@@ -174,6 +174,7 @@
 <div id="err" hidden></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pako/2.1.0/pako.min.js"></script>
 <script>
 const DATA = "__DATA__";
 const UV_SCALE = 256;
@@ -183,18 +184,20 @@ const LIGHTMAP_UV_SCALE = 1024;
 // dialled back rather than added at full strength.
 const LIGHTMAP_INTENSITY = 1;
 
+// Geometry buffers are deflated before they are base64'd, which halves the
+// page: quantised positions and indices compress well and base64 otherwise
+// costs a third on top.
 function b64(s, Type) {
   const bin = atob(s);
-  const buf = new ArrayBuffer(bin.length);
-  const view = new Uint8Array(buf);
+  const view = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) view[i] = bin.charCodeAt(i);
-  return new Type(buf);
+  return new Type(pako.inflate(view).buffer);
 }
 
-if (typeof THREE === "undefined") {
+if (typeof THREE === "undefined" || typeof pako === "undefined") {
   const e = document.getElementById("err");
   e.hidden = false;
-  e.textContent = "three.js did not load, so the terrain cannot be drawn. " +
+  e.textContent = "three.js or pako did not load, so the terrain cannot be drawn. " +
     "Reload the page; if it keeps failing, a network policy is blocking cdnjs.cloudflare.com.";
 } else {
   const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -355,7 +358,7 @@ if (typeof THREE === "undefined") {
       });
     }
     const position = new THREE.BufferAttribute(b64(map.position, Int16Array), 3, true);
-    const normal = new THREE.BufferAttribute(b64(map.normal, Int16Array), 3, true);
+    const normal = new THREE.BufferAttribute(b64(map.normal, Int8Array), 3, true);
     const IndexArray = map.wideIndex ? Uint32Array : Uint16Array;
 
     const g = new THREE.BufferGeometry();

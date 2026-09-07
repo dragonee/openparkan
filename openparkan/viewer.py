@@ -40,7 +40,13 @@ def _png_data_uri(width: int, height: int, pixels: bytes, alpha: bool = False) -
 
 
 def _b64(arr: bytes) -> str:
-    return base64.b64encode(arr).decode("ascii")
+    """Deflate a geometry buffer and base64 it.
+
+    Base64 costs a third on top of the bytes; deflating first pays that back
+    twice over, because quantised positions and indices are highly
+    compressible.  Across the 33 maps it halves the page.
+    """
+    return base64.b64encode(zlib.compress(arr, 9)).decode("ascii")
 
 
 class TextureResolver:
@@ -238,12 +244,14 @@ def build_map_payload(mesh: landmesh.LandMesh, resolver: TextureResolver, name: 
         for value, mid, span in zip((x - cx, z, -(y - cy)), tmid, tspan, strict=True):
             q = round((value - mid) / span * 32767)
             pos += struct.pack("<h", max(-32767, min(32767, q)))
+        # Normals are int8 in the file; keep them there rather than widening
+        # to int16 for no gain in precision.
         a, b, c = mesh.normals[i]
         nrm += struct.pack(
-            "<3h",
-            max(-32767, min(32767, round(a * 32767))),
-            max(-32767, min(32767, round(c * 32767))),
-            max(-32767, min(32767, round(-b * 32767))),
+            "<3b",
+            max(-127, min(127, round(a * 127))),
+            max(-127, min(127, round(c * 127))),
+            max(-127, min(127, round(-b * 127))),
         )
         for target, source in ((uv, mesh.uv1), (uv2, mesh.uv2)):
             u, v = source[i]
