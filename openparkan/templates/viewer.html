@@ -177,6 +177,11 @@
 <script>
 const DATA = "__DATA__";
 const UV_SCALE = 256;
+// Lightmap UVs are the same uint16 over 1024, not 256: one atlas page.
+const LIGHTMAP_UV_SCALE = 1024;
+// The scene already has a sun and an ambient term, so the baked map is
+// dialled back rather than added at full strength.
+const LIGHTMAP_INTENSITY = 1;
 
 function b64(s, Type) {
   const bin = atob(s);
@@ -442,6 +447,8 @@ if (typeof THREE === "undefined") {
     g.setAttribute("position",
       new THREE.BufferAttribute(b64(src.position, Int16Array), 3, true));
     g.setAttribute("uv", new THREE.BufferAttribute(b64(src.uv, Uint16Array), 2));
+    // Baked lighting has its own UV set; three.js reads a lightMap through uv2.
+    if (src.uv2) g.setAttribute("uv2", new THREE.BufferAttribute(b64(src.uv2, Uint16Array), 2));
     g.setIndex(new THREE.BufferAttribute(
       b64(src.index, src.wide ? Uint32Array : Uint16Array), 1));
     src.groups.forEach((gr, k) => g.addGroup(gr.start, gr.count, k));
@@ -466,6 +473,17 @@ if (typeof THREE === "undefined") {
         opts.color = multiply(tint, multiply(gr.tint, pooled.colour));
       }
       if (pooled) applyCutout(opts, pooled);
+      if (gr.lightmap !== undefined) {
+        // Baked static lighting: 21 buildings ship one, keyed by their wear's
+        // LIGHTMAPS section.  It has its own UV set, and no wrapping -- the
+        // atlas is inset by half a texel and must not tile.
+        const t = textureCache["lm" + gr.lightmap] ||
+          (textureCache["lm" + gr.lightmap] = loader.load(DATA.pool[gr.lightmap].url));
+        t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping;
+        t.repeat.set(1 / LIGHTMAP_UV_SCALE, 1 / LIGHTMAP_UV_SCALE);
+        opts.lightMap = t;
+        opts.lightMapIntensity = LIGHTMAP_INTENSITY;
+      }
       return animate(new THREE.MeshLambertMaterial(opts), gr);
     });
     modelMatCache[key] = mats;

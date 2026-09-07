@@ -60,6 +60,9 @@ class TextureResolver:
     def __init__(self, game: Path, max_size: int = 128):
         self.archive = NResArchive.open(game / "Textures.lib")
         self.materials = materials.MaterialLibrary(game / "Material.lib")
+        self.lightmaps = NResArchive.open(game / "lightmap.lib")
+        self._lightmap_index = {e.name.upper(): e for e in self.lightmaps}
+        self._by_lightmap: dict[str, int] = {}
         self.max_size = max_size
         self.index = {}
         for e in self.archive:
@@ -86,6 +89,30 @@ class TextureResolver:
                         out[o + c] = (a + b + d + e) // 4
             pixels, w, h = bytes(out), nw, nh
         return w, h, pixels
+
+    def lightmap(self, name: str) -> int | None:
+        """Pool index for a ``lightmap.lib`` member, or None if it has none.
+
+        Baked lighting is kept at full size: it is one page for a whole
+        building, so halving it costs much more than it saves.
+        """
+        key = name.upper()
+        if key not in self._by_lightmap:
+            entry = self._lightmap_index.get(key)
+            if entry is None:
+                self._by_lightmap[key] = None
+            else:
+                tex = texm.decode(self.lightmaps.read(entry))
+                self._by_lightmap[key] = len(self.pool)
+                self.pool.append({
+                    "kind": "texture",
+                    "name": name,
+                    "url": _png_data_uri(tex.width, tex.height, texm.to_rgb(tex)),
+                    "opacity": 1.0,
+                    "cutout": False,
+                    "graded": False,
+                })
+        return self._by_lightmap[key]
 
     def tint(self, name: str) -> int:
         """The material's diffuse colour, packed for the viewer."""
@@ -345,6 +372,7 @@ class ModelLibrary:
         self._archives: dict[str, NResArchive] = {}
         self.models: list[dict] = []
         self._meshes: dict[tuple[str, str], objmesh.ObjectMesh | None] = {}
+        self._wears: dict[tuple[str, str], objmesh.Wear] = {}
         self._by_name: dict[str, int | None] = {}
         self._by_parts: dict[tuple, int | None] = {}
 
@@ -384,13 +412,14 @@ class ModelLibrary:
             try:
                 archive = self._archive(ref.library)
                 try:
-                    wear = objmesh.read_wea(
+                    wear = objmesh.parse_wear(
                         archive.read_name(ref.member.replace(".msh", ".wea"))
                     )
                 except KeyError:
-                    wear = []
+                    wear = objmesh.Wear()
+                self._wears[key] = wear
                 self._meshes[key] = objmesh.parse(
-                    archive.read_name(ref.member), ref.member, wear
+                    archive.read_name(ref.member), ref.member, wear.materials
                 )
             except (KeyError, ValueError, struct.error):
                 self._meshes[key] = None
@@ -450,12 +479,17 @@ class ModelLibrary:
 
         points: list[tuple[float, float, float]] = []
         uvs: list[tuple[float, float]] = []
+        lightmap_uvs: list[tuple[float, float]] = []
         groups: list[dict] = []
         idx_values: list[int] = []
         for ref, pose in parts:
             m = self._mesh(ref)
             if m is None:
                 continue
+            wear_record = self._wears.get((ref.library, ref.member))
+            baked = None
+            if wear_record and wear_record.lightmaps and m.lightmap_uv:
+                baked = self.textures.lightmap(wear_record.lightmaps[0])
             # Vertices are authored in their own node's frame; without the
             # node poses applied a multi-part model draws every part piled on
             # the origin.  See docs/07-objects.md.
@@ -489,6 +523,9 @@ class ModelLibrary:
                             remap[v] = len(points)
                             points.append(objmesh.apply(pose, positions[v]))
                             uvs.append(m.uv[v] if v < len(m.uv) else (0.0, 0.0))
+                            lightmap_uvs.append(
+                                m.lightmap_uv[v] if v < len(m.lightmap_uv) else (0.0, 0.0)
+                            )
                         idx_values.append(remap[v])
                 name = wear[b.material] if 0 <= b.material < len(wear) else None
                 frames = self.textures.frames(name) if name else []
@@ -498,6 +535,8 @@ class ModelLibrary:
                     "material": frames[0] if frames else -1,
                     "tint": self.textures.tint(name) if name else 0xFFFFFF,
                 }
+                if baked is not None:
+                    group["lightmap"] = baked
                 if len(frames) > 1:
                     group["frames"] = frames
                 groups.append(group)
@@ -526,7 +565,9 @@ class ModelLibrary:
         ]
         pos = bytearray()
         uv = bytearray()
-        for (x, y, z), (u, w) in zip(points, uvs, strict=True):
+        uv2 = bytearray()
+        baked_any = any("lightmap" in g for g in groups)
+        for (x, y, z), (u, w), (lu, lw) in zip(points, uvs, lightmap_uvs, strict=True):
             for value, mid, span in zip((x, z, -y), centre, half, strict=True):
                 q = round((value - mid) / span * 32767)
                 pos += struct.pack("<h", max(-32767, min(32767, q)))
@@ -535,6 +576,12 @@ class ModelLibrary:
                 min(0xFFFF, max(0, round(u * objmesh.UV_FIXED_POINT_SCALE))),
                 min(0xFFFF, max(0, round(w * objmesh.UV_FIXED_POINT_SCALE))),
             )
+            if baked_any:
+                uv2 += struct.pack(
+                    "<2H",
+                    min(0xFFFF, max(0, round(lu * objmesh.LIGHTMAP_UV_SCALE))),
+                    min(0xFFFF, max(0, round(lw * objmesh.LIGHTMAP_UV_SCALE))),
+                )
 
         wide = len(points) > 0xFFFF
         idx = bytearray()
@@ -548,6 +595,7 @@ class ModelLibrary:
             "wide": wide,
             "position": _b64(bytes(pos)),
             "uv": _b64(bytes(uv)),
+            "uv2": _b64(bytes(uv2)) if baked_any else None,
             "index": _b64(bytes(idx)),
             "scale": [round(v, 4) for v in half],
             "offset": [round(v, 4) for v in centre],

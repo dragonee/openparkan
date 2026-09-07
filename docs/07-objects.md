@@ -402,6 +402,37 @@ animations ask for `0FAIR.0` upward when only `FAIR.0` exists, and `B_MTP_04`
 asks for `qqds.7` when every member of `Textures.lib` ends in `.0`. Taking
 the first name that *is* present rescues them.
 
+### Baked lighting
+
+`lightmap.lib` is 25 `Texm` pages named after buildings, 128 or 256 pixels
+square, RGB565. A `.wea` names one in a second keyword section:
+
+```
+39
+0 B_PG4
+...
+38 R_NP13
+
+LIGHTMAPS
+1
+0 fr_l_bunker_00.0
+```
+
+and **mesh stream 18 is the UV set that addresses it**. The correlation is
+total: of the 435 object meshes, 21 carry both a `LIGHTMAPS` section and
+stream 18, and **none carries one without the other**.
+
+The UVs are the same `uint16` as stream 5 but over **1024**, not 256, because
+they address one atlas page and never leave 0..1. Every one of the 21 tops out
+at exactly `round((1 - 0.5 / width) * 1024)` for the width of its own page --
+1022 for a 256-pixel lightmap, 1020 for a 128 -- which is the half-texel inset
+an atlas is authored with, and which pins the divisor and the pairing at the
+same time.
+
+The pages are not soft grey shading: they are dense mosaics of per-triangle
+patches in saturated greens, oranges and purples, which is what a building
+lit from inside by coloured lamps bakes down to.
+
 ### Buildings carry an interior path graph
 
 Stream 17 is non-empty on **29 of the 30 meshes in `fortif.rlb` and nowhere

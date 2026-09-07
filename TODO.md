@@ -64,23 +64,18 @@ groups that track their names (all six `TREE*` materials share value 6, the
 effects share 0xFF) and reads like a shader or blend-mode id, but nothing
 confirms it.
 
-### 2.2 Lightmaps
-
-`lightmap.lib` is 2.7 MB of NRes and has never been opened. Static lighting is
-presumably in there; everything is currently lit by one directional light.
-
-### 2.3 Skyboxes
+### 2.2 Skyboxes
 
 `sky.ske` (binary) and `sky.wea` per mission name environment textures —
 `ENV_NEBULA_0`, `ENV_STARS`, `ENV_SUN_3`, `ENV_MOON`, `ENV_FLARE_00`. The
 `.wea` half is already readable with `mesh.read_wea`; `sky.ske` is not parsed.
 
-### 2.4 Effects
+### 2.3 Effects
 
 `*.exp` explosion definitions (`system.rlb`) and `effects.rlb` are untouched.
 Not needed for a static scene; needed for anything animated.
 
-### 2.5 The `NL` archives block the UI
+### 2.4 The `NL` archives block the UI
 
 `gamefont.rlb` and `sprites.lib` are not NRes — `'NL'`, version 1, an `0xABBA`
 marker, then high-entropy payload. Two files, holding fonts and 2D sprites.

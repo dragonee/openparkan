@@ -986,6 +986,49 @@ def check_poses(check, game: Path) -> None:
           f"{exact_lod0}/{boxed} meshes match it exactly, against {exact_all}/{boxed} "
           f"when all five slots of the variant are drawn together")
 
+    # Baked lighting: the wear's LIGHTMAPS section and mesh stream 18.
+    lightmaps = NResArchive.open(game / "lightmap.lib")
+    pages = {e.name.upper(): texm.parse_header(lightmaps.read(e))[:2] for e in lightmaps}
+    with_both = with_stream = with_section = fits_page = 0
+    for name in archives:
+        path = game / name
+        if not path.exists():
+            continue
+        archive = NResArchive.open(path)
+        for entry in archive:
+            if not entry.name.lower().endswith(".msh"):
+                continue
+            m = objmesh.parse(archive.read(entry), entry.name)
+            try:
+                wear = objmesh.parse_wear(
+                    archive.read_name(entry.name.replace(".msh", ".wea"))
+                )
+            except KeyError:
+                wear = objmesh.Wear()
+            has_stream = bool(m.lightmap_uv)
+            has_section = bool(wear.lightmaps)
+            with_stream += has_stream and not has_section
+            with_section += has_section and not has_stream
+            if not (has_stream and has_section):
+                continue
+            with_both += 1
+            page = pages.get(wear.lightmaps[0].upper())
+            if not page:
+                continue
+            # An atlas is authored inset by half a texel, so the largest UV is
+            # 1 - 0.5 / width.  Exact on every one, which pins both the 1024
+            # divisor and the pairing.
+            top = max(max(u, v) for u, v in m.lightmap_uv)
+            want = round((1 - 0.5 / page[0]) * objmesh.LIGHTMAP_UV_SCALE)
+            fits_page += round(top * objmesh.LIGHTMAP_UV_SCALE) == want
+    check("MESH: stream 18 is the lightmap's UV set",
+          with_stream == 0 and with_section == 0,
+          f"{with_both} meshes carry both a LIGHTMAPS section and stream 18, "
+          f"{with_stream} the stream alone, {with_section} the section alone")
+    check("MESH: lightmap UVs are uint16 over 1024", fits_page == with_both,
+          f"{fits_page}/{with_both} top out at exactly 1 - 0.5/width of their "
+          f"own page -- 1022 for a 256-pixel lightmap, 1020 for a 128")
+
     # Assemblies: a depth-first tree whose children name a socket node.
     dats = sorted((game / "UNITS").rglob("*.dat"))
     trees = attachments = to_socket = 0

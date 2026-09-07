@@ -12,6 +12,8 @@ the same numeric-type-as-stream-selector convention as the terrain
      3      12  vertex      position, float32 x/y/z
      4       4  vertex      normal, int8 x/y/z / 127, then one padding byte
      5       4  vertex      UV, uint16 8.8 fixed point
+    18       4  vertex      lightmap UV, uint16 over 1024; only on the 21
+                             buildings whose wear has a LIGHTMAPS section
      6       6  face        triangle, three uint16 indices *relative to the
                              first_vertex of the batch that covers them*
      7      16  face        face record, contents unresolved
@@ -53,6 +55,7 @@ STREAM_BATCH = 13
 STREAM_PATH_GRAPH = 17
 STREAM_POSE_KEY = 8
 STREAM_FRAME_MAP = 19
+STREAM_LIGHTMAP_UV = 18
 
 SUBOBJECT_HEADER_SIZE = 38
 SLOT_HEADER_SIZE = 0x8C
@@ -89,6 +92,13 @@ NO_ANIMATION = 0xFFFF
 
 #: UVs use the same 8.8 fixed point as the terrain.
 UV_FIXED_POINT_SCALE = 256.0
+
+#: Lightmap UVs are the same uint16 over 1024, not 256: they address one page
+#: of an atlas, so they never leave 0..1.  Every one of the 21 lightmapped
+#: meshes tops out at exactly ``round((1 - 0.5 / width) * 1024)`` for its own
+#: lightmap's width -- 1022 for a 256-pixel page, 1020 for a 128 -- which is
+#: the half-texel inset an atlas is authored with.
+LIGHTMAP_UV_SCALE = 1024.0
 
 
 #: A pose: a translation and a rotation quaternion ``(w, x, y, z)``.
@@ -293,6 +303,8 @@ class ObjectMesh:
     uv: list[tuple[float, float]]
     #: Absolute vertex indices, with each batch's first_vertex already added.
     triangles: list[tuple[int, int, int]]
+    #: Lightmap UVs, empty on a model with no baked lighting.
+    lightmap_uv: list[tuple[float, float]] = field(default_factory=list)
     #: The file's own batch-relative indices.
     raw_triangles: list[tuple[int, int, int]] = field(default_factory=list)
     subobjects: list[str] = field(default_factory=list)
@@ -442,14 +454,18 @@ def parse(blob: bytes, name: str = "<mesh>", texture_names: list[str] | None = N
         for i in range(nv)
     ]
 
-    raw_uv = stream[STREAM_UV]
-    uv = [
-        (
-            struct.unpack_from("<H", raw_uv, i * 4)[0] / UV_FIXED_POINT_SCALE,
-            struct.unpack_from("<H", raw_uv, i * 4 + 2)[0] / UV_FIXED_POINT_SCALE,
-        )
-        for i in range(nv)
-    ]
+    def read_uv(raw: bytes, scale: float) -> list[tuple[float, float]]:
+        return [
+            (
+                struct.unpack_from("<H", raw, i * 4)[0] / scale,
+                struct.unpack_from("<H", raw, i * 4 + 2)[0] / scale,
+            )
+            for i in range(nv)
+        ]
+
+    uv = read_uv(stream[STREAM_UV], UV_FIXED_POINT_SCALE)
+    raw_lm = stream.get(STREAM_LIGHTMAP_UV, b"")
+    lightmap_uv = read_uv(raw_lm, LIGHTMAP_UV_SCALE) if len(raw_lm) >= nv * 4 else []
 
     raw_tri = stream[STREAM_TRIANGLE]
     raw_triangles = [
@@ -562,6 +578,7 @@ def parse(blob: bytes, name: str = "<mesh>", texture_names: list[str] | None = N
         normals=normals,
         uv=uv,
         triangles=triangles,
+        lightmap_uv=lightmap_uv,
         raw_triangles=raw_triangles,
         subobjects=subobjects,
         texture_names=texture_names or [],
@@ -684,23 +701,52 @@ def read_path_graph(archive: NResArchive) -> PathGraph | None:
     return None
 
 
-def read_wea(blob: bytes) -> list[str]:
-    """Parse a ``.wea`` -- a *wear*, the material palette of a model.
+@dataclass
+class Wear:
+    """A model's ``.wea``: its material palette, and its baked lighting.
 
-    A count, then ``index name`` pairs.  Some wears carry further keyword
-    sections such as ``LIGHTMAPS`` after the palette; parsing stops there.
+    The file is one or more keyword sections, each a count then ``index name``
+    pairs.  The first section has no keyword and holds the materials a draw
+    batch indexes.  ``LIGHTMAPS`` names members of ``lightmap.lib``, and
+    exactly the 21 meshes that carry one also carry mesh stream 18 -- the
+    lightmap's UV set.  No mesh has one without the other.
     """
-    tokens = blob.decode("latin-1").split()
-    if not tokens or not tokens[0].lstrip("-").isdigit():
-        return []
-    count = int(tokens[0])
+
+    materials: list[str] = field(default_factory=list)
+    lightmaps: list[str] = field(default_factory=list)
+
+
+def _read_table(tokens: list[str], start: int) -> tuple[list[str], int]:
+    """Read ``count`` then ``index name`` pairs; returns the table and where
+    reading stopped."""
+    if start >= len(tokens) or not tokens[start].lstrip("-").isdigit():
+        return [], start
+    count = int(tokens[start])
     names = [""] * count
-    i = 1
-    while i + 1 < len(tokens):
-        if not tokens[i].lstrip("-").isdigit():
-            break
-        idx = int(tokens[i])
-        if 0 <= idx < count:
-            names[idx] = tokens[i + 1]
+    i = start + 1
+    while i + 1 < len(tokens) and tokens[i].lstrip("-").isdigit():
+        index = int(tokens[i])
+        if 0 <= index < count:
+            names[index] = tokens[i + 1]
         i += 2
-    return names
+    return names, i
+
+
+def parse_wear(blob: bytes) -> Wear:
+    """Parse a ``.wea`` in full, materials and lightmaps."""
+    tokens = blob.decode("latin-1").split()
+    materials, at = _read_table(tokens, 0)
+    lightmaps: list[str] = []
+    while at < len(tokens):
+        keyword = tokens[at].upper()
+        table, at = _read_table(tokens, at + 1)
+        if keyword == "LIGHTMAPS":
+            lightmaps = table
+        if not table:
+            at += 1
+    return Wear(materials, lightmaps)
+
+
+def read_wea(blob: bytes) -> list[str]:
+    """The material palette of a ``.wea``; see ``parse_wear`` for the rest."""
+    return parse_wear(blob).materials
