@@ -1,0 +1,269 @@
+"""Reader for ``sky.ske`` -- the per-mission **atmosphere**.
+
+Not a skybox.  ``Terrain.dll`` calls this an atmosphere file and names the
+tool that wrote it: *"SunDll panic : Old version ske file / ReSave in
+SunEditor"*.  Inside are ``CAtmosphere``, ``CAtmData``, ``CSun``,
+``CreateAtmosphereObject``, "Illegal atmosphere object type", and the
+settings ``AtmSkyDetail``, ``AtmStarsOn``, ``AtmCloudsOn``, ``LensFlareOn``.
+
+What the file holds is a **day cycle**: a list of keyframes, each stamped with
+an hour and a minute, carrying the colours and intensities the sky takes at
+that time.  On ``CAMPAIGN.04/Mission.01`` the twelve keyframes run 00:20,
+01:24, 06:48, 12:34, 13:58, 15:00, 15:48, 19:20, 22:39, 23:20, 23:59, and the
+first colour group goes from ``#000025`` at twenty past midnight to ``#563868``
+at half past twelve while the light intensity climbs from 0.1 to 5.0.
+
+Layout, which accounts for all 29 shipped files to the byte::
+
+    file header, 124 bytes
+        int32   -1                     magic
+        int32   5                      version
+        int32   section count, 1 or 2
+        int32   1
+        int32   keyframes in the first section
+        ...     see FileHeader below
+    keyframe x count
+    for each further section:
+        72 bytes                       the same block as bytes 52..123
+        keyframes to the end of the file
+
+and one keyframe is::
+
+    88 bytes    22 slots: mostly BGRA colours, three of them float32
+    6 x string  the object's name in one slot, empty in the rest
+    float32[4]  intensities; the third tracks the sun through the day
+    int32 n
+    n x string  sound files -- "atm_rain1.wav" is the only one shipped
+    uint32[10]  a kind word, then the hour and minute
+
+A string is an ``int32`` length followed by that many bytes and no
+terminator, which is what ``MFile``'s string reader does.
+
+The engine builds five kinds of atmosphere object -- **SUN, SKY, RAIN, SNOW
+and LIGHTNING**, a five-way switch in ``Terrain.dll``'s factory -- and a
+keyframe's name slot carries ``sun``, ``moon`` or ``env_lightning``.  Which
+field selects the type is not established; see ``docs/10-sky.md``.
+
+The sibling ``sky.wea`` names the textures, in the same format model wears
+use: ``ENV_NEBULA_0``, ``ENV_STARS``, ``ENV_CLOUDS``, ``ENV_SUN_3``,
+``ENV_MOON``, ``ENV_FLARE_00``, ``ENV_FLARE_01``, ``SNOWFLAKE``, ``RAIN_DROP``.
+"""
+
+from __future__ import annotations
+
+import struct
+from dataclasses import dataclass, field
+from pathlib import Path
+
+from .mesh import read_wea
+
+MAGIC = 0xFFFFFFFF
+VERSION = 5
+HEADER_SIZE = 124
+#: Bytes 52..123 of the file header, repeated ahead of every later section.
+SECTION_HEADER_SIZE = 72
+SLOT_COUNT = 22
+NAME_SLOTS = 6
+#: Slots of the 88-byte block that hold a float32 rather than a colour.
+FLOAT_SLOTS = (6,)
+#: Slots whose colour tracks the time of day; see the module docstring.
+DAY_CYCLE_SLOTS = (1, 2, 3, 4)
+
+#: The trailer opens with a kind word: 3 on 621 of the 656 shipped keyframes,
+#: 1 on 6, and 0 on the 29 that close a section.  The hour and minute follow
+#: it, one word later when the kind is 3.  Reading it that way gives a valid
+#: time on every keyframe and leaves all 29 first sections sorted by time;
+#: reading a fixed offset breaks on 18.
+KIND_WITH_PADDING = 3
+
+
+class SkyFormatError(ValueError):
+    pass
+
+
+@dataclass
+class Keyframe:
+    """The sky at one time of day."""
+
+    hour: int
+    minute: int
+    #: 22 four-byte slots exactly as stored.
+    slots: list[bytes]
+    #: The object this keyframe belongs to -- ``sun``, ``moon``,
+    #: ``env_lightning`` -- or an empty string.
+    name: str
+    #: Sound files the keyframe triggers.
+    sounds: list[str] = field(default_factory=list)
+    #: Four float32.  The third runs 0.1 at night to 5.0 at midday, so it
+    #: reads as a light intensity; the first two are 2.2 and 2.0 almost
+    #: everywhere.
+    intensity: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0)
+    #: The ten trailing uint32, with the time still in place.
+    trailer: tuple[int, ...] = ()
+
+    @property
+    def kind(self) -> int:
+        return self.trailer[0] if self.trailer else 0
+    #: Which section of the file this came from.
+    section: int = 0
+
+    @property
+    def minutes(self) -> int:
+        """Time of day in minutes, for ordering and interpolation."""
+        return self.hour * 60 + self.minute
+
+    def colour(self, slot: int) -> tuple[int, int, int, int]:
+        """One slot as ``(r, g, b, a)``.
+
+        Stored BGRA, the same DirectDraw convention the textures use.
+        """
+        b, g, r, a = self.slots[slot]
+        return r, g, b, a
+
+    def number(self, slot: int) -> float:
+        return struct.unpack("<f", self.slots[slot])[0]
+
+    @property
+    def sky(self) -> tuple[int, int, int, int]:
+        """The first day-cycle colour.
+
+        Which of the three colour groups is the dome and which are fog and
+        ambient is not established -- this is the group that most clearly
+        tracks the day, going near-black at midnight.
+        """
+        return self.colour(DAY_CYCLE_SLOTS[0])
+
+    @property
+    def light(self) -> float:
+        return self.intensity[2]
+
+
+@dataclass
+class Atmosphere:
+    source: Path
+    version: int
+    sections: int
+    keyframes: list[Keyframe]
+    #: The file header, as it stands, for anything not yet named.
+    header: bytes = b""
+    #: Texture names from the sibling ``sky.wea``.
+    textures: list[str] = field(default_factory=list)
+
+    def __len__(self) -> int:
+        return len(self.keyframes)
+
+    def at(self, hour: int, minute: int = 0) -> Keyframe | None:
+        """The keyframe in force at a time of day.
+
+        The latest keyframe at or before the time, wrapping to the last one of
+        the day before midnight.  Keyframes are not stored in time order in
+        every file, so they are sorted here.
+        """
+        if not self.keyframes:
+            return None
+        want = hour * 60 + minute
+        ordered = sorted(self.keyframes, key=lambda k: k.minutes)
+        best = ordered[-1]
+        for k in ordered:
+            if k.minutes <= want:
+                best = k
+        return best
+
+    def brightest(self) -> Keyframe | None:
+        """The keyframe with the most light -- the middle of the day."""
+        return max(self.keyframes, key=lambda k: k.light, default=None)
+
+
+def _read_string(data: bytes, pos: int) -> tuple[str, int]:
+    if pos + 4 > len(data):
+        raise SkyFormatError(f"string length runs past the end at {pos}")
+    n = struct.unpack_from("<I", data, pos)[0]
+    if n > 4096 or pos + 4 + n > len(data):
+        raise SkyFormatError(f"implausible string length {n} at {pos}")
+    return data[pos + 4 : pos + 4 + n].decode("latin-1"), pos + 4 + n
+
+
+def _read_keyframe(data: bytes, pos: int, section: int) -> tuple[Keyframe, int]:
+    if pos + 88 > len(data):
+        raise SkyFormatError(f"keyframe runs past the end at {pos}")
+    slots = [data[pos + i * 4 : pos + i * 4 + 4] for i in range(SLOT_COUNT)]
+    pos += 88
+
+    names = []
+    for _ in range(NAME_SLOTS):
+        name, pos = _read_string(data, pos)
+        names.append(name)
+
+    intensity = struct.unpack_from("<4f", data, pos)
+    pos += 16
+
+    count = struct.unpack_from("<I", data, pos)[0]
+    pos += 4
+    if count > 64:
+        raise SkyFormatError(f"implausible sound count {count} at {pos - 4}")
+    sounds = []
+    for _ in range(count):
+        sound, pos = _read_string(data, pos)
+        sounds.append(sound)
+
+    if pos + 40 > len(data):
+        raise SkyFormatError(f"keyframe trailer runs past the end at {pos}")
+    trailer = struct.unpack_from("<10I", data, pos)
+    pos += 40
+    at = 4 if trailer[0] == KIND_WITH_PADDING else 3
+
+    return (
+        Keyframe(
+            hour=trailer[at],
+            minute=trailer[at + 1],
+            slots=slots,
+            name=next((n for n in names if n), ""),
+            sounds=[s for s in sounds if s],
+            intensity=intensity,
+            trailer=trailer,
+            section=section,
+        ),
+        pos,
+    )
+
+
+def load(path: str | Path) -> Atmosphere:
+    """Parse a ``sky.ske``, picking up the sibling ``sky.wea`` when present.
+
+    Raises SkyFormatError unless the file is consumed exactly, which is the
+    same consistency check the other readers make.
+    """
+    path = Path(path)
+    data = path.read_bytes()
+    if len(data) < HEADER_SIZE:
+        raise SkyFormatError(f"{path}: too short to be an atmosphere file")
+    magic, version, sections, _one, count = struct.unpack_from("<5I", data, 0)
+    if magic != MAGIC:
+        raise SkyFormatError(f"{path}: expected magic {MAGIC:#x}, got {magic:#x}")
+    if version != VERSION:
+        raise SkyFormatError(f"{path}: version {version}, expected {VERSION}")
+
+    keyframes = []
+    pos = HEADER_SIZE
+    for _ in range(count):
+        frame, pos = _read_keyframe(data, pos, 0)
+        keyframes.append(frame)
+
+    # Later sections repeat the header's own 72-byte tail and then run to the
+    # end of the file.  Their keyframe count is not in either header -- the
+    # six shipped two-section files carry byte-identical section headers but
+    # 27 and 20 keyframes -- so the list is read until the bytes are gone.
+    section = 1
+    while pos < len(data):
+        pos += SECTION_HEADER_SIZE
+        while pos < len(data):
+            frame, pos = _read_keyframe(data, pos, section)
+            keyframes.append(frame)
+        section += 1
+
+    if pos != len(data):
+        raise SkyFormatError(f"{path}: parsed {pos} bytes of a {len(data)}-byte file")
+
+    wea = path.parent / "sky.wea"
+    textures = read_wea(wea.read_bytes()) if wea.exists() else []
+    return Atmosphere(path, version, sections, keyframes, data[:HEADER_SIZE], textures)

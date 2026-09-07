@@ -27,7 +27,7 @@ practice — format facts yes, code no — is set out in
 | **Building interiors** | done — path graph for 29 buildings |
 | **Control points** | done — 284 members, 3599 named attachment points |
 | **`Land.map` navigation mesh** | done — all 33 maps, 34662 areals, adjacency and grid |
-| **Sky** | `sky.wea` names its textures; `sky.ske`, the atmosphere file, is not decoded |
+| **Sky** | done — `sky.ske` day cycle, all 29 missions parse to the byte |
 | **Behaviour scripts, gameplay** | not started |
 
 ## Quickstart
@@ -132,11 +132,10 @@ tried.
 
 ## What is left
 
-Renderer work is triaged in [TODO.md](TODO.md), worst-looking first. The
-largest gap is the sky: `sky.ske` is an *atmosphere* file — typed objects and
-timed events — and is not decoded. After that it is effects, the two `NL`
-archives that hold the fonts and 2D sprites, and a handful of fields carried
-through the readers without being understood.
+Renderer work is triaged in [TODO.md](TODO.md), worst-looking first: the
+second layer of a terrain material, effects, the two `NL` archives that hold
+the fonts and 2D sprites, and a handful of fields carried through the readers
+without being understood.
 
 ## Documentation
 

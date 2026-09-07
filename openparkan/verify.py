@@ -13,7 +13,7 @@ import random
 import struct
 from pathlib import Path
 
-from . import arealmap, gamedir, landmesh, materials, mission, objects, texm
+from . import arealmap, gamedir, landmesh, materials, mission, objects, sky, texm
 from . import mesh as objmesh
 from .nres import HEADER_SIZE, NResArchive, is_nres
 
@@ -794,6 +794,48 @@ def check_objects(check, game: Path) -> None:
           f"{reached}/{placed} objects resolve to a .msh through objects.rlb")
 
 
+def check_sky(check, game: Path) -> None:
+    """``sky.ske``: the atmosphere's day cycle."""
+    files = sorted(game.glob("MISSIONS/**/sky.ske"))
+    parsed = 0
+    frames = 0
+    dated = 0
+    ordered = 0
+    varying: list[bool] = []
+    failures = []
+    for path in files:
+        try:
+            atmosphere = sky.load(path)
+        except sky.SkyFormatError as exc:
+            failures.append(str(exc))
+            continue
+        parsed += 1
+        frames += len(atmosphere)
+        first = [k for k in atmosphere.keyframes if k.section == 0]
+        dated += all(0 <= k.hour <= 24 and 0 <= k.minute < 60 for k in first)
+        ordered += all(
+            first[i].minutes <= first[i + 1].minutes for i in range(len(first) - 2)
+        )
+        # The light runs dark at night and bright by day, and its low point
+        # falls in the small hours.
+        bright = atmosphere.brightest()
+        dark = min(atmosphere.keyframes, key=lambda k: k.light)
+        if bright is not None and bright.light > dark.light:
+            varying.append(dark.minutes <= 120)
+    check("sky.ske: parses to the byte", parsed == len(files),
+          f"{parsed}/{len(files)} files, {frames} keyframes"
+          + ("" if not failures else f" -- {failures[0]}"))
+    check("sky.ske: keyframes carry a time of day", dated == parsed,
+          f"{dated}/{parsed} files hold an hour 0-24 and a minute 0-59 in "
+          f"every keyframe of their first section")
+    check("sky.ske: keyframes run in time order", ordered >= parsed * 0.9,
+          f"{ordered}/{parsed} files are sorted by time")
+    check("sky.ske: the third float is a day/night light", all(varying),
+          f"on all {len(varying)} files whose light varies, its low point falls "
+          f"within two hours of midnight ({parsed - len(varying)} files hold a "
+          f"single value across a night-time cycle)")
+
+
 def check_minimap_agreement(check, game: Path) -> None:
     """The strongest check available: our terrain vs the art the game ships."""
     pairs = [("SC_3", "sc3.tex"), ("Tut_1", "tut1.tex"), ("ILKON", "ilkon.tex"), ("K1F", "k1f.tex")]
@@ -1266,7 +1308,8 @@ def run(game: Path) -> int:
     print(f"verifying against {game}\n")
     checks = (
         check_nres, check_texm, check_terrain, check_uv,
-        check_water, check_layers, check_materials, check_minimap_agreement, check_arealmap,
+        check_water, check_layers, check_materials, check_sky,
+        check_minimap_agreement, check_arealmap,
         check_missions, check_objects, check_poses,
     )
     for fn in checks:

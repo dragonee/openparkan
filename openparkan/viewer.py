@@ -14,7 +14,7 @@ import zlib
 from importlib import resources
 from pathlib import Path
 
-from . import landmesh, materials, mission, objects, texm
+from . import landmesh, materials, mission, objects, sky, texm
 from . import mesh as objmesh
 from .nres import NResArchive
 from .png import _chunk
@@ -622,6 +622,44 @@ class ModelLibrary:
         return slot
 
 
+#: Slots of a sky keyframe the viewer draws with.  Which of the three colour
+#: groups is the dome and which are fog and ambient is not established, but
+#: the first group is the one that tracks the day and the second is
+#: consistently lighter, so they read as zenith and horizon.  See
+#: docs/10-sky.md.
+SKY_ZENITH_SLOT = 1
+SKY_HORIZON_SLOT = 7
+SKY_SUN_SLOT = 18
+
+
+def _pack_colour(rgba: tuple[int, int, int, int]) -> int:
+    r, g, b, _a = rgba
+    return (r << 16) | (g << 8) | b
+
+
+def build_sky_payload(folder: Path) -> dict | None:
+    """The mission's atmosphere, at the brightest point of its day."""
+    path = folder / "sky.ske"
+    if not path.exists():
+        return None
+    try:
+        atmosphere = sky.load(path)
+    except (sky.SkyFormatError, OSError):
+        return None
+    frame = atmosphere.brightest()
+    if frame is None:
+        return None
+    return {
+        "zenith": _pack_colour(frame.colour(SKY_ZENITH_SLOT)),
+        "horizon": _pack_colour(frame.colour(SKY_HORIZON_SLOT)),
+        "sun": _pack_colour(frame.colour(SKY_SUN_SLOT)),
+        "light": round(frame.light, 3),
+        "time": f"{frame.hour:02d}:{frame.minute:02d}",
+        "keyframes": len(atmosphere),
+        "textures": [t for t in atmosphere.textures if t],
+    }
+
+
 def build_mission_payload(
     m: mission.Mission, map_index: int, models: ModelLibrary | None = None
 ) -> dict:
@@ -666,6 +704,7 @@ def build_mission_payload(
         "label": label,
         "title": m.title,
         "map": map_index,
+        "sky": build_sky_payload(folder),
         "clans": clans,
         "objects": placed,
         "routes": [[[round(v, 2) for v in pt] for pt in r.points] for r in m.routes],

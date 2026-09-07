@@ -53,24 +53,19 @@ confirms it, and if it is wrong then something is not being drawn.
 
 Correct as far as it goes, but not what the game showed.
 
-### 2.1 The sky
+### 2.1 The sky is a gradient, not the game's sky
 
-The biggest thing still missing from every picture. `Terrain.dll` calls
-`sky.ske` an **atmosphere** file, written by a tool it names SunEditor, and
-the class names say what is in it: `CAtmosphere`, `CAtmData`, `CSun`,
-`CreateAtmosphereObject`, "Illegal atmosphere object type", plus the settings
-`AtmSkyDetail`, `AtmStarsOn`, `AtmCloudsOn`, `LensFlareOn`. So it is a list of
-typed sky objects and timed events (`GetTimeDiffInSec`, `GetEvents`; the first
-words of a file read as `23, 59` where a time would go). 999 to 8573 bytes,
-different per mission.
+`sky.ske` is [solved](docs/10-sky.md) and the viewer draws the mission's own
+day-cycle colours as a zenith-to-horizon dome, with its sun colour and
+intensity on the directional light. What it does not draw is what `sky.wea`
+names: `ENV_NEBULA_0`, `ENV_STARS`, `ENV_CLOUDS`, `ENV_SUN_3`, `ENV_MOON`,
+`ENV_FLARE_00`. All six textures are in `Textures.lib` and decode; nothing yet
+says where in the dome each one goes, or which keyframe field positions the
+sun.
 
-The sibling `sky.wea` is already readable and names the textures:
-`ENV_NEBULA_0`, `ENV_STARS`, `ENV_CLOUDS`, `ENV_SUN_3`, `ENV_MOON`,
-`ENV_FLARE_00`, `ENV_FLARE_01`, `SNOWFLAKE`, `RAIN_DROP`. What is missing is
-the placement, and guessing it would be inventing.
-
-**Where to look:** `Terrain.dll`'s `CreateAtmosphereObject`, which has to
-switch on the object type word.
+Three smaller unknowns sit in the same file: the keyframe count of a second
+section (six missions have one), which field selects the object type between
+SUN, SKY, RAIN, SNOW and LIGHTNING, and most of the 124-byte file header.
 
 ### 2.2 The second layer of a terrain material
 

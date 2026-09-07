@@ -151,6 +151,7 @@
       <dt>Triangles</dt><dd id="nf">&ndash;</dd>
       <dt>Water</dt><dd id="wat">&ndash;</dd>
       <dt id="objdt" hidden>Placed</dt><dd id="obj" hidden>&ndash;</dd>
+      <dt id="skydt" hidden>Sky</dt><dd id="sky" hidden>&ndash;</dd>
     </dl>
     <div id="clanbox" hidden>
       <label>Clans &middot; data.tma</label>
@@ -213,10 +214,49 @@ if (typeof THREE === "undefined" || typeof pako === "undefined") {
   scene.add(sun, new THREE.AmbientLight(0xffffff, 0.46));
 
   const cssVar = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  let missionSky = null;
+
+  // The sky dome, from the mission's own atmosphere file: an inverted sphere
+  // shaded from the zenith colour down to the horizon colour.  Both come out
+  // of the brightest keyframe of the day cycle in sky.ske.
+  const DOME_RADIUS = 26000;
+  let dome = null;
+  function buildDome(zenith, horizon) {
+    if (dome) { scene.remove(dome); dome.geometry.dispose(); dome.material.dispose(); dome = null; }
+    if (zenith === undefined) return;
+    const g = new THREE.SphereGeometry(DOME_RADIUS, 32, 20);
+    const top = new THREE.Color(zenith), low = new THREE.Color(horizon);
+    const pos = g.attributes.position, colour = [];
+    for (let i = 0; i < pos.count; i++) {
+      // 0 at the horizon, 1 overhead; squared so the band sits low, which is
+      // where a real sky's gradient lives.
+      const t = Math.max(0, pos.getY(i) / DOME_RADIUS);
+      colour.push(...low.clone().lerp(top, t * t).toArray());
+    }
+    g.setAttribute("color", new THREE.Float32BufferAttribute(colour, 3));
+    dome = new THREE.Mesh(g, new THREE.MeshBasicMaterial({
+      side: THREE.BackSide, vertexColors: true, fog: false, depthWrite: false,
+    }));
+    dome.renderOrder = -1;
+    scene.add(dome);
+  }
+
   function applyTheme() {
+    if (missionSky) {
+      // Distant terrain fades into the horizon rather than into the page.
+      scene.background = new THREE.Color(missionSky.horizon);
+      scene.fog = new THREE.Fog(missionSky.horizon, 3200, 15000);
+      sun.color = new THREE.Color(missionSky.sun);
+      sun.intensity = Math.min(1.15, 0.55 + 0.22 * missionSky.light);
+      buildDome(missionSky.zenith, missionSky.horizon);
+      return;
+    }
     const fog = parseInt(cssVar("--fog"), 16);
     scene.background = new THREE.Color(fog);
     scene.fog = new THREE.Fog(fog, 2600, 11000);
+    sun.color = new THREE.Color(0xffffff);
+    sun.intensity = 0.92;
+    buildDome(undefined);
   }
   applyTheme();
   matchMedia("(prefers-color-scheme: dark)").addEventListener("change", applyTheme);
@@ -569,6 +609,12 @@ if (typeof THREE === "undefined" || typeof pako === "undefined") {
     document.getElementById("obj").hidden = false;
     document.getElementById("obj").innerHTML = mis.objects.length.toLocaleString() +
       (drawn ? ' <span class="unit">(' + drawn + " meshed)</span>" : "");
+    const skyRow = document.getElementById("sky"), skyLabel = document.getElementById("skydt");
+    skyRow.hidden = skyLabel.hidden = !mis.sky;
+    if (mis.sky) {
+      skyRow.innerHTML = mis.sky.time + ' <span class="unit">' + mis.sky.keyframes +
+        " keyframes</span>";
+    }
     document.getElementById("clanbox").hidden = false;
     document.getElementById("clans").innerHTML = mis.clans.map((c) =>
       '<span class="layer clan"><span class="dot" style="background:#' +
@@ -579,6 +625,8 @@ if (typeof THREE === "undefined" || typeof pako === "undefined") {
     clearOverlay();
     document.getElementById("objdt").hidden = true;
     document.getElementById("obj").hidden = true;
+    document.getElementById("skydt").hidden = true;
+    document.getElementById("sky").hidden = true;
     document.getElementById("clanbox").hidden = true;
   }
 
@@ -601,6 +649,8 @@ if (typeof THREE === "undefined" || typeof pako === "undefined") {
   addGroup("Missions", DATA.missions.map((mis) => ({
     text: mis.label + " -- " + mis.title,
     fn: () => {
+      missionSky = mis.sky || null;
+      applyTheme();
       show(DATA.maps[mis.map]);
       showMission(mis);
       document.getElementById("path").textContent =
@@ -610,6 +660,8 @@ if (typeof THREE === "undefined" || typeof pako === "undefined") {
   addGroup("Terrain only", DATA.maps.map((m, i) => ({
     text: m.name,
     fn: () => {
+      missionSky = null;
+      applyTheme();
       show(DATA.maps[i]);
       showTerrainOnly();
       document.getElementById("path").textContent = "DATA/MAPS/" + m.name + "/Land.msh";

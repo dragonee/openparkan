@@ -7,7 +7,7 @@ import sys
 from collections import Counter
 from pathlib import Path
 
-from . import gamedir, landmesh, mission, texm, verify, viewer
+from . import gamedir, landmesh, mission, sky, texm, verify, viewer
 from .nres import NResArchive, is_nres
 from .png import write_png
 
@@ -159,6 +159,46 @@ def cmd_missions(args, game: Path) -> int:
     return 0
 
 
+def cmd_sky(args, game: Path) -> int:
+    """Print a mission's atmosphere: its day cycle, keyframe by keyframe."""
+    folders = gamedir.missions(game) if not args.mission else [
+        Path(args.mission) if (Path(args.mission) / "sky.ske").exists()
+        else game / "MISSIONS" / args.mission
+    ]
+    shown = 0
+    for folder in folders:
+        path = folder / "sky.ske"
+        if not path.exists():
+            continue
+        atmosphere = sky.load(path)
+        shown += 1
+        label = str(folder.relative_to(game))
+        print(f"{label}  {len(atmosphere)} keyframes, {atmosphere.sections} section(s)")
+        if atmosphere.textures:
+            print(f"  sky.wea      {', '.join(t for t in atmosphere.textures if t)}")
+        if not args.frames:
+            frame = atmosphere.brightest()
+            if frame:
+                r, g, b, _ = frame.sky
+                print(f"  brightest    {frame.hour:02d}:{frame.minute:02d}  "
+                      f"sky #{r:02x}{g:02x}{b:02x}  light {frame.light:.2f}")
+            continue
+        for frame in atmosphere.keyframes:
+            r, g, b, _ = frame.sky
+            extra = []
+            if frame.name:
+                extra.append(frame.name)
+            if frame.sounds:
+                extra.append(", ".join(frame.sounds))
+            print(f"    {frame.hour:02d}:{frame.minute:02d}  sky #{r:02x}{g:02x}{b:02x}  "
+                  f"light {frame.light:5.2f}  section {frame.section}"
+                  + (f"  {' | '.join(extra)}" if extra else ""))
+    if not shown:
+        print("no sky.ske found", file=sys.stderr)
+        return 2
+    return 0
+
+
 def cmd_mission(args, game: Path) -> int:
     d = Path(args.mission)
     if not (d / "data.tma").exists():
@@ -307,6 +347,11 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser(
         "verify", help="re-derive every claim in docs/ from the installed data files"
     ).set_defaults(fn=cmd_verify)
+
+    p = sub.add_parser("sky", help="show a mission's atmosphere and its day cycle")
+    p.add_argument("mission", nargs="?", help="mission directory; default is every mission")
+    p.add_argument("--frames", action="store_true", help="list every keyframe")
+    p.set_defaults(fn=cmd_sky)
 
     p = sub.add_parser("viewer", help="build a self-contained 3D terrain viewer")
     p.add_argument("maps", nargs="*", help="map names; default is every map")

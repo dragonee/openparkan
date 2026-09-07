@@ -125,16 +125,9 @@ engine generated at run time.
 `*.ctl` controllers, `*.exp` explosions, `.scr` node semantics, the `.trf`
 streams, save games in `SAVE/`, and the network protocol.
 
-`sky.ske` is opened but not decoded. `Terrain.dll` names it an **atmosphere**
-file written by a tool it calls SunEditor ("SunDll panic : Old version ske
-file / ReSave in SunEditor"), with `CAtmosphere`, `CAtmData`, `CSun`,
-`CreateAtmosphereObject`, "Illegal atmosphere object type", and the settings
-`AtmSkyDetail`, `AtmStarsOn`, `AtmCloudsOn`, `LensFlareOn`. So it is a list of
-typed sky objects plus timed events -- `CAtmData::GetTimeDiffInSec` and
-`GetEvents`, and the first words of a file read as `23, 59` where a time would
-go. Sizes run 999 to 8573 bytes and vary per mission. The layer names are in
-the sibling `sky.wea`, which is already readable: `ENV_NEBULA_0`, `ENV_STARS`,
-`ENV_CLOUDS`, `ENV_SUN_3`, `ENV_MOON`, `ENV_FLARE_00`, `ENV_FLARE_01`,
-`SNOWFLAKE`, `RAIN_DROP`.
+`sky.ske` is [solved](10-sky.md) -- a day cycle of colour keyframes, all 29
+files to the byte. Three things in it are not: the keyframe count of a second
+section, which field selects the object type (SUN, SKY, RAIN, SNOW,
+LIGHTNING), and most of the 124-byte file header.
 
 The ones that hold back a picture are triaged in [../TODO.md](../TODO.md).
