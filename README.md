@@ -19,7 +19,8 @@ reproduced.
 | **3D terrain viewer** | done — self-contained HTML, no server |
 | **`data.tma` missions** | done — all 29 parse to EOF, 864 objects placed |
 | **`objects.rlb`, unit assemblies** | done — 590 records, 458 assemblies, 5708 components |
-| **Object meshes** | geometry done — 68 meshes; per-face texture unresolved |
+| **Object meshes** | geometry done — 435 meshes in 10 archives; per-face texture unresolved |
+| **Control points** | done — 284 members, 3599 named attachment points |
 | **`Land.map` navigation** | not started |
 | **Behaviour scripts, gameplay** | not started |
 
@@ -90,8 +91,11 @@ PASS  objects.rlb: every record parses into slots    590 records, tags ['BTLU', 
 PASS  objects.rlb: scenery resource slots resolve    405/405 slots across 81 STAT records
 PASS  MESH: object meshes parse with consistent streams 68/68 meshes, 41663 triangles, all indices in range
 PASS  MESH: int8/127 normals are unit length         worst deviation 0.0130 -- the same encoding as the terrain
+PASS  MESH: the format is the same in every archive  435 meshes, 241887 triangles across 10 archives
+PASS  CTPT: control points parse as two parallel arrays 284 members, 3599 points, 3599 of them named
 PASS  UNITS/*.dat: assemblies parse on a 112-byte stride 458/458 files, 5708 components
 PASS  UNITS/*.dat: components resolve in objects.rlb 5705/5708 resolve (3 do not; see docs/07-objects.md)
+PASS  every placed mission object reaches geometry   864/864 objects resolve to a .msh through objects.rlb
 ```
 
 That last check is the important one. The game ships pre-rendered minimaps in
@@ -120,7 +124,7 @@ openparkan/
   gamedir.py    installation discovery
   mission.py    data.tma reader: clans, objects, routes
   objects.py    objects.rlb records and UNITS/*.dat assemblies
-  mesh.py       object geometry (MESH members)
+  mesh.py       object geometry and control points
   viewer.py     self-contained HTML viewer generator
   verify.py     the checks quoted above
   png.py        dependency-free PNG writer

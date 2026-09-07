@@ -328,18 +328,37 @@ if (typeof THREE === "undefined") {
   const modelCache = {};
   let overlay = null;
 
-  // Scenery is drawn from its real geometry, decoded out of objects.rlb ->
-  // static.rlb. Geometries are shared between every placement of a model.
+  // Objects are drawn from their real geometry, decoded through objects.rlb.
+  // Geometries are shared between every placement of a model, and shading is
+  // flat, so the meshes ship without per-vertex normals.
   function modelGeometry(i) {
     if (modelCache[i]) return modelCache[i];
     const src = DATA.models[i];
     const g = new THREE.BufferGeometry();
-    g.setAttribute("position", new THREE.BufferAttribute(b64(src.position, Float32Array), 3));
-    g.setAttribute("normal", new THREE.BufferAttribute(b64(src.normal, Int16Array), 3, true));
+    // Positions arrive quantised to int16 over the model's bounding box; the
+    // normalized flag maps them back to -1..1 in the shader. The scale and
+    // offset that restore world units are applied to the *object*, never to
+    // the geometry: BufferGeometry.scale() reads raw integers out of a
+    // normalized attribute and writes them back, which overflows the buffer.
+    g.setAttribute("position",
+      new THREE.BufferAttribute(b64(src.position, Int16Array), 3, true));
     g.setIndex(new THREE.BufferAttribute(
       b64(src.index, src.wide ? Uint32Array : Uint16Array), 1));
+    g.computeVertexNormals();
     modelCache[i] = g;
     return g;
+  }
+
+  // A model sits inside a group so its own scale and offset compose with the
+  // placement's rotation in the right order.
+  function modelInstance(i, material) {
+    const src = DATA.models[i];
+    const inner = new THREE.Mesh(modelGeometry(i), material);
+    inner.scale.set(src.scale[0], src.scale[1], src.scale[2]);
+    inner.position.set(src.offset[0], src.offset[1], src.offset[2]);
+    const group = new THREE.Group();
+    group.add(inner);
+    return group;
   }
 
   function clearOverlay() {
@@ -360,19 +379,21 @@ if (typeof THREE === "undefined") {
     const cx = map.centre[0], cy = map.centre[1];
     overlay = new THREE.Group();
 
-    const mats = mis.clans.map((c) =>
-      new THREE.MeshLambertMaterial({ color: c.colour }));
+    const flat = (colour) => new THREE.MeshLambertMaterial({
+      color: colour, side: THREE.DoubleSide, flatShading: true,
+    });
+    const mats = mis.clans.map((c) => new THREE.MeshLambertMaterial({ color: c.colour }));
+    const meshMats = mis.clans.map((c) => flat(c.colour));
     const neutral = new THREE.MeshLambertMaterial({ color: NEUTRAL });
 
-    const sceneryMat = new THREE.MeshLambertMaterial({
-      color: SCENERY, side: THREE.DoubleSide, flatShading: true,
-    });
+    const sceneryMat = flat(SCENERY);
     let drawn = 0;
     mis.objects.forEach((o) => {
       // o.p is [x, z, y] in game space; the map is recentred and Y-up.
       let m;
       if (o.m !== undefined) {
-        m = new THREE.Mesh(modelGeometry(o.m), sceneryMat);
+        // Clan-owned things take their clan's colour; scenery stays neutral.
+        m = modelInstance(o.m, o.c < 0 ? sceneryMat : meshMats[o.c]);
         m.position.set(o.p[0] - cx, o.p[1], -(o.p[2] - cy));
         // Game rotation is about the up axis; the Y flip reverses its sense.
         m.rotation.y = -o.r;

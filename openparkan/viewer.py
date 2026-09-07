@@ -188,66 +188,121 @@ CLAN_COLOURS = [0x3E7CB1, 0xC1453C, 0x4E9A51, 0xB07A2A, 0x7B5EA7, 0x2E9A96]
 NEUTRAL_COLOUR = 0x8A8A85
 
 
-class SceneryLibrary:
-    """Resolves scenery names to geometry, once each, for the viewer.
+class ModelLibrary:
+    """Resolves any placed mission object to renderable geometry.
 
-    Missions place scenery by name into ``objects.rlb``, whose STAT record
-    points at a ``.msh`` in another archive.  Meshes are shared across
-    missions, so they are packed once and referenced by index.
+    Two chains meet here.  Scenery names an ``objects.rlb`` record directly.
+    A building or unit names a ``UNITS/**/*.dat`` assembly, whose first
+    component names a record -- and for buildings that record is a ``FORT``
+    whose first slot points at a second record that finally carries the mesh.
+
+    Only the first component of an assembly is used, so a unit renders as its
+    chassis rather than as the full assembled robot: where the other parts
+    attach is not yet known.  See docs/07-objects.md.
     """
+
+    MAX_INDIRECTION = 3
 
     def __init__(self, game: Path):
         self.game = game
         self.library = objects.ObjectLibrary(game / "objects.rlb")
-        self._archives: dict[str, object] = {}
+        self._archives: dict[str, NResArchive] = {}
         self.models: list[dict] = []
-        self._index: dict[str, int | None] = {}
+        self._by_ref: dict[tuple[str, str], int] = {}
+        self._by_name: dict[str, int | None] = {}
 
-    def _archive(self, name: str):
+    def _archive(self, name: str) -> NResArchive:
         if name not in self._archives:
             self._archives[name] = NResArchive.open(self.game / name)
         return self._archives[name]
 
-    def resolve(self, name: str) -> int | None:
-        """Index into ``self.models``, or None when the name has no geometry."""
-        key = name.lower()
-        if key in self._index:
-            return self._index[key]
-        record = self.library.get(name)
-        ref = record.mesh if record else None
-        slot = None
-        if ref:
-            m = objmesh.parse(self._archive(ref.library).read_name(ref.member), ref.member)
-            pos = bytearray()
-            nrm = bytearray()
-            for (x, y, z), (a, b, c) in zip(m.positions, m.normals, strict=True):
-                # Game space is Z-up; the viewer is Y-up, matching the terrain.
-                pos += struct.pack("<3f", x, z, -y)
-                nrm += struct.pack(
-                    "<3h",
-                    max(-32767, min(32767, round(a * 32767))),
-                    max(-32767, min(32767, round(c * 32767))),
-                    max(-32767, min(32767, round(-b * 32767))),
-                )
-            wide = m.vertex_count > 0xFFFF
-            idx = bytearray()
-            for tri in m.triangles:
-                idx += struct.pack("<3I" if wide else "<3H", *tri)
-            slot = len(self.models)
-            self.models.append({
-                "name": name,
-                "wide": wide,
-                "position": _b64(bytes(pos)),
-                "normal": _b64(bytes(nrm)),
-                "index": _b64(bytes(idx)),
-                "tris": m.triangle_count,
-            })
-        self._index[key] = slot
+    def _record_mesh(self, record, depth: int = 0):
+        if record is None or depth > self.MAX_INDIRECTION:
+            return None
+        direct = record.mesh
+        if direct:
+            return direct
+        # A FORT record has no geometry of its own; its first slot names
+        # another record that does.
+        for slot in record.slots:
+            if slot and not slot.suffix:
+                found = self._record_mesh(self.library.get(slot.member), depth + 1)
+                if found:
+                    return found
+        return None
+
+    def _unit_file(self, path: str) -> Path | None:
+        f = self.game / path.replace("\\", "/")
+        if f.exists():
+            return f
+        if f.parent.exists():
+            lower = {x.name.lower(): x for x in f.parent.iterdir()}
+            return lower.get(f.name.lower())
+        return None
+
+    def _pack(self, ref) -> int:
+        key = (ref.library, ref.member)
+        if key in self._by_ref:
+            return self._by_ref[key]
+        m = objmesh.parse(self._archive(ref.library).read_name(ref.member), ref.member)
+        # Positions only: the viewer flat-shades, so per-vertex normals would
+        # be ignored and are not worth the bytes.  Positions are quantised to
+        # int16 across the model's own bounding box and restored with a scale
+        # and offset, which halves the geometry and costs about a thousandth
+        # of a model's size in precision.
+        # Game space is Z-up, the viewer is Y-up: (x, y, z) -> (x, z, -y).
+        # Quantise in the viewer's axis order, because a scale factor can
+        # rescale components but cannot reorder them.
+        (lox, loy, loz), (hix, hiy, hiz) = m.bounds()
+        centre = ((lox + hix) / 2, (loz + hiz) / 2, -(loy + hiy) / 2)
+        half = [
+            max((hix - lox) / 2, 1e-6),
+            max((hiz - loz) / 2, 1e-6),
+            max((hiy - loy) / 2, 1e-6),
+        ]
+        pos = bytearray()
+        for x, y, z in m.positions:
+            for value, mid, span in zip((x, z, -y), centre, half, strict=True):
+                q = round((value - mid) / span * 32767)
+                pos += struct.pack("<h", max(-32767, min(32767, q)))
+        wide = m.vertex_count > 0xFFFF
+        idx = bytearray()
+        for tri in m.triangles:
+            idx += struct.pack("<3I" if wide else "<3H", *tri)
+        self._by_ref[key] = len(self.models)
+        self.models.append({
+            "name": ref.member,
+            "wide": wide,
+            "position": _b64(bytes(pos)),
+            "index": _b64(bytes(idx)),
+            "scale": [round(v, 4) for v in half],
+            "offset": [round(v, 4) for v in centre],
+            "tris": m.triangle_count,
+        })
+        return self._by_ref[key]
+
+    def resolve(self, obj: mission.MissionObject) -> int | None:
+        """Index into ``self.models``, or None when nothing resolves."""
+        if obj.path in self._by_name:
+            return self._by_name[obj.path]
+        ref = None
+        if obj.is_static:
+            ref = self._record_mesh(self.library.get(obj.path))
+        else:
+            f = self._unit_file(obj.path)
+            if f is not None:
+                unit = objects.load_unit(f)
+                if unit.components:
+                    ref = self._record_mesh(
+                        self.library.get(unit.components[0].ref.member)
+                    )
+        slot = self._pack(ref) if ref else None
+        self._by_name[obj.path] = slot
         return slot
 
 
 def build_mission_payload(
-    m: mission.Mission, map_index: int, scenery: SceneryLibrary | None = None
+    m: mission.Mission, map_index: int, models: ModelLibrary | None = None
 ) -> dict:
     """Pack a mission into markers the viewer can drop onto its map.
 
@@ -273,10 +328,10 @@ def build_mission_payload(
             "n": o.name or o.path.replace("\\", "/").rsplit("/", 1)[-1],
             "r": round(o.rotation, 4),
         }
-        if scenery is not None and o.is_static:
-            model = scenery.resolve(o.path)
-            if model is not None:
-                entry["m"] = model
+        if models is not None:
+            slot = models.resolve(o)
+            if slot is not None:
+                entry["m"] = slot
         placed.append(entry)
     # Campaign missions are all called Mission.0N, so qualify them with the
     # campaign directory to keep the selector unambiguous.

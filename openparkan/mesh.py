@@ -120,6 +120,54 @@ def parse(blob: bytes, name: str = "<mesh>", texture_names: list[str] | None = N
     )
 
 
+CONTROL_POINT_NUMERIC = 36
+CONTROL_POINT_NAME = 32
+
+
+@dataclass
+class ControlPoint:
+    """A named point on a model: an attachment, a light, an effect origin.
+
+    The record is nine float32.  In ``static.rlb`` and ``turrets.rlb`` the
+    first triple is zero, the second is a position inside the model's bounding
+    box and the third a unit direction -- but that reading does not hold in
+    every archive (``guns.rlb`` stores a scalar width in a vector slot), so the
+    triples are exposed as they are and named ``a``, ``position`` and
+    ``direction`` only as the best-supported interpretation.
+    """
+
+    name: str
+    a: tuple[float, float, float]
+    position: tuple[float, float, float]
+    direction: tuple[float, float, float]
+
+
+def parse_control_points(blob: bytes, source: str = "<cpt>") -> list[ControlPoint]:
+    """Parse a ``CTPT`` payload.
+
+    The layout is two parallel arrays, not an array of records::
+
+        uint32  count
+        count x float32[9]     numeric data
+        count x char[32]       names
+
+    which is why the total is always ``4 + count * 68``.
+    """
+    count = struct.unpack_from("<I", blob, 0)[0]
+    expected = 4 + count * (CONTROL_POINT_NUMERIC + CONTROL_POINT_NAME)
+    if expected != len(blob):
+        raise ValueError(
+            f"{source}: {count} control points implies {expected} bytes, have {len(blob)}"
+        )
+    names_at = 4 + count * CONTROL_POINT_NUMERIC
+    out = []
+    for i in range(count):
+        v = struct.unpack_from("<9f", blob, 4 + i * CONTROL_POINT_NUMERIC)
+        raw = blob[names_at + i * CONTROL_POINT_NAME : names_at + (i + 1) * CONTROL_POINT_NAME]
+        out.append(ControlPoint(raw.split(b"\0")[0].decode("latin-1"), v[0:3], v[3:6], v[6:9]))
+    return out
+
+
 def read_wea(blob: bytes) -> list[str]:
     """Parse a ``.wea`` texture name table: a count, then ``index name`` pairs."""
     tokens = blob.decode("latin-1").split()

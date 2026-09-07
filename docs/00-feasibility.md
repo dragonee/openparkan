@@ -119,9 +119,12 @@ engineering: a scene graph, camera, selection and a minimap over data that is
 already readable. Object *geometry* now reads too, so a scene can be drawn
 from real meshes rather than placeholders.
 
+Every object a mission places — all 864 of them — now resolves to real
+geometry, so a scene can be drawn from the game's own meshes.
+
 What still blocks a playable build is `Land.map` (navigation), the per-face
-texture assignment on object meshes, and how components are positioned when a
-unit is assembled — see [06-open-questions.md](06-open-questions.md).
+texture assignment on object meshes, and how components bind to a chassis when
+a unit is assembled — see [06-open-questions.md](06-open-questions.md).
 
 ## Legal position
 

@@ -320,6 +320,39 @@ def check_objects(check, game: Path) -> None:
     check("MESH: int8/127 normals are unit length", worst_normal < 0.02,
           f"worst deviation {worst_normal:.4f} -- the same encoding as the terrain")
 
+    # The mesh and control-point formats are not specific to scenery: every
+    # record type but FORT uses the same .msh/.wea/.cpt/.ndp/.ctl slot set.
+    ARCHIVES = (
+        "static.rlb", "intsys.rlb", "turrets.rlb", "guns.rlb", "parts.rlb",
+        "weapon.rlb", "animals.rlb", "bases.rlb", "fortif.rlb", "system.rlb",
+    )
+    all_meshes = all_tris = mesh_fail = 0
+    all_cpt = cpt_fail = points = 0
+    named = 0
+    for name in ARCHIVES:
+        ar = NResArchive.open(game / name)
+        for e in ar:
+            if e.tag == "MESH":
+                try:
+                    mm = objmesh.parse(ar.read(e), e.name)
+                    assert all(0 <= i < mm.vertex_count for t in mm.triangles for i in t)
+                    all_meshes += 1
+                    all_tris += mm.triangle_count
+                except Exception:
+                    mesh_fail += 1
+            elif e.tag == "CTPT":
+                try:
+                    pts = objmesh.parse_control_points(ar.read(e), e.name)
+                    all_cpt += 1
+                    points += len(pts)
+                    named += sum(1 for p in pts if p.name)
+                except Exception:
+                    cpt_fail += 1
+    check("MESH: the format is the same in every archive", mesh_fail == 0,
+          f"{all_meshes} meshes, {all_tris} triangles across {len(ARCHIVES)} archives")
+    check("CTPT: control points parse as two parallel arrays", cpt_fail == 0,
+          f"{all_cpt} members, {points} points, {named} of them named")
+
     # Unit assemblies.
     dats = sorted((game / "UNITS").rglob("*.dat"))
     loaded = comps = missing = 0
@@ -340,6 +373,38 @@ def check_objects(check, game: Path) -> None:
           + ("" if not failures else f" -- {failures[0]}"))
     check("UNITS/*.dat: components resolve in objects.rlb", missing <= 3,
           f"{comps - missing}/{comps} resolve ({missing} do not; see docs/07-objects.md)")
+
+    # Every placed object must reach geometry, following FORT indirection.
+    def record_mesh(rec, depth=0):
+        if rec is None or depth > 3:
+            return None
+        if rec.mesh:
+            return rec.mesh
+        for slot in rec.slots:
+            if slot and not slot.suffix:
+                found = record_mesh(lib.get(slot.member), depth + 1)
+                if found:
+                    return found
+        return None
+
+    reached = placed = 0
+    for d in gamedir.missions(game):
+        for o in mission.load(d / "data.tma").objects:
+            placed += 1
+            if o.is_static:
+                ref = record_mesh(lib.get(o.path))
+            else:
+                f = game / o.path.replace("\\", "/")
+                if not f.exists() and f.parent.exists():
+                    f = {x.name.lower(): x for x in f.parent.iterdir()}.get(f.name.lower())
+                ref = None
+                if f is not None and f.exists():
+                    unit = objects.load_unit(f)
+                    if unit.components:
+                        ref = record_mesh(lib.get(unit.components[0].ref.member))
+            reached += ref is not None
+    check("every placed mission object reaches geometry", reached == placed,
+          f"{reached}/{placed} objects resolve to a .msh through objects.rlb")
 
 
 def check_minimap_agreement(check, game: Path) -> None:

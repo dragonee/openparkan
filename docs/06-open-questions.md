@@ -58,9 +58,24 @@ likely explanation.
 
 ## How a unit's components are positioned
 
-A `.dat` assembly lists its parts but not where they attach. Hardpoints are
-presumably in the `.ctl` controllers, or in the unresolved mesh streams (1, 8,
-13). Without them a unit can only be drawn as its chassis.
+A `.dat` assembly lists its parts but not where they attach. The `.cpt` control
+points are clearly the raw material — `TurretCenter`, `TurretDirect`, `foot_fl`
+— but nothing yet says which point on a chassis a given part binds to. Until
+that is worked out a unit can only be drawn as its first component.
+
+## CTPT field roles outside static.rlb
+
+The container is solid everywhere (all 284 members parse, all 3599 points
+named), but the nine floats only read cleanly as
+`(zero, position, unit direction)` in `static.rlb` and `turrets.rlb`.
+`guns.rlb` and `parts.rlb` put scalars like `Width` in a vector slot.
+
+## BASE — building footprints
+
+`fortif.rlb` `.bas` members open with a count and then float triples at z ≈ 0
+that trace a polygon, so they read as a building's ground footprint. The
+header does not divide evenly into the payload, so the full record is not
+mapped.
 
 ## Unresolved terrain fields
 

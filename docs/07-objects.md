@@ -128,6 +128,41 @@ sub-object count sometimes equals the texture count (`s_tree_0_06`: 4 and 4)
 and sometimes does not (`s_stn_0_10`: 1 and 2). See
 [06-open-questions.md](06-open-questions.md).
 
+## CTPT — control points
+
+Every record with geometry has a `.cpt` slot. The format is **two parallel
+arrays, not an array of records**, which is why the total is always
+`4 + count × 68`:
+
+```
+uint32   count
+count × float32[9]     numeric data      (36 bytes each)
+count × char[32]       names             (32 bytes each)
+```
+
+All 284 `CTPT` members across ten archives parse, giving **3599 control points,
+every one of them named**. The names say what the format is for:
+
+| Archive | Names | Meaning |
+|---|---|---|
+| `static.rlb` | `Root`, `Exp_X/Y/Z`, `Eff1_X/Y/Z`, `Up1Light` | origin, explosion and effect frames, light positions |
+| `turrets.rlb` | `TurretCenter`, `TurretDirect` | turret mount and aim direction |
+| `guns.rlb` | `Dir_1`, `Width_1` | barrel direction and spread |
+| `bases.rlb` | `foot_fl`, `foot_fl_d` | walker foot positions |
+| `fortif.rlb` | `P000`, `P001`, … | numbered points around a building |
+
+A triple of points named `Exp_X`, `Exp_Y`, `Exp_Z` shares one position and
+carries unit directions `(1,0,0)`, `(0,1,0)`, `(0,0,1)` — **three named points
+describing one attachment frame**. That is the clearest evidence for what the
+nine floats are.
+
+The reading `(zero, position, unit direction)` holds strongly in `static.rlb`
+(first triple exactly zero on 93% of points, third unit-length on 99%, second
+inside the mesh bounds on 99%) and in `turrets.rlb` (third unit-length on
+100%). It does **not** hold everywhere: `guns.rlb` and `parts.rlb` appear to
+store scalars such as `Width` in a vector slot. The parser therefore exposes
+the three triples as-is.
+
 ## Local origins
 
 Object meshes are not consistently based at z = 0. `s_tree_0_06` spans
