@@ -33,15 +33,16 @@ _SPECIAL_MATERIALS = {
 }
 
 
-def _png_data_uri(width: int, height: int, rgb: bytes) -> str:
+def _png_data_uri(width: int, height: int, pixels: bytes, alpha: bool = False) -> str:
+    stride = 4 if alpha else 3
     raw = bytearray()
-    row = width * 3
+    row = width * stride
     for y in range(height):
         raw.append(0)
-        raw += rgb[y * row : (y + 1) * row]
+        raw += pixels[y * row : (y + 1) * row]
     blob = (
         b"\x89PNG\r\n\x1a\n"
-        + _chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+        + _chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 6 if alpha else 2, 0, 0, 0))
         + _chunk(b"IDAT", zlib.compress(bytes(raw), 9))
         + _chunk(b"IEND", b"")
     )
@@ -69,23 +70,23 @@ class TextureResolver:
         self.pool: list[dict] = []
         self._by_name: dict[str, int] = {}
 
-    def _downsample(self, tex, rgb: bytes) -> tuple[int, int, bytes]:
+    def _downsample(self, tex, pixels: bytes, stride: int = 3) -> tuple[int, int, bytes]:
         """Halve until within ``max_size``; terrain tiles do not need mip 0."""
         w, h = tex.width, tex.height
         while max(w, h) > self.max_size and w % 2 == 0 and h % 2 == 0:
             nw, nh = w // 2, h // 2
-            out = bytearray(nw * nh * 3)
+            out = bytearray(nw * nh * stride)
             for y in range(nh):
                 for x in range(nw):
-                    o = (y * nw + x) * 3
-                    for c in range(3):
-                        a = rgb[((2 * y) * w + 2 * x) * 3 + c]
-                        b = rgb[((2 * y) * w + 2 * x + 1) * 3 + c]
-                        d = rgb[((2 * y + 1) * w + 2 * x) * 3 + c]
-                        e = rgb[((2 * y + 1) * w + 2 * x + 1) * 3 + c]
+                    o = (y * nw + x) * stride
+                    for c in range(stride):
+                        a = pixels[((2 * y) * w + 2 * x) * stride + c]
+                        b = pixels[((2 * y) * w + 2 * x + 1) * stride + c]
+                        d = pixels[((2 * y + 1) * w + 2 * x) * stride + c]
+                        e = pixels[((2 * y + 1) * w + 2 * x + 1) * stride + c]
                         out[o + c] = (a + b + d + e) // 4
-            rgb, w, h = bytes(out), nw, nh
-        return w, h, rgb
+            pixels, w, h = bytes(out), nw, nh
+        return w, h, pixels
 
     def resolve(self, name: str) -> int:
         """Index in ``self.pool`` for a texture name, with or without its
@@ -96,11 +97,36 @@ class TextureResolver:
         entry = self.index.get(key)
         if entry is not None:
             tex = texm.decode(self.archive.read(entry))
-            w, h, rgb = self._downsample(tex, texm.to_rgb(tex, (90, 90, 90)))
-            mat = {"kind": "texture", "name": name, "url": _png_data_uri(w, h, rgb), "opacity": 1.0}
+            # 241 of the 393 shipped textures carry alpha, and the foliage is
+            # among them: a tree is a pair of crossed planes that only reads
+            # as a tree once the texture cuts its own silhouette out.
+            alpha = tex.rgba[3::4]
+            cutout = any(v < 255 for v in alpha)
+            if cutout:
+                w, h, pixels = self._downsample(tex, tex.rgba, 4)
+            else:
+                w, h, pixels = self._downsample(tex, texm.to_rgb(tex, (90, 90, 90)))
+            mat = {
+                "kind": "texture",
+                "name": name,
+                "url": _png_data_uri(w, h, pixels, cutout),
+                "opacity": 1.0,
+                # A cutout is drawn with an alpha test rather than blending:
+                # it needs no depth sorting, and it is what the fixed-function
+                # hardware this was written for could do.
+                "cutout": cutout,
+                "graded": cutout and any(0 < v < 255 for v in alpha),
+            }
         else:
             r, g, b, a = _SPECIAL_MATERIALS.get(key, (0x80, 0x80, 0x80, 1.0))
-            mat = {"kind": "colour", "name": name, "colour": (r << 16) | (g << 8) | b, "opacity": a}
+            mat = {
+                "kind": "colour",
+                "name": name,
+                "colour": (r << 16) | (g << 8) | b,
+                "opacity": a,
+                "cutout": False,
+                "graded": False,
+            }
         self._by_name[key] = len(self.pool)
         self.pool.append(mat)
         return self._by_name[key]

@@ -259,6 +259,16 @@ if (typeof THREE === "undefined") {
     place();
   }, { passive: false });
 
+  // A texture with alpha is drawn as a cutout: the alpha test discards the
+  // hole rather than blending it, so nothing needs depth sorting.  Foliage is
+  // crossed planes and only reads as a plant this way.
+  function applyCutout(opts, src) {
+    if (!src.cutout) return opts;
+    opts.alphaTest = src.graded ? 0.35 : 0.5;
+    opts.transparent = false;
+    return opts;
+  }
+
   const loader = new THREE.TextureLoader();
   const textureCache = {};
   let current = null;
@@ -322,6 +332,7 @@ if (typeof THREE === "undefined") {
       if (src.kind === "texture") opts.map = groundTexture(m.pool);
       else opts.color = src.colour;
       if (m.water || src.opacity < 1) { opts.transparent = true; opts.opacity = src.opacity; }
+      applyCutout(opts, src);
       return new THREE.MeshLambertMaterial(opts);
     });
     current = new THREE.Group();
@@ -419,6 +430,7 @@ if (typeof THREE === "undefined") {
       } else if (pooled) {
         opts.color = pooled.colour;
       }
+      if (pooled) applyCutout(opts, pooled);
       return new THREE.MeshLambertMaterial(opts);
     });
     modelMatCache[key] = mats;

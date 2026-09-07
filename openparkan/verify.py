@@ -78,6 +78,7 @@ def check_texm(check, game: Path) -> None:
     ar = NResArchive.open(game / "Textures.lib")
     exact = decoded = 0
     fmts: dict[int, int] = {}
+    cutout = graded = palettised = keyed = 0
     for e in ar:
         blob = ar.read(e)
         w, h, mips, flags, fmt = texm.parse_header(blob)
@@ -89,10 +90,26 @@ def check_texm(check, game: Path) -> None:
         tex = texm.decode(blob)
         if len(tex.rgba) == w * h * 4:
             decoded += 1
+        alpha = tex.rgba[3::4]
+        if any(v < 255 for v in alpha):
+            cutout += 1
+            graded += any(0 < v < 255 for v in alpha)
+        if fmt == texm.FMT_PALETTE8:
+            palettised += 1
+            # The palette is BGRX; if X were an alpha channel some entry would
+            # differ from the rest.  None does, on any shipped texture.
+            body = blob[texm.HEADER_SIZE :]
+            keyed += len({body[i * 4 + 3] for i in range(256)}) > 1
     check("Texm: declared format predicts the payload size", exact >= len(ar) * 0.8,
           f"{exact}/{len(ar)} exact (rest have a truncated mip tail)")
     check("Texm: every texture decodes to RGBA", decoded == len(ar),
           f"{decoded}/{len(ar)}, formats {dict(sorted(fmts.items()))}")
+    check("Texm: alpha is real and worth drawing", cutout > len(ar) * 0.5,
+          f"{cutout}/{len(ar)} textures carry alpha, {graded} of them graded "
+          f"rather than a hard cut")
+    check("Texm: a palettised texture has no colour key", keyed == 0,
+          f"the fourth palette byte is constant on all {palettised} palettised "
+          f"textures, so transparency lives in the 4444 and 8888 formats only")
 
 
 def check_terrain(check, game: Path) -> None:

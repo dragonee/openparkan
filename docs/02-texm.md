@@ -64,3 +64,20 @@ uv run openparkan textures ui/minimap.lib --out /tmp/minimaps
 
 `uv run openparkan verify`, checks 5–6: the declared format predicts the payload size
 for 328/393 textures, and all 393 decode to RGBA at the declared dimensions.
+
+## Transparency
+
+**241 of the 393 shipped textures carry alpha**, and 237 of those are graded
+rather than a hard cut — antialiased edges, not a one-bit mask. They are all
+`4444` or `8888`; the other three formats have no alpha channel at all.
+
+The palettised format has none either, which is worth stating because a colour
+key would be the obvious 1998 answer. Its palette is BGR**X**, and the fourth
+byte is **constant across all 256 entries on every one of the 15 palettised
+textures** — so it is padding. Palette index 0 is unused in the image data of
+all fifteen, which rules out the other common convention too. Of those
+fifteen, four are trees and ten are `WATER0`..`WATER9`, an animation.
+
+So foliage transparency is ordinary 8888 alpha, and a renderer wants an alpha
+**test** rather than blending for it: a tree is a pair of crossed planes, and
+a cutout needs no depth sorting. Without it a tree draws as a solid slab.
