@@ -19,18 +19,8 @@ from . import mesh as objmesh
 from .nres import NResArchive
 from .png import _chunk
 
-_SPECIAL_MATERIALS = {
-    # Not present in Textures.lib; the engine treats these as animated or
-    # procedural surfaces.  Approximated here with flat colours.
-    "WATER": (0x2E, 0x6B, 0x8F, 0.72),
-    "WATER_M": (0x2E, 0x6B, 0x8F, 0.72),
-    "WATER_BOT": (0x4A, 0x54, 0x40, 1.0),
-    "B_S0": (0x6B, 0x6B, 0x63, 1.0),
-    "B_MTP_01": (0x6B, 0x6B, 0x63, 1.0),
-    "ENV_NLAVA": (0xC4, 0x4A, 0x1E, 1.0),
-    "ENV_NLAVA_M": (0xC4, 0x4A, 0x1E, 1.0),
-    "ENV_LAVA_BOT": (0x5A, 0x2A, 0x18, 1.0),
-}
+#: Last resort for a name that reaches neither Material.lib nor Textures.lib.
+_FALLBACK_COLOUR = (0x80, 0x80, 0x80, 1.0)
 
 
 def _png_data_uri(width: int, height: int, pixels: bytes, alpha: bool = False) -> str:
@@ -54,14 +44,22 @@ def _b64(arr: bytes) -> str:
 
 
 class TextureResolver:
-    """Resolves terrain texture names into a pool of materials shared by every map.
+    """Resolves a material name into a pool of images shared by every map.
 
     Maps reuse the same handful of ground textures, so the pool is what keeps a
     33-map viewer from embedding the same PNG thirty-three times.
+
+    A name from ``Land1.wea`` or a model's wear is a **material** name, and it
+    goes through ``Material.lib`` first.  That is what makes ``WATER``,
+    ``B_S0`` and ``ENV_NLAVA`` resolve: they are not in ``Textures.lib`` under
+    those names, but their materials point at ``WATER0.0``, ``B_FOUND.0`` and
+    ``LAV00.0``.  A direct lookup remains the fallback, since most material
+    names and texture names coincide.
     """
 
     def __init__(self, game: Path, max_size: int = 128):
         self.archive = NResArchive.open(game / "Textures.lib")
+        self.materials = materials.MaterialLibrary(game / "Material.lib")
         self.max_size = max_size
         self.index = {}
         for e in self.archive:
@@ -69,6 +67,7 @@ class TextureResolver:
             self.index.setdefault(e.name.split(".")[0].upper(), e)
         self.pool: list[dict] = []
         self._by_name: dict[str, int] = {}
+        self._frames: dict[str, list[int]] = {}
 
     def _downsample(self, tex, pixels: bytes, stride: int = 3) -> tuple[int, int, bytes]:
         """Halve until within ``max_size``; terrain tiles do not need mip 0."""
@@ -88,9 +87,57 @@ class TextureResolver:
             pixels, w, h = bytes(out), nw, nh
         return w, h, pixels
 
+    def tint(self, name: str) -> int:
+        """The material's diffuse colour, packed for the viewer."""
+        r, g, b = self.materials.colour_for(name.upper().split(".")[0])
+        return (r << 16) | (g << 8) | b
+
+    def frames(self, name: str) -> list[int]:
+        """Pool indices for every animation frame of a material.
+
+        One entry for a still surface; ten for ``WATER_M``, which is what a
+        Parkan lake actually is.
+        """
+        key = name.upper().split(".")[0]
+        if key not in self._frames:
+            names = [
+                n for n in self.materials.frames_for(key)
+                if n.upper().split(".")[0] in self.index
+            ]
+            pool = [self._image(n) for n in names]
+            # ENV_NLAVA names LAV00.0 eight times and FIRE_SMOKE_W resolves
+            # every frame to the one FAIR.0 that shipped: a flip-book of one
+            # image is not an animation.
+            if len(set(pool)) > 1:
+                self._frames[key] = pool
+            else:
+                self._frames[key] = [self.resolve(name)]
+        return self._frames[key]
+
     def resolve(self, name: str) -> int:
-        """Index in ``self.pool`` for a texture name, with or without its
-        ``.0`` member suffix."""
+        """Index in ``self.pool`` for a material or texture name.
+
+        Materials come first: a terrain layer names a material, and eight of
+        them have no same-named texture at all.
+        """
+        key = name.upper().split(".")[0]
+        if key in self._by_name:
+            return self._by_name[key]
+        material = self.materials.get(key)
+        if material:
+            # The first texture the material names that is actually shipped.
+            # Eight materials point at frames that are not in Textures.lib --
+            # the FIRE_SMOKE animations name 0FAIR.0 upwards and only FAIR.0
+            # exists -- so falling through the list rescues the mixed ones.
+            for candidate in material.textures:
+                if candidate.upper().split(".")[0] in self.index:
+                    index = self._image(candidate)
+                    self._by_name[key] = index
+                    return index
+        return self._image(name)
+
+    def _image(self, name: str) -> int:
+        """Index in ``self.pool`` for a name looked up in Textures.lib."""
         key = name.upper().split(".")[0]
         if key in self._by_name:
             return self._by_name[key]
@@ -118,7 +165,7 @@ class TextureResolver:
                 "graded": cutout and any(0 < v < 255 for v in alpha),
             }
         else:
-            r, g, b, a = _SPECIAL_MATERIALS.get(key, (0x80, 0x80, 0x80, 1.0))
+            r, g, b, a = _FALLBACK_COLOUR
             mat = {
                 "kind": "colour",
                 "name": name,
@@ -200,8 +247,12 @@ def build_map_payload(mesh: landmesh.LandMesh, resolver: TextureResolver, name: 
             a, b, c = mesh.faces[fi]
             idx += struct.pack("<3I" if wide else "<3H", a, b, c)
         tex_name = mesh.texture_name(1, tex_index) or "?"
+        frames = resolver.frames(tex_name)
         groups.append({"start": start, "count": len(face_ids) * 3, "material": len(materials)})
-        materials.append({"pool": resolver.resolve(tex_name), "water": is_water})
+        entry = {"pool": frames[0], "water": is_water, "tint": resolver.tint(tex_name)}
+        if len(frames) > 1:
+            entry["frames"] = frames
+        materials.append(entry)
 
     # The second texture layer, drawn as an overlay over the faces that carry
     # one -- 8 to 30% of a map, and what turns a hard texture boundary into a
@@ -222,7 +273,12 @@ def build_map_payload(mesh: landmesh.LandMesh, resolver: TextureResolver, name: 
         overlay_groups.append(
             {"start": start, "count": len(face_ids) * 3, "material": len(overlay_materials)}
         )
-        overlay_materials.append({"pool": resolver.resolve(mesh.texture_name(2, tex_index))})
+        layer2_name = mesh.texture_name(2, tex_index)
+        frames = resolver.frames(layer2_name)
+        entry = {"pool": frames[0], "tint": resolver.tint(layer2_name)}
+        if len(frames) > 1:
+            entry["frames"] = frames
+        overlay_materials.append(entry)
 
     wet = mesh.water_faces()
     level = mesh.water_level()
@@ -284,7 +340,7 @@ class ModelLibrary:
     def __init__(self, game: Path, textures: TextureResolver):
         self.game = game
         self.library = objects.ObjectLibrary(game / "objects.rlb")
-        self.materials = materials.MaterialLibrary(game / "Material.lib")
+        self.materials = textures.materials
         self.textures = textures
         self._archives: dict[str, NResArchive] = {}
         self.models: list[dict] = []
@@ -434,14 +490,17 @@ class ModelLibrary:
                             points.append(objmesh.apply(pose, positions[v]))
                             uvs.append(m.uv[v] if v < len(m.uv) else (0.0, 0.0))
                         idx_values.append(remap[v])
-                texture = None
-                if 0 <= b.material < len(wear):
-                    texture = self.materials.texture_for(wear[b.material])
-                groups.append({
+                name = wear[b.material] if 0 <= b.material < len(wear) else None
+                frames = self.textures.frames(name) if name else []
+                group = {
                     "start": start,
                     "count": len(idx_values) - start,
-                    "material": self.textures.resolve(texture) if texture else -1,
-                })
+                    "material": frames[0] if frames else -1,
+                    "tint": self.textures.tint(name) if name else 0xFFFFFF,
+                }
+                if len(frames) > 1:
+                    group["frames"] = frames
+                groups.append(group)
         groups = [g for g in groups if g["count"]]
         if not points:
             self._by_parts[key] = None

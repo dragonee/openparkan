@@ -152,3 +152,24 @@ So the ground is `mix(layer2, layer1, blend)`, which a renderer can get either
 from a two-texture shader or, as the viewer does, by drawing the layer-2 faces
 again over the layer-1 pass with alpha `1 - blend`. Without it every texture
 boundary on the terrain is a hard polygon edge; the game's are gradients.
+
+## Terrain layers name materials, not textures
+
+`Land1.wea` and `Land2.wea` hold **material** names, and they go through
+`Material.lib` exactly as a model's wear does. That is what makes the eight
+names an earlier draft listed as unresolvable resolve: `WATER` is not in
+`Textures.lib`, but the material of that name points at `WATER0.0`, `B_S0`
+points at `B_FOUND.0` and `ENV_NLAVA` at `LAV00.0`. All **270 layer names
+across the 33 maps** reach a texture this way, against 193 by direct lookup.
+
+Two things follow that a flat-colour stand-in was hiding:
+
+- **Water is animated.** `WATER_M` is one layer of ten frames, `WATER0.0`
+  through `WATER9.0`, all palettised 64x64 ripple patterns.
+- **Water is blue because its material is.** The texture is neutral grey; the
+  colour is the material's `#4d6aff` diffuse, which multiplies it.
+
+Water is drawn see-through here. The material declares no transparency, but
+every map that has water also carries a `WATER_BOT` material on the ground
+beneath it, and a lake bed nobody can see would not be worth authoring. The
+exact figure is a renderer choice.

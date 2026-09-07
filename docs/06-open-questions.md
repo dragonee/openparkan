@@ -87,7 +87,10 @@ mapped.
 - `Land.msh` stream 2: 737 float3 on SC_3. The first 8 are the map's bounding
   box corners; the remaining 729 (= 27³) look like a spatial subdivision.
 - Face record fields 10, 11, 12, and field 0 (near-constant per mesh).
-- `MAT0`'s per-layer stride, and the colour bytes around each texture name.
+- `MAT0`'s byte 4: twelve values that sort materials into groups tracking
+  their names (all six `TREE*` share 6, the effects share 0xFF), so it reads
+  as a shader or blend-mode id. Also the record's variable-length tail, and
+  the second colour triple after the diffuse.
 - The high byte of a draw batch's material word: 0xFF on 14166 batches and
   0x00 on 972.
 - A batch's vertex range (fields 7 and 8). The ranges are contiguous but only
@@ -107,12 +110,13 @@ mapped.
 - 65 of 393 textures have a mip tail shorter than the declared level count
   implies. Harmless for level 0, but a packer would need to reproduce it.
 
-## Special materials
+## Dangling texture references
 
-Eight terrain texture names do not resolve in `Textures.lib`: `WATER`,
-`WATER_M`, `WATER_BOT`, `B_S0`, `B_MTP_01`, `ENV_NLAVA`, `ENV_NLAVA_M`,
-`ENV_LAVA_BOT`. Likely animated materials defined in `Material.lib` (206 KB,
-NRes) — not yet inspected.
+Eight of the 905 materials name a texture that was never shipped: the five
+`FIRE_SMOKE*` animations ask for `0FAIR.0` upward when only `FAIR.0` exists,
+and `B_MTP_04`, `B_MTP_04G` and `B_MTP_05` ask for `qqds.7` and `ds.7` when
+every member of `Textures.lib` ends in `.0`. Cut content, or frames the
+engine generated at run time.
 
 ## Not looked at at all
 

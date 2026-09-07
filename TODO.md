@@ -53,41 +53,34 @@ confirms it, and if it is wrong then something is not being drawn.
 
 Correct as far as it goes, but not what the game showed.
 
-### 2.1 Animated and special materials
+### 2.1 Multi-layer materials
 
-Eight terrain names never resolve in `Textures.lib` — `WATER`, `WATER_M`,
-`WATER_BOT`, `B_S0`, `B_MTP_01`, `ENV_NLAVA`, `ENV_NLAVA_M`, `ENV_LAVA_BOT` —
-and are drawn as flat colours. Separately, 85 of 15138 object draw batches
-reach a texture name like `0FAIR.0`, `1FAIR.0`, `2FAIR.0`: numbered animation
-frames held outside `Textures.lib`. `Material.lib` is the place to look; its
-`MAT0` records carry a layer count and `World3D.dll` complains about "Too many
-animations for material".
+45 materials have more than one layer — 43 with two and two with eight — and
+the renderer draws only the first. The second is usually a mask (`L20.0`
+alongside `L20M.0`), and `Iron_3D.ini` has `EMBM=1`, so the game used
+environment-mapped bump mapping and some of these are bump layers. What each
+layer *is* is not readable from the record: byte 4 sorts materials into twelve
+groups that track their names (all six `TREE*` materials share value 6, the
+effects share 0xFF) and reads like a shader or blend-mode id, but nothing
+confirms it.
 
-### 2.2 Multi-layer materials
-
-`MAT0` declares a layer count — up to 29, and 377 of 905 materials have more
-than one — and the reader takes only the first texture. The
-per-layer stride varies with layer type and is not mapped, so the colour bytes
-around each name are unread. Detail and bump layers are being dropped —
-`Iron_3D.ini` has `EMBM=1`, so the game used environment-mapped bump mapping.
-
-### 2.3 Lightmaps
+### 2.2 Lightmaps
 
 `lightmap.lib` is 2.7 MB of NRes and has never been opened. Static lighting is
 presumably in there; everything is currently lit by one directional light.
 
-### 2.4 Skyboxes
+### 2.3 Skyboxes
 
 `sky.ske` (binary) and `sky.wea` per mission name environment textures —
 `ENV_NEBULA_0`, `ENV_STARS`, `ENV_SUN_3`, `ENV_MOON`, `ENV_FLARE_00`. The
 `.wea` half is already readable with `mesh.read_wea`; `sky.ske` is not parsed.
 
-### 2.5 Effects
+### 2.4 Effects
 
 `*.exp` explosion definitions (`system.rlb`) and `effects.rlb` are untouched.
 Not needed for a static scene; needed for anything animated.
 
-### 2.6 The `NL` archives block the UI
+### 2.5 The `NL` archives block the UI
 
 `gamefont.rlb` and `sprites.lib` are not NRes — `'NL'`, version 1, an `0xABBA`
 marker, then high-entropy payload. Two files, holding fonts and 2D sprites.

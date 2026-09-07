@@ -262,6 +262,34 @@ if (typeof THREE === "undefined") {
   // A texture with alpha is drawn as a cutout: the alpha test discards the
   // hole rather than blending it, so nothing needs depth sorting.  Foliage is
   // crossed planes and only reads as a plant this way.
+  // Register a material for frame swapping if its payload names frames.
+  function animate(material, entry) {
+    if (!entry || !entry.frames || entry.frames.length < 2) return material;
+    animated.push({ material, frames: entry.frames.map(groundTexture) });
+    return material;
+  }
+
+  // A material's diffuse colour multiplies its texture.  It is where a
+  // Parkan lake gets its blue: WATER's texture is a neutral grey ripple.
+  const WHITE = 0xffffff;
+  // Water is drawn see-through.  The material itself says opaque, but every
+  // map with water also carries a WATER_BOT material on the ground under it,
+  // and a lake bed nobody can see would not be worth authoring.  The exact
+  // figure is a renderer choice.
+  const WATER_OPACITY = 0.72;
+  function multiply(a, b) {
+    if (a === undefined) a = WHITE;
+    if (b === undefined) b = WHITE;
+    if (a === WHITE) return b;
+    if (b === WHITE) return a;
+    let out = 0;
+    for (let shift = 16; shift >= 0; shift -= 8) {
+      const v = (((a >> shift) & 255) * ((b >> shift) & 255)) / 255;
+      out |= Math.round(v) << shift;
+    }
+    return out;
+  }
+
   function applyCutout(opts, src) {
     if (!src.cutout) return opts;
     opts.alphaTest = src.graded ? 0.35 : 0.5;
@@ -271,6 +299,11 @@ if (typeof THREE === "undefined") {
 
   const loader = new THREE.TextureLoader();
   const textureCache = {};
+  // Materials whose Material.lib record holds several frames -- water is ten,
+  // lava eight.  Swapped in the render loop; three.js reads material.map into
+  // the uniforms every frame, so no shader recompile is involved.
+  const ANIM_FPS = 8;
+  const animated = [];
   let current = null;
   let showLayer2 = true;
   let shown = null;
@@ -288,11 +321,11 @@ if (typeof THREE === "undefined") {
   // Layer 2 is drawn over layer 1 with alpha = 1 - blend, where blend is the
   // terrain's own per-vertex weight for layer 1.  Lambert has no per-vertex
   // alpha in this build, so it is patched in.
-  function blendedMaterial(pool) {
-    const src = DATA.pool[pool];
+  function blendedMaterial(entry) {
+    const src = DATA.pool[entry.pool];
     const opts = { side: THREE.DoubleSide, transparent: true, depthWrite: false };
-    if (src.kind === "texture") opts.map = groundTexture(pool);
-    else opts.color = src.colour;
+    if (src.kind === "texture") opts.map = groundTexture(entry.pool);
+    opts.color = multiply(entry.tint, src.kind === "texture" ? WHITE : src.colour);
     const material = new THREE.MeshLambertMaterial(opts);
     material.onBeforeCompile = (shader) => {
       shader.vertexShader = "attribute float blend;\nvarying float vBlend;\n" +
@@ -307,6 +340,7 @@ if (typeof THREE === "undefined") {
 
   function show(map) {
     shown = map;
+    animated.length = 0;
     if (current) {
       scene.remove(current);
       current.traverse((o) => {
@@ -330,10 +364,13 @@ if (typeof THREE === "undefined") {
       const src = DATA.pool[m.pool];
       const opts = { side: THREE.DoubleSide };
       if (src.kind === "texture") opts.map = groundTexture(m.pool);
-      else opts.color = src.colour;
-      if (m.water || src.opacity < 1) { opts.transparent = true; opts.opacity = src.opacity; }
+      opts.color = multiply(m.tint, src.kind === "texture" ? WHITE : src.colour);
+      if (m.water || src.opacity < 1) {
+        opts.transparent = true;
+        opts.opacity = m.water ? WATER_OPACITY : src.opacity;
+      }
       applyCutout(opts, src);
-      return new THREE.MeshLambertMaterial(opts);
+      return animate(new THREE.MeshLambertMaterial(opts), m);
     });
     current = new THREE.Group();
     current.add(new THREE.Mesh(g, mats));
@@ -346,7 +383,8 @@ if (typeof THREE === "undefined") {
       o.setAttribute("blend", new THREE.BufferAttribute(b64(map.blend, Uint8Array), 1, true));
       o.setIndex(new THREE.BufferAttribute(b64(map.overlayIndex, IndexArray), 1));
       map.overlayGroups.forEach((gr) => o.addGroup(gr.start, gr.count, gr.material));
-      const layer2 = new THREE.Mesh(o, map.overlayMaterials.map((m) => blendedMaterial(m.pool)));
+      const layer2 = new THREE.Mesh(
+        o, map.overlayMaterials.map((m) => animate(blendedMaterial(m), m)));
       layer2.renderOrder = 1;
       current.add(layer2);
     }
@@ -422,16 +460,13 @@ if (typeof THREE === "undefined") {
       const opts = { side: THREE.DoubleSide, color: tint };
       const pooled = gr.material >= 0 ? DATA.pool[gr.material] : null;
       if (pooled && pooled.kind === "texture") {
-        const t = textureCache[gr.material] ||
-          (textureCache[gr.material] = loader.load(pooled.url));
-        t.wrapS = t.wrapT = THREE.RepeatWrapping;
-        t.repeat.set(1 / UV_SCALE, 1 / UV_SCALE);
-        opts.map = t;
+        opts.map = groundTexture(gr.material);
+        opts.color = multiply(tint, gr.tint);
       } else if (pooled) {
-        opts.color = pooled.colour;
+        opts.color = multiply(tint, multiply(gr.tint, pooled.colour));
       }
       if (pooled) applyCutout(opts, pooled);
-      return new THREE.MeshLambertMaterial(opts);
+      return animate(new THREE.MeshLambertMaterial(opts), gr);
     });
     modelMatCache[key] = mats;
     return mats;
@@ -597,6 +632,10 @@ if (typeof THREE === "undefined") {
   (function loop() {
     requestAnimationFrame(loop);
     if (spinning) { cam.yaw += 0.0015; place(); }
+    if (animated.length) {
+      const tick = Math.floor(performance.now() * ANIM_FPS / 1000);
+      animated.forEach((a) => { a.material.map = a.frames[tick % a.frames.length]; });
+    }
     renderer.render(scene, camera);
   })();
 }

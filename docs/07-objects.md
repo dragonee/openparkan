@@ -373,23 +373,34 @@ of the vertex array. Plausibility is not verification.
 
 ### The material chain
 
+A batch names an index into the model's wear; the wear names a material; the
+material names a texture:
+
 ```
-mesh stream 13 batch
-  -> wear entry            the .wea palette, up to 46 material names
-     -> Material.lib MAT0  905 materials, each naming its texture layers
-        -> Textures.lib    a Texm, named exactly as the material spells it
+mesh stream 13 batch -> .wea entry -> Material.lib MAT0 -> Textures.lib Texm
 ```
 
-**15053 of 15138 draw batches reach a real texture** this way. The 85 that do
-not are animation frames (`0FAIR.0`, `1FAIR.0`, …) held outside `Textures.lib`.
+15053 of 15138 batches reach a real texture that way.
 
-`MAT0` is only partly mapped: the record opens with a layer count and carries
-per-layer colour bytes, but the per-layer stride varies with layer type. The
-texture names are extracted by pattern instead, which is safe because they are
-distinctive — 3096 of 3139 resolve.
+A `MAT0` record opens with two `uint16` — the number of texture entries and
+the number of **layers** — and the count divides by the layers on all 905
+records. The quotient is a frame count: `WATER_M` is one layer of ten frames
+(`WATER0.0` .. `WATER9.0`) and `WATER_BOT` is two layers of one (`L20.0` and
+its mask `L20M.0`). 860 materials have a single layer, 43 have two, two have
+eight; **animation is much the commoner reason for a material to hold several
+textures**, which an earlier draft of this document had backwards.
 
-A wear is a **skin**, not just a texture list: `World3D.dll` calls them wears
-and has `CMD_CAMOUFLAGE_WEAR` alongside "Illegal wear length".
+Entries start 12 bytes in on a 40-byte stride, with the texture name at +20
+and a three-byte RGB **diffuse colour** at +6, behind a constant 100 that
+holds on 904 of the 905 records. The colour is not decoration: `WATER`'s
+texture is a neutral grey ripple and all of the blue is in its `#4d6aff`, and
+lava is a dull pattern tinted `#b41e00`. 760 materials carry a colour other
+than white.
+
+Eight materials name a texture that was never shipped — the `FIRE_SMOKE`
+animations ask for `0FAIR.0` upward when only `FAIR.0` exists, and `B_MTP_04`
+asks for `qqds.7` when every member of `Textures.lib` ends in `.0`. Taking
+the first name that *is* present rescues them.
 
 ### Buildings carry an interior path graph
 

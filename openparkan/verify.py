@@ -203,6 +203,65 @@ def check_layers(check, game: Path) -> None:
           f"below it on {varying} of the {touched} that one does")
 
 
+def check_materials(check, game: Path) -> None:
+    """Material.lib: layers against animation frames, and the diffuse colour."""
+    lib = materials.MaterialLibrary(game / "Material.lib")
+    textures = NResArchive.open(game / "Textures.lib")
+    known = {e.name.split(".")[0].upper() for e in textures}
+
+    divides = 0
+    counted = 0
+    frames = layered = 0
+    for m in lib.materials.values():
+        if m.layer_count and m.entry_count % m.layer_count == 0:
+            divides += 1
+        if len(m.textures) == m.entry_count:
+            counted += 1
+        if m.frame_count > 1:
+            frames += 1
+        if m.layer_count > 1:
+            layered += 1
+    raw = lib.archive
+    marker = 0
+    for entry in raw:
+        if entry.tag != materials.MATERIAL_TAG:
+            continue
+        blob = raw.read(entry)
+        at = materials.ENTRY_BASE + materials.COLOUR_MARKER_OFFSET
+        marker += len(blob) > at and blob[at] == materials.COLOUR_MARKER
+    total = len(lib)
+    check("Material.lib: entry count divides by layer count", divides == total,
+          f"{divides}/{total} records; {frames} animate, {layered} have more than one layer")
+    check("Material.lib: the pattern finds exactly the declared textures",
+          counted >= total * 0.98,
+          f"{counted}/{total} records")
+    check("Material.lib: the diffuse colour sits behind a constant 100",
+          marker >= total - 1,
+          f"{marker}/{total} records carry the marker; "
+          f"{sum(1 for m in lib.materials.values() if m.colour != (255, 255, 255))} "
+          f"are tinted, WATER #4d6aff and ENV_NLAVA #b41e00 among them")
+
+    # Terrain layer names are material names, which is what makes the eight
+    # that are missing from Textures.lib resolve.
+    direct = through = named = 0
+    for folder in gamedir.maps(game):
+        mesh = landmesh.load(folder / "Land.msh")
+        for table in (mesh.layer1_names, mesh.layer2_names):
+            for name in table:
+                if not name:
+                    continue
+                named += 1
+                key = name.upper().split(".")[0]
+                if key in known:
+                    direct += 1
+                base = lib.texture_for(key)
+                if base and base.upper().split(".")[0] in known:
+                    through += 1
+    check("terrain layer names resolve through Material.lib", through == named,
+          f"{through}/{named} reach a texture through a material, against "
+          f"{direct}/{named} looked up in Textures.lib directly")
+
+
 def check_water(check, game: Path) -> None:
     """Water is identified three independent ways; they must agree everywhere."""
     maps = gamedir.maps(game)
@@ -1060,7 +1119,7 @@ def run(game: Path) -> int:
     print(f"verifying against {game}\n")
     checks = (
         check_nres, check_texm, check_terrain, check_uv,
-        check_water, check_layers, check_minimap_agreement, check_arealmap,
+        check_water, check_layers, check_materials, check_minimap_agreement, check_arealmap,
         check_missions, check_objects, check_poses,
     )
     for fn in checks:
