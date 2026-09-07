@@ -162,6 +162,7 @@
     </div>
     <div class="controls">
       <button id="wire" aria-pressed="false">Wireframe</button>
+      <button id="blend" aria-pressed="true">Blend layer 2</button>
       <button id="spin" aria-pressed="true">Orbit</button>
     </div>
   </div>
@@ -261,39 +262,83 @@ if (typeof THREE === "undefined") {
   const loader = new THREE.TextureLoader();
   const textureCache = {};
   let current = null;
+  let showLayer2 = true;
+  let shown = null;
+
+  // Terrain texture, shared by both layers.  UVs arrive as raw 8.8 fixed
+  // point, so the scale is undone on the texture rather than the attribute.
+  function groundTexture(pool) {
+    const t = textureCache[pool] || (textureCache[pool] = loader.load(DATA.pool[pool].url));
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    t.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    t.repeat.set(1 / UV_SCALE, 1 / UV_SCALE);
+    return t;
+  }
+
+  // Layer 2 is drawn over layer 1 with alpha = 1 - blend, where blend is the
+  // terrain's own per-vertex weight for layer 1.  Lambert has no per-vertex
+  // alpha in this build, so it is patched in.
+  function blendedMaterial(pool) {
+    const src = DATA.pool[pool];
+    const opts = { side: THREE.DoubleSide, transparent: true, depthWrite: false };
+    if (src.kind === "texture") opts.map = groundTexture(pool);
+    else opts.color = src.colour;
+    const material = new THREE.MeshLambertMaterial(opts);
+    material.onBeforeCompile = (shader) => {
+      shader.vertexShader = "attribute float blend;\nvarying float vBlend;\n" +
+        shader.vertexShader.replace("#include <begin_vertex>",
+          "#include <begin_vertex>\n  vBlend = blend;");
+      shader.fragmentShader = "varying float vBlend;\n" +
+        shader.fragmentShader.replace("#include <dithering_fragment>",
+          "#include <dithering_fragment>\n  gl_FragColor.a *= 1.0 - vBlend;");
+    };
+    return material;
+  }
 
   function show(map) {
+    shown = map;
     if (current) {
       scene.remove(current);
-      current.geometry.dispose();
-      current.material.forEach((m) => m.dispose());  // pooled textures outlive the mesh
+      current.traverse((o) => {
+        if (!o.isMesh) return;
+        o.geometry.dispose();
+        o.material.forEach((m) => m.dispose());  // pooled textures outlive the mesh
+      });
     }
+    const position = new THREE.BufferAttribute(b64(map.position, Int16Array), 3, true);
+    const normal = new THREE.BufferAttribute(b64(map.normal, Int16Array), 3, true);
+    const IndexArray = map.wideIndex ? Uint32Array : Uint16Array;
+
     const g = new THREE.BufferGeometry();
-    g.setAttribute("position",
-      new THREE.BufferAttribute(b64(map.position, Int16Array), 3, true));
-    g.setAttribute("normal", new THREE.BufferAttribute(b64(map.normal, Int16Array), 3, true));
+    g.setAttribute("position", position);
+    g.setAttribute("normal", normal);
     g.setAttribute("uv", new THREE.BufferAttribute(b64(map.uv, Uint16Array), 2));
-    g.setIndex(new THREE.BufferAttribute(
-      b64(map.index, map.wideIndex ? Uint32Array : Uint16Array), 1));
+    g.setIndex(new THREE.BufferAttribute(b64(map.index, IndexArray), 1));
     map.groups.forEach((gr) => g.addGroup(gr.start, gr.count, gr.material));
 
     const mats = map.materials.map((m) => {
       const src = DATA.pool[m.pool];
       const opts = { side: THREE.DoubleSide };
-      if (src.kind === "texture") {
-        const t = textureCache[m.pool] || (textureCache[m.pool] = loader.load(src.url));
-        t.wrapS = t.wrapT = THREE.RepeatWrapping;
-        t.anisotropy = renderer.capabilities.getMaxAnisotropy();
-        // UVs arrive as raw 8.8 fixed point; undo the scale here.
-        t.repeat.set(1 / UV_SCALE, 1 / UV_SCALE);
-        opts.map = t;
-      } else {
-        opts.color = src.colour;
-      }
+      if (src.kind === "texture") opts.map = groundTexture(m.pool);
+      else opts.color = src.colour;
       if (m.water || src.opacity < 1) { opts.transparent = true; opts.opacity = src.opacity; }
       return new THREE.MeshLambertMaterial(opts);
     });
-    current = new THREE.Mesh(g, mats);
+    current = new THREE.Group();
+    current.add(new THREE.Mesh(g, mats));
+
+    if (map.overlayGroups.length && showLayer2) {
+      const o = new THREE.BufferGeometry();
+      o.setAttribute("position", position);
+      o.setAttribute("normal", normal);
+      o.setAttribute("uv", new THREE.BufferAttribute(b64(map.uv2, Uint16Array), 2));
+      o.setAttribute("blend", new THREE.BufferAttribute(b64(map.blend, Uint8Array), 1, true));
+      o.setIndex(new THREE.BufferAttribute(b64(map.overlayIndex, IndexArray), 1));
+      map.overlayGroups.forEach((gr) => o.addGroup(gr.start, gr.count, gr.material));
+      const layer2 = new THREE.Mesh(o, map.overlayMaterials.map((m) => blendedMaterial(m.pool)));
+      layer2.renderOrder = 1;
+      current.add(layer2);
+    }
     // Dequantise on the object, never on the geometry.
     current.scale.set(map.scale[0], map.scale[1], map.scale[2]);
     current.position.set(map.offset[0], map.offset[1], map.offset[2]);
@@ -507,7 +552,20 @@ if (typeof THREE === "undefined") {
   document.getElementById("wire").addEventListener("click", (e) => {
     const on = e.currentTarget.getAttribute("aria-pressed") !== "true";
     e.currentTarget.setAttribute("aria-pressed", String(on));
-    current.material.forEach((m) => { m.wireframe = on; });
+    current.traverse((o) => {
+      if (o.isMesh) o.material.forEach((m) => { m.wireframe = on; });
+    });
+  });
+  document.getElementById("blend").addEventListener("click", (e) => {
+    showLayer2 = e.currentTarget.getAttribute("aria-pressed") !== "true";
+    e.currentTarget.setAttribute("aria-pressed", String(showLayer2));
+    if (shown) {
+      const keep = { target: cam.target.clone(), dist: cam.dist, yaw: cam.yaw, pitch: cam.pitch };
+      show(shown);
+      cam.target.copy(keep.target); cam.dist = keep.dist;
+      cam.yaw = keep.yaw; cam.pitch = keep.pitch;
+      place();
+    }
   });
   document.getElementById("spin").addEventListener("click", (e) => {
     spinning = e.currentTarget.getAttribute("aria-pressed") !== "true";

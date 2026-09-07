@@ -152,6 +152,40 @@ def check_uv(check, game: Path) -> None:
 LIQUID_NAMES = ("WATER", "WATER_M", "ENV_NLAVA", "ENV_NLAVA_M")
 
 
+def check_layers(check, game: Path) -> None:
+    """The terrain's second texture layer and the weight that mixes it in."""
+    maps = gamedir.maps(game)
+    clean = dirty = 0
+    varying = touched = 0
+    with_layer2 = faces_1 = faces_2 = 0
+    for folder in maps:
+        m = landmesh.load(folder / "Land.msh")
+        second = {
+            v
+            for i in range(m.face_count)
+            if m.face_tex2[i] != landmesh.NO_TEXTURE
+            for v in m.faces[i]
+        }
+        covered = sum(1 for i in range(m.face_count) if m.face_tex2[i] != landmesh.NO_TEXTURE)
+        with_layer2 += covered > 0
+        faces_1 += m.face_count
+        faces_2 += covered
+        for v in range(m.vertex_count):
+            if v in second:
+                touched += 1
+                varying += m.blend[v] < 0.999
+            elif abs(m.blend[v] - 1.0) < 1e-6:
+                clean += 1
+            else:
+                dirty += 1
+    check("Land.msh: a second texture layer covers part of every map",
+          with_layer2 == len(maps),
+          f"{faces_2}/{faces_1} faces across {with_layer2}/{len(maps)} maps carry one")
+    check("Land.msh: stream 14 is the weight of layer 1", dirty == 0,
+          f"exactly 1.0 on all {clean} vertices no layer-2 face touches; "
+          f"below it on {varying} of the {touched} that one does")
+
+
 def check_water(check, game: Path) -> None:
     """Water is identified three independent ways; they must agree everywhere."""
     maps = gamedir.maps(game)
@@ -1009,7 +1043,7 @@ def run(game: Path) -> int:
     print(f"verifying against {game}\n")
     checks = (
         check_nres, check_texm, check_terrain, check_uv,
-        check_water, check_minimap_agreement, check_arealmap,
+        check_water, check_layers, check_minimap_agreement, check_arealmap,
         check_missions, check_objects, check_poses,
     )
     for fn in checks:

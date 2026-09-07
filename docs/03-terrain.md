@@ -22,7 +22,7 @@ indexed by vertex or by face.
 | 4 | 4 | vertex | normal, `int8` x/y/z ÷ 127, plus one padding byte |
 | 5 | 4 | vertex | layer-1 UV, `uint16` pair, 8.8 fixed point |
 | 18 | 4 | vertex | layer-2 UV, same encoding |
-| 14 | 4 | vertex | layer blend weight, `float32` in 0..1 |
+| 14 | 4 | vertex | weight of layer 1, `float32` in 0..1 |
 | 21 | 28 | face | the face record, below |
 | 11 | 4 | face | `(face index, flags)` |
 | 2 | 12 | — | bounding geometry: 8 bbox corners, then more |
@@ -136,3 +136,19 @@ uv run openparkan viewer SC_3 Tut_1 --out viewer.html
 Maps are square, 798 to 2490 world units on a side, with 3000–10600 vertices
 and 3100–9500 triangles. It is a coarse adaptive mesh — roughly one triangle
 per 35 × 35 units on SC_3 — not a regular heightfield grid.
+
+## The second texture layer
+
+A face names two textures — the low and high bytes of face word 2 — and a
+vertex carries UVs for both, in streams 5 and 18. Between 8% and 30% of a
+map's faces carry a second layer; 32450 of 275882 across all 33 maps.
+
+Stream 14 is **the weight of layer 1**, and the proof is a clean split: it is
+exactly 1.0 on all 258046 vertices that no layer-2 face touches, and below 1.0
+on 19663 of the 41404 that one does. Nothing else in the mesh separates so
+cleanly on that boundary.
+
+So the ground is `mix(layer2, layer1, blend)`, which a renderer can get either
+from a two-texture shader or, as the viewer does, by drawing the layer-2 faces
+again over the layer-1 pass with alpha `1 - blend`. Without it every texture
+boundary on the terrain is a hard polygon edge; the game's are gradients.

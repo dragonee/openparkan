@@ -53,14 +53,7 @@ confirms it, and if it is wrong then something is not being drawn.
 
 Correct as far as it goes, but not what the game showed.
 
-### 2.1 Terrain draws one texture layer of two
-
-Terrain carries a full second layer that is parsed and then ignored: stream 18
-(layer-2 UV), stream 14 (per-vertex blend weight, `float32` 0..1), and the
-`Land2.wea` name table. The viewer uses layer 1 only, so ground transitions are
-hard instead of blended. Everything needed is already in `LandMesh`.
-
-### 2.2 Animated and special materials
+### 2.1 Animated and special materials
 
 Eight terrain names never resolve in `Textures.lib` — `WATER`, `WATER_M`,
 `WATER_BOT`, `B_S0`, `B_MTP_01`, `ENV_NLAVA`, `ENV_NLAVA_M`, `ENV_LAVA_BOT` —
@@ -70,7 +63,7 @@ frames held outside `Textures.lib`. `Material.lib` is the place to look; its
 `MAT0` records carry a layer count and `World3D.dll` complains about "Too many
 animations for material".
 
-### 2.3 Multi-layer materials
+### 2.2 Multi-layer materials
 
 `MAT0` declares a layer count — up to 29, and 377 of 905 materials have more
 than one — and the reader takes only the first texture. The
@@ -78,30 +71,30 @@ per-layer stride varies with layer type and is not mapped, so the colour bytes
 around each name are unread. Detail and bump layers are being dropped —
 `Iron_3D.ini` has `EMBM=1`, so the game used environment-mapped bump mapping.
 
-### 2.4 Palettised transparency
+### 2.3 Palettised transparency
 
 Format-`0` textures decode fully opaque. Whether a palette index acts as a
 colour key is unknown, and the foliage textures strongly suggest one does —
 vegetation is alpha-billboard geometry, so without this trees render as solid
 slabs rather than leaves.
 
-### 2.5 Lightmaps
+### 2.4 Lightmaps
 
 `lightmap.lib` is 2.7 MB of NRes and has never been opened. Static lighting is
 presumably in there; everything is currently lit by one directional light.
 
-### 2.6 Skyboxes
+### 2.5 Skyboxes
 
 `sky.ske` (binary) and `sky.wea` per mission name environment textures —
 `ENV_NEBULA_0`, `ENV_STARS`, `ENV_SUN_3`, `ENV_MOON`, `ENV_FLARE_00`. The
 `.wea` half is already readable with `mesh.read_wea`; `sky.ske` is not parsed.
 
-### 2.7 Effects
+### 2.6 Effects
 
 `*.exp` explosion definitions (`system.rlb`) and `effects.rlb` are untouched.
 Not needed for a static scene; needed for anything animated.
 
-### 2.8 The `NL` archives block the UI
+### 2.7 The `NL` archives block the UI
 
 `gamefont.rlb` and `sprites.lib` are not NRes — `'NL'`, version 1, an `0xABBA`
 marker, then high-entropy payload. Two files, holding fonts and 2D sprites.
@@ -118,7 +111,7 @@ No reverse engineering needed; just work.
   them, but front-face culling is still the correct default for closed shells.
 - **LOD switching.** All three levels are parsed; the viewer always draws
   LOD 0. Switch by screen size.
-- **Alpha ordering.** Needed before 2.4 looks right.
+- **Alpha ordering.** Needed before 2.3 looks right.
 - **Terrain patches.** Face field 13 (0..62 on SC_3) reads as a patch or sector
   id and would give cheap frustum culling, if confirmed.
 - **Batch material high byte.** 0xFF on 14166 batches, 0x00 on 972. Not a

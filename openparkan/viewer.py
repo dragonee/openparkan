@@ -131,6 +131,8 @@ def build_map_payload(mesh: landmesh.LandMesh, resolver: TextureResolver, name: 
     pos = bytearray()
     nrm = bytearray()
     uv = bytearray()
+    uv2 = bytearray()
+    blend = bytearray()
     for i in range(nv):
         x, y, z = mesh.positions[i]
         for value, mid, span in zip((x - cx, z, -(y - cy)), tmid, tspan, strict=True):
@@ -143,12 +145,18 @@ def build_map_payload(mesh: landmesh.LandMesh, resolver: TextureResolver, name: 
             max(-32767, min(32767, round(c * 32767))),
             max(-32767, min(32767, round(-b * 32767))),
         )
-        u, v = mesh.uv1[i]
-        uv += struct.pack(
-            "<2H",
-            min(0xFFFF, round(u * landmesh.UV_FIXED_POINT_SCALE)),
-            min(0xFFFF, round(v * landmesh.UV_FIXED_POINT_SCALE)),
-        )
+        for target, source in ((uv, mesh.uv1), (uv2, mesh.uv2)):
+            u, v = source[i]
+            target += struct.pack(
+                "<2H",
+                min(0xFFFF, round(u * landmesh.UV_FIXED_POINT_SCALE)),
+                min(0xFFFF, round(v * landmesh.UV_FIXED_POINT_SCALE)),
+            )
+        # Stream 14 is the weight of layer 1: it is exactly 1.0 on every
+        # vertex that no layer-2 face touches, and drops below it on 46% of
+        # the ones that do.  The viewer draws layer 2 over layer 1 with
+        # alpha 1 - blend, which is the same mix.
+        blend += struct.pack("B", max(0, min(255, round(mesh.blend[i] * 255))))
 
     # Sort faces by material so each run becomes one draw group.
     buckets: dict[tuple[int, int], list[int]] = {}
@@ -168,6 +176,27 @@ def build_map_payload(mesh: landmesh.LandMesh, resolver: TextureResolver, name: 
         tex_name = mesh.texture_name(1, tex_index) or "?"
         groups.append({"start": start, "count": len(face_ids) * 3, "material": len(materials)})
         materials.append({"pool": resolver.resolve(tex_name), "water": is_water})
+
+    # The second texture layer, drawn as an overlay over the faces that carry
+    # one -- 8 to 30% of a map, and what turns a hard texture boundary into a
+    # blended one.
+    overlay_buckets: dict[int, list[int]] = {}
+    for fi in range(mesh.face_count):
+        index = mesh.face_tex2[fi]
+        if index != landmesh.NO_TEXTURE and mesh.texture_name(2, index):
+            overlay_buckets.setdefault(index, []).append(fi)
+    overlay_index = bytearray()
+    overlay_groups = []
+    overlay_materials = []
+    for tex_index, face_ids in sorted(overlay_buckets.items()):
+        start = len(overlay_index) // (4 if wide else 2)
+        for fi in face_ids:
+            a, b, c = mesh.faces[fi]
+            overlay_index += struct.pack("<3I" if wide else "<3H", a, b, c)
+        overlay_groups.append(
+            {"start": start, "count": len(face_ids) * 3, "material": len(overlay_materials)}
+        )
+        overlay_materials.append({"pool": resolver.resolve(mesh.texture_name(2, tex_index))})
 
     wet = mesh.water_faces()
     level = mesh.water_level()
@@ -190,9 +219,15 @@ def build_map_payload(mesh: landmesh.LandMesh, resolver: TextureResolver, name: 
         "position": _b64(bytes(pos)),
         "normal": _b64(bytes(nrm)),
         "uv": _b64(bytes(uv)),
+        "uv2": _b64(bytes(uv2)),
+        "blend": _b64(bytes(blend)),
         "index": _b64(bytes(idx)),
         "groups": groups,
         "materials": materials,
+        "overlayIndex": _b64(bytes(overlay_index)),
+        "overlayGroups": overlay_groups,
+        "overlayMaterials": overlay_materials,
+        "overlayFaces": sum(len(v) for v in overlay_buckets.values()),
         "layer1": mesh.layer1_names,
         "layer2": mesh.layer2_names,
     }
