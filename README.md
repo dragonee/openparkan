@@ -15,17 +15,19 @@ practice — format facts yes, code no — is set out in
 | | |
 |---|---|
 | **NRes containers** | done — all 116 archives, 6697 members, round-trip-accurate model |
-| **Texm textures** | done — all 393 textures decode, all 5 pixel formats |
-| **`Land.msh` terrain** | done — all 33 maps, geometry, normals, UVs, materials, water |
+| **Texm textures** | done — all 393 textures decode, all 5 pixel formats, alpha included |
+| **`Land.msh` terrain** | done — all 33 maps, geometry, normals, both texture layers and their blend, water |
 | **3D terrain viewer** | done — self-contained HTML, no server |
 | **`data.tma` missions** | done — all 29 parse to EOF, 864 objects placed |
 | **`objects.rlb`, unit assemblies** | done — 590 records, 458 assemblies, 5708 components |
 | **Object meshes** | done — geometry, materials, textures, node poses, LOD and interior/exterior selection |
 | **Assembled units and buildings** | done — the `.dat` component tree and where each part bolts on |
-| **Materials** | done — `Material.lib`, 905 materials; 99.4% of batches reach a texture |
+| **Materials** | done — `Material.lib`, 905 materials, animation frames and diffuse colour; 99.4% of batches reach a texture |
+| **Baked lighting** | done — `lightmap.lib`, 21 buildings, per-batch |
 | **Building interiors** | done — path graph for 29 buildings |
 | **Control points** | done — 284 members, 3599 named attachment points |
 | **`Land.map` navigation mesh** | done — all 33 maps, 34662 areals, adjacency and grid |
+| **Sky** | `sky.wea` names its textures; `sky.ske`, the atmosphere file, is not decoded |
 | **Behaviour scripts, gameplay** | not started |
 
 ## Quickstart
@@ -130,9 +132,11 @@ tried.
 
 ## What is left
 
-Renderer work is triaged in [TODO.md](TODO.md), worst-looking first: the
-second terrain texture layer, animated and multi-layer materials, palettised
-transparency, lightmaps and skyboxes.
+Renderer work is triaged in [TODO.md](TODO.md), worst-looking first. The
+largest gap is the sky: `sky.ske` is an *atmosphere* file — typed objects and
+timed events — and is not decoded. After that it is effects, the two `NL`
+archives that hold the fonts and 2D sprites, and a handful of fields carried
+through the readers without being understood.
 
 ## Documentation
 
