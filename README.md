@@ -21,7 +21,7 @@ reproduced.
 | **`objects.rlb`, unit assemblies** | done — 590 records, 458 assemblies, 5708 components |
 | **Object meshes** | geometry done — 435 meshes in 10 archives; per-face texture unresolved |
 | **Control points** | done — 284 members, 3599 named attachment points |
-| **`Land.map` navigation** | not started |
+| **`Land.map` navigation** | partial — area polygons read; the bulk is unsolved |
 | **Behaviour scripts, gameplay** | not started |
 
 ## Quickstart

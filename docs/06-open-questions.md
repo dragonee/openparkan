@@ -19,11 +19,44 @@ few fields are carried through without being understood:
 
 ## Land.map / ArealMap — blocks pathfinding
 
-One NRes member, type 12, named `ArealMap`, 188538 bytes on SC_3, starting with
-float32 data. Not a plain square grid: 188538 divides to 434.2², 307.0² or
-217.1² at 1, 2 and 4 bytes per cell, none of them whole. Handled by
-`ArealMap.dll` (226 KB). Presumably the navigation and region map used for
-pathfinding and territory.
+One NRes member, type 12, named `ArealMap`; 132 KB on ILKON, 188 KB on SC_3,
+750 KB on map 23. Handled by `ArealMap.dll` (226 KB). This is presumably the
+navigation and territory map. Partly characterised, not solved.
+
+**It is not a raster.** Bytes per world unit² varies more than twenty-fold
+across the 33 maps (0.014 on Net_4_04 to 0.34 on map 41), so size tracks
+content, not area. Two maps that share terrain — Net_2_01 and Net_4_02, with
+identical vertex and face counts — have byte-identical sizes, which is a useful
+consistency check for anyone continuing.
+
+**The file opens with area polygons.** Each record runs:
+
+```
+float32  centre x, centre y
+float32  0, 0
+float32  polygon area          (38910 on a ~125-unit hexagon; 2.598 * 125^2 = 40600)
+float32  0, 0, 1.0
+uint32   1, 0, 1, 0
+uint32   vertex count          (7 and 10 in the records read so far)
+uint32   0
+         count x { float32 x; float32 y; float32 0 }
+uint32   a trailing block of varying length
+```
+
+The vertices trace a closed polygon on a lattice of about 125 units — on ILKON
+the first record is a hexagon through (374.3, 374.3), (499.0, 374.3),
+(623.8, 374.3), (748.5, 374.3), (623.8, 499.0), (499.0, 499.0), (374.3, 499.0).
+
+**But only about ten of these records exist**, filling the first ~6.5 KB of a
+132 KB file. The trailing block's length is not encoded anywhere found so far,
+so the records cannot be walked reliably; they were located by scanning for the
+header signature.
+
+**The remaining 95% is something else**: uint16 values, mostly small, with long
+verbatim runs — `(1, 29)` repeated for stretches at one offset, `(10, 1)` at
+another. That shape suggests run-length encoding, but summing the pairs either
+way gives totals in the hundreds of millions, far too large for any grid the
+map could have, so plain RLE is ruled out in both orderings.
 
 ## The `NL` archives
 
@@ -42,12 +75,25 @@ files, holding fonts and 2D sprites, so this blocks UI work but nothing else.
 ## Object mesh: which texture a face uses
 
 Geometry reads fine (see [07-objects.md](07-objects.md)), but nothing found so
-far picks between the 2–4 textures a mesh's `.wea` lists. Face record field 0
-is zero on every face of every mesh; no other field has a range matching the
-texture count; and the sub-object count matches the texture count on some
-meshes but not others. Until this is solved, object geometry can only be drawn
-untextured — which makes rocks look right and vegetation, being
-alpha-billboards, look like bare skeletons.
+far picks between the textures a mesh's `.wea` lists — and meshes can list a
+lot of them: `static.rlb` has models with a single sub-object and twelve or
+fourteen textures.
+
+Ruled out, so that the next person need not repeat it:
+
+- **The face record (stream 7, 16 bytes per face).** Field 0 is zero on every
+  face of every mesh in `static.rlb`. Fields 1–3 are the three edge
+  neighbours: their high bytes take values 0..4 with 255 for "none", which is
+  exactly what a face index into a 1200-face mesh looks like. No field has a
+  value range matching the texture count.
+- **Per sub-object.** Sub-object count equals texture count on only 9 of 68
+  meshes; 14 meshes have one sub-object and two textures, 5 have one
+  sub-object and twelve.
+- **Stream 13 and stream 15**, scanned byte-column-wise for any field with as
+  few distinct values as the texture count.
+
+Untextured, rocks look right and vegetation looks like bare skeletons, because
+the foliage is alpha-textured billboards — see [07-objects.md](07-objects.md).
 
 ## Object mesh: local origins and the .ctl controller
 
