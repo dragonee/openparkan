@@ -71,6 +71,13 @@ VARIANT_COUNT = 3
 NO_SLOT = 0xFFFF
 #: Bit 0 of a sub-object's flags marks interior geometry.
 SUBOBJECT_INTERIOR = 0x0001
+#: Bit 5 marks a collision hull -- geometry the engine tests against but never
+#: draws.  It sits on 28 nodes across the shipped archives and on nothing else,
+#: and every one of them is named ``CP_m1o1`` (19) or ``BTCP_m1o1`` (9).  They
+#: are always leaves, and together they carry 18402 triangles that a renderer
+#: must skip: excluding them is what takes the models that fit inside their own
+#: authored bounding box from 422 to 434 of 434.
+SUBOBJECT_COLLISION = 0x0020
 NO_PARENT = 0xFFFF
 
 BATCH_SIZE = 20
@@ -236,7 +243,8 @@ class Subobject:
     lets you walk into them -- so a model's parts are split between the two.
     Names say which (``o01_0_m1o1`` outside, ``i03_0_m1o1`` inside) and so does
     ``flags`` bit 0, which agrees with the naming on all 1564 sub-objects
-    across six archives.
+    across six archives.  Bit 5 marks a collision hull, which is not drawn at
+    all; see ``is_collision``.
     """
 
     name: str
@@ -257,6 +265,17 @@ class Subobject:
     @property
     def is_interior(self) -> bool:
         return bool(self.flags & SUBOBJECT_INTERIOR)
+
+    @property
+    def is_collision(self) -> bool:
+        """Whether this node is a collision hull rather than something to draw.
+
+        A `CP_m1o1` hull is a crude box around the part it belongs to, and it
+        is bigger than the part -- a turret's is nearly twice its height -- so
+        drawing it puts a translucent slab over the model and pushes it
+        outside the box the file itself states.
+        """
+        return bool(self.flags & SUBOBJECT_COLLISION)
 
     def slots_for_lod(self, lod: int = 0, variant: int = 0) -> list[int]:
         """The slot to draw this node at one level of detail.
@@ -412,9 +431,13 @@ class ObjectMesh:
         lives in its ``i*`` nodes, so excluding them makes buildings far too
         short.  The flag marks internal *components*, not a separate indoor
         model.
+
+        Collision hulls are never returned; see ``Subobject.is_collision``.
         """
         out: list[tuple[int, int, int]] = []
         for node in self.nodes:
+            if node.is_collision:
+                continue
             if interior is not None and node.is_interior != interior:
                 continue
             for index in node.slots_for_lod(lod):

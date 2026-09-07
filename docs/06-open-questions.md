@@ -43,12 +43,17 @@ BA AB         0xABBA marker
 after which the payload is high-entropy — compressed or obfuscated. Only 2
 files, holding fonts and 2D sprites, so this blocks UI work but nothing else.
 
-## Object mesh: the .ctl controller
+## The .ctl controller and the .ndp record
 
-Every `STAT` record has a `.ctl` slot that has not been read. The vertical
-datum and the component attachment it was expected to explain both turned out
-to live in the mesh itself — see [07-objects.md](07-objects.md) — so what a
-controller carries is still open.
+Both are [identified but not parsed](07-objects.md). A `.ctl` is a *movement*
+controller — `Control.dll`'s `LoadControlSystem`, driven through an `IControl`
+of speeds, accelerations and angle limits — with a fixed parameter header and
+a body of 156-byte records. A `.ndp` is a damage record: a hit-point float and
+an `(archive, member)` pair naming an `.exp` explosion.
+
+Neither affects a static picture, which is why neither is read. The vertical
+datum, the component attachment and the rest pose that each was in turn
+expected to explain all turned out to live in the mesh.
 
 ## CTPT field roles outside static.rlb
 
@@ -122,8 +127,9 @@ engine generated at run time.
 
 ## Not looked at at all
 
-`*.ctl` controllers, `*.exp` explosions, `.scr` node semantics, the `.trf`
-streams, save games in `SAVE/`, and the network protocol.
+`*.exp` explosions, `.scr` node semantics, the `.trf` streams, save games in
+`SAVE/`, and the network protocol. `*.ctl` and `*.ndp` are no longer here:
+both are identified above.
 
 `sky.ske` is [solved](10-sky.md) -- a day cycle of colour keyframes, all 29
 files to the byte. Three things in it are not: the keyframe count of a second

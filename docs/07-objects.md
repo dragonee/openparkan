@@ -45,6 +45,44 @@ slot 5  -           -
 All 405 populated slots across the 81 `STAT` records resolve to real archive
 members.
 
+### `.ctl` is a movement controller, not an animation one
+
+The `.ctl` slot was the last one never opened, and the obvious place to look
+for the pose a parked unit stands in. It is the wrong place.
+
+`Control.dll` exports `LoadControlSystem`, which allocates a 0x668- or
+0x670-byte object; the interface the rest of the engine drives it through is
+`IControl`, and `Terrain.dll` names its methods in full when a call fails:
+`SetTangAccel`, `SetNormSpeed`, `SetTangSpeed`, `SetWorldSpeed`,
+`SetWorldAccel`, `SetNormAngle`, `SetStrafeAngle`, `MakeMovementCorrection`,
+`SetControlCalculationMode`. Speeds, accelerations and angles — steering.
+
+The file is that object written out. Its constructor fills four `float32[3]`
+slots with ∓FLT_MAX as "no limit", and those exact bit patterns
+(`ff ff 7f ff` / `ff ff 7f 7f`) appear in the same order in every controller.
+The rest of the fixed header is the same vocabulary: 6.2831 (2π) and 1.5708
+(π/2) as angle limits, 0.1, 0.5, 1.0, 2.5, 250, 500, 1000, 10000.
+
+Two measurements say it is not per-node data. A controller's size correlates
+**+0.97** with its own leading count field and only **+0.40** with the number
+of nodes in the mesh it belongs to, over the 542 records that have both. And
+the largest controllers belong to the animals — `a_a_l3.ctl` is 222496 bytes
+for a 13-node model — which is behaviour, not geometry. Its body is a run of
+156-byte records carrying consecutive intervals (22.875, 23.75, 24.625 …) and
+∓ bound triples.
+
+The remaining question the `.ctl` was carrying is
+[still open](06-open-questions.md), but it is a question about how a unit
+*moves*, not about how it stands.
+
+### `.ndp` names an explosion
+
+Not read either, but its shape is plain from a hexdump: a count, a `float32`
+that reads as hit points (490.0 on `ba_a_02`), and then the same 32-byte
+`(archive, member)` pair `objects.rlb` uses — pointing at `weapon.rlb` /
+`ba_a_02.exp`. Damage properties and the explosion to play, which is
+[section 2.3](../TODO.md) territory.
+
 ## UNITS/**/*.dat — unit and building assemblies
 
 458 files, all the same shape:
@@ -177,6 +215,30 @@ interiors hang off `o01`, and `o03`, `o04`, `Base_TL` chain off `o02`.
 This explains `objects.rlb`'s `INTO` and `EXTO` record tags — interior and
 exterior objects — and why only buildings have a path graph.
 
+### Flag bit 5 marks a collision hull, which must not be drawn
+
+28 nodes across the shipped archives carry flag bit `0x0020`, and **every one
+of them is named `CP_m1o1` (19) or `BTCP_m1o1` (9)**. Nothing else carries the
+bit. Six further `CP_m1o1` nodes do not, and all six are empty — the bit goes
+on the hulls that have geometry.
+
+A hull is a crude oversized box around the part it belongs to, and drawing it
+is conspicuous. On `o_bnt_la_01` the model's real geometry tops out at
+z = 1.60, exactly the top of the authored box; its `CP_m1o1` reaches 3.55 —
+more than twice the building's height, wrapped around it as a translucent
+slab. On the twelve worst meshes the model's *bottom* matches the box's bottom
+to 0.00 and only the top overshoots, which is the signature of one extra node
+rather than a wrong pose.
+
+The box settles it. Level 0 with poses applied fits inside the extent the file
+itself states on **434 of 434** models once these nodes are skipped, against
+**422** while they are drawn — and on the animated meshes alone, 157 of 157
+against 145. Twelve models is also exactly the set that no choice of animation
+frame could fix, which is how the hulls were found: the residual was never a
+pose problem.
+
+`ObjectMesh.select()` and the viewer both skip them. 18402 triangles.
+
 ### Nodes, slots and levels of detail
 
 A node's 38-byte record is:
@@ -268,12 +330,23 @@ corner pylons sit at (±20.74, ±20.74, 22.58) once composed, and on top of each
 other without it.
 
 Stream 19 is the **frame map**: `link_count` entries per animated node, each an
-index into stream 8, starting at the node's `anim_start`. A node's
+index into stream 8, starting at the node's `anim_start`. The runs are laid out
+node-major — consecutive animated nodes' `anim_start` differ by exactly
+`link_count` — so frame *f* of a node is `anim_start + f`. A node's
 `fallback_key` is the **last** frame of its own run — true on all 817 animated
 nodes — so using it as a rest pose leaves a turret swung round to wherever its
-animation ended. Frame 0 of the run is the rest pose, and it keeps a model
-inside its own authored box on 106 of 157 animated meshes against 81 for the
-fallback.
+animation ended.
+
+Frame 0 of the run is the rest pose, and once the
+[collision hulls](#flag-bit-5-marks-a-collision-hull-which-must-not-be-drawn)
+are skipped it puts **157 of 157** animated meshes inside their own authored
+box. So does the fallback key, and so does every other frame: the box does not
+discriminate between frames, because an animation stays inside it. What the
+box does discriminate is whether the hulls are drawn — 145 of 157 with them —
+which is how the twelve stragglers turned out not to be a pose question. The
+earlier "106 of 157 against 81 for the fallback" was the same measurement taken
+over all fifteen slot indices, before the slot index was understood; it was
+comparing two piles of superimposed levels of detail.
 
 ### The ground datum: a model's own z = 0
 

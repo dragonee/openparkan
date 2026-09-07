@@ -1067,6 +1067,115 @@ def check_poses(check, game: Path) -> None:
           posed_ok > raw_ok * 1.25,
           f"{posed_ok}/{total} with poses applied against {raw_ok}/{total} without")
 
+    # Sub-object flag bit 5 marks a collision hull.  The name says the same
+    # thing, and the two agree exactly.
+    marked = named = drawable = agree = hull_triangles = 0
+    for _name, m in meshes:
+        for node in m.nodes:
+            hull = node.name.split("_")[0] in ("CP", "BTCP")
+            triangles = sum(
+                m.slots[i].triangle_count
+                for i in node.slots_for_lod(0)
+                if i < len(m.slots)
+            )
+            marked += node.is_collision
+            named += hull
+            if hull and triangles:
+                drawable += 1
+                agree += node.is_collision
+                hull_triangles += triangles
+    check("MESH: flag bit 0x20 marks exactly the CP_* collision hulls",
+          marked == agree == drawable > 0 and marked < named,
+          f"{marked} nodes carry the bit and every one is named CP_* or BTCP_*; "
+          f"{agree}/{drawable} of the hulls that have geometry carry it, and the "
+          f"{named - drawable} that do not are empty. {hull_triangles} triangles "
+          f"a renderer must not draw")
+
+    # And dropping them is what makes every model fit the box it states.
+    def within(m: objmesh.ObjectMesh, skip_hulls: bool) -> bool:
+        lo = [math.inf] * 3
+        hi = [-math.inf] * 3
+        for i, node in enumerate(m.nodes):
+            if skip_hulls and node.is_collision:
+                continue
+            pose = m.world_pose(i)
+            for index in node.slots_for_lod(0):
+                if index >= len(m.slots):
+                    continue
+                slot = m.slots[index]
+                stop = slot.first_triangle + slot.triangle_count
+                for tri in m.triangles[slot.first_triangle : stop]:
+                    for v in tri:
+                        if v >= len(m.positions):
+                            continue
+                        p = objmesh.apply(pose, m.positions[v])
+                        for axis in range(3):
+                            lo[axis] = min(lo[axis], p[axis])
+                            hi[axis] = max(hi[axis], p[axis])
+        if lo[0] == math.inf:
+            return False
+        want_lo, want_hi = m.volume.minimum, m.volume.maximum
+        tol = 0.005 * (math.dist(want_lo, want_hi) or 1.0)
+        return all(
+            lo[a] >= want_lo[a] - tol and hi[a] <= want_hi[a] + tol for a in range(3)
+        )
+
+    boxed = [m for _name, m in meshes if m.volume and m.nodes and m.slots]
+    with_hulls = sum(within(m, False) for m in boxed)
+    without = sum(within(m, True) for m in boxed)
+    check("MESH: level 0 fits inside the authored box once hulls are dropped",
+          without == len(boxed) > with_hulls,
+          f"{without}/{len(boxed)} models fit inside their own box against "
+          f"{with_hulls}/{len(boxed)} while the collision hulls are drawn")
+
+    # The .ctl slot was the obvious place to look for the pose a parked unit
+    # stands in.  It is not there: a controller's size tracks its own leading
+    # count and not the model's node count.
+    library = objects.ObjectLibrary(game / "objects.rlb")
+    opened: dict[str, dict[str, bytes]] = {}
+
+    def controller(ref) -> bytes | None:
+        if ref.library not in opened:
+            path = game / ref.library
+            opened[ref.library] = (
+                {e.name.lower(): NResArchive.open(path).read(e)
+                 for e in NResArchive.open(path)}
+                if path.exists() else {}
+            )
+        return opened[ref.library].get(ref.member.lower())
+
+    sizes: list[int] = []
+    counts: list[int] = []
+    node_counts: list[int] = []
+    by_name = {name.lower(): m for name, m in meshes}
+    for record in library.records.values():
+        slot = record.slot_with_suffix("ctl")
+        if slot is None or record.mesh is None:
+            continue
+        blob = controller(slot)
+        model = by_name.get(record.mesh.member.lower())
+        if blob is None or model is None or len(blob) < 4:
+            continue
+        sizes.append(len(blob))
+        counts.append(struct.unpack_from("<i", blob, 0)[0])
+        node_counts.append(len(model.nodes))
+
+    def correlation(a: list[int], b: list[int]) -> float:
+        mean_a = sum(a) / len(a)
+        mean_b = sum(b) / len(b)
+        cov = sum((x - mean_a) * (y - mean_b) for x, y in zip(a, b, strict=True))
+        spread = math.sqrt(
+            sum((x - mean_a) ** 2 for x in a) * sum((y - mean_b) ** 2 for y in b)
+        )
+        return cov / spread if spread else 0.0
+
+    own = correlation(sizes, counts)
+    nodes = correlation(sizes, node_counts)
+    check("objects.rlb: a .ctl is not per-node data", own > 0.9 > nodes,
+          f"over {len(sizes)} records a controller's size correlates {own:+.2f} "
+          f"with its own leading count and only {nodes:+.2f} with the number of "
+          f"nodes in the mesh it belongs to")
+
     # The 15 slot indices are three variants of a five-slot block, and the
     # first four of each block are a level-of-detail ladder.
     def ladder(width: int) -> tuple[int, int]:

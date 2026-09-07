@@ -80,6 +80,25 @@ written down is a question nobody reopens.
 - [x] **Terrain patches** — a negative result. Face field 13 is *not* spatial:
       only 25 of 348 groups are even 20% tighter than a random subset of the
       same size, so there is nothing there to cull by.
+- [x] **The rest pose.** Not a pose problem at all. The renderer was drawing
+      the models' *collision hulls*: sub-object flag bit `0x20` sits on 28
+      nodes and every one is named `CP_m1o1` or `BTCP_m1o1`, they are always
+      leaves, and they carry **18402 triangles** of oversized box. Skip them
+      and level 0 fits inside the extent the file itself states on **434 of
+      434** models against 422 while they are drawn — 157 of 157 animated
+      meshes against 145. The "51 animated meshes fall outside their box"
+      figure this replaces was measured over all fifteen slot indices, which
+      superimposes every level of detail; at the level the renderer draws, the
+      residual was twelve, and all twelve were hulls.
+      → [docs/07-objects.md](docs/07-objects.md)
+- [x] **What a `.ctl` is** — a *movement* controller, not an animation one.
+      `Control.dll`'s `LoadControlSystem` behind an `IControl` of
+      `SetTangAccel` / `SetNormSpeed` / `SetStrafeAngle`; the file is that
+      object written out, ∓FLT_MAX "no limit" triples and all. Its size
+      correlates **+0.97** with its own leading count and **+0.40** with the
+      node count of the mesh it belongs to, over 542 records, so it holds no
+      per-node data. `.ndp`, the other unread `STAT` slot, is a hit-point
+      float and an `(archive, member)` pair naming an `.exp` explosion.
 - [x] **Coplanar geometry.** Two causes, both fixed. The terrain's two ground
       layers now share a single pass — bucketing faces by the pair costs 5 to
       8 groups per map against 3 to 5 — and the file's own duplicated faces
@@ -91,22 +110,10 @@ written down is a question nobody reopens.
 
 ## 1. Wrong on screen today
 
-These produce visibly incorrect output. Fix in this order. All three came out
-of doing the pose work above.
+These produce visibly incorrect output. Fix in this order. Both came out of
+doing the pose work above.
 
-### 1.1 A unit renders in its rest pose, not standing
-
-A walking chassis's legs are animated, and the rest pose is frame 0 of each
-node's run in the frame map. That is the right *static* choice — it keeps a
-model inside its own authored box on 106 of 157 animated meshes against 81 for
-the fallback key — but it is not necessarily the pose the game shows a parked
-unit in, and 51 animated meshes still fall outside their box in it.
-
-**Where to look:** the `.ctl` controller, which is the one slot of a `STAT`
-record still unread, and stream 19's relationship to `Iron_3D.ini`'s animation
-settings.
-
-### 1.2 A socket's rotation is thrown away
+### 1.1 A socket's rotation is thrown away
 
 A part is mounted at its socket's position with its own orientation. That is
 right in the sense that both alternatives are visibly worse (see
@@ -114,7 +121,7 @@ docs/07-objects.md), but it means a turret can never be drawn turned, and the
 108 attachments whose socket and root rotations disagree by 180 degrees are
 telling us something that is not yet understood.
 
-### 1.3 Damage variants are guessed at
+### 1.2 Damage variants are guessed at
 
 Two of every three five-slot blocks are unused by the renderer. 135 nodes
 populate them, and `fr_b_brige`'s `o02` carries identical triangle counts in

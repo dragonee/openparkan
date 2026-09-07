@@ -545,10 +545,14 @@ class ModelLibrary:
             wear = m.texture_names
 
             # A model holds up to three levels of detail at once; draw LOD 0
-            # only.  Every node is drawn: a building's tall structure lives in
-            # its i* nodes, so filtering them out leaves it far too short.
+            # only.  Every node is drawn except its collision hulls: a
+            # building's tall structure lives in its i* nodes, so filtering
+            # those out leaves it far too short, but a CP_* hull is a crude
+            # oversized box the engine only tests against.
             wanted: list[int] = []
             for node in m.nodes:
+                if node.is_collision:
+                    continue
                 for index in node.slots_for_lod(0):
                     if index < len(m.slots):
                         slot = m.slots[index]
