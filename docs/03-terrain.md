@@ -32,8 +32,8 @@ indexed by vertex or by face.
 
 | Field | Meaning |
 |---|---|
-| 0 | flags (4 distinct values across a map) |
-| 1 | surface kind — **2 means water** |
+| 0 | flags; the value **1544** (`0x0608`) marks water |
+| 1 | surface bitfield; bit **`0x02`** marks water |
 | 2 | lo byte = layer-1 texture index, hi byte = layer-2 (`0xFF` = none) |
 | 3 | always `0xFFFF` |
 | 4, 5, 6 | vertex indices |
@@ -87,11 +87,24 @@ leaves a worst-case residual of **0.004 texel units** over the whole map.
 dividing by 127 yields a unit vector at every vertex of every map — worst
 deviation from unit length **0.0133**. Nothing but a normal does that.
 
-**Field 1 = 2 means water.** The 88 faces so marked on SC_3 share a single Z
-value: spread `0.000000`, a perfectly flat plane at z = 54.90. Their layer-1
-texture index resolves through `Land1.wea` to the name `WATER`, and the faces
-marked `WATER_BOT` are the lowest terrain on the map. The name table, the
-geometry and the flag all agree.
+**Water is marked by bit `0x02` of field 1 — and field 1 is a bitfield, not an
+enum.** This is worth stating carefully because the obvious reading is wrong:
+the observed values are 0, 2, 16 and 18, so testing `field1 == 2` silently
+misses every water face that also carries bit 16, and holds on only 5 of the
+33 maps. Testing `field1 & 2` matches the water faces **exactly on all 33
+maps** — 3630 faces across the 11 maps that have any.
+
+Three independent signals agree on every map, which is what makes this solid:
+
+- `field1 & 0x02` is set,
+- field 0 equals `1544` — an entirely separate marker, same face set,
+- the layer-1 texture index resolves through `Land1.wea` to `WATER`,
+  `WATER_M`, `ENV_NLAVA` or `ENV_NLAVA_M`.
+
+And the geometry corroborates it: on all 11 maps with water, every water
+vertex shares a single Z — a perfectly flat plane (z = 54.90 on SC_3, spread
+`0.000000`). The faces textured `WATER_BOT` are the lowest terrain on the map,
+sitting under it.
 
 ## The strongest check: the game's own art
 

@@ -1,64 +1,169 @@
 <title>__TITLE__</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
 <style>
   :root {
-    --bg: #f4f2ee; --panel: #fffefb; --ink: #1c1b18; --muted: #6b675f;
-    --line: #ddd8cf; --accent: #8a5a2b; --shadow: 0 1px 3px rgba(0,0,0,.08);
+    --ground: #e8e9ea;
+    --panel: #fbfbfc;
+    --ink: #16181b;
+    --muted: #656c74;
+    --line: #cdd1d5;
+    --line-soft: #e2e5e8;
+    --signal: #b06a10;
+    --signal-soft: #f0e2cd;
+    --fog: 0xd8dade;
   }
-  :root:not([data-theme="light"]) { }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
-      --bg: #171614; --panel: #211f1c; --ink: #ece8e1; --muted: #9a948a;
-      --line: #35322d; --accent: #d29b62; --shadow: 0 1px 3px rgba(0,0,0,.4);
+      --ground: #111417;
+      --panel: #191d21;
+      --ink: #e6e9ec;
+      --muted: #8d959e;
+      --line: #2c3238;
+      --line-soft: #23282d;
+      --signal: #e0a24a;
+      --signal-soft: #33291a;
+      --fog: 0x12161a;
     }
   }
   :root[data-theme="dark"] {
-    --bg: #171614; --panel: #211f1c; --ink: #ece8e1; --muted: #9a948a;
-    --line: #35322d; --accent: #d29b62; --shadow: 0 1px 3px rgba(0,0,0,.4);
+    --ground: #111417;
+    --panel: #191d21;
+    --ink: #e6e9ec;
+    --muted: #8d959e;
+    --line: #2c3238;
+    --line-soft: #23282d;
+    --signal: #e0a24a;
+    --signal-soft: #33291a;
+    --fog: 0x12161a;
   }
-  body { background: var(--bg); color: var(--ink); font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font-family: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+    font-size: 13px;
+    line-height: 1.5;
+  }
   #stage { position: fixed; inset: 0; }
   canvas { display: block; }
-  .panel {
-    position: fixed; top: 14px; left: 14px; z-index: 5; background: var(--panel);
-    border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow);
-    padding: 12px 14px; max-width: 290px;
+
+  .instrument {
+    position: fixed; top: 16px; left: 16px; z-index: 5; width: 262px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    box-shadow: 0 1px 2px rgba(0,0,0,.06), 0 8px 24px rgba(0,0,0,.07);
+    display: flex; flex-direction: column;
   }
-  h1 { margin: 0 0 2px; font-size: 15px; font-weight: 620; letter-spacing: -0.01em; }
-  .sub { color: var(--muted); font-size: 12px; margin-bottom: 10px; }
-  label { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 10px 0 4px; }
-  select, button {
-    font: inherit; color: var(--ink); background: var(--bg);
-    border: 1px solid var(--line); border-radius: 7px; padding: 5px 8px; width: 100%;
+  .head { padding: 13px 15px 12px; border-bottom: 1px solid var(--line); }
+  .eyebrow {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 10px; letter-spacing: .09em; text-transform: uppercase;
+    color: var(--muted); margin-bottom: 5px;
   }
-  button { cursor: pointer; margin-top: 6px; }
-  button:hover { border-color: var(--accent); color: var(--accent); }
-  button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
-  dl { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; margin: 10px 0 0; font-size: 12px; }
-  dt { color: var(--muted); }
-  dd { margin: 0; font-variant-numeric: tabular-nums; }
-  .hint { margin-top: 11px; padding-top: 9px; border-top: 1px solid var(--line); color: var(--muted); font-size: 11px; }
-  .swatches { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
-  .sw { font-size: 10px; padding: 2px 6px; border-radius: 4px; border: 1px solid var(--line); color: var(--muted); }
-  #err { position: fixed; inset: 0; display: grid; place-items: center; padding: 30px; text-align: center; color: var(--muted); }
+  h1 { margin: 0; font-size: 16px; font-weight: 600; letter-spacing: -.012em; }
+  .path {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 10.5px; color: var(--muted); margin-top: 5px;
+    word-break: break-all;
+  }
+
+  .body { padding: 13px 15px; display: flex; flex-direction: column; gap: 13px; }
+  label {
+    display: block; font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 10px; letter-spacing: .09em; text-transform: uppercase;
+    color: var(--muted); margin-bottom: 5px;
+  }
+  select {
+    font: inherit; font-size: 13px; width: 100%;
+    color: var(--ink); background: var(--ground);
+    border: 1px solid var(--line); border-radius: 2px; padding: 5px 7px;
+  }
+  select:focus-visible, button:focus-visible {
+    outline: 2px solid var(--signal); outline-offset: 1px;
+  }
+
+  .readout { display: grid; grid-template-columns: auto 1fr; gap: 3px 14px; }
+  .readout dt {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 10.5px; letter-spacing: .04em; color: var(--muted);
+    text-transform: uppercase; align-self: baseline;
+  }
+  .readout dd {
+    margin: 0; text-align: right;
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 12px; font-variant-numeric: tabular-nums;
+  }
+  .readout dd .unit { color: var(--muted); font-size: 10.5px; }
+
+  .layers { display: flex; flex-wrap: wrap; gap: 4px; }
+  .layer {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 10.5px; padding: 2px 6px;
+    border: 1px solid var(--line); border-radius: 2px; color: var(--muted);
+  }
+  .layer.wet { border-color: var(--signal); color: var(--signal); background: var(--signal-soft); }
+
+  .controls { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  button {
+    font: inherit; font-size: 12px; cursor: pointer;
+    color: var(--muted); background: transparent;
+    border: 1px solid var(--line); border-radius: 2px; padding: 5px 6px;
+  }
+  button:hover { color: var(--ink); border-color: var(--muted); }
+  button[aria-pressed="true"] {
+    color: var(--signal); border-color: var(--signal); background: var(--signal-soft);
+  }
+
+  .foot {
+    padding: 9px 15px 11px; border-top: 1px solid var(--line-soft);
+    color: var(--muted); font-size: 11px;
+  }
+  .foot kbd {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 10px; border: 1px solid var(--line); border-radius: 2px;
+    padding: 0 3px; color: var(--ink);
+  }
+  #err {
+    position: fixed; inset: 0; display: grid; place-items: center;
+    padding: 32px; text-align: center; color: var(--muted); max-width: 34em;
+    margin: 0 auto;
+  }
 </style>
 
 <div id="stage"></div>
-<div class="panel">
-  <h1>Parkan terrain</h1>
-  <div class="sub">Geometry decoded from <code>Land.msh</code></div>
-  <label for="mapsel">Map</label>
-  <select id="mapsel"></select>
-  <button id="wire" aria-pressed="false">Wireframe</button>
-  <button id="spin" aria-pressed="true">Auto-rotate</button>
-  <dl>
-    <dt>Vertices</dt><dd id="nv">-</dd>
-    <dt>Triangles</dt><dd id="nf">-</dd>
-    <dt>Extent</dt><dd id="ext">-</dd>
-    <dt>Height</dt><dd id="hgt">-</dd>
-  </dl>
-  <div class="swatches" id="sw"></div>
-  <div class="hint">Drag to orbit &middot; scroll to zoom &middot; shift-drag to pan</div>
+
+<div class="instrument">
+  <div class="head">
+    <div class="eyebrow">Parkan &middot; Iron Strategy</div>
+    <h1>Terrain survey</h1>
+    <div class="path" id="path">DATA/MAPS/</div>
+  </div>
+  <div class="body">
+    <div>
+      <label for="mapsel">Map</label>
+      <select id="mapsel"></select>
+    </div>
+    <dl class="readout">
+      <dt>Extent</dt><dd id="ext">&ndash;</dd>
+      <dt>Elevation</dt><dd id="hgt">&ndash;</dd>
+      <dt>Vertices</dt><dd id="nv">&ndash;</dd>
+      <dt>Triangles</dt><dd id="nf">&ndash;</dd>
+      <dt>Water</dt><dd id="wat">&ndash;</dd>
+    </dl>
+    <div>
+      <label>Ground layer &middot; Land1.wea</label>
+      <div class="layers" id="layers"></div>
+    </div>
+    <div class="controls">
+      <button id="wire" aria-pressed="false">Wireframe</button>
+      <button id="spin" aria-pressed="true">Orbit</button>
+    </div>
+  </div>
+  <div class="foot">
+    <kbd>drag</kbd> rotate &middot; <kbd>scroll</kbd> zoom &middot; <kbd>shift</kbd>+drag pan
+  </div>
 </div>
+
 <div id="err" hidden></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -77,35 +182,33 @@ function b64(s, Type) {
 if (typeof THREE === "undefined") {
   const e = document.getElementById("err");
   e.hidden = false;
-  e.textContent = "three.js failed to load, so the terrain cannot be drawn.";
+  e.textContent = "three.js did not load, so the terrain cannot be drawn. " +
+    "Reload the page; if it keeps failing, a network policy is blocking cdnjs.cloudflare.com.";
 } else {
+  const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
   const stage = document.getElementById("stage");
   const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
   stage.appendChild(renderer.domElement);
 
   const scene = new THREE.Scene();
-  const camera = new THREE.PerspectiveCamera(48, 1, 1, 40000);
-  const sun = new THREE.DirectionalLight(0xffffff, 0.95);
+  const camera = new THREE.PerspectiveCamera(46, 1, 1, 60000);
+  const sun = new THREE.DirectionalLight(0xffffff, 0.92);
   sun.position.set(-0.5, 1.0, 0.6);
-  scene.add(sun, new THREE.AmbientLight(0xffffff, 0.42));
+  scene.add(sun, new THREE.AmbientLight(0xffffff, 0.46));
 
-  const themeBg = () => {
-    const dark = document.documentElement.dataset.theme === "dark" ||
-      (document.documentElement.dataset.theme !== "light" &&
-       matchMedia("(prefers-color-scheme: dark)").matches);
-    return dark ? 0x171614 : 0xdfdcd5;
-  };
-  const applyBg = () => {
-    scene.background = new THREE.Color(themeBg());
-    scene.fog = new THREE.Fog(themeBg(), 3000, 9000);
-  };
-  applyBg();
-  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", applyBg);
+  const cssVar = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  function applyTheme() {
+    const fog = parseInt(cssVar("--fog"), 16);
+    scene.background = new THREE.Color(fog);
+    scene.fog = new THREE.Fog(fog, 2600, 11000);
+  }
+  applyTheme();
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", applyTheme);
 
-  // --- orbit camera (hand-rolled: keeps the page to a single CDN script) ---
-  const cam = { yaw: -0.7, pitch: 0.62, dist: 3200, target: new THREE.Vector3(0, 0, 0) };
-  let spinning = true;
+  // Orbit camera, hand-rolled so the page needs exactly one CDN script.
+  const cam = { yaw: -0.7, pitch: 0.6, dist: 3200, target: new THREE.Vector3(0, 0, 0) };
+  let spinning = !reduceMotion;
   function place() {
     const cp = Math.cos(cam.pitch), sp = Math.sin(cam.pitch);
     camera.position.set(
@@ -116,10 +219,14 @@ if (typeof THREE === "undefined") {
     camera.lookAt(cam.target);
   }
   let drag = null;
+  const stopSpin = () => {
+    spinning = false;
+    document.getElementById("spin").setAttribute("aria-pressed", "false");
+  };
   renderer.domElement.addEventListener("pointerdown", (e) => {
     drag = { x: e.clientX, y: e.clientY, pan: e.shiftKey || e.button === 2 };
     renderer.domElement.setPointerCapture(e.pointerId);
-    spinning = false; document.getElementById("spin").setAttribute("aria-pressed", "false");
+    stopSpin();
   });
   renderer.domElement.addEventListener("pointermove", (e) => {
     if (!drag) return;
@@ -141,14 +248,14 @@ if (typeof THREE === "undefined") {
   renderer.domElement.addEventListener("contextmenu", (e) => e.preventDefault());
   renderer.domElement.addEventListener("wheel", (e) => {
     e.preventDefault();
-    cam.dist = Math.max(150, Math.min(14000, cam.dist * (1 + Math.sign(e.deltaY) * 0.12)));
+    cam.dist = Math.max(120, Math.min(20000, cam.dist * (1 + Math.sign(e.deltaY) * 0.12)));
     place();
   }, { passive: false });
 
-  // --- build one map ---
   const loader = new THREE.TextureLoader();
   const textureCache = {};
   let current = null;
+
   function show(map) {
     if (current) {
       scene.remove(current);
@@ -183,15 +290,24 @@ if (typeof THREE === "undefined") {
     scene.add(current);
 
     cam.target.set(0, (map.height[0] + map.height[1]) / 2, 0);
-    cam.dist = Math.max(map.extent[0], map.extent[1]) * 1.35;
+    cam.dist = Math.max(map.extent[0], map.extent[1]) * 1.3;
     place();
 
-    document.getElementById("nv").textContent = map.vertexCount.toLocaleString();
-    document.getElementById("nf").textContent = map.faceCount.toLocaleString();
-    document.getElementById("ext").textContent = map.extent[0] + " x " + map.extent[1];
-    document.getElementById("hgt").textContent = map.height[0] + " to " + map.height[1];
-    document.getElementById("sw").innerHTML = map.layer1
-      .map((n) => '<span class="sw">' + n + "</span>").join("");
+    const num = (v) => v.toLocaleString();
+    document.getElementById("path").textContent = "DATA/MAPS/" + map.name + "/Land.msh";
+    document.getElementById("nv").textContent = num(map.vertexCount);
+    document.getElementById("nf").textContent = num(map.faceCount);
+    document.getElementById("ext").innerHTML =
+      num(Math.round(map.extent[0])) + " &times; " + num(Math.round(map.extent[1])) +
+      ' <span class="unit">u</span>';
+    document.getElementById("hgt").innerHTML =
+      map.height[0] + " to " + map.height[1] + ' <span class="unit">u</span>';
+    document.getElementById("wat").innerHTML = map.water
+      ? 'z=' + map.water.z + ' <span class="unit">u, ' + map.water.faces + ' faces</span>'
+      : '<span class="unit">none</span>';
+    document.getElementById("layers").innerHTML = map.layer1
+      .map((n, i) => '<span class="layer' + (map.wetLayers.includes(i) ? " wet" : "") + '">' +
+        n + "</span>").join("");
   }
 
   const sel = document.getElementById("mapsel");
@@ -203,19 +319,19 @@ if (typeof THREE === "undefined") {
   sel.addEventListener("change", () => show(DATA.maps[+sel.value]));
 
   document.getElementById("wire").addEventListener("click", (e) => {
-    const on = e.target.getAttribute("aria-pressed") !== "true";
-    e.target.setAttribute("aria-pressed", String(on));
+    const on = e.currentTarget.getAttribute("aria-pressed") !== "true";
+    e.currentTarget.setAttribute("aria-pressed", String(on));
     current.material.forEach((m) => { m.wireframe = on; });
   });
   document.getElementById("spin").addEventListener("click", (e) => {
-    spinning = e.target.getAttribute("aria-pressed") !== "true";
-    e.target.setAttribute("aria-pressed", String(spinning));
+    spinning = e.currentTarget.getAttribute("aria-pressed") !== "true";
+    e.currentTarget.setAttribute("aria-pressed", String(spinning));
   });
+  if (reduceMotion) document.getElementById("spin").setAttribute("aria-pressed", "false");
 
   function resize() {
-    const w = innerWidth, h = innerHeight;
-    renderer.setSize(w, h);
-    camera.aspect = w / h;
+    renderer.setSize(innerWidth, innerHeight);
+    camera.aspect = innerWidth / innerHeight;
     camera.updateProjectionMatrix();
   }
   addEventListener("resize", resize);
@@ -224,7 +340,7 @@ if (typeof THREE === "undefined") {
 
   (function loop() {
     requestAnimationFrame(loop);
-    if (spinning) { cam.yaw += 0.0016; place(); }
+    if (spinning) { cam.yaw += 0.0015; place(); }
     renderer.render(scene, camera);
   })();
 }

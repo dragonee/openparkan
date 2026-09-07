@@ -139,27 +139,30 @@ def build_map_payload(mesh: landmesh.LandMesh, resolver: TextureResolver, name: 
     # Sort faces by material so each run becomes one draw group.
     buckets: dict[tuple[int, int], list[int]] = {}
     for fi, _tri in enumerate(mesh.faces):
-        key = (mesh.face_tex1[fi], mesh.face_surface[fi])
+        key = (mesh.face_tex1[fi], mesh.is_water(fi))
         buckets.setdefault(key, []).append(fi)
 
     wide = nv > 0xFFFF
     idx = bytearray()
     groups = []
     materials = []
-    for (tex_index, surface), face_ids in sorted(buckets.items()):
+    for (tex_index, is_water), face_ids in sorted(buckets.items()):
         start = len(idx) // (4 if wide else 2)
         for fi in face_ids:
             a, b, c = mesh.faces[fi]
             idx += struct.pack("<3I" if wide else "<3H", a, b, c)
         tex_name = mesh.texture_name(1, tex_index) or "?"
         groups.append({"start": start, "count": len(face_ids) * 3, "material": len(materials)})
-        materials.append({
-            "pool": resolver.resolve(tex_name),
-            "water": surface == landmesh.SURFACE_WATER,
-        })
+        materials.append({"pool": resolver.resolve(tex_name), "water": is_water})
+
+    wet = mesh.water_faces()
+    level = mesh.water_level()
+    wet_layers = sorted({mesh.face_tex1[fi] for fi in wet})
 
     return {
         "name": name,
+        "water": {"z": round(level, 2), "faces": len(wet)} if level is not None else None,
+        "wetLayers": wet_layers,
         "vertexCount": nv,
         "faceCount": mesh.face_count,
         "extent": [round(maxx - minx, 1), round(maxy - miny, 1)],

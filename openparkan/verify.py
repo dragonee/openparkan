@@ -116,7 +116,7 @@ def check_terrain(check, game: Path) -> None:
           f"worst deviation {normal_err:.4f} across all maps")
 
 
-def check_uv_and_water(check, game: Path) -> None:
+def check_uv(check, game: Path) -> None:
     m = landmesh.load(game / "DATA" / "MAPS" / "SC_3" / "Land.msh")
     worst = 0.0
     (minx, miny, _), (maxx, maxy, _) = m.bounds()
@@ -126,17 +126,40 @@ def check_uv_and_water(check, game: Path) -> None:
     check("Land.msh: layer-1 UV == world XY / 50", worst < 0.35,
           f"SC_3 worst residual {worst:.3f} texel units")
 
-    flat = []
-    for surface, tri in zip(m.face_surface, m.faces, strict=False):
-        if surface == landmesh.SURFACE_WATER:
-            flat.extend(m.positions[i][2] for i in tri)
-    spread = (max(flat) - min(flat)) if flat else -1.0
-    check("Land.msh: surface kind 2 is a flat water plane", flat and spread < 1e-3,
-          f"{len(flat)} water vertices, z spread {spread:.6f}, plane at z={flat[0]:.2f}")
-
     names = {m.texture_name(1, t) for t in m.face_tex1}
     check("Land.msh: texture indices resolve through Land1.wea", "WATER" in names,
           f"SC_3 layer-1 names in use: {sorted(n for n in names if n)}")
+
+
+#: Terrain texture names that denote a liquid surface in the .wea tables.
+LIQUID_NAMES = ("WATER", "WATER_M", "ENV_NLAVA", "ENV_NLAVA_M")
+
+
+def check_water(check, game: Path) -> None:
+    """Water is identified three independent ways; they must agree everywhere."""
+    maps = gamedir.maps(game)
+    by_bit = by_flags = flat = 0
+    with_water = total_faces = 0
+    for d in maps:
+        m = landmesh.load(d / "Land.msh")
+        by_name = {
+            i for i in range(m.face_count)
+            if (m.texture_name(1, m.face_tex1[i]) or "").upper() in LIQUID_NAMES
+        }
+        by_bit += by_name == {i for i in range(m.face_count) if m.is_water(i)}
+        by_flags += by_name == {
+            i for i in range(m.face_count) if m.face_flags[i] == landmesh.FLAGS_WATER
+        }
+        if by_name:
+            with_water += 1
+            total_faces += len(by_name)
+            flat += m.water_level() is not None
+    check("Land.msh: surface bit 0x02 marks exactly the water faces", by_bit == len(maps),
+          f"{by_bit}/{len(maps)} maps, {total_faces} water faces on {with_water} maps")
+    check("Land.msh: face flags 1544 agree with the surface bit", by_flags == len(maps),
+          f"{by_flags}/{len(maps)} maps -- an independent second marker")
+    check("Land.msh: water is a single flat plane per map", flat == with_water,
+          f"{flat}/{with_water} maps with water")
 
 
 def check_minimap_agreement(check, game: Path) -> None:
@@ -197,7 +220,11 @@ def run(game: Path) -> int:
         print(f"{'PASS' if ok else 'FAIL'}  {name:<46} {evidence}")
 
     print(f"verifying against {game}\n")
-    for fn in (check_nres, check_texm, check_terrain, check_uv_and_water, check_minimap_agreement):
+    checks = (
+        check_nres, check_texm, check_terrain, check_uv,
+        check_water, check_minimap_agreement,
+    )
+    for fn in checks:
         fn(check, game)
     failed = [n for n, ok, _ in results if not ok]
     print(f"\n{len(results) - len(failed)}/{len(results)} checks passed")

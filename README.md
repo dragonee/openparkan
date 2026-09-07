@@ -69,8 +69,10 @@ PASS  Land.msh: every vertex is referenced by a face 33/33 maps
 PASS  Land.msh: face adjacency is mutual             33/33 maps
 PASS  Land.msh: int8/127 normals are unit length     worst deviation 0.0133
 PASS  Land.msh: layer-1 UV == world XY / 50          worst residual 0.004 texel units
-PASS  Land.msh: surface kind 2 is a flat water plane z spread 0.000000, plane at z=54.90
 PASS  Land.msh: texture indices resolve through Land1.wea
+PASS  Land.msh: surface bit 0x02 marks exactly the water faces  33/33 maps, 3630 faces
+PASS  Land.msh: face flags 1544 agree with the surface bit      33/33 maps
+PASS  Land.msh: water is a single flat plane per map            11/11 maps with water
 PASS  Terrain matches the game's own minimap art     SC_3 +0.883, Tut_1 +0.927,
                                                      ILKON +0.965, K1F +0.901
 ```

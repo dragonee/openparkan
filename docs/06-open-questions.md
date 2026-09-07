@@ -54,6 +54,8 @@ geometry support and is the obvious place to start.
   or sector id, but not confirmed.
 - Stream 11's flags word: 72 on 4228 faces, 88 on 329, then 328, 968, 984, 344.
   Bit flags of some kind; 88 correlates with water.
+- Face field 0's other values (1536, 1540, 9728 on SC_3) and field 1's bit
+  `0x10`. Only the water bit in each is understood.
 
 ## Textures
 

@@ -18,8 +18,8 @@ selector.  Every stream is a flat array indexed by vertex or by face.
 
 FACE, as 14 little-endian uint16::
 
-     0  flags
-     1  surface kind (2 == water)
+     0  flags; 1544 (0x0608) marks water
+     1  surface bitfield; bit 0x02 marks water
      2  lo byte = layer-1 texture index, hi byte = layer-2 (0xFF = none);
         both index the map's Land1.wea / Land2.wea name tables
      3  always 0xFFFF
@@ -57,7 +57,15 @@ STREAM_FACE = 21
 FACE_STRIDE = 28
 NO_NEIGHBOUR = 0xFFFF
 NO_TEXTURE = 0xFF
-SURFACE_WATER = 2
+
+#: Bit 1 of the face's surface word marks a water surface.  It is a *bitfield*,
+#: not an enum: the observed values are 0, 2, 16 and 18, and testing ``== 2``
+#: silently misses every water face that also carries bit 16.
+SURFACE_WATER_BIT = 0x02
+
+#: Face flags word carried by every water face, on every map that has water.
+#: An independent corroboration of SURFACE_WATER_BIT.
+FLAGS_WATER = 1544
 
 #: UV values are 8.8 fixed point and the layer-1 mapping tiles every 50 world
 #: units, which is how ``u == x / 50`` comes out as ``u16 == x * 5.12``.
@@ -94,6 +102,22 @@ class LandMesh:
         ys = [p[1] for p in self.positions]
         zs = [p[2] for p in self.positions]
         return (min(xs), min(ys), min(zs)), (max(xs), max(ys), max(zs))
+
+    def is_water(self, face: int) -> bool:
+        """Whether a face is part of a water surface."""
+        return bool(self.face_surface[face] & SURFACE_WATER_BIT)
+
+    def water_faces(self) -> list[int]:
+        return [i for i in range(self.face_count) if self.is_water(i)]
+
+    def water_level(self) -> float | None:
+        """The z of the map's water plane, or None if the map has no water.
+
+        Water is a single flat plane on all 11 maps that have any, so a lone
+        value is expected; None also covers a map that breaks that assumption.
+        """
+        levels = {self.positions[v][2] for i in self.water_faces() for v in self.faces[i]}
+        return levels.pop() if len(levels) == 1 else None
 
     def texture_name(self, layer: int, index: int) -> str | None:
         table = self.layer1_names if layer == 1 else self.layer2_names
