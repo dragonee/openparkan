@@ -14,7 +14,8 @@ import zlib
 from importlib import resources
 from pathlib import Path
 
-from . import landmesh, mission, texm
+from . import landmesh, mission, objects, texm
+from . import mesh as objmesh
 from .nres import NResArchive
 from .png import _chunk
 
@@ -187,7 +188,67 @@ CLAN_COLOURS = [0x3E7CB1, 0xC1453C, 0x4E9A51, 0xB07A2A, 0x7B5EA7, 0x2E9A96]
 NEUTRAL_COLOUR = 0x8A8A85
 
 
-def build_mission_payload(m: mission.Mission, map_index: int) -> dict:
+class SceneryLibrary:
+    """Resolves scenery names to geometry, once each, for the viewer.
+
+    Missions place scenery by name into ``objects.rlb``, whose STAT record
+    points at a ``.msh`` in another archive.  Meshes are shared across
+    missions, so they are packed once and referenced by index.
+    """
+
+    def __init__(self, game: Path):
+        self.game = game
+        self.library = objects.ObjectLibrary(game / "objects.rlb")
+        self._archives: dict[str, object] = {}
+        self.models: list[dict] = []
+        self._index: dict[str, int | None] = {}
+
+    def _archive(self, name: str):
+        if name not in self._archives:
+            self._archives[name] = NResArchive.open(self.game / name)
+        return self._archives[name]
+
+    def resolve(self, name: str) -> int | None:
+        """Index into ``self.models``, or None when the name has no geometry."""
+        key = name.lower()
+        if key in self._index:
+            return self._index[key]
+        record = self.library.get(name)
+        ref = record.mesh if record else None
+        slot = None
+        if ref:
+            m = objmesh.parse(self._archive(ref.library).read_name(ref.member), ref.member)
+            pos = bytearray()
+            nrm = bytearray()
+            for (x, y, z), (a, b, c) in zip(m.positions, m.normals, strict=True):
+                # Game space is Z-up; the viewer is Y-up, matching the terrain.
+                pos += struct.pack("<3f", x, z, -y)
+                nrm += struct.pack(
+                    "<3h",
+                    max(-32767, min(32767, round(a * 32767))),
+                    max(-32767, min(32767, round(c * 32767))),
+                    max(-32767, min(32767, round(-b * 32767))),
+                )
+            wide = m.vertex_count > 0xFFFF
+            idx = bytearray()
+            for tri in m.triangles:
+                idx += struct.pack("<3I" if wide else "<3H", *tri)
+            slot = len(self.models)
+            self.models.append({
+                "name": name,
+                "wide": wide,
+                "position": _b64(bytes(pos)),
+                "normal": _b64(bytes(nrm)),
+                "index": _b64(bytes(idx)),
+                "tris": m.triangle_count,
+            })
+        self._index[key] = slot
+        return slot
+
+
+def build_mission_payload(
+    m: mission.Mission, map_index: int, scenery: SceneryLibrary | None = None
+) -> dict:
     """Pack a mission into markers the viewer can drop onto its map.
 
     Positions are converted into the same recentred, Y-up frame as the terrain,
@@ -199,18 +260,24 @@ def build_mission_payload(m: mission.Mission, map_index: int) -> dict:
          "colour": CLAN_COLOURS[i % len(CLAN_COLOURS)]}
         for i, c in enumerate(m.clans)
     ]
-    objects = []
+    placed = []
     for o in m.objects:
         x, y, z = o.position
         # ClanID is a 0-based index into the clan list, not the clan's own
         # `index` field -- see docs/04-missions.md.
         slot = o.clan_id if o.clan_id is not None and 0 <= o.clan_id < len(clans) else None
-        objects.append({
+        entry = {
             "p": [round(x, 2), round(z, 2), round(y, 2)],
             "k": o.kind,
             "c": -1 if slot is None else slot,
             "n": o.name or o.path.replace("\\", "/").rsplit("/", 1)[-1],
-        })
+            "r": round(o.rotation, 4),
+        }
+        if scenery is not None and o.is_static:
+            model = scenery.resolve(o.path)
+            if model is not None:
+                entry["m"] = model
+        placed.append(entry)
     # Campaign missions are all called Mission.0N, so qualify them with the
     # campaign directory to keep the selector unambiguous.
     folder = m.source.parent
@@ -224,7 +291,7 @@ def build_mission_payload(m: mission.Mission, map_index: int) -> dict:
         "title": m.title,
         "map": map_index,
         "clans": clans,
-        "objects": objects,
+        "objects": placed,
         "routes": [[[round(v, 2) for v in pt] for pt in r.points] for r in m.routes],
     }
 
@@ -233,10 +300,11 @@ def build_html(
     payloads: list[dict],
     pool: list[dict],
     missions: list[dict] | None = None,
+    models: list[dict] | None = None,
     title: str = "Parkan Terrain Viewer",
 ) -> str:
     data = json.dumps(
-        {"maps": payloads, "pool": pool, "missions": missions or []},
+        {"maps": payloads, "pool": pool, "missions": missions or [], "models": models or []},
         separators=(",", ":"),
     )
     return _template().replace("__TITLE__", title).replace('"__DATA__"', data)

@@ -39,13 +39,28 @@ BA AB         0xABBA marker
 after which the payload is high-entropy — compressed or obfuscated. Only 2
 files, holding fonts and 2D sprites, so this blocks UI work but nothing else.
 
-## Mesh format for objects
+## Object mesh: which texture a face uses
 
-`MESH` members in `static.rlb` and `system.rlb` hold the geometry for units and
-buildings. Not yet examined here; `Land.msh` was the priority because terrain
-is what a viewer needs first. The upstream Rust project
-[fparkan](https://github.com/valentineus/fparkan) reports validated static MSH
-geometry support and is the obvious place to start.
+Geometry reads fine (see [07-objects.md](07-objects.md)), but nothing found so
+far picks between the 2–4 textures a mesh's `.wea` lists. Face record field 0
+is zero on every face of every mesh; no other field has a range matching the
+texture count; and the sub-object count matches the texture count on some
+meshes but not others. Until this is solved, object geometry can only be drawn
+untextured — which makes rocks look right and vegetation, being
+alpha-billboards, look like bare skeletons.
+
+## Object mesh: local origins and the .ctl controller
+
+Meshes are not consistently based at z = 0, and adding a mesh's minimum z to
+its placement does not make scenery sit flush on the terrain. Every `STAT`
+record has a `.ctl` slot that has not been read; a transform there is the
+likely explanation.
+
+## How a unit's components are positioned
+
+A `.dat` assembly lists its parts but not where they attach. Hardpoints are
+presumably in the `.ctl` controllers, or in the unresolved mesh streams (1, 8,
+13). Without them a unit can only be drawn as its chassis.
 
 ## Unresolved terrain fields
 

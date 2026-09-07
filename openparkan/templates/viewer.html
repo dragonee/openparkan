@@ -324,16 +324,32 @@ if (typeof THREE === "undefined") {
     3: new THREE.SphereGeometry(5, 6, 5),
   };
   const NEUTRAL = 0x8a8a85;
+  const SCENERY = 0x6f7360;
+  const modelCache = {};
   let overlay = null;
+
+  // Scenery is drawn from its real geometry, decoded out of objects.rlb ->
+  // static.rlb. Geometries are shared between every placement of a model.
+  function modelGeometry(i) {
+    if (modelCache[i]) return modelCache[i];
+    const src = DATA.models[i];
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.BufferAttribute(b64(src.position, Float32Array), 3));
+    g.setAttribute("normal", new THREE.BufferAttribute(b64(src.normal, Int16Array), 3, true));
+    g.setIndex(new THREE.BufferAttribute(
+      b64(src.index, src.wide ? Uint32Array : Uint16Array), 1));
+    modelCache[i] = g;
+    return g;
+  }
 
   function clearOverlay() {
     if (!overlay) return;
     scene.remove(overlay);
     overlay.traverse((n) => {
-      if (n.isMesh || n.isLine) {
-        if (n.material.dispose) n.material.dispose();
-        if (n.isLine && n.geometry.dispose) n.geometry.dispose();
-      }
+      // Marker shapes and model geometries are shared and outlive the overlay;
+      // only line geometry is built per mission.
+      if (n.isLine && n.geometry.dispose) n.geometry.dispose();
+      if ((n.isMesh || n.isLine) && n.material.dispose) n.material.dispose();
     });
     overlay = null;
   }
@@ -348,10 +364,23 @@ if (typeof THREE === "undefined") {
       new THREE.MeshLambertMaterial({ color: c.colour }));
     const neutral = new THREE.MeshLambertMaterial({ color: NEUTRAL });
 
+    const sceneryMat = new THREE.MeshLambertMaterial({
+      color: SCENERY, side: THREE.DoubleSide, flatShading: true,
+    });
+    let drawn = 0;
     mis.objects.forEach((o) => {
-      const m = new THREE.Mesh(SHAPES[o.k] || SHAPES[2], o.c < 0 ? neutral : mats[o.c]);
       // o.p is [x, z, y] in game space; the map is recentred and Y-up.
-      m.position.set(o.p[0] - cx, o.p[1] + 8, -(o.p[2] - cy));
+      let m;
+      if (o.m !== undefined) {
+        m = new THREE.Mesh(modelGeometry(o.m), sceneryMat);
+        m.position.set(o.p[0] - cx, o.p[1], -(o.p[2] - cy));
+        // Game rotation is about the up axis; the Y flip reverses its sense.
+        m.rotation.y = -o.r;
+        drawn++;
+      } else {
+        m = new THREE.Mesh(SHAPES[o.k] || SHAPES[2], o.c < 0 ? neutral : mats[o.c]);
+        m.position.set(o.p[0] - cx, o.p[1] + 8, -(o.p[2] - cy));
+      }
       overlay.add(m);
     });
 
@@ -366,7 +395,8 @@ if (typeof THREE === "undefined") {
 
     document.getElementById("objdt").hidden = false;
     document.getElementById("obj").hidden = false;
-    document.getElementById("obj").textContent = mis.objects.length.toLocaleString();
+    document.getElementById("obj").innerHTML = mis.objects.length.toLocaleString() +
+      (drawn ? ' <span class="unit">(' + drawn + " meshed)</span>" : "");
     document.getElementById("clanbox").hidden = false;
     document.getElementById("clans").innerHTML = mis.clans.map((c) =>
       '<span class="layer clan"><span class="dot" style="background:#' +

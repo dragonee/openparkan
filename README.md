@@ -18,8 +18,10 @@ reproduced.
 | **`Land.msh` terrain** | done — all 33 maps, geometry, normals, UVs, materials, water |
 | **3D terrain viewer** | done — self-contained HTML, no server |
 | **`data.tma` missions** | done — all 29 parse to EOF, 864 objects placed |
+| **`objects.rlb`, unit assemblies** | done — 590 records, 458 assemblies, 5708 components |
+| **Object meshes** | geometry done — 68 meshes; per-face texture unresolved |
 | **`Land.map` navigation** | not started |
-| **Object meshes, scripts, gameplay** | not started |
+| **Behaviour scripts, gameplay** | not started |
 
 ## Quickstart
 
@@ -84,6 +86,12 @@ PASS  data.tma: buildings sit on the terrain surface median height above ground 
 PASS  data.tma: every object reference resolves      864/864 -- UNITS/*.dat on disk, scenery as STAT in objects.rlb
 PASS  data.tma: ClanID is a 0-based index into the clan list 463/463 object ClanIDs in range
 PASS  data.tma: objects belong to the clan whose base they sit at 123/125 (98.4%) on skirmish and multiplayer maps
+PASS  objects.rlb: every record parses into slots    590 records, tags ['BTLU', 'BULL', 'EXTO', 'FORT', 'INTO', 'STAT', 'SUNO', 'WPNS']
+PASS  objects.rlb: scenery resource slots resolve    405/405 slots across 81 STAT records
+PASS  MESH: object meshes parse with consistent streams 68/68 meshes, 41663 triangles, all indices in range
+PASS  MESH: int8/127 normals are unit length         worst deviation 0.0130 -- the same encoding as the terrain
+PASS  UNITS/*.dat: assemblies parse on a 112-byte stride 458/458 files, 5708 components
+PASS  UNITS/*.dat: components resolve in objects.rlb 5705/5708 resolve (3 do not; see docs/07-objects.md)
 ```
 
 That last check is the important one. The game ships pre-rendered minimaps in
@@ -100,6 +108,7 @@ tried.
 - [04-missions.md](docs/04-missions.md) — the `MISSIONS` directory
 - [05-engine.md](docs/05-engine.md) — the shipped DLLs and what they do
 - [06-open-questions.md](docs/06-open-questions.md) — what is still unknown
+- [07-objects.md](docs/07-objects.md) — `objects.rlb`, unit assemblies, object meshes
 
 ## Layout
 
@@ -110,6 +119,8 @@ openparkan/
   landmesh.py   terrain mesh parser
   gamedir.py    installation discovery
   mission.py    data.tma reader: clans, objects, routes
+  objects.py    objects.rlb records and UNITS/*.dat assemblies
+  mesh.py       object geometry (MESH members)
   viewer.py     self-contained HTML viewer generator
   verify.py     the checks quoted above
   png.py        dependency-free PNG writer

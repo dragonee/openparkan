@@ -11,7 +11,8 @@ from __future__ import annotations
 import math
 from pathlib import Path
 
-from . import gamedir, landmesh, mission, texm
+from . import gamedir, landmesh, mission, objects, texm
+from . import mesh as objmesh
 from .nres import HEADER_SIZE, NResArchive, is_nres
 
 
@@ -271,6 +272,76 @@ def check_missions(check, game: Path) -> None:
           f"{near}/{near_total} ({ratio:.1%}) on skirmish and multiplayer maps")
 
 
+def check_objects(check, game: Path) -> None:
+    """objects.rlb reference records, object meshes, and unit assemblies."""
+    lib = objects.ObjectLibrary(game / "objects.rlb")
+    check("objects.rlb: every record parses into slots", len(lib) > 0,
+          f"{len(lib)} records, tags "
+          f"{sorted({r.tag for r in lib.records.values()})}")
+
+    # Every slot of every scenery record must name a real archive member.
+    archives: dict[str, NResArchive] = {}
+    good = bad = 0
+    for record in lib.by_tag("STAT"):
+        for slot in record.slots:
+            if not slot:
+                continue
+            if slot.library not in archives:
+                archives[slot.library] = NResArchive.open(game / slot.library)
+            try:
+                archives[slot.library].find(slot.member)
+                good += 1
+            except KeyError:
+                bad += 1
+    check("objects.rlb: scenery resource slots resolve", bad == 0,
+          f"{good}/{good + bad} slots across {len(lib.by_tag('STAT'))} STAT records")
+
+    # Object meshes: streams must agree on vertex and face counts.
+    static = NResArchive.open(game / "static.rlb")
+    parsed = consistent = 0
+    worst_normal = 0.0
+    tris = 0
+    for entry in static:
+        if entry.tag != "MESH":
+            continue
+        m = objmesh.parse(static.read(entry), entry.name)
+        parsed += 1
+        tris += m.triangle_count
+        ok = (
+            len(m.normals) == m.vertex_count
+            and len(m.uv) == m.vertex_count
+            and all(0 <= i < m.vertex_count for t in m.triangles for i in t)
+        )
+        consistent += ok
+        for n in m.normals:
+            worst_normal = max(worst_normal, abs(math.sqrt(sum(c * c for c in n)) - 1.0))
+    check("MESH: object meshes parse with consistent streams", consistent == parsed,
+          f"{consistent}/{parsed} meshes, {tris} triangles, all indices in range")
+    check("MESH: int8/127 normals are unit length", worst_normal < 0.02,
+          f"worst deviation {worst_normal:.4f} -- the same encoding as the terrain")
+
+    # Unit assemblies.
+    dats = sorted((game / "UNITS").rglob("*.dat"))
+    loaded = comps = missing = 0
+    failures = []
+    for f in dats:
+        try:
+            d = objects.load_unit(f)
+        except objects.ObjectFormatError as exc:
+            failures.append(str(exc))
+            continue
+        loaded += 1
+        for c in d.components:
+            comps += 1
+            if c.ref.library.lower() == "objects.rlb" and lib.get(c.ref.member) is None:
+                missing += 1
+    check("UNITS/*.dat: assemblies parse on a 112-byte stride", not failures,
+          f"{loaded}/{len(dats)} files, {comps} components"
+          + ("" if not failures else f" -- {failures[0]}"))
+    check("UNITS/*.dat: components resolve in objects.rlb", missing <= 3,
+          f"{comps - missing}/{comps} resolve ({missing} do not; see docs/07-objects.md)")
+
+
 def check_minimap_agreement(check, game: Path) -> None:
     """The strongest check available: our terrain vs the art the game ships."""
     pairs = [("SC_3", "sc3.tex"), ("Tut_1", "tut1.tex"), ("ILKON", "ilkon.tex"), ("K1F", "k1f.tex")]
@@ -331,7 +402,7 @@ def run(game: Path) -> int:
     print(f"verifying against {game}\n")
     checks = (
         check_nres, check_texm, check_terrain, check_uv,
-        check_water, check_minimap_agreement, check_missions,
+        check_water, check_minimap_agreement, check_missions, check_objects,
     )
     for fn in checks:
         fn(check, game)

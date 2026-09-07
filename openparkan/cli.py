@@ -241,15 +241,21 @@ def cmd_viewer(args, game: Path) -> int:
         print(f"  packed {name:<16} {mesh.vertex_count:5d} verts {mesh.face_count:5d} tris")
 
     missions = []
+    scenery = None if args.no_geometry else viewer.SceneryLibrary(game)
     if not args.no_missions:
         for d in gamedir.missions(game):
             m = mission.load(d / "data.tma")
             if m.map_name in index_of:
-                missions.append(viewer.build_mission_payload(m, index_of[m.map_name]))
+                missions.append(viewer.build_mission_payload(m, index_of[m.map_name], scenery))
         print(f"  packed {len(missions)} missions, "
               f"{sum(len(x['objects']) for x in missions)} placed objects")
+        if scenery:
+            print(f"  packed {len(scenery.models)} scenery meshes, "
+                  f"{sum(x['tris'] for x in scenery.models)} triangles")
 
-    html = viewer.build_html(payloads, resolver.pool, missions, args.title)
+    html = viewer.build_html(
+        payloads, resolver.pool, missions, scenery.models if scenery else [], args.title
+    )
     Path(args.out).write_text(html, encoding="utf-8")
     print(f"wrote {args.out} ({len(html.encode()) / 1e6:.1f} MB, {len(payloads)} maps)")
     return 0
@@ -310,6 +316,8 @@ def main(argv: list[str] | None = None) -> int:
                    help="downsample terrain textures to at most this many pixels")
     p.add_argument("--no-missions", action="store_true",
                    help="terrain only; omit mission object placement")
+    p.add_argument("--no-geometry", action="store_true",
+                   help="draw scenery as markers instead of its real mesh")
     p.set_defaults(fn=cmd_viewer)
 
     args = ap.parse_args(argv)

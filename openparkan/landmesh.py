@@ -43,6 +43,7 @@ import struct
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .mesh import read_wea
 from .nres import NResArchive
 
 STREAM_BOUNDS = 2
@@ -171,19 +172,8 @@ class LandMesh:
 
 
 def _read_wea(path: Path) -> list[str]:
-    """Read a ``.wea`` name table: a count, then ``index name`` pairs."""
-    if not path.exists():
-        return []
-    tokens = path.read_bytes().decode("latin-1").split()
-    if not tokens:
-        return []
-    count = int(tokens[0])
-    names = [""] * count
-    for i in range(1, len(tokens) - 1, 2):
-        idx = int(tokens[i])
-        if 0 <= idx < count:
-            names[idx] = tokens[i + 1]
-    return names
+    """Read a ``.wea`` name table from disk; the same format objects use."""
+    return read_wea(path.read_bytes()) if path.exists() else []
 
 
 def load(path: str | Path) -> LandMesh:

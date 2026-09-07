@@ -50,6 +50,17 @@ two-layer materials, water planes and face adjacency. The parse is confirmed
 against the game's own pre-rendered minimaps at Pearson r = +0.88 to +0.97.
 See [03-terrain.md](03-terrain.md).
 
+**One geometry format, used twice.** Object meshes turn out to be NRes
+archives nested inside archive members, using the same stream convention and
+the same `int8`/127 normals and 8.8 fixed-point UVs as the terrain. Cracking
+the terrain therefore cracked most of the object format too. See
+[07-objects.md](07-objects.md).
+
+**The parts catalogue is in the data.** A unit is an assembly of components,
+each naming an `objects.rlb` record and carrying the display name the game's
+UI shows — "Large Track Chs (L-42t)", "ARMOUR LA.Mk3 (ARM 3)". All 458
+assemblies and 5708 components read without touching the executable.
+
 ## What is genuinely hard
 
 **The simulation, not the parsing.** Damage model, economy, capture rules,
@@ -103,11 +114,14 @@ projects spend a decade.
 at a median of +0.000 units above the terrain, which is the check that ties
 mission space and terrain space together.
 
-**Step 4 is the next thing**, and it is engineering rather than reverse
+**Step 4 is the next thing**, and it is mostly engineering rather than reverse
 engineering: a scene graph, camera, selection and a minimap over data that is
-already readable. The two format gaps that would block going further are
-`Land.map` (navigation) and the object mesh format — see
-[06-open-questions.md](06-open-questions.md).
+already readable. Object *geometry* now reads too, so a scene can be drawn
+from real meshes rather than placeholders.
+
+What still blocks a playable build is `Land.map` (navigation), the per-face
+texture assignment on object meshes, and how components are positioned when a
+unit is assembled — see [06-open-questions.md](06-open-questions.md).
 
 ## Legal position
 
