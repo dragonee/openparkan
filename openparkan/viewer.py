@@ -317,7 +317,13 @@ class ModelLibrary:
         lox, hix = min(p[0] for p in pts), max(p[0] for p in pts)
         loy, hiy = min(p[1] for p in pts), max(p[1] for p in pts)
         loz, hiz = min(p[2] for p in pts), max(p[2] for p in pts)
-        centre = ((lox + hix) / 2, (loz + hiz) / 2, -(loy + hiy) / 2)
+        # Rest the model on its own base rather than its centre.  Buildings
+        # are authored symmetric about z = 0 -- fr_m_bunker spans -9.04..9.04,
+        # fr_l_plant -32.95..32.95 -- so placing z = 0 at ground level buries
+        # half of them, which is what the mission z does.  Units and rocks are
+        # already authored base-at-origin, so this shift is a no-op for them.
+        # The engine's real datum has not been found; see docs/07-objects.md.
+        centre = ((lox + hix) / 2, (hiz - loz) / 2, -(loy + hiy) / 2)
         half = [
             max((hix - lox) / 2, 1e-6),
             max((hiz - loz) / 2, 1e-6),

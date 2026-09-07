@@ -160,6 +160,36 @@ follow each node's slots to a run of triangles.
 other 2632 are its interior and its LOD 1. Drawing all of them at once is what
 makes a building look like scrambled geometry.
 
+### Buildings must be rested on their base, not their origin
+
+A mission places an object by putting model **z = 0** at the placement height,
+and for units and scenery that is right — they are authored with their base at
+the origin (measured base-minus-terrain: units +0.16, rocks 0.00).
+
+Buildings are not. Their exterior is authored **symmetric about z = 0**:
+`fr_m_bunker` spans −9.04..9.04, `fr_l_angar` −18.43..18.43, `fr_l_plant`
+−32.95..32.95. Placing that origin at ground level buries half the building,
+and measured across all 167 placed buildings the base sits a median of
+**23.6 units underground** — about 44% of the model.
+
+Two things say the minimum z really is the bottom of the structure rather than
+a deep foundation:
+
+- the interior path graph's lowest waypoint sits slightly *above* the exterior
+  minimum on 28 of 29 buildings — a floor below ground level would make no
+  sense;
+- units and scenery, which are visibly correct, are authored the other way.
+
+So a renderer should offset a model by `-min(z)` of the geometry it draws.
+That is a no-op for units and rocks and lifts buildings out of the ground.
+
+**This is a heuristic, not the engine's rule.** The real datum has not been
+found. Ruled out: the `Root` control point (buildings have `P###` points and no
+`Root`), the `.bas` footprint plane (its z range is symmetric, e.g.
+−60.51..60.51 on `fr_b_bunker`, so it is not a ground plane as read), the slot
+AABBs (they match the raw vertex bounds exactly, so they carry no transform),
+and the root node's pose (identity on the buildings checked).
+
 **Still missing: node poses.** The fallback key selects a static pose from
 stream 8, and a child's pose composes with its parent's. Without that, models
 whose parts are authored around a pose still come out wrong — `fr_l_gener` is

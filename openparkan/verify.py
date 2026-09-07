@@ -306,6 +306,31 @@ def check_missions(check, game: Path) -> None:
     check("data.tma: buildings sit on the terrain surface", abs(median) < 1.0,
           f"median height above ground {median:+.3f} over {len(residuals)} buildings")
 
+    # A building's exterior is authored symmetric about z = 0, so placing that
+    # origin at ground level buries half of it.  Units and scenery are authored
+    # base-at-origin.  See docs/07-objects.md.
+    centred = tall = 0
+    for name in ("fortif.rlb",):
+        ar = NResArchive.open(game / name)
+        for e in ar:
+            if e.tag != "MESH":
+                continue
+            m = objmesh.parse(ar.read(e), e.name)
+            sel = m.select(0, interior=False) or m.triangles
+            vs = {i for t in sel for i in t}
+            if not vs:
+                continue
+            lo = min(m.positions[i][2] for i in vs)
+            hi = max(m.positions[i][2] for i in vs)
+            if hi - lo < 1e-3:
+                continue
+            tall += 1
+            centred += abs(lo + hi) / (hi - lo) < 0.25
+    check("MESH: building exteriors are authored about their centre",
+          centred > tall * 0.6,
+          f"{centred}/{tall} building meshes are near-symmetric about z=0 "
+          f"-- they must be rested on their base, not their origin")
+
     # Definition references must resolve, which is what makes the object
     # records readable rather than merely parseable.
     statics = {

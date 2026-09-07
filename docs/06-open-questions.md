@@ -77,6 +77,12 @@ mapped.
   vertex or face count.
 - `Land.msh` stream 2: 737 float3 on SC_3. The first 8 are the map's bounding
   box corners; the remaining 729 (= 27³) look like a spatial subdivision.
+- **The vertical datum for buildings.** Their exteriors are authored symmetric
+  about z = 0 while units and scenery are base-at-origin, so a renderer has to
+  rest buildings on their own base to stop them sinking. That is a heuristic;
+  the engine must have a real rule. `Root` control points, the `.bas` footprint
+  plane, the slot AABBs and the root node pose have all been ruled out —
+  see [07-objects.md](07-objects.md).
 - **Node poses.** A node's fallback key selects a static pose out of stream 8,
   and a child composes with its parent. Without it, models authored around a
   pose render wrong even with the correct slot selection — `fr_l_gener` is the
