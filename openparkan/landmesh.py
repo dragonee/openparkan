@@ -88,6 +88,7 @@ class LandMesh:
     face_patch: list[int]
     layer1_names: list[str] = field(default_factory=list)
     layer2_names: list[str] = field(default_factory=list)
+    _grid: dict | None = field(default=None, repr=False, compare=False)
 
     @property
     def vertex_count(self) -> int:
@@ -118,6 +119,49 @@ class LandMesh:
         """
         levels = {self.positions[v][2] for i in self.water_faces() for v in self.faces[i]}
         return levels.pop() if len(levels) == 1 else None
+
+    def _build_index(self, cells: int = 64) -> None:
+        """Bucket faces into a coarse XY grid so height_at is not O(faces)."""
+        (minx, miny, _), (maxx, maxy, _) = self.bounds()
+        self._grid_origin = (minx, miny)
+        self._grid_step = ((maxx - minx) / cells, (maxy - miny) / cells)
+        self._grid_cells = cells
+        grid: dict[tuple[int, int], list[int]] = {}
+        sx, sy = self._grid_step
+        for fi, tri in enumerate(self.faces):
+            xs = [self.positions[i][0] for i in tri]
+            ys = [self.positions[i][1] for i in tri]
+            for cx in range(int((min(xs) - minx) / sx), int((max(xs) - minx) / sx) + 1):
+                for cy in range(int((min(ys) - miny) / sy), int((max(ys) - miny) / sy) + 1):
+                    grid.setdefault((cx, cy), []).append(fi)
+        self._grid = grid
+
+    def height_at(self, x: float, y: float) -> float | None:
+        """Terrain elevation at a world XY, or None if outside the mesh.
+
+        Where water covers the ground the higher surface wins, which is what a
+        thing standing on the map would rest on.
+        """
+        if getattr(self, "_grid", None) is None:
+            self._build_index()
+        sx, sy = self._grid_step
+        ox, oy = self._grid_origin
+        cell = (int((x - ox) / sx), int((y - oy) / sy))
+        best = None
+        for fi in self._grid.get(cell, ()):
+            a, b, c = (self.positions[i] for i in self.faces[fi])
+            den = (b[1] - c[1]) * (a[0] - c[0]) + (c[0] - b[0]) * (a[1] - c[1])
+            if abs(den) < 1e-12:
+                continue
+            l1 = ((b[1] - c[1]) * (x - c[0]) + (c[0] - b[0]) * (y - c[1])) / den
+            l2 = ((c[1] - a[1]) * (x - c[0]) + (a[0] - c[0]) * (y - c[1])) / den
+            l3 = 1.0 - l1 - l2
+            if l1 < -1e-6 or l2 < -1e-6 or l3 < -1e-6:
+                continue
+            z = l1 * a[2] + l2 * b[2] + l3 * c[2]
+            if best is None or z > best:
+                best = z
+        return best
 
     def texture_name(self, layer: int, index: int) -> str | None:
         table = self.layer1_names if layer == 1 else self.layer2_names

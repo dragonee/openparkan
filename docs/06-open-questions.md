@@ -2,16 +2,20 @@
 
 Things observed but not resolved. Roughly in the order they block progress.
 
-## data.tma record framing — blocks mission loading
+## data.tma leftovers
 
-Strings are length-prefixed and the object graph is legible (see
-[04-missions.md](04-missions.md)), but the 16-byte header differs between
-missions and the binary framing between strings has not been mapped. Until
-this is done, missions can be *read* but not *loaded*.
+The format is parsed end to end (see [04-missions.md](04-missions.md)), but a
+few fields are carried through without being understood:
 
-The property-name tables embedded next to each object are the lever here: they
-give the field names, so it should be possible to work out the record layout by
-aligning names against the bytes that follow them.
+- A property stores three words after its type tag. The first is the value;
+  the other two are constant per property name across every mission, so they
+  read as bounds or defaults, but nothing confirms which is which.
+- The four words after an object's instance name (`0, -1, -1, 1` throughout).
+- The word before the object count, always 10.
+- The word after a clan's behaviour-tree path.
+- The four words trailing each trailer viewpoint.
+- Object `scale` is `1,1,1` in every shipped mission, so the axis order is
+  unverified.
 
 ## Land.map / ArealMap — blocks pathfinding
 

@@ -14,7 +14,7 @@ import zlib
 from importlib import resources
 from pathlib import Path
 
-from . import landmesh, texm
+from . import landmesh, mission, texm
 from .nres import NResArchive
 from .png import _chunk
 
@@ -166,6 +166,9 @@ def build_map_payload(mesh: landmesh.LandMesh, resolver: TextureResolver, name: 
         "vertexCount": nv,
         "faceCount": mesh.face_count,
         "extent": [round(maxx - minx, 1), round(maxy - miny, 1)],
+        # The recentring applied to the geometry, so mission markers given in
+        # raw game coordinates can be placed into the same frame.
+        "centre": [round(cx, 4), round(cy, 4)],
         "height": [round(minz, 1), round(maxz, 1)],
         "wideIndex": wide,
         "position": _b64(bytes(pos)),
@@ -179,8 +182,63 @@ def build_map_payload(mesh: landmesh.LandMesh, resolver: TextureResolver, name: 
     }
 
 
-def build_html(payloads: list[dict], pool: list[dict], title: str = "Parkan Terrain Viewer") -> str:
-    data = json.dumps({"maps": payloads, "pool": pool}, separators=(",", ":"))
+#: Clan colours, chosen to stay distinguishable on both the light and dark ground.
+CLAN_COLOURS = [0x3E7CB1, 0xC1453C, 0x4E9A51, 0xB07A2A, 0x7B5EA7, 0x2E9A96]
+NEUTRAL_COLOUR = 0x8A8A85
+
+
+def build_mission_payload(m: mission.Mission, map_index: int) -> dict:
+    """Pack a mission into markers the viewer can drop onto its map.
+
+    Positions are converted into the same recentred, Y-up frame as the terrain,
+    which is the point of the exercise: if the two disagree, the markers float
+    or sink and you can see it immediately.
+    """
+    clans = [
+        {"name": c.name, "index": c.index, "base": [c.base[0], c.base[1]],
+         "colour": CLAN_COLOURS[i % len(CLAN_COLOURS)]}
+        for i, c in enumerate(m.clans)
+    ]
+    objects = []
+    for o in m.objects:
+        x, y, z = o.position
+        # ClanID is a 0-based index into the clan list, not the clan's own
+        # `index` field -- see docs/04-missions.md.
+        slot = o.clan_id if o.clan_id is not None and 0 <= o.clan_id < len(clans) else None
+        objects.append({
+            "p": [round(x, 2), round(z, 2), round(y, 2)],
+            "k": o.kind,
+            "c": -1 if slot is None else slot,
+            "n": o.name or o.path.replace("\\", "/").rsplit("/", 1)[-1],
+        })
+    # Campaign missions are all called Mission.0N, so qualify them with the
+    # campaign directory to keep the selector unambiguous.
+    folder = m.source.parent
+    label = folder.name
+    if folder.parent.name.upper().startswith("CAMPAIGN."):
+        label = f"{folder.parent.name} / {folder.name}"
+
+    return {
+        "name": folder.name,
+        "label": label,
+        "title": m.title,
+        "map": map_index,
+        "clans": clans,
+        "objects": objects,
+        "routes": [[[round(v, 2) for v in pt] for pt in r.points] for r in m.routes],
+    }
+
+
+def build_html(
+    payloads: list[dict],
+    pool: list[dict],
+    missions: list[dict] | None = None,
+    title: str = "Parkan Terrain Viewer",
+) -> str:
+    data = json.dumps(
+        {"maps": payloads, "pool": pool, "missions": missions or []},
+        separators=(",", ":"),
+    )
     return _template().replace("__TITLE__", title).replace('"__DATA__"', data)
 
 

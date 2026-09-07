@@ -32,8 +32,8 @@ properties are unimportant, but object names are."*
 **The missions carry their own schema.** `data.tma` is binary, but each object
 is followed by its property *names* in plain text — `LogicalID`, `ClanID`,
 `MaxSpeedPercent`, `MaximumOre`, `ChargeRadius`, `FreeConstructionTime`. The
-gameplay data model can be recovered without disassembling anything. See
-[04-missions.md](04-missions.md).
+gameplay data model came straight out of the mission files, with no
+disassembly. See [04-missions.md](04-missions.md).
 
 **The DLL split is free architecture documentation.** `Terrain`, `World3D`,
 `ArealMap`, `Behavior`, `ai`, `Control`, `Effect`, `Net`, `MisLoad`, `Ngi32` —
@@ -91,18 +91,23 @@ moddability, a map editor, deterministic multiplayer, and preservation.
 |---|---|---|
 | 1 | Asset toolkit: NRes, textures, sounds | **done** |
 | 2 | Terrain viewer: render a real map | **done** |
-| 3 | Mission loader: place every object from `data.tma` | next |
-| 4 | Static simulation: camera, selection, minimap, no AI | |
+| 3 | Mission loader: place every object from `data.tma` | **done** |
+| 4 | Static simulation: camera, selection, minimap, no AI | next |
 | 5 | Gameplay: movement, combat, economy, then `.scr` behaviours | the long tail |
 
 Steps 1–3 are a realistic solo side project. Step 5 is where OpenRA-class
 projects spend a decade.
 
-**Step 3 is the next thing to crack**, and the blocker is narrow: `data.tma`'s
-record framing. The strings are length-prefixed and the object graph is
-already legible; what is missing is the binary layout between them. The
-embedded property-name tables are the lever, since they give the field names
-directly.
+`data.tma` is now fully parsed: all 29 missions consume to the last byte,
+864 objects are placed, and every reference they make resolves. Buildings land
+at a median of +0.000 units above the terrain, which is the check that ties
+mission space and terrain space together.
+
+**Step 4 is the next thing**, and it is engineering rather than reverse
+engineering: a scene graph, camera, selection and a minimap over data that is
+already readable. The two format gaps that would block going further are
+`Land.map` (navigation) and the object mesh format — see
+[06-open-questions.md](06-open-questions.md).
 
 ## Legal position
 

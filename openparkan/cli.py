@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import argparse
 import sys
+from collections import Counter
 from pathlib import Path
 
-from . import gamedir, landmesh, texm, verify, viewer
+from . import gamedir, landmesh, mission, texm, verify, viewer
 from .nres import NResArchive, is_nres
 from .png import write_png
 
@@ -145,6 +146,81 @@ def cmd_heightmap(args, game: Path) -> int:
     return 0
 
 
+def cmd_missions(args, game: Path) -> int:
+    for d in gamedir.missions(game):
+        m = mission.load(d / "data.tma")
+        kinds = Counter(o.kind_name for o in m.objects)
+        print(
+            f"{str(d.relative_to(game)):<42} {m.map_name:<16} "
+            f"{len(m.clans)} clans  {len(m.objects):4d} objects  "
+            f"({kinds['building']}b/{kinds['unit']}u/"
+            f"{kinds['vegetation'] + kinds['rock']}s)  {m.title}"
+        )
+    return 0
+
+
+def cmd_mission(args, game: Path) -> int:
+    d = Path(args.mission)
+    if not (d / "data.tma").exists():
+        d = game / "MISSIONS" / args.mission
+    if not (d / "data.tma").exists():
+        print(f"no mission at {args.mission}", file=sys.stderr)
+        return 2
+    m = mission.load(d / "data.tma")
+    print(f"{m.source}")
+    print(f"  description  {m.title}")
+    if m.description and m.description != m.title:
+        print(f"  (in data.tma) {m.description!r}")
+    print(f"  map          {m.map_name}  ({m.map_path})")
+    print(f"  viewpoints   {len(m.viewpoints)}")
+    if m.routes:
+        pts = ", ".join(f"#{r.id}:{len(r.points)}pt" for r in m.routes)
+        print(f"  routes       {len(m.routes)}  ({pts})")
+    print(f"  clans        {len(m.clans)}")
+    for c in m.clans:
+        allies = [n for n, v in c.relations.items() if v and n != c.name]
+        print(
+            f"    [{c.index}] {c.name:<10} base=({c.base[0]:.0f}, {c.base[1]:.0f})  "
+            f"ai={c.ai_script.rsplit(chr(92), 1)[-1]}"
+            + (f"  zones={len(c.zones)}" if c.zones else "")
+            + (f"  allied={allies}" if allies else "")
+        )
+    print(f"  objects      {len(m.objects)}")
+    for kind, group in sorted(
+        _group(m.objects, lambda o: o.kind_name).items(), key=lambda kv: -len(kv[1])
+    ):
+        print(f"    {kind:<12} {len(group):4d}  {_top_names(group)}")
+    if args.list:
+        print("\n  id          clan  kind        position                    definition")
+        for o in m.objects:
+            x, y, z = o.position
+            print(
+                f"    {o.logical_id:<11} {str(o.clan_id):<5} {o.kind_name:<11} "
+                f"({x:7.1f},{y:7.1f},{z:6.1f})  {o.path}"
+            )
+    cfg = d / "mission.cfg"
+    if cfg.exists():
+        blocks = mission.load_cfg(cfg)
+        for name in ("primary_objectives", "bonus_objectives"):
+            if blocks.get(name):
+                print(f"\n  {name.replace('_', ' ')}:")
+                for v in blocks[name].values():
+                    print(f"    {v}")
+    return 0
+
+
+def _group(items, key):
+    out = {}
+    for it in items:
+        out.setdefault(key(it), []).append(it)
+    return out
+
+
+def _top_names(objs, limit: int = 4) -> str:
+    names = Counter(o.path.replace(chr(92), "/").rsplit("/", 1)[-1] for o in objs)
+    return ", ".join(f"{n}x{c}" if c > 1 else n for n, c in names.most_common(limit))
+
+
 def cmd_verify(args, game: Path) -> int:
     return verify.run(game)
 
@@ -153,15 +229,27 @@ def cmd_viewer(args, game: Path) -> int:
     names = args.maps or [d.name for d in gamedir.maps(game)]
     resolver = viewer.TextureResolver(game, max_size=args.texture_size)
     payloads = []
+    index_of = {}
     for name in names:
         path = game / "DATA" / "MAPS" / name / "Land.msh"
         if not path.exists():
             print(f"no such map: {name}", file=sys.stderr)
             return 2
         mesh = landmesh.load(path)
+        index_of[name] = len(payloads)
         payloads.append(viewer.build_map_payload(mesh, resolver, name))
         print(f"  packed {name:<16} {mesh.vertex_count:5d} verts {mesh.face_count:5d} tris")
-    html = viewer.build_html(payloads, resolver.pool, args.title)
+
+    missions = []
+    if not args.no_missions:
+        for d in gamedir.missions(game):
+            m = mission.load(d / "data.tma")
+            if m.map_name in index_of:
+                missions.append(viewer.build_mission_payload(m, index_of[m.map_name]))
+        print(f"  packed {len(missions)} missions, "
+              f"{sum(len(x['objects']) for x in missions)} placed objects")
+
+    html = viewer.build_html(payloads, resolver.pool, missions, args.title)
     Path(args.out).write_text(html, encoding="utf-8")
     print(f"wrote {args.out} ({len(html.encode()) / 1e6:.1f} MB, {len(payloads)} maps)")
     return 0
@@ -201,6 +289,15 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--size", type=int, default=800)
     p.set_defaults(fn=cmd_heightmap)
 
+    sub.add_parser("missions", help="list every mission with its map and contents").set_defaults(
+        fn=cmd_missions
+    )
+
+    p = sub.add_parser("mission", help="describe one mission in detail")
+    p.add_argument("mission", help="a mission directory, or a name under MISSIONS/")
+    p.add_argument("--list", action="store_true", help="list every placed object")
+    p.set_defaults(fn=cmd_mission)
+
     sub.add_parser(
         "verify", help="re-derive every claim in docs/ from the installed data files"
     ).set_defaults(fn=cmd_verify)
@@ -211,6 +308,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--title", default="Parkan Terrain Viewer")
     p.add_argument("--texture-size", type=int, default=64,
                    help="downsample terrain textures to at most this many pixels")
+    p.add_argument("--no-missions", action="store_true",
+                   help="terrain only; omit mission object placement")
     p.set_defaults(fn=cmd_viewer)
 
     args = ap.parse_args(argv)

@@ -102,6 +102,8 @@
     border: 1px solid var(--line); border-radius: 2px; color: var(--muted);
   }
   .layer.wet { border-color: var(--signal); color: var(--signal); background: var(--signal-soft); }
+  .clan { display: inline-flex; align-items: center; gap: 5px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
 
   .controls { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
   button {
@@ -140,16 +142,20 @@
   </div>
   <div class="body">
     <div>
-      <label for="mapsel">Map</label>
-      <select id="mapsel"></select>
+      <label for="scenesel">Scene</label>
+      <select id="scenesel"></select>
     </div>
     <dl class="readout">
       <dt>Extent</dt><dd id="ext">&ndash;</dd>
       <dt>Elevation</dt><dd id="hgt">&ndash;</dd>
-      <dt>Vertices</dt><dd id="nv">&ndash;</dd>
       <dt>Triangles</dt><dd id="nf">&ndash;</dd>
       <dt>Water</dt><dd id="wat">&ndash;</dd>
+      <dt id="objdt" hidden>Placed</dt><dd id="obj" hidden>&ndash;</dd>
     </dl>
+    <div id="clanbox" hidden>
+      <label>Clans &middot; data.tma</label>
+      <div class="layers" id="clans"></div>
+    </div>
     <div>
       <label>Ground layer &middot; Land1.wea</label>
       <div class="layers" id="layers"></div>
@@ -294,8 +300,6 @@ if (typeof THREE === "undefined") {
     place();
 
     const num = (v) => v.toLocaleString();
-    document.getElementById("path").textContent = "DATA/MAPS/" + map.name + "/Land.msh";
-    document.getElementById("nv").textContent = num(map.vertexCount);
     document.getElementById("nf").textContent = num(map.faceCount);
     document.getElementById("ext").innerHTML =
       num(Math.round(map.extent[0])) + " &times; " + num(Math.round(map.extent[1])) +
@@ -310,13 +314,106 @@ if (typeof THREE === "undefined") {
         n + "</span>").join("");
   }
 
-  const sel = document.getElementById("mapsel");
-  DATA.maps.forEach((m, i) => {
-    const o = document.createElement("option");
-    o.value = String(i); o.textContent = m.name;
-    sel.appendChild(o);
-  });
-  sel.addEventListener("change", () => show(DATA.maps[+sel.value]));
+  // --- mission object markers ---------------------------------------------
+  // Each kind gets a silhouette you can tell apart at a distance: an upright
+  // block for a building, a nose-up cone for a unit, a small ball for scenery.
+  const SHAPES = {
+    0: new THREE.BoxGeometry(15, 15, 15),
+    1: new THREE.ConeGeometry(7, 20, 5),
+    2: new THREE.SphereGeometry(5, 6, 5),
+    3: new THREE.SphereGeometry(5, 6, 5),
+  };
+  const NEUTRAL = 0x8a8a85;
+  let overlay = null;
+
+  function clearOverlay() {
+    if (!overlay) return;
+    scene.remove(overlay);
+    overlay.traverse((n) => {
+      if (n.isMesh || n.isLine) {
+        if (n.material.dispose) n.material.dispose();
+        if (n.isLine && n.geometry.dispose) n.geometry.dispose();
+      }
+    });
+    overlay = null;
+  }
+
+  function showMission(mis) {
+    clearOverlay();
+    const map = DATA.maps[mis.map];
+    const cx = map.centre[0], cy = map.centre[1];
+    overlay = new THREE.Group();
+
+    const mats = mis.clans.map((c) =>
+      new THREE.MeshLambertMaterial({ color: c.colour }));
+    const neutral = new THREE.MeshLambertMaterial({ color: NEUTRAL });
+
+    mis.objects.forEach((o) => {
+      const m = new THREE.Mesh(SHAPES[o.k] || SHAPES[2], o.c < 0 ? neutral : mats[o.c]);
+      // o.p is [x, z, y] in game space; the map is recentred and Y-up.
+      m.position.set(o.p[0] - cx, o.p[1] + 8, -(o.p[2] - cy));
+      overlay.add(m);
+    });
+
+    // Campaign missions carry waypoint routes; draw them as polylines.
+    mis.routes.forEach((route) => {
+      const pts = route.map((p) => new THREE.Vector3(p[0] - cx, p[2] + 6, -(p[1] - cy)));
+      const g = new THREE.BufferGeometry().setFromPoints(pts);
+      overlay.add(new THREE.Line(g, new THREE.LineBasicMaterial({ color: 0xd0a050 })));
+    });
+
+    scene.add(overlay);
+
+    document.getElementById("objdt").hidden = false;
+    document.getElementById("obj").hidden = false;
+    document.getElementById("obj").textContent = mis.objects.length.toLocaleString();
+    document.getElementById("clanbox").hidden = false;
+    document.getElementById("clans").innerHTML = mis.clans.map((c) =>
+      '<span class="layer clan"><span class="dot" style="background:#' +
+      c.colour.toString(16).padStart(6, "0") + '"></span>' + c.name + "</span>").join("");
+  }
+
+  function showTerrainOnly() {
+    clearOverlay();
+    document.getElementById("objdt").hidden = true;
+    document.getElementById("obj").hidden = true;
+    document.getElementById("clanbox").hidden = true;
+  }
+
+  // --- scene selector -----------------------------------------------------
+  const sel = document.getElementById("scenesel");
+  const scenes = [];
+  function addGroup(name, entries) {
+    if (!entries.length) return;
+    const g = document.createElement("optgroup");
+    g.label = name;
+    entries.forEach(({ text, fn }) => {
+      const o = document.createElement("option");
+      o.value = String(scenes.length);
+      o.textContent = text;
+      scenes.push(fn);
+      g.appendChild(o);
+    });
+    sel.appendChild(g);
+  }
+  addGroup("Missions", DATA.missions.map((mis) => ({
+    text: mis.label + " -- " + mis.title,
+    fn: () => {
+      show(DATA.maps[mis.map]);
+      showMission(mis);
+      document.getElementById("path").textContent =
+        "MISSIONS/" + mis.label.replace(" / ", "/") + "/data.tma";
+    },
+  })));
+  addGroup("Terrain only", DATA.maps.map((m, i) => ({
+    text: m.name,
+    fn: () => {
+      show(DATA.maps[i]);
+      showTerrainOnly();
+      document.getElementById("path").textContent = "DATA/MAPS/" + m.name + "/Land.msh";
+    },
+  })));
+  sel.addEventListener("change", () => scenes[+sel.value]());
 
   document.getElementById("wire").addEventListener("click", (e) => {
     const on = e.currentTarget.getAttribute("aria-pressed") !== "true";
@@ -336,7 +433,7 @@ if (typeof THREE === "undefined") {
   }
   addEventListener("resize", resize);
   resize();
-  show(DATA.maps[0]);
+  scenes[0]();
 
   (function loop() {
     requestAnimationFrame(loop);

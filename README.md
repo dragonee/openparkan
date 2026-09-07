@@ -17,7 +17,7 @@ reproduced.
 | **Texm textures** | done — all 393 textures decode, all 5 pixel formats |
 | **`Land.msh` terrain** | done — all 33 maps, geometry, normals, UVs, materials, water |
 | **3D terrain viewer** | done — self-contained HTML, no server |
-| **`data.tma` missions** | partial — clans, map link, object paths, property schema |
+| **`data.tma` missions** | done — all 29 parse to EOF, 864 objects placed |
 | **`Land.map` navigation** | not started |
 | **Object meshes, scripts, gameplay** | not started |
 
@@ -33,8 +33,10 @@ export PARKAN_DIR="/path/to/Parkan Iron Strategy"   # or pass --game
 uv run openparkan info                       # summarise the install
 uv run openparkan verify                     # re-derive every documented claim
 uv run openparkan maps                       # list all 33 maps
+uv run openparkan missions                   # list all 29 missions
+uv run openparkan mission Single.01          # one mission in detail
 uv run openparkan heightmap SC_3 --out sc3.png
-uv run openparkan viewer --out terrain.html  # 3D viewer, all maps, ~11 MB
+uv run openparkan viewer --out terrain.html  # 3D viewer: maps + placed objects
 ```
 
 The game directory is found automatically if it sits next to this repo, is
@@ -47,6 +49,7 @@ uv run openparkan ls Textures.lib --type Texm
 uv run openparkan extract sounds.lib --out /tmp/sounds     # RIFF/WAVE, playable as-is
 uv run openparkan textures Textures.lib --out /tmp/tex     # 393 PNGs
 uv run openparkan textures ui/minimap.lib --out /tmp/minimaps
+uv run openparkan mission CAMPAIGN/CAMPAIGN.02/Mission.03 --list
 uv run openparkan viewer SC_3 Tut_1 ILKON --out three-maps.html
 ```
 
@@ -60,21 +63,27 @@ every factual claim in `docs/` is re-derived from the installed files by
 PASS  NRes: header size == file size                 116/116 archives
 PASS  NRes: every member offset is 8-byte aligned    116/116 archives, 6697 members
 PASS  NRes: no member ranges overlap                 0 overlaps
-PASS  NRes: inter-member padding is zero-filled      0 non-zero gaps, largest gap 7 bytes
-PASS  Texm: declared format predicts the payload size 328/393 exact
-PASS  Texm: every texture decodes to RGBA            393/393, formats {0,565,888,4444,8888}
+PASS  NRes: inter-member padding is zero-filled      0 non-zero gaps, largest gap 7 bytes (< 8 as expected)
+PASS  Texm: declared format predicts the payload size 328/393 exact (rest have a truncated mip tail)
+PASS  Texm: every texture decodes to RGBA            393/393, formats {0: 15, 565: 47, 888: 52, 4444: 42, 8888: 237}
 PASS  Land.msh: all maps parse                       33 maps
 PASS  Land.msh: face indices within the vertex array 33/33 maps
 PASS  Land.msh: every vertex is referenced by a face 33/33 maps
-PASS  Land.msh: face adjacency is mutual             33/33 maps
-PASS  Land.msh: int8/127 normals are unit length     worst deviation 0.0133
-PASS  Land.msh: layer-1 UV == world XY / 50          worst residual 0.004 texel units
-PASS  Land.msh: texture indices resolve through Land1.wea
-PASS  Land.msh: surface bit 0x02 marks exactly the water faces  33/33 maps, 3630 faces
-PASS  Land.msh: face flags 1544 agree with the surface bit      33/33 maps
-PASS  Land.msh: water is a single flat plane per map            11/11 maps with water
-PASS  Terrain matches the game's own minimap art     SC_3 +0.883, Tut_1 +0.927,
-                                                     ILKON +0.965, K1F +0.901
+PASS  Land.msh: face adjacency is mutual             33/33 maps -- proves fields 7..9 are neighbours
+PASS  Land.msh: int8/127 normals are unit length     worst deviation 0.0133 across all maps
+PASS  Land.msh: layer-1 UV == world XY / 50          SC_3 worst residual 0.004 texel units
+PASS  Land.msh: texture indices resolve through Land1.wea SC_3 layer-1 names in use: ['L00', 'L04', 'WATER', 'WATER_BOT']
+PASS  Land.msh: surface bit 0x02 marks exactly the water faces 33/33 maps, 3630 water faces on 11 maps
+PASS  Land.msh: face flags 1544 agree with the surface bit 33/33 maps -- an independent second marker
+PASS  Land.msh: water is a single flat plane per map 11/11 maps with water
+PASS  Terrain matches the game's own minimap art     SC_3 r=+0.883, Tut_1 r=+0.927, ILKON r=+0.965, K1F r=+0.901
+PASS  data.tma: parses exactly to end of file        29/29 missions, 864 objects
+PASS  data.tma: the map it names exists              29/29 missions reference a real DATA/MAPS entry
+PASS  data.tma: placed objects lie inside the map    864/864 objects within their map's XY extent
+PASS  data.tma: buildings sit on the terrain surface median height above ground +0.000 over 167 buildings
+PASS  data.tma: every object reference resolves      864/864 -- UNITS/*.dat on disk, scenery as STAT in objects.rlb
+PASS  data.tma: ClanID is a 0-based index into the clan list 463/463 object ClanIDs in range
+PASS  data.tma: objects belong to the clan whose base they sit at 123/125 (98.4%) on skirmish and multiplayer maps
 ```
 
 That last check is the important one. The game ships pre-rendered minimaps in
@@ -100,6 +109,7 @@ openparkan/
   texm.py       texture decoder
   landmesh.py   terrain mesh parser
   gamedir.py    installation discovery
+  mission.py    data.tma reader: clans, objects, routes
   viewer.py     self-contained HTML viewer generator
   verify.py     the checks quoted above
   png.py        dependency-free PNG writer

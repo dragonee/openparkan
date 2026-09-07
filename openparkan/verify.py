@@ -11,7 +11,7 @@ from __future__ import annotations
 import math
 from pathlib import Path
 
-from . import gamedir, landmesh, texm
+from . import gamedir, landmesh, mission, texm
 from .nres import HEADER_SIZE, NResArchive, is_nres
 
 
@@ -162,6 +162,115 @@ def check_water(check, game: Path) -> None:
           f"{flat}/{with_water} maps with water")
 
 
+def check_missions(check, game: Path) -> None:
+    """The mission format is validated by whether it closes, and by whether
+    everything it points at actually exists."""
+    dirs = gamedir.missions(game)
+    parsed: list[mission.Mission] = []
+    failures = []
+    for d in dirs:
+        try:
+            parsed.append(mission.load(d / "data.tma"))
+        except mission.MissionFormatError as exc:
+            failures.append(f"{d.name}: {exc}")
+    check("data.tma: parses exactly to end of file", not failures,
+          f"{len(parsed)}/{len(dirs)} missions, "
+          f"{sum(len(m.objects) for m in parsed)} objects"
+          + ("" if not failures else f" -- {failures[0]}"))
+    if not parsed:
+        return
+
+    maps = {d.name for d in gamedir.maps(game)}
+    resolved = sum(1 for m in parsed if m.map_name in maps)
+    check("data.tma: the map it names exists", resolved == len(parsed),
+          f"{resolved}/{len(parsed)} missions reference a real DATA/MAPS entry")
+
+    # Every placed object must fall inside the map it is placed on.
+    meshes: dict[str, landmesh.LandMesh] = {}
+    inside = total = 0
+    for m in parsed:
+        if m.map_name not in maps:
+            continue
+        if m.map_name not in meshes:
+            meshes[m.map_name] = landmesh.load(game / "DATA" / "MAPS" / m.map_name / "Land.msh")
+        (minx, miny, _), (maxx, maxy, _) = meshes[m.map_name].bounds()
+        for o in m.objects:
+            total += 1
+            x, y, _ = o.position
+            inside += minx <= x <= maxx and miny <= y <= maxy
+    check("data.tma: placed objects lie inside the map", inside == total,
+          f"{inside}/{total} objects within their map's XY extent")
+
+    # Buildings rest on the ground, which ties mission space to terrain space.
+    residuals = []
+    for m in parsed:
+        if m.map_name not in meshes:
+            continue
+        mesh = meshes[m.map_name]
+        for o in m.objects:
+            if o.kind != mission.KIND_BUILDING:
+                continue
+            h = mesh.height_at(o.position[0], o.position[1])
+            if h is not None:
+                residuals.append(o.position[2] - h)
+    residuals.sort()
+    median = residuals[len(residuals) // 2] if residuals else 999.0
+    check("data.tma: buildings sit on the terrain surface", abs(median) < 1.0,
+          f"median height above ground {median:+.3f} over {len(residuals)} buildings")
+
+    # Definition references must resolve, which is what makes the object
+    # records readable rather than merely parseable.
+    statics = {
+        e.name.lower()
+        for e in NResArchive.open(game / "objects.rlb")
+        if e.tag == "STAT"
+    }
+    good = bad = 0
+    for m in parsed:
+        for o in m.objects:
+            if o.is_static:
+                good += o.path.lower() in statics
+                bad += o.path.lower() not in statics
+            else:
+                f = game / o.path.replace("\\", "/")
+                hit = f.exists()
+                if not hit and f.parent.exists():
+                    hit = f.name.lower() in {x.name.lower() for x in f.parent.iterdir()}
+                good += hit
+                bad += not hit
+    check("data.tma: every object reference resolves", bad == 0,
+          f"{good}/{good + bad} -- UNITS/*.dat on disk, scenery as STAT in objects.rlb")
+
+    # ClanID indexes the clan list positionally; it is not the clan's own
+    # `index` field, which starts at 1 and repeats across campaign missions.
+    owned = sum(1 for m in parsed for o in m.objects if o.clan_id is not None)
+    in_range = sum(
+        1 for m in parsed for o in m.objects
+        if o.clan_id is not None and 0 <= o.clan_id < len(m.clans)
+    )
+    check("data.tma: ClanID is a 0-based index into the clan list",
+          in_range == owned, f"{in_range}/{owned} object ClanIDs in range")
+
+    # Corroboration: on skirmish and multiplayer maps, where each clan holds a
+    # distinct base, an object's clan should be the one whose base it sits near.
+    near = near_total = 0
+    for m in parsed:
+        if not m.source.parent.name.startswith(("Single", "Multi")):
+            continue
+        bases = [c.base for c in m.clans]
+        for o in m.objects:
+            if o.clan_id is None or not (0 <= o.clan_id < len(bases)):
+                continue
+            x, y, _ = o.position
+            dists = [math.dist((x, y), b) for b in bases]
+            near_total += 1
+            near += dists.index(min(dists)) == o.clan_id
+    ratio = near / near_total if near_total else 0.0
+    check("data.tma: objects belong to the clan whose base they sit at",
+          ratio > 0.95,
+          f"{near}/{near_total} ({ratio:.1%}) on skirmish and multiplayer maps")
+
+
 def check_minimap_agreement(check, game: Path) -> None:
     """The strongest check available: our terrain vs the art the game ships."""
     pairs = [("SC_3", "sc3.tex"), ("Tut_1", "tut1.tex"), ("ILKON", "ilkon.tex"), ("K1F", "k1f.tex")]
@@ -222,7 +331,7 @@ def run(game: Path) -> int:
     print(f"verifying against {game}\n")
     checks = (
         check_nres, check_texm, check_terrain, check_uv,
-        check_water, check_minimap_agreement,
+        check_water, check_minimap_agreement, check_missions,
     )
     for fn in checks:
         fn(check, game)
