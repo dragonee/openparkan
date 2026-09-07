@@ -1,26 +1,98 @@
 # TODO — renderer
 
-What is left to draw a Parkan scene correctly. Ordered by how much each item
-costs you in a picture, not by how interesting it is.
+What is left to draw a Parkan scene correctly, and what has been closed.
+Ordered by how much each item costs you in a picture, not by how interesting
+it is.
 
 Format questions that do not affect rendering (save games, the network
 protocol, `.scr` semantics, leftover `data.tma` words) live in
 [docs/06-open-questions.md](docs/06-open-questions.md).
 
-Status of what already works is in the [README](README.md); every claim below
-was measured against a real install and can be re-derived with
-`uv run openparkan verify`.
+Every figure below was measured against a real install and can be re-derived
+with `uv run openparkan verify`.
+
+---
+
+## 0. Done
+
+Closed, with what the answer turned out to be. A question with its answer
+written down is a question nobody reopens.
+
+- [x] **Node poses.** Stream 8 is 24-byte keys: a `float32[3]` translation, a
+      `float32` frame time, and the rotation as `int16[4]` over 32767 in
+      `(w, x, y, z)` order — **34038 of 34049** are unit length, and they read
+      conjugated because the game is left-handed. Composing them reaches the
+      model's own authored box on **305 of 434** meshes against 237 without.
+      → [docs/07-objects.md](docs/07-objects.md)
+- [x] **Unit scale.** Not a thing. The "chassis are 1/20 too small" reading
+      came from measuring an *unposed* chassis; posed, they run 1.5 to 30
+      units against buildings of 40 to 215.
+- [x] **The vertical datum for buildings.** There is no datum. A mission puts
+      model z = 0 at the given height and nothing else: over 864 placements a
+      building's origin lands a median **0.00** from the terrain under it and
+      a unit's lowest exterior vertex **0.08**. The "rest it on its base"
+      heuristic this replaced lifted `fr_b_bunker` 23 units into the air.
+- [x] **Component attachment.** A `.dat` is a tree written depth first —
+      **458 of 458** assemblies consume their child counts exactly — and a
+      component's second field is the node index in its *parent's* mesh.
+      **946 of 946** guns and **468 of 468** turrets land on a geometry-less
+      `Base_*` node. Units draw assembled instead of as a bare chassis.
+- [x] **The slot index.** `[variant * 5 + lod]`, not `[lod * 5 + group]`.
+      Level 0 alone reproduces the authored box exactly on **302 of 434**
+      meshes against 231 for all five together. The viewer had been drawing
+      four levels of detail on top of one another — 381k triangles where 229k
+      was right.
+- [x] **The terrain's second texture layer.** Stream 14 is the weight of
+      layer 1: exactly 1.0 on **all 258046** vertices no layer-2 face touches,
+      and below it on 19663 of the 41404 that one does. Ground transitions
+      blend instead of ending at a polygon edge.
+      → [docs/03-terrain.md](docs/03-terrain.md)
+- [x] **Palettised transparency.** There is none — the palette's fourth byte
+      is constant on all 15 palettised textures. Alpha lives in the 4444 and
+      8888 formats, on **241 of 393** textures, and was being flattened away;
+      foliage was drawing as solid slabs. → [docs/02-texm.md](docs/02-texm.md)
+- [x] **Animated and special materials.** Terrain layer names are *material*
+      names: **270 of 270** resolve through `Material.lib`, which is the whole
+      of the "eight unresolvable special materials". `WATER_M` is one layer of
+      ten frames, and water is blue because its material is `#4d6aff` — its
+      texture is a neutral grey ripple.
+- [x] **Lightmaps.** `lightmap.lib` is 25 atlases named by a `.wea`'s
+      `LIGHTMAPS` section, and mesh stream 18 is their UV set — over **1024**,
+      not 256, exact to the half-texel inset on all 21. Of the 435 object
+      meshes, 21 carry both and **none carries one without the other**.
+- [x] **Skyboxes.** `sky.ske` is not a skybox: it is an *atmosphere*, a day
+      cycle of colour keyframes, and all **29 files parse to the byte** (656
+      keyframes, every one with a valid time, every first section sorted).
+      → [docs/10-sky.md](docs/10-sky.md)
+- [x] **The sky textures.** `sky.wea`'s slot index is the role — all 29
+      missions fill the same nine slots — and **261 of 261** slot names
+      resolve through `Material.lib`. A material picks a **sub-image** as well
+      as a texture: `ENV_SUN` and `ENV_MOON` are both `SUN.0`, at cells 0 and
+      2, which is where each one sits.
+- [x] **Backface culling.** Winding is consistent: **434 of 435** meshes wind
+      over 95% of their triangles the same way as their own vertex normals.
+      Everything draws front-face now except cutouts, which stay two-sided
+      because a tree is a pair of crossed planes.
+- [x] **The batch material's high byte.** It marks the lit batches: the 21
+      meshes with a `0x00` batch are exactly the 21 with a lightmap, and
+      **51324 of 51324** of their vertices carry a lightmap UV against 1268 of
+      85347 under `0xFF`.
+- [x] **Terrain patches** — a negative result. Face field 13 is *not* spatial:
+      only 25 of 348 groups are even 20% tighter than a random subset of the
+      same size, so there is nothing there to cull by.
+- [x] **Coplanar geometry.** Two causes, both fixed. The terrain's two ground
+      layers now share a single pass — bucketing faces by the pair costs 5 to
+      8 groups per map against 3 to 5 — and the file's own duplicated faces
+      are filtered: **46283 of 275882** faces across the 33 maps repeat a
+      triangle already in the list, and drawing both copies made the walkable
+      ground flicker.
 
 ---
 
 ## 1. Wrong on screen today
 
-These produce visibly incorrect output. Fix in this order.
-
-*(Everything that used to be in this section — node poses, unit scale, the
-vertical datum, and component attachment — is done; see
-[docs/07-objects.md](docs/07-objects.md). What is left here came out of doing
-it.)*
+These produce visibly incorrect output. Fix in this order. All three came out
+of doing the pose work above.
 
 ### 1.1 A unit renders in its rest pose, not standing
 
@@ -108,19 +180,19 @@ Blocks any in-engine interface work and nothing else.
 
 No reverse engineering needed; just work.
 
-- **LOD switching.** All four levels of each variant are parsed and
+- [ ] **LOD switching.** All four levels of each variant are parsed and
   `slots_for_lod` takes the level; the viewer always asks for 0. Switching by
   screen size is a payload change, not a format question.
-- **Terrain culling.** There is no patch id to cull by: face field 13 turned
+- [ ] **Terrain culling.** There is no patch id to cull by: face field 13 turned
   out not to be spatial (see docs/06-open-questions.md), so a renderer has to
   build its own grid, which is what `LandMesh._build_index` already does for
   height queries.
-- **Alpha ordering.** Cutouts need none, which is why they are what the
+- [ ] **Alpha ordering.** Cutouts need none, which is why they are what the
   viewer uses, but the graded textures behind effects and the sky will.
-- **Coplanar geometry.** Nothing in the scene should be drawn twice at the
-  same depth. Two things caused that: the terrain's two ground layers, now
-  one pass, and the file's own duplicated faces, now filtered by
-  `LandMesh.distinct_faces` (see docs/03-terrain.md).
+- [x] **Coplanar geometry** — done; see section 0. Nothing in the scene should
+  be drawn twice at the same depth, and two things were: the terrain's two
+  ground layers, now one pass, and the file's own duplicated faces, now
+  filtered by `LandMesh.distinct_faces`.
 
 ## 4. Known-unknowns carried in the readers
 

@@ -132,10 +132,12 @@ tried.
 
 ## What is left
 
-Renderer work is triaged in [TODO.md](TODO.md), worst-looking first: the
-second layer of a terrain material, effects, the two `NL` archives that hold
-the fonts and 2D sprites, and a handful of fields carried through the readers
-without being understood.
+Renderer work is triaged in [TODO.md](TODO.md), which records both what is
+closed and what the answer turned out to be. Still open, worst-looking first:
+the sky's weather layers (lens flares, snow and rain), the second layer of a
+terrain material, effects, the two `NL` archives that hold the fonts and 2D
+sprites, and a handful of fields carried through the readers without being
+understood.
 
 ## Documentation
 
