@@ -512,16 +512,46 @@ def check_objects(check, game: Path) -> None:
                     absolute_use += (
                         len({i for t in m.raw_triangles for i in t}) / m.vertex_count
                     )
-            for part in m.parts:
+            for node in m.nodes:
                 parts_seen += 1
                 interior_tot += 1
-                interior_ok += part.is_interior == part.name.lower().startswith("i")
+                interior_ok += node.is_interior == node.name.lower().startswith("i")
     check("MESH: batch indices are relative to the batch's first vertex",
           relative == batched,
           f"{relative}/{batched} meshes -- every index is below its own batch's vertex count")
     check("MESH: resolved indices reference every vertex", full_use == batched,
           f"{full_use}/{batched} meshes reach 100% of their vertices "
           f"(reading the indices as absolute reaches {absolute_use / max(batched, 1):.0%})")
+    # Slots and LOD selection: a node picks geometry with
+    # slot_index[lod * 5 + group], so a renderer can draw one level of detail
+    # and leave the building's interior out.
+    slot_ok = slot_range = sel = slotted = 0
+    for name in ARCHIVES:
+        ar = NResArchive.open(game / name)
+        for e in ar:
+            if e.tag != "MESH":
+                continue
+            m = objmesh.parse(ar.read(e), e.name)
+            if not m.slots or not m.nodes:
+                continue
+            slotted += 1
+            slot_ok += all(
+                i == objmesh.NO_SLOT or i < len(m.slots)
+                for n in m.nodes for i in n.slot_index
+            )
+            slot_range += all(
+                s.first_triangle + s.triangle_count <= m.triangle_count
+                and s.first_batch + s.batch_count <= len(m.batches)
+                for s in m.slots
+            )
+            sel += bool(m.select(0, interior=False)) or not m.triangle_count
+    check("MESH: node slot indices address real slots", slot_ok == slotted,
+          f"{slot_ok}/{slotted} meshes")
+    check("MESH: slot ranges lie inside the triangle and batch lists",
+          slot_range == slotted, f"{slot_range}/{slotted} meshes")
+    check("MESH: every model yields exterior LOD 0 geometry", sel == slotted,
+          f"{sel}/{slotted} meshes -- what a renderer should draw")
+
     check("MESH: sub-object flag bit 0 marks interior geometry",
           interior_ok == interior_tot,
           f"{interior_ok}/{interior_tot} sub-objects agree with the o*/i* naming")

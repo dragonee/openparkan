@@ -20,7 +20,7 @@ practice — format facts yes, code no — is set out in
 | **3D terrain viewer** | done — self-contained HTML, no server |
 | **`data.tma` missions** | done — all 29 parse to EOF, 864 objects placed |
 | **`objects.rlb`, unit assemblies** | done — 590 records, 458 assemblies, 5708 components |
-| **Object meshes** | geometry, materials and textures done; interior/exterior separation not yet |
+| **Object meshes** | geometry, materials, textures, LOD and interior/exterior selection; node poses outstanding |
 | **Materials** | done — `Material.lib`, 905 materials; 99.4% of batches reach a texture |
 | **Building interiors** | done — path graph for 29 buildings |
 | **Control points** | done — 284 members, 3599 named attachment points |
@@ -110,6 +110,9 @@ PASS  MESH: a batch's material indexes the model's wear 434/434 meshes with a we
 PASS  Material.lib: batch -> wear -> MAT0 -> Texm resolves 15053/15138 batches reach a real texture (905 materials)
 PASS  MESH: batch indices are relative to the batch's first vertex 435/435 meshes -- every index is below its own batch's vertex count
 PASS  MESH: resolved indices reference every vertex  435/435 meshes reach 100% of their vertices (reading the indices as absolute reaches 41%)
+PASS  MESH: node slot indices address real slots     434/434 meshes
+PASS  MESH: slot ranges lie inside the triangle and batch lists 434/434 meshes
+PASS  MESH: every model yields exterior LOD 0 geometry 434/434 meshes -- what a renderer should draw
 PASS  MESH: sub-object flag bit 0 marks interior geometry 1845/1845 sub-objects agree with the o*/i* naming
 PASS  MESH: buildings carry an interior path graph   29 of 30 fortif.rlb meshes, 1056 nodes, 1096 links
 PASS  MESH: path graph links join real nodes         1096/1096 links
@@ -161,8 +164,17 @@ analysis/       disassembly scaffolding (not part of the library)
 
 - [valentineus/fparkan](https://github.com/valentineus/fparkan) — a Rust
   monorepo covering NRes and RsLi archives, static MSH geometry, `Texm`,
-  `WEAR`, `MAT0` and terrain, with a headless runtime and a partial Vulkan
-  renderer. The furthest-along project by some distance.
+  `WEAR`, `MAT0` and terrain, with a headless runtime and a Vulkan renderer.
+  The furthest-along project by some distance, and actively maintained.
+
+  Its `docs/reference/msh.md` supplied two facts this project had failed to
+  find on its own: that stream 2 is a 140-byte header followed by 68-byte
+  geometry slots, and that a node's fifteen trailing words are
+  `slot_index[lod * 5 + group]`. Both were checked against the shipped data
+  before being used — the slot layout accounts for stream 2 exactly on all 434
+  meshes. fparkan is GPL-2.0 and this project is MIT, so only its
+  documentation was read, never its source; a file format is a fact, an
+  implementation of one is not.
 - [AlexKimov/parkan-file-formats](https://github.com/AlexKimov/parkan-file-formats)
   — 010Editor templates and QuickBMS scripts, mostly for Parkan 1's `.lib`.
 

@@ -97,12 +97,13 @@ streams:
 | 5 | 4 | vertex | UV, `uint16` 8.8 fixed point |
 | 6 | 6 | face | triangle, three `uint16` indices — **relative to the batch** |
 | 9 | 32 | sub-object | sub-object name |
-| 1 | 38 | sub-object | flags, parent, part list |
+| 1 | 38 | node | flags, parent, `slot_index[lod * 5 + group]` |
 | 7 | 16 | face | face record: fields 1–3 are edge neighbours; the rest unresolved |
 | 13 | 20 | batch | draw batch: material, index range, vertex range |
 | 17 | 20 | node | building interior path graph — see below |
 | 10 | 4 | sub-object | one `uint32`, zero throughout |
-| 2, 8, 15, 19 | — | — | unresolved |
+| 2 | 68 | slot | 140-byte header, then triangle and batch ranges |
+| 8, 15, 19 | — | — | animation keys and auxiliary streams, unresolved |
 
 Streams 4 and 5 use exactly the encodings established for the terrain, which
 is a useful independent confirmation of both: the normals come out unit-length
@@ -129,11 +130,40 @@ interiors hang off `o01`, and `o03`, `o04`, `Base_TL` chain off `o02`.
 This explains `objects.rlb`'s `INTO` and `EXTO` record tags — interior and
 exterior objects — and why only buildings have a path graph.
 
-**Not yet solved:** how a sub-object reaches its triangles. Its part list
-indexes stream 2 (34 elements on the bunker, variable-length records), and
-nothing found so far connects those to batches. Until that is mapped, a
-renderer draws the inside and the outside superimposed, which is what a
-building looks like in the viewer today.
+### Nodes, slots and levels of detail
+
+A node's 38-byte record is:
+
+```
+uint16   flags            bit 0 set = interior
+uint16   parent           node index, 0xFFFF for a root
+uint16   animation map start
+uint16   fallback key     selects the node's static pose
+uint16   slot_index[15]   addressed as [lod * 5 + group], 0xFFFF = none
+```
+
+and stream 2 is a **140-byte header followed by 68-byte slots**:
+
+```
+uint16   first triangle, triangle count
+uint16   first batch, batch count
+float32  aabb min[3], aabb max[3]
+float32  bounding sphere centre[3], radius
+uint32   x5
+```
+
+`140 + 68 * count` accounts for stream 2 exactly on **all 434 meshes**. This
+is what a renderer needs: pick a level of detail, skip the interior nodes,
+follow each node's slots to a run of triangles.
+
+`fr_b_bunker` resolves to 1024 exterior triangles at LOD 0 out of 3656 — the
+other 2632 are its interior and its LOD 1. Drawing all of them at once is what
+makes a building look like scrambled geometry.
+
+**Still missing: node poses.** The fallback key selects a static pose from
+stream 8, and a child's pose composes with its parent's. Without that, models
+whose parts are authored around a pose still come out wrong — `fr_l_gener` is
+the clear example.
 
 Sub-object names describe the model's construction: `s_tree_0_06` is
 `Base_TM`, `leaf1_m1o1`, `leaf2_m1o1`, `leaf3_m1o1`.

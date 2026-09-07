@@ -100,3 +100,24 @@ disassembly proper: the NRes element-count field. It gave stream 13 a stride of
 20 bytes rather than the 12 a hex dump suggested, and at 20 bytes the stream is
 plainly a list of draw batches. There was never a per-face material field to
 find.
+
+
+## Reading other people's work
+
+Disassembly is not the only source of facts. `Land.map`'s cell array and the
+mesh batch list came out of the binaries; the mesh **slot** layout came out of
+[fparkan](https://github.com/valentineus/fparkan)'s format reference, after
+this project had spent a round failing to find it — including an exhaustive
+search over `header + count * unit + tail` layouts that never tried a fixed
+140-byte header.
+
+The same discipline applies as with a binary, plus one more consideration.
+fparkan is GPL-2.0; this project is MIT. So: **documentation only, never
+source.** A file format is a fact and facts are not copyrightable; a particular
+implementation is expression and is. Every borrowed fact was then checked
+against the shipped data before being relied on — `140 + 68 * count` accounts
+for stream 2 exactly on all 434 meshes, and every node slot index addresses a
+real slot.
+
+That check is not a formality. It is what turns someone else's claim into
+something this project knows.

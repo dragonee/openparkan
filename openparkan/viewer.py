@@ -267,15 +267,56 @@ class ModelLibrary:
         except KeyError:
             wear = []
         m = objmesh.parse(archive.read_name(ref.member), ref.member, wear)
-        # Positions only: the viewer flat-shades, so per-vertex normals would
-        # be ignored and are not worth the bytes.  Positions are quantised to
-        # int16 across the model's own bounding box and restored with a scale
-        # and offset, which halves the geometry and costs about a thousandth
-        # of a model's size in precision.
-        # Game space is Z-up, the viewer is Y-up: (x, y, z) -> (x, z, -y).
-        # Quantise in the viewer's axis order, because a scale factor can
-        # rescale components but cannot reorder them.
-        (lox, loy, loz), (hix, hiy, hiz) = m.bounds()
+
+        # A model holds its interior, its exterior and up to three levels of
+        # detail at once.  Draw the outside at LOD 0 and nothing else.
+        wanted = []
+        for node in m.nodes:
+            if node.is_interior:
+                continue
+            for index in node.slots_for_lod(0):
+                if index < len(m.slots):
+                    slot = m.slots[index]
+                    wanted += list(range(slot.first_batch, slot.first_batch + slot.batch_count))
+        if not wanted:
+            wanted = list(range(len(m.batches)))
+        wanted = sorted(set(i for i in wanted if i < len(m.batches)))
+
+        # Compact to just the vertices those batches touch.
+        remap: dict[int, int] = {}
+        verts: list[int] = []
+        groups = []
+        idx_values: list[int] = []
+        for bi in wanted:
+            b = m.batches[bi]
+            first, count = b.triangles
+            start = len(idx_values)
+            for t in range(first, min(first + count, len(m.triangles))):
+                for v in m.triangles[t]:
+                    if v not in remap:
+                        remap[v] = len(verts)
+                        verts.append(v)
+                    idx_values.append(remap[v])
+            texture = None
+            if 0 <= b.material < len(wear):
+                texture = self.materials.texture_for(wear[b.material])
+            groups.append({
+                "start": start,
+                "count": len(idx_values) - start,
+                "material": self.textures.resolve(texture) if texture else -1,
+            })
+        groups = [g for g in groups if g["count"]]
+        if not verts:
+            self._by_ref[key] = None
+            return None
+
+        # Quantise in the viewer's axis order: game space is Z-up, the viewer
+        # is Y-up, and a scale factor can rescale components but not reorder
+        # them.
+        pts = [m.positions[v] for v in verts]
+        lox, hix = min(p[0] for p in pts), max(p[0] for p in pts)
+        loy, hiy = min(p[1] for p in pts), max(p[1] for p in pts)
+        loz, hiz = min(p[2] for p in pts), max(p[2] for p in pts)
         centre = ((lox + hix) / 2, (loz + hiz) / 2, -(loy + hiy) / 2)
         half = [
             max((hix - lox) / 2, 1e-6),
@@ -283,36 +324,23 @@ class ModelLibrary:
             max((hiy - loy) / 2, 1e-6),
         ]
         pos = bytearray()
-        for x, y, z in m.positions:
+        uv = bytearray()
+        for v in verts:
+            x, y, z = m.positions[v]
             for value, mid, span in zip((x, z, -y), centre, half, strict=True):
                 q = round((value - mid) / span * 32767)
                 pos += struct.pack("<h", max(-32767, min(32767, q)))
-        # UVs are 8.8 fixed point in the file; kept raw and unscaled in the
-        # shader by the material's texture.repeat, exactly as for the terrain.
-        uv = bytearray()
-        for u, v in m.uv:
+            u, w = m.uv[v]
             uv += struct.pack(
                 "<2H",
                 min(0xFFFF, round(u * objmesh.UV_FIXED_POINT_SCALE)),
-                min(0xFFFF, round(v * objmesh.UV_FIXED_POINT_SCALE)),
+                min(0xFFFF, round(w * objmesh.UV_FIXED_POINT_SCALE)),
             )
 
-        wide = m.vertex_count > 0xFFFF
+        wide = len(verts) > 0xFFFF
         idx = bytearray()
-        for tri in m.triangles:
-            idx += struct.pack("<3I" if wide else "<3H", *tri)
-
-        # One draw group per batch, each with the texture its material names.
-        groups = []
-        for b in m.batches:
-            texture = None
-            if 0 <= b.material < len(wear):
-                texture = self.materials.texture_for(wear[b.material])
-            groups.append({
-                "start": b.first_index,
-                "count": b.index_count,
-                "material": self.textures.resolve(texture) if texture else -1,
-            })
+        for v in idx_values:
+            idx += struct.pack("<I" if wide else "<H", v)
 
         self._by_ref[key] = len(self.models)
         self.models.append({
@@ -324,7 +352,7 @@ class ModelLibrary:
             "scale": [round(v, 4) for v in half],
             "offset": [round(v, 4) for v in centre],
             "groups": groups,
-            "tris": m.triangle_count,
+            "tris": len(idx_values) // 3,
         })
         return self._by_ref[key]
 

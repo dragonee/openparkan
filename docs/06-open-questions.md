@@ -77,28 +77,11 @@ mapped.
   vertex or face count.
 - `Land.msh` stream 2: 737 float3 on SC_3. The first 8 are the map's bounding
   box corners; the remaining 729 (= 27³) look like a spatial subdivision.
-- **How a sub-object reaches its triangles.** Interior and exterior parts are
-  cleanly identified (stream 1, flag bit 0), but their part lists index
-  stream 2, whose variable-length records have not been mapped to batches. A
-  renderer therefore draws a building's inside and outside on top of each
-  other. This is the most visible remaining defect.
-- Stream 2's record layout: 21 elements in 1568 bytes on `fr_m_brige`, 34 in
-  2452 on `fr_b_bunker`, 86 in 5988 on `fr_l_gener` — none divides evenly, so
-  records vary in size. They open with float32 triples that read as bounding
-  geometry (the first record is the mesh's eight bounding-box corners). An
-  exhaustive search over `header + count*unit + tail` layouts finds none that
-  consumes all five test cases exactly, so the records are more structured
-  than a count followed by an array.
-
-  Things already ruled out for the sub-object → triangle mapping: a per-vertex
-  part id (streams 4 and 15 have no column with the right cardinality), a
-  per-face one (stream 7), the batch flag byte (0xFF/0x00 — both groups have
-  index counts divisible by 3, so it is not a primitive type either), backface
-  culling (interior faces are not uniformly back-facing), and normal
-  orientation relative to the mesh centre (separates one building, not the
-  others).
-- Stream 8: one 24-byte record per sub-object opening with a float3 that reads
-  as a pivot (the bridge's are 0,0,0 / ±8.96,-23.04,-12.16 / 0,57.6,0).
+- **Node poses.** A node's fallback key selects a static pose out of stream 8,
+  and a child composes with its parent. Without it, models authored around a
+  pose render wrong even with the correct slot selection — `fr_l_gener` is the
+  clear case. Stream 8 (animation keys) and stream 19 (frame map) are the
+  remaining geometry work.
 - Face record fields 10, 11, 12, and field 0 (near-constant per mesh).
 - `MAT0`'s per-layer stride, and the colour bytes around each texture name.
 - The high byte of a draw batch's material word: 0xFF on 14166 batches and

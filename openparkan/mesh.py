@@ -7,8 +7,8 @@ the same numeric-type-as-stream-selector convention as the terrain
 
     id  stride  indexed by  contents
     --  ------  ----------  ---------------------------------------------
-     1      38  sub-object  flags, parent, and a list of part indices
-     2     ---  ---         floats; opens with bounding-box corners
+     1      38  node        flags, parent, and slot_index[lod * 5 + group]
+     2      68  slot        a 140-byte header, then geometry slots
      3      12  vertex      position, float32 x/y/z
      4       4  vertex      normal, int8 x/y/z / 127, then one padding byte
      5       4  vertex      UV, uint16 8.8 fixed point
@@ -52,6 +52,12 @@ STREAM_BATCH = 13
 STREAM_PATH_GRAPH = 17
 
 SUBOBJECT_HEADER_SIZE = 38
+SLOT_HEADER_SIZE = 0x8C
+SLOT_SIZE = 68
+#: A node selects geometry with slot_index[lod * LOD_GROUPS + group].
+LOD_COUNT = 3
+LOD_GROUPS = 5
+NO_SLOT = 0xFFFF
 #: Bit 0 of a sub-object's flags marks interior geometry.
 SUBOBJECT_INTERIOR = 0x0001
 NO_PARENT = 0xFFFF
@@ -72,6 +78,18 @@ UV_FIXED_POINT_SCALE = 256.0
 
 
 @dataclass
+class Slot:
+    """A run of triangles and batches that a node can select."""
+
+    first_triangle: int
+    triangle_count: int
+    first_batch: int
+    batch_count: int
+    aabb_min: tuple[float, float, float]
+    aabb_max: tuple[float, float, float]
+
+
+@dataclass
 class Subobject:
     """One named part of a model.
 
@@ -85,13 +103,18 @@ class Subobject:
     name: str
     flags: int
     parent: int
-    #: Indices into stream 2's part list; how those reach triangles is not
-    #: yet known, so interior geometry cannot be filtered out yet.
-    parts: list[int]
+    fallback_key: int
+    #: 15 slot indices, addressed as ``[lod * 5 + group]``; NO_SLOT where the
+    #: node has no geometry for that combination.
+    slot_index: list[int]
 
     @property
     def is_interior(self) -> bool:
         return bool(self.flags & SUBOBJECT_INTERIOR)
+
+    def slots_for_lod(self, lod: int) -> list[int]:
+        base = lod * LOD_GROUPS
+        return [i for i in self.slot_index[base : base + LOD_GROUPS] if i != NO_SLOT]
 
 
 @dataclass
@@ -127,11 +150,31 @@ class ObjectMesh:
     subobjects: list[str] = field(default_factory=list)
     texture_names: list[str] = field(default_factory=list)
     batches: list[Batch] = field(default_factory=list)
-    parts: list[Subobject] = field(default_factory=list)
+    nodes: list[Subobject] = field(default_factory=list)
+    slots: list[Slot] = field(default_factory=list)
 
     @property
     def has_interior(self) -> bool:
-        return any(p.is_interior for p in self.parts)
+        return any(n.is_interior for n in self.nodes)
+
+    def select(self, lod: int = 0, interior: bool = False) -> list[tuple[int, int, int]]:
+        """Triangles for one level of detail, inside or outside.
+
+        A building holds both its inside and its outside, and up to three
+        levels of detail, in one mesh.  Drawing the lot at once is what makes
+        a building look like scrambled geometry.
+        """
+        out: list[tuple[int, int, int]] = []
+        for node in self.nodes:
+            if node.is_interior != interior:
+                continue
+            for index in node.slots_for_lod(lod):
+                if index >= len(self.slots):
+                    continue
+                slot = self.slots[index]
+                stop = slot.first_triangle + slot.triangle_count
+                out += self.triangles[slot.first_triangle : stop]
+        return out
 
     def material_of_triangle(self, index: int) -> int | None:
         """Material index for a triangle, via the batch that covers it."""
@@ -200,14 +243,28 @@ def parse(blob: bytes, name: str = "<mesh>", texture_names: list[str] | None = N
     if len(headers) == n_parts * SUBOBJECT_HEADER_SIZE:
         for i in range(n_parts):
             words = struct.unpack_from("<19H", headers, i * SUBOBJECT_HEADER_SIZE)
-            listed = [w for w in words[3:] if w != 0xFFFF]
             parts.append(
                 Subobject(
                     name=subobjects[i] if i < len(subobjects) else "",
                     flags=words[0],
                     parent=words[1],
-                    parts=listed,
+                    fallback_key=words[3],
+                    slot_index=list(words[4:19]),
                 )
+            )
+
+    slots = []
+    slot_entry = entries.get(STREAM_BOUNDS)
+    raw_slots = stream.get(STREAM_BOUNDS, b"")
+    n_slots = slot_entry.element_count if slot_entry else 0
+    if len(raw_slots) == SLOT_HEADER_SIZE + n_slots * SLOT_SIZE:
+        for i in range(n_slots):
+            o = SLOT_HEADER_SIZE + i * SLOT_SIZE
+            ts, tc, bs, bc = struct.unpack_from("<4H", raw_slots, o)
+            slots.append(
+                Slot(ts, tc, bs, bc,
+                     struct.unpack_from("<3f", raw_slots, o + 8),
+                     struct.unpack_from("<3f", raw_slots, o + 20))
             )
 
     batches = []
@@ -244,7 +301,8 @@ def parse(blob: bytes, name: str = "<mesh>", texture_names: list[str] | None = N
         subobjects=subobjects,
         texture_names=texture_names or [],
         batches=batches,
-        parts=parts,
+        nodes=parts,
+        slots=slots,
     )
 
 
