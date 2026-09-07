@@ -118,7 +118,9 @@ No reverse engineering needed; just work.
 - **Alpha ordering.** Cutouts need none, which is why they are what the
   viewer uses, but the graded textures behind effects and the sky will.
 - **Coplanar geometry.** Nothing in the scene should be drawn twice at the
-  same depth; the terrain's two ground layers share one pass for that reason.
+  same depth. Two things caused that: the terrain's two ground layers, now
+  one pass, and the file's own duplicated faces, now filtered by
+  `LandMesh.distinct_faces` (see docs/03-terrain.md).
 
 ## 4. Known-unknowns carried in the readers
 

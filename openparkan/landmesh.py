@@ -14,6 +14,9 @@ selector.  Every stream is a flat array indexed by vertex or by face.
     18       4  vertex      layer-2 UV, uint16 8.8 fixed point
     14       4  vertex      layer blend weight, float32 in 0..1
     11       4  face        (face index, flags)
+
+Between a fifth and two fifths of a map's faces are stored twice at identical
+positions; see ``LandMesh.distinct_faces``.
     21      28  face        the face record, see FACE below
 
 FACE, as 14 little-endian uint16::
@@ -165,6 +168,32 @@ class LandMesh:
             if best is None or z > best:
                 best = z
         return best
+
+    def distinct_faces(self) -> list[int]:
+        """One face per set of triangles that occupy the same three points.
+
+        Between a fifth and two fifths of a map's faces are stored **twice**,
+        at bit-identical positions -- 84% of the flat ``L32`` ground on map 23
+        alone.  The two copies carry the same layer-1 texture, the same UVs,
+        the same normals and the same winding, and agree on whether they have
+        a second layer; they differ only in incidental per-vertex layer-2 data
+        and, on about an eighth of them, the face's patch word.  The engine
+        presumably draws one patch or the other and never both.
+
+        A renderer that draws the file as it stands draws those triangles
+        twice at the same depth, and they z-fight -- which is what makes the
+        walkable ground flicker.  This returns the first face of each set, in
+        file order, so each surface is drawn once.
+        """
+        seen: dict[tuple, int] = {}
+        keep = []
+        for i, tri in enumerate(self.faces):
+            key = tuple(sorted(self.positions[v] for v in tri))
+            if key in seen:
+                continue
+            seen[key] = i
+            keep.append(i)
+        return keep
 
     def texture_name(self, layer: int, index: int) -> str | None:
         table = self.layer1_names if layer == 1 else self.layer2_names

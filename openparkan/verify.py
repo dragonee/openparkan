@@ -199,6 +199,47 @@ def check_layers(check, game: Path) -> None:
     check("Land.msh: a second texture layer covers part of every map",
           with_layer2 == len(maps),
           f"{faces_2}/{faces_1} faces across {with_layer2}/{len(maps)} maps carry one")
+    # Coincident faces: the file stores a large minority of its triangles
+    # twice, which z-fights if a renderer draws the list as it stands.
+    stored = drawn = 0
+    same_uv = same_normal = same_layer = sets = 0
+    for folder in gamedir.maps(game):
+        m = landmesh.load(folder / "Land.msh")
+        stored += m.face_count
+        keep = m.distinct_faces()
+        drawn += len(keep)
+        groups: dict[tuple, list[int]] = {}
+        for i, tri in enumerate(m.faces):
+            groups.setdefault(
+                tuple(sorted(m.positions[v] for v in tri)), []
+            ).append(i)
+        for members in groups.values():
+            if len(members) < 2:
+                continue
+            sets += 1
+            a, b = members[0], members[1]
+            first = {m.positions[v]: v for v in m.faces[a]}
+            second = {m.positions[v]: v for v in m.faces[b]}
+            if set(first) != set(second):
+                continue
+            same_uv += all(m.uv1[first[k]] == m.uv1[second[k]] for k in first)
+            same_normal += all(
+                m.normals[first[k]] == m.normals[second[k]] for k in first
+            )
+            same_layer += (
+                (m.face_tex2[a] == landmesh.NO_TEXTURE)
+                == (m.face_tex2[b] == landmesh.NO_TEXTURE)
+            )
+    check("Land.msh: a large minority of faces are stored twice",
+          drawn < stored * 0.9,
+          f"{stored - drawn} of {stored} faces across the 33 maps repeat a "
+          f"triangle already in the list, in {sets} coincident sets")
+    check("Land.msh: the two copies are the same surface",
+          same_uv == sets and same_normal > sets * 0.99 and same_layer > sets * 0.99,
+          f"layer-1 UVs match on all {same_uv} sets, normals on {same_normal} "
+          f"and the second-layer flag on {same_layer} -- so a renderer can "
+          f"draw either copy and must not draw both")
+
     # A negative result, kept so nobody re-derives it: face field 13 is not a
     # spatial index.
     tight = loose = 0

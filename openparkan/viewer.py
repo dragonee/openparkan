@@ -322,8 +322,12 @@ def build_map_payload(mesh: landmesh.LandMesh, resolver: TextureResolver, name: 
     # 2 as a second, coplanar mesh made the walkable ground flicker: the two
     # passes compile to different shader programs, and their depths come out
     # a hair apart.
+    # A fifth to two fifths of a map's faces are stored twice at identical
+    # positions, so draw one of each pair or they z-fight.  See
+    # LandMesh.distinct_faces.
+    drawn_faces = mesh.distinct_faces()
     buckets: dict[tuple[int, int, bool], list[int]] = {}
-    for fi in range(mesh.face_count):
+    for fi in drawn_faces:
         key = (mesh.face_tex1[fi], mesh.face_tex2[fi], mesh.is_water(fi))
         buckets.setdefault(key, []).append(fi)
 
@@ -360,7 +364,8 @@ def build_map_payload(mesh: landmesh.LandMesh, resolver: TextureResolver, name: 
         "water": {"z": round(level, 2), "faces": len(wet)} if level is not None else None,
         "wetLayers": wet_layers,
         "vertexCount": nv,
-        "faceCount": mesh.face_count,
+        "faceCount": len(drawn_faces),
+        "storedFaces": mesh.face_count,
         "extent": [round(maxx - minx, 1), round(maxy - miny, 1)],
         # The recentring applied to the geometry, so mission markers given in
         # raw game coordinates can be placed into the same frame.
@@ -378,8 +383,7 @@ def build_map_payload(mesh: landmesh.LandMesh, resolver: TextureResolver, name: 
         "groups": groups,
         "materials": materials,
         "layer2Faces": sum(
-            1 for i in range(mesh.face_count)
-            if mesh.face_tex2[i] != landmesh.NO_TEXTURE
+            1 for i in drawn_faces if mesh.face_tex2[i] != landmesh.NO_TEXTURE
         ),
         "layer1": mesh.layer1_names,
         "layer2": mesh.layer2_names,

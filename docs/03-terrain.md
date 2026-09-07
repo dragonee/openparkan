@@ -207,3 +207,26 @@ draft assumed from `Iron_3D.ini`'s `EMBM=1`. They read as the 16-bit and
 32-bit variants of one texture, and `Iron_3D.ini` carries both `BITDEPTH` and
 `RENDER_QUALITY`, which is presumably what chose between them. Which index
 goes with which setting is not established, so the reader takes layer 0.
+
+## A large minority of faces are stored twice
+
+**46283 of the 275882 faces across the 33 maps repeat a triangle already in
+the list** — bit-identical positions, in 46215 coincident sets, almost all of
+them pairs. Per map it runs from a sixth to a fifth of the faces, and it is
+not spread evenly: on map 23, **84% of the flat `L32` ground is duplicated**
+against 20% of the surrounding `L33`, and duplicated faces are flatter than
+the rest (median height range 11.8 against 22.6). Those flat areas are the
+walkable ground.
+
+The two copies are the same surface. Layer-1 UVs match on **all 46215** sets,
+normals on 46126, winding on every one, and they always agree on whether the
+face has a second layer. What differs is incidental: the layer-2 UVs on about
+60% of pairs, the per-vertex blend on about 18%, and the face's patch word on
+about an eighth.
+
+Why the file is like this is not established — the engine presumably has each
+copy in a different patch and draws one or the other, never both. What matters
+for a renderer is that **drawing the list as it stands draws those triangles
+twice at the same depth**, and they z-fight: the walkable ground flickers as
+the camera moves. `LandMesh.distinct_faces()` returns the first face of each
+set, in file order, and the viewer draws that.
