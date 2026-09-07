@@ -122,6 +122,8 @@ NRes) — not yet inspected.
 
 ## Not looked at at all
 
-`*.ctl` controllers, `*.exp` explosions, `sky.ske` skyboxes, `UNITS/**/*.dat`
-unit definitions, `lightmap.lib`, `.scr` node semantics, the `.trf` streams,
-save games in `SAVE/`, and the network protocol.
+`*.ctl` controllers, `*.exp` explosions, `sky.ske` skyboxes, `lightmap.lib`,
+`.scr` node semantics, the `.trf` streams, save games in `SAVE/`, and the
+network protocol.
+
+The ones that hold back a picture are triaged in [../TODO.md](../TODO.md).

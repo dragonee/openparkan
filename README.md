@@ -127,6 +127,13 @@ That last check is the important one. The game ships pre-rendered minimaps in
 that art is an independent test of the whole chain, and it passes on every map
 tried.
 
+## What is left
+
+Renderer work is triaged in [TODO.md](TODO.md), worst-looking first: node
+poses, unit scale, the vertical datum for buildings, then fidelity — the second
+terrain texture layer, animated materials, multi-layer materials, palettised
+transparency, lightmaps, skyboxes.
+
 ## Documentation
 
 - [00-feasibility.md](docs/00-feasibility.md) — can this engine be rebuilt, and what would it take
