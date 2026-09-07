@@ -1,0 +1,43 @@
+[project]
+name = "openparkan"
+version = "0.1.0"
+description = "Clean-room readers for the data files of Parkan: Iron Strategy (1998)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+keywords = ["parkan", "reverse-engineering", "game-formats", "nres"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Topic :: Games/Entertainment",
+    "Topic :: Software Development :: Disassemblers",
+]
+# Deliberately empty: the toolkit runs on a bare interpreter so that anyone
+# can point it at a Steam install without a build step.
+dependencies = []
+
+[project.scripts]
+openparkan = "openparkan.cli:main"
+
+[project.urls]
+Documentation = "https://github.com/dragonee/openparkan/tree/main/docs"
+
+[dependency-groups]
+dev = ["ruff>=0.6"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["openparkan"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"openparkan/templates" = "openparkan/templates"

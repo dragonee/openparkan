@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+.venv/
+build/
+dist/
+*.egg-info/
+
+# generated output (the viewer template under openparkan/ is source, not output)
+/extracted/
+/textures/
+/*.html
+/*.png
+.ruff_cache/
