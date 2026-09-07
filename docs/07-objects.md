@@ -98,10 +98,11 @@ streams:
 | 6 | 6 | face | triangle, three `uint16` vertex indices |
 | 9 | 32 | sub-object | sub-object name |
 | 1 | 38 | sub-object | header, unresolved |
-| 7 | 16 | face | face record, unresolved |
+| 7 | 16 | face | face record: fields 1–3 are edge neighbours; the rest unresolved |
+| 13 | 20 | batch | draw batch: material, index range, vertex range |
+| 17 | 20 | node | building interior path graph — see below |
 | 10 | 4 | sub-object | one `uint32`, zero throughout |
-| 2, 8, 13, 15 | — | — | unresolved |
-| 17, 19 | 0 | — | always empty |
+| 2, 8, 15, 19 | — | — | unresolved |
 
 Streams 4 and 5 use exactly the encodings established for the terrain, which
 is a useful independent confirmation of both: the normals come out unit-length
@@ -119,14 +120,65 @@ ten sub-objects named `lf11_m1o1` through `lf33_m1o1` — leaf clusters. The
 foliage is alpha-textured planes, so it needs the texture assignment to read
 correctly.
 
-### Which texture a face uses is not known
+### Materials are per batch, not per face
 
-Each mesh has a `.wea` naming 2–4 textures, but nothing found so far selects
-between them per face. Face record field 0 is zero on every face of every
-mesh, and no other field has a range matching the texture count. The
-sub-object count sometimes equals the texture count (`s_tree_0_06`: 4 and 4)
-and sometimes does not (`s_stn_0_10`: 1 and 2). See
-[06-open-questions.md](06-open-questions.md).
+This is why the assignment resisted every search of the face record: **there
+is no per-face material field.** Stream 13 groups the index buffer into draw
+batches and names a material for each.
+
+```
+uint16  0, 0
+uint16  material          low byte indexes the wear; high byte 0xFF or 0x00
+uint16  0xFFFF
+uint16  index count       3 x the triangles in this batch
+uint16  first index       offset into stream 6
+uint16  0
+uint16  vertex count
+uint16  first vertex
+uint16  0
+```
+
+The batches tile the index buffer exactly — index counts sum to `3 × triangles`
+and the offsets are contiguous — on all 435 meshes. `fr_b_bunker` has 224
+batches over 39 materials and uses every one of them.
+
+The element count comes from the stream's own NRes directory entry, which is
+also how the 20-byte stride was pinned down; a hex dump alone suggested 12.
+
+### The material chain
+
+```
+mesh stream 13 batch
+  -> wear entry            the .wea palette, up to 46 material names
+     -> Material.lib MAT0  905 materials, each naming its texture layers
+        -> Textures.lib    a Texm, named exactly as the material spells it
+```
+
+**15053 of 15138 draw batches reach a real texture** this way. The 85 that do
+not are animation frames (`0FAIR.0`, `1FAIR.0`, …) held outside `Textures.lib`.
+
+`MAT0` is only partly mapped: the record opens with a layer count and carries
+per-layer colour bytes, but the per-layer stride varies with layer type. The
+texture names are extracted by pattern instead, which is safe because they are
+distinctive — 3096 of 3139 resolve.
+
+A wear is a **skin**, not just a texture list: `World3D.dll` calls them wears
+and has `CMD_CAMOUFLAGE_WEAR` alongside "Illegal wear length".
+
+### Buildings carry an interior path graph
+
+Stream 17 is non-empty on **29 of the 30 meshes in `fortif.rlb` and nowhere
+else** — only a building has an inside to walk around. The engine calls it a
+*hall way*; `MHallWay::LoadFromResource` in `ArealMap.dll` reads it.
+
+```
+nodes × 20 bytes    float32 x, y, z; uint32 ×2
+links × 40 bytes    uint32 start node, end node; uint32 ×8 (0xFFFFFFFF)
+```
+
+Both counts come from the directory entry: nodes from the element-count field
+at +4, links from the field at +8. `size = 20*nodes + 40*links` holds on all
+29. Every link joins two real nodes (1096/1096).
 
 ## CTPT — control points
 

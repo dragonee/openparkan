@@ -11,7 +11,7 @@ from __future__ import annotations
 import math
 from pathlib import Path
 
-from . import arealmap, gamedir, landmesh, mission, objects, texm
+from . import arealmap, gamedir, landmesh, materials, mission, objects, texm
 from . import mesh as objmesh
 from .nres import HEADER_SIZE, NResArchive, is_nres
 
@@ -439,6 +439,73 @@ def check_objects(check, game: Path) -> None:
           f"{all_meshes} meshes, {all_tris} triangles across {len(ARCHIVES)} archives")
     check("CTPT: control points parse as two parallel arrays", cpt_fail == 0,
           f"{all_cpt} members, {points} points, {named} of them named")
+
+    # Draw batches carry the material assignment; no per-face field does.
+    lib_mat = materials.MaterialLibrary(game / "Material.lib")
+    tex_names = {e.name.upper() for e in NResArchive.open(game / "Textures.lib")}
+    tiles = covers = mats_ok = batched = with_wear = 0
+    chain_ok = chain_total = 0
+    for name in ARCHIVES:
+        ar = NResArchive.open(game / name)
+        for e in ar:
+            if e.tag != "MESH":
+                continue
+            try:
+                wear = objmesh.read_wea(ar.read_name(e.name.replace(".msh", ".wea")))
+            except KeyError:
+                wear = []
+            m = objmesh.parse(ar.read(e), e.name, wear)
+            if not m.batches:
+                continue
+            batched += 1
+            tiles += sum(b.index_count for b in m.batches) == m.triangle_count * 3
+            cursor = 0
+            for b in m.batches:
+                if b.first_index != cursor:
+                    break
+                cursor += b.index_count
+            else:
+                covers += 1
+            if wear:
+                with_wear += 1
+                mats_ok += max(b.material for b in m.batches) < len(wear)
+                for b in m.batches:
+                    chain_total += 1
+                    if b.material >= len(wear):
+                        continue
+                    texture = lib_mat.texture_for(wear[b.material])
+                    chain_ok += bool(texture and texture.upper() in tex_names)
+    check("MESH: draw batches tile the index buffer", tiles == batched,
+          f"{tiles}/{batched} meshes -- index counts sum to 3 x triangles")
+    check("MESH: batch index ranges are contiguous", covers == batched,
+          f"{covers}/{batched} meshes")
+    check("MESH: a batch's material indexes the model's wear", mats_ok == with_wear,
+          f"{mats_ok}/{with_wear} meshes with a wear "
+          f"-- this is where the texture assignment lives")
+    check("Material.lib: batch -> wear -> MAT0 -> Texm resolves",
+          chain_ok > chain_total * 0.98,
+          f"{chain_ok}/{chain_total} batches reach a real texture "
+          f"({len(lib_mat)} materials)")
+
+    # Building interiors: the path graph the engine calls a hall way.
+    fortif = NResArchive.open(game / "fortif.rlb")
+    graphs = nodes = links = bad_link = 0
+    for e in fortif:
+        if e.tag != "MESH":
+            continue
+        graph = objmesh.read_path_graph(NResArchive(fortif.read(e), e.name))
+        if graph is None:
+            continue
+        graphs += 1
+        nodes += len(graph.nodes)
+        links += len(graph.links)
+        for link in graph.links:
+            if not (0 <= link.start < len(graph.nodes) and 0 <= link.end < len(graph.nodes)):
+                bad_link += 1
+    check("MESH: buildings carry an interior path graph", graphs > 0,
+          f"{graphs} of 30 fortif.rlb meshes, {nodes} nodes, {links} links")
+    check("MESH: path graph links join real nodes", bad_link == 0,
+          f"{links - bad_link}/{links} links")
 
     # Unit assemblies.
     dats = sorted((game / "UNITS").rglob("*.dat"))

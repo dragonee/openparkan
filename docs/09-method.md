@@ -89,4 +89,14 @@ work:
 - **One source path survived**:
   `C:\ESTARIOL\IronStrategy\ArealMap\SystemArealMap.cpp`.
 
-`MHallWay panic: cannot load path graph` is the next thread worth pulling.
+That thread ran further than expected. `MHallWay panic: cannot load path
+graph` led to `MHallWay::LoadFromResource`, whose loader reads chunk type 17
+of a nested resource — which turned out to be an object-mesh stream that is
+non-empty on buildings and nowhere else.
+
+And the per-face texture assignment, which three rounds of data inference had
+failed to find, fell out of a detail the binary supplied rather than the
+disassembly proper: the NRes element-count field. It gave stream 13 a stride of
+20 bytes rather than the 12 a hex dump suggested, and at 20 bytes the stream is
+plainly a list of draw batches. There was never a per-face material field to
+find.

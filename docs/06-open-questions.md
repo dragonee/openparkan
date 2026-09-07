@@ -26,8 +26,8 @@ The navigation mesh is [solved](08-arealmap.md). Two fields are not:
 - The sub-block list (`B` in the record) is zero on every shipped map, so its
   contents are unexercised.
 
-`MHallWay panic: cannot load path graph` points at a separate path-graph
-structure that has not been located.
+`MHallWay`'s path graph turned out to be mesh stream 17, carried by buildings
+— see [07-objects.md](07-objects.md).
 
 ## The `NL` archives
 
@@ -42,29 +42,6 @@ BA AB         0xABBA marker
 
 after which the payload is high-entropy — compressed or obfuscated. Only 2
 files, holding fonts and 2D sprites, so this blocks UI work but nothing else.
-
-## Object mesh: which texture a face uses
-
-Geometry reads fine (see [07-objects.md](07-objects.md)), but nothing found so
-far picks between the textures a mesh's `.wea` lists — and meshes can list a
-lot of them: `static.rlb` has models with a single sub-object and twelve or
-fourteen textures.
-
-Ruled out, so that the next person need not repeat it:
-
-- **The face record (stream 7, 16 bytes per face).** Field 0 is zero on every
-  face of every mesh in `static.rlb`. Fields 1–3 are the three edge
-  neighbours: their high bytes take values 0..4 with 255 for "none", which is
-  exactly what a face index into a 1200-face mesh looks like. No field has a
-  value range matching the texture count.
-- **Per sub-object.** Sub-object count equals texture count on only 9 of 68
-  meshes; 14 meshes have one sub-object and two textures, 5 have one
-  sub-object and twelve.
-- **Stream 13 and stream 15**, scanned byte-column-wise for any field with as
-  few distinct values as the texture count.
-
-Untextured, rocks look right and vegetation looks like bare skeletons, because
-the foliage is alpha-textured billboards — see [07-objects.md](07-objects.md).
 
 ## Object mesh: local origins and the .ctl controller
 
@@ -100,7 +77,12 @@ mapped.
   vertex or face count.
 - `Land.msh` stream 2: 737 float3 on SC_3. The first 8 are the map's bounding
   box corners; the remaining 729 (= 27³) look like a spatial subdivision.
-- Face record fields 10, 11, 12.
+- Face record fields 10, 11, 12, and field 0 (near-constant per mesh).
+- `MAT0`'s per-layer stride, and the colour bytes around each texture name.
+- The high byte of a draw batch's material word: 0xFF on 14166 batches and
+  0x00 on 972.
+- A batch's vertex range (fields 7 and 8). The ranges are contiguous but only
+  tile the vertex array on 69 of 435 meshes, so they are not a partition.
 - Face record field 13 (0..62, 59 distinct on SC_3) — treated here as a patch
   or sector id, but not confirmed.
 - Stream 11's flags word: 72 on 4228 faces, 88 on 329, then 328, 968, 984, 344.

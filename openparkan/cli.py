@@ -241,7 +241,7 @@ def cmd_viewer(args, game: Path) -> int:
         print(f"  packed {name:<16} {mesh.vertex_count:5d} verts {mesh.face_count:5d} tris")
 
     missions = []
-    models = None if args.no_geometry else viewer.ModelLibrary(game)
+    models = None if args.no_geometry else viewer.ModelLibrary(game, resolver)
     if not args.no_missions:
         for d in gamedir.missions(game):
             m = mission.load(d / "data.tma")

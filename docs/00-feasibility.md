@@ -68,7 +68,7 @@ pathfinding, and the FPS/RTS hybrid where the player drops into a mech. None of
 that is in the data files. It is 3.59 MB of x86 code across the DLLs, with
 `iron3d.dll` (929 KB) and `Terrain.dll` (623 KB) as the bulk.
 
-**Behaviour graphs.** `.scr` files are compiled node graphs — they open with a
+**Behaviour graphs** are now the main obstacle. `.scr` files are compiled node graphs — they open with a
 node name like `PBM_N_OPTIMAL_TRANSPORT_Start` followed by dense int32 index
 arrays with `0xFFFFFFFF` as the null link. Parsing the graph structure is a
 weekend. Making the nodes *behave* the same is the multi-month part, and it is
@@ -126,9 +126,13 @@ geometry, so a scene can be drawn from the game's own meshes.
 their maps exactly. That one needed the disassembler — see
 [09-method.md](09-method.md).
 
-What still blocks a playable build is the per-face texture assignment on object
-meshes, how components bind to a chassis when a unit is assembled, and the
-behaviour graphs — see [06-open-questions.md](06-open-questions.md).
+Textures resolve too, through the game's own chain — a mesh's draw batch names
+a material in its wear, the material names a texture, and 99.4% of batches
+reach a real one.
+
+What still blocks a playable build is how components bind to a chassis when a
+unit is assembled, and the behaviour graphs — see
+[06-open-questions.md](06-open-questions.md).
 
 ## Legal position
 

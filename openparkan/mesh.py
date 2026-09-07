@@ -17,12 +17,14 @@ the same numeric-type-as-stream-selector convention as the terrain
      8     ---  ---         unresolved; 24 bytes on most meshes, 96 on some
      9      32  sub-object  sub-object name ("Base_TM", "leaf1_m1o1")
     10       4  sub-object  one uint32, zero throughout the shipped data
-    13      12  ---         unresolved
+    13      20  batch       draw batch: material, index range, vertex range
     15       8  vertex      unresolved
-    17, 19   0  ---         always empty
+    17      20  node        building interior path graph, see parse_path_graph
+    19     ---  ---         unresolved; present on many meshes, empty on some
 
-Vertex positions, normals, UVs and triangles are established; which texture
-each face uses is not -- see ``docs/06-open-questions.md``.
+Materials are assigned per *batch*, not per face: stream 13 groups runs of the
+index buffer and names a material for each, which is why no field of the face
+record ever held a texture index.
 """
 
 from __future__ import annotations
@@ -40,12 +42,42 @@ STREAM_UV = 5
 STREAM_TRIANGLE = 6
 STREAM_FACE = 7
 STREAM_SUBOBJECT_NAME = 9
+STREAM_BATCH = 13
+STREAM_PATH_GRAPH = 17
+
+BATCH_SIZE = 20
+#: High byte of a batch's material word; 0xFF on most batches, 0x00 on some.
+BATCH_MATERIAL_MASK = 0xFF
+
+PATH_NODE_SIZE = 20
+PATH_LINK_SIZE = 40
+NO_LINK = 0xFFFFFFFF
 
 NAME_FIELD = 32
 FACE_STRIDE = 16
 
 #: UVs use the same 8.8 fixed point as the terrain.
 UV_FIXED_POINT_SCALE = 256.0
+
+
+@dataclass
+class Batch:
+    """A run of the index buffer drawn with one material.
+
+    ``material`` indexes the model's wear (its ``.wea`` palette).
+    """
+
+    material: int
+    flag: int
+    first_index: int
+    index_count: int
+    first_vertex: int
+    vertex_count: int
+
+    @property
+    def triangles(self) -> tuple[int, int]:
+        """``(first triangle, triangle count)`` into the mesh's triangle list."""
+        return self.first_index // 3, self.index_count // 3
 
 
 @dataclass
@@ -57,6 +89,15 @@ class ObjectMesh:
     triangles: list[tuple[int, int, int]]
     subobjects: list[str] = field(default_factory=list)
     texture_names: list[str] = field(default_factory=list)
+    batches: list[Batch] = field(default_factory=list)
+
+    def material_of_triangle(self, index: int) -> int | None:
+        """Material index for a triangle, via the batch that covers it."""
+        for b in self.batches:
+            first, count = b.triangles
+            if first <= index < first + count:
+                return b.material
+        return None
 
     @property
     def vertex_count(self) -> int:
@@ -78,6 +119,7 @@ def parse(blob: bytes, name: str = "<mesh>", texture_names: list[str] | None = N
     ``.wea`` member and is carried through for callers that want it."""
     inner = NResArchive(blob, name)
     stream = {e.type_id: inner.read(e) for e in inner}
+    entries = {e.type_id: e for e in inner}
 
     raw_pos = stream[STREAM_POSITION]
     nv = len(raw_pos) // 12
@@ -109,6 +151,21 @@ def parse(blob: bytes, name: str = "<mesh>", texture_names: list[str] | None = N
         for i in range(len(raw_names) // NAME_FIELD)
     ]
 
+    batches = []
+    raw_batch = stream.get(STREAM_BATCH, b"")
+    for i in range(entries[STREAM_BATCH].element_count if STREAM_BATCH in entries else 0):
+        f = struct.unpack_from("<10H", raw_batch, i * BATCH_SIZE)
+        batches.append(
+            Batch(
+                material=f[2] & BATCH_MATERIAL_MASK,
+                flag=f[2] >> 8,
+                index_count=f[4],
+                first_index=f[5],
+                vertex_count=f[7],
+                first_vertex=f[8],
+            )
+        )
+
     return ObjectMesh(
         name=name,
         positions=positions,
@@ -117,6 +174,7 @@ def parse(blob: bytes, name: str = "<mesh>", texture_names: list[str] | None = N
         triangles=triangles,
         subobjects=subobjects,
         texture_names=texture_names or [],
+        batches=batches,
     )
 
 
@@ -168,15 +226,84 @@ def parse_control_points(blob: bytes, source: str = "<cpt>") -> list[ControlPoin
     return out
 
 
+@dataclass
+class PathNode:
+    """A waypoint inside a building."""
+
+    position: tuple[float, float, float]
+    a: int
+    b: int
+
+
+@dataclass
+class PathLink:
+    """A traversable connection between two waypoints."""
+
+    start: int
+    end: int
+    #: Eight further slots, ``0xFFFFFFFF`` throughout the shipped data.
+    extra: tuple[int, ...]
+
+
+@dataclass
+class PathGraph:
+    nodes: list[PathNode]
+    links: list[PathLink]
+
+
+def parse_path_graph(blob: bytes, node_count: int, link_count: int) -> PathGraph:
+    """Parse stream 17, the interior path graph the engine calls a *hall way*.
+
+    The two counts are not in the payload; they are the element-count and the
+    following field of the stream's own NRes directory entry.  Only buildings
+    carry one -- 29 of the 30 meshes in ``fortif.rlb``, and nothing anywhere
+    else, because only a building has an inside to walk around.
+    """
+    expected = node_count * PATH_NODE_SIZE + link_count * PATH_LINK_SIZE
+    if len(blob) != expected:
+        raise ValueError(
+            f"path graph: {node_count} nodes and {link_count} links imply "
+            f"{expected} bytes, have {len(blob)}"
+        )
+    nodes = []
+    for i in range(node_count):
+        x, y, z, a, b = struct.unpack_from("<3f2I", blob, i * PATH_NODE_SIZE)
+        nodes.append(PathNode((x, y, z), a, b))
+    base = node_count * PATH_NODE_SIZE
+    links = []
+    for i in range(link_count):
+        values = struct.unpack_from("<10I", blob, base + i * PATH_LINK_SIZE)
+        links.append(PathLink(values[0], values[1], values[2:]))
+    return PathGraph(nodes, links)
+
+
+def read_path_graph(archive: NResArchive) -> PathGraph | None:
+    """Read the path graph out of an already-opened object mesh, if it has one."""
+    for entry in archive:
+        if entry.type_id == STREAM_PATH_GRAPH and entry.size:
+            return parse_path_graph(
+                archive.read(entry), entry.element_count, entry.link_count
+            )
+    return None
+
+
 def read_wea(blob: bytes) -> list[str]:
-    """Parse a ``.wea`` texture name table: a count, then ``index name`` pairs."""
+    """Parse a ``.wea`` -- a *wear*, the material palette of a model.
+
+    A count, then ``index name`` pairs.  Some wears carry further keyword
+    sections such as ``LIGHTMAPS`` after the palette; parsing stops there.
+    """
     tokens = blob.decode("latin-1").split()
-    if not tokens:
+    if not tokens or not tokens[0].lstrip("-").isdigit():
         return []
     count = int(tokens[0])
     names = [""] * count
-    for i in range(1, len(tokens) - 1, 2):
+    i = 1
+    while i + 1 < len(tokens):
+        if not tokens[i].lstrip("-").isdigit():
+            break
         idx = int(tokens[i])
         if 0 <= idx < count:
             names[idx] = tokens[i + 1]
+        i += 2
     return names

@@ -269,7 +269,8 @@ if (typeof THREE === "undefined") {
       current.material.forEach((m) => m.dispose());  // pooled textures outlive the mesh
     }
     const g = new THREE.BufferGeometry();
-    g.setAttribute("position", new THREE.BufferAttribute(b64(map.position, Float32Array), 3));
+    g.setAttribute("position",
+      new THREE.BufferAttribute(b64(map.position, Int16Array), 3, true));
     g.setAttribute("normal", new THREE.BufferAttribute(b64(map.normal, Int16Array), 3, true));
     g.setAttribute("uv", new THREE.BufferAttribute(b64(map.uv, Uint16Array), 2));
     g.setIndex(new THREE.BufferAttribute(
@@ -293,6 +294,9 @@ if (typeof THREE === "undefined") {
       return new THREE.MeshLambertMaterial(opts);
     });
     current = new THREE.Mesh(g, mats);
+    // Dequantise on the object, never on the geometry.
+    current.scale.set(map.scale[0], map.scale[1], map.scale[2]);
+    current.position.set(map.offset[0], map.offset[1], map.offset[2]);
     scene.add(current);
 
     cam.target.set(0, (map.height[0] + map.height[1]) / 2, 0);
@@ -326,6 +330,7 @@ if (typeof THREE === "undefined") {
   const NEUTRAL = 0x8a8a85;
   const SCENERY = 0x6f7360;
   const modelCache = {};
+  const modelMatCache = {};
   let overlay = null;
 
   // Objects are drawn from their real geometry, decoded through objects.rlb.
@@ -342,18 +347,44 @@ if (typeof THREE === "undefined") {
     // normalized attribute and writes them back, which overflows the buffer.
     g.setAttribute("position",
       new THREE.BufferAttribute(b64(src.position, Int16Array), 3, true));
+    g.setAttribute("uv", new THREE.BufferAttribute(b64(src.uv, Uint16Array), 2));
     g.setIndex(new THREE.BufferAttribute(
       b64(src.index, src.wide ? Uint32Array : Uint16Array), 1));
+    src.groups.forEach((gr, k) => g.addGroup(gr.start, gr.count, k));
     g.computeVertexNormals();
     modelCache[i] = g;
     return g;
   }
 
+  // One material per draw batch, textured through
+  // batch -> wear -> Material.lib -> Textures.lib.
+  function modelMaterials(i, tint) {
+    const key = i + "|" + tint;
+    if (modelMatCache[key]) return modelMatCache[key];
+    const src = DATA.models[i];
+    const mats = src.groups.map((gr) => {
+      const opts = { side: THREE.DoubleSide, color: tint };
+      const pooled = gr.material >= 0 ? DATA.pool[gr.material] : null;
+      if (pooled && pooled.kind === "texture") {
+        const t = textureCache[gr.material] ||
+          (textureCache[gr.material] = loader.load(pooled.url));
+        t.wrapS = t.wrapT = THREE.RepeatWrapping;
+        t.repeat.set(1 / UV_SCALE, 1 / UV_SCALE);
+        opts.map = t;
+      } else if (pooled) {
+        opts.color = pooled.colour;
+      }
+      return new THREE.MeshLambertMaterial(opts);
+    });
+    modelMatCache[key] = mats;
+    return mats;
+  }
+
   // A model sits inside a group so its own scale and offset compose with the
   // placement's rotation in the right order.
-  function modelInstance(i, material) {
+  function modelInstance(i, tint) {
     const src = DATA.models[i];
-    const inner = new THREE.Mesh(modelGeometry(i), material);
+    const inner = new THREE.Mesh(modelGeometry(i), modelMaterials(i, tint));
     inner.scale.set(src.scale[0], src.scale[1], src.scale[2]);
     inner.position.set(src.offset[0], src.offset[1], src.offset[2]);
     const group = new THREE.Group();
@@ -388,12 +419,19 @@ if (typeof THREE === "undefined") {
 
     const sceneryMat = flat(SCENERY);
     let drawn = 0;
+    const tintOf = (c) => {
+      const r = (c >> 16) & 255, g = (c >> 8) & 255, b = c & 255;
+      const mix = (v) => Math.round(255 - (255 - v) * 0.35);
+      return (mix(r) << 16) | (mix(g) << 8) | mix(b);
+    };
     mis.objects.forEach((o) => {
       // o.p is [x, z, y] in game space; the map is recentred and Y-up.
       let m;
       if (o.m !== undefined) {
         // Clan-owned things take their clan's colour; scenery stays neutral.
-        m = modelInstance(o.m, o.c < 0 ? sceneryMat : meshMats[o.c]);
+        // Owned objects take a light wash of their clan colour over the
+        // texture; scenery stays untinted.
+        m = modelInstance(o.m, o.c < 0 ? 0xffffff : tintOf(mis.clans[o.c].colour));
         m.position.set(o.p[0] - cx, o.p[1], -(o.p[2] - cy));
         // Game rotation is about the up axis; the Y flip reverses its sense.
         m.rotation.y = -o.r;

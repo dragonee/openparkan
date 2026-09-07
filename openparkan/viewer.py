@@ -14,7 +14,7 @@ import zlib
 from importlib import resources
 from pathlib import Path
 
-from . import landmesh, mission, objects, texm
+from . import landmesh, materials, mission, objects, texm
 from . import mesh as objmesh
 from .nres import NResArchive
 from .png import _chunk
@@ -88,8 +88,9 @@ class TextureResolver:
         return w, h, rgb
 
     def resolve(self, name: str) -> int:
-        """Return the index in ``self.pool`` for this terrain texture name."""
-        key = name.upper()
+        """Index in ``self.pool`` for a texture name, with or without its
+        ``.0`` member suffix."""
+        key = name.upper().split(".")[0]
         if key in self._by_name:
             return self._by_name[key]
         entry = self.index.get(key)
@@ -117,12 +118,24 @@ def build_map_payload(mesh: landmesh.LandMesh, resolver: TextureResolver, name: 
     # float32: normals are int8 in the file and UVs are 8.8 fixed point, so
     # storing them narrow is both smaller and closer to what the game shipped.
     # The viewer restores the UV scale with texture.repeat = 1/256.
+    # Terrain positions are quantised the same way object meshes are: int16
+    # over the map's own bounding box, dequantised by a scale and offset that
+    # the viewer applies to the mesh object rather than to the geometry.
+    tspan = [
+        max((maxx - minx) / 2, 1e-6),
+        max((maxz - minz) / 2, 1e-6),
+        max((maxy - miny) / 2, 1e-6),
+    ]
+    tmid = ((minx + maxx) / 2 - cx, (minz + maxz) / 2, -((miny + maxy) / 2 - cy))
+
     pos = bytearray()
     nrm = bytearray()
     uv = bytearray()
     for i in range(nv):
         x, y, z = mesh.positions[i]
-        pos += struct.pack("<3f", x - cx, z, -(y - cy))
+        for value, mid, span in zip((x - cx, z, -(y - cy)), tmid, tspan, strict=True):
+            q = round((value - mid) / span * 32767)
+            pos += struct.pack("<h", max(-32767, min(32767, q)))
         a, b, c = mesh.normals[i]
         nrm += struct.pack(
             "<3h",
@@ -170,6 +183,8 @@ def build_map_payload(mesh: landmesh.LandMesh, resolver: TextureResolver, name: 
         # The recentring applied to the geometry, so mission markers given in
         # raw game coordinates can be placed into the same frame.
         "centre": [round(cx, 4), round(cy, 4)],
+        "scale": [round(v, 4) for v in tspan],
+        "offset": [round(v, 4) for v in tmid],
         "height": [round(minz, 1), round(maxz, 1)],
         "wideIndex": wide,
         "position": _b64(bytes(pos)),
@@ -203,9 +218,11 @@ class ModelLibrary:
 
     MAX_INDIRECTION = 3
 
-    def __init__(self, game: Path):
+    def __init__(self, game: Path, textures: TextureResolver):
         self.game = game
         self.library = objects.ObjectLibrary(game / "objects.rlb")
+        self.materials = materials.MaterialLibrary(game / "Material.lib")
+        self.textures = textures
         self._archives: dict[str, NResArchive] = {}
         self.models: list[dict] = []
         self._by_ref: dict[tuple[str, str], int] = {}
@@ -244,7 +261,12 @@ class ModelLibrary:
         key = (ref.library, ref.member)
         if key in self._by_ref:
             return self._by_ref[key]
-        m = objmesh.parse(self._archive(ref.library).read_name(ref.member), ref.member)
+        archive = self._archive(ref.library)
+        try:
+            wear = objmesh.read_wea(archive.read_name(ref.member.replace(".msh", ".wea")))
+        except KeyError:
+            wear = []
+        m = objmesh.parse(archive.read_name(ref.member), ref.member, wear)
         # Positions only: the viewer flat-shades, so per-vertex normals would
         # be ignored and are not worth the bytes.  Positions are quantised to
         # int16 across the model's own bounding box and restored with a scale
@@ -265,18 +287,43 @@ class ModelLibrary:
             for value, mid, span in zip((x, z, -y), centre, half, strict=True):
                 q = round((value - mid) / span * 32767)
                 pos += struct.pack("<h", max(-32767, min(32767, q)))
+        # UVs are 8.8 fixed point in the file; kept raw and unscaled in the
+        # shader by the material's texture.repeat, exactly as for the terrain.
+        uv = bytearray()
+        for u, v in m.uv:
+            uv += struct.pack(
+                "<2H",
+                min(0xFFFF, round(u * objmesh.UV_FIXED_POINT_SCALE)),
+                min(0xFFFF, round(v * objmesh.UV_FIXED_POINT_SCALE)),
+            )
+
         wide = m.vertex_count > 0xFFFF
         idx = bytearray()
         for tri in m.triangles:
             idx += struct.pack("<3I" if wide else "<3H", *tri)
+
+        # One draw group per batch, each with the texture its material names.
+        groups = []
+        for b in m.batches:
+            texture = None
+            if 0 <= b.material < len(wear):
+                texture = self.materials.texture_for(wear[b.material])
+            groups.append({
+                "start": b.first_index,
+                "count": b.index_count,
+                "material": self.textures.resolve(texture) if texture else -1,
+            })
+
         self._by_ref[key] = len(self.models)
         self.models.append({
             "name": ref.member,
             "wide": wide,
             "position": _b64(bytes(pos)),
+            "uv": _b64(bytes(uv)),
             "index": _b64(bytes(idx)),
             "scale": [round(v, 4) for v in half],
             "offset": [round(v, 4) for v in centre],
+            "groups": groups,
             "tris": m.triangle_count,
         })
         return self._by_ref[key]

@@ -20,7 +20,9 @@ practice — format facts yes, code no — is set out in
 | **3D terrain viewer** | done — self-contained HTML, no server |
 | **`data.tma` missions** | done — all 29 parse to EOF, 864 objects placed |
 | **`objects.rlb`, unit assemblies** | done — 590 records, 458 assemblies, 5708 components |
-| **Object meshes** | geometry done — 435 meshes in 10 archives; per-face texture unresolved |
+| **Object meshes** | done — 435 meshes, with per-batch materials and textures |
+| **Materials** | done — `Material.lib`, 905 materials; 99.4% of batches reach a texture |
+| **Building interiors** | done — path graph for 29 buildings |
 | **Control points** | done — 284 members, 3599 named attachment points |
 | **`Land.map` navigation mesh** | done — all 33 maps, 34662 areals, adjacency and grid |
 | **Behaviour scripts, gameplay** | not started |
@@ -102,6 +104,12 @@ PASS  MESH: object meshes parse with consistent streams 68/68 meshes, 41663 tria
 PASS  MESH: int8/127 normals are unit length         worst deviation 0.0130 -- the same encoding as the terrain
 PASS  MESH: the format is the same in every archive  435 meshes, 241887 triangles across 10 archives
 PASS  CTPT: control points parse as two parallel arrays 284 members, 3599 points, 3599 of them named
+PASS  MESH: draw batches tile the index buffer       435/435 meshes -- index counts sum to 3 x triangles
+PASS  MESH: batch index ranges are contiguous        435/435 meshes
+PASS  MESH: a batch's material indexes the model's wear 434/434 meshes with a wear -- this is where the texture assignment lives
+PASS  Material.lib: batch -> wear -> MAT0 -> Texm resolves 15053/15138 batches reach a real texture (905 materials)
+PASS  MESH: buildings carry an interior path graph   29 of 30 fortif.rlb meshes, 1056 nodes, 1096 links
+PASS  MESH: path graph links join real nodes         1096/1096 links
 PASS  UNITS/*.dat: assemblies parse on a 112-byte stride 458/458 files, 5708 components
 PASS  UNITS/*.dat: components resolve in objects.rlb 5705/5708 resolve (3 do not; see docs/07-objects.md)
 PASS  every placed mission object reaches geometry   864/864 objects resolve to a .msh through objects.rlb
@@ -137,6 +145,7 @@ openparkan/
   objects.py    objects.rlb records and UNITS/*.dat assemblies
   mesh.py       object geometry and control points
   arealmap.py   Land.map navigation mesh
+  materials.py  Material.lib (MAT0)
   viewer.py     self-contained HTML viewer generator
   verify.py     the checks quoted above
   png.py        dependency-free PNG writer

@@ -6,4 +6,14 @@ It contains no game assets; point it at your own installation.
 
 __version__ = "0.1.0"
 
-from . import arealmap, landmesh, mesh, mission, nres, objects, png, texm  # noqa: F401
+from . import (  # noqa: F401
+    arealmap,
+    landmesh,
+    materials,
+    mesh,
+    mission,
+    nres,
+    objects,
+    png,
+    texm,
+)
