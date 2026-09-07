@@ -109,11 +109,23 @@ Streams 4 and 5 use exactly the encodings established for the terrain, which
 is a useful independent confirmation of both: the normals come out unit-length
 to within 0.013 across all 68 meshes.
 
-### A building holds its inside and its outside at once
+### `o*` and `i*` are external and internal *components*, not two models
 
-Parkan lets you walk into buildings, so a building mesh carries both. The
-sub-object names say which: `fr_b_bunker` has `o01`…`o04` outside, `i01`…`i14`
-inside, and `Base_TL` / `Base_DF` for the ground pads.
+`fr_b_bunker` has nodes `o01`…`o04` and `i01`…`i14`, and flag bit 0 splits them
+exactly along that naming (1564/1564 sub-objects across six archives). The
+tempting reading — that `o*` is the outside and `i*` the walk-in interior — is
+**wrong for rendering**, and acting on it makes buildings far too short:
+
+| mesh | `o*` at LOD 0 | `i*` at LOD 0 |
+|---|---|---|
+| `fr_l_bunker` | −5.71 .. 12.54 | −8.25 .. **44.00** |
+| `fr_l_plant` | −32.95 .. 32.95 | −35.74 .. **53.28** |
+
+A building's tall structure lives in its `i*` nodes. The flag matches
+`objects.rlb`'s `INTO` / `EXTO` tags, which distinguish a robot's internal
+parts (engine, battery, armour) from its external ones (turrets, guns) — both
+of which are drawn. So `ObjectMesh.select()` draws every node by default and
+takes `interior` only as an optional filter.
 
 Stream 1 carries one 38-byte header per sub-object:
 
@@ -156,9 +168,10 @@ uint32   x5
 is what a renderer needs: pick a level of detail, skip the interior nodes,
 follow each node's slots to a run of triangles.
 
-`fr_b_bunker` resolves to 1024 exterior triangles at LOD 0 out of 3656 — the
-other 2632 are its interior and its LOD 1. Drawing all of them at once is what
-makes a building look like scrambled geometry.
+Selecting **LOD 0 across all nodes** is what a renderer wants: on `fr_l_bunker`
+that is 3050 triangles of 4066, the remainder being LOD 1 duplicates. Drawing
+every level of detail superimposed is what makes a building look like
+scrambled geometry — not the `i*` nodes.
 
 ### Buildings must be rested on their base, not their origin
 
@@ -190,10 +203,24 @@ found. Ruled out: the `Root` control point (buildings have `P###` points and no
 AABBs (they match the raw vertex bounds exactly, so they carry no transform),
 and the root node's pose (identity on the buildings checked).
 
-**Still missing: node poses.** The fallback key selects a static pose from
-stream 8, and a child's pose composes with its parent's. Without that, models
-whose parts are authored around a pose still come out wrong — `fr_l_gener` is
-the clear example.
+**Still missing: node poses.** Stream 8 holds 24-byte keys — a `float32[3]`
+translation and a packed rotation — and a node's `fallback_key` selects one.
+Poses compose down the parent chain, and composing the translations alone
+produces offsets like (54.5, 77.1, 57.2) that fling geometry away, so the
+rotation matters and its packing is not decoded. Identity reads as
+`(0, 0, 32767, 0, 0, 0)` and a quarter turn as `(0, 0, 23220, 0, 0, 23119)` —
+23220/32767 = 0.709, 23119/32767 = 0.706, so cos and sin of 45° are in there.
+
+Until poses are applied, sub-assemblies render at their authored origin rather
+than their assembled position: some parts of a building float, and
+`fr_l_gener` comes out spiky.
+
+### Units are authored at a different scale
+
+A unit's chassis is tiny in model units — `r_h_02` is 390 triangles inside a
+0.7 × 0.8 × 1.26 box, against a bunker 52 units tall. Something scales them up
+and it is not the mission record, whose scale is `1,1,1` throughout. Not yet
+investigated.
 
 Sub-object names describe the model's construction: `s_tree_0_06` is
 `Base_TM`, `leaf1_m1o1`, `leaf2_m1o1`, `leaf3_m1o1`.

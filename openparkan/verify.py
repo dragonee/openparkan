@@ -316,7 +316,7 @@ def check_missions(check, game: Path) -> None:
             if e.tag != "MESH":
                 continue
             m = objmesh.parse(ar.read(e), e.name)
-            sel = m.select(0, interior=False) or m.triangles
+            sel = m.select(0) or m.triangles
             vs = {i for t in sel for i in t}
             if not vs:
                 continue
@@ -569,12 +569,12 @@ def check_objects(check, game: Path) -> None:
                 and s.first_batch + s.batch_count <= len(m.batches)
                 for s in m.slots
             )
-            sel += bool(m.select(0, interior=False)) or not m.triangle_count
+            sel += bool(m.select(0)) or not m.triangle_count
     check("MESH: node slot indices address real slots", slot_ok == slotted,
           f"{slot_ok}/{slotted} meshes")
     check("MESH: slot ranges lie inside the triangle and batch lists",
           slot_range == slotted, f"{slot_range}/{slotted} meshes")
-    check("MESH: every model yields exterior LOD 0 geometry", sel == slotted,
+    check("MESH: every model yields LOD 0 geometry", sel == slotted,
           f"{sel}/{slotted} meshes -- what a renderer should draw")
 
     check("MESH: sub-object flag bit 0 marks interior geometry",

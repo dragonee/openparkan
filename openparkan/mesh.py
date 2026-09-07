@@ -157,16 +157,22 @@ class ObjectMesh:
     def has_interior(self) -> bool:
         return any(n.is_interior for n in self.nodes)
 
-    def select(self, lod: int = 0, interior: bool = False) -> list[tuple[int, int, int]]:
-        """Triangles for one level of detail, inside or outside.
+    def select(self, lod: int = 0, interior: bool | None = None) -> list[tuple[int, int, int]]:
+        """Triangles for one level of detail.
 
-        A building holds both its inside and its outside, and up to three
-        levels of detail, in one mesh.  Drawing the lot at once is what makes
-        a building look like scrambled geometry.
+        A model holds up to three levels of detail in one mesh, and drawing
+        them superimposed is what makes a building look like scrambled
+        geometry.  Selecting a single LOD fixes that.
+
+        ``interior`` filters on the node flag when given.  Leave it None --
+        the default -- to draw the whole model: a building's tall structure
+        lives in its ``i*`` nodes, so excluding them makes buildings far too
+        short.  The flag marks internal *components*, not a separate indoor
+        model.
         """
         out: list[tuple[int, int, int]] = []
         for node in self.nodes:
-            if node.is_interior != interior:
+            if interior is not None and node.is_interior != interior:
                 continue
             for index in node.slots_for_lod(lod):
                 if index >= len(self.slots):

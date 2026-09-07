@@ -268,12 +268,11 @@ class ModelLibrary:
             wear = []
         m = objmesh.parse(archive.read_name(ref.member), ref.member, wear)
 
-        # A model holds its interior, its exterior and up to three levels of
-        # detail at once.  Draw the outside at LOD 0 and nothing else.
+        # A model holds up to three levels of detail at once; draw LOD 0 only.
+        # Every node is drawn: a building's tall structure lives in its i*
+        # nodes, so filtering them out leaves it far too short.
         wanted = []
         for node in m.nodes:
-            if node.is_interior:
-                continue
             for index in node.slots_for_lod(0):
                 if index < len(m.slots):
                     slot = m.slots[index]

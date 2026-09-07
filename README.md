@@ -95,7 +95,7 @@ PASS  data.tma: parses exactly to end of file        29/29 missions, 864 objects
 PASS  data.tma: the map it names exists              29/29 missions reference a real DATA/MAPS entry
 PASS  data.tma: placed objects lie inside the map    864/864 objects within their map's XY extent
 PASS  data.tma: buildings sit on the terrain surface median height above ground +0.000 over 167 buildings
-PASS  MESH: building exteriors are authored about their centre 22/30 building meshes are near-symmetric about z=0 -- they must be rested on their base, not their origin
+PASS  MESH: building exteriors are authored about their centre 20/30 building meshes are near-symmetric about z=0 -- they must be rested on their base, not their origin
 PASS  data.tma: every object reference resolves      864/864 -- UNITS/*.dat on disk, scenery as STAT in objects.rlb
 PASS  data.tma: ClanID is a 0-based index into the clan list 463/463 object ClanIDs in range
 PASS  data.tma: objects belong to the clan whose base they sit at 123/125 (98.4%) on skirmish and multiplayer maps
@@ -113,7 +113,7 @@ PASS  MESH: batch indices are relative to the batch's first vertex 435/435 meshe
 PASS  MESH: resolved indices reference every vertex  435/435 meshes reach 100% of their vertices (reading the indices as absolute reaches 41%)
 PASS  MESH: node slot indices address real slots     434/434 meshes
 PASS  MESH: slot ranges lie inside the triangle and batch lists 434/434 meshes
-PASS  MESH: every model yields exterior LOD 0 geometry 434/434 meshes -- what a renderer should draw
+PASS  MESH: every model yields LOD 0 geometry        434/434 meshes -- what a renderer should draw
 PASS  MESH: sub-object flag bit 0 marks interior geometry 1845/1845 sub-objects agree with the o*/i* naming
 PASS  MESH: buildings carry an interior path graph   29 of 30 fortif.rlb meshes, 1056 nodes, 1096 links
 PASS  MESH: path graph links join real nodes         1096/1096 links

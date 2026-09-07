@@ -83,6 +83,10 @@ mapped.
   the engine must have a real rule. `Root` control points, the `.bas` footprint
   plane, the slot AABBs and the root node pose have all been ruled out —
   see [07-objects.md](07-objects.md).
+- **Unit scale.** Robot chassis meshes are authored roughly 1/20 the scale of
+  buildings (`r_h_02` fits in a 0.7-unit box), and the mission record's scale
+  is `1,1,1` throughout, so the factor comes from somewhere else — probably the
+  `.dat` component fields or the `.ctl` controller.
 - **Node poses.** A node's fallback key selects a static pose out of stream 8,
   and a child composes with its parent. Without it, models authored around a
   pose render wrong even with the correct slot selection — `fr_l_gener` is the
