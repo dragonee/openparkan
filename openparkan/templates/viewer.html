@@ -434,10 +434,16 @@ if (typeof THREE === "undefined" || typeof pako === "undefined") {
   // A texture with alpha is drawn as a cutout: the alpha test discards the
   // hole rather than blending it, so nothing needs depth sorting.  Foliage is
   // crossed planes and only reads as a plant this way.
-  // Register a material for frame swapping if its payload names frames.
-  function animate(material, entry) {
-    if (!entry || !entry.frames || entry.frames.length < 2) return material;
-    animated.push({ material, frames: entry.frames.map(groundTexture) });
+  // Register a texture slot for frame swapping if its payload names frames.
+  // `apply` puts the texture where it belongs -- material.map for an ordinary
+  // material, a uniform for the terrain's second ground layer.
+  function animate(material, entry, frames, apply) {
+    const list = frames || (entry && entry.frames);
+    if (!list || list.length < 2) return material;
+    animated.push({
+      frames: list.map(groundTexture),
+      apply: apply || ((t) => { material.map = t; }),
+    });
     return material;
   }
 
@@ -477,8 +483,6 @@ if (typeof THREE === "undefined" || typeof pako === "undefined") {
   const ANIM_FPS = 8;
   const animated = [];
   let current = null;
-  let showLayer2 = true;
-  let shown = null;
 
   // Terrain texture, shared by both layers.  UVs arrive as raw 8.8 fixed
   // point, so the scale is undone on the texture rather than the attribute.
@@ -490,28 +494,54 @@ if (typeof THREE === "undefined" || typeof pako === "undefined") {
     return t;
   }
 
-  // Layer 2 is drawn over layer 1 with alpha = 1 - blend, where blend is the
-  // terrain's own per-vertex weight for layer 1.  Lambert has no per-vertex
-  // alpha in this build, so it is patched in.
-  function blendedMaterial(entry) {
-    const src = DATA.pool[entry.pool];
-    const opts = { side: THREE.FrontSide, transparent: true, depthWrite: false };
-    if (src.kind === "texture") opts.map = groundTexture(entry.pool);
-    opts.color = multiply(entry.tint, src.kind === "texture" ? WHITE : src.colour);
+  // Both ground layers in one material.  The terrain carries a second UV set
+  // and a per-vertex weight for layer 1, so the mix happens in the fragment
+  // shader rather than in a second, coplanar pass -- which is what used to
+  // make the walkable ground flicker.
+  const terrainShaders = [];
+  let layer2On = true;
+
+  function groundMaterial(m) {
+    const src = DATA.pool[m.pool];
+    const opts = { side: THREE.FrontSide };
+    if (src.kind === "texture") opts.map = groundTexture(m.pool);
+    opts.color = multiply(m.tint, src.kind === "texture" ? WHITE : src.colour);
+    if (m.water || src.opacity < 1) {
+      opts.transparent = true;
+      opts.opacity = m.water ? WATER_OPACITY : src.opacity;
+    }
+    applyCutout(opts, src);
     const material = new THREE.MeshLambertMaterial(opts);
+    const second = m.pool2 === undefined ? null : DATA.pool[m.pool2];
+    if (!second || second.kind !== "texture") return animate(material, m);
+
     material.onBeforeCompile = (shader) => {
-      shader.vertexShader = "attribute float blend;\nvarying float vBlend;\n" +
+      shader.uniforms.layer2 = { value: groundTexture(m.pool2) };
+      shader.uniforms.layer2Tint = { value: new THREE.Color(multiply(m.tint2, WHITE)) };
+      shader.uniforms.layer2Mix = { value: layer2On ? 1 : 0 };
+      shader.vertexShader =
+        "attribute vec2 uvLayer2;\nattribute float blend;\n" +
+        "varying vec2 vUvLayer2;\nvarying float vBlend;\n" +
         shader.vertexShader.replace("#include <begin_vertex>",
-          "#include <begin_vertex>\n  vBlend = blend;");
-      shader.fragmentShader = "varying float vBlend;\n" +
-        shader.fragmentShader.replace("#include <dithering_fragment>",
-          "#include <dithering_fragment>\n  gl_FragColor.a *= 1.0 - vBlend;");
+          "#include <begin_vertex>\n  vUvLayer2 = uvLayer2 / " + UV_SCALE.toFixed(1) +
+          ";\n  vBlend = blend;");
+      shader.fragmentShader =
+        "uniform sampler2D layer2;\nuniform vec3 layer2Tint;\nuniform float layer2Mix;\n" +
+        "varying vec2 vUvLayer2;\nvarying float vBlend;\n" +
+        shader.fragmentShader.replace("#include <map_fragment>",
+          "#include <map_fragment>\n" +
+          "  vec4 under = texture2D(layer2, vUvLayer2);\n" +
+          "  under.rgb *= layer2Tint;\n" +
+          "  diffuseColor = mix(diffuseColor, mix(under, diffuseColor, vBlend), layer2Mix);");
+      terrainShaders.push(shader);
+      // The second layer animates too -- WATER_M is a layer-2 material on
+      // several maps -- so its frames swap the uniform rather than a map.
+      animate(material, null, m.frames2, (t) => { shader.uniforms.layer2.value = t; });
     };
-    return material;
+    return animate(material, m);
   }
 
   function show(map) {
-    shown = map;
     animated.length = 0;
     if (current) {
       scene.remove(current);
@@ -529,37 +559,14 @@ if (typeof THREE === "undefined" || typeof pako === "undefined") {
     g.setAttribute("position", position);
     g.setAttribute("normal", normal);
     g.setAttribute("uv", new THREE.BufferAttribute(b64(map.uv, Uint16Array), 2));
+    g.setAttribute("uvLayer2", new THREE.BufferAttribute(b64(map.uv2, Uint16Array), 2));
+    g.setAttribute("blend", new THREE.BufferAttribute(b64(map.blend, Uint8Array), 1, true));
     g.setIndex(new THREE.BufferAttribute(b64(map.index, IndexArray), 1));
     map.groups.forEach((gr) => g.addGroup(gr.start, gr.count, gr.material));
 
-    const mats = map.materials.map((m) => {
-      const src = DATA.pool[m.pool];
-      const opts = { side: THREE.FrontSide };
-      if (src.kind === "texture") opts.map = groundTexture(m.pool);
-      opts.color = multiply(m.tint, src.kind === "texture" ? WHITE : src.colour);
-      if (m.water || src.opacity < 1) {
-        opts.transparent = true;
-        opts.opacity = m.water ? WATER_OPACITY : src.opacity;
-      }
-      applyCutout(opts, src);
-      return animate(new THREE.MeshLambertMaterial(opts), m);
-    });
+    terrainShaders.length = 0;
     current = new THREE.Group();
-    current.add(new THREE.Mesh(g, mats));
-
-    if (map.overlayGroups.length && showLayer2) {
-      const o = new THREE.BufferGeometry();
-      o.setAttribute("position", position);
-      o.setAttribute("normal", normal);
-      o.setAttribute("uv", new THREE.BufferAttribute(b64(map.uv2, Uint16Array), 2));
-      o.setAttribute("blend", new THREE.BufferAttribute(b64(map.blend, Uint8Array), 1, true));
-      o.setIndex(new THREE.BufferAttribute(b64(map.overlayIndex, IndexArray), 1));
-      map.overlayGroups.forEach((gr) => o.addGroup(gr.start, gr.count, gr.material));
-      const layer2 = new THREE.Mesh(
-        o, map.overlayMaterials.map((m) => animate(blendedMaterial(m), m)));
-      layer2.renderOrder = 1;
-      current.add(layer2);
-    }
+    current.add(new THREE.Mesh(g, map.materials.map(groundMaterial)));
     // Dequantise on the object, never on the geometry.
     current.scale.set(map.scale[0], map.scale[1], map.scale[2]);
     current.position.set(map.offset[0], map.offset[1], map.offset[2]);
@@ -803,15 +810,9 @@ if (typeof THREE === "undefined" || typeof pako === "undefined") {
     });
   });
   document.getElementById("blend").addEventListener("click", (e) => {
-    showLayer2 = e.currentTarget.getAttribute("aria-pressed") !== "true";
-    e.currentTarget.setAttribute("aria-pressed", String(showLayer2));
-    if (shown) {
-      const keep = { target: cam.target.clone(), dist: cam.dist, yaw: cam.yaw, pitch: cam.pitch };
-      show(shown);
-      cam.target.copy(keep.target); cam.dist = keep.dist;
-      cam.yaw = keep.yaw; cam.pitch = keep.pitch;
-      place();
-    }
+    layer2On = e.currentTarget.getAttribute("aria-pressed") !== "true";
+    e.currentTarget.setAttribute("aria-pressed", String(layer2On));
+    terrainShaders.forEach((s) => { s.uniforms.layer2Mix.value = layer2On ? 1 : 0; });
   });
   document.getElementById("time").addEventListener("input", (e) => {
     const day = (missionSky && missionSky.day) || [];
@@ -838,7 +839,7 @@ if (typeof THREE === "undefined" || typeof pako === "undefined") {
     skyGroup.position.copy(camera.position);
     if (animated.length) {
       const tick = Math.floor(performance.now() * ANIM_FPS / 1000);
-      animated.forEach((a) => { a.material.map = a.frames[tick % a.frames.length]; });
+      animated.forEach((a) => { a.apply(a.frames[tick % a.frames.length]); });
     }
     renderer.render(scene, camera);
   })();

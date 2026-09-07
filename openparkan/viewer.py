@@ -317,54 +317,39 @@ def build_map_payload(mesh: landmesh.LandMesh, resolver: TextureResolver, name: 
         # alpha 1 - blend, which is the same mix.
         blend += struct.pack("B", max(0, min(255, round(mesh.blend[i] * 255))))
 
-    # Sort faces by material so each run becomes one draw group.
-    buckets: dict[tuple[int, int], list[int]] = {}
-    for fi, _tri in enumerate(mesh.faces):
-        key = (mesh.face_tex1[fi], mesh.is_water(fi))
+    # One draw group per (layer 1, layer 2, water) combination -- 5 to 8 per
+    # map -- so both ground layers are drawn in a single pass.  Drawing layer
+    # 2 as a second, coplanar mesh made the walkable ground flicker: the two
+    # passes compile to different shader programs, and their depths come out
+    # a hair apart.
+    buckets: dict[tuple[int, int, bool], list[int]] = {}
+    for fi in range(mesh.face_count):
+        key = (mesh.face_tex1[fi], mesh.face_tex2[fi], mesh.is_water(fi))
         buckets.setdefault(key, []).append(fi)
 
     wide = nv > 0xFFFF
     idx = bytearray()
     groups = []
     materials = []
-    for (tex_index, is_water), face_ids in sorted(buckets.items()):
+    for (tex1, tex2, is_water), face_ids in sorted(buckets.items()):
         start = len(idx) // (4 if wide else 2)
         for fi in face_ids:
             a, b, c = mesh.faces[fi]
             idx += struct.pack("<3I" if wide else "<3H", a, b, c)
-        tex_name = mesh.texture_name(1, tex_index) or "?"
-        frames = resolver.frames(tex_name)
+        name = mesh.texture_name(1, tex1) or "?"
+        frames = resolver.frames(name)
         groups.append({"start": start, "count": len(face_ids) * 3, "material": len(materials)})
-        entry = {"pool": frames[0], "water": is_water, "tint": resolver.tint(tex_name)}
+        entry = {"pool": frames[0], "water": is_water, "tint": resolver.tint(name)}
         if len(frames) > 1:
             entry["frames"] = frames
+        second = mesh.texture_name(2, tex2)
+        if second:
+            over = resolver.frames(second)
+            entry["pool2"] = over[0]
+            entry["tint2"] = resolver.tint(second)
+            if len(over) > 1:
+                entry["frames2"] = over
         materials.append(entry)
-
-    # The second texture layer, drawn as an overlay over the faces that carry
-    # one -- 8 to 30% of a map, and what turns a hard texture boundary into a
-    # blended one.
-    overlay_buckets: dict[int, list[int]] = {}
-    for fi in range(mesh.face_count):
-        index = mesh.face_tex2[fi]
-        if index != landmesh.NO_TEXTURE and mesh.texture_name(2, index):
-            overlay_buckets.setdefault(index, []).append(fi)
-    overlay_index = bytearray()
-    overlay_groups = []
-    overlay_materials = []
-    for tex_index, face_ids in sorted(overlay_buckets.items()):
-        start = len(overlay_index) // (4 if wide else 2)
-        for fi in face_ids:
-            a, b, c = mesh.faces[fi]
-            overlay_index += struct.pack("<3I" if wide else "<3H", a, b, c)
-        overlay_groups.append(
-            {"start": start, "count": len(face_ids) * 3, "material": len(overlay_materials)}
-        )
-        layer2_name = mesh.texture_name(2, tex_index)
-        frames = resolver.frames(layer2_name)
-        entry = {"pool": frames[0], "tint": resolver.tint(layer2_name)}
-        if len(frames) > 1:
-            entry["frames"] = frames
-        overlay_materials.append(entry)
 
     wet = mesh.water_faces()
     level = mesh.water_level()
@@ -392,10 +377,10 @@ def build_map_payload(mesh: landmesh.LandMesh, resolver: TextureResolver, name: 
         "index": _b64(bytes(idx)),
         "groups": groups,
         "materials": materials,
-        "overlayIndex": _b64(bytes(overlay_index)),
-        "overlayGroups": overlay_groups,
-        "overlayMaterials": overlay_materials,
-        "overlayFaces": sum(len(v) for v in overlay_buckets.values()),
+        "layer2Faces": sum(
+            1 for i in range(mesh.face_count)
+            if mesh.face_tex2[i] != landmesh.NO_TEXTURE
+        ),
         "layer1": mesh.layer1_names,
         "layer2": mesh.layer2_names,
     }

@@ -148,10 +148,15 @@ exactly 1.0 on all 258046 vertices that no layer-2 face touches, and below 1.0
 on 19663 of the 41404 that one does. Nothing else in the mesh separates so
 cleanly on that boundary.
 
-So the ground is `mix(layer2, layer1, blend)`, which a renderer can get either
-from a two-texture shader or, as the viewer does, by drawing the layer-2 faces
-again over the layer-1 pass with alpha `1 - blend`. Without it every texture
+So the ground is `mix(layer2, layer1, blend)`. Without it every texture
 boundary on the terrain is a hard polygon edge; the game's are gradients.
+
+Draw it in **one pass**. Grouping faces by the pair `(layer 1, layer 2)`
+rather than by layer 1 alone costs almost nothing — 5 to 8 groups per map
+against 3 to 5 — and then one material can sample both. Drawing layer 2 as a
+second, coplanar mesh instead makes the ground flicker: the two passes compile
+to different shader programs, their interpolated depths come out a hair apart,
+and the walkable areas z-fight as the camera moves.
 
 ## Terrain layers name materials, not textures
 

@@ -117,6 +117,8 @@ No reverse engineering needed; just work.
   height queries.
 - **Alpha ordering.** Cutouts need none, which is why they are what the
   viewer uses, but the graded textures behind effects and the sky will.
+- **Coplanar geometry.** Nothing in the scene should be drawn twice at the
+  same depth; the terrain's two ground layers share one pass for that reason.
 
 ## 4. Known-unknowns carried in the readers
 
