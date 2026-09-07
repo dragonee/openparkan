@@ -173,3 +173,17 @@ Water is drawn see-through here. The material declares no transparency, but
 every map that has water also carries a `WATER_BOT` material on the ground
 beneath it, and a lake bed nobody can see would not be worth authoring. The
 exact figure is a renderer choice.
+
+## Face field 13 is not a patch id
+
+An earlier draft read the last word of the face record as a patch or sector
+id, on the strength of its range (0..62, about 57 distinct values per map).
+It is not. Grouping faces by it gives regions that **span the whole map**:
+only 25 of 348 groups across six maps are even 20% tighter than a random
+subset of the same size, and the median group covers 100% of the map either
+way.
+
+It is also interleaved in face order rather than run-length, does not
+determine the texture pair or the surface word, and does not track elevation.
+Its groups are wildly uneven — 1, 2, 4 and 384 faces on SC_3. A renderer that
+wants to cull terrain has to build its own grid.

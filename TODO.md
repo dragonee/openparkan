@@ -90,8 +90,10 @@ No reverse engineering needed; just work.
 - **LOD switching.** All four levels of each variant are parsed and
   `slots_for_lod` takes the level; the viewer always asks for 0. Switching by
   screen size is a payload change, not a format question.
-- **Terrain patches.** Face field 13 (0..62 on SC_3) reads as a patch or
-  sector id and would give cheap frustum culling, if confirmed.
+- **Terrain culling.** There is no patch id to cull by: face field 13 turned
+  out not to be spatial (see docs/06-open-questions.md), so a renderer has to
+  build its own grid, which is what `LandMesh._build_index` already does for
+  height queries.
 - **Alpha ordering.** Cutouts need none, which is why they are what the
   viewer uses, but the graded textures behind effects and the sky will.
 

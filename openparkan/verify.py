@@ -9,6 +9,7 @@ Each check prints PASS/FAIL and the evidence behind it.  If a claim in
 from __future__ import annotations
 
 import math
+import random
 import struct
 from pathlib import Path
 
@@ -198,6 +199,33 @@ def check_layers(check, game: Path) -> None:
     check("Land.msh: a second texture layer covers part of every map",
           with_layer2 == len(maps),
           f"{faces_2}/{faces_1} faces across {with_layer2}/{len(maps)} maps carry one")
+    # A negative result, kept so nobody re-derives it: face field 13 is not a
+    # spatial index.
+    tight = loose = 0
+    for folder in gamedir.maps(game)[:6]:
+        m = landmesh.load(folder / "Land.msh")
+        (minx, miny, _), (maxx, maxy, _) = m.bounds()
+        span = max(maxx - minx, maxy - miny) or 1.0
+        groups: dict[int, list[int]] = {}
+        for i, patch in enumerate(m.face_patch):
+            groups.setdefault(patch, []).append(i)
+        rng = random.Random(0)
+
+        def extent(chosen, mesh=m, scale=span):
+            xs = [mesh.positions[v][0] for f in chosen for v in mesh.faces[f]]
+            ys = [mesh.positions[v][1] for f in chosen for v in mesh.faces[f]]
+            return max(max(xs) - min(xs), max(ys) - min(ys)) / scale
+
+        for faces in groups.values():
+            shuffled = rng.sample(range(m.face_count), len(faces))
+            if extent(faces) < extent(shuffled) * 0.8:
+                tight += 1
+            else:
+                loose += 1
+    check("Land.msh: face field 13 is not a spatial patch id", tight < loose * 0.1,
+          f"{tight}/{tight + loose} groups are tighter than a random subset of "
+          f"the same size, so it cannot be used for culling")
+
     check("Land.msh: stream 14 is the weight of layer 1", dirty == 0,
           f"exactly 1.0 on all {clean} vertices no layer-2 face touches; "
           f"below it on {varying} of the {touched} that one does")

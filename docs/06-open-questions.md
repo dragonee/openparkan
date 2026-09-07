@@ -93,8 +93,12 @@ mapped.
   the second colour triple after the diffuse.
 - A batch's vertex range (fields 7 and 8). The ranges are contiguous but only
   tile the vertex array on 69 of 435 meshes, so they are not a partition.
-- Face record field 13 (0..62, 59 distinct on SC_3) — treated here as a patch
-  or sector id, but not confirmed.
+- Terrain face field 13 (0..62, ~57 distinct per map). **Not** a patch or
+  sector id, which earlier drafts guessed: grouping faces by it gives regions
+  that span the whole map, no tighter than a random subset of the same size,
+  on every map tried. It is interleaved in face order, does not determine the
+  texture pair or the surface word, and does not track elevation. Its groups
+  are wildly uneven — 1, 2, 4 and 384 faces on SC_3.
 - Stream 11's flags word: 72 on 4228 faces, 88 on 329, then 328, 968, 984, 344.
   Bit flags of some kind; 88 correlates with water.
 - Face field 0's other values (1536, 1540, 9728 on SC_3) and field 1's bit

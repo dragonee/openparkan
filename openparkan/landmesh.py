@@ -32,7 +32,9 @@ FACE, as 14 little-endian uint16::
     10  unresolved
     11  unresolved
     12  unresolved
-    13  patch / sector id
+    13  0..62, ~57 distinct values.  Not a spatial patch: a value's faces
+         span the whole map, indistinguishable from a random subset of the
+         same size.  Not a material key either.  Unresolved.
 
 See ``docs/03-terrain.md`` for how each of these was established.
 """
