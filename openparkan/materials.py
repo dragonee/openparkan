@@ -28,6 +28,15 @@ is a neutral grey ripple and the blue is entirely in its ``#4d6aff``, and lava
 is a dull red pattern tinted ``#b41e00``.  761 materials carry a colour other
 than white.
 
+The byte immediately before the name, at +19, selects a **sub-image**: ``0xFF``
+means the whole texture, and anything else is a cell of a sprite sheet.  427
+of the 905 materials take the whole texture; the rest index one.  The sky
+materials are the clearest case -- ``SUN.0`` is a 2 x 2 sheet holding a sun
+corona and a moon, and ``ENV_SUN`` asks for cell 0 while ``ENV_MOON`` asks for
+cell 2, which is where the moon is.  ``SUN1.0`` holds four stars and a moon
+and its three ``ENV_SUN_*`` materials name cells 0, 1 and 3 -- the three
+stars.  See ``docs/10-sky.md`` for the two that do not fit.
+
 The texture names are still extracted by pattern rather than by offset,
 because the record's tail is not a constant size -- most are
 ``12 + 40 * count + 8`` bytes but the two-layer ones are longer.  The names
@@ -53,6 +62,13 @@ COLOUR_OFFSET = 6
 COLOUR_MARKER_OFFSET = 5
 COLOUR_MARKER = 100
 
+#: The byte before an entry's texture name picks a cell of a sprite sheet.
+CELL_OFFSET = 19
+#: ...or asks for the whole texture.
+WHOLE_TEXTURE = 0xFF
+#: Sheets are square and cells are half the texture, so an index runs 0..3.
+SHEET_SIDE = 2
+
 #: Texture references look like ``NAME.0`` -- the same form Textures.lib uses.
 _TEXTURE_RE = re.compile(rb"[A-Za-z0-9_]{2,}\.\d+")
 
@@ -67,6 +83,22 @@ class Material:
     textures: list[str]
     #: Diffuse colour multiplying the base texture, as ``(r, g, b)``.
     colour: tuple[int, int, int] = (255, 255, 255)
+    #: Cell of the texture to use, or WHOLE_TEXTURE.
+    cell: int = WHOLE_TEXTURE
+
+    @property
+    def cell_uv(self) -> tuple[float, float, float, float] | None:
+        """``(u0, v0, u1, v1)`` of the cell, or None for the whole texture.
+
+        Row-major over a 2 x 2 sheet.  An index past the sheet -- only
+        ``ENV_SUN_2`` and ``ENV_MOON_5`` do that, both naming ``SUN4.0`` with
+        4 and 5 -- gets the whole texture rather than a guess.
+        """
+        if self.cell == WHOLE_TEXTURE or not 0 <= self.cell < SHEET_SIDE ** 2:
+            return None
+        row, column = divmod(self.cell, SHEET_SIDE)
+        step = 1.0 / SHEET_SIDE
+        return (column * step, row * step, (column + 1) * step, (row + 1) * step)
 
     @property
     def texture(self) -> str | None:
@@ -109,8 +141,10 @@ class MaterialLibrary:
             at = ENTRY_BASE + COLOUR_OFFSET
             if len(data) >= at + 3 and data[at - 1] == COLOUR_MARKER:
                 colour = tuple(data[at : at + 3])
+            at = ENTRY_BASE + CELL_OFFSET
+            cell = data[at] if len(data) > at else WHOLE_TEXTURE
             self.materials[entry.name.upper()] = Material(
-                entry.name, entries, layers, names, colour
+                entry.name, entries, layers, names, colour, cell
             )
 
     def get(self, name: str) -> Material | None:

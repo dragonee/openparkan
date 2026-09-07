@@ -27,7 +27,7 @@ practice — format facts yes, code no — is set out in
 | **Building interiors** | done — path graph for 29 buildings |
 | **Control points** | done — 284 members, 3599 named attachment points |
 | **`Land.map` navigation mesh** | done — all 33 maps, 34662 areals, adjacency and grid |
-| **Sky** | done — `sky.ske` day cycle, all 29 missions parse to the byte |
+| **Sky** | done — `sky.ske` day cycle and `sky.wea`'s nine texture slots, all 29 missions |
 | **Behaviour scripts, gameplay** | not started |
 
 ## Quickstart

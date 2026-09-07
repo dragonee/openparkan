@@ -45,8 +45,12 @@ keyframe's name slot carries ``sun``, ``moon`` or ``env_lightning``.  Which
 field selects the type is not established; see ``docs/10-sky.md``.
 
 The sibling ``sky.wea`` names the textures, in the same format model wears
-use: ``ENV_NEBULA_0``, ``ENV_STARS``, ``ENV_CLOUDS``, ``ENV_SUN_3``,
-``ENV_MOON``, ``ENV_FLARE_00``, ``ENV_FLARE_01``, ``SNOWFLAKE``, ``RAIN_DROP``.
+use, and **the slot index is the role**: the same nine slots in the same order
+in all 29 missions, with slots 1, 5, 6 and 8 naming the identical texture
+every time.  They are material names, so they resolve through ``Material.lib``
+exactly as the terrain's do -- and the material picks a cell of a sprite sheet
+as well as a texture, which is how one 2 x 2 ``SUN.0`` provides both the sun
+and the moon.
 """
 
 from __future__ import annotations
@@ -68,6 +72,19 @@ NAME_SLOTS = 6
 FLOAT_SLOTS = (6,)
 #: Slots whose colour tracks the time of day; see the module docstring.
 DAY_CYCLE_SLOTS = (1, 2, 3, 4)
+
+#: ``sky.wea`` slot -> what it is.  Fixed across all 29 missions.
+SLOT_ROLES = (
+    "nebula",
+    "stars",
+    "clouds",
+    "sun",
+    "moon",
+    "flare",
+    "flare2",
+    "snow",
+    "rain",
+)
 
 #: The trailer opens with a kind word: 3 on 621 of the 656 shipped keyframes,
 #: 1 on 6, and 0 on the 29 that close a section.  The hour and minute follow
@@ -168,6 +185,15 @@ class Atmosphere:
             if k.minutes <= want:
                 best = k
         return best
+
+    def texture(self, role: str) -> str | None:
+        """The material named for one of the nine ``sky.wea`` roles."""
+        if role not in SLOT_ROLES:
+            raise KeyError(f"unknown sky role {role!r}")
+        index = SLOT_ROLES.index(role)
+        if index >= len(self.textures):
+            return None
+        return self.textures[index] or None
 
     def brightest(self) -> Keyframe | None:
         """The keyframe with the most light -- the middle of the day."""

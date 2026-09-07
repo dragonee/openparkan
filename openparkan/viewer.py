@@ -23,6 +23,14 @@ from .png import _chunk
 _FALLBACK_COLOUR = (0x80, 0x80, 0x80, 1.0)
 
 
+class _Image:
+    """The width and height ``_downsample`` needs, for already-cropped pixels."""
+
+    def __init__(self, width: int, height: int):
+        self.width = width
+        self.height = height
+
+
 def _png_data_uri(width: int, height: int, pixels: bytes, alpha: bool = False) -> str:
     stride = 4 if alpha else 3
     raw = bytearray()
@@ -78,10 +86,13 @@ class TextureResolver:
         self._by_name: dict[str, int] = {}
         self._frames: dict[str, list[int]] = {}
 
-    def _downsample(self, tex, pixels: bytes, stride: int = 3) -> tuple[int, int, bytes]:
+    def _downsample(
+        self, tex, pixels: bytes, stride: int = 3, max_size: int | None = None
+    ) -> tuple[int, int, bytes]:
         """Halve until within ``max_size``; terrain tiles do not need mip 0."""
+        limit = self.max_size if max_size is None else max_size
         w, h = tex.width, tex.height
-        while max(w, h) > self.max_size and w % 2 == 0 and h % 2 == 0:
+        while max(w, h) > limit and w % 2 == 0 and h % 2 == 0:
             nw, nh = w // 2, h // 2
             out = bytearray(nw * nh * stride)
             for y in range(nh):
@@ -95,6 +106,46 @@ class TextureResolver:
                         out[o + c] = (a + b + d + e) // 4
             pixels, w, h = bytes(out), nw, nh
         return w, h, pixels
+
+    def sprite(self, name: str, max_size: int = 256) -> int | None:
+        """Pool index for a material's texture, cropped to its own cell.
+
+        A material names a texture *and* a cell of it -- ``SUN.0`` is a 2 x 2
+        sheet holding a sun corona and a moon, and ``ENV_SUN`` and
+        ``ENV_MOON`` are the same texture with different cells.
+        """
+        key = f"sprite:{name.upper()}:{max_size}"
+        if key in self._by_name:
+            return self._by_name[key]
+        material = self.materials.get(name)
+        if material is None or not material.textures:
+            return None
+        entry = self.index.get(material.textures[0].upper().split(".")[0])
+        if entry is None:
+            return None
+        tex = texm.decode(self.archive.read(entry))
+        pixels, width, height = tex.rgba, tex.width, tex.height
+        box = material.cell_uv
+        if box is not None:
+            u0, v0, u1, v1 = box
+            x0, y0 = round(u0 * width), round(v0 * height)
+            x1, y1 = round(u1 * width), round(v1 * height)
+            cropped = bytearray()
+            for y in range(y0, y1):
+                cropped += pixels[(y * width + x0) * 4 : (y * width + x1) * 4]
+            pixels, width, height = bytes(cropped), x1 - x0, y1 - y0
+        shrunk = _Image(width, height)
+        w, h, pixels = self._downsample(shrunk, pixels, 4, max_size)
+        self._by_name[key] = len(self.pool)
+        self.pool.append({
+            "kind": "texture",
+            "name": name,
+            "url": _png_data_uri(w, h, pixels, True),
+            "opacity": 1.0,
+            "cutout": False,
+            "graded": True,
+        })
+        return self._by_name[key]
 
     def lightmap(self, name: str) -> int | None:
         """Pool index for a ``lightmap.lib`` member, or None if it has none.
@@ -637,8 +688,13 @@ def _pack_colour(rgba: tuple[int, int, int, int]) -> int:
     return (r << 16) | (g << 8) | b
 
 
-def build_sky_payload(folder: Path) -> dict | None:
-    """The mission's atmosphere, at the brightest point of its day."""
+#: The sky.wea roles the viewer draws, and how far to shrink each.
+SKY_LAYERS = (("nebula", 256), ("stars", 256), ("clouds", 256),
+              ("sun", 128), ("moon", 128))
+
+
+def build_sky_payload(folder: Path, resolver: TextureResolver | None = None) -> dict | None:
+    """The mission's atmosphere: its whole day cycle, and its sky textures."""
     path = folder / "sky.ske"
     if not path.exists():
         return None
@@ -646,18 +702,47 @@ def build_sky_payload(folder: Path) -> dict | None:
         atmosphere = sky.load(path)
     except (sky.SkyFormatError, OSError):
         return None
-    frame = atmosphere.brightest()
-    if frame is None:
+    brightest = atmosphere.brightest()
+    if brightest is None:
         return None
-    return {
-        "zenith": _pack_colour(frame.colour(SKY_ZENITH_SLOT)),
-        "horizon": _pack_colour(frame.colour(SKY_HORIZON_SLOT)),
-        "sun": _pack_colour(frame.colour(SKY_SUN_SLOT)),
-        "light": round(frame.light, 3),
-        "time": f"{frame.hour:02d}:{frame.minute:02d}",
+
+    # Every keyframe of the first section, in time order; that is the day and
+    # the viewer's time control walks it.
+    frames = sorted(
+        (k for k in atmosphere.keyframes if k.section == 0), key=lambda k: k.minutes
+    )
+    peak = max((k.light for k in frames), default=1.0) or 1.0
+    payload = {
+        "zenith": _pack_colour(brightest.colour(SKY_ZENITH_SLOT)),
+        "horizon": _pack_colour(brightest.colour(SKY_HORIZON_SLOT)),
+        "sunColour": _pack_colour(brightest.colour(SKY_SUN_SLOT)),
+        "light": round(brightest.light, 3),
+        "time": f"{brightest.hour:02d}:{brightest.minute:02d}",
         "keyframes": len(atmosphere),
         "textures": [t for t in atmosphere.textures if t],
+        "day": [
+            {
+                "t": f"{k.hour:02d}:{k.minute:02d}",
+                "z": _pack_colour(k.colour(SKY_ZENITH_SLOT)),
+                "h": _pack_colour(k.colour(SKY_HORIZON_SLOT)),
+                "s": _pack_colour(k.colour(SKY_SUN_SLOT)),
+                "l": round(k.light, 3),
+                # How dark this keyframe is against the day's peak, which is
+                # what decides whether the stars show.
+                "n": round(1.0 - min(1.0, k.light / peak), 3),
+            }
+            for k in frames
+        ],
+        "peak": frames.index(brightest) if brightest in frames else 0,
     }
+    if resolver is not None:
+        for role, size in SKY_LAYERS:
+            name = atmosphere.texture(role)
+            index = resolver.sprite(name, size) if name else None
+            if index is not None:
+                payload[role] = index
+                payload[role + "Name"] = name
+    return payload
 
 
 def build_mission_payload(
@@ -704,7 +789,7 @@ def build_mission_payload(
         "label": label,
         "title": m.title,
         "map": map_index,
-        "sky": build_sky_payload(folder),
+        "sky": build_sky_payload(folder, models.textures if models else None),
         "clans": clans,
         "objects": placed,
         "routes": [[[round(v, 2) for v in pt] for pt in r.points] for r in m.routes],

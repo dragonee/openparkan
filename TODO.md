@@ -53,15 +53,22 @@ confirms it, and if it is wrong then something is not being drawn.
 
 Correct as far as it goes, but not what the game showed.
 
-### 2.1 The sky is a gradient, not the game's sky
+### 2.1 The sky's weather layers
 
-`sky.ske` is [solved](docs/10-sky.md) and the viewer draws the mission's own
-day-cycle colours as a zenith-to-horizon dome, with its sun colour and
-intensity on the directional light. What it does not draw is what `sky.wea`
-names: `ENV_NEBULA_0`, `ENV_STARS`, `ENV_CLOUDS`, `ENV_SUN_3`, `ENV_MOON`,
-`ENV_FLARE_00`. All six textures are in `Textures.lib` and decode; nothing yet
-says where in the dome each one goes, or which keyframe field positions the
-sun.
+The dome now carries the mission's own nebula, stars and clouds, and its sun
+and moon as billboards — `sky.wea`'s nine slots are a fixed role table and all
+261 slot names across the 29 missions resolve (see
+[docs/10-sky.md](docs/10-sky.md)). Four of the nine are not drawn:
+
+- **The lens flares** (slots 5 and 6, `ENV_FLARE_00` / `ENV_FLARE_01`) need
+  the sun's screen position and a chain of sprites down the view axis.
+- **Snow and rain** (slots 7 and 8) are particle systems, which is
+  `effects.rlb` — see 2.3.
+
+And **where the sun stands** is the renderer's own arc, not the game's:
+`CSun::Render` builds its matrix from two angles at `this+0x30` and
+`this+0x34`, and no pair of floats in a keyframe varies with time the way an
+azimuth and an elevation would.
 
 Three smaller unknowns sit in the same file: the keyframe count of a second
 section (six missions have one), which field selects the object type between

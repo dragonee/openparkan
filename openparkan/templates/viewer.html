@@ -105,6 +105,10 @@
   .clan { display: inline-flex; align-items: center; gap: 5px; }
   .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
 
+  #timebox input { width: 100%; accent-color: var(--signal); margin: 0; }
+  #timebox label { display: flex; justify-content: space-between; gap: 8px; }
+  #timeval { color: var(--ink); letter-spacing: 0; text-transform: none; font-size: 11px; }
+
   .controls { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
   button {
     font: inherit; font-size: 12px; cursor: pointer;
@@ -161,6 +165,10 @@
       <label>Ground layer &middot; Land1.wea</label>
       <div class="layers" id="layers"></div>
     </div>
+    <div id="timebox" hidden>
+      <label for="time">Time of day &middot; sky.ske <span id="timeval">&ndash;</span></label>
+      <input id="time" type="range" min="0" max="0" value="0" step="1">
+    </div>
     <div class="controls">
       <button id="wire" aria-pressed="false">Wireframe</button>
       <button id="blend" aria-pressed="true">Blend layer 2</button>
@@ -216,15 +224,28 @@ if (typeof THREE === "undefined" || typeof pako === "undefined") {
   const cssVar = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
   let missionSky = null;
 
-  // The sky dome, from the mission's own atmosphere file: an inverted sphere
-  // shaded from the zenith colour down to the horizon colour.  Both come out
-  // of the brightest keyframe of the day cycle in sky.ske.
+  // The sky, from the mission's own atmosphere file.  Four pieces:
+  //   * a dome carrying the nebula, tinted by the keyframe's zenith and
+  //     horizon colours -- MeshBasicMaterial multiplies map by vertex colour,
+  //     so one draw gives "the nebula under this hour's light";
+  //   * the stars over it, additive, fading in as the day's light drops;
+  //   * the clouds over that, tiled and tinted by the horizon;
+  //   * the sun and the moon as billboards.
+  // sky.wea's nine slots are fixed roles, and the material behind each names
+  // both a texture and a cell of it -- see docs/10-sky.md.
   const DOME_RADIUS = 26000;
-  let dome = null;
-  function buildDome(zenith, horizon) {
-    if (dome) { scene.remove(dome); dome.geometry.dispose(); dome.material.dispose(); dome = null; }
-    if (zenith === undefined) return;
-    const g = new THREE.SphereGeometry(DOME_RADIUS, 32, 20);
+  const CLOUD_TILES = 4;
+  // The sky rides with the camera, so the horizon stays at eye level however
+  // far the view climbs.
+  const skyGroup = new THREE.Group();
+  scene.add(skyGroup);
+  let dome = null, starLayer = null, cloudLayer = null, sunSprite = null, moonSprite = null;
+
+  function domeGeometry() {
+    return new THREE.SphereGeometry(DOME_RADIUS, 40, 28);
+  }
+
+  function tintDome(g, zenith, horizon) {
     const top = new THREE.Color(zenith), low = new THREE.Color(horizon);
     const pos = g.attributes.position, colour = [];
     for (let i = 0; i < pos.count; i++) {
@@ -234,29 +255,132 @@ if (typeof THREE === "undefined" || typeof pako === "undefined") {
       colour.push(...low.clone().lerp(top, t * t).toArray());
     }
     g.setAttribute("color", new THREE.Float32BufferAttribute(colour, 3));
-    dome = new THREE.Mesh(g, new THREE.MeshBasicMaterial({
-      side: THREE.BackSide, vertexColors: true, fog: false, depthWrite: false,
-    }));
-    dome.renderOrder = -1;
-    scene.add(dome);
+    g.attributes.color.needsUpdate = true;
+  }
+
+  function skyTexture(pool, repeat) {
+    const t = textureCache["sky" + pool] ||
+      (textureCache["sky" + pool] = loader.load(DATA.pool[pool].url));
+    if (repeat) {
+      t.wrapS = t.wrapT = THREE.RepeatWrapping;
+      t.repeat.set(repeat, repeat);
+    }
+    return t;
+  }
+
+  function dropSky() {
+    [dome, starLayer, cloudLayer, sunSprite, moonSprite].forEach((o) => {
+      if (!o) return;
+      skyGroup.remove(o);
+      if (o.geometry) o.geometry.dispose();
+      if (o.material) o.material.dispose();
+    });
+    dome = starLayer = cloudLayer = sunSprite = moonSprite = null;
+  }
+
+  function buildSky(sky) {
+    dropSky();
+    if (!sky) return;
+    const opts = { side: THREE.BackSide, fog: false, depthWrite: false, vertexColors: true };
+    if (sky.nebula !== undefined) opts.map = skyTexture(sky.nebula);
+    dome = new THREE.Mesh(domeGeometry(), new THREE.MeshBasicMaterial(opts));
+    dome.renderOrder = -3;
+    skyGroup.add(dome);
+
+    if (sky.stars !== undefined) {
+      starLayer = new THREE.Mesh(domeGeometry(), new THREE.MeshBasicMaterial({
+        map: skyTexture(sky.stars), side: THREE.BackSide, fog: false,
+        depthWrite: false, transparent: true, blending: THREE.AdditiveBlending,
+      }));
+      starLayer.renderOrder = -2;
+      starLayer.scale.setScalar(0.99);
+      skyGroup.add(starLayer);
+    }
+    if (sky.clouds !== undefined) {
+      cloudLayer = new THREE.Mesh(domeGeometry(), new THREE.MeshBasicMaterial({
+        map: skyTexture(sky.clouds, CLOUD_TILES), side: THREE.BackSide, fog: false,
+        depthWrite: false, transparent: true, opacity: 0.7,
+      }));
+      cloudLayer.renderOrder = -1;
+      cloudLayer.scale.setScalar(0.97);
+      skyGroup.add(cloudLayer);
+    }
+    const place = (pool, size) => {
+      if (pool === undefined) return null;
+      const m = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: skyTexture(pool), fog: false, depthWrite: false, transparent: true,
+        blending: THREE.AdditiveBlending,
+      }));
+      m.scale.setScalar(size);
+      skyGroup.add(m);
+      return m;
+    };
+    sunSprite = place(sky.sun, DOME_RADIUS * 0.17);
+    moonSprite = place(sky.moon, DOME_RADIUS * 0.12);
+  }
+
+  // Where the sun stands at a time of day.  The engine keeps two angles on
+  // each sun object -- CSun::Render builds its matrix from them -- and they
+  // have not been found in sky.ske, so this arc is the renderer's own: up at
+  // noon, on the horizon at six, under it at night.  The moon sits opposite,
+  // and the scene's light follows the sun so shading and sky agree.
+  function sunDirection(label) {
+    const [h, m] = String(label || "12:00").split(":").map(Number);
+    const day = ((h * 60 + (m || 0)) % 1440) / 1440;
+    const angle = (day - 0.25) * Math.PI * 2;
+    return new THREE.Vector3(
+      Math.cos(angle) * -0.6, Math.sin(angle), Math.cos(angle) * 0.8
+    ).normalize();
+  }
+
+  // The keyframe currently shown, and the colours it puts on everything.
+  function applyKeyframe(frame) {
+    if (!missionSky || !frame) return;
+    scene.background = new THREE.Color(frame.h);
+    scene.fog = new THREE.Fog(frame.h, 3200, 15000);
+    sun.color = new THREE.Color(frame.s);
+    sun.intensity = Math.min(1.15, 0.55 + 0.22 * frame.l);
+    if (dome) tintDome(dome.geometry, frame.z, frame.h);
+    if (starLayer) starLayer.material.opacity = frame.n;
+    if (cloudLayer) cloudLayer.material.color = new THREE.Color(frame.h);
+
+    const dir = sunDirection(frame.t);
+    // Never light the terrain from underneath; at night the sun is below the
+    // horizon and only the ambient term is left.
+    sun.position.copy(dir).setY(Math.max(dir.y, 0.12)).normalize();
+    if (sunSprite) {
+      sunSprite.position.copy(dir).multiplyScalar(DOME_RADIUS * 0.92);
+      sunSprite.material.opacity = Math.max(0, Math.min(1, 0.3 + dir.y * 2));
+    }
+    if (moonSprite) {
+      moonSprite.position.copy(dir).multiplyScalar(-DOME_RADIUS * 0.92);
+      moonSprite.material.opacity = Math.max(0, Math.min(1, 0.3 - dir.y * 2));
+    }
+    const label = document.getElementById("timeval");
+    if (label) label.textContent = frame.t;
   }
 
   function applyTheme() {
     if (missionSky) {
-      // Distant terrain fades into the horizon rather than into the page.
-      scene.background = new THREE.Color(missionSky.horizon);
-      scene.fog = new THREE.Fog(missionSky.horizon, 3200, 15000);
-      sun.color = new THREE.Color(missionSky.sun);
-      sun.intensity = Math.min(1.15, 0.55 + 0.22 * missionSky.light);
-      buildDome(missionSky.zenith, missionSky.horizon);
+      buildSky(missionSky);
+      const day = missionSky.day || [];
+      const slider = document.getElementById("time");
+      if (slider) {
+        slider.max = String(Math.max(0, day.length - 1));
+        slider.value = String(missionSky.peak || 0);
+      }
+      applyKeyframe(day[missionSky.peak || 0] || {
+        z: missionSky.zenith, h: missionSky.horizon, s: missionSky.sunColour,
+        l: missionSky.light, n: 0, t: missionSky.time,
+      });
       return;
     }
+    dropSky();
     const fog = parseInt(cssVar("--fog"), 16);
     scene.background = new THREE.Color(fog);
     scene.fog = new THREE.Fog(fog, 2600, 11000);
     sun.color = new THREE.Color(0xffffff);
     sun.intensity = 0.92;
-    buildDome(undefined);
   }
   applyTheme();
   matchMedia("(prefers-color-scheme: dark)").addEventListener("change", applyTheme);
@@ -609,6 +733,7 @@ if (typeof THREE === "undefined" || typeof pako === "undefined") {
     document.getElementById("obj").hidden = false;
     document.getElementById("obj").innerHTML = mis.objects.length.toLocaleString() +
       (drawn ? ' <span class="unit">(' + drawn + " meshed)</span>" : "");
+    document.getElementById("timebox").hidden = !(mis.sky && mis.sky.day && mis.sky.day.length > 1);
     const skyRow = document.getElementById("sky"), skyLabel = document.getElementById("skydt");
     skyRow.hidden = skyLabel.hidden = !mis.sky;
     if (mis.sky) {
@@ -627,6 +752,7 @@ if (typeof THREE === "undefined" || typeof pako === "undefined") {
     document.getElementById("obj").hidden = true;
     document.getElementById("skydt").hidden = true;
     document.getElementById("sky").hidden = true;
+    document.getElementById("timebox").hidden = true;
     document.getElementById("clanbox").hidden = true;
   }
 
@@ -687,6 +813,10 @@ if (typeof THREE === "undefined" || typeof pako === "undefined") {
       place();
     }
   });
+  document.getElementById("time").addEventListener("input", (e) => {
+    const day = (missionSky && missionSky.day) || [];
+    applyKeyframe(day[+e.currentTarget.value]);
+  });
   document.getElementById("spin").addEventListener("click", (e) => {
     spinning = e.currentTarget.getAttribute("aria-pressed") !== "true";
     e.currentTarget.setAttribute("aria-pressed", String(spinning));
@@ -705,6 +835,7 @@ if (typeof THREE === "undefined" || typeof pako === "undefined") {
   (function loop() {
     requestAnimationFrame(loop);
     if (spinning) { cam.yaw += 0.0015; place(); }
+    skyGroup.position.copy(camera.position);
     if (animated.length) {
       const tick = Math.floor(performance.now() * ANIM_FPS / 1000);
       animated.forEach((a) => { a.material.map = a.frames[tick % a.frames.length]; });

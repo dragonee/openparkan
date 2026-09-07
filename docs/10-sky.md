@@ -97,16 +97,71 @@ keyframes are near-identical within a file, and the two record shapes that do
 differ (a float where another has a colour, at slot 11) are not distinguished
 by any word that has been located.
 
-## The sibling `sky.wea`
+## The sibling `sky.wea` — the slot index is the role
 
-Plain text in the same format model wears use, naming the textures:
-`ENV_NEBULA_0`, `ENV_STARS`, `ENV_CLOUDS`, `ENV_SUN_3`, `ENV_MOON`,
-`ENV_FLARE_00`, `ENV_FLARE_01`, `SNOWFLAKE`, `RAIN_DROP`. The variants differ
-per mission — `ENV_NEBULA_1`, `ENV_SUN_6`, `ENV_CLOUDS_2` and so on. Nothing
-yet says where in the dome each one is drawn.
+Plain text in the same format model wears use, and **the position in the list
+is what the entry means**. All 29 missions fill the same nine slots in the
+same order:
+
+| slot | role | example | constant across missions |
+|---|---|---|---|
+| 0 | nebula | `ENV_NEBULA_0` | four variants |
+| 1 | stars | `ENV_STARS` | **yes** |
+| 2 | clouds | `ENV_CLOUDS` | four variants |
+| 3 | sun | `ENV_SUN_3` | five variants |
+| 4 | moon | `ENV_MOON` | four variants |
+| 5 | lens flare | `ENV_FLARE_00` | **yes** |
+| 6 | lens flare | `ENV_FLARE_01` | **yes** |
+| 7 | snow | `SNOWFLAKE` | two variants |
+| 8 | rain | `RAIN_DROP` | **yes** |
+
+Not one of those names is in `Textures.lib`. They are **material** names, and
+they go through `Material.lib` exactly as the terrain's layers do — all
+**261 slot names across the 29 missions** resolve that way.
+
+## A material picks a sub-image as well as a texture
+
+The byte immediately before a material entry's texture name is `0xFF` on 427
+of the 905 materials and a small number on the rest. `0xFF` means *the whole
+texture*; anything else is a cell of a sprite sheet, row-major over a 2 x 2
+grid.
+
+The sky is where this is unmistakable. `SUN.0` is one 256-pixel image holding
+a sun corona in its top-left quarter and a rocky moon in its bottom-left, and
+**`ENV_SUN` asks for cell 0 while `ENV_MOON` asks for cell 2** — which is
+exactly where each one is. `SUN1.0` holds four bodies, three stars and a moon;
+its three `ENV_SUN_*` materials name cells 0, 1 and 3, the three stars, and
+leave cell 2, the moon, alone. `SUN3.0` holds a star and three planets, and
+its three `ENV_MOON_*` materials name cells 1, 2 and 3 — the planets.
+
+Two do not fit: `ENV_SUN_2` and `ENV_MOON_5` both name `SUN4.0` with cells 4
+and 5, which are past the end of a 2 x 2 grid, and `SUN4.0`'s two sprites sit
+in the cells a 2 x 2 would number 1 and 3. The reader falls back to the whole
+texture for an index it cannot place rather than guess.
+
+## What the viewer draws
+
+- The **nebula** on the dome, multiplied by the keyframe's zenith-to-horizon
+  gradient, so one draw gives "this sky at this hour".
+- The **stars** over it, additive, fading in as the day's light drops.
+- The **clouds** over that, tiled four times and tinted by the horizon colour.
+- The **sun** and **moon** as billboards, opposite each other.
+
+Where the sun goes is the renderer's own choice: `CSun::Render` builds its
+matrix from two angles at `this+0x30` and `this+0x34`, and those have not been
+found in `sky.ske`, so the viewer runs the sun along a day arc from the
+keyframe's own time — overhead at noon, on the horizon at six, below it at
+night — and points the scene's light the same way so the shading and the sky
+agree. The time-of-day control walks the keyframes.
 
 ## Not resolved
 
+- **Where the sun stands.** `CSun` keeps two angles; they are not in the
+  keyframe. No pair of floats in the 88-byte block varies with time the way
+  an azimuth and an elevation would.
+- **The lens flares, snow and rain.** Slots 5 to 8 resolve to real textures
+  and are not drawn: a flare needs the sun's screen position, and snow and
+  rain need the particle system in `effects.rlb`.
 - **The keyframe count of a second section.** Six files have two; their
   72-byte section headers are byte-identical yet hold 27 and 20 keyframes, so
   the count is not in them. The reader takes the second section's keyframes to

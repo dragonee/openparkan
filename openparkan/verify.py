@@ -830,6 +830,45 @@ def check_sky(check, game: Path) -> None:
           f"every keyframe of their first section")
     check("sky.ske: keyframes run in time order", ordered >= parsed * 0.9,
           f"{ordered}/{parsed} files are sorted by time")
+    # sky.wea is a fixed role table, and every slot resolves.
+    lib = materials.MaterialLibrary(game / "Material.lib")
+    textures = NResArchive.open(game / "Textures.lib")
+    known = {e.name.split(".")[0].upper() for e in textures}
+    per_slot: list[set[str]] = [set() for _ in sky.SLOT_ROLES]
+    named = resolved = full = 0
+    for path in files:
+        try:
+            atmosphere = sky.load(path)
+        except sky.SkyFormatError:
+            continue
+        for index, role in enumerate(sky.SLOT_ROLES):
+            name = atmosphere.texture(role)
+            if not name:
+                continue
+            per_slot[index].add(name)
+            named += 1
+            material = lib.get(name)
+            base = material.textures[0] if material and material.textures else None
+            if base and base.upper().split(".")[0] in known:
+                resolved += 1
+    constant = [i for i, s in enumerate(per_slot) if len(s) == 1]
+    check("sky.wea: the slot index is the role", len(per_slot[0]) and all(per_slot),
+          f"all {parsed} missions fill the same {len(sky.SLOT_ROLES)} slots; "
+          f"slots {constant} name one texture every time")
+    check("sky.wea: every slot resolves through Material.lib", resolved == named,
+          f"{resolved}/{named} slot names reach a texture (none of them is in "
+          f"Textures.lib under its own name)")
+
+    for material in lib.materials.values():
+        full += material.cell == materials.WHOLE_TEXTURE
+    sun, moon = lib.get("ENV_SUN"), lib.get("ENV_MOON")
+    check("Material.lib: the byte before the name picks a sub-image",
+          sun is not None and moon is not None
+          and sun.textures == moon.textures and sun.cell != moon.cell,
+          f"{full}/{len(lib)} materials take the whole texture; ENV_SUN and "
+          f"ENV_MOON are both {sun.textures[0] if sun else '?'} at cells "
+          f"{sun.cell if sun else '?'} and {moon.cell if moon else '?'}")
+
     check("sky.ske: the third float is a day/night light", all(varying),
           f"on all {len(varying)} files whose light varies, its low point falls "
           f"within two hours of midnight ({parsed - len(varying)} files hold a "
