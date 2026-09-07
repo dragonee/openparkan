@@ -53,22 +53,41 @@ confirms it, and if it is wrong then something is not being drawn.
 
 Correct as far as it goes, but not what the game showed.
 
-### 2.1 Multi-layer materials
+### 2.1 The sky
 
-45 materials have more than one layer — 43 with two and two with eight — and
-the renderer draws only the first. The second is usually a mask (`L20.0`
-alongside `L20M.0`), and `Iron_3D.ini` has `EMBM=1`, so the game used
-environment-mapped bump mapping and some of these are bump layers. What each
-layer *is* is not readable from the record: byte 4 sorts materials into twelve
-groups that track their names (all six `TREE*` materials share value 6, the
-effects share 0xFF) and reads like a shader or blend-mode id, but nothing
-confirms it.
+The biggest thing still missing from every picture. `Terrain.dll` calls
+`sky.ske` an **atmosphere** file, written by a tool it names SunEditor, and
+the class names say what is in it: `CAtmosphere`, `CAtmData`, `CSun`,
+`CreateAtmosphereObject`, "Illegal atmosphere object type", plus the settings
+`AtmSkyDetail`, `AtmStarsOn`, `AtmCloudsOn`, `LensFlareOn`. So it is a list of
+typed sky objects and timed events (`GetTimeDiffInSec`, `GetEvents`; the first
+words of a file read as `23, 59` where a time would go). 999 to 8573 bytes,
+different per mission.
 
-### 2.2 Skyboxes
+The sibling `sky.wea` is already readable and names the textures:
+`ENV_NEBULA_0`, `ENV_STARS`, `ENV_CLOUDS`, `ENV_SUN_3`, `ENV_MOON`,
+`ENV_FLARE_00`, `ENV_FLARE_01`, `SNOWFLAKE`, `RAIN_DROP`. What is missing is
+the placement, and guessing it would be inventing.
 
-`sky.ske` (binary) and `sky.wea` per mission name environment textures —
-`ENV_NEBULA_0`, `ENV_STARS`, `ENV_SUN_3`, `ENV_MOON`, `ENV_FLARE_00`. The
-`.wea` half is already readable with `mesh.read_wea`; `sky.ske` is not parsed.
+**Where to look:** `Terrain.dll`'s `CreateAtmosphereObject`, which has to
+switch on the object type word.
+
+### 2.2 The second layer of a terrain material
+
+42 ground textures ship as a `L20.0` / `L20M.0` pair and the material names
+both. They are **not** detail or bump layers, which an earlier note assumed
+from `Iron_3D.ini`'s `EMBM=1`: correlation between the two is 0.994 median
+over all 42 pairs, so the `M` half is the same image in XRGB8888 rather than
+RGB565, at an exposure authored per texture (ratio 0.54 to 2.03).
+
+`Iron_3D.ini` carries `BITDEPTH` and `RENDER_QUALITY`, which is presumably
+what chose between them; which index goes with which setting is not
+established, so the reader takes layer 0. Two materials have **eight** layers
+(`B_LBL_01`, `R_LBL_01`) and those are unexplained.
+
+Byte 4 of a `MAT0` record sorts materials into twelve groups that track their
+names — all six `TREE*` share value 6, the effects share `0xFF` — and reads
+like a shader or blend-mode id, but nothing confirms it.
 
 ### 2.3 Effects
 

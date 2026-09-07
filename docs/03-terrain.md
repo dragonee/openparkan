@@ -187,3 +187,18 @@ It is also interleaved in face order rather than run-length, does not
 determine the texture pair or the surface word, and does not track elevation.
 Its groups are wildly uneven — 1, 2, 4 and 384 faces on SC_3. A renderer that
 wants to cull terrain has to build its own grid.
+
+## The `*M` textures are a second copy, not a bump map
+
+42 of the ground textures ship as a pair: `L20.0` in RGB565 and `L20M.0` in
+XRGB8888, and the material for `L20` names both as its two layers. The `M`
+half is **the same image**: correlation between the two is 0.994 median, 0.897
+at worst, over all 42 pairs. What differs is colour depth and exposure — the
+brightness ratio runs from 0.54 to 2.03 and was clearly authored per texture,
+not applied as a gain.
+
+So they are not detail layers and not bump maps, which is what an earlier
+draft assumed from `Iron_3D.ini`'s `EMBM=1`. They read as the 16-bit and
+32-bit variants of one texture, and `Iron_3D.ini` carries both `BITDEPTH` and
+`RENDER_QUALITY`, which is presumably what chose between them. Which index
+goes with which setting is not established, so the reader takes layer 0.
