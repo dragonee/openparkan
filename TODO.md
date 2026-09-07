@@ -17,70 +17,37 @@ was measured against a real install and can be re-derived with
 
 These produce visibly incorrect output. Fix in this order.
 
-### 1.1 Node poses — parts float, `fr_l_gener` is spiky
+*(Everything that used to be in this section — node poses, unit scale, the
+vertical datum, and component attachment — is done; see
+[docs/07-objects.md](docs/07-objects.md). What is left here came out of doing
+it.)*
 
-**Blocks:** every multi-part model — buildings with sub-assemblies, turrets,
-guns, and any assembled robot.
+### 1.1 A unit renders in its rest pose, not standing
 
-A mesh's stream 8 holds 24-byte keys: a `float32[3]` translation followed by 12
-bytes of packed rotation. A node's `fallback_key` selects one, and poses
-compose down the parent chain — parent rotation turns the child translation,
-translations sum, rotations multiply.
+A walking chassis's legs are animated, and the rest pose is frame 0 of each
+node's run in the frame map. That is the right *static* choice — it keeps a
+model inside its own authored box on 106 of 157 animated meshes against 81 for
+the fallback key — but it is not necessarily the pose the game shows a parked
+unit in, and 51 animated meshes still fall outside their box in it.
 
-Composing the **translations alone** yields offsets like (54.5, 77.1, 57.2) on
-`fr_l_bunker`, which throws geometry off the map, so the rotation is load
-bearing and its packing is not decoded.
+**Where to look:** the `.ctl` controller, which is the one slot of a `STAT`
+record still unread, and stream 19's relationship to `Iron_3D.ini`'s animation
+settings.
 
-What is known about those 12 bytes:
+### 1.2 A socket's rotation is thrown away
 
-| key | bytes 12–23 as `int16[6]` |
-|---|---|
-| identity | `(0, 0, 32767, 0, 0, 0)` |
-| quarter turn | `(0, 0, 23220, 0, 0, 23119)` |
+A part is mounted at its socket's position with its own orientation. That is
+right in the sense that both alternatives are visibly worse (see
+docs/07-objects.md), but it means a turret can never be drawn turned, and the
+108 attachments whose socket and root rotations disagree by 180 degrees are
+telling us something that is not yet understood.
 
-23220/32767 = 0.7087 and 23119/32767 = 0.7056 — cos and sin of 45°, so a
-half-angle representation is in there. Some keys read as a `float32` 1.0 at
-offset 12, which argues against a plain `int16[6]`.
+### 1.3 Damage variants are guessed at
 
-**Where to look:** fparkan documents `node38_fallback_pose`, type-8 keys and
-the type-19 frame map in `docs/reference/msh.md` — read the docs, not the
-source (see [docs/09-method.md](docs/09-method.md) on why). Otherwise
-`Terrain.dll`'s `LoadBuilding` is unoptimised and readable.
-
-**Test it with:** 3599 real keys across ten archives, plus the visible check
-that `fr_l_gener` stops being a star and building sub-parts stop floating.
-
-### 1.2 Unit scale — robots render about 1/20 too small
-
-`r_h_02.msh` is 390 triangles inside a 0.7 × 0.8 × 1.26 box, against a bunker
-52 units tall. Chassis meshes in `bases.rlb` are all authored at this scale.
-The mission record's `scale` is `1,1,1` in every shipped mission, so the factor
-comes from elsewhere — most likely the `.dat` component words or the `.ctl`
-controller.
-
-Probably falls out of 1.1, since both are transform data.
-
-### 1.3 The vertical datum for buildings is a heuristic
-
-The viewer rests every model on its own base (`-min(z)` of the drawn
-geometry). That is right for units and scenery, which are authored
-base-at-origin, and it stops buildings sinking — their exteriors are authored
-symmetric about z = 0. But the engine must have a real rule and this is not it.
-
-Ruled out already: `Root` control points (buildings carry `P###` and no
-`Root`), the `.bas` footprint plane (symmetric z range, so not a ground
-plane as read), the slot AABBs (identical to raw vertex bounds), and the root
-node pose (identity on every building checked). See
-[docs/07-objects.md](docs/07-objects.md).
-
-### 1.4 A unit draws as its chassis only
-
-A `.dat` assembly lists its parts but not where they attach. The `.cpt` control
-points are plainly the raw material — `TurretCenter`, `TurretDirect`,
-`foot_fl`, `Dir_1` — but nothing yet says which point on a chassis a given part
-binds to. Needs 1.1 first: without poses there is nothing to attach *to*.
-
----
+Two of every three five-slot blocks are unused by the renderer. 135 nodes
+populate them, and `fr_b_brige`'s `o02` carries identical triangle counts in
+variants 0 and 1 — a destroyed state is the obvious reading, but nothing
+confirms it, and if it is wrong then something is not being drawn.
 
 ## 2. Missing fidelity
 

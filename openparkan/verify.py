@@ -9,6 +9,7 @@ Each check prints PASS/FAIL and the evidence behind it.  If a claim in
 from __future__ import annotations
 
 import math
+import struct
 from pathlib import Path
 
 from . import arealmap, gamedir, landmesh, materials, mission, objects, texm
@@ -704,6 +705,299 @@ def check_minimap_agreement(check, game: Path) -> None:
           ", ".join(f"{n} r={s:+.3f}" for n, s in scores))
 
 
+def check_poses(check, game: Path) -> None:
+    """Node poses, the assembly tree, and the ground datum."""
+    archives = [
+        "static.rlb", "fortif.rlb", "bases.rlb", "turrets.rlb", "guns.rlb",
+        "parts.rlb", "weapon.rlb", "animals.rlb", "intsys.rlb", "system.rlb",
+    ]
+    meshes: list[tuple[str, objmesh.ObjectMesh]] = []
+    keys = unit = 0
+    for name in archives:
+        path = game / name
+        if not path.exists():
+            continue
+        archive = NResArchive.open(path)
+        for entry in archive:
+            if not entry.name.lower().endswith(".msh"):
+                continue
+            blob = archive.read(entry)
+            meshes.append((entry.name, objmesh.parse(blob, entry.name)))
+            # Read the last eight bytes of each key straight out of the file,
+            # before the reader normalises them, or the claim proves itself.
+            inner = NResArchive(blob, entry.name)
+            for stream in inner:
+                if stream.type_id != objmesh.STREAM_POSE_KEY:
+                    continue
+                raw = inner.read(stream)
+                for i in range(stream.element_count):
+                    packed = struct.unpack_from("<4h", raw, i * objmesh.POSE_KEY_SIZE + 16)
+                    keys += 1
+                    length = math.sqrt(
+                        sum((v / objmesh.QUATERNION_SCALE) ** 2 for v in packed)
+                    )
+                    unit += abs(length - 1.0) < 0.001
+    check("MESH: stream 8 rotations are unit quaternions", keys - unit <= 12,
+          f"{unit}/{keys} of the packed int16 quadruples are within 0.1% of "
+          f"unit length ({keys - unit} are zero or unnormalised)")
+
+    # The frame map indexes real keys, and an animated node's fallback is the
+    # last frame of its own run.
+    in_range = frames = fallback_is_last = animated = 0
+    for _name, m in meshes:
+        for node in m.nodes:
+            if not node.is_animated or not m.frame_count:
+                continue
+            animated += 1
+            run = m.frame_map[node.anim_start : node.anim_start + m.frame_count]
+            frames += len(run)
+            in_range += sum(1 for k in run if k < len(m.keys))
+            fallback_is_last += bool(run) and run[-1] == node.fallback_key
+    check("MESH: the frame map indexes real pose keys", in_range == frames,
+          f"{in_range}/{frames} entries across {animated} animated nodes")
+    check("MESH: an animated node's fallback is its last frame",
+          fallback_is_last >= animated * 0.95,
+          f"{fallback_is_last}/{animated} nodes")
+
+    # The strongest check: the authored bounding box in the stream-2 header is
+    # stated in posed space, so composing poses has to reach it.
+    def box(m: objmesh.ObjectMesh, posed: bool):
+        lo = [math.inf] * 3
+        hi = [-math.inf] * 3
+        found = False
+        for i, node in enumerate(m.nodes):
+            pose = m.world_pose(i) if posed else objmesh.IDENTITY_POSE
+            for index in node.slot_index:
+                if index == objmesh.NO_SLOT or index >= len(m.slots):
+                    continue
+                slot = m.slots[index]
+                stop = slot.first_triangle + slot.triangle_count
+                for tri in m.triangles[slot.first_triangle : stop]:
+                    for v in tri:
+                        if v >= len(m.positions):
+                            continue
+                        p = objmesh.apply(pose, m.positions[v])
+                        found = True
+                        for axis in range(3):
+                            lo[axis] = min(lo[axis], p[axis])
+                            hi[axis] = max(hi[axis], p[axis])
+        return (lo, hi) if found else None
+
+    posed_ok = raw_ok = total = 0
+    for _name, m in meshes:
+        if m.volume is None or not m.nodes or not m.slots:
+            continue
+        want_lo, want_hi = m.volume.minimum, m.volume.maximum
+        diagonal = math.dist(want_lo, want_hi) or 1.0
+        tol = 0.005 * diagonal
+        total += 1
+        for posed, counter in ((True, "posed"), (False, "raw")):
+            got = box(m, posed)
+            if got is None:
+                continue
+            lo, hi = got
+            fits = all(
+                lo[a] <= want_lo[a] + tol and hi[a] >= want_hi[a] - tol for a in range(3)
+            )
+            if fits and counter == "posed":
+                posed_ok += 1
+            elif fits:
+                raw_ok += 1
+    check("MESH: posed geometry reaches the authored bounding box",
+          posed_ok > raw_ok * 1.25,
+          f"{posed_ok}/{total} with poses applied against {raw_ok}/{total} without")
+
+    # The 15 slot indices are three variants of a five-slot block, and the
+    # first four of each block are a level-of-detail ladder.
+    def ladder(width: int) -> tuple[int, int]:
+        good = seen = 0
+        for _name, m in meshes:
+            for node in m.nodes:
+                for base in range(0, 15, objmesh.SLOTS_PER_VARIANT):
+                    counts = [
+                        m.slots[i].triangle_count
+                        for i in node.slot_index[base : base + width]
+                        if i != objmesh.NO_SLOT and i < len(m.slots)
+                    ]
+                    if len(counts) < 2:
+                        continue
+                    seen += 1
+                    good += all(counts[i] >= counts[i + 1] for i in range(len(counts) - 1))
+        return good, seen
+
+    four, four_of = ladder(4)
+    five, five_of = ladder(5)
+    check("MESH: a variant's first four slots are an LOD ladder",
+          four / max(four_of, 1) > 0.99 > five / max(five_of, 1),
+          f"triangle counts fall monotonically on {four}/{four_of} chains; "
+          f"{five}/{five_of} once the fifth slot is included, so it is not a level")
+
+    # And drawing level 0 alone is what the authored box describes.
+    exact_lod0 = exact_all = boxed = 0
+    for _name, m in meshes:
+        if m.volume is None or not m.nodes or not m.slots:
+            continue
+        want_lo, want_hi = m.volume.minimum, m.volume.maximum
+        tol = 0.005 * (math.dist(want_lo, want_hi) or 1.0)
+        boxed += 1
+        for pick, name in (
+            (lambda n: n.slots_for_lod(0), "lod0"),
+            (lambda n: [i for i in n.slot_index[:5] if i != objmesh.NO_SLOT], "all"),
+        ):
+            lo = [math.inf] * 3
+            hi = [-math.inf] * 3
+            for i, node in enumerate(m.nodes):
+                pose = m.world_pose(i)
+                for index in pick(node):
+                    if index >= len(m.slots):
+                        continue
+                    slot = m.slots[index]
+                    stop = slot.first_triangle + slot.triangle_count
+                    for tri in m.triangles[slot.first_triangle : stop]:
+                        for v in tri:
+                            if v >= len(m.positions):
+                                continue
+                            p = objmesh.apply(pose, m.positions[v])
+                            for axis in range(3):
+                                lo[axis] = min(lo[axis], p[axis])
+                                hi[axis] = max(hi[axis], p[axis])
+            if math.isinf(lo[0]):
+                continue
+            fits = all(
+                abs(lo[a] - want_lo[a]) < tol and abs(hi[a] - want_hi[a]) < tol
+                for a in range(3)
+            )
+            if name == "lod0":
+                exact_lod0 += fits
+            else:
+                exact_all += fits
+    check("MESH: level 0 alone is what the authored box measures",
+          exact_lod0 > exact_all * 1.2,
+          f"{exact_lod0}/{boxed} meshes match it exactly, against {exact_all}/{boxed} "
+          f"when all five slots of the variant are drawn together")
+
+    # Assemblies: a depth-first tree whose children name a socket node.
+    dats = sorted((game / "UNITS").rglob("*.dat"))
+    trees = attachments = to_socket = 0
+    cache: dict[tuple[str, str], objmesh.ObjectMesh | None] = {}
+    opened: dict[str, NResArchive] = {}
+    lib = objects.ObjectLibrary(game / "objects.rlb")
+
+    def record_mesh(rec, depth=0):
+        if rec is None or depth > 3:
+            return None
+        if rec.mesh:
+            return rec.mesh
+        for slot in rec.slots:
+            if slot and not slot.suffix:
+                found = record_mesh(lib.get(slot.member), depth + 1)
+                if found:
+                    return found
+        return None
+
+    def load(ref):
+        if ref is None:
+            return None
+        key = (ref.library, ref.member)
+        if key not in cache:
+            try:
+                if ref.library not in opened:
+                    opened[ref.library] = NResArchive.open(game / ref.library)
+                cache[key] = objmesh.parse(
+                    opened[ref.library].read_name(ref.member), ref.member
+                )
+            except (KeyError, ValueError, FileNotFoundError):
+                cache[key] = None
+        return cache[key]
+
+    for path in dats:
+        unit = objects.load_unit(path)
+        try:
+            parents = unit.parents()
+        except objects.ObjectFormatError:
+            continue
+        trees += 1
+        refs = [record_mesh(lib.get(c.ref.member)) for c in unit.components]
+        for i, component in enumerate(unit.components):
+            parent = parents[i]
+            if parent < 0 or not component.is_external:
+                continue
+            host = load(refs[parent])
+            if host is None:
+                continue
+            attachments += 1
+            if 0 <= component.attach_node < len(host.nodes):
+                name = host.nodes[component.attach_node].name.lower()
+                to_socket += name.startswith("base")
+    check("UNITS/*.dat: components form a depth-first tree", trees == len(dats),
+          f"{trees}/{len(dats)} assemblies consume their child counts exactly")
+    check("UNITS/*.dat: every part attaches to a Base_* node",
+          to_socket == attachments,
+          f"{to_socket}/{attachments} turret and gun attachments")
+
+    # The ground datum: a placed object's own z = 0 sits on the terrain.
+    heights: dict[Path, landmesh.LandMesh] = {}
+    origin_on_ground = base_on_ground = buildings = units = 0
+    for folder in gamedir.missions(game):
+        m = mission.load(folder / "data.tma")
+        if not m.map_path:
+            continue
+        target = game / m.map_path.replace("\\", "/")
+        land = (target if target.is_dir() else target.parent) / "Land.msh"
+        if not land.exists():
+            continue
+        if land not in heights:
+            heights[land] = landmesh.load(land)
+        terrain = heights[land]
+        for o in m.objects:
+            if o.kind not in (mission.KIND_BUILDING, mission.KIND_UNIT):
+                continue
+            ground = terrain.height_at(o.position[0], o.position[1])
+            if ground is None:
+                continue
+            ref = None
+            if not o.is_static:
+                f = game / o.path.replace("\\", "/")
+                if not f.exists() and f.parent.exists():
+                    f = {x.name.lower(): x for x in f.parent.iterdir()}.get(f.name.lower())
+                if f is not None and f.exists():
+                    definition = objects.load_unit(f)
+                    if definition.components:
+                        ref = record_mesh(lib.get(definition.components[0].ref.member))
+            model = load(ref)
+            if model is None:
+                continue
+            posed = model.posed_positions(0)
+            reachable = {
+                v
+                for i, node in enumerate(model.nodes)
+                if not node.is_interior
+                for index in node.slots_for_lod(0)
+                if index < len(model.slots)
+                for tri in model.triangles[
+                    model.slots[index].first_triangle :
+                    model.slots[index].first_triangle + model.slots[index].triangle_count
+                ]
+                for v in tri
+            }
+            reachable = {v for v in reachable if v < len(posed)}
+            if not reachable:
+                continue
+            lowest = min(posed[v][2] for v in reachable)
+            if o.kind == mission.KIND_BUILDING:
+                buildings += 1
+                origin_on_ground += abs(o.position[2] - ground) < 2.0
+            else:
+                units += 1
+                base_on_ground += abs(o.position[2] + lowest - ground) < 1.0
+    check("placement: a building's origin sits on the terrain",
+          origin_on_ground >= buildings * 0.5,
+          f"{origin_on_ground}/{buildings} within 2 units of the height under them")
+    check("placement: a unit's lowest exterior vertex sits on the terrain",
+          base_on_ground >= units * 0.5,
+          f"{base_on_ground}/{units} within 1 unit of the height under them")
+
+
 def run(game: Path) -> int:
     """Run every check against ``game``.  Returns a process exit code."""
     results: list[tuple[str, bool, str]] = []
@@ -716,7 +1010,7 @@ def run(game: Path) -> int:
     checks = (
         check_nres, check_texm, check_terrain, check_uv,
         check_water, check_minimap_agreement, check_arealmap,
-        check_missions, check_objects,
+        check_missions, check_objects, check_poses,
     )
     for fn in checks:
         fn(check, game)

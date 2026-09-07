@@ -43,19 +43,12 @@ BA AB         0xABBA marker
 after which the payload is high-entropy — compressed or obfuscated. Only 2
 files, holding fonts and 2D sprites, so this blocks UI work but nothing else.
 
-## Object mesh: local origins and the .ctl controller
+## Object mesh: the .ctl controller
 
-Meshes are not consistently based at z = 0, and adding a mesh's minimum z to
-its placement does not make scenery sit flush on the terrain. Every `STAT`
-record has a `.ctl` slot that has not been read; a transform there is the
-likely explanation.
-
-## How a unit's components are positioned
-
-A `.dat` assembly lists its parts but not where they attach. The `.cpt` control
-points are clearly the raw material — `TurretCenter`, `TurretDirect`, `foot_fl`
-— but nothing yet says which point on a chassis a given part binds to. Until
-that is worked out a unit can only be drawn as its first component.
+Every `STAT` record has a `.ctl` slot that has not been read. The vertical
+datum and the component attachment it was expected to explain both turned out
+to live in the mesh itself — see [07-objects.md](07-objects.md) — so what a
+controller carries is still open.
 
 ## CTPT field roles outside static.rlb
 
@@ -71,27 +64,28 @@ that trace a polygon, so they read as a building's ground footprint. The
 header does not divide evenly into the payload, so the full record is not
 mapped.
 
+## Object mesh leftovers
+
+- **The fifth slot of a variant.** Four of every five slot indices are a level
+  of detail ladder; the fifth is not (it breaks the monotonic triangle count
+  on 292 chains). 316 of the 1845 nodes carry one; of the 288 that carry both
+  a level 0 and a fifth slot, the two use the same materials on 197 and
+  different ones on 91.
+- **What the later slot variants are.** Two of the three blocks of five are
+  used by 135 nodes. `fr_b_brige`'s `o02` has identical counts in variants 0
+  and 1, which reads like a damage state.
+- **Pose key `time`.** The `float32` at offset 12 of a stream-8 key is an
+  integer frame number in every one of the 34049 keys, ranging 0..473. It is
+  not used by a static renderer.
+- The 180-degree disagreement between a socket's rotation and the root
+  rotation of the part that mounts on it, on 108 of 1414 attachments.
+
 ## Unresolved terrain fields
 
 - `Land.msh` stream 1: 2432 bytes on SC_3, mostly `0xFF`. Not indexed by
   vertex or face count.
 - `Land.msh` stream 2: 737 float3 on SC_3. The first 8 are the map's bounding
   box corners; the remaining 729 (= 27³) look like a spatial subdivision.
-- **The vertical datum for buildings.** Their exteriors are authored symmetric
-  about z = 0 while units and scenery are base-at-origin, so a renderer has to
-  rest buildings on their own base to stop them sinking. That is a heuristic;
-  the engine must have a real rule. `Root` control points, the `.bas` footprint
-  plane, the slot AABBs and the root node pose have all been ruled out —
-  see [07-objects.md](07-objects.md).
-- **Unit scale.** Robot chassis meshes are authored roughly 1/20 the scale of
-  buildings (`r_h_02` fits in a 0.7-unit box), and the mission record's scale
-  is `1,1,1` throughout, so the factor comes from somewhere else — probably the
-  `.dat` component fields or the `.ctl` controller.
-- **Node poses.** A node's fallback key selects a static pose out of stream 8,
-  and a child composes with its parent. Without it, models authored around a
-  pose render wrong even with the correct slot selection — `fr_l_gener` is the
-  clear case. Stream 8 (animation keys) and stream 19 (frame map) are the
-  remaining geometry work.
 - Face record fields 10, 11, 12, and field 0 (near-constant per mesh).
 - `MAT0`'s per-layer stride, and the colour bytes around each texture name.
 - The high byte of a draw batch's material word: 0xFF on 14166 batches and

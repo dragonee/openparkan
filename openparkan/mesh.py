@@ -35,6 +35,7 @@ applied; ``raw_triangles`` keeps the file's own values.
 
 from __future__ import annotations
 
+import math
 import struct
 from dataclasses import dataclass, field
 
@@ -50,13 +51,20 @@ STREAM_SUBOBJECT_NAME = 9
 STREAM_SUBOBJECT_HEADER = 1
 STREAM_BATCH = 13
 STREAM_PATH_GRAPH = 17
+STREAM_POSE_KEY = 8
+STREAM_FRAME_MAP = 19
 
 SUBOBJECT_HEADER_SIZE = 38
 SLOT_HEADER_SIZE = 0x8C
 SLOT_SIZE = 68
-#: A node selects geometry with slot_index[lod * LOD_GROUPS + group].
-LOD_COUNT = 3
-LOD_GROUPS = 5
+#: A node selects geometry with ``slot_index[variant * SLOTS_PER_VARIANT + lod]``.
+#: Each block of five is one variant: four levels of detail and a fifth slot
+#: whose role is not established.  Within a block the first four triangle
+#: counts fall monotonically on 1157 of 1161 chains; including the fifth drops
+#: that to 869, which is what says it is not a level.
+SLOTS_PER_VARIANT = 5
+LOD_COUNT = 4
+VARIANT_COUNT = 3
 NO_SLOT = 0xFFFF
 #: Bit 0 of a sub-object's flags marks interior geometry.
 SUBOBJECT_INTERIOR = 0x0001
@@ -73,8 +81,125 @@ NO_LINK = 0xFFFFFFFF
 NAME_FIELD = 32
 FACE_STRIDE = 16
 
+POSE_KEY_SIZE = 24
+#: A pose quaternion is int16 over this scale, so 32767 reads as 1.0.
+QUATERNION_SCALE = 32767.0
+#: A node with no entry in the frame map.
+NO_ANIMATION = 0xFFFF
+
 #: UVs use the same 8.8 fixed point as the terrain.
 UV_FIXED_POINT_SCALE = 256.0
+
+
+#: A pose: a translation and a rotation quaternion ``(w, x, y, z)``.
+Pose = tuple[tuple[float, float, float], tuple[float, float, float, float]]
+
+IDENTITY_POSE: Pose = ((0.0, 0.0, 0.0), (1.0, 0.0, 0.0, 0.0))
+
+
+def quaternion_multiply(
+    a: tuple[float, float, float, float], b: tuple[float, float, float, float]
+) -> tuple[float, float, float, float]:
+    """Compose two rotations, ``a`` applied after ``b``."""
+    w1, x1, y1, z1 = a
+    w2, x2, y2, z2 = b
+    return (
+        w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2,
+        w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2,
+        w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2,
+        w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2,
+    )
+
+
+def quaternion_rotate(
+    q: tuple[float, float, float, float], v: tuple[float, float, float]
+) -> tuple[float, float, float]:
+    """Rotate a vector by a unit quaternion."""
+    w, x, y, z = q
+    vx, vy, vz = v
+    tx = 2.0 * (y * vz - z * vy)
+    ty = 2.0 * (z * vx - x * vz)
+    tz = 2.0 * (x * vy - y * vx)
+    return (
+        vx + w * tx + (y * tz - z * ty),
+        vy + w * ty + (z * tx - x * tz),
+        vz + w * tz + (x * ty - y * tx),
+    )
+
+
+def compose(parent: Pose, child: Pose) -> Pose:
+    """Place a child pose in its parent's frame."""
+    (px, py, pz), pq = parent
+    ct, cq = child
+    rx, ry, rz = quaternion_rotate(pq, ct)
+    return ((px + rx, py + ry, pz + rz), quaternion_multiply(pq, cq))
+
+
+def invert(pose: Pose) -> Pose:
+    """The pose that undoes ``pose``."""
+    (x, y, z), (w, qx, qy, qz) = pose
+    inverse = (w, -qx, -qy, -qz)
+    back = quaternion_rotate(inverse, (-x, -y, -z))
+    return back, inverse
+
+
+def apply(pose: Pose, point: tuple[float, float, float]) -> tuple[float, float, float]:
+    """Transform a point by a pose."""
+    (tx, ty, tz), q = pose
+    x, y, z = quaternion_rotate(q, point)
+    return (x + tx, y + ty, z + tz)
+
+
+@dataclass
+class PoseKey:
+    """One entry of stream 8: where a node sits, and when.
+
+    24 bytes: a ``float32[3]`` translation, a ``float32`` time in frames, and
+    the rotation as ``int16[4]`` over 32767 in ``(w, x, y, z)`` order -- 34038
+    of the 34049 keys the game ships are unit length to within 0.1%, and the
+    eleven that are not are all zero or unnormalised, so they are repaired on
+    read.
+
+    A node's rest pose is its ``fallback_key``.  Animated nodes walk the frame
+    map instead; their fallback is the animation's last frame, which is why
+    using it for a rest pose leaves turrets pointing wherever they stopped.
+
+    ``rotation`` is stored conjugated relative to the file, because the game
+    is left-handed; see ``parse``.
+    """
+
+    translation: tuple[float, float, float]
+    time: float
+    rotation: tuple[float, float, float, float]
+
+    @property
+    def pose(self) -> Pose:
+        return self.translation, self.rotation
+
+
+@dataclass
+class BoundingVolume:
+    """The model's authored extent, from the 140-byte stream-2 header.
+
+    Eight box corners, a bounding sphere, then the axis and radius of a
+    bounding cylinder.  The box is the useful part: it is stated in *posed*
+    space, so it is the oracle that proves a pose reading right or wrong.
+    """
+
+    corners: list[tuple[float, float, float]]
+    centre: tuple[float, float, float]
+    radius: float
+    axis_low: tuple[float, float, float]
+    axis_high: tuple[float, float, float]
+    axis_radius: float
+
+    @property
+    def minimum(self) -> tuple[float, float, float]:
+        return tuple(min(c[a] for c in self.corners) for a in range(3))
+
+    @property
+    def maximum(self) -> tuple[float, float, float]:
+        return tuple(max(c[a] for c in self.corners) for a in range(3))
 
 
 @dataclass
@@ -103,18 +228,41 @@ class Subobject:
     name: str
     flags: int
     parent: int
+    #: Start of this node's run in the frame map (stream 19), or NO_ANIMATION.
+    #: The run is ``frame_count`` long and each entry indexes a pose key.
+    anim_start: int
     fallback_key: int
-    #: 15 slot indices, addressed as ``[lod * 5 + group]``; NO_SLOT where the
-    #: node has no geometry for that combination.
+    #: 15 slot indices, addressed as ``[variant * 5 + lod]``; NO_SLOT where
+    #: the node has no geometry for that combination.
     slot_index: list[int]
+
+    @property
+    def is_animated(self) -> bool:
+        return self.anim_start != NO_ANIMATION
 
     @property
     def is_interior(self) -> bool:
         return bool(self.flags & SUBOBJECT_INTERIOR)
 
-    def slots_for_lod(self, lod: int) -> list[int]:
-        base = lod * LOD_GROUPS
-        return [i for i in self.slot_index[base : base + LOD_GROUPS] if i != NO_SLOT]
+    def slots_for_lod(self, lod: int = 0, variant: int = 0) -> list[int]:
+        """The slot to draw this node at one level of detail.
+
+        At most one slot: a level is a single entry, not the five-slot run the
+        earlier reading took it for.  Drawing all five superimposes four
+        levels of detail and is what makes a model look like scrambled
+        geometry.
+
+        28 nodes carry only the fifth slot of their variant, so level 0 falls
+        back to the coarsest slot present rather than drawing nothing.
+        """
+        base = variant * SLOTS_PER_VARIANT
+        block = self.slot_index[base : base + SLOTS_PER_VARIANT]
+        if lod < len(block) and block[lod] != NO_SLOT:
+            return [block[lod]]
+        if lod == 0:
+            fallback = next((i for i in block if i != NO_SLOT), NO_SLOT)
+            return [fallback] if fallback != NO_SLOT else []
+        return []
 
 
 @dataclass
@@ -152,6 +300,78 @@ class ObjectMesh:
     batches: list[Batch] = field(default_factory=list)
     nodes: list[Subobject] = field(default_factory=list)
     slots: list[Slot] = field(default_factory=list)
+    #: Stream 8, the pose keys every node draws its placement from.
+    keys: list[PoseKey] = field(default_factory=list)
+    #: Stream 19, ``frame_count`` key indices per animated node.
+    frame_map: tuple[int, ...] = ()
+    frame_count: int = 0
+    #: The authored bounding volume from the stream-2 header, if present.
+    volume: BoundingVolume | None = None
+
+    def rest_key(self, node: int) -> int | None:
+        """Index of the pose key that puts a node in its rest position.
+
+        An animated node's ``fallback_key`` is the *last* frame of its
+        animation, not its rest pose -- a turret's fallback leaves it swung
+        round to wherever the animation ended -- so an animated node takes
+        frame 0 of its own run in the frame map instead.
+        """
+        n = self.nodes[node]
+        if n.is_animated and self.frame_count and n.anim_start < len(self.frame_map):
+            return self.frame_map[n.anim_start]
+        if n.fallback_key < len(self.keys):
+            return n.fallback_key
+        return None
+
+    def local_pose(self, node: int) -> Pose:
+        """A node's pose in its parent's frame."""
+        key = self.rest_key(node)
+        return IDENTITY_POSE if key is None else self.keys[key].pose
+
+    def world_pose(self, node: int) -> Pose:
+        """A node's pose in model space, composed down the parent chain."""
+        pose = self.local_pose(node)
+        seen = {node}
+        parent = self.nodes[node].parent
+        while parent != NO_PARENT and parent < len(self.nodes) and parent not in seen:
+            seen.add(parent)
+            pose = compose(self.local_pose(parent), pose)
+            parent = self.nodes[parent].parent
+        return pose
+
+    def node_of_triangle(self, index: int, lod: int = 0) -> int | None:
+        """Which node draws a triangle, via the slot that covers it."""
+        for i, node in enumerate(self.nodes):
+            for si in node.slots_for_lod(lod):
+                if si >= len(self.slots):
+                    continue
+                slot = self.slots[si]
+                if slot.first_triangle <= index < slot.first_triangle + slot.triangle_count:
+                    return i
+        return None
+
+    def posed_positions(self, lod: int = 0) -> list[tuple[float, float, float]]:
+        """Vertex positions with each node's world pose applied.
+
+        Mesh vertices are authored in their own node's frame; without this a
+        multi-part model draws every part piled on the origin.  Vertices not
+        reached by ``lod`` keep their raw position.
+        """
+        out = list(self.positions)
+        for i, node in enumerate(self.nodes):
+            pose = self.world_pose(i)
+            if pose == IDENTITY_POSE:
+                continue
+            for si in node.slots_for_lod(lod):
+                if si >= len(self.slots):
+                    continue
+                slot = self.slots[si]
+                stop = slot.first_triangle + slot.triangle_count
+                for tri in self.triangles[slot.first_triangle : stop]:
+                    for v in tri:
+                        if v < len(out):
+                            out[v] = apply(pose, self.positions[v])
+        return out
 
     @property
     def has_interior(self) -> bool:
@@ -254,6 +474,7 @@ def parse(blob: bytes, name: str = "<mesh>", texture_names: list[str] | None = N
                     name=subobjects[i] if i < len(subobjects) else "",
                     flags=words[0],
                     parent=words[1],
+                    anim_start=words[2],
                     fallback_key=words[3],
                     slot_index=list(words[4:19]),
                 )
@@ -272,6 +493,44 @@ def parse(blob: bytes, name: str = "<mesh>", texture_names: list[str] | None = N
                      struct.unpack_from("<3f", raw_slots, o + 8),
                      struct.unpack_from("<3f", raw_slots, o + 20))
             )
+
+    keys = []
+    key_entry = entries.get(STREAM_POSE_KEY)
+    raw_keys = stream.get(STREAM_POSE_KEY, b"")
+    for i in range(key_entry.element_count if key_entry else 0):
+        o = i * POSE_KEY_SIZE
+        if o + POSE_KEY_SIZE > len(raw_keys):
+            break
+        translation = struct.unpack_from("<3f", raw_keys, o)
+        time = struct.unpack_from("<f", raw_keys, o + 12)[0]
+        w, x, y, z = struct.unpack_from("<4h", raw_keys, o + 16)
+        length = math.sqrt(sum((v / QUATERNION_SCALE) ** 2 for v in (w, x, y, z)))
+        if length < 1e-6:
+            rotation = (1.0, 0.0, 0.0, 0.0)
+        else:
+            scale = QUATERNION_SCALE * length
+            # The game is left-handed (Z up, DirectX): the matrix it builds
+            # from a quaternion is the transpose of the right-handed one, so
+            # the same four numbers denote the conjugate rotation here.
+            rotation = (w / scale, -x / scale, -y / scale, -z / scale)
+        keys.append(PoseKey(translation, time, rotation))
+
+    frame_entry = entries.get(STREAM_FRAME_MAP)
+    raw_frames = stream.get(STREAM_FRAME_MAP, b"")
+    frame_map = struct.unpack_from(f"<{len(raw_frames) // 2}H", raw_frames, 0)
+    frame_count = frame_entry.link_count if frame_entry else 0
+
+    volume = None
+    if len(raw_slots) >= SLOT_HEADER_SIZE:
+        v = struct.unpack_from("<35f", raw_slots, 0)
+        volume = BoundingVolume(
+            corners=[v[i * 3 : i * 3 + 3] for i in range(8)],
+            centre=v[24:27],
+            radius=v[27],
+            axis_low=v[28:31],
+            axis_high=v[31:34],
+            axis_radius=v[34],
+        )
 
     batches = []
     raw_batch = stream.get(STREAM_BATCH, b"")
@@ -309,6 +568,10 @@ def parse(blob: bytes, name: str = "<mesh>", texture_names: list[str] | None = N
         batches=batches,
         nodes=parts,
         slots=slots,
+        keys=keys,
+        frame_map=frame_map,
+        frame_count=frame_count,
+        volume=volume,
     )
 
 

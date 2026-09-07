@@ -55,12 +55,28 @@ uint32   class word
 components × N, 112 bytes each:
     char[32]  archive name, always "objects.rlb"
     char[32]  record name
-    uint32    varies
-    int32     varies
+    uint32    flags, 1 throughout
+    int32     attachment node in the parent's mesh, -1 on the root
     char[32]  display name
-    uint32    varies
-    int32     varies
+    uint32    class
+    int32     child count
 ```
+
+The class says what a part is and, with it, what it hangs off:
+
+```
+0  chassis     the root
+1  turret      bolts to the chassis
+2  armour      modelled, but only visible from inside
+3  internal    engine, battery, shield, sensor, deflector -- likewise
+4  gun         bolts to the turret
+5  ammunition  a clip belonging to the gun above it
+```
+
+The component list is **a tree written depth first**: a record owns the next
+`child_count` records' subtrees. That reading consumes all 458 shipped
+assemblies exactly, and it is what makes the attachment field usable — a
+child's node index is into *its own parent's* mesh, not the chassis's.
 
 **A unit is an assembly of parts**, which is the game's central mechanic
 written straight into the data. `UNITS/UNITS/BATTLE/w_b_trk1.dat` is 18
@@ -78,6 +94,25 @@ i_dsh_b_df   Large detect.shld (LDS1)
 
 The display names are the strings the game's UI shows, so the whole parts
 catalogue is readable without touching the executable.
+
+### How parts attach
+
+A mesh carries **geometry-less `Base_*` nodes**: `Base_TM` and `Base_TL` on a
+chassis, `Base_LU_01` / `Base_RU_01` / `Base_gun` on a turret, `Base_RDR` and
+`Base_DF` for a radar and a deflector. They exist only to hold a pose, and a
+component's attachment field is the index of one of them. Across all 458
+assemblies, **946 of 946 guns and 468 of 468 turrets** land on a `Base_*`
+node, the one exception being a chassis with no mesh at all.
+
+The mount itself is the socket's **position**. Its rotation is not applied:
+a socket carries the same rotation as the root node of the part that plugs
+into it — on 1306 of the 1414 attachments — so composing the two turns the
+part twice and guns come out pointing sideways. Cancelling it instead
+(`socket ∘ root⁻¹`) fixes those but flips the other 108, whose socket and root
+disagree by exactly 180°, upside down; `r_l_02`'s turret ends up underneath
+the chassis. Taking the position and leaving the part in its own orientation
+is right in both groups, and puts a bunker's turret at z 16.49 on a bunker
+whose roof is at 16.49.
 
 All 458 files parse on the 112-byte stride, giving 5708 components. **5705
 resolve** in `objects.rlb`; three do not — `fr_l_mast`, `fr_l_tele` and
@@ -149,9 +184,9 @@ A node's 38-byte record is:
 ```
 uint16   flags            bit 0 set = interior
 uint16   parent           node index, 0xFFFF for a root
-uint16   animation map start
-uint16   fallback key     selects the node's static pose
-uint16   slot_index[15]   addressed as [lod * 5 + group], 0xFFFF = none
+uint16   animation map start   into stream 19, 0xFFFF if not animated
+uint16   fallback key     index into stream 8
+uint16   slot_index[15]   addressed as [variant * 5 + lod], 0xFFFF = none
 ```
 
 and stream 2 is a **140-byte header followed by 68-byte slots**:
@@ -164,66 +199,119 @@ float32  bounding sphere centre[3], radius
 uint32   x5
 ```
 
-`140 + 68 * count` accounts for stream 2 exactly on **all 434 meshes**. This
-is what a renderer needs: pick a level of detail, skip the interior nodes,
-follow each node's slots to a run of triangles.
+`140 + 68 * count` accounts for stream 2 exactly on **all 434 meshes**.
 
-Selecting **LOD 0 across all nodes** is what a renderer wants: on `fr_l_bunker`
-that is 3050 triangles of 4066, the remainder being LOD 1 duplicates. Drawing
-every level of detail superimposed is what makes a building look like
-scrambled geometry — not the `i*` nodes.
+The 15 slot indices are **three blocks of five**, and each block is one
+variant: within a block the first four triangle counts fall monotonically on
+**1157 of 1161** chains, and only 869 once the fifth slot is counted, so the
+fifth is not a level. `s_stn_0_01` is the clearest case — one node, three
+slots of 58, 22 and 14 triangles, which is a level ladder and not three parts.
 
-### Buildings must be rested on their base, not their origin
+So **one node draws one slot**: `slot_index[variant * 5 + lod]`. Reading the
+five as parallel groups draws four levels of detail on top of one another,
+which is what makes a model look like scrambled geometry — not the `i*` nodes.
+Across the placed missions it inflated the drawn geometry from 229k triangles
+to 381k.
+
+Two things pin the reading down beyond the monotonicity:
+
+- level 0 of variant 0 alone reproduces the authored bounding box **exactly on
+  302 of 434 meshes**, against 231 when all five slots are drawn together;
+- 28 nodes carry only the fifth slot of their block, so level 0 falls back to
+  the coarsest slot present rather than drawing nothing. No node lacks
+  geometry in variant 0 but has some in a later variant.
+
+What the later variants are is not established. `fr_b_brige`'s `o02` node has
+identical counts in variants 0 and 1 (12, 6, 2 both times), which reads like a
+damage state.
+
+### The stream 2 header is the model's authored extent
+
+The 140 bytes before the first slot are 35 floats:
+
+```
+float32  box corner[8][3]        the model's bounding box, in posed space
+float32  sphere centre[3], radius
+float32  axis low[3], axis high[3], radius
+```
+
+The last seven are a bounding **cylinder**, and its radius is exact: 11.6771
+on `R_B_02` is `sqrt(8.791² + 7.687²)`, 28.3412 on `fr_b_brige` is
+`sqrt(25.6² + 12.16²)`, 66.927 on `fr_b_bunker` is `47.325 × sqrt(2)`.
+
+The box is the useful part, because **it is stated in posed space**. That
+makes it the oracle that decides whether a pose reading is right: with poses
+applied the drawn geometry reaches it on 305 of 434 meshes, without them on
+237.
+
+### Node poses
+
+Stream 8 is an array of 24-byte keys:
+
+```
+float32  translation[3]
+float32  time, in frames
+int16    rotation[4]      w, x, y, z over 32767
+```
+
+**34038 of the 34049 keys the game ships are unit quaternions** to within
+0.1%; the other eleven are all zero or, in one case, unnormalised, and are
+repaired on read. The game is left-handed — Z up, DirectX — so the matrix it
+builds from a quaternion is the transpose of the right-handed one, and the
+same four numbers denote the **conjugate** rotation here. Reading them
+straight through instead costs a factor of ten in the box error (median 1.48%
+of the model diagonal against 0.10%).
+
+A node's pose composes down the parent chain: the parent's rotation turns the
+child's translation, translations sum, rotations multiply. `fr_l_gener`'s four
+corner pylons sit at (±20.74, ±20.74, 22.58) once composed, and on top of each
+other without it.
+
+Stream 19 is the **frame map**: `link_count` entries per animated node, each an
+index into stream 8, starting at the node's `anim_start`. A node's
+`fallback_key` is the **last** frame of its own run — true on all 817 animated
+nodes — so using it as a rest pose leaves a turret swung round to wherever its
+animation ended. Frame 0 of the run is the rest pose, and it keeps a model
+inside its own authored box on 106 of 157 animated meshes against 81 for the
+fallback.
+
+### The ground datum: a model's own z = 0
 
 A mission places an object by putting model **z = 0** at the placement height,
-and for units and scenery that is right — they are authored with their base at
-the origin (measured base-minus-terrain: units +0.16, rocks 0.00).
+and that is all there is to it — no offset. Measured across the 864 placed
+objects in the shipped missions, against the terrain height under each:
 
-Buildings are not. Their exterior is authored **symmetric about z = 0**:
-`fr_m_bunker` spans −9.04..9.04, `fr_l_angar` −18.43..18.43, `fr_l_plant`
-−32.95..32.95. Placing that origin at ground level buries half the building,
-and measured across all 167 placed buildings the base sits a median of
-**23.6 units underground** — about 44% of the model.
+| kind | origin − terrain | lowest exterior vertex − terrain |
+|---|---|---|
+| building | **0.00** | −1.16 |
+| unit | +1.54 | **−0.08** |
+| vegetation | +2.25 | −2.79 |
+| rock | +7.80 | −0.09 |
 
-Two things say the minimum z really is the bottom of the structure rather than
-a deep foundation:
+A building's origin lands on the ground; a unit's mission z is set so its
+wheels or feet do. Both are the same rule seen from two ends, and both are
+tight: 64% of units put their lowest vertex within one unit of the terrain.
 
-- the interior path graph's lowest waypoint sits slightly *above* the exterior
-  minimum on 28 of 29 buildings — a floor below ground level would make no
-  sense;
-- units and scenery, which are visibly correct, are authored the other way.
+This only reads that way **once node poses are applied**. Before that a
+building's parts pile up on their own origins, its geometry comes out roughly
+symmetric about z = 0, and it looks half-buried — which is what earlier drafts
+of this document described, and why they recommended resting a model on
+`-min(z)`. That heuristic lifts `fr_b_bunker` 23 units into the air.
 
-So a renderer should offset a model by `-min(z)` of the geometry it draws.
-That is a no-op for units and rocks and lifts buildings out of the ground.
+Buildings whose exterior does go below z = 0 are the ones that should: bunkers
+and towers are dug in, and a bridge spans a canyon. The ones that do not are
+exactly the ones you would expect — `fr_b_plant` −0.00, `fr_b_store` 0.00,
+`fr_l_angar` −0.00, and the turrets in `turrets.rlb` at +0.08.
 
-**This is a heuristic, not the engine's rule.** The real datum has not been
-found. Ruled out: the `Root` control point (buildings have `P###` points and no
-`Root`), the `.bas` footprint plane (its z range is symmetric, e.g.
-−60.51..60.51 on `fr_b_bunker`, so it is not a ground plane as read), the slot
-AABBs (they match the raw vertex bounds exactly, so they carry no transform),
-and the root node's pose (identity on the buildings checked).
+### Units are authored at the same scale as everything else
 
-**Still missing: node poses.** Stream 8 holds 24-byte keys — a `float32[3]`
-translation and a packed rotation — and a node's `fallback_key` selects one.
-Poses compose down the parent chain, and composing the translations alone
-produces offsets like (54.5, 77.1, 57.2) that fling geometry away, so the
-rotation matters and its packing is not decoded. Identity reads as
-`(0, 0, 32767, 0, 0, 0)` and a quarter turn as `(0, 0, 23220, 0, 0, 23119)` —
-23220/32767 = 0.709, 23119/32767 = 0.706, so cos and sin of 45° are in there.
-
-Until poses are applied, sub-assemblies render at their authored origin rather
-than their assembled position: some parts of a building float, and
-`fr_l_gener` comes out spiky.
-
-### Units are authored at a different scale
-
-A unit's chassis is tiny in model units — `r_h_02` is 390 triangles inside a
-0.7 × 0.8 × 1.26 box, against a bunker 52 units tall. Something scales them up
-and it is not the mission record, whose scale is `1,1,1` throughout. Not yet
-investigated.
-
-Sub-object names describe the model's construction: `s_tree_0_06` is
-`Base_TM`, `leaf1_m1o1`, `leaf2_m1o1`, `leaf3_m1o1`.
+An earlier draft recorded that chassis meshes were about 1/20 the scale of
+buildings, from `r_h_02` fitting in a 0.7 × 0.8 × 1.26 box. That was measured
+before poses were applied and is wrong: posed, `r_h_02` spans 1.5 units
+vertically, `R_B_02` is 17.6 × 15.4 × 3.9, and `R_B_08` is 29.7 units tall,
+against buildings of 40 to 215. The placement statistics above settle it
+independently — if units were twenty times too small their bases would not
+land on the terrain at all.
 
 ### Vegetation is billboards
 
@@ -355,10 +443,10 @@ the three triples as-is.
 
 ## Local origins
 
-Object meshes are not consistently based at z = 0. `s_tree_0_06` spans
-z −11.1 to +22.8; `s_tree_59` spans −127.1 to +2.1, almost entirely *below*
-its origin — and the missions place it 125 units above the ground, which
-compensates almost exactly. Adding the mesh's minimum z to its placement does
-not make scenery sit flush in general (median −1.9, wide spread), so there is
-probably a transform in the `.ctl` controller that has not been read yet.
-Buildings, by contrast, sit at a median of +0.000 above the terrain.
+Vegetation and rock are the two kinds the ground datum fits least well:
+`s_tree_59` spans z −127.1 to +2.1, almost entirely *below* its origin, and
+the missions place it 125 units above the ground, which compensates almost
+exactly. Read as "the mission z is the model origin" that is consistent — the
+tree is authored hanging below its origin and placed high enough to make up
+for it — but it means a mis-set placement is invisible in the data, and it is
+why vegetation's residuals are the widest of the four kinds.

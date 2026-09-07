@@ -207,13 +207,15 @@ class ModelLibrary:
     """Resolves any placed mission object to renderable geometry.
 
     Two chains meet here.  Scenery names an ``objects.rlb`` record directly.
-    A building or unit names a ``UNITS/**/*.dat`` assembly, whose first
-    component names a record -- and for buildings that record is a ``FORT``
-    whose first slot points at a second record that finally carries the mesh.
+    A building or unit names a ``UNITS/**/*.dat`` assembly, whose components
+    form a tree -- and for buildings the root record is a ``FORT`` whose first
+    slot points at a second record that finally carries the mesh.
 
-    Only the first component of an assembly is used, so a unit renders as its
-    chassis rather than as the full assembled robot: where the other parts
-    attach is not yet known.  See docs/07-objects.md.
+    An assembly is drawn whole.  Each component says which node of its
+    parent's mesh it bolts onto, so a robot is built by composing chassis,
+    turret and guns down that tree; the internal systems and ammunition are
+    modelled but never visible from outside, so they are skipped.  See
+    docs/07-objects.md.
     """
 
     MAX_INDIRECTION = 3
@@ -225,8 +227,9 @@ class ModelLibrary:
         self.textures = textures
         self._archives: dict[str, NResArchive] = {}
         self.models: list[dict] = []
-        self._by_ref: dict[tuple[str, str], int] = {}
+        self._meshes: dict[tuple[str, str], objmesh.ObjectMesh | None] = {}
         self._by_name: dict[str, int | None] = {}
+        self._by_parts: dict[tuple, int | None] = {}
 
     def _archive(self, name: str) -> NResArchive:
         if name not in self._archives:
@@ -257,72 +260,145 @@ class ModelLibrary:
             return lower.get(f.name.lower())
         return None
 
-    def _pack(self, ref) -> int:
+    def _mesh(self, ref) -> objmesh.ObjectMesh | None:
+        """Parse a mesh once, wear and all."""
         key = (ref.library, ref.member)
-        if key in self._by_ref:
-            return self._by_ref[key]
-        archive = self._archive(ref.library)
+        if key not in self._meshes:
+            try:
+                archive = self._archive(ref.library)
+                try:
+                    wear = objmesh.read_wea(
+                        archive.read_name(ref.member.replace(".msh", ".wea"))
+                    )
+                except KeyError:
+                    wear = []
+                self._meshes[key] = objmesh.parse(
+                    archive.read_name(ref.member), ref.member, wear
+                )
+            except (KeyError, ValueError, struct.error):
+                self._meshes[key] = None
+        return self._meshes[key]
+
+    def _parts(self, obj: mission.MissionObject) -> list[tuple[object, objmesh.Pose]]:
+        """Every visible mesh of a placed object, with where it sits."""
+        if obj.is_static:
+            ref = self._record_mesh(self.library.get(obj.path))
+            return [(ref, objmesh.IDENTITY_POSE)] if ref else []
+
+        f = self._unit_file(obj.path)
+        if f is None:
+            return []
         try:
-            wear = objmesh.read_wea(archive.read_name(ref.member.replace(".msh", ".wea")))
-        except KeyError:
-            wear = []
-        m = objmesh.parse(archive.read_name(ref.member), ref.member, wear)
+            unit = objects.load_unit(f)
+            parents = unit.parents()
+        except (objects.ObjectFormatError, OSError, struct.error):
+            return []
 
-        # A model holds up to three levels of detail at once; draw LOD 0 only.
-        # Every node is drawn: a building's tall structure lives in its i*
-        # nodes, so filtering them out leaves it far too short.
-        wanted = []
-        for node in m.nodes:
-            for index in node.slots_for_lod(0):
-                if index < len(m.slots):
-                    slot = m.slots[index]
-                    wanted += list(range(slot.first_batch, slot.first_batch + slot.batch_count))
-        if not wanted:
-            wanted = list(range(len(m.batches)))
-        wanted = sorted(set(i for i in wanted if i < len(m.batches)))
+        refs: list[object] = []
+        poses: list[objmesh.Pose] = []
+        out = []
+        for i, component in enumerate(unit.components):
+            ref = self._record_mesh(self.library.get(component.ref.member))
+            refs.append(ref)
+            parent = parents[i]
+            pose = objmesh.IDENTITY_POSE
+            if parent >= 0:
+                pose = poses[parent]
+                host = self._mesh(refs[parent]) if refs[parent] else None
+                if host and 0 <= component.attach_node < len(host.nodes):
+                    # Position only.  A socket carries the same rotation as
+                    # the root node of the part that plugs into it -- on 1306
+                    # of the 1414 attachments the game ships -- so composing
+                    # the two applies the turn twice and guns end up pointing
+                    # sideways.  Cancelling it instead fixes those but flips
+                    # the other 108 upside down, since their socket and root
+                    # disagree by 180 degrees.  Taking the socket's position
+                    # and leaving the part in its own orientation is right in
+                    # both groups.  See docs/07-objects.md.
+                    socket = host.world_pose(component.attach_node)[0]
+                    pose = objmesh.compose(pose, (socket, objmesh.IDENTITY_POSE[1]))
+            poses.append(pose)
+            if ref and component.is_external:
+                out.append((ref, pose))
+        return out
 
-        # Compact to just the vertices those batches touch.
-        remap: dict[int, int] = {}
-        verts: list[int] = []
-        groups = []
+    def _pack(self, parts: list[tuple[object, objmesh.Pose]]) -> int | None:
+        """Turn a list of posed meshes into one payload the viewer can draw."""
+        key = tuple(
+            (r.library, r.member, tuple(round(v, 4) for v in p[0] + p[1]))
+            for r, p in parts
+        )
+        if key in self._by_parts:
+            return self._by_parts[key]
+
+        points: list[tuple[float, float, float]] = []
+        uvs: list[tuple[float, float]] = []
+        groups: list[dict] = []
         idx_values: list[int] = []
-        for bi in wanted:
-            b = m.batches[bi]
-            first, count = b.triangles
-            start = len(idx_values)
-            for t in range(first, min(first + count, len(m.triangles))):
-                for v in m.triangles[t]:
-                    if v not in remap:
-                        remap[v] = len(verts)
-                        verts.append(v)
-                    idx_values.append(remap[v])
-            texture = None
-            if 0 <= b.material < len(wear):
-                texture = self.materials.texture_for(wear[b.material])
-            groups.append({
-                "start": start,
-                "count": len(idx_values) - start,
-                "material": self.textures.resolve(texture) if texture else -1,
-            })
+        for ref, pose in parts:
+            m = self._mesh(ref)
+            if m is None:
+                continue
+            # Vertices are authored in their own node's frame; without the
+            # node poses applied a multi-part model draws every part piled on
+            # the origin.  See docs/07-objects.md.
+            positions = m.posed_positions(0)
+            wear = m.texture_names
+
+            # A model holds up to three levels of detail at once; draw LOD 0
+            # only.  Every node is drawn: a building's tall structure lives in
+            # its i* nodes, so filtering them out leaves it far too short.
+            wanted: list[int] = []
+            for node in m.nodes:
+                for index in node.slots_for_lod(0):
+                    if index < len(m.slots):
+                        slot = m.slots[index]
+                        wanted += list(
+                            range(slot.first_batch, slot.first_batch + slot.batch_count)
+                        )
+            if not wanted:
+                wanted = list(range(len(m.batches)))
+            wanted = sorted({i for i in wanted if i < len(m.batches)})
+
+            # Compact to just the vertices those batches touch.
+            remap: dict[int, int] = {}
+            for bi in wanted:
+                b = m.batches[bi]
+                first, count = b.triangles
+                start = len(idx_values)
+                for t in range(first, min(first + count, len(m.triangles))):
+                    for v in m.triangles[t]:
+                        if v not in remap:
+                            remap[v] = len(points)
+                            points.append(objmesh.apply(pose, positions[v]))
+                            uvs.append(m.uv[v] if v < len(m.uv) else (0.0, 0.0))
+                        idx_values.append(remap[v])
+                texture = None
+                if 0 <= b.material < len(wear):
+                    texture = self.materials.texture_for(wear[b.material])
+                groups.append({
+                    "start": start,
+                    "count": len(idx_values) - start,
+                    "material": self.textures.resolve(texture) if texture else -1,
+                })
         groups = [g for g in groups if g["count"]]
-        if not verts:
-            self._by_ref[key] = None
+        if not points:
+            self._by_parts[key] = None
             return None
 
         # Quantise in the viewer's axis order: game space is Z-up, the viewer
         # is Y-up, and a scale factor can rescale components but not reorder
         # them.
-        pts = [m.positions[v] for v in verts]
-        lox, hix = min(p[0] for p in pts), max(p[0] for p in pts)
-        loy, hiy = min(p[1] for p in pts), max(p[1] for p in pts)
-        loz, hiz = min(p[2] for p in pts), max(p[2] for p in pts)
-        # Rest the model on its own base rather than its centre.  Buildings
-        # are authored symmetric about z = 0 -- fr_m_bunker spans -9.04..9.04,
-        # fr_l_plant -32.95..32.95 -- so placing z = 0 at ground level buries
-        # half of them, which is what the mission z does.  Units and rocks are
-        # already authored base-at-origin, so this shift is a no-op for them.
-        # The engine's real datum has not been found; see docs/07-objects.md.
-        centre = ((lox + hix) / 2, (hiz - loz) / 2, -(loy + hiy) / 2)
+        lox, hix = min(p[0] for p in points), max(p[0] for p in points)
+        loy, hiy = min(p[1] for p in points), max(p[1] for p in points)
+        loz, hiz = min(p[2] for p in points), max(p[2] for p in points)
+        # No vertical fudge: a model's own z = 0 is its ground contact point.
+        # Over 864 shipped placements a building's origin lands within a
+        # median 0.00 of the terrain height under it, and a unit's lowest
+        # exterior vertex within 0.08 -- see docs/07-objects.md.  This only
+        # reads that way once node poses are applied; before that a building's
+        # parts pile up on the origin and it looks half-buried.
+        centre = ((lox + hix) / 2, (loz + hiz) / 2, -(loy + hiy) / 2)
         half = [
             max((hix - lox) / 2, 1e-6),
             max((hiz - loz) / 2, 1e-6),
@@ -330,26 +406,25 @@ class ModelLibrary:
         ]
         pos = bytearray()
         uv = bytearray()
-        for v in verts:
-            x, y, z = m.positions[v]
+        for (x, y, z), (u, w) in zip(points, uvs, strict=True):
             for value, mid, span in zip((x, z, -y), centre, half, strict=True):
                 q = round((value - mid) / span * 32767)
                 pos += struct.pack("<h", max(-32767, min(32767, q)))
-            u, w = m.uv[v]
             uv += struct.pack(
                 "<2H",
-                min(0xFFFF, round(u * objmesh.UV_FIXED_POINT_SCALE)),
-                min(0xFFFF, round(w * objmesh.UV_FIXED_POINT_SCALE)),
+                min(0xFFFF, max(0, round(u * objmesh.UV_FIXED_POINT_SCALE))),
+                min(0xFFFF, max(0, round(w * objmesh.UV_FIXED_POINT_SCALE))),
             )
 
-        wide = len(verts) > 0xFFFF
+        wide = len(points) > 0xFFFF
         idx = bytearray()
         for v in idx_values:
             idx += struct.pack("<I" if wide else "<H", v)
 
-        self._by_ref[key] = len(self.models)
+        self._by_parts[key] = len(self.models)
         self.models.append({
-            "name": ref.member,
+            "name": parts[0][0].member,
+            "parts": len(parts),
             "wide": wide,
             "position": _b64(bytes(pos)),
             "uv": _b64(bytes(uv)),
@@ -359,24 +434,14 @@ class ModelLibrary:
             "groups": groups,
             "tris": len(idx_values) // 3,
         })
-        return self._by_ref[key]
+        return self._by_parts[key]
 
     def resolve(self, obj: mission.MissionObject) -> int | None:
         """Index into ``self.models``, or None when nothing resolves."""
         if obj.path in self._by_name:
             return self._by_name[obj.path]
-        ref = None
-        if obj.is_static:
-            ref = self._record_mesh(self.library.get(obj.path))
-        else:
-            f = self._unit_file(obj.path)
-            if f is not None:
-                unit = objects.load_unit(f)
-                if unit.components:
-                    ref = self._record_mesh(
-                        self.library.get(unit.components[0].ref.member)
-                    )
-        slot = self._pack(ref) if ref else None
+        parts = self._parts(obj)
+        slot = self._pack(parts) if parts else None
         self._by_name[obj.path] = slot
         return slot
 

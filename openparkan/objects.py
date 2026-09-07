@@ -21,6 +21,14 @@ class word, then 112-byte components, each naming one ``objects.rlb`` record
 plus the display name the game shows for it ("Large Track Chs (L-42t)",
 "ARMOUR LA.Mk3 (ARM 3)").  This is the modular-robot mechanic the game is
 built around, expressed directly in the data.
+
+The component list is a **tree written depth first**: each record carries a
+child count, and its children are the records that follow.  That reading
+consumes all 458 shipped assemblies exactly.  A child also carries the *node
+index* in its parent's mesh that it bolts onto -- always one of the parent's
+geometry-less ``Base_*`` nodes, on 946 of 946 guns and 468 of 468 turrets --
+so an assembled robot is built by walking the tree and composing each part's
+mesh onto that node's pose.  See ``docs/07-objects.md``.
 """
 
 from __future__ import annotations
@@ -37,6 +45,27 @@ NAME_FIELD = 32
 DAT_MAGIC = 0xF0F1
 DAT_HEADER = 8
 DAT_COMPONENT = 112
+
+#: A component's class, which says both what it does and where it hangs.
+CLASS_CHASSIS = 0
+CLASS_TURRET = 1
+CLASS_ARMOUR = 2
+CLASS_INTERNAL = 3
+CLASS_GUN = 4
+CLASS_AMMO = 5
+
+CLASS_NAMES = {
+    CLASS_CHASSIS: "chassis",
+    CLASS_TURRET: "turret",
+    CLASS_ARMOUR: "armour",
+    CLASS_INTERNAL: "internal",
+    CLASS_GUN: "gun",
+    CLASS_AMMO: "ammo",
+}
+
+#: Classes whose geometry is drawn outside the hull.  Armour, internal systems
+#: and ammunition are modelled but only visible from inside the machine.
+EXTERNAL_CLASSES = frozenset({CLASS_CHASSIS, CLASS_TURRET, CLASS_GUN})
 
 
 class ObjectFormatError(ValueError):
@@ -125,10 +154,23 @@ class Component:
 
     ref: ResourceRef
     label: str
-    a: int
-    b: int
-    c: int
-    d: int
+    #: One throughout the shipped data; role unknown.
+    flags: int
+    #: Node index in the *parent* component's mesh that this part bolts onto.
+    #: The chassis, which has no parent, carries -1.
+    attach_node: int
+    class_id: int
+    #: How many of the following components hang off this one.
+    child_count: int
+
+    @property
+    def class_name(self) -> str:
+        return CLASS_NAMES.get(self.class_id, "?")
+
+    @property
+    def is_external(self) -> bool:
+        """Whether this part is drawn on the outside of the machine."""
+        return self.class_id in EXTERNAL_CLASSES
 
 
 @dataclass
@@ -141,6 +183,35 @@ class UnitDefinition:
     def label(self) -> str:
         """The first component's display name, which names the whole thing."""
         return self.components[0].label if self.components else ""
+
+    def parents(self) -> list[int]:
+        """Parent index of every component, walking the depth-first tree.
+
+        The root -- the chassis -- gets -1.  Raises ObjectFormatError if the
+        child counts do not account for the file exactly, which they do on all
+        458 shipped assemblies.
+        """
+        parent = [-1] * len(self.components)
+        stack: list[tuple[int, int]] = []  # (component index, children still owed)
+        for i, component in enumerate(self.components):
+            if stack:
+                owner, owed = stack[-1]
+                parent[i] = owner
+                if owed == 1:
+                    stack.pop()
+                else:
+                    stack[-1] = (owner, owed - 1)
+            elif i:
+                raise ObjectFormatError(
+                    f"{self.source}: component {i} has no parent in the tree"
+                )
+            if component.child_count:
+                stack.append((i, component.child_count))
+        if stack:
+            raise ObjectFormatError(
+                f"{self.source}: {len(stack)} components still owe children at the end"
+            )
+        return parent
 
 
 def load_unit(path: str | Path) -> UnitDefinition:
@@ -160,8 +231,8 @@ def load_unit(path: str | Path) -> UnitDefinition:
     components = []
     for i in range(body // DAT_COMPONENT):
         o = DAT_HEADER + i * DAT_COMPONENT
-        a, b = struct.unpack_from("<Ii", data, o + 64)
-        c, d = struct.unpack_from("<Ii", data, o + 104)
+        flags, attach = struct.unpack_from("<Ii", data, o + 64)
+        class_id, children = struct.unpack_from("<Ii", data, o + 104)
         components.append(
             Component(
                 ref=ResourceRef(
@@ -169,10 +240,10 @@ def load_unit(path: str | Path) -> UnitDefinition:
                     _fixed_string(data[o + NAME_FIELD : o + 64]),
                 ),
                 label=_fixed_string(data[o + 72 : o + 104]),
-                a=a,
-                b=b,
-                c=c,
-                d=d,
+                flags=flags,
+                attach_node=attach,
+                class_id=class_id,
+                child_count=children,
             )
         )
     return UnitDefinition(path, kind, components)

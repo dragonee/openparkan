@@ -20,7 +20,8 @@ practice — format facts yes, code no — is set out in
 | **3D terrain viewer** | done — self-contained HTML, no server |
 | **`data.tma` missions** | done — all 29 parse to EOF, 864 objects placed |
 | **`objects.rlb`, unit assemblies** | done — 590 records, 458 assemblies, 5708 components |
-| **Object meshes** | geometry, materials, textures, LOD and interior/exterior selection; node poses outstanding |
+| **Object meshes** | done — geometry, materials, textures, node poses, LOD and interior/exterior selection |
+| **Assembled units and buildings** | done — the `.dat` component tree and where each part bolts on |
 | **Materials** | done — `Material.lib`, 905 materials; 99.4% of batches reach a texture |
 | **Building interiors** | done — path graph for 29 buildings |
 | **Control points** | done — 284 members, 3599 named attachment points |
@@ -129,10 +130,9 @@ tried.
 
 ## What is left
 
-Renderer work is triaged in [TODO.md](TODO.md), worst-looking first: node
-poses, unit scale, the vertical datum for buildings, then fidelity — the second
-terrain texture layer, animated materials, multi-layer materials, palettised
-transparency, lightmaps, skyboxes.
+Renderer work is triaged in [TODO.md](TODO.md), worst-looking first: the
+second terrain texture layer, animated and multi-layer materials, palettised
+transparency, lightmaps and skyboxes.
 
 ## Documentation
 
