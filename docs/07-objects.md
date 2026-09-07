@@ -95,9 +95,9 @@ streams:
 | 3 | 12 | vertex | position, `float32` x/y/z, **Z up** |
 | 4 | 4 | vertex | normal, `int8` x/y/z ÷ 127, plus a padding byte |
 | 5 | 4 | vertex | UV, `uint16` 8.8 fixed point |
-| 6 | 6 | face | triangle, three `uint16` vertex indices |
+| 6 | 6 | face | triangle, three `uint16` indices — **relative to the batch** |
 | 9 | 32 | sub-object | sub-object name |
-| 1 | 38 | sub-object | header, unresolved |
+| 1 | 38 | sub-object | flags, parent, part list |
 | 7 | 16 | face | face record: fields 1–3 are edge neighbours; the rest unresolved |
 | 13 | 20 | batch | draw batch: material, index range, vertex range |
 | 17 | 20 | node | building interior path graph — see below |
@@ -107,6 +107,33 @@ streams:
 Streams 4 and 5 use exactly the encodings established for the terrain, which
 is a useful independent confirmation of both: the normals come out unit-length
 to within 0.013 across all 68 meshes.
+
+### A building holds its inside and its outside at once
+
+Parkan lets you walk into buildings, so a building mesh carries both. The
+sub-object names say which: `fr_b_bunker` has `o01`…`o04` outside, `i01`…`i14`
+inside, and `Base_TL` / `Base_DF` for the ground pads.
+
+Stream 1 carries one 38-byte header per sub-object:
+
+```
+uint16   flags        bit 0 set = interior
+uint16   parent       sub-object index, 0xFFFF for a root
+uint16   ...          a list of part indices into stream 2, 0xFFFF-terminated
+```
+
+**Flag bit 0 agrees with the `o*` / `i*` naming on all 1564 sub-objects across
+six archives.** The parent field gives a hierarchy: on the bunker, the
+interiors hang off `o01`, and `o03`, `o04`, `Base_TL` chain off `o02`.
+
+This explains `objects.rlb`'s `INTO` and `EXTO` record tags — interior and
+exterior objects — and why only buildings have a path graph.
+
+**Not yet solved:** how a sub-object reaches its triangles. Its part list
+indexes stream 2 (34 elements on the bunker, variable-length records), and
+nothing found so far connects those to batches. Until that is mapped, a
+renderer draws the inside and the outside superimposed, which is what a
+building looks like in the viewer today.
 
 Sub-object names describe the model's construction: `s_tree_0_06` is
 `Base_TM`, `leaf1_m1o1`, `leaf2_m1o1`, `leaf3_m1o1`.
@@ -144,6 +171,20 @@ batches over 39 materials and uses every one of them.
 
 The element count comes from the stream's own NRes directory entry, which is
 also how the 20-byte stride was pinned down; a hex dump alone suggested 12.
+
+### Indices are batch-relative
+
+Stream 6's indices are **relative to the covering batch's `first_vertex`**, the
+DirectX `DrawIndexedPrimitive` convention: the real vertex is
+`batch.first_vertex + index`.
+
+This is easy to get wrong, and a naive range check does not catch it. Relative
+indices are small — the largest on `fr_m_brige` is 243 in a 1458-vertex mesh —
+so they *also* look like valid absolute indices, and a check for "every index
+is inside the vertex array" passes while the geometry is scrambled. The check
+that actually discriminates is that every index is below **its own batch's**
+`vertex_count`, which holds on all 435 meshes. Corroboration: the batch windows
+end at exactly the vertex count (`max(first_vertex + vertex_count) == 1458`).
 
 ### The material chain
 

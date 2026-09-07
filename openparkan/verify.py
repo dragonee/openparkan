@@ -487,6 +487,34 @@ def check_objects(check, game: Path) -> None:
           f"{chain_ok}/{chain_total} batches reach a real texture "
           f"({len(lib_mat)} materials)")
 
+    # Indices are batch-relative, the DirectX DrawIndexedPrimitive convention.
+    relative = interior_ok = interior_tot = parts_seen = 0
+    for name in ARCHIVES:
+        ar = NResArchive.open(game / name)
+        for e in ar:
+            if e.tag != "MESH":
+                continue
+            m = objmesh.parse(ar.read(e), e.name)
+            if m.batches:
+                flat = [i for t in m.raw_triangles for i in t]
+                ok = True
+                for b in m.batches:
+                    seg = flat[b.first_index : b.first_index + b.index_count]
+                    if seg and max(seg) >= b.vertex_count:
+                        ok = False
+                        break
+                relative += ok
+            for part in m.parts:
+                parts_seen += 1
+                interior_tot += 1
+                interior_ok += part.is_interior == part.name.lower().startswith("i")
+    check("MESH: batch indices are relative to the batch's first vertex",
+          relative == batched,
+          f"{relative}/{batched} meshes -- every index is below its own batch's vertex count")
+    check("MESH: sub-object flag bit 0 marks interior geometry",
+          interior_ok == interior_tot,
+          f"{interior_ok}/{interior_tot} sub-objects agree with the o*/i* naming")
+
     # Building interiors: the path graph the engine calls a hall way.
     fortif = NResArchive.open(game / "fortif.rlb")
     graphs = nodes = links = bad_link = 0

@@ -77,6 +77,16 @@ mapped.
   vertex or face count.
 - `Land.msh` stream 2: 737 float3 on SC_3. The first 8 are the map's bounding
   box corners; the remaining 729 (= 27³) look like a spatial subdivision.
+- **How a sub-object reaches its triangles.** Interior and exterior parts are
+  cleanly identified (stream 1, flag bit 0), but their part lists index
+  stream 2, whose variable-length records have not been mapped to batches. A
+  renderer therefore draws a building's inside and outside on top of each
+  other. This is the most visible remaining defect.
+- Stream 2's record layout: 21 elements in 1568 bytes on `fr_m_brige`, 34 in
+  2452 on `fr_b_bunker` — neither divides evenly, so records vary in size.
+  They open with float32 triples that read as bounding geometry.
+- Stream 8: one 24-byte record per sub-object opening with a float3 that reads
+  as a pivot (the bridge's are 0,0,0 / ±8.96,-23.04,-12.16 / 0,57.6,0).
 - Face record fields 10, 11, 12, and field 0 (near-constant per mesh).
 - `MAT0`'s per-layer stride, and the colour bytes around each texture name.
 - The high byte of a draw batch's material word: 0xFF on 14166 batches and

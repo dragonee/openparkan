@@ -20,7 +20,7 @@ practice — format facts yes, code no — is set out in
 | **3D terrain viewer** | done — self-contained HTML, no server |
 | **`data.tma` missions** | done — all 29 parse to EOF, 864 objects placed |
 | **`objects.rlb`, unit assemblies** | done — 590 records, 458 assemblies, 5708 components |
-| **Object meshes** | done — 435 meshes, with per-batch materials and textures |
+| **Object meshes** | geometry, materials and textures done; interior/exterior separation not yet |
 | **Materials** | done — `Material.lib`, 905 materials; 99.4% of batches reach a texture |
 | **Building interiors** | done — path graph for 29 buildings |
 | **Control points** | done — 284 members, 3599 named attachment points |
@@ -108,6 +108,8 @@ PASS  MESH: draw batches tile the index buffer       435/435 meshes -- index cou
 PASS  MESH: batch index ranges are contiguous        435/435 meshes
 PASS  MESH: a batch's material indexes the model's wear 434/434 meshes with a wear -- this is where the texture assignment lives
 PASS  Material.lib: batch -> wear -> MAT0 -> Texm resolves 15053/15138 batches reach a real texture (905 materials)
+PASS  MESH: batch indices are relative to the batch's first vertex 435/435 meshes -- every index is below its own batch's vertex count
+PASS  MESH: sub-object flag bit 0 marks interior geometry 1845/1845 sub-objects agree with the o*/i* naming
 PASS  MESH: buildings carry an interior path graph   29 of 30 fortif.rlb meshes, 1056 nodes, 1096 links
 PASS  MESH: path graph links join real nodes         1096/1096 links
 PASS  UNITS/*.dat: assemblies parse on a 112-byte stride 458/458 files, 5708 components

@@ -7,12 +7,13 @@ the same numeric-type-as-stream-selector convention as the terrain
 
     id  stride  indexed by  contents
     --  ------  ----------  ---------------------------------------------
-     1      38  sub-object  per-sub-object header, contents unresolved
+     1      38  sub-object  flags, parent, and a list of part indices
      2     ---  ---         floats; opens with bounding-box corners
      3      12  vertex      position, float32 x/y/z
      4       4  vertex      normal, int8 x/y/z / 127, then one padding byte
      5       4  vertex      UV, uint16 8.8 fixed point
-     6       6  face        triangle, three uint16 vertex indices
+     6       6  face        triangle, three uint16 indices *relative to the
+                             first_vertex of the batch that covers them*
      7      16  face        face record, contents unresolved
      8     ---  ---         unresolved; 24 bytes on most meshes, 96 on some
      9      32  sub-object  sub-object name ("Base_TM", "leaf1_m1o1")
@@ -25,6 +26,11 @@ the same numeric-type-as-stream-selector convention as the terrain
 Materials are assigned per *batch*, not per face: stream 13 groups runs of the
 index buffer and names a material for each, which is why no field of the face
 record ever held a texture index.
+
+Indices in stream 6 are **relative to the batch that covers them**, the
+DirectX ``DrawIndexedPrimitive`` convention: the real vertex is
+``batch.first_vertex + index``.  ``ObjectMesh.triangles`` has this already
+applied; ``raw_triangles`` keeps the file's own values.
 """
 
 from __future__ import annotations
@@ -34,7 +40,6 @@ from dataclasses import dataclass, field
 
 from .nres import NResArchive
 
-STREAM_SUBOBJECT_HEADER = 1
 STREAM_BOUNDS = 2
 STREAM_POSITION = 3
 STREAM_NORMAL = 4
@@ -42,8 +47,14 @@ STREAM_UV = 5
 STREAM_TRIANGLE = 6
 STREAM_FACE = 7
 STREAM_SUBOBJECT_NAME = 9
+STREAM_SUBOBJECT_HEADER = 1
 STREAM_BATCH = 13
 STREAM_PATH_GRAPH = 17
+
+SUBOBJECT_HEADER_SIZE = 38
+#: Bit 0 of a sub-object's flags marks interior geometry.
+SUBOBJECT_INTERIOR = 0x0001
+NO_PARENT = 0xFFFF
 
 BATCH_SIZE = 20
 #: High byte of a batch's material word; 0xFF on most batches, 0x00 on some.
@@ -58,6 +69,29 @@ FACE_STRIDE = 16
 
 #: UVs use the same 8.8 fixed point as the terrain.
 UV_FIXED_POINT_SCALE = 256.0
+
+
+@dataclass
+class Subobject:
+    """One named part of a model.
+
+    Buildings carry their inside and their outside in the same mesh -- Parkan
+    lets you walk into them -- so a model's parts are split between the two.
+    Names say which (``o01_0_m1o1`` outside, ``i03_0_m1o1`` inside) and so does
+    ``flags`` bit 0, which agrees with the naming on all 1564 sub-objects
+    across six archives.
+    """
+
+    name: str
+    flags: int
+    parent: int
+    #: Indices into stream 2's part list; how those reach triangles is not
+    #: yet known, so interior geometry cannot be filtered out yet.
+    parts: list[int]
+
+    @property
+    def is_interior(self) -> bool:
+        return bool(self.flags & SUBOBJECT_INTERIOR)
 
 
 @dataclass
@@ -86,10 +120,18 @@ class ObjectMesh:
     positions: list[tuple[float, float, float]]
     normals: list[tuple[float, float, float]]
     uv: list[tuple[float, float]]
+    #: Absolute vertex indices, with each batch's first_vertex already added.
     triangles: list[tuple[int, int, int]]
+    #: The file's own batch-relative indices.
+    raw_triangles: list[tuple[int, int, int]] = field(default_factory=list)
     subobjects: list[str] = field(default_factory=list)
     texture_names: list[str] = field(default_factory=list)
     batches: list[Batch] = field(default_factory=list)
+    parts: list[Subobject] = field(default_factory=list)
+
+    @property
+    def has_interior(self) -> bool:
+        return any(p.is_interior for p in self.parts)
 
     def material_of_triangle(self, index: int) -> int | None:
         """Material index for a triangle, via the batch that covers it."""
@@ -141,7 +183,7 @@ def parse(blob: bytes, name: str = "<mesh>", texture_names: list[str] | None = N
     ]
 
     raw_tri = stream[STREAM_TRIANGLE]
-    triangles = [
+    raw_triangles = [
         struct.unpack_from("<3H", raw_tri, i * 6) for i in range(len(raw_tri) // 6)
     ]
 
@@ -150,6 +192,23 @@ def parse(blob: bytes, name: str = "<mesh>", texture_names: list[str] | None = N
         raw_names[i * NAME_FIELD : (i + 1) * NAME_FIELD].split(b"\0")[0].decode("latin-1")
         for i in range(len(raw_names) // NAME_FIELD)
     ]
+
+    headers = stream.get(STREAM_SUBOBJECT_HEADER, b"")
+    parts = []
+    header_entry = entries.get(STREAM_SUBOBJECT_HEADER)
+    n_parts = header_entry.element_count if header_entry else 0
+    if len(headers) == n_parts * SUBOBJECT_HEADER_SIZE:
+        for i in range(n_parts):
+            words = struct.unpack_from("<19H", headers, i * SUBOBJECT_HEADER_SIZE)
+            listed = [w for w in words[3:] if w != 0xFFFF]
+            parts.append(
+                Subobject(
+                    name=subobjects[i] if i < len(subobjects) else "",
+                    flags=words[0],
+                    parent=words[1],
+                    parts=listed,
+                )
+            )
 
     batches = []
     raw_batch = stream.get(STREAM_BATCH, b"")
@@ -166,15 +225,26 @@ def parse(blob: bytes, name: str = "<mesh>", texture_names: list[str] | None = N
             )
         )
 
+    # Resolve batch-relative indices to absolute ones.  A mesh without batches
+    # has nothing to resolve against, so its indices are taken as they are.
+    triangles = list(raw_triangles)
+    for b in batches:
+        first, count = b.triangles
+        for t in range(first, min(first + count, len(triangles))):
+            a, bb, c = raw_triangles[t]
+            triangles[t] = (a + b.first_vertex, bb + b.first_vertex, c + b.first_vertex)
+
     return ObjectMesh(
         name=name,
         positions=positions,
         normals=normals,
         uv=uv,
         triangles=triangles,
+        raw_triangles=raw_triangles,
         subobjects=subobjects,
         texture_names=texture_names or [],
         batches=batches,
+        parts=parts,
     )
 
 
