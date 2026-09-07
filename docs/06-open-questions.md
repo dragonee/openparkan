@@ -91,8 +91,6 @@ mapped.
   their names (all six `TREE*` share 6, the effects share 0xFF), so it reads
   as a shader or blend-mode id. Also the record's variable-length tail, and
   the second colour triple after the diffuse.
-- The high byte of a draw batch's material word: 0xFF on 14166 batches and
-  0x00 on 972.
 - A batch's vertex range (fields 7 and 8). The ranges are contiguous but only
   tile the vertex array on 69 of 435 meshes, so they are not a partition.
 - Face record field 13 (0..62, 59 distinct on SC_3) — treated here as a patch

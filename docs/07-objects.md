@@ -433,6 +433,28 @@ The pages are not soft grey shading: they are dense mosaics of per-triangle
 patches in saturated greens, oranges and purples, which is what a building
 lit from inside by coloured lamps bakes down to.
 
+### The batch material's high byte marks the lit batches
+
+A draw batch's material word carries the material index in its low byte and
+either `0x00` or `0xFF` in its high byte -- 972 batches against 14181, an open
+question in earlier drafts. It says whether the batch takes the model's
+lightmap:
+
+- the **21** meshes with a `0x00` batch are exactly the 21 with a lightmap;
+- every vertex a `0x00` batch reaches carries a non-zero lightmap UV,
+  **51324 of 51324**, against 1268 of 85347 under `0xFF`.
+
+So a building's lit surfaces and its unlit ones are separate batches, and a
+renderer binds the lightmap per batch rather than per model.
+
+### Winding is consistent, so culling is safe
+
+On **434 of the 435** object meshes, over 95% of triangles wind the same way
+as their own vertex normals (median 100%, worst mesh 92.9%); the terrain is at
+99.4%. Front-face culling is therefore correct for closed shells. Foliage
+still needs two-sided drawing -- a tree is a pair of crossed planes, and half
+of each plane faces away.
+
 ### Buildings carry an interior path graph
 
 Stream 17 is non-empty on **29 of the 30 meshes in `fortif.rlb` and nowhere

@@ -1029,6 +1029,82 @@ def check_poses(check, game: Path) -> None:
           f"{fits_page}/{with_both} top out at exactly 1 - 0.5/width of their "
           f"own page -- 1022 for a 256-pixel lightmap, 1020 for a 128")
 
+    # The high byte of a batch's material word marks the lit batches.
+    lit_meshes = set()
+    lightmapped = set()
+    lit_uv = lit_total = unlit_uv = unlit_total = 0
+    for name in archives:
+        path = game / name
+        if not path.exists():
+            continue
+        archive = NResArchive.open(path)
+        for entry in archive:
+            if not entry.name.lower().endswith(".msh"):
+                continue
+            m = objmesh.parse(archive.read(entry), entry.name)
+            if any(b.is_lit for b in m.batches):
+                lit_meshes.add(entry.name.lower())
+            try:
+                wear = objmesh.parse_wear(
+                    archive.read_name(entry.name.replace(".msh", ".wea"))
+                )
+            except KeyError:
+                continue
+            if wear.lightmaps:
+                lightmapped.add(entry.name.lower())
+            if not m.lightmap_uv:
+                continue
+            for b in m.batches:
+                first, count = b.triangles
+                seen = {
+                    v
+                    for tri in m.triangles[first : first + count]
+                    for v in tri
+                    if v < len(m.lightmap_uv)
+                }
+                mapped = sum(1 for v in seen if m.lightmap_uv[v] != (0.0, 0.0))
+                if b.is_lit:
+                    lit_total += len(seen)
+                    lit_uv += mapped
+                else:
+                    unlit_total += len(seen)
+                    unlit_uv += mapped
+    check("MESH: a batch's material high byte marks the lit batches",
+          lit_meshes == lightmapped and lit_uv == lit_total,
+          f"the {len(lit_meshes)} meshes with a 0x00 batch are exactly the "
+          f"{len(lightmapped)} with a lightmap; {lit_uv}/{lit_total} of their "
+          f"vertices carry a lightmap UV, against {unlit_uv}/{unlit_total} "
+          f"under 0xFF")
+
+    # Winding, which is what says front-face culling is safe.
+    consistent = wound = 0
+    for _name, m in meshes:
+        agree = seen = 0
+        for tri in m.triangles:
+            if max(tri) >= len(m.positions):
+                continue
+            a, b, c = (m.positions[i] for i in tri)
+            u = (b[0] - a[0], b[1] - a[1], b[2] - a[2])
+            v = (c[0] - a[0], c[1] - a[1], c[2] - a[2])
+            face = (
+                u[1] * v[2] - u[2] * v[1],
+                u[2] * v[0] - u[0] * v[2],
+                u[0] * v[1] - u[1] * v[0],
+            )
+            avg = [sum(m.normals[i][k] for i in tri) / 3 for k in range(3)]
+            d = sum(f * n for f, n in zip(face, avg, strict=True))
+            if abs(d) < 1e-9:
+                continue
+            seen += 1
+            agree += d > 0
+        if seen:
+            wound += 1
+            consistent += agree > seen * 0.95
+    check("MESH: triangle winding agrees with the vertex normals",
+          consistent >= wound - 1,
+          f"{consistent}/{wound} meshes wind over 95% of their triangles the "
+          f"same way, which is what makes front-face culling safe")
+
     # Assemblies: a depth-first tree whose children name a socket node.
     dats = sorted((game / "UNITS").rglob("*.dat"))
     trees = attachments = to_socket = 0

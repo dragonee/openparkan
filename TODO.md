@@ -87,20 +87,13 @@ Blocks any in-engine interface work and nothing else.
 
 No reverse engineering needed; just work.
 
-- **Backface culling.** Everything draws `DoubleSide`. Measured: interior faces
-  are *not* uniformly back-facing, so culling is not a shortcut for hiding
-  them, but front-face culling is still the correct default for closed shells.
-- **LOD switching.** All three levels are parsed; the viewer always draws
-  LOD 0. Switch by screen size.
+- **LOD switching.** All four levels of each variant are parsed and
+  `slots_for_lod` takes the level; the viewer always asks for 0. Switching by
+  screen size is a payload change, not a format question.
+- **Terrain patches.** Face field 13 (0..62 on SC_3) reads as a patch or
+  sector id and would give cheap frustum culling, if confirmed.
 - **Alpha ordering.** Cutouts need none, which is why they are what the
   viewer uses, but the graded textures behind effects and the sky will.
-- **Terrain patches.** Face field 13 (0..62 on SC_3) reads as a patch or sector
-  id and would give cheap frustum culling, if confirmed.
-- **Batch material high byte.** 0xFF on 14166 batches, 0x00 on 972. Not a
-  primitive type — both groups have index counts divisible by three. A blend or
-  two-sided flag is the obvious guess and it is one afternoon to test.
-
----
 
 ## 4. Known-unknowns carried in the readers
 

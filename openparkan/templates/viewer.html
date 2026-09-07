@@ -328,7 +328,7 @@ if (typeof THREE === "undefined") {
   // alpha in this build, so it is patched in.
   function blendedMaterial(entry) {
     const src = DATA.pool[entry.pool];
-    const opts = { side: THREE.DoubleSide, transparent: true, depthWrite: false };
+    const opts = { side: THREE.FrontSide, transparent: true, depthWrite: false };
     if (src.kind === "texture") opts.map = groundTexture(entry.pool);
     opts.color = multiply(entry.tint, src.kind === "texture" ? WHITE : src.colour);
     const material = new THREE.MeshLambertMaterial(opts);
@@ -367,7 +367,7 @@ if (typeof THREE === "undefined") {
 
     const mats = map.materials.map((m) => {
       const src = DATA.pool[m.pool];
-      const opts = { side: THREE.DoubleSide };
+      const opts = { side: THREE.FrontSide };
       if (src.kind === "texture") opts.map = groundTexture(m.pool);
       opts.color = multiply(m.tint, src.kind === "texture" ? WHITE : src.colour);
       if (m.water || src.opacity < 1) {
@@ -464,7 +464,7 @@ if (typeof THREE === "undefined") {
     if (modelMatCache[key]) return modelMatCache[key];
     const src = DATA.models[i];
     const mats = src.groups.map((gr) => {
-      const opts = { side: THREE.DoubleSide, color: tint };
+      const opts = { side: THREE.FrontSide, color: tint };
       const pooled = gr.material >= 0 ? DATA.pool[gr.material] : null;
       if (pooled && pooled.kind === "texture") {
         opts.map = groundTexture(gr.material);

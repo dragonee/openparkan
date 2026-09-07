@@ -535,7 +535,7 @@ class ModelLibrary:
                     "material": frames[0] if frames else -1,
                     "tint": self.textures.tint(name) if name else 0xFFFFFF,
                 }
-                if baked is not None:
+                if baked is not None and b.is_lit:
                     group["lightmap"] = baked
                 if len(frames) > 1:
                     group["frames"] = frames

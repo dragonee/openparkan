@@ -74,8 +74,12 @@ SUBOBJECT_INTERIOR = 0x0001
 NO_PARENT = 0xFFFF
 
 BATCH_SIZE = 20
-#: High byte of a batch's material word; 0xFF on most batches, 0x00 on some.
+#: High byte of a batch's material word.  It says whether the batch is lit by
+#: the model's lightmap: 0x00 on the 972 batches that are, 0xFF on the other
+#: 14181.  Every vertex a 0x00 batch reaches carries a non-zero lightmap UV
+#: (51324 of 51324), against 1% of the vertices a 0xFF batch reaches.
 BATCH_MATERIAL_MASK = 0xFF
+BATCH_LIT = 0x00
 
 PATH_NODE_SIZE = 20
 PATH_LINK_SIZE = 40
@@ -283,11 +287,18 @@ class Batch:
     """
 
     material: int
+    #: High byte of the material word; ``BATCH_LIT`` when the batch takes the
+    #: model's lightmap.
     flag: int
     first_index: int
     index_count: int
     first_vertex: int
     vertex_count: int
+
+    @property
+    def is_lit(self) -> bool:
+        """Whether this batch takes the model's baked lightmap."""
+        return self.flag == BATCH_LIT
 
     @property
     def triangles(self) -> tuple[int, int]:
