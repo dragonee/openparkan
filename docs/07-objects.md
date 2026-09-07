@@ -180,11 +180,21 @@ DirectX `DrawIndexedPrimitive` convention: the real vertex is
 
 This is easy to get wrong, and a naive range check does not catch it. Relative
 indices are small — the largest on `fr_m_brige` is 243 in a 1458-vertex mesh —
-so they *also* look like valid absolute indices, and a check for "every index
-is inside the vertex array" passes while the geometry is scrambled. The check
-that actually discriminates is that every index is below **its own batch's**
-`vertex_count`, which holds on all 435 meshes. Corroboration: the batch windows
-end at exactly the vertex count (`max(first_vertex + vertex_count) == 1458`).
+so they *also* look like valid absolute indices, and "every index is inside the
+vertex array" passes while the geometry is scrambled.
+
+The decisive test is **vertex reachability**: a correct reading must use every
+vertex the file stores. Resolved through the batches, the indices reach
+**100% of vertices on all 435 meshes**. Read as absolute they reach 41% on
+average and as little as 6% on `fr_l_gener` — a mesh does not store 5461
+vertices in order to draw 330 of them. Two further confirmations: every index
+is below **its own batch's** `vertex_count` (435/435), and the batch windows
+end exactly at the vertex count (`max(first_vertex + vertex_count) == 1458` on
+the bridge).
+
+Edge-length statistics, by contrast, *prefer* the wrong answer — the absolute
+reading produces tighter triangles because it keeps re-using one small corner
+of the vertex array. Plausibility is not verification.
 
 ### The material chain
 

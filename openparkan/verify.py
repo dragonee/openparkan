@@ -488,7 +488,8 @@ def check_objects(check, game: Path) -> None:
           f"({len(lib_mat)} materials)")
 
     # Indices are batch-relative, the DirectX DrawIndexedPrimitive convention.
-    relative = interior_ok = interior_tot = parts_seen = 0
+    relative = interior_ok = interior_tot = parts_seen = full_use = 0
+    absolute_use = 0.0
     for name in ARCHIVES:
         ar = NResArchive.open(game / name)
         for e in ar:
@@ -504,6 +505,13 @@ def check_objects(check, game: Path) -> None:
                         ok = False
                         break
                 relative += ok
+                # The decisive test: a correct reading must reach every
+                # vertex.  Read as absolute, buildings reach barely a tenth.
+                full_use += len({i for t in m.triangles for i in t}) == m.vertex_count
+                if m.vertex_count:
+                    absolute_use += (
+                        len({i for t in m.raw_triangles for i in t}) / m.vertex_count
+                    )
             for part in m.parts:
                 parts_seen += 1
                 interior_tot += 1
@@ -511,6 +519,9 @@ def check_objects(check, game: Path) -> None:
     check("MESH: batch indices are relative to the batch's first vertex",
           relative == batched,
           f"{relative}/{batched} meshes -- every index is below its own batch's vertex count")
+    check("MESH: resolved indices reference every vertex", full_use == batched,
+          f"{full_use}/{batched} meshes reach 100% of their vertices "
+          f"(reading the indices as absolute reaches {absolute_use / max(batched, 1):.0%})")
     check("MESH: sub-object flag bit 0 marks interior geometry",
           interior_ok == interior_tot,
           f"{interior_ok}/{interior_tot} sub-objects agree with the o*/i* naming")

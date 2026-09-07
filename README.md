@@ -109,6 +109,7 @@ PASS  MESH: batch index ranges are contiguous        435/435 meshes
 PASS  MESH: a batch's material indexes the model's wear 434/434 meshes with a wear -- this is where the texture assignment lives
 PASS  Material.lib: batch -> wear -> MAT0 -> Texm resolves 15053/15138 batches reach a real texture (905 materials)
 PASS  MESH: batch indices are relative to the batch's first vertex 435/435 meshes -- every index is below its own batch's vertex count
+PASS  MESH: resolved indices reference every vertex  435/435 meshes reach 100% of their vertices (reading the indices as absolute reaches 41%)
 PASS  MESH: sub-object flag bit 0 marks interior geometry 1845/1845 sub-objects agree with the o*/i* naming
 PASS  MESH: buildings carry an interior path graph   29 of 30 fortif.rlb meshes, 1056 nodes, 1096 links
 PASS  MESH: path graph links join real nodes         1096/1096 links

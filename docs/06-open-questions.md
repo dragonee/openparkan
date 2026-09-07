@@ -83,8 +83,20 @@ mapped.
   renderer therefore draws a building's inside and outside on top of each
   other. This is the most visible remaining defect.
 - Stream 2's record layout: 21 elements in 1568 bytes on `fr_m_brige`, 34 in
-  2452 on `fr_b_bunker` — neither divides evenly, so records vary in size.
-  They open with float32 triples that read as bounding geometry.
+  2452 on `fr_b_bunker`, 86 in 5988 on `fr_l_gener` — none divides evenly, so
+  records vary in size. They open with float32 triples that read as bounding
+  geometry (the first record is the mesh's eight bounding-box corners). An
+  exhaustive search over `header + count*unit + tail` layouts finds none that
+  consumes all five test cases exactly, so the records are more structured
+  than a count followed by an array.
+
+  Things already ruled out for the sub-object → triangle mapping: a per-vertex
+  part id (streams 4 and 15 have no column with the right cardinality), a
+  per-face one (stream 7), the batch flag byte (0xFF/0x00 — both groups have
+  index counts divisible by 3, so it is not a primitive type either), backface
+  culling (interior faces are not uniformly back-facing), and normal
+  orientation relative to the mesh centre (separates one building, not the
+  others).
 - Stream 8: one 24-byte record per sub-object opening with a float3 that reads
   as a pivot (the bridge's are 0,0,0 / ±8.96,-23.04,-12.16 / 0,57.6,0).
 - Face record fields 10, 11, 12, and field 0 (near-constant per mesh).
