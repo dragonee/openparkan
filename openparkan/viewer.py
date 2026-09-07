@@ -499,18 +499,20 @@ class ModelLibrary:
             if parent >= 0:
                 pose = poses[parent]
                 host = self._mesh(refs[parent]) if refs[parent] else None
-                if host and 0 <= component.attach_node < len(host.nodes):
-                    # Position only.  A socket carries the same rotation as
-                    # the root node of the part that plugs into it -- on 1306
-                    # of the 1414 attachments the game ships -- so composing
-                    # the two applies the turn twice and guns end up pointing
-                    # sideways.  Cancelling it instead fixes those but flips
-                    # the other 108 upside down, since their socket and root
-                    # disagree by 180 degrees.  Taking the socket's position
-                    # and leaving the part in its own orientation is right in
-                    # both groups.  See docs/07-objects.md.
-                    socket = host.world_pose(component.attach_node)[0]
-                    pose = objmesh.compose(pose, (socket, objmesh.IDENTITY_POSE[1]))
+                part = self._mesh(ref) if ref else None
+                if host and part and 0 <= component.attach_node < len(host.nodes):
+                    # Mounting makes the part's root node take the socket's
+                    # pose, so the transform is socket composed with the
+                    # inverse of the root.  On 1212 of the 1318 mounts the two
+                    # rotations are equal and every part's root translation is
+                    # zero, so this is identical to using the socket's
+                    # position alone; it differs only on the 106 whose socket
+                    # says something the part does not, and those are the
+                    # turrets that hang under a flying chassis.  See
+                    # docs/07-objects.md.
+                    socket = host.world_pose(component.attach_node)
+                    mount = objmesh.compose(socket, objmesh.invert(part.root_pose()))
+                    pose = objmesh.compose(pose, mount)
             poses.append(pose)
             if ref and component.is_external:
                 out.append((ref, pose))

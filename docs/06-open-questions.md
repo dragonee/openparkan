@@ -82,8 +82,10 @@ mapped.
 - **Pose key `time`.** The `float32` at offset 12 of a stream-8 key is an
   integer frame number in every one of the 34049 keys, ranging 0..473. It is
   not used by a static renderer.
-- The 180-degree disagreement between a socket's rotation and the root
-  rotation of the part that mounts on it, on 108 of 1414 attachments.
+- 25 of the 1414 attachments have a socket that turns the part by 120° about
+  (1, 1, 1) — a cyclic axis permutation — or by 126°. They are missile packs
+  and shell clips on the winged SSM launchers. The other 83 disagreements are
+  [solved](07-objects.md): a turret hung under a flying chassis.
 
 ## Unresolved terrain fields
 

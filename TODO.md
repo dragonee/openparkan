@@ -99,6 +99,17 @@ written down is a question nobody reopens.
       node count of the mesh it belongs to, over 542 records, so it holds no
       per-node data. `.ndp`, the other unread `STAT` slot, is a hit-point
       float and an `(archive, member)` pair naming an `.exp` explosion.
+- [x] **The socket's rotation.** It was being thrown away, and it was saying
+      something real. A part mounts by making its root node take the socket's
+      pose, so the transform is `socket ∘ root⁻¹`; every mounted part's root
+      translation is exactly zero on **1414 of 1414** attachments, which is
+      why the socket's position alone was indistinguishable from its full pose
+      on the 1306 whose rotations agree. Of the 108 that disagree, **83 are
+      exactly 180° and every one is on a chassis whose own name says Flying or
+      Helicopter** — an aircraft's turret hangs under the belly. The socket
+      even sits at the bottom of a flying hull and the top of a tracked one.
+      Overlap with the hull falls on 22 of the 404 distinct mounts and rises
+      on none. → [docs/07-objects.md](docs/07-objects.md)
 - [x] **Coplanar geometry.** Two causes, both fixed. The terrain's two ground
       layers now share a single pass — bucketing faces by the pair costs 5 to
       8 groups per map against 3 to 5 — and the file's own duplicated faces
@@ -110,18 +121,9 @@ written down is a question nobody reopens.
 
 ## 1. Wrong on screen today
 
-These produce visibly incorrect output. Fix in this order. Both came out of
-doing the pose work above.
+One item left here, and it came out of doing the pose work above.
 
-### 1.1 A socket's rotation is thrown away
-
-A part is mounted at its socket's position with its own orientation. That is
-right in the sense that both alternatives are visibly worse (see
-docs/07-objects.md), but it means a turret can never be drawn turned, and the
-108 attachments whose socket and root rotations disagree by 180 degrees are
-telling us something that is not yet understood.
-
-### 1.2 Damage variants are guessed at
+### 1.1 Damage variants are guessed at
 
 Two of every three five-slot blocks are unused by the renderer. 135 nodes
 populate them, and `fr_b_brige`'s `o02` carries identical triangle counts in

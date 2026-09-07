@@ -365,6 +365,20 @@ class ObjectMesh:
             return n.fallback_key
         return None
 
+    def root_pose(self) -> Pose:
+        """The pose of the model's root node.
+
+        A part is mounted by making this pose equal the socket's, so it is
+        what a host's socket replaces.  Its translation is zero on all 1318
+        turret and gun meshes the game mounts, which is why taking only the
+        socket's position was indistinguishable from the full pose except
+        where the two rotations disagree.
+        """
+        for i, node in enumerate(self.nodes):
+            if node.parent == NO_PARENT:
+                return self.local_pose(i)
+        return IDENTITY_POSE
+
     def local_pose(self, node: int) -> Pose:
         """A node's pose in its parent's frame."""
         key = self.rest_key(node)

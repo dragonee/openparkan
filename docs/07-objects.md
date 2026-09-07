@@ -142,15 +142,41 @@ component's attachment field is the index of one of them. Across all 458
 assemblies, **946 of 946 guns and 468 of 468 turrets** land on a `Base_*`
 node, the one exception being a chassis with no mesh at all.
 
-The mount itself is the socket's **position**. Its rotation is not applied:
-a socket carries the same rotation as the root node of the part that plugs
-into it — on 1306 of the 1414 attachments — so composing the two turns the
-part twice and guns come out pointing sideways. Cancelling it instead
-(`socket ∘ root⁻¹`) fixes those but flips the other 108, whose socket and root
-disagree by exactly 180°, upside down; `r_l_02`'s turret ends up underneath
-the chassis. Taking the position and leaving the part in its own orientation
-is right in both groups, and puts a bunker's turret at z 16.49 on a bunker
-whose roof is at 16.49.
+**Mounting makes the part's root node take the socket's pose**, so the
+transform that places a part is `socket ∘ root⁻¹`. Two facts make that read
+cleanly. Every mounted part's root node sits at its own origin — a translation
+of exactly zero on all 1414 attachments — so the socket's position and its
+rotation are independent contributions. And a socket usually carries the same
+rotation as the root of the part that plugs into it, on 1306 of the 1414, so
+`socket ∘ root⁻¹` reduces to the socket's position there and composing the two
+naively would turn the part twice.
+
+The 108 sockets that say something the part does not are the interesting ones,
+and they are not noise. **83 of them are exactly 180°, and every single one is
+on a chassis whose own name says so**: `R_L_02` "Small Flying Chs (S-2f)",
+`R_T_02` "Tiny Helicopter Chs (T-2)", `R_B_02` "Large Flying Chs (L-2f)",
+`R_M_02` "Medium Flying Chs (M-2f)". Not one tracked or walking chassis is
+among them. An aircraft's turret hangs under the belly, upside down, and the
+socket is where that is written down.
+
+The geometry agrees. On a tracked chassis the turret socket sits at the top of
+the hull — `R_L_01` puts `Base_TL` at z 0.12 under a roof at 0.20, `R_B_01` at
+1.28 under 1.48. On a flying one it sits at the *bottom*: `R_L_02` at −0.43
+against a belly at −0.53, `R_B_02` at −2.00 against −2.08. Taking only the
+socket's position buries the turret whole inside the hull — on `R_M_02` all
+1.38 of its height overlaps — while the socket's own pose hangs it below with
+**zero** overlap, its top at −0.84 meeting the belly at −0.85.
+
+Across the 404 distinct `(chassis, socket, part)` mounts, applying the
+socket's rotation lowers a part's overlap with its hull on 22 and **raises it
+on none**; the other 382 are unchanged, bit for bit, because the two rotations
+agree there. A bunker's turret still lands at z 16.49 on a bunker whose roof
+is at 16.49.
+
+The remaining 25 disagreements are 120° about (1, 1, 1) — a cyclic axis
+permutation — and two at 126°, all of them missile packs and shell clips on
+`e_gun_bl_17` "Large Winged SSM" and its kin. They are not understood, but
+they are no worse under this rule than the last.
 
 All 458 files parse on the 112-byte stride, giving 5708 components. **5705
 resolve** in `objects.rlb`; three do not — `fr_l_mast`, `fr_l_tele` and

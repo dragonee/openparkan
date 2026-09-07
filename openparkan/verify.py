@@ -1398,6 +1398,8 @@ def check_poses(check, game: Path) -> None:
                 cache[key] = None
         return cache[key]
 
+    mounts = rooted_at_origin = agree = 0
+    disagree: list[tuple[float, str]] = []
     for path in dats:
         unit = objects.load_unit(path)
         try:
@@ -1417,11 +1419,52 @@ def check_poses(check, game: Path) -> None:
             if 0 <= component.attach_node < len(host.nodes):
                 name = host.nodes[component.attach_node].name.lower()
                 to_socket += name.startswith("base")
+
+            # Mounting makes the part's root node take the socket's pose.
+            part = load(refs[i])
+            if part is None or not (0 <= component.attach_node < len(host.nodes)):
+                continue
+            mounts += 1
+            root_translation, root_rotation = part.root_pose()
+            rooted_at_origin += math.dist(root_translation, (0.0, 0.0, 0.0)) < 1e-6
+            socket = host.world_pose(component.attach_node)
+            turn = objmesh.quaternion_multiply(
+                socket[1], (root_rotation[0], *(-v for v in root_rotation[1:]))
+            )
+            degrees = math.degrees(2 * math.acos(min(1.0, abs(turn[0]))))
+            if degrees < 1.0:
+                agree += 1
+            else:
+                disagree.append((degrees, unit.components[parent].label))
+
     check("UNITS/*.dat: components form a depth-first tree", trees == len(dats),
           f"{trees}/{len(dats)} assemblies consume their child counts exactly")
     check("UNITS/*.dat: every part attaches to a Base_* node",
           to_socket == attachments,
           f"{to_socket}/{attachments} turret and gun attachments")
+
+    # A part's root translation is zero throughout, which is why using the
+    # socket's position alone was indistinguishable from using its whole pose
+    # everywhere except where the two rotations differ.
+    check("UNITS/*.dat: a mounted part is rooted at its own origin",
+          rooted_at_origin == mounts > 0,
+          f"{rooted_at_origin}/{mounts} turret and gun meshes have a root node "
+          f"at (0, 0, 0), so a socket contributes position and rotation "
+          f"independently")
+
+    # And where a socket does say something the part does not, it says the
+    # part hangs upside down -- which is what an aircraft's turret does.
+    flipped = [d for d in disagree if abs(d[0] - 180.0) < 1.0]
+    airborne = sum(
+        1 for _turn, label in flipped
+        if "flying" in label.lower() or "helicopter" in label.lower()
+    )
+    check("UNITS/*.dat: a socket that disagrees is a turret hung underneath",
+          airborne == len(flipped) > 0,
+          f"{agree}/{mounts} sockets carry the part's own rotation; of the "
+          f"{len(disagree)} that do not, {len(flipped)} are exactly 180 degrees "
+          f"and all {airborne} of those sit on a chassis whose own name says "
+          f"Flying or Helicopter")
 
     # The ground datum: a placed object's own z = 0 sits on the terrain.
     heights: dict[Path, landmesh.LandMesh] = {}
