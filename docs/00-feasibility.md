@@ -74,9 +74,9 @@ arrays with `0xFFFFFFFF` as the null link. Parsing the graph structure is a
 weekend. Making the nodes *behave* the same is the multi-month part, and it is
 interpreted by `Behavior.dll` (357 KB) plus `ai.dll` (207 KB).
 
-**Navigation.** `Land.map` / `ArealMap` is unresolved and is what pathfinding
-and territory almost certainly ride on. See
-[06-open-questions.md](06-open-questions.md).
+**Navigation is no longer a blocker.** `Land.map` is a convex navigation mesh
+— 242 to 4990 areals per map with mutual adjacency and a 128 × 128 lookup grid
+— and it reads on all 33 maps. See [08-arealmap.md](08-arealmap.md).
 
 **The hybrid partial-replacement trick probably will not help.** The engine is
 split into DLLs, which suggests swapping one at a time on Windows. But most
@@ -122,9 +122,13 @@ from real meshes rather than placeholders.
 Every object a mission places — all 864 of them — now resolves to real
 geometry, so a scene can be drawn from the game's own meshes.
 
-What still blocks a playable build is `Land.map` (navigation), the per-face
-texture assignment on object meshes, and how components bind to a chassis when
-a unit is assembled — see [06-open-questions.md](06-open-questions.md).
+`Land.map` is now solved too: all 33 navigation meshes read, and they tile
+their maps exactly. That one needed the disassembler — see
+[09-method.md](09-method.md).
+
+What still blocks a playable build is the per-face texture assignment on object
+meshes, how components bind to a chassis when a unit is assembled, and the
+behaviour graphs — see [06-open-questions.md](06-open-questions.md).
 
 ## Legal position
 

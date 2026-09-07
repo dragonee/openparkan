@@ -17,46 +17,17 @@ few fields are carried through without being understood:
 - Object `scale` is `1,1,1` in every shipped mission, so the axis order is
   unverified.
 
-## Land.map / ArealMap — blocks pathfinding
+## Land.map leftovers
 
-One NRes member, type 12, named `ArealMap`; 132 KB on ILKON, 188 KB on SC_3,
-750 KB on map 23. Handled by `ArealMap.dll` (226 KB). This is presumably the
-navigation and territory map. Partly characterised, not solved.
+The navigation mesh is [solved](08-arealmap.md). Two fields are not:
 
-**It is not a raster.** Bytes per world unit² varies more than twenty-fold
-across the 33 maps (0.014 on Net_4_04 to 0.34 on map 41), so size tracks
-content, not area. Two maps that share terrain — Net_2_01 and Net_4_02, with
-identical vertex and face counts — have byte-identical sizes, which is a useful
-consistency check for anyone continuing.
+- An areal edge's second `int32`. It ranges beyond the areal count, so it is
+  not a second areal reference.
+- The sub-block list (`B` in the record) is zero on every shipped map, so its
+  contents are unexercised.
 
-**The file opens with area polygons.** Each record runs:
-
-```
-float32  centre x, centre y
-float32  0, 0
-float32  polygon area          (38910 on a ~125-unit hexagon; 2.598 * 125^2 = 40600)
-float32  0, 0, 1.0
-uint32   1, 0, 1, 0
-uint32   vertex count          (7 and 10 in the records read so far)
-uint32   0
-         count x { float32 x; float32 y; float32 0 }
-uint32   a trailing block of varying length
-```
-
-The vertices trace a closed polygon on a lattice of about 125 units — on ILKON
-the first record is a hexagon through (374.3, 374.3), (499.0, 374.3),
-(623.8, 374.3), (748.5, 374.3), (623.8, 499.0), (499.0, 499.0), (374.3, 499.0).
-
-**But only about ten of these records exist**, filling the first ~6.5 KB of a
-132 KB file. The trailing block's length is not encoded anywhere found so far,
-so the records cannot be walked reliably; they were located by scanning for the
-header signature.
-
-**The remaining 95% is something else**: uint16 values, mostly small, with long
-verbatim runs — `(1, 29)` repeated for stretches at one offset, `(10, 1)` at
-another. That shape suggests run-length encoding, but summing the pairs either
-way gives totals in the hundreds of millions, far too large for any grid the
-map could have, so plain RLE is ruled out in both orderings.
+`MHallWay panic: cannot load path graph` points at a separate path-graph
+structure that has not been located.
 
 ## The `NL` archives
 

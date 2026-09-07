@@ -5,9 +5,10 @@ Clean-room readers for the data files of **Parkan: Iron Strategy** (Nikita,
 
 This repository contains **no game assets**. Point it at your own installation.
 
-Everything here was derived by observing the shipped data files. No
-disassembly of the game binaries was involved, and none of the original code is
-reproduced.
+Most of it was derived by observing the shipped data files. `Land.map` resisted
+that and was recovered by disassembling `ArealMap.dll`; what that means in
+practice — format facts yes, code no — is set out in
+[09-method.md](docs/09-method.md). No code from the game is reproduced here.
 
 ## Status
 
@@ -21,7 +22,7 @@ reproduced.
 | **`objects.rlb`, unit assemblies** | done — 590 records, 458 assemblies, 5708 components |
 | **Object meshes** | geometry done — 435 meshes in 10 archives; per-face texture unresolved |
 | **Control points** | done — 284 members, 3599 named attachment points |
-| **`Land.map` navigation** | partial — area polygons read; the bulk is unsolved |
+| **`Land.map` navigation mesh** | done — all 33 maps, 34662 areals, adjacency and grid |
 | **Behaviour scripts, gameplay** | not started |
 
 ## Quickstart
@@ -67,6 +68,7 @@ PASS  NRes: header size == file size                 116/116 archives
 PASS  NRes: every member offset is 8-byte aligned    116/116 archives, 6697 members
 PASS  NRes: no member ranges overlap                 0 overlaps
 PASS  NRes: inter-member padding is zero-filled      0 non-zero gaps, largest gap 7 bytes (< 8 as expected)
+PASS  NRes: the element-count field equals size / stride 231/231 terrain streams across 33 maps
 PASS  Texm: declared format predicts the payload size 328/393 exact (rest have a truncated mip tail)
 PASS  Texm: every texture decodes to RGBA            393/393, formats {0: 15, 565: 47, 888: 52, 4444: 42, 8888: 237}
 PASS  Land.msh: all maps parse                       33 maps
@@ -80,6 +82,13 @@ PASS  Land.msh: surface bit 0x02 marks exactly the water faces 33/33 maps, 3630 
 PASS  Land.msh: face flags 1544 agree with the surface bit 33/33 maps -- an independent second marker
 PASS  Land.msh: water is a single flat plane per map 11/11 maps with water
 PASS  Terrain matches the game's own minimap art     SC_3 r=+0.883, Tut_1 r=+0.927, ILKON r=+0.965, K1F r=+0.901
+PASS  Land.map: payload is consumed exactly          33/33 maps, 34662 areals
+PASS  Land.map: every map uses the same cell grid    (128, 128)
+PASS  Land.map: areal adjacency is mutual            33/33 maps -- proves edge field 0 is the neighbour
+PASS  Land.map: the stored area matches the polygon  34301/34662 areals agree with their shoelace area within 2%
+PASS  Land.map: areals span the same extent as the terrain 33/33 maps
+PASS  Land.map: areals tile the map without gaps or overlap 33/33 maps -- areas sum to the full square
+PASS  Land.map: cell grid indexes real areals        1034301 cell entries across 33 maps
 PASS  data.tma: parses exactly to end of file        29/29 missions, 864 objects
 PASS  data.tma: the map it names exists              29/29 missions reference a real DATA/MAPS entry
 PASS  data.tma: placed objects lie inside the map    864/864 objects within their map's XY extent
@@ -113,6 +122,8 @@ tried.
 - [05-engine.md](docs/05-engine.md) — the shipped DLLs and what they do
 - [06-open-questions.md](docs/06-open-questions.md) — what is still unknown
 - [07-objects.md](docs/07-objects.md) — `objects.rlb`, unit assemblies, object meshes
+- [08-arealmap.md](docs/08-arealmap.md) — `Land.map`, the navigation mesh
+- [09-method.md](docs/09-method.md) — how this was done, and the clean-room line
 
 ## Layout
 
@@ -125,11 +136,13 @@ openparkan/
   mission.py    data.tma reader: clans, objects, routes
   objects.py    objects.rlb records and UNITS/*.dat assemblies
   mesh.py       object geometry and control points
+  arealmap.py   Land.map navigation mesh
   viewer.py     self-contained HTML viewer generator
   verify.py     the checks quoted above
   png.py        dependency-free PNG writer
   cli.py        command line
 docs/           format documentation
+analysis/       disassembly scaffolding (not part of the library)
 ```
 
 ## Prior art

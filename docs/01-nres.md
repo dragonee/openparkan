@@ -30,7 +30,9 @@ offset  size  field
 0x00       4  type. Either a FourCC tag ('Texm', 'SWAV', 'MESH', 'CTLD', ...)
               or, in per-map files, a small little-endian integer used as a
               stream selector
-0x04       8  zero in every shipped file
+0x04       4  uint32 element count -- the number of records in the payload,
+              where the payload is an array; zero otherwise
+0x08       4  zero in every shipped file
 0x0C       4  uint32 payload size in bytes
 0x10       4  uint32, always 1
 0x14      32  name, NUL-padded ASCII
@@ -50,6 +52,14 @@ this padding to round-trip a file.
 directory order is `0, 5, 6, 7, 8, 9, 10, 11, 12, 16, 1, 4, 15, 13, 14, 2, 3`.
 Treat it as an opaque id the engine uses to cross-reference members; do not
 assume it matches iteration order.
+
+**The element count at +4 is real, and sometimes essential.** It is zero on
+most members, which is why it first looked like padding, but it is non-zero on
+2119 of 5928 members across the install. `ArealMap.dll` reads its areal count
+from this field and nowhere else, so `Land.map` cannot be parsed without it.
+For terrain streams it equals `size / stride` exactly — 231 of 231 streams
+across all 33 maps — which independently confirms the vertex and face counts
+derived from the stream data itself. `Material.lib` also populates +8.
 
 **Names are not unique.** In `Land.msh` every member is called `Land` and only
 the numeric type distinguishes them. Look members up by type there, by name
@@ -75,5 +85,6 @@ mission directories, as do mixed-case member names. Look up case-insensitively.
 
 ## Verified by
 
-`uv run openparkan verify`, checks 1–4: header size agreement, 8-byte alignment,
-non-overlapping ranges, zero-filled padding — over all 116 archives.
+`uv run openparkan verify`: header size agreement, 8-byte alignment,
+non-overlapping ranges and zero-filled padding over all 116 archives, plus the
+element-count field against `size / stride` for every terrain stream.

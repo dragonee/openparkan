@@ -23,6 +23,10 @@ openparkan = "openparkan.cli:main"
 Documentation = "https://github.com/dragonee/openparkan/tree/main/docs"
 
 [dependency-groups]
+analysis = [
+    "capstone>=5.0.9",
+    "pefile>=2024.8.26",
+]
 dev = ["ruff>=0.6"]
 
 [build-system]

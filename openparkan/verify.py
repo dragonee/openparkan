@@ -11,7 +11,7 @@ from __future__ import annotations
 import math
 from pathlib import Path
 
-from . import gamedir, landmesh, mission, objects, texm
+from . import arealmap, gamedir, landmesh, mission, objects, texm
 from . import mesh as objmesh
 from .nres import HEADER_SIZE, NResArchive, is_nres
 
@@ -56,6 +56,21 @@ def check_nres(check, game: Path) -> None:
     check("NRes: no member ranges overlap", overlaps == 0, f"{overlaps} overlaps")
     check("NRes: inter-member padding is zero-filled", bad_pad == 0,
           f"{bad_pad} non-zero gaps, largest gap {max_gap} bytes (< 8 as expected)")
+
+    # The directory's element-count field is what ArealMap.dll reads to learn
+    # how many areals a chunk holds; for terrain streams it must equal
+    # size / stride.
+    strides = {3: 12, 4: 4, 5: 4, 18: 4, 14: 4, 11: 4, 21: 28}
+    agree = seen = 0
+    for d in gamedir.maps(game):
+        for e in NResArchive.open(d / "Land.msh"):
+            stride = strides.get(e.type_id)
+            if stride is None or not e.element_count:
+                continue
+            seen += 1
+            agree += e.size == e.element_count * stride
+    check("NRes: the element-count field equals size / stride", agree == seen,
+          f"{agree}/{seen} terrain streams across {len(gamedir.maps(game))} maps")
 
 
 def check_texm(check, game: Path) -> None:
@@ -161,6 +176,78 @@ def check_water(check, game: Path) -> None:
           f"{by_flags}/{len(maps)} maps -- an independent second marker")
     check("Land.msh: water is a single flat plane per map", flat == with_water,
           f"{flat}/{with_water} maps with water")
+
+
+def check_arealmap(check, game: Path) -> None:
+    """The navigation mesh, whose layout came out of ArealMap.dll."""
+    maps = [d for d in gamedir.maps(game) if (d / "Land.map").exists()]
+    loaded = []
+    failures = []
+    for d in maps:
+        try:
+            loaded.append((d, arealmap.load(d / "Land.map")))
+        except arealmap.ArealMapFormatError as exc:
+            failures.append(str(exc))
+    total_areals = sum(am.areal_count for _, am in loaded)
+    check("Land.map: payload is consumed exactly", not failures,
+          f"{len(loaded)}/{len(maps)} maps, {total_areals} areals"
+          + ("" if not failures else f" -- {failures[0]}"))
+    if not loaded:
+        return
+
+    grids = {(am.cells_across, am.cells_down) for _, am in loaded}
+    check("Land.map: every map uses the same cell grid", len(grids) == 1,
+          f"{grids.pop() if len(grids) == 1 else grids}")
+
+    mutual = 0
+    for _, am in loaded:
+        ok = True
+        for i, a in enumerate(am.areals):
+            for nb in a.neighbours:
+                if nb >= am.areal_count or i not in am.areals[nb].neighbours:
+                    ok = False
+                    break
+            if not ok:
+                break
+        mutual += ok
+    check("Land.map: areal adjacency is mutual", mutual == len(loaded),
+          f"{mutual}/{len(loaded)} maps -- proves edge field 0 is the neighbour")
+
+    close = total = 0
+    for _, am in loaded:
+        for a in am.areals:
+            if a.area <= 0:
+                continue
+            total += 1
+            close += abs(a.polygon_area() - a.area) / a.area < 0.02
+    check("Land.map: the stored area matches the polygon", close > total * 0.95,
+          f"{close}/{total} areals agree with their shoelace area within 2%")
+
+    # The decomposition should tile the map: areal extent equals terrain
+    # extent, and the areas sum to the whole square.
+    tiled = aligned = 0
+    for d, am in loaded:
+        mesh = landmesh.load(d / "Land.msh")
+        (tminx, tminy, _), (tmaxx, tmaxy, _) = mesh.bounds()
+        (aminx, aminy), (amaxx, amaxy) = am.bounds()
+        aligned += (abs(aminx - tminx) < 1 and abs(aminy - tminy) < 1
+                    and abs(amaxx - tmaxx) < 1 and abs(amaxy - tmaxy) < 1)
+        square = (tmaxx - tminx) * (tmaxy - tminy)
+        tiled += abs(sum(a.area for a in am.areals) - square) / square < 0.01
+    check("Land.map: areals span the same extent as the terrain", aligned == len(loaded),
+          f"{aligned}/{len(loaded)} maps")
+    check("Land.map: areals tile the map without gaps or overlap", tiled == len(loaded),
+          f"{tiled}/{len(loaded)} maps -- areas sum to the full square")
+
+    # Every index the grid hands out must be a real areal.
+    bad = items = 0
+    for _, am in loaded:
+        for entries in am.cells.values():
+            for idx in entries:
+                items += 1
+                bad += not (0 <= idx < am.areal_count)
+    check("Land.map: cell grid indexes real areals", bad == 0,
+          f"{items} cell entries across {len(loaded)} maps")
 
 
 def check_missions(check, game: Path) -> None:
@@ -467,7 +554,8 @@ def run(game: Path) -> int:
     print(f"verifying against {game}\n")
     checks = (
         check_nres, check_texm, check_terrain, check_uv,
-        check_water, check_minimap_agreement, check_missions, check_objects,
+        check_water, check_minimap_agreement, check_arealmap,
+        check_missions, check_objects,
     )
     for fn in checks:
         fn(check, game)

@@ -30,6 +30,10 @@ class NResEntry:
     offset: int
     size: int
     index: int
+    #: Number of elements in the payload, where the member is an array.  Zero
+    #: on members that are not arrays.  ArealMap.dll reads its areal count from
+    #: this field, and for terrain streams it equals size / stride exactly.
+    element_count: int = 0
 
     @property
     def tag(self) -> str:
@@ -78,6 +82,7 @@ class NResArchive:
                     size=struct.unpack_from("<I", rec, 12)[0],
                     offset=struct.unpack_from("<I", rec, 56)[0],
                     index=struct.unpack_from("<I", rec, 60)[0],
+                    element_count=struct.unpack_from("<I", rec, 4)[0],
                 )
             )
 
