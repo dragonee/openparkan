@@ -1,5 +1,5 @@
-"""Object definitions: ``objects.rlb`` records, ``.ndp`` damage tables, and
-``UNITS/**/*.dat`` assemblies.
+"""Object definitions: ``objects.rlb`` records, ``.ndp`` damage tables, ``.bas``
+footprints, and ``UNITS/**/*.dat`` assemblies.
 
 Two small fixed-layout formats that together turn a name in a mission file
 into concrete resources.
@@ -31,6 +31,16 @@ geometry-less ``Base_*`` nodes, on 946 of 946 guns and 468 of 468 turrets --
 so an assembled robot is built by walking the tree and composing each part's
 mesh onto that node's pose.
 
+A ``.bas`` slot is a building's **ground plan**: two closed outlines in the
+model's own frame, an inner one that traces the building itself and an outer
+one a clearance margin beyond it -- 1.3 to 2.4 times the area, 1.6 median.
+All 30 shipped records hold exactly two, all 60 rings wind anticlockwise, and
+the inner ring's XY extent is the model's own bounding box on 23 of the 30.
+Placed and turned by the mission's angle, it sits on the terrain: over 167
+placed buildings the ground under the outline runs a median 2.24 units from
+its lowest point to its highest, and the placement height is a median 0.00
+above their mean.
+
 A ``.ndp`` slot is the model's **damage table**: one 76-byte record per mesh
 node, holding that node's durability and the explosion it plays when it is
 destroyed -- ``explode_tree.exp`` for a tree, ``explode_frt_b.exp`` for a big
@@ -49,6 +59,10 @@ from .nres import NResArchive
 
 SLOT_SIZE = 64
 NAME_FIELD = 32
+
+#: A ``.bas`` footprint block: a constant 1, a point count, that many points
+#: plus a repeat of the first, and then two ``int32`` per point.
+BASE_MARKER = 1
 
 #: A ``.ndp`` is an int32 count and then one 76-byte record per mesh node:
 #: an int32 of flags, two floats, and the ``(archive, member)`` pair naming the
@@ -155,6 +169,60 @@ def parse_damage(blob: bytes, source: str = "<ndp>") -> list[NodeDamage]:
     return out
 
 
+@dataclass(frozen=True)
+class Footprint:
+    """One ring of a ``.bas``: a closed outline in the model's own frame."""
+
+    #: The ring's corners, without the repeated closing point.
+    points: list[tuple[float, float, float]]
+    #: Two ``int32`` per point, carried through unread.
+    trailer: list[int]
+
+    @property
+    def area(self) -> float:
+        """The shoelace area in XY.  Every shipped ring winds anticlockwise."""
+        total = 0.0
+        for i, (x1, y1, _) in enumerate(self.points):
+            x2, y2, _ = self.points[(i + 1) % len(self.points)]
+            total += x1 * y2 - x2 * y1
+        return total / 2
+
+
+def parse_base(blob: bytes, source: str = "<bas>") -> list[Footprint]:
+    """Parse a ``.bas``.  Every shipped record holds exactly two rings."""
+    out: list[Footprint] = []
+    pos = 0
+    while pos < len(blob):
+        if pos + 8 > len(blob):
+            raise ObjectFormatError(f"{source}: no room for a ring header at {pos}")
+        marker, count = struct.unpack_from("<2i", blob, pos)
+        if marker != BASE_MARKER or not 3 <= count <= 256:
+            raise ObjectFormatError(
+                f"{source}: ring header ({marker}, {count}) at {pos}"
+            )
+        end = pos + 8 + (count + 1) * 12
+        if end > len(blob):
+            raise ObjectFormatError(f"{source}: ring at {pos} runs past the end")
+        points = [
+            struct.unpack_from("<3f", blob, pos + 8 + i * 12) for i in range(count + 1)
+        ]
+        if points[0] != points[-1]:
+            raise ObjectFormatError(f"{source}: ring at {pos} does not close")
+        pos = end
+        trailer: list[int] = []
+        # The trailing pair per point is written only when another ring
+        # follows, so the last ring in a record ends with its outline.
+        if pos < len(blob):
+            if pos + 8 * count > len(blob):
+                raise ObjectFormatError(
+                    f"{source}: no room for {2 * count} trailing ints at {pos}"
+                )
+            trailer = list(struct.unpack_from(f"<{2 * count}i", blob, pos))
+            pos += 8 * count
+        out.append(Footprint(points[:-1], trailer))
+    return out
+
+
 @dataclass
 class ObjectRecord:
     """One record of ``objects.rlb``: a name, a tag, and its resource slots."""
@@ -183,6 +251,11 @@ class ObjectRecord:
     def damage(self) -> ResourceRef | None:
         """The ``.ndp`` slot, a per-node damage table."""
         return self.slot_with_suffix("ndp")
+
+    @property
+    def footprint(self) -> ResourceRef | None:
+        """The ``.bas`` slot, a building's ground outline."""
+        return self.slot_with_suffix("bas")
 
 
 class ObjectLibrary:

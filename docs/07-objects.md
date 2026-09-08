@@ -75,6 +75,41 @@ The remaining question the `.ctl` was carrying is
 [still open](06-open-questions.md), but it is a question about how a unit
 *moves*, not about how it stands.
 
+### `.bas` is a building's ground plan
+
+30 members of `fortif.rlb`, and every one is a run of blocks:
+
+```
+int32    1            a marker; constant on all 60 rings
+int32    count        corners
+float32  x, y, z  x (count + 1)    the ring, closed by repeating the first
+int32    ...      x (2 * count)    two per corner; written only when another
+                                   ring follows, so the last ring ends here
+```
+
+**All 30 parse exactly and all hold exactly two rings**, of 3 to 26 corners,
+and **all 60 wind anticlockwise**. The z is constant across a ring on 46 of
+the 60.
+
+The two rings are the building and a clearance around it. The inner one traces
+the model — its XY extent *is* the mesh's own bounding box on 18 of the 30,
+`fr_b_bunker` at −47.3..47.3 on both axes, `fr_b_inst` at −55.2..55.2 and
+−47.8..63.6 — and the outer one stands off from it, 1.32 to 2.35 times the
+area with a median of 1.61. The exceptions are the bridges, whose model is
+half a span: `fr_b_brige`'s ring covers y −37.1..0.0 of a mesh that runs to
+119.1, which is the half that touches the ground.
+
+Placed and turned by the mission's angle it lands where the building does.
+Over the **167 placed buildings** that have one, the terrain under the outline
+spans a median 2.24 units from its lowest sample to its highest — buildings
+sit on flat ground — and the placement height is a median **0.00** above their
+mean. That makes it the one independent check on object *placement* the data
+offers, which is why the viewer draws it through the same transform as the
+model rather than a baked one: an outline that agreed with the model no matter
+what would test nothing. The `Footprints` toggle shows them.
+
+The two `int32` per corner are not read.
+
 ### `.ndp` is a damage table, one record per node
 
 An `int32` count and then **76 bytes per record**. All 542 shipped members are

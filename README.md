@@ -23,6 +23,7 @@ practice — format facts yes, code no — is set out in
 | **Object meshes** | done — geometry, materials, textures, node poses, LOD, damage states, interior/exterior and collision selection |
 | **Assembled units and buildings** | done — the `.dat` component tree, and each part mounted at its socket's full pose |
 | **Damage tables** | done — `.ndp`, 542 tables, one record per node, 2203 explosions named |
+| **Building footprints** | done — `.bas`, 30 ground plans; the one independent check on object placement |
 | **Effects** | done — `effects.rlb`, 923 effects and 4737 emitters; 144 `.exp` explosions |
 | **Materials** | done — `Material.lib`, 905 materials, animation frames and diffuse colour; 99.4% of batches reach a texture |
 | **Baked lighting** | done — `lightmap.lib`, 21 buildings, per-batch |

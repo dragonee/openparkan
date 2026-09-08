@@ -669,8 +669,43 @@ class ModelLibrary:
             return self._by_name[obj.path]
         parts = self._parts(obj)
         slot = self._pack(parts) if parts else None
+        if slot is not None and "plan" not in self.models[slot]:
+            self.models[slot]["plan"] = self._plan(obj)
         self._by_name[obj.path] = slot
         return slot
+
+    def _plan(self, obj: mission.MissionObject) -> list[list[float]] | None:
+        """The building's ground outline, in its own frame and viewer axes.
+
+        Emitted unrotated so the overlay goes through the same placement the
+        model does; baking the turn in here would make the two agree with each
+        other rather than with the game.
+        """
+        if obj.is_static:
+            return None
+        f = self._unit_file(obj.path)
+        if f is None:
+            return None
+        try:
+            unit = objects.load_unit(f)
+        except (objects.ObjectFormatError, OSError, struct.error):
+            return None
+        for component in unit.components:
+            record = self.library.get(component.ref.member)
+            slot = record.footprint if record else None
+            if slot is None:
+                continue
+            try:
+                blob = self._archive(slot.library).read_name(slot.member)
+                rings = objects.parse_base(blob, slot.member)
+            except (KeyError, ValueError, objects.ObjectFormatError, struct.error):
+                return None
+            if not rings:
+                return None
+            # Game space is Z-up, the viewer Y-up: (x, y, z) -> (x, z, -y).
+            return [[round(x, 2), round(z, 2), round(-y, 2)]
+                    for x, y, z in rings[0].points]
+        return None
 
 
 #: Slots of a sky keyframe the viewer draws with.  Which of the three colour

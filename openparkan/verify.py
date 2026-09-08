@@ -1753,6 +1753,117 @@ def check_damage(check, game: Path) -> None:
           f"pieces gone: fewer triangles on {shrinks}/{compared}")
 
 
+def check_footprints(check, game: Path) -> None:
+    """.bas ground plans, and whether a placed building sits on its own."""
+    archive = NResArchive.open(game / "fortif.rlb")
+    plans: dict[str, list[objects.Footprint]] = {}
+    rings = anticlockwise = 0
+    for entry in archive:
+        if not entry.name.lower().endswith(".bas"):
+            continue
+        try:
+            plan = objects.parse_base(archive.read(entry), entry.name)
+        except objects.ObjectFormatError:
+            continue
+        plans[entry.name.lower()[:-4]] = plan
+        rings += len(plan)
+        anticlockwise += sum(1 for r in plan if r.area > 0)
+    total = sum(1 for e in archive if e.name.lower().endswith(".bas"))
+    two = sum(1 for p in plans.values() if len(p) == 2)
+    check("fortif.rlb: a .bas is two closed rings",
+          len(plans) == total > 0 and two == total,
+          f"{len(plans)}/{total} records parse and {two} hold exactly two "
+          f"rings; all {anticlockwise}/{rings} wind anticlockwise")
+
+    # The inner ring traces the model, the outer one stands off from it.
+    boxed = matched = 0
+    ratios: list[float] = []
+    for stem, plan in plans.items():
+        inner, outer = plan[0], plan[1]
+        if inner.area:
+            ratios.append(abs(outer.area / inner.area))
+        try:
+            model = objmesh.parse(archive.read_name(stem + ".msh"), stem)
+        except (KeyError, ValueError, struct.error):
+            continue
+        if model.volume is None:
+            continue
+        boxed += 1
+        lo, hi = model.volume.minimum, model.volume.maximum
+        xs = [p[0] for p in inner.points]
+        ys = [p[1] for p in inner.points]
+        matched += (
+            abs(min(xs) - lo[0]) < 0.1 and abs(max(xs) - hi[0]) < 0.1
+            and abs(min(ys) - lo[1]) < 0.1 and abs(max(ys) - hi[1]) < 0.1
+        )
+    ratios.sort()
+    check("fortif.rlb: the inner ring is the model, the outer a clearance",
+          matched >= boxed * 0.6 and ratios[0] > 1.0,
+          f"the inner ring's XY extent is the model's own bounding box on "
+          f"{matched}/{boxed}; the outer ring is {ratios[0]:.2f} to "
+          f"{ratios[-1]:.2f} times its area, {ratios[len(ratios)//2]:.2f} median")
+
+    # And placed on a map, the outline lands on the ground.
+    library = objects.ObjectLibrary(game / "objects.rlb")
+
+    def plan_of(path: str) -> list[objects.Footprint] | None:
+        target = game / path.replace("\\", "/")
+        if not target.exists():
+            return None
+        try:
+            unit = objects.load_unit(target)
+        except (objects.ObjectFormatError, OSError, struct.error):
+            return None
+        for component in unit.components:
+            record = library.get(component.ref.member)
+            slot = record.footprint if record else None
+            if slot:
+                return plans.get(slot.member.lower()[:-4])
+        return None
+
+    heights: dict[Path, landmesh.LandMesh] = {}
+    spreads: list[float] = []
+    drops: list[float] = []
+    for folder in gamedir.missions(game):
+        m = mission.load(folder / "data.tma")
+        if not m.map_path:
+            continue
+        target = game / m.map_path.replace("\\", "/")
+        land = (target if target.is_dir() else target.parent) / "Land.msh"
+        if not land.exists():
+            continue
+        if land not in heights:
+            heights[land] = landmesh.load(land)
+        ground = heights[land]
+        for o in m.objects:
+            if o.kind != mission.KIND_BUILDING or o.is_static:
+                continue
+            plan = plan_of(o.path)
+            if not plan:
+                continue
+            angle = o.rotation
+            under = []
+            for x, y, _z in plan[0].points:
+                wx = o.position[0] + x * math.cos(angle) - y * math.sin(angle)
+                wy = o.position[1] + x * math.sin(angle) + y * math.cos(angle)
+                h = ground.height_at(wx, wy)
+                if h is not None:
+                    under.append(h)
+            if len(under) < 3:
+                continue
+            spreads.append(max(under) - min(under))
+            drops.append(o.position[2] - sum(under) / len(under))
+    spreads.sort()
+    drops.sort()
+    middle = abs(drops[len(drops) // 2]) if drops else 99.0
+    check("placement: a building's footprint lands on the ground",
+          len(drops) > 100 and middle < 0.5
+          and spreads[len(spreads) // 2] < 5.0,
+          f"over {len(drops)} placed buildings the terrain under the outline "
+          f"spans a median {spreads[len(spreads)//2]:.2f} units, and the "
+          f"placement height sits a median {middle:.2f} above its mean")
+
+
 def check_effects(check, game: Path) -> None:
     """effects.rlb and the .exp explosions, and the chain that reaches them."""
     library = effects.EffectLibrary(game / "effects.rlb")
@@ -1900,7 +2011,7 @@ def run(game: Path) -> int:
         check_water, check_layers, check_materials, check_sky,
         check_minimap_agreement, check_arealmap,
         check_missions, check_objects, check_poses, check_damage,
-        check_effects,
+        check_effects, check_footprints,
     )
     for fn in checks:
         fn(check, game)

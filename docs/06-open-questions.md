@@ -63,12 +63,12 @@ named), but the nine floats only read cleanly as
 `(zero, position, unit direction)` in `static.rlb` and `turrets.rlb`.
 `guns.rlb` and `parts.rlb` put scalars like `Width` in a vector slot.
 
-## BASE — building footprints
+## BASE — the two int32 per corner
 
-`fortif.rlb` `.bas` members open with a count and then float triples at z ≈ 0
-that trace a polygon, so they read as a building's ground footprint. The
-header does not divide evenly into the payload, so the full record is not
-mapped.
+`.bas` is [solved](07-objects.md): two closed rings, a building's outline and
+a clearance around it, all 30 records to the byte. Each corner carries two
+`int32` that are not read — `fr_e_ruin`'s first ring gives 308, 306, 309, 304
+and then 2, 1, 1, 1, which reads as two parallel arrays rather than pairs.
 
 ## Object mesh leftovers
 
