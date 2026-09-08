@@ -226,8 +226,10 @@ def cmd_effects(args, game: Path) -> int:
     for i, emitter in enumerate(effect.emitters):
         flag = " flagged" if emitter.flagged else ""
         what = str(emitter.resource) if emitter.resource else "-"
+        span = emitter.audible_range
+        heard = f"   audible {span[0]:g}..{span[1]:g}" if span else ""
         print(f"  {i:2d}  type {emitter.kind:2d}{flag:8s}  "
-              f"{len(emitter.body):3d} bytes  {what}")
+              f"{len(emitter.body):3d} bytes  {what}{heard}")
     return 0
 
 

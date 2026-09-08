@@ -1723,6 +1723,46 @@ def check_effects(check, game: Path) -> None:
           f"{drawn_ok}/{drawn} materials resolve through Material.lib and "
           f"{played_ok}/{played} sounds are in sounds.lib")
 
+    # Inside a block, the sound emitter is the one that reads: a near and a
+    # far audible distance, in that order.
+    ordered = sounds = 0
+    ranges: Counter[tuple[int, int]] = Counter()
+    flagged = 0
+    for effect in library:
+        for emitter in effect.emitters:
+            flagged += emitter.flagged
+            span = emitter.audible_range
+            if span is None:
+                continue
+            sounds += 1
+            ordered += span[0] <= span[1]
+            ranges[(round(span[0]), round(span[1]))] += 1
+    check("effects.rlb: a sound emitter carries a near and far distance",
+          ordered == sounds > 0,
+          f"+{effects.SOUND_NEAR} <= +{effects.SOUND_FAR} on {ordered}/{sounds} "
+          f"sound blocks; commonest are "
+          + ", ".join(f"{a}..{b}" for (a, b), _ in ranges.most_common(3)))
+    check("effects.rlb: bit 8 of the type word is a flag, not the type",
+          0 < flagged < emitters,
+          f"set on {flagged} of the {emitters} emitters, and the engine's "
+          f"factory keys only on the low byte -- it stores (word >> 8) & 1 "
+          f"separately")
+
+    # An explosion's size lives in the .exp, not in the effect: the small,
+    # medium and big fortification blasts share their emitter blocks exactly.
+    trio = [library.get(f"exp_frt_{suffix}") for suffix in ("l", "m", "b")]
+    shared = 0
+    if all(trio):
+        width = min(len(e.emitters) for e in trio)
+        for i in range(width):
+            bodies = {e.emitters[i].body for e in trio}
+            shared += len(bodies) == 1
+        check("effects.rlb: an explosion's size is a scale, not new geometry",
+              shared == width > 0,
+              f"exp_frt_l, _m and _b share {shared}/{width} emitter blocks byte "
+              f"for byte; the 2, 3 and 4 that separate them are the magnitude "
+              f"in their .exp")
+
     # .exp records, wherever they live.
     total = refs = named = 0
     for path in sorted(game.glob("*.rlb")) + sorted(game.glob("*.lib")):

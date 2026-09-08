@@ -50,21 +50,64 @@ is its type; the type fixes the block's length and where inside it the
 | 3 | 200 | 136 | a material | 1545 |
 | 4 | 204 | 136 | a material | 202 |
 | 5 | 112 | 48 | a material | 31 |
+| 6 | 4 | — | — | 0 |
 | 7 | 208 | 144 | a material | 1161 |
 | 8 | 248 | 184 | a material | 237 |
 | 9 | 208 | 136 | a material | 266 |
 | 10 | 208 | 144 | a material | 160 |
 
-That table walks **all 923 effects to the byte**, 4737 emitters in total. Type
-6 does not occur, and neither does 0.
+That table walks **all 923 effects to the byte**, 4737 emitters in total.
 
-The table was not guessed. It was fitted: 338 of the records have a resource
-pair in every block, which pins each type's length directly, and the rest were
-settled by a search over the remaining lengths for the table that walks the
-most records — 922 of 923 at the first pass, then all 923 once type 4 was
-corrected from 200 to 204. The confirmation is independent of the fit: on
-every record that walks, **every block ends where a `(archive, member)` pair
-begins**, which a wrong stride would break immediately.
+It was arrived at twice. First it was fitted from the data: 338 records have a
+resource pair in every block, which pins those lengths directly, and the rest
+fell to a search for the table that walks the most records — 922 of 923 at the
+first pass, then all 923 once type 4 was corrected from 200 to 204. The
+independent confirmation was that on every record that walks, **every block
+ends where a `(archive, member)` pair begins**, which a wrong stride breaks
+immediately.
+
+Then it was read off the engine, which agrees exactly. `Effect.dll`'s emitter
+factory does:
+
+```
+mov edx, [edi]      ; the block's first dword
+and edx, 0xff       ; the low byte is the type
+lea eax, [edx - 1]  ; types are 1-based
+cmp eax, 9
+ja  <skip>
+jmp [eax*4 + <table>]
+```
+
+and each of the ten branches allocates its class, stores the block pointer,
+and advances `edi` by exactly the stride above — `add edi, 0xe0` for type 1,
+`0x94` for type 2, and so on. Two things follow that the data could not give:
+**type 6 is a real type with a 4-byte block**, which no shipped effect uses,
+and **bit 8 is a flag rather than part of the type** — right after the switch
+the factory computes `(word >> 8) & 1` and stores it as a byte on the emitter.
+It is set on 1811 of the 4737 emitters and what it controls is not known.
+
+Types 7 and 10 allocate the same 0x48-byte object and install different
+vtables, so they are sibling classes rather than unrelated ones.
+
+## Inside a block
+
+Only the sound emitter is read. Type 2 keeps a **near and far audible
+distance** as two `float32` at +64 and +68: the first is never greater than
+the second on any of the 517 blocks, and the pairs are exactly what a 3D sound
+wants — (3, 40) on 160 of them, (10, 100) on 120, then (3, 50), (10, 80),
+(15, 300). `aim_exp_L`'s explosion is audible from 20 to 200 units. Two more
+`float32` at +8 and +12 sit in 0..1, most often (0.0, 0.1), and +72 is 1.0 on
+516 of the 517.
+
+The rest is open. Type 3's `+40..+48` and `+52..+60` are a component-wise
+(low, high) pair of `float32[3]` on 1427 of 1545 blocks, which is the shape a
+particle spread takes, but the other types do not follow it and none of the
+values is identified.
+
+One negative result worth keeping: **an explosion's size is not in its
+effect.** `exp_frt_l`, `exp_frt_m` and `exp_frt_b` share their emitter blocks
+byte for byte; the 2, 3 and 4 that separate them are the magnitude in their
+`.exp`, which scales the whole thing at run time.
 
 **Every one of the 3577 material references resolves** through `Material.lib`,
 and 516 of the 517 sounds are in `sounds.lib` — the exception is
@@ -97,14 +140,17 @@ to `exp_t_sn_mis` and its neighbours.
 
 ## Not resolved
 
-- **What distinguishes one emitter type from another.** Nine types with fixed
-  lengths, all but one naming a material, and nothing yet says which is a
-  sprite burst, which a trail, which a light.
-- **The floats inside a block.** Each carries 30 to 60 of them — colours,
-  lifetimes, velocities and spreads, by the look of the values — and none is
-  identified.
+- **What distinguishes one emitter type from another.** Ten types with fixed
+  lengths, all but two naming a material, and nothing yet says which is a
+  sprite burst, which a trail, which a light. The emitter object keeps only a
+  pointer to its block, so the field offsets live in each class's own update
+  method, behind its vtable.
+- **The floats inside a block**, except the sound emitter's distances. Each
+  block carries 30 to 60 of them — colours, lifetimes, velocities and spreads,
+  by the look of the values.
 - **The 60-byte effect header** and the `.exp`'s first float and flags word.
-- **Bit 8 of the type word**, set on 1811 of the 4737 emitters.
+- **What bit 8 controls.** That it is a flag is settled; what it switches is
+  not.
 - Snow and rain are **not** here. There is no FXID whose name mentions either,
   and `sky.wea`'s slots name the materials `SNOWFLAKE` and `RAIN_DROP`
   directly — see [10-sky.md](10-sky.md).

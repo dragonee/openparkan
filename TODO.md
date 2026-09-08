@@ -232,11 +232,27 @@ blocks to the byte, 144 `.exp` records parse, and a destroyed node's damage
 record reaches real sprites on 2189 of 2203 references. Nothing draws them:
 an explosion is transient and a static scene has nowhere to put one.
 
-What is left is inside a block. Nine emitter types with fixed lengths, all but
-one naming a material, and nothing yet says which is a sprite burst, which a
-trail, which a light; each block carries 30 to 60 floats that read as colours,
-lifetimes and velocities, and none is identified. Also the 60-byte effect
-header, the `.exp`'s first float and flags word, and bit 8 of the type word.
+The block table is now the engine's rather than a fit: `Effect.dll`'s emitter
+factory masks the word to a byte, subtracts one, bounds it at 9 and jumps
+through a ten-entry table whose branches advance the read pointer by exactly
+those strides. That added **type 6**, a 4-byte block nothing uses, and settled
+**bit 8** — the factory stores `(word >> 8) & 1` on the emitter, so it is a
+flag, not part of the type.
+
+Inside a block, the sound emitter is read: type 2 keeps a **near and far
+audible distance** at +64 and +68, ordered on all 517 blocks, (3, 40) and
+(10, 100) being the commonest. The rest is open — ten types and nothing yet
+says which is a sprite burst, which a trail, which a light; 30 to 60 floats
+per block that read as colours, lifetimes and velocities. The emitter object
+keeps only a pointer to its block, so the field offsets live in each class's
+update method behind its vtable, which is where this goes next.
+
+Also open: the 60-byte effect header, the `.exp`'s first float and flags word,
+and what bit 8 controls.
+
+A negative result worth keeping: an explosion's size is **not** in its effect.
+`exp_frt_l`, `_m` and `_b` share their emitter blocks byte for byte; the 2, 3
+and 4 that separate them are the magnitude in their `.exp`.
 
 ### 2.4 The `NL` archives block the UI
 

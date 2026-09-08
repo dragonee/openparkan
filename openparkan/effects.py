@@ -30,16 +30,28 @@ where inside it the ``(archive, member)`` pair sits::
       3     200   136           a material
       4     204   136           a material
       5     112   48            a material
+      6       4   --            never used by the shipped data
       7     208   144           a material
       8     248   184           a material
       9     208   136           a material
      10     208   144           a material
 
-That table walks all 923 shipped effects to the byte -- 4737 emitters -- and
+The lengths are the engine's own.  ``Effect.dll``'s emitter factory masks the
+word to a byte, subtracts one, bounds it at 9 and jumps through a ten-entry
+table; each branch allocates its class and then advances the read pointer by
+exactly these strides.  That settles two things the data alone could not: type
+6 exists but nothing uses it, and **bit 8 is a one-bit flag** -- the factory
+computes ``(word >> 8) & 1`` and stores it on the emitter -- rather than part
+of the type.
+
+The table walks all 923 shipped effects to the byte -- 4737 emitters -- and
 every one of the 3577 material references resolves through ``Material.lib``;
-516 of the 517 sounds are in ``sounds.lib``.  What distinguishes one emitter type from
-another -- and the meaning of the floats inside a block -- is not established;
-see ``docs/11-effects.md``.
+516 of the 517 sounds are in ``sounds.lib``.
+
+Inside a block, only the sound emitter is read.  Type 2 keeps a **near and far
+audible distance** at +64 and +68, ordered on all 517 blocks and taking values
+like (3, 40), (10, 100) and (15, 300); an explosion's is (20, 200).  What the
+other types' floats mean is not established; see ``docs/11-effects.md``.
 
 Nothing here draws: an explosion is transient and a static scene has no place
 to put one.  What it gives you is the graph, from a mesh node's ``.ndp``
@@ -64,9 +76,17 @@ EXPLOSION_STRIDE = 64
 #: The 60 bytes before an effect's first emitter block.
 HEADER_SIZE = 60
 
-#: Emitter type -> the block's length in bytes.
-EMITTER_SIZE = {1: 224, 2: 148, 3: 200, 4: 204, 5: 112, 7: 208, 8: 248,
+#: Emitter type -> the block's length in bytes, as ``Effect.dll``'s factory
+#: advances its read pointer.  Type 6 never appears in the shipped data.
+EMITTER_SIZE = {1: 224, 2: 148, 3: 200, 4: 204, 5: 112, 6: 4, 7: 208, 8: 248,
                 9: 208, 10: 208}
+
+#: The types the engine's jump table covers.
+EMITTER_TYPES = range(1, 11)
+
+#: A sound emitter's near and far audible distance.
+SOUND_NEAR = 64
+SOUND_FAR = 68
 
 #: Emitter type -> where its ``(archive, member)`` pair starts in the block.
 #: Type 1 has none.
@@ -119,7 +139,15 @@ class Emitter:
 
     @property
     def flagged(self) -> bool:
+        """Bit 8 of the type word, which the engine keeps as a boolean."""
         return bool(self.word & EMITTER_FLAG)
+
+    @property
+    def audible_range(self) -> tuple[float, float] | None:
+        """``(near, far)`` distance of a sound emitter, or None for the rest."""
+        if not self.is_sound or len(self.body) < SOUND_FAR + 4:
+            return None
+        return struct.unpack_from("<2f", self.body, SOUND_NEAR)
 
 
 @dataclass
