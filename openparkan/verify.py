@@ -81,6 +81,7 @@ def check_texm(check, game: Path) -> None:
     exact = decoded = 0
     fmts: dict[int, int] = {}
     cutout = graded = palettised = keyed = 0
+    silhouettes = trees = 0
     for e in ar:
         blob = ar.read(e)
         w, h, mips, flags, fmt = texm.parse_header(blob)
@@ -96,6 +97,11 @@ def check_texm(check, game: Path) -> None:
         if any(v < 255 for v in alpha):
             cutout += 1
             graded += any(0 < v < 255 for v in alpha)
+            silhouettes += texm.is_cutout(tex)
+        if e.name.upper() in ("FTREE1.0", "NTREE1.0", "HTREE1.0"):
+            trees += texm.is_cutout(tex)
+        if e.name.upper() in ("MTP_01.0", "S0A1.0", "NP11.0"):
+            trees -= texm.is_cutout(tex)
         if fmt == texm.FMT_PALETTE8:
             palettised += 1
             # The palette is BGRX; if X were an alpha channel some entry would
@@ -109,6 +115,15 @@ def check_texm(check, game: Path) -> None:
     check("Texm: alpha is real and worth drawing", cutout > len(ar) * 0.5,
           f"{cutout}/{len(ar)} textures carry alpha, {graded} of them graded "
           f"rather than a hard cut")
+    check("Texm: alpha is mostly a gloss map, not a silhouette",
+          0 < silhouettes < cutout * 0.2,
+          f"{silhouettes}/{cutout} textures with alpha are cut silhouettes -- a "
+          f"real hole and a thin transition; the rest are continuous maps, and "
+          f"alpha-testing those punches holes through solid geometry")
+    check("Texm: the tree textures are the silhouettes", trees == 3,
+          f"{trees}/3 of FTREE1.0, NTREE1.0 and HTREE1.0 read as cutouts, "
+          f"against 0/3 for MTP_01.0, S0A1.0 and NP11.0")
+
     check("Texm: a palettised texture has no colour key", keyed == 0,
           f"the fourth palette byte is constant on all {palettised} palettised "
           f"textures, so transparency lives in the 4444 and 8888 formats only")

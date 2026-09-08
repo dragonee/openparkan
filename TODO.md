@@ -158,6 +158,16 @@ written down is a question nobody reopens.
       `CAtmData::GetEvents` dispatches on a ten-valued opcode whose branches
       pair up start/stop per object type, and the sky is created outside that
       switch with a hardcoded id. → [docs/10-sky.md](docs/10-sky.md)
+- [x] **See-through buildings.** Reported against the alien plant on
+      `Mission.02`, and it was every machine on every map. Carrying alpha and
+      *being* transparent are different things: of the 241 textures with
+      alpha, **only 23 are cut silhouettes**. The rest are continuous gloss
+      maps — `S0A1.0` has not one pixel at 0 or 255 — and alpha-testing them
+      discarded **30% of all object texture area**, 61% of `MTP_01.0`.
+      `texm.is_cutout` separates them by asking for a real hole and a thin
+      transition; a non-silhouette now takes its colour and ignores alpha
+      rather than compositing it, which would wash the colour out.
+      → [docs/02-texm.md](docs/02-texm.md)
 - [x] **Coplanar geometry.** Two causes, both fixed. The terrain's two ground
       layers now share a single pass — bucketing faces by the pair costs 5 to
       8 groups per map against 3 to 5 — and the file's own duplicated faces
@@ -169,8 +179,14 @@ written down is a question nobody reopens.
 
 ## 1. Wrong on screen today
 
-Nothing. Everything that was drawing incorrectly has been fixed; what is left
-below is fidelity the game had and this does not, and engineering.
+Nothing known. What is left below is fidelity the game had and this does not,
+and engineering.
+
+Two things do draw as flat grey rather than as art, and cannot be fixed from
+the shipped data: `B_MTP_04`, `B_MTP_04G` and `B_MTP_05` name `qqds.7` and
+`ds.7`, which are in no archive and have no near match, and the five
+`FIRE_SMOKE*` animations name `0FAIR.0` upward when only `FAIR.0` exists.
+That costs 206 triangles on `fr_l_gener` and 153 on `fr_m_mtp`.
 
 ## 2. Missing fidelity
 

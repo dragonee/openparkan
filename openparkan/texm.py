@@ -183,6 +183,43 @@ def decode(data: bytes) -> Texture:
     return Texture(w, h, mips, fmt, flags, bytes(out), parse_pages(data))
 
 
+def drop_alpha(tex: Texture) -> bytes:
+    """The colour channels alone, with the alpha channel ignored.
+
+    Most of the alpha in this game is not transparency.  201 of the 237
+    ARGB8888 textures carry a *continuous* alpha field -- ``S0A1.0`` has not a
+    single pixel at 0 or 255 -- which is a gloss or self-illumination map, and
+    compositing it would wash the colour out.  See ``is_cutout``.
+    """
+    src = tex.rgba
+    out = bytearray(tex.width * tex.height * 3)
+    for i in range(tex.width * tex.height):
+        out[i * 3 : i * 3 + 3] = src[i * 4 : i * 4 + 3]
+    return bytes(out)
+
+
+#: A silhouette needs a real hole, and its transition band is thin.
+CUTOUT_MIN_TRANSPARENT = 0.05
+CUTOUT_MAX_SOFT = 0.25
+
+
+def is_cutout(tex: Texture) -> bool:
+    """Whether this texture's alpha is a cut silhouette rather than a map.
+
+    A silhouette is nearly binary: a real fully-transparent region and only a
+    thin band between.  ``FTREE1.0`` is 38% transparent with a 4.8% band -- a
+    white blob on black, the crown of a tree.  A gloss map is a continuous
+    greyscale image of the surface: ``MTP_01.0`` has 75% of its pixels between
+    the extremes and ``S0A1.0`` has 100%, and alpha-testing either punches
+    holes through solid machinery.
+    """
+    alpha = tex.rgba[3::4]
+    n = len(alpha) or 1
+    transparent = sum(1 for v in alpha if v == 0) / n
+    soft = sum(1 for v in alpha if 8 < v < 247) / n
+    return transparent > CUTOUT_MIN_TRANSPARENT and soft < CUTOUT_MAX_SOFT
+
+
 def to_rgb(tex: Texture, background: tuple[int, int, int] = (255, 0, 255)) -> bytes:
     """Flatten RGBA to RGB, compositing transparency over ``background``."""
     src = tex.rgba

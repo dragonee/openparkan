@@ -114,6 +114,33 @@ textures** — so it is padding. Palette index 0 is unused in the image data of
 all fifteen, which rules out the other common convention too. Of those
 fifteen, four are trees and ten are `WATER0`..`WATER9`, an animation.
 
+### Most of that alpha is not transparency
+
+Carrying alpha and *being* transparent are different things, and conflating
+them punches holes through solid machinery. Look at the channel:
+
+- `FTREE1.0` is **38% at exactly 0, 57% at exactly 255, and 4.8% in between** —
+  a white blob on black. That is a cut silhouette, the crown of a tree.
+- `MTP_01.0` has **75% of its pixels strictly between** the extremes, and
+  `S0A1.0` has **100%** — not one pixel at 0 or 255. Rendered as an image the
+  channel is a continuous greyscale picture of the surface's own detail. That
+  is a gloss or self-illumination map, and there is no silhouette in it.
+
+The second kind is much the commoner: of the 241 textures with alpha, **only
+23 are silhouettes**. `openparkan.texm.is_cutout` separates them by asking for
+a real fully-transparent region (over 5% at 0) and a thin transition (under
+25% in between), which puts all three tree textures on one side and every
+building and machine texture on the other.
+
+It matters a great deal on screen. Treating any alpha as a cutout and
+alpha-testing it discards **30% of all object texture area** — 61% of
+`MTP_01.0`, 59% of `NP05.0`, 50% of `GEN_05.0` — and buildings come out as
+skeletons you can see through. Nor can the channel simply be composited away:
+flattening a gloss map over a background washes the colour out, so a
+non-silhouette texture takes its colour channels and ignores alpha entirely
+(`texm.drop_alpha`).
+
 So foliage transparency is ordinary 8888 alpha, and a renderer wants an alpha
 **test** rather than blending for it: a tree is a pair of crossed planes, and
-a cutout needs no depth sorting. Without it a tree draws as a solid slab.
+a cutout needs no depth sorting. Without it a tree draws as a solid slab —
+and with it applied to everything, a power plant draws as a wireframe.

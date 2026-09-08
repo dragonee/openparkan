@@ -231,15 +231,17 @@ class TextureResolver:
         entry = self.index.get(key)
         if entry is not None:
             tex = texm.decode(self.archive.read(entry))
-            # 241 of the 393 shipped textures carry alpha, and the foliage is
-            # among them: a tree is a pair of crossed planes that only reads
-            # as a tree once the texture cuts its own silhouette out.
+            # 241 of the 393 shipped textures carry alpha, but almost none of
+            # it is transparency.  Only a *silhouette* is -- a tree is a pair
+            # of crossed planes that reads as a plant once the texture cuts
+            # its own outline.  The rest is a continuous gloss map over solid
+            # machinery, and alpha-testing it punches holes through buildings.
             alpha = tex.rgba[3::4]
-            cutout = any(v < 255 for v in alpha)
+            cutout = texm.is_cutout(tex)
             if cutout:
                 w, h, pixels = self._downsample(tex, tex.rgba, 4)
             else:
-                w, h, pixels = self._downsample(tex, texm.to_rgb(tex, (90, 90, 90)))
+                w, h, pixels = self._downsample(tex, texm.drop_alpha(tex))
             mat = {
                 "kind": "texture",
                 "name": name,
