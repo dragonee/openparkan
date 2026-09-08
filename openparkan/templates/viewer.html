@@ -861,8 +861,14 @@ if (typeof THREE === "undefined" || typeof pako === "undefined") {
         // texture; scenery stays untinted.
         m = modelInstance(o.m, o.c < 0 ? 0xffffff : tintOf(mis.clans[o.c].colour));
         m.position.set(o.p[0] - cx, o.p[1], -(o.p[2] - cy));
-        // Game rotation is about the up axis; the Y flip reverses its sense.
-        m.rotation.y = -o.r;
+        // Game rotation is about its up axis, which is the viewer's Y.  The
+        // axis swap (x, y, z) -> (x, z, -y) carries the sense across
+        // unchanged, so the angle is used as it stands.  The bridges are the
+        // proof: each is two halves placed back to back, their rotations
+        // exactly pi apart, and this joins their ends to 0.00 units on all
+        // eight pairs -- against 4.9 to 282.8 units apart if the angle is
+        // negated.  See docs/04-missions.md.
+        m.rotation.y = o.r;
         drawn++;
       } else {
         m = new THREE.Mesh(SHAPES[o.k] || SHAPES[2], o.c < 0 ? neutral : mats[o.c]);

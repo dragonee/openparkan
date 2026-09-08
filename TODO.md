@@ -168,6 +168,14 @@ written down is a question nobody reopens.
       transition; a non-silhouette now takes its colour and ignores alpha
       rather than compositing it, which would wash the colour out.
       → [docs/02-texm.md](docs/02-texm.md)
+- [x] **The placement rotation's sense.** Reported as bridges not meeting.
+      A bridge is two halves back to back — nine pairs across seven missions,
+      each pair's angles exactly π apart — and their roadways have to join.
+      The angle applies **as it stands** about the viewer's Y: that joins the
+      ends to within a unit on **9 of 9** pairs, against **0 of 9** negated,
+      with gaps of 4.9 to 282.8 units. Every placed object was turned the
+      wrong way; only the bridges could show it.
+      → [docs/04-missions.md](docs/04-missions.md)
 - [x] **Coplanar geometry.** Two causes, both fixed. The terrain's two ground
       layers now share a single pass — bucketing faces by the pair costs 5 to
       8 groups per map against 3 to 5 — and the file's own duplicated faces

@@ -1617,6 +1617,50 @@ def check_poses(check, game: Path) -> None:
     check("placement: a building's origin sits on the terrain",
           origin_on_ground >= buildings * 0.5,
           f"{origin_on_ground}/{buildings} within 2 units of the height under them")
+    # Bridges come in halves placed back to back, their rotations exactly pi
+    # apart, so their ends must meet.  That pins the sense of the placement
+    # angle, which nothing else in the data does.
+    joined = flipped = pairs = 0
+    for folder in gamedir.missions(game):
+        m = mission.load(folder / "data.tma")
+        spans = [o for o in m.objects if "bridge" in (o.path or "").lower()]
+        for i in range(0, len(spans) - 1, 2):
+            first, second = spans[i], spans[i + 1]
+            if abs(abs(second.rotation - first.rotation) - math.pi) > 0.01:
+                continue
+            definition = objects.load_unit(
+                game / first.path.replace("\\", "/")
+            )
+            model = load(record_mesh(lib.get(definition.components[0].ref.member)))
+            if model is None or model.volume is None:
+                continue
+            pairs += 1
+            lo, hi = model.volume.minimum, model.volume.maximum
+            # The half's long horizontal axis, and its two ends in model space.
+            axis = 0 if hi[0] - lo[0] > hi[1] - lo[1] else 1
+            ends = []
+            for angle in (1, -1):
+                here = []
+                for o in (first, second):
+                    t = angle * o.rotation
+                    for reach in (lo[axis], hi[axis]):
+                        p = [0.0, 0.0]
+                        p[axis] = reach
+                        here.append((
+                            o.position[0] + p[0] * math.cos(t) - p[1] * math.sin(t),
+                            o.position[1] + p[0] * math.sin(t) + p[1] * math.cos(t),
+                        ))
+                ends.append(min(
+                    math.dist(a, b) for a in here[:2] for b in here[2:]
+                ))
+            joined += ends[0] < 1.0
+            flipped += ends[1] < 1.0
+    check("placement: a bridge's two halves meet",
+          joined == pairs > 0 and flipped < pairs,
+          f"{joined}/{pairs} pairs join to within a unit when the placement "
+          f"angle is used as it stands, against {flipped}/{pairs} when it is "
+          f"negated -- which is what fixes the sense of the rotation")
+
     check("placement: a unit's lowest exterior vertex sits on the terrain",
           base_on_ground >= units * 0.5,
           f"{base_on_ground}/{units} within 1 unit of the height under them")

@@ -89,6 +89,25 @@ name a `.dat` definition file under `UNITS/`; vegetation and rock name a
 `STAT` member of `objects.rlb`. **All 864 placed objects across all 29
 missions resolve** — 463 files on disk, 401 archive members.
 
+### The rotation's sense
+
+`rotation` turns the object about the map's up axis, and the bridges settle
+which way. A bridge is placed as **two halves back to back**: nine pairs
+across seven missions, each pair's angles exactly π apart to four decimals —
+`+0.0370` and `+3.1786` on Tut_1, `-0.0789` and `+3.0627` on KM_4. Their
+roadways have to meet.
+
+Taking the angle as it stands joins the two ends to within a unit on **all
+nine pairs** — to 0.00 on eight of them. Negating it joins **none**, and
+leaves gaps of 4.9 to 282.8 units. So a renderer that maps game
+`(x, y, z)` to a Y-up `(x, z, -y)` applies the angle unchanged about its
+Y: the axis swap carries the sense across as it is.
+
+It is worth stating because nothing else in the shipped data tests it.
+Buildings and units placed at an arbitrary heading simply face somewhere, and
+a wrong sense looks like a design decision. Two objects that must interlock
+are the only witness.
+
 ### Property
 
 ```
