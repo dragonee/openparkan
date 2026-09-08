@@ -31,17 +31,44 @@ The navigation mesh is [solved](08-arealmap.md). Two fields are not:
 
 ## The `NL` archives
 
-`gamefont.rlb` and `sprites.lib` are not NRes. They begin:
+`gamefont.rlb` and `sprites.lib` are not NRes. The 32-byte header is settled:
 
 ```
-4E 4C 00 01   'NL', version 1
-<u16> <u16>   two equal values (2,2 and 24,24 respectively)
-00 00 00 00
-BA AB         0xABBA marker
+0x00  char[2]  'NL'
+0x02  uint16   1            version
+0x04  uint16   count        2 in gamefont.rlb, 24 in sprites.lib
+0x06  uint16   count        the same value again
+0x08  6 bytes  zero
+0x0E  uint16   0xABBA       marker
+0x10  uint32   unpacked     87096 and 1573632
+0x14  uint32   packed       25991 and 99633
+0x18  uint32   zero, twice
 ```
 
-after which the payload is high-entropy — compressed or obfuscated. Only 2
-files, holding fonts and 2D sprites, so this blocks UI work but nothing else.
+`packed` is exactly `file size − 96` on the one and `file size − 776` on the
+other, so the stream sits at the end and a block of 64 or 744 bytes stands
+between it and the header. That block is high-entropy on both, so it is not a
+plain directory. `sprites.lib`'s `unpacked` reads as **24 × (65536 + 32)** —
+24 sprites of 256 × 256 with a 32-byte header apiece — which is exactly
+1573632.
+
+The payload is **LZSS**, and `gamefont.rlb` all but falls out: a flag byte,
+eight items, least significant bit first; a set bit is a literal; a clear bit
+is a two-byte match with a 12-bit offset and a length of four bits plus three.
+That gives **87057 bytes of a declared 87096** — 0.04% short — and the output
+is unmistakably a font: forty zero bytes and then a glyph table stepping by
+four, `04 02 04 00`, `08 06 08 00`, `0c 09 0c 00`.
+
+Two things are missing. Where the last 39 bytes of `gamefont.rlb` come from,
+and why `sprites.lib` does not decode the same way — from offset 776 it yields
+352625 of its declared 1573632, and a search over offsets, over the 12/4,
+4/12, 11/5, 10/6 and 8/8 splits, over minimum lengths 1 to 4 and both bit
+orders finds nothing exact. No shipped binary contains the `'NL'` magic, the
+`0xABBA` marker or either file's name, so the loader has not been found
+either.
+
+The probe is `analysis/nl.py`. Nothing is in the library, because a
+decompressor that is 39 bytes short is a decompressor that does not work.
 
 ## The .ctl controller
 

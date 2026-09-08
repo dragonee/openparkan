@@ -280,9 +280,21 @@ and 4 that separate them are the magnitude in their `.exp`.
 
 ### 2.4 The `NL` archives block the UI
 
-`gamefont.rlb` and `sprites.lib` are not NRes — `'NL'`, version 1, an `0xABBA`
-marker, then high-entropy payload. Two files, holding fonts and 2D sprites.
-Blocks any in-engine interface work and nothing else.
+Half open now. The 32-byte header is [settled](docs/06-open-questions.md) —
+a member count, an `0xABBA` marker, then the unpacked and packed sizes — and
+the payload is **LZSS**: flag byte, eight items, LSB first, a set bit a
+literal and a clear bit a two-byte match with a 12-bit offset and a four-bit
+length plus three.
+
+`gamefont.rlb` decodes to **87057 bytes of a declared 87096** under that,
+0.04% short, and the output is unmistakably a font: forty zeros then a glyph
+table stepping by four. `sprites.lib` does not decode the same way — 352625 of
+1573632 — and a search over offsets, splits, minimum lengths and bit orders
+finds nothing exact for it.
+
+So: where `gamefont.rlb`'s last 39 bytes come from, and what `sprites.lib`
+does differently. The probe is `analysis/nl.py`; nothing is in the library,
+because a decompressor that is 39 bytes short is one that does not work.
 
 ---
 
