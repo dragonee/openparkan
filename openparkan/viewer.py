@@ -110,9 +110,11 @@ class TextureResolver:
     def sprite(self, name: str, max_size: int = 256) -> int | None:
         """Pool index for a material's texture, cropped to its own cell.
 
-        A material names a texture *and* a cell of it -- ``SUN.0`` is a 2 x 2
-        sheet holding a sun corona and a moon, and ``ENV_SUN`` and
-        ``ENV_MOON`` are the same texture with different cells.
+        A material names a texture *and* a cell of it, and the cell indexes the
+        texture's own ``Page`` table of sub-image rectangles.  ``SUN.0``'s four
+        pages are its four quadrants, so ``ENV_SUN`` (cell 0) and ``ENV_MOON``
+        (cell 2) are the same texture cropped differently; ``EFFECT6.0``'s 26
+        pages are strips, tiles, discs and 16 x 16 icons all at once.
         """
         key = f"sprite:{name.upper()}:{max_size}"
         if key in self._by_name:
@@ -125,7 +127,8 @@ class TextureResolver:
             return None
         tex = texm.decode(self.archive.read(entry))
         pixels, width, height = tex.rgba, tex.width, tex.height
-        box = material.cell_uv
+        box = (None if material.cell == materials.WHOLE_TEXTURE
+               else tex.page_uv(material.cell))
         if box is not None:
             u0, v0, u1, v1 = box
             x0, y0 = round(u0 * width), round(v0 * height)

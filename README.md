@@ -15,7 +15,7 @@ practice — format facts yes, code no — is set out in
 | | |
 |---|---|
 | **NRes containers** | done — all 116 archives, 6697 members, round-trip-accurate model |
-| **Texm textures** | done — all 393 textures decode, all 5 pixel formats, alpha included |
+| **Texm textures** | done — all 393 textures decode, all 5 pixel formats, alpha and the `Page` sub-image table |
 | **`Land.msh` terrain** | done — all 33 maps, geometry, normals, both texture layers and their blend, water |
 | **3D terrain viewer** | done — self-contained HTML, no server |
 | **`data.tma` missions** | done — all 29 parse to EOF, 864 objects placed |
@@ -29,7 +29,7 @@ practice — format facts yes, code no — is set out in
 | **Building interiors** | done — path graph for 29 buildings |
 | **Control points** | done — 284 members, 3599 named attachment points |
 | **`Land.map` navigation mesh** | done — all 33 maps, 34662 areals, adjacency and grid |
-| **Sky** | done — `sky.ske` day cycle, `sky.wea`'s nine texture slots and the engine's twelve-element lens flare, all 29 missions |
+| **Sky** | done — `sky.ske` day cycle, `sky.wea`'s nine texture slots, the engine's twelve-element lens flare and the weather markers, all 29 missions |
 | **Behaviour scripts, gameplay** | not started |
 
 ## Quickstart
@@ -145,10 +145,9 @@ every map tried.
 Renderer work is triaged in [TODO.md](TODO.md), which records both what is
 closed and what the answer turned out to be. Nothing is known to draw
 *incorrectly* any more; what is missing is fidelity the game had. Worst-looking
-first: the sky's snow and rain, what the floats inside an effect's emitter
-mean, the second layer of a terrain material, the two `NL` archives that hold
-the fonts and 2D sprites, and a handful of fields carried through the readers
-without being understood.
+first: what the floats inside an effect's emitter mean, the second layer of a
+terrain material, the two `NL` archives that hold the fonts and 2D sprites,
+and a handful of fields carried through the readers without being understood.
 
 ## Documentation
 

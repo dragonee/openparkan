@@ -875,7 +875,8 @@ def check_sky(check, game: Path) -> None:
     # sky.wea is a fixed role table, and every slot resolves.
     lib = materials.MaterialLibrary(game / "Material.lib")
     textures = NResArchive.open(game / "Textures.lib")
-    known = {e.name.split(".")[0].upper() for e in textures}
+    textures_by_stem = {e.name.split(".")[0].upper(): e for e in textures}
+    known = set(textures_by_stem)
     per_slot: list[set[str]] = [set() for _ in sky.SLOT_ROLES]
     named = resolved = full = 0
     for path in files:
@@ -960,18 +961,32 @@ def check_sky(check, game: Path) -> None:
           f"{weathered.get('lightning', 0)} name {sky.LIGHTNING_MARKER}; "
           f"none names snow")
 
-    # And a negative result: the sub-image cell is not a square grid.
-    above = [
-        m for m in lib.materials.values()
-        if m.cell != materials.WHOLE_TEXTURE
-        and m.cell >= materials.SHEET_SIDE ** materials.SHEET_SIDE
-    ]
-    biggest = max((m.cell for m in above), default=0)
-    check("Material.lib: a sub-image cell is not a 2x2 grid everywhere",
-          len(above) > 0 and biggest > 3,
-          f"{len(above)} materials ask for a cell above 3, up to {biggest}, so "
-          f"the 2x2 reading that SUN.0 confirms does not generalise; none of "
-          f"them is reached by mesh or terrain geometry")
+    # The sub-image cell indexes the texture's own Page table.
+    indexed = inside = biggest = 0
+    pages_seen = set()
+    for material in lib.materials.values():
+        if material.cell == materials.WHOLE_TEXTURE or not material.textures:
+            continue
+        entry = textures_by_stem.get(material.textures[0].upper().split(".")[0])
+        if entry is None:
+            continue
+        indexed += 1
+        biggest = max(biggest, material.cell)
+        pages = texm.parse_pages(textures.read(entry))
+        pages_seen.add(entry.name)
+        inside += material.cell < len(pages)
+    check("Texm: a material's cell indexes the texture's own Page table",
+          inside == indexed > 0,
+          f"{inside}/{indexed} cells fall inside the Page table of the texture "
+          f"they name, over {len(pages_seen)} textures and cells up to {biggest}")
+
+    # SUN.0's four pages are its quadrants, which is what puts ENV_MOON's
+    # cell 2 on the moon.
+    sun_pages = texm.parse_pages(textures.read_name("SUN.0"))
+    check("Texm: SUN.0's pages are the quadrants ENV_SUN and ENV_MOON pick",
+          sun_pages == [(0, 0, 128, 128), (128, 0, 128, 128),
+                        (0, 128, 128, 128), (128, 128, 128, 128)],
+          f"{sun_pages} -- cell 0 is the corona, cell 2 the moon")
 
     check("sky.ske: the third float is a day/night light", all(varying),
           f"on all {len(varying)} files whose light varies, its low point falls "

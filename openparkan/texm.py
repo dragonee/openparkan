@@ -15,16 +15,34 @@ Layout (see ``docs/02-texm.md``)::
 
 Palettised textures put a 256 x BGRX palette immediately after the header and
 before the index data.
+
+**A ``Page`` chunk may follow the pixel data**: the magic ``'Page'``, a
+``uint32`` count, and then that many 8-byte rectangles of four ``uint16`` in
+the order ``(x, width, y, height)``.  It is the texture's own list of
+sub-images, and a material's cell byte indexes it.  ``SUN.0``'s four entries
+are the four quadrants of a 256 x 256 sheet in the order top-left, top-right,
+bottom-left, bottom-right, which is why ``ENV_SUN`` asks for cell 0 and
+``ENV_MOON`` for cell 2.  The rectangles are not a grid: ``EFFECT6.0`` names
+four 128 x 32 strips, eight 64 x 64 tiles, eight 30 x 30 discs and five 16 x 16
+icons in one table of 26.
+
+All 61 textures a material indexes carry one, and every cell asked for is
+inside its table.
 """
 
 from __future__ import annotations
 
 import struct
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 HEADER = struct.Struct("<4sIIIIIII")
 HEADER_SIZE = HEADER.size  # 32
 PALETTE_SIZE = 256 * 4
+
+#: The sub-image table that may follow the pixel data.
+PAGE_MAGIC = b"Page"
+PAGE_HEADER = 8
+PAGE_STRIDE = 8
 
 FMT_PALETTE8 = 0
 FMT_RGB565 = 565
@@ -54,14 +72,52 @@ class Texture:
     flags: int
     rgba: bytes  # mip level 0, 4 bytes per pixel, R G B A
 
+    #: The texture's own sub-images, from its ``Page`` chunk, as
+    #: ``(x, y, width, height)`` in pixels.  Empty when it has none.
+    pages: list[tuple[int, int, int, int]] = field(default_factory=list)
+
     @property
     def has_alpha(self) -> bool:
         return self.fmt in (FMT_ARGB8888, FMT_ARGB4444)
+
+    def page_uv(self, cell: int) -> tuple[float, float, float, float] | None:
+        """``(u0, v0, u1, v1)`` of one sub-image, or None if there is no such cell."""
+        if not 0 <= cell < len(self.pages):
+            return None
+        x, y, w, h = self.pages[cell]
+        return (x / self.width, y / self.height,
+                (x + w) / self.width, (y + h) / self.height)
 
 
 def mip_pyramid_pixels(width: int, height: int, levels: int) -> int:
     """Total pixel count across ``levels`` mip levels, halving and clamping at 1."""
     return sum(max(width >> i, 1) * max(height >> i, 1) for i in range(levels))
+
+
+def parse_pages(data: bytes) -> list[tuple[int, int, int, int]]:
+    """The sub-images a Texm declares, as ``(x, y, width, height)``.
+
+    The chunk sits after the mip pyramid, so finding it means knowing how long
+    that is; a texture with a short mip tail simply has no chunk to find.
+    """
+    w, h, mips, _flags, fmt = parse_header(data)
+    if fmt not in _BYTES_PER_PIXEL:
+        return []
+    end = HEADER_SIZE + mip_pyramid_pixels(w, h, mips) * _BYTES_PER_PIXEL[fmt]
+    if fmt == FMT_PALETTE8:
+        end += PALETTE_SIZE
+    if end + PAGE_HEADER > len(data) or data[end : end + 4] != PAGE_MAGIC:
+        return []
+    count = struct.unpack_from("<I", data, end + 4)[0]
+    if end + PAGE_HEADER + count * PAGE_STRIDE > len(data):
+        return []
+    out = []
+    for i in range(count):
+        x, width, y, height = struct.unpack_from(
+            "<4H", data, end + PAGE_HEADER + i * PAGE_STRIDE
+        )
+        out.append((x, y, width, height))
+    return out
 
 
 def parse_header(data: bytes) -> tuple:
@@ -124,7 +180,7 @@ def decode(data: bytes) -> Texture:
         for i in range(w * h):
             j = body[i] * 4
             out[i * 4 : i * 4 + 4] = bytes((palette[j + 2], palette[j + 1], palette[j], 255))
-    return Texture(w, h, mips, fmt, flags, bytes(out))
+    return Texture(w, h, mips, fmt, flags, bytes(out), parse_pages(data))
 
 
 def to_rgb(tex: Texture, background: tuple[int, int, int] = (255, 0, 255)) -> bytes:

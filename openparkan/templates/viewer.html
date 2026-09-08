@@ -272,7 +272,9 @@ if (typeof THREE === "undefined" || typeof pako === "undefined") {
 
   function dropSky() {
     buildFlare(null);
+    buildRain(null);
     sunHeading = null;
+    rainWanted = 0;
     [dome, starLayer, cloudLayer, sunSprite, moonSprite].forEach((o) => {
       if (!o) return;
       skyGroup.remove(o);
@@ -322,16 +324,68 @@ if (typeof THREE === "undefined" || typeof pako === "undefined") {
     sunSprite = place(sky.sun, DOME_RADIUS * 0.17);
     moonSprite = place(sky.moon, DOME_RADIUS * 0.12);
     buildFlare(sky);
+    buildRain(sky);
   }
 
-  // Rain and lightning are marked but not drawn.  A keyframe that names
-  // atm_rain1.wav starts rain and one that names env_lightning starts
-  // lightning -- eight of the 29 missions carry each, and none names snow --
-  // and the payload runs the weather to the next keyframe that names
-  // anything.  What is missing is the sprite: RAIN_DROP and SNOWFLAKE are
-  // cells 21 and 20 of EFFECT6.0, and that atlas is not a uniform grid, so
-  // there is no honest way to cut the drop out of it yet.  See
-  // docs/10-sky.md.
+  // Rain.  A keyframe that names atm_rain1.wav starts it, and one that names
+  // env_lightning starts lightning; eight of the 29 missions carry each, and
+  // none names snow.  Where the weather stops is not written down -- the sun
+  // and moon come in start/stop pairs, these appear once -- so the payload
+  // runs it to the next keyframe that names anything, which on Single.01 is a
+  // wet morning from 07:00 to 15:00.  The drops are the mission's own
+  // RAIN_DROP: cell 21 of EFFECT6.0, a 16 x 16 icon its Page table points at.
+  const RAIN_BOX = 900;
+  const RAIN_DROPS = 1400;
+  const RAIN_FALL = 900;      // units a second
+  let rainLayer = null, rainVelocity = null, rainWanted = 0;
+
+  function buildRain(sky) {
+    if (rainLayer) {
+      skyGroup.remove(rainLayer);
+      rainLayer.geometry.dispose();
+      rainLayer.material.dispose();
+      rainLayer = null;
+    }
+    if (!sky || sky.rain === undefined) return;
+    const xyz = new Float32Array(RAIN_DROPS * 3);
+    rainVelocity = new Float32Array(RAIN_DROPS);
+    for (let i = 0; i < RAIN_DROPS; i++) {
+      xyz[i * 3] = (Math.random() - 0.5) * RAIN_BOX;
+      xyz[i * 3 + 1] = (Math.random() - 0.5) * RAIN_BOX;
+      xyz[i * 3 + 2] = (Math.random() - 0.5) * RAIN_BOX;
+      rainVelocity[i] = RAIN_FALL * (0.75 + Math.random() * 0.5);
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.BufferAttribute(xyz, 3));
+    rainLayer = new THREE.Points(g, new THREE.PointsMaterial({
+      map: skyTexture(sky.rain), size: 9, sizeAttenuation: true,
+      transparent: true, opacity: 0, depthWrite: false, fog: false,
+    }));
+    rainLayer.renderOrder = 2;
+    skyGroup.add(rainLayer);
+  }
+
+  function fallRain(dt) {
+    if (!rainLayer) return;
+    const m = rainLayer.material;
+    // Ease, so the shower arrives rather than snapping on with the slider.
+    m.opacity += (rainWanted - m.opacity) * Math.min(1, dt * 3);
+    rainLayer.visible = m.opacity > 0.005;
+    if (!rainLayer.visible) return;
+    const p = rainLayer.geometry.attributes.position;
+    const floor = -RAIN_BOX / 2;
+    for (let i = 0; i < RAIN_DROPS; i++) {
+      let y = p.array[i * 3 + 1] - rainVelocity[i] * dt;
+      if (y < floor) {
+        y += RAIN_BOX;
+        p.array[i * 3] = (Math.random() - 0.5) * RAIN_BOX;
+        p.array[i * 3 + 2] = (Math.random() - 0.5) * RAIN_BOX;
+      }
+      p.array[i * 3 + 1] = y;
+    }
+    p.needsUpdate = true;
+  }
+
   // The lens flare.  Terrain.dll's CSun::RenderFlare strings twelve sprites
   // along the line from the sun's position on screen through the centre of
   // the screen; the payload carries its table of positions, sizes and colours
@@ -432,6 +486,7 @@ if (typeof THREE === "undefined" || typeof pako === "undefined") {
     if (starLayer) starLayer.material.opacity = frame.n;
     if (cloudLayer) cloudLayer.material.color = new THREE.Color(frame.h);
 
+    rainWanted = frame.w === "rain" ? 0.85 : 0;
     const dir = sunDirection(frame.t);
     sunHeading = dir;
     // Never light the terrain from underneath; at night the sun is below the
@@ -928,10 +983,15 @@ if (typeof THREE === "undefined" || typeof pako === "undefined") {
   resize();
   scenes[0]();
 
+  let lastFrame = performance.now();
   (function loop() {
     requestAnimationFrame(loop);
+    const now = performance.now();
+    const dt = Math.min(0.1, (now - lastFrame) / 1000);
+    lastFrame = now;
     if (spinning) { cam.yaw += 0.0015; place(); }
     skyGroup.position.copy(camera.position);
+    fallRain(dt);
     if (animated.length) {
       const tick = Math.floor(performance.now() * ANIM_FPS / 1000);
       animated.forEach((a) => { a.apply(a.frames[tick % a.frames.length]); });

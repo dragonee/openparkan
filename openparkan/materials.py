@@ -37,14 +37,14 @@ cell 2, which is where the moon is.  ``SUN1.0`` holds four stars and a moon
 and its three ``ENV_SUN_*`` materials name cells 0, 1 and 3 -- the three
 stars.
 
-**The 2 x 2 reading does not generalise.**  249 materials ask for a cell above
-3, up to 63, across 61 textures, and those atlases are not uniform grids:
-``EFFECT6.0`` holds four wide streaks, four starbursts, a cyan band, a row of
-eight discs and a row of small icons, all at different tile sizes.  So
-``cell_uv`` answers only for the 2 x 2 sheets and returns None otherwise,
-which is safe -- **no mesh or terrain material asks for a cell at all**, and
-the four sky materials that do above 3 are the two weather sprites and two
-sun and moon variants.  See ``docs/10-sky.md``.
+The cell is **not** a grid index, which an earlier reading assumed from the
+2 x 2 sheets.  It indexes the texture's own ``Page`` table -- a list of
+sub-image rectangles appended to the Texm payload, see ``texm.parse_pages``.
+That is why ``SUN.0`` behaves like a 2 x 2 grid (its four pages *are* the four
+quadrants) while ``EFFECT6.0`` does not: its 26 pages are four 128 x 32
+strips, eight 64 x 64 tiles, eight 30 x 30 discs and five 16 x 16 icons.  All
+61 textures a material indexes carry a table, and every one of the 249 cells
+asked for is inside its own.
 
 The texture names are still extracted by pattern rather than by offset,
 because the record's tail is not a constant size -- most are
@@ -71,12 +71,11 @@ COLOUR_OFFSET = 6
 COLOUR_MARKER_OFFSET = 5
 COLOUR_MARKER = 100
 
-#: The byte before an entry's texture name picks a cell of a sprite sheet.
+#: The byte before an entry's texture name picks one of the texture's own
+#: sub-images -- an index into its ``Page`` table; see ``texm.parse_pages``.
 CELL_OFFSET = 19
 #: ...or asks for the whole texture.
 WHOLE_TEXTURE = 0xFF
-#: Sheets are square and cells are half the texture, so an index runs 0..3.
-SHEET_SIDE = 2
 
 #: Texture references look like ``NAME.0`` -- the same form Textures.lib uses.
 _TEXTURE_RE = re.compile(rb"[A-Za-z0-9_]{2,}\.\d+")
@@ -96,18 +95,8 @@ class Material:
     cell: int = WHOLE_TEXTURE
 
     @property
-    def cell_uv(self) -> tuple[float, float, float, float] | None:
-        """``(u0, v0, u1, v1)`` of the cell, or None for the whole texture.
-
-        Row-major over a 2 x 2 sheet.  An index past the sheet -- only
-        ``ENV_SUN_2`` and ``ENV_MOON_5`` do that, both naming ``SUN4.0`` with
-        4 and 5 -- gets the whole texture rather than a guess.
-        """
-        if self.cell == WHOLE_TEXTURE or not 0 <= self.cell < SHEET_SIDE ** 2:
-            return None
-        row, column = divmod(self.cell, SHEET_SIDE)
-        step = 1.0 / SHEET_SIDE
-        return (column * step, row * step, (column + 1) * step, (row + 1) * step)
+    def whole_texture(self) -> bool:
+        return self.cell == WHOLE_TEXTURE
 
     @property
     def texture(self) -> str | None:

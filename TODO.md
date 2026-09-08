@@ -142,6 +142,22 @@ written down is a question nobody reopens.
       names are real. End to end, **2189 of 2203** `.ndp` explosion references
       reach an effect whose every material resolves.
       → [docs/11-effects.md](docs/11-effects.md)
+- [x] **The sprite-sheet cell.** Not a grid index, which an earlier reading
+      assumed from `SUN.0`. A Texm may carry a **`Page` chunk** after its mip
+      pyramid — the magic `'Page'`, a `uint32` count, then that many 8-byte
+      rectangles of `(x, width, y, height)` — and the cell indexes *that*.
+      `SUN.0`'s four pages are its quadrants, which is why the grid reading
+      looked right; `EFFECT6.0`'s 26 are strips, tiles, discs and 16 x 16
+      icons all at once. **All 61 indexed textures carry a table and all 478
+      cells fall inside their own.** It was blocking the weather sprites and
+      every effect sprite. → [docs/02-texm.md](docs/02-texm.md)
+- [x] **The weather switch.** A keyframe names the atmosphere object it acts
+      on: `sun` and `moon` in start/stop pairs, `atm_rain1.wav` and
+      `env_lightning` once each. **14 of the 29 missions carry a marker** —
+      eight name rain, eight lightning, none snow — and rain now draws.
+      `CAtmData::GetEvents` dispatches on a ten-valued opcode whose branches
+      pair up start/stop per object type, and the sky is created outside that
+      switch with a hardcoded id. → [docs/10-sky.md](docs/10-sky.md)
 - [x] **Coplanar geometry.** Two causes, both fixed. The terrain's two ground
       layers now share a single pass — bucketing faces by the pair costs 5 to
       8 groups per map against 3 to 5 — and the file's own duplicated faces
@@ -162,17 +178,15 @@ Correct as far as it goes, but not what the game showed.
 
 ### 2.1 The sky's weather layers
 
-Seven of `sky.wea`'s nine slots are drawn: the nebula, stars and clouds on the
-dome, the sun and moon as billboards, and the lens flare as a 2D overlay (see
-[docs/10-sky.md](docs/10-sky.md)). Two are not:
+Eight of `sky.wea`'s nine slots are drawn: the nebula, stars and clouds on the
+dome, the sun and moon as billboards, the lens flare as a 2D overlay, and rain
+where a mission asks for it (see [docs/10-sky.md](docs/10-sky.md)). The ninth
+is snow, and **no shipped mission names it**, so there is nothing to switch
+on.
 
-- **Snow and rain** (slots 7 and 8). The switch is
-  [answered](docs/10-sky.md): a keyframe names `atm_rain1.wav` to start rain
-  and `env_lightning` to start lightning, **14 of the 29 missions carry a
-  marker** — eight each — and none names snow. What blocks drawing it is the
-  *sprite*: `RAIN_DROP` and `SNOWFLAKE` are cells 21 and 20 of `EFFECT6.0`,
-  and that atlas is not a uniform grid, so there is no honest way to cut a
-  drop out of it. The viewer names the weather in its panel and draws nothing.
+What is left of the weather is where a shower *stops*: the sun and moon come
+in start/stop pairs and rain does not, so the viewer runs it to the next
+keyframe that names anything — a reading, not a fact.
 
 And **where the sun stands** is the renderer's own arc, not the game's:
 `CSun::Render` builds its matrix from two angles at `this+0x30` and
@@ -193,15 +207,6 @@ ten-valued opcode whose branches pair up as start/stop per object type, and
 the sky is created outside that switch with a hardcoded id — but which *file*
 field feeds the opcode is not pinned down, which is why where a shower stops
 is still unknown.
-
-### 2.1a The sprite-sheet cell is not a square grid
-
-249 materials ask for a sub-image cell above 3, up to 63, across 61 textures,
-and those atlases mix tile sizes — `EFFECT6.0` holds wide streaks, starbursts,
-a cyan band, a row of eight discs and a row of icons. The 2 x 2 reading that
-`SUN.0` confirms covers only the sheets that are 2 x 2. Nothing drawn today is
-wrong — no mesh or terrain material asks for a cell — but it blocks the
-weather sprites and every effect sprite.
 
 ### 2.2 The second layer of a terrain material
 

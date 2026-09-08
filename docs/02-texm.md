@@ -53,6 +53,41 @@ Because of that, `openparkan.texm.decode` reads **mip level 0 only**. Level 0
 sits at a known offset regardless of how the tail is stored, so decoding is
 robust for all 393 textures.
 
+## The `Page` chunk — a texture's own sub-images
+
+Some of the 65 textures whose payload does not match the pyramid are not
+truncated at all: they carry an extra chunk after it.
+
+```
+char[4]  'Page'
+uint32   count
+count x  uint16 x, uint16 width, uint16 y, uint16 height
+```
+
+Note the field order — **x, width, y, height**, not the x/y/w/h you would
+guess. It is the texture's list of sub-images, and it is what a material's
+cell byte indexes (see [07-objects.md](07-objects.md) for the material chain).
+
+`SUN.0` declares four:
+
+| cell | x | width | y | height | what it is |
+|---:|---:|---:|---:|---:|---|
+| 0 | 0 | 128 | 0 | 128 | the sun's corona |
+| 1 | 128 | 128 | 0 | 128 | a soft glow |
+| 2 | 0 | 128 | 128 | 128 | the moon |
+| 3 | 128 | 128 | 128 | 128 | another glow |
+
+which is why `ENV_SUN` asks for cell 0 and `ENV_MOON` for cell 2. That sheet
+happens to be a 2 x 2 grid, and an earlier reading took the cell for a grid
+index on the strength of it. **It is not a grid.** `EFFECT6.0`'s 26 pages are
+four 128 x 32 strips, eight 64 x 64 tiles, eight 30 x 30 discs and five
+16 x 16 icons, in one table; `RAIN_DROP` is cell 21, a 16 x 16 icon at
+(16, 224), and no square grid puts anything but a fragment there.
+
+**All 61 textures a material indexes carry a table, and all 478 cells asked
+for fall inside their own** — which is what makes the reading safe, since a
+wrong stride would run off the end almost immediately.
+
 ## Usage
 
 ```
@@ -62,8 +97,9 @@ uv run openparkan textures ui/minimap.lib --out /tmp/minimaps
 
 ## Verified by
 
-`uv run openparkan verify`, checks 5–6: the declared format predicts the payload size
-for 328/393 textures, and all 393 decode to RGBA at the declared dimensions.
+`uv run openparkan verify`: the declared format predicts the payload size for
+328/393 textures, all 393 decode to RGBA at the declared dimensions, and
+478/478 material cells fall inside the `Page` table of the texture they name.
 
 ## Transparency
 

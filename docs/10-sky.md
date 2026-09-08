@@ -220,6 +220,9 @@ and rain does not.
 - The **stars** over it, additive, fading in as the day's light drops.
 - The **clouds** over that, tiled four times and tinted by the horizon colour.
 - The **sun** and **moon** as billboards, opposite each other.
+- **Rain**, when the mission's keyframes ask for it: the drops are its own
+  `RAIN_DROP` sprite, cell 21 of `EFFECT6.0`, falling in a 900-unit box that
+  rides with the camera.
 - The **lens flare**, as a 2D overlay drawn after the scene — it is in the
   lens, not the world, so it takes no depth test. The twelve elements and
   their tables are the engine's; both gates are adapted. The 15° cone is
@@ -243,16 +246,12 @@ agree. The time-of-day control walks the keyframes.
   an azimuth and an elevation would.
 - **What the flare's second gate measures.** The engine ramps it between the
   cosines of 30° and 60° of a float the sun object keeps at `+0x80`.
-- **Snow and rain.** Not for want of a particle system — they are not in
-  `effects.rlb` at all, and which missions have them is [answered
-  above](#the-weather-and-how-the-engine-reads-a-keyframe). What is missing is
-  the *sprite*. `RAIN_DROP` and `SNOWFLAKE` are cells 21 and 20 of
-  `EFFECT6.0`, and that texture is not a uniform grid: it holds four wide blue
-  streaks, four starbursts, a cyan band, a row of eight green discs and a row
-  of small icons, all at different tile sizes. Neither an 8x8 nor a 4x8
-  reading of cell 21 lands on anything that looks like a drop. Until the
-  atlas's addressing is understood there is no honest way to cut one out, so
-  the viewer marks the weather in its panel and draws nothing.
+- **Snow.** No shipped mission names it, so there is nothing to switch on.
+  `SNOWFLAKE` resolves — it is cell 20 of `EFFECT6.0`, a 16 x 16 icon — and
+  the viewer would draw it the same way it draws rain if a mission asked.
+- **Where a shower stops.** The sun and moon come in start/stop pairs and rain
+  does not, so the viewer runs the weather to the next keyframe that names
+  anything. That is a reading, not a fact.
 - **The keyframe count of a second section.** Six files have two; their
   72-byte section headers are byte-identical yet hold 27 and 20 keyframes, so
   the count is not in them. The reader takes the second section's keyframes to
