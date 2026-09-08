@@ -23,6 +23,7 @@ practice — format facts yes, code no — is set out in
 | **Object meshes** | done — geometry, materials, textures, node poses, LOD, damage states, interior/exterior and collision selection |
 | **Assembled units and buildings** | done — the `.dat` component tree, and each part mounted at its socket's full pose |
 | **Damage tables** | done — `.ndp`, 542 tables, one record per node, 2203 explosions named |
+| **Effects** | done — `effects.rlb`, 923 effects and 4737 emitters; 144 `.exp` explosions |
 | **Materials** | done — `Material.lib`, 905 materials, animation frames and diffuse colour; 99.4% of batches reach a texture |
 | **Baked lighting** | done — `lightmap.lib`, 21 buildings, per-batch |
 | **Building interiors** | done — path graph for 29 buildings |
@@ -60,6 +61,9 @@ uv run openparkan extract sounds.lib --out /tmp/sounds     # RIFF/WAVE, playable
 uv run openparkan textures Textures.lib --out /tmp/tex     # 393 PNGs
 uv run openparkan textures ui/minimap.lib --out /tmp/minimaps
 uv run openparkan mission CAMPAIGN/CAMPAIGN.02/Mission.03 --list
+uv run openparkan sky Single.01 --frames                    # the day cycle
+uv run openparkan effects aim_exp_L                         # one effect's emitters
+uv run openparkan explosions                                # every .exp
 uv run openparkan viewer SC_3 Tut_1 ILKON --out three-maps.html
 ```
 
@@ -141,9 +145,10 @@ every map tried.
 Renderer work is triaged in [TODO.md](TODO.md), which records both what is
 closed and what the answer turned out to be. Nothing is known to draw
 *incorrectly* any more; what is missing is fidelity the game had. Worst-looking
-first: the sky's snow and rain, the second layer of a terrain material,
-effects, the two `NL` archives that hold the fonts and 2D sprites, and a
-handful of fields carried through the readers without being understood.
+first: the sky's snow and rain, what the floats inside an effect's emitter
+mean, the second layer of a terrain material, the two `NL` archives that hold
+the fonts and 2D sprites, and a handful of fields carried through the readers
+without being understood.
 
 ## Documentation
 
@@ -157,6 +162,8 @@ handful of fields carried through the readers without being understood.
 - [07-objects.md](docs/07-objects.md) — `objects.rlb`, unit assemblies, object meshes
 - [08-arealmap.md](docs/08-arealmap.md) — `Land.map`, the navigation mesh
 - [09-method.md](docs/09-method.md) — how this was done, and the clean-room line
+- [10-sky.md](docs/10-sky.md) — `sky.ske`, the day cycle, and the lens flare
+- [11-effects.md](docs/11-effects.md) — `effects.rlb` and the `.exp` explosions
 
 ## Layout
 

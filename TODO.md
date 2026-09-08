@@ -133,6 +133,15 @@ written down is a question nobody reopens.
       `sky.wea`'s two flare slots. The angular gate is exact too: off beyond
       15° from the view axis, linear to full on-axis, then squared.
       → [docs/10-sky.md](docs/10-sky.md)
+- [x] **Effects.** `effects.rlb` is 923 effects, each a 60-byte header and
+      then typed **emitter** blocks whose type fixes the block's length and
+      where its `(archive, member)` pair sits. The table of nine types walks
+      **all 923 to the byte** — 4737 emitters — and **3577 of 3577** material
+      references resolve, 516 of 517 sounds. An `.exp` is a 24-byte header and
+      one 64-byte name per effect: **144 of 144** parse, 212 of their 213
+      names are real. End to end, **2189 of 2203** `.ndp` explosion references
+      reach an effect whose every material resolves.
+      → [docs/11-effects.md](docs/11-effects.md)
 - [x] **Coplanar geometry.** Two causes, both fixed. The terrain's two ground
       layers now share a single pass — bucketing faces by the pair costs 5 to
       8 groups per map against 3 to 5 — and the file's own duplicated faces
@@ -157,8 +166,12 @@ Seven of `sky.wea`'s nine slots are drawn: the nebula, stars and clouds on the
 dome, the sun and moon as billboards, and the lens flare as a 2D overlay (see
 [docs/10-sky.md](docs/10-sky.md)). Two are not:
 
-- **Snow and rain** (slots 7 and 8) are particle systems, which is
-  `effects.rlb` — see 2.3.
+- **Snow and rain** (slots 7 and 8). Not in `effects.rlb` after all: no FXID
+  there names either, and the slots name the materials `SNOWFLAKE` and
+  `RAIN_DROP` directly, so both resolve to textures today. What is missing is
+  the switch — which missions have weather, and how much. That is the same
+  unknown as "which field selects the object type between SUN, SKY, RAIN, SNOW
+  and LIGHTNING" below.
 
 And **where the sun stands** is the renderer's own arc, not the game's:
 `CSun::Render` builds its matrix from two angles at `this+0x30` and
@@ -195,8 +208,16 @@ like a shader or blend-mode id, but nothing confirms it.
 
 ### 2.3 Effects
 
-`*.exp` explosion definitions (`system.rlb`) and `effects.rlb` are untouched.
-Not needed for a static scene; needed for anything animated.
+Both formats are [read](docs/11-effects.md) — 923 effects walk their emitter
+blocks to the byte, 144 `.exp` records parse, and a destroyed node's damage
+record reaches real sprites on 2189 of 2203 references. Nothing draws them:
+an explosion is transient and a static scene has nowhere to put one.
+
+What is left is inside a block. Nine emitter types with fixed lengths, all but
+one naming a material, and nothing yet says which is a sprite burst, which a
+trail, which a light; each block carries 30 to 60 floats that read as colours,
+lifetimes and velocities, and none is identified. Also the 60-byte effect
+header, the `.exp`'s first float and flags word, and bit 8 of the type word.
 
 ### 2.4 The `NL` archives block the UI
 

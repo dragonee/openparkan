@@ -127,9 +127,10 @@ engine generated at run time.
 
 ## Not looked at at all
 
-`*.exp` explosions, `.scr` node semantics, the `.trf` streams, save games in
-`SAVE/`, and the network protocol. `*.ctl` and `*.ndp` are no longer here:
-both are identified above.
+`.scr` node semantics, the `.trf` streams, save games in `SAVE/`, and the
+network protocol. `*.ctl` and `*.ndp` are identified above; `*.exp` and
+`effects.rlb` are [read](11-effects.md), though what the floats inside an
+emitter mean is not.
 
 `sky.ske` is [solved](10-sky.md) -- a day cycle of colour keyframes, all 29
 files to the byte. Three things in it are not: the keyframe count of a second

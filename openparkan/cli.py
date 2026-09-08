@@ -7,8 +7,8 @@ import sys
 from collections import Counter
 from pathlib import Path
 
-from . import gamedir, landmesh, mission, sky, texm, verify, viewer
-from .nres import NResArchive, is_nres
+from . import effects, gamedir, landmesh, mission, sky, texm, verify, viewer
+from .nres import NotAnNResArchive, NResArchive, is_nres
 from .png import write_png
 
 
@@ -199,6 +199,58 @@ def cmd_sky(args, game: Path) -> int:
     return 0
 
 
+def cmd_effects(args, game: Path) -> int:
+    """List effects, or describe one and everything it reaches."""
+    library = effects.EffectLibrary(game / "effects.rlb")
+    if not args.name:
+        kinds: dict[int, int] = {}
+        for effect in library:
+            for emitter in effect.emitters:
+                kinds[emitter.kind] = kinds.get(emitter.kind, 0) + 1
+        print(f"{len(library)} effects, "
+              f"{sum(len(e.emitters) for e in library)} emitters")
+        print("  emitter types " + ", ".join(
+            f"{k}x{n}" for k, n in sorted(kinds.items())))
+        for effect in sorted(library, key=lambda e: e.name.lower()):
+            drawn = len(effect.materials)
+            heard = len(effect.sounds)
+            print(f"  {effect.name:<26} {len(effect.emitters):2d} emitters"
+                  f"  {drawn} drawn, {heard} heard")
+        return 0
+
+    effect = library.get(args.name)
+    if effect is None:
+        print(f"no such effect: {args.name}", file=sys.stderr)
+        return 2
+    print(f"{effect.name}  {len(effect.emitters)} emitters")
+    for i, emitter in enumerate(effect.emitters):
+        flag = " flagged" if emitter.flagged else ""
+        what = str(emitter.resource) if emitter.resource else "-"
+        print(f"  {i:2d}  type {emitter.kind:2d}{flag:8s}  "
+              f"{len(emitter.body):3d} bytes  {what}")
+    return 0
+
+
+def cmd_explosions(args, game: Path) -> int:
+    """Every .exp in the installation, and the effects it sets off."""
+    shown = 0
+    for path in sorted(game.glob("*.rlb")) + sorted(game.glob("*.lib")):
+        try:
+            archive = NResArchive.open(path)
+        except NotAnNResArchive:
+            continue
+        for entry in archive:
+            if not entry.name.lower().endswith(".exp"):
+                continue
+            record = effects.parse_explosion(archive.read(entry), entry.name)
+            shown += 1
+            print(f"{path.name}/{entry.name:<24} magnitude {record.magnitude:5.1f}"
+                  f"  flags {record.flags}  -> "
+                  + ", ".join(str(r) for r in record.effects))
+    print(f"\n{shown} explosion definitions")
+    return 0
+
+
 def cmd_mission(args, game: Path) -> int:
     d = Path(args.mission)
     if not (d / "data.tma").exists():
@@ -352,6 +404,14 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("mission", nargs="?", help="mission directory; default is every mission")
     p.add_argument("--frames", action="store_true", help="list every keyframe")
     p.set_defaults(fn=cmd_sky)
+
+    p = sub.add_parser("effects", help="list effects, or describe one")
+    p.add_argument("name", nargs="?", help="an FXID name; default is a listing")
+    p.set_defaults(fn=cmd_effects)
+
+    sub.add_parser(
+        "explosions", help="every .exp and the effects it sets off"
+    ).set_defaults(fn=cmd_explosions)
 
     p = sub.add_parser("viewer", help="build a self-contained 3D terrain viewer")
     p.add_argument("maps", nargs="*", help="map names; default is every map")

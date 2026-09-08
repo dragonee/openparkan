@@ -13,9 +13,9 @@ import random
 import struct
 from pathlib import Path
 
-from . import arealmap, gamedir, landmesh, materials, mission, objects, sky, texm
+from . import arealmap, effects, gamedir, landmesh, materials, mission, objects, sky, texm
 from . import mesh as objmesh
-from .nres import HEADER_SIZE, NResArchive, is_nres
+from .nres import HEADER_SIZE, NotAnNResArchive, NResArchive, is_nres
 
 
 def all_archives(game: Path) -> list[Path]:
@@ -1645,6 +1645,99 @@ def check_damage(check, game: Path) -> None:
           f"pieces gone: fewer triangles on {shrinks}/{compared}")
 
 
+def check_effects(check, game: Path) -> None:
+    """effects.rlb and the .exp explosions, and the chain that reaches them."""
+    library = effects.EffectLibrary(game / "effects.rlb")
+    members = len(library.archive)
+    emitters = sum(len(e.emitters) for e in library)
+    check("effects.rlb: every effect walks its emitter blocks exactly",
+          len(library) == members > 0,
+          f"{len(library)}/{members} effects parse into {emitters} emitters "
+          f"across {len(effects.EMITTER_SIZE)} block types")
+
+    # Each block names a material or a sound, and they resolve.
+    mats = materials.MaterialLibrary(game / "Material.lib")
+    heard = {e.name.lower() for e in NResArchive.open(game / "sounds.lib")}
+    drawn = drawn_ok = played = played_ok = 0
+    for effect in library:
+        for emitter in effect.emitters:
+            if not emitter.resource.member:
+                continue
+            if emitter.is_sound:
+                played += 1
+                played_ok += emitter.resource.member.lower() in heard
+            else:
+                drawn += 1
+                drawn_ok += mats.get(emitter.resource.member) is not None
+    check("effects.rlb: an emitter's resource resolves",
+          drawn_ok == drawn > 0 and played_ok >= played - 1,
+          f"{drawn_ok}/{drawn} materials resolve through Material.lib and "
+          f"{played_ok}/{played} sounds are in sounds.lib")
+
+    # .exp records, wherever they live.
+    total = refs = named = 0
+    for path in sorted(game.glob("*.rlb")) + sorted(game.glob("*.lib")):
+        try:
+            archive = NResArchive.open(path)
+        except NotAnNResArchive:
+            continue
+        for entry in archive:
+            if not entry.name.lower().endswith(".exp"):
+                continue
+            total += 1
+            record = effects.parse_explosion(archive.read(entry), entry.name)
+            for ref in record.effects:
+                if ref.member:
+                    refs += 1
+                    named += library.get(ref.member) is not None
+    check("*.exp: a 24-byte header and one 64-byte name per effect",
+          total > 0 and named >= refs - 1,
+          f"{total} explosion definitions parse; {named}/{refs} of the effects "
+          f"they name are real FXID members")
+
+    # And the whole chain: a mesh node's damage record reaches sprites.
+    library_objects = objects.ObjectLibrary(game / "objects.rlb")
+    opened: dict[str, NResArchive] = {}
+
+    def member(ref) -> bytes | None:
+        if ref is None or not ref.library:
+            return None
+        try:
+            if ref.library not in opened:
+                opened[ref.library] = NResArchive.open(game / ref.library)
+            return opened[ref.library].read_name(ref.member)
+        except (KeyError, ValueError, FileNotFoundError):
+            return None
+
+    wired = reached = 0
+    for record in library_objects.records.values():
+        raw = member(record.damage)
+        if raw is None:
+            continue
+        try:
+            table = objects.parse_damage(raw, record.damage.member)
+        except objects.ObjectFormatError:
+            continue
+        for row in table:
+            if not row.explosion:
+                continue
+            wired += 1
+            blob = member(row.explosion)
+            if blob is None:
+                continue
+            explosion = effects.parse_explosion(blob, row.explosion.member)
+            effect = next(
+                (library.get(r.member) for r in explosion.effects
+                 if library.get(r.member)), None
+            )
+            if effect and all(mats.get(m) for m in effect.materials):
+                reached += 1
+    check("a destroyed node reaches real sprites",
+          reached >= wired * 0.98 > 0,
+          f"{reached}/{wired} .ndp explosion references walk through to an "
+          f"effect whose every material resolves")
+
+
 def run(game: Path) -> int:
     """Run every check against ``game``.  Returns a process exit code."""
     results: list[tuple[str, bool, str]] = []
@@ -1659,6 +1752,7 @@ def run(game: Path) -> int:
         check_water, check_layers, check_materials, check_sky,
         check_minimap_agreement, check_arealmap,
         check_missions, check_objects, check_poses, check_damage,
+        check_effects,
     )
     for fn in checks:
         fn(check, game)
