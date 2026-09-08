@@ -7,7 +7,7 @@ import sys
 from collections import Counter
 from pathlib import Path
 
-from . import effects, gamedir, landmesh, mission, sky, texm, verify, viewer
+from . import effects, gamedir, landmesh, mission, rsli, sky, texm, verify, viewer
 from .nres import NotAnNResArchive, NResArchive, is_nres
 from .png import write_png
 
@@ -33,7 +33,16 @@ def cmd_info(args, game: Path) -> int:
 
 
 def cmd_ls(args, game: Path) -> int:
-    archive = NResArchive.open(_archive_path(game, args.archive))
+    path = _archive_path(game, args.archive)
+    if rsli.is_rsli(path):
+        archive = rsli.RsLiArchive.open(path)
+        print(f"# {archive.source} -- {len(archive)} entries, RsLi, "
+              f"{'presorted' if archive.presorted else 'unsorted'}")
+        for e in archive:
+            print(f"{e.storage:<8} {e.name:<34} {e.size:10d}  @{e.offset} "
+                  f"({e.packed} packed)")
+        return 0
+    archive = NResArchive.open(path)
     print(f"# {archive.source} -- {len(archive)} entries, version 0x{archive.version:x}")
     for e in archive:
         if args.type and e.tag != args.type:
@@ -43,9 +52,16 @@ def cmd_ls(args, game: Path) -> int:
 
 
 def cmd_extract(args, game: Path) -> int:
-    archive = NResArchive.open(_archive_path(game, args.archive))
+    path = _archive_path(game, args.archive)
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
+    if rsli.is_rsli(path):
+        archive = rsli.RsLiArchive.open(path)
+        for e in archive:
+            (out / e.name).write_bytes(archive.read(e))
+        print(f"extracted {len(archive)} members to {out}")
+        return 0
+    archive = NResArchive.open(path)
     n = 0
     for e in archive:
         if args.type and e.tag != args.type:
@@ -59,20 +75,32 @@ def cmd_extract(args, game: Path) -> int:
     return 0
 
 
+def _members(path: Path):
+    """(name, bytes) for every member, whichever container this is."""
+    if rsli.is_rsli(path):
+        archive = rsli.RsLiArchive.open(path)
+        for entry in archive:
+            yield entry.name, archive.read(entry)
+        return
+    archive = NResArchive.open(path)
+    for entry in archive:
+        yield entry.name or f"unnamed_{entry.index}", archive.read(entry)
+
+
 def cmd_textures(args, game: Path) -> int:
-    archive = NResArchive.open(_archive_path(game, args.archive))
+    path = _archive_path(game, args.archive)
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     ok = failed = 0
-    for e in archive:
+    for name, blob in _members(path):
         try:
-            tex = texm.decode(archive.read(e))
+            tex = texm.decode(blob)
         except texm.UnsupportedTexture as exc:
             failed += 1
             if args.verbose:
-                print(f"  skip {e.name:<24} {exc}", file=sys.stderr)
+                print(f"  skip {name:<24} {exc}", file=sys.stderr)
             continue
-        stem = e.name.rsplit(".", 1)[0] or f"unnamed_{e.index}"
+        stem = name.rsplit(".", 1)[0] or name
         if args.alpha:
             write_png(out / (stem + ".png"), tex.width, tex.height, tex.rgba, alpha=True)
         else:

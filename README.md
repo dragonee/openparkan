@@ -31,6 +31,7 @@ practice — format facts yes, code no — is set out in
 | **Control points** | done — 284 members, 3599 named attachment points |
 | **`Land.map` navigation mesh** | done — all 33 maps, 34662 areals, adjacency and grid |
 | **Sky** | done — `sky.ske` day cycle, `sky.wea`'s nine texture slots, the engine's twelve-element lens flare and the weather markers, all 29 missions |
+| **RsLi archives** | done — `gamefont.rlb` and `sprites.lib`, encrypted entry table, 26 members; the whole 2D interface |
 | **Behaviour scripts, gameplay** | not started |
 
 ## Quickstart
@@ -61,6 +62,8 @@ uv run openparkan ls Textures.lib --type Texm
 uv run openparkan extract sounds.lib --out /tmp/sounds     # RIFF/WAVE, playable as-is
 uv run openparkan textures Textures.lib --out /tmp/tex     # 393 PNGs
 uv run openparkan textures ui/minimap.lib --out /tmp/minimaps
+uv run openparkan textures sprites.lib --out /tmp/ui --alpha   # the 2D interface
+uv run openparkan ls sprites.lib                               # an RsLi archive
 uv run openparkan mission CAMPAIGN/CAMPAIGN.02/Mission.03 --list
 uv run openparkan sky Single.01 --frames                    # the day cycle
 uv run openparkan effects aim_exp_L                         # one effect's emitters
@@ -147,8 +150,9 @@ Renderer work is triaged in [TODO.md](TODO.md), which records both what is
 closed and what the answer turned out to be. Nothing is known to draw
 *incorrectly* any more; what is missing is fidelity the game had. Worst-looking
 first: what the floats inside an effect's emitter mean, the second layer of a
-terrain material, the two `NL` archives that hold the fonts and 2D sprites,
-and a handful of fields carried through the readers without being understood.
+terrain material, `gamefont.rlb`'s two members now that the archive itself
+opens, and a handful of fields carried through the readers without being
+understood.
 
 ## Documentation
 
@@ -164,6 +168,7 @@ and a handful of fields carried through the readers without being understood.
 - [09-method.md](docs/09-method.md) — how this was done, and the clean-room line
 - [10-sky.md](docs/10-sky.md) — `sky.ske`, the day cycle, and the lens flare
 - [11-effects.md](docs/11-effects.md) — `effects.rlb` and the `.exp` explosions
+- [12-rsli.md](docs/12-rsli.md) — the two archives that are not NRes, and their cipher
 
 ## Layout
 
@@ -198,13 +203,13 @@ analysis/       disassembly scaffolding (not part of the library)
   slots and a node's fifteen trailing words as `slot_index[lod * 5 + group]`;
   `rsli.md` gave the `NL` archives their name and their shape — an encrypted
   entry table, and members packed one at a time by any of seven methods, which
-  is why reading them as a single stream could never have worked. Everything
+  is why reading them as a single stream could never have worked. The cipher
+  itself is not in their reference; that came out of `Ngi32.dll`. Everything
   borrowed is checked against the shipped data before it is used: the slot
-  layout accounts for stream 2 exactly on all 434 meshes, and the RsLi header
-  and table offsets check out on both files, while the parts that cannot be
-  checked yet are marked as theirs rather than ours. fparkan is GPL-2.0 and
-  this project is MIT, so only its documentation was read, never its source;
-  a file format is a fact, an implementation of one is not.
+  layout accounts for stream 2 exactly on all 434 meshes, and every one of the
+  26 RsLi members unpacks to the size its decrypted entry declares. fparkan is
+  GPL-2.0 and this project is MIT, so only its documentation was read, never
+  its source; a file format is a fact, an implementation of one is not.
 - [AlexKimov/parkan-file-formats](https://github.com/AlexKimov/parkan-file-formats)
   — 010Editor templates and QuickBMS scripts, mostly for Parkan 1's `.lib`.
 

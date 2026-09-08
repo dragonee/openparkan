@@ -14,7 +14,18 @@ import struct
 from collections import Counter
 from pathlib import Path
 
-from . import arealmap, effects, gamedir, landmesh, materials, mission, objects, sky, texm
+from . import (
+    arealmap,
+    effects,
+    gamedir,
+    landmesh,
+    materials,
+    mission,
+    objects,
+    rsli,
+    sky,
+    texm,
+)
 from . import mesh as objmesh
 from .nres import HEADER_SIZE, NotAnNResArchive, NResArchive, is_nres
 
@@ -1753,6 +1764,57 @@ def check_damage(check, game: Path) -> None:
           f"pieces gone: fewer triangles on {shrinks}/{compared}")
 
 
+def check_rsli(check, game: Path) -> None:
+    """gamefont.rlb and sprites.lib -- the two archives that are not NRes."""
+    archives = []
+    for name in ("gamefont.rlb", "sprites.lib"):
+        path = game / name
+        if path.exists() and rsli.is_rsli(path):
+            archives.append((name, rsli.RsLiArchive.open(path)))
+    members = sum(len(a) for _n, a in archives)
+    named = sum(
+        1 for _n, a in archives for e in a
+        if e.name and e.name.isascii() and e.name == e.name.upper() and "." in e.name
+    )
+    check("RsLi: the entry table decrypts to real names", named == members > 0,
+          f"{named}/{members} entries across {len(archives)} archives read as "
+          f"uppercase ASCII with an extension -- {', '.join(e.name for e in archives[0][1])}"
+          if archives else "no RsLi archives found")
+
+    totals = all(sum(e.size for e in a) == a.total for _n, a in archives)
+    check("RsLi: the unpacked sizes sum to the header's total", totals,
+          ", ".join(f"{n} {sum(e.size for e in a)}/{a.total}" for n, a in archives))
+
+    unpacked = 0
+    kinds: Counter[str] = Counter()
+    for _name, archive in archives:
+        for entry in archive:
+            try:
+                blob = archive.read(entry)
+            except rsli.RsLiFormatError:
+                continue
+            if len(blob) == entry.size:
+                unpacked += 1
+                kinds[entry.storage] += 1
+    check("RsLi: every member unpacks to the size it declares",
+          unpacked == members > 0,
+          f"{unpacked}/{members} members, {dict(kinds)}")
+
+    # And the sprites are ordinary textures once they are out.
+    sprites = next((a for n, a in archives if n == "sprites.lib"), None)
+    decoded = 0
+    if sprites is not None:
+        for entry in sprites:
+            try:
+                texm.decode(sprites.read(entry))
+                decoded += 1
+            except (texm.UnsupportedTexture, rsli.RsLiFormatError):
+                pass
+    check("RsLi: sprites.lib holds Texm textures", sprites and decoded == len(sprites),
+          f"{decoded}/{len(sprites) if sprites else 0} members decode as Texm, "
+          f"which is the whole 2D interface")
+
+
 def check_footprints(check, game: Path) -> None:
     """.bas ground plans, and whether a placed building sits on its own."""
     archive = NResArchive.open(game / "fortif.rlb")
@@ -2011,7 +2073,7 @@ def run(game: Path) -> int:
         check_water, check_layers, check_materials, check_sky,
         check_minimap_agreement, check_arealmap,
         check_missions, check_objects, check_poses, check_damage,
-        check_effects, check_footprints,
+        check_effects, check_footprints, check_rsli,
     )
     for fn in checks:
         fn(check, game)

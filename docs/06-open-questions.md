@@ -29,54 +29,13 @@ The navigation mesh is [solved](08-arealmap.md). Two fields are not:
 `MHallWay`'s path graph turned out to be mesh stream 17, carried by buildings
 — see [07-objects.md](07-objects.md).
 
-## The `NL` archives
+## `gamefont.rlb`'s two members
 
-Not NRes. fparkan calls the format **RsLi** and
-[documents it](https://fparkan.popov.link/reference/rsli/); what follows keeps
-its claims and this project's checks apart, as
-[09-method.md](09-method.md) requires.
-
-Confirmed against both shipped files:
-
-```
-0x00  char[2]  'NL'
-0x02  uint8    0            reserved
-0x03  uint8    1            version
-0x04  int16    count        2 in gamefont.rlb, 24 in sprites.lib
-0x06  int16    count        the same value again
-0x0E  uint16   0xABBA       marker
-```
-
-and the layout `[header 32][entry table count × 32][payloads]`, which puts the
-payload at 96 in `gamefont.rlb` and 800 in `sprites.lib`.
-
-From the reference and **not** confirmed, because the entry table cannot be
-read: a 32-byte entry of `char[12]` name, four service bytes, an `int16` of
-flags, an `int16` mapping the sorted position to the original, then unpacked
-size, offset and packed size as `uint32`. The flags pick a storage method —
-raw, a byte transform, LZSS, transform + LZSS, adaptive Huffman + LZSS,
-transform + Huffman + LZSS, or raw Deflate.
-
-The entry table is XOR-transformed by a keystream seeded from the low 16 bits
-of the word at 0x14 and running across the whole table without resetting
-between records. **The generator is not documented and has not been
-recovered**, so the table stays unreadable and members cannot be located.
-Fifteen classic LCGs, over 16- and 32-bit states and four output byte
-selections, all fail the test that the top byte of every `uint32` in an entry
-must decrypt to zero on files this small.
-
-One thing still reads without it: decoding `gamefont.rlb`'s payload as a
-single LZSS stream from 96 gives 87057 bytes whose head is unmistakably a font
-— forty zeros, then a glyph table stepping by four, `04 02 04 00`,
-`08 06 08 00`, `0c 09 0c 00` — which is consistent with its first member using
-the plain LZSS method.
-
-The probe is `analysis/nl.py`, which also records the wrong turn: this project
-read 0x10 and 0x14 as an unpacked and a packed size, and `file size − packed`
-lands on 96 for `gamefont.rlb`, which is the right answer for the wrong
-reason. 0x14 is a seed. Believing otherwise hid why `sprites.lib` would not
-decode — its members are packed **separately and by different methods**, one
-of them Deflate, so no single pass over the payload was ever going to work.
+The archives themselves are [solved](12-rsli.md) -- RsLi, an encrypted entry
+table, 26 members all unpacking to their declared sizes. The 24 in
+`sprites.lib` are ordinary `Texm`. The two in `gamefont.rlb` are not:
+`ARIALTEX.TFT` opens with a table of glyph boxes stepping by four after forty
+zero bytes, and `PAL.PAL` is 66564 bytes that have not been looked at.
 
 ## The .ctl controller
 

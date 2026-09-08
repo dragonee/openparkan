@@ -176,6 +176,16 @@ written down is a question nobody reopens.
       with gaps of 4.9 to 282.8 units. Every placed object was turned the
       wrong way; only the bridges could show it.
       → [docs/04-missions.md](docs/04-missions.md)
+- [x] **The `NL` archives.** They are **RsLi**, and the reason they looked
+      like noise is that the **entry table is encrypted** -- two bytes of
+      state seeded from the header word at 0x14, `a = ((a<<1) ^ d)`,
+      `d = (d>>1) ^ a`, running across the table without resetting. The
+      keystream came out of `Ngi32.dll`'s loader; fparkan's reference named
+      the format and gave the entry layout. Decrypted, **26 of 26 members
+      unpack to exactly the size they declare** -- two LZSS, 24 raw Deflate --
+      and all 24 sprites are ordinary `Texm`, so `openparkan textures
+      sprites.lib` writes the cockpit, the interface, the cursors and the
+      logo straight out. → [docs/12-rsli.md](docs/12-rsli.md)
 - [x] **Coplanar geometry.** Two causes, both fixed. The terrain's two ground
       layers now share a single pass — bucketing faces by the pair costs 5 to
       8 groups per map against 3 to 5 — and the file's own duplicated faces
@@ -277,23 +287,6 @@ and what bit 8 controls.
 A negative result worth keeping: an explosion's size is **not** in its effect.
 `exp_frt_l`, `_m` and `_b` share their emitter blocks byte for byte; the 2, 3
 and 4 that separate them are the magnitude in their `.exp`.
-
-### 2.4 The `NL` archives block the UI
-
-Narrowed to one thing. fparkan calls the format **RsLi** and documents it; the
-header and the `[32][count × 32][payloads]` layout are
-[confirmed here](docs/06-open-questions.md), and the entries are a name, a
-storage method, an offset and two sizes.
-
-What blocks it is that **the entry table is XOR-encrypted** with a keystream
-seeded from the word at 0x14, and the generator is neither documented nor
-recovered — fifteen classic LCGs fail. Without the table there is no way to
-find where a member starts or which of the seven storage methods it uses, and
-those run from raw through LZSS and adaptive Huffman to Deflate.
-
-That also corrects what this file said before: `sprites.lib` was never going
-to decode as one stream, because its members are packed separately and by
-different methods.
 
 ---
 
