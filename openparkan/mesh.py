@@ -68,6 +68,15 @@ SLOT_SIZE = 68
 SLOTS_PER_VARIANT = 5
 LOD_COUNT = 4
 VARIANT_COUNT = 3
+#: The three five-slot blocks are damage states, not a second level-of-detail
+#: axis.  1479 nodes fill block 0, 135 fill block 1 and 15 fill block 2, and no
+#: node ever fills a later block without the earlier ones.  A later block is
+#: the same part with pieces missing: `s_tree_0_04`'s crown drops from 212
+#: triangles topping out at z 22.12 to 104 at 10.39, and `fr_l_gener`'s pylons
+#: go 88 / 66 / 14 triangles at z 22.70 / 9.31 / -16.88, sinking into the
+#: ground.  The `.ndp` damage table settles it: every one of those nodes names
+#: an explosion, and the tree's is `explode_tree.exp`.
+VARIANT_INTACT = 0
 NO_SLOT = 0xFFFF
 #: Bit 0 of a sub-object's flags marks interior geometry.
 SUBOBJECT_INTERIOR = 0x0001

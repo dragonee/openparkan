@@ -1529,6 +1529,93 @@ def check_poses(check, game: Path) -> None:
           f"{base_on_ground}/{units} within 1 unit of the height under them")
 
 
+def check_damage(check, game: Path) -> None:
+    """The .ndp damage table, and what the later slot variants hold."""
+    library = objects.ObjectLibrary(game / "objects.rlb")
+    opened: dict[str, NResArchive] = {}
+
+    def member(ref) -> bytes | None:
+        if ref is None:
+            return None
+        try:
+            if ref.library not in opened:
+                opened[ref.library] = NResArchive.open(game / ref.library)
+            return opened[ref.library].read_name(ref.member)
+        except (KeyError, ValueError, FileNotFoundError):
+            return None
+
+    parsed = total = per_node = 0
+    named = 0
+    variant_nodes = variant_named = 0
+    nested = blocks = 0
+    shrinks = compared = 0
+    for record in library.records.values():
+        raw = member(record.damage)
+        if raw is None:
+            continue
+        total += 1
+        try:
+            table = objects.parse_damage(raw, record.damage.member)
+        except objects.ObjectFormatError:
+            continue
+        parsed += 1
+        named += sum(1 for row in table if row.explosion)
+
+        blob = member(record.mesh)
+        if blob is None:
+            continue
+        try:
+            model = objmesh.parse(blob, record.mesh.member)
+        except (ValueError, struct.error):
+            continue
+        per_node += len(table) == len(model.nodes)
+        if len(table) != len(model.nodes):
+            continue
+        for i, node in enumerate(model.nodes):
+            filled = [
+                any(
+                    node.slot_index[v * objmesh.SLOTS_PER_VARIANT + lod]
+                    != objmesh.NO_SLOT
+                    for lod in range(objmesh.SLOTS_PER_VARIANT)
+                )
+                for v in range(objmesh.VARIANT_COUNT)
+            ]
+            if any(filled):
+                blocks += 1
+                nested += filled == sorted(filled, reverse=True)
+            if not filled[1]:
+                continue
+            variant_nodes += 1
+            variant_named += bool(table[i].explosion)
+            intact = node.slot_index[0]
+            damaged = node.slot_index[objmesh.SLOTS_PER_VARIANT]
+            if objmesh.NO_SLOT not in (intact, damaged) and max(
+                intact, damaged
+            ) < len(model.slots):
+                compared += 1
+                shrinks += (
+                    model.slots[damaged].triangle_count
+                    <= model.slots[intact].triangle_count
+                )
+
+    check("objects.rlb: a .ndp is one damage record per node",
+          parsed == total > 0 and per_node >= parsed * 0.99,
+          f"{parsed}/{total} tables are exactly 4 + n*{objects.DAMAGE_STRIDE} "
+          f"bytes and {per_node} of them have one record per mesh node; "
+          f"{named} records name an explosion")
+
+    check("MESH: the five-slot blocks are filled in order",
+          nested == blocks > 0,
+          f"{nested}/{blocks} nodes fill block 0 first, then 1, then 2 -- no "
+          f"node carries a later block without the earlier ones")
+
+    check("MESH: a node with a second block is one that can be destroyed",
+          variant_named == variant_nodes > 0,
+          f"all {variant_nodes} nodes that carry a second five-slot block name "
+          f"an explosion in their .ndp, and the block holds the same part with "
+          f"pieces gone: fewer triangles on {shrinks}/{compared}")
+
+
 def run(game: Path) -> int:
     """Run every check against ``game``.  Returns a process exit code."""
     results: list[tuple[str, bool, str]] = []
@@ -1542,7 +1629,7 @@ def run(game: Path) -> int:
         check_nres, check_texm, check_terrain, check_uv,
         check_water, check_layers, check_materials, check_sky,
         check_minimap_agreement, check_arealmap,
-        check_missions, check_objects, check_poses,
+        check_missions, check_objects, check_poses, check_damage,
     )
     for fn in checks:
         fn(check, game)

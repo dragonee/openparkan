@@ -75,13 +75,32 @@ The remaining question the `.ctl` was carrying is
 [still open](06-open-questions.md), but it is a question about how a unit
 *moves*, not about how it stands.
 
-### `.ndp` names an explosion
+### `.ndp` is a damage table, one record per node
 
-Not read either, but its shape is plain from a hexdump: a count, a `float32`
-that reads as hit points (490.0 on `ba_a_02`), and then the same 32-byte
-`(archive, member)` pair `objects.rlb` uses — pointing at `weapon.rlb` /
-`ba_a_02.exp`. Damage properties and the explosion to play, which is
-[section 2.3](../TODO.md) territory.
+An `int32` count and then **76 bytes per record**. All 542 shipped members are
+exactly `4 + n * 76` bytes, and 541 of them have `n` equal to the node count of
+the mesh they belong to.
+
+```
+int32    flags        0 throughout, except 1 on scenery and 112 on projectiles
+float32  durability   1000000 where the node cannot be destroyed
+float32  ...          unresolved; 1000 on 549 records, then 0, 10, 1, 300, 500
+char[32] archive      the explosion's library
+char[32] member       the explosion, a .exp
+```
+
+Which float is the hit points is settled only by weight of evidence: the first
+is the one that scales with the size of the part, correlating **+0.56** with
+the node's volume in log space against **+0.19** for the second.
+
+2203 records name an explosion, and the names say plainly what the table is
+for: `explode_tree.exp` and `explode_leaf.exp` on scenery, `explode_frt_b.exp`
+and `explode_frt_m.exp` on fortifications, `explode_rbr_l.exp` on large robots,
+`selfexp_anl_01b.exp` on animals. Parkan lets you shoot a building apart piece
+by piece; this is the table that says what each piece costs and what it looks
+like going up. The `.exp` files themselves are still
+[unread](../TODO.md) — `openparkan.objects.parse_damage` gets you as far as
+their names.
 
 ## UNITS/**/*.dat — unit and building assemblies
 
@@ -309,9 +328,32 @@ Two things pin the reading down beyond the monotonicity:
   the coarsest slot present rather than drawing nothing. No node lacks
   geometry in variant 0 but has some in a later variant.
 
-What the later variants are is not established. `fr_b_brige`'s `o02` node has
-identical counts in variants 0 and 1 (12, 6, 2 both times), which reads like a
-damage state.
+### The later blocks are damage states
+
+1479 nodes fill block 0, **135 fill block 1 and 15 fill block 2**, and no node
+ever fills a later block without the earlier ones (1790 of 1790). They are
+concentrated where you would expect: 97 of the 135 are in `fortif.rlb`, the
+buildings.
+
+A later block is the same part with pieces gone. `s_tree_0_04`'s crown drops
+from 212 triangles topping out at z 22.12 to 104 at 10.39. `fr_b_bunker`'s
+`o01` goes 396 → 282 and 10.59 → 7.22. Where a third block exists the sequence
+continues: `fr_l_gener`'s four pylons run 88 / 66 / 14 triangles at z 22.70 /
+9.31 / **−16.88**, the last sunk below the ground. Triangle counts fall on 121
+of the 145 nodes that have both, and the materials are identical on all of
+them — the damage is modelled, not textured.
+
+The `.ndp` damage table settles which direction the sequence runs. **Every one
+of the 145 nodes that carries a second block names an explosion**, and the
+names are not ambiguous: `s_tree_0_04`'s tree node has 3000 durability and
+`static.rlb/explode_tree.exp`; `s_tree_0_06`'s three leaf nodes have 1000 and
+`explode_leaf.exp`. A tree is not built, so this is destruction, not
+construction.
+
+The geometry is authored separately rather than derived: a later block's
+vertices are wholly disjoint from block 0's on all 135, never a subset. A
+renderer that draws intact scenery wants block 0 and nothing else, which is
+what `slots_for_lod` takes by default; nothing is missing from the picture.
 
 ### The stream 2 header is the model's authored extent
 

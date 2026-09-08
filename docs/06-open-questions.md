@@ -43,17 +43,18 @@ BA AB         0xABBA marker
 after which the payload is high-entropy — compressed or obfuscated. Only 2
 files, holding fonts and 2D sprites, so this blocks UI work but nothing else.
 
-## The .ctl controller and the .ndp record
+## The .ctl controller
 
-Both are [identified but not parsed](07-objects.md). A `.ctl` is a *movement*
-controller — `Control.dll`'s `LoadControlSystem`, driven through an `IControl`
-of speeds, accelerations and angle limits — with a fixed parameter header and
-a body of 156-byte records. A `.ndp` is a damage record: a hit-point float and
-an `(archive, member)` pair naming an `.exp` explosion.
+[Identified but not parsed](07-objects.md): a *movement* controller —
+`Control.dll`'s `LoadControlSystem`, driven through an `IControl` of speeds,
+accelerations and angle limits — with a fixed parameter header and a body of
+156-byte records. It does not affect a static picture, which is why it is not
+read. The vertical datum, the component attachment and the rest pose that it
+was in turn expected to explain all turned out to live in the mesh.
 
-Neither affects a static picture, which is why neither is read. The vertical
-datum, the component attachment and the rest pose that each was in turn
-expected to explain all turned out to live in the mesh.
+Its sibling `.ndp` is [solved and read](07-objects.md). One field of it is not:
+the second `float32` of a record, 1000 on 549 of them and then 0, 10, 1, 300
+and 500.
 
 ## CTPT field roles outside static.rlb
 
@@ -76,9 +77,6 @@ mapped.
   on 292 chains). 316 of the 1845 nodes carry one; of the 288 that carry both
   a level 0 and a fifth slot, the two use the same materials on 197 and
   different ones on 91.
-- **What the later slot variants are.** Two of the three blocks of five are
-  used by 135 nodes. `fr_b_brige`'s `o02` has identical counts in variants 0
-  and 1, which reads like a damage state.
 - **Pose key `time`.** The `float32` at offset 12 of a stream-8 key is an
   integer frame number in every one of the 34049 keys, ranging 0..473. It is
   not used by a static renderer.

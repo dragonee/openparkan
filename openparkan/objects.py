@@ -1,4 +1,5 @@
-"""Object definitions: ``objects.rlb`` records and ``UNITS/**/*.dat`` assemblies.
+"""Object definitions: ``objects.rlb`` records, ``.ndp`` damage tables, and
+``UNITS/**/*.dat`` assemblies.
 
 Two small fixed-layout formats that together turn a name in a mission file
 into concrete resources.
@@ -28,7 +29,14 @@ consumes all 458 shipped assemblies exactly.  A child also carries the *node
 index* in its parent's mesh that it bolts onto -- always one of the parent's
 geometry-less ``Base_*`` nodes, on 946 of 946 guns and 468 of 468 turrets --
 so an assembled robot is built by walking the tree and composing each part's
-mesh onto that node's pose.  See ``docs/07-objects.md``.
+mesh onto that node's pose.
+
+A ``.ndp`` slot is the model's **damage table**: one 76-byte record per mesh
+node, holding that node's durability and the explosion it plays when it is
+destroyed -- ``explode_tree.exp`` for a tree, ``explode_frt_b.exp`` for a big
+fortification, ``selfexp_anl_01b.exp`` for an animal.  Parkan lets you shoot a
+building apart piece by piece, and this is the table that says what each piece
+costs and what it looks like going up.  See ``docs/07-objects.md``.
 """
 
 from __future__ import annotations
@@ -41,6 +49,13 @@ from .nres import NResArchive
 
 SLOT_SIZE = 64
 NAME_FIELD = 32
+
+#: A ``.ndp`` is an int32 count and then one 76-byte record per mesh node:
+#: an int32 of flags, two floats, and the ``(archive, member)`` pair naming the
+#: explosion that node plays when it is destroyed.  All 542 shipped members are
+#: exactly ``4 + n * 76`` bytes and 541 of them have ``n`` equal to the node
+#: count of the mesh they belong to.
+DAMAGE_STRIDE = 76
 
 DAT_MAGIC = 0xF0F1
 DAT_HEADER = 8
@@ -94,6 +109,52 @@ class ResourceRef:
         return f"{self.library}/{self.member}" if self else "-"
 
 
+@dataclass(frozen=True)
+class NodeDamage:
+    """What happens to one node of a model when it is shot to pieces."""
+
+    #: Zero throughout, except 1 on scenery and 112 on projectiles.  Flags.
+    flags: int
+    #: Reads as hit points: it is the field that scales with the size of the
+    #: node, correlating +0.56 with its volume in log space against +0.19 for
+    #: the other float.  1000000 on the nodes that cannot be destroyed.
+    durability: float
+    #: Unresolved.  1000 on 549 records, then 0, 10, 1, 300 and 500.
+    unknown: float
+    #: The explosion to play, as an ``(archive, member)`` pair like any other.
+    explosion: ResourceRef
+
+    def __bool__(self) -> bool:
+        return bool(self.explosion)
+
+
+def parse_damage(blob: bytes, source: str = "<ndp>") -> list[NodeDamage]:
+    """Parse a ``.ndp`` damage table, one record per node of its mesh."""
+    if len(blob) < 4:
+        raise ObjectFormatError(f"{source}: too short to hold a record count")
+    count = struct.unpack_from("<i", blob, 0)[0]
+    if count < 0 or len(blob) != 4 + count * DAMAGE_STRIDE:
+        raise ObjectFormatError(
+            f"{source}: {len(blob)} bytes is not {count} records of {DAMAGE_STRIDE}"
+        )
+    out = []
+    for i in range(count):
+        o = 4 + i * DAMAGE_STRIDE
+        flags, durability, unknown = struct.unpack_from("<iff", blob, o)
+        out.append(
+            NodeDamage(
+                flags=flags,
+                durability=durability,
+                unknown=unknown,
+                explosion=ResourceRef(
+                    _fixed_string(blob[o + 12 : o + 44]),
+                    _fixed_string(blob[o + 44 : o + DAMAGE_STRIDE]),
+                ),
+            )
+        )
+    return out
+
+
 @dataclass
 class ObjectRecord:
     """One record of ``objects.rlb``: a name, a tag, and its resource slots."""
@@ -117,6 +178,11 @@ class ObjectRecord:
     def textures(self) -> ResourceRef | None:
         """The ``.wea`` slot, a name table of texture names."""
         return self.slot_with_suffix("wea")
+
+    @property
+    def damage(self) -> ResourceRef | None:
+        """The ``.ndp`` slot, a per-node damage table."""
+        return self.slot_with_suffix("ndp")
 
 
 class ObjectLibrary:

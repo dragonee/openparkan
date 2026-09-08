@@ -110,6 +110,20 @@ written down is a question nobody reopens.
       even sits at the bottom of a flying hull and the top of a tracked one.
       Overlap with the hull falls on 22 of the 404 distinct mounts and rises
       on none. → [docs/07-objects.md](docs/07-objects.md)
+- [x] **Damage variants.** The three five-slot blocks are damage states, and
+      the renderer is right to draw only the first. 1479 nodes fill block 0,
+      135 fill block 1, 15 fill block 2, and **1790 of 1790** fill them in
+      order. A later block is the same part with pieces gone —
+      `fr_l_gener`'s pylons run 88 / 66 / 14 triangles at z 22.70 / 9.31 /
+      −16.88, the last sunk under the ground. The `.ndp` table settles the
+      direction: **all 145** nodes with a second block name an explosion, and
+      a tree's is `explode_tree.exp`. A tree is not built.
+      → [docs/07-objects.md](docs/07-objects.md)
+- [x] **`.ndp`, the damage table.** An `int32` count then 76 bytes per node:
+      flags, durability, an unresolved float, and the `(archive, member)` pair
+      naming the explosion that node plays. **542 of 542** members are exactly
+      `4 + n*76` and 541 have one record per mesh node; 2203 records name an
+      explosion. Read by `openparkan.objects.parse_damage`.
 - [x] **Coplanar geometry.** Two causes, both fixed. The terrain's two ground
       layers now share a single pass — bucketing faces by the pair costs 5 to
       8 groups per map against 3 to 5 — and the file's own duplicated faces
@@ -121,14 +135,8 @@ written down is a question nobody reopens.
 
 ## 1. Wrong on screen today
 
-One item left here, and it came out of doing the pose work above.
-
-### 1.1 Damage variants are guessed at
-
-Two of every three five-slot blocks are unused by the renderer. 135 nodes
-populate them, and `fr_b_brige`'s `o02` carries identical triangle counts in
-variants 0 and 1 — a destroyed state is the obvious reading, but nothing
-confirms it, and if it is wrong then something is not being drawn.
+Nothing. Everything that was drawing incorrectly has been fixed; what is left
+below is fidelity the game had and this does not, and engineering.
 
 ## 2. Missing fidelity
 
