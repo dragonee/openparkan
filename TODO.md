@@ -166,12 +166,13 @@ Seven of `sky.wea`'s nine slots are drawn: the nebula, stars and clouds on the
 dome, the sun and moon as billboards, and the lens flare as a 2D overlay (see
 [docs/10-sky.md](docs/10-sky.md)). Two are not:
 
-- **Snow and rain** (slots 7 and 8). Not in `effects.rlb` after all: no FXID
-  there names either, and the slots name the materials `SNOWFLAKE` and
-  `RAIN_DROP` directly, so both resolve to textures today. What is missing is
-  the switch — which missions have weather, and how much. That is the same
-  unknown as "which field selects the object type between SUN, SKY, RAIN, SNOW
-  and LIGHTNING" below.
+- **Snow and rain** (slots 7 and 8). The switch is
+  [answered](docs/10-sky.md): a keyframe names `atm_rain1.wav` to start rain
+  and `env_lightning` to start lightning, **14 of the 29 missions carry a
+  marker** — eight each — and none names snow. What blocks drawing it is the
+  *sprite*: `RAIN_DROP` and `SNOWFLAKE` are cells 21 and 20 of `EFFECT6.0`,
+  and that atlas is not a uniform grid, so there is no honest way to cut a
+  drop out of it. The viewer names the weather in its panel and draws nothing.
 
 And **where the sun stands** is the renderer's own arc, not the game's:
 `CSun::Render` builds its matrix from two angles at `this+0x30` and
@@ -185,9 +186,22 @@ The flare's second intensity gate is in the same position: the engine ramps it
 between the cosines of 30° and 60° of a float the sun object keeps at `+0x80`,
 and what that float is has not been established.
 
-Three smaller unknowns sit in the same file: the keyframe count of a second
-section (six missions have one), which field selects the object type between
-SUN, SKY, RAIN, SNOW and LIGHTNING, and most of the 124-byte file header.
+Two smaller unknowns sit in the same file: the keyframe count of a second
+section (six missions have one), and most of the 124-byte file header. The
+object type is now half-answered — `CAtmData::GetEvents` dispatches on a
+ten-valued opcode whose branches pair up as start/stop per object type, and
+the sky is created outside that switch with a hardcoded id — but which *file*
+field feeds the opcode is not pinned down, which is why where a shower stops
+is still unknown.
+
+### 2.1a The sprite-sheet cell is not a square grid
+
+249 materials ask for a sub-image cell above 3, up to 63, across 61 textures,
+and those atlases mix tile sizes — `EFFECT6.0` holds wide streaks, starbursts,
+a cyan band, a row of eight discs and a row of icons. The 2 x 2 reading that
+`SUN.0` confirms covers only the sheets that are 2 x 2. Nothing drawn today is
+wrong — no mesh or terrain material asks for a cell — but it blocks the
+weather sprites and every effect sprite.
 
 ### 2.2 The second layer of a terrain material
 

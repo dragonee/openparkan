@@ -685,7 +685,8 @@ def _pack_colour(rgba: tuple[int, int, int, int]) -> int:
 
 #: The sky.wea roles the viewer draws, and how far to shrink each.
 SKY_LAYERS = (("nebula", 256), ("stars", 256), ("clouds", 256),
-              ("sun", 128), ("moon", 128), ("flare", 128), ("flare2", 128))
+              ("sun", 128), ("moon", 128), ("flare", 128), ("flare2", 128),
+              ("snow", 64), ("rain", 64))
 
 
 def build_sky_payload(folder: Path, resolver: TextureResolver | None = None) -> dict | None:
@@ -707,6 +708,18 @@ def build_sky_payload(folder: Path, resolver: TextureResolver | None = None) -> 
         (k for k in atmosphere.keyframes if k.section == 0), key=lambda k: k.minutes
     )
     peak = max((k.light for k in frames), default=1.0) or 1.0
+
+    # A keyframe that names atm_rain1.wav starts rain, and one that names
+    # env_lightning starts lightning.  Where they stop is not written down --
+    # the sun and moon come in start/stop pairs, these appear once -- so the
+    # viewer runs the weather from its keyframe to the next keyframe that
+    # names anything at all.  See docs/10-sky.md.
+    weather = [""] * len(frames)
+    running = ""
+    for i, k in enumerate(frames):
+        if k.markers:
+            running = k.weather or ""
+        weather[i] = running
     payload = {
         "zenith": _pack_colour(brightest.colour(SKY_ZENITH_SLOT)),
         "horizon": _pack_colour(brightest.colour(SKY_HORIZON_SLOT)),
@@ -725,8 +738,9 @@ def build_sky_payload(folder: Path, resolver: TextureResolver | None = None) -> 
                 # How dark this keyframe is against the day's peak, which is
                 # what decides whether the stars show.
                 "n": round(1.0 - min(1.0, k.light / peak), 3),
+                **({"w": weather[i]} if weather[i] else {}),
             }
-            for k in frames
+            for i, k in enumerate(frames)
         ],
         "peak": frames.index(brightest) if brightest in frames else 0,
         # The lens flare is a constant of the engine rather than of the
@@ -741,6 +755,7 @@ def build_sky_payload(folder: Path, resolver: TextureResolver | None = None) -> 
         "flareCone": sky.FLARE_CONE_DEGREES,
         "flareElevation": [sky.FLARE_ELEVATION_FULL_DEGREES,
                            sky.FLARE_ELEVATION_ZERO_DEGREES],
+        "weather": sorted({w for w in weather if w}),
     }
     if resolver is not None:
         for role, size in SKY_LAYERS:

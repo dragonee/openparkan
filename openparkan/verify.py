@@ -11,6 +11,7 @@ from __future__ import annotations
 import math
 import random
 import struct
+from collections import Counter
 from pathlib import Path
 
 from . import arealmap, effects, gamedir, landmesh, materials, mission, objects, sky, texm
@@ -938,6 +939,39 @@ def check_sky(check, game: Path) -> None:
           f"{with_alpha}/{decoded} of the textures behind "
           f"{', '.join(n for group in flare_names for n in group)} have an "
           f"alpha channel, which is what an additive sprite needs")
+
+    # Rain and lightning are named by a keyframe; snow never is.
+    weathered = Counter()
+    with_marker = 0
+    for path in files:
+        try:
+            atmosphere = sky.load(path)
+        except sky.SkyFormatError:
+            continue
+        kinds = atmosphere.weather()
+        with_marker += bool(kinds)
+        for kind in kinds:
+            weathered[kind] += 1
+    check("sky.ske: a keyframe names the weather it starts",
+          weathered.get("rain", 0) > 0 and weathered.get("lightning", 0) > 0
+          and "snow" not in weathered,
+          f"{with_marker}/{parsed} missions carry a weather marker: "
+          f"{weathered.get('rain', 0)} name {sky.RAIN_MARKER} and "
+          f"{weathered.get('lightning', 0)} name {sky.LIGHTNING_MARKER}; "
+          f"none names snow")
+
+    # And a negative result: the sub-image cell is not a square grid.
+    above = [
+        m for m in lib.materials.values()
+        if m.cell != materials.WHOLE_TEXTURE
+        and m.cell >= materials.SHEET_SIDE ** materials.SHEET_SIDE
+    ]
+    biggest = max((m.cell for m in above), default=0)
+    check("Material.lib: a sub-image cell is not a 2x2 grid everywhere",
+          len(above) > 0 and biggest > 3,
+          f"{len(above)} materials ask for a cell above 3, up to {biggest}, so "
+          f"the 2x2 reading that SUN.0 confirms does not generalise; none of "
+          f"them is reached by mesh or terrain geometry")
 
     check("sky.ske: the third float is a day/night light", all(varying),
           f"on all {len(varying)} files whose light varies, its low point falls "

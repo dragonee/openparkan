@@ -35,7 +35,16 @@ materials are the clearest case -- ``SUN.0`` is a 2 x 2 sheet holding a sun
 corona and a moon, and ``ENV_SUN`` asks for cell 0 while ``ENV_MOON`` asks for
 cell 2, which is where the moon is.  ``SUN1.0`` holds four stars and a moon
 and its three ``ENV_SUN_*`` materials name cells 0, 1 and 3 -- the three
-stars.  See ``docs/10-sky.md`` for the two that do not fit.
+stars.
+
+**The 2 x 2 reading does not generalise.**  249 materials ask for a cell above
+3, up to 63, across 61 textures, and those atlases are not uniform grids:
+``EFFECT6.0`` holds four wide streaks, four starbursts, a cyan band, a row of
+eight discs and a row of small icons, all at different tile sizes.  So
+``cell_uv`` answers only for the 2 x 2 sheets and returns None otherwise,
+which is safe -- **no mesh or terrain material asks for a cell at all**, and
+the four sky materials that do above 3 are the two weather sprites and two
+sun and moon variants.  See ``docs/10-sky.md``.
 
 The texture names are still extracted by pattern rather than by offset,
 because the record's tail is not a constant size -- most are

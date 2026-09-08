@@ -113,6 +113,12 @@ FLARE_ELEMENTS = (
     (-1.1, 0.2, 0xFF7CC5C9, 0),
 )
 
+#: A keyframe names the atmosphere object it belongs to.  Four names appear:
+#: ``sun`` and ``moon``, which come in a start/stop pair, and these two, which
+#: appear once each in a section.  No shipped mission names snow.
+RAIN_MARKER = "atm_rain1.wav"
+LIGHTNING_MARKER = "env_lightning"
+
 #: A ghost's half-size is ``FLARE_SCALE * (viewport width / 2) * size``.
 FLARE_SCALE = 0.25
 
@@ -167,6 +173,27 @@ class Keyframe:
     def minutes(self) -> int:
         """Time of day in minutes, for ordering and interpolation."""
         return self.hour * 60 + self.minute
+
+    @property
+    def markers(self) -> list[str]:
+        """Every name this keyframe carries, the sound slots included."""
+        return [n for n in ([self.name] + list(self.sounds)) if n]
+
+    @property
+    def weather(self) -> str | None:
+        """``"rain"``, ``"lightning"``, or None if this keyframe starts neither.
+
+        The engine turns an atmosphere object on and off from a keyframe, and
+        the sun and the moon come in start/stop pairs.  Rain and lightning
+        appear once in a section, so where they stop is not established; see
+        ``docs/10-sky.md``.
+        """
+        for marker in self.markers:
+            if marker == RAIN_MARKER:
+                return "rain"
+            if marker == LIGHTNING_MARKER:
+                return "lightning"
+        return None
 
     def colour(self, slot: int) -> tuple[int, int, int, int]:
         """One slot as ``(r, g, b, a)``.
@@ -233,6 +260,15 @@ class Atmosphere:
         if index >= len(self.textures):
             return None
         return self.textures[index] or None
+
+    def weather(self) -> dict[str, list[Keyframe]]:
+        """The keyframes that start each kind of weather, by kind."""
+        out: dict[str, list[Keyframe]] = {}
+        for frame in self.keyframes:
+            kind = frame.weather
+            if kind:
+                out.setdefault(kind, []).append(frame)
+        return out
 
     def brightest(self) -> Keyframe | None:
         """The keyframe with the most light -- the middle of the day."""

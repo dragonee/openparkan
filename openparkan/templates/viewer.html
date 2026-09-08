@@ -324,6 +324,14 @@ if (typeof THREE === "undefined" || typeof pako === "undefined") {
     buildFlare(sky);
   }
 
+  // Rain and lightning are marked but not drawn.  A keyframe that names
+  // atm_rain1.wav starts rain and one that names env_lightning starts
+  // lightning -- eight of the 29 missions carry each, and none names snow --
+  // and the payload runs the weather to the next keyframe that names
+  // anything.  What is missing is the sprite: RAIN_DROP and SNOWFLAKE are
+  // cells 21 and 20 of EFFECT6.0, and that atlas is not a uniform grid, so
+  // there is no honest way to cut the drop out of it yet.  See
+  // docs/10-sky.md.
   // The lens flare.  Terrain.dll's CSun::RenderFlare strings twelve sprites
   // along the line from the sun's position on screen through the centre of
   // the screen; the payload carries its table of positions, sizes and colours
@@ -825,8 +833,11 @@ if (typeof THREE === "undefined" || typeof pako === "undefined") {
     const skyRow = document.getElementById("sky"), skyLabel = document.getElementById("skydt");
     skyRow.hidden = skyLabel.hidden = !mis.sky;
     if (mis.sky) {
+      // The weather a mission's keyframes name.  Not drawn -- see the note by
+      // the sky layers -- but worth saying which missions have it.
+      const weather = (mis.sky.weather || []).join(" + ");
       skyRow.innerHTML = mis.sky.time + ' <span class="unit">' + mis.sky.keyframes +
-        " keyframes</span>";
+        " keyframes" + (weather ? " &middot; " + weather : "") + "</span>";
     }
     document.getElementById("clanbox").hidden = false;
     document.getElementById("clans").innerHTML = mis.clans.map((c) =>

@@ -177,6 +177,42 @@ ramp is then squared. Those cosines are cached at load from a constant of 15
 degrees, alongside 30 and 60 for a second ramp on a quantity the sun object
 carries at `+0x80`, which has not been identified.
 
+## The weather, and how the engine reads a keyframe
+
+A keyframe carries names, and the names say which atmosphere object it acts
+on. Four appear across the 656 shipped keyframes: **`sun`** (73) and
+**`moon`** (65), which come in start/stop pairs, and **`atm_rain1.wav`** (9)
+and **`env_lightning`** (9), which appear once in a section.
+
+That is the weather switch. **14 of the 29 missions carry a marker — eight
+name rain and eight name lightning — and not one names snow.** The rain
+markers are all early morning: 02:40, 05:10, 05:40 and 07:00.
+
+`Terrain.dll` says what the engine does with them.
+`CAtmosphere::HandleEvents` walks a list of 20-byte events built by
+`CAtmData::GetEvents`, and each event's second word is the object type it
+passes to `CreateAtmosphereObject` — a five-way switch, allocating 0x9e8,
+0x560, 0xc0, 0xb8 and one more. `GetEvents` itself dispatches on a ten-valued
+opcode at the head of its keyframe record, and the ten branches pair up
+exactly:
+
+| opcode | object type | action |
+|---:|---:|---|
+| 0, 1 | 0 | start, stop — and branch 0 compares the name to `"sun"` |
+| 2, 7 | — | nothing |
+| 3, 4 | 2 | start, stop |
+| 5, 6 | 3 | start, stop |
+| 8, 9 | 4 | start, stop |
+
+Even starts, odd stops. Object type **1** is never created from an event, and
+the reason is visible one call site up: the sky is created directly, with a
+hardcoded `1`, which is why every mission has one and no keyframe has to ask.
+
+Which field of the *file* feeds that opcode is not established — the trailer
+word this reader calls `kind` is 3 on 621 of the 656 keyframes, which does not
+fit. So where a shower **stops** is unknown: the sun and moon come in pairs
+and rain does not.
+
 ## What the viewer draws
 
 - The **nebula** on the dome, multiplied by the keyframe's zenith-to-horizon
@@ -207,8 +243,16 @@ agree. The time-of-day control walks the keyframes.
   an azimuth and an elevation would.
 - **What the flare's second gate measures.** The engine ramps it between the
   cosines of 30° and 60° of a float the sun object keeps at `+0x80`.
-- **Snow and rain.** Slots 7 and 8 resolve to real textures and are not drawn;
-  they need the particle system in `effects.rlb`.
+- **Snow and rain.** Not for want of a particle system — they are not in
+  `effects.rlb` at all, and which missions have them is [answered
+  above](#the-weather-and-how-the-engine-reads-a-keyframe). What is missing is
+  the *sprite*. `RAIN_DROP` and `SNOWFLAKE` are cells 21 and 20 of
+  `EFFECT6.0`, and that texture is not a uniform grid: it holds four wide blue
+  streaks, four starbursts, a cyan band, a row of eight green discs and a row
+  of small icons, all at different tile sizes. Neither an 8x8 nor a 4x8
+  reading of cell 21 lands on anything that looks like a drop. Until the
+  atlas's addressing is understood there is no honest way to cut one out, so
+  the viewer marks the weather in its panel and draws nothing.
 - **The keyframe count of a second section.** Six files have two; their
   72-byte section headers are byte-identical yet hold 27 and 20 keyframes, so
   the count is not in them. The reader takes the second section's keyframes to
