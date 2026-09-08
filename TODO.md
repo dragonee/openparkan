@@ -124,6 +124,15 @@ written down is a question nobody reopens.
       naming the explosion that node plays. **542 of 542** members are exactly
       `4 + n*76` and 541 have one record per mesh node; 2203 records name an
       explosion. Read by `openparkan.objects.parse_damage`.
+- [x] **The lens flare.** `CSun::RenderFlare` strings **twelve sprites** along
+      the line from the sun's position on screen through the centre of the
+      screen, and its four tables came out of `Terrain.dll` whole: positions
+      from 1.2 (past the sun) to −1.1 (past the far side), sizes 0.1 to 1.0
+      scaled by a quarter of the half-viewport, twelve `D3DCOLOR` constants of
+      which the engine scales only the alpha, and a per-element pick between
+      `sky.wea`'s two flare slots. The angular gate is exact too: off beyond
+      15° from the view axis, linear to full on-axis, then squared.
+      → [docs/10-sky.md](docs/10-sky.md)
 - [x] **Coplanar geometry.** Two causes, both fixed. The terrain's two ground
       layers now share a single pass — bucketing faces by the pair costs 5 to
       8 groups per map against 3 to 5 — and the file's own duplicated faces
@@ -144,20 +153,24 @@ Correct as far as it goes, but not what the game showed.
 
 ### 2.1 The sky's weather layers
 
-The dome now carries the mission's own nebula, stars and clouds, and its sun
-and moon as billboards — `sky.wea`'s nine slots are a fixed role table and all
-261 slot names across the 29 missions resolve (see
-[docs/10-sky.md](docs/10-sky.md)). Four of the nine are not drawn:
+Seven of `sky.wea`'s nine slots are drawn: the nebula, stars and clouds on the
+dome, the sun and moon as billboards, and the lens flare as a 2D overlay (see
+[docs/10-sky.md](docs/10-sky.md)). Two are not:
 
-- **The lens flares** (slots 5 and 6, `ENV_FLARE_00` / `ENV_FLARE_01`) need
-  the sun's screen position and a chain of sprites down the view axis.
 - **Snow and rain** (slots 7 and 8) are particle systems, which is
   `effects.rlb` — see 2.3.
 
 And **where the sun stands** is the renderer's own arc, not the game's:
 `CSun::Render` builds its matrix from two angles at `this+0x30` and
-`this+0x34`, and no pair of floats in a keyframe varies with time the way an
-azimuth and an elevation would.
+`this+0x34` — a rotation of the second about the horizontal axis at the first,
+which is a Rodrigues matrix read straight off the disassembly — but nothing
+writes those two fields from a file that has been found, and no pair of floats
+in a keyframe or in the 124-byte header varies the way an azimuth and an
+elevation would.
+
+The flare's second intensity gate is in the same position: the engine ramps it
+between the cosines of 30° and 60° of a float the sun object keeps at `+0x80`,
+and what that float is has not been established.
 
 Three smaller unknowns sit in the same file: the keyframe count of a second
 section (six missions have one), which field selects the object type between

@@ -240,6 +240,8 @@ if (typeof THREE === "undefined" || typeof pako === "undefined") {
   const skyGroup = new THREE.Group();
   scene.add(skyGroup);
   let dome = null, starLayer = null, cloudLayer = null, sunSprite = null, moonSprite = null;
+  //: Where the sun stands right now; the flare overlay needs it every frame.
+  let sunHeading = null;
 
   function domeGeometry() {
     return new THREE.SphereGeometry(DOME_RADIUS, 40, 28);
@@ -269,6 +271,8 @@ if (typeof THREE === "undefined" || typeof pako === "undefined") {
   }
 
   function dropSky() {
+    buildFlare(null);
+    sunHeading = null;
     [dome, starLayer, cloudLayer, sunSprite, moonSprite].forEach((o) => {
       if (!o) return;
       skyGroup.remove(o);
@@ -317,13 +321,89 @@ if (typeof THREE === "undefined" || typeof pako === "undefined") {
     };
     sunSprite = place(sky.sun, DOME_RADIUS * 0.17);
     moonSprite = place(sky.moon, DOME_RADIUS * 0.12);
+    buildFlare(sky);
+  }
+
+  // The lens flare.  Terrain.dll's CSun::RenderFlare strings twelve sprites
+  // along the line from the sun's position on screen through the centre of
+  // the screen; the payload carries its table of positions, sizes and colours
+  // straight out of the engine.  It is drawn as a 2D overlay after the scene,
+  // which is what the engine does too -- the flare is in the lens, not the
+  // world, so it takes no depth test.
+  const flareScene = new THREE.Scene();
+  const flareCamera = new THREE.OrthographicCamera(0, 1, 1, 0, -1, 1);
+  let flareGhosts = [];
+  let sunScreen = new THREE.Vector3();
+
+  function buildFlare(sky) {
+    flareGhosts.forEach((g) => {
+      flareScene.remove(g);
+      g.material.dispose();
+    });
+    flareGhosts = [];
+    const chain = sky && sky.flareChain;
+    if (!chain || sky.flare === undefined) return;
+    chain.forEach((e) => {
+      const pool = e.tex && sky.flare2 !== undefined ? sky.flare2 : sky.flare;
+      const g = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: skyTexture(pool), color: new THREE.Color(e.colour),
+        transparent: true, depthTest: false, depthWrite: false, fog: false,
+        blending: THREE.AdditiveBlending, opacity: 0,
+      }));
+      g.userData = e;
+      flareScene.add(g);
+      flareGhosts.push(g);
+    });
+  }
+
+  // The engine gates the flare twice, and both gates are adapted here.
+  //
+  // The first is a 15-degree cone about the view axis: linear in the cosine,
+  // then squared.  That angle is calibrated to the game's own field of view,
+  // and against this survey's wide orbiting camera -- which looks down at the
+  // terrain from above -- it would almost never open, so the same
+  // linear-then-squared ramp is driven by how far the sun sits from the centre
+  // of the screen instead.  Same idea, window the size of the viewport.
+  //
+  // The second ramps between the cosines of 30 and 60 degrees of a quantity
+  // carried by the sun object that has not been identified.  A horizon test
+  // stands in for it: the flare goes out as the sun sets, which is the one
+  // thing such a gate certainly has to do.
+  const HORIZON_FADE = 0.1;
+
+  function drawFlare(dir) {
+    if (!flareGhosts.length) return false;
+    let intensity = Math.max(0, Math.min(1,
+      (dir.y + HORIZON_FADE) / (2 * HORIZON_FADE)));
+    sunScreen.copy(dir).multiplyScalar(DOME_RADIUS).add(camera.position)
+      .project(camera);
+    const cx = innerWidth / 2, cy = innerHeight / 2;
+    const sx = (sunScreen.x * 0.5 + 0.5) * innerWidth;
+    const sy = (sunScreen.y * 0.5 + 0.5) * innerHeight;
+    // Behind the camera the projection wraps round; there is no flare then.
+    if (sunScreen.z > 1) intensity = 0;
+    const near = Math.max(0, 1 - Math.hypot(sx - cx, sy - cy) / Math.hypot(cx, cy));
+    intensity *= near * near;
+    if (intensity <= 0.001) {
+      flareGhosts.forEach((g) => { g.material.opacity = 0; });
+      return false;
+    }
+    flareGhosts.forEach((g) => {
+      const e = g.userData;
+      const half = 0.25 * cx * e.size;
+      g.position.set(cx + (sx - cx) * e.at, cy + (sy - cy) * e.at, 0);
+      g.scale.set(half * 2, half * 2, 1);
+      g.material.opacity = e.alpha * intensity;
+    });
+    return true;
   }
 
   // Where the sun stands at a time of day.  The engine keeps two angles on
-  // each sun object -- CSun::Render builds its matrix from them -- and they
-  // have not been found in sky.ske, so this arc is the renderer's own: up at
-  // noon, on the horizon at six, under it at night.  The moon sits opposite,
-  // and the scene's light follows the sun so shading and sky agree.
+  // each sun object -- CSun::Render builds its matrix from them, a rotation of
+  // the second angle about the horizontal axis at the first -- and they have
+  // not been found in sky.ske, so this arc is the renderer's own: up at noon,
+  // on the horizon at six, under it at night.  The moon sits opposite, and the
+  // scene's light follows the sun so shading and sky agree.
   function sunDirection(label) {
     const [h, m] = String(label || "12:00").split(":").map(Number);
     const day = ((h * 60 + (m || 0)) % 1440) / 1440;
@@ -345,6 +425,7 @@ if (typeof THREE === "undefined" || typeof pako === "undefined") {
     if (cloudLayer) cloudLayer.material.color = new THREE.Color(frame.h);
 
     const dir = sunDirection(frame.t);
+    sunHeading = dir;
     // Never light the terrain from underneath; at night the sun is below the
     // horizon and only the ambient term is left.
     sun.position.copy(dir).setY(Math.max(dir.y, 0.12)).normalize();
@@ -828,6 +909,9 @@ if (typeof THREE === "undefined" || typeof pako === "undefined") {
     renderer.setSize(innerWidth, innerHeight);
     camera.aspect = innerWidth / innerHeight;
     camera.updateProjectionMatrix();
+    flareCamera.right = innerWidth;
+    flareCamera.top = innerHeight;
+    flareCamera.updateProjectionMatrix();
   }
   addEventListener("resize", resize);
   resize();
@@ -842,6 +926,11 @@ if (typeof THREE === "undefined" || typeof pako === "undefined") {
       animated.forEach((a) => { a.apply(a.frames[tick % a.frames.length]); });
     }
     renderer.render(scene, camera);
+    if (sunHeading && drawFlare(sunHeading)) {
+      renderer.autoClear = false;
+      renderer.render(flareScene, flareCamera);
+      renderer.autoClear = true;
+    }
   })();
 }
 </script>

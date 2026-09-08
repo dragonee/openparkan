@@ -910,6 +910,35 @@ def check_sky(check, game: Path) -> None:
           f"ENV_MOON are both {sun.textures[0] if sun else '?'} at cells "
           f"{sun.cell if sun else '?'} and {moon.cell if moon else '?'}")
 
+    # The lens flare table read out of Terrain.dll, against the textures the
+    # missions actually name for it.
+    flare_names = [sorted(per_slot[sky.SLOT_ROLES.index(r)]) for r in ("flare", "flare2")]
+    with_alpha = decoded = 0
+    for names in flare_names:
+        for name in names:
+            material = lib.get(name)
+            base = material.textures[0] if material and material.textures else None
+            if not base:
+                continue
+            try:
+                tex = texm.decode(textures.read_name(base))
+            except (KeyError, ValueError):
+                continue
+            decoded += 1
+            with_alpha += any(v < 255 for v in tex.rgba[3::4])
+    positions = [e[0] for e in sky.FLARE_ELEMENTS]
+    check("CSun: the lens flare is twelve sprites down the view axis",
+          len(sky.FLARE_ELEMENTS) == 12
+          and positions == sorted(positions, reverse=True)
+          and positions[0] > 1.0 and positions[-1] < -1.0
+          and {e[3] for e in sky.FLARE_ELEMENTS} == {0, 1},
+          f"positions run {positions[0]} (past the sun) to {positions[-1]} "
+          f"(past the far side of the screen); both flare slots are used")
+    check("sky.wea: the flare textures carry alpha", with_alpha == decoded > 0,
+          f"{with_alpha}/{decoded} of the textures behind "
+          f"{', '.join(n for group in flare_names for n in group)} have an "
+          f"alpha channel, which is what an additive sprite needs")
+
     check("sky.ske: the third float is a day/night light", all(varying),
           f"on all {len(varying)} files whose light varies, its low point falls "
           f"within two hours of midnight ({parsed - len(varying)} files hold a "

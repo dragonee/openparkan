@@ -28,7 +28,7 @@ practice — format facts yes, code no — is set out in
 | **Building interiors** | done — path graph for 29 buildings |
 | **Control points** | done — 284 members, 3599 named attachment points |
 | **`Land.map` navigation mesh** | done — all 33 maps, 34662 areals, adjacency and grid |
-| **Sky** | done — `sky.ske` day cycle and `sky.wea`'s nine texture slots, all 29 missions |
+| **Sky** | done — `sky.ske` day cycle, `sky.wea`'s nine texture slots and the engine's twelve-element lens flare, all 29 missions |
 | **Behaviour scripts, gameplay** | not started |
 
 ## Quickstart
@@ -141,10 +141,9 @@ every map tried.
 Renderer work is triaged in [TODO.md](TODO.md), which records both what is
 closed and what the answer turned out to be. Nothing is known to draw
 *incorrectly* any more; what is missing is fidelity the game had. Worst-looking
-first: the sky's weather layers (lens flares, snow and rain), the second layer
-of a terrain material, effects, the two `NL` archives that hold the fonts and
-2D sprites, and a handful of fields carried through the readers without being
-understood.
+first: the sky's snow and rain, the second layer of a terrain material,
+effects, the two `NL` archives that hold the fonts and 2D sprites, and a
+handful of fields carried through the readers without being understood.
 
 ## Documentation
 

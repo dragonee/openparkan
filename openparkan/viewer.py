@@ -685,7 +685,7 @@ def _pack_colour(rgba: tuple[int, int, int, int]) -> int:
 
 #: The sky.wea roles the viewer draws, and how far to shrink each.
 SKY_LAYERS = (("nebula", 256), ("stars", 256), ("clouds", 256),
-              ("sun", 128), ("moon", 128))
+              ("sun", 128), ("moon", 128), ("flare", 128), ("flare2", 128))
 
 
 def build_sky_payload(folder: Path, resolver: TextureResolver | None = None) -> dict | None:
@@ -729,6 +729,18 @@ def build_sky_payload(folder: Path, resolver: TextureResolver | None = None) -> 
             for k in frames
         ],
         "peak": frames.index(brightest) if brightest in frames else 0,
+        # The lens flare is a constant of the engine rather than of the
+        # mission, but it travels with the sky so the viewer has it in one
+        # place.  See sky.FLARE_ELEMENTS.
+        "flareChain": [
+            {"at": at, "size": size, "colour": colour & 0xFFFFFF,
+             "alpha": round((colour >> 24) / 255.0, 3), "tex": tex}
+            for at, size, colour, tex in sky.FLARE_ELEMENTS
+        ],
+        "flareScale": sky.FLARE_SCALE,
+        "flareCone": sky.FLARE_CONE_DEGREES,
+        "flareElevation": [sky.FLARE_ELEVATION_FULL_DEGREES,
+                           sky.FLARE_ELEVATION_ZERO_DEGREES],
     }
     if resolver is not None:
         for role, size in SKY_LAYERS:

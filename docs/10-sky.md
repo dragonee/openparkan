@@ -139,6 +139,44 @@ and 5, which are past the end of a 2 x 2 grid, and `SUN4.0`'s two sprites sit
 in the cells a 2 x 2 would number 1 and 3. The reader falls back to the whole
 texture for an index it cannot place rather than guess.
 
+## The lens flare
+
+`CSun::RenderFlare` is short and reads straight through. It strings **twelve
+sprites along the line from the sun's position on screen through the centre of
+the screen**, taking each one's place, size, colour and texture from four
+parallel tables in `Terrain.dll`'s data:
+
+| # | position | size | colour | texture |
+|---:|---:|---:|---|---:|
+| 0 | 1.2 | 0.2 | `#FFB090A3` | 0 |
+| 1 | 0.7 | 0.3 | `#FF5A58BB` | 0 |
+| 2 | 0.5 | 0.2 | `#9630BE52` | 1 |
+| 3 | 0.2 | 0.1 | `#96C93432` | 1 |
+| 4 | 0.0 | 0.1 | `#FF30BE52` | 0 |
+| 5 | −0.2 | 0.3 | `#96969664` | 1 |
+| 6 | −0.3 | 0.3 | `#FFB090A3` | 0 |
+| 7 | −0.5 | 0.7 | `#FF7C6BC9` | 0 |
+| 8 | −0.6 | 0.4 | `#96306452` | 1 |
+| 9 | −0.8 | 1.0 | `#FF0B17B9` | 0 |
+| 10 | −1.0 | 0.3 | `#FFB626B1` | 0 |
+| 11 | −1.1 | 0.2 | `#FF7CC5C9` | 0 |
+
+Position 1 is the sun itself and 0 the middle of the screen, so the chain
+starts just past the sun and runs out the far side. A ghost's half-size is
+`0.25 * (viewport width / 2) * size`, which makes the largest of them an
+eighth of the screen across. The colours are `D3DCOLOR` constants; the engine
+scales **only their alpha** by the flare's intensity and leaves the RGB alone,
+which is visible in the helper that does it — it shifts the top byte out,
+multiplies, and ORs the other three back unchanged. The texture column picks
+between the two flare slots of `sky.wea`; which of the pair the engine calls 0
+is not established.
+
+Intensity has two gates. The first is exact: the flare is off once the sun is
+more than **15°** off the view axis, ramps linearly to full on-axis, and the
+ramp is then squared. Those cosines are cached at load from a constant of 15
+degrees, alongside 30 and 60 for a second ramp on a quantity the sun object
+carries at `+0x80`, which has not been identified.
+
 ## What the viewer draws
 
 - The **nebula** on the dome, multiplied by the keyframe's zenith-to-horizon
@@ -146,6 +184,14 @@ texture for an index it cannot place rather than guess.
 - The **stars** over it, additive, fading in as the day's light drops.
 - The **clouds** over that, tiled four times and tinted by the horizon colour.
 - The **sun** and **moon** as billboards, opposite each other.
+- The **lens flare**, as a 2D overlay drawn after the scene — it is in the
+  lens, not the world, so it takes no depth test. The twelve elements and
+  their tables are the engine's; both gates are adapted. The 15° cone is
+  calibrated to the game's field of view and would almost never open against
+  an orbiting camera that looks down at the terrain, so the same
+  linear-then-squared ramp is driven by the sun's distance from the centre of
+  the screen; and a horizon test stands in for the unidentified second gate,
+  which at least has to take the flare away at night.
 
 Where the sun goes is the renderer's own choice: `CSun::Render` builds its
 matrix from two angles at `this+0x30` and `this+0x34`, and those have not been
@@ -159,9 +205,10 @@ agree. The time-of-day control walks the keyframes.
 - **Where the sun stands.** `CSun` keeps two angles; they are not in the
   keyframe. No pair of floats in the 88-byte block varies with time the way
   an azimuth and an elevation would.
-- **The lens flares, snow and rain.** Slots 5 to 8 resolve to real textures
-  and are not drawn: a flare needs the sun's screen position, and snow and
-  rain need the particle system in `effects.rlb`.
+- **What the flare's second gate measures.** The engine ramps it between the
+  cosines of 30° and 60° of a float the sun object keeps at `+0x80`.
+- **Snow and rain.** Slots 7 and 8 resolve to real textures and are not drawn;
+  they need the particle system in `effects.rlb`.
 - **The keyframe count of a second section.** Six files have two; their
   72-byte section headers are byte-identical yet hold 27 and 20 keyframes, so
   the count is not in them. The reader takes the second section's keyframes to

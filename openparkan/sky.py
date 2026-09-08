@@ -86,6 +86,45 @@ SLOT_ROLES = (
     "rain",
 )
 
+#: The lens flare, as ``Terrain.dll``'s ``CSun::RenderFlare`` draws it: twelve
+#: sprites strung along the line from the sun's position on screen through the
+#: centre of the screen, each ``(position, size, colour, texture)``.
+#:
+#: ``position`` is the fraction of that line -- 1 is the sun itself, 0 the
+#: middle of the screen, negative the far side, and the first element sits at
+#: 1.2, past the sun.  ``size`` is scaled by ``FLARE_SCALE`` and half the
+#: viewport width, so the largest ghost is an eighth of the screen across.
+#: ``colour`` is a D3D ARGB constant whose alpha the engine multiplies by the
+#: flare's own intensity.  ``texture`` picks between the two flare slots of
+#: ``sky.wea`` -- which of the pair the engine calls 0 is not established, so
+#: this takes 0 as ``flare`` and 1 as ``flare2``.
+FLARE_ELEMENTS = (
+    (1.2, 0.2, 0xFFB090A3, 0),
+    (0.7, 0.3, 0xFF5A58BB, 0),
+    (0.5, 0.2, 0x9630BE52, 1),
+    (0.2, 0.1, 0x96C93432, 1),
+    (0.0, 0.1, 0xFF30BE52, 0),
+    (-0.2, 0.3, 0x96969664, 1),
+    (-0.3, 0.3, 0xFFB090A3, 0),
+    (-0.5, 0.7, 0xFF7C6BC9, 0),
+    (-0.6, 0.4, 0x96306452, 1),
+    (-0.8, 1.0, 0xFF0B17B9, 0),
+    (-1.0, 0.3, 0xFFB626B1, 0),
+    (-1.1, 0.2, 0xFF7CC5C9, 0),
+)
+
+#: A ghost's half-size is ``FLARE_SCALE * (viewport width / 2) * size``.
+FLARE_SCALE = 0.25
+
+#: The flare is off when the sun is more than this many degrees off the view
+#: axis, and ramps linearly to full on-axis; the engine then squares the ramp.
+FLARE_CONE_DEGREES = 15.0
+
+#: A second ramp on the sun's own elevation: full above the first angle, out
+#: below the second.
+FLARE_ELEVATION_FULL_DEGREES = 30.0
+FLARE_ELEVATION_ZERO_DEGREES = 60.0
+
 #: The trailer opens with a kind word: 3 on 621 of the 656 shipped keyframes,
 #: 1 on 6, and 0 on the 29 that close a section.  The hour and minute follow
 #: it, one word later when the kind is 3.  Reading it that way gives a valid
