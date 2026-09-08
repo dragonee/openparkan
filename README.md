@@ -193,14 +193,18 @@ analysis/       disassembly scaffolding (not part of the library)
   `WEAR`, `MAT0` and terrain, with a headless runtime and a Vulkan renderer.
   The furthest-along project by some distance, and actively maintained.
 
-  Its `docs/reference/msh.md` supplied two facts this project had failed to
-  find on its own: that stream 2 is a 140-byte header followed by 68-byte
-  geometry slots, and that a node's fifteen trailing words are
-  `slot_index[lod * 5 + group]`. Both were checked against the shipped data
-  before being used — the slot layout accounts for stream 2 exactly on all 434
-  meshes. fparkan is GPL-2.0 and this project is MIT, so only its
-  documentation was read, never its source; a file format is a fact, an
-  implementation of one is not.
+  Its format reference has supplied facts this project failed to find on its
+  own, twice. `msh.md` gave the 140-byte stream-2 header with 68-byte geometry
+  slots and a node's fifteen trailing words as `slot_index[lod * 5 + group]`;
+  `rsli.md` gave the `NL` archives their name and their shape — an encrypted
+  entry table, and members packed one at a time by any of seven methods, which
+  is why reading them as a single stream could never have worked. Everything
+  borrowed is checked against the shipped data before it is used: the slot
+  layout accounts for stream 2 exactly on all 434 meshes, and the RsLi header
+  and table offsets check out on both files, while the parts that cannot be
+  checked yet are marked as theirs rather than ours. fparkan is GPL-2.0 and
+  this project is MIT, so only its documentation was read, never its source;
+  a file format is a fact, an implementation of one is not.
 - [AlexKimov/parkan-file-formats](https://github.com/AlexKimov/parkan-file-formats)
   — 010Editor templates and QuickBMS scripts, mostly for Parkan 1's `.lib`.
 

@@ -280,21 +280,20 @@ and 4 that separate them are the magnitude in their `.exp`.
 
 ### 2.4 The `NL` archives block the UI
 
-Half open now. The 32-byte header is [settled](docs/06-open-questions.md) —
-a member count, an `0xABBA` marker, then the unpacked and packed sizes — and
-the payload is **LZSS**: flag byte, eight items, LSB first, a set bit a
-literal and a clear bit a two-byte match with a 12-bit offset and a four-bit
-length plus three.
+Narrowed to one thing. fparkan calls the format **RsLi** and documents it; the
+header and the `[32][count × 32][payloads]` layout are
+[confirmed here](docs/06-open-questions.md), and the entries are a name, a
+storage method, an offset and two sizes.
 
-`gamefont.rlb` decodes to **87057 bytes of a declared 87096** under that,
-0.04% short, and the output is unmistakably a font: forty zeros then a glyph
-table stepping by four. `sprites.lib` does not decode the same way — 352625 of
-1573632 — and a search over offsets, splits, minimum lengths and bit orders
-finds nothing exact for it.
+What blocks it is that **the entry table is XOR-encrypted** with a keystream
+seeded from the word at 0x14, and the generator is neither documented nor
+recovered — fifteen classic LCGs fail. Without the table there is no way to
+find where a member starts or which of the seven storage methods it uses, and
+those run from raw through LZSS and adaptive Huffman to Deflate.
 
-So: where `gamefont.rlb`'s last 39 bytes come from, and what `sprites.lib`
-does differently. The probe is `analysis/nl.py`; nothing is in the library,
-because a decompressor that is 39 bytes short is one that does not work.
+That also corrects what this file said before: `sprites.lib` was never going
+to decode as one stream, because its members are packed separately and by
+different methods.
 
 ---
 

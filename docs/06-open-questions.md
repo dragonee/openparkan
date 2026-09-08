@@ -31,44 +31,52 @@ The navigation mesh is [solved](08-arealmap.md). Two fields are not:
 
 ## The `NL` archives
 
-`gamefont.rlb` and `sprites.lib` are not NRes. The 32-byte header is settled:
+Not NRes. fparkan calls the format **RsLi** and
+[documents it](https://fparkan.popov.link/reference/rsli/); what follows keeps
+its claims and this project's checks apart, as
+[09-method.md](09-method.md) requires.
+
+Confirmed against both shipped files:
 
 ```
 0x00  char[2]  'NL'
-0x02  uint16   1            version
-0x04  uint16   count        2 in gamefont.rlb, 24 in sprites.lib
-0x06  uint16   count        the same value again
-0x08  6 bytes  zero
+0x02  uint8    0            reserved
+0x03  uint8    1            version
+0x04  int16    count        2 in gamefont.rlb, 24 in sprites.lib
+0x06  int16    count        the same value again
 0x0E  uint16   0xABBA       marker
-0x10  uint32   unpacked     87096 and 1573632
-0x14  uint32   packed       25991 and 99633
-0x18  uint32   zero, twice
 ```
 
-`packed` is exactly `file size − 96` on the one and `file size − 776` on the
-other, so the stream sits at the end and a block of 64 or 744 bytes stands
-between it and the header. That block is high-entropy on both, so it is not a
-plain directory. `sprites.lib`'s `unpacked` reads as **24 × (65536 + 32)** —
-24 sprites of 256 × 256 with a 32-byte header apiece — which is exactly
-1573632.
+and the layout `[header 32][entry table count × 32][payloads]`, which puts the
+payload at 96 in `gamefont.rlb` and 800 in `sprites.lib`.
 
-The payload is **LZSS**, and `gamefont.rlb` all but falls out: a flag byte,
-eight items, least significant bit first; a set bit is a literal; a clear bit
-is a two-byte match with a 12-bit offset and a length of four bits plus three.
-That gives **87057 bytes of a declared 87096** — 0.04% short — and the output
-is unmistakably a font: forty zero bytes and then a glyph table stepping by
-four, `04 02 04 00`, `08 06 08 00`, `0c 09 0c 00`.
+From the reference and **not** confirmed, because the entry table cannot be
+read: a 32-byte entry of `char[12]` name, four service bytes, an `int16` of
+flags, an `int16` mapping the sorted position to the original, then unpacked
+size, offset and packed size as `uint32`. The flags pick a storage method —
+raw, a byte transform, LZSS, transform + LZSS, adaptive Huffman + LZSS,
+transform + Huffman + LZSS, or raw Deflate.
 
-Two things are missing. Where the last 39 bytes of `gamefont.rlb` come from,
-and why `sprites.lib` does not decode the same way — from offset 776 it yields
-352625 of its declared 1573632, and a search over offsets, over the 12/4,
-4/12, 11/5, 10/6 and 8/8 splits, over minimum lengths 1 to 4 and both bit
-orders finds nothing exact. No shipped binary contains the `'NL'` magic, the
-`0xABBA` marker or either file's name, so the loader has not been found
-either.
+The entry table is XOR-transformed by a keystream seeded from the low 16 bits
+of the word at 0x14 and running across the whole table without resetting
+between records. **The generator is not documented and has not been
+recovered**, so the table stays unreadable and members cannot be located.
+Fifteen classic LCGs, over 16- and 32-bit states and four output byte
+selections, all fail the test that the top byte of every `uint32` in an entry
+must decrypt to zero on files this small.
 
-The probe is `analysis/nl.py`. Nothing is in the library, because a
-decompressor that is 39 bytes short is a decompressor that does not work.
+One thing still reads without it: decoding `gamefont.rlb`'s payload as a
+single LZSS stream from 96 gives 87057 bytes whose head is unmistakably a font
+— forty zeros, then a glyph table stepping by four, `04 02 04 00`,
+`08 06 08 00`, `0c 09 0c 00` — which is consistent with its first member using
+the plain LZSS method.
+
+The probe is `analysis/nl.py`, which also records the wrong turn: this project
+read 0x10 and 0x14 as an unpacked and a packed size, and `file size − packed`
+lands on 96 for `gamefont.rlb`, which is the right answer for the wrong
+reason. 0x14 is a seed. Believing otherwise hid why `sprites.lib` would not
+decode — its members are packed **separately and by different methods**, one
+of them Deflate, so no single pass over the payload was ever going to work.
 
 ## The .ctl controller
 
