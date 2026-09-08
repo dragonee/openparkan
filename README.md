@@ -31,7 +31,7 @@ practice — format facts yes, code no — is set out in
 | **Control points** | done — 284 members, 3599 named attachment points |
 | **`Land.map` navigation mesh** | done — all 33 maps, 34662 areals, adjacency and grid |
 | **Sky** | done — `sky.ske` day cycle, `sky.wea`'s nine texture slots, the engine's twelve-element lens flare and the weather markers, all 29 missions |
-| **RsLi archives** | done — `gamefont.rlb` and `sprites.lib`, encrypted entry table, 26 members; the whole 2D interface |
+| **RsLi archives** | mostly — encrypted entry table read, all 24 `sprites.lib` members out; `gamefont.rlb`'s two use an LZSS that does not decode |
 | **Behaviour scripts, gameplay** | not started |
 
 ## Quickstart
@@ -149,10 +149,9 @@ every map tried.
 Renderer work is triaged in [TODO.md](TODO.md), which records both what is
 closed and what the answer turned out to be. Nothing is known to draw
 *incorrectly* any more; what is missing is fidelity the game had. Worst-looking
-first: what the floats inside an effect's emitter mean, the second layer of a
-terrain material, `gamefont.rlb`'s two members now that the archive itself
-opens, and a handful of fields carried through the readers without being
-understood.
+first: what the floats inside an effect's emitter mean, RsLi's LZSS and with
+it the font, the second layer of a terrain material, and a handful of fields
+carried through the readers without being understood.
 
 ## Documentation
 

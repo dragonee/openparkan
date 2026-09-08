@@ -181,11 +181,12 @@ written down is a question nobody reopens.
       state seeded from the header word at 0x14, `a = ((a<<1) ^ d)`,
       `d = (d>>1) ^ a`, running across the table without resetting. The
       keystream came out of `Ngi32.dll`'s loader; fparkan's reference named
-      the format and gave the entry layout. Decrypted, **26 of 26 members
-      unpack to exactly the size they declare** -- two LZSS, 24 raw Deflate --
-      and all 24 sprites are ordinary `Texm`, so `openparkan textures
-      sprites.lib` writes the cockpit, the interface, the cursors and the
-      logo straight out. → [docs/12-rsli.md](docs/12-rsli.md)
+      the format and gave the entry layout. Decrypted, **all 24 Deflate
+      members of `sprites.lib` inflate to exactly the size they declare** and
+      are ordinary `Texm`, so `openparkan textures sprites.lib` writes the
+      cockpit, the interface, the cursors and the logo straight out. The two
+      LZSS members of `gamefont.rlb` do **not** decode and are refused; see
+      §2.4. → [docs/12-rsli.md](docs/12-rsli.md)
 - [x] **Coplanar geometry.** Two causes, both fixed. The terrain's two ground
       layers now share a single pass — bucketing faces by the pair costs 5 to
       8 groups per map against 3 to 5 — and the file's own duplicated faces
@@ -287,6 +288,22 @@ and what bit 8 controls.
 A negative result worth keeping: an explosion's size is **not** in its effect.
 `exp_frt_l`, `_m` and `_b` share their emitter blocks byte for byte; the 2, 3
 and 4 that separate them are the magnitude in their `.exp`.
+
+### 2.4 RsLi's LZSS keeps the font shut
+
+The archives open, but `gamefont.rlb`'s two members are `0x040` LZSS and do
+not decode. The obvious 12-bit offset, 4-bit length shape reproduces
+`ARIALTEX.TFT`'s `Tfnt` header and lands a `Texm` magic at 4116 — where
+arithmetic says one belongs, 20532 − 4116 − 32 = 16384 = 128 × 128 — and then
+emits maximum-length matches from the wrong place, so the "pixels" are the
+bytes `Texm` repeated. A ring-buffer index, a pre-filled window, other
+starting positions and other minimum lengths all fail the same way, and the
+size check cannot catch it because the output is truncated to fit.
+
+The engine's decompressor has not been found: it is not beside the loader in
+`Ngi32.dll`, and neither a 4096 window constant nor a dispatch on the seven
+storage flags turns up in that DLL. Until it does, the font and its palette
+stay shut. See [docs/12-rsli.md](docs/12-rsli.md).
 
 ---
 

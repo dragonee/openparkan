@@ -29,13 +29,17 @@ The navigation mesh is [solved](08-arealmap.md). Two fields are not:
 `MHallWay`'s path graph turned out to be mesh stream 17, carried by buildings
 — see [07-objects.md](07-objects.md).
 
-## `gamefont.rlb`'s two members
+## RsLi's LZSS
 
-The archives themselves are [solved](12-rsli.md) -- RsLi, an encrypted entry
-table, 26 members all unpacking to their declared sizes. The 24 in
-`sprites.lib` are ordinary `Texm`. The two in `gamefont.rlb` are not:
-`ARIALTEX.TFT` opens with a table of glyph boxes stepping by four after forty
-zero bytes, and `PAL.PAL` is 66564 bytes that have not been looked at.
+The archives themselves are [solved](12-rsli.md) -- an encrypted entry table,
+and the 24 Deflate members of `sprites.lib` all inflate exactly. The two
+members of `gamefont.rlb` are `0x040` LZSS and **do not decode**: the obvious
+12-bit offset, 4-bit length shape reproduces their first four kilobytes and
+then emits maximum-length matches from the wrong place, and none of the usual
+variations fixes it. `read` refuses them. That leaves the font closed, and the
+engine's own decompressor unfound -- it is not next to the loader in
+`Ngi32.dll`, and neither a 4096 window constant nor a dispatch on the seven
+storage flags turns up in that DLL's code.
 
 ## The .ctl controller
 

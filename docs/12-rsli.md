@@ -69,22 +69,46 @@ and the names come out at once:
 
 `flags` picks how a member is packed. The engine defines seven methods — raw,
 a byte transform, LZSS, transform + LZSS, adaptive Huffman + LZSS, transform +
-Huffman + LZSS, and raw Deflate — and the shipped data uses two of them: the
-font's pair are `0x040` LZSS, and all 24 sprites are `0x100` raw Deflate.
+Huffman + LZSS, and raw Deflate — and the shipped data uses two: all 24
+sprites are `0x100` raw Deflate, and the font's pair are `0x040` LZSS.
 
-**All 26 members unpack to exactly the size their entry declares.**
-
-The LZSS is the shape the era used everywhere: a flag byte, then eight items,
-least significant bit first; a set bit is a literal, a clear bit a two-byte
-match with a 12-bit offset — the first byte plus the high nibble of the second
-— and a length of the low nibble plus three. It overruns by one byte on both
-members that use it, so the declared size is the authority and the reader
-truncates.
+**The Deflate members are read. The two LZSS ones are not.** All 24 sprites
+inflate to exactly the size their entry declares; `read` refuses the other two
+rather than hand back plausible rubbish.
 
 `sprites.lib::INTERF8.TEX` declares one byte more than the file holds; the
 deflate stream ends before it, so a short read is harmless. fparkan
 [documents the same quirk](https://fparkan.popov.link/reference/rsli/), which
 is a pleasing independent confirmation that the table decrypts correctly.
+
+### Why the LZSS is refused
+
+The obvious shape — a flag byte, eight items, least significant bit first, a
+set bit a literal and a clear bit a two-byte match with a 12-bit offset and a
+length of four bits plus three — looks right at first. It reproduces
+`ARIALTEX.TFT`'s `Tfnt` magic and header, and lands a `Texm` magic at 4116,
+which is exactly where arithmetic says one should be: 20532 − 4116 − 32 =
+16384 = 128 × 128.
+
+Then it falls apart. From 4116 on it emits maximum-length matches from the
+wrong place, so the "texture" is the four bytes `Texm` repeated: the byte
+histogram of the supposed pixels is `T` 1063, `e` 1260, `x` 1261, `m` 1237,
+space 1223, and the non-zero runs after 4116 sit exactly 18 bytes apart —
+18 being the longest match the encoding can express.
+
+None of the usual variations helps: an absolute ring-buffer index instead of a
+distance back, a window pre-filled with zeros or spaces, a different starting
+write position, a different minimum length. The size check does not catch any
+of it, because the output is truncated to the declared length and then matches
+it.
+
+So the two font members stay closed, and with them the font itself. What can
+be said about `ARIALTEX.TFT` comes from the part that decodes before the
+corruption plus arithmetic: a 20-byte header beginning `Tfnt`, then 4096 bytes
+that divide evenly into 256 records of 16, then a 128 × 128 8-bit texture at
+4116. `PAL.PAL` is 66564 bytes = 4 + 1024 + 65536, which reads as a header, a
+256-entry palette and a 256 × 256 image, but the pixels that come out are not
+one.
 
 ## What is inside
 
@@ -100,10 +124,8 @@ uv run openparkan textures sprites.lib --out /tmp/ui --alpha
 `COCKPIT.TEX` is the radar screen and reticle; `INTERF1.TEX` is window frames,
 buttons, the cursor arrow and the check and cross icons.
 
-`gamefont.rlb`'s two members are not Texm. `PAL.PAL` is 66564 bytes and
-`ARIALTEX.TFT` 20532; the `.TFT` opens with a table of glyph boxes stepping by
-four — `04 02 04 00`, `08 06 08 00`, `0c 09 0c 00` — after forty zero bytes.
-Neither is parsed further.
+`gamefont.rlb`'s two are not readable at all until the LZSS is, so the font
+stays shut.
 
 ## Prior art
 

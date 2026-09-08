@@ -1787,18 +1787,23 @@ def check_rsli(check, game: Path) -> None:
 
     unpacked = 0
     kinds: Counter[str] = Counter()
+    refused: Counter[str] = Counter()
     for _name, archive in archives:
         for entry in archive:
             try:
                 blob = archive.read(entry)
             except rsli.RsLiFormatError:
+                refused[entry.storage] += 1
                 continue
             if len(blob) == entry.size:
                 unpacked += 1
                 kinds[entry.storage] += 1
-    check("RsLi: every member unpacks to the size it declares",
-          unpacked == members > 0,
-          f"{unpacked}/{members} members, {dict(kinds)}")
+    check("RsLi: every deflate member unpacks to the size it declares",
+          unpacked == members - sum(refused.values()) > 0
+          and set(kinds) == {"deflate"},
+          f"{unpacked}/{members} members, {dict(kinds)}; the other "
+          f"{sum(refused.values())} are {dict(refused)} and are refused "
+          f"rather than guessed at")
 
     # And the sprites are ordinary textures once they are out.
     sprites = next((a for n, a in archives if n == "sprites.lib"), None)
@@ -1808,7 +1813,7 @@ def check_rsli(check, game: Path) -> None:
             try:
                 texm.decode(sprites.read(entry))
                 decoded += 1
-            except (texm.UnsupportedTexture, rsli.RsLiFormatError):
+            except (texm.UnsupportedTexture, rsli.RsLiFormatError, ValueError):
                 pass
     check("RsLi: sprites.lib holds Texm textures", sprites and decoded == len(sprites),
           f"{decoded}/{len(sprites) if sprites else 0} members decode as Texm, "

@@ -42,17 +42,18 @@ nothing short of the whole table decrypts.  Once it does, the names come out:
 ``PAL.PAL`` and ``ARIALTEX.TFT`` in the font archive, and ``COCKPIT.TEX``,
 ``LOGO.TEX``, ``INTERF1``..``INTERF8`` and two geyser animations in the other.
 
-``flags`` picks a storage method.  Only three of the seven occur: raw, LZSS,
-and raw Deflate, and each of the 26 shipped members decompresses to exactly
-the size its entry declares.  The LZSS is the same shape the rest of the era
-used -- a flag byte, eight items, least significant bit first, a set bit a
-literal and a clear bit a two-byte match with a 12-bit offset and a length of
-four bits plus three -- and it overruns its declared size by one byte on both
-members that use it, so the size is the authority.
+``flags`` picks a storage method.  Two of the seven occur here: the 24 members
+of ``sprites.lib`` are ``0x100`` raw Deflate, and the two of ``gamefont.rlb``
+are ``0x040`` LZSS.
 
-The sprite members are ordinary ``Texm`` textures once unpacked, 4444 at
-64 x 64, 128 x 128 and 256 x 256, so they go straight through
-``openparkan.texm``.
+**Deflate is read; LZSS is not.**  All 24 sprite members inflate to exactly the
+size their entry declares and decode as ordinary ``Texm`` textures -- 4444 at
+64 x 64, 128 x 128 and 256 x 256 -- so they go straight through
+``openparkan.texm``.  The two font members do not: the obvious 12-bit offset,
+4-bit length shape reproduces their first few kilobytes and then falls apart,
+emitting maximum-length matches from the wrong place, and the size check does
+not catch it because the output is truncated to fit.  ``read`` refuses them
+rather than hand back plausible rubbish; see ``docs/12-rsli.md``.
 """
 
 from __future__ import annotations
@@ -117,7 +118,15 @@ def decrypt_table(cipher: bytes, seed: int) -> bytes:
 
 
 def unpack_lzss(data: bytes, size: int) -> bytes:
-    """Decode an LZSS member, stopping at the size its entry declares."""
+    """**Wrong past the first few kilobytes.**  Kept for the record only.
+
+    A flag byte, eight items, least significant bit first; a set bit a
+    literal, a clear bit a two-byte match with a 12-bit offset and a length of
+    four bits plus three.  That reproduces the head of both font members --
+    ``ARIALTEX.TFT``'s ``Tfnt`` magic and the ``Texm`` at 4116 -- and then
+    starts emitting 18-byte matches from the wrong offset, so the tail is a
+    repeat of whatever came before.  ``read`` does not use it.
+    """
     out = bytearray()
     pos = 0
     end = len(data)
@@ -216,8 +225,6 @@ class RsLiArchive:
             raise RsLiFormatError(f"{self.source}: {entry.name} is outside the file")
         if entry.flags == STORE_RAW:
             out = raw[: entry.size]
-        elif entry.flags == STORE_LZSS:
-            out = unpack_lzss(raw, entry.size)
         elif entry.flags == STORE_DEFLATE:
             out = zlib.decompressobj(-zlib.MAX_WBITS).decompress(raw)
         else:
