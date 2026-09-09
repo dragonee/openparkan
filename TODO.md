@@ -410,23 +410,33 @@ gates, and rain where a mission asks for it (see
 [docs/10-sky.md](docs/10-sky.md)). The ninth is snow, and **no shipped mission
 names it**, so there is nothing to switch on.
 
-What is left of the weather is where a shower *stops*: the sun and moon come
-in start/stop pairs and rain does not, so the viewer runs it to the next
-keyframe that names anything — a reading, not a fact.
+What is left of the weather is where a shower *stops* — and this round showed
+why it was never going to be found in the file.
+
+`CAtmData::GetEvents` (`0x1006dc10`) dispatches through a jump table at
+`0x1006e829`; cases 2 and 7 share the out-of-range target and do nothing,
+and the other eight pair up as start/stop per object type. Its records come
+from `0x1006d740`, which splits the query at midnight and calls the collector
+at `0x1006d460`. The collector asks the atmosphere data object for a section's
+keyframes one at a time and receives a **0x98-byte record whose layout is the
+engine's, not the file's**: `+0x00` the opcode, `+0x20` the hour, `+0x24` the
+minute, `+0x64` a *pointer* to the name. **The opcode is assembled in memory.**
+
+The data agrees. No slot of the 22 carries 0..9 across the 656 keyframes —
+slot 5 is the only small one and it is 0 throughout. The trailer's last word
+does span 0..9, but it puts **438 of 656** keyframes on case 7, the no-op,
+including 60 named `sun` and 59 named `moon` — bodies that must start and
+stop. So it is not the opcode, and the field hunt is closed as a dead end. The
+next handle is the data object's own vtable, one hop further out.
+
+**The sun's lifetime is half answered.** The collector's conversion is
+`t = (hour * 3600 + minute * 60) * scale / 86400` — seconds since midnight,
+through a per-section scale, over a day. What the scale *is* comes from a
+virtual call on the same object and is the last piece. It changes nothing on
+screen: the start and stop keyframes already say when the sun is up.
 
 Two smaller unknowns sit in the same file: the keyframe count of a second
-section (six missions have one), and most of the 124-byte file header. The
-object type is now half-answered — `CAtmData::GetEvents` dispatches on a
-ten-valued opcode whose branches pair up as start/stop per object type, and
-the sky is created outside that switch with a hardcoded id — but which *file*
-field feeds the opcode is not pinned down, which is why where a shower stops
-is still unknown.
-
-The sun's **lifetime** is the last piece of its own block: `GetEvents` maps
-the start and stop keyframes' clock times through a per-section scale and
-takes the difference, and that scale comes from a virtual call that has not
-been followed. It changes nothing on screen — the start and stop keyframes
-already say when the sun is up.
+section (six missions have one), and most of the 124-byte header.
 
 ### 2.2 Who asks a material for its second track
 

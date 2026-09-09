@@ -195,11 +195,12 @@ markers are all early morning: 02:40, 05:10, 05:40 and 07:00.
 
 `Terrain.dll` says what the engine does with them.
 `CAtmosphere::HandleEvents` walks a list of 20-byte events built by
-`CAtmData::GetEvents`, and each event's second word is the object type it
-passes to `CreateAtmosphereObject` — a five-way switch, allocating 0x9e8,
-0x560, 0xc0, 0xb8 and one more. `GetEvents` itself dispatches on a ten-valued
-opcode at the head of its keyframe record, and the ten branches pair up
-exactly:
+`CAtmData::GetEvents` (`0x1006dc10`), and each event's second word is the
+object type it passes to `CreateAtmosphereObject` — a five-way switch,
+allocating 0x9e8, 0x560, 0xc0, 0xb8 and one more. `GetEvents` dispatches on a
+ten-valued opcode at the head of its keyframe record through a jump table at
+`0x1006e829`, and the ten branches pair up exactly — cases 2 and 7 share the
+*same* target as the out-of-range default, so they do nothing at all:
 
 | opcode | object type | action |
 |---:|---:|---|
@@ -213,10 +214,40 @@ Even starts, odd stops. Object type **1** is never created from an event, and
 the reason is visible one call site up: the sky is created directly, with a
 hardcoded `1`, which is why every mission has one and no keyframe has to ask.
 
-Which field of the *file* feeds that opcode is not established — the trailer
-word this reader calls `kind` is 3 on 621 of the 656 keyframes, which does not
-fit. So where a shower **stops** is unknown: the sun and moon come in pairs
-and rain does not.
+### The opcode is not a field of the file
+
+`GetEvents` gets its records from `0x1006d740`, which splits the query at
+midnight and calls `0x1006d460` once or twice. That is the collector: it asks
+the atmosphere data object for a section's keyframe count and then for each
+keyframe in turn, receiving a **0x98-byte record** whose layout is the
+engine's, not the file's — `+0x00` the opcode, `+0x20` the hour, `+0x24` the
+minute, `+0x64` a **pointer** to the name that branch 0 compares against
+`"sun"`.
+
+So the opcode is assembled in memory, which is why looking for it in the file
+comes up empty, and the data says the same. None of the 22 four-byte slots
+carries a value in 0..9 on all 656 keyframes — slot 5 is the only small one
+and it is 0 throughout. The trailer's last word does span 0..9, but it puts
+**438 of the 656** keyframes on case 7, the no-op, and among them 60 named
+`sun` and 59 named `moon` — bodies that must start and stop. It is not the
+opcode.
+
+**So where a shower stops is still unknown**, and the reason is now clear:
+nothing in `sky.ske` says. The sun and moon come in start/stop pairs of
+*named* keyframes; rain and lightning appear once in a section.
+
+### How a keyframe's clock becomes an event time
+
+The same collector shows the conversion the sun's lifetime needed:
+
+```
+t = (hour * 3600 + minute * 60) * scale / 86400
+```
+
+— the seconds since midnight, scaled by a per-section value the collector
+fetches through the data object's vtable and divided by a day. What that scale
+*is* is the last piece: it comes from a virtual call that has not been
+followed, and it is what turns two clock times into a duration.
 
 ## What the viewer draws
 
