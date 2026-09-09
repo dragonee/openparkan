@@ -959,18 +959,31 @@ if (typeof THREE === "undefined" || typeof pako === "undefined") {
       } else if (pooled) {
         opts.color = multiply(tint, multiply(gr.tint, pooled.colour));
       }
-      if (pooled) applyCutout(opts, pooled);
       // How the material draws is in Material.lib's archive directory, not
-      // in the record: 8 is additive.  Ten model materials carry it --
-      // PI_LIGHT, PI_TELE and the bridge glows.  Flags 4 (see-through, 140
-      // model materials, the bunker portals among them) is read but not acted
-      // on: the pool drops the alpha channel of every non-cutout texture, so
-      // blending one today would only cost depth writes and buy nothing.
+      // in the record: 4 is see-through, 8 additive.  A blended material
+      // keeps its alpha channel through the pool, so it blends rather than
+      // cutting a silhouette out of itself -- and it must not take the alpha
+      // *test* a cutout does, which is why applyCutout only runs for the
+      // rest.  140 model materials draw see-through (the bunker portals,
+      // B_COMP_3G instrument glass) and ten additive (PI_LIGHT, PI_TELE, the
+      // bridge glows).
+      // The two signals say different things and both are used: the flags
+      // say how the material *composites*, the texture says what its alpha
+      // *means*.  A silhouette wants the alpha test -- 32 of the see-through
+      // materials are foliage, FTREE1, HTREE1, GRASS, ELKA -- while a graded
+      // alpha wants blending.  Additive overrides both: an explosion or a
+      // shield is a glow whatever shape its alpha has.
       if (gr.blend & BLEND_ADD) {
         opts.transparent = true;
         opts.blending = THREE.AdditiveBlending;
         opts.depthWrite = false;
-        delete opts.alphaTest;
+      } else if ((gr.blend & BLEND_ALPHA) && pooled && !pooled.cutout) {
+        opts.transparent = true;
+        // A see-through part is small and sits inside its own model, so
+        // leaving depth unwritten is what keeps it from culling the rest.
+        opts.depthWrite = false;
+      } else if (pooled) {
+        applyCutout(opts, pooled);
       }
       if (gr.lightmap !== undefined) {
         // Baked static lighting: 21 buildings ship one, keyed by their wear's

@@ -323,9 +323,14 @@ written down is a question nobody reopens.
       it, along with every `JET*`, `SHOOT*`, `LASER_*` and `SPLASH*`; **210 of
       214** carry a black diffuse; **not one** carries a specular against
       261/417 of the flags-2 skins; and an effect's emitters name **2519 at 8
-      and 980 at 4** against 24 ordinary skins. `Material.blend` carries it and
-      the viewer draws the ten additive model materials — `PI_LIGHT`,
-      `PI_TELE`, the bridge glows — additively.
+      and 980 at 4** against 24 ordinary skins. `Material.blend` carries it,
+      and the viewer uses it with the texture rather than instead of it: the
+      flags say how a material *composites*, the texture says what its alpha
+      *means*. Additive blends whatever the alpha's shape; see-through blends
+      a graded alpha (**166** of the 219) but alpha-tests a silhouette (32 —
+      the foliage, `FTREE1`, `HTREE1`, `GRASS`, `ELKA`); everything else keeps
+      the old heuristic and has its alpha dropped in the reader, which is what
+      stops a gloss map punching holes through a building.
       → [docs/07-objects.md](docs/07-objects.md)
 - [x] **Animation playback.** **157 of the 435 meshes carry one**, and three
       facts make it playable as a bone per node. It is **rigid**: every one of

@@ -85,6 +85,16 @@ class TextureResolver:
         self.pool: list[dict] = []
         self._by_name: dict[str, int] = {}
         self._frames: dict[str, list[int]] = {}
+        #: Textures a see-through or additive material names.  Alpha is
+        #: dropped everywhere else -- see ``_image`` -- and until the archive
+        #: directory's flags byte was read there was nothing to tell the two
+        #: apart, so it was dropped from those too.
+        self._blended: set[str] = {
+            texture.upper().split(".")[0]
+            for material in self.materials.materials.values()
+            if material.blend & (materials.BLEND_ALPHA | materials.BLEND_ADD)
+            for texture in material.textures
+        }
 
     def _downsample(
         self, tex, pixels: bytes, stride: int = 3, max_size: int | None = None
@@ -240,27 +250,34 @@ class TextureResolver:
         entry = self.index.get(key)
         if entry is not None:
             tex = texm.decode(self.archive.read(entry))
-            # 241 of the 393 shipped textures carry alpha, but almost none of
-            # it is transparency.  Only a *silhouette* is -- a tree is a pair
-            # of crossed planes that reads as a plant once the texture cuts
-            # its own outline.  The rest is a continuous gloss map over solid
-            # machinery, and alpha-testing it punches holes through buildings.
+            # 241 of the 393 shipped textures carry alpha, but on most of
+            # them it is not transparency -- it is a continuous gloss map over
+            # solid machinery, and alpha-testing that punches holes through
+            # buildings.  Two things are transparency, and the material says
+            # which: a **cutout**, where the alpha is a silhouette and a tree
+            # reads as a plant once its texture cuts its own outline, and a
+            # material whose flags byte says it draws see-through or additive.
+            # Everything else has its alpha dropped here and never sees it.
             alpha = tex.rgba[3::4]
             cutout = texm.is_cutout(tex)
-            if cutout:
+            blended = key in self._blended
+            if cutout or blended:
                 w, h, pixels = self._downsample(tex, tex.rgba, 4)
             else:
                 w, h, pixels = self._downsample(tex, texm.drop_alpha(tex))
             mat = {
                 "kind": "texture",
                 "name": name,
-                "url": _png_data_uri(w, h, pixels, cutout),
+                "url": _png_data_uri(w, h, pixels, cutout or blended),
                 "opacity": 1.0,
                 # A cutout is drawn with an alpha test rather than blending:
                 # it needs no depth sorting, and it is what the fixed-function
                 # hardware this was written for could do.
                 "cutout": cutout,
                 "graded": cutout and any(0 < v < 255 for v in alpha),
+                # Whether the alpha channel survived, so a blended material
+                # knows there is something to blend.
+                "alpha": cutout or blended,
             }
         else:
             r, g, b, a = _FALLBACK_COLOUR

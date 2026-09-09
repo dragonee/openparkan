@@ -613,6 +613,33 @@ def check_materials(check, game: Path) -> None:
           f"are drawn unlit, and not one of them carries a specular colour "
           f"against {lit_shiny}/{len(lit)} of the flags-2 skins")
 
+    # What a see-through material's alpha actually is, which is what a
+    # renderer has to branch on: a silhouette takes an alpha test, a graded
+    # one takes blending.
+    stems = {e.name.split(".")[0].upper(): e for e in textures}
+    def alpha_kind(material) -> str:
+        texture = material.texture
+        entry = stems.get(texture.upper().split(".")[0]) if texture else None
+        if entry is None:
+            return "none"
+        pixels = texm.decode(textures.read(entry))
+        channel = pixels.rgba[3::4]
+        if not any(v < 16 for v in channel):
+            return "opaque"
+        return "silhouette" if texm.is_cutout(pixels) else "graded"
+    see = Counter(alpha_kind(m) for m in lib.materials.values()
+                  if m.blend == materials.BLEND_ALPHA)
+    lit = Counter(alpha_kind(m) for m in lib.materials.values()
+                  if m.blend == materials.BLEND_LIT)
+    check("Material.lib: a see-through material's alpha is real",
+          see["graded"] + see["silhouette"] > sum(see.values()) * 0.85
+          and lit["silhouette"] < sum(lit.values()) * 0.02,
+          f"the flags-4 materials name {dict(sorted(see.items()))} textures "
+          f"and the flags-2 skins {dict(sorted(lit.items()))} -- so a "
+          f"see-through material really does carry transparency, and the "
+          f"silhouettes among it are the foliage (FTREE1, HTREE1, GRASS, "
+          f"ELKA), which want an alpha test rather than blending")
+
     # Who names which group.  Each consumer lands in one, sharply.
     def group_of(names) -> Counter:
         out: Counter[int] = Counter()

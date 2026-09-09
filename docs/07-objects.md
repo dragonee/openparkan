@@ -715,6 +715,27 @@ reading fits a set of black-diffuse, specular-free materials called `*_add`.
 What the record's own class byte at +4 means is still open; this is the field
 a renderer needs.
 
+### Two signals, and both are used
+
+The flags byte says how a material **composites**; the texture says what its
+alpha **means**. They are not the same question, and a renderer needs both.
+
+241 of the 393 textures carry an alpha channel and on most of them it is a
+gloss map over solid machinery — alpha-testing that punches holes through a
+building, which is why the reader drops the channel by default. The flags byte
+is what says when not to. Of the 219 see-through materials, **166 name a
+graded alpha** and 32 name a silhouette; of the 417 ordinary skins, only 4 are
+silhouettes. So:
+
+- **additive** (flags 8) blends additively whatever the alpha's shape — an
+  explosion or a shield is a glow;
+- **see-through** (flags 4) blends when the alpha is graded, but takes the
+  alpha *test* when it is a silhouette. Those 32 are the foliage — `FTREE1`,
+  `HTREE1`, `GRASS`, `ELKA` — and a tree wants a hard edge and a depth write,
+  not sorting;
+- everything else keeps the old cutout heuristic, and its alpha never leaves
+  the reader.
+
 ### The second count is animation tracks, not layers
 
 The second `uint16` counts **animation tracks**, not texture layers, which is
