@@ -13,7 +13,8 @@ selector.  Every stream is a flat array indexed by vertex or by face.
      5       4  vertex      layer-1 UV, uint16 8.8 fixed point
     18       4  vertex      layer-2 UV, uint16 8.8 fixed point
     14       4  vertex      layer blend weight, float32 in 0..1
-    11       4  face        (face index, flags)
+    11       4  face        the draw order: a face index, a flags byte
+                             and a byte that is zero on 275566 of 275882
     21      28  face        the face record, see FACE below
 
 Streams 1 and 2 are the map's own **spatial index**, and it is a flat grid
@@ -73,7 +74,8 @@ STREAM_NORMAL = 4
 STREAM_UV1 = 5
 STREAM_UV2 = 18
 STREAM_BLEND = 14
-STREAM_FACE_FLAGS = 11
+STREAM_DRAW_ORDER = 11
+DRAW_ORDER_STRIDE = 4
 STREAM_FACE = 21
 
 FACE_STRIDE = 28
@@ -157,6 +159,10 @@ class LandMesh:
     cells: list[Cell] = field(default_factory=list)
     #: One entry per grid square, from stream 1: the cells that cover it.
     squares: list[tuple[int, ...]] = field(default_factory=list)
+    #: Stream 11: the order the map was baked to draw in.  See
+    #: ``parse_draw_order``; the viewer buckets by material itself and does
+    #: not use it.
+    draw_order: list[int] = field(default_factory=list)
     _grid: dict | None = field(default=None, repr=False, compare=False)
 
     @property
@@ -316,6 +322,27 @@ def parse_cells(raw: bytes | None) -> list[Cell]:
     return out
 
 
+def parse_draw_order(raw: bytes | None) -> list[int]:
+    """Stream 11: the order to draw a map's faces in.
+
+    Four bytes a face -- a ``uint16`` face index, a flags byte and a byte that
+    is zero on 275566 of the 275882 faces.  The indices are a **permutation**
+    of the whole face list on all 33 maps, and it is not an arbitrary one: it
+    reorders faces only *within* a cell, keeping all 14976 cells contiguous,
+    and inside each one it sorts them by texture pair.  In this order **every
+    one of the 14976 cells draws in the minimum number of batches** -- no
+    texture pair appears twice in a cell's run -- against 11463 in file order.
+
+    So it is the draw order the map was baked with, and a renderer that
+    buckets faces by material itself, as this one does, does not need it.
+    """
+    if not raw:
+        return []
+    count = len(raw) // DRAW_ORDER_STRIDE
+    return [struct.unpack_from("<H", raw, i * DRAW_ORDER_STRIDE)[0]
+            for i in range(count)]
+
+
 def parse_squares(raw: bytes | None) -> list[tuple[int, ...]]:
     """The square table of stream 1.
 
@@ -383,6 +410,10 @@ def load(path: str | Path) -> LandMesh:
     return LandMesh(
         cells=parse_cells(archive.one_of_type(STREAM_BOUNDS)),
         squares=parse_squares(archive.one_of_type(STREAM_SQUARES)),
+        draw_order=parse_draw_order(
+            archive.one_of_type(STREAM_DRAW_ORDER)
+            if archive.has_type(STREAM_DRAW_ORDER) else None
+        ),
         positions=positions,
         normals=normals,
         uv1=uv1,

@@ -237,6 +237,30 @@ Each cell is listed **twice**, and the two records are the same ground at two
 **levels of detail** — see below. They share a box, and the second holds no
 more faces than the first on all 7488 pairs.
 
+## Stream 11 is the order to draw the faces in
+
+Four bytes a face: a `uint16` face index, a flags byte and a byte that is zero
+on 275566 of the 275882. The old note called the word a flag and puzzled over
+its values; splitting it into two bytes settles most of that, and the *index*
+turns out to be the interesting half.
+
+**It is a permutation of the whole face list on all 33 maps** — every face
+once, none twice — and not an arbitrary one. It reorders faces only *inside* a
+cell: all **14976** cells stay contiguous. And within a cell it sorts them by
+texture pair, optimally: in this order **every one of the 14976 cells draws in
+the minimum number of batches**, with no texture pair appearing twice in its
+run, against 11463 in file order.
+
+So stream 11 is the draw order the map was baked with — the engine walks a
+cell and gets its faces already batched. A renderer that buckets faces by
+material itself, as this one does, has no use for it, which is why the viewer
+reads it and does not draw with it.
+
+The flags byte is 0x48 on 248624 faces, 0x58 on 27169, 0xC8 on 84 and 0xD8 on
+5 — bits 3 and 6 always set, bits 4 and 7 varying. Bit 4 leans towards water
+(1326 of the 3630 water faces carry it, against a tenth of the dry ones) but
+does not mark it, and what either bit means is not established.
+
 ## Face field 13 is not a patch id
 
 An earlier draft read the last word of the face record as a patch or sector

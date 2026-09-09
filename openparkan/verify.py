@@ -265,6 +265,50 @@ def check_grid(check, game: Path) -> None:
           f"all {sum(used.values())} squares use {sorted(used)} of the 15 "
           f"slots a record has room for")
 
+    # Stream 11 is the draw order: a permutation that keeps every cell
+    # contiguous and sorts the faces inside it by texture pair.
+    permuted = contiguous = 0
+    optimal = cells_seen = file_optimal = 0
+    for folder in maps:
+        mesh = landmesh.load(folder / "Land.msh")
+        order = mesh.draw_order
+        if not order or not mesh.cells:
+            continue
+        permuted += sorted(order) == list(range(mesh.face_count))
+        cell_of = [0] * mesh.face_count
+        for ci, cell in enumerate(mesh.cells):
+            for f in cell.faces:
+                if f < mesh.face_count:
+                    cell_of[f] = ci
+        runs = 1
+        for a, b in zip(order, order[1:], strict=False):
+            runs += cell_of[a] != cell_of[b]
+        contiguous += runs == len(mesh.cells)
+        pair = [(mesh.face_tex1[f], mesh.face_tex2[f]) for f in range(mesh.face_count)]
+        for faces in (order, list(range(mesh.face_count))):
+            grouped: dict[int, list[int]] = {}
+            for f in faces:
+                grouped.setdefault(cell_of[f], []).append(f)
+            tally = 0
+            for run in grouped.values():
+                batches = 1
+                for a, b in zip(run, run[1:], strict=False):
+                    batches += pair[a] != pair[b]
+                tally += batches == len({pair[f] for f in run})
+            if faces is order:
+                optimal += tally
+                cells_seen += len(grouped)
+            else:
+                file_optimal += tally
+    check("Land.msh: stream 11 is the order to draw the faces in",
+          permuted == contiguous == len(maps) and optimal == cells_seen,
+          f"the face indices are a permutation of the whole list on "
+          f"{permuted}/{len(maps)} maps and reorder faces only inside a cell "
+          f"-- every cell stays contiguous on {contiguous}.  In that order "
+          f"all {optimal}/{cells_seen} cells draw in the minimum number of "
+          f"batches, no texture pair twice, against {file_optimal} in file "
+          f"order")
+
     check("Land.msh: a square's two cells are two levels of detail",
           coarser == cell_pairs > 0,
           f"the second record of a cell holds no more faces than the first on "

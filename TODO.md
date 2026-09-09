@@ -360,6 +360,15 @@ written down is a question nobody reopens.
       **ring 0 is the inner one on all 30**, the outline taken off the
       building, while the outer ring is a clearance the author drew.
       → [docs/07-objects.md](docs/07-objects.md)
+- [x] **What `Land.msh` stream 11 is.** The draw order. Four bytes a face — a
+      `uint16` index, a flags byte, and a byte that is zero on 275566 of
+      275882 — and the indices are a **permutation of the whole face list on
+      all 33 maps** that reorders faces only *inside* a cell: all **14976**
+      cells stay contiguous. Within a cell it sorts by texture pair, and
+      optimally — in this order **every one of the 14976 cells draws in the
+      minimum number of batches**, no pair twice, against 11463 in file order.
+      A renderer that buckets by material itself does not need it.
+      → [docs/03-terrain.md](docs/03-terrain.md)
 - [x] **The renderer's interface.** `IDirect3DDevice7`, pinned by the vtable
       offsets the engine calls through — `SetRenderState` at 20,
       `DrawPrimitive` at 25, `SetTexture` at 35, `SetTextureStageState` at 37,
@@ -631,8 +640,10 @@ today; each is a small trap for anyone extending the code.
 - A batch's vertex range (fields 7 and 8): contiguous, but tiles the vertex
   array on only 69 of 435 meshes, so not a partition.
 - Face record fields 10, 11, 12, and field 0 (near-constant per mesh).
-- Terrain stream 11's flags word — 72 on 4228 faces, 88 on 329; 88 correlates
-  with water.
+- Terrain stream 11's **flags byte** — 0x48 on 248624 faces, 0x58 on 27169,
+  0xC8 on 84, 0xD8 on 5. The stream itself is read (it is the draw order, see
+  section 0); bits 3 and 6 are always set and bits 4 and 7 vary, and bit 4
+  leans towards water without marking it.
 - `CTPT`'s nine floats read as `(zero, position, unit direction)` in
   `static.rlb` and `turrets.rlb` but not in `guns.rlb` or `parts.rlb`, which
   put scalars like `Width` in a vector slot.
