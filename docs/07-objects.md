@@ -483,6 +483,39 @@ earlier "106 of 157 against 81 for the fallback" was the same measurement taken
 over all fifteen slot indices, before the slot index was understood; it was
 comparing two piles of superimposed levels of detail.
 
+### Animation: stream 19 over stream 8
+
+**157 of the 435 meshes carry one.** Stream 8 is the pose keys and stream 19
+the frame map: `frame_count` indices per animated node, laid out consecutively
+from that node's `anim_start`, one entry per frame. `frame_count` is the
+archive entry's own second count.
+
+Three things make it playable, and each is checked over every animated mesh:
+
+- **It is rigid, one node to a vertex.** Every one of the 296379 vertices those
+  meshes hold is reached by exactly one node, so a bone per node at a single
+  weight plays the whole thing and there is nothing to blend.
+  (`ObjectMesh.node_of_vertex`.)
+- **A key's `time` is the frame at which its run first names it** — on all
+  **33020** keys. The map repeats a key to hold it, so the times are what a
+  player interpolates between rather than a per-frame table to step through.
+  A turret's nine frames are six keys with holds in between; stepping them
+  jumps 90° at a time.
+- **An animated node's rest pose is its own first frame**, on all 817 of them.
+  That is what lets a bind pose be taken from the rest pose and the animation
+  begin exactly on it.
+
+The rigs read as rigs. `R_H_02`'s ten nodes are `B_Dn` (the body) with
+`LL_Up`, `LL_Dn`, `FL_Up`, `FL_Dn` down one leg and `LR_*`, `FR_*` down the
+other, and **only the body's key translates** — every limb bone's translation
+is the same in all 124 frames, which is what a jointed skeleton looks like.
+Nine of the 34 rigs move their root more than a unit; `R_H_02`'s lunges 5.7
+forward and comes back to zero, so the loop closes. A few of the creatures'
+do not, and those snap at the wrap.
+
+`ObjectMesh.track(node)` returns the key per frame; `animated` says whether
+there is anything to play.
+
 ### The ground datum: a model's own z = 0
 
 A mission places an object by putting model **z = 0** at the placement height,

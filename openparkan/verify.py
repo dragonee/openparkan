@@ -2273,6 +2273,66 @@ def check_lod(check, game: Path) -> None:
           f"whose nodes pose it differently, which is what lets "
           f"posed_positions pose every level at once")
 
+    # The animation: 157 of the 435 meshes carry one, and what makes it
+    # playable as a bone per node is that it is rigid.
+    animated = placed = unplaced = 0
+    timed = mistimed = 0
+    rested = restless = 0
+    still = 0
+    for library in sorted(game.glob("*.rlb")):
+        try:
+            archive = NResArchive.open(library)
+        except NotAnNResArchive:
+            continue
+        for entry in archive:
+            if not entry.name.lower().endswith(".msh"):
+                continue
+            try:
+                m = objmesh.parse(archive.read(entry), entry.name)
+            except (ValueError, struct.error):
+                continue
+            if not m.animated:
+                continue
+            animated += 1
+            owner = m.node_of_vertex()
+            placed += sum(1 for v in owner if v != objmesh.NO_NODE)
+            unplaced += sum(1 for v in owner if v == objmesh.NO_NODE)
+            for ni in range(len(m.nodes)):
+                run = m.track(ni)
+                if not run:
+                    still += 1
+                    continue
+                if m.rest_key(ni) == run[0]:
+                    rested += 1
+                else:
+                    restless += 1
+                last = None
+                for at, key in enumerate(run):
+                    if key == last or key >= len(m.keys):
+                        continue
+                    last = key
+                    if abs(m.keys[key].time - at) < 1e-6:
+                        timed += 1
+                    else:
+                        mistimed += 1
+    check("MESH: an animation is rigid, one node to a vertex",
+          animated > 100 and unplaced == 0,
+          f"{animated} of the 435 meshes carry an animation, and every one of "
+          f"the {placed} vertices they hold is reached by exactly one node -- "
+          f"so a bone per node at a single weight plays it, with nothing to "
+          f"blend")
+    check("MESH: a pose key's time is the frame it starts at",
+          mistimed == 0 and timed > 30000,
+          f"{timed}/{timed + mistimed} keys across the {animated} animated "
+          f"meshes; the frame map repeats a key to hold it, so the times are "
+          f"what a player interpolates between -- a turret's nine frames are "
+          f"six keys, and stepping them would jump 90 degrees at a time")
+    check("MESH: an animated node's rest pose is its first frame",
+          restless == 0 and rested > 0,
+          f"{rested}/{rested + restless} animated nodes, over {still} that "
+          f"never move -- which is what lets a bind pose be taken from the "
+          f"rest pose and the animation start on it")
+
 
 def check_damage(check, game: Path) -> None:
     """The .ndp damage table, and what the later slot variants hold."""

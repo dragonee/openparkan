@@ -20,7 +20,7 @@ practice — format facts yes, code no — is set out in
 | **3D terrain viewer** | done — self-contained HTML, no server |
 | **`data.tma` missions** | done — all 29 parse to EOF, 864 objects placed |
 | **`objects.rlb`, unit assemblies** | done — 590 records, 458 assemblies, 5708 components |
-| **Object meshes** | done — geometry, materials, textures, node poses, LOD, damage states, interior/exterior and collision selection |
+| **Object meshes** | done — geometry, materials, textures, node poses, LOD, damage states, interior/exterior and collision selection, and the animation 157 of them carry |
 | **Assembled units and buildings** | done — the `.dat` component tree, and each part mounted at its socket's full pose |
 | **Damage tables** | done — `.ndp`, 542 tables, one record per node, 2203 explosions named |
 | **Building footprints** | done — `.bas`, 30 ground plans; the one independent check on object placement |
@@ -151,8 +151,9 @@ Renderer work is triaged in [TODO.md](TODO.md), which records both what is
 closed and what the answer turned out to be. Nothing is known to draw
 *incorrectly* any more; what is missing is fidelity the game had. Worst-looking
 first: what the floats inside an effect's emitter mean, which of a ground
-material's two tracks the engine asks for, and a handful of fields carried
-through the readers without being understood.
+material's two tracks the engine asks for, what would *choose* an animation
+(a mesh carries exactly one, and what triggers it is gameplay), and a handful
+of fields carried through the readers without being understood.
 
 ## Documentation
 

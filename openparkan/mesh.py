@@ -113,6 +113,9 @@ QUATERNION_SCALE = 32767.0
 #: A node with no entry in the frame map.
 NO_ANIMATION = 0xFFFF
 
+#: ``node_of_vertex`` where no node's slot reaches a vertex.
+NO_NODE = -1
+
 #: UVs use the same 8.8 fixed point as the terrain.
 UV_FIXED_POINT_SCALE = 256.0
 
@@ -417,6 +420,47 @@ class ObjectMesh:
                 if slot.first_triangle <= index < slot.first_triangle + slot.triangle_count:
                     return i
         return None
+
+    @property
+    def animated(self) -> bool:
+        """Whether this mesh carries an animation worth playing."""
+        return self.frame_count > 1 and any(n.is_animated for n in self.nodes)
+
+    def node_of_vertex(self) -> list[int]:
+        """Which node poses each vertex, or ``NO_NODE``.
+
+        The same walk ``posed_positions`` makes, kept as a table instead of
+        applied: a vertex belongs to exactly one node -- no vertex of any of
+        the 435 meshes is reached by two slots whose nodes pose it
+        differently -- so a model animates **rigidly per node**, with no
+        skinning weights to recover.
+        """
+        out = [NO_NODE] * len(self.positions)
+        for i, node in enumerate(self.nodes):
+            for si in node.slot_index:
+                if si == NO_SLOT or si >= len(self.slots):
+                    continue
+                slot = self.slots[si]
+                stop = slot.first_triangle + slot.triangle_count
+                for tri in self.triangles[slot.first_triangle : stop]:
+                    for v in tri:
+                        if v < len(out):
+                            out[v] = i
+        return out
+
+    def track(self, node: int) -> list[int]:
+        """The pose key a node takes at each frame, or ``[]`` if it is still.
+
+        Stream 19 lays the runs out consecutively, ``frame_count`` entries per
+        animated node starting at its ``anim_start``, and each entry indexes
+        stream 8.  A key's ``time`` is its frame number: they run 0 to
+        ``frame_count - 1`` with one key per frame.
+        """
+        n = self.nodes[node]
+        if not n.is_animated or self.frame_count < 2:
+            return []
+        run = self.frame_map[n.anim_start : n.anim_start + self.frame_count]
+        return list(run) if len(run) == self.frame_count else []
 
     def posed_positions(self) -> list[tuple[float, float, float]]:
         """Vertex positions with each node's world pose applied.

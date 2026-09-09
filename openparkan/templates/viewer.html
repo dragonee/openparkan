@@ -174,6 +174,7 @@
       <button id="plan" aria-pressed="false">Footprints</button>
       <button id="lod" aria-pressed="true">Detail levels</button>
       <button id="blend" aria-pressed="true">Blend layer 2</button>
+      <button id="anim" aria-pressed="true">Animate</button>
       <button id="spin" aria-pressed="true">Orbit</button>
     </div>
   </div>
@@ -815,6 +816,84 @@ if (typeof THREE === "undefined" || typeof pako === "undefined") {
   const LOD_AT = [0, 40, 100, 250];
   let lodOn = true;
 
+  // 157 of the 435 object meshes carry an animation, and it is **rigid per
+  // node**: one node poses a vertex and no vertex is shared between two, so a
+  // model rides one bone per node at a single weight, with nothing to blend.
+  // A key's frame is the key's own time field, so the keys are slerped by the
+  // clock -- a turret's nine frames are six keys with holds between them, and
+  // stepping them would jump 90 degrees at a time.
+  const POSE_FPS = 15;
+  let animOn = true;
+  const skeletons = {};
+
+  function skeletonFor(i) {
+    if (skeletons[i] !== undefined) return skeletons[i];
+    const src = DATA.models[i];
+    if (!src || !src.bones) return (skeletons[i] = null);
+    const bones = src.bones.map((b) => {
+      const bone = new THREE.Bone();
+      bone.position.set(b.r[0], b.r[1], b.r[2]);
+      bone.quaternion.set(b.r[4], b.r[5], b.r[6], b.r[3]);
+      return bone;
+    });
+    // The bones hold model-space poses, but the geometry is quantised into a
+    // cube and the mesh's own transform scales it back out; the skin runs
+    // before that, in the geometry's own space.  Undoing the transform on the
+    // bone root puts the two in the same space -- and it is why an animated
+    // model is quantised uniformly, since a rotation does not survive a
+    // non-uniform scale.
+    const root = new THREE.Group();
+    const h = src.scale[0];
+    root.scale.setScalar(1 / h);
+    root.position.set(-src.offset[0] / h, -src.offset[1] / h, -src.offset[2] / h);
+    src.bones.forEach((b, k) => (b.p >= 0 ? bones[b.p] : root).add(bones[k]));
+    root.updateMatrixWorld(true);
+    // Skeleton() takes the bones' inverses from where they stand, so this has
+    // to happen with every bone at its rest pose.
+    skeletons[i] = {
+      skeleton: new THREE.Skeleton(bones),
+      root, bones,
+      tracks: src.bones.map((b) => (b.k ? b64(b.k, Float32Array) : null)),
+      cursor: src.bones.map(() => 0),
+      frames: src.frames,
+    };
+    return skeletons[i];
+  }
+
+  const _qa = new THREE.Quaternion(), _qb = new THREE.Quaternion();
+
+  function poseSkeletons(clock) {
+    Object.keys(skeletons).forEach((key) => {
+      const rec = skeletons[key];
+      if (!rec) return;
+      const f = animOn ? (clock * POSE_FPS) % rec.frames : 0;
+      rec.tracks.forEach((track, k) => {
+        if (!track) return;
+        const n = track.length / 8;
+        let i = rec.cursor[k];
+        if (i >= n || track[i * 8] > f) i = 0;
+        while (i + 1 < n && track[(i + 1) * 8] <= f) i++;
+        rec.cursor[k] = i;
+        const j = (i + 1) % n;
+        const t0 = track[i * 8];
+        // The last key runs to the end of the loop, not to the first key's
+        // own frame, or the wrap would play backwards.
+        const t1 = j === 0 ? rec.frames : track[j * 8];
+        const u = t1 > t0 ? Math.min(1, Math.max(0, (f - t0) / (t1 - t0))) : 0;
+        const a = i * 8, b = j * 8;
+        const bone = rec.bones[k];
+        bone.position.set(
+          track[a + 1] + (track[b + 1] - track[a + 1]) * u,
+          track[a + 2] + (track[b + 2] - track[a + 2]) * u,
+          track[a + 3] + (track[b + 3] - track[a + 3]) * u);
+        _qa.set(track[a + 5], track[a + 6], track[a + 7], track[a + 4]);
+        _qb.set(track[b + 5], track[b + 6], track[b + 7], track[b + 4]);
+        bone.quaternion.copy(_qa).slerp(_qb, u);
+      });
+      rec.root.updateMatrixWorld(true);
+    });
+  }
+
   function modelGeometry(i, lod) {
     const key = i + "@" + lod;
     if (modelCache[key]) return modelCache[key];
@@ -832,6 +911,19 @@ if (typeof THREE === "undefined" || typeof pako === "undefined") {
     if (src.uv2) g.setAttribute("uv2", new THREE.BufferAttribute(b64(src.uv2, Uint16Array), 2));
     g.setIndex(new THREE.BufferAttribute(
       b64(src.index, src.wide ? Uint32Array : Uint16Array), 1));
+    if (src.skin) {
+      // One bone per vertex at full weight: the animation is rigid per node,
+      // so the other three slots stay empty.
+      const node = b64(src.skin, Uint16Array);
+      const index = new Uint16Array(node.length * 4);
+      const weight = new Float32Array(node.length * 4);
+      for (let v = 0; v < node.length; v++) {
+        index[v * 4] = node[v];
+        weight[v * 4] = 1;
+      }
+      g.setAttribute("skinIndex", new THREE.BufferAttribute(index, 4));
+      g.setAttribute("skinWeight", new THREE.BufferAttribute(weight, 4));
+    }
     // Every level shares one position, uv and index buffer; a level's
     // geometry is just the subset of groups tagged with it.
     groupsFor(src, lod).forEach((gr, k) => g.addGroup(gr.start, gr.count, k));
@@ -859,7 +951,7 @@ if (typeof THREE === "undefined" || typeof pako === "undefined") {
     if (modelMatCache[key]) return modelMatCache[key];
     const src = DATA.models[i];
     const mats = groupsFor(src, lod).map((gr) => {
-      const opts = { side: THREE.FrontSide, color: tint };
+      const opts = { side: THREE.FrontSide, color: tint, skinning: !!src.skin };
       const pooled = gr.material >= 0 ? DATA.pool[gr.material] : null;
       if (pooled && pooled.kind === "texture") {
         opts.map = groundTexture(gr.material);
@@ -906,9 +998,21 @@ if (typeof THREE === "undefined" || typeof pako === "undefined") {
     const radius = Math.max(src.scale[0], src.scale[1], src.scale[2]);
     const group = new THREE.Group();
     const lod = new THREE.LOD();
+    const rig = skeletonFor(i);
     levels.forEach((level, rank) => {
-      const inner = new THREE.Mesh(modelGeometry(i, level),
-                                   modelMaterials(i, tint, level));
+      const geometry = modelGeometry(i, level);
+      const mats = modelMaterials(i, tint, level);
+      let inner;
+      if (rig) {
+        inner = new THREE.SkinnedMesh(geometry, mats);
+        // Detached: the skin runs in the geometry's own space and the mesh's
+        // transform places the instance afterwards, so every placement of a
+        // model can share one skeleton and they animate in step.
+        inner.bindMode = "detached";
+        inner.bind(rig.skeleton, new THREE.Matrix4());
+      } else {
+        inner = new THREE.Mesh(geometry, mats);
+      }
       inner.scale.set(src.scale[0], src.scale[1], src.scale[2]);
       inner.position.set(src.offset[0], src.offset[1], src.offset[2]);
       // Rank, not the level number: a model missing level 1 should still hand
@@ -945,6 +1049,7 @@ if (typeof THREE === "undefined" || typeof pako === "undefined") {
     overlay = null;
     footprints = [];
     lodGroups = [];
+    Object.keys(skeletons).forEach((k) => delete skeletons[k]);
   }
 
   function showMission(mis) {
@@ -1093,6 +1198,11 @@ if (typeof THREE === "undefined" || typeof pako === "undefined") {
       if (o.isMesh) o.material.forEach((m) => { m.wireframe = on; });
     });
   });
+  document.getElementById("anim").addEventListener("click", (e) => {
+    animOn = !animOn;
+    e.currentTarget.setAttribute("aria-pressed", String(animOn));
+  });
+
   document.getElementById("lod").addEventListener("click", (e) => {
     lodOn = !lodOn;
     e.currentTarget.setAttribute("aria-pressed", String(lodOn));
@@ -1144,6 +1254,7 @@ if (typeof THREE === "undefined" || typeof pako === "undefined") {
       const tick = Math.floor(performance.now() * ANIM_FPS / 1000);
       animated.forEach((a) => { a.apply(a.frames[tick % a.frames.length]); });
     }
+    poseSkeletons(now / 1000);
     renderer.render(scene, camera);
     if (sunHeading && drawFlare(sunHeading, flareGate)) {
       renderer.autoClear = false;

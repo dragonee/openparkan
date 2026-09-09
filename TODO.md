@@ -327,6 +327,23 @@ written down is a question nobody reopens.
       the viewer draws the ten additive model materials — `PI_LIGHT`,
       `PI_TELE`, the bridge glows — additively.
       → [docs/07-objects.md](docs/07-objects.md)
+- [x] **Animation playback.** **157 of the 435 meshes carry one**, and three
+      facts make it playable as a bone per node. It is **rigid**: every one of
+      the 296379 vertices those meshes hold is reached by exactly one node, so
+      a single weight plays it and there is nothing to blend. **A key's time
+      is the frame at which its run first names it**, on all **33020** keys --
+      the frame map repeats a key to hold it, so the times are what to
+      interpolate between; a turret's nine frames are six keys, and stepping
+      them jumps 90 degrees at a time. And **an animated node's rest pose is
+      its own first frame**, on all 817, which is what lets the bind pose come
+      from the rest pose. The rigs read as rigs: `R_H_02` is a body with four
+      bones down each leg, and only the body's key translates.
+      A mounted part now hangs from the **bone** of the node it attaches to
+      rather than from a fixed pose, so a walking chassis carries its guns.
+      An animated model is quantised into a cube rather than its own box,
+      because the skin runs in the geometry's space and a rotation does not
+      survive a non-uniform scale.
+      → [docs/07-objects.md](docs/07-objects.md)
 - [x] **The renderer's interface.** `IDirect3DDevice7`, pinned by the vtable
       offsets the engine calls through — `SetRenderState` at 20,
       `DrawPrimitive` at 25, `SetTexture` at 35, `SetTextureStageState` at 37,
@@ -551,6 +568,12 @@ engine reads as a dword.
   thresholds being multiples of the model's own radius so a lamp post and a
   factory swap at the same size on screen rather than the same distance. The
   **Detail levels** button pins everything to level 0 for comparison.
+- [x] **Animation** — done; see section 0. Every placement of a model shares
+  one skeleton and they animate in step, which is what a survey wants; the
+  **Animate** button pins everything to frame 0 for comparison. What is *not*
+  read is what would choose an animation: a mesh carries exactly one, so a
+  walk cycle and a turret sweep are the same track, and what triggers which is
+  gameplay.
 - [x] **Alpha ordering** — done. The see-through layers now composite in a
   written-down order: the dome, the stars and the clouds behind everything,
   then the opaque world, then water, rain and the footprint overlay, and the

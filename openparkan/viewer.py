@@ -487,11 +487,18 @@ class ModelLibrary:
                 self._meshes[key] = None
         return self._meshes[key]
 
-    def _parts(self, obj: mission.MissionObject) -> list[tuple[object, objmesh.Pose]]:
-        """Every visible mesh of a placed object, with where it sits."""
+    def _parts(
+        self, obj: mission.MissionObject
+    ) -> list[tuple[object, objmesh.Pose, int, int]]:
+        """Every visible mesh of a placed object, with where it sits.
+
+        Each entry is the mesh, its pose, the index of the part it is mounted
+        on and the node of that part it hangs from -- ``-1`` for a part that
+        stands on its own.
+        """
         if obj.is_static:
             ref = self._record_mesh(self.library.get(obj.path))
-            return [(ref, objmesh.IDENTITY_POSE)] if ref else []
+            return [(ref, objmesh.IDENTITY_POSE, -1, -1)] if ref else []
 
         f = self._unit_file(obj.path)
         if f is None:
@@ -505,6 +512,9 @@ class ModelLibrary:
         refs: list[object] = []
         poses: list[objmesh.Pose] = []
         out = []
+        #: Component index -> its place in ``out``, so a mounted part can name
+        #: the bone it hangs from instead of only the pose it hangs at.
+        slot_of: dict[int, int] = {}
         for i, component in enumerate(unit.components):
             ref = self._record_mesh(self.library.get(component.ref.member))
             refs.append(ref)
@@ -529,14 +539,17 @@ class ModelLibrary:
                     pose = objmesh.compose(pose, mount)
             poses.append(pose)
             if ref and component.is_external:
-                out.append((ref, pose))
+                host_slot = slot_of.get(parent, -1) if parent >= 0 else -1
+                slot_of[i] = len(out)
+                out.append((ref, pose, host_slot, component.attach_node))
         return out
 
     def _pack(self, parts: list[tuple[object, objmesh.Pose]]) -> int | None:
         """Turn a list of posed meshes into one payload the viewer can draw."""
         key = tuple(
-            (r.library, r.member, tuple(round(v, 4) for v in p[0] + p[1]))
-            for r, p in parts
+            (r.library, r.member, host, node,
+             tuple(round(v, 4) for v in p[0] + p[1]))
+            for r, p, host, node in parts
         )
         if key in self._by_parts:
             return self._by_parts[key]
@@ -546,7 +559,17 @@ class ModelLibrary:
         lightmap_uvs: list[tuple[float, float]] = []
         groups: list[dict] = []
         idx_values: list[int] = []
-        for ref, pose in parts:
+        # A model animates rigidly per node -- one node poses a vertex and no
+        # vertex is shared between two -- so the animation rides as a bone per
+        # node, a pose key table, and one bone index per vertex.
+        bones: list[dict] = []
+        skin: list[int] = []
+        frame_span = 0
+        #: Where each part's bones start, so a mounted part can hang from the
+        #: bone of the node it is attached to rather than from a fixed pose --
+        #: otherwise a walking chassis leaves its guns behind.
+        bone_base: list[int] = []
+        for ref, pose, host_slot, attach_node in parts:
             m = self._mesh(ref)
             if m is None:
                 continue
@@ -559,6 +582,48 @@ class ModelLibrary:
             # the origin.  See docs/07-objects.md.
             positions = m.posed_positions()
             wear = m.texture_names
+
+            # One bone per node of this part, its rest pose in model space and
+            # the part's mount folded into the roots.  Every part contributes
+            # bones, animated or not, so a vertex always has one to ride.
+            base = len(bones)
+            bone_base.append(base)
+            owner = m.node_of_vertex()
+            hanger = -1
+            if 0 <= host_slot < len(bone_base) - 1:
+                host = self._mesh(parts[host_slot][0])
+                if host and 0 <= attach_node < len(host.nodes):
+                    hanger = bone_base[host_slot] + attach_node
+            if m.animated:
+                frame_span = max(frame_span, m.frame_count)
+            for i, node in enumerate(m.nodes):
+                local = m.local_pose(i)
+                parent = node.parent
+                if parent == objmesh.NO_PARENT or parent >= len(m.nodes):
+                    # A part's root node *becomes* its socket, so hanging it
+                    # off that bone with no pose of its own is exactly the
+                    # mount transform -- and it now follows when the host
+                    # animates.
+                    parent, local = ((hanger, objmesh.IDENTITY_POSE)
+                                     if hanger >= 0
+                                     else (-1, objmesh.compose(pose, local)))
+                else:
+                    parent += base
+                steps, last = [], None
+                for at, index in enumerate(m.track(i)):
+                    if index == last or index >= len(m.keys):
+                        continue
+                    last = index
+                    steps.append((float(at), m.keys[index].pose))
+                bone = {"p": parent, "r": _pose_payload(local)}
+                if len(steps) > 1:
+                    bone["k"] = steps
+                bones.append(bone)
+            root = next(
+                (i for i, n in enumerate(m.nodes)
+                 if n.parent == objmesh.NO_PARENT or n.parent >= len(m.nodes)),
+                0,
+            )
 
             # A model holds up to four levels of detail at once, one slot per
             # level, and all of them are packed.  They are the same object with
@@ -601,6 +666,9 @@ class ModelLibrary:
                             if v not in remap:
                                 remap[v] = len(points)
                                 points.append(objmesh.apply(pose, positions[v]))
+                                node = owner[v] if v < len(owner) else objmesh.NO_NODE
+                                skin.append(base + (root if node == objmesh.NO_NODE
+                                                    else node))
                                 uvs.append(m.uv[v] if v < len(m.uv) else (0.0, 0.0))
                                 lightmap_uvs.append(
                                     m.lightmap_uv[v] if v < len(m.lightmap_uv)
@@ -647,6 +715,12 @@ class ModelLibrary:
             max((hiz - loz) / 2, 1e-6),
             max((hiy - loy) / 2, 1e-6),
         ]
+        # An animated model is quantised into a *cube*, not its own box.  The
+        # bone deltas are in model units and the skin transform runs in the
+        # geometry's own space, so the scale that gets it back to world units
+        # has to be one a rotation survives -- and a non-uniform one is not.
+        if frame_span:
+            half = [max(half)] * 3
         pos = bytearray()
         uv = bytearray()
         uv2 = bytearray()
@@ -686,6 +760,8 @@ class ModelLibrary:
             "groups": groups,
             "tris": len(idx_values) // 3,
         })
+        if frame_span and any("k" in b for b in bones):
+            self.models[-1].update(_skin_payload(bones, skin, frame_span))
         return self._by_parts[key]
 
     def resolve(self, obj: mission.MissionObject) -> int | None:
@@ -741,6 +817,46 @@ class ModelLibrary:
 SKY_ZENITH_SLOT = 1
 SKY_HORIZON_SLOT = 7
 SKY_SUN_SLOT = 18
+
+
+def _skin_payload(bones: list[dict], skin: list[int], frames: int) -> dict:
+    """The animation half of a model: a bone per node and its keyframes.
+
+    Every bone carries its rest pose in its parent's frame.  An animated one
+    also carries its keys as ``[frame, x, y, z, qw, qx, qy, qz]`` -- the frame
+    a key becomes active is the key's own ``time`` field, exactly, on all
+    33020 keys of the 157 animated meshes -- so the viewer slerps between
+    consecutive keys by the clock rather than stepping frame by frame.  A
+    turret's nine frames are six keys with holds in between; stepping them
+    would jump 90 degrees at a time.
+    """
+    out = []
+    for bone in bones:
+        entry = {"p": bone["p"], "r": bone["r"]}
+        steps = bone.get("k")
+        if steps:
+            blob = bytearray()
+            for time, pose in steps:
+                blob += struct.pack("<8f", time, *_pose_payload(pose))
+            entry["k"] = _b64(bytes(blob))
+        out.append(entry)
+    return {
+        "bones": out,
+        "frames": frames,
+        "skin": _b64(struct.pack(f"<{len(skin)}H", *skin)),
+    }
+
+
+def _pose_payload(pose: objmesh.Pose) -> list[float]:
+    """A pose in the viewer's axes: ``[x, y, z, qw, qx, qy, qz]``.
+
+    Game space is Z-up and the viewer Y-up, which is the map
+    ``(x, y, z) -> (x, z, -y)`` -- a quarter turn about X.  A rotation
+    conjugated by it keeps its angle and turns its axis the same way, so the
+    quaternion follows the same permutation on its vector part.
+    """
+    (x, y, z), (w, qx, qy, qz) = pose
+    return [round(v, 5) for v in (x, z, -y, w, qx, qz, -qy)]
 
 
 def _pack_colour(rgba: tuple[int, int, int, int]) -> int:
