@@ -659,16 +659,22 @@ class ModelLibrary:
             # engine only tests against.
             for lod in range(objmesh.LOD_COUNT):
                 wanted: list[int] = []
+                # Which batches belong to a node the file marks internal.  21
+                # of the 435 meshes carry them, and they are most of the
+                # model: fr_b_bunker is 2040 interior triangles against 450
+                # of shell.  Parkan let you walk into its buildings.
+                inside: dict[int, bool] = {}
                 for node in m.nodes:
                     if node.is_collision:
                         continue
                     for index in node.slots_for_lod(lod):
                         if index < len(m.slots):
                             slot = m.slots[index]
-                            wanted += list(
-                                range(slot.first_batch,
-                                      slot.first_batch + slot.batch_count)
-                            )
+                            run = range(slot.first_batch,
+                                        slot.first_batch + slot.batch_count)
+                            wanted += list(run)
+                            for bi in run:
+                                inside[bi] = node.is_interior
                 if not wanted and lod == 0:
                     wanted = list(range(len(m.batches)))
                 wanted = sorted({i for i in wanted if i < len(m.batches)})
@@ -706,6 +712,8 @@ class ModelLibrary:
                         "tint": self.textures.tint(name) if name else 0xFFFFFF,
                         "lod": lod,
                     }
+                    if inside.get(bi):
+                        group["in"] = 1
                     blend = self.textures.blend(name) if name else 0
                     if blend & (materials.BLEND_ALPHA | materials.BLEND_ADD):
                         group["blend"] = blend  # 4 see-through, 8 additive

@@ -576,6 +576,13 @@ engine reads as a dword.
   thresholds being multiples of the model's own radius so a lamp post and a
   factory swap at the same size on screen rather than the same distance. The
   **Detail levels** button pins everything to level 0 for comparison.
+- [x] **Cutaway** — done. 21 of the 435 meshes carry nodes the file marks
+  internal, and the inside is most of the model: **29460 triangles against
+  10725** of shell. The **Cut away** button hides the `o*` shell on the models
+  that have one, which costs no rebuild — a group's `count` goes to zero and
+  the geometry is shared by every placement, so one edit opens every building
+  at once. A model with nothing inside is left alone, since cutting a tree
+  open would only make it vanish.
 - [x] **Animation** — done; see section 0. Every placement of a model shares
   one skeleton and they animate in step, which is what a survey wants; the
   **Animate** button pins everything to frame 0 for comparison. What is *not*

@@ -2300,6 +2300,56 @@ def check_lod(check, game: Path) -> None:
           f"whose nodes pose it differently, which is what lets "
           f"posed_positions pose every level at once")
 
+    # Buildings you can walk into: 21 of the 435 meshes carry nodes the file
+    # marks internal, and the inside is most of the model.
+    hollow = solid = 0
+    inside_tris = outside_tris = 0
+    graphed = 0
+    graph_only: list[str] = []
+    biggest = ("", 0, 0)
+    for library in sorted(game.glob("*.rlb")):
+        try:
+            archive = NResArchive.open(library)
+        except NotAnNResArchive:
+            continue
+        for entry in archive:
+            if not entry.name.lower().endswith(".msh"):
+                continue
+            blob = archive.read(entry)
+            try:
+                m = objmesh.parse(blob, entry.name)
+            except (ValueError, struct.error):
+                continue
+            try:
+                graph = objmesh.read_path_graph(NResArchive(blob))
+            except (ValueError, struct.error, NotAnNResArchive):
+                graph = None
+            if not m.has_interior:
+                solid += 1
+                if graph:
+                    graph_only.append(entry.name)
+                continue
+            hollow += 1
+            graphed += graph is not None
+            inner = len(m.select(0, interior=True))
+            outer = len(m.select(0, interior=False))
+            inside_tris += inner
+            outside_tris += outer
+            if inner > biggest[1]:
+                biggest = (entry.name, inner, outer)
+    check("MESH: a building's interior is most of its model",
+          hollow > 15 and inside_tris > outside_tris * 2,
+          f"{hollow} of the {hollow + solid} meshes carry nodes the file marks "
+          f"internal, {inside_tris} triangles of inside against "
+          f"{outside_tris} of shell -- {biggest[0]} alone is {biggest[1]} "
+          f"against {biggest[2]}")
+    check("MESH: every interior comes with a graph to walk it",
+          graphed == hollow > 0,
+          f"{graphed}/{hollow} of the meshes with an interior also carry a "
+          f"path graph, and the {len(graph_only)} that carry a graph without "
+          f"one are bridges and ruins -- things you cross rather than enter: "
+          f"{sorted(graph_only)[:4]}")
+
     # The animation: 157 of the 435 meshes carry one, and what makes it
     # playable as a bone per node is that it is rigid.
     animated = placed = unplaced = 0

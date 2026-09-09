@@ -295,6 +295,18 @@ interiors hang off `o01`, and `o03`, `o04`, `Base_TL` chain off `o02`.
 This explains `objects.rlb`'s `INTO` and `EXTO` record tags — interior and
 exterior objects — and why only buildings have a path graph.
 
+**But the flag is exactly what a cutaway needs.** 21 of the 435 meshes carry
+internal nodes, and the inside is most of the model: **29460 triangles of
+interior against 10725 of shell**, with `fr_b_ruin` alone at 2478 against 450.
+Hiding the `o*` nodes opens a building up — the bunker turns out to be an
+octagonal chamber with corridors running off it — and the cross-check holds:
+**all 21 of the meshes with an interior also carry a path graph** to walk it.
+The 8 that carry a graph without internal nodes are the bridges, ruins and the
+hangar, which you cross rather than enter.
+
+So `select(interior=True)` is a cutaway, `select()` is the building, and
+`select(interior=False)` is a shell that is far too short to be one.
+
 ### Flag bit 5 marks a collision hull, which must not be drawn
 
 28 nodes across the shipped archives carry flag bit `0x0020`, and **every one

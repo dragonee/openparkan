@@ -176,6 +176,7 @@
       <button id="blend" aria-pressed="true">Blend layer 2</button>
       <button id="anim" aria-pressed="true">Animate</button>
       <button id="coarse" aria-pressed="false">Coarse ground</button>
+      <button id="cut" aria-pressed="false">Cut away</button>
       <button id="spin" aria-pressed="true">Orbit</button>
     </div>
   </div>
@@ -694,6 +695,25 @@ if (typeof THREE === "undefined" || typeof pako === "undefined") {
   // Material.lib's flags byte, from the archive directory.
   const BLEND_ALPHA = 4, BLEND_ADD = 8;
 
+  //: Cutaway: 21 of the 435 meshes carry nodes the file marks internal, and
+  //: they are most of the model -- fr_b_bunker is 2040 interior triangles
+  //: behind 450 of shell.  Hiding the shell is a matter of setting a group's
+  //: count to zero, which costs no rebuild and no cache: the geometry is
+  //: shared by every placement, so one edit shows every building at once.
+  let cutAway = false;
+  const builtModels = [];
+
+  function applyCutaway() {
+    builtModels.forEach(({ geometry, groups }) => {
+      // A model with nothing inside is left alone: cutting a tree open would
+      // only make it vanish.
+      const hollow = groups.some((gr) => gr.in);
+      geometry.groups.forEach((g, k) => {
+        g.count = (cutAway && hollow && !groups[k].in) ? 0 : groups[k].count;
+      });
+    });
+  }
+
   //: Which level of the terrain is drawn.  The file holds two, and the coarse
   //: one is what the engine would switch to per cell at distance; here it is
   //: a toggle, because a survey camera frames the whole map at once.
@@ -947,8 +967,11 @@ if (typeof THREE === "undefined" || typeof pako === "undefined") {
     }
     // Every level shares one position, uv and index buffer; a level's
     // geometry is just the subset of groups tagged with it.
-    groupsFor(src, lod).forEach((gr, k) => g.addGroup(gr.start, gr.count, k));
+    const built = groupsFor(src, lod);
+    built.forEach((gr, k) => g.addGroup(gr.start, gr.count, k));
     g.computeVertexNormals();
+    builtModels.push({ geometry: g, groups: built });
+    if (cutAway) applyCutaway();
     modelCache[key] = g;
     return g;
   }
@@ -1226,6 +1249,12 @@ if (typeof THREE === "undefined" || typeof pako === "undefined") {
       if (o.isMesh) o.material.forEach((m) => { m.wireframe = on; });
     });
   });
+  document.getElementById("cut").addEventListener("click", (e) => {
+    cutAway = !cutAway;
+    e.currentTarget.setAttribute("aria-pressed", String(cutAway));
+    applyCutaway();
+  });
+
   document.getElementById("coarse").addEventListener("click", (e) => {
     coarseGround = !coarseGround;
     e.currentTarget.setAttribute("aria-pressed", String(coarseGround));

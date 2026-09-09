@@ -27,7 +27,7 @@ practice — format facts yes, code no — is set out in
 | **Effects** | done — `effects.rlb`, 923 effects and 4737 emitters; 144 `.exp` explosions; and which 176 of a block's floats the engine actually reads |
 | **Materials** | done — `Material.lib`, all 905 records end to end: a `D3DMATERIAL7` per entry, the animation tracks over them, and every batch reaching a texture |
 | **Baked lighting** | done — `lightmap.lib`, 21 buildings, per-batch |
-| **Building interiors** | done — path graph for 29 buildings |
+| **Building interiors** | done — the internal nodes are 29460 triangles behind 10725 of shell, and the viewer cuts buildings open; path graph for 29 |
 | **Control points** | done — 284 members, 3599 named attachment points |
 | **`Land.map` navigation mesh** | done — all 33 maps, 34662 areals, adjacency and grid |
 | **Sky** | done — `sky.ske` day cycle, `sky.wea`'s nine texture slots, the engine's twelve-element lens flare and both its intensity gates, the weather markers, and where the sun and moon stand (fixed, and in no file), all 29 missions |
