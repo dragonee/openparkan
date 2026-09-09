@@ -83,8 +83,8 @@ The remaining question the `.ctl` was carrying is
 int32    1            a marker; constant on all 60 rings
 int32    count        corners
 float32  x, y, z  x (count + 1)    the ring, closed by repeating the first
-int32    ...      x (2 * count)    two per corner; written only when another
-                                   ring follows, so the last ring ends here
+int32    triangle x count          where the corner was taken off the model
+int32    corner   x count          which of that triangle's three it is
 ```
 
 **All 30 parse exactly and all hold exactly two rings**, of 3 to 26 corners,
@@ -108,7 +108,24 @@ offers, which is why the viewer draws it through the same transform as the
 model rather than a baked one: an outline that agreed with the model no matter
 what would test nothing. The `Footprints` toggle shows them.
 
-The two `int32` per corner are not read.
+### The block after a ring is where its corners came from
+
+It looked like a header that would not divide evenly. It is a
+**back-reference**: `count` int32 triangle indices, then `count` int32
+corners, so a ring point is `mesh.triangles[triangle][corner]` of the
+building's own mesh. The author traced the outline **on the model**.
+
+It resolves exactly on **15 of the 30** records — 154 points, every one of
+them — and on the other 14 no ring point sits on a mesh vertex at all, so
+those outlines were traced on geometry the shipped mesh no longer carries.
+(`fr_b_ruin` scores one hit out of 18, which is a coincidence rather than a
+partial match.)
+
+That also settles why only one of the two rings carries it. **Ring 0 is the
+inner one on all 30** — the outline taken off the building — and it is the one
+with the back-reference; the outer ring is a clearance the author drew around
+the model rather than off it, and has none. What looked like "written only
+when another ring follows" was "written only on the ring that was traced".
 
 ### `.ndp` is a damage table, one record per node
 

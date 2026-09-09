@@ -52,7 +52,7 @@ costs and what it looks like going up.  See ``docs/07-objects.md``.
 from __future__ import annotations
 
 import struct
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from .nres import NResArchive
@@ -60,8 +60,9 @@ from .nres import NResArchive
 SLOT_SIZE = 64
 NAME_FIELD = 32
 
-#: A ``.bas`` footprint block: a constant 1, a point count, that many points
-#: plus a repeat of the first, and then two ``int32`` per point.
+#: A ``.bas`` ring: a constant 1, a point count, that many points plus a
+#: repeat of the first, and -- on a ring taken off the model -- one ``int32``
+#: triangle index per point followed by one ``int32`` corner.
 BASE_MARKER = 1
 
 #: A ``.ndp`` is an int32 count and then one 76-byte record per mesh node:
@@ -175,8 +176,11 @@ class Footprint:
 
     #: The ring's corners, without the repeated closing point.
     points: list[tuple[float, float, float]]
-    #: Two ``int32`` per point, carried through unread.
-    trailer: list[int]
+    #: Where each corner came from: ``(triangle, corner)`` into the building's
+    #: own mesh, so the point is ``mesh.triangles[triangle][corner]``.  Only
+    #: the inner ring carries it -- the outer one is a clearance the author
+    #: drew rather than traced.  Empty on the outer ring.
+    traced: list[tuple[int, int]] = field(default_factory=list)
 
     @property
     def area(self) -> float:
@@ -209,17 +213,22 @@ def parse_base(blob: bytes, source: str = "<bas>") -> list[Footprint]:
         if points[0] != points[-1]:
             raise ObjectFormatError(f"{source}: ring at {pos} does not close")
         pos = end
-        trailer: list[int] = []
-        # The trailing pair per point is written only when another ring
-        # follows, so the last ring in a record ends with its outline.
+        traced: list[tuple[int, int]] = []
+        # A ring the author *traced* on the model carries a back-reference per
+        # corner: one array of triangle indices, then one of which corner of
+        # each.  The outer ring is a clearance drawn around the building
+        # rather than taken off it, so it has none -- which is why this looked
+        # like a header that would not divide evenly.
         if pos < len(blob):
             if pos + 8 * count > len(blob):
                 raise ObjectFormatError(
-                    f"{source}: no room for {2 * count} trailing ints at {pos}"
+                    f"{source}: no room for {count} traced corners at {pos}"
                 )
-            trailer = list(struct.unpack_from(f"<{2 * count}i", blob, pos))
+            faces = struct.unpack_from(f"<{count}i", blob, pos)
+            corners = struct.unpack_from(f"<{count}i", blob, pos + 4 * count)
+            traced = list(zip(faces, corners, strict=True))
             pos += 8 * count
-        out.append(Footprint(points[:-1], trailer))
+        out.append(Footprint(points[:-1], traced))
     return out
 
 

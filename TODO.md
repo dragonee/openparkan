@@ -349,6 +349,17 @@ written down is a question nobody reopens.
       because the skin runs in the geometry's space and a rotation does not
       survive a non-uniform scale.
       → [docs/07-objects.md](docs/07-objects.md)
+- [x] **The `.bas` block that "did not divide evenly".** It is not a header:
+      a ring the author **traced on the model** carries a back-reference per
+      corner — `count` int32 triangle indices, then `count` int32 corners — so
+      the point is `mesh.triangles[triangle][corner]`. On the **16 of 30**
+      records whose outline still sits on the shipped mesh it resolves on
+      **154 of 154** points, all-or-nothing per record; on the other 14 no
+      ring point lands on a vertex at all, so those were traced on geometry
+      the mesh no longer carries. And it explains why only one ring has it:
+      **ring 0 is the inner one on all 30**, the outline taken off the
+      building, while the outer ring is a clearance the author drew.
+      → [docs/07-objects.md](docs/07-objects.md)
 - [x] **The renderer's interface.** `IDirect3DDevice7`, pinned by the vtable
       offsets the engine calls through — `SetRenderState` at 20,
       `DrawPrimitive` at 25, `SetTexture` at 35, `SetTextureStageState` at 37,
@@ -625,7 +636,5 @@ today; each is a small trap for anyone extending the code.
 - `CTPT`'s nine floats read as `(zero, position, unit direction)` in
   `static.rlb` and `turrets.rlb` but not in `guns.rlb` or `parts.rlb`, which
   put scalars like `Width` in a vector slot.
-- `BASE` (`.bas`) footprint records: a count then float triples, but the header
-  does not divide evenly into the payload.
 - 65 of 393 textures have a mip tail shorter than the declared level count.
   Harmless for level 0; a packer would need to reproduce it.

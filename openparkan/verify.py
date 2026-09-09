@@ -430,6 +430,11 @@ def _covers(mesh, faces, x: float, y: float) -> bool:
     return False
 
 
+def _near(a, b, tol: float = 0.01) -> bool:
+    """Whether two points coincide."""
+    return all(abs(x - y) <= tol for x, y in zip(a, b, strict=False))
+
+
 def _is_name(field: bytes) -> bool:
     """A texture-name field: NUL-terminated, printable ASCII, non-empty run."""
     if b"\0" not in field:
@@ -2627,6 +2632,43 @@ def check_footprints(check, game: Path) -> None:
           len(plans) == total > 0 and two == total,
           f"{len(plans)}/{total} records parse and {two} hold exactly two "
           f"rings; all {anticlockwise}/{rings} wind anticlockwise")
+
+    # The block between the rings is a back-reference: which triangle of the
+    # building's own mesh each corner was taken off, and which corner of it.
+    inner_traced = outer_traced = 0
+    on_mesh = resolved = points = 0
+    whole = partial = 0
+    for stem, plan in plans.items():
+        inner_traced += bool(plan[0].traced)
+        outer_traced += bool(plan[1].traced)
+        try:
+            m = objmesh.parse(archive.read_name(stem + ".msh"), stem)
+        except (KeyError, ValueError, struct.error):
+            continue
+        hits = 0
+        for point, (face, corner) in zip(plan[0].points, plan[0].traced,
+                                         strict=False):
+            points += 1
+            if not (0 <= face < len(m.triangles) and 0 <= corner < 3):
+                continue
+            v = m.triangles[face][corner]
+            if v < len(m.positions) and _near(m.positions[v], point):
+                hits += 1
+        resolved += hits
+        on_mesh += hits == len(plan[0].points)
+        whole += hits == len(plan[0].points)
+        partial += 0 < hits < len(plan[0].points)
+    check("fortif.rlb: the inner ring is traced on the model's own triangles",
+          inner_traced == len(plans) and outer_traced == 0
+          and whole >= 15 and resolved >= 150,
+          f"every one of the {inner_traced} inner rings carries an int32 "
+          f"triangle and an int32 corner per point, and not one of the "
+          f"{len(plans)} outer rings does -- the outer ring is a clearance "
+          f"drawn round the building rather than taken off it.  The reference "
+          f"resolves every point on {whole} of the records, {resolved} in "
+          f"all; on the other {len(plans) - whole - partial} no ring point "
+          f"sits on a mesh vertex at all, so those outlines were traced on "
+          f"geometry the shipped mesh no longer carries")
 
     # The inner ring traces the model, the outer one stands off from it.
     boxed = matched = 0
