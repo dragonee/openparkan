@@ -415,20 +415,28 @@ class ObjectMesh:
                     return i
         return None
 
-    def posed_positions(self, lod: int = 0) -> list[tuple[float, float, float]]:
+    def posed_positions(self) -> list[tuple[float, float, float]]:
         """Vertex positions with each node's world pose applied.
 
         Mesh vertices are authored in their own node's frame; without this a
-        multi-part model draws every part piled on the origin.  Vertices not
-        reached by ``lod`` keep their raw position.
+        multi-part model draws every part piled on the origin.
+
+        **Every** slot is posed, not just one level's.  That is unambiguous:
+        no vertex of any of the 435 meshes is reached by two slots whose nodes
+        have different world poses.  It used to pose only the slots one level
+        reached, which quietly left the coarser levels in raw node-local
+        space -- and reading them back with the wrong level made them look as
+        though they lived in a different frame altogether.  They do not: posed,
+        each level sits on level 0's centre to within a median 0.000 to 0.011
+        of the model's size.
         """
         out = list(self.positions)
         for i, node in enumerate(self.nodes):
             pose = self.world_pose(i)
             if pose == IDENTITY_POSE:
                 continue
-            for si in node.slots_for_lod(lod):
-                if si >= len(self.slots):
+            for si in node.slot_index:
+                if si == NO_SLOT or si >= len(self.slots):
                     continue
                 slot = self.slots[si]
                 stop = slot.first_triangle + slot.triangle_count

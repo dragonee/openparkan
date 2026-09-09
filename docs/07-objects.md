@@ -363,31 +363,37 @@ Two things pin the reading down beyond the monotonicity:
   the coarsest slot present rather than drawing nothing. No node lacks
   geometry in variant 0 but has some in a later variant.
 
-### But only level 0 is in the model's own frame
+### Every level is a simplification in place
 
-The ladder is real by triangle count — **137445, 34843, 14033, 5039** across
-the four levels, over 434, 283, 282 and 197 meshes, and then slot 4 goes back
-*up* to 13763 over only 103, which is the other half of the argument that the
-fifth is not a level.
+The ladder is real by triangle count — **137445, 34843, 14033 and 5039**
+across the four levels, over 434, 283, 282 and 197 meshes — and then slot 4
+goes back *up* to 13763 over only 103, which is the other half of the argument
+that the fifth is not a level.
 
-What does not hold is where the coarse levels sit. Level 0 fits the model's
-own authored box on **434 of 434** meshes; level 1 on **129 of 283**, level 2
-on 124 of 282, level 3 on 66 of 197, with overruns up to half the model's
-size. It is not a posing problem: the nodes that own the coarse slots carry
-identity poses, so posed and unposed positions give the same answer on all
-four.
+The coarse levels sit exactly where level 0 sits. Posed, each level's centre
+is within a median **0.000 to 0.011** of the model's size of level 0's, and
+its extent within **0.001 to 0.037**. Against the model's own authored box:
+level 0 fits on 434 of 434, level 1 on 257 of 283, level 2 on 232 of 282,
+level 3 on 134 of 197 and slot 4 on 101 of 103. The stragglers are trees and
+stones, where a simplification legitimately changes the silhouette.
 
-`o_bnt_rdr_l_01` shows what is going on. Its level 0 runs z 0.1 to 2.3 — a
-2.2-unit mast resting on the ground — and its level 1 runs −1.1 to 1.1: the
-same height, **centred on the origin instead of standing on it**. 85 of the
-283 level-1 slots are centred that way where level 0 is not. But that is not
-the whole story either: only 134 of 283 match level 0's extent to within 5%,
-and the mismatch grows with the level.
+That took two attempts, and the first one was wrong in a way worth recording.
+`posed_positions(lod)` used to pose only the vertices *that level* reached,
+which is fine if you draw the level you asked for — and a trap if you do not.
+Reading levels 1 to 3 back out of `posed_positions(0)` returns them in raw
+node-local space, which makes them look as though they live in a different
+frame: level 1 appeared to fit the authored box on only 129 of 283, and
+`o_bnt_rdr_l_01` appeared to have its level 1 centred on the origin where its
+level 0 rests on the ground. Both were artefacts of the unposed read.
 
-So the coarse slots are real geometry in a frame that has not been
-established, and drawing them would put objects in the wrong place on more
-than half the models. The reader parses all fifteen and `slots_for_lod` takes
-a level; the viewer asks for 0 only.
+`posed_positions` now poses **every** slot, which is unambiguous: **no vertex
+of any of the 435 meshes is reached by two slots whose nodes pose it
+differently**, so there is never a choice to get wrong.
+
+Each slot also states its own axis-aligned box, and that is what pinned the
+decode down: a slot's declared box matches the vertices decoded for it exactly
+on **1451, 1011, 952, 535 and 288 slots** — every slot of every level, with
+the box stated in node-local space.
 
 ### The later blocks are damage states
 

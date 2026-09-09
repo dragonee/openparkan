@@ -199,6 +199,24 @@ written down is a question nobody reopens.
       would not be pulled hardest exactly where the original is least grey.
       What the renderer *does* with it is a separate question; see §2.2.
       → [docs/03-terrain.md](docs/03-terrain.md)
+- [x] **Levels of detail, and the trap that hid them.** The four levels are a
+      ladder by triangle count — **137445, 34843, 14033, 5039** over 434, 283,
+      282 and 197 meshes — and they are the same object with detail removed:
+      posed, each level's centre sits within a median **0.000 to 0.011** of the
+      model's size of level 0's, and its extent within **0.001 to 0.037**.
+      Each slot's own declared box matches the vertices decoded for it
+      **exactly, on every slot of every level** — 1451, 1011, 952, 535 and 288.
+      Getting there took two attempts. `posed_positions(lod)` posed only the
+      vertices that level reached, so reading levels 1 to 3 out of
+      `posed_positions(0)` returned them in raw node-local space and made them
+      look as though they lived in a different frame — level 1 appeared to fit
+      the authored box on 129 of 283 rather than 257. It now poses **every**
+      slot, which is unambiguous: no vertex of any of the 435 meshes is reached
+      by two slots whose nodes pose it differently. The viewer packs all four
+      levels and switches by apparent size, which at a camera framing the whole
+      map draws **189804 triangles instead of 641530** across the 864 placed
+      models — 30%, for 2.1 MB more payload.
+      → [docs/07-objects.md](docs/07-objects.md)
 - [x] **RsLi's LZSS, and with it the font.** The bit packing was right the
       first time; what was wrong is that the offset is an **absolute index
       into the ring buffer**, not a distance back, and the ring is pre-filled
@@ -386,36 +404,15 @@ a blend or shader mode — the multi-layer materials being exactly the ones that
 would need one. Nothing confirms it, and the reader passes it through
 unnamed.
 
-### 2.5 Where the coarse levels of detail live
-
-The four levels are a real ladder by triangle count — **137445, 34843, 14033
-and 5039** over 434, 283, 282 and 197 meshes — so a distant object could be
-drawn for a quarter, a tenth or a twenty-fifth of what it costs up close. That
-was on the list as pure engineering. It is not.
-
-**Only level 0 is in the model's own frame.** It fits the authored bounding
-box on **434 of 434** meshes; level 1 fits on **129 of 283**, level 2 on 124
-of 282, level 3 on 66 of 197, with overruns up to half the model's size. Not a
-posing problem — the nodes owning the coarse slots carry identity poses, so
-posed and unposed agree.
-
-`o_bnt_rdr_l_01` is the clearest case: level 0 runs z 0.1 to 2.3, a mast
-resting on the ground, and level 1 runs −1.1 to 1.1 — the same height, centred
-on the origin instead of standing on it. **85 of the 283** level-1 slots are
-centred that way where level 0 is not, so that is part of the answer but not
-all of it: only 134 of 283 match level 0's extent to within 5%, and the
-mismatch grows with the level.
-
-Until the frame is worked out, drawing the coarse levels would put objects in
-the wrong place on more than half the models, so the viewer asks for level 0
-and packs nothing else. Packing all four costs 61% more geometry and 2.1 MB of
-payload, which is affordable — the reason not to is that it would be wrong.
-→ [docs/07-objects.md](docs/07-objects.md)
-
 ---
 
 ## 3. Renderer engineering, not format work
 
+- [x] **LOD switching** — done, once the geometry was validated; see section 0.
+  All four levels are packed and the viewer picks one by apparent size, the
+  thresholds being multiples of the model's own radius so a lamp post and a
+  factory swap at the same size on screen rather than the same distance. The
+  **Detail levels** button pins everything to level 0 for comparison.
 - [x] **Alpha ordering** — done. The see-through layers now composite in a
   written-down order: the dome, the stars and the clouds behind everything,
   then the opaque world, then water, rain and the footprint overlay, and the
@@ -433,8 +430,6 @@ payload, which is affordable — the reason not to is that it would be wrong.
   be drawn twice at the same depth, and two things were: the terrain's two
   ground layers, now one pass, and the file's own duplicated faces, now
   filtered by `LandMesh.distinct_faces`.
-
-**LOD switching moved out of this section** — it is not engineering. See §2.5.
 
 ## 4. Known-unknowns carried in the readers
 

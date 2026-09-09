@@ -548,57 +548,70 @@ class ModelLibrary:
             # Vertices are authored in their own node's frame; without the
             # node poses applied a multi-part model draws every part piled on
             # the origin.  See docs/07-objects.md.
-            positions = m.posed_positions(0)
+            positions = m.posed_positions()
             wear = m.texture_names
 
-            # A model holds up to three levels of detail at once; draw LOD 0
-            # only.  Every node is drawn except its collision hulls: a
-            # building's tall structure lives in its i* nodes, so filtering
-            # those out leaves it far too short, but a CP_* hull is a crude
-            # oversized box the engine only tests against.
-            wanted: list[int] = []
-            for node in m.nodes:
-                if node.is_collision:
-                    continue
-                for index in node.slots_for_lod(0):
-                    if index < len(m.slots):
-                        slot = m.slots[index]
-                        wanted += list(
-                            range(slot.first_batch, slot.first_batch + slot.batch_count)
-                        )
-            if not wanted:
-                wanted = list(range(len(m.batches)))
-            wanted = sorted({i for i in wanted if i < len(m.batches)})
-
-            # Compact to just the vertices those batches touch.
-            remap: dict[int, int] = {}
-            for bi in wanted:
-                b = m.batches[bi]
-                first, count = b.triangles
-                start = len(idx_values)
-                for t in range(first, min(first + count, len(m.triangles))):
-                    for v in m.triangles[t]:
-                        if v not in remap:
-                            remap[v] = len(points)
-                            points.append(objmesh.apply(pose, positions[v]))
-                            uvs.append(m.uv[v] if v < len(m.uv) else (0.0, 0.0))
-                            lightmap_uvs.append(
-                                m.lightmap_uv[v] if v < len(m.lightmap_uv) else (0.0, 0.0)
+            # A model holds up to four levels of detail at once, one slot per
+            # level, and all of them are packed.  They are the same object with
+            # detail removed -- posed, each level sits on level 0's centre to
+            # within a median 0.000 to 0.011 of the model's size -- and the
+            # chain runs 137445, 34843, 14033 and 5039 triangles, so a distant
+            # object costs a quarter, a tenth or a twenty-fifth of a near one.
+            # Every node is drawn except its collision hulls: a building's tall
+            # structure lives in its i* nodes, so filtering those out leaves it
+            # far too short, but a CP_* hull is a crude oversized box the
+            # engine only tests against.
+            for lod in range(objmesh.LOD_COUNT):
+                wanted: list[int] = []
+                for node in m.nodes:
+                    if node.is_collision:
+                        continue
+                    for index in node.slots_for_lod(lod):
+                        if index < len(m.slots):
+                            slot = m.slots[index]
+                            wanted += list(
+                                range(slot.first_batch,
+                                      slot.first_batch + slot.batch_count)
                             )
-                        idx_values.append(remap[v])
-                name = wear[b.material] if 0 <= b.material < len(wear) else None
-                frames = self.textures.frames(name) if name else []
-                group = {
-                    "start": start,
-                    "count": len(idx_values) - start,
-                    "material": frames[0] if frames else -1,
-                    "tint": self.textures.tint(name) if name else 0xFFFFFF,
-                }
-                if baked is not None and b.is_lit:
-                    group["lightmap"] = baked
-                if len(frames) > 1:
-                    group["frames"] = frames
-                groups.append(group)
+                if not wanted and lod == 0:
+                    wanted = list(range(len(m.batches)))
+                wanted = sorted({i for i in wanted if i < len(m.batches)})
+                if not wanted:
+                    continue
+
+                # Compact to just the vertices those batches touch.  Each level
+                # gets its own copy, so a vertex two levels share is written
+                # twice and computeVertexNormals sees one level at a time.
+                remap: dict[int, int] = {}
+                for bi in wanted:
+                    b = m.batches[bi]
+                    first, count = b.triangles
+                    start = len(idx_values)
+                    for t in range(first, min(first + count, len(m.triangles))):
+                        for v in m.triangles[t]:
+                            if v not in remap:
+                                remap[v] = len(points)
+                                points.append(objmesh.apply(pose, positions[v]))
+                                uvs.append(m.uv[v] if v < len(m.uv) else (0.0, 0.0))
+                                lightmap_uvs.append(
+                                    m.lightmap_uv[v] if v < len(m.lightmap_uv)
+                                    else (0.0, 0.0)
+                                )
+                            idx_values.append(remap[v])
+                    name = wear[b.material] if 0 <= b.material < len(wear) else None
+                    frames = self.textures.frames(name) if name else []
+                    group = {
+                        "start": start,
+                        "count": len(idx_values) - start,
+                        "material": frames[0] if frames else -1,
+                        "tint": self.textures.tint(name) if name else 0xFFFFFF,
+                        "lod": lod,
+                    }
+                    if baked is not None and b.is_lit:
+                        group["lightmap"] = baked
+                    if len(frames) > 1:
+                        group["frames"] = frames
+                    groups.append(group)
         groups = [g for g in groups if g["count"]]
         if not points:
             self._by_parts[key] = None

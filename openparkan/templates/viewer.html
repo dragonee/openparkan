@@ -172,6 +172,7 @@
     <div class="controls">
       <button id="wire" aria-pressed="false">Wireframe</button>
       <button id="plan" aria-pressed="false">Footprints</button>
+      <button id="lod" aria-pressed="true">Detail levels</button>
       <button id="blend" aria-pressed="true">Blend layer 2</button>
       <button id="spin" aria-pressed="true">Orbit</button>
     </div>
@@ -796,8 +797,18 @@ if (typeof THREE === "undefined" || typeof pako === "undefined") {
   // Objects are drawn from their real geometry, decoded through objects.rlb.
   // Geometries are shared between every placement of a model, and shading is
   // flat, so the meshes ship without per-vertex normals.
-  function modelGeometry(i) {
-    if (modelCache[i]) return modelCache[i];
+  // Levels of detail, and where each takes over.  A model carries up to four,
+  // and they are the same object with detail removed rather than four
+  // different objects -- posed, each sits on level 0's centre to within a
+  // median 0.000 to 0.011 of the model's size.  The thresholds are in units of
+  // the model's own radius, so a lamp post and a factory swap at the same
+  // apparent size rather than the same distance.
+  const LOD_AT = [0, 40, 100, 250];
+  let lodOn = true;
+
+  function modelGeometry(i, lod) {
+    const key = i + "@" + lod;
+    if (modelCache[key]) return modelCache[key];
     const src = DATA.models[i];
     const g = new THREE.BufferGeometry();
     // Positions arrive quantised to int16 over the model's bounding box; the
@@ -812,19 +823,33 @@ if (typeof THREE === "undefined" || typeof pako === "undefined") {
     if (src.uv2) g.setAttribute("uv2", new THREE.BufferAttribute(b64(src.uv2, Uint16Array), 2));
     g.setIndex(new THREE.BufferAttribute(
       b64(src.index, src.wide ? Uint32Array : Uint16Array), 1));
-    src.groups.forEach((gr, k) => g.addGroup(gr.start, gr.count, k));
+    // Every level shares one position, uv and index buffer; a level's
+    // geometry is just the subset of groups tagged with it.
+    groupsFor(src, lod).forEach((gr, k) => g.addGroup(gr.start, gr.count, k));
     g.computeVertexNormals();
-    modelCache[i] = g;
+    modelCache[key] = g;
     return g;
+  }
+
+  //: The groups of one level.  A model packed before levels existed has none
+  //: tagged, in which case every group belongs to level 0.
+  function groupsFor(src, lod) {
+    return src.groups.filter((gr) => (gr.lod || 0) === lod);
+  }
+
+  //: Which levels a model actually carries, coarsest last.
+  function lodsOf(src) {
+    const seen = new Set(src.groups.map((gr) => gr.lod || 0));
+    return [...seen].sort((a, b) => a - b);
   }
 
   // One material per draw batch, textured through
   // batch -> wear -> Material.lib -> Textures.lib.
-  function modelMaterials(i, tint) {
-    const key = i + "|" + tint;
+  function modelMaterials(i, tint, lod) {
+    const key = i + "|" + tint + "@" + lod;
     if (modelMatCache[key]) return modelMatCache[key];
     const src = DATA.models[i];
-    const mats = src.groups.map((gr) => {
+    const mats = groupsFor(src, lod).map((gr) => {
       const opts = { side: THREE.FrontSide, color: tint };
       const pooled = gr.material >= 0 ? DATA.pool[gr.material] : null;
       if (pooled && pooled.kind === "texture") {
@@ -855,12 +880,36 @@ if (typeof THREE === "undefined" || typeof pako === "undefined") {
   // placement's rotation in the right order.
   function modelInstance(i, tint) {
     const src = DATA.models[i];
-    const inner = new THREE.Mesh(modelGeometry(i), modelMaterials(i, tint));
-    inner.scale.set(src.scale[0], src.scale[1], src.scale[2]);
-    inner.position.set(src.offset[0], src.offset[1], src.offset[2]);
+    const levels = lodsOf(src);
+    // The radius the thresholds are measured in: the model's own half-extent.
+    const radius = Math.max(src.scale[0], src.scale[1], src.scale[2]);
     const group = new THREE.Group();
-    group.add(inner);
+    const lod = new THREE.LOD();
+    levels.forEach((level, rank) => {
+      const inner = new THREE.Mesh(modelGeometry(i, level),
+                                   modelMaterials(i, tint, level));
+      inner.scale.set(src.scale[0], src.scale[1], src.scale[2]);
+      inner.position.set(src.offset[0], src.offset[1], src.offset[2]);
+      // Rank, not the level number: a model missing level 1 should still hand
+      // over to whatever it does carry at the first threshold.
+      lod.addLevel(inner, rank === 0 ? 0 : LOD_AT[Math.min(rank, 3)] * radius);
+    });
+    lod.autoUpdate = lodOn;
+    lodGroups.push(lod);
+    group.add(lod);
     return group;
+  }
+
+  //: Every LOD in the scene, so the toggle can pin them all to level 0.
+  let lodGroups = [];
+
+  function applyLod() {
+    lodGroups.forEach((lod) => {
+      lod.autoUpdate = lodOn;
+      if (!lodOn) {
+        lod.levels.forEach((l, k) => { l.object.visible = k === 0; });
+      }
+    });
   }
 
   function clearOverlay() {
@@ -874,6 +923,7 @@ if (typeof THREE === "undefined" || typeof pako === "undefined") {
     });
     overlay = null;
     footprints = [];
+    lodGroups = [];
   }
 
   function showMission(mis) {
@@ -1022,6 +1072,12 @@ if (typeof THREE === "undefined" || typeof pako === "undefined") {
       if (o.isMesh) o.material.forEach((m) => { m.wireframe = on; });
     });
   });
+  document.getElementById("lod").addEventListener("click", (e) => {
+    lodOn = !lodOn;
+    e.currentTarget.setAttribute("aria-pressed", String(lodOn));
+    applyLod();
+  });
+
   document.getElementById("plan").addEventListener("click", (e) => {
     const on = e.currentTarget.getAttribute("aria-pressed") !== "true";
     e.currentTarget.setAttribute("aria-pressed", String(on));

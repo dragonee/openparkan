@@ -1762,7 +1762,7 @@ def check_poses(check, game: Path) -> None:
             model = load(ref)
             if model is None:
                 continue
-            posed = model.posed_positions(0)
+            posed = model.posed_positions()
             reachable = {
                 v
                 for i, node in enumerate(model.nodes)
@@ -1859,7 +1859,7 @@ def check_lod(check, game: Path) -> None:
                 continue
             low, high = m.volume.minimum, m.volume.maximum
             span = max(high[a] - low[a] for a in range(3)) or 1.0
-            posed = m.posed_positions(0)
+            posed = m.posed_positions()
             for k in range(objmesh.SLOTS_PER_VARIANT):
                 vertices: set[int] = set()
                 count = 0
@@ -1896,13 +1896,53 @@ def check_lod(check, game: Path) -> None:
           + ", ".join(f"{k}: {triangles[k]}" for k in range(4))
           + f" -- but slot 4 goes back up to {triangles[4]} over only "
           f"{filled[4]} meshes, so it is not a fifth level")
-    check("MESH: only slot 0 sits in the model's own frame",
+    check("MESH: every level is a simplification in place",
           fits[0] == seen[0] > 0
-          and all(fits[k] < seen[k] * 0.6 for k in range(1, 5)),
-          ", ".join(f"slot {k}: {fits[k]}/{seen[k]} fit the authored box"
+          and all(fits[k] >= seen[k] * 0.65 for k in range(1, 5)),
+          ", ".join(f"slot {k}: {fits[k]}/{seen[k]}"
                     for k in range(objmesh.SLOTS_PER_VARIANT))
-          + " -- the coarse slots are real geometry in a frame that is not "
-            "established, so the viewer draws slot 0 only")
+          + " fit the model's authored box -- once every slot is posed, not "
+            "just the level being read.  The coarse levels sit on level 0's "
+            "centre to within a median 0.000 to 0.011 of the model's size and "
+            "match its extent to within 0.001 to 0.037, so they are the same "
+            "object with detail removed.  The stragglers are trees and stones "
+            "whose silhouette a simplification legitimately changes")
+
+    # Posing every slot at once is only safe because the slots never disagree.
+    clashes = 0
+    checked = 0
+    for library in sorted(game.glob("*.rlb")):
+        try:
+            archive = NResArchive.open(library)
+        except NotAnNResArchive:
+            continue
+        for entry in archive:
+            if not entry.name.lower().endswith(".msh"):
+                continue
+            try:
+                m = objmesh.parse(archive.read(entry), entry.name)
+            except (ValueError, struct.error):
+                continue
+            checked += 1
+            owner: dict[int, tuple] = {}
+            for ni, node in enumerate(m.nodes):
+                pose = m.world_pose(ni)
+                for si in node.slot_index:
+                    if si == objmesh.NO_SLOT or si >= len(m.slots):
+                        continue
+                    slot = m.slots[si]
+                    stop = slot.first_triangle + slot.triangle_count
+                    for tri in m.triangles[slot.first_triangle:stop]:
+                        for v in tri:
+                            if owner.get(v, pose) != pose:
+                                clashes += 1
+                                break
+                            owner[v] = pose
+    check("MESH: no vertex is shared by slots under different poses",
+          clashes == 0 and checked > 0,
+          f"{clashes} of {checked} meshes have a vertex reached by two slots "
+          f"whose nodes pose it differently, which is what lets "
+          f"posed_positions pose every level at once")
 
 
 def check_damage(check, game: Path) -> None:
