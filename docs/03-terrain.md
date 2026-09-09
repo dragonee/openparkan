@@ -347,6 +347,10 @@ rather than doubled.
 
 `LandMesh.lod_faces(0)` returns the fine level and the viewer draws that:
 **173827 triangles instead of 275882**, one surface everywhere, and no seams.
+Both levels are packed — the coarse one costs only its indices, since its
+vertices are a subset of the fine one's — and the **Coarse ground** button
+switches between them. A game renderer would switch per cell by distance; a
+survey camera frames the whole map, so here it is a toggle.
 
 An earlier deduplication pass — keep the first face of each set of triangles
 with identical positions — is gone. It removed exactly the 46186 the

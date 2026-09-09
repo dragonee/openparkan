@@ -353,27 +353,31 @@ def build_map_payload(mesh: landmesh.LandMesh, resolver: TextureResolver, name: 
     # 2 as a second, coplanar mesh made the walkable ground flicker: the two
     # passes compile to different shader programs, and their depths come out
     # a hair apart.
-    # The map is stored twice, as two levels of detail; draw the fine one.
-    # Drawing both puts two surfaces a fraction of a unit apart over the flat
-    # ground and they z-fight.  See LandMesh.lod_faces.
+    # The map is stored twice, as two levels of detail, and drawing both puts
+    # two surfaces a fraction of a unit apart over the flat ground -- they
+    # z-fight.  Both are packed and one is drawn; level 1 costs only its
+    # indices, because its vertices are a subset of level 0's and the whole
+    # vertex array is already here.  See LandMesh.lod_faces.
     drawn_faces = mesh.lod_faces(0)
-    buckets: dict[tuple[int, int, bool], list[int]] = {}
-    for fi in drawn_faces:
-        key = (mesh.face_tex1[fi], mesh.face_tex2[fi], mesh.is_water(fi))
-        buckets.setdefault(key, []).append(fi)
+    buckets: dict[tuple[int, int, bool, int], list[int]] = {}
+    for level in range(landmesh.LOD_COUNT):
+        for fi in mesh.lod_faces(level):
+            key = (mesh.face_tex1[fi], mesh.face_tex2[fi], mesh.is_water(fi), level)
+            buckets.setdefault(key, []).append(fi)
 
     wide = nv > 0xFFFF
     idx = bytearray()
     groups = []
     materials = []
-    for (tex1, tex2, is_water), face_ids in sorted(buckets.items()):
+    for (tex1, tex2, is_water, level), face_ids in sorted(buckets.items()):
         start = len(idx) // (4 if wide else 2)
         for fi in face_ids:
             a, b, c = mesh.faces[fi]
             idx += struct.pack("<3I" if wide else "<3H", a, b, c)
         name = mesh.texture_name(1, tex1) or "?"
         frames = resolver.frames(name)
-        groups.append({"start": start, "count": len(face_ids) * 3, "material": len(materials)})
+        groups.append({"start": start, "count": len(face_ids) * 3,
+                       "material": len(materials), "lod": level})
         entry = {"pool": frames[0], "water": is_water, "tint": resolver.tint(name)}
         if len(frames) > 1:
             entry["frames"] = frames
@@ -396,6 +400,7 @@ def build_map_payload(mesh: landmesh.LandMesh, resolver: TextureResolver, name: 
         "wetLayers": wet_layers,
         "vertexCount": nv,
         "faceCount": len(drawn_faces),
+        "coarseFaces": len(mesh.lod_faces(1)),
         "storedFaces": mesh.face_count,
         "extent": [round(maxx - minx, 1), round(maxy - miny, 1)],
         # The recentring applied to the geometry, so mission markers given in

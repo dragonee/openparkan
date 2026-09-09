@@ -152,7 +152,7 @@
     <dl class="readout">
       <dt>Extent</dt><dd id="ext">&ndash;</dd>
       <dt>Elevation</dt><dd id="hgt">&ndash;</dd>
-      <dt>Triangles</dt><dd id="nf">&ndash;</dd>
+      <dt>Triangles</dt><dd id="nf" title="fine / coarse level">&ndash;</dd>
       <dt>Water</dt><dd id="wat">&ndash;</dd>
       <dt id="objdt" hidden>Placed</dt><dd id="obj" hidden>&ndash;</dd>
       <dt id="skydt" hidden>Sky</dt><dd id="sky" hidden>&ndash;</dd>
@@ -175,6 +175,7 @@
       <button id="lod" aria-pressed="true">Detail levels</button>
       <button id="blend" aria-pressed="true">Blend layer 2</button>
       <button id="anim" aria-pressed="true">Animate</button>
+      <button id="coarse" aria-pressed="false">Coarse ground</button>
       <button id="spin" aria-pressed="true">Orbit</button>
     </div>
   </div>
@@ -693,6 +694,20 @@ if (typeof THREE === "undefined" || typeof pako === "undefined") {
   // Material.lib's flags byte, from the archive directory.
   const BLEND_ALPHA = 4, BLEND_ADD = 8;
 
+  //: Which level of the terrain is drawn.  The file holds two, and the coarse
+  //: one is what the engine would switch to per cell at distance; here it is
+  //: a toggle, because a survey camera frames the whole map at once.
+  let coarseGround = false;
+  let terrainGeometry = null, terrainGroups = null;
+
+  function setTerrainLod(level) {
+    if (!terrainGeometry || !terrainGroups) return;
+    terrainGeometry.clearGroups();
+    terrainGroups
+      .filter((gr) => (gr.lod || 0) === level)
+      .forEach((gr) => terrainGeometry.addGroup(gr.start, gr.count, gr.material));
+  }
+
   const terrainShaders = [];
   let layer2On = true;
 
@@ -760,7 +775,12 @@ if (typeof THREE === "undefined" || typeof pako === "undefined") {
     g.setAttribute("uvLayer2", new THREE.BufferAttribute(b64(map.uv2, Uint16Array), 2));
     g.setAttribute("blend", new THREE.BufferAttribute(b64(map.blend, Uint8Array), 1, true));
     g.setIndex(new THREE.BufferAttribute(b64(map.index, IndexArray), 1));
-    map.groups.forEach((gr) => g.addGroup(gr.start, gr.count, gr.material));
+    // Both levels of detail are packed over one vertex array -- the coarse
+    // one's vertices are a subset of the fine one's -- so switching is a
+    // matter of which groups the geometry carries.
+    terrainGeometry = g;
+    terrainGroups = map.groups;
+    setTerrainLod(coarseGround ? 1 : 0);
 
     terrainShaders.length = 0;
     current = new THREE.Group();
@@ -775,7 +795,9 @@ if (typeof THREE === "undefined" || typeof pako === "undefined") {
     place();
 
     const num = (v) => v.toLocaleString();
-    document.getElementById("nf").textContent = num(map.faceCount);
+    document.getElementById("nf").textContent = map.coarseFaces
+      ? num(map.faceCount) + " / " + num(map.coarseFaces)
+      : num(map.faceCount);
     document.getElementById("ext").innerHTML =
       num(Math.round(map.extent[0])) + " &times; " + num(Math.round(map.extent[1])) +
       ' <span class="unit">u</span>';
@@ -799,7 +821,6 @@ if (typeof THREE === "undefined" || typeof pako === "undefined") {
     3: new THREE.SphereGeometry(5, 6, 5),
   };
   const NEUTRAL = 0x8a8a85;
-  const SCENERY = 0x6f7360;
   const modelCache = {};
   const modelMatCache = {};
   let overlay = null;
@@ -1071,14 +1092,8 @@ if (typeof THREE === "undefined" || typeof pako === "undefined") {
     const cx = map.centre[0], cy = map.centre[1];
     overlay = new THREE.Group();
 
-    const flat = (colour) => new THREE.MeshLambertMaterial({
-      color: colour, side: THREE.DoubleSide, flatShading: true,
-    });
     const mats = mis.clans.map((c) => new THREE.MeshLambertMaterial({ color: c.colour }));
-    const meshMats = mis.clans.map((c) => flat(c.colour));
     const neutral = new THREE.MeshLambertMaterial({ color: NEUTRAL });
-
-    const sceneryMat = flat(SCENERY);
     let drawn = 0;
     const tintOf = (c) => {
       const r = (c >> 16) & 255, g = (c >> 8) & 255, b = c & 255;
@@ -1211,6 +1226,12 @@ if (typeof THREE === "undefined" || typeof pako === "undefined") {
       if (o.isMesh) o.material.forEach((m) => { m.wireframe = on; });
     });
   });
+  document.getElementById("coarse").addEventListener("click", (e) => {
+    coarseGround = !coarseGround;
+    e.currentTarget.setAttribute("aria-pressed", String(coarseGround));
+    setTerrainLod(coarseGround ? 1 : 0);
+  });
+
   document.getElementById("anim").addEventListener("click", (e) => {
     animOn = !animOn;
     e.currentTarget.setAttribute("aria-pressed", String(animOn));

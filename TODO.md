@@ -590,9 +590,12 @@ engine reads as a dword.
   or 8 x 8 grid of cells, each with a box, a centre, a radius and a run of
   faces, and every one of the 275882 faces lies inside its own cell. See
   section 0. Culling still buys nothing *here* — the worst map is **6259
-  triangles** once only the fine level is drawn, median 5852, in one call, and the
-  survey camera frames the whole map — so the reader exposes the grid and the
-  viewer does not use it. A game renderer would.
+  triangles** once only the fine level is drawn, median 5852, in one call, and
+  the survey camera frames the whole map — so the reader exposes the grid and
+  the viewer does not use it. A game renderer would, and it would switch
+  levels **per cell**; the viewer packs both and offers the coarse one as a
+  toggle instead, which costs only its indices because its vertices are a
+  subset of the fine level's.
 - [x] **Coplanar geometry** — done; see section 0. Nothing in the scene should
   be drawn twice at the same depth, and two things were: the terrain's two
   ground layers, now one pass, and the map's second level of detail, now not
