@@ -48,8 +48,8 @@ niGetD3DVideoModeList niSelectD3DDriver
 
 plus a `DisableD3DCalls` switch and a `Software\Nikita\NgiTool` registry key.
 `World3D.dll` imports `DINPUT`. So the stack is DirectDraw + Direct3D
-immediate mode + DirectSound + DirectInput — fixed-function DirectX 6/7 with a
-software fallback.
+immediate mode + DirectSound + DirectInput — fixed-function DirectX 7 with a
+software fallback; the interface is pinned to `IDirect3DDevice7` below.
 
 That is good news for a reimplementation: there are no shaders to reproduce.
 `Iron_3D.ini` shows the whole feature set —
@@ -64,6 +64,90 @@ BITDEPTH=32
 
 `EMBM` is environment-mapped bump mapping, a DX6-era feature. Everything here
 maps onto modern Metal / Vulkan / WebGPU without difficulty.
+
+### The device is `IDirect3DDevice7`
+
+`Ngi32.dll` binds DirectDraw by name at run time (`DirectDrawCreate`,
+`DirectDrawCreateEx`) and drives everything through one COM-style object
+whose vtable is at `0x100315e0`; `niGet3DRender` hands it out and every other
+DLL calls it. Which Direct3D interface it holds falls out of the call sites:
+counting the vtable offsets it calls through gives `SetRenderState` at index
+20, `SetTransform` at 11, `SetViewport` at 13, `DrawPrimitive` at 25,
+`SetTexture` at 35, `SetTextureStageState` at 37, `Begin`/`EndStateBlock` at
+22/23 and `ApplyStateBlock` at 39 — the **`IDirect3DDevice7`** layout exactly,
+with no offset left over. The driver GUID it compares against at `0x10031378`
+is `IID_IDirect3DHALDevice`.
+
+The engine declares **six vertex formats**, and their FVF codes and strides
+check each other:
+
+| FVF | Meaning | Stride |
+|---|---|---|
+| `0x1c2` | `XYZ \| DIFFUSE \| SPECULAR \| TEX1` | 28 |
+| `0x2c2` | `XYZ \| DIFFUSE \| SPECULAR \| TEX2` | 36 |
+| `0x1c4` | `XYZRHW \| DIFFUSE \| SPECULAR \| TEX1` | 32 |
+| `0x2c4` | `XYZRHW \| DIFFUSE \| SPECULAR \| TEX2` | 40 |
+| `0x112` | `XYZ \| NORMAL \| TEX1` | 32 |
+| `0x212` | `XYZ \| NORMAL \| TEX2` | 40 |
+
+Every stride is what its bits imply, to the byte. Three layouts, each with a
+one-texture form and its two-texture twin — so multitexturing is not
+incidental to the engine, it has its own vertex declaration.
+
+### The render phase table
+
+`Ngi32.dll` holds a table of **20 records of 44 bytes at `0x10036a30`**,
+covering **14 render phases** numbered 0 to 13. A record carries the phase it
+implements, a capability requirement, a filtering-quality index, a list of
+`{stage, state, value}` triples, and a four-entry array saying which of the
+call's texture arguments each stage takes. At start-up the engine walks the
+table once per phase and keeps the **first record whose requirement the device
+meets**, recording its triples into a D3D state block — so a phase that needs
+more than the hardware offers is re-expressed over more stages rather than
+dropped. `ApplyStateBlock` is then all a draw costs.
+
+Setting a phase is one call, `render->SetPhase(mode, tex0, tex1)`, vtable
+index 30. The stage array decides the binding, and **every two-texture phase
+reads `[0, 1, …]` — argument 0 to stage 0, argument 1 to stage 1.** The number
+of stages it will fill is `min(device stages, 4)`, held in the render object
+and forced to 1 by the registry value `Disable MultiTexturing` under
+`HKCU\Software\Nikita\NgiTool` (alongside `DisableMipmap`,
+`Force 16-bit textures`, `DisableD3DCalls`, `UseFirstCard` and `ForceCpu`).
+`Iron_3D.ini`'s `BITDEPTH` and `RENDER_QUALITY` have nothing to do with it —
+they live in `iron3d.dll` and never reach a stage.
+
+What the two-texture phases compute:
+
+| Phase | Result |
+|---|---|
+| 3 | `tex0 · tex1 · diffuse` |
+| 4 | `lerp(tex0, tex1, tex1.a) · diffuse` |
+| 5 | `lerp(tex0, tex1, diffuse.a) · diffuse` |
+| 9 | `tex0 · tex1 · 2 · diffuse` — `MODULATE2X`, whose identity value is 128 |
+| 10, 11 | `BUMPENVMAP` / `BUMPENVMAPLUMINANCE`, the `EMBM=1` path |
+| 12, 13 | three textures: modulate, bump, then add |
+
+Phases 1, 2, 7 and 8 are the single-texture ones and 0 is untextured. Phase 6
+is the odd one: it binds **one** texture to stages 0, 1 and 3 with
+`TEXCOORDINDEX` 0, 1 and 0 — two UV sets over one image.
+
+`Terrain.dll`'s `CShade::ConfigureTextureAndAlphaBlendModes` is the consumer.
+It asks the renderer which phases exist on this device (`IsPhaseSupported`,
+vtable index 31) and caches one mode per drawing role, falling back to phase 1
+where the device cannot do better; it warns *"TEXTUREMODE_MODULATE not
+supported"* if even phase 1 is missing. Where two textures have to be
+combined it either sets phase 3 and puts the second texture in stage 1, **or**
+— when phase 3 is missing — builds a second surface and draws a second pass.
+
+A surface, as the renderer sees it, is five fields: two textures, a cell for
+each (`-1` for the whole texture), and the phase. `CCamera::DrawMaterialStrided2`
+reads exactly those and makes one `SetPhase` call. A `MAT0` entry supplies one
+texture and one cell, so a material fills half of one — see
+[03-terrain.md](03-terrain.md#the-m-twin-is-the-materials-second-track-drawn-unlit).
+
+These are facts about the binaries rather than about the shipped data, so
+`uv run openparkan verify` does not cover them; the addresses above are where
+to look. See [09-method.md](09-method.md).
 
 `Iron_3D.ini` also proves the Steam build already runs at modern resolutions
 (`DISPLAY_WIDTH=1920`, `DISPLAY_HEIGHT=1080`), so resolution is not among the

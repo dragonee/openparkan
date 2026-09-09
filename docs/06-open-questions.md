@@ -73,15 +73,14 @@ and then 2, 1, 1, 1, which reads as two parallel arrays rather than pairs.
 
 ## Unresolved terrain fields
 
-- `Land.msh` stream 1: 2432 bytes on SC_3, mostly `0xFF`. Not indexed by
-  vertex or face count.
-- `Land.msh` stream 2: 737 float3 on SC_3. The first 8 are the map's bounding
-  box corners; the remaining 729 (= 27³) look like a spatial subdivision.
 - Face record fields 10, 11, 12, and field 0 (near-constant per mesh).
-- `MAT0`'s byte 4: twelve values that sort materials into groups tracking
-  their names (all six `TREE*` share 6, the effects share 0xFF), so it reads
-  as a shader or blend-mode id. Also the record's variable-length tail, and
-  the second colour triple after the diffuse.
+- `MAT0`'s byte 4: eleven values plus an unset `0xFF` that sort materials into
+  groups tracking their names (all six `TREE*` share 6), so it reads as a
+  shader or blend-mode id, but nothing in the engine follows it. The
+  directory's flags byte beside it is the sharper field; see
+  [../TODO.md](../TODO.md) §2.4. The record's tail is the animation-track
+  table and is now read, and the "second colour triple" is the entry's
+  ambient — see [07-objects.md](07-objects.md#the-material-chain).
 - A batch's vertex range (fields 7 and 8). The ranges are contiguous but only
   tile the vertex array on 69 of 435 meshes, so they are not a partition.
 - Terrain face field 13 (0..62, ~57 distinct per map). **Not** a patch or

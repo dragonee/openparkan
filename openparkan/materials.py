@@ -1,6 +1,6 @@
 """Reader for ``Material.lib`` -- the ``MAT0`` material database.
 
-905 materials, each naming one or more texture layers.  A model's wear (its
+905 materials, each naming one or more textures.  A model's wear (its
 ``.wea``) lists material names; a mesh batch picks one of them by index; the
 material names the texture.  That completes the chain from a triangle to a
 pixel::
@@ -12,78 +12,108 @@ not textures, which is why ``WATER``, ``B_S0`` and ``ENV_NLAVA`` cannot be
 found in ``Textures.lib`` -- they are here, and they name ``WATER0.0``,
 ``B_FOUND.0`` and ``LAV00.0``.
 
-A record opens with two uint16: the number of texture entries and the number
-of **layers**.  The count divides by the layer count on all 905 records, and
-the quotient is a frame count -- ``WATER_M`` is one layer of ten frames
-(``WATER0.0`` .. ``WATER9.0``), while ``WATER_BOT`` is two layers of one
-(``L20.0`` and ``L20M.0``).  860 materials have a single layer, 43 have two
-and two have eight; animation is much the commoner reason for a material to
-hold several textures.
+The record
+----------
 
-The two-layer ones are the ground: a texture in RGB565 and its ``M`` twin in
-XRGB8888, holding the same picture flattened towards neutral grey -- see
-``docs/03-terrain.md``.  It is **not** a mask, which this reader used to call
-it.  The two eight-layer ones, ``B_LBL_01`` and ``R_LBL_01``, are not eight
-images at all: both name ``PG27.0`` eight times and ask for cells 0 to 7 of
-it, so they are the blue and red team variants of one insignia sheet.
+A record is a 14-byte header, then the entries, then a table of animation
+tracks over them::
 
-An entry begins 12 bytes in and runs **34** bytes to the next, with the
-texture name in a 14-byte field at +20.  34 rather than 40: at 34 the opacity
-byte lands on 100 in every entry of 904 of the 905 records, and every other
-stride tried collapses to 531 -- which is exactly the number of records
-holding a single entry, where a stride cannot be wrong.
+    +0   uint16   entry count
+    +2   uint16   track count      (the engine refuses more than 20)
+    +4   uint8    class            \\
+    +5   uint8    unused            |  version-gated; see below
+    +6   float32                    |
+    +10  uint32                    /
+    +14  entry[]  34 bytes each
+         track[]  a uint32, a uint16 key count, then 6 bytes per key
 
-Getting that stride right is what makes every material resolve.  The names
+**All 905 records parse to the byte with nothing left over.**
+
+The last four header fields are gated on a **version** that is not in the
+record at all -- it is the archive directory entry's second count field
+(``NResEntry.link_count``), and the parser substitutes a default below each
+threshold: 0xFF for the two bytes at version < 2, 1.0 for the float at < 3, 0
+for the dword at < 4.  Every shipped record declares **version 6**, so all
+four are present and the header is 14 bytes on every one.  The float is 1.0
+on all 905 and the dword 0 on 901 -- the other four hold a float, 1000.0 or
+9999.0.
+
+The entry
+---------
+
+An entry is a **D3DMATERIAL7 written as bytes**, and that is why it is 34
+long::
+
+    +0   uint8[3] ambient  rgb      +3  uint8 ambient  alpha, per cent
+    +4   uint8[3] diffuse  rgb      +7  uint8 diffuse  alpha, per cent
+    +8   uint8[3] specular rgb      +11 uint8 specular alpha, per cent
+    +12  uint8[3] emissive rgb      +15 uint8 emissive alpha, per cent
+    +16  uint8    specular power
+    +17  int8     sub-image, -1 for the whole texture
+    +18  char[16] texture name
+
+The colours are bytes over 255 and the alphas **per cent** -- the parser
+multiplies the four alpha bytes by 0.01 and the twelve colour bytes by
+1/255.  Not one of the 12572 alpha bytes exceeds 100, which no wrong offset
+survives.  The longest shipped name is 12 characters and seven entries name
+nothing at all, which the engine reads as "no texture".
+
+Getting the stride right is what makes every material resolve.  The names
 used to be extracted by pattern, and the pattern swallowed whatever
 alphanumeric byte happened to sit in front of a name: it read ``qqds.7`` out
 of ``B_MTP_04``, whose real texture is ``MTP_04.0``, and ``0FAIR.0`` ..
 ``7FAIR.0`` out of the ``FIRE_SMOKE`` animations, where those digits are the
-cell bytes 48..55 of fourteen frames that all name ``FAIR.0``.  Read by
-offset, **all 905 materials name a texture that is in Textures.lib**, against
-891 by pattern.
+cell bytes of fourteen frames that all name ``FAIR.0``.  Read by offset, **all
+905 materials name a texture that is in Textures.lib**, against 891 by
+pattern.
 
-At +6 sits a three-byte RGB **diffuse colour** that modulates the texture.  It
-matters: ``WATER``'s texture is a neutral grey ripple and the blue is entirely
-in its ``#4d6aff``, and lava is a dull red pattern tinted ``#b41e00``.  761
-materials carry a colour other than white.
+The diffuse colour matters on screen: ``WATER``'s texture is a neutral grey
+ripple and the blue is entirely in its ``#4d6aff``, and lava is a dull red
+pattern tinted ``#b41e00``.  761 materials carry a diffuse other than white.
+The ambient alpha is the only one that ever varies -- 3138 of the 3143
+entries are at 100 and the exception is ``FIRESTORM``, whose entries run 0,
+60, 80, 90, 95, 100 across its frames, which is a fade-in.
 
-The byte at +5 ahead of it is **not** the constant marker an earlier reading
-took it for.  It is an **opacity in percent** -- ``World3D.dll``'s parser
-multiplies it by 0.01 -- and it looks constant only because every material but
-one is fully opaque.  The exception gives it away: ``FIRESTORM``'s entries run
-**0, 60, 80, 90, 95, 100** across its frames, which is a fade-in.  3138 of the
-3143 entries are at 100.
+The byte before the name selects a **sub-image**: -1 means the whole texture,
+and anything else is a cell.  630 of the 3143 entries take the whole texture.
+The cell is **not** a grid index -- it indexes the texture's own ``Page``
+table, a list of sub-image rectangles appended to the Texm payload; see
+``texm.parse_pages``.  That is why ``SUN.0`` behaves like a 2 x 2 grid (its
+four pages *are* the four quadrants) while ``EFFECT6.0`` does not: its 26
+pages are four 128 x 32 strips, eight 64 x 64 tiles, eight 30 x 30 discs and
+five 16 x 16 icons.  All 62 textures a material indexes carry a table, and
+every one of the **2513** cells asked for is inside its own.
 
-The record is **versioned**, and the parser gates its tail on that: at version
-2 it reads the two bytes at +4 and +5, at 3 a ``float32`` defaulting to 1.0,
-at 4 a ``uint32`` defaulting to 0.  Below each it substitutes the default --
-and for the two bytes the default is **0xFF**.  So 0xFF in those fields is the
-engine's own "not set", which is what byte 5 holds on all 905 records and byte
-4 on 376 of them.  The other 11 values of byte 4 sort the library by role:
-0 to 4 hold **43 of the 45 multi-layer materials** and are almost all opaque
-ground, 5 is 342 object materials of which every one carries alpha, 6 is the
-87 ``TREE*`` and foliage, 7 is the two water materials, and 8 to 10 are three
-smaller families.  It reads like a shader or blend mode, but nothing confirms
-it.
+The tracks
+----------
 
-The byte immediately before the name, at +19, selects a **sub-image**: ``0xFF``
-means the whole texture, and anything else is a cell of a sprite sheet.  427
-of the 905 materials take the whole texture; the rest index one.  The sky
-materials are the clearest case -- ``SUN.0`` is a 2 x 2 sheet holding a sun
-corona and a moon, and ``ENV_SUN`` asks for cell 0 while ``ENV_MOON`` asks for
-cell 2, which is where the moon is.  ``SUN1.0`` holds four stars and a moon
-and its three ``ENV_SUN_*`` materials name cells 0, 1 and 3 -- the three
-stars.
+The second uint16 is **not a layer count**, which an earlier reading took it
+for.  It is the number of **animation tracks**, and the engine caps it at 20
+with the message "Too many animations for material."  Each track is a flags
+word, a key count, and one 6-byte key per keyframe: the entry to show, the
+time to show it, and a word that is zero on all 3147 keys.  Playing a track
+means walking its keys and interpolating the two entries that bracket the
+clock, which is why an entry is a whole material and not just a name.
 
-The cell is **not** a grid index, which an earlier reading assumed from the
-2 x 2 sheets.  It indexes the texture's own ``Page`` table -- a list of
-sub-image rectangles appended to the Texm payload, see ``texm.parse_pages``.
-That is why ``SUN.0`` behaves like a 2 x 2 grid (its four pages *are* the four
-quadrants) while ``EFFECT6.0`` does not: its 26 pages are four 128 x 32
-strips, eight 64 x 64 tiles, eight 30 x 30 discs and five 16 x 16 icons.  All
-62 textures a material indexes carry a table, and every one of the **2513**
-cells asked for -- across every entry of every material, not just the first --
-is inside its own.
+So the counts read the other way round from the old guess: ``WATER_M`` is one
+track of ten keys 200 apart -- ``WATER0.0`` through ``WATER9.0`` -- and
+``WATER_BOT`` is **two tracks of one key each**, one naming ``L20.0`` and the
+other ``L20M.0``.  860 materials have a single track, 43 have two and two
+have eight.
+
+The 43 two-track ones are the ground, and on all 43 the second track's entry
+names the first's texture with an ``M`` inserted.  The twin is **not a second
+texture layer**: nothing binds the two together, and a caller asking for
+track 1 gets one texture exactly as a caller asking for track 0 does.  What
+separates them is the lighting: on 37 of the 43 the first entry carries a
+white diffuse over a black ambient and the second a black diffuse over a
+white ambient, so the base is lit by the scene and **the twin is drawn
+unlit** -- which is what a texture flattened towards mid-grey is for.  See
+``docs/03-terrain.md``.
+
+The two eight-track materials, ``B_LBL_01`` and ``R_LBL_01``, are the same
+mechanism used for variants rather than frames: eight tracks of one key,
+naming cells 0 to 7 of one insignia sheet, blue and red.
 """
 
 from __future__ import annotations
@@ -96,63 +126,114 @@ from .nres import NResArchive
 
 MATERIAL_TAG = "MAT0"
 
-#: An entry's diffuse colour, and the opacity that anchors the offset.
-ENTRY_BASE = 12
-#: One texture entry.  34, not 40: at 34 the marker byte lands on 100 in every
-#: entry of 904 of the 905 records, against 531 at any other stride tried --
-#: and 531 is just the number of single-entry records, where a stride cannot
-#: be wrong.  The name field runs 14 bytes from +20 and the longest shipped
-#: name is 12 characters.
+#: Two counts, the class byte, an unused byte, a float and a dword.  The last
+#: four are version-gated and every shipped record declares version 6, so the
+#: header is this long on all 905.
+HEADER_SIZE = 14
+
+#: The archive directory's ``link_count`` is the record version, and 6 is what
+#: every shipped material carries.
+RECORD_VERSION = 6
+
+#: One entry: a ``D3DMATERIAL7`` written as bytes, then the sub-image and the
+#: name.  4 x (rgb + alpha) + power + cell + 16 = 34.
 ENTRY_STRIDE = 34
-COLOUR_OFFSET = 6
-#: An **opacity in percent**, which the engine multiplies by 0.01.  It reads
-#: as a constant 100 because all but one material is fully opaque -- the
-#: exception is ``FIRESTORM``, whose entries run 0, 60, 80, 90, 95, 100 across
-#: its frames, which is a fade-in.  It is what anchors the entry offsets.
-OPACITY_OFFSET = 5
-OPAQUE = 100
 
-#: The byte before an entry's texture name picks one of the texture's own
-#: sub-images -- an index into its ``Page`` table; see ``texm.parse_pages``.
-CELL_OFFSET = 19
-#: ...or asks for the whole texture.
-WHOLE_TEXTURE = 0xFF
-
-#: Where an entry's texture name starts, and how long the field is.
-NAME_OFFSET = 20
+AMBIENT_OFFSET = 0
+DIFFUSE_OFFSET = 4
+SPECULAR_OFFSET = 8
+EMISSIVE_OFFSET = 12
+#: Each colour's alpha sits behind its three bytes.
+ALPHA_STEP = 3
+POWER_OFFSET = 16
+CELL_OFFSET = 17
+NAME_OFFSET = 18
 NAME_FIELD = ENTRY_STRIDE - NAME_OFFSET
 
-#: A second colour sits ahead of the marker.  On 38 of the 43 two-layer
-#: materials the two entries hold it and the diffuse the opposite way round --
-#: entry 0 white diffuse and black here, entry 1 the reverse -- so the second
-#: entry is marked as something other than an ordinary lit layer.  Which of
-#: the two D3D slots each is has not been established.
-TINT_OFFSET = 2
+#: The four alphas are per cent -- the engine multiplies each by 0.01.
+ALPHA_FULL = 100
+
+#: A cell of -1 asks for the whole texture rather than one of its pages.
+WHOLE_TEXTURE = -1
+
+#: What the parser writes into the two version-gated bytes when the record is
+#: too old to carry them, and so the engine's own "not set".
+UNSET = 0xFF
+
+#: "Too many animations for material." -- the engine's own limit.
+MAX_TRACKS = 20
+
+#: A track's header: a flags word then a key count.
+TRACK_HEADER = 6
+#: One keyframe: the entry to show, when to show it, and a word that is zero
+#: on every one of the 3147 shipped keys.
+KEY_STRIDE = 6
+
+
+@dataclass(frozen=True)
+class Key:
+    """One keyframe of a track."""
+
+    entry: int
+    time: int
+    unread: int = 0
+
+
+@dataclass(frozen=True)
+class Track:
+    """One animation of a material, over its entries."""
+
+    #: The low three bits of the track's word.  0 on 821 of the 918 tracks and
+    #: on every track of every multi-track material, so it distinguishes
+    #: playback rather than role.
+    kind: int
+    #: The rest of that word.  0 on 848.
+    param: int
+    keys: list[Key] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
 class MaterialEntry:
-    """One texture entry of a material."""
+    """One entry of a material: a ``D3DMATERIAL7`` and the texture it wears."""
 
     texture: str
-    #: Sub-image of that texture, or WHOLE_TEXTURE.
+    #: Sub-image of that texture, or ``WHOLE_TEXTURE``.
     cell: int = WHOLE_TEXTURE
-    #: Diffuse colour, as ``(r, g, b)``.
+    #: Diffuse colour, as ``(r, g, b)``.  What the scene light multiplies.
     colour: tuple[int, int, int] = (255, 255, 255)
-    #: The second colour slot, ahead of the opacity.
-    tint: tuple[int, int, int] = (0, 0, 0)
-    #: Opacity in 0..1; 1.0 on every entry but ``FIRESTORM``'s fade-in.
-    opacity: float = 1.0
+    #: Ambient colour: what the surface shows when nothing lights it.
+    ambient: tuple[int, int, int] = (0, 0, 0)
+    specular: tuple[int, int, int] = (0, 0, 0)
+    emissive: tuple[int, int, int] = (0, 0, 0)
+    #: The four alphas in 0..1.  Only the ambient one ever varies.
+    ambient_alpha: float = 1.0
+    diffuse_alpha: float = 0.0
+    specular_alpha: float = 0.0
+    emissive_alpha: float = 0.0
+    #: Specular power: 0, 3, 4, 5 or 6.
+    power: int = 0
+
+    @property
+    def lit(self) -> bool:
+        """Whether the scene light reaches this entry.
+
+        An entry with a black diffuse and a white ambient shows the texture at
+        full brightness whatever the lighting; that is what the ground's ``M``
+        twins carry.
+        """
+        return self.colour != (0, 0, 0)
 
 
 @dataclass
 class Material:
     name: str
-    #: Total texture entries: ``layers * frames``.
     entry_count: int
-    layer_count: int
+    #: Animation tracks over the entries, **not** texture layers.
+    track_count: int
     #: Every entry in file order.
     entries: list[MaterialEntry] = field(default_factory=list)
+    #: The tracks themselves.
+    tracks: list[Track] = field(default_factory=list)
 
     @property
     def colour(self) -> tuple[int, int, int]:
@@ -177,45 +258,104 @@ class Material:
     def texture(self) -> str | None:
         return self.textures[0] if self.textures else None
 
-    @property
-    def frame_count(self) -> int:
-        """How many animation frames the base layer has."""
-        if self.layer_count <= 1:
-            return len(self.textures)
-        return max(1, self.entry_count // self.layer_count)
+    def variant(self, track: int = 0) -> MaterialEntry | None:
+        """The entry a track's first key names.
+
+        Materials with more than one track use the extra ones as variants of
+        the same surface rather than as frames: the ground's ``M`` twin is
+        track 1, and an insignia's team colour is one track per team.
+        """
+        if not 0 <= track < len(self.tracks) or not self.tracks[track].keys:
+            return None
+        at = self.tracks[track].keys[0].entry
+        return self.entries[at] if at < len(self.entries) else None
 
     @property
     def frames(self) -> list[str]:
-        """The base layer's texture per frame, in order.
+        """The first track's texture per keyframe, in order.
 
-        Single-layer materials -- 860 of the 905 -- store their frames
-        consecutively, so the name list is the animation.  Multi-layer ones
-        interleave in an order that is not established, so only the first
-        texture is offered for those.
+        This is the animation: ``WATER_M`` gives its ten ripple frames and a
+        still material gives its one.  The other tracks are variants, not
+        later frames, so they are not in here.
         """
-        if self.layer_count > 1:
+        if not self.tracks:
             return self.textures[:1]
-        return self.textures
+        out = []
+        for key in self.tracks[0].keys:
+            if key.entry < len(self.entries):
+                texture = self.entries[key.entry].texture
+                if texture:
+                    out.append(texture)
+        return out or self.textures[:1]
+
+    @property
+    def frame_count(self) -> int:
+        return len(self.frames)
+
+
+def _colour(blob: bytes, at: int) -> tuple[int, int, int]:
+    return (blob[at], blob[at + 1], blob[at + 2])
 
 
 def parse_entries(data: bytes, count: int) -> list[MaterialEntry]:
-    """The ``count`` texture entries of a MAT0 record."""
+    """The ``count`` entries of a MAT0 record."""
     out = []
     for i in range(count):
-        at = ENTRY_BASE + i * ENTRY_STRIDE
+        at = HEADER_SIZE + i * ENTRY_STRIDE
         blk = data[at : at + ENTRY_STRIDE]
         if len(blk) < ENTRY_STRIDE:
             break
         out.append(
             MaterialEntry(
                 texture=blk[NAME_OFFSET:].split(b"\0")[0].decode("latin-1"),
-                cell=blk[CELL_OFFSET],
-                colour=tuple(blk[COLOUR_OFFSET : COLOUR_OFFSET + 3]),
-                tint=tuple(blk[TINT_OFFSET : TINT_OFFSET + 3]),
-                opacity=blk[OPACITY_OFFSET] / OPAQUE,
+                cell=struct.unpack_from("<b", blk, CELL_OFFSET)[0],
+                colour=_colour(blk, DIFFUSE_OFFSET),
+                ambient=_colour(blk, AMBIENT_OFFSET),
+                specular=_colour(blk, SPECULAR_OFFSET),
+                emissive=_colour(blk, EMISSIVE_OFFSET),
+                ambient_alpha=blk[AMBIENT_OFFSET + ALPHA_STEP] / ALPHA_FULL,
+                diffuse_alpha=blk[DIFFUSE_OFFSET + ALPHA_STEP] / ALPHA_FULL,
+                specular_alpha=blk[SPECULAR_OFFSET + ALPHA_STEP] / ALPHA_FULL,
+                emissive_alpha=blk[EMISSIVE_OFFSET + ALPHA_STEP] / ALPHA_FULL,
+                power=blk[POWER_OFFSET],
             )
         )
     return out
+
+
+def parse_tracks(data: bytes, at: int, count: int) -> tuple[list[Track], int]:
+    """The animation tracks that follow a record's entries.
+
+    Returns the tracks and the offset just past them, which is the end of the
+    record on all 905.
+    """
+    out = []
+    for _ in range(count):
+        if at + TRACK_HEADER > len(data):
+            break
+        word, keys = struct.unpack_from("<IH", data, at)
+        at += TRACK_HEADER
+        track = Track(word & 7, word >> 3, [])
+        for _ in range(keys):
+            if at + KEY_STRIDE > len(data):
+                break
+            track.keys.append(Key(*struct.unpack_from("<3H", data, at)))
+            at += KEY_STRIDE
+        out.append(track)
+    return out, at
+
+
+def parse(name: str, data: bytes) -> Material:
+    """Parse one MAT0 record."""
+    count, tracks = struct.unpack_from("<2H", data, 0)
+    entries = parse_entries(data, count)
+    return Material(
+        name,
+        count,
+        tracks,
+        entries,
+        parse_tracks(data, HEADER_SIZE + count * ENTRY_STRIDE, tracks)[0],
+    )
 
 
 class MaterialLibrary:
@@ -227,10 +367,8 @@ class MaterialLibrary:
         for entry in self.archive:
             if entry.tag != MATERIAL_TAG:
                 continue
-            data = self.archive.read(entry)
-            count, layers = struct.unpack_from("<2H", data, 0)
-            self.materials[entry.name.upper()] = Material(
-                entry.name, count, layers, parse_entries(data, count)
+            self.materials[entry.name.upper()] = parse(
+                entry.name, self.archive.read(entry)
             )
 
     def get(self, name: str) -> Material | None:

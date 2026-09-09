@@ -25,7 +25,7 @@ practice — format facts yes, code no — is set out in
 | **Damage tables** | done — `.ndp`, 542 tables, one record per node, 2203 explosions named |
 | **Building footprints** | done — `.bas`, 30 ground plans; the one independent check on object placement |
 | **Effects** | done — `effects.rlb`, 923 effects and 4737 emitters; 144 `.exp` explosions; and which 176 of a block's floats the engine actually reads |
-| **Materials** | done — `Material.lib`, 905 materials, animation frames and diffuse colour; 99.4% of batches reach a texture |
+| **Materials** | done — `Material.lib`, all 905 records end to end: a `D3DMATERIAL7` per entry, the animation tracks over them, and every batch reaching a texture |
 | **Baked lighting** | done — `lightmap.lib`, 21 buildings, per-batch |
 | **Building interiors** | done — path graph for 29 buildings |
 | **Control points** | done — 284 members, 3599 named attachment points |
@@ -121,7 +121,7 @@ PASS  CTPT: control points parse as two parallel arrays 284 members, 3599 points
 PASS  MESH: draw batches tile the index buffer       435/435 meshes -- index counts sum to 3 x triangles
 PASS  MESH: batch index ranges are contiguous        435/435 meshes
 PASS  MESH: a batch's material indexes the model's wear 434/434 meshes with a wear -- this is where the texture assignment lives
-PASS  Material.lib: batch -> wear -> MAT0 -> Texm resolves 15053/15138 batches reach a real texture (905 materials)
+PASS  Material.lib: batch -> wear -> MAT0 -> Texm resolves 15138/15138 batches reach a real texture (905 materials)
 PASS  MESH: batch indices are relative to the batch's first vertex 435/435 meshes -- every index is below its own batch's vertex count
 PASS  MESH: resolved indices reference every vertex  435/435 meshes reach 100% of their vertices (reading the indices as absolute reaches 41%)
 PASS  MESH: node slot indices address real slots     434/434 meshes
@@ -150,8 +150,8 @@ every map tried.
 Renderer work is triaged in [TODO.md](TODO.md), which records both what is
 closed and what the answer turned out to be. Nothing is known to draw
 *incorrectly* any more; what is missing is fidelity the game had. Worst-looking
-first: what the floats inside an effect's emitter mean, what the engine does
-with a terrain material's second layer, and a handful of fields carried
+first: what the floats inside an effect's emitter mean, which of a ground
+material's two tracks the engine asks for, and a handful of fields carried
 through the readers without being understood.
 
 ## Documentation

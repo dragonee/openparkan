@@ -169,7 +169,7 @@ across the 33 maps** reach a texture this way, against 193 by direct lookup.
 
 Two things follow that a flat-colour stand-in was hiding:
 
-- **Water is animated.** `WATER_M` is one layer of ten frames, `WATER0.0`
+- **Water is animated.** `WATER_M` is a ten-key animation, `WATER0.0`
   through `WATER9.0`, all palettised 64x64 ripple patterns.
 - **Water is blue because its material is.** The texture is neutral grey; the
   colour is the material's `#4d6aff` diffuse, which multiplies it.
@@ -256,12 +256,11 @@ Its groups are wildly uneven — 1, 2, 4 and 384 faces on SC_3. So field 13 is
 not what a renderer would cull by — but the map does carry a grid, in
 [stream 2](#stream-2-is-the-maps-own-spatial-index), which is.
 
-## The `*M` textures are the same image flattened towards grey
+## The `*M` twin is the material's second track, drawn unlit
 
-43 ground materials name a texture and its `M` twin as their two layers, and
-every pair is the same size with the base in **RGB565** and the twin in
-**XRGB8888**. They hold the same picture — correlation 0.94 to 1.00 — but not
-the same colours.
+43 ground materials name a texture and its `M` twin, and every pair is the
+same size with the base in **RGB565** and the twin in **XRGB8888**. They hold
+the same picture — correlation 0.94 to 1.00 — but not the same colours.
 
 What the `M` half is becomes obvious once you measure the distance from
 neutral grey rather than the brightness. **On 40 of the 43 pairs the `M`
@@ -273,28 +272,42 @@ squares fit of `M = a·base + b` lands a residual of only 2 to 15 levels out of
 255 — so the twin is the base put through a per-texture brightness and
 contrast, aimed at mid-grey.
 
-That is what a **modulation layer** looks like: 128 is the value that changes
-nothing, which is why the twin is the one stored at 8 bits per channel where
-banding round the neutral point would show. It also explains the colours the
-record carries. On 38 of the 43 the two entries hold their two colour slots
-the opposite way round — entry 0 with a white diffuse and black in the slot
-ahead of the opacity, entry 1 with black diffuse and white there — so the
-second entry is flagged as something other than an ordinary lit layer.
+**The two are not two layers of one draw.** A material's second `uint16`
+counts *animation tracks*, not layers — see
+[07-objects.md](07-objects.md#the-second-count-is-animation-tracks-not-layers)
+— and on all 43 the two tracks hold a single key each, track 0 naming entry 0
+and track 1 naming entry 1. A caller asking for track 1 gets one texture,
+exactly as a caller asking for track 0 does. Nothing in the record binds them
+together.
 
-They are certainly not bump maps, which an earlier draft guessed from
-`Iron_3D.ini`'s `EMBM=1`, and not a mask, which the reader used to call them.
-Nor are they simply the 16-bit and 32-bit variants of one texture: a bit-depth
-copy would not be pulled towards grey, and would not be pulled hardest exactly
-where the original is least grey.
+What separates them is the **lighting**. An entry is a `D3DMATERIAL7`, and on
+38 of the 43 the first carries a **white diffuse over a black ambient** and
+the second the reverse — a **black diffuse over a white ambient**. Under
+fixed-function lighting that is the difference between a surface the scene
+light multiplies and one that shows at full brightness whatever the lighting.
+The base is lit; **the twin is drawn unlit**, which is exactly what a copy
+flattened towards mid-grey is for: the contrast a light would have supplied is
+already baked out of it.
 
-**What still is not established is what the engine does with the second
-layer.** `Iron_3D.ini` carries `BITDEPTH` and `RENDER_QUALITY`; both keys
-appear in `iron3d.dll` and nowhere else, and both are read into a settings
-block, but nothing has been traced from there to a material's layer index. The
-material manager lives in `World3D.dll` — `LoadMatManager`, and a
-`GetMaterialPhase` whose "table" is the wear table rather than the layer — and
-`Ngi32.dll`'s `rsLoadMultiTexture` is a stub that returns zero. The reader
-takes layer 0, which is the coloured one and the only one that stands alone.
+They are not bump maps, which an earlier draft guessed from `Iron_3D.ini`'s
+`EMBM=1`; not a mask, which the reader used to call them; and not a second
+texture stage, which the draft before this one called them. Nor are they
+simply the 16-bit and 32-bit variants of one texture: a bit-depth copy would
+not be pulled towards grey, and would not be pulled hardest exactly where the
+original is least grey.
+
+The engine's multitexture path is real, and this is not it. `Ngi32.dll` keeps
+a table of 14 render phases at `0x10036a30`, several of them two-texture, and
+`CShade::ConfigureTextureAndAlphaBlendModes` asks the device which of them it
+supports at start-up; where the two-texture `MODULATE` phase is missing the
+engine falls back to a second pass. But a `MAT0` entry carries **one** texture
+and one cell, and the material manager hands back one entry at a time — so no
+material ever reaches that path. See
+[05-engine.md](05-engine.md#the-render-phase-table).
+
+**What is still open is who asks for track 1.** The selector is an argument to
+the material manager's `GetMaterialPhase`, and no caller of it has been found;
+the reader takes track 0, which is the lit half.
 
 ## A large minority of faces are stored twice
 

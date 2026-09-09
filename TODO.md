@@ -53,8 +53,8 @@ written down is a question nobody reopens.
       foliage was drawing as solid slabs. → [docs/02-texm.md](docs/02-texm.md)
 - [x] **Animated and special materials.** Terrain layer names are *material*
       names: **270 of 270** resolve through `Material.lib`, which is the whole
-      of the "eight unresolvable special materials". `WATER_M` is one layer of
-      ten frames, and water is blue because its material is `#4d6aff` — its
+      of the "eight unresolvable special materials". `WATER_M` is a ten-key
+      animation, and water is blue because its material is `#4d6aff` — its
       texture is a neutral grey ripple.
 - [x] **Lightmaps.** `lightmap.lib` is 25 atlases named by a `.wea`'s
       `LIGHTMAPS` section, and mesh stream 18 is their UV set — over **1024**,
@@ -187,7 +187,7 @@ written down is a question nobody reopens.
       cockpit, the interface, the cursors and the logo straight out. The two
       LZSS members of `gamefont.rlb` took a second attempt; see the entry
       above. → [docs/12-rsli.md](docs/12-rsli.md)
-- [x] **What the `*M` ground texture is.** The 43 two-layer ground materials
+- [x] **What the `*M` ground texture is.** The 43 two-track ground materials
       pair a texture in RGB565 with its `M` twin in XRGB8888, and the twin is
       the same picture **flattened towards neutral grey**: closer to grey on
       **40 of the 43** pairs, and moved furthest where the base started
@@ -197,7 +197,8 @@ written down is a question nobody reopens.
       to call it, nor a bump map, which an earlier draft guessed from `EMBM=1`,
       nor a plain bit-depth copy — a copy would not be pulled towards grey, and
       would not be pulled hardest exactly where the original is least grey.
-      What the renderer *does* with it is a separate question; see §2.2.
+      What the renderer does with it is settled too, below: it is the
+      material's second track, drawn unlit.
       → [docs/03-terrain.md](docs/03-terrain.md)
 - [x] **Levels of detail, and the trap that hid them.** The four levels are a
       ladder by triangle count — **137445, 34843, 14033, 5039** over 434, 283,
@@ -261,31 +262,70 @@ written down is a question nobody reopens.
       copies live: **46261 of the 46283 duplicated faces are in it, against
       22 in the first**, which ties this to the duplicate-face finding.
       → [docs/03-terrain.md](docs/03-terrain.md)
-- [x] **The `MAT0` opacity, which was being read as a marker.** The byte at
-      +5 of an entry is an **opacity in percent** — `World3D.dll`'s parser
-      multiplies it by 0.01 — not the constant 100 an earlier reading called a
-      marker. It looks constant because 3138 of the 3143 entries are fully
-      opaque; the exception gives it away, `FIRESTORM` running **0, 60, 80,
-      90, 95, 100** across its frames, which is a fade-in and is not something
-      a marker can be. It still anchors the entry offsets, so nothing about
-      the stride changes.
-- [x] **The `MAT0` entry stride, and with it every texture name.** An entry is
-      **34 bytes**, not 40: at 34 the marker byte lands on 100 in every entry
-      of **904 of the 905** records, and every other stride tried collapses to
-      531 — exactly the number of single-entry records, where a stride cannot
-      be wrong. The names had been extracted by pattern instead, and the
+- [x] **The whole `MAT0` record, end to end.** A 14-byte header, then the
+      entries at **34 bytes** each, then a table of animation tracks over
+      them — and all **905 records parse to the byte with nothing left
+      over**. An entry is a **`D3DMATERIAL7` written as bytes**: ambient,
+      diffuse, specular and emissive as three colour bytes over 255 and an
+      alpha in per cent, then a specular power, a signed cell byte and a
+      16-byte name. That is what makes 34 the stride, and it is checkable —
+      **not one of the 12572 alpha bytes exceeds 100**, which the best of
+      twelve other (base, stride) pairs cannot match. The version the header's
+      last four fields are gated on is **not in the record**: it is the
+      archive directory entry's second count, 6 on all 905, which is why the
+      header is 14 bytes rather than the 6 an older record would have.
+      → [docs/07-objects.md](docs/07-objects.md)
+- [x] **The `MAT0` opacity, which was being read as a marker.** It is the
+      entry's **ambient alpha**, in per cent — `World3D.dll`'s parser
+      multiplies all four alpha bytes by 0.01. It looks constant because 3138
+      of the 3143 entries are fully opaque; the exception gives it away,
+      `FIRESTORM` running **0, 60, 80, 90, 95, 100** across its frames, which
+      is a fade-in and is not something a marker can be.
+- [x] **Every texture name.** The names had been extracted by pattern, and the
       pattern swallowed whatever alphanumeric byte sat in front of a name: so
       `B_MTP_04`'s texture read as `qqds.7` when it is `MTP_04.0`, and the
       `FIRE_SMOKE` animations' as `0FAIR.0` .. `7FAIR.0` when all fourteen
-      frames name `FAIR.0` and those digits are the cell bytes 48..55. Read by
-      offset, **all 905 materials name a texture that is in Textures.lib**,
-      against 891 by pattern — which empties section 1 — and the cell check
-      now covers **2513** cells across every entry of every material rather
-      than 478 first entries. → [docs/03-terrain.md](docs/03-terrain.md)
-- [x] **The eight-layer materials.** Not eight images: `B_LBL_01` and
-      `R_LBL_01` both name `PG27.0` eight times and ask for cells 0 to 7 of
-      it, and differ only in their two colours. They are the blue and red team
-      variants of one insignia sheet.
+      frames name `FAIR.0` and those digits are cell bytes. Read by offset,
+      **all 905 materials name a texture that is in Textures.lib**, against
+      891 by pattern — which empties section 1 — and the cell check now covers
+      **2513** cells across every entry of every material rather than 478
+      first entries. → [docs/03-terrain.md](docs/03-terrain.md)
+- [x] **What a material's second "layer" is — and it is not a layer.** The
+      second `uint16` counts **animation tracks**, not texture layers; the
+      engine caps it at 20 with *"Too many animations for material."* and each
+      track is a list of 6-byte keys naming an entry and a time. `WATER_M` is
+      one track of ten keys 200 apart, not one layer of ten frames. Every one
+      of the **102 tracks across the 45 materials that have more than one
+      holds a single key, and track *i* names entry *i***, so the extra tracks
+      are alternative renderings of one surface: the 43 ground twins, and the
+      two eight-track insignia sheets. → [docs/07-objects.md](docs/07-objects.md)
+- [x] **What the engine does with the ground's `M` twin.** Nothing
+      multitextured. On all 43 pairs the twin is track 1's entry, and what
+      separates it from track 0 is the **lighting**: on 38 of the 43 the first
+      entry carries a white diffuse over a black ambient and the second the
+      reverse, so the base is lit by the scene and **the twin is drawn
+      unlit** — which is what a copy flattened towards mid-grey is for. The
+      engine's multitexture path exists and this is not it: `Ngi32.dll` keeps
+      14 render phases at `0x10036a30`, `SetPhase(mode, tex0, tex1)` binds
+      argument 0 to stage 0 and argument 1 to stage 1 on **every** two-texture
+      phase, and `CShade::ConfigureTextureAndAlphaBlendModes` picks a phase
+      per device and falls back to a second pass where the hardware is short.
+      But a `MAT0` entry carries one texture and one cell, so no material ever
+      reaches it. → [docs/03-terrain.md](docs/03-terrain.md),
+      [docs/05-engine.md](docs/05-engine.md)
+- [x] **The renderer's interface.** `IDirect3DDevice7`, pinned by the vtable
+      offsets the engine calls through — `SetRenderState` at 20,
+      `DrawPrimitive` at 25, `SetTexture` at 35, `SetTextureStageState` at 37,
+      `ApplyStateBlock` at 39, with nothing left over — and by six declared
+      vertex formats whose FVF codes and strides check each other to the byte.
+      Three layouts, each with a one-texture form and its two-texture twin.
+      `BITDEPTH` and `RENDER_QUALITY` were a dead end: the real switch is the
+      registry value `Disable MultiTexturing` under
+      `HKCU\Software\Nikita\NgiTool`. → [docs/05-engine.md](docs/05-engine.md)
+- [x] **The eight-layer materials.** Not eight images and not eight layers:
+      `B_LBL_01` and `R_LBL_01` are eight *tracks* of one key, all naming
+      `PG27.0` and asking for cells 0 to 7 of it. They are the blue and red
+      team variants of one insignia sheet.
 - [x] **Where the sun stands** — and it is in no file, which is why it was
       never found in one. `CSun`'s two angles are **constants in
       `Terrain.dll`**, filled by `CAtmData::GetEvents` from a single test on
@@ -354,36 +394,30 @@ takes the difference, and that scale comes from a virtual call that has not
 been followed. It changes nothing on screen — the start and stop keyframes
 already say when the sun is up.
 
-### 2.2 What the engine does with a material's second layer
+### 2.2 Who asks a material for its second track
 
-The layer itself is [read](docs/03-terrain.md) and section 0 says what it is.
-What no code path has been traced to is **which layer the renderer binds, and
-how**.
+Everything else about the ground's `M` twin is settled and sits in section 0:
+it is track 1 of a two-track material, it carries a black diffuse over a white
+ambient where track 0 carries the reverse, and the engine's two-texture path —
+`Ngi32.dll`'s 14 render phases, `SetPhase(mode, tex0, tex1)`, the second-pass
+fallback in `CShade::ConfigureTextureAndAlphaBlendModes` — never sees it,
+because a `MAT0` entry carries one texture and one cell.
 
-Everything about the data says *modulation*: 128 is the value that changes
-nothing, which is why the twin is the half stored at 8 bits per channel where
-banding around the neutral point would show; and on 38 of the 43 the two
-entries carry their two colour slots the opposite way round — entry 0 with a
-white diffuse and black in the slot ahead of the marker, entry 1 the reverse —
-so the second is flagged as something other than an ordinary lit layer.
+What is left is the **selector**. The material manager's `GetMaterialPhase`
+takes a track index, clamps it to 0 when it is out of range, and fills a
+descriptor of a `D3DMATERIAL7`, one texture and one cell. It is
+`World3D.dll` vtable index 7 on the object `LoadMatManager` returns, at
+`0x10003680`, and it is reached **only** through that vtable — there is no
+direct call to it anywhere in the shipped DLLs, and no call site with its
+five stack arguments has been found in `Terrain.dll`, `iron3d.dll`,
+`AniMesh.dll`, `ArealMap.dll`, `Effect.dll`, `Control.dll` or `MisLoad.dll`.
+Until one is, what decides between the lit half and the unlit one is a guess.
 
-None of that is confirmation. What was searched and came up empty:
-
-- `BITDEPTH` and `RENDER_QUALITY` are in `iron3d.dll` and in no other binary.
-  Both are read into a settings block built on the stack by the loader at
-  `0x10061360`, and `BITDEPTH` is only ever *written* back to the ini. Nothing
-  has been followed from that block to a material's layer index.
-- The material manager is `World3D.dll` — `LoadMatManager`, and the MAT0
-  parser at `0x10004634`. Its `GetMaterialPhase` takes a *table* and an index,
-  but the table is the wear table, not the layer.
-- `Ngi32.dll` exports `rsLoadMultiTexture`, which is the obvious name for it
-  and is a **stub**: `xor eax, eax; ret 0x10`. That whole DLL's texture
-  exports are stubs, so the real renderer is `iron3d.dll` and the multitexture
-  path has to be found there.
-
-The reader takes layer 0, which is the coloured one and the only one that
-stands alone. If the engine does modulate, the ground is missing a contrast
-boost at close range and nothing else.
+It matters little on screen. The 860 single-track materials are unaffected;
+of the 45 that are not, 43 are ground and 2 are the team insignia, whose
+selector is obviously the team. The reader and the viewer take track 0, which
+is the lit half and the only one that stands alone; the cost of being wrong is
+that ground drawn where the engine wanted the unlit twin comes out shaded.
 
 ### 2.3 Effects
 
@@ -427,23 +461,34 @@ and 4 that separate them are the magnitude in their `.exp`.
 
 ### 2.4 The `MAT0` class byte
 
-Byte 4 sorts the library into eleven groups plus an unset value, and what it
-*is* is still open. What is settled is how to read it.
+Byte 4 of a record sorts the library into eleven groups plus an unset value,
+and what it *is* is still open. What is settled is how to read it, and that a
+second field beside it turned out to carry more.
 
-`World3D.dll`'s parser gates the record's tail on a **version**: at 2 it reads
-the bytes at +4 and +5, at 3 a `float32` defaulting to 1.0, at 4 a `uint32`
-defaulting to 0 — and below each it substitutes the default. For the two bytes
-that default is **`0xFF`**, so 0xFF is the engine's own *not set*, which is
-what byte 5 holds on all 905 records and byte 4 on 376 of them. It is not a
-twelfth group.
+The record's tail is gated on a **version**, and the version is not in the
+record: it is the archive directory entry's second count field, 6 on all 905.
+At 2 the parser reads the bytes at +4 and +5, at 3 a `float32` defaulting to
+1.0, at 4 a `uint32` defaulting to 0, substituting the default below each. For
+the two bytes that default is **`0xFF`**, so 0xFF is the engine's own *not
+set*, which is what byte 5 holds on all 905 records and byte 4 on 376 of them.
+It is not a twelfth group.
 
-The other eleven sort the library by role, sharply: **0 to 4 hold 43 of the 45
-multi-layer materials** and are almost all opaque ground, 5 is 342 object
-materials of which every one carries alpha, 6 is the 87 `TREE*` and foliage,
-7 is `WATER` and `WATER_M`, and 8, 9 and 10 are three smaller families of 24,
-12 and 9. That is the shape of a shader or blend mode and it is the strongest
-hint there is, but the field has exactly one consumer in the engine and
-following it into `GetMaterialPhase`'s output struct did not name it.
+The other eleven sort the library by role: **0 to 4 hold all 43 two-track
+ground materials** and are almost all opaque, 5 is 342 object materials, 6 is
+the 87 `TREE*` and foliage, 7 is `WATER` and `WATER_M`, and 8, 9 and 10 are
+three smaller families of 24, 12 and 9. That is the shape of a shader or blend
+mode, but the field has exactly one consumer in the engine — the loader copies
+it into the material and nothing follows it further.
+
+The **directory's *first* count field is a second flags byte**, and it is the
+one the loader actually branches on: bit 1 goes into one material field and
+bits 2 to 5 into another, while bit 0 sets a local flag (one record has it)
+and bit 6 another that no record sets. It takes five values across the
+library — 0 on 54, 2 on 417, 4 on 219, 5 on 1 and 8 on 214 — and it separates them by **transparency**, which the class byte
+does not do as cleanly: not one of the 54 materials at 0 names a texture that
+carries alpha, and 416 of the 417 at 2 name an `ARGB8888`. What the three
+values of the four-bit field select is still open, but it is now the more
+promising of the two bytes.
 
 ---
 

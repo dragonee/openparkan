@@ -401,114 +401,236 @@ def check_layers(check, game: Path) -> None:
           f"below it on {varying} of the {touched} that one does")
 
 
+def _is_name(field: bytes) -> bool:
+    """A texture-name field: NUL-terminated, printable ASCII, non-empty run."""
+    if b"\0" not in field:
+        return False
+    head = field.split(b"\0")[0]
+    return all(33 <= b < 127 for b in head)
+
+
 def check_materials(check, game: Path) -> None:
-    """Material.lib: layers against animation frames, and the diffuse colour."""
+    """Material.lib: the record layout, the tracks, and the ground's M twin."""
     lib = materials.MaterialLibrary(game / "Material.lib")
     textures = NResArchive.open(game / "Textures.lib")
     known = {e.name.split(".")[0].upper() for e in textures}
+    raw = lib.archive
+    records = [e for e in raw if e.tag == materials.MATERIAL_TAG]
+    total = len(lib)
 
-    divides = 0
-    counted = 0
-    frames = layered = 0
+    # The whole record, end to end.  A 14-byte header, 34 bytes an entry, then
+    # a track table -- and nothing left over anywhere.
+    exact = versioned = 0
+    for entry in records:
+        blob = raw.read(entry)
+        count, tracks = struct.unpack_from("<2H", blob, 0)
+        at = materials.HEADER_SIZE + count * materials.ENTRY_STRIDE
+        exact += materials.parse_tracks(blob, at, tracks)[1] == len(blob)
+        versioned += entry.link_count == materials.RECORD_VERSION
+    check("Material.lib: a record parses to the byte", exact == total,
+          f"{exact}/{total} records are a {materials.HEADER_SIZE}-byte header, "
+          f"{materials.ENTRY_STRIDE} bytes an entry and then the track table, "
+          f"with nothing left over")
+    check("Material.lib: the record version lives in the archive directory",
+          versioned == total,
+          f"the directory entry's second count is "
+          f"{materials.RECORD_VERSION} on all {versioned}/{total} records, and "
+          f"the parser gates the header's last four fields on it -- which is "
+          f"what makes the header 14 bytes rather than 6")
+
+    # An entry is a D3DMATERIAL7 written as bytes: four colours, each three
+    # bytes and a per-cent alpha, then the power, the cell and the name.  A
+    # wrong stride or a wrong base puts arbitrary bytes in the alpha slots.
+    def entry_fits(base: int, stride: int) -> int:
+        """Records whose every entry reads as a D3DMATERIAL7 at this layout."""
+        good = 0
+        for entry in records:
+            blob = raw.read(entry)
+            count = struct.unpack_from("<H", blob, 0)[0]
+            good += all(
+                base + (i + 1) * stride <= len(blob)
+                and all(
+                    blob[base + i * stride + off + materials.ALPHA_STEP]
+                    <= materials.ALPHA_FULL
+                    for off in (0, 4, 8, 12)
+                )
+                and _is_name(blob[base + i * stride + materials.NAME_OFFSET:
+                                  base + (i + 1) * stride])
+                for i in range(count)
+            )
+        return good
+    here = entry_fits(materials.HEADER_SIZE, materials.ENTRY_STRIDE)
+    rival = max(
+        entry_fits(base, stride)
+        for base, stride in ((6, 34), (10, 34), (12, 34), (13, 34), (15, 34),
+                             (16, 34), (14, 30), (14, 32), (14, 33),
+                             (14, 35), (14, 36), (14, 40))
+    )
+    slots = sum(m.entry_count for m in lib.materials.values()) * 4
+    check("Material.lib: an entry is a D3DMATERIAL7 and 34 bytes long",
+          here == total > rival,
+          f"at a 14-byte header and a stride of 34 all four alpha bytes are a "
+          f"percentage -- 100 or below, over {slots} slots -- and the 16-byte "
+          f"name field is terminated ASCII, in every entry of {here}/{total} "
+          f"records; the best of twelve other (base, stride) pairs -- the "
+          f"shorter headers the version gate would have produced among them "
+          f"-- manages {rival}")
+
+    counted = names = 0
     for m in lib.materials.values():
-        if m.layer_count and m.entry_count % m.layer_count == 0:
-            divides += 1
         if all(t.upper().split(".")[0] in known for t in m.textures):
             counted += 1
-        if m.frame_count > 1:
-            frames += 1
-        if m.layer_count > 1:
-            layered += 1
-    # The entry stride: every entry's marker byte has to land on 100, not just
-    # the first one's.  Any wrong stride collapses to the 531 records that hold
-    # a single entry, where a stride cannot be wrong.
-    raw = lib.archive
-    blobs = [raw.read(e) for e in raw if e.tag == materials.MATERIAL_TAG]
-    def marker_hits(stride: int) -> int:
-        hit = 0
-        for blob in blobs:
-            n = struct.unpack_from("<H", blob, 0)[0]
-            at = materials.ENTRY_BASE + materials.OPACITY_OFFSET
-            hit += all(
-                at + i * stride < len(blob)
-                and blob[at + i * stride] == materials.OPAQUE
-                for i in range(n)
-            )
-        return hit
-    total = len(lib)
-    here = marker_hits(materials.ENTRY_STRIDE)
-    rival = max(marker_hits(s) for s in (30, 32, 33, 35, 36, 40))
-    check("Material.lib: entry count divides by layer count", divides == total,
-          f"{divides}/{total} records; {frames} animate, {layered} have more than one layer")
-    check("Material.lib: an entry is 34 bytes", here > rival and here >= total - 1,
-          f"the marker lands on 100 in every entry of {here}/{total} records at "
-          f"stride {materials.ENTRY_STRIDE}, against {rival} at the best of "
-          f"30, 32, 33, 35, 36 and 40 -- and {rival} is the number of "
-          f"single-entry records, where no stride can be wrong")
+        names += len(m.textures)
     check("Material.lib: every material names a texture that exists",
           counted == total,
           f"{counted}/{total} materials name only textures that are in "
-          f"Textures.lib; reading the names by pattern instead of by offset "
-          f"left 14 that did not, qqds.7 and 0FAIR.0 among them")
-    # The byte ahead of the diffuse is an opacity in percent, not a marker:
-    # World3D.dll's parser multiplies it by 0.01.  It looks constant because
-    # one material is the only one that is ever less than fully opaque.
+          f"Textures.lib, {names} names in all; reading them by pattern "
+          f"instead of by offset left 14 that did not, qqds.7 and 0FAIR.0 "
+          f"among them")
+
+    # The ambient alpha is the only one that varies, and it is a fade.
     ramps = {}
     opacity = Counter()
     for name, m in lib.materials.items():
-        values = [e.opacity for e in m.entries]
+        values = [e.ambient_alpha for e in m.entries]
         opacity.update(round(v, 2) for v in values)
         if any(v != 1.0 for v in values):
             ramps[name] = values
     faded = sum(n for v, n in opacity.items() if v != 1.0)
-    check("Material.lib: the byte at +5 is an opacity, not a marker",
+    check("Material.lib: the ambient alpha is an opacity, not a marker",
           len(ramps) == 1 and faded > 0,
           f"{sum(opacity.values()) - faded} of {sum(opacity.values())} entries "
-          f"are fully opaque and the exception is "
-          f"{', '.join(ramps)} at "
-          f"{[round(v * 100) for v in next(iter(ramps.values()))][:6]} percent "
+          f"are fully opaque and the exception is {', '.join(ramps)} at "
+          f"{[round(v * 100) for v in next(iter(ramps.values()))][:6]} per cent "
           f"across its frames -- a fade-in, which is what a constant marker "
           f"could not be")
+
+    tinted = sum(1 for m in lib.materials.values() if m.colour != (255, 255, 255))
+    check("Material.lib: the diffuse colour is the fifth byte group",
+          tinted > total // 2,
+          f"{tinted}/{total} materials carry a diffuse other than white, "
+          f"WATER #4d6aff and ENV_NLAVA #b41e00 among them -- the texture "
+          f"under both is neutral grey")
 
     # 0xFF in the two version-gated bytes is the engine's own "not set": it is
     # exactly what the parser substitutes when the record is too old to carry
     # them.
     groups = Counter()
     unset_five = 0
-    for entry in raw:
-        if entry.tag != materials.MATERIAL_TAG:
-            continue
+    for entry in records:
         blob = raw.read(entry)
         if len(blob) > 5:
             groups[blob[4]] += 1
-            unset_five += blob[5] == materials.WHOLE_TEXTURE
-    named = {g: n for g, n in groups.items() if g != materials.WHOLE_TEXTURE}
+            unset_five += blob[5] == materials.UNSET
+    named_groups = {g: n for g, n in groups.items() if g != materials.UNSET}
     check("Material.lib: 0xFF in the class byte means unset, not a class",
-          unset_five == total and groups[materials.WHOLE_TEXTURE] > 0,
+          unset_five == total and groups[materials.UNSET] > 0,
           f"byte 5 is 0xFF on all {unset_five} records and byte 4 on "
-          f"{groups[materials.WHOLE_TEXTURE]}; the parser writes exactly 0xFF "
+          f"{groups[materials.UNSET]}; the parser writes exactly 0xFF "
           f"into both when the record's version is below 2, so it is the "
-          f"engine's own default.  The other {len(named)} values sort the "
-          f"library by role: {dict(sorted(named.items()))}")
+          f"engine's own default.  The other {len(named_groups)} values sort "
+          f"the library by role: {dict(sorted(named_groups.items()))}")
 
-    check("Material.lib: the diffuse colour sits behind the opacity",
-          here >= total - 1,
-          f"the opacity is 100 in every entry of {here}/{total} records, which "
-          f"is what anchors the offsets; "
-          f"{sum(1 for m in lib.materials.values() if m.colour != (255, 255, 255))} "
-          f"materials are tinted, WATER #4d6aff and ENV_NLAVA #b41e00 among them")
+    # The archive directory's first count field is a flags byte the loader
+    # reads -- bit 1 into one material field, bits 2..5 into another -- and it
+    # sorts the library by transparency far more sharply than the class byte
+    # in the record does.
+    fmt = {}
+    for entry in textures:
+        try:
+            fmt[entry.name.upper()] = texm.decode(textures.read(entry)).fmt
+        except Exception:  # noqa: BLE001 - a few members are not decodable
+            continue
+    alpha_formats = (texm.FMT_ARGB4444, texm.FMT_ARGB8888)
+    by_flag = defaultdict(Counter)
+    by_class = defaultdict(Counter)
+    for entry in records:
+        material = lib.get(entry.name)
+        texture = material.texture
+        carries = fmt.get(texture.upper()) in alpha_formats if texture else False
+        by_flag[entry.element_count][carries] += 1
+        by_class[raw.read(entry)[4]][carries] += 1
+    def purity(table) -> int:
+        return sum(max(c.values()) for c in table.values())
+    opaque = by_flag[0]
+    bit_one = by_flag[2]
+    check("Material.lib: the directory's flags byte says whether a material "
+          "is transparent",
+          opaque[True] == 0 and purity(by_flag) > purity(by_class),
+          f"not one of the {sum(opaque.values())} materials whose flags byte is "
+          f"0 names a texture that carries alpha, and {bit_one[True]} of the "
+          f"{sum(bit_one.values())} whose byte is 2 do; over the library the "
+          f"flags byte puts {purity(by_flag)}/{total} materials in a "
+          f"transparency-pure group against {purity(by_class)} for the record's "
+          f"class byte.  The loader reads bit 1 of it into one material field "
+          f"and bits 2..5 into another")
 
-    # The second layer of a two-layer material.  42 ground materials name a
-    # texture and its "M" twin; what the twin is can be measured.
+    # The second uint16 counts animation tracks, not texture layers.  The
+    # engine caps it at 20 and every shipped record is far below.
+    by_tracks = Counter(m.track_count for m in lib.materials.values())
+    keys = [k for m in lib.materials.values() for t in m.tracks for k in t.keys]
+    in_range = sum(1 for m in lib.materials.values()
+                   for t in m.tracks for k in t.keys if k.entry < m.entry_count)
+    animated = sum(1 for m in lib.materials.values() if m.frame_count > 1)
+    check("Material.lib: the second count is animation tracks, not layers",
+          max(by_tracks) <= materials.MAX_TRACKS and in_range == len(keys),
+          f"the engine refuses more than {materials.MAX_TRACKS} of them "
+          f'("Too many animations for material."); the library holds '
+          f"{dict(sorted(by_tracks.items()))} and all {in_range} keys across "
+          f"them name an entry that exists.  {animated} materials animate")
+
+    multi = [m for m in lib.materials.values() if m.track_count > 1]
+    singles = sum(1 for m in multi
+                  for t in m.tracks if len(t.keys) == 1)
+    own = sum(1 for m in multi
+              for i, t in enumerate(m.tracks)
+              if len(t.keys) == 1 and t.keys[0].entry == i)
+    check("Material.lib: a multi-track material is variants, not frames",
+          len(multi) == 45 and own == singles == sum(m.track_count for m in multi),
+          f"every one of the {singles} tracks across the {len(multi)} "
+          f"materials that have more than one holds a single key, and track i "
+          f"names entry i on all {own} -- so the extra tracks are alternative "
+          f"renderings of the same surface, not later frames of one")
+
+    # The ground's M twin is the second track, and what separates it from the
+    # first is the lighting rather than the texture.
+    twins = [m for m in lib.materials.values() if m.track_count == 2]
+    suffixed = sum(1 for m in twins if len(m.textures) == 2
+                   and m.textures[1].upper() == m.textures[0].upper().replace(".0", "M.0"))
+    unlit = sum(1 for m in twins
+                if (m.variant(0) and m.variant(1)
+                    and m.variant(0).lit and not m.variant(1).lit
+                    and m.variant(1).ambient == (255, 255, 255)))
+    check("Material.lib: the ground's M twin is its second track, drawn unlit",
+          suffixed == len(twins) and unlit >= len(twins) - 6,
+          f"on all {suffixed} of the {len(twins)} two-track materials the "
+          f"second track's entry names the first's texture with an M inserted, "
+          f"and on {unlit} of them that entry carries a black diffuse over a "
+          f"white ambient where the first carries the reverse -- so the scene "
+          f"light reaches one and not the other")
+
+    # The two eight-track materials are eight cells of one sheet.
+    eights = [m for m in lib.materials.values() if m.track_count == 8]
+    one_sheet = all(len({t.upper() for t in m.textures}) == 1 for m in eights)
+    cells_ok = all(sorted(e.cell for e in m.entries) == list(range(8))
+                   for m in eights)
+    check("Material.lib: an eight-track material is eight cells of one sheet",
+          len(eights) == 2 and one_sheet and cells_ok,
+          f"{[m.name for m in eights]} each name "
+          f"{eights[0].textures[0] if eights else '?'} eight times and ask for "
+          f"cells 0-7 of it -- team variants of one insignia sheet, not eight "
+          f"images")
+
+    # What the twin's texture is, measured against the base.
     by_stem = {e.name.split(".")[0].upper(): e for e in textures}
-    twins = []
-    for m in lib.materials.values():
-        if m.layer_count != 2 or len(m.textures) != 2:
+    pairs = []
+    for m in twins:
+        if len(m.textures) != 2:
             continue
         a, b = (by_stem.get(t.upper().split(".")[0]) for t in m.textures)
         if a is None or b is None:
             continue
-        twins.append((m, texm.decode(textures.read(a)), texm.decode(textures.read(b))))
+        pairs.append((m, texm.decode(textures.read(a)), texm.decode(textures.read(b))))
     def from_grey(pix) -> float:
         """Mean per-pixel distance from neutral grey, over a sample."""
         n = pix.width * pix.height
@@ -520,7 +642,7 @@ def check_materials(check, game: Path) -> None:
 
     sized = fmt = neutral = 0
     widest = ("", 0.0, 0.0)
-    for _m, a, b in twins:
+    for _m, a, b in pairs:
         sized += (a.width, a.height) == (b.width, b.height)
         fmt += a.fmt == texm.FMT_RGB565 and b.fmt == texm.FMT_XRGB8888
         if (a.width, a.height) != (b.width, b.height):
@@ -529,29 +651,17 @@ def check_materials(check, game: Path) -> None:
         neutral += far < near
         if near - far > widest[1] - widest[2]:
             widest = (_m.name, near, far)
-    check("Material.lib: a two-layer material is a texture and its M twin",
-          len(twins) >= 40 and sized == len(twins) == fmt,
-          f"{len(twins)} materials name a pair; all {sized} hold the same "
+    check("Material.lib: a two-track material is a texture and its M twin",
+          len(pairs) >= 40 and sized == len(pairs) == fmt,
+          f"{len(pairs)} materials name a pair; all {sized} hold the same "
           f"dimensions, and all {fmt} are RGB565 paired with XRGB8888")
     check("Material.lib: the M half is the flattened one",
-          neutral >= len(twins) - 3,
-          f"on {neutral}/{len(twins)} pairs the M texture sits closer to "
+          neutral >= len(pairs) - 3,
+          f"on {neutral}/{len(pairs)} pairs the M texture sits closer to "
           f"neutral grey than the base does -- {widest[0]} goes "
           f"{widest[1]:.0f} to {widest[2]:.0f} -- so it is the base flattened "
-          f"towards 128, not a mask and not the same image at another bit "
-          f"depth; the three exceptions differ by about a point")
-
-    # The two eight-layer materials are eight cells of one sheet.
-    eights = [m for m in lib.materials.values() if m.layer_count == 8]
-    one_sheet = all(len({t.upper() for t in m.textures}) == 1 for m in eights)
-    cells_ok = all(sorted(e.cell for e in m.entries) == list(range(8))
-                   for m in eights)
-    check("Material.lib: an eight-layer material is eight cells of one sheet",
-          len(eights) == 2 and one_sheet and cells_ok,
-          f"{[m.name for m in eights]} each name "
-          f"{eights[0].textures[0] if eights else '?'} eight times and ask for "
-          f"cells 0-7 of it -- team variants of one insignia sheet, not eight "
-          f"images")
+          f"towards 128, which is what an unlit copy of a lit surface looks "
+          f"like; the three exceptions differ by about a point")
 
     # Terrain layer names are material names, which is what makes the eight
     # that are missing from Textures.lib resolve.

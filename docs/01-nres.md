@@ -31,8 +31,10 @@ offset  size  field
               or, in per-map files, a small little-endian integer used as a
               stream selector
 0x04       4  uint32 element count -- the number of records in the payload,
-              where the payload is an array; zero otherwise
-0x08       4  zero in every shipped file
+              where the payload is an array; zero otherwise.  In
+              `Material.lib` it is a flags byte instead (see below)
+0x08       4  zero in every shipped file except `Material.lib`, where it is
+              the record's format version
 0x0C       4  uint32 payload size in bytes
 0x10       4  uint32, always 1
 0x14      32  name, NUL-padded ASCII
@@ -59,7 +61,16 @@ most members, which is why it first looked like padding, but it is non-zero on
 from this field and nowhere else, so `Land.map` cannot be parsed without it.
 For terrain streams it equals `size / stride` exactly — 231 of 231 streams
 across all 33 maps — which independently confirms the vertex and face counts
-derived from the stream data itself. `Material.lib` also populates +8.
+derived from the stream data itself.
+
+**`Material.lib` uses both count fields for something else.** +8 is the
+record's **format version** — 6 on all 905 — and `World3D.dll`'s parser gates
+the header's last four fields on it, so a member of this archive cannot be
+parsed without reading its directory entry first. +4 is a **flags byte**: bit
+1 and bits 2–5 each go into a field of the loaded material, and the byte
+separates the library by transparency (not one of the 54 materials whose byte
+is 0 names a texture that carries alpha; 416 of the 417 whose byte is 2 name
+an `ARGB8888`). See [07-objects.md](07-objects.md#the-material-chain).
 
 **Names are not unique.** In `Land.msh` every member is called `Land` and only
 the numeric type distinguishes them. Look members up by type there, by name

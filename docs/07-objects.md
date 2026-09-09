@@ -588,37 +588,86 @@ material names a texture:
 mesh stream 13 batch -> .wea entry -> Material.lib MAT0 -> Textures.lib Texm
 ```
 
-15053 of 15138 batches reach a real texture that way.
+All 15138 batches reach a real texture that way.
 
-A `MAT0` record opens with two `uint16` — the number of texture entries and
-the number of **layers** — and the count divides by the layers on all 905
-records. The quotient is a frame count: `WATER_M` is one layer of ten frames
-(`WATER0.0` .. `WATER9.0`) and `WATER_BOT` is two layers of one (`L20.0` and
-its mask `L20M.0`). 860 materials have a single layer, 43 have two, two have
-eight; **animation is much the commoner reason for a material to hold several
-textures**, which an earlier draft of this document had backwards.
+A `MAT0` record is a **14-byte header, then the entries, then a table of
+animation tracks over them** — and all 905 parse to the byte with nothing left
+over:
 
-Entries start 12 bytes in, with the texture name at +20 and a three-byte RGB
-**diffuse colour** at +6. The colour is not decoration: `WATER`'s texture is a
-neutral grey ripple and all of the blue is in its `#4d6aff`, and lava is a
-dull pattern tinted `#b41e00`. 761 materials carry a colour other than white.
+```
++0   uint16   entry count
++2   uint16   track count      the engine refuses more than 20
++4   uint8    class            \
++5   uint8    unused            |  version-gated
++6   float32                    |
++10  uint32                    /
++14  entry[]  34 bytes each
+     track[]  a uint32, a uint16 key count, then 6 bytes per key
+```
 
-The byte at +5 ahead of it is an **opacity in percent**, which `World3D.dll`
-multiplies by 0.01 — not the constant marker an earlier draft called it. It
-looks constant because 3138 of the 3143 entries are fully opaque, and the
-exception gives it away: `FIRESTORM` runs **0, 60, 80, 90, 95, 100** across
-its frames, which is a fade-in. It still anchors the offsets.
+The version those last four fields are gated on **is not in the record**. It
+is the archive directory entry's second count field, and the parser
+substitutes a default below each threshold: `0xFF` for the two bytes below
+version 2, 1.0 for the float below 3, 0 for the dword below 4. Every shipped
+record declares **version 6**, so all four are present and the header is 14
+bytes on every one — which is what fixes where the entries start. That
+default is also why `0xFF` in the class byte means *not set* rather than a
+twelfth class: it is exactly what the parser writes when the record is too
+old. Byte 5 is `0xFF` on all 905 and byte 4 on 376.
 
-The record is **versioned**, and the parser gates its tail on that: at 2 it
-reads the bytes at +4 and +5, at 3 a `float32` defaulting to 1.0, at 4 a
-`uint32` defaulting to 0. Below each it writes the default, and for the two
-bytes that default is **`0xFF`** — so 0xFF is the engine's own *not set*,
-which is what +5 holds on all 905 records and +4 on 376 of them.
+An entry is a **`D3DMATERIAL7` written as bytes**, and that is why it is 34
+long:
 
-An entry runs **34** bytes, not 40 — a stride that used to be wrong, which is
-why the names were read by pattern and why eight materials looked like they
-named textures nobody shipped. They do not: read by offset, all 905 name a
-texture that is in `Textures.lib`. See `openparkan/materials.py`.
+```
++0   uint8[3] ambient  rgb      +3  uint8 ambient  alpha, per cent
++4   uint8[3] diffuse  rgb      +7  uint8 diffuse  alpha, per cent
++8   uint8[3] specular rgb      +11 uint8 specular alpha, per cent
++12  uint8[3] emissive rgb      +15 uint8 emissive alpha, per cent
++16  uint8    specular power
++17  int8     sub-image, -1 for the whole texture
++18  char[16] texture name
+```
+
+The parser multiplies the four alpha bytes by 0.01 and the twelve colour
+bytes by 1/255, and **not one of the 12572 alpha bytes exceeds 100** — a test
+no wrong stride and no wrong header length survives. The stride used to be
+read as 40 with the entries starting at 12, which is why the names were
+extracted by pattern and why eight materials looked like they named textures
+nobody shipped. They do not: read by offset, all 905 name a texture in
+`Textures.lib`.
+
+The diffuse colour is not decoration: `WATER`'s texture is a neutral grey
+ripple and all of the blue is in its `#4d6aff`, and lava is a dull pattern
+tinted `#b41e00`. 761 materials carry a diffuse other than white. The
+**ambient alpha** is the only one that ever varies — 3138 of 3143 entries are
+at 100, and the exception gives it away: `FIRESTORM` runs **0, 60, 80, 90,
+95, 100** across its frames, which is a fade-in.
+
+### The second count is animation tracks, not layers
+
+The second `uint16` counts **animation tracks**, not texture layers, which is
+what an earlier draft called it. The engine caps it at 20 with the message
+*"Too many animations for material."*, and each track is a flags word, a key
+count, and one 6-byte key per keyframe: the entry to show, when to show it,
+and a word that is zero on all 3147 shipped keys. Playing a track walks its
+keys and interpolates the two entries that bracket the clock — which is why
+an entry is a whole `D3DMATERIAL7` and not just a name.
+
+So the counts read the other way round from the old guess. `WATER_M` is one
+track of ten keys 200 apart, and `WATER_BOT` is **two tracks of one key
+each**. 860 materials have a single track, 43 have two and two have eight.
+
+Every one of the 102 tracks across the 45 materials that have more than one
+holds a **single key, and track *i* names entry *i***. So the extra tracks are
+not later frames — they are alternative renderings of the same surface, and
+the caller picks one:
+
+- the **43** two-track materials are the ground, and track 1 is the `M` twin
+  drawn unlit — see [03-terrain.md](03-terrain.md);
+- the **two** eight-track ones, `B_LBL_01` and `R_LBL_01`, name cells 0 to 7
+  of one insignia sheet, blue and red.
+
+See `openparkan/materials.py`.
 
 ### Baked lighting
 
