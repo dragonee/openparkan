@@ -887,12 +887,18 @@ carries unit directions `(1,0,0)`, `(0,1,0)`, `(0,0,1)` — **three named points
 describing one attachment frame**. That is the clearest evidence for what the
 nine floats are.
 
-The reading `(zero, position, unit direction)` holds strongly in `static.rlb`
-(first triple exactly zero on 93% of points, third unit-length on 99%, second
-inside the mesh bounds on 99%) and in `turrets.rlb` (third unit-length on
-100%). It does **not** hold everywhere: `guns.rlb` and `parts.rlb` appear to
-store scalars such as `Width` in a vector slot. The parser therefore exposes
-the three triples as-is.
+The reading is `(zero, position, vector)`, and the first triple is **exactly
+zero on 3432 of the 3599** points.
+
+The third triple is a direction whose **length carries a magnitude**, which is
+what an earlier draft missed when it said `guns.rlb` and `parts.rlb` "store
+scalars such as `Width` in a vector slot". They do not. On a frame or an aim
+point the vector is unit length — **553 of the 570** named `*_X`, `*_Y`,
+`*_Z`, `*Direct` or `*Center` — and on a size it is an axis times that size:
+**all 191 points named `Width`, `Height` or `Size` have exactly one non-zero
+component**. `parts.rlb`'s `Width_1` at `(0, 0, 0.42)` is 0.42 across the
+model's z; its `Dir_1` at `(0, 4.849, 0)` is a barrel axis 4.849 long. One
+reading covers every archive.
 
 ## Local origins
 

@@ -712,12 +712,17 @@ CONTROL_POINT_NAME = 32
 class ControlPoint:
     """A named point on a model: an attachment, a light, an effect origin.
 
-    The record is nine float32.  In ``static.rlb`` and ``turrets.rlb`` the
-    first triple is zero, the second is a position inside the model's bounding
-    box and the third a unit direction -- but that reading does not hold in
-    every archive (``guns.rlb`` stores a scalar width in a vector slot), so the
-    triples are exposed as they are and named ``a``, ``position`` and
-    ``direction`` only as the best-supported interpretation.
+    The record is nine float32: a triple that is **exactly zero on 3432 of
+    the 3599** shipped points, a position, and a vector.
+
+    That vector is a direction whose **length carries a magnitude**, which is
+    what an earlier reading missed when it called ``guns.rlb`` and
+    ``parts.rlb`` "scalars in a vector slot".  On a frame or an aim point it
+    is unit length -- 553 of the 570 named ``*_X``, ``*_Y``, ``*_Z``,
+    ``*Direct`` or ``*Center`` -- and on a size it is an axis times the size:
+    **all 191 points named Width, Height or Size have exactly one non-zero
+    component**, so ``Width_1`` at ``(0, 0, 0.42)`` is 0.42 across the model's
+    z, not a scalar written into a vector.
     """
 
     name: str

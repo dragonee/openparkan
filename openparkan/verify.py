@@ -1165,6 +1165,36 @@ def check_objects(check, game: Path) -> None:
     check("CTPT: control points parse as two parallel arrays", cpt_fail == 0,
           f"{all_cpt} members, {points} points, {named} of them named")
 
+    # The third triple is a direction whose length is a magnitude, not a
+    # scalar written into a vector slot.
+    axis_named = axis_ok = frame_named = frame_unit = zeroed = seen = 0
+    for name in ARCHIVES:
+        ar = NResArchive.open(game / name)
+        for e in ar:
+            if e.tag != "CTPT":
+                continue
+            try:
+                pts = objmesh.parse_control_points(ar.read(e), e.name)
+            except (ValueError, struct.error):
+                continue
+            for p in pts:
+                seen += 1
+                zeroed += all(abs(v) < 1e-6 for v in p.a)
+                low = p.name.lower()
+                if any(k in low for k in ("width", "height", "size")):
+                    axis_named += 1
+                    axis_ok += sum(1 for v in p.direction if abs(v) > 1e-6) == 1
+                if any(k in low for k in ("_x", "_y", "_z", "direct", "center")):
+                    frame_named += 1
+                    frame_unit += abs(math.dist(p.direction, (0, 0, 0)) - 1) < 0.01
+    check("CTPT: the third triple is a direction with a length",
+          axis_ok == axis_named > 0 and frame_unit > frame_named * 0.95,
+          f"every one of the {axis_named} points named Width, Height or Size "
+          f"has exactly one non-zero component -- an axis times the size, not "
+          f"a scalar in a vector slot -- and {frame_unit}/{frame_named} of the "
+          f"frame and aim points are unit length.  The first triple is exactly "
+          f"zero on {zeroed}/{seen}")
+
     # Draw batches carry the material assignment; no per-face field does.
     lib_mat = materials.MaterialLibrary(game / "Material.lib")
     tex_names = {e.name.upper() for e in NResArchive.open(game / "Textures.lib")}

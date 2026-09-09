@@ -375,6 +375,15 @@ written down is a question nobody reopens.
       393; the leftover is the **`Page` sub-image table**, and it accounts for
       the payload to the byte on all 65 — `Page` magic, an 8-byte header and
       8 bytes a page. So `Textures.lib` is read with nothing unexplained.
+- [x] **`CTPT`'s nine floats**, and the exception that was not one. The record
+      is `(zero, position, vector)` — the first triple is exactly zero on
+      **3432 of 3599** — and the third is a direction whose **length is a
+      magnitude**. An earlier draft said `guns.rlb` and `parts.rlb` put
+      scalars like `Width` in a vector slot; they do not. **All 191** points
+      named `Width`, `Height` or `Size` have exactly one non-zero component,
+      so `Width_1` at `(0, 0, 0.42)` is 0.42 across the model's z, and
+      **553 of 570** frame and aim points are unit length. One reading covers
+      every archive. → [docs/07-objects.md](docs/07-objects.md)
 - [x] **The renderer's interface.** `IDirect3DDevice7`, pinned by the vtable
       offsets the engine calls through — `SetRenderState` at 20,
       `DrawPrimitive` at 25, `SetTexture` at 35, `SetTextureStageState` at 37,
@@ -650,6 +659,3 @@ today; each is a small trap for anyone extending the code.
   0xC8 on 84, 0xD8 on 5. The stream itself is read (it is the draw order, see
   section 0); bits 3 and 6 are always set and bits 4 and 7 vary, and bit 4
   leans towards water without marking it.
-- `CTPT`'s nine floats read as `(zero, position, unit direction)` in
-  `static.rlb` and `turrets.rlb` but not in `guns.rlb` or `parts.rlb`, which
-  put scalars like `Width` in a vector slot.
