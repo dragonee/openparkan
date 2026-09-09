@@ -177,6 +177,64 @@ shape:
 
 Five sprite layers, a sound, and one parameter block.
 
+## A third witness to the read map, and what shape the floats have
+
+The read map came out of `Effect.dll`'s vtables and knows nothing about the
+data, which makes the data an independent test of it — and the sharpest form
+of the test is simply whether a slot the engine loads as a float *holds* one.
+
+**All 97347 reads of the 176 live slots are a real float**: finite, and either
+exactly zero or between 1e-6 and 1e6 in magnitude. The 127 dead slots manage
+**92.4%** — 5395 of their reads are NaN, denormal or absurd, which is what an
+editor's uncleared buffer looks like. Nothing in the recovery used the values.
+
+Sorting the live slots by the shape of their values across the library gives:
+
+| shape | slots |
+|---|---:|
+| signed | 37 |
+| positive | 59 |
+| 0..1 | 32 |
+| integral | 33 |
+| always zero | 15 |
+
+The 15 that are always zero are read by the engine and never set by the
+editor — a parameter the artists left alone throughout.
+
+### The motif is a component-wise (low, high) triple
+
+Type 3's `+40..+48` against `+52..+60` was the first one found, and it is not
+special. Searching every type for a pair of disjoint triples that is ordered
+on nearly every block **and identical on a good share of them** — an emitter
+that does not randomise a quantity writes the same value twice — turns up the
+same shape elsewhere. The two strongest are in type 10: `+80..+88` against
+`+128..+136`, ordered on 154 of 160 blocks and *identical* on 154, and
+`+92..+100` against `+104..+112`, ordered on all 160 and identical on 158.
+Type 4's `+100..+108` against `+112..+120` is ordered on all 202.
+
+Where several triples happen to be ordered the partner is ambiguous, so this
+is a motif rather than a field list. It says what the block *is*: a parameter
+sheet of randomised ranges.
+
+### Two handles followed, one of them dead
+
+`Effect.dll` imports three things that would name a value if a float reached
+them — `ngiGetClocks`, `ngiGetSinCos` and `g_FastProc`'s matrix routines.
+
+**The clock is a dead end.** All 13 of its call sites are the same three
+instructions — `call ngiGetClocks; mov [state], eax; ret` — seeding a
+pseudo-random generator. Nothing in the DLL compares a block float against
+elapsed time, so a lifetime cannot be found that way.
+
+**`ngiGetSinCos` is called from exactly one place**, at `0x1000c293`, and that
+routine is the emitter's **random direction**: it draws from the generator,
+scales the integer by 1/65536, offsets it, feeds the result to sin/cos, scales
+a vector by three separate factors and hands it to `g_FastProc`'s transform
+with a matrix at the object's `+0xc0`. So the engine's emitters do randomise a
+direction within a spread, and the values that shape it pass through here —
+but the routine takes them as arguments rather than reading the block itself,
+so the offsets are one call further out.
+
 ## The chain, end to end
 
 A mesh node carries a durability and an explosion in its
@@ -195,11 +253,11 @@ to `exp_t_sn_mis` and its neighbours.
   the families are visible, and type 1 and the sound share a direction the
   drawing types do not — but no type is named.
 - **What the live floats mean**, except the sound emitter's distances and the
-  direction at `+52`. 176 of them are read; the values look like colours,
-  lifetimes, velocities and spreads, but nothing pins one down. The next
-  handle is a class whose method does something recognisable with a value —
-  feeds it to a matrix, compares it against a clock — rather than just copying
-  it into the particle it builds.
+  direction at `+52`. 176 are read and they are now *typed* by shape and by
+  the (low, high) motif above, but no third field is named. The clock handle
+  is spent — it only seeds a generator — and the one sin/cos site takes its
+  values as arguments, so the next handle is whoever *calls* it, one frame
+  further out.
 - **The 60-byte effect header** and the `.exp`'s first float and flags word.
 - **What bit 8 controls.** That it is a flag is settled; what it switches is
   not.

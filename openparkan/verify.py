@@ -2755,6 +2755,60 @@ def check_effects(check, game: Path) -> None:
           f"types are loaded as a float; the rest the editor writes and the "
           f"engine never looks at")
 
+    # A third check on the read map, and the sharpest: a slot the engine loads
+    # as a float should hold one.  The map came out of the vtables and knows
+    # nothing about the data.
+    def sane(v: float) -> bool:
+        return math.isfinite(v) and (v == 0.0 or 1e-6 <= abs(v) <= 1e6)
+    bodies: dict[int, list[bytes]] = {}
+    for effect in library.effects.values():
+        for em in effect.emitters:
+            bodies.setdefault(em.kind, []).append(em.body)
+    live_ok = live_n = dead_ok = dead_n = 0
+    live_slots = dead_slots = 0
+    shape: Counter[str] = Counter()
+    for kind, blocks in bodies.items():
+        read = set(effects.READ_OFFSETS.get(kind, ()))
+        resource = effects.RESOURCE_AT.get(kind)
+        for off in range(4, len(blocks[0]) - 3, 4):
+            if resource is not None and resource <= off < resource + 64:
+                continue
+            values = [struct.unpack_from("<f", b, off)[0]
+                      for b in blocks if off + 4 <= len(b)]
+            good = sum(1 for v in values if sane(v))
+            if off in read:
+                live_slots += 1
+                live_ok += good
+                live_n += len(values)
+                lo, hi = min(values), max(values)
+                if lo == hi == 0.0:
+                    shape["zero"] += 1
+                elif all(v == int(v) for v in values) and hi < 1e6:
+                    shape["integral"] += 1
+                elif lo >= 0 and hi <= 1.0:
+                    shape["0..1"] += 1
+                elif lo >= 0:
+                    shape["positive"] += 1
+                else:
+                    shape["signed"] += 1
+            else:
+                dead_slots += 1
+                dead_ok += good
+                dead_n += len(values)
+    check("effects.rlb: every slot the engine reads holds a real float",
+          live_ok == live_n and dead_ok < dead_n * 0.98,
+          f"all {live_ok} reads of the {live_slots} live slots are finite and "
+          f"either zero or between 1e-6 and 1e6, against "
+          f"{100 * dead_ok / max(dead_n, 1):.1f}% of the {dead_slots} dead "
+          f"ones -- {dead_n - dead_ok} of those are NaN, denormal or absurd.  "
+          f"The map came from Effect.dll's vtables and knows nothing about "
+          f"the data, so this is a third witness to it")
+    check("effects.rlb: the live floats sort by shape",
+          sum(shape.values()) == live_slots and shape["signed"] > 0,
+          f"{dict(sorted(shape.items()))} -- and the recurring motif is a "
+          f"component-wise (low, high) triple, which type 3's +40..+48 and "
+          f"+52..+60 were the first of")
+
     # Types 9 and 3 read the same fields because 9's constructor installs 3's
     # vtable before overriding it; 7 and 10 are siblings on one 0x48 object.
     check("Effect.dll: the emitter classes fall into families",

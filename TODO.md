@@ -499,34 +499,37 @@ not merely a default: nothing found asks for another.
 
 Both formats are [read](docs/11-effects.md) — 923 effects walk their emitter
 blocks to the byte, 144 `.exp` records parse, and a destroyed node's damage
-record reaches real sprites on 2189 of 2203 references. Nothing draws them:
-an explosion is transient and a static scene has nowhere to put one.
+record reaches real sprites on 2189 of 2203 references. Nothing draws them: an
+explosion is transient and a static scene has nowhere to put one.
 
-Which floats in a block are **live** is now settled. Each class keeps only a
-pointer to its own block, so the fields that matter are whatever its virtual
-methods load through it; walking the vtables of `Effect.dll` recovers the set.
-**176 of the 441 four-byte slots across the ten block types are read as a
-float** and the rest the editor wrote and the engine never looks at. Two
-things check the map: the sound emitter's `+64` and `+68` were read off the
-data long before it existed and the map contains them, and **not one of the
-176 offsets lands inside a block's `(archive, member)` pair** even though the
-map came from the code and `RESOURCE_AT` came from the data.
+Which floats in a block are **live** is settled — **176 of the 441** four-byte
+slots across the ten block types — and the map now has a **third witness, from
+the data**. A slot the engine loads as a float should hold one, and every one
+of the **97347** reads of the 176 is finite and either exactly zero or between
+1e-6 and 1e6. The 127 dead slots manage **92.4%**: 5395 of their reads are
+NaN, denormal or absurd, which is what an editor's uncleared buffer looks
+like. The map came out of the vtables and used none of the values.
 
-The class families fall out of it — types 3 and 9 read the same eighteen
-offsets, 7 and 10 the same thirty-one, 4 a strict subset of 3's — and one more
-field is named: **types 1 and 2 keep a unit vector at `+52`**, unit length on
-597 of 618 and 517 of 517 blocks and exactly `(1, 0, 0)` on most. The drawing
-types keep something else there; on type 8 not one block of 237 is a unit
-vector.
+The slots are now **typed**, if not named: 37 signed, 59 positive, 32 in
+0..1, 33 integral, and **15 that are always zero** — read by the engine and
+never set by the artists. And type 3's (low, high) triple is a **motif**, not
+a special case: type 10's `+80..+88` against `+128..+136` is ordered on 154 of
+160 blocks and *identical* on 154, `+92..+100` against `+104..+112` ordered on
+all 160 and identical on 158, and type 4's `+100..+108` against `+112..+120`
+ordered on all 202. A block is a parameter sheet of randomised ranges.
 
-What is still open is **what any of the live floats mean**. The values look
-like colours, lifetimes, velocities and spreads. Type 3's `+40..+48` and
-`+52..+60` are a component-wise (low, high) pair on 1427 of 1545 blocks and
-the engine reads exactly those six, which is the data and the code agreeing;
-types 7 and 10 read a `float32[3]` at `+56`, `+80`, `+104` and `+128`, a
-24-byte stride. None of that names a field. The next handle is a method that
-does something *recognisable* with a value — feeds it to a matrix, compares it
-against a clock — rather than copying it into the particle it builds.
+**Two handles were followed and one is dead.** `Effect.dll` imports
+`ngiGetClocks`, `ngiGetSinCos` and `g_FastProc`, which are the only things in
+it that would *name* a value. The clock is spent: all 13 of its call sites are
+`call ngiGetClocks; mov [state], eax; ret`, seeding a random generator, and
+nothing compares a block float against elapsed time — so a lifetime cannot be
+found that way, which the previous entry here assumed it could.
+`ngiGetSinCos` has **exactly one** call site, at `0x1000c293`, inside the
+emitter's random-direction routine: it draws from the generator, scales by
+1/65536, feeds sin/cos, scales a vector by three factors and hands it to
+`g_FastProc`'s transform against a matrix at the object's `+0xc0`. The
+routine takes those factors as *arguments*, so the offsets that feed it are
+one call further out — and that caller is the next handle.
 
 Also open: the 60-byte effect header, the `.exp`'s first float and flags word,
 and what bit 8 controls.
