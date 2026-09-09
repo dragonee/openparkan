@@ -7,7 +7,18 @@ import sys
 from collections import Counter
 from pathlib import Path
 
-from . import effects, gamedir, landmesh, mission, rsli, sky, texm, verify, viewer
+from . import (
+    effects,
+    font,
+    gamedir,
+    landmesh,
+    mission,
+    rsli,
+    sky,
+    texm,
+    verify,
+    viewer,
+)
 from .nres import NotAnNResArchive, NResArchive, is_nres
 from .png import write_png
 
@@ -272,6 +283,31 @@ def cmd_effects(args, game: Path) -> int:
     return 0
 
 
+def cmd_font(args, game: Path) -> int:
+    """The game font: its glyph table, its atlas, and the palette behind it."""
+    archive = rsli.RsLiArchive.open(game / "gamefont.rlb")
+    glyphs = font.parse_font(archive.read_name("ARIALTEX.TFT"))
+    palette = font.parse_palette(archive.read_name("PAL.PAL"))
+    atlas = texm.decode(glyphs.atlas, palette.raw)
+    drawn = glyphs.drawn
+    print(f"ARIALTEX.TFT  {len(drawn)} glyphs of {font.GLYPH_COUNT} records, "
+          f"{len(glyphs.rows)} rows, atlas {atlas.width}x{atlas.height} "
+          f"format {atlas.fmt}")
+    print(f"PAL.PAL       {sum(1 for c in palette.colours if any(c))} colours "
+          f"and a {font.TABLE_SIDE}x{font.TABLE_SIDE} '{font.PALETTE_TAG.decode()}' "
+          f"mixing table")
+    if args.out:
+        write_png(Path(args.out), atlas.width, atlas.height, texm.to_rgb(atlas))
+        print(f"wrote {args.out}")
+    if args.glyphs:
+        for code in drawn:
+            g = glyphs.glyphs[code]
+            label = chr(code) if 32 <= code < 127 else f"\\x{code:02x}"
+            print(f"  {code:>3} {label:<6} u {g.u0:.5f}..{g.u1:.5f}  v {g.v0:.5f}"
+                  f"  {g.width(atlas.width):>2}px  advance {g.advance}")
+    return 0
+
+
 def cmd_explosions(args, game: Path) -> int:
     """Every .exp in the installation, and the effects it sets off."""
     shown = 0
@@ -451,6 +487,11 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--floats", action="store_true",
                    help="show the block floats the engine actually reads")
     p.set_defaults(fn=cmd_effects)
+
+    p = sub.add_parser("font", help="the game font and its palette")
+    p.add_argument("--out", help="write the glyph atlas to this PNG")
+    p.add_argument("--glyphs", action="store_true", help="list every glyph")
+    p.set_defaults(fn=cmd_font)
 
     sub.add_parser(
         "explosions", help="every .exp and the effects it sets off"

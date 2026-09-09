@@ -45,6 +45,10 @@ PAGE_HEADER = 8
 PAGE_STRIDE = 8
 
 FMT_PALETTE8 = 0
+#: 8-bit indices into an **external** palette rather than an embedded one.
+#: The only texture that uses it is the font atlas inside ``ARIALTEX.TFT``,
+#: whose palette is ``gamefont.rlb``'s ``PAL.PAL``.
+FMT_INDEX8 = 2
 FMT_RGB565 = 565
 FMT_ARGB4444 = 4444
 FMT_XRGB8888 = 888
@@ -52,6 +56,7 @@ FMT_ARGB8888 = 8888
 
 _BYTES_PER_PIXEL = {
     FMT_PALETTE8: 1,
+    FMT_INDEX8: 1,
     FMT_RGB565: 2,
     FMT_ARGB4444: 2,
     FMT_XRGB8888: 4,
@@ -127,24 +132,30 @@ def parse_header(data: bytes) -> tuple:
     return w, h, mips, flags, fmt
 
 
-def decode(data: bytes) -> Texture:
+def decode(data: bytes, palette: bytes | None = None) -> Texture:
     """Decode mip level 0 of a Texm blob to straight RGBA8888.
 
     Only level 0 is decoded: it is the only level a renderer needs to import,
     and it sits at a known offset regardless of how the tail of the mip chain
     is padded.
+
+    ``palette`` supplies the 1024-byte table for ``FMT_INDEX8``, which carries
+    none of its own; without one those textures come out as a grey ramp.
     """
     w, h, mips, flags, fmt = parse_header(data)
     if fmt not in _BYTES_PER_PIXEL:
         raise UnsupportedTexture(f"unknown pixel format {fmt!r}")
     body = data[HEADER_SIZE:]
 
-    palette = None
     if fmt == FMT_PALETTE8:
         palette = body[:PALETTE_SIZE]
         body = body[PALETTE_SIZE:]
         if len(palette) < PALETTE_SIZE:
             raise UnsupportedTexture("truncated palette")
+    elif fmt == FMT_INDEX8 and palette is None:
+        palette = bytes(v for i in range(256) for v in (i, i, i, 0))
+    elif fmt != FMT_INDEX8:
+        palette = None
 
     need = w * h * _BYTES_PER_PIXEL[fmt]
     if len(body) < need:
@@ -176,7 +187,7 @@ def decode(data: bytes) -> Texture:
         for i in range(w * h):
             b, g, r, a = body[i * 4 : i * 4 + 4]
             out[i * 4 : i * 4 + 4] = bytes((r, g, b, 255 if fmt == FMT_XRGB8888 else a))
-    else:  # palettised
+    else:  # palettised, embedded (format 0) or external (format 2)
         for i in range(w * h):
             j = body[i] * 4
             out[i * 4 : i * 4 + 4] = bytes((palette[j + 2], palette[j + 1], palette[j], 255))

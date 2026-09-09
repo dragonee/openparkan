@@ -17,6 +17,7 @@ from pathlib import Path
 from . import (
     arealmap,
     effects,
+    font,
     gamedir,
     landmesh,
     materials,
@@ -1955,12 +1956,10 @@ def check_rsli(check, game: Path) -> None:
             if len(blob) == entry.size:
                 unpacked += 1
                 kinds[entry.storage] += 1
-    check("RsLi: every deflate member unpacks to the size it declares",
-          unpacked == members - sum(refused.values()) > 0
-          and set(kinds) == {"deflate"},
-          f"{unpacked}/{members} members, {dict(kinds)}; the other "
-          f"{sum(refused.values())} are {dict(refused)} and are refused "
-          f"rather than guessed at")
+    check("RsLi: every member unpacks to the size it declares",
+          unpacked == members > 0 and not refused,
+          f"{unpacked}/{members} members across both archives, "
+          f"{dict(kinds)} -- nothing is refused any more")
 
     # And the sprites are ordinary textures once they are out.
     sprites = next((a for n, a in archives if n == "sprites.lib"), None)
@@ -1972,6 +1971,60 @@ def check_rsli(check, game: Path) -> None:
                 decoded += 1
             except (texm.UnsupportedTexture, rsli.RsLiFormatError, ValueError):
                 pass
+    # The font, which the LZSS kept shut until the decoder was right.
+    fonts = rsli.RsLiArchive.open(game / "gamefont.rlb")
+    blobs = {}
+    for entry in fonts:
+        try:
+            blobs[entry.name.upper()] = fonts.read(entry)
+        except rsli.RsLiFormatError:
+            pass
+    check("RsLi: the LZSS members unpack to the size they declare",
+          len(blobs) == len(fonts) == 2,
+          f"{len(blobs)}/{len(fonts)} members of gamefont.rlb, both 0x040 -- "
+          f"the offset is an absolute ring index, the ring starts at "
+          f"{rsli.LZSS_START:#x} and is filled with spaces")
+
+    glyphs = font.parse_font(blobs["ARIALTEX.TFT"])
+    palette = font.parse_palette(blobs["PAL.PAL"])
+    atlas = texm.decode(glyphs.atlas, palette.raw)
+    fits = sum(1 for g in glyphs.glyphs
+               if g.drawn and g.width(atlas.width) == g.advance + 1)
+    ordered = sum(1 for g in glyphs.glyphs if g.u0 <= g.u1)
+    check("Tfnt: a glyph's advance matches the span it occupies",
+          fits == len(glyphs.drawn) > 100 and ordered == font.GLYPH_COUNT,
+          f"on all {fits} of the {len(glyphs.drawn)} drawn glyphs the span is "
+          f"exactly advance + 1; the other "
+          f"{font.GLYPH_COUNT - len(glyphs.drawn)} are the placeholder, and "
+          f"u0 <= u1 on {ordered}/{font.GLYPH_COUNT}")
+    check("Tfnt: the glyphs sit in rows of one height",
+          len(glyphs.rows) > 3
+          and len({round((b - a) * atlas.height)
+                   for a, b in zip(glyphs.rows, glyphs.rows[1:], strict=False)}) == 1,
+          f"{len(glyphs.rows)} rows at v = "
+          + ", ".join(str(round(v * atlas.height)) for v in glyphs.rows))
+
+    lit = {atlas.rgba[i * 4 : i * 4 + 3]
+           for i in range(atlas.width * atlas.height)
+           if any(atlas.rgba[i * 4 : i * 4 + 3])}
+    check("Texm: pixel format 2 indexes the external palette",
+          atlas.fmt == texm.FMT_INDEX8 and lit == {bytes((255, 255, 255))},
+          f"the {atlas.width}x{atlas.height} atlas is format {atlas.fmt}, one "
+          f"byte per pixel, and every lit pixel comes out {sorted(lit)[0].hex()} "
+          f"-- white, through PAL.PAL")
+
+    table = palette.blend
+    side = font.TABLE_SIDE
+    symmetric = sum(1 for a in range(side) for b in range(side)
+                    if table[a * side + b] == table[b * side + a])
+    diagonal = sum(1 for i in range(side) if table[i * side + i] == i)
+    check("PAL.PAL: the Ipol table is a symmetric colour mixer",
+          symmetric == side * side and diagonal > side * 0.9,
+          f"table[a][b] == table[b][a] on all {symmetric} cells and "
+          f"table[i][i] == i on {diagonal}/{side} -- mixing a colour with "
+          f"itself returns it, and the {side - diagonal} that do not are "
+          f"indices the palette never uses")
+
     check("RsLi: sprites.lib holds Texm textures", sprites and decoded == len(sprites),
           f"{decoded}/{len(sprites) if sprites else 0} members decode as Texm, "
           f"which is the whole 2D interface")

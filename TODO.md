@@ -185,8 +185,8 @@ written down is a question nobody reopens.
       members of `sprites.lib` inflate to exactly the size they declare** and
       are ordinary `Texm`, so `openparkan textures sprites.lib` writes the
       cockpit, the interface, the cursors and the logo straight out. The two
-      LZSS members of `gamefont.rlb` do **not** decode and are refused; see
-      §2.4. → [docs/12-rsli.md](docs/12-rsli.md)
+      LZSS members of `gamefont.rlb` took a second attempt; see the entry
+      above. → [docs/12-rsli.md](docs/12-rsli.md)
 - [x] **What the `*M` ground texture is.** The 43 two-layer ground materials
       pair a texture in RGB565 with its `M` twin in XRGB8888, and the twin is
       the same picture **flattened towards neutral grey**: closer to grey on
@@ -199,6 +199,26 @@ written down is a question nobody reopens.
       would not be pulled hardest exactly where the original is least grey.
       What the renderer *does* with it is a separate question; see §2.2.
       → [docs/03-terrain.md](docs/03-terrain.md)
+- [x] **RsLi's LZSS, and with it the font.** The bit packing was right the
+      first time; what was wrong is that the offset is an **absolute index
+      into the ring buffer**, not a distance back, and the ring is pre-filled
+      with **spaces** with the write position starting at **0xFEE** — the
+      classic `N − F` of Okumura's LZSS. Miss any one of the three and a
+      member still decodes for a few kilobytes before drifting, which is what
+      made the first attempt so convincing. The routine came out of
+      `Ngi32.dll`: `rsLoadFast` tests `flags & 0x1e0`, a **mask over the four
+      packed bits**, and `rsLoad` switches on the masked value. The earlier
+      sweep missed it because it looked for the seven storage constants one at
+      a time and never for the mask over them.
+      Both members now unpack exactly. **`ARIALTEX.TFT`** is a `Tfnt` — 256
+      glyph records then a `Texm` at 4116 — and the metrics check out: on all
+      **123** drawn glyphs the span is exactly `advance + 1`, and they sit in
+      seven rows 18 pixels apart. Its atlas is **pixel format 2**, one byte per
+      pixel indexing an external palette, which appears nowhere else.
+      **`PAL.PAL`** is that palette plus a table tagged **`Ipol`**: 256 × 256
+      bytes, **symmetric on all 65536 cells** with `table[i][i] == i` on 237 of
+      256 — a colour mixer. Every lit font pixel is index 73, and 73 is white.
+      → [docs/12-rsli.md](docs/12-rsli.md)
 - [x] **The `MAT0` entry stride, and with it every texture name.** An entry is
       **34 bytes**, not 40: at 34 the marker byte lands on 100 in every entry
       of **904 of the 905** records, and every other stride tried collapses to
@@ -354,22 +374,6 @@ and what bit 8 controls.
 A negative result worth keeping: an explosion's size is **not** in its effect.
 `exp_frt_l`, `_m` and `_b` share their emitter blocks byte for byte; the 2, 3
 and 4 that separate them are the magnitude in their `.exp`.
-
-### 2.4 RsLi's LZSS keeps the font shut
-
-The archives open, but `gamefont.rlb`'s two members are `0x040` LZSS and do
-not decode. The obvious 12-bit offset, 4-bit length shape reproduces
-`ARIALTEX.TFT`'s `Tfnt` header and lands a `Texm` magic at 4116 — where
-arithmetic says one belongs, 20532 − 4116 − 32 = 16384 = 128 × 128 — and then
-emits maximum-length matches from the wrong place, so the "pixels" are the
-bytes `Texm` repeated. A ring-buffer index, a pre-filled window, other
-starting positions and other minimum lengths all fail the same way, and the
-size check cannot catch it because the output is truncated to fit.
-
-The engine's decompressor has not been found: it is not beside the loader in
-`Ngi32.dll`, and neither a 4096 window constant nor a dispatch on the seven
-storage flags turns up in that DLL. Until it does, the font and its palette
-stay shut. See [docs/12-rsli.md](docs/12-rsli.md).
 
 ### 2.5 The `MAT0` blend-mode byte
 

@@ -72,43 +72,46 @@ a byte transform, LZSS, transform + LZSS, adaptive Huffman + LZSS, transform +
 Huffman + LZSS, and raw Deflate — and the shipped data uses two: all 24
 sprites are `0x100` raw Deflate, and the font's pair are `0x040` LZSS.
 
-**The Deflate members are read. The two LZSS ones are not.** All 24 sprites
-inflate to exactly the size their entry declares; `read` refuses the other two
-rather than hand back plausible rubbish.
+**Both are read.** All 24 sprites inflate to exactly the size their entry
+declares, and both font members unpack through the LZSS to exactly theirs.
 
 `sprites.lib::INTERF8.TEX` declares one byte more than the file holds; the
 deflate stream ends before it, so a short read is harmless. fparkan
 [documents the same quirk](https://fparkan.popov.link/reference/rsli/), which
 is a pleasing independent confirmation that the table decrypts correctly.
 
-### Why the LZSS is refused
+### The LZSS, and why the first attempt was wrong
 
-The obvious shape — a flag byte, eight items, least significant bit first, a
-set bit a literal and a clear bit a two-byte match with a 12-bit offset and a
-length of four bits plus three — looks right at first. It reproduces
-`ARIALTEX.TFT`'s `Tfnt` magic and header, and lands a `Texm` magic at 4116,
-which is exactly where arithmetic says one should be: 20532 − 4116 − 32 =
-16384 = 128 × 128.
+The bit packing was right the first time: a flag byte, eight items, least
+significant bit first, a set bit a literal and a clear bit a two-byte match
+whose low nibble of the high byte plus three gives the length and whose
+remaining twelve bits give the offset. What was wrong was what the offset
+*means*.
 
-Then it falls apart. From 4116 on it emits maximum-length matches from the
-wrong place, so the "texture" is the four bytes `Texm` repeated: the byte
-histogram of the supposed pixels is `T` 1063, `e` 1260, `x` 1261, `m` 1237,
-space 1223, and the non-zero runs after 4116 sit exactly 18 bytes apart —
-18 being the longest match the encoding can express.
+**It is an absolute index into the ring buffer, not a distance back.** Both
+the copy source and the write position then walk forward through the ring,
+each masked to 4096. And the ring is not empty when a member starts: it is
+**pre-filled with spaces** and the write position starts at **0xFEE** —
+4096 − 18, the classic `N − F` of Okumura's LZSS.
 
-None of the usual variations helps: an absolute ring-buffer index instead of a
-distance back, a window pre-filled with zeros or spaces, a different starting
-write position, a different minimum length. The size check does not catch any
-of it, because the output is truncated to the declared length and then matches
-it.
+Miss any one of those three and a member still decodes for a few kilobytes
+before drifting, which is exactly what made the first attempt convincing:
+it reproduced `ARIALTEX.TFT`'s `Tfnt` header and landed a `Texm` magic at
+4116, where arithmetic says one belongs, and only then began emitting
+maximum-length matches from the wrong place. The size check could not catch
+it because the output is truncated to the declared length and then trivially
+matches it. **A size check on a truncated decode proves nothing** — what
+settled it this time was decoding the atlas and looking at it.
 
-So the two font members stay closed, and with them the font itself. What can
-be said about `ARIALTEX.TFT` comes from the part that decodes before the
-corruption plus arithmetic: a 20-byte header beginning `Tfnt`, then 4096 bytes
-that divide evenly into 256 records of 16, then a 128 × 128 8-bit texture at
-4116. `PAL.PAL` is 66564 bytes = 4 + 1024 + 65536, which reads as a header, a
-256-entry palette and a 256 × 256 image, but the pixels that come out are not
-one.
+The routine came out of `Ngi32.dll`, and the reason the first search missed
+it is worth recording. `rsLoadFast` tests `flags & 0x1e0` — a **mask over the
+four "packed" bits** — and hands anything set to `rsLoad`, which switches on
+the same masked value: 0 raw, 0x20 transform, 0x40 the plain LZSS, 0x60
+transform + LZSS, and above that the Huffman variants. The earlier sweep
+looked for the seven storage constants one at a time and never for the mask
+over them. The same decoder handles `0x080` by driving the ring through an
+adaptive Huffman tree of 627 nodes and starting it at 0xFC4 instead; nothing
+ships that way, so `openparkan` does not implement it.
 
 ## What is inside
 
@@ -124,8 +127,31 @@ uv run openparkan textures sprites.lib --out /tmp/ui --alpha
 `COCKPIT.TEX` is the radar screen and reticle; `INTERF1.TEX` is window frames,
 buttons, the cursor arrow and the check and cross icons.
 
-`gamefont.rlb`'s two are not readable at all until the LZSS is, so the font
-stays shut.
+`gamefont.rlb`'s two are the font and its palette, and both open now.
+
+**`ARIALTEX.TFT`** is a `Tfnt`: a 20-byte header, 256 glyph records of 16
+bytes, and an ordinary `Texm` at 4116. A record is `u0`, `u1`, `v0` as texture
+coordinates and an `int32` advance, and the two agree — on **all 123** glyphs
+the font actually draws, the span `(u1 − u0) × 128` is exactly `advance + 1`.
+The other 133 records are a placeholder with an advance of 8. The glyphs sit
+in **seven rows 18 pixels apart**, Latin and Cyrillic.
+
+Its atlas is **pixel format 2**, which appears nowhere else in the game: one
+byte per pixel, indexing an *external* palette rather than carrying one.
+
+**`PAL.PAL`** is that palette, and it says so. 1024 bytes of BGRA with the
+fourth byte always zero, then the literal tag **`Ipol`**, then a 256 × 256
+byte table. The table is **symmetric on all 65536 cells** and `table[i][i] ==
+i` on 237 of 256 — the other 19 being indices the palette never uses. It is an
+interpolation table: given two palette indices it returns the index of their
+mixture, which is how an 8-bit renderer blends. Every lit pixel of the font is
+index 73, and index 73 is `(255, 255, 255)`, so the glyphs are white and the
+engine tints them.
+
+```
+uv run openparkan font --out font.png
+uv run openparkan font --glyphs
+```
 
 ## Prior art
 

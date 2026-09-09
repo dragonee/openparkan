@@ -46,14 +46,26 @@ nothing short of the whole table decrypts.  Once it does, the names come out:
 of ``sprites.lib`` are ``0x100`` raw Deflate, and the two of ``gamefont.rlb``
 are ``0x040`` LZSS.
 
-**Deflate is read; LZSS is not.**  All 24 sprite members inflate to exactly the
-size their entry declares and decode as ordinary ``Texm`` textures -- 4444 at
-64 x 64, 128 x 128 and 256 x 256 -- so they go straight through
-``openparkan.texm``.  The two font members do not: the obvious 12-bit offset,
-4-bit length shape reproduces their first few kilobytes and then falls apart,
-emitting maximum-length matches from the wrong place, and the size check does
-not catch it because the output is truncated to fit.  ``read`` refuses them
-rather than hand back plausible rubbish; see ``docs/12-rsli.md``.
+**Both are read.**  All 24 sprite members inflate to exactly the size their
+entry declares and decode as ordinary ``Texm`` textures -- 4444 at 64 x 64,
+128 x 128 and 256 x 256 -- and the two font members unpack through
+``unpack_lzss`` to exactly theirs.
+
+The LZSS took two attempts.  The bit packing was right first time -- a flag
+byte, eight items, least significant bit first, a set bit a literal and a
+clear bit a two-byte match with a 12-bit offset and a four-bit length plus
+three -- but the offset is an **absolute index into the ring buffer**, not a
+distance back, and the ring starts at **0xFEE** pre-filled with **spaces**.
+Miss any one of those three and the first few kilobytes still come out right,
+which is what made the first attempt so convincing.
+
+That came off ``Ngi32.dll``, which reaches it through ``rsLoad``: it masks the
+flags with ``0x1e0`` -- the four "packed" bits -- and switches, 0x40 landing
+on the plain decoder.  The earlier search missed the dispatch because it was
+looking for the seven storage constants one at a time rather than the mask
+over them.  The same routine handles ``0x080`` by running the ring through an
+adaptive Huffman decoder and starting it at 0xFC4 instead; nothing ships that
+way, so it is not implemented.
 """
 
 from __future__ import annotations
@@ -89,9 +101,16 @@ STORE_NAMES = {
     STORE_DEFLATE: "deflate",
 }
 
-#: The LZSS window, and the smallest match it can encode.
+#: The LZSS ring buffer, the smallest match it can encode, and where the write
+#: position starts.  The engine seeds it at 0xFEE -- the classic ``N - F`` of
+#: Okumura's LZSS, 4096 - 18 -- and fills the buffer with spaces.  Under the
+#: adaptive-Huffman variant (``0x080``, unused by the shipped data) it starts
+#: at 0xFC4 instead.
 LZSS_WINDOW = 4096
 LZSS_MIN_MATCH = 3
+LZSS_START = 0xFEE
+LZSS_FILL = 0x20
+LZSS_HUFFMAN_START = 0xFC4
 
 
 class RsLiFormatError(ValueError):
@@ -118,39 +137,60 @@ def decrypt_table(cipher: bytes, seed: int) -> bytes:
 
 
 def unpack_lzss(data: bytes, size: int) -> bytes:
-    """**Wrong past the first few kilobytes.**  Kept for the record only.
+    """Unpack a ``STORE_LZSS`` member.
 
-    A flag byte, eight items, least significant bit first; a set bit a
-    literal, a clear bit a two-byte match with a 12-bit offset and a length of
-    four bits plus three.  That reproduces the head of both font members --
-    ``ARIALTEX.TFT``'s ``Tfnt`` magic and the ``Texm`` at 4116 -- and then
-    starts emitting 18-byte matches from the wrong offset, so the tail is a
-    repeat of whatever came before.  ``read`` does not use it.
+    A flag byte, then eight items, least significant bit first: a set bit is a
+    literal, a clear bit a two-byte match whose low byte and the high nibble of
+    its high byte give a **12-bit index into the ring buffer** -- an absolute
+    position, not a distance back -- and whose low nibble plus three gives the
+    length.  Both the copy source and the write position walk forward through
+    the ring, masked to 4096.
+
+    The ring starts at ``LZSS_START`` filled with spaces, which is what makes
+    the first matches of a member resolve to anything sensible.
     """
+    window = bytearray([LZSS_FILL]) * LZSS_WINDOW
+    pos = LZSS_START
     out = bytearray()
-    pos = 0
+    src = 0
     end = len(data)
-    while pos < end and len(out) < size:
-        flags = data[pos]
-        pos += 1
-        for _ in range(8):
-            if pos >= end or len(out) >= size:
+    flags = 0
+    left = 0
+    while len(out) < size:
+        carry = left & 1
+        left >>= 1
+        if not carry:
+            if src >= end:
                 break
-            if flags & 1:
-                out.append(data[pos])
-                pos += 1
-            else:
-                if pos + 1 >= end:
-                    break
-                low, high = data[pos], data[pos + 1]
-                pos += 2
-                offset = (low | ((high & 0xF0) << 4)) or LZSS_WINDOW
-                length = (high & 0x0F) + LZSS_MIN_MATCH
-                for _ in range(length):
-                    source = len(out) - offset
-                    out.append(out[source] if source >= 0 else 0)
-            flags >>= 1
-    return bytes(out[:size])
+            flags = data[src]
+            src += 1
+            left = 0x7F
+        if src >= end:
+            break
+        literal = flags & 1
+        flags >>= 1
+        if literal:
+            byte = data[src]
+            src += 1
+            window[pos] = byte
+            pos = (pos + 1) % LZSS_WINDOW
+            out.append(byte)
+            continue
+        if src + 1 >= end:
+            break
+        low, high = data[src], data[src + 1]
+        src += 2
+        run = (high & 0x0F) + LZSS_MIN_MATCH
+        at = low | ((high >> 4) << 8)
+        for _ in range(run):
+            byte = window[at]
+            at = (at + 1) % LZSS_WINDOW
+            window[pos] = byte
+            pos = (pos + 1) % LZSS_WINDOW
+            out.append(byte)
+            if len(out) >= size:
+                break
+    return bytes(out)
 
 
 @dataclass(frozen=True)
@@ -227,6 +267,8 @@ class RsLiArchive:
             out = raw[: entry.size]
         elif entry.flags == STORE_DEFLATE:
             out = zlib.decompressobj(-zlib.MAX_WBITS).decompress(raw)
+        elif entry.flags == STORE_LZSS:
+            out = unpack_lzss(raw, entry.size)
         else:
             raise RsLiFormatError(
                 f"{self.source}: {entry.name} uses storage {entry.storage}, "
