@@ -64,6 +64,20 @@ FACE_STRIDE = 28
 NO_NEIGHBOUR = 0xFFFF
 NO_TEXTURE = 0xFF
 
+#: Stream 2 is the map's own spatial index: the eight corners of the mesh's
+#: bounding box, then one record per cell of a uniform grid.
+BOX_CORNERS = 8
+BOX_HEADER = BOX_CORNERS * 12
+#: A record: ``uint16 first``, ``uint16 count``, a zero, then the cell's box,
+#: centre and bounding-sphere radius, then five more zeros.
+CELL_STRIDE = 68
+#: The first record does not start at the corners' end; 44 bytes of the header
+#: come first and are zero on all 33 maps.
+CELL_START = 44
+#: A cell is listed twice.  The two records share a box and split the faces
+#: into two blocks: 46261 of the 46283 duplicated faces are in the second.
+CELLS_PER_SQUARE = 2
+
 #: Bit 1 of the face's surface word marks a water surface.  It is a *bitfield*,
 #: not an enum: the observed values are 0, 2, 16 and 18, and testing ``== 2``
 #: silently misses every water face that also carries bit 16.
@@ -76,6 +90,25 @@ FLAGS_WATER = 1544
 #: UV values are 8.8 fixed point and the layer-1 mapping tiles every 50 world
 #: units, which is how ``u == x / 50`` comes out as ``u16 == x * 5.12``.
 UV_FIXED_POINT_SCALE = 256.0
+
+
+@dataclass(frozen=True)
+class Cell:
+    """One cell of the terrain's grid: a box and a run of faces."""
+
+    #: The first face of the run, and how many.  Faces are stored in cell
+    #: order, so this indexes ``LandMesh.faces`` directly.
+    first: int
+    count: int
+    minimum: tuple[float, float, float]
+    maximum: tuple[float, float, float]
+    centre: tuple[float, float, float]
+    #: Radius of the sphere around the box.
+    radius: float
+
+    @property
+    def faces(self) -> range:
+        return range(self.first, self.first + self.count)
 
 
 @dataclass
@@ -94,7 +127,17 @@ class LandMesh:
     face_patch: list[int]
     layer1_names: list[str] = field(default_factory=list)
     layer2_names: list[str] = field(default_factory=list)
+    #: The map's own spatial index, from stream 2; empty if it has none.
+    cells: list[Cell] = field(default_factory=list)
     _grid: dict | None = field(default=None, repr=False, compare=False)
+
+    @property
+    def grid_size(self) -> tuple[int, int]:
+        """How many cells across and down, from the distinct cell corners."""
+        if not self.cells:
+            return (0, 0)
+        return (len({round(c.minimum[0], 1) for c in self.cells}),
+                len({round(c.minimum[1], 1) for c in self.cells}))
 
     @property
     def vertex_count(self) -> int:
@@ -207,6 +250,36 @@ def _read_wea(path: Path) -> list[str]:
     return read_wea(path.read_bytes()) if path.exists() else []
 
 
+def parse_cells(raw: bytes | None) -> list[Cell]:
+    """The grid of stream 2.
+
+    Eight box corners, 44 bytes that are zero on every map, then one 68-byte
+    record per cell.  It parses with nothing left over on all 33 maps, the
+    runs chain end to end, and their counts sum to the face count -- so the
+    faces are stored in cell order and a run indexes them directly.  Every one
+    of the 275882 faces lies inside its own cell's box.
+    """
+    if not raw or len(raw) < BOX_HEADER + CELL_START:
+        return []
+    body = raw[BOX_HEADER:]
+    out = []
+    at = CELL_START
+    while at + CELL_STRIDE <= len(body):
+        first, count = struct.unpack_from("<2H", body, at)
+        out.append(
+            Cell(
+                first=first,
+                count=count,
+                minimum=struct.unpack_from("<3f", body, at + 8),
+                maximum=struct.unpack_from("<3f", body, at + 20),
+                centre=struct.unpack_from("<3f", body, at + 32),
+                radius=struct.unpack_from("<f", body, at + 44)[0],
+            )
+        )
+        at += CELL_STRIDE
+    return out
+
+
 def load(path: str | Path) -> LandMesh:
     """Load a ``Land.msh``.  Sibling ``Land1.wea`` / ``Land2.wea`` are picked
     up automatically when present, giving the terrain texture names."""
@@ -254,6 +327,7 @@ def load(path: str | Path) -> LandMesh:
         patch.append(r[13])
 
     return LandMesh(
+        cells=parse_cells(archive.one_of_type(STREAM_BOUNDS)),
         positions=positions,
         normals=normals,
         uv1=uv1,

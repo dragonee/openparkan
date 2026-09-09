@@ -179,6 +179,67 @@ def check_terrain(check, game: Path) -> None:
           f"worst deviation {normal_err:.4f} across all maps")
 
 
+def check_grid(check, game: Path) -> None:
+    """Stream 2 is the map's own spatial index -- the engine shipped one."""
+    maps = gamedir.maps(game)
+    parsed = chained = summed = 0
+    inside = checked = 0
+    shapes: Counter[tuple[int, int, int]] = Counter()
+    dup_first = dup_second = 0
+    for folder in maps:
+        mesh = landmesh.load(folder / "Land.msh")
+        cells = mesh.cells
+        if not cells:
+            continue
+        parsed += 1
+        chained += all(cells[i].first + cells[i].count == cells[i + 1].first
+                       for i in range(len(cells) - 1))
+        summed += sum(c.count for c in cells) == mesh.face_count
+        wide, deep = mesh.grid_size
+        shapes[(wide, deep, len(cells) // max(1, wide * deep))] += 1
+        slack = (cells[0].maximum[0] - cells[0].minimum[0]) * 0.001
+        for cell in cells:
+            for face in cell.faces:
+                if face >= mesh.face_count:
+                    continue
+                checked += 1
+                points = [mesh.positions[v] for v in mesh.faces[face]]
+                inside += all(
+                    cell.minimum[a] - slack <= p[a] <= cell.maximum[a] + slack
+                    for p in points for a in range(3)
+                )
+        keep = set(mesh.distinct_faces())
+        seen: dict[tuple, int] = {}
+        for cell in cells:
+            key = (round(cell.minimum[0], 1), round(cell.minimum[1], 1))
+            rank = seen.get(key, 0)
+            seen[key] = rank + 1
+            dropped = sum(1 for f in cell.faces
+                          if f < mesh.face_count and f not in keep)
+            if rank == 0:
+                dup_first += dropped
+            else:
+                dup_second += dropped
+
+    check("Land.msh: stream 2 is a grid of face runs", parsed == len(maps) > 0,
+          f"{parsed}/{len(maps)} maps parse a cell table with nothing left "
+          f"over; shapes (across, down, records per cell) {dict(shapes)}")
+    check("Land.msh: the runs chain and cover every face",
+          chained == summed == parsed,
+          f"{chained}/{parsed} maps have first + count equal to the next "
+          f"first on every record, and on {summed}/{parsed} the counts sum "
+          f"exactly to the face count")
+    check("Land.msh: every face lies inside its own cell", inside == checked > 0,
+          f"{inside}/{checked} faces across the {parsed} maps have all three "
+          f"vertices inside the box of the cell whose run holds them -- so the "
+          f"faces are stored in cell order and a run indexes them directly")
+    check("Land.msh: the duplicated faces are the second record of a cell",
+          dup_second > dup_first * 100,
+          f"a cell is listed twice; of the duplicated faces "
+          f"{dup_second} are in the second record and only {dup_first} in the "
+          f"first, so the second block is where the coplanar copies live")
+
+
 def check_uv(check, game: Path) -> None:
     m = landmesh.load(game / "DATA" / "MAPS" / "SC_3" / "Land.msh")
     worst = 0.0
@@ -2499,7 +2560,7 @@ def run(game: Path) -> int:
         check_nres, check_texm, check_terrain, check_uv,
         check_water, check_layers, check_materials, check_sky,
         check_minimap_agreement, check_arealmap,
-        check_missions, check_objects, check_poses, check_lod, check_damage,
+        check_grid, check_missions, check_objects, check_poses, check_lod, check_damage,
         check_effects, check_footprints, check_rsli,
     )
     for fn in checks:

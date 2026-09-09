@@ -237,6 +237,19 @@ written down is a question nobody reopens.
       bytes, **symmetric on all 65536 cells** with `table[i][i] == i` on 237 of
       256 — a colour mixer. Every lit font pixel is index 73, and 73 is white.
       → [docs/12-rsli.md](docs/12-rsli.md)
+- [x] **The terrain's spatial index.** `Land.msh` stream 2 is not an
+      unexplained blob: it is the map's own grid. Eight bounding-box corners,
+      then a 68-byte record per cell holding `uint16 first`, `uint16 count`,
+      the cell's box, its centre and a bounding-sphere radius. It **parses
+      with nothing left over on all 33 maps**, the runs chain end to end, and
+      their counts **sum exactly to the face count** — so faces are stored in
+      cell order and a run indexes them directly. **All 275882 faces lie
+      inside their own cell's box.** The grid is 16 x 16 on 28 maps and 8 x 8
+      on five, following the mesh's vertex count rather than the world size.
+      Each cell is listed twice, and the second record is where the coplanar
+      copies live: **46261 of the 46283 duplicated faces are in it, against
+      22 in the first**, which ties this to the duplicate-face finding.
+      → [docs/03-terrain.md](docs/03-terrain.md)
 - [x] **The `MAT0` opacity, which was being read as a marker.** The byte at
       +5 of an entry is an **opacity in percent** — `World3D.dll`'s parser
       multiplies it by 0.01 — not the constant 100 an earlier reading called a
@@ -436,13 +449,14 @@ following it into `GetMaterialPhase`'s output struct did not name it.
   lens flare last in its own overlay scene. Water no longer writes depth,
   which is safe because it never sorts against itself: **all 11 maps that
   carry water carry it as a single flat plane**, none at two heights.
-- [ ] **Terrain culling** — not worth doing for this viewer, and the numbers
-  say so. There is no patch id to cull by (face field 13 turned out not to be
-  spatial), so a renderer has to build its own grid, which is what
-  `LandMesh._build_index` already does for height queries. But the worst map
-  is **8400 triangles** after de-duplication, median 7607, drawn in one call,
-  and the survey camera frames the whole map — a frustum test would reject
-  almost nothing. This is a note for a game renderer, not a job here.
+- [ ] **Terrain culling** — the grid exists after all, and this entry used to
+  say it did not. Face field 13 is not spatial, but **stream 2 is**: a 16 x 16
+  or 8 x 8 grid of cells, each with a box, a centre, a radius and a run of
+  faces, and every one of the 275882 faces lies inside its own cell. See
+  section 0. Culling still buys nothing *here* — the worst map is **8400
+  triangles** after de-duplication, median 7607, drawn in one call, and the
+  survey camera frames the whole map — so the reader exposes the grid and the
+  viewer does not use it. A game renderer would.
 - [x] **Coplanar geometry** — done; see section 0. Nothing in the scene should
   be drawn twice at the same depth, and two things were: the terrain's two
   ground layers, now one pass, and the file's own duplicated faces, now
@@ -456,9 +470,7 @@ today; each is a small trap for anyone extending the code.
 - A batch's vertex range (fields 7 and 8): contiguous, but tiles the vertex
   array on only 69 of 435 meshes, so not a partition.
 - Face record fields 10, 11, 12, and field 0 (near-constant per mesh).
-- Terrain `Land.msh` stream 1 (mostly `0xFF`) and stream 2 (737 float3 on
-  SC_3: eight bounding-box corners then 729 = 27³ entries that look like a
-  spatial subdivision).
+- Terrain `Land.msh` stream 1 (mostly `0xFF`).
 - Terrain stream 11's flags word — 72 on 4228 faces, 88 on 329; 88 correlates
   with water.
 - `CTPT`'s nine floats read as `(zero, position, unit direction)` in

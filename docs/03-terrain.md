@@ -179,6 +179,47 @@ every map that has water also carries a `WATER_BOT` material on the ground
 beneath it, and a lake bed nobody can see would not be worth authoring. The
 exact figure is a renderer choice.
 
+## Stream 2 is the map's own spatial index
+
+The engine ships a grid, which is worth saying plainly because an earlier note
+here concluded it did not. Stream 2 is 96 bytes of header — **the eight
+corners of the mesh's bounding box**, exactly — then 44 bytes that are zero on
+every map, then one 68-byte record per cell:
+
+```
+uint16   first        the first face of this cell's run
+uint16   count        how many
+float32  0
+float32  min[3]       the cell's box
+float32  max[3]
+float32  centre[3]
+float32  radius       of the sphere around the box
+float32  0 x5
+```
+
+It **parses with nothing left over on all 33 maps**. The runs chain end to
+end — `first + count` is the next record's `first` on every one — and their
+counts **sum exactly to the face count**. Which means the faces are stored in
+cell order and a run indexes `faces` directly, with no permutation table in
+between.
+
+The proof is total: **all 275882 faces across the 33 maps have every one of
+their three vertices inside the box of the cell whose run holds them.** Not
+most; all.
+
+The grid is uniform and its resolution follows the mesh rather than the world:
+**16 x 16 on 28 maps and 8 x 8 on the other five**, which is why `SC_3` at
+2490 units gets 8 x 8 while map 11 at 998 units gets 16 x 16 — SC_3 has 5692
+vertices and map 11 has 6458.
+
+Each cell is listed **twice**, two records sharing a box and splitting the
+faces into two blocks. The second block is where the duplicated geometry
+lives: of the 46283 faces that repeat a triangle already in the list, **46261
+are in the second record and 22 in the first**. So the two-block layout and
+[the duplicate faces](#a-large-minority-of-faces-are-stored-twice) are the
+same fact seen from two directions. What the second block is *for* — a second
+pass, or just where the editor appended — is not established.
+
 ## Face field 13 is not a patch id
 
 An earlier draft read the last word of the face record as a patch or sector
@@ -190,8 +231,9 @@ way.
 
 It is also interleaved in face order rather than run-length, does not
 determine the texture pair or the surface word, and does not track elevation.
-Its groups are wildly uneven — 1, 2, 4 and 384 faces on SC_3. A renderer that
-wants to cull terrain has to build its own grid.
+Its groups are wildly uneven — 1, 2, 4 and 384 faces on SC_3. So field 13 is
+not what a renderer would cull by — but the map does carry a grid, in
+[stream 2](#stream-2-is-the-maps-own-spatial-index), which is.
 
 ## The `*M` textures are the same image flattened towards grey
 
