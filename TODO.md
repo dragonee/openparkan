@@ -674,10 +674,15 @@ engine reads as a dword.
 Parsed and passed through without being understood. None affects a picture
 today; each is a small trap for anyone extending the code.
 
-- Terrain **surface word bit `0x10`**: set on about 95% of faces, clear on the
-  rest in connected regions, and it tracks *none* of slope, elevation,
-  material, level of detail, map edge, duplication between levels or coverage
-  by the navigation mesh. Clear on every lava bed and on patches of ordinary
-  ground.
+- Terrain **surface word bit `0x10`**: set on 244714 faces and clear on 30250,
+  in connected regions, and it tracks *none* of slope, elevation, material,
+  level of detail, map edge, duplication between levels or coverage by the
+  navigation mesh. fparkan's notes say the word is a 16-bit compaction of a
+  32-bit engine mask and that this bit is the engine's `0x00001000`, but do
+  not name it either.
+- Terrain **face field 13**, now known to be *six flags* rather than an id —
+  fparkan documents a six-bit surface class packed from the same mask, and
+  every one of the 275882 faces holds a value below 64. Which flag is which
+  is open; none of the six tracks slope, height or face size.
 - Terrain **draw-order flags bit `0x80`**, on 89 faces across the 33 maps. The
   rest of that byte is read: `0x10` opens a batch and `0x48` is constant.

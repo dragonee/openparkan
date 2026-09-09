@@ -553,6 +553,25 @@ def check_layers(check, game: Path) -> None:
           f"cross product of the triangle on {agrees} -- so flat shading "
           f"needs no cross product, and the winding is confirmed a third time")
 
+    # Field 13 is six bits wide, and the surface word two.
+    widest = 0
+    six_bit = seen_faces = 0
+    surface_values: Counter[int] = Counter()
+    for folder in gamedir.maps(game):
+        m = landmesh.load(folder / "Land.msh")
+        for i in range(m.face_count):
+            seen_faces += 1
+            widest = max(widest, m.face_patch[i])
+            six_bit += m.face_patch[i] < 64
+            surface_values[m.face_surface[i]] += 1
+    check("Land.msh: face field 13 is a six-bit field, not an id",
+          six_bit == seen_faces and widest < 64,
+          f"every one of the {seen_faces} faces holds a value below 64, the "
+          f"largest being {widest}, and 63 of the 64 occur -- so it is a set "
+          f"of six flags rather than an index, which is also why its groups "
+          f"are neither spatial nor tied to a material.  The surface word "
+          f"beside it uses two bits: {dict(sorted(surface_values.items()))}")
+
     check("Land.msh: face field 13 is not a spatial patch id", tight < loose * 0.1,
           f"{tight}/{tight + loose} groups are tighter than a random subset of "
           f"the same size, so it cannot be used for culling")

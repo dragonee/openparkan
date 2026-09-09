@@ -291,10 +291,37 @@ Walk the order and change material wherever the bit is set, and the map draws.
 The rest of the byte is a constant `0x48` — bits 3 and 6 on every face — plus
 bit 7, which 89 faces carry and nothing yet explains.
 
+## What fparkan's notes add, and what they do not
+
+[fparkan](https://fparkan.popov.link/) publishes its own reverse-engineering
+of the same engine. Its *documentation* — not its source; see
+[09-method.md](09-method.md) — was read for the two bits still open here, and
+it does not name either. What it does give is a **frame**, and everything
+below was re-checked against the install before it was written down.
+
+- The surface word is a **16-bit compaction of a 32-bit engine mask**, with a
+  documented bit-for-bit mapping. Our unexplained `0x10` is the engine's full
+  mask bit `0x00001000`, and its `0x02` is full `0x00000008`. Neither is
+  named there either. The compact word takes exactly two bits across the
+  library: 0 on 27538 faces, 2 on 2712, 16 on 244714 and 18 on 918.
+- Beside it the engine packs a **six-bit class** from six more mask bits —
+  and **field 13 is exactly six bits wide**: every one of the 275882 faces
+  holds a value below 64, the largest 62, with 63 of the 64 occurring. So it
+  is a *set of flags*, not the index this document used to call it, which also
+  explains the negative result below: a bitfield's groups have no reason to be
+  spatial or to track a material.
+
+Two places where the reading here goes further. fparkan leaves the face
+record's last eight bytes uninterpreted; six of them are the face's own
+normal, checked above. And it describes stream 11 only as "cell accelerator
+data" with no semantics; it is the draw order, and its `0x10` opens a batch —
+both checked on all 275882 faces.
+
 ## Face field 13 is not a patch id
 
 An earlier draft read the last word of the face record as a patch or sector
 id, on the strength of its range (0..62, about 57 distinct values per map).
+It is six flags, as above.
 It is not. Grouping faces by it gives regions that **span the whole map**:
 only 25 of 348 groups across six maps are even 20% tighter than a random
 subset of the same size, and the median group covers 100% of the map either
