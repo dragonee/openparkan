@@ -16,12 +16,33 @@ A record opens with two uint16: the number of texture entries and the number
 of **layers**.  The count divides by the layer count on all 905 records, and
 the quotient is a frame count -- ``WATER_M`` is one layer of ten frames
 (``WATER0.0`` .. ``WATER9.0``), while ``WATER_BOT`` is two layers of one
-(``L20.0`` and its mask ``L20M.0``).  860 materials have a single layer, 43
-have two and two have eight; animation is much the commoner reason for a
-material to hold several textures.
+(``L20.0`` and ``L20M.0``).  860 materials have a single layer, 43 have two
+and two have eight; animation is much the commoner reason for a material to
+hold several textures.
 
-An entry begins 12 bytes in and runs 40 bytes to the next, with the texture
-name at +20.  At +6 sits a three-byte RGB **diffuse colour** that modulates
+The two-layer ones are the ground: a texture in RGB565 and its ``M`` twin in
+XRGB8888, holding the same picture flattened towards neutral grey -- see
+``docs/03-terrain.md``.  It is **not** a mask, which this reader used to call
+it.  The two eight-layer ones, ``B_LBL_01`` and ``R_LBL_01``, are not eight
+images at all: both name ``PG27.0`` eight times and ask for cells 0 to 7 of
+it, so they are the blue and red team variants of one insignia sheet.
+
+An entry begins 12 bytes in and runs **34** bytes to the next, with the
+texture name in a 14-byte field at +20.  34 rather than 40: at 34 the marker
+byte lands on 100 in every entry of 904 of the 905 records, and every other
+stride tried collapses to 531 -- which is exactly the number of records
+holding a single entry, where a stride cannot be wrong.
+
+Getting that stride right is what makes every material resolve.  The names
+used to be extracted by pattern, and the pattern swallowed whatever
+alphanumeric byte happened to sit in front of a name: it read ``qqds.7`` out
+of ``B_MTP_04``, whose real texture is ``MTP_04.0``, and ``0FAIR.0`` ..
+``7FAIR.0`` out of the ``FIRE_SMOKE`` animations, where those digits are the
+cell bytes 48..55 of fourteen frames that all name ``FAIR.0``.  Read by
+offset, **all 905 materials name a texture that is in Textures.lib**, against
+891 by pattern.
+
+At +6 sits a three-byte RGB **diffuse colour** that modulates
 the texture, preceded by a constant 100 -- constant on 904 of the 905 records,
 which is what makes the offset trustworthy.  It matters: ``WATER``'s texture
 is a neutral grey ripple and the blue is entirely in its ``#4d6aff``, and lava
@@ -43,21 +64,15 @@ sub-image rectangles appended to the Texm payload, see ``texm.parse_pages``.
 That is why ``SUN.0`` behaves like a 2 x 2 grid (its four pages *are* the four
 quadrants) while ``EFFECT6.0`` does not: its 26 pages are four 128 x 32
 strips, eight 64 x 64 tiles, eight 30 x 30 discs and five 16 x 16 icons.  All
-61 textures a material indexes carry a table, and every one of the 249 cells
-asked for is inside its own.
-
-The texture names are still extracted by pattern rather than by offset,
-because the record's tail is not a constant size -- most are
-``12 + 40 * count + 8`` bytes but the two-layer ones are longer.  The names
-are unambiguous enough for that to be safe: the number found equals the
-declared count on 895 of the 905 records.
+62 textures a material indexes carry a table, and every one of the **2513**
+cells asked for -- across every entry of every material, not just the first --
+is inside its own.
 """
 
 from __future__ import annotations
 
-import re
 import struct
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from .nres import NResArchive
@@ -66,7 +81,12 @@ MATERIAL_TAG = "MAT0"
 
 #: An entry's diffuse colour, and the constant that anchors the offset.
 ENTRY_BASE = 12
-ENTRY_STRIDE = 40
+#: One texture entry.  34, not 40: at 34 the marker byte lands on 100 in every
+#: entry of 904 of the 905 records, against 531 at any other stride tried --
+#: and 531 is just the number of single-entry records, where a stride cannot
+#: be wrong.  The name field runs 14 bytes from +20 and the longest shipped
+#: name is 12 characters.
+ENTRY_STRIDE = 34
 COLOUR_OFFSET = 6
 COLOUR_MARKER_OFFSET = 5
 COLOUR_MARKER = 100
@@ -77,8 +97,29 @@ CELL_OFFSET = 19
 #: ...or asks for the whole texture.
 WHOLE_TEXTURE = 0xFF
 
-#: Texture references look like ``NAME.0`` -- the same form Textures.lib uses.
-_TEXTURE_RE = re.compile(rb"[A-Za-z0-9_]{2,}\.\d+")
+#: Where an entry's texture name starts, and how long the field is.
+NAME_OFFSET = 20
+NAME_FIELD = ENTRY_STRIDE - NAME_OFFSET
+
+#: A second colour sits ahead of the marker.  On 38 of the 43 two-layer
+#: materials the two entries hold it and the diffuse the opposite way round --
+#: entry 0 white diffuse and black here, entry 1 the reverse -- so the second
+#: entry is marked as something other than an ordinary lit layer.  Which of
+#: the two D3D slots each is has not been established.
+TINT_OFFSET = 2
+
+
+@dataclass(frozen=True)
+class MaterialEntry:
+    """One texture entry of a material."""
+
+    texture: str
+    #: Sub-image of that texture, or WHOLE_TEXTURE.
+    cell: int = WHOLE_TEXTURE
+    #: Diffuse colour, as ``(r, g, b)``.
+    colour: tuple[int, int, int] = (255, 255, 255)
+    #: The second colour slot, ahead of the marker.
+    tint: tuple[int, int, int] = (0, 0, 0)
 
 
 @dataclass
@@ -87,12 +128,22 @@ class Material:
     #: Total texture entries: ``layers * frames``.
     entry_count: int
     layer_count: int
-    #: Texture names in file order; the first is the base texture.
-    textures: list[str]
-    #: Diffuse colour multiplying the base texture, as ``(r, g, b)``.
-    colour: tuple[int, int, int] = (255, 255, 255)
-    #: Cell of the texture to use, or WHOLE_TEXTURE.
-    cell: int = WHOLE_TEXTURE
+    #: Every entry in file order.
+    entries: list[MaterialEntry] = field(default_factory=list)
+    @property
+    def colour(self) -> tuple[int, int, int]:
+        """Diffuse colour of the first entry; white when there is none."""
+        return self.entries[0].colour if self.entries else (255, 255, 255)
+
+    @property
+    def cell(self) -> int:
+        """Sub-image the first entry asks for."""
+        return self.entries[0].cell if self.entries else WHOLE_TEXTURE
+
+    @property
+    def textures(self) -> list[str]:
+        """The entries' texture names, skipping the entries that name none."""
+        return [e.texture for e in self.entries if e.texture]
 
     @property
     def whole_texture(self) -> bool:
@@ -123,6 +174,28 @@ class Material:
         return self.textures
 
 
+def parse_entries(data: bytes, count: int) -> list[MaterialEntry]:
+    """The ``count`` texture entries of a MAT0 record."""
+    out = []
+    for i in range(count):
+        at = ENTRY_BASE + i * ENTRY_STRIDE
+        blk = data[at : at + ENTRY_STRIDE]
+        if len(blk) < ENTRY_STRIDE:
+            break
+        colour = (255, 255, 255)
+        if blk[COLOUR_MARKER_OFFSET] == COLOUR_MARKER:
+            colour = tuple(blk[COLOUR_OFFSET : COLOUR_OFFSET + 3])
+        out.append(
+            MaterialEntry(
+                texture=blk[NAME_OFFSET:].split(b"\0")[0].decode("latin-1"),
+                cell=blk[CELL_OFFSET],
+                colour=colour,
+                tint=tuple(blk[TINT_OFFSET : TINT_OFFSET + 3]),
+            )
+        )
+    return out
+
+
 class MaterialLibrary:
     """``Material.lib``, keyed by material name (case-insensitively)."""
 
@@ -133,16 +206,9 @@ class MaterialLibrary:
             if entry.tag != MATERIAL_TAG:
                 continue
             data = self.archive.read(entry)
-            entries, layers = struct.unpack_from("<2H", data, 0)
-            names = [m.group().decode("latin-1") for m in _TEXTURE_RE.finditer(data)]
-            colour = (255, 255, 255)
-            at = ENTRY_BASE + COLOUR_OFFSET
-            if len(data) >= at + 3 and data[at - 1] == COLOUR_MARKER:
-                colour = tuple(data[at : at + 3])
-            at = ENTRY_BASE + CELL_OFFSET
-            cell = data[at] if len(data) > at else WHOLE_TEXTURE
+            count, layers = struct.unpack_from("<2H", data, 0)
             self.materials[entry.name.upper()] = Material(
-                entry.name, entries, layers, names, colour, cell
+                entry.name, count, layers, parse_entries(data, count)
             )
 
     def get(self, name: str) -> Material | None:

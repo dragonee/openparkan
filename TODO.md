@@ -187,6 +187,23 @@ written down is a question nobody reopens.
       cockpit, the interface, the cursors and the logo straight out. The two
       LZSS members of `gamefont.rlb` do **not** decode and are refused; see
       §2.4. → [docs/12-rsli.md](docs/12-rsli.md)
+- [x] **The `MAT0` entry stride, and with it every texture name.** An entry is
+      **34 bytes**, not 40: at 34 the marker byte lands on 100 in every entry
+      of **904 of the 905** records, and every other stride tried collapses to
+      531 — exactly the number of single-entry records, where a stride cannot
+      be wrong. The names had been extracted by pattern instead, and the
+      pattern swallowed whatever alphanumeric byte sat in front of a name: so
+      `B_MTP_04`'s texture read as `qqds.7` when it is `MTP_04.0`, and the
+      `FIRE_SMOKE` animations' as `0FAIR.0` .. `7FAIR.0` when all fourteen
+      frames name `FAIR.0` and those digits are the cell bytes 48..55. Read by
+      offset, **all 905 materials name a texture that is in Textures.lib**,
+      against 891 by pattern — which empties section 1 — and the cell check
+      now covers **2513** cells across every entry of every material rather
+      than 478 first entries. → [docs/03-terrain.md](docs/03-terrain.md)
+- [x] **The eight-layer materials.** Not eight images: `B_LBL_01` and
+      `R_LBL_01` both name `PG27.0` eight times and ask for cells 0 to 7 of
+      it, and differ only in their two colours. They are the blue and red team
+      variants of one insignia sheet.
 - [x] **Where the sun stands** — and it is in no file, which is why it was
       never found in one. `CSun`'s two angles are **constants in
       `Terrain.dll`**, filled by `CAtmData::GetEvents` from a single test on
@@ -220,11 +237,9 @@ written down is a question nobody reopens.
 Nothing known. What is left below is fidelity the game had and this does not,
 and engineering.
 
-Two things do draw as flat grey rather than as art, and cannot be fixed from
-the shipped data: `B_MTP_04`, `B_MTP_04G` and `B_MTP_05` name `qqds.7` and
-`ds.7`, which are in no archive and have no near match, and the five
-`FIRE_SMOKE*` animations name `0FAIR.0` upward when only `FAIR.0` exists.
-That costs 206 triangles on `fr_l_gener` and 153 on `fr_m_mtp`.
+The two materials that used to draw as flat grey are fixed; see the entry on
+the `MAT0` entry stride in section 0. Nothing in `Material.lib` is
+unresolvable any more — all **905** materials name a texture that exists.
 
 ## 2. Missing fidelity
 
@@ -257,22 +272,32 @@ takes the difference, and that scale comes from a virtual call that has not
 been followed. It changes nothing on screen — the start and stop keyframes
 already say when the sun is up.
 
-### 2.2 The second layer of a terrain material
+### 2.2 What the engine does with a material's second layer
 
-42 ground textures ship as a `L20.0` / `L20M.0` pair and the material names
-both. They are **not** detail or bump layers, which an earlier note assumed
-from `Iron_3D.ini`'s `EMBM=1`: correlation between the two is 0.994 median
-over all 42 pairs, so the `M` half is the same image in XRGB8888 rather than
-RGB565, at an exposure authored per texture (ratio 0.54 to 2.03).
+What the second layer *is* is settled: 43 ground materials name a texture in
+RGB565 and its `M` twin in XRGB8888, holding the same picture flattened
+towards neutral grey — closer to grey on 40 of the 43, and moved furthest
+where the base started furthest away (`L25` goes from a mean distance of 110
+to 12). Not a mask, not a bump map, and not a plain bit-depth copy. See
+[docs/03-terrain.md](docs/03-terrain.md).
 
-`Iron_3D.ini` carries `BITDEPTH` and `RENDER_QUALITY`, which is presumably
-what chose between them; which index goes with which setting is not
-established, so the reader takes layer 0. Two materials have **eight** layers
-(`B_LBL_01`, `R_LBL_01`) and those are unexplained.
+What is **not** settled is what the renderer does with it. It reads as a
+modulation layer — 128 is the value that changes nothing, which is why it is
+the half stored at 8 bits per channel — and on 38 of the 43 the two entries
+carry their two colour slots the opposite way round, so the second is flagged
+as something other than an ordinary lit layer. But no code path has been
+traced. `BITDEPTH` and `RENDER_QUALITY` appear in `iron3d.dll` and nowhere
+else and are read into a settings block; the material manager is
+`World3D.dll`'s `LoadMatManager`, whose `GetMaterialPhase` indexes the *wear*
+table rather than the layer; and `Ngi32.dll`'s `rsLoadMultiTexture` is a stub
+that returns zero. The reader takes layer 0, which is the coloured one.
 
 Byte 4 of a `MAT0` record sorts materials into twelve groups that track their
-names — all six `TREE*` share value 6, the effects share `0xFF` — and reads
-like a shader or blend-mode id, but nothing confirms it.
+names — the 87 `TREE*` and foliage share 6, `WATER` and `WATER_M` have 7 to
+themselves, the 24 `B_MTP_*` share 8, and 376 effects and sky materials share
+`0xFF`. Values 0 to 4 hold **43 of the 45 multi-layer materials** between
+them, which is the strongest hint yet that the byte is a blend mode, but
+nothing confirms it.
 
 ### 2.3 Effects
 

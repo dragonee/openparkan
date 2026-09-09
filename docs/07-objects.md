@@ -573,10 +573,10 @@ texture is a neutral grey ripple and all of the blue is in its `#4d6aff`, and
 lava is a dull pattern tinted `#b41e00`. 760 materials carry a colour other
 than white.
 
-Eight materials name a texture that was never shipped — the `FIRE_SMOKE`
-animations ask for `0FAIR.0` upward when only `FAIR.0` exists, and `B_MTP_04`
-asks for `qqds.7` when every member of `Textures.lib` ends in `.0`. Taking
-the first name that *is* present rescues them.
+An entry runs **34** bytes, not 40 — a stride that used to be wrong, which is
+why the names were read by pattern and why eight materials looked like they
+named textures nobody shipped. They do not: read by offset, all 905 name a
+texture that is in `Textures.lib`. See `openparkan/materials.py`.
 
 ### Baked lighting
 

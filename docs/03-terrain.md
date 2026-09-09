@@ -193,20 +193,45 @@ determine the texture pair or the surface word, and does not track elevation.
 Its groups are wildly uneven — 1, 2, 4 and 384 faces on SC_3. A renderer that
 wants to cull terrain has to build its own grid.
 
-## The `*M` textures are a second copy, not a bump map
+## The `*M` textures are the same image flattened towards grey
 
-42 of the ground textures ship as a pair: `L20.0` in RGB565 and `L20M.0` in
-XRGB8888, and the material for `L20` names both as its two layers. The `M`
-half is **the same image**: correlation between the two is 0.994 median, 0.897
-at worst, over all 42 pairs. What differs is colour depth and exposure — the
-brightness ratio runs from 0.54 to 2.03 and was clearly authored per texture,
-not applied as a gain.
+43 ground materials name a texture and its `M` twin as their two layers, and
+every pair is the same size with the base in **RGB565** and the twin in
+**XRGB8888**. They hold the same picture — correlation 0.94 to 1.00 — but not
+the same colours.
 
-So they are not detail layers and not bump maps, which is what an earlier
-draft assumed from `Iron_3D.ini`'s `EMBM=1`. They read as the 16-bit and
-32-bit variants of one texture, and `Iron_3D.ini` carries both `BITDEPTH` and
-`RENDER_QUALITY`, which is presumably what chose between them. Which index
-goes with which setting is not established, so the reader takes layer 0.
+What the `M` half is becomes obvious once you measure the distance from
+neutral grey rather than the brightness. **On 40 of the 43 pairs the `M`
+texture sits closer to grey than the base**, and the ones that move furthest
+are the ones that started furthest away: `L25`, a near-white snow, goes from a
+mean distance of 110 to 12; `L23` from 98 to 15. The three exceptions differ
+by about a point. Saturation drops on 36 of 42, and a per-channel least
+squares fit of `M = a·base + b` lands a residual of only 2 to 15 levels out of
+255 — so the twin is the base put through a per-texture brightness and
+contrast, aimed at mid-grey.
+
+That is what a **modulation layer** looks like: 128 is the value that changes
+nothing, which is why the twin is the one stored at 8 bits per channel where
+banding round the neutral point would show. It also explains the colours the
+record carries. On 38 of the 43 the two entries hold their two colour slots
+the opposite way round — entry 0 with a white diffuse and black in the slot
+ahead of the marker, entry 1 with black diffuse and white there — so the
+second entry is flagged as something other than an ordinary lit layer.
+
+They are certainly not bump maps, which an earlier draft guessed from
+`Iron_3D.ini`'s `EMBM=1`, and not a mask, which the reader used to call them.
+Nor are they simply the 16-bit and 32-bit variants of one texture: a bit-depth
+copy would not be pulled towards grey, and would not be pulled hardest exactly
+where the original is least grey.
+
+**What still is not established is what the engine does with the second
+layer.** `Iron_3D.ini` carries `BITDEPTH` and `RENDER_QUALITY`; both keys
+appear in `iron3d.dll` and nowhere else, and both are read into a settings
+block, but nothing has been traced from there to a material's layer index. The
+material manager lives in `World3D.dll` — `LoadMatManager`, and a
+`GetMaterialPhase` whose "table" is the wear table rather than the layer — and
+`Ngi32.dll`'s `rsLoadMultiTexture` is a stub that returns zero. The reader
+takes layer 0, which is the coloured one and the only one that stands alone.
 
 ## A large minority of faces are stored twice
 

@@ -115,14 +115,6 @@ and then 2, 1, 1, 1, which reads as two parallel arrays rather than pairs.
 - 65 of 393 textures have a mip tail shorter than the declared level count
   implies. Harmless for level 0, but a packer would need to reproduce it.
 
-## Dangling texture references
-
-Eight of the 905 materials name a texture that was never shipped: the five
-`FIRE_SMOKE*` animations ask for `0FAIR.0` upward when only `FAIR.0` exists,
-and `B_MTP_04`, `B_MTP_04G` and `B_MTP_05` ask for `qqds.7` and `ds.7` when
-every member of `Textures.lib` ends in `.0`. Cut content, or frames the
-engine generated at run time.
-
 ## Not looked at at all
 
 `.scr` node semantics, the `.trf` streams, save games in `SAVE/`, and the

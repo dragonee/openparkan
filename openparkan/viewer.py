@@ -213,9 +213,9 @@ class TextureResolver:
         material = self.materials.get(key)
         if material:
             # The first texture the material names that is actually shipped.
-            # Eight materials point at frames that are not in Textures.lib --
-            # the FIRE_SMOKE animations name 0FAIR.0 upwards and only FAIR.0
-            # exists -- so falling through the list rescues the mixed ones.
+            # Every one of the 905 resolves now that the entry stride is
+            # right, so this walks the list only to skip an entry that names
+            # nothing at all.
             for candidate in material.textures:
                 if candidate.upper().split(".")[0] in self.index:
                     index = self._image(candidate)

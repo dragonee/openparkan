@@ -311,31 +311,103 @@ def check_materials(check, game: Path) -> None:
     for m in lib.materials.values():
         if m.layer_count and m.entry_count % m.layer_count == 0:
             divides += 1
-        if len(m.textures) == m.entry_count:
+        if all(t.upper().split(".")[0] in known for t in m.textures):
             counted += 1
         if m.frame_count > 1:
             frames += 1
         if m.layer_count > 1:
             layered += 1
+    # The entry stride: every entry's marker byte has to land on 100, not just
+    # the first one's.  Any wrong stride collapses to the 531 records that hold
+    # a single entry, where a stride cannot be wrong.
     raw = lib.archive
-    marker = 0
-    for entry in raw:
-        if entry.tag != materials.MATERIAL_TAG:
-            continue
-        blob = raw.read(entry)
-        at = materials.ENTRY_BASE + materials.COLOUR_MARKER_OFFSET
-        marker += len(blob) > at and blob[at] == materials.COLOUR_MARKER
+    blobs = [raw.read(e) for e in raw if e.tag == materials.MATERIAL_TAG]
+    def marker_hits(stride: int) -> int:
+        hit = 0
+        for blob in blobs:
+            n = struct.unpack_from("<H", blob, 0)[0]
+            at = materials.ENTRY_BASE + materials.COLOUR_MARKER_OFFSET
+            hit += all(
+                at + i * stride < len(blob)
+                and blob[at + i * stride] == materials.COLOUR_MARKER
+                for i in range(n)
+            )
+        return hit
     total = len(lib)
+    here = marker_hits(materials.ENTRY_STRIDE)
+    rival = max(marker_hits(s) for s in (30, 32, 33, 35, 36, 40))
     check("Material.lib: entry count divides by layer count", divides == total,
           f"{divides}/{total} records; {frames} animate, {layered} have more than one layer")
-    check("Material.lib: the pattern finds exactly the declared textures",
-          counted >= total * 0.98,
-          f"{counted}/{total} records")
+    check("Material.lib: an entry is 34 bytes", here > rival and here >= total - 1,
+          f"the marker lands on 100 in every entry of {here}/{total} records at "
+          f"stride {materials.ENTRY_STRIDE}, against {rival} at the best of "
+          f"30, 32, 33, 35, 36 and 40 -- and {rival} is the number of "
+          f"single-entry records, where no stride can be wrong")
+    check("Material.lib: every material names a texture that exists",
+          counted == total,
+          f"{counted}/{total} materials name only textures that are in "
+          f"Textures.lib; reading the names by pattern instead of by offset "
+          f"left 14 that did not, qqds.7 and 0FAIR.0 among them")
     check("Material.lib: the diffuse colour sits behind a constant 100",
-          marker >= total - 1,
-          f"{marker}/{total} records carry the marker; "
+          here >= total - 1,
+          f"{here}/{total} records carry the marker in every entry; "
           f"{sum(1 for m in lib.materials.values() if m.colour != (255, 255, 255))} "
           f"are tinted, WATER #4d6aff and ENV_NLAVA #b41e00 among them")
+
+    # The second layer of a two-layer material.  42 ground materials name a
+    # texture and its "M" twin; what the twin is can be measured.
+    by_stem = {e.name.split(".")[0].upper(): e for e in textures}
+    twins = []
+    for m in lib.materials.values():
+        if m.layer_count != 2 or len(m.textures) != 2:
+            continue
+        a, b = (by_stem.get(t.upper().split(".")[0]) for t in m.textures)
+        if a is None or b is None:
+            continue
+        twins.append((m, texm.decode(textures.read(a)), texm.decode(textures.read(b))))
+    def from_grey(pix) -> float:
+        """Mean per-pixel distance from neutral grey, over a sample."""
+        n = pix.width * pix.height
+        return sum(
+            abs(pix.rgba[i * 4] - 128) + abs(pix.rgba[i * 4 + 1] - 128)
+            + abs(pix.rgba[i * 4 + 2] - 128)
+            for i in range(0, n, 7)
+        ) / (3 * len(range(0, n, 7)))
+
+    sized = fmt = neutral = 0
+    widest = ("", 0.0, 0.0)
+    for _m, a, b in twins:
+        sized += (a.width, a.height) == (b.width, b.height)
+        fmt += a.fmt == texm.FMT_RGB565 and b.fmt == texm.FMT_XRGB8888
+        if (a.width, a.height) != (b.width, b.height):
+            continue
+        near, far = from_grey(a), from_grey(b)
+        neutral += far < near
+        if near - far > widest[1] - widest[2]:
+            widest = (_m.name, near, far)
+    check("Material.lib: a two-layer material is a texture and its M twin",
+          len(twins) >= 40 and sized == len(twins) == fmt,
+          f"{len(twins)} materials name a pair; all {sized} hold the same "
+          f"dimensions, and all {fmt} are RGB565 paired with XRGB8888")
+    check("Material.lib: the M half is the flattened one",
+          neutral >= len(twins) - 3,
+          f"on {neutral}/{len(twins)} pairs the M texture sits closer to "
+          f"neutral grey than the base does -- {widest[0]} goes "
+          f"{widest[1]:.0f} to {widest[2]:.0f} -- so it is the base flattened "
+          f"towards 128, not a mask and not the same image at another bit "
+          f"depth; the three exceptions differ by about a point")
+
+    # The two eight-layer materials are eight cells of one sheet.
+    eights = [m for m in lib.materials.values() if m.layer_count == 8]
+    one_sheet = all(len({t.upper() for t in m.textures}) == 1 for m in eights)
+    cells_ok = all(sorted(e.cell for e in m.entries) == list(range(8))
+                   for m in eights)
+    check("Material.lib: an eight-layer material is eight cells of one sheet",
+          len(eights) == 2 and one_sheet and cells_ok,
+          f"{[m.name for m in eights]} each name "
+          f"{eights[0].textures[0] if eights else '?'} eight times and ask for "
+          f"cells 0-7 of it -- team variants of one insignia sheet, not eight "
+          f"images")
 
     # Terrain layer names are material names, which is what makes the eight
     # that are missing from Textures.lib resolve.
@@ -987,24 +1059,29 @@ def check_sky(check, game: Path) -> None:
           f"{weathered.get('lightning', 0)} name {sky.LIGHTNING_MARKER}; "
           f"none names snow")
 
-    # The sub-image cell indexes the texture's own Page table.
+    # The sub-image cell indexes the texture's own Page table -- on every
+    # entry of every material, now that the entries can be walked.
     indexed = inside = biggest = 0
     pages_seen = set()
+    page_cache: dict[str, int] = {}
     for material in lib.materials.values():
-        if material.cell == materials.WHOLE_TEXTURE or not material.textures:
-            continue
-        entry = textures_by_stem.get(material.textures[0].upper().split(".")[0])
-        if entry is None:
-            continue
-        indexed += 1
-        biggest = max(biggest, material.cell)
-        pages = texm.parse_pages(textures.read(entry))
-        pages_seen.add(entry.name)
-        inside += material.cell < len(pages)
+        for item in material.entries:
+            if item.cell == materials.WHOLE_TEXTURE or not item.texture:
+                continue
+            entry = textures_by_stem.get(item.texture.upper().split(".")[0])
+            if entry is None:
+                continue
+            indexed += 1
+            biggest = max(biggest, item.cell)
+            if entry.name not in page_cache:
+                page_cache[entry.name] = len(texm.parse_pages(textures.read(entry)))
+            pages_seen.add(entry.name)
+            inside += item.cell < page_cache[entry.name]
     check("Texm: a material's cell indexes the texture's own Page table",
           inside == indexed > 0,
           f"{inside}/{indexed} cells fall inside the Page table of the texture "
-          f"they name, over {len(pages_seen)} textures and cells up to {biggest}")
+          f"they name, over {len(pages_seen)} textures and cells up to {biggest} "
+          f"-- every entry of every material, not just the first")
 
     # SUN.0's four pages are its quadrants, which is what puts ENV_MOON's
     # cell 2 on the moon.
