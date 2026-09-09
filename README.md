@@ -84,7 +84,7 @@ PASS  NRes: every member offset is 8-byte aligned    116/116 archives, 6697 memb
 PASS  NRes: no member ranges overlap                 0 overlaps
 PASS  NRes: inter-member padding is zero-filled      0 non-zero gaps, largest gap 7 bytes (< 8 as expected)
 PASS  NRes: the element-count field equals size / stride 231/231 terrain streams across 33 maps
-PASS  Texm: declared format predicts the payload size 328/393 exact (rest have a truncated mip tail)
+PASS  Texm: the header accounts for every byte of the payload 328/393 end exactly on the last mip level and the other 65 carry a Page table after it
 PASS  Texm: every texture decodes to RGBA            393/393, formats {0: 15, 565: 47, 888: 52, 4444: 42, 8888: 237}
 PASS  Land.msh: all maps parse                       33 maps
 PASS  Land.msh: face indices within the vertex array 33/33 maps

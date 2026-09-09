@@ -99,8 +99,6 @@ and then 2, 1, 1, 1, which reads as two parallel arrays rather than pairs.
 - Palettised textures (format `0`) are decoded fully opaque. Whether a palette
   index is treated as a colour key for transparency is unknown; foliage
   textures suggest one probably is.
-- 65 of 393 textures have a mip tail shorter than the declared level count
-  implies. Harmless for level 0, but a packer would need to reproduce it.
 
 ## Not looked at at all
 

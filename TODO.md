@@ -369,6 +369,12 @@ written down is a question nobody reopens.
       minimum number of batches**, no pair twice, against 11463 in file order.
       A renderer that buckets by material itself does not need it.
       → [docs/03-terrain.md](docs/03-terrain.md)
+- [x] **The "truncated mip tails", which were never truncated.** 65 of the 393
+      textures have bytes left over after the mip pyramid, and an earlier
+      reading called the tail short. Every declared level is present on all
+      393; the leftover is the **`Page` sub-image table**, and it accounts for
+      the payload to the byte on all 65 — `Page` magic, an 8-byte header and
+      8 bytes a page. So `Textures.lib` is read with nothing unexplained.
 - [x] **The renderer's interface.** `IDirect3DDevice7`, pinned by the vtable
       offsets the engine calls through — `SetRenderState` at 20,
       `DrawPrimitive` at 25, `SetTexture` at 35, `SetTextureStageState` at 37,
@@ -647,5 +653,3 @@ today; each is a small trap for anyone extending the code.
 - `CTPT`'s nine floats read as `(zero, position, unit direction)` in
   `static.rlb` and `turrets.rlb` but not in `guns.rlb` or `parts.rlb`, which
   put scalars like `Width` in a vector slot.
-- 65 of 393 textures have a mip tail shorter than the declared level count.
-  Harmless for level 0; a packer would need to reproduce it.

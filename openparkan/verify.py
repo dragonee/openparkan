@@ -90,7 +90,7 @@ def check_nres(check, game: Path) -> None:
 
 def check_texm(check, game: Path) -> None:
     ar = NResArchive.open(game / "Textures.lib")
-    exact = decoded = 0
+    exact = decoded = paged = 0
     fmts: dict[int, int] = {}
     cutout = graded = palettised = keyed = 0
     silhouettes = trees = 0
@@ -100,8 +100,17 @@ def check_texm(check, game: Path) -> None:
         fmts[fmt] = fmts.get(fmt, 0) + 1
         bpp = {0: 1, 565: 2, 4444: 2, 888: 4, 8888: 4}[fmt]
         want = texm.mip_pyramid_pixels(w, h, mips) * bpp + (texm.PALETTE_SIZE if fmt == 0 else 0)
-        if want == len(blob) - texm.HEADER_SIZE:
+        left = len(blob) - texm.HEADER_SIZE - want
+        if left == 0:
             exact += 1
+        else:
+            # Not a truncated tail, which an earlier reading called it: every
+            # declared level is there and the extra bytes are the Page table.
+            pages = texm.parse_pages(blob)
+            paged += bool(pages) and (
+                left == texm.PAGE_HEADER + len(pages) * texm.PAGE_STRIDE
+                and blob[texm.HEADER_SIZE + want:][:4] == texm.PAGE_MAGIC
+            )
         tex = texm.decode(blob)
         if len(tex.rgba) == w * h * 4:
             decoded += 1
@@ -120,8 +129,12 @@ def check_texm(check, game: Path) -> None:
             # differ from the rest.  None does, on any shipped texture.
             body = blob[texm.HEADER_SIZE :]
             keyed += len({body[i * 4 + 3] for i in range(256)}) > 1
-    check("Texm: declared format predicts the payload size", exact >= len(ar) * 0.8,
-          f"{exact}/{len(ar)} exact (rest have a truncated mip tail)")
+    check("Texm: the header accounts for every byte of the payload",
+          exact + paged == len(ar),
+          f"{exact}/{len(ar)} end exactly on the last mip level and the other "
+          f"{paged} carry a Page table after it -- so no texture has a "
+          f"truncated mip tail, which an earlier reading called them: every "
+          f"declared level is present in all {len(ar)}")
     check("Texm: every texture decodes to RGBA", decoded == len(ar),
           f"{decoded}/{len(ar)}, formats {dict(sorted(fmts.items()))}")
     check("Texm: alpha is real and worth drawing", cutout > len(ar) * 0.5,

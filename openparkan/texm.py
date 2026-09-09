@@ -103,7 +103,10 @@ def parse_pages(data: bytes) -> list[tuple[int, int, int, int]]:
     """The sub-images a Texm declares, as ``(x, y, width, height)``.
 
     The chunk sits after the mip pyramid, so finding it means knowing how long
-    that is; a texture with a short mip tail simply has no chunk to find.
+    that is -- and it is the whole of what follows: **all 393 textures account
+    for every byte of their payload** as the declared mip levels and, on 65 of
+    them, this table.  No texture has a short mip tail, which an earlier
+    reading of the leftover bytes called them.
     """
     w, h, mips, _flags, fmt = parse_header(data)
     if fmt not in _BYTES_PER_PIXEL:
