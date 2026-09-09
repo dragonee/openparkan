@@ -55,6 +55,7 @@ and the moon.
 
 from __future__ import annotations
 
+import math
 import struct
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -126,10 +127,55 @@ FLARE_SCALE = 0.25
 #: axis, and ramps linearly to full on-axis; the engine then squares the ramp.
 FLARE_CONE_DEGREES = 15.0
 
-#: A second ramp on the sun's own elevation: full above the first angle, out
-#: below the second.
-FLARE_ELEVATION_FULL_DEGREES = 30.0
-FLARE_ELEVATION_ZERO_DEGREES = 60.0
+#: The second gate is a ramp on the **height** of the body's own direction --
+#: the engine negates the vector's third component and compares it against
+#: these two cosines, so the flare is full at 60 degrees of elevation and above
+#: and out at 30 degrees and below.  Written as heights rather than as angles
+#: because that is what the comparison is against, and because writing them as
+#: elevations inverts the two.
+FLARE_HEIGHT_FULL = math.cos(math.radians(30.0))
+FLARE_HEIGHT_ZERO = math.cos(math.radians(60.0))
+
+
+def flare_height_gate(height: float) -> float:
+    """The second gate, given the height of a unit direction."""
+    if height >= FLARE_HEIGHT_FULL:
+        return 1.0
+    if height <= FLARE_HEIGHT_ZERO:
+        return 0.0
+    return (height - FLARE_HEIGHT_ZERO) / (FLARE_HEIGHT_FULL - FLARE_HEIGHT_ZERO)
+
+
+#: **Where the sun stands, and it is not in any file.**  ``CSun``'s two angles
+#: are constants in ``Terrain.dll``, picked by whether the keyframe's name is
+#: exactly ``sun``: an azimuth and a tilt from the zenith, in whole degrees.
+#: See ``docs/10-sky.md``.
+BODY_ANGLES = {"sun": (90.0, 30.0), "moon": (0.0, 50.0)}
+
+#: The same three-int block's fourth field is the ``sky.wea`` slot the body
+#: draws with, and it is 3 for the sun and 4 for anything else -- which is
+#: ``SLOT_ROLES`` exactly.
+BODY_SLOT = {"sun": 3, "moon": 4}
+
+
+def body_direction(name: str) -> tuple[float, float, float]:
+    """The unit direction to ``sun`` or ``moon``, in game axes, z up.
+
+    ``CSun::Render`` builds ``Rz(azimuth) . Rx(tilt)`` every frame from the two
+    constants above and nothing ever changes them, so this is fixed for the
+    whole mission.  The direction is that matrix's third column.
+    """
+    azimuth, tilt = (math.radians(v) for v in BODY_ANGLES[name])
+    return (
+        math.sin(azimuth) * math.sin(tilt),
+        -math.cos(azimuth) * math.sin(tilt),
+        math.cos(tilt),
+    )
+
+
+def body_elevation(name: str) -> float:
+    """How far above the horizon a body stands, in degrees."""
+    return math.degrees(math.asin(body_direction(name)[2]))
 
 #: The trailer opens with a kind word: 3 on 621 of the 656 shipped keyframes,
 #: 1 on 6, and 0 on the 29 that close a section.  The hour and minute follow

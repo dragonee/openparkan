@@ -30,7 +30,7 @@ practice — format facts yes, code no — is set out in
 | **Building interiors** | done — path graph for 29 buildings |
 | **Control points** | done — 284 members, 3599 named attachment points |
 | **`Land.map` navigation mesh** | done — all 33 maps, 34662 areals, adjacency and grid |
-| **Sky** | done — `sky.ske` day cycle, `sky.wea`'s nine texture slots, the engine's twelve-element lens flare and the weather markers, all 29 missions |
+| **Sky** | done — `sky.ske` day cycle, `sky.wea`'s nine texture slots, the engine's twelve-element lens flare and both its intensity gates, the weather markers, and where the sun and moon stand (fixed, and in no file), all 29 missions |
 | **RsLi archives** | mostly — encrypted entry table read, all 24 `sprites.lib` members out; `gamefont.rlb`'s two use an LZSS that does not decode |
 | **Behaviour scripts, gameplay** | not started |
 

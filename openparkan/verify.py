@@ -1019,6 +1019,86 @@ def check_sky(check, game: Path) -> None:
           f"within two hours of midnight ({parsed - len(varying)} files hold a "
           f"single value across a night-time cycle)")
 
+    # Where the sun stands is not in the file -- CSun takes two whole-degree
+    # angles from a block Terrain.dll fills with constants, picked by whether
+    # the keyframe's name is exactly "sun".  Nothing in the data can confirm a
+    # constant directly, but three things it implies are checkable.
+
+    # One: the engine's test is name == "sun", so the only two names that can
+    # reach it must be the two it distinguishes.
+    named: dict[str, int] = {}
+    sections = 0
+    paired = 0
+    overlaps = 0
+    odd = []
+    for path in files:
+        try:
+            atmosphere = sky.load(path)
+        except sky.SkyFormatError:
+            continue
+        for k in atmosphere.keyframes:
+            if k.name:
+                named[k.name] = named.get(k.name, 0) + 1
+        for section in sorted({k.section for k in atmosphere.keyframes}):
+            sections += 1
+            window = {}
+            for name in sky.BODY_ANGLES:
+                marks = sorted(
+                    k.minutes for k in atmosphere.keyframes
+                    if k.name == name and k.section == section
+                )
+                if len(marks) == 2:
+                    window[name] = marks
+            if len(window) == 2:
+                paired += 1
+                (rise, set_), (moonrise, moonset) = window["sun"], window["moon"]
+                overlaps += not (set_ <= moonrise or moonset <= rise)
+            else:
+                odd.append(f"{path.parent.name}/{section}")
+    bodies = {n: named.get(n, 0) for n in sky.BODY_ANGLES}
+    check("sky.ske: the only bodies a keyframe names are the sun and the moon",
+          set(named) - {sky.RAIN_MARKER, sky.LIGHTNING_MARKER}
+          == set(sky.BODY_ANGLES),
+          f"{bodies} against the engine's single test, name == 'sun'")
+    check("sky.ske: the sun and the moon come in start/stop pairs",
+          paired >= sections - 3,
+          f"{paired}/{sections} sections hold exactly one pair of each; the "
+          f"other {len(odd)} are two five-keyframe skies that name only the "
+          f"sun and one that names each body once, so the reader toggles on "
+          f"each mark rather than assuming a pair")
+    check("sky.ske: the sun and the moon are never up together", overlaps == 0,
+          f"{overlaps} of {paired} paired sections overlap -- the sun runs "
+          f"about 01:30 to 15:00 and the moon 16:20 to midnight, which is what "
+          f"makes two fixed positions a quarter turn apart coherent")
+
+    # Two: the block's fourth field is 3 for the sun and 4 for the moon, and
+    # SLOT_ROLES -- read out of sky.wea, quite separately -- says the same.
+    check("CSun: the engine's slot for each body is the sky.wea role",
+          all(sky.SLOT_ROLES[slot] == name
+              for name, slot in sky.BODY_SLOT.items()),
+          ", ".join(f"{name} -> slot {slot} = {sky.SLOT_ROLES[slot]}"
+                    for name, slot in sky.BODY_SLOT.items()))
+
+    # Three: the flare's second gate ramps between cos 60 and cos 30, and the
+    # sun's own tilt is 30 degrees off the zenith -- so its height is cos 30
+    # exactly and it sits on the top edge of the ramp.  That coincidence is
+    # what identifies the gate as the body's height.
+    heights = {n: sky.body_direction(n)[2] for n in sky.BODY_ANGLES}
+    check("CSun: the sun stands exactly at the top of the flare's second gate",
+          abs(heights["sun"] - sky.FLARE_HEIGHT_FULL) < 1e-6
+          and sky.flare_height_gate(heights["sun"]) == 1.0,
+          f"the sun's height is {heights['sun']:.6f} against a ramp that tops "
+          f"out at {sky.FLARE_HEIGHT_FULL:.6f}; the moon's "
+          f"{heights['moon']:.6f} gives "
+          f"{sky.flare_height_gate(heights['moon']):.3f}")
+    check("CSun: both bodies stand above the horizon and a quarter turn apart",
+          all(sky.body_elevation(n) > 0 for n in sky.BODY_ANGLES)
+          and abs(sky.BODY_ANGLES["sun"][0] - sky.BODY_ANGLES["moon"][0]) == 90,
+          f"sun {sky.body_elevation('sun'):.0f} degrees up, moon "
+          f"{sky.body_elevation('moon'):.0f}, azimuths "
+          f"{sky.BODY_ANGLES['sun'][0]:.0f} and "
+          f"{sky.BODY_ANGLES['moon'][0]:.0f}")
+
 
 def check_minimap_agreement(check, game: Path) -> None:
     """The strongest check available: our terrain vs the art the game ships."""

@@ -241,8 +241,10 @@ if (typeof THREE === "undefined" || typeof pako === "undefined") {
   const skyGroup = new THREE.Group();
   scene.add(skyGroup);
   let dome = null, starLayer = null, cloudLayer = null, sunSprite = null, moonSprite = null;
-  //: Where the sun stands right now; the flare overlay needs it every frame.
+  //: Whichever of the sun and moon is up, and the strength its own elevation
+  //: gives the flare.  The overlay needs both every frame.
   let sunHeading = null;
+  let flareGate = 0;
 
   function domeGeometry() {
     return new THREE.SphereGeometry(DOME_RADIUS, 40, 28);
@@ -275,6 +277,7 @@ if (typeof THREE === "undefined" || typeof pako === "undefined") {
     buildFlare(null);
     buildRain(null);
     sunHeading = null;
+    flareGate = 0;
     rainWanted = 0;
     [dome, starLayer, cloudLayer, sunSprite, moonSprite].forEach((o) => {
       if (!o) return;
@@ -419,7 +422,7 @@ if (typeof THREE === "undefined" || typeof pako === "undefined") {
     });
   }
 
-  // The engine gates the flare twice, and both gates are adapted here.
+  // The engine gates the flare twice.
   //
   // The first is a 15-degree cone about the view axis: linear in the cosine,
   // then squared.  That angle is calibrated to the game's own field of view,
@@ -428,16 +431,22 @@ if (typeof THREE === "undefined" || typeof pako === "undefined") {
   // linear-then-squared ramp is driven by how far the sun sits from the centre
   // of the screen instead.  Same idea, window the size of the viewport.
   //
-  // The second ramps between the cosines of 30 and 60 degrees of a quantity
-  // carried by the sun object that has not been identified.  A horizon test
-  // stands in for it: the flare goes out as the sun sets, which is the one
-  // thing such a gate certainly has to do.
-  const HORIZON_FADE = 0.1;
+  // The second is the engine's own, now that it is known what it measures:
+  // the height of the body's direction, ramped between the cosines of 60 and
+  // 30 degrees.  The sun's fixed elevation is exactly 60 degrees, so it sits
+  // on the top edge of that ramp and always flares at full; the moon's 40
+  // puts it at 0.39.
+  function heightGate(y) {
+    if (!missionSky || !missionSky.flareHeight) return 0;
+    const [zero, full] = missionSky.flareHeight;
+    if (y >= full) return 1;
+    if (y <= zero) return 0;
+    return (y - zero) / (full - zero);
+  }
 
-  function drawFlare(dir) {
+  function drawFlare(dir, gate) {
     if (!flareGhosts.length) return false;
-    let intensity = Math.max(0, Math.min(1,
-      (dir.y + HORIZON_FADE) / (2 * HORIZON_FADE)));
+    let intensity = gate;
     sunScreen.copy(dir).multiplyScalar(DOME_RADIUS).add(camera.position)
       .project(camera);
     const cx = innerWidth / 2, cy = innerHeight / 2;
@@ -461,19 +470,17 @@ if (typeof THREE === "undefined" || typeof pako === "undefined") {
     return true;
   }
 
-  // Where the sun stands at a time of day.  The engine keeps two angles on
-  // each sun object -- CSun::Render builds its matrix from them, a rotation of
-  // the second angle about the horizontal axis at the first -- and they have
-  // not been found in sky.ske, so this arc is the renderer's own: up at noon,
-  // on the horizon at six, under it at night.  The moon sits opposite, and the
-  // scene's light follows the sun so shading and sky agree.
-  function sunDirection(label) {
-    const [h, m] = String(label || "12:00").split(":").map(Number);
-    const day = ((h * 60 + (m || 0)) % 1440) / 1440;
-    const angle = (day - 0.25) * Math.PI * 2;
-    return new THREE.Vector3(
-      Math.cos(angle) * -0.6, Math.sin(angle), Math.cos(angle) * 0.8
-    ).normalize();
+  // Where the sun stands -- and it does not move.  CSun::Render rebuilds its
+  // matrix every frame from two angles the constructor sets once, and those
+  // two are constants in Terrain.dll rather than anything out of sky.ske: an
+  // azimuth and a tilt from the zenith, picked by whether the keyframe's name
+  // is exactly "sun".  The sun ends up 60 degrees above the horizon and the
+  // moon 40, a quarter turn apart, and each stays there for the mission.
+  // See docs/10-sky.md.
+  function bodyDirection(name) {
+    const b = missionSky && missionSky.bodies && missionSky.bodies[name];
+    if (!b) return new THREE.Vector3(0.5, 0.866, 0);
+    return new THREE.Vector3().fromArray(b.dir);
   }
 
   // The keyframe currently shown, and the colours it puts on everything.
@@ -488,19 +495,28 @@ if (typeof THREE === "undefined" || typeof pako === "undefined") {
     if (cloudLayer) cloudLayer.material.color = new THREE.Color(frame.h);
 
     rainWanted = frame.w === "rain" ? 0.85 : 0;
-    const dir = sunDirection(frame.t);
-    sunHeading = dir;
-    // Never light the terrain from underneath; at night the sun is below the
-    // horizon and only the ambient term is left.
-    sun.position.copy(dir).setY(Math.max(dir.y, 0.12)).normalize();
+
+    // Which body is up.  Both the sun and the moon come in start/stop pairs
+    // and no mission has them up at once -- the sun runs about 01:30 to 15:00
+    // and the moon 16:20 to midnight -- so at most one of these is drawn, each
+    // at its own fixed place.
+    const lit = frame.u || [];
+    const sunUp = lit.indexOf("sun") >= 0;
+    const moonUp = lit.indexOf("moon") >= 0;
+    const dir = bodyDirection(sunUp || !moonUp ? "sun" : "moon");
+    sunHeading = sunUp || moonUp ? dir : null;
+    sun.position.copy(dir).normalize();
     if (sunSprite) {
       sunSprite.position.copy(dir).multiplyScalar(DOME_RADIUS * 0.92);
-      sunSprite.material.opacity = Math.max(0, Math.min(1, 0.3 + dir.y * 2));
+      sunSprite.material.opacity = sunUp ? 1 : 0;
     }
     if (moonSprite) {
-      moonSprite.position.copy(dir).multiplyScalar(-DOME_RADIUS * 0.92);
-      moonSprite.material.opacity = Math.max(0, Math.min(1, 0.3 - dir.y * 2));
+      moonSprite.position.copy(bodyDirection("moon"))
+        .multiplyScalar(DOME_RADIUS * 0.92);
+      moonSprite.material.opacity = moonUp ? 1 : 0;
     }
+    // The engine's own second gate, on the height of whichever body is up.
+    flareGate = sunUp || moonUp ? heightGate(dir.y) : 0;
     const label = document.getElementById("timeval");
     if (label) label.textContent = frame.t;
   }
@@ -1029,7 +1045,7 @@ if (typeof THREE === "undefined" || typeof pako === "undefined") {
       animated.forEach((a) => { a.apply(a.frames[tick % a.frames.length]); });
     }
     renderer.render(scene, camera);
-    if (sunHeading && drawFlare(sunHeading)) {
+    if (sunHeading && drawFlare(sunHeading, flareGate)) {
       renderer.autoClear = false;
       renderer.render(flareScene, flareCamera);
       renderer.autoClear = true;

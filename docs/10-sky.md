@@ -171,11 +171,16 @@ multiplies, and ORs the other three back unchanged. The texture column picks
 between the two flare slots of `sky.wea`; which of the pair the engine calls 0
 is not established.
 
-Intensity has two gates. The first is exact: the flare is off once the sun is
-more than **15°** off the view axis, ramps linearly to full on-axis, and the
-ramp is then squared. Those cosines are cached at load from a constant of 15
-degrees, alongside 30 and 60 for a second ramp on a quantity the sun object
-carries at `+0x80`, which has not been identified.
+Intensity has two gates, and both are now exact. The first: the flare is off
+once the sun is more than **15°** off the view axis, ramps linearly to full
+on-axis, and the ramp is then squared. The second ramps on **how high the body
+stands** — see [below](#where-the-sun-stands-and-it-is-not-in-a-file). Both
+sets of cosines are cached at load from constants of 15, 30 and 60 degrees.
+
+The whole flare is skipped when the first gate falls below **0.1**, and the
+composite intensity also brightens the sun's own billboard: the engine lerps
+each of its three colour channels from `c` to `5c`, so a sun on the view axis
+draws up to five times its own colour.
 
 ## The weather, and how the engine reads a keyframe
 
@@ -219,33 +224,89 @@ and rain does not.
   gradient, so one draw gives "this sky at this hour".
 - The **stars** over it, additive, fading in as the day's light drops.
 - The **clouds** over that, tiled four times and tinted by the horizon colour.
-- The **sun** and **moon** as billboards, opposite each other.
+- The **sun** and **moon** as billboards, each at its own fixed place, and
+  only whichever one the keyframes say is up.
 - **Rain**, when the mission's keyframes ask for it: the drops are its own
   `RAIN_DROP` sprite, cell 21 of `EFFECT6.0`, falling in a 900-unit box that
   rides with the camera.
 - The **lens flare**, as a 2D overlay drawn after the scene — it is in the
   lens, not the world, so it takes no depth test. The twelve elements and
-  their tables are the engine's; both gates are adapted. The 15° cone is
-  calibrated to the game's field of view and would almost never open against
-  an orbiting camera that looks down at the terrain, so the same
-  linear-then-squared ramp is driven by the sun's distance from the centre of
-  the screen; and a horizon test stands in for the unidentified second gate,
-  which at least has to take the flare away at night.
+  their tables are the engine's, and so is the second gate — full for the sun,
+  0.39 for the moon, nothing when neither is up. Only the first gate is
+  adapted: its 15° cone is calibrated to the game's field of view and would
+  almost never open against an orbiting camera that looks down at the terrain,
+  so the same linear-then-squared ramp is driven by the sun's distance from
+  the centre of the screen instead.
 
-Where the sun goes is the renderer's own choice: `CSun::Render` builds its
-matrix from two angles at `this+0x30` and `this+0x34`, and those have not been
-found in `sky.ske`, so the viewer runs the sun along a day arc from the
-keyframe's own time — overhead at noon, on the horizon at six, below it at
-night — and points the scene's light the same way so the shading and the sky
-agree. The time-of-day control walks the keyframes.
+The **sun and moon stand still**, each at its own fixed place, and only one of
+them is ever up — see the next section. The time-of-day control walks the
+keyframes, and the scene's light points at whichever body is in the sky so the
+shading and the sky agree.
+
+## Where the sun stands, and it is not in a file
+
+It was never going to be found in `sky.ske`, because it is not in any file:
+**`CSun`'s two angles are constants in `Terrain.dll`**, and the only thing the
+mission chooses is *when* the sun is up.
+
+The chain is short. `CAtmData::GetEvents` walks the keyframes; on the
+start opcode it compares the keyframe's name against the literal `"sun"` and
+fills a four-`int32` block in the DLL's own data from that one test:
+
+| field | `name == "sun"` | anything else | what `CSun` does with it |
+|---|---:|---:|---|
+| +0 | the sun's lifetime | the moon's | `× 1000`, kept as milliseconds |
+| +4 | 90 | 0 | × π/180 → `this+0x30`, an azimuth |
+| +8 | 30 | 50 | × π/180 → `this+0x34`, a tilt from the zenith |
+| +C | 3 | 4 | the `sky.wea` slot to draw with |
+
+The event record carries a pointer to that block at `+0x10`, and
+`CreateAtmosphereObject` hands it to the constructor. Three things fall out.
+
+**The fourth field is the slot table.** 3 and 4 are `sun` and `moon` in
+`SLOT_ROLES` — read out of `sky.wea` quite separately, from the nine slots all
+29 missions fill in the same order. The engine and the data agree on the
+index without either having been derived from the other.
+
+**The two angles are an azimuth and a tilt.** `CSun::Render` builds
+`Rodrigues(axis = (cos A, sin A, 0), B)` and multiplies it by a rotation of
+`A` about the vertical, which is `Rz(A) · Rx(B)`; the body's direction is that
+matrix's third column, `(sin A sin B, −cos A sin B, cos B)`. So:
+
+| | azimuth | tilt | direction (game axes, z up) | above the horizon |
+|---|---:|---:|---|---:|
+| sun | 90° | 30° | (0.5, 0, 0.866) | **60°** |
+| moon | 0° | 50° | (0, −0.766, 0.643) | **40°** |
+
+**And that is where the flare's second gate comes from.** It ramps on the
+height of that same direction — the vector at `this+0x78`, whose third
+component is the `+0x80` the gate negates and compares — between
+`cos 60° = 0.5` and `cos 30° = 0.866`. The sun's height *is* `cos 30°`, to
+the last bit, so the sun sits exactly on the top edge of the ramp and always
+flares at full; the moon's 0.643 gives 0.390. The two gate constants were
+chosen to bracket the two bodies, which is what identifies what the gate
+measures.
+
+Nothing ever rewrites the two angles: `Render` rebuilds the same matrix from
+them every frame. The sun does not travel.
+
+What the mission does choose is **when**, and the data backs the reading. A
+keyframe naming a body toggles it, the engine's opcodes running even to start
+and odd to stop, and **32 of the 35 shipped sections hold exactly one pair of
+each** — the sun up from about 01:30 to 15:00, the moon from 16:20 to
+midnight. **No section has them up at once**, on any of the 29 missions, which
+is what makes two fixed positions only a quarter turn apart coherent: they are
+never in the sky together. The three exceptions are two five-keyframe skies
+that name the sun on every keyframe and never the moon, and one that names
+each body once and stops neither.
 
 ## Not resolved
 
-- **Where the sun stands.** `CSun` keeps two angles; they are not in the
-  keyframe. No pair of floats in the 88-byte block varies with time the way
-  an azimuth and an elevation would.
-- **What the flare's second gate measures.** The engine ramps it between the
-  cosines of 30° and 60° of a float the sun object keeps at `+0x80`.
+- **The sun's lifetime.** The block's first field is a duration in seconds
+  that `GetEvents` computes by mapping the start and stop keyframes' clock
+  times through a per-section scale and taking the difference, wrapping round
+  the section. The scale comes from a virtual call whose meaning is not
+  pinned down, so the number is not reproduced here — only what it is for.
 - **Snow.** No shipped mission names it, so there is nothing to switch on.
   `SNOWFLAKE` resolves — it is cell 20 of `EFFECT6.0`, a 16 x 16 icon — and
   the viewer would draw it the same way it draws rain if a mission asked.

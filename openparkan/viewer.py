@@ -760,6 +760,22 @@ def build_sky_payload(folder: Path, resolver: TextureResolver | None = None) -> 
         if k.markers:
             running = k.weather or ""
         weather[i] = running
+
+    # The sun and the moon come in start/stop pairs -- the engine's opcodes
+    # run even to start and odd to stop -- so a keyframe naming a body toggles
+    # it.  32 of the 35 shipped sections hold exactly one pair of each, the sun
+    # up from about 01:30 to 15:00 and the moon from 16:20 to midnight, and no
+    # section has them up at once.  That is what makes two fixed positions a
+    # quarter turn apart a coherent thing for the engine to do: only one of
+    # them is ever in the sky.
+    up: list[list[str]] = [[] for _ in frames]
+    for name in sky.BODY_ANGLES:
+        showing = False
+        for i, k in enumerate(frames):
+            if k.name == name:
+                showing = not showing
+            if showing:
+                up[i].append(name)
     payload = {
         "zenith": _pack_colour(brightest.colour(SKY_ZENITH_SLOT)),
         "horizon": _pack_colour(brightest.colour(SKY_HORIZON_SLOT)),
@@ -779,6 +795,7 @@ def build_sky_payload(folder: Path, resolver: TextureResolver | None = None) -> 
                 # what decides whether the stars show.
                 "n": round(1.0 - min(1.0, k.light / peak), 3),
                 **({"w": weather[i]} if weather[i] else {}),
+                **({"u": up[i]} if up[i] else {}),
             }
             for i, k in enumerate(frames)
         ],
@@ -793,8 +810,21 @@ def build_sky_payload(folder: Path, resolver: TextureResolver | None = None) -> 
         ],
         "flareScale": sky.FLARE_SCALE,
         "flareCone": sky.FLARE_CONE_DEGREES,
-        "flareElevation": [sky.FLARE_ELEVATION_FULL_DEGREES,
-                           sky.FLARE_ELEVATION_ZERO_DEGREES],
+        "flareHeight": [sky.FLARE_HEIGHT_ZERO, sky.FLARE_HEIGHT_FULL],
+        # Where the sun and moon stand.  Not a property of the mission: the
+        # two angles are constants in Terrain.dll, so this is the same in
+        # every sky.  Game space is z-up, the viewer y-up.
+        "bodies": {
+            name: {
+                # Nine places, not six: the sun's height is cos 30 exactly,
+                # which is the top edge of the flare's second gate, and
+                # rounding it short drops the flare off full.
+                "dir": [round(x, 9), round(z, 9), round(-y, 9)],
+                "elevation": round(sky.body_elevation(name), 1),
+            }
+            for name in sky.BODY_ANGLES
+            for x, y, z in [sky.body_direction(name)]
+        },
         "weather": sorted({w for w in weather if w}),
     }
     if resolver is not None:

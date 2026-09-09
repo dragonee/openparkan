@@ -187,6 +187,25 @@ written down is a question nobody reopens.
       cockpit, the interface, the cursors and the logo straight out. The two
       LZSS members of `gamefont.rlb` do **not** decode and are refused; see
       §2.4. → [docs/12-rsli.md](docs/12-rsli.md)
+- [x] **Where the sun stands** — and it is in no file, which is why it was
+      never found in one. `CSun`'s two angles are **constants in
+      `Terrain.dll`**, filled by `CAtmData::GetEvents` from a single test on
+      the keyframe's name: `(90°, 30°)` when it is exactly `sun`, `(0°, 50°)`
+      otherwise. `CSun::Render` rebuilds `Rz(A)·Rx(B)` from them every frame
+      and nothing ever changes them, so **the sun does not travel** — it
+      stands 60° above the horizon and the moon 40°, a quarter turn apart.
+      Three things confirm it. The same block's fourth field is 3 for the sun
+      and 4 for the moon, which is `SLOT_ROLES` exactly — the engine and
+      `sky.wea` agreeing on an index neither derived from the other. The
+      flare's second gate, unidentified until now, ramps between `cos 60°` and
+      `cos 30°` of the body's **height**, and the sun's height *is* `cos 30°`
+      to the last bit: the two constants were chosen to bracket the two
+      bodies, the sun flaring at full and the moon at 0.390. And the missions
+      back the picture — **32 of 35 sections hold one start/stop pair of each
+      body and none has them up at once**, the sun running about 01:30 to
+      15:00 and the moon 16:20 to midnight, which is what makes two fixed
+      positions a quarter turn apart coherent. The viewer's invented day arc
+      is gone. → [docs/10-sky.md](docs/10-sky.md)
 - [x] **Coplanar geometry.** Two causes, both fixed. The terrain's two ground
       layers now share a single pass — bucketing faces by the pair costs 5 to
       8 groups per map against 3 to 5 — and the file's own duplicated faces
@@ -213,27 +232,16 @@ Correct as far as it goes, but not what the game showed.
 
 ### 2.1 The sky's weather layers
 
-Eight of `sky.wea`'s nine slots are drawn: the nebula, stars and clouds on the
-dome, the sun and moon as billboards, the lens flare as a 2D overlay, and rain
-where a mission asks for it (see [docs/10-sky.md](docs/10-sky.md)). The ninth
-is snow, and **no shipped mission names it**, so there is nothing to switch
-on.
+All nine of `sky.wea`'s slots are accounted for and eight are drawn: the
+nebula, stars and clouds on the dome, the sun and moon as billboards at their
+own fixed places, the lens flare as a 2D overlay with both of the engine's
+gates, and rain where a mission asks for it (see
+[docs/10-sky.md](docs/10-sky.md)). The ninth is snow, and **no shipped mission
+names it**, so there is nothing to switch on.
 
 What is left of the weather is where a shower *stops*: the sun and moon come
 in start/stop pairs and rain does not, so the viewer runs it to the next
 keyframe that names anything — a reading, not a fact.
-
-And **where the sun stands** is the renderer's own arc, not the game's:
-`CSun::Render` builds its matrix from two angles at `this+0x30` and
-`this+0x34` — a rotation of the second about the horizontal axis at the first,
-which is a Rodrigues matrix read straight off the disassembly — but nothing
-writes those two fields from a file that has been found, and no pair of floats
-in a keyframe or in the 124-byte header varies the way an azimuth and an
-elevation would.
-
-The flare's second intensity gate is in the same position: the engine ramps it
-between the cosines of 30° and 60° of a float the sun object keeps at `+0x80`,
-and what that float is has not been established.
 
 Two smaller unknowns sit in the same file: the keyframe count of a second
 section (six missions have one), and most of the 124-byte file header. The
@@ -242,6 +250,12 @@ ten-valued opcode whose branches pair up as start/stop per object type, and
 the sky is created outside that switch with a hardcoded id — but which *file*
 field feeds the opcode is not pinned down, which is why where a shower stops
 is still unknown.
+
+The sun's **lifetime** is the last piece of its own block: `GetEvents` maps
+the start and stop keyframes' clock times through a per-section scale and
+takes the difference, and that scale comes from a virtual call that has not
+been followed. It changes nothing on screen — the start and stop keyframes
+already say when the sun is up.
 
 ### 2.2 The second layer of a terrain material
 
