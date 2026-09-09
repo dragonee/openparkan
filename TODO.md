@@ -187,6 +187,18 @@ written down is a question nobody reopens.
       cockpit, the interface, the cursors and the logo straight out. The two
       LZSS members of `gamefont.rlb` do **not** decode and are refused; see
       §2.4. → [docs/12-rsli.md](docs/12-rsli.md)
+- [x] **What the `*M` ground texture is.** The 43 two-layer ground materials
+      pair a texture in RGB565 with its `M` twin in XRGB8888, and the twin is
+      the same picture **flattened towards neutral grey**: closer to grey on
+      **40 of the 43** pairs, and moved furthest where the base started
+      furthest away — `L25`, a near-white snow, goes from a mean distance of
+      110 to 12. A per-channel fit of `M = a.base + b` leaves a residual of 2
+      to 15 levels out of 255. So it is neither a mask, which this reader used
+      to call it, nor a bump map, which an earlier draft guessed from `EMBM=1`,
+      nor a plain bit-depth copy — a copy would not be pulled towards grey, and
+      would not be pulled hardest exactly where the original is least grey.
+      What the renderer *does* with it is a separate question; see §2.2.
+      → [docs/03-terrain.md](docs/03-terrain.md)
 - [x] **The `MAT0` entry stride, and with it every texture name.** An entry is
       **34 bytes**, not 40: at 34 the marker byte lands on 100 in every entry
       of **904 of the 905** records, and every other stride tried collapses to
@@ -274,30 +286,34 @@ already say when the sun is up.
 
 ### 2.2 What the engine does with a material's second layer
 
-What the second layer *is* is settled: 43 ground materials name a texture in
-RGB565 and its `M` twin in XRGB8888, holding the same picture flattened
-towards neutral grey — closer to grey on 40 of the 43, and moved furthest
-where the base started furthest away (`L25` goes from a mean distance of 110
-to 12). Not a mask, not a bump map, and not a plain bit-depth copy. See
-[docs/03-terrain.md](docs/03-terrain.md).
+The layer itself is [read](docs/03-terrain.md) and section 0 says what it is.
+What no code path has been traced to is **which layer the renderer binds, and
+how**.
 
-What is **not** settled is what the renderer does with it. It reads as a
-modulation layer — 128 is the value that changes nothing, which is why it is
-the half stored at 8 bits per channel — and on 38 of the 43 the two entries
-carry their two colour slots the opposite way round, so the second is flagged
-as something other than an ordinary lit layer. But no code path has been
-traced. `BITDEPTH` and `RENDER_QUALITY` appear in `iron3d.dll` and nowhere
-else and are read into a settings block; the material manager is
-`World3D.dll`'s `LoadMatManager`, whose `GetMaterialPhase` indexes the *wear*
-table rather than the layer; and `Ngi32.dll`'s `rsLoadMultiTexture` is a stub
-that returns zero. The reader takes layer 0, which is the coloured one.
+Everything about the data says *modulation*: 128 is the value that changes
+nothing, which is why the twin is the half stored at 8 bits per channel where
+banding around the neutral point would show; and on 38 of the 43 the two
+entries carry their two colour slots the opposite way round — entry 0 with a
+white diffuse and black in the slot ahead of the marker, entry 1 the reverse —
+so the second is flagged as something other than an ordinary lit layer.
 
-Byte 4 of a `MAT0` record sorts materials into twelve groups that track their
-names — the 87 `TREE*` and foliage share 6, `WATER` and `WATER_M` have 7 to
-themselves, the 24 `B_MTP_*` share 8, and 376 effects and sky materials share
-`0xFF`. Values 0 to 4 hold **43 of the 45 multi-layer materials** between
-them, which is the strongest hint yet that the byte is a blend mode, but
-nothing confirms it.
+None of that is confirmation. What was searched and came up empty:
+
+- `BITDEPTH` and `RENDER_QUALITY` are in `iron3d.dll` and in no other binary.
+  Both are read into a settings block built on the stack by the loader at
+  `0x10061360`, and `BITDEPTH` is only ever *written* back to the ini. Nothing
+  has been followed from that block to a material's layer index.
+- The material manager is `World3D.dll` — `LoadMatManager`, and the MAT0
+  parser at `0x10004634`. Its `GetMaterialPhase` takes a *table* and an index,
+  but the table is the wear table, not the layer.
+- `Ngi32.dll` exports `rsLoadMultiTexture`, which is the obvious name for it
+  and is a **stub**: `xor eax, eax; ret 0x10`. That whole DLL's texture
+  exports are stubs, so the real renderer is `iron3d.dll` and the multitexture
+  path has to be found there.
+
+The reader takes layer 0, which is the coloured one and the only one that
+stands alone. If the engine does modulate, the ground is missing a contrast
+boost at close range and nothing else.
 
 ### 2.3 Effects
 
@@ -343,6 +359,17 @@ The engine's decompressor has not been found: it is not beside the loader in
 `Ngi32.dll`, and neither a 4096 window constant nor a dispatch on the seven
 storage flags turns up in that DLL. Until it does, the font and its palette
 stay shut. See [docs/12-rsli.md](docs/12-rsli.md).
+
+### 2.5 The `MAT0` blend-mode byte
+
+Byte 4 of a `MAT0` record sorts the 905 materials into **twelve groups** that
+track their names: the 87 `TREE*` and foliage share 6, `WATER` and `WATER_M`
+have 7 to themselves, the 24 `B_MTP_*` share 8, 342 share 5 and 376 effects
+and sky materials share `0xFF`. Values 0 to 4 hold **43 of the 45 multi-layer
+materials** between them, which is the strongest hint yet that the byte picks
+a blend or shader mode — the multi-layer materials being exactly the ones that
+would need one. Nothing confirms it, and the reader passes it through
+unnamed.
 
 ---
 
