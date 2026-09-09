@@ -179,6 +179,15 @@ class TextureResolver:
         r, g, b = self.materials.colour_for(name.upper().split(".")[0])
         return (r << 16) | (g << 8) | b
 
+    def blend(self, name: str) -> int:
+        """How the material draws: the archive directory's flags byte.
+
+        0 opaque, 2 the ordinary lit skin, 4 see-through, 8 additive.  See
+        ``materials`` -- the record itself does not carry it.
+        """
+        material = self.materials.get(name.upper().split(".")[0])
+        return material.blend if material else materials.BLEND_OPAQUE
+
     def frames(self, name: str) -> list[int]:
         """Pool indices for every animation frame of a material.
 
@@ -607,6 +616,9 @@ class ModelLibrary:
                         "tint": self.textures.tint(name) if name else 0xFFFFFF,
                         "lod": lod,
                     }
+                    blend = self.textures.blend(name) if name else 0
+                    if blend & (materials.BLEND_ALPHA | materials.BLEND_ADD):
+                        group["blend"] = blend  # 4 see-through, 8 additive
                     if baked is not None and b.is_lit:
                         group["lightmap"] = baked
                     if len(frames) > 1:

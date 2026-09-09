@@ -581,8 +581,8 @@ def check_materials(check, game: Path) -> None:
         by_class[raw.read(entry)[4]][carries] += 1
     def purity(table) -> int:
         return sum(max(c.values()) for c in table.values())
-    opaque = by_flag[0]
-    bit_one = by_flag[2]
+    opaque = by_flag[materials.BLEND_OPAQUE]
+    bit_one = by_flag[materials.BLEND_LIT]
     check("Material.lib: the directory's flags byte says whether a material "
           "is transparent",
           opaque[True] == 0 and purity(by_flag) > purity(by_class),
@@ -593,6 +593,53 @@ def check_materials(check, game: Path) -> None:
           f"transparency-pure group against {purity(by_class)} for the record's "
           f"class byte.  The loader reads bit 1 of it into one material field "
           f"and bits 2..5 into another")
+
+    # What each value is, from four independent directions: the artists'
+    # naming, the lighting slots, the specular, and who names the material.
+    add = [m for m in lib.materials.values() if m.blend == materials.BLEND_ADD]
+    named_add = [m for m in lib.materials.values() if m.name.lower().endswith("_add")]
+    in_add = sum(1 for m in named_add if m.blend == materials.BLEND_ADD)
+    unlit = sum(1 for m in add if m.entries and m.entries[0].colour == (0, 0, 0))
+    shiny = sum(1 for m in add
+                if any(e.specular != (0, 0, 0) for e in m.entries))
+    lit = [m for m in lib.materials.values() if m.blend == materials.BLEND_LIT]
+    lit_shiny = sum(1 for m in lit
+                    if any(e.specular != (0, 0, 0) for e in m.entries))
+    check("Material.lib: flags 8 is additive",
+          in_add >= len(named_add) - 2 and unlit >= len(add) - 6 and shiny == 0,
+          f"{in_add} of the {len(named_add)} materials the artists named "
+          f"*_add carry it, along with every JET*, SHOOT*, LASER_* and "
+          f"SPLASH*; {unlit} of the {len(add)} carry a black diffuse, so they "
+          f"are drawn unlit, and not one of them carries a specular colour "
+          f"against {lit_shiny}/{len(lit)} of the flags-2 skins")
+
+    # Who names which group.  Each consumer lands in one, sharply.
+    def group_of(names) -> Counter:
+        out: Counter[int] = Counter()
+        for name in names:
+            m = lib.get(name.split(".")[0])
+            if m is not None:
+                out[m.blend] += 1
+        return out
+    ground = group_of(
+        n for folder in gamedir.maps(game)
+        for table in (landmesh.load(folder / "Land.msh").layer1_names,
+                      landmesh.load(folder / "Land.msh").layer2_names)
+        for n in table if n
+    )
+    emitters = group_of(
+        n for e in effects.EffectLibrary(game / "effects.rlb").effects.values()
+        for n in e.materials
+    )
+    check("Material.lib: the flags groups line up with who names them",
+          ground[materials.BLEND_OPAQUE] > sum(ground.values()) * 0.6
+          and emitters[materials.BLEND_ADD] > emitters[materials.BLEND_LIT] * 50,
+          f"the terrain's layer tables name "
+          f"{ground[materials.BLEND_OPAQUE]}/{sum(ground.values())} at flags 0, "
+          f"and the materials an effect's emitters name are "
+          f"{dict(sorted(emitters.items()))} -- {emitters[materials.BLEND_ADD]} "
+          f"additive glows and {emitters[materials.BLEND_ALPHA]} smokes against "
+          f"{emitters[materials.BLEND_LIT]} ordinary skins")
 
     # The second uint16 counts animation tracks, not texture layers.  The
     # engine caps it at 20 and every shipped record is far below.

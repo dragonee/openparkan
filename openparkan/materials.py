@@ -84,6 +84,44 @@ pages are four 128 x 32 strips, eight 64 x 64 tiles, eight 30 x 30 discs and
 five 16 x 16 icons.  All 62 textures a material indexes carry a table, and
 every one of the **2513** cells asked for is inside its own.
 
+How a material draws
+--------------------
+
+Neither the record's class byte nor anything else inside the record says how
+a material blends.  The **archive directory** does.  Its first count field --
+where every other archive keeps an element count -- is a flags byte here, and
+it is the one the loader branches on: bit 1 into one field of the loaded
+material, bits 2 to 5 into another, bit 0 into a local flag that one record
+sets and bit 6 into one that none does.  It takes five values, and they sort
+the library by how the material is drawn:
+
+===== ==== =========================================================
+flags    n what it holds
+===== ==== =========================================================
+    0   54 opaque and lit.  52 of the 54 name a texture with no alpha
+           channel at all, and the other two name no texture
+    2  417 the ordinary lit skin: **3140 of the 3143** references from
+           a model's wear land here, and 261 carry a specular colour
+    4  219 see-through: smoke, dust and most of the sky.  175 of the
+           219 carry a black diffuse, so they are drawn unlit
+    5    1 ``ENV_STARS``, which is 4 with bit 0 as well
+    8  214 **additive**: 44 of the 46 materials the artists named
+           ``*_add`` are here, along with every ``JET*``, ``SHOOT*``,
+           ``LASER_*`` and ``SPLASH*``.  210 of the 214 carry a black
+           diffuse and **not one** carries a specular
+===== ==== =========================================================
+
+Who names what agrees: the terrain's layer tables are 196 at 0 against 74
+elsewhere, a model's wear is 3140 at 2, `sky.wea`'s slots are 4, 5 and 8, and
+the materials an effect's emitters name are **2519 at 8 and 980 at 4** -- the
+additive glows and the smoke.
+
+"Additive" is read off the data rather than out of the engine: the naming, the
+black diffuse, the absent specular and the population all say it, and
+``Ngi32.dll``'s phase table has the `ADD` mode to do it with.  What the
+record's own class byte (+4) means is still open; this field is the one a
+renderer needs.
+
 The tracks
 ----------
 
@@ -163,6 +201,18 @@ UNSET = 0xFF
 #: "Too many animations for material." -- the engine's own limit.
 MAX_TRACKS = 20
 
+#: The archive directory's *first* count field is a flags byte, and it is what
+#: the loader branches on: bit 1 goes into one field of the loaded material,
+#: bits 2 to 5 into another, bit 0 into a local flag one record sets and bit 6
+#: into one none does.  It takes five values across the library and they sort
+#: it by **how the material draws**; see the module docstring.
+BLEND_OPAQUE = 0
+BLEND_LIT = 2
+BLEND_ALPHA = 4
+BLEND_ADD = 8
+#: Bit 0, set on ``ENV_STARS`` alone.
+BLEND_BIT0 = 1
+
 #: A track's header: a flags word then a key count.
 TRACK_HEADER = 6
 #: One keyframe: the entry to show, when to show it, and a word that is zero
@@ -230,10 +280,22 @@ class Material:
     entry_count: int
     #: Animation tracks over the entries, **not** texture layers.
     track_count: int
+    #: The archive directory's flags byte: how the material draws.
+    blend: int = BLEND_OPAQUE
     #: Every entry in file order.
     entries: list[MaterialEntry] = field(default_factory=list)
     #: The tracks themselves.
     tracks: list[Track] = field(default_factory=list)
+
+    @property
+    def additive(self) -> bool:
+        """Whether the material adds its colour rather than covering with it."""
+        return self.blend & BLEND_ADD != 0
+
+    @property
+    def blended(self) -> bool:
+        """Whether it draws see-through at all."""
+        return self.blend & (BLEND_LIT | BLEND_ALPHA | BLEND_ADD) != 0
 
     @property
     def colour(self) -> tuple[int, int, int]:
@@ -345,14 +407,19 @@ def parse_tracks(data: bytes, at: int, count: int) -> tuple[list[Track], int]:
     return out, at
 
 
-def parse(name: str, data: bytes) -> Material:
-    """Parse one MAT0 record."""
+def parse(name: str, data: bytes, blend: int = BLEND_OPAQUE) -> Material:
+    """Parse one MAT0 record.
+
+    ``blend`` is the archive directory entry's first count field, which the
+    record itself does not carry.
+    """
     count, tracks = struct.unpack_from("<2H", data, 0)
     entries = parse_entries(data, count)
     return Material(
         name,
         count,
         tracks,
+        blend,
         entries,
         parse_tracks(data, HEADER_SIZE + count * ENTRY_STRIDE, tracks)[0],
     )
@@ -368,7 +435,7 @@ class MaterialLibrary:
             if entry.tag != MATERIAL_TAG:
                 continue
             self.materials[entry.name.upper()] = parse(
-                entry.name, self.archive.read(entry)
+                entry.name, self.archive.read(entry), entry.element_count
             )
 
     def get(self, name: str) -> Material | None:

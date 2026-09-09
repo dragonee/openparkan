@@ -312,6 +312,21 @@ written down is a question nobody reopens.
       But a `MAT0` entry carries one texture and one cell, so no material ever
       reaches it. → [docs/03-terrain.md](docs/03-terrain.md),
       [docs/05-engine.md](docs/05-engine.md)
+- [x] **How a material draws** — and it is not in the record. The archive
+      directory's first count field is a **flags byte**, the one `World3D.dll`
+      branches on, and it sorts the library by blend mode: **0** opaque and
+      lit (52 of the 54 name a texture with no alpha at all), **2** the
+      ordinary lit skin (**3140 of the 3143** model-wear references, 261 with
+      specular), **4** see-through (smoke, dust, most of the sky; 175 of 219
+      unlit), **8** **additive**. The additive reading holds from four
+      directions: **44 of the 46** materials the artists named `*_add` carry
+      it, along with every `JET*`, `SHOOT*`, `LASER_*` and `SPLASH*`; **210 of
+      214** carry a black diffuse; **not one** carries a specular against
+      261/417 of the flags-2 skins; and an effect's emitters name **2519 at 8
+      and 980 at 4** against 24 ordinary skins. `Material.blend` carries it and
+      the viewer draws the ten additive model materials — `PI_LIGHT`,
+      `PI_TELE`, the bridge glows — additively.
+      → [docs/07-objects.md](docs/07-objects.md)
 - [x] **The renderer's interface.** `IDirect3DDevice7`, pinned by the vtable
       offsets the engine calls through — `SetRenderState` at 20,
       `DrawPrimitive` at 25, `SetTexture` at 35, `SetTextureStageState` at 37,
@@ -415,28 +430,38 @@ already say when the sun is up.
 
 ### 2.2 Who asks a material for its second track
 
-Everything else about the ground's `M` twin is settled and sits in section 0:
-it is track 1 of a two-track material, it carries a black diffuse over a white
-ambient where track 0 carries the reverse, and the engine's two-texture path —
-`Ngi32.dll`'s 14 render phases, `SetPhase(mode, tex0, tex1)`, the second-pass
-fallback in `CShade::ConfigureTextureAndAlphaBlendModes` — never sees it,
-because a `MAT0` entry carries one texture and one cell.
+Everything else about the ground's `M` twin is closed and sits in section 0.
+What is left is the **selector**, and this round narrowed it a long way
+without closing it.
 
-What is left is the **selector**. The material manager's `GetMaterialPhase`
-takes a track index, clamps it to 0 when it is out of range, and fills a
-descriptor of a `D3DMATERIAL7`, one texture and one cell. It is
-`World3D.dll` vtable index 7 on the object `LoadMatManager` returns, at
-`0x10003680`, and it is reached **only** through that vtable — there is no
-direct call to it anywhere in the shipped DLLs, and no call site with its
-five stack arguments has been found in `Terrain.dll`, `iron3d.dll`,
-`AniMesh.dll`, `ArealMap.dll`, `Effect.dll`, `Control.dll` or `MisLoad.dll`.
-Until one is, what decides between the lit half and the unlit one is a guess.
+The material manager's vtable is at `0x100209e4` — an earlier note had the
+base wrong by two slots, which is why the first search looked at the wrong
+offset. `GetMaterialPhase` is **index 5**, at `+0x14`, and it is a plain
+stdcall:
 
-It matters little on screen. The 860 single-track materials are unaffected;
-of the 45 that are not, 43 are ground and 2 are the team insignia, whose
-selector is obviously the team. The reader and the viewer take track 0, which
-is the lit half and the only one that stands alone; the cost of being wrong is
-that ground drawn where the engine wanted the unlit twin comes out shaded.
+```
+GetMaterialPhase(self, handle, track, time, &out)      ret 0x14
+```
+
+`handle` packs `(table << 16) | index`; `track` is clamped to 0 when it falls
+outside the material's track count; `out` receives a 0x50-byte descriptor —
+a `D3DMATERIAL7`, one texture and one cell — written into a **static** at
+`0x1013eab0`, and the function *returns* a pointer to `material + 0x164`, the
+block the directory flags byte fills. There is a **four-argument sibling at
+index 3** (`0x100031f0`) that returns the same pointer without a track index.
+
+**No caller was found.** `LoadMatManager` is imported only by `Terrain.dll`,
+which calls it three times and then reads the stored pointer twice, for vtable
+index 6 and index 1 — never index 3 or 5. Neither entry point is the target of
+a direct call or a jump anywhere in `World3D.dll`, and a scan of
+`Terrain.dll`, `iron3d.dll`, `AniMesh.dll`, `ArealMap.dll`, `Effect.dll`,
+`Control.dll`, `MisLoad.dll` and `Wizard.dll` for a call through `+0x14` with
+five stack arguments, an out-pointer `lea`d from a local and a float in the
+window turns up nothing that fits.
+
+That is not proof of dead code — the pointer could reach a caller by a route
+the scan does not model — but it does mean the reader's choice of track 0 is
+not merely a default: nothing found asks for another.
 
 ### 2.3 Effects
 
@@ -480,34 +505,32 @@ and 4 that separate them are the magnitude in their `.exp`.
 
 ### 2.4 The `MAT0` class byte
 
-Byte 4 of a record sorts the library into eleven groups plus an unset value,
-and what it *is* is still open. What is settled is how to read it, and that a
-second field beside it turned out to carry more.
+The *useful* half of this is closed and sits in section 0: the archive
+directory's flags byte is the blend mode, and a renderer can read it. What is
+left is the record's own **byte 4**, which sorts the library into eleven
+groups plus an unset `0xFF` — and nothing in the engine follows it.
 
-The record's tail is gated on a **version**, and the version is not in the
-record: it is the archive directory entry's second count field, 6 on all 905.
-At 2 the parser reads the bytes at +4 and +5, at 3 a `float32` defaulting to
-1.0, at 4 a `uint32` defaulting to 0, substituting the default below each. For
-the two bytes that default is **`0xFF`**, so 0xFF is the engine's own *not
-set*, which is what byte 5 holds on all 905 records and byte 4 on 376 of them.
-It is not a twelfth group.
+The record's tail is gated on a **version** that is not in the record either:
+it is the directory entry's second count field, 6 on all 905. At 2 the parser
+reads the bytes at +4 and +5, at 3 a `float32` defaulting to 1.0, at 4 a
+`uint32` defaulting to 0, substituting the default below each. For the two
+bytes that default is `0xFF`, so 0xFF is the engine's own *not set* — which is
+what byte 5 holds on all 905 records and byte 4 on 376. It is not a twelfth
+group.
 
 The other eleven sort the library by role: **0 to 4 hold all 43 two-track
-ground materials** and are almost all opaque, 5 is 342 object materials, 6 is
-the 87 `TREE*` and foliage, 7 is `WATER` and `WATER_M`, and 8, 9 and 10 are
-three smaller families of 24, 12 and 9. That is the shape of a shader or blend
-mode, but the field has exactly one consumer in the engine — the loader copies
-it into the material and nothing follows it further.
+ground materials**, 5 is 342 object materials, 6 the 87 `TREE*` and foliage, 7
+`WATER` and `WATER_M`, and 8, 9 and 10 three smaller families of 24, 12 and 9.
+That is the shape of a shader id, but the loader copies it into the material
+and **nothing reads it back**: the constant that addresses it, `0x10066b44`,
+appears three times in `World3D.dll` and every one is in the loader or in the
+tiny accessor that hands out its address. Whoever calls that accessor is
+unfound — the same gap as §2.2.
 
-The **directory's *first* count field is a second flags byte**, and it is the
-one the loader actually branches on: bit 1 goes into one material field and
-bits 2 to 5 into another, while bit 0 sets a local flag (one record has it)
-and bit 6 another that no record sets. It takes five values across the
-library — 0 on 54, 2 on 417, 4 on 219, 5 on 1 and 8 on 214 — and it separates them by **transparency**, which the class byte
-does not do as cleanly: not one of the 54 materials at 0 names a texture that
-carries alpha, and 416 of the 417 at 2 name an `ARGB8888`. What the three
-values of the four-bit field select is still open, but it is now the more
-promising of the two bytes.
+Two smaller unknowns sit beside it. The version-3 `float32` is 1.0 on all 905
+records, and the version-4 `uint32` is 0 on 901 and a *float* on the other
+four — 1000.0 twice and 9999.0 twice — so it is a distance or a range the
+engine reads as a dword.
 
 ---
 

@@ -17,13 +17,16 @@ the same numeric-type-as-stream-selector convention as the terrain
      6       6  face        triangle, three uint16 indices *relative to the
                              first_vertex of the batch that covers them*
      7      16  face        face record, contents unresolved
-     8     ---  ---         unresolved; 24 bytes on most meshes, 96 on some
+     8      24  pose key    a node's placement: float32[3] translation,
+                             float32 frame time, int16[4] rotation over 32767
      9      32  sub-object  sub-object name ("Base_TM", "leaf1_m1o1")
     10       4  sub-object  one uint32, zero throughout the shipped data
     13      20  batch       draw batch: material, index range, vertex range
     15       8  vertex      unresolved
     17      20  node        building interior path graph, see parse_path_graph
-    19     ---  ---         unresolved; present on many meshes, empty on some
+    19       2  frame       per animated node, ``frame_count`` indices into
+                             stream 8; the archive entry's second count is
+                             ``frame_count``
 
 Materials are assigned per *batch*, not per face: stream 13 groups runs of the
 index buffer and names a material for each, which is why no field of the face

@@ -643,6 +643,45 @@ tinted `#b41e00`. 761 materials carry a diffuse other than white. The
 at 100, and the exception gives it away: `FIRESTORM` runs **0, 60, 80, 90,
 95, 100** across its frames, which is a fade-in.
 
+### How a material draws is in the archive directory
+
+Nothing inside the record says how a material blends. The **directory entry**
+does. Its first count field — where every other archive keeps an element
+count — is a flags byte here, and it is the one `World3D.dll`'s loader
+branches on: bit 1 into one field of the loaded material, bits 2 to 5 into
+another, bit 0 into a local flag one record sets and bit 6 into one none does.
+
+It takes five values, and they sort the library by how the material is drawn:
+
+| flags | n | what it holds |
+|---|---|---|
+| 0 | 54 | opaque and lit. 52 of the 54 name a texture with **no alpha channel at all**; the other two name no texture |
+| 2 | 417 | the ordinary lit skin — **3140 of the 3143** references from a model's wear land here, and 261 carry a specular colour |
+| 4 | 219 | see-through: smoke, dust and most of the sky. 175 of the 219 carry a black diffuse, so they draw unlit |
+| 5 | 1 | `ENV_STARS`, which is 4 with bit 0 as well |
+| 8 | 214 | **additive** |
+
+The additive reading is the firmest, and it comes from four directions at
+once. **44 of the 46 materials the artists themselves named `*_add`** carry
+flags 8, and so does every `JET*`, `SHOOT*`, `LASER_*` and `SPLASH*`. **210 of
+the 214** carry a black diffuse, so the scene light never reaches them — which
+is what you want for a glow. **Not one** carries a specular colour, against
+261 of the 417 flags-2 skins. And the population is right: the materials an
+effect's emitters name are **2519 at flags 8 and 980 at flags 4** — the
+additive glows and the smoke — against 24 ordinary skins.
+
+Who names what agrees everywhere else too. The terrain's layer tables are 196
+at flags 0 against 74 elsewhere; a model's wear is 3140 at flags 2, with the
+140 at flags 4 being bunker portals and instrument glass and the 10 at flags 8
+being `PI_LIGHT`, `PI_TELE` and the bridge glows; `sky.wea`'s slots are 4, 5
+and 8 and never 0 or 2.
+
+The word *additive* is read off the data, not out of the engine — but
+`Ngi32.dll`'s phase table has an `ADD` mode to do it with, and no other
+reading fits a set of black-diffuse, specular-free materials called `*_add`.
+What the record's own class byte at +4 means is still open; this is the field
+a renderer needs.
+
 ### The second count is animation tracks, not layers
 
 The second `uint16` counts **animation tracks**, not texture layers, which is

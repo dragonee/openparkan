@@ -689,6 +689,9 @@ if (typeof THREE === "undefined" || typeof pako === "undefined") {
   // and a per-vertex weight for layer 1, so the mix happens in the fragment
   // shader rather than in a second, coplanar pass -- which is what used to
   // make the walkable ground flicker.
+  // Material.lib's flags byte, from the archive directory.
+  const BLEND_ALPHA = 4, BLEND_ADD = 8;
+
   const terrainShaders = [];
   let layer2On = true;
 
@@ -865,6 +868,18 @@ if (typeof THREE === "undefined" || typeof pako === "undefined") {
         opts.color = multiply(tint, multiply(gr.tint, pooled.colour));
       }
       if (pooled) applyCutout(opts, pooled);
+      // How the material draws is in Material.lib's archive directory, not
+      // in the record: 8 is additive.  Ten model materials carry it --
+      // PI_LIGHT, PI_TELE and the bridge glows.  Flags 4 (see-through, 140
+      // model materials, the bunker portals among them) is read but not acted
+      // on: the pool drops the alpha channel of every non-cutout texture, so
+      // blending one today would only cost depth writes and buy nothing.
+      if (gr.blend & BLEND_ADD) {
+        opts.transparent = true;
+        opts.blending = THREE.AdditiveBlending;
+        opts.depthWrite = false;
+        delete opts.alphaTest;
+      }
       if (gr.lightmap !== undefined) {
         // Baked static lighting: 21 buildings ship one, keyed by their wear's
         // LIGHTMAPS section.  It has its own UV set, and no wrapping -- the
