@@ -25,8 +25,8 @@ indexed by vertex or by face.
 | 14 | 4 | vertex | weight of layer 1, `float32` in 0..1 |
 | 21 | 28 | face | the face record, below |
 | 11 | 4 | face | `(face index, flags)` |
-| 2 | 12 | — | bounding geometry: 8 bbox corners, then more |
-| 1 | — | — | unresolved; small, mostly `0xFF` |
+| 2 | 68 | cell | the spatial index: 8 bbox corners, then a box and a face run per cell |
+| 1 | 38 | square | the square table over those cells |
 
 ## The face record (28 bytes, 14 × uint16)
 
@@ -179,12 +179,32 @@ every map that has water also carries a `WATER_BOT` material on the ground
 beneath it, and a lake bed nobody can see would not be worth authoring. The
 exact figure is a renderer choice.
 
-## Stream 2 is the map's own spatial index
+## Streams 1 and 2 are the map's own spatial index
 
-The engine ships a grid, which is worth saying plainly because an earlier note
-here concluded it did not. Stream 2 is 96 bytes of header — **the eight
-corners of the mesh's bounding box**, exactly — then 44 bytes that are zero on
-every map, then one 68-byte record per cell:
+Two streams, and together they are a **flat grid with a per-square list** —
+not the quadtree the 4x size step between the small and large maps suggests.
+There is no hierarchy in either.
+
+### Stream 1: the square table
+
+One 19-`uint16` record per grid square: four words of header, then room for
+**15 cell indices** with `0xFFFF` for an empty slot. It divides exactly on all
+33 maps — 64 records for the 8 x 8 maps, 256 for the 16 x 16.
+
+Every square uses **exactly two** of its fifteen slots, all 7488 of them, and
+they are its own two: square `i` names cells `i` and `squares + i`, and that
+pair always shares a bounding box. The other thirteen slots are a capacity the
+shipped data never needs.
+
+The four header words are `0, 0xFFFF, 0, 0` on every one of the 7488 records,
+so nothing in the data tells them apart. `0xFFFF` is this format's usual
+"none", as it is for a face's neighbour and a node's slot.
+
+### Stream 2: the cells
+
+96 bytes of header — **the eight corners of the mesh's bounding box**,
+exactly — then 44 bytes that are zero on every map, then one 68-byte record
+per cell:
 
 ```
 uint16   first        the first face of this cell's run
@@ -207,7 +227,8 @@ The proof is total: **all 275882 faces across the 33 maps have every one of
 their three vertices inside the box of the cell whose run holds them.** Not
 most; all.
 
-The grid is uniform and its resolution follows the mesh rather than the world:
+The grid is uniform and its resolution follows the mesh rather than the
+world:
 **16 x 16 on 28 maps and 8 x 8 on the other five**, which is why `SC_3` at
 2490 units gets 8 x 8 while map 11 at 998 units gets 16 x 16 — SC_3 has 5692
 vertices and map 11 has 6458.

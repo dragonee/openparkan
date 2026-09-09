@@ -16,7 +16,7 @@ practice — format facts yes, code no — is set out in
 |---|---|
 | **NRes containers** | done — all 116 archives, 6697 members, round-trip-accurate model |
 | **Texm textures** | done — all 393 textures decode, all 5 pixel formats, alpha and the `Page` sub-image table |
-| **`Land.msh` terrain** | done — all 33 maps, geometry, normals, both texture layers and their blend, water, and the map's own 16 x 16 spatial grid |
+| **`Land.msh` terrain** | done — all 33 maps, geometry, normals, both texture layers and their blend, water, and the map's own spatial index -- both the cell grid and its square table |
 | **3D terrain viewer** | done — self-contained HTML, no server |
 | **`data.tma` missions** | done — all 29 parse to EOF, 864 objects placed |
 | **`objects.rlb`, unit assemblies** | done — 590 records, 458 assemblies, 5708 components |

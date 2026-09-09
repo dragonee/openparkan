@@ -237,6 +237,17 @@ written down is a question nobody reopens.
       bytes, **symmetric on all 65536 cells** with `table[i][i] == i` on 237 of
       256 — a colour mixer. Every lit font pixel is index 73, and 73 is white.
       → [docs/12-rsli.md](docs/12-rsli.md)
+- [x] **The terrain's square table.** `Land.msh` stream 1 is the other half of
+      the index: one 19-`uint16` record per grid square, four words of header
+      then room for **15 cell indices** with `0xFFFF` for empty. It divides
+      exactly on all 33 maps, and every one of the **7488 squares uses exactly
+      two** slots — its own two, since square `i` names cells `i` and
+      `squares + i` and that pair always shares a bounding box. The four
+      header words are `0, 0xFFFF, 0, 0` throughout, so nothing distinguishes
+      them. It is **not** a quadtree, which the 4x step between the small and
+      large maps had suggested — there is no hierarchy in either stream, just
+      a flat grid and a list per square. With this the terrain format is read
+      end to end. → [docs/03-terrain.md](docs/03-terrain.md)
 - [x] **The terrain's spatial index.** `Land.msh` stream 2 is not an
       unexplained blob: it is the map's own grid. Eight bounding-box corners,
       then a 68-byte record per cell holding `uint16 first`, `uint16 count`,
@@ -470,7 +481,6 @@ today; each is a small trap for anyone extending the code.
 - A batch's vertex range (fields 7 and 8): contiguous, but tiles the vertex
   array on only 69 of 435 meshes, so not a partition.
 - Face record fields 10, 11, 12, and field 0 (near-constant per mesh).
-- Terrain `Land.msh` stream 1 (mostly `0xFF`).
 - Terrain stream 11's flags word — 72 on 4228 faces, 88 on 329; 88 correlates
   with water.
 - `CTPT`'s nine floats read as `(zero, position, unit direction)` in

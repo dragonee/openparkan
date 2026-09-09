@@ -6,18 +6,30 @@ selector.  Every stream is a flat array indexed by vertex or by face.
 
     id  stride  indexed by  contents
     --  ------  ----------  ---------------------------------------------
-     1     ---  ---         unresolved (small, mostly 0xFF)
-     2      12  ---         bounding geometry: 8 bbox corners, then more
+     1      38  square      the square table over the cells of stream 2
+     2      68  cell        the spatial index: 8 bbox corners, then the cells
      3      12  vertex      position, float32 x/y/z  (z is up)
      4       4  vertex      normal, int8 x/y/z / 127, then one padding byte
      5       4  vertex      layer-1 UV, uint16 8.8 fixed point
     18       4  vertex      layer-2 UV, uint16 8.8 fixed point
     14       4  vertex      layer blend weight, float32 in 0..1
     11       4  face        (face index, flags)
-
-Between a fifth and two fifths of a map's faces are stored twice at identical
-positions; see ``LandMesh.distinct_faces``.
     21      28  face        the face record, see FACE below
+
+Streams 1 and 2 are the map's own **spatial index**, and it is a flat grid
+with a list per square rather than a tree.  Stream 2 holds one 68-byte record
+per cell -- a box, a centre, a bounding-sphere radius and a run of faces --
+and the faces are stored in cell order, so a run indexes ``faces`` directly:
+all 275882 faces across the 33 maps lie inside their own cell's box.  Stream 1
+holds one 38-byte record per grid square naming the cells that cover it, two
+of a possible fifteen on every one of the 7488 squares.  The grid is 16 x 16
+on 28 maps and 8 x 8 on five, following the vertex count rather than the world
+size.
+
+Each square's two cells share a box and split its faces in two, and the second
+block is where the duplicated geometry lives: between a fifth and two fifths
+of a map's faces are stored twice at identical positions, and 46261 of those
+46283 are in a second block.  See ``LandMesh.distinct_faces``.
 
 FACE, as 14 little-endian uint16::
 
@@ -78,6 +90,14 @@ CELL_START = 44
 #: into two blocks: 46261 of the 46283 duplicated faces are in the second.
 CELLS_PER_SQUARE = 2
 
+#: Stream 1 is the square table that indexes stream 2: one record per grid
+#: square, four words of header then room for 15 cell indices terminated by
+#: ``0xFFFF``.  Every one of the 7488 shipped squares uses exactly two.
+SQUARE_WORDS = 19
+SQUARE_HEADER = 4
+NO_CELL = 0xFFFF
+STREAM_SQUARES = 1
+
 #: Bit 1 of the face's surface word marks a water surface.  It is a *bitfield*,
 #: not an enum: the observed values are 0, 2, 16 and 18, and testing ``== 2``
 #: silently misses every water face that also carries bit 16.
@@ -129,6 +149,8 @@ class LandMesh:
     layer2_names: list[str] = field(default_factory=list)
     #: The map's own spatial index, from stream 2; empty if it has none.
     cells: list[Cell] = field(default_factory=list)
+    #: One entry per grid square, from stream 1: the cells that cover it.
+    squares: list[tuple[int, ...]] = field(default_factory=list)
     _grid: dict | None = field(default=None, repr=False, compare=False)
 
     @property
@@ -280,6 +302,24 @@ def parse_cells(raw: bytes | None) -> list[Cell]:
     return out
 
 
+def parse_squares(raw: bytes | None) -> list[tuple[int, ...]]:
+    """The square table of stream 1.
+
+    A record is 19 ``uint16``: four of header -- 0, ``0xFFFF``, 0, 0 on all
+    7488 shipped squares, so nothing tells them apart -- then room for 15 cell
+    indices, ``0xFFFF`` for an empty slot.  Every square uses exactly two, and
+    they are its own two: the pair always shares a bounding box.
+    """
+    if not raw:
+        return []
+    count = len(raw) // 2 // SQUARE_WORDS
+    out = []
+    for i in range(count):
+        words = struct.unpack_from(f"<{SQUARE_WORDS}H", raw, i * SQUARE_WORDS * 2)
+        out.append(tuple(v for v in words[SQUARE_HEADER:] if v != NO_CELL))
+    return out
+
+
 def load(path: str | Path) -> LandMesh:
     """Load a ``Land.msh``.  Sibling ``Land1.wea`` / ``Land2.wea`` are picked
     up automatically when present, giving the terrain texture names."""
@@ -328,6 +368,7 @@ def load(path: str | Path) -> LandMesh:
 
     return LandMesh(
         cells=parse_cells(archive.one_of_type(STREAM_BOUNDS)),
+        squares=parse_squares(archive.one_of_type(STREAM_SQUARES)),
         positions=positions,
         normals=normals,
         uv1=uv1,

@@ -233,6 +233,46 @@ def check_grid(check, game: Path) -> None:
           f"{inside}/{checked} faces across the {parsed} maps have all three "
           f"vertices inside the box of the cell whose run holds them -- so the "
           f"faces are stored in cell order and a run indexes them directly")
+    # Stream 1 is the square table over those cells.
+    squared = headers = named = boxed = 0
+    used: Counter[int] = Counter()
+    for folder in maps:
+        mesh = landmesh.load(folder / "Land.msh")
+        if not mesh.cells or not mesh.squares:
+            continue
+        wide, deep = mesh.grid_size
+        squares = wide * deep
+        squared += len(mesh.squares) == squares
+        named += all(sq == (i, squares + i)
+                     for i, sq in enumerate(mesh.squares))
+        boxed += all(
+            mesh.cells[sq[0]].minimum == mesh.cells[sq[1]].minimum
+            and mesh.cells[sq[0]].maximum == mesh.cells[sq[1]].maximum
+            for sq in mesh.squares if len(sq) == 2
+        )
+        raw = NResArchive.open(folder / "Land.msh").one_of_type(
+            landmesh.STREAM_SQUARES)
+        words = struct.unpack(f"<{len(raw) // 2}H", raw)
+        stride = landmesh.SQUARE_WORDS
+        headers += all(
+            words[i * stride : i * stride + 4] == (0, 0xFFFF, 0, 0)
+            for i in range(len(raw) // 2 // stride)
+        )
+        for sq in mesh.squares:
+            used[len(sq)] += 1
+    check("Land.msh: stream 1 is one record per grid square",
+          squared == headers == len(maps) > 0,
+          f"{squared}/{len(maps)} maps hold exactly one 19-word record per "
+          f"square, and on {headers} of them the four header words are "
+          f"0, 0xFFFF, 0, 0 throughout -- so nothing in the data tells those "
+          f"four apart")
+    check("Land.msh: a square names its own two cells",
+          named == boxed == len(maps) and set(used) == {2},
+          f"{named}/{len(maps)} maps have square i naming cells i and "
+          f"squares + i, and on {boxed} the pair always shares a bounding box; "
+          f"all {sum(used.values())} squares use {sorted(used)} of the 15 "
+          f"slots a record has room for")
+
     check("Land.msh: the duplicated faces are the second record of a cell",
           dup_second > dup_first * 100,
           f"a cell is listed twice; of the duplicated faces "
