@@ -11,7 +11,7 @@ from __future__ import annotations
 import math
 import random
 import struct
-from collections import Counter
+from collections import Counter, defaultdict
 from pathlib import Path
 
 from . import (
@@ -2141,6 +2141,66 @@ def check_effects(check, game: Path) -> None:
           f"set on {flagged} of the {emitters} emitters, and the engine's "
           f"factory keys only on the low byte -- it stores (word >> 8) & 1 "
           f"separately")
+
+    # Which floats of a block are live.  Each class keeps a pointer to its own
+    # block and the live fields are whatever its virtual methods read through
+    # it; the set came out of Effect.dll.  Two things check it.
+    reads = effects.READ_OFFSETS
+    recorded = sum(len(v) for v in reads.values())
+    stray = [
+        (t, at) for t, offs in reads.items() for at in offs
+        if at + 4 > effects.EMITTER_SIZE[t]
+        or (effects.RESOURCE_AT.get(t) is not None
+            and effects.RESOURCE_AT[t] <= at < effects.RESOURCE_AT[t] + 64)
+    ]
+    check("Effect.dll: every float a class reads lies in its own block",
+          not stray and recorded > 100,
+          f"{recorded}/{recorded} recorded offsets fall inside the block and "
+          f"none of them lands in the (archive, member) pair -- the read map "
+          f"comes from the code and RESOURCE_AT from the data, and they do "
+          f"not collide anywhere")
+
+    # The control: the sound emitter's two distances were read off the data
+    # long before this map existed, so the map has to contain them.
+    check("Effect.dll: the read map contains the distances already known",
+          effects.SOUND_NEAR in reads[effects.EMITTER_SOUND]
+          and effects.SOUND_FAR in reads[effects.EMITTER_SOUND],
+          f"type {effects.EMITTER_SOUND} reads "
+          f"{len(reads[effects.EMITTER_SOUND])} offsets and "
+          f"+{effects.SOUND_NEAR} and +{effects.SOUND_FAR} are among them")
+
+    slots = sum(effects.EMITTER_SIZE[t] // 4 for t in effects.EMITTER_SIZE)
+    check("Effect.dll: most of an emitter block is never read",
+          recorded < slots / 2,
+          f"{recorded} of the {slots} four-byte slots across the ten block "
+          f"types are loaded as a float; the rest the editor writes and the "
+          f"engine never looks at")
+
+    # Types 9 and 3 read the same fields because 9's constructor installs 3's
+    # vtable before overriding it; 7 and 10 are siblings on one 0x48 object.
+    check("Effect.dll: the emitter classes fall into families",
+          reads[9] == reads[3] and reads[7] == reads[10]
+          and set(reads[4]) < set(reads[3]),
+          f"types 3 and 9 read the same {len(reads[3])} offsets, 7 and 10 the "
+          f"same {len(reads[7])}, and 4 reads a strict subset of 3's, short "
+          f"by {sorted(set(reads[3]) - set(reads[4]))}")
+
+    # And one field is identified by its shape rather than by the code: types
+    # 1 and 2 keep a unit vector where the drawing types keep something else.
+    unit = defaultdict(lambda: [0, 0])
+    for effect in library:
+        for emitter in effect.emitters:
+            vector = emitter.direction
+            if vector is None:
+                continue
+            unit[emitter.kind][1] += 1
+            length = math.sqrt(sum(v * v for v in vector))
+            unit[emitter.kind][0] += abs(length - 1.0) < 0.01
+    ok = all(good >= total * 0.95 for good, total in unit.values())
+    check("effects.rlb: types 1 and 2 keep a unit vector at +52", ok and unit,
+          ", ".join(f"type {t}: {g}/{n} unit length"
+                    for t, (g, n) in sorted(unit.items()))
+          + " -- a direction, defaulting to (1, 0, 0)")
 
     # An explosion's size lives in the .exp, not in the effect: the small,
     # medium and big fortification blasts share their emitter blocks exactly.

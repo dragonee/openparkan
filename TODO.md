@@ -322,20 +322,31 @@ blocks to the byte, 144 `.exp` records parse, and a destroyed node's damage
 record reaches real sprites on 2189 of 2203 references. Nothing draws them:
 an explosion is transient and a static scene has nowhere to put one.
 
-The block table is now the engine's rather than a fit: `Effect.dll`'s emitter
-factory masks the word to a byte, subtracts one, bounds it at 9 and jumps
-through a ten-entry table whose branches advance the read pointer by exactly
-those strides. That added **type 6**, a 4-byte block nothing uses, and settled
-**bit 8** — the factory stores `(word >> 8) & 1` on the emitter, so it is a
-flag, not part of the type.
+Which floats in a block are **live** is now settled. Each class keeps only a
+pointer to its own block, so the fields that matter are whatever its virtual
+methods load through it; walking the vtables of `Effect.dll` recovers the set.
+**176 of the 441 four-byte slots across the ten block types are read as a
+float** and the rest the editor wrote and the engine never looks at. Two
+things check the map: the sound emitter's `+64` and `+68` were read off the
+data long before it existed and the map contains them, and **not one of the
+176 offsets lands inside a block's `(archive, member)` pair** even though the
+map came from the code and `RESOURCE_AT` came from the data.
 
-Inside a block, the sound emitter is read: type 2 keeps a **near and far
-audible distance** at +64 and +68, ordered on all 517 blocks, (3, 40) and
-(10, 100) being the commonest. The rest is open — ten types and nothing yet
-says which is a sprite burst, which a trail, which a light; 30 to 60 floats
-per block that read as colours, lifetimes and velocities. The emitter object
-keeps only a pointer to its block, so the field offsets live in each class's
-update method behind its vtable, which is where this goes next.
+The class families fall out of it — types 3 and 9 read the same eighteen
+offsets, 7 and 10 the same thirty-one, 4 a strict subset of 3's — and one more
+field is named: **types 1 and 2 keep a unit vector at `+52`**, unit length on
+597 of 618 and 517 of 517 blocks and exactly `(1, 0, 0)` on most. The drawing
+types keep something else there; on type 8 not one block of 237 is a unit
+vector.
+
+What is still open is **what any of the live floats mean**. The values look
+like colours, lifetimes, velocities and spreads. Type 3's `+40..+48` and
+`+52..+60` are a component-wise (low, high) pair on 1427 of 1545 blocks and
+the engine reads exactly those six, which is the data and the code agreeing;
+types 7 and 10 read a `float32[3]` at `+56`, `+80`, `+104` and `+128`, a
+24-byte stride. None of that names a field. The next handle is a method that
+does something *recognisable* with a value — feeds it to a matrix, compares it
+against a clock — rather than copying it into the particle it builds.
 
 Also open: the 60-byte effect header, the `.exp`'s first float and flags word,
 and what bit 8 controls.

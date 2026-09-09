@@ -99,10 +99,59 @@ wants — (3, 40) on 160 of them, (10, 100) on 120, then (3, 50), (10, 80),
 `float32` at +8 and +12 sit in 0..1, most often (0.0, 0.1), and +72 is 1.0 on
 516 of the 517.
 
-The rest is open. Type 3's `+40..+48` and `+52..+60` are a component-wise
-(low, high) pair of `float32[3]` on 1427 of 1545 blocks, which is the shape a
-particle spread takes, but the other types do not follow it and none of the
-values is identified.
+## Which floats are live
+
+The other nine types keep only a pointer to their block — at `this+0x18` for
+most of them, `+0x1c` for type 1, `+0x24` for the sound — so the fields that
+matter are whatever each class's own virtual methods load through that
+pointer. That set can be recovered: walk the class's vtable, taint the
+register the block pointer lands in, and record every `fld` off it.
+
+**176 of the 441 four-byte slots across the ten block types are read as a
+float.** Everything else the editor wrote and the engine never looks at:
+
+| type | block | offsets it loads |
+|---:|---:|---|
+| 1 | 224 | 28, 32, 36 · 52, 56, 60 · 80, 84, 88, 92 · 112, 116 |
+| 2 | 148 | 8, 12 · 28, 32, 36 · 52, 56, 60 · **64, 68** · 72, 76 |
+| 3 | 200 | 8, 12 · 24, 28, 32, 36 · 40–60 · 100–120 |
+| 4 | 204 | 8, 12 · 24, 28 · 40–60 · 100–120 |
+| 5 | 112 | 4, 8, 12, 16 · 24–44 |
+| 6 | 4 | — |
+| 7 | 208 | 12–32 · 44–140 |
+| 8 | 248 | 8–32 · 52, 56, 60 · 88–120 · 136–168 |
+| 9 | 208 | the same eighteen as 3 |
+| 10 | 208 | the same thirty-one as 7 |
+
+Two things check the map. **The sound emitter is the control**: its `+64` and
+`+68` were read off the data long before this existed, and the map contains
+them — along with the `+8`, `+12` and `+72` the data had also flagged. And
+**not one of the 176 offsets lands inside a block's `(archive, member)`
+pair**, though the read map comes from the code and `RESOURCE_AT` came from
+the data; an error on either side would collide somewhere.
+
+The families fall out of it. **Types 3 and 9 read the same eighteen
+offsets** — type 9's constructor installs type 3's vtable and then overrides
+it, so it inherits the layout. **Types 7 and 10 read the same thirty-one**,
+which is the sibling relationship the factory already suggested. Type 4 reads
+a strict subset of type 3's, short only `+32` and `+36`.
+
+One field is identified by its shape rather than by the code: **types 1 and 2
+keep a unit vector at `+52`** — unit length on 597 of 618 and 517 of 517
+blocks, and exactly `(1, 0, 0)` on 542 and 517 of them. A direction with a +X
+default. The drawing types keep something else there: on type 8 not one block
+of 237 is unit length.
+
+Type 3's `+40..+48` and `+52..+60` are a component-wise (low, high) pair of
+`float32[3]` on 1427 of 1545 blocks, which is the shape a particle spread
+takes — and the engine reads exactly those six, which is the data and the code
+agreeing without either being derived from the other. Types 7 and 10 read a
+`float32[3]` at `+56`, `+80`, `+104` and `+128`, a regular 24-byte stride, in
+their own methods rather than through a helper.
+
+**None of that names a field.** It says which of the 30 to 60 floats in a
+block are live, which classes share a layout, and which two hold a direction.
+What they mean is still open.
 
 One negative result worth keeping: **an explosion's size is not in its
 effect.** `exp_frt_l`, `exp_frt_m` and `exp_frt_b` share their emitter blocks
@@ -142,12 +191,15 @@ to `exp_t_sn_mis` and its neighbours.
 
 - **What distinguishes one emitter type from another.** Ten types with fixed
   lengths, all but two naming a material, and nothing yet says which is a
-  sprite burst, which a trail, which a light. The emitter object keeps only a
-  pointer to its block, so the field offsets live in each class's own update
-  method, behind its vtable.
-- **The floats inside a block**, except the sound emitter's distances. Each
-  block carries 30 to 60 of them — colours, lifetimes, velocities and spreads,
-  by the look of the values.
+  sprite burst, which a trail, which a light. The read map above narrows it —
+  the families are visible, and type 1 and the sound share a direction the
+  drawing types do not — but no type is named.
+- **What the live floats mean**, except the sound emitter's distances and the
+  direction at `+52`. 176 of them are read; the values look like colours,
+  lifetimes, velocities and spreads, but nothing pins one down. The next
+  handle is a class whose method does something recognisable with a value —
+  feeds it to a matrix, compares it against a clock — rather than just copying
+  it into the particle it builds.
 - **The 60-byte effect header** and the `.exp`'s first float and flags word.
 - **What bit 8 controls.** That it is a flag is settled; what it switches is
   not.

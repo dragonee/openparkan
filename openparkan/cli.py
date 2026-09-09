@@ -258,6 +258,17 @@ def cmd_effects(args, game: Path) -> int:
         heard = f"   audible {span[0]:g}..{span[1]:g}" if span else ""
         print(f"  {i:2d}  type {emitter.kind:2d}{flag:8s}  "
               f"{len(emitter.body):3d} bytes  {what}{heard}")
+        if args.floats:
+            live = emitter.live_floats()
+            aim = emitter.direction
+            if aim:
+                print(f"        direction +{effects.DIRECTION_AT} "
+                      f"({aim[0]:g}, {aim[1]:g}, {aim[2]:g})")
+            if live:
+                print("        live  " + "  ".join(
+                    f"+{at}={value:g}" for at, value in sorted(live.items())))
+            else:
+                print("        live  none -- this class reads nothing")
     return 0
 
 
@@ -437,6 +448,8 @@ def main(argv: list[str] | None = None) -> int:
 
     p = sub.add_parser("effects", help="list effects, or describe one")
     p.add_argument("name", nargs="?", help="an FXID name; default is a listing")
+    p.add_argument("--floats", action="store_true",
+                   help="show the block floats the engine actually reads")
     p.set_defaults(fn=cmd_effects)
 
     sub.add_parser(

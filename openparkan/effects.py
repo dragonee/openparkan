@@ -48,10 +48,25 @@ The table walks all 923 shipped effects to the byte -- 4737 emitters -- and
 every one of the 3577 material references resolves through ``Material.lib``;
 516 of the 517 sounds are in ``sounds.lib``.
 
-Inside a block, only the sound emitter is read.  Type 2 keeps a **near and far
-audible distance** at +64 and +68, ordered on all 517 blocks and taking values
-like (3, 40), (10, 100) and (15, 300); an explosion's is (20, 200).  What the
-other types' floats mean is not established; see ``docs/11-effects.md``.
+Inside a block, ``READ_OFFSETS`` says which floats are **live**.  Each class
+keeps only a pointer to its block, so the fields that matter are whatever its
+own virtual methods load through that pointer, and walking the vtables of
+``Effect.dll`` recovers the set: **176 of the 441 four-byte slots** across the
+ten types, the rest written by the editor and never looked at.  Two things
+check it -- the sound emitter's +64 and +68 were known from the data long
+before the map existed and the map contains them, and not one of the 176
+offsets lands inside a block's ``(archive, member)`` pair even though the map
+came from the code and ``RESOURCE_AT`` from the data.
+
+The families fall out: types 3 and 9 read the same eighteen offsets, 7 and 10
+the same thirty-one, and 4 a strict subset of 3's.
+
+Two fields are identified.  Type 2 keeps a **near and far audible distance**
+at +64 and +68, ordered on all 517 blocks and taking values like (3, 40),
+(10, 100) and (15, 300); an explosion's is (20, 200).  And types 1 and 2 keep
+a **unit vector** at +52 -- unit length on 597 of 618 and 517 of 517 blocks,
+and exactly (1, 0, 0) on most.  What the rest mean is not established; see
+``docs/11-effects.md``.
 
 Nothing here draws: an explosion is transient and a static scene has no place
 to put one.  What it gives you is the graph, from a mesh node's ``.ndp``
@@ -99,6 +114,43 @@ EMITTER_SOUND = 2
 EMITTER_FLAG = 0x100
 
 NAME_FIELD = 32
+
+#: Emitter type -> the offsets its own class **loads as a float**, recovered
+#: from ``Effect.dll``.  Each class keeps only a pointer to its block -- at
+#: ``this+0x18`` for most of them, ``+0x1c`` for type 1 and ``+0x24`` for the
+#: sound -- so the live fields are whatever its virtual methods read through
+#: that pointer.  This is the set those methods reach directly or one call
+#: deep.
+#:
+#: It is a map of what is *used*, not of what anything means.  Only the sound
+#: emitter's two distances and the direction at +52 are identified; see
+#: ``docs/11-effects.md``.
+READ_OFFSETS: dict[int, tuple[int, ...]] = {
+    1: (28, 32, 36, 52, 56, 60, 80, 84, 88, 92, 112, 116),
+    2: (8, 12, 28, 32, 36, 52, 56, 60, 64, 68, 72, 76),
+    3: (8, 12, 24, 28, 32, 36, 40, 44, 48, 52, 56, 60,
+        100, 104, 108, 112, 116, 120),
+    4: (8, 12, 24, 28, 40, 44, 48, 52, 56, 60,
+        100, 104, 108, 112, 116, 120),
+    5: (4, 8, 12, 16, 24, 28, 32, 36, 40, 44),
+    6: (),
+    7: (12, 16, 20, 24, 28, 32, 44, 48, 52, 56, 60, 64, 68, 72, 76, 80, 84,
+        88, 92, 96, 100, 104, 108, 112, 116, 120, 124, 128, 132, 136, 140),
+    8: (8, 12, 16, 20, 24, 28, 32, 52, 56, 60, 88, 92, 96, 100, 104, 108,
+        112, 116, 120, 136, 140, 144, 148, 152, 156, 160, 164, 168),
+    9: (8, 12, 24, 28, 32, 36, 40, 44, 48, 52, 56, 60,
+        100, 104, 108, 112, 116, 120),
+    10: (12, 16, 20, 24, 28, 32, 44, 48, 52, 56, 60, 64, 68, 72, 76, 80, 84,
+         88, 92, 96, 100, 104, 108, 112, 116, 120, 124, 128, 132, 136, 140),
+}
+
+#: Where each class keeps the pointer to its own block.
+BLOCK_FIELD = {1: 0x1C, 2: 0x24, 3: 0x18, 4: 0x18, 5: 0x18,
+               6: 0x18, 7: 0x18, 8: 0x18, 9: 0x18, 10: 0x18}
+
+#: Types 1 and 2 carry a unit vector here, ``(1, 0, 0)`` on most blocks.
+DIRECTION_AT = 52
+DIRECTION_TYPES = (1, 2)
 
 
 class EffectFormatError(ValueError):
@@ -148,6 +200,25 @@ class Emitter:
         if not self.is_sound or len(self.body) < SOUND_FAR + 4:
             return None
         return struct.unpack_from("<2f", self.body, SOUND_NEAR)
+
+    def live_floats(self) -> dict[int, float]:
+        """The floats this emitter's own class actually reads, by offset.
+
+        The rest of the block is written by the editor and never loaded.  What
+        any of these mean is not established -- see ``READ_OFFSETS``.
+        """
+        return {
+            at: struct.unpack_from("<f", self.body, at)[0]
+            for at in READ_OFFSETS.get(self.kind, ())
+            if at + 4 <= len(self.body)
+        }
+
+    @property
+    def direction(self) -> tuple[float, float, float] | None:
+        """The unit vector types 1 and 2 keep at +52, or None for the rest."""
+        if self.kind not in DIRECTION_TYPES or len(self.body) < DIRECTION_AT + 12:
+            return None
+        return struct.unpack_from("<3f", self.body, DIRECTION_AT)
 
 
 @dataclass
