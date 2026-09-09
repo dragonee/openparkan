@@ -455,7 +455,9 @@ def check_water(check, game: Path) -> None:
     check("Land.msh: face flags 1544 agree with the surface bit", by_flags == len(maps),
           f"{by_flags}/{len(maps)} maps -- an independent second marker")
     check("Land.msh: water is a single flat plane per map", flat == with_water,
-          f"{flat}/{with_water} maps with water")
+          f"{flat}/{with_water} maps with water -- so no water surface is ever "
+          f"behind another, which is what lets the viewer draw it see-through "
+          f"without writing depth")
 
 
 def check_arealmap(check, game: Path) -> None:
@@ -1835,6 +1837,74 @@ def check_poses(check, game: Path) -> None:
           f"{base_on_ground}/{units} within 1 unit of the height under them")
 
 
+def check_lod(check, game: Path) -> None:
+    """The five slots of a variant: only the first is in the model's own frame."""
+    filled = Counter()
+    triangles = Counter()
+    fits = Counter()
+    seen = Counter()
+    for library in sorted(game.glob("*.rlb")):
+        try:
+            archive = NResArchive.open(library)
+        except NotAnNResArchive:
+            continue
+        for entry in archive:
+            if not entry.name.lower().endswith(".msh"):
+                continue
+            try:
+                m = objmesh.parse(archive.read(entry), entry.name)
+            except (ValueError, struct.error):
+                continue
+            if not m.volume:
+                continue
+            low, high = m.volume.minimum, m.volume.maximum
+            span = max(high[a] - low[a] for a in range(3)) or 1.0
+            posed = m.posed_positions(0)
+            for k in range(objmesh.SLOTS_PER_VARIANT):
+                vertices: set[int] = set()
+                count = 0
+                for node in m.nodes:
+                    if node.is_collision:
+                        continue
+                    index = (node.slot_index[k] if k < len(node.slot_index)
+                             else objmesh.NO_SLOT)
+                    if index == objmesh.NO_SLOT or index >= len(m.slots):
+                        continue
+                    slot = m.slots[index]
+                    for b in m.batches[slot.first_batch:
+                                       slot.first_batch + slot.batch_count]:
+                        first, n = b.triangles
+                        count += n
+                        for t in range(first, min(first + n, len(m.triangles))):
+                            vertices.update(m.triangles[t])
+                if not vertices:
+                    continue
+                filled[k] += 1
+                triangles[k] += count
+                seen[k] += 1
+                points = [posed[v] for v in vertices]
+                over = max(
+                    max(low[a] - min(q[a] for q in points),
+                        max(q[a] for q in points) - high[a])
+                    for a in range(3)
+                ) / span
+                fits[k] += over <= 0.02
+
+    falls = all(triangles[k] > triangles[k + 1] for k in range(3))
+    check("MESH: slots 0 to 3 fall like a level-of-detail chain", falls,
+          "triangles per slot position: "
+          + ", ".join(f"{k}: {triangles[k]}" for k in range(4))
+          + f" -- but slot 4 goes back up to {triangles[4]} over only "
+          f"{filled[4]} meshes, so it is not a fifth level")
+    check("MESH: only slot 0 sits in the model's own frame",
+          fits[0] == seen[0] > 0
+          and all(fits[k] < seen[k] * 0.6 for k in range(1, 5)),
+          ", ".join(f"slot {k}: {fits[k]}/{seen[k]} fit the authored box"
+                    for k in range(objmesh.SLOTS_PER_VARIANT))
+          + " -- the coarse slots are real geometry in a frame that is not "
+            "established, so the viewer draws slot 0 only")
+
+
 def check_damage(check, game: Path) -> None:
     """The .ndp damage table, and what the later slot variants hold."""
     library = objects.ObjectLibrary(game / "objects.rlb")
@@ -2347,7 +2417,7 @@ def run(game: Path) -> int:
         check_nres, check_texm, check_terrain, check_uv,
         check_water, check_layers, check_materials, check_sky,
         check_minimap_agreement, check_arealmap,
-        check_missions, check_objects, check_poses, check_damage,
+        check_missions, check_objects, check_poses, check_lod, check_damage,
         check_effects, check_footprints, check_rsli,
     )
     for fn in checks:

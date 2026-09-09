@@ -375,7 +375,7 @@ A negative result worth keeping: an explosion's size is **not** in its effect.
 `exp_frt_l`, `_m` and `_b` share their emitter blocks byte for byte; the 2, 3
 and 4 that separate them are the magnitude in their `.exp`.
 
-### 2.5 The `MAT0` blend-mode byte
+### 2.4 The `MAT0` blend-mode byte
 
 Byte 4 of a `MAT0` record sorts the 905 materials into **twelve groups** that
 track their names: the 87 `TREE*` and foliage share 6, `WATER` and `WATER_M`
@@ -386,25 +386,55 @@ a blend or shader mode — the multi-layer materials being exactly the ones that
 would need one. Nothing confirms it, and the reader passes it through
 unnamed.
 
+### 2.5 Where the coarse levels of detail live
+
+The four levels are a real ladder by triangle count — **137445, 34843, 14033
+and 5039** over 434, 283, 282 and 197 meshes — so a distant object could be
+drawn for a quarter, a tenth or a twenty-fifth of what it costs up close. That
+was on the list as pure engineering. It is not.
+
+**Only level 0 is in the model's own frame.** It fits the authored bounding
+box on **434 of 434** meshes; level 1 fits on **129 of 283**, level 2 on 124
+of 282, level 3 on 66 of 197, with overruns up to half the model's size. Not a
+posing problem — the nodes owning the coarse slots carry identity poses, so
+posed and unposed agree.
+
+`o_bnt_rdr_l_01` is the clearest case: level 0 runs z 0.1 to 2.3, a mast
+resting on the ground, and level 1 runs −1.1 to 1.1 — the same height, centred
+on the origin instead of standing on it. **85 of the 283** level-1 slots are
+centred that way where level 0 is not, so that is part of the answer but not
+all of it: only 134 of 283 match level 0's extent to within 5%, and the
+mismatch grows with the level.
+
+Until the frame is worked out, drawing the coarse levels would put objects in
+the wrong place on more than half the models, so the viewer asks for level 0
+and packs nothing else. Packing all four costs 61% more geometry and 2.1 MB of
+payload, which is affordable — the reason not to is that it would be wrong.
+→ [docs/07-objects.md](docs/07-objects.md)
+
 ---
 
 ## 3. Renderer engineering, not format work
 
-No reverse engineering needed; just work.
-
-- [ ] **LOD switching.** All four levels of each variant are parsed and
-  `slots_for_lod` takes the level; the viewer always asks for 0. Switching by
-  screen size is a payload change, not a format question.
-- [ ] **Terrain culling.** There is no patch id to cull by: face field 13 turned
-  out not to be spatial (see docs/06-open-questions.md), so a renderer has to
-  build its own grid, which is what `LandMesh._build_index` already does for
-  height queries.
-- [ ] **Alpha ordering.** Cutouts need none, which is why they are what the
-  viewer uses, but the graded textures behind effects and the sky will.
+- [x] **Alpha ordering** — done. The see-through layers now composite in a
+  written-down order: the dome, the stars and the clouds behind everything,
+  then the opaque world, then water, rain and the footprint overlay, and the
+  lens flare last in its own overlay scene. Water no longer writes depth,
+  which is safe because it never sorts against itself: **all 11 maps that
+  carry water carry it as a single flat plane**, none at two heights.
+- [ ] **Terrain culling** — not worth doing for this viewer, and the numbers
+  say so. There is no patch id to cull by (face field 13 turned out not to be
+  spatial), so a renderer has to build its own grid, which is what
+  `LandMesh._build_index` already does for height queries. But the worst map
+  is **8400 triangles** after de-duplication, median 7607, drawn in one call,
+  and the survey camera frames the whole map — a frustum test would reject
+  almost nothing. This is a note for a game renderer, not a job here.
 - [x] **Coplanar geometry** — done; see section 0. Nothing in the scene should
   be drawn twice at the same depth, and two things were: the terrain's two
   ground layers, now one pass, and the file's own duplicated faces, now
   filtered by `LandMesh.distinct_faces`.
+
+**LOD switching moved out of this section** — it is not engineering. See §2.5.
 
 ## 4. Known-unknowns carried in the readers
 

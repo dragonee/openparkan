@@ -238,6 +238,25 @@ if (typeof THREE === "undefined" || typeof pako === "undefined") {
   const CLOUD_TILES = 4;
   // The sky rides with the camera, so the horizon stays at eye level however
   // far the view climbs.
+  // The order the see-through layers composite in, back to front.  three.js
+  // draws every opaque item first and then the transparent ones sorted by
+  // renderOrder, so this is the whole of the scene's alpha ordering; the lens
+  // flare is not in it because it is a separate overlay scene drawn after.
+  //
+  // Water is the one transparent surface in the world rather than on the sky,
+  // and it does not need sorting against itself: all 11 maps that carry water
+  // carry it as a single flat plane, none at two heights, so no water surface
+  // is ever behind another.  It still must not write depth, or it would cull
+  // whatever is drawn later underneath it.
+  const LAYER = {
+    dome: -3,       // the nebula, on the inside of the sky sphere
+    stars: -2,      // additive, over the dome
+    clouds: -1,     // over the stars
+    // opaque terrain, buildings and units draw here, at 0
+    water: 1,       // after the lake bed it is seen through
+    rain: 2,        // falls in front of the world
+    footprint: 3,   // an overlay on the ground, depth-test off
+  };
   const skyGroup = new THREE.Group();
   scene.add(skyGroup);
   let dome = null, starLayer = null, cloudLayer = null, sunSprite = null, moonSprite = null;
@@ -294,7 +313,7 @@ if (typeof THREE === "undefined" || typeof pako === "undefined") {
     const opts = { side: THREE.BackSide, fog: false, depthWrite: false, vertexColors: true };
     if (sky.nebula !== undefined) opts.map = skyTexture(sky.nebula);
     dome = new THREE.Mesh(domeGeometry(), new THREE.MeshBasicMaterial(opts));
-    dome.renderOrder = -3;
+    dome.renderOrder = LAYER.dome;
     skyGroup.add(dome);
 
     if (sky.stars !== undefined) {
@@ -302,7 +321,7 @@ if (typeof THREE === "undefined" || typeof pako === "undefined") {
         map: skyTexture(sky.stars), side: THREE.BackSide, fog: false,
         depthWrite: false, transparent: true, blending: THREE.AdditiveBlending,
       }));
-      starLayer.renderOrder = -2;
+      starLayer.renderOrder = LAYER.stars;
       starLayer.scale.setScalar(0.99);
       skyGroup.add(starLayer);
     }
@@ -311,7 +330,7 @@ if (typeof THREE === "undefined" || typeof pako === "undefined") {
         map: skyTexture(sky.clouds, CLOUD_TILES), side: THREE.BackSide, fog: false,
         depthWrite: false, transparent: true, opacity: 0.7,
       }));
-      cloudLayer.renderOrder = -1;
+      cloudLayer.renderOrder = LAYER.clouds;
       cloudLayer.scale.setScalar(0.97);
       skyGroup.add(cloudLayer);
     }
@@ -365,7 +384,7 @@ if (typeof THREE === "undefined" || typeof pako === "undefined") {
       map: skyTexture(sky.rain), size: 9, sizeAttenuation: true,
       transparent: true, opacity: 0, depthWrite: false, fog: false,
     }));
-    rainLayer.renderOrder = 2;
+    rainLayer.renderOrder = LAYER.rain;
     skyGroup.add(rainLayer);
   }
 
@@ -619,6 +638,7 @@ if (typeof THREE === "undefined" || typeof pako === "undefined") {
   // and a lake bed nobody can see would not be worth authoring.  The exact
   // figure is a renderer choice.
   const WATER_OPACITY = 0.72;
+
   function multiply(a, b) {
     if (a === undefined) a = WHITE;
     if (b === undefined) b = WHITE;
@@ -673,6 +693,9 @@ if (typeof THREE === "undefined" || typeof pako === "undefined") {
     if (m.water || src.opacity < 1) {
       opts.transparent = true;
       opts.opacity = m.water ? WATER_OPACITY : src.opacity;
+      // See LAYER: one plane per map, so it never sorts against itself, and
+      // writing depth would only cull what is drawn later beneath it.
+      opts.depthWrite = false;
     }
     applyCutout(opts, src);
     const material = new THREE.MeshLambertMaterial(opts);
@@ -894,7 +917,7 @@ if (typeof THREE === "undefined" || typeof pako === "undefined") {
             new THREE.LineBasicMaterial({ color: 0x40e0a0, depthTest: false })
           );
           ring.visible = false;
-          ring.renderOrder = 3;
+          ring.renderOrder = LAYER.footprint;
           m.add(ring);
           footprints.push(ring);
         }

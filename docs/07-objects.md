@@ -363,6 +363,32 @@ Two things pin the reading down beyond the monotonicity:
   the coarsest slot present rather than drawing nothing. No node lacks
   geometry in variant 0 but has some in a later variant.
 
+### But only level 0 is in the model's own frame
+
+The ladder is real by triangle count — **137445, 34843, 14033, 5039** across
+the four levels, over 434, 283, 282 and 197 meshes, and then slot 4 goes back
+*up* to 13763 over only 103, which is the other half of the argument that the
+fifth is not a level.
+
+What does not hold is where the coarse levels sit. Level 0 fits the model's
+own authored box on **434 of 434** meshes; level 1 on **129 of 283**, level 2
+on 124 of 282, level 3 on 66 of 197, with overruns up to half the model's
+size. It is not a posing problem: the nodes that own the coarse slots carry
+identity poses, so posed and unposed positions give the same answer on all
+four.
+
+`o_bnt_rdr_l_01` shows what is going on. Its level 0 runs z 0.1 to 2.3 — a
+2.2-unit mast resting on the ground — and its level 1 runs −1.1 to 1.1: the
+same height, **centred on the origin instead of standing on it**. 85 of the
+283 level-1 slots are centred that way where level 0 is not. But that is not
+the whole story either: only 134 of 283 match level 0's extent to within 5%,
+and the mismatch grows with the level.
+
+So the coarse slots are real geometry in a frame that has not been
+established, and drawing them would put objects in the wrong place on more
+than half the models. The reader parses all fifteen and `slots_for_lod` takes
+a level; the viewer asks for 0 only.
+
 ### The later blocks are damage states
 
 1479 nodes fill block 0, **135 fill block 1 and 15 fill block 2**, and no node
