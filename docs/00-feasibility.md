@@ -46,7 +46,8 @@ The most exotic feature in `Iron_3D.ini` is `EMBM` — environment-mapped bump
 mapping. All of it maps cleanly onto modern Metal, Vulkan or WebGPU.
 
 **Terrain is already solved.** All 33 maps parse: geometry, normals, UVs,
-two-layer materials, water planes and face adjacency. The parse is confirmed
+both texture layers and their blend, water planes, face adjacency, the cell
+grid and the two levels of detail the map is stored at. The parse is confirmed
 against the game's own pre-rendered minimaps at Pearson r = +0.88 to +0.97.
 See [03-terrain.md](03-terrain.md).
 
