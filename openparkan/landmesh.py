@@ -26,10 +26,14 @@ of a possible fifteen on every one of the 7488 squares.  The grid is 16 x 16
 on 28 maps and 8 x 8 on five, following the vertex count rather than the world
 size.
 
-Each square's two cells share a box and split its faces in two, and the second
-block is where the duplicated geometry lives: between a fifth and two fifths
-of a map's faces are stored twice at identical positions, and 46261 of those
-46283 are in a second block.  See ``LandMesh.distinct_faces``.
+Each square names **two** cells, and they are the same ground at two levels
+of detail: the first is the mesh as authored and the second a simplification
+of it.  Each level covers the map on its own, level 1 is built from a subset
+of level 0's vertices, and it has fewer faces in every one of the 7488 cell
+pairs where it differs at all.  Level 0 is the contiguous face range
+``[0, split)`` and level 1 the rest.  A renderer draws **one level per cell**;
+drawing both puts two surfaces a fraction of a unit apart over the flat ground
+and they z-fight.  See ``LandMesh.lod_faces``.
 
 FACE, as 14 little-endian uint16::
 
@@ -86,9 +90,11 @@ CELL_STRIDE = 68
 #: The first record does not start at the corners' end; 44 bytes of the header
 #: come first and are zero on all 33 maps.
 CELL_START = 44
-#: A cell is listed twice.  The two records share a box and split the faces
-#: into two blocks: 46261 of the 46283 duplicated faces are in the second.
+#: A square names one cell per **level of detail**.  The two records share a
+#: box and split the faces into two contiguous runs: the authored mesh, then a
+#: simplification of it built from a subset of the same vertices.
 CELLS_PER_SQUARE = 2
+LOD_COUNT = CELLS_PER_SQUARE
 
 #: Stream 1 is the square table that indexes stream 2: one record per grid
 #: square, four words of header then room for 15 cell indices terminated by
@@ -192,14 +198,19 @@ class LandMesh:
         return levels.pop() if len(levels) == 1 else None
 
     def _build_index(self, cells: int = 64) -> None:
-        """Bucket faces into a coarse XY grid so height_at is not O(faces)."""
+        """Bucket faces into a coarse XY grid so height_at is not O(faces).
+
+        Level 0 only: the coarse level covers the same ground and would put a
+        second, simplified surface under every query.
+        """
         (minx, miny, _), (maxx, maxy, _) = self.bounds()
         self._grid_origin = (minx, miny)
         self._grid_step = ((maxx - minx) / cells, (maxy - miny) / cells)
         self._grid_cells = cells
         grid: dict[tuple[int, int], list[int]] = {}
         sx, sy = self._grid_step
-        for fi, tri in enumerate(self.faces):
+        for fi in self.lod_faces():
+            tri = self.faces[fi]
             xs = [self.positions[i][0] for i in tri]
             ys = [self.positions[i][1] for i in tri]
             for cx in range(int((min(xs) - minx) / sx), int((max(xs) - minx) / sx) + 1):
@@ -234,31 +245,34 @@ class LandMesh:
                 best = z
         return best
 
-    def distinct_faces(self) -> list[int]:
-        """One face per set of triangles that occupy the same three points.
+    @property
+    def lod_split(self) -> int:
+        """First face of the coarse level; ``face_count`` if there is only one.
 
-        Between a fifth and two fifths of a map's faces are stored **twice**,
-        at bit-identical positions -- 84% of the flat ``L32`` ground on map 23
-        alone.  The two copies carry the same layer-1 texture, the same UVs,
-        the same normals and the same winding, and agree on whether they have
-        a second layer; they differ only in incidental per-vertex layer-2 data
-        and, on about an eighth of them, the face's patch word.  The engine
-        presumably draws one patch or the other and never both.
-
-        A renderer that draws the file as it stands draws those triangles
-        twice at the same depth, and they z-fight -- which is what makes the
-        walkable ground flicker.  This returns the first face of each set, in
-        file order, so each surface is drawn once.
+        The cells' runs chain end to end and the levels do not interleave, so
+        each level is a single slice of ``faces``: level 0 is ``[0, split)``
+        and level 1 ``[split, face_count)``, on all 33 maps.
         """
-        seen: dict[tuple, int] = {}
-        keep = []
-        for i, tri in enumerate(self.faces):
-            key = tuple(sorted(self.positions[v] for v in tri))
-            if key in seen:
-                continue
-            seen[key] = i
-            keep.append(i)
-        return keep
+        per = len(self.cells) // LOD_COUNT
+        return self.cells[per].first if per and len(self.cells) > per else self.face_count
+
+    def lod_faces(self, level: int = 0) -> list[int]:
+        """The face indices of one level of detail, in file order.
+
+        The map is stored **twice**: every grid square names one cell per
+        level, level 0 as authored and level 1 a simplification of it drawn
+        from the same vertices.  Each level covers the whole map on its own --
+        a random point of any map lands on exactly one face of each -- and
+        level 1 is coarser in 6387 of the 7488 cell pairs and never finer.
+
+        Drawing both is what made the ground flicker.  Where the simplifier
+        left a triangle alone the two copies are bit-identical (a fifth to two
+        fifths of the faces), but where it did not the two surfaces sit a
+        fraction of a unit apart over gently sloping ground and z-fight; the
+        old duplicate filter caught only the identical half.  Draw one level.
+        """
+        split = self.lod_split
+        return list(range(0, split) if level == 0 else range(split, self.face_count))
 
     def texture_name(self, layer: int, index: int) -> str | None:
         table = self.layer1_names if layer == 1 else self.layer2_names

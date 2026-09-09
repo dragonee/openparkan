@@ -213,7 +213,13 @@ if (typeof THREE === "undefined" || typeof pako === "undefined") {
 } else {
   const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
   const stage = document.getElementById("stage");
-  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  // Logarithmic depth: the scene runs from a 1.5-unit chassis to a 26000-unit
+  // sky dome, and a linear buffer over that range resolves about half a unit
+  // at 3 km -- enough to make a bunker's base and the ground it rests on swap
+  // places as the camera orbits.
+  const renderer = new THREE.WebGLRenderer({
+    antialias: true, logarithmicDepthBuffer: true,
+  });
   renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
   stage.appendChild(renderer.domElement);
 

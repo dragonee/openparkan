@@ -185,7 +185,7 @@ def check_grid(check, game: Path) -> None:
     parsed = chained = summed = 0
     inside = checked = 0
     shapes: Counter[tuple[int, int, int]] = Counter()
-    dup_first = dup_second = 0
+    coarser = cell_pairs = 0
     for folder in maps:
         mesh = landmesh.load(folder / "Land.msh")
         cells = mesh.cells
@@ -208,18 +208,10 @@ def check_grid(check, game: Path) -> None:
                     cell.minimum[a] - slack <= p[a] <= cell.maximum[a] + slack
                     for p in points for a in range(3)
                 )
-        keep = set(mesh.distinct_faces())
-        seen: dict[tuple, int] = {}
-        for cell in cells:
-            key = (round(cell.minimum[0], 1), round(cell.minimum[1], 1))
-            rank = seen.get(key, 0)
-            seen[key] = rank + 1
-            dropped = sum(1 for f in cell.faces
-                          if f < mesh.face_count and f not in keep)
-            if rank == 0:
-                dup_first += dropped
-            else:
-                dup_second += dropped
+        per = len(cells) // landmesh.LOD_COUNT
+        for i in range(per):
+            cell_pairs += 1
+            coarser += cells[i + per].count <= cells[i].count
 
     check("Land.msh: stream 2 is a grid of face runs", parsed == len(maps) > 0,
           f"{parsed}/{len(maps)} maps parse a cell table with nothing left "
@@ -273,11 +265,11 @@ def check_grid(check, game: Path) -> None:
           f"all {sum(used.values())} squares use {sorted(used)} of the 15 "
           f"slots a record has room for")
 
-    check("Land.msh: the duplicated faces are the second record of a cell",
-          dup_second > dup_first * 100,
-          f"a cell is listed twice; of the duplicated faces "
-          f"{dup_second} are in the second record and only {dup_first} in the "
-          f"first, so the second block is where the coplanar copies live")
+    check("Land.msh: a square's two cells are two levels of detail",
+          coarser == cell_pairs > 0,
+          f"the second record of a cell holds no more faces than the first on "
+          f"all {coarser}/{cell_pairs} pairs -- the same ground simplified, "
+          f"not a second patch of it")
 
 
 def check_uv(check, game: Path) -> None:
@@ -328,46 +320,69 @@ def check_layers(check, game: Path) -> None:
     check("Land.msh: a second texture layer covers part of every map",
           with_layer2 == len(maps),
           f"{faces_2}/{faces_1} faces across {with_layer2}/{len(maps)} maps carry one")
-    # Coincident faces: the file stores a large minority of its triangles
-    # twice, which z-fights if a renderer draws the list as it stands.
+    # The map is stored twice, at two levels of detail -- one cell per level
+    # per square -- and drawing both is what made the flat ground flicker.
+    rng = random.Random(11)
     stored = drawn = 0
-    same_uv = same_normal = same_layer = sets = 0
+    sliced = covered = subset = coarser = pairs = 0
+    identical = fine_total = 0
+    grazing = 0
     for folder in gamedir.maps(game):
         m = landmesh.load(folder / "Land.msh")
+        cells = m.cells
+        per = len(cells) // landmesh.LOD_COUNT
         stored += m.face_count
-        keep = m.distinct_faces()
-        drawn += len(keep)
-        groups: dict[tuple, list[int]] = {}
-        for i, tri in enumerate(m.faces):
-            groups.setdefault(
-                tuple(sorted(m.positions[v] for v in tri)), []
-            ).append(i)
-        for members in groups.values():
-            if len(members) < 2:
-                continue
-            sets += 1
-            a, b = members[0], members[1]
-            first = {m.positions[v]: v for v in m.faces[a]}
-            second = {m.positions[v]: v for v in m.faces[b]}
-            if set(first) != set(second):
-                continue
-            same_uv += all(m.uv1[first[k]] == m.uv1[second[k]] for k in first)
-            same_normal += all(
-                m.normals[first[k]] == m.normals[second[k]] for k in first
-            )
-            same_layer += (
-                (m.face_tex2[a] == landmesh.NO_TEXTURE)
-                == (m.face_tex2[b] == landmesh.NO_TEXTURE)
-            )
-    check("Land.msh: a large minority of faces are stored twice",
-          drawn < stored * 0.9,
-          f"{stored - drawn} of {stored} faces across the 33 maps repeat a "
-          f"triangle already in the list, in {sets} coincident sets")
-    check("Land.msh: the two copies are the same surface",
-          same_uv == sets and same_normal > sets * 0.99 and same_layer > sets * 0.99,
-          f"layer-1 UVs match on all {same_uv} sets, normals on {same_normal} "
-          f"and the second-layer flag on {same_layer} -- so a renderer can "
-          f"draw either copy and must not draw both")
+        fine = m.lod_faces(0)
+        coarse = m.lod_faces(1)
+        drawn += len(fine)
+        # Each level is one contiguous slice of the face array.
+        sliced += (
+            [f for c in cells[:per] for f in c.faces] == fine
+            and [f for c in cells[per:] for f in c.faces] == coarse
+        )
+        for i in range(per):
+            pairs += 1
+            coarser += cells[i + per].count <= cells[i].count
+        subset += (
+            {v for f in coarse for v in m.faces[f]}
+            <= {v for f in fine for v in m.faces[f]}
+        )
+        # Each level covers the map on its own: a random point lands on
+        # exactly one face of each, wherever the ground is not folded.
+        (minx, miny, _), (maxx, maxy, _) = m.bounds()
+        hits = [0, 0]
+        for _ in range(150):
+            x = rng.uniform(minx, maxx)
+            y = rng.uniform(miny, maxy)
+            for level, faces in ((0, fine), (1, coarse)):
+                if _covers(m, faces, x, y):
+                    hits[level] += 1
+        covered += hits[0] > 140 and hits[1] > 140
+        # Where the simplifier left a triangle alone the two copies are
+        # bit-identical; where it did not they graze each other.
+        keys = {tuple(sorted(m.positions[v] for v in m.faces[f])) for f in fine}
+        fine_total += len(fine)
+        identical += sum(
+            1 for f in coarse
+            if tuple(sorted(m.positions[v] for v in m.faces[f])) in keys
+        )
+        grazing += len(coarse) - sum(
+            1 for f in coarse
+            if tuple(sorted(m.positions[v] for v in m.faces[f])) in keys
+        )
+    check("Land.msh: the map is stored twice, at two levels of detail",
+          sliced == covered == subset == len(gamedir.maps(game)),
+          f"each level is one contiguous slice of the face array on "
+          f"{sliced} maps, each covers the whole map on its own on {covered}, "
+          f"and level 1 uses no vertex level 0 does not on {subset}; level 1 "
+          f"is no finer in {coarser}/{pairs} cell pairs")
+    check("Land.msh: drawing one level is what stops the ground flickering",
+          drawn < stored * 0.75,
+          f"level 0 is {drawn} of the {stored} stored faces; {identical} of "
+          f"level 1's repeat a level-0 triangle exactly -- those are the ones "
+          f"the simplifier left alone -- and the other {grazing} sit a "
+          f"fraction of a unit from the surface they replace, which is what "
+          f"z-fights")
 
     # A negative result, kept so nobody re-derives it: face field 13 is not a
     # spatial index.
@@ -399,6 +414,20 @@ def check_layers(check, game: Path) -> None:
     check("Land.msh: stream 14 is the weight of layer 1", dirty == 0,
           f"exactly 1.0 on all {clean} vertices no layer-2 face touches; "
           f"below it on {varying} of the {touched} that one does")
+
+
+def _covers(mesh, faces, x: float, y: float) -> bool:
+    """Whether any of ``faces`` spans the world point ``(x, y)``."""
+    for f in faces:
+        a, b, c = (mesh.positions[v] for v in mesh.faces[f])
+        den = (b[1] - c[1]) * (a[0] - c[0]) + (c[0] - b[0]) * (a[1] - c[1])
+        if abs(den) < 1e-12:
+            continue
+        l1 = ((b[1] - c[1]) * (x - c[0]) + (c[0] - b[0]) * (y - c[1])) / den
+        l2 = ((c[1] - a[1]) * (x - c[0]) + (a[0] - c[0]) * (y - c[1])) / den
+        if l1 >= -1e-9 and l2 >= -1e-9 and 1.0 - l1 - l2 >= -1e-9:
+            return True
+    return False
 
 
 def _is_name(field: bytes) -> bool:

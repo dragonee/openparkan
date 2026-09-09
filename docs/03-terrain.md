@@ -233,13 +233,9 @@ world:
 2490 units gets 8 x 8 while map 11 at 998 units gets 16 x 16 — SC_3 has 5692
 vertices and map 11 has 6458.
 
-Each cell is listed **twice**, two records sharing a box and splitting the
-faces into two blocks. The second block is where the duplicated geometry
-lives: of the 46283 faces that repeat a triangle already in the list, **46261
-are in the second record and 22 in the first**. So the two-block layout and
-[the duplicate faces](#a-large-minority-of-faces-are-stored-twice) are the
-same fact seen from two directions. What the second block is *for* — a second
-pass, or just where the editor appended — is not established.
+Each cell is listed **twice**, and the two records are the same ground at two
+**levels of detail** — see below. They share a box, and the second holds no
+more faces than the first on all 7488 pairs.
 
 ## Face field 13 is not a patch id
 
@@ -309,25 +305,49 @@ material ever reaches that path. See
 the material manager's `GetMaterialPhase`, and no caller of it has been found;
 the reader takes track 0, which is the lit half.
 
-## A large minority of faces are stored twice
+## The map is stored twice, at two levels of detail
 
-**46283 of the 275882 faces across the 33 maps repeat a triangle already in
-the list** — bit-identical positions, in 46215 coincident sets, almost all of
-them pairs. Per map it runs from a sixth to a fifth of the faces, and it is
-not spread evenly: on map 23, **84% of the flat `L32` ground is duplicated**
-against 20% of the surrounding `L33`, and duplicated faces are flatter than
-the rest (median height range 11.8 against 22.6). Those flat areas are the
-walkable ground.
+Every grid square names two cells, and they are not two patches of ground:
+they are the **same** ground, twice. Level 0 is the mesh as authored and level
+1 a simplification of it, and a renderer draws one of them per cell.
 
-The two copies are the same surface. Layer-1 UVs match on **all 46215** sets,
-normals on 46126, winding on every one, and they always agree on whether the
-face has a second layer. What differs is incidental: the layer-2 UVs on about
-60% of pairs, the per-vertex blend on about 18%, and the face's patch word on
-about an eighth.
+Four things say so, and each is checked on all 33 maps:
 
-Why the file is like this is not established — the engine presumably has each
-copy in a different patch and draws one or the other, never both. What matters
-for a renderer is that **drawing the list as it stands draws those triangles
-twice at the same depth**, and they z-fight: the walkable ground flickers as
-the camera moves. `LandMesh.distinct_faces()` returns the first face of each
-set, in file order, and the viewer draws that.
+- **The levels do not interleave.** The cells' runs chain end to end and level
+  0's cells come first, so each level is a single slice of the face array:
+  level 0 is `[0, split)` and level 1 the rest, where `split` is the first
+  face of cell `squares`.
+- **Each level covers the whole map on its own.** A random point of any map
+  lands inside exactly one face of level 0 and exactly one of level 1. Their
+  plan-view areas each come to 1.00 of the map's footprint.
+- **Level 1 introduces no new vertices.** Every vertex it uses, level 0 uses
+  too — which is what a mesh simplifier produces and what a second patch of
+  ground would not.
+- **Level 1 is coarser.** It holds no more faces than level 0 in any of the
+  **7488** cell pairs, fewer in 6387 of them, and 102055 faces against 173827
+  across the library.
+
+### Drawing both is what made the ground flicker
+
+Where the simplifier left a triangle alone the two copies are bit-identical —
+**46186** of level 1's faces repeat a level-0 triangle exactly, between a
+fifth and two fifths of a map. Those are easy to spot and an earlier draft
+filtered them, calling them "duplicated faces" and guessing the engine "draws
+one patch or the other". Half right: the other **55869** are the faces the
+simplifier *did* change, and they are not identical to anything — they sit a
+fraction of a unit from the surface they replace.
+
+That residue is what a viewer sees as flicker. Over gently sloping ground the
+two surfaces graze each other and z-fight along thin wandering seams; over
+steep ground they part company by up to 70 units and the coarse level breaks
+through the fine one as streaks along the ridges. The faces in the thin band
+sit on a median slope of 14° to 33°, the ones that separate grossly on 24° to
+49° — which is why the flat basins flickered and the mountains looked noisy
+rather than doubled.
+
+`LandMesh.lod_faces(0)` returns the fine level and the viewer draws that:
+**173827 triangles instead of 275882**, one surface everywhere, and no seams.
+
+An earlier deduplication pass — keep the first face of each set of triangles
+with identical positions — is gone. It removed exactly the 46186 the
+simplifier had not touched and kept every one that flickered.

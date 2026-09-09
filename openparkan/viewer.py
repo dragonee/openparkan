@@ -327,10 +327,10 @@ def build_map_payload(mesh: landmesh.LandMesh, resolver: TextureResolver, name: 
     # 2 as a second, coplanar mesh made the walkable ground flicker: the two
     # passes compile to different shader programs, and their depths come out
     # a hair apart.
-    # A fifth to two fifths of a map's faces are stored twice at identical
-    # positions, so draw one of each pair or they z-fight.  See
-    # LandMesh.distinct_faces.
-    drawn_faces = mesh.distinct_faces()
+    # The map is stored twice, as two levels of detail; draw the fine one.
+    # Drawing both puts two surfaces a fraction of a unit apart over the flat
+    # ground and they z-fight.  See LandMesh.lod_faces.
+    drawn_faces = mesh.lod_faces(0)
     buckets: dict[tuple[int, int, bool], list[int]] = {}
     for fi in drawn_faces:
         key = (mesh.face_tex1[fi], mesh.face_tex2[fi], mesh.is_water(fi))

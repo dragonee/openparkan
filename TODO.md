@@ -258,9 +258,8 @@ written down is a question nobody reopens.
       cell order and a run indexes them directly. **All 275882 faces lie
       inside their own cell's box.** The grid is 16 x 16 on 28 maps and 8 x 8
       on five, following the mesh's vertex count rather than the world size.
-      Each cell is listed twice, and the second record is where the coplanar
-      copies live: **46261 of the 46283 duplicated faces are in it, against
-      22 in the first**, which ties this to the duplicate-face finding.
+      Each cell is listed twice, and the two records are the same ground at
+      two levels of detail; see the entry below.
       → [docs/03-terrain.md](docs/03-terrain.md)
 - [x] **The whole `MAT0` record, end to end.** A 14-byte header, then the
       entries at **34 bytes** each, then a table of animation tracks over
@@ -347,10 +346,30 @@ written down is a question nobody reopens.
       is gone. → [docs/10-sky.md](docs/10-sky.md)
 - [x] **Coplanar geometry.** Two causes, both fixed. The terrain's two ground
       layers now share a single pass — bucketing faces by the pair costs 5 to
-      8 groups per map against 3 to 5 — and the file's own duplicated faces
-      are filtered: **46283 of 275882** faces across the 33 maps repeat a
-      triangle already in the list, and drawing both copies made the walkable
-      ground flicker.
+      8 groups per map against 3 to 5 — and the map is no longer drawn twice;
+      see the level-of-detail entry below.
+- [x] **The terrain flicker, and it was never a duplicate-face problem.**
+      `Land.msh` stores the map **twice**, at two levels of detail: every grid
+      square names one cell per level, level 0 as authored and level 1 a
+      simplification of it. Four things say so on all 33 maps — the levels are
+      two contiguous slices of the face array; **each covers the whole map on
+      its own**, a random point landing inside exactly one face of each;
+      level 1 **introduces no vertex level 0 does not**; and level 1 is no
+      finer in any of the **7488** cell pairs. An earlier draft saw only the
+      **46186** faces the simplifier had left alone, called them duplicates
+      and filtered them — but the other **55869** are the ones it changed, and
+      those sit a fraction of a unit from the surface they replace. That
+      residue was the flicker: thin wandering seams over gentle ground (median
+      slope 14–33°) and streaks along the ridges where the two levels part by
+      up to 70 units. `LandMesh.lod_faces(0)` draws the fine level alone —
+      **173827 triangles instead of 275882**.
+      → [docs/03-terrain.md](docs/03-terrain.md)
+- [x] **Depth precision at range.** The survey runs from a 1.5-unit chassis to
+      a 26000-unit sky dome, and a linear depth buffer over `near = 1` resolves
+      about **half a unit at 3 km** — enough to make a bunker's base and the
+      ground it rests on swap places as the camera orbits. The renderer now
+      asks for a **logarithmic depth buffer**, which holds about 0.002 units at
+      the same range.
 
 ---
 
@@ -509,14 +528,15 @@ promising of the two bytes.
   say it did not. Face field 13 is not spatial, but **stream 2 is**: a 16 x 16
   or 8 x 8 grid of cells, each with a box, a centre, a radius and a run of
   faces, and every one of the 275882 faces lies inside its own cell. See
-  section 0. Culling still buys nothing *here* — the worst map is **8400
-  triangles** after de-duplication, median 7607, drawn in one call, and the
+  section 0. Culling still buys nothing *here* — the worst map is **6259
+  triangles** once only the fine level is drawn, median 5852, in one call, and the
   survey camera frames the whole map — so the reader exposes the grid and the
   viewer does not use it. A game renderer would.
 - [x] **Coplanar geometry** — done; see section 0. Nothing in the scene should
   be drawn twice at the same depth, and two things were: the terrain's two
-  ground layers, now one pass, and the file's own duplicated faces, now
-  filtered by `LandMesh.distinct_faces`.
+  ground layers, now one pass, and the map's second level of detail, now not
+  drawn at all (`LandMesh.lod_faces`). What is left is honest depth precision,
+  and the renderer now asks for a logarithmic depth buffer to get it.
 
 ## 4. Known-unknowns carried in the readers
 
