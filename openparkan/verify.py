@@ -464,6 +464,48 @@ def check_layers(check, game: Path) -> None:
                 tight += 1
             else:
                 loose += 1
+    # Field 0's bit 2 says the face has a second texture layer.
+    marked = layered = both = neither = 0
+    for folder in gamedir.maps(game):
+        m = landmesh.load(folder / "Land.msh")
+        for i in range(m.face_count):
+            bit = bool(m.face_flags[i] & landmesh.FLAGS_LAYER2_BIT)
+            has = m.face_tex2[i] != landmesh.NO_TEXTURE
+            marked += bit
+            layered += has
+            both += bit and has
+            neither += not bit and not has
+    check("Land.msh: face flags bit 0x004 marks the two-layer faces",
+          both == marked == layered and neither == 275882 - layered,
+          f"set on {marked} faces and clear on the other {neither}, and it "
+          f"agrees with the layer-2 texture index on every one of the "
+          f"{both + neither} -- so a face says twice that it has a second "
+          f"layer, in its flags and in its texture word")
+
+    # Fields 10, 11 and 12 are the face's own normal.
+    faces_seen = unit = agrees = 0
+    for folder in gamedir.maps(game):
+        m = landmesh.load(folder / "Land.msh")
+        for i, n in enumerate(m.face_normal):
+            faces_seen += 1
+            unit += abs(math.dist(n, (0, 0, 0)) - 1) < 0.02
+            a, b, c = (m.positions[v] for v in m.faces[i])
+            u = [b[k] - a[k] for k in range(3)]
+            w = [c[k] - a[k] for k in range(3)]
+            cross = (u[1] * w[2] - u[2] * w[1],
+                     u[2] * w[0] - u[0] * w[2],
+                     u[0] * w[1] - u[1] * w[0])
+            length = math.dist(cross, (0, 0, 0))
+            if length < 1e-9:
+                continue
+            agrees += sum(x * y for x, y in zip(n, cross, strict=True)) / length > 0.99
+    check("Land.msh: face fields 10, 11 and 12 are the face's own normal",
+          unit > faces_seen - 5 and agrees > faces_seen - 10,
+          f"read as int16 over {landmesh.NORMAL_SCALE:.0f} they are unit "
+          f"length on {unit}/{faces_seen} faces and point the same way as the "
+          f"cross product of the triangle on {agrees} -- so flat shading "
+          f"needs no cross product, and the winding is confirmed a third time")
+
     check("Land.msh: face field 13 is not a spatial patch id", tight < loose * 0.1,
           f"{tight}/{tight + loose} groups are tighter than a random subset of "
           f"the same size, so it cannot be used for culling")
@@ -1234,6 +1276,39 @@ def check_objects(check, game: Path) -> None:
           f"{tiles}/{batched} meshes -- index counts sum to 3 x triangles")
     check("MESH: batch index ranges are contiguous", covers == batched,
           f"{covers}/{batched} meshes")
+    # A batch's vertex range is D3D's (BaseVertexIndex, NumVertices): the span
+    # its indices reach, not a slice of the array it owns.
+    spans = span_ok = span_meshes = span_all = 0
+    for name in ARCHIVES:
+        ar = NResArchive.open(game / name)
+        for e in ar:
+            if e.tag != "MESH":
+                continue
+            try:
+                m = objmesh.parse(ar.read(e), e.name)
+            except (ValueError, struct.error):
+                continue
+            span_meshes += 1
+            whole = True
+            for b in m.batches:
+                first, count = b.triangles
+                rel = [v for t in m.raw_triangles[first:first + count] for v in t]
+                if not rel:
+                    continue
+                spans += 1
+                if max(rel) + 1 == b.vertex_count:
+                    span_ok += 1
+                else:
+                    whole = False
+            span_all += whole
+    check("MESH: a batch's vertex range is the span its indices reach",
+          span_ok == spans > 0 and span_all == span_meshes,
+          f"vertex_count is exactly the largest relative index plus one on "
+          f"all {span_ok} batches of all {span_all} meshes -- D3D's "
+          f"NumVertices beside first_vertex's BaseVertexIndex.  It is a draw "
+          f"hint, which is why it never tiled the vertex array: two batches "
+          f"are free to reach the same vertices")
+
     check("MESH: a batch's material indexes the model's wear", mats_ok == with_wear,
           f"{mats_ok}/{with_wear} meshes with a wear "
           f"-- this is where the texture assignment lives")

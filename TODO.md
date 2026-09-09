@@ -384,6 +384,20 @@ written down is a question nobody reopens.
       so `Width_1` at `(0, 0, 0.42)` is 0.42 across the model's z, and
       **553 of 570** frame and aim points are unit length. One reading covers
       every archive. → [docs/07-objects.md](docs/07-objects.md)
+- [x] **A batch's vertex range**, which was never a partition. It is D3D's
+      `(BaseVertexIndex, NumVertices)`: `vertex_count` is **exactly the largest
+      relative index plus one on all 15153 batches of all 435 meshes**, so it
+      is the span the driver has to transform, and two batches are free to
+      reach the same vertices. That is why it tiled the array on only 69 of
+      435 — it was never trying to.
+- [x] **Terrain face fields 10, 11, 12 and field 0's bits.** 10..12 are the
+      **face's own normal**, `int16` over 32767: unit length on **275881 of
+      275882** and agreeing with the triangle's cross product on **275877**.
+      Field 0 is a bitfield over a constant `0x600`, and `0x004` marks a face
+      with a **second texture layer** — set on exactly the **32450** that have
+      one and on none of the other 243432 — beside the known `0x008` for
+      water. `0x2000` is still unread.
+      → [docs/03-terrain.md](docs/03-terrain.md)
 - [x] **The renderer's interface.** `IDirect3DDevice7`, pinned by the vtable
       offsets the engine calls through — `SetRenderState` at 20,
       `DrawPrimitive` at 25, `SetTexture` at 35, `SetTextureStageState` at 37,
@@ -652,9 +666,8 @@ engine reads as a dword.
 Parsed and passed through without being understood. None affects a picture
 today; each is a small trap for anyone extending the code.
 
-- A batch's vertex range (fields 7 and 8): contiguous, but tiles the vertex
-  array on only 69 of 435 meshes, so not a partition.
-- Face record fields 10, 11, 12, and field 0 (near-constant per mesh).
+- Terrain face flags bit `0x2000`: 6102 faces carry it and it tracks neither
+  water, nor a second layer, nor slope.
 - Terrain stream 11's **flags byte** — 0x48 on 248624 faces, 0x58 on 27169,
   0xC8 on 84, 0xD8 on 5. The stream itself is read (it is the draw order, see
   section 0); bits 3 and 6 are always set and bits 4 and 7 vary, and bit 4

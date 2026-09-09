@@ -38,7 +38,8 @@ and they z-fight.  See ``LandMesh.lod_faces``.
 
 FACE, as 14 little-endian uint16::
 
-     0  flags; 1544 (0x0608) marks water
+     0  flags: bit 0x004 marks a face with a second texture layer and
+        bit 0x008 water, over a constant 0x600.  Bit 0x2000 is unresolved
      1  surface bitfield; bit 0x02 marks water
      2  lo byte = layer-1 texture index, hi byte = layer-2 (0xFF = none);
         both index the map's Land1.wea / Land2.wea name tables
@@ -49,9 +50,9 @@ FACE, as 14 little-endian uint16::
      7  adjacent face across edge 0 (0xFFFF = none)
      8  adjacent face across edge 1
      9  adjacent face across edge 2
-    10  unresolved
-    11  unresolved
-    12  unresolved
+    10  face normal x, int16 over 32767
+    11  face normal y
+    12  face normal z
     13  0..62, ~57 distinct values.  Not a spatial patch: a value's faces
          span the whole map, indistinguishable from a random subset of the
          same size.  Not a material key either.  Unresolved.
@@ -106,6 +107,11 @@ SQUARE_HEADER = 4
 NO_CELL = 0xFFFF
 STREAM_SQUARES = 1
 
+#: Bit 2 of the face's *flags* word marks a face that carries a second
+#: texture layer: it is set on exactly the 32450 faces whose layer-2 index is
+#: not 0xFF, and on no other, across all 33 maps.
+FLAGS_LAYER2_BIT = 0x0004
+
 #: Bit 1 of the face's surface word marks a water surface.  It is a *bitfield*,
 #: not an enum: the observed values are 0, 2, 16 and 18, and testing ``== 2``
 #: silently misses every water face that also carries bit 16.
@@ -118,6 +124,10 @@ FLAGS_WATER = 1544
 #: UV values are 8.8 fixed point and the layer-1 mapping tiles every 50 world
 #: units, which is how ``u == x / 50`` comes out as ``u16 == x * 5.12``.
 UV_FIXED_POINT_SCALE = 256.0
+
+#: A face's own normal is int16 over this, the same scale a mesh pose key uses
+#: for its quaternion.
+NORMAL_SCALE = 32767.0
 
 
 @dataclass(frozen=True)
@@ -153,6 +163,11 @@ class LandMesh:
     face_tex1: list[int]
     face_tex2: list[int]
     face_patch: list[int]
+    #: The face's own normal, from fields 10..12 as int16 over 32767.  Unit
+    #: length on 275881 of the 275882 shipped faces and agreeing with the
+    #: geometric normal on 275877, so a renderer that wants flat shading has
+    #: it without a cross product.
+    face_normal: list[tuple[float, float, float]] = field(default_factory=list)
     layer1_names: list[str] = field(default_factory=list)
     layer2_names: list[str] = field(default_factory=list)
     #: The map's own spatial index, from stream 2; empty if it has none.
@@ -397,12 +412,15 @@ def load(path: str | Path) -> LandMesh:
     nf = len(raw_face) // FACE_STRIDE
     faces, adjacency = [], []
     flags, surface, tex1, tex2, patch = [], [], [], [], []
+    face_normal: list[tuple[float, float, float]] = []
     for i in range(nf):
         r = struct.unpack_from("<14H", raw_face, i * FACE_STRIDE)
         faces.append((r[4], r[5], r[6]))
         adjacency.append((r[7], r[8], r[9]))
         flags.append(r[0])
         surface.append(r[1])
+        signed = struct.unpack_from("<3h", raw_face, i * FACE_STRIDE + 20)
+        face_normal.append(tuple(v / NORMAL_SCALE for v in signed))
         tex1.append(r[2] & 0xFF)
         tex2.append(r[2] >> 8)
         patch.append(r[13])
@@ -426,6 +444,7 @@ def load(path: str | Path) -> LandMesh:
         face_tex1=tex1,
         face_tex2=tex2,
         face_patch=patch,
+        face_normal=face_normal,
         layer1_names=_read_wea(path.parent / "Land1.wea"),
         layer2_names=_read_wea(path.parent / "Land2.wea"),
     )

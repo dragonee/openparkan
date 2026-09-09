@@ -73,7 +73,6 @@ and then 2, 1, 1, 1, which reads as two parallel arrays rather than pairs.
 
 ## Unresolved terrain fields
 
-- Face record fields 10, 11, 12, and field 0 (near-constant per mesh).
 - `MAT0`'s byte 4: eleven values plus an unset `0xFF` that sort materials into
   groups tracking their names (all six `TREE*` share 6), so it reads as a
   shader or blend-mode id, but nothing in the engine follows it. The
@@ -81,18 +80,19 @@ and then 2, 1, 1, 1, which reads as two parallel arrays rather than pairs.
   [../TODO.md](../TODO.md) §2.4. The record's tail is the animation-track
   table and is now read, and the "second colour triple" is the entry's
   ambient — see [07-objects.md](07-objects.md#the-material-chain).
-- A batch's vertex range (fields 7 and 8). The ranges are contiguous but only
-  tile the vertex array on 69 of 435 meshes, so they are not a partition.
 - Terrain face field 13 (0..62, ~57 distinct per map). **Not** a patch or
   sector id, which earlier drafts guessed: grouping faces by it gives regions
   that span the whole map, no tighter than a random subset of the same size,
   on every map tried. It is interleaved in face order, does not determine the
   texture pair or the surface word, and does not track elevation. Its groups
   are wildly uneven — 1, 2, 4 and 384 faces on SC_3.
-- Stream 11's flags word: 72 on 4228 faces, 88 on 329, then 328, 968, 984, 344.
-  Bit flags of some kind; 88 correlates with water.
-- Face field 0's other values (1536, 1540, 9728 on SC_3) and field 1's bit
-  `0x10`. Only the water bit in each is understood.
+- Stream 11's **flags byte** — 0x48 on 248624 faces, 0x58 on 27169, 0xC8 on 84
+  and 0xD8 on 5. Bits 3 and 6 are always set; bit 4 leans towards water
+  without marking it. The stream around it is the draw order, see
+  [03-terrain.md](03-terrain.md#stream-11-is-the-order-to-draw-the-faces-in).
+- Face flags bit `0x2000`, on 6102 faces, and surface-word bit `0x10`. The
+  rest of both words is read: flags `0x004` is a second texture layer and
+  `0x008` water, and fields 10..12 are the face's own normal.
 
 ## Textures
 

@@ -237,6 +237,25 @@ Each cell is listed **twice**, and the two records are the same ground at two
 **levels of detail** — see below. They share a box, and the second holds no
 more faces than the first on all 7488 pairs.
 
+## The face record's last unread fields
+
+**Fields 10, 11 and 12 are the face's own normal**, `int16` over 32767 — the
+same fixed point a mesh pose key uses for its quaternion. They are unit length
+on **275881 of the 275882** faces and point the same way as the cross product
+of the triangle on **275877**, so flat shading needs no cross product and the
+winding is confirmed a third time. `LandMesh.face_normal` carries them.
+
+**Field 0 is a bitfield over a constant `0x600`**, and two of its bits are
+now named. `0x008` marks water, which was known. `0x004` marks a face that
+carries a **second texture layer**: it is set on exactly the **32450** faces
+whose layer-2 index is not `0xFF` and on none of the other 243432. So a face
+says twice that it has a second layer — in its flags and in its texture word —
+and the values that puzzled an earlier draft fall out: `1536` is the base,
+`1540` adds the second layer, `1544` adds water.
+
+`0x2000` is still unread: 6102 faces carry it, and it tracks neither water,
+nor a second layer, nor slope.
+
 ## Stream 11 is the order to draw the faces in
 
 Four bytes a face: a `uint16` face index, a flags byte and a byte that is zero
