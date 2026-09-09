@@ -327,10 +327,10 @@ def check_materials(check, game: Path) -> None:
         hit = 0
         for blob in blobs:
             n = struct.unpack_from("<H", blob, 0)[0]
-            at = materials.ENTRY_BASE + materials.COLOUR_MARKER_OFFSET
+            at = materials.ENTRY_BASE + materials.OPACITY_OFFSET
             hit += all(
                 at + i * stride < len(blob)
-                and blob[at + i * stride] == materials.COLOUR_MARKER
+                and blob[at + i * stride] == materials.OPAQUE
                 for i in range(n)
             )
         return hit
@@ -349,11 +349,53 @@ def check_materials(check, game: Path) -> None:
           f"{counted}/{total} materials name only textures that are in "
           f"Textures.lib; reading the names by pattern instead of by offset "
           f"left 14 that did not, qqds.7 and 0FAIR.0 among them")
-    check("Material.lib: the diffuse colour sits behind a constant 100",
+    # The byte ahead of the diffuse is an opacity in percent, not a marker:
+    # World3D.dll's parser multiplies it by 0.01.  It looks constant because
+    # one material is the only one that is ever less than fully opaque.
+    ramps = {}
+    opacity = Counter()
+    for name, m in lib.materials.items():
+        values = [e.opacity for e in m.entries]
+        opacity.update(round(v, 2) for v in values)
+        if any(v != 1.0 for v in values):
+            ramps[name] = values
+    faded = sum(n for v, n in opacity.items() if v != 1.0)
+    check("Material.lib: the byte at +5 is an opacity, not a marker",
+          len(ramps) == 1 and faded > 0,
+          f"{sum(opacity.values()) - faded} of {sum(opacity.values())} entries "
+          f"are fully opaque and the exception is "
+          f"{', '.join(ramps)} at "
+          f"{[round(v * 100) for v in next(iter(ramps.values()))][:6]} percent "
+          f"across its frames -- a fade-in, which is what a constant marker "
+          f"could not be")
+
+    # 0xFF in the two version-gated bytes is the engine's own "not set": it is
+    # exactly what the parser substitutes when the record is too old to carry
+    # them.
+    groups = Counter()
+    unset_five = 0
+    for entry in raw:
+        if entry.tag != materials.MATERIAL_TAG:
+            continue
+        blob = raw.read(entry)
+        if len(blob) > 5:
+            groups[blob[4]] += 1
+            unset_five += blob[5] == materials.WHOLE_TEXTURE
+    named = {g: n for g, n in groups.items() if g != materials.WHOLE_TEXTURE}
+    check("Material.lib: 0xFF in the class byte means unset, not a class",
+          unset_five == total and groups[materials.WHOLE_TEXTURE] > 0,
+          f"byte 5 is 0xFF on all {unset_five} records and byte 4 on "
+          f"{groups[materials.WHOLE_TEXTURE]}; the parser writes exactly 0xFF "
+          f"into both when the record's version is below 2, so it is the "
+          f"engine's own default.  The other {len(named)} values sort the "
+          f"library by role: {dict(sorted(named.items()))}")
+
+    check("Material.lib: the diffuse colour sits behind the opacity",
           here >= total - 1,
-          f"{here}/{total} records carry the marker in every entry; "
+          f"the opacity is 100 in every entry of {here}/{total} records, which "
+          f"is what anchors the offsets; "
           f"{sum(1 for m in lib.materials.values() if m.colour != (255, 255, 255))} "
-          f"are tinted, WATER #4d6aff and ENV_NLAVA #b41e00 among them")
+          f"materials are tinted, WATER #4d6aff and ENV_NLAVA #b41e00 among them")
 
     # The second layer of a two-layer material.  42 ground materials name a
     # texture and its "M" twin; what the twin is can be measured.

@@ -237,6 +237,14 @@ written down is a question nobody reopens.
       bytes, **symmetric on all 65536 cells** with `table[i][i] == i` on 237 of
       256 — a colour mixer. Every lit font pixel is index 73, and 73 is white.
       → [docs/12-rsli.md](docs/12-rsli.md)
+- [x] **The `MAT0` opacity, which was being read as a marker.** The byte at
+      +5 of an entry is an **opacity in percent** — `World3D.dll`'s parser
+      multiplies it by 0.01 — not the constant 100 an earlier reading called a
+      marker. It looks constant because 3138 of the 3143 entries are fully
+      opaque; the exception gives it away, `FIRESTORM` running **0, 60, 80,
+      90, 95, 100** across its frames, which is a fade-in and is not something
+      a marker can be. It still anchors the entry offsets, so nothing about
+      the stride changes.
 - [x] **The `MAT0` entry stride, and with it every texture name.** An entry is
       **34 bytes**, not 40: at 34 the marker byte lands on 100 in every entry
       of **904 of the 905** records, and every other stride tried collapses to
@@ -393,16 +401,25 @@ A negative result worth keeping: an explosion's size is **not** in its effect.
 `exp_frt_l`, `_m` and `_b` share their emitter blocks byte for byte; the 2, 3
 and 4 that separate them are the magnitude in their `.exp`.
 
-### 2.4 The `MAT0` blend-mode byte
+### 2.4 The `MAT0` class byte
 
-Byte 4 of a `MAT0` record sorts the 905 materials into **twelve groups** that
-track their names: the 87 `TREE*` and foliage share 6, `WATER` and `WATER_M`
-have 7 to themselves, the 24 `B_MTP_*` share 8, 342 share 5 and 376 effects
-and sky materials share `0xFF`. Values 0 to 4 hold **43 of the 45 multi-layer
-materials** between them, which is the strongest hint yet that the byte picks
-a blend or shader mode — the multi-layer materials being exactly the ones that
-would need one. Nothing confirms it, and the reader passes it through
-unnamed.
+Byte 4 sorts the library into eleven groups plus an unset value, and what it
+*is* is still open. What is settled is how to read it.
+
+`World3D.dll`'s parser gates the record's tail on a **version**: at 2 it reads
+the bytes at +4 and +5, at 3 a `float32` defaulting to 1.0, at 4 a `uint32`
+defaulting to 0 — and below each it substitutes the default. For the two bytes
+that default is **`0xFF`**, so 0xFF is the engine's own *not set*, which is
+what byte 5 holds on all 905 records and byte 4 on 376 of them. It is not a
+twelfth group.
+
+The other eleven sort the library by role, sharply: **0 to 4 hold 43 of the 45
+multi-layer materials** and are almost all opaque ground, 5 is 342 object
+materials of which every one carries alpha, 6 is the 87 `TREE*` and foliage,
+7 is `WATER` and `WATER_M`, and 8, 9 and 10 are three smaller families of 24,
+12 and 9. That is the shape of a shader or blend mode and it is the strongest
+hint there is, but the field has exactly one consumer in the engine and
+following it into `GetMaterialPhase`'s output struct did not name it.
 
 ---
 

@@ -215,7 +215,7 @@ nothing, which is why the twin is the one stored at 8 bits per channel where
 banding round the neutral point would show. It also explains the colours the
 record carries. On 38 of the 43 the two entries hold their two colour slots
 the opposite way round — entry 0 with a white diffuse and black in the slot
-ahead of the marker, entry 1 with black diffuse and white there — so the
+ahead of the opacity, entry 1 with black diffuse and white there — so the
 second entry is flagged as something other than an ordinary lit layer.
 
 They are certainly not bump maps, which an earlier draft guessed from

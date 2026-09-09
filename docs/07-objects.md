@@ -598,12 +598,22 @@ its mask `L20M.0`). 860 materials have a single layer, 43 have two, two have
 eight; **animation is much the commoner reason for a material to hold several
 textures**, which an earlier draft of this document had backwards.
 
-Entries start 12 bytes in on a 40-byte stride, with the texture name at +20
-and a three-byte RGB **diffuse colour** at +6, behind a constant 100 that
-holds on 904 of the 905 records. The colour is not decoration: `WATER`'s
-texture is a neutral grey ripple and all of the blue is in its `#4d6aff`, and
-lava is a dull pattern tinted `#b41e00`. 760 materials carry a colour other
-than white.
+Entries start 12 bytes in, with the texture name at +20 and a three-byte RGB
+**diffuse colour** at +6. The colour is not decoration: `WATER`'s texture is a
+neutral grey ripple and all of the blue is in its `#4d6aff`, and lava is a
+dull pattern tinted `#b41e00`. 761 materials carry a colour other than white.
+
+The byte at +5 ahead of it is an **opacity in percent**, which `World3D.dll`
+multiplies by 0.01 — not the constant marker an earlier draft called it. It
+looks constant because 3138 of the 3143 entries are fully opaque, and the
+exception gives it away: `FIRESTORM` runs **0, 60, 80, 90, 95, 100** across
+its frames, which is a fade-in. It still anchors the offsets.
+
+The record is **versioned**, and the parser gates its tail on that: at 2 it
+reads the bytes at +4 and +5, at 3 a `float32` defaulting to 1.0, at 4 a
+`uint32` defaulting to 0. Below each it writes the default, and for the two
+bytes that default is **`0xFF`** — so 0xFF is the engine's own *not set*,
+which is what +5 holds on all 905 records and +4 on 376 of them.
 
 An entry runs **34** bytes, not 40 — a stride that used to be wrong, which is
 why the names were read by pattern and why eight materials looked like they

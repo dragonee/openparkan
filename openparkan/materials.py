@@ -28,7 +28,7 @@ images at all: both name ``PG27.0`` eight times and ask for cells 0 to 7 of
 it, so they are the blue and red team variants of one insignia sheet.
 
 An entry begins 12 bytes in and runs **34** bytes to the next, with the
-texture name in a 14-byte field at +20.  34 rather than 40: at 34 the marker
+texture name in a 14-byte field at +20.  34 rather than 40: at 34 the opacity
 byte lands on 100 in every entry of 904 of the 905 records, and every other
 stride tried collapses to 531 -- which is exactly the number of records
 holding a single entry, where a stride cannot be wrong.
@@ -42,12 +42,29 @@ cell bytes 48..55 of fourteen frames that all name ``FAIR.0``.  Read by
 offset, **all 905 materials name a texture that is in Textures.lib**, against
 891 by pattern.
 
-At +6 sits a three-byte RGB **diffuse colour** that modulates
-the texture, preceded by a constant 100 -- constant on 904 of the 905 records,
-which is what makes the offset trustworthy.  It matters: ``WATER``'s texture
-is a neutral grey ripple and the blue is entirely in its ``#4d6aff``, and lava
-is a dull red pattern tinted ``#b41e00``.  761 materials carry a colour other
-than white.
+At +6 sits a three-byte RGB **diffuse colour** that modulates the texture.  It
+matters: ``WATER``'s texture is a neutral grey ripple and the blue is entirely
+in its ``#4d6aff``, and lava is a dull red pattern tinted ``#b41e00``.  761
+materials carry a colour other than white.
+
+The byte at +5 ahead of it is **not** the constant marker an earlier reading
+took it for.  It is an **opacity in percent** -- ``World3D.dll``'s parser
+multiplies it by 0.01 -- and it looks constant only because every material but
+one is fully opaque.  The exception gives it away: ``FIRESTORM``'s entries run
+**0, 60, 80, 90, 95, 100** across its frames, which is a fade-in.  3138 of the
+3143 entries are at 100.
+
+The record is **versioned**, and the parser gates its tail on that: at version
+2 it reads the two bytes at +4 and +5, at 3 a ``float32`` defaulting to 1.0,
+at 4 a ``uint32`` defaulting to 0.  Below each it substitutes the default --
+and for the two bytes the default is **0xFF**.  So 0xFF in those fields is the
+engine's own "not set", which is what byte 5 holds on all 905 records and byte
+4 on 376 of them.  The other 11 values of byte 4 sort the library by role:
+0 to 4 hold **43 of the 45 multi-layer materials** and are almost all opaque
+ground, 5 is 342 object materials of which every one carries alpha, 6 is the
+87 ``TREE*`` and foliage, 7 is the two water materials, and 8 to 10 are three
+smaller families.  It reads like a shader or blend mode, but nothing confirms
+it.
 
 The byte immediately before the name, at +19, selects a **sub-image**: ``0xFF``
 means the whole texture, and anything else is a cell of a sprite sheet.  427
@@ -79,7 +96,7 @@ from .nres import NResArchive
 
 MATERIAL_TAG = "MAT0"
 
-#: An entry's diffuse colour, and the constant that anchors the offset.
+#: An entry's diffuse colour, and the opacity that anchors the offset.
 ENTRY_BASE = 12
 #: One texture entry.  34, not 40: at 34 the marker byte lands on 100 in every
 #: entry of 904 of the 905 records, against 531 at any other stride tried --
@@ -88,8 +105,12 @@ ENTRY_BASE = 12
 #: name is 12 characters.
 ENTRY_STRIDE = 34
 COLOUR_OFFSET = 6
-COLOUR_MARKER_OFFSET = 5
-COLOUR_MARKER = 100
+#: An **opacity in percent**, which the engine multiplies by 0.01.  It reads
+#: as a constant 100 because all but one material is fully opaque -- the
+#: exception is ``FIRESTORM``, whose entries run 0, 60, 80, 90, 95, 100 across
+#: its frames, which is a fade-in.  It is what anchors the entry offsets.
+OPACITY_OFFSET = 5
+OPAQUE = 100
 
 #: The byte before an entry's texture name picks one of the texture's own
 #: sub-images -- an index into its ``Page`` table; see ``texm.parse_pages``.
@@ -118,8 +139,10 @@ class MaterialEntry:
     cell: int = WHOLE_TEXTURE
     #: Diffuse colour, as ``(r, g, b)``.
     colour: tuple[int, int, int] = (255, 255, 255)
-    #: The second colour slot, ahead of the marker.
+    #: The second colour slot, ahead of the opacity.
     tint: tuple[int, int, int] = (0, 0, 0)
+    #: Opacity in 0..1; 1.0 on every entry but ``FIRESTORM``'s fade-in.
+    opacity: float = 1.0
 
 
 @dataclass
@@ -130,6 +153,7 @@ class Material:
     layer_count: int
     #: Every entry in file order.
     entries: list[MaterialEntry] = field(default_factory=list)
+
     @property
     def colour(self) -> tuple[int, int, int]:
         """Diffuse colour of the first entry; white when there is none."""
@@ -182,15 +206,13 @@ def parse_entries(data: bytes, count: int) -> list[MaterialEntry]:
         blk = data[at : at + ENTRY_STRIDE]
         if len(blk) < ENTRY_STRIDE:
             break
-        colour = (255, 255, 255)
-        if blk[COLOUR_MARKER_OFFSET] == COLOUR_MARKER:
-            colour = tuple(blk[COLOUR_OFFSET : COLOUR_OFFSET + 3])
         out.append(
             MaterialEntry(
                 texture=blk[NAME_OFFSET:].split(b"\0")[0].decode("latin-1"),
                 cell=blk[CELL_OFFSET],
-                colour=colour,
+                colour=tuple(blk[COLOUR_OFFSET : COLOUR_OFFSET + 3]),
                 tint=tuple(blk[TINT_OFFSET : TINT_OFFSET + 3]),
+                opacity=blk[OPACITY_OFFSET] / OPAQUE,
             )
         )
     return out
