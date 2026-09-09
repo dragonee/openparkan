@@ -398,6 +398,14 @@ written down is a question nobody reopens.
       one and on none of the other 243432 — beside the known `0x008` for
       water. `0x2000` is still unread.
       → [docs/03-terrain.md](docs/03-terrain.md)
+- [x] **The last two terrain bits that mattered.** The draw order's flags byte
+      says **where a batch begins**: bit `0x10` is set on exactly the **27174**
+      faces that open a run of one texture pair inside a cell and clear on all
+      248708 others, agreeing on every one of the 275882 — so walking the
+      order and changing material where the bit is set draws the map. And face
+      flags bit `0x2000` marks the **bed beneath a liquid**: exactly the
+      **6102** faces whose layer-1 material is `WATER_BOT` or `ENV_LAVA_BOT`,
+      and no other. → [docs/03-terrain.md](docs/03-terrain.md)
 - [x] **The renderer's interface.** `IDirect3DDevice7`, pinned by the vtable
       offsets the engine calls through — `SetRenderState` at 20,
       `DrawPrimitive` at 25, `SetTexture` at 35, `SetTextureStageState` at 37,
@@ -666,9 +674,10 @@ engine reads as a dword.
 Parsed and passed through without being understood. None affects a picture
 today; each is a small trap for anyone extending the code.
 
-- Terrain face flags bit `0x2000`: 6102 faces carry it and it tracks neither
-  water, nor a second layer, nor slope.
-- Terrain stream 11's **flags byte** — 0x48 on 248624 faces, 0x58 on 27169,
-  0xC8 on 84, 0xD8 on 5. The stream itself is read (it is the draw order, see
-  section 0); bits 3 and 6 are always set and bits 4 and 7 vary, and bit 4
-  leans towards water without marking it.
+- Terrain **surface word bit `0x10`**: set on about 95% of faces, clear on the
+  rest in connected regions, and it tracks *none* of slope, elevation,
+  material, level of detail, map edge, duplication between levels or coverage
+  by the navigation mesh. Clear on every lava bed and on patches of ordinary
+  ground.
+- Terrain **draw-order flags bit `0x80`**, on 89 faces across the 33 maps. The
+  rest of that byte is read: `0x10` opens a batch and `0x48` is constant.

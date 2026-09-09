@@ -38,8 +38,8 @@ and they z-fight.  See ``LandMesh.lod_faces``.
 
 FACE, as 14 little-endian uint16::
 
-     0  flags: bit 0x004 marks a face with a second texture layer and
-        bit 0x008 water, over a constant 0x600.  Bit 0x2000 is unresolved
+     0  flags over a constant 0x600: bit 0x004 marks a face with a second
+        texture layer, 0x008 water and 0x2000 the bed beneath a liquid
      1  surface bitfield; bit 0x02 marks water
      2  lo byte = layer-1 texture index, hi byte = layer-2 (0xFF = none);
         both index the map's Land1.wea / Land2.wea name tables
@@ -77,6 +77,8 @@ STREAM_UV2 = 18
 STREAM_BLEND = 14
 STREAM_DRAW_ORDER = 11
 DRAW_ORDER_STRIDE = 4
+#: Bit 4 of a draw-order entry's flags byte: this face opens a batch.
+DRAW_BATCH_START = 0x10
 STREAM_FACE = 21
 
 FACE_STRIDE = 28
@@ -106,6 +108,11 @@ SQUARE_WORDS = 19
 SQUARE_HEADER = 4
 NO_CELL = 0xFFFF
 STREAM_SQUARES = 1
+
+#: Bit 13 of the face's flags word marks the **bed beneath a liquid**: it is
+#: set on exactly the 6102 faces whose layer-1 material is ``WATER_BOT`` or
+#: ``ENV_LAVA_BOT``, and on no other face of any map.
+FLAGS_LIQUID_BED_BIT = 0x2000
 
 #: Bit 2 of the face's *flags* word marks a face that carries a second
 #: texture layer: it is set on exactly the 32450 faces whose layer-2 index is
@@ -178,6 +185,9 @@ class LandMesh:
     #: ``parse_draw_order``; the viewer buckets by material itself and does
     #: not use it.
     draw_order: list[int] = field(default_factory=list)
+    #: The flags byte beside each draw-order entry; ``DRAW_BATCH_START`` says
+    #: the face opens a batch.
+    draw_flags: list[int] = field(default_factory=list)
     _grid: dict | None = field(default=None, repr=False, compare=False)
 
     @property
@@ -348,6 +358,11 @@ def parse_draw_order(raw: bytes | None) -> list[int]:
     one of the 14976 cells draws in the minimum number of batches** -- no
     texture pair appears twice in a cell's run -- against 11463 in file order.
 
+    The flags byte says where a batch begins: **bit 0x10 is set on exactly
+    the 27174 faces that open a run of one texture pair inside a cell**, and
+    clear on every one of the other 248708 -- so walking the order and
+    changing material wherever the bit is set draws the map.
+
     So it is the draw order the map was baked with, and a renderer that
     buckets faces by material itself, as this one does, does not need it.
     """
@@ -356,6 +371,17 @@ def parse_draw_order(raw: bytes | None) -> list[int]:
     count = len(raw) // DRAW_ORDER_STRIDE
     return [struct.unpack_from("<H", raw, i * DRAW_ORDER_STRIDE)[0]
             for i in range(count)]
+
+
+def parse_draw_flags(raw: bytes | None) -> list[int]:
+    """The flags byte beside each entry of the draw order.
+
+    ``DRAW_BATCH_START`` is the one that is read: it opens a batch.
+    """
+    if not raw:
+        return []
+    count = len(raw) // DRAW_ORDER_STRIDE
+    return [raw[i * DRAW_ORDER_STRIDE + 2] for i in range(count)]
 
 
 def parse_squares(raw: bytes | None) -> list[tuple[int, ...]]:
@@ -408,6 +434,8 @@ def load(path: str | Path) -> LandMesh:
     raw_blend = archive.one_of_type(STREAM_BLEND)
     blend = [struct.unpack_from("<f", raw_blend, i * 4)[0] for i in range(nv)]
 
+    raw_draw = (archive.one_of_type(STREAM_DRAW_ORDER)
+                if archive.has_type(STREAM_DRAW_ORDER) else None)
     raw_face = archive.one_of_type(STREAM_FACE)
     nf = len(raw_face) // FACE_STRIDE
     faces, adjacency = [], []
@@ -428,10 +456,8 @@ def load(path: str | Path) -> LandMesh:
     return LandMesh(
         cells=parse_cells(archive.one_of_type(STREAM_BOUNDS)),
         squares=parse_squares(archive.one_of_type(STREAM_SQUARES)),
-        draw_order=parse_draw_order(
-            archive.one_of_type(STREAM_DRAW_ORDER)
-            if archive.has_type(STREAM_DRAW_ORDER) else None
-        ),
+        draw_order=parse_draw_order(raw_draw),
+        draw_flags=parse_draw_flags(raw_draw),
         positions=positions,
         normals=normals,
         uv1=uv1,

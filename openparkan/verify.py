@@ -313,6 +313,35 @@ def check_grid(check, game: Path) -> None:
                 cells_seen += len(grouped)
             else:
                 file_optimal += tally
+    # And its flags byte says where each batch begins.
+    starts = marked = agreed = drawn = 0
+    for folder in maps:
+        mesh = landmesh.load(folder / "Land.msh")
+        if not mesh.draw_order or not mesh.cells:
+            continue
+        cell_of = [0] * mesh.face_count
+        for ci, cell in enumerate(mesh.cells):
+            for f in cell.faces:
+                if f < mesh.face_count:
+                    cell_of[f] = ci
+        previous = None
+        for f, flag in zip(mesh.draw_order, mesh.draw_flags, strict=True):
+            key = (cell_of[f], mesh.face_tex1[f], mesh.face_tex2[f])
+            opens = key != previous
+            previous = key
+            bit = bool(flag & landmesh.DRAW_BATCH_START)
+            drawn += 1
+            starts += opens
+            marked += bit
+            agreed += bit == opens
+    check("Land.msh: the draw order's flags byte opens each batch",
+          agreed == drawn > 0 and marked == starts,
+          f"bit 0x{landmesh.DRAW_BATCH_START:02x} is set on exactly the "
+          f"{marked} faces that open a run of one texture pair inside a cell "
+          f"and clear on the other {drawn - marked} -- agreeing on all "
+          f"{agreed}.  Walk the order and change material where the bit is "
+          f"set and the map draws")
+
     check("Land.msh: stream 11 is the order to draw the faces in",
           permuted == contiguous == len(maps) and optimal == cells_seen,
           f"the face indices are a permutation of the whole list on "
@@ -475,6 +504,24 @@ def check_layers(check, game: Path) -> None:
             layered += has
             both += bit and has
             neither += not bit and not has
+    # And bit 13 marks the ground under a liquid.
+    bed_named = bed_bit = bed_both = 0
+    for folder in gamedir.maps(game):
+        m = landmesh.load(folder / "Land.msh")
+        for i in range(m.face_count):
+            name = (m.texture_name(1, m.face_tex1[i]) or "").upper()
+            under = name in ("WATER_BOT", "ENV_LAVA_BOT")
+            bit = bool(m.face_flags[i] & landmesh.FLAGS_LIQUID_BED_BIT)
+            bed_named += under
+            bed_bit += bit
+            bed_both += under and bit
+    check("Land.msh: face flags bit 0x2000 marks the bed under a liquid",
+          bed_both == bed_named == bed_bit > 0,
+          f"set on exactly the {bed_bit} faces whose layer-1 material is "
+          f"WATER_BOT or ENV_LAVA_BOT and on no other face of any map -- so "
+          f"the ground beneath a lake says so itself, which is the third way "
+          f"a map marks its liquids")
+
     check("Land.msh: face flags bit 0x004 marks the two-layer faces",
           both == marked == layered and neither == 275882 - layered,
           f"set on {marked} faces and clear on the other {neither}, and it "

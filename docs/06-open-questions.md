@@ -86,13 +86,14 @@ and then 2, 1, 1, 1, which reads as two parallel arrays rather than pairs.
   on every map tried. It is interleaved in face order, does not determine the
   texture pair or the surface word, and does not track elevation. Its groups
   are wildly uneven — 1, 2, 4 and 384 faces on SC_3.
-- Stream 11's **flags byte** — 0x48 on 248624 faces, 0x58 on 27169, 0xC8 on 84
-  and 0xD8 on 5. Bits 3 and 6 are always set; bit 4 leans towards water
-  without marking it. The stream around it is the draw order, see
-  [03-terrain.md](03-terrain.md#stream-11-is-the-order-to-draw-the-faces-in).
-- Face flags bit `0x2000`, on 6102 faces, and surface-word bit `0x10`. The
-  rest of both words is read: flags `0x004` is a second texture layer and
-  `0x008` water, and fields 10..12 are the face's own normal.
+- The surface word's bit `0x10`: set on about 95% of faces and clear on the
+  rest in connected regions, tracking none of slope, elevation, material,
+  level of detail, map edge, duplication between levels or coverage by the
+  navigation mesh.
+- The draw order's flags bit `0x80`, on 89 faces across the 33 maps. The rest
+  of the face record is read: flags `0x004` is a second texture layer, `0x008`
+  water and `0x2000` a liquid bed; fields 10..12 are the face's own normal;
+  and the draw order's `0x10` opens a batch.
 
 ## Textures
 

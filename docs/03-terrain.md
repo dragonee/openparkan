@@ -253,8 +253,16 @@ says twice that it has a second layer — in its flags and in its texture word �
 and the values that puzzled an earlier draft fall out: `1536` is the base,
 `1540` adds the second layer, `1544` adds water.
 
-`0x2000` is still unread: 6102 faces carry it, and it tracks neither water,
-nor a second layer, nor slope.
+`0x2000` marks the **bed beneath a liquid**: it is set on exactly the **6102**
+faces whose layer-1 material is `WATER_BOT` or `ENV_LAVA_BOT`, and on no other
+face of any map. So the ground under a lake says so itself — the third way a
+map marks its liquids, beside the surface bit and the flags value 1544.
+
+Field 1, the surface word, keeps one secret: bit `0x10` is set on about 95% of
+faces and clear on the rest, in connected regions rather than scattered, and
+it tracks *none* of slope, elevation, material, level of detail, map edge,
+duplication between levels, or coverage by the navigation mesh. It is clear on
+every lava bed and on patches of ordinary ground.
 
 ## Stream 11 is the order to draw the faces in
 
@@ -275,10 +283,13 @@ cell and gets its faces already batched. A renderer that buckets faces by
 material itself, as this one does, has no use for it, which is why the viewer
 reads it and does not draw with it.
 
-The flags byte is 0x48 on 248624 faces, 0x58 on 27169, 0xC8 on 84 and 0xD8 on
-5 — bits 3 and 6 always set, bits 4 and 7 varying. Bit 4 leans towards water
-(1326 of the 3630 water faces carry it, against a tenth of the dry ones) but
-does not mark it, and what either bit means is not established.
+The flags byte beside each entry says **where a batch begins**. Bit `0x10` is
+set on exactly the **27174** faces that open a run of one texture pair inside
+a cell, and clear on all 248708 others — agreeing on every one of the 275882.
+Walk the order and change material wherever the bit is set, and the map draws.
+
+The rest of the byte is a constant `0x48` — bits 3 and 6 on every face — plus
+bit 7, which 89 faces carry and nothing yet explains.
 
 ## Face field 13 is not a patch id
 
