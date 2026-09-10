@@ -22,7 +22,6 @@ Everything below is re-derived by ``uv run openparkan verify``.
 
 from __future__ import annotations
 
-import math
 import struct
 from dataclasses import dataclass
 
@@ -52,17 +51,46 @@ TRIPLE_AT = (20, 32, 44, 56, 68, 80)
 
 #: The file's own two-pi, on all three components of the triple at +56 on 364
 #: members and of the triple at +80 on 422.  A limit of a whole turn is the
-#: same as no limit, which is why it reads as a default.
-FULL_TURN = 6.28
+#: same as no limit, which is why it reads as a default.  It is **6.28**, a
+#: decimal somebody typed rather than the real constant, and this is that
+#: decimal as a ``float32`` -- the exact bits the constructor writes.
+FULL_TURN = 6.28000020980835
 
-#: ``pi/2`` at +112 on 509 of the 531 -- a half-cone, and the one angle in the
-#: block that is not either a whole turn or a sentinel.
-HALF_CONE = math.pi / 2
+#: The engine's own half-turn-of-a-cone at +112, on 509 of the 531.  Note it is
+#: **1.57079**, not ``pi/2``: like ``FULL_TURN`` it is a decimal somebody typed,
+#: and the constructor writes exactly these bits.
+HALF_CONE = 1.5707900524139404
 
 #: ``FLT_MAX`` at +124 on 502, and -1.0 at +108 on 465 and +120 on 433.  Both
 #: read as "unbounded"; which one a field uses follows its sign convention.
 FLT_MAX = 3.4028234663852886e38
 NO_LIMIT = -1.0
+
+#: Where the frame's float block lands in the live controller.  ``Control.dll``
+#: builds a 0x668- or 0x670-byte object whose initialiser at ``0x10006689``
+#: writes a default into every one of these slots, and **the value it writes is
+#: the commonest value in the file** for all 27 of them.  So the frame from +20
+#: on is that object's parameter block: object offset = file offset + 0x45c.
+#: The five counts below +20 are not part of it -- the object keeps pointers
+#: there.
+FIELD_BASE = 0x45C
+
+#: File offset -> the default the constructor writes.  A shipped controller
+#: that leaves a slot alone is carrying the engine's own compiled-in value.
+DEFAULTS: dict[int, float | int] = {
+    20: 2.5, 24: 2.5, 28: 2.5,
+    32: 0.0, 36: 0.0, 40: 0.0,
+    44: 0.0, 48: 0.0, 52: 0.0,
+    56: FULL_TURN, 60: FULL_TURN, 64: FULL_TURN,
+    68: 1.0, 72: 1.0, 76: 1.0,
+    80: FULL_TURN, 84: FULL_TURN, 88: FULL_TURN,
+    92: 0, 96: 0.0, 100: 0.0, 104: 0,
+    108: NO_LIMIT, 112: HALF_CONE, 116: 0,
+    120: NO_LIMIT, 124: FLT_MAX,
+}
+
+#: The slots ``DEFAULTS`` holds as integers rather than floats.
+DEFAULT_INTS = (92, 104, 116)
 
 #: A reference record inside a section: two 32-byte NUL-padded name fields and
 #: nine int32.  They occur in runs at this stride; the runs are anchored by

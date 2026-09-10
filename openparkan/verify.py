@@ -3366,6 +3366,26 @@ def check_control(check, game: Path) -> None:
           f"{len(sizes)} members are {control.FRAME_SIZE} bytes with 0xFF from "
           f"+{control.HEADER_SIZE} on -- {', '.join(bare_names[:3])}")
 
+    modes = 0
+    worst = ""
+    for off, want in sorted(control.DEFAULTS.items()):
+        if off in control.DEFAULT_INTS:
+            seen = Counter(struct.unpack_from("<i", blob, off)[0]
+                           for _l, _n, blob in blobs)
+            hit = seen.most_common(1)[0][0] == want
+        else:
+            seen = Counter(struct.unpack_from("<f", blob, off)[0]
+                           for _l, _n, blob in blobs)
+            hit = seen.most_common(1)[0][0] == want
+        modes += hit
+        if not hit:
+            worst = f"; +{off} is {seen.most_common(1)[0][0]}, not {want}"
+    check(".ctl: the frame's commonest value is the engine's own default",
+          modes == len(control.DEFAULTS) > 0,
+          f"{modes}/{len(control.DEFAULTS)} slots -- the initialiser at "
+          f"0x10006689 writes each of them into the live object at "
+          f"file + 0x{control.FIELD_BASE:x}{worst}")
+
     reads = [v for c in parsed for t in c.triples for v in t]
     reads += [v for c in parsed for v in (*c.pair, *c.bounds, c.cone, c.reach)]
     finite = sum(1 for v in reads if math.isfinite(v))

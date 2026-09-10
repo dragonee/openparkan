@@ -513,6 +513,18 @@ written down is a question nobody reopens.
       outside it on 14 of the 116 rows, so walking is not the movement
       controller's job. → [docs/14-controls.md](docs/14-controls.md)
 
+- [x] **The `.ctl` frame is the controller object.** Not a serialisation
+      format with a layout of its own: `Control.dll`'s initialiser at
+      `0x10006689` writes a compiled-in default into every field of the
+      controller it builds, and that default is the **commonest value in
+      the shipped files on all 27 slots** — 2.5 for the first triple, 6.28
+      for the two angular ones, 1.0, -1.0, `FLT_MAX`, 1.57079. So object
+      offset = file offset + `0x45c`, and a controller that leaves a slot
+      alone carries the engine's own value rather than an artist's. The
+      engine's "2π" is **6.28** and its "π/2" is **1.57079** — typed
+      decimals, not the constants — and the reader now keeps those bits.
+      → [docs/13-control.md](docs/13-control.md)
+
 ## 1. Wrong on screen today
 
 Nothing known. What is left below is fidelity the game had and this does not,
@@ -743,12 +755,16 @@ today; each is a small trap for anyone extending the code.
   finds the reference records by shape instead. Beside them: the 84-byte
   block at +128, and the nine ints of a reference, three of which read as
   ASCII on 41 records.
-- Which `.ctl` field feeds which channel. The message side is closed — the
-  controller dispatches `MCMD_` 1..16 — but the handlers for 8..12 reach
-  indexed channels on two sub-objects (`+0x5c8`, a 0xf4-byte class with
-  0x1c-stride channels defaulting to 0.5; `+0x5cc`, a 0x120-byte class with
-  two arrays of six floats defaulting to 1.0 and 0.0), and nothing yet says
-  which triple of the frame either was loaded from.
+- Which `.ctl` field feeds which channel. Two of the three legs are now
+  closed. The message side: the controller dispatches `MCMD_` 1..16. The
+  storage side: the frame from +20 on **is** the live object's parameter
+  block at `file + 0x45c`, proved by the initialiser at `0x10006689`
+  writing a default into all 27 slots that is the commonest value in the
+  shipped files, 27 for 27. What is left is only the wiring between them —
+  the handlers for messages 8..12 reach indexed channels on two sub-objects
+  (`+0x5c8`, a 0xf4-byte class with 0x1c-stride channels defaulting to 0.5;
+  `+0x5cc`, a 0x120-byte class with two arrays of six floats), and nothing
+  yet says which triple either was loaded from.
 - What handles `MCMD_WALK_F`. `MCMD_WALK_B` (20) and `MCMD_LOCK` (21) are
   answered — `Control.dll` has a second control class whose table covers
   messages 20 to 28, and `AniMesh.dll`'s agent takes both as well, keeping

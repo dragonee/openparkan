@@ -115,6 +115,47 @@ files where a single axis is clamped on its own. That is what a pitch limit on
 a camera looks like. It is a reading, not a fact, and nothing else in the data
 tests it.
 
+## The frame is the live object's parameter block
+
+The earlier note that "the file is that object written out" is now exact.
+`Control.dll`'s initialiser at `0x10006689` writes a default into every field
+of the controller it builds, and **the value it writes is the commonest value
+in the shipped files, on all 27 slots**:
+
+| File | Object | Default written | Files carrying it |
+|---|---|---|---:|
+| +20, +24, +28 | `+0x470`–`+0x478` | 2.5 | 324 |
+| +32, +36, +40 | `+0x47c`–`+0x484` | 0 | 518–527 |
+| +44, +48, +52 | `+0x488`–`+0x490` | 0 | 434–505 |
+| +56, +60, +64 | `+0x494`–`+0x49c` | 6.28 | 364–365 |
+| +68, +72, +76 | `+0x4a0`–`+0x4a8` | 1.0 | 418–444 |
+| +80, +84, +88 | `+0x4ac`–`+0x4b4` | 6.28 | 422–451 |
+| +92 | `+0x4b8` | 0 | 324 |
+| +96, +100 | `+0x4bc`, `+0x4c0` | 0 | 512 |
+| +104 | `+0x4c4` | 0 | 509 |
+| +108 | `+0x4c8` | -1.0 | 465 |
+| +112 | `+0x4cc` | 1.57079 | 509 |
+| +116 | `+0x4d0` | 0 | 342 |
+| +120 | `+0x4d4` | -1.0 | 433 |
+| +124 | `+0x4d8` | FLT_MAX | 502 |
+
+So **object offset = file offset + 0x45c**, and a shipped controller that
+leaves a slot alone is carrying the engine's own compiled-in value rather than
+anything an artist chose. The five counts below +20 are not part of the block:
+the object keeps pointers in those slots (`+0x45c` holds one the constructor
+sets, `+0x46c` another that later code follows).
+
+Two of the constants are worth noticing, because they are not the mathematics
+they look like. The "whole turn" is **6.28**, and the "half cone" is
+**1.57079** — decimals somebody typed, not `2*pi` and `pi/2`. The reader keeps
+the engine's bits rather than the real values, since the point is to match the
+file.
+
+This does not name the fields, and it does not say which triple feeds which
+channel. What it does settle is that there is nothing else to find about the
+*shape*: the frame has no hidden structure, it is one C++ object's floats, and
+anything further has to come from what reads them.
+
 ## The reference record
 
 The sections after the frame carry **100-byte records**: a 32-byte archive
