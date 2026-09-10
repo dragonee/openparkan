@@ -3483,6 +3483,46 @@ def check_controls(check, game: Path) -> None:
           f"{named}/{sum(1 for r in rows if r.pressed)} press rows end in a "
           f"{controls.COMMANDS} identifier; the rest are prose or parameterised")
 
+    values = controls.SCAN
+    order = [line.strip().split(" ")[0]
+             for line in (game / controls.SCANCODES).read_text("latin-1")
+             .replace("\r\n", "\n").split("\n")
+             if line.strip().startswith("SCAN_")]
+    check("controls: every key in the descriptor has a recovered scan code",
+          set(order) == set(values) and len(order) == len(values) > 0,
+          f"{len(values)} names in {controls.SCANCODES} and {len(values)} in the "
+          f"table recovered from World3D.dll, and the two sets are equal")
+
+    ibm = {"SCAN_ESC": 1, "SCAN_W_1": 2, "SCAN_W": 17, "SCAN_A": 30,
+           "SCAN_S": 31, "SCAN_D": 32, "SCAN_LSHIFT": 42, "SCAN_F1": 59}
+    agree = sum(1 for name, code in ibm.items() if values.get(name) == code)
+    lead = sum(1 for i, name in enumerate(order) if values.get(name) == i)
+    check("controls: the scan codes are the real ones",
+          agree == len(ibm) and lead > 50,
+          f"{agree}/{len(ibm)} keys carry their IBM PC set-1 code, and the first "
+          f"{lead} entries of {controls.SCANCODES} are listed in code order")
+
+    unresolved = sorted({r.command for r in rows if r.code == controls.UNRESOLVED})
+    check("controls: every command a table sends has a number",
+          rows and not unresolved,
+          f"{len({r.command for r in rows})} distinct commands across the tables "
+          f"resolve through the World3D.dll table")
+
+    outside = sorted({r.command for r in rows if not r.dispatched})
+    check("controls: three commands fall outside the controller's dispatch",
+          len(outside) == 3,
+          f"{sum(1 for r in rows if r.dispatched)}/{len(rows)} rows send a command "
+          f"in {controls.DISPATCHED.start}..{controls.DISPATCHED.stop - 1}; "
+          f"the rest are {', '.join(outside)}")
+
+    classed = {r.target for r in rows}
+    unknown = sorted(c for c in classed
+                     if c not in controls.CICLS and c != "CICLS_UNKNOWN")
+    check("controls: every target class a table names has an id",
+          classed and not unknown,
+          f"{len(classed)} classes used, {len(controls.CICLS)} known to the engine "
+          f"-- CICLS_UNKNOWN is the resolver's own default, {controls.UNKNOWN_CLASS}")
+
     schemes = controls.build_schemes(game)
     members = [m for s in schemes for m in s.members]
     present = sum(1 for m in members if (game / m.replace("\\", "/")).is_file())

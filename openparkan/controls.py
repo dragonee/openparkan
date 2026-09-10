@@ -45,10 +45,282 @@ BUILD_SCHEME_DECLARED = 11
 #: A ``.tbl`` row has eleven fields before the trailing text.
 TABLE_FIELDS = 11
 
+#: The controller's own message dispatch is a 16-way jump table on the command
+#: number, so these are the commands it handles itself.  Walking and locking
+#: are outside it and go somewhere else.
+DISPATCHED = range(1, 17)
+
+#: What a resolver returns for a name it does not know.
+UNRESOLVED = -1
+UNKNOWN_CLASS = 0
+
 #: The "no modifier" key, and the two devices a row can come from.
 NO_MODIFIER = "SCAN_NULL"
 DEVICES = ("KEY", "MOUSE")
 
+
+# --- Values recovered from World3D.dll -------------------------------------
+#
+# The engine parses these tables as text, so it carries a resolver for every
+# family of names: a chain of string compares, each case returning a
+# constant, ending in a branchless idiom that yields the constant on a match
+# and the family's default otherwise (-1 for most, 0 for the classes).
+# The names are the files'; the numbers are the engine's.
+
+#: Movement command -> the number the engine dispatches on.  The
+#: controller's own jump table covers 1 to 16; ``MCMD_WALK_F``,
+#: ``MCMD_WALK_B`` and ``MCMD_LOCK`` fall outside it.
+MCMD = {
+    "MCMD_DUMMY": 0,
+    "MCMD_STATE": 1,
+    "MCMD_ROTATE_X": 2,
+    "MCMD_ROTATE_Y": 3,
+    "MCMD_ROTATE_Z": 4,
+    "MCMD_ANGLE_X": 5,
+    "MCMD_ANGLE_Y": 6,
+    "MCMD_FORWARD": 7,
+    "MCMD_BACK": 8,
+    "MCMD_LEFT": 9,
+    "MCMD_RIGHT": 10,
+    "MCMD_UP": 11,
+    "MCMD_DOWN": 12,
+    "MCMD_SELECT": 13,
+    "MCMD_SELECT_NEXT": 14,
+    "MCMD_TABLE": 15,
+    "MCMD_ANGLE_Z": 16,
+    "MCMD_MISSILE": 17,
+    "MCMD_FIRE_ALL": 18,
+    "MCMD_WALK_F": 19,
+    "MCMD_WALK_B": 20,
+    "MCMD_LOCK": 21,
+}
+
+#: Component class -> its id.  6, 7, 14, 16, 17 and 18 name nothing.
+#: An unrecognised class resolves to 0, which is what ``CICLS_UNKNOWN``
+#: in the shipped tables amounts to.
+CICLS = {
+    "CICLS_TURRET": 1,
+    "CICLS_MULTIGUN": 2,
+    "CICLS_SIMPLE": 3,
+    "CICLS_CAMERA": 4,
+    "CICLS_ENGINE": 5,
+    "CICLS_RADAR": 8,
+    "CICLS_FIGHTSHIELD": 9,
+    "CICLS_DETECTSHIELD": 10,
+    "CICLS_ELEVATOR": 11,
+    "CICLS_DOOR": 12,
+    "CICLS_COMPUTER": 13,
+    "CICLS_REPAIRSYS": 15,
+    "CICLS_POWERSTOR": 19,
+}
+
+#: Component state -> its bit.  The same bit means different things to
+#: different classes: 256 is ``CIS_CONTINUEFIGHT`` to a gun,
+#: ``CIS_TURRETCONTROL`` to a turret and ``CIS_ANGLETRACE`` to a tracker.
+CIS = {
+    "CIS_SWITCHOFF": 0,
+    "CIS_SWITCHON": 32,
+    "CIS_SWITCH_INV": 64,
+    "CIS_ANGLETRACE": 256,
+    "CIS_CONTINUEFIGHT": 256,
+    "CIS_TURRETCONTROL": 256,
+    "CIS_MANUALCONTROL": 512,
+    "CIS_MANUALTRACE": 512,
+    "CIS_SINGLEFIGHT": 512,
+    "CIS_GROUPFIGHT": 1024,
+    "CIS_POINTTRACE": 1024,
+    "CIS_INFRARED_ON": 4096,
+    "CIS_INFRARED_OFF": 8192,
+    "CIS_CHAMELEON_INV": 16384,
+    "CIS_INFRARED_INV": 16384,
+}
+
+#: Whether an angle wraps at a whole turn.
+MAN = {
+    "MAN_WRAP": 0,
+    "MAN_NOTWRAP": 1,
+}
+
+#: Key -> scan code.  Every one of the 174 names in ``ScanCode.dsc`` is
+#: here and there are no others.  These are the real IBM PC set-1 codes:
+#: ``SCAN_A`` is 30, ``SCAN_ESC`` is 1, ``SCAN_F1`` is 59.  The mouse and
+#: joystick continue the numbering past the keyboard.
+SCAN = {
+    "SCAN_NULL": 0,
+    "SCAN_ESC": 1,
+    "SCAN_W_1": 2,
+    "SCAN_W_2": 3,
+    "SCAN_W_3": 4,
+    "SCAN_W_4": 5,
+    "SCAN_W_5": 6,
+    "SCAN_W_6": 7,
+    "SCAN_W_7": 8,
+    "SCAN_W_8": 9,
+    "SCAN_W_9": 10,
+    "SCAN_W_0": 11,
+    "SCAN_W_SUB": 12,
+    "SCAN_W_PLUS": 13,
+    "SCAN_BS": 14,
+    "SCAN_TAB": 15,
+    "SCAN_Q": 16,
+    "SCAN_W": 17,
+    "SCAN_E": 18,
+    "SCAN_R": 19,
+    "SCAN_T": 20,
+    "SCAN_Y": 21,
+    "SCAN_U": 22,
+    "SCAN_I": 23,
+    "SCAN_O": 24,
+    "SCAN_P": 25,
+    "SCAN_LBRACKET": 26,
+    "SCAN_RBRACKET": 27,
+    "SCAN_W_ENTER": 28,
+    "SCAN_LCTRL": 29,
+    "SCAN_A": 30,
+    "SCAN_S": 31,
+    "SCAN_D": 32,
+    "SCAN_F": 33,
+    "SCAN_G": 34,
+    "SCAN_H": 35,
+    "SCAN_J": 36,
+    "SCAN_K": 37,
+    "SCAN_L": 38,
+    "SCAN_SEMIDOT": 39,
+    "SCAN_QUOTE": 40,
+    "SCAN_TILDA": 41,
+    "SCAN_LSHIFT": 42,
+    "SCAN_BSLASH": 43,
+    "SCAN_Z": 44,
+    "SCAN_X": 45,
+    "SCAN_C": 46,
+    "SCAN_V": 47,
+    "SCAN_B": 48,
+    "SCAN_N": 49,
+    "SCAN_M": 50,
+    "SCAN_COMMA": 51,
+    "SCAN_DOT": 52,
+    "SCAN_SLASH": 53,
+    "SCAN_RSHIFT": 54,
+    "SCAN_G_ASTERISK": 55,
+    "SCAN_BLANK": 57,
+    "SCAN_CAPS": 58,
+    "SCAN_F1": 59,
+    "SCAN_F2": 60,
+    "SCAN_F3": 61,
+    "SCAN_F4": 62,
+    "SCAN_F5": 63,
+    "SCAN_F6": 64,
+    "SCAN_F7": 65,
+    "SCAN_F8": 66,
+    "SCAN_F9": 67,
+    "SCAN_F10": 68,
+    "SCAN_PAUSE": 69,
+    "SCAN_SLOCK": 70,
+    "SCAN_G_7": 71,
+    "SCAN_G_8": 72,
+    "SCAN_G_9": 73,
+    "SCAN_G_SUB": 74,
+    "SCAN_G_4": 75,
+    "SCAN_G_5": 76,
+    "SCAN_G_6": 77,
+    "SCAN_G_PLUS": 78,
+    "SCAN_G_1": 79,
+    "SCAN_G_2": 80,
+    "SCAN_G_3": 81,
+    "SCAN_G_0": 82,
+    "SCAN_W_DEL": 83,
+    "SCAN_F11": 87,
+    "SCAN_F12": 88,
+    "SCAN_G_ENTER": 284,
+    "SCAN_RCTRL": 285,
+    "SCAN_G_SLASH": 309,
+    "SCAN_NUMLOCK": 325,
+    "SCAN_G_HOME": 327,
+    "SCAN_G_UP": 328,
+    "SCAN_G_PGUP": 329,
+    "SCAN_G_LEFT": 331,
+    "SCAN_G_RIGHT": 333,
+    "SCAN_G_END": 335,
+    "SCAN_G_DOWN": 336,
+    "SCAN_G_PGDN": 337,
+    "SCAN_G_INS": 338,
+    "SCAN_G_DEL": 339,
+    "SCAN_MOUSE_X": 510,
+    "SCAN_MOUSE_Y": 511,
+    "SCAN_LMOUSE": 512,
+    "SCAN_RMOUSE": 513,
+    "SCAN_MMOUSE": 514,
+    "SCAN_JOY1": 516,
+    "SCAN_JOY2": 517,
+    "SCAN_JOY3": 518,
+    "SCAN_JOY4": 519,
+    "SCAN_JOY5": 520,
+    "SCAN_JOY6": 521,
+    "SCAN_JOY7": 522,
+    "SCAN_JOY8": 523,
+    "SCAN_JOY9": 524,
+    "SCAN_JOY10": 525,
+    "SCAN_JOY11": 526,
+    "SCAN_JOY12": 527,
+    "SCAN_JOY13": 528,
+    "SCAN_JOY14": 529,
+    "SCAN_JOY15": 530,
+    "SCAN_JOY16": 531,
+    "SCAN_JOY17": 532,
+    "SCAN_JOY18": 533,
+    "SCAN_JOY19": 534,
+    "SCAN_JOY20": 535,
+    "SCAN_JOY21": 536,
+    "SCAN_JOY22": 537,
+    "SCAN_JOY23": 538,
+    "SCAN_JOY24": 539,
+    "SCAN_JOY25": 540,
+    "SCAN_JOY26": 541,
+    "SCAN_JOY27": 542,
+    "SCAN_JOY28": 543,
+    "SCAN_JOY29": 544,
+    "SCAN_JOY30": 545,
+    "SCAN_JOY31": 546,
+    "SCAN_JOY32": 547,
+    "SCAN_JPOV1_0": 550,
+    "SCAN_JPOV1_45": 551,
+    "SCAN_JPOV1_90": 552,
+    "SCAN_JPOV1_135": 553,
+    "SCAN_JPOV1_180": 554,
+    "SCAN_JPOV1_225": 555,
+    "SCAN_JPOV1_270": 556,
+    "SCAN_JPOV1_315": 557,
+    "SCAN_JPOV2_0": 560,
+    "SCAN_JPOV2_45": 561,
+    "SCAN_JPOV2_90": 562,
+    "SCAN_JPOV2_135": 563,
+    "SCAN_JPOV2_180": 564,
+    "SCAN_JPOV2_225": 565,
+    "SCAN_JPOV2_270": 566,
+    "SCAN_JPOV2_315": 567,
+    "SCAN_JPOV3_0": 570,
+    "SCAN_JPOV3_45": 571,
+    "SCAN_JPOV3_90": 572,
+    "SCAN_JPOV3_135": 573,
+    "SCAN_JPOV3_180": 574,
+    "SCAN_JPOV3_225": 575,
+    "SCAN_JPOV3_270": 576,
+    "SCAN_JPOV3_315": 577,
+    "SCAN_JPOV4_0": 580,
+    "SCAN_JPOV4_45": 581,
+    "SCAN_JPOV4_90": 582,
+    "SCAN_JPOV4_135": 583,
+    "SCAN_JPOV4_180": 584,
+    "SCAN_JPOV4_225": 585,
+    "SCAN_JPOV4_270": 586,
+    "SCAN_JPOV4_315": 587,
+    "SCAN_JOY_X": 590,
+    "SCAN_JOY_Y": 591,
+    "SCAN_JOY_Z": 592,
+    "SCAN_JOY_R_X": 593,
+    "SCAN_JOY_R_Y": 594,
+    "SCAN_JOY_R_Z": 595,
+}
 
 class ControlsFormatError(ValueError):
     pass
@@ -91,6 +363,11 @@ class Binding:
     @property
     def chord(self) -> str:
         return self.key if self.modifier == NO_MODIFIER else f"{self.modifier}+{self.key}"
+
+    @property
+    def codes(self) -> tuple[int, int]:
+        """The chord as the engine numbers it: (modifier, key) scan codes."""
+        return SCAN.get(self.modifier, UNRESOLVED), SCAN.get(self.key, UNRESOLVED)
 
 
 def bindings(path: Path) -> list[Binding]:
@@ -141,6 +418,28 @@ class Action:
     def action(self) -> str:
         """The ``Command.dsc`` identifier this row names, if it names one."""
         return f"CMD_{self.note}" if self.note else ""
+
+    @property
+    def code(self) -> int:
+        """The command as the engine numbers it."""
+        return MCMD.get(self.command, UNRESOLVED)
+
+    @property
+    def class_id(self) -> int:
+        """The target class as the engine numbers it.  ``CICLS_UNKNOWN`` is 0."""
+        return CICLS.get(self.target, UNKNOWN_CLASS)
+
+    @property
+    def bits(self) -> int:
+        """The state field's value: a ``CIS_`` bit, a ``MAN_`` flag, or 0."""
+        if self.state in CIS:
+            return CIS[self.state]
+        return MAN.get(self.state, 0)
+
+    @property
+    def dispatched(self) -> bool:
+        """True when the movement controller handles this command itself."""
+        return self.code in DISPATCHED
 
 
 def table(path: Path) -> list[Action]:

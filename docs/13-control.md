@@ -188,9 +188,19 @@ loader proper — which resolves a name through the resource manager at
 
 A sibling handler at `0x100314f0` — its `0x80000023` branch — shows the idiom
 the sections are likely to follow: a **flags byte** whose bits gate optional
-blocks, each block a run of
-`int32` terminated by `-1`. That is consistent with the `-1` fills throughout
-these files, and it is the next thing to test.
+blocks, each block a run of `int32` terminated by `-1`. That is consistent with
+the `-1` fills throughout these files, and it is the next thing to test.
+
+**What the controller's messages are is now settled.** Its dispatch is a
+16-way jump table on the message number, and that range is exactly `MCMD_` 1
+to 16 — the movement commands the input tables send, whose numbers are
+recovered in [14-controls.md](14-controls.md). Three commands the shipped
+tables use fall outside it: `MCMD_WALK_F` (19), `MCMD_WALK_B` (20) and
+`MCMD_LOCK` (21), so walking a machine is handled somewhere else entirely.
+What remains open is narrower than it was: not *what the messages are*, but
+which **field of the frame** feeds the channels those handlers reach —
+`+0x5c8`, a 0xf4-byte object with 0x1c-stride channels defaulting to 0.5, and
+`+0x5cc`, a 0x120-byte one with two arrays of six floats.
 
 Two smaller unknowns sit beside the sections: the 84-byte block at +128 — set
 on 525 members, and identical between `ctl_cam_fly` and `fr_b_plant` (a 1.0,

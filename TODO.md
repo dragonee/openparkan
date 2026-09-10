@@ -501,6 +501,18 @@ written down is a question nobody reopens.
       rows. `BuildDat.lst` reads too: all 32 assemblies exist, and it holds
       **12** schemes where its own header says there must be 11.
 
+- [x] **What the controller's messages are.** Settled, and it came from the
+      text layer rather than the disassembly. `World3D.dll` carries a
+      name resolver for every family the tables use, so the engine's own
+      numbers are recoverable: all **174** scan codes (the real IBM PC set-1
+      codes — `SCAN_A` is 30, `SCAN_ESC` 1, `SCAN_F1` 59), 22 `MCMD_`
+      commands, 13 `CICLS_` classes and 15 `CIS_` state bits. The
+      controller's dispatch is a 16-way jump table, and **`MCMD_` 1 to 16 is
+      exactly that range** — the join the previous entry was missing.
+      `MCMD_WALK_F` (19), `MCMD_WALK_B` (20) and `MCMD_LOCK` (21) fall
+      outside it on 14 of the 116 rows, so walking is not the movement
+      controller's job. → [docs/14-controls.md](docs/14-controls.md)
+
 ## 1. Wrong on screen today
 
 Nothing known. What is left below is fidelity the game had and this does not,
@@ -731,6 +743,12 @@ today; each is a small trap for anyone extending the code.
   finds the reference records by shape instead. Beside them: the 84-byte
   block at +128, and the nine ints of a reference, three of which read as
   ASCII on 41 records.
-- Which `.ctl` field feeds which `IControl` setter. The stub table names
-  every method but never receives an argument, so the mapping has to come
-  from `AniMesh.dll` — the only module that calls `LoadControlSystem`.
+- Which `.ctl` field feeds which channel. The message side is closed — the
+  controller dispatches `MCMD_` 1..16 — but the handlers for 8..12 reach
+  indexed channels on two sub-objects (`+0x5c8`, a 0xf4-byte class with
+  0x1c-stride channels defaulting to 0.5; `+0x5cc`, a 0x120-byte class with
+  two arrays of six floats defaulting to 1.0 and 0.0), and nothing yet says
+  which triple of the frame either was loaded from.
+- What handles `MCMD_WALK_F`, `MCMD_WALK_B` and `MCMD_LOCK`. They are
+  outside the movement controller's dispatch range and 14 shipped rows send
+  them.
