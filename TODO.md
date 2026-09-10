@@ -28,9 +28,9 @@ written down is a question nobody reopens.
       came from measuring an *unposed* chassis; posed, they run 1.5 to 30
       units against buildings of 40 to 215.
 - [x] **The vertical datum for buildings.** There is no datum. A mission puts
-      model z = 0 at the given height and nothing else: over 864 placements a
-      building's origin lands a median **0.00** from the terrain under it and
-      a unit's lowest exterior vertex **0.08**. The "rest it on its base"
+      model z = 0 at the given height and nothing else: a building's origin
+      lands a median **+0.03** above the terrain under it and a unit's lowest
+      exterior vertex within **0.03** of it. The "rest it on its base"
       heuristic this replaced lifted `fr_b_bunker` 23 units into the air.
 - [x] **Component attachment.** A `.dat` is a tree written depth first —
       **458 of 458** assemblies consume their child counts exactly — and a

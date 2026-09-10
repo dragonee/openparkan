@@ -101,8 +101,8 @@ half a span: `fr_b_brige`'s ring covers y −37.1..0.0 of a mesh that runs to
 
 Placed and turned by the mission's angle it lands where the building does.
 Over the **167 placed buildings** that have one, the terrain under the outline
-spans a median 2.24 units from its lowest sample to its highest — buildings
-sit on flat ground — and the placement height is a median **0.00** above their
+spans a median 1.93 units from its lowest sample to its highest — buildings
+sit on flat ground — and the placement height is a median **0.04** above their
 mean. That makes it the one independent check on object *placement* the data
 offers, which is why the viewer draws it through the same transform as the
 model rather than a baked one: an outline that agreed with the model no matter
@@ -553,14 +553,21 @@ objects in the shipped missions, against the terrain height under each:
 
 | kind | origin − terrain | lowest exterior vertex − terrain |
 |---|---|---|
-| building | **0.00** | −1.16 |
-| unit | +1.54 | **−0.08** |
-| vegetation | +2.25 | −2.79 |
-| rock | +7.80 | −0.09 |
+| building | **+0.03** | −0.68 |
+| unit | +1.56 | **−0.00** |
 
 A building's origin lands on the ground; a unit's mission z is set so its
 wheels or feet do. Both are the same rule seen from two ends, and both are
-tight: 64% of units put their lowest vertex within one unit of the terrain.
+tight: 75% of units put their lowest vertex within one unit of the terrain,
+and the median unit is **0.03** off it.
+
+Vegetation and rock are the two kinds this fits least well, for a reason the
+data itself gives — see [Local origins](#local-origins) below.
+
+The figures moved slightly when the terrain gained its levels of detail:
+`height_at` samples the fine level alone now, and the placement checks
+improved with it — buildings within two units of the ground went from 96 of
+167 to **100**, and units within one from 194 of 296 to **223**.
 
 This only reads that way **once node poses are applied**. Before that a
 building's parts pile up on their own origins, its geometry comes out roughly

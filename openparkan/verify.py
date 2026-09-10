@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import math
 import random
+import statistics
 import struct
 from collections import Counter, defaultdict
 from pathlib import Path
@@ -2322,6 +2323,9 @@ def check_poses(check, game: Path) -> None:
     # The ground datum: a placed object's own z = 0 sits on the terrain.
     heights: dict[Path, landmesh.LandMesh] = {}
     origin_on_ground = base_on_ground = buildings = units = 0
+    building_off: list[float] = []
+    unit_off: list[float] = []
+    datum: dict[int, tuple[list[float], list[float]]] = defaultdict(lambda: ([], []))
     for folder in gamedir.missions(game):
         m = mission.load(folder / "data.tma")
         if not m.map_path:
@@ -2334,8 +2338,6 @@ def check_poses(check, game: Path) -> None:
             heights[land] = landmesh.load(land)
         terrain = heights[land]
         for o in m.objects:
-            if o.kind not in (mission.KIND_BUILDING, mission.KIND_UNIT):
-                continue
             ground = terrain.height_at(o.position[0], o.position[1])
             if ground is None:
                 continue
@@ -2368,15 +2370,20 @@ def check_poses(check, game: Path) -> None:
             if not reachable:
                 continue
             lowest = min(posed[v][2] for v in reachable)
+            datum[o.kind][0].append(o.position[2] - ground)
+            datum[o.kind][1].append(o.position[2] + lowest - ground)
             if o.kind == mission.KIND_BUILDING:
                 buildings += 1
+                building_off.append(abs(o.position[2] - ground))
                 origin_on_ground += abs(o.position[2] - ground) < 2.0
-            else:
+            elif o.kind == mission.KIND_UNIT:
                 units += 1
+                unit_off.append(abs(o.position[2] + lowest - ground))
                 base_on_ground += abs(o.position[2] + lowest - ground) < 1.0
     check("placement: a building's origin sits on the terrain",
           origin_on_ground >= buildings * 0.5,
-          f"{origin_on_ground}/{buildings} within 2 units of the height under them")
+          f"{origin_on_ground}/{buildings} within 2 units of the height under "
+          f"them, a median {statistics.median(building_off):.2f} off")
     # Bridges come in halves placed back to back, their rotations exactly pi
     # apart, so their ends must meet.  That pins the sense of the placement
     # angle, which nothing else in the data does.
@@ -2421,9 +2428,25 @@ def check_poses(check, game: Path) -> None:
           f"angle is used as it stands, against {flipped}/{pairs} when it is "
           f"negated -- which is what fixes the sense of the rotation")
 
+    # The ground datum, all four kinds at once, so the table in the docs is
+    # re-derivable rather than hand-kept.
+    table = ", ".join(
+        f"{mission.KIND_NAMES.get(k, k)} {statistics.median(a):+.2f} / "
+        f"{statistics.median(b):+.2f} over {len(a)}"
+        for k, (a, b) in sorted(datum.items()) if a
+    )
+    check("placement: a model's own z = 0 is the ground datum",
+          abs(statistics.median(datum[mission.KIND_BUILDING][0])) < 0.2
+          and abs(statistics.median(datum[mission.KIND_UNIT][1])) < 0.2,
+          f"median (origin - terrain) / (lowest exterior vertex - terrain) by "
+          f"kind: {table} -- a building's origin lands on the ground and a "
+          f"unit's mission z is set so its feet do, which is the same rule "
+          f"from two ends")
+
     check("placement: a unit's lowest exterior vertex sits on the terrain",
           base_on_ground >= units * 0.5,
-          f"{base_on_ground}/{units} within 1 unit of the height under them")
+          f"{base_on_ground}/{units} within 1 unit of the height under them, "
+          f"a median {statistics.median(unit_off):.2f} off")
 
 
 def check_lod(check, game: Path) -> None:

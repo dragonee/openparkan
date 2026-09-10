@@ -107,7 +107,7 @@ PASS  Land.map: cell grid indexes real areals        1034301 cell entries across
 PASS  data.tma: parses exactly to end of file        29/29 missions, 864 objects
 PASS  data.tma: the map it names exists              29/29 missions reference a real DATA/MAPS entry
 PASS  data.tma: placed objects lie inside the map    864/864 objects within their map's XY extent
-PASS  data.tma: buildings sit on the terrain surface median height above ground +0.000 over 167 buildings
+PASS  data.tma: buildings sit on the terrain surface median height above ground +0.026 over 167 buildings
 PASS  MESH: building exteriors are authored about their centre 20/30 building meshes are near-symmetric about z=0 -- they must be rested on their base, not their origin
 PASS  data.tma: every object reference resolves      864/864 -- UNITS/*.dat on disk, scenery as STAT in objects.rlb
 PASS  data.tma: ClanID is a 0-based index into the clan list 463/463 object ClanIDs in range

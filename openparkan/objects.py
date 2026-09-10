@@ -37,8 +37,8 @@ one a clearance margin beyond it -- 1.3 to 2.4 times the area, 1.6 median.
 All 30 shipped records hold exactly two, all 60 rings wind anticlockwise, and
 the inner ring's XY extent is the model's own bounding box on 23 of the 30.
 Placed and turned by the mission's angle, it sits on the terrain: over 167
-placed buildings the ground under the outline runs a median 2.24 units from
-its lowest point to its highest, and the placement height is a median 0.00
+placed buildings the ground under the outline runs a median 1.93 units from
+its lowest point to its highest, and the placement height is a median 0.04
 above their mean.
 
 A ``.ndp`` slot is the model's **damage table**: one 76-byte record per mesh

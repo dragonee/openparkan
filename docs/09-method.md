@@ -121,3 +121,28 @@ real slot.
 
 That check is not a formality. It is what turns someone else's claim into
 something this project knows.
+
+### The second consultation went the other way
+
+fparkan's notes were read again for two bits this project could not name: the
+terrain surface word's `0x10` and the draw order's `0x80`. **Neither is named
+there either**, which is worth writing down — a negative result from the other
+project saves the next person the same trip.
+
+What it did give was a frame. The surface word turns out to be a **16-bit
+compaction of a 32-bit engine mask** with a documented bit mapping, so the
+unnamed `0x10` is the engine's `0x00001000`; and the engine packs a **six-bit
+surface class** from six more of those bits, which is what face field 13 is.
+That reading was checked before it was used: every one of the 275882 faces
+holds a field-13 value below 64. It also settled an older negative — a
+bitfield's groups have no reason to be spatial or to track a material, which
+is exactly why field 13 failed as a patch id.
+
+And in two places the reading here goes further: fparkan leaves the face
+record's last eight bytes uninterpreted, six of which are the face's own
+normal, and it describes stream 11 only as "cell accelerator data", where it
+is the draw order with a batch-start bit. Both are checked on all 275882
+faces.
+
+The exchange is not one-directional, and recording which way it ran each time
+is part of the same honesty as recording where a fact came from.

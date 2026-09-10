@@ -112,7 +112,7 @@ projects spend a decade.
 
 `data.tma` is now fully parsed: all 29 missions consume to the last byte,
 864 objects are placed, and every reference they make resolves. Buildings land
-at a median of +0.000 units above the terrain, which is the check that ties
+at a median of +0.026 units above the terrain, which is the check that ties
 mission space and terrain space together.
 
 **Step 4 is the next thing**, and it is mostly engineering rather than reverse

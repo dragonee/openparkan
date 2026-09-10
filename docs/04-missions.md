@@ -188,7 +188,7 @@ Mission name:
 - **Everything it points at exists**: 29/29 map paths resolve to a real
   `DATA/MAPS` entry, 864/864 object references resolve.
 - **Placement agrees with the terrain.** All 864 objects fall inside their
-  map's XY extent, and buildings sit at a **median of +0.000 units** above the
+  map's XY extent, and buildings sit at a **median of +0.026 units** above the
   terrain surface sampled from `Land.msh`. Bridges float (median +12.8) and
   bunkers dig in (median −3.0), which is what those things should do.
 
