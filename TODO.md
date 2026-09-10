@@ -749,6 +749,10 @@ today; each is a small trap for anyone extending the code.
   0x1c-stride channels defaulting to 0.5; `+0x5cc`, a 0x120-byte class with
   two arrays of six floats defaulting to 1.0 and 0.0), and nothing yet says
   which triple of the frame either was loaded from.
-- What handles `MCMD_WALK_F`, `MCMD_WALK_B` and `MCMD_LOCK`. They are
-  outside the movement controller's dispatch range and 14 shipped rows send
-  them.
+- What handles `MCMD_WALK_F`. `MCMD_WALK_B` (20) and `MCMD_LOCK` (21) are
+  answered — `Control.dll` has a second control class whose table covers
+  messages 20 to 28, and `AniMesh.dll`'s agent takes both as well, keeping
+  `MCMD_LOCK` for itself where it forwards everything else. `MCMD_LOCK`
+  turns out to carry a sub-command rather than a magnitude. But **19 has no
+  handler in any of the six modules scanned**, and six shipped rows send it:
+  the `W` key, down and up, in all three tables. → [docs/14-controls.md](docs/14-controls.md)

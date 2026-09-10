@@ -175,8 +175,11 @@ exactly 100 bytes apart.
 
 ### Where to look next
 
-`LoadControlSystem` copies six `(archive, member)` name pairs into a local
-block and hands it to a message dispatch. The object is 0x668 or 0x670 bytes
+`LoadControlSystem` takes **three `(archive, member)` pairs** — six name
+strings — copies them into a local block and hands it to a message dispatch.
+Its only caller, at `AniMesh.dll:0x100032e7`, pushes them from three fields of
+the agent at `+0x80`, `+0xc0` and `+0x100`, each an archive name followed by a
+member name 0x20 later, plus a kind argument the callee compares against 9. The object is 0x668 or 0x670 bytes
 with **six vtables** (`0x1003d298`, `0x1003d254`, `0x1003d1fc`, `0x1003d1b4`,
 `0x1003d1a0`, `0x1003d198`) and the interface it returns is the last of them,
 at `+0x14`. The message it sends is `0x80000020`, whose only handler is the function

@@ -3508,12 +3508,20 @@ def check_controls(check, game: Path) -> None:
           f"{len({r.command for r in rows})} distinct commands across the tables "
           f"resolve through the World3D.dll table")
 
-    outside = sorted({r.command for r in rows if not r.dispatched})
+    outside = Counter(r.command for r in rows if not r.dispatched)
     check("controls: three commands fall outside the controller's dispatch",
           len(outside) == 3,
           f"{sum(1 for r in rows if r.dispatched)}/{len(rows)} rows send a command "
-          f"in {controls.DISPATCHED.start}..{controls.DISPATCHED.stop - 1}; "
-          f"the rest are {', '.join(outside)}")
+          f"in {controls.DISPATCHED.start}..{controls.DISPATCHED.stop - 1}; the rest "
+          + ", ".join(f"{n} x{c}" for n, c in sorted(outside.items())))
+
+    walk = [r for r in rows if r.command == "MCMD_WALK_F"]
+    tables = {name for name in controls.TABLES
+              for r in controls.table(game / name) if r.command == "MCMD_WALK_F"}
+    check("controls: the forward walk is sent by every table",
+          len(walk) == 6 and len(tables) == len(controls.TABLES),
+          f"MCMD_WALK_F is sent on {len(walk)} rows, two in each of "
+          f"{len(tables)} tables -- and no module dispatches on its number")
 
     classed = {r.target for r in rows}
     unknown = sorted(c for c in classed

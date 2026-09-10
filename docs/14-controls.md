@@ -177,6 +177,37 @@ What is still not established is the step past this: which **field of the
 `MCMD_UP` and reaches index 0 of the object at `+0x5cc` does not say which of
 the frame's six triples that object was loaded from.
 
+### Where the three outsiders go
+
+`MCMD_WALK_B` and `MCMD_LOCK` are handled, and not by the movement
+controller. Two places take them:
+
+- **`Control.dll` has a second control class.** Its dispatcher at `0x10007830`
+  covers messages 1, 4, 7, 12, the `0x80000020` load, and a range of its own —
+  `lea eax, [edx - 0x14]; cmp eax, 8; jmp [eax*4 + 0x10007d8c]`, a 9-way table
+  over **20 to 28**. Entry 0 is `MCMD_WALK_B` at `0x10007d58`, entry 1 is
+  `MCMD_LOCK` at `0x10007d0f`, entries 2 to 6 all point at the shared no-op,
+  and 27 and 28 belong to some other family.
+- **`AniMesh.dll`'s agent takes them too.** Its dispatcher at `0x10006fc0`
+  sends `MCMD_WALK_B` to `0x10007277`, `MCMD_LOCK` to `0x1000729b`, and the
+  control-system load to `0x10007248`. A forwarder at `0x10001320` passes every
+  message it receives to a sub-object **except** 21 — `MCMD_LOCK` is the one
+  message the agent keeps for itself.
+
+**`MCMD_LOCK` carries a sub-command.** Both handlers read the word the message
+points at rather than a magnitude: `Control.dll` tests it against 5,
+`AniMesh.dll` tables it as `[arg] - 2` over eight entries at `0x100073a8`. So
+"lock" is a family of actions, not one.
+
+**`MCMD_WALK_F` (19) has no handler anywhere.** There is no `cmp edx, 0x13` in
+`Control.dll`, `AniMesh.dll`, `World3D.dll`, `iron3d.dll`, `Behavior.dll` or
+`ai.dll`, and every jump-table range that reaches the walk messages starts at
+20 (`lea eax, [edx - 0x14]`), so 19 falls to the default in each. Six shipped
+rows send it — two in each of the three tables, the `W` key down and up. Either
+something translates it before it reaches a controller, or the forward walk is
+driven another way entirely. It is the sharpest loose end the numbering
+exposes.
+
 ### Three schemes
 
 `hero.tbl`, `m1.tbl` and `m2.tbl` are the pilot on foot and two machine
