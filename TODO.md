@@ -91,14 +91,26 @@ written down is a question nobody reopens.
       superimposes every level of detail; at the level the renderer draws, the
       residual was twelve, and all twelve were hulls.
       → [docs/07-objects.md](docs/07-objects.md)
-- [x] **What a `.ctl` is** — a *movement* controller, not an animation one.
-      `Control.dll`'s `LoadControlSystem` behind an `IControl` of
-      `SetTangAccel` / `SetNormSpeed` / `SetStrafeAngle`; the file is that
-      object written out, ∓FLT_MAX "no limit" triples and all. Its size
-      correlates **+0.97** with its own leading count and **+0.40** with the
-      node count of the mesh it belongs to, over 542 records, so it holds no
-      per-node data. `.ndp`, the other unread `STAT` slot, is a hit-point
-      float and an `(archive, member)` pair naming an `.exp` explosion.
+- [x] **The `.ctl` controller, as far as its frame.** A *movement*
+      controller, not an animation one, and now [read](docs/13-control.md).
+      All **531** members open with the same **212-byte frame** — a 128-byte
+      parameter block whose 24 float slots are finite on all **12744** reads,
+      six triples whose components agree on 2889 of 3186, and the engine's
+      own defaults: a whole turn, `pi/2`, `FLT_MAX`, `-1`. Six members are
+      the frame and nothing else. `Terrain.dll` carries a stub table at
+      `0x100191a0` that names the whole of `IControl` — tangential, normal
+      and world speeds, two accelerations, two angles and a calculation
+      mode — which is a better account of a triple than `(x, y, z)`.
+      The 100-byte **reference record** inside it says what the thing
+      *emits*: all **1651** resolve, and every one of the 158 that names
+      `objects.rlb` is a `BULL` — a projectile — carried only by the four
+      archives that hold things which shoot. The old note here said "a body
+      of 156-byte records"; the records are 100 bytes, and the sections
+      around them are not fixed-stride at all. Its size still correlates
+      **+0.97** with its own leading count and **+0.40** with the node count
+      of the mesh it belongs to, over 542 records, so it holds no per-node
+      data. `.ndp`, the other unread `STAT` slot, is a hit-point float and
+      an `(archive, member)` pair naming an `.exp` explosion.
 - [x] **The socket's rotation.** It was being thrown away, and it was saying
       something real. A part mounts by making its root node take the socket's
       pose, so the transform is `socket ∘ root⁻¹`; every mounted part's root
@@ -699,3 +711,15 @@ today; each is a small trap for anyone extending the code.
   rest of that byte is read: `0x10` opens a batch and `0x48` is constant.
 - Object mesh **face flags** (0 on 233714 faces, then 2, 4, 16, 32, 34) and the
   **class** beside them, which sits below 64 on 240500 of 241887.
+- The `.ctl` **sections**. The five counts at +0..+16 say how many of five
+  kinds a controller carries, and the frame accounts for the file exactly
+  when all five are zero, but the sections are variable-length and nest: the
+  three kinds that appear alone give strides of 160, 36 and 180, a count of 1
+  on the second slot costs zero bytes, and no assignment of five fixed
+  strides fits — the best exact solution fails on 520 of the 531. The reader
+  finds the reference records by shape instead. Beside them: the 84-byte
+  block at +128, and the nine ints of a reference, three of which read as
+  ASCII on 41 records.
+- Which `.ctl` field feeds which `IControl` setter. The stub table names
+  every method but never receives an argument, so the mapping has to come
+  from `AniMesh.dll` — the only module that calls `LoadControlSystem`.

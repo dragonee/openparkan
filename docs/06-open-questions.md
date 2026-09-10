@@ -31,12 +31,21 @@ The navigation mesh is [solved](08-arealmap.md). Two fields are not:
 
 ## The .ctl controller
 
-[Identified but not parsed](07-objects.md): a *movement* controller —
-`Control.dll`'s `LoadControlSystem`, driven through an `IControl` of speeds,
-accelerations and angle limits — with a fixed parameter header and a body of
-156-byte records. It does not affect a static picture, which is why it is not
-read. The vertical datum, the component attachment and the rest pose that it
-was in turn expected to explain all turned out to live in the mesh.
+[Read as far as its frame](13-control.md). The 212-byte parameter block at the
+head of all 531 members is parsed and verified, the `IControl` interface is
+recovered by name from `Terrain.dll`'s stub table, and the 100-byte reference
+record — which is what a controller *emits*, an effect or a projectile — is
+found and resolves on all 1651. The vertical datum, the component attachment
+and the rest pose that this file was once expected to explain all turned out
+to live in the mesh.
+
+Two things in it are open. The **sections** after the frame are
+variable-length and nest, so the five counts at +0..+16 do not give their
+sizes; the earlier note here said “a body of 156-byte records”, and that was
+wrong — the records are 100 bytes and the sections around them are not fixed
+at all. And **which field feeds which setter** is unmapped: the stub table
+names the interface but never receives an argument, so the mapping has to
+come from `AniMesh.dll`, the only module that calls `LoadControlSystem`.
 
 Its sibling `.ndp` is [solved and read](07-objects.md). One field of it is not:
 the second `float32` of a record, 1000 on 549 of them and then 0, 10, 1, 300

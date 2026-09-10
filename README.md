@@ -29,6 +29,7 @@ practice — format facts yes, code no — is set out in
 | **Baked lighting** | done — `lightmap.lib`, 21 buildings, per-batch |
 | **Building interiors** | done — the internal nodes are 29460 triangles behind 10725 of shell, and the viewer cuts buildings open; path graph for 29 |
 | **Control points** | done — 284 members, 3599 named attachment points |
+| **Movement controllers** | partial — `.ctl`, the 212-byte parameter frame on all 531 members and the 1651 references inside them; the variable sections after the frame are not parsed |
 | **`Land.map` navigation mesh** | done — all 33 maps, 34662 areals, adjacency and grid |
 | **Sky** | done — `sky.ske` day cycle, `sky.wea`'s nine texture slots, the engine's twelve-element lens flare and both its intensity gates, the weather markers, and where the sun and moon stand (fixed, and in no file), all 29 missions |
 | **RsLi archives** | done — encrypted entry table read, deflate and LZSS both unpacked; all 24 `sprites.lib` members out, and `gamefont.rlb`'s font, glyph metrics and `Ipol` palette |
@@ -170,6 +171,7 @@ of fields carried through the readers without being understood.
 - [10-sky.md](docs/10-sky.md) — `sky.ske`, the day cycle, and the lens flare
 - [11-effects.md](docs/11-effects.md) — `effects.rlb` and the `.exp` explosions
 - [12-rsli.md](docs/12-rsli.md) — the two archives that are not NRes, and their cipher
+- [13-control.md](docs/13-control.md) — `.ctl`, the movement controller and `IControl`
 
 ## Layout
 

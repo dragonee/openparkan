@@ -8,6 +8,7 @@ from collections import Counter
 from pathlib import Path
 
 from . import (
+    control,
     effects,
     font,
     gamedir,
@@ -235,6 +236,52 @@ def cmd_sky(args, game: Path) -> int:
     if not shown:
         print("no sky.ske found", file=sys.stderr)
         return 2
+    return 0
+
+
+def cmd_control(args, game: Path) -> int:
+    """List controllers, or show one .ctl in full."""
+    names = frozenset(
+        path.name.lower() for path in game.iterdir()
+        if path.suffix.lower() in (".rlb", ".lib") and is_nres(path)
+    )
+    found: list[tuple[str, str, control.Controller]] = []
+    for path in sorted(game.glob("*.rlb")) + sorted(game.glob("*.lib")):
+        if not is_nres(path):
+            continue
+        archive = NResArchive.open(path)
+        for entry in archive:
+            if not entry.tag.upper().startswith("CTL"):
+                continue
+            if args.name and entry.name.lower() != args.name.lower():
+                continue
+            found.append((path.name, entry.name,
+                          control.parse(archive.read(entry), names)))
+    if not found:
+        print(f"no such controller: {args.name}" if args.name
+              else "no controllers found", file=sys.stderr)
+        return 2
+
+    if not args.name:
+        refs = sum(len(c.references) for _l, _n, c in found)
+        print(f"{len(found)} controllers, {refs} references")
+        for lib, name, c in found:
+            mark = " bare" if c.bare else ""
+            print(f"  {lib:<14} {name:<26} sections {c.sections:3d}  "
+                  f"refs {len(c.references):3d}{mark}")
+        return 0
+
+    for lib, name, c in found:
+        print(f"{lib}/{name}   counts {c.counts}"
+              f"{'   (frame only)' if c.bare else ''}")
+        for at, triple in zip(control.TRIPLE_AT, c.triples, strict=True):
+            print(f"  +{at:<4d} {triple[0]:12g} {triple[1]:12g} {triple[2]:12g}")
+        print(f"  +92   {c.scale}   +96 {c.pair[0]:g}, {c.pair[1]:g}   "
+              f"+104 {c.mode}   +116 {c.flags}")
+        print(f"  bounds {c.bounds[0]:g}, {c.bounds[1]:g}   "
+              f"cone {c.cone:.5f}   reach {c.reach:g}")
+        for r in c.references:
+            print(f"  +{r.offset:<6d} {str(r.resource):<40} {list(r.values)}")
     return 0
 
 
@@ -481,6 +528,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("mission", nargs="?", help="mission directory; default is every mission")
     p.add_argument("--frames", action="store_true", help="list every keyframe")
     p.set_defaults(fn=cmd_sky)
+
+    p = sub.add_parser("control", help="list .ctl controllers, or show one")
+    p.add_argument("name", nargs="?", help="a .ctl member name; default is a listing")
+    p.set_defaults(fn=cmd_control)
 
     p = sub.add_parser("effects", help="list effects, or describe one")
     p.add_argument("name", nargs="?", help="an FXID name; default is a listing")

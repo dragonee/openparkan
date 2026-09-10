@@ -17,6 +17,7 @@ from pathlib import Path
 
 from . import (
     arealmap,
+    control,
     effects,
     font,
     gamedir,
@@ -3328,6 +3329,105 @@ def check_effects(check, game: Path) -> None:
           f"effect whose every material resolves")
 
 
+def check_control(check, game: Path) -> None:
+    """.ctl -- the controller's 212-byte parameter frame."""
+    names = frozenset(p.name.lower() for p in all_archives(game))
+    members: dict[str, set[str]] = {}
+    blobs: list[tuple[str, str, bytes]] = []
+    for path in all_archives(game):
+        archive = NResArchive.open(path)
+        members[path.name.lower()] = {e.name.lower() for e in archive}
+        for entry in archive:
+            if entry.tag.upper().startswith("CTL"):
+                blobs.append((path.name, entry.name, archive.read(entry)))
+
+    parsed: list[control.Controller] = []
+    sizes: list[int] = []
+    bare_names: list[str] = []
+    refused = 0
+    for _lib, name, blob in blobs:
+        try:
+            controller = control.parse(blob, names)
+        except control.ControlFormatError:
+            refused += 1
+            continue
+        parsed.append(controller)
+        if controller.bare:
+            sizes.append(len(blob))
+            bare_names.append(name)
+    check(".ctl: every controller carries the 212-byte frame",
+          parsed and not refused,
+          f"{len(parsed)}/{len(blobs)} members across "
+          f"{len({lib for lib, _n, _b in blobs})} archives parse, none refused")
+
+    check(".ctl: a controller with no sections is the frame and nothing else",
+          bool(sizes) and all(n == control.FRAME_SIZE for n in sizes),
+          f"{len(sizes)} members are {control.FRAME_SIZE} bytes with 0xFF from "
+          f"+{control.HEADER_SIZE} on -- {', '.join(bare_names[:3])}")
+
+    reads = [v for c in parsed for t in c.triples for v in t]
+    reads += [v for c in parsed for v in (*c.pair, *c.bounds, c.cone, c.reach)]
+    finite = sum(1 for v in reads if math.isfinite(v))
+    check(".ctl: every float in the parameter block is a float",
+          finite == len(reads) > 0,
+          f"{finite}/{len(reads)} reads across the block's 24 float slots on "
+          f"{len(parsed)} members are finite")
+
+    equal = sum(1 for c in parsed for t in c.triples if t[0] == t[1] == t[2])
+    total = sum(len(c.triples) for c in parsed)
+    check(".ctl: the six triples are per-axis",
+          equal >= total * 0.8 > 0,
+          f"{equal}/{total} triples hold the same value on all three "
+          f"components, which is what a per-axis default looks like")
+
+    turn = sum(1 for c in parsed
+               if all(abs(v - control.FULL_TURN) <= 0.01 for v in c.triples[5]))
+    cone = sum(1 for c in parsed if abs(c.cone - control.HALF_CONE) <= 1e-4)
+    reach = sum(1 for c in parsed if c.reach >= control.FLT_MAX)
+    check(".ctl: the angle limits carry the engine's own defaults",
+          turn > len(parsed) * 0.7 and cone > len(parsed) * 0.9
+          and reach > len(parsed) * 0.9,
+          f"a whole turn on {turn}, pi/2 on {cone}, FLT_MAX on {reach} "
+          f"of {len(parsed)}")
+
+    refs = [r for c in parsed for r in c.references]
+    resolved = sum(
+        1 for r in refs
+        if r.resource.member.lower() in members.get(r.resource.library.lower(), ())
+    )
+    check(".ctl: every reference names a member that exists",
+          resolved == len(refs) > 0,
+          f"{resolved}/{len(refs)} (archive, member) pairs resolve, into "
+          f"{len({r.resource.library.lower() for r in refs})} archives")
+
+    tags = {e.name.lower(): e.tag for e in NResArchive.open(game / "objects.rlb")} \
+        if (game / "objects.rlb").exists() else {}
+    kinds: Counter[str] = Counter()
+    shooters: set[str] = set()
+    for (lib, _name, _blob), c in zip(blobs, parsed, strict=True):
+        for r in c.references:
+            if r.resource.library.lower() == "objects.rlb":
+                kind = tags.get(r.resource.member.lower(), "?")
+                kinds[kind] += 1
+                shooters.add(lib)
+    check(".ctl: the objects a controller names are projectiles",
+          kinds and set(kinds) == {"BULL"}
+          and shooters <= {"guns.rlb", "turrets.rlb", "animals.rlb", "bases.rlb"},
+          f"all {sum(kinds.values())} objects.rlb references are BULL records, "
+          f"and the only archives that carry any are {', '.join(sorted(shooters))}")
+
+    runs = 0
+    stepped = 0
+    for c in parsed:
+        for a, b in zip(c.references, c.references[1:], strict=False):
+            runs += 1
+            stepped += b.offset - a.offset == control.REFERENCE_STRIDE
+    check(".ctl: references sit at a fixed stride",
+          stepped >= runs * 0.75 > 0,
+          f"{stepped}/{runs} consecutive references are "
+          f"{control.REFERENCE_STRIDE} bytes apart")
+
+
 def run(game: Path) -> int:
     """Run every check against ``game``.  Returns a process exit code."""
     results: list[tuple[str, bool, str]] = []
@@ -3342,7 +3442,7 @@ def run(game: Path) -> int:
         check_water, check_layers, check_materials, check_sky,
         check_minimap_agreement, check_arealmap,
         check_grid, check_missions, check_objects, check_poses, check_lod, check_damage,
-        check_effects, check_footprints, check_rsli,
+        check_effects, check_footprints, check_rsli, check_control,
     )
     for fn in checks:
         fn(check, game)

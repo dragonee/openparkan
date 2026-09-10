@@ -14,7 +14,7 @@ machine type `0x14c`).
 | `Terrain.dll` | 623 KB | 13 | terrain, building placement, render settings |
 | `Behavior.dll` | 357 KB | 3 | behaviour graph interpreter (`.scr`) |
 | `services.dll` | 232 KB | 6 | support services |
-| `Control.dll` | 235 KB | 5 | controllers (`.ctl` data) |
+| `Control.dll` | 235 KB | 5 | controllers — `IControl`, [read](13-control.md) |
 | `ArealMap.dll` | 226 KB | 9 | areal map — navigation / regions (`Land.map`) |
 | `ai.dll` | 207 KB | 2 | AI |
 | `Ngi32.dll` | 195 KB | 145 | **Nikita Graphics Interface** — the platform layer |
