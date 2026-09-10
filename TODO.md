@@ -406,6 +406,17 @@ written down is a question nobody reopens.
       flags bit `0x2000` marks the **bed beneath a liquid**: exactly the
       **6102** faces whose layer-1 material is `WATER_BOT` or `ENV_LAVA_BOT`,
       and no other. → [docs/03-terrain.md](docs/03-terrain.md)
+- [x] **Object mesh stream 7**, the last per-face record either format
+      carried unread. **One 16-byte record per triangle on all 435 meshes** —
+      241887 — and it mirrors the terrain's: a flags word, **three edge
+      neighbours** (`0xFFFF` for none) and **the face's own normal** as
+      `int16` over 32767. Both halves check exactly: the normal is unit length
+      on all 241887 and agrees with the triangle's cross product on 241879,
+      and **674200 of the 674206** in-range neighbours share two vertex
+      positions with the face that names them — the six that do not are all in
+      one mesh. The flags word takes six values and the trailing field has the
+      shape of the terrain's six-bit class; neither is named.
+      → [docs/07-objects.md](docs/07-objects.md)
 - [x] **The renderer's interface.** `IDirect3DDevice7`, pinned by the vtable
       offsets the engine calls through — `SetRenderState` at 20,
       `DrawPrimitive` at 25, `SetTexture` at 35, `SetTextureStageState` at 37,
@@ -686,3 +697,5 @@ today; each is a small trap for anyone extending the code.
   is open; none of the six tracks slope, height or face size.
 - Terrain **draw-order flags bit `0x80`**, on 89 faces across the 33 maps. The
   rest of that byte is read: `0x10` opens a batch and `0x48` is constant.
+- Object mesh **face flags** (0 on 233714 faces, then 2, 4, 16, 32, 34) and the
+  **class** beside them, which sits below 64 on 240500 of 241887.

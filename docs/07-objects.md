@@ -624,6 +624,39 @@ batches over 39 materials and uses every one of them.
 The element count comes from the stream's own NRes directory entry, which is
 also how the 20-byte stride was pinned down; a hex dump alone suggested 12.
 
+### Stream 7 is the per-face record
+
+The last stream the reader carried unread. **One 16-byte record per triangle
+on all 435 meshes**, 241887 in all, and it is the object mesh's version of the
+terrain's face record:
+
+```
++0   uint16   flags
++2   uint16   neighbour across edge 0   (0xFFFF = none)
++4   uint16   neighbour across edge 1
++6   uint16   neighbour across edge 2
++8   int16    normal x, over 32767
++10  int16    normal y
++12  int16    normal z
++14  uint16   a class, below 64 on 240500 of the 241887
+```
+
+**The normal is exact.** Read as `int16` over 32767 it is unit length on all
+241887 faces and points the same way as the cross product of the triangle on
+241879 — the same encoding, to the constant, that the terrain's fields 10 to
+12 use.
+
+**The adjacency is exact too**, and it is checked the strong way rather than
+by mutuality: of the 674206 in-range neighbours, **674200 share two vertex
+positions** with the face that names them. Six do not, all in `s_stn_0_13`,
+and 362 share all three, which is a pair of coincident triangles. 51455 of the
+725661 slots are `0xFFFF`, the open edges of the model.
+
+The flags word takes six values — 0 on 233714 faces, then 2, 4, 16, 32 and 34
+— and the trailing field has the shape of the terrain's six-bit class without
+its cleanliness: 240500 faces sit below 64, and 1387 spread thinly over 230
+meshes go above. Neither is named.
+
 ### Indices are batch-relative
 
 Stream 6's indices are **relative to the covering batch's `first_vertex`**, the

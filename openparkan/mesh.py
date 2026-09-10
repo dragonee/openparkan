@@ -16,7 +16,8 @@ the same numeric-type-as-stream-selector convention as the terrain
                              buildings whose wear has a LIGHTMAPS section
      6       6  face        triangle, three uint16 indices *relative to the
                              first_vertex of the batch that covers them*
-     7      16  face        face record, contents unresolved
+     7      16  face        flags, three edge neighbours, the face normal as
+                             int16 over 32767, and a small trailing field
      8      24  pose key    a node's placement: float32[3] translation,
                              float32 frame time, int16[4] rotation over 32767
      9      32  sub-object  sub-object name ("Base_TM", "leaf1_m1o1")
@@ -52,6 +53,13 @@ STREAM_NORMAL = 4
 STREAM_UV = 5
 STREAM_TRIANGLE = 6
 STREAM_FACE = 7
+#: One 16-byte record per triangle: flags, three edge neighbours, the face's
+#: own normal as int16 over NORMAL_SCALE, and a small trailing field.
+FACE_RECORD_STRIDE = 16
+#: A face record's normal is int16 over this, as the terrain's is.
+NORMAL_SCALE = 32767.0
+#: No neighbour across this edge.
+NO_FACE = 0xFFFF
 STREAM_SUBOBJECT_NAME = 9
 STREAM_SUBOBJECT_HEADER = 1
 STREAM_BATCH = 13
@@ -359,6 +367,17 @@ class ObjectMesh:
     lightmap_uv: list[tuple[float, float]] = field(default_factory=list)
     #: The file's own batch-relative indices.
     raw_triangles: list[tuple[int, int, int]] = field(default_factory=list)
+    #: Stream 7, one per triangle.  ``face_normal`` is the face's own normal,
+    #: unit length on all 241887 faces of the 435 meshes and agreeing with the
+    #: cross product on 241879; ``face_adjacency`` its three edge neighbours,
+    #: ``NO_FACE`` where there is none, and every in-range neighbour shares an
+    #: edge -- 674200 of 674206.  ``face_flags`` is 0 on 233714 faces and
+    #: takes 2, 4, 16, 32 or 34 on the rest; ``face_class`` sits below 64 on
+    #: 240500 of them, the shape the terrain's own class field has.
+    face_normal: list[tuple[float, float, float]] = field(default_factory=list)
+    face_adjacency: list[tuple[int, int, int]] = field(default_factory=list)
+    face_flags: list[int] = field(default_factory=list)
+    face_class: list[int] = field(default_factory=list)
     subobjects: list[str] = field(default_factory=list)
     texture_names: list[str] = field(default_factory=list)
     batches: list[Batch] = field(default_factory=list)
@@ -615,6 +634,22 @@ def parse(blob: bytes, name: str = "<mesh>", texture_names: list[str] | None = N
                 )
             )
 
+    # Stream 7: one record per triangle.
+    raw_records = stream.get(STREAM_FACE, b"")
+    face_normal: list[tuple[float, float, float]] = []
+    face_adjacency: list[tuple[int, int, int]] = []
+    face_flags: list[int] = []
+    face_class: list[int] = []
+    for i in range(len(raw_records) // FACE_RECORD_STRIDE):
+        at = i * FACE_RECORD_STRIDE
+        face_flags.append(struct.unpack_from("<H", raw_records, at)[0])
+        face_adjacency.append(struct.unpack_from("<3H", raw_records, at + 2))
+        face_normal.append(tuple(
+            v / NORMAL_SCALE
+            for v in struct.unpack_from("<3h", raw_records, at + 8)
+        ))
+        face_class.append(struct.unpack_from("<H", raw_records, at + 14)[0])
+
     slots = []
     slot_entry = entries.get(STREAM_BOUNDS)
     raw_slots = stream.get(STREAM_BOUNDS, b"")
@@ -699,6 +734,10 @@ def parse(blob: bytes, name: str = "<mesh>", texture_names: list[str] | None = N
         triangles=triangles,
         lightmap_uv=lightmap_uv,
         raw_triangles=raw_triangles,
+        face_normal=face_normal,
+        face_adjacency=face_adjacency,
+        face_flags=face_flags,
+        face_class=face_class,
         subobjects=subobjects,
         texture_names=texture_names or [],
         batches=batches,

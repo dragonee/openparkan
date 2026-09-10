@@ -1343,6 +1343,77 @@ def check_objects(check, game: Path) -> None:
           f"{tiles}/{batched} meshes -- index counts sum to 3 x triangles")
     check("MESH: batch index ranges are contiguous", covers == batched,
           f"{covers}/{batched} meshes")
+    # Stream 7 is the per-face record: flags, three edge neighbours, the face's
+    # own normal, and a trailing class.
+    recs = per_tri = rec_meshes = 0
+    rec_unit = rec_agrees = 0
+    slots_seen = no_face = in_range = shares_edge = 0
+    flag_values: Counter[int] = Counter()
+    small_class = class_seen = 0
+    for name in ARCHIVES:
+        ar = NResArchive.open(game / name)
+        for e in ar:
+            if e.tag != "MESH":
+                continue
+            try:
+                m = objmesh.parse(ar.read(e), e.name)
+            except (ValueError, struct.error):
+                continue
+            if not m.face_normal:
+                continue
+            rec_meshes += 1
+            per_tri += len(m.face_normal) == len(m.triangles)
+            place = [tuple(sorted(m.positions[v] for v in t if v < len(m.positions)))
+                     for t in m.triangles]
+            for i, normal in enumerate(m.face_normal):
+                if i >= len(m.triangles):
+                    break
+                recs += 1
+                rec_unit += abs(math.dist(normal, (0, 0, 0)) - 1) < 0.02
+                flag_values[m.face_flags[i]] += 1
+                class_seen += 1
+                small_class += m.face_class[i] < 64
+                a, b, c = (m.positions[v] for v in m.triangles[i])
+                u = [b[k] - a[k] for k in range(3)]
+                w = [c[k] - a[k] for k in range(3)]
+                cross = (u[1] * w[2] - u[2] * w[1],
+                         u[2] * w[0] - u[0] * w[2],
+                         u[0] * w[1] - u[1] * w[0])
+                length = math.dist(cross, (0, 0, 0))
+                if length > 1e-9:
+                    rec_agrees += sum(
+                        x * y for x, y in zip(normal, cross, strict=True)
+                    ) / length > 0.99
+                for j in m.face_adjacency[i]:
+                    slots_seen += 1
+                    if j == objmesh.NO_FACE:
+                        no_face += 1
+                    elif j < len(place):
+                        in_range += 1
+                        shares_edge += len(set(place[i]) & set(place[j])) >= 2
+    check("MESH: stream 7 is one record per triangle",
+          per_tri == rec_meshes > 0,
+          f"{per_tri}/{rec_meshes} meshes hold exactly one 16-byte record per "
+          f"triangle, {recs} in all")
+    check("MESH: a face record carries the face's own normal",
+          rec_unit == recs and rec_agrees > recs - 20,
+          f"read as int16 over {objmesh.NORMAL_SCALE:.0f} it is unit length on "
+          f"all {rec_unit} faces and points the same way as the cross product "
+          f"of the triangle on {rec_agrees} -- the same encoding the terrain's "
+          f"face record uses")
+    check("MESH: a face record's three neighbours share an edge",
+          shares_edge > in_range - 20 and no_face > 0,
+          f"{shares_edge}/{in_range} in-range neighbours share two vertex "
+          f"positions with the face that names them, over {slots_seen} slots "
+          f"of which {no_face} are 0xFFFF -- so fields 1 to 3 are the edge "
+          f"adjacency, as the terrain's fields 7 to 9 are")
+    check("MESH: a face record's flags and class",
+          len(flag_values) < 10 and small_class > class_seen * 0.99,
+          f"the flags word takes {dict(sorted(flag_values.items()))} and the "
+          f"trailing field sits below 64 on {small_class}/{class_seen} faces "
+          f"-- the shape of the terrain's six-bit class, though not as clean: "
+          f"{class_seen - small_class} faces spread over the library go above")
+
     # A batch's vertex range is D3D's (BaseVertexIndex, NumVertices): the span
     # its indices reach, not a slice of the array it owns.
     spans = span_ok = span_meshes = span_all = 0
