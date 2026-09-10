@@ -764,7 +764,11 @@ today; each is a small trap for anyone extending the code.
   the handlers for messages 8..12 reach indexed channels on two sub-objects
   (`+0x5c8`, a 0xf4-byte class with 0x1c-stride channels defaulting to 0.5;
   `+0x5cc`, a 0x120-byte class with two arrays of six floats), and nothing
-  yet says which triple either was loaded from.
+  yet says which triple either was loaded from. The read/write scan narrows
+  it: **17 of the 32 slots are never touched in `Control.dll` outside the
+  initialiser**, `+124` turns out to be run-time state rather than a
+  parameter, `+116` is a bitfield whose bit 0 the engine tests, and
+  `+44`/`+48`/`+52`/`+56` are compared rather than multiplied in.
 - What handles `MCMD_WALK_F`. `MCMD_WALK_B` (20) and `MCMD_LOCK` (21) are
   answered — `Control.dll` has a second control class whose table covers
   messages 20 to 28, and `AniMesh.dll`'s agent takes both as well, keeping

@@ -3411,6 +3411,15 @@ def check_control(check, game: Path) -> None:
           f"a whole turn on {turn}, pi/2 on {cone}, FLT_MAX on {reach} "
           f"of {len(parsed)}")
 
+    flags = [c.flags for c in parsed]
+    bits = sorted({b for v in flags for b in range(32) if v >> b & 1})
+    check(".ctl: the word at +116 is a bitfield",
+          flags and all(0 <= v < 32 for v in flags) and bits == list(range(5)),
+          f"every value is below 32 and bits {bits[0]}..{bits[-1]} are used; "
+          f"bit 0 -- the one Control.dll tests with "
+          f"`test byte ptr [ptr+0x60], 1` -- is set on "
+          f"{sum(1 for v in flags if v & 1)} of {len(flags)}")
+
     refs = [r for c in parsed for r in c.references]
     resolved = sum(
         1 for r in refs

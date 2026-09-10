@@ -156,6 +156,65 @@ channel. What it does settle is that there is nothing else to find about the
 *shape*: the frame has no hidden structure, it is one C++ object's floats, and
 anything further has to come from what reads them.
 
+### How the block is loaded, in the engine's own order
+
+The copy is at `0x10008ea0`. It reads **five `int32`** from the record one at a
+time, then:
+
+```
+lea eax, [ebx + 0x470]        ; the object's parameter block
+mov ecx, 0x1b                 ; 27 dwords -- 108 bytes
+mov esi, ebp                  ; the record, now at +20
+mov [ebx + 0x46c], ebp        ; keep a pointer to the source
+rep movsd
+...
+add ebp, 0x6c                 ; on to the next record, 128 bytes on
+```
+
+Five ints and 27 dwords is 128 bytes, read in exactly the order this document
+gives them. That is the frame confirmed from the read side as well as from the
+defaults.
+
+Note what it keeps at `+0x46c`: a pointer to the **source** record at file +20,
+not to the copy. Thirteen sites later follow it, so an offset `[ptr + N]` in
+that code is file offset `20 + N`.
+
+### What reads the block
+
+Every access to the block in `Control.dll` outside the initialiser, by file
+offset:
+
+| File offset | How it is used |
+|---|---|
+| +0 | written, and its address taken |
+| +4, +8 | read, 5 sites |
+| +16 | the source pointer — 13 reads, 1 write |
+| +20 | address taken (the copy's destination) |
+| +44, +48, +52 | `fcomp` — compared, not multiplied in; +48's address is also taken |
+| +56 | `fcomp` |
+| +88, +104 | read as dwords |
+| +92 | read, 3 sites |
+| +108 | read, 5 sites |
+| +116 | `test byte ptr [ptr + 0x60], 1` — a **bitfield**, bit 0 |
+| +124 | 8 reads and **2 writes** in the integrator at `0x1000f412` |
+
+Two things follow. **`+124` is not a parameter** — it is written at run time, so
+the `FLT_MAX` the constructor puts there is an initial value, not a limit the
+artist set. And **`+116` is a bitfield**: every one of the 531 values is below
+32, bits 0 to 4 are used, and bit 0 — the one the engine tests — is set on 111.
+
+**Seventeen of the thirty-two slots are never touched anywhere in
+`Control.dll` outside the initialiser**: +12, +24, +28, +32, +36, +40, +60,
++64, +68, +72, +76, +80, +84, +96, +100, +112, +120. That includes two whole
+triples and the half-cone at +112. They are either read by another module
+through the interface, or dead. This says nothing about which; it says only
+that the DLL that owns the block mostly does not look at it.
+
+The object also carries a property interface — `[esp+0x1c] - 1`, `cmp eax,
+0xb3`, so **ids 1 to 180**, dispatched through a byte index table at
+`0x1000e5e8` into a jump table at `0x1000e554`. A spot check of its cases finds
+that most hand out fields elsewhere in the object rather than in this block.
+
 ## The reference record
 
 The sections after the frame carry **100-byte records**: a 32-byte archive
