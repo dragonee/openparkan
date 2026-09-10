@@ -18,6 +18,7 @@ from pathlib import Path
 from . import (
     arealmap,
     control,
+    controls,
     effects,
     font,
     gamedir,
@@ -3428,6 +3429,70 @@ def check_control(check, game: Path) -> None:
           f"{control.REFERENCE_STRIDE} bytes apart")
 
 
+def check_controls(check, game: Path) -> None:
+    """The input layer: ScanCode.dsc, Command.dsc, the .man bindings, the .tbl tables."""
+    keys = controls.scancodes(game)
+    actions = controls.commands(game)
+    check("controls: the two descriptor files read",
+          len(keys) > 100 and len(actions) > 50,
+          f"{len(keys)} scan codes in {controls.SCANCODES}, "
+          f"{len(actions)} commands in {controls.COMMANDS}, each with a label")
+
+    rows: list[controls.Action] = []
+    refused = []
+    for name in controls.TABLES:
+        path = game / name
+        if not path.exists():
+            continue
+        try:
+            rows.extend(controls.table(path))
+        except controls.ControlsFormatError as exc:
+            refused.append(str(exc))
+    check("controls: every .tbl row has its eleven fields",
+          rows and not refused,
+          f"{len(rows)} rows across {len(controls.TABLES)} tables "
+          f"({', '.join(controls.TABLES)}), none refused")
+
+    bound: list[controls.Binding] = []
+    for path in sorted(game.glob("*.man")):
+        bound.extend(controls.bindings(path))
+    unknown_cmd = {b.command for b in bound if b.command not in actions}
+    unknown_key = {k for b in bound for k in (b.modifier, b.key) if k not in keys}
+    check("controls: every binding names a command and keys that exist",
+          bound and not unknown_cmd and not unknown_key,
+          f"{len(bound)} bindings across {len(sorted(game.glob('*.man')))} .man files "
+          f"resolve into {controls.COMMANDS} and {controls.SCANCODES}")
+
+    table_keys = {k for r in rows for k in (r.modifier, r.key)}
+    missing = sorted(k for k in table_keys if k not in keys)
+    check("controls: every key a table names is a known scan code",
+          table_keys and not missing,
+          f"{len(table_keys)} distinct scan names across the tables, all in "
+          f"{controls.SCANCODES}")
+
+    released = [r for r in rows if not r.pressed]
+    stops = sum(1 for r in released if r.value == 0.0)
+    check("controls: a release row cancels what the press row started",
+          stops >= len(released) * 0.75 > 0,
+          f"{stops}/{len(released)} release rows carry magnitude 0.0, against "
+          f"{sum(1 for r in rows if r.pressed)} press rows")
+
+    named = sum(1 for r in rows if r.pressed and r.action in actions)
+    check("controls: a press row names the command it runs",
+          named > 0,
+          f"{named}/{sum(1 for r in rows if r.pressed)} press rows end in a "
+          f"{controls.COMMANDS} identifier; the rest are prose or parameterised")
+
+    schemes = controls.build_schemes(game)
+    members = [m for s in schemes for m in s.members]
+    present = sum(1 for m in members if (game / m.replace("\\", "/")).is_file())
+    check("controls: every building scheme names assemblies that exist",
+          schemes and present == len(members) > 0,
+          f"{len(schemes)} schemes, {present}/{len(members)} .dat files present "
+          f"-- the file's own header says there must be "
+          f"{controls.BUILD_SCHEME_DECLARED}")
+
+
 def run(game: Path) -> int:
     """Run every check against ``game``.  Returns a process exit code."""
     results: list[tuple[str, bool, str]] = []
@@ -3442,7 +3507,7 @@ def run(game: Path) -> int:
         check_water, check_layers, check_materials, check_sky,
         check_minimap_agreement, check_arealmap,
         check_grid, check_missions, check_objects, check_poses, check_lod, check_damage,
-        check_effects, check_footprints, check_rsli, check_control,
+        check_effects, check_footprints, check_rsli, check_control, check_controls,
     )
     for fn in checks:
         fn(check, game)

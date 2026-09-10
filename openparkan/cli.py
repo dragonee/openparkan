@@ -9,6 +9,7 @@ from pathlib import Path
 
 from . import (
     control,
+    controls,
     effects,
     font,
     gamedir,
@@ -236,6 +237,45 @@ def cmd_sky(args, game: Path) -> int:
     if not shown:
         print("no sky.ske found", file=sys.stderr)
         return 2
+    return 0
+
+
+def cmd_controls(args, game: Path) -> int:
+    """The input tables: what each key sends, and where."""
+    keys = controls.scancodes(game)
+    actions = controls.commands(game)
+    if args.bindings:
+        for path in sorted(game.glob("*.man")):
+            bound = controls.bindings(path)
+            print(f"{path.name}  ({len(bound)} bindings)")
+            for b in bound:
+                label = keys.get(b.key, "") or b.key
+                print(f"  {label:<12} {b.command:<32} {actions.get(b.command, '')}")
+        return 0
+
+    for name in controls.TABLES:
+        path = game / name
+        if not path.exists():
+            continue
+        rows = controls.table(path)
+        print(f"{name}  ({len(rows)} rows)")
+        for r in rows:
+            edge = "down" if r.pressed else "up  "
+            chord = r.key if r.modifier == controls.NO_MODIFIER \
+                else f"{r.modifier}+{r.key}"
+            extra = f"  {r.state}" if r.state != "0" else ""
+            ramp = f"  ramp {r.ramp:g}/{r.ramp_time}" if r.ramp or r.ramp_time else ""
+            print(f"  {r.device:<5} {chord:<24} {edge}  {r.target:<18} "
+                  f"{r.command:<14} {r.value:6.2f} {r.index:3d}{extra}{ramp}"
+                  f"   {r.note}")
+        print()
+
+    schemes = controls.build_schemes(game)
+    print(f"{controls.BUILD_SCHEMES}  ({len(schemes)} schemes, header says "
+          f"{controls.BUILD_SCHEME_DECLARED})")
+    for scheme in schemes:
+        print(f"  {scheme.name:<16} {len(scheme.members)}  "
+              + ", ".join(m.rsplit("\\", 1)[-1] for m in scheme.members))
     return 0
 
 
@@ -528,6 +568,11 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("mission", nargs="?", help="mission directory; default is every mission")
     p.add_argument("--frames", action="store_true", help="list every keyframe")
     p.set_defaults(fn=cmd_sky)
+
+    p = sub.add_parser("controls", help="the input tables and key bindings")
+    p.add_argument("--bindings", action="store_true",
+                   help="list the .man key bindings instead of the tables")
+    p.set_defaults(fn=cmd_controls)
 
     p = sub.add_parser("control", help="list .ctl controllers, or show one")
     p.add_argument("name", nargs="?", help="a .ctl member name; default is a listing")

@@ -490,6 +490,17 @@ written down is a question nobody reopens.
 
 ---
 
+- [x] **The input layer.** The game ships it as commented plain text and
+      nothing here read it. Now [read](docs/14-controls.md): `ScanCode.dsc`
+      (174 keys), `Command.dsc` (72 actions with an English sentence each),
+      12 `.man` files (**275** bindings, every one naming a command and keys
+      that exist), and the three `.tbl` control tables (**116** rows, all
+      eleven fields, all 31 scan names known). A row names the target class
+      (`CICLS_TURRET`, `CICLS_CAMERA`) and the command (`MCMD_ANGLE_X`), and
+      a key coming up re-sends the same command with 0.0 on 21 of 27 release
+      rows. `BuildDat.lst` reads too: all 32 assemblies exist, and it holds
+      **12** schemes where its own header says there must be 11.
+
 ## 1. Wrong on screen today
 
 Nothing known. What is left below is fidelity the game had and this does not,

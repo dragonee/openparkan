@@ -113,7 +113,10 @@ and then 2, 1, 1, 1, which reads as two parallel arrays rather than pairs.
 ## Not looked at at all
 
 `.scr` node semantics, the `.trf` streams, save games in `SAVE/`, and the
-network protocol. `*.ctl` and `*.ndp` are identified above; `*.exp` and
+network protocol. The engine's own `.ini` files — `Comp.ini`'s component
+registry, `Behavior.ini`'s and `ArealMap.ini`'s debug switches — are text and
+are described in [14-controls.md](14-controls.md) but not parsed; the input
+tables beside them are [read](14-controls.md). `*.ctl` and `*.ndp` are identified above; `*.exp` and
 `effects.rlb` are [read](11-effects.md), though what the floats inside an
 emitter mean is not.
 
