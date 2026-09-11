@@ -35,6 +35,7 @@ practice — format facts yes, code no — is set out in
 | **Sky** | done — `sky.ske` day cycle, `sky.wea`'s nine texture slots, the engine's twelve-element lens flare and both its intensity gates, the weather markers, and where the sun and moon stand (fixed, and in no file), all 29 missions |
 | **RsLi archives** | done — encrypted entry table read, deflate and LZSS both unpacked; all 24 `sprites.lib` members out, and `gamefont.rlb`'s font, glyph metrics and `Ipol` palette |
 | **Behaviour scripts** | structure done — all 58 `.scr` end to end, 677 handlers and 6065 nodes, and `varset.var`'s 231 declarations, against which every one of the 9239 operands resolves by name; the nine universal event handlers, the 14 AI problems and their `Start`/`Continue` pairing, and which node slot reads and which writes. What a node *does* is not read |
+| **Research tree** | done — all 29 `.trf`, 368 items each with names, codes, categories and both edge lists; the prerequisite graph, its research-centre spine, and the per-mission rewiring |
 | **Behaviour scripts, semantics** | not started — what the seven opcodes compute, and what `head[0]` selects |
 
 ## Quickstart
@@ -194,6 +195,7 @@ of fields carried through the readers without being understood.
 - [13-control.md](docs/13-control.md) — `.ctl`, the movement controller and `IControl`
 - [14-controls.md](docs/14-controls.md) — the input layer the game ships as text
 - [15-behaviour.md](docs/15-behaviour.md) — the `.scr` mission AI scripts and `varset.var`
+- [16-research.md](docs/16-research.md) — the `.trf` research tree
 
 ## Layout
 
@@ -211,6 +213,7 @@ openparkan/
   control.py    .ctl movement controllers
   controls.py   the input tables, and the engine's own numbers
   behaviour.py  .scr mission AI scripts, and their varset.var symbol table
+  research.py   .trf research tree
   viewer.py     self-contained HTML viewer generator
   verify.py     the checks quoted above
   png.py        dependency-free PNG writer

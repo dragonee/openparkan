@@ -545,6 +545,22 @@ written down is a question nobody reopens.
       5126 on opcode 6 taking 0 to 11. What a node *does* is the months-long
       half and is untouched. → [docs/15-behaviour.md](docs/15-behaviour.md)
 
+- [x] **The research tree.** `.trf` was written down last round as an open
+      lead for the wrong reason and is now read for the right one. Every member
+      of all 29 archives is named `ResTree` because that is what it is. Twelve
+      streams are one table in columns: **368 items**, four streams exactly
+      that many records wide, and two counted lists that turn out to be **the
+      same graph written twice** — across all 26 archives that carry them,
+      `TRF2`/`TRF3` and `TRF4`/`TRF5` are **exact transposes**, which is what
+      fixes the direction rather than a guess about the names. The spine is two
+      interlocking ladders, research centres and factories, and they gate
+      everything: `Lrg Research cntr RC-47` alone unlocks 33 items where
+      nothing off the spine unlocks more than five. And it is a **per-mission**
+      tree — the item table is identical everywhere but the wiring is not, with
+      11 distinct prerequisite totals from 0 to 341, three archives carrying no
+      edges at all and six rewiring the centre chain.
+      → [docs/16-research.md](docs/16-research.md)
+
 - [x] **What the `.scr` operands point at.** `varset.var`, sitting in the same
       directory the whole time: one shared plain-text symbol table that
       documents its own format on line one and declares **231** variables.
@@ -852,10 +868,11 @@ today; each is a small trap for anyone extending the code.
   carrying the top bit. `head[3]` runs 0..6, the opcode's own range. The
   trailer is −1 on 4686 of 6065. And what the seven opcodes *compute* is the
   months-long half. → [docs/15-behaviour.md](docs/15-behaviour.md)
-- `.trf`, the **research tree**. Identified but not read: 29 NRes archives of
-  12 streams, `TRF6`–`TRFA` carrying 395 part ids, weapon codes, display names,
-  descriptions and UI stat templates, and `TRF0`–`TRF5`/`TRFB` binary. Nothing
-  in the renderer wants it.
+- `.trf` **leftovers**, now that the tree itself is
+  [read](docs/16-research.md): the four float32 of a `TRF0` record (cost and
+  time is the obvious guess, and the reader does not make it), the record's id
+  and its two packed words, the mapping from `TRF6`'s 395 part ids to the 368
+  items, and `TRFA`'s template syntax.
 - What handles `MCMD_WALK_F`. `MCMD_WALK_B` (20) and `MCMD_LOCK` (21) are
   answered — `Control.dll` has a second control class whose table covers
   messages 20 to 28, and `AniMesh.dll`'s agent takes both as well, keeping

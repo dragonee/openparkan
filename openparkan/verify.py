@@ -27,6 +27,7 @@ from . import (
     materials,
     mission,
     objects,
+    research,
     rsli,
     sky,
     texm,
@@ -3737,6 +3738,81 @@ def check_behaviour(check, game: Path) -> None:
           f"while {len(read)} of them are read as operands")
 
 
+def check_research(check, game: Path) -> None:
+    """The research tree: MISSIONS/SCRIPTS/*.trf."""
+    paths = research.trees(game)
+    trees = []
+    refused = []
+    for path in paths:
+        try:
+            trees.append(research.read(path))
+        except (research.ResearchFormatError, NotAnNResArchive) as exc:
+            refused.append(str(exc))
+    check("research: every .trf reads as a tree",
+          paths and not refused,
+          f"{len(trees)}/{len(paths)} archives read, {sum(len(t) for t in trees)} "
+          f"items in total, none refused")
+
+    widths = {len(t) for t in trees}
+    check("research: every archive holds the same number of items",
+          widths == {research.ITEMS},
+          f"all {len(trees)} carry {research.ITEMS} items, and TRF0 is "
+          f"{research.ITEMS} x {research.RECORD} bytes in each")
+
+    named = [t for t in trees if all(i.name for i in t.items)]
+    distinct = {i.name for t in trees for i in t.items}
+    check("research: every item has a display name",
+          len(named) == len(trees) > 0,
+          f"{research.ITEMS} names per archive resolve out of TRF8, "
+          f"{len(distinct)} of them distinct -- the tree holds several grades "
+          f"of the same thing")
+
+    linked = [t for t in trees if t.edges]
+    bad = [(t.source.name, i.index, j)
+           for t in linked for i in t.items
+           for j in (*i.requires, *i.unlocks) if not 0 <= j < len(t)]
+    check("research: every edge names an item that exists",
+          linked and not bad,
+          f"{sum(t.edges for t in linked)} prerequisites across {len(linked)} "
+          f"archives, every one in 0..{research.ITEMS - 1}")
+
+    mismatch = []
+    for t in linked:
+        forward = {(i.index, j) for i in t.items for j in i.requires}
+        backward = {(j, i.index) for i in t.items for j in i.unlocks}
+        if forward != backward:
+            mismatch.append(t.source.name)
+    check("research: the two edge lists are the same graph written twice",
+          linked and not mismatch,
+          f"in all {len(linked)} archives that carry them, TRF2/TRF3 and "
+          f"TRF4/TRF5 are exact transposes -- which is what fixes the direction")
+
+    centres = ("Sml Research cntr", "Med Research cntr", "Lrg Research cntr",
+               "Enh Research cntr")
+    spined = 0
+    for t in linked:
+        chain = [t.find(name) for name in centres]
+        if not all(chain):
+            continue
+        first = [c[0] for c in chain]
+        spined += all(a.index in b.requires
+                      for a, b in zip(first, first[1:], strict=False))
+    check("research: most archives put a chain of research centres at the spine",
+          spined >= len(linked) * 0.5 > 0,
+          f"in {spined}/{len(linked)} archives the four research centres each "
+          f"name the one below as a prerequisite; the other "
+          f"{len(linked) - spined} rewire it, which is what makes this a "
+          f"per-mission tree")
+
+    totals = sorted({t.edges for t in trees})
+    check("research: each mission ships its own wiring",
+          len(totals) > 3,
+          f"{len(totals)} distinct prerequisite counts across {len(trees)} "
+          f"archives, from {totals[0]} to {totals[-1]} -- {len(trees) - len(linked)} "
+          f"carry no edges at all, and the commonest wiring is shared by "
+          f"{max(sum(1 for t in trees if t.edges == e) for e in totals)}")
+
+
 def run(game: Path) -> int:
     """Run every check against ``game``.  Returns a process exit code."""
     results: list[tuple[str, bool, str]] = []
@@ -3752,7 +3828,7 @@ def run(game: Path) -> int:
         check_minimap_agreement, check_arealmap,
         check_grid, check_missions, check_objects, check_poses, check_lod, check_damage,
         check_effects, check_footprints, check_rsli, check_control, check_controls,
-        check_behaviour,
+        check_behaviour, check_research,
     )
     for fn in checks:
         fn(check, game)

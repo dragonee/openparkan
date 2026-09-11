@@ -15,6 +15,7 @@ from . import (
     gamedir,
     landmesh,
     mission,
+    research,
     rsli,
     sky,
     texm,
@@ -484,6 +485,54 @@ def _top_names(objs, limit: int = 4) -> str:
     return ", ".join(f"{n}x{c}" if c > 1 else n for n, c in names.most_common(limit))
 
 
+def cmd_research(args, game: Path) -> int:
+    """The research tree: what unlocks what."""
+    paths = research.trees(game)
+    if not paths:
+        print("no .trf archives found")
+        return 1
+    chosen = paths[0]
+    if args.file:
+        want = args.file.lower()
+        match = [p for p in paths if p.name.lower() == want or p.stem.lower() == want]
+        if not match:
+            print(f"no such tree: {args.file}; {len(paths)} available")
+            return 1
+        chosen = match[0]
+    elif any(p.name == "auto.trf" for p in paths):
+        chosen = next(p for p in paths if p.name == "auto.trf")
+
+    tree = research.read(chosen)
+    leaves = sum(1 for i in tree.items if i.leaf)
+    print(f"{chosen.name}: {len(tree)} items, {tree.edges} prerequisites, "
+          f"{len(tree.roots)} with none, {leaves} unlocking nothing")
+
+    if args.item:
+        found = tree.find(args.item)
+        if not found:
+            print(f"nothing matches {args.item!r}")
+            return 1
+        for item in found:
+            print(f"\n{item.index}  {item.name}"
+                  f"{f'  [{item.code}]' if item.code else ''}  ({item.kind})")
+            print(f"  values   {', '.join(f'{v:g}' for v in item.values)}")
+            print(f"  requires {', '.join(tree[r].name for r in item.requires) or '-'}")
+            print(f"  unlocks  {', '.join(tree[u].name for u in item.unlocks) or '-'}")
+        return 0
+
+    if args.hubs:
+        gates = sorted((i for i in tree.items if i.unlocks),
+                       key=lambda i: (-len(i.unlocks), i.index))
+        for item in gates:
+            print(f"  {len(item.unlocks):3}  {item.name}")
+        return 0
+
+    print()
+    for line in research.render(tree, args.category):
+        print(line)
+    return 0
+
+
 def cmd_verify(args, game: Path) -> int:
     return verify.run(game)
 
@@ -584,6 +633,14 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("control", help="list .ctl controllers, or show one")
     p.add_argument("name", nargs="?", help="a .ctl member name; default is a listing")
     p.set_defaults(fn=cmd_control)
+
+    p = sub.add_parser("research", help="the research tree from a .trf archive")
+    p.add_argument("item", nargs="?", help="show one item by name instead of the tree")
+    p.add_argument("--file", help="which .trf to read; default auto.trf")
+    p.add_argument("--category", type=int, help="only roots in this category")
+    p.add_argument("--hubs", action="store_true",
+                   help="list the items that gate the most, commonest first")
+    p.set_defaults(fn=cmd_research)
 
     p = sub.add_parser("effects", help="list effects, or describe one")
     p.add_argument("name", nargs="?", help="an FXID name; default is a listing")
