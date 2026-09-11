@@ -47,51 +47,48 @@ uint32         four packed bytes
 The three offsets all land inside their streams on all 368 items in all 29
 archives.
 
-### The four floats, and whether one of them is research time
+### The four floats are two resources, charged twice — *settled*
 
-Nothing in the data labels them. `TRFA`'s templates carry units (`t`, `HP`,
-`m`, `MWt`, `kmph`) but they describe the *component* — weight, damage, range —
-and none of the 27 distinct stat rows is a time. So what follows is a reading
-of the corpus, and the reader does not encode it.
+An earlier draft of this section argued from the corpus that the four were
+two pairs, one for researching an item and one for building it, with the
+second member of each a **duration**, and offered `v1` as the research time.
+**The pairing was right and the duration was wrong.** The game names these
+fields itself, in [`objects.dlb`](19-descriptions.md), and none of them is a
+time:
 
-The four are **two pairs**, and each pair is zero *together*: `(v0,v1)` is zero
-on 277 of 368 items and `(v2,v3)` on 50. The pairs behave differently:
+```
+#7ResearchEnergyCost=18
+#8ResearchOreCost=50
+#9BuildEnergyCost=18
+#ABuildOreCost=50
+```
 
-- **All 91 items with a non-zero `(v0,v1)` are required by something**, with no
-  exceptions. That pair only ever appears on an item that is researched.
-- On an upgrade ladder both pairs rise monotonically, and `(v0,v1)` sits just
-  *above* `(v2,v3)`:
+Joined on the short code, **304 of 329 items match all four exactly**; the
+remainder are short codes the library reuses across entries, so the join
+picks the wrong one rather than the values disagreeing. So a `TRF0` record's
+floats are, in order:
 
-  | | v0, v1 | v2, v3 |
-  |---|---|---|
-  | `ARMOUR SA.Mk2` | 6, 9 | 5.5, 8 |
-  | `ARMOUR SA.Mk4` | 18, 24 | 16.5, 21 |
-  | `ARMOUR SA.Mk6` | 31, 35 | 29.5, 32.5 |
+| | |
+|---|---|
+| `values[0]` | `ResearchEnergyCost` |
+| `values[1]` | `ResearchOreCost` |
+| `values[2]` | `BuildEnergyCost` |
+| `values[3]` | `BuildOreCost` |
 
-- For a **building** the second pair's second element explodes where the first
-  pair's does not:
+Two resources — **energy and ore** — each charged once to research a thing
+and once to build it. `Item.research_cost` and `Item.build_cost` return them.
 
-  | | v0, v1 | v2, v3 |
-  |---|---|---|
-  | `Large Factory FB-47L` | 20, 120 | 20, **1250** |
-  | `Large Core mine MS-47L` | 20, 150 | 20, **1500** |
-  | `Sml Research cntr RC-17` | 0, 0 | 8, **250** |
+That explains every shape the corpus showed. A pair reads zero exactly when
+that half is free, which is why 277 items cost nothing to research: they are
+what you start with. A factory's build costs tower over its research costs
+(20, 120 against 20, 1250) because a building is expensive to put up and
+cheap to think of. And the pairs track each other up an upgrade ladder
+because a better part costs more of both.
 
-  A component's two pairs stay close; two engine grades have them exactly
-  equal.
-
-That is the shape of **one pair for researching a thing and one for building
-it**, with the second element of each the duration: a factory is quick to
-research and slow to build, a laser is much the same either way, and a starting
-item costs nothing to research because it is not researched. Up the research
-centres `v1` runs 0, 50, 60, 90.
-
-So **yes, `v1` is the best candidate for how long a research takes** — and `v3`
-for how long the thing then takes to build. What is *not* settled is which
-member of a pair is the duration and which the cost: `v0` and `v2` are the
-smaller and steadier of each pair, which is what a price would look like, but
-nothing in the shipped data distinguishes the two. The reader exposes
-`Item.values` as four unnamed floats for that reason.
+**Nothing in the shipped data gives a research a duration.** If the game has
+one it is computed rather than tabulated, and `varset.var`'s
+`dTechnologyFactor` ([15-behaviour.md](15-behaviour.md)) is where to look
+first.
 
 ## Which way the edges point
 
@@ -153,9 +150,8 @@ So a mission can hand the player a different technology ladder, and several do.
 
 ## What is not read here
 
-- **Which member of each float pair is the duration** and which the cost. The
-  pairing itself, and which pair is research and which is building, is argued
-  above; the split inside a pair is not.
+- **Whether a research has a duration at all.** The four floats are costs and
+  no shipped file tabulates a time, so if there is one it is computed.
 - **`TRF6` and `TRFB`** — 395 part ids against 368 items, with one packed word
   each. The counts differ, so the mapping is not one to one.
 - **`TRF9`**, which carries a description for only 150 of the 368, and

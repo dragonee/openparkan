@@ -562,6 +562,20 @@ written down is a question nobody reopens.
       is a finding rather than a miss.
       → [docs/17-saves.md](docs/17-saves.md)
 
+- [x] **The parts database, and what the research tree's floats are.**
+      `objects.dlb` is an NRes archive of **395 `DSCR` members**, the same 395
+      part ids in the same order as the tree's `TRF6`, and each is plain text
+      carrying the developers' own field names. That **settles the four
+      float32** an earlier round could only argue about: they are
+      `ResearchEnergyCost`, `ResearchOreCost`, `BuildEnergyCost` and
+      `BuildOreCost` — **304 of 329 items match all four exactly** — so they are
+      two resources charged twice and **none of them is a time**. The note that
+      offered one as a research duration is corrected. It also gives the
+      classification (`//B:WPN:GUN:MK2`), the stat-panel rows with their units,
+      and a second independent statement of the gun-to-clip link: all 58
+      ammunition members name the weapon they feed.
+      → [docs/19-descriptions.md](docs/19-descriptions.md)
+
 - [x] **The research tree.** `.trf` was written down last round as an open
       lead for the wrong reason and is now read for the right one. Every member
       of all 29 archives is named `ResTree` because that is what it is. Twelve
@@ -907,11 +921,15 @@ today; each is a small trap for anyone extending the code.
   separated by the owning object's own data. Whether the header's second
   version byte really separates campaign from single is also open — one of six
   saves has it set. → [docs/17-saves.md](docs/17-saves.md)
-- `.trf` **leftovers**, now that the tree itself is
-  [read](docs/16-research.md): the four float32 of a `TRF0` record (cost and
-  time is the obvious guess, and the reader does not make it), the record's id
-  and its two packed words, the mapping from `TRF6`'s 395 part ids to the 368
-  items, and `TRFA`'s template syntax.
+- `.trf` **leftovers**, now that the tree and the four floats are read: the
+  `TRF0` record's id and its two packed words, and the mapping from `TRF6`'s
+  395 part ids to the 368 tree items. `TRFA`'s template syntax is
+  [read](docs/19-descriptions.md) — it is `objects.dlb`'s stat rows, copied.
+- **Whether a research takes time at all.** The tabulated numbers are costs,
+  so if there is a duration the engine computes it; `varset.var`'s
+  `dTechnologyFactor` is where to look.
+- `objects.dlb`'s **`//G<n>:L<n>`** group and level, and the fifth slot of its
+  classification line. → [docs/19-descriptions.md](docs/19-descriptions.md)
 - What handles `MCMD_WALK_F`. `MCMD_WALK_B` (20) and `MCMD_LOCK` (21) are
   answered — `Control.dll` has a second control class whose table covers
   messages 20 to 28, and `AniMesh.dll`'s agent takes both as well, keeping

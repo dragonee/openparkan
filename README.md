@@ -35,6 +35,7 @@ practice — format facts yes, code no — is set out in
 | **Sky** | done — `sky.ske` day cycle, `sky.wea`'s nine texture slots, the engine's twelve-element lens flare and both its intensity gates, the weather markers, and where the sun and moon stand (fixed, and in no file), all 29 missions |
 | **RsLi archives** | done — encrypted entry table read, deflate and LZSS both unpacked; all 24 `sprites.lib` members out, and `gamefont.rlb`'s font, glyph metrics and `Ipol` palette |
 | **Behaviour scripts** | structure done — all 58 `.scr` end to end, 677 handlers and 6065 nodes, and `varset.var`'s 231 declarations, against which every one of the 9239 operands resolves by name; the nine universal event handlers, the 14 AI problems and their `Start`/`Continue` pairing, and which node slot reads and which writes. What a node *does* is not read |
+| **Parts database** | done — `objects.dlb`, all 395 `DSCR` entries: the classification, the short code and display name, the stat panel rows, and the four costs that name the research tree's floats |
 | **Research tree** | done — all 29 `.trf`, 368 items each with names, codes, categories and both edge lists; the prerequisite graph, its research-centre spine, and the per-mission rewiring |
 | **Save games** | partial — the `SLOT` header on all 6, the mission, map and research trees they name, and 1154 of 1158 archive-member references resolving; the object graph itself is a raw heap dump and is not decoded |
 | **Behaviour scripts, semantics** | not started — what the seven opcodes compute, and what `head[0]` selects |
@@ -199,6 +200,7 @@ of fields carried through the readers without being understood.
 - [16-research.md](docs/16-research.md) — the `.trf` research tree
 - [17-saves.md](docs/17-saves.md) — what a `.sav` refers to
 - [18-vocabulary.md](docs/18-vocabulary.md) — the object naming scheme, and what is guesswork
+- [19-descriptions.md](docs/19-descriptions.md) — `objects.dlb`, the parts database
 
 ## Layout
 
@@ -217,6 +219,7 @@ openparkan/
   controls.py   the input tables, and the engine's own numbers
   behaviour.py  .scr mission AI scripts, and their varset.var symbol table
   research.py   .trf research tree
+  descriptions.py objects.dlb parts database
   save.py       SAVE/*.sav headers and references
   viewer.py     self-contained HTML viewer generator
   verify.py     the checks quoted above

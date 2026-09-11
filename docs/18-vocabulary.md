@@ -105,9 +105,13 @@ The gun's second letter is its kind, and it splits cleanly — **measured**:
 
 *Guess*: `c` for cannon, `l` for launcher.
 
-Fourteen `i_cNN` members are in `objects.rlb` but in no assembly, among them
-every `i_c06_l_*` and `i_c07_l_*`. *Unknown* whether they are cut content or
-fitted by something other than a `.dat`.
+Fourteen `i_cNN` members are in `objects.rlb` but in no assembly, and they
+split cleanly — **measured**. **Eight are in every research tree's part list**,
+so they are buildable and simply never pre-fitted. The other **six are
+`i_c06_l_01/02/df` and `i_c07_l_01/02/df`, and they appear nowhere else in the
+installation at all** — not in a tree, not in a save, not in `objects.dlb`.
+Every one of the 50 clips that *is* fitted is also in the part list, so those
+six are the only ones outside the game's own catalogue. *Guess*: cut content.
 
 ## Two building sets — *measured*
 

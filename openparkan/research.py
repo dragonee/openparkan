@@ -27,7 +27,7 @@ once as out-edges: across all 26 archives that carry them they are **exact
 transposes of each other**, which is what pins the direction.  A ``TRF0``
 record is::
 
-    float32 x4        two pairs; the second is much the larger
+    float32 x4        the research energy and ore cost, then the build pair
     int32             byte offset into TRF7, this item's short code
     int32             byte offset into TRF8, this item's display name
     int32             an id, not the item's own index
@@ -87,11 +87,10 @@ class Item:
     name: str
     code: str
     category: int
-    #: Two pairs of float32, unlabelled anywhere in the data.  The corpus
-    #: argues that the first pair is the cost of researching the item and the
-    #: second of building it, with the second member of each the duration --
-    #: see ``docs/16-research.md``.  Nothing distinguishes duration from price
-    #: inside a pair, so they stay unnamed here.
+    #: ``(ResearchEnergyCost, ResearchOreCost, BuildEnergyCost, BuildOreCost)``.
+    #: The names are the game's own, out of ``objects.dlb``; see
+    #: ``descriptions.py``.  Two resources, each charged twice -- once to
+    #: research the item and once to build it.  None of them is a time.
     values: tuple[float, float, float, float]
     #: Indices of the items this one needs first.
     requires: tuple[int, ...]
@@ -101,6 +100,16 @@ class Item:
     @property
     def kind(self) -> str:
         return CATEGORIES.get(self.category, str(self.category))
+
+    @property
+    def research_cost(self) -> tuple[float, float]:
+        """What researching it costs: (energy, ore).  Zero when it is free."""
+        return self.values[0], self.values[1]
+
+    @property
+    def build_cost(self) -> tuple[float, float]:
+        """What building it costs: (energy, ore)."""
+        return self.values[2], self.values[3]
 
     @property
     def root(self) -> bool:

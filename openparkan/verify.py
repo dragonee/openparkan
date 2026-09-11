@@ -21,6 +21,7 @@ from . import (
     behaviour,
     control,
     controls,
+    descriptions,
     effects,
     font,
     gamedir,
@@ -3980,6 +3981,85 @@ def check_vocabulary(check, game: Path) -> None:
           f"is not established")
 
 
+def check_descriptions(check, game: Path) -> None:
+    """The parts database, objects.dlb, and what it names."""
+    path = game / descriptions.LIBRARY
+    if not path.exists():
+        return
+    parts = descriptions.read(path)
+    check("descriptions: every member reads",
+          len(parts) == descriptions.PARTS,
+          f"{len(parts)} {descriptions.TAG} members in {descriptions.LIBRARY}, "
+          f"each with a display name and five key=value slots")
+
+    trees = [research.read(p) for p in research.trees(game)]
+    ids: list[str] = []
+    for tree in trees:
+        archive = NResArchive(tree.source.read_bytes())
+        for entry in archive.entries:
+            if entry.tag == "TRF6":
+                blob = archive.read(entry)
+                ids = [x.decode("latin-1") for x in blob.split(b"\0") if x]
+                break
+        if ids:
+            break
+    check("descriptions: the library and the research tree list the same parts",
+          ids and list(parts) == ids,
+          f"{len(ids)} part ids in TRF6 and {len(parts)} in "
+          f"{descriptions.LIBRARY}, the same names in the same order")
+
+    by_code: dict[str, descriptions.Description] = {}
+    for part in parts.values():
+        if part.code:
+            by_code.setdefault(part.code, part)
+    tree = trees[0] if trees else None
+    matched = compared = 0
+    if tree:
+        for item in tree.items:
+            part = by_code.get(item.code) if item.code else None
+            if part is None:
+                continue
+            compared += 1
+            matched += item.values == (
+                part.research_energy, part.research_ore,
+                part.build_energy, part.build_ore,
+            )
+    check("descriptions: the tree's four floats are the library's four costs",
+          compared and matched >= compared * 0.9,
+          f"{matched}/{compared} items match ResearchEnergyCost, ResearchOreCost, "
+          f"BuildEnergyCost and BuildOreCost exactly -- so the floats are two "
+          f"resources charged twice, and none of them is a time")
+
+    ammunition = [p for p in parts.values() if p.kind == "AMM"]
+    clips = [p for p in ammunition if p.belongs_to]
+    coded = sum(1 for c in clips if c.belongs_to.rsplit(" ", 1)[-1] in by_code)
+    check("descriptions: an ammunition entry names the weapon it feeds",
+          ammunition and len(clips) == len(ammunition),
+          f"{len(clips)}/{len(ammunition)} ammunition members name a weapon in "
+          f"slot 5 -- the gun-to-clip link said independently of the assemblies; "
+          f"{coded} end in a short code that is itself a member and the rest name "
+          f"it in words only")
+
+    catalogue = set(parts)
+    library_names = {e.name for e in NResArchive((game / "objects.rlb").read_bytes()).entries} \
+        if (game / "objects.rlb").exists() else set()
+    clips_all = {n for n in library_names if re.match(r"i_c\d\d_", n)}
+    outside = sorted(clips_all - catalogue)
+    check("descriptions: six clip models are outside the game's own catalogue",
+          clips_all and outside == ["i_c06_l_01", "i_c06_l_02", "i_c06_l_df",
+                                    "i_c07_l_01", "i_c07_l_02", "i_c07_l_df"],
+          f"{len(clips_all) - len(outside)}/{len(clips_all)} i_cNN models in "
+          f"objects.rlb have a {descriptions.TAG} entry; the {len(outside)} that "
+          f"do not are every i_c06_l and i_c07_l, and they are in no tree, save "
+          f"or assembly either")
+
+    free = [p for p in parts.values() if not p.researched]
+    check("descriptions: what costs nothing to research is what you start with",
+          free and len(free) < len(parts),
+          f"{len(free)}/{len(parts)} parts have both research costs at zero; the "
+          f"other {len(parts) - len(free)} must be paid for")
+
+
 def run(game: Path) -> int:
     """Run every check against ``game``.  Returns a process exit code."""
     results: list[tuple[str, bool, str]] = []
@@ -3995,7 +4075,8 @@ def run(game: Path) -> int:
         check_minimap_agreement, check_arealmap,
         check_grid, check_missions, check_objects, check_poses, check_lod, check_damage,
         check_effects, check_footprints, check_rsli, check_control, check_controls,
-        check_behaviour, check_research, check_saves, check_vocabulary,
+        check_behaviour, check_research, check_descriptions, check_saves,
+        check_vocabulary,
     )
     for fn in checks:
         fn(check, game)
