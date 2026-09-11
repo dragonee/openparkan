@@ -3779,6 +3779,35 @@ def check_behaviour(check, game: Path) -> None:
           f"that does not is tagged {min(other)}..{max(other)}; the two sets do "
           f"not meet")
 
+    def _kind(n):
+        if n.calls:
+            return "fn"
+        if n.opcode in behaviour.BINARY:
+            return "op"
+        if (n.source != behaviour.NULL or n.reference != behaviour.NULL
+                or n.literal != behaviour.NULL):
+            return "assign"
+        return f"tag{n.tag}"
+
+    five = five_then = three = three_after = opened = 0
+    for s in scripts:
+        for handler in s.handlers:
+            kinds = [_kind(n) for n in handler.nodes]
+            opened += bool(kinds) and kinds[0] == "tag1"
+            for i, k in enumerate(kinds):
+                if k == "tag5":
+                    five += 1
+                    five_then += i + 1 < len(kinds) and kinds[i + 1] == "tag1"
+                if k == "tag3":
+                    three += 1
+                    three_after += i > 0 and kinds[i - 1] == "op"
+    check("behaviour: two tags sit in a fixed place in the node list",
+          five and five_then == five and three_after >= three - 3 and not opened,
+          f"tag 5 is followed immediately by tag 1 on {five_then}/{five} nodes, "
+          f"tag 3 follows a comparison on {three_after}/{three}, and no handler "
+          f"opens with tag 1 -- so the tags sit in the stream rather than "
+          f"floating, which is what control flow would look like")
+
     table = behaviour.variables(game)
     names = [v.name for v in table]
     check("behaviour: the shared symbol table reads",

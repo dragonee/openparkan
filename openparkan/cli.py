@@ -8,6 +8,7 @@ from collections import Counter
 from pathlib import Path
 
 from . import (
+    behaviour,
     control,
     controls,
     effects,
@@ -567,6 +568,40 @@ def cmd_saves(args, game: Path) -> int:
     return 0
 
 
+def cmd_behaviour(args, game: Path) -> int:
+    """The mission AI scripts, as pseudo-code."""
+    paths = behaviour.scripts(game)
+    if not paths:
+        print("no .scr files found")
+        return 1
+    if not args.script:
+        table = behaviour.variables(game)
+        print(f"{len(paths)} scripts, {len(table)} variables in {behaviour.VARSET}\n")
+        for path in paths:
+            script = behaviour.read(path)
+            print(f"  {path.name:16} {len(script.handlers):3} handlers "
+                  f"{script.nodes:4} nodes   {', '.join(script.problems) or '-'}")
+        return 0
+
+    want = args.script.lower()
+    match = [p for p in paths if p.name.lower() == want or p.stem.lower() == want]
+    if not match:
+        print(f"no such script: {args.script}")
+        return 1
+    script = behaviour.read(match[0])
+    table = behaviour.variables(game)
+    if args.handler and script.handler(args.handler) is None:
+        print(f"{match[0].name} has no handler {args.handler!r}; it has "
+              + ", ".join(h.name for h in script.handlers))
+        return 1
+    print(f"{match[0].name}: {len(script.handlers)} handlers, {script.nodes} nodes")
+    print("# fnN, opN and tagN are numbered, not named -- the shipped files say "
+          "what they take, not what they do\n")
+    for line in behaviour.render(script, table, args.handler or ""):
+        print(line)
+    return 0
+
+
 def cmd_verify(args, game: Path) -> int:
     return verify.run(game)
 
@@ -667,6 +702,11 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("control", help="list .ctl controllers, or show one")
     p.add_argument("name", nargs="?", help="a .ctl member name; default is a listing")
     p.set_defaults(fn=cmd_control)
+
+    p = sub.add_parser("behaviour", help="the .scr mission AI, as pseudo-code")
+    p.add_argument("script", nargs="?", help="a .scr name; default is a listing")
+    p.add_argument("handler", nargs="?", help="one handler; default is all of them")
+    p.set_defaults(fn=cmd_behaviour)
 
     p = sub.add_parser("saves", help="what each save game is, and what it refers to")
     p.add_argument("--members", action="store_true",

@@ -217,7 +217,7 @@ openparkan/
   materials.py  Material.lib (MAT0)
   control.py    .ctl movement controllers
   controls.py   the input tables, and the engine's own numbers
-  behaviour.py  .scr mission AI scripts, and their varset.var symbol table
+  behaviour.py  .scr mission AI scripts, varset.var, and a pseudo-code view
   research.py   .trf research tree
   descriptions.py objects.dlb parts database
   save.py       SAVE/*.sav headers and references

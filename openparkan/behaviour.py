@@ -442,3 +442,45 @@ def name_at(table: list[Variable], index: int) -> str:
     if 0 <= index < len(table):
         return table[index].name
     return ""
+
+
+def render_node(node: Node, table: list[Variable]) -> str:
+    """One node as a line of pseudo-code.
+
+    Nothing here is named beyond what the data names.  A function is
+    ``fn15``, a fixed-arity opcode ``op1`` and a tag ``tag5``, because the
+    shipped files say what they take and not what they do.  The variables are
+    real names out of ``varset.var``.
+    """
+    args = ", ".join(name_at(table, o) or str(o) for o in node.operands)
+    into = name_at(table, node.destination) or ""
+    lead = f"{into} = " if into else ""
+
+    if node.calls:
+        return f"{lead}fn{node.function}({args})"
+    if node.opcode in BINARY:
+        return f"{lead}op{node.opcode}({args})"
+    if node.source != NULL:
+        return f"{lead}{name_at(table, node.source) or node.source}"
+    if node.reference != NULL:
+        return f"{lead}{name_at(table, node.reference) or node.reference}"
+    if node.literal != NULL:
+        value = node.literal
+        if value >= 0:
+            return f"{lead}{value}"
+        # Python ints are unbounded, so mask to the word the file holds.
+        return f"{lead}{value & 0xFFFF_FFFF & ~LITERAL_FLAG}  # flag {LITERAL_FLAG:#x} set"
+    return f"{lead}tag{node.tag}({args})" if args else f"{lead}tag{node.tag}"
+
+
+def render(script: Script, table: list[Variable], only: str = "") -> list[str]:
+    """A script as pseudo-code, one handler after another."""
+    lines: list[str] = []
+    for handler in script.handlers:
+        if only and handler.name != only:
+            continue
+        lines.append(f"{handler.name}:   # {len(handler.nodes)} nodes")
+        for index, node in enumerate(handler.nodes):
+            lines.append(f"  {index:4}  {render_node(node, table)}")
+        lines.append("")
+    return lines

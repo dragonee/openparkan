@@ -265,3 +265,48 @@ def test_the_tags_that_take_an_operand():
     assert [t for t, n in behaviour.TAG_ARITY.items() if n == 1] == [3, 4]
     assert behaviour.TAG_ARITY[behaviour.REFERENCE_TAG] == 0
     assert set(behaviour.ASSIGN_TAGS) <= set(behaviour.TAG_ARITY)
+
+
+def test_a_call_renders_with_its_variable_names(tmp_path):
+    table = behaviour.variables(write_varset(tmp_path))
+    node = behaviour.parse(build_script([("Init", [
+        build_node(head=(19, -1, -1, -1), operands=(0, 2, 5))])])).handlers[0].nodes[0]
+    assert behaviour.render_node(node, table) == "fn19(f0, d0, ClanID)"
+
+
+def test_a_call_that_writes_renders_as_an_assignment(tmp_path):
+    table = behaviour.variables(write_varset(tmp_path))
+    node = behaviour.parse(build_script([("Init", [
+        build_node(head=(29, 4, -1, -1), operands=(2,))])])).handlers[0].nodes[0]
+    assert behaviour.render_node(node, table) == "dTemp = fn29(d0)"
+
+
+def test_the_other_forms_render(tmp_path):
+    table = behaviour.variables(write_varset(tmp_path))
+
+    def one(head, opcode=6, operands=(), trailer=-1):
+        data = build_script([("Init", [build_node(head, opcode, operands, trailer)])])
+        return behaviour.render_node(behaviour.parse(data).handlers[0].nodes[0], table)
+
+    assert one((-1, 4, -1, -1), trailer=0) == "dTemp = f0"
+    assert one((-1, 4, 28, 6)) == "dTemp = 28"
+    assert one((-1, 4, 174, -1)) == "dTemp = 174"
+    assert one((-1, -1, -1, 5)) == "tag5"
+    assert one((-1, -1, -1, 3), operands=(2,)) == "tag3(d0)"
+    assert one((-1, -1, -1, -1), opcode=1, operands=(0, 2)) == "op1(f0, d0)"
+
+
+def test_a_flagged_literal_is_shown_as_flagged(tmp_path):
+    table = behaviour.variables(write_varset(tmp_path))
+    data = build_script([("Init", [build_node((-1, 4, -2147483643, 6))])])
+    line = behaviour.render_node(behaviour.parse(data).handlers[0].nodes[0], table)
+    assert line.startswith("dTemp = 5")
+    assert "flag" in line
+
+
+def test_render_can_pick_one_handler(tmp_path):
+    table = behaviour.variables(write_varset(tmp_path))
+    script = behaviour.parse(build_script([("Init", [build_node()]), ("Mission", [])]))
+    lines = behaviour.render(script, table, "Mission")
+    assert lines[0].startswith("Mission:")
+    assert not any("Init" in x for x in lines)

@@ -282,6 +282,50 @@ Function 19 appears in `Init` and nowhere else, which is where placing a base
 belongs. These readings are **guesses from the argument vocabulary** and the
 reader names none of them: it exposes `Node.function` as a number.
 
+## Reading a script
+
+Every field of a node now has a role, so a handler can be printed as
+pseudo-code. `openparkan behaviour c1m2e PBM_BUILDING_INF_CAPTURE_Start`:
+
+```
+   0  dX = fn29(d0)
+   1  dT = fn14(UNIT_ANY_NEAREST_CAPTURER, TARGET_BY_LOGIC_ID, dX)
+   2  op1(dT, ERROR)
+   3  fTemp = fn12()
+   ...
+   7  fn2(PBM_ROBOT_NEEDED, fTemp, dTemp1, dTemp2, ROBOT_BATTLEUNIT, NONE, SELECT_FASTEST)
+   8  tag5
+   9  tag1
+  10  fn15(dT, ORDER_ROBOT_CAPTURE, INSERT_ORDER_REPLACE, NONE, f0, f0, f0, f0, TARGET_BY_LOGIC_ID, dX)
+  11  fn6(dT, UNIT_NORMAL)
+  17  dAttackGroup = fn25(TAKE_BY_HITS, dTemp3, TARGET_BY_LOGIC_ID, dT)
+  30  fn28(dAttackGroup, ORDER_ROBOT_PATROL, INSERT_ORDER_REPLACE, ...)
+  32  fn27(ACTION_DESTROY, EXP_TARGET_BY_LOGIC_ID, dX)
+```
+
+**`fnN`, `opN` and `tagN` are numbered, not named**, and the renderer will not
+name them: the shipped files say what they take, not what they do. Everything
+else on those lines is a real name out of `varset.var`.
+
+Read as English, that handler finds the nearest capturer, asks for a battle
+robot if there is none, orders the one it has to capture, takes a group by
+hits, patrols it and marks the target for destruction. That is a *reading*,
+and the only part of it the data states is the argument names.
+
+### Where the tags sit — *measured*
+
+The tags are not scattered. Two facts hold across all 58 scripts:
+
+- **tag 5 is followed immediately by tag 1 on 210 of 210** nodes.
+- **tag 3 follows a comparison on 82 of 85**, and it is one of the two tags
+  that take an operand.
+- **No handler opens with tag 1**, and 36 end with one.
+
+*Guess*: the comparison nodes are conditions and the tags are the branch and
+join around them — `op1(dT, ERROR)` then a block then `tag1` reads exactly
+like an `if`. Nothing here proves it, and the renderer prints the flat list
+rather than indenting on a guess.
+
 ## What is not read here
 
 - **What the 57 functions compute**, and what the six fixed-arity opcodes do.
