@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import math
 import random
+import re
 import statistics
 import struct
 from collections import Counter, defaultdict
@@ -3872,6 +3873,83 @@ def check_saves(check, game: Path) -> None:
           f"{agree} of those name a .sav that is there")
 
 
+def check_vocabulary(check, game: Path) -> None:
+    """The naming scheme the archives and saves share."""
+    library = game / "objects.rlb"
+    if not library.exists():
+        return
+    names = sorted(e.name for e in NResArchive(library.read_bytes()).entries)
+
+    sizes = {"b": "large", "m": "medium", "l": "small", "t": "tiny", "f": "huge"}
+    labels: dict[str, str] = {}
+    for path in sorted((game / "UNITS").rglob("*.dat")):
+        try:
+            unit = objects.load_unit(path)
+        except (objects.ObjectFormatError, ValueError, OSError):
+            continue
+        for part in unit.components:
+            if part.ref.member and part.label:
+                labels[part.ref.member] = part.label
+    words = {"lrg": "large", "med": "medium", "sml": "small", "tny": "tiny"}
+    agree = Counter()
+    total = Counter()
+    for member, label in labels.items():
+        bits = member.split("_")
+        if len(bits) < 3 or bits[-2].lower() not in sizes:
+            continue
+        letter = bits[-2].lower()
+        found = re.search(r"\b(Huge|Large|Lrg|Medium|Med|Small|Sml|Tiny|Tny)\b",
+                          label, re.IGNORECASE)
+        if not found:
+            continue
+        word = found.group(1).lower()
+        total[letter] += 1
+        agree[letter] += words.get(word, word) == sizes[letter]
+    check("vocabulary: the letter in a part id is its size",
+          total and sum(agree.values()) >= sum(total.values()) - 2,
+          f"b=large, m=medium, l=small, t=tiny, f=huge on "
+          f"{sum(agree.values())}/{sum(total.values())} parts, against the display "
+          f"name the assembly gives each -- the two that differ are A_L_05, a "
+          f"creature, and R_B_06")
+
+    numbered = sorted({int(m.group(1)) for n in names
+                       if (m := re.match(r"i_c(\d\d)_", n))})
+    named = set(controls.CICLS.values())
+    check("vocabulary: the i_cNN models are indexed by component class",
+          numbered and set(numbered) - named,
+          f"{len(numbered)} i_cNN families, {numbered[0]}..{numbered[-1]}; "
+          f"{len(named & set(numbered))} of the {len(named)} classes the engine "
+          f"names have one, and {sorted(set(numbered) - named)} have a model "
+          f"where the resolver names no class")
+
+    shared = defaultdict(set)
+    for name in names:
+        bits = name.split("_")
+        if len(bits) >= 3 and len(bits[0]) == 2:
+            shared["_".join(bits[1:])].add(bits[0])
+    both = {k: v for k, v in shared.items() if {"bu", "fr"} <= v}
+    check("vocabulary: two building sets cover the same list of functions",
+          len(both) >= 8,
+          f"bu_ and fr_ both supply {len(both)} of the same suffixes -- "
+          + ", ".join(sorted(k.split('_', 1)[-1] for k in both)[:6]) + ", ...")
+
+    ordinals = []
+    for path in save.saves(game):
+        blob = path.read_bytes()
+        for ref in save.read(path).references:
+            if ref.offset + 76 <= len(blob):
+                ordinals.append(struct.unpack_from("<i", blob, ref.offset + 72)[0])
+    small = [v for v in ordinals if 0 < v <= 64]
+    walk = sum(1 for a, b in zip(ordinals, ordinals[1:], strict=False)
+               if abs(b - a) == 1)
+    check("vocabulary: a member record ends in a small ordinal",
+          ordinals and len(small) >= len(ordinals) * 0.9,
+          f"{len(small)}/{len(ordinals)} records hold 1..{max(small)} at +72 and "
+          f"{walk}/{len(ordinals) - 1} adjacent records differ by exactly one -- "
+          f"it counts along a group, but it runs down as often as up and its role "
+          f"is not established")
+
+
 def run(game: Path) -> int:
     """Run every check against ``game``.  Returns a process exit code."""
     results: list[tuple[str, bool, str]] = []
@@ -3887,7 +3965,7 @@ def run(game: Path) -> int:
         check_minimap_agreement, check_arealmap,
         check_grid, check_missions, check_objects, check_poses, check_lod, check_damage,
         check_effects, check_footprints, check_rsli, check_control, check_controls,
-        check_behaviour, check_research, check_saves,
+        check_behaviour, check_research, check_saves, check_vocabulary,
     )
     for fn in checks:
         fn(check, game)

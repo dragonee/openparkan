@@ -885,6 +885,19 @@ today; each is a small trap for anyone extending the code.
   carrying the top bit. `head[3]` runs 0..6, the opcode's own range. The
   trailer is −1 on 4686 of 6065. And what the seven opcodes *compute* is the
   months-long half. → [docs/15-behaviour.md](docs/15-behaviour.md)
+- **Component classes 6, 7, 14, 17 and 18.** They have shipped models named
+  `i_cNN` after the class id but the engine's resolver names none of them, so
+  the classes exist and only their names are missing from the text layer. 16
+  has neither a name nor a model. What any of them *does* is open.
+  → [docs/18-vocabulary.md](docs/18-vocabulary.md)
+- **The three int32 that end a save's member record.** `+72` counts along a
+  group of parts but runs down as often as up, so it is not a slot number;
+  `+64` is not the component class (tested, and it disagrees on 953 of 957);
+  `+68` is small with some plainly uninitialised values. All three open.
+  → [docs/18-vocabulary.md](docs/18-vocabulary.md)
+- Which of `bu_` and `fr_` is which faction. They supply the same 34 building
+  suffixes, so they are two sets covering one function list, but nothing in the
+  shipped data attaches either to a side.
 - The **save object graph**. Units, buildings, components, positions, damage,
   resources and mission progress are all in a `.sav` and none is decoded. The
   76-byte two-string record is the one structure identified, appearing in runs

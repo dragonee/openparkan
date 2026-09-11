@@ -198,6 +198,7 @@ of fields carried through the readers without being understood.
 - [15-behaviour.md](docs/15-behaviour.md) — the `.scr` mission AI scripts and `varset.var`
 - [16-research.md](docs/16-research.md) — the `.trf` research tree
 - [17-saves.md](docs/17-saves.md) — what a `.sav` refers to
+- [18-vocabulary.md](docs/18-vocabulary.md) — the object naming scheme, and what is guesswork
 
 ## Layout
 
