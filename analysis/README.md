@@ -15,3 +15,44 @@ uv sync --group analysis
 `pe.py` wraps `pefile` and `capstone` with the helpers this binary needs:
 section and export listing, string extraction, raw cross-reference search over
 `.text`, a prologue-walker, and a disassembler that annotates string operands.
+
+`names.py` extracts the engine's name-to-number tables. Several of the game's
+data files are plain text naming things like `MCMD_LEFT`, `CICLS_TURRET` and
+`SCAN_A`, so every binary that reads one carries a resolver — a chain of
+string compares, each case returning a constant. Those chains are the
+developers' own vocabulary, and this pulls them out:
+
+```
+uv run --group analysis python analysis/names.py World3D.dll
+uv run --group analysis python analysis/names.py iron3d.dll --prefix CMD
+```
+
+Its regression test is that it reproduces every table already in
+`openparkan/controls.py` byte for byte — `SCAN` (174), `CMD` (43+31),
+`MCMD` (22), `CIS` (15), `CICLS` (13), `MAN` (2). Re-run it after any change.
+Swept across the whole installation, `World3D.dll` and `iron3d.dll` are the
+only binaries that carry a resolver chain at all; the `GMSG_*` and `VOICE_*`
+identifiers elsewhere are log strings and lookup keys, not compare cases.
+
+## Things that cost us time
+
+- **A resolver has four shapes**, and missing one loses entries silently. They
+  are documented in `names.py`'s module docstring: the ordinary `mov eax, K`;
+  a case returning the zero `strcmp` already left in `eax`; a case writing to
+  an out-parameter (`mov dword ptr [edi], 0x2ed`), which is what `iron3d.dll`
+  does; and the chain's branchless last case
+  (`neg eax; sbb eax, eax; and eax, M; add eax, K`). The compiler also elides
+  the test where a case and the default are both zero.
+- **A family that comes out all zeros is a bug, not a finding.** That is the
+  signature of latching onto pushed strings that are not compare cases.
+- **A linear capstone sweep over `.text` desynchronises** on jump tables and
+  inline data, and then silently stops. Every scan must restart a byte later
+  when `disasm` stalls. `pe.py`'s `xrefs_to` does *not* do this and so misses
+  references; `function_start` is unreliable for the same reason and has
+  pointed at the wrong function more than once. Prefer the loop in `names.py`.
+- **Don't match disassembly with regular expressions where operands matter.**
+  Use `detail = True` and read `ins.operands` and their `access` flags. Two
+  regex passes over the same property table once disagreed with each other.
+- **Check a recovered table against the shipped files before believing it.**
+  The scan codes were confirmed twice over: they are the real IBM PC set-1
+  numbers, and `ScanCode.dsc` lists its first 56 entries in code order.

@@ -322,6 +322,121 @@ SCAN = {
     "SCAN_JOY_R_Z": 595,
 }
 
+
+# --- Values recovered from World3D.dll and iron3d.dll ----------------------
+#
+# The `CMD_` names of `Command.dsc` and the `.man` binding files are resolved
+# by **two** binaries, and they divide the vocabulary cleanly between them:
+# `World3D.dll` answers for the commands aimed at the object you are
+# controlling, `iron3d.dll` for the ones aimed at the game itself.  The two
+# chains share exactly one name, `CMD_CAMERA_INFRARED`, and they agree on it.
+#
+# The split is not an inference from the names.  Ten of the twelve `.man`
+# files draw on one binary only -- `hero.man` and the two `table_*.man` from
+# World3D, `addition.man` and `ui_hq*.man` from iron3d -- and no `.tbl` row
+# anywhere names an `iron3d.dll` command.  Only `ui_other.man` mixes, which is
+# what a file of that name should do.
+
+#: Commands to the controlled object, from ``World3D.dll``.  The values are
+#: banded by subsystem: 1-14 the hull, 20-24 the turret, 30-35 the camera,
+#: 40-49 weapon selection, 50-51 firing the selected weapon, 60-66 the rest.
+CMD_OBJECT = {
+    "CMD_OBJ_MOVE_LEFT": 1,
+    "CMD_OBJ_MOVE_RIGHT": 2,
+    "CMD_OBJ_MOVE_FORWARD": 3,
+    "CMD_OBJ_MOVE_BACKWARD": 4,
+    "CMD_OBJ_MOVE_DOWN": 5,
+    "CMD_OBJ_MOVE_UP": 6,
+    "CMD_OBJ_TURN_LEFT": 7,
+    "CMD_OBJ_TURN_RIGHT": 8,
+    "CMD_OBJ_TURN_UP": 9,
+    "CMD_OBJ_TURN_DOWN": 10,
+    "CMD_OBJ_SPEED_MAX": 11,
+    "CMD_OBJ_SPEED_MORE": 12,
+    "CMD_OBJ_SPEED_LESS": 13,
+    "CMD_OBJ_STOP": 14,
+    "CMD_TURRET_LEFT": 20,
+    "CMD_TURRET_RIGHT": 21,
+    "CMD_TURRET_UP": 22,
+    "CMD_TURRET_DOWN": 23,
+    "CMD_TURRET_CENTER": 24,
+    "CMD_CAMERA_LEFT": 30,
+    "CMD_CAMERA_RIGHT": 31,
+    "CMD_CAMERA_UP": 32,
+    "CMD_CAMERA_DOWN": 33,
+    "CMD_CAMERA_CENTER": 34,
+    "CMD_CAMERA_INFRARED": 35,
+    "CMD_SELECT_ALL_WEAPON": 40,
+    "CMD_SELECT_WEAPON_1": 41,
+    "CMD_SELECT_WEAPON_2": 42,
+    "CMD_SELECT_WEAPON_3": 43,
+    "CMD_SELECT_WEAPON_4": 44,
+    "CMD_SELECT_WEAPON_5": 45,
+    "CMD_SELECT_WEAPON_6": 46,
+    "CMD_SELECT_WEAPON_7": 47,
+    "CMD_SELECT_WEAPON_8": 48,
+    "CMD_SELECT_WEAPON_9": 49,
+    "CMD_FIRE_SELECTED_CONT": 50,
+    "CMD_FIRE_SELECTED": 51,
+    "CMD_CAMOUFLAGE_WEAR": 60,
+    "CMD_REPAIRSYS_ON": 61,
+    "CMD_CHANGE_TABLE": 63,
+    "CMD_SPOTLIGHT": 64,
+    "CMD_FIRE_MISSILE": 65,
+    "CMD_FIRE_ALL": 66,
+}
+
+#: Commands to the game, from ``iron3d.dll``: the commander's camera, the
+#: menus, the terminal, saving and loading.  A flat run of 723..754 with 743
+#: and 745 unused, plus the one camera command it shares with the object set.
+CMD_GAME = {
+    "CMD_CAMERA_INFRARED": 35,
+    "CMD_JAMES_HQ_MOVE_LEFT": 723,
+    "CMD_JAMES_HQ_MOVE_RIGHT": 724,
+    "CMD_JAMES_HQ_MOVE_UP": 725,
+    "CMD_JAMES_HQ_MOVE_DOWN": 726,
+    "CMD_JAMES_HQ_MOVE_FORWARD": 727,
+    "CMD_JAMES_HQ_MOVE_BACKWARD": 728,
+    "CMD_PAGER": 729,
+    "CMD_ENTER_STATE": 730,
+    "CMD_JAMES_MISSION_OBJ": 731,
+    "CMD_JAMES_SELECT_TARGET": 732,
+    "CMD_JAMES_SELECT_ENEMY": 733,
+    "CMD_JAMES_SELECT_FRIEND": 734,
+    "CMD_ROLLBACK_STATE": 735,
+    "CMD_JAMES_OUTER_CAMERA": 736,
+    "CMD_JAMES_COCKPIT_OFF": 737,
+    "CMD_JAMES_ZOOM_MODE": 738,
+    "CMD_JAMES_SATELLITE_MAP": 739,
+    "CMD_JAMES_WINGMAN_MENU": 740,
+    "CMD_JAMES_BASE_ROTLEFT": 741,
+    "CMD_JAMES_BASE_ROTRIGHT": 742,
+    "CMD_JAMES_AUTO_DRIVER": 744,
+    "CMD_TERMINAL": 746,
+    "CMD_TERMINAL_NEW_MESSAGE": 747,
+    "CMD_GAME_MENU": 748,
+    "CMD_HELP": 749,
+    "CMD_JAMES_AIM_TARGET": 750,
+    "CMD_INC_MAP_ALPHA": 751,
+    "CMD_DEC_MAP_ALPHA": 752,
+    "CMD_QUICK_SAVE": 753,
+    "CMD_QUICK_LOAD": 754,
+}
+
+#: Every command the engine knows, from whichever binary resolves it.  The
+#: union is **73** names against the **72** in ``Command.dsc``: the extra one
+#: is ``CMD_FIRE_SELECTED`` (51), which the engine resolves but no shipped
+#: file names.  Nothing in ``Command.dsc`` is missing from here.
+CMD = {**CMD_OBJECT, **CMD_GAME}
+
+#: The one name both binaries resolve, and the value they agree on.
+CMD_SHARED = "CMD_CAMERA_INFRARED"
+
+#: Resolved by the engine but named by no shipped file.  Its neighbour
+#: ``CMD_FIRE_SELECTED_CONT`` (50) is the one ``Command.dsc`` exposes, so
+#: this looks like the single-shot half of a pair that was never bound.
+CMD_UNNAMED = "CMD_FIRE_SELECTED"
+
 class ControlsFormatError(ValueError):
     pass
 
@@ -368,6 +483,24 @@ class Binding:
     def codes(self) -> tuple[int, int]:
         """The chord as the engine numbers it: (modifier, key) scan codes."""
         return SCAN.get(self.modifier, UNRESOLVED), SCAN.get(self.key, UNRESOLVED)
+
+    @property
+    def code(self) -> int:
+        """The command as the engine numbers it, from whichever binary knows it."""
+        return CMD.get(self.command, UNRESOLVED)
+
+    @property
+    def handler(self) -> str:
+        """Which binary resolves this command: ``World3D.dll`` or ``iron3d.dll``.
+
+        ``CMD_CAMERA_INFRARED`` is in both chains; it is reported as the
+        object command it also is.
+        """
+        if self.command in CMD_OBJECT:
+            return "World3D.dll"
+        if self.command in CMD_GAME:
+            return "iron3d.dll"
+        return ""
 
 
 def bindings(path: Path) -> list[Binding]:

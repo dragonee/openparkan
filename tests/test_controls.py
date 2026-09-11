@@ -133,3 +133,65 @@ class TestRecoveredTables:
         assert controls.CICLS["CICLS_TURRET"] == 1
         assert controls.CICLS["CICLS_ENGINE"] == 5
         assert "CICLS_UNKNOWN" not in controls.CICLS
+
+    def test_the_two_command_chains_are_disjoint_but_for_one_name(self):
+        assert len(controls.CMD_OBJECT) == 43
+        assert len(controls.CMD_GAME) == 31
+        shared = set(controls.CMD_OBJECT) & set(controls.CMD_GAME)
+        assert shared == {controls.CMD_SHARED}
+        assert (controls.CMD_OBJECT[controls.CMD_SHARED]
+                == controls.CMD_GAME[controls.CMD_SHARED] == 35)
+        assert len(controls.CMD) == 73
+
+    def test_the_object_commands_are_banded_by_subsystem(self):
+        bands = {
+            "CMD_OBJ_MOVE_LEFT": 1, "CMD_OBJ_STOP": 14,
+            "CMD_TURRET_LEFT": 20, "CMD_TURRET_CENTER": 24,
+            "CMD_CAMERA_LEFT": 30, "CMD_CAMERA_INFRARED": 35,
+            "CMD_SELECT_ALL_WEAPON": 40, "CMD_SELECT_WEAPON_9": 49,
+            "CMD_FIRE_SELECTED_CONT": 50, "CMD_FIRE_ALL": 66,
+        }
+        for name, value in bands.items():
+            assert controls.CMD_OBJECT[name] == value
+        assert max(controls.CMD_OBJECT.values()) == 66
+
+    def test_the_game_commands_are_a_flat_run(self):
+        run = sorted(v for v in controls.CMD_GAME.values() if v > 100)
+        assert run[0] == 723 and run[-1] == 754
+        assert set(range(723, 755)) - set(run) == {743, 745}
+        assert controls.CMD_GAME["CMD_JAMES_HQ_MOVE_LEFT"] == 723
+        assert controls.CMD_GAME["CMD_QUICK_LOAD"] == 754
+
+    def test_one_command_is_resolved_but_never_named(self):
+        assert controls.CMD_UNNAMED == "CMD_FIRE_SELECTED"
+        assert controls.CMD[controls.CMD_UNNAMED] == 51
+        assert controls.CMD["CMD_FIRE_SELECTED_CONT"] == 50
+
+
+class TestBindingResolution:
+    """A ``.man`` line resolves to numbers without the game being present."""
+
+    def test_a_binding_resolves_its_command_and_chord(self):
+        b = controls.Binding("CMD_FIRE_ALL", "SCAN_NULL", "SCAN_BLANK")
+        assert b.code == 66
+        assert b.handler == "World3D.dll"
+        assert b.codes == (0, 57)
+        assert b.chord == "SCAN_BLANK"
+
+    def test_a_game_command_names_the_other_binary(self):
+        b = controls.Binding("CMD_QUICK_SAVE", "SCAN_LSHIFT", "SCAN_F5")
+        assert b.code == 753
+        assert b.handler == "iron3d.dll"
+        assert b.codes == (42, 63)
+        assert b.chord == "SCAN_LSHIFT+SCAN_F5"
+
+    def test_an_unknown_command_resolves_to_the_engines_default(self):
+        b = controls.Binding("CMD_NOT_A_COMMAND", "SCAN_NULL", "SCAN_NOT_A_KEY")
+        assert b.code == controls.UNRESOLVED
+        assert b.handler == ""
+        assert b.codes == (0, controls.UNRESOLVED)
+
+    def test_the_shared_command_is_reported_as_an_object_command(self):
+        b = controls.Binding(controls.CMD_SHARED, "SCAN_NULL", "SCAN_I")
+        assert b.code == 35
+        assert b.handler == "World3D.dll"

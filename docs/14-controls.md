@@ -111,6 +111,12 @@ the constant on a match and the family's default otherwise: **-1** for most,
 **0** for the component classes. The names are the files'; the numbers are the
 engine's.
 
+Five of the six families are `World3D.dll`'s alone. The sixth, the `CMD_`
+commands, is split with `iron3d.dll`, and that split is worth a section of its
+own below. `analysis/names.py` extracts all of them; swept across the whole
+installation, those **two binaries are the only ones that carry a resolver
+chain at all**.
+
 **Every one of the 174 keys in `ScanCode.dsc` has a value, and there are no
 others** — the two sets are equal. They are the real **IBM PC set-1 scan
 codes**: `SCAN_ESC` is 1, `SCAN_A` is 30, `SCAN_LSHIFT` is 42, `SCAN_F1` is
@@ -143,6 +149,56 @@ different classes — **256** is `CIS_CONTINUEFIGHT` to a gun,
 `CIS_TURRETCONTROL` to a turret and `CIS_ANGLETRACE` to whatever traces. So a
 state word cannot be read without knowing the class it is aimed at, which is
 why the row carries both.
+
+### The commands, and the two binaries that answer for them
+
+`Command.dsc` and the `.man` files speak a sixth family, `CMD_`, and this one
+is not resolved in `World3D.dll` alone. **Two** binaries carry a chain, and
+between them they cover every one of the descriptor's 72 names:
+
+| binary | names | values | what it answers for |
+|---|---:|---|---|
+| `World3D.dll` | 43 | 1–66 | the object you are controlling |
+| `iron3d.dll` | 31 | 723–754 | the game itself |
+
+The object commands are **banded by subsystem**, and the bands are the
+engine's own — nothing here is grouping by name:
+
+| band | | commands |
+|---|---:|---|
+| the hull | 1–14 | `CMD_OBJ_MOVE_*` 1–6, `CMD_OBJ_TURN_*` 7–10, `CMD_OBJ_SPEED_MAX` 11, `_MORE` 12, `_LESS` 13, `CMD_OBJ_STOP` 14 |
+| the turret | 20–24 | `CMD_TURRET_LEFT` 20, `RIGHT` 21, `UP` 22, `DOWN` 23, `CENTER` 24 |
+| the camera | 30–35 | `CMD_CAMERA_LEFT` 30, `RIGHT` 31, `UP` 32, `DOWN` 33, `CENTER` 34, `INFRARED` 35 |
+| the weapons | 40–49 | `CMD_SELECT_ALL_WEAPON` 40, then `CMD_SELECT_WEAPON_1`–`_9` 41–49 |
+| firing | 50–51 | `CMD_FIRE_SELECTED_CONT` 50, `CMD_FIRE_SELECTED` 51 |
+| the rest | 60–66 | `CMD_CAMOUFLAGE_WEAR` 60, `CMD_REPAIRSYS_ON` 61, `CMD_CHANGE_TABLE` 63, `CMD_SPOTLIGHT` 64, `CMD_FIRE_MISSILE` 65, `CMD_FIRE_ALL` 66 |
+
+The game commands are a flat run instead — `CMD_JAMES_HQ_MOVE_LEFT` is 723 and
+`CMD_QUICK_LOAD` 754, with only **743** and **745** unused. They are the
+commander's camera, target selection, the wingman menu, the pager, the chat
+terminal, entering and leaving a warbot, the map's alpha, the game menu, help,
+and quick save and load.
+
+**The split is a fact about the files, not a reading of the names.** Ten of
+the twelve `.man` files draw on one binary only — `hero.man` and both
+`table_*.man` from `World3D.dll`, `addition.man` and both `ui_hq*.man` from
+`iron3d.dll` — and no `.tbl` row anywhere names an `iron3d.dll` command. Only
+`ui_other.man` and its `_d` twin mix, which is what a file of that name should
+do.
+
+Two loose ends, both small and both checked:
+
+- **One name is in both chains**: `CMD_CAMERA_INFRARED`, and the two resolvers
+  **agree** that it is 35. It is a component command the game shell also wants
+  to reach.
+- **One name is in neither file**: `CMD_FIRE_SELECTED` (51) is resolved by
+  `World3D.dll` but appears in no `Command.dsc` line and no `.man` binding.
+  Its neighbour `CMD_FIRE_SELECTED_CONT` (50) is the one the descriptor
+  exposes, so this looks like the single-shot half of a pair that shipped
+  unbound. The union is 73 names against the descriptor's 72, and that is the
+  whole of the difference.
+
+Of the 73, **65** are actually bound by the 275 `.man` lines.
 
 ## The join with the controller
 

@@ -30,7 +30,7 @@ practice — format facts yes, code no — is set out in
 | **Building interiors** | done — the internal nodes are 29460 triangles behind 10725 of shell, and the viewer cuts buildings open; path graph for 29 |
 | **Control points** | done — 284 members, 3599 named attachment points |
 | **Movement controllers** | done — `.ctl`, all 531 members end to end: the parameter frame, the component records with their part labels, and 1769 resource references that all resolve |
-| **Input layer** | done — `ScanCode.dsc`, `Command.dsc`, 12 `.man` binding files and the three `.tbl` control tables; 275 bindings and 116 rows, all resolving, and the engine's own numbers for every key, command, class and state |
+| **Input layer** | done — `ScanCode.dsc`, `Command.dsc`, 12 `.man` binding files and the three `.tbl` control tables; 275 bindings and 116 rows, all resolving, and the engine's own numbers for every key, command, class and state, including all 72 `CMD_` commands out of the two binaries that resolve them |
 | **`Land.map` navigation mesh** | done — all 33 maps, 34662 areals, adjacency and grid |
 | **Sky** | done — `sky.ske` day cycle, `sky.wea`'s nine texture slots, the engine's twelve-element lens flare and both its intensity gates, the weather markers, and where the sun and moon stand (fixed, and in no file), all 29 missions |
 | **RsLi archives** | done — encrypted entry table read, deflate and LZSS both unpacked; all 24 `sprites.lib` members out, and `gamefont.rlb`'s font, glyph metrics and `Ipol` palette |
@@ -214,7 +214,6 @@ openparkan/
   cli.py        command line
 docs/           format documentation
 tests/          unit tests, no game data needed
-TASK.md         a brief for whoever picks this up next
 analysis/       disassembly scaffolding (not part of the library)
 ```
 

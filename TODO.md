@@ -4,8 +4,6 @@ What is left to draw a Parkan scene correctly, and what has been closed.
 Ordered by how much each item costs you in a picture, not by how interesting
 it is.
 
-The next concrete piece of work is written up in [TASK.md](TASK.md).
-
 Format questions that do not affect rendering (save games, the network
 protocol, `.scr` semantics, leftover `data.tma` words) live in
 [docs/06-open-questions.md](docs/06-open-questions.md).
@@ -515,6 +513,22 @@ written down is a question nobody reopens.
       `MCMD_WALK_F` (19), `MCMD_WALK_B` (20) and `MCMD_LOCK` (21) fall
       outside it on 14 of the 116 rows, so walking is not the movement
       controller's job. → [docs/14-controls.md](docs/14-controls.md)
+
+- [x] **The `CMD_` command numbers, and who answers for them.** The last
+      family the text layer names. It is resolved by **two** binaries, not
+      one: `World3D.dll` numbers the 43 commands aimed at the object you
+      control, banded by subsystem (1–14 hull, 20–24 turret, 30–35 camera,
+      40–49 weapon select, 50–51 fire, 60–66 the rest), and `iron3d.dll` the
+      31 aimed at the game itself, a flat run of 723–754 missing only 743 and
+      745. Between them they cover **all 72** names in `Command.dsc`. The
+      split is a fact about the files rather than a reading of the names:
+      **10 of the 12** `.man` files draw on one binary only, and no `.tbl` row
+      anywhere names an `iron3d.dll` command. One name is in both chains —
+      `CMD_CAMERA_INFRARED`, and they agree it is 35 — and one,
+      `CMD_FIRE_SELECTED` (51), is resolved by the engine but named by no
+      shipped file. Swept across the installation, those two binaries are the
+      only ones carrying a resolver chain at all.
+      → [docs/14-controls.md](docs/14-controls.md)
 
 - [x] **The `.ctl` frame is the controller object.** Not a serialisation
       format with a layout of its own: `Control.dll`'s initialiser at

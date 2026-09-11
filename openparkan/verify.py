@@ -3591,6 +3591,47 @@ def check_controls(check, game: Path) -> None:
           f"-- the file's own header says there must be "
           f"{controls.BUILD_SCHEME_DECLARED}")
 
+    nameless = sorted(n for n in actions if n not in controls.CMD)
+    check("controls: every command in the descriptor has a number",
+          actions and not nameless,
+          f"{len(actions)}/{len(actions)} names in {controls.COMMANDS} resolve "
+          f"through the two chains -- {len(controls.CMD_OBJECT)} from World3D.dll, "
+          f"{len(controls.CMD_GAME)} from iron3d.dll")
+
+    unnumbered = sorted({b.command for b in bound if b.code == controls.UNRESOLVED})
+    check("controls: every binding resolves to a command number",
+          bound and not unnumbered,
+          f"{len(bound)} bindings across {len(sorted(game.glob('*.man')))} .man "
+          f"files carry {len({b.command for b in bound})} distinct commands, all "
+          f"numbered")
+
+    shared = sorted(set(controls.CMD_OBJECT) & set(controls.CMD_GAME))
+    spare = sorted(set(controls.CMD) - set(actions))
+    check("controls: the two chains agree where they overlap",
+          shared == [controls.CMD_SHARED]
+          and controls.CMD_OBJECT[controls.CMD_SHARED]
+          == controls.CMD_GAME[controls.CMD_SHARED]
+          and spare == [controls.CMD_UNNAMED],
+          f"one name in both chains, {controls.CMD_SHARED} = "
+          f"{controls.CMD[controls.CMD_SHARED]} in each; the union is "
+          f"{len(controls.CMD)} against {len(actions)} in {controls.COMMANDS}, the "
+          f"odd one out {controls.CMD_UNNAMED} = {controls.CMD[controls.CMD_UNNAMED]}")
+
+    pure = 0
+    for path in sorted(game.glob("*.man")):
+        named = {b.command for b in controls.bindings(path)}
+        obj = named & set(controls.CMD_OBJECT) - {controls.CMD_SHARED}
+        shell = named & set(controls.CMD_GAME) - {controls.CMD_SHARED}
+        pure += not (obj and shell)
+    from_game = sorted({r.action for r in rows
+                        if r.pressed and r.action in controls.CMD_GAME
+                        and r.action not in controls.CMD_OBJECT})
+    check("controls: the two chains split the binding files between them",
+          pure == len(sorted(game.glob("*.man"))) - 2 and not from_game,
+          f"{pure}/{len(sorted(game.glob('*.man')))} .man files draw on one binary "
+          f"only, the two ui_other files being the exception, and no .tbl row "
+          f"names an iron3d.dll command")
+
 
 def run(game: Path) -> int:
     """Run every check against ``game``.  Returns a process exit code."""
