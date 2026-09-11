@@ -38,10 +38,21 @@ first 23 declarations, which are the literal constants ``f0``..``f9`` and
 freely.  A node therefore reads its sources and writes its result, and which
 slot is which is settled.
 
-What a node *does* with them is not read here.  The opcode's arity is fixed --
-**0 to 5 take exactly two operands and 6 takes anything from none to eleven**
--- but what the seven opcodes compute, and what ``head[0]`` selects, are open.
-See ``docs/15-behaviour.md``.
+A node comes in **two forms**, and ``head[0]`` is what tells them apart.  With
+it set the node is a **call**: ``head[0]`` picks one of 57 functions, the
+operands are its arguments, and ``head[2]``, ``head[3]`` and the trailer are
+null on every one of the 2087.  With it unset the node **assigns**: it writes
+its destination from the trailer, which is a variable, or from ``head[2]``,
+which is a small integer -- and a node that writes carries exactly one of the
+two while a node that does not carries neither, 1718 and 1321 with no
+exceptions.  Only opcode 6 ever carries ``head[0]``; the fixed-arity opcodes
+0 to 5 never do.
+
+A function's signature is fixed: all 57 appear under one opcode, 52 of 57
+under a single operand count, and 56 of 57 either always write a destination
+or never do.  What each function *computes* is not read here, though the
+arguments say a good deal -- function 19 takes ``ClanBaseX``, ``ClanBaseY``
+and ``ClanID`` and appears only in ``Init``.  See ``docs/15-behaviour.md``.
 
 Everything above is re-derived by ``uv run openparkan verify``.
 """
@@ -66,6 +77,14 @@ OPCODES = range(0, 7)
 
 #: The widest operand list in the shipped scripts.
 MAX_OPERANDS = 11
+
+#: How many distinct functions a call selects from, and their range.
+FUNCTIONS = 57
+FUNCTION_IDS = range(0, 73)
+
+#: ``head[3]`` on an assignment: these two write a destination, the rest
+#: (1 to 5) are the forms that write nothing.
+ASSIGN_TAGS = (-1, 6)
 
 #: The engine's own event handlers: present in all 58 scripts.
 EVENTS = (
@@ -143,6 +162,39 @@ class Node:
     def binary(self) -> bool:
         """True for the fixed-arity opcodes, which always carry two operands."""
         return self.opcode in BINARY
+
+    @property
+    def function(self) -> int:
+        """The function this node calls, or ``NULL`` when it is not a call."""
+        return self.head[0]
+
+    @property
+    def calls(self) -> bool:
+        """True when the node is a call: a function, and operands as arguments."""
+        return self.head[0] != NULL
+
+    @property
+    def source(self) -> int:
+        """The variable an assignment reads, or ``NULL``.
+
+        Only ever set on a node that writes, and never together with
+        ``immediate``.
+        """
+        return self.trailer
+
+    @property
+    def immediate(self) -> int:
+        """The small integer an assignment writes, or ``NULL``.
+
+        Always paired with a ``DWORD`` destination.  Whether it is a literal
+        or an index into something is not established.
+        """
+        return self.head[2]
+
+    @property
+    def assigns(self) -> bool:
+        """True when the node writes its destination from one of the two."""
+        return not self.calls and (self.source != NULL or self.immediate != NULL)
 
     @property
     def destination(self) -> int:

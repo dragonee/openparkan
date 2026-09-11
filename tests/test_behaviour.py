@@ -196,3 +196,41 @@ def test_a_node_names_its_destination_and_its_sources():
 def test_a_node_may_write_nowhere():
     node = behaviour.parse(build_script([("Init", [build_node()])])).handlers[0].nodes[0]
     assert node.destination == behaviour.NULL
+
+
+def test_a_call_carries_a_function_and_nothing_else():
+    data = build_script([("Init", [
+        build_node(head=(19, -1, -1, -1), operands=(224, 225, 226), trailer=-1)])])
+    node = behaviour.parse(data).handlers[0].nodes[0]
+    assert node.calls
+    assert node.function == 19
+    assert not node.assigns
+    assert node.source == behaviour.NULL
+    assert node.immediate == behaviour.NULL
+
+
+def test_an_assignment_reads_a_variable_through_the_trailer():
+    data = build_script([("Init", [build_node(head=(-1, 171, -1, -1), trailer=4)])])
+    node = behaviour.parse(data).handlers[0].nodes[0]
+    assert not node.calls
+    assert node.assigns
+    assert node.destination == 171
+    assert node.source == 4
+    assert node.immediate == behaviour.NULL
+
+
+def test_an_assignment_may_carry_an_immediate_instead():
+    data = build_script([("Init", [build_node(head=(-1, 171, 6, 6), trailer=-1)])])
+    node = behaviour.parse(data).handlers[0].nodes[0]
+    assert node.assigns
+    assert node.immediate == 6
+    assert node.source == behaviour.NULL
+    assert node.head[3] in behaviour.ASSIGN_TAGS
+
+
+def test_a_node_that_writes_nothing_assigns_nothing():
+    data = build_script([("Init", [build_node(head=(-1, -1, -1, 3))])])
+    node = behaviour.parse(data).handlers[0].nodes[0]
+    assert not node.calls
+    assert not node.assigns
+    assert node.head[3] not in behaviour.ASSIGN_TAGS

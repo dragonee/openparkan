@@ -178,18 +178,87 @@ descriptions, `TRFA` stat templates for a UI panel
 an operand ceiling of 228 — is a coincidence, and a good reminder that a
 number landing in the right range is not evidence.
 
+## The node has two forms, and `head[0]` tells them apart
+
+`head[0]` was the last field with no reading at all. It has one, and it
+splits the node in two — *measured*, with no exceptions in 6065 nodes.
+
+### A call
+
+**2087 nodes carry `head[0]`, and every one is opcode 6.** On all 2087,
+`head[2]`, `head[3]` and the trailer are **null**. So a node with a function
+uses only the function, its operands and its destination:
+
+```
+head[0]      which function, 57 distinct over 0..72
+operands     its arguments
+head[1]      where the result goes, or null
+```
+
+A function's signature is fixed by its number:
+
+| | |
+|---|---:|
+| appear under a single opcode | **57 of 57** |
+| take a single number of arguments | **52 of 57** |
+| either always write a destination or never | **56 of 57** |
+
+That is a function table. The five with a variable count (14, 15, 25, 28, 44)
+take 2–3, 9–11, 1/4/5, 10–11 and 4–5 arguments, which reads as optional
+trailing ones.
+
+### An assignment
+
+The other 3039 opcode-6 nodes have no function, and they write from one of two
+places. The correspondence is exact:
+
+| writes | `head[2]` | trailer | operands | nodes |
+|---|---|---|---|---:|
+| yes | — | set | — | 1379 |
+| yes | set | — | — | 339 |
+| no | — | — | — | 1211 |
+| no | — | — | one | 110 |
+
+**All 1718 nodes that write carry exactly one of the two sources, and all 1321
+that write nothing carry neither.** The trailer is a variable index — 1379 of
+1379 valid, and the commonest are `f0`, `f1`, `f2`, the literal pool — so that
+form is `destination = variable`. `head[2]` is a small integer, 1 to 16 mostly,
+with the top bit set on 55 of 339, and its destination is a **`DWORD` on all
+339**, never a float.
+
+And `head[3]` is the tag that says which: **−1 or 6 on every node that writes,
+1 to 5 on every node that does not**, the two sets never meeting.
+
+### What the functions are — *guess*
+
+Nothing names them; `ai.dll` holds no run of 73 identifiers. But the arguments
+do the work, because they are `varset.var` names and the developers wrote
+those in full:
+
+| fn | uses | its arguments include | reading |
+|---:|---:|---|---|
+| 30 | 244 | `MESSAGE_INFO`, `OBJECTIVE_COMPLETE` | show a message, tick an objective |
+| 15 | 236 | `ORDER_ROBOT_PATROL`, `INSERT_ORDER_REPLACE`, `fSuccess` | give a robot an order |
+| 8 | 179 | `ST_SOLVING`, `ST_SOLVED` | set the problem's state |
+| 2 | 176 | `PBM_ROBOT_NEEDED`, `ROBOT_BATTLEUNIT` | raise a problem |
+| 27 | 147 | `ACTION_DESTROY`, `EXP_TARGET_BY_LOGIC_ID` | set a group's action |
+| 28 | 85 | `dAttackGroup`, `ORDER_ROBOT_ATTACK` | order a group |
+| 25 | 85 | `TAKE_BY_HITS`, `TARGET_BY_PLACE` → `dAttackGroup` | form a group |
+| 19 | 58 | `ClanBaseX`, `ClanBaseY`, `ClanID` | place the clan's base |
+
+Function 19 appears in `Init` and nowhere else, which is where placing a base
+belongs. These readings are **guesses from the argument vocabulary** and the
+reader names none of them: it exposes `Node.function` as a number.
+
 ## What is not read here
 
-- **What the seven opcodes compute.** The arity is fixed and the operands are
-  named, but nothing says whether opcode 1 is a comparison or an assignment.
-  This is the months-long half and it is gameplay, not format.
-- **`head[0]`**, which runs 0..72 on 2087 nodes. Too narrow to be a variable
-  index and there is no name table for it: `ai.dll` holds no run of ~73
-  identifiers, so whatever it selects is code.
-- **`head[2]`**, −1 on all but 339 nodes, where 63 of those carry the top bit
-  set (`0x80000000 | small`) and the rest are small. **`head[3]`**, 0..6 —
-  the opcode's own range, which may or may not mean anything.
-- **The trailer**, −1 on 4686 of 6065 nodes and 86 distinct values otherwise.
-  Every non-null value is a valid `varset.var` index, but so is almost any
-  small number, so that is not evidence.
+- **What the 57 functions compute**, and what the six fixed-arity opcodes do.
+  The shapes are settled; the meanings are the months-long half, and they are
+  gameplay rather than format.
+- **Whether `head[2]` is a literal or an index.** It is a small integer bound
+  to a `DWORD` destination, with the top bit set on 55 of 339. Both readings
+  fit and nothing in the data separates them.
+- **The five tag values 1 to 5** that `head[3]` takes on a node writing
+  nothing, and what distinguishes the 1211 bare nodes from the 110 that carry
+  a single operand.
 - **`.trf`**, the research tree — identified above, not read.

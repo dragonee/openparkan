@@ -38,7 +38,7 @@ practice — format facts yes, code no — is set out in
 | **Parts database** | done — `objects.dlb`, all 395 `DSCR` entries: the classification, the short code and display name, the stat panel rows, and the four costs that name the research tree's floats |
 | **Research tree** | done — all 29 `.trf`, 368 items each with names, codes, categories and both edge lists; the prerequisite graph, its research-centre spine, and the per-mission rewiring |
 | **Save games** | partial — the `SLOT` header on all 6, the mission, map and research trees they name, and 1154 of 1158 archive-member references resolving; the object graph itself is a raw heap dump and is not decoded |
-| **Behaviour scripts, semantics** | not started — what the seven opcodes compute, and what `head[0]` selects |
+| **Behaviour scripts, semantics** | partial — the node's two forms are read: a call selecting one of 57 functions with a fixed signature, or an assignment from a variable or an immediate. What the functions and opcodes *compute* is not started |
 
 ## Quickstart
 

@@ -892,13 +892,14 @@ today; each is a small trap for anyone extending the code.
   initialiser**, `+124` turns out to be run-time state rather than a
   parameter, `+116` is a bitfield whose bit 0 the engine tests, and
   `+44`/`+48`/`+52`/`+56` are compared rather than multiplied in.
-- The `.scr` **node's remaining fields**, now that the operands and the
-  destination are named. `head[0]` runs 0..72 on 2087 nodes and is too narrow
-  to be a variable index; `ai.dll` holds no run of ~73 identifiers, so whatever
-  it selects is code. `head[2]` is −1 on all but 339 nodes, 63 of those
-  carrying the top bit. `head[3]` runs 0..6, the opcode's own range. The
-  trailer is −1 on 4686 of 6065. And what the seven opcodes *compute* is the
-  months-long half. → [docs/15-behaviour.md](docs/15-behaviour.md)
+- What the `.scr` **functions and opcodes compute**. The node's *shape* is now
+  fully read ([15-behaviour.md](docs/15-behaviour.md)): `head[0]` selects one
+  of 57 functions with a fixed signature, or the node assigns from a variable
+  or an immediate. What each function does is the months-long half, and the
+  argument vocabulary gives readings but not proof. Three smaller pieces go
+  with it: whether `head[2]` is a literal or an index, the five tag values
+  `head[3]` takes on a node that writes nothing, and what separates the 1211
+  bare nodes from the 110 carrying one operand.
 - **Component classes 6, 7, 14 and 16-18**, which `World3D.dll`'s resolver
   leaves unnamed. A first pass thought the `i_cNN` models were named after
   them; they are not, they are ammunition named after the weapon

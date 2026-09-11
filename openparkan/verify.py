@@ -3708,6 +3708,55 @@ def check_behaviour(check, game: Path) -> None:
           f"node count, and the ceiling is {ceiling} whether a script holds 17 "
           f"nodes or 585 -- so the vocabulary is shared")
 
+    calls = [n for n in nodes if n.calls]
+    clean = [n for n in calls
+             if n.head[2] == behaviour.NULL and n.head[3] == behaviour.NULL
+             and n.trailer == behaviour.NULL]
+    only6 = {n.opcode for n in calls}
+    check("behaviour: a node with a function is a call and carries nothing else",
+          calls and len(clean) == len(calls) and only6 == {behaviour.VARIADIC},
+          f"{len(calls)} nodes select a function, every one under opcode "
+          f"{behaviour.VARIADIC}, and all {len(clean)} leave head[2], head[3] and "
+          f"the trailer null -- the fixed-arity opcodes never carry one")
+
+    signature = defaultdict(lambda: (set(), set(), set()))
+    for node in calls:
+        arity, ops, writes = signature[node.function]
+        arity.add(len(node.operands))
+        ops.add(node.opcode)
+        writes.add(node.destination != behaviour.NULL)
+    one_arity = sum(1 for v in signature.values() if len(v[0]) == 1)
+    one_write = sum(1 for v in signature.values() if len(v[2]) == 1)
+    check("behaviour: a function's signature is fixed by its number",
+          len(signature) == behaviour.FUNCTIONS
+          and one_arity >= len(signature) - 5 and one_write >= len(signature) - 1,
+          f"{len(signature)} distinct functions over "
+          f"{min(signature)}..{max(signature)}; {one_arity} take a single number "
+          f"of arguments and {one_write} either always write a destination or "
+          f"never do")
+
+    plain = [n for n in nodes if n.opcode == behaviour.VARIADIC and not n.calls]
+    writers = [n for n in plain if n.destination != behaviour.NULL]
+    sourced = [n for n in writers
+               if (n.source != behaviour.NULL) != (n.immediate != behaviour.NULL)]
+    quiet = [n for n in plain if n.destination == behaviour.NULL]
+    bare = [n for n in quiet
+            if n.source == behaviour.NULL and n.immediate == behaviour.NULL]
+    check("behaviour: an assignment carries exactly one source, and only when it writes",
+          plain and len(sourced) == len(writers) and len(bare) == len(quiet),
+          f"{len(writers)}/{len(writers)} nodes that write carry a variable or an "
+          f"immediate but never both, and {len(bare)}/{len(quiet)} that write "
+          f"nothing carry neither")
+
+    tags = {n.head[3] for n in writers}
+    other = {n.head[3] for n in quiet}
+    check("behaviour: head[3] says whether the node writes",
+          tags == set(behaviour.ASSIGN_TAGS) and not (tags & other),
+          f"every assignment that writes is tagged "
+          f"{' or '.join(str(t) for t in behaviour.ASSIGN_TAGS)} and every one "
+          f"that does not is tagged {min(other)}..{max(other)}; the two sets do "
+          f"not meet")
+
     table = behaviour.variables(game)
     names = [v.name for v in table]
     check("behaviour: the shared symbol table reads",
