@@ -3420,58 +3420,43 @@ def check_control(check, game: Path) -> None:
           f"`test byte ptr [ptr+0x60], 1` -- is set on "
           f"{sum(1 for v in flags if v & 1)} of {len(flags)}")
 
-    walked = exact = typed = withtype = 0
-    for _lib, _name, blob in blobs:
-        try:
-            c = control.parse(blob, names)
-        except control.ControlFormatError:
-            continue
-        start = control.section4_start(c.counts)
-        if c.counts[3]:
-            withtype += 1
-            if start + 4 <= len(blob):
-                tid = struct.unpack_from("<i", blob, start)[0]
-                typed += tid in control.COMPONENT_TYPES
-            continue
-        walked += 1
-        got = control.reference_groups(blob, start + control.BLOCK_SIZE,
-                                       c.counts[4], names)
-        if got is not None and got[1] == len(blob):
-            exact += 1
-    check(".ctl: the sections are laid out as the loader walks them",
-          exact == walked > 0,
-          f"{exact}/{walked} members that carry no component records are "
-          f"consumed to the byte by section 1 ({control.SECTION1_RECORD} + "
-          f"{control.SECTION1_PER_B}*B per record, then A*A int32), section 2 "
-          f"({control.SECTION2_RECORD}), the {control.BLOCK_SIZE}-byte block "
+    typed = sum(1 for c in parsed for k in c.components
+                if k.type_id in control.COMPONENT_TYPES)
+    parts = sum(len(c.components) for c in parsed)
+    check(".ctl: every member is consumed to the byte",
+          len(parsed) == len(blobs) > 0,
+          f"{len(parsed)}/{len(blobs)} walk end to end -- section 1 "
+          f"({control.SECTION1_RECORD} + {control.SECTION1_PER_B}*B a record, "
+          f"then A*A int32), section 2 ({control.SECTION2_RECORD}), "
+          f"{parts} component records, the {control.BLOCK_SIZE}-byte block, "
           f"and the reference groups")
 
     check(".ctl: a component record names a type the factory knows",
-          typed == withtype > 0,
-          f"{typed}/{withtype} members with component records begin section 4 "
-          f"with an id in {control.COMPONENT_TYPES.start}.."
-          f"{control.COMPONENT_TYPES.stop - 1}, which is the range the factory "
-          f"at 0x1002d4b0 dispatches")
+          typed == parts > 0,
+          f"all {parts} records carry an id in {control.COMPONENT_TYPES.start}.."
+          f"{control.COMPONENT_TYPES.stop - 1}, the range the factory at "
+          f"0x1002d4b0 dispatches; "
+          f"{len({k.type_id for c in parsed for k in c.components})} of the 30 "
+          f"are used")
 
-    refs = [r for c in parsed for r in c.references]
-    resolved = sum(
-        1 for r in refs
-        if r.resource.member.lower() in members.get(r.resource.library.lower(), ())
-    )
+    named = [r for c in parsed for r in c.named]
+    resolved = sum(1 for r in named
+                   if r.member.lower() in members.get(r.library.lower(), ()))
     check(".ctl: every reference names a member that exists",
-          resolved == len(refs) > 0,
-          f"{resolved}/{len(refs)} (archive, member) pairs resolve, into "
-          f"{len({r.resource.library.lower() for r in refs})} archives")
+          resolved == len(named) > 0,
+          f"{resolved}/{len(named)} (archive, member) pairs resolve -- "
+          f"{sum(1 for c in parsed for k in c.components if k.resource)} on "
+          f"components and the rest in section 5, out of "
+          f"{sum(len(c.references) for c in parsed)} records there")
 
     tags = {e.name.lower(): e.tag for e in NResArchive.open(game / "objects.rlb")} \
         if (game / "objects.rlb").exists() else {}
     kinds: Counter[str] = Counter()
     shooters: set[str] = set()
     for (lib, _name, _blob), c in zip(blobs, parsed, strict=True):
-        for r in c.references:
-            if r.resource.library.lower() == "objects.rlb":
-                kind = tags.get(r.resource.member.lower(), "?")
-                kinds[kind] += 1
+        for r in c.named:
+            if r.library.lower() == "objects.rlb":
+                kinds[tags.get(r.member.lower(), "?")] += 1
                 shooters.add(lib)
     check(".ctl: the objects a controller names are projectiles",
           kinds and set(kinds) == {"BULL"}
@@ -3479,16 +3464,20 @@ def check_control(check, game: Path) -> None:
           f"all {sum(kinds.values())} objects.rlb references are BULL records, "
           f"and the only archives that carry any are {', '.join(sorted(shooters))}")
 
-    runs = 0
-    stepped = 0
-    for c in parsed:
-        for a, b in zip(c.references, c.references[1:], strict=False):
-            runs += 1
-            stepped += b.offset - a.offset == control.REFERENCE_STRIDE
-    check(".ctl: references sit at a fixed stride",
-          stepped >= runs * 0.75 > 0,
-          f"{stepped}/{runs} consecutive references are "
-          f"{control.REFERENCE_STRIDE} bytes apart")
+    labels = {k.label for c in parsed for k in c.components if k.label}
+    parts = {e.name.lower(): e.tag
+             for e in NResArchive.open(game / "objects.rlb")} \
+        if (game / "objects.rlb").exists() else {}
+    matched = {label for label in labels
+               if any(n.startswith(label.lower()) for n in parts)}
+    tagged = {parts[n] for label in matched for n in parts
+              if n.startswith(label.lower())}
+    check(".ctl: a component's label names a family of internal parts",
+          labels and matched == labels and tagged == {"INTO"},
+          f"all {len(labels)} distinct labels on "
+          f"{sum(1 for c in parsed for k in c.components if k.label)} records "
+          f"are a prefix of an objects.rlb member, and every member they reach "
+          f"is an {', '.join(sorted(tagged))} record")
 
 
 def check_controls(check, game: Path) -> None:

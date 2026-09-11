@@ -41,6 +41,19 @@ SECTION1_PER_B = 16
 SECTION2_RECORD = 36
 BLOCK_SIZE = 84
 COMPONENT_TYPES = range(1, 31)
+
+#: A component record's fixed part, and the fields inside it that are read.
+#: Thirteen of the factory's fourteen classes share one parser at
+#: ``0x10021d50``; the fourteenth (type 2, which type 30 also uses) calls that
+#: one first and then does more with the object, so the record's extent is the
+#: same for all of them.
+COMPONENT_FIXED = 0xB0
+#: The ``(archive, member)`` pair, 32 bytes each -- what the component emits.
+COMPONENT_NAME_AT = 0x6C
+#: How many 4-byte entries follow the fixed part.
+COMPONENT_COUNT_AT = 0xAC
+#: A field the parser treats as absent when it is -1.
+COMPONENT_INDEX_AT = 0x18
 #: The smallest a controller can be.  The 128-byte frame and the 84-byte block
 #: are **not** adjacent in general -- sections 1, 2 and 4 lie between them --
 #: but a member with none of those is exactly the two, which is why 212 is the
@@ -118,12 +131,14 @@ DEFAULT_INTS = (92, 104, 116)
 #: * a fixed **84-byte block**, copied into the object.
 #: * **section 5** -- ``counts[4]`` groups, each an int32 ``n`` followed by
 #:   ``n`` reference records.
-#: A reference record inside a section: two 32-byte NUL-padded name fields and
-#: nine int32.  They occur in runs at this stride; the runs are anchored by
-#: hand because the sections around them are not parsed.
+#: A section-5 record: **nine int32, then** two 32-byte NUL-padded name fields.
+#: The order was the other way round in this reader until the sections were
+#: walked properly -- anchoring on the names put the ints where the names are.
 REFERENCE_STRIDE = 100
 NAME_FIELD = 32
 REFERENCE_INTS = 9
+#: Where the ``(archive, member)`` pair starts inside the record.
+REFERENCE_NAME_AT = 36
 
 
 class ControlFormatError(ValueError):
@@ -182,13 +197,85 @@ class Controller:
     reach: float
     #: True when +128 to the end is the unset fill.
     bare: bool
-    #: The reference records found in the sections after the frame.
+    #: Section 4: what this controller is made of, and what each part emits.
+    components: tuple[Component, ...]
+    #: Section 5's groups: 1432 of the 1651 named references live here, the
+    #: other 219 being components' own resources.  In the 136 members that
+    #: carry no components at all, none of section 5's records is named.
     references: tuple[Reference, ...]
+
+    @property
+    def named(self) -> list[ResourceRef]:
+        """Everything this controller names, from its parts and its groups."""
+        out = [c.resource for c in self.components if c.resource]
+        out += [r.resource for r in self.references if r.resource]
+        return out
 
     @property
     def sections(self) -> int:
         """How many sections the counts ask for, across all five kinds."""
         return sum(self.counts)
+
+
+@dataclass(frozen=True)
+class Component:
+    """One section-4 record: a class id, what it emits, and its tail.
+
+    The type id picks one of 30 classes at the factory in ``Control.dll``.
+    Thirteen sizes of object come out of it, but every class parses its record
+    with the same code, so the record is one shape:
+
+    ``COMPONENT_FIXED`` bytes, then ``len(entries)`` int32, then a length and
+    that many bytes of text where the length is not zero.
+    """
+
+    type_id: int
+    resource: ResourceRef
+    #: The int32 at +0x18, or None where the parser's -1 means absent.
+    index: int | None
+    #: The 4-byte entries after the fixed part.
+    entries: tuple[int, ...]
+    #: The length-prefixed string at the end, empty where the length is zero.
+    label: str
+    #: Where the record starts, and how long it is.
+    offset: int
+    size: int
+
+
+def read_component(blob: bytes, pos: int) -> Component | None:
+    """Read one component record.  None if it does not read as one."""
+    if pos + COMPONENT_FIXED > len(blob):
+        return None
+    type_id = struct.unpack_from("<i", blob, pos)[0]
+    count = struct.unpack_from("<i", blob, pos + COMPONENT_COUNT_AT)[0]
+    if type_id not in COMPONENT_TYPES or not 0 <= count <= 4096:
+        return None
+    end = pos + COMPONENT_FIXED
+    entries = struct.unpack_from(f"<{count}i", blob, end) if count else ()
+    end += 4 * count
+    if end + 4 > len(blob):
+        return None
+    length = struct.unpack_from("<i", blob, end)[0]
+    end += 4
+    label = ""
+    if length:
+        if not 0 < length < 4096 or end + length + 1 > len(blob):
+            return None
+        label = _fixed_string(blob[end : end + length + 1])
+        end += length + 1
+    index = struct.unpack_from("<i", blob, pos + COMPONENT_INDEX_AT)[0]
+    return Component(
+        type_id=type_id,
+        resource=ResourceRef(
+            _name(blob, pos + COMPONENT_NAME_AT) or "",
+            _name(blob, pos + COMPONENT_NAME_AT + NAME_FIELD) or "",
+        ),
+        index=None if index == -1 else index,
+        entries=tuple(entries),
+        label=label,
+        offset=pos,
+        size=end - pos,
+    )
 
 
 def section4_start(counts: tuple[int, ...]) -> int:
@@ -212,12 +299,11 @@ def reference_groups(blob: bytes, pos: int, count: int,
         if n < 0 or pos + n * REFERENCE_STRIDE > len(blob):
             return None
         for _i in range(n):
-            library = _name(blob, pos) or ""
-            member = _name(blob, pos + NAME_FIELD) or ""
+            library = _name(blob, pos + REFERENCE_NAME_AT) or ""
+            member = _name(blob, pos + REFERENCE_NAME_AT + NAME_FIELD) or ""
             if archives is not None and library and library.lower() not in archives:
                 return None
-            values = struct.unpack_from(f"<{REFERENCE_INTS}i", blob,
-                                        pos + 2 * NAME_FIELD)
+            values = struct.unpack_from(f"<{REFERENCE_INTS}i", blob, pos)
             out.append(Reference(ResourceRef(library, member), values, pos))
             pos += REFERENCE_STRIDE
     return out, pos
@@ -241,29 +327,6 @@ def _name(blob: bytes, offset: int) -> str | None:
     return _fixed_string(field)
 
 
-def find_references(blob: bytes, archives: frozenset[str] | None = None) -> list[Reference]:
-    """Locate the 100-byte reference records in the sections after the frame.
-
-    The sections are not parsed, so the records are found by their shape: two
-    readable name fields where the first names an archive.  Passing the set of
-    archive names that actually exist anchors the scan -- without it a record
-    whose member field holds an uninitialised tail can be picked up four bytes
-    late, splitting ``objects.rlb`` into ``cts.rlb``.
-    """
-    out: list[Reference] = []
-    pos = HEADER_SIZE
-    while pos + REFERENCE_STRIDE <= len(blob):
-        library = _name(blob, pos)
-        member = _name(blob, pos + NAME_FIELD)
-        if library and member and (archives is None or library.lower() in archives):
-            values = struct.unpack_from(f"<{REFERENCE_INTS}i", blob, pos + 2 * NAME_FIELD)
-            out.append(Reference(ResourceRef(library, member), values, pos))
-            pos += REFERENCE_STRIDE
-        else:
-            pos += 4
-    return out
-
-
 def parse(blob: bytes, archives: frozenset[str] | None = None) -> Controller:
     """Read a ``.ctl`` member.  Raises unless the 212-byte frame is present."""
     if len(blob) < FRAME_SIZE:
@@ -275,6 +338,22 @@ def parse(blob: bytes, archives: frozenset[str] | None = None) -> Controller:
         raise ControlFormatError(f"negative section count in {counts}")
     if not any(counts) and len(blob) != FRAME_SIZE:
         raise ControlFormatError(f"no sections but {len(blob)} bytes, not {FRAME_SIZE}")
+    pos = section4_start(counts)
+    components: list[Component] = []
+    for _ in range(counts[3]):
+        part = read_component(blob, pos)
+        if part is None:
+            raise ControlFormatError(
+                f"component {len(components)} of {counts[3]} does not read at {pos}"
+            )
+        components.append(part)
+        pos += part.size
+    groups = reference_groups(blob, pos + BLOCK_SIZE, counts[4], archives)
+    if groups is None:
+        raise ControlFormatError(f"reference groups do not read at {pos + BLOCK_SIZE}")
+    references, end = groups
+    if end != len(blob):
+        raise ControlFormatError(f"consumed {end} of {len(blob)} bytes")
     return Controller(
         counts=counts,
         triples=tuple(_triple(blob, at) for at in TRIPLE_AT),
@@ -289,5 +368,6 @@ def parse(blob: bytes, archives: frozenset[str] | None = None) -> Controller:
         flags=struct.unpack_from("<i", blob, 116)[0],
         reach=struct.unpack_from("<f", blob, 124)[0],
         bare=set(blob[HEADER_SIZE:]) == {UNSET},
-        references=tuple(find_references(blob, archives)),
+        components=tuple(components),
+        references=tuple(references),
     )

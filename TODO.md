@@ -102,7 +102,7 @@ written down is a question nobody reopens.
       and world speeds, two accelerations, two angles and a calculation
       mode — which is a better account of a triple than `(x, y, z)`.
       The 100-byte **reference record** inside it says what the thing
-      *emits*: all **1651** resolve, and every one of the 158 that names
+      *emits*: all **1769** resolve, and every one of the 158 that names
       `objects.rlb` is a `BULL` — a projectile — carried only by the four
       archives that hold things which shoot. The old note here said "a body
       of 156-byte records": that was section 1's record with the second
@@ -542,6 +542,20 @@ written down is a question nobody reopens.
       smallest members have nothing in between.
       → [docs/13-control.md](docs/13-control.md)
 
+- [x] **The `.ctl` component records — the format is finished.** A section-4
+      record is one shape for all 30 type ids: thirteen of the factory's
+      fourteen classes parse it with the same code at `0x10021d50`, and the
+      fourteenth calls that code first. It is `0xb0` fixed bytes, then `N`
+      int32 where `N` is at +0xac, then a length and that many bytes of
+      label. **All 531 members walk end to end**, 1066 component records
+      among them. A component's label names a family of internal parts:
+      **all 57 distinct labels prefix an `objects.rlb` member and every one
+      of the 186 they reach is an `INTO` record**. A section-5 record turned
+      out to be nine int32 **then** the name pair, not the other way round —
+      anchoring on names had put the ints where the names are. A controller
+      names **1769** resources and every one resolves.
+      → [docs/13-control.md](docs/13-control.md)
+
 ## 1. Wrong on screen today
 
 Nothing known. What is left below is fidelity the game had and this does not,
@@ -763,16 +777,10 @@ today; each is a small trap for anyone extending the code.
   rest of that byte is read: `0x10` opens a batch and `0x48` is constant.
 - Object mesh **face flags** (0 on 233714 faces, then 2, 4, 16, 32, 34) and the
   **class** beside them, which sits below 64 on 240500 of 241887.
-- The `.ctl` **component records**, section 4. Everything around them is
-  [read](docs/13-control.md) — section 1 is `A` records of `156 + 16*B`
-  then `A*A` int32, section 2 is `C` records of 36 bytes, then an 84-byte
-  block and `E` reference groups — and the 136 members with no component
-  records are consumed to the byte. But a component record's first int32
-  picks one of **30 classes**, each of which parses its own record through
-  its vtable, so the sizes live in 30 parsers rather than a table. All 395
-  members that carry them start section 4 with an id in 1..30. Beside it:
-  the 84-byte block's contents, and the nine ints of a reference, three of
-  which read as ASCII on 41 records.
+- The `.ctl` fields' **meaning**, now that their extent is settled: the
+  component record's 64-byte block at +0x2c and its 4-byte entries, section
+  1's and section 2's record contents, the 84-byte block, and the nine ints
+  of a section-5 record.
 - Which `.ctl` field feeds which channel. Two of the three legs are now
   closed. The message side: the controller dispatches `MCMD_` 1..16. The
   storage side: the frame from +20 on **is** the live object's parameter

@@ -303,12 +303,13 @@ def cmd_control(args, game: Path) -> int:
         return 2
 
     if not args.name:
-        refs = sum(len(c.references) for _l, _n, c in found)
-        print(f"{len(found)} controllers, {refs} references")
+        refs = sum(len(c.named) for _l, _n, c in found)
+        parts = sum(len(c.components) for _l, _n, c in found)
+        print(f"{len(found)} controllers, {parts} components, {refs} named references")
         for lib, name, c in found:
             mark = " bare" if c.bare else ""
-            print(f"  {lib:<14} {name:<26} sections {c.sections:3d}  "
-                  f"refs {len(c.references):3d}{mark}")
+            print(f"  {lib:<14} {name:<26} parts {len(c.components):3d}  "
+                  f"named {len(c.named):3d}{mark}")
         return 0
 
     for lib, name, c in found:
@@ -320,8 +321,14 @@ def cmd_control(args, game: Path) -> int:
               f"+104 {c.mode}   +116 {c.flags}")
         print(f"  bounds {c.bounds[0]:g}, {c.bounds[1]:g}   "
               f"cone {c.cone:.5f}   reach {c.reach:g}")
+        for k in c.components:
+            label = f"  {k.label}" if k.label else ""
+            entries = f"  {len(k.entries)} entries" if k.entries else ""
+            print(f"  part +{k.offset:<6d} type {k.type_id:2d}  {k.size:4d} bytes  "
+                  f"{str(k.resource):<34}{label}{entries}")
         for r in c.references:
-            print(f"  +{r.offset:<6d} {str(r.resource):<40} {list(r.values)}")
+            if r.resource:
+                print(f"  ref  +{r.offset:<6d} {str(r.resource):<40} {list(r.values)}")
     return 0
 
 

@@ -217,43 +217,6 @@ The object also carries a property interface — `[esp+0x1c] - 1`, `cmp eax,
 `0x1000e5e8` into a jump table at `0x1000e554`. A spot check of its cases finds
 that most hand out fields elsewhere in the object rather than in this block.
 
-## The reference record
-
-The sections after the frame carry **100-byte records**: a 32-byte archive
-name, a 32-byte member name, then nine `int32`.
-
-```
-0x00  char[32]   archive
-0x20  char[32]   member
-0x40  int32[9]   unresolved
-```
-
-**All 1651 of them resolve** to a member that exists, and they point into
-exactly three archives:
-
-| Into | Records | What it is |
-|---|---:|---|
-| `effects.rlb` | 1435 | a visual effect |
-| `objects.rlb` | 158 | **every one a `BULL` record** — a projectile |
-| `weapon.rlb` | 58 | another weapon |
-
-That settles what the record is for: **a controller names what the thing
-emits.** Only `guns.rlb`, `turrets.rlb`, `animals.rlb` and `bases.rlb` carry
-an `objects.rlb` reference — the four archives that hold things which shoot —
-and a gun's single reference is the bullet it fires. A building's controller
-names only effects: `fr_b_plant` has 54, most of them `f_signlight_g`.
-
-The nine ints are small and unresolved. The first three are zero on 1373,
-1537 and 1474 records, the fourth is 3, 4 or 5 on 1230, and two of the rest
-count upwards across a run — 100, 101, 102 beside 12, 13, 14 — which reads as
-an index rather than a parameter. `-1` turns up in every slot, the same
-sentinel the frame uses, but no record is `-1` throughout.
-
-One caveat on the tail: on **41** of the 1651 the third int reads as ASCII
-rather than a number, so the nine ints are not the same nine fields on every
-record. The two names are sound on all 1651 — they resolve — but a reader that
-depends on the ints should check them.
-
 ## The sections
 
 The loader at `0x10008b10` reads the five counts one at a time, copies the
@@ -263,7 +226,7 @@ parameter block, and then walks the body. That walk is the layout:
 |---|---|---|
 | section 1 | `counts[0]` = A, `counts[1]` = B | A records of `156 + 16*B`, then `A*A` int32 |
 | section 2 | `counts[2]` = C | C records of 36 bytes |
-| section 4 | `counts[3]` = D | D records, each **type-dispatched**, size not recovered |
+| section 4 | `counts[3]` = D | D component records, each **type-dispatched** |
 | the block | — | a fixed **84 bytes**, copied into the object |
 | section 5 | `counts[4]` = E | E groups: an int32 `n`, then `n` records of 100 bytes |
 
@@ -277,27 +240,66 @@ original note was section 1 with B = 0 — right about the number, wrong about
 what it counted. And the "84-byte trailer" is not padding: the loader `rep
 movsd`s it into the object and then reads section 5 after it.
 
-Checked against the data: **all 136 members that carry no component records
-are consumed to the byte**, and every one of the **395** that do carry them
-begins section 4 with an int32 in **1 to 30** — exactly the range the factory
-at `0x1002d4b0` dispatches, through a byte index table at `0x1002d864` into a
-jump table at `0x1002d82c`.
+Checked against the data: **all 531 members are consumed to the byte**, once
+the component record below is added.
 
+## The component record
+
+A section-4 record is one shape for every type. The factory at `0x1002d4b0`
+dispatches its first `int32` — **a type id from 1 to 30** — through a byte
+index table at `0x1002d864` into fourteen cases, which build objects of
+fourteen different sizes. But thirteen of the fourteen classes parse their
+record with the *same* code at `0x10021d50`, and the fourteenth (type 2, which
+type 30 shares) calls that code first and then does more with the object. So
+the record's extent is common to all of them:
+
+```
+0x00  int32      type id, 1..30
+0x18  int32      an index; the parser treats -1 as absent
+0x2c  byte[64]   copied whole into the object
+0x6c  char[32]   archive        what this part emits
+0x8c  char[32]   member
+0xac  int32      N -- how many 4-byte entries follow
+0xb0  int32[N]   the entries
+      int32      L
+      char[L+1]  a label, where L is not zero
+```
+
+**All 531 members now walk end to end**, 1066 component records among them,
+every one carrying an id in 1..30 — 20 of the 30 ids are used.
+
+The label is the good part. **All 57 distinct labels are a prefix of an
+`objects.rlb` member, and every one of the 186 members they reach is an
+`INTO` record** — an internal part. `i_pws_f` is a power supply, `i_rdr_b` a
+radar, `i_eng_l` an engine, `i_fsh_f` a fight shield. So section 4 is the
+controller's **parts list**, and a component's label says which family of
+internal part it stands for. 395 of the 1066 records carry one.
+
+## The section-5 record
+
+Nine `int32`, **then** the name pair:
+
+```
+0x00  int32[9]   unresolved
+0x24  char[32]   archive
+0x44  char[32]   member
+```
+
+This reader had that the other way round until the sections were walked:
+anchoring on the names put the ints where the names are, which is also where
+the old note about "three of the nine reading as ASCII on 41 records" came
+from. There are **2925** such records and **1432** of them are named.
+
+Across both places a controller names **1769** resources and **every one
+resolves**. The 219 on components are what the part emits — a gun's projectile
+is named there, which is why all 158 `objects.rlb` references are `BULL`
+records, carried only by the four archives that hold things which shoot.
 ### What is still not read
 
-**The component records of section 4.** Their first int32 picks one of 30
-classes; the factory builds that class and hands the record to its own vtable
-slot 7, which parses it and returns the advanced pointer. So the sizes live in
-30 different parsers, not in one table, and this reader does not walk them.
-That is also why no assignment of fixed strides ever fitted the file sizes.
-
-Because section 4 is opaque, the reader computes section 1, section 2 and the
-start of section 4 exactly, and reads section 5 only where section 4 is empty.
-The `Reference` records it finds by shape elsewhere are inside the component
-records — a gun's projectile is named in the component that fires it, not in
-section 5. Section 5's own records carry the same 100-byte shape but, in the
-136 members where they can be located exactly, **none of them has a readable
-name**.
+The meaning of the fields rather than their extent: the component
+record's 64-byte block at +0x2c and its 4-byte entries, section 1's and
+section 2's record contents, the 84-byte block's contents, and the nine
+ints of a section-5 record.
 
 ### Where to look next
 
