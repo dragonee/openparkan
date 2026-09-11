@@ -120,8 +120,9 @@ and then 2, 1, 1, 1, which reads as two parallel arrays rather than pairs.
 ## Not looked at at all
 
 `.scr` **node semantics** -- the structure is now [read](15-behaviour.md), all 58
-files end to end, but what a node does is not -- save games in `SAVE/`, and the
-network protocol. The `.trf` archives are [read](16-research.md): 368 research
+files end to end, but what a node does is not -- and the network protocol. Save
+games in `SAVE/` are [partly read](17-saves.md): the header and what a save
+refers to, but not the object graph, which is a raw heap dump. The `.trf` archives are [read](16-research.md): 368 research
 items and their prerequisite graph, though four floats and three of the twelve
 streams inside them are not. The engine's own `.ini` files — `Comp.ini`'s component
 registry, `Behavior.ini`'s and `ArealMap.ini`'s debug switches — are text and

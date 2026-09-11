@@ -17,6 +17,7 @@ from . import (
     mission,
     research,
     rsli,
+    save,
     sky,
     texm,
     verify,
@@ -533,6 +534,39 @@ def cmd_research(args, game: Path) -> int:
     return 0
 
 
+def cmd_saves(args, game: Path) -> int:
+    """What each save game is, and what it refers to."""
+    index = {}
+    try:
+        index = {x.filename.lower(): x for x in save.slots(game)}
+    except OSError:
+        pass
+    paths = save.saves(game)
+    if not paths:
+        print("no saves found")
+        return 1
+    for path in paths:
+        try:
+            s = save.read(path)
+        except save.SaveFormatError as exc:
+            print(f"{path.name}: {exc}")
+            continue
+        label = index.get(path.name.lower())
+        kind = "campaign" if s.campaign else "single"
+        print(f"{path.name}  {path.stat().st_size:>7} bytes  {kind}"
+              f"{f'  {label.name!r}' if label and label.name else ''}")
+        print(f"  mission  {s.mission}")
+        print(f"  map      {s.map}")
+        print(f"  trees    {', '.join(s.trees) or '-'}")
+        print(f"  refers to {len(s.references)} archive members, "
+              f"{len(s.members)} distinct")
+        if args.members:
+            for archive, member in s.members:
+                print(f"      {archive:12} {member}")
+        print()
+    return 0
+
+
 def cmd_verify(args, game: Path) -> int:
     return verify.run(game)
 
@@ -633,6 +667,11 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("control", help="list .ctl controllers, or show one")
     p.add_argument("name", nargs="?", help="a .ctl member name; default is a listing")
     p.set_defaults(fn=cmd_control)
+
+    p = sub.add_parser("saves", help="what each save game is, and what it refers to")
+    p.add_argument("--members", action="store_true",
+                   help="list every archive member the save names")
+    p.set_defaults(fn=cmd_saves)
 
     p = sub.add_parser("research", help="the research tree from a .trf archive")
     p.add_argument("item", nargs="?", help="show one item by name instead of the tree")

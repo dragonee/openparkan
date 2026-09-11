@@ -545,6 +545,23 @@ written down is a question nobody reopens.
       5126 on opcode 6 taking 0 to 11. What a node *does* is the months-long
       half and is untouched. → [docs/15-behaviour.md](docs/15-behaviour.md)
 
+- [x] **Save games, as far as they go.** A `.sav` is **not a designed format**
+      — it is the engine's live object graph written out as it sat in memory,
+      with the classes' 32-byte string fields, heap addresses left in place
+      (`0x10106b98` at the same spot in all six saves) and buffer tails never
+      zeroed, so a name is not reliably NUL-terminated. Decoding it means
+      reconstructing the classes. What *is* read is the header — `SLOT`,
+      version, and the one length-prefixed string in the file, the mission path
+      — and **what a save refers to**: all six name a mission directory, a
+      `DATA/MAPS` map and their research trees, and every one of those is
+      installed. `slot4` names **four** trees, one per opposing clan plus the
+      shared `data.trf`, which is what the per-mission `.trf` wiring is for.
+      A scan for the engine's two-string record recovers **1158 member
+      references, 1154 resolving** into the archive they name; the four that do
+      not are research-tree part ids (`R_L_04`) stored in the same field, which
+      is a finding rather than a miss.
+      → [docs/17-saves.md](docs/17-saves.md)
+
 - [x] **The research tree.** `.trf` was written down last round as an open
       lead for the wrong reason and is now read for the right one. Every member
       of all 29 archives is named `ResTree` because that is what it is. Twelve
@@ -868,6 +885,12 @@ today; each is a small trap for anyone extending the code.
   carrying the top bit. `head[3]` runs 0..6, the opcode's own range. The
   trailer is −1 on 4686 of 6065. And what the seven opcodes *compute* is the
   months-long half. → [docs/15-behaviour.md](docs/15-behaviour.md)
+- The **save object graph**. Units, buildings, components, positions, damage,
+  resources and mission progress are all in a `.sav` and none is decoded. The
+  76-byte two-string record is the one structure identified, appearing in runs
+  separated by the owning object's own data. Whether the header's second
+  version byte really separates campaign from single is also open — one of six
+  saves has it set. → [docs/17-saves.md](docs/17-saves.md)
 - `.trf` **leftovers**, now that the tree itself is
   [read](docs/16-research.md): the four float32 of a `TRF0` record (cost and
   time is the obvious guess, and the reader does not make it), the record's id

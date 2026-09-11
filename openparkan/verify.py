@@ -29,6 +29,7 @@ from . import (
     objects,
     research,
     rsli,
+    save,
     sky,
     texm,
 )
@@ -3813,6 +3814,64 @@ def check_research(check, game: Path) -> None:
           f"{max(sum(1 for t in trees if t.edges == e) for e in totals)}")
 
 
+def check_saves(check, game: Path) -> None:
+    """Save games: SAVE/*.sav and the slot index beside them."""
+    paths = save.saves(game)
+    read = []
+    refused = []
+    for path in paths:
+        try:
+            read.append(save.read(path))
+        except save.SaveFormatError as exc:
+            refused.append(str(exc))
+    check("saves: every save reads its header",
+          paths and not refused,
+          f"{len(read)}/{len(paths)} open with {save.MAGIC.decode()} and version "
+          f"{save.VERSION}, each naming the mission it is in")
+
+    missions = [s for s in read
+                if (game / Path(s.mission.replace('\\', '/'))).is_dir()]
+    check("saves: every save names a mission that is installed",
+          read and len(missions) == len(read),
+          f"{len(missions)}/{len(read)} mission paths resolve to a directory, "
+          f"{len({s.mission for s in read})} distinct")
+
+    maps = [s for s in read if s.map and (game / "DATA" / "MAPS" / s.map).is_dir()]
+    check("saves: every save names a map that is installed",
+          read and len(maps) == len(read),
+          f"{len(maps)}/{len(read)} name a DATA/MAPS directory that exists -- "
+          + ", ".join(sorted({s.map for s in read})))
+
+    wanted = {t for s in read for t in s.trees}
+    here = {p.name.lower() for p in research.trees(game)}
+    check("saves: every research tree a save names is installed",
+          wanted and wanted <= here,
+          f"{len(wanted)} distinct .trf named across the saves, all present; "
+          f"one save names {max(len(s.trees) for s in read)} of them, one per clan")
+
+    archives = {}
+    for name in save.ARCHIVES:
+        path = game / name
+        if path.exists():
+            archives[name] = {e.name for e in NResArchive(path.read_bytes()).entries}
+    refs = [r for s in read for r in s.references]
+    resolved = sum(1 for r in refs
+                   if r.archive in archives and r.member in archives[r.archive])
+    check("saves: the members a save names are in the archives it names",
+          refs and resolved >= len(refs) * 0.99,
+          f"{resolved}/{len(refs)} references resolve into {', '.join(sorted(archives))} "
+          f"-- the rest name a research-tree part id instead")
+
+    index = save.slots(game)
+    filled = [x for x in index if not x.empty]
+    present = {p.name.lower() for p in paths}
+    agree = sum(1 for x in filled if x.filename.lower() in present)
+    check("saves: the slot index agrees with the files on disk",
+          index and agree == len(filled) == len(paths),
+          f"{len(index)} slots in {save.SLOTS}, {len(filled)} not empty and all "
+          f"{agree} of those name a .sav that is there")
+
+
 def run(game: Path) -> int:
     """Run every check against ``game``.  Returns a process exit code."""
     results: list[tuple[str, bool, str]] = []
@@ -3828,7 +3887,7 @@ def run(game: Path) -> int:
         check_minimap_agreement, check_arealmap,
         check_grid, check_missions, check_objects, check_poses, check_lod, check_damage,
         check_effects, check_footprints, check_rsli, check_control, check_controls,
-        check_behaviour, check_research,
+        check_behaviour, check_research, check_saves,
     )
     for fn in checks:
         fn(check, game)
