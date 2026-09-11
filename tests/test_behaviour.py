@@ -234,3 +234,34 @@ def test_a_node_that_writes_nothing_assigns_nothing():
     assert not node.calls
     assert not node.assigns
     assert node.head[3] not in behaviour.ASSIGN_TAGS
+
+
+def test_the_tag_reads_head2_as_a_variable():
+    data = build_script([("Init", [build_node(head=(-1, 171, 174, -1))])])
+    node = behaviour.parse(data).handlers[0].nodes[0]
+    assert node.tag == behaviour.REFERENCE_TAG
+    assert node.reference == 174
+    assert node.literal == behaviour.NULL
+    assert node.assigns
+
+
+def test_the_other_tag_reads_head2_as_a_number():
+    data = build_script([("Init", [build_node(head=(-1, 171, 28, 6))])])
+    node = behaviour.parse(data).handlers[0].nodes[0]
+    assert node.tag == behaviour.LITERAL_TAG
+    assert node.literal == 28
+    assert node.reference == behaviour.NULL
+
+
+def test_a_flagged_literal_is_returned_as_written():
+    flagged = -2147483643        # 0x80000005
+    data = build_script([("Init", [build_node(head=(-1, 171, flagged, 6))])])
+    node = behaviour.parse(data).handlers[0].nodes[0]
+    assert node.literal == flagged
+    assert node.literal & behaviour.LITERAL_FLAG
+
+
+def test_the_tags_that_take_an_operand():
+    assert [t for t, n in behaviour.TAG_ARITY.items() if n == 1] == [3, 4]
+    assert behaviour.TAG_ARITY[behaviour.REFERENCE_TAG] == 0
+    assert set(behaviour.ASSIGN_TAGS) <= set(behaviour.TAG_ARITY)

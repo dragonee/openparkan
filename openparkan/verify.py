@@ -3748,6 +3748,28 @@ def check_behaviour(check, game: Path) -> None:
           f"immediate but never both, and {len(bare)}/{len(quiet)} that write "
           f"nothing carry neither")
 
+    arity_ok = sum(1 for n in plain
+                   if len(n.operands) == behaviour.TAG_ARITY.get(n.tag, -1))
+    check("behaviour: a tag fixes its own arity, the way a function does",
+          plain and arity_ok == len(plain),
+          f"{arity_ok}/{len(plain)} nodes carry exactly the operands their tag "
+          f"takes -- "
+          + ", ".join(f"{t}:{a}" for t, a in sorted(behaviour.TAG_ARITY.items()))
+          + " -- so the 110 with one operand are tags 3 and 4 and no others")
+
+    refs = [n for n in plain if n.reference != behaviour.NULL]
+    lits = [n for n in plain if n.literal != behaviour.NULL]
+    ref_ok = sum(1 for n in refs if 0 <= n.reference < len(behaviour.variables(game)))
+    span = len(behaviour.variables(game))
+    impossible = [n for n in lits if not 0 <= n.literal < span]
+    check("behaviour: the tag says whether head[2] is a variable or a number",
+          refs and lits and ref_ok == len(refs) and impossible,
+          f"under tag {behaviour.REFERENCE_TAG} all {ref_ok}/{len(refs)} values "
+          f"are variable indices and only "
+          f"{len({n.reference for n in refs})} distinct ones are used; under tag "
+          f"{behaviour.LITERAL_TAG} {len(impossible)}/{len(lits)} cannot be an "
+          f"index at all, and the rest run densely from 1")
+
     tags = {n.head[3] for n in writers}
     other = {n.head[3] for n in quiet}
     check("behaviour: head[3] says whether the node writes",

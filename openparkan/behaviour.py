@@ -41,12 +41,14 @@ slot is which is settled.
 A node comes in **two forms**, and ``head[0]`` is what tells them apart.  With
 it set the node is a **call**: ``head[0]`` picks one of 57 functions, the
 operands are its arguments, and ``head[2]``, ``head[3]`` and the trailer are
-null on every one of the 2087.  With it unset the node **assigns**: it writes
-its destination from the trailer, which is a variable, or from ``head[2]``,
-which is a small integer -- and a node that writes carries exactly one of the
-two while a node that does not carries neither, 1718 and 1321 with no
-exceptions.  Only opcode 6 ever carries ``head[0]``; the fixed-arity opcodes
-0 to 5 never do.
+null on every one of the 2087.  With it unset ``head[3]`` takes over as the selector,
+with an arity of its own: tags 3 and 4 take one operand and the rest take
+none.  Two of the seven tags write a destination and the other five do not,
+and a node that writes carries exactly one source while a node that does not
+carries none -- 1718 and 1321, no exceptions.  The source is the trailer, a
+variable, or ``head[2]``, which the tag reads as a variable under -1 and as a
+plain number under 6.  Only opcode 6 ever carries ``head[0]``; the
+fixed-arity opcodes 0 to 5 never do.
 
 A function's signature is fixed: all 57 appear under one opcode, 52 of 57
 under a single operand count, and 56 of 57 either always write a destination
@@ -85,6 +87,19 @@ FUNCTION_IDS = range(0, 73)
 #: ``head[3]`` on an assignment: these two write a destination, the rest
 #: (1 to 5) are the forms that write nothing.
 ASSIGN_TAGS = (-1, 6)
+
+#: ``head[3]`` is the non-call node's own selector, and like a function id it
+#: has a fixed arity.  Tags 3 and 4 take one operand; the rest take none.
+TAG_ARITY = {-1: 0, 1: 0, 2: 0, 3: 1, 4: 1, 5: 0, 6: 0}
+
+#: The tag under which ``head[2]`` is a variable index, and the one under
+#: which it is a plain number.
+REFERENCE_TAG = -1
+LITERAL_TAG = 6
+
+#: The high half set on 55 of the literals.  Its meaning is open; a sign is
+#: the obvious guess and nothing tests it.
+LITERAL_FLAG = 0x8000_0000
 
 #: The engine's own event handlers: present in all 58 scripts.
 EVENTS = (
@@ -183,13 +198,33 @@ class Node:
         return self.trailer
 
     @property
-    def immediate(self) -> int:
-        """The small integer an assignment writes, or ``NULL``.
+    def tag(self) -> int:
+        """What a node that is not a call does.  Its arity is ``TAG_ARITY``."""
+        return self.head[3]
 
-        Always paired with a ``DWORD`` destination.  Whether it is a literal
-        or an index into something is not established.
+    @property
+    def immediate(self) -> int:
+        """The value an assignment writes through ``head[2]``, or ``NULL``.
+
+        The tag says how to read it: under ``REFERENCE_TAG`` it is a variable
+        index and under ``LITERAL_TAG`` a plain number.  Prefer ``reference``
+        and ``literal``.
         """
         return self.head[2]
+
+    @property
+    def reference(self) -> int:
+        """The variable ``head[2]`` names, or ``NULL`` if it is not one."""
+        return self.head[2] if self.tag == REFERENCE_TAG else NULL
+
+    @property
+    def literal(self) -> int:
+        """The number ``head[2]`` holds, or ``NULL`` if it is not one.
+
+        The flag bit, set on 55 of them, is left in place: this returns the
+        word as written.
+        """
+        return self.head[2] if self.tag == LITERAL_TAG else NULL
 
     @property
     def assigns(self) -> bool:

@@ -226,8 +226,40 @@ form is `destination = variable`. `head[2]` is a small integer, 1 to 16 mostly,
 with the top bit set on 55 of 339, and its destination is a **`DWORD` on all
 339**, never a float.
 
-And `head[3]` is the tag that says which: **−1 or 6 on every node that writes,
-1 to 5 on every node that does not**, the two sets never meeting.
+And `head[3]` is a **selector of its own**, the way `head[0]` is for a call,
+with its own fixed arity — *measured*, **3039 of 3039**:
+
+| tag | operands | writes | nodes |
+|---:|---:|---|---:|
+| −1 | 0 | yes, from a variable | 1452 |
+| 1 | 0 | no | 944 |
+| 2 | 0 | no | 57 |
+| 3 | **1** | no | 85 |
+| 4 | **1** | no | 25 |
+| 5 | 0 | no | 210 |
+| 6 | 0 | yes, from a number | 266 |
+
+So the 110 nodes carrying a single operand are exactly tags 3 and 4, and
+nothing else distinguishes them from the 1211 bare ones.
+
+### `head[2]` is a variable under one tag and a number under the other
+
+The two readings are hard to separate for small values, because the literal
+pool sits at the front of `varset.var` — `f7` is at index 7 *and* has the
+value 7. The tag separates them anyway:
+
+- **Tag −1** — all 73 values are valid indices, and only **three distinct ones
+  are ever used**: `d2`, `ERROR`, `dTemp3`. Scattered, named, meaningful. This
+  is a variable.
+- **Tag 6** — **63 of 266 cannot be an index at all**: 55 carry a flag in the
+  high half (`0x8000_0000`) and two are `4094` and `65534`, past the end of a
+  231-entry table. The rest run **densely from 1 to 28** with one gap, which is
+  what a small integer looks like and not what a choice of variables looks
+  like. This is a number.
+
+The flag on those 55 is **unknown**; a sign is the obvious guess and nothing
+here tests it. `Node.reference` and `Node.literal` return one or the other and
+`NULL` for the wrong tag.
 
 ### What the functions are — *guess*
 
@@ -255,10 +287,8 @@ reader names none of them: it exposes `Node.function` as a number.
 - **What the 57 functions compute**, and what the six fixed-arity opcodes do.
   The shapes are settled; the meanings are the months-long half, and they are
   gameplay rather than format.
-- **Whether `head[2]` is a literal or an index.** It is a small integer bound
-  to a `DWORD` destination, with the top bit set on 55 of 339. Both readings
-  fit and nothing in the data separates them.
-- **The five tag values 1 to 5** that `head[3]` takes on a node writing
-  nothing, and what distinguishes the 1211 bare nodes from the 110 that carry
-  a single operand.
+- **What the seven `head[3]` tags do**, now that their arity and their
+  writing are read. Tag 1 alone accounts for 944 nodes.
+- **The flag bit on 55 literals** (`0x8000_0000`), and the two sentinel
+  values `4094` and `65534`.
 - **`.trf`**, the research tree — identified above, not read.
