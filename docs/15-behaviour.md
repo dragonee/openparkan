@@ -382,6 +382,46 @@ to do next. Tag 2 marks where a handler stops planning and starts committing.
 The bracketing and the counts are measured; the words for them are not, and
 the renderer prints `tagN`.
 
+## What the interpreter looks like
+
+`ai.dll` runs these scripts, and its dispatch loop is at **`0x100122b5`**:
+
+```
+mov  eax, dword ptr [edi]        ; the node's first field
+cmp  eax, -1
+je   0x10012313                  ; -1 goes the other way
+mov  edx, dword ptr [esi + 0xc]  ; the handler table
+call dword ptr [edx + eax*4]     ; table[head[0]]
+mov  edi, dword ptr [edi + 8]    ; on to the next node
+```
+
+That is the two-form node **confirmed from the code**, and it was derived from
+the data first: `head[0]` is loaded, tested against −1, and either indexes a
+handler table or takes the other branch. Nothing about the split was a
+reading. The last line also says nodes are a **linked list** once loaded,
+whatever they are on disk.
+
+The handler table is written contiguously by the loader's initialiser at
+**`0x1000129e`** — **70 stores**, at object offsets `0xc` through `0x120`,
+four bytes apart with no gaps, and all **70 targets distinct**. They are real
+functions with ordinary prologues.
+
+**The mapping from a function id to one of those 70 slots is not
+established.** The scripts use ids 0 to 72 with 57 distinct values, and 70
+slots cannot cover 73 ids. Nothing writes past `0x120`, and the base the
+dispatch indexes from is loaded out of another object, so which slot is id 0
+stays open.
+
+### Naming the functions from the binary did not work
+
+The handlers index the interpreter's own structures — `imul eax, 0x14` for one
+stride, `shl ecx, 5` for another — and call helpers. **None of the ones
+inspected references a string.** There is no name table, no debug text and no
+log line to hang an identifier on, which is why the readings in this document
+come from the argument vocabulary instead. Naming them properly means
+following the helpers into the engine's object model, which is the
+multi-month half and is not attempted here.
+
 ## What is not read here
 
 - **What the 57 functions compute**, and what the six fixed-arity opcodes do.

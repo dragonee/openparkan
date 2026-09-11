@@ -896,7 +896,12 @@ today; each is a small trap for anyone extending the code.
   fully read ([15-behaviour.md](docs/15-behaviour.md)): `head[0]` selects one
   of 57 functions with a fixed signature, or the node assigns from a variable
   or an immediate. What each function does is the months-long half, and the
-  argument vocabulary gives readings but not proof. The node's tags are read
+  argument vocabulary gives readings but not proof, and the binary will not
+  hand it over cheaply: the interpreter's dispatch is found
+  (`ai.dll:0x100122b5`, which confirms the node's two forms from the code) and
+  so is its 70-entry handler table (`0x1000129e`), but **none of the handlers
+  references a string** and 70 slots cannot cover the 73 ids the scripts use,
+  so the id-to-slot mapping is open too. The node's tags are read
   the same way round: 1 closes a block, 3, 4 and 5 end one, 2 marks where a
   handler stops planning — but whether tag 3's `fPry` weight is a priority,
   and what separates the three exits, is not. The flag bit on 55 literals

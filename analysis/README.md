@@ -56,3 +56,19 @@ identifiers elsewhere are log strings and lookup keys, not compare cases.
 - **Check a recovered table against the shipped files before believing it.**
   The scan codes were confirmed twice over: they are the real IBM PC set-1
   numbers, and `ScanCode.dsc` lists its first 56 entries in code order.
+
+
+## Where the behaviour interpreter lives
+
+`ai.dll` loads and runs the `.scr` scripts — not `Behavior.dll`, which owns
+the research tree. Useful addresses, all in `ai.dll`:
+
+| address | what |
+|---|---|
+| `0x100014f9` | `cmp edi, 0x49` — the script version check; the error text calls them "not up to date" |
+| `0x1000129e` | the loader's initialiser, which writes 70 handler pointers at object offsets `0xc`..`0x120` |
+| `0x100122b5` | the dispatch loop: load `head[0]`, test against −1, `call [table + id*4]`, follow `[node+8]` to the next |
+| `0x10012313` | the branch taken when `head[0]` is −1 |
+
+See [../docs/15-behaviour.md](../docs/15-behaviour.md). The handlers carry no
+strings, so the binary does not name them.
