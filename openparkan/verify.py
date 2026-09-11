@@ -3420,6 +3420,39 @@ def check_control(check, game: Path) -> None:
           f"`test byte ptr [ptr+0x60], 1` -- is set on "
           f"{sum(1 for v in flags if v & 1)} of {len(flags)}")
 
+    walked = exact = typed = withtype = 0
+    for _lib, _name, blob in blobs:
+        try:
+            c = control.parse(blob, names)
+        except control.ControlFormatError:
+            continue
+        start = control.section4_start(c.counts)
+        if c.counts[3]:
+            withtype += 1
+            if start + 4 <= len(blob):
+                tid = struct.unpack_from("<i", blob, start)[0]
+                typed += tid in control.COMPONENT_TYPES
+            continue
+        walked += 1
+        got = control.reference_groups(blob, start + control.BLOCK_SIZE,
+                                       c.counts[4], names)
+        if got is not None and got[1] == len(blob):
+            exact += 1
+    check(".ctl: the sections are laid out as the loader walks them",
+          exact == walked > 0,
+          f"{exact}/{walked} members that carry no component records are "
+          f"consumed to the byte by section 1 ({control.SECTION1_RECORD} + "
+          f"{control.SECTION1_PER_B}*B per record, then A*A int32), section 2 "
+          f"({control.SECTION2_RECORD}), the {control.BLOCK_SIZE}-byte block "
+          f"and the reference groups")
+
+    check(".ctl: a component record names a type the factory knows",
+          typed == withtype > 0,
+          f"{typed}/{withtype} members with component records begin section 4 "
+          f"with an id in {control.COMPONENT_TYPES.start}.."
+          f"{control.COMPONENT_TYPES.stop - 1}, which is the range the factory "
+          f"at 0x1002d4b0 dispatches")
+
     refs = [r for c in parsed for r in c.references]
     resolved = sum(
         1 for r in refs

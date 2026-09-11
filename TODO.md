@@ -105,8 +105,9 @@ written down is a question nobody reopens.
       *emits*: all **1651** resolve, and every one of the 158 that names
       `objects.rlb` is a `BULL` — a projectile — carried only by the four
       archives that hold things which shoot. The old note here said "a body
-      of 156-byte records"; the records are 100 bytes, and the sections
-      around them are not fixed-stride at all. Its size still correlates
+      of 156-byte records": that was section 1's record with the second
+      count zero, right about the number and wrong about what it counted.
+      Its size still correlates
       **+0.97** with its own leading count and **+0.40** with the node count
       of the mesh it belongs to, over 542 records, so it holds no per-node
       data. `.ndp`, the other unread `STAT` slot, is a hit-point float and
@@ -525,6 +526,22 @@ written down is a question nobody reopens.
       decimals, not the constants — and the reader now keeps those bits.
       → [docs/13-control.md](docs/13-control.md)
 
+- [x] **The `.ctl` sections, all but one.** The loader at `0x10008b10`
+      reads the five counts one at a time and then walks the body:
+      **section 1** is `A` records of `156 + 16*B` followed by `A*A` int32
+      (the engine computes the same span twice, once per record and once as
+      `A*(A + 4*B + 39)*4`, which checked the arithmetic before a file was
+      opened), **section 2** is `C` records of 36 bytes, **section 4** is
+      `D` type-dispatched component records, then a fixed **84-byte block**
+      the loader copies, then **section 5**, `E` groups of an int32 and that
+      many 100-byte records. All **136** members with no component records
+      are consumed to the byte, and all **395** that have them start section
+      4 with an id in 1..30 — the range the factory at `0x1002d4b0`
+      dispatches. The 84-byte "trailer" was never padding: it is copied into
+      the object, and it only looked adjacent to the frame because the six
+      smallest members have nothing in between.
+      → [docs/13-control.md](docs/13-control.md)
+
 ## 1. Wrong on screen today
 
 Nothing known. What is left below is fidelity the game had and this does not,
@@ -746,15 +763,16 @@ today; each is a small trap for anyone extending the code.
   rest of that byte is read: `0x10` opens a batch and `0x48` is constant.
 - Object mesh **face flags** (0 on 233714 faces, then 2, 4, 16, 32, 34) and the
   **class** beside them, which sits below 64 on 240500 of 241887.
-- The `.ctl` **sections**. The five counts at +0..+16 say how many of five
-  kinds a controller carries, and the frame accounts for the file exactly
-  when all five are zero, but the sections are variable-length and nest: the
-  three kinds that appear alone give strides of 160, 36 and 180, a count of 1
-  on the second slot costs zero bytes, and no assignment of five fixed
-  strides fits — the best exact solution fails on 520 of the 531. The reader
-  finds the reference records by shape instead. Beside them: the 84-byte
-  block at +128, and the nine ints of a reference, three of which read as
-  ASCII on 41 records.
+- The `.ctl` **component records**, section 4. Everything around them is
+  [read](docs/13-control.md) — section 1 is `A` records of `156 + 16*B`
+  then `A*A` int32, section 2 is `C` records of 36 bytes, then an 84-byte
+  block and `E` reference groups — and the 136 members with no component
+  records are consumed to the byte. But a component record's first int32
+  picks one of **30 classes**, each of which parses its own record through
+  its vtable, so the sizes live in 30 parsers rather than a table. All 395
+  members that carry them start section 4 with an id in 1..30. Beside it:
+  the 84-byte block's contents, and the nine ints of a reference, three of
+  which read as ASCII on 41 records.
 - Which `.ctl` field feeds which channel. Two of the three legs are now
   closed. The message side: the controller dispatches `MCMD_` 1..16. The
   storage side: the frame from +20 on **is** the live object's parameter

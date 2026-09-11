@@ -39,13 +39,19 @@ found and resolves on all 1651. The vertical datum, the component attachment
 and the rest pose that this file was once expected to explain all turned out
 to live in the mesh.
 
-Two things in it are open. The **sections** after the frame are
-variable-length and nest, so the five counts at +0..+16 do not give their
-sizes; the earlier note here said “a body of 156-byte records”, and that was
-wrong — the records are 100 bytes and the sections around them are not fixed
-at all. And **which field feeds which setter** is unmapped: the stub table
-names the interface but never receives an argument, so the mapping has to
-come from `AniMesh.dll`, the only module that calls `LoadControlSystem`.
+The **sections** are read too, all but one: the loader walks section 1
+(`counts[0]` records of `156 + 16*counts[1]`, then `counts[0]**2` int32),
+section 2 (`counts[2]` records of 36 bytes), section 4, an 84-byte block and
+section 5 (`counts[4]` groups of an int32 and that many 100-byte records).
+The 136 members with no section-4 records are consumed to the byte.
+
+What is open is **section 4's component records**: the first int32 picks one
+of 30 classes and each class parses its own record, so the sizes are in 30
+parsers rather than a table. The earlier note here said “a body of 156-byte
+records”, which was section 1 with `counts[1]` zero. And **which field feeds
+which setter** is unmapped: the stub table names the interface but never
+receives an argument, so the mapping has to come from `AniMesh.dll`, the only
+module that calls `LoadControlSystem`.
 
 Its sibling `.ndp` is [solved and read](07-objects.md). One field of it is not:
 the second `float32` of a record, 1000 on 549 of them and then 0, 10, 1, 300

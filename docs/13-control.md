@@ -20,10 +20,12 @@ Everything below is re-derived by `uv run openparkan verify`.
 
 ## The 212-byte frame
 
-Every member begins with the same frame: a **128-byte parameter block**, then
-an 84-byte block that can be entirely unset. Six members are nothing else —
-exactly 212 bytes with `0xFF` from +128 to the end, the same "not set" fill
-the `MAT0` loader uses. Five of those six carry no sections at all.
+Every member begins with a **128-byte frame**: five counts, then a 27-dword
+parameter block. An 84-byte block follows it *in the file only when nothing
+lies between them* — sections 1, 2 and 4 sit in the gap. Six members have
+nothing in the gap and are exactly 212 bytes, `0xFF` from +128 to the end,
+the same "not set" fill the `MAT0` loader uses. That is why 212 is the floor,
+and why the 84-byte block read as a trailer until the layout was recovered.
 
 ```
 0x00  int32[5]   section counts
@@ -252,26 +254,50 @@ rather than a number, so the nine ints are not the same nine fields on every
 record. The two names are sound on all 1651 — they resolve — but a reader that
 depends on the ints should check them.
 
-## What is not read
+## The sections
 
-**The sections themselves.** The five counts at +0..+16 say how many of each
-of five kinds a member carries, and the frame accounts for the file exactly
-when all five are zero. Beyond that the sections are variable-length and
-nest, so their sizes are not a function of the counts:
+The loader at `0x10008b10` reads the five counts one at a time, copies the
+parameter block, and then walks the body. That walk is the layout:
 
-- The three kinds that ever appear alone give strides of **160**, **36** and
-  **180** — and a count of 1 on the second slot costs **zero** bytes
-  (`s_tree_a_80.ctl` is 212 bytes with counts `(0, 1, 0, 0, 0)`), so that slot
-  is a flag, not an array length.
-- Solved exactly over all 531 members, no assignment of five fixed strides
-  fits: the best exact solution fails on **520** of them.
+| Order | Governed by | Size |
+|---|---|---|
+| section 1 | `counts[0]` = A, `counts[1]` = B | A records of `156 + 16*B`, then `A*A` int32 |
+| section 2 | `counts[2]` = C | C records of 36 bytes |
+| section 4 | `counts[3]` = D | D records, each **type-dispatched**, size not recovered |
+| the block | — | a fixed **84 bytes**, copied into the object |
+| section 5 | `counts[4]` = E | E groups: an int32 `n`, then `n` records of 100 bytes |
 
-So this reader finds the reference records **by their shape** rather than by
-walking the sections, anchored on the set of archive names that actually
-exist. Without that anchor a record whose member field holds an uninitialised
-tail gets picked up four bytes late, splitting `objects.rlb` into `cts.rlb`;
-with it, all 1651 land on a real member and 1144 of 1322 consecutive pairs sit
-exactly 100 bytes apart.
+Section 1's span is worth showing because the engine writes it twice. The
+parse walks A records of `16*B + 156` and then adds `A*A*4`; the skip path
+computes `A * (A + 4*B + 39) * 4` in one go. Those are the same number, which
+is how the arithmetic was confirmed before any file was opened.
+
+**This settles two old misreadings.** The "body of 156-byte records" in the
+original note was section 1 with B = 0 — right about the number, wrong about
+what it counted. And the "84-byte trailer" is not padding: the loader `rep
+movsd`s it into the object and then reads section 5 after it.
+
+Checked against the data: **all 136 members that carry no component records
+are consumed to the byte**, and every one of the **395** that do carry them
+begins section 4 with an int32 in **1 to 30** — exactly the range the factory
+at `0x1002d4b0` dispatches, through a byte index table at `0x1002d864` into a
+jump table at `0x1002d82c`.
+
+### What is still not read
+
+**The component records of section 4.** Their first int32 picks one of 30
+classes; the factory builds that class and hands the record to its own vtable
+slot 7, which parses it and returns the advanced pointer. So the sizes live in
+30 different parsers, not in one table, and this reader does not walk them.
+That is also why no assignment of fixed strides ever fitted the file sizes.
+
+Because section 4 is opaque, the reader computes section 1, section 2 and the
+start of section 4 exactly, and reads section 5 only where section 4 is empty.
+The `Reference` records it finds by shape elsewhere are inside the component
+records — a gun's projectile is named in the component that fires it, not in
+section 5. Section 5's own records carry the same 100-byte shape but, in the
+136 members where they can be located exactly, **none of them has a readable
+name**.
 
 ### Where to look next
 

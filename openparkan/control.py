@@ -30,12 +30,22 @@ from .objects import ResourceRef, _fixed_string
 #: The NRes tag every ``.ctl`` member carries.
 CTL_TAG = "CTLD"
 
-#: The parameter block, and the block after it that can be wholly unset.
+#: The frame: five counts and the 27-dword parameter block.
 HEADER_SIZE = 128
-TRAILER_SIZE = 84
-#: What a controller occupies before any section: 212 bytes on every member,
-#: and the whole file on the six that carry no sections.
-FRAME_SIZE = HEADER_SIZE + TRAILER_SIZE
+
+#: Section 1's record, section 2's record, the fixed block the loader copies
+#: after the component records, and the component type ids the factory at
+#: ``0x1002d4b0`` accepts.
+SECTION1_RECORD = 156
+SECTION1_PER_B = 16
+SECTION2_RECORD = 36
+BLOCK_SIZE = 84
+COMPONENT_TYPES = range(1, 31)
+#: The smallest a controller can be.  The 128-byte frame and the 84-byte block
+#: are **not** adjacent in general -- sections 1, 2 and 4 lie between them --
+#: but a member with none of those is exactly the two, which is why 212 is the
+#: floor and why the block looked like a trailer before the layout was read.
+FRAME_SIZE = HEADER_SIZE + BLOCK_SIZE
 
 #: The engine's "not set" fill, the same byte the ``MAT0`` loader treats as
 #: absent.  The six section-less members are 0xFF from +128 to the end.
@@ -92,6 +102,22 @@ DEFAULTS: dict[int, float | int] = {
 #: The slots ``DEFAULTS`` holds as integers rather than floats.
 DEFAULT_INTS = (92, 104, 116)
 
+#: The sections after the frame, recovered from the loader at ``0x10008b10``.
+#: It reads the five counts one at a time, copies the parameter block, and then
+#: walks the body in this order.
+#:
+#: * **section 1** -- ``counts[0]`` records of ``SECTION1_RECORD + 16 *
+#:   counts[1]`` bytes, then ``counts[0] ** 2`` int32.  The engine computes the
+#:   whole span as ``A * (4 * A + 16 * B + 156)`` when it skips the section,
+#:   which is the same arithmetic.
+#: * **section 2** -- ``counts[2]`` records of 36 bytes.
+#: * **section 4** -- ``counts[3]`` records whose first int32 is a **type id
+#:   from 1 to 30**.  Each is parsed by the class the factory at ``0x1002d4b0``
+#:   builds for that id, through its own vtable slot, so the sizes live in 30
+#:   different classes and are **not** read here.
+#: * a fixed **84-byte block**, copied into the object.
+#: * **section 5** -- ``counts[4]`` groups, each an int32 ``n`` followed by
+#:   ``n`` reference records.
 #: A reference record inside a section: two 32-byte NUL-padded name fields and
 #: nine int32.  They occur in runs at this stride; the runs are anchored by
 #: hand because the sections around them are not parsed.
@@ -163,6 +189,38 @@ class Controller:
     def sections(self) -> int:
         """How many sections the counts ask for, across all five kinds."""
         return sum(self.counts)
+
+
+def section4_start(counts: tuple[int, ...]) -> int:
+    """Where the component records begin -- everything before them is fixed."""
+    a, b, c = counts[0], counts[1], counts[2]
+    return (HEADER_SIZE
+            + a * (SECTION1_RECORD + SECTION1_PER_B * b) + 4 * a * a
+            + c * SECTION2_RECORD)
+
+
+def reference_groups(blob: bytes, pos: int, count: int,
+                     archives: frozenset[str] | None = None
+                     ) -> tuple[list[Reference], int] | None:
+    """Read ``count`` reference groups at ``pos``.  None if they do not fit."""
+    out: list[Reference] = []
+    for _ in range(count):
+        if pos + 4 > len(blob):
+            return None
+        n = struct.unpack_from("<i", blob, pos)[0]
+        pos += 4
+        if n < 0 or pos + n * REFERENCE_STRIDE > len(blob):
+            return None
+        for _i in range(n):
+            library = _name(blob, pos) or ""
+            member = _name(blob, pos + NAME_FIELD) or ""
+            if archives is not None and library and library.lower() not in archives:
+                return None
+            values = struct.unpack_from(f"<{REFERENCE_INTS}i", blob,
+                                        pos + 2 * NAME_FIELD)
+            out.append(Reference(ResourceRef(library, member), values, pos))
+            pos += REFERENCE_STRIDE
+    return out, pos
 
 
 def _triple(blob: bytes, offset: int) -> tuple[float, float, float]:
