@@ -214,6 +214,7 @@ openparkan/
   cli.py        command line
 docs/           format documentation
 tests/          unit tests, no game data needed
+TASK.md         a brief for whoever picks this up next
 analysis/       disassembly scaffolding (not part of the library)
 ```
 

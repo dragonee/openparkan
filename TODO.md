@@ -4,6 +4,8 @@ What is left to draw a Parkan scene correctly, and what has been closed.
 Ordered by how much each item costs you in a picture, not by how interesting
 it is.
 
+The next concrete piece of work is written up in [TASK.md](TASK.md).
+
 Format questions that do not affect rendering (save games, the network
 protocol, `.scr` semantics, leftover `data.tma` words) live in
 [docs/06-open-questions.md](docs/06-open-questions.md).
