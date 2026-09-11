@@ -937,6 +937,15 @@ today; each is a small trap for anyone extending the code.
   what the tech level gates — it rises with `UpgradeLevel` and with tree depth
   but nothing says which is cause.
   → [docs/19-descriptions.md](docs/19-descriptions.md)
+- The **briefing's four soft fields**, now that the flythrough is
+  [read](docs/21-briefing.md): what `flyaround` orbits (11 waypoints ask for
+  it and no field says a radius or an axis), which end of an edge `EdgeTime`
+  belongs to, what `RotateTime` rotates, and whether `NoisePercent` is static
+  or interference. `LoopIndex` is -1 on all 378, so what the engine would do
+  with any other value is untested by the data. A lead beside them:
+  `message_index` is an id rather than a position -- three files skip a
+  number -- so something asks for a message *by number*, and the AI script is
+  the obvious candidate.
 - What handles `MCMD_WALK_F`. `MCMD_WALK_B` (20) and `MCMD_LOCK` (21) are
   answered — `Control.dll` has a second control class whose table covers
   messages 20 to 28, and `AniMesh.dll`'s agent takes both as well, keeping

@@ -19,6 +19,7 @@ from pathlib import Path
 from . import (
     arealmap,
     behaviour,
+    briefing,
     control,
     controls,
     descriptions,
@@ -4316,6 +4317,109 @@ def check_resources(check, game: Path) -> None:
           f"inside one name")
 
 
+def check_briefing(check, game: Path) -> None:
+    """briefing.cfg: the flythrough a campaign mission opens on."""
+    paths = briefing.briefings(game)
+    if not paths:
+        return
+    campaign = sorted((game / "MISSIONS" / "CAMPAIGN").glob("*/Mission.*"))
+    check("briefing: every campaign mission has one, and only those",
+          len(paths) == briefing.BRIEFINGS
+          and {p.parent for p in paths} == set(campaign),
+          f"{len(paths)} briefings against {len(campaign)} campaign missions "
+          f"and {len(gamedir.missions(game))} missions in all")
+
+    stops: list[tuple[Path, briefing.Waypoint]] = []
+    complete = 0
+    for path in paths:
+        raw = mission.load_cfg(path)
+        complete += all(set(briefing.FIELDS) <= set(p) for p in raw.values())
+        stops.extend((path, w) for w in briefing.waypoints(path))
+    vocabulary = sum(w.edge in briefing.EDGES and w.wait in briefing.WAITS
+                     for _, w in stops)
+    check("briefing: a waypoint is 24 fields, always the same 24",
+          complete == len(paths) and len(stops) == briefing.WAYPOINTS
+          and vocabulary == len(stops),
+          f"{len(stops)} waypoints in {len(paths)} files, every one with all "
+          f"{len(briefing.FIELDS)} fields, an EdgeType in {list(briefing.EDGES)} "
+          f"and a WaitType in {list(briefing.WAITS)}")
+
+    check("briefing: LoopIndex is read and never set",
+          all(w.loop == briefing.NO_LOOP for _, w in stops),
+          f"all {len(stops)} waypoints carry LoopIndex {briefing.NO_LOOP}")
+
+    inside = above = sampled = 0
+    clearance = []
+    for path in paths:
+        d = path.parent
+        m = mission.load(d / "data.tma")
+        land_dir = game / Path(str(m.map_path).replace("\\", "/")).parent
+        if not (land_dir / "Land.msh").exists():
+            continue
+        land = landmesh.load(land_dir / "Land.msh")
+        (minx, miny, _), (maxx, maxy, _) = land.bounds()
+        for w in briefing.waypoints(path):
+            cx, cy, cz = w.camera
+            tx, ty, _ = w.target
+            inside += (minx <= cx <= maxx and miny <= cy <= maxy
+                       and minx <= tx <= maxx and miny <= ty <= maxy)
+            height = land.height_at(cx, cy)
+            if height is not None:
+                sampled += 1
+                above += cz > height
+                clearance.append(cz - height)
+    median = statistics.median(clearance) if clearance else 0.0
+    check("briefing: the camera path is in world coordinates",
+          inside == len(stops) and above == sampled == len(stops),
+          f"{inside}/{len(stops)} waypoints put both camera and target inside "
+          f"their own map's extent, and {above}/{sampled} sit above the terrain "
+          f"-- median clearance {median:.1f}, least {min(clearance or [0]):.1f}")
+
+    texts = resources.TextResources.open(game)
+    spoken = [(p, w) for p, w in stops if w.text_id]
+    missing = [(p, w) for p, w in spoken if texts.get(w.text_id) is None]
+    check("briefing: the subtitles resolve, bar the finale's",
+          len(missing) == 3 and len({p for p, _ in missing}) == 1,
+          f"{len(spoken) - len(missing)}/{len(spoken)} TextResID reach a string; "
+          f"the {len(missing)} that do not are all in "
+          f"{missing[0][0].parent.name if missing else '-'} -- "
+          f"{', '.join(sorted(w.text_id for _, w in missing))}")
+
+    voiced = unbound = 0
+    for path in paths:
+        bound: dict[str, str] = {}
+        for d in resources.descriptors(path.parent / "mission.cfg"):
+            if d.role == briefing.BRIEFING_ROLE:
+                bound = d.bindings
+        for w in briefing.waypoints(path):
+            if w.sound_id:
+                voiced += 1
+                unbound += w.sound_id not in bound
+    check("briefing: every voice resolves, and only through briefing_sounds",
+          voiced and unbound == 0,
+          f"{voiced - unbound}/{voiced} SoundResID are bound by the mission's "
+          f"own {briefing.BRIEFING_ROLE} descriptor; none needs "
+          f"{briefing.MESSAGE_ROLE}")
+
+    files = sorted(game.rglob(briefing.MESSAGES))
+    lines = [m for f in files for m in briefing.messages(f)]
+    resolved = sum(texts.get(m.text_id) is not None for m in lines if m.text_id)
+    gaps = sum([m.index for m in briefing.messages(f)]
+               != list(range(len(briefing.messages(f)))) for f in files)
+    with_role = {f.parent for f in files if any(
+        d.role == briefing.MESSAGE_ROLE
+        for d in resources.descriptors(f.parent / "mission.cfg"))}
+    check("briefing: the in-mission messages resolve too",
+          len(files) == briefing.MESSAGE_FILES
+          and len(lines) == briefing.MESSAGES_TOTAL
+          and resolved == len(lines)
+          and with_role == {f.parent for f in files},
+          f"{resolved}/{len(lines)} messages in {len(files)} files reach a "
+          f"string, and the same {len(with_role)} missions declare "
+          f"{briefing.MESSAGE_ROLE}; message_index is an id, not a position -- "
+          f"{gaps} files skip a number")
+
+
 def run(game: Path) -> int:
     """Run every check against ``game``.  Returns a process exit code."""
     results: list[tuple[str, bool, str]] = []
@@ -4332,7 +4436,7 @@ def run(game: Path) -> int:
         check_grid, check_missions, check_objects, check_poses, check_lod, check_damage,
         check_effects, check_footprints, check_rsli, check_control, check_controls,
         check_behaviour, check_research, check_descriptions, check_saves,
-        check_vocabulary, check_resources,
+        check_vocabulary, check_resources, check_briefing,
     )
     for fn in checks:
         fn(check, game)

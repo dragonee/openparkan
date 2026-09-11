@@ -120,7 +120,10 @@ and then 2, 1, 1, 1, which reads as two parallel arrays rather than pairs.
 ## Not looked at at all
 
 `.scr` **node semantics** -- the structure is now [read](15-behaviour.md), all 58
-files end to end, but what a node does is not -- and the network protocol. Save
+files end to end, but what a node does is not -- and the network protocol.
+The text layer around a mission is [read](21-briefing.md): the opening
+flythrough, its subtitles and voices, and the in-mission messages, through the
+[resource descriptors](20-resources.md) that bind them. Save
 games in `SAVE/` are [partly read](17-saves.md): the header and what a save
 refers to, but not the object graph, which is a raw heap dump. The `.trf` archives are [read](16-research.md): 368 research
 items and their prerequisite graph, though four floats and three of the twelve

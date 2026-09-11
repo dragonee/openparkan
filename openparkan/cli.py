@@ -9,6 +9,7 @@ from pathlib import Path
 
 from . import (
     behaviour,
+    briefing,
     control,
     controls,
     effects,
@@ -517,6 +518,77 @@ def cmd_resources(args, game: Path) -> int:
     return 0
 
 
+def cmd_briefing(args, game: Path) -> int:
+    """The camera flythrough a campaign mission opens on, and what it says."""
+    paths = briefing.briefings(game)
+    if not paths:
+        print("no briefings found")
+        return 1
+    texts = resources.TextResources.open(game)
+
+    if not args.mission:
+        print(f"{len(paths)} briefings\n")
+        for path in paths:
+            stops = briefing.waypoints(path)
+            spoken = sum(w.speaks for w in stops)
+            msgs = path.parent / briefing.MESSAGES
+            extra = f", {len(briefing.messages(msgs))} messages" if msgs.exists() else ""
+            print(f"  {_mission_name(game, path.parent):<34} {len(stops):3} waypoints "
+                  f"{sum(w.seconds for w in stops):6.1f}s  {spoken} spoken{extra}")
+        return 0
+
+    want = args.mission.lower().replace("\\", "/")
+    match = [p for p in paths
+             if want in _mission_name(game, p.parent).lower()]
+    if len(match) != 1:
+        print(f"{'no' if not match else 'more than one'} briefing matches "
+              f"{args.mission!r}; try one of")
+        for p in paths:
+            print(f"  {_mission_name(game, p.parent)}")
+        return 1
+
+    path = match[0]
+    sounds = _briefing_sounds(game, path.parent)
+    stops = briefing.waypoints(path)
+    print(f"# {_mission_name(game, path.parent)} -- {len(stops)} waypoints, "
+          f"{sum(w.seconds for w in stops):.1f}s of camera\n")
+    for i, w in enumerate(stops):
+        cx, cy, cz = w.camera
+        tx, ty, tz = w.target
+        holds = ",".join(n for n, on in (
+            ("text", w.wait_for_text), ("sound", w.wait_for_sound),
+            ("time", w.wait_for_time), ("click", w.wait_for_click)) if on)
+        print(f"  {i:3} {w.edge:<7}{w.wait:<11}{w.edge_time:5.1f}s "
+              f"({cx:7.1f},{cy:7.1f},{cz:6.1f}) -> ({tx:7.1f},{ty:7.1f},{tz:6.1f})  "
+              f"{holds}")
+        if w.sound_id:
+            print(f"      voice {sounds.get(w.sound_id, w.sound_id + ' (unbound)')}")
+        if w.text_id:
+            body = texts.get(w.text_id)
+            if body is None:
+                print(f"      text  {w.text_id}: no string in the shipped table")
+            else:
+                flat = " ".join(body.split())
+                if len(flat) > 160:
+                    flat = flat[:157] + "..."
+                print(f'      "{flat}"')
+    return 0
+
+
+def _mission_name(game: Path, directory: Path) -> str:
+    return directory.relative_to(game).as_posix().replace("MISSIONS/", "")
+
+
+def _briefing_sounds(game: Path, directory: Path) -> dict[str, str]:
+    cfg = directory / "mission.cfg"
+    if not cfg.exists():
+        return {}
+    for d in resources.descriptors(cfg):
+        if d.role == briefing.BRIEFING_ROLE:
+            return dict(d.bindings)
+    return {}
+
+
 def cmd_research(args, game: Path) -> int:
     """The research tree: what unlocks what."""
     paths = research.trees(game)
@@ -737,6 +809,11 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("script", nargs="?", help="a .scr name; default is a listing")
     p.add_argument("handler", nargs="?", help="one handler; default is all of them")
     p.set_defaults(fn=cmd_behaviour)
+
+    p = sub.add_parser(
+        "briefing", help="a campaign mission's opening flythrough, and its script")
+    p.add_argument("mission", nargs="?", help="part of a mission's path")
+    p.set_defaults(fn=cmd_briefing)
 
     p = sub.add_parser(
         "resources", help="the .cfg resource descriptors, and the text they reach")
