@@ -896,10 +896,11 @@ today; each is a small trap for anyone extending the code.
   fully read ([15-behaviour.md](docs/15-behaviour.md)): `head[0]` selects one
   of 57 functions with a fixed signature, or the node assigns from a variable
   or an immediate. What each function does is the months-long half, and the
-  argument vocabulary gives readings but not proof. Three smaller pieces go
-  with it: whether `head[2]` is a literal or an index, the five tag values
-  `head[3]` takes on a node that writes nothing, and what separates the 1211
-  bare nodes from the 110 carrying one operand.
+  argument vocabulary gives readings but not proof. The node's tags are read
+  the same way round: 1 closes a block, 3, 4 and 5 end one, 2 marks where a
+  handler stops planning — but whether tag 3's `fPry` weight is a priority,
+  and what separates the three exits, is not. The flag bit on 55 literals
+  (`0x8000_0000`) and the sentinels `4094` and `65534` go with them.
 - **Component classes 6, 7, 14 and 16-18**, which `World3D.dll`'s resolver
   leaves unnamed. A first pass thought the `i_cNN` models were named after
   them; they are not, they are ammunition named after the weapon

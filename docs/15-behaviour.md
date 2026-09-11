@@ -345,17 +345,51 @@ So the renderer indents, and the result reads as guard clauses:
 15  fn15(dT, ORDER_ROBOT_CAPTURE, INSERT_ORDER_REPLACE, ...)
 ```
 
-*Guess*, and only this much: a comparison is an `if`, tag 1 its end, and tag 5
-a return — which is what "always last inside a block" would mean. The
-bracketing itself is measured; the words for it are not.
+### What the other tags do — *measured*, and then a reading
+
+With the blocks established, the remaining tags sort themselves.
+
+**Tags 3, 4 and 5 end the block they sit in.** Across the corpus they are
+**followed immediately by a closer on 319 of 320** nodes — tag 5 on 210/210,
+tag 4 on 25/25, tag 3 on 84/85 — and they sit at depth 1 or deeper. They
+differ only in what they carry: tag 5 nothing, tags 3 and 4 one operand each.
+
+Tag 3's operand is the interesting one. It is a **weight**:
+
+| operand | nodes |
+|---|---:|
+| `fPry` | 26 |
+| `dArealFactor` | 24 |
+| `fAgressive` | 10 |
+| `dMaxPlant` | 7 |
+| `dUnitBattleFactor`, `dMaxMine`, `fPlentyResourceAmount` | 2 each |
+
+Tag 4's is more mixed — `d9` on 9 of 25, then `dCurrentSender`,
+`dMaxTransport`, `dBaseFactor`.
+
+**Tag 2 is not a terminator.** It sits at the outermost depth on **56 of 57**,
+is followed by a closer only once, and ends 18 handlers outright. What comes
+after it is the handler's bookkeeping: `fn27(ACTION_DESTROY, ...)` and
+`fn27(ACTION_CAPTURE_BUILDING, ...)` on 45 nodes, `fn8(ST_SOLVING)` on 26,
+`fn2(PBM_…)` on 55. It appears only in `PBM_*_Start` (27), `PBM_*_Continue`
+(18) and `Problems0` (12).
+
+*Guess*, and only this much: a comparison is an `if` and tag 1 its end; tags
+3, 4 and 5 are three ways of leaving a block, with tag 5 a plain return and
+tag 3 a return carrying a priority — `fPry` reads as exactly that, and an AI
+problem's `_Start` handler returning a weight is how a planner would rank what
+to do next. Tag 2 marks where a handler stops planning and starts committing.
+The bracketing and the counts are measured; the words for them are not, and
+the renderer prints `tagN`.
 
 ## What is not read here
 
 - **What the 57 functions compute**, and what the six fixed-arity opcodes do.
   The shapes are settled; the meanings are the months-long half, and they are
   gameplay rather than format.
-- **What tags 2, 3, 4 and 5 do.** Tag 1 is the block end and tag 5 sits
-  always last inside a block; the other three are open.
+- **What the exit tags mean.** Their shape is read — 3, 4 and 5 end a block,
+  2 does not — but whether tag 3's weight is a priority, and what separates
+  the three exits, is not.
 - **The flag bit on 55 literals** (`0x8000_0000`), and the two sentinel
   values `4094` and `65534`.
 - **`.trf`**, the research tree — identified above, not read.

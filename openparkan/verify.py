@@ -3800,6 +3800,30 @@ def check_behaviour(check, game: Path) -> None:
           f"comparisons and bracket cleanly, nesting {deepest} deep at most; "
           f"the {total - clean} that do not carry a spare closer")
 
+    exits = ended = 0
+    marker = outer = 0
+    for s in scripts:
+        for handler in s.handlers:
+            depth = 0
+            for i, node in enumerate(handler.nodes):
+                if node.closes:
+                    depth -= 1
+                if node.terminates:
+                    exits += 1
+                    ended += i + 1 < len(handler.nodes) and handler.nodes[i + 1].closes
+                if (not node.calls and not node.assigns
+                        and node.tag == behaviour.MARKER_TAG):
+                    marker += 1
+                    outer += depth <= 0
+                if node.opens:
+                    depth += 1
+    check("behaviour: three tags end the block they sit in, and one does not",
+          exits and ended >= exits - 1 and outer >= marker - 1,
+          f"tags {', '.join(str(t) for t in behaviour.EXIT_TAGS)} are followed "
+          f"immediately by a closer on {ended}/{exits} nodes, while tag "
+          f"{behaviour.MARKER_TAG} sits at the outermost depth on {outer}/{marker} "
+          f"and is followed by the handler's bookkeeping instead")
+
     def _kind(n):
         if n.calls:
             return "fn"

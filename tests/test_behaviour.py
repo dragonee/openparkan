@@ -352,3 +352,26 @@ def test_render_survives_a_spare_closer(tmp_path):
         build_node(head=(19, -1, -1, -1)),
     ])]))
     assert [x[8:] for x in behaviour.render(script, table)[1:3]] == ["tag1", "fn19()"]
+
+
+def test_the_exit_tags_terminate_and_the_marker_does_not():
+    nodes = [build_node(head=(-1, -1, -1, t)) for t in (2, 3, 4, 5)]
+    read = behaviour.parse(build_script([("Init", nodes)])).handlers[0].nodes
+    assert [n.terminates for n in read] == [False, True, True, True]
+    assert behaviour.MARKER_TAG not in behaviour.EXIT_TAGS
+    assert behaviour.CLOSE_TAG not in behaviour.EXIT_TAGS
+
+
+def test_an_exit_tag_carrying_a_value_is_not_a_terminator():
+    """terminates means the bare form; an assignment tagged 5 is not one."""
+    data = build_script([("Init", [build_node(head=(-1, 30, 5, 5), trailer=4)])])
+    node = behaviour.parse(data).handlers[0].nodes[0]
+    assert node.assigns
+    assert not node.terminates
+
+
+def test_the_exit_tags_carry_what_the_corpus_says():
+    assert behaviour.TAG_ARITY[5] == 0
+    assert behaviour.TAG_ARITY[3] == 1
+    assert behaviour.TAG_ARITY[4] == 1
+    assert behaviour.TAG_ARITY[behaviour.MARKER_TAG] == 0

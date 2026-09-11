@@ -102,6 +102,15 @@ LITERAL_TAG = 6
 #: cleanly, nesting up to five deep.
 CLOSE_TAG = 1
 
+#: The three tags that end a block: 319 of their 320 nodes are immediately
+#: followed by a ``CLOSE_TAG``.  Tag 5 takes nothing, 3 and 4 take one
+#: operand each.
+EXIT_TAGS = (3, 4, 5)
+
+#: The one tag that is not a block terminator.  It sits at the outermost
+#: depth on 56 of 57, and what follows it is the handler's bookkeeping.
+MARKER_TAG = 2
+
 #: The high half set on 55 of the literals.  Its meaning is open; a sign is
 #: the obvious guess and nothing tests it.
 LITERAL_FLAG = 0x8000_0000
@@ -201,6 +210,11 @@ class Node:
         ``immediate``.
         """
         return self.trailer
+
+    @property
+    def terminates(self) -> bool:
+        """True for a tag that ends the block it sits in."""
+        return not self.calls and not self.assigns and self.tag in EXIT_TAGS
 
     @property
     def opens(self) -> bool:
