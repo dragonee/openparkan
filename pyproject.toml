@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Clean-room readers for the data files of Parkan: Iron Strategy (1998)"
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "MIT" }
+license = { file = "LICENSE" }
 keywords = ["parkan", "reverse-engineering", "game-formats", "nres"]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -27,7 +27,10 @@ analysis = [
     "capstone>=5.0.9",
     "pefile>=2024.8.26",
 ]
-dev = ["ruff>=0.6"]
+dev = [
+    "pytest>=9.1.1",
+    "ruff>=0.6",
+]
 
 [build-system]
 requires = ["hatchling"]
@@ -35,6 +38,9 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["openparkan"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
 
 [tool.ruff]
 line-length = 100

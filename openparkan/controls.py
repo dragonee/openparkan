@@ -336,9 +336,9 @@ def _pairs(path: Path, prefix: str) -> dict[str, str]:
     """A ``.dsc``: one identifier per line, then its label, tabs and all."""
     out: dict[str, str] = {}
     for line in _lines(path):
-        head, _, rest = line.strip().partition(" ")
-        if head.startswith(prefix):
-            out[head] = rest.strip()
+        fields = line.strip().split(None, 1)
+        if fields and fields[0].startswith(prefix):
+            out[fields[0]] = fields[1].strip() if len(fields) > 1 else ""
     return out
 
 

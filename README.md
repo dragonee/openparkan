@@ -74,6 +74,24 @@ uv run openparkan explosions                                # every .exp
 uv run openparkan viewer SC_3 Tut_1 ILKON --out three-maps.html
 ```
 
+## Tests
+
+Two different things, and they answer different questions.
+
+```
+uv run pytest          # does the code still work?     no game needed
+uv run openparkan verify   # is what the docs claim still true?  needs a game
+```
+
+`pytest` builds the bytes it reads — an NRes archive, a `.ctl` controller, a
+`.tbl` table — so a contributor without a copy of the game can still find out
+whether a refactor broke a reader. Nothing under `tests/` is game data, and
+the repository ships none.
+
+`verify` is the other half: it re-derives every factual claim in `docs/` from a
+real installation. A reader can pass the tests and still be wrong about the
+game; only `verify` can catch that.
+
 ## Verification
 
 Reverse-engineered format notes are easy to write and easy to get wrong, so
@@ -188,11 +206,14 @@ openparkan/
   mesh.py       object geometry and control points
   arealmap.py   Land.map navigation mesh
   materials.py  Material.lib (MAT0)
+  control.py    .ctl movement controllers
+  controls.py   the input tables, and the engine's own numbers
   viewer.py     self-contained HTML viewer generator
   verify.py     the checks quoted above
   png.py        dependency-free PNG writer
   cli.py        command line
 docs/           format documentation
+tests/          unit tests, no game data needed
 analysis/       disassembly scaffolding (not part of the library)
 ```
 
@@ -220,5 +241,5 @@ analysis/       disassembly scaffolding (not part of the library)
 
 ## Licence
 
-MIT for this code. The game's data files are not covered and are not included;
-you need your own copy of the game.
+MIT for this code — the terms are in [LICENSE](LICENSE). The game's data files
+are not covered and are not included; you need your own copy of the game.
