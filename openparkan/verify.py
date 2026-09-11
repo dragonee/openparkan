@@ -17,6 +17,7 @@ from pathlib import Path
 
 from . import (
     arealmap,
+    behaviour,
     control,
     controls,
     effects,
@@ -3633,6 +3634,77 @@ def check_controls(check, game: Path) -> None:
           f"names an iron3d.dll command")
 
 
+def check_behaviour(check, game: Path) -> None:
+    """The behaviour scripts: MISSIONS/SCRIPTS/*.scr."""
+    paths = behaviour.scripts(game)
+    scripts = []
+    refused = []
+    for path in paths:
+        try:
+            scripts.append(behaviour.read(path))
+        except behaviour.ScriptFormatError as exc:
+            refused.append(str(exc))
+    check("behaviour: every script reads end to end",
+          paths and not refused,
+          f"{len(scripts)}/{len(paths)} .scr files consumed exactly -- "
+          f"{sum(len(s.handlers) for s in scripts)} handlers and "
+          f"{sum(s.nodes for s in scripts)} nodes, none refused")
+
+    magics = {s.magic for s in scripts}
+    check("behaviour: every script carries the same magic",
+          magics == {behaviour.MAGIC},
+          f"all {len(scripts)} open with {behaviour.MAGIC}, and every handler is "
+          f"indexed by its own position")
+
+    missing = {e: sum(1 for s in scripts if s.handler(e) is None)
+               for e in behaviour.EVENTS}
+    check("behaviour: the engine's own event handlers are in every script",
+          scripts and not any(missing.values()),
+          f"{len(behaviour.EVENTS)} handlers -- {behaviour.EVENTS[0]}, "
+          f"{behaviour.EVENTS[1]}, {behaviour.EVENTS[2]} and {len(behaviour.EVENTS) - 3} "
+          f"more -- present in all {len(scripts)} scripts")
+
+    unpaired = []
+    for s in scripts:
+        for problem in s.problems:
+            for phase in behaviour.PHASES:
+                if s.handler(f"{problem}_{phase}") is None:
+                    unpaired.append(f"{s.source.name}:{problem}_{phase}")
+    carried = {p for s in scripts for p in s.problems}
+    check("behaviour: every AI problem is written in both its halves",
+          scripts and not unpaired,
+          f"{len(carried)} distinct problems across the scripts, each carrying a "
+          f"{behaviour.PHASES[0]} and a {behaviour.PHASES[1]} wherever it appears")
+
+    known = set(behaviour.PROBLEMS)
+    check("behaviour: the problems are the ones the reader knows",
+          carried and carried == known,
+          f"{len(carried)} problems named, and the set matches the "
+          f"{len(behaviour.PROBLEMS)} in the reader exactly")
+
+    nodes = [n for s in scripts for h in s.handlers for n in h.nodes]
+    wrong = [n for n in nodes if n.binary and len(n.operands) != 2]
+    widths = {len(n.operands) for n in nodes if not n.binary}
+    check("behaviour: an opcode's arity is fixed by the opcode",
+          nodes and not wrong and max(widths) <= behaviour.MAX_OPERANDS,
+          f"{sum(1 for n in nodes if n.binary)} nodes on opcodes "
+          f"{behaviour.BINARY.start}..{behaviour.BINARY.stop - 1} take exactly two "
+          f"operands; the {len(nodes) - sum(1 for n in nodes if n.binary)} on "
+          f"{behaviour.VARIADIC} take {min(widths)} to {max(widths)}")
+
+    outside = 0
+    for s in scripts:
+        top = max((o for h in s.handlers for n in h.nodes for o in n.operands),
+                  default=-1)
+        outside += top >= s.nodes
+    ceiling = max(o for n in nodes for o in n.operands)
+    check("behaviour: the operands index a table the script does not carry",
+          outside > len(scripts) * 0.5,
+          f"{outside}/{len(scripts)} scripts name an operand at or past their own "
+          f"node count, and the ceiling is {ceiling} across the corpus -- so the "
+          f"node vocabulary is shared and lives elsewhere")
+
+
 def run(game: Path) -> int:
     """Run every check against ``game``.  Returns a process exit code."""
     results: list[tuple[str, bool, str]] = []
@@ -3648,6 +3720,7 @@ def run(game: Path) -> int:
         check_minimap_agreement, check_arealmap,
         check_grid, check_missions, check_objects, check_poses, check_lod, check_damage,
         check_effects, check_footprints, check_rsli, check_control, check_controls,
+        check_behaviour,
     )
     for fn in checks:
         fn(check, game)

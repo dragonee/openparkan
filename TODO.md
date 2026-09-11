@@ -530,6 +530,21 @@ written down is a question nobody reopens.
       only ones carrying a resolver chain at all.
       → [docs/14-controls.md](docs/14-controls.md)
 
+- [x] **The `.scr` behaviour scripts, structurally.** The project's largest
+      unread format, and the feasibility note called it the main obstacle.
+      The structure is a weekend and it is now spent: **all 58 files read end
+      to end**, 677 handlers and 6065 nodes, nothing left over. A script is a
+      set of named handlers, each a flat node list; nothing in the file is
+      aligned or padded. **Nine handlers are in every one of the 58 scripts**
+      — `Init`, `Problems0`, `Mission`, the `Fort_`/`Mech_` task events and
+      `Hero_Teleported` — so they are the engine's event set, not a mission's.
+      The rest are `PBM_` AI problems, and **every `_Start` has a matching
+      `_Continue` in all 58 files without exception**. The node's opcode runs
+      0..6 and its arity is fixed by its value: **939 nodes on opcodes 0–5
+      take exactly two operands and not one takes any other number**, against
+      5126 on opcode 6 taking 0 to 11. What a node *does* is the months-long
+      half and is untouched. → [docs/15-behaviour.md](docs/15-behaviour.md)
+
 - [x] **The `.ctl` frame is the controller object.** Not a serialisation
       format with a layout of its own: `Control.dll`'s initialiser at
       `0x10006689` writes a compiled-in default into every field of the
@@ -814,6 +829,17 @@ today; each is a small trap for anyone extending the code.
   initialiser**, `+124` turns out to be run-time state rather than a
   parameter, `+116` is a bitfield whose bit 0 the engine tests, and
   `+44`/`+48`/`+52`/`+56` are compared rather than multiplied in.
+- The `.scr` **node vocabulary**. The 9239 operands run 0..228 and are not
+  indices into the script that holds them — 49 of the 58 name an operand at or
+  past their own node count, and the ceiling is the same 228 in a script of 17
+  nodes as in one of 585. So the table is shared and lives elsewhere, and it is
+  not in the binaries: `Behavior.dll` carries no `PBM_` string and `ai.dll`
+  exactly one. The open lead is `.trf` — 29 NRes archives in the same
+  directory, 12 streams each, every member named `ResTree`, and `TRF0` is
+  14720 bytes in all 29, the only stream whose size never varies. 14720 is
+  64 × 230, the right order for a table a ceiling of 228 would index, but the
+  stream's own record boundaries do not fall at 64 and `.trf` stays unread.
+  → [docs/15-behaviour.md](docs/15-behaviour.md)
 - What handles `MCMD_WALK_F`. `MCMD_WALK_B` (20) and `MCMD_LOCK` (21) are
   answered — `Control.dll` has a second control class whose table covers
   messages 20 to 28, and `AniMesh.dll`'s agent takes both as well, keeping
