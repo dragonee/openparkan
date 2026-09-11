@@ -1,14 +1,15 @@
 # The behaviour scripts — `.scr`
 
 `MISSIONS/SCRIPTS/` holds 58 `.scr` files, from 286 bytes to 21050. They are
-the mission AI, and `Behavior.dll` interprets them. This reads **all 58 end to
-end with nothing left over**: 677 handlers and 6065 nodes.
+the mission AI, and `ai.dll` loads them. This reads **all 58 end to end with
+nothing left over** — 677 handlers and 6065 nodes — and resolves every one of
+their 9239 operands against the symbol table the game ships beside them.
 
 Before this they were the project's largest unread format. The feasibility
 note called them "the main obstacle" and split the problem in two: parsing the
 graph is a weekend, making the nodes *behave* is months. That split is real,
-and this document is the first half only. **What a node does is not read
-here**, and the last section says exactly what would be needed.
+and this document is the first half. **What a node does is not read here** —
+but what it reads and what it writes are, by name.
 
 ## The file
 
@@ -101,36 +102,94 @@ comparison set, and opcode 6 — five sixths of all nodes — is what a call or 
 sequence looks like. Both readings are *unconfirmed*, and the reader names
 neither: it exposes `opcode` and `binary` and stops there.
 
-## Where the vocabulary is not
+## The vocabulary: `varset.var`
 
-The 9239 operands run **0 to 228**, with 170 distinct values, and they are
-never negative. They are not indices into the script that holds them:
-**49 of the 58 scripts name an operand at or past their own node count**, and
-the ceiling is the same 228 in a script of 17 nodes as in one of 585.
+The 9239 operands run 0 to 228 and are never negative. They are not indices
+into the script that holds them — **49 of the 58 scripts name an operand at or
+past their own node count**, and the ceiling is the same 228 whether a script
+holds 17 nodes or 585. So the vocabulary is shared.
 
-So the node vocabulary is shared and lives outside the `.scr` files. It is not
-in the binaries either — `Behavior.dll` carries no `PBM_` string at all and
-`ai.dll` carries exactly one, so there is no name table to lift the way
-`World3D.dll`'s [command resolvers](14-controls.md) were lifted.
+It is shared in the most ordinary way imaginable. `MISSIONS/SCRIPTS/` holds one
+`varset.var`, it is plain text, and it documents its own format on line one:
 
-The open lead is `.trf`. The same directory holds 29 of them; each is an NRes
-archive of 12 streams tagged `TRF0`–`TRFB` and every one is named `ResTree` —
-a resource *tree*. `TRF0` is **14720 bytes in all 29 files**, which is the only
-stream whose size never varies, and 14720 is 64 × 230 — the right order for a
-table the operands' ceiling of 228 would index. That is suggestive and nothing
-more: the stream's own record boundaries do not fall at 64, and this project
-does not write down a reading it has not checked. `.trf` is unread.
+```
+//VAR( Type, Name, DefValue, Minimum, Maximum, Comment)
+//STRING( Size, Name, DefValue, Comment)
+
+VAR( float, f0, 0)
+VAR( float, f1, 1)
+...
+VAR( DWORD, ClanBaseX, 950);
+VAR( DWORD, ClanBaseY, 1000);
+VAR( DWORD, ClanID, 0);
+```
+
+**231 declarations, and the index is the position.** Every one of the 9239
+operands indexes it and none falls outside. The first node of `Init` in the
+first script reads 224, 225, 226 — `ClanBaseX`, `ClanBaseY`, `ClanID`, which is
+what setting a mission up looks like.
+
+Read the file in order or not at all: eleven declarations end in a stray `;`
+and four of those sit in the middle, so a parser that drops them shifts every
+index after it.
+
+### Which slot reads and which writes
+
+`head[1]` is the node's **destination**, and the corpus proves it rather than
+suggesting it. All 2504 non-null values are valid indices, and **not one of
+them names any of the first 23 declarations** — while the operands read those
+freely. Those 23 are exactly the things you cannot assign to:
+
+| | |
+|---|---|
+| `f0`–`f9` | the float literals 0 to 9 |
+| `d0`–`d9` | the integer literals 0 to 9 |
+| `dCurrentProblem`, `dCurrentSender`, `fDifficulty` | written by the engine at load |
+
+That last row is confirmed from the other side: `ai.dll` resolves
+`dCurrentProblem` and `dCurrentSender` by name immediately after the version
+check, along with ten more it writes itself. So a node reads its sources and
+writes its result, and 3561 of the 6065 write nowhere at all.
+
+The same table serves the `.fml` formula files beside the scripts: of the 15
+identifiers they use, 11 are `varset.var` declarations and the other four are
+the format's own keywords (`FUNCTION`, `FormulaSet`, `export`, `file`).
+
+### Who reads a script, and what 73 means
+
+Not `Behavior.dll`. **`ai.dll`** carries `.scr`, `.var`, `.fml` and
+`MISSIONS\SCRIPTS\`; `Behavior.dll` carries `ResTree` and owns the research
+tree instead. The loader checks the first word against 73 and, on a mismatch,
+prints
+
+> `(AI.DLL) ERROR: Scripts are not up to date !`
+
+so 73 is a **format version**, not a magic number — the engine's own words for
+it. Nothing in the corpus carries any other value.
+
+### What `.trf` turned out to be
+
+A dead end for this, and worth writing down so nobody walks it twice. The 29
+`.trf` archives beside the scripts are the **research tree**, which is what
+`ResTree` was saying: `TRF6` is 395 part ids (`e_gun_bc_05`), `TRF7` weapon
+codes (`L80mmRG`), `TRF8` display names (`Large Rail Gun`), `TRF9`
+descriptions, `TRFA` stat templates for a UI panel
+(`@G@Weight @B,weight,G,t,5,1@`). `TRF0` being 14720 bytes — 64 × 230, against
+an operand ceiling of 228 — is a coincidence, and a good reminder that a
+number landing in the right range is not evidence.
 
 ## What is not read here
 
-- **What a node does.** The head fields, the opcode meanings and the operand
-  namespace are all open. This is the months-long half of the problem and it
-  is gameplay, not format.
-- **The four head fields.** Their ranges differ, so they are not four of a
-  kind: slot 0 runs −1..72, slot 1 −1..228 — the operands' own range, so it is
-  probably a reference of the same kind — slot 2 is −1 on 5726 of 6065 nodes
-  with a handful of values carrying the top bit set, and slot 3 runs −1..6,
-  the opcode's range.
+- **What the seven opcodes compute.** The arity is fixed and the operands are
+  named, but nothing says whether opcode 1 is a comparison or an assignment.
+  This is the months-long half and it is gameplay, not format.
+- **`head[0]`**, which runs 0..72 on 2087 nodes. Too narrow to be a variable
+  index and there is no name table for it: `ai.dll` holds no run of ~73
+  identifiers, so whatever it selects is code.
+- **`head[2]`**, −1 on all but 339 nodes, where 63 of those carry the top bit
+  set (`0x80000000 | small`) and the rest are small. **`head[3]`**, 0..6 —
+  the opcode's own range, which may or may not mean anything.
 - **The trailer**, −1 on 4686 of 6065 nodes and 86 distinct values otherwise.
-- **`.trf`**, above, and **`.fml`** — 58 plain-text formula sets in the same
-  directory, `FUNCTION( , fTemp + 0.001, )`.
+  Every non-null value is a valid `varset.var` index, but so is almost any
+  small number, so that is not evidence.
+- **`.trf`**, the research tree — identified above, not read.

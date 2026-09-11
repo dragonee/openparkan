@@ -126,3 +126,73 @@ class TestTheEnginesOwnNames:
         assert behaviour.VARIADIC == 6
         assert behaviour.VARIADIC not in behaviour.BINARY
         assert list(behaviour.OPCODES) == [*behaviour.BINARY, behaviour.VARIADIC]
+
+
+VARSET = """\
+//VAR( Type, Name, DefValue, Minimum, Maximum, Comment)
+//STRING( Size, Name, DefValue, Comment)
+
+// Numbers like vars
+VAR( float, f0, 0)
+VAR( float, f1, 1)
+VAR( DWORD, d0, 0)
+///////////////////////////////////////
+VAR( DWORD, dCurrentProblem, 0)
+VAR( DWORD, dTemp, 0)   // a scratch slot
+VAR( DWORD, ClanID, 0);
+STRING( 32, sName, "")
+"""
+
+
+def write_varset(tmp_path, text=VARSET):
+    d = tmp_path / "MISSIONS" / "SCRIPTS"
+    d.mkdir(parents=True)
+    (d / behaviour.VARSET).write_text(text.replace("\n", "\r\n"), "latin-1")
+    return tmp_path
+
+
+def test_the_symbol_table_reads_in_file_order(tmp_path):
+    table = behaviour.variables(write_varset(tmp_path))
+    assert [v.name for v in table] == [
+        "f0", "f1", "d0", "dCurrentProblem", "dTemp", "ClanID", "sName",
+    ]
+    assert table[0].kind == "VAR"
+    assert table[0].type == "float"
+    assert table[-1].kind == "STRING"
+    assert table[-1].type == "32"
+
+
+def test_a_trailing_semicolon_does_not_lose_a_declaration(tmp_path):
+    """Dropping one would shift every index after it."""
+    table = behaviour.variables(write_varset(tmp_path))
+    assert behaviour.name_at(table, 5) == "ClanID"
+
+
+def test_the_literal_pool_is_recognised(tmp_path):
+    table = behaviour.variables(write_varset(tmp_path))
+    assert [v.name for v in table if v.literal] == ["f0", "f1", "d0"]
+    assert not table[3].literal
+
+
+def test_name_at_is_empty_outside_the_table(tmp_path):
+    table = behaviour.variables(write_varset(tmp_path))
+    assert behaviour.name_at(table, behaviour.NULL) == ""
+    assert behaviour.name_at(table, 999) == ""
+    assert behaviour.name_at(table, 0) == "f0"
+
+
+def test_an_empty_symbol_table_is_refused(tmp_path):
+    with pytest.raises(behaviour.ScriptFormatError, match="no declarations"):
+        behaviour.variables(write_varset(tmp_path, "// nothing here\n"))
+
+
+def test_a_node_names_its_destination_and_its_sources():
+    data = build_script([("Init", [build_node(head=(3, 4, -1, -1), operands=(0, 2))])])
+    node = behaviour.parse(data).handlers[0].nodes[0]
+    assert node.destination == 4
+    assert node.operands == (0, 2)
+
+
+def test_a_node_may_write_nowhere():
+    node = behaviour.parse(build_script([("Init", [build_node()])])).handlers[0].nodes[0]
+    assert node.destination == behaviour.NULL

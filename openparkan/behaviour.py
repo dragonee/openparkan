@@ -28,11 +28,19 @@ own event set rather than anything a mission invents.  The rest are the
 mission's AI problems, and those come in pairs: **every** `PBM_*_Start` in a
 file has a matching `PBM_*_Continue`, across all 58 files without exception.
 
-What a node *does* is not read here, and reproducing that is the hard part of
-the game rather than of the format.  Two structural facts constrain it: the
-opcode's arity is fixed -- **0 to 5 take exactly two operands and 6 takes
-anything from none to eleven** -- and the operands index a table that is not
-in this file, since they run to 228 in scripts holding as few as 17 nodes.
+A node's operands are **variable indices**, and the variables are declared in
+``MISSIONS/SCRIPTS/varset.var`` -- one shared, commented, plain-text symbol
+table of 231 entries that every script draws on.  All 9239 operands in the
+corpus index it and none falls outside.  ``head[1]`` is the node's
+**destination**: it too is always a valid index, and it never names any of the
+first 23 declarations, which are the literal constants ``f0``..``f9`` and
+``d0``..``d9`` plus the three the engine writes itself.  Operands read those
+freely.  A node therefore reads its sources and writes its result, and which
+slot is which is settled.
+
+What a node *does* with them is not read here.  The opcode's arity is fixed --
+**0 to 5 take exactly two operands and 6 takes anything from none to eleven**
+-- but what the seven opcodes compute, and what ``head[0]`` selects, are open.
 See ``docs/15-behaviour.md``.
 
 Everything above is re-derived by ``uv run openparkan verify``.
@@ -40,6 +48,7 @@ Everything above is re-derived by ``uv run openparkan verify``.
 
 from __future__ import annotations
 
+import re
 import struct
 from dataclasses import dataclass
 from pathlib import Path
@@ -95,6 +104,17 @@ PHASES = ("Start", "Continue")
 #: What a head field or a trailer holds where it holds nothing.
 NULL = -1
 
+#: The shared symbol table every script draws on, in ``MISSIONS/SCRIPTS``.
+VARSET = "varset.var"
+
+#: The two things ``varset.var`` declares.
+DECLARATIONS = ("VAR", "STRING")
+
+#: Declarations 0 to 22 are the read-only pool -- the float and integer
+#: literals 0..9, and the three values the engine writes itself.  A node's
+#: operands read them; a node's destination is never one of them.
+READ_ONLY = 23
+
 #: The high bit seen set on some ``head[2]`` values, which otherwise stay
 #: small.  Whatever it tags, it is not an index in the operands' space.
 TAGGED = -(2**31)
@@ -108,10 +128,10 @@ class ScriptFormatError(ValueError):
 class Node:
     """One node of a handler.
 
-    ``head`` is four fields whose meanings are open.  Their observed ranges
-    differ, so they are not four of a kind: slot 0 runs -1..72, slot 1
-    -1..228 (the operands' own range), slot 2 is mostly -1 with a handful of
-    values carrying the top bit, and slot 3 runs -1..6.
+    ``operands`` and ``destination`` are indices into ``varset.var``.  The
+    rest of ``head`` is open: slot 0 runs -1..72 and indexes something this
+    reader has not found, slot 2 is -1 on all but 339 nodes with a handful of
+    values carrying the top bit, and slot 3 runs -1..6, the opcode's range.
     """
 
     head: tuple[int, int, int, int]
@@ -123,6 +143,16 @@ class Node:
     def binary(self) -> bool:
         """True for the fixed-arity opcodes, which always carry two operands."""
         return self.opcode in BINARY
+
+    @property
+    def destination(self) -> int:
+        """The variable this node writes, or ``NULL``.
+
+        Never one of the first ``READ_ONLY`` declarations, where the operands
+        draw on them freely -- which is what makes this the write and those
+        the reads.
+        """
+        return self.head[1]
 
 
 @dataclass(frozen=True)
@@ -271,3 +301,57 @@ def read(path: Path) -> Script:
 def scripts(game: Path) -> list[Path]:
     """Every ``.scr`` the installation ships, sorted."""
     return sorted((game / "MISSIONS" / "SCRIPTS").glob("*.scr"))
+
+
+@dataclass(frozen=True)
+class Variable:
+    """One line of ``varset.var``.
+
+    The file documents its own two forms at the top::
+
+        //VAR( Type, Name, DefValue, Minimum, Maximum, Comment)
+        //STRING( Size, Name, DefValue, Comment)
+    """
+
+    kind: str
+    type: str
+    name: str
+    default: str
+
+    @property
+    def literal(self) -> bool:
+        """True for the ``f0``..``f9`` / ``d0``..``d9`` constant pool."""
+        return len(self.name) == 2 and self.name[0] in "fd" and self.name[1].isdigit()
+
+
+_DECL = re.compile(
+    r"^\s*(VAR|STRING)\(\s*([^,)]+?)\s*,\s*([A-Za-z_][A-Za-z0-9_]*)\s*"
+    r"(?:,(.*?))?\)\s*;?\s*$"
+)
+
+
+def variables(game: Path) -> list[Variable]:
+    """Read ``varset.var``: the symbol table a node's indices point into.
+
+    Order is the file's, because the index *is* the position.  Comment-only
+    lines and the trailing ``;`` some declarations carry are both tolerated;
+    dropping either would shift every index after it.
+    """
+    path = game / "MISSIONS" / "SCRIPTS" / VARSET
+    out: list[Variable] = []
+    for line in path.read_text("latin-1").replace("\r\n", "\n").split("\n"):
+        body = "" if line.lstrip().startswith("//") else line.split("//")[0]
+        found = _DECL.match(body)
+        if found:
+            kind, type_, name, default = found.groups()
+            out.append(Variable(kind, type_, name, (default or "").strip()))
+    if not out:
+        raise ScriptFormatError(f"{path.name}: no declarations")
+    return out
+
+
+def name_at(table: list[Variable], index: int) -> str:
+    """The name at ``index``, or ``''`` for ``NULL`` and anything out of range."""
+    if 0 <= index < len(table):
+        return table[index].name
+    return ""

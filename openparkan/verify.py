@@ -3698,11 +3698,43 @@ def check_behaviour(check, game: Path) -> None:
                   default=-1)
         outside += top >= s.nodes
     ceiling = max(o for n in nodes for o in n.operands)
-    check("behaviour: the operands index a table the script does not carry",
+    check("behaviour: the operands are not indices into the script itself",
           outside > len(scripts) * 0.5,
           f"{outside}/{len(scripts)} scripts name an operand at or past their own "
-          f"node count, and the ceiling is {ceiling} across the corpus -- so the "
-          f"node vocabulary is shared and lives elsewhere")
+          f"node count, and the ceiling is {ceiling} whether a script holds 17 "
+          f"nodes or 585 -- so the vocabulary is shared")
+
+    table = behaviour.variables(game)
+    names = [v.name for v in table]
+    check("behaviour: the shared symbol table reads",
+          len(table) > 200 and len(set(names)) == len(names),
+          f"{len(table)} declarations in {behaviour.VARSET}, every name distinct, "
+          f"read in file order because the index is the position")
+
+    operands = [o for n in nodes for o in n.operands]
+    stray = [o for o in operands if not 0 <= o < len(table)]
+    check("behaviour: every operand names a variable in that table",
+          operands and not stray,
+          f"{len(operands)}/{len(operands)} operands across the corpus index "
+          f"{behaviour.VARSET}, ceiling {max(operands)} against {len(table)} "
+          f"declarations")
+
+    dests = [n.destination for n in nodes if n.destination != behaviour.NULL]
+    bad = [d for d in dests if not 0 <= d < len(table)]
+    check("behaviour: a node's destination names one too",
+          dests and not bad,
+          f"{len(dests)} nodes carry a destination and all {len(dests)} index "
+          f"{behaviour.VARSET}; {len(nodes) - len(dests)} write nowhere")
+
+    pool = [v.name for v in table[: behaviour.READ_ONLY]]
+    literals = sum(1 for v in table[: behaviour.READ_ONLY] if v.literal)
+    written = [d for d in dests if d < behaviour.READ_ONLY]
+    read = sorted({o for o in operands if o < behaviour.READ_ONLY})
+    check("behaviour: the first declarations are read-only and the nodes respect it",
+          not written and len(read) > 10 and literals == 20,
+          f"no destination names any of the first {behaviour.READ_ONLY} "
+          f"({literals} literals {pool[0]}..{pool[19]} plus {', '.join(pool[20:])}), "
+          f"while {len(read)} of them are read as operands")
 
 
 def run(game: Path) -> int:

@@ -545,6 +545,22 @@ written down is a question nobody reopens.
       5126 on opcode 6 taking 0 to 11. What a node *does* is the months-long
       half and is untouched. → [docs/15-behaviour.md](docs/15-behaviour.md)
 
+- [x] **What the `.scr` operands point at.** `varset.var`, sitting in the same
+      directory the whole time: one shared plain-text symbol table that
+      documents its own format on line one and declares **231** variables.
+      **Every one of the 9239 operands indexes it and none falls outside**;
+      `Init`'s first node reads 224, 225, 226 — `ClanBaseX`, `ClanBaseY`,
+      `ClanID`. It also settles which slot is which: `head[1]` is the
+      **destination**, because all 2504 non-null values are valid indices and
+      **not one names any of the first 23 declarations**, which are the
+      literals `f0`..`f9`, `d0`..`d9` and the three the engine writes itself —
+      while the operands read those freely. Two corrections fell out: `ai.dll`
+      loads the scripts, not `Behavior.dll`, which owns the research tree; and
+      the leading 73 is a **format version**, since a mismatch prints "Scripts
+      are not up to date". The `.trf` lead was wrong — those archives are the
+      research tree, and `TRF0` being 64 × 230 against an operand ceiling of
+      228 is a coincidence. → [docs/15-behaviour.md](docs/15-behaviour.md)
+
 - [x] **The `.ctl` frame is the controller object.** Not a serialisation
       format with a layout of its own: `Control.dll`'s initialiser at
       `0x10006689` writes a compiled-in default into every field of the
@@ -829,17 +845,17 @@ today; each is a small trap for anyone extending the code.
   initialiser**, `+124` turns out to be run-time state rather than a
   parameter, `+116` is a bitfield whose bit 0 the engine tests, and
   `+44`/`+48`/`+52`/`+56` are compared rather than multiplied in.
-- The `.scr` **node vocabulary**. The 9239 operands run 0..228 and are not
-  indices into the script that holds them — 49 of the 58 name an operand at or
-  past their own node count, and the ceiling is the same 228 in a script of 17
-  nodes as in one of 585. So the table is shared and lives elsewhere, and it is
-  not in the binaries: `Behavior.dll` carries no `PBM_` string and `ai.dll`
-  exactly one. The open lead is `.trf` — 29 NRes archives in the same
-  directory, 12 streams each, every member named `ResTree`, and `TRF0` is
-  14720 bytes in all 29, the only stream whose size never varies. 14720 is
-  64 × 230, the right order for a table a ceiling of 228 would index, but the
-  stream's own record boundaries do not fall at 64 and `.trf` stays unread.
-  → [docs/15-behaviour.md](docs/15-behaviour.md)
+- The `.scr` **node's remaining fields**, now that the operands and the
+  destination are named. `head[0]` runs 0..72 on 2087 nodes and is too narrow
+  to be a variable index; `ai.dll` holds no run of ~73 identifiers, so whatever
+  it selects is code. `head[2]` is −1 on all but 339 nodes, 63 of those
+  carrying the top bit. `head[3]` runs 0..6, the opcode's own range. The
+  trailer is −1 on 4686 of 6065. And what the seven opcodes *compute* is the
+  months-long half. → [docs/15-behaviour.md](docs/15-behaviour.md)
+- `.trf`, the **research tree**. Identified but not read: 29 NRes archives of
+  12 streams, `TRF6`–`TRFA` carrying 395 part ids, weapon codes, display names,
+  descriptions and UI stat templates, and `TRF0`–`TRF5`/`TRFB` binary. Nothing
+  in the renderer wants it.
 - What handles `MCMD_WALK_F`. `MCMD_WALK_B` (20) and `MCMD_LOCK` (21) are
   answered — `Control.dll` has a second control class whose table covers
   messages 20 to 28, and `AniMesh.dll`'s agent takes both as well, keeping

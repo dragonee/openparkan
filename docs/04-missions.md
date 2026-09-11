@@ -192,13 +192,14 @@ Mission name:
   terrain surface sampled from `Land.msh`. Bridges float (median +12.8) and
   bunkers dig in (median −3.0), which is what those things should do.
 
-## SCRIPTS — still opaque
+## SCRIPTS
 
 - **`.fml`** — plain text formula sets: `FUNCTION( , fTemp + 0.001, )`.
-- **`.scr`** — compiled node graphs, opening with a name such as
-  `PBM_N_OPTIMAL_TRANSPORT_Start` then int32 slots with `0xFFFFFFFF` as null.
+- **`.scr`** — the mission AI, now [read](15-behaviour.md): named handlers over
+  flat node lists, all 58 files end to end.
 - **`.trf`** — NRes archives of 12 streams tagged `TRF0`–`TRFB`, all named
   `ResTree`, nearly all exactly 77448 bytes.
 
-Interpreted by `Behavior.dll` and `ai.dll`. Parsing the graphs is tractable;
-reproducing what the nodes do is the hard part of the project.
+Loaded by `ai.dll`. The graphs are [parsed](15-behaviour.md) and their
+operands resolve by name against `varset.var`; reproducing what the nodes *do*
+is the hard part of the project and is untouched.

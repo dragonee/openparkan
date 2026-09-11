@@ -69,11 +69,12 @@ pathfinding, and the FPS/RTS hybrid where the player drops into a mech. None of
 that is in the data files. It is 3.59 MB of x86 code across the DLLs, with
 `iron3d.dll` (929 KB) and `Terrain.dll` (623 KB) as the bulk.
 
-**Behaviour graphs** are now the main obstacle. `.scr` files are compiled node graphs — they open with a
-node name like `PBM_N_OPTIMAL_TRANSPORT_Start` followed by dense int32 index
-arrays with `0xFFFFFFFF` as the null link. Parsing the graph structure is a
-weekend. Making the nodes *behave* the same is the multi-month part, and it is
-interpreted by `Behavior.dll` (357 KB) plus `ai.dll` (207 KB).
+**Behaviour graphs** are the main obstacle, and the weekend half of them is
+[done](15-behaviour.md). A `.scr` is a set of named handlers over flat node
+lists; all 58 read end to end, and every operand resolves by name against
+`varset.var`, the plain-text symbol table shipped beside them. What is left is
+what the estimate said it would be: making the nodes *behave* the same is the
+multi-month part, and it is `ai.dll` (207 KB) that runs them.
 
 **Navigation is no longer a blocker.** `Land.map` is a convex navigation mesh
 — 242 to 4990 areals per map with mutual adjacency and a 128 × 128 lookup grid
