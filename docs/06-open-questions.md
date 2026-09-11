@@ -127,10 +127,10 @@ flythrough, its subtitles and voices, and the in-mission messages, through the
 games in `SAVE/` are [partly read](17-saves.md): the header and what a save
 refers to, but not the object graph, which is a raw heap dump. The `.trf` archives are [read](16-research.md): 368 research
 items and their prerequisite graph, though four floats and three of the twelve
-streams inside them are not. The engine's own `.ini` files — `Comp.ini`'s component
-registry, `Behavior.ini`'s and `ArealMap.ini`'s debug switches — are text and
-are described in [14-controls.md](14-controls.md) but not parsed; the input
-tables beside them are [read](14-controls.md). `*.ctl` and `*.ndp` are identified above; `*.exp` and
+streams inside them are not. The engine's own `.ini` files are now
+[read](22-settings.md) — the component registry, the two debug files, the
+display settings and the mission-progress dispatcher, each matched to the
+module that reads it; the input tables beside them are [read](14-controls.md). `*.ctl` and `*.ndp` are identified above; `*.exp` and
 `effects.rlb` are [read](11-effects.md), though what the floats inside an
 emitter mean is not.
 

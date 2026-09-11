@@ -21,6 +21,7 @@ from . import (
     resources,
     rsli,
     save,
+    settings,
     sky,
     texm,
     verify,
@@ -589,6 +590,48 @@ def _briefing_sounds(game: Path, directory: Path) -> dict[str, str]:
     return {}
 
 
+def cmd_settings(args, game: Path) -> int:
+    """The engine's own configuration, and the progress it keeps."""
+    registry_path = game / settings.COMPONENTS_FILE
+    if registry_path.exists():
+        print(f"# {settings.COMPONENTS_FILE} -- the component registry")
+        for row in settings.registry(registry_path):
+            print(f"  {row.cid}  {row.name:<24} {row.dll:<14} {row.function}")
+
+    for name in (settings.BEHAVIOUR_FILE, settings.AREALMAP_FILE):
+        path = game / name
+        if not path.exists():
+            continue
+        table = settings.switches(path)
+        print(f"\n# {name} -- {len(table)} switches")
+        for key, value in table.items():
+            shared = " (shared)" if key in settings.LOGGING else ""
+            print(f"  {key:<20} {value}{shared}")
+
+    path = game / settings.DISPLAY_FILE
+    if path.exists():
+        blocks = settings.sections(path)
+        print(f"\n# {settings.DISPLAY_FILE} -- written by the game, "
+              f"{sum(len(v) for v in blocks.values())} keys")
+        for head, table in blocks.items():
+            print(f"  [{head}]")
+            for key, value in table.items():
+                print(f"    {key:<22} {value}")
+
+    done = settings.completed(game)
+    if done:
+        missions = {settings.dispatcher_key(game, d): d
+                    for d in gamedir.missions(game)}
+        print(f"\n# {settings.DISPATCHER_FILE[-1]} -- {len(done)} of "
+              f"{len(missions)} missions completed on this install")
+        for key in done:
+            directory = missions.get(key)
+            where = (directory.relative_to(game).as_posix() if directory
+                     else f"{key}  (no such mission)")
+            print(f"  {where}")
+    return 0
+
+
 def cmd_research(args, game: Path) -> int:
     """The research tree: what unlocks what."""
     paths = research.trees(game)
@@ -809,6 +852,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("script", nargs="?", help="a .scr name; default is a listing")
     p.add_argument("handler", nargs="?", help="one handler; default is all of them")
     p.set_defaults(fn=cmd_behaviour)
+
+    sub.add_parser(
+        "settings", help="the engine's own .ini files and the progress it keeps"
+    ).set_defaults(fn=cmd_settings)
 
     p = sub.add_parser(
         "briefing", help="a campaign mission's opening flythrough, and its script")

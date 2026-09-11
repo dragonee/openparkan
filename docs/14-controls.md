@@ -289,11 +289,11 @@ be 11 schemes"* — and it ships **12**: the eleven, plus `Tower_Large`. Whether
 the engine reads the twelfth is not established here, and the discrepancy is
 recorded rather than resolved.
 
-## What is not read here
+## The configuration beside them
 
-The other configuration files in the root are text of the same kind and are
-not parsed: `Comp.ini` (the component registry — `CID_CLASSIC_LANDSCAPE 0
-terrain.dll LoadLandscape` through `CID_RESEARCH 7`), `Behavior.ini` and
-`ArealMap.ini` (logging and debug switches, including `ImmortalHero`,
-`DeterminMode` and `SaveLog`), and `Iron_3D.ini`. They configure the engine
-rather than describing data, and nothing in this toolkit acts on them yet.
+The other text files in the root are the engine's own configuration —
+`Comp.ini`'s component registry, `Behavior.ini`'s and `ArealMap.ini`'s debug
+switches, `Iron_3D.ini`'s display settings — and they are now
+[read](22-settings.md). They configure the engine rather than describing data,
+so nothing in this toolkit acts on them; it reads them and says which module
+owns each.

@@ -34,6 +34,7 @@ from . import (
     resources,
     rsli,
     save,
+    settings,
     sky,
     texm,
 )
@@ -4420,6 +4421,69 @@ def check_briefing(check, game: Path) -> None:
           f"{gaps} files skip a number")
 
 
+def check_settings(check, game: Path) -> None:
+    """The engine's own configuration files, and which module owns each."""
+    registry_path = game / settings.COMPONENTS_FILE
+    if not registry_path.exists():
+        return
+    rows = settings.registry(registry_path)
+    names = settings.component_names(registry_path)
+    present = sum((game / r.dll).exists()
+                  or any(q.name.lower() == r.dll.lower() for q in game.iterdir())
+                  for r in rows)
+    check("settings: the component registry is eight contiguous ids",
+          len(rows) == settings.COMPONENTS
+          and [r.cid for r in rows] == list(range(settings.COMPONENTS))
+          and set(names) == {r.cid for r in rows},
+          f"{len(rows)} rows in {settings.COMPONENTS_FILE}, ids 0 to "
+          f"{settings.COMPONENTS - 1}, each named by the file's own header "
+          f"-- {names.get(0, '?')} through {names.get(settings.COMPONENTS - 1, '?')}")
+    check("settings: every registry row names a module that is there",
+          present == len(rows),
+          f"{present}/{len(rows)} rows name one of "
+          f"{len({r.dll.lower() for r in rows})} DLLs in the installation, "
+          f"between them {len({r.function for r in rows})} entry points")
+
+    behaviour_switches = settings.switches(game / settings.BEHAVIOUR_FILE)
+    areal_switches = settings.switches(game / settings.AREALMAP_FILE)
+    shared = set(behaviour_switches) & set(areal_switches)
+    check("settings: the two debug files share a logging preamble",
+          shared == set(settings.LOGGING),
+          f"{len(behaviour_switches)} switches in {settings.BEHAVIOUR_FILE} and "
+          f"{len(areal_switches)} in {settings.AREALMAP_FILE}, sharing exactly "
+          f"{', '.join(sorted(shared))}")
+
+    binaries = {p.name: p.read_bytes().lower() for p in sorted(game.iterdir())
+                if p.suffix.lower() in (".dll", ".exe")}
+    owners = {
+        settings.COMPONENTS_FILE: "World3D.dll",
+        settings.BEHAVIOUR_FILE: "Behavior.dll",
+        settings.AREALMAP_FILE: "ArealMap.dll",
+        settings.DISPLAY_FILE: "iron3d.dll",
+        settings.DISPATCHER_FILE[-1]: "iron3d.dll",
+    }
+    matched = []
+    for name, owner in owners.items():
+        holders = [b for b, data in binaries.items() if name.lower().encode() in data]
+        matched.append(holders == [owner])
+    check("settings: one module owns each configuration file",
+          all(matched) and len(binaries) > 1,
+          f"{sum(matched)}/{len(owners)} file names appear in exactly one of "
+          f"{len(binaries)} binaries, and it is the module that carries their "
+          f"switches -- {', '.join(sorted(set(owners.values())))}")
+
+    keys = settings.completed(game)
+    if not keys:
+        return
+    missions = {settings.dispatcher_key(game, d): d for d in gamedir.missions(game)}
+    resolved = sum(k in missions for k in keys)
+    check("settings: every mission the dispatcher records is a real one",
+          resolved == len(keys) and set(keys.values()) == {settings.DONE},
+          f"{resolved}/{len(keys)} keys in {settings.DISPATCHER_FILE[-1]} "
+          f"flatten from one of the {len(missions)} mission directories, every "
+          f"value {settings.DONE} -- this install's progress, not the format")
+
+
 def run(game: Path) -> int:
     """Run every check against ``game``.  Returns a process exit code."""
     results: list[tuple[str, bool, str]] = []
@@ -4436,7 +4500,7 @@ def run(game: Path) -> int:
         check_grid, check_missions, check_objects, check_poses, check_lod, check_damage,
         check_effects, check_footprints, check_rsli, check_control, check_controls,
         check_behaviour, check_research, check_descriptions, check_saves,
-        check_vocabulary, check_resources, check_briefing,
+        check_vocabulary, check_resources, check_briefing, check_settings,
     )
     for fn in checks:
         fn(check, game)

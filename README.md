@@ -37,6 +37,7 @@ practice — format facts yes, code no — is set out in
 | **Behaviour scripts** | structure done — all 58 `.scr` end to end, 677 handlers and 6065 nodes, and `varset.var`'s 231 declarations, against which every one of the 9239 operands resolves by name; the nine universal event handlers, the 14 AI problems and their `Start`/`Continue` pairing, and which node slot reads and which writes. What a node *does* is not read |
 | **Parts database** | done — `objects.dlb`, all 395 `DSCR` entries: the classification, the short code and display name, the stat panel rows, and the four costs that name the research tree's floats |
 | **Research tree** | done — all 29 `.trf`, 368 items each with names, codes, categories and both edge lists; the prerequisite graph, its research-centre spine, and the per-mission rewiring |
+| **Engine configuration** | done — the five `.ini` files, each matched to the one module that reads it; `Comp.ini`'s eight-row component registry, how `World3D.dll` parses it and that all eight entry points are real exports; and the dispatcher's mission-progress keys, which round-trip against the directory tree |
 | **Mission briefings** | done — `briefing.cfg` on all 20 campaign missions, 378 waypoints with all 24 fields; camera and target inside their own map and above the terrain on 378 of 378, 165 of 165 voices bound and 275 of 278 subtitles, the three missing being a gap in the shipped finale |
 | **Resource bindings** | done — the `desc = "resource"` descriptor, 132 objects across 32 `.cfg` files binding 751 names into seven libraries, all resolving; and `TextRes.dll`'s string table, the game's own 173 lines of dialogue, read without a PE dependency |
 | **Save games** | partial — the `SLOT` header on all 6, the mission, map and research trees they name, and 1154 of 1158 archive-member references resolving; the object graph itself is a raw heap dump and is not decoded |
@@ -205,6 +206,7 @@ of fields carried through the readers without being understood.
 - [19-descriptions.md](docs/19-descriptions.md) — `objects.dlb`, the parts database
 - [20-resources.md](docs/20-resources.md) — the `.cfg` resource descriptor and `TextRes.dll`
 - [21-briefing.md](docs/21-briefing.md) — `briefing.cfg`, the opening flythrough
+- [22-settings.md](docs/22-settings.md) — the engine's five `.ini` files
 
 ## Layout
 
@@ -226,6 +228,7 @@ openparkan/
   descriptions.py objects.dlb parts database
   resources.py  .cfg resource descriptors and the PE string table
   briefing.py   briefing.cfg flythroughs and messages.cfg
+  settings.py   the engine's .ini files and mission progress
   save.py       SAVE/*.sav headers and references
   viewer.py     self-contained HTML viewer generator
   verify.py     the checks quoted above

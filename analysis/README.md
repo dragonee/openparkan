@@ -72,3 +72,23 @@ the research tree. Useful addresses, all in `ai.dll`:
 
 See [../docs/15-behaviour.md](../docs/15-behaviour.md). The handlers carry no
 strings, so the binary does not name them.
+
+
+## The component registry
+
+`Comp.ini` is read by `World3D.dll`, and `registry.py` checks every row of it
+against the export table of the DLL it names:
+
+```
+uv run --group analysis python analysis/registry.py
+```
+
+| address | what |
+|---|---|
+| `0x10014790` | the reader; its own error string calls it `LoadComponentAddr` |
+| `0x10026bec` | `'%d %s %s'` — a row is an int and two words, the rest free text |
+| `0x100666b8` | the table it fills, 16 bytes a row: id, module handle, entry point |
+| `0x10795284` | the row counter, advanced only when both lookups succeed |
+| `0x10013f84` | the caller, which pushes the filename |
+
+See [../docs/22-settings.md](../docs/22-settings.md).

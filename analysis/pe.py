@@ -33,6 +33,16 @@ class Binary:
         self.text_va = self.base + self.text.VirtualAddress
         self.text_data = self.text.get_data()
 
+    def exports(self) -> dict[str, int]:
+        """Every named export, as ``name -> virtual address``."""
+        self.pe.parse_data_directories(directories=[
+            pefile.DIRECTORY_ENTRY["IMAGE_DIRECTORY_ENTRY_EXPORT"]])
+        directory = getattr(self.pe, "DIRECTORY_ENTRY_EXPORT", None)
+        if directory is None:
+            return {}
+        return {e.name.decode(): self.base + e.address
+                for e in directory.symbols if e.name}
+
     # --- address helpers -------------------------------------------------
     def va_to_off(self, va: int) -> int | None:
         rva = va - self.base
