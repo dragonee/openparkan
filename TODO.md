@@ -904,9 +904,6 @@ today; each is a small trap for anyone extending the code.
   them; they are not, they are ammunition named after the weapon
   ([18-vocabulary.md](docs/18-vocabulary.md)), so those six classes have no
   evidence of any kind attached to them yet.
-- **Fourteen `i_cNN` clips that no assembly fits**, among them every
-  `i_c06_l_*` and `i_c07_l_*`. Cut content, or fitted by something other than
-  a `.dat`. → [docs/18-vocabulary.md](docs/18-vocabulary.md)
 - **The three int32 that end a save's member record.** `+72` counts along a
   group of parts but runs down as often as up, so it is not a slot number;
   `+64` is not the component class (tested, and it disagrees on 953 of 957);
@@ -928,8 +925,11 @@ today; each is a small trap for anyone extending the code.
 - **Whether a research takes time at all.** The tabulated numbers are costs,
   so if there is a duration the engine computes it; `varset.var`'s
   `dTechnologyFactor` is where to look.
-- `objects.dlb`'s **`//G<n>:L<n>`** group and level, and the fifth slot of its
-  classification line. → [docs/19-descriptions.md](docs/19-descriptions.md)
+- `objects.dlb`'s **`A<n>` token** closing the classification line (six values,
+  tied to nothing else), its `A`/`N`/`E` size letters that no part id uses, and
+  what the tech level gates — it rises with `UpgradeLevel` and with tree depth
+  but nothing says which is cause.
+  → [docs/19-descriptions.md](docs/19-descriptions.md)
 - What handles `MCMD_WALK_F`. `MCMD_WALK_B` (20) and `MCMD_LOCK` (21) are
   answered — `Control.dll` has a second control class whose table covers
   messages 20 to 28, and `AniMesh.dll`'s agent takes both as well, keeping

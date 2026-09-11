@@ -106,3 +106,23 @@ def test_unknown_size_and_kind_pass_through():
     d = descriptions.parse_entry("//G1:L0\n//Z:ZZZ:ZZZ:MK1\n#2Thing\n")
     assert d.size_word == "Z"
     assert d.kind_word == "ZZZ"
+
+
+def test_a_chained_sub_kind_line_reads():
+    """`//B:BLD:BUN:TUR:MK1:A3` has six slots where a gun's has five."""
+    d = descriptions.parse_entry("//G1:L0\n//B:BLD:BUN:TUR:MK1:A3\n#2Large Bunker Trt\n")
+    assert (d.size, d.kind, d.sub, d.mark) == ("B", "BLD", "BUN:TUR", "MK1")
+    assert d.tail == ("A3",)
+    assert d.group_word == "buildings"
+
+
+def test_a_line_without_a_mark_still_reads():
+    d = descriptions.parse_entry("//G4:L0\n//M:DVC:BAT\n#2Battery\n")
+    assert (d.kind, d.sub, d.mark, d.tail) == ("DVC", "BAT", "", ())
+
+
+def test_the_level_band_follows_the_upgrade_level():
+    assert descriptions.parse_entry("//G3:L14\n//B:WPN:GUN:MK2\n#6UpgradeLevel=2\n").banded
+    assert not descriptions.parse_entry("//G3:L21\n//B:WPN:GUN:MK2\n#6UpgradeLevel=1\n").banded
+    # level 0 is the free stock and never counts against a band
+    assert descriptions.parse_entry("//G3:L0\n//B:WPN:GUN:MK2\n#6UpgradeLevel=3\n").banded

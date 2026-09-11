@@ -4053,6 +4053,29 @@ def check_descriptions(check, game: Path) -> None:
           f"do not are every i_c06_l and i_c07_l, and they are in no tree, save "
           f"or assembly either")
 
+    classified = [p for p in parts.values() if p.kind and p.size]
+    tidy = [p for p in parts.values()
+            if p.kind in descriptions.GROUP_KINDS.get(p.group, set())]
+    stray_group = sorted(p.part for p in parts.values() if p not in tidy)
+    check("descriptions: the group is the catalogue's top-level tab",
+          len(classified) == len(parts) and len(tidy) >= len(parts) - 4,
+          f"all {len(parts)} carry a classification line and {len(tidy)} sit in "
+          f"the group their kind belongs to -- "
+          + ", ".join(f"G{g} {descriptions.GROUPS[g]} "
+                      f"({'+'.join(sorted(descriptions.GROUP_KINDS[g]))})"
+                      for g in sorted(descriptions.GROUPS))
+          + f"; the {len(stray_group)} that do not are "
+          + ", ".join(stray_group))
+
+    banded = [p for p in parts.values() if p.banded]
+    stray = sorted(p.part for p in parts.values() if not p.banded)
+    check("descriptions: the tech level rises with the upgrade level",
+          len(banded) >= len(parts) - 4,
+          f"{len(banded)}/{len(parts)} parts sit in the level band their "
+          f"UpgradeLevel implies -- "
+          + ", ".join(f"{k}:{v[0]}..{v[1]}" for k, v in sorted(descriptions.BANDS.items()))
+          + f"; the {len(stray)} that do not are " + ", ".join(stray))
+
     free = [p for p in parts.values() if not p.researched]
     check("descriptions: what costs nothing to research is what you start with",
           free and len(free) < len(parts),

@@ -25,7 +25,7 @@ field names into it.
 
 | line | what it is |
 |---|---|
-| `//G<n>:L<n>` | a group and a level. *Unknown* what either indexes |
+| `//G<n>:L<n>` | the catalogue group, and a tech level. Both read below |
 | `//<size>:<kind>:<sub>:<mark>:<a>` | the classification, below |
 | `#1` | short code — `L152mmC`. On 356 of 395 |
 | `#2` | display name — the string the UI shows. On all 395 |
@@ -34,7 +34,49 @@ field names into it.
 | `#6`…`#A` | five `key=value` numbers, on all 395 |
 | `@G@…@B,…@` | one row of the part's stat panel |
 
-The classification's first slot is the **same size letter as a part id**
+### The group and the level
+
+`//G<n>:L<n>` is not opaque after all.
+
+**The group is the catalogue's top-level tab** — *measured*. Each of the four
+holds one kind, or the two kinds that belong together:
+
+| group | | kinds | parts |
+|---:|---|---|---:|
+| `G1` | buildings | `BLD` | 58 |
+| `G2` | chassis | `SHS`, `ANM` | 82 |
+| `G3` | armament | `WPN`, `AMM` | 117 |
+| `G4` | devices | `DVC` | 134 |
+
+**391 of 395** sit in the group their kind belongs to; the four that do not
+are named in the check. Armament being one tab for both the guns and the
+clips they take is the same pairing `#5` states line by line.
+
+**The level is a tech level, and it rises with `UpgradeLevel`** — *measured*.
+The bands rise and touch only at their edges:
+
+| `UpgradeLevel` | tech levels |
+|---:|---|
+| 0 | 0–1 |
+| 1 | 2–8 |
+| 2 | 9–16 |
+| 3 | 14–21 |
+
+**393 of 395** sit in their band, counting level 0 as the free stock; the two
+that do not are `e_gun_fc_07` and `i_pws_b_02`. The level also tracks depth in
+the [research tree](16-research.md) — a part with no prerequisites is level 0,
+and the deepest reach 16–21 — but loosely enough that it is a designer's
+grading rather than a computed depth. *Guess*: it is what gates a part behind
+a research centre tier.
+
+### The rest of the classification line
+
+The line is **variable length**: `//B:BLD:BUN:TUR:MK1:A3` has six slots where
+`//B:WPN:GUN:MK2:A3` has five, because a sub-kind can be a chain. The mark is
+whichever token matches `MK<n>`; everything between the kind and it is the
+chain, and one `A<n>` token follows.
+
+The first slot is the **same size letter as a part id**
 ([18-vocabulary.md](18-vocabulary.md)): `B` large (144), `M` medium (96),
 `L` small (92), `T` tiny (26), `H` huge (2), plus `A` (27), `N` and `E`.
 The kind slot is six values: `DVC` device (134), `SHS` chassis (78),
@@ -80,9 +122,10 @@ code that is itself a member and the rest naming it in words
 
 ## What is not read here
 
-- **`//G<n>:L<n>`.** The group runs 1–4 and the level takes a dozen values;
-  neither is tied to anything else in the data. *Unknown.*
-- **The fifth slot of the classification line** (`A3`, `A1`), and the `A`, `N`
-  and `E` size letters, which no part id uses.
+- **The `A<n>` token** that closes the classification line — six values,
+  `A0`–`A5`, tied to nothing else here. *Unknown.*
+- **The `A`, `N` and `E` size letters**, which no part id uses.
+- **What the tech level gates exactly.** It rises with `UpgradeLevel` and with
+  depth in the research tree, but nothing says which is cause.
 - **The stat *values*.** This file names the fields and their units; what a
   given part weighs is not here.

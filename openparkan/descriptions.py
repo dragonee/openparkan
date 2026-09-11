@@ -53,6 +53,16 @@ PARTS = 395
 #: The size letter of the classification line, as in a part id.
 SIZES = {"B": "large", "M": "medium", "L": "small", "T": "tiny", "H": "huge"}
 
+#: The group in the ``//G<n>:L<n>`` line: the catalogue's top-level tab, and
+#: the kinds that belong to it.  Armament is one tab holding both the weapons
+#: and the ammunition they take.
+GROUPS = {1: "buildings", 2: "chassis", 3: "armament", 4: "devices"}
+GROUP_KINDS = {1: {"BLD"}, 2: {"SHS", "ANM"}, 3: {"WPN", "AMM"}, 4: {"DVC"}}
+
+#: What ``UpgradeLevel`` bands the tech level into.  The bands rise and touch
+#: only at their edges; see ``docs/19-descriptions.md``.
+BANDS = {0: (0, 1), 1: (2, 8), 2: (9, 16), 3: (14, 21)}
+
 #: The kind slot.
 KINDS = {
     "DVC": "device",
@@ -73,7 +83,10 @@ NUMBERS = (
 )
 
 _GROUP = re.compile(r"^//G(\d+):L(\d+)\s*$")
-_CLASS = re.compile(r"^//([A-Z]+):([A-Z]+):([A-Z]+):([A-Z0-9]+)(?::([A-Z0-9]+))?\s*$")
+#: The classification line is variable: the mark is the ``MK<n>`` token and
+#: anything between the kind and it is a chain of sub-kinds.
+_CLASS = re.compile(r"^//([A-Z]+):([A-Z]+):(.+?)\s*$")
+_MARK = re.compile(r"^MK\d+$")
 _SLOT = re.compile(r"^#(\w)(.*)$")
 _STAT = re.compile(r"^@G@(.*?)\s*@B,([^,]*),G,([^,]*),")
 
@@ -106,8 +119,11 @@ class Description:
     level: int
     size: str
     kind: str
+    #: The sub-kind chain, ``:``-joined where there is more than one.
     sub: str
     mark: str
+    #: Whatever follows the mark -- one ``A<n>`` token throughout.  Unread.
+    tail: tuple[str, ...]
     upgrade: int
     research_energy: float
     research_ore: float
@@ -131,6 +147,18 @@ class Description:
         return bool(self.research_energy or self.research_ore)
 
     @property
+    def group_word(self) -> str:
+        return GROUPS.get(self.group, str(self.group))
+
+    @property
+    def banded(self) -> bool:
+        """True when the tech level sits in the band its upgrade level implies."""
+        if not self.level:
+            return True
+        low, high = BANDS.get(self.upgrade, (0, 0))
+        return low <= self.level <= high
+
+    @property
     def size_word(self) -> str:
         return SIZES.get(self.size, self.size)
 
@@ -143,6 +171,7 @@ def parse_entry(text: str, part: str = "") -> Description:
     """Read one ``DSCR`` member's text."""
     group = level = 0
     size = kind = sub = mark = ""
+    tail: tuple[str, ...] = ()
     code = name = belongs = ""
     free: list[str] = []
     numbers: dict[str, float] = {}
@@ -157,7 +186,13 @@ def parse_entry(text: str, part: str = "") -> Description:
             continue
         found = _CLASS.match(line)
         if found:
-            size, kind, sub, mark = found.group(1), found.group(2), found.group(3), found.group(4)
+            size, kind = found.group(1), found.group(2)
+            rest = found.group(3).split(":")
+            marks = [i for i, x in enumerate(rest) if _MARK.match(x)]
+            at = marks[0] if marks else len(rest)
+            sub = ":".join(rest[:at])
+            mark = rest[at] if marks else ""
+            tail = tuple(rest[at + 1:]) if marks else ()
             continue
         found = _STAT.match(line)
         if found:
@@ -192,6 +227,7 @@ def parse_entry(text: str, part: str = "") -> Description:
         kind=kind,
         sub=sub,
         mark=mark,
+        tail=tail,
         upgrade=int(numbers.get("UpgradeLevel", 0)),
         research_energy=numbers.get("ResearchEnergyCost", 0.0),
         research_ore=numbers.get("ResearchOreCost", 0.0),
