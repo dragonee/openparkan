@@ -790,7 +790,10 @@ today; each is a small trap for anyone extending the code.
   the handlers for messages 8..12 reach indexed channels on two sub-objects
   (`+0x5c8`, a 0xf4-byte class with 0x1c-stride channels defaulting to 0.5;
   `+0x5cc`, a 0x120-byte class with two arrays of six floats), and nothing
-  yet says which triple either was loaded from. The read/write scan narrows
+  yet says which triple either was loaded from. The property interface is
+  **not** the route: 143 of its 180 ids fall to a default, and of the 37 it
+  implements only six reach the block — three fields (+20, +48, +124)
+  through three get/set pairs. The read/write scan narrows
   it: **17 of the 32 slots are never touched in `Control.dll` outside the
   initialiser**, `+124` turns out to be run-time state rather than a
   parameter, `+116` is a bitfield whose bit 0 the engine tests, and

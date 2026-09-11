@@ -212,10 +212,32 @@ triples and the half-cone at +112. They are either read by another module
 through the interface, or dead. This says nothing about which; it says only
 that the DLL that owns the block mostly does not look at it.
 
-The object also carries a property interface — `[esp+0x1c] - 1`, `cmp eax,
-0xb3`, so **ids 1 to 180**, dispatched through a byte index table at
-`0x1000e5e8` into a jump table at `0x1000e554`. A spot check of its cases finds
-that most hand out fields elsewhere in the object rather than in this block.
+### The property interface is not where the names are
+
+The object carries a property interface — `[esp+0x1c] - 1`, `cmp eax, 0xb3`,
+so **ids 1 to 180**, dispatched at `0x1000dcc0` through a byte index table at
+`0x1000e5e8` into a jump table at `0x1000e554`. It looked like the place field
+names would come from. It is not, and this is the count rather than the spot
+check that stood here before.
+
+There are **37 distinct cases**. **143 of the 180 ids fall to the default at
+`0x1000e002`**, which returns zero — so the class implements 37 properties out
+of an interface-wide id space of 180. Of those 37:
+
+- **six reach the parameter block**, and they are three fields through three
+  get/set pairs: **17 and 18** → file **+20**, **144 and 145** → file **+48**,
+  **136 and 137** → file **+124**. One of each pair goes through the source
+  pointer at `+0x46c`, the other through the copy at `+0x470`, and both land on
+  the same field.
+- **twelve hand out something else in the object** — `+0x2c`, `+0xf0`,
+  `+0x1a0`, `+0x1bc`, `+0x1c8`, `+0x1d4`, `+0x1e0`, `+0x1f4`, `+0x200`,
+  `+0x538` (twice) and `+0x660`.
+- **nineteen are not a plain pointer** at all: they compute or convert rather
+  than hand out a field.
+
+So the interface exposes **three** of the block's thirty-two slots. The
+seventeen slots nothing in `Control.dll` touches are not reached this way
+either, and whatever reads them — if anything does — is somewhere else again.
 
 ## The sections
 
