@@ -97,6 +97,11 @@ TAG_ARITY = {-1: 0, 1: 0, 2: 0, 3: 1, 4: 1, 5: 0, 6: 0}
 REFERENCE_TAG = -1
 LITERAL_TAG = 6
 
+#: The tag that closes a block a comparison opened.  Across the corpus, 675
+#: of 677 handlers hold exactly as many of these as comparisons and bracket
+#: cleanly, nesting up to five deep.
+CLOSE_TAG = 1
+
 #: The high half set on 55 of the literals.  Its meaning is open; a sign is
 #: the obvious guess and nothing tests it.
 LITERAL_FLAG = 0x8000_0000
@@ -196,6 +201,22 @@ class Node:
         ``immediate``.
         """
         return self.trailer
+
+    @property
+    def opens(self) -> bool:
+        """True for a comparison, which opens a block."""
+        return not self.calls and self.opcode in BINARY
+
+    @property
+    def closes(self) -> bool:
+        """True for the bare tag that closes one.
+
+        Bare is checked against the raw fields rather than ``reference`` and
+        ``literal``, which are gated on their own tags and so would report
+        nothing here whatever ``head[2]`` held.
+        """
+        return (not self.calls and self.tag == CLOSE_TAG
+                and self.head[2] == NULL and self.trailer == NULL)
 
     @property
     def tag(self) -> int:
@@ -474,13 +495,23 @@ def render_node(node: Node, table: list[Variable]) -> str:
 
 
 def render(script: Script, table: list[Variable], only: str = "") -> list[str]:
-    """A script as pseudo-code, one handler after another."""
+    """A script as pseudo-code, one handler after another.
+
+    Indented on the bracketing a comparison and ``CLOSE_TAG`` make, which
+    holds on 675 of the corpus's 677 handlers.  The depth is clamped at zero
+    so the two that carry a spare closer still print.
+    """
     lines: list[str] = []
     for handler in script.handlers:
         if only and handler.name != only:
             continue
         lines.append(f"{handler.name}:   # {len(handler.nodes)} nodes")
+        depth = 0
         for index, node in enumerate(handler.nodes):
-            lines.append(f"  {index:4}  {render_node(node, table)}")
+            if node.closes:
+                depth = max(0, depth - 1)
+            lines.append(f"  {index:4}  {'  ' * depth}{render_node(node, table)}")
+            if node.opens:
+                depth += 1
         lines.append("")
     return lines

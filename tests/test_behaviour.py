@@ -310,3 +310,45 @@ def test_render_can_pick_one_handler(tmp_path):
     lines = behaviour.render(script, table, "Mission")
     assert lines[0].startswith("Mission:")
     assert not any("Init" in x for x in lines)
+
+
+def test_a_comparison_opens_and_the_bare_tag_closes():
+    data = build_script([("Init", [
+        build_node(opcode=1, operands=(0, 1)),
+        build_node(head=(-1, -1, -1, 5)),
+        build_node(head=(-1, -1, -1, 1)),
+    ])])
+    a, b, c = behaviour.parse(data).handlers[0].nodes
+    assert a.opens and not a.closes
+    assert not b.opens and not b.closes
+    assert c.closes and not c.opens
+
+
+def test_an_assignment_tagged_one_does_not_close():
+    """A closer is bare; tag 1 carrying a source is an assignment."""
+    data = build_script([("Init", [build_node(head=(-1, 30, 5, 1))])])
+    node = behaviour.parse(data).handlers[0].nodes[0]
+    assert node.tag == behaviour.CLOSE_TAG
+    assert not node.closes
+
+
+def test_render_indents_the_block(tmp_path):
+    table = behaviour.variables(write_varset(tmp_path))
+    script = behaviour.parse(build_script([("Init", [
+        build_node(opcode=1, operands=(0, 2)),
+        build_node(head=(-1, -1, -1, 5)),
+        build_node(head=(-1, -1, -1, 1)),
+        build_node(head=(19, -1, -1, -1)),
+    ])]))
+    body = [x[8:] for x in behaviour.render(script, table)[1:5]]
+    assert body == ["op1(f0, d0)", "  tag5", "tag1", "fn19()"]
+
+
+def test_render_survives_a_spare_closer(tmp_path):
+    """Two shipped handlers carry one; the depth must not go negative."""
+    table = behaviour.variables(write_varset(tmp_path))
+    script = behaviour.parse(build_script([("Init", [
+        build_node(head=(-1, -1, -1, 1)),
+        build_node(head=(19, -1, -1, -1)),
+    ])]))
+    assert [x[8:] for x in behaviour.render(script, table)[1:3]] == ["tag1", "fn19()"]

@@ -3779,6 +3779,27 @@ def check_behaviour(check, game: Path) -> None:
           f"that does not is tagged {min(other)}..{max(other)}; the two sets do "
           f"not meet")
 
+    clean = negative = 0
+    deepest = 0
+    for s in scripts:
+        for handler in s.handlers:
+            depth = under = 0
+            for node in handler.nodes:
+                if node.opens:
+                    depth += 1
+                    deepest = max(deepest, depth)
+                elif node.closes:
+                    depth -= 1
+                    under |= depth < 0
+            clean += not under and depth == 0
+            negative += bool(under)
+    total = sum(len(s.handlers) for s in scripts)
+    check("behaviour: a comparison opens a block and tag 1 closes it",
+          total and clean >= total - 2,
+          f"{clean}/{total} handlers hold exactly as many closers as "
+          f"comparisons and bracket cleanly, nesting {deepest} deep at most; "
+          f"the {total - clean} that do not carry a spare closer")
+
     def _kind(n):
         if n.calls:
             return "fn"

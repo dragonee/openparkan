@@ -312,27 +312,50 @@ robot if there is none, orders the one it has to capture, takes a group by
 hits, patrols it and marks the target for destruction. That is a *reading*,
 and the only part of it the data states is the argument names.
 
-### Where the tags sit — *measured*
+### A comparison opens a block and tag 1 closes it — *measured*
 
-The tags are not scattered. Two facts hold across all 58 scripts:
+The tags are not scattered, and the counts give it away: there are **944 tag-1
+nodes against 939 comparisons**. Per handler the match is near-exact.
 
-- **tag 5 is followed immediately by tag 1 on 210 of 210** nodes.
-- **tag 3 follows a comparison on 82 of 85**, and it is one of the two tags
-  that take an operand.
-- **No handler opens with tag 1**, and 36 end with one.
+- **675 of 677 handlers hold exactly as many bare tag-1 nodes as
+  comparisons**, and bracket cleanly — the depth never goes negative and ends
+  at zero. Nesting reaches **five** deep.
+- The two that do not are both `Mission` handlers, in `c2m2p.scr` and
+  `c4m1p.scr`, and each carries a spare closer.
+- **tag 5 is followed immediately by tag 1 on 210 of 210** nodes, so it is
+  always the last thing inside a block.
+- **tag 3 follows a comparison on 82 of 85**, and is one of the two tags that
+  take an operand.
 
-*Guess*: the comparison nodes are conditions and the tags are the branch and
-join around them — `op1(dT, ERROR)` then a block then `tag1` reads exactly
-like an `if`. Nothing here proves it, and the renderer prints the flat list
-rather than indenting on a guess.
+So the renderer indents, and the result reads as guard clauses:
+
+```
+ 0  dT = fn50(ORDER_ROBOT_CAPTURE)
+ 1  op5(dT, ERROR)
+ 2    tag5
+ 3  tag1
+ 4  fn7()
+ 5  dX = fn29(d0)
+ 6  dT = fn14(UNIT_ANY_NEAREST_CAPTURER, TARGET_BY_LOGIC_ID, dX)
+ 7  op1(dT, ERROR)
+ 8    fTemp = fn12()
+12    fn2(PBM_ROBOT_NEEDED, fTemp, ..., ROBOT_BATTLEUNIT, NONE, SELECT_FASTEST)
+13    tag5
+14  tag1
+15  fn15(dT, ORDER_ROBOT_CAPTURE, INSERT_ORDER_REPLACE, ...)
+```
+
+*Guess*, and only this much: a comparison is an `if`, tag 1 its end, and tag 5
+a return — which is what "always last inside a block" would mean. The
+bracketing itself is measured; the words for it are not.
 
 ## What is not read here
 
 - **What the 57 functions compute**, and what the six fixed-arity opcodes do.
   The shapes are settled; the meanings are the months-long half, and they are
   gameplay rather than format.
-- **What the seven `head[3]` tags do**, now that their arity and their
-  writing are read. Tag 1 alone accounts for 944 nodes.
+- **What tags 2, 3, 4 and 5 do.** Tag 1 is the block end and tag 5 sits
+  always last inside a block; the other three are open.
 - **The flag bit on 55 literals** (`0x8000_0000`), and the two sentinel
   values `4094` and `65534`.
 - **`.trf`**, the research tree — identified above, not read.
