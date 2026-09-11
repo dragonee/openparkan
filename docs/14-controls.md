@@ -140,7 +140,7 @@ The commands:
 and the classes, which are plain ids rather than bits: `CICLS_TURRET` 1,
 `MULTIGUN` 2, `SIMPLE` 3, `CAMERA` 4, `ENGINE` 5, `RADAR` 8, `FIGHTSHIELD` 9,
 `DETECTSHIELD` 10, `ELEVATOR` 11, `DOOR` 12, `COMPUTER` 13, `REPAIRSYS` 15,
-`POWERSTOR` 19. 6, 7, 14 and 16–18 name nothing — though five of those six have shipped models named `i_cNN` after the class id, so the classes exist and only their names are missing here; see [18-vocabulary.md](18-vocabulary.md). `CICLS_UNKNOWN` is not in the
+`POWERSTOR` 19. 6, 7, 14 and 16–18 name nothing. `CICLS_UNKNOWN` is not in the
 chain at all, so it is whatever the resolver returns for a name it does not
 know: **0**.
 

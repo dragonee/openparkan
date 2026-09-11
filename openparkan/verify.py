@@ -3912,15 +3912,45 @@ def check_vocabulary(check, game: Path) -> None:
           f"name the assembly gives each -- the two that differ are A_L_05, a "
           f"creature, and R_B_06")
 
-    numbered = sorted({int(m.group(1)) for n in names
-                       if (m := re.match(r"i_c(\d\d)_", n))})
-    named = set(controls.CICLS.values())
-    check("vocabulary: the i_cNN models are indexed by component class",
-          numbered and set(numbered) - named,
-          f"{len(numbered)} i_cNN families, {numbered[0]}..{numbered[-1]}; "
-          f"{len(named & set(numbered))} of the {len(named)} classes the engine "
-          f"names have one, and {sorted(set(numbered) - named)} have a model "
-          f"where the resolver names no class")
+    def _parents(parts):
+        out, stack = {}, []
+        for i, part in enumerate(parts):
+            while stack and stack[-1][1] == 0:
+                stack.pop()
+            out[i] = stack[-1][0] if stack else -1
+            if stack:
+                stack[-1][1] -= 1
+            stack.append([i, part.child_count])
+        return out
+
+    clips = matched = orphans = 0
+    kinds = Counter()
+    for path in sorted((game / "UNITS").rglob("*.dat")):
+        try:
+            unit = objects.load_unit(path)
+        except (objects.ObjectFormatError, ValueError, OSError):
+            continue
+        owner = _parents(unit.components)
+        for i, part in enumerate(unit.components):
+            clip = re.match(r"i_c(\d\d)_([a-z])_", part.ref.member or "")
+            if not clip:
+                continue
+            clips += 1
+            at = owner[i]
+            gun = re.match(r"e_gun_([a-z])([a-z])_(\d\d)$",
+                           unit.components[at].ref.member or "") if at >= 0 else None
+            if not gun:
+                orphans += 1
+                continue
+            matched += (gun.group(3) == clip.group(1)
+                        and gun.group(1) == clip.group(2))
+            kinds[gun.group(2)] += 1
+    check("vocabulary: a clip's number and size name the gun it feeds",
+          clips and matched == clips and not orphans,
+          f"{matched}/{clips} i_cNN clips hang off an e_gun_<size><kind>_NN with "
+          f"the same number and size, none orphaned -- so NN is a weapon type, "
+          f"not a component class; the kind letter splits "
+          + ", ".join(f"{k}:{v}" for k, v in sorted(kinds.items())))
 
     shared = defaultdict(set)
     for name in names:
@@ -3931,7 +3961,7 @@ def check_vocabulary(check, game: Path) -> None:
     check("vocabulary: two building sets cover the same list of functions",
           len(both) >= 8,
           f"bu_ and fr_ both supply {len(both)} of the same suffixes -- "
-          + ", ".join(sorted(k.split('_', 1)[-1] for k in both)[:6]) + ", ...")
+          + ", ".join(sorted({k.rsplit('_', 1)[-1] for k in both})[:7]) + ", ...")
 
     ordinals = []
     for path in save.saves(game):

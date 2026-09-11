@@ -72,40 +72,42 @@ The first five rows are not guesses at all: the `.dat` assemblies pair each
 member with the display name the game's UI shows, which
 [07-objects.md](07-objects.md) already uses.
 
-## `i_cNN` is indexed by component class — *measured*
+## `i_cNN` is ammunition, and `NN` names the weapon — *measured*
 
-Seventeen families are named `i_c01` … `i_c18`, and the numbers are the
-engine's **`CICLS_` component class ids**, the same ones `World3D.dll`'s
-resolver hands out for the `.tbl` control tables
-([14-controls.md](14-controls.md)):
+Sixty-four members are named `i_c01` … `i_c18`. An earlier draft of this note
+read the number as the engine's **`CICLS_` component class id**, because the
+range lines up and `World3D.dll`'s resolver leaves 6, 7, 14 and 16–18
+unnamed. **That was wrong**, and the assemblies say so plainly: every one of
+these members is an *ammunition clip*, class 5 in the `.dat` taxonomy, with
+labels like `Clip 75mm ammo` and `Winged pack I`. `i_c08` is a howitzer clip,
+not a `CICLS_RADAR`. Two small sequential numbers happened to overlap.
 
-| id | class | model |
-|---:|---|---|
-| 1 | `CICLS_TURRET` | `i_c01` |
-| 2 | `CICLS_MULTIGUN` | `i_c02` |
-| 3 | `CICLS_SIMPLE` | `i_c03` |
-| 4 | `CICLS_CAMERA` | `i_c04` |
-| 5 | `CICLS_ENGINE` | `i_c05` |
-| **6** | *the resolver names none* | `i_c06` |
-| **7** | *the resolver names none* | `i_c07` |
-| 8 | `CICLS_RADAR` | `i_c08` |
-| 9 | `CICLS_FIGHTSHIELD` | `i_c09` |
-| 10 | `CICLS_DETECTSHIELD` | `i_c10` |
-| 11 | `CICLS_ELEVATOR` | `i_c11` |
-| 12 | `CICLS_DOOR` | `i_c12` |
-| 13 | `CICLS_COMPUTER` | `i_c13` |
-| **14** | *the resolver names none* | `i_c14` |
-| 15 | `CICLS_REPAIRSYS` | `i_c15` |
-| **17**, **18** | *the resolver names none* | `i_c17`, `i_c18` |
-| 19 | `CICLS_POWERSTOR` | — (it is `i_pws_*`) |
+What the number really is falls out of the assembly tree. A `.dat` is written
+depth first, so a clip's parent is the gun it belongs to, and:
 
-That closes half of an open question. 14-controls.md recorded that
-**6, 7, 14 and 16–18 name nothing** in the resolver chain; five of those six
-have shipped models, so the classes exist in the engine and only their *names*
-are missing from the text layer. **16 has neither a name nor a model.**
+```
+e_gun_<size><kind>_<NN>      the gun
+i_c<NN>_<size>_<index>       its ammunition
+```
 
-*Unknown*: what classes 6, 7, 14, 17 and 18 do. Nothing in the shipped text
-names them and the models alone do not say.
+**All 588 clips in the shipped assemblies hang off a gun, and all 588 match
+that gun on both the number and the size letter.** No exceptions. So `NN` is a
+**weapon-type id**, shared by a gun and the clips that feed it, and the pair
+(size, `NN`) identifies the weapon: `i_c05_b_*` is 80mm ammunition for
+`e_gun_bc_05` while `i_c05_l_*` is a missile pack for `e_gun_ll_05`.
+
+The gun's second letter is its kind, and it splits cleanly — **measured**:
+
+| letter | feeds | count |
+|---|---|---:|
+| `c` | shells and ammunition clips | 299 |
+| `l` | rockets, missiles and winged packs | 289 |
+
+*Guess*: `c` for cannon, `l` for launcher.
+
+Fourteen `i_cNN` members are in `objects.rlb` but in no assembly, among them
+every `i_c06_l_*` and `i_c07_l_*`. *Unknown* whether they are cut content or
+fitted by something other than a `.dat`.
 
 ## Two building sets — *measured*
 

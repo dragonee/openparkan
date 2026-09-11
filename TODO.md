@@ -885,11 +885,14 @@ today; each is a small trap for anyone extending the code.
   carrying the top bit. `head[3]` runs 0..6, the opcode's own range. The
   trailer is −1 on 4686 of 6065. And what the seven opcodes *compute* is the
   months-long half. → [docs/15-behaviour.md](docs/15-behaviour.md)
-- **Component classes 6, 7, 14, 17 and 18.** They have shipped models named
-  `i_cNN` after the class id but the engine's resolver names none of them, so
-  the classes exist and only their names are missing from the text layer. 16
-  has neither a name nor a model. What any of them *does* is open.
-  → [docs/18-vocabulary.md](docs/18-vocabulary.md)
+- **Component classes 6, 7, 14 and 16-18**, which `World3D.dll`'s resolver
+  leaves unnamed. A first pass thought the `i_cNN` models were named after
+  them; they are not, they are ammunition named after the weapon
+  ([18-vocabulary.md](docs/18-vocabulary.md)), so those six classes have no
+  evidence of any kind attached to them yet.
+- **Fourteen `i_cNN` clips that no assembly fits**, among them every
+  `i_c06_l_*` and `i_c07_l_*`. Cut content, or fitted by something other than
+  a `.dat`. → [docs/18-vocabulary.md](docs/18-vocabulary.md)
 - **The three int32 that end a save's member record.** `+72` counts along a
   group of parts but runs down as often as up, so it is not a slot number;
   `+64` is not the component class (tested, and it disagrees on 953 of 957);
