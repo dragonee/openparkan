@@ -37,6 +37,7 @@ practice — format facts yes, code no — is set out in
 | **Behaviour scripts** | structure done — all 58 `.scr` end to end, 677 handlers and 6065 nodes, and `varset.var`'s 231 declarations, against which every one of the 9239 operands resolves by name; the nine universal event handlers, the 14 AI problems and their `Start`/`Continue` pairing, and which node slot reads and which writes. What a node *does* is not read |
 | **Parts database** | done — `objects.dlb`, all 395 `DSCR` entries: the classification, the short code and display name, the stat panel rows, and the four costs that name the research tree's floats |
 | **Research tree** | done — all 29 `.trf`, 368 items each with names, codes, categories and both edge lists; the prerequisite graph, its research-centre spine, and the per-mission rewiring |
+| **Resource bindings** | done — the `desc = "resource"` descriptor, 132 objects across 32 `.cfg` files binding 751 names into seven libraries, all resolving; and `TextRes.dll`'s string table, the game's own 173 lines of dialogue, read without a PE dependency |
 | **Save games** | partial — the `SLOT` header on all 6, the mission, map and research trees they name, and 1154 of 1158 archive-member references resolving; the object graph itself is a raw heap dump and is not decoded |
 | **Behaviour scripts, semantics** | partial — every field of a node now has a role: a call selecting one of 57 functions with a fixed signature, or a tagged operation with its own arity, assigning from a variable or a number. What the functions, opcodes and tags *compute* is not started |
 
@@ -201,6 +202,7 @@ of fields carried through the readers without being understood.
 - [17-saves.md](docs/17-saves.md) — what a `.sav` refers to
 - [18-vocabulary.md](docs/18-vocabulary.md) — the object naming scheme, and what is guesswork
 - [19-descriptions.md](docs/19-descriptions.md) — `objects.dlb`, the parts database
+- [20-resources.md](docs/20-resources.md) — the `.cfg` resource descriptor and `TextRes.dll`
 
 ## Layout
 
@@ -220,6 +222,7 @@ openparkan/
   behaviour.py  .scr mission AI scripts, varset.var, and a pseudo-code view
   research.py   .trf research tree
   descriptions.py objects.dlb parts database
+  resources.py  .cfg resource descriptors and the PE string table
   save.py       SAVE/*.sav headers and references
   viewer.py     self-contained HTML viewer generator
   verify.py     the checks quoted above

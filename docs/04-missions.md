@@ -167,6 +167,14 @@ end
 CRLF, tab-separated, `#` comments. One shipped comment is a gift:
 *"Names of properties are unimportant, but object names are."*
 
+Some of its objects are not free-form at all. An object whose `desc` is
+`"resource"` is a **resource descriptor** — a library, a type, and a list of
+names bound to its members — and it is the same object in the same syntax that
+`ui/*.cfg` and `DATA/TextRes.cfg` use. A mission carries between three and
+five of them: its minimap, its ambient theme and variations, and, for a
+campaign mission, its briefing and tutorial voices.
+→ [20-resources.md](20-resources.md)
+
 ## Mistips.mis — briefing markup
 
 ```

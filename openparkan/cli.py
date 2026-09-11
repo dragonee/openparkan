@@ -17,6 +17,7 @@ from . import (
     landmesh,
     mission,
     research,
+    resources,
     rsli,
     save,
     sky,
@@ -487,6 +488,35 @@ def _top_names(objs, limit: int = 4) -> str:
     return ", ".join(f"{n}x{c}" if c > 1 else n for n, c in names.most_common(limit))
 
 
+def cmd_resources(args, game: Path) -> int:
+    """List every resource descriptor, or print the text one library holds."""
+    if args.text is not None:
+        texts = resources.TextResources.open(game)
+        pattern = args.text.lower()
+        hits = [(n, i) for n, i in sorted(texts.names.items(), key=lambda kv: kv[1])
+                if pattern in n.lower()]
+        print(f"# {len(hits)} of {len(texts.names)} names match {args.text!r}")
+        for name, ident in hits:
+            body = (texts.table.get(ident) or "").replace("\n", " ")
+            print(f"  {name:<14} {ident:>4}  {body}")
+        return 0
+
+    total = bound = 0
+    print("# file                                        role              "
+          "library              type       names")
+    for path in sorted(game.rglob("*.cfg")):
+        for d in resources.descriptors(path):
+            total += 1
+            library = resources.locate(game, d.library)
+            where = library.name if library else f"MISSING {d.library}"
+            bound += len(d)
+            rel = path.relative_to(game).as_posix()
+            print(f"  {rel:<44} {d.role:<17} {where:<20} "
+                  f"{d.kind:<10} {len(d):>4}")
+    print(f"\n  {total} descriptors binding {bound} names")
+    return 0
+
+
 def cmd_research(args, game: Path) -> int:
     """The research tree: what unlocks what."""
     paths = research.trees(game)
@@ -707,6 +737,12 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("script", nargs="?", help="a .scr name; default is a listing")
     p.add_argument("handler", nargs="?", help="one handler; default is all of them")
     p.set_defaults(fn=cmd_behaviour)
+
+    p = sub.add_parser(
+        "resources", help="the .cfg resource descriptors, and the text they reach")
+    p.add_argument("--text", metavar="PATTERN",
+                   help="print the game's own text whose name contains PATTERN")
+    p.set_defaults(fn=cmd_resources)
 
     p = sub.add_parser("saves", help="what each save game is, and what it refers to")
     p.add_argument("--members", action="store_true",

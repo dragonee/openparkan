@@ -30,6 +30,7 @@ from . import (
     mission,
     objects,
     research,
+    resources,
     rsli,
     save,
     sky,
@@ -4228,6 +4229,93 @@ def check_descriptions(check, game: Path) -> None:
           f"other {len(parts) - len(free)} must be paid for")
 
 
+def check_resources(check, game: Path) -> None:
+    """The .cfg resource descriptors, and the text library one of them names."""
+    found: list[tuple[Path, resources.Descriptor]] = []
+    for path in sorted(game.rglob("*.cfg")):
+        for d in resources.descriptors(path):
+            found.append((path, d))
+    if not found:
+        return
+
+    libraries = 0
+    by_name = by_index = unresolved = 0
+    archives: dict[str, tuple[set[str], int]] = {}
+    for _, d in found:
+        library = resources.locate(game, d.library)
+        if library is None:
+            # Its bindings cannot resolve either, and saying so keeps the two
+            # checks below from passing on a shrunken population.
+            unresolved += len(d)
+            by_name += len(d)
+            continue
+        libraries += 1
+        key = str(library)
+        if key not in archives:
+            if library.suffix.lower() == ".dll":
+                ids = set(resources.strings(library.read_bytes()))
+                archives[key] = ({str(i) for i in ids}, -1)
+            else:
+                opened = (rsli.RsLiArchive.open(library) if rsli.is_rsli(library)
+                          else NResArchive.open(library))
+                names = {e.name.lower() for e in opened.entries}
+                archives[key] = (names, len(opened.entries))
+        members, count = archives[key]
+        for value in d.bindings.values():
+            if value.lstrip("-").isdigit():
+                by_index += 1
+                ok = value in members if count < 0 else 0 <= int(value) < count
+            else:
+                by_name += 1
+                ok = (value.lower() in members
+                      or value.rsplit(".", 1)[0].lower() in members)
+            unresolved += not ok
+    check("resources: every descriptor's library exists",
+          libraries == len(found) == resources.DESCRIPTORS,
+          f"{libraries}/{len(found)} descriptor objects in "
+          f"{len({str(p) for p, _ in found})} .cfg files name a library that is "
+          f"in the installation")
+    check("resources: every name a descriptor binds resolves",
+          unresolved == 0 and by_name + by_index == resources.BINDINGS,
+          f"{by_name + by_index - unresolved}/{by_name + by_index} bindings "
+          f"reach a member -- {by_name} by name, {by_index} by index")
+
+    shapes = sum(d.libtype == resources.LIBTYPE and d.type in resources.TYPES
+                 for _, d in found)
+    check("resources: a descriptor's shape is uniform",
+          shapes == len(found),
+          f"{shapes}/{len(found)} are libtype {resources.LIBTYPE!r} with a type "
+          f"in {sorted(resources.TYPES)}; 3 is never used")
+
+    music = {d.role for _, d in found if d.type == 5}
+    sounds = {resources.locate(game, d.library).name.lower()
+              for _, d in found if d.type in (4, 5)
+              and resources.locate(game, d.library)}
+    check("resources: type 5 is the looping theme and nothing else",
+          music == {resources.MUSIC_ROLE} and sounds <= {"sounds.lib", "voices.lib"},
+          f"all {sum(d.type == 5 for _, d in found)} type-5 descriptors are "
+          f"{resources.MUSIC_ROLE}, and types 4 and 5 together name only "
+          f"{', '.join(sorted(sounds))}")
+
+    index = game.joinpath(*resources.TEXT_INDEX)
+    if not index.exists():
+        return
+    texts = resources.TextResources.open(game)
+    named = {i for i in texts.names.values() if i in texts.table}
+    check("resources: the text table and its index are the same set",
+          len(texts.names) == len(texts.table) == len(named) == resources.TEXTS,
+          f"{len(texts.names)} names in {index.name} and {len(texts.table)} "
+          f"strings in the DLL, every name resolving and every string named")
+
+    empty = sum(not t.strip() for t in texts.table.values())
+    high = [t for t in texts.table.values() if any(ord(c) > 127 for c in t)]
+    check("resources: the strings are text",
+          empty == 0 and len(high) <= 3,
+          f"{len(texts.table)} strings, none blank, {len(high)} carrying a "
+          f"character above U+007F -- the English build, with a Cyrillic A left "
+          f"inside one name")
+
+
 def run(game: Path) -> int:
     """Run every check against ``game``.  Returns a process exit code."""
     results: list[tuple[str, bool, str]] = []
@@ -4244,7 +4332,7 @@ def run(game: Path) -> int:
         check_grid, check_missions, check_objects, check_poses, check_lod, check_damage,
         check_effects, check_footprints, check_rsli, check_control, check_controls,
         check_behaviour, check_research, check_descriptions, check_saves,
-        check_vocabulary,
+        check_vocabulary, check_resources,
     )
     for fn in checks:
         fn(check, game)
