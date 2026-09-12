@@ -4073,6 +4073,44 @@ def check_saves(check, game: Path) -> None:
           f"names {narrow_hits} on any of them -- so they are two records, "
           f"not one field written loosely")
 
+    wide_gaps, narrow_gaps = [], []
+    for path in save.saves(game):
+        s = save.read(path)
+        for width, bucket in ((save.MEMBER_AT[1], wide_gaps),
+                              (save.MEMBER_AT[0], narrow_gaps)):
+            offsets = sorted(r.offset for r in s.references if r.field == width)
+            bucket.extend(b - a for a, b in zip(offsets, offsets[1:], strict=False))
+    near = [gap for gap in wide_gaps if gap < 500]
+    sized = [gap for gap in near
+             if gap >= save.WORLD_RECORD and (gap - save.WORLD_RECORD) % save.WORLD_STEP == 0]
+    exact = sum(1 for gap in narrow_gaps if gap == save.PART_RECORD)
+    check("saves: each record has a size, and the two differ",
+          near and len(sized) == len(near) and exact >= len(narrow_gaps) * 0.6,
+          f"{len(sized)}/{len(near)} consecutive world records sit "
+          f"{save.WORLD_RECORD} bytes apart plus a multiple of {save.WORLD_STEP}, "
+          f"and {exact}/{len(narrow_gaps)} part records exactly "
+          f"{save.PART_RECORD}")
+
+    placed_hits = placed_total = 0
+    for path in save.saves(game):
+        s = save.read(path)
+        tma = game / s.mission / "data.tma"
+        if not tma.exists():
+            continue
+        blob = path.read_bytes()
+        where = [o.position for o in mission.load(tma).objects]
+        placed_total += len(where)
+        for off in range(0, len(blob) - 12, 4):
+            point = struct.unpack_from("<3f", blob, off)
+            if any(abs(point[0] - x) < 0.5 and abs(point[1] - y) < 0.5
+                   and abs(point[2] - z) < 0.5 for x, y, z in where):
+                placed_hits += 1
+    check("saves: a save does not store where the world stands",
+          placed_total and placed_hits < placed_total * 0.25,
+          f"{placed_hits} float32 triples in all six saves match any of the "
+          f"{placed_total} positions their missions place -- chance, so "
+          f"placement is not kept as a triple in the mission's frame")
+
     index = save.slots(game)
     filled = [x for x in index if not x.empty]
     present = {p.name.lower() for p in paths}

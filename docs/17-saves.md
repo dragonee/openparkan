@@ -87,6 +87,37 @@ names a research part id where a member belongs.
 
 So the member field holds an archive member, always.
 
+## The two records have sizes
+
+Both records repeat at a measurable stride, and the strides differ — which is
+the strongest evidence yet that they are two kinds of thing.
+
+**The part record is 76 bytes.** 812 of the 1152 gaps between consecutive
+narrow records are exactly that, the two-string record
+[18-vocabulary.md](18-vocabulary.md) already measures fields in. The rest are
+88, 112 and larger, which is what runs separated by their owner's own data
+look like.
+
+**The world record is 450 bytes plus a multiple of 8.** Every one of the 82
+gaps below 500 bytes between wide records is 450, 458, 466 or 474 — 82 of 82,
+no other value — so a world object has a fixed part and a short variable one.
+What the 8-byte step counts is open; a list of attached parts is the obvious
+guess and nothing here tests it.
+
+## What a save does not contain
+
+**Where anything stands.** Searching an entire save on four-byte alignment for
+a `float32` triple matching any position its mission places finds **1 of 22**
+on `slot3` and **4 of 27** on `slot4` — chance, against the 96 plausible
+triples a file that size holds. No axis order and no sign flip does better,
+and `float64` finds none at all. Ten such matches across all six saves against
+123 placed positions.
+
+So a save is not a snapshot of the world's geometry. Either placement is kept
+in a form unlike the mission's, or the save is a delta over the mission it
+names and the untouched scenery is simply reloaded. This is the first thing
+anyone decoding the graph will try, so it is written down as tried.
+
 ## `saveslots.cfg`
 
 Plain text in the engine's `OBJECT` / `END` form, tab-separated:

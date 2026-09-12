@@ -27,6 +27,20 @@ says so where it does: a reference is an archive name followed 32 bytes later
 by a member name, which is the shape of the engine's two-string record.  That
 is a heuristic with a good hit rate, not a decode.  See ``docs/17-saves.md``.
 
+The two records have sizes, and they are different sizes.  **Of the 1152 gaps
+between consecutive narrow records, 812 are exactly 76 bytes** -- the
+two-string record already known.  **Of the 82 gaps below 500 between wide
+records, all 82 are 450, 458, 466 or 474**: a 450-byte base plus a multiple of
+8, so a world object carries a short variable part as well as a fixed one.
+
+What a world object does *not* carry is its position.  Searching a whole save
+on four-byte alignment for a ``float32`` triple matching any position the
+mission places finds **1 of 22** on one save and **4 of 27** on another --
+chance, against the 96 plausible triples such a file holds -- and no axis
+order or sign flip does better, nor does ``float64``.  So a save is not a
+snapshot of where everything stands; whatever it keeps about placement is in
+some other form.
+
 **The pair is written two ways**, and reading only one of them hid a fifth of
 the references.  The archive name is followed by the member name at 32 bytes
 in the common record and at **128** in a second one.  A scan that looks only
@@ -70,6 +84,17 @@ MAX_PATH = 260
 #: that knows only the first does not report those as unresolved, it never
 #: sees them at all.  184 of the 186 candidates at 128 name a real member.
 MEMBER_AT = (32, 128)
+
+#: The narrow record's own length.  812 of the 1152 gaps between consecutive
+#: narrow records are exactly this, which is the 76-byte two-string record
+#: `18-vocabulary.md` measures fields in.
+PART_RECORD = 76
+
+#: The wide record's.  Every one of the 82 gaps below 500 bytes is 450, 458,
+#: 466 or 474 -- this base plus a multiple of ``WORLD_STEP`` -- so the record
+#: has a fixed part and a short variable one.  What the step counts is open.
+WORLD_RECORD = 450
+WORLD_STEP = 8
 
 #: Archives a save is known to name.
 ARCHIVES = ("objects.rlb", "effects.rlb")
