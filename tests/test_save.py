@@ -20,10 +20,14 @@ def build_save(mission="missions/campaign/campaign.01/mission.01/",
     return bytes(out + body)
 
 
-def record(archive: str, member: str) -> bytes:
-    """The engine's two-string record: a 32-byte field, then another."""
-    return (archive.encode() + b"\0").ljust(save.MEMBER_AT, b"\0") + \
-           (member.encode() + b"\0").ljust(save.MEMBER_AT, b"\0")
+def record(archive: str, member: str, width: int = save.MEMBER_AT[0]) -> bytes:
+    """The engine's two-string record: an archive field, then a member one.
+
+    ``width`` is how much the archive name gets -- the engine writes both 32
+    and 128, and a reader that knows only one silently drops the other.
+    """
+    return (archive.encode() + b"\0").ljust(width, b"\0") + \
+           (member.encode() + b"\0").ljust(32, b"\0")
 
 
 def test_a_save_reads_its_header():
@@ -126,3 +130,20 @@ def test_the_slot_index_reads(tmp_path):
     assert got[0].filename == "slot1.sav"
     assert not got[0].empty
     assert got[1].empty
+
+
+def test_the_wide_record_is_found_too():
+    body = record("objects.rlb", "fr_l_gener", width=save.MEMBER_AT[1])
+    s = save.parse(build_save(body=body))
+    assert [(r.member, r.field) for r in s.references] == [("fr_l_gener", 128)]
+
+
+def test_a_member_name_is_never_read_out_of_another_archive_name():
+    """Landing 128 bytes on can fall inside a neighbouring archive name."""
+    body = record("objects.rlb", "i_arm_b_05") \
+        + record("objects.rlb", "i_arm_b_06") \
+        + record("objects.rlb", "i_arm_b_07")
+    s = save.parse(build_save(body=body))
+    assert all(r.member != "rlb" for r in s.references)
+    assert {r.member for r in s.references} == {
+        "i_arm_b_05", "i_arm_b_06", "i_arm_b_07"}

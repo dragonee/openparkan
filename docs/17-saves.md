@@ -60,17 +60,32 @@ fields, the archive then the member:
 +32   i_arm_b_05\0    ...pointer junk...
 ```
 
-Scanning for that shape — an archive name with a member name 32 bytes after it
-— recovers **1158 references across the six saves, and 1154 of them resolve**
-into the archive they name. This is a **scan, not a parse**, and the reader
-says so; a good hit rate against real data is what it has instead of a decode.
+**The pair is written two ways**, and an earlier draft of this section knew
+only one of them. The member name sits 32 bytes after the archive name in the
+common record and **128** in a second one. A scan that looks only at 32 does
+not report the others as unresolved — it never counts them — so its hit rate
+flattered its coverage by about a fifth.
 
-The four that do not resolve are not failures of the scan. They pair
-`objects.rlb` with `R_L_03`, `R_L_04` and `R_L_05`, which are not members of it
-— they are part ids from the research tree's `TRF6`, and the save stores one
-beside a display name (`Small Track Chs (S-42t)`). So the member field holds
-either an archive member or a research part id, and nothing in the record
-distinguishes them.
+Scanning for both shapes recovers **1342 references across the six saves, and
+all 1342 resolve** into the archive they name. This is still a **scan, not a
+parse**, and the reader says so; a perfect hit rate against real data is what
+it has instead of a decode.
+
+The two records are not one field written loosely. The wide one names objects
+the mission itself places — 7, 8, 8, 3 and 8 of them on five of the six saves
+— and **the narrow one names none, on any save**. So the wide record is a
+placed world object and the narrow one is something else, most likely the
+parts a machine is assembled from.
+
+An earlier draft also explained four references that "do not resolve": they
+paired `objects.rlb` with `R_L_03`, `R_L_04` and `R_L_05`, and were read as
+part ids from the research tree's `TRF6` rather than archive members. **That
+was a case-sensitivity bug and the explanation was invented to fit it.**
+`objects.rlb` holds those members as `r_l_03`, `r_l_04` and `r_l_05`, and the
+game's own lookup folds case — `NResArchive.find` says so. Nothing in a save
+names a research part id where a member belongs.
+
+So the member field holds an archive member, always.
 
 ## `saveslots.cfg`
 

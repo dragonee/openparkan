@@ -27,6 +27,14 @@ says so where it does: a reference is an archive name followed 32 bytes later
 by a member name, which is the shape of the engine's two-string record.  That
 is a heuristic with a good hit rate, not a decode.  See ``docs/17-saves.md``.
 
+**The pair is written two ways**, and reading only one of them hid a fifth of
+the references.  The archive name is followed by the member name at 32 bytes
+in the common record and at **128** in a second one.  A scan that looks only
+at 32 does not report the others as unresolved -- it never counts them -- so
+its hit rate flatters its coverage.  The wide record's names overlap what the
+mission itself places and the narrow record's never do, on every save carrying
+both, so they are two record types rather than one field written loosely.
+
 Everything above is re-derived by ``uv run openparkan verify``.
 """
 
@@ -57,13 +65,20 @@ MAX_PATH = 260
 
 #: In the engine's two-string record the member name sits this far after the
 #: archive name.  Both are 32-byte fields.
-MEMBER_AT = 32
+#: The engine writes the pair two ways.  A 32-byte archive field is the
+#: common one, and **a second record gives the archive 128 bytes**; a scan
+#: that knows only the first does not report those as unresolved, it never
+#: sees them at all.  184 of the 186 candidates at 128 name a real member.
+MEMBER_AT = (32, 128)
 
 #: Archives a save is known to name.
 ARCHIVES = ("objects.rlb", "effects.rlb")
 
 _ARCHIVE = re.compile(rb"(" + rb"|".join(a.encode() for a in ARCHIVES) + rb")\x00")
-_MEMBER = re.compile(rb"[A-Za-z_][A-Za-z0-9_.\-]{1,30}")
+#: A member name ends at a NUL.  The buffer after it is whatever was in
+#: the heap, so without the terminator the wide record matches garbage:
+#: 323 candidates instead of 186, and only 184 of them real either way.
+_MEMBER = re.compile(rb"[A-Za-z_][A-Za-z0-9_.\-]{1,30}\x00")
 _MAP = re.compile(rb"DATA\\MAPS\\([A-Za-z0-9_]{1,30})\\land", re.IGNORECASE)
 _TREE = re.compile(rb"MISSIONS\\SCRIPTS\\([A-Za-z0-9_]{1,30}\.trf)", re.IGNORECASE)
 
@@ -79,6 +94,11 @@ class Reference:
     archive: str
     member: str
     offset: int
+    #: How far the member name sat after the archive name -- one of
+    #: ``MEMBER_AT``.  The two are different records, not one written loosely:
+    #: the wide one carries names a mission also places, the narrow one does
+    #: not, on every save that has both.
+    field: int = 32
 
 
 @dataclass(frozen=True)
@@ -144,13 +164,21 @@ def parse(data: bytes, source: Path | None = None) -> Save:
             trees.append(name)
 
     references: list[Reference] = []
-    for match in _ARCHIVE.finditer(data):
-        at = match.start() + MEMBER_AT
-        member = _MEMBER.match(data, at)
-        if member:
-            references.append(
-                Reference(match.group(1).decode(), member.group().decode(), match.start())
-            )
+    occupied = list(_ARCHIVE.finditer(data))
+    for match in occupied:
+        for width in MEMBER_AT:
+            at = match.start() + width
+            # The wide offset can land inside a neighbouring ``objects.rlb``
+            # and report its ``rlb`` tail as a member.  A field never starts
+            # inside another archive name.
+            if any(a.start() <= at < a.end() for a in occupied):
+                continue
+            member = _MEMBER.match(data, at)
+            if member:
+                references.append(Reference(
+                    match.group(1).decode(),
+                    member.group().rstrip(b"\x00").decode(),
+                    match.start(), width))
 
     return Save(
         source=source or Path(where),

@@ -4041,14 +4041,37 @@ def check_saves(check, game: Path) -> None:
     for name in save.ARCHIVES:
         path = game / name
         if path.exists():
-            archives[name] = {e.name for e in NResArchive(path.read_bytes()).entries}
+            # Folded, because the game's own lookup is: see NResArchive.find.
+            archives[name] = {e.name.lower()
+                              for e in NResArchive(path.read_bytes()).entries}
     refs = [r for s in read for r in s.references]
     resolved = sum(1 for r in refs
-                   if r.archive in archives and r.member in archives[r.archive])
+                   if r.archive in archives and r.member.lower() in archives[r.archive])
+    widths = Counter(r.field for r in refs)
     check("saves: the members a save names are in the archives it names",
           refs and resolved >= len(refs) * 0.99,
-          f"{resolved}/{len(refs)} references resolve into {', '.join(sorted(archives))} "
-          f"-- the rest name a research-tree part id instead")
+          f"{resolved}/{len(refs)} references resolve into "
+          f"{', '.join(sorted(archives))}, counting both record widths -- "
+          + ", ".join(f"{n} at {w}" for w, n in sorted(widths.items())))
+
+    narrow_hits = wide_hits = 0
+    for path in save.saves(game):
+        s = save.read(path)
+        tma = game / s.mission / "data.tma"
+        if not tma.exists():
+            continue
+        placed = {o.path.replace("\\", "/").rsplit("/", 1)[-1].lower().removesuffix(".dat")
+                  for o in mission.load(tma).objects}
+        wide = {r.member.lower() for r in s.references if r.field == save.MEMBER_AT[1]}
+        narrow = {r.member.lower() for r in s.references if r.field == save.MEMBER_AT[0]}
+        narrow_hits += len(narrow & placed)
+        wide_hits += bool(wide & placed)
+    check("saves: the two record widths hold different populations",
+          narrow_hits == 0 and wide_hits >= 4,
+          f"the 128-byte record names objects the mission itself places on "
+          f"{wide_hits} of {len(save.saves(game))} saves; the 32-byte record "
+          f"names {narrow_hits} on any of them -- so they are two records, "
+          f"not one field written loosely")
 
     index = save.slots(game)
     filled = [x for x in index if not x.empty]
@@ -4150,18 +4173,20 @@ def check_vocabulary(check, game: Path) -> None:
           f"bu_ and fr_ both supply {len(both)} of the same suffixes -- "
           + ", ".join(sorted({k.rsplit('_', 1)[-1] for k in both})[:7]) + ", ...")
 
+    # The narrow record only: +72 is a field of that layout, and the wide
+    # record puts its member name at 128, so the offset means nothing there.
     ordinals = []
     for path in save.saves(game):
         blob = path.read_bytes()
         for ref in save.read(path).references:
-            if ref.offset + 76 <= len(blob):
+            if ref.field == save.MEMBER_AT[0] and ref.offset + 76 <= len(blob):
                 ordinals.append(struct.unpack_from("<i", blob, ref.offset + 72)[0])
     small = [v for v in ordinals if 0 < v <= 64]
     walk = sum(1 for a, b in zip(ordinals, ordinals[1:], strict=False)
                if abs(b - a) == 1)
     check("vocabulary: a member record ends in a small ordinal",
           ordinals and len(small) >= len(ordinals) * 0.9,
-          f"{len(small)}/{len(ordinals)} records hold 1..{max(small)} at +72 and "
+          f"{len(small)}/{len(ordinals)} narrow records hold 1..{max(small)} at +72 and "
           f"{walk}/{len(ordinals) - 1} adjacent records differ by exactly one -- "
           f"it counts along a group, but it runs down as often as up and its role "
           f"is not established")

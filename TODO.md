@@ -558,10 +558,14 @@ written down is a question nobody reopens.
       `DATA/MAPS` map and their research trees, and every one of those is
       installed. `slot4` names **four** trees, one per opposing clan plus the
       shared `data.trf`, which is what the per-mission `.trf` wiring is for.
-      A scan for the engine's two-string record recovers **1158 member
-      references, 1154 resolving** into the archive they name; the four that do
-      not are research-tree part ids (`R_L_04`) stored in the same field, which
-      is a finding rather than a miss.
+      A scan for the engine's two-string record recovers **1342 member
+      references and all 1342 resolve** into the archive they name. The pair is
+      written two ways -- the member 32 bytes after the archive name, or 128 --
+      and a scan that knew only the first never counted the other fifth. The
+      wide record names objects the mission itself places; the narrow one names
+      none on any save. An earlier note here read four "unresolved" references
+      as research part ids stored in the member field: that was a
+      case-sensitivity bug and the explanation was invented to fit it.
       → [docs/17-saves.md](docs/17-saves.md)
 
 - [x] **The parts database, and what the research tree's floats are.**

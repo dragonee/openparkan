@@ -133,7 +133,7 @@ followed by three `int32`. The strings are
 |---|---|---|
 | `+64` | 0 (567), 7 (245), 1 (94), −1 (91), 6, 3 | **unknown.** Not the component class: tested against the class id the assemblies give the same member and it disagrees on 953 of 957. Ammunition records carry 10 and 12 here where internals carry 0, which would suit a quantity, but that is one weak pattern and not evidence. |
 | `+68` | 0–7 mostly, with some values that are plainly uninitialised (`0x01010000`) | **unknown** |
-| `+72` | 1098 of 1158 hold 1…32; 919 of 1157 adjacent records differ by exactly one | counts along a group of parts. It **runs down as often as up** — `23, 17, 16, 15` in one save, `17, 20, 19, 18` in another — so the obvious reading, a slot number counting from 1, is wrong. **Role unknown.** |
+| `+72` | 1098 of the 1158 **narrow** records hold 1…32; 919 of 1157 adjacent records differ by exactly one. The offset is a field of that record only — the wide record puts its member name at 128 | counts along a group of parts. It **runs down as often as up** — `23, 17, 16, 15` in one save, `17, 20, 19, 18` in another — so the obvious reading, a slot number counting from 1, is wrong. **Role unknown.** |
 
 ## A negative result worth recording
 
