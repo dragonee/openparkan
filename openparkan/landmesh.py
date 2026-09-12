@@ -53,9 +53,9 @@ FACE, as 14 little-endian uint16::
     10  face normal x, int16 over 32767
     11  face normal y
     12  face normal z
-    13  0..62, ~57 distinct values.  Not a spatial patch: a value's faces
-         span the whole map, indistinguishable from a random subset of the
-         same size.  Not a material key either.  Unresolved.
+    13  three 2-bit codes, one per edge: which edge of the face across
+         that edge is the shared one, or 3 where there is no neighbour.
+         This is the mesh's winged-edge link -- see EDGE_TWIN_BITS
 
 See ``docs/03-terrain.md`` for how each of these was established.
 """
@@ -144,6 +144,23 @@ FLAGS_WATER = 1544
 #: units, which is how ``u == x / 50`` comes out as ``u16 == x * 5.12``.
 UV_FIXED_POINT_SCALE = 256.0
 
+#: Field 13 is three 2-bit codes packed low to high, one per edge.  Edge `e`
+#: of a face reads `(field13 >> 2 * e) & 3`, and the code is **the index of
+#: the matching edge back in the neighbouring face** -- so a walker crossing
+#: an edge arrives knowing which edge it came in by, without searching the
+#: neighbour's three.  It holds on **817150 of 817150** shared edges across the
+#: 33 maps.  `EDGE_NONE` is the code where there is no neighbour, and it agrees
+#: with the adjacency field on all **827646** edge slots.
+#:
+#: That is a winged-edge structure, and the engine names it: `Terrain.dll`
+#: carries `CTerrain::FindFaceInWing`.  The field's range of 0..62 is the
+#: giveaway -- 63 would be a face with all three edges free, and no map has
+#: one.  Earlier notes read the packed byte as a single number and looked for
+#: spatial structure in it, which there is none of.
+EDGE_TWIN_BITS = 2
+#: The per-edge code for an edge with no face across it.
+EDGE_NONE = 3
+
 #: A face's own normal is int16 over this, the same scale a mesh pose key uses
 #: for its quaternion.
 NORMAL_SCALE = 32767.0
@@ -223,6 +240,16 @@ class LandMesh:
         ys = [p[1] for p in self.positions]
         zs = [p[2] for p in self.positions]
         return (min(xs), min(ys), min(zs)), (max(xs), max(ys), max(zs))
+
+    def edge_twin(self, face: int, edge: int) -> int | None:
+        """Which edge of the neighbour across ``edge`` is the shared one.
+
+        ``None`` where the edge has no neighbour.  This is field 13 unpacked;
+        it saves a walker searching the neighbour's three edges for the one it
+        came in by.
+        """
+        code = (self.face_patch[face] >> (EDGE_TWIN_BITS * edge)) & 3
+        return None if code == EDGE_NONE else code
 
     @property
     def marks_lava(self) -> bool:

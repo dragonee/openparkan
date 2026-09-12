@@ -44,3 +44,17 @@ def test_a_map_that_never_sets_the_bit_has_no_lava():
     mesh = build([0x00, 0x02, 0x00])
     assert not mesh.marks_lava
     assert not any(mesh.is_lava(i) for i in range(3))
+
+
+def test_field_13_unpacks_as_three_edge_codes():
+    """Low to high: edge 0 in bits 0-1, edge 1 in 2-3, edge 2 in 4-5."""
+    mesh = build([0x10])
+    # edge 0 -> 1, edge 1 -> 2, edge 2 -> 0
+    mesh.face_patch[0] = 1 | (2 << 2) | (0 << 4)
+    assert [mesh.edge_twin(0, e) for e in range(3)] == [1, 2, 0]
+
+
+def test_a_free_edge_has_no_twin():
+    mesh = build([0x10])
+    mesh.face_patch[0] = landmesh.EDGE_NONE | (1 << 2) | (landmesh.EDGE_NONE << 4)
+    assert [mesh.edge_twin(0, e) for e in range(3)] == [None, 1, None]

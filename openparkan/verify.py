@@ -217,6 +217,29 @@ def check_terrain(check, game: Path) -> None:
             exact += lava == {i for i in range(len(mesh.faces)) if mesh.is_lava(i)}
         else:
             unused += 1 if not lava else 0
+    # Field 13 is the mesh's winged-edge link: three 2-bit codes, one per edge,
+    # naming the matching edge back in the neighbour.  Read as one number it
+    # looks like a meaningless 0..62 with no spatial structure, which is what
+    # earlier notes concluded.
+    twins = slots = mutual = free_ok = 0
+    for folder in maps:
+        mesh = landmesh.load(folder / "Land.msh")
+        for i, adj in enumerate(mesh.adjacency):
+            for e in range(3):
+                slots += 1
+                back = mesh.edge_twin(i, e)
+                free_ok += (back is None) == (adj[e] == 0xFFFF)
+                if back is None:
+                    continue
+                twins += 1
+                mutual += mesh.adjacency[adj[e]][back] == i
+    check("Land.msh: field 13 is the winged-edge link",
+          mutual == twins and free_ok == slots,
+          f"each edge's 2-bit code names the matching edge back in its "
+          f"neighbour on {mutual}/{twins} shared edges, and marks no-neighbour "
+          f"on all {free_ok}/{slots} edge slots.  63 -- all three edges free -- "
+          f"is why the field stops at 62: no map has such a face")
+
     check("Land.msh: the surface word's bit 0x10 is clear on lava",
           exact == using and unused == len(maps) - using,
           f"on all {exact}/{using} maps that set the bit, the faces with it "

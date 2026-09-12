@@ -258,6 +258,34 @@ faces whose layer-1 material is `WATER_BOT` or `ENV_LAVA_BOT`, and on no other
 face of any map. So the ground under a lake says so itself — the third way a
 map marks its liquids, beside the surface bit and the flags value 1544.
 
+### Field 13 is the winged-edge link
+
+Three 2-bit codes packed low to high, one per edge. Edge `e` reads
+`(field13 >> 2e) & 3`, and the code is **the index of the matching edge back
+in the neighbouring face** — so a walker crossing an edge arrives knowing
+which edge it came in by, without searching the neighbour's three. Code 3
+means there is no neighbour.
+
+It holds on **817150 of 817150** shared edges across the 33 maps, and the
+no-neighbour code agrees with the adjacency field on all **827646** edge
+slots. The field's range is the confirmation: 63 would be a face with all
+three edges free, and **no map has one** — 265635 faces have no free edge,
+9998 have one and 249 have two.
+
+That is a winged-edge structure, and the engine names it — `Terrain.dll`
+carries `CTerrain::FindFaceInWing`. The code was found in the building-
+insertion path: at `Terrain.dll:0x1000c309` the engine sets an edge's
+adjacency to `0xFFFF` and immediately writes 3 into that edge's slot, through
+three branches that mask `0xFC`, `0xF3` and `0xCF` — a byte written as three
+2-bit fields, indexed by the same 0/1/2 that indexes adjacency.
+
+Earlier notes read the packed byte as a single number and hunted for spatial
+structure in it: "0..62, ~57 distinct values, not a spatial patch, a value's
+faces span the whole map, indistinguishable from a random subset of the same
+size, groups wildly uneven — 1, 2, 4 and 384 faces on SC_3". Every one of
+those observations is true and none of them means anything, because the
+number is three numbers.
+
 Field 1, the surface word, has two bits in use, and the second one is
 **lava**. Bit `0x10` is clear on lava and on the bed beneath it, and set on
 everything else: on the **29 of 33 maps that set the bit anywhere**, the faces

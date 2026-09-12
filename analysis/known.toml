@@ -1350,3 +1350,20 @@ kind = "function"
 name = "the .ske reader's record filler"
 doc = "docs/10-sky.md"
 read = true
+
+# --- the terrain's winged-edge link, ../docs/03-terrain.md -----------------
+[[entry]]
+module = "Terrain.dll"
+at = "0x1000bdb0"
+kind = "function"
+name = "the building cut: frees an edge and writes 3 into its winged-edge slot"
+doc = "docs/03-terrain.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1000c309"
+kind = "site"
+name = "adjacency[edge] = 0xFFFF, then field 13's 2-bit slot for that edge"
+doc = "docs/03-terrain.md"
+read = true

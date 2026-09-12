@@ -99,12 +99,13 @@ and then 2, 1, 1, 1, which reads as two parallel arrays rather than pairs.
   renderer would act on — the ground's second track — is in the track count
   already. See [07-objects.md](07-objects.md#the-class-byte-is-loaded-and-never-read)
   and [../analysis/README.md](../analysis/README.md).
-- Terrain face field 13 (0..62, ~57 distinct per map). **Not** a patch or
-  sector id, which earlier drafts guessed: grouping faces by it gives regions
-  that span the whole map, no tighter than a random subset of the same size,
-  on every map tried. It is interleaved in face order, does not determine the
-  texture pair or the surface word, and does not track elevation. Its groups
-  are wildly uneven — 1, 2, 4 and 384 faces on SC_3.
+- Terrain face field 13 is **answered: it is the winged-edge link**. Three
+  2-bit codes, one per edge, each naming the matching edge back in the
+  neighbouring face, with 3 for no neighbour — right on **817150 of 817150**
+  shared edges. Reading the packed byte as one number is what made it look
+  like a meaningless 0..62 with no spatial structure; 63 never appears because
+  that would be a face with all three edges free.
+  See [03-terrain.md](03-terrain.md).
 - The surface word's bit `0x10` is **answered: it is clear on lava**. On the
   29 of 33 maps that set it anywhere, the faces with it clear are exactly the
   faces whose layer-1 material names lava — 6711 across the library, surfaces

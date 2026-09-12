@@ -656,6 +656,19 @@ written down is a question nobody reopens.
       names **1769** resources and every one resolves.
       → [docs/13-control.md](docs/13-control.md)
 
+- [x] **Terrain face field 13 — the winged-edge link.** Three 2-bit codes,
+      one per edge, each naming **the matching edge back in the neighbouring
+      face**, with 3 for no neighbour. Right on **817150 of 817150** shared
+      edges and **827646 of 827646** edge slots, across all 33 maps. Reading
+      the packed byte as one number is what made it look like a meaningless
+      0..62 with ~57 distinct values and no spatial structure — the number is
+      three numbers. 63 never appears because it would be a face with all
+      three edges free, and none exists. Found in the building-insertion path
+      at `Terrain.dll:0x1000c309`, which sets an edge's adjacency to `0xFFFF`
+      and writes 3 into that edge's slot through masks `0xFC`, `0xF3`, `0xCF`;
+      the engine's own name for the structure is `CTerrain::FindFaceInWing`.
+      → [docs/03-terrain.md](docs/03-terrain.md)
+
 - [x] **The terrain surface word's bit `0x10` — it is lava.** Clear on lava
       and on the bed beneath it, set on everything else. On the **29 of 33
       maps that set the bit anywhere**, the faces with it clear are *exactly*
