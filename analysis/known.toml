@@ -22,6 +22,7 @@ module = "ai.dll"
 at = "0x100014f9"
 kind = "site"
 name = "script version gate, cmp edi, 0x49"
+read = true
 doc = "analysis/README.md"
 
 [[entry]]
@@ -29,6 +30,7 @@ module = "ai.dll"
 at = "0x1000129e"
 kind = "site"
 name = "interpreter initialiser: 70 handler pointers at +0xc..+0x120"
+read = true
 doc = "analysis/README.md"
 
 [[entry]]
@@ -36,6 +38,7 @@ module = "ai.dll"
 at = "0x100122b5"
 kind = "site"
 name = "the dispatch loop"
+read = true
 doc = "docs/15-behaviour.md"
 
 [[entry]]
@@ -43,6 +46,7 @@ module = "ai.dll"
 at = "0x10012313"
 kind = "site"
 name = "the branch taken when head[0] is -1"
+read = true
 doc = "analysis/README.md"
 
 # --- the component registry, ../docs/22-settings.md ------------------------
@@ -51,6 +55,7 @@ module = "World3D.dll"
 at = "0x10014790"
 kind = "function"
 name = "LoadComponentAddr: reads Comp.ini"
+read = true
 doc = "docs/22-settings.md"
 
 [[entry]]
@@ -58,6 +63,7 @@ module = "World3D.dll"
 at = "0x10013f84"
 kind = "site"
 name = "the caller that pushes Comp.ini's filename"
+read = true
 doc = "analysis/README.md"
 
 [[entry]]
@@ -65,6 +71,7 @@ module = "World3D.dll"
 at = "0x10026bec"
 kind = "datum"
 name = "'%d %s %s' -- a Comp.ini row"
+read = true
 doc = "analysis/README.md"
 
 [[entry]]
@@ -72,6 +79,7 @@ module = "World3D.dll"
 at = "0x100666b8"
 kind = "datum"
 name = "the component table, 16 bytes a row"
+read = true
 doc = "analysis/README.md"
 
 [[entry]]
@@ -79,6 +87,7 @@ module = "World3D.dll"
 at = "0x10795284"
 kind = "datum"
 name = "the component row counter"
+read = true
 doc = "analysis/README.md"
 
 # --- the research tree's loader, ../docs/16-research.md --------------------
@@ -87,6 +96,7 @@ module = "MisLoad.dll"
 at = "0x100025f0"
 kind = "function"
 name = "LoadResearch"
+read = true
 doc = "docs/16-research.md"
 
 [[entry]]
@@ -94,6 +104,7 @@ module = "MisLoad.dll"
 at = "0x10002fe0"
 kind = "function"
 name = "the .trf load: twelve streams in a fixed order"
+read = true
 doc = "docs/16-research.md"
 
 [[entry]]
@@ -101,6 +112,7 @@ module = "MisLoad.dll"
 at = "0x1000302c"
 kind = "site"
 name = "the version gate over TRF0"
+read = true
 doc = "analysis/README.md"
 
 [[entry]]
@@ -108,6 +120,7 @@ module = "MisLoad.dll"
 at = "0x1000306d"
 kind = "site"
 name = "the same field over TRF1, kept as a boolean"
+read = true
 doc = "analysis/README.md"
 
 [[entry]]
@@ -115,6 +128,7 @@ module = "MisLoad.dll"
 at = "0x100030c1"
 kind = "site"
 name = "the one writable copy: TRF1 into a zeroed buffer"
+read = true
 doc = "analysis/README.md"
 
 [[entry]]
@@ -122,6 +136,7 @@ module = "MisLoad.dll"
 at = "0x100032cd"
 kind = "site"
 name = "the count/pointer pairing over TRF2/TRF3"
+read = true
 doc = "analysis/README.md"
 
 [[entry]]
@@ -129,6 +144,7 @@ module = "MisLoad.dll"
 at = "0x100033a5"
 kind = "site"
 name = "the count/pointer pairing over TRF4/TRF5"
+read = true
 doc = "analysis/README.md"
 
 [[entry]]
@@ -136,6 +152,7 @@ module = "MisLoad.dll"
 at = "0x10002f60"
 kind = "function"
 name = "slot 44: TRFB index -> part id and the item that researches it"
+read = true
 doc = "analysis/README.md"
 
 [[entry]]
@@ -143,6 +160,7 @@ module = "MisLoad.dll"
 at = "0x10002d50"
 kind = "function"
 name = "first of ten per-field getters over the 40-byte record"
+read = true
 doc = "analysis/README.md"
 
 [[entry]]
@@ -150,6 +168,7 @@ module = "MisLoad.dll"
 at = "0x1000e18c"
 kind = "datum"
 name = "the .trf reader's vtable; slot 6 loads"
+read = true
 doc = "analysis/README.md"
 
 [[entry]]
@@ -157,6 +176,7 @@ module = "MisLoad.dll"
 at = "0x1000e130"
 kind = "datum"
 name = "the loaded tree's vtable, 55 slots"
+read = true
 doc = "analysis/README.md"
 
 # --- the material manager, ../docs/07-objects.md, ../docs/03-terrain.md ----
@@ -165,6 +185,7 @@ module = "World3D.dll"
 at = "0x10002aa0"
 kind = "function"
 name = "LoadMatManager: 0x470 bytes, vtable at +0"
+read = true
 doc = "analysis/README.md"
 
 [[entry]]
@@ -172,6 +193,7 @@ module = "World3D.dll"
 at = "0x100209e4"
 kind = "datum"
 name = "the material manager's vtable, eleven slots"
+read = true
 doc = "analysis/README.md"
 
 [[entry]]
@@ -179,6 +201,7 @@ module = "World3D.dll"
 at = "0x100031f0"
 kind = "function"
 name = "manager slot 3: the track-less material fetch"
+read = true
 doc = "analysis/README.md"
 
 [[entry]]
@@ -186,6 +209,7 @@ module = "World3D.dll"
 at = "0x10003680"
 kind = "function"
 name = "manager slot 5: GetMaterialPhase, and nobody calls it"
+read = true
 doc = "TODO.md"
 
 [[entry]]
@@ -193,6 +217,7 @@ module = "World3D.dll"
 at = "0x10003ab0"
 kind = "function"
 name = "manager slot 9: returns &material[id].class, and nobody calls it"
+read = true
 doc = "docs/07-objects.md"
 
 [[entry]]
@@ -200,6 +225,7 @@ module = "World3D.dll"
 at = "0x100669f0"
 kind = "datum"
 name = "the loaded material array, 368 bytes a record"
+read = true
 doc = "docs/07-objects.md"
 
 [[entry]]
@@ -207,6 +233,7 @@ module = "Terrain.dll"
 at = "0x10046917"
 kind = "site"
 name = "calling manager slot 3, selectors zero -- the positive control"
+read = true
 doc = "analysis/README.md"
 
 [[entry]]
@@ -214,6 +241,7 @@ module = "Terrain.dll"
 at = "0x10017215"
 kind = "site"
 name = "calling manager slot 6, from the field at +0x7be0"
+read = true
 doc = "analysis/README.md"
 
 [[entry]]
@@ -221,6 +249,7 @@ module = "Terrain.dll"
 at = "0x10069dd0"
 kind = "function"
 name = "the five-way factory that passes the manager on"
+read = true
 doc = "analysis/README.md"
 
 [[entry]]
@@ -228,6 +257,7 @@ module = "Terrain.dll"
 at = "0x1005991f"
 kind = "site"
 name = "a five-argument call at slot 5's offset, on another class"
+read = true
 doc = "analysis/README.md"
 
 [[entry]]
@@ -235,6 +265,7 @@ module = "AniMesh.dll"
 at = "0x10003936"
 kind = "site"
 name = "calling manager slot 6, from the field at +0x14c"
+read = true
 doc = "analysis/README.md"
 
 # --- message dispatch, ../docs/14-controls.md ------------------------------
@@ -243,6 +274,7 @@ module = "World3D.dll"
 at = "0x1000fcac"
 kind = "site"
 name = "the MCMD dispatcher: lea eax, [ebp - 1]; cmp eax, 0x14"
+read = true
 doc = "docs/14-controls.md"
 
 [[entry]]
@@ -250,6 +282,7 @@ module = "World3D.dll"
 at = "0x100109f8"
 kind = "table"
 name = "the MCMD jump table, 21 entries"
+read = true
 doc = "docs/14-controls.md"
 
 [[entry]]
@@ -257,6 +290,7 @@ module = "World3D.dll"
 at = "0x100101b2"
 kind = "site"
 name = "the handler MCMD 7, 8, 19 and 20 share"
+read = true
 doc = "docs/14-controls.md"
 
 [[entry]]
@@ -264,6 +298,7 @@ module = "World3D.dll"
 at = "0x1001059b"
 kind = "site"
 name = "the same range trick for MCMD_UP and MCMD_DOWN"
+read = true
 doc = "docs/14-controls.md"
 
 # --- the save writer, ../docs/17-saves.md ----------------------------------
@@ -272,6 +307,7 @@ module = "iron3d.dll"
 at = "0x100a1637"
 kind = "site"
 name = "the save writer: SLOT and the length-prefixed blobs after it"
+read = true
 doc = "docs/17-saves.md"
 
 [[entry]]
@@ -279,6 +315,7 @@ module = "iron3d.dll"
 at = "0x100b4b34"
 kind = "function"
 name = "the fwrite the save body goes through"
+read = true
 doc = "docs/17-saves.md"
 
 # --- the .ctl controller, ../docs/13-control.md ----------------------------
@@ -287,4 +324,964 @@ module = "AniMesh.dll"
 at = "0x100032e7"
 kind = "site"
 name = "the only caller of the three-field message dispatch"
+read = true
 doc = "docs/13-control.md"
+
+# --- names the binaries carry themselves --------------------------------
+#
+# Recovered by `coverage.py --names`: a release build with no symbols still
+# has its assertion text, and an assertion names the function it sits in.
+# Only one-to-one attributions are here.
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1000a500"
+kind = "function"
+name = "CTerrain::FindFaceInFan"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1000a5f0"
+kind = "function"
+name = "CTerrain::FindFaceInWing"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10014c60"
+kind = "function"
+name = "CLandscape::CheckMaxBasementAngle"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x100150f0"
+kind = "function"
+name = "CLandscape::StartCheckMaxBasementAngle"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10015820"
+kind = "function"
+name = "CLandscape::StopCheckMaxBasementAngle"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x100166a0"
+kind = "function"
+name = "CLandscape::CLandscape"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10019400"
+kind = "function"
+name = "CLandscape::EndCheckMaxBasementAngle"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1001e580"
+kind = "function"
+name = "CLadnscape::Patch"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1001fcd0"
+kind = "function"
+name = "CLandscape::Initialize"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x100205c0"
+kind = "function"
+name = "CLadnscape::GetFirstIntersectedFace"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10021860"
+kind = "function"
+name = "CLandscape::GetWalkFace"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10024d70"
+kind = "function"
+name = "CWorld::GetWorldFace"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10025fc0"
+kind = "function"
+name = "CWorld::PlaceObjectOnWorldFace"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10026340"
+kind = "function"
+name = "CWorld::FindWorldFace"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10028840"
+kind = "function"
+name = "CShade::RenderEffect"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1002ce40"
+kind = "function"
+name = "CShade::EmbossBumpMap"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1002dc20"
+kind = "function"
+name = "CShade::ChromaMap"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1002e300"
+kind = "function"
+name = "CDynamicPageHeap::Allocate"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1002fab0"
+kind = "function"
+name = "CStridedPrimitive::RenderVB"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10032f90"
+kind = "function"
+name = "CPrimBuffer::CreatePrim"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1003e1d0"
+kind = "function"
+name = "CCamDistSortLayerVB::Render"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10043680"
+kind = "function"
+name = "CShade::SetClipStateForJoint"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x100437c0"
+kind = "function"
+name = "CShade::StartMeshRender"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10043880"
+kind = "function"
+name = "CShade::EndMeshRender"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10046a60"
+kind = "function"
+name = "CShade::InitAlphaBlendModeTranslateTable"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10047070"
+kind = "function"
+name = "CShade::UnregisterLightManager"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10051590"
+kind = "function"
+name = "CShade::BeginDraw"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10052630"
+kind = "function"
+name = "CShade::EndDraw"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10057550"
+kind = "function"
+name = "CBuilding::SendMsg"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10058950"
+kind = "function"
+name = "CBuilding::SetObjectState"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10058b90"
+kind = "function"
+name = "CBuilding::Render"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1005a5d0"
+kind = "function"
+name = "CBuilding::PortalDrawNotify"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1005a6c0"
+kind = "function"
+name = "CBuilding::GetFirstIntersectedFace"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1005b520"
+kind = "function"
+name = "CBuilding::AlikItem2VladItem"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1005b590"
+kind = "function"
+name = "CBuilding::GetItemState"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1005b5d0"
+kind = "function"
+name = "CBuilding::OpenDoor"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1005b620"
+kind = "function"
+name = "CBuilding::IsDoorOpen"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1005f5c0"
+kind = "function"
+name = "CSettings::CSettings"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1006a850"
+kind = "function"
+name = "CAtmData::GetTimeDiffInSec"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1006dc10"
+kind = "function"
+name = "CAtmData::GetEvents"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1006ec30"
+kind = "function"
+name = "CAtmosphere::CAtmosphere"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1006fbb0"
+kind = "function"
+name = "CAtmosphere::HandleEvents"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10070040"
+kind = "function"
+name = "CAtmosphere::SendMsg"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10070520"
+kind = "function"
+name = "CAtmosphere::SetObjectState"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10071c10"
+kind = "function"
+name = "CLightning::Init"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10075d00"
+kind = "function"
+name = "CRain::CRain"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1007d150"
+kind = "function"
+name = "CSun::Render"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1007d510"
+kind = "function"
+name = "CSun::RenderFlare"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1007fa90"
+kind = "function"
+name = "CLightManager::CLightManager"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10081de0"
+kind = "function"
+name = "CBufferingCamera::SetRenderer"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10081e30"
+kind = "function"
+name = "CBufferingCamera::SetPrimBuffer"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10081fe0"
+kind = "function"
+name = "CBufferingCamera::SetPostDrawHandler"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10082180"
+kind = "function"
+name = "CBufferingCamera::GetFrustum"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x100830b0"
+kind = "function"
+name = "CBufferingCamera::GetObjectMask"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x100839c0"
+kind = "function"
+name = "CCamera::CCamera"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x100849e0"
+kind = "function"
+name = "CCamera::DrawMaterial"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10084a00"
+kind = "function"
+name = "CCamera::SetClipRect"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10084a50"
+kind = "function"
+name = "CCamera::GetClipPlanes"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10084b60"
+kind = "function"
+name = "CCamera::SetLightState"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10084b80"
+kind = "function"
+name = "CCamera::GetLightState"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10084ba0"
+kind = "function"
+name = "CCamera::GetFrustrumInfo"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10084bc0"
+kind = "function"
+name = "ICamera::SetTransformMatrix"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10084be0"
+kind = "function"
+name = "ICamera::GetTransformMatrix"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10084f80"
+kind = "function"
+name = "CCamera::DrawMaterialStrided"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10084fa0"
+kind = "function"
+name = "CCamera::DrawMaterialStrided2"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10085190"
+kind = "function"
+name = "CCamera::SetZBufferArea"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x100879c0"
+kind = "function"
+name = "MFile::ReadString"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1008a730"
+kind = "function"
+name = "CGameObject::SetParent"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1008a980"
+kind = "function"
+name = "CGameObject::GetChildren"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1008a9b0"
+kind = "function"
+name = "CGameObject::PlaceObject"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1008ae50"
+kind = "function"
+name = "CGameObject::GetPlacement"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10017510"
+kind = "function"
+name = "CGameObject::SetParent"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10017760"
+kind = "function"
+name = "CGameObject::GetChildren"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10017790"
+kind = "function"
+name = "CGameObject::PlaceObject"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10017c30"
+kind = "function"
+name = "CGameObject::GetPlacement"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "MisLoad.dll"
+at = "0x10004d00"
+kind = "function"
+name = "CGameObject::SetParent"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "MisLoad.dll"
+at = "0x10004f50"
+kind = "function"
+name = "CGameObject::GetChildren"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "MisLoad.dll"
+at = "0x10004f80"
+kind = "function"
+name = "CGameObject::PlaceObject"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "MisLoad.dll"
+at = "0x10005420"
+kind = "function"
+name = "CGameObject::GetPlacement"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "ai.dll"
+at = "0x10017170"
+kind = "function"
+name = "MVarSet::LinkVar"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "ai.dll"
+at = "0x1001b290"
+kind = "function"
+name = "MFile::ReadString"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10005880"
+kind = "function"
+name = "MBehaviour::SendMsg"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10008c70"
+kind = "function"
+name = "MBehaviour::ReloadSuperAI"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1000a160"
+kind = "function"
+name = "MBehaviour::GetMessageList"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1000a180"
+kind = "function"
+name = "MBehaviour::ClearMessageList"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1000c7d0"
+kind = "function"
+name = "MBehaviour::OnMainTeleportDetectHero"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10020be0"
+kind = "function"
+name = "MGraph::FormPath"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x100235e0"
+kind = "function"
+name = "MResearchCenter::CreateParentTechArray"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x100236d0"
+kind = "function"
+name = "MResearchCenter::CalcSummCost"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10026d40"
+kind = "function"
+name = "M_Task_Attack::SetTarget"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10027250"
+kind = "function"
+name = "M_Task_Attack::OnBehaviourTakt"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10027580"
+kind = "function"
+name = "M_Task_Attack::MakeGoCommand"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1002a4f0"
+kind = "function"
+name = "M_Task_Construct::OnBehaviourTakt"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1002cd10"
+kind = "function"
+name = "M_Task_Mine::SetTarget"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1002e750"
+kind = "function"
+name = "M_Task_Reload::SetTarget"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1002f730"
+kind = "function"
+name = "M_Task_Research::OnBehaviourTakt"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10033a80"
+kind = "function"
+name = "MTaskStack::CreateTaskFromOrder"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1003bad0"
+kind = "function"
+name = "MWalker::SetTarget"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1003c0c0"
+kind = "function"
+name = "MWalker::AppendTarget"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1003cfd0"
+kind = "function"
+name = "MWalker::ClearMoverReachedPoint"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1003d280"
+kind = "function"
+name = "MWalker::OnBehaviourTakt"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x100410c0"
+kind = "function"
+name = "MWalker::LockNextPath"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10041520"
+kind = "function"
+name = "MWalker::UnLockOne"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10042c10"
+kind = "function"
+name = "MWorldGraph::AddNeighbourToFront"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x100430d0"
+kind = "function"
+name = "MWorldGraph::GetUniqPosCenter"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10049090"
+kind = "function"
+name = "MVarSet::LinkVar"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "ArealMap.dll"
+at = "0x10001370"
+kind = "function"
+name = "M_IArealMap::SendMsg"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "ArealMap.dll"
+at = "0x1000a400"
+kind = "function"
+name = "MHallWay::LoadFromResource"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "ArealMap.dll"
+at = "0x1000a940"
+kind = "function"
+name = "MHallWay::SendMsg"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "ArealMap.dll"
+at = "0x1000b950"
+kind = "function"
+name = "MHallWay::GrowLinkedZone"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "ArealMap.dll"
+at = "0x1000e480"
+kind = "function"
+name = "MLandHexaGris::CutContour"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "ArealMap.dll"
+at = "0x10010b10"
+kind = "function"
+name = "MBrokenAreal::Divide"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "ArealMap.dll"
+at = "0x1001ee30"
+kind = "function"
+name = "M_ISystemArealMap::GrowLinkedZone"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "ArealMap.dll"
+at = "0x1001fe00"
+kind = "function"
+name = "M_ISystemArealMap::SendMsg"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "ArealMap.dll"
+at = "0x10020a40"
+kind = "function"
+name = "SystemArealMap::SetClanType"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "ArealMap.dll"
+at = "0x10022d80"
+kind = "function"
+name = "M_ISystemArealMap::OnRemoveStatic"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "ArealMap.dll"
+at = "0x100243d0"
+kind = "function"
+name = "M_ISystemArealMap::RegisterName"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "ArealMap.dll"
+at = "0x10024680"
+kind = "function"
+name = "M_ISystemArealMap::UnRegisterName"
+doc = "the binary's own assertion text"
+read = false
+
+[[entry]]
+module = "ArealMap.dll"
+at = "0x10024860"
+kind = "function"
+name = "M_ISystemArealMap::GetLIDByName"
+doc = "the binary's own assertion text"
+read = false
+

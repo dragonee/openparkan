@@ -153,6 +153,43 @@ to look. See [09-method.md](09-method.md).
 (`DISPLAY_WIDTH=1920`, `DISPLAY_HEIGHT=1080`), so resolution is not among the
 reasons to reimplement.
 
+## The engine's own class names
+
+A release build with no symbols still carries its assertion text, and an
+assertion names the function it sits in. `analysis/coverage.py --names`
+recovers **119 function names over 40 classes** that way, each tied to one
+address — and they are the developers' names, not ours. Two spellings give
+that away: `CLadnscape` is a typo living alongside `CLandscape`, and
+`CBuilding::AlikItem2VladItem` converts between two programmers' idea of what
+an item is.
+
+The classes sort the engine cleanly, with the `C` prefix on the world and the
+`M` prefix on the simulation:
+
+| module | classes |
+|---|---|
+| `Terrain.dll` | `CLandscape`, `CTerrain`, `CWorld`, `CBuilding`, `CAtmosphere`, `CAtmData`, `CSun`, `CRain`, `CLightning`, `CCamera`, `CBufferingCamera`, `ICamera`, `CShade`, `CPrimBuffer`, `CStridedPrimitive`, `CLightManager`, `CDynamicPageHeap`, `CSettings` |
+| `Behavior.dll` | `MBehaviour`, `MWalker`, `MTaskStack`, `M_Task_Attack`, `M_Task_Construct`, `M_Task_Mine`, `M_Task_Reload`, `M_Task_Research`, `MGraph`, `MWorldGraph`, `MResearchCenter`, `MVarSet` |
+| `ArealMap.dll` | `M_ISystemArealMap`, `M_IArealMap`, `MHallWay`, `MLandHexaGris`, `MBrokenAreal` |
+| `AniMesh.dll`, `MisLoad.dll`, `Terrain.dll` | `CGameObject` |
+
+Several answer or sharpen questions asked elsewhere in these notes.
+`CShade::InitAlphaBlendModeTranslateTable` is the renderer turning a blend
+mode into a device state, which is the other end of the `MAT0` flags byte in
+[07-objects.md](07-objects.md). `CWorld::PlaceObjectOnWorldFace`,
+`FindWorldFace` and `GetWorldFace` are the placement path behind the vertical
+datum in [04-missions.md](04-missions.md), and
+`CLandscape::CheckMaxBasementAngle` says *basement* is the engine's word for a
+building's footing. `CGameObject::SetParent`, `PlaceObject`, `GetPlacement`
+and `GetChildren` are the attachment tree. `MGraph::FormPath` and
+`MWorldGraph::AddNeighbourToFront` are the pathfinder, and the `M_Task_*`
+family is the order vocabulary the `.scr` scripts drive
+([15-behaviour.md](15-behaviour.md)).
+
+A name is a place to start, not an answer: the ledger in
+`analysis/known.toml` marks these `read = false` until somebody has actually
+read the function.
+
 ## Data layout
 
 ```

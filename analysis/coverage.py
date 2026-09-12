@@ -68,6 +68,13 @@ PADDING = re.compile(rb"(\xcc{2,}|\x90{2,})")
 #: A string worth counting as evidence that a function touches game data.
 PRINTABLE = re.compile(rb"[\x20-\x7e]{4,}\x00")
 
+#: `CLandscape::Insert(` -- the developers' own name for a function, left in
+#: the assertion text.  The trailing `(` is what separates a method from an
+#: enum: `iron3d.dll` carries a table of `CState::FREE_MODE` and friends which
+#: name no function at all.
+SYMBOL = re.compile(
+    r"([A-Za-z_][A-Za-z0-9_]{2,40}::~?[A-Za-z_][A-Za-z0-9_]{1,40})\s*\(")
+
 #: `function` an entry point; `site` one instruction inside one; `datum` data
 #: outside `.text`; `table` data inside it, which is where this compiler puts
 #: its jump tables.
@@ -89,12 +96,19 @@ class Function:
 
 @dataclass
 class Entry:
-    """One line of the ledger."""
+    """One line of the ledger.
+
+    `read` is the distinction that keeps the percentage honest: the binaries
+    name 119 of their own functions in assertion text, and knowing a function
+    is called `CLandscape::Insert` is not the same as knowing what it does.
+    A name is a place to start, not an answer.
+    """
     module: str
     at: int
     kind: str
     name: str
     doc: str = ""
+    read: bool = False
 
 
 class Module:
@@ -280,7 +294,7 @@ def ledger() -> list[Entry]:
     for row in raw.get("entry", []):
         out.append(Entry(row["module"], int(str(row["at"]), 16),
                          row.get("kind", "function"), row["name"],
-                         row.get("doc", "")))
+                         row.get("doc", ""), row.get("read", False)))
     return out
 
 
@@ -311,37 +325,48 @@ def library(mods: dict[str, Module]) -> set[str]:
 # --- reports -------------------------------------------------------------
 def report(mods: dict[str, Module], entries: list[Entry]) -> None:
     known: dict[str, set[int]] = defaultdict(set)
+    understood: dict[str, set[int]] = defaultdict(set)
     for e in entries:
         if e.kind in ("function", "site"):
             known[e.module].add(e.at)
+            if e.read:
+                understood[e.module].add(e.at)
 
     groups: dict[str, list[tuple[str, Function]]] = defaultdict(list)
     for name, mod in mods.items():
         for fn in mod.functions():
             groups[fn.group].append((name, fn))
 
-    read_groups = set()
-    for name, mod in mods.items():
-        for at in known[name]:
-            fn = mod.function_at(at)
-            if fn:
-                read_groups.add(fn.group)
+    def groups_of(table):
+        out = set()
+        for name, mod in mods.items():
+            for at in table[name]:
+                fn = mod.function_at(at)
+                if fn:
+                    out.add(fn.group)
+        return out
 
-    print(f"{'module':16} {'funcs':>6} {'bytes':>9} {'read':>5} {'bytes':>8} {'%':>5}")
-    tf = tb = rf = rb = 0
+    named_groups = groups_of(known)
+    read_groups = groups_of(understood)
+
+    print(f"{'module':16} {'funcs':>6} {'bytes':>9} "
+          f"{'named':>6} {'read':>5} {'bytes':>8} {'%read':>6}")
+    tf = tb = nf = rf = rb = 0
     for name, mod in mods.items():
         fns = mod.functions()
+        seen = [f for f in fns if f.group in named_groups]
         done = [f for f in fns if f.group in read_groups]
         b = sum(f.size for f in fns)
         db = sum(f.size for f in done)
-        print(f"{name:16} {len(fns):6} {b:9} {len(done):5} {db:8} "
-              f"{100 * db / b if b else 0:4.1f}%")
+        print(f"{name:16} {len(fns):6} {b:9} {len(seen):6} {len(done):5} "
+              f"{db:8} {100 * db / b if b else 0:5.1f}%")
         tf += len(fns)
         tb += b
+        nf += len(seen)
         rf += len(done)
         rb += db
-    print(f"{'TOTAL':16} {tf:6} {tb:9} {rf:5} {rb:8} "
-          f"{100 * rb / tb if tb else 0:4.1f}%")
+    print(f"{'TOTAL':16} {tf:6} {tb:9} {nf:6} {rf:5} {rb:8} "
+          f"{100 * rb / tb if tb else 0:5.1f}%")
     shared = sum(1 for g, v in groups.items() if len({n for n, _ in v}) > 1)
     print(f"\n{len(groups)} distinct bodies, {tf - len(groups)} duplicates; "
           f"{shared} of them appear in more than one module and are library "
@@ -435,6 +460,48 @@ def closure(mod: Module, at: int, entries: list[Entry],
         print(f"  {'  ' * min(depth, 6)}{a:#010x} {fn.size:6}  {mark}")
 
 
+def names(mods: dict[str, Module], entries: list[Entry],
+          lib: set[str]) -> None:
+    """Ledger entries for every function the game names itself.
+
+    A release build with no symbols still carries the assertion text, and an
+    assertion names the function it sits in.  Attribution is only accepted
+    where it is one to one -- a symbol seen in one function and a function
+    claiming one symbol -- because the exceptions are real: one 26612-byte
+    function in `Terrain.dll` asserts under both `CLandscape::Insert` and
+    `CTerrain::PlaceBasement`, which is what an inlined callee looks like from
+    outside.
+    """
+    have = {(e.module, e.at) for e in entries}
+    found = skipped = 0
+    for name, mod in mods.items():
+        owners: dict[str, set[int]] = defaultdict(set)
+        for fn in mod.functions():
+            if fn.group in lib:
+                continue
+            for text in set(fn.strings):
+                for m in SYMBOL.finditer(text):
+                    owners[m.group(1)].add(fn.at)
+        claims: dict[int, set[str]] = defaultdict(set)
+        for symbol, where in owners.items():
+            if len(where) == 1:
+                claims[next(iter(where))].add(symbol)
+        for at, symbols in sorted(claims.items()):
+            if len(symbols) > 1:
+                skipped += 1
+                continue
+            if (name, at) in have:
+                continue
+            fn = mod.function_at(at)
+            print(f"\n[[entry]]\nmodule = \"{name}\"\nat = \"{at:#010x}\"\n"
+                  f"kind = \"{'function' if fn and fn.at == at else 'site'}\"\n"
+                  f"name = \"{next(iter(symbols))}\"\n"
+                  f"doc = \"the binary's own assertion text\"\n"
+                  f"read = false")
+            found += 1
+    print(f"\n# {found} proposed, {skipped} skipped as claiming two names")
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--check", action="store_true",
@@ -443,6 +510,8 @@ def main(argv=None) -> int:
                     help="list a module's unread functions, best first")
     ap.add_argument("--closure", metavar="MODULE:ADDR",
                     help="what one entry point reaches")
+    ap.add_argument("--names", action="store_true",
+                    help="ledger entries for functions the game names itself")
     ap.add_argument("-n", type=int, default=40, help="how many rows")
     args = ap.parse_args(argv)
 
@@ -456,6 +525,9 @@ def main(argv=None) -> int:
         return 0
     if args.unknown:
         unknown(mods[args.unknown], entries, args.n, library(mods))
+        return 0
+    if args.names:
+        names(mods, entries, library(mods))
         return 0
     report(mods, entries)
     return 0

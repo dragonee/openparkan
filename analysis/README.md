@@ -83,6 +83,21 @@ game's own data. It works: the first thing it surfaced in `MisLoad.dll` was
 the developers' own class, `CGameObject`, with `PlaceObject()`,
 `GetPlacement()`, `SetParent()` and `GetChildren()` in its assertion text.
 
+`--names` then takes that as far as it goes. An assertion names the function
+it sits in, so **119 functions over 40 classes** name themselves, and the
+ledger takes all of them at once — see
+[../docs/05-engine.md](../docs/05-engine.md). Attribution is only accepted one
+to one, a symbol seen in one function and a function claiming one symbol,
+which rejects three: one 26612-byte function in `Terrain.dll` asserts under
+both `CLandscape::Insert` and `CTerrain::PlaceBasement`, which is what an
+inlined callee looks like from outside. The trailing `(` in the pattern is
+load-bearing too — without it `iron3d.dll`'s table of `CState::FREE_MODE` and
+friends reads as twelve methods, and they are enum values naming nothing.
+
+The ledger separates **named** from **read** for this reason. Knowing a
+function is called `CLandscape::Insert` is not knowing what it does, and a
+percentage that counted the two together would be measuring the wrong thing.
+
 
 ## Things that cost us time
 
