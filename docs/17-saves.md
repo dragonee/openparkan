@@ -164,6 +164,42 @@ values, so there is no capacity to compare against. **Guess**, marked as one.
 `+72` is the ordinal [18-vocabulary.md](18-vocabulary.md) describes, still
 unexplained.
 
+## What the writer does, from the writer
+
+`iron3d.dll` holds the save code — `slot%d.sav` and `/save/` are its strings —
+and the magic pins the routine exactly: `mov dword ptr [esp + 0x4c],
+0x544f4c53` at **`0x100a1637`** is the only place `SLOT` is written. Two more
+sites compare against it, at `0x1001332c` and `0x100a2ced`, which are the
+"is this a save?" check and the loader.
+
+Everything goes out through one primitive, **`0x100b4b34`**, called as
+`(ptr, size, count, handle)` — `fwrite`. Read in order, the calls *are* the
+header this project parses:
+
+```
+fwrite(&"SLOT", 4, 1, f)
+fwrite(&version, 1, 1, f)          a byte
+fwrite(&flag, 1, 1, f)             a byte, read from the game object's +0x150
+fwrite(&length, 4, 1, f)           strlen of the mission path
+fwrite(path, length, 1, f)
+```
+
+which is independent confirmation of a header that was worked out from the
+files.
+
+**The body is length-prefixed blobs, and each one is somebody's memory.** The
+writer repeats `fwrite(&length, 4, 1)` then `fwrite(bytes, length, 1)`, and
+the bytes come from a **virtual call** — `call [edx + 0x58]` hands back a
+pointer and a length. So a subsystem is asked for its state and gives back a
+block, which the writer copies out whole. That is why the body is a heap dump,
+why pointers and stack rubbish are in it, and why the layout differs from
+class to class: nobody ever designed a record.
+
+Walking a save that way — header, then `(int32 length, bytes)` — reads **two
+blobs on all six saves**, the first holding 60% to 88% of the file, before the
+next dword stops being a length (it is ASCII: `"0."`). So the container is
+real and this reader walks as far as it is sure of.
+
 ## Three ways in that do not work
 
 Written down because each is the obvious next idea, and each costs an

@@ -979,6 +979,12 @@ today; each is a small trap for anyone extending the code.
   part record only the last twelve bytes are fields, and `+64`/`+68` belong to
   different kinds — ammunition alone always uses `+64` (10 to 20, a round
   count is the guess) and never `+68`.
+  The **writer is found**: `iron3d.dll:0x100a1637` emits `SLOT` and everything
+  after it through `fwrite` at `0x100b4b34`, which confirms the header
+  field-for-field and shows the body to be **length-prefixed blobs handed over
+  by a virtual call** — each one a subsystem's own memory, which is why no
+  record was ever designed. Walking that container reads two blobs on all six
+  saves before the next dword stops being a length.
   Three routes in are ruled out and written up: **pointers do not resolve** to
   file offsets under any constant base (best delta reaches 3 of 540 records),
   the **part record carries no identity** (no field is unique per record), and

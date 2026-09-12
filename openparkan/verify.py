@@ -4192,6 +4192,20 @@ def check_saves(check, game: Path) -> None:
           f"the four-byte grid -- records sit at arbitrary offsets, so a "
           f"dword-aligned scan misses almost all of them")
 
+    walked = big = 0
+    for path in save.saves(game):
+        s = save.read(path)
+        if len(s.blobs) == save.BLOBS:
+            walked += 1
+            size = path.stat().st_size
+            big += s.blobs[0].size > size * 0.6
+    check("saves: the body opens as length-prefixed blobs, as the writer emits",
+          walked == len(save.saves(game)) and big == walked,
+          f"{walked}/{len(save.saves(game))} saves walk as {save.BLOBS} "
+          f"length-prefixed runs before the format changes, the first holding "
+          f"over 60% of the file -- the shape iron3d.dll's writer produces at "
+          f"0x100a1637 through fwrite")
+
     index = save.slots(game)
     filled = [x for x in index if not x.empty]
     present = {p.name.lower() for p in paths}

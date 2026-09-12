@@ -59,6 +59,19 @@ import struct
 from dataclasses import dataclass
 from pathlib import Path
 
+#: How the writer emits everything after the header.  ``iron3d.dll``'s save
+#: routine at ``0x100a1637`` writes through one primitive, ``0x100b4b34``,
+#: which is ``fwrite(ptr, size, count, file)``, and the body is a run of
+#: ``fwrite(&length, 4, 1)`` followed by ``fwrite(bytes, length, 1)``.  The
+#: bytes come from a **virtual call** -- ``call [edx + 0x58]`` hands back a
+#: pointer and a length -- so each blob is one subsystem's own memory, which
+#: is why the body is a heap dump whose layout differs from class to class.
+BLOB_LENGTH = 4
+
+#: Walking the file that way reads this many blobs before the format changes;
+#: the first holds most of the save.
+BLOBS = 2
+
 #: The directory the game keeps saves in.
 DIRECTORY = "SAVE"
 
@@ -159,6 +172,14 @@ class Reference:
 
 
 @dataclass(frozen=True)
+class Blob:
+    """One length-prefixed run the writer emitted from a virtual call."""
+
+    offset: int
+    size: int
+
+
+@dataclass(frozen=True)
 class Slot:
     """One entry of ``saveslots.cfg``."""
 
@@ -182,6 +203,9 @@ class Save:
     trees: tuple[str, ...]
     #: Every archive member reference the scan recovered.
     references: tuple[Reference, ...]
+    #: The length-prefixed runs the writer emits after the header, as far as
+    #: the walk gets.  See ``BLOB_LENGTH``.
+    blobs: tuple[Blob, ...] = ()
 
     @property
     def campaign(self) -> bool:
@@ -237,8 +261,18 @@ def parse(data: bytes, source: Path | None = None) -> Save:
                     member.group().rstrip(b"\x00").decode(),
                     match.start(), width))
 
+    blobs: list[Blob] = []
+    at = 10 + length
+    while at + BLOB_LENGTH <= len(data):
+        size = struct.unpack_from("<I", data, at)[0]
+        if size == 0 or at + BLOB_LENGTH + size > len(data):
+            break
+        blobs.append(Blob(at + BLOB_LENGTH, size))
+        at += BLOB_LENGTH + size
+
     return Save(
         source=source or Path(where),
+        blobs=tuple(blobs),
         version=version,
         kind=kind,
         mission=mission,
