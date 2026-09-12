@@ -212,6 +212,16 @@ UNSET = 0xFF
 #: "Too many animations for material." -- the engine's own limit.
 MAX_TRACKS = 20
 
+#: The class byte's values below this are the ground: every one of the 43
+#: two-track materials sits here and no material above it has a second track.
+#: The engine loads the byte and never reads it back -- see
+#: ``analysis/vcalls.py`` -- so this is the one distinction it carries that a
+#: renderer could have acted on, and the track count already carries it.
+GROUND_CLASSES = 5
+
+#: A material with a second track is the ground's ``M`` twin.
+TWIN_TRACKS = 2
+
 #: The archive directory's *first* count field is a flags byte, and it is what
 #: the loader branches on: bit 1 goes into one field of the loaded material,
 #: bits 2 to 5 into another, bit 0 into a local flag one record sets and bit 6

@@ -741,6 +741,26 @@ def check_materials(check, game: Path) -> None:
           f"engine's own default.  The other {len(named_groups)} values sort "
           f"the library by role: {dict(sorted(named_groups.items()))}")
 
+    # Nothing in the engine reads the class byte back -- the manager's accessor
+    # for it is vtable slot 9 and no module calls it (analysis/vcalls.py).  So
+    # the question a renderer has to answer is what it loses by ignoring it,
+    # and the answer is nothing: the only distinction it draws that a renderer
+    # could act on is which materials carry the ground's second track, and the
+    # track count says that already.
+    ground = {e.name for e in records
+              if raw.read(e)[4] < materials.GROUND_CLASSES}
+    twins = {e.name for e in records
+             if len(lib.get(e.name).tracks) == materials.TWIN_TRACKS}
+    check("Material.lib: the class byte draws no distinction the track count "
+          "does not",
+          bool(twins) and twins <= ground,
+          f"all {len(twins)} materials with a second track carry a class below "
+          f"{materials.GROUND_CLASSES} and no material above it has one, so "
+          f"the ground's M twin -- the one thing the class byte separates that "
+          f"a renderer acts on -- is already in the track count.  Classes "
+          f"0..{materials.GROUND_CLASSES - 1} hold {len(ground)} materials in "
+          f"all, {len(ground) - len(twins)} of them single-track")
+
     # The archive directory's first count field is a flags byte the loader
     # reads -- bit 1 into one material field, bits 2..5 into another -- and it
     # sorts the library by transparency far more sharply than the class byte

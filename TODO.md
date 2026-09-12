@@ -656,6 +656,23 @@ written down is a question nobody reopens.
       names **1769** resources and every one resolves.
       → [docs/13-control.md](docs/13-control.md)
 
+- [x] **The `MAT0` class byte — nothing reads it.** The loader copies byte 4
+      into the runtime material's `+0x154`, and three instructions in the
+      whole of `World3D.dll` name that address: two stores and one accessor
+      that returns its address. The accessor is **slot 9 of the material
+      manager's eleven-slot vtable**, a two-argument call, and no module calls
+      it. The negative is controlled twice over. Following the pointer through
+      the object fields, stack locals and constructor arguments of the only
+      two modules that can hold a manager finds calls through slots 1, 2, 3
+      and 6 — including both sites already published — and none through 9.
+      Then, with no taint at all, **every one of the 87 indirect calls at that
+      vtable offset** in those modules: two have a receiver at an offset a
+      manager is stored at, and both pass three arguments where slot 9 takes
+      two. A renderer loses nothing by ignoring it — the one distinction it
+      draws that a renderer acts on is the ground's second track, and **all 43
+      two-track materials have a class below 5 while no material above it has
+      a second track**. → [docs/07-objects.md](docs/07-objects.md), `analysis/vcalls.py`
+
 ## 1. Wrong on screen today
 
 Nothing known. What is left below is fidelity the game had and this does not,
@@ -760,9 +777,14 @@ The four candidates the arg-counting scan produced are two CRT array-destructor
 helpers calling through a stack argument and two calls of one and three
 arguments on other objects.
 
-**The negative is controlled this time.** The same scan, run for index 3's
+**The negative is controlled twice over.** The same scan, run for index 3's
 offset, returns `Terrain.dll:0x10046917` with the four pushes that entry point
 takes — so a run that finds nothing is the binary's answer, not the search's.
+And `analysis/vcalls.py` now also enumerates **every** indirect call at index
+5's offset with no taint at all: 63 across the two modules, of which two have
+a receiver at an offset a manager is stored at. One passes three arguments
+where index 5 takes five; the other's receiver takes a call at `+0x84`, so it
+has at least 34 slots against this vtable's eleven. Neither is the manager.
 The conclusion stands and is now stronger than "nothing found asks for
 another": the engine's own material fetch **has no track parameter to pass**,
 so reading track 0 is what the engine does, not a default this library picked.
@@ -820,34 +842,15 @@ A negative result worth keeping: an explosion's size is **not** in its effect.
 `exp_frt_l`, `_m` and `_b` share their emitter blocks byte for byte; the 2, 3
 and 4 that separate them are the magnitude in their `.exp`.
 
-### 2.4 The `MAT0` class byte
+### 2.4 Two words in the `MAT0` header
 
-The *useful* half of this is closed and sits in section 0: the archive
-directory's flags byte is the blend mode, and a renderer can read it. What is
-left is the record's own **byte 4**, which sorts the library into eleven
-groups plus an unset `0xFF` — and nothing in the engine follows it.
-
-The record's tail is gated on a **version** that is not in the record either:
-it is the directory entry's second count field, 6 on all 905. At 2 the parser
-reads the bytes at +4 and +5, at 3 a `float32` defaulting to 1.0, at 4 a
-`uint32` defaulting to 0, substituting the default below each. For the two
-bytes that default is `0xFF`, so 0xFF is the engine's own *not set* — which is
-what byte 5 holds on all 905 records and byte 4 on 376. It is not a twelfth
-group.
-
-The other eleven sort the library by role: **0 to 4 hold all 43 two-track
-ground materials**, 5 is 342 object materials, 6 the 87 `TREE*` and foliage, 7
-`WATER` and `WATER_M`, and 8, 9 and 10 three smaller families of 24, 12 and 9.
-That is the shape of a shader id, but the loader copies it into the material
-and **nothing reads it back**: the constant that addresses it, `0x10066b44`,
-appears three times in `World3D.dll` and every one is in the loader or in the
-tiny accessor that hands out its address. Whoever calls that accessor is
-unfound — the same gap as §2.2.
-
-Two smaller unknowns sit beside it. The version-3 `float32` is 1.0 on all 905
-records, and the version-4 `uint32` is 0 on 901 and a *float* on the other
-four — 1000.0 twice and 9999.0 twice — so it is a distance or a range the
-engine reads as a dword.
+The class byte that used to be this entry is [closed](#0-done): the engine
+loads it and never reads it back. Two smaller unknowns survive it. The
+version-3 `float32` is 1.0 on all 905 records, and the version-4 `uint32` is 0
+on 901 and a *float* on the other four — 1000.0 twice and 9999.0 twice — so it
+is a distance or a range the engine reads as a dword. Both land in the runtime
+material beside the class byte, at `+0x15c` and `+0x160`, and both are as
+unread as it is.
 
 ---
 

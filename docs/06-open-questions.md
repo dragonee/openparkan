@@ -89,13 +89,16 @@ and then 2, 1, 1, 1, which reads as two parallel arrays rather than pairs.
 
 ## Unresolved terrain fields
 
-- `MAT0`'s byte 4: eleven values plus an unset `0xFF` that sort materials into
-  groups tracking their names (all six `TREE*` share 6), so it reads as a
-  shader or blend-mode id, but nothing in the engine follows it. The
-  directory's flags byte beside it is the sharper field; see
-  [../TODO.md](../TODO.md) §2.4. The record's tail is the animation-track
-  table and is now read, and the "second colour triple" is the entry's
-  ambient — see [07-objects.md](07-objects.md#the-material-chain).
+- `MAT0`'s byte 4 is **answered, and the answer is that nothing reads it**.
+  Eleven values plus an unset `0xFF` sort materials into groups tracking their
+  names (all six `TREE*` share 6), so it reads as a shader id — but the loader
+  copies it to the runtime material's `+0x154` and the only code that names
+  that field's address is an accessor, slot 9 of the material manager's
+  vtable, which no module calls. The directory's flags byte beside it is the
+  field a renderer wants, and the one distinction the class byte draws that a
+  renderer would act on — the ground's second track — is in the track count
+  already. See [07-objects.md](07-objects.md#the-class-byte-is-loaded-and-never-read)
+  and [../analysis/README.md](../analysis/README.md).
 - Terrain face field 13 (0..62, ~57 distinct per map). **Not** a patch or
   sector id, which earlier drafts guessed: grouping faces by it gives regions
   that span the whole map, no tighter than a random subset of the same size,

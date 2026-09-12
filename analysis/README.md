@@ -163,6 +163,60 @@ Three lessons, all of which had already cost something:
   that step this is the `MisLoad.dll` mistake again.
 
 
+## `vcalls.py`, and a negative with nothing left to assume
+
+```
+uv run --group analysis python analysis/vcalls.py
+```
+
+Asked of the material manager, it answers two of the questions above at once —
+who calls index 5 (`../TODO.md` §2.2) and who reads the `MAT0` class byte
+(§2.4, now closed) — and it does so in two passes, because one pass is not
+enough.
+
+The **first** follows the pointer the way the compiler moves it: into object
+fields, through stack locals, and across call boundaries. That last one
+matters: `Terrain.dll` hands the manager to a five-way factory at `0x10069dd0`
+which hands it on to five constructors, so a scan confined to one frame stops
+short of most of the uses. It reports which slots are called from where.
+
+The **second** drops the taint entirely, because the first has a gap it cannot
+close: a constructor stores the manager into its own object, and following
+*that* field means tainting every object with a field at the same offset,
+which taints the module and answers nothing. So for a slot claimed empty it
+enumerates **every** indirect call at that offset in the modules that can hold
+the object, and discriminates on two things a taint does not need:
+
+- **arity**, from the slot's own `ret n` — a call passing a different number
+  of arguments is not a call to that slot;
+- **vtable width** — if the code elsewhere calls `+0x84` on the same receiver,
+  that object has at least 34 slots against this vtable's eleven.
+
+| address | what |
+|---|---|
+| `0x10002aa0` | `LoadMatManager`: 0x470 bytes, vtable at `+0`, eleven slots |
+| `0x10003ab0` | slot 9 — returns `&material[id].class`, and nobody calls it |
+| `0x100669f0` | the material array, 368 bytes a record; the class byte at `+0x154` |
+| `0x10069dd0` | `Terrain.dll`'s five-way factory, which passes the manager on |
+| `0x1005991f` | the trap: a five-argument call at index 5's offset, on another class |
+
+Four more ways to be wrong, all of which this cost:
+
+- **`ebp` is not always a frame pointer.** `AniMesh.dll` uses it as the object
+  pointer, so `[ebp + 0x14c]` there is a *field*. Testing for a local before
+  testing for a field dropped a real call site silently.
+- **The prologue's pushes are not arguments.** `push ebp; mov ebp, esp; push
+  ecx` looks like two arguments to a naive counter, and it turned a
+  three-argument `__thiscall` into exactly the five-argument call §2.2 says
+  does not exist.
+- **A coarse taint is not a conservative taint.** Growing the field set from
+  every store reached 120 offsets in `Terrain.dll` and reported callers for
+  all eleven slots. An over-approximation that covers everything proves
+  nothing; the useful shape is a precise pass plus an exhaustive one.
+- **An offset is not an identity.** Two objects with a pointer at `+0x8` are
+  not the same class. Ask what else the code calls on the receiver.
+
+
 ## Message dispatch, and the constant that is never compared
 
 `MCMD_WALK_F` (19) was written up as having no handler anywhere, on the

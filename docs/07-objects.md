@@ -781,8 +781,50 @@ and 8 and never 0 or 2.
 The word *additive* is read off the data, not out of the engine — but
 `Ngi32.dll`'s phase table has an `ADD` mode to do it with, and no other
 reading fits a set of black-diffuse, specular-free materials called `*_add`.
-What the record's own class byte at +4 means is still open; this is the field
-a renderer needs.
+This is the field a renderer needs; the record's own class byte at +4, below,
+is not.
+
+### The class byte is loaded and never read
+
+The record's byte 4 sorts the library into eleven groups — the ground in 0 to
+4, object skins in 5, foliage in 6, water in 7, and three smaller families in
+8, 9 and 10, with `0xFF` on the other 376 meaning *not set* rather than a
+twelfth group. It has the shape of a shader id. **The engine never looks at
+it.**
+
+A loaded material is a 368-byte record in a global array in `World3D.dll`, and
+the class byte lands at its `+0x154`:
+
+```
++0x000  a flag, initialised to -1      +0x154  the record's class byte
++0x008  entry count                    +0x158  the record's byte 5
++0x00c  entries, 76 bytes each         +0x15c  the record's float, 1.0
++0x010  track count                    +0x160  the record's dword
++0x014  the tracks                     +0x164  the block index 3 hands out
+```
+
+An entry is 76 bytes because a `D3DMATERIAL7` is 68, plus the texture and the
+cell — which is the same shape the file's 34-byte entry carries, written for
+the API rather than for disk.
+
+Three instructions in the whole of `World3D.dll` name the class field's
+address: two loader stores, and one accessor that computes
+`&material[id].class` and returns it. That accessor is **slot 9 of the
+material manager's eleven-slot vtable**, a two-argument call, and nothing in
+the game calls it. Only two modules can hold a manager — `Terrain.dll`, in
+three separate object fields, and `AniMesh.dll` in one — and following the
+pointer through their fields, their stack locals and the five constructors
+they hand it to finds calls through slots 1, 2, 3 and 6 and none through 9.
+Dropping the taint entirely and enumerating **every** indirect call at that
+vtable offset in both modules — 87 of them — leaves two whose receiver sits at
+an offset a manager is stored at, and both pass three arguments where slot 9
+takes two. See [../analysis/README.md](../analysis/README.md).
+
+So a renderer that ignores the class byte loses nothing measurable: the only
+distinction it draws that a renderer would act on is which materials carry the
+ground's second track, and **all 43 of those have a class below 5 while no
+material above it has a second track at all** — the track count says it
+already.
 
 ### Two signals, and both are used
 
