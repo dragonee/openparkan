@@ -258,11 +258,24 @@ faces whose layer-1 material is `WATER_BOT` or `ENV_LAVA_BOT`, and on no other
 face of any map. So the ground under a lake says so itself — the third way a
 map marks its liquids, beside the surface bit and the flags value 1544.
 
-Field 1, the surface word, keeps one secret: bit `0x10` is set on about 95% of
-faces and clear on the rest, in connected regions rather than scattered, and
-it tracks *none* of slope, elevation, material, level of detail, map edge,
-duplication between levels, or coverage by the navigation mesh. It is clear on
-every lava bed and on patches of ordinary ground.
+Field 1, the surface word, has two bits in use, and the second one is
+**lava**. Bit `0x10` is clear on lava and on the bed beneath it, and set on
+everything else: on the **29 of 33 maps that set the bit anywhere**, the faces
+carrying it clear are *exactly* the faces whose layer-1 material names lava —
+all **6711** of them across the library, surfaces and beds alike, with no
+exception on any map. The other four files never set it and contain no lava,
+so `LandMesh.marks_lava` asks first; on those a clear bit means nothing.
+
+An earlier reading of this field said "set on about 95% of faces and clear on
+the rest, in connected regions, tracking none of slope, elevation, material,
+level of detail, map edge, duplication between levels, or coverage by the
+navigation mesh". The 95% was real and the conclusion was not, and the reason
+is worth keeping: **the maps were pooled.** The four files that never set the
+bit contribute 23439 clear faces with no lava under them, which buries the
+6711 that carry the signal. Per map the correspondence is exact and obvious.
+It was also read as "clear on every lava bed and on patches of ordinary
+ground" — the ordinary ground was those four maps, and two of them,
+`SC_1` and `Net_4_01`, are the same file under two names.
 
 ## Stream 11 is the order to draw the faces in
 

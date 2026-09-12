@@ -40,7 +40,7 @@ FACE, as 14 little-endian uint16::
 
      0  flags over a constant 0x600: bit 0x004 marks a face with a second
         texture layer, 0x008 water and 0x2000 the bed beneath a liquid
-     1  surface bitfield; bit 0x02 marks water
+     1  surface bitfield; bit 0x02 marks water and bit 0x10 is clear on lava
      2  lo byte = layer-1 texture index, hi byte = layer-2 (0xFF = none);
         both index the map's Land1.wea / Land2.wea name tables
      3  always 0xFFFF
@@ -123,6 +123,18 @@ FLAGS_LAYER2_BIT = 0x0004
 #: not an enum: the observed values are 0, 2, 16 and 18, and testing ``== 2``
 #: silently misses every water face that also carries bit 16.
 SURFACE_WATER_BIT = 0x02
+
+#: Bit 4 of the surface word is **clear on lava and on its bed, and set on
+#: everything else**.  On the 29 maps that set it anywhere, the faces with it
+#: clear are *exactly* the faces whose layer-1 material names lava -- all 6711
+#: of them across the library, surfaces and beds alike.  The other four map
+#: files never set it, and they contain no lava; ``LandMesh.marks_lava`` says
+#: which kind a map is, because on those four a clear bit means nothing.
+#:
+#: Pooling the maps is what hid this: the four that never set the bit
+#: contribute 23439 clear faces with no lava under them, which buries the 6711
+#: that carry the signal and leaves "about 95% set, in connected regions".
+SURFACE_NOT_LAVA_BIT = 0x10
 
 #: Face flags word carried by every water face, on every map that has water.
 #: An independent corroboration of SURFACE_WATER_BIT.
@@ -211,6 +223,23 @@ class LandMesh:
         ys = [p[1] for p in self.positions]
         zs = [p[2] for p in self.positions]
         return (min(xs), min(ys), min(zs)), (max(xs), max(ys), max(zs))
+
+    @property
+    def marks_lava(self) -> bool:
+        """Whether this map uses the surface word's lava bit at all.
+
+        Four of the 33 files never set it.  On those a clear bit says nothing,
+        so asking ``is_lava`` of them would call the whole map lava.
+        """
+        return any(v & SURFACE_NOT_LAVA_BIT for v in self.face_surface)
+
+    def is_lava(self, face: int) -> bool:
+        """Whether a face is lava or the bed beneath it.
+
+        False throughout on a map that does not mark lava -- and none of the
+        four such maps has any.
+        """
+        return self.marks_lava and not self.face_surface[face] & SURFACE_NOT_LAVA_BIT
 
     def is_water(self, face: int) -> bool:
         """Whether a face is part of a water surface."""

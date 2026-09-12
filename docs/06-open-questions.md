@@ -105,10 +105,13 @@ and then 2, 1, 1, 1, which reads as two parallel arrays rather than pairs.
   on every map tried. It is interleaved in face order, does not determine the
   texture pair or the surface word, and does not track elevation. Its groups
   are wildly uneven — 1, 2, 4 and 384 faces on SC_3.
-- The surface word's bit `0x10`: set on about 95% of faces and clear on the
-  rest in connected regions, tracking none of slope, elevation, material,
-  level of detail, map edge, duplication between levels or coverage by the
-  navigation mesh.
+- The surface word's bit `0x10` is **answered: it is clear on lava**. On the
+  29 of 33 maps that set it anywhere, the faces with it clear are exactly the
+  faces whose layer-1 material names lava — 6711 across the library, surfaces
+  and beds alike. The four that never set it have no lava. The old reading,
+  "about 95% set, in connected regions, tracking nothing", came of pooling the
+  maps: those four files contribute 23439 clear faces with nothing under them.
+  See [03-terrain.md](03-terrain.md).
 - The draw order's flags bit `0x80`, on 89 faces across the 33 maps. The rest
   of the face record is read: flags `0x004` is a second texture layer, `0x008`
   water and `0x2000` a liquid bed; fields 10..12 are the face's own normal;

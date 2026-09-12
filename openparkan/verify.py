@@ -202,6 +202,29 @@ def check_terrain(check, game: Path) -> None:
     check("Land.msh: int8/127 normals are unit length", normal_err < 0.02,
           f"worst deviation {normal_err:.4f} across all maps")
 
+    # The surface word's bit 0x10 is clear on lava and set on everything else.
+    # Pooling the maps hides it: four files never set the bit and have no lava,
+    # and their clear faces outnumber the ones that carry the signal.
+    exact = using = lava_faces = unused = 0
+    for folder in maps:
+        mesh = landmesh.load(folder / "Land.msh")
+        names = [n.upper() for n in mesh.layer1_names]
+        lava = {i for i, t in enumerate(mesh.face_tex1)
+                if "LAVA" in (names[t] if t < len(names) else "")}
+        lava_faces += len(lava)
+        if mesh.marks_lava:
+            using += 1
+            exact += lava == {i for i in range(len(mesh.faces)) if mesh.is_lava(i)}
+        else:
+            unused += 1 if not lava else 0
+    check("Land.msh: the surface word's bit 0x10 is clear on lava",
+          exact == using and unused == len(maps) - using,
+          f"on all {exact}/{using} maps that set the bit, the faces with it "
+          f"clear are exactly the faces whose layer-1 material names lava -- "
+          f"{lava_faces} of them in the library, surfaces and beds alike.  The "
+          f"other {unused} maps never set it and have no lava, which is why "
+          f"pooling the maps made it look like a 95/5 split with no meaning")
+
 
 def check_grid(check, game: Path) -> None:
     """Stream 2 is the map's own spatial index -- the engine shipped one."""

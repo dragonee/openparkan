@@ -656,6 +656,19 @@ written down is a question nobody reopens.
       names **1769** resources and every one resolves.
       → [docs/13-control.md](docs/13-control.md)
 
+- [x] **The terrain surface word's bit `0x10` — it is lava.** Clear on lava
+      and on the bed beneath it, set on everything else. On the **29 of 33
+      maps that set the bit anywhere**, the faces with it clear are *exactly*
+      the faces whose layer-1 material names lava — all **6711** across the
+      library, surfaces and beds alike, no exception on any map. The other
+      four never set it and have no lava. The old reading — "about 95% set, in
+      connected regions, tracking none of slope, elevation, material, level of
+      detail, map edge, duplication or the navigation mesh" — came of
+      **pooling the maps**: those four files contribute 23439 clear faces with
+      nothing under them, burying the 6711 that carry the signal. Two of them,
+      `SC_1` and `Net_4_01`, are the same file under two names.
+      → [docs/03-terrain.md](docs/03-terrain.md)
+
 - [x] **The `MAT0` class byte — nothing reads it.** The loader copies byte 4
       into the runtime material's `+0x154`, and three instructions in the
       whole of `World3D.dll` name that address: two stores and one accessor
