@@ -4110,6 +4110,54 @@ def check_saves(check, game: Path) -> None:
           f"-- and {varying} of {len({n for n, _ in steps})} names appear with "
           f"two counts, so it is partly the instance's own")
 
+    rising = counted = 0
+    for path in save.saves(game):
+        s = save.read(path)
+        blob = path.read_bytes()
+        order = []
+        for r in sorted(s.references, key=lambda r: r.offset):
+            if r.field != save.MEMBER_AT[1] or not r.member.startswith(save.SCENERY):
+                continue
+            at = r.offset + save.WORLD_INDEX_AT
+            if at + 2 > len(blob):
+                continue
+            value = struct.unpack_from("<H", blob, at)[0]
+            if value != save.NO_INDEX:
+                order.append(value)
+        if order:
+            counted += 1
+            rising += all(b > a for a, b in zip(order, order[1:], strict=False))
+    check("saves: a scenery record carries an index that rises in file order",
+          counted and rising == counted,
+          f"{rising}/{counted} saves with scenery hold a uint16 at "
+          f"+{save.WORLD_INDEX_AT:#x} that only increases down the file -- an "
+          f"identity assigned in order, and not an index into the mission's "
+          f"own lists")
+
+    kinds = defaultdict(lambda: [0, 0, 0])
+    library = game / descriptions.LIBRARY
+    if library.exists():
+        parts = descriptions.read(library)
+        for path in save.saves(game):
+            blob = path.read_bytes()
+            for r in save.read(path).references:
+                part = parts.get(r.member)
+                if (r.field != save.MEMBER_AT[0] or part is None
+                        or r.offset + 76 > len(blob)):
+                    continue
+                a, b, _ = struct.unpack_from("<3i", blob, r.offset + save.PART_FIELDS[0])
+                row = kinds[part.kind]
+                row[0] += 1
+                row[1] += a != 0
+                row[2] += b != 0
+        ammo = kinds.get("AMM", [0, 0, 0])
+        check("saves: the part record's two ints belong to different kinds",
+              ammo[0] and ammo[1] == ammo[0] and ammo[2] == 0,
+              f"all {ammo[0]} ammunition records carry a value at "
+              f"+{save.PART_FIELDS[0]} and zero at +{save.PART_FIELDS[1]}; "
+              + ", ".join(f"{k} {v[1]}/{v[0]} and {v[2]}/{v[0]}"
+                          for k, v in sorted(kinds.items()) if k != "AMM"))
+
     placed_hits = placed_total = 0
     for path in save.saves(game):
         s = save.read(path)

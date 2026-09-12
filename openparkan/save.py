@@ -106,6 +106,28 @@ WORLD_STEP = 8
 #: Members whose name marks them as the map's furniture rather than a machine.
 SCENERY = ("s_tree", "s_stone")
 
+#: A ``uint16`` in the world record's fixed part.  On scenery it **rises
+#: strictly in file order** in every save that has any, with ``NO_INDEX`` for
+#: absent -- so it is an identity of some kind, assigned in order.  It is not
+#: an index into the mission's object list, nor into its statics or its
+#: non-statics: tested under every shift, nothing matches.
+#:
+#: On other object classes the same offset is not that field at all.  On 14
+#: records of one save it holds the low half of ``1.0f``.  **The 450-byte
+#: record is not one layout** -- the classes differ, which is what a dump of
+#: live objects looks like.
+WORLD_INDEX_AT = 0x1BE
+
+#: What that field holds where it holds nothing.
+NO_INDEX = 0xFFFF
+
+#: The three ``int32`` that end a part record.  ``+64`` and ``+68`` are used
+#: by different kinds of part rather than by all of them: ammunition carries
+#: 10..20 at ``+64`` and **0 at +68 on every record**, weapons carry 1..7 at
+#: ``+64``, and buildings, devices and chassis mostly carry 0 there and vary
+#: at ``+68`` instead.  ``+72`` is the ordinal `18-vocabulary.md` describes.
+PART_FIELDS = (64, 68, 72)
+
 #: Archives a save is known to name.
 ARCHIVES = ("objects.rlb", "effects.rlb")
 

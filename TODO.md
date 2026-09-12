@@ -973,6 +973,12 @@ today; each is a small trap for anyone extending the code.
   take none and none takes more than one, while all 45 others take at least
   one — and three of 24 names appear with two counts, so it is partly
   per-instance. What it counts is open.
+  The world record's `uint16` at `+0x1be` rises in file order on scenery and
+  is not an index into any mission list; the same offset on other classes is
+  not the same field, so the 450 bytes are a size and not a layout. In the
+  part record only the last twelve bytes are fields, and `+64`/`+68` belong to
+  different kinds — ammunition alone always uses `+64` (10 to 20, a round
+  count is the guess) and never `+68`.
   **Positions are not in a save** as a `float32` triple in the mission's frame,
   under any axis order or sign, nor as `float64` — 10 chance matches across the
   six saves against 123 placed positions. → [docs/17-saves.md](docs/17-saves.md) Whether the header's second

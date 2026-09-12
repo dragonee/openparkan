@@ -121,6 +121,49 @@ makes it at least partly the instance's own state. A list of attached parts
 remains the obvious reading and is still a **guess**; what is measured is the
 split and the variation.
 
+## Inside the world record
+
+The fixed part carries a `uint16` at **+0x1be** that, on scenery, **only ever
+increases down the file** — 7, 8, 9, 10, 12, 14, 22 in one save — with
+`0xffff` where it holds nothing. Five of the six saves have scenery and all
+five rise. So it is an identity assigned in order.
+
+It is **not an index into the mission**: not into its object list, not into
+its statics, not into its non-statics, under any shift. `slot3`'s counter 9 is
+`s_tree_54` where the mission's ninth object is `s_tree_93`, and the offsets
+between the two orders are not even constant.
+
+And the same offset is **not the same field on every object**. On fourteen
+records of `slot1` it holds the low half of `1.0f` instead. So the 450-byte
+record is a size, not a layout: the classes inside it differ, which is what a
+dump of live objects looks like and why this is hard.
+
+## Inside the part record
+
+A census of all 1158 part records puts real fields only in the last twelve
+bytes. Everything before is the 32-byte archive field, the 32-byte member
+field, and the uninitialised tails of both.
+
+The three `int32` are **not three fields every part uses.** They split by what
+the part is:
+
+| kind | non-zero at `+64` | non-zero at `+68` |
+|---|---:|---:|
+| `AMM` ammunition | **69 of 69** | **0 of 69** |
+| `WPN` weapons | 165 of 165 | 165 of 165 |
+| `SHS` chassis | 8 of 65 | 65 of 65 |
+| `BLD` buildings | 7 of 43 | 43 of 43 |
+| `DVC` devices | 146 of 615 | 530 of 615 |
+
+**Ammunition is the only kind that never uses `+64`'s neighbour**, and the
+only kind that always uses `+64`, where it holds 10 to 20. A round count is
+the obvious reading and `objects.dlb` cannot confirm it: its stat rows name
+the fields a part displays (`Weight`, `Blast area`, `Damage`) without giving
+values, so there is no capacity to compare against. **Guess**, marked as one.
+
+`+72` is the ordinal [18-vocabulary.md](18-vocabulary.md) describes, still
+unexplained.
+
 ## What a save does not contain
 
 **Where anything stands.** Searching an entire save on four-byte alignment for
