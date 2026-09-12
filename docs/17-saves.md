@@ -164,6 +164,40 @@ values, so there is no capacity to compare against. **Guess**, marked as one.
 `+72` is the ordinal [18-vocabulary.md](18-vocabulary.md) describes, still
 unexplained.
 
+## Three ways in that do not work
+
+Written down because each is the obvious next idea, and each costs an
+afternoon to rule out.
+
+**The pointers do not resolve to file offsets.** A heap dump usually keeps its
+pointers, and if the file were a contiguous image of a heap region then
+`file offset = address - base` for one constant base. It is not. Taking every
+plausible pointer value and every known record offset, and asking which delta
+maps the most *distinct* records, the best reaches **3 of 540** — noise. The
+records were written one at a time, not copied as a block, so a pointer
+identifies an object only to the engine that wrote it.
+
+**The part record has no identity.** If a record held its own address, the
+graph could be rebuilt from the file alone. No field in the 76 bytes is unique
+per record: across 114 records in one save the most varied field holds **26
+distinct values**, and most hold fewer than ten. A part record is a *value* —
+a kind and some state — not an entity something else can point at.
+
+**Two saves of one mission differ mostly in rubbish.** `slot3` and `slot5` are
+the same mission and **90.4% identical**. The differences are regular — one
+two-byte change per world record, every 450 bytes — which looks like the
+signal until you read it: the dword at `+0x54` is `0x0019f4e8` in `slot1`,
+which is the Windows main-thread **stack** range. It is uninitialised buffer,
+and it differs because the two saves were written with a different stack under
+them. Differential analysis works mechanically; those two saves are simply
+nearly the same state.
+
+That last one is worth keeping as a **tool**: a field holding `0x0019xxxx` is
+stack junk, and so is a field that differs between two saves of identical
+state. Mapping the rubbish before decoding anything is the way to avoid
+inventing meaning for it — which this project has already done once, with the
+`R_L_03` "research part id" that was really a case-sensitivity bug.
+
 ## What a save does not contain
 
 **Where anything stands.** Searching an entire save on four-byte alignment for

@@ -979,6 +979,11 @@ today; each is a small trap for anyone extending the code.
   part record only the last twelve bytes are fields, and `+64`/`+68` belong to
   different kinds — ammunition alone always uses `+64` (10 to 20, a round
   count is the guess) and never `+68`.
+  Three routes in are ruled out and written up: **pointers do not resolve** to
+  file offsets under any constant base (best delta reaches 3 of 540 records),
+  the **part record carries no identity** (no field is unique per record), and
+  two saves of one mission differ **mostly in stack rubbish** -- the giveaway
+  being `0x0019xxxx`, the Windows main-thread stack range.
   **Positions are not in a save** as a `float32` triple in the mission's frame,
   under any axis order or sign, nor as `float64` — 10 chance matches across the
   six saves against 123 placed positions. → [docs/17-saves.md](docs/17-saves.md) Whether the header's second
