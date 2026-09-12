@@ -155,8 +155,14 @@ NULL = -1
 #: The shared symbol table every script draws on, in ``MISSIONS/SCRIPTS``.
 VARSET = "varset.var"
 
-#: The two things ``varset.var`` declares.
+#: The two forms ``varset.var`` documents in its own header.  Only ``VAR`` is
+#: ever used: the shipped file has no ``STRING`` declaration at all.
 DECLARATIONS = ("VAR", "STRING")
+
+#: The types those declarations carry, and how many of each.  ``ai.dll`` can
+#: hold at least six -- its value formatter switches six ways on a type tag --
+#: so the scripts use two of the interpreter's types.
+TYPES = {"DWORD": 200, "float": 31}
 
 #: Declarations 0 to 22 are the read-only pool -- the float and integer
 #: literals 0..9, and the three values the engine writes itself.  A node's

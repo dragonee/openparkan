@@ -133,6 +133,22 @@ Read the file in order or not at all: eleven declarations end in a stray `;`
 and four of those sit in the middle, so a parser that drops them shifts every
 index after it.
 
+**Two types are declared and a third is only documented.** All 231 are `VAR`:
+**200 `DWORD` and 31 `float`**, and the `STRING(...)` form the header
+advertises is never used once. The engine is readier than the data: `ai.dll`
+carries a value formatter that switches six ways on a type tag — a string
+copy, decimal through `itoa`, a hex form that writes its own `0x`, a boolean
+test and two more — and fourteen near-identical methods switch on the same
+tag. So the script vocabulary uses two of at least six types the interpreter
+can hold. Which tag is which type is not established.
+
+A negative worth keeping, now checked exhaustively rather than by search:
+**there is no 73-entry switch in `ai.dll`.** Enumerating every jump table in
+the binary — 72 of them — the widest has **13 entries**, so the 73 function
+ids are not dispatched by a switch anywhere. The 70-entry handler table the
+loader builds remains the only dispatch, and the id-to-slot mapping stays
+open.
+
 ### Which slot reads and which writes
 
 `head[1]` is the node's **destination**, and the corpus proves it rather than

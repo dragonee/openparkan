@@ -3912,6 +3912,21 @@ def check_behaviour(check, game: Path) -> None:
           f"while {len(read)} of them are read as operands")
 
 
+def check_varset_types(check, game: Path) -> None:
+    """varset.var declares two of the three forms its own header documents."""
+    declarations = behaviour.variables(game)
+    if not declarations:
+        return
+    kinds = Counter(v.kind for v in declarations)
+    types = Counter(v.type for v in declarations)
+    check("behaviour: the scripts use two types and never the third form",
+          set(kinds) == {"VAR"} and dict(types) == behaviour.TYPES,
+          f"{len(declarations)} declarations, all VAR -- "
+          + ", ".join(f"{n} {t}" for t, n in sorted(types.items()))
+          + f"; the {behaviour.DECLARATIONS[1]}(...) form the file's own header "
+            f"documents is never used")
+
+
 def check_research(check, game: Path) -> None:
     """The research tree: MISSIONS/SCRIPTS/*.trf."""
     paths = research.trees(game)
@@ -4700,6 +4715,7 @@ def run(game: Path) -> int:
         check_behaviour, check_research, check_descriptions, check_saves,
         check_vocabulary, check_resources, check_briefing, check_settings,
         check_research_streams, check_atmosphere_events,
+        check_varset_types,
     )
     for fn in checks:
         fn(check, game)

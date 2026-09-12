@@ -929,7 +929,9 @@ today; each is a small trap for anyone extending the code.
   (`ai.dll:0x100122b5`, which confirms the node's two forms from the code) and
   so is its 70-entry handler table (`0x1000129e`), but **none of the handlers
   references a string** and 70 slots cannot cover the 73 ids the scripts use,
-  so the id-to-slot mapping is open too. The node's tags are read
+  so the id-to-slot mapping is open too. There is no 73-entry switch either,
+  and that is now exhaustive rather than a search result: all **72** jump
+  tables in `ai.dll` were enumerated and the widest holds 13 entries. The node's tags are read
   the same way round: 1 closes a block, 3, 4 and 5 end one, 2 marks where a
   handler stops planning — but whether tag 3's `fPry` weight is a priority,
   and what separates the three exits, is not. The flag bit on 55 literals

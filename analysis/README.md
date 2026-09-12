@@ -73,6 +73,16 @@ the research tree. Useful addresses, all in `ai.dll`:
 See [../docs/15-behaviour.md](../docs/15-behaviour.md). The handlers carry no
 strings, so the binary does not name them.
 
+**No 73-entry switch, checked exhaustively.** Enumerating every jump table in
+`ai.dll` rather than searching for one -- match `jmp dword ptr [reg*4 + T]`
+and read the `cmp` that guards it -- gives **72 tables, the widest 13
+entries**. So the negative holds, and now for a reason that does not depend on
+what the search was looking for. Fourteen of those tables are the same 6-way
+switch on a value's type tag (`0x100127b0` and its neighbours): a string copy,
+`itoa` base 10, a hex form that writes its own `0x`, and a boolean test. The
+scripts declare only `DWORD` and `float`, so the interpreter holds more types
+than `varset.var` uses.
+
 
 ## The component registry
 
