@@ -233,6 +233,21 @@ def check_terrain(check, game: Path) -> None:
                     continue
                 twins += 1
                 mutual += mesh.adjacency[adj[e]][back] == i
+    # The draw-order flags byte has exactly four values across the library, and
+    # two of its bits are set on every entry, so they carry nothing.
+    seen = Counter()
+    for folder in maps:
+        seen.update(landmesh.load(folder / "Land.msh").draw_flags)
+    always = 0xFF
+    for v in seen:
+        always &= v
+    check("Land.msh: the draw order's flags byte takes four values",
+          len(seen) == 4 and always == 0x48,
+          f"{dict(sorted(seen.items()))} over {sum(seen.values())} entries; "
+          f"0x08 and 0x40 are set on every one and say nothing, 0x10 opens a "
+          f"batch, and 0x80 is on {sum(n for v, n in seen.items() if v & 0x80)} "
+          f"entries of two maps")
+
     check("Land.msh: field 13 is the winged-edge link",
           mutual == twins and free_ok == slots,
           f"each edge's 2-bit code names the matching edge back in its "

@@ -113,10 +113,16 @@ and then 2, 1, 1, 1, which reads as two parallel arrays rather than pairs.
   "about 95% set, in connected regions, tracking nothing", came of pooling the
   maps: those four files contribute 23439 clear faces with nothing under them.
   See [03-terrain.md](03-terrain.md).
-- The draw order's flags bit `0x80`, on 89 faces across the 33 maps. The rest
-  of the face record is read: flags `0x004` is a second texture layer, `0x008`
-  water and `0x2000` a liquid bed; fields 10..12 are the face's own normal;
-  and the draw order's `0x10` opens a batch.
+- The draw order's flags bit `0x80`. The byte takes **exactly four values**
+  across the library — `0x48`, `0x58`, `0xc8`, `0xd8` — so `0x08` and `0x40`
+  are set on every one of the 275882 entries and say nothing, `0x10` opens a
+  batch, and `0x80` is left. It is on **89 entries of two maps only**, `ILKON`
+  (76) and `SC_3` (13), in short runs mostly of length 2. The faces it marks
+  are ordinary: median area, free-edge count and level of detail all match the
+  rest of their map, and they are not degenerate or duplicated. The rest of
+  the face record is read: flags `0x004` is a second texture layer, `0x008`
+  water and `0x2000` a liquid bed, and fields 10..12 are the face's own
+  normal.
 
 ## Textures
 
