@@ -44,6 +44,35 @@ n x string  sound files
 uint32[10]  a kind word, then the hour and the minute
 ```
 
+Bytes **64 and 68** of the header are two `uint32` holding **how long one
+in-game day lasts in real time**, as hours then minutes. They sit inside the
+72-byte block repeated ahead of every further section, so each section
+declares its own. 21 of the 29 missions run a day in a quarter of an hour:
+
+| hours, minutes | seconds | files |
+|---|---|---|
+| 0, 15 | 900 | 21 |
+| 0, 40 | 2400 | 3 |
+| 0, 20 | 1200 | 2 |
+| 0, 9 | 540 | 1 |
+| 24, 0 | 86400 | 2 |
+
+The engine keeps `hours * 3600 + minutes * 60` per entry and maps a keyframe's
+24-hour clock stamp onto it linearly — `clock_seconds * that / 86400` — so on
+a 15-minute day noon falls 450 seconds in. `CAtmosphere::CAtmosphere` runs the
+whole span through `CAtmData::GetTimeDiffInSec` and keeps the answer in
+milliseconds.
+
+The two files declaring a full **24 hours** are the giveaway, and they are the
+check: a sky that keeps real time never visibly moves, and those two carry
+**5 keyframes against a minimum of 12** everywhere else. They have nothing to
+animate. The chain is `CAtmosphere::CAtmosphere` (`Terrain.dll:0x1006ec30`) ->
+`0x1006fab0` -> `CAtmData` slot 3 (`0x1006a5d0`), which returns an array the
+constructor fills from the reader's `0x100695b0`. That the array's source is
+*this* pair of header words is the reading rather than a traced byte: it is
+the only varying time-shaped pair in the header, it is inside the repeated
+section block, and it sorts the static skies out exactly.
+
 A **string** is an `int32` length followed by that many bytes with no
 terminator, which is what `MFile`'s string reader does — `Terrain.dll`'s
 deserialiser is an unoptimised run of `fread(ptr, 4, 1, file)` calls, so the
@@ -402,11 +431,12 @@ each body once and stops neither.
 
 ## Not resolved
 
-- **The sun's lifetime.** The block's first field is a duration in seconds
-  that `GetEvents` computes by mapping the start and stop keyframes' clock
-  times through a per-section scale and taking the difference, wrapping round
-  the section. The scale comes from a virtual call whose meaning is not
-  pinned down, so the number is not reproduced here — only what it is for.
+- **The sun's lifetime** is now computable. `GetEvents` maps the start and
+  stop keyframes' clock times through the scale and takes the difference,
+  wrapping round the section — and the scale is the declared day length
+  above, so the duration is `(stop - start) * day_seconds / 86400`. What is
+  left is only that no shipped file has been walked end to end against a
+  running game to confirm the wrap.
 - **Snow.** No shipped mission names it, so there is nothing to switch on.
   `SNOWFLAKE` resolves — it is cell 20 of `EFFECT6.0`, a 16 x 16 icon — and
   the viewer would draw it the same way it draws rain if a mission asked.
@@ -418,6 +448,8 @@ each body once and stops neither.
   the count is not in them. The reader takes the second section's keyframes to
   the end of the file, which consumes all six exactly.
 - Which field selects the object type.
-- The rest of the 124-byte file header. It holds `23, 59` where a time would
-  go, `6939832` twice, and a couple of small counts.
+- The rest of the 124-byte file header. Bytes 64 and 68 are the day length,
+  above. It still holds `23, 59` where a time would go — the same
+  hours-and-minutes shape, constant on all 29 — `6939832` twice, and a couple
+  of small counts.
 - Slots 0, 5, 15–17, 19–21 of the colour block, and the trailer past the time.

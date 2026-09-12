@@ -134,6 +134,22 @@ class Module:
     def in_text(self, va: int) -> bool:
         return self.va0 <= va < self.end
 
+    def offset(self, va: int) -> int | None:
+        """The file offset of a virtual address, or None where it has none.
+
+        A section's virtual size can run past what the file holds; an address
+        in that tail maps to no bytes at all, and computing one arithmetically
+        reads whatever section follows.
+        """
+        rva = va - self.base
+        for s in self.pe.sections:
+            span = max(s.Misc_VirtualSize, s.SizeOfRawData)
+            if s.VirtualAddress <= rva < s.VirtualAddress + span:
+                if rva - s.VirtualAddress >= s.SizeOfRawData:
+                    return None
+                return s.PointerToRawData + (rva - s.VirtualAddress)
+        return None
+
     def section_of(self, va: int) -> str | None:
         rva = va - self.base
         for s in self.pe.sections:
@@ -141,6 +157,11 @@ class Module:
             if s.VirtualAddress <= rva < s.VirtualAddress + span:
                 return s.Name.rstrip(b"\0").decode("latin-1", "replace")
         return None
+
+    def dword(self, va: int) -> int:
+        """The dword at a virtual address, or 0 where it has no bytes."""
+        off = self.offset(va)
+        return 0 if off is None else int.from_bytes(self.raw[off:off + 4], "little")
 
     def masked(self) -> bytes:
         """`.text` with every relocated dword blanked.

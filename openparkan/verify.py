@@ -1664,6 +1664,35 @@ def check_sky(check, game: Path) -> None:
           f"every keyframe of their first section")
     check("sky.ske: keyframes run in time order", ordered >= parsed * 0.9,
           f"{ordered}/{parsed} files are sorted by time")
+
+    # Bytes 64 and 68 of the header say how long one in-game day lasts in real
+    # time.  The engine keeps `hours * 3600 + minutes * 60` and scales every
+    # keyframe's clock stamp against it; the give-away in the data is that the
+    # files declaring a full 24 hours -- a sky that keeps real time, so never
+    # visibly moves -- are exactly the ones with the fewest keyframes.
+    days = Counter()
+    static, static_frames, moving_frames = [], [], []
+    for path in files:
+        try:
+            atmosphere = sky.load(path)
+        except sky.SkyFormatError:
+            continue
+        hours, minutes = atmosphere.day
+        days[(hours, minutes)] += 1
+        if (hours, minutes) == sky.STATIC_DAY:
+            static.append(path.parent.name)
+            static_frames.append(len(atmosphere))
+        else:
+            moving_frames.append(len(atmosphere))
+    sane = all(h <= 24 and mi < 60 for h, mi in days)
+    check("sky.ske: a header says how long one day lasts",
+          sane and bool(static) and max(static_frames) < min(moving_frames),
+          f"bytes 64 and 68 read as hours and minutes on all "
+          f"{sum(days.values())} files: {dict(sorted(days.items()))}.  The "
+          f"{len(static)} declaring a full {sky.STATIC_DAY[0]} hours carry "
+          f"{max(static_frames)} keyframes against a minimum of "
+          f"{min(moving_frames)} everywhere else -- a sky that keeps real "
+          f"time has nothing to animate")
     # sky.wea is a fixed role table, and every slot resolves.
     lib = materials.MaterialLibrary(game / "Material.lib")
     textures = NResArchive.open(game / "Textures.lib")

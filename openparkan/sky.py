@@ -102,6 +102,19 @@ FLOAT_SLOTS = (6,)
 #: Slots whose colour tracks the time of day; see the module docstring.
 DAY_CYCLE_SLOTS = (1, 2, 3, 4)
 
+#: How long one in-game day lasts in real time, as ``uint32`` hours then
+#: ``uint32`` minutes, at bytes 64 and 68 of the header -- inside the 72-byte
+#: block that is repeated ahead of every further section, so each section
+#: declares its own.  ``CAtmData`` keeps ``hours * 3600 + minutes * 60`` per
+#: entry and the engine maps a keyframe's 24-hour clock stamp onto it as
+#: ``clock_seconds * that / 86400``; ``CAtmosphere::CAtmosphere`` turns the
+#: total into milliseconds.  See ``docs/10-sky.md``.
+DAY_LENGTH_AT = 64
+#: Seconds in the clock day a stamp is scaled against.
+CLOCK_DAY = 86400
+#: What a file says when its sky does not move: a day that lasts a real day.
+STATIC_DAY = (24, 0)
+
 #: The five kinds of atmosphere object, numbered as ``Terrain.dll``'s
 #: type-name switch numbers them (the jump table at ``0x10070024``).
 OBJECT_TYPES = {0: "SUN", 1: "SKY", 2: "RAIN", 3: "SNOW", 4: "LIGHTNING"}
@@ -336,6 +349,27 @@ class Atmosphere:
 
     def __len__(self) -> int:
         return len(self.keyframes)
+
+    @property
+    def day(self) -> tuple[int, int]:
+        """How long one in-game day lasts in real time, as (hours, minutes)."""
+        if len(self.header) < DAY_LENGTH_AT + 8:
+            return (0, 0)
+        return struct.unpack_from("<2I", self.header, DAY_LENGTH_AT)
+
+    @property
+    def day_seconds(self) -> int:
+        """The same, in seconds -- what the engine keeps."""
+        hours, minutes = self.day
+        return hours * 3600 + minutes * 60
+
+    def real_seconds(self, hour: int, minute: int) -> float:
+        """When in real time a keyframe's clock stamp falls.
+
+        The engine's own arithmetic: the stamp's seconds since midnight,
+        scaled by the declared day length over a 24-hour clock.
+        """
+        return (hour * 3600 + minute * 60) * self.day_seconds / CLOCK_DAY
 
     def at(self, hour: int, minute: int = 0) -> Keyframe | None:
         """The keyframe in force at a time of day.

@@ -727,11 +727,18 @@ reaches the record from a **240-byte runtime keyframe** at `+0x28` (the filler
 is `0x100692d0`, hour at `+0x14` and minute at `+0x18`), so the next handle is
 whatever fills that keyframe from the file.
 
-**The sun's lifetime is half answered.** The collector's conversion is
-`t = (hour * 3600 + minute * 60) * scale / 86400` — seconds since midnight,
-through a per-section scale, over a day. What the scale *is* comes from a
-virtual call on the same object and is the last piece. It changes nothing on
-screen: the start and stop keyframes already say when the sun is up.
+**The scale is answered: it is how long a day lasts.** The collector's
+conversion is `t = (hour * 3600 + minute * 60) * scale / 86400` — seconds
+since midnight, through a scale, over a day — and the scale comes from
+`CAtmData` slot 3, an array the constructor fills as `hours * 3600 +
+minutes * 60` from the `.ske` reader. In the file that pair is at header
+**bytes 64 and 68**: **21 of the 29 missions run an in-game day in 15 real
+minutes**, three in 40, two in 20, one in 9, and two declare a full 24 hours.
+Those last two are the check — a sky keeping real time never visibly moves,
+and they carry 5 keyframes against a minimum of 12 everywhere else.
+`CAtmosphere::CAtmosphere` runs the span through `GetTimeDiffInSec` and keeps
+it in milliseconds. It changes nothing on screen; it makes the sun's lifetime
+computable. See [docs/10-sky.md](docs/10-sky.md).
 
 One smaller unknown sits in the same file: most of the 124-byte header. The
 other, the keyframe count of a second section, is answered -- a second section

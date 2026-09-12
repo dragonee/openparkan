@@ -659,7 +659,7 @@ at = "0x1006ec30"
 kind = "function"
 name = "CAtmosphere::CAtmosphere"
 doc = "the binary's own assertion text"
-read = false
+read = true
 
 [[entry]]
 module = "Terrain.dll"
@@ -1285,3 +1285,68 @@ name = "M_ISystemArealMap::GetLIDByName"
 doc = "the binary's own assertion text"
 read = false
 
+
+# --- the day cycle's length, ../docs/10-sky.md -----------------------------
+[[entry]]
+module = "Terrain.dll"
+at = "0x1006fab0"
+kind = "function"
+name = "the day cycle's length: clock seconds * day length / 86400"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1006a070"
+kind = "function"
+name = "CAtmData::CAtmData -- builds the per-entry day length from the reader"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1009b988"
+kind = "datum"
+name = "CAtmData's vtable; slot 3 is the day length, 4 GetEvents, 6 GetTimeDiffInSec"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1006a5d0"
+kind = "function"
+name = "CAtmData slot 3: the day length in seconds, per entry"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1006a5b0"
+kind = "function"
+name = "CAtmData slot 2: how many entries the day length array has"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10069120"
+kind = "function"
+name = "the .ske reader's factory"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x100695b0"
+kind = "function"
+name = "the .ske reader's hours and minutes accessor, from record +0x4c and +0x50"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x100692d0"
+kind = "function"
+name = "the .ske reader's record filler"
+doc = "docs/10-sky.md"
+read = true
