@@ -101,8 +101,25 @@ look like.
 **The world record is 450 bytes plus a multiple of 8.** Every one of the 82
 gaps below 500 bytes between wide records is 450, 458, 466 or 474 — 82 of 82,
 no other value — so a world object has a fixed part and a short variable one.
-What the 8-byte step counts is open; a list of attached parts is the obvious
-guess and nothing here tests it.
+
+The step is not noise: **it separates the map's furniture from everything
+else.**
+
+| | records | steps taken |
+|---|---:|---|
+| `s_tree_*`, `s_stone_*` | 37 | **0** on 33, 1 on 4, never more |
+| everything else | 45 | 1 on 26, 2 on 5, 3 on 14, **never 0** |
+
+The names in the second row are `objects.rlb` members like `bb_b_02` and
+`bp_b_04` — not `.dat` assemblies and not `objects.dlb` parts, so the step is
+not a count of anything the model files carry.
+
+Nor is it a constant of the model: **three of the 24 names appear with two
+different counts** (`bp_b_03` and `bp_b_04` at 2 and 3, `s_stone_13` at 0 and
+1), so the same object saved twice can take a different number of steps. That
+makes it at least partly the instance's own state. A list of attached parts
+remains the obvious reading and is still a **guess**; what is measured is the
+split and the variation.
 
 ## What a save does not contain
 

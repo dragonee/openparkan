@@ -968,7 +968,11 @@ today; each is a small trap for anyone extending the code.
   record kinds are now identified rather than one: the **76-byte** part record
   (812 of 1152 consecutive gaps) and a **450-byte world record** that grows in
   steps of 8 (82 of 82 gaps below 500 are 450, 458, 466 or 474). The world
-  record names objects the mission places; the part record never does.
+  record names objects the mission places; the part record never does. The
+  8-byte step separates furniture from machinery — 33 of 37 scenery records
+  take none and none takes more than one, while all 45 others take at least
+  one — and three of 24 names appear with two counts, so it is partly
+  per-instance. What it counts is open.
   **Positions are not in a save** as a `float32` triple in the mission's frame,
   under any axis order or sign, nor as `float64` — 10 chance matches across the
   six saves against 123 placed positions. → [docs/17-saves.md](docs/17-saves.md) Whether the header's second

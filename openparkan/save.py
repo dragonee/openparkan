@@ -92,9 +92,19 @@ PART_RECORD = 76
 
 #: The wide record's.  Every one of the 82 gaps below 500 bytes is 450, 458,
 #: 466 or 474 -- this base plus a multiple of ``WORLD_STEP`` -- so the record
-#: has a fixed part and a short variable one.  What the step counts is open.
+#: has a fixed part and a short variable one.
+#:
+#: The multiple separates the world's furniture from the rest: **33 of the 37
+#: scenery records take none and no scenery record takes more than one**, while
+#: **no other record takes none at all** (26 at one step, 5 at two, 14 at
+#: three).  It is not simply a property of the model either -- three of the 24
+#: names appear with two different counts -- so it is at least partly the
+#: instance's own state.  What it counts is open.
 WORLD_RECORD = 450
 WORLD_STEP = 8
+
+#: Members whose name marks them as the map's furniture rather than a machine.
+SCENERY = ("s_tree", "s_stone")
 
 #: Archives a save is known to name.
 ARCHIVES = ("objects.rlb", "effects.rlb")

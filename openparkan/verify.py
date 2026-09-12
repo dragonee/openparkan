@@ -4091,6 +4091,25 @@ def check_saves(check, game: Path) -> None:
           f"and {exact}/{len(narrow_gaps)} part records exactly "
           f"{save.PART_RECORD}")
 
+    steps = []
+    for path in save.saves(game):
+        s = save.read(path)
+        wide = sorted((r.offset, r.member) for r in s.references
+                      if r.field == save.MEMBER_AT[1])
+        for (at, name), (nxt, _) in zip(wide, wide[1:], strict=False):
+            if nxt - at < 500:
+                steps.append((name, (nxt - at - save.WORLD_RECORD) // save.WORLD_STEP))
+    scenery = [k for name, k in steps if name.startswith(save.SCENERY)]
+    other = [k for name, k in steps if not name.startswith(save.SCENERY)]
+    varying = len({name for name, _ in steps
+                   if len({k for n, k in steps if n == name}) > 1})
+    check("saves: the world record's step tells furniture from machinery",
+          steps and max(scenery) <= 1 and min(other) >= 1,
+          f"{scenery.count(0)}/{len(scenery)} scenery records take no step and "
+          f"none takes more than one; all {len(other)} others take at least one "
+          f"-- and {varying} of {len({n for n, _ in steps})} names appear with "
+          f"two counts, so it is partly the instance's own")
+
     placed_hits = placed_total = 0
     for path in save.saves(game):
         s = save.read(path)
