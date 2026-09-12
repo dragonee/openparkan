@@ -148,6 +148,64 @@ prerequisite totals from 0 to 341, with the commonest shared by 13 archives.
 
 So a mission can hand the player a different technology ladder, and several do.
 
+## What the engine's own loader says
+
+`Comp.ini` names the entry point — `CID_RESEARCH 7 misload.dll LoadResearch`
+([22-settings.md](22-settings.md)) — so the tree has a front door, and going
+through it settles some things the data could not.
+
+`LoadResearch` builds a 0x138-byte object and hands the file to a 0x80-byte
+reader whose loading method is at `MisLoad.dll:0x10002fe0`. That method takes
+the streams in a **fixed order**, which is not the order the tags run in:
+
+```
+TRF0  TRF1  TRFB  TRF6  TRF7  TRF8  TRF9  TRFA  TRF2  TRF3  TRF4  TRF5
+```
+
+**Ten of the twelve are mandatory** — a missing tag returns false and the load
+fails. Only `TRF3` and `TRF5` are skipped quietly, and *those two are the only
+tags ever absent from a shipped archive*: three of the 29 lack them, and each
+one lacks both. The code and the data draw the same line.
+
+**The directory's second count is a version, and the loader checks it.**
+Before reading a byte it asks for `TRF0`, fails unless that field holds **3**,
+and it holds 3 on all 29. The same field over `TRF1` it keeps as a boolean —
+0 on all 29, so nothing shipped turns that switch on and what it switches is
+unknown.
+
+### The count/pointer pairing, from the other side
+
+For `TRF2` the loader allocates one `(count, pointer)` pair per item, fills
+the counts from the stream, then walks `TRF3` handing each item with a
+non-zero count the cursor and advancing it by `count * 4`. Then the same for
+`TRF4` over `TRF5`.
+
+That is exactly the structure this reader builds, and it was derived here from
+the data before the loader was read — the second time in this project that the
+binary has confirmed a layout rather than supplied it (the first was the
+`.scr` node, [15-behaviour.md](15-behaviour.md)). The data closes the loop a
+third way: `sum(TRF2) == TRF3`'s element count `==` its size in int32, on
+**26 of 26** archives that carry it.
+
+### `TRF1` is state, not a label
+
+Every stream but one is used where it lies. `TRF1` is copied: the loader
+allocates `element_count` bytes, zeroes them, and reads the stream into that
+buffer. **A stream the engine takes a writable copy of is state**, so the
+category byte is where an item *starts* rather than what it permanently is —
+which is why 5 reads as *starting*, meaning already available.
+
+Two more per-item arrays are allocated and never read from the file: 368
+`int32` and 368 `int16`. Those are runtime, and there is nothing in the
+archive to match them to.
+
+### What it does not answer
+
+**Nothing in `MisLoad.dll` indexes a 40-byte record.** The loader hands out
+pointers to `TRF0` and leaves the fields alone, so the record's id and its two
+packed words will not be answered here; whoever reads them is in another
+module, and `Behavior.dll` is where to look next.
+
 ## What is not read here
 
 - **Whether a research has a duration at all.** The four floats are costs and
@@ -157,4 +215,7 @@ So a mission can hand the player a different technology ladder, and several do.
 - **`TRF9`**, which carries a description for only 150 of the 368, and
   **`TRFA`**'s template syntax (`@G@Weight  @B,weight,G,t,5,1@`).
 - The `TRF0` record's **id**, its `(class << 16) | counter` word and its four
-  packed bytes.
+  packed bytes. The loader does not touch them, so the next attempt starts in
+  `Behavior.dll`, not here.
+- **What `TRF1`'s directory flag switches.** The loader keeps it; no shipped
+  archive sets it.

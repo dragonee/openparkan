@@ -927,7 +927,12 @@ today; each is a small trap for anyone extending the code.
   saves has it set. → [docs/17-saves.md](docs/17-saves.md)
 - `.trf` **leftovers**, now that the tree and the four floats are read: the
   `TRF0` record's id and its two packed words, and the mapping from `TRF6`'s
-  395 part ids to the 368 tree items. `TRFA`'s template syntax is
+  395 part ids to the 368 tree items. The loader has been read
+  ([docs/16-research.md](docs/16-research.md)) and **does not touch those
+  fields** -- it hands out pointers -- so the next attempt starts in
+  `Behavior.dll`, which owns the tree, rather than in `MisLoad.dll`. What
+  `TRF1`'s directory flag switches joins them: the loader keeps it as a
+  boolean and no shipped archive sets it. `TRFA`'s template syntax is
   [read](docs/19-descriptions.md) — it is `objects.dlb`'s stat rows, copied.
 - **Whether a research takes time at all.** The tabulated numbers are costs,
   so if there is a duration the engine computes it; `varset.var`'s

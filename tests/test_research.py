@@ -131,3 +131,9 @@ def test_a_missing_stream_is_refused():
     data = build_nres([("TRF0", research.MEMBER, b"\0" * research.RECORD)])
     with pytest.raises(research.ResearchFormatError, match="no TRF1"):
         research.parse(data)
+
+
+def test_the_loader_order_is_the_twelve_streams():
+    """A typo in READ_ORDER would silently weaken the checks that use it."""
+    assert sorted(research.READ_ORDER) == sorted(research.STREAMS)
+    assert set(research.OPTIONAL) < set(research.STREAMS)

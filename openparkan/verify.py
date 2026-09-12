@@ -4129,6 +4129,61 @@ def check_vocabulary(check, game: Path) -> None:
           f"is not established")
 
 
+def check_research_streams(check, game: Path) -> None:
+    """What MisLoad.dll's loader requires of a .trf, checked against the files."""
+    paths = research.trees(game)
+    if not paths:
+        return
+    directories = []
+    for path in paths:
+        archive = NResArchive(path.read_bytes())
+        directories.append({e.tag: e for e in archive.entries})
+
+    versioned = sum(d["TRF0"].link_count == research.VERSION
+                    for d in directories if "TRF0" in d)
+    check("research: the loader's version gate holds on every archive",
+          versioned == len(directories),
+          f"{versioned}/{len(directories)} archives carry {research.VERSION} in "
+          f"the directory's second count over TRF0, which MisLoad.dll requires "
+          f"before it reads a byte")
+
+    flagged = sum(d["TRF1"].link_count != research.STATE_FLAG
+                  for d in directories if "TRF1" in d)
+    sized = sum("TRF1" in d and d["TRF1"].size == d["TRF1"].element_count
+                == research.ITEMS for d in directories)
+    check("research: TRF1 is one byte per item and its flag is never set",
+          flagged == 0 and sized == len(directories),
+          f"{sized}/{len(directories)} archives hold {research.ITEMS} bytes of "
+          f"TRF1, and {flagged} set the boolean the loader keeps beside it")
+
+    absent = {tag for d in directories for tag in research.STREAMS if tag not in d}
+    together = sum(("TRF3" in d) == ("TRF5" in d) for d in directories)
+    without = sum("TRF3" not in d for d in directories)
+    check("research: only the streams the loader can do without are missing",
+          absent <= set(research.OPTIONAL) and together == len(directories),
+          f"{without} of {len(directories)} archives lack "
+          f"{', '.join(sorted(absent)) or 'nothing'}, always both at once; "
+          f"every other tag is in every archive, as the loader requires")
+
+    agreed = pairs = 0
+    for path, d in zip(paths, directories, strict=True):
+        if "TRF3" not in d or "TRF5" not in d:
+            continue
+        archive = NResArchive(path.read_bytes())
+        pairs += 1
+        ok = True
+        for counts, flat in (("TRF2", "TRF3"), ("TRF4", "TRF5")):
+            blob = archive.read(d[counts])
+            total = sum(struct.unpack(f"<{len(blob) // 4}i", blob))
+            ok &= total == d[flat].element_count == d[flat].size // 4
+        agreed += ok
+    check("research: a count stream and its flat list agree three ways",
+          pairs and agreed == pairs,
+          f"{agreed}/{pairs} archives have sum(TRF2) == TRF3's element count "
+          f"== its size in int32, and the same for TRF4 and TRF5 -- the pairing "
+          f"the loader builds at 0x100032cd")
+
+
 def check_descriptions(check, game: Path) -> None:
     """The parts database, objects.dlb, and what it names."""
     path = game / descriptions.LIBRARY
@@ -4501,6 +4556,7 @@ def run(game: Path) -> int:
         check_effects, check_footprints, check_rsli, check_control, check_controls,
         check_behaviour, check_research, check_descriptions, check_saves,
         check_vocabulary, check_resources, check_briefing, check_settings,
+        check_research_streams,
     )
     for fn in checks:
         fn(check, game)

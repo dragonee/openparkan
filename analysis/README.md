@@ -92,3 +92,22 @@ uv run --group analysis python analysis/registry.py
 | `0x10013f84` | the caller, which pushes the filename |
 
 See [../docs/22-settings.md](../docs/22-settings.md).
+
+
+## The research tree's loader
+
+`Comp.ini` names it: `CID_RESEARCH 7 misload.dll LoadResearch`. Addresses, all
+in `MisLoad.dll`:
+
+| address | what |
+|---|---|
+| `0x100025f0` | `LoadResearch`; allocates 0x138 and a 0x80-byte reader at `+0x130` |
+| `0x1000e18c` | the reader's vtable; slot 6 (`+0x18`) loads |
+| `0x10002fe0` | the load: twelve streams in a fixed order, ten of them required |
+| `0x1000302c` | the version gate -- the directory's second count over `TRF0` must be 3 |
+| `0x1000306d` | the same field over `TRF1`, kept as a boolean |
+| `0x100030c1` | the one writable copy: `TRF1` into a zeroed buffer |
+| `0x100032cd` | the count/pointer pairing over `TRF2`/`TRF3`, and `0x100033a5` for `TRF4`/`TRF5` |
+
+Nothing in the DLL indexes the 40-byte `TRF0` record; it hands out pointers.
+See [../docs/16-research.md](../docs/16-research.md).

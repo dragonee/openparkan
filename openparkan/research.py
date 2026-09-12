@@ -24,8 +24,26 @@ TRFB   4 bytes each    one packed word per TRF6 entry
 
 ``TRF3`` and ``TRF5`` are the same graph written twice, once as in-edges and
 once as out-edges: across all 26 archives that carry them they are **exact
-transposes of each other**, which is what pins the direction.  A ``TRF0``
-record is::
+transposes of each other**, which is what pins the direction.
+
+The engine agrees, and says two more things the data alone did not.
+``MisLoad.dll``'s ``LoadResearch`` takes the streams in a fixed order and
+**pairs each count with a pointer walked through the flat list four bytes at a
+time** -- the same structure this reader builds, arrived at from the other
+side.  It requires ten of the twelve and will do without only ``TRF3`` and
+``TRF5``; those two are the only tags ever missing from a shipped archive, and
+the three that lack one lack both.  And it **gates the whole load on the
+directory's second count over ``TRF0`` being 3**, which it is on all 29, so
+that field is a format version.
+
+``TRF1`` is the odd one: every other stream is used where it lies, and this
+one is copied into a buffer the loader allocates and zeroes first.  A stream
+the engine takes a writable copy of is **state**, not a label -- the category
+is where an item *starts*, and 5 reads as already available.  A second gate
+sits beside it: the directory's second count over ``TRF1`` is read as a
+boolean, and it is 0 on all 29, so nothing shipped turns that switch on.
+
+A ``TRF0`` record is::
 
     float32 x4        the research energy and ore cost, then the build pair
     int32             byte offset into TRF7, this item's short code
@@ -64,8 +82,25 @@ ITEMS = 368
 #: One ``TRF0`` record.
 RECORD = 40
 
-#: The category byte in ``TRF1``.  4 is the bulk of the tree and 7 the small
-#: equipment; 2 is the wildlife and the hero, which are not researched.
+#: The order ``MisLoad.dll``'s reader (``0x10002fe0``) takes the streams in.
+READ_ORDER = ("TRF0", "TRF1", "TRFB", "TRF6", "TRF7", "TRF8", "TRF9", "TRFA",
+              "TRF2", "TRF3", "TRF4", "TRF5")
+
+#: The two it will load without.  A missing tag anywhere else aborts.
+OPTIONAL = ("TRF3", "TRF5")
+
+#: The directory's second count over ``TRF0``, which the loader requires
+#: before it reads anything: a format version.
+VERSION = 3
+
+#: The same field over ``TRF1``, which the loader keeps as a boolean.  No
+#: shipped archive sets it, so what it switches is unknown.
+STATE_FLAG = 0
+
+#: The starting state in ``TRF1`` -- the engine copies this stream into a
+#: writable buffer, so it is where an item begins rather than what it is.
+#: 4 is the bulk of the tree and 7 the small equipment; 2 is the wildlife and
+#: the hero, which are not researched.
 CATEGORIES = {
     0: "special",
     2: "creature",
