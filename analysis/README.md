@@ -109,5 +109,17 @@ in `MisLoad.dll`:
 | `0x100030c1` | the one writable copy: `TRF1` into a zeroed buffer |
 | `0x100032cd` | the count/pointer pairing over `TRF2`/`TRF3`, and `0x100033a5` for `TRF4`/`TRF5` |
 
-Nothing in the DLL indexes the 40-byte `TRF0` record; it hands out pointers.
+| `0x10002f60` | slot 44: `TRFB` index -> part id text and the item that researches it |
+| `0x10002d50`.. | ten per-field getters over the 40-byte record, `0x30` apart |
+| `0x1000e130` | the loaded tree's vtable, 55 slots |
+
+**A search that missed its target, worth remembering.** A first pass concluded
+nothing in the DLL indexed a 40-byte record, having looked for `imul` by 40 and
+for `lea r,[r+r*4]` followed by `shl r,3`. The compiler emitted neither: it
+scales by five with `lea eax, [eax + eax*4]` and by eight in the *addressing
+mode* of the load that follows, `[ecx + eax*8 + 0x23]`. There is no multiply
+instruction to find. When searching for a stride, search for the scaled
+addressing mode too, and treat "no hits" as "the search was wrong" until a
+positive control says otherwise.
+
 See [../docs/16-research.md](../docs/16-research.md).

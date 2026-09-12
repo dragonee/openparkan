@@ -10,8 +10,11 @@ from openparkan import research
 from tests.conftest import build_nres
 
 
-def build_trf(items, edges=True) -> bytes:
-    """``items`` is a list of ``(name, code, category, values, requires)``."""
+def build_trf(items, edges=True, parts=None) -> bytes:
+    """``items`` is a list of ``(name, code, category, values, requires)``.
+
+    ``parts`` is an optional list of ``(part_id, item_index)`` for TRFB/TRF6.
+    """
     n = len(items)
     names, codes = bytearray(), bytearray()
     name_at, code_at = [], []
@@ -24,9 +27,19 @@ def build_trf(items, edges=True) -> bytes:
     requires = [tuple(i[4]) for i in items]
     unlocks = [tuple(j for j, r in enumerate(requires) if i in r) for i in range(n)]
 
+    trf6, trfb = bytearray(), bytearray()
+    part_index = [0] * n
+    for entry, (pid, item) in enumerate(parts or []):
+        at = len(trf6)
+        trf6 += pid.encode() + b"\0"
+        trfb += struct.pack("<HH", at, item)
+        if item < n:
+            part_index[item] = entry
+
     trf0 = bytearray()
     for i, (_, _, _, values, _) in enumerate(items):
-        trf0 += struct.pack("<4f6i", *values, code_at[i], name_at[i], i, 0, 0, 0)
+        trf0 += struct.pack("<4f4iH6B", *values, code_at[i], name_at[i], i, 0,
+                            part_index[i], 1, 2, 3, 4, 5, 6)
 
     members = [
         ("TRF0", research.MEMBER, bytes(trf0)),
@@ -47,6 +60,11 @@ def build_trf(items, edges=True) -> bytes:
         ("TRF7", research.MEMBER, bytes(codes)),
         ("TRF8", research.MEMBER, bytes(names)),
     ]
+    if parts:
+        members += [
+            ("TRF6", research.MEMBER, bytes(trf6)),
+            ("TRFB", research.MEMBER, bytes(trfb)),
+        ]
     return build_nres(members)
 
 
@@ -137,3 +155,42 @@ def test_the_loader_order_is_the_twelve_streams():
     """A typo in READ_ORDER would silently weaken the checks that use it."""
     assert sorted(research.READ_ORDER) == sorted(research.STREAMS)
     assert set(research.OPTIONAL) < set(research.STREAMS)
+
+
+PARTS = [("e_gun_bc_05", 0), ("e_tur_bb_01", 2), ("e_tur_bt_01", 2)]
+
+
+def test_trfb_maps_parts_onto_items():
+    t = research.parse(build_trf(ITEMS, parts=PARTS))
+    assert t.parts == {"e_gun_bc_05": 0, "e_tur_bb_01": 2, "e_tur_bt_01": 2}
+    assert t[0].parts == ("e_gun_bc_05",)
+    assert t[2].parts == ("e_tur_bb_01", "e_tur_bt_01")
+    assert t[1].parts == ()
+
+
+def test_a_part_index_is_a_trfb_index_not_an_item_one():
+    t = research.parse(build_trf(ITEMS, parts=PARTS))
+    assert t.part_ids == ("e_gun_bc_05", "e_tur_bb_01", "e_tur_bt_01")
+    assert t.part_at(t[2].part_index) in t[2].parts
+    assert t.part_at(99) == ""
+
+
+def test_an_item_is_found_by_its_part():
+    t = research.parse(build_trf(ITEMS, parts=PARTS))
+    assert t.item_for("E_TUR_BT_01").name == "Big Gun"
+    assert t.item_for("nothing") is None
+
+
+def test_a_trfb_entry_that_names_no_item_is_refused():
+    with pytest.raises(research.ResearchFormatError):
+        research.parse(build_trf(ITEMS, parts=[("ghost", 9)]))
+
+
+def test_the_record_tail_is_six_separate_bytes():
+    t = research.parse(build_trf(ITEMS, parts=PARTS))
+    assert t[0].tail == (1, 2, 3, 4, 5, 6)
+
+
+def test_a_tree_without_trfb_still_reads():
+    t = research.parse(build_trf(ITEMS))
+    assert t.part_ids == () and t[0].parts == ()

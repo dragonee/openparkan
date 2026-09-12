@@ -925,14 +925,16 @@ today; each is a small trap for anyone extending the code.
   separated by the owning object's own data. Whether the header's second
   version byte really separates campaign from single is also open — one of six
   saves has it set. → [docs/17-saves.md](docs/17-saves.md)
-- `.trf` **leftovers**, now that the tree and the four floats are read: the
-  `TRF0` record's id and its two packed words, and the mapping from `TRF6`'s
-  395 part ids to the 368 tree items. The loader has been read
-  ([docs/16-research.md](docs/16-research.md)) and **does not touch those
-  fields** -- it hands out pointers -- so the next attempt starts in
-  `Behavior.dll`, which owns the tree, rather than in `MisLoad.dll`. What
-  `TRF1`'s directory flag switches joins them: the loader keeps it as a
-  boolean and no shipped archive sets it. `TRFA`'s template syntax is
+- `.trf` **leftovers**, most of which are now closed
+  ([docs/16-research.md](docs/16-research.md)). `TRFB` is the part-to-item
+  mapping -- 395 parts onto 368 items, 27 of them mounting pairs, confirmed
+  against `objects.dlb` on 11455 of 11455 entries -- and the record's last
+  eight bytes are a `uint16` pointing back through it plus **six separate byte
+  fields**, one engine getter each, not the two packed words this project read
+  them as. What is left: the **id** at `+0x18` (879 distinct values, 0 to
+  3896, equal to the item's index on only 986 of 10672), what any of the six
+  bytes means, and what `TRF1`'s directory flag switches -- the loader keeps it
+  as a boolean and no shipped archive sets it. `TRFA`'s template syntax is
   [read](docs/19-descriptions.md) — it is `objects.dlb`'s stat rows, copied.
 - **Whether a research takes time at all.** The tabulated numbers are costs,
   so if there is a duration the engine computes it; `varset.var`'s

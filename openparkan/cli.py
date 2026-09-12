@@ -663,8 +663,11 @@ def cmd_research(args, game: Path) -> int:
             print(f"\n{item.index}  {item.name}"
                   f"{f'  [{item.code}]' if item.code else ''}  ({item.kind})")
             print(f"  values   {', '.join(f'{v:g}' for v in item.values)}")
+            print(f"  parts    {', '.join(item.parts) or '-'}")
             print(f"  requires {', '.join(tree[r].name for r in item.requires) or '-'}")
             print(f"  unlocks  {', '.join(tree[u].name for u in item.unlocks) or '-'}")
+            print(f"  tail     {', '.join(str(b) for b in item.tail) or '-'}"
+                  f"   (six fields at record +0x22..+0x27, unnamed)")
         return 0
 
     if args.hubs:

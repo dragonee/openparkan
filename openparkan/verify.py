@@ -4165,6 +4165,59 @@ def check_research_streams(check, game: Path) -> None:
           f"{', '.join(sorted(absent)) or 'nothing'}, always both at once; "
           f"every other tag is in every archive, as the loader requires")
 
+    trees = [research.read(path) for path in paths]
+    mapped = complete = paired = 0
+    for tree in trees:
+        parts = tree.parts
+        mapped += len(parts) == research.PARTS
+        complete += all(item.parts for item in tree.items)
+        paired += max(len(item.parts) for item in tree.items) == 2
+    check("research: TRFB maps every part onto an item, and every item is named",
+          mapped == complete == len(trees) and paired == len(trees),
+          f"{research.PARTS} part ids per archive across {len(trees)}, each "
+          f"naming one of the {research.ITEMS} items, all {research.ITEMS} "
+          f"named, and never more than two parts to an item")
+
+    named = compared = 0
+    library = game / descriptions.LIBRARY
+    if library.exists():
+        parts = descriptions.read(library)
+        for tree in trees:
+            for item in tree.items:
+                for pid in item.parts:
+                    part = parts.get(pid)
+                    if part is None:
+                        continue
+                    compared += 1
+                    named += part.name.strip().lower() == item.name.strip().lower()
+        check("research: a part and the item that researches it are the same thing",
+              compared and named == compared,
+              f"{named}/{compared} TRFB entries land on the item whose TRF8 "
+              f"display name is the part's own name in {descriptions.LIBRARY} "
+              f"-- two files that share no bytes agreeing on all of it")
+
+    back = items = 0
+    for tree in trees:
+        for item in tree.items:
+            items += 1
+            back += tree.part_at(item.part_index) in item.parts
+    check("research: the mapping is written both ways round",
+          items and back == items,
+          f"{back}/{items} records hold a uint16 at +0x20 that indexes the "
+          f"TRFB entry naming that same item -- part to item in TRFB, item to "
+          f"part in the record")
+
+    spread = [set() for _ in range(6)]
+    for tree in trees:
+        for item in tree.items:
+            for i, value in enumerate(item.tail):
+                spread[i].add(value)
+    check("research: the record's last six bytes are six fields",
+          all(1 < len(s) <= 40 for s in spread),
+          "distinct values per byte at +0x22..+0x27: "
+          + ", ".join(str(len(s)) for s in spread)
+          + " -- each narrow, which a packed word's bytes would not be")
+
     agreed = pairs = 0
     for path, d in zip(paths, directories, strict=True):
         if "TRF3" not in d or "TRF5" not in d:

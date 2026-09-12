@@ -199,23 +199,67 @@ Two more per-item arrays are allocated and never read from the file: 368
 `int32` and 368 `int16`. Those are runtime, and there is nothing in the
 archive to match them to.
 
-### What it does not answer
+### The interface over the record
 
-**Nothing in `MisLoad.dll` indexes a 40-byte record.** The loader hands out
-pointers to `TRF0` and leaves the fields alone, so the record's id and its two
-packed words will not be answered here; whoever reads them is in another
-module, and `Behavior.dll` is where to look next.
+An earlier draft of this section said nothing in `MisLoad.dll` indexes a
+40-byte record. That was wrong, and wrong for a bad reason: the search covered
+`imul` and `lea`+`shl` and missed the form the compiler actually used —
+`lea eax, [eax + eax*4]` and then an `*8` in the addressing mode, ×5 then ×8
+with no multiply instruction to find.
+
+There are **55 vtable slots** over the loaded tree, and ten of them are
+per-field getters over the record. Each bounds-checks the index against the
+item count and returns −1 outside it:
+
+| slot | reads | |
+|---:|---|---|
+| 36, 38, 42, 39 | `int32` at `+0x10`, `+0x14`, `+0x18`, `+0x1c` | the two text offsets, the id, the panel offset |
+| 37, 35, 34, 41, 40, 53 | `byte` at `+0x22`…`+0x27` | six separate fields |
+
+**That the last six bytes get a getter each is what settles their shape.**
+They were read here as two packed words; they are six fields, and the data
+says the same — each holds between 4 and 33 distinct values across all 29
+archives, which the bytes of one packed number would not.
+
+Three more slots matter: 32 and 33 return the prerequisite and unlock lists as
+`(pointer, count)` over the pairs the loader built, and 44 is the mapping
+below.
+
+### `TRFB` is the part-to-item mapping
+
+Slot 44 bounds its argument against **395**, reads a `uint16` from `TRFB` as a
+byte offset into `TRF6`, copies the NUL-terminated part id out, and returns
+the *second* `uint16` of the same entry. So a `TRFB` entry is two `uint16`:
+**an offset into `TRF6`, and the index of the item that researches that part.**
+
+The data confirms it four ways:
+
+- all **11455** entries across the 29 archives land on a `TRF6` string start;
+- all **11455** name an item in `0..367`;
+- **11455 of 11455** land on the item whose `TRF8` display name is that part's
+  own name in [`objects.dlb`](19-descriptions.md) — two files that share no
+  bytes, agreeing on every entry;
+- and the record's `uint16` at `+0x20` indexes the `TRFB` entry that names
+  that same item, on **10672 of 10672** records, so the mapping is written
+  both ways round.
+
+Every one of the 368 items is named by at least one part, and none by more
+than two. The 27 that take two are mounting pairs — `e_tur_bb_01` and
+`e_tur_bt_01`, one turret researched once — which is exactly the 395 − 368
+difference that made the counts look like a puzzle.
 
 ## What is not read here
 
 - **Whether a research has a duration at all.** The four floats are costs and
   no shipped file tabulates a time, so if there is one it is computed.
-- **`TRF6` and `TRFB`** — 395 part ids against 368 items, with one packed word
-  each. The counts differ, so the mapping is not one to one.
+- ~~`TRF6` and `TRFB`~~ — **closed**, above: `TRFB` maps each of the 395 parts
+  onto the item that researches it, and 27 items take two parts each.
 - **`TRF9`**, which carries a description for only 150 of the 368, and
   **`TRFA`**'s template syntax (`@G@Weight  @B,weight,G,t,5,1@`).
-- The `TRF0` record's **id**, its `(class << 16) | counter` word and its four
-  packed bytes. The loader does not touch them, so the next attempt starts in
-  `Behavior.dll`, not here.
+- The `TRF0` record's **id** at `+0x18` — 879 distinct values from 0 to 3896,
+  equal to the item's own index on only 986 of 10672 records.
+- **What the six bytes at `+0x22`..`+0x27` mean.** Their shape is settled and
+  their ranges measured (1..7 with 255 for none, 8..12, 16..72, 80..84 with
+  255 for none, 0..5, 0..3); each has its own getter, and none is named.
 - **What `TRF1`'s directory flag switches.** The loader keeps it; no shipped
   archive sets it.

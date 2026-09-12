@@ -50,8 +50,24 @@ A ``TRF0`` record is::
     int32             byte offset into TRF8, this item's display name
     int32             an id, not the item's own index
     int32             byte offset into TRFA, this item's stat template
-    uint32            (class << 16) | counter
-    uint32            four packed bytes
+    uint16            this item's own entry in TRFB -- the mapping, reversed
+    byte x6           six separate fields, one getter each
+
+The last eight bytes were read here as two packed words until the engine's own
+accessors said otherwise: ``MisLoad.dll`` hands out a **bounds-checked getter
+per byte** for the six at ``+0x22``..``+0x27``, and the data agrees -- each
+holds between 4 and 33 distinct values across all 29 archives, which the bytes
+of a packed word would not.  What any of the six means is open.
+
+**``TRFB`` is the part-to-item mapping**, which was the open question here.
+Each of its 395 entries is two ``uint16``: a byte offset into ``TRF6``, and the
+index of the item that researches that part.  All 395 land on a string start,
+all 368 items are named, and no item takes more than two parts -- the 27 that
+take two are mounting pairs like ``e_tur_bb_01``/``e_tur_bt_01``, one turret
+researched once.  Two files that share no bytes agree on all of it: **11455 of
+11455** entries land on the item whose display name is the part's own name in
+``objects.dlb``.  The record's ``uint16`` at ``+0x20`` points back, so the
+mapping is stored both ways round.
 
 Names are not unique -- 216 distinct over 368 items -- because the tree holds
 several grades of the same thing.  Use the index.
@@ -81,6 +97,13 @@ ITEMS = 368
 
 #: One ``TRF0`` record.
 RECORD = 40
+
+#: One ``TRFB`` entry: two ``uint16``, an offset into ``TRF6`` and the index
+#: of the item that researches that part.
+PART = 4
+
+#: How many parts the library describes, and ``TRFB`` maps.
+PARTS = 395
 
 #: The order ``MisLoad.dll``'s reader (``0x10002fe0``) takes the streams in.
 READ_ORDER = ("TRF0", "TRF1", "TRFB", "TRF6", "TRF7", "TRF8", "TRF9", "TRFA",
@@ -131,6 +154,17 @@ class Item:
     requires: tuple[int, ...]
     #: Indices of the items this one opens up.
     unlocks: tuple[int, ...]
+    #: The part ids ``TRFB`` maps onto this item -- usually one, sometimes a
+    #: pair of mounting variants researched together.
+    parts: tuple[str, ...] = ()
+    #: The ``uint16`` at record ``+0x20``: this item's own entry in ``TRFB``,
+    #: so the part-to-item mapping is written both ways round.
+    part_index: int = 0
+    #: Record ``+0x22``..``+0x27``.  Six separate fields, not a packed word:
+    #: the engine hands out a bounds-checked byte getter for each.  Measured
+    #: ranges are 1..7 with 255 for none, 8..12, 16..72, 80..84 with 255 for
+    #: none, 0..5 and 0..3.  What any of them means is open.
+    tail: tuple[int, ...] = ()
 
     @property
     def kind(self) -> str:
@@ -163,6 +197,9 @@ class Tree:
 
     source: Path
     items: tuple[Item, ...]
+    #: Every part id in ``TRFB`` order, which is its own index space: a
+    #: record's ``part_index`` indexes this, not ``items``.
+    part_ids: tuple[str, ...] = ()
 
     def __len__(self) -> int:
         return len(self.items)
@@ -182,6 +219,24 @@ class Tree:
         """Every item whose display name matches, case-insensitively."""
         low = name.lower()
         return tuple(i for i in self.items if low in i.name.lower())
+
+    @property
+    def parts(self) -> dict[str, int]:
+        """Every part id in ``TRFB``, against the item that researches it."""
+        return {pid: item.index for item in self.items for pid in item.parts}
+
+    def part_at(self, index: int) -> str:
+        """The part id at a ``TRFB`` index, which is what a record's
+        ``part_index`` holds."""
+        return self.part_ids[index] if 0 <= index < len(self.part_ids) else ""
+
+    def item_for(self, part: str) -> Item | None:
+        """The item that researches a part id, case-insensitively."""
+        low = part.lower()
+        for item in self.items:
+            if any(p.lower() == low for p in item.parts):
+                return item
+        return None
 
 
 def _text(blob: bytes, offset: int) -> str:
@@ -234,11 +289,25 @@ def parse(data: bytes, source: Path | None = None) -> Tree:
             )
         unlocks = _slices(counts, flat)
 
+    parts: list[list[str]] = [[] for _ in range(count)]
+    order: list[str] = []
+    if "TRFB" in blob and "TRF6" in blob:
+        table, names = blob["TRFB"], blob["TRF6"]
+        for entry in range(len(table) // PART):
+            at, item = struct.unpack_from("<HH", table, entry * PART)
+            if item >= count or at >= len(names):
+                raise ResearchFormatError(
+                    f"{where}: TRFB entry {entry} names item {item} at {at}")
+            part = _text(names, at)
+            parts[item].append(part)
+            order.append(part)
+
     items: list[Item] = []
     for index in range(count):
-        *values, code_at, name_at, _id, _panel, _tag, _packed = struct.unpack_from(
-            "<4f6i", blob["TRF0"], index * RECORD
-        )
+        fields = struct.unpack_from("<4f4iH6B", blob["TRF0"], index * RECORD)
+        values = fields[:4]
+        code_at, name_at, _id, _panel, part_index = fields[4:9]
+        tail = fields[9:]
         items.append(
             Item(
                 index=index,
@@ -248,9 +317,13 @@ def parse(data: bytes, source: Path | None = None) -> Tree:
                 values=(values[0], values[1], values[2], values[3]),
                 requires=requires[index],
                 unlocks=unlocks[index],
+                parts=tuple(parts[index]),
+                part_index=part_index,
+                tail=tuple(tail),
             )
         )
-    return Tree(source=source or Path(where), items=tuple(items))
+    return Tree(source=source or Path(where), items=tuple(items),
+                part_ids=tuple(order))
 
 
 def read(path: Path) -> Tree:
