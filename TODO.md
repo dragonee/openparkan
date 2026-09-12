@@ -739,18 +739,27 @@ a `D3DMATERIAL7`, one texture and one cell — written into a **static** at
 block the directory flags byte fills. There is a **four-argument sibling at
 index 3** (`0x100031f0`) that returns the same pointer without a track index.
 
-**No caller was found.** `LoadMatManager` is imported only by `Terrain.dll`,
-which calls it three times and then reads the stored pointer twice, for vtable
-index 6 and index 1 — never index 3 or 5. Neither entry point is the target of
-a direct call or a jump anywhere in `World3D.dll`, and a scan of
-`Terrain.dll`, `iron3d.dll`, `AniMesh.dll`, `ArealMap.dll`, `Effect.dll`,
-`Control.dll`, `MisLoad.dll` and `Wizard.dll` for a call through `+0x14` with
-five stack arguments, an out-pointer `lea`d from a local and a float in the
-window turns up nothing that fits.
+**Settled, and two things this entry used to say were wrong.**
+`LoadMatManager` is *not* imported only by `Terrain.dll` — `AniMesh.dll`
+imports it too. And index 3 is *not* uncalled: `Terrain.dll` calls it at
+`0x10046917`, with both selector arguments zero, copying the descriptor it
+returns into the caller's own object.
 
-That is not proof of dead code — the pointer could reach a caller by a route
-the scan does not model — but it does mean the reader's choice of track 0 is
-not merely a default: nothing found asks for another.
+Three modules can hold a manager pointer: `World3D.dll`, which makes it, and
+the two that import it. `Terrain.dll` keeps it in three different object
+fields (`+0x7be0`, `+0xc14`, `+0x178`), `AniMesh.dll` in one (`+0x14c`) —
+which is why a search for a single stored global found less than there was.
+Across all three modules there is **no five-argument call through index 5**.
+The four candidates the arg-counting scan produced are two CRT array-destructor
+helpers calling through a stack argument and two calls of one and three
+arguments on other objects.
+
+**The negative is controlled this time.** The same scan, run for index 3's
+offset, returns `Terrain.dll:0x10046917` with the four pushes that entry point
+takes — so a run that finds nothing is the binary's answer, not the search's.
+The conclusion stands and is now stronger than "nothing found asks for
+another": the engine's own material fetch **has no track parameter to pass**,
+so reading track 0 is what the engine does, not a default this library picked.
 
 ### 2.3 Effects
 

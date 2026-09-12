@@ -123,3 +123,31 @@ addressing mode too, and treat "no hits" as "the search was wrong" until a
 positive control says otherwise.
 
 See [../docs/16-research.md](../docs/16-research.md).
+
+
+## The material manager, and controlling a negative
+
+The question was who asks a material for its second animation track
+(`../docs/03-terrain.md`, TODO §2.2). The answer is nobody, and the useful
+part is how that was made safe to say.
+
+| address | what |
+|---|---|
+| `0x100209e4` | the manager's vtable in `World3D.dll`; index 5 takes a track, index 3 does not |
+| `0x100031f0` | index 3, the track-less sibling |
+| `0x10046917` | `Terrain.dll` calling index 3, selectors zero — **the positive control** |
+| `0x1001720c` | `Terrain.dll` calling index 6, from the field at `+0x7be0` |
+| `0x10003925` | `AniMesh.dll` calling index 6, from the field at `+0x14c` |
+
+Three lessons, all of which had already cost something:
+
+- **A pointer is not kept in one place.** `Terrain.dll` stores the manager in
+  three different object fields; a search that assumed one global saw a third
+  of the call sites and concluded "twice, for index 6 and index 1".
+- **`AniMesh.dll` imports `LoadMatManager` too.** The claim that only
+  `Terrain.dll` did was never checked against the import tables; checking all
+  of them takes one pass.
+- **Never publish a negative without a positive control.** Run the same search
+  for something you know is there. Here index 3's call site comes back with
+  the right argument count, so index 5's silence means something. Without
+  that step this is the `MisLoad.dll` mistake again.

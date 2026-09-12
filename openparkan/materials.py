@@ -152,6 +152,17 @@ unlit** -- which is what a texture flattened towards mid-grey is for.  See
 The two eight-track materials, ``B_LBL_01`` and ``R_LBL_01``, are the same
 mechanism used for variants rather than frames: eight tracks of one key,
 naming cells 0 to 7 of one insignia sheet, blue and red.
+
+**Nothing asks for a track.**  The manager exposes two ways to fetch a
+material: ``GetMaterialPhase`` at vtable index 5, which takes a track index,
+and a sibling at index 3 that takes none.  Only three modules can hold a
+manager pointer -- ``World3D.dll``, which makes it, and ``Terrain.dll`` and
+``AniMesh.dll``, which import ``LoadMatManager`` -- and between them there is
+**no five-argument call through index 5 at all**, while index 3 *is* called,
+from ``Terrain.dll`` at ``0x10046917``, with its selectors zero.  So reading
+track 0 is not this library guessing a default: the engine's own fetch has no
+track parameter to pass.  See ``analysis/README.md`` for how that negative was
+controlled.
 """
 
 from __future__ import annotations
