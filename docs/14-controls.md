@@ -255,14 +255,43 @@ points at rather than a magnitude: `Control.dll` tests it against 5,
 `AniMesh.dll` tables it as `[arg] - 2` over eight entries at `0x100073a8`. So
 "lock" is a family of actions, not one.
 
-**`MCMD_WALK_F` (19) has no handler anywhere.** There is no `cmp edx, 0x13` in
-`Control.dll`, `AniMesh.dll`, `World3D.dll`, `iron3d.dll`, `Behavior.dll` or
-`ai.dll`, and every jump-table range that reaches the walk messages starts at
-20 (`lea eax, [edx - 0x14]`), so 19 falls to the default in each. Six shipped
-rows send it — two in each of the three tables, the `W` key down and up. Either
-something translates it before it reaches a controller, or the forward walk is
-driven another way entirely. It is the sharpest loose end the numbering
-exposes.
+**`MCMD_WALK_F` (19) is handled, and this entry used to say it was not.** The
+claim was that no `cmp edx, 0x13` exists in any of six modules and that every
+range reaching the walk messages starts at 20. Both halves were true and the
+conclusion was still wrong, which is worth keeping as a caution: the search
+looked for a *constant* in a *dispatcher*, and this dispatch has neither.
+
+`World3D.dll` carries the **whole `MCMD` space in one table**:
+
+```
+0x1000fcac   lea eax, [ebp - 1]
+             cmp eax, 0x14
+             ja  default
+             jmp dword ptr [eax*4 + 0x100109f8]
+```
+
+Twenty-one entries, messages 1 to 21, and message 19 is entry 18. So there is
+no comparison against 19 to find — a range table handles every member of its
+span without naming any of them — and the message id is in `ebp`, not `edx`.
+
+**Entry 19 shares its handler with 7, 8 and 20.** `MCMD_FORWARD`,
+`MCMD_BACK`, `MCMD_WALK_F` and `MCMD_WALK_B` all jump to `0x100101b2`, which
+re-reads the message and separates them itself — `cmp ebp, 0x13` for the
+forward walk, `cmp ebp, 0x14` for the back one, the remainder for the two
+drive messages. Walking and driving are one routine with a mode, which is why
+no dedicated handler existed to find. `MCMD_UP` and `MCMD_DOWN` share
+`0x1001059b` the same way.
+
+So the sharpest loose end the numbering exposed was an artefact of how it was
+looked for.
+
+The shipped rows show what the sharing is for. A paired message **carries its
+sign in its name**: `MCMD_WALK_F` and `MCMD_UP` send only positive magnitudes,
+`MCMD_WALK_B` and `MCMD_DOWN` only negative, and each pair is one handler that
+reads the message to know which half it is. `MCMD_FORWARD` does the opposite —
+it carries −1, 0 and 1 by itself, and **`MCMD_BACK` is sent by no shipped
+row at all**. So driving reverses by sign on one message and walking by a
+second message, through the same code.
 
 ### Three schemes
 

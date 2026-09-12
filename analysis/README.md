@@ -151,3 +151,30 @@ Three lessons, all of which had already cost something:
   for something you know is there. Here index 3's call site comes back with
   the right argument count, so index 5's silence means something. Without
   that step this is the `MisLoad.dll` mistake again.
+
+
+## Message dispatch, and the constant that is never compared
+
+`MCMD_WALK_F` (19) was written up as having no handler anywhere, on the
+evidence that no module contains `cmp edx, 0x13`. It has one.
+
+| address | what |
+|---|---|
+| `0x1000fcac` | `World3D.dll`'s dispatcher: `lea eax, [ebp - 1]; cmp eax, 0x14; jmp [eax*4 + table]` |
+| `0x100109f8` | the table -- 21 entries, the whole `MCMD` space, 1 to 21 |
+| `0x100101b2` | the handler entries 7, 8, 19 and 20 share; `cmp ebp, 0x13` picks the forward walk |
+| `0x1001059b` | the same trick for `MCMD_UP` and `MCMD_DOWN` |
+
+Two more ways to be wrong, both of which this cost:
+
+- **A range table names none of its members.** `lea eax, [base - N]; cmp eax,
+  M; jmp [eax*4 + T]` dispatches N..N+M without any constant in that span
+  appearing anywhere. Searching for `cmp reg, 0x13` cannot find it, and the
+  message id was in `ebp` rather than `edx` besides. `ranges.py`-style
+  scanning -- enumerate every range dispatch and ask which spans cover the
+  value -- finds it in one pass over every binary.
+- **Scan every module, not a chosen six.** The handler was in `World3D.dll`,
+  which the original list named but searched only for the constant.
+
+The control matters as much as the search: run the range scan for 20 first and
+check `Control.dll`'s known 20..28 table comes back.

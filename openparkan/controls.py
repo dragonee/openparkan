@@ -95,6 +95,16 @@ MCMD = {
     "MCMD_LOCK": 21,
 }
 
+#: The span ``World3D.dll`` dispatches in one table at ``0x100109f8``:
+#: ``lea eax, [ebp - 1]; cmp eax, 0x14; jmp [eax*4 + table]``, so messages 1
+#: to 21 -- every ``MCMD_`` the resolver names bar ``MCMD_DUMMY``.  Entries 7,
+#: 8, 19 and 20 share one handler that separates them itself, which is why
+#: walking has no dispatcher entry of its own to find.
+MCMD_DISPATCH = (1, 21)
+
+#: The messages that share the drive/walk handler at ``0x100101b2``.
+MCMD_MOVEMENT = ("MCMD_FORWARD", "MCMD_BACK", "MCMD_WALK_F", "MCMD_WALK_B")
+
 #: Component class -> its id.  6, 7, 14, 16, 17 and 18 name nothing.
 #: An unrecognised class resolves to 0, which is what ``CICLS_UNKNOWN``
 #: in the shipped tables amounts to.

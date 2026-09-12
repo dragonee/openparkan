@@ -3522,6 +3522,29 @@ def check_controls(check, game: Path) -> None:
           f"{len(bound)} bindings across {len(sorted(game.glob('*.man')))} .man files "
           f"resolve into {controls.COMMANDS} and {controls.SCANCODES}")
 
+    lo, hi = controls.MCMD_DISPATCH
+    inside = sum(lo <= r.code <= hi for r in rows)
+    check("controls: every command a table sends is in World3D's one table",
+          rows and inside == len(rows),
+          f"{inside}/{len(rows)} rows send a message in {lo}..{hi}, the span "
+          f"World3D.dll dispatches from one 21-entry table at 0x100109f8")
+
+    def values(name):
+        return {r.value for r in rows if r.command == name}
+
+    pairs = (("MCMD_WALK_F", "MCMD_WALK_B"), ("MCMD_UP", "MCMD_DOWN"))
+    signed = all(all(v >= 0 for v in values(a)) and all(v <= 0 for v in values(b))
+                 and values(a) and values(b) for a, b in pairs)
+    drive = values("MCMD_FORWARD")
+    back = sum(r.command == "MCMD_BACK" for r in rows)
+    check("controls: a paired message carries its sign in its name",
+          signed and back == 0 and -1.0 in drive,
+          "MCMD_WALK_F and MCMD_UP send only positive magnitudes and "
+          "MCMD_WALK_B and MCMD_DOWN only negative, though each pair shares "
+          f"one handler; MCMD_FORWARD instead carries "
+          f"{', '.join(f'{v:g}' for v in sorted(drive))} by itself and "
+          f"MCMD_BACK is sent by {back} rows")
+
     table_keys = {k for r in rows for k in (r.modifier, r.key)}
     missing = sorted(k for k in table_keys if k not in keys)
     check("controls: every key a table names is a known scan code",

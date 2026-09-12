@@ -512,7 +512,9 @@ written down is a question nobody reopens.
       exactly that range** — the join the previous entry was missing.
       `MCMD_WALK_F` (19), `MCMD_WALK_B` (20) and `MCMD_LOCK` (21) fall
       outside it on 14 of the 116 rows, so walking is not the movement
-      controller's job. → [docs/14-controls.md](docs/14-controls.md)
+      controller's job. It is `World3D.dll`'s: one 21-entry table covers
+      the whole `MCMD` space, and walking shares its handler with driving.
+      → [docs/14-controls.md](docs/14-controls.md)
 
 - [x] **The `CMD_` command numbers, and who answers for them.** The last
       family the text layer names. It is resolved by **two** binaries, not
@@ -987,10 +989,9 @@ today; each is a small trap for anyone extending the code.
   `message_index` is an id rather than a position -- three files skip a
   number -- so something asks for a message *by number*, and the AI script is
   the obvious candidate.
-- What handles `MCMD_WALK_F`. `MCMD_WALK_B` (20) and `MCMD_LOCK` (21) are
-  answered — `Control.dll` has a second control class whose table covers
-  messages 20 to 28, and `AniMesh.dll`'s agent takes both as well, keeping
-  `MCMD_LOCK` for itself where it forwards everything else. `MCMD_LOCK`
-  turns out to carry a sub-command rather than a magnitude. But **19 has no
-  handler in any of the six modules scanned**, and six shipped rows send it:
-  the `W` key, down and up, in all three tables. → [docs/14-controls.md](docs/14-controls.md)
+- ~~What handles `MCMD_WALK_F`~~ — **closed**. `World3D.dll` dispatches the
+  whole `MCMD` space from one 21-entry table at `0x100109f8`, and entry 19
+  shares its handler with `MCMD_FORWARD`, `MCMD_BACK` and `MCMD_WALK_B`; the
+  body separates them with `cmp ebp, 0x13`. The old search looked for a
+  constant in a dispatcher, and a range table names none of its members.
+  → [docs/14-controls.md](docs/14-controls.md)
