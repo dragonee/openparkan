@@ -149,6 +149,23 @@ well.
 
 So the type vocabulary is closed and the field that selects it is not.
 
+Two candidates were tested and both failed, which is worth writing down so
+they are not tried again. The first is the trailer word above. The second was
+the **second section**: the collector takes a section number, six files carry
+a second section, and it looked like the event list to the day cycle's
+colours. It is not. Both sections of all six run **00h to 24h**, and in five of
+them the second reuses **16 of the first's 17 distinct colour blocks** at
+different times with a flatter light curve, and carries `sun` and `moon` names
+of its own. It is a *second complete day cycle* — a weather variant of the
+same day is the obvious reading and a **guess**; what is measured is that both
+are whole cycles over the same span. `Single.01`'s pair share only 5 blocks,
+so the variant can be a wholly different day. What selects between them is
+open.
+
+That also answers, in passing, the smaller unknown recorded here as "the
+keyframe count of a second section": the count is not the question, because
+the section is not a tail of the first.
+
 ## The sibling `sky.wea` — the slot index is the role
 
 Plain text in the same format model wears use, and **the position in the list

@@ -4158,6 +4158,32 @@ def check_atmosphere_events(check, game: Path) -> None:
           f"{len(named)} of {len(frames)} keyframes carry a name -- "
           + ", ".join(f"{n} x{c}" for n, c in sorted(names.items())))
 
+    cycles = wholes = 0
+    reused = []
+    for path in sorted(game.rglob("sky.ske")):
+        try:
+            atmosphere = sky.load(path)
+        except (sky.SkyFormatError, struct.error):
+            continue
+        sections = sorted({f.section for f in atmosphere.keyframes})
+        if len(sections) < 2:
+            continue
+        cycles += 1
+        spans = []
+        for index in sections:
+            group = [f for f in atmosphere.keyframes if f.section == index]
+            spans.append((min(f.hour for f in group), max(f.hour for f in group)))
+        wholes += all(lo == 0 and hi == 24 for lo, hi in spans)
+        blocks = [{b"".join(f.slots) for f in atmosphere.keyframes if f.section == i}
+                  for i in sections[:2]]
+        reused.append(len(blocks[0] & blocks[1]))
+    if cycles:
+        check("sky: a second section is a second whole day, not a fragment",
+              wholes == cycles,
+              f"{wholes}/{cycles} files with two sections have both running "
+              f"00h to 24h, the second reusing {max(reused)} of the first's "
+              f"colour blocks at its own times")
+
     candidate = [f.trailer[sky.OPCODE_CANDIDATE] for f in frames
                  if len(f.trailer) > sky.OPCODE_CANDIDATE]
     in_range = sum(0 <= v <= 9 for v in candidate)

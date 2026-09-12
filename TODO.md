@@ -710,8 +710,12 @@ through a per-section scale, over a day. What the scale *is* comes from a
 virtual call on the same object and is the last piece. It changes nothing on
 screen: the start and stop keyframes already say when the sun is up.
 
-Two smaller unknowns sit in the same file: the keyframe count of a second
-section (six missions have one), and most of the 124-byte header.
+One smaller unknown sits in the same file: most of the 124-byte header. The
+other, the keyframe count of a second section, is answered -- a second section
+is a **second whole day cycle**, 00h to 24h like the first and reusing 16 of
+its 17 colour blocks at different times, not a tail or an event list. It was
+tested as the event list and is not that. What selects between the two cycles
+is open.
 
 ### 2.2 Who asks a material for its second track
 

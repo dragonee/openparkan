@@ -57,6 +57,14 @@ case at all**, which agrees with the sky being created outside the switch with
 a hardcoded id.  Phase 0 is the create side: the handler that takes it looks
 the object up and warns *"Atmosphere object already exists"*.
 
+**A second section is a second complete day cycle.**  Six of the 29 files
+carry one, and it is not an event list or a fragment: both sections of all six
+run 00h to 24h, and in five of them the second reuses **16 of the first's 17
+distinct colour blocks** at different times, with a flatter light curve.  It
+reads as a weather variant of the same day -- a guess; what is measured is
+that both are whole cycles over the same span.  What selects between them is
+open, and the engine's collector does take a section number.
+
 Which field of a keyframe carries that opcode is still **not established**,
 and the last word of the trailer -- the only field that spans 0 to 9 -- is
 ruled out for a sharper reason than before: 7 means *nothing happens*, and
