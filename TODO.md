@@ -656,6 +656,21 @@ written down is a question nobody reopens.
       names **1769** resources and every one resolves.
       → [docs/13-control.md](docs/13-control.md)
 
+- [x] **The material flags byte's blend function, out of the engine.** It
+      used to be read off the data — "no other reading fits a set of
+      black-diffuse, specular-free materials called `*_add`". Every link is
+      now from a binary: `World3D.dll:0x10004415` stores `(flags >> 2) & 0xF`
+      at `material + 0x168`, which is `+4` of the block the manager's index 3
+      hands out; `Terrain.dll:0x10028907` indexes a five-entry table with it;
+      `CShade::InitAlphaBlendModeTranslateTable` fills that table with mode
+      ids `0, 4, 2, 3, 5`; and `Ngi32.dll:0x100346e0` is six 40-byte records of
+      `{D3D render state, value}`. **Flags 8 reaches `SRCALPHA/ONE`** — mode 0
+      is `ONE/ZERO` with blending off and is called `BLEND_DISABLE` in the
+      engine's own assertion text. One thing the data could not say: **every
+      mode but 0 turns alpha testing on**, `ALPHAFUNC = GREATEREQUAL`, so the
+      engine alpha-tests whenever it blends and never when it does not.
+      → [docs/07-objects.md](docs/07-objects.md)
+
 - [x] **Terrain face field 13 — the winged-edge link.** Three 2-bit codes,
       one per edge, each naming **the matching edge back in the neighbouring
       face**, with 3 for no neighbour. Right on **817150 of 817150** shared

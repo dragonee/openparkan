@@ -852,6 +852,25 @@ def check_materials(check, game: Path) -> None:
     lit = [m for m in lib.materials.values() if m.blend == materials.BLEND_LIT]
     lit_shiny = sum(1 for m in lit
                     if any(e.specular != (0, 0, 0) for e in m.entries))
+    # The flags byte's route to a D3D blend function, every link from a binary.
+    # (flags >> 2) & 0xF indexes a five-entry table, so a byte that ran past it
+    # would be a wrong reading of the field.
+    modes = defaultdict(set)
+    for m in lib.materials.values():
+        modes[m.blend].add(m.blend_function)
+    in_range = all(m.blend_index < len(materials.BLEND_TRANSLATE)
+                   for m in lib.materials.values())
+    additive = {m.blend_function for m in lib.materials.values()
+                if m.blend == materials.BLEND_ADD}
+    check("Material.lib: the flags byte indexes the engine's blend table",
+          in_range and additive == {("SRCALPHA", "ONE", True)}
+          and len(modes[materials.BLEND_OPAQUE]) == 1,
+          f"(flags >> {materials.BLEND_SHIFT}) lands inside the five-entry "
+          f"translate table on all {total} materials: "
+          + "; ".join(f"{f} -> {next(iter(v))[0]}/{next(iter(v))[1]}"
+                      for f, v in sorted(modes.items()))
+          + ".  Flags 8 reaches SRCALPHA/ONE, which is additive")
+
     check("Material.lib: flags 8 is additive",
           in_add >= len(named_add) - 2 and unlit >= len(add) - 6 and shiny == 0,
           f"{in_add} of the {len(named_add)} materials the artists named "

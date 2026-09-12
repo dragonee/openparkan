@@ -234,6 +234,34 @@ BLEND_ADD = 8
 #: Bit 0, set on ``ENV_STARS`` alone.
 BLEND_BIT0 = 1
 
+#: How the flags byte becomes a blend mode, traced through the engine.
+#:
+#: ``World3D.dll:0x10004415`` stores ``(flags >> 2) & 0xF`` into the loaded
+#: material at ``+0x168``, and that field is the second dword of the block the
+#: material manager hands out (index 3 returns ``&material[0x164]``).
+#: ``Terrain.dll:0x10028907`` uses it to index a five-entry translate table
+#: that ``CShade::InitAlphaBlendModeTranslateTable`` (``0x10046a60``) fills
+#: with the mode ids below, falling back to the last supported mode where the
+#: device refuses one.  ``Ngi32.dll:0x100346e0`` is six 40-byte records of
+#: ``{D3D render state, value}`` -- the modes themselves.
+BLEND_SHIFT = 2
+BLEND_INDEX_MASK = 0xF
+
+#: ``index -> mode``, as the translate table is initialised.
+BLEND_TRANSLATE = (0, 4, 2, 3, 5)
+
+#: ``mode -> (SRCBLEND, DESTBLEND, alpha test)``, from the Ngi32 table.  Every
+#: mode but 0 turns alpha testing on with ``ALPHAFUNC = GREATEREQUAL``, so the
+#: engine alpha-tests whenever it blends.
+BLEND_MODES = {
+    0: ("ONE", "ZERO", False),
+    1: ("SRCALPHA", "ZERO", True),
+    2: ("SRCALPHA", "ONE", True),
+    3: ("ZERO", "SRCCOLOR", True),
+    4: ("SRCALPHA", "INVSRCALPHA", True),
+    5: ("DESTCOLOR", "SRCCOLOR", True),
+}
+
 #: A track's header: a flags word then a key count.
 TRACK_HEADER = 6
 #: One keyframe: the entry to show, when to show it, and a word that is zero
@@ -307,6 +335,23 @@ class Material:
     entries: list[MaterialEntry] = field(default_factory=list)
     #: The tracks themselves.
     tracks: list[Track] = field(default_factory=list)
+
+    @property
+    def blend_index(self) -> int:
+        """The flags byte's mode index, as the loader extracts it."""
+        return (self.blend >> BLEND_SHIFT) & BLEND_INDEX_MASK
+
+    @property
+    def blend_mode(self) -> int | None:
+        """The engine's alpha-blend mode id, or None if the index is unused."""
+        i = self.blend_index
+        return BLEND_TRANSLATE[i] if i < len(BLEND_TRANSLATE) else None
+
+    @property
+    def blend_function(self) -> tuple[str, str, bool] | None:
+        """``(SRCBLEND, DESTBLEND, alpha test)`` -- what a renderer needs."""
+        mode = self.blend_mode
+        return None if mode is None else BLEND_MODES[mode]
 
     @property
     def additive(self) -> bool:

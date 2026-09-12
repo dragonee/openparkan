@@ -778,9 +778,38 @@ at flags 0 against 74 elsewhere; a model's wear is 3140 at flags 2, with the
 being `PI_LIGHT`, `PI_TELE` and the bridge glows; `sky.wea`'s slots are 4, 5
 and 8 and never 0 or 2.
 
-The word *additive* is read off the data, not out of the engine — but
-`Ngi32.dll`'s phase table has an `ADD` mode to do it with, and no other
-reading fits a set of black-diffuse, specular-free materials called `*_add`.
+The word *additive* used to be read off the data rather than out of the
+engine. It is now out of the engine, with every link from a binary:
+
+| where | what |
+|---|---|
+| `World3D.dll:0x10004415` | `material[0x168] = (flags >> 2) & 0xF` |
+| the manager's index 3 | returns `&material[0x164]`, so that field is the block's `+4` |
+| `Terrain.dll:0x10028907` | uses the block's `+4` to index a five-entry table |
+| `CShade::InitAlphaBlendModeTranslateTable`, `0x10046a60` | fills it with mode ids `0, 4, 2, 3, 5`, falling back to the last supported mode where the device refuses one |
+| `Ngi32.dll:0x100346e0` | six 40-byte records of `{D3D render state, value}` — the modes |
+
+Decoding the table gives the blend functions themselves:
+
+| mode | SRCBLEND | DESTBLEND | alpha test |
+|---|---|---|---|
+| 0 | `ONE` | `ZERO` | off |
+| 1 | `SRCALPHA` | `ZERO` | on |
+| **2** | **`SRCALPHA`** | **`ONE`** | on |
+| 3 | `ZERO` | `SRCCOLOR` | on |
+| **4** | **`SRCALPHA`** | **`INVSRCALPHA`** | on |
+| 5 | `DESTCOLOR` | `SRCCOLOR` | on |
+
+So the flags byte resolves to exactly what the data said: **0 and 2 reach mode
+0** and do not blend at all, **4 and 5 reach mode 4** and blend on alpha, and
+**8 reaches mode 2 — `SRCALPHA/ONE`, which is additive.** The engine's own
+name for mode 0 is in its assertion text: `BLEND_DISABLE`.
+
+One thing the data could not have told us: **every mode but 0 turns alpha
+testing on**, with `ALPHAFUNC = GREATEREQUAL`. The engine alpha-tests whenever
+it blends, and never when it does not. `Material.blend_function` returns the
+triple.
+
 This is the field a renderer needs; the record's own class byte at +4, below,
 is not.
 

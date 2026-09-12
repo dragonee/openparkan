@@ -527,14 +527,6 @@ read = false
 
 [[entry]]
 module = "Terrain.dll"
-at = "0x10046a60"
-kind = "function"
-name = "CShade::InitAlphaBlendModeTranslateTable"
-doc = "the binary's own assertion text"
-read = false
-
-[[entry]]
-module = "Terrain.dll"
 at = "0x10047070"
 kind = "function"
 name = "CShade::UnregisterLightManager"
@@ -1366,4 +1358,37 @@ at = "0x1000c309"
 kind = "site"
 name = "adjacency[edge] = 0xFFFF, then field 13's 2-bit slot for that edge"
 doc = "docs/03-terrain.md"
+read = true
+
+# --- the material flags byte's route to a blend mode, ../docs/07-objects.md -
+[[entry]]
+module = "World3D.dll"
+at = "0x10004415"
+kind = "site"
+name = "material[0x168] = (directory flags >> 2) & 0xF"
+doc = "docs/07-objects.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10046a60"
+kind = "function"
+name = "CShade::InitAlphaBlendModeTranslateTable: index -> mode 0,4,2,3,5"
+doc = "docs/07-objects.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10028907"
+kind = "site"
+name = "the draw path indexing the blend translate table"
+doc = "docs/07-objects.md"
+read = true
+
+[[entry]]
+module = "Ngi32.dll"
+at = "0x100346e0"
+kind = "datum"
+name = "six 40-byte alpha-blend mode records of {render state, value}"
+doc = "docs/07-objects.md"
 read = true
