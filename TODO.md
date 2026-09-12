@@ -688,8 +688,21 @@ The data agrees. No slot of the 22 carries 0..9 across the 656 keyframes —
 slot 5 is the only small one and it is 0 throughout. The trailer's last word
 does span 0..9, but it puts **438 of 656** keyframes on case 7, the no-op,
 including 60 named `sun` and 59 named `moon` — bodies that must start and
-stop. So it is not the opcode, and the field hunt is closed as a dead end. The
-next handle is the data object's own vtable, one hop further out.
+stop. So it is not the opcode, and the field hunt is closed as a dead end.
+
+**The opcode vocabulary is now closed; the field is still open.** Going in
+through `Comp.ini`'s `CID_CLASSIC_ATMOSPHERIC` entry point reached the
+type-name switch, which numbers the five objects `SUN` 0, `SKY` 1, `RAIN` 2,
+`SNOW` 3, `LIGHTNING` 4, and then the ten opcodes themselves — read off what
+each case *writes* into its 20-byte event record, not guessed: 0/1 start/stop
+`SUN`, 3/4 `RAIN`, 5/6 `SNOW`, 8/9 `LIGHTNING`, with **2 and 7 doing nothing**
+and `SKY` absent because the sky is created outside the switch. Phase 0 is the
+create side. The rejection above now has an exact statement: that word puts
+**119 of the 140 named keyframes** on a do-nothing case.
+See [docs/10-sky.md](docs/10-sky.md). What is left is the field: the opcode
+reaches the record from a **240-byte runtime keyframe** at `+0x28` (the filler
+is `0x100692d0`, hour at `+0x14` and minute at `+0x18`), so the next handle is
+whatever fills that keyframe from the file.
 
 **The sun's lifetime is half answered.** The collector's conversion is
 `t = (hour * 3600 + minute * 60) * scale / 86400` — seconds since midnight,

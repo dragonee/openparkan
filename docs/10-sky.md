@@ -92,10 +92,62 @@ consistently the lighter of the two.
 LIGHTNING** — allocating classes of 0x9e8, 0x560, 0xc0, 0xb8 bytes and one
 more. A keyframe's name slot carries `sun`, `moon` or `env_lightning`, and the
 counted string list carries sound files (`atm_rain1.wav` is the only one
-shipped). Which field selects the type is **not established**: the shipped
-keyframes are near-identical within a file, and the two record shapes that do
-differ (a float where another has a colour, at slot 11) are not distinguished
-by any word that has been located.
+shipped).
+
+**The five are numbered**, which an earlier draft of this section did not
+know. `CAtmosphere`'s event handler at `0x1006fbb0` dispatches a type through
+a jump table at `0x10070024`, and each case copies that type's name into a
+buffer for its log line:
+
+| | 0 | 1 | 2 | 3 | 4 |
+|---|---|---|---|---|---|
+| | `SUN` | `SKY` | `RAIN` | `SNOW` | `LIGHTNING` |
+
+### The ten opcodes, decoded
+
+`CAtmData::GetEvents` dispatches on a ten-valued opcode, and each of its cases
+**writes** a phase and a type into a 20-byte event record — `{phase, type,
+two words of time, one more}`. Read off those writes rather than guessed, the
+table is:
+
+| opcode | | opcode | | opcode | |
+|---:|---|---:|---|---:|---|
+| 0 | start `SUN` | 1 | stop `SUN` | 2 | *nothing* |
+| 3 | start `RAIN` | 4 | stop `RAIN` | | |
+| 5 | start `SNOW` | 6 | stop `SNOW` | 7 | *nothing* |
+| 8 | start `LIGHTNING` | 9 | stop `LIGHTNING` | | |
+
+Two things fall out of it. **2 and 7 share the switch's default and do
+nothing** — which is what "cases 2 and 7 share the out-of-range target" in the
+earlier note actually meant. And **`SKY` has no case at all**, which agrees
+with the separate finding that the sky is created outside the switch with a
+hardcoded id: a sky is never started or stopped because it is always there.
+
+The pairing is not the arithmetic one. `type * 2 + phase` would put `RAIN` at
+4 and 5; the cases say 3 and 4. The gaps at 2 and 7 are where the enum's
+author left room, and the only way to get the table right is to read what each
+case stores.
+
+Phase **0 is the create side**: the handler that takes it resolves the type
+name, looks the object up, and warns *"Atmosphere object already exists - %s"*.
+
+### Which field carries the opcode — still open, and one candidate is dead
+
+The opcode is assembled in memory. The collector fills a 0x98-byte record from
+a **240-byte runtime keyframe** (the filler is at `0x100692d0`): hour at
+`+0x14`, minute at `+0x18`, the opcode at `+0x28`, and six `c_str()` pointers
+at `+0x64`…`+0x78` — the file's six name slots, so the runtime keyframe is the
+file's keyframe expanded.
+
+The trailer's last word is the only field in the file that spans 0 to 9, and
+it is **ruled out**, for a sharper reason than the first attempt had. Now that
+7 is known to mean *nothing happens*, the objection is exact: that word puts
+**119 of the 140 named keyframes** — all 59 `moon` and 60 of the 75 `sun` — on
+a do-nothing case. Bodies that must rise and set cannot all be no-ops. Six
+keyframes, the last of six files, carry an uninitialised `6939832` there as
+well.
+
+So the type vocabulary is closed and the field that selects it is not.
 
 ## The sibling `sky.wea` — the slot index is the role
 

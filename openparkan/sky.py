@@ -40,9 +40,29 @@ A string is an ``int32`` length followed by that many bytes and no
 terminator, which is what ``MFile``'s string reader does.
 
 The engine builds five kinds of atmosphere object -- **SUN, SKY, RAIN, SNOW
-and LIGHTNING**, a five-way switch in ``Terrain.dll``'s factory -- and a
-keyframe's name slot carries ``sun``, ``moon`` or ``env_lightning``.  Which
-field selects the type is not established; see ``docs/10-sky.md``.
+and LIGHTNING** -- and they are numbered, out of the jump table the type-name
+switch uses: ``SUN`` 0, ``SKY`` 1, ``RAIN`` 2, ``SNOW`` 3, ``LIGHTNING`` 4.
+
+The ten-valued opcode ``CAtmData::GetEvents`` dispatches on decodes
+completely, and not by the obvious rule: each case *writes* a phase and a type
+into a 20-byte event record, and read back off those writes the table is
+
+    0 start SUN    1 stop SUN    2 nothing
+    3 start RAIN   4 stop RAIN
+    5 start SNOW   6 stop SNOW   7 nothing
+    8 start LIGHTNING   9 stop LIGHTNING
+
+**2 and 7 do nothing** -- they share the switch's default -- and **SKY has no
+case at all**, which agrees with the sky being created outside the switch with
+a hardcoded id.  Phase 0 is the create side: the handler that takes it looks
+the object up and warns *"Atmosphere object already exists"*.
+
+Which field of a keyframe carries that opcode is still **not established**,
+and the last word of the trailer -- the only field that spans 0 to 9 -- is
+ruled out for a sharper reason than before: 7 means *nothing happens*, and
+that word puts **all 59 ``moon`` keyframes and 60 of the 75 ``sun`` ones**
+there, which cannot be right for bodies that must be started and stopped.
+See ``docs/10-sky.md``.
 
 The sibling ``sky.wea`` names the textures, in the same format model wears
 use, and **the slot index is the role**: the same nine slots in the same order
@@ -73,6 +93,34 @@ NAME_SLOTS = 6
 FLOAT_SLOTS = (6,)
 #: Slots whose colour tracks the time of day; see the module docstring.
 DAY_CYCLE_SLOTS = (1, 2, 3, 4)
+
+#: The five kinds of atmosphere object, numbered as ``Terrain.dll``'s
+#: type-name switch numbers them (the jump table at ``0x10070024``).
+OBJECT_TYPES = {0: "SUN", 1: "SKY", 2: "RAIN", 3: "SNOW", 4: "LIGHTNING"}
+
+#: What an event does to its object.  Phase 0 is the create side.
+PHASES = {0: "start", 1: "stop"}
+
+#: ``CAtmData::GetEvents``' ten opcodes, as ``(phase, type)`` -- read off what
+#: each case of the switch at ``0x1006e829`` writes into the event record.
+#: 2 and 7 are absent: they share the switch's default and do nothing, and
+#: ``SKY`` never appears because the sky is created outside the switch.
+EVENT_OPCODES = {
+    0: (0, 0), 1: (1, 0),
+    3: (0, 2), 4: (1, 2),
+    5: (0, 3), 6: (1, 3),
+    8: (0, 4), 9: (1, 4),
+}
+
+#: The opcodes that reach the default and do nothing.
+NO_EVENT = (2, 7)
+
+#: One event record the handler walks: phase, type, and two words of time.
+EVENT_RECORD = 20
+
+#: The trailer word that spans the opcode range but is **not** the opcode;
+#: see the module docstring.
+OPCODE_CANDIDATE = 9
 
 #: ``sky.wea`` slot -> what it is.  Fixed across all 29 missions.
 SLOT_ROLES = (

@@ -4129,6 +4129,47 @@ def check_vocabulary(check, game: Path) -> None:
           f"is not established")
 
 
+def check_atmosphere_events(check, game: Path) -> None:
+    """The atmosphere's event vocabulary, and the field that is not its opcode."""
+    frames = []
+    for path in sorted(game.rglob("sky.ske")):
+        try:
+            frames.extend(sky.load(path).keyframes)
+        except (sky.SkyFormatError, struct.error):
+            continue
+    if not frames:
+        return
+
+    covered = set(sky.EVENT_OPCODES) | set(sky.NO_EVENT)
+    phases = {p for p, _ in sky.EVENT_OPCODES.values()}
+    kinds = {k for _, k in sky.EVENT_OPCODES.values()}
+    check("sky: the ten opcodes are five objects by two phases, less the gaps",
+          covered == set(range(10)) and phases == set(sky.PHASES)
+          and kinds == set(sky.OBJECT_TYPES) - {1},
+          f"{len(sky.EVENT_OPCODES)} opcodes name "
+          f"{', '.join(sky.OBJECT_TYPES[k] for k in sorted(kinds))} in "
+          f"start/stop pairs; {sky.NO_EVENT} do nothing and SKY has no case, "
+          f"being created outside the switch")
+
+    named = [f for f in frames if f.name]
+    names = Counter(f.name for f in named)
+    check("sky: only the sun and the moon are named in a keyframe",
+          set(names) == {"sun", "moon"},
+          f"{len(named)} of {len(frames)} keyframes carry a name -- "
+          + ", ".join(f"{n} x{c}" for n, c in sorted(names.items())))
+
+    candidate = [f.trailer[sky.OPCODE_CANDIDATE] for f in frames
+                 if len(f.trailer) > sky.OPCODE_CANDIDATE]
+    in_range = sum(0 <= v <= 9 for v in candidate)
+    dead = sum(f.trailer[sky.OPCODE_CANDIDATE] in sky.NO_EVENT
+               for f in named if len(f.trailer) > sky.OPCODE_CANDIDATE)
+    check("sky: the field that spans the opcode range is not the opcode",
+          dead > len(named) // 2 and in_range < len(candidate),
+          f"{in_range}/{len(candidate)} of that word is in 0..9, and it puts "
+          f"{dead}/{len(named)} of the named keyframes on a do-nothing case -- "
+          f"so the sun and moon would never start or stop")
+
+
 def check_research_streams(check, game: Path) -> None:
     """What MisLoad.dll's loader requires of a .trf, checked against the files."""
     paths = research.trees(game)
@@ -4609,7 +4650,7 @@ def run(game: Path) -> int:
         check_effects, check_footprints, check_rsli, check_control, check_controls,
         check_behaviour, check_research, check_descriptions, check_saves,
         check_vocabulary, check_resources, check_briefing, check_settings,
-        check_research_streams,
+        check_research_streams, check_atmosphere_events,
     )
     for fn in checks:
         fn(check, game)
