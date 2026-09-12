@@ -1,0 +1,290 @@
+# What has been read in the game's code.
+#
+# An address on its own means nothing here: every module shares image base
+# 0x10000000, so 0x1000129e is inside the .text of all fifteen of them.  This
+# is the file that supplies the missing half, and `coverage.py --check` holds
+# it to the binaries -- a `function` must start where it says, a `site` must
+# be an instruction, a `datum` must not be code.
+#
+# `kind`:
+#   function  a function entry point
+#   site      one instruction inside a function, quoted for what it does there
+#   datum     a table, vtable, string or counter -- anything not code
+#
+# Seeded from the tables in README.md, which are module-scoped.  The rest of
+# the addresses the docs publish are named only in prose, and prose does not
+# say which module reliably enough to import blind; they go in as their
+# sections are re-read.
+
+# --- the behaviour interpreter, ../docs/15-behaviour.md ---------------------
+[[entry]]
+module = "ai.dll"
+at = "0x100014f9"
+kind = "site"
+name = "script version gate, cmp edi, 0x49"
+doc = "analysis/README.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x1000129e"
+kind = "site"
+name = "interpreter initialiser: 70 handler pointers at +0xc..+0x120"
+doc = "analysis/README.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x100122b5"
+kind = "site"
+name = "the dispatch loop"
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x10012313"
+kind = "site"
+name = "the branch taken when head[0] is -1"
+doc = "analysis/README.md"
+
+# --- the component registry, ../docs/22-settings.md ------------------------
+[[entry]]
+module = "World3D.dll"
+at = "0x10014790"
+kind = "function"
+name = "LoadComponentAddr: reads Comp.ini"
+doc = "docs/22-settings.md"
+
+[[entry]]
+module = "World3D.dll"
+at = "0x10013f84"
+kind = "site"
+name = "the caller that pushes Comp.ini's filename"
+doc = "analysis/README.md"
+
+[[entry]]
+module = "World3D.dll"
+at = "0x10026bec"
+kind = "datum"
+name = "'%d %s %s' -- a Comp.ini row"
+doc = "analysis/README.md"
+
+[[entry]]
+module = "World3D.dll"
+at = "0x100666b8"
+kind = "datum"
+name = "the component table, 16 bytes a row"
+doc = "analysis/README.md"
+
+[[entry]]
+module = "World3D.dll"
+at = "0x10795284"
+kind = "datum"
+name = "the component row counter"
+doc = "analysis/README.md"
+
+# --- the research tree's loader, ../docs/16-research.md --------------------
+[[entry]]
+module = "MisLoad.dll"
+at = "0x100025f0"
+kind = "function"
+name = "LoadResearch"
+doc = "docs/16-research.md"
+
+[[entry]]
+module = "MisLoad.dll"
+at = "0x10002fe0"
+kind = "function"
+name = "the .trf load: twelve streams in a fixed order"
+doc = "docs/16-research.md"
+
+[[entry]]
+module = "MisLoad.dll"
+at = "0x1000302c"
+kind = "site"
+name = "the version gate over TRF0"
+doc = "analysis/README.md"
+
+[[entry]]
+module = "MisLoad.dll"
+at = "0x1000306d"
+kind = "site"
+name = "the same field over TRF1, kept as a boolean"
+doc = "analysis/README.md"
+
+[[entry]]
+module = "MisLoad.dll"
+at = "0x100030c1"
+kind = "site"
+name = "the one writable copy: TRF1 into a zeroed buffer"
+doc = "analysis/README.md"
+
+[[entry]]
+module = "MisLoad.dll"
+at = "0x100032cd"
+kind = "site"
+name = "the count/pointer pairing over TRF2/TRF3"
+doc = "analysis/README.md"
+
+[[entry]]
+module = "MisLoad.dll"
+at = "0x100033a5"
+kind = "site"
+name = "the count/pointer pairing over TRF4/TRF5"
+doc = "analysis/README.md"
+
+[[entry]]
+module = "MisLoad.dll"
+at = "0x10002f60"
+kind = "function"
+name = "slot 44: TRFB index -> part id and the item that researches it"
+doc = "analysis/README.md"
+
+[[entry]]
+module = "MisLoad.dll"
+at = "0x10002d50"
+kind = "function"
+name = "first of ten per-field getters over the 40-byte record"
+doc = "analysis/README.md"
+
+[[entry]]
+module = "MisLoad.dll"
+at = "0x1000e18c"
+kind = "datum"
+name = "the .trf reader's vtable; slot 6 loads"
+doc = "analysis/README.md"
+
+[[entry]]
+module = "MisLoad.dll"
+at = "0x1000e130"
+kind = "datum"
+name = "the loaded tree's vtable, 55 slots"
+doc = "analysis/README.md"
+
+# --- the material manager, ../docs/07-objects.md, ../docs/03-terrain.md ----
+[[entry]]
+module = "World3D.dll"
+at = "0x10002aa0"
+kind = "function"
+name = "LoadMatManager: 0x470 bytes, vtable at +0"
+doc = "analysis/README.md"
+
+[[entry]]
+module = "World3D.dll"
+at = "0x100209e4"
+kind = "datum"
+name = "the material manager's vtable, eleven slots"
+doc = "analysis/README.md"
+
+[[entry]]
+module = "World3D.dll"
+at = "0x100031f0"
+kind = "function"
+name = "manager slot 3: the track-less material fetch"
+doc = "analysis/README.md"
+
+[[entry]]
+module = "World3D.dll"
+at = "0x10003680"
+kind = "function"
+name = "manager slot 5: GetMaterialPhase, and nobody calls it"
+doc = "TODO.md"
+
+[[entry]]
+module = "World3D.dll"
+at = "0x10003ab0"
+kind = "function"
+name = "manager slot 9: returns &material[id].class, and nobody calls it"
+doc = "docs/07-objects.md"
+
+[[entry]]
+module = "World3D.dll"
+at = "0x100669f0"
+kind = "datum"
+name = "the loaded material array, 368 bytes a record"
+doc = "docs/07-objects.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10046917"
+kind = "site"
+name = "calling manager slot 3, selectors zero -- the positive control"
+doc = "analysis/README.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10017215"
+kind = "site"
+name = "calling manager slot 6, from the field at +0x7be0"
+doc = "analysis/README.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10069dd0"
+kind = "function"
+name = "the five-way factory that passes the manager on"
+doc = "analysis/README.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1005991f"
+kind = "site"
+name = "a five-argument call at slot 5's offset, on another class"
+doc = "analysis/README.md"
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10003936"
+kind = "site"
+name = "calling manager slot 6, from the field at +0x14c"
+doc = "analysis/README.md"
+
+# --- message dispatch, ../docs/14-controls.md ------------------------------
+[[entry]]
+module = "World3D.dll"
+at = "0x1000fcac"
+kind = "site"
+name = "the MCMD dispatcher: lea eax, [ebp - 1]; cmp eax, 0x14"
+doc = "docs/14-controls.md"
+
+[[entry]]
+module = "World3D.dll"
+at = "0x100109f8"
+kind = "table"
+name = "the MCMD jump table, 21 entries"
+doc = "docs/14-controls.md"
+
+[[entry]]
+module = "World3D.dll"
+at = "0x100101b2"
+kind = "site"
+name = "the handler MCMD 7, 8, 19 and 20 share"
+doc = "docs/14-controls.md"
+
+[[entry]]
+module = "World3D.dll"
+at = "0x1001059b"
+kind = "site"
+name = "the same range trick for MCMD_UP and MCMD_DOWN"
+doc = "docs/14-controls.md"
+
+# --- the save writer, ../docs/17-saves.md ----------------------------------
+[[entry]]
+module = "iron3d.dll"
+at = "0x100a1637"
+kind = "site"
+name = "the save writer: SLOT and the length-prefixed blobs after it"
+doc = "docs/17-saves.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100b4b34"
+kind = "function"
+name = "the fwrite the save body goes through"
+doc = "docs/17-saves.md"
+
+# --- the .ctl controller, ../docs/13-control.md ----------------------------
+[[entry]]
+module = "AniMesh.dll"
+at = "0x100032e7"
+kind = "site"
+name = "the only caller of the three-field message dispatch"
+doc = "docs/13-control.md"

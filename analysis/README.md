@@ -34,6 +34,56 @@ Swept across the whole installation, `World3D.dll` and `iron3d.dll` are the
 only binaries that carry a resolver chain at all; the `GMSG_*` and `VOICE_*`
 identifiers elsewhere are log strings and lookup keys, not compare cases.
 
+## `coverage.py`, and reading all of it
+
+```
+uv run --group analysis python analysis/coverage.py                  # the ledger
+uv run --group analysis python analysis/coverage.py --check          # is it true?
+uv run --group analysis python analysis/coverage.py --unknown MisLoad.dll
+uv run --group analysis python analysis/coverage.py --closure MisLoad.dll:0x100025f0
+```
+
+The install is **17343 functions over 3.4 MB** of x86, and nothing in a
+stripped release build tells you whether you have been somewhere before.
+`known.toml` is the ledger that does, and `coverage.py` builds the map it sits
+on. The job is smaller than it looks in two ways: masking the addresses the
+loader relocates collapses the set to **12427 distinct bodies**, and 531 of
+those appear in more than one module, which is the statically linked CRT.
+
+**An address without a module is not a fact.** Every module here is based at
+`0x10000000`, so `0x1000129e` is inside the `.text` of all fifteen of them.
+That is why the ledger carries `module`, `at` and `kind`, and why `--check`
+exists: a `function` has to start where it says, a `site` has to be an
+instruction, a `datum` has to be outside `.text` and a `table` inside it. The
+first run of it failed six of the thirty-eight entries this file already
+published — five were addresses of *instructions* written up as though they
+were functions, and one was a jump table called data when it lives in `.text`
+like all of this compiler's.
+
+Function boundaries come from four places, because no single one suffices
+without symbols: direct call targets, the export table, the ends of padding
+runs, and the addresses data sections point at. Each of the last two cost a
+correction:
+
+- **Padding is `int3` in some modules and `nop` in others.** Splitting on one
+  of them found 34 functions in `World3D.dll` and 1672 in `Terrain.dll`, which
+  is the signature of a rule that fits one build and not the other.
+- **A vtable-only function has no padding before it.** `MisLoad.dll`'s ten
+  record getters are packed end to end, reached only through the vtable, and a
+  scan that wants padding or a call finds two of the ten. Believing a data
+  pointer that lands just after a `ret` finds them — but believing *every*
+  such pointer grew `iron3d.dll` from 4000 functions to 10000, because a dword
+  that merely looks like an address is everywhere. A pointer is only believed
+  when its neighbours are pointers too: a vtable is a run, a coincidence is
+  alone.
+
+`--unknown` ranks what is left by the strings a function names, because a
+function naming a file, a tag, a class or an error message is handling the
+game's own data. It works: the first thing it surfaced in `MisLoad.dll` was
+the developers' own class, `CGameObject`, with `PlaceObject()`,
+`GetPlacement()`, `SetParent()` and `GetChildren()` in its assertion text.
+
+
 ## Things that cost us time
 
 - **A resolver has four shapes**, and missing one loses entries silently. They
