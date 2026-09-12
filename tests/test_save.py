@@ -147,3 +147,25 @@ def test_a_member_name_is_never_read_out_of_another_archive_name():
     assert all(r.member != "rlb" for r in s.references)
     assert {r.member for r in s.references} == {
         "i_arm_b_05", "i_arm_b_06", "i_arm_b_07"}
+
+
+def blob(payload: bytes) -> bytes:
+    """The writer's shape: a length then that many bytes."""
+    return struct.pack("<I", len(payload)) + payload
+
+
+def test_the_body_walks_as_length_prefixed_blobs():
+    s = save.parse(build_save(body=blob(b"x" * 40) + blob(b"yy")))
+    assert [b.size for b in s.blobs] == [40, 2]
+    assert s.blobs[0].offset == len(build_save()) + 4
+
+
+def test_the_walk_stops_where_a_length_stops_making_sense():
+    body = blob(b"x" * 8) + struct.pack("<I", 1 << 30) + b"junk"
+    s = save.parse(build_save(body=body))
+    assert [b.size for b in s.blobs] == [8]
+
+
+def test_a_zero_length_ends_the_walk():
+    s = save.parse(build_save(body=blob(b"x" * 8) + struct.pack("<I", 0)))
+    assert [b.size for b in s.blobs] == [8]

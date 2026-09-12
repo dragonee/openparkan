@@ -12,6 +12,7 @@ from . import (
     briefing,
     control,
     controls,
+    descriptions,
     effects,
     font,
     gamedir,
@@ -684,7 +685,11 @@ def cmd_research(args, game: Path) -> int:
 
 
 def cmd_saves(args, game: Path) -> int:
-    """What each save game is, and what it refers to."""
+    """What each save game is, what it refers to, and what it holds."""
+    catalogue = {}
+    library = game / descriptions.LIBRARY
+    if library.exists():
+        catalogue = descriptions.read(library)
     index = {}
     try:
         index = {x.filename.lower(): x for x in save.slots(game)}
@@ -707,11 +712,34 @@ def cmd_saves(args, game: Path) -> int:
         print(f"  mission  {s.mission}")
         print(f"  map      {s.map}")
         print(f"  trees    {', '.join(s.trees) or '-'}")
+        print(f"  body     {len(s.blobs)} length-prefixed blobs, "
+              + ", ".join(f"{b.size}" for b in s.blobs))
         print(f"  refers to {len(s.references)} archive members, "
               f"{len(s.members)} distinct")
+
+        world = [r for r in s.references if r.field == save.MEMBER_AT[1]]
+        parts = [r for r in s.references if r.field == save.MEMBER_AT[0]]
+        scenery = [r for r in world if r.member.startswith(save.SCENERY)]
+        print(f"  world    {len(world)} objects -- {len(scenery)} scenery, "
+              f"{len(world) - len(scenery)} built")
+        print(f"  parts    {len(parts)} records", end="")
+        if catalogue:
+            known = [r for r in parts if r.member in catalogue]
+            kinds = Counter(catalogue[r.member].kind for r in known)
+            print(f", {len(known)} named in {descriptions.LIBRARY} -- "
+                  + ", ".join(f"{n} {k}" for k, n in kinds.most_common()))
+        else:
+            print()
+
         if args.members:
-            for archive, member in s.members:
-                print(f"      {archive:12} {member}")
+            print("\n    world objects:")
+            for r in world:
+                print(f"      {r.member}")
+            print("    parts:")
+            for name, count in Counter(r.member for r in parts).most_common():
+                part = catalogue.get(name)
+                label = f"  {part.name}" if part else ""
+                print(f"      {name:16} x{count}{label}")
         print()
     return 0
 
