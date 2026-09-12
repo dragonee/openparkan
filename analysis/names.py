@@ -85,10 +85,19 @@ class Image:
         self.text = next(s for s in self.pe.sections if b".text" in s.Name)
 
     def string_at(self, va: int, limit: int = 64) -> str | None:
+        """The NUL-terminated string at ``va``, or ``None``.
+
+        A section's virtual size can run past what the file holds -- the
+        zero-initialised tail of ``.data`` -- and an address there has no
+        bytes.  Mapping it arithmetically reads whatever section comes next
+        in the file, which invents strings that are not at that address.
+        """
         for sec in self.pe.sections:
             lo = self.base + sec.VirtualAddress
             if not lo <= va < lo + sec.Misc_VirtualSize:
                 continue
+            if va - lo >= sec.SizeOfRawData:
+                return None
             off = sec.PointerToRawData + (va - lo)
             end = self.raw.find(b"\0", off, off + limit)
             if end < 0:

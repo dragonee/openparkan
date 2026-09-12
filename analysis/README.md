@@ -188,3 +188,31 @@ Two more ways to be wrong, both of which this cost:
 
 The control matters as much as the search: run the range scan for 20 first and
 check `Control.dll`'s known 20..28 table comes back.
+
+
+## A virtual address past its section's raw data
+
+`pe.py` and `names.py` both mapped a virtual address to a file offset with
+`PointerToRawData + (rva - VirtualAddress)`, guarded only by the section's
+*virtual* size. A section's virtual size can exceed what the file holds --
+`.data` carries its zero-initialised tail that way -- and an address in that
+tail **has no file offset at all**. The arithmetic lands in whatever section
+comes next in the file.
+
+In `Effect.dll` `.data` is 33252 bytes virtual against 16384 raw, so every
+address above `0x10024000` was read out of `.rsrc`. An uninitialised global
+came back as the version resource's `ProductName`, which is what gave it away:
+a routine appeared to be passed pointers to strings that could not be there.
+
+Fixed both ways round. `va_to_off` returns `None` past the raw data and
+`read` supplies zeros, which is what the loader maps; `Image.string_at`
+returns `None` rather than inventing a string from the next section. `pe.py`
+gained `is_uninitialised(va)` to tell the two kinds of `None` apart.
+
+The regression the section above asks for still passes: `names.py` recovers
+22 `MCMD_`, 13 `CICLS_` and 43 `CMD_` names from `World3D.dll` and 31 `CMD_`
+from `iron3d.dll`, every value equal to the library's.
+
+**What this costs to miss**: any read of an uninitialised global returned
+another section's bytes and looked like data. Values recovered that way are
+not wrong about the address -- they are about nothing at all.

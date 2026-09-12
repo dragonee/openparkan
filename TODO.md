@@ -796,8 +796,18 @@ found that way, which the previous entry here assumed it could.
 emitter's random-direction routine: it draws from the generator, scales by
 1/65536, feeds sin/cos, scales a vector by three factors and hands it to
 `g_FastProc`'s transform against a matrix at the object's `+0xc0`. The
-routine takes those factors as *arguments*, so the offsets that feed it are
-one call further out — and that caller is the next handle.
+routine takes those factors as *arguments*, so the offsets that feed it were
+expected one call further out.
+
+**Followed, and they are not there.** The routine is `0x1000c1a0`, and its two
+callers (`0x1000c02d`, `0x1000c188`) pass small integer constants, a float, a
+flag, and four pointers into `.data`'s **uninitialised tail** — runtime
+scratch, not emitter-block offsets. Nothing at either call site reads an
+effect record, so the factors reach the routine from further back still and
+this expectation is closed as wrong rather than as a handle. What did come of
+following it is a bug in the analysis scaffolding: those pointers appeared to
+address the version resource, which is how a bad address mapping in `pe.py`
+was found. See [analysis/README.md](analysis/README.md).
 
 Also open: the 60-byte effect header, the `.exp`'s first float and flags word,
 and what bit 8 controls.

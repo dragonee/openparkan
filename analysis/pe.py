@@ -45,16 +45,42 @@ class Binary:
 
     # --- address helpers -------------------------------------------------
     def va_to_off(self, va: int) -> int | None:
+        """File offset of a virtual address, or ``None`` if it has no bytes.
+
+        A section's virtual size can exceed what the file holds -- `.data`
+        carries its zero-initialised tail that way -- and an address in that
+        tail has **no file offset at all**.  Mapping it arithmetically lands
+        in whatever section follows in the file, which is how reading an
+        uninitialised global once came back as the version resource's
+        ``ProductName``.  Past the raw data this returns ``None``, and
+        ``read`` supplies the zeros the loader would.
+        """
         rva = va - self.base
         for s in self.pe.sections:
             span = max(s.Misc_VirtualSize, s.SizeOfRawData)
             if s.VirtualAddress <= rva < s.VirtualAddress + span:
+                if rva - s.VirtualAddress >= s.SizeOfRawData:
+                    return None
                 return s.PointerToRawData + (rva - s.VirtualAddress)
         return None
 
+    def is_uninitialised(self, va: int) -> bool:
+        """Whether ``va`` is mapped but has no bytes in the file."""
+        rva = va - self.base
+        for s in self.pe.sections:
+            span = max(s.Misc_VirtualSize, s.SizeOfRawData)
+            if s.VirtualAddress <= rva < s.VirtualAddress + span:
+                return rva - s.VirtualAddress >= s.SizeOfRawData
+        return False
+
     def read(self, va: int, n: int) -> bytes:
         off = self.va_to_off(va)
-        return b"" if off is None else self.pe.__data__[off:off + n]
+        if off is None:
+            # Zero for the uninitialised tail, which is what the loader maps;
+            # empty for an address in no section at all.
+            return bytes(n) if self.is_uninitialised(va) else b""
+        raw = self.pe.__data__[off:off + n]
+        return bytes(raw) + bytes(n - len(raw)) if len(raw) < n else bytes(raw)
 
     def cstring(self, va: int, limit: int = 200) -> str:
         raw = self.read(va, limit)
