@@ -4167,16 +4167,30 @@ def check_saves(check, game: Path) -> None:
         blob = path.read_bytes()
         where = [o.position for o in mission.load(tma).objects]
         placed_total += len(where)
+        for off in range(0, len(blob) - 12):
+            point = struct.unpack_from("<3f", blob, off)
+            if any(abs(point[0] - x) < 0.25 and abs(point[1] - y) < 0.25
+                   and abs(point[2] - z) < 0.25 for x, y, z in where):
+                placed_hits += 1
+    aligned_hits = 0
+    for path in save.saves(game):
+        s = save.read(path)
+        tma = game / s.mission / "data.tma"
+        if not tma.exists():
+            continue
+        blob = path.read_bytes()
+        where = [o.position for o in mission.load(tma).objects]
         for off in range(0, len(blob) - 12, 4):
             point = struct.unpack_from("<3f", blob, off)
-            if any(abs(point[0] - x) < 0.5 and abs(point[1] - y) < 0.5
-                   and abs(point[2] - z) < 0.5 for x, y, z in where):
-                placed_hits += 1
-    check("saves: a save does not store where the world stands",
-          placed_total and placed_hits < placed_total * 0.25,
-          f"{placed_hits} float32 triples in all six saves match any of the "
-          f"{placed_total} positions their missions place -- chance, so "
-          f"placement is not kept as a triple in the mission's frame")
+            if any(abs(point[0] - x) < 0.25 and abs(point[1] - y) < 0.25
+                   and abs(point[2] - z) < 0.25 for x, y, z in where):
+                aligned_hits += 1
+    check("saves: positions are in a save, off the four-byte grid",
+          placed_hits > aligned_hits * 3 and placed_hits > 20,
+          f"{placed_hits} float32 triples match a position their mission "
+          f"places when every byte offset is tried, against {aligned_hits} on "
+          f"the four-byte grid -- records sit at arbitrary offsets, so a "
+          f"dword-aligned scan misses almost all of them")
 
     index = save.slots(game)
     filled = [x for x in index if not x.empty]

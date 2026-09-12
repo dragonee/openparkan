@@ -984,9 +984,13 @@ today; each is a small trap for anyone extending the code.
   the **part record carries no identity** (no field is unique per record), and
   two saves of one mission differ **mostly in stack rubbish** -- the giveaway
   being `0x0019xxxx`, the Windows main-thread stack range.
-  **Positions are not in a save** as a `float32` triple in the mission's frame,
-  under any axis order or sign, nor as `float64` — 10 chance matches across the
-  six saves against 123 placed positions. → [docs/17-saves.md](docs/17-saves.md) Whether the header's second
+  **Positions are in a save after all** — 42 `float32` triples match a position
+  their mission places once every byte offset is tried, against 10 on the
+  four-byte grid, and they cluster at `+0x143`, `+0x161` and `+0x1b1` of the
+  nearest world record, one offset per class. The earlier "not in a save"
+  reading rested on a dword-aligned scan. What is still open is the join
+  between a record's name and the position near it.
+  → [docs/17-saves.md](docs/17-saves.md) Whether the header's second
   version byte really separates campaign from single is also open — one of six
   saves has it set. → [docs/17-saves.md](docs/17-saves.md)
 - `.trf` **leftovers**, most of which are now closed

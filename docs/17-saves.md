@@ -198,19 +198,34 @@ state. Mapping the rubbish before decoding anything is the way to avoid
 inventing meaning for it — which this project has already done once, with the
 `R_L_03` "research part id" that was really a case-sensitivity bug.
 
-## What a save does not contain
+## Positions are in a save, off the four-byte grid
 
-**Where anything stands.** Searching an entire save on four-byte alignment for
-a `float32` triple matching any position its mission places finds **1 of 22**
-on `slot3` and **4 of 27** on `slot4` — chance, against the 96 plausible
-triples a file that size holds. No axis order and no sign flip does better,
-and `float64` finds none at all. Ten such matches across all six saves against
-123 placed positions.
+An earlier version of this section said a save does not store where anything
+stands, on the evidence that a scan found 10 matching `float32` triples across
+all six saves. **That scan stepped four bytes at a time.** The records sit at
+arbitrary byte offsets — the two-string fields are not aligned to anything —
+so three quarters of the file was never looked at.
 
-So a save is not a snapshot of the world's geometry. Either placement is kept
-in a form unlike the mission's, or the save is a delta over the mission it
-names and the untouched scenery is simply reloaded. This is the first thing
-anyone decoding the graph will try, so it is written down as tried.
+Stepping **one** byte finds **42** triples matching a position the mission
+places, against 10 on the dword grid. `slot4` alone accounts for 20 of its 27
+placed objects. The matches land at every alignment: 0, 1, 2 and 3.
+
+Relative to the nearest world record they cluster at **`+0x143`** (scenery),
+**`+0x161`** (`fr_b_ruin`) and **`+0x1b1`** (`fr_l_gener`) — three classes,
+three offsets, which is the same "450 bytes is a size, not a layout" result
+from the other side.
+
+What is **not** established is the join between a record's name and the
+position at its offset. Reading `+0x143` of every scenery record gives
+plausible, stable coordinates — `s_tree_55` is (511.2, 163.0, 221.8) in all
+three saves of that mission — but they are not the mission's placement of
+*that* name. So the field is real and the attribution is not; a record's name
+field and the position near it may belong to different objects, which the
+450-byte window cannot resolve.
+
+The lesson is the one this project keeps relearning: **an alignment assumption
+is an assumption.** A negative that rests on one is worth no more than the
+assumption.
 
 ## `saveslots.cfg`
 
