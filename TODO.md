@@ -1013,19 +1013,22 @@ today; each is a small trap for anyone extending the code.
   handler stops planning — but whether tag 3's `fPry` weight is a priority,
   and what separates the three exits, is not. The flag bit on 55 literals
   (`0x8000_0000`) and the sentinels `4094` and `65534` go with them.
-- **Component classes 6, 7, 14 and 16-18**, which `World3D.dll`'s resolver
-  leaves unnamed. A first pass thought the `i_cNN` models were named after
-  them; they are not, they are ammunition named after the weapon
-  ([18-vocabulary.md](docs/18-vocabulary.md)), so those six classes have no
-  evidence of any kind attached to them yet.
+- ~~**Component classes 6, 7, 14 and 16-18**~~ — **narrowed**. 17 is the
+  rounds' seeker (20 components). 6, 7, 14, 16 and 18 are in no shipped
+  controller, `Control.dll`'s factory builds them as its generic device, and
+  no module asks `IControl` for them by class; all the engine holds for them is
+  a power channel. What they were meant to be is not recorded anywhere.
+  → [docs/18-vocabulary.md](docs/18-vocabulary.md)
 - **The three int32 that end a save's member record.** `+72` counts along a
   group of parts but runs down as often as up, so it is not a slot number;
   `+64` is not the component class (tested, and it disagrees on 953 of 957);
   `+68` is small with some plainly uninitialised values. All three open.
   → [docs/18-vocabulary.md](docs/18-vocabulary.md)
-- Which of `bu_` and `fr_` is which faction. They supply the same 34 building
-  suffixes, so they are two sets covering one function list, but nothing in the
-  shipped data attaches either to a side.
+- ~~Which of `bu_` and `fr_` is which faction~~ — **closed: neither**. An
+  `fr_` building is a `FORT` record whose first slot is the `bu_` `BTLU`
+  record of the same suffix, and that record draws the `fr_` model;
+  `CBuilding` loads it through `LoadAgent`. One set of models, 34 of 34.
+  → [docs/18-vocabulary.md](docs/18-vocabulary.md)
 - The **save object graph**. Units, buildings, components, positions, damage,
   resources and mission progress are all in a `.sav` and none is decoded. Two
   record kinds are now identified rather than one: the **76-byte** part record
@@ -1068,27 +1071,37 @@ today; each is a small trap for anyone extending the code.
   against `objects.dlb` on 11455 of 11455 entries -- and the record's last
   eight bytes are a `uint16` pointing back through it plus **six separate byte
   fields**, one engine getter each, not the two packed words this project read
-  them as. What is left: the **id** at `+0x18` (879 distinct values, 0 to
-  3896, equal to the item's index on only 986 of 10672), what any of the six
-  bytes means, and what `TRF1`'s directory flag switches -- the loader keeps it
-  as a boolean and no shipped archive sets it. `TRFA`'s template syntax is
-  [read](docs/19-descriptions.md) — it is `objects.dlb`'s stat rows, copied.
-- **Whether a research takes time at all.** The tabulated numbers are costs,
-  so if there is a duration the engine computes it; `varset.var`'s
-  `dTechnologyFactor` is where to look.
-- `objects.dlb`'s **`A<n>` token** closing the classification line (six values,
-  tied to nothing else), its `A`/`N`/`E` size letters that no part id uses, and
-  what the tech level gates — it rises with `UpgradeLevel` and with tree depth
-  but nothing says which is cause.
+  them as. Now closed too: the "id" at `+0x18` is the item's `TRF9`
+  description offset (10672 of 10672), `+0x23`..`+0x25` are `objects.dlb`'s
+  kind and sub-kinds as numbers (11455 of 11455), from which `iron3d.dll`
+  derives a building's `Type` (164 of 167 placed), and `TRF1` is three state
+  bits. `TRF1`'s directory flag is narrowed: `iron3d.dll` calls a tree with it
+  set one that "contains debugging information", and warns unless
+  `FULL_RESEARCH_TREE` is set; nothing else found reads it. The docs' slot
+  numbers were 23 too high -- the getters sit on `IResearch`, not the object's
+  own table. `TRFA`'s template syntax is [read](docs/19-descriptions.md) — it is
+  `objects.dlb`'s stat rows, copied.
+- ~~**Whether a research takes time at all.**~~ — **closed**: it does, and the
+  budget is the research centre's `FreeResearchTime`, the same for every
+  technology it researches ([docs/23-economy.md](docs/23-economy.md)); the
+  tree's four numbers are costs.
+- `objects.dlb`: **narrowed**. The `A<n>` token is a size grade that follows
+  the size letter on 358 of 395 (37 launchers, packs and level-0 guns differ,
+  unexplained); the tech level gates nothing, because the game never reads the
+  file's text -- `iron3d.dll` only asks whether a part has a member. Open: what
+  the `A` and `N` size letters stand for.
   → [docs/19-descriptions.md](docs/19-descriptions.md)
-- **What the eight component loaders do.** `Comp.ini` names them and all
-  eight resolve to real exports ([docs/22-settings.md](docs/22-settings.md)),
-  so there are now eight named entry points into the engine's object model —
-  the first handles into it that did not have to be found by searching.
-  `CID_SHADER`'s is a singleton factory over a 0xb8-byte object and was ruled
-  out as §2.2's unfound caller; the other seven are unfollowed.
-- `Behavior.ini`'s **`DefaultOrderPhase = 10`**, which looks like an index and
-  indexes nothing this project can name.
+- **What the eight component loaders do** — **followed one level**
+  ([docs/22-settings.md](docs/22-settings.md)): each allocates, constructs and
+  returns an interface, and `World3D.dll`'s `LoadObjectFromDisk` maps an object
+  class 1–11 onto them (3 buildings, 4 robots, 9 rounds, 10 scenery, 11 the
+  research tree); the shader is reached only by id, from four `Terrain.dll`
+  constructors. What the landscape, camera and atmosphere constructors read is
+  their own docs' business.
+- ~~`Behavior.ini`'s **`DefaultOrderPhase = 10`**~~ — **read**: the phase at
+  which `GiveDefaultOrder` gives a battle robot order 13 and the hero order 6, compared with a behaviour field only the constructor writes, so it
+  never fires. What should have advanced the field is open.
+  → [docs/22-settings.md](docs/22-settings.md)
 - The **briefing's four soft fields**, now that the flythrough is
   [read](docs/21-briefing.md): what `flyaround` orbits (11 waypoints ask for
   it and no field says a radius or an axis), which end of an edge `EdgeTime`

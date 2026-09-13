@@ -21,12 +21,18 @@ File layout::
     uint32   version, always 1
     uint32   route count
     routes   { uint32 id; uint32 point count; float32[3] * count }
-    uint32   always 6
+    uint32   the clan table's version, 6 -- MisLoad.dll takes 1..6
     uint32   clan count
     clans    (see _read_clan)
-    uint32   always 10; uint32 object count
+    uint32   the object record's version, 10; uint32 object count
     objects  (see _read_object)
-    trailer  map path, description, per-clan viewpoints
+    trailer  map path, a word, description, the mineral lodes
+
+The two version words are the loader's, not constants: ``MisLoad.dll`` reads
+fields of an object record only from the version that introduced them
+(``0x10003900``) and gives an older record a scale of 1.  The trailer's
+records, once read as a viewpoint per clan, are **mineral lodes**:
+``iron3d.dll`` hands them to ``ArealMap.dll``'s ``SetMineralLode``.
 
 See ``docs/04-missions.md``.
 """
@@ -39,6 +45,24 @@ from pathlib import Path
 
 #: Second word of every object record; absent at the start of the trailer.
 OBJECT_MARKER = 0x80000002
+
+#: The clan table's version word, and the highest ``MisLoad.dll`` accepts
+#: (``0x100015b0``); below 6 it builds the alliance matrix from the clan types.
+CLAN_TABLE_VERSION = 6
+
+#: The object record's version word.  ``MisLoad.dll:0x10003900`` reads the
+#: clan index from 3, the logical id from 4, the property table from 6, the
+#: instance name from 7, the start flag from 8, the host building and vertex
+#: from 9 and the scale from 10; every shipped mission is 10.
+OBJECT_VERSION = 10
+
+#: A unit's host-building and vertex words when it starts outside any building.
+NOT_INSIDE = -1
+
+#: The object type a mineral lode carries (``Behavior.dll``'s minerals search
+#: looks for it).  ``iron3d.dll`` gives every lode this type whatever the file
+#: says (``0x10081880``).
+MINERAL_LODE = 0x10001000
 
 #: Property value type tags.
 TYPE_FLOAT = 0
@@ -254,6 +278,10 @@ class MissionObject:
     logical_id: int
     position: tuple[float, float, float]
     rotation: float
+    #: Multiplies the model's own x, y and z, and its bounding radius by the
+    #: largest (``AniMesh.dll:0x10014770``).  Only scenery is scaled:
+    #: ``iron3d.dll`` passes it for kinds 2 and 3 and never to a building or a
+    #: unit.  Uniform on all 864 shipped objects.
     scale: tuple[float, float, float]
     properties: dict[str, Property] = field(default_factory=dict)
     #: See KIND_* above.
@@ -292,6 +320,55 @@ class MissionObject:
         parts = self.path.replace("\\", "/").split("/")
         return parts[1].upper() if len(parts) > 2 else "?"
 
+    # ``unknown`` keeps the words as the file holds them, (clan, (ax, ay),
+    # (flag, host, vertex, header)); the properties below name them.
+
+    @property
+    def clan_index(self) -> int:
+        """The word after the path: the owning clan's 0-based index.
+
+        ``iron3d.dll`` indexes its clan records with it (``0x100a4097``); it
+        equals ``ClanID`` on all 463 owned objects.  Scenery carries leftovers.
+        """
+        return self.unknown[0] if self.unknown else -1
+
+    @property
+    def angles(self) -> tuple[float, float, float]:
+        """Turns about x, y and z, in radians; ``rotation`` is the third.
+
+        ``MisLoad.dll:0x10001d80`` builds Rz(z)·Ry(y)·Rx(x).  The first two were
+        read as padding: they are 0 on all 864 placed objects.
+        """
+        ax, ay = self.unknown[1] if self.unknown else (0, 0)
+        as_float = (struct.unpack("<f", struct.pack("<I", w))[0] for w in (ax, ay))
+        return (*as_float, self.rotation)
+
+    @property
+    def start_flag(self) -> int:
+        """A building's creation flag: bit 0 of ``CreateObjectFromScheme``'s
+        flags, which sets 2 on the building through ``IBuilding`` slot 12.
+
+        It marks the second half of each bridge pair.  A unit's or scenery's
+        is not passed on.
+        """
+        return self.unknown[2][0] if self.unknown else 0
+
+    @property
+    def host(self) -> int | None:
+        """The logical id of the building a unit starts inside, or None."""
+        value = self.unknown[2][1] if self.unknown else NOT_INSIDE
+        return None if value == NOT_INSIDE else value
+
+    @property
+    def vertex(self) -> int | None:
+        """The host building's hall-way vertex a unit is placed at, or None.
+
+        While it is set ``MisLoad.dll`` hands out a zero position and zero
+        angles (``0x100014b4``): the vertex places the unit.
+        """
+        value = self.unknown[2][2] if self.unknown else NOT_INSIDE
+        return None if value == NOT_INSIDE else value
+
 
 @dataclass
 class Route:
@@ -301,8 +378,38 @@ class Route:
 
 @dataclass
 class Viewpoint:
+    """A trailer record: a **mineral lode**, not a viewpoint.
+
+    The name stays because the golden dump uses it.  ``iron3d.dll:0x10081880``
+    takes each through ``IMission`` slot 13 and gives ``SetMineralLode`` its x
+    and y, its found flag and ``amount``; z, the type word and the fourth word
+    are not used, and ``env_mineral`` is drawn at the ground under it.
+    """
+
     position: tuple[float, float, float]
     unknown: tuple[int, int, int, int]
+
+    @property
+    def found(self) -> bool:
+        """Already found: the minerals search skips a lode with this set."""
+        return bool(self.unknown[0])
+
+    @property
+    def object_type(self) -> int:
+        """The type word as filed -- ``MINERAL_LODE`` on 25 of 28, 0 on three."""
+        return self.unknown[1]
+
+    @property
+    def amount(self) -> float:
+        """The third word as a float, kept at the lode's ``+0x14``; 1e4..1e20.
+
+        What reads it is not established.
+        """
+        return struct.unpack("<f", struct.pack("<I", self.unknown[2]))[0]
+
+
+#: The trailer's records by what they are.
+Lode = Viewpoint
 
 
 @dataclass
@@ -315,7 +422,20 @@ class Mission:
     map_path: str
     description: str
     viewpoints: list[Viewpoint]
+    #: The object record's version word, ``OBJECT_VERSION``.
     unknown_pre_objects: int
+    #: The word after the map path: 1 on the six multiplayer maps and
+    #: Single.01, 0 elsewhere.  ``IMission`` slot 11 returns it and nothing
+    #: calls that slot.
+    map_word: int = 0
+    #: The word before the lode count, 1 on all 29; the lode reader is handed
+    #: it and ignores it.
+    lode_version: int = 0
+
+    @property
+    def lodes(self) -> list[Viewpoint]:
+        """The mineral lodes -- the trailer records ``viewpoints`` holds."""
+        return self.viewpoints
 
     @property
     def descr_file(self) -> str:
@@ -414,16 +534,16 @@ def load(path: str | Path) -> Mission:
         rid = r.u32()
         routes.append(Route(rid, [r.vec3() for _ in range(r.u32())]))
 
-    r.u32()  # always 6 in every shipped mission
+    r.u32()  # the clan table's version, CLAN_TABLE_VERSION
     clans = [_read_clan(r) for _ in range(r.u32())]
 
-    pre = r.u32()  # always 10
+    pre = r.u32()  # the object record's version, OBJECT_VERSION
     objects = [_read_object(r) for _ in range(r.u32())]
 
     map_path = r.string()
-    r.u32()
+    map_word = r.u32()
     description = r.string()
-    r.u32()
+    lode_version = r.u32()
     viewpoints = [
         Viewpoint(r.vec3(), (r.u32(), r.u32(), r.u32(), r.u32()))
         for _ in range(r.u32())
@@ -444,6 +564,8 @@ def load(path: str | Path) -> Mission:
         description=description,
         viewpoints=viewpoints,
         unknown_pre_objects=pre,
+        map_word=map_word,
+        lode_version=lode_version,
     )
 
 

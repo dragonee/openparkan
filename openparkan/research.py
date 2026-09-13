@@ -38,26 +38,32 @@ that field is a format version.
 
 ``TRF1`` is the odd one: every other stream is used where it lies, and this
 one is copied into a buffer the loader allocates and zeroes first.  A stream
-the engine takes a writable copy of is **state**, not a label -- the category
-is where an item *starts*, and 5 reads as already available.  A second gate
-sits beside it: the directory's second count over ``TRF1`` is read as a
-boolean, and it is 0 on all 29, so nothing shipped turns that switch on.
+the engine takes a writable copy of is **state**, not a label: three bits,
+``IN_TREE``, ``RESEARCHED`` and ``AVAILABLE``, which a completed research
+rewrites.  A second gate sits beside it: the directory's second count over
+``TRF1`` is read as a boolean, and ``iron3d.dll`` calls a tree with it set one
+that "contains debugging information".  It is 0 on all 29.
 
 A ``TRF0`` record is::
 
     float32 x4        the research energy and ore cost, then the build pair
     int32             byte offset into TRF7, this item's short code
     int32             byte offset into TRF8, this item's display name
-    int32             an id, not the item's own index
+    int32             byte offset into TRF9, this item's description
     int32             byte offset into TRFA, this item's stat template
     uint16            this item's own entry in TRFB -- the mapping, reversed
-    byte x6           six separate fields, one getter each
+    byte x6           role, kind, sub-kind, branch, size, upgrade level
 
 The last eight bytes were read here as two packed words until the engine's own
 accessors said otherwise: ``MisLoad.dll`` hands out a **bounds-checked getter
-per byte** for the six at ``+0x22``..``+0x27``, and the data agrees -- each
-holds between 4 and 33 distinct values across all 29 archives, which the bytes
-of a packed word would not.  What any of the six means is open.
+per byte** for the six at ``+0x22``..``+0x27``.  The middle four are
+``objects.dlb``'s classification line in numbers, which is how the game knows
+a part's class without reading that file; ``iron3d.dll`` turns them into an
+object ``Type`` (``object_type``).
+
+The getters sit on ``IResearch``, the 32-slot interface at ``0x1000e18c``
+that a query for interface ``0x502`` returns; the 23-slot table before it is
+the research game object's own.
 
 **``TRFB`` is the part-to-item mapping**, which was the open question here.
 Each of its 395 entries is two ``uint16``: a byte offset into ``TRF6``, and the
@@ -116,14 +122,25 @@ OPTIONAL = ("TRF3", "TRF5")
 #: before it reads anything: a format version.
 VERSION = 3
 
-#: The same field over ``TRF1``, which the loader keeps as a boolean.  No
-#: shipped archive sets it, so what it switches is unknown.
+#: The same field over ``TRF1``, which the loader keeps as a boolean and
+#: ``IResearch`` slot 29 hands out: the tree **contains debugging
+#: information**.  ``iron3d.dll`` says so in those words (``0x100605d6``)
+#: unless ``Iron_3D.ini`` sets ``[CS] FULL_RESEARCH_TREE``.  0 on all 29.
 STATE_FLAG = 0
+DEBUG_INFO = STATE_FLAG
 
-#: The starting state in ``TRF1`` -- the engine copies this stream into a
-#: writable buffer, so it is where an item begins rather than what it is.
-#: 4 is the bulk of the tree and 7 the small equipment; 2 is the wildlife and
-#: the hero, which are not researched.
+#: ``TRF1`` is three bits of state, as ``MisLoad.dll`` reads and writes them:
+#: ``IN_TREE`` puts the item in this mission's tree, ``RESEARCHED`` marks it
+#: done, and ``AVAILABLE`` means every prerequisite is done.  Completing a
+#: research sets the last two and then gives ``AVAILABLE`` to every item in the
+#: tree whose prerequisites are all in it and researched (``0x10002c10``).
+AVAILABLE = 0x1
+RESEARCHED = 0x2
+IN_TREE = 0x4
+
+#: The starting states the archives use.  0 is out of the tree, 2 researched
+#: but not in it (the wildlife and the hero), 4 waiting on a prerequisite,
+#: 5 open to research and 7 granted.
 CATEGORIES = {
     0: "special",
     2: "creature",
@@ -131,6 +148,37 @@ CATEGORIES = {
     5: "starting",
     7: "basic",
 }
+
+#: Record ``+0x23``..``+0x25`` are ``objects.dlb``'s classification line as
+#: numbers: the kind, the first sub-kind, and a building's second.  Every
+#: value maps onto one token across all 11,455 part entries.
+PART_KINDS = {8: "BLD", 9: "SHS", 10: "AMM", 11: "DVC", 12: "WPN"}
+PART_SUBS = {
+    16: "HNG", 17: "BUN", 18: "INT", 19: "MIN", 20: "PLT", 21: "STR", 22: "TEL",
+    23: "TOW", 24: "TMP", 25: "BRD", 26: "GEN", 28: "RUN", 29: "TWL", 30: "TWH",
+    32: "SHS", 33: "TUR", 34: "TAR",
+    49: "GUN", 50: "FLM", 51: "MIS", 52: "ROC", 53: "LAS", 55: "DVC", 56: "TAS",
+    64: "DEF", 65: "RDR", 66: "REP", 67: "FSH", 68: "ARM", 69: "BRN", 70: "DSH",
+    71: "ENG", 72: "BAT",
+}
+PART_BRANCHES = {80: "TUR", 81: "BLD", 82: "DEF", 83: "RDR", 84: "UPG"}
+NO_BRANCH = 255
+
+#: What ``iron3d.dll:0x1008a590`` makes of those bytes: a building's ``Type``
+#: from its sub-kind -- a bunker's from its size -- and a turret's unit
+#: ``Type`` from its role.  Anything else is 0.
+KIND_BUILDING = 8
+KIND_CHASSIS = 9
+SUB_TURRET = 33
+SUB_BUNKER = 17
+BUILDING_TYPES = {
+    16: 0x80000040, 18: 0x80000400, 19: 0x80000004, 20: 0x80000010,
+    21: 0x80000008, 24: 0x80000200, 25: 0x80001000, 26: 0x80000002,
+    29: 0x80100000, 30: 0x80200000,
+}
+BUNKER_TYPES = {1: 0x80010000, 2: 0x80020000, 3: 0x80040000}
+TURRET_TYPES = {3: 0x1004000, 4: 0x1010000, 5: 0x1020000, 6: 0x1002000}
+TURRET_DEFAULT_TYPE = 0x1008000
 
 
 class ResearchFormatError(ValueError):
@@ -175,9 +223,12 @@ class Item:
     #: Record ``+0x22``..``+0x27``.  Six separate fields, not a packed word:
     #: the engine hands out a bounds-checked byte getter for each.  Measured
     #: ranges are 1..7 with 255 for none, 8..12, 16..72, 80..84 with 255 for
-    #: none, 0..5 and 0..3.  The first is the ``role``, the fifth the ``size``
-    #: and the sixth the ``upgrade_level``; the middle three are open.
+    #: none, 0..5 and 0..3: the ``role``, ``part_kind``, ``part_sub``,
+    #: ``part_branch``, ``size`` and ``upgrade_level``.
     tail: tuple[int, ...] = ()
+    #: ``TRF9``: the record's ``+0x18`` is a byte offset into it, and 150 of
+    #: the 368 land on text; the rest on an empty string.
+    description: str = ""
 
     @property
     def role(self) -> int:
@@ -193,6 +244,47 @@ class Item:
     def upgrade_level(self) -> int:
         """``objects.dlb``'s UpgradeLevel for the part, on every shipped record."""
         return self.tail[5] if len(self.tail) > 5 else 0
+
+    @property
+    def part_kind(self) -> str:
+        """``objects.dlb``'s kind token -- ``BLD``, ``SHS``, ``WPN``..."""
+        return PART_KINDS.get(self.tail[1], "") if len(self.tail) > 1 else ""
+
+    @property
+    def part_sub(self) -> str:
+        """The first sub-kind token -- ``BUN``, ``TUR``, ``GUN``..."""
+        return PART_SUBS.get(self.tail[2], "") if len(self.tail) > 2 else ""
+
+    @property
+    def part_branch(self) -> str:
+        """A building part's second sub-kind -- ``BLD``, ``DEF``, ``TUR``...; else ''."""
+        return PART_BRANCHES.get(self.tail[3], "") if len(self.tail) > 3 else ""
+
+    @property
+    def object_type(self) -> int:
+        """The object ``Type`` ``iron3d.dll`` derives from the record, or 0."""
+        if len(self.tail) < 5:
+            return 0
+        kind, sub = self.tail[1], self.tail[2]
+        if kind == KIND_CHASSIS and sub == SUB_TURRET:
+            return TURRET_TYPES.get(self.tail[0], TURRET_DEFAULT_TYPE)
+        if kind == KIND_BUILDING:
+            if sub == SUB_BUNKER:
+                return BUNKER_TYPES.get(self.tail[4], 0)
+            return BUILDING_TYPES.get(sub, 0)
+        return 0
+
+    @property
+    def in_tree(self) -> bool:
+        return bool(self.category & IN_TREE)
+
+    @property
+    def researched(self) -> bool:
+        return bool(self.category & RESEARCHED)
+
+    @property
+    def available(self) -> bool:
+        return bool(self.category & AVAILABLE)
 
     @property
     def kind(self) -> str:
@@ -334,7 +426,7 @@ def parse(data: bytes, source: Path | None = None) -> Tree:
     for index in range(count):
         fields = struct.unpack_from("<4f4iH6B", blob["TRF0"], index * RECORD)
         values = fields[:4]
-        code_at, name_at, _id, _panel, part_index = fields[4:9]
+        code_at, name_at, description_at, _panel, part_index = fields[4:9]
         tail = fields[9:]
         items.append(
             Item(
@@ -348,6 +440,7 @@ def parse(data: bytes, source: Path | None = None) -> Tree:
                 parts=tuple(parts[index]),
                 part_index=part_index,
                 tail=tuple(tail),
+                description=_text(blob.get("TRF9", b""), description_at),
             )
         )
     return Tree(source=source or Path(where), items=tuple(items),

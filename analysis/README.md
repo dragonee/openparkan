@@ -184,16 +184,25 @@ in `MisLoad.dll`:
 | address | what |
 |---|---|
 | `0x100025f0` | `LoadResearch`; allocates 0x138 and a 0x80-byte reader at `+0x130` |
-| `0x1000e18c` | the reader's vtable; slot 6 (`+0x18`) loads |
+| `0x1000e18c` | the reader's vtable, `IResearch` (32 slots); slot 6 (`+0x18`) loads |
 | `0x10002fe0` | the load: twelve streams in a fixed order, ten of them required |
 | `0x1000302c` | the version gate -- the directory's second count over `TRF0` must be 3 |
 | `0x1000306d` | the same field over `TRF1`, kept as a boolean |
 | `0x100030c1` | the one writable copy: `TRF1` into a zeroed buffer |
 | `0x100032cd` | the count/pointer pairing over `TRF2`/`TRF3`, and `0x100033a5` for `TRF4`/`TRF5` |
 
-| `0x10002f60` | slot 44: `TRFB` index -> part id text and the item that researches it |
+| `0x10002f60` | `IResearch` slot 21: `TRFB` index -> part id text and the item that researches it |
 | `0x10002d50`.. | ten per-field getters over the 40-byte record, `0x30` apart |
-| `0x1000e130` | the loaded tree's vtable, 55 slots |
+| `0x1000e130` | the research game object's vtable, 23 slots; interface `0x502` returns the reader |
+
+**Two vtables end to end read as one.** `0x1000e130` was written up as a
+55-slot table because a dump that runs until the next dword is not code never
+stops at a table's end when another table follows. The object's own table has
+23 slots, and `0x1000e18c` — the reader's, which `LoadResearch` itself calls
+slot 6 of — starts right after it; every slot number the docs gave was 23 too
+high. Find where a table is *installed* (`mov [reg], imm` in a constructor)
+before counting its slots, and check a slot number against a call site that
+uses it.
 
 **A search that missed its target, worth remembering.** A first pass concluded
 nothing in the DLL indexed a 40-byte record, having looked for `imul` by 40 and

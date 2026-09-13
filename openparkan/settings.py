@@ -94,6 +94,37 @@ DISPATCHER_FILE = ("MISSIONS", "dispatcher.ini")
 #: How many components the registry declares.
 COMPONENTS = 8
 
+#: ``World3D.dll``'s ``LoadObjectFromDisk`` (``0x10007a50``): the object class
+#: a caller asks for, and the registry id it loads it through.  Classes 6 and
+#: 8 are illegal; the shader (id 6) is reached only by ``LoadComponent``
+#: (``0x10014980``), which takes the id itself.  Buildings are class 3 and
+#: robots 4 (``ArealMap.dll``'s ``CreateObjectFromScheme``), what a controller
+#: emits 9 (``Control.dll``), mission scenery 10 and the research tree 11.
+OBJECT_CLASSES = {1: 0, 2: 3, 3: 1, 4: 3, 5: 2, 7: 5, 9: 3, 10: 4, 11: 7}
+
+#: Each loader's allocation and the interface offset it returns, by entry
+#: point.  All take ``(library, member, 0, player)``.
+LOADERS = {
+    "LoadLandscape": (0x7D40, 0),
+    "LoadBuilding": (0xFC, 0x8),
+    "LoadCamera": (0x1A4, 0x134),
+    "LoadAgent": (0x7BC, 0x130),
+    "CreateAtmosphere": (0x1AC, 0x138),
+    "CreateShader": (0xB8, 0),
+    "LoadResearch": (0x138, 0),
+}
+
+#: ``Behavior.ini``'s ``DefaultOrderPhase`` is compared with a behaviour's
+#: ``+0xa00``, which nothing but its constructor writes (0), before
+#: ``GiveDefaultOrder`` hands a battle robot order 13 and the hero order 6
+#: (``Behavior.dll:0x10004c80``).
+DEFAULT_ORDER_FIELD = 0xA00
+
+#: A ``[CS]`` key of ``Iron_3D.ini`` the shipped file does not carry.  Non-zero
+#: silences the research tree's debug-information warning, and four part-list
+#: builders of the panels take its inverse as a flag (``iron3d.dll:0x1008ac50``).
+FULL_RESEARCH_TREE = "FULL_RESEARCH_TREE"
+
 #: The switches both debug files carry.
 LOGGING = ("LogFile", "SaveLog", "MaxErrorLevel", "DefErrorLevel", "LookBugMode")
 

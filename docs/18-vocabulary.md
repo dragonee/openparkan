@@ -119,15 +119,60 @@ installation at all** — not in a tree, not in a save, not in `objects.dlb`.
 Every one of the 50 clips that *is* fitted is also in the part list, so those
 six are the only ones outside the game's own catalogue. *Guess*: cut content.
 
-## Two building sets — *measured*
+## `fr_` and `bu_`: a building and its body — *measured* and *read*
 
 `bu_` (34 members) and `fr_` (35) supply **the same 34 suffixes**: `bunker`,
 `brige`, `inst`, `mine`, `plant`, `ruin`, `store`, `towH`, `towL`, `angar` and
-the rest, each in its sizes. One function list, two sets of models.
+the rest, each in its sizes. An earlier draft read that as two sets of models
+and guessed two architectural styles, one per side. **It is not two sides and
+not two sets of models**; the records' tags say what they are.
 
-*Guess*: two architectural styles, most likely the game's opposing sides.
-Nothing in the shipped data attaches either prefix to a faction name, so which
-is whose is **unknown**.
+Every `fr_` building is a `FORT` record of two slots, and the first names the
+`bu_` of the same suffix in `objects.rlb`; the second is the building's `.bas`
+ground plan. Every `bu_` is a `BTLU` record — the record kind a creature or a
+robot body has — naming five `fr_` resources in `fortif.rlb`: the `.msh`,
+`.wea`, `.cpt`, `.ndp` and `.ctl` of the model the building's `.bas` names.
+*Measured*: 34 of 34 `FORT` records point at their own `bu_`, all 34 `bu_`
+records are pointed at, and all 34 draw on their building's model — 28 of the
+same suffix, and the six towers (`towH`, `towL` in three size letters) sharing
+`fr_b_tower` and `fr_m_tower`. The 35th `fr_` member, `fr_l_01`, is a `BULL`
+round.
+
+The code does the same (*read*): `LoadBuilding`, the `CID_CLASSIC_FORT` loader
+([22-settings.md](22-settings.md)), constructs a `CBuilding` that reads the
+`FORT` record's four strings and hands its first slot to `AniMesh.dll`'s
+`LoadAgent` (`Terrain.dll:0x10055e95`) — so a building is a fortification
+wrapped around an ordinary agent, and the `bu_` record is that agent. There is
+one set of building models, and no faction in the names.
+
+## The component classes the resolver leaves unnamed — *read* and *measured*
+
+`World3D.dll`'s name resolver knows 13 `CICLS_` classes and leaves 6, 7, 14
+and 16–18 without a name ([14-controls.md](14-controls.md)). The `i_cNN`
+ammunition was once taken for them and is not (above). What the rest of the
+install says about the six:
+
+- **17 is the round's seeker.** 20 components carry it, all on rounds in
+  `weapon.rlb`, and `Control.dll`'s factory builds it its own 0xa0-byte
+  class (`0x10024760`; [29-weapons.md](29-weapons.md)).
+- **6, 7, 14, 16 and 18 are in no shipped controller**: 1066 components over
+  20 classes, none of these five.
+- **The factory gives them nothing of their own.** `Control.dll:0x1002d4b0`
+  switches through a 30-byte index table and sends 3, 6, 7, 11–14, 16, 18,
+  20, 22–25, 28 and 29 to one default: the generic 0xa4-byte device
+  (`0x1002d6ec`, constructor `0x10020800`).
+- **No module asks for them by class.** The `IControl` query that walks a
+  controller's components of one class (interface 0x202, slot 9) is called
+  with a constant class in `Behavior.dll` (1, 10, 15, 25, 26, 29, 30),
+  `iron3d.dll` (1–4, 30), `World3D.dll` (2, 24) and `Effect.dll` (2) — the
+  building binder's 26, 25, 29, 10 and 15 are the positive control — and never
+  with 6, 7, 14, 16 or 18.
+- What the engine does hold for them is a power channel each
+  (`Control.dll:0x1003ccc8`): 14 on the batteries' channel, 16 on the engines',
+  and 6, 7 and 18 on channel 0.
+
+So the five are ids the engine reserves and nothing ships. *Guess*: cut
+component kinds, like the six clips outside the catalogue.
 
 ## The member record in a save
 

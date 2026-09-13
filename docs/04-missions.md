@@ -14,7 +14,7 @@ MISSIONS/
 
 | File | Format | Contents |
 |---|---|---|
-| `data.tma` | binary | clans, object placement, routes — **fully parsed** |
+| `data.tma` | binary | clans, object placement, routes, mineral lodes — **fully parsed** |
 | `mission.cfg` | text | resources, objectives, minimap |
 | `descr` | text | one-line description shown in the menu |
 | `sky.wea` | text | skybox texture name table |
@@ -37,14 +37,24 @@ that many bytes, no NUL terminator.
 uint32   version, always 1
 uint32   route count
 routes   { uint32 id; uint32 point count; float32[3] × count }
-uint32   always 6
+uint32   the clan table's version, 6
 uint32   clan count
 clans    × clan count
-uint32   object record version, always 10    the scale is read from 10 on
+uint32   the object record's version, 10    the scale is read from 10 on
 uint32   object count
 objects  × object count
 trailer
 ```
+
+The two words once written up as "always 6" and "always 10" are **versions**,
+and the loader branches on them (*read*, `MisLoad.dll`). The clan table
+(`0x100015b0`) accepts 1 to 6 and, below 6, builds the alliance matrix from
+the clan types instead of reading it. The object reader (`0x10003900`) takes
+each field only from the version that introduced it: the clan index from 3,
+the logical id from 4, the property table from 6, the instance name from 7,
+the start flag from 8, the host building and its vertex from 9, and the scale
+from 10 — an older record gets a scale of 1. Every shipped mission is 10
+(*measured*, 29 of 29).
 
 ### Clan
 
@@ -94,14 +104,16 @@ only on campaign missions, with radius pairs like 20/40 and 10/30.
 uint32   kind        0 building, 1 unit, 2 vegetation, 3 rock
 uint32   always 0x80000002
 string   path
-uint32   varies
-int32    logical id                   also repeated as the LogicalID property
+uint32   clan index                   v3; the owner's 0-based clan, = ClanID
+int32    logical id                   v4; also repeated as the LogicalID property
 float32  x, y, z
-float32  rotation x, y, radians       always 0
-float32  rotation z, radians          about the map's up axis
-float32  scale x, y, z                uniform; 218 of 864 are not 1
-string   instance name                empty for scenery
-uint32   four words: 0, -1, -1, 1
+float32  turns about x, y, z          radians; x and y are 0 throughout
+float32  scale x, y, z                v10; uniform throughout, 1 on 646 of 864
+string   instance name                v7; empty for scenery
+uint32   start flag                   v8; a building's, see below
+int32    host building                v9; a logical id, or -1
+int32    hall-way vertex              v9; in the host, or -1
+uint32   property table word          v6; 1, read and discarded
 uint32   property count
 properties × count
 ```
@@ -115,9 +127,51 @@ name a `.dat` definition file under `UNITS/`; vegetation and rock name a
 `STAT` member of `objects.rlb`. **All 864 placed objects across all 29
 missions resolve** — 463 files on disk, 401 archive members.
 
+### What the object's words do — *read*, and *measured*
+
+`iron3d.dll:0x100a3ea0` places a mission: it sorts the records by kind, creates
+the buildings first and files each under its logical id, then the units, then
+the scenery. `MisLoad.dll` hands it each record through `IMission` slot 10
+(`0x10001440`).
+
+- **The word after the path is the owning clan.** `iron3d.dll` indexes its clan
+  records with it (`0x100a4097`), and it equals `ClanID` on **463 of 463**
+  owned objects. Scenery carries leftovers (−1, 0, 3…) that nothing reads.
+- **The two "always 0" words and `rotation` are one vector of three turns.**
+  `MisLoad.dll:0x10001d80` builds the placement as Rz(z)·Ry(y)·Rx(x) with the
+  position as its translation. The turns about x and y are 0 on all 864.
+- **Only scenery is scaled.** Kinds 2 and 3 go to `World3D.dll`'s
+  `AddNewObjectToGame` with the scale, which hands it to the model's interface
+  0x18 slot 15 (`0x10008428`): `AniMesh.dll:0x10014770` multiplies the model's
+  own x, y and z by the three and its bounding radius by the largest. Buildings
+  and units go to `ArealMap.dll`'s `CreateObjectFromScheme`, which takes no
+  scale. *Measured*: x = y = z on 864 of 864; 134 trees and 82 rocks are not 1,
+  and two animals (`tushka.dat`, 1.5 and 1.25) carry a scale nothing applies.
+  See [the scale](#the-scale).
+- **A unit can start inside a building.** The host word is a building's logical
+  id and the vertex word a vertex of that building's hall-way graph
+  ([07-objects.md](07-objects.md)); `CreateObjectFromScheme` logs *"Placing
+  Robot inside Building … into Vertex"* and takes the vertex's position
+  (`ArealMap.dll:0x10015290`). While the vertex is set, `IMission` slot 10 hands
+  out a zero position and zero turns (`0x100014b4`). *Measured*: 13 objects set
+  the pair, all units, each naming a building placed in the same mission and a
+  vertex inside its graph — 12 heroes in their own clan's bunker and one
+  walker in another clan's store; the other 851 set both to −1.
+- **The start flag is a building's.** `iron3d.dll:0x10033cb0` turns it into bit
+  0 of `CreateObjectFromScheme`'s `dwCreateFlag` (bit 2 says a logical id
+  follows), and that bit sets 2 on the building through `IBuilding` slot 12
+  (`Terrain.dll:0x10056cb0`, `CBuilding +0xb8`, 1 by default). A unit's and
+  scenery's flag is not passed on. *Measured*: it marks **exactly one half of
+  each of the nine bridge pairs** — always the half with the later logical id
+  and the angle π further on — and 4 other buildings (two mines, a plant, a
+  generator); 6 units and 4 trees set it to no effect. What reads the
+  building's 2 back (`IBuilding` slot 13) is not found.
+- **The property table's leading word** is read into a local and dropped
+  (`0x10003ab0`); it is 1 on all 864.
+
 ### The rotation's sense
 
-`rotation z` turns the object about the map's up axis, and the bridges settle
+The turn about z turns the object about the map's up axis, and the bridges settle
 which way. A bridge is placed as **two halves back to back**: nine pairs
 across seven missions, each pair's angles exactly π apart to four decimals —
 `+0.0370` and `+3.1786` on Tut_1, `-0.0789` and `+3.0627` on KM_4. Their
@@ -133,6 +187,10 @@ It is worth stating because nothing else in the shipped data tests it.
 Buildings and units placed at an arbitrary heading simply face somewhere, and
 a wrong sense looks like a design decision. Two objects that must interlock
 are the only witness.
+
+The loader now says the same (*read*): the placement matrix's turn about z is
+`[[cos, −sin], [sin, cos]]` over x and y (`MisLoad.dll:0x10001d80`), a positive
+angle taking +x towards +y.
 
 ### The scale
 
@@ -231,15 +289,43 @@ clan they are assigned to.
 
 ```
 string   map path                     DATA\MAPS\SC_3\land
-uint32   varies
+uint32   a word                       1 on the multiplayer maps and Single.01
 string   description                  see the warning below
-uint32   varies
-uint32   viewpoint count
-viewpoints { float32[3] position; uint32 × 4 }
+uint32   the lode table's word, 1
+uint32   lode count
+lodes    { float32[3] position; uint32 found; uint32 type; float32 amount; uint32 }
 ```
 
 The map path is how a mission chooses its terrain — `mission.cfg` only names
-the *minimap* image. There is one viewpoint per clan.
+the *minimap* image.
+
+**The trailer's records are mineral lodes**, not a viewpoint per clan (*read*).
+`MisLoad.dll` reads the description from object version 2 and the lodes from
+5 (`0x10001b10`), 28 bytes each (`0x10004040`), and hands out 24 of them
+through `IMission` slots 12 and 13. `iron3d.dll:0x10081880` builds one 24-byte
+record per lode — x, y, a zero z, the found flag, the type `0x10001000` and
+the amount — and gives the list to `ArealMap.dll`'s
+`SetMineralLode` (`0x10021db0`); `0x10081c10` then draws `effects.rlb`'s
+`env_mineral` on the ground under each. `0x10001000` is the type the builders'
+minerals search looks for, and the search skips a lode whose found flag is set
+and sets it when a unit gets within 10 m ([31-packages.md](31-packages.md)).
+
+*Measured*: 28 lodes on 13 of the 29 missions; the count equals the clan count
+on only 2. 17 start found. The type word is `0x10001000` on 25 and 0 on 3, but
+`iron3d.dll` writes its own `0x10001000` whatever the file says; the file's z
+is dropped too. The amount runs 1e4 to 1e20 — what reads it off the lode
+(`+0x14`) is not found. The fourth word (0, or 100.0 as a float on the three
+with type 0) never leaves `MisLoad.dll`.
+
+The word after the map path is `IMission` slot 11's (`0x10001510`), and no
+caller of that slot was found. `iron3d.dll` is the only module that imports
+`CreateMissionData`; the three functions that create the object
+(`0x100a1f90`, `0x100a2bd0`, `0x100a36a0`) keep it local, hand it only to the
+placement (`0x100a3ea0`) and the lode setup (`0x10081880`), and between the
+five they call slots 1–3, 5–10 and 12–14. It is 1 on `Multi.01` to
+`Multi.06` and `Single.01`, 0 elsewhere. The lode table's word is passed to
+the lode reader, which ignores it. A save keeps its own copy of the lodes, 24
+bytes each, read back by `0x10081750`.
 
 **The description field is damaged in the shipped data.** Its length word is
 the *capacity* of a fixed-size buffer, and whatever followed the real text in
@@ -292,6 +378,8 @@ Mission name:
   main structural proof.
 - **The declared object count is right.** The word before the object list
   equals the number of objects the parse then finds, on every mission.
+- **The loader agrees field by field.** `MisLoad.dll`'s readers take the same
+  fields in the same order, and name what the parse had left as padding.
 - **Everything it points at exists**: 29/29 map paths resolve to a real
   `DATA/MAPS` entry, 864/864 object references resolve.
 - **Placement agrees with the terrain.** All 864 objects fall inside their
