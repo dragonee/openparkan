@@ -4262,3 +4262,19 @@ kind = "function"
 name = "default orders: an animal migrates (order 15), a mine mines"
 doc = "docs/31-packages.md"
 read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000ccc5"
+kind = "site"
+name = "projectile tick asks the round's seeker (+0x5d8) for a heading"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000cde5"
+kind = "site"
+name = "projectile steering clamped to the controller's turn rate (file +56, +60)"
+doc = "docs/29-weapons.md"
+read = true

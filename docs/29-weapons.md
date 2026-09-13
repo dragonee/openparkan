@@ -125,10 +125,33 @@ whose section-2 record names a node (*measured*).
   No other "damage type" field was found: a taser and a laser differ only in
   their numbers.
 - **Missiles are guided and rockets are not.** The rounds of all ten missile
-  launchers carry a class-17 seeker; those of the six rocket launchers do not. A seeker keeps `cos(value 0)` as its
-  cone (`Control.dll:0x100247a0`) and follows its target while it is within
-  value 1 m and inside the cone (`0x100247c0`); value 2 (250–10,000) is not
-  read. The two howitzer shells carry one too.
+  launchers carry a class-17 seeker; those of the six rocket launchers do not.
+  The two howitzer shells carry one too.
+
+## Guided rounds differ in how hard they steer — *read*, and *measured*
+
+A seeker keeps `cos(value 0)` as its cone (`Control.dll:0x100247a0`). Each tick
+the round's own control system asks it for a heading (`0x1000ccc5`): the seeker
+answers only while its target is within **value 1** m and inside the cone
+(`0x100247c0`). The round then turns towards that heading on each axis at up to
+its **controller's turn rate** — the frame's fourth triple, the same field that
+turns a machine ([24-motion.md](24-motion.md)) — which clamps the command
+(`0x1000cde5`). So how well a guided round follows a target is two numbers:
+how wide it looks, and how fast it can turn.
+
+| round | cone, rad | follows within, m | turns, rad/s | seeker value 2 |
+|---|---:|---:|---:|---:|
+| missiles, tiny to large (`bm_t/l/m/b_01`) | 0.80–0.95 | 500 | 1.2–1.6 | 3,000–5,000 |
+| huge missile (`fm_h_01`) | 1.57 | 700 | 1.3–1.4 | 3,500 |
+| winged SSMs (`bm_m/b_04`) | 0.70 | 500 | 0.5 | 7,000–10,000 |
+| howitzer shells (`bb_m/b_02`) | 0.26–0.27 | 350–400 | 0.35–0.40 | 500–750 |
+| rockets (`br_*`, `fr_l_01`) | no seeker | — | 1.52, unused | — |
+
+*Measured*: every missile round looks wider and turns faster than both guided
+shells. A howitzer shell corrects gently inside a 15° cone; a missile looks
+through about three times the angle and turns three to four times as fast; the
+winged SSMs look wide but turn slowly. The seeker's value 2 is not read by
+either method.
 
 ## The weapons the player builds — *measured*, with *derived* rates
 
@@ -211,5 +234,6 @@ The enemy variants and the huge guns:
   every shipped gun leaves at 0.
 - What marks a barrel to be skipped (bit 0x40 of its attachment record,
   `0x10029ff5`); the node word of section 2 matches it on the seven lasers.
-- A seeker's value 2.
+- A seeker's value 2, and the scale on the steering command (`0x100430d4`, set at
+  `0x1000d9fc`).
 - How the AI picks a weapon when a unit has several.

@@ -5303,6 +5303,20 @@ def check_weapons(check, game: Path) -> None:
     laser_range = {r.range for r in kinds["LAS"]}
     taser_range = [r.range for r in kinds["TAS"]]
     guided = all(r.guided for r in kinds["MIS"]) and not any(r.guided for r in kinds["ROC"])
+    shells = [g.round for e, g in player.values()
+              if g.round and g.round.guided and e.sub == "GUN"]
+    missiles = kinds["MIS"]
+    check("weapon.rlb: a missile steers harder than a guided shell",
+          shells and missiles
+          and max(r.cone for r in shells) < min(r.cone for r in missiles)
+          and max(r.turn_rate for r in shells) < min(r.turn_rate for r in missiles),
+          f"the {len(shells)} guided gun rounds (howitzer shells) look within a "
+          f"{min(r.cone for r in shells):.2f}-{max(r.cone for r in shells):.2f} rad cone "
+          f"and turn at {min(r.turn_rate for r in shells):g}-"
+          f"{max(r.turn_rate for r in shells):g} rad/s; the {len(missiles)} missile "
+          f"rounds {min(r.cone for r in missiles):.2f}-{max(r.cone for r in missiles):.2f} "
+          f"rad and {min(r.turn_rate for r in missiles):g}-"
+          f"{max(r.turn_rate for r in missiles):g} rad/s")
     check("weapon.rlb: beams are instant, tasers short, missiles guided and rockets not",
           beams == {10000.0} and laser_range == {1000.0} and max(taser_range) < 200 and guided,
           f"every laser and taser round flies at {min(beams):g} m/s; lasers reach "

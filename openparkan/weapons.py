@@ -41,6 +41,13 @@ class Round:
     blast: float | None
     #: Whether it carries a class-17 seeker.
     guided: bool
+    #: The seeker's cone half-angle in radians, and how near a target must be
+    #: for it to follow, in m; zero on an unguided round.
+    cone: float = 0.0
+    reach: float = 0.0
+    #: The most the round turns a second, in radians: its controller's turn
+    #: rate, which caps the steering a seeker asks for (``Control.dll:0x1000cde5``).
+    turn_rate: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -142,6 +149,7 @@ class Armoury:
             damage += blast.damage
             if i == 0:
                 first = blast
+        seeker = next((p for p in parsed.components if p.type_id == control.SEEKER_TYPE), None)
         return Round(
             member=member,
             speed=parsed.triples[control.TRIPLE_TOP_SPEED][1],
@@ -149,7 +157,10 @@ class Armoury:
             damage=damage,
             kind=first.kind if first else None,
             blast=first.radius if first and first.kind == effects.HIT_AREA else None,
-            guided=any(p.type_id == control.SEEKER_TYPE for p in parsed.components),
+            guided=seeker is not None,
+            cone=seeker.values[0] if seeker else 0.0,
+            reach=seeker.values[1] if seeker else 0.0,
+            turn_rate=max(parsed.triples[control.TRIPLE_TURN]),
         )
 
     def gun(self, part: str) -> Gun | None:
