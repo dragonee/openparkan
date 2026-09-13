@@ -28,8 +28,9 @@ few fields are carried through without being understood:
   trailer's records are mineral lodes**, not viewpoints; the words are a found
   flag, the object type `0x10001000` (the type the minerals search asks for),
   an amount and a float nothing reads. Every one of the 15 placed mines lies
-  within 250 of one. What reads the amount off `SetMineralLode`'s record
-  (`+0x14`) is open. See [04-missions.md](04-missions.md) and
+  within 250 of one, and a mine adds up the amounts of the lodes within 250 as
+  what it has to mine (`M_Task_Mine`, `Behavior.dll:0x1002cd10`). See
+  [04-missions.md](04-missions.md) and
   [31-packages.md](31-packages.md#mineral-lodes--read-and-measured).
 - ~~Object `scale`'s axis order~~ — **answered**: x, y and z scale the
   model's own axes and the radius takes the largest; only vegetation and rock

@@ -1009,9 +1009,10 @@ today; each is a small trap for anyone extending the code.
   `0x80000000`/`0x10000000` bracketing a switch; action 0 stops the body and
   action 20 hands a building to `CLandscape::PlaceBuilding`; a component's
   4-byte entries are the **channels it drives** (885 of 885); triple 6 is the
-  **most the body leans**, and triple 2 is never read. Still open: triple 5,
-  class 3's value 0, the camera's values 3-5, the hero's arms' values 1 and
-  4, the record's int 8, and what control message 7's argument selects.
+  **most the body leans**, triple 5 **how fast the hull rights itself**, and
+  triple 2 is never read. Still open: class 3's value 0, the camera's values
+  3-5, the hero's arms' values 1 and 4, the record's int 8, and what control
+  message 7's argument selects.
 - ~~Which `.ctl` field feeds which channel~~ — **closed, and the question was
   malformed.** The "16-way message dispatch" it rested on is
   `IDeviceManager` slot 4, a getter by id (`Control.dll:0x1002b410`), and
@@ -1105,8 +1106,9 @@ today; each is a small trap for anyone extending the code.
   constructors. What the landscape, camera and atmosphere constructors read is
   their own docs' business.
 - ~~`Behavior.ini`'s **`DefaultOrderPhase = 10`**~~ — **read**: the phase at
-  which `GiveDefaultOrder` gives a battle robot order 13 and the hero order 6, compared with a behaviour field only the constructor writes, so it
-  never fires. What should have advanced the field is open.
+  which `GiveDefaultOrder` gives a battle robot order 13 and the hero order 6,
+  compared with a behaviour field only the constructor writes, so it never
+  fires. What should have advanced the field is open.
   → [docs/22-settings.md](docs/22-settings.md)
 - ~~The **briefing's four soft fields**~~ — **closed** by reading the player
   (`iron3d.dll:0x1002f480`): `flyaround` orbits the waypoint's target once
