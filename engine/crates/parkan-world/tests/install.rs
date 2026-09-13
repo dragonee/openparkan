@@ -170,9 +170,9 @@ fn the_heros_laser_kills_a_small_target_in_two_hits() {
     let w = &mut play.hero.walker;
     w.body.position = Vec3::new(at.x, at.y, centre.z + 20.0);
     w.body.yaw = (-facing.x).atan2(facing.y);
+    w.follow_ground(&play.ground);
     w.from = (w.body.position, w.body.yaw);
     w.from_heading = w.body.yaw;
-    w.follow_ground(&play.ground);
     play.tick(1000.0 / 60.0, [0.0; 2]);
 
     // Tilt the sight until it meets the target's node 0, the base whose death kills it.
@@ -208,4 +208,95 @@ fn the_heros_laser_kills_a_small_target_in_two_hits() {
     assert!(killed_at.is_some(), "killed; damage {damage:?}");
     assert_eq!(damage, vec![(0, 250.0), (0, 250.0)], "each laser hit is 249 + 1 on node 0");
     assert_eq!(play.killed, vec![object]);
+}
+
+#[test]
+#[ignore = "needs the game install"]
+fn the_hero_destroys_mission_01s_five_targets() {
+    use glam::Vec3;
+    use parkan_formats::mission;
+    use parkan_sim::combat::Event;
+    use parkan_world::play::Play;
+
+    let game = gamedir::find(None).expect("a Parkan install: set PARKAN_DIR");
+    let dir = gamedir::resolve(&game, gamedir::MISSION_01).unwrap();
+    let m = mission::parse(&std::fs::read(dir.join("data.tma")).unwrap(), "Mission.01").unwrap();
+    let mut play = Play::load(&game, &m).unwrap().expect("Mission 01 has a hero");
+    let dummies: Vec<usize> = m
+        .objects
+        .iter()
+        .enumerate()
+        .filter(|(_, o)| o.path.to_ascii_lowercase().ends_with("targ.dat"))
+        .map(|(i, _)| i)
+        .collect();
+    assert_eq!(dummies.len(), 5);
+    play.hero.key("SCAN_W_1", true); // the laser alone
+    let pitch = play.hero.rig.pitch.unwrap();
+    for &object in &dummies {
+        let t = play.battle.objects.iter().position(|&o| o == object).unwrap();
+        let centre = play.battle.combat.targets[t].centre;
+        let base = m.objects[object].position[2];
+        let mut aimed = false;
+        'stand: for k in 0..16 {
+            let a = k as f32 * std::f32::consts::TAU / 16.0;
+            let at = centre + Vec3::new(a.cos(), a.sin(), 0.0) * 30.0;
+            if !play.ground.below(at.x, at.y, 1000.0).is_some_and(|h| h.point.z > base - 9.0) {
+                continue;
+            }
+            let facing = (centre - at).with_z(0.0).normalize();
+            let w = &mut play.hero.walker;
+            w.body.position = Vec3::new(at.x, at.y, centre.z + 20.0);
+            w.body.yaw = (-facing.x).atan2(facing.y);
+            w.follow_ground(&play.ground);
+            w.from = (w.body.position, w.body.yaw);
+            w.from_heading = w.body.yaw;
+            play.tick(1000.0 / 60.0, [0.0; 2]);
+            for v in (0..=100).map(|s| s as f32 / 100.0) {
+                play.hero.rig.values[pitch] = v;
+                // The gun mounts follow the pitch (flag 8, and 0x40 copies them): settle them.
+                for c in 0..play.hero.rig.channels.len() {
+                    let flags = play.hero.rig.channels[c].flags;
+                    if flags & 0x40 != 0 && c > 0 {
+                        play.hero.rig.values[c] = play.hero.rig.values[c - 1];
+                    } else if flags & 0x8 != 0 {
+                        play.hero.rig.values[c] = v;
+                    }
+                }
+                let (o, s) = play.hero.sight().unwrap();
+                let hit = play.battle.combat.first_hit(&play.ground, None, o + s * 5.0, o + s * 200.0, 0.0);
+                let on_base = |h: Option<(parkan_sim::hit::Strike, Option<usize>, usize)>| {
+                    h.is_some_and(|(strike, target, _)| target == Some(t) && strike.node == Some(0))
+                };
+                if !on_base(hit) {
+                    continue;
+                }
+                // The laser leaves its arm's muzzle, below and beside the sight: its line
+                // to the aim point must be clear too.
+                play.hero.rig.aim[1] = 1.0 - v;
+                let laser = play.hero.guns[2].barrels[0].channel;
+                let (muzzle, _) = play.hero.muzzle(laser).unwrap();
+                let aim = play.battle.combat.aim_point(&play.ground, None, o, s).unwrap();
+                let past = aim + (aim - muzzle).normalize() * 2.0;
+                if on_base(play.battle.combat.first_hit(&play.ground, None, muzzle, past, 0.0)) {
+                    aimed = true;
+                    break 'stand;
+                }
+            }
+        }
+        assert!(aimed, "a stand with the sight on object {object}'s base");
+        play.hero.key("SCAN_LMOUSE", true);
+        let mut killed = false;
+        for _ in 0..600 {
+            let events = play.tick(1000.0 / 60.0, [0.0; 2]);
+            if events.iter().any(|e| matches!(e, Event::Killed { target } if *target == t)) {
+                killed = true;
+                break;
+            }
+        }
+        play.hero.key("SCAN_LMOUSE", false);
+        assert!(killed, "object {object} dies within 10 s of fire");
+    }
+    let mut dead = play.killed.clone();
+    dead.sort_unstable();
+    assert_eq!(dead, dummies);
 }
