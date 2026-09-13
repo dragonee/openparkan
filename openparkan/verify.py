@@ -3108,17 +3108,17 @@ def check_profiles(check, game: Path) -> None:
                if vars_[profiles.POWER_OUT].value > 0}
     mine = buildings.get("prof_mine.var", {})
     storage = buildings.get("prof_storage.var", {})
-    check("behpsp.res: the generator is the power source, and a mine feeds nothing",
+    check("behpsp.res: the generator is the only profile that makes power",
           sources.get("prof_generator.var") == 10
           and set(sources) <= {"prof_generator.var", "prof_universal.var",
-                               "prof_bunker.var"}
-          and mine and mine[profiles.ORE_ON].value == 0
-          and storage and storage[profiles.ORE_ON].value > 0,
-          f"Transfer_Power_Out is non-zero only on {sources}; the distribution "
-          f"step draws ore from a holder at its Transfer_Ore_OnBoard rate, which "
-          f"is {mine[profiles.ORE_ON].value:g} on a mine and "
-          f"{storage[profiles.ORE_ON].value:g} on a storage -- so a mine's ore "
-          f"reaches nobody until something carries it")
+                               "prof_bunker.var"},
+          f"Transfer_Power_Out is non-zero only on {sources} -- a debug "
+          f"profile and a bunker's trickle aside, the generator.  The ore "
+          f"rates are data too, and are not checked as a mechanism: a mine's "
+          f"profile says Transfer_Ore_OnBoard {mine[profiles.ORE_ON].value:g} "
+          f"and a storage's {storage[profiles.ORE_ON].value:g}, but a placed "
+          f"mine's capacity is not its profile's either, and the game's own "
+          f"tutorial says a mine does supply a factory")
 
     # The object's own directory says what it is: UNITS\UNITS\TRANSPRT,
     # UNITS\UNITS\BUILDER, and the mine and storage models by name.

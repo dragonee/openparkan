@@ -67,14 +67,37 @@ and a transport's 1000; the missions and the engine agree with each other and
 not with the profiles. A builder carrying ore is what `Building_Cost` is paid
 from — a *guess*, since the construction task is unread.
 
-## Ore has to be carried — *measured*, and *read*
+## How ore reaches a consumer — *open*, and a correction
 
-The distribution step (below) draws ore out of a holder at its
-`Transfer_Ore_OnBoard` rate, capped by what it contains — *read*, at
-`Behavior.dll:0x1001a8c6`. That rate is **0 on a mine and 20 on a storage**
-(*measured*). So a mine fills itself and feeds nobody: its ore reaches a
-factory or an institute only once a transport has moved it into a storage.
-The transport carries 2000 and loads and unloads at 100 a second.
+An earlier version of this section said **a mine feeds nobody** until a
+transport carries its ore to a storage. **That was wrong, or at least not
+established, and the game says so itself.** The tutorial text in
+`TextRes.dll`:
+
+> string 103 — "if you don't have a Warehouse, your Factory's production, for
+> instance, will be limited by the Mine's parameters"
+>
+> string 101 — "the Mine works kinda slow, and if your base doesn't have a
+> Warehouse, you'll always have to wait to accumulate enough raw materials"
+
+So a mine does supply consumers directly, slowly; a warehouse stores ore and
+"teletransports" it to them; and a transport ships ore from mine to warehouse
+(string 104).
+
+What the claim rested on, and which link is suspect:
+
+- The distribution step draws ore from a holder at the variable it reads as
+  id `0x1002`, capped by the holder's contents — *read*, at
+  `Behavior.dll:0x1001a8c6`.
+- Taking ids as `0x1000 +` position among a profile's floats, `0x1002` is
+  `Transfer_Ore_OnBoard`, which is **0 in a mine's profile and 20 in a
+  storage's** — *measured*.
+- But a placed mine does not use its profile's capacity: missions give every
+  mine 500, the engine's `Mine_MaxOre`, where the profile says 1000. The same is
+  probably true of its rate, which would come from `Mine_OrePerSecond`. Either
+  that or the id numbering is the link that breaks.
+
+*Unknown:* how a mine's output reaches the pool without a warehouse.
 
 ## Power is shared in two tiers — *read*
 
@@ -137,9 +160,9 @@ transport turret carries ore from the mine to a warehouse, one power plant
 holds about 33%, a factory builds far slower when both are low, and
 construction slows research.
 
-- **Transport from mine to warehouse** — the rates are *measured* and their
-  use is *read*: ore is drawn from a holder at its on-board rate, which is 0
-  on a mine and 20 on a storage.
+- **Transport from mine to warehouse** — confirmed by the game's own tutorial
+  (strings 103, 104). A mine also supplies consumers directly, more slowly;
+  how is *unknown* — see the correction above.
 - **Slower when low** — *read*, for research. The draw rates scale with
   efficiency and the task tracks its scarcest budget. The factory's
   construction task has not been read, so the factory itself is *unknown*.
