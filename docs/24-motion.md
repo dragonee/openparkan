@@ -164,8 +164,10 @@ mass × 0.001 as "Weight" (`iron3d.dll:0x1006f300`, IControl 136 and 124).
 
 *Measured:* every internal part but armour carries a mass — 100 to 40,000 kg
 over the 104 in `intsys.rlb`, against 0 on all 24 armour parts — and so does
-every `o_cNN` gun, 6.25 to 6,000. The slots a gun mount, a chassis or a
-building declares for its parts carry none, bar one detection-shield slot of 10. An internal engine's mass
+every `o_cNN` ammunition clip, 6.25 to 6,000. The guns' own components and the
+slots a chassis or a building declares for its parts carry none, bar one
+detection-shield slot of 10. (This page once called the clips guns;
+[29-weapons.md](29-weapons.md) sorts them out.) An internal engine's mass
 rises with its value and draw:
 
 | | df (0.7) | 01 (0.8) | 02 (0.9) | 03 (1.0) |

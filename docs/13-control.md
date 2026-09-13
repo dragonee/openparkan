@@ -249,7 +249,7 @@ parameter block, and then walks the body. That walk is the layout:
 | Order | Governed by | Size |
 |---|---|---|
 | section 1 | `counts[0]` = A, `counts[1]` = B | A states of `156 + 16*B`, then an `A*A` table of floats |
-| section 2 | `counts[2]` = C | C records of 36 bytes |
+| section 2 | `counts[2]` = C | C records of 36 bytes; +20 a node, where a gun's barrels sit |
 | section 4 | `counts[3]` = D | D component records, each **type-dispatched** |
 | the block | — | a fixed **84 bytes**, copied into the object |
 | section 5 | `counts[4]` = E | E groups: an int32 `n`, then `n` records of 100 bytes |
@@ -280,6 +280,7 @@ the record's extent is common to all of them:
 ```
 0x00  int32      type id, 1..30
 0x04  int32      the model node it sits on, an index into the object's .ndp
+0x08  uint32     flags: on a gun 0x2000000 fires every barrel at once
 0x18  int32      the initial state (CIS_ switch values); -1 keeps the class's default
 0x20  float      power: a consumer's draw a second, a battery's output
 0x2c  float[16]  the component's values, copied whole into the object

@@ -103,7 +103,10 @@ The gun's second letter is its kind, and it splits cleanly — **measured**:
 | `c` | shells and ammunition clips | 299 |
 | `l` | rockets, missiles and winged packs | 289 |
 
-*Guess*: `c` for cannon, `l` for launcher.
+*Guess*: `c` for cannon, `l` for launcher. The gun records bear it out and add
+two letters: `c` covers every gun, flamer, laser and taser — lasers and
+tasers take no clip at all — `l` the rocket and missile launchers, `s` the
+mobile builders, and `f` the huge guns ([29-weapons.md](29-weapons.md)).
 
 Fourteen `i_cNN` members are in `objects.rlb` but in no assembly, and they
 split cleanly — **measured**. **Eight are in every research tree's part list**,

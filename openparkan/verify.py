@@ -38,6 +38,7 @@ from . import (
     settings,
     sky,
     texm,
+    weapons,
 )
 from . import mesh as objmesh
 from .nres import HEADER_SIZE, NotAnNResArchive, NResArchive, is_nres
@@ -4390,22 +4391,23 @@ def check_sensors(check, game: Path) -> None:
         archive = NResArchive.open(game / lib)
         for entry in archive:
             if entry.tag.upper().startswith("CTL"):
-                # a gun is an o_cNN controller; an o_gun mount only declares slots
-                kind = "gun" if entry.name.lower().startswith("o_c") else "slot"
+                # o_cNN is an ammunition clip; o_gun_* is the gun itself
+                kind = "clip" if entry.name.lower().startswith("o_c") else "gun"
                 for part in control.parse(archive.read(entry), names).components:
                     masses[(lib if lib == "intsys.rlb" else kind, part.type_id)].append(
                         part.mass)
     armour = masses.pop(("intsys.rlb", control.ARMOUR_TYPE), [])
-    guns = masses.get(("gun", control.GUN_TYPE), [])
-    slots = [v for (where, _t), vs in masses.items() if where == "slot" for v in vs]
+    clips = masses.get(("clip", control.GUN_TYPE), [])
+    guns = [v for (where, _t), vs in masses.items() if where == "gun" for v in vs]
     rest = [v for (where, _t), vs in masses.items() if where == "intsys.rlb" for v in vs]
-    check(".ctl: every internal part but armour, and every gun, has a mass",
+    check(".ctl: every internal part but armour, and every ammunition clip, has a mass",
           armour and not any(armour) and rest and min(rest) == 100.0
-          and max(rest) == 40000.0 and guns and min(guns) > 0 and slots and not any(slots),
+          and max(rest) == 40000.0 and clips and min(clips) > 0 and guns and not any(guns),
           f"{len(armour)} armour parts weigh 0; the other {len(rest)} intsys.rlb "
-          f"parts {min(rest):g}-{max(rest):g} kg and the {len(guns)} o_cNN guns "
-          f"{min(guns):g}-{max(guns):g}, where the {len(slots)} slots the gun mounts "
-          f"declare weigh 0.  Control.dll:0x1000fac0 totals them into the mass signature")
+          f"parts {min(rest):g}-{max(rest):g} kg and the {len(clips)} o_cNN clips "
+          f"{min(clips):g}-{max(clips):g}, where the {len(guns)} components of the o_gun "
+          f"guns themselves weigh 0.  Control.dll:0x1000fac0 totals them into the mass "
+          f"signature")
 
     # -- detect shields ----------------------------------------------------
     lib = descriptions.library(game)
@@ -5184,6 +5186,128 @@ def check_chassis(check, game: Path) -> None:
           hero_only and enemy_only and any(mission.CLAN_PLAYER in use[c] for c in PLAYER_CHASSIS),
           f"R_H_02 {dict(use['R_H_02'])}; " + ", ".join(f"{c} {dict(use[c])}" for c in special)
           + " (clan types: 1 player, 2 enemy, 3 neutral)")
+
+
+#: The catalogue sub-kinds that fire on energy alone.
+ENERGY_WEAPONS = ("LAS", "TAS")
+#: A clip's marks, in order.
+CLIP_MARKS = ("df", "01", "02")
+
+
+def check_weapons(check, game: Path) -> None:
+    """guns.rlb and weapon.rlb: guns, clips and rounds."""
+    arm = weapons.Armoury(game)
+    catalogue = descriptions.library(game)
+    guns = {k.lower(): (entry, arm.gun(k.lower())) for k, entry in catalogue.items()
+            if k.lower().startswith("e_gun_")}
+    guns = {k: (e, g) for k, (e, g) in guns.items() if g is not None}
+    firearms = {k: (e, g) for k, (e, g) in guns.items() if g.type_id == control.GUN_TYPE}
+    clips = {k.lower(): (entry, arm.clip(k.lower())) for k, entry in catalogue.items()
+             if k.lower().startswith("i_c")}
+
+    labelled = sum(1 for _, g in firearms.values() if g.slot)
+    agree = sum(1 for _, g in firearms.values() if bool(g.slot) == g.uses_clips)
+    fitted: Counter[str] = Counter()
+    bare: Counter[str] = Counter()
+    for path in sorted(game.glob("UNITS/**/*.dat")):
+        unit = objects.load_unit(path)
+        parent = unit.parents()
+        member = [c.ref.member.lower() for c in unit.components]
+        for i, m in enumerate(member):
+            if m in firearms:
+                kids = [x for j, x in enumerate(member) if parent[j] == i and x.startswith("i_c")]
+                (fitted if kids else bare)[m] += 1
+    wrong = ([m for m in fitted if not firearms[m][1].slot]
+             + [m for m in bare if firearms[m][1].slot])
+    check("guns.rlb: a gun takes clips exactly when its slot is labelled",
+          firearms and agree == len(firearms) and not wrong and 0 < labelled < len(firearms),
+          f"{labelled} of {len(firearms)} guns label their class-2 slot (i_cNN_<size>) and "
+          f"carry a magazine; the other {len(firearms) - labelled} read -1.  In the "
+          f"assemblies {sum(fitted.values())} fitted guns hang a clip and "
+          f"{sum(bare.values())} do not, each on the side its label says")
+
+    slot_of = {g.slot: g for _, g in firearms.values() if g.slot}
+    pairs = [(c, slot_of.get(c.family)) for _, c in clips.values()]
+    same = sum(1 for c, g in pairs if g and g.round and c.round == g.round.member
+               and arm.clip_values(c.part) == (g.capacitor, g.shot_energy, g.interval_ms))
+    shuffled = [g for _, g in pairs]
+    random.Random(1).shuffle(shuffled)
+    by_chance = sum(1 for (c, _), g in zip(pairs, shuffled, strict=True)
+                    if g and arm.clip_values(c.part) == (g.capacitor, g.shot_energy, g.interval_ms))
+    check(".ctl: a clip repeats its gun's energy, rate and round",
+          pairs and same == len(pairs) and by_chance < len(pairs) // 2,
+          f"all {same}/{len(pairs)} catalogue clips carry the capacitor, energy a shot, "
+          f"interval and round of the gun whose slot names their family; paired at "
+          f"random, {by_chance} would")
+
+    ladders: dict[str, list[tuple[int, int, float]]] = defaultdict(list)
+    for key, (_, c) in clips.items():
+        ladders[c.family].append((CLIP_MARKS.index(key[8:10]), c.rounds, c.mass))
+    rising = all(a[1] < b[1] and a[2] < b[2] for rows in ladders.values()
+                 for a, b in zip(sorted(rows), sorted(rows)[1:], strict=False))
+    check(".ctl: a clip's rounds and weight rise with its mark",
+          ladders and rising,
+          "; ".join(f"{fam} " + "/".join(str(r) for _, r, _ in sorted(rows))
+                    for fam, rows in sorted(ladders.items())))
+
+    every = [g for _, g in guns.values()]
+    powered = all(g.capacitor > 0 and 0 < g.shot_energy <= g.capacitor and g.interval_ms > 0
+                  for g in every)
+    tails = all(not any(arm.values(k)[4:]) for k in list(guns) + list(clips))
+    check(".ctl: every gun and clip is a capacitor, a shot's energy and an interval",
+          every and powered and tails,
+          f"on all {len(every)} guns value 1 (capacitor) >= value 2 (energy a shot) > 0 "
+          f"and value 3 (ms between shots) > 0, and values 4-15 are zero on them and "
+          f"the {len(clips)} clips.  Control.dll:0x10029cfd refuses a shot below value 2")
+
+    player = {k: (e, g) for k, (e, g) in firearms.items()
+              if not e.code.startswith("_") and not k.startswith("e_gun_f")}
+    by_kind: dict[str, Counter[bool]] = defaultdict(Counter)
+    for e, g in player.values():
+        by_kind[e.sub + ("*" if "pumping" in e.name.lower() else "")][not g.uses_clips] += 1
+    ok = all((kind in ENERGY_WEAPONS) == bool(c[True]) and not (c[True] and c[False])
+             for kind, c in by_kind.items())
+    enemy = [g for k, (_, g) in firearms.items() if k not in player]
+    check("objects.dlb: lasers and tasers need no ammunition; cannons, flamers, rockets do",
+          player and ok and enemy and not any(g.uses_clips for g in enemy),
+          "; ".join(f"{kind} {c[True]} energy / {c[False]} clip"
+                    for kind, c in sorted(by_kind.items()))
+          + f" (* the pumping laser, which takes clips); all {len(enemy)} '_'-coded and "
+          f"huge guns have an unlimited magazine")
+
+    launchers = {k: (e, g) for k, (e, g) in player.items() if e.sub in ("ROC", "MIS")}
+    odd = sorted(k for k, (_, g) in launchers.items() if g.magazine != g.barrels)
+    check("guns.rlb: a rocket or missile launcher's magazine is its tube count",
+          launchers and len(odd) < len(launchers)
+          and all("winged" in launchers[k][0].name.lower() for k in odd),
+          f"{len(launchers) - len(odd)} of {len(launchers)} launchers hold as many rounds "
+          f"as they have barrels; the {len(odd)} that do not are the winged SSMs")
+
+    literal = {}
+    for k, (e, g) in guns.items():
+        text = next((s.field.strip('"') for s in e.stats if s.field.startswith('"')), None)
+        if text and g.round:
+            literal[k] = (float(text), g.round.damage, g.beams, g.salvo)
+    check("objects.dlb: a multi-beam laser's printed damage is its beams times one round",
+          literal and all(t == d * b and s for t, d, b, s in literal.values()),
+          ", ".join(f"{k} {t:g} = {b} x {d:g}" for k, (t, d, b, s) in sorted(literal.items()))
+          + " -- all set record +8 bit 0x2000000, every barrel at once "
+          "(Control.dll:0x10029fcc)")
+
+    kinds: dict[str, list[weapons.Round]] = defaultdict(list)
+    for e, g in player.values():
+        if g.round:
+            kinds[e.sub].append(g.round)
+    beams = {r.speed for r in kinds["LAS"] + kinds["TAS"]}
+    laser_range = {r.range for r in kinds["LAS"]}
+    taser_range = [r.range for r in kinds["TAS"]]
+    guided = all(r.guided for r in kinds["MIS"]) and not any(r.guided for r in kinds["ROC"])
+    check("weapon.rlb: beams are instant, tasers short, missiles guided and rockets not",
+          beams == {10000.0} and laser_range == {1000.0} and max(taser_range) < 200 and guided,
+          f"every laser and taser round flies at {min(beams):g} m/s; lasers reach "
+          f"{sorted(laser_range)} m (+108), tasers {min(taser_range):g}-{max(taser_range):g}; "
+          f"all {len(kinds['MIS'])} missile rounds carry a class-17 seeker, none of the "
+          f"{len(kinds['ROC'])} rocket rounds do")
 
 
 def check_controls(check, game: Path) -> None:
@@ -6588,7 +6712,7 @@ def run(game: Path) -> int:
         check_grid, check_missions, check_objects, check_poses, check_lod, check_damage,
         check_effects, check_footprints, check_rsli, check_control, check_efficiency,
         check_motion, check_sensors, check_combat, check_ownership,
-        check_capture, check_repair, check_chassis,
+        check_capture, check_repair, check_chassis, check_weapons,
         check_controls,
         check_behaviour, check_research, check_descriptions, check_saves,
         check_vocabulary, check_resources, check_briefing, check_settings,

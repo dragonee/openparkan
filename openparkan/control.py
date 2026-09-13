@@ -33,6 +33,9 @@ CTL_TAG = "CTLD"
 #: The frame: five counts and the 27-dword parameter block.
 HEADER_SIZE = 128
 
+#: The node word of a section-2 record: where a barrel sits, -1 on none.
+SECTION2_NODE_AT = 20
+
 #: Section 1's record, section 2's record, the fixed block the loader copies
 #: after the component records, and the component type ids the factory at
 #: ``0x1002d4b0`` accepts.
@@ -89,7 +92,8 @@ POWER_STORE_TYPE = 19
 ENGINE_TYPE = 5
 #: What the part weighs, in kg, a float.  ``Control.dll:0x1000fac0`` adds it to
 #: the mass of the node the part sits on.  Every internal part but armour
-#: carries one, and every gun; the slots a mount or chassis declares do not.
+#: carries one, and every ammunition clip; guns and the slots a chassis
+#: declares do not.
 COMPONENT_MASS_AT = 0x1C
 #: ``CICLS_RADAR``.  Values 0-2 are its sensitivities to a target's three
 #: signatures, value 3 its range and value 4 how long a scan stays good, in
@@ -108,8 +112,24 @@ CAMOUFLAGE_POWER = 4
 #: computer as the control pod (``0x10057550``).
 DOOR_TYPE = 12
 COMPUTER_TYPE = 13
-#: ``CICLS_MULTIGUN``, the gun.  Type 30 is built by the same class.
+#: ``CICLS_MULTIGUN``, the gun, and type 30, the builder's beam, which the same
+#: class builds (``Control.dll:0x100294c0``).  A gun reads four values: its
+#: magazine in rounds (-1 unlimited), the capacitor it keeps charged, the
+#: energy a shot takes from it, and the ms between shots.
 GUN_TYPE = 2
+BUILDER_TYPE = 30
+GUN_MAGAZINE = 0
+GUN_CAPACITOR = 1
+GUN_SHOT_ENERGY = 2
+GUN_INTERVAL = 3
+UNLIMITED = -1
+#: A projectile's seeker: value 0 its cone's half-angle in radians, value 1
+#: the distance it follows a target within (``0x100247a0``, ``0x100247c0``).
+SEEKER_TYPE = 17
+#: The component record's flags word.  On a gun, ``SALVO`` fires every barrel
+#: at once instead of the next in turn (``0x10029fcc``).
+COMPONENT_FLAGS_AT = 0x08
+SALVO = 0x2000000
 #: ``CICLS_FIGHTSHIELD``, the shield generator.  Values: a sector's maximum, the
 #: recharge a second, the charge a point costs (``Control.dll:0x100257b0``).
 FIGHT_SHIELD_TYPE = 9
@@ -332,6 +352,9 @@ class Controller:
     references: tuple[Reference, ...]
     #: Section 1: the animation states.
     states: tuple[State, ...] = ()
+    #: Section 2's node words, one a record.  A gun's entries index these:
+    #: its barrels.
+    points: tuple[int, ...] = ()
 
     @property
     def named(self) -> list[ResourceRef]:
@@ -378,6 +401,8 @@ class Component:
     node: int = 0
     #: The float at ``COMPONENT_MASS_AT``: what the part weighs, in kg.
     mass: float = 0.0
+    #: The word at ``COMPONENT_FLAGS_AT``.
+    flags: int = 0
 
     @property
     def slot(self) -> str | None:
@@ -458,6 +483,7 @@ def read_component(blob: bytes, pos: int) -> Component | None:
         power=struct.unpack_from("<f", blob, pos + COMPONENT_POWER_AT)[0],
         node=struct.unpack_from("<i", blob, pos + COMPONENT_NODE_AT)[0],
         mass=struct.unpack_from("<f", blob, pos + COMPONENT_MASS_AT)[0],
+        flags=struct.unpack_from("<I", blob, pos + COMPONENT_FLAGS_AT)[0],
     )
 
 
@@ -476,6 +502,12 @@ def read_states(blob: bytes, counts: tuple[int, ...]) -> tuple[State, ...]:
             engine=struct.unpack_from("<f", blob, at + STATE_ENGINE_AT)[0],
         ))
     return tuple(out)
+
+
+def _points(blob: bytes, counts: tuple[int, ...]) -> tuple[int, ...]:
+    at = section4_start(counts) - counts[2] * SECTION2_RECORD
+    return tuple(struct.unpack_from("<i", blob, at + i * SECTION2_RECORD + SECTION2_NODE_AT)[0]
+                 for i in range(counts[2]))
 
 
 def section4_start(counts: tuple[int, ...]) -> int:
@@ -571,4 +603,5 @@ def parse(blob: bytes, archives: frozenset[str] | None = None) -> Controller:
         components=tuple(components),
         references=tuple(references),
         states=read_states(blob, counts),
+        points=_points(blob, counts),
     )

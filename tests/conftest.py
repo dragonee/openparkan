@@ -50,13 +50,15 @@ def nres_archive():
 def build_component(type_id: int, library: str = "", member: str = "",
                     entries: tuple[int, ...] = (), label: str = "",
                     index: int = -1, values: tuple[float, ...] = (),
-                    power: float = 0.0, node: int = 0, mass: float = 0.0) -> bytes:
+                    power: float = 0.0, node: int = 0, mass: float = 0.0,
+                    flags: int = 0) -> bytes:
     """One section-4 record, laid out as ``Control.dll`` reads it."""
     rec = bytearray(control.COMPONENT_FIXED)
     struct.pack_into("<i", rec, 0, type_id)
     struct.pack_into("<i", rec, control.COMPONENT_NODE_AT, node)
     struct.pack_into("<f", rec, control.COMPONENT_POWER_AT, power)
     struct.pack_into("<f", rec, control.COMPONENT_MASS_AT, mass)
+    struct.pack_into("<I", rec, control.COMPONENT_FLAGS_AT, flags)
     struct.pack_into("<i", rec, control.COMPONENT_INDEX_AT, index)
     struct.pack_into(f"<{len(values)}f", rec, control.COMPONENT_VALUES_AT, *values)
     at = control.COMPONENT_NAME_AT
@@ -95,7 +97,7 @@ def build_state(flags: int = 0, velocity=((0.0,) * 3, (0.0,) * 3),
 
 
 def build_ctl(counts=(0, 0, 0, 0, 0), params=None, components=(), groups=(),
-              block=None, states=()) -> bytes:
+              block=None, states=(), points=()) -> bytes:
     """A whole controller: frame, sections, the block, the reference groups."""
     a, b, c, _d, _e = counts
     out = bytearray(struct.pack("<5i", *counts))
@@ -105,7 +107,10 @@ def build_ctl(counts=(0, 0, 0, 0, 0), params=None, components=(), groups=(),
     body = b"".join(states)
     out += body + bytes(a * stride - len(body))
     out += bytes(4 * a * a)
-    out += bytes(c * control.SECTION2_RECORD)
+    for i in range(c):
+        rec = bytearray(control.SECTION2_RECORD)
+        struct.pack_into("<i", rec, control.SECTION2_NODE_AT, points[i] if i < len(points) else 0)
+        out += rec
     for part in components:
         out += part
     out += block if block is not None else bytes([control.UNSET]) * control.BLOCK_SIZE

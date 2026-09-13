@@ -127,5 +127,7 @@ code that is itself a member and the rest naming it in words
 - **The `A`, `N` and `E` size letters**, which no part id uses.
 - **What the tech level gates exactly.** It rises with `UpgradeLevel` and with
   depth in the research tree, but nothing says which is cause.
-- **The stat *values*.** This file names the fields and their units; what a
-  given part weighs is not here.
+- **The stat *values*.** This file names the fields and their units; the values
+  are computed at run time from the part's controller — a weapon's in
+  [29-weapons.md](29-weapons.md#what-the-stat-panel-shows--read), a chassis's in
+  [24-motion.md](24-motion.md).

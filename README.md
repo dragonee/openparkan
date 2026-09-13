@@ -213,6 +213,7 @@ of fields carried through the readers without being understood.
 - [26-damage.md](docs/26-damage.md) — hits, explosions, shields and deflectors, armour, hit points and repair
 - [27-ownership.md](docs/27-ownership.md) — charging docks, control pods and capture, and the clan type
 - [28-chassis.md](docs/28-chassis.md) — chassis families, the slots they declare, weight, costs and research
+- [29-weapons.md](docs/29-weapons.md) — guns, ammunition clips and rounds: energy or cartridges, damage, rate and range
 
 ## Layout
 

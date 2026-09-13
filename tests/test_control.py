@@ -71,6 +71,16 @@ def test_only_the_efficiency_class_has_an_efficiency(ctl, component):
     assert got[1].efficiency is None
 
 
+def test_a_gun_names_its_barrels_and_whether_they_fire_together(ctl, component):
+    gun = component(control.GUN_TYPE, entries=(0, 1, 2), flags=control.SALVO,
+                    values=(-1.0, 20.0, 18.0, 1600.0))
+    c = control.parse(ctl(counts=(0, 0, 3, 1, 0), components=[gun], points=(4, 5, -1)))
+    one = c.components[0]
+    assert one.flags & control.SALVO
+    assert c.points == (4, 5, -1)
+    assert [c.points[e] for e in one.entries if c.points[e] != -1] == [4, 5]
+
+
 def test_a_labelled_record_is_a_slot(ctl, component):
     parts = [component(control.ENGINE_TYPE, label="i_eng_b"),
              component(control.GUN_TYPE, label="i_c05_b")]

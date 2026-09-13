@@ -3568,3 +3568,253 @@ kind = "function"
 name = "UNITS .dat tree reader (magic 0xf0f1, class word, root, children via 0x10015300); size class from the root name's size letter"
 doc = "docs/28-chassis.md"
 read = true
+
+# --- weapons: guns, clips, rounds, ../docs/29-weapons.md ---
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1006f406"
+kind = "site"
+name = "stat panel wattage: device 0 property 0x1300 (a gun's value 2, energy per shot)"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1006f4a0"
+kind = "site"
+name = "stat panel range: [device +0x9c pointer + 0x58], the round controller's +108"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1006f654"
+kind = "table"
+name = "stat panel value jump table, 24 field ids"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x100294c0"
+kind = "function"
+name = "class-2/30 gun constructor: 0x184 bytes, vtable 0x1003cbd8, +0x180 level ratio 1"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1003cbd8"
+kind = "datum"
+name = "gun vtable: 1 prepare, 3 state, 5 draw, 6 level, 7 parse, 11 fire, 14/15 save/load"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x100296f0"
+kind = "function"
+name = "gun slot 1: spawn a sample round; copy its frame to +0x9c; round props 0x35 -> +0x174 (damage), 0xa5 -> +0x178 (blast)"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10029650"
+kind = "function"
+name = "gun slot 7 parse: base parse, capacitor +0x120 = value 1, rounds +0x124 = int(value 0), barrel states +0x12c"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10029a90"
+kind = "function"
+name = "gun slot 6: capacitor += granted charge; level +0x4c = capacitor / value 1"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10029b50"
+kind = "function"
+name = "gun slot 14: save rounds (+0x124) and, with flag 0x1000000, the capacitor"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10029b90"
+kind = "function"
+name = "gun slot 15: load rounds (+0x124) and, with flag 0x1000000, the capacitor"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10029ca0"
+kind = "function"
+name = "gun slot 11 fire: state +0x11c -- 5 no rounds, 6 capacitor below value 2; fires one barrel or all (record +8 bit 0x2000000)"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10029cfd"
+kind = "site"
+name = "gun cannot fire while its capacitor holds less than value 2"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10029fcc"
+kind = "site"
+name = "record +8 bit 0x2000000: fire every barrel at once"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002a05e"
+kind = "site"
+name = "a shot takes value 2 out of the capacitor"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002a085"
+kind = "site"
+name = "next shot no sooner than now + value 3 ms"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002a0d2"
+kind = "site"
+name = "without the salvo bit, barrels fire in turn, skipping flagged ones"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002a09f"
+kind = "site"
+name = "a single-fight state (0x200) is cleared after one shot"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002a100"
+kind = "function"
+name = "gun slot 3 state: 0x1000 resets aim; any other state word goes to +0x50 (0x100 continue, 0x200 single, 0 off)"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002a190"
+kind = "function"
+name = "one barrel's shot: spawn the round (agent kind 9), owner, prop 0xb4 level ratio, rounds -1"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002a5e3"
+kind = "site"
+name = "rounds -= 1 unless -1 (unlimited) or already 0"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002bb9a"
+kind = "site"
+name = "device property 6 on a gun: +0x174, the round's damage"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002bcdd"
+kind = "site"
+name = "device property 0x700 on a gun: rounds left (+0x124)"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002bd14"
+kind = "site"
+name = "device property 0x800 on a gun: magazine, int(value 0)"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002bd45"
+kind = "site"
+name = "device property 0x900 on a gun: +0x178, the round's blast radius"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002be7c"
+kind = "site"
+name = "device property 0xa00 on a gun: 1000 / max(1, value 3), shots a second"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002c28d"
+kind = "site"
+name = "device property 0x1300 on a gun: value 2, energy per shot"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002e580"
+kind = "function"
+name = "interface 0x202 slot 3: device property by UI id (0x53 rounds, 0x55 magazine, 0x65 rate, 0x68 damage, 0x76 blast, 0x64 round frame)"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10013620"
+kind = "function"
+name = "damage estimate: sum over nodes of max life + level ratio x .exp damage (round property 0x35)"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x100136c0"
+kind = "function"
+name = "blast estimate: node 0's .exp radius, absolute on a round (property 0xa5)"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000cfd0"
+kind = "site"
+name = "a round's distance from its origin held to .ctl +108 (its range)"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x100247c0"
+kind = "function"
+name = "class-17 seeker tick: follows its target while within value 1 and the cone"
+doc = "docs/29-weapons.md"
+read = true

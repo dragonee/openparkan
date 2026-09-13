@@ -71,7 +71,7 @@ which size of part a slot takes:
 | hero `r_h_02` | — | l | l | l | l | l |
 
 Radars and deflectors do not go on a chassis: they fit on the turret, which
-declares their slots the same way ([29-turrets.md](29-turrets.md), when it lands).
+declares their slots the same way ([30-turrets.md](30-turrets.md)).
 
 **What the label is not** — *read*, as a search. The component parser keeps a
 copy of the label on the component object (`+0x30`, `Control.dll:0x10021f00`),
