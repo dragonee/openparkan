@@ -134,32 +134,42 @@ exactly `4 + n * 76` bytes, and 541 of them have `n` equal to the node count of
 the mesh they belong to.
 
 ```
-int32    flags        0 throughout, except 1 on scenery and 112 on projectiles
-float32  durability   1000000 where the node cannot be destroyed
-float32  ...          unresolved; 104 distinct values, see below
+int32    flags        0 on most; 1 on scenery, 112 on projectiles, 32/64 on running gear
+float32  durability   hit points; 1000000 where the node cannot be destroyed
+float32  density      times the node's volume, its mass; 104 distinct values
 char[32] archive      the explosion's library
 char[32] member       the explosion, a .exp
 ```
 
 **The first float is the node's hit points** — *read*. `Control.dll` builds one
 node record per `.ndp` record (`0x1000b240`) and at reset sets each node's life
-to that float times two object scales (`0x1000f940`); damage lowers it, clamped
-at 0 (`0x10010f30`), and a node at 0 is marked destroyed — and takes the whole
-object with it if it is node 0 or carries flag bit 1. A component's powers are
-scaled by its node's `life / max`
+to that float times the object's volume scale and the difficulty's level
+ratio (`0x1000f940`, [26-damage.md](26-damage.md#hit-points--read-and-measured));
+damage lowers it, clamped at 0 (`0x10010f30`), and a node at 0 is marked
+destroyed — and takes the whole object with it if it is node 0 or carries flag
+bit 1. A component's powers are scaled by its node's `life / max`
 ([23-economy.md](23-economy.md#efficiency-is-a-buildings-size)). The size
 correlation that stood here alone before agrees: the first float correlates
 **+0.56** with the node's volume in log space, against **+0.19** for the
 second.
+
+**The second float times the node's volume is its mass** — *read*,
+`0x1000fac0` ([24-motion.md](24-motion.md#load--read-and-measured)), which makes
+it a density by the look of it. That fits what was measured of it before: it
+*falls* as a node grows.
+
+**Flags 0x20 and 0x40 mark a machine's left and right running gear** —
+*measured*, 28 nodes each across 15 chassis and animal tables, every 0x20 node
+at x < 0 and every 0x40 node at x > 0 — and the drive averages each side's life
+([24-motion.md](24-motion.md#running-gear-legs-wheels-and-tracks-by-side--read-and-measured)).
 
 2203 records name an explosion, and the names say plainly what the table is
 for: `explode_tree.exp` and `explode_leaf.exp` on scenery, `explode_frt_b.exp`
 and `explode_frt_m.exp` on fortifications, `explode_rbr_l.exp` on large robots,
 `selfexp_anl_01b.exp` on animals. Parkan lets you shoot a building apart piece
 by piece; this is the table that says what each piece costs and what it looks
-like going up. The `.exp` files themselves are still
-[unread](../TODO.md) — `openparkan.objects.parse_damage` gets you as far as
-their names.
+like going up. What an `.exp` does to whatever it hits is in
+[26-damage.md](26-damage.md).
 
 ## UNITS/**/*.dat — unit and building assemblies
 

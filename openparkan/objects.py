@@ -140,16 +140,17 @@ class NodeDamage:
     #: ``RIGHT_GEAR`` on a machine's running gear.
     flags: int
     #: The node's hit points.  ``Control.dll:0x1000f940`` sets a node's life to
-    #: this times two object scales, and a component on the node is scaled by
-    #: what is left of it.  It is also the float that grows with the node,
-    #: +0.56 with its volume in log space.  1000000 where it cannot be destroyed.
+    #: this times the object's volume scale and the difficulty's level ratio
+    #: (``+0x660``), and a component on the node is scaled by what is left.
+    #: It is also the float that grows with the node, +0.56 with its volume
+    #: in log space.  1000000 where it cannot be destroyed.
     durability: float
-    #: Unresolved, and not a handful of values: 104 distinct over 2334
-    #: records.  The 17 whole numbers (1000 on 549, 0, 10, 1, 300, 500 ...)
-    #: sit on buildings, scenery and projectiles and read as authored.  The
-    #: other 87 are fractional -- 91.008, 1124.23 -- on 873 records that are
-    #: all unit parts, and read as computed.  They fall as the node grows
-    #: (log-log -0.46 against its bounding volume), so not a mass.
+    #: Times the node's volume, the node's mass (``Control.dll:0x1000fac0``) --
+    #: so a density, by the look of it.  104 distinct values over 2334
+    #: records: 17 whole numbers (1000 on 549, 0, 10, 1, 300, 500 ...) on
+    #: buildings, scenery and projectiles, and 87 fractional ones on unit
+    #: parts.  They fall as the node grows, as a density that keeps a part's
+    #: mass in bounds would.
     unknown: float
     #: The explosion to play, as an ``(archive, member)`` pair like any other.
     explosion: ResourceRef

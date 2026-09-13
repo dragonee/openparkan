@@ -1813,7 +1813,7 @@ read = true
 module = "Control.dll"
 at = "0x1002ba30"
 kind = "function"
-name = "IControl object set: 1 writes every battery's charge"
+name = "IControl object set: 1 every battery's charge, 7 mean shield fill, 0x11 level ratio to the fight shield and class-2 guns"
 doc = "docs/23-economy.md"
 read = true
 
@@ -1846,7 +1846,7 @@ read = true
 module = "Control.dll"
 at = "0x1000f940"
 kind = "function"
-name = "node reset: life = .ndp durability x two object scales, fraction 1"
+name = "node reset: life = max = .ndp hit points x volume scale x level ratio (query id 3), fraction 1"
 doc = "docs/07-objects.md"
 read = true
 
@@ -2241,7 +2241,7 @@ read = true
 module = "Control.dll"
 at = "0x1002d4b0"
 kind = "function"
-name = "component factory: type id -> class by a 30-byte index table; 9, 21, 8, 17 also kept at +0x5cc..+0x5d8"
+name = "component factory: type id -> class by a 30-byte index table; classes 1, 9, 21, 8, 17 kept at +0x5c8..+0x5d8; class 27 armour struct at +0x5b4 from values 0, 1, 2"
 doc = "docs/25-sensors.md"
 read = true
 
@@ -2521,7 +2521,7 @@ read = true
 module = "Control.dll"
 at = "0x1000dcc0"
 kind = "function"
-name = "control system property get (ids 1-180); 0x43-0x45 are the radar signatures"
+name = "control system property get (ids 1-180): 0x31 life fraction, 0x32 mean life of 0x70-flagged nodes, 0x43-0x45 the radar signatures, 0xb4 level ratio"
 doc = "docs/25-sensors.md"
 read = false
 
@@ -2588,3 +2588,327 @@ kind = "function"
 name = "class-17 reset: +0x94 = cos(value 0)"
 doc = "docs/25-sensors.md"
 read = true
+
+# --- damage, shields, armour and repair, ../docs/26-damage.md ---------------
+
+[[entry]]
+module = "Control.dll"
+at = "0x100076f0"
+kind = "function"
+name = "control system QueryInterface: 0xa IControl +0, 0x16 ILifeSystem +4, 0x202 +8, 0x204 IDeviceManager +0xc, 0x26 +0x10"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1003b59c"
+kind = "datum"
+name = "ILifeSystem vtable: 3 node query, 5/6 property get/set, 7 kill, 8 take a hit, 10/11 attacker id"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000e980"
+kind = "function"
+name = "property set: 0x31 life fraction (heals incl. destroyed parts), 0x7f attacker id, 0xa2 invulnerable, 0xb4 level ratio (+0x660, forwards 0x11)"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10009f90"
+kind = "function"
+name = "set the level ratio (+0x660): every node's life and max, and the totals, scaled by new / old"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10009ee0"
+kind = "function"
+name = "volume scale (+0x548 = product of the object's three scales): node life rescaled by new / old"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000eb70"
+kind = "function"
+name = "ILifeSystem slot 7: kill -- every node damaged by the total max, unless invulnerable (+0x5b0)"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000ebc0"
+kind = "function"
+name = "ILifeSystem slot 8, take a hit: kind 2 straight to the struck node, kinds 3/4 shield first then every node; not self, not invulnerable"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000ff00"
+kind = "function"
+name = "shield filter: sector named by the hit or picked by direction when the blast crosses the bubble; absorbs min(damage, sector)"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10010030"
+kind = "function"
+name = "node takes a hit: kind 2 whole, kind 3 x ((R + r - d) / 2R)^3 by sphere overlap, kind 4 nothing; armour min(D, a1 D + a2 D^2)"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10011130"
+kind = "function"
+name = "node stage update: children of a destroyed node are destroyed with it"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10011220"
+kind = "function"
+name = "node damage stage N - ceil(N x fraction); a step plays the .exp: damage ratio x exp + life lost, radius exp (x node radius unless a round)"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x100110ab"
+kind = "site"
+name = "a type-3 object is not killed when node 0 or a vital node dies"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x100129f0"
+kind = "function"
+name = "hit record: +0 the .exp (its first word the kind), +4/+8 source, +0xc/+0x10/+0x14 struck object, node, face, +0x34 damage, +0x38 radius"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10012ce0"
+kind = "function"
+name = "hit queue: area blasts hit own nodes and every object in reach through ILifeSystem slot 8; kind 2 goes to the struck object"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10025460"
+kind = "function"
+name = "fight shield constructor: six sector fractions at +0x98 start at 1, max multiplier +0x11c = 1"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1003c938"
+kind = "datum"
+name = "fight shield (class 9) vtable"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x100255c0"
+kind = "function"
+name = "fight shield value get: value 0 (sector max) x +0x11c (level ratio)"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x100257b0"
+kind = "function"
+name = "fight shield slot 6: charge = level x draw - idle; points = charge / value 2 (negative drains), spread by 0x10025a90"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10025a90"
+kind = "function"
+name = "shield recharge: each sector gains in proportion to what it lacks (drain: to what it holds)"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10025bc0"
+kind = "function"
+name = "sector strength = value 0 x sector fraction"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10025be0"
+kind = "function"
+name = "add points to one sector, clamped to 0..max"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002c500"
+kind = "function"
+name = "IDeviceManager slot 12: shield bubble works only with a fight shield (+0x5cc) and a deflector (+0x5d0), both on and intact"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002c590"
+kind = "function"
+name = "IDeviceManager slot 13: sector by the hit's dominant axis: 0 +y, 1 -y, 2 -x, 3 +x, 4 +z, 5 -z"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002ca30"
+kind = "function"
+name = "IDeviceManager slot 14: effective sector = deflector value 0x300+i (x condition x level) x sector strength"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002ca80"
+kind = "function"
+name = "IDeviceManager slot 15: set effective sector -- the shield loses absorbed / deflector coefficient"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1003ccb0"
+kind = "datum"
+name = "deflector value ids by sector: 0x300..0x305"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10010b10"
+kind = "function"
+name = "repair need: max - life over living nodes, or over every node on a type-3 object"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10010ba0"
+kind = "function"
+name = "heal: nodes topped up in index order (or pro rata), destroyed nodes only when flagged"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10022b00"
+kind = "function"
+name = "repair slot 1: flags a type-3 object's repair system to restore destroyed parts"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10022bb0"
+kind = "function"
+name = "repair slot 6: points = (level x draw - idle) / value 1, never negative"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002a3fb"
+kind = "site"
+name = "a class-2 gun hands its +0x180 (the level ratio) to the round it fires as property 180"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10076010"
+kind = "function"
+name = "LEVEL_RATIO: warriors, HQs and heroes not allied with the player get property 180 = [LEVEL_RATIO] EASY/MEDIUM/HARD"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1007d4b0"
+kind = "function"
+name = "applies the level ratio to every registered object once a mission has loaded"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10028e93"
+kind = "site"
+name = "GAME_LEVEL stored at settings +0x150 (0 EASY, 1 MEDIUM, else HARD)"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1005e487"
+kind = "site"
+name = "[CS] INVULNERABILITY debug key: property 162 = 1 on the hero"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10018100"
+kind = "function"
+name = "docked unit: life fraction and shield fill each + 0.1 x dt"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x100181e0"
+kind = "function"
+name = "docked unit: each class-2 gun's ammunition + 10% of its maximum a second (at least 1), value 1 + 0.1 x dt"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10019bd0"
+kind = "function"
+name = "difficulty profile bound: Speed_MaximumFactor, Router_RandomError, Fire_MissAngle, Fire_FreqFactor, Decision_RepairOn/Off, Decision_Dormancy"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1001c700"
+kind = "function"
+name = "needs service: life < 0.5 (a building < 0.9), property 0x32 < 0.6, or a device's 0x400 < 0.2"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1003356f"
+kind = "site"
+name = "Task_Upgrade makes the upgrading unit invulnerable (property 162 = 1)"
+doc = "docs/26-damage.md"
+read = true
+
+# --- renames of existing entries --------------------------------------------

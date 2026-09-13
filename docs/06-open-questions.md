@@ -60,14 +60,10 @@ the nine ints of a section-5 record. The motion fields — acceleration, top
 speed, turn rate, slope mode and cone, payload, a state's velocity and spin
 boxes and engine factor — are [read](24-motion.md).
 
-Its sibling `.ndp` is [solved and read](07-objects.md). One field of it is not:
-the second `float32` of a record. It was written up as "1000 on 549, then 0,
-10, 1, 300 and 500", which is the whole numbers only: the field takes **104
-distinct values** over 2334 records. The 17 whole ones sit on buildings,
-scenery and projectiles and read as authored; the other 87 are fractional —
-91.008, 1124.23 — on 873 records that are **all unit parts** (`EXTO`, `BTLU`)
-and read as computed. They *fall* as a node grows, log-log −0.46 against its
-bounding volume, so whatever they are it is not a mass or a size.
+Its sibling `.ndp` is [solved and read](07-objects.md), the second `float32`
+included: ~~what it is~~ — answered, it times the node's volume is the node's
+mass ([24-motion.md](24-motion.md#load--read-and-measured)), a density. It
+*falls* as a node grows, which once ruled out a mass; a density is what fits.
 
 ## CTPT field roles outside static.rlb
 

@@ -3722,11 +3722,14 @@ def check_effects(check, game: Path) -> None:
         check("effects.rlb: an explosion's size is a scale, not new geometry",
               shared == width > 0,
               f"exp_frt_l, _m and _b share {shared}/{width} emitter blocks byte "
-              f"for byte; the 2, 3 and 4 that separate them are the magnitude "
+              f"for byte; the 2, 3 and 4 that separate them are the radius "
               f"in their .exp")
 
-    # .exp records, wherever they live.
-    total = refs = named = 0
+    # .exp records, wherever they live: a hit kind and twelve name slots.
+    total = refs = named = count_fits = 0
+    kinds: Counter[int] = Counter()
+    filled: Counter[int] = Counter()
+    in_order = backwards = surfaces = generic = 0
     for path in sorted(game.glob("*.rlb")) + sorted(game.glob("*.lib")):
         try:
             archive = NResArchive.open(path)
@@ -3737,14 +3740,41 @@ def check_effects(check, game: Path) -> None:
                 continue
             total += 1
             record = effects.parse_explosion(archive.read(entry), entry.name)
+            kinds[record.kind] += 1
+            filled[len(record.effects)] += 1
+            count_fits += len(record.effects) == record.kind
             for ref in record.effects:
-                if ref.member:
-                    refs += 1
-                    named += library.get(ref.member) is not None
-    check("*.exp: a 24-byte header and one 64-byte name per effect",
-          total > 0 and named >= refs - 1,
-          f"{total} explosion definitions parse; {named}/{refs} of the effects "
-          f"they name are real FXID members")
+                refs += 1
+                named += library.get(ref.member) is not None
+            if len(record.effects) != effects.EXPLOSION_SLOTS:
+                continue
+            for i, ref in enumerate(record.by_surface):
+                # exp_Hsn_bul, exp_b_st_how: the tag is the last two letters of
+                # a two- or three-letter token; "mn" is the flame family's
+                # catch-all.
+                tags = {w[-2:] for w in ref.member.lower().split("_") if len(w) in (2, 3)}
+                mine = {effects.SURFACE_TAGS[i]} | ({"st"} if effects.SURFACE_TAGS[i] == "gr"
+                                                    else set())
+                surfaces += 1
+                generic += "mn" in tags
+                in_order += bool(tags & (mine | {"mn"}))
+                backwards += bool(tags & {effects.SURFACE_TAGS[-1 - i]})
+    check("*.exp: every one is 792 bytes of header and twelve name slots",
+          total > 0 and set(filled) <= {0, 1, effects.EXPLOSION_SLOTS} and named >= refs - 2,
+          f"all {total} parse at {effects.EXPLOSION_SIZE} bytes; they fill "
+          f"{dict(sorted(filled.items()))} slots, and {named}/{refs} of the names are "
+          f"real FXID members")
+    check("*.exp: the first word is the hit kind, not a count",
+          set(kinds) == {effects.HIT_NONE, effects.HIT_DIRECT, effects.HIT_AREA}
+          and count_fits < total // 2,
+          f"kinds {dict(sorted(kinds.items()))} -- nothing, a direct hit, an area "
+          f"blast (Control.dll:0x1000ebc0); read as a count it matches the filled "
+          f"slots on only {count_fits}")
+    check("*.exp: slots 1-11 are the effect for the surface struck, in one order",
+          surfaces and in_order == surfaces and backwards < surfaces // 2,
+          f"{in_order}/{surfaces} names carry their slot's surface tag "
+          f"({' '.join(effects.SURFACE_TAGS)}), {generic} of them the catch-all mn; "
+          f"read backwards, {backwards}")
 
     # And the whole chain: a mesh node's damage record reaches sprites.
     library_objects = objects.ObjectLibrary(game / "objects.rlb")
@@ -4272,9 +4302,6 @@ def check_motion(check, game: Path) -> None:
           f"engines weigh 0.  Control.dll:0x1000fac0 adds a part's mass to its node")
 
 
-#: ``CICLS`` classes the checks below name: armour (``i_arm``) and the gun.
-ARMOUR_TYPE = 27
-GUN_TYPE = 2
 #: The four marks of an internal part, by name suffix: MK1 to MK4.
 MARKS = ("df", "01", "02", "03")
 
@@ -4368,8 +4395,8 @@ def check_sensors(check, game: Path) -> None:
                 for part in control.parse(archive.read(entry), names).components:
                     masses[(lib if lib == "intsys.rlb" else kind, part.type_id)].append(
                         part.mass)
-    armour = masses.pop(("intsys.rlb", ARMOUR_TYPE), [])
-    guns = masses.get(("gun", GUN_TYPE), [])
+    armour = masses.pop(("intsys.rlb", control.ARMOUR_TYPE), [])
+    guns = masses.get(("gun", control.GUN_TYPE), [])
     slots = [v for (where, _t), vs in masses.items() if where == "slot" for v in vs]
     rest = [v for (where, _t), vs in masses.items() if where == "intsys.rlb" for v in vs]
     check(".ctl: every internal part but armour, and every gun, has a mass",
@@ -4456,6 +4483,148 @@ def check_sensors(check, game: Path) -> None:
           and len(buildings) == 2,
           f"{buildings[('bunker/tower', 1)]} bunkers and towers carry one "
           f"e_gun_fs radar; the other {buildings[('other', 0)]} buildings none")
+
+
+#: ``Iron_3D.ini``'s ``[LEVEL_RATIO]``: what an enemy warrior's hit points,
+#: shields and gun damage are scaled by at each difficulty.
+LEVEL_RATIO = {"EASY": 0.5, "MEDIUM": 0.7, "HARD": 1.0}
+#: A node's hit points where it cannot be destroyed.
+INDESTRUCTIBLE = 1_000_000.0
+
+
+def check_combat(check, game: Path) -> None:
+    """Damage, shields, armour and repair, against the shipped data."""
+    names = frozenset(p.name.lower() for p in all_archives(game))
+
+    # ---- a direct round's damage is its hit points plus the explosion's
+    weapon = NResArchive.open(game / "weapon.rlb")
+    members = {e.name.lower(): e for e in weapon}
+    blasts = {name: effects.parse_explosion(weapon.read(e), name)
+              for name, e in members.items() if name.endswith(".exp")}
+    direct = []
+    for name, entry in sorted(members.items()):
+        if not name.endswith(".ndp"):
+            continue
+        for row in objects.parse_damage(weapon.read(entry), name):
+            blast = blasts.get(row.explosion.member.lower()) if row.explosion else None
+            if blast and blast.kind == effects.HIT_DIRECT:
+                direct.append((row.durability, blast.damage))
+    whole = sum(1 for hp, dmg in direct if (hp + dmg) % 10 == 0)
+    alone = sum(1 for hp, _ in direct if hp % 10 == 0)
+    check("weapon.rlb: a direct round hits for its hit points plus one",
+          direct and all(dmg == 1 for _, dmg in direct)
+          and whole >= len(direct) - 1 and alone == 0,
+          f"all {len(direct)} direct-hit rounds' explosions do 1; hit points "
+          f"plus that are a multiple of 10 on {whole}, the hit points alone "
+          f"on {alone} -- {sorted({int(h + d) for h, d in direct})[:8]}...")
+
+    # ---- the components
+    parts: dict[int, list[tuple[str, str, control.Component]]] = defaultdict(list)
+    for path in all_archives(game):
+        archive = NResArchive.open(path)
+        for entry in archive:
+            if not entry.tag.upper().startswith("CTL"):
+                continue
+            try:
+                parsed = control.parse(archive.read(entry), names)
+            except control.ControlFormatError:
+                continue
+            for part in parsed.components:
+                parts[part.type_id].append((path.name, entry.name, part))
+
+    shields = [p for _, _, p in parts[control.FIGHT_SHIELD_TYPE]]
+    check(".ctl: class 9: a fight shield is a maximum, a rate and a price",
+          shields and all(not any(p.values[3:]) for p in shields)
+          and all(p.values[0] > 0 and p.values[1] > 0 for p in shields),
+          f"{len(shields)} fight shields, all with values 3-15 zero; per-sector "
+          f"maximum {min(p.values[0] for p in shields):g}-"
+          f"{max(p.values[0] for p in shields):g}, recharge "
+          f"{min(p.values[1] for p in shields):g}-"
+          f"{max(p.values[1] for p in shields):g} a second")
+    check(".ctl: class 9: no fight shield recharges for free",
+          all(p.values[2] > 0 for p in shields),
+          f"value 2, the charge a point costs, is above zero on "
+          f"{sum(p.values[2] > 0 for p in shields)}/{len(shields)}: "
+          f"{sorted({round(p.values[2], 5) for p in shields})}")
+
+    repairs = [p for _, _, p in parts[control.REPAIR_TYPE]]
+    check(".ctl: class 15: no repair system is free",
+          repairs and all(p.values[1] > 0 for p in repairs)
+          and all(not any(p.values[2:]) for p in repairs),
+          f"value 1 above zero on {sum(p.values[1] > 0 for p in repairs)}/"
+          f"{len(repairs)}: {sorted({round(p.values[1], 5) for p in repairs})}; "
+          f"values 2-15 zero throughout")
+
+    deflectors = [(a, p) for a, _, p in parts[control.DEFLECTOR_TYPE]]
+    equal = sum(1 for _, p in deflectors
+                if len(set(p.values[:6])) == 1 and 0 < p.values[0] <= 1
+                and not any(p.values[6:]))
+    where = Counter(a for a, _ in deflectors)
+    check(".ctl: class 21: a deflector is six coefficients, one per face",
+          deflectors and equal == len(deflectors),
+          f"{equal}/{len(deflectors)} carry six equal values in 0..1 and "
+          f"nothing after -- {sorted({p.values[0] for _, p in deflectors})}")
+
+    fortif_shield = {e for a, e, _ in parts[control.FIGHT_SHIELD_TYPE] if a == "fortif.rlb"}
+    fortif_deflector = {e for a, e, _ in parts[control.DEFLECTOR_TYPE] if a == "fortif.rlb"}
+    check("fortif.rlb: buildings carry shields but no deflector",
+          fortif_shield and not fortif_deflector,
+          f"{len(fortif_shield)} building controllers have a fight shield and "
+          f"{len(fortif_deflector)} a deflector; the {len(deflectors)} "
+          f"deflectors are in {dict(where)}")
+
+    armour = [(a, p) for a, _, p in parts[control.ARMOUR_TYPE]]
+    chassis = [p for a, p in armour if a == "bases.rlb"]
+    fitted = [p for a, p in armour if a == "intsys.rlb"]
+    even = [(1 - p.values[1]) / p.values[2] for p in fitted if p.values[2] > 0]
+    check(".ctl: class 27: armour is a linear and a squared factor",
+          chassis and fitted
+          and all(tuple(p.values[:3]) == (0.0, 1.0, 0.0) for p in chassis)
+          and all(0 < p.values[1] < 1 and p.values[2] > 0 for p in fitted)
+          and len(even) == len(fitted) and 1500 < min(even) and max(even) < 3500,
+          f"the {len(chassis)} chassis armours are (0, 1, 0), no reduction; the "
+          f"{len(fitted)} fitted ones keep {min(p.values[1] for p in fitted):.2f}-"
+          f"{max(p.values[1] for p in fitted):.2f} of a hit plus a square term, "
+          f"so a hit of {min(even):.0f}-{max(even):.0f} or more goes through whole")
+
+    # ---- the difficulty ratio
+    ini = settings.sections(game / "Iron_3D.ini")
+    ratio = {k: float(v) for k, v in ini.get("LEVEL_RATIO", {}).items()}
+    check("Iron_3D.ini: LEVEL_RATIO scales enemies 0.5, 0.7, 1.0",
+          ratio == LEVEL_RATIO,
+          f"{ratio}; iron3d.dll:0x10076010 reads the one GAME_LEVEL picks "
+          f"(GAME_LEVEL={ini.get('CS', {}).get('GAME_LEVEL')})")
+
+    # ---- hit points
+    bases = NResArchive.open(game / "bases.rlb")
+    by_size: dict[str, list[float]] = defaultdict(list)
+    for entry in bases:
+        name = entry.name.lower()
+        if name.endswith(".ndp") and name.startswith("r_"):
+            node0 = objects.parse_damage(bases.read(entry), name)[0].durability
+            by_size[name[2]].append(node0)
+    medians = {k: statistics.median(v) for k, v in by_size.items()}
+    check("bases.rlb: a chassis's hit points grow with its size",
+          medians["t"] < medians["l"] < medians["m"] < medians["b"]
+          and all(x < INDESTRUCTIBLE for v in by_size.values() for x in v),
+          "node-0 hit points by size letter: " + ", ".join(
+              f"{k} {min(v):g}-{max(v):g} (median {medians[k]:g})"
+              for k, v in sorted(by_size.items(), key=lambda kv: medians[kv[0]])))
+
+    fortif = NResArchive.open(game / "fortif.rlb")
+    frail = total_b = 0
+    for entry in fortif:
+        name = entry.name.lower()
+        if not name.endswith(".ndp"):
+            continue
+        table = objects.parse_damage(fortif.read(entry), name)
+        total_b += 1
+        frail += table[0].durability <= 1 and len(table) > 1
+    check("fortif.rlb: a building's first node can be a 1-hit-point stub",
+          frail > 0,
+          f"{frail}/{total_b} building tables give node 0 one hit point among "
+          f"sturdier parts; Control.dll:0x100110ab spares a type-3 object when "
+          f"node 0 goes, where a unit dies")
 
 
 def check_controls(check, game: Path) -> None:
@@ -5859,7 +6028,7 @@ def run(game: Path) -> int:
         check_minimap_agreement, check_arealmap,
         check_grid, check_missions, check_objects, check_poses, check_lod, check_damage,
         check_effects, check_footprints, check_rsli, check_control, check_efficiency,
-        check_motion, check_sensors,
+        check_motion, check_sensors, check_combat,
         check_controls,
         check_behaviour, check_research, check_descriptions, check_saves,
         check_vocabulary, check_resources, check_briefing, check_settings,

@@ -67,8 +67,9 @@ after engines and the miscellaneous channel
 
    tried in the order mass, electronics, drive (below). A target whose word
    from its slot `0x2c` is `0xfffe` in the low 16 bits is never detected
-   (`0x10024638`) — the value `Behavior.dll` and `iron3d.dll` also use for a
-   clan, so *guess*: an ownerless object.
+   (`0x10024638`). It is the value a destroyed object's owner word is set to
+   (`0x10011098`, [26-damage.md](26-damage.md#hit-points--read-and-measured)),
+   so *guess*: the radar passes over wrecks.
 
 So the distance at which one signature is seen is `R · √(1 − 1/(v·s))`: a
 product `v·s` of 10 is seen at 95% of the range, 2 at 71%, and 1 or less not

@@ -10,31 +10,30 @@ Everything below is re-derived by `uv run openparkan verify`.
 ## `.exp` — what an explosion sets off
 
 144 members across five archives — 119 in `weapon.rlb`, then `animals.rlb`
-(12), `system.rlb` (8), `static.rlb` (4) and `turrets.rlb` (1). Each is:
+(12), `system.rlb` (8), `static.rlb` (4) and `turrets.rlb` (1). An `.exp` is
+**what a hit does**, and every one is 792 bytes:
 
 ```
-int32    count
-float32  a           0 to 500; unresolved
-float32  magnitude   2 on every _l, 3 on every _m, 4 on every _b
+int32    kind        1 nothing, 2 a direct hit, 3 an area blast (Control.dll:0x1000ebc0)
+float32  damage      0 to 800,000
+float32  radius      2 on every _l, 3 on every _m, 4 on every _b
 float32  1.0
 float32  1.0
-int32    flags       0 on 81 records, 7 on 63
-count x  char[32] archive, char[32] member    the FXID to play
+int32    placement   7 on 63 records -- at the point of impact; 0 on 81
+12 x     char[32] archive, char[32] member   slot 0 the effect; 1-11 by surface struck
 ```
 
-`24 + count * 64` fits all 144 exactly, and **212 of the 213 names they carry
-are real `FXID` members**. The one that is not, `exp_t_sn_mis`, sits beside
-`exp_t_st_mis` and `exp_t_sw_mis` in the same archive and reads as a typo.
+The names fill 1 slot or all 12 (and none on two). On the 50 full records,
+slots 1–11 carry the surface in one order — `sn st gr sw ic mt gr wt al an
+sh`, 550 of 550, the flame family's catch-all `mn` standing in for 32 — and
+690 of the 692 names are real `FXID` members.
 
-The **magnitude** is the field that gives the format away. It tracks the size
-suffix in the record's own name across every family: `explode_frt_l` 2,
-`explode_frt_m` 3, `explode_frt_b` 4, and the same for `explode_rbr_*`.
-
-A record is a fixed **792-byte buffer written without being cleared**, so
-everything past the last name pair is whatever an earlier edit left there.
-`weapon.rlb/bb_b_02.exp` declares three effects and carries four names, the
-fourth a duplicate of the first. Reading past the count gets you stale data
-that no longer resolves — which is how the count was confirmed.
+**This page read the first word as a count until the damage code was read**
+([26-damage.md](26-damage.md)). It matches the filled slots on only 26 of the
+144, and the "stale names past the count" it explained are the surface slots.
+The **radius** tracks the size suffix in the record's own name across every
+family: `explode_frt_l` 2, `explode_frt_m` 3, `explode_frt_b` 4, and the same
+for `explode_rbr_*` — a multiple of the exploding node's bounding radius.
 
 ## `FXID` — one effect
 
@@ -155,7 +154,7 @@ What they mean is still open.
 
 One negative result worth keeping: **an explosion's size is not in its
 effect.** `exp_frt_l`, `exp_frt_m` and `exp_frt_b` share their emitter blocks
-byte for byte; the 2, 3 and 4 that separate them are the magnitude in their
+byte for byte; the 2, 3 and 4 that separate them are the radius in their
 `.exp`, which scales the whole thing at run time.
 
 **Every one of the 3577 material references resolves** through `Material.lib`,
@@ -258,7 +257,8 @@ to `exp_t_sn_mis` and its neighbours.
   is spent — it only seeds a generator — and the one sin/cos site takes its
   values as arguments, so the next handle is whoever *calls* it, one frame
   further out.
-- **The 60-byte effect header** and the `.exp`'s first float and flags word.
+- **The 60-byte effect header**, and the engine's surface index behind an
+  `.exp`'s slots 1–11.
 - **What bit 8 controls.** That it is a flag is settled; what it switches is
   not.
 - Snow and rain are **not** here. There is no FXID whose name mentions either,

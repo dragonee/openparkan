@@ -422,8 +422,9 @@ def cmd_explosions(args, game: Path) -> int:
                 continue
             record = effects.parse_explosion(archive.read(entry), entry.name)
             shown += 1
-            print(f"{path.name}/{entry.name:<24} magnitude {record.magnitude:5.1f}"
-                  f"  flags {record.flags}  -> "
+            print(f"{path.name}/{entry.name:<24} kind {record.kind}"
+                  f"  damage {record.damage:g}  radius {record.radius:g}"
+                  f"  placement {record.placement}  -> "
                   + ", ".join(str(r) for r in record.effects))
     print(f"\n{shown} explosion definitions")
     return 0

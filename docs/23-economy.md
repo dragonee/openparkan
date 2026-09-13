@@ -277,7 +277,8 @@ a node of its model at record `+4`, and asks the control system about it
 (`Control.dll:0x1000dc40`, id 1). The control system builds one node record per
 entry of the object's `.ndp` damage table
 ([07-objects.md](07-objects.md#ndp-is-a-damage-table-one-record-per-node)): life
-starts at the `.ndp` durability times two object scales (`0x1000f940`), damage
+starts at the `.ndp` durability times the object's volume scale and the
+difficulty's level ratio (`0x1000f940`, [26-damage.md](26-damage.md)), damage
 lowers it clamped at 0 (`0x10010f30`), and the node's fraction `life / max` is
 what id 1 returns. On all 781 components that sit beside a same-named `.ndp`,
 the node index falls inside its table; shuffle the pairing and 308 fall
@@ -433,10 +434,11 @@ Each class prices its own draw in its vtable slot 5, read per class:
 | battery (19) | a source: `min(output × charge × condition, capacity × charge × condition)` (`0x100229a0`) |
 
 The numbers make the split plain (*measured*). A building's fight shield
-recharges 80 a second of 8,000 a sector at no cost per point (value 2 is 0);
-a bot's `o_fsh` shields recharge 50–80 of 3,350–3,800 at 0.06 a point, and a
-chassis shield 10–50 at 2. A building's repair system restores 100 a second
-free; a bot's, 50–80 at 0.06. Engines carry a power figure of 20 on the
+recharges 80 a second of 8,000 a sector at 0.00015 a point; a bot's large
+`o_fsh_b` shields recharge 50–80 of 3,350–3,800 at 0.06 a point, and a chassis
+shield 10–100 at 2. A building's repair system restores 100 a second at 0.0002
+a point; a bot's large one, 50–80 at 0.06. (This page once said the building
+figures were free: an earlier survey rounded them to 0.) Engines carry a power figure of 20 on the
 chassis and 4.5–11.2 on the internal `o_eng` parts. So on a bot, moving,
 shield recharge and repair all cost charge, and weapons, served fourth, get
 what is left.
@@ -613,7 +615,6 @@ construction slows research.
 
 ## Not established
 
-- The second object scale on node life (`+0x660`).
 - What makes a building a charging dock for units, and which task sends a bot
   there on its own.
 - Whether a clan's AI re-orders a build that was refused for want of a mind

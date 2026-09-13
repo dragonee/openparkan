@@ -210,6 +210,7 @@ of fields carried through the readers without being understood.
 - [23-economy.md](docs/23-economy.md) — ore and power: who makes, carries, shares and spends them
 - [24-motion.md](docs/24-motion.md) — how a machine moves: states, speed limits, running gear, load, and what moving costs
 - [25-sensors.md](docs/25-sensors.md) — radar, the detection shield and camouflage, and what the AI sees
+- [26-damage.md](docs/26-damage.md) — hits, explosions, shields and deflectors, armour, hit points and repair
 
 ## Layout
 

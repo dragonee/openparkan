@@ -95,6 +95,24 @@ RADAR_PERIOD = 4
 DETECT_SHIELD_TYPE = 10
 CAMOUFLAGE = 3
 CAMOUFLAGE_POWER = 4
+#: ``CICLS_MULTIGUN``, the gun.  Type 30 is built by the same class.
+GUN_TYPE = 2
+#: ``CICLS_FIGHTSHIELD``, the shield generator.  Values: a sector's maximum, the
+#: recharge a second, the charge a point costs (``Control.dll:0x100257b0``).
+FIGHT_SHIELD_TYPE = 9
+SHIELD_SECTORS = 6
+#: ``CICLS_REPAIRSYS``.  Values: the points it restores a second, the charge
+#: a point costs (``0x10022bb0``).
+REPAIR_TYPE = 15
+#: The deflector, ``i_def``; ``CICLS`` has no name for it.  Values 0-5: how
+#: much of each shield sector stops damage (``0x1002ca30``).  The bubble is up
+#: only while a fight shield and a deflector are both on and intact
+#: (``0x1002c500``).
+DEFLECTOR_TYPE = 21
+#: Armour, ``i_arm``; ``CICLS`` has no name for it either.  Values: a rating,
+#: then a linear and a square factor -- a hit of D becomes
+#: ``min(D, linear x D + square x D^2)`` (``0x10010030``).
+ARMOUR_TYPE = 27
 
 #: A section-1 state: ``SECTION1_RECORD`` bytes, then ``counts[1]`` 16-byte
 #: conditions.  Bits 0-2 of the flags switch on the velocity box per axis and

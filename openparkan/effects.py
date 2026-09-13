@@ -2,21 +2,18 @@
 
 Two small formats that together say what happens when something blows up.
 
-An **``.exp``** (tag ``EXPL``) is a 24-byte header -- a count, four
-``float32`` and a flags word -- followed by that many 64-byte
-``(archive, member)`` pairs naming the effects to play at once.  ``24 + n *
-64`` fits all 144 shipped explosions -- 119 of them in ``weapon.rlb``, the rest
-spread over ``animals.rlb``, ``system.rlb``, ``static.rlb`` and
-``turrets.rlb`` -- and 212 of the 213 names they carry are real ``FXID``
-members.  The one that is not, ``exp_t_sn_mis``, sits beside ``exp_t_st_mis``
-and ``exp_t_sw_mis`` in the same archive and reads as a typo.
+An **``.exp``** (tag ``EXPL``) is what a hit does: 792 bytes, a 24-byte
+header -- the hit kind, the damage, the radius, two floats of 1.0 and a
+placement word -- and twelve 64-byte ``(archive, member)`` slots.  Slot 0 is
+the effect to play; slots 1 to 11 are the effect for each surface struck.
+``Control.dll:0x1000ebc0`` switches on the kind: 1 does nothing but the
+effect, 2 is a direct hit on the node struck, 3 an area blast.  All 144
+shipped explosions are 792 bytes -- 119 of them in ``weapon.rlb``, the rest
+in ``animals.rlb``, ``system.rlb``, ``static.rlb`` and ``turrets.rlb`` -- and
+fill 0, 1 or all 12 slots.  See ``docs/26-damage.md``.
 
-The second float tracks the size in the record's own name -- 2 on every
-``_l``, 3 on every ``_m``, 4 on every ``_b`` -- so it reads as a magnitude.
-The file is a fixed 792-byte buffer written without being cleared, so
-everything past the last pair is whatever an earlier edit left there; the
-count is the only thing that says where the record ends, and ignoring it gets
-you stale names that no longer resolve.
+The first word was read here once as a count of names.  It matches the filled
+slots on only 26 of the 144.
 
 An **``FXID``** (in ``effects.rlb``) is one effect: a 60-byte header, then that
 many typed **emitter** blocks.  A block opens with a ``uint32`` whose low byte
@@ -82,11 +79,24 @@ from pathlib import Path
 from .nres import NResArchive
 from .objects import ResourceRef, _fixed_string
 
-#: An ``.exp``'s count, four floats and a flags word.
+#: An ``.exp``'s kind, damage, radius, two floats and a placement word.
 EXPLOSION_HEADER = 24
 
-#: One ``(archive, member)`` pair of an ``.exp``.
+#: One ``(archive, member)`` pair of an ``.exp``, and how many there are.
 EXPLOSION_STRIDE = 64
+EXPLOSION_SLOTS = 12
+EXPLOSION_SIZE = EXPLOSION_HEADER + EXPLOSION_SLOTS * EXPLOSION_STRIDE
+
+#: The hit kinds ``Control.dll:0x1000ebc0`` tells apart.  Kind 4, shields
+#: only, is handled and never shipped.
+HIT_NONE = 1
+HIT_DIRECT = 2
+HIT_AREA = 3
+HIT_SHIELDS = 4
+
+#: The surface tag the effect in slots 1 to 11 carries in its name.  Which
+#: surface index the engine passes is not traced; these are the names' own.
+SURFACE_TAGS = ("sn", "st", "gr", "sw", "ic", "mt", "gr", "wt", "al", "an", "sh")
 
 #: The 60 bytes before an effect's first emitter block.
 HEADER_SIZE = 60
@@ -159,19 +169,37 @@ class EffectFormatError(ValueError):
 
 @dataclass(frozen=True)
 class Explosion:
-    """An ``.exp``: some numbers and the effects it sets off."""
+    """An ``.exp``: what kind of hit, how hard, how wide, and what it looks like."""
 
-    #: ``values[1]`` tracks the size suffix of the record's name.  The third
-    #: and fourth are 1.0 throughout; the first ranges 0 to 500 and is
-    #: unresolved.
-    values: tuple[float, float, float, float]
-    #: 0 on 81 records and 7 on 63.  Unresolved.
-    flags: int
-    effects: list[ResourceRef]
+    #: ``HIT_NONE``, ``HIT_DIRECT`` or ``HIT_AREA``.
+    kind: int
+    #: The level ratio times this, plus the life the exploding node lost, is
+    #: the hit's damage (``Control.dll:0x10011794``).
+    damage: float
+    #: Absolute on a round; a multiple of the node's bounding radius otherwise.
+    #: 2 on every ``_l`` record, 3 on every ``_m``, 4 on every ``_b``.
+    radius: float
+    #: The two floats after the radius, 1.0 throughout.  Not read by the hit.
+    values: tuple[float, float]
+    #: 7 on 63 records -- at the point of impact -- and 0 on the rest.
+    placement: int
+    #: The twelve name slots, blank where empty.
+    slots: tuple[ResourceRef, ...]
 
     @property
-    def magnitude(self) -> float:
-        return self.values[1]
+    def effect(self) -> ResourceRef | None:
+        """The effect to play, slot 0."""
+        return self.slots[0] if self.slots and self.slots[0] else None
+
+    @property
+    def by_surface(self) -> tuple[ResourceRef, ...]:
+        """Slots 1 to 11, one per ``SURFACE_TAGS`` entry."""
+        return self.slots[1:]
+
+    @property
+    def effects(self) -> list[ResourceRef]:
+        """Every effect it names, in slot order."""
+        return [r for r in self.slots if r]
 
 
 @dataclass(frozen=True)
@@ -249,21 +277,20 @@ def _pair(blob: bytes, offset: int) -> ResourceRef:
 
 
 def parse_explosion(blob: bytes, source: str = "<exp>") -> Explosion:
-    """Parse an ``.exp``.  Everything past the last pair is stale."""
-    if len(blob) < EXPLOSION_HEADER:
-        raise EffectFormatError(f"{source}: too short to hold a header")
-    count = struct.unpack_from("<i", blob, 0)[0]
-    if count < 0 or EXPLOSION_HEADER + count * EXPLOSION_STRIDE > len(blob):
+    """Parse an ``.exp``.  Raises unless it is the 792-byte record."""
+    if len(blob) != EXPLOSION_SIZE:
         raise EffectFormatError(
-            f"{source}: {count} effects will not fit in {len(blob)} bytes"
+            f"{source}: {len(blob)} bytes, not the {EXPLOSION_SIZE} of an explosion"
         )
+    kind, damage, radius, one, two, placement = struct.unpack_from("<i4fi", blob, 0)
     return Explosion(
-        values=struct.unpack_from("<4f", blob, 4),
-        flags=struct.unpack_from("<i", blob, 20)[0],
-        effects=[
-            _pair(blob, EXPLOSION_HEADER + i * EXPLOSION_STRIDE)
-            for i in range(count)
-        ],
+        kind=kind,
+        damage=damage,
+        radius=radius,
+        values=(one, two),
+        placement=placement,
+        slots=tuple(_pair(blob, EXPLOSION_HEADER + i * EXPLOSION_STRIDE)
+                    for i in range(EXPLOSION_SLOTS)),
     )
 
 

@@ -116,9 +116,10 @@ engine — so it is **unknown**, not a problem id.
 `Iron_3D.ini` is four sections and 33 keys: `[CS]` the display and input,
 `[MULTIPLAYER]` a login, `[TEMP]` two ranges the interface normalises against
 (`OFFENCE_MIN`/`MAX`, `DEFENCE_MIN`/`MAX`), and `[LEVEL_RATIO]` three
-difficulty multipliers — 0.5, 0.7, 1.0 — that `GAME_LEVEL` picks between. That
-`GAME_LEVEL` indexes those three is a **guess**; what is measured is that both
-live in `iron3d.dll` and nowhere else.
+difficulty multipliers — 0.5, 0.7, 1.0 — that `GAME_LEVEL` picks between:
+0 `EASY`, 1 `MEDIUM`, anything else `HARD` (*read*, `iron3d.dll:0x10076010`).
+The ratio scales enemy warriors' hit points, shields and gun damage
+([26-damage.md](26-damage.md#the-difficulty-ratio--read-and-measured)).
 
 `dispatcher.ini` is one `[COMPLETE]` section with one key per mission
 finished, value 1. **The key is the mission's own directory path**, every
