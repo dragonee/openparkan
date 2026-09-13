@@ -80,6 +80,56 @@ impl Ground {
         ([lo[0], lo[1]], [hi[0], hi[1]])
     }
 
+    /// A segment through the ground (`Terrain.dll:0x100205c0`): the cells along its xy
+    /// in order from `p0`, each cell's faces one-sided through the face normal, and
+    /// the nearest strike in the first cell that has one.
+    ///
+    /// STAND-IN: docs/26-damage.md#the-hit-test--read-and-measured -- the landscape's
+    /// own cell size is not this index's; the water surface, mask bit 8 by the look of
+    /// it, is passed through.
+    pub fn segment(&self, p0: Vec3, p1: Vec3) -> Option<crate::hit::Strike> {
+        let cell_of = |p: Vec3| (((p.x - self.lo[0]) / CELL).floor(), ((p.y - self.lo[1]) / CELL).floor());
+        let (mut cx, mut cy) = cell_of(p0);
+        let (ex, ey) = cell_of(p1);
+        let d = p1 - p0;
+        let step = |v: f32| if v > 0.0 { 1.0 } else { -1.0 };
+        let (sx, sy) = (step(d.x), step(d.y));
+        let boundary = |c: f32, s: f32, lo: f32| lo + (c + if s > 0.0 { 1.0 } else { 0.0 }) * CELL;
+        let t_at = |b: f32, from: f32, v: f32| if v == 0.0 { f32::INFINITY } else { (b - from) / v };
+        let mut tx = t_at(boundary(cx, sx, self.lo[0]), p0.x, d.x);
+        let mut ty = t_at(boundary(cy, sy, self.lo[1]), p0.y, d.y);
+        let (dtx, dty) = (CELL / d.x.abs(), CELL / d.y.abs());
+        let cells = (ex - cx).abs() + (ey - cy).abs() + 1.0;
+        for _ in 0..cells as usize {
+            if cx >= 0.0 && cy >= 0.0 && (cx as usize) < self.size[0] && (cy as usize) < self.size[1] {
+                let mut best: Option<crate::hit::Strike> = None;
+                for &f in &self.cells[cy as usize * self.size[0] + cx as usize] {
+                    let face = &self.land.faces[f as usize];
+                    let [a, b, c] =
+                        face.vertices.map(|v| Vec3::from_array(self.land.positions[usize::from(v)]));
+                    let Some(q) = crate::hit::plane_crossing(p0, p1, Vec3::from_array(face.normal), a) else {
+                        continue;
+                    };
+                    let d2 = (q - p0).length_squared();
+                    if crate::hit::inside(q, a, b, c) && best.is_none_or(|s| d2 < s.d2) {
+                        best = Some(crate::hit::Strike { point: q, d2, node: None, triangle: f as usize });
+                    }
+                }
+                if best.is_some() {
+                    return best;
+                }
+            }
+            if tx < ty {
+                cx += sx;
+                tx += dtx;
+            } else {
+                cy += sy;
+                ty += dty;
+            }
+        }
+        None
+    }
+
     /// The highest ground face at `(x, y)` whose plane there is not above `top`.
     pub fn below(&self, x: f32, y: f32, top: f32) -> Option<Hit> {
         let cx = ((x - self.lo[0]) / CELL).floor();
@@ -184,6 +234,16 @@ pub(crate) mod tests {
         assert!(!wall.walkable());
         assert_eq!(g.below(40.5, 20.0, 10.0), None);
         assert_eq!(g.below(-1.0, 20.0, 10.0), None);
+    }
+
+    #[test]
+    fn a_shot_meets_the_floor_through_the_water_and_not_from_below() {
+        let g = floor();
+        let s = g.segment(Vec3::new(2.0, 30.0, 20.0), Vec3::new(38.0, 1.0, -20.0)).unwrap();
+        assert!(s.point.z.abs() < 1e-3 && s.node.is_none(), "{:?}", s.point);
+        assert_eq!(g.segment(Vec3::new(20.0, 20.0, -5.0), Vec3::new(21.0, 20.0, 5.0)), None);
+        let wall = g.segment(Vec3::new(45.0, 20.0, 20.0), Vec3::new(35.0, 20.0, 20.0));
+        assert!(wall.is_none(), "the wall faces -x: a shot from +x is behind it");
     }
 
     #[test]

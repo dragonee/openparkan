@@ -116,8 +116,8 @@ sphere has radius *r* and centre at distance *d* from a blast of radius *R*:
 
 | | damage |
 |---|---|
-| `d ≥ R + r` | 0 |
-| one sphere wholly inside the other | the whole blast |
+| `d ≥ R + r`, or a node sphere of radius 0 | 0 |
+| one sphere strictly inside the other, `d < R − r` or `d < r − R` | the whole blast |
 | otherwise | `damage × ((R + r − d) / 2R)³` |
 
 ## The hit test — *read*, and *measured*
