@@ -2199,6 +2199,30 @@ def check_poses(check, game: Path) -> None:
                 drawable += 1
                 agree += node.is_collision
                 hull_triangles += triangles
+    # The fifth slot of a variant is where collision geometry lives: the nodes
+    # carrying only that slot are exactly the collision hulls, and no ordinary
+    # node shares its fifth slot with one of its levels.
+    only_fifth, hulls, shared, both = set(), set(), 0, 0
+    for mesh_name, m in meshes:
+        for k, node in enumerate(m.nodes):
+            levels = [node.slot_index[i] for i in range(objmesh.LOD_COUNT)
+                      if node.slot_index[i] != objmesh.NO_SLOT]
+            fifth = node.collision_slot()
+            if node.is_collision:
+                hulls.add((mesh_name, k))
+            if fifth is None:
+                continue
+            if not levels:
+                only_fifth.add((mesh_name, k))
+            else:
+                both += 1
+                shared += fifth in levels
+    check("MESH: the fifth slot of a variant holds the collision hulls",
+          only_fifth == hulls and hulls and shared == 0,
+          f"the {len(only_fifth)} nodes carrying only a fifth slot are exactly "
+          f"the {len(hulls)} collision hulls; on the {both} ordinary nodes that "
+          f"carry both, the fifth is a separate slot on all {both - shared}")
+
     check("MESH: flag bit 0x20 marks exactly the CP_* collision hulls",
           marked == agree == drawable > 0 and marked < named,
           f"{marked} nodes carry the bit and every one is named CP_* or BTCP_*; "

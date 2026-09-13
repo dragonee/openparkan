@@ -79,11 +79,11 @@ and then 2, 1, 1, 1, which reads as two parallel arrays rather than pairs.
 
 ## Object mesh leftovers
 
-- **The fifth slot of a variant.** Four of every five slot indices are a level
-  of detail ladder; the fifth is not (it breaks the monotonic triangle count
-  on 292 chains). 316 of the 1845 nodes carry one; of the 288 that carry both
-  a level 0 and a fifth slot, the two use the same materials on 197 and
-  different ones on 91.
+- **The fifth slot of a variant** is **collision geometry**, as far as the data
+  goes: the 28 nodes carrying only a fifth slot are exactly the 28 collision
+  hulls, and on the 288 ordinary nodes with both it is always a separate slot
+  — a copy of level 0 on 141, coarser on 137. The hit test itself has not been
+  found reading it. See [07-objects.md](07-objects.md).
 - **Pose key `time`.** The `float32` at offset 12 of a stream-8 key is an
   integer frame number in every one of the 34049 keys, ranging 0..473. It is
   not used by a static renderer.

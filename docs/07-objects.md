@@ -388,9 +388,23 @@ Two things pin the reading down beyond the monotonicity:
 
 - level 0 of variant 0 alone reproduces the authored bounding box **exactly on
   302 of 434 meshes**, against 231 when all five slots are drawn together;
-- 28 nodes carry only the fifth slot of their block, so level 0 falls back to
-  the coarsest slot present rather than drawing nothing. No node lacks
-  geometry in variant 0 but has some in a later variant.
+- 28 nodes carry only the fifth slot of their block. No node lacks geometry
+  in variant 0 but has some in a later variant.
+
+### The fifth slot is collision geometry
+
+Those 28 nodes are **exactly the 28 collision hulls** — flag bit 5, every one
+named `CP_*` or `BTCP_*` — so a hull keeps its geometry in the fifth slot and
+nowhere else. That is the measurement. On the 288 ordinary nodes that carry
+both a level 0 and a fifth slot, the fifth is **always a separate slot**, never
+one of the node's levels reused: a same-sized copy of level 0 on 141, a coarser
+shape on 137 (closest to level 1 on 83 of those), and finer on 10. Reading all
+316 as the geometry collision is tested against is the natural extension, but
+it is a reading — the engine's hit test has not been found taking slot 4.
+
+This also corrects why level 0 falls back to the fifth slot: not so that a node
+draws something rather than nothing, but because the only nodes it happens to
+are hulls, which are never drawn. `ObjectMesh.select` and the viewer skip them.
 
 ### Every level is a simplification in place
 

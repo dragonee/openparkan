@@ -73,9 +73,19 @@ SLOT_HEADER_SIZE = 0x8C
 SLOT_SIZE = 68
 #: A node selects geometry with ``slot_index[variant * SLOTS_PER_VARIANT + lod]``.
 #: Each block of five is one variant: four levels of detail and a fifth slot
-#: whose role is not established.  Within a block the first four triangle
+#: that is **collision geometry**.  Within a block the first four triangle
 #: counts fall monotonically on 1157 of 1161 chains; including the fifth drops
 #: that to 869, which is what says it is not a level.
+#:
+#: What says it is collision: the 28 nodes that carry *only* a fifth slot are
+#: exactly the 28 collision hulls -- flag bit 5, every one named ``CP_*`` or
+#: ``BTCP_*`` -- so a hull's geometry lives in that slot and nowhere else.  On
+#: the 288 ordinary nodes that carry both, the fifth is always a *separate*
+#: slot, never shared with a level: a same-sized copy of level 0 on 141, a
+#: coarser shape on 137 (nearest level 1 on 83 of them), finer on 10.  That
+#: last half is the reading rather than the measurement -- the engine's hit
+#: test has not been found reading slot 4.
+COLLISION_SLOT = 4
 SLOTS_PER_VARIANT = 5
 LOD_COUNT = 4
 VARIANT_COUNT = 3
@@ -300,6 +310,11 @@ class Subobject:
         """
         return bool(self.flags & SUBOBJECT_COLLISION)
 
+    def collision_slot(self, variant: int = 0) -> int | None:
+        """The fifth slot of a variant: the geometry collision is tested on."""
+        index = self.slot_index[variant * SLOTS_PER_VARIANT + COLLISION_SLOT]
+        return None if index == NO_SLOT else index
+
     def slots_for_lod(self, lod: int = 0, variant: int = 0) -> list[int]:
         """The slot to draw this node at one level of detail.
 
@@ -308,8 +323,10 @@ class Subobject:
         levels of detail and is what makes a model look like scrambled
         geometry.
 
-        28 nodes carry only the fifth slot of their variant, so level 0 falls
-        back to the coarsest slot present rather than drawing nothing.
+        28 nodes carry only the fifth slot of their variant, and level 0
+        falls back to it.  Those 28 are exactly the collision hulls, so the
+        fallback never reaches a picture -- ``select`` and the viewer skip
+        hulls -- but it is how a hull's geometry is found at all.
         """
         base = variant * SLOTS_PER_VARIANT
         block = self.slot_index[base : base + SLOTS_PER_VARIANT]
