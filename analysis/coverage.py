@@ -80,6 +80,10 @@ SYMBOL = re.compile(
 #: its jump tables.
 KINDS = ("function", "site", "datum", "table")
 
+#: How many consecutive code pointers make a vtable whose entries are believed
+#: without further evidence.
+VTABLE_RUN = 6
+
 
 @dataclass
 class Function:
@@ -284,6 +288,27 @@ class Module:
                 if va in starts or before in (b"\xcc", b"\x90") \
                         or ends.get(va) in ("ret", "jmp"):
                     out.add(va)
+            # A long run of code pointers is a vtable, and every entry in one
+            # is a function whatever sits in front of it.  The test above
+            # misses an entry whose predecessor ends in an inline jump table --
+            # the byte before it is table data, not a `ret` -- which is how
+            # MBehaviour's slot 26 at Behavior.dll:0x1000a490 was folded into
+            # the function before it.  Six is long enough to exclude jump
+            # tables that point into the middle of a function, and adds 11
+            # functions across the install.
+            vals = [int.from_bytes(blob[o:o + 4], "little")
+                    for o in range(0, len(blob) - 4, 4)]
+            i = 0
+            while i < len(points):
+                if not points[i]:
+                    i += 1
+                    continue
+                j = i
+                while j < len(points) and points[j]:
+                    j += 1
+                if j - i >= VTABLE_RUN:
+                    out.update(vals[i:j])
+                i = j
         return out
 
     def calls(self) -> dict[int, set[int]]:

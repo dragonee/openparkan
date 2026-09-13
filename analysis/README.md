@@ -76,6 +76,13 @@ correction:
   that merely looks like an address is everywhere. A pointer is only believed
   when its neighbours are pointers too: a vtable is a run, a coincidence is
   alone.
+- **A vtable entry can follow inline data.** `MBehaviour`'s slot 26
+  (`Behavior.dll:0x1000a490`) comes straight after a function that ends in its
+  own jump table, so the byte in front of it is table data, not a `ret`, and
+  the rule above folded it into the function before. A run of six or more code
+  pointers is now believed outright — it adds 11 functions across the install
+  and nothing balloons — and `--check` caught the miss the first time an
+  entry named that address.
 
 `--unknown` ranks what is left by the strings a function names, because a
 function naming a file, a tag, a class or an error message is handling the
