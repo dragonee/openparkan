@@ -1462,7 +1462,7 @@ read = true
 module = "Behavior.dll"
 at = "0x1001adb0"
 kind = "function"
-name = "distributor slot 11: the tick, dt from a millisecond clock"
+name = "distributor slot 11: the tick, dt from a millisecond clock; runs every 3 x 64 ms + rand 0..63"
 doc = "docs/23-economy.md"
 read = true
 
@@ -1831,4 +1831,125 @@ at = "0x1000cee0"
 kind = "function"
 name = "MBehaviour size class from a name letter: building l2 m3 b4 e5"
 doc = "docs/23-economy.md"
+read = true
+
+# --- cadence, condition, bot power, minds, ../docs/23-economy.md ---------------
+[[entry]]
+module = "Control.dll"
+at = "0x1000dc40"
+kind = "function"
+name = "control system node query: 1 life fraction, 2 .ndp flags & 0x70, 3 max life"
+doc = "docs/23-economy.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000f940"
+kind = "function"
+name = "node reset: life = .ndp durability x two object scales, fraction 1"
+doc = "docs/07-objects.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10010f30"
+kind = "function"
+name = "node damage: life clamped to 0..max, fraction = life / max"
+doc = "docs/07-objects.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000bcf0"
+kind = "function"
+name = "controller tick (slot 22); power tick every 250 +/- 31 ms"
+doc = "docs/23-economy.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10032280"
+kind = "function"
+name = "LoadControlSystem: kind 9 (BULL) small class, else the 0x670 class with the power tick"
+doc = "docs/23-economy.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10021860"
+kind = "function"
+name = "default component draw: power x dt while on and intact"
+doc = "docs/23-economy.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x100265c0"
+kind = "function"
+name = "engine draw: power x speed / top speed (triple 3) x [+0x154] x dt"
+doc = "docs/23-economy.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10029a40"
+kind = "function"
+name = "gun draw: power x dt plus capacitor deficit to value 1"
+doc = "docs/23-economy.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10025700"
+kind = "function"
+name = "fight shield draw: power x dt + value2 x min(value1 x cond x dt, value0 x 6 - sectors)"
+doc = "docs/23-economy.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x100264b0"
+kind = "function"
+name = "detect shield draw: power x dt, + value4 x dt in mode 0x1000"
+doc = "docs/23-economy.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10022b20"
+kind = "function"
+name = "repair draw: power x dt + value1 x min(value0 x cond x dt, needed)"
+doc = "docs/23-economy.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x100060ad"
+kind = "site"
+name = "distributor registration only when Type bit 31 is set: buildings only"
+doc = "docs/23-economy.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10019372"
+kind = "site"
+name = "docked unit reload: battery fill += 0.1 x dt"
+doc = "docs/23-economy.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10039266"
+kind = "site"
+name = "clan SuperAI mind list filled with the data.tma clan word (minds)"
+doc = "docs/04-missions.md"
+read = true
+
+[[entry]]
+module = "MisLoad.dll"
+at = "0x10003ca0"
+kind = "function"
+name = "clan reader: ..., behaviour tree, minds (+0x40), relations"
+doc = "docs/04-missions.md"
 read = true

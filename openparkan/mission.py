@@ -196,7 +196,20 @@ class Clan:
     #: clan name -> relation word (1 towards itself, 0 towards the others in
     #: every shipped mission, so it reads as an alliance matrix)
     relations: dict[str, int] = field(default_factory=dict)
+    #: ``(parent, minds)`` as the file holds them; see ``minds``.
     unknown: tuple[int, int] = (0, 0)
+
+    @property
+    def minds(self) -> int:
+        """How many bots the clan can have at once -- the game's "CPUs".
+
+        The word after the behaviour-tree path.  ``iron3d.dll:0x10039266``
+        fills the clan SuperAI's mind list with this many free slots; a factory
+        will not start a bot without one (``Behavior.dll:0x10029ba0``), a bot
+        under construction already holds one, and a bot's is given back when it
+        is destroyed or captured.  No placed clan exceeds it.
+        """
+        return self.unknown[1]
 
 
 @dataclass

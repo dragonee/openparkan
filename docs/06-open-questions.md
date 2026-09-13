@@ -13,10 +13,8 @@ few fields are carried through without being understood:
   object's `MaximumOre`. See [04-missions.md](04-missions.md).
 - The four words after an object's instance name (`0, -1, -1, 1` throughout).
 - The word before the object count, always 10.
-- The word after a clan's behaviour-tree path: 2..17, 5 on 53 of 101 clans,
-  equal between the matched opponents of `Multi.01`..`04`, climbing for the
-  campaign's main enemy, and tracking no count in the record or its tree. A
-  strength or AI level is the guess; see [04-missions.md](04-missions.md).
+- ~~The word after a clan's behaviour-tree path.~~ **Answered**: the clan's
+  mind count, how many bots it may field; see [04-missions.md](04-missions.md).
 - The four words trailing each trailer viewpoint.
 - Object `scale` is `1,1,1` in every shipped mission, so the axis order is
   unverified.

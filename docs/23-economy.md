@@ -264,13 +264,27 @@ factors:
 
 | id bit | multiplies by |
 |---|---|
-| `0x100` | a value the owner reports for the component; slot 2 treats 0 as destroyed, so it is its condition — a *guess* |
+| `0x100` | **the life left in the part**: its model node's hit points over their maximum, 1 intact and 0 destroyed |
 | `0x200` | a level held at `+0x4c`, which starts at 1 and can be set only while the component's state at `+0x50` is non-zero and it is not destroyed |
 
 So `0x300`–`0x305` are **the first six floats of the record, scaled by
 condition and level**, and an intact building's `KPD` is its class-26
 component's first float. The level is its share of the building's own power,
 below.
+
+**Condition is a node's life** — *read*, and *measured*. Each component names
+a node of its model at record `+4`, and asks the control system about it
+(`Control.dll:0x1000dc40`, id 1). The control system builds one node record per
+entry of the object's `.ndp` damage table
+([07-objects.md](07-objects.md#ndp-is-a-damage-table-one-record-per-node)): life
+starts at the `.ndp` durability times two object scales (`0x1000f940`), damage
+lowers it clamped at 0 (`0x10010f30`), and the node's fraction `life / max` is
+what id 1 returns. On all 781 components that sit beside a same-named `.ndp`,
+the node index falls inside its table; shuffle the pairing and 308 fall
+outside. So **shooting the part that carries a building's efficiency lowers
+`KPD` in proportion** — and 22 of the 31 efficiency parts can be shot down,
+with durability 35,000 to 500,000; the other 9 carry the 1,000,000 that means
+a node cannot be destroyed.
 
 **The data** — *measured*. Class 26 occurs only in `fortif.rlb`, once per
 building controller (five times on the small main teleport), always with
@@ -316,9 +330,10 @@ read full: that is a generator's (`fr_l_gener`, −1).
 **Every controller tick spends the batteries** (*read*,
 `Control.dll:0x1002d340`, `dt` in seconds). Each component reports a flow
 through its vtable slot 5. A battery gives `min(output × charge × condition ×
-dt, capacity × charge × condition)`; a consumer takes `(power + usage) × dt`,
-where *power* is a float in its record at `+0x20` and *usage* is what
-`SetPowerUsage` gave it. What the batteries give is then handed out **by
+dt, capacity × charge × condition)`; the efficiency component takes `(power +
+usage) × dt`, where *power* is a float in its record at `+0x20` and *usage* is
+what `SetPowerUsage` gave it. Other classes price their draw their own way —
+see the next section. What the batteries give is then handed out **by
 channel, in a fixed order**, each class having one channel
 (`Control.dll:0x1003ccc8`):
 
@@ -350,6 +365,110 @@ building's batteries by `Available / Total` of what they lack; a working
 building drains its own; and once its charge sinks under that threshold its
 `KPD` drops with it — and with `KPD` its ore and power collection, a mine's
 digging, and so its progress. Until then a shortage costs nothing but charge.
+
+### How often, and where it settles — *read*, with a derived settle point
+
+The two sides run on separate timers, both measuring `dt` in real seconds from
+the game's millisecond clock:
+
+- **The distribution step runs every 192 to 255 ms.** The main loop calls each
+  clan's SuperAI every frame (`iron3d.dll:0x1005edc9`), which calls the
+  distributor's tick first and unconditionally (`ai.dll:0x1000178f`); the tick
+  itself waits for a timer of `3 × 64` ms plus a random `0..63`
+  (`Behavior.dll:0x10019e1b`, `0x1004c569`). The SuperAI's own thinking after it
+  runs only every 7 to 8 seconds, and does not gate the distributor.
+- **A building's power tick runs every 250 ± 31 ms** (`Control.dll:0x1000c756`):
+  250 is a compiled constant, the jitter a sixteenth of a turn of a shift
+  register, and a countdown of 100 set by a message forces it on every
+  controller tick for a while.
+
+Neither is a multiple of the other, and the jitter keeps them from locking.
+Neither timer is in any data file.
+
+**The top-up never overshoots**: a building receives at most `capacity × (1 −
+fill)`, and a clan's surplus is simply not drawn. Full buildings ask for
+nothing, so **only the draining buildings share a shortage**. For `N` equally
+busy buildings on a clan making `G` power a second, each with draw `d = 0.01 +
+Use_Power` and battery output `R`, the averages settle at
+
+```
+level (and KPD)   r = min(1, G / (N × d))
+charge            f = r × d / R
+```
+
+— a derivation from the read formulas over the discrete steps, so a *guess* in
+its exactness. One generator (`G` = 10) and three small factories building at
+once (`d` = 4.01, `R` = 50) settle at a level of 0.83 and a charge of 6.7%:
+research and construction at 83% speed. The building's capacity drops out,
+which is measurable to matter little anyway — every `fortif.rlb` building with
+batteries holds 19.5 or 20 and puts out 50 to 52 a second.
+
+## Bots spend power through the same code, priced by part — *read*, and *measured*
+
+**The machinery is shared.** `LoadControlSystem` (`Control.dll:0x10032280`)
+builds the same 0x670-byte control system for every agent except a projectile
+(kind 9, a `BULL` record, which gets a smaller class with a different tick), so
+a robot and a building run the same power tick, the same channels and the same
+battery code.
+
+**What differs is what draws, and what refills.**
+
+| | a building | a bot |
+|---|---|---|
+| batteries | `i_pws` parts holding 19.5–20, 50–52 a second | the chassis's own — 10,000 at 250 a second on 22 of the 28 in `bases.rlb` — plus internal `o_pws_b` batteries of 22,000–31,000 at 25.5–34.5 |
+| refilled by | the clan's generators, through the distribution step | never by the distributor (*measured*: its registration needs bit 31 of `Type`, set on all 167 placed buildings and none of the 296 units); a docked unit gains 10% of a full charge a second (`Behavior.dll:0x10019372`, "Reloaded") |
+| main draw | the efficiency component, `(0.01 + Use_Power) × dt` | engines, first on the same channel |
+
+Each class prices its own draw in its vtable slot 5, read per class:
+
+| class | draw a second |
+|---|---|
+| default — doors, computers, radar, deflectors, armour | `power` while switched on and intact (`0x10021860`) |
+| efficiency (26) | `power + usage` (`0x1002e540`) |
+| engine (5) | `power × speed ÷ top speed × a factor at +0x154` (`0x100265c0`), each the largest of three axes: *speed* from three floats of the live controller (`+0x1c8`) that read as its velocity — a *guess* — and *top speed* from the controller frame's third triple, which this settles as a speed limit |
+| gun (2, 30) | `power` plus whatever its capacitor lacks of value 1; its level is the capacitor's fill (`0x10029a40`, `0x10029a90`) |
+| fight shield (9) | `power` plus `value 2 ×` the recharge it does: `min(value 1 × condition, value 0 × 6 − the six sectors' strength)` (`0x10025700`) |
+| detect shield (10) | `power`, plus value 4 while it is in mode `0x1000` (`0x100264b0`) |
+| repair (15) | `power` plus `value 1 ×` the hit points it restores, at most `value 0 × condition` a second (`0x10022b20`) |
+| battery (19) | a source: `min(output × charge × condition, capacity × charge × condition)` (`0x100229a0`) |
+
+The numbers make the split plain (*measured*). A building's fight shield
+recharges 80 a second of 8,000 a sector at no cost per point (value 2 is 0);
+a bot's `o_fsh` shields recharge 50–80 of 3,350–3,800 at 0.06 a point, and a
+chassis shield 10–50 at 2. A building's repair system restores 100 a second
+free; a bot's, 50–80 at 0.06. Engines carry a power figure of 20 on the
+chassis and 4.5–11.2 on the internal `o_eng` parts. So on a bot, moving,
+shield recharge and repair all cost charge, and weapons, served fourth, get
+what is left.
+
+## The bot limit is the clan's mind count — *read*, and *measured*
+
+What caps a clan's army is not a factory setting but its **minds** — "Available
+CPUs" in the game's own interface (`iron3d.dll` string 3067).
+
+- **Where the number comes from.** The word after a clan's behaviour-tree path
+  in `data.tma`, 2 to 17 ([04-missions.md](04-missions.md)). `iron3d.dll`
+  fills the clan SuperAI's mind list with that many free entries
+  (`0x10039266`); nothing found adds more during a mission.
+- **What holds one.** Starting a build takes a free entry and marks it
+  reserved (`Behavior.dll:0x1002a348`, and `0x1002a0bb` for a free bot); with
+  none free the factory logs "No Free mind... cannot start constructing" and
+  does not start. When the build completes the reservation is dropped and the
+  new bot claims an entry by its id (`0x1001e0e0`, "Attached to Brain"). A bot
+  captured or placed by the mission takes one too, and with none free that is
+  a "Behaviour panic".
+- **What frees one.** A bot destroyed or deleted, or captured by another clan
+  (`ai.dll:0x10003e40`, `0x10006530`), or a build that is aborted
+  (`0x10029910`).
+- **What the player hears.** When the player clan has none free, the
+  constructor plays `VOICE_NO_CPU` (`iron3d.dll:0x1005ee43`).
+
+So a clan with 5 minds can have at most 5 bots alive or under construction,
+and its factories stop until one is lost. Buildings take no mind.
+
+*Measured:* across all 101 shipped clans no clan is placed with more robots
+than its minds, two sit exactly at the limit, and counting every owned object
+instead, 18 would exceed it.
 
 ## Construction — *read*
 
@@ -480,10 +599,14 @@ construction slows research.
   that map has three equal generators, one of them the player's. On a map
   with two it would read 50%, with one 100%. The earlier guess here, that it
   came from a component averaging three inputs, is withdrawn.
+- **A cap on bots, after which factories stop** — *read*, and exact. It is the
+  clan's mind count from the mission, 2 to 17, shown as "Available CPUs"; a bot
+  alive or under construction holds one, and losing a bot gives it back.
 
 ## Not established
 
-- How often the distribution step runs against the controller tick, and so
-  the charge a busy building settles at when its clan is short.
-- The owner's per-component figure, the `0x100` factor: 0 means destroyed, and
-  that it is condition is a *guess*.
+- The engine draw's factor at `+0x154`, and the second object scale on node
+  life (`+0x660`).
+- What makes a building a charging dock for units, and which task sends a bot
+  there on its own.
+- Whether a factory refused for want of a mind retries by itself.

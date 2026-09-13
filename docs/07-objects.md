@@ -141,9 +141,16 @@ char[32] archive      the explosion's library
 char[32] member       the explosion, a .exp
 ```
 
-Which float is the hit points is settled only by weight of evidence: the first
-is the one that scales with the size of the part, correlating **+0.56** with
-the node's volume in log space against **+0.19** for the second.
+**The first float is the node's hit points** — *read*. `Control.dll` builds one
+node record per `.ndp` record (`0x1000b240`) and at reset sets each node's life
+to that float times two object scales (`0x1000f940`); damage lowers it, clamped
+at 0 (`0x10010f30`), and a node at 0 is marked destroyed — and takes the whole
+object with it if it is node 0 or carries flag bit 1. A component's powers are
+scaled by its node's `life / max`
+([23-economy.md](23-economy.md#efficiency-is-a-buildings-size)). The size
+correlation that stood here alone before agrees: the first float correlates
+**+0.56** with the node's volume in log space, against **+0.19** for the
+second.
 
 2203 records name an explosion, and the names say plainly what the table is
 for: `explode_tree.exp` and `explode_leaf.exp` on scenery, `explode_frt_b.exp`

@@ -57,22 +57,32 @@ string   AI script                    MISSIONS\SCRIPTS\scr_pl_1
 uint32   zone count
 zones    { uint32 kind; float32[3] centre; float32 inner; float32 outer }
 string   behaviour tree               MISSIONS\SCRIPTS\scream.trf
-uint32   2..17, meaning open -- see below
+uint32   minds: how many bots the clan may field, 2..17 -- see below
 uint32   relation count
-relations { string clan name; uint32 relation }
-```
+relations { string clan naThe word after the behaviour tree is **the clan's mind count** — how many bots
+it may have at once, the game's "Available CPUs" (`iron3d.dll` string 3067),
+*read*. `MisLoad.dll:0x10003ca0` loads it into the clan record, `iron3d.dll`
+copies it (`0x10038ebd`) and fills the clan SuperAI's mind list with that many
+free slots (`0x10039266`). A factory will not start a bot without a free slot
+("No Free mind... cannot start constructing", `Behavior.dll:0x10029ba0`), a bot
+under construction already holds one, and a bot's slot is given back when it
+is destroyed or captured. When the player has none left the game says
+`VOICE_NO_CPU`. Nothing found raises it during a mission. See
+[23-economy.md](23-economy.md#the-bot-limit-is-the-clans-mind-count--read-and-measured).
 
-The word after the behaviour tree is **open**, but it is not noise.
-*Measured:* it runs 2..17 over the 101 shipped clans and sits at 5 on 53 of
-them, nearly every fauna and neutral clan among them. It tracks none of the
-clan's index, zone count, ally count, object, unit or building counts, or its
-research tree's starting items or roots. It *does* equal the clan count on 26
-of the 101 — but 22 of those are the common value 5 landing in five-clan
-missions, and away from 5 it matches on 4 of 48, which is chance. The
-two competing clans of `Multi.01` to `Multi.04` carry equal values (8 and 8),
-and across the campaigns the main enemy's value climbs, reaching 17 on
-`CAMPAIGN.02/Mission.04`. *Guess:* a clan strength or AI level, set equal for
-matched opponents. Nothing in the file or the tree confirms it.
+*Measured:* it runs 2..17 over the 101 shipped clans, 5 on 53 of them. No clan
+is placed with more `UNITS\UNITS` robots than its minds — two sit exactly at
+the limit, `CAMPAIGN.00/Mission.01`'s `Trgt` at 5 and
+`CAMPAIGN.02/Mission.04`'s `Enemy` at 17 — while counting every owned object
+instead, 18 clans exceed it. The two top clans of `Multi.01` to `Multi.04` get
+8 each.
+
+This word was open until the construction code was read. The earlier note here
+measured what it is *not* — not the clan index, zone count or ally count, and
+equal to the clan count only by the chance of the common value 5 — and guessed
+a clan strength or AI level. It is a strength of a kind: a cap on the army.
+
+ or the tree confirms it.
 
 The relation table is an **alliance matrix**: every clan lists every clan,
 with 1 towards itself and its allies and 0 towards its enemies. Zones appear

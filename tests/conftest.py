@@ -50,10 +50,11 @@ def nres_archive():
 def build_component(type_id: int, library: str = "", member: str = "",
                     entries: tuple[int, ...] = (), label: str = "",
                     index: int = -1, values: tuple[float, ...] = (),
-                    power: float = 0.0) -> bytes:
+                    power: float = 0.0, node: int = 0) -> bytes:
     """One section-4 record, laid out as ``Control.dll`` reads it."""
     rec = bytearray(control.COMPONENT_FIXED)
     struct.pack_into("<i", rec, 0, type_id)
+    struct.pack_into("<i", rec, control.COMPONENT_NODE_AT, node)
     struct.pack_into("<f", rec, control.COMPONENT_POWER_AT, power)
     struct.pack_into("<i", rec, control.COMPONENT_INDEX_AT, index)
     struct.pack_into(f"<{len(values)}f", rec, control.COMPONENT_VALUES_AT, *values)

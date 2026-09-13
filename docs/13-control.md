@@ -99,7 +99,9 @@ come from.
 
 ### What the numbers look like
 
-**Which triple is which is not established** and this document does not guess.
+**Which triple is which is mostly not established.** One is: an engine's power
+draw divides the agent's speed by the largest component of triple 3 (file
++44), so triple 3 is the top speed ([23-economy.md](23-economy.md)).
 Three members side by side:
 
 | | `ctl_cam_fly` | `o_c01_l_01` (a gun) | `fr_b_plant` (a factory) |
@@ -277,6 +279,7 @@ the record's extent is common to all of them:
 
 ```
 0x00  int32      type id, 1..30
+0x04  int32      the model node it sits on, an index into the object's .ndp
 0x18  int32      an index; the parser treats -1 as absent
 0x20  float      power: a consumer's draw a second, a battery's output
 0x2c  float[16]  the component's values, copied whole into the object
@@ -298,7 +301,11 @@ that name's number: `i_pws` on 19 (`POWERSTOR`), `i_fsh` on 9, `i_dsh` on 10,
 (`MULTIGUN`). The float at `+0x20` is the class's **power figure** — zero on
 all 64 turrets, 152 guns and every door and computer, 0.01 on each building's
 efficiency component, 5 to 1000 on batteries — and each class draws on one of
-six power channels served in a fixed order; see
+six power channels served in a fixed order. The int at `+4` is the part's
+**node**: all 781 components beside a same-named `.ndp` index inside it, and
+the part's powers scale with that node's remaining life. An engine's draw
+divides its speed by the largest component of the frame's **third triple**,
+which makes that triple the per-axis top speed — the flying camera's 100. See
 [23-economy.md](23-economy.md#a-power-shortage-lowers-efficiency-once-the-batteries-run-down--read-and-measured).
 
 The label is the good part. **All 57 distinct labels are a prefix of an

@@ -78,6 +78,12 @@ def test_a_component_carries_its_power_and_channel(ctl, component):
     assert work.power == pytest.approx(0.01) and work.channel == 3
 
 
+def test_a_component_names_its_node(ctl, component):
+    part = component(5, node=17)
+    one = control.parse(ctl(counts=(0, 0, 0, 1, 0), components=[part])).components[0]
+    assert one.node == 17
+
+
 def test_every_channel_is_served_once():
     served = [c for group in control.POWER_ORDER for c in group]
     assert sorted(served) == sorted(set(control.POWER_CHANNEL))

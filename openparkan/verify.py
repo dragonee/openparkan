@@ -1234,34 +1234,43 @@ def check_missions(check, game: Path) -> None:
           f"one exception, and not an exception: its maximum is the same "
           f"object's MaximumOre on {ore}/{ore_total}")
 
-    # The word after a clan's behaviour-tree path.  Not solved; what is checked
-    # here is only what it is *not*, and where its values fall.
+    # The word after a clan's behaviour-tree path is its mind count: the
+    # SuperAI gets that many free slots, a bot holds one alive or under
+    # construction, and a factory will not start without one.  So no clan can
+    # be placed with more robots than it -- while every owned object together
+    # does exceed it, which keeps the bound from being trivially loose.
     clans = [c for m in parsed for c in m.clans]
-    word = Counter(c.unknown[1] for c in clans)
-    common = word.most_common(1)[0][0]
-    # Judged away from the common value: 5 sits on half the clans, and five-clan
-    # missions are full of fauna at 5, so "equals the clan count" comes out true
-    # on 22 clans for no reason at all.
-    rare = [(c, m) for m in parsed for c in m.clans if c.unknown[1] != common]
-    by_count = sum(c.unknown[1] == len(m.clans)
-                   for m in parsed for c in m.clans)
-    unrelated = all(
-        sum(c.unknown[1] == f(c, m) for c, m in rare) * 10 < len(rare)
-        for f in (lambda c, m: c.index, lambda c, m: len(m.clans),
-                  lambda c, m: len(c.zones),
-                  lambda c, m: sum(v == 1 for v in c.relations.values())))
-    multi = {d.name: sorted((c.unknown[1] for c in m.clans), reverse=True)[:2]
+    word = Counter(c.minds for c in clans)
+    robots_over = []
+    owned_over = 0
+    at_limit = []
+    for d, m in zip(dirs, parsed, strict=False):
+        robots: Counter[int] = Counter()
+        owned: Counter[int] = Counter()
+        for o in m.objects:
+            if o.clan_id is None:
+                continue
+            owned[o.clan_id] += 1
+            if o.path.replace("\\", "/").upper().startswith("UNITS/UNITS/"):
+                robots[o.clan_id] += 1
+        for i, c in enumerate(m.clans):
+            if robots[i] > c.minds:
+                robots_over.append(f"{d.name} {c.name} {robots[i]}>{c.minds}")
+            if robots[i] == c.minds:
+                at_limit.append(f"{d.parent.name}/{d.name} {c.name!r}")
+            owned_over += owned[i] > c.minds
+    multi = {d.name: sorted((c.minds for c in m.clans), reverse=True)[:2]
              for d, m in zip(dirs, parsed, strict=False)
              if d.name in ("Multi.01", "Multi.02", "Multi.03", "Multi.04")}
-    check("data.tma: the word after a clan's tree path is not a count",
-          unrelated and all(a == b for a, b in multi.values()),
-          f"{min(word)}..{max(word)} over {len(clans)} clans, {word[common]} of "
-          f"them at {common}.  It equals the clan count on {by_count}, but away "
-          f"from {common} on only "
-          f"{sum(c.unknown[1] == len(m.clans) for c, m in rare)}/{len(rare)} -- "
-          f"the rest is {common} landing in {common}-clan missions -- and it "
-          f"matches the index, zone count or ally count on under a tenth.  The "
-          f"two top clans of Multi.01..04 carry equal values: {multi}")
+    check("data.tma: a clan's placed robots fit its mind count",
+          clans and not robots_over and owned_over > 0
+          and all(a == b for a, b in multi.values()),
+          f"the word after the tree path runs {min(word)}..{max(word)} over "
+          f"{len(clans)} clans; placed UNITS\\UNITS robots exceed it on "
+          f"{len(robots_over)}, sit exactly at it on {len(at_limit)} "
+          f"({', '.join(at_limit)}), while all owned objects exceed it on "
+          f"{owned_over}.  The two top clans of Multi.01..04 get equal minds: "
+          f"{multi}{'; ' + ', '.join(robots_over[:3]) if robots_over else ''}")
 
     maps = {d.name for d in gamedir.maps(game)}
     resolved = sum(1 for m in parsed if m.map_name in maps)
@@ -3224,6 +3233,23 @@ def check_profiles(check, game: Path) -> None:
           f"{profiles.RESEARCH_TIME_DEFAULT:g} on {len(placed) - len(long)} of "
           f"{len(placed)} and otherwise on {len(long)} research centre")
 
+    # Only a building joins its clan's distributor: MBehaviour registers an
+    # object only when bit 31 of its Type is set (Behavior.dll:0x100060ad).
+    kinds: Counter[tuple[str, bool]] = Counter()
+    for d in gamedir.missions(game):
+        for o in mission.load(d / "data.tma").objects:
+            if o.type_id is None:
+                continue
+            parts = o.path.replace("\\", "/").split("/")
+            kinds[(parts[1].upper() if len(parts) > 2 else "?",
+                   bool(o.type_id & 0x80000000))] += 1
+    check("data.tma: only buildings share their clan's power",
+          kinds and set(kinds) == {("BUILDS", True), ("UNITS", False)},
+          f"bit 31 of Type, which the distributor registration tests, is set on "
+          f"all {kinds[('BUILDS', True)]} placed buildings and on none of the "
+          f"{kinds[('UNITS', False)]} placed units -- a bot's batteries are "
+          f"never refilled by the clan's generators")
+
     # The size letters the construction task reads: a chassis's third
     # character and a building's fourth.  The names agree with the model
     # codes the labels carry -- T-, S-, M-, L- for chassis, -17, -30, -47, -67
@@ -3931,8 +3957,13 @@ def check_efficiency(check, game: Path) -> None:
     families: dict[str, Counter[int]] = defaultdict(Counter)
     buildings: dict[str, control.Controller] = {}
     powers = []
+    # (component nodes, node count of the same-stem .ndp) per controller
+    paired: list[tuple[list[int], int]] = []
+    efficiency_life: list[float] = []
     for path in all_archives(game):
         archive = NResArchive.open(path)
+        tables = {e.name.lower()[:-4]: e for e in archive
+                  if e.name.lower().endswith(".ndp")}
         for entry in archive:
             if not entry.tag.upper().startswith("CTL"):
                 continue
@@ -3940,6 +3971,13 @@ def check_efficiency(check, game: Path) -> None:
                 parsed = control.parse(archive.read(entry), names)
             except control.ControlFormatError:
                 continue
+            table = tables.get(entry.name.lower()[:-4])
+            if table is not None and parsed.components:
+                rows = objects.parse_damage(archive.read(table), table.name)
+                paired.append(([p.node for p in parsed.components], len(rows)))
+                efficiency_life.extend(
+                    rows[p.node].durability for p in parsed.components
+                    if p.type_id == control.EFFICIENCY_TYPE and 0 <= p.node < len(rows))
             if path.name.lower() == "fortif.rlb":
                 buildings[entry.name.lower()] = parsed
             for part in parsed.components:
@@ -3952,6 +3990,30 @@ def check_efficiency(check, game: Path) -> None:
                     efficiency[entry.name.lower()].append(part.efficiency)
                     homes.add(path.name.lower())
                     others_zero &= not any(part.values[1:])
+
+    inside = sum(1 for nodes, count in paired for n in nodes if 0 <= n < count)
+    parts = sum(len(nodes) for nodes, _ in paired)
+    shuffled = [count for _, count in paired]
+    random.Random(1).shuffle(shuffled)
+    misses = sum(1 for (nodes, _), count in zip(paired, shuffled, strict=True)
+                 for n in nodes if not 0 <= n < count)
+    check(".ctl: a component's +4 is a node of its object's .ndp",
+          parts and inside == parts and misses > 0,
+          f"{inside}/{parts} component nodes across {len(paired)} controllers fall "
+          f"inside the same-stem .ndp's record count; paired with a shuffled .ndp, "
+          f"{misses} fall outside.  Control.dll asks that node's life fraction "
+          f"(0x1000dc40, id 1) for every value read with bit 0x100")
+
+    solid = [life for life in efficiency_life if life >= 1_000_000]
+    soft = [life for life in efficiency_life if life < 1_000_000]
+    check(".ctl: a building's efficiency part can usually be shot down",
+          efficiency_life and soft and solid and len(efficiency_life) == sum(
+              1 for c in buildings.values() for p in c.components
+              if p.type_id == control.EFFICIENCY_TYPE),
+          f"of {len(efficiency_life)} efficiency components, {len(soft)} sit on a "
+          f".ndp node with durability {min(soft):g}..{max(soft):g} and "
+          f"{len(solid)} on the 1000000 that cannot be destroyed -- and KPD falls "
+          f"with that node's life")
 
     check(".ctl: a component's 64-byte block is sixteen floats",
           finite == values > 0,

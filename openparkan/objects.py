@@ -130,9 +130,10 @@ class NodeDamage:
 
     #: Zero throughout, except 1 on scenery and 112 on projectiles.  Flags.
     flags: int
-    #: Reads as hit points: it is the field that scales with the size of the
-    #: node, correlating +0.56 with its volume in log space against +0.19 for
-    #: the other float.  1000000 on the nodes that cannot be destroyed.
+    #: The node's hit points.  ``Control.dll:0x1000f940`` sets a node's life to
+    #: this times two object scales, and a component on the node is scaled by
+    #: what is left of it.  It is also the float that grows with the node,
+    #: +0.56 with its volume in log space.  1000000 where it cannot be destroyed.
     durability: float
     #: Unresolved, and not a handful of values: 104 distinct over 2334
     #: records.  The 17 whole numbers (1000 on 549, 0, 10, 1, 300, 500 ...)

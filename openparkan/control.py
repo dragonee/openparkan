@@ -52,6 +52,11 @@ COMPONENT_FIXED = 0xB0
 COMPONENT_NAME_AT = 0x6C
 #: How many 4-byte entries follow the fixed part.
 COMPONENT_COUNT_AT = 0xAC
+#: The node of the model this component sits on: the control system asks the
+#: node table built from the object's ``.ndp`` for that node's remaining life
+#: (``Control.dll:0x1000dc40``, id 1), which scales every value read with
+#: bit ``0x100``.
+COMPONENT_NODE_AT = 0x04
 #: A field the parser treats as absent when it is -1.
 COMPONENT_INDEX_AT = 0x18
 #: The 64 bytes the parser copies into the object whole, which the component's
@@ -269,6 +274,8 @@ class Component:
     values: tuple[float, ...] = ()
     #: The float at ``COMPONENT_POWER_AT``.
     power: float = 0.0
+    #: The int at ``COMPONENT_NODE_AT``: an index into the object's ``.ndp``.
+    node: int = 0
 
     @property
     def channel(self) -> int:
@@ -323,6 +330,7 @@ def read_component(blob: bytes, pos: int) -> Component | None:
         values=struct.unpack_from(f"<{COMPONENT_VALUE_COUNT}f", blob,
                                   pos + COMPONENT_VALUES_AT),
         power=struct.unpack_from("<f", blob, pos + COMPONENT_POWER_AT)[0],
+        node=struct.unpack_from("<i", blob, pos + COMPONENT_NODE_AT)[0],
     )
 
 
