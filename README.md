@@ -214,6 +214,7 @@ of fields carried through the readers without being understood.
 - [27-ownership.md](docs/27-ownership.md) — charging docks, control pods and capture, and the clan type
 - [28-chassis.md](docs/28-chassis.md) — chassis families, the slots they declare, weight, costs and research
 - [29-weapons.md](docs/29-weapons.md) — guns, ammunition clips and rounds: energy or cartridges, damage, rate and range
+- [30-turrets.md](docs/30-turrets.md) — turrets: two mountings, gun sockets, and the role a turret gives a unit
 
 ## Layout
 

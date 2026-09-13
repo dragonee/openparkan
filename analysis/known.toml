@@ -3818,3 +3818,149 @@ kind = "function"
 name = "class-17 seeker tick: follows its target while within value 1 and the cone"
 doc = "docs/29-weapons.md"
 read = true
+
+# --- turrets: mountings, sockets, roles, ../docs/30-turrets.md ---
+
+[[entry]]
+module = "Control.dll"
+at = "0x10027050"
+kind = "function"
+name = "class-1 (turret) constructor: 0xf4 bytes, vtable 0x1003caf8; the factory keeps it at +0x5c8"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1003caf8"
+kind = "datum"
+name = "turret class vtable: slot 1 0x10027170, slot 11 0x10027470 (message handler)"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002d53c"
+kind = "site"
+name = "component factory, type 1: the turret kept at +0x5c8"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x100271c7"
+kind = "site"
+name = "turret: record +8 bit 0x4000000 (upright, t mounting) set -> negate the aim vector at +0x9c"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10027470"
+kind = "function"
+name = "turret message handler (vtable slot 11): tests the upright bit at +8"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x100276ed"
+kind = "site"
+name = "turret handler: upright bit set -> 1 - v on the aim triple"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10028990"
+kind = "function"
+name = "turret angle from the control system (called at 0x10005afa), negated when not upright"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x100289b5"
+kind = "site"
+name = "turret: upright bit clear (b, hung under a flyer) -> multiply by -1"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002b7bb"
+kind = "site"
+name = "IControl getter: a component record's +8 bit 0x8000000 -- set on every HQ turret"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x100233d0"
+kind = "function"
+name = "class-4 (camera) constructor, vtable 0x1003c720"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1003c720"
+kind = "datum"
+name = "camera class vtable"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x100238b0"
+kind = "function"
+name = "camera (slot 1): creates a view and hands it values 0, 1, 2 (0.1, 1000, 1.3 on every camera)"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10008a80"
+kind = "function"
+name = "behaviour profile by Type (+0xafc): 0x1004000 prof_bld, 0x1002000 prof_trn, 0x1008000 prof_war, 0x1010000 prof_hq, 0x1020000 prof_hero, 0x20000000 prof_animal, 0x8000xxxx buildings"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10104f98"
+kind = "datum"
+name = "commander order table: 22 x {order, Type mask, 2 words, string id} -- Standby..Refit for all, Transport minerals for transports, Search minerals/Build/Upgrade for builders"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10105150"
+kind = "datum"
+name = "second order table: 7 x the same record -- Standby, Follow me, Search and capture, Seek and destroy, Attack, Capture building, Refit"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1007ae52"
+kind = "site"
+name = "order table walk: an order is offered when (mask & Type) == Type"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100544b0"
+kind = "function"
+name = "unit assembly writer: magic 0xf0f1, then a class word, then the component records"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10054f5f"
+kind = "site"
+name = "unit writer: the 0xf0f1 magic"
+doc = "docs/30-turrets.md"
+read = true

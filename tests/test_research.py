@@ -194,3 +194,11 @@ def test_the_record_tail_is_six_separate_bytes():
 def test_a_tree_without_trfb_still_reads():
     t = research.parse(build_trf(ITEMS))
     assert t.part_ids == () and t[0].parts == ()
+
+
+def test_an_items_tail_names_its_role_size_and_level():
+    item = research.Item(0, "Small Builder", "Bs1", 1, (3.0, 5.0, 3.0, 5.0), (), (),
+                         tail=(research.ROLE_BUILDER, 9, 33, 255, 1, 2))
+    assert (item.role, item.size, item.upgrade_level) == (research.ROLE_BUILDER, 1, 2)
+    bare = research.Item(1, "", "", 0, (0.0, 0.0, 0.0, 0.0), (), ())
+    assert bare.role == research.ROLE_NONE

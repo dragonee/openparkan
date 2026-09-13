@@ -107,6 +107,16 @@ RADAR_PERIOD = 4
 DETECT_SHIELD_TYPE = 10
 CAMOUFLAGE = 3
 CAMOUFLAGE_POWER = 4
+#: ``CICLS_TURRET`` and ``CICLS_CAMERA``.  A robot turret's controller opens
+#: with a turret, a radar slot, a camera and a deflector slot.
+TURRET_TYPE = 1
+CAMERA_TYPE = 4
+#: A turret component's flags: ``MOUNT_UPRIGHT`` on every ground (``e_tur_?t``)
+#: turret and clear on its twin hung under a flyer (``e_tur_?b``) -- the turret
+#: mirrors its aim on it (``0x100271c7``, ``0x100289b5``); ``MOUNT_HQ`` on the
+#: HQ turrets, which ``IControl``'s getter tests (``0x1002b7bb``).
+MOUNT_UPRIGHT = 0x04000000
+MOUNT_HQ = 0x08000000
 #: ``CICLS_DOOR`` and ``CICLS_COMPUTER``.  ``Terrain.dll``'s building files
 #: its controller's items by these (``0x100583a2``), and runs its first
 #: computer as the control pod (``0x10057550``).
@@ -126,8 +136,9 @@ UNLIMITED = -1
 #: A projectile's seeker: value 0 its cone's half-angle in radians, value 1
 #: the distance it follows a target within (``0x100247a0``, ``0x100247c0``).
 SEEKER_TYPE = 17
-#: The component record's flags word.  On a gun, ``SALVO`` fires every barrel
-#: at once instead of the next in turn (``0x10029fcc``).
+#: The component record's flags word, read per class: on a gun ``SALVO`` fires
+#: every barrel at once instead of the next in turn (``0x10029fcc``); on a
+#: turret see ``MOUNT_*``.
 COMPONENT_FLAGS_AT = 0x08
 SALVO = 0x2000000
 #: ``CICLS_FIGHTSHIELD``, the shield generator.  Values: a sector's maximum, the

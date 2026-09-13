@@ -350,11 +350,32 @@ class Component:
         return self.class_id in EXTERNAL_CLASSES
 
 
+#: A unit's Type: the ``.dat`` class word, the mission property ``Type``, the
+#: numbers ``varset.var`` names.  A robot's is decided by its turret, and
+#: ``Behavior.dll:0x10008a80`` picks its behaviour profile by it.
+TYPE_TRANSPORT = 0x01002000     # prof_trn
+TYPE_BUILDER = 0x01004000       # prof_bld
+TYPE_WARRIOR = 0x01008000       # prof_war
+TYPE_HQ = 0x01010000            # prof_hq
+TYPE_HERO = 0x01020000          # prof_hero
+TYPE_ANIMAL = 0x20000000        # prof_animal
+#: Every building's Type has this bit; the low bits say which.
+TYPE_BUILDING = 0x80000000
+#: The two nodes a turret mesh mounts by; every other ``Base_*`` node of a
+#: turret is a gun socket.
+TURRET_MOUNT_NODES = ("Base_TM", "Base_TL")
+
+
 @dataclass
 class UnitDefinition:
     source: Path
+    #: The object's Type, ``TYPE_*`` -- or a building's, with ``TYPE_BUILDING``.
     kind: int
     components: list[Component]
+
+    @property
+    def is_building(self) -> bool:
+        return bool(self.kind & TYPE_BUILDING)
 
     @property
     def label(self) -> str:

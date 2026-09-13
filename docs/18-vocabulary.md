@@ -35,8 +35,11 @@ This is why `R_B_04` is `Large Track Chs` and `R_L_04` is `Small Track Chs`
 no such pattern and is unexplained.
 
 Two-letter forms (`bc`, `bt`, `mt`, `lt`, `fc`) take the size from the first
-letter — every `f*` part is huge, every `m*` medium. *Guess*: the second
-letter is a sub-type; nothing tests it.
+letter — every `f*` part is huge, every `m*` medium. The second letter is now
+read: on a turret, `t` is a ground mounting and `b` the same turret hung under
+a flyer ([30-turrets.md](30-turrets.md)); on a gun it is the kind — `c` a gun,
+`l` a launcher, `s` a module, the mobile builders and the bunker and tower
+radars ([29-weapons.md](29-weapons.md)).
 
 ### The tail — *guess*
 

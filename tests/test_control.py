@@ -81,6 +81,14 @@ def test_a_gun_names_its_barrels_and_whether_they_fire_together(ctl, component):
     assert [c.points[e] for e in one.entries if c.points[e] != -1] == [4, 5]
 
 
+def test_a_turret_says_how_it_is_mounted(ctl, component):
+    ground = component(control.TURRET_TYPE, flags=control.MOUNT_UPRIGHT)
+    hung = component(control.TURRET_TYPE, flags=control.MOUNT_HQ)
+    a, b = control.parse(ctl(counts=(0, 0, 0, 2, 0), components=[ground, hung])).components
+    assert a.flags & control.MOUNT_UPRIGHT and not a.flags & control.MOUNT_HQ
+    assert b.flags & control.MOUNT_HQ and not b.flags & control.MOUNT_UPRIGHT
+
+
 def test_a_labelled_record_is_a_slot(ctl, component):
     parts = [component(control.ENGINE_TYPE, label="i_eng_b"),
              component(control.GUN_TYPE, label="i_c05_b")]

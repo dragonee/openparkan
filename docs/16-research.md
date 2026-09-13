@@ -258,8 +258,14 @@ difference that made the counts look like a puzzle.
   **`TRFA`**'s template syntax (`@G@Weight  @B,weight,G,t,5,1@`).
 - The `TRF0` record's **id** at `+0x18` — 879 distinct values from 0 to 3896,
   equal to the item's own index on only 986 of 10672 records.
-- **What the six bytes at `+0x22`..`+0x27` mean.** Their shape is settled and
-  their ranges measured (1..7 with 255 for none, 8..12, 16..72, 80..84 with
-  255 for none, 0..5, 0..3); each has its own getter, and none is named.
+- **What three of the six bytes at `+0x22`..`+0x27` mean.** Their shape is
+  settled and their ranges measured (1..7 with 255 for none, 8..12, 16..72,
+  80..84 with 255 for none, 0..5, 0..3); each has its own getter. Three are
+  now read (*measured*, all 10,672 records): `+0x22` is the role a unit part
+  gives a unit — 1 a bunker or tower turret, 2–5 a battle, transport, builder
+  or HQ turret, 6 the hero, 7 an animal, 255 anything else; `+0x26` is the
+  size — 0 tiny, 1 small, 2 medium, 3 large, 4 for `H`, `A` and `N`, 5 for `E`;
+  `+0x27` equals the part's UpgradeLevel ([30-turrets.md](30-turrets.md)).
+  `+0x23`..`+0x25` are open.
 - **What `TRF1`'s directory flag switches.** The loader keeps it; no shipped
   archive sets it.

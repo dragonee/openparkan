@@ -185,7 +185,9 @@ the target and the radar. What hides a machine is its own shield.
   with a turret carry exactly one `i_rdr` part, fitted to the turret, and one
   `i_dsh` part, fitted to the chassis; none of the 86 without a turret carries
   either. The turret's controller declares a radar of its own under the part's
-  label, with values (the second row of the first table); each chassis in
+  label, with values (the second row of the first table), and the label's
+  size letter is the size of radar part the turret takes — all 744 fitted
+  radar and deflector parts match it ([30-turrets.md](30-turrets.md)); each chassis in
   `bases.rlb` declares a detection-shield slot the same way but empty — all 22
   of those records' values are zero.
 - **Of the buildings, only bunkers and towers can see.** All 27 carry one

@@ -5310,6 +5310,343 @@ def check_weapons(check, game: Path) -> None:
           f"{len(kinds['ROC'])} rocket rounds do")
 
 
+#: A research item's role, for the roles a turret gives a unit.
+TURRET_ROLE_TYPE = {research.ROLE_BATTLE: objects.TYPE_WARRIOR,
+                    research.ROLE_TRANSPORT: objects.TYPE_TRANSPORT,
+                    research.ROLE_BUILDER: objects.TYPE_BUILDER,
+                    research.ROLE_HQ: objects.TYPE_HQ, research.ROLE_HERO: objects.TYPE_HERO}
+
+
+def _turret_role(text: tuple[str, ...]) -> int:
+    first = text[0].lower() if text else ""
+    return {"warbot": objects.TYPE_WARRIOR, "cargobot": objects.TYPE_TRANSPORT,
+            "mobile builder": objects.TYPE_BUILDER, "control sensor": objects.TYPE_HQ,
+            "hero": objects.TYPE_HERO}.get(first, 0)
+
+
+def check_turrets(check, game: Path) -> None:
+    """Turrets: mounting variants, sockets, roles, and the special ones."""
+    names = frozenset(p.name.lower() for p in all_archives(game))
+    library = objects.ObjectLibrary(game / "objects.rlb")
+    catalogue = descriptions.library(game)
+    turrets = NResArchive.open(game / "turrets.rlb")
+    opened: dict[str, NResArchive] = {"turrets.rlb": turrets}
+    mesh_nodes: dict[str, list[str] | None] = {}
+
+    def nodes_of(member: str) -> list[str] | None:
+        if member not in mesh_nodes:
+            record = library.get(member)
+            msh = record.slot_with_suffix("msh") if record else None
+            out = None
+            if msh:
+                arch = opened.setdefault(msh.library.lower(),
+                                         NResArchive.open(game / msh.library))
+                out = objmesh.parse(arch.read_name(msh.member), msh.member).subobjects
+            mesh_nodes[member] = out
+        return mesh_nodes[member]
+
+    ids = sorted(r.lower() for r in library.records if r.lower().startswith("e_tur"))
+
+    # --- t and b are one turret in two mountings ------------------------------
+    pairs = same_entry = shared = one_word = 0
+    odd: list[str] = []
+    words: Counter[tuple[str, int]] = Counter()
+    for tid in ids:
+        if tid[7] != "t":
+            continue
+        bid = tid[:7] + "b" + tid[8:]
+        if bid not in ids:
+            continue
+        pairs += 1
+        ct, cb = catalogue.get(tid), catalogue.get(bid)
+        same_entry += bool(ct and cb and (ct.name, ct.code, ct.build_ore)
+                           == (cb.name, cb.code, cb.build_ore))
+        rt, rb = library.get(tid), library.get(bid)
+        slots_t = {s.member.rsplit(".", 1)[-1]: s.member for s in rt.slots}
+        slots_b = {s.member.rsplit(".", 1)[-1]: s.member for s in rb.slots}
+        shared += all(slots_t[x] == slots_b[x] for x in ("msh", "wea", "ndp")) and all(
+            slots_t[x] != slots_b[x] for x in ("cpt", "ctl"))
+        blob_t = turrets.read_name(slots_t["ctl"])
+        blob_b = turrets.read_name(slots_b["ctl"])
+        diff = [i for i in range(len(blob_t)) if blob_t[i] != blob_b[i]]
+        part = control.parse(blob_t, names).components[0]
+        at = part.offset + control.COMPONENT_FLAGS_AT
+        word_t = part.flags
+        word_b = control.parse(blob_b, names).components[0].flags
+        one_word += (len(blob_t) == len(blob_b) and part.type_id == control.TURRET_TYPE
+                     and all(at <= i < at + 4 for i in diff)
+                     and word_t & control.MOUNT_UPRIGHT and not word_b & control.MOUNT_UPRIGHT)
+        if word_t ^ word_b != control.MOUNT_UPRIGHT:
+            odd.append(tid)
+        words[("t", word_t)] += 1
+        words[("b", word_b)] += 1
+    check("turrets.rlb: a t and a b turret are one turret, mounted two ways",
+          pairs and same_entry == pairs == shared == one_word,
+          f"all {pairs} e_tur_?t/?b pairs share their objects.dlb entry and their "
+          f"mesh, .wea and .ndp, and their controllers differ only in bit "
+          f"{control.MOUNT_UPRIGHT:#x} of the turret component's word at +8, set on t: "
+          + ", ".join(f"{v} {w:#x} x{n}" for (v, w), n in sorted(words.items()))
+          + f"; the pair differing in more than that bit: {odd}")
+
+    # A second bit marks the HQ turrets.
+    hq_bit: dict[bool, Counter[bool]] = defaultdict(Counter)
+    for tid in ids:
+        ctl = library.get(tid).slot_with_suffix("ctl")
+        word = control.parse(turrets.read_name(ctl.member), names).components[0].flags
+        is_hq = _turret_role(catalogue[tid].text) == objects.TYPE_HQ
+        hq_bit[is_hq][bool(word & control.MOUNT_HQ)] += 1
+    check("turrets.rlb: bit 0x8000000 of the turret word marks an HQ turret",
+          hq_bit[True] == Counter({True: hq_bit[True][True]}) and hq_bit[True][True]
+          and hq_bit[False][True] == 1,
+          f"HQ turrets with/without it {dict(hq_bit[True])}; the rest "
+          f"{dict(hq_bit[False])}, the one exception e_tur_lb_06, whose t twin "
+          f"lacks it; IControl's getter tests it at Control.dll:0x1002b7bb")
+
+    # --- mounts, from the assemblies -------------------------------------------
+    variant_on: dict[str, Counter[bool]] = defaultdict(Counter)
+    size_ok = size_all = 0
+    gun_size: Counter[bool] = Counter()
+    off_size: set[str] = set()
+    builder_socket: Counter[tuple[str, str]] = Counter()
+    kind_by_turret: dict[str, set[int]] = defaultdict(set)
+    labelled = fitted_ok = 0
+    for path in sorted(game.glob("UNITS/**/*.dat")):
+        unit = objects.load_unit(path)
+        comps = unit.components
+        parents = unit.parents()
+        for i, comp in enumerate(comps):
+            member = comp.ref.member.lower()
+            parent = comps[parents[i]].ref.member.lower() if parents[i] >= 0 else ""
+            if member.startswith("e_tur"):
+                kind_by_turret[member].add(unit.kind)
+                chassis = catalogue.get(comps[parents[i]].ref.member)
+                flying = bool(chassis and re.search(r"flying|helicopter", chassis.name, re.I))
+                variant_on[member[7]][flying] += 1
+                size_all += 1
+                size_ok += member[6] == parent[2]
+                # the radar and deflector parts the turret's controller names
+                ctl = library.get(member).slot_with_suffix("ctl")
+                labels = {p.label.lower() for p in
+                          control.parse(turrets.read_name(ctl.member), names).components
+                          if p.label}
+                for j, child in enumerate(comps):
+                    cm = child.ref.member.lower()
+                    if parents[j] == i and cm[:5] in ("i_rdr", "i_def"):
+                        labelled += 1
+                        fitted_ok += cm[:7] in labels
+            if member.startswith("e_gun") and parent.startswith("e_tur"):
+                same = member[6] == parent[6]
+                gun_size[same] += 1
+                if not same:
+                    off_size.add(parent + ">" + member[:8])
+                if member[7] == "s":
+                    node = nodes_of(parent)
+                    builder_socket[(parent[:8] + parent[9:], node[comp.attach_node])] += 1
+    check("UNITS: a b turret hangs under a flyer, a t turret sits on the ground",
+          variant_on["b"] and variant_on["t"] and set(variant_on["b"]) == {True}
+          and set(variant_on["t"]) == {False},
+          f"b turrets on flying chassis {dict(variant_on['b'])}, t turrets "
+          f"{dict(variant_on['t'])} (True = the chassis' catalogue name says "
+          f"Flying or Helicopter)")
+    check("UNITS: a turret's size is its chassis' size, and its guns' too",
+          size_ok == size_all > 0 and gun_size[True] and off_size
+          and all(o.startswith("e_tur_bt_10>e_gun_f") for o in off_size),
+          f"{size_ok}/{size_all} turrets share their chassis' size letter; "
+          f"{gun_size[True]} guns share their turret's and {gun_size[False]} do not, "
+          f"all of them fortification guns on {sorted(off_size)}")
+    check("UNITS: a builder's module sits on its turret's Base_LU_01",
+          builder_socket and all(node == "Base_LU_01" for (_t, node) in builder_socket)
+          and all(t[6:8] in ("lt", "lb", "mt", "mb") and t.endswith("03")
+                  for (t, _n) in builder_socket),
+          f"every e_gun_?s mobile builder module: {dict(builder_socket)}")
+    check("UNITS: a turret takes the radar and deflector sizes its controller names",
+          labelled and fitted_ok == labelled,
+          f"{fitted_ok}/{labelled} fitted i_rdr/i_def parts match the size of the "
+          f"i_rdr_?/i_def_? label on their turret's radar and deflector components")
+
+    # --- sockets against the catalogue ----------------------------------------
+    rows = []
+    agree = 0
+    exceptions = []
+    for tid in ids:
+        if tid[7] == "b":
+            continue
+        entry = catalogue.get(tid)
+        sockets = [n for n in (nodes_of(tid) or []) if n.startswith("Base_")
+                   and n not in objects.TURRET_MOUNT_NODES]
+        text = " ".join(entry.text)
+        slots = re.search(r"(\d+)[- ](?:\w+ )?slots?", text)
+        want = int(slots.group(1)) if slots else None
+        role = _turret_role(entry.text)
+        have = len(sockets) - (role == objects.TYPE_BUILDER)
+        rows.append((tid, want, len(sockets)))
+        if want is not None and have == want:
+            agree += 1
+        else:
+            exceptions.append(f"{tid} {want}/{len(sockets)}")
+    check("turrets.rlb: a turret's Base_* sockets are its catalogue's battle slots",
+          agree >= 20 and len(exceptions) == 6
+          and {e.split()[0] for e in exceptions} == {"e_tur_bt_07", "e_tur_bt_08",
+                                                     "e_tur_bt_11", "e_tur_bt_12",
+                                                     "e_tur_lt_07", "e_tur_ht_02"},
+          f"{agree} of {len(rows)} turrets have as many gun sockets as their "
+          f"catalogue's slots, counting a builder's module socket apart; the rest "
+          f"(catalogue/sockets): {', '.join(exceptions)}")
+
+    builtin = {}
+    for tid in ids:
+        if tid[7] == "b":
+            continue
+        ctl = library.get(tid).slot_with_suffix("ctl")
+        parts = control.parse(turrets.read_name(ctl.member), names).components
+        builtin[tid] = sum(1 for p in parts if p.type_id == control.GUN_TYPE)
+        firsts = [p.type_id for p in parts[:4]]
+        if firsts != [control.TURRET_TYPE, control.RADAR_TYPE, control.CAMERA_TYPE,
+                      control.DEFLECTOR_TYPE]:
+            builtin[tid] = -1
+    with_guns = sorted(t for t, n in builtin.items() if n > 0)
+    check("turrets.rlb: every robot turret is a turret, radar, camera and deflector",
+          -1 not in builtin.values()
+          and with_guns == ["e_tur_bt_11", "e_tur_bt_12", "e_tur_ht_02", "e_tur_lt_07"]
+          and all(builtin[t] == 4 for t in with_guns),
+          f"all {len(builtin)} controllers open with classes 1, 8, 4, 21; four carry "
+          f"four built-in guns of their own and no gun socket: {', '.join(with_guns)}")
+
+    defaults = 0
+    turret_ctls = [e for e in turrets if e.name.lower().endswith(".ctl")]
+    for entry in turret_ctls:
+        blob = turrets.read(entry)
+        same = True
+        for at, want in control.DEFAULTS.items():
+            fmt = "<i" if at in control.DEFAULT_INTS else "<f"
+            got = struct.unpack_from(fmt, blob, at)[0]
+            same &= (got == want) if fmt == "<i" else abs(got - want) <= 1e-6 * max(1, abs(want))
+        defaults += same
+    check("turrets.rlb: no turret controller authors a rate or a limit",
+          defaults == len(turret_ctls) > 0,
+          f"{defaults}/{len(turret_ctls)} carry the constructor's default on all "
+          f"{len(control.DEFAULTS)} frame slots from +20 to +124")
+
+    # --- roles ------------------------------------------------------------------
+    by_role: dict[int, set[int]] = defaultdict(set)
+    for member, kinds in kind_by_turret.items():
+        entry = catalogue.get(member)
+        by_role[_turret_role(entry.text)].update(kinds)
+    check("UNITS: a unit's class word is its turret's role",
+          {r: sorted(k) for r, k in by_role.items()}
+          == {t: [t] for t in TURRET_ROLE_TYPE.values()},
+          "; ".join(f"catalogue {r:#x}: .dat {', '.join(hex(k) for k in sorted(v))}"
+                    for r, v in sorted(by_role.items()))
+          + ".  Behavior.dll:0x10008a80 picks prof_war/trn/bld/hq/hero by it")
+
+    codes: dict[int, set[int]] = defaultdict(set)
+    upgrade = items = 0
+    size_codes: dict[str, set[int]] = defaultdict(set)
+    others: Counter[int] = Counter()
+    for tree_path in research.trees(game):
+        tree = research.read(tree_path)
+        for item in tree.items:
+            entry = catalogue.get(item.parts[0]) if item.parts else None
+            if not entry or not item.tail:
+                continue
+            items += 1
+            upgrade += item.tail[5] == entry.upgrade
+            size_codes[entry.size].add(item.tail[4])
+            sub = entry.sub.split(":") if entry.sub else []
+            if entry.kind == "SHS" and "TUR" in sub:
+                codes[item.tail[0]].add(_turret_role(entry.text))
+            else:
+                others[item.tail[0]] += 1
+    check(".trf: a turret item's first tail byte is its role",
+          {c: sorted(v) for c, v in codes.items()}
+          == {c: [t] for c, t in TURRET_ROLE_TYPE.items()}
+          and set(others) == {1, 6, 7, 255},
+          "turrets " + "; ".join(f"{c} -> {', '.join(hex(t) for t in sorted(v))}"
+                                 for c, v in sorted(codes.items()))
+          + f"; every other item {dict(sorted(others.items()))} (1 a bunker or tower "
+          f"turret, 6 the hero chassis, 7 an animal, 255 none)")
+    check(".trf: the last two tail bytes are the size and UpgradeLevel",
+          upgrade == items > 0 and {k: sorted(v) for k, v in size_codes.items()}
+          == {"T": [0], "L": [1], "M": [2], "B": [3], "H": [4], "A": [4], "N": [4],
+              "E": [5]},
+          f"+0x27 equals objects.dlb's UpgradeLevel on {upgrade}/{items} item "
+          f"records; +0x26 by size letter "
+          + ", ".join(f"{k} {sorted(v)}" for k, v in sorted(size_codes.items())))
+
+    # --- the special turrets ----------------------------------------------------
+    free = sorted(t for t in ids if t[7] != "b" and catalogue.get(t)
+                  and not any((catalogue[t].build_energy, catalogue[t].build_ore,
+                               catalogue[t].research_energy, catalogue[t].research_ore)))
+    ai = {c.ref.member.lower() for p in game.glob("UNITS/UNITS/AI/*.dat")
+          for c in objects.load_unit(p).components}
+    placed: dict[str, Counter[int]] = defaultdict(Counter)
+    type_seen = type_same = 0
+    for tma in sorted(game.glob("MISSIONS/**/data.tma")):
+        m = mission.load(tma)
+        for o in m.objects:
+            if o.kind != mission.KIND_UNIT or o.clan_id is None:
+                continue
+            found = list(game.glob("UNITS/**/" + Path(o.path.replace("\\", "/")).name))
+            if not found:
+                continue
+            assembly = objects.load_unit(found[0])
+            prop = o.properties.get("Type")
+            type_seen += 1
+            type_same += bool(prop) and prop.value == assembly.kind
+            for comp in assembly.components:
+                cm = comp.ref.member.lower()
+                if cm.startswith("e_tur"):
+                    placed[cm[:7] + "t" + cm[8:] if cm[7] == "b" else cm][
+                        m.clans[o.clan_id].type] += 1
+    check("data.tma: a placed unit's Type is its assembly's class word",
+          type_seen and type_same == type_seen,
+          f"{type_same}/{type_seen} placed units carry a Type property equal to their "
+          f".dat's class word")
+    specials = [t for t in free if t != "e_tur_ht_02"]
+    enemy_only = all(set(placed[t]) <= {mission.CLAN_ENEMY, mission.CLAN_NEUTRAL}
+                     for t in specials)
+    battle = [t for t in ids if t[7] == "t"
+              and _turret_role(catalogue[t].text) == objects.TYPE_WARRIOR
+              and t not in free]
+    player_battle = sum(placed[t][mission.CLAN_PLAYER] for t in battle)
+    check("turrets.rlb: the free turrets are the enemy's and the hero's",
+          free == ["e_tur_bt_09", "e_tur_bt_10", "e_tur_bt_11", "e_tur_bt_12",
+                   "e_tur_ht_02", "e_tur_lt_07"]
+          and enemy_only and set(placed["e_tur_ht_02"]) == {mission.CLAN_PLAYER}
+          and not any(t in ai or (t[:7] + "b" + t[8:]) in ai for t in free)
+          and player_battle > 0,
+          f"{', '.join(free)} cost nothing to research or build; missions place "
+          + ", ".join(f"{t[6:]} {dict(placed[t])}" for t in specials)
+          + f" (clan types), the hero turret {dict(placed['e_tur_ht_02'])}, and none "
+          f"is in UNITS/UNITS/AI.  Control: the paid battle turrets are placed "
+          f"for players {player_battle} times")
+
+    body: dict[str, float] = {}
+    for tid in ids:
+        if tid[7] == "b":
+            continue
+        record = library.get(tid)
+        ndp = record.slot_with_suffix("ndp")
+        table = objects.parse_damage(turrets.read_name(ndp.member), ndp.member)
+        ctl = record.slot_with_suffix("ctl")
+        part = control.parse(turrets.read_name(ctl.member), names).components[0]
+        body[tid] = table[part.node].durability
+    by_size: dict[str, set[float]] = defaultdict(set)
+    for tid, hp in body.items():
+        if tid not in free and _turret_role(catalogue[tid].text) != objects.TYPE_BUILDER \
+                and tid != "e_tur_lt_06":
+            by_size[tid[6]].add(hp)
+    check("turrets.rlb: a turret's body hit points are set by its size",
+          {k: sorted(v) for k, v in by_size.items()}
+          == {"t": [120.0], "l": [270.0], "m": [720.0], "b": [3000.0]},
+          f"the node under each turret component: tiny/small/medium/large "
+          f"{', '.join(f'{k} {sorted(v)}' for k, v in sorted(by_size.items()))}; "
+          f"builders b {body['e_tur_bt_08']:g} m {body['e_tur_mt_03']:g} l "
+          f"{body['e_tur_lt_03']:g}; HE {body['e_tur_lt_06']:g}; transformer "
+          f"{body['e_tur_bt_09']:g}, small tower {body['e_tur_bt_10']:g}, monsters "
+          f"{body['e_tur_lt_07']:g}/{body['e_tur_bt_11']:g}/{body['e_tur_bt_12']:g}")
+
+
 def check_controls(check, game: Path) -> None:
     """The input layer: ScanCode.dsc, Command.dsc, the .man bindings, the .tbl tables."""
     keys = controls.scancodes(game)
@@ -6713,6 +7050,7 @@ def run(game: Path) -> int:
         check_effects, check_footprints, check_rsli, check_control, check_efficiency,
         check_motion, check_sensors, check_combat, check_ownership,
         check_capture, check_repair, check_chassis, check_weapons,
+        check_turrets,
         check_controls,
         check_behaviour, check_research, check_descriptions, check_saves,
         check_vocabulary, check_resources, check_briefing, check_settings,

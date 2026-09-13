@@ -15,3 +15,10 @@ def test_a_chassis_record_names_its_profile():
     assert objects.ObjectRecord("r_b_04", "BTLU", slots).profile == "chas_trk.var"
     assert objects.ObjectRecord("fr_l_plant", "FORT", slots).profile is None
     assert objects.ObjectRecord("r_b_04", "BTLU", slots[:5]).profile is None
+
+
+def test_a_units_class_word_is_its_type():
+    builder = objects.UnitDefinition(source=None, kind=objects.TYPE_BUILDER, components=[])
+    mine = objects.UnitDefinition(source=None, kind=0x80000004, components=[])
+    assert not builder.is_building
+    assert mine.is_building

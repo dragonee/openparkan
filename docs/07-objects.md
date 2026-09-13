@@ -177,7 +177,7 @@ like going up. What an `.exp` does to whatever it hits is in
 
 ```
 uint32   magic, always 0x0000F0F1
-uint32   class word
+uint32   class word: the unit's Type (0x1008000 a warbot ... 0x8000xxxx a building)
 components × N, 112 bytes each:
     char[32]  archive name, always "objects.rlb"
     char[32]  record name
@@ -198,6 +198,12 @@ The class says what a part is and, with it, what it hangs off:
 4  gun         bolts to the turret
 5  ammunition  a clip belonging to the gun above it
 ```
+
+The class word is the unit's **Type**, and a robot's turret decides it
+([30-turrets.md](30-turrets.md#the-turret-decides-what-the-unit-is--measured-and-read)).
+The part classes are not strict: **26 guns are written with class 2**, not 4
+(11 in `AI`, 8 in `BATTLE`, 7 in `AUTO`), so find a unit's guns by their
+`e_gun_` prefix.
 
 The component list is **a tree written depth first**: a record owns the next
 `child_count` records' subtrees. That reading consumes all 458 shipped

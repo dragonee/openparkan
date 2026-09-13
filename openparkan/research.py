@@ -137,6 +137,18 @@ class ResearchFormatError(ValueError):
     pass
 
 
+#: ``Item.role``: a bunker or tower turret, a battle, transport, builder or HQ
+#: turret, the hero chassis, an animal; 255 on anything else.
+ROLE_BUILDING_TURRET = 1
+ROLE_BATTLE = 2
+ROLE_TRANSPORT = 3
+ROLE_BUILDER = 4
+ROLE_HQ = 5
+ROLE_HERO = 6
+ROLE_ANIMAL = 7
+ROLE_NONE = 255
+
+
 @dataclass(frozen=True)
 class Item:
     """One researchable item."""
@@ -163,8 +175,24 @@ class Item:
     #: Record ``+0x22``..``+0x27``.  Six separate fields, not a packed word:
     #: the engine hands out a bounds-checked byte getter for each.  Measured
     #: ranges are 1..7 with 255 for none, 8..12, 16..72, 80..84 with 255 for
-    #: none, 0..5 and 0..3.  What any of them means is open.
+    #: none, 0..5 and 0..3.  The first is the ``role``, the fifth the ``size``
+    #: and the sixth the ``upgrade_level``; the middle three are open.
     tail: tuple[int, ...] = ()
+
+    @property
+    def role(self) -> int:
+        """``ROLE_*``: what a unit part makes a unit, 255 for anything else."""
+        return self.tail[0] if self.tail else ROLE_NONE
+
+    @property
+    def size(self) -> int:
+        """0 tiny, 1 small, 2 medium, 3 large, 4 hero and the A and N letters, 5 E."""
+        return self.tail[4] if len(self.tail) > 4 else 0
+
+    @property
+    def upgrade_level(self) -> int:
+        """``objects.dlb``'s UpgradeLevel for the part, on every shipped record."""
+        return self.tail[5] if len(self.tail) > 5 else 0
 
     @property
     def kind(self) -> str:
