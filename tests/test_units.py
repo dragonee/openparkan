@@ -61,3 +61,12 @@ def test_a_fitted_battery_replaces_the_chassis_slot():
     assert unit.battery == (31000.0, 34.5)
     assert sheet().battery == (10000.0, 250.0)
     assert "runs on: battery 31,000 at 34.5/s" in "\n".join(units.render(unit))
+
+
+def test_the_chassis_body_does_not_eat_into_its_payload():
+    # w_b_trk1: 80 t of payload, a 20 t body, 80.6 t in all.
+    load = units.Load(payload=80000.0, body=20000.0, total=80596.0)
+    assert not load.over
+    assert load.spare == 19404.0
+    heavy = units.Load(payload=70000.0, body=17500.0, total=121015.0)
+    assert heavy.over and heavy.spare == 0.0

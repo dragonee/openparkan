@@ -35,7 +35,9 @@ the profile agrees with the name (*measured*). The animals name `chas_wlk` or
 The size letter is the third character, and it is also the size of the turret
 the chassis carries: **318 of 318** turrets on shipped robots share their
 chassis's letter (`t`, `l`, `m`, `b`, and `h` for the hero) — shuffled, 86 do.
-Nothing read enforces it; the data never breaks it.
+Nothing in the load path enforces it; the data never breaks it. What keeps it
+so is, by the look of it, the robot constructor screen, which offers parts by
+name ([below](#what-the-label-is-not--read-as-a-search)).
 
 ## A chassis declares its slots — *measured*, and *read*
 
@@ -73,12 +75,30 @@ which size of part a slot takes:
 Radars and deflectors do not go on a chassis: they fit on the turret, which
 declares their slots the same way ([30-turrets.md](30-turrets.md)).
 
-**What the label is not** — *read*, as a search. The component parser keeps a
-copy of the label on the component object (`+0x30`, `Control.dll:0x10021f00`),
-but nothing found compares it: `Control.dll`'s one string compare
-(`0x1003a670`) is called only on `(archive, member)` pairs in its resource
-caches, and a loaded part is appended, not matched to a slot (next section).
-*Guess*: the label is the unit editor's fitting rule, and the data obeys it.
+### What the label is not — *read*, as a search
+
+The component parser keeps a copy of the label on the component object
+(`+0x30`, `Control.dll:0x10021f00`), but nothing found compares it:
+`Control.dll`'s one string compare (`0x1003a670`) is called only on
+`(archive, member)` pairs in its resource caches, and a loaded part is
+appended, not matched to a slot (next section). Neither `AniMesh.dll` nor
+`Behavior.dll`, which send the parts, looks at a name's letters.
+
+**The robot constructor offers parts by name prefix** — *read*, in outline.
+Its page builder (`iron3d.dll:0x10048220`, called from `0x1004cd00` with a
+page item's name at `+0xc4`) works like this:
+
+- **A turret page.** A name starting `e_tur_` lists the catalogue entries
+  starting with the name it was given (`0x10049126` into `0x1008a780`, which
+  walks the item list and keeps the matches).
+- **The chassis page.** It offers the prefixes `r_t`, then `r_l`, `r_m` and
+  `r_b` as a four-way grade rises (`0x10048b38`).
+- **Guns.** `e_gun_` is built the same way (`0x10048311`).
+
+So the size letter and the slot label are kept by what the editor offers,
+not by what the engine accepts. Where each page item's name comes from is not
+traced, so that the internal-part pages are keyed on the slot labels is still
+a *guess*.
 
 **The slot records carry defaults** — *measured*. Every chassis's engine slot
 is value 1 at power 20, its battery 10,000 at 250 a second, its repair slot 1
@@ -93,6 +113,45 @@ every wheeled and tracked chassis and most flyers unlabelled class-3
 records naming wheel, track or rotor nodes. `r_l_06` (S-6f) is a whole unit in one controller —
 turret, camera, radar, deflector, detection shield and two guns — and no
 assembly uses it.
+
+### The class-3 records turn the wheels — *read*, and *measured*
+
+Class 3 is `CICLS_SIMPLE`. The factory builds it, like every class without a
+case of its own, as the plain 0xa4-byte device (`Control.dll:0x10020800`,
+vtable `0x1003c448`). Each tick (slot 11, `0x10020900`) it moves the section-2
+channels its entries name by a mix of the machine's motion:
+
+- **What the flags word picks.** Its bytes 1 and 2 each pick a source
+  (`0x10020d90` into `0x10020ea0`):
+
+  | byte | source |
+  |---:|---|
+  | 2–4 | spin about x, y, z |
+  | 5–7 | the same, negated |
+  | 8–10 | the lean on x, y, z ÷ triple 6 ([24-motion.md](24-motion.md#the-hull-leans-and-rights-itself--read-and-measured)) |
+  | 11–13 | velocity x, y, z ÷ the authored top speed |
+  | 14 | the speed ÷ the top speed, as lengths |
+
+- **How they combine.** The two are weighted by the floats at record `+0x24`
+  and `+0x28` and added to the device's value each tick. A byte below 2 picks
+  nothing: byte 1 then stands for 1 and byte 2 for 0, so a record with both at
+  0 advances at a constant rate.
+- **Byte 0.** When it is set, byte 0's source is written straight into the
+  value instead, and a byte 0 of 1 holds the value where it is.
+
+*Measured*: **72 class-3 records**, 71 on 11 chassis and one on the medium
+MTP building. Every one has zero power, and zero values but for eight of the
+flyers' records, whose first value is 0.5.
+
+| flags | gains | on | reads as |
+|---|---|---|---|
+| `0x01070C00` / `0x02040C00` | 1 and 0.5 | the drive wheels and tracks of all six wheeled and tracked chassis, left and right | forward speed ∓ half the turn: skid steering |
+| `0x00000004` | — | two wheels of the Small Wheel Chs and four of the Medium | set to the turn rate: steering |
+| `0x00000001` | — | the other wheels, and the upper track rollers | held |
+| `0x8000000C`, `0x8100000C`, `0x8200000C` | — | engines and wings of four flyers | set to forward speed ÷ top: they tilt |
+| `0` | 1 | the T-2's two rotors, and the building's | a constant: they spin all the time |
+
+So the unlabelled records are animation, not slots.
 
 ## A fitted part takes over its slot — *read*, and *measured*
 
@@ -147,6 +206,59 @@ The single pointers the factory keeps (turret, fight shield, deflector, radar,
 class 17: `0x1002d56e`) point at the slot's device, which the fitted part re-parses
 in place, so they need no second look.
 
+### The order parts load in, and what a slot keeps — *read*, and *measured*
+
+**Parts load in the assembly's own order, depth first** (*read*).
+
+- **The chassis first.** `Behavior.dll` builds the unit from the root record
+  ("Chassis created", `0x1001d8eb`). The agent enters that object as part 0
+  (`AniMesh.dll:0x1000311f`).
+- **Then each child.** Each child of the root goes through `0x1001cd40`, which:
+  - sends the part (message `0x80000020`, `0x1001ce5b`);
+  - reads back the id the agent gave it, the smallest not yet taken
+    (`AniMesh.dll:0x10003775`);
+  - recurses into the part's own children with that id as their parent.
+- **So the order is the file's.** It is the `.dat` file's pre-order, the order
+  `objects.load_unit` lists the components in. Each part loads after
+  everything listed before it, so a turret's guns and clips load after the
+  turret.
+- **What a part brings.** An `EXTO` part's mesh is merged without its own node
+  0, whose place is the node it attaches to: `AniMesh.dll` skips it
+  (`0x1000a79d`), and `Control.dll` skips the first `.ndp` row to match
+  (`0x10008c6a`). On all 111 external parts the mesh and its `.ndp` have the
+  same number of nodes, so the two stay in step (*measured*).
+
+**The last record of a single-pointer class wins, and no assembly has two.**
+
+- **The rule.** The factory overwrites the class's pointer on every record it
+  builds (`0x1002d53c`, `0x1002d56e`, `0x1002d5a0`, `0x1002d5d2`,
+  `0x1002d604`). The armour numbers are refreshed from every class-27 record
+  (`0x1002d7b6`). So the later part in load order would win.
+- **The data.** It never comes to that (*measured*). Over all 458 assemblies,
+  counting the root's records, every external part's, and the one each
+  internal part re-parses, no assembly has two records of class 1, 8, 9, 17,
+  21 or 27. The chassis brings the fight shield and armour; the turret brings
+  itself, the radar and the deflector.
+
+**A fitted part keeps nothing of the slot's figures** (*read*).
+
+- **What the re-parse replaces.** It runs the class's parser with the node
+  kept (`0x1002d8ad`). The shared parser (`0x10021d50`) then:
+  - points the device at the part's record (`+0x48`), from which its mass,
+    power and flags are read;
+  - copies the part's sixteen values over the slot's (`0x10021d93`);
+  - takes its initial state unless that is −1;
+  - and renames it.
+- **What survives.** Only the node and the slot's entries: entries are
+  appended (`0x10021df3`), and a fitted part brings none.
+- **The data.** All 3,832 internal parts and clips carry exactly one record,
+  with no entries. The 958 slots that have entries keep them: 588 guns'
+  magazine slots (their barrels), 353 radar slots and 17 deflector slots
+  (*measured*).
+- **So the defaults stand only in an empty slot.** The three are the Small
+  Tower's armour, which weighs nothing and cuts nothing, and the two targets'
+  engines of drive 1.
+
 ## What a chassis weighs — *read*, and *measured*
 
 `Control.dll:0x1000fac0` weighs the merged model node by node. A node's mass is
@@ -192,12 +304,26 @@ densities. The densities were computed to hit a design weight:
 A whole unit's weight follows the same sum over the parts that bring nodes —
 the chassis, turret and guns — plus each internal part's and clip's own mass: an
 internal part's mesh is not loaded, so it adds no volume and no area — *derived*.
-The tracked `w_b_trk1` comes to about 80.6 t (the chassis 20 t, the turret and
-guns 20.5 t, the internal parts and clips 21.6 t, armour Mk3 at 22.5 × 824 of
-area 18.5 t) against 80 t of payload plus the chassis's own 20; a tiny helicopter
-`11tin1` to 2.5 t against 2.775 + 0.275. That the payload's "own node range"
-([24-motion.md](24-motion.md#load--read-and-measured)) is the chassis's nodes
-is still a *guess*, and so these spare-payload figures are too.
+A turret's or gun's node 0 is not merged
+([above](#the-order-parts-load-in-and-what-a-slot-keeps--read-and-measured)),
+so it weighs nothing either.
+
+**The chassis's body does not count against its payload** — *read*. The nodes
+the payload sum returns are part 0's, the root object's
+([24-motion.md](24-motion.md#load--read-and-measured)). That settles the
+earlier *guess*. So:
+
+- The tracked `w_b_trk1` comes to about 80.6 t: the chassis 20 t, the turret
+  and guns 20.5 t, the internal parts and clips 21.6 t, and armour Mk3 at
+  22.5 × 824 of area 18.5 t. That is against 80 t of payload plus the
+  chassis's own 20, leaving 19.4 t spare.
+- A tiny helicopter `11tin1` comes to 2.5 t against 2.775 + 0.275.
+
+*Measured*, weighing every robot that way (`units.Workshop.weigh`): 364 of the
+374 carry no more than their payload. If the chassis's body counted, 187 would
+not. The ten over are nine large assemblies and one medium walker
+(`23mwalk1e`, 33 t on 28). The worst is `AI_LW_31`, at 121 t on a 70 t Large
+Wheel Chs. On those ten the spare payload is 0, which halves the top speed.
 
 ## What a chassis costs, and who builds it — *measured*
 
@@ -247,16 +373,55 @@ and S-7f are placed only by enemy clans, and the hero only by the player
 prerequisite, and all six are category 0 in 25–28 of the 29 trees. *Guess*: they are mission set pieces the
 player cannot build.
 
+**Category 0 means out of the tree** — *read*, and *measured*. The `TRF1` byte
+is not a category but three state bits, which the loaded tree reads and writes
+(`MisLoad.dll`):
+
+| bit | meaning | read at |
+|---:|---|---|
+| 1 | available to research | slot 26's second answer (`0x10002aa0`) |
+| 2 | researched | its first; slots 48 and 49 save and restore exactly this bit (`0x100034b0`, `0x100035f0`) |
+| 4 | in this mission's tree | its third |
+
+- **Finishing a research.** Slot 30 (`0x10002c10`) finishes research `i` only
+  if bit 4 is set, and then sets bits 1 and 2.
+- **What becomes available.** It then sets bit 1 on every item with bit 4 whose
+  prerequisites all have bits 4 and 2.
+- **What the values are.** Read that way, 7 is a researched item, 5 one open to
+  research, 4 one still locked, and 2 one researched but out of the tree (the
+  animals and the hero).
+- **What 0 is.** None of the three: the item is out of the tree, cannot be
+  opened and can never be researched there.
+- **The data agrees** (*measured*, all 10,672 items in the 29 trees). All 177
+  items at 5 have every prerequisite at 2 or 7, and all 2,044 at 4 have at
+  least one that is not.
+- **Where it goes next.** That a builder then refuses an item without bit 2
+  is *derived* from this; the consumer of slot 26 was not read.
+  [16-research.md](16-research.md)'s names for the values (special, creature,
+  main, starting, basic) describe the shipped trees, not the bits.
+
 ## Not established
 
-- What enforces a turret's size and a part's slot, if anything does at run
-  time — the label and the size letter are obeyed by the data and read by
-  nothing found.
-- The order parts load in, and so which of two same-class single-pointer
-  records wins when a chassis and a part both carry one.
-- Whether a chassis slot's default (a 10,000 battery, a value-1 engine) is meant
-  to stay alongside the fitted part, or whether the data relies on it.
-- Which node range the payload sum treats as the chassis's own.
-- The class-3 records on wheeled, tracked and flying chassis, and `r_l_06`'s
-  purpose.
-- Research-tree category 0 ("special"): what it does to an item.
+- What enforces a turret's size and a part's slot — narrowed: nothing in the
+  load path. The robot constructor lists parts by name prefix
+  ([What the label is not](#what-the-label-is-not--read-as-a-search)). Open:
+  where its page items' names (`+0xc4`) come from, and so whether the internal
+  pages key on the slot labels.
+- ~~The order parts load in, and which same-class record wins~~ — answered:
+  the `.dat` pre-order, root first; the last would win and no assembly has
+  two ([The order parts load in](#the-order-parts-load-in-and-what-a-slot-keeps--read-and-measured)).
+- ~~Whether a chassis slot's default stays alongside the fitted part~~ —
+  answered: it does not; only the node and the slot's entries survive the
+  re-parse.
+- ~~Which node range the payload sum treats as the chassis's own~~ —
+  answered: part 0's, the root object's
+  ([What a chassis weighs](#what-a-chassis-weighs--read-and-measured)).
+- ~~The class-3 records~~ — answered: simple devices that turn wheels, steer,
+  tilt and spin rotors from the motion
+  ([The class-3 records](#the-class-3-records-turn-the-wheels--read-and-measured)).
+  `r_l_06`'s purpose stays open. Only `objects.rlb`, `objects.dlb`,
+  `bases.rlb` and the 29 `.trf` name it; no `.dat`, mission or binary does
+  (*measured*).
+- ~~Research-tree category 0~~ — answered: none of the three state bits, out
+  of the tree ([above](#what-a-chassis-costs-and-who-builds-it--measured)).
+  Open: what reads slot 26 to allow a build.

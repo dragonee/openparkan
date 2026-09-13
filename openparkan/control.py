@@ -221,6 +221,22 @@ CAMOUFLAGE_POWER = 4
 #: with a turret, a radar slot, a camera and a deflector slot.
 TURRET_TYPE = 1
 CAMERA_TYPE = 4
+#: ``CICLS_SIMPLE``: the plain device (``Control.dll:0x10020800``) that turns a
+#: machine's wheels, steers, tilts wings and spins rotors.  Flag bytes 1 and 2
+#: each pick a ``SIMPLE_SOURCES`` quantity, weighted by the floats at record
+#: ``+0x24`` and ``+0x28`` (``SIMPLE_GAINS_AT``); byte 0, when set, is written
+#: straight into the value instead (``0x10020900``).
+SIMPLE_TYPE = 3
+SIMPLE_GAINS_AT = 0x24
+#: A simple device's source by selector byte (``0x10020d90``): spin, negated
+#: spin, the lean over triple 6 and velocity over the top speed, on x, y and
+#: z; 14 is the speed over the top speed as lengths.  A byte below 2 picks
+#: nothing.
+SIMPLE_SOURCES = {2: ("spin", 0), 3: ("spin", 1), 4: ("spin", 2),
+                  5: ("-spin", 0), 6: ("-spin", 1), 7: ("-spin", 2),
+                  8: ("lean", 0), 9: ("lean", 1), 10: ("lean", 2),
+                  11: ("velocity", 0), 12: ("velocity", 1), 13: ("velocity", 2),
+                  14: ("speed", -1)}
 #: A turret component's flags: ``MOUNT_UPRIGHT`` on every ground (``e_tur_?t``)
 #: turret and clear on its twin hung under a flyer (``e_tur_?b``) -- an upright
 #: turret keeps its aim triple as 1 - v (``0x100271c7``, ``0x100276ed``) and a
@@ -246,6 +262,8 @@ def shake_ring(offset: tuple[float, float, float], seconds: float) -> tuple[floa
     """The camera's shake offset ``seconds`` after it started ringing down."""
     k = math.cos(math.pi / 2 * SHAKE_FREQUENCY * seconds) / (seconds + 1.0) ** SHAKE_DECAY
     return (offset[0] * k, offset[1] * k, offset[2] * k)
+
+
 #: ``CICLS_DOOR`` and ``CICLS_COMPUTER``.  ``Terrain.dll``'s building files
 #: its controller's items by these (``0x100583a2``), and runs its first
 #: computer as the control pod (``0x10057550``).
@@ -321,6 +339,12 @@ ARMOUR_TYPE = 27
 SLOT_FAMILIES = {"i_eng": ENGINE_TYPE, "i_pws": POWER_STORE_TYPE,
                  "i_fsh": FIGHT_SHIELD_TYPE, "i_dsh": DETECT_SHIELD_TYPE,
                  "i_rps": REPAIR_TYPE, "i_arm": ARMOUR_TYPE}
+#: The classes a control system keeps one pointer to, overwritten by every
+#: record it builds (``Control.dll:0x1002d53c``..``0x1002d604``), and armour,
+#: whose numbers every class-27 record refreshes (``0x1002d7b6``): the last in
+#: load order wins.  Class 17 has no ``CICLS_`` name.
+SINGLE_POINTER_CLASSES = (TURRET_TYPE, RADAR_TYPE, FIGHT_SHIELD_TYPE, 17,
+                          DEFLECTOR_TYPE, ARMOUR_TYPE)
 
 #: A section-1 state: ``SECTION1_RECORD`` bytes, then ``counts[1]`` 16-byte
 #: conditions.  Bits 0-2 of the flags switch on the velocity box per axis and
@@ -357,6 +381,15 @@ STATE_GROUND_CONTACTS = 0x4
 #: ``0x100158c4``), no slope brake (``0x10015681``) and no turn-rate clamp
 #: (``0x10014c02``).  Rounds, trees and stones carry it; no chassis does.
 STATE_UNBOUNDED = 0x40000
+#: How the hull rights itself (``Control.dll:0x1000c3a2``): toward the world's
+#: up, toward the vector at control ``+0x348``, or not at all.  Pitch is taken
+#: when ``0x10`` or ``0x40`` is set, roll when ``0x20`` or ``0x80`` is.  Triple 5
+#: (``TRIPLE_SETTLE``) is the share of the tilt taken back each step.
+STATE_RIGHT_UP = 0xC0
+STATE_RIGHT_TO_VECTOR = 0x30
+STATE_RIGHT_PITCH = 0x50
+STATE_RIGHT_ROLL = 0xA0
+STATE_NO_RIGHTING = 0x400000
 #: A step is held to this many seconds, and a fixed-length velocity state is
 #: cut so that speed x step stays within ``FIXED_STEP_REACH`` (``0x1000550e``).
 STEP_MIN = 0.01
@@ -381,6 +414,14 @@ LEAN_NEGATE = 0x80
 LEAN_TURN = (1, 2, 3)
 LEAN_VELOCITY = (4, 5, 6)
 LEAN_ACCELERATION = (8, 9, 10)
+#: The same selectors as (quantity, axis), one byte per axis -- pitch, roll,
+#: yaw (``Control.dll:0x10014e46``): the step's turn over the authored turn
+#: rate x dt, velocity over the authored top speed, the step's change of
+#: velocity over the authored acceleration.  0 and 7 lean nothing, and the
+#: lean on that axis is the source's fraction times triple 6 (``TRIPLE_LEAN``).
+LEAN_SOURCES = {1: ("turn", 0), 2: ("turn", 1), 3: ("turn", 2),
+                4: ("velocity", 0), 5: ("velocity", 1), 6: ("velocity", 2),
+                8: ("acceleration", 0), 9: ("acceleration", 1), 10: ("acceleration", 2)}
 #: A state's 16-byte conditions are its **contacts**, one per foot, wheel or
 #: leg, the same points in every state of a controller:
 #:
@@ -462,11 +503,17 @@ TRIPLE_AT = (20, 32, 44, 56, 68, 80)
 TRIPLE_ACCELERATION = 0
 TRIPLE_TOP_SPEED = 2
 TRIPLE_TURN = 3
-#: Triple 6 is the most the body leans about each axis, in radians
-#: (``STATE_LEAN_AT``).  Triple 2 is never read: nothing in ``Control.dll``
-#: reaches +32..+40 in either copy of the block, and 518 of 531 leave it zero.
+#: +32: nothing in ``Control.dll`` reaches +32..+40 in either copy of the
+#: block, and 518 of 531 leave it zero; its forward component is the AI
+#: walker's speed floor (``Behavior.dll:0x1003bed0``).
+TRIPLE_IDLE = 1
+TRIPLE_UNREAD = TRIPLE_IDLE
+#: +68: the share of the hull's tilt righted each step (``0x10014b0b``),
+#: multiplied into the spin integrator (``0x10014b15``).
+TRIPLE_SETTLE = 4
+#: +80, triple 6: the most the hull leans, in radians, per axis
+#: (``STATE_LEAN_AT``, ``0x10014f80``).
 TRIPLE_LEAN = 5
-TRIPLE_UNREAD = 1
 #: The ``mode`` that brakes on a slope steeper than ``cone``
 #: (``Control.dll:0x100157ac``).
 SLOPE_MODE = 2
@@ -719,10 +766,23 @@ class State:
     contacts: tuple[Contact, ...] = ()
     #: +0x08..+0x0a: what leans the body about x, y and z (``STATE_LEAN_AT``).
     lean: tuple[int, int, int] = (0, 0, 0)
+    #: +0x08..+0x0b as one little-endian dword: the three lean selectors, pitch
+    #: in the low byte, and a fourth byte that is 0 throughout.
+    lean_word: int = 0
 
     @property
     def anchor(self) -> bool:
         return bool(self.mode & STATE_ANCHOR)
+
+    def lean_source(self, axis: int) -> tuple[str, int, bool] | None:
+        """What leans the hull on ``axis`` (0 pitch, 1 roll, 2 yaw) in this state.
+
+        ``(quantity, source axis, negated)`` from ``LEAN_SOURCES``, or None where
+        the selector leans nothing.
+        """
+        byte = self.lean[axis]
+        source = LEAN_SOURCES.get(byte & ~LEAN_NEGATE & 0xFF)
+        return (*source, bool(byte & LEAN_NEGATE)) if source else None
 
     @property
     def by_velocity(self) -> bool:
@@ -736,6 +796,7 @@ class State:
         (``Control.dll:0x10001000``).
         """
         return all(c.allows(ok) for c, ok in zip(self.contacts, intact, strict=True))
+
     @property
     def blends(self) -> bool:
         """Whether a step of this state weighs its two pairs by speed.
@@ -786,8 +847,9 @@ class Controller:
     """The 212-byte frame at the head of a ``.ctl`` member, and its sections.
 
     The triples are per-axis.  +20 is the acceleration, +44 the top speed,
-    +56 the turn rate, +68 is multiplied into the spin and +80 is the most the
-    body leans (``TRIPLE_*``); +32 is never read.
+    +56 the turn rate, +68 how fast the hull rights itself and +80 the most it
+    leans (``TRIPLE_*``); +32 is never read by ``Control.dll``, and its forward
+    component is the AI's speed floor.
     Every one of the 12744 float reads across the block's 24 float slots is
     finite.
     """
@@ -1107,6 +1169,7 @@ def read_states(blob: bytes, counts: tuple[int, ...]) -> tuple[State, ...]:
                                             at + SECTION1_RECORD + SECTION1_PER_B * j))
                 for j in range(counts[1])),
             lean=tuple(blob[at + STATE_LEAN_AT:at + STATE_LEAN_AT + 3]),
+            lean_word=struct.unpack_from("<I", blob, at + STATE_LEAN_AT)[0],
         ))
     return tuple(out)
 

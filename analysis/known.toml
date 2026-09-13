@@ -5775,6 +5775,311 @@ name = "asks IControl 145, the live top speed, and compares it with 1"
 doc = "docs/24-motion.md"
 read = true
 
+# --- motion: G's writers, the payload's node range, lean and righting, the AI's speed ---
+[[entry]]
+module = "Control.dll"
+at = "0x10006ec9"
+kind = "site"
+name = "control system constructor: ground speed factor G (+0x1a8) = 1.0"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001aafd"
+kind = "site"
+name = "ground contact: G (+0x1a8) = the material record's +0x15c; the only other write of +0x1a8"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "World3D.dll"
+at = "0x1000451a"
+kind = "site"
+name = "material loader: +0x15c (G) = 1.0 before the header is read"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "World3D.dll"
+at = "0x1000458b"
+kind = "site"
+name = "material loader: +0x15c (G) = the header float when the record version is 3 or more"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000fafa"
+kind = "site"
+name = "payload sum: model interface slot 14 with part id 0, the first node of the root object"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000fb08"
+kind = "site"
+name = "payload sum: model interface slot 15 with part id 0, how many nodes the root object has"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000fb6f"
+kind = "site"
+name = "payload sum: a node in the root's range gives its density x volume back to spare payload, before armour"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000fc51"
+kind = "site"
+name = "spare payload = +0x4d8 - total mass, never below 0"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10005780"
+kind = "function"
+name = "model interface slot 14: index of the first node record whose +0 part id matches, -1 if none"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x100057c0"
+kind = "function"
+name = "model interface slot 15: how many node records carry a part id"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x100123e0"
+kind = "function"
+name = "model node record (0x130 bytes): +0 part id, +4 base node, +0x10 mesh << 16, +0x12c the mesh object"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x100123eb"
+kind = "site"
+name = "model node record: +0 = the part id it came with"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x1000311f"
+kind = "site"
+name = "agent creation: its own object enters the part list as id 0 (parent -1, attach -1)"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10016a70"
+kind = "function"
+name = "create the model and merge the root mesh as part 0 (message 0x80000020, id 0)"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10014e46"
+kind = "site"
+name = "spin integrator: the lean selectors, state +0x08, one byte per axis"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001538c"
+kind = "table"
+name = "lean selector jump table: 1-3 turn / (authored turn x dt), 4-6 velocity / authored top, 8-10 velocity change / authored accel, 7 none"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10014f80"
+kind = "site"
+name = "lean target = the selector's fraction x live triple 6 (+80), negated by bit 0x80"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x100151ae"
+kind = "site"
+name = "lean (body +0xa0) held within +/- live triple 6"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10014e5f"
+kind = "site"
+name = "lean kept at body +0xa0 (control +0x254)"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10015906"
+kind = "site"
+name = "velocity integrator: body +0x170 = this step's change of velocity"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000c3a2"
+kind = "site"
+name = "machine tick, righting: state +0x04 bit 0x400000 skips; 0xC0 aims at world up, 0x30 at the vector +0x348, through the hull matrix +0x264"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000c439"
+kind = "site"
+name = "righting toward the vector at control +0x348, which nothing in Control.dll writes by displacement"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000c4af"
+kind = "site"
+name = "righting: pitch taken when state bit 0x10 or 0x40 is set, roll when 0x20 or 0x80"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000c576"
+kind = "site"
+name = "righting angles into body +0x68 (control +0x21c)"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10014af9"
+kind = "site"
+name = "spin integrator: state bits 0x50 zero the spin about x, 0xa0 about y"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10014b0b"
+kind = "site"
+name = "spin integrator: the rotation step takes live triple 5 (+68) x the righting angles (body +0x68)"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002bbb1"
+kind = "site"
+name = "device property 1: the device's power level (+0x4c)"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002e6dd"
+kind = "site"
+name = "Control.dll's own ask for a device's power level (property 1): the positive control"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x100182ba"
+kind = "site"
+name = "docked refill asks a class-2 gun's power level (property 1): the only such ask outside Control.dll"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000dd6f"
+kind = "site"
+name = "IControl slot 13 id 0x12: a pointer to the live parameter block (+0x470)"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10005133"
+kind = "site"
+name = "unit takt: copy the live limits into the behaviour's +0x5fc"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1001bbe0"
+kind = "function"
+name = "behaviour +0x5fc and +0x614: live forward top, triple 2 y, top x/z, yaw turn, forward accel, from IControl slot 13 id 0x12"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x100051b0"
+kind = "site"
+name = "unit takt: live forward top >= 0.5 and > triple 2 y sets flag 0x800 (+0xa04) and runs the walker"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1000528f"
+kind = "site"
+name = "unit takt: top speed too low; clears flag 0x800, and the walker's queues if it was set"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1003dc90"
+kind = "function"
+name = "walker: clear its three target queues (+0xe8, +0xfc, +0x110)"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1003be4f"
+kind = "site"
+name = "MWalker::SetTarget: speed capped at live forward top x Movement_SpeedPercent x Speed_MaximumFactor (+0x8d4)"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1003bed0"
+kind = "site"
+name = "MWalker::SetTarget: speed held above triple 2 y x Movement_MinSpeedPercent"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1003bf05"
+kind = "site"
+name = "MWalker::SetTarget: speed held above 2"
+doc = "docs/24-motion.md"
+read = true
+
 # --- sensors: radar, detect shield, signatures, AI contacts, ../docs/25-sensors.md ---
 
 [[entry]]
@@ -8197,6 +8502,239 @@ at = "0x10029ba6"
 kind = "site"
 name = "gun rounds left (+0x124) restored from a stream"
 doc = "docs/29-weapons.md"
+read = true
+
+# --- chassis: load order, single pointers, the re-parse, class 3, research state ---
+[[entry]]
+module = "Behavior.dll"
+at = "0x1001d8eb"
+kind = "site"
+name = "unit built: \"Chassis created\", then each child of the root added with parent id 0"
+doc = "docs/28-chassis.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1001cd40"
+kind = "function"
+name = "\"Trying to add Sub Item\": send the part (0x80000020), read back its id, recurse into its children with it"
+doc = "docs/28-chassis.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10003775"
+kind = "site"
+name = "attach: a part takes the smallest id no listed part has"
+doc = "docs/28-chassis.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x1000a460"
+kind = "function"
+name = "model: merge a part's mesh; for a part id other than 0, node 0 is skipped and the rest appended from the attach node"
+doc = "docs/28-chassis.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x1000a79d"
+kind = "site"
+name = "merge: a part's local node index is one past the loop's, skipping its node 0"
+doc = "docs/28-chassis.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10008c6a"
+kind = "site"
+name = "loader: a part (+0xc0 set) skips its first .ndp record, matching the model"
+doc = "docs/28-chassis.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002d53c"
+kind = "site"
+name = "factory: turret pointer +0x5c8 overwritten by every class-1 record"
+doc = "docs/28-chassis.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002d5a0"
+kind = "site"
+name = "factory: deflector pointer +0x5d0 overwritten by every class-21 record"
+doc = "docs/28-chassis.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002d5d2"
+kind = "site"
+name = "factory: radar pointer +0x5d4 overwritten by every class-8 record"
+doc = "docs/28-chassis.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002d604"
+kind = "site"
+name = "factory: class-17 pointer +0x5d8 overwritten by every class-17 record"
+doc = "docs/28-chassis.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002d7b6"
+kind = "site"
+name = "factory: every class-27 record refreshes the armour struct (+0x5b4), made on the first"
+doc = "docs/28-chassis.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002d8ad"
+kind = "site"
+name = "re-parse: the device's slot 7 with the part's record and the node kept"
+doc = "docs/28-chassis.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10021d50"
+kind = "function"
+name = "shared component parser: record pointer +0x48, state +0x50 unless -1, 16 values to +0x54, names, entries appended"
+doc = "docs/28-chassis.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10021d93"
+kind = "site"
+name = "shared parser: the record's sixteen values copied over the device's (+0x54)"
+doc = "docs/28-chassis.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10021df3"
+kind = "site"
+name = "shared parser: the record's entries appended to the device's list (+0x20)"
+doc = "docs/28-chassis.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10020800"
+kind = "function"
+name = "CICLS_SIMPLE (class 3 and every class without a case): the plain 0xa4-byte device"
+doc = "docs/28-chassis.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10020900"
+kind = "function"
+name = "simple device tick: bytes 1 and 2 of its flags pick sources weighted by record +0x24/+0x28, added to its value; byte 0 sets it"
+doc = "docs/28-chassis.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10020d90"
+kind = "function"
+name = "simple device source by selector 2-14: spin, negated spin, lean / triple 6, velocity / top, speed / top"
+doc = "docs/28-chassis.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10020ea0"
+kind = "function"
+name = "simple device source by (axis, kind): control +0x1d4 spin, +0x254 lean / authored +0x3c, +0x1c8 velocity / authored +0x18"
+doc = "docs/28-chassis.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10048220"
+kind = "function"
+name = "robot constructor page builder: parts by name prefix"
+doc = "docs/28-chassis.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10048311"
+kind = "site"
+name = "constructor: the e_gun_ prefix"
+doc = "docs/28-chassis.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10048b38"
+kind = "site"
+name = "constructor chassis page: r_t, r_l, r_m, r_b offered as a 1-4 grade rises"
+doc = "docs/28-chassis.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10049126"
+kind = "site"
+name = "constructor: a name starting e_tur_ lists the catalogue by that prefix (0x1008a780)"
+doc = "docs/28-chassis.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1008a780"
+kind = "function"
+name = "constructor: collect the item list's entries whose names start with a prefix"
+doc = "docs/28-chassis.md"
+read = true
+
+[[entry]]
+module = "MisLoad.dll"
+at = "0x10002aa0"
+kind = "function"
+name = "research slot 26: item info -- TRF1 bit 2 researched, bit 1 available, bit 4 in the tree; the four costs; the part id"
+doc = "docs/28-chassis.md"
+read = true
+
+[[entry]]
+module = "MisLoad.dll"
+at = "0x10002c10"
+kind = "function"
+name = "research slot 30: finish item i if TRF1 bit 4, set bits 1|2; open every in-tree item whose prerequisites all have bits 4 and 2"
+doc = "docs/28-chassis.md"
+read = true
+
+[[entry]]
+module = "MisLoad.dll"
+at = "0x10002c35"
+kind = "site"
+name = "research slot 30: refuses an item without TRF1 bit 4 (out of the tree)"
+doc = "docs/28-chassis.md"
+read = true
+
+[[entry]]
+module = "MisLoad.dll"
+at = "0x100034b0"
+kind = "function"
+name = "research slot 48: save the items with TRF1 bit 2 (researched)"
+doc = "docs/28-chassis.md"
+read = true
+
+[[entry]]
+module = "MisLoad.dll"
+at = "0x100035f0"
+kind = "function"
+name = "research slot 49: restore TRF1 bit 2 on the saved items"
+doc = "docs/28-chassis.md"
 read = true
 
 # --- the search task's plan, ../docs/31-packages.md ---

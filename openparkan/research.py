@@ -181,6 +181,17 @@ TURRET_TYPES = {3: 0x1004000, 4: 0x1010000, 5: 0x1020000, 6: 0x1002000}
 TURRET_DEFAULT_TYPE = 0x1008000
 
 
+#: The same three bits under the names a second reading gave them
+#: (``MisLoad.dll`` slot 26, ``0x10002aa0``).  Finishing a research needs
+#: ``STATE_IN_TREE`` and sets the other two; an item in the tree becomes
+#: available once every prerequisite is researched (slot 30, ``0x10002c10``).
+#: So 7 is researched, 5 open, 4 locked, 2 researched outside the tree, and 0
+#: out of the tree.
+STATE_AVAILABLE = AVAILABLE
+STATE_RESEARCHED = RESEARCHED
+STATE_IN_TREE = IN_TREE
+
+
 class ResearchFormatError(ValueError):
     pass
 
@@ -276,14 +287,17 @@ class Item:
 
     @property
     def in_tree(self) -> bool:
+        """``IN_TREE``: part of this mission's tree at all."""
         return bool(self.category & IN_TREE)
 
     @property
     def researched(self) -> bool:
+        """``RESEARCHED``: already researched at the mission's start."""
         return bool(self.category & RESEARCHED)
 
     @property
     def available(self) -> bool:
+        """``AVAILABLE``: open to research at the mission's start."""
         return bool(self.category & AVAILABLE)
 
     @property

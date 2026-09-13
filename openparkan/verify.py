@@ -5038,6 +5038,54 @@ def check_motion(check, game: Path) -> None:
           f"value/power/kg by size -- {'; '.join(detail)}; the {len(elsewhere)} other "
           f"engines weigh 0.  Control.dll:0x1000fac0 adds a part's mass to its node")
 
+    # The lean: state +0x08 picks a source per axis, triple 6 is its limit.
+    leaning = [(name, s) for _lib, name, c in every for s in c.states if s.lean_word]
+    words = Counter(s.lean_word for _, s in leaning)
+    valid = all(((s.lean_word >> (8 * axis)) & 0x7F) in set(control.LEAN_SOURCES) | {0}
+                for _, s in leaning for axis in (0, 1))
+    no_yaw = all(not s.lean_word & 0xFFFF0000 for s in states)
+    wheels = {name for name, s in leaning if s.lean_word == 0x8389}
+    hero_leans = any(s.lean_word for lib, name, c in every
+                     if (lib, name) == ("bases.rlb", "r_h_02.ctl") for s in c.states)
+    check(".ctl: a state's +0x08 picks what leans the hull on pitch and roll",
+          valid and no_yaw and set(words) == {0x0386, 0x8389, 0x8405}
+          and wheels == {f"r_{s}_0{k}.ctl" for s in "lmb" for k in (3, 4)} and not hero_leans,
+          f"{len(leaning)} of {len(states)} states in {len({n for n, _ in leaning})} "
+          f"controllers set it: " + ", ".join(f"{w:#06x} on {n}" for w, n in sorted(words.items()))
+          + "; every selector names a source the spin integrator knows "
+          "(Control.dll:0x1001538c), byte 2 (yaw) is 0 on all, and 0x8389 is on exactly "
+          "the six wheeled and tracked chassis.  The lean is the source's fraction x "
+          "triple 6 (0x10014f80)")
+
+    righting = Counter(s.mode & (control.STATE_RIGHT_UP | control.STATE_RIGHT_TO_VECTOR
+                                 | control.STATE_NO_RIGHTING) for s in states)
+    mixed = sum(1 for s in states if s.mode & control.STATE_RIGHT_UP
+                and s.mode & control.STATE_RIGHT_TO_VECTOR)
+    by_name = defaultdict(set)
+    for _lib, name, c in every:
+        for s in c.states:
+            by_name[name].add(s.mode & (control.STATE_RIGHT_UP | control.STATE_RIGHT_TO_VECTOR))
+    ground = {f"r_{s}_0{k}.ctl" for s in "lmb" for k in (3, 4)}
+    check(".ctl: a state's +0x04 bits right the hull toward up or toward the ground",
+          not mixed and all(by_name[n] == {control.STATE_RIGHT_TO_VECTOR} for n in ground)
+          and by_name["r_h_02.ctl"] == {control.STATE_RIGHT_UP}
+          and righting[control.STATE_RIGHT_UP] and righting[control.STATE_RIGHT_TO_VECTOR],
+          f"of {len(states)} states {righting[control.STATE_RIGHT_UP]} set 0xC0 (up), "
+          f"{righting[control.STATE_RIGHT_TO_VECTOR]} set 0x30 (the vector at +0x348), "
+          f"{righting[control.STATE_NO_RIGHTING]} set 0x400000 (skip) and "
+          f"{righting[0]} none; none mixes the two.  All six wheeled and tracked "
+          f"chassis's states take 0x30, every hero state 0xC0 (Control.dll:0x1000c3a2)")
+
+    idle = {k: round(c.triples[control.TRIPLE_IDLE][1], 3) for k, c in joined.items()}
+    floors = Counter(idle.values())
+    check(".ctl: triple 2's forward component, the AI walker's floor, is under 2 m/s",
+          idle and set(floors) <= {0.0, 0.1, 0.49, 0.6}
+          and all(idle[p] == 0.6 for p in ("R_L_01", "R_M_01", "R_B_01", "R_B_05", "R_H_02"))
+          and idle["R_T_01"] == 0.49,
+          ", ".join(f"{v:g} on {n}" for v, n in sorted(floors.items()))
+          + f" of {len(idle)} chassis; Behavior.dll:0x1003bed0 holds an order's speed "
+          f"above it x Movement_MinSpeedPercent, and 0x1003bf05 above 2")
+
 
 #: The four marks of an internal part, by name suffix: MK1 to MK4.
 MARKS = ("df", "01", "02", "03")
@@ -6999,6 +7047,144 @@ def check_chassis(check, game: Path) -> None:
           hero_only and enemy_only and any(mission.CLAN_PLAYER in use[c] for c in PLAYER_CHASSIS),
           f"R_H_02 {dict(use['R_H_02'])}; " + ", ".join(f"{c} {dict(use[c])}" for c in special)
           + " (clan types: 1 player, 2 enemy, 3 neutral)")
+
+    # 8. what each part brings, in load order: records, nodes, and what a fitted
+    #    part keeps of its slot
+    arm = weapons.Armoury(game)
+    assemblies = sorted(game.glob("UNITS/**/*.dat"))
+    doubled = []
+    one_record = with_entries = into = 0
+    slot_entries: Counter[int] = Counter()
+    external_parts: set[str] = set()
+    for path in assemblies:
+        unit = objects.load_unit(path)
+        parents = unit.parents()
+        classes: Counter[int] = Counter()
+        firsts: dict[int, list[control.Component]] = {}
+        for i, c in enumerate(unit.components):
+            member = c.ref.member.lower()
+            record, parsed = library.get(member), arm.controller(member)
+            if record is None or parsed is None:
+                continue
+            if i == 0 or record.tag == objects.EXTERNAL_TAG:
+                firsts[i] = list(parsed.components)
+                classes.update(p.type_id for p in parsed.components)
+                if i:
+                    external_parts.add(member)
+            elif record.tag == objects.INTERNAL_TAG:
+                into += 1
+                one_record += len(parsed.components) == 1
+                with_entries += any(p.entries for p in parsed.components)
+                slots = firsts.get(parents[i], [])
+                if 0 <= c.attach_node < len(slots):
+                    slot = slots[c.attach_node]
+                    if slot.entries:
+                        slot_entries[slot.type_id] += 1
+                    classes[slot.type_id] -= 1
+                    classes[parsed.components[0].type_id] += 1
+        if any(classes[k] > 1 for k in control.SINGLE_POINTER_CLASSES):
+            doubled.append(path.name)
+    check("UNITS: no assembly loads two records of a single-pointer class",
+          assemblies and not doubled,
+          f"over {len(assemblies)} assemblies, counting the root's and every external "
+          f"part's records with each internal part in its slot, none has two of class "
+          f"1, 8, 9, 17, 21 or 27 -- the factory keeps the last (Control.dll:0x1002d56e)"
+          + (f"; doubled: {doubled[:4]}" if doubled else ""))
+    check("UNITS: a fitted part is one record with no entries, so a slot's entries stay",
+          into and one_record == into and not with_entries
+          and set(slot_entries) == {control.GUN_TYPE, control.RADAR_TYPE, control.DEFLECTOR_TYPE},
+          f"all {one_record}/{into} internal parts and clips carry exactly one record and "
+          f"none has entries; the slots they fill that do are "
+          + ", ".join(f"{n} of class {k}" for k, n in sorted(slot_entries.items()))
+          + " (guns, radars, deflectors).  The re-parse appends entries "
+          "(Control.dll:0x10021df3) and replaces the rest")
+
+    in_step = 0
+    for member in sorted(external_parts):
+        record = library.get(member)
+        if record.mesh and record.damage:
+            model = objmesh.parse(arm.read(record.mesh), record.mesh.member)
+            rows = objects.parse_damage(arm.read(record.damage), record.damage.member)
+            in_step += len(model.nodes) == len(rows)
+    check("objects.rlb: an external part's mesh and .ndp list the same nodes",
+          external_parts and in_step == len(external_parts),
+          f"{in_step}/{len(external_parts)} turrets and guns in the assemblies; both "
+          f"loaders drop node 0 of a part together (AniMesh.dll:0x1000a79d, "
+          f"Control.dll:0x10008c6a), so the two stay in step")
+
+    # 9. class 3, CICLS_SIMPLE: the wheels, tracks and rotors
+    simple = []
+    for path in all_archives(game):
+        archive = NResArchive.open(path)
+        for entry in archive:
+            if entry.tag.upper().startswith("CTL"):
+                blob = archive.read(entry)
+                try:
+                    parsed = control.parse(blob)
+                except control.ControlFormatError:
+                    continue
+                for p in parsed.components:
+                    if p.type_id == control.SIMPLE_TYPE:
+                        gains = struct.unpack_from("<2f", blob, p.offset + control.SIMPLE_GAINS_AT)
+                        simple.append((path.name.lower(), entry.name.lower(), p, gains))
+    on_chassis = {name for lib, name, _, _ in simple if lib == "bases.rlb"}
+    drive = {name for _, name, p, g in simple if p.flags in (0x01070C00, 0x02040C00)
+             and g == (1.0, 0.5)}
+    quiet = all(not any(p.values[1:]) and p.values[0] in (0.0, 0.5) and p.power == 0
+                for _, _, p, _ in simple)
+    half = sum(p.values[0] == 0.5 for _, _, p, _ in simple)
+    picks = all(((p.flags >> shift) & 0xFF) in set(control.SIMPLE_SOURCES) | {0, 1}
+                for _, _, p, _ in simple for shift in (0, 8, 16))
+    wheeled_tracked = {f"r_{s}_0{k}.ctl" for s in "lmb" for k in (3, 4)}
+    check(".ctl: the class-3 records are simple devices driven by the motion",
+          simple and quiet and picks and drive == wheeled_tracked,
+          f"{len(simple)} records, {sum(lib == 'bases.rlb' for lib, *_ in simple)} on "
+          f"{len(on_chassis)} chassis; zero power, values zero but a 0.5 first value on "
+          f"{half} flyer records, every flag byte "
+          f"0, 1 or a source 0x10020d90 knows; the forward-speed +/- half-turn drive "
+          f"(0x01070C00/0x02040C00 at gains 1 and 0.5) is on exactly the six wheeled "
+          f"and tracked chassis")
+
+    # 10. TRF1 is state bits: available, researched, in the tree
+    opened = locked = opened_ok = locked_ok = 0
+    for tree in trees:
+        for item in tree.items:
+            done = all(tree[r].researched for r in item.requires)
+            if item.category == research.STATE_IN_TREE | research.STATE_AVAILABLE:
+                opened += 1
+                opened_ok += done
+            elif item.category == research.STATE_IN_TREE:
+                locked += 1
+                locked_ok += not done
+    check(".trf: TRF1 is state bits -- an item opens once its prerequisites are researched",
+          opened and locked and opened_ok == opened and locked_ok == locked,
+          f"{opened_ok}/{opened} items in the tree and open (5) have every prerequisite "
+          f"researched (bit 2), and {locked_ok}/{locked} in the tree and locked (4) have "
+          f"one that is not -- MisLoad.dll slot 30's rule (0x10002c10); 0 is out of the tree")
+
+    # 11. the chassis's own body goes back to its payload
+    shop = units.Workshop(game)
+    loads = [shop.weigh(path) for path in assemblies
+             if objects.load_unit(path).components[0].ref.member.lower().startswith("r_")]
+    loads = [w for w in loads if w is not None]
+    fits = sum(not w.over for w in loads)
+    without = sum(w.total > w.payload for w in loads)
+    check("UNITS: with the chassis's own body given back, nearly every robot fits its payload",
+          loads and fits >= len(loads) - 10 and without > len(loads) // 3,
+          f"{fits} of {len(loads)} robots weigh no more than payload + body "
+          f"(units.Workshop.weigh; Control.dll:0x1000fb6f gives part 0's nodes back); "
+          f"counting the body against the payload, {without} would not")
+
+    # 12. the S-6f is named by the catalogue and the trees only
+    naming = set()
+    for path in sorted(game.rglob("*")):
+        if path.is_file() and path.suffix.lower() != ".trf" \
+                and b"r_l_06" in path.read_bytes().lower():
+            naming.add(path.name.lower())
+    check("install: only objects.rlb, objects.dlb and bases.rlb name r_l_06, besides the trees",
+          naming == {"objects.rlb", "objects.dlb", "bases.rlb"},
+          f"outside MISSIONS/SCRIPTS/*.trf the S-6f is named by {sorted(naming)}: no "
+          f"assembly, mission or binary")
 
 
 #: The catalogue sub-kinds that fire on energy alone.

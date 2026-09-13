@@ -71,8 +71,9 @@ class Chassis:
     #: The size of part each labelled slot takes, by family.
     slots: dict[str, str]
     #: What the chassis's own slot records carry -- its built-in battery
-    #: (capacity, output) and engine (drive, draw).  The engine sums them with
-    #: a fitted part's (docs/28-chassis.md).
+    #: (capacity, output) and engine (drive, draw).  A fitted part re-parses the
+    #: slot and none of these survive it (docs/28-chassis.md); they stand only
+    #: where nothing is fitted.
     battery: tuple[float, float]
     engine: tuple[float, float]
     cost: Cost
@@ -173,6 +174,33 @@ class Unit:
         return max((w.gun.round.range for w in self.weapons if w.gun.round), default=0.0)
 
 
+@dataclass
+class Load:
+    """What an assembly weighs, in kg, the way ``Control.dll:0x1000fac0`` sums it.
+
+    *Derived*: the sum is read, the figures are the shipped data put through it.
+    """
+
+    #: The root's authored payload, controller +124.
+    payload: float
+    #: The root object's own nodes, density x level-0 volume: what the sum
+    #: gives back to the payload (docs/24-motion.md).
+    body: float
+    #: Every merged node's density x volume, plus armour's weight over every
+    #: node's area when the unit has armour, plus every device's record mass.
+    total: float
+
+    @property
+    def spare(self) -> float:
+        """The spare payload, never below 0; 0 halves top speed."""
+        return max(0.0, self.payload + self.body - self.total)
+
+    @property
+    def over(self) -> bool:
+        """Whether the unit carries more than its payload allows."""
+        return self.total > self.payload + self.body
+
+
 class Workshop:
     """Everything a sheet is read from, opened once for many units."""
 
@@ -196,6 +224,60 @@ class Workshop:
     def _mesh(self, record: objects.ObjectRecord) -> mesh.ObjectMesh | None:
         ref = record.mesh
         return mesh.parse(self.armoury.read(ref), ref.member) if ref else None
+
+    def _node_weights(self, record: objects.ObjectRecord) -> list[tuple[float, float, float]]:
+        """Each node's (density, level-0 volume, level-0 area); zeros without a slot."""
+        model = self._mesh(record)
+        rows = self._damage(record)
+        if model is None:
+            return []
+        out = []
+        for node, row in zip(model.nodes, rows, strict=False):
+            index = node.slot_index[0]
+            slot = model.slots[index] if 0 <= index < len(model.slots) else None
+            out.append((row.unknown, slot.volume if slot else 0.0, slot.area if slot else 0.0))
+        return out
+
+    def weigh(self, dat: str | Path) -> Load | None:
+        """What an assembly weighs, and so its spare payload; None without a root controller.
+
+        Parts join in the file's order.  The root brings every node and record;
+        a turret or gun brings its nodes but its node 0, where it attaches, and
+        appends its records; an internal part or clip replaces the record at
+        its slot (docs/28-chassis.md).
+        """
+        unit = objects.load_unit(Path(dat))
+        parents = unit.parents()
+        devices: list[control.Component] = []
+        first_device: dict[int, int] = {}
+        nodes: list[tuple[float, float, float, bool]] = []
+        payload = None
+        for i, c in enumerate(unit.components):
+            member = c.ref.member.lower()
+            record = self.library.get(member)
+            parsed = self.armoury.controller(member)
+            if record is None or parsed is None:
+                continue
+            if i == 0 or record.tag == objects.EXTERNAL_TAG:
+                if i == 0:
+                    payload = parsed.payload
+                first_device[i] = len(devices)
+                devices.extend(parsed.components)
+                weights = self._node_weights(record)
+                nodes.extend((*w, i == 0) for w in (weights if i == 0 else weights[1:]))
+            elif record.tag == objects.INTERNAL_TAG and parsed.components \
+                    and parents[i] in first_device:
+                slot = first_device[parents[i]] + c.attach_node
+                if 0 <= slot < len(devices):
+                    devices[slot] = parsed.components[0]
+        if payload is None:
+            return None
+        armour = [d for d in devices if d.type_id == control.ARMOUR_TYPE]
+        per_area = armour[-1].values[0] if armour else 0.0
+        total = sum(density * volume + per_area * area for density, volume, area, _ in nodes)
+        total += sum(d.mass for d in devices)
+        body = sum(density * volume for density, volume, _area, root in nodes if root)
+        return Load(payload=payload, body=body, total=total)
 
     def _damage(self, record: objects.ObjectRecord) -> list[objects.NodeDamage]:
         ref = record.damage
