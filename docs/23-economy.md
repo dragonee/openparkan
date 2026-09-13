@@ -106,7 +106,7 @@ inference, and only `0x1005` happened to agree with the real table. With the
 table read, the rate is the off-board one, a mine's is non-zero, and the
 tutorial and the code agree.
 
-## Power is shared in two tiers — *read*
+## The sharing formula has two tiers — *read*
 
 `Behavior.dll:0x10019e80` runs once per clan per distribution step and logs
 every quantity it uses. Generators are the building types `0x80000002`,
@@ -116,8 +116,8 @@ every quantity it uses. Generators are the building types `0x80000002`,
 lacks**: its need times one minus its current fill.
 
 The step then totals supply (`fPowerAvailable`) against demand
-(`fPowerUsage`), with demand split by a per-building priority (`fPriority`)
-into a first tier and the rest, and fills them in order:
+(`fPowerUsage`), with part of each building's demand, set by its priority
+(`fPriority`), counted as a first tier, and fills the tiers in order:
 
 ```
 if Available ≤ FirstTier:       A = Available / FirstTier;  B = 0;  Take = 1
@@ -127,13 +127,65 @@ else:                           A = 1;  B = 1;  Take = Total / Available
 
 **`fPowerA`** is the share of first-tier demand met, **`fPowerB`** the share of
 the rest, and **`fPowerTake`** the share of the generated power actually drawn —
-below 1 only when there is a surplus, which is simply not taken. Each consumer's
-charge is then topped up by what it lacked times its tier's share; a generator
-is set straight to full. Ore goes through the identical formula as `fOreA`,
-`fOreB` and `fOreTake`.
+below 1 only when there is a surplus, which is simply not taken. A generator is
+set straight to full. Ore goes through the identical formula as `fOreA`, `fOreB`
+and `fOreTake`, with a holder's ore and a consumer's free ore space in place of
+power and charge.
 
-*Unknown:* what sets a building's `fPriority`, so which buildings are first
-tier.
+**The tiers are not a set of buildings.** A priority `p` is a number, and it
+splits *each* building's demand: the first tier is `Σ want × p`, and a consumer
+is topped up by
+
+```
+received = want × (p × A + (1 − p) × B)
+```
+
+*read*, at `0x1001a7cb` for power and `0x1001a881` for ore.
+
+## Every building has the same priority — *read*
+
+The distributor keeps one 0x1c-byte record per building — id, priority, a lock
+flag, and the power and ore wanted and received — and its vtable
+(`Behavior.dll:0x10059794`) manages the priorities so that **they always sum to
+1**:
+
+| slot | address | what it does |
+|---|---|---|
+| 3 | `0x1001a9a0` | set one building's priority and lock flag, clamped to what the locked ones leave |
+| 4 | `0x1001aac0` | add a building at `1 / (n + 1)` |
+| 8 | `0x1001abf0` | remove a building |
+| 10 | `0x1001ac50` | reset every priority to `1 / n` and unlock all |
+
+After each change `0x1001ac90` rescales the unlocked priorities to fill whatever
+the changed and locked ones leave.
+
+**Only add and remove are ever called.** A building's behaviour registers
+itself when it joins a clan and unregisters when it leaves
+(`Behavior.dll:0x100060dc` and three more; `0x10008f71`, `0x1000ce6b`),
+reaching the distributor through `ai.dll`'s `GetSuperAI(clan)` — imported by
+ordinal — and SuperAI slot 11. Adding at `1 / (n + 1)` and rescaling the rest
+keeps every share equal, and so does removing. **No call to the setter or the
+reset exists anywhere in the install:** across every module, 87 indirect calls
+at the setter's offset push four values since the last call or branch; 68 of
+those push an address built by `lea`, which none of the setter's arguments is,
+and the other 19 turn out to be a function's own register saves plus one
+argument, or a different interface's `(self, id, flags)`. The lock flag, which
+only the setter writes, is therefore never set. That negative is a search, not
+a proof: a call that computed an argument by calling something else between its
+pushes would be missed.
+
+**With every `p` equal, the two tiers collapse.** Put `p` into the formula. If
+`Available ≤ p × Total`, a building receives `want × p × Available / (p ×
+Total)`; otherwise `want × (p + (1 − p)(Available − p × Total) / ((1 − p) ×
+Total))`. Both come to the same thing:
+
+```
+received = want × min(1, Available / Total)
+```
+
+So **no building is served first**. When power or ore is short, every consumer
+gets the same fraction of what it lacks, and that fraction is what the clan
+produces over what all of its consumers want.
 
 ## Research — *read*
 
@@ -248,10 +300,10 @@ construction slows research.
 - **Slower when low** — *read*, for both the factory and research. Power and
   ore accrue in proportion to efficiency, and progress is the smallest of the
   three completion fractions, so whichever resource is short sets the pace.
-- **Construction slowing research** — *guess*. The factory draws 4 power and 5
-  ore from the same pool the institute draws 3 and 1 from, so while it builds
-  the institute's tier gets a smaller share. Which tier each sits in is
-  unread, so how much smaller is too.
+- **Construction slowing research** — *read*, when the clan is short. Every
+  consumer gets the same fraction of what it lacks, `Available / Total`, and a
+  building factory adds its own want to `Total`. With a surplus the fraction
+  is already 1 and building costs research nothing.
 - **A mine ≈ 11%** — *read*, and exact. The ore bar divides held ore by 4500,
   one full mine plus one full storage, and a full mine holds 500: 11.1%.
 - **One power plant ≈ 33%** — *read*, and confirmed on The Convoy. The energy
@@ -262,4 +314,4 @@ construction slows research.
 
 ## Not established
 
-- `fPriority`, and properties `0x300`–`0x305`.
+- Properties `0x300`–`0x305`.

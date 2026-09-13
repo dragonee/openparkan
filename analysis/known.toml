@@ -1564,3 +1564,76 @@ kind = "function"
 name = "MBehaviour variable by id: 0x1001 OnBoard, 0x1002 KPD x OffBoard, 0x1004/5 power in/out"
 doc = "docs/23-economy.md"
 read = true
+
+# --- the distributor's priorities, ../docs/23-economy.md --------------------
+[[entry]]
+module = "Behavior.dll"
+at = "0x10059794"
+kind = "datum"
+name = "resource distributor vtable, 13 slots; the 0x304 interface at +4"
+doc = "docs/23-economy.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1001a9a0"
+kind = "function"
+name = "distributor slot 3: set priority and lock, clamped; never called"
+doc = "docs/23-economy.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1001aac0"
+kind = "function"
+name = "distributor slot 4: add a building at 1/(n+1)"
+doc = "docs/23-economy.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1001abf0"
+kind = "function"
+name = "distributor slot 8: remove a building"
+doc = "docs/23-economy.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1001ac50"
+kind = "function"
+name = "distributor slot 10: every priority to 1/n, unlocked; never called"
+doc = "docs/23-economy.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1001ac90"
+kind = "function"
+name = "distributor: rescale unlocked priorities so all sum to 1"
+doc = "docs/23-economy.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1001ae70"
+kind = "function"
+name = "distributor QueryInterface: 0 and 0x304"
+doc = "docs/23-economy.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x100060dc"
+kind = "site"
+name = "a building behaviour adds itself to its clan's distributor"
+doc = "docs/23-economy.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10008f71"
+kind = "site"
+name = "a building behaviour removes itself from its clan's distributor"
+doc = "docs/23-economy.md"
+read = true
