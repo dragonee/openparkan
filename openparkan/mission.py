@@ -228,6 +228,13 @@ CLAN_PLAYER = 1
 CLAN_ENEMY = 2
 CLAN_NEUTRAL = 3
 
+#: A relation word, as the mission file and a clan's SuperAI both hold it
+#: (``ai.dll:0x10005e80``).  A unit's behaviour takes another clan's units as
+#: hostile on 0 and friendly on 2 (``Behavior.dll:0x1000d460``, ``0x1000d4f0``).
+RELATION_HOSTILE = 0
+RELATION_NEUTRAL = 1
+RELATION_ALLIED = 2
+
 
 @dataclass
 class Clan:
@@ -239,8 +246,9 @@ class Clan:
     ai_script: str
     behaviour: str
     zones: list[Zone] = field(default_factory=list)
-    #: clan name -> relation word (1 towards itself, 0 towards the others in
-    #: every shipped mission, so it reads as an alliance matrix)
+    #: clan name -> relation word, ``RELATION_*``: 0 hostile, 1 neutral, 2
+    #: allied.  Every shipped clan writes 1 towards itself, which the loader
+    #: overrides with 2; see ``Mission.relations``.
     relations: dict[str, int] = field(default_factory=dict)
     #: ``(parent, minds)`` as the file holds them; see ``minds``.
     unknown: tuple[int, int] = (0, 0)
@@ -461,6 +469,34 @@ class Mission:
 
     def clan_by_index(self, index: int) -> Clan | None:
         return next((c for c in self.clans if c.index == index), None)
+
+    def relations(self) -> list[list[int]]:
+        """What each clan's SuperAI starts out holding towards each other clan.
+
+        ``result[i][j]`` is clan *i*'s ``RELATION_*`` towards clan *j*, in file
+        order.  ``MisLoad.dll`` (``0x100015b0``) files each relation word
+        under the clan its name matches, ignoring case; a clan it names no word
+        for stays hostile.  A neutral clan holds 1 towards everyone and everyone
+        1 towards it, and every clan holds 2 towards itself.  ``iron3d.dll``
+        then hands every entry to the clan's SuperAI (``0x100a2773``).
+        """
+        index = {c.name.lower(): i for i, c in enumerate(self.clans)}
+        n = len(self.clans)
+        matrix = [[RELATION_HOSTILE] * n for _ in range(n)]
+        for i, clan in enumerate(self.clans):
+            for other, word in clan.relations.items():
+                j = index.get(other.lower())
+                if j is not None:
+                    matrix[i][j] = word
+            if clan.type == CLAN_NEUTRAL:
+                matrix[i] = [RELATION_NEUTRAL] * n
+        for i in range(n):
+            for j in range(n):
+                if i == j:
+                    matrix[i][j] = RELATION_ALLIED
+                elif self.clans[j].type == CLAN_NEUTRAL:
+                    matrix[i][j] = RELATION_NEUTRAL
+        return matrix
 
 
 def _read_clan(r: _Reader) -> Clan:

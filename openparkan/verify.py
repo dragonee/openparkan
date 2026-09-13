@@ -6225,6 +6225,42 @@ def check_sensors(check, game: Path) -> None:
           f"{buildings[('bunker/tower', 1)]} bunkers and towers carry one "
           f"e_gun_fs radar; the other {buildings[('other', 0)]} buildings none")
 
+    # -- clan relations: the file's words are the SuperAI's ------------------
+    words: Counter[tuple[str, int]] = Counter()
+    pairs: Counter[tuple[int, int]] = Counter()
+    unmatched = overridden = 0
+    missions = [mission.load(p) for p in sorted(game.glob("MISSIONS/**/data.tma"))]
+    for m in missions:
+        by_name = {c.name.lower(): c for c in m.clans}
+        for clan in m.clans:
+            for other, word in clan.relations.items():
+                target = by_name.get(other.lower())
+                unmatched += target is None
+                if target is clan:
+                    words[("self", word)] += 1
+                elif target is not None:
+                    words[("other", word)] += 1
+                    # MisLoad.dll forces 1 to and from a neutral clan
+                    overridden += (mission.CLAN_NEUTRAL in (clan.type, target.type)
+                                   and word != mission.RELATION_NEUTRAL)
+        matrix = m.relations()
+        for i in range(len(m.clans)):
+            for j in range(i + 1, len(m.clans)):
+                pairs[(matrix[i][j], matrix[j][i])] += 1
+    others = {w: n for (k, w), n in words.items() if k == "other"}
+    selves = {w for (k, w) in words if k == "self"}
+    check("data.tma: a relation word is 0, 1 or 2, and the clans agree pairwise",
+          set(others) == {0, 1, 2} and selves == {1}
+          and not unmatched and not overridden
+          and all(a == b for a, b in pairs) and len(pairs) == 3,
+          f"towards other clans {dict(sorted(others.items()))}, towards itself 1 on "
+          f"{words[('self', 1)]} (the loader makes it 2, MisLoad.dll:0x100015b0); "
+          f"{unmatched} name no clan and {overridden} words to or from a neutral "
+          f"clan differ from the 1 the loader forces.  Across {len(missions)} "
+          f"missions every pair of clans holds the same word each way: "
+          + ", ".join(f"{a} on {n}" for (a, _b), n in sorted(pairs.items()))
+          + " (0 hostile, 1 neutral, 2 allied; ai.dll:0x10005e80)")
+
 
 #: ``Iron_3D.ini``'s ``[LEVEL_RATIO]``: what an enemy warrior's hit points,
 #: shields and gun damage are scaled by at each difficulty.
@@ -6354,6 +6390,20 @@ def check_hit_test(check, game: Path) -> None:
           f"radius (fastest {ratios[-1][1]} x{ratios[-1][0]:.0f}, slowest "
           f"{ratios[0][1]} x{ratios[0][0]:.2f}; {missing} name an absent .ctl)")
 
+    # A round's swept sphere is its mesh header's sphere (AniMesh.dll:0x1000a891,
+    # 0x10009510): one part, scale 1.
+    radii = {}
+    for record in library.by_tag("BULL"):
+        m = mesh_of(record)
+        if m is not None:
+            radii[record.name.lower()] = m.collision_radius()
+    positive = [r for r in radii.values() if r > 0]
+    hero_radii = ", ".join(f"{n} {radii[n]:.3g}" for n in HERO_ROUNDS if n in radii)
+    check("weapon.rlb: every round's mesh header carries the sphere it sweeps",
+          radii and len(positive) == len(radii),
+          f"{len(positive)}/{len(radii)} BULL rounds with a mesh have a header sphere "
+          f"of radius {min(positive):.3g}-{max(positive):.3g}; the hero's: {hero_radii}")
+
 
 def check_combat(check, game: Path) -> None:
     """Damage, shields, armour and repair, against the shipped data."""
@@ -6436,6 +6486,42 @@ def check_combat(check, game: Path) -> None:
           f"{len(fortif_deflector)} a deflector; the {len(deflectors)} "
           f"deflectors are in {dict(where)}")
 
+    # ---- which sector is the front: a model's +y.  The running gear's names put
+    # a front (F) or back (B) letter beside their side letter.
+    front = back = wrong = 0
+    for libname in ("bases.rlb", "animals.rlb"):
+        archive = NResArchive.open(game / libname)
+        meshes = {e.name.lower()[:-4]: e for e in archive if e.tag.upper().startswith("MESH")}
+        for entry in archive:
+            stem = entry.name.lower()[:-4]
+            if not entry.name.lower().endswith(".ndp") or stem not in meshes:
+                continue
+            rows = objects.parse_damage(archive.read(entry), entry.name)
+            gear = [(i, r.flags) for i, r in enumerate(rows)
+                    if r.flags in (objects.LEFT_GEAR, objects.RIGHT_GEAR)]
+            if not gear:
+                continue
+            model = objmesh.parse(archive.read(meshes[stem]), meshes[stem].name)
+            for i, flags in gear:
+                word = model.nodes[i].name.split("_")[0]
+                side = "L" if flags == objects.LEFT_GEAR else "R"
+                at = word.rfind(side)
+                beside = {word[at - 1] if at > 0 else "", word[at + 1: at + 2]}
+                y = model.world_pose(i)[0][1]
+                if beside & {"F"} and not beside & {"B"}:
+                    front += y > 0
+                    wrong += y <= 0
+                elif beside & {"B"} and not beside & {"F"}:
+                    back += y < 0
+                    wrong += y >= 0
+    check("bases.rlb: a machine's front is +y, so shield sector 0 is the front",
+          front and back and not wrong,
+          f"of the running-gear nodes whose name puts F or B beside the side letter "
+          f"(LFdd, WFRa, TBL, WMLB ...), all {front} front ones rest at y > 0 and all "
+          f"{back} back ones at y < 0 ({wrong} disagree); the sector test turns the "
+          f"hit into the object's frame first (Control.dll:0x1002c666) and gives +y "
+          f"sector 0, -x 2 (the left gear's side) and +x 3")
+
     armour = [(a, p) for a, _, p in parts[control.ARMOUR_TYPE]]
     chassis = [p for a, p in armour if a == "bases.rlb"]
     fitted = [p for a, p in armour if a == "intsys.rlb"]
@@ -6475,19 +6561,44 @@ def check_combat(check, game: Path) -> None:
               for k, v in sorted(by_size.items(), key=lambda kv: medians[kv[0]])))
 
     fortif = NResArchive.open(game / "fortif.rlb")
-    frail = total_b = 0
+    fortif_meshes = {e.name.lower()[:-4]: e for e in fortif if e.tag.upper().startswith("MESH")}
+    frail = total_b = frail_bare = sturdy_bare = 0
     for entry in fortif:
         name = entry.name.lower()
         if not name.endswith(".ndp"):
             continue
         table = objects.parse_damage(fortif.read(entry), name)
         total_b += 1
-        frail += table[0].durability <= 1 and len(table) > 1
+        stub = table[0].durability <= 1 and len(table) > 1
+        frail += stub
+        if name[:-4] in fortif_meshes:
+            model = objmesh.parse(fortif.read(fortif_meshes[name[:-4]]), name)
+            bare = model.nodes[0].hit_slot() is None
+            frail_bare += stub and bare
+            sturdy_bare += not stub and bare
     check("fortif.rlb: a building's first node can be a 1-hit-point stub",
-          frail > 0,
+          frail > 0 and frail_bare == frail and not sturdy_bare,
           f"{frail}/{total_b} building tables give node 0 one hit point among "
-          f"sturdier parts; Control.dll:0x100110ab spares a type-3 object when "
-          f"node 0 goes, where a unit dies")
+          f"sturdier parts, and on all {frail_bare} of them node 0 has no level-0 "
+          f"geometry for a round to strike, where it has on every other table "
+          f"({sturdy_bare} bare).  A building is agent kind 3 (Terrain.dll:0x10057da0), "
+          f"which Control.dll:0x100110ab only marks when node 0 goes, where a unit dies")
+
+    # ---- the .exp's two floats after the radius: 1.0 everywhere, and unread
+    pair_values: Counter[tuple[float, float]] = Counter()
+    for path in sorted(game.glob("*.rlb")):
+        try:
+            archive = NResArchive.open(path)
+        except NotAnNResArchive:
+            continue
+        for entry in archive:
+            if entry.name.lower().endswith(".exp"):
+                pair_values[effects.parse_explosion(archive.read(entry), entry.name).values] += 1
+    check("*.exp: the two floats after the radius are 1.0 on every explosion",
+          list(pair_values) == [(1.0, 1.0)],
+          f"{dict(pair_values)}; the one place an .exp record is fetched "
+          f"(Control.dll:0x100113db) reads its +4, +8 and +0x14 and its names, and "
+          f"the hits it builds read only its kind -- +0xc and +0x10 are not read")
 
 
 #: The largest size class that may capture a building (``Behavior.dll:0x100301a9``).
@@ -6795,6 +6906,23 @@ def check_repair(check, game: Path) -> None:
           len(panels) == 16 and all(("Regeneration", "HP/s") in v for v in panels.values()),
           f"{sum(('Regeneration', 'HP/s') in v for v in panels.values())}/{len(panels)} "
           f"i_rps catalogue entries show Regeneration HP/s")
+
+    # 4b. the row's field, regener, is query 0x77: a class-15 device's value 0 x
+    # condition (a class-9 device would give value 1).  Only repair parts use it,
+    # and each part's first device is its repair system.
+    regener = Counter(k.lower()[:5] for k, d in lib.items()
+                      for s in d.stats if s.field == "regener")
+    first_is_repair = 0
+    intsys = NResArchive.open(game / "intsys.rlb")
+    for entry in intsys:
+        if entry.tag.upper().startswith("CTL") and entry.name.lower().startswith("o_rps_"):
+            parsed = control.parse(intsys.read(entry), names)
+            first_is_repair += parsed.components[0].type_id == control.REPAIR_TYPE
+    check("objects.dlb: the Regeneration row reads the part's repair rate",
+          dict(regener) == {"i_rps": 16} and first_is_repair == 16,
+          f"field 'regener' on {dict(regener)}; the first device of {first_is_repair}/16 "
+          f"o_rps controllers is class 15, whose value 0 x condition the field's "
+          f"query answers (iron3d.dll:0x1006f62c id 0x77 -> Control.dll:0x1002c1b6)")
 
     # 5. every robot and nearly every building is fitted with one
     fitted: Counter = Counter()

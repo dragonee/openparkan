@@ -4,6 +4,9 @@
 >
 > - What ends a round on a hit is closed: action 17 in its `+0x4e4` group kills it (docs/11, docs/26).
 > - A round's owner is the whole robot, not the gun (docs/29, *The round's start*).
+> - The sweep ends are read, not guessed: the agent sends message 1 to its collision object before its control system ticks and message 0x1c to it right after (AniMesh:0x10001370), so `start`/`end` are the sphere centre before and after the move (docs/26, *The hit test*).
+> - A round's collision radius is its mesh's stream-2 header sphere, times the largest scale (AniMesh:0x1000a891, 0x10009510; docs/26).
+> - Shield sector 0 (+y) is the front, 2 (−x) the left (docs/26, *Shields*).
 # The hit test, for the Rust engine
 
 Labels: **read** = recovered from the code at the address given; **measured** =

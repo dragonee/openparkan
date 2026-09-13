@@ -319,6 +319,32 @@ STROKE_MS = 1000.0
 #: recharge a second, the charge a point costs (``Control.dll:0x100257b0``).
 FIGHT_SHIELD_TYPE = 9
 SHIELD_SECTORS = 6
+#: Which way each shield sector faces, in the object's own frame -- +y ahead,
+#: +x to the right, +z up (``Control.dll:0x1002c590`` turns the hit into that
+#: frame first).  Sector 0 is the front, 1 the back, 2 the left, 3 the right.
+SECTOR_FRONT, SECTOR_BACK, SECTOR_LEFT, SECTOR_RIGHT, SECTOR_TOP, SECTOR_BOTTOM = range(6)
+SECTOR_AXES = ((0, 1, 0), (0, -1, 0), (-1, 0, 0), (1, 0, 0), (0, 0, 1), (0, 0, -1))
+
+
+def shield_sector(direction: tuple[float, float, float]) -> int:
+    """The sector a hit from ``direction`` (object frame, centre to hit) lands in.
+
+    The dominant axis decides, tested in ``SECTOR_AXES`` order, so a tie goes
+    to the earlier sector: a hit straight along a diagonal between front and
+    right is the front's, and so is a zero vector.
+    """
+    x, y, z = direction
+    if y >= abs(x) and y >= abs(z):
+        return SECTOR_FRONT
+    if y <= -abs(x) and y <= -abs(z):
+        return SECTOR_BACK
+    if x <= -abs(y) and x <= -abs(z):
+        return SECTOR_LEFT
+    if x >= abs(y) and x >= abs(z):
+        return SECTOR_RIGHT
+    if z >= abs(x) and z >= abs(y):
+        return SECTOR_TOP
+    return SECTOR_BOTTOM
 #: ``CICLS_REPAIRSYS``.  Values: the points it restores a second, the charge
 #: a point costs (``0x10022bb0``).  It repairs only its own object, starts
 #: switched off, and values 2-15 are zero on every record: it has no reach.

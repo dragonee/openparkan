@@ -50,6 +50,17 @@ def test_a_node_weighs_by_its_level_zero_slot_only():
     assert mesh.ObjectMesh.node_volume(model, 1) == 0.0
 
 
+def test_a_single_part_sweeps_its_header_sphere_times_its_largest_scale():
+    from types import SimpleNamespace
+    volume = mesh.BoundingVolume(corners=[(0.0, 0.0, 0.0)] * 8, centre=(0.0, 0.0, 0.0),
+                                 radius=0.75, axis_low=(0.0, 0.0, 0.0),
+                                 axis_high=(0.0, 0.0, 0.0), axis_radius=0.0)
+    model = SimpleNamespace(volume=volume)
+    assert mesh.ObjectMesh.collision_radius(model) == 0.75
+    assert mesh.ObjectMesh.collision_radius(model, (1.0, 2.0, 0.5)) == 1.5
+    assert mesh.ObjectMesh.collision_radius(SimpleNamespace(volume=None)) == 0.0
+
+
 def test_a_round_is_tested_against_level_zero_never_the_fifth_slot():
     n = node([7, 8, N, N, 9])
     assert n.hit_slot() == 7

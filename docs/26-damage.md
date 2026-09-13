@@ -30,10 +30,35 @@ Each node of a model has a life, built from its `.ndp` record
   kind `LoadControlSystem` is given) is 3, which is only marked (`0x100110ab`).
   A radar never detects an object whose word reads `0xfffe`
   ([25-sensors.md](25-sensors.md#a-scan-is-a-sphere-a-falloff-and-three-tests--read)),
-  so that it passes over wrecks is a *guess* that joins the two. That kind 3 is a
-  building is a *guess*; it fits the data: 12 of the 30 building tables in
-  `fortif.rlb` give node 0 one hit point beside parts of 40,000–500,000, which
-  would make those buildings die at the first scratch.
+  so that it passes over wrecks is a *guess* that joins the two.
+- **Agent kind 3 is a building** — *read*. An agent with a parent takes the
+  parent's kind (`AniMesh.dll:0x10003174`, `IGameObject` slot 11) instead of
+  one from its `objects.rlb` tag; a building's agent is loaded by
+  `Terrain.dll`'s `CBuilding` — the object `LoadBuilding` makes for a `FORT`
+  record — with the building as its parent (`Terrain.dll:0x10055e95`), and
+  the building's slot 11 returns 3 (`0x10057da0`). The same agent build gives a
+  kind-3 agent a hall-way graph and a collision manager of its own
+  (`AniMesh.dll:0x10003488`).
+- **A building whose node 0 dies becomes a shell** — *read*. Its owner word
+  reads `0xfffe`, the id the behaviour code calls `DETID_KILLED`; on its next
+  takt the behaviour sees it and sets its killed flag `0x1000`
+  (`Behavior.dll:0x10004d65`), and from then on the takt returns at once — no
+  radar module, no docks or places, no building takt (so no repair decision
+  and no production), no fire control (`0x10004d54`). Only the behaviour's
+  constructor clears that flag (`0x10003c85`). The object is not removed: its
+  model and its other nodes stay, and they can still be shot apart.
+  `iron3d.dll` compares with `0xfffe` in 37 places; the one read, a walker
+  over its registered objects by an id and a mask of type bits
+  (`iron3d.dll:0x1007dee0`) — a clan and a `Type` mask, by the look of it, a
+  *guess* — passes such an object over, so to it the building is gone. The
+  rest, and what calls that walker, were not read.
+- **Which buildings that can happen to** — *measured*. 12 of the 30 building
+  tables in `fortif.rlb` give node 0 one hit point beside parts of
+  40,000–500,000 — mines, plants, stores, the generator, the hangar and the medium
+  main teleport — and on **all 12 node 0 has no level-0 geometry**, where it has
+  on all 18 others. A round, which strikes level 0 only
+  ([the hit test](#the-hit-test--read-and-measured)), can never hit that node;
+  that a blast cannot either, having no sphere to overlap, is a *guess*.
 - **Damage stages.** A node with *N* damage states (the extra mesh blocks) is
   in stage `N − ceil(N × life / max)`; each step up plays the node's `.exp`
   explosion (`0x10011220`).
@@ -102,7 +127,15 @@ for 150, a big one `bb_b_01` for 900, lasers for 200–1,700.
 The hit is queued on the object that exploded and applied on its tick
 (`0x10012ce0`):
 
-- **Kind 2** goes to the object and node the round struck.
+- **Kind 2** goes to the object and node the round struck. The hit learns
+  them from the round's own collision object: when node 0's stage explodes, it
+  takes the contact record's face reference — object, node, batch, triangle in
+  batch, triangle, as the mesh test wrote it (`Control.dll:0x1001d9d0`) — and
+  copies its **first three** into the hit's `+0xc`, `+0x10` and `+0x14`
+  (`0x10011479`). A round stopped by a shield bubble wrote that reference
+  itself (`0x1000d23f`): the object, node **−2** and the **sector** in the
+  third place — which is how a hit "names no node of its own and carries its
+  sector" ([below](#shields-a-generator-a-deflector-six-sectors--read-and-measured)).
 - **Kind 3** hits the exploding object's own nodes, then **every object whose
   bounds reach the blast**, through `ILifeSystem` slot 8.
 - A hit does nothing if the object that fired it no longer exists, if it is
@@ -145,10 +178,34 @@ kind comes from the `objects.rlb` tag (`AniMesh.dll:0x1000317f`):
 | `STAT` | 81 | 10 |
 | any other | — | the kind of the object it hangs on |
 
-Only rounds and units carry a contact record. A collision object sets its
-start and end to its bounding sphere's centre on message 1 (`0x1001fec0`) and
-moves its end there again on message `0x1c` (`0x10020010`); how the two ends
-differ when the pass runs between them is *not established*.
+The parent comes first: an agent with a parent takes the parent's kind
+whatever its own tag (`0x10003174`), and a building's agent hangs on
+`Terrain.dll`'s `CBuilding`, which answers 3 (`Terrain.dll:0x10057da0`).
+
+Only rounds and units carry a contact record.
+
+**The sweep runs from where the object was to where its tick left it** —
+*read*. A collision object sets its start and end to its agent's world
+bounding-sphere centre on message 1 (`0x1001fec0`) and moves its end there on
+message `0x1c` (`0x10020010`). The agent hands message 1 to its components in
+a fixed order (`AniMesh.dll:0x10001370`): the behaviour, the wizard, **the
+collision object** — start = end = the centre now — then **the control
+system**, whose tick moves the object, and then, still inside message 1,
+**message `0x1c` to the collision object** alone (`0x1000145a`), which moves
+the end to the centre after the move. So when the world's pass runs, the
+segment is this frame's motion of the sphere centre, and the world's own
+`0x1c` broadcast afterwards only writes the same end again.
+
+**The radius is the mesh header's sphere** — *read*. Each part of an agent
+keeps its mesh's stream-2 header — box, sphere, cylinder
+(`AniMesh.dll:0x1000a891`) — and the agent's sphere is recomputed from them at
+the current pose: the parts' centres weighted by their radii, a radius reaching
+the farthest part's sphere, then the centre times each scale and the radius
+times the largest (`0x10009510`). Interface `0x18` slot 9 hands that sphere
+out, its centre moved to world space and its radius as it is
+(`0x10014580`), and message 1 stores that radius. A round is one part, so its
+radius is its header's radius — 0.103 to 1.41 on the 67 `BULL` rounds, 0.121
+on the hero's cannon shell and laser bolt (*measured*).
 
 **The pass** does three things:
 
@@ -235,9 +292,19 @@ dominant axis after the object's matrix is applied (`0x1002c590`):
 
 | sector | 0 | 1 | 2 | 3 | 4 | 5 |
 |---|---|---|---|---|---|---|
-| axis | +y | −y | −x | +x | +z, top | −z, bottom |
+| axis | +y | −y | −x | +x | +z | −z |
+| side | **front** | back | left | right | top | bottom |
 
-Which of ±x and ±y is the front is not established here.
+**Sector 0 is the front** — *read*, and *measured*. The test first turns the
+hit's offset from the bubble's centre into the object's own frame — the
+transpose of its matrix, `Ngi32.dll`'s `g_FastProc` slot `0x8c`
+(`Control.dll:0x1002c666`) — and ties go to the lower sector. In that frame a
+machine moves along +y ([24-motion.md](24-motion.md#the-pieces--read)),
+and the models agree: every running-gear node whose name puts `F` beside its
+side letter (`LFdd`, `WFRa`, `TMFL` …) rests at y > 0 and every one with `B`
+(`LBdd`, `TBR`, `WMLB` …) at y < 0 — 18 and 16 of them — while the left gear
+sits at x < 0 ([07-objects.md](07-objects.md)). `openparkan.control.shield_sector`
+gives the sector for a direction.
 
 **How much it stops.** A sector's effective strength is
 
@@ -353,6 +420,15 @@ anybody else" below).
 - **No reach:** values 2–15 are zero on all 64 records (*measured*), so there
   is no range, no target and no radius. The catalogue agrees: all 16 `i_rps`
   entries in `objects.dlb` show a single **"Regeneration", in HP/s**.
+- **What that row prints** — *read*, and *measured*. Its field, `regener`, is
+  the stat panel's field 13 (`iron3d.dll:0x1006f070`), which asks the part's
+  interface `0x202` slot 3 for id `0x77` on device 0 (`0x1006f62c`). That id
+  is component query `0x1100` (`Control.dll:0x1002e887`): on a class-15 device
+  **value 0 × its condition**, the points a second; on a class-9 fight shield
+  value 1 × condition, the recharge a second; nothing on any other class
+  (`0x1002c1b6`). Only the 16 `i_rps` entries use the field, and each
+  `o_rps` controller's first device is its class-15 system (*measured*), so
+  the row always shows the repair rate — the table below, for a new part.
 
 **The numbers** — *measured*.
 
@@ -467,26 +543,39 @@ shield, battery and ammunition (`Behavior.dll:0x10018100`, `0x10019372`,
 
 ## Not established
 
-- Which of ±x, ±y is a model's front, so which sector is "front".
-- How a collision object's start and end differ when the pass runs: message 1
-  sets both to the sphere's centre, message `0x1c` moves the end, and the pass
-  runs between the two.
-- How the struck object and node reach `ILifeSystem` slot 8's hit. It carries
-  the same five-integer reference the collision record does, but the copy was
-  not found.
+- ~~Which of ±x, ±y is a model's front.~~ Answered: +y, sector 0
+  ([Shields](#shields-a-generator-a-deflector-six-sectors--read-and-measured)).
+- ~~How a collision object's start and end differ when the pass runs.~~
+  Answered: the agent's centre before and after its control system's tick
+  ([The hit test](#the-hit-test--read-and-measured)).
+- ~~How the struck object and node reach `ILifeSystem` slot 8's hit.~~
+  Answered: the node stage copies the first three integers of the round's
+  contact reference ([A hit](#a-hit-from-the-round-to-the-node--read)).
 - ~~What reads a node's fifth slot, if a round's hit test does not.~~
   **Answered**: the mesh draw, for a view the turret's camera component
   registered with the unit's mesh — the first-person view draws every node's
   fifth slot (`AniMesh.dll:0x10014be5`). See
   [07-objects.md](07-objects.md#the-fifth-slot-is-what-the-units-own-view-draws).
-- Where a round's collision radius comes from. That it is the bounding sphere
-  in its mesh's header is a *guess*.
+- ~~Where a round's collision radius comes from.~~ Answered: its mesh's
+  stream-2 header sphere, times the largest scale
+  ([The hit test](#the-hit-test--read-and-measured)).
 - Who clears the behaviour flag `0x10` that lets a unit's takt switch its
   repair (`Behavior.dll:0x100067b0`'s caller), and so whether the AI overrides
   the switch while the player drives.
-- What `IControl` component query `0x77`, which the catalogue's Regeneration
-  row reads (`iron3d.dll:0x1006f62c`), answers.
-- The two 1.0 floats of an `.exp`. Its slots 1–11 are by ground surface
+- ~~What `IControl` component query `0x77` answers.~~ Answered: component
+  query `0x1100`, a repair system's value 0 × condition
+  ([Repair](#repair-a-units-own-repair-unit-switched-on-and-off--read-and-measured)).
+- The two 1.0 floats of an `.exp` (`+0xc`, `+0x10`; 1.0 on all 144,
+  *measured*). **No reader was found**, as a search: the only place an `.exp`
+  record is fetched (`Control.dll:0x100113db`) reads its `+4`, `+8`, `+0x14`
+  and names and not these, and the hits it builds read only its kind
+  (`0x1000ebc0`, `0x10012ce0`, `0x10010030`, `0x1000ff00`). The next place to
+  look is anything a hit record is handed to beyond those four. Its slots 1–11
+  are by ground surface
   ([11-effects.md](11-effects.md#what-an-explosion-plays--read-and-measured)).
-- What agent kind 3 is, and what becomes of a kind-3 object whose node 0 is
-  destroyed (it is marked `0xfffe` and not killed).
+- ~~What agent kind 3 is.~~ Answered: a building. What becomes of one whose
+  node 0 is destroyed is narrowed: its behaviour stops for good and the object
+  stays ([Hit points](#hit-points--read-and-measured)); what `iron3d.dll` does
+  with its `0xfffe` owner word is not read.
+- What `iron3d.dll` does with an object whose owner word is `0xfffe`: 37
+  compares with the value, one read (`0x1007dee0`, which skips it).

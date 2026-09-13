@@ -426,3 +426,20 @@ def test_the_camera_shake_rings_down_from_its_offset():
     # after a second it is down by (1 + 1) ** 3 and cos(1.5 pi) is 0 again
     x = control.shake_ring((0.0, 2.0, 0.0), 2.0)[1]
     assert abs(x - 2.0 * math.cos(3 * math.pi) / 27) < 1e-9
+
+
+def test_a_shield_sector_is_the_hit_direction_s_dominant_axis():
+    assert control.shield_sector((0.1, 5.0, 0.2)) == control.SECTOR_FRONT
+    assert control.shield_sector((0.0, -1.0, 0.0)) == control.SECTOR_BACK
+    assert control.shield_sector((-3.0, 1.0, 2.0)) == control.SECTOR_LEFT
+    assert control.shield_sector((3.0, 1.0, -2.0)) == control.SECTOR_RIGHT
+    assert control.shield_sector((0.0, 0.5, 9.0)) == control.SECTOR_TOP
+    assert control.shield_sector((0.2, 0.0, -1.0)) == control.SECTOR_BOTTOM
+
+
+def test_a_tie_between_sectors_goes_to_the_earlier_one():
+    assert control.shield_sector((1.0, 1.0, 0.0)) == control.SECTOR_FRONT
+    assert control.shield_sector((0.0, 0.0, 0.0)) == control.SECTOR_FRONT
+    assert control.shield_sector((1.0, 0.0, 1.0)) == control.SECTOR_RIGHT
+    assert all(control.shield_sector(axis) == i
+               for i, axis in enumerate(control.SECTOR_AXES))
