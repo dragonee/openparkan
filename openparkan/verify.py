@@ -6825,6 +6825,59 @@ def check_capture(check, game: Path) -> None:
           f"{ENTER} = {controls.CMD.get(ENTER)} ({label!r}), bound to {sorted(keys)}; "
           f"case 0x2da of iron3d.dll's command handler 0x10071cd0")
 
+    # Computer 0 is the first class-13 record: CBuilding files items in load order
+    # (Terrain.dll:0x100583a2), and the loader appends components in file order.
+    two: dict[str, tuple[float, float]] = {}
+    for name, entry in entries.items():
+        if not entry.tag.upper().startswith("CTL"):
+            continue
+        c = control.parse(fortif.read(entry), names)
+        rates = [min(c.channels[k].rate for k in p.entries) for p in c.components
+                 if p.type_id == control.COMPUTER_TYPE and p.entries]
+        if len(rates) == 2:
+            two[name[:-4]] = (rates[0], rates[1])
+    differ = {n: r for n, r in two.items() if not math.isclose(r[0], r[1])}
+    check("fortif.rlb: where a building has two computers, the first is the pod at 0.5",
+          len(two) == 18 and len(differ) == 8
+          and all(math.isclose(a, 0.5, abs_tol=1e-6) and math.isclose(b, 0.2, abs_tol=1e-6)
+                  for a, b in differ.values()),
+          f"{len(two)} buildings carry two class-13 parts; they differ on {len(differ)} "
+          f"({', '.join(sorted(differ))}): first 0.5, second a wrapping 0.2.  Computer 0 "
+          f"is the first, so these pods fire the capture at 0.9 / 0.5 = 1.8 s, not 4.5 s")
+
+    # A unit stands in a place only while its world speed is at most 2 m/s -- 1000 at
+    # the teleport places (Behavior.dll:0x100184f0).
+    teleport: Counter[str] = Counter()
+    other = 0
+    for name, entry in entries.items():
+        if not name.endswith(".msh"):
+            continue
+        graph = objmesh.read_path_graph(NResArchive(fortif.read(entry), entry.name))
+        for n in graph.nodes if graph else ():
+            if n.flags & objmesh.PLACE_TELEPORT:
+                teleport[name[:-4]] += 1
+            elif n.flags & (objmesh.PLACE_POD | objmesh.PLACE_DOCK | objmesh.PLACE_MINE
+                            | objmesh.PLACE_STORE):
+                other += 1
+    check("fortif.rlb: only the main teleport's places let a moving unit count",
+          dict(teleport) == {"fr_m_mtp": 4, "fr_b_ruin": 1} and other > 40,
+          f"places with a bit of {objmesh.PLACE_TELEPORT:#x}, where the speed bound is "
+          f"{objmesh.PLACE_TELEPORT_SPEED:g}: {dict(teleport)}; the other {other} pods, "
+          f"docks and ore places count a unit only at {objmesh.PLACE_SPEED:g} m/s or less "
+          f"(property 0x27, the world velocity)")
+
+    charge: Counter[float] = Counter()
+    for path in sorted(game.glob("MISSIONS/**/data.tma")):
+        for obj in mission.load(path).objects:
+            prop = obj.properties.get("ChargeRadius")
+            if prop is not None:
+                charge[float(prop.value)] += 1
+    check("data.tma: ChargeRadius is always the constant its getter returns",
+          list(charge) == [mission.CHARGE_RADIUS] and sum(charge.values()) == 463,
+          f"{dict(charge)}: Behavior.dll's property getter returns 10000 for kind 6 "
+          f"(0x1000b688) and its setter stores nothing (0x1000b575), so no mission "
+          f"could change it")
+
 
 #: The difficulty profiles in ``behpsp.res``.
 DIFFICULTY_PROFILES = ("diff_strong.var", "diff_normal.var", "diff_weak.var",
@@ -7450,6 +7503,20 @@ def check_weapons(check, game: Path) -> None:
           f"all {len(kinds['MIS'])} missile rounds carry a class-17 seeker, none of the "
           f"{len(kinds['ROC'])} rocket rounds do")
 
+    # What the AI's fight module holds back, and whose mount aims above the target.
+    heavy = sorted({(e.code, g.round.damage) for e, g in guns.values()
+                    if g.round and g.round.damage >= weapons.AI_HEAVY_DAMAGE})
+    lobbed = Counter((e.sub, g.round.member.lower()) for e, g in guns.values()
+                     if g.round and g.round.lobbed)
+    flamers = sum(1 for e, g in guns.values() if e.sub == "FLM" and g.round)
+    check("weapon.rlb: the AI holds back only the winged SSMs; only flame rounds fall",
+          [c for c, _ in heavy] == sorted(["MWML1M", "LWML1L", "LWML2M"])
+          and {s for s, _ in lobbed} == {"FLM"} and sum(lobbed.values()) == flamers,
+          f"rounds of {weapons.AI_HEAVY_DAMAGE:g} damage or more: {heavy} -- the fight "
+          f"module fires those only at a target whose id nibble is 3 (Behavior.dll:"
+          f"0x10024d30); mode-3 rounds, which a mount lobs (Control.dll:0x10028401): "
+          f"{dict(lobbed)}, on all {flamers} flamers")
+
 
 #: A research item's role, for the roles a turret gives a unit.
 TURRET_ROLE_TYPE = {research.ROLE_BATTLE: objects.TYPE_WARRIOR,
@@ -7547,6 +7614,80 @@ def check_firing(check, game: Path) -> None:
           f"{1000 / shots[0][2]:g} a second where its panel's 1000 / max(1, value 3) "
           f"says {1000 / max(1.0, cannon):g}.  Four arms play frames {arm_frames}; no "
           f"hero gun names a shot group")
+
+    # A gun is ready once its arm is out: the turret pairs each follower with a gun
+    # and an arm (Control.dll:0x10027170), and an arm is an item stepping 0.45.
+    comps = tur.components
+    mounts = tur.gun_mounts()
+    arm_rates = {tur.channels[e].rate for p in arms for e in p.entries}
+    unfold_s = 0.0
+    if len(arm_rates) == 1:
+        rate = next(iter(arm_rates))
+        left = 1.0
+        while left > 1e-9:
+            step = min(control.ITEM_STEP, left)
+            unfold_s += step / rate
+            left -= step
+    check("o_tur_ht_02: each gun's mount pairs with its arm, which unfolds in 0.5 s",
+          [(comps[m.gun].resource.member.lower(), comps[m.arm].type_id) for m in mounts
+           if m.gun is not None and m.arm is not None]
+          == [("bb_h_01", 24), ("bp_h_01", 24), ("bl_h_01", 24), ("bm_h_01", 24)]
+          and len(mounts) == 4 and {p.state for p in arms} == {0x21}
+          and math.isclose(unfold_s, 0.5),
+          f"followers {[m.channel for m in mounts]} take guns {[m.gun for m in mounts]} and "
+          f"arms {[m.arm for m in mounts]} in order; every arm starts in state "
+          f"{sorted({p.state for p in arms})} (record +0x18) and its channels run at "
+          f"{sorted(arm_rates)} a second, so 0.45, 0.9, 1 take {unfold_s:g} s "
+          f"(Control.dll:0x10020900).  The gun is not ready until then (0x10028200)")
+
+    unpaired: list[str] = []
+    paired = flag_2000 = 0
+    for path in all_archives(game):
+        archive = NResArchive.open(path)
+        for entry in archive:
+            if not entry.tag.upper().startswith("CTL"):
+                continue
+            try:
+                c = control.parse(archive.read(entry), names)
+            except control.ControlFormatError:
+                continue
+            flag_2000 += sum(1 for ch in c.channels if ch.flags & 0x2000)
+            ms = c.gun_mounts()
+            if any(m.gun is None for m in ms):
+                unpaired.append(entry.name.lower())
+            elif ms:
+                paired += 1
+    check(".ctl: every follower channel has a gun to aim, but on two gun parts",
+          sorted(unpaired) == ["o_gun_ba_03.ctl", "o_gun_ta_02.ctl"] and paired > 60
+          and flag_2000 == 0,
+          f"on {paired} controllers every channel flagged 8 (and not 0x40) meets a class-2 "
+          f"or class-30 part to pair with; {unpaired} (e_gun_bl_03, e_gun_tl_02) carry a "
+          f"follower and no gun.  No channel carries the flag 0x2000 the turret's takt "
+          f"treats apart (Control.dll:0x10027eec)")
+
+    fx = effects.EffectLibrary(game / "effects.rlb")
+    load = [r for r in tur.references if r.group == tur.load_group]
+    made = {r.values[7]: r.resource.member.lower() for r in load
+            if r.action == control.ACT_EFFECT_POINTS}
+    bound = {made.get(r.args[0]): r.args[1] for r in load
+             if r.action == control.ACT_EFFECT_TIME_POINT}
+    barrel_nodes = [tur.channels[p.entries[0]].node for p in guns if p.entries]
+    arm_nodes = [tur.channels[p.entries[0]].node for p in arms if p.entries]
+    guns_fx = {k: v for k, v in bound.items() if k and not k.endswith("_sfx")}
+    sfx = {k: v for k, v in bound.items() if k and k.endswith("_sfx")}
+    modes = {k: fx.get(k).mode for k in bound if k and fx.get(k)}
+    sound_windows = {e.window for k in sfx if fx.get(k)
+                     for e in fx.get(k).emitters if e.is_sound}
+    check("o_tur_ht_02: the gun effects follow the barrels, the _sfx the arms",
+          sorted(guns_fx.values()) == sorted(barrel_nodes[:3])
+          and sorted(sfx.values()) == sorted(arm_nodes)
+          and set(modes.values()) == {4} and len(sound_windows) == 1
+          and math.isclose(next(iter(sound_windows))[0], 0.15, abs_tol=1e-6),
+          f"action 14 binds {guns_fx} to the barrel nodes {barrel_nodes} and {sfx} to the "
+          f"arm nodes {arm_nodes}; all {len(modes)} are time mode 4, the node's phase "
+          f"(Effect.dll:0x10005d3f, AniMesh.dll:0x10005600), so a gun's effect plays "
+          f"through its stroke and an _sfx sound in "
+          f"{[tuple(round(v, 2) for v in w) for w in sorted(sound_windows)]} of its arm")
 
 
 def _turret_role(text: tuple[str, ...]) -> int:

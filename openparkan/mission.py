@@ -158,6 +158,10 @@ class _Reader:
 
 #: An int property's maximum when it has none -- ``ClanID`` uses it.
 NO_MAXIMUM = -1
+#: What ``ChargeRadius`` reads back as, whatever a mission stores: the getter
+#: returns this constant and the setter stores nothing
+#: (``Behavior.dll:0x1000b688``, ``0x1000b575``).
+CHARGE_RADIUS = 10000.0
 
 
 @dataclass

@@ -309,8 +309,16 @@ DEVICE_INPUT_KINDS = ("spin", "-spin", "lean", "speed")
 DEVICE_INPUT_FIRST = 2
 DEVICE_INPUT_LENGTH = 14
 #: The hero turret's weapon arms, one per gun; built as the factory's generic
-#: device (``0x1002d6ec``).  No other controller has any.
+#: device (``0x1002d6ec``), the base item (``0x10020800``).  No other
+#: controller has any.
 ARM_TYPE = 24
+#: An item's state word, low two bits: 1 moves its progress toward 1 (an arm
+#: unfolds), 2 toward 0 (it folds), 0.45 a step (``Control.dll:0x10020a28``).
+#: ``World3D.dll`` sends arms ``0x21`` and ``0x22``; the item reads only these
+#: bits of them.
+ITEM_OPENING = 1
+ITEM_CLOSING = 2
+ITEM_STEP = 0.45
 #: A barrel stroke: the channel heads for 0.5, the round leaves, the channel
 #: heads for 1.0, then snaps back (``0x1002a190``) -- a whole value at the
 #: channel's rate, before the gun's interval starts.
@@ -1024,6 +1032,48 @@ class Controller:
     def sections(self) -> int:
         """How many sections the counts ask for, across all five kinds."""
         return sum(self.counts)
+
+    def gun_mounts(self) -> list[Mount]:
+        """The follower channels a turret pairs with guns and arms, in order.
+
+        A channel flagged 8 joins the turret; one also flagged ``0x40`` follows
+        its neighbour and is passed over.  The *n*-th remaining one takes the
+        next gun (class 2 or 30) and the next arm (class 24) in component
+        order, or none (``Control.dll:0x10027170``).  This is one controller's
+        view: a unit's parts load into one control system, so a fitted gun's
+        own follower pairs with the guns of the whole unit in load order.
+        """
+        def nxt(kinds: tuple[int, ...], start: int) -> int | None:
+            return next((i for i in range(start, len(self.components))
+                         if self.components[i].type_id in kinds), None)
+
+        out: list[Mount] = []
+        gun_from = arm_from = 0
+        for k, ch in enumerate(self.channels):
+            if not ch.flags & CHANNEL_TURRET or ch.flags & CHANNEL_FOLLOWS:
+                continue
+            gun = nxt((GUN_TYPE, BUILDER_TYPE), gun_from)
+            arm = nxt((ARM_TYPE,), arm_from)
+            gun_from = gun + 1 if gun is not None else gun_from
+            arm_from = arm + 1 if arm is not None else arm_from
+            out.append(Mount(k, gun, arm))
+        return out
+
+
+@dataclass(frozen=True)
+class Mount:
+    """A gun's mount: the follower channel that aims it, and what it pairs with.
+
+    The gun is not ready to fire while its arm is folding or unfolding: the
+    turret sets the gun's ready byte from the arm's progress
+    (``Control.dll:0x10028200``).
+    """
+
+    #: The section-2 channel that follows the turret's pitch.
+    channel: int
+    #: The gun and the arm it pairs with, as component indices, or None.
+    gun: int | None
+    arm: int | None
 
 
 @dataclass(frozen=True)

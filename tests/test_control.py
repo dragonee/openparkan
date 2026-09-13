@@ -235,6 +235,20 @@ def test_section_two_reads_as_channels(ctl):
     assert abs(pitch.span - 1.92) < 1e-6
 
 
+def test_followers_pair_with_guns_and_arms_in_order(ctl, component):
+    follow = control.CHANNEL_TURRET
+    shadow = control.CHANNEL_TURRET | control.CHANNEL_FOLLOWS
+    channels = [(0.0, 0.0, 0.0, 1.0, 1.0, 0), (55.0, 57.0, 0.27, 1.5, 1.92, follow),
+                (55.0, 57.0, 0.27, 1.5, 1.92, shadow), (55.0, 57.0, 0.27, 1.5, 1.92, follow),
+                (55.0, 57.0, 0.27, 1.5, 1.92, follow)]
+    parts = [component(control.TURRET_TYPE), component(control.GUN_TYPE),
+             component(control.BUILDER_TYPE), component(control.ARM_TYPE)]
+    blob = ctl(counts=(0, 0, len(channels), len(parts), 0), channels=channels, components=parts)
+    mounts = control.parse(blob).gun_mounts()
+    assert [(m.channel, m.gun, m.arm) for m in mounts] == [(1, 1, 3), (3, 2, None),
+                                                             (4, None, None)]
+
+
 def test_a_state_carries_its_frame_pairs_blend_and_length(ctl, state):
     blob = bytearray(ctl(counts=(1, 0, 0, 0, 0), states=[state()]))
     at = control.HEADER_SIZE

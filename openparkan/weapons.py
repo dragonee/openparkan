@@ -16,6 +16,7 @@ level ratio of 1: it ignores armour and shields.  See ``docs/29-weapons.md``.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -48,6 +49,18 @@ class Round:
     #: The most the round turns a second, in radians: its controller's turn
     #: rate, which caps the steering a seeker asks for (``Control.dll:0x1000cde5``).
     turn_rate: float = 0.0
+    #: The controller's mode (+104): 3 on the four flame rounds, which fall.
+    mode: int = 0
+
+    @property
+    def lobbed(self) -> bool:
+        """Whether gravity pulls it, so its gun's mount aims above the target.
+
+        A gun keeps 1 for such a round (``Control.dll:0x100297ef``), which
+        switches off the sight convergence and switches on the mount's
+        ballistic elevation (``0x10028401``).
+        """
+        return self.mode != 0
 
 
 @dataclass(frozen=True)
@@ -183,6 +196,7 @@ class Armoury:
             cone=seeker.values[0] if seeker else 0.0,
             reach=seeker.values[1] if seeker else 0.0,
             turn_rate=max(parsed.triples[control.TRIPLE_TURN]),
+            mode=parsed.mode,
         )
 
     def gun(self, part: str) -> Gun | None:
@@ -221,3 +235,94 @@ class Armoury:
         return Clip(part=part, family=part.lower()[:7],
                     rounds=int(one.values[control.GUN_MAGAZINE]),
                     mass=one.mass, round=one.resource.member)
+
+
+def mount_aim(initial: float, pitch: float, arm: float) -> tuple[float, bool]:
+    """Where a gun's mount heads, and whether the gun is ready, for a round that does not fall.
+
+    ``arm`` is the progress of the gun's arm, 1 where it has none.  While the
+    arm moves, the mount blends from its channel's initial value to the
+    turret's pitch target and the gun may not fire; once it is out, the mount
+    follows the pitch and the gun is ready (``Control.dll:0x10028200``).  A
+    lobbed round adds an elevation and may still be refused; see
+    ``lobbed_elevation``.
+    """
+    if arm < 1.0:
+        return (1.0 - arm) * initial + arm * pitch, False
+    return pitch, True
+
+
+def lobbed_elevation(speed: float, gravity: float,
+                     to: tuple[float, float, float]) -> float | None:
+    """The angle a mount raises a falling round by to reach ``to``, or None.
+
+    The flight time t solves ``|to + g t^2 / 2 z| = speed * t``; the lower arc
+    is taken when both exist, and the answer is the angle between the launch
+    direction and the straight line.  None when the target is out of reach,
+    which leaves the gun not ready (``Control.dll:0x10028401``).  The mount
+    then rises by ``0.83 x angle / span`` of its channel, signed by the
+    turret's up.
+    """
+    x, y, z = to
+    reach = speed * speed - gravity * z
+    square = x * x + y * y + z * z
+    disc = reach * reach - gravity * gravity * square
+    if gravity <= 0.0 or square <= 0.0 or disc <= 0.0:
+        return None
+    scale = 2.0 / (gravity * gravity)
+    near, spread = reach * scale, math.sqrt(disc) * scale
+    t2 = near + spread if near < spread else near - spread
+    if t2 <= 0.0:
+        return None
+    t = math.sqrt(t2)
+    launch = (x / t, y / t, (z + 0.5 * gravity * t2) / t)
+    dot = sum(a * b for a, b in zip(launch, to, strict=True))
+    norm = math.sqrt(sum(a * a for a in launch)) * math.sqrt(square)
+    return math.acos(max(-1.0, min(1.0, dot / norm)))
+
+
+#: The AI fires a gun one shot at a time, when a product of scores clears a
+#: threshold (``Behavior.dll:0x10024f07``): 0.45, or 0.85 on a building or a
+#: unit in some states.
+AI_FIRE_SCORE = 0.45
+AI_FIRE_SCORE_HIGH = 0.85
+#: A round doing this much damage or more is held back from most targets
+#: (``0x10024d30``): the winged SSMs.
+AI_HEAVY_DAMAGE = 10000.0
+#: Nearer than this the distance score falls toward zero (``0x1001b5e0``).
+AI_TOO_CLOSE = 5.0
+
+
+def ai_distance_score(distance: float, rise: float, speed: float) -> float:
+    """How good ``distance`` is for a gun whose round flies at ``speed``, to the AI.
+
+    Behavior.dll's gun record keeps three distances from the round's speed:
+    none nearer than 5 m, full out to ``(speed + 1) / 2``, none past
+    ``2 (speed + 1)`` (``0x1001b4b0``); the score is then scaled by
+    ``1 - rise / speed`` (``0x1001b9f0``).
+    """
+    full = (speed + 1.0) * 0.5
+    none = 2.0 * (speed + 1.0)
+    if distance < AI_TOO_CLOSE:
+        band = distance / AI_TOO_CLOSE
+    elif distance <= full:
+        band = 1.0
+    elif distance < none:
+        band = (distance - none) / (full - none)
+    else:
+        band = 0.0
+    return band * (1.0 - rise / speed) if speed else 0.0
+
+
+def ai_fire_wait(magazine: float, difficulty: float = 1.0) -> tuple[float, float]:
+    """The AI's wait between one gun's shots: (least, random extra), in seconds.
+
+    ``30 / magazine`` each when the magazine holds more than 2, else 0.5 and
+    1.5; both are divided by the difficulty profile's value
+    (``Behavior.dll:0x1001b650``).  The gun's own interval still applies.
+    """
+    difficulty = difficulty if difficulty > 0.0 else 1.0
+    if magazine > 2.0:
+        each = 30.0 / magazine / difficulty
+        return each, each
+    return 0.5 / difficulty, 1.5 / difficulty
