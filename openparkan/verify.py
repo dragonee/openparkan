@@ -4771,6 +4771,87 @@ def check_ownership(check, game: Path) -> None:
           f"{neutral_units} units, {neutral_buildings} buildings")
 
 
+#: The command the hero presses at a neutral bot (``iron3d.dll:0x10071f08``).
+ENTER = "CMD_ENTER_STATE"
+
+
+def check_capture(check, game: Path) -> None:
+    """Pods are computers; a hero takes a neutral unit by entering it."""
+    names = frozenset(p.name.lower() for p in all_archives(game))
+    fortif = NResArchive.open(game / "fortif.rlb")
+    entries = {e.name.lower(): e for e in fortif}
+    computers: set[str] = set()
+    doors: set[str] = set()
+    stems: set[str] = set()
+    for name, entry in entries.items():
+        if not entry.tag.upper().startswith("CTL"):
+            continue
+        stem = name[:-4]
+        stems.add(stem)
+        parts = control.parse(fortif.read(entry), names).components
+        if any(p.type_id == control.COMPUTER_TYPE for p in parts):
+            computers.add(stem)
+        if any(p.type_id == control.DOOR_TYPE for p in parts):
+            doors.add(stem)
+    pods: set[str] = set()
+    for stem in stems:
+        mesh = entries.get(stem + ".msh")
+        if mesh is None:
+            continue
+        graph = objmesh.read_path_graph(NResArchive(fortif.read(mesh), mesh.name))
+        if graph and any(n.flags & objmesh.PLACE_POD for n in graph.nodes):
+            pods.add(stem)
+    check("fortif.rlb: a building has a pod exactly when it has a computer",
+          pods and pods == computers and doors - pods,
+          f"{len(computers)} of {len(stems)} building controllers carry a class-13 "
+          f"computer, and they are exactly the {len(pods)} whose hall way has a pod "
+          f"(0x40); control: doors (class 12) are also on "
+          f"{', '.join(sorted(doors - pods))}, with no pod.  Terrain.dll's "
+          f"CBuilding runs its first computer as the pod (0x10057550)")
+
+    # The hero's Enter takes a neutral unit: every neutral-owned unit has a Type
+    # the handler accepts, and no neutral-owned building does.
+    unit_types: Counter[int] = Counter()
+    building_types: Counter[int] = Counter()
+    for path in sorted(game.glob("MISSIONS/**/data.tma")):
+        m = mission.load(path)
+        for obj in m.objects:
+            if obj.clan_id is None or not 0 <= obj.clan_id < len(m.clans):
+                continue
+            if m.clans[obj.clan_id].type != mission.CLAN_NEUTRAL:
+                continue
+            kind = obj.properties.get("Type")
+            value = int(kind.value) if kind is not None else 0
+            if obj.kind == mission.KIND_UNIT:
+                unit_types[value] += 1
+            elif obj.kind == mission.KIND_BUILDING:
+                building_types[value] += 1
+    def unit(t: int) -> bool:
+        return bool(t) and t & mission.UNIT_TYPE_MASK == t
+
+    fits = sum(n for t, n in unit_types.items() if unit(t))
+    buildings_fit = sum(n for t, n in building_types.items() if unit(t))
+    check("data.tma: every neutral unit is one a hero can take",
+          unit_types and fits == sum(unit_types.values()) and building_types
+          and buildings_fit == 0,
+          f"{fits}/{sum(unit_types.values())} units owned by type-3 clans have a Type "
+          f"inside 0x103e000 ("
+          + ", ".join(f"{t:#x} x{n}" for t, n in sorted(unit_types.items()))
+          + f"); "
+          f"control: none of their {sum(building_types.values())} buildings does.  "
+          f"iron3d.dll:0x10071f08 captures such a unit within 20 of the hero on {ENTER}")
+
+    label = controls.commands(game).get(ENTER)
+    keys = {b.key for man in ("ui_other.man", "ui_other_d.man", "addition.man")
+            if (game / man).exists()
+            for b in controls.bindings(game / man) if b.command == ENTER}
+    check("Command.dsc: the hero's Enter is 'Enter warbot/HQ'",
+          label == "Enter warbot/HQ" and keys == {"SCAN_W_ENTER"}
+          and controls.CMD.get(ENTER) == 730,
+          f"{ENTER} = {controls.CMD.get(ENTER)} ({label!r}), bound to {sorted(keys)}; "
+          f"case 0x2da of iron3d.dll's command handler 0x10071cd0")
+
+
 def check_controls(check, game: Path) -> None:
     """The input layer: ScanCode.dsc, Command.dsc, the .man bindings, the .tbl tables."""
     keys = controls.scancodes(game)
@@ -6173,6 +6254,7 @@ def run(game: Path) -> int:
         check_grid, check_missions, check_objects, check_poses, check_lod, check_damage,
         check_effects, check_footprints, check_rsli, check_control, check_efficiency,
         check_motion, check_sensors, check_combat, check_ownership,
+        check_capture,
         check_controls,
         check_behaviour, check_research, check_descriptions, check_saves,
         check_vocabulary, check_resources, check_briefing, check_settings,

@@ -553,9 +553,9 @@ read = false
 module = "Terrain.dll"
 at = "0x10057550"
 kind = "function"
-name = "CBuilding::SendMsg"
-doc = "the binary's own assertion text"
-read = false
+name = "CBuilding::SendMsg tick: doors close after 5000 ms; computer 0 is the pod state machine"
+doc = "docs/27-ownership.md"
+read = true
 
 [[entry]]
 module = "Terrain.dll"
@@ -3120,5 +3120,183 @@ module = "iron3d.dll"
 at = "0x100394a0"
 kind = "function"
 name = "clan record type == 3 (neutral)"
+doc = "docs/27-ownership.md"
+read = true
+
+# --- capture: the pod, IBuilding, the hero's Enter, ../docs/27-ownership.md ---
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1000e5fc"
+kind = "site"
+name = "CTerrain::PlaceBuilding: QI 0x17 is IBuilding (0x11 IBasement just before)"
+doc = "docs/27-ownership.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10055310"
+kind = "function"
+name = "CBuilding::CBuilding: vtables +0 0x1009b59c .. +0xc IBuilding 0x1009b52c, +0x10 IMesh2; callback field +0xbc cleared"
+doc = "docs/27-ownership.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10057c20"
+kind = "function"
+name = "CBuilding inner QueryInterface: 6 object, 0x11 +4 IBasement, 0x17 +0xc IBuilding, 0x18 +0x10 IMesh2"
+doc = "docs/27-ownership.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1009b52c"
+kind = "datum"
+name = "IBuilding vtable: 3 set capture callback, 4 close computer, 14/15 node queries"
+doc = "docs/27-ownership.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1005b250"
+kind = "function"
+name = "IBuilding slot 3: store the callback (interface +0xb0 = object +0xbc)"
+doc = "docs/27-ownership.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1005b270"
+kind = "function"
+name = "IBuilding slot 4: close computer i -- state 3, item state 2"
+doc = "docs/27-ownership.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x100580b0"
+kind = "function"
+name = "CBuilding init: IItemManager items of type 12 become doors (+0x5c), type 13 computers (+0x68)"
+doc = "docs/27-ownership.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10057a41"
+kind = "site"
+name = "pod: item opened and the unit still in the zone -- call the capture callback (building, unit, 0)"
+doc = "docs/27-ownership.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10059d80"
+kind = "function"
+name = "pod zone: horizontal distance within 0.8 x the item part's sphere radius, height inside its box"
+doc = "docs/27-ownership.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10059f40"
+kind = "function"
+name = "IBasement object notification: modes 1/2 track an object's position in the building, 3 forget it; needs IMesh2 and ILifeSystem"
+doc = "docs/27-ownership.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100610c2"
+kind = "site"
+name = "capture callback: unit clan == building clan -> no capture (0x10062630 instead)"
+doc = "docs/27-ownership.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10061192"
+kind = "site"
+name = "capture callback, single player: record SetOwner(unit clan, 1), then the voice -- no relation check"
+doc = "docs/27-ownership.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10032fd0"
+kind = "function"
+name = "object record SetOwner(clan, capture): relink clan lists, IBehaviour::Capture when asked"
+doc = "docs/27-ownership.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10071cd0"
+kind = "function"
+name = "game command handler (ecx = CMD id); 730 CMD_ENTER_STATE enters or captures the hero's target"
+doc = "docs/27-ownership.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100726dc"
+kind = "table"
+name = "command handler jump table for 730..736; slot 0 CMD_ENTER_STATE -> 0x10071f08"
+doc = "docs/27-ownership.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10071fe7"
+kind = "site"
+name = "Enter: hero within 20 of the target (x, y)"
+doc = "docs/27-ownership.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1007202a"
+kind = "site"
+name = "Enter: target clan type 3 (neutral) -> IBehaviour::Capture(player clan)"
+doc = "docs/27-ownership.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10038ea0"
+kind = "function"
+name = "clan record from IMission clan info: +0xc type (info +0), +0x20 minds (info +0x14)"
+doc = "docs/27-ownership.md"
+read = true
+
+[[entry]]
+module = "MisLoad.dll"
+at = "0x10001320"
+kind = "function"
+name = "IMission clan info: +0 the clan type word (+0x3c), +4/+8 base, +0xc name"
+doc = "docs/27-ownership.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10009051"
+kind = "site"
+name = "MBehaviour::Capture, unit branch: new clan, SuperAI and IArealMap only"
+doc = "docs/27-ownership.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002bc7c"
+kind = "site"
+name = "device property 0x600 is the component's state word +0x50"
+doc = "docs/27-ownership.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10021090"
+kind = "site"
+name = "base component slot 3: set the state word +0x50 and mark it changed"
 doc = "docs/27-ownership.md"
 read = true

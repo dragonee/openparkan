@@ -185,6 +185,11 @@ class Zone:
     kind: int = 1
 
 
+#: A ``Type`` property with no bit outside this mask is a unit -- transport,
+#: builder, warrior, HQ or hero -- as the hero's Enter tests it
+#: (``iron3d.dll:0x10071fad``).
+UNIT_TYPE_MASK = 0x103E000
+
 #: A clan's type, the word ``Clan.type`` reads.
 CLAN_NATURE = 0
 CLAN_PLAYER = 1

@@ -95,6 +95,11 @@ RADAR_PERIOD = 4
 DETECT_SHIELD_TYPE = 10
 CAMOUFLAGE = 3
 CAMOUFLAGE_POWER = 4
+#: ``CICLS_DOOR`` and ``CICLS_COMPUTER``.  ``Terrain.dll``'s building files
+#: its controller's items by these (``0x100583a2``), and runs its first
+#: computer as the control pod (``0x10057550``).
+DOOR_TYPE = 12
+COMPUTER_TYPE = 13
 #: ``CICLS_MULTIGUN``, the gun.  Type 30 is built by the same class.
 GUN_TYPE = 2
 #: ``CICLS_FIGHTSHIELD``, the shield generator.  Values: a sector's maximum, the

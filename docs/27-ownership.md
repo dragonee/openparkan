@@ -108,13 +108,51 @@ missmached".
 **The capturer walks to the pod** (`0x1003094f`) and the task ends when the
 building's clan is its own: "Building [..] captured" (`0x10030474`).
 
-**Taking the building** is done in `iron3d.dll`, by a callback it registers on
-every building (`0x10032e99`, entry `0x10061050`): if the capturer's clan is
-not the building's, it calls the building's `MBehaviour::Capture` with the
-capturer's clan (`0x10061145`) and broadcasts the change through the queue
-(`IQueue::ChangeOwner`, `World3D.dll:0x10004f50`, message
-`GMSG_CHANGE_OBJECT_OWNER` `0x80000007`, whose handler calls `Capture` on the
-other machines, `0x1000672b`).
+**What fires it is the building's computer** — *read*, and *measured*. The
+building object is `Terrain.dll`'s `CBuilding`, and interface `0x17` is its
+**`IBuilding`** (`CTerrain::PlaceBuilding` asks for it by that name,
+`0x1000e5fc`; the inner `QueryInterface` at `0x10057c20` answers it). Slot 3
+of `IBuilding` (`0x1005b250`) is where `iron3d.dll` stores its callback
+(`0x10032e99`).
+
+- **The pod is a `CICLS_COMPUTER` part.** When a building starts,
+  `CBuilding` walks its controller's items and files class 12 as doors and
+  class 13 as computers (`0x100580b0`). *Measured:* the 21 `fortif.rlb`
+  controllers with a class-13 part are exactly the 21 buildings whose hall way
+  has a pod. Doors are no substitute: the large ruin has four and no pod.
+- **Who counts as inside.** The building keeps the position of every object
+  its ground plan reports inside it, provided the object has a mesh and a life
+  system (`0x10059f40`). On each tick (`CBuilding::SendMsg`, `0x10057550`) it
+  looks for one standing in the **first** computer's zone: within 0.8 of that
+  part's bounding radius across the ground, and within its box in height
+  (`0x10059d80`). The test reads only the position: no clan, size, order or
+  speed is checked here.
+- **The pod opens, then fires.** With someone in the zone and the pod idle,
+  the building switches the computer on, and it starts opening. When the item
+  reports done, the building checks that the same object is still in the zone.
+  Only then does it call the callback with the building and that object
+  (`0x10057a41`). The pod closes when the object leaves, and it can fire again
+  5 seconds after it has closed. **How long the opening takes** (the capture's
+  "couple of seconds") is how long the item stays switched on. What switches it
+  back is *unknown*.
+- **The callback takes the building** (`iron3d.dll:0x10061050`).
+  - **Same clan** (`0x100610c2`): nothing is captured; `0x10062630` runs
+    instead, and is not read here.
+  - **Any other clan, single player** (`0x10061192`): the building's record
+    changes owner and calls `MBehaviour::Capture` with the newcomer's clan
+    (`0x10032fd0`), then the voice below plays. **There is no check of
+    alliance, damage, power or defenders.** An ally's building is taken the
+    same way, which is when the player hears `VOICE_NBUILD_CAPTURE`.
+  - **Network games:** only the machine that owns the building (*guess*, from
+    the check against `+0xad4`) does the capture, then broadcasts it:
+    `IQueue::ChangeOwner` (`World3D.dll:0x10004f50`) sends message
+    `GMSG_CHANGE_OBJECT_OWNER` `0x80000007`, whose handler calls `Capture` on
+    the other machines (`0x1000672b`).
+
+So what keeps a large bot from capturing is not the capture code. The capture
+order refuses anything bigger than size class 2, and `MakeInsideDest` will not
+route one to a pod (above). Whether a large bot driven by the player could reach
+a pod is not established.
 
 **What changes** (`MBehaviour::Capture`, `Behavior.dll:0x10008e40`): the
 building's task list is dropped, it leaves its old clan's power distributor,
@@ -126,6 +164,41 @@ when the player takes a building from a neutral or an ally,
 `VOICE_EBUILD_CAPTURE` from an enemy, and `VOICE_BUILD_CAPTURE` when the
 player loses one. The cursor over a building a selected capturer can take is
 `CAPTURE`, `ui/capture.ani` (`ui/cursor.cfg`, *measured*).
+
+## A neutral unit is taken by the hero — *read*, and *measured*
+
+Capturing a bot is not done at a pod. It is the hero's **Enter** —
+`CMD_ENTER_STATE`, 730, "Enter warbot/HQ", bound to `SCAN_W_ENTER`
+(*measured*) — in `iron3d.dll`'s command handler (`0x10071cd0`, case
+`0x10071f08`):
+
+1. **The hero must be out on foot.** The game view must be in state 1 or 3,
+   and the player's hero record must have its flag `+0xa2` set. That flag is
+   set when the hero's body is shown and cleared when it is hidden
+   (`0x1006792a`, `0x1006788a`), so reading it as "on foot" is a *guess*.
+2. **The target must be a unit within 20.** It is the hero's current target.
+   Its `Type` must have no bit outside `0x103e000` (`0x10071fad`): transport,
+   builder, warrior, HQ or hero. It must be within 20 of the hero across the
+   ground (`0x10071fe7`).
+3. **If the target's clan is neutral (type 3),** the unit is captured on the
+   spot: `MBehaviour::Capture` with the player's clan (`0x1007202a`), a new
+   owner on its record, and a place in the player's clan list. If it is a bot
+   the hero can board, the hero then enters it (`0x10062bc0`). Otherwise a
+   message is shown.
+4. **If not,** Enter only boards a bot of the player's own clan. An enemy's or
+   an ally's bot cannot be taken this way.
+
+For a unit, `Capture` changes only its clan, SuperAI and areal map
+(`Behavior.dll:0x10009051`). The mind it then needs is taken the way any
+placed or captured bot takes one
+([23-economy.md](23-economy.md#the-bot-limit-is-the-clans-mind-count--read-and-measured)).
+Nothing else found calls `Capture` on a unit: the AI clans have no way to take
+a neutral bot (a search, not a proof).
+
+*Measured:* the 22 units owned by neutral clans, all in the campaign, are
+18 warriors (`0x1008000`), 2 HQs (`0x1010000`), a builder and a transport.
+Every one passes the handler's unit test, and none of the neutral clans' 28
+buildings does.
 
 ## The clan word is a type — *measured*, and *read*
 
@@ -140,15 +213,18 @@ The clan record's word after the base position, which
 | 3 | 19 | `Ntrl`, `neutral`, `Ntr`, `Clan IIIn` — the neutrals |
 
 It is the 1-based position of the clan only on 61 of the 101, because players
-come first and enemies second. `ArealMap.dll` keeps a type per clan
+come first and enemies second.
+
+**The file's word is the engine's clan type** — *read*. `MisLoad.dll` hands it
+out first in a clan's info (`0x10001320`), and `iron3d.dll` stores it at `+0xc`
+of its clan record (`0x10038ea0`). `ArealMap.dll` keeps a type per clan too
 (`SystemArealMap::GetClanType`, `0x10020a10`, and `SetClanType`), and a clan it
-does not know is type 3 — that this is the word the file carries is a *guess*
-the names above make a strong one; the load path between them was not traced.
-The code treats 3 as neutral: `iron3d.dll` tests for it (`0x100394a0`) to pick
-the voice above, and a neutral or nature clan's bots never order themselves to
-a dock (`Behavior.dll:0x10017dbd`). A radar module drops contacts of both kinds
-([25-sensors.md](25-sensors.md#what-the-ai-does-with-it--read)), so the AI does
-not pick animals or neutrals as targets on its own.
+does not know is type 3. The code treats 3 as neutral: `iron3d.dll` tests the
+record's field against it (`0x100394a0`) to pick the voice above and to let the
+hero take a unit (above), and a neutral or nature clan's bots never order
+themselves to a dock (`Behavior.dll:0x10017dbd`). A radar module drops contacts
+of both kinds ([25-sensors.md](25-sensors.md#what-the-ai-does-with-it--read)),
+so the AI does not pick animals or neutrals as targets on its own.
 
 **Neutrals own things** (*measured*): 22 units and 28 buildings across the
 shipped missions — factories, a hangar, a bunker and a generator in the first campaign's
@@ -157,17 +233,14 @@ generators between the players. `Multi.05`'s `Ntrl` is the exception: type 2.
 
 ## Not established
 
-- **What fires the capture callback, and when**: how long a capturer must
-  stand in the pod, and whether defenders inside or the building's damage
-  stop it. The callback sits on the building's interface `0x17`; nothing in
-  `Behavior.dll`, `Terrain.dll`, `AniMesh.dll`, `ArealMap.dll`, `Control.dll`,
-  `World3D.dll` or `Effect.dll` answers that interface by a compare or a jump
-  table found so far.
-- **How a neutral bot is captured.** `MBehaviour::Capture` accepts a unit (it
-  only changes its clan), and a captured unit takes a mind
-  ([23-economy.md](23-economy.md#the-bot-limit-is-the-clans-mind-count--read-and-measured));
-  but no path from a pod, a touch or a hero action to it was found. The log
-  string "Cannot capture warbot" is referenced by nothing.
+- **How long a pod takes to open**: the computer item stays switched on for
+  some time before the building sees it done, and what switches it back
+  (`Control.dll` state word `+0x50`, property `0x600`) was not found.
+- What `iron3d.dll:0x10062630` does when a unit of the building's own clan
+  opens the pod.
+- The hero's target field (record `+0x38`, `+4`) and what sets it; the game
+  view states 1 and 3.
+- What `0x10076d30` rules out before the hero boards a bot.
 - Whether a unit must be standing still to count as in a place: the
   occupancy test (`0x10018310`) compares a vector of the unit's to 2.0, and
   that it is the velocity is a *guess*.
