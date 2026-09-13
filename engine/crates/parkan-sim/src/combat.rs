@@ -8,13 +8,13 @@
 use std::rc::Rc;
 
 use glam::Vec3;
-use parkan_formats::exp::{Explosion, HIT_AREA, HIT_DIRECT};
+use parkan_formats::exp::{Explosion, HIT_AREA, HIT_DIRECT, HIT_SHIELDS};
 use parkan_formats::mesh::Mesh;
 use parkan_formats::pose::Pose;
 
 use crate::damage::{Life, blast, round_hit};
 use crate::ground::Ground;
-use crate::hit::{Strike, map_edge, segment_mesh, swept_spheres};
+use crate::hit::{ROUND_SKIPS_FACE, SIGHT_SKIPS_FACE, Strike, map_edge, segment_mesh_passing, swept_spheres};
 
 /// A mode-0 round's sideways speed, in its own frame, bleeds off at this many m/s a
 /// millisecond (`Control.dll:0x1000ceec`).
@@ -33,8 +33,8 @@ pub struct RoundKind {
     pub top_speed: f32,
     /// File +108.
     pub range: f32,
-    /// STAND-IN: docs/26-damage.md#the-hit-test--read-and-measured -- that the collision
-    /// radius is the mesh's stream-2 sphere is a guess.
+    /// The collision radius: the mesh's stream-2 header sphere times the object's
+    /// largest scale, and a round is never scaled (docs/26, "The hit test").
     pub radius: f32,
     /// Node 0's hit points: a round dies from full health.
     pub hit_points: f32,
@@ -44,6 +44,9 @@ pub struct RoundKind {
     pub range_end: Option<Explosion>,
 }
 
+/// STAND-IN: docs/29-weapons.md#not-established -- whether a target the hero's AI set
+/// before the player took over survives is not established; nothing sets the turret's
+/// target while the player drives, so a round carries none and a guided one flies straight.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Round {
     /// Unique among the rounds a `Combat` has fired.
@@ -151,8 +154,9 @@ impl Combat {
         Some(self.fired)
     }
 
-    /// The nearest thing a segment meets: the ground, or a live target other than
-    /// `skip`. Returns the strike and the target struck.
+    /// The nearest thing a round's segment meets: the ground, or a live target other
+    /// than `skip`, passing the triangles a round passes. Returns the strike and the
+    /// target struck.
     pub fn first_hit(
         &self,
         ground: &Ground,
@@ -160,6 +164,19 @@ impl Combat {
         p0: Vec3,
         p1: Vec3,
         radius: f32,
+    ) -> Option<(Strike, Option<usize>, usize)> {
+        self.nearest(ground, skip, p0, p1, radius, ROUND_SKIPS_FACE)
+    }
+
+    /// [`Combat::first_hit`], passing the triangles whose flags meet `passes`.
+    fn nearest(
+        &self,
+        ground: &Ground,
+        skip: Option<usize>,
+        p0: Vec3,
+        p1: Vec3,
+        radius: f32,
+        passes: u16,
     ) -> Option<(Strike, Option<usize>, usize)> {
         let mut best: Option<(Strike, Option<usize>, usize)> = ground.segment(p0, p1).map(|s| (s, None, 0));
         for (id, target) in self.targets.iter().enumerate() {
@@ -171,7 +188,7 @@ impl Combat {
                 continue;
             }
             for (p, part) in target.parts.iter().enumerate() {
-                if let Some(s) = segment_mesh(&part.mesh, &part.nodes, part.scale, p0, p1)
+                if let Some(s) = segment_mesh_passing(&part.mesh, &part.nodes, part.scale, p0, p1, passes)
                     && best.as_ref().is_none_or(|(b, _, _)| s.d2 < b.d2)
                 {
                     best = Some((s, Some(id), p));
@@ -183,6 +200,12 @@ impl Combat {
 
     /// The sight's aim point (`0x1002a610`): the first thing the ray from `origin` along
     /// `direction` meets, pushed out to at least 100 m; `None` when it meets nothing.
+    /// The ray asks for every class and passes no triangle (`0x1002adc0`), so it can stop
+    /// on leaves a round flies through.
+    ///
+    /// STAND-IN: docs/29-weapons.md#not-established -- whether the landscape is one of
+    /// the objects the ray walks is not traced; the ground is met, less its water
+    /// surface, as a round meets it.
     pub fn aim_point(
         &self,
         ground: &Ground,
@@ -195,7 +218,7 @@ impl Combat {
         let (lo, hi) = ground.bounds();
         let reach = Vec3::new(hi[0] - lo[0], hi[1] - lo[1], 0.0).length() + 2.0 * NEAREST_AIM;
         let (p0, p1) = (origin + s * SIGHT_FROM, origin + s * reach.min(SIGHT_TO));
-        let (strike, _, _) = self.first_hit(ground, owner, p0, p1, 0.0)?;
+        let (strike, _, _) = self.nearest(ground, owner, p0, p1, 0.0, SIGHT_SKIPS_FACE)?;
         let mut point = strike.point;
         if (point - origin).length() < NEAREST_AIM {
             point = origin + s * NEAREST_AIM;
@@ -322,6 +345,11 @@ impl Combat {
                     }
                 }
             }
+            // STAND-IN: docs/26-damage.md#shields-a-generator-a-deflector-six-sectors--read-and-measured
+            // -- shields are not modelled: no bubble stops a round, a blast skips its
+            // shield step, and kind 4, shields only, does nothing. Mission 01's `tut1_e1`,
+            // `tut1_mf1` and `helic` carry fight shields and deflectors.
+            HIT_SHIELDS => {}
             _ => {}
         }
     }
@@ -445,6 +473,26 @@ mod tests {
         c.fire(0, None, muzzle, Vec3::Y, Vec3::ZERO, 1.0);
         let events = c.tick(1.0 / 60.0, &g);
         assert!(events.iter().any(|e| matches!(e, Event::Gone { .. })), "{events:?}");
+    }
+
+    #[test]
+    fn the_sight_stops_on_a_face_a_round_flies_through() {
+        let g = floor();
+        let mut c = Combat { kinds: vec![laser()], ..Default::default() };
+        // A flagged post 110 m out, like a tree's leaves, and a plain one behind it.
+        let mut leaves = post(Vec3::new(20.0, 120.0, 0.0), 500.0);
+        let mesh = Rc::make_mut(&mut leaves.parts[0].mesh);
+        mesh.face_flags = vec![crate::hit::ROUND_SKIPS_FACE; 2];
+        c.targets = vec![leaves, post(Vec3::new(20.0, 140.0, 0.0), 500.0)];
+        let origin = Vec3::new(20.0, 10.0, 1.0);
+        let aim = c.aim_point(&g, None, origin, Vec3::Y).unwrap();
+        assert!((aim - Vec3::new(20.0, 120.0, 1.0)).length() < 1e-3, "{aim}");
+        let (_, target, _) = c.first_hit(&g, None, origin, origin + Vec3::Y * 200.0, 0.0).unwrap();
+        assert_eq!(target, Some(1), "the round passes the flagged faces");
+        // Nearer than 100 m, the aim point is pushed out along the ray.
+        c.targets[0] = post(Vec3::new(20.0, 50.0, 0.0), 500.0);
+        let aim = c.aim_point(&g, None, origin, Vec3::Y).unwrap();
+        assert!((aim - Vec3::new(20.0, 110.0, 1.0)).length() < 1e-3, "{aim}");
     }
 
     #[test]

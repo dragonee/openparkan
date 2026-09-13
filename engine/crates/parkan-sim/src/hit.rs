@@ -10,6 +10,8 @@ use parkan_formats::pose::Pose;
 
 /// A round passes through triangles flagged 4 or 32 (`Control.dll:0x1001d9fa`).
 pub const ROUND_SKIPS_FACE: u16 = 0x24;
+/// The sight ray passes through no triangle (`Control.dll:0x1002adc0`).
+pub const SIGHT_SKIPS_FACE: u16 = 0;
 
 /// Where a segment strikes.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -60,7 +62,20 @@ fn arr(v: Vec3) -> [f64; 3] {
 ///
 /// `scale` is the object's uniform scale: the poses carry it in their translations,
 /// and the node frames are scaled by it, as `SetScale` recomposes them (docs/04).
+/// A round's query passes through the triangles flagged [`ROUND_SKIPS_FACE`].
 pub fn segment_mesh(mesh: &Mesh, world: &[Pose], scale: f32, p0: Vec3, p1: Vec3) -> Option<Strike> {
+    segment_mesh_passing(mesh, world, scale, p0, p1, ROUND_SKIPS_FACE)
+}
+
+/// [`segment_mesh`], passing through the triangles whose flags meet `passes`.
+pub fn segment_mesh_passing(
+    mesh: &Mesh,
+    world: &[Pose],
+    scale: f32,
+    p0: Vec3,
+    p1: Vec3,
+    passes: u16,
+) -> Option<Strike> {
     let mut best = (p1 - p0).length_squared();
     let mut out = None;
     for (i, node) in mesh.nodes.iter().enumerate() {
@@ -74,7 +89,7 @@ pub fn segment_mesh(mesh: &Mesh, world: &[Pose], scale: f32, p0: Vec3, p1: Vec3)
         let first = usize::from(s.first_triangle);
         let last = (first + usize::from(s.triangle_count)).min(mesh.triangles.len());
         for t in first..last {
-            if mesh.face_flags.get(t).is_some_and(|f| f & ROUND_SKIPS_FACE != 0) {
+            if mesh.face_flags.get(t).is_some_and(|f| f & passes != 0) {
                 continue;
             }
             let [a, b, c] = mesh.triangles[t].map(|v| Vec3::from_array(mesh.positions[usize::from(v)]));
@@ -247,5 +262,14 @@ mod tests {
             segment_mesh(&mesh, &world, 1.0, Vec3::new(3.0, 0.0, 0.0), Vec3::new(3.0, 10.0, 0.0)),
             None
         );
+    }
+
+    #[test]
+    fn the_sights_segment_stops_on_the_triangles_a_round_passes() {
+        let (mesh, world) = wall();
+        let (p0, p1) = (Vec3::ZERO, Vec3::new(0.0, 10.0, 0.0));
+        assert_eq!(segment_mesh(&mesh, &world, 1.0, p0, p1).unwrap().node, Some(0));
+        let sight = segment_mesh_passing(&mesh, &world, 1.0, p0, p1, SIGHT_SKIPS_FACE).unwrap();
+        assert_eq!((sight.node, sight.point), (Some(1), Vec3::new(0.0, 3.0, 0.0)));
     }
 }

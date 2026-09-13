@@ -10,7 +10,7 @@ use std::rc::Rc;
 
 use anyhow::{Context, Result};
 use glam::{Quat, Vec3};
-use parkan_formats::control::{self, ARM_TYPE, CAMERA_TYPE, Controller, GUN_TYPE};
+use parkan_formats::control::{self, CAMERA_TYPE, Controller, GUN_TYPE};
 use parkan_formats::cpt::{self, ControlPoint};
 use parkan_formats::mission::Mission;
 use parkan_formats::pose::{Pose, rotate};
@@ -19,14 +19,15 @@ use parkan_sim::ground::Ground;
 use parkan_sim::guns::{CONTINUE_FIGHT, Gun, STATE_OFF, Shot};
 use parkan_sim::input::{Hands, Pilot};
 use parkan_sim::machine::Walker;
-use parkan_sim::turret::Rig;
-use parkan_sim::turret::step_toward;
+use parkan_sim::turret::{ARM_FOLD, ARM_UNFOLD, ITEM_CLOSING, ITEM_OPENING, Rig, view};
 
 use crate::assembly::{Assembly, LoadedMesh, Part};
 use crate::battle::{Battle, STARTS_SELECTED};
 
 /// What `Iron_3D.ini` sets the mouse to when it says nothing.
 pub const DEFAULT_MOUSE_SENS: f32 = 100.0;
+/// Machine steps one tick runs one at a time before it hands the rest to the machine.
+const MAX_STEPS: usize = 2000;
 
 /// Whether a mission object is the player's hero.
 pub fn is_hero(path: &str) -> bool {
@@ -63,9 +64,9 @@ pub struct Hero {
     /// The turret's guns, and the round kind each fires in its `Battle`.
     pub guns: Vec<Gun>,
     pub rounds: Vec<Option<usize>>,
-    /// Each gun's arm: the channels of the class-24 component paired with it.
-    pub arms: Vec<Vec<usize>>,
     fire_held: bool,
+    /// The machine's velocity over its last step, from the two poses either side.
+    velocity: Vec3,
     /// Game time, ms.
     pub time_ms: f64,
 }
@@ -159,8 +160,8 @@ impl Hero {
             points,
             guns: Vec::new(),
             rounds: Vec::new(),
-            arms: Vec::new(),
             fire_held: false,
+            velocity: Vec3::ZERO,
             time_ms: 0.0,
         }))
     }
@@ -186,31 +187,23 @@ impl Hero {
 
     /// Fit the turret's guns: each class-2 component, the round its record names
     /// loaded into `battle`. A gun whose round's frame +116 carries 4 starts selected;
-    /// on the hero the rest start deselected (`World3D.dll:0x1000ed20`).
+    /// on the hero the rest start deselected (`World3D.dll:0x1000ed20`). The n-th gun's
+    /// arm, the n-th class-24 component, is sent `0x21` if its gun starts selected and
+    /// `0x22` if not (`0x1000ef4e`, `0x1000ef9e`): the cannon's and the laser's unfold
+    /// from folded.
     pub fn arm(&mut self, battle: &mut Battle, assembly: &mut Assembly) {
         self.guns.clear();
         self.rounds.clear();
         let components = self.turret_controller.components.clone();
-        self.arms = components
-            .iter()
-            .filter(|c| c.type_id == ARM_TYPE)
-            .map(|c| c.entries.iter().filter_map(|&e| usize::try_from(e).ok()).collect())
-            .collect();
         for (i, c) in components.iter().enumerate().filter(|(_, c)| c.type_id == GUN_TYPE) {
             let mut gun = Gun::new(i, c, &self.turret_controller.channels);
             let kind = battle.round_kind(assembly, &c.resource.member);
             gun.selected = kind.is_some_and(|k| battle.kinds[k].frame_flags & STARTS_SELECTED != 0);
-            // STAND-IN: docs/29-weapons.md#the-button-reaches-the-selected-guns -- selecting
-            // sends the gun's arm state 1 and deselecting state 2, which by the frames
-            // unfold and fold it; a gun selected at the start begins unfolded.
-            if gun.selected
-                && let Some(arm) = self.arms.get(self.guns.len())
-            {
-                for &c in arm {
-                    if let Some(v) = self.rig.values.get_mut(c) {
-                        *v = 1.0;
-                    }
-                }
+            // The gun keeps its round's top speed and whether it falls (`0x100297ef`).
+            gun.round_speed = kind.map_or(0.0, |k| battle.combat.kinds[k].top_speed);
+            gun.falls = controller(assembly, &c.resource.member).ok().flatten().is_some_and(|r| r.mode != 0);
+            if let Some(arm) = self.rig.arms.get_mut(self.guns.len()) {
+                arm.send(if gun.selected { ARM_UNFOLD } else { ARM_FOLD });
             }
             self.guns.push(gun);
             self.rounds.push(kind);
@@ -223,18 +216,26 @@ impl Hero {
         let (pilot, mut hands) = self.hands();
         pilot.mouse(mouse, &mut hands);
         self.time_ms += dt_ms;
-        self.walker.advance(self.time_ms, ground);
-        self.rig.update((dt_ms / 1000.0) as f32);
+        self.walk(ground);
 
-        // `World3D.dll:0x100109f8`: a gun's number toggles it; -1 selects and resets all.
+        // `World3D.dll:0x100109f8`: a gun's number toggles it and sends its arm state 1
+        // or 2; -1 selects and resets every gun and sends every arm `0x21`.
         for n in std::mem::take(&mut self.pilot.selects) {
             if n < 0 {
                 for g in &mut self.guns {
                     g.selected = true;
                     g.reset();
                 }
-            } else if let Some(g) = usize::try_from(n - 1).ok().and_then(|i| self.guns.get_mut(i)) {
+                for a in &mut self.rig.arms {
+                    a.send(ARM_UNFOLD);
+                }
+            } else if let Some(i) = usize::try_from(n - 1).ok()
+                && let Some(g) = self.guns.get_mut(i)
+            {
                 g.toggle();
+                if let Some(a) = self.rig.arms.get_mut(i) {
+                    a.send(if g.selected { ITEM_OPENING } else { ITEM_CLOSING });
+                }
             }
         }
         // `MCMD_STATE` index -1 reaches the selected guns as the button goes down or up.
@@ -245,15 +246,14 @@ impl Hero {
                 g.state = state;
             }
         }
-        let dt = (dt_ms / 1000.0) as f32;
-        for (g, arm) in self.guns.iter().zip(&self.arms) {
-            let target = if g.selected { 1.0 } else { 0.0 };
-            for &c in arm {
-                if let (Some(ch), Some(v)) = (self.rig.channels.get(c), self.rig.values.get(c).copied()) {
-                    self.rig.values[c] = step_toward(v, target, ch.rate, dt, false);
-                }
-            }
+        if self.guns.iter().any(|g| g.falls)
+            && let Some(up) = self.rig.yaw.and_then(|c| usize::try_from(self.rig.channels[c].origin).ok())
+            && let Some((_, direction)) = self.point(up)
+        {
+            self.rig.center_up = direction.z;
         }
+        // The turret's takt: its channels, the arms, and each mount's gun's ready byte.
+        self.rig.update((dt_ms / 1000.0) as f32, &mut self.guns);
         let mut shots = Vec::new();
         for (i, g) in self.guns.iter_mut().enumerate() {
             g.recharge();
@@ -265,6 +265,27 @@ impl Hero {
             }
         }
         shots
+    }
+
+    /// Run the machine's steps due by now one at a time, handing the camera each step's
+    /// jolt: (previous − current velocity) ÷ the step in seconds, the velocity from the
+    /// poses either side of the step (`Control.dll:0x1000c6e7`, docs/30, "The camera shake").
+    fn walk(&mut self, ground: &Ground) {
+        let w = &mut self.walker;
+        for _ in 0..MAX_STEPS {
+            if w.controller.states.is_empty() || self.time_ms < w.machine.clock_ms {
+                return;
+            }
+            let due = w.machine.clock_ms;
+            w.advance(due, ground);
+            let step = (w.machine.step_ms / 1000.0) as f32;
+            if step > 0.0 {
+                let velocity = (w.body.position - w.from.0) / step;
+                self.rig.shake.jolt((self.velocity - velocity) / step, w.machine.step_start_ms / 1000.0);
+                self.velocity = velocity;
+            }
+        }
+        w.advance(self.time_ms, ground);
     }
 
     /// The hero's world velocity.
@@ -317,11 +338,9 @@ impl Hero {
         mount.compose(&mesh.world_pose_by(node, local))
     }
 
-    /// The first-person eye (`Control.dll:0x100234c0`).
-    ///
-    /// STAND-IN: docs/30-turrets.md#aiming-and-the-camera--read-and-measured -- which
-    /// point gives the position and which the direction is read from the data:
-    /// position from `CameraCenter`, look along `TargetDirect`, up the look node's +z.
+    /// The first-person eye (`Control.dll:0x100234c0`): `CameraCenter`'s position plus
+    /// the shake, `TargetDirect`'s vector for the look and `CameraCenter`'s own vector
+    /// for the up, turned by free look ([`view`]).
     pub fn eye(&self) -> Eye {
         let (position, _) = self.walker.drawn(self.time_ms);
         let heading = Quat::from_rotation_z(self.walker.drawn_heading(self.time_ms));
@@ -331,23 +350,14 @@ impl Hero {
         let look = self.turret_node(&mount, node(&self.look_point));
         let f = |v: [f64; 3]| Vec3::new(v[0] as f32, v[1] as f32, v[2] as f32);
         let eye = f(at.apply(self.eye_point.position.map(f64::from)));
-        let forward =
-            f(rotate(look.rotation, self.look_point.direction.map(f64::from))).normalize_or(Vec3::Y);
-        let up = f(rotate(look.rotation, [0.0, 0.0, 1.0])).normalize_or(Vec3::Z);
-
-        // Free look (`0x10023788`): pitch (0.5 − y) × π about the side axis, yaw
-        // (0.5 − x) × 2π about the up axis.
-        // STAND-IN: docs/30-turrets.md#aiming-and-the-camera--read-and-measured -- the
-        // senses on screen are not read; yaw is taken clockwise so it follows the hull's.
-        let side = forward.cross(up).normalize_or(Vec3::X);
-        let [x, y, _] = self.rig.look;
-        let turn = Quat::from_axis_angle(up, -(0.5 - x) * std::f32::consts::TAU)
-            * Quat::from_axis_angle(side, (0.5 - y) * std::f32::consts::PI);
+        let forward = f(rotate(look.rotation, self.look_point.direction.map(f64::from)));
+        let up = f(rotate(at.rotation, self.eye_point.direction.map(f64::from)));
+        let (forward, up) = view(heading * forward, heading * up, self.rig.look);
         let values = self.rig.camera_values;
         Eye {
-            position: position + heading * eye,
-            forward: heading * (turn * forward),
-            up: heading * (turn * up),
+            position: position + heading * eye + self.rig.shake.eye(self.time_ms / 1000.0),
+            forward,
+            up,
             fov_x: values[2],
             near: values[0],
         }

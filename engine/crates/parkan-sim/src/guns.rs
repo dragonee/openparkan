@@ -83,6 +83,13 @@ pub struct Gun {
     pub state: i32,
     /// Whether the fire button reaches this gun.
     pub selected: bool,
+    /// The ready byte (`+0x118`): the constructor sets it, and a turret's takt rewrites
+    /// it from the gun's mount.
+    pub ready: bool,
+    /// Its round's top speed (`+0x94`), and whether the round falls (`+0x98`: its
+    /// controller's mode is not 0, `0x100297ef`).
+    pub round_speed: f32,
+    pub falls: bool,
     start_ms: f64,
     next_ms: f64,
     started: bool,
@@ -120,6 +127,9 @@ impl Gun {
             salvo: record.flags & SALVO != 0,
             state: STATE_OFF,
             selected: false,
+            ready: true,
+            round_speed: 0.0,
+            falls: false,
             start_ms: 0.0,
             next_ms: 0.0,
             started: false,
@@ -167,8 +177,8 @@ impl Gun {
         shots
     }
 
-    /// `0x10029ca0`: continue a stroke, or start one when the gun has rounds, charge
-    /// and a state.
+    /// `0x10029ca0`: continue a stroke, or start one when the gun has rounds, charge,
+    /// its ready byte and a state.
     fn fire_step(&mut self, t: f64, shots: &mut Vec<Shot>) {
         if self.barrels.is_empty() {
             return;
@@ -182,6 +192,7 @@ impl Gun {
         }
         if self.rounds == 0
             || (self.capacitor > 0.0 && self.charge < self.shot_energy)
+            || !self.ready
             || self.state == STATE_OFF
         {
             return;
@@ -312,6 +323,20 @@ mod tests {
         assert_eq!((shots.len(), laser.rounds), (1, 0));
         let mut free = gun([-1.0, 200.0, 5.5, 200.0], &[4.0]);
         assert_eq!((hold(&mut free, 3000.0).len(), free.rounds), (7, -1));
+    }
+
+    #[test]
+    fn a_gun_that_is_not_ready_starts_no_stroke_but_finishes_the_one_it_started() {
+        let mut laser = gun([-1.0, 200.0, 5.5, 200.0], &[4.0]);
+        laser.ready = false;
+        laser.state = CONTINUE_FIGHT;
+        assert!(laser.tick(0.0).is_empty() && laser.tick(1000.0).is_empty());
+        assert_eq!(laser.barrels[0].step, 0);
+        laser.ready = true;
+        assert!(laser.tick(1100.0).is_empty(), "the stroke starts");
+        laser.ready = false;
+        assert_eq!(laser.tick(1230.0).len(), 1, "the round still leaves");
+        assert!(laser.tick(3000.0).is_empty(), "and no stroke follows");
     }
 
     #[test]
