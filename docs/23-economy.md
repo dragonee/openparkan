@@ -153,6 +153,31 @@ inputs, and type 21 sums five.
 *Unknown:* what properties `0x300`–`0x305` are, and how the time budget
 accrues.
 
+## Construction — *read*
+
+`M_Task_Construct::OnBehaviourTakt` (`Behavior.dll:0x1002a4f0`) is the factory
+building a bot, and it has the same three budgets as research — ore, power and
+time — with one difference in how ore is pulled.
+
+- **Time** accrues as plain `dt`; **power** as `KPD × Use_Power × dt`.
+- **Ore** is requested each tick as
+
+  ```
+  f        = ore collected / ore cost
+  k        = 0.2 below 20% collected;  f from 20% to 80%;  3 above 80%
+  request  = (ore cost − ore collected) × k × KPD × 0.2 + 0.07
+  ```
+
+  so a build pulls ore slowly at first, in proportion through the middle, and
+  three times harder at the end, always scaled by efficiency. The request is
+  not multiplied by the tick's length.
+- Once power is fully collected it calls `SetPowerUsage(0)` and stops drawing;
+  once ore is, it withdraws its request.
+- It **completes when all three are collected**, then decrements a clan counter
+  at `+0x9ec` — the free-bot count, a *guess* from the mission's `FreeBotNum`.
+- Until then its **progress is `min(time, ore, power)` as fractions, capped at
+  1**, logged as "Construction in progress".
+
 ## Against what the game looked like
 
 The HUD shows ore and power as percentages, a mine gives about 11%, a
@@ -163,9 +188,9 @@ construction slows research.
 - **Transport from mine to warehouse** — confirmed by the game's own tutorial
   (strings 103, 104). A mine also supplies consumers directly, more slowly;
   how is *unknown* — see the correction above.
-- **Slower when low** — *read*, for research. The draw rates scale with
-  efficiency and the task tracks its scarcest budget. The factory's
-  construction task has not been read, so the factory itself is *unknown*.
+- **Slower when low** — *read*, for both the factory and research. Power and
+  ore accrue in proportion to efficiency, and progress is the smallest of the
+  three completion fractions, so whichever resource is short sets the pace.
 - **Construction slowing research** — *guess*. The factory draws 4 power and 5
   ore from the same pool the institute draws 3 and 1 from, so while it builds
   the institute's tier gets a smaller share. Which tier each sits in is
@@ -184,5 +209,10 @@ construction slows research.
   `Transfer_Power_Out`, and the mining code takes the smaller of one side's
   rate and the other's contents. The loader that assigns them has not been
   read.
-- The HUD's ore and power percentages, and the factory's construction task.
+- The HUD's ore and power percentages. Ruled out so far: `iron3d.dll`'s
+  `targeter_energy` is a weapon's charge; the `"%s : %d%%"` tooltip is an
+  object's own field times 100; the low-resources voice fires on message
+  `0x104` sent from elsewhere; and the distributor's vtable slot 11 is its
+  tick, not a getter. The distributor is created by `ai.dll`, not through
+  `Comp.ini`.
 - `fPriority`, and properties `0x300`–`0x305`.

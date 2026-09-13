@@ -1066,8 +1066,8 @@ module = "Behavior.dll"
 at = "0x1002a4f0"
 kind = "function"
 name = "M_Task_Construct::OnBehaviourTakt"
-doc = "the binary's own assertion text"
-read = false
+doc = "docs/23-economy.md"
+read = true
 
 [[entry]]
 module = "Behavior.dll"
@@ -1447,5 +1447,21 @@ module = "Control.dll"
 at = "0x1002bb40"
 kind = "function"
 name = "component property getter; 0xe00 on type 10 is (p300+p301+p302)/3"
+doc = "docs/23-economy.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10019da0"
+kind = "function"
+name = "CreateDistributor: the clan's ore and power distributor, created by ai.dll"
+doc = "docs/23-economy.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1001adb0"
+kind = "function"
+name = "distributor slot 11: the tick, dt from a millisecond clock"
 doc = "docs/23-economy.md"
 read = true
