@@ -8254,6 +8254,73 @@ def check_packages(check, game: Path) -> None:
           ", ".join(f"{n[6:]} {k}" for n, k in used.most_common())
           + f"; never: {', '.join(never)}")
 
+    # The status line: a switch over the head order, each case loading a string id.
+    by_order = _status_switch(iron) or {}
+    wanted = {o: packages.STATUS_FIRST + i for o, i in packages.STATUS_BY_ORDER.items()}
+    unknown = packages.STATUS_FIRST + len(packages.STATUS) - 1
+    named = ", ".join(f"{o} {table.get(s)!r}" for o, s in sorted(by_order.items())
+                      if s != unknown)
+    rest = sorted(o for o, s in by_order.items() if s == unknown)
+    check("iron3d.dll: the status line's string is picked by the head order",
+          len(by_order) == 25 and by_order[0] == packages.STATUS_FIRST
+          and all(by_order[o] == wanted.get(o, unknown) for o in range(1, 25)),
+          f"the one 25-case switch on esi (iron3d.dll:0x10076f90) loads, by order: {named}; "
+          f"orders {', '.join(map(str, rest))} load 'unknown'")
+
+    # The wingman menu: the command that opens the second table, as the files name it.
+    described = controls.commands(game).get("CMD_JAMES_WINGMAN_MENU", "")
+    bound = sorted({b.chord for name in ("addition.man", "ui_other.man")
+                    for b in controls.bindings(game / name)
+                    if b.command == "CMD_JAMES_WINGMAN_MENU"})
+    check("Command.dsc: the second menu's command activates the wingman menu, on the tilde",
+          described.lower() == "activate wingman menu" and bound == ["SCAN_TILDA"]
+          and controls.CMD.get("CMD_JAMES_WINGMAN_MENU") == 740,
+          f"CMD_JAMES_WINGMAN_MENU (740) is described {described!r} and bound to "
+          f"{', '.join(bound)} in addition.man and ui_other.man; its handler opens the "
+          f"selector whose menu reads the 7-row second table")
+
+    # Nothing reads a profile's task flags by name: only their binder and their values name them.
+    naming: dict[str, set[str]] = defaultdict(set)
+    probes = [f.encode() for f in packages.TASK_FLAGS] + [b"Patrol_Attack_Range",
+                                                          b"Build_BuildDistance"]
+    for path in sorted(p for p in game.iterdir() if p.is_file()):
+        data = path.read_bytes()
+        for probe in probes:
+            if probe in data:
+                naming[probe.decode()].add(path.name)
+    flags_where = {frozenset(naming[f]) for f in packages.TASK_FLAGS}
+    check("install: only Behavior.dll and behpsp.res name a task flag or the two unread constants",
+          flags_where == {frozenset({"Behavior.dll", "behpsp.res"})}
+          and naming["Patrol_Attack_Range"] == naming["Build_BuildDistance"] == {"Behavior.dll"},
+          f"all {len(packages.TASK_FLAGS)} Task_* names occur in "
+          f"{', '.join(sorted(next(iter(flags_where))))} and in no other top-level file of "
+          f"{sum(1 for p in game.iterdir() if p.is_file())}; Patrol_Attack_Range and "
+          f"Build_BuildDistance only in {', '.join(sorted(naming['Patrol_Attack_Range']))} -- "
+          f"no module looks them up by name")
+
+
+def _status_switch(image: bytes) -> dict[int, int] | None:
+    """``iron3d.dll``'s status-line switch: order -> the string id its case loads.
+
+    The switch is ``cmp esi, 0x18; ja default; jmp [esi*4 + table]`` and every
+    case ``mov esi, [eax]; mov edx, id``.  Returns None if the pattern is absent.
+    """
+    at = image.find(b"\x83\xfe\x18\x0f\x87")
+    if at < 0 or image[at + 9:at + 12] != b"\xff\x24\xb5":
+        return None
+    sections, _ = resources._sections(image)
+    lfanew = struct.unpack_from("<I", image, 0x3C)[0]
+    base = struct.unpack_from("<I", image, lfanew + 24 + 28)[0]
+    table = struct.unpack_from("<I", image, at + 12)[0] - base
+    out = {}
+    for order in range(25):
+        case = struct.unpack_from("<I", image, resources._offset(sections, table + 4 * order))[0]
+        off = resources._offset(sections, case - base)
+        if image[off:off + 3] != b"\x8b\x30\xba":
+            return None
+        out[order] = struct.unpack_from("<I", image, off + 3)[0]
+    return out
+
 
 def check_builder(check, game: Path) -> None:
     """The builder and the transport: who they are, what they carry, where they go."""
@@ -8393,6 +8460,20 @@ def check_builder(check, game: Path) -> None:
           f"chassis sizes {sorted(sizes[objects.TYPE_TRANSPORT])}; builders: "
           f"{dict(held[objects.TYPE_BUILDER])}, sizes "
           f"{sorted(sizes[objects.TYPE_BUILDER])} -- one capacity whatever the size")
+
+    # 4b. a builder sets off with Building_Cost and pays the full sum, unclamped
+    starts = sorted({n for _, n in held[objects.TYPE_BUILDER]})
+    poorest = min(starts) if starts else 0.0
+    dearer = sorted(n for n, cost in first.items() if cost > poorest)
+    cheaper = sorted(n for n, cost in first.items() if cost <= poorest)
+    check("objects.dlb: a builder placed with 200 ore goes into debt on all but a generator",
+          starts and poorest >= profiles.BUILDING_COST and len(dearer) == 11
+          and cheaper == ["Generator"],
+          f"placed builders start with {', '.join(f'{s:g}' for s in starts)} ore, each at least "
+          f"Building_Cost ({profiles.BUILDING_COST:g}), so they set off at once "
+          f"(Behavior.dll:0x10028ff0); {len(dearer)} of {len(first)} first buildings cost more "
+          f"than {poorest:g}, and the property setter stores the negative result "
+          f"(0x100269e0); only {', '.join(cheaper)} ({first['Generator']:g}) is paid in full")
 
     # 5. hall ways: one ground-level mine place per mine, one store place per storage
     fortif = NResArchive.open(game / "fortif.rlb")
@@ -8662,6 +8743,42 @@ def check_search(check, game: Path) -> None:
           f"offset by the unit's position (Behavior.dll:0x10030c86), lies within "
           f"{packages.FLEE_RANGE:g} of a map's corner or off the map")
 
+    # The mineral lodes are the trailer's records: every placed mine sits on some.
+    lodes = total = found = typed = 0
+    missions_with = 0
+    amounts: set[float] = set()
+    mines = Counter()
+    others = Counter()
+    for path in sorted(game.glob("MISSIONS/**/data.tma")):
+        m = mission.load(path)
+        got = packages.mineral_lodes(m)
+        total += 1
+        missions_with += bool(got)
+        lodes += len(got)
+        found += sum(lode.found for lode in got)
+        typed += sum(lode.type_word == packages.MINERALS for lode in got)
+        amounts |= {lode.amount for lode in got}
+        for o in m.objects:
+            kind = o.properties.get("Type")
+            if kind is None or not (int(kind.value) & 0xFFFFFFFF) >> 31 or not got:
+                continue
+            near = any(math.hypot(lode.x - o.position[0], lode.y - o.position[1])
+                       <= packages.MINE_LODE_RADIUS for lode in got)
+            is_mine = (int(kind.value) & 0xFFFFFFFF) == 0x80000004
+            (mines if is_mine else others)[near] += 1
+    decades = {round(math.log10(a)) for a in amounts if a > 0}
+    check("data.tma: the trailer's records are mineral lodes, and every mine sits by one",
+          lodes and mines[True] and not mines[False] and others[True] * 10 < others[False]
+          and typed > lodes // 2
+          and all(abs(a / 10 ** round(math.log10(a)) - 1) < 1e-3 for a in amounts)
+          and min(decades) >= 4,
+          f"{lodes} records in {missions_with} of {total} missions; all {mines[True]} placed "
+          f"mines lie within {packages.MINE_LODE_RADIUS:g} of one (M_Task_Mine takes the "
+          f"amounts of those), against {others[True]} of {sum(others.values())} other "
+          f"buildings; {typed} carry the type 0x10001000 Search minerals asks for; the "
+          f"amounts are 10^n or 10^n - 1 for n {min(decades)}..{max(decades)}; {found} start "
+          f"found, which a minerals search skips")
+
 
 #: Section-5 action codes (``Control.dll:0x10002800``): start and stop an
 #: effect, and kill every unit inside the building's construction sphere.
@@ -8690,6 +8807,39 @@ def _action_groups(blob: bytes,
             pos += control.REFERENCE_STRIDE
         out.append(group)
     return out
+
+
+def _planned_run(parsed: control.Controller, frm: int, to: int) -> list[int] | None:
+    """The states the planner queues from ``frm`` toward ``to``, as it searches.
+
+    The search is rooted at the target: every state starts at the cost of its
+    own edge into the target -- the target's self-edge too -- and each state
+    settled passes its cost on to the states with an edge into it.  A state's
+    predecessor in that search is its next hop, and the run follows the hops
+    until it reaches the target (``Control.dll:0x100019d0``, ``0x10004f50``).
+    """
+    n = len(parsed.states)
+    dist = [parsed.cost(to, j) for j in range(n)]
+    hop = [to] * n
+    settled = [False] * n
+    while True:
+        open_states = [j for j in range(n) if not settled[j] and dist[j] < control.NO_EDGE]
+        if not open_states:
+            return None
+        pick = min(open_states, key=lambda j: dist[j])
+        settled[pick] = True
+        if pick == frm:
+            break
+        for k in range(n):
+            through = dist[pick] + parsed.cost(pick, k)
+            if not settled[k] and through < dist[k]:
+                dist[k], hop[k] = through, pick
+    run, state = [], frm
+    while True:
+        state = hop[state]
+        run.append(state)
+        if state == to or len(run) > n:
+            return run
 
 
 def _animated_parts(blob: bytes,
@@ -8760,6 +8910,26 @@ def check_construction(check, game: Path) -> None:
           f"code 2, 8 or 10 names (+0x90) a section-5 group holding action 21, which "
           f"kills every object of classes 0x4/0x10/0x400 inside the construction sphere "
           f"(Control.dll:0x100033e6)")
+    # 2b. the kill states re-enter themselves every step while their code is held
+    looping = Counter()
+    for _blob, parsed in buildings.values():
+        for index, state in enumerate(parsed.states):
+            if state.request not in (2, 8, 10):
+                continue
+            looping[(state.anchor and bool(state.mode & control.STATE_FIXED)
+                     and state.flags == 0 and state.length,
+                     _planned_run(parsed, index, index) == [index])] += 1
+    steps = {length for (length, _), _n in looping.items()}
+    check("fortif.rlb: a kill state is a fixed anchor whose way back is its own self-edge",
+          looping and set(looping) == {(250.0, True)}
+          and sum(looping.values()) == 3 * len(buildings),
+          f"all {sum(looping.values())} states asked for by code 2, 8 or 10 on "
+          f"{len(buildings)} controllers are anchors fixed at "
+          f"{', '.join(f'{s:g}' for s in steps)} ms "
+          f"with their boxes off, and the planner's way back from each "
+          f"(Control.dll:0x10004f50 over 0x100019d0) is its self-edge alone -- so while the "
+          f"code is held the state is entered, and its kill run, every step: four times a second")
+
     without = sorted(set(buildings) - sphered)
     check("fortif.rlb: a building names the sign, start and main sphere effects",
           sphered and bt and all("bunker" in n or "tower" in n for n in bt)

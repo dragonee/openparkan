@@ -488,8 +488,13 @@ reads `Decision_RepairOn`/`Off` was wrong.
   - A unit runs it on its takt (`0x10005110`) unless that tick sent it to a
     dock or into an attack (`0x10017d50`, `0x10017e70`).
   - The unit takt needs bit `0x10` of the behaviour's flags, which the
-    behaviour's mode setter derives from its argument (`0x100067b0`). Who
-    clears it, for instance while the player drives the unit, is not traced.
+    behaviour's mode setter derives from its argument (`0x100067b0`). **The
+    unit's `Wizard.dll` object sets it** (`0x10003890`), and taking a bot
+    clears it unless its auto-driver level is 1 or 2 (`iron3d.dll:0x10074ff0`,
+    [31-packages.md](31-packages.md#the-escape--read)). So **while the player
+    drives a bot at level 0 the AI does not touch its repair switch**; at level
+    1 or 2 it does. The player's hero has the bit forced off whether driven or
+    let go.
   - Clans of type 3 skip the takt altogether (`0x10005070`).
 
 | profile (*measured*) | `Decision_RepairOn` | `Decision_RepairOff` | a unit switches on below | and off above |
@@ -559,9 +564,9 @@ shield, battery and ammunition (`Behavior.dll:0x10018100`, `0x10019372`,
 - ~~Where a round's collision radius comes from.~~ Answered: its mesh's
   stream-2 header sphere, times the largest scale
   ([The hit test](#the-hit-test--read-and-measured)).
-- Who clears the behaviour flag `0x10` that lets a unit's takt switch its
-  repair (`Behavior.dll:0x100067b0`'s caller), and so whether the AI overrides
-  the switch while the player drives.
+- ~~Who clears the behaviour flag `0x10` that lets a unit's takt switch its
+  repair.~~ The unit's wizard, off while the player drives at auto-driver
+  level 0 ([31-packages.md](31-packages.md#the-escape--read)).
 - ~~What `IControl` component query `0x77` answers.~~ Answered: component
   query `0x1100`, a repair system's value 0 × condition
   ([Repair](#repair-a-units-own-repair-unit-switched-on-and-off--read-and-measured)).
