@@ -9,7 +9,7 @@ use anyhow::{Context, Result};
 use parkan_formats::mission::{self, Value as PropertyValue};
 use parkan_formats::nres::Archive;
 use parkan_formats::pose::Pose;
-use parkan_formats::{control, controls, landmesh, materials, mesh, texm, wea};
+use parkan_formats::{control, controls, cpt, landmesh, materials, mesh, texm, wea};
 
 use crate::assembly;
 use serde_json::{Value, json};
@@ -368,6 +368,7 @@ pub fn controllers(path: &Path, names: &[String]) -> Result<Value> {
                 "request": s.request,
             })).collect::<Vec<_>>(),
             "costs": vector(&c.costs),
+            "live_costs": vector(&c.live_costs()),
             "channels": c.channels.iter().map(|ch| json!([
                 ch.node, number(ch.first), number(ch.last), number(ch.initial), ch.origin,
                 ch.point, number(ch.rate), number(ch.span), ch.flags,
@@ -396,6 +397,31 @@ pub fn controllers(path: &Path, names: &[String]) -> Result<Value> {
         }));
     }
     Ok(json!({ "kind": "control", "controllers": out }))
+}
+
+/// The `.cpt` members of an archive, all of them unless `names` picks some.
+pub fn control_points(path: &Path, names: &[String]) -> Result<Value> {
+    let archive = Archive::open(path)?;
+    let members: Vec<String> = if names.is_empty() {
+        archive.entries.iter().filter(|e| e.tag() == cpt::CTPT_TAG).map(|e| e.name.clone()).collect()
+    } else {
+        names.to_vec()
+    };
+    let mut out = Vec::new();
+    for member in &members {
+        let points = cpt::parse(archive.read_name(member)?, member)?;
+        out.push(json!({
+            "name": member,
+            "points": points.iter().map(|p| json!({
+                "name": p.name,
+                "a": vector(&p.a),
+                "nodes": [p.nodes().0, p.nodes().1],
+                "position": vector(&p.position),
+                "direction": vector(&p.direction),
+            })).collect::<Vec<_>>(),
+        }));
+    }
+    Ok(json!({ "kind": "cpt", "members": out }))
 }
 
 /// A `.tbl`: every row, and the numbers the engine resolves its names to.
@@ -436,8 +462,9 @@ pub fn dump(kind: &str, path: &Path, names: &[String]) -> Result<Value> {
         "assembly" => mission_assembly(path),
         "control" => controllers(path, names),
         "controls" => input_table(path),
+        "cpt" => control_points(path, names),
         other => anyhow::bail!(
-            "unknown kind {other:?}; expected nres, mission, texm, materials, landmesh, mesh, assembly, control or controls"
+            "unknown kind {other:?}; expected nres, mission, texm, materials, landmesh, mesh, assembly, control, controls or cpt"
         ),
     }
 }

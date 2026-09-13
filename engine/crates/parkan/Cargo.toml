@@ -11,6 +11,7 @@ anyhow.workspace = true
 glam.workspace = true
 parkan-formats.workspace = true
 parkan-render.workspace = true
+parkan-sim.workspace = true
 parkan-world.workspace = true
 png.workspace = true
 pollster.workspace = true

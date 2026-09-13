@@ -65,8 +65,8 @@ def terrain_textures(game: Path) -> list[str]:
     return sorted(names)
 
 
-def _has_controllers(path: Path) -> bool:
-    return any(e.tag == control.CTL_TAG for e in NResArchive.open(path))
+def _has_tag(path: Path, tag: str) -> bool:
+    return any(e.tag == tag for e in NResArchive.open(path))
 
 
 def mission_meshes(game: Path) -> list[tuple[Path, str]]:
@@ -86,8 +86,8 @@ def targets(game: Path) -> list[tuple[str, Path, list[str]]]:
 
     M0: every archive and Mission 01's ``data.tma``.  M1: ``Material.lib``,
     Tut_1's ``Land.msh`` and the textures its ground names.  M2: Mission 01's
-    assembly and every mesh its objects are drawn from.  M3: every controller
-    and the three input tables.
+    assembly and every mesh its objects are drawn from.  M3: every controller,
+    every control point list and the three input tables.
     """
     archives = sorted(p for p in game.rglob("*") if p.is_file() and is_nres(p))
     return ([("nres", p, []) for p in archives]
@@ -97,7 +97,8 @@ def targets(game: Path) -> list[tuple[str, Path, list[str]]]:
                ("texm", game / "Textures.lib", terrain_textures(game)),
                ("assembly", game / MISSION_01, [])]
             + [("mesh", archive, [member]) for archive, member in mission_meshes(game)]
-            + [("control", p, []) for p in archives if _has_controllers(p)]
+            + [("control", p, []) for p in archives if _has_tag(p, control.CTL_TAG)]
+            + [("cpt", p, []) for p in archives if _has_tag(p, "CTPT")]
             + [("controls", game / name, []) for name in controls.TABLES])
 
 

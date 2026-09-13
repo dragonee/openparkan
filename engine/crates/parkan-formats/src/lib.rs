@@ -6,6 +6,7 @@
 
 pub mod control;
 pub mod controls;
+pub mod cpt;
 pub mod cursor;
 pub mod gamedir;
 pub mod landmesh;

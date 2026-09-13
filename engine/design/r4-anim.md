@@ -1,4 +1,8 @@
 <!-- Phase R research note R4: Animation playback. Where this note and docs/ disagree, docs/ wins: docs/24-motion.md#playing-a-state--read-and-measured -->
+
+> **Superseded since this note was written:**
+>
+> - The live cost's scaling is read: file cost × (1 + g_v + g_s), each gap the largest |destination box centre − source box minimum| over the source's switched-on axes (docs/24). Without it the hero's run ping-pongs into the backward states.
 # R4 engine description: playing a controller's animation (Phase One, Mission 01)
 
 Labels: **faithful** means read or measured, with its source in doc.md and

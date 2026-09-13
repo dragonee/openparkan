@@ -113,17 +113,38 @@ pub struct Body {
     pub command: [f32; 3],
     /// The turn not yet made (`+0x1e0`), 0.5 at rest.
     pub pending: [f32; 3],
+    /// The strafe angle asked for (`+0x1f4`), and how much of it the body has turned.
+    pub strafe: f32,
+    pub strafe_turned: f32,
 }
 
 impl Body {
     pub fn new(position: Vec3, yaw: f32) -> Self {
-        Self { position, yaw, velocity: [0.0; 3], spin: [0.0; 3], command: [0.0; 3], pending: [NO_TURN; 3] }
+        Self {
+            position,
+            yaw,
+            velocity: [0.0; 3],
+            spin: [0.0; 3],
+            command: [0.0; 3],
+            pending: [NO_TURN; 3],
+            strafe: 0.0,
+            strafe_turned: 0.0,
+        }
     }
 
     /// A vector in the machine's frame, turned into the world.
     pub fn to_world(&self, v: Vec3) -> Vec3 {
         let (s, c) = self.yaw.sin_cos();
         Vec3::new(v.x * c - v.y * s, v.x * s + v.y * c, v.z)
+    }
+
+    /// Where the unit looks: the body's heading less the strafe it has turned.
+    ///
+    /// STAND-IN: docs/24-motion.md#from-input-to-motion--read-and-measured -- how the
+    /// strafe turn splits between hull and turret is not read; the legs turn and the
+    /// turret holds its heading.
+    pub fn heading(&self) -> f32 {
+        self.yaw - self.strafe_turned
     }
 
     pub fn forward(&self) -> Vec3 {

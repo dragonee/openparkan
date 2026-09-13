@@ -20,12 +20,20 @@ mip levels. Every placed object is drawn from its assembly:
 - level 0 is drawn, and collision hulls never;
 - materials draw in the blend mode their flags byte names.
 
-M3 is under way. `parkan-sim` plays a controller's states on their own clock
-and walks a machine on the ground: the live limits, the velocity and pending
-turn integrators run once a state step, and the body moves by its velocity or
-by the animation's root stride. On Tut_1 the hero holding W reaches 14 m/s in
-its run cycle. Not in the window yet: input, the first-person eye and the
-drawn animation.
+M3 is under way. The window opens in the hero's cockpit on Mission 01:
+
+- `parkan-sim` plays the chassis controller's states on their own clock. The
+  live limits and the velocity and pending-turn integrators run once a state
+  step. The body moves by its velocity or by the animation's root stride.
+- The planner scales the file's transition costs as the loader does, so the
+  run cycle keeps running forward.
+- `hero.tbl` drives it through the game's mouse filter.
+- The turret's pitch channel tilts the sight. The eye stands at
+  `CameraCenter` and looks along `TargetDirect` with a horizontal field of
+  view of 1.3 rad.
+
+On Tut_1 the hero holding W runs at 14 m/s. Not drawn yet: the hero itself
+and its animation, when seen from outside.
 
 Not yet: lightmaps (no Mission 01 mesh has one) and levels of detail beyond 0.
 This directory also holds what the rest will follow:
@@ -48,7 +56,10 @@ and `parkan`, in milestones M0 to M5.
 
 ```
 cd engine
-cargo run --release -p parkan                                  # Mission 01, debug camera
+cargo run --release -p parkan                                  # Mission 01, in the hero's cockpit
+cargo run --release -p parkan -- --fly                         # a debug camera instead
+cargo run --release -p parkan -- --headless --ticks 180 --hold SCAN_W   # play 3 s holding W, no window
+cargo run --release -p parkan -- --screenshot run.png --ticks 120 --hold SCAN_W --mouse 6,-8
 cargo run --release -p parkan -- --screenshot m1.png           # one frame to a PNG, no window
 cargo run --release -p parkan -- --screenshot map.png --top-down --size 768x768
 cargo run --release -p parkan -- --screenshot tank.png --look 705,885,24,734,906,10   # from X,Y,Z at TX,TY,TZ
@@ -56,8 +67,15 @@ cargo run --release -p parkan -- --mission MISSIONS/Single.01  # another mission
 ```
 
 `--game DIR` or `PARKAN_DIR` points at the install when it is not beside this
-repository. In the window W/A/S/D and Q/E fly, holding the right mouse button
-turns, Shift flies faster and Escape quits.
+repository.
+
+In the cockpit the hero's own `hero.tbl` drives it. W and S walk, A and D
+strafe, the mouse turns the hull and tilts the turret, and Shift with the
+mouse looks around. A click grabs the mouse; Escape lets it go, and quits once
+it is free. `--ticks N`, `--hold` (scan names) and `--mouse DX,DY` (counts a
+tick) play the hero at 60 ticks a second before a screenshot, or with
+`--headless` print where it got to. With `--fly`, W/A/S/D and Q/E fly, holding
+the right mouse button turns and Shift flies faster.
 
 ## Checks
 
@@ -95,7 +113,6 @@ a row here. A row leaves this table when research closes it.
 | M3 | The mesh walk inside `FindWorldFace`, and the two query passes | the face under the point, found fresh each step; the water surface is never ground | [24](../docs/24-motion.md#finding-the-ground--read) |
 | M4 | Which way the gap to the liquid surface is measured over a bed | `water_level − centre.z < r` (bed damage arrives with damage) | [24](../docs/24-motion.md#not-established) |
 | M3 | The divisor D in a blended state's weight | the largest span of the velocity box's switched-on axes | [24](../docs/24-motion.md#not-established) |
-| M3 | The transition cost's scaling by the gap between two states' boxes | the file's cost unscaled | [24](../docs/24-motion.md#playing-a-state--read-and-measured) |
 | M3 | Section 1's 16-byte conditions, and a state's use count `+0x94` | always satisfied; unlimited | [24](../docs/24-motion.md#section-1-is-the-animation-state-graph--read-and-measured) |
 | M3 | Whether a state's step velocity replaces the integrated one | it does not; the boxes test the integrated velocity | [24](../docs/24-motion.md#not-established) |
 | M3 | The state a machine starts in, and what plays when nothing is queued | state 0; the current state plays again | [24](../docs/24-motion.md#playing-a-state--read-and-measured) |
@@ -103,10 +120,14 @@ a row here. A row leaves this table when research closes it.
 | M3 | The node range the payload counts as the chassis | none: spare payload is the whole payload, r = 1 | [24](../docs/24-motion.md#load--read-and-measured) |
 | M3 | What triples 5 and 6 do to the attitude | only the turn about z is applied | [24](../docs/24-motion.md#not-established) |
 | M3 | Which way across a slope the mode-2 brake acts | uphill, against the face normal | [24](../docs/24-motion.md#ground-and-slope--read) |
-| M3 | The mouse's yaw and pitch signs on screen | mouse right turns right, mouse up looks up; check against the game | [30](../docs/30-turrets.md#not-established) |
-| M3 | Which camera point gives the position and which the direction | position from `CameraCenter`, direction from `TargetDirect` | [30](../docs/30-turrets.md#aiming-and-the-camera--read-and-measured) |
-| M3 | How the strafe angle's turn splits between hull and turret; the keypad cruise ramp | the legs turn and the turret holds its heading; the ramp adds 0.05 a second to the command | [24](../docs/24-motion.md#not-established) |
+| M3 | The signs `SetInverseMotion` starts with, and the free look's senses on screen | invert (−1, +1): mouse right turns the hull right, mouse up tilts the sight up; free look yaw follows the hull | [14](../docs/14-controls.md#from-a-row-to-a-command--read-and-measured) |
+| M3 | Which camera point gives the position and which the direction | position from `CameraCenter`, direction from `TargetDirect`, up the look node's +z | [30](../docs/30-turrets.md#aiming-and-the-camera--read-and-measured) |
+| M3 | How the strafe angle's turn splits between hull and turret, and at what rate | the legs turn at once and the turret holds its heading; the angle follows the keys held, mirrored while backing up | [24](../docs/24-motion.md#not-established) |
+| M3 | What the keypad cruise's ramp does | ramp rows do nothing | [24](../docs/24-motion.md#not-established) |
+| M3 | A chord with no row of its own, such as Shift+W | the plain row | [14](../docs/14-controls.md#the-table) |
 | M3 | The mouse sensitivity handed to `World3D.dll` | `MOUSE_SENS` × 0.01 from `Iron_3D.ini` | [14](../docs/14-controls.md#from-a-row-to-a-command--read-and-measured) |
+| M3 | How a follower channel (flag 8) aims its gun's mount | it steps toward the pitch channel's value at its own rate; flag 0x40 copies the previous channel | [30](../docs/30-turrets.md#aiming-and-the-camera--read-and-measured) |
+| M3 | Whether the player's own unit is drawn in first person | it is not | [30](../docs/30-turrets.md#aiming-and-the-camera--read-and-measured) |
 | M4 | What sets the hero's turret target in first-person play | none: the plasma bolt and the missile fly straight | [29](../docs/29-weapons.md#not-established) |
 | M4 | What starts the hero's muzzle flash and shot sounds | start the gun's effect and `_sfx` at step 1 of each barrel stroke, driven 0 to 1 by the barrel channel | [29](../docs/29-weapons.md#not-established) |
 | M4 | How the turret's follower channels set a gun's ready byte | always ready | [29](../docs/29-weapons.md#not-established) |

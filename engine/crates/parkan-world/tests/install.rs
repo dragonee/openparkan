@@ -94,3 +94,40 @@ fn mission_01s_bridge_halves_meet() {
     assert!(joined < 0.05, "the bridge halves are {joined:.2} apart");
     assert!(negated > 1.0, "control: with the angle negated they are {negated:.2} apart");
 }
+
+#[test]
+#[ignore = "needs the game install"]
+fn the_heros_eye_looks_level_along_its_heading_and_pitches_with_the_turret() {
+    use parkan_formats::{landmesh, mission};
+    use parkan_sim::ground::Ground;
+    use parkan_world::{assembly::Assembly, hero::Hero};
+
+    let game = gamedir::find(None).expect("a Parkan install: set PARKAN_DIR");
+    let dir = gamedir::resolve(&game, gamedir::MISSION_01).unwrap();
+    let m = mission::parse(&std::fs::read(dir.join("data.tma")).unwrap(), "Mission.01").unwrap();
+    let mut assembly = Assembly::new(&game).unwrap();
+    let mut hero = Hero::load(&mut assembly, &m).unwrap().expect("Mission 01 has a hero");
+    let land = landmesh::load(&gamedir::resolve(&game, "DATA/MAPS/Tut_1/Land.msh").unwrap()).unwrap();
+    let ground = Ground::new(land);
+    hero.tick(1000.0 / 60.0, [0.0; 2], &ground);
+
+    let eye = hero.eye();
+    let facing = hero.walker.body.forward();
+    // The pitch channel starts at 0.2727, within 0.6 degrees of level (docs/30).
+    assert!(eye.forward.z.abs() < 0.02, "level: {}", eye.forward);
+    assert!(eye.forward.dot(facing) > 0.999, "{} against {facing}", eye.forward);
+    assert!((eye.fov_x - 1.3).abs() < 1e-6 && (eye.near - 0.1).abs() < 1e-6);
+    let origin = hero.walker.body.position;
+    let lift = eye.position.z - origin.z;
+    assert!(lift > 0.5 && lift < 3.0, "the eye {lift} above the origin");
+    assert!((eye.position - origin).truncate().length() < 1.0);
+
+    // Full up is frame 57, the sight at +79.4 degrees.
+    hero.rig.aim[1] = 0.0;
+    for _ in 0..120 {
+        hero.tick(1000.0 / 60.0, [0.0; 2], &ground);
+    }
+    let up = hero.eye().forward;
+    assert!((up.z.asin().to_degrees() - 79.4).abs() < 1.0, "{}", up.z.asin().to_degrees());
+    assert!((hero.eye().position - eye.position).length() < 0.05, "pitch does not move the eye");
+}

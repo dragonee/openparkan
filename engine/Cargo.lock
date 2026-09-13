@@ -1304,6 +1304,7 @@ dependencies = [
  "glam",
  "parkan-formats",
  "parkan-render",
+ "parkan-sim",
  "parkan-world",
  "png",
  "pollster",
@@ -1343,7 +1344,9 @@ name = "parkan-world"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "glam",
  "parkan-formats",
+ "parkan-sim",
  "serde_json",
  "sha2",
 ]

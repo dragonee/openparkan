@@ -87,12 +87,16 @@ pub struct Frames {
 /// A machine on the ground: its controller, its body and its state clock.
 pub struct Walker {
     pub controller: Controller,
+    /// The transition costs as the loader scales them (`0x10001790`).
+    pub costs: Vec<f32>,
     pub strides: Vec<Stride>,
     pub limits: Limits,
     pub body: Body,
     pub machine: Machine,
-    /// The body's position and heading when the current step began, for drawing.
+    /// The body's position and yaw when the current step began, for drawing.
     pub from: (Vec3, f32),
+    /// The unit's heading when the current step began.
+    pub from_heading: f32,
     /// The body sphere's radius as the ground contact holds it.
     pub radius: f32,
     /// How far the origin stands above the model's lowest point.
@@ -123,6 +127,7 @@ impl Walker {
         let limits = Limits::live(&controller, motion::engine_drive(&controller), 1.0, 1.0);
         let body = Body::new(position, yaw);
         Self {
+            costs: controller.live_costs(),
             controller,
             strides,
             limits,
@@ -140,6 +145,7 @@ impl Walker {
                 seed: 0x2545_F491,
             },
             from: (position, yaw),
+            from_heading: yaw,
             radius,
             base,
             ground: None,
@@ -177,17 +183,17 @@ impl Walker {
         let c = &self.controller;
         let current = self.machine.current;
         // STAND-IN: docs/24-motion.md#section-1-is-the-animation-state-graph--read-and-measured
-        // -- a state's 16-byte conditions are taken as met, its use count as
-        // unlimited, and the file's costs are not scaled by the boxes' gap.
+        // -- a state's 16-byte conditions are taken as met, and its use count as
+        // unlimited.
         if c.states[current].applies(v, s)
-            && let Some((path, _)) = c.path(current, current)
+            && let Some((path, _)) = c.path_by(&self.costs, current, current)
         {
             self.machine.queue = path.into();
             return;
         }
         let best = (0..c.states.len())
             .filter(|&j| j != current && c.states[j].anchor() && c.states[j].applies(v, s))
-            .filter_map(|j| c.path(current, j))
+            .filter_map(|j| c.path_by(&self.costs, current, j))
             .min_by(|a, b| a.1.total_cmp(&b.1));
         if let Some((path, _)) = best {
             self.machine.queue = path.into();
@@ -212,6 +218,7 @@ impl Walker {
         self.machine.q_prev = self.machine.q;
         self.machine.q = 1.0;
         self.from = (self.body.position, self.body.yaw);
+        self.from_heading = self.body.heading();
         self.machine.step_start_ms = self.machine.clock_ms;
 
         // In ms and f64, so a 50 ms step is 50 ms on the clock.
@@ -242,6 +249,11 @@ impl Walker {
         }
         let step = (step_ms / 1000.0) as f32;
 
+        // STAND-IN: docs/24-motion.md#from-input-to-motion--read-and-measured -- the
+        // body turns by the change in strafe angle (`0x10014cf0`); at what rate is not
+        // read, so it is turned at once.
+        self.body.yaw = wrap_angle(self.body.yaw + self.body.strafe - self.body.strafe_turned);
+        self.body.strafe_turned = self.body.strafe;
         let turned = motion::integrate_turn(&mut self.body.pending, &self.limits, step);
         // STAND-IN: docs/24-motion.md#from-input-to-motion--read-and-measured -- triple 6
         // is (0, 0, 6.28) on the hero; only the turn about z is applied.
@@ -298,6 +310,11 @@ impl Walker {
         let position = self.from.0.lerp(self.body.position, s);
         let yaw = self.from.1 + wrap_angle(self.body.yaw - self.from.1) * s;
         (position, yaw)
+    }
+
+    /// The unit's heading drawn at `t_ms`.
+    pub fn drawn_heading(&self, t_ms: f64) -> f32 {
+        self.from_heading + wrap_angle(self.body.heading() - self.from_heading) * self.phase(t_ms)
     }
 
     /// The step's phase at `t_ms`, 0 to 1.

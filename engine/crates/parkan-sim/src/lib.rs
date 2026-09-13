@@ -6,5 +6,7 @@
 //! section, and `engine/README.md` lists it.
 
 pub mod ground;
+pub mod input;
 pub mod machine;
 pub mod motion;
+pub mod turret;

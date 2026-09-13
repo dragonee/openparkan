@@ -1,13 +1,22 @@
 //! `parkan`: Parkan: Iron Strategy, played from the install.
 //!
-//! M0 opens a mission and flies a debug camera over its placed objects.
+//! Opens a mission in its hero's cockpit, or flies a debug camera over it.
 //!
 //! ```text
-//! parkan [--game DIR] [--mission MISSIONS/…] [--screenshot OUT.png] [--size WxH]
+//! parkan [--game DIR] [--mission MISSIONS/…] [--fly]
+//!        [--screenshot OUT.png] [--size WxH] [--top-down] [--look X,Y,Z,TX,TY,TZ]
+//!        [--headless] [--ticks N] [--hold SCAN_W,SCAN_A] [--mouse DX,DY]
 //! ```
 //!
-//! In the window: W/A/S/D and Q/E fly, the right mouse button held turns,
-//! Shift is faster, Escape quits.
+//! In the cockpit the hero's own input table drives it: W/S walk, A/D strafe,
+//! the mouse turns the hull and tilts the turret, Shift and the mouse look
+//! around. A click grabs the mouse; Escape lets it go, and quits when it is free.
+//! With `--fly`: W/A/S/D and Q/E fly, the right mouse button held turns, Shift is
+//! faster.
+//!
+//! `--ticks`, `--hold` and `--mouse` play the hero for that many 60 Hz ticks
+//! holding those keys and moving the mouse by that many counts a tick, before a
+//! `--screenshot` or, with `--headless`, printing where it got to.
 
 mod camera;
 mod scene;
@@ -27,26 +36,39 @@ use winit::application::ApplicationHandler;
 use winit::event::{DeviceEvent, DeviceId, ElementState, MouseButton, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::keyboard::{KeyCode, PhysicalKey};
-use winit::window::{Window, WindowId};
+use winit::window::{CursorGrabMode, Window, WindowId};
+
+/// The simulation runs at a fixed 60 ticks a second.
+const TICK_MS: f64 = 1000.0 / 60.0;
 
 struct Args {
     game: Option<PathBuf>,
     mission: String,
+    fly: bool,
     screenshot: Option<PathBuf>,
     size: (u32, u32),
     top_down: bool,
     /// `--look X,Y,Z,TX,TY,TZ`: a screenshot camera at X,Y,Z looking at TX,TY,TZ.
     look: Option<[f32; 6]>,
+    headless: bool,
+    ticks: u32,
+    hold: Vec<String>,
+    mouse: [f32; 2],
 }
 
 fn args() -> Result<Args> {
     let mut out = Args {
         game: None,
         mission: gamedir::MISSION_01.to_owned(),
+        fly: false,
         screenshot: None,
         size: (1280, 720),
         top_down: false,
         look: None,
+        headless: false,
+        ticks: 0,
+        hold: Vec::new(),
+        mouse: [0.0; 2],
     };
     let mut it = std::env::args().skip(1);
     while let Some(flag) = it.next() {
@@ -54,8 +76,16 @@ fn args() -> Result<Args> {
         match flag.as_str() {
             "--game" => out.game = Some(PathBuf::from(value()?)),
             "--mission" => out.mission = value()?,
+            "--fly" => out.fly = true,
             "--screenshot" => out.screenshot = Some(PathBuf::from(value()?)),
             "--top-down" => out.top_down = true,
+            "--headless" => out.headless = true,
+            "--ticks" => out.ticks = value()?.parse()?,
+            "--hold" => out.hold = value()?.split(',').map(str::to_owned).collect(),
+            "--mouse" => {
+                let v: Vec<f32> = value()?.split(',').map(str::parse).collect::<Result<_, _>>()?;
+                out.mouse = v.try_into().map_err(|_| anyhow::anyhow!("--mouse takes two numbers"))?;
+            }
             "--look" => {
                 let v: Vec<f32> = value()?.split(',').map(str::parse).collect::<Result<_, _>>()?;
                 out.look = Some(v.try_into().map_err(|_| anyhow::anyhow!("--look takes six numbers"))?);
@@ -91,10 +121,48 @@ fn top_down(terrain: &Terrain, aspect: f32) -> glam::Mat4 {
     proj * glam::Mat4::look_to_rh(centre, -Vec3::Z, Vec3::Y)
 }
 
+/// Play the hero for `--ticks`, holding `--hold` and moving `--mouse`.
+fn rehearse(play: &mut scene::Play, args: &Args) {
+    for key in &args.hold {
+        play.hero.key(key, true);
+    }
+    for tick in 0..args.ticks {
+        play.hero.tick(TICK_MS, args.mouse, &play.ground);
+        if args.headless && (tick + 1) % 60 == 0 {
+            report(play);
+        }
+    }
+}
+
+fn report(play: &scene::Play) {
+    let h = &play.hero;
+    let b = &h.walker.body;
+    let eye = h.eye();
+    println!(
+        "t {:6.2} s  at ({:.2}, {:.2}, {:.2})  speed {:5.2} m/s  heading {:+.3}  state {:3}  look ({:+.3}, {:+.3}, {:+.3})",
+        h.time_ms / 1000.0,
+        b.position.x,
+        b.position.y,
+        b.position.z,
+        Vec3::from_array(b.velocity).length(),
+        b.heading(),
+        h.walker.machine.current,
+        eye.forward.x,
+        eye.forward.y,
+        eye.forward.z,
+    );
+}
+
 fn screenshot(loaded: &scene::Loaded, game: &Path, args: &Args, out: &Path) -> Result<()> {
     let (width, height) = args.size;
     let gpu = pollster::block_on(Gpu::headless())?;
-    let world = scene::world(game, loaded)?;
+    let mut world = scene::world(game, loaded)?;
+    let mut play =
+        if args.fly || args.top_down || args.look.is_some() { None } else { scene::play(game, loaded)? };
+    if let Some(p) = play.as_mut() {
+        scene::hide(&mut world.objects, p.hero.object);
+        rehearse(p, args);
+    }
     let mut renderer = Renderer::new(&gpu.device, parkan_render::CAPTURE_FORMAT);
     renderer.set_world(
         &gpu.device,
@@ -113,6 +181,8 @@ fn screenshot(loaded: &scene::Loaded, game: &Path, args: &Args, out: &Path) -> R
             aspect,
             camera::NEAR,
         ) * glam::Mat4::look_at_rh(eye, target, Vec3::Z)
+    } else if let Some(p) = &play {
+        camera::first_person(&p.hero.eye(), aspect)
     } else {
         start_camera(loaded).view_proj(aspect)
     };
@@ -137,11 +207,18 @@ struct Running {
 struct App {
     loaded: scene::Loaded,
     world: scene::World,
+    /// The hero's cockpit, or `None` to fly.
+    play: Option<scene::Play>,
     camera: FlyCamera,
     running: Option<Running>,
     held: HashSet<KeyCode>,
     looking: bool,
+    grabbed: bool,
+    /// Mouse counts since the last tick.
+    counts: [f32; 2],
     last: Instant,
+    /// Real time not yet simulated, ms.
+    owed: f64,
 }
 
 impl App {
@@ -167,9 +244,29 @@ impl App {
         Ok(())
     }
 
+    fn grab(&mut self, on: bool) {
+        let Some(r) = self.running.as_ref() else { return };
+        let mode = if on { CursorGrabMode::Locked } else { CursorGrabMode::None };
+        let ok = r.window.set_cursor_grab(mode).or_else(|_| {
+            r.window.set_cursor_grab(if on { CursorGrabMode::Confined } else { CursorGrabMode::None })
+        });
+        r.window.set_cursor_visible(!on);
+        self.grabbed = on && ok.is_ok();
+    }
+
     fn step(&mut self) {
-        let dt = self.last.elapsed().as_secs_f32().min(0.1);
+        let elapsed = self.last.elapsed().as_secs_f64() * 1000.0;
         self.last = Instant::now();
+        if let Some(play) = self.play.as_mut() {
+            self.owed = (self.owed + elapsed).min(250.0);
+            while self.owed >= TICK_MS {
+                play.hero.tick(TICK_MS, self.counts, &play.ground);
+                self.counts = [0.0; 2];
+                self.owed -= TICK_MS;
+            }
+            return;
+        }
+        let dt = (elapsed as f32 / 1000.0).min(0.1);
         let fast = self.held.contains(&KeyCode::ShiftLeft) || self.held.contains(&KeyCode::ShiftRight);
         let speed = if fast { 120.0 } else { 30.0 };
         let axis = |plus, minus| {
@@ -196,13 +293,11 @@ impl App {
         };
         let view = frame.texture.create_view(&Default::default());
         let aspect = r.config.width as f32 / r.config.height.max(1) as f32;
-        r.renderer.draw(
-            &r.gpu.device,
-            &r.gpu.queue,
-            &view,
-            (r.config.width, r.config.height),
-            self.camera.view_proj(aspect),
-        );
+        let view_proj = match &self.play {
+            Some(play) => camera::first_person(&play.hero.eye(), aspect),
+            None => self.camera.view_proj(aspect),
+        };
+        r.renderer.draw(&r.gpu.device, &r.gpu.queue, &view, (r.config.width, r.config.height), view_proj);
         r.gpu.queue.present(frame);
     }
 }
@@ -227,19 +322,43 @@ impl ApplicationHandler for App {
                     r.surface.configure(&r.gpu.device, &r.config);
                 }
             }
+            WindowEvent::Focused(false) => self.grab(false),
             WindowEvent::KeyboardInput { event, .. } => {
-                if let PhysicalKey::Code(code) = event.physical_key {
-                    if code == KeyCode::Escape {
-                        event_loop.exit();
+                let PhysicalKey::Code(code) = event.physical_key else { return };
+                if code == KeyCode::Escape && event.state == ElementState::Pressed {
+                    if self.grabbed {
+                        self.grab(false)
+                    } else {
+                        event_loop.exit()
                     }
-                    match event.state {
-                        ElementState::Pressed => self.held.insert(code),
-                        ElementState::Released => self.held.remove(&code),
-                    };
+                    return;
+                }
+                let pressed = event.state == ElementState::Pressed;
+                if let Some(play) = self.play.as_mut() {
+                    if let Some(scan) = scene::scan_name(code)
+                        && !event.repeat
+                    {
+                        play.hero.key(scan, pressed);
+                    }
+                } else if pressed {
+                    self.held.insert(code);
+                } else {
+                    self.held.remove(&code);
                 }
             }
-            WindowEvent::MouseInput { state, button: MouseButton::Right, .. } => {
-                self.looking = state == ElementState::Pressed;
+            WindowEvent::MouseInput { state, button, .. } => {
+                let pressed = state == ElementState::Pressed;
+                if self.play.is_some() && pressed && !self.grabbed {
+                    self.grab(true);
+                    return;
+                }
+                if let Some(play) = self.play.as_mut() {
+                    if let Some(scan) = scene::button_name(button) {
+                        play.hero.key(scan, pressed);
+                    }
+                } else if button == MouseButton::Right {
+                    self.looking = pressed;
+                }
             }
             WindowEvent::RedrawRequested => self.redraw(),
             _ => {}
@@ -247,9 +366,13 @@ impl ApplicationHandler for App {
     }
 
     fn device_event(&mut self, _event_loop: &ActiveEventLoop, _id: DeviceId, event: DeviceEvent) {
-        if let DeviceEvent::MouseMotion { delta: (dx, dy) } = event
-            && self.looking
-        {
+        let DeviceEvent::MouseMotion { delta: (dx, dy) } = event else { return };
+        if self.play.is_some() {
+            if self.grabbed {
+                self.counts[0] += dx as f32;
+                self.counts[1] += dy as f32;
+            }
+        } else if self.looking {
             self.camera.turn(dx as f32 * 0.004, dy as f32 * 0.004);
         }
     }
@@ -277,21 +400,35 @@ fn main() -> Result<()> {
             p.x, p.y, p.z
         )),
     );
+    if args.headless {
+        let mut play = scene::play(&game, &loaded)?.context("the mission has no hero to play")?;
+        rehearse(&mut play, &args);
+        report(&play);
+        return Ok(());
+    }
     if let Some(out) = &args.screenshot {
         return screenshot(&loaded, &game, &args, out);
     }
-    let world = scene::world(&game, &loaded)?;
+    let mut world = scene::world(&game, &loaded)?;
+    let play = if args.fly { None } else { scene::play(&game, &loaded)? };
+    if let Some(p) = &play {
+        scene::hide(&mut world.objects, p.hero.object);
+    }
     let event_loop = EventLoop::new()?;
     event_loop.set_control_flow(ControlFlow::Poll);
     let camera = start_camera(&loaded);
     let mut app = App {
         loaded,
         world,
+        play,
         camera,
         running: None,
         held: HashSet::new(),
         looking: false,
+        grabbed: false,
+        counts: [0.0; 2],
         last: Instant::now(),
+        owed: 0.0,
     };
     event_loop.run_app(&mut app)?;
     Ok(())

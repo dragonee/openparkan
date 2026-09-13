@@ -33,6 +33,12 @@ pub const STATE_JITTER: u32 = 0x1000000;
 
 pub const CHANNEL_WRAP: i32 = 0x1;
 pub const CHANNEL_INVERT: i32 = 0x2;
+/// Not driven by the component update: the camera's.
+pub const CHANNEL_UNDRIVEN: i32 = 0x4;
+/// Joins the turret's list: a gun mount that follows the pitch.
+pub const CHANNEL_TURRET: i32 = 0x8;
+/// Takes the previous channel's value.
+pub const CHANNEL_FOLLOWS: i32 = 0x40;
 
 pub const TURRET_TYPE: i32 = 1;
 pub const GUN_TYPE: i32 = 2;
@@ -175,19 +181,47 @@ impl Controller {
         self.costs[to * self.states.len() + from]
     }
 
-    /// The cheapest run of states from `from` to `to`, without `from` and with `to`,
-    /// and what it costs.
+    /// The costs the planner uses, scaled at load (`0x10001790`): the file's cost times
+    /// one plus two gaps. The velocity gap is the largest distance, over the axes the
+    /// source state switches on, from the centre of the destination's velocity box to
+    /// the minimum of the source's; the spin gap is the same over the spin box.
+    pub fn live_costs(&self) -> Vec<f32> {
+        let n = self.states.len();
+        let mut out = Vec::with_capacity(n * n);
+        for to in 0..n {
+            for from in 0..n {
+                let (dest, src) = (&self.states[to], &self.states[from]);
+                let gap = |box_to: &([f32; 3], [f32; 3]), box_from: &([f32; 3], [f32; 3]), first_bit: u32| {
+                    (0..3)
+                        .filter(|&k| src.flags & (first_bit << k) != 0)
+                        .map(|k| ((box_to.0[k] + box_to.1[k]) * 0.5 - box_from.0[k]).abs())
+                        .fold(0.0_f32, f32::max)
+                };
+                let scale = 1.0 + gap(&dest.velocity, &src.velocity, 1) + gap(&dest.spin, &src.spin, 0x10);
+                out.push(self.cost(to, from) * scale);
+            }
+        }
+        out
+    }
+
+    /// The cheapest run of states from `from` to `to` over the file's costs.
+    pub fn path(&self, from: usize, to: usize) -> Option<(Vec<usize>, f32)> {
+        self.path_by(&self.costs, from, to)
+    }
+
+    /// The cheapest run of states from `from` to `to` over `costs`, without `from` and
+    /// with `to`, and what it costs.
     ///
     /// Dijkstra rooted at the target, the way the planner runs it (`0x100019d0`):
     /// each state starts at its direct cost to `to` and relaxes through the states
     /// settled before it, until `from` is settled. A cost of `NO_EDGE` or more is no
     /// edge. With `from == to` that is the cheapest cycle back, or the diagonal.
-    pub fn path(&self, from: usize, to: usize) -> Option<(Vec<usize>, f32)> {
+    pub fn path_by(&self, costs: &[f32], from: usize, to: usize) -> Option<(Vec<usize>, f32)> {
         let n = self.states.len();
-        if from >= n || to >= n {
+        if from >= n || to >= n || costs.len() != n * n {
             return None;
         }
-        let edge = |to: usize, from: usize| Some(self.cost(to, from)).filter(|&c| c < NO_EDGE);
+        let edge = |to: usize, from: usize| Some(costs[to * n + from]).filter(|&c| c < NO_EDGE);
         let mut dist: Vec<f32> = (0..n).map(|k| edge(to, k).unwrap_or(f32::INFINITY)).collect();
         let mut next = vec![to; n];
         let mut settled = vec![false; n];
@@ -421,6 +455,25 @@ mod tests {
         edge(0, 2, 5.0);
         edge(0, 0, diagonal);
         Controller { states: vec![State::default(); 3], costs, ..Default::default() }
+    }
+
+    #[test]
+    fn the_loader_scales_a_cost_by_the_gap_from_the_destinations_centre() {
+        let run = |lo: f32, hi: f32| State {
+            flags: 0b10,
+            velocity: ([0.0, lo, 0.0], [0.0, hi, 0.0]),
+            ..Default::default()
+        };
+        let c = Controller {
+            states: vec![run(6.0, 14.0), run(-14.0, -6.0), run(6.0, 14.0)],
+            costs: (0..9).map(|k| if k % 4 == 0 { NO_EDGE } else { 1.0 }).collect(),
+            ..Default::default()
+        };
+        let live = c.live_costs();
+        // Forward to backward: |-10 - 6| = 16; forward to forward: |10 - 6| = 4.
+        assert_eq!(live[3], 17.0);
+        assert_eq!(live[2 * 3], 5.0);
+        assert_eq!(c.path_by(&live, 0, 0).map(|p| p.0), Some(vec![2, 0]));
     }
 
     #[test]

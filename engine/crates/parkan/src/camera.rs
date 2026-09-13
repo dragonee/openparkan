@@ -1,6 +1,7 @@
-//! The M0 debug camera: flies freely in game space.
+//! The cameras: the hero's first-person eye, and a debug camera that flies freely.
 
 use glam::{Mat4, Vec3};
+use parkan_world::hero::Eye;
 
 /// Degrees of the vertical field of view for the debug camera. The game's
 /// own first-person view is set by the turret's camera in M3.
@@ -45,9 +46,28 @@ impl FlyCamera {
     }
 }
 
+/// The view through the hero's eye. Its field of view is horizontal: the camera
+/// keeps tan of half its angle and scales y by it × height ÷ width (docs/30).
+pub fn first_person(eye: &Eye, aspect: f32) -> Mat4 {
+    let fov_y = 2.0 * ((eye.fov_x / 2.0).tan() / aspect).atan();
+    let view = Mat4::look_to_rh(eye.position, eye.forward, eye.up);
+    Mat4::perspective_infinite_reverse_rh(fov_y, aspect, eye.near) * view
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_eyes_field_of_view_is_across_the_screen() {
+        let eye = Eye { position: Vec3::ZERO, forward: Vec3::Y, up: Vec3::Z, fov_x: 1.3, near: 0.1 };
+        // A point at the edge of a 1.3-rad horizontal view lands on the screen's edge.
+        let edge = Vec3::new(0.65_f32.tan(), 1.0, 0.0);
+        for aspect in [4.0 / 3.0, 16.0 / 9.0] {
+            let p = first_person(&eye, aspect).project_point3(edge);
+            assert!((p.x - 1.0).abs() < 1e-4, "{p}");
+        }
+    }
 
     #[test]
     fn heading_zero_looks_north_and_right_is_east() {

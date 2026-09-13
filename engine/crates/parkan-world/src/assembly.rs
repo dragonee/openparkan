@@ -18,6 +18,8 @@ use parkan_formats::{gamedir, mission, wea};
 /// One visible mesh of a placed object.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Part {
+    /// The `objects.rlb` record the part is built from.
+    pub record: String,
     pub reference: ResourceRef,
     /// Where it sits in the object's own frame.
     pub pose: Pose,
@@ -78,7 +80,9 @@ impl Assembly {
         if matches!(kind, mission::KIND_VEGETATION | mission::KIND_ROCK) {
             let reference = self.library.record_mesh(self.library.get(path), 0);
             return reference
-                .map(|r| vec![Part { reference: r, pose: IDENTITY, host: -1, node: -1 }])
+                .map(|r| {
+                    vec![Part { record: path.to_owned(), reference: r, pose: IDENTITY, host: -1, node: -1 }]
+                })
                 .unwrap_or_default();
         }
         let Some(file) = gamedir::resolve(&self.game, path) else { return Vec::new() };
@@ -117,7 +121,13 @@ impl Assembly {
                 } else {
                     (-1, -1)
                 };
-                out.push(Part { reference: r.clone(), pose, host, node });
+                out.push(Part {
+                    record: component.reference.member.clone(),
+                    reference: r.clone(),
+                    pose,
+                    host,
+                    node,
+                });
             }
             references.push(reference);
         }

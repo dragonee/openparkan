@@ -314,6 +314,8 @@ def controllers(path: Path, names: list[str] | None = None) -> dict:
                 for s in c.states
             ],
             "costs": vector(c.costs),
+            "live_costs": [number(c.live_cost(to, frm)) for to in range(len(c.states))
+                           for frm in range(len(c.states))],
             "channels": [
                 [ch.node, number(ch.first), number(ch.last), number(ch.initial), ch.origin,
                  ch.point, number(ch.rate), number(ch.span), ch.flags]
@@ -334,6 +336,22 @@ def controllers(path: Path, names: list[str] | None = None) -> dict:
             ],
         })
     return {"kind": "control", "controllers": out}
+
+
+def control_points(path: Path, names: list[str] | None = None) -> dict:
+    """The ``.cpt`` members of an archive, all of them unless ``names`` picks some."""
+    archive = NResArchive.open(path)
+    members = names or [e.name for e in archive if e.tag == "CTPT"]
+    return {
+        "kind": "cpt",
+        "members": [
+            {"name": member,
+             "points": [{"name": p.name, "a": vector(p.a), "nodes": list(p.nodes),
+                         "position": vector(p.position), "direction": vector(p.direction)}
+                        for p in objmesh.parse_control_points(archive.read_name(member), member)]}
+            for member in members
+        ],
+    }
 
 
 def input_table(path: Path, names: list[str] | None = None) -> dict:
@@ -362,4 +380,4 @@ def _mission(path: Path, names: list[str] | None = None) -> dict:
 #: What ``openparkan dump`` and ``parkan-dump`` both accept, and the reader each runs.
 KINDS = {"nres": _nres, "mission": _mission, "texm": texm, "materials": material_library,
          "landmesh": land_mesh, "mesh": object_mesh, "assembly": mission_assembly,
-         "control": controllers, "controls": input_table}
+         "control": controllers, "controls": input_table, "cpt": control_points}
