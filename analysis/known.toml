@@ -1105,9 +1105,9 @@ read = false
 module = "Behavior.dll"
 at = "0x1003bad0"
 kind = "function"
-name = "MWalker::SetTarget"
-doc = "the binary's own assertion text"
-read = false
+name = "MWalker::SetTarget: refuses a target out of the map or with no areal map"
+doc = "docs/31-packages.md"
+read = true
 
 [[entry]]
 module = "Behavior.dll"
@@ -3031,8 +3031,8 @@ read = true
 module = "Behavior.dll"
 at = "0x100306f0"
 kind = "function"
-name = "Go/Capture task StartTask: walk to the building's pod (0x40)"
-doc = "docs/27-ownership.md"
+name = "search task Plan (slot 15): a mineral lode, a building to capture or a hostile robot; else a flee point or a random point"
+doc = "docs/31-packages.md"
 read = true
 
 [[entry]]
@@ -4609,4 +4609,270 @@ at = "0x10029ba6"
 kind = "site"
 name = "gun rounds left (+0x124) restored from a stream"
 doc = "docs/29-weapons.md"
+read = true
+
+# --- the search task's plan, ../docs/31-packages.md ---
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10030280"
+kind = "function"
+name = "search task Start: remember CanFly (+0x7c = !CanFly), then plan"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10030000"
+kind = "function"
+name = "search task interrupt priority: enemy mode lets engagements in (1); capture/minerals refuse reasons 0-2, 5; a capturer refits only at life <= 0.2 or charge <= 0.3"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x100300f0"
+kind = "table"
+name = "search priority jump table by interrupt reason 0-5"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10015260"
+kind = "function"
+name = "collect buildings of a type mask and clan from the clan's areal map snapshot, skipping any in their construction-sphere phase (variable 0x202 > 0)"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10015310"
+kind = "function"
+name = "collect units of a type mask and clan from the clan's areal map snapshot"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10001960"
+kind = "function"
+name = "task: walk to a point at a speed through the unit's walker; 0 if refused"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1003dd80"
+kind = "function"
+name = "walker idle: no path, no step, no wait pending"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1004c4c0"
+kind = "function"
+name = "randomised timer arm (min s, random s): stores both x 1000 / 64"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10017660"
+kind = "function"
+name = "chassis profile binder: ChassisType, CanMove, CanRotate, CanFly, CanJump, CanStrafe, WalkChassis, Worm (MBehaviour +0x7c0)"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10020f70"
+kind = "function"
+name = "length of a vector across the ground (x, y)"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10021070"
+kind = "function"
+name = "normalise a vector across the ground (z = 0)"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1003011b"
+kind = "site"
+name = "search task timer: every 15 s plus up to 15 s"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x100301b2"
+kind = "site"
+name = "search task in capture mode: timer every 3 s plus up to 3 s"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10030806"
+kind = "site"
+name = "search plan: collect buildings of type 0x8017365e, any clan"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10030859"
+kind = "site"
+name = "search plan: skip main teleports (0x80000200) and bridges (0x80001000)"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x100308ac"
+kind = "site"
+name = "search plan: a generator counts at half its distance"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x100308d0"
+kind = "site"
+name = "search plan: skip a building of the unit's own clan; keep the nearest"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1003094c"
+kind = "site"
+name = "search plan: walk to the target building's pod (place 0x40); a flyer first lands at the nearest walkable corner of its contour"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10030c0a"
+kind = "site"
+name = "search plan, no building: sum directions away from hostile robots within 300"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10030c86"
+kind = "site"
+name = "search plan: flee point 50..300 along that direction, not offset by the unit's position"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10030d7e"
+kind = "site"
+name = "seek and destroy plan: robots of type mask 0x100e000 (transport, builder, warrior), within 3000"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10030de6"
+kind = "site"
+name = "seek and destroy plan: only a clan the unit's clan is hostile to; the nearest the walker accepts"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10030ed2"
+kind = "site"
+name = "search plan, nothing known: up to 150 random points 100 inside the map until one is in a usable areal"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10030535"
+kind = "site"
+name = "search minerals: within 10 m of the lode -> 'Resource Found', mark it, end"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1000a587"
+kind = "site"
+name = "MBehaviour variable 0x202: the construction sphere's centre height while the order-18 state (+0x968) is 2, else 0"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "ArealMap.dll"
+at = "0x10039130"
+kind = "datum"
+name = "clan ArealMap vtable: 3 areal count, 6 areal record, 7 object by LID, 10 refresh an areal, 12 radar report"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "ArealMap.dll"
+at = "0x10001ec0"
+kind = "function"
+name = "clan ArealMap radar report: refresh every areal within range of the reporting unit"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "ArealMap.dll"
+at = "0x10001dd0"
+kind = "function"
+name = "clan ArealMap: spread a refresh to neighbouring areals within range"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "ArealMap.dll"
+at = "0x10001840"
+kind = "function"
+name = "clan ArealMap: replace an areal's unit and building snapshot from the SystemArealMap, stamped with the time"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "ArealMap.dll"
+at = "0x10039810"
+kind = "datum"
+name = "SystemArealMap vtable: 6 areal record, 7 areal at a point, 10 GetClanType, 21 object by LID, 25 lode count, 26 lode record, 46 write lode"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "ArealMap.dll"
+at = "0x10021db0"
+kind = "function"
+name = "SystemArealMap::SetMineralLode"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "ArealMap.dll"
+at = "0x10021e70"
+kind = "function"
+name = "SystemArealMap: write a mineral lode record (24 bytes) and flag it"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1005c540"
+kind = "function"
+name = "CBuilding::GetConstructionSphere (IBuilding slot 15): placement 2 -> world centre and radius"
+doc = "docs/31-packages.md"
 read = true

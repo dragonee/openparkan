@@ -114,22 +114,51 @@ readers were not traced, that is marked.
   `0x1002b670`), or fails if the place is unreachable. The go task will not be
   interrupted by reasons 0–2 or 5, only 3 and 4 (`0x1002b390`). Whether the
   menu can chain waypoints was not established: it issues one place.
-- **Seek and destroy — search, no target.** Search's `SetTarget`
-  (`0x10030110`) sets its enemy mode for a target of `0x204`. How it picks the
-  next enemy, and whether it fights through `M_Task_Attack`, was not read.
-- **Search and capture — search by building type.** It works only for a unit
-  of size class ≤ 2, tiny or small, which includes every hero; otherwise
-  `SetTarget` fails (`0x100301a9`).
-  - **Which buildings:** the mask `0x8017365e` holds every building type but
-    the large tower (`0x200000`).
-  - **Main teleports:** the capture order refuses them
-    ([27-ownership.md](27-ownership.md)).
-  - **Rescan:** the task rescans on a 3 s timer instead of search's default 15 s.
-  - **Ends:** it logs "Building [..] captured" once the building is the unit's
-    clan's (`0x10030474`).
-  - **Not read:** which building it prefers.
-- **Capture building — search on one building.** This is the same class with
-  the picked building's logic id, under the same size rule.
+- **Seek and destroy — search, no target.** `SetTarget` (`0x10030110`) sets
+  the task's enemy mode for a target of `0x204`. Each plan picks **the nearest
+  hostile warrior, builder or transport the clan knows of, within 3,000**, and
+  walks to where it was last seen (below). The task does not attack anything
+  itself: its interrupt priority lets an engagement through at 1 (`0x10030027`),
+  so the behaviour's own radar engagement ([Between orders](#between-orders--read))
+  does the fighting on the way. It never ends on its own; with no enemy known it
+  roams the map.
+- **Search and capture — search by building type.** A unit of size class ≤ 2 —
+  tiny or small, which includes every hero — or `SetTarget` fails
+  (`0x100301a9`). Each plan picks **the nearest building the clan knows of that
+  is not its own**, by these rules (`0x100306f0`):
+  - **Types:** the mask `0x8017365e` holds every building type but three — the
+    power mast (`0x80000080`), the little teleport (`0x80000100`) and the heavy
+    tower (`0x80200000`) — and the plan skips main teleports and bridges as well
+    (`0x10030859`). *Measured:* every type it can pick has a pod on every model
+    but the ruins, which have none; the heavy towers have pods, so only an
+    explicit Capture building takes one.
+  - **Whose:** any clan but the unit's own — enemy, neutral or ally alike
+    (`0x100308d0`).
+  - **Distance:** across the ground, and **a generator counts at half its
+    distance** (`0x100308ac`), so a capturer prefers a generator up to twice as
+    far as anything else.
+  - **Not while it is going up:** a building in its construction-sphere phase is
+    skipped (`0x10015260`, variable `0x202`).
+  - **Nothing else:** no test of what the building is worth, of who defends it,
+    or of whether another unit is already on its way.
+
+  It walks to the building's pod at the unit's speed × `Go_SpeedPercent`
+  (`0x1003094c`). A **flying** capturer first lands at the nearest walkable
+  corner of the building's ground contour, then walks to the pod. If the walk to
+  the pod is refused — a ruin has no pod — the plan falls through to roaming,
+  and the next plan picks the same building again, so a capturer can hang about
+  a ruin (*derived*). When the
+  building turns the unit's own clan the task logs "Building [..] captured"
+  (`0x10030474`) and **plans the next one** at once. It never ends on its own.
+  - **Rescan:** every 3 s plus up to 3 s, against 15 plus up to 15 s in the other
+    modes (`0x100301b2`, `0x1003011b`); a plan also runs whenever the unit stops.
+  - **No fighting on the way:** its interrupt priority is 0 for engagements
+    (reasons 0–2 and 5), and for a refit unless its life is at most 0.2 or its
+    charge at most 0.3 (`0x10030000`).
+- **Capture building — search on one building.** The same class with the picked
+  building's logic id, under the same size rule, and `SetTarget` also refuses
+  one of the unit's own clan or a main teleport. It ends — successfully — when
+  the building is the unit's clan's.
 - **Guard — patrol.** Pick a unit, a building or a place (`0x1002d520`). The
   patrol task moves to a new random point around it on a timer (`0x1002dd90`),
   and only while `Behavior.ini`'s `DeterminMode` is 0 (`0x1002d900`). The
@@ -158,9 +187,58 @@ readers were not traced, that is marked.
     fires from at most 200;
   - it closes at 0.8 + up to 0.2 of its speed and fights at 0.7 + up to 0.3;
   - it changes course every 4 + up to 4 s.
-- **Transport minerals, Search minerals, Build, Upgrade.** These are the
-  transport, search (minerals mode), build and upgrade tasks. [32-builder.md](32-builder.md)
-  covers what they do.
+- **Search minerals — search by type `0x10001000`.** The minerals mode picks
+  **the nearest mineral lode nobody has found yet**, from the whole map's list
+  (`ArealMap.dll`'s `SetMineralLode`, `0x10021db0`), not from what the clan has
+  seen. It walks there; within 10 m it marks the lode found for everyone, logs
+  "Resource Found" (`0x10030535`) and ends. What sets the lodes was not traced.
+- **Transport minerals, Build, Upgrade.** These are the transport, build and
+  upgrade tasks; [32-builder.md](32-builder.md) covers what they do.
+
+## Where a search looks — *read*, and *measured*
+
+**What the clan knows.** Enemy and building candidates come from the clan's
+**areal map**, not from the whole world and not from the unit's own radar list
+(`0x10015260`, `0x10015310`). That map keeps, for each areal, a snapshot of the
+units and buildings in it. Every 2.0–4.9 s each unit's radar module reports its
+position and radar range ([25-sensors.md](25-sensors.md)). The clan map then
+refreshes the snapshot of every areal within that range from the game's
+system map, and stamps it with the time (`ArealMap.dll:0x10001ec0`,
+`0x10001dd0`, `0x10001840`). So a search picks from **what the clan's radars
+have swept, as last seen there**. A building or unit in an areal no radar of
+the clan has covered is not a candidate. Whether a clan's map starts out
+knowing anything was not traced.
+
+**The plan runs in this order** (`0x100306f0`), and the first that finds
+something is taken:
+
+| mode | candidates | pick |
+|---|---|---|
+| minerals | the map's undiscovered mineral lodes | nearest |
+| capture | the clan's known buildings of the mask, not its own, not under construction, no main teleport or bridge | nearest across the ground, a generator at half distance |
+| capture, nothing found | the clan's known hostile warriors, builders and transports within 300 | a point away from them (below) |
+| enemies | the clan's known hostile warriors, builders and transports within 3,000 | nearest the walker accepts |
+| nothing found in any | — | a random point on the map |
+
+**Hostile** is the behaviour's own test (`0x1000d460`): not the unit's clan; for
+a neutral clan's unit nothing is hostile, for a nature clan's everything is;
+otherwise the clans' relation ([25-sensors.md](25-sensors.md)). **HQs and heroes
+are never hunted**: the mask `0x100e000` holds transports, builders and
+warriors only (*measured* against `varset.var`'s robot types).
+
+**Roaming.** With nothing to go for, the unit tries up to 150 random points at
+least 100 inside the map's bounds, and walks to the first that lies in a usable
+areal (`0x10030ed2`). It moves at its speed × `Go_SpeedPercent`, 1.0, in every
+mode.
+
+**The capturer's retreat, as read.** A capturer with no building to take and
+hostile robots within 300 sums the directions from each of them to itself. It
+then looks for a usable point 50, 53, 56 … up to 300 along that direction
+(`0x10030c86`). The point is **not added to the unit's position**. *Measured:*
+every map's navigation mesh starts at (0, 0), 33 of 33. So the point lies within
+300 of the map's corner, or off the map, where no areal is usable and the unit
+roams instead. That this is a slip in the game's code rather than a design is a
+*guess*.
 
 ## Who may run which — *measured*, and *read*
 
@@ -221,9 +299,12 @@ What does gate packages, as read:
   - it is an animal that is not migrating;
   - the current task's interrupt priority is below 0.3.
 
-  Standby, shutdown, go, build and transport all answer 0 to reason 0. **So a
-  unit engages on its own while stopped, guarding, searching or attacking, but
-  not while standing by, moving on a route, building or transporting.**
+  Standby, shutdown, go, build and transport all answer 0 to reason 0, and so do
+  Search and capture, Capture building and Search minerals; Seek and destroy
+  answers 1. **So a
+  unit engages on its own while stopped, guarding, seeking and destroying or
+  attacking, but not while standing by, moving on a route, capturing, searching
+  for minerals, building or transporting.**
 - **Refitting.** A unit whose life or charge is below half, or whose guns are
   mostly dry, sends itself to a dock as a reason-3 task
   ([27-ownership.md](27-ownership.md)). The default priority lets reason 3
@@ -260,8 +341,11 @@ captures by logic id 34 times.
 ## Not established
 
 - Whether anything enforces a profile's task flags.
-- How seek and destroy picks its next enemy, and how search and capture
-  chooses among buildings.
+- What sets the mineral lodes the minerals search picks from.
+- Whether a clan's areal map knows anything before its units' radars have swept
+  it, and how old a snapshot may be before a search still trusts it.
+- What the search task's start does to the unit's `+0x35c` controller (it asks
+  for mode 2, as other tasks do).
 - What reasons 1, 2, 4 and 5 of the interrupt priority are. 0 is an engagement
   and 3 a refit.
 - What orders 14, 16 and 18 are called. 14 and 16 build the research task.

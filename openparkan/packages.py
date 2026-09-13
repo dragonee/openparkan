@@ -53,8 +53,27 @@ TASK_FLAGS = ("Task_Stop", "Task_Go", "Task_Attack", "Task_Search", "Task_Patrol
               "Task_RandomGo", "Task_Charge", "Task_Mine", "Task_Construct",
               "Task_Research")
 
-#: The building types "Search and capture" looks for: all but the large tower.
+#: The building types "Search and capture" looks for: all but the power mast,
+#: the little teleport and the heavy tower -- and the plan skips main teleports
+#: and bridges as well (``Behavior.dll:0x10030859``).
 CAPTURE_TYPES = 0x8017365E
+SEARCH_SKIPS = (0x80000200, 0x80001000)
+#: The robot Types "Seek and destroy" hunts: transports, builders, warriors --
+#: never an HQ or a hero (``0x10030d7e``).
+HUNTED = 0x0100E000
+#: How far a search looks for enemies, and how near they must be before a
+#: capturer with nothing to take moves away from them.
+HUNT_RANGE = 3000.0
+FLEE_RANGE = 300.0
+#: A generator counts at this fraction of its distance when a capturer picks a
+#: building (``0x100308ac``).
+GENERATOR_WEIGHT = 0.5
+#: The search task's replan timers, ``(every, plus up to)`` seconds: capture
+#: mode, and every other mode.
+CAPTURE_TIMER = (3.0, 3.0)
+SEARCH_TIMER = (15.0, 15.0)
+#: Random roaming keeps this far inside the map (``0x10030f29``).
+ROAM_MARGIN = 100.0
 #: The type "Search minerals" looks for.
 MINERALS = 0x10001000
 #: The largest size class that may capture (``Behavior.dll:0x100301a9``).

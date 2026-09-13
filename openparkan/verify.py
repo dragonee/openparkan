@@ -6139,6 +6139,72 @@ def check_loading(check, game: Path) -> None:
           + " against the slot's 10000 at 250/s")
 
 
+def _pods_by_type(game: Path) -> dict[int, list[bool]]:
+    """Building Type -> for each assembly, whether its hall way has a pod."""
+    fortif = NResArchive.open(game / "fortif.rlb")
+    graphs = {e.name.lower(): objmesh.read_path_graph(NResArchive(fortif.read(e), e.name))
+              for e in fortif if e.tag == "MESH"}
+    library = objects.ObjectLibrary(game / "objects.rlb")
+    out: dict[int, list[bool]] = defaultdict(list)
+    for dat in sorted(game.glob("UNITS/BUILDS/**/*.dat")):
+        unit = objects.load_unit(dat)
+        record = library.get(unit.components[0].ref.member.lower())
+        bas = record.footprint if record else None
+        graph = graphs.get(bas.member.rsplit(".", 1)[0].lower() + ".msh") if bas else None
+        out[unit.kind].append(bool(graph and any(n.flags & objmesh.PLACE_POD for n in graph.nodes)))
+    return out
+
+
+def check_search(check, game: Path) -> None:
+    """The search task: which buildings it captures, which robots it hunts, where it roams."""
+    pods = _pods_by_type(game)
+    inside = {t for t in pods if t & packages.CAPTURE_TYPES == t}
+    picked = inside - set(packages.SEARCH_SKIPS)
+    outside = set(pods) - inside
+    podless = sorted(t for t in picked if not any(pods[t]))
+    missed_with_pods = sorted(t for t in outside if all(pods[t]))
+    check("UNITS: Search and capture looks for every building type but three",
+          len(outside) == 3 and 0x80200000 in outside
+          and podless == [0x80002000] and missed_with_pods == [0x80200000]
+          and all(all(pods[t]) for t in picked if t != 0x80002000),
+          f"of {len(pods)} building Types, the mask 0x8017365e leaves out "
+          + ", ".join(f"{t:#x}" for t in sorted(outside))
+          + " (the mast, the little teleport and the heavy tower); the plan also skips "
+          "main teleports and bridges.  Every Type it can pick has a pod on every model "
+          "but the ruins (0x80002000), which have none; the heavy towers have pods, so only "
+          "an explicit Capture building takes one")
+
+    types = {v.name: int(v.default, 0) & 0xFFFFFFFF for v in behaviour.variables(game)
+             if v.name.startswith("ROBOT_")}
+    hunted = sorted(n for n, t in types.items() if t & packages.HUNTED == t)
+    spared = sorted(n for n, t in types.items() if t & packages.HUNTED != t)
+    placed = defaultdict(int)
+    for path in sorted(game.glob("MISSIONS/**/data.tma")):
+        for o in mission.load(path).objects:
+            kind = o.properties.get("Type")
+            if o.kind == mission.KIND_UNIT and kind is not None:
+                value = int(kind.value) & 0xFFFFFFFF
+                placed[value & packages.HUNTED == value] += 1
+    check("varset.var: Seek and destroy hunts transports, builders and warriors, not HQs or heroes",
+          hunted == ["ROBOT_BATTLEUNIT", "ROBOT_BUILDER", "ROBOT_TRANSPORT"]
+          and spared == ["ROBOT_HERO", "ROBOT_HQ"] and placed[True] and placed[False],
+          f"inside 0x100e000: {', '.join(hunted)}; outside: {', '.join(spared)}.  "
+          f"Of the placed units {placed[True]} are huntable and {placed[False]} are not "
+          f"(HQs, heroes, animals)")
+
+    bounds = [arealmap.load(p).bounds() for p in sorted(game.glob("DATA/MAPS/*/Land.map"))]
+    origin = sum(1 for (x, y), _ in bounds if x == 0.0 and y == 0.0)
+    roomy = sum(1 for (x, y), (u, v) in bounds
+                if u - x > 2 * packages.ROAM_MARGIN and v - y > 2 * packages.ROAM_MARGIN)
+    check("Land.map: every map starts at (0, 0)",
+          bounds and origin == len(bounds) == roomy,
+          f"{origin}/{len(bounds)} navigation meshes span from (0, 0), all wider than the "
+          f"random roam's {packages.ROAM_MARGIN:g} margins; so the search's flee point, "
+          f"which is not "
+          f"offset by the unit's position (Behavior.dll:0x10030c86), lies within "
+          f"{packages.FLEE_RANGE:g} of a map's corner or off the map")
+
+
 def check_controls(check, game: Path) -> None:
     """The input layer: ScanCode.dsc, Command.dsc, the .man bindings, the .tbl tables."""
     keys = controls.scancodes(game)
@@ -7543,7 +7609,7 @@ def run(game: Path) -> int:
         check_motion, check_sensors, check_combat, check_ownership,
         check_capture, check_repair, check_chassis, check_weapons,
         check_turrets, check_packages, check_builder,
-        check_units, check_loading,
+        check_units, check_loading, check_search,
         check_controls,
         check_behaviour, check_research, check_descriptions, check_saves,
         check_vocabulary, check_resources, check_briefing, check_settings,
