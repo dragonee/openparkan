@@ -18,6 +18,7 @@
 //! holding those keys and moving the mouse by that many counts a tick, before a
 //! `--screenshot` or, with `--headless`, printing where it got to.
 
+mod audio;
 mod camera;
 mod scene;
 
@@ -224,6 +225,7 @@ fn screenshot(loaded: &scene::Loaded, game: &Path, args: &Args, out: &Path) -> R
     }
     if let Some(p) = play.as_mut() {
         scene::sync(&mut renderer, &gpu.device, &gpu.queue, p, &world.objects, view_proj, eye);
+        renderer.set_hud(&gpu.device, &gpu.queue, &scene::hud(p, aspect));
     }
     let pixels = parkan_render::capture(&gpu, &mut renderer, (width, height), view_proj)?;
     let file = std::io::BufWriter::new(std::fs::File::create(out)?);
@@ -258,6 +260,7 @@ struct App {
     last: Instant,
     /// Real time not yet simulated, ms.
     owed: f64,
+    audio: Option<audio::Audio>,
     started: Instant,
 }
 
@@ -354,6 +357,13 @@ impl App {
             Some(play) => {
                 let eye = play.hero.eye();
                 let view_proj = camera::first_person(&eye, aspect);
+                r.renderer.set_hud(&r.gpu.device, &r.gpu.queue, &scene::hud(play, aspect));
+                if let Some(audio) = self.audio.as_mut() {
+                    let right = eye.forward.cross(eye.up);
+                    for cue in std::mem::take(&mut play.cues) {
+                        audio.play(&cue, eye.position, right);
+                    }
+                }
                 scene::sync(
                     &mut r.renderer,
                     &r.gpu.device,
@@ -488,6 +498,7 @@ fn main() -> Result<()> {
     let event_loop = EventLoop::new()?;
     event_loop.set_control_flow(ControlFlow::Poll);
     let camera = start_camera(&loaded);
+    let audio = if play.is_some() { audio::Audio::open(&game) } else { None };
     let mut app = App {
         loaded,
         world,
@@ -500,6 +511,7 @@ fn main() -> Result<()> {
         counts: [0.0; 2],
         last: Instant::now(),
         owed: 0.0,
+        audio,
         started: Instant::now(),
     };
     event_loop.run_app(&mut app)?;

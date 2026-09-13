@@ -11,6 +11,7 @@ use wgpu::util::DeviceExt;
 
 pub mod dome;
 pub mod frame;
+pub mod hud;
 pub mod models;
 pub mod sprites;
 pub mod terrain;
@@ -95,6 +96,7 @@ pub struct Renderer {
     bank: Option<GpuTextures>,
     lighting: frame::Lighting,
     dome: Option<(dome::DomeRenderer, Vec<[f32; 3]>)>,
+    hud: Option<hud::HudRenderer>,
     sprites: Option<sprites::SpriteRenderer>,
 }
 
@@ -177,6 +179,7 @@ impl Renderer {
             bank: None,
             lighting: frame::Lighting::default(),
             dome: None,
+            hud: None,
             sprites: None,
         }
     }
@@ -243,6 +246,12 @@ impl Renderer {
         if let Some((_, c)) = self.dome.as_mut() {
             *c = colours;
         }
+    }
+
+    /// This frame's HUD rectangles.
+    pub fn set_hud(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, rects: &[hud::Rect]) {
+        let hud = self.hud.get_or_insert_with(|| hud::HudRenderer::new(device, self.format));
+        hud.prepare(device, queue, rects);
     }
 
     /// This frame's effect quads.
@@ -339,6 +348,9 @@ impl Renderer {
             }
             if let Some(sprites) = &self.sprites {
                 sprites.draw(&mut pass);
+            }
+            if let Some(hud) = &self.hud {
+                hud.draw(&mut pass);
             }
             pass.set_bind_group(0, &self.bind_group, &[]);
             for (pipeline, geometry) in [(&self.lines, &self.grid), (&self.solid, &self.triangles)] {

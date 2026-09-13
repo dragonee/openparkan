@@ -100,6 +100,44 @@ pub fn play(game: &Path, loaded: &Loaded) -> Result<Option<Play>> {
     Play::load(game, &loaded.mission)
 }
 
+/// The HUD: a crosshair at the screen's centre, where the sight looks, and a slot for
+/// each gun, lit while selected, with its magazine and capacitor as bars.
+///
+/// STAND-IN: docs/30-turrets.md#not-established -- how the game's HUD draws the aim
+/// point and the guns is not read.
+pub fn hud(play: &Play, aspect: f32) -> Vec<parkan_render::hud::Rect> {
+    use parkan_render::hud::Rect;
+    let mut out = Vec::new();
+    let (w, h) = (0.02 / aspect.max(0.1), 0.02);
+    let (tw, th) = (0.002 / aspect.max(0.1), 0.002);
+    let white = [1.0, 1.0, 1.0, 0.8];
+    out.push(Rect { min: [-w, -th], max: [-w / 3.0, th], colour: white });
+    out.push(Rect { min: [w / 3.0, -th], max: [w, th], colour: white });
+    out.push(Rect { min: [-tw, -h], max: [tw, -h / 3.0], colour: white });
+    out.push(Rect { min: [-tw, h / 3.0], max: [tw, h], colour: white });
+    for (i, g) in play.hero.guns.iter().enumerate() {
+        let x0 = -0.95 + i as f32 * 0.12;
+        let (x1, y0, y1) = (x0 + 0.1, -0.95, -0.85);
+        let frame = if g.selected { [1.0, 0.8, 0.2, 0.9] } else { [0.4, 0.4, 0.4, 0.6] };
+        out.push(Rect { min: [x0, y0], max: [x1, y1], colour: [0.0, 0.0, 0.0, 0.4] });
+        out.push(Rect { min: [x0, y1], max: [x1, y1 + 0.008], colour: frame });
+        let full = |v: f32| x0 + 0.005 + (x1 - x0 - 0.01) * v.clamp(0.0, 1.0);
+        let magazine = if g.magazine < 0 { 1.0 } else { g.rounds as f32 / g.magazine.max(1) as f32 };
+        let charge = if g.capacitor > 0.0 { g.charge / g.capacitor } else { 1.0 };
+        out.push(Rect {
+            min: [x0 + 0.005, y0 + 0.055],
+            max: [full(magazine), y0 + 0.08],
+            colour: [0.9, 0.9, 0.9, 0.9],
+        });
+        out.push(Rect {
+            min: [x0 + 0.005, y0 + 0.02],
+            max: [full(charge), y0 + 0.045],
+            colour: [0.3, 0.7, 1.0, 0.9],
+        });
+    }
+    out
+}
+
 /// The looks the effects draw with, for the renderer.
 pub fn sprite_looks(play: &Play) -> Vec<parkan_render::sprites::SpriteLook> {
     play.fx

@@ -10,7 +10,7 @@ use parkan_formats::materials::Library;
 use parkan_formats::mission::Mission;
 use parkan_formats::{gamedir, landmesh};
 use parkan_sim::combat::{Event, Round};
-use parkan_sim::effects::{Frame, Sprite};
+use parkan_sim::effects::{Cue, Frame, Sprite};
 use parkan_sim::ground::Ground;
 
 use crate::assembly::Assembly;
@@ -41,6 +41,8 @@ pub struct Play {
     pub turret_effects: Vec<TurretEffect>,
     /// Mission objects that have died, not yet taken out of the drawing.
     pub killed: Vec<usize>,
+    /// Sounds started and not yet played.
+    pub cues: Vec<Cue>,
 }
 
 /// A round's own frame: y along its flight, z up, x to its side.
@@ -105,6 +107,7 @@ impl Play {
             materials,
             turret_effects,
             killed: Vec::new(),
+            cues: Vec::new(),
         };
         for i in 0..play.turret_effects.len() {
             let e = play.turret_effects[i].clone();
@@ -190,6 +193,8 @@ impl Play {
             Owner::Round(id) => rounds.iter().any(|r| r.id == *id),
             _ => true,
         });
+        let cues = self.fx.cues(now);
+        self.cues.extend(cues);
         self.fx.tick(now);
         for e in &events {
             if let Event::Killed { target } = e {

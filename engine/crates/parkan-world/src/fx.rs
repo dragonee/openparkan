@@ -10,7 +10,7 @@ use parkan_formats::exp::Explosion;
 use parkan_formats::fxid::{self, Effect};
 use parkan_formats::gamedir;
 use parkan_formats::nres::Archive;
-use parkan_sim::effects::{Frame, Instance, Sprite};
+use parkan_sim::effects::{Cue, Frame, Instance, Sprite};
 
 use crate::textures::TextureStore;
 
@@ -149,6 +149,11 @@ impl Fx {
     /// Every instance `owner` holds.
     pub fn owned(&mut self, owner: Owner) -> impl Iterator<Item = &mut Instance> {
         self.instances.iter_mut().filter(move |(o, _)| *o == owner).map(|(_, i)| i)
+    }
+
+    /// Every sound an instance starts by `now_ms`.
+    pub fn cues(&mut self, now_ms: f64) -> Vec<Cue> {
+        self.instances.iter_mut().flat_map(|(_, i)| i.cues(now_ms)).collect()
     }
 
     /// Drop the instances that have run their course.

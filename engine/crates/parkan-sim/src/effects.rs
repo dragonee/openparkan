@@ -45,6 +45,16 @@ impl Frame {
     }
 }
 
+/// A sound to play: a type-2 emitter's `sounds.lib` member, where, and the distances
+/// it is heard fully and last heard at (+64, +68).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Cue {
+    pub sound: String,
+    pub position: Vec3,
+    pub near: f32,
+    pub far: f32,
+}
+
 /// A quad to draw: a material, a centre, a length along a direction and a width.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Sprite {
@@ -70,6 +80,8 @@ pub struct Instance {
     /// The owner's speed as a fraction of its top speed, for modes 5–15.
     pub speed: f32,
     seed: u32,
+    /// *t* when the sounds were last looked at, −1 before.
+    heard_t: f32,
 }
 
 fn lerp3(lo: [f32; 3], hi: [f32; 3], s: f32) -> Vec3 {
@@ -101,7 +113,18 @@ impl Instance {
         let scale = size * effect.header.scale[0];
         let end_ms = now_ms + f64::from(effect.header.duration) * 1000.0;
         let mode = mode.unwrap_or(effect.header.mode);
-        Self { effect, frame, scale, start_ms: now_ms, end_ms, mode, value: 0.0, speed: 0.0, seed }
+        Self {
+            effect,
+            frame,
+            scale,
+            start_ms: now_ms,
+            end_ms,
+            mode,
+            value: 0.0,
+            speed: 0.0,
+            seed,
+            heard_t: -1.0,
+        }
     }
 
     /// Mode 1's progress, (now − start) ÷ (end − start); a duration of 0 is through at once.
@@ -139,6 +162,26 @@ impl Instance {
     /// Flag 2: an instance deletes itself once *t* ≥ 1 (`0x100062a6`).
     pub fn finished(&self, now_ms: f64) -> bool {
         self.effect.header.flags & FX_DELETE_AT_END != 0 && self.t(now_ms) >= 1.0
+    }
+
+    /// The sounds whose trigger *t* has crossed since the last call: a type-2 emitter
+    /// plays once as *t* passes its +8 (`Effect.dll:0x10012f42`).
+    pub fn cues(&mut self, now_ms: f64) -> Vec<Cue> {
+        let t = self.t(now_ms);
+        let before = self.heard_t;
+        self.heard_t = t;
+        self.effect
+            .emitters
+            .iter()
+            .filter(|e| e.kind == EMITTER_SOUND && !e.resource.member.is_empty())
+            .filter(|e| before < e.f(8) && t >= e.f(8))
+            .map(|e| Cue {
+                sound: e.resource.member.clone(),
+                position: self.frame.origin,
+                near: e.f(64),
+                far: e.f(68),
+            })
+            .collect()
     }
 
     /// What the instance draws at `now_ms`.
@@ -336,6 +379,24 @@ mod tests {
         out.clear();
         fx.sprites(1000.0, &mut out);
         assert!(out.is_empty(), "past the burst's share of the window");
+    }
+
+    #[test]
+    fn a_sound_plays_once_each_time_its_trigger_is_crossed() {
+        let shot = block(2, 148, &[(8, 0.01), (12, 1.0), (64, 10.0), (68, 80.0)], "h_fire_cannon.wav");
+        let frame = Frame::along(Vec3::ONE, Vec3::X, 1.0);
+        let mut fx = Instance::new(effect(TIME_POINT, 0.0, 0, vec![shot]), frame, 1.0, 0.0, None, 1);
+        assert!(fx.cues(0.0).is_empty(), "t 0 is short of 0.01");
+        fx.value = 0.5;
+        let cues = fx.cues(10.0);
+        assert_eq!(cues.len(), 1);
+        assert_eq!((cues[0].position, cues[0].near, cues[0].far), (Vec3::ONE, 10.0, 80.0));
+        fx.value = 1.0;
+        assert!(fx.cues(20.0).is_empty(), "already past");
+        fx.value = 0.0;
+        assert!(fx.cues(30.0).is_empty());
+        fx.value = 0.5;
+        assert_eq!(fx.cues(40.0).len(), 1, "the next stroke");
     }
 
     #[test]

@@ -23,6 +23,7 @@ parkan-render = { path = "crates/parkan-render" }
 anyhow = "=1.0.104"
 bytemuck = { version = "=1.25.2", features = ["derive"] }
 glam = { version = "=0.29.3", features = ["bytemuck"] }
+kira = { version = "=0.12.4", default-features = false, features = ["adpcm", "cpal", "pcm", "wav"] }
 png = "=0.18.1"
 pollster = "=0.4.0"
 serde_json = { version = "=1.0.151", features = ["preserve_order"] }

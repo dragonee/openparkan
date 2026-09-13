@@ -9,6 +9,7 @@ rust-version.workspace = true
 [dependencies]
 anyhow.workspace = true
 glam.workspace = true
+kira.workspace = true
 parkan-formats.workspace = true
 parkan-render.workspace = true
 parkan-sim.workspace = true

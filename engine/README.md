@@ -66,7 +66,9 @@ M5 has begun. The sky is the mission's `sky.ske`, interpolated on its clock:
 - the scene colour adds to every material's emissive, and the sun or the
   moon lights the scene.
 
-Not yet: the HUD and sound.
+Sound plays each effect's sound emitters from `sounds.lib`, WAV and MS ADPCM
+through kira, as their effect time passes their trigger. A HUD shows a
+crosshair and the guns: which are selected, their magazines and capacitors.
 
 Not yet: lightmaps (no Mission 01 mesh has one) and levels of detail beyond 0.
 This directory also holds what the rest will follow:
@@ -186,4 +188,6 @@ a row here. A row leaves this table when research closes it.
 | M4 | The effect manager's random generator | any uniform generator | [11](../docs/11-effects.md#how-an-effect-runs--read) |
 | M5 | What the class-24 arms' states 1, 2 and `0x21` play | unfold on select, fold on deselect | [29](../docs/29-weapons.md#not-established) |
 | M5 | The camera shake's trigger | no shake | [30](../docs/30-turrets.md#not-established) |
+| M5 | How the HUD draws the aim point and the guns | a crosshair at the centre; a slot a gun, lit while selected, with magazine and capacitor bars | [30](../docs/30-turrets.md#not-established) |
+| M5 | How a sound falls off between its near and far distances, and how it is panned | linear in distance; panned by its direction against the eye's right | [11](../docs/11-effects.md#emitter-types--read-and-measured) |
 | M5 | When a mission's sky clock starts | at noon of its day | [10](../docs/10-sky.md#not-resolved) |
