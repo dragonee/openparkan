@@ -49,3 +49,18 @@ def test_an_input_table_dumps_its_rows_and_their_numbers(tmp_path):
     (row,) = dump.input_table(path)["rows"]
     assert (row["code"], row["class_id"], row["bits"]) == (19, 0, 0)
     assert row["note"] == "OBJ_MOVE_FORWARD"
+
+
+def test_damage_tables_and_explosions_dump_every_member(tmp_path, nres_archive):
+    import struct
+
+    node = struct.pack("<iff", 0, 500.0, 1000.0) + b"weapon.rlb".ljust(32, b"\0") \
+        + b"bb_h_01.exp".ljust(32, b"\0")
+    blast = struct.pack("<i4fi", 3, 170.0, 7.0, 1.0, 1.0, 7) + bytes(12 * 64)
+    path = tmp_path / "t.rlb"
+    path.write_bytes(nres_archive([("NDPR", "t.ndp", struct.pack("<i", 1) + node),
+                                   ("EXPL", "t.exp", blast)]))
+    (table,) = dump.damage_tables(path)["members"]
+    assert table["nodes"][0][1] == 500.0 and table["nodes"][0][3] == ["weapon.rlb", "bb_h_01.exp"]
+    (e,) = dump.explosions(path)["members"]
+    assert (e["kind"], e["damage"], e["radius"]) == (3, 170.0, 7.0)

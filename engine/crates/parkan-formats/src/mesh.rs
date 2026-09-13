@@ -11,6 +11,8 @@ pub const STREAM_POSITION: u32 = 3;
 pub const STREAM_NORMAL: u32 = 4;
 pub const STREAM_UV: u32 = 5;
 pub const STREAM_TRIANGLE: u32 = 6;
+pub const STREAM_FACE: u32 = 7;
+pub const FACE_STRIDE: usize = 16;
 pub const STREAM_POSE_KEY: u32 = 8;
 pub const STREAM_NAME: u32 = 9;
 pub const STREAM_BATCH: u32 = 13;
@@ -132,6 +134,9 @@ pub struct Mesh {
     pub nodes: Vec<Node>,
     pub slots: Vec<Slot>,
     pub batches: Vec<Batch>,
+    /// Stream 7, one record per triangle: its flags word, and its normal (int16 ÷ 32767).
+    pub face_flags: Vec<u16>,
+    pub face_normals: Vec<[f32; 3]>,
     pub keys: Vec<Key>,
     pub frame_map: Vec<u16>,
     pub frame_count: u32,
@@ -326,6 +331,17 @@ pub fn parse(blob: &[u8], name: &str) -> Result<Mesh, FormatError> {
         .map(|i| [u16_at(raw_tri, i * 6), u16_at(raw_tri, i * 6 + 2), u16_at(raw_tri, i * 6 + 4)])
         .collect();
 
+    let raw_faces = stream(STREAM_FACE)?;
+    let face_count = raw_faces.len() / FACE_STRIDE;
+    let face_flags = (0..face_count).map(|i| u16_at(raw_faces, i * FACE_STRIDE)).collect();
+    let face_normals = (0..face_count)
+        .map(|i| {
+            std::array::from_fn(|k| {
+                f32::from(u16_at(raw_faces, i * FACE_STRIDE + 8 + 2 * k) as i16) / 32767.0
+            })
+        })
+        .collect();
+
     let names = stream(STREAM_NAME)?;
     let name_at = |i: usize| {
         names.get(i * 32..(i + 1) * 32).map(|raw| {
@@ -435,6 +451,8 @@ pub fn parse(blob: &[u8], name: &str) -> Result<Mesh, FormatError> {
         nodes,
         slots,
         batches,
+        face_flags,
+        face_normals,
         keys,
         frame_map,
         frame_count,

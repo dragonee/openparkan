@@ -87,7 +87,8 @@ def targets(game: Path) -> list[tuple[str, Path, list[str]]]:
     M0: every archive and Mission 01's ``data.tma``.  M1: ``Material.lib``,
     Tut_1's ``Land.msh`` and the textures its ground names.  M2: Mission 01's
     assembly and every mesh its objects are drawn from.  M3: every controller,
-    every control point list and the three input tables.
+    every control point list and the three input tables.  M4: every damage
+    table and explosion.
     """
     archives = sorted(p for p in game.rglob("*") if p.is_file() and is_nres(p))
     return ([("nres", p, []) for p in archives]
@@ -99,6 +100,8 @@ def targets(game: Path) -> list[tuple[str, Path, list[str]]]:
             + [("mesh", archive, [member]) for archive, member in mission_meshes(game)]
             + [("control", p, []) for p in archives if _has_tag(p, control.CTL_TAG)]
             + [("cpt", p, []) for p in archives if _has_tag(p, "CTPT")]
+            + [("ndp", p, []) for p in archives if _has_tag(p, "NDPR")]
+            + [("exp", p, []) for p in archives if _has_tag(p, "EXPL")]
             + [("controls", game / name, []) for name in controls.TABLES])
 
 

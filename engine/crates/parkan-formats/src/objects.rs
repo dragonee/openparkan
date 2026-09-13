@@ -16,7 +16,7 @@ pub const CLASS_CHASSIS: u32 = 0;
 pub const CLASS_TURRET: u32 = 1;
 pub const CLASS_GUN: u32 = 4;
 
-fn fixed(raw: &[u8]) -> String {
+pub(crate) fn fixed(raw: &[u8]) -> String {
     let end = raw.iter().position(|&b| b == 0).unwrap_or(raw.len());
     latin1(&raw[..end])
 }

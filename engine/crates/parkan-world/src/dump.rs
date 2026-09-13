@@ -9,7 +9,7 @@ use anyhow::{Context, Result};
 use parkan_formats::mission::{self, Value as PropertyValue};
 use parkan_formats::nres::Archive;
 use parkan_formats::pose::Pose;
-use parkan_formats::{control, controls, cpt, landmesh, materials, mesh, texm, wea};
+use parkan_formats::{control, controls, cpt, exp, landmesh, materials, mesh, ndp, texm, wea};
 
 use crate::assembly;
 use serde_json::{Value, json};
@@ -282,6 +282,8 @@ pub fn object_mesh(path: &Path, names: &[String]) -> Result<Value> {
         "uv": m.uv,
         "lightmap_uv": m.lightmap_uv,
         "keys": m.keys.iter().map(|k| json!([vector(&k.translation), number(k.time), k.rotation])).collect::<Vec<_>>(),
+        "face_flags": m.face_flags,
+        "face_normals": m.face_normals.iter().map(|n| vector(n)).collect::<Vec<_>>(),
         "frame_map": m.frame_map,
         "frame_count": m.frame_count,
         "root_pose": pose(&m.root_pose()),
@@ -424,6 +426,51 @@ pub fn control_points(path: &Path, names: &[String]) -> Result<Value> {
     Ok(json!({ "kind": "cpt", "members": out }))
 }
 
+/// The members of an archive carrying `tag`, all of them unless `names` picks some.
+fn members(archive: &Archive, tag: &str, names: &[String]) -> Vec<String> {
+    if names.is_empty() {
+        archive.entries.iter().filter(|e| e.tag() == tag).map(|e| e.name.clone()).collect()
+    } else {
+        names.to_vec()
+    }
+}
+
+/// The `.ndp` members of an archive.
+pub fn damage_tables(path: &Path, names: &[String]) -> Result<Value> {
+    let archive = Archive::open(path)?;
+    let mut out = Vec::new();
+    for member in members(&archive, ndp::NDP_TAG, names) {
+        let nodes = ndp::parse(archive.read_name(&member)?, &member)?;
+        out.push(json!({
+            "name": member,
+            "nodes": nodes.iter().map(|d| json!([
+                d.flags, number(d.durability), number(d.density),
+                [d.explosion.library, d.explosion.member],
+            ])).collect::<Vec<_>>(),
+        }));
+    }
+    Ok(json!({ "kind": "ndp", "members": out }))
+}
+
+/// The `.exp` members of an archive.
+pub fn explosions(path: &Path, names: &[String]) -> Result<Value> {
+    let archive = Archive::open(path)?;
+    let mut out = Vec::new();
+    for member in members(&archive, exp::EXP_TAG, names) {
+        let e = exp::parse(archive.read_name(&member)?, &member)?;
+        out.push(json!({
+            "name": member,
+            "kind": e.kind,
+            "damage": number(e.damage),
+            "radius": number(e.radius),
+            "values": vector(&e.values),
+            "placement": e.placement,
+            "slots": e.slots.iter().map(|s| json!([s.library, s.member])).collect::<Vec<_>>(),
+        }));
+    }
+    Ok(json!({ "kind": "exp", "members": out }))
+}
+
 /// A `.tbl`: every row, and the numbers the engine resolves its names to.
 pub fn input_table(path: &Path) -> Result<Value> {
     let rows = controls::load(path)?;
@@ -463,8 +510,10 @@ pub fn dump(kind: &str, path: &Path, names: &[String]) -> Result<Value> {
         "control" => controllers(path, names),
         "controls" => input_table(path),
         "cpt" => control_points(path, names),
+        "ndp" => damage_tables(path, names),
+        "exp" => explosions(path, names),
         other => anyhow::bail!(
-            "unknown kind {other:?}; expected nres, mission, texm, materials, landmesh, mesh, assembly, control, controls or cpt"
+            "unknown kind {other:?}; expected nres, mission, texm, materials, landmesh, mesh, assembly, control, controls, cpt, ndp or exp"
         ),
     }
 }

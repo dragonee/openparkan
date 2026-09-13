@@ -19,7 +19,7 @@ import math
 import struct
 from pathlib import Path
 
-from . import assembly, control, controls, landmesh, materials, mission
+from . import assembly, control, controls, effects, landmesh, materials, mission, objects
 from . import mesh as objmesh
 from . import texm as textures
 from .nres import NResArchive
@@ -255,6 +255,8 @@ def object_mesh(path: Path, names: list[str] | None = None) -> dict:
         "uv": [vector(v) for v in m.uv],
         "lightmap_uv": [vector(v) for v in m.lightmap_uv],
         "keys": [[vector(k.translation), number(k.time), vector(k.rotation)] for k in m.keys],
+        "face_flags": list(m.face_flags),
+        "face_normals": [vector(n) for n in m.face_normal],
         "frame_map": list(m.frame_map),
         "frame_count": m.frame_count,
         "root_pose": _pose(m.root_pose()),
@@ -354,6 +356,38 @@ def control_points(path: Path, names: list[str] | None = None) -> dict:
     }
 
 
+def _ref(ref) -> list[str]:
+    return [ref.library, ref.member]
+
+
+def damage_tables(path: Path, names: list[str] | None = None) -> dict:
+    """The ``.ndp`` members of an archive, all of them unless ``names`` picks some."""
+    archive = NResArchive.open(path)
+    members = names or [e.name for e in archive if e.tag == "NDPR"]
+    return {
+        "kind": "ndp",
+        "members": [
+            {"name": member,
+             "nodes": [[d.flags, number(d.durability), number(d.unknown), _ref(d.explosion)]
+                       for d in objects.parse_damage(archive.read_name(member), member)]}
+            for member in members
+        ],
+    }
+
+
+def explosions(path: Path, names: list[str] | None = None) -> dict:
+    """The ``.exp`` members of an archive, all of them unless ``names`` picks some."""
+    archive = NResArchive.open(path)
+    members = names or [e.name for e in archive if e.tag == "EXPL"]
+    out = []
+    for member in members:
+        e = effects.parse_explosion(archive.read_name(member), member)
+        out.append({"name": member, "kind": e.kind, "damage": number(e.damage),
+                    "radius": number(e.radius), "values": vector(e.values),
+                    "placement": e.placement, "slots": [_ref(s) for s in e.slots]})
+    return {"kind": "exp", "members": out}
+
+
 def input_table(path: Path, names: list[str] | None = None) -> dict:
     """A ``.tbl``: every row, and the numbers the engine resolves its names to."""
     return {
@@ -380,4 +414,5 @@ def _mission(path: Path, names: list[str] | None = None) -> dict:
 #: What ``openparkan dump`` and ``parkan-dump`` both accept, and the reader each runs.
 KINDS = {"nres": _nres, "mission": _mission, "texm": texm, "materials": material_library,
          "landmesh": land_mesh, "mesh": object_mesh, "assembly": mission_assembly,
-         "control": controllers, "controls": input_table, "cpt": control_points}
+         "control": controllers, "controls": input_table, "cpt": control_points,
+         "ndp": damage_tables, "exp": explosions}
