@@ -3,6 +3,14 @@
 > **Superseded since this note was written:**
 >
 > - R6 did not find what drives the hero's muzzle effects (time mode 4); it stays a stand-in.
+> - Since read (docs/11): time mode 4 is the animation value of the mesh node action 14 names — the
+>   barrel nodes for the guns' effects, the arm nodes for the `_sfx` — so nothing starts them per shot;
+>   a round's hit on a unit plays the struck batch's material class (`mt` on Mission 01); type 1 is a
+>   Direct3D-style light with (start, end) position, direction, colour and range and fixed attenuation
+>   terms; a bolt's length is its start point to its position, one sprite per +36; a stream emits every
+>   lerp(+24, +28) s; the fade value is start + (end − start)·x^power; bit 8 turns the depth test off
+>   while the effect's tested point (header +0x24) is in view; header +0x14 is a settings switch, all
+>   on at `RENDER_QUALITY=2`.
 # R5 engine description: effects (Phase One, Mission 01)
 
 **Faithful** means read or measured, with its source in doc.md and known.toml.

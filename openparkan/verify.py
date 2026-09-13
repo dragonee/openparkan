@@ -2257,6 +2257,49 @@ def check_render_state(check, game: Path) -> None:
           f"palettised texture draws index 0, the one an alpha surface would clear "
           f"({keyed} of {palettised}).  Control: +0x18 is non-zero on {later}")
 
+    # Which textures World3D.dll loads opaque: a lit skin's (directory flags
+    # bit 1), unless EMBOSS_BUMP is on.  Who names the alpha textures, the
+    # cutouts and the 81 carrying header bit 26.
+    mats = materials.MaterialLibrary(game / "Material.lib")
+    named_by: dict[str, set[int]] = defaultdict(set)
+    for m in mats.materials.values():
+        for t in m.textures:
+            named_by[t.upper()].add(m.blend)
+    alpha_names = []
+    bit26_names = []
+    cutouts = []
+    for entry in archive:
+        data = archive.read(entry)
+        if data[:4] != b"Texm":
+            continue
+        _m, _w, _h, _mips, _flags, u14, _u18, fmt = texm.HEADER.unpack_from(data, 0)
+        name = entry.name.upper()
+        if u14 & texm.HEADER_BIT_26:
+            bit26_names.append(name)
+        if texm.uploads_with_alpha(fmt, u14):
+            alpha_names.append(name)
+            if texm.is_cutout(texm.decode(data)):
+                cutouts.append(name)
+
+    def opaque(name: str) -> bool:
+        return any(texm.material_load_flags(b) & texm.LOAD_OPAQUE for b in named_by[name])
+    skins = [n for n in alpha_names if opaque(n)]
+    skin_cutouts = sorted(n for n in cutouts if opaque(n))
+    trees = [n for n in cutouts if "TREE" in n]
+    bit26_skins = [n for n in bit26_names if opaque(n)]
+    check("Material.lib: a lit skin's texture loads opaque, whatever its format",
+          len(skins) == 171 and skin_cutouts == ["AIM_02.0", "PI_CSPG3.0", "S7.0"]
+          and trees and not any(opaque(n) for n in trees)
+          and len(bit26_skins) == 78 and len(bit26_names) == 81,
+          f"World3D.dll:0x10004441 ORs load flag 0x80000 (Ngi32.dll:0x1000fe18, opaque "
+          f"surface) into the texture of every material with directory flags bit 1 "
+          f"unless EMBOSS_BUMP is on: that is {len(skins)} of the {len(alpha_names)} "
+          f"4444/8888 textures, {len(skin_cutouts)} of the {len(cutouts)} cut-outs "
+          f"({', '.join(skin_cutouts)}) and none of the trees ({', '.join(trees)}); "
+          f"{len(bit26_skins)} of the {len(bit26_names)} textures with header bit 26 "
+          f"are lit skins' and the other {len(bit26_names) - len(bit26_skins)} are named "
+          f"by no material")
+
     starts: Counter[float] = Counter()
     ends: Counter[int] = Counter()
     off = keyframes = 0
@@ -3863,11 +3906,13 @@ def check_effects(check, game: Path) -> None:
           f"+{effects.SOUND_NEAR} and +{effects.SOUND_FAR} are among them")
 
     slots = sum(effects.EMITTER_SIZE[t] // 4 for t in effects.EMITTER_SIZE)
-    check("Effect.dll: most of an emitter block is never read",
+    check("Effect.dll: a class loads under half its block straight off the pointer",
           recorded < slots / 2,
           f"{recorded} of the {slots} four-byte slots across the ten block "
-          f"types are loaded as a float; the rest the editor writes and the "
-          f"engine never looks at")
+          f"types are loaded with fld straight off the block pointer; the map is a "
+          f"lower bound -- exponent triples read through a pointer into the block "
+          f"(types 3, 4, 8 and 9 at +64 and +124, Effect.dll:0x100106f6) and fields "
+          f"copied as dwords first (type 1's light) are live too")
 
     # A third check on the read map, and the sharpest: a slot the engine loads
     # as a float should hold one.  The map came out of the vtables and knows
@@ -4993,6 +5038,184 @@ def check_effect_timing(check, game: Path) -> None:
           f"one of those {idle_total} dust effects is speed-driven (mode 15) with no "
           f"emitter active at 0; on {restarted} surfaces 0 and 2 run action 11, which "
           f"hands the effect back its own mode")
+
+    # Header +0x14 is a settings id out of Effect.dll's own string table.
+    settings = Counter(fx.gate for fx in library)
+    named = sum(n for s, n in settings.items() if s in effects.EFFECT_SETTINGS)
+    grouped = sum(n for s, n in settings.items() if s >> 8 in (0, 1, 2, 3))
+    hero = library.get("hero_cannon")
+    listed = ", ".join(f"{s:#x} {effects.EFFECT_SETTINGS.get(s)} {n}"
+                       for s, n in sorted(settings.items()))
+    check("FXID: header +0x14 is one of Effect.dll's twenty settings switches",
+          named == len(library) and grouped == len(library) and hero is not None
+          and hero.setting == "Gun fire"
+          and all(effects.setting_enabled(s, 1) for s in settings),
+          f"all {named} of {len(library)} effects name a switch "
+          f"({len(settings)} of the 20 ids: {listed}); "
+          f"the gate is table[id & 0xff] (Effect.dll:0x1000ec40) and preset 1, "
+          f"RENDER_QUALITY=2, leaves every one on; the hero's guns are group 3's "
+          f"'Gun fire'")
+
+    # The test point and bit 8.
+    points = Counter(fx.test_point for fx in library)
+    flagged_kinds: Counter[int] = Counter()
+    with_flag = with_flag_point = 0
+    for fx in library:
+        kinds = {e.kind for e in fx.emitters if e.flagged}
+        flagged_kinds.update(e.kind for e in fx.emitters if e.flagged)
+        if kinds:
+            with_flag += 1
+            with_flag_point += fx.test_point != (0.0, 0.0, 0.0)
+    on_axis = sum(n for p, n in points.items() if p[1] == p[2] == 0.0 and p[0] >= 0.0)
+    check("FXID: the tested point lies on +x, and bit 8 is only on drawn emitters",
+          on_axis == len(library) and set(flagged_kinds) <= {3, 4, 7, 8, 9}
+          and with_flag_point > with_flag // 2,
+          f"header +0x24 is {', '.join(f'{p} on {n}' for p, n in points.most_common())} "
+          f"-- the point Effect.dll:0x10007eb5 carries into the frame and rays from the "
+          f"camera; bit 8 by type {dict(sorted(flagged_kinds.items()))}, never on a "
+          f"light, a sound, a bolt or type 10; {with_flag_point} of the {with_flag} "
+          f"effects with a flagged emitter lift the point off their origin")
+
+    flags = {bit: [fx for fx in library if fx.flags & bit]
+             for bit in (effects.FX_DETACH, effects.FX_TARGET_POINT,
+                         effects.FX_HIDE_OCCLUDED, effects.FX_SECOND_PASS,
+                         effects.FX_SHADE_FLAG)}
+    detach = flags[effects.FX_DETACH]
+    target = flags[effects.FX_TARGET_POINT]
+    bolts = [fx for fx in library if any(e.kind == 5 for e in fx.emitters)]
+    once = sum(fx.mode == effects.TIME_ONCE for fx in detach)
+    check("FXID: flag 4 anchors once-through effects, flag 0x1000 every bolt",
+          len(detach) > 400 and once > 0.95 * len(detach)
+          and {fx.name for fx in target} == {fx.name for fx in bolts}
+          and all({e.kind for e in fx.emitters} == {5} for fx in target),
+          f"flag 4 (let go of the attach point, Effect.dll:0x10006324) on {len(detach)}, "
+          f"{sum(fx.mode == effects.TIME_ONCE for fx in detach)} of them time mode 1; "
+          f"flag 0x1000 (the manager's target point each tick, 0x10006349) on "
+          f"{len(target)}, exactly the {len(bolts)} effects with a type-5 bolt, all "
+          f"bolt-only; flag 0x400 on {len(flags[effects.FX_HIDE_OCCLUDED])}, 0x800 on "
+          f"{len(flags[effects.FX_SECOND_PASS])}, 0x2000 on "
+          f"{[fx.name for fx in flags[effects.FX_SHADE_FLAG]]}")
+
+    # Type 1 is a light: its kind word and its attenuation terms.
+    kinds = Counter()
+    attenuation = Counter()
+    ranges = []
+    for fx in library:
+        for e in fx.emitters:
+            light = e.light
+            if light is None:
+                continue
+            kinds[struct.unpack_from("<I", e.body, effects.LIGHT_KIND_AT)[0]] += 1
+            attenuation[tuple(round(v, 3) for v in light.attenuation)] += 1
+            ranges.append(light.range)
+    cannon = next(e.light for e in hero.emitters if e.kind == 1) if hero else None
+    check("FXID: a type-1 block is a Direct3D light's parameters",
+          set(kinds) <= set(effects.LIGHT_KINDS) and sum(kinds.values()) == 618
+          and all(a[0] == 0.0 for a in attenuation) and min(min(r) for r in ranges) >= 0.0
+          and cannon is not None and cannon.range == (30.0, 3.0),
+          f"+4, the light kind (Effect.dll:0x1000f649), is {dict(sorted(kinds.items()))}; "
+          f"the attenuation terms +124..+132 are {dict(attenuation)} -- never a constant "
+          f"term; every range is >= 0; the hero cannon's flash runs 30 to 3 in "
+          f"colour {cannon.colour[0][:3] if cannon else None} to "
+          f"{tuple(round(v, 2) for v in cannon.colour[1][:3]) if cannon else None}")
+
+    # A bolt's segment and count, a stream's interval, a particle's fade.
+    segments = Counter()
+    counts = Counter()
+    intervals = []
+    lives = []
+    fades = Counter()
+    stream_fades = Counter()
+    for fx in library:
+        for e in fx.emitters:
+            if e.kind == 5:
+                counts[struct.unpack_from("<I", e.body, effects.BOLT_COUNT_AT)[0]] += 1
+                segments[struct.unpack_from("<f", e.body, effects.BOLT_SEGMENT_AT)[0]] += 1
+            elif e.kind == 8:
+                intervals.append(e.emission_interval)
+                lives.append(e.particle_lifetime)
+                start, end, _power = e.fade
+                stream_fades["down" if start > end else "up" if start < end else "flat"] += 1
+            elif e.kind in (7, 10):
+                start, end, _power = e.fade
+                fades["down" if start > end else "up" if start < end else "flat"] += 1
+    check("FXID: bolts run in segments, streams emit on an interval, particles fade",
+          set(counts) == {20} and min(segments) >= 50.0
+          and all(0.0 < a <= 1.0 and 0.0 < b <= 1.0 for a, b in intervals)
+          and fades["down"] > 0.9 * sum(fades.values())
+          and stream_fades["down"] > 0.9 * len(intervals),
+          f"all {sum(counts.values())} bolts draw at most {sorted(counts)} sprites, one "
+          f"per {dict(sorted(segments.items()))} units of their length "
+          f"(Effect.dll:0x10002c53); the {len(intervals)} streams emit every "
+          f"{min(min(i) for i in intervals):g} to {max(max(i) for i in intervals):g} s "
+          f"(0x10011a6c) and their particles live {min(min(v) for v in lives):.2g} to "
+          f"{max(max(v) for v in lives):.2g} s, a ring's worth (0x1001209e); fade values "
+          f"run {dict(fades)} on bursts (+8/+12/+16) and {dict(stream_fades)} on "
+          f"streams (+4/+8/+12)")
+
+    # Time mode 4 reads a node's value, and the hero turret names the nodes its
+    # guns' barrels and arms animate.
+    turrets = NResArchive.open(game / "turrets.rlb")
+    tur = control.parse(turrets.read_name("o_tur_ht_02.ctl"), names)
+    tmesh = objmesh.parse(turrets.read_name("o_tur_ha_02.msh"), "o_tur_ha_02.msh")
+    ids = {r.args[3]: r.resource.member.lower() for r in tur.group(control.ENTRY_LOAD)
+           if r.action == control.ACT_EFFECT_POINTS}
+    timed = {ids[r.args[0]]: r.args[1] for r in tur.group(control.ENTRY_LOAD)
+             if r.action == control.ACT_EFFECT_TIME_POINT}
+    animated = {ch.node: i for i, ch in enumerate(tur.channels)}
+    guns = {i for c in tur.components if c.type_id == control.GUN_TYPE for i in c.entries}
+    arms = {i for c in tur.components if c.type_id == control.ARM_TYPE for i in c.entries}
+    by_gun = {name: tmesh.nodes[node].name for name, node in timed.items()
+              if animated.get(node) in guns}
+    by_arm = sorted(name for name, node in timed.items() if animated.get(node) in arms)
+    as_channels = sum(1 for n in timed.values()
+                      if n < len(tur.channels) and tur.channels[n].node == n)
+    check("o_tur_ht_02: time mode 4 reads the nodes the barrels and arms animate",
+          len(timed) == 7 and all(node in animated for node in timed.values())
+          and by_gun == {"hero_cannon": "Gun02_m1o1", "hero_prifle": "Plz02_m1o1",
+                         "hero_redlaser": "Lz02_m1o1"}
+          and by_arm == ["hero_cannon_sfx", "hero_missile_sfx", "hero_prifle_sfx",
+                         "hero_redlaser_sfx"]
+          and all(library.get(n).mode == effects.TIME_POINT for n in timed),
+          f"action 14's v5 is a mesh node (AniMesh.dll:0x10005600 returns node +0x114, "
+          f"the value the channel update sets, Control.dll:0x10021c97): {timed}; the gun "
+          f"effects follow their gun component's barrel channel on {by_gun}, the four "
+          f"sounds an arm channel's node; control: read as channel numbers, "
+          f"{as_channels} of 7 name a channel on that node")
+
+    # A unit answers interface 0xd with its own material manager, so a round
+    # that strikes it plays the slot of the struck batch's material class.
+    mats = materials.MaterialLibrary(game / "Material.lib")
+    things = objects.ObjectLibrary(game / "objects.rlb")
+    opened: dict[str, NResArchive] = {}
+    classes: Counter[int] = Counter()
+    units = 0
+    for record in things.by_tag("BTLU"):
+        ref = record.textures
+        if ref is None or not ref.library:
+            continue
+        opened.setdefault(ref.library, NResArchive.open(game / ref.library))
+        units += 1
+        for name in objmesh.read_wea(opened[ref.library].read_name(ref.member)):
+            m = mats.get(name)
+            if m is not None:
+                classes[m.surface] += 1
+    mission = {}
+    for stem in ("r_h_01", "r_h_02", "r_h_03"):
+        ref = things.get(stem).textures
+        opened.setdefault(ref.library, NResArchive.open(game / ref.library))
+        mission[stem] = sorted({mats.get(n).surface for n in
+                                objmesh.read_wea(opened[ref.library].read_name(ref.member))})
+    total = sum(classes.values())
+    check("objects.rlb: a unit's skins are the machine surface, so a hit plays 'mt'",
+          units == 63 and classes[5] > 0.8 * total
+          and all(v == [5] for v in mission.values()),
+          f"the {total} wear materials of the {units} BTLU units are class "
+          f"{dict(classes.most_common())} (255 unset: slot 0); Mission 01's dummies "
+          f"and hero {mission}.  A unit's QueryInterface answers 0xd from its own "
+          f"table (AniMesh.dll:0x1000358f, LoadMatManager), CWorld::GetWorldFace takes "
+          f"the struck batch's material (AniMesh.dll:0x100135c8), and Control.dll:"
+          f"0x100114fd reads its class, so slot 6, {effects.SURFACE_TAGS[5]!r}, plays")
 
 
 def check_actions(check, game: Path) -> None:
