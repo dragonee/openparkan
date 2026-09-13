@@ -71,17 +71,19 @@ bounding volume, so whatever they are it is not a mass or a size.
 
 ## CTPT field roles outside static.rlb
 
-The container is solid everywhere (all 284 members parse, all 3599 points
-named), but the nine floats only read cleanly as
-`(zero, position, unit direction)` in `static.rlb` and `turrets.rlb`.
-`guns.rlb` and `parts.rlb` put scalars like `Width` in a vector slot.
+~~Answered.~~ The nine floats looked like `(zero, position, unit direction)` in
+`static.rlb` and `turrets.rlb` but put scalars like `Width` in a vector slot in
+`guns.rlb` and `parts.rlb`. They do not: every one of the 191 points named
+`Width`, `Height` or `Size` has exactly one non-zero component — an axis times
+the size. See [07-objects.md](07-objects.md#ctpt--control-points).
 
 ## BASE — the two int32 per corner
 
-`.bas` is [solved](07-objects.md): two closed rings, a building's outline and
-a clearance around it, all 30 records to the byte. Each corner carries two
-`int32` that are not read — `fr_e_ruin`'s first ring gives 308, 306, 309, 304
-and then 2, 1, 1, 1, which reads as two parallel arrays rather than pairs.
+~~Answered.~~ They are two parallel arrays, as suspected, and they are a
+back-reference: **which triangle of the building's own mesh each corner was
+traced off, and which corner of it**. Only the inner ring carries them; the
+outer ring is a clearance drawn around the building. See
+[07-objects.md](07-objects.md).
 
 ## Object mesh leftovers
 
