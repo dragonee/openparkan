@@ -48,22 +48,27 @@ every one of the 3577 material references resolves through ``Material.lib``;
 Inside a block, ``READ_OFFSETS`` says which floats are **live**.  Each class
 keeps only a pointer to its block, so the fields that matter are whatever its
 own virtual methods load through that pointer, and walking the vtables of
-``Effect.dll`` recovers the set: **176 of the 441 four-byte slots** across the
+``Effect.dll`` recovers the set: **181 of the 441 four-byte slots** across the
 ten types, the rest written by the editor and never looked at.  Two things
 check it -- the sound emitter's +64 and +68 were known from the data long
-before the map existed and the map contains them, and not one of the 176
+before the map existed and the map contains them, and not one of the 181
 offsets lands inside a block's ``(archive, member)`` pair even though the map
-came from the code and ``RESOURCE_AT`` from the data.
+came from the code and ``RESOURCE_AT`` from the data.  The map is a lower
+bound: it counts ``fld`` loads straight off the block pointer, so a field
+copied as a dword first (type 1's start colour) or read through a pointer
+into the block (the exponent triples of types 3, 4, 8 and 9) is live without
+being in it.
 
 The families fall out: types 3 and 9 read the same eighteen offsets, 7 and 10
 the same thirty-one, and 4 a strict subset of 3's.
 
-Two fields are identified.  Type 2 keeps a **near and far audible distance**
-at +64 and +68, ordered on all 517 blocks and taking values like (3, 40),
-(10, 100) and (15, 300); an explosion's is (20, 200).  And types 1 and 2 keep
-a **unit vector** at +52 -- unit length on 597 of 618 and 517 of 517 blocks,
-and exactly (1, 0, 0) on most.  What the rest mean is not established; see
-``docs/11-effects.md``.
+Several fields are identified.  Type 2 keeps a **near and far audible
+distance** at +64 and +68.  **Type 1 is a light** in its owner's light manager
+(``LIGHT_*``, ``Emitter.light``).  A **type-5 bolt** runs from a start point to
+where the effect is now, in segments of +36 (``Emitter.bolt_segments``); a
+**type-8 stream** emits a particle every +24..+28 seconds; a particle's and a
+sprite's **fade** is a (start, end, power) triple.  What the rest mean is not
+established; see ``docs/11-effects.md``.
 
 Nothing here draws: an explosion is transient and a static scene has no place
 to put one.  What it gives you is the graph, from a mesh node's ``.ndp``
@@ -112,21 +117,27 @@ PLACE_OBJECT_Z = 6
 PLACE_CONTACT = 7
 
 #: The header: emitter count, time mode, duration in seconds, the spread of a
-#: random jitter on effect time, flags, a number a global table must accept
-#: before the instance runs, random offset amplitudes, a point, and a scale
-#: (``Effect.dll:0x10007650``, ``0x10005c60``, ``0x10008120``).
+#: random jitter on effect time, flags, the settings switch the effect belongs
+#: to, random offset amplitudes, the point its visibility is tested at, and a
+#: scale (``Effect.dll:0x10007650``, ``0x10005c60``, ``0x10008120``,
+#: ``0x10007d10``).
 HEADER_MODE_AT = 4
 HEADER_DURATION_AT = 8
 HEADER_JITTER_AT = 12
 HEADER_FLAGS_AT = 16
 HEADER_GATE_AT = 20
+HEADER_SETTING_AT = HEADER_GATE_AT
 HEADER_OFFSET_AT = 24
 HEADER_POINT_AT = 36
 HEADER_SCALE_AT = 48
 
-#: Header flags.  4 and 0x1000 are not read.
+#: Header flags.  0x10000, on one effect, is not read.
 FX_JITTER = 0x1
 FX_DELETE_AT_END = 0x2
+#: After its first tick the instance bakes its world place into its own frame
+#: and lets go of its attach point (``Effect.dll:0x10006324``): an explosion
+#: stays where it went off.  409 effects, 402 of them once-through.
+FX_DETACH = 0x4
 FX_RANDOM_OFFSET = 0x8
 FX_KEEP_WHEN_HIDDEN = 0x10
 FX_PING_PONG = 0x20
@@ -134,14 +145,68 @@ FX_START_OFF = 0x40
 FX_HOLD_UNLESS_PAUSED = 0x80
 FX_HOLD_WHILE_PAUSED = 0x100
 FX_TIMES_LINEAR = 0x200
-FX_DRAW_TEST = 0x800
+#: Test the point at ``HEADER_POINT_AT`` for a clear line from the camera, and
+#: draw nothing while it is hidden (``0x10007984``, ``0x10008016``).  An emitter
+#: with ``EMITTER_FLAG`` asks for the same test.
+FX_HIDE_OCCLUDED = 0x400
+#: Drawn only by a draw call whose pass argument is set (``0x10007d44``,
+#: ``0x10004061``); which call that is is not established.
+FX_SECOND_PASS = 0x800
+FX_DRAW_TEST = FX_SECOND_PASS
+#: Every manager tick hands each emitter the manager's target point, which a
+#: type-5 bolt takes for its start (``0x10006349``, ``0x10003070``).  All 14
+#: effects with a bolt carry it.
+FX_TARGET_POINT = 0x1000
+#: Passed on to the renderer as effect draw flag 4 (``0x1001088c``), which
+#: reaches the texture choice by distance (``Terrain.dll:0x10028417``).  One
+#: effect, ``env_lightning``.
+FX_SHADE_FLAG = 0x2000
 FX_SKIP_SECOND_TEST = 0x8000
 
+#: Header +0x14 is a **settings id**.  Its low byte indexes the twenty switches
+#: of ``Effect.dll``'s own settings page and its high byte is the group the
+#: switch is listed under; the names are the DLL's string table, loaded under
+#: the same ids (``0x1000e9c0``).  An instance whose switch is off neither
+#: updates nor draws (``0x1000ec40``, ``0x10007d59``, ``0x1000825e``).  Every
+#: shipped effect names one of these.
+EFFECT_SETTINGS: dict[int, str] = {
+    0x000: "Dust", 0x001: "Smoke", 0x002: "Engine fire", 0x003: "Explode",
+    0x004: "Shield", 0x005: "Lights",
+    0x106: "Dust", 0x107: "Smoke", 0x108: "Explode", 0x109: "Shield",
+    0x10A: "Lights", 0x10F: "Lights",
+    0x20B: "Smoke", 0x20C: "Engine fire", 0x20D: "Explode", 0x20E: "Gun fire",
+    0x310: "Smoke", 0x311: "Explode", 0x312: "Gun fire", 0x313: "Lights",
+}
+
+#: The three presets the page's slot 8 sets (``0x1000e7c0``), as the switches
+#: they leave on.  Presets 1 and 2 turn everything on; preset 3 turns off the
+#: dust and smoke of group 0, the dust, smoke and lights of group 1, the smoke
+#: and engine fire of group 2 and the smoke of group 3.
+EFFECT_PRESETS: dict[int, frozenset[int]] = {
+    1: frozenset(EFFECT_SETTINGS),
+    2: frozenset(EFFECT_SETTINGS),
+    3: frozenset(EFFECT_SETTINGS) - {0x000, 0x001, 0x106, 0x107, 0x10A, 0x20B,
+                                      0x20C, 0x310},
+}
+
+#: ``Iron_3D.ini``'s ``RENDER_QUALITY`` -> the preset ``iron3d.dll`` asks every
+#: settings page for (``0x100616f0``); the page starts on preset 1.
+RENDER_QUALITY_PRESET = {0: 3, 1: 2, 2: 1}
+
+
+def setting_enabled(setting: int, preset: int = 1) -> bool:
+    """Whether a settings id's switch is on under a preset."""
+    return setting in EFFECT_PRESETS.get(preset, frozenset())
+
 #: How effect time *t*, 0 to 1, is found (``Effect.dll:0x10005c60``): set from
-#: outside and 0 until set; once through the duration; looping; reversed; an
-#: owner's control-point value; speed over top speed (6-8 per axis); spin
-#: (10-12 per axis); one minus a point's or property's value; the larger of
-#: speed and spin; a point value that only rises or only falls.
+#: outside and 0 until set; once through the duration; looping; reversed; the
+#: animation value of an owner's mesh node (``TIME_POINT``: the node action 14
+#: names, counted from its part's first node, read through the owner's
+#: interface 0xb slot 9, ``AniMesh.dll:0x10005600`` -- the value the channel
+#: animating that node sets, ``Control.dll:0x10021c97``); speed over top speed
+#: (6-8 per axis); spin (10-12 per axis); one minus a point's or property's
+#: value; the larger of speed and spin; a node value that only rises or only
+#: falls.
 TIME_MANUAL = 0
 TIME_ONCE = 1
 TIME_LOOP = 2
@@ -183,8 +248,77 @@ RESOURCE_AT = {2: 84, 3: 136, 4: 136, 5: 48, 7: 144, 8: 184, 9: 136, 10: 144}
 #: The one emitter type that plays a sound rather than drawing something.
 EMITTER_SOUND = 2
 
-#: Bit 8 of the type word.  Set on 1811 of the 4737 emitters; role unknown.
+#: Bit 8 of the type word.  Set on 1811 of the 4737 emitters, all of them
+#: sprites or particles (types 3, 4, 7, 8 and 9).  It asks the instance to test
+#: its point (``HEADER_POINT_AT``) for a clear line from the camera at
+#: intervals (``Effect.dll:0x10007984``, ``0x10007f7f``), and while
+#: the point is in view the emitter draws with the renderer's depth test off
+#: (``0x10009930`` sets draw flag 1; ``Terrain.dll:0x100282c6`` clears
+#: ``ZENABLE``) -- a glow seen through whatever stands in front of it.  Hidden,
+#: it draws like any other sprite.
 EMITTER_FLAG = 0x100
+EMITTER_OVERLAY = EMITTER_FLAG
+
+#: Type 1 is a **light** in the owner's light manager (interface 0xe, a
+#: ``Terrain.dll`` ``CLightManager``; ``Effect.dll:0x1000f4b0``,
+#: ``0x1000f6e0``).  Each quantity is a (start, end) pair lerped by the
+#: progress through the window; the manager's record is Direct3D's
+#: ``D3DLIGHT2`` layout plus three fields.
+LIGHT_KIND_AT = 4
+#: Where the light sits, in the effect's own frame.
+LIGHT_POSITION_AT = (16, 28)
+#: Which way it points.
+LIGHT_DIRECTION_AT = (40, 52)
+#: Its colour, RGBA -- (0.5, 0.3, 0.01) on the hero's cannon.
+LIGHT_COLOUR_AT = (64, 80)
+#: A random amount up to +-half of each, added to the colour every update.
+LIGHT_COLOUR_JITTER_AT = 96
+#: Its range -- 30 to 3 on the cannon's flash -- and a jitter on it.
+LIGHT_RANGE_AT = (112, 116)
+LIGHT_RANGE_JITTER_AT = 120
+#: The three attenuation terms, handed to the manager as they are.
+LIGHT_ATTENUATION_AT = 124
+
+#: ``Direct3D`` light types, as the manager's record takes them.
+LIGHT_POINT = 1
+LIGHT_DIRECTIONAL = 3
+LIGHT_PARALLEL_POINT = 4
+
+#: Block +4 -> (light type, manager flags) (``0x1000f649``).  The manager skips
+#: a light with ``0x80000000`` unless it is drawing that light's own owner
+#: (``Terrain.dll:0x10047a52``) and leaves one with ``0x20000000`` out of
+#: ``EmulatePointLights`` (``0x1002a200``).  Anything else is kind 1.
+LIGHT_KINDS: dict[int, tuple[int, int]] = {
+    1: (LIGHT_POINT, 0x80000000),
+    2: (LIGHT_POINT, 0),
+    3: (LIGHT_DIRECTIONAL, 0),
+    4: (LIGHT_PARALLEL_POINT, 0),
+    5: (LIGHT_POINT, 0),
+    6: (LIGHT_POINT, 0xA0000000),
+    7: (LIGHT_POINT, 0x20000000),
+}
+
+#: A type-5 bolt: at most +20 sprites (a ``uint32``), one for every +36 units
+#: of its length (``Effect.dll:0x10002c53``).
+BOLT_COUNT_AT = 20
+BOLT_SEGMENT_AT = 36
+
+#: A type-8 stream emits one particle every lerp(+24, +28) seconds as its
+#: window runs (``Effect.dll:0x10011a6c``), into a ring of +36 (``uint32``).
+#: A particle's age runs 0 to 1 over the ring, so it lives +36 intervals
+#: (``0x1001209e``).
+STREAM_INTERVAL_AT = (24, 28)
+STREAM_CAPACITY_AT = 36
+
+#: The value a particle (types 7 and 10, or a stream's, type 8) or a sprite
+#: (3, 4 and 9) hands the renderer: ``start + (end - start) * x ** power``, x
+#: the particle's age or the progress through the window (``0x100013c2``,
+#: ``0x10012322``, ``0x10010881``).  Zero draws nothing
+#: (``Terrain.dll:0x1002887e``).  1197 of the 1321 burst blocks and 233 of the
+#: 237 streams fade from start to a smaller end.
+PARTICLE_FADE_AT = (8, 12, 16)
+STREAM_FADE_AT = (4, 8, 12)
+SPRITE_FADE_AT = (20, 24, 28)
 
 NAME_FIELD = 32
 
@@ -195,11 +329,15 @@ NAME_FIELD = 32
 #: that pointer.  This is the set those methods reach directly or one call
 #: deep.
 #:
-#: It is a map of what is *used*, not of what anything means.  Only the sound
-#: emitter's two distances and the direction at +52 are identified; see
-#: ``docs/11-effects.md``.
+#: It is a map of what is *used*, not of what anything means, and a lower
+#: bound: it counts ``fld`` loads straight off the block pointer, so a field
+#: copied as a dword first (type 1's light) or read through a pointer into the
+#: block (the exponent triples of types 3, 4, 8 and 9 at +64 and +124, type 8's
+#: at +172) is live without being here.
+#: Type 1's +120, its range jitter, was missed by the first walk and is loaded
+#: in its update (``0x1000fa9a``).  See ``docs/11-effects.md``.
 READ_OFFSETS: dict[int, tuple[int, ...]] = {
-    1: (8, 12, 28, 32, 36, 52, 56, 60, 80, 84, 88, 92, 112, 116),
+    1: (8, 12, 28, 32, 36, 52, 56, 60, 80, 84, 88, 92, 112, 116, 120),
     2: (8, 12, 28, 32, 36, 52, 56, 60, 64, 68, 72, 76),
     3: (8, 12, 24, 28, 32, 36, 40, 44, 48, 52, 56, 60,
         100, 104, 108, 112, 116, 120),
@@ -221,13 +359,31 @@ READ_OFFSETS: dict[int, tuple[int, ...]] = {
 BLOCK_FIELD = {1: 0x1C, 2: 0x24, 3: 0x18, 4: 0x18, 5: 0x18,
                6: 0x18, 7: 0x18, 8: 0x18, 9: 0x18, 10: 0x18}
 
-#: Types 1 and 2 carry a unit vector here, ``(1, 0, 0)`` on most blocks.
+#: Types 1 and 2 carry a unit vector here, ``(1, 0, 0)`` on most blocks.  On
+#: the light it is the end of its direction.
 DIRECTION_AT = 52
 DIRECTION_TYPES = (1, 2)
 
 
 class EffectFormatError(ValueError):
     pass
+
+
+@dataclass(frozen=True)
+class Light:
+    """What a type-1 emitter asks its owner's light manager for."""
+
+    #: ``LIGHT_POINT``, ``LIGHT_DIRECTIONAL`` or ``LIGHT_PARALLEL_POINT``.
+    type: int
+    #: The manager's flags word for it; see ``LIGHT_KINDS``.
+    flags: int
+    position: tuple[tuple[float, float, float], tuple[float, float, float]]
+    direction: tuple[tuple[float, float, float], tuple[float, float, float]]
+    colour: tuple[tuple[float, float, float, float], tuple[float, float, float, float]]
+    colour_jitter: tuple[float, float, float, float]
+    range: tuple[float, float]
+    range_jitter: float
+    attenuation: tuple[float, float, float]
 
 
 @dataclass(frozen=True)
@@ -290,8 +446,70 @@ class Emitter:
 
     @property
     def flagged(self) -> bool:
-        """Bit 8 of the type word, which the engine keeps as a boolean."""
+        """Bit 8 of the type word: draw over the scene while the point is in view."""
         return bool(self.word & EMITTER_FLAG)
+
+    @property
+    def light(self) -> Light | None:
+        """The light a type-1 emitter drives, or None for the other types."""
+        if self.kind != 1 or len(self.body) < LIGHT_ATTENUATION_AT + 12:
+            return None
+        b = self.body
+        kind = struct.unpack_from("<I", b, LIGHT_KIND_AT)[0]
+        light_type, flags = LIGHT_KINDS.get(kind, LIGHT_KINDS[1])
+
+        def pair(at: tuple[int, int], n: int):
+            return tuple(struct.unpack_from(f"<{n}f", b, o) for o in at)
+
+        return Light(
+            type=light_type,
+            flags=flags,
+            position=pair(LIGHT_POSITION_AT, 3),
+            direction=pair(LIGHT_DIRECTION_AT, 3),
+            colour=pair(LIGHT_COLOUR_AT, 4),
+            colour_jitter=struct.unpack_from("<4f", b, LIGHT_COLOUR_JITTER_AT),
+            range=struct.unpack_from("<2f", b, LIGHT_RANGE_AT[0]),
+            range_jitter=struct.unpack_from("<f", b, LIGHT_RANGE_JITTER_AT)[0],
+            attenuation=struct.unpack_from("<3f", b, LIGHT_ATTENUATION_AT),
+        )
+
+    def bolt_segments(self, length: float) -> int:
+        """How many sprites a type-5 bolt of ``length`` units draws; 0 otherwise.
+
+        The length is not in the block: it is the distance from the bolt's start
+        point to where the effect is now (``Effect.dll:0x10002c3f``).
+        """
+        if self.kind != 5 or len(self.body) < BOLT_SEGMENT_AT + 4:
+            return 0
+        most = struct.unpack_from("<I", self.body, BOLT_COUNT_AT)[0]
+        step = struct.unpack_from("<f", self.body, BOLT_SEGMENT_AT)[0]
+        n = int(length // step) if step > 0 else 0
+        return max(1, min(n, most))
+
+    @property
+    def emission_interval(self) -> tuple[float, float] | None:
+        """A type-8 stream's seconds between particles at its window's ends."""
+        if self.kind != 8 or len(self.body) < STREAM_INTERVAL_AT[1] + 4:
+            return None
+        return struct.unpack_from("<2f", self.body, STREAM_INTERVAL_AT[0])
+
+    @property
+    def particle_lifetime(self) -> tuple[float, float] | None:
+        """A type-8 particle's seconds of life at its window's ends."""
+        interval = self.emission_interval
+        if interval is None or len(self.body) < STREAM_CAPACITY_AT + 4:
+            return None
+        ring = struct.unpack_from("<I", self.body, STREAM_CAPACITY_AT)[0]
+        return (ring * interval[0], ring * interval[1])
+
+    @property
+    def fade(self) -> tuple[float, float, float] | None:
+        """``(start, end, power)`` of the value this emitter draws with."""
+        at = {7: PARTICLE_FADE_AT, 10: PARTICLE_FADE_AT, 8: STREAM_FADE_AT,
+              3: SPRITE_FADE_AT, 4: SPRITE_FADE_AT, 9: SPRITE_FADE_AT}.get(self.kind)
+        if at is None or len(self.body) < at[2] + 4:
+            return None
+        return tuple(struct.unpack_from("<f", self.body, o)[0] for o in at)
 
     @property
     def audible_range(self) -> tuple[float, float] | None:
@@ -353,8 +571,18 @@ class Effect:
 
     @property
     def gate(self) -> int:
-        """The number a global table must accept first; its meaning is unknown."""
+        """The settings id whose switch must be on for the effect to run."""
         return struct.unpack_from("<I", self.header, HEADER_GATE_AT)[0]
+
+    @property
+    def setting(self) -> str | None:
+        """The name ``Effect.dll`` gives the effect's switch, or None."""
+        return EFFECT_SETTINGS.get(self.gate)
+
+    @property
+    def test_point(self) -> tuple[float, float, float]:
+        """The point, in the instance's frame, whose view from the camera is tested."""
+        return struct.unpack_from("<3f", self.header, HEADER_POINT_AT)
 
     @property
     def scale(self) -> tuple[float, float, float]:

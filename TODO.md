@@ -845,15 +845,20 @@ blocks to the byte, 144 `.exp` records parse, and a destroyed node's damage
 record reaches real sprites on 2189 of 2203 references. Nothing draws them: an
 explosion is transient and a static scene has nowhere to put one.
 
-Which floats in a block are **live** is settled — **180 of the 441** four-byte
-slots across the ten block types — and the map now has a **third witness, from
-the data**. A slot the engine loads as a float should hold one, and every one
-of the **98987** reads of the 180 is finite and either exactly zero or between
-1e-6 and 1e6. The 123 dead slots manage **92.3%**: 5395 of their reads are
-NaN, denormal or absurd, which is what an editor's uncleared buffer looks
-like. The map came out of the vtables and used none of the values.
+Which floats in a block are loaded straight off the block pointer is settled —
+**181 of the 441** four-byte slots across the ten block types (type 1's `+120`
+was missed until the light was read). That is a **lower bound** on what is
+live: fields copied as dwords first and the exponent triples read through a
+pointer into the block (types 3, 4, 8 and 9) are live too
+([docs/11](docs/11-effects.md#which-floats-are-live)). The map has a **third
+witness, from the data**. A slot the
+engine loads as a float should hold one, and every one of the **99605** reads
+of the 181 is finite and either exactly zero or between 1e-6 and 1e6. The 122
+dead slots manage **92.2%**: 5395 of their reads are NaN, denormal or absurd,
+which is what an editor's uncleared buffer looks like. The map came out of the
+vtables and used none of the values.
 
-The slots are now **typed**, if not named: 37 signed, 59 positive, 36 in
+The slots are now **typed**, if not named: 37 signed, 60 positive, 36 in
 0..1, 33 integral, and **15 that are always zero** — read by the engine and
 never set by the artists. And type 3's (low, high) triple is a **motif**, not
 a special case: type 10's `+80..+88` against `+128..+136` is ordered on 154 of
@@ -884,8 +889,24 @@ following it is a bug in the analysis scaffolding: those pointers appeared to
 address the version resource, which is how a bad address mapping in `pe.py`
 was found. See [analysis/README.md](analysis/README.md).
 
-Also open: the 60-byte effect header, the `.exp`'s first float and flags word,
-and what bit 8 controls.
+- [x] **The 60-byte header, the `.exp` record and bit 8 are read**
+      ([docs/11](docs/11-effects.md#how-an-effect-runs--read)). The header is
+      a time mode, a duration, a jitter, a flags word (every bit the shipped
+      data sets but `0x10000` now has a reading), a **settings switch** at
+      `+0x14` out of `Effect.dll`'s own string table, random offsets, the
+      **point whose view from the camera is tested** at `+0x24`, and a scale.
+      The `.exp`'s first word is the hit kind, its first float the damage and
+      its last word the placement ([docs/26](docs/26-damage.md)). **Bit 8**
+      draws an emitter with the depth test off while the tested point is in
+      view. **Type 1 is a light** in the owner's `CLightManager`; a type-5
+      bolt's length is its start point to its current position; a type-8
+      stream emits on an interval; time mode 4 reads a mesh node's animation
+      value; a round's hit on a unit plays the struck batch's material class.
+
+Still open, from [docs/11](docs/11-effects.md#not-resolved): what the fade
+value scales and what a particle's exponent-shaped triples are; how the shade turns a light's
+range and attenuation into light; who passes flag 0x800's draw pass and who
+sets the manager's target point; what the four settings groups are.
 
 A negative result worth keeping: an explosion's size is **not** in its effect.
 `exp_frt_l`, `_m` and `_b` share their emitter blocks byte for byte; the 2, 3

@@ -425,9 +425,9 @@ read = false
 module = "Terrain.dll"
 at = "0x10024d70"
 kind = "function"
-name = "CWorld::GetWorldFace"
-doc = "the binary's own assertion text"
-read = false
+name = "CWorld::GetWorldFace: the hit record's object by id, its QI 0x18 geometry slots 3 and 5; flag 8 gives the material id at face +0x74"
+doc = "docs/11-effects.md"
+read = true
 
 [[entry]]
 module = "Terrain.dll"
@@ -449,9 +449,9 @@ read = false
 module = "Terrain.dll"
 at = "0x10028840"
 kind = "function"
-name = "CShade::RenderEffect"
-doc = "the binary's own assertion text"
-read = false
+name = "CShade::RenderEffect: nothing for a zero fade value; the sprite kind's low word picks the primitive, the flags go to 0x10028260"
+doc = "docs/11-effects.md"
+read = true
 
 [[entry]]
 module = "Terrain.dll"
@@ -713,9 +713,9 @@ read = false
 module = "Terrain.dll"
 at = "0x1007fa90"
 kind = "function"
-name = "CLightManager::CLightManager"
-doc = "the binary's own assertion text"
-read = false
+name = "CLightManager::CLightManager: 20 light records of 0x5c, D3DLIGHT2 plus flags and 1/range"
+doc = "docs/11-effects.md"
+read = true
 
 [[entry]]
 module = "Terrain.dll"
@@ -6916,7 +6916,7 @@ read = true
 module = "Effect.dll"
 at = "0x10004b70"
 kind = "function"
-name = "manager slot 0x34 (action 14): the control point an instance's time mode 4 reads"
+name = "manager slot 0x34 (action 14): the owner mesh node an instance's time mode 4 reads"
 doc = "docs/11-effects.md"
 read = true
 
@@ -7028,7 +7028,7 @@ read = true
 module = "Effect.dll"
 at = "0x1000f6e0"
 kind = "site"
-name = "type-1 update (vtable 0x1001e78c slot 2): switches a handle of manager +0x28 (owner QI 0xe) on inside the window +8..+12, off outside"
+name = "type-1 update (vtable 0x1001e78c slot 2): a light of the owner's CLightManager (QI 0xe) on inside the window +8..+12; position, direction, colour + jitter, range + jitter (+120) lerped and handed to slots 8, 9, 3, 4"
 doc = "docs/11-effects.md"
 read = true
 
@@ -7100,7 +7100,7 @@ read = true
 module = "Effect.dll"
 at = "0x10002a20"
 kind = "function"
-name = "type-5 update: window +12..+16; seconds when +40 < 0"
+name = "type-5 update: window +12..+16; phase seconds when +40 < 0; start point on the first tick, then the midpoint and half the distance to where the effect is now"
 doc = "docs/11-effects.md"
 read = true
 
@@ -7132,7 +7132,7 @@ read = true
 module = "Effect.dll"
 at = "0x10001300"
 kind = "function"
-name = "type-7/10 render: particle age = (phase - spawn) / +0x1c, one-shot flag, drag, LOD budget"
+name = "type-7/10 render: particle age = (phase - spawn) / +0x1c, one-shot flag, drag, LOD budget; fade value +8 + (+12 - +8) age^+16; per-axis exponents +80.. and +128.."
 doc = "docs/11-effects.md"
 read = true
 
@@ -7148,7 +7148,7 @@ read = true
 module = "Effect.dll"
 at = "0x100115c0"
 kind = "function"
-name = "type-8 update: window +16..+20 on t unless +0x8c"
+name = "type-8 update: window +16..+20 on t unless +0x8c; one particle every lerp(+24, +28) seconds, ring of +36"
 doc = "docs/11-effects.md"
 read = true
 
@@ -7180,7 +7180,367 @@ read = true
 module = "Effect.dll"
 at = "0x10009930"
 kind = "function"
-name = "effect sprite draw: frame fraction and a 0..1 value to the shade, emitter flag bit 8 passed on"
+name = "effect sprite draw: frame fraction to the material track, the fade value to the shade (0 draws nothing); flag 1 when bit 8 and the point is in view, flag 4 from header 0x2000; CShade slot 27"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "Effect.dll"
+at = "0x10007984"
+kind = "site"
+name = "factory: emitter +4 = type word bit 8; bit 8 or header 0x400 set instance +0xa0 bit 0x10 (test the point), 0x400 also 0x100 (hide while hidden)"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "Effect.dll"
+at = "0x10007d10"
+kind = "function"
+name = "instance draw: switch gate, header 0x800 only with the pass argument, ray from the camera to header +0x24 at intervals, the emitter draw context (+0x64 header flags, +0x68 point in view)"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "Effect.dll"
+at = "0x10007f7f"
+kind = "site"
+name = "instance draw: the world's ray query to the test point; no hit sets +0xa0 bit 8, a hit clears it"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "Effect.dll"
+at = "0x10008016"
+kind = "site"
+name = "instance draw: header 0x400 draws nothing while the test point is hidden"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "Effect.dll"
+at = "0x1000846c"
+kind = "site"
+name = "instance update: the emitters' clock is seconds since the instance started"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "Effect.dll"
+at = "0x10006324"
+kind = "site"
+name = "instance tick: header flag 4 bakes the world frame and detaches from the attach point"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "Effect.dll"
+at = "0x10006349"
+kind = "site"
+name = "instance tick: header flag 0x1000 asks the manager to hand out its target point next tick; flag 0x800 clear marks an ordinary-pass instance (0x10006364)"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "Effect.dll"
+at = "0x10004050"
+kind = "function"
+name = "manager slot 3 draw (renderer, node or -2, pass): skips when pass is 0 and every instance is 0x800"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "Effect.dll"
+at = "0x10004c50"
+kind = "function"
+name = "manager slot 0x44: the target point, an object id, node and local point, handed to every emitter's slot 6"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "Effect.dll"
+at = "0x1000ec40"
+kind = "function"
+name = "settings gate: switch table[id & 0xff]"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "Effect.dll"
+at = "0x1000ec50"
+kind = "function"
+name = "settings: group float (id >> 8) x a random number, the particle LOD"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "Effect.dll"
+at = "0x1000e9c0"
+kind = "function"
+name = "effect settings page: the switch and LOD names from the DLL's string table, ids 0..0x3f1"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "Effect.dll"
+at = "0x1000e7c0"
+kind = "function"
+name = "effect settings page slot 8: presets 1 and 2 all switches on, 3 dust/smoke/some lights off; group floats and +0x14a4"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "Effect.dll"
+at = "0x10014090"
+kind = "function"
+name = "InitializeSettings export: loads the names and registers the page with CreateGameSettings as id 0x14"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "Effect.dll"
+at = "0x1001ec58"
+kind = "datum"
+name = "effect settings page vtable"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "Effect.dll"
+at = "0x1000f4b0"
+kind = "function"
+name = "type-1 init: copies the (start, end) pairs, light kind +4 to a D3D type and flags, creates the light (manager slots 12, 13), off"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "Effect.dll"
+at = "0x1000f6c0"
+kind = "table"
+name = "type-1 light kind jump table, +4 = 1..7"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "Effect.dll"
+at = "0x1000fa9a"
+kind = "site"
+name = "type-1 update: fld of block +120, the range jitter"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "Effect.dll"
+at = "0x10003070"
+kind = "function"
+name = "type-5 slot 6: take the manager's target point as the bolt's start"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "Effect.dll"
+at = "0x100028a0"
+kind = "function"
+name = "type-5 init: material +48, +20 sprite objects, widths +24/+28, phase from +40/+44"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "Effect.dll"
+at = "0x10002be0"
+kind = "function"
+name = "type-5 render: length = |now - start|, floor(length / +36) sprites clamped to 1..+20, fade +4..+8"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "Effect.dll"
+at = "0x10011230"
+kind = "function"
+name = "type-8 init: material +184, a ring of +36 particles, interval pair +24/+28"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "Effect.dll"
+at = "0x10011a6c"
+kind = "site"
+name = "type-8 update: while last + lerp(+24, +28) < now, emit one particle along the path"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "Effect.dll"
+at = "0x10012030"
+kind = "function"
+name = "type-8 render: particle age = ring distance from the newest plus the time since it / (interval x ring); fade +4 + (+8 - +4) age^+12 (0x10012322); exponent triples +124.. and +172.."
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "Effect.dll"
+at = "0x100013c2"
+kind = "site"
+name = "type-7 render: the particle's fade value +8 + (+12 - +8) age^+16"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10028260"
+kind = "function"
+name = "effect primitive submit: draw flag 1 (or shade +0x172c) turns ZENABLE off, flag 2 ZWRITEENABLE off, flag 4 to the distance texture choice"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1003e54c"
+kind = "site"
+name = "primitive render: SetRenderState 7 (ZENABLE) from +0x12c and 14 (ZWRITEENABLE) from +0x12d"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1007fa40"
+kind = "function"
+name = "CreateLightManager export"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1009c1f0"
+kind = "datum"
+name = "CLightManager vtable: 3 colour, 4 range and attenuation, 5 spot, 6 on/off, 8 position, 9 direction, 11 is on, 12 create, 13 flags, 17 get colour"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x100806b0"
+kind = "function"
+name = "CLightManager slot 12: a free record, D3D light type at +4"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x100800a0"
+kind = "function"
+name = "CLightManager slot 4: range +0x30, 1/range +0x54, attenuation +0x38..+0x40"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10047a52"
+kind = "site"
+name = "light pass: a light flagged 0x80000000 is skipped unless the object drawn is its owner"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1002a200"
+kind = "site"
+name = "EmulatePointLights: a point light flagged 0x20000000 is left out"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10001320"
+kind = "function"
+name = "agent QueryInterface: the outer object's unless id 0x15, else table +0x198[(id >> 8) * 48 + (id & 0xff)]"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x100012d0"
+kind = "function"
+name = "agent +0x130 interface QueryInterface: the table alone, never the outer"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x100032a4"
+kind = "site"
+name = "agent loader: +0x14c = LoadMatManager, +0x150 = CreateLightManager, then CreateFxManager (0x100033ba)"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x1000358f"
+kind = "site"
+name = "agent loader: the material manager into interface slot 0xd, the light manager into 0xe (0x1000359b), fx manager 0x13 (0x10003607)"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10006e50"
+kind = "function"
+name = "AniMesh QueryInterface: 0xb main, 0x18 geometry, 0x20, 0x25, 0x26"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10005600"
+kind = "function"
+name = "AniMesh slot 9: node n's animation value (+0x114)"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10005630"
+kind = "function"
+name = "AniMesh slot 10: set node n's value and weight; frames +0x100..+0x104 lerp by it"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10005780"
+kind = "function"
+name = "AniMesh slot 14: index of the first node of a part id, or -1"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x100134d0"
+kind = "function"
+name = "geometry slot 3: the struck triangle's record; +0x34 material id = node wear base | batch material low byte (0x100135c8)"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10009a7b"
+kind = "site"
+name = "channels at load: each channel's initial value, wrapped or clamped and inverted, to AniMesh slot 10 on its node"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10021c97"
+kind = "site"
+name = "channel update: the channel's value, wrapped or clamped and inverted, to AniMesh slot 10 on its node"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001147e"
+kind = "site"
+name = "node damage stage: a contact record with object, node, batch and triangle goes to CWorld::GetWorldFace flags 0xa"
 doc = "docs/11-effects.md"
 read = true
 
@@ -7228,7 +7588,7 @@ read = true
 module = "Control.dll"
 at = "0x10003031"
 kind = "site"
-name = "action 14: the effect with id v4 reads its time from control point v5"
+name = "action 14: the effect with id v4 reads its time from mesh node v5, counted from its part's first node (AniMesh slot 14)"
 doc = "docs/13-control.md"
 read = true
 
@@ -8039,6 +8399,118 @@ module = "Ngi32.dll"
 at = "0x1000f620"
 kind = "function"
 name = "palette to surface: index 0 alpha 0 and the rest 0xff on an alpha surface; bit 0x2000000 makes a 32-step fade on a key index"
+doc = "docs/02-texm.md"
+read = true
+
+[[entry]]
+module = "Ngi32.dll"
+at = "0x1000f3d0"
+kind = "function"
+name = "texture object constructor: +0x10 archive, +0x14 caller's load flags | resource index"
+doc = "docs/02-texm.md"
+read = true
+
+[[entry]]
+module = "Ngi32.dll"
+at = "0x10007e10"
+kind = "function"
+name = "3D render slot 14: CreateTexture(archive, load flags | index, ...)"
+doc = "docs/02-texm.md"
+read = true
+
+[[entry]]
+module = "Ngi32.dll"
+at = "0x1000fe18"
+kind = "site"
+name = "texture upload: caller's load flag 0x80000 skips the alpha surface"
+doc = "docs/02-texm.md"
+read = true
+
+[[entry]]
+module = "Ngi32.dll"
+at = "0x10008940"
+kind = "function"
+name = "3D render slot 31: a device capability flag by index"
+doc = "docs/02-texm.md"
+read = true
+
+[[entry]]
+module = "World3D.dll"
+at = "0x10004310"
+kind = "function"
+name = "material loader: directory flags bit 0 load flag 0x200000, bit 1 0x80000 unless render setting 109 and capability 6"
+doc = "docs/02-texm.md"
+read = true
+
+[[entry]]
+module = "World3D.dll"
+at = "0x10004441"
+kind = "site"
+name = "material loader: OR load flag 0x80000 into a lit skin's texture"
+doc = "docs/02-texm.md"
+read = true
+
+[[entry]]
+module = "World3D.dll"
+at = "0x10004b10"
+kind = "function"
+name = "texture by name: cached, else render slot 14 with format setting | load flags | 0x400000 (0x10004c88)"
+doc = "docs/02-texm.md"
+read = true
+
+[[entry]]
+module = "World3D.dll"
+at = "0x1000a820"
+kind = "function"
+name = "render settings page (id 0xa) set: ids 90..110; 100 texture format, 109 skin alpha (0x100234e8)"
+doc = "docs/02-texm.md"
+read = true
+
+[[entry]]
+module = "World3D.dll"
+at = "0x100140ad"
+kind = "site"
+name = "render capability 6 kept for the material loader"
+doc = "docs/02-texm.md"
+read = true
+
+[[entry]]
+module = "World3D.dll"
+at = "0x1000a600"
+kind = "function"
+name = "game settings slot 8: a preset to every registered page"
+doc = "docs/02-texm.md"
+read = true
+
+[[entry]]
+module = "World3D.dll"
+at = "0x10014cca"
+kind = "site"
+name = "registers the render settings page as id 0xa"
+doc = "docs/02-texm.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10061310"
+kind = "function"
+name = "Iron_3D.ini display keys: RENDER_QUALITY to preset 3/2/1, REFLECTIONS, EMBOSS_BUMP to World3D setting 109"
+doc = "docs/02-texm.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1006176f"
+kind = "site"
+name = "EMBOSS_BUMP to setting (page 0xa, id 0x6d)"
+doc = "docs/02-texm.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100613fd"
+kind = "site"
+name = "Iron_3D.ini: EMBOSS_BUMP != 0 kept as a byte"
 doc = "docs/02-texm.md"
 read = true
 

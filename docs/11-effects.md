@@ -86,14 +86,16 @@ and advances `edi` by exactly the stride above — `add edi, 0xe0` for type 1,
 **type 6 is a real type with a 4-byte block**, which no shipped effect uses,
 and **bit 8 is a flag rather than part of the type** — right after the switch
 the factory computes `(word >> 8) & 1` and stores it as a byte on the emitter.
-It is set on 1811 of the 4737 emitters and what it controls is not known.
+It is set on 1811 of the 4737 emitters, and it draws the emitter over the scene
+while the effect's point is in view — see [bit 8 and the tested
+point](#bit-8-and-the-tested-point--read-and-measured).
 
 Types 7 and 10 allocate the same 0x48-byte object and install different
 vtables, so they are sibling classes rather than unrelated ones.
 
 ## Inside a block
 
-Only the sound emitter is read. Type 2 keeps a **near and far audible
+The sound emitter was the first one read off the data. Type 2 keeps a **near and far audible
 distance** as two `float32` at +64 and +68: the first is never greater than
 the second on any of the 517 blocks, and the pairs are exactly what a 3D sound
 wants — (3, 40) on 160 of them, (10, 100) on 120, then (3, 50), (10, 80),
@@ -109,12 +111,22 @@ matter are whatever each class's own virtual methods load through that
 pointer. That set can be recovered: walk the class's vtable, taint the
 register the block pointer lands in, and record every `fld` off it.
 
-**180 of the 441 four-byte slots across the ten block types are read as a
-float.** Everything else the editor wrote and the engine never looks at:
+**181 of the 441 four-byte slots across the ten block types are loaded as a
+float straight off the block pointer.** That is a **lower bound** on what is
+live, not the whole of it. Reading the classes' code for this page found two
+kinds of load the walk cannot see: a field **copied as a dword** before it is
+used (type 1's start colour and position, the start of a particle's fade, a
+bolt's sprite count), and a field read **through a pointer into the block** —
+the per-axis exponent triples of types 3, 4 and 9 at +64..+72 and +124..+132
+(`add esi, 0x40` and `add ebx, 0x7c` at `0x100106f6`, `0x10010784`), and type
+8's at +124..+132 and +172..+180 (`0x10012185`). Of the 122 slots outside the
+map, 103 hold a sane float on every block, though many of those are simply
+zero throughout; see [the emitter types](#emitter-types--read-and-measured)
+for what is named:
 
 | type | block | offsets it loads |
 |---:|---:|---|
-| 1 | 224 | 8, 12 · 28, 32, 36 · 52, 56, 60 · 80, 84, 88, 92 · 112, 116 |
+| 1 | 224 | 8, 12 · 28, 32, 36 · 52, 56, 60 · 80, 84, 88, 92 · 112, 116, 120 |
 | 2 | 148 | 8, 12 · 28, 32, 36 · 52, 56, 60 · **64, 68** · 72, 76 |
 | 3 | 200 | 8, 12 · 24, 28, 32, 36 · 40–60 · 100–120 |
 | 4 | 204 | the same eighteen as 3 |
@@ -128,7 +140,7 @@ float.** Everything else the editor wrote and the engine never looks at:
 Two things check the map. **The sound emitter is the control**: its `+64` and
 `+68` were read off the data long before this existed, and the map contains
 them — along with the `+8`, `+12` and `+72` the data had also flagged. And
-**not one of the 180 offsets lands inside a block's `(archive, member)`
+**not one of the 181 offsets lands inside a block's `(archive, member)`
 pair**, though the read map comes from the code and `RESOURCE_AT` came from
 the data; an error on either side would collide somewhere.
 
@@ -138,14 +150,16 @@ it, so it inherits the layout. **Types 7 and 10 read the same thirty-one**,
 which is the sibling relationship the factory already suggested. Type 4 reads
 the same as type 3 as well: its `+32` and `+36` are read through a second
 pointer to the block, at `+0xfc` (`0x100108f9`), which an earlier walk did not
-follow. Type 1 also reads `+8` and `+12`, its window, in an update the first
-sweep did not decode (`0x1000f6e0`).
+follow. Type 1 also reads `+8` and `+12`, its window, and `+120`, its range
+jitter (`0x1000fa9a`), in an update the first sweep did not decode
+(`0x1000f6e0`); the map missed `+120` until the light was read.
 
-One field is identified by its shape rather than by the code: **types 1 and 2
-keep a unit vector at `+52`** — unit length on 597 of 618 and 517 of 517
+One field was identified by its shape before the code named it: **types 1 and
+2 keep a unit vector at `+52`** — unit length on 597 of 618 and 517 of 517
 blocks, and exactly `(1, 0, 0)` on 542 and 517 of them. A direction with a +X
-default. The drawing types keep something else there: on type 8 not one block
-of 237 is unit length.
+default; on the light it is the end of the light's direction (below). The
+drawing types keep something else there: on type 8 not one block of 237 is
+unit length.
 
 Type 3's `+40..+48` and `+52..+60` are a component-wise (low, high) pair of
 `float32[3]` on 1427 of 1545 blocks, which is the shape a particle spread
@@ -156,7 +170,9 @@ their own methods rather than through a helper.
 
 **None of that names a field.** It says which of the 30 to 60 floats in a
 block are live, which classes share a layout, and which two hold a direction.
-What they mean is still open.
+The types' own code names the light, the bolt, the stream's rate and the
+fades — see [the emitter types](#emitter-types--read-and-measured); most of
+the rest is still open.
 
 One negative result worth keeping: **an explosion's size is not in its
 effect.** `exp_frt_l`, `exp_frt_m` and `exp_frt_b` share their emitter blocks
@@ -188,9 +204,9 @@ The read map came out of `Effect.dll`'s vtables and knows nothing about the
 data, which makes the data an independent test of it — and the sharpest form
 of the test is simply whether a slot the engine loads as a float *holds* one.
 
-**All 98987 reads of the 180 live slots are a real float**: finite, and either
-exactly zero or between 1e-6 and 1e6 in magnitude. The 123 dead slots manage
-**92.3%** — 5395 of their reads are NaN, denormal or absurd, which is what an
+**All 99605 reads of the 181 live slots are a real float**: finite, and either
+exactly zero or between 1e-6 and 1e6 in magnitude. The 122 dead slots manage
+**92.2%** — 5395 of their reads are NaN, denormal or absurd, which is what an
 editor's uncleared buffer looks like. Nothing in the recovery used the values.
 
 Sorting the live slots by the shape of their values across the library gives:
@@ -198,7 +214,7 @@ Sorting the live slots by the shape of their values across the library gives:
 | shape | slots |
 |---|---:|
 | signed | 37 |
-| positive | 59 |
+| positive | 60 |
 | 0..1 | 36 |
 | integral | 33 |
 | always zero | 15 |
@@ -269,13 +285,32 @@ record's id.
 | +4 | u32 | **time mode**, below | 0 on 131, 1 on 540, 2 on 115, 4 on 47, 5 on 46, 14–17 on 44 (*measured*) |
 | +8 | f32 | **duration**, s: end = start + 1000 × it, in ms | 0 to 5 (0.75 on the hero's guns, 1.5 on impacts, 3 on the dummies' explosions) |
 | +0xc | f32 | spread of a random jitter on *t* (flag 1) | |
-| +0x10 | u32 | flags: 1 jitter; **2 delete once *t* ≥ 1**; 8 a random offset (+0x18); 0x10 keep running when the attach point is hidden; 0x20 ping-pong; 0x40 start switched off; 0x80 / 0x100 hold *t* at 0 while the manager's bit 0 (messages 23, 24) is clear / set; 0x200 × linear progress; 0x800 tested in the draw (`0x10007d44`); 0x8000 skip the attach point's second test | explosions 0x16, rounds 0x10 |
-| +0x14 | u32 | a number a global table must accept before the instance updates or draws (`0x1000ec40`); meaning *unknown* | 18 values, 0 to 787; 786 on the hero's guns |
+| +0x10 | u32 | **flags**, below | explosions 0x16, rounds 0x10 |
+| +0x14 | u32 | **the settings switch** the effect belongs to; off, the instance neither updates nor draws ([below](#which-effects-run-the-settings-switch--read-and-measured)) | 18 of the 20 ids; `0x312` "Gun fire" on the hero's guns |
 | +0x18 | f32×3 | random offset amplitudes (flag 8) | |
-| +0x24 | f32×3 | a point in the instance's frame (`0x10007eb5`); a bounds centre is a *guess* | (1, 0, 0) on impacts |
+| +0x24 | f32×3 | **the tested point**, in the instance's frame: the camera's view of it decides bit 8 and flag 0x400 ([below](#bit-8-and-the-tested-point--read-and-measured)) | (0, 0, 0) on 462, (1, 0, 0) on 368, (0.5, 0, 0) on 93 |
 | +0x30 | f32×3 | **scale**; the size a controller or `.exp` asks for is multiplied by it | 0.1 on the hero's muzzle effects |
 
-What 0x4 and 0x1000 do is *unknown*.
+**The flags** (`0x10006170`, `0x10007650`, `0x10007d10`, `0x10008120`; counts
+*measured* over the 923):
+
+| flag | effects | what it does |
+|---:|---:|---|
+| 0x1 | 58 | jitter *t* by +0xc |
+| 0x2 | 403 | **delete once *t* ≥ 1** (`0x100062a6`) |
+| 0x4 | 409 | **let go of the attach point**: after its first tick the instance bakes its world frame into its own and forgets the point (`0x10006324`), so an explosion stays where it went off; 402 of the 409 are time mode 1 |
+| 0x8 | 57 | a random offset (+0x18) |
+| 0x10 | 466 | keep running when the attach point is hidden |
+| 0x20 | 50 | ping-pong |
+| 0x40 | 8 | start switched off |
+| 0x80 / 0x100 | 110 on 0x100 | hold *t* at 0 while the manager's bit 0 (messages 23, 24) is clear / set |
+| 0x200 | — | × linear progress |
+| 0x400 | 114 | **draw nothing while the tested point is hidden** (`0x10008016`): the building and robot beacon lights, `f_*light*`, `rb_*light*` |
+| 0x800 | 198 | **drawn only by a draw call that passes its pass argument** (`0x10007d44`; the manager skips such calls outright when all its instances are 0x800, `0x10004061`); which caller passes it is not established. Lights, sounds, breath and beacons |
+| 0x1000 | 14 | **hand the emitters the manager's target point** every manager tick (`0x10006349`, manager slot `0x44`); a type-5 bolt takes it for its start (`0x10003070`). Exactly the 14 effects with a bolt, all bolt-only |
+| 0x2000 | 1 | passed to the renderer as effect draw flag 4 (`0x1001088c`), which reaches its texture choice by distance (`Terrain.dll:0x10028417`); `env_lightning` alone |
+| 0x8000 | 5 | skip the attach point's second test |
+| 0x10000 | 1 | *unknown* — no test found; `aim_tail_S` |
 
 **Effect time *t*** runs 0 to 1 (`0x10005c60`, 18 modes):
 
@@ -285,7 +320,7 @@ What 0x4 and 0x1000 do is *unknown*.
 | 1 | (now − start) / (end − start): once through |
 | 2 | its fractional part: looping |
 | 3 | 1 − mode 1 |
-| 4 | the owner's value at a control point (action 14), through the owner's interface `0xb`, slot 9 |
+| 4 | **the animation value of an owner's mesh node** (action 14), through the owner's interface `0xb`, slot 9 — [below](#time-mode-4-is-a-nodes-animation-value--read-and-measured) |
 | 5 | the owner's speed ÷ its top speed (properties `0x21` and `0x11`); 6–8 per axis |
 | 9–12 | the same for spin (property `0x24`) |
 | 13, 14 | 1 − an owner value (the attach point's; property `0x31`) |
@@ -316,20 +351,56 @@ action that calls each ([13-control.md](13-control.md#the-section-5-record--read
 
 **The manager ticks** on message 28 with the time in milliseconds
 (`0x10003d54`): an instance updates when 100 ms have passed since its last
-update, or within 50 ms of a command to it.
+update, or within 50 ms of a command to it. The emitters' own clock is
+**seconds since the instance started** (`0x1000846c`), which is what a phase
+"in seconds when negative" and a stream's interval count.
+
+### Time mode 4 is a node's animation value — *read*, and *measured*
+
+Action 14's v5 (`Control.dll:0x10003031`) is **a mesh node**, not a control
+point. The controller adds the index of its part's first node, less one
+(`AniMesh.dll` slot 14, `0x10005780`), and the manager keeps it for the
+instance (slot `0x34`). Time mode 4 then asks the owner's interface `0xb` — the
+`AniMesh` object itself — for slot 9 (`0x10005600`), which returns **that
+node's animation value**, record `+0x114`. The value is what a channel writes
+when it animates the node: the channel update (`Control.dll:0x10021c97`, and
+`0x10009a7b` at load) hands `AniMesh` slot 10 (`0x10005630`) the channel's
+value, wrapped or clamped and inverted by its flags, and the node plays frame
+`+0x100` lerped toward `+0x104` by it.
+
+*Measured* on the hero's turret, where all seven action-14 nodes are animated
+by a channel:
+
+| effect | node | animated by |
+|---|---|---|
+| `hero_cannon` | 13 `Gun02_m1o1` | channel 3, the cannon's barrel (gun component) |
+| `hero_prifle` | 9 `Plz02_m1o1` | channel 8, the plasma rifle's barrel |
+| `hero_redlaser` | 22 `Lz02_m1o1` | channel 22, the laser's barrel |
+| `hero_cannon_sfx` | 11 `RVin_m1o1` | channel 13, a class-24 arm |
+| `hero_prifle_sfx` | 7 `LVin_m1o1` | channel 16, an arm |
+| `hero_redlaser_sfx` | 19 `Lz00_m1o1` | channel 19, an arm |
+| `hero_missile_sfx` | 15 `Rk00_m1o1` | channel 23, an arm |
+
+So a gun's effect **runs with its barrel's stroke**: the stroke takes the
+channel 0 → 0.5 → 1 and snaps it back to 0
+([29-weapons.md](29-weapons.md#the-guns-takt-a-stroke-then-the-interval)), and
+`hero_cannon`'s flash, light and `H_fire_cannon.wav` (at 0.01) play across it
+with no start command. The `_sfx` effects are **not shot sounds**: they follow
+the arms, and `H_gh_cannon.wav` plays as the cannon's arm passes 0.15. Read as
+channel numbers instead, the seven name a channel on that node twice.
 
 ## Emitter types — *read*, and *measured*
 
 | type | class | window (block offsets) | what the code shows | what it is |
 |---:|---|---|---|---|
-| 1 | 0xf0, vtable `0x1001e78c` | +8..+12 | switches a handle from the owner's interface `0xe` on inside the window and off outside, then places it (`0x1000f6e0`) | a **light** — *guess*: +80..+88 is (0.5, 0.3, 0.01) on the cannon, (1, 0.2, 0.2) on the red laser, (0.2, 0.2, 1) on the plasma rifle; +112/+116 two light parameters (30, 3; the helm light 0.15, 0.35) |
+| 1 | 0xf0, vtable `0x1001e78c` | +8..+12 | creates a light in the owner's light manager, interface `0xe` (`0x1000f4b0`), switches it on inside the window and off outside, and hands it a position, direction, colour, range and attenuation every update (`0x1000f6e0`) | a **light** — [below](#type-1-is-a-light--read-and-measured) |
 | 2 | 0xa0, `0x1001f048` | trigger at +8 | plays once *t* crosses +8 (`0x10012f42`) | the **sound**; near/far at +64/+68 |
 | 3 | 0xfc, `0x1001e770` | +32..+36 | a phase *a* + (*b* − *a*)·*x*^*g* from +8/+12/+16, *x* the progress through the window or seconds when +8 < 0 (`0x100105f0`); the (low, high) triples +40/+52 and +100/+112 shaped by per-axis powers; a 0..1 value +20..+24 to the power +28 and the phase's fractional part go to the draw (`0x100106c0`) | a **sprite** that moves (+40/+52) and grows (+100/+112) over its window — muzzle flashes, glows, bullets |
 | 4 | 0x104, `0x1001e754` | +32..+36 | type 3's phase (`0x100108f0`) | a sprite variant |
-| 5 | 0x54, `0x1001e360` | +12..+16 | a phase from +40, seconds when negative (`0x10002a20`) | the **laser** bolt `hero_laser_bullet` — a beam is a *guess* |
+| 5 | 0x54, `0x1001e360` | +12..+16 | a phase from +40, seconds when negative (`0x10002a20`); a start point, and sprites along the line from it to where the effect is now (`0x10002be0`) | a **bolt**: laser and shock tails, `hero_laser_bullet` — [below](#bolts-streams-and-fades--read-and-measured) |
 | 6 | 0x1c, `0x1001e738` | — | — | never shipped |
-| 7 | 0x48, `0x1001e228` | +20..+24 | +0x24 × +0x28 particles with random start positions and velocities (`0x10001720`); each particle's age = (phase − its spawn) / +0x1c, one-shot flag, drag (`0x10001300`) | a **particle burst** — smoke, fire, splashes |
-| 8 | 0xac, `0x1001e71c` | +16..+20 | windowed on *t* unless +0x8c (`0x100115c0`) | a **particle stream** — dust, missile smoke |
+| 7 | 0x48, `0x1001e228` | +20..+24 | +0x24 × +0x28 particles with random start positions and velocities (`0x10001720`); each particle's age = (phase − its spawn) / +0x1c, one-shot flag, drag, and a fade value from +8/+12/+16 (`0x10001300`) | a **particle burst** — smoke, fire, splashes |
+| 8 | 0xac, `0x1001e71c` | +16..+20 | windowed on *t* unless +0x8c; one particle every +24..+28 seconds into a ring of +36 (`0x100115c0`) | a **particle stream** — dust, missile smoke |
 | 9 | 0x100, `0x1001e700` | +32..+36 | type 3 with its own draw | sprite |
 | 10 | 0x48, `0x1001e24c` | +20..+24 | type 7 with its own start | particles (`NE_Gibs_Stn` debris) |
 
@@ -337,8 +408,129 @@ update, or within 50 ms of a command to it.
 emitters; read four bytes early or late, 705.
 
 A type-7 block with +4 = 1 draws its particles in sprite mode 3, any other
-value in mode 0 (`0x100019d0`); that mode 0 faces the camera is a *guess*. Bit 8 of the type word goes to the
-sprite draw (`0x10009930`); what it switches there is *unknown*.
+value in mode 0 (`0x100019d0`); that mode 0 faces the camera is a *guess*.
+
+### Type 1 is a light — *read*, and *measured*
+
+Every agent builds a `CLightManager` (`Terrain.dll:0x1007fa40`) and files it in
+its interface table as **`0xe`**, beside its material manager as `0xd` and its
+effect manager as `0x13` (`AniMesh.dll:0x1000358f`); the effect manager binds
+`0xe` at message 4. A type-1 emitter asks that manager for a light record
+(slot 12) and then drives it. The record is **Direct3D's `D3DLIGHT2` layout** —
+type at +4, colour at +8, position +0x18, direction +0x24, range +0x30,
+attenuation +0x38..+0x40, theta and phi +0x44/+0x48, the active bit in +0x4c —
+followed by the manager's flags and 1 / range (slots 3, 4, 5, 6, 8, 9, 13;
+*derived* from the offsets each slot writes).
+
+Each quantity in the block is a **(start, end) pair lerped by the progress
+through the window** (`0x1000f6e0`):
+
+| block | field | measured over the 618 |
+|---|---|---|
+| +4 | kind: 1 point, flags `0x80000000`; 2 and 5 point; 3 directional; 4 parallel point; 6 point, `0xa0000000`; 7 point, `0x20000000` (`0x1000f649`) | 5 on 416, 6 on 175, 7 on 14, 1 on 12, 2 on 1 |
+| +16 → +28 | position, in the effect's frame, then the owner's | (0, 0, 0) on 427 |
+| +40 → +52 | direction | `(1, 0, 0)` at +52 on 542 |
+| +64 → +80 | colour, RGBA | overbright starts: (3, 2, 0) on 140, (2, 1, 0) on 110 |
+| +96 | colour jitter, ± half of each | 0 on 511 |
+| +112 → +116 | range, clamped to at least 0.01, × a factor taken from the instance's frame (its scale is a *guess*) | 30 → 3 on the hero's cannon |
+| +120 | range jitter (the read map missed it) | 0 on 560 |
+| +124..+132 | the three attenuation terms, handed on unchanged | (0, 1, 0) on 447, (0, 1, 1) on 170, (0, 0, 1) on 1 — never a constant term |
+
+The manager skips a light flagged `0x80000000` unless the object being lit is
+the light's owner (`Terrain.dll:0x10047a52`), and `EmulatePointLights` leaves
+out one flagged `0x20000000` (`0x1002a200`). How the shade turns range and
+attenuation into light on a surface is not read here; that it is Direct3D's
+fixed-function falloff is a *guess* from the layout.
+
+### Bolts, streams and fades — *read*, and *measured*
+
+**A type-5 bolt's length is not in its block.** The update keeps a **start
+point** — the effect's position on its first tick, or the manager's target
+point, which header flag 0x1000 hands every emitter each tick — and the
+effect's current position (`0x10002a20`). The draw measures the distance
+between the two and lays **floor(length / +36) sprites** along it, at least
+one and at most +20 (`0x10002c53`); +4 → +8 is the fade value across the
+window. *Measured* on all 31 bolts: +20 is 20, +36 is 50, 150, 200 or 250, +40
+is −1 (a phase in seconds) and +4 → +8 is 1 → 0. Who sets the manager's target
+point (slot `0x44`, `0x10004c50`) is not traced; the 14 effects that use it are
+laser, shock and builder tails.
+
+**A type-8 stream emits by interval.** While (last emission + lerp(+24, +28,
+window progress)) is before now, it emits one more particle, spaced along the
+path the effect moved, into a ring of +36 (`0x10011a6c`, `0x10011230`).
+A stream particle's age runs 0 to 1 over the ring, so **it lives +36
+intervals** (`0x1001209e`). *Measured* on the 237 streams: intervals from 0.005
+to 0.2 seconds — (0.08, 0.08) on 80, (0.05, 0.01) on 48 — rings of 6 to 40,
+and lives of 0.05 to 4.5 s; the hero cannon's smoke puffs every 0.05 s falling
+to 0.02, ten at a time, so each lives 0.5 s falling to 0.2.
+
+**A fade value.** A burst particle hands the renderer
+**+8 + (+12 − +8) × age^+16** (`0x100013c2`), a stream particle
++4 + (+8 − +4) × age^+12 (`0x10012322`), a sprite +20 + (+24 − +20) ×
+progress^+28 (`0x10010881`). The renderer draws nothing at 0
+(`Terrain.dll:0x1002887e`). *Measured*: 1197 of the 1321 burst blocks fall
+from start to end, 118 hold and 6 rise; 233 of the 237 streams fall and 4
+hold. Whether the value scales alpha or colour depends on the material's blend
+and is not read.
+
+## Which effects run: the settings switch — *read*, and *measured*
+
+Header +0x14 is a **settings id**. `Effect.dll` registers a settings page with
+the game's settings (`InitializeSettings`, `0x10014090`, id `0x14`) whose
+switches are named by the DLL's own string table under the very same ids
+(`0x1000e9c0`); an instance whose switch is off neither updates nor draws
+(`0x1000ec40` returns table[id & 0xff], `0x10007d59`, `0x1000825e`). The high
+byte is the group the switch is listed under:
+
+| group | switches |
+|---|---|
+| 0 | `0x000` Dust, `0x001` Smoke, `0x002` Engine fire, `0x003` Explode, `0x004` Shield, `0x005` Lights |
+| 1 | `0x106` Dust, `0x107` Smoke, `0x108` Explode, `0x109` Shield, `0x10a` Lights, `0x10f` Lights |
+| 2 | `0x20b` Smoke, `0x20c` Engine fire, `0x20d` Explode, `0x20e` Gun fire |
+| 3 | `0x310` Smoke, `0x311` Explode, `0x312` Gun fire, `0x313` Lights |
+
+Each group also carries a "LOD distribution" and a "High quality LOD" name
+(`0x?f0`, `0x?f1`) and a float the particle emitters scale by a random number
+(`0x1000ec50`). What the four groups stand for is *unknown*.
+
+**The presets.** The page's slot 8 (`0x1000e7c0`) sets all twenty at once:
+presets 1 and 2 turn every switch on; preset 3 turns off the dust and smoke of
+group 0, the dust, smoke and lights of group 1, the smoke and engine fire of
+group 2 and the smoke of group 3. `iron3d.dll` reads `Iron_3D.ini`'s
+`RENDER_QUALITY` and asks every page for preset 3, 2 or 1 for the values 0, 1
+and 2 (`0x100616f0`, through `World3D.dll:0x1000a600`); the page itself starts
+on preset 1.
+
+*Measured*: **every one of the 923 effects names one of the twenty** — 18 of
+them in use, `0x311` "Explode" on 237 and `0x5` "Lights" on 120 — and the
+install's `RENDER_QUALITY=2` leaves them all on. The hero's guns are `0x312`
+"Gun fire". `hero_helm_light` is `0x107` "Smoke", so a switch's name is the
+artists' filing rather than a rule.
+
+## Bit 8 and the tested point — *read*, and *measured*
+
+When the factory builds an instance it marks it for a **visibility test** if
+any emitter has bit 8 or the header has flag 0x400 (`0x10007984`). At
+intervals (`0x10007fa1`) the instance's draw carries header +0x24 into the
+world through its frame and casts a ray to it from the camera through the
+world (`0x10007eb5`, `0x10007f7f`): no hit, and the point is **in view**.
+
+- **Flag 0x400** draws nothing while the point is hidden (`0x10008016`).
+- **Bit 8**: while the point is in view the emitter's sprites are drawn with
+  effect draw flag 1 (`0x10009930`), which makes the renderer turn
+  **`ZENABLE` off** for them (`Terrain.dll:0x100282c6`, set at
+  `0x1003e54c`) — a glow seen through what stands in front of its sprites
+  once its centre is visible. Hidden, the sprites are depth-tested like any
+  other. Every sprite that goes through that draw carries flag 2 as well,
+  **`ZWRITEENABLE` off**.
+
+*Measured*: bit 8 is on 1811 emitters, all of them drawn — 1088 of type 3, 660
+of 7, 39 of 9, 20 of 8, 4 of 4 — and never on a light, a sound, a bolt or type
+10. Header +0x24 lies on +x on all 923: (0, 0, 0) on 462, **(1, 0, 0) on 368**
+and (0.5, 0, 0) on 93, and 359 of the 467 effects with a flagged emitter lift
+it off their origin. An impact is aimed along the struck face's vector
+(placement 7, below); if that vector becomes the effect's x axis, (1, 0, 0)
+keeps the test point clear of the face the effect sits on — a *guess*.
 
 ## What an explosion plays — *read*, and *measured*
 
@@ -359,6 +551,27 @@ A node's damage stage plays its `.exp` (`Control.dll:0x10011220`):
    — that this is the impact normal is a *guess*.
 4. **How big.** Scale = the `.exp` radius on a round (agent kind 9), the radius
    × the node's bounding radius on anything else (`Control.dll:0x10011749`).
+
+**A unit answers for its material** (*read*). A round's contact record keeps
+the object, node, batch and triangle it struck; a contact with an object id
+and no −1 among them goes to `CWorld::GetWorldFace` (`Control.dll:0x1001147e`,
+`Terrain.dll:0x10024d70`). That asks the struck object for its geometry,
+interface `0x18` — on a unit its `AniMesh` (`AniMesh.dll:0x10006e50`) — whose
+slot 3 gives the triangle's record, with the **material id** at `+0x34`: the
+node's wear base ORed with the struck batch's material byte
+(`AniMesh.dll:0x100135c8`). The damage stage then asks the object for interface
+`0xd`, and **a unit has one**: its loader keeps the material manager it loads
+for its own model at `+0x14c` and files it in its interface table under `0xd`
+(`AniMesh.dll:0x100032a4`, `0x1000358f`), which both its `QueryInterface`s
+serve (`0x10001320` when the agent has no outer object; `0x100012d0` always).
+Units have no outer object — `World3D.dll`'s loader passes 0
+(`0x10007bc8`); only a `CBuilding` aggregates its agent. So a hit on a unit
+plays the slot of the **struck batch's material class**.
+
+*Measured*: the 1150 wear materials of the 63 `BTLU` units are class 5 on 992,
+unset on 92 (slot 0), 6 on 30, 8 on 25, 9 on 8, 10 on 2 and 1 on 1; the Mission
+01 dummies `r_h_01`, `r_h_03` and the hero's `r_h_02` are class 5 throughout,
+so a hit on them plays the **`mt`** effect (slot 6).
 
 *Measured*, which surface each slot is — the material classes carry the tags'
 names:
@@ -384,17 +597,22 @@ Read one slot either way, none of the seven name witnesses agrees.
 - **The hero's turret** (`o_tur_ht_02`) binds nine effects at load on
   control-point triples: `hero_cannon` (11, 12, 13), `hero_prifle` (15, 16, 17),
   `hero_redlaser` (4, 5, 6), `hero_helm_light`, `hero_breath` and four `_sfx`
-  sounds; action 14 drives the three guns' effects from points 13, 9 and 22.
-  The gun effects are time mode 4 — they play as that point's value runs from 0
-  to 1 — which point value that is belongs to the firing chain.
+  sounds; action 14 times the three guns' effects from their barrel nodes 13,
+  9 and 22 and the sounds from the arm nodes 11, 7, 19 and 15. All seven are
+  time mode 4, so they play as those nodes' channels run: the guns' effects
+  through each barrel stroke, the `_sfx` as the arms unfold
+  ([above](#time-mode-4-is-a-nodes-animation-value--read-and-measured)).
 - **The rounds** carry their flight effects: `hero_cannon_bullet`
-  (a sprite and two glows), `hero_laser_bullet` (two type-5 bolts),
-  `hero_prifle_bulletA/B`, and the missile's engine, smoke and launch.
+  (a sprite and two glows), `hero_laser_bullet` (two type-5 bolts from the
+  manager's target point to the round), `hero_prifle_bulletA/B`, and the
+  missile's engine, smoke and launch.
 - **A hit.** Each round's node explodes through its `.ndp` `.exp`: `bb_h_01`,
   `bl_h_01`, `bp_h_01` kind 2 and `bm_h_01` kind 3, all with placement 7 and
   eleven surface slots (`exp_H??_bul`, `_las`, `_pls`, `_mis`). The dummies'
-  and hero's skins are all class 5, so a hit on them is the `mt` effect if the
-  unit answers for its material — *unknown*, see below.
+  and hero's skins are all class 5, and a unit answers for its material, so a
+  hit on them is the **`mt`** effect.
+- **Every switch is on**: the hero's guns are `0x312` "Gun fire", and the
+  install's `RENDER_QUALITY=2` picks preset 1.
 - **Range end** plays `bb_h_01_end`, `bl_h_01_end`, `pls_h_end` or the missile's
   own blast `exp_m_mis` in the air (slot 0).
 - **The dummies** explode with `explode_aim_S` (`r_h_01`, radius 5.5) and
@@ -403,17 +621,25 @@ Read one slot either way, none of the seven name witnesses agrees.
 
 ## Not resolved
 
-- **Most of each emitter's floats.** The window, the phase and the sprite's
-  moving and growing triples are read; a particle's colour and alpha over its
-  life, the emission rate of type 8 and a type-5 bolt's length are not named.
-- **What type 1 drives.** It switches something from the owner's interface
-  `0xe` on and off; that it is a light rests on the colours.
-- **What bit 8 does** in the sprite draw, and header flags 4 and 0x1000.
-- **Whether a unit answers for its material** when a round strikes it, so
-  whether a hit on a robot plays the `mt` slot or slot 0: the terrain answers
-  (`Terrain.dll:0x1001a25a`), an agent's interface `0xd` was not read.
-- **What the owner's value at a control point is** (time mode 4) — the gun's
-  firing channel is a *guess* for R6.
+- **The rest of each emitter's floats.** The window, the phase, the sprite's
+  moving and growing triples, the light, the bolt's segments, the stream's
+  interval and lifetime, and the fade values are read. Still unnamed: what the
+  fade value scales (alpha or colour; it goes to the shade as `+0x20` of the
+  material state), what the (low, high) triples a particle's per-axis
+  exponents shape are — position and size is a *guess* (types 7 and 10: +80
+  and +128; type 8: +124 and +172, `0x10012030`) — and a bolt's widths +24/+28
+  (a width at each end is a *guess*).
+- **How the shade lights with a type-1 light** — the falloff over range and
+  attenuation (`EmulatePointLights`, `Terrain.dll:0x1002a130`, and the Direct3D
+  path), and what the manager flags `0x80000000` and `0x20000000` mean beyond
+  the two tests found.
+- **Who passes the draw's pass argument** that flag 0x800 waits for (manager
+  slot 3, `0x10004050`; the landscape's call at `Terrain.dll:0x1001f178` pushes
+  one argument fewer than the slot takes), **who sets the manager's target
+  point** (slot `0x44`) that bolts start from, what draw flag 4 (header
+  0x2000) changes in the texture choice, and header flag 0x10000.
+- **What the four settings groups are**, and the group floats `+0x1084` and
+  `+0x1294` and the page's `+0x14a4` that the presets set.
 - Snow and rain are **not** here. There is no FXID whose name mentions either,
   and `sky.wea`'s slots name the materials `SNOWFLAKE` and `RAIN_DROP`
   directly — see [10-sky.md](10-sky.md).

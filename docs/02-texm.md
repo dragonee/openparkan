@@ -159,8 +159,7 @@ copies the 32-byte header whole, so the word it tests is header `+0x14`
 
 Everything else — `565`, `888` and the palettised textures — goes to an
 opaque surface. There is one override: a caller's load flag `0x80000` sends
-even an alpha format to an opaque surface. Which callers pass it is not
-traced.
+even an alpha format to an opaque surface (`0x1000fe18`) — see [below](#who-loads-a-texture-opaque--read-and-measured).
 
 **A palette gets alpha only on an alpha surface** (`0x1000f620`):
 
@@ -179,5 +178,58 @@ Neither case is reached on shipped data (*measured*):
 No module ever sets `D3DRENDERSTATE_COLORKEYENABLE` either: a sweep of
 `Terrain.dll`, `World3D.dll`, `AniMesh.dll`, `Effect.dll`, `Ngi32.dll` and
 `iron3d.dll` finds no push of state 41. The same sweep does find every fog
-state site. What bit `0x4000000` does — set on 81 `8888` building textures
-(`PG*`, `GEN_*`) — is *unknown*; the loader does not test it.
+state site.
+
+### Who loads a texture opaque — *read*, and *measured*
+
+A texture is created through the 3D render interface's slot 14
+(`Ngi32.dll:0x10007e10`), which keeps the caller's **load flags** ORed with the
+resource index in the texture object's `+0x14` (`0x1000f3d0`); the upload masks
+out the flags with `0x7ff80000`. It is a different word from the header's
+`+0x14`.
+
+**`World3D.dll`'s material loader is the caller that sets `0x80000`**
+(`0x10004310`). It branches on the material's archive directory flags
+([07-objects.md](07-objects.md#how-a-material-draws-is-in-the-archive-directory)):
+
+- **bit 1 — the lit skins, flags 2 — gets `0x80000`** (`0x10004441`) unless
+  both of two things hold: the render setting 109 is on (`0x1000aa04`, global
+  `0x100234e8`) and the device reports capability 6 (render slot 31,
+  `0x100140ad`);
+- bit 0 (`ENV_STARS` alone) gets `0x200000`, whose effect is not read.
+
+It then asks for the texture by name with those flags, the texture-format
+setting and `0x400000` (`0x10004b10`, the call at `0x10004c88`).
+
+**Setting 109 is `EMBOSS_BUMP`.** `iron3d.dll` reads `Iron_3D.ini`'s
+`EMBOSS_BUMP` and hands it to the settings page `World3D.dll` registers as
+`0xa` (`iron3d.dll:0x100613fd`, `0x1006176f`; `World3D.dll:0x10014cca`). This
+install's `Iron_3D.ini` has `EMBOSS_BUMP=0`, so **every lit skin uploads
+opaque**, whatever its format: the continuous greyscale in their alpha
+channels, [above](#most-of-that-alpha-is-not-transparency), is not there to
+draw with unless emboss bump mapping is on. That it is the emboss bump map
+(`CShade::EmbossBumpMap`, `Terrain.dll:0x1002ce40`) is a *guess* from the
+setting's name; that shade function is not read.
+
+*Measured* over `Material.lib` and `Textures.lib`:
+
+- **171 of the 279** `4444` and `8888` textures are named by a lit skin, and so
+  load opaque;
+- of the **23** cut-outs, three — `AIM_02`, `PI_CSPG3`, `S7` — are lit skins'
+  and draw solid; the trees (`FTREE1`, `HTREE1`, `NTREE1`) are flags 4 and keep
+  their alpha;
+- **78 of the 81** textures with header bit `0x4000000` are lit skins'; the
+  other three (`S14N1..3`) are named by no material.
+
+**Header bit `0x4000000` is read by nothing.** A sweep of `Ngi32.dll`,
+`Terrain.dll`, `World3D.dll`, `AniMesh.dll`, `Effect.dll` and `iron3d.dll` for
+a test or mask of `0x4000000`, for a shift by 26 and for a byte test of the
+header copy finds no read of the header word. The control: the same sweep finds
+the loader's own tests of the header's `0x1000000` and `0x2000000`
+(`0x1000fe39`, `0x1000fe23`, and the palette's `0x1000f64d`). Its hits for
+`0x4000000` are the load flag passed to `rsLoadFast` (`0x1000fbcb`), a device
+capability word (`0x1000649f`), a light's flags (`Terrain.dll:0x10047a74`) and
+the C runtime's file-mode parsing. Nor does it separate the lit skins: the 81
+and the 92 other lit-skin 8888 textures are alike in format, mip flags and
+alpha statistics. So the bit is *unknown* and, as far as the engine goes,
+dead.

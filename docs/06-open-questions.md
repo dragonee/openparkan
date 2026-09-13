@@ -148,6 +148,13 @@ outer ring is a clearance drawn around the building. See
   header asks for alpha, and no shipped header does. On an alpha surface it
   would clear index 0, which no palettised image draws. No module sets
   `COLORKEYENABLE`. See [02-texm.md](02-texm.md#what-the-loader-does-with-alpha--read-and-measured).
+- ~~Who loads a texture opaque~~ — answered: `World3D.dll`'s material loader,
+  for every lit skin (directory flags bit 1) unless `EMBOSS_BUMP` is on, so
+  171 of the 279 alpha-format textures upload without alpha on this install.
+  See [02-texm.md](02-texm.md#who-loads-a-texture-opaque--read-and-measured).
+- **Header `+0x14` bit `0x4000000`** on 81 textures: no module reads it (a
+  sweep with a positive control); its meaning is *unknown* and the engine can
+  ignore it.
 
 ## Not looked at at all
 
@@ -163,8 +170,9 @@ streams inside them are not. The engine's own `.ini` files are now
 [read](22-settings.md) — the component registry, the two debug files, the
 display settings and the mission-progress dispatcher, each matched to the
 module that reads it; the input tables beside them are [read](14-controls.md). `*.ctl` and `*.ndp` are identified above; `*.exp` and
-`effects.rlb` are [read](11-effects.md), though what the floats inside an
-emitter mean is not.
+`effects.rlb` are [read](11-effects.md), header and flags included, and so are
+the light, bolt, stream and fade fields of the emitters; the rest of an
+emitter's floats are not.
 
 `sky.ske` is [solved](10-sky.md) -- day cycles of colour keyframes read the
 way `Terrain.dll` reads them, all 29 files to the byte: each keyframe carries

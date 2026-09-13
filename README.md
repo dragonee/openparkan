@@ -24,7 +24,7 @@ practice — format facts yes, code no — is set out in
 | **Assembled units and buildings** | done — the `.dat` component tree, and each part mounted at its socket's full pose |
 | **Damage tables** | done — `.ndp`, 542 tables, one record per node, 2203 explosions named |
 | **Building footprints** | done — `.bas`, 30 ground plans; the one independent check on object placement |
-| **Effects** | done — `effects.rlb`, 923 effects and 4737 emitters; 144 `.exp` explosions; and which 180 of a block's floats the engine actually reads; how an effect is timed, switched and chosen by surface |
+| **Effects** | done — `effects.rlb`, 923 effects and 4737 emitters; 144 `.exp` explosions; and at least 181 of a block's floats the engine reads; how an effect is timed, switched and chosen by surface; lights, bolts, streams, the settings switches and the depth-test flag |
 | **Materials** | done — `Material.lib`, all 905 records end to end: a `D3DMATERIAL7` per entry, the animation tracks over them, and every batch reaching a texture |
 | **Baked lighting** | done — `lightmap.lib`, 21 buildings, per-batch |
 | **Building interiors** | done — the internal nodes are 29460 triangles behind 10725 of shell, and the viewer cuts buildings open; path graph for 29 |

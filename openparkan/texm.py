@@ -56,10 +56,25 @@ FMT_ARGB8888 = 8888
 
 #: Header +0x14 bits that give a texture an alpha surface, and the second a
 #: 32-step fade on its palette (``Ngi32.dll:0x1000fdf6``, ``0x1000f620``).  No
-#: shipped texture sets either; ``0x4000000``, on 81 ARGB8888 textures, the
-#: loader does not test.
+#: shipped texture sets either.
 ALPHA_SURFACE = 0x01000000
 FADE_PALETTE = 0x02000000
+#: On 81 ARGB8888 textures, 78 of them skins of lit materials.  No module
+#: tests it: a sweep of the six render modules for the constant finds the
+#: loader's two alpha bits and nothing for this one.
+HEADER_BIT_26 = 0x04000000
+
+#: The caller's load flag that sends even a 4444 or 8888 texture to an opaque
+#: surface (``Ngi32.dll:0x1000fe18``).  ``World3D.dll``'s material loader sets
+#: it on the texture of every material whose directory flags carry bit 1 -- the
+#: lit skins -- unless ``Iron_3D.ini``'s ``EMBOSS_BUMP`` is on and the device
+#: reports capability 6 (``World3D.dll:0x10004441``).
+LOAD_OPAQUE = 0x00080000
+#: Set by the same loader for a material whose directory flags carry bit 0
+#: (``ENV_STARS`` alone); what it does is not read.
+LOAD_BIT0_MATERIAL = 0x00200000
+#: The directory flag bit the opaque load keys on.
+MATERIAL_LIT_BIT = 0x2
 
 _BYTES_PER_PIXEL = {
     FMT_PALETTE8: 1,
@@ -135,13 +150,30 @@ def parse_pages(data: bytes) -> list[tuple[int, int, int, int]]:
     return out
 
 
-def uploads_with_alpha(fmt: int, flags14: int = 0) -> bool:
+def uploads_with_alpha(fmt: int, flags14: int = 0, load_flags: int = 0) -> bool:
     """Whether the engine gives a texture an alpha surface.
 
-    Only 4444, 8888 and the two header bits do.  A palettised texture goes to
-    an opaque surface, so no index is ever a colour key on shipped data.
+    Only 4444, 8888 and the two header bits do, and not when the caller loads
+    it with ``LOAD_OPAQUE``.  A palettised texture goes to an opaque surface, so
+    no index is ever a colour key on shipped data.
     """
+    if load_flags & LOAD_OPAQUE:
+        return False
     return fmt in (FMT_ARGB4444, FMT_ARGB8888) or bool(flags14 & (ALPHA_SURFACE | FADE_PALETTE))
+
+
+def material_load_flags(directory_flags: int, emboss_bump: bool = False) -> int:
+    """The load flags ``World3D.dll`` gives a material's texture.
+
+    A lit skin -- directory flags bit 1, 417 of the 905 materials -- has its
+    texture loaded opaque unless emboss bump mapping is on (``Iron_3D.ini``'s
+    ``EMBOSS_BUMP`` and the device's capability 6), so its alpha channel, a
+    continuous greyscale map on most of them, is not there to draw with.
+    """
+    flags = LOAD_BIT0_MATERIAL if directory_flags & 1 else 0
+    if directory_flags & MATERIAL_LIT_BIT and not emboss_bump:
+        flags |= LOAD_OPAQUE
+    return flags
 
 
 def parse_header(data: bytes) -> tuple:
