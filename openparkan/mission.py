@@ -124,13 +124,26 @@ class _Reader:
         return self.pos >= len(self.data)
 
 
+#: An int property's maximum when it has none -- ``ClanID`` uses it.
+NO_MAXIMUM = -1
+
+
 @dataclass
 class Property:
     """One entry of an object's property table.
 
-    The three values are stored as a triple in the file.  Their roles are not
-    firmly established; ``value`` is the first and is the one that varies
-    per-instance, so it is the one to read.
+    A value and its bounds: ``b`` is the **minimum** and ``c`` the
+    **maximum**.  Every instance of fourteen of the fifteen shipped property
+    names keeps its value inside them, and the bounds read as what they are --
+    ``0..1`` for a fraction, ``0..INT_MAX`` for a count, ``2..1000`` for a
+    time.  Three conventions sit on top:
+
+    * ``c == -1`` on an int means no maximum (``ClanID``);
+    * ``b == c == value`` locks the value (``LogicalID``, ``Type``,
+      ``ChargeRadius``);
+    * ``CurrentOre``'s maximum is the same object's ``MaximumOre`` value, on
+      all 463, and its minimum was never initialised -- denormal floats such
+      as 6.45e-39 where it is not zero.
     """
 
     name: str
@@ -142,6 +155,20 @@ class Property:
     @property
     def is_float(self) -> bool:
         return self.type == TYPE_FLOAT
+
+    @property
+    def minimum(self) -> float | int:
+        return self.b
+
+    @property
+    def maximum(self) -> float | int | None:
+        """The upper bound, or None where an int property says it has none."""
+        return None if (not self.is_float and self.c == NO_MAXIMUM) else self.c
+
+    @property
+    def locked(self) -> bool:
+        """Bounds collapsed onto the value: not something to edit."""
+        return self.b == self.c == self.value
 
 
 @dataclass

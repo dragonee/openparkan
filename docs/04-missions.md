@@ -125,9 +125,26 @@ are the only witness.
 ```
 uint32   type        0 float32, 1 int32
 uint32   value       the per-instance value
-uint32   two further words, roles not established
+uint32   minimum
+uint32   maximum     -1 on an int means none
 string   name
 ```
+
+The two words after the value are **its bounds**. Across every property
+instance in the shipped missions but one family, the value sits between them,
+and the bounds say what the property is: `0..1` for `Invulnerability`,
+`Life state` and `MaxSpeedPercent`, `0..INT_MAX` for `FreeBotNum` and
+`FreeTechnoNum`, `2..1000` for the construction and research times, `0..1e6`
+for `MaximumOre`. Three conventions ride on it. `ClanID`'s maximum is `-1`,
+meaning none. `LogicalID`, `Type` and `ChargeRadius` set both bounds to the
+value itself, which locks it. And `CurrentOre`'s maximum is **the same object's `MaximumOre`** on
+all 463 — the one bound that moves with the object — while its minimum was
+never initialised: denormal floats like `6.45e-39` wherever it is not zero,
+which is why it alone looked like it broke the rule.
+
+An earlier note said both words were constant per property name. They are not
+on four: `LogicalID` and `Type` are locked to each instance's own value, `CurrentOre`'s tracks
+`MaximumOre`, and `NOT USED` has two pairs.
 
 Each object carries its own property *names*, so the gameplay data model comes
 straight out of the mission file: `Invulnerability`, `Life state`, `LogicalID`,

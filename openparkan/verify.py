@@ -1209,6 +1209,30 @@ def check_missions(check, game: Path) -> None:
     if not parsed:
         return
 
+    # A property's two further words are its minimum and maximum.
+    inside = locked = unbounded = ore = ore_total = 0
+    instances = 0
+    for m in parsed:
+        for o in m.objects:
+            for prop in o.properties.values():
+                if prop.name == "CurrentOre":
+                    top = o.properties.get("MaximumOre")
+                    ore_total += 1
+                    ore += top is not None and prop.c == top.value
+                    continue
+                instances += 1
+                hi = prop.maximum
+                inside += prop.minimum <= prop.value and (hi is None or prop.value <= hi)
+                locked += prop.locked
+                unbounded += hi is None
+    check("data.tma: a property's two further words are its bounds",
+          inside == instances and ore == ore_total > 0,
+          f"{inside}/{instances} property instances keep their value between "
+          f"the two -- {unbounded} of them an int whose maximum -1 means none, "
+          f"{locked} locked with both bounds on the value.  CurrentOre is the "
+          f"one exception, and not an exception: its maximum is the same "
+          f"object's MaximumOre on {ore}/{ore_total}")
+
     # The word after a clan's behaviour-tree path.  Not solved; what is checked
     # here is only what it is *not*, and where its values fall.
     clans = [c for m in parsed for c in m.clans]

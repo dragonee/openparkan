@@ -7,9 +7,10 @@ Things observed but not resolved. Roughly in the order they block progress.
 The format is parsed end to end (see [04-missions.md](04-missions.md)), but a
 few fields are carried through without being understood:
 
-- A property stores three words after its type tag. The first is the value;
-  the other two are constant per property name across every mission, so they
-  read as bounds or defaults, but nothing confirms which is which.
+- ~~A property's two words after its value~~ — **answered: minimum and
+  maximum.** Every instance keeps its value between them; `-1` on an int is
+  no maximum, equal bounds lock the value, and `CurrentOre`'s maximum is its
+  object's `MaximumOre`. See [04-missions.md](04-missions.md).
 - The four words after an object's instance name (`0, -1, -1, 1` throughout).
 - The word before the object count, always 10.
 - The word after a clan's behaviour-tree path: 2..17, 5 on 53 of 101 clans,
