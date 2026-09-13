@@ -295,7 +295,9 @@ those in full:
 | 19 | 58 | `ClanBaseX`, `ClanBaseY`, `ClanID` | place the clan's base |
 
 Function 19 appears in `Init` and nowhere else, which is where placing a base
-belongs. These readings are **guesses from the argument vocabulary** and the
+belongs. What each `ORDER_*` a script gives does is in
+[31-packages.md](31-packages.md); `ORDER_ROBOT_CAPTURE` is the search task
+restricted to buildings, not a task of its own. These readings are **guesses from the argument vocabulary** and the
 reader names none of them: it exposes `Node.function` as a number.
 
 ## Reading a script

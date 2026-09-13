@@ -56,9 +56,11 @@ Against what the game looked like: docks in factories, a repair depot, power
 stations, bunkers and towers, small ones indoors and large ones outside. The
 data agrees on all but two points. Only one generator model ships
 (`fr_l_gener`; the `L Power Maste` has no hall way at all). And no building is
-named a repair depot: the hangar is the one building left with a ground-level
-dock, so that it is the depot is a *guess* by elimination. Every dock repairs,
-not only the hangar's.
+named a repair depot in the data: the hangar is the one building left with a
+ground-level dock, and the command menu names its build and upgrade entries
+**Outpost** — *posterunek* in Polish — pushing `BUILDING_HANGAR`
+(`iron3d.dll:0x1007baf7`, [31-packages.md](31-packages.md)). Every dock
+repairs, not only the hangar's.
 
 ## What a dock gives — *read*
 

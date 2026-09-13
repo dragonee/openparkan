@@ -3023,7 +3023,7 @@ read = true
 module = "Behavior.dll"
 at = "0x10030110"
 kind = "function"
-name = "Go/Capture task SetTarget: foreign building, size <= 2, not a main teleport"
+name = "search task SetTarget (SEARCH and CAPTURE): foreign building, size <= 2, not a main teleport"
 doc = "docs/27-ownership.md"
 read = true
 
@@ -3039,7 +3039,7 @@ read = true
 module = "Behavior.dll"
 at = "0x10030300"
 kind = "function"
-name = "Go/Capture task takt: 'Building [..] captured' once it is ours"
+name = "search task takt (SEARCH and CAPTURE): 'Building [..] captured' once it is ours"
 doc = "docs/27-ownership.md"
 read = true
 
@@ -3963,4 +3963,302 @@ at = "0x10054f5f"
 kind = "site"
 name = "unit writer: the 0xf0f1 magic"
 doc = "docs/30-turrets.md"
+read = true
+
+# --- packages: menus, orders, tasks, profiles, ../docs/31-packages.md ---
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1007aaa0"
+kind = "function"
+name = "order menu for the selection: a row shows when its robot-type mask holds each unit's type"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1007bbb0"
+kind = "function"
+name = "order menu row availability: build and upgrade rows by research and existing buildings"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1007b740"
+kind = "function"
+name = "executes an order-menu command id: a dispatch code, a target pick mode, or an upgrade by building type"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10079230"
+kind = "function"
+name = "issues an order to each selected unit by dispatch code: 1 STAYGROUND, 2 GO place, 3 SEARCH buildings, 4 SEARCH enemies, 6 SEARCH a building, 8 RELOAD, 10 FOLLOW 50, 20 TRANSPORT, 30 SEARCH minerals"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10078ce0"
+kind = "function"
+name = "Attack package: ORDER_ROBOT_ATTACK by logic id"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10078df0"
+kind = "function"
+name = "Guard package: ORDER_ROBOT_PATROL on a unit or building by logic id, or on a place"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10078f60"
+kind = "function"
+name = "Upgrade package: ORDER_ROBOT_UPGRADE by logic id"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x100596ac"
+kind = "datum"
+name = "Task_Stop vtable (order 1)"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10059e74"
+kind = "datum"
+name = "go task vtable (order 2, and order 3 on a place): slot 3 0x1002b3c0, 6 0x1002b540, 7 0x1002b670"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10059d78"
+kind = "datum"
+name = "M_Task_Attack vtable (order 3): 3 SetTarget, 6 StartTask, 7 takt, 15 manoeuvre"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10059d38"
+kind = "datum"
+name = "patrol task vtable (order 4): place, building or unit"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10059cf8"
+kind = "datum"
+name = "search task vtable (orders 5 and 17): enemies, minerals, or buildings to capture"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10059ca8"
+kind = "datum"
+name = "transport task vtable (order 6)"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10059c60"
+kind = "datum"
+name = "build task vtable (order 7)"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10059b60"
+kind = "datum"
+name = "M_Task_Mine vtable (order 10)"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10059ba0"
+kind = "datum"
+name = "random-go task vtable (order 13)"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10059f58"
+kind = "datum"
+name = "M_Task_Research vtable (orders 14 and 16)"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10059aac"
+kind = "datum"
+name = "animal migrate task vtable (order 15, an animal's default order)"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10059ae8"
+kind = "datum"
+name = "order-18 task vtable, ShowUpgrade logs"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10059eec"
+kind = "datum"
+name = "shutdown task vtable (order 19)"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10059e38"
+kind = "datum"
+name = "leave task vtable (order 20): a place 150 m, then 300 m, away"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10059eb0"
+kind = "datum"
+name = "stay-ground task vtable (order 21, the Standby package)"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10059dfc"
+kind = "datum"
+name = "follow task vtable (order 22)"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10059dc0"
+kind = "datum"
+name = "get-on-board task vtable (order 23)"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10059c20"
+kind = "datum"
+name = "upgrade task vtable (order 24)"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1002d520"
+kind = "function"
+name = "patrol SetTarget: place, building or unit, with its radius"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1002d900"
+kind = "function"
+name = "patrol takt: new trajectory point on each mode's timer, DeterminMode 0 only"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1002dd90"
+kind = "function"
+name = "patrol: picks the next trajectory point"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10026fd0"
+kind = "function"
+name = "M_Task_Attack::StartTask: no weapon cancels; no target takes the nearest"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1002b670"
+kind = "function"
+name = "go takt: 'We are staying... task over', unreachable target fails"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1002ad80"
+kind = "function"
+name = "follow SetTarget: FollowRadius from the order parameter"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10031c80"
+kind = "function"
+name = "stay-ground interrupt priority: 0 for every reason"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1002b390"
+kind = "function"
+name = "go interrupt priority: reasons 0-2 and 5 give 0, 3 and 4 the default"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x100018a0"
+kind = "function"
+name = "default interrupt priority by reason: 0-2 scored, 3 (refit) only with a reachable dock"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10001010"
+kind = "function"
+name = "default contact score: 0 beyond 500, else by the contact's figures"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x100179c0"
+kind = "function"
+name = "engage: inserts a reason-0 task unless DeterminMode, a building, a neutral clan, a BUILD order, or the current task's priority < 0.3"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x100088f0"
+kind = "function"
+name = "default orders: an animal migrates (order 15), a mine mines"
+doc = "docs/31-packages.md"
 read = true

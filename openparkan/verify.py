@@ -30,6 +30,7 @@ from . import (
     materials,
     mission,
     objects,
+    packages,
     profiles,
     research,
     resources,
@@ -5647,6 +5648,140 @@ def check_turrets(check, game: Path) -> None:
           f"{body['e_tur_lt_07']:g}/{body['e_tur_bt_11']:g}/{body['e_tur_bt_12']:g}")
 
 
+#: The robot Types' behaviour profiles, without the animal's.
+MENU_PROFILES = {t: p for t, p in packages.PROFILE_BY_TYPE.items() if t != objects.TYPE_ANIMAL}
+#: The Type a placed unit's ``UNITS/UNITS`` folder names.
+UNIT_FOLDER_TYPE = {"BATTLE": objects.TYPE_WARRIOR, "BUILDER": objects.TYPE_BUILDER,
+                    "TRANSPRT": objects.TYPE_TRANSPORT, "HERO": objects.TYPE_HERO,
+                    "HQ": objects.TYPE_HQ, "ANIMAL": objects.TYPE_ANIMAL,
+                    "AUTODEMO": objects.TYPE_WARRIOR}
+
+
+def check_packages(check, game: Path) -> None:
+    """The commander's packages: menus, orders, profiles, and who runs what."""
+    declared = {v.name: int(v.default, 0) for v in behaviour.variables(game)
+                if v.name.startswith("ORDER_")}
+    check("varset.var: the orders a unit or building can be given",
+          declared == packages.ORDERS,
+          f"{len(declared)} ORDER_* constants, " + ", ".join(
+              f"{n[6:]} {v}" for n, v in sorted(declared.items(), key=lambda kv: kv[1])))
+
+    iron = (game / "iron3d.dll").read_bytes()
+    table = resources.strings(iron)
+    named = {p.command: table.get(p.string) for p in packages.PACKAGES}
+    plain = [p for p in packages.PACKAGES if p.command not in (10, 17)]
+    check("iron3d.dll: the commander's packages are strings 5000-5008",
+          all(named[p.command] == p.label for p in plain),
+          "; ".join(f"{p.string} {named[p.command]!r}" for p in plain))
+
+    status = tuple(table.get(packages.STATUS_FIRST + i)
+                   for i in range(len(packages.STATUS)))
+    check("iron3d.dll: a unit's status line is one of 18 strings from 6180",
+          status == packages.STATUS
+          and table.get(packages.STATUS_FIRST + len(packages.STATUS)) is None,
+          ", ".join(repr(s) for s in status))
+
+    # The two menu tables: 20-byte rows of command id, robot-type mask, a
+    # needs-a-target flag, a pick mode, and the string id.  Find the HQ menu
+    # by its first row, then read on while the string ids stay in range.
+    first = struct.pack("<5I", 0, packages.ROBOT_ANY, 0, 0, 5000)
+    hq_at = iron.find(first)
+    rows = []
+    at = hq_at
+    while hq_at >= 0:
+        row = struct.unpack_from("<5I", iron, at)
+        if not (row[1] >> 24 == 1 and (1000 <= row[4] < 6000)):
+            break
+        rows.append(row)
+        at += 20
+    hq, wingman = rows[:22], rows[22:]
+    masks = Counter((r[1], table.get(r[4]).split()[0]) for r in hq)
+    check("iron3d.dll: HQ orders go to every robot, minerals to transports, building to builders",
+          hq_at >= 0 and len(hq) == 22
+          and {r[1] for r in hq[:6]} == {packages.ROBOT_ANY}
+          and hq[6][1] == 0x01002000 and {r[1] for r in hq[7:]} == {0x01004000}
+          and [r[0] for r in hq] == [0, 1, 2, 3, 6, 7] + list(range(8, 24))
+          and [r[0] for r in wingman] == [0, 24, 2, 3, 4, 5, 7],
+          f"{len(hq)} HQ rows: {', '.join(f'{hex(m)} {w}' for (m, w), n in masks.items())}; "
+          f"the {len(wingman)}-row wingman menu: "
+          + ", ".join(table.get(r[4]) for r in wingman)
+          + f"; control: a row must carry a robot-type mask, and the table ends at row {len(rows)}")
+
+    picks = {table.get(r[4]): (r[2], r[3]) for r in rows if r[2]}
+    check("iron3d.dll: Route, Guard, Attack, Capture building and building placement pick a target",
+          picks.get("Route") == (1, 4) and picks.get("Guard") == (1, 3)
+          and picks.get("Attack") == (1, 3) and picks.get("Capture building") == (1, 2)
+          and all(picks.get(n) == (1, 4) for n in ("Build Mine", "Build Factory"))
+          and all(r[2] == 0 for r in rows if table.get(r[4]) in
+                  ("Standby", "Seek and destroy", "Search and capture", "Refit")),
+          ", ".join(f"{n} mode {m}" for n, (_, m) in picks.items()))
+
+    # The profiles.
+    held = profiles.load(game)
+    types = {name: v["Type"].value & 0xFFFFFFFF for name, v in held.items() if "Type" in v}
+    check("behpsp.res: each robot profile's Type is its varset.var robot type",
+          all(types.get(p) == t for t, p in MENU_PROFILES.items())
+          and types.get("prof_animal.var") == objects.TYPE_ANIMAL
+          and types.get("prof_exp.var") == 0x01001000,
+          ", ".join(f"{p} {hex(t)}" for t, p in sorted(MENU_PROFILES.items()))
+          + f"; prof_exp.var {hex(types.get('prof_exp.var', 0))}, a type varset.var does not name")
+
+    behavior = (game / "Behavior.dll").read_bytes()
+    loaded = {n for n in held if n.startswith("prof_") and n.encode() + b"\0" in behavior}
+    check("Behavior.dll: fifteen profiles are loaded; prof_exp and prof_universal never are",
+          len(loaded) == 15 and "prof_exp.var" not in loaded
+          and "prof_universal.var" not in loaded
+          and all(p in loaded for p in MENU_PROFILES.values()),
+          f"{len(loaded)} of {sum(1 for n in held if n.startswith('prof_'))} prof_*.var "
+          f"names occur in the binary")
+
+    flags = {name: tuple(int(v[f].value) for f in packages.TASK_FLAGS)
+             for name, v in held.items() if "Task_Stop" in v}
+    everything = {n for n, row in flags.items() if all(row)}
+    builder = {f for f, x in zip(packages.TASK_FLAGS, flags["prof_bld.var"], strict=True) if x}
+    buildings = [n for n, t in types.items() if t == 0x7FFFFFFF]
+    check("behpsp.res: warriors, transports, HQs and heroes may take every task; builders six",
+          everything == {"prof_war.var", "prof_trn.var", "prof_hq.var", "prof_hero.var",
+                         "prof_animal.var", "prof_universal.var"}
+          and builder == {"Task_Stop", "Task_Go", "Task_Reload", "Task_Repare", "Task_Build",
+                          "Task_RandomGo"}
+          and all(flags[b][0] == 1 for b in buildings),
+          f"every flag set on {', '.join(sorted(everything))}; prof_bld.var: "
+          f"{', '.join(sorted(builder))}; every building profile ({len(buildings)}) keeps "
+          f"Task_Stop")
+
+    # Placed units: the folder names the type.
+    placed: Counter[tuple[str, int]] = Counter()
+    for path in sorted(game.glob("MISSIONS/**/data.tma")):
+        for o in mission.load(path).objects:
+            if o.kind != mission.KIND_UNIT or "Type" not in o.properties:
+                continue
+            folder = o.path.replace("\\", "/").split("/")[-2].upper()
+            placed[(folder, o.properties["Type"].value & 0xFFFFFFFF)] += 1
+    agree = sum(n for (f, t), n in placed.items() if UNIT_FOLDER_TYPE.get(f) == t)
+    other = {k: n for k, n in placed.items() if UNIT_FOLDER_TYPE.get(k[0]) not in (None, k[1])}
+    check("data.tma: a placed unit's Type follows its UNITS folder",
+          agree and other == {("BATTLE", 0x01010000): 3},
+          f"{agree} of {sum(placed.values())} placed units carry their folder's type; "
+          f"the exceptions: {', '.join(f'{f} as {hex(t)} x{n}' for (f, t), n in other.items())}")
+
+    # Scripts.
+    tables = behaviour.variables(game)
+    used: Counter[str] = Counter()
+    for path in behaviour.scripts(game):
+        for line in behaviour.render(behaviour.read(path), tables):
+            used.update(re.findall(r"\b(ORDER_(?:ROBOT|BUILDING)_[A-Z]+)\b", line))
+    never = sorted(set(packages.ORDERS) - set(used))
+    check("*.scr: patrol, attack and capture are the orders mission scripts give most",
+          used and set(used) <= set(packages.ORDERS)
+          and [n for n, _ in used.most_common(3)] == [
+              "ORDER_ROBOT_PATROL", "ORDER_ROBOT_ATTACK", "ORDER_ROBOT_CAPTURE"]
+          and never == ["ORDER_BUILDING_CHARGE", "ORDER_ROBOT_LEAVE", "ORDER_ROBOT_REPARE",
+                        "ORDER_ROBOT_STAYGROUND"],
+          ", ".join(f"{n[6:]} {k}" for n, k in used.most_common())
+          + f"; never: {', '.join(never)}")
+
+
 def check_controls(check, game: Path) -> None:
     """The input layer: ScanCode.dsc, Command.dsc, the .man bindings, the .tbl tables."""
     keys = controls.scancodes(game)
@@ -7050,7 +7185,7 @@ def run(game: Path) -> int:
         check_effects, check_footprints, check_rsli, check_control, check_efficiency,
         check_motion, check_sensors, check_combat, check_ownership,
         check_capture, check_repair, check_chassis, check_weapons,
-        check_turrets,
+        check_turrets, check_packages,
         check_controls,
         check_behaviour, check_research, check_descriptions, check_saves,
         check_vocabulary, check_resources, check_briefing, check_settings,
