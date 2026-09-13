@@ -125,9 +125,14 @@ STREAM_SQUARES = 1
 #: ``ENV_LAVA_BOT``, and on no other face of any map.
 FLAGS_LIQUID_BED_BIT = 0x2000
 
-#: cos 80 degrees.  A face whose normal z is not above this is never taken as
-#: ground by a unit's ground contact (``Control.dll:0x1001a6fd``).
+#: cos 80 degrees.  A face whose normal z is not above this passes neither of a
+#: unit's ground searches (``Control.dll:0x1001a6fd``) and ends a mesh walk
+#: (``Terrain.dll:0x10026630``); only the searches' last fallback can take one,
+#: for a tick.
 WALKABLE_NORMAL_Z = 0.173648
+#: How many faces ``CWorld::FindWorldFace`` visits before giving up: the
+#: counter's 25th pass returns failure (``Terrain.dll:0x10026519``).
+WALK_FACES = 24
 
 #: Bit 2 of the face's *flags* word marks a face that carries a second
 #: texture layer: it is set on exactly the 32450 faces whose layer-2 index is
@@ -265,6 +270,61 @@ class LandMesh:
         """
         code = (self.face_patch[face] >> (EDGE_TWIN_BITS * edge)) & 3
         return None if code == EDGE_NONE else code
+
+    def _side(self, a: int, b: int, x: float, y: float) -> float:
+        """Twice the signed area of (a, b, point): positive left of a->b."""
+        (ax, ay, _), (bx, by, _) = self.positions[a], self.positions[b]
+        return (bx - ax) * (y - ay) - (by - ay) * (x - ax)
+
+    def contains_xy(self, face: int, x: float, y: float) -> bool:
+        """Whether a point lies in a face seen from above, edges included.
+
+        Faces wind counter-clockwise from above, so inside is left of all
+        three edges (``Terrain.dll:0x100225e0``).
+        """
+        v = self.faces[face]
+        return all(self._side(v[e], v[(e + 1) % 3], x, y) >= 0 for e in range(3))
+
+    def walk(self, face: int, start: tuple[float, float], end: tuple[float, float],
+             limit: float = WALKABLE_NORMAL_Z) -> int | None:
+        """The face under ``end``, walked to across edges from ``face``.
+
+        The rule ``CWorld::FindWorldFace`` follows (``Terrain.dll:0x10026340``)
+        as a unit's ground contact calls it, from the last ground point to the
+        new sphere centre:
+
+        * ``start`` must lie in ``face``;
+        * a face whose normal z is not above ``limit`` ends the walk;
+        * a face holding ``end`` is the answer;
+        * otherwise cross edge ``e`` -- vertices ``e`` and ``e + 1`` -- where
+          vertex ``e`` lies right of the line start->end and vertex ``e + 1``
+          left of it, to the neighbour across that edge;
+        * no such edge, no neighbour, or a 25th face gives ``None``, and the
+          caller falls back to a vertical search.
+        """
+        if not self.contains_xy(face, *start):
+            return None
+        dx, dy = end[0] - start[0], end[1] - start[1]
+
+        def side(vertex: int) -> float:
+            px, py, _ = self.positions[vertex]
+            return dx * (py - start[1]) - dy * (px - start[0])
+
+        for _ in range(WALK_FACES):
+            if self.face_normal[face][2] <= limit:
+                return None
+            if self.contains_xy(face, *end):
+                return face
+            v = self.faces[face]
+            for e in range(3):
+                if side(v[e]) < 0 < side(v[(e + 1) % 3]):
+                    face = self.adjacency[face][e]
+                    break
+            else:
+                return None
+            if face == NO_NEIGHBOUR:
+                return None
+        return None
 
     @property
     def marks_lava(self) -> bool:

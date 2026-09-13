@@ -327,6 +327,16 @@ STATE_ANCHOR = 0x1
 STATE_BY_VELOCITY = 0x10000
 STATE_FIXED = 0x100000
 STATE_JITTER = 0x1000000
+#: The body follows the ground on its contact points: it falls under the
+#: world's gravity until the nearest flagged contact reaches its ground point
+#: (``0x1001b3bd``, ``0x10015d60``).  Without it the sphere is only ever lifted
+#: out of the ground.  Set on every state of the controllers that declare
+#: contact points, and on no other.
+STATE_GROUND_CONTACTS = 0x4
+#: Unbounded motion: no clamp to the live top speed (``0x1001461e``,
+#: ``0x100158c4``), no slope brake (``0x10015681``) and no turn-rate clamp
+#: (``0x10014c02``).  Rounds, trees and stones carry it; no chassis does.
+STATE_UNBOUNDED = 0x40000
 #: A step is held to this many seconds, and a fixed-length velocity state is
 #: cut so that speed x step stays within ``FIXED_STEP_REACH`` (``0x1000550e``).
 STEP_MIN = 0.01
@@ -706,6 +716,49 @@ class State:
         (``Control.dll:0x10001000``).
         """
         return all(c.allows(ok) for c, ok in zip(self.contacts, intact, strict=True))
+    @property
+    def blends(self) -> bool:
+        """Whether a step of this state weighs its two pairs by speed.
+
+        Only a state that is neither velocity-driven, fixed, nor of a set
+        length computes a weight (``Control.dll:0x1000555b``); every other
+        state plays with a weight of 1.
+        """
+        return not self.mode & (STATE_BY_VELOCITY | STATE_FIXED) and self.length == 0
+
+    @property
+    def blend_floor(self) -> float:
+        """lo: the smaller of the velocity box's largest ``|min|`` and ``|max|``.
+
+        Taken over all three axes, switched on or not; an axis left off holds
+        ``FLT_MAX`` and would make lo infinite.
+        """
+        lo, hi = self.velocity
+        return min(max(abs(v) for v in lo), max(abs(v) for v in hi))
+
+    @property
+    def blend_divisor(self) -> float:
+        """D: the largest ``| |max| - |min| |`` over the velocity box's axes.
+
+        ``0x100055d4``: the absolute bounds, their difference and its absolute
+        value, then the largest component.  An axis left off gives 0; a box
+        that straddles zero gives less than its span.
+        """
+        lo, hi = self.velocity
+        return max(abs(abs(h) - abs(m)) for m, h in zip(lo, hi, strict=True))
+
+    def blend_weight(self, speed: float) -> float:
+        """q, the weight toward pair B at a speed (the largest local component).
+
+        1 unless the state ``blends``, the machine moves (speed above 1e-9,
+        ``0x1000553e``) and D is positive; otherwise ``p + (1 - p) * blend``
+        with ``p = (speed - lo) / D`` held to 0..1 (``0x100057a3``).
+        """
+        divisor = self.blend_divisor
+        if not self.blends or speed <= 1e-9 or divisor <= 0:
+            return 1.0
+        p = min(1.0, max(0.0, (speed - self.blend_floor) / divisor))
+        return p + (1.0 - p) * self.blend
 
 
 @dataclass(frozen=True)
@@ -771,6 +824,27 @@ class Controller:
         """
         return self.costs[to * len(self.states) + frm]
 
+    def transition_factor(self, to: int, frm: int) -> float:
+        """What the loader multiplies the file's cost from ``frm`` to ``to`` by.
+
+        ``Control.dll:0x10001790``: one, plus the largest ``|centre - min|``
+        over the velocity axes ``frm`` switches on -- the centre of ``to``'s
+        box, the minimum of ``frm``'s -- plus the same over the spin axes.  It
+        is not the gap between the two boxes: a state's cost to itself grows
+        by half its own span.
+        """
+        dest, src = self.states[to], self.states[frm]
+
+        def largest(dest_box, src_box, shift):
+            out = 0.0
+            for axis in range(3):
+                if src.flags >> (shift + axis) & 1:
+                    centre = (dest_box[0][axis] + dest_box[1][axis]) / 2
+                    out = max(out, abs(centre - src_box[0][axis]))
+            return out
+
+        return 1.0 + largest(dest.velocity, src.velocity, 0) + largest(dest.spin, src.spin, 4)
+
     def live_cost(self, to: int, frm: int) -> float:
         """The cost the planner uses: the file's, scaled at load (``0x10001790``).
 
@@ -778,26 +852,19 @@ class Controller:
         largest distance, over the axes the source state switches on (+0x00 bits
         0-2), from the centre of the destination's velocity box to the minimum of
         the source's; the spin gap is the same over bits 4-6
-        (``0x10001af0`` takes the larger of three).
+        (``0x10001af0`` takes the larger of three).  See ``transition_factor``.
         """
-        dest, src = self.states[to], self.states[frm]
+        return self.cost(to, frm) * self.transition_factor(to, frm)
 
-        def gap(box_to, box_from, first_bit):
-            centre = [(lo + hi) * 0.5 for lo, hi in zip(*box_to, strict=True)]
-            return max((abs(centre[k] - box_from[0][k]) for k in range(3)
-                        if src.flags & (first_bit << k)), default=0.0)
-
-        return self.cost(to, frm) * (1.0 + gap(dest.velocity, src.velocity, 1)
-                                     + gap(dest.spin, src.spin, 0x10))
-
-    def path(self, frm: int, to: int, live: bool = False) -> list[int] | None:
+    def path(self, frm: int, to: int, live: bool = True) -> list[int] | None:
         """The cheapest run of states from ``frm`` to ``to``, without ``frm``.
 
-        Dijkstra over the file's costs, as the planner runs it
-        (``0x100019d0``), or with ``live`` over the costs the engine scales
-        at load (``live_cost``).
+        Dijkstra as the planner runs it (``0x100019d0``), over the costs as the
+        loader leaves them (``live_cost``); ``live=False`` walks the file's
+        own numbers instead.  A cost at or above ``NO_EDGE`` is no edge either
+        way.
         """
-        weight = self.live_cost if live else self.cost
+        weigh = self.live_cost if live else self.cost
         best = {frm: 0.0}
         back: dict[int, int] = {}
         queue = [(0.0, frm)]
@@ -812,8 +879,10 @@ class Controller:
             if cost > best.get(state, float("inf")):
                 continue
             for nxt in range(len(self.states)):
-                step = weight(nxt, state)
-                if step >= NO_EDGE or nxt == state:
+                if nxt == state or self.cost(nxt, state) >= NO_EDGE:
+                    continue
+                step = weigh(nxt, state)
+                if step >= NO_EDGE:
                     continue
                 if cost + step < best.get(nxt, float("inf")):
                     best[nxt] = cost + step

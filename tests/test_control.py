@@ -372,3 +372,26 @@ def test_a_generic_device_names_its_inputs(ctl, component):
     assert control.device_input(7) == ("-spin", 2)
     assert control.device_input(14) == ("speed", -1)
     assert control.device_input(1) is None
+def test_the_transition_factor_reaches_from_source_minimum_to_destination_centre(ctl, state):
+    walk = state(flags=0x2, velocity=((-0.6, 6.0, -0.6), (0.6, 14.0, 0.6)))
+    near = state(flags=0x2, velocity=((-0.6, 2.0, -0.6), (0.6, 10.0, 0.6)))
+    far = state(flags=0x2, velocity=((-0.6, 10.0, -0.6), (0.6, 20.0, 0.6)))
+    c = control.parse(ctl(counts=(3, 0, 0, 0, 0), states=[walk, near, far]))
+    # to near (centre y 6) from walk (min y 6): no reach
+    assert c.transition_factor(1, 0) == 1.0
+    # to far (centre y 15) from walk: 1 + 9, though the boxes overlap
+    assert abs(c.transition_factor(2, 0) - 10.0) < 1e-6
+    # only the source's switched-on axes count: near switches on y too
+    assert abs(c.transition_factor(0, 1) - 9.0) < 1e-6
+
+
+def test_the_blend_weight_divides_by_the_largest_absolute_difference(ctl, state):
+    run = state(velocity=((-0.6, 6.0, -0.6), (0.6, 14.0, 0.6)))
+    stand = state(velocity=((-2.0, -2.0, -2.0), (2.0, 2.0, 2.0)))
+    s, still = control.parse(ctl(counts=(2, 0, 0, 0, 0), states=[run, stand])).states
+    assert s.blends and s.blend == 0.0
+    assert (s.blend_floor, s.blend_divisor) == (6.0, 8.0)
+    assert abs(s.blend_weight(10.0) - 0.5) < 1e-6
+    assert s.blend_weight(20.0) == 1.0 and s.blend_weight(0.0) == 1.0
+    # a box symmetric about zero has D = 0: the weight stays 1
+    assert still.blend_divisor == 0.0 and still.blend_weight(1.0) == 1.0

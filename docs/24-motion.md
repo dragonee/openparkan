@@ -98,6 +98,29 @@ tick (`0x1000bcf0`, loop at `0x1000c2a5`):
 - The attitude and velocity integrators run once a step, with dt the step.
 - Between steps the drawn body is interpolated by the phase s (`0x10015a50`).
 
+**The step velocity is a report, not a state.** The move writes the velocity
+it used into `+0x200` (body `+0x4c`): a velocity-driven state the integrated
+velocity clamped into its own box and turned into the world (`0x10001160`,
+`0x10014610`, stored at `0x1001592b`); any other state its world stride ÷ the
+step (`0x10015990`). Nothing copies it back:
+
+- the planner tests the boxes against the integrated velocity `+0x1c8` and
+  spin `+0x1d4` (`0x100051ef`);
+- only the integrator and `SetTangSpeed` (`0x100044a0`) write `+0x1c8`;
+- `+0x200` is read by the property getter alone — 0x28 and 0x67 its length,
+  0x66 mass × it (`0x1000df1a`, `0x1000e145`, `0x1000e0e1`) — where property
+  0x23 is the length of `+0x1c8` (`0x1000de5d`).
+
+**State bit `0x40000` lifts the limits** (`0x100053f4`, passed to all three
+body routines):
+
+- no clamp of the velocity to the live top speed (`0x1001461e`, `0x100158c4`);
+- no slope brake (`0x10015681`);
+- no turn-rate clamp on the pending turn (`0x10014c02`).
+
+*Measured:* 153 states carry it — 70 in `weapon.rlb`, 80 in `static.rlb` (the
+trees and stones) and 3 in `system.rlb`. No chassis or animal state does.
+
 **What the mesh plays** (`0x100059a0`, through `AniMesh.dll`'s interface
 `0xb` at `+0x20`):
 
@@ -107,9 +130,19 @@ tick (`0x1000bcf0`, loop at `0x1000c2a5`):
 - **Weight:** w eases from the last step's q to this step's over the first
   quarter: u = min(4s, 1), w = (1 − u) q₋₁ + u q.
 - **q** is 1, except on a state that is neither velocity-driven nor fixed in
-  length. There q = p + (1 − p) × `+0x1c`, where p = (speed − lo) ÷ D held to
-  0–1 (`0x100057a3`). lo is the smaller of the velocity box's largest |min| and
-  largest |max|. D is a box extent; that it is the box's span is a *guess*.
+  length, while the machine moves (speed above 1e-9, `0x1000553e`). There
+  q = p + (1 − p) × `+0x1c`, where p = (speed − lo) ÷ D held to 0–1
+  (`0x100057a3`). Both are taken over all three axes of the velocity box,
+  switched on or not (`0x1000555b`–`0x1000576d`):
+  - **lo** is the smaller of the largest |min| and the largest |max|;
+  - **D** is the largest ||max| − |min|| — the absolute bounds, their
+    difference and its absolute value (`0x100055d4`), then the largest
+    component (`0x10001af0`). An axis left off gives 0, and a box that
+    straddles zero gives less than its span. D = 0 leaves q at 1.
+
+  *Measured:* 348 states take this branch. All 348 switch on all three
+  velocity axes, so lo is finite. On 324 D equals the box's largest span; on
+  the other 24 D is 0, and their blend base is 1 anyway.
 - **Pose:** each node takes frame A's pose at w = 0, frame B's at w = 1, and a
   blend between ([07-objects.md](07-objects.md#how-the-engine-plays-it--read)).
 
@@ -128,7 +161,8 @@ feet do not slide.
   - The row is the destination: `table[to][from]` (*measured*: all 826
     zero-cost edges join a state whose B ends where the next one's starts; read
     the other way, none do).
-  - A cost of 1,000,000 or more is no edge.
+  - A cost of 1,000,000 or more is no edge. The planner compares the scaled
+    costs (`0x10001a0e`).
   - At load each cost is scaled (`0x10001790`, called from the loader at
     `0x10008f57`): it is multiplied by 1 + g_v + g_s.
     - g_v is the largest distance, over the velocity axes the **source** state
@@ -136,6 +170,11 @@ feet do not slide.
       minimum of the source's.
     - g_s is the same over the spin box (`0x10001af0` takes the larger of
       three).
+    - It is not the gap between the boxes. *Measured:* of the 3,522 edges
+      under 1,000,000 in the 531 controllers, the factor changes 1,925
+      non-zero costs, by up to ×46.5, and lifts none to 1,000,000. One plus
+      the gap between the velocity boxes would give the same factor on only
+      776.
     - It is what keeps a gait going (*measured*). On `r_h_02`, 8 of the
       velocity-driven anchors have exits running both ways, and the file ties
       every such exit at 1. Scaled, the exits that keep the direction are the
@@ -435,28 +474,187 @@ and that group picks the step by surface
 1. **Body sphere.** The object's bounding sphere gives the centre and radius.
    A radius under 20 is held to at most 7.5 (`0x1001a48e`); one of 20 or more
    is kept. The centre goes into `+0x98`.
+   A second sphere, from the object's other interface (`+0x28`, `0x1001a518`),
+   gives a radius r₂ that is held to 7.5 only on objects with flag
+   `0x1000000`; it bounds the first search pass below.
 2. **Keep the face.** If a face from the last tick is still held (`+0xa4`),
    the engine walks the mesh from the last ground point (`+0x8c`) to the new
    centre (`Terrain.dll` `CWorld::FindWorldFace`, slot 9, called at
-   `0x1001a627`) with the limit 0.173648, cos 80°.
-3. **Otherwise search.** An `IWorld` slot 10 query runs at the centre with 0.5,
-   in two passes (register values 6, then 10; `0x1001a6cc`, `0x1001a77d`). A
-   face is taken if its normal z is above 0.173648 (`0x1001a6fd`) and, on the
-   first pass, the hit lies below the centre. **A face steeper than 80° is
-   never ground** — 323 of the 173827 level-0 terrain faces across the maps
-   (*measured*).
-4. **Ground point.** The centre projected onto the face plane goes into
-   `+0x70` and the face normal into `+0x7c`; `+0x8c` keeps the point
-   (`0x1001a848`). With no face, the ground point is the centre.
+   `0x1001a627`) with the limit 0.173648, cos 80°. Any failure clears the
+   face and falls through to the search. The walk, in the plane
+   (`Terrain.dll:0x10026340`):
+   - the start point must lie in the held face, else it fails (code `0x10`);
+   - a face whose normal z is not above the limit ends it (code 1);
+   - a face holding the centre is the answer;
+   - otherwise it crosses edge *e* — vertex *e* to vertex *e* + 1 — where
+     vertex *e* lies right of the line start→centre and vertex *e* + 1 left of
+     it (`0x100225e0`, twice the signed area), to the neighbour across that
+     edge;
+   - no such edge, no neighbour, or a 25th face fails (code 4).
+
+   A face's inside is left of all three edges, so the walk assumes faces wind
+   counter-clockwise from above and that adjacency slot *e* is the edge from
+   vertex *e* to *e* + 1. *Measured:* both hold on every map — 817150 of 817150
+   neighbours share those two vertex positions, and 272580 of 272580 walkable
+   faces wind counter-clockwise — and on Tut_1 the rule walks from a face to
+   the face under a point 7.6 or 10.3 away on 97 of 97 samples.
+3. **Otherwise search.** `IWorld` slot 10 (`Terrain.dll:0x10026b20`) is a
+   **walk-face query**: its register argument is an axis in the low two bits
+   (2, z) and a direction, `4` for faces at or above the point and `8` for
+   faces at or below it (`CLandscape::GetWalkFace`, `0x10021b84`,
+   `0x10021ff6`, `0x1002201b`). So 6 looks up and 10 looks down. The ground
+   contact runs (`0x1001a6cc`, `0x1001a77d`):
+   1. up: a face is taken if its normal z is above 0.173648 (`0x1001a6fd`) and
+      it is less than r₂ above the centre — the sphere has sunk into it;
+   2. down: a face is taken if its normal z is above 0.173648;
+   3. neither: the up query's face, whatever it was (`0x1001a7e1`).
+
+   The query walks the scene from its root, recursing into children, and asks
+   every node whose type is 1 or 3 (the filter's `0xa` against `1 << type`,
+   `0x10026bc9`) — the landscape among them, since it is found — keeping the
+   smallest gap. An object answers through
+   interface `0x25` slot 2, with the 0.5, if it has one, else interface
+   `0x18` slot 7 (`0x10026bdc`, `0x10026c83`). The landscape tests the faces
+   of the grid cell under the point, in cell order, and returns the first
+   whose triangle holds the point and whose plane lies the right way. An
+   `AniMesh` object answers `0x25` at object `+0xc` (its interface request,
+   `AniMesh.dll:0x10006e50`), and both its slot 2 (`0x1000ccb0`) and its slot 7
+   (`0x10013fe0`) visit **level 0 of the current variant** (`0x10007edb`); a
+   `CBuilding` hands slot 7 to its mesh (`Terrain.dll:0x10056c70`). The ground search's filter excludes
+   world face bits `0x200` (the liquid surface) and `0x8` (`0x1001a687`).
+   **A face steeper than 80° is ground for a tick at most** — 323 of the
+   173827 level-0 terrain faces across the maps (*measured*): only fallback 3
+   takes one, and the next tick's walk gives it up at its first step.
+4. **Ground point.** The centre dropped **vertically** onto the face plane
+   goes into `+0x70` — x and y kept, z solved from the plane through the
+   face's first vertex (`0x1001bfc0`) — and the face normal into `+0x7c`;
+   `+0x8c` keeps the point (`0x1001a848`). With no face, the ground point is
+   the centre.
 5. **Touching** means `|ground point − centre|² ≤ 2r²` (`0x1001a9f9`), and the
    surface record is read only then. The exception is a face with world flag
-   `0x400` — the liquid bed, the terrain's `0x2000`: its record is read when an
-   `IWorld` slot 8 query for class `0x200`, the liquid surface, finds a gap
-   under the radius (`0x1001aa10`). Which way that gap is measured is
-   *unknown*.
+   `0x400` — the liquid bed, the terrain's `0x2000`: its record is read when
+   `IWorld` slot 8, the same vertical query in both directions for faces
+   with bit `0x200`, the liquid surface (`Terrain.dll:0x10025ba0`), finds one
+   with **centre z − surface z < r** (`0x1001aa99`). A sphere is wet from r
+   above the water down.
 6. **Contact points.** The same face search runs again for each of the current
    state's `counts[1]` contact points (`0x1001abcc`) — the feet, wheels or
-   tracks, placed on their nodes.
+   tracks, placed on their nodes. Each 16-byte record in the state is one
+   contact: `+0` a node, `+4` flags, `+8` a group. Flag 1 lets it lift the
+   body and join the averaged normal (below). The live record's byte `+0x59`
+   is set when the contact's node lacks flag `0x10` in its 44-byte life record
+   (`+0x55c`, `0x1001ac39`) — whether the node still stands: status `0x10` is
+   a node at 0 life (`0x1001106c`, *read* in
+   [13-control.md](13-control.md#section-1s-conditions-are-contacts--read-and-measured))
+   — and it is that byte a state's `0x100` and `0x200` conditions
+   test (`0x10001107`). A contact whose node lacks it searches from the next
+   node that has it when flag 4 is set, and is skipped otherwise
+   (`0x1001ac3e`).
+7. **Placement.** Unless state bit `0x8000000` is set, the object is placed on
+   its held face through `IWorld` slot 11, `PlaceObjectOnWorldFace`
+   (`0x1001b4c3`).
+
+### Holding the body on the ground — *read*, and *measured*
+
+After the search the ground contact moves the body, through
+`0x10015d60` (`0x1001b446`), by a lift **straight up**:
+
+- **State bit `0x4` clear** — flyers, and any state without contact points:
+  the lift is (ground z − centre z) + r when the ground point lies less than r
+  below the centre, and 0 otherwise (`0x1001b3c3`). The sphere is pushed out
+  of the ground and never pulled down: **such a machine does not fall**.
+- **State bit `0x4` set, with contact points:** the lift is the largest
+  (ground z − contact z) over the contacts with flag 1 (`0x1001b000`), and the
+  body **falls**. Each tick it tries a fall of (v − g dt ÷ 2) dt, with g the
+  world's gravity (`IWorld` slot 4, 10.0) and v a fall speed at body `+0xac`
+  that loses g dt (`0x10015d91`). If the fall stays above the lift it is
+  taken; otherwise the body rises or sinks by the lift.
+- Whenever the lift is taken, in either case, v returns to 0 and the averaged
+  normal — the sphere's and each flag-1 contact's, over their count —
+  becomes the body's ground normal `+0x194` (`0x10015e47`), which the slope
+  brake reads.
+- The move shifts the body's three matrices (`+0xb0`, `+0xf0`, `+0x130`) and
+  notifies the object (`0x10015f0f`). The velocity is not touched.
+
+*Measured:* bit `0x4` is set on exactly the 961 states of the controllers
+that declare contact points — the walkers, wheeled and tracked chassis, the
+hero, three animals, the trees and stones — and on no other. So everything
+with legs, wheels or tracks falls under gravity 10, and every flyer holds its
+height. A mode-0 or mode-2 machine falls exactly when its state has contact
+points.
+
+### Collision between objects — *read*
+
+The collision pass (`0x1001c040`; [26-damage.md](26-damage.md#the-hit-test--read-and-measured))
+takes every pair once, and goes further only when one side has a contact
+record and the two swept spheres touch (`0x1001e9f0`). A pair with a handler
+of its own (`+0x40` slot 7) goes to it; a pair with no round goes to
+`0x1001daf0` with the **larger sphere as the obstacle A and the smaller as the
+mover B** (`0x1001d647`). B's move is its sphere's start and end plus the
+relative displacement of the two contact records. A push P starts at 0:
+
+1. **Faces stop B.** B's segment runs through A's geometry (interface `0x18`
+   slot 6, the level-0 triangles of an `AniMesh` object). A face B moves into
+   — the move against the face normal — sets B's end back to its start and
+   P to start − end (`0x1001dd42`).
+2. **Small faces stop large movers.** A second segment query with another
+   filter, on a B that answers interface `0x10`, stops B the same way when the
+   face's shortest edge, squared, is under 235 and B's class (the first
+   dword message `0x201` returns) is 4 or more, or under 160 and the class 3
+   or more (`0x1001deb7`, `0x1001deea`).
+3. **A's shape pushes B out.** B's sphere at its end, the radius held to 7.5
+   on objects with flag `0x1000000`, goes to A's interface `0x25` slot 3, and
+   the push it returns is added to P (`0x1001e007`). On an `AniMesh` object
+   that slot (`AniMesh.dll:0x1000d410`) walks the nodes' **level 0 of the
+   current variant** too (`0x1000d645`); how it turns them into a push is not
+   read.
+
+P under 1e-6 in squared length is no contact. Otherwise P is shared by
+**mass squared**, the owner's property 0x7c copied to the collision object
+on message `0x1c` (`0x10020038`): B moves by P × m_A² ÷ (m_A² + m_B²) and A by
+−P × m_B² ÷ (m_A² + m_B²); a side with no contact record does not move and
+the other takes all of P (`0x1001e05f`). Each moved record gains flag 8.
+
+**The machine takes the push** on message `0x1b` (`0x1000c990`, slot 23),
+for record flags 8 or `0x10`, by moving its position — the velocity is
+kept:
+
+- with state bit `0x4` the push is made **horizontal**: its z is dropped and
+  x and y are scaled up to keep its length, at most ×4 (`0x1000ca44`) — unless
+  the machine's parent is of type 3 and the push points down, when it is
+  taken whole (`0x1000c9eb`);
+- without bit `0x4` it is taken whole.
+
+So units slide around each other's meshes, the lighter one giving way, and
+no collision costs speed or life. Every geometry step reads level 0: no `.bas`
+polygon, areal or fifth slot (the first-person view's geometry, once read as
+collision hulls; see [07-objects.md](07-objects.md#the-fifth-slot-is-what-the-units-own-view-draws))
+takes part in this pass.
+
+### The map edge — *read*
+
+A moving object that is not a round is kept inside the world's box
+(`0x1001e650`, from `IWorld` slot 10's box query at `0x1001e664`):
+
+- **hard:** past the box's x and y sides inset by the sphere's radius, or
+  more than 20 above its top, it is pushed back to the boundary; nothing
+  pushes it up from below;
+- **soft:** within 80 of an inset side it is pushed back by
+  3 × 0.0125 × min(depth, 80), and above the top by 3 × 0.05 × min(depth, 20)
+  (`0x1001e7ba`).
+
+Both add to the contact record's push with flag `0x10`, which the machine
+takes like any other push. A round meets the same box with its top doubled
+and is removed ([26-damage.md](26-damage.md#the-hit-test--read-and-measured)).
+
+### Jumping — *read*
+
+There is none. `CanJump` is bound from `chas_wlk.var` into `MBehaviour`
+`+0x7d0` (`Behavior.dll:0x100176bf`) and never read: of the 27 calls to the
+profile getter (`0x10014670`), the fields read after them are `CanFly` (+0xc)
+and `WalkChassis` (+0x18), never +0x10, and nothing else addresses the
+profile. No `MCMD_` command jumps, and iron3d's only `jump` is a camera-path
+edge type.
 
 ### Gravity — *read*, and *measured*
 
@@ -466,8 +664,10 @@ mode-3 controller uses it: the velocity integrator adds −g along world z,
 turned into the machine's frame (`0x10015879`). The six mode-3 controllers are
 the four `bf_*_01` rounds in `weapon.rlb` and the two hero targets `r_h_01`
 and `r_h_03`. **Modes 0 and 2 — every other machine, the hero `r_h_02`
-included — have no gravity term.** What holds them to the ground is the
-contact above; how the position is put back onto `+0x70` is *unknown*.
+included — have no gravity term in the integrator.** Gravity reaches them
+through the ground contact instead: a state with contact points falls at the
+same 10.0 until a contact lands
+([Holding the body on the ground](#holding-the-body-on-the-ground--read-and-measured)).
 
 ### Lakes in the areal map — *measured*
 
@@ -544,20 +744,28 @@ asks for the live top speed (IControl 145) and compares it with 1
 
 ## Not established
 
-- Collision between objects: the shapes (sphere, cylinder, the fifth mesh
-  slot, the `.bas` polygon, the areal obstacles) and the response
-  (slide, stop or push).
-- How the body is snapped to the ground point, and whether a mode-0 or mode-2
-  machine ever falls.
-- Jumping and `CanJump`, the map edge, bridges (`m_bridge`). That buildings and
-  bridges are ground through the same world-face query
-  (`CBuilding::GetFirstIntersectedFace`) is a *guess* from the names.
-- What register values 6 and 10 select in `IWorld` slot 10; the sign of the
-  liquid-surface gap.
-- The exact divisor D in a blended state's weight (`0x100057a3`), and what
-  state bit `0x40000` changes in the integrators.
-- Whether the step velocity a state sets (`+0x200`, body `+0x4c`) replaces the
-  integrated velocity `+0x1c8` the boxes are tested against.
+- How interface `0x25` slot 3 turns an object's level-0 triangles into a
+  push (`AniMesh.dll:0x1000d410`, 3017 bytes;
+  [Collision between objects](#collision-between-objects--read)), and what
+  slot 2 does with its 0.5. `AniMesh` objects answer `0x25` (found by
+  enumerating range dispatches that span `0x18` and `0x25`, since no `cmp`
+  names it); whether any `Terrain.dll` class does is not checked.
+- Which scene nodes are types 1 and 3, the only ones the walk-face query asks
+  (the node's slot 11, `0x10026bbb`; the landscape is one of them); what a
+  machine's parent of type 3 is; what class message `0x201` returns. So which
+  bridges and buildings are ground is read only as far as "their level-0
+  faces, if they are of those types". A search for vtables whose twelfth
+  entry is `mov eax, K; ret` found none in `Terrain.dll`, `AniMesh.dll`,
+  `World3D.dll` or `Control.dll` — a negative with no positive control, so
+  not evidence that the types are computed.
+- Which `Land.msh` faces carry the world face bit `0x8` and class bit 8 that
+  the ground search excludes; the landscape converts them to its own mask at
+  `Terrain.dll:0x10022da0` (world `0x8` → `0x20`, `0x200` → `0x20000`,
+  `0x400` → `0x2000`).
+- The contact records' flag 2, which hands the contact to the object's
+  interface slot `0x7c` (`0x1001affd`), and flag `0x20`. Flag `0x1000` runs the
+  record's group once while its node stands (`0x1001b08f`); no shipped record
+  sets it.
 - Where G would ever differ from 1: no shipped material sets it
   ([Ground and collision](#ground-and-collision--read-and-measured)).
 - How the strafe angle's turn (`0x10014cf0`) is split between the hull and the

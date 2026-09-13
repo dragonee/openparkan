@@ -4,6 +4,11 @@
 >
 > - Dust is the other way round from the guess here: it shows on surfaces 0 and 2 only, above a fifth of top speed (docs/24, docs/11).
 > - R1 did not settle collision between objects; it is still unknown, and so still a stand-in.
+> - Collision between objects is now read, bar one step (docs/24 "Collision between objects"): the smaller body stops on the larger one's level-0 faces and is pushed out through its interface `0x25`, the push shared by mass squared and taken horizontally by anything with contact points. Units are not spheres pushed apart, and no velocity is cancelled.
+> - The ground point is the centre dropped vertically onto the face plane, not along the normal, and the body is held by a vertical lift: states with contact points fall under gravity 10 until a contact lands; the others are only lifted out of the ground (docs/24 "Holding the body on the ground"). The snap stand-in below is superseded.
+> - The FindWorldFace walk is read: up to 24 faces, crossing edge e where vertex e lies right of the line and e+1 left. The search's passes are up (within r₂) then down, with the up hit as a fallback.
+> - The liquid gap is `centre.z − surface.z < r`, the other sign from the stand-in below.
+> - The map edge is read: a hard clamp to the world box inset by r (and 20 above its top) plus a soft push within 80. There is no jumping.
 # R2 engine description: ground following and collision (Phase One, Mission 01 / Tut_1)
 
 Labels: **faithful** means read or measured, with its source in doc.md and
