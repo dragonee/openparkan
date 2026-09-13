@@ -12,14 +12,14 @@ object WayPoint0
     TargetX = 967.457        where it looks
     TargetY = 610.348
     TargetZ = 11.945
-    EdgeType = "spline"      how it travels
-    WaitType = "continuous"  whether it stops here
+    EdgeType = "spline"      how it leaves
+    WaitType = "continuous"  what it does here
     EdgeTime = 3.70
     WaypointTime = 0.000
     RotateTime = 0.000
     FadeTime = 0.000
     ZoomTime = 0.000
-    WaitForText = false      what holds the sequence here
+    WaitForText = false      the holds it asks for
     WaitForSound = true
     WaitForTime = true
     WaitForClick = false
@@ -57,20 +57,84 @@ stands.
 | field | | what it is |
 |---|---|---|
 | `CameraX/Y/Z`, `TargetX/Y/Z` | | eye and look-at, world space — *measured* |
-| `EdgeType` | | how the camera travels into this stop: `linear` 243, `spline` 89, `jump` 46 |
-| `WaitType` | | `continuous` 362, `stay` 5, `flyaround` 11 |
-| `EdgeTime` | | seconds of travel; `WaypointTime` seconds of dwell |
-| `RotateTime`, `FadeTime`, `ZoomTime` | | three more timers, each on its own effect |
-| `WaitForText/Sound/Time/Click` | | what holds the sequence at this stop; more than one may be set |
+| `EdgeType` | | how the camera **leaves** this stop: `linear` 243, `spline` 89, `jump` 46 — *read* |
+| `WaitType` | | what it does while here: `continuous` 362, `stay` 5, `flyaround` 11 — *read* |
+| `EdgeTime` | | seconds the edge leaving this stop takes — *read* |
+| `WaypointTime` | | seconds of dwell, when `WaitForTime` is set — *read* |
+| `RotateTime` | | seconds per revolution of a `flyaround` — *read*, *measured* |
+| `FadeTime`, `ZoomTime` | | seconds to move the fade or the zoom from this stop's value to the next stop's — *read* |
+| `WaitForTime` | | whether the dwell lasts `WaypointTime` — *read* |
+| `WaitForText/Sound/Click` | | loaded, copied, never consulted — *read* |
 | `TextResID`, `SoundResID` | | the subtitle and the voice, resolved below |
-| `NoisePercent`, `FadePercent` | | picture treatment, 0–100 |
-| `ZoomOn`, `NightVisionOn` | | two camera filters, as booleans |
-| `LoopIndex` | | **−1 on all 378** — a field the engine reads and the authors never used |
+| `FadePercent` | | the black overlay's opacity, 0 clear to 100 black — *read*, *measured* |
+| `NoisePercent` | | loaded as a fraction, never consulted — *read*; 0 on all 378 |
+| `ZoomOn`, `NightVisionOn` | | two camera effects, off on all 378 |
+| `LoopIndex` | | the stop to go to after this one, in place of the next — *read*; **−1 on all 378** |
 
-`EdgeTime + WaypointTime` summed over a briefing is a *floor*, not a duration:
-a stop that waits for its voice runs as long as the voice does, and that
-length is in the `.wav`, not here. The longest briefing by that floor is
-`CAMPAIGN.01/Mission.01` at 190 seconds over 37 waypoints.
+`EdgeTime + WaypointTime` summed over a briefing is a *floor* on its length.
+The longest briefing by that floor is `CAMPAIGN.01/Mission.01` at 190 seconds
+over 37 waypoints.
+
+## How the player runs it — *read*
+
+`iron3d.dll` loads a waypoint into a 116-byte record (`0x1002d140`) and plays
+the list from a per-frame update (`0x1002f480`) that alternates two phases: a
+**dwell** at waypoint *i*, then an **edge** out of it.
+
+- **An edge belongs to the waypoint it leaves.** On leaving *i*
+  (`0x100308a0`) the camera starts from where it is and heads for the next
+  stop — `LoopIndex` if it is not −1, otherwise *i + 1* — and the edge
+  (`0x1002f6d0`) runs *i*'s `EdgeType` over *i*'s `EdgeTime`. When it is done
+  the destination becomes the current stop (`0x1002f0d0`). The last
+  waypoint's edge has nowhere to go: the camera holds for its `EdgeTime` and
+  the briefing ends. The reading this document used to give, travel *into* a
+  waypoint, was the wrong way round.
+- **`linear`** interpolates eye and look-at over `EdgeTime`; **`spline`**
+  builds a curve for each (`0x10030a10`) whose end tangent depends on the
+  destination — still moving along the edge into a `continuous` stop whose
+  own edge is a spline, along the orbit into a `flyaround`, at rest into
+  anything else; **`jump`** holds the
+  camera where it is for half of `EdgeTime` while the picture goes to black,
+  cuts to the destination, and comes back to the destination's `FadePercent`
+  over the other half.
+- **The dwell** ends at once unless `WaitForTime` is set, and then lasts
+  `WaypointTime`. `WaitForText`, `WaitForSound` and `WaitForClick` are copied
+  with the record and read by nothing: every function in `iron3d.dll` that
+  indexes the waypoint list was checked, with `WaitForTime`'s read as the
+  positive control.
+- **`flyaround`** (`0x1002fec0`) orbits the waypoint's **target**: level, at
+  the camera's height on arrival and its horizontal distance from the target,
+  starting from its bearing, turning `2π / RotateTime` radians a second and
+  always looking at the target (`0x100305c0` takes the radius, height and
+  bearing). The loader refuses a `flyaround` with a `RotateTime` of 0, and
+  takes a fifth word, `flyby`, as the same code when `RotateTime` is positive.
+  `stay` and `continuous` do nothing during the dwell; they differ only in
+  the spline tangent above.
+- **The fade** is a full-screen black rectangle whose alpha is the fade level
+  × 255 (`0x100315b0`). On arriving at *i* (`0x100305c0`) the player takes
+  *i*'s `FadePercent` and the next stop's and moves from one to the other
+  over *i*'s `FadeTime` (`0x10030120`); the zoom does the same between
+  `ZoomOn` values over `ZoomTime`, and `NightVisionOn` switches its effect on
+  arrival.
+- The **voice** starts on arrival, from `SoundResID`; the **subtitle** drawn
+  is the current waypoint's `TextResID`.
+- **`NoisePercent`** is read as a whole number times 0.01 into the record's
+  `+0x28` and never read again.
+
+The shipped files agree with every part of that (*measured*):
+
+- `RotateTime` is set on exactly the 11 `flyaround` waypoints and on no other,
+  and **each of the 11 dwells for one revolution** — `WaypointTime` within
+  0.05 s of `RotateTime`, `WaitForTime` set. All 89 `spline` edges have a
+  positive `EdgeTime`, as the loader demands.
+- **Every change of `FadePercent` between a waypoint and the next, 76 of 76,
+  carries a `FadeTime` on the earlier one.** All 38 fades to black last
+  exactly that waypoint's `EdgeTime` — the fade runs over the edge leaving it
+  and is black as the camera arrives — and the 38 fades back in are no
+  longer. All 46 jumps sit between two clear waypoints and dip on their own.
+  All 20 briefings open and close black.
+- `NoisePercent` is 0, `ZoomOn` and `NightVisionOn` false and `ZoomTime` 0 on
+  all 378.
 
 ## What it says, and in whose voice
 
@@ -111,22 +175,58 @@ end
 missions whose `mission.cfg` declares `tutorial_voices`.
 
 `message_index` is an **id, not a position** — three files prove it: one skips
-6, one skips 20, and one jumps from 14 to 100. So something else in the
-mission asks for a message *by number*, and the obvious candidate is the AI
-script ([15-behaviour.md](15-behaviour.md)); nothing here tests that, and it
-is written down as a lead, not a finding.
+6, one skips 20, and one jumps from 14 to 100.
 
-## What this does not say
+**The clan scripts ask for a message by that id** (*read*). `iron3d.dll`
+builds a map from `message_index` to message when the mission loads
+(`0x10094e90`) and plays one by id (`0x10094e30`). It is asked from two
+places:
 
-- **What `flyaround` orbits.** Eleven waypoints ask for it; the field says
-  neither a radius nor an axis, so it is presumably the camera circling its
-  own target.
-- **Which end of an edge `EdgeTime` belongs to.** Travel *into* a waypoint is
-  the reading used here because the first waypoint of a briefing also carries
-  one; that is a **guess**.
-- **What `RotateTime` rotates**, and whether `NoisePercent` is static or
-  interference. No shipped value contradicts either reading.
-- **Whether `LoopIndex` would work.** It is −1 everywhere, so the engine's
-  behaviour on any other value is untested by the data.
+- **The game callback** every clan's SuperAI is created with (`0x10060ce0`,
+  pushed at `0x100391a5`). A script calls it with two values, and the first is
+  one of `varset.var`'s own `Messages` constants: `SYSTEM_MESSAGE` 0 records
+  the mission's result (`MISSION_FAILED` / `MISSION_COMPLETE`),
+  **`MESSAGE_INFO` 1 plays the message whose id is the second value**,
+  `CLAN_HERO_KILLED` 2 does nothing in this build, and `OBJECTIVE_COMPLETE`,
+  `OBJECTIVE_FAILED` and `OBJECTIVE_PROGRESS`, 3 to 5, set an objective's
+  state ([17-saves.md](17-saves.md)). In `ai.dll` the call is made by the
+  handler stored at the interpreter's `+0x78` (`0x1000c266`), which evaluates
+  two operands and passes them on.
+- **`iron3d.dll` itself**, in game mode 4: id 22 from the order menu
+  (`0x10058015`) and id 100 from `0x100638a9`.
+
+Measured against the scripts: **every call a script makes with a message
+constant goes through one function id, `fn30`** — 244 calls, 99 of them
+`MESSAGE_INFO` — and **all 22 literal ids** the clan scripts of 13 missions
+pass with `MESSAGE_INFO` are `message_index` values of that mission's
+`messages.cfg`; the training missions mostly pass a counter, `dMCount`,
+instead. The two ids the game asks for itself are each in exactly one file,
+both in the training campaign — 22 in `CAMPAIGN.00/Mission.03`, 100 in
+`CAMPAIGN.00/Mission.02` — which is why those files skip to them.
+
+## Not established
+
+- ~~What `flyaround` orbits~~ — **the waypoint's target**, level, once per
+  `RotateTime` (*read*; 11 of 11 dwell one revolution).
+- ~~Which end of an edge `EdgeTime` belongs to~~ — **the end it leaves**
+  (*read*; every fade to black lasts it).
+- ~~What `RotateTime` rotates~~ — the `flyaround` orbit, and nothing else.
+- ~~Whether `NoisePercent` is static or interference~~ — **neither: this build
+  never reads it** after loading. What a value was meant to do cannot be
+  learned from this binary.
+- ~~What `LoopIndex` other than −1 would do~~ — send the camera to that
+  waypoint after this one, instead of the next; an index at or before the
+  current one loops the flythrough (*read*; no shipped briefing sets one).
+- ~~Who asks for a message by `message_index`~~ — the clan script, through
+  the SuperAI's game callback with `MESSAGE_INFO`, and the game itself for 22
+  and 100.
+- **What game mode 4 is.** `iron3d.dll:0x1005c748` compares the settings
+  object's first word with 2, 3 and 4 into three flags; mode 4 is the one that
+  asks for messages 22 and 100, which only training missions carry, so the
+  training campaign is the likely reading — a **guess**.
+- **How a briefing is skipped**, and what `WaitForClick` was for; nothing that
+  indexes the waypoints reads it.
+- **The spline's own curve** (`0x1002cc50`, set up at `0x10030a10`) beyond its
+  end tangents.
 
 Everything above is re-derived by `uv run openparkan verify`.

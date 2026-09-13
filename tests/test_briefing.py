@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import dataclasses
+
 from openparkan import briefing
 
 BRIEFING = """\
@@ -128,3 +130,24 @@ def test_briefings_are_found_by_name(tmp_path):
     (tmp_path / "Mission.01").mkdir()
     write(tmp_path, f"Mission.01/{briefing.BRIEFING}", BRIEFING)
     assert [p.parent.name for p in briefing.briefings(tmp_path)] == ["Mission.01"]
+
+
+def test_the_camera_leaves_for_the_next_stop_or_the_loop(tmp_path):
+    stops = briefing.waypoints(write(tmp_path, briefing.BRIEFING, BRIEFING))
+    assert briefing.next_stop(stops, 0) == 1
+    assert briefing.next_stop(stops, 1) is None
+    looped = [stops[0], dataclasses.replace(stops[1], loop=0)]
+    assert briefing.next_stop(looped, 1) == 0
+
+
+def test_a_flyaround_turns_once_per_rotate_time(tmp_path):
+    first, _ = briefing.waypoints(write(tmp_path, briefing.BRIEFING, BRIEFING))
+    assert first.orbit_rate == 0.0
+    orbiting = dataclasses.replace(first, wait="flyaround", rotate_time=4.0)
+    assert abs(orbiting.orbit_rate * 4.0 - briefing.FULL_TURN) < 1e-9
+    assert briefing.WAIT_CODES["flyby"] == briefing.WAIT_CODES["flyaround"]
+
+
+def test_fade_percent_is_the_black_overlay(tmp_path):
+    first, second = briefing.waypoints(write(tmp_path, briefing.BRIEFING, BRIEFING))
+    assert first.fade_level == 1.0 and second.fade_level == 0.0

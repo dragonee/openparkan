@@ -11,14 +11,14 @@ directory, written in the same ``object … end`` syntax as ``mission.cfg``::
         TargetX = 967.457        where it looks
         TargetY = 610.348
         TargetZ = 11.945
-        EdgeType = "spline"      how it travels
-        WaitType = "continuous"  whether it stops here
+        EdgeType = "spline"      how it leaves
+        WaitType = "continuous"  what it does here
         EdgeTime = 3.70
         WaypointTime = 0.000
         RotateTime = 0.000
         FadeTime = 0.000
         ZoomTime = 0.000
-        WaitForText = false      what holds the sequence here
+        WaitForText = false      the holds it asks for
         WaitForSound = true
         WaitForTime = true
         WaitForClick = false
@@ -59,6 +59,25 @@ dialogue rather than the briefing::
 **99 messages, and every text resource resolves.**  ``message_index`` is an
 id, not a position: three files skip a number and one jumps to 100.  Those 16
 are exactly the missions whose ``mission.cfg`` declares ``tutorial_voices``.
+A clan's script asks for one by id: it calls the game back with
+``MESSAGE_INFO`` and the id, and ``iron3d.dll`` looks the message up in the
+map it built from this file.  The game itself asks for two, ``ENGINE_MESSAGES``.
+
+How ``iron3d.dll`` plays the flythrough (``0x1002f480`` and the functions it
+calls) settles the fields' meanings:
+
+- An **edge belongs to the waypoint it leaves.**  From waypoint *i* the camera
+  travels to waypoint *i + 1* -- or to ``LoopIndex`` when that is not -1 --
+  over *i*'s ``EdgeTime``, the way *i*'s ``EdgeType`` says.  The last
+  waypoint's edge goes nowhere and is the hold before the briefing ends.
+- ``flyaround`` **orbits the waypoint's target**, level, at the camera's own
+  height and distance, one revolution per ``RotateTime`` seconds.
+- ``FadePercent`` is the **black overlay's opacity**, ``FadeTime`` how long it
+  takes to go from this waypoint's to the next's; a ``jump`` dips to black and
+  back over its own ``EdgeTime`` instead.
+- ``NoisePercent`` is read and **never used**: nothing in the player looks at
+  it, or at ``WaitForText``, ``WaitForSound`` and ``WaitForClick``.  A dwell
+  ends when ``WaypointTime`` runs out if ``WaitForTime`` is set, at once if not.
 
 Everything above is re-derived by ``uv run openparkan verify``.
 """
@@ -78,11 +97,27 @@ MESSAGES = "messages.cfg"
 BRIEFING_ROLE = "briefing_sounds"
 MESSAGE_ROLE = "tutorial_voices"
 
-#: How the camera travels into a waypoint.
+#: How the camera travels out of a waypoint.
 EDGES = ("linear", "spline", "jump")
 
-#: Whether it stops there.
+#: What it does while it is there.
 WAITS = ("continuous", "stay", "flyaround")
+
+#: The codes the loader (``iron3d.dll:0x1002d140``) turns the words into.  It
+#: also takes ``flyby``, as the same code as ``flyaround``; no briefing uses it.
+#: ``stay`` and ``continuous`` differ only in the tangent a spline edge
+#: arrives with: still at a ``stay``, moving at a ``continuous`` stop whose own
+#: edge is a spline.
+EDGE_CODES = {"linear": 0, "spline": 1, "jump": 2}
+WAIT_CODES = {"stay": 0, "flyaround": 1, "flyby": 1, "continuous": 3}
+
+#: The loader refuses a ``spline`` whose ``EdgeTime`` is not positive, a
+#: ``flyaround`` whose ``RotateTime`` is zero and a ``flyby`` whose is not
+#: positive.  One ``RotateTime`` is one revolution.
+FULL_TURN = 6.2831855
+
+#: Percentages are read as whole numbers and stored times this.
+PERCENT = 0.01
 
 #: Every field a waypoint carries.  All 378 carry all 24.
 FIELDS = (
@@ -93,8 +128,22 @@ FIELDS = (
     "ZoomOn", "NightVisionOn", "LoopIndex",
 )
 
-#: What ``LoopIndex`` holds in every shipped waypoint.
+#: What ``LoopIndex`` holds in every shipped waypoint.  Anything else names the
+#: waypoint to go to after this one, in place of the next in file order.
 NO_LOOP = -1
+
+#: The first argument a script passes when it calls the game back
+#: (``iron3d.dll:0x10060ce0``), named as ``varset.var`` names them: a mission
+#: result, a message by id, a hero killed (which this build ignores), and an
+#: objective completed, failed or reopened.
+SCRIPT_CALLS = {
+    "SYSTEM_MESSAGE": 0, "MESSAGE_INFO": 1, "CLAN_HERO_KILLED": 2,
+    "OBJECTIVE_COMPLETE": 3, "OBJECTIVE_FAILED": 4, "OBJECTIVE_PROGRESS": 5,
+}
+
+#: The message ids ``iron3d.dll`` asks for itself, in game mode 4: 22 from
+#: the order menu (``0x10058015``) and 100 from ``0x100638a9``.
+ENGINE_MESSAGES = (22, 100)
 
 #: What the shipped installation carries.
 BRIEFINGS = 20
@@ -142,14 +191,36 @@ class Waypoint:
 
     @property
     def seconds(self) -> float:
-        """Travel plus dwell.  A floor, not a duration: a waypoint that waits
-        for its voice runs as long as the voice does, which is not in the
-        file."""
+        """Travel plus dwell: the waypoint's time when ``WaitForTime`` is set.
+
+        The player consults no other hold, so this is the whole of it."""
         return self.edge_time + self.dwell
 
     @property
     def speaks(self) -> bool:
         return bool(self.text_id or self.sound_id)
+
+    @property
+    def orbit_rate(self) -> float:
+        """Radians a second a ``flyaround`` turns: a full turn per ``RotateTime``."""
+        return FULL_TURN / self.rotate_time if self.rotate_time else 0.0
+
+    @property
+    def fade_level(self) -> float:
+        """The black overlay's opacity, 0 clear to 1 black."""
+        return self.fade * PERCENT
+
+
+def next_stop(stops: list[Waypoint], index: int) -> int | None:
+    """Where the camera goes after waypoint ``index``, or ``None`` at the end.
+
+    ``LoopIndex`` wins when it is set; otherwise the next waypoint in file
+    order.  The edge there is ``stops[index]``'s own.
+    """
+    loop = stops[index].loop
+    if loop != NO_LOOP:
+        return loop
+    return index + 1 if index + 1 < len(stops) else None
 
 
 @dataclass(frozen=True)

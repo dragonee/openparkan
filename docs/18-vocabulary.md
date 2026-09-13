@@ -177,14 +177,25 @@ component kinds, like the six clips outside the catalogue.
 ## The member record in a save
 
 The engine writes "a thing from an archive" as two 32-byte string fields
-followed by three `int32`. The strings are
-[read](17-saves.md); the three integers are not.
+followed by three `int32`. **The 1158 narrow records a scan finds are three
+populations**, now that the save is [parsed](17-saves.md): 906 entries of a
+model's part list, 201 records inside the control system's chunk, and 51
+components of saved unit designs in `.dat` layout. The table that follows
+this paragraph used to average the three; the part list's fields are *read*
+(`AniMesh.dll:0x10003760`) and *measured*:
 
-| offset | *measured* | reading |
+| offset | part list, *read* | *measured* |
 |---|---|---|
-| `+64` | 0 (567), 7 (245), 1 (94), −1 (91), 6, 3 | **unknown.** Not the component class: tested against the class id the assemblies give the same member and it disagrees on 953 of 957. Ammunition records carry 10 and 12 here where internals carry 0, which would suit a quantity, but that is one weak pattern and not evidence. |
-| `+68` | 0–7 mostly, with some values that are plainly uninitialised (`0x01010000`) | **unknown** |
-| `+72` | 1098 of the 1158 **narrow** records hold 1…32; 919 of 1157 adjacent records differ by exactly one. The offset is a field of that record only — the wide record puts its member name at 128 | counts along a group of parts. It **runs down as often as up** — `23, 17, 16, 15` in one save, `17, 20, 19, 18` in another — so the obvious reading, a slot number counting from 1, is wrong. **Role unknown.** |
+| `+64` | the **id of the part this one hangs off**, 0 for the object itself | 906 of 906 name 0 or another part in the same list; every ammunition part hangs off its gun |
+| `+68` | the **node of the parent's mesh** for an `EXTO` part, the **slot of its controller** for an `INTO` one — the `.dat` attachment field, relative to the parent | 0 on all 69 ammunition parts: slot 0 of the gun |
+| `+72` | the part's **own id**, the lowest not in use when it was attached | unique within all 94 lists |
+
+That settles what this table used to say. The ammunition "quantity" at `+64`
+was the gun's id. The `−1` (91) and the "plainly uninitialised" values were
+the other two populations — a design component's `+64` is its flags word, 1.
+And `+72` ran down as often as up because ids are handed out lowest-free as
+parts come and go; the old "counts along a group" was only ever an
+approximate description of a list written in attachment order.
 
 ## A negative result worth recording
 
@@ -193,12 +204,15 @@ memory dump, so any vtable pointer in it would name a C++ class and its method
 table. **It does not.** Of every word in the image's address range, only four
 recur across all six saves, and the two that appear exactly once per save sit
 at fixed header offsets — leftovers in a dumped struct, not an object's vtable.
-The saves carry heap addresses, not class pointers, so they are no route into
-the binaries' class layout.
+The parse shows what such leftovers are: the world header ends in ten words of
+stack, two of which are `iron3d.dll` addresses in every save — `0x10106b98`,
+and `0x100a16fb`, the save writer's own return address after an `fwrite`.
+Objects are named by ids, not class pointers, so a save is no route into the
+binaries' class layout.
 
 ## What this does not cover
 
-The object graph itself. Units, buildings, positions, damage, resources and
-mission progress are all in a `.sav` and none of it is decoded; see
-[17-saves.md](17-saves.md). This note is about the *names* and the little that
-sits beside them.
+Most of the object graph. The save's sections, its object records, part lists
+and placements are now read ([17-saves.md](17-saves.md)); damage, resources
+and most of each owner's chunk are not. This note is about the *names* and the
+little that sits beside them.

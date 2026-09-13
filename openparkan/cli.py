@@ -738,26 +738,32 @@ def cmd_saves(args, game: Path) -> int:
         return 1
     for path in paths:
         try:
-            s = save.read(path)
-        except save.SaveFormatError as exc:
+            s = save.read(path, game)
+        except (save.SaveFormatError, OSError) as exc:
             print(f"{path.name}: {exc}")
             continue
         label = index.get(path.name.lower())
-        kind = "campaign" if s.campaign else "single"
-        print(f"{path.name}  {path.stat().st_size:>7} bytes  {kind}"
+        print(f"{path.name}  {path.stat().st_size:>7} bytes  {s.level_name}"
               f"{f'  {label.name!r}' if label and label.name else ''}")
         print(f"  mission  {s.mission}")
         print(f"  map      {s.map}")
         print(f"  trees    {', '.join(s.trees) or '-'}")
-        print(f"  body     {len(s.blobs)} length-prefixed blobs, "
-              + ", ".join(f"{b.size}" for b in s.blobs))
+        print(f"  body     world {s.world.size} bytes, {len(s.objects)} objects; "
+              f"{s.clans} clans, {len(s.objectives)} objectives, "
+              f"{len(s.designs)} designs, AI "
+              + ", ".join(f"{c.size}" for c in s.ai)
+              + ("" if s.complete else "  (not read to the end)"))
+        for objective in s.objectives:
+            state = {save.OBJECTIVE_DONE: "done", save.OBJECTIVE_FAILED: "failed"}.get(
+                objective.state, "open")
+            print(f"    {state:6} {objective.text}")
         print(f"  refers to {len(s.references)} archive members, "
               f"{len(s.members)} distinct")
 
-        world = [r for r in s.references if r.field == save.MEMBER_AT[1]]
-        parts = [r for r in s.references if r.field == save.MEMBER_AT[0]]
-        scenery = [r for r in world if r.member.startswith(save.SCENERY)]
-        print(f"  world    {len(world)} objects -- {len(scenery)} scenery, "
+        world = [o for o in s.objects if o.archive]
+        parts = [p for o in s.objects for p in o.parts]
+        scenery = [o for o in world if o.member.startswith(save.SCENERY)]
+        print(f"  world    {len(world)} placed objects -- {len(scenery)} scenery, "
               f"{len(world) - len(scenery)} built")
         print(f"  parts    {len(parts)} records", end="")
         if catalogue:
@@ -770,8 +776,11 @@ def cmd_saves(args, game: Path) -> int:
 
         if args.members:
             print("\n    world objects:")
-            for r in world:
-                print(f"      {r.member}")
+            for o in s.objects:
+                where = ("" if o.position is None else
+                         "  at ({:.1f}, {:.1f}, {:.1f})".format(*o.position))
+                print(f"      {o.kind:#04x} {o.serial:4} {o.member}{where}"
+                      f"{f'  {len(o.parts)} parts' if o.parts else ''}")
             print("    parts:")
             for name, count in Counter(r.member for r in parts).most_common():
                 part = catalogue.get(name)
