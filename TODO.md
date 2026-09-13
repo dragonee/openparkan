@@ -81,7 +81,9 @@ written down is a question nobody reopens.
       only 25 of 348 groups are even 20% tighter than a random subset of the
       same size, so there is nothing there to cull by.
 - [x] **The rest pose.** Not a pose problem at all. The renderer was drawing
-      the models' *collision hulls*: sub-object flag bit `0x20` sits on 28
+      the models' *collision hulls* (since read as the **cockpit**, which only
+      the unit's own first-person view draws — docs/07-objects.md): sub-object
+      flag bit `0x20` sits on 28
       nodes and every one is named `CP_m1o1` or `BTCP_m1o1`, they are always
       leaves, and they carry **18402 triangles** of oversized box. Skip them
       and level 0 fits inside the extent the file itself states on **434 of
@@ -311,8 +313,10 @@ written down is a question nobody reopens.
       holds a single key, and track *i* names entry *i***, so the extra tracks
       are alternative renderings of one surface: the 43 ground twins, and the
       two eight-track insignia sheets. → [docs/07-objects.md](docs/07-objects.md)
-- [x] **What the engine does with the ground's `M` twin.** Nothing
-      multitextured. On all 43 pairs the twin is track 1's entry, and what
+- [x] **What the engine does with the ground's `M` twin.** *Superseded*: the
+      landscape binds it as a second texture stage at render phase 9 — see
+      §2.2. What follows is the earlier reading, kept for its measurements.
+      Nothing multitextured. On all 43 pairs the twin is track 1's entry, and what
       separates it from track 0 is the **lighting**: on 38 of the 43 the first
       entry carries a white diffuse over a black ambient and the second the
       reverse, so the base is lit by the scene and **the twin is drawn
@@ -781,62 +785,45 @@ What is left, each with its handle in [docs/10-sky.md](docs/10-sky.md#not-resolv
 
 ### 2.2 Who asks a material for its second track
 
-Everything else about the ground's `M` twin is closed and sits in section 0.
-What is left is the **selector**, and this round narrowed it a long way
-without closing it.
+- [x] **Closed — the landscape does, and it is a second texture stage.**
+      `CShade`'s cell draw (`Terrain.dll:0x100438c0`) sends each batch through
+      a lighting helper (`0x1002b470`), which asks the material manager's slot
+      3 for **track 1** (`0x1002b4b6`) on every face that is not water, when
+      the device has render phase 9 (`+0xbd8`, `0x10041274`) and
+      `MicroTexturingOn` is on (default 1). It binds track 1's texture as the
+      second stage at phase 9, `tex0 · tex1 · 2 · diffuse`, and builds no
+      extra light pass. 164230 of the 172012 level-0 faces that are not water
+      name a layer-1 material with a second track; no water face does.
+      → [docs/03-terrain.md](docs/03-terrain.md#who-asks-for-track-1--read-and-measured)
 
-The material manager's vtable is at `0x100209e4` — an earlier note had the
-base wrong by two slots, which is why the first search looked at the wrong
-offset. `GetMaterialPhase` is **index 5**, at `+0x14`, and it is a plain
-stdcall:
+The manager, as read before and still right: its vtable is at
+`World3D.dll:0x100209e4` (an earlier note had the base two slots off).
+`GetMaterialPhase` is index 5, `(self, handle, track, time, &out)`, `ret 0x14`;
+`handle` packs `(table << 16) | index`; `out` receives a 0x50-byte descriptor
+— a `D3DMATERIAL7`, one texture and one cell — in a static at `0x1013eab0`,
+and the function returns `material + 0x164`, the block the directory flags
+byte fills. `LoadMatManager` is imported by `Terrain.dll` and `AniMesh.dll`.
 
-```
-GetMaterialPhase(self, handle, track, time, &out)      ret 0x14
-```
+What this entry used to say, and why it was wrong, is worth keeping:
 
-`handle` packs `(table << 16) | index`; `track` is clamped to 0 when it falls
-outside the material's track count; `out` receives a 0x50-byte descriptor —
-a `D3DMATERIAL7`, one texture and one cell — written into a **static** at
-`0x1013eab0`, and the function *returns* a pointer to `material + 0x164`, the
-block the directory flags byte fills. There is a **four-argument sibling at
-index 3** (`0x100031f0`) that returns the same pointer without a track index.
+- **Slot 3 is not track-less.** It takes `(handle, track, &out)` on the global
+  clock, clamping a track outside the material's count to 0
+  (`World3D.dll:0x1000322f`); slot 5 takes a time as well. The call at
+  `Terrain.dll:0x10046917` passes handle 0 and track 0.
+- **There is a five-argument call through slot 5**, at `Terrain.dll:0x100454e6`,
+  on a manager `CShade::StartMeshRender` (`0x100437c0`) keeps at `+0xcb8` —
+  handed to it as an argument by the landscape (`0x1001b95e`) and by every
+  object mesh (`AniMesh.dll:0x10014e0a`). The search looked where managers are
+  *stored* and at `QueryInterface` answers, and this one is neither.
+- **The lead at `AniMesh.dll:0x100059e3`** is IAnimation slot 27: it makes a
+  mesh wear the material of a face it is given, keeping that face owner's
+  manager at `+0x204` and the handle at `+0x208`, and passes them to
+  `StartMeshRender` with track 0. An object mesh otherwise passes the track its
+  `ILifeSystem` slot 15 answers — 0 as far as is read.
+  → [docs/07-objects.md](docs/07-objects.md#who-picks-an-object-meshs-material-track--read)
 
-**Settled, and two things this entry used to say were wrong.**
-`LoadMatManager` is *not* imported only by `Terrain.dll` — `AniMesh.dll`
-imports it too. And index 3 is *not* uncalled: `Terrain.dll` calls it at
-`0x10046917`, with both selector arguments zero, copying the descriptor it
-returns into the caller's own object.
-
-Three modules can hold a manager pointer: `World3D.dll`, which makes it, and
-the two that import it. `Terrain.dll` keeps it in three different object
-fields (`+0x7be0`, `+0xc14`, `+0x178`), `AniMesh.dll` in one (`+0x14c`) —
-which is why a search for a single stored global found less than there was.
-Across all three modules there is **no five-argument call through index 5**.
-The four candidates the arg-counting scan produced are two CRT array-destructor
-helpers calling through a stack argument and two calls of one and three
-arguments on other objects.
-
-**The negative is controlled twice over.** The same scan, run for index 3's
-offset, returns `Terrain.dll:0x10046917` with the four pushes that entry point
-takes — so a run that finds nothing is the binary's answer, not the search's.
-And `analysis/vcalls.py` now also enumerates **every** indirect call at index
-5's offset with no taint at all: 63 across the two modules, of which two have
-a receiver at an offset a manager is stored at. One passes three arguments
-where index 5 takes five; the other's receiver takes a call at `+0x84`, so it
-has at least 34 slots against this vtable's eleven. Neither is the manager.
-The conclusion stands and is now stronger than "nothing found asks for
-another": the engine's own material fetch **has no track parameter to pass**,
-so reading track 0 is what the engine does, not a default this library picked.
-
-**One assumption above failed elsewhere.** "Three modules can hold a manager
-pointer" is not so: any module can ask a face's owner for one by
-`QueryInterface` 0xd, and that is how `Control.dll` reaches slot 9 (the class
-byte, [section 0](#0-done)). A sweep of every module for `QueryInterface` 0xd
-in its usual form — `mov edx, 0xd`, then a call through slot 0 — finds six
-sites — two in `AniMesh.dll`, two in `Control.dll`, one each in `Effect.dll`
-and `Terrain.dll` — and no call through index 5's `+0x14` within the 60
-instructions after any of them. `AniMesh.dll:0x100059e3` keeps its answer in an
-object field, `+0x204`, which that window does not follow.
+Left open: who calls IAnimation slot 27, and who, if anyone, sets an object's
+track through `ILifeSystem` slot 16 (`Control.dll:0x10008810`).
 
 ### 2.3 Effects
 
@@ -971,20 +958,23 @@ and 4 that separate them are the magnitude in their `.exp`.
 Parsed and passed through without being understood. None affects a picture
 today; each is a small trap for anyone extending the code.
 
-- Terrain **surface word bit `0x10`**: set on 244714 faces and clear on 30250,
-  in connected regions, and it tracks *none* of slope, elevation, material,
-  level of detail, map edge, duplication between levels or coverage by the
-  navigation mesh. fparkan's notes say the word is a 16-bit compaction of a
-  32-bit engine mask and that this bit is the engine's `0x00001000`, but do
-  not name it either.
-- Terrain **face field 13**, now known to be *six flags* rather than an id —
-  fparkan documents a six-bit surface class packed from the same mask, and
-  every one of the 275882 faces holds a value below 64. Which flag is which
-  is open; none of the six tracks slope, height or face size.
-- Terrain **draw-order flags bit `0x80`**, on 89 faces across the 33 maps. The
-  rest of that byte is read: `0x10` opens a batch and `0x48` is constant.
-- Object mesh **face flags** (0 on 233714 faces, then 2, 4, 16, 32, 34) and the
-  **class** beside them, which sits below 64 on 240500 of 241887.
+- ~~Terrain **surface word bit `0x10`**~~ — **closed: clear on lava** and its
+  bed, exactly, on the 29 maps that set it at all
+  ([docs/03-terrain.md](docs/03-terrain.md)).
+- ~~Terrain **face field 13**~~ — **closed: the winged-edge link**, three 2-bit
+  codes naming the matching edge in each neighbour, right on 817150 of 817150
+  shared edges ([docs/03-terrain.md](docs/03-terrain.md#field-13-is-the-winged-edge-link)).
+- ~~Terrain **draw-order flags bit `0x80`**~~ — **closed: inert.** The draw
+  reads bit `0x10` alone and nothing reads or writes bit 7; the engine's own
+  rebuilder writes the rest as `0x48`
+  ([docs/03-terrain.md](docs/03-terrain.md#what-the-engine-does-with-the-byte--read-and-measured)).
+- Object mesh **face flags** — narrowed. The **class** beside them is closed:
+  its low six bits are the same winged-edge link, right on 674206 of 674206
+  neighbours by geometry. Flag 2 is on exactly the floors of the 29 buildings
+  with a path graph, 4 and 32 are what a round passes through (read), 16 is on
+  384 vertical building faces. What reads 2 and 16 is open: the mesh visitor
+  takes its triangle masks from its caller (`AniMesh.dll:0x10008120`).
+  → [docs/07-objects.md](docs/07-objects.md#stream-7-is-the-per-face-record)
 - The `.ctl` fields' **meaning**, now that their extent is settled: the
   component record's sixteen values (class 26's first is a building's
   efficiency, done) and its 4-byte entries, section

@@ -146,29 +146,33 @@ other ``L20M.0``.  860 materials have a single track, 43 have two and two
 have eight.
 
 The 43 two-track ones are the ground, and on all 43 the second track's entry
-names the first's texture with an ``M`` inserted.  The twin is **not a second
-texture layer**: nothing binds the two together, and a caller asking for
-track 1 gets one texture exactly as a caller asking for track 0 does.  What
-separates them is the lighting: on 37 of the 43 the first entry carries a
-white diffuse over a black ambient and the second a black diffuse over a
-white ambient, so the base is lit by the scene and **the twin is drawn
-unlit** -- which is what a texture flattened towards mid-grey is for.  See
-``docs/03-terrain.md``.
+names the first's texture with an ``M`` inserted.  Nothing in the record binds
+the two together, and a caller asking for track 1 gets one texture exactly as
+a caller asking for track 0 does.  Their entries differ in lighting: on 37 of
+the 43 the first carries a white diffuse over a black ambient and the second
+a black diffuse over a white ambient.  The landscape, though, takes only the
+twin's texture and multiplies it over the base at twice strength (below), so
+those colours are not what draws it.  See ``docs/03-terrain.md``.
 
 The two eight-track materials, ``B_LBL_01`` and ``R_LBL_01``, are the same
 mechanism used for variants rather than frames: eight tracks of one key,
 naming cells 0 to 7 of one insignia sheet, blue and red.
 
-**Nothing asks for a track.**  The manager exposes two ways to fetch a
-material: ``GetMaterialPhase`` at vtable index 5, which takes a track index,
-and a sibling at index 3 that takes none.  Only three modules can hold a
-manager pointer -- ``World3D.dll``, which makes it, and ``Terrain.dll`` and
-``AniMesh.dll``, which import ``LoadMatManager`` -- and between them there is
-**no five-argument call through index 5 at all**, while index 3 *is* called,
-from ``Terrain.dll`` at ``0x10046917``, with its selectors zero.  So reading
-track 0 is not this library guessing a default: the engine's own fetch has no
-track parameter to pass.  See ``analysis/README.md`` for how that negative was
-controlled.
+**Who asks for track 1** -- *read*.  Both of the manager's fetches take a
+track: ``GetMaterialPhase`` at vtable index 5 with an explicit time, and index
+3 on the global clock; either clamps a track outside the material's count to
+0.  The landscape's draw asks for **track 1** (``Terrain.dll:0x1002b4b6``, the
+lighting helper ``0x1002b470``) for every batch that is not water, when the
+``MicroTexturingOn`` setting is on (default 1) and the device has render phase
+9, ``tex0 x tex1 x 2 x diffuse``.  It takes only that entry's *texture*, binds
+it as the second stage over track 0's and sets phase 9 -- instead of building
+the light pass it builds otherwise.  An object mesh draws with the track its
+``ILifeSystem`` slot 15 answers (``AniMesh.dll:0x10014dee``), which is 0 unless
+something sets it.  So track 0 is right for a picture without the second
+stage, and ``GROUND_DETAIL_TRACK`` is what the game layers over it.  An
+earlier version of this note said nothing asks; the call through index 5 it
+could not find is at ``Terrain.dll:0x100454e6``, on a manager handed to
+``CShade::StartMeshRender`` rather than stored.
 """
 
 from __future__ import annotations
@@ -234,6 +238,14 @@ LIQUID_BED_RATE = 10000.0
 
 #: A material with a second track is the ground's ``M`` twin.
 TWIN_TRACKS = 2
+
+#: The track the landscape binds as the second texture stage, at render phase
+#: 9 (``tex0 x tex1 x 2``), on every face that is not water
+#: (``Terrain.dll:0x1002b4b6``).  Mid-grey is that phase's identity, which is
+#: what the twin is flattened towards.
+GROUND_DETAIL_TRACK = 1
+#: The render phase it is drawn with: ``MODULATE2X``.
+GROUND_DETAIL_PHASE = 9
 
 #: The archive directory's *first* count field is a flags byte, and it is what
 #: the loader branches on: bit 1 goes into one field of the loaded material,
@@ -419,6 +431,18 @@ class Material:
             return None
         at = self.tracks[track].keys[0].entry
         return self.entries[at] if at < len(self.entries) else None
+
+    def entry_for_track(self, track: int) -> MaterialEntry | None:
+        """The entry the engine's material manager hands out for ``track``.
+
+        Unlike ``variant``, a track outside the material's count is taken as
+        track 0, which is what both of the manager's fetches do
+        (``World3D.dll:0x1000322f``).  So the landscape's request for
+        ``GROUND_DETAIL_TRACK`` on a one-track material gets its base again.
+        """
+        if not 0 <= track < len(self.tracks):
+            track = 0
+        return self.variant(track)
 
     @property
     def frames(self) -> list[str]:

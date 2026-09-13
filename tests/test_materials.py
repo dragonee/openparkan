@@ -53,3 +53,25 @@ def test_the_header_carries_the_ground_a_unit_stands_on():
 def test_a_zero_dword_is_no_damage():
     m = materials.parse("L02", struct.pack("<2HBBfI", 0, 0, 1, materials.UNSET, 1.0, 0))
     assert m.damage_rate == 0.0
+
+
+def ground(names: list[str]) -> materials.Material:
+    entries = [materials.MaterialEntry(texture=n) for n in names]
+    tracks = [materials.Track(kind=0, param=0, keys=[materials.Key(entry=i, time=0)])
+              for i in range(len(names))]
+    return materials.Material(name="L20", entry_count=len(names),
+                              track_count=len(names), entries=entries, tracks=tracks)
+
+
+def test_the_landscape_layers_the_second_track_over_the_first():
+    twin = ground(["L20.0", "L20M.0"])
+    assert twin.entry_for_track(materials.GROUND_DETAIL_TRACK).texture == "L20M.0"
+    assert twin.entry_for_track(0).texture == "L20.0"
+
+
+def test_a_track_the_material_lacks_is_taken_as_track_0():
+    """Both manager fetches clamp; the library's variant() does not."""
+    single = ground(["L08.0"])
+    assert single.variant(materials.GROUND_DETAIL_TRACK) is None
+    assert single.entry_for_track(materials.GROUND_DETAIL_TRACK).texture == "L08.0"
+    assert single.entry_for_track(-1).texture == "L08.0"

@@ -36,14 +36,29 @@ One areal:
 0x30  uint32   vertex count V
 0x34  uint32   sub-block count B          zero on every shipped map
 0x38  float32  V × [3]                    polygon vertices
-      int32    (V + 3B) × [2]             per edge: neighbour areal index and a
-                                          second index whose role is unclear
-      B × { uint32 n; float32 n × [3] }
+      int32    V × [2]                    per edge: neighbour areal, twin edge
+      int32    3B × [2]                   three more pairs per sub-block
+      B × { uint32 n; float32 n × [3] }   a sub-block: n points
 ```
 
 So an areal is `56 + V*20` bytes when B is zero — which is exactly the 196-byte
 stride visible in a hex dump of a 7-vertex areal, and the reason a fixed-stride
 guess almost worked and then fell apart.
+
+### The sub-blocks are carried and never used — *read*
+
+The per-areal load (`ArealMap.dll:0x10007640`, called for each areal from the
+map loader at `0x1001e2cb`) copies nothing: it keeps pointers into the
+payload. Into the 120-byte areal it writes the record's address (`+4`), V
+(`+8`), the vertex pointer (`+0xc`), the edge pointer (`+0x10`) and the
+vertices' xy box (`+0x14`..`+0x20`). Then it moves the cursor past
+`(V + 3B) × 8` bytes of pairs and, for each sub-block, past `4 + n × 12` —
+which is the layout above — and keeps **no field for B**, no pointer to the
+three extra pairs and none to the points; the only count the areal holds is
+V. So a map could carry sub-blocks and the game would step over them and keep
+nothing of them; none ships any, so what an editor meant by them is not in
+the data either. That the kept record address is never used to reach `+0x34`
+again was searched within `ArealMap.dll` only.
 
 **A lake is its own areal.** Every areal whose third flag word has all of
 `0xF0` set covers only water and liquid-bed faces, and every other areal is

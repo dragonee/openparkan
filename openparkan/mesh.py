@@ -17,7 +17,7 @@ the same numeric-type-as-stream-selector convention as the terrain
      6       6  face        triangle, three uint16 indices *relative to the
                              first_vertex of the batch that covers them*
      7      16  face        flags, three edge neighbours, the face normal as
-                             int16 over 32767, and a small trailing field
+                             int16 over 32767, and the winged-edge link
      8      24  pose key    a node's placement: float32[3] translation,
                              float32 frame time, int16[4] rotation over 32767
      9      32  sub-object  sub-object name ("Base_TM", "leaf1_m1o1")
@@ -54,12 +54,30 @@ STREAM_UV = 5
 STREAM_TRIANGLE = 6
 STREAM_FACE = 7
 #: One 16-byte record per triangle: flags, three edge neighbours, the face's
-#: own normal as int16 over NORMAL_SCALE, and a small trailing field.
+#: own normal as int16 over NORMAL_SCALE, and the winged-edge link.
 FACE_RECORD_STRIDE = 16
 #: A face record's normal is int16 over this, as the terrain's is.
 NORMAL_SCALE = 32767.0
 #: No neighbour across this edge.
 NO_FACE = 0xFFFF
+#: The record's last word is the terrain's field 13 again: three 2-bit codes,
+#: edge ``e`` at ``(link >> 2 * e) & 3``, each **the index of the matching edge
+#: back in the neighbouring face**, 3 where there is none.  Checked by geometry
+#: rather than by mutuality -- the code names the neighbour's edge with the
+#: same two vertex positions on **674206 of 674206** in-range neighbours, and
+#: it is 3 on all 51455 open edges.  Only the low six bits are the link: 1387
+#: faces carry more above them, and they recur at the same record positions
+#: across unrelated models (faces 120, 123 and 124 of a node's run on most
+#: trees), which is what a buffer the exporter never cleared looks like.
+FACE_LINK_BITS = 2
+FACE_LINK_MASK = 0x3F
+FACE_NO_TWIN = 3
+#: Face flag ``0x02`` is on the floors of the buildings a unit walks through:
+#: it sits on exactly the 29 meshes that carry a path graph and on nothing
+#: else, and 5590 of its 6166 faces face straight up once posed (*measured*;
+#: no reader of it is established).  4 and 32 are the faces a round passes
+#: through (``ROUND_SKIPS_FACE``); 16 is on 384 vertical faces of 20 buildings.
+FACE_BUILDING_FLOOR = 0x02
 STREAM_SUBOBJECT_NAME = 9
 STREAM_SUBOBJECT_HEADER = 1
 STREAM_BATCH = 13
@@ -73,20 +91,28 @@ SLOT_HEADER_SIZE = 0x8C
 SLOT_SIZE = 68
 #: A node selects geometry with ``slot_index[variant * SLOTS_PER_VARIANT + lod]``.
 #: Each block of five is one variant: four levels of detail and a fifth slot
-#: that is **collision geometry**.  Within a block the first four triangle
-#: counts fall monotonically on 1157 of 1161 chains; including the fifth drops
-#: that to 869, which is what says it is not a level.
+#: that is **what the unit's own first-person view draws**.  Within a block the
+#: first four triangle counts fall monotonically on 1157 of 1161 chains;
+#: including the fifth drops that to 869, which is what says it is not a level.
 #:
-#: What says it is collision: the 28 nodes that carry *only* a fifth slot are
-#: exactly the 28 collision hulls -- flag bit 5, every one named ``CP_*`` or
-#: ``BTCP_*`` -- so a hull's geometry lives in that slot and nowhere else.  On
-#: the 288 ordinary nodes that carry both, the fifth is always a *separate*
-#: slot, never shared with a level: a same-sized copy of level 0 on 141, a
-#: coarser shape on 137 (nearest level 1 on 83 of them), finer on 10.  That
-#: last half is the reading rather than the measurement -- and a round's hit
-#: test does **not** read slot 4: it takes level 0 (``HIT_LOD``), so a hull is
-#: never struck.  What reads the fifth slot is not established.
-COLLISION_SLOT = 4
+#: What reads it -- *read*.  A turret's camera component registers the view it
+#: creates with the unit's mesh (``Control.dll:0x1002399a``, IAnimation slot
+#: 33), and the mesh draw asks whether the view drawing it is one of those
+#: (``AniMesh.dll:0x10014bdb``, slot 34).  If it is, every node draws slot
+#: ``variant * 5 + 4`` instead of the level the distance picks
+#: (``0x10014be5``), and a node with nothing there is not drawn at all.
+#:
+#: The 28 nodes that carry *only* a fifth slot -- flag ``0x20``, named
+#: ``CP_m1o1`` or ``BTCP_m1o1`` -- are therefore geometry only that view sees,
+#: and they are where the view sits: on all 54 turret records whose mesh has
+#: one, the ``CameraCenter`` control point is on it.  So they are the cockpit.
+#: An earlier reading called them collision hulls and this slot collision
+#: geometry; a round's hit test takes level 0 (``HIT_LOD``) and never this
+#: slot.  On the 288 ordinary nodes that carry both, the fifth is a separate
+#: slot: a same-sized copy of level 0 on 141, coarser on 137, finer on 10.
+COCKPIT_LOD = 4
+#: The name this slot had while it was read as collision geometry.
+COLLISION_SLOT = COCKPIT_LOD
 SLOTS_PER_VARIANT = 5
 LOD_COUNT = 4
 VARIANT_COUNT = 3
@@ -114,13 +140,19 @@ ROUND_SKIPS_BATCH_200 = 0x200
 ROUND_TESTS_BATCH_200 = 0x4000000
 #: Bit 0 of a sub-object's flags marks interior geometry.
 SUBOBJECT_INTERIOR = 0x0001
-#: Bit 5 marks a collision hull -- geometry the engine tests against but never
-#: draws.  It sits on 28 nodes across the shipped archives and on nothing else,
-#: and every one of them is named ``CP_m1o1`` (19) or ``BTCP_m1o1`` (9).  They
-#: are always leaves, and together they carry 18402 triangles that a renderer
-#: must skip: excluding them is what takes the models that fit inside their own
-#: authored bounding box from 422 to 434 of 434.
-SUBOBJECT_COLLISION = 0x0020
+#: Bit 5 marks the **cockpit**: a node whose only geometry is its fifth slot,
+#: so only the unit's own first-person view draws it (``COCKPIT_LOD``).  It
+#: sits on 28 nodes, all in ``turrets.rlb``, every one named ``CP_m1o1`` (19)
+#: or ``BTCP_m1o1`` (9); they are always leaves, and the turret's
+#: ``CameraCenter`` sits on them.  Their 18402 triangles are not what anyone
+#: else sees: excluding them is what takes the models that fit inside their
+#: own authored bounding box from 422 to 434 of 434.  When a mesh draws its
+#: fifth slot it tells ``CShade``'s mesh draw mode 2 for a node with this bit
+#: and 1 for any other (``AniMesh.dll:0x10014e9a``), which that draw files
+#: under layer 10 or 9 where an ordinary surface gets 0, or 5 see-through.
+SUBOBJECT_COCKPIT = 0x0020
+#: The name this bit had while the nodes were read as collision hulls.
+SUBOBJECT_COLLISION = SUBOBJECT_COCKPIT
 NO_PARENT = 0xFFFF
 
 BATCH_SIZE = 20
@@ -321,8 +353,8 @@ class Subobject:
     lets you walk into them -- so a model's parts are split between the two.
     Names say which (``o01_0_m1o1`` outside, ``i03_0_m1o1`` inside) and so does
     ``flags`` bit 0, which agrees with the naming on all 1564 sub-objects
-    across six archives.  Bit 5 marks a collision hull, which is not drawn at
-    all; see ``is_collision``.
+    across six archives.  Bit 5 marks the cockpit, which only the unit's own
+    first-person view draws; see ``is_cockpit``.
     """
 
     name: str
@@ -345,29 +377,35 @@ class Subobject:
         return bool(self.flags & SUBOBJECT_INTERIOR)
 
     @property
-    def is_collision(self) -> bool:
-        """Whether this node is a collision hull rather than something to draw.
+    def is_cockpit(self) -> bool:
+        """Whether this node is the cockpit, drawn only to the unit's own view.
 
-        A `CP_m1o1` hull is a crude box around the part it belongs to, and it
-        is bigger than the part -- a turret's is nearly twice its height -- so
-        drawing it puts a translucent slab over the model and pushes it
-        outside the box the file itself states.
+        A ``CP_m1o1`` node is a box around the eye, bigger than the part -- a
+        turret's is nearly twice its height -- so drawing it in a survey puts a
+        slab over the model and pushes it outside the box the file states.
         """
-        return bool(self.flags & SUBOBJECT_COLLISION)
+        return bool(self.flags & SUBOBJECT_COCKPIT)
 
-    def collision_slot(self, variant: int = 0) -> int | None:
-        """The fifth slot of a variant.
+    #: The name ``is_cockpit`` had while these nodes were read as hulls.
+    is_collision = is_cockpit
 
-        A round's hit test does not read it (``hit_slot``); what does is not
-        established.
+    def cockpit_slot(self, variant: int = 0) -> int | None:
+        """The fifth slot of a variant: what the unit's own view draws.
+
+        The mesh draws it in place of a level of detail for a view the
+        turret's camera component registered (``COCKPIT_LOD``).  A round's hit
+        test does not read it (``hit_slot``).
         """
-        index = self.slot_index[variant * SLOTS_PER_VARIANT + COLLISION_SLOT]
+        index = self.slot_index[variant * SLOTS_PER_VARIANT + COCKPIT_LOD]
         return None if index == NO_SLOT else index
+
+    #: The name ``cockpit_slot`` had while the slot was read as collision.
+    collision_slot = cockpit_slot
 
     def hit_slot(self, variant: int = 0) -> int | None:
         """The slot a round is tested against: level 0 of the variant, no fallback.
 
-        None on every collision hull, which carries no level 0.
+        None on every cockpit node, which carries no level 0.
         """
         index = self.slot_index[variant * SLOTS_PER_VARIANT + HIT_LOD]
         return None if index == NO_SLOT else index
@@ -381,9 +419,10 @@ class Subobject:
         geometry.
 
         28 nodes carry only the fifth slot of their variant, and level 0
-        falls back to it.  Those 28 are exactly the collision hulls, so the
-        fallback never reaches a picture -- ``select`` and the viewer skip
-        hulls -- but it is how a hull's geometry is found at all.
+        falls back to it.  Those 28 are exactly the cockpit nodes, which the
+        game draws only to the unit's own view, so the fallback never reaches
+        a survey picture -- ``select`` and the viewer skip them -- but it is
+        how their geometry is found at all.
         """
         base = variant * SLOTS_PER_VARIANT
         block = self.slot_index[base : base + SLOTS_PER_VARIANT]
@@ -446,8 +485,9 @@ class ObjectMesh:
     #: cross product on 241879; ``face_adjacency`` its three edge neighbours,
     #: ``NO_FACE`` where there is none, and every in-range neighbour shares an
     #: edge -- 674200 of 674206.  ``face_flags`` is 0 on 233714 faces and
-    #: takes 2, 4, 16, 32 or 34 on the rest; ``face_class`` sits below 64 on
-    #: 240500 of them, the shape the terrain's own class field has.
+    #: takes 2, 4, 16, 32 or 34 on the rest; ``face_class`` is the winged-edge
+    #: link in its low six bits (``edge_twin``), with leftovers above them on
+    #: 1387 faces.
     face_normal: list[tuple[float, float, float]] = field(default_factory=list)
     face_adjacency: list[tuple[int, int, int]] = field(default_factory=list)
     face_flags: list[int] = field(default_factory=list)
@@ -659,11 +699,11 @@ class ObjectMesh:
         short.  The flag marks internal *components*, not a separate indoor
         model.
 
-        Collision hulls are never returned; see ``Subobject.is_collision``.
+        Cockpit nodes are never returned; see ``Subobject.is_cockpit``.
         """
         out: list[tuple[int, int, int]] = []
         for node in self.nodes:
-            if node.is_collision:
+            if node.is_cockpit:
                 continue
             if interior is not None and node.is_interior != interior:
                 continue
@@ -682,6 +722,16 @@ class ObjectMesh:
             if first <= index < first + count:
                 return b.material
         return None
+
+    def edge_twin(self, face: int, edge: int) -> int | None:
+        """Which edge of the face across ``edge`` is the shared one.
+
+        ``None`` where the edge is open.  The face record's last word is the
+        same winged-edge link the terrain keeps in its field 13; only its low
+        six bits are the link (``FACE_LINK_MASK``).
+        """
+        code = (self.face_class[face] >> (FACE_LINK_BITS * edge)) & 3
+        return None if code == FACE_NO_TWIN else code
 
     @property
     def vertex_count(self) -> int:
@@ -905,14 +955,29 @@ class ControlPoint:
     def nodes(self) -> tuple[int, int]:
         """The first triple's second and third slots, read as the int32 they are.
 
-        The first names a node of the same-stem mesh on all but one of the
-        points that have one; the second is the same number on 3338 of the
-        3599, and where they differ -- ``r_b_03``'s wheels, a gun's barrels --
-        the second is the part's own node.  On the hero's turret both name the
-        node the point sits on.  What the pair means where it differs is not
-        established.
+        The first is **the node the point sits on** -- the only one the
+        control system keeps when it loads the file (``Control.dll:0x1000b22a``),
+        and the one its world position and direction come from.  It names a
+        node of the same-stem mesh on all but one of the points that have one.
+
+        The second is the same number on 3338 of the 3599.  Where it differs it
+        is **the node that carries the point**: for a contact point the ground
+        contact marks that node (``0x1001a3aa``) and stops counting the point
+        once that node is destroyed (``0x1001ac0d``).  On a chassis it is the
+        wheel or leg below the body node the point sits on -- 69 of the 78
+        chassis points whose pair differs.  See ``placed_on`` and ``carrier``.
         """
         return tuple(struct.unpack("<i", struct.pack("<f", v))[0] for v in self.a[1:])
+
+    @property
+    def placed_on(self) -> int:
+        """The node whose pose places the point."""
+        return self.nodes[0]
+
+    @property
+    def carrier(self) -> int:
+        """The node a contact point lives and dies with; often ``placed_on``."""
+        return self.nodes[1]
 
 
 def parse_control_points(blob: bytes, source: str = "<cpt>") -> list[ControlPoint]:

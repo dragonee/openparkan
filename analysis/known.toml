@@ -200,17 +200,17 @@ doc = "analysis/README.md"
 module = "World3D.dll"
 at = "0x100031f0"
 kind = "function"
-name = "manager slot 3: the track-less material fetch"
+name = "manager slot 3: (handle, track, &out) on the global clock; a track outside the count is 0 -- once misread as track-less"
 read = true
-doc = "analysis/README.md"
+doc = "docs/03-terrain.md"
 
 [[entry]]
 module = "World3D.dll"
 at = "0x10003680"
 kind = "function"
-name = "manager slot 5: GetMaterialPhase, and nobody calls it"
+name = "manager slot 5: GetMaterialPhase (handle, track, time, &out); called from CShade's mesh draw (Terrain.dll:0x100454e6)"
 read = true
-doc = "TODO.md"
+doc = "docs/03-terrain.md"
 
 [[entry]]
 module = "World3D.dll"
@@ -513,9 +513,9 @@ read = false
 module = "Terrain.dll"
 at = "0x100437c0"
 kind = "function"
-name = "CShade::StartMeshRender"
-doc = "the binary's own assertion text"
-read = false
+name = "CShade::StartMeshRender (this, camera, mesh, manager -> +0xcb8, track -> +0xcbc, 0)"
+doc = "docs/07-objects.md"
+read = true
 
 [[entry]]
 module = "Terrain.dll"
@@ -2143,6 +2143,557 @@ at = "0x100346e0"
 kind = "datum"
 name = "six 40-byte alpha-blend mode records of {render state, value}"
 doc = "docs/07-objects.md"
+read = true
+
+# --- who asks for track 1: CShade and the landscape draw, ../docs/03-terrain.md ---
+[[entry]]
+module = "Terrain.dll"
+at = "0x1009b17c"
+kind = "datum"
+name = "CShade vtable: 4 cell draw, 5 StartMeshRender, 14 SetClipStateForJoint, 15 set +0xca8, 18 EndMeshRender, 21 mesh draw"
+doc = "docs/03-terrain.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x100438c0"
+kind = "function"
+name = "CShade slot 4, the landscape cell draw: draw-order entries, face descriptors, a surface per batch"
+doc = "docs/03-terrain.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1004399a"
+kind = "site"
+name = "cell draw: draw-order flags byte >> 4 & 1 -- the only read of the byte"
+doc = "docs/03-terrain.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10043a3d"
+kind = "site"
+name = "cell draw: each batch through the lighting helper (surface, manager, layer-1 handle, mode, water, water)"
+doc = "docs/03-terrain.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1002b470"
+kind = "function"
+name = "lighting helper: with phase 9 and a face that is not water, track 1's texture as stage 2 at phase 9 and no pass; else a light pass on track 0"
+doc = "docs/03-terrain.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1002b4b6"
+kind = "site"
+name = "lighting helper: manager slot 3 (handle, track 1, &out) -- who asks for track 1"
+doc = "docs/03-terrain.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1002b96f"
+kind = "site"
+name = "lighting helper: manager slot 3 with track 0 for the light pass"
+doc = "docs/03-terrain.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1002c000"
+kind = "function"
+name = "cell draw's layer-2 surface: slot 3 track 0, then the lighting helper with water 0"
+doc = "docs/03-terrain.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x100410a0"
+kind = "function"
+name = "CShade::ConfigureTextureAndAlphaBlendModes: phases per role; +0xbd8 = IsPhaseSupported(9), +0xbdc = 9"
+doc = "docs/03-terrain.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10041274"
+kind = "site"
+name = "CShade +0xbd8: the device supports render phase 9 (MODULATE2X)"
+doc = "docs/03-terrain.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10046c63"
+kind = "site"
+name = "CShade +0xcc0 = render setting 4, MicroTexturingOn (default 1)"
+doc = "docs/03-terrain.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10044ea0"
+kind = "function"
+name = "CShade slot 21, the mesh draw: slot 5 with a time or slot 3, both with the StartMeshRender track"
+doc = "docs/07-objects.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x100454e6"
+kind = "site"
+name = "mesh draw: manager slot 5 (handle, track +0xcbc, time, &out) -- the five-argument call once said not to exist"
+doc = "docs/03-terrain.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10045521"
+kind = "site"
+name = "mesh draw: manager slot 3 (handle, track +0xcbc, &out)"
+doc = "docs/07-objects.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1004553b"
+kind = "site"
+name = "mesh draw: mode bit 1 -> layer 9, bit 2 -> layer 10; else 0, or 5 see-through"
+doc = "docs/07-objects.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1001b7b0"
+kind = "function"
+name = "landscape render: StartMeshRender, then the cell draw per square at its chosen level"
+doc = "docs/03-terrain.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1001b95e"
+kind = "site"
+name = "landscape render: StartMeshRender with the terrain's manager (+0x7be0) and track 0"
+doc = "docs/03-terrain.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1001c35f"
+kind = "site"
+name = "landscape render: cell draw on the cell's run of the draw order (+0x150)"
+doc = "docs/03-terrain.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1001a470"
+kind = "function"
+name = "landscape face descriptor (QI 1 slot 4): +0x3c the face record's dword (flags | surface << 16)"
+doc = "docs/03-terrain.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x100175d1"
+kind = "site"
+name = "CLandscape ctor: chunk 0x12, 'Unable to find microtexture mapping chunk'"
+doc = "docs/03-terrain.md"
+read = true
+
+# --- the draw order's flags byte, ../docs/03-terrain.md ---
+[[entry]]
+module = "Terrain.dll"
+at = "0x10064770"
+kind = "function"
+name = "draw-order rebuild for a cell after a building is placed"
+doc = "docs/03-terrain.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1000e430"
+kind = "function"
+name = "building placement (asserts CTerrain::PlaceBuilding and CLandscape::Insert); calls the draw-order rebuild"
+doc = "docs/03-terrain.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10060480"
+kind = "function"
+name = "draw-order builder: faces of one texture pair without flags 0x20/0x800; bits 0-2 clear, 3 set, 5-6 = 2, 4 on the first; bit 7 kept"
+doc = "docs/03-terrain.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10062eb0"
+kind = "function"
+name = "draw-order builder, second variant; same bit writes, bit 7 kept"
+doc = "docs/03-terrain.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10064490"
+kind = "function"
+name = "draw-order builder, third variant (faces flagged 0x20); same bit writes, bit 7 kept"
+doc = "docs/03-terrain.md"
+read = true
+
+# --- the fifth slot is the first-person view's, ../docs/07-objects.md ---
+[[entry]]
+module = "AniMesh.dll"
+at = "0x100068a0"
+kind = "function"
+name = "mesh object ctor: six interfaces at +0..+0x14, +0x204 = 0, +0x208 = -1"
+doc = "docs/07-objects.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10006fc0"
+kind = "function"
+name = "mesh object message handler: 4 binds QI 6, 0x18, 0xd (+0x24), 0xe, 0xa, 0x16 (+0x30), 0x204, 0x13, CShade (+0x3c); 0x80000020 merges a part"
+doc = "docs/07-objects.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10007022"
+kind = "site"
+name = "mesh init: QI 0xd, the mesh's own material manager, into +0x24"
+doc = "docs/07-objects.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x1000704f"
+kind = "site"
+name = "mesh init: QI 0x16, ILifeSystem, into +0x30"
+doc = "docs/07-objects.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10005ec0"
+kind = "function"
+name = "IAnimation slot 33: add a view to the list at +0x1c8"
+doc = "docs/07-objects.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10005f60"
+kind = "function"
+name = "IAnimation slot 34: is this view in the list"
+doc = "docs/07-objects.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10005fa0"
+kind = "function"
+name = "IAnimation slot 35: remove a view from the list"
+doc = "docs/07-objects.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10014b30"
+kind = "function"
+name = "interface 0x18 slot 11, the mesh draw: level by distance or 4 for a listed view; StartMeshRender; CShade slot 21 per node"
+doc = "docs/07-objects.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10014bdb"
+kind = "site"
+name = "mesh draw: IAnimation slot 34 on the view being drawn"
+doc = "docs/07-objects.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10014be5"
+kind = "site"
+name = "mesh draw: a listed view draws level 4, the fifth slot"
+doc = "docs/07-objects.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10014e9a"
+kind = "site"
+name = "mesh draw at level 4: mode 2 for a node flagged 0x20, else 1"
+doc = "docs/07-objects.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10014f85"
+kind = "site"
+name = "mesh draw at level 4: CShade slot 15 (1) in place of SetClipStateForJoint"
+doc = "docs/07-objects.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10014dee"
+kind = "site"
+name = "mesh draw: the track is ILifeSystem slot 15 (+0x30) unless a face material is set (+0x208)"
+doc = "docs/07-objects.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10014e0a"
+kind = "site"
+name = "mesh draw: CShade::StartMeshRender with the manager at +0x204 and the track"
+doc = "docs/07-objects.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x100101d0"
+kind = "function"
+name = "interface 0x20 slot 6, a part's draw at a given level; at level 4 mode 2 (0x20), 1, or 0 for kind 3"
+doc = "docs/07-objects.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10005970"
+kind = "function"
+name = "IAnimation slot 27: wear a face's material -- the face owner's QI 0xd into +0x204, its handle into +0x208"
+doc = "docs/07-objects.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x100059e3"
+kind = "site"
+name = "IAnimation slot 27: QueryInterface 0xd on the object that owns the face"
+doc = "docs/07-objects.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x100134d0"
+kind = "function"
+name = "interface 0x18 slot 3, a batch descriptor: handle +0x208 when set, else the node's table | batch material"
+doc = "docs/07-objects.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10013595"
+kind = "site"
+name = "batch descriptor: the face material override at mesh +0x208"
+doc = "docs/07-objects.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10013680"
+kind = "function"
+name = "interface 0x18 slot 5: a triangle's descriptor, its stream-7 flags word into 0x10026ed8"
+doc = "docs/07-objects.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002399a"
+kind = "site"
+name = "camera component: IAnimation slot 33 -- its view joins the unit mesh's list"
+doc = "docs/07-objects.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x100239cd"
+kind = "site"
+name = "camera component: IAnimation slot 35 -- the view leaves the list"
+doc = "docs/07-objects.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10023480"
+kind = "function"
+name = "camera component destructor: takes its view off the mesh's list"
+doc = "docs/07-objects.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002349a"
+kind = "site"
+name = "camera destructor: IAnimation slot 35"
+doc = "docs/07-objects.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000791d"
+kind = "site"
+name = "control system init: QI 0xb, the aggregate's IAnimation, into +0x20"
+doc = "docs/07-objects.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x100079e2"
+kind = "site"
+name = "control system init: every component gets the control system, ILifeSystem and IAnimation (+0x3c, +0x44, +0x40)"
+doc = "docs/07-objects.md"
+read = true
+
+# --- an object mesh's material track, ../docs/07-objects.md ---
+[[entry]]
+module = "Control.dll"
+at = "0x10008800"
+kind = "function"
+name = "ILifeSystem slot 15: returns +0x554 -- the track an object mesh draws with"
+doc = "docs/07-objects.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10008810"
+kind = "function"
+name = "ILifeSystem slot 16: sets +0x554; no caller found"
+doc = "docs/07-objects.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x100070d1"
+kind = "site"
+name = "control system ctor: +0x554 = 0"
+doc = "docs/07-objects.md"
+read = true
+
+[[entry]]
+module = "World3D.dll"
+at = "0x1000322f"
+kind = "site"
+name = "manager slot 3: a track at or past the material's count, or negative, is taken as 0"
+doc = "docs/03-terrain.md"
+read = true
+
+# --- mounting a part, ../docs/07-objects.md ---
+[[entry]]
+module = "AniMesh.dll"
+at = "0x1000a460"
+kind = "function"
+name = "merge an external part's mesh into the unit's: node 0 dropped, its children hung on the socket"
+doc = "docs/07-objects.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x1000a719"
+kind = "site"
+name = "part merge: one node fewer than the part has"
+doc = "docs/07-objects.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x1000a7dd"
+kind = "site"
+name = "part merge: a node whose parent was node 0 takes the socket as parent"
+doc = "docs/07-objects.md"
+read = true
+
+# --- control points: placed on one node, carried by another, ../docs/07-objects.md ---
+[[entry]]
+module = "Control.dll"
+at = "0x10008b10"
+kind = "function"
+name = "control system part load: control points, .ndp records, sections, components"
+doc = "docs/07-objects.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000b210"
+kind = "function"
+name = "control point entry: record, part, node = the record's second slot or -1"
+doc = "docs/07-objects.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000b22a"
+kind = "site"
+name = "control point entry: the node is record +4 -- the only slot kept"
+doc = "docs/07-objects.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10008be8"
+kind = "site"
+name = "control point load: a part's node 0 becomes its socket, any other is shifted into the merged mesh"
+doc = "docs/07-objects.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001b4f0"
+kind = "function"
+name = "control point world position and direction, by its entry's node (mode 1 local, else through IAnimation slot 4)"
+doc = "docs/07-objects.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001a3aa"
+kind = "site"
+name = "ground contact: a contact point's record +8 node gets mask bit 0x10 (IAnimation slot 8)"
+doc = "docs/07-objects.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001ac0d"
+kind = "site"
+name = "ground contact: a contact point whose record +8 node is destroyed does not touch"
+doc = "docs/07-objects.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10011071"
+kind = "site"
+name = "node damage: life at 0 sets node record +0x28 bit 0x10, destroyed"
+doc = "docs/07-objects.md"
+read = true
+
+# --- the areal map's sub-blocks, ../docs/08-arealmap.md ---
+[[entry]]
+module = "ArealMap.dll"
+at = "0x10007640"
+kind = "function"
+name = "per-areal load: keeps record, V, vertex and edge pointers, xy box; steps over 3B pairs and sub-blocks, keeps no B"
+doc = "docs/08-arealmap.md"
+read = true
+
+[[entry]]
+module = "ArealMap.dll"
+at = "0x1001e2cb"
+kind = "site"
+name = "areal map load: the per-areal load, 120 bytes an areal"
+doc = "docs/08-arealmap.md"
 read = true
 
 # --- the economy, ../docs/23-economy.md -------------------------------------

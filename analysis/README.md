@@ -210,13 +210,23 @@ See [../docs/16-research.md](../docs/16-research.md).
 ## The material manager, and controlling a negative
 
 The question was who asks a material for its second animation track
-(`../docs/03-terrain.md`, TODO §2.2). The answer is nobody, and the useful
-part is how that was made safe to say.
+(`../docs/03-terrain.md`, TODO §2.2). This section concluded nobody, and **that
+was wrong**: the landscape's lighting helper asks slot 3 for track 1
+(`Terrain.dll:0x1002b4b6`), and `CShade`'s mesh draw calls slot 5 with five
+arguments (`Terrain.dll:0x100454e6`). Both reach a manager that was passed as
+an *argument* — to `CShade::StartMeshRender`, which keeps it at `+0xcb8` — so
+neither a search from where managers are stored nor one from where
+`QueryInterface` 0xd hands them out could see it, and slot 3 was misread as
+taking no track. The lesson below still stands and needs one more line: **a
+pointer can arrive as a parameter.** Find the class that receives it by the
+arities of several of its slots together (`CShade`'s vtable at
+`Terrain.dll:0x1009b17c` was the only match for seven of them at once), then
+follow its field. What follows is how the wrong negative was made to look safe.
 
 | address | what |
 |---|---|
-| `0x100209e4` | the manager's vtable in `World3D.dll`; index 5 takes a track, index 3 does not |
-| `0x100031f0` | index 3, the track-less sibling |
+| `0x100209e4` | the manager's vtable in `World3D.dll`; index 5 takes a track and a time, index 3 a track |
+| `0x100031f0` | index 3, the sibling that takes the clock's time (once called track-less) |
 | `0x10046917` | `Terrain.dll` calling index 3, selectors zero — **the positive control** |
 | `0x1001720c` | `Terrain.dll` calling index 6, from the field at `+0x7be0` |
 | `0x10003925` | `AniMesh.dll` calling index 6, from the field at `+0x14c` |

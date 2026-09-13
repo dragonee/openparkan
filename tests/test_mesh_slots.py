@@ -98,3 +98,37 @@ def test_two_frames_and_a_weight():
     assert m.blended_pose(0, 0.0, 2.0, 1.0)[0] == (8.0, 0.0, 0.0)
     assert m.blended_pose(0, 0.0, 2.0, 0.5)[0] == (4.0, 0.0, 0.0)
     assert m.blended_pose(0, -1.0, 1.0, 0.5)[0] == (4.0, 0.0, 0.0)
+
+
+def test_the_cockpit_flag_is_the_bit_once_read_as_a_hull():
+    n = node([N, N, N, N, 4], flags=mesh.SUBOBJECT_COCKPIT, name="CP_m1o1")
+    assert mesh.SUBOBJECT_COLLISION == mesh.SUBOBJECT_COCKPIT
+    assert n.is_cockpit and n.is_collision
+    assert n.cockpit_slot() == n.collision_slot() == 4
+    assert mesh.COCKPIT_LOD == mesh.COLLISION_SLOT == 4
+
+
+def test_a_node_without_a_fifth_slot_draws_nothing_to_its_own_view():
+    """The draw asks for slot variant*5 + 4 for a registered view, with no
+    fallback, so an ordinary node without one is simply not drawn there."""
+    assert node([1, 2, 3]).cockpit_slot() is None
+    assert node([1, 2, 3, N, 8]).cockpit_slot() == 8
+
+
+def test_an_object_face_record_ends_in_the_winged_edge_link():
+    m = mesh.ObjectMesh.__new__(mesh.ObjectMesh)
+    # edge 0 meets the neighbour's edge 2, edge 1 its edge 0, edge 2 is open;
+    # 0x1C0 above the six bits is exporter leftover and must not matter
+    object.__setattr__(m, "face_class", [0x1C0 | 2 | (0 << 2) | (3 << 4)])
+    assert m.edge_twin(0, 0) == 2
+    assert m.edge_twin(0, 1) == 0
+    assert m.edge_twin(0, 2) is None
+
+
+def test_a_control_point_is_placed_on_one_node_and_carried_by_another():
+    def as_float(i):
+        return struct.unpack("<f", struct.pack("<i", i))[0]
+    wheel = mesh.ControlPoint("weel_fl", (0.0, as_float(0), as_float(5)),
+                              (0.0, 0.0, 0.0), (0.0, 0.0, 1.0))
+    assert wheel.placed_on == 0
+    assert wheel.carrier == 5
