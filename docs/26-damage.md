@@ -107,7 +107,8 @@ The hit is queued on the object that exploded and applied on its tick
 - A hit does nothing if the object that fired it no longer exists, if it is
   the target's own, or if the target is **invulnerable** (property 162, `+0x5b0`
   — the `[CS] INVULNERABILITY` debug key sets it on the hero, `0x1005e487`,
-  and a unit is invulnerable while it upgrades a building, `0x1003356f`).
+  and a unit is invulnerable from its arrival at a building it upgrades until
+  the new level stands, `0x1003356f`, [32-builder.md](32-builder.md#upgrading-a-building--read)).
 
 **A blast falls off with overlap** (`0x10010030`). For a node whose bounding
 sphere has radius *r* and centre at distance *d* from a blast of radius *R*:

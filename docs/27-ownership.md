@@ -22,8 +22,8 @@ of one mask and every bit of another).
 |---|---|---|
 | `0x40` | the **control pod** — where a capturer goes | `0x1003094c` |
 | `0x20`, `0x200`, `0x400` | a **dock**: charges, repairs and rearms who stands in it | `0x10019251` |
-| `0x8` | a mine's loading place ("Mined") | `0x10019482` |
-| `0x10` | a storage's unloading place ("Stored") | `0x100195b8` |
+| `0x8` | a mine's loading place ("Mined"): exactly one, ground-level, on each mine model and on no other building ([32-builder.md](32-builder.md)) | `0x10019482` |
+| `0x10` | a storage's unloading place ("Stored"): exactly one, ground-level, on each storage model | `0x100195b8` |
 | `0x8000`, `0x4000`, `0x10000` | main teleport in, out, and the exit vertex | `0x10018bb1`, `0x1001914f` |
 | `0x80`, `0x800` | a factory's creation node | `0x100299ea` |
 | `0x10000000` | **ground level**: a place 10 wide and 12 high instead of 5 and 3 | `0x100184f0` |

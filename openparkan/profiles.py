@@ -66,7 +66,13 @@ TRANSPORT_MAX_ORE = 2000.0
 TRANSPORT_ORE_ON_PER_SECOND = 100.0
 TRANSPORT_ORE_OFF_PER_SECOND = 100.0
 TRANSPORT_BUILDING_DIST = 80.0
+#: Not a building's price, which is the sum of its parts' build ore
+#: (``Behavior.dll:0x10029810``): what a builder must hold to set off for a
+#: site, and 1.5 times it is what a mine or storage must hold before a builder
+#: fetches ore from it (``0x10028ff0``, ``0x10029110``).
 BUILDING_COST = 100.0
+#: How long an upgrade takes at the building, in seconds (``0x1003363f``).
+UPGRADE_SECONDS = 50.0
 
 #: The HUD's ore bar is ore held in the clan's mines and storages over this --
 #: ``iron3d.dll:0x1006d927`` multiplies by 1/4500.  It is one full mine plus

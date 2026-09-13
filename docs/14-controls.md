@@ -314,9 +314,10 @@ Bunker_Small 3
 ```
 
 **All 32 assemblies it names exist on disk.** Its own header says *"There must
-be 11 schemes"* — and it ships **12**: the eleven, plus `Tower_Large`. Whether
-the engine reads the twelfth is not established here, and the discrepancy is
-recorded rather than resolved.
+be 11 schemes"* — and it ships **12**: the eleven, plus `Tower_Large`. The
+engine reads all twelve: `ArealMap.dll:0x1001ce90` registers each name with a
+building Type, `Tower_Large` included, so the header's count is stale. A
+scheme's list is that Type's upgrade ladder ([32-builder.md](32-builder.md)).
 
 ## The configuration beside them
 

@@ -5796,6 +5796,175 @@ def check_packages(check, game: Path) -> None:
           + f"; never: {', '.join(never)}")
 
 
+def check_builder(check, game: Path) -> None:
+    """The builder and the transport: who they are, what they carry, where they go."""
+    names = frozenset(p.name.lower() for p in game.glob("*.rlb"))
+    catalogue = descriptions.library(game)
+
+    def role(member: str) -> str:
+        entry = catalogue.get(member)
+        text = " ".join(entry.text).lower() if entry else ""
+        if "mobile builder" in text and entry.kind == "WPN":
+            return "beam"
+        if "mobile builder" in text:
+            return "builder turret"
+        if "cargobot" in text:
+            return "transport turret"
+        return ""
+
+    # 1. the class word is the Type, and it goes with the builder beam or the cargo turret
+    by_type: dict[int, Counter[str]] = defaultdict(Counter)
+    assemblies: dict[int, int] = Counter()
+    for dat in sorted(game.glob("UNITS/**/*.dat")):
+        unit = objects.load_unit(dat)
+        assemblies[unit.kind] += 1
+        roles = {role(c.ref.member) for c in unit.components} - {""}
+        for r in roles:
+            by_type[unit.kind][r] += 1
+    beam_types = {t for t, c in by_type.items() if c["beam"]}
+    cargo_types = {t for t, c in by_type.items() if c["transport turret"]}
+    check("UNITS: a builder is Type 0x1004000 with a beam, a transport 0x1002000 with cargo",
+          beam_types == {objects.TYPE_BUILDER}
+          and by_type[objects.TYPE_BUILDER]["beam"] == assemblies[objects.TYPE_BUILDER]
+          and cargo_types == {objects.TYPE_TRANSPORT}
+          and by_type[objects.TYPE_TRANSPORT]["transport turret"]
+          == assemblies[objects.TYPE_TRANSPORT]
+          and assemblies[objects.TYPE_WARRIOR] > 0,
+          f"all {assemblies[objects.TYPE_BUILDER]} assemblies whose class word is ROBOT_BUILDER "
+          f"carry a mobile-builder module and no other does; all "
+          f"{assemblies[objects.TYPE_TRANSPORT]} of 0x1002000 carry a Cargobot turret and no other "
+          f"does; control: {assemblies[objects.TYPE_WARRIOR]} warriors (0x1008000) carry neither")
+
+    # 2. a builder module fires only type-30 beams, and nothing else has type 30
+    guns = NResArchive.open(game / "guns.rlb")
+    library = objects.ObjectLibrary(game / "objects.rlb")
+    modules = {m for m in catalogue if role(m) == "beam"}
+    beam_ctl = set()
+    for member in modules:
+        record = library.get(member)
+        ctl = record.slot_with_suffix("ctl") if record else None
+        if ctl:
+            beam_ctl.add(ctl.member.lower())
+    types_by_ctl: dict[str, Counter[int]] = {}
+    emitted: set[str] = set()
+    for entry in guns:
+        if not entry.tag.upper().startswith("CTL"):
+            continue
+        parsed = control.parse(guns.read(entry), names)
+        types_by_ctl[entry.name.lower()] = Counter(p.type_id for p in parsed.components)
+        if entry.name.lower() in beam_ctl:
+            emitted |= {p.resource.member.lower() for p in parsed.components}
+    beams_only = all(set(types_by_ctl[c]) == {control.BUILDER_TYPE} for c in beam_ctl)
+    elsewhere = sorted(c for c, t in types_by_ctl.items()
+                       if t[control.BUILDER_TYPE] and c not in beam_ctl)
+    gunners = sum(1 for t in types_by_ctl.values() if t[control.GUN_TYPE])
+    rounds = {m: library.get(m) for m in emitted}
+    check("guns.rlb: a builder module fires type-30 beams only, and only it does",
+          len(beam_ctl) == 3 and beams_only and not elsewhere and gunners > 0
+          and all(r is not None and r.tag == "BULL" and m.startswith("bld_")
+                  for m, r in rounds.items()),
+          f"the {len(beam_ctl)} mobile-builder controllers ({', '.join(sorted(beam_ctl))}) carry "
+          f"only type {control.BUILDER_TYPE}, emitting {sorted(emitted)} (BULL records); "
+          f"no other of "
+          f"{len(types_by_ctl)} gun controllers has one; control: {gunners} carry type-2 guns")
+
+    # 3. BuildDat.lst: twelve schemes, one Type each, the engine's twelve names
+    schemes = controls.build_schemes(game)
+    kinds = {}
+    for scheme in schemes:
+        units = [objects.load_unit(game / m.replace("\\", "/")) for m in scheme.members]
+        kinds[scheme.name] = {u.kind for u in units}
+    building_types: dict[int, set[str]] = defaultdict(set)
+    for dat in game.glob("UNITS/BUILDS/**/*.dat"):
+        building_types[objects.load_unit(dat).kind].add(dat.parent.name)
+    unbuilt = {t: sorted(f) for t, f in building_types.items()
+               if t not in controls.SCHEME_TYPES.values()}
+    check("BuildDat.lst: each scheme is one building Type, the twelve the engine names",
+          len(schemes) == len(controls.SCHEME_TYPES) == controls.BUILD_SCHEME_DECLARED + 1
+          and all(kinds.get(n) == {t} for n, t in controls.SCHEME_TYPES.items())
+          and set(controls.SCHEME_TYPES.values()) <= set(building_types),
+          f"{len(schemes)} schemes (the header says {controls.BUILD_SCHEME_DECLARED}); every "
+          f"assembly in a scheme has the class word ArealMap.dll:0x1001ce90 registers for its "
+          f"name; the building Types no scheme builds: "
+          + ", ".join(f"{t:#x} {'/'.join(f)}" for t, f in sorted(unbuilt.items())))
+
+    # 3b. what a builder must carry: a scheme's first building, by its parts' build ore
+    def ore(dat: str) -> float:
+        unit = objects.load_unit(game / dat.replace("\\", "/"))
+        return sum(catalogue[c.ref.member].build_ore for c in unit.components
+                   if c.ref.member in catalogue)
+    first = {s.name: ore(s.members[0]) for s in schemes}
+    every = {m: ore(m) for s in schemes for m in s.members}
+    fetched = {n: v for n, v in first.items()
+               if controls.SCHEME_TYPES[n] != controls.SCHEME_TYPES["Mine"]}
+    check("objects.dlb: every building a builder fetches ore for fits in one load",
+          fetched and max(fetched.values()) <= profiles.TRANSPORT_MAX_ORE
+          and max(every.values()) > profiles.TRANSPORT_MAX_ORE,
+          f"the first building of each scheme but the mine costs {min(fetched.values()):g}-"
+          f"{max(fetched.values()):g} ore by its parts' BuildOreCost, within the 2000 a builder "
+          f"holds; the mine, which a builder puts up without fetching (Behavior.dll:0x10028ff4), "
+          f"costs {first['Mine']:g}; control: the dearest upgrade level, "
+          f"{max(every, key=every.get).split(chr(92))[-1]}, costs {max(every.values()):g}")
+
+    # 4. missions: every placed builder and transport can carry 2000 ore
+    held: dict[int, Counter[tuple[float, float]]] = defaultdict(Counter)
+    sizes: dict[int, set[str]] = defaultdict(set)
+    for folder in gamedir.missions(game):
+        for obj in mission.load(folder / "data.tma").objects:
+            kind = obj.properties.get("Type")
+            if kind is None or (kind.value & 0xFFFFFFFF) not in (objects.TYPE_BUILDER,
+                                                                 objects.TYPE_TRANSPORT):
+                continue
+            top = obj.properties.get("MaximumOre")
+            now = obj.properties.get("CurrentOre")
+            held[kind.value & 0xFFFFFFFF][(top.value if top else None,
+                                           now.value if now else None)] += 1
+            dat = game / obj.path.replace("\\", "/")
+            if dat.exists():
+                sizes[kind.value & 0xFFFFFFFF].add(
+                    objects.load_unit(dat).components[0].ref.member[2].lower())
+    check("data.tma: a placed builder or transport carries Transport_MaxOre, whatever its size",
+          held[objects.TYPE_TRANSPORT] and held[objects.TYPE_BUILDER]
+          and {t for t, _ in held[objects.TYPE_TRANSPORT]} == {profiles.TRANSPORT_MAX_ORE}
+          and {t for t, _ in held[objects.TYPE_BUILDER]} == {profiles.TRANSPORT_MAX_ORE}
+          and {n for _, n in held[objects.TYPE_TRANSPORT]} == {0.0}
+          and {n for _, n in held[objects.TYPE_BUILDER]} <= {200.0, profiles.TRANSPORT_MAX_ORE}
+          and len(sizes[objects.TYPE_TRANSPORT] | sizes[objects.TYPE_BUILDER]) > 1,
+          f"transports (MaximumOre, CurrentOre): {dict(held[objects.TYPE_TRANSPORT])}, "
+          f"chassis sizes {sorted(sizes[objects.TYPE_TRANSPORT])}; builders: "
+          f"{dict(held[objects.TYPE_BUILDER])}, sizes "
+          f"{sorted(sizes[objects.TYPE_BUILDER])} -- one capacity whatever the size")
+
+    # 5. hall ways: one ground-level mine place per mine, one store place per storage
+    fortif = NResArchive.open(game / "fortif.rlb")
+    graphs = {e.name.lower(): objmesh.read_path_graph(NResArchive(fortif.read(e), e.name))
+              for e in fortif if e.tag == "MESH"}
+    places: dict[str, tuple[int, int, int]] = {}
+    for dat in sorted(game.glob("UNITS/BUILDS/**/*.dat")):
+        root = objects.load_unit(dat).components[0].ref.member.lower()
+        record = library.get(root)
+        bas = record.footprint if record else None
+        graph = graphs.get(bas.member.rsplit(".", 1)[0].lower() + ".msh") if bas else None
+        if graph is None:
+            continue
+        flags = [n.flags for n in graph.nodes]
+        places[f"{dat.parent.name}/{root}"] = (
+            sum(1 for a in flags if a & objmesh.PLACE_MINE),
+            sum(1 for a in flags if a & objmesh.PLACE_STORE),
+            sum(1 for a in flags if a & (objmesh.PLACE_MINE | objmesh.PLACE_STORE)
+                and not a & objmesh.PLACE_GROUND))
+    mines = {k: v for k, v in places.items() if k.startswith("MINE/")}
+    stores = {k: v for k, v in places.items() if k.startswith("STORAGE/")}
+    others = {k: v for k, v in places.items() if k not in mines and k not in stores}
+    check("fortif.rlb: a mine has one loading place, a storage one unloading place",
+          mines and stores and all(v == (1, 0, 0) for v in mines.values())
+          and all(v == (0, 1, 0) for v in stores.values())
+          and not any(v[0] or v[1] for v in others.values()),
+          f"{len(mines)} mine and {len(stores)} storage models each carry exactly one "
+          f"ground-level 0x8 or 0x10 place, where a transport loads and unloads; control: "
+          f"none of the other {len(others)} building models has either")
+
+
 def check_controls(check, game: Path) -> None:
     """The input layer: ScanCode.dsc, Command.dsc, the .man bindings, the .tbl tables."""
     keys = controls.scancodes(game)
@@ -7199,7 +7368,7 @@ def run(game: Path) -> int:
         check_effects, check_footprints, check_rsli, check_control, check_efficiency,
         check_motion, check_sensors, check_combat, check_ownership,
         check_capture, check_repair, check_chassis, check_weapons,
-        check_turrets, check_packages,
+        check_turrets, check_packages, check_builder,
         check_controls,
         check_behaviour, check_research, check_descriptions, check_saves,
         check_vocabulary, check_resources, check_briefing, check_settings,

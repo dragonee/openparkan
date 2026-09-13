@@ -38,9 +38,18 @@ COMMANDS = "Command.dsc"
 
 #: The behaviour system's building schemes.
 BUILD_SCHEMES = "BuildDat.lst"
-#: The file's own header says "There must be 11 schemes".  It ships **12**.
-#: Whether the engine reads the twelfth is not established here.
+#: The file's own header says "There must be 11 schemes".  It ships **12**, and
+#: the engine reads all twelve (``SCHEME_TYPES``): the header is stale.
 BUILD_SCHEME_DECLARED = 11
+#: The building Type of each scheme, as ``ArealMap.dll:0x1001ce90`` registers
+#: them.  A scheme's list is its Type's upgrade ladder: a builder builds the
+#: first, and each upgrade moves the building one on.
+SCHEME_TYPES = {
+    "Bunker_Small": 0x80010000, "Bunker_Medium": 0x80020000, "Bunker_Large": 0x80040000,
+    "Generator": 0x80000002, "Mine": 0x80000004, "Storage": 0x80000008,
+    "Plant": 0x80000010, "Hangar": 0x80000040, "MainTeleport": 0x80000200,
+    "Institute": 0x80000400, "Tower_Medium": 0x80100000, "Tower_Large": 0x80200000,
+}
 
 #: A ``.tbl`` row has eleven fields before the trailing text.
 TABLE_FIELDS = 11
@@ -625,6 +634,11 @@ class BuildScheme:
 
     name: str
     members: tuple[str, ...]
+
+    @property
+    def type(self) -> int | None:
+        """The building Type the engine registers this scheme for."""
+        return SCHEME_TYPES.get(self.name)
 
 
 def build_schemes(game: Path) -> list[BuildScheme]:

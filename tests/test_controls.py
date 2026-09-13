@@ -195,3 +195,10 @@ class TestBindingResolution:
         b = controls.Binding(controls.CMD_SHARED, "SCAN_NULL", "SCAN_I")
         assert b.code == 35
         assert b.handler == "World3D.dll"
+
+
+def test_every_build_scheme_is_a_building_type():
+    assert len(controls.SCHEME_TYPES) == controls.BUILD_SCHEME_DECLARED + 1
+    assert all(t & 0x80000000 for t in controls.SCHEME_TYPES.values())
+    assert controls.BuildScheme("Mine", ()).type == 0x80000004
+    assert controls.BuildScheme("Bridge", ()).type is None

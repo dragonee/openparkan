@@ -4278,3 +4278,261 @@ kind = "site"
 name = "projectile steering clamped to the controller's turn rate (file +56, +60)"
 doc = "docs/29-weapons.md"
 read = true
+
+# --- builder and transport, ../docs/32-builder.md ---
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1001be10"
+kind = "function"
+name = "device lists: a turret (type 1) opens an entry; guns (2) and builder beams (30) go to separate lists in it"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1001c137"
+kind = "site"
+name = "type 30, the builder beam, filed in the turret entry's second list"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x100284f0"
+kind = "function"
+name = "M_Task_Build state names: Cannot, GoToStorage, OreOnBoard, GoToBuild, Wait"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x100285f0"
+kind = "function"
+name = "M_Task_Build::SetTarget: building Type at +0x60; target 0x206 a matrix, 0x202 a place, 0x204 none"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10028800"
+kind = "function"
+name = "M_Task_Build::StartTask: the Type's level-0 scheme .dat, its parts' build ore summed into +0x120"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10028b80"
+kind = "function"
+name = "M_Task_Build::OnBehaviourTakt: load ore at a holder, go to the site, create the building"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10028e8f"
+kind = "site"
+name = "Wait: builds once now - +0x128 >= 1000 ms; +0x128 is only ever zeroed"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10028f40"
+kind = "function"
+name = "M_Task_Build go command: to the holder's ore place at Transport_SpeedPercent, to the site at Build_SpeedPercent"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10028ff0"
+kind = "function"
+name = "M_Task_Build chooser: a mine goes straight to the site; own ore >= Building_Cost too; else fetch"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10029110"
+kind = "function"
+name = "builder's ore source: nearest clan mine or storage holding more than 1.5 x Building_Cost"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10029240"
+kind = "function"
+name = "M_Task_Build::CreateBuilding: CreateObjectFromScheme with the scheme, matrix and clan"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10029300"
+kind = "function"
+name = "builder's walk to the site (Build_SpeedPercent)"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10029420"
+kind = "function"
+name = "has an intact builder beam: first type-30 device whose value 0x400 is above 0"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10029810"
+kind = "function"
+name = "recursive part cost: research-tree item's build ore and energy per part; unresearched fails"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10033150"
+kind = "function"
+name = "M_Task_Upgrade state names: Cannot, GoToBuild, SphereDown, SphereUp"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10033250"
+kind = "function"
+name = "upgrade needs an intact builder beam (type 30, value 0x400 above 0)"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x100332e0"
+kind = "function"
+name = "M_Task_Upgrade::SetTarget: own clan's building by LID, level + 1 below its scheme's length"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x100333b0"
+kind = "function"
+name = "M_Task_Upgrade::StartTask: find a place to stand, else fail"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10033410"
+kind = "function"
+name = "M_Task_Upgrade::OnBehaviourTakt: invulnerable at the site, 50 s, then the next level's building"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1003363f"
+kind = "site"
+name = "upgrade completes 50000 ms after it began (or when the upgrader's clan word reads 0xfffe)"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x100338a0"
+kind = "function"
+name = "upgrade stand-off: a random point beside the building ('Place to upgrade where found')"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10031e70"
+kind = "function"
+name = "M_Task_Transport state names: Cannot, GoToMine, OreOnBoard, GoToStorage, OreOffBoard"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10031f70"
+kind = "function"
+name = "M_Task_Transport::SetTarget: ignores the target, clears mine and storage"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10031f90"
+kind = "function"
+name = "M_Task_Transport::StartTask"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10032000"
+kind = "function"
+name = "M_Task_Transport::OnBehaviourTakt: load 100/s to 2000 or the mine's last, unload 100/s, wait if full"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x100322fd"
+kind = "site"
+name = "storage has under 0.1 free: state 5, wait near it"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10032870"
+kind = "function"
+name = "M_Task_Transport chooser: no mine or storage, Cannot; ore aboard, GoToStorage; else GoToMine"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10032a00"
+kind = "function"
+name = "transport's mine: nearest clan BUILDING_MINE whose 0x8 place is free"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10032c50"
+kind = "function"
+name = "transport's storage: nearest clan BUILDING_STORAGE"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x100312c0"
+kind = "function"
+name = "ShowUpgrade StartTask"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002d672"
+kind = "site"
+name = "factory: types 2 and 30 both build the 0x184-byte gun class 0x100294c0"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "ArealMap.dll"
+at = "0x1001ce90"
+kind = "function"
+name = "registers the twelve BuildDat.lst schemes by name and building Type"
+doc = "docs/32-builder.md"
+read = true

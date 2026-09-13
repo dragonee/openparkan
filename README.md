@@ -216,6 +216,7 @@ of fields carried through the readers without being understood.
 - [29-weapons.md](docs/29-weapons.md) — guns, ammunition clips and rounds: energy or cartridges, damage, rate and range
 - [30-turrets.md](docs/30-turrets.md) — turrets: two mountings, gun sockets, and the role a turret gives a unit
 - [31-packages.md](docs/31-packages.md) — the commander's packages: orders, tasks, and who may run what
+- [32-builder.md](docs/32-builder.md) — builders and transports: the beam, building, upgrading and carrying ore
 
 ## Layout
 

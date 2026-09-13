@@ -81,7 +81,9 @@ wait to accumulate enough raw materials" — and string 103: without a
 warehouse "your Factory's production … will be limited by the Mine's
 parameters". What a warehouse adds is a second outlet and a 4000 buffer that a
 transport fills from the mine at 100 a second, so the mine never sits full at
-500 and idle.
+500 and idle. A transport picks the nearest mine with a free loading place and
+the nearest storage, leaves a mine part-loaded once it runs dry, and waits
+beside a full storage ([32-builder.md](32-builder.md#transporting-ore--read-and-measured)).
 
 **The id table**, read off `MBehaviour`'s variable getter
 (`Behavior.dll:0x1000a490`, vtable slot 26, a switch):
