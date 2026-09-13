@@ -37,6 +37,7 @@ conditions behind a pointer (`0x10001730`).
 |---|---|
 | +0x00 | flags: bits 0–2 switch on the velocity box per axis, bits 4–6 the spin box |
 | +0x04 | flags: bit 0 an **anchor** the planner chooses among (`0x1000524c`); `0x10000` moves by velocity; `0x100000` a fixed step with no motion; `0x1000000` jitters the step ([Playing a state](#playing-a-state--read-and-measured)) |
+| +0x08..+0x0a | what leans the body about x, y, z ([13-control.md](13-control.md#the-lean-and-triple-6--read-and-measured)) |
 | +0x0c, +0x10 | frame pair **A**: first and last frame |
 | +0x14, +0x18 | frame pair **B**: first and last frame |
 | +0x1c | the blend base toward B |
@@ -45,10 +46,11 @@ conditions behind a pointer (`0x10001730`).
 | +0x3c / +0x48 | spin box, min xyz / max xyz |
 | **+0x54** | **the engine factor** |
 | +0x94 | a use count, −1 for unlimited (`0x1000530f`) |
-| 16 × B | conditions: bit 0x100 needs a byte of the i-th 0x5c-byte entry at `+0xc4` set, 0x200 needs it clear (`0x10001107`); what the entries are is not read |
+| 16 × B | the **contacts**, a foot, wheel or leg each: a control point, flags, the group run when it lands. `0x100` makes the state need that point's node intact, `0x200` destroyed (`0x10001107`) — a walker's limping states ([13-control.md](13-control.md#section-1s-conditions-are-contacts--read-and-measured)) |
 
 A state applies while the machine's velocity and spin lie inside the boxes its
-flags switch on (`0x10001000`). An anchor that stops applying queues the
+flags switch on, its contacts' nodes are intact or destroyed as they ask, and
+its request code matches (`0x10001000`). An anchor that stops applying queues the
 cheapest path to an anchor that does (`0x100051c0`); the table's row is the
 destination
 ([Playing a state](#playing-a-state--read-and-measured)).
@@ -424,7 +426,9 @@ only** — `L08`, `L09` and `L00`, `L01`, `L19`, `L20`, `L28`, `L32`, `L40` —
 So on the commonest ground, stone class 1, a wheeled or tracked chassis raises
 no dust, and on sand and grass it raises it above a fifth of its top speed
 ([11-effects.md](11-effects.md#how-an-effect-runs--read)). The footstep effects
-(`step_*`) are not in these groups; they are named records of their own.
+(`step_*`) are not in these groups: a contact runs its own group when it lands,
+and that group picks the step by surface
+([13-control.md](13-control.md#a-records-condition-and-runs--read-and-measured)).
 
 ### Finding the ground — *read*
 
@@ -559,9 +563,9 @@ asks for the live top speed (IControl 145) and compares it with 1
 - How the strafe angle's turn (`0x10014cf0`) is split between the hull and the
   turret, and what `MCMD_FORWARD`'s ramp does.
 - Which node range the payload sum counts as the chassis.
-- Triples 5 (+68) and 6 (+80): 6 clamps an attitude the spin integrator
-  drives from a per-state selector (state +0x08), 5 is multiplied into it;
-  what that attitude is on screen is not read.
+- Triple 5 (+68), multiplied into the spin integrator (`0x10014b15`). Triple 6
+  is read: the most the body leans per axis
+  ([13-control.md](13-control.md#the-lean-and-triple-6--read-and-measured)).
 - Whether any module calls `CWorld` slot 5 to change the 10.0 gravity.
 - Where `Speed_MaximumFactor` is applied, and what the unit's `+0x5fc` speed
   base is.

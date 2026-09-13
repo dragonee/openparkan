@@ -200,68 +200,68 @@ Two loose ends, both small and both checked:
 
 Of the 73, **65** are actually bound by the 275 `.man` lines.
 
-## The join with the controller
+## The join with the controller — *read*
 
-This closes something the [controller](13-control.md) left open. Its message
-dispatch is a 16-way jump table — `lea eax, [edx - 1]; cmp eax, 0xf; ja …;
-jmp [eax*4 + 0x1002b9e8]` — and **`MCMD_` 1 to 16 is exactly that range**, in
-order. Entry by entry:
+This section once closed a gap by counting. `Control.dll` has a 16-way jump
+table — `lea eax, [edx - 1]; cmp eax, 0xf; ja …; jmp [eax*4 + 0x1002b9e8]` —
+and `MCMD_` 1 to 16 is that range, so the table was read as the controller's
+movement dispatch. **It is not a message dispatch.** The function it sits in,
+`0x1002b410`, is slot 4 of the control system's `IDeviceManager` (interface
+`0x204`, the sub-object at `+0xc`, vtable `0x1003b4fc`), a getter that answers
+a figure by id; `edx` is the id and the argument is where the answer goes.
+Its offsets are relative to `+0xc`, which is why the slots it reads looked like
+`+0x5c8` and `+0x5cc` when they are the factory's radar (`+0x5d4`) and seeker
+(`+0x5d8`).
 
-| Msg | Command | What the handler touches |
-|---:|---|---|
-| 1 | `MCMD_STATE` | `+0x5b4` |
-| 2–4 | `MCMD_ROTATE_X/Y/Z` | `+0x5b4`, then locals |
-| 5–6 | `MCMD_ANGLE_X/Y` | locals |
-| 7 | `MCMD_FORWARD` | `+0x5c0` |
-| 8, 9 | `MCMD_BACK`, `MCMD_LEFT` | `+0x5c8`, indices 3 and 4 |
-| 10, 11, 12 | `MCMD_RIGHT`, `UP`, `DOWN` | `+0x5cc`, indices 1, 0, 2 |
-| 13 | `MCMD_SELECT` | `+0x5bc` |
-| 14, 15, 16 | `SELECT_NEXT`, `TABLE`, `ANGLE_Z` | `+0x5c0` |
+| id | answers | | id | answers |
+|---:|---|---|---:|---|
+| 1 | the batteries' fill | | 9 | the radar's value 4, its period |
+| 2 | the batteries' capacity | | 10, 11, 12 | the seeker's values 1, 0, 2 |
+| 3, 4 | channel 0/2/5 and 0/3/4 demand a second | | 13 | whether the turret is an HQ turret |
+| 5, 6 | the guns' `+0x174` × 1000 ÷ interval, 5 skipping guns in state 1 | | 14 | mean shield fill × Σ deflector values 0–5 × shield value 0 |
+| 7 | the fight shield's mean sector fill | | 15 | Σ deflector values 0–5 × shield value 0 |
+| 8 | the radar's value 3, its range | | 16 | deflector value 0 × shield value 0 |
 
-The two slots hold different classes: `+0x5c8` is a 0xf4-byte object whose
-constructor lays out channels of stride 0x1c defaulting to 0.5, `+0x5cc` a
-0x120-byte one with two arrays of six floats defaulting to 1.0 and 0.0.
+Its callers ask for it after a `QueryInterface` for `0x204`: `Behavior.dll`
+for 1, 2, 5, 6 and 7 (id 1 at `0x100180bd`), `ArealMap.dll`
+for 6, `iron3d.dll` for 2, and a gun, on the round it fires, for 10–12
+(`Control.dll:0x1002986c`). The ids are listed in `control.DEVICE_QUERIES`.
 
-**That match is by count, and the rows do not travel this way** (*read*,
+**The rows travel another way** (*read*,
 [below](#from-a-row-to-a-command--read-and-measured)). A `.tbl` row is
-interpreted in `World3D.dll` (`0x1000fb40`) and reaches `Control.dll` through
-`IControl`'s setters and the component interface at object `+8`, not as a
-message numbered like the command. So which messages the 16-way table takes is
-still open; that its two slots are the factory's single turret (`+0x5c8`) and
-fight shield (`+0x5cc`) fits a component dispatch, not `MCMD_` (*guess*).
+interpreted in `World3D.dll` (`0x1000fb40`), whose 21-entry table covers the
+whole `MCMD` space, and reaches `Control.dll` through `IControl`'s setters and
+the component interface at object `+8`. So no field of the `.ctl` frame is
+wired to a message: the command a row sets is multiplied by the live top
+speed (triple 3) and approached at the live acceleration (triple 1), a queued
+turn is paid out at the turn rate (triple 4)
+([24-motion.md](24-motion.md#speed-is-a-target-approached-at-a-fixed-acceleration--read)),
+a turret's channels move at their own section-2 rates, and a section-2
+channel is reached by a component that lists it
+([13-control.md](13-control.md#the-entries-are-channels-and-a-devices-inputs--read-and-measured)).
 
-**The three commands the shipped tables use that fall outside 1..16 are
-`MCMD_WALK_F` (19), `MCMD_WALK_B` (20) and `MCMD_LOCK` (21)** — 14 of the 116
-rows. The movement controller cannot be what handles them, so walking a
-machine is somebody else's job. That is the strongest thing the numbers say,
-and where the next dig starts.
+### Messages 20 and 21 are the agent's, not `MCMD_WALK_B` and `MCMD_LOCK`
 
-What is still not established is the step past this: which **field of the
-`.ctl` frame** feeds which of those channels. Knowing that message 11 is
-`MCMD_UP` and reaches index 0 of the object at `+0x5cc` does not say which of
-the frame's six triples that object was loaded from.
+The same numbering coincidence was drawn a second time, and it does not hold
+either. `Control.dll`'s own message dispatcher (`0x10007830`, `IControl` slot
+2) takes 1, 4 (attach), 7, 12, the `0x80000020` load and a 9-way table over
+**20 to 28** (`lea eax, [edx - 0x14]; cmp eax, 8; jmp [eax*4 + 0x10007d8c]`):
 
-### Where the three outsiders go
+- **20 re-initialises** (`0x10007d58`): `0x10009420` with the argument, then the
+  node reset, the weights and the speed limits — the "reset" the live limits
+  are recomputed at.
+- **21 carries a sub-code** (`0x10007d0f`): with 5, and the time it is given
+  matching, it runs the control takt (`0x100059a0`).
+- 22–26 do nothing, 27 and 28 call vtable slots 23 and 24.
 
-`MCMD_WALK_B` and `MCMD_LOCK` are handled, and not by the movement
-controller. Two places take them:
-
-- **`Control.dll` has a second control class.** Its dispatcher at `0x10007830`
-  covers messages 1, 4, 7, 12, the `0x80000020` load, and a range of its own —
-  `lea eax, [edx - 0x14]; cmp eax, 8; jmp [eax*4 + 0x10007d8c]`, a 9-way table
-  over **20 to 28**. Entry 0 is `MCMD_WALK_B` at `0x10007d58`, entry 1 is
-  `MCMD_LOCK` at `0x10007d0f`, entries 2 to 6 all point at the shared no-op,
-  and 27 and 28 belong to some other family.
-- **`AniMesh.dll`'s agent takes them too.** Its dispatcher at `0x10006fc0`
-  sends `MCMD_WALK_B` to `0x10007277`, `MCMD_LOCK` to `0x1000729b`, and the
-  control-system load to `0x10007248`. A forwarder at `0x10001320` passes every
-  message it receives to a sub-object **except** 21 — `MCMD_LOCK` is the one
-  message the agent keeps for itself.
-
-**`MCMD_LOCK` carries a sub-command.** Both handlers read the word the message
-points at rather than a magnitude: `Control.dll` tests it against 5,
-`AniMesh.dll` tables it as `[arg] - 2` over eight entries at `0x100073a8`. So
-"lock" is a family of actions, not one.
+`AniMesh.dll`'s agent dispatcher (`0x10006fc0`) matches: its 20 (`0x10007277`)
+re-initialises and then makes the same two calls as its control-system load
+(`0x10007248`), and its 21 switches on a sub-code 2..9 (`0x1000729b`, table
+`0x100073a8`); the forwarder at `0x10001320` passes on everything but 21.
+**These are the engine's agent messages**, which share small numbers with
+`MCMD_`; walking and the lock are the row handler's
+([below](#from-a-row-to-a-command--read-and-measured)), which is where
+`MCMD_WALK_F`'s handler was found.
 
 **`MCMD_WALK_F` (19) is handled, and this entry used to say it was not.** The
 claim was that no `cmp edx, 0x13` exists in any of six modules and that every

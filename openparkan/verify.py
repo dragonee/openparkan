@@ -4576,6 +4576,135 @@ def check_control(check, game: Path) -> None:
           f"are a prefix of an objects.rlb member, and every member they reach "
           f"is an {', '.join(sorted(tagged))} record")
 
+    check_ctl_fields(check, game, blobs, parsed)
+
+
+#: The component classes the factory builds as its generic device
+#: (``Control.dll:0x1002d6ec``, ``0x10020800``).
+GENERIC_DEVICE_TYPES = frozenset({3, 6, 7, 11, 12, 13, 14, 16, 18, 20, 21, 22, 23, 24, 25, 28, 29})
+
+
+def check_ctl_fields(check, game: Path, blobs, parsed) -> None:
+    """.ctl: component entries, section 1's contacts, the lean, triple 2, device inputs."""
+    entries = [(x, c.counts[2]) for c in parsed for k in c.components for x in k.entries]
+    channels = sum(c.counts[2] for c in parsed)
+    named = sum(len({x for k in c.components for x in k.entries}) for c in parsed)
+    check(".ctl: a component's entries are its controller's channels",
+          entries and all(0 <= x < n for x, n in entries),
+          f"all {len(entries)} entries on "
+          f"{sum(1 for c in parsed for k in c.components if k.entries)} components index "
+          f"section 2 (Control.dll:0x10021de7 rebases them by the part's first channel); "
+          f"{named} of the {channels} channels are driven by some component")
+
+    points: dict[tuple[str, str], list] = {}
+    ndp_flags: dict[tuple[str, str], list[int]] = {}
+    for path in all_archives(game):
+        archive = NResArchive.open(path)
+        for entry in archive:
+            stem = entry.name.lower().rsplit(".", 1)[0]
+            if entry.name.lower().endswith(".cpt"):
+                points[(path.name.lower(), stem)] = objmesh.parse_control_points(
+                    archive.read(entry))
+            elif entry.name.lower().endswith(".ndp"):
+                raw = archive.read(entry)
+                ndp_flags[(path.name.lower(), stem)] = [
+                    struct.unpack_from("<i", raw, 4 + 76 * i)[0]
+                    for i in range(struct.unpack_from("<i", raw, 0)[0])]
+
+    states = same = gaps = resolved = with_cpt = contacts = good_groups = 0
+    contact_groups: dict[tuple[str, str], set[int]] = {}
+    reached: dict[tuple[str, str], set[int]] = {}
+    limping: Counter[str] = Counter()
+    gear: Counter[int] = Counter()
+    names: Counter[str] = Counter()
+    for (lib, name, blob), c in zip(blobs, parsed, strict=True):
+        key = (lib.lower(), name.lower().rsplit(".", 1)[0])
+        reached[key] = ({g for g in c.groups if g != control.NO_GROUP}
+                        | {s.actions for s in c.states} | {k.group for k in c.components})
+        stride = control.SECTION1_RECORD + control.SECTION1_PER_B * c.counts[1]
+        for i, s in enumerate(c.states):
+            if not s.contacts:
+                continue
+            states += 1
+            same += [k.point for k in s.contacts] == [k.point for k in c.states[0].contacts]
+            pts = points.get(key)
+            for j, k in enumerate(s.contacts):
+                contacts += 1
+                at = control.HEADER_SIZE + i * stride + control.SECTION1_RECORD + 16 * j
+                gaps += struct.unpack_from("<i", blob, at + 12)[0] == 0
+                good_groups += k.group == control.NO_GROUP or 0 <= k.group < c.counts[4]
+                if k.group != control.NO_GROUP:
+                    contact_groups.setdefault(key, set()).add(k.group)
+                if pts is not None:
+                    with_cpt += 1
+                    if 0 <= k.point < len(pts):
+                        resolved += 1
+                        names[re.sub(r"[_\d].*|(Left|Right)", "", pts[k.point].name)] += 1
+            if any(k.flags & control.NEEDS_DESTROYED for k in s.contacts):
+                limping[name.lower()] += 1
+                for k in s.contacts:
+                    node = pts[k.point].nodes[1] if pts and 0 <= k.point < len(pts) else -1
+                    flags = ndp_flags.get(key, [])
+                    gear[flags[node] & 0x60 if 0 <= node < len(flags) else -1] += 1
+    only = sum(len(g - reached[key]) for key, g in contact_groups.items())
+    check(".ctl: a state's contacts are control points, the same in every state",
+          states and same == states and gaps == contacts and resolved == with_cpt > 0
+          and good_groups == contacts and only == 22,
+          f"{contacts} contacts on {states} states; the points agree with state 0's on "
+          f"{same}; +12 is zero on {gaps}; {resolved}/{with_cpt} index the same-stem .cpt "
+          f"where there is one ({dict(names.most_common(5))}); +8 is -1 or a group on "
+          f"{good_groups}, and {only} groups are reached only from a contact -- footsteps")
+
+    check(".ctl: the states that need a destroyed contact are walkers limping",
+          sum(limping.values()) == 102 and set(gear) <= {0x20, 0x40} and gear[0x20] == gear[0x40],
+          f"{dict(limping)} states carry 0x200 (Control.dll:0x10001107 wants that contact's "
+          f"node destroyed); every contact on them sits on a running-gear node, "
+          f"left {gear[0x20]} and right {gear[0x40]}")
+
+    selecting: dict[str, set[int]] = defaultdict(set)
+    lean_states = 0
+    sources = set()
+    for (_lib, name, _blob), c in zip(blobs, parsed, strict=True):
+        for s in c.states:
+            if any(s.lean):
+                lean_states += 1
+            for axis, sel in enumerate(s.lean):
+                if sel:
+                    selecting[name.lower()].add(axis)
+                    sources.add(sel & ~control.LEAN_NEGATE)
+    known = set(control.LEAN_TURN + control.LEAN_VELOCITY + control.LEAN_ACCELERATION)
+    by_name = {(n.lower()): c for (_l, n, _b), c in zip(blobs, parsed, strict=True)}
+    authored = sum(1 for n, axes in selecting.items() for a in axes
+                   if by_name[n].triples[control.TRIPLE_LEAN][a] < 6.0)
+    selected = sum(len(a) for a in selecting.values())
+    z_default = sum(1 for n in selecting
+                    if abs(by_name[n].triples[control.TRIPLE_LEAN][2] - control.FULL_TURN) < 1e-4)
+    check(".ctl: a state's lean selects a source, and triple 6 bounds it",
+          lean_states == 28 and len(selecting) == 16 and sources <= known
+          and authored == selected and z_default == len(selecting),
+          f"{lean_states} states on {len(selecting)} controllers pick sources "
+          f"{sorted(sources)} (Control.dll:0x10014e8d); every axis they lean carries an "
+          f"authored triple-6 limit below a turn, {authored} of {selected}, and z, which "
+          f"none leans, keeps 6.28 on all {z_default}")
+
+    unread = sum(1 for c in parsed if not any(c.triples[control.TRIPLE_UNREAD]))
+    check(".ctl: triple 2 is mostly left zero",
+          unread == 518,
+          f"{unread} of {len(parsed)} leave +32..+40 at zero; nothing in Control.dll reads "
+          f"them in either copy of the block")
+
+    devices = [k for c in parsed for k in c.components if k.type_id in GENERIC_DEVICE_TYPES]
+    selectors = Counter(s for k in devices for s in k.inputs if s)
+    pairs = Counter((k.inputs[1:], k.weights) for k in devices if any(k.inputs[1:]))
+    inputs = sorted({control.device_input(s) for s in selectors} - {None})
+    check(".ctl: a generic device's selectors name motion inputs",
+          devices and all(s == 1 or control.device_input(s) for s in selectors)
+          and set(pairs) == {((12, 7), (1.0, 0.5)), ((12, 4), (1.0, 0.5))},
+          f"{len(devices)} generic devices use selectors {dict(selectors)} "
+          f"(Control.dll:0x10020d90): {inputs}; "
+          f"the wheels' two inputs are the forward speed and half the yaw rate either "
+          f"way, {dict(pairs)}")
+
 
 #: A building's model number, as its display name carries it, against the
 #: efficiency its controller gives it.
@@ -5648,6 +5777,104 @@ def check_actions(check, game: Path) -> None:
           f"the surfaces whose materials carry their slot's tag: {', '.join(good)} "
           f"(Control.dll:0x100117d0 plays slot surface + 1); water is surface 7, "
           f"{by_surface[7]}.  Control: one slot either way, {off} of 7 agree")
+
+    check_action_conditions(check, game)
+
+
+def check_action_conditions(check, game: Path) -> None:
+    """Section 5's conditions and runs, the hero's footsteps, the critical-damage entries."""
+    names = frozenset(p.name.lower() for p in all_archives(game))
+    modes: Counter[str] = Counter()
+    bits: set[int] = set()
+    inverted_inside = True
+    opened = closed = stray = 0
+    hero = None
+    entries: dict[int, Counter[tuple[int, ...]]] = {control.ENTRY_CRITICAL: Counter(),
+                                                    control.ENTRY_RECOVERED: Counter()}
+    paired = set_six = unused = 0
+    effects_on: Counter[str] = Counter()
+    for path in all_archives(game):
+        archive = NResArchive.open(path)
+        for entry in archive:
+            if not entry.tag.upper().startswith("CTL"):
+                continue
+            try:
+                c = control.parse(archive.read(entry), names)
+            except control.ControlFormatError:
+                continue
+            if entry.name.lower() == "r_h_02.ctl":
+                hero = c
+            for r in c.references:
+                if r.flags & control.REF_ANY:
+                    modes["any"] += 1
+                if r.flags & control.REF_ALL:
+                    modes["all"] += 1
+                if r.flags & (control.REF_ANY | control.REF_ALL):
+                    bits |= {i for i in range(control.CONDITIONS) if r.mask >> i & 1}
+                    inverted_inside &= r.inverted & ~r.mask == 0
+            for g in range(c.counts[4]):
+                inside = False
+                for r in (r for r in c.references if r.group == g):
+                    if r.flags & control.REF_OPEN and not inside:
+                        inside, opened = True, opened + 1
+                    if r.flags & control.REF_ELSE:
+                        closed += inside
+                        stray += not inside
+                        inside = False
+                stray += inside
+            if not c.groups:
+                continue
+            unused += any(c.groups[e] != control.NO_GROUP for e in (1, 5, 8, 9))
+            six = c.groups[control.ENTRY_CRITICAL] != control.NO_GROUP
+            seven = c.groups[control.ENTRY_RECOVERED] != control.NO_GROUP
+            set_six += six
+            paired += six and seven
+            ids = {r.args[3]: r.resource.member for r in c.references
+                   if r.action in (control.ACT_EFFECT_POINT, control.ACT_EFFECT_POINTS)}
+            for e in entries:
+                if c.groups[e] != control.NO_GROUP:
+                    grp = c.group(e)
+                    entries[e][tuple(sorted({r.action for r in grp}))] += 1
+                    if e == control.ENTRY_CRITICAL:
+                        on = [r.args[0] for r in grp]
+                        off = [r.args[0] for r in c.group(control.ENTRY_RECOVERED)]
+                        paired -= six and seven and sorted(on) != sorted(off)
+                        effects_on.update(ids.get(i, "?") for i in on)
+    check(".ctl: a section-5 record's ints 1 and 2 are a mask over the condition bytes",
+          modes == Counter(any=37) and bits <= set(range(11)) | {14, 15} and inverted_inside
+          and opened == closed == 8 and stray == 0,
+          f"{dict(modes)} records test bytes {sorted(bits)} (surface ids 0-10, 7 the liquid "
+          f"bed; Control.dll:0x100022c0), every inversion inside its mask; {opened} runs "
+          f"open with 0x80000000 and {closed} close with 0x10000000, none left open")
+
+    steps = []
+    if hero is not None:
+        ids = {r.args[3]: r.resource.member.lower() for r in hero.references
+               if r.action in (control.ACT_EFFECT_POINT, control.ACT_EFFECT_POINTS)}
+        feet = {k.group for s in hero.states for k in s.contacts} - {control.NO_GROUP}
+        for r in hero.references:
+            if r.group in feet and r.mask and not r.flags & control.REF_ELSE:
+                steps.append((r.mask.bit_length() - 1, ids.get(r.args[0], "")))
+    tags = effects.SURFACE_TAGS
+
+    def matching(shift: int) -> int:
+        return sum(1 for bit, fx in steps if 0 <= bit + shift < len(tags)
+                   and fx.startswith("step_h") and fx[6:7] == tags[bit + shift][0])
+    control_hits = max(matching(-1), matching(1))
+    check("r_h_02: the hero's footstep group picks its effect by surface id",
+          len(steps) == 12 and matching(0) == 8 and control_hits <= 2,
+          f"each foot's group (a contact's +8) starts {sorted(set(steps))}; "
+          f"on {matching(0)} of {len(steps)} the effect's letter is the surface's tag "
+          f"({' '.join(tags)}): metal, stone, grass, al.  Control: one surface either way, "
+          f"{control_hits}")
+
+    check(".ctl: block entries 6 and 7 switch an effect on and off at critical damage",
+          set_six == 32 and paired == 32 and unused == 0
+          and set(entries[control.ENTRY_CRITICAL]) == {(control.ACT_EFFECT_ON,)}
+          and set(entries[control.ENTRY_RECOVERED]) == {(control.ACT_EFFECT_OFF,)},
+          f"{set_six} controllers set entry 6 and {paired} of them turn the same effects "
+          f"off in entry 7 (Control.dll:0x10012bfb, 0x10012b12): {dict(effects_on)}; "
+          f"{unused} set entry 1, 5, 8 or 9")
 
 
 def check_sensors(check, game: Path) -> None:
@@ -8015,10 +8242,11 @@ def check_controls(check, game: Path) -> None:
           f"resolve through the World3D.dll table")
 
     outside = Counter(r.command for r in rows if not r.dispatched)
-    check("controls: three commands fall outside the controller's dispatch",
+    check("controls: three commands the tables send are numbered above 16",
           len(outside) == 3,
           f"{sum(1 for r in rows if r.dispatched)}/{len(rows)} rows send a command "
-          f"in {controls.DISPATCHED.start}..{controls.DISPATCHED.stop - 1}; the rest "
+          f"in {controls.DISPATCHED.start}..{controls.DISPATCHED.stop - 1}, the span once "
+          f"read as Control.dll's dispatch (it is IDeviceManager's getter); the rest "
           + ", ".join(f"{n} x{c}" for n, c in sorted(outside.items())))
 
     walk = [r for r in rows if r.command == "MCMD_WALK_F"]
@@ -8027,7 +8255,8 @@ def check_controls(check, game: Path) -> None:
     check("controls: the forward walk is sent by every table",
           len(walk) == 6 and len(tables) == len(controls.TABLES),
           f"MCMD_WALK_F is sent on {len(walk)} rows, two in each of "
-          f"{len(tables)} tables -- and no module dispatches on its number")
+          f"{len(tables)} tables -- and no module compares against its number: "
+          f"World3D.dll's range table reaches it")
 
     classed = {r.target for r in rows}
     unknown = sorted(c for c in classed

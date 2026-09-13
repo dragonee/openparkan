@@ -303,3 +303,72 @@ def test_a_record_is_an_action_with_four_arguments(ctl, reference):
         control.ACT_EFFECT_START, control.ACT_KILL]
     assert c.group(control.ENTRY_HIT)[0].args == (5, 0, 0, 0)
     assert c.group(control.ENTRY_EDGE) == []
+
+
+def _surface(i: int) -> list[bool]:
+    return [n == i for n in range(control.CONDITIONS)]
+
+
+def _step(effect: int, flags: int, mask: int, invert: int = 0) -> tuple[int, ...]:
+    signed = flags - (1 << 32) if flags >= 1 << 31 else flags
+    return (signed, mask, invert, control.ACT_EFFECT_START, effect, 1, 0, 0, 0)
+
+
+def test_a_record_runs_on_its_masked_conditions(ctl, reference):
+    any_ = control.REF_ANY
+    blob = ctl(counts=(0, 0, 0, 0, 1),
+               groups=[[reference("", "", _step(1, any_, 1 << 5)),
+                        reference("", "", _step(2, any_, 1 << 7, 1 << 7)),
+                        reference("", "", _step(3, control.REF_ALL, (1 << 1) | (1 << 2))),
+                        reference("", "", _step(4, 0, 1 << 3))]])
+    c = control.parse(blob)
+    metal, stone = _surface(5), _surface(1)
+    assert [r.args[0] for r in control.run_group(c.references, metal)] == [1, 2, 4]
+    bed = list(stone)
+    bed[control.COND_BED] = True
+    assert [r.args[0] for r in control.run_group(c.references, bed)] == [4]
+    assert c.references[1].mask == 1 << 7 and c.references[1].inverted == 1 << 7
+
+
+def test_a_run_closes_with_an_else(ctl, reference):
+    opening = control.REF_OPEN | control.REF_ANY
+    closing = opening | control.REF_ELSE
+    group = [reference("", "", _step(101, opening, 1 << 5)),
+             reference("", "", _step(201, opening, 1 << 1)),
+             reference("", "", _step(301, closing, 1 << 9))]
+    c = control.parse(ctl(counts=(0, 0, 0, 0, 1), groups=[group]))
+    ran = lambda s: [r.args[0] for r in control.run_group(c.references, _surface(s))]  # noqa: E731
+    assert ran(5) == [101]
+    assert ran(1) == [201]
+    assert ran(9) == [301]
+    assert ran(0) == [301]          # nothing matched, so the else runs
+
+
+def test_a_state_carries_its_contacts_and_lean(ctl, state):
+    stride = control.SECTION1_RECORD + 2 * control.SECTION1_PER_B
+    rec = bytearray(state(conditions=2))
+    rec[control.STATE_LEAN_AT:control.STATE_LEAN_AT + 3] = bytes(
+        (control.LEAN_NEGATE | control.LEAN_ACCELERATION[1], control.LEAN_TURN[2], 0))
+    struct.pack_into("<iIi", rec, control.SECTION1_RECORD, 4,
+                     control.NEEDS_INTACT | control.CONTACT_SUPPORT, 3)
+    struct.pack_into("<iIi", rec, control.SECTION1_RECORD + 16, 6,
+                     control.NEEDS_DESTROYED | control.CONTACT_FALLBACK, -1)
+    assert len(rec) == stride
+    (s,) = control.parse(ctl(counts=(1, 2, 0, 0, 0), states=[bytes(rec)])).states
+    assert [(k.point, k.group) for k in s.contacts] == [(4, 3), (6, -1)]
+    assert s.lean == (0x89, 3, 0)
+    assert s.allows([True, False])
+    assert not s.allows([True, True])
+    assert not s.allows([False, False])
+
+
+def test_a_generic_device_names_its_inputs(ctl, component):
+    wheel = bytearray(component(3, entries=(0,), flags=0x01070C00))
+    struct.pack_into("<2f", wheel, control.COMPONENT_WEIGHTS_AT, 1.0, 0.5)
+    (part,) = control.parse(ctl(counts=(0, 0, 1, 1, 0), components=[bytes(wheel)])).components
+    assert part.inputs == (0, 12, 7)
+    assert part.weights == (1.0, 0.5)
+    assert control.device_input(12) == ("speed", 1)
+    assert control.device_input(7) == ("-spin", 2)
+    assert control.device_input(14) == ("speed", -1)
+    assert control.device_input(1) is None
