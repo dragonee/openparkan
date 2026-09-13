@@ -5867,7 +5867,7 @@ read = true
 module = "Control.dll"
 at = "0x10001790"
 kind = "function"
-name = "state graph load: live cost = file cost x (1 + largest gap between the two states' velocity and spin boxes)"
+name = "state graph load: live cost = file cost x (1 + g_v + g_s); a gap is the largest |centre of the destination box - minimum of the source box| over the axes the source switches on, velocity then spin"
 doc = "docs/24-motion.md"
 read = true
 
@@ -7400,4 +7400,21 @@ at = "0x1002053c"
 kind = "datum"
 name = "interface 0x18 (mesh geometry) vtable: slot 14 GetScale, slot 15 SetScale"
 doc = "docs/07-objects.md"
+read = true
+
+# --- M3: the transition cost's scaling (docs/24-motion.md "Playing a state") ---
+[[entry]]
+module = "Control.dll"
+at = "0x10001af0"
+kind = "function"
+name = "the larger of a float triple's three components (the state graph's spin gap)"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10008f57"
+kind = "site"
+name = "controller load: the state graph's costs are scaled (0x10001790) once the states are copied"
+doc = "docs/24-motion.md"
 read = true

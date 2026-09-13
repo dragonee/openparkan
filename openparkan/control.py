@@ -560,14 +560,33 @@ class Controller:
         """
         return self.costs[to * len(self.states) + frm]
 
-    def path(self, frm: int, to: int) -> list[int] | None:
+    def live_cost(self, to: int, frm: int) -> float:
+        """The cost the planner uses: the file's, scaled at load (``0x10001790``).
+
+        It is the file's cost times one plus two gaps.  The velocity gap is the
+        largest distance, over the axes the source state switches on (+0x00 bits
+        0-2), from the centre of the destination's velocity box to the minimum of
+        the source's; the spin gap is the same over bits 4-6
+        (``0x10001af0`` takes the larger of three).
+        """
+        dest, src = self.states[to], self.states[frm]
+
+        def gap(box_to, box_from, first_bit):
+            centre = [(lo + hi) * 0.5 for lo, hi in zip(*box_to, strict=True)]
+            return max((abs(centre[k] - box_from[0][k]) for k in range(3)
+                        if src.flags & (first_bit << k)), default=0.0)
+
+        return self.cost(to, frm) * (1.0 + gap(dest.velocity, src.velocity, 1)
+                                     + gap(dest.spin, src.spin, 0x10))
+
+    def path(self, frm: int, to: int, live: bool = False) -> list[int] | None:
         """The cheapest run of states from ``frm`` to ``to``, without ``frm``.
 
         Dijkstra over the file's costs, as the planner runs it
-        (``0x100019d0``).  The engine also multiplies each cost at load by one
-        plus the largest gap between the two states' boxes (``0x10001790``);
-        that is not applied here.
+        (``0x100019d0``), or with ``live`` over the costs the engine scales
+        at load (``live_cost``).
         """
+        weight = self.live_cost if live else self.cost
         best = {frm: 0.0}
         back: dict[int, int] = {}
         queue = [(0.0, frm)]
@@ -582,7 +601,7 @@ class Controller:
             if cost > best.get(state, float("inf")):
                 continue
             for nxt in range(len(self.states)):
-                step = self.cost(nxt, state)
+                step = weight(nxt, state)
                 if step >= NO_EDGE or nxt == state:
                     continue
                 if cost + step < best.get(nxt, float("inf")):

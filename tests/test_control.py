@@ -262,6 +262,20 @@ def test_the_cheapest_path_reads_the_table_row_as_the_destination(ctl, state):
     assert c.path(2, 0) is None
 
 
+def test_the_loader_scales_a_cost_by_the_gap_from_the_destinations_centre(ctl, state):
+    forward = state(flags=0b10, velocity=((0.0, 6.0, 0.0), (0.0, 14.0, 0.0)))
+    backward = state(flags=0b10, velocity=((0.0, -14.0, 0.0), (0.0, -6.0, 0.0)))
+    blob = bytearray(ctl(counts=(3, 0, 0, 0, 0), states=[forward, backward, forward]))
+    at = control.HEADER_SIZE + 3 * control.SECTION1_RECORD
+    no = control.NO_EDGE
+    struct.pack_into("<9f", blob, at, no, 1.0, 1.0, 1.0, no, 1.0, 1.0, 1.0, no)
+    c = control.parse(bytes(blob))
+    # Forward to backward: |-10 - 6| = 16; forward to forward: |10 - 6| = 4.
+    assert c.live_cost(1, 0) == 17.0
+    assert c.live_cost(2, 0) == 5.0
+    assert c.path(0, 1, live=True) == [1]
+
+
 def test_a_channel_names_the_node_it_plays(ctl):
     blob = bytearray(ctl(counts=(0, 0, 1, 0, 0), points=(3,),
                          channels=[(49.0, 53.0, 0.5, 100.0, 6.28,

@@ -127,8 +127,18 @@ feet do not slide.
     zero-cost edges join a state whose B ends where the next one's starts; read
     the other way, none do).
   - A cost of 1,000,000 or more is no edge.
-  - At load each cost is multiplied by one plus the largest gap between the two
-    states' boxes (`0x10001790`).
+  - At load each cost is scaled (`0x10001790`, called from the loader at
+    `0x10008f57`): it is multiplied by 1 + g_v + g_s.
+    - g_v is the largest distance, over the velocity axes the **source** state
+      switches on, from the centre of the destination's velocity box to the
+      minimum of the source's.
+    - g_s is the same over the spin box (`0x10001af0` takes the larger of
+      three).
+    - It is what keeps a gait going (*measured*). On `r_h_02`, 8 of the
+      velocity-driven anchors have exits running both ways, and the file ties
+      every such exit at 1. Scaled, the exits that keep the direction are the
+      cheapest on all 8. At the end of the forward run, state 78 goes on to 85
+      at 5, not to the backward run's 79 at 17.
 
 **The hero** (*measured*, `r_h_02` against `R_H_02.msh`):
 

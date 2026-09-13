@@ -4746,6 +4746,36 @@ def check_playback(check, game: Path) -> None:
           f"pair B ends on the frame the next one's starts; control: read the other "
           f"way, {backwards} do.  {anchors} of the {states} states are anchors the "
           f"planner chooses among (Control.dll:0x100051c0)")
+    def direction(s):
+        lo, hi = s.velocity[0][1], s.velocity[1][1]
+        return 0 if lo <= 0 <= hi else (1 if lo > 0 else -1)
+
+    both_ways = file_keeps = live_keeps = 0
+    for frm, s in enumerate(hero.states):
+        if not (s.anchor and s.by_velocity):
+            continue
+        exits = [to for to in range(len(hero.states)) if to != frm
+                 and hero.cost(to, frm) < control.NO_EDGE and direction(hero.states[to])]
+        if len({direction(hero.states[to]) for to in exits}) < 2:
+            continue
+        both_ways += 1
+        for weight, tally in ((hero.cost, "file"), (hero.live_cost, "live")):
+            best = min(weight(to, frm) for to in exits)
+            kept = all(direction(hero.states[to]) == direction(s)
+                       for to in exits if weight(to, frm) == best)
+            if tally == "file":
+                file_keeps += kept
+            else:
+                live_keeps += kept
+    check("r_h_02: scaled at load, the table keeps a gait going",
+          both_ways == 8 and live_keeps == both_ways and file_keeps == 0
+          and hero.live_cost(85, 78) == 5.0 and hero.live_cost(79, 78) == 17.0,
+          f"on {live_keeps} of the {both_ways} velocity-driven anchors whose exits run "
+          f"both ways, the cheapest exits keep the direction once each cost is times "
+          f"1 + the gaps from the destination box's centre to the source's minimum "
+          f"(Control.dll:0x10001790); control: by the file's costs alone {file_keeps} "
+          f"do.  The forward run's 78 goes on to 85 at {hero.live_cost(85, 78):g}, "
+          f"not to 79 at {hero.live_cost(79, 78):g}")
     check(".ctl: the fixed, motionless step 0x100000 is the buildings'",
           fixed["fortif.rlb"] == 420 and sum(fixed.values()) == 421,
           f"{dict(+fixed)}")
