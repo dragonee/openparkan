@@ -166,7 +166,12 @@ impl Mesh {
     }
 
     pub fn world_pose(&self, node: usize) -> Pose {
-        let mut pose = self.local_pose(node);
+        self.world_pose_by(node, |n| self.local_pose(n))
+    }
+
+    /// A node's pose in model space, with every node of the chain posed by `local`.
+    pub fn world_pose_by(&self, node: usize, local: impl Fn(usize) -> Pose) -> Pose {
+        let mut pose = local(node);
         let mut seen = vec![node];
         let mut parent = self.nodes[node].parent;
         while parent != NO_PARENT
@@ -175,10 +180,54 @@ impl Mesh {
         {
             let p = usize::from(parent);
             seen.push(p);
-            pose = self.local_pose(p).compose(&pose);
+            pose = local(p).compose(&pose);
             parent = self.nodes[p].parent;
         }
         pose
+    }
+
+    /// A node's pose at a fractional frame, as `AniMesh.dll:0x10012880` finds it.
+    ///
+    /// The key is the run's entry at `floor(frame)`. Past the run, on a node that is
+    /// not animated, or where the entry is at or past the node's fallback key, the
+    /// fallback key is used. At a key's time, or the next key's, that key is taken
+    /// whole; otherwise the two are blended by time.
+    pub fn pose_at(&self, node: usize, frame: f64) -> Pose {
+        let n = &self.nodes[node];
+        let mut index = usize::from(n.fallback_key);
+        let k = frame.floor();
+        if n.is_animated() && k >= 0.0 && k < f64::from(self.frame_count) {
+            let at = usize::from(n.anim_start) + k as usize;
+            if let Some(&entry) = self.frame_map.get(at)
+                && entry < n.fallback_key
+            {
+                index = usize::from(entry);
+            }
+        }
+        let Some(key) = self.keys.get(index) else { return IDENTITY };
+        let time = f64::from(key.time);
+        let Some(next) = self.keys.get(index + 1).filter(|_| frame != time) else { return key.pose() };
+        let next_time = f64::from(next.time);
+        if frame == next_time {
+            return next.pose();
+        }
+        if next_time == time {
+            return key.pose();
+        }
+        key.pose().blend(&next.pose(), (frame - time) / (next_time - time))
+    }
+
+    /// Two frames and a weight, as a controller hands them (`0x10012560`): frame A
+    /// alone at weight 0 or when B is negative, frame B alone at weight 1 or when A
+    /// is negative, a blend between otherwise.
+    pub fn blended_pose(&self, node: usize, frame_a: f64, frame_b: f64, weight: f64) -> Pose {
+        let use_a = weight < 1.0 && frame_a >= 0.0;
+        let use_b = weight > 0.0 && frame_b >= 0.0;
+        match (use_a, use_b) {
+            (true, true) => self.pose_at(node, frame_a).blend(&self.pose_at(node, frame_b), weight),
+            (false, true) => self.pose_at(node, frame_b),
+            _ => self.pose_at(node, frame_a.max(0.0)),
+        }
     }
 
     /// The pose a host's socket replaces when this mesh is mounted.
@@ -208,6 +257,18 @@ impl Mesh {
             }
         }
         out
+    }
+
+    /// The lowest z of what is drawn at rest: level 0 of variant 0, hulls left out.
+    pub fn lowest(&self) -> Option<f64> {
+        let posed = self.posed_positions();
+        self.nodes
+            .iter()
+            .filter(|n| !n.is_collision())
+            .filter_map(|n| n.slot_for_lod(0, 0))
+            .flat_map(|s| self.slot_triangles(s).iter().flatten())
+            .filter_map(|&v| posed.get(usize::from(v)).map(|p| p[2]))
+            .reduce(f64::min)
     }
 
     /// Vertex positions with each node's world pose applied, in model space.

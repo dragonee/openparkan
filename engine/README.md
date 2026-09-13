@@ -20,9 +20,15 @@ mip levels. Every placed object is drawn from its assembly:
 - level 0 is drawn, and collision hulls never;
 - materials draw in the blend mode their flags byte names.
 
-Not yet: animation (M3), lightmaps (no Mission 01 mesh has one) and levels of
-detail beyond 0. This
-directory also holds what the rest will follow:
+M3 is under way. `parkan-sim` plays a controller's states on their own clock
+and walks a machine on the ground: the live limits, the velocity and pending
+turn integrators run once a state step, and the body moves by its velocity or
+by the animation's root stride. On Tut_1 the hero holding W reaches 14 m/s in
+its run cycle. Not in the window yet: input, the first-person eye and the
+drawn animation.
+
+Not yet: lightmaps (no Mission 01 mesh has one) and levels of detail beyond 0.
+This directory also holds what the rest will follow:
 
 - **`docs/`** is the source of truth. Every behaviour the engine implements is
   in a doc there, labelled *read* or *measured*, and re-derived by
@@ -83,15 +89,20 @@ a row here. A row leaves this table when research closes it.
 | M1 | How the 34142-radius dome escapes the far plane and a fog ending by 700 | draw the dome first, depth writes off, unfogged but for its rim | [10](../docs/10-sky.md#not-resolved) |
 | M1 | The heading angle's zero and direction for the fog colour | 0 along +y, turning towards +x, like the dome's segments | [10](../docs/10-sky.md#not-resolved) |
 | M1 | What the sun does with its seven values; the scene's light direction | a directional light coloured by slot 19 × the third float, pointing from the sun's fixed place | [10](../docs/10-sky.md#not-resolved) |
-| M3 | How a body is put back on its ground point, and whether modes 0 and 2 fall | after integrating, set the sphere centre to ground point + r along the normal | [24](../docs/24-motion.md#not-established) |
-| M3 | Collision between objects: shapes and response | spheres pushed apart in xy, the approaching velocity cancelled; faces steeper than 80° remove the velocity into them | [24](../docs/24-motion.md#not-established) |
-| M3 | The map edge, bridges, jumping | clamp to the terrain's box inset by r; bridges and buildings as walkable mesh faces | [24](../docs/24-motion.md#not-established) |
-| M3 | Which way the gap to the liquid surface is measured over a bed | `water_level − centre.z < r` | [24](../docs/24-motion.md#not-established) |
-| M3 | The mesh walk order inside `FindWorldFace` | cross the edge the segment leaves by until the face holds the centre | [24](../docs/24-motion.md#finding-the-ground--read) |
-| M3 | The divisor D in a blended state's weight | the speed box's span | [24](../docs/24-motion.md#not-established) |
+| M3 | How a body is put back on its ground point, and whether modes 0 and 2 fall | after each step the model's lowest point is set on the highest walkable face within the contact radius above it, as a mission places units | [24](../docs/24-motion.md#not-established) |
+| M3 | Collision between objects: shapes and response | none yet: units walk through each other and through buildings | [24](../docs/24-motion.md#not-established) |
+| M3 | Walls, the map edge, bridges, jumping | a step that ends over a face steeper than 80°, or off the ground mesh, is undone and the body stops; bridges and buildings are not ground | [24](../docs/24-motion.md#not-established) |
+| M3 | The mesh walk inside `FindWorldFace`, and the two query passes | the face under the point, found fresh each step; the water surface is never ground | [24](../docs/24-motion.md#finding-the-ground--read) |
+| M4 | Which way the gap to the liquid surface is measured over a bed | `water_level − centre.z < r` (bed damage arrives with damage) | [24](../docs/24-motion.md#not-established) |
+| M3 | The divisor D in a blended state's weight | the largest span of the velocity box's switched-on axes | [24](../docs/24-motion.md#not-established) |
 | M3 | The transition cost's scaling by the gap between two states' boxes | the file's cost unscaled | [24](../docs/24-motion.md#playing-a-state--read-and-measured) |
-| M3 | Section 1's 16-byte conditions | always satisfied | [24](../docs/24-motion.md#section-1-is-the-animation-state-graph--read-and-measured) |
+| M3 | Section 1's 16-byte conditions, and a state's use count `+0x94` | always satisfied; unlimited | [24](../docs/24-motion.md#section-1-is-the-animation-state-graph--read-and-measured) |
 | M3 | Whether a state's step velocity replaces the integrated one | it does not; the boxes test the integrated velocity | [24](../docs/24-motion.md#not-established) |
+| M3 | The state a machine starts in, and what plays when nothing is queued | state 0; the current state plays again | [24](../docs/24-motion.md#playing-a-state--read-and-measured) |
+| M3 | The game's random source for a jittering step | xorshift | [24](../docs/24-motion.md#playing-a-state--read-and-measured) |
+| M3 | The node range the payload counts as the chassis | none: spare payload is the whole payload, r = 1 | [24](../docs/24-motion.md#load--read-and-measured) |
+| M3 | What triples 5 and 6 do to the attitude | only the turn about z is applied | [24](../docs/24-motion.md#not-established) |
+| M3 | Which way across a slope the mode-2 brake acts | uphill, against the face normal | [24](../docs/24-motion.md#ground-and-slope--read) |
 | M3 | The mouse's yaw and pitch signs on screen | mouse right turns right, mouse up looks up; check against the game | [30](../docs/30-turrets.md#not-established) |
 | M3 | Which camera point gives the position and which the direction | position from `CameraCenter`, direction from `TargetDirect` | [30](../docs/30-turrets.md#aiming-and-the-camera--read-and-measured) |
 | M3 | How the strafe angle's turn splits between hull and turret; the keypad cruise ramp | the legs turn and the turret holds its heading; the ramp adds 0.05 a second to the command | [24](../docs/24-motion.md#not-established) |

@@ -243,6 +243,12 @@ fn pose(p: &Pose) -> Value {
     json!([p.translation, p.rotation])
 }
 
+/// The frames a mesh dump poses every animated node at: whole, halves, past the end.
+fn sample_frames(frame_count: u32) -> [f64; 7] {
+    let fc = f64::from(frame_count);
+    [0.0, 0.5, 1.0, 2.25, fc * 0.5 + 0.3, fc - 1.0, fc + 1.0]
+}
+
 /// One `MESH` member of an archive, `names[0]`, as the reader holds it.
 pub fn object_mesh(path: &Path, names: &[String]) -> Result<Value> {
     let archive = Archive::open(path)?;
@@ -281,6 +287,14 @@ pub fn object_mesh(path: &Path, names: &[String]) -> Result<Value> {
         "root_pose": pose(&m.root_pose()),
         "node_of_vertex": m.node_of_vertex(),
         "sphere": m.sphere.map_or(Value::Null, |(c, r)| json!([vector(&c), number(r)])),
+        "samples": m.nodes.iter().enumerate().filter(|(_, n)| n.is_animated()).map(|(i, _)| {
+            let fc = f64::from(m.frame_count);
+            json!({
+                "node": i,
+                "at": sample_frames(m.frame_count).iter().map(|&f| pose(&m.pose_at(i, f))).collect::<Vec<_>>(),
+                "blended": pose(&m.blended_pose(i, 0.5, fc * 0.6, 0.3)),
+            })
+        }).collect::<Vec<_>>(),
     }))
 }
 

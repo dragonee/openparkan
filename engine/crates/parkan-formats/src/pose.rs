@@ -31,7 +31,37 @@ pub fn rotate(q: [f64; 4], v: [f64; 3]) -> [f64; 3] {
     [vx + w * tx + (y * tz - z * ty), vy + w * ty + (z * tx - x * tz), vz + w * tz + (x * ty - y * tx)]
 }
 
+/// Two unit rotations interpolated the short way round.
+pub fn slerp(a: [f64; 4], b: [f64; 4], t: f64) -> [f64; 4] {
+    let mut dot: f64 = a.iter().zip(b).map(|(x, y)| x * y).sum();
+    let mut b = b;
+    if dot < 0.0 {
+        b = b.map(|v| -v);
+        dot = -dot;
+    }
+    let out: [f64; 4] = if dot > 0.9995 {
+        std::array::from_fn(|i| a[i] + t * (b[i] - a[i]))
+    } else {
+        let theta = dot.acos();
+        let (sa, sb, s) = (((1.0 - t) * theta).sin(), (t * theta).sin(), theta.sin());
+        std::array::from_fn(|i| (sa * a[i] + sb * b[i]) / s)
+    };
+    let norm = out.iter().map(|v| v * v).sum::<f64>().sqrt();
+    let norm = if norm == 0.0 { 1.0 } else { norm };
+    out.map(|v| v / norm)
+}
+
 impl Pose {
+    /// A lerp of the translations and a slerp of the rotations.
+    pub fn blend(&self, other: &Pose, t: f64) -> Pose {
+        Pose {
+            translation: std::array::from_fn(|i| {
+                self.translation[i] + t * (other.translation[i] - self.translation[i])
+            }),
+            rotation: slerp(self.rotation, other.rotation, t),
+        }
+    }
+
     /// Place `child` in this pose's frame.
     pub fn compose(&self, child: &Pose) -> Pose {
         let r = rotate(self.rotation, child.translation);

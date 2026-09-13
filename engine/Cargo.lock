@@ -1330,6 +1330,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "parkan-sim"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "glam",
+ "parkan-formats",
+]
+
+[[package]]
 name = "parkan-world"
 version = "0.1.0"
 dependencies = [

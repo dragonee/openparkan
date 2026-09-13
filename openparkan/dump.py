@@ -216,6 +216,11 @@ def _pose(pose) -> list:
     return [vector(pose[0]), vector(pose[1])]
 
 
+def sample_frames(frame_count: int) -> list[float]:
+    """The frames a mesh dump poses every animated node at: whole, halves, past the end."""
+    return [0.0, 0.5, 1.0, 2.25, frame_count * 0.5 + 0.3, frame_count - 1.0, frame_count + 1.0]
+
+
 def object_mesh(path: Path, names: list[str] | None = None) -> dict:
     """One ``MESH`` member of an archive, ``names[0]``, as the reader holds it.
 
@@ -255,6 +260,11 @@ def object_mesh(path: Path, names: list[str] | None = None) -> dict:
         "root_pose": _pose(m.root_pose()),
         "node_of_vertex": m.node_of_vertex(),
         "sphere": None if m.volume is None else [vector(m.volume.centre), number(m.volume.radius)],
+        "samples": [
+            {"node": i, "at": [_pose(m.pose_at(i, f)) for f in sample_frames(m.frame_count)],
+             "blended": _pose(m.blended_pose(i, 0.5, m.frame_count * 0.6, 0.3))}
+            for i, n in enumerate(m.nodes) if n.is_animated
+        ],
     }
 
 

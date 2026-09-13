@@ -1,0 +1,17 @@
+[package]
+name = "parkan-sim"
+description = "The game's rules as plain Rust: motion, the ground, a controller's states"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+glam.workspace = true
+parkan-formats.workspace = true
+
+[dev-dependencies]
+anyhow.workspace = true
+
+[lints]
+workspace = true
