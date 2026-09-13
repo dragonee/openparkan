@@ -116,8 +116,15 @@ outer ring is a clearance drawn around the building. See
   with the unit's mesh, and the mesh draws slot `variant × 5 + 4` of every node
   to that view. The 28 "collision hulls" carrying only a fifth slot are the
   cockpit the view sits in — `CameraCenter` is on one on all 54 turret records
-  that have one. A round's hit test takes level 0 and never strikes them. See
-  [07-objects.md](07-objects.md#the-fifth-slot-is-what-the-units-own-view-draws).
+  that have one. A round's hit test takes level 0 and never strikes them. Nor
+  does the ground: the walk-face query on an object takes level 0 of the
+  current variant (`AniMesh.dll:0x10007edb`), and a unit moving into another
+  object stops on that object's level-0 faces and is pushed out of its level-0
+  triangles (`AniMesh.dll:0x1000d645`), so the collision pass never reads the
+  fifth slot either. See
+  [07-objects.md](07-objects.md#the-fifth-slot-is-what-the-units-own-view-draws),
+  [26-damage.md](26-damage.md#the-hit-test--read-and-measured) and
+  [24-motion.md](24-motion.md#collision-between-objects--read).
 - ~~**Pose key `time`**~~ — answered: a key's time is **the frame at which
   its run first names it**, which is what an animation player interpolates
   between. See [07-objects.md](07-objects.md).

@@ -2702,16 +2702,16 @@ read = true
 module = "Terrain.dll"
 at = "0x10021860"
 kind = "function"
-name = "CLandscape::GetWalkFace"
-doc = "the binary's own assertion text"
-read = false
+name = "CLandscape::GetWalkFace (iface 0x18 slot 7): register = axis (low bits) | 4 faces at/above | 8 at/below; first face in the grid cell holding the point; out +0x1c hit z, +0x20 gap squared"
+doc = "docs/24-motion.md"
+read = true
 
 [[entry]]
 module = "Terrain.dll"
 at = "0x10024d70"
 kind = "function"
-name = "CWorld::GetWorldFace: the hit record's object by id, its QI 0x18 geometry slots 3 and 5; flag 8 gives the material id at face +0x74"
-doc = "docs/11-effects.md"
+name = "CWorld::GetWorldFace (slot 6): the hit record's object by id, its QI 0x18 geometry slots 3 and 5; face struct +0 flags, +8 normal ptr, +0xc/+0x20/+0x34 neighbour refs (flag 4), +0x54..+0x5c vertex ptrs (flag 1), +0x74 material id (flag 8); also docs/11-effects.md"
+doc = "docs/24-motion.md"
 read = true
 
 [[entry]]
@@ -2726,9 +2726,9 @@ read = false
 module = "Terrain.dll"
 at = "0x10026340"
 kind = "function"
-name = "CWorld::FindWorldFace"
-doc = "the binary's own assertion text"
-read = false
+name = "CWorld::FindWorldFace: start must lie in the held face; walks <= 24 faces, crossing edge e where vertex e is right of start->end and e+1 left; steep face (nz <= limit) fails"
+doc = "docs/24-motion.md"
+read = true
 
 [[entry]]
 module = "Terrain.dll"
@@ -8924,6 +8924,646 @@ at = "0x100114fd"
 kind = "site"
 name = "node damage stage: QI 0xd on a face's owner, material manager slot 9 on the face's material id -- the surface id, 10 without a manager"
 doc = "docs/07-objects.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x100055d4"
+kind = "site"
+name = "blend weight: D = largest | |max| - |min| | of the velocity box (abs, difference, abs, largest of three)"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000553e"
+kind = "site"
+name = "blend weight: skipped (q stays 1) when the speed is not above 1e-9"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10001af0"
+kind = "function"
+name = "largest of a 3-vector's components"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x100053f4"
+kind = "site"
+name = "state step: state bit 0x40000 -> the flag passed to the body transform and both integrators"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10014610"
+kind = "function"
+name = "body step velocity: clamp to live top speed unless 0x40000; clamp into the state's box (0x10001160); turn into the world"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10001160"
+kind = "function"
+name = "clamp a vector into a state's velocity box, per axis"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10014c02"
+kind = "site"
+name = "spin integrator: the turn-rate clamp on the pending turn is skipped under state bit 0x40000"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10015681"
+kind = "site"
+name = "velocity integrator: slope brake skipped under state bit 0x40000"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x100158c4"
+kind = "site"
+name = "velocity integrator: top-speed clamp skipped under state bit 0x40000"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001592b"
+kind = "site"
+name = "velocity-driven move: body +0x4c (control +0x200) = the box-clamped world velocity"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x100051ef"
+kind = "site"
+name = "planner: the state test reads the integrated velocity +0x1c8 and spin +0x1d4"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000df1a"
+kind = "site"
+name = "property 0x28: length of the step velocity +0x200"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000e0e1"
+kind = "site"
+name = "property 0x66: mass x step velocity +0x200"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000e145"
+kind = "site"
+name = "property 0x67: length of the step velocity +0x200"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000de5d"
+kind = "site"
+name = "property 0x23: length of the integrated velocity +0x1c8"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001a518"
+kind = "site"
+name = "ground contact: second sphere (+0x28 slot 3): centre +0x98, radius r2 held to 7.5 only on objects with flag 0x1000000"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001a7e1"
+kind = "site"
+name = "ground contact: neither search pass qualifies -> the up query's face is taken anyway"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001bfc0"
+kind = "function"
+name = "ground point: the point dropped vertically onto the plane through the face's first vertex"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001aa99"
+kind = "site"
+name = "liquid bed: surface record read when centre z - liquid surface z < r"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001ac39"
+kind = "site"
+name = "contact point: live +0x59 = the node's life record (+0x55c, 44 bytes) lacks flag 0x10"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001ac3e"
+kind = "site"
+name = "contact point: flag 4 searches from the next standing node when its own lacks it; else skipped"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001b000"
+kind = "site"
+name = "contact points with flag 1: largest ground z - contact z is the lift; their normals join the average"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001b3c3"
+kind = "site"
+name = "ground lift without state bit 4: (ground z - centre z) + r when the ground point is less than r below, else 0"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001b4c3"
+kind = "site"
+name = "ground contact: IWorld slot 11 PlaceObjectOnWorldFace on the held face unless state bit 0x8000000"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10015d60"
+kind = "function"
+name = "body ground follow: with state bit 4 and contacts, fall (v - g dt/2) dt, v -= g dt (IWorld slot 4) unless below the lift; else move by the lift, v = 0, ground normal +0x194"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10016730"
+kind = "function"
+name = "static init: the up vector (0, 0, 1) at 0x10043b40"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001d647"
+kind = "site"
+name = "pair resolve: the larger sphere is the obstacle, the smaller the mover (non-rounds to 0x1001daf0)"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001daf0"
+kind = "function"
+name = "unit pair: mover's segment vs obstacle's faces stops it; small faces (shortest edge^2 < 235/160) stop class >= 4/3; iface 0x25 slot 3 push-out; push split by mass^2"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001deb7"
+kind = "site"
+name = "unit pair: the hit face's shortest squared edge"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001e05f"
+kind = "site"
+name = "unit pair: a side with no contact record does not move; else B += P mA^2/(mA^2+mB^2), A -= P mB^2/(...), flag 8"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10020038"
+kind = "site"
+name = "collision object message 0x1c: +0x34 = owner property 0x7c, the mass"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001f5e9"
+kind = "site"
+name = "collision object init: +0x58 = QI 0x18 (faces), +0x5c = QI 0x25 (sphere push, walk face)"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001e650"
+kind = "function"
+name = "moving entry vs world box: pushed back inside the box inset by r (z top +20); soft push 3 x 0.0125 x depth within 80 of a side, 3 x 0.05 x depth above the top; flag 0x10"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000c990"
+kind = "function"
+name = "machine slot 23 (GMSG 0x1b): record flags 8|0x10 move the position by the push; state bit 4 flattens it to horizontal (length kept, <= x4)"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10026b20"
+kind = "function"
+name = "CWorld slot 10: walk-face query from the scene root (0x10026b80)"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10026b80"
+kind = "function"
+name = "walk-face query over the scene: object types by mask (1 << type), QI 0x25 slot 2 else QI 0x18 slot 7, nearest gap, children"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10025b40"
+kind = "function"
+name = "CWorld slot 8: vertical walk-face query for a face class (0x10025ba0)"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10025ba0"
+kind = "function"
+name = "slot 8 worker: QI 0x18 slot 7 on each object, children"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x100225e0"
+kind = "function"
+name = "twice the signed area of (a, b, p) in xy: (b-a) x (p-a)"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10022da0"
+kind = "function"
+name = "walk-face filter: world face bits -> landscape mask (0x8 -> 0x20, 0x200 -> 0x20000, 0x400 -> 0x2000 ...)"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x100202a0"
+kind = "function"
+name = "landscape iface 0x18 slot 5: face data: vertex ptrs +0/+4/+8, neighbours +0x24/+0x28/+0x2c, mask +0x3c -> world class bits"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1009a3f8"
+kind = "datum"
+name = "landscape interface 0x18 vtable: 3 face, 5 face data, 6 GetFirstIntersectedFace, 7 GetWalkFace"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1009b4ec"
+kind = "datum"
+name = "CBuilding interface 0x18 vtable: slots 3, 5 and 7 forward to the building's mesh (+0x1c), 6 its own GetFirstIntersectedFace"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10056c70"
+kind = "function"
+name = "CBuilding slot 7: the walk-face query forwarded to the mesh at +0x1c"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10006e50"
+kind = "function"
+name = "object interface request (on +0x14): 0xb +0, 0x18 +4, 0x20 +8, 0x25 +0xc, 0x26 +0x10, by a byte-indexed jump table"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x100204fc"
+kind = "datum"
+name = "object interface 0x25 vtable: slot 2 walk-face query with a radius argument, slot 3 sphere push-out"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x1000ccb0"
+kind = "function"
+name = "interface 0x25 slot 2: walk-face query over level 0 of the current variant (visitor 0x10007e90)"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x1000d410"
+kind = "function"
+name = "interface 0x25 slot 3: sphere push-out against the nodes' level 0 of the current variant (the method not read)"
+doc = "docs/24-motion.md"
+read = false
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x1000d645"
+kind = "site"
+name = "sphere push-out: node slot record for variant -1 (current), level 0"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10026630"
+kind = "site"
+name = "FindWorldFace: a face whose normal z is not above the limit ends the walk (returns 1)"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10021b84"
+kind = "site"
+name = "GetWalkFace: the register's low bits (& ~0xc) are the axis"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10021ff6"
+kind = "site"
+name = "GetWalkFace: register bit 4 skips a face below the point (gap < 0)"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1002201b"
+kind = "site"
+name = "GetWalkFace: register bit 8 skips a face above the point (gap > 0)"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10026bbb"
+kind = "site"
+name = "walk-face query: the scene node's slot 11 gives its type"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10026bc9"
+kind = "site"
+name = "walk-face query: the filter's first word against 1 << type (0xa: types 1 and 3)"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10026bdc"
+kind = "site"
+name = "walk-face query: QI 0x25 first, its slot 2 with the radius argument"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10026c83"
+kind = "site"
+name = "walk-face query: else QI 0x18, its slot 7 (GetWalkFace)"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x100176bf"
+kind = "site"
+name = "chassis profile binder: CanJump bound to profile +0x10 (MBehaviour +0x7d0)"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10001107"
+kind = "site"
+name = "state condition: 0x100 needs contact i's live +0x59 set, 0x200 needs it clear"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10001a0e"
+kind = "site"
+name = "Dijkstra: a scaled cost at or above 1,000,000 is no edge"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000555b"
+kind = "site"
+name = "state step: the blend weight's lo and D over all three velocity axes"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000576d"
+kind = "site"
+name = "state step: p held to 0..1 before q = p + (1 - p) x blend"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000c9eb"
+kind = "site"
+name = "machine GMSG 0x1b: a parent of type 3 with a downward push takes it whole"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000ca44"
+kind = "site"
+name = "machine GMSG 0x1b: the push flattened to horizontal, scaled by |P|/|Pxy| up to 4"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001461e"
+kind = "site"
+name = "body step velocity: state bit 0x40000 skips the top-speed clamp"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10015d91"
+kind = "site"
+name = "ground follow: the world's gravity from IWorld slot 4"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10015e47"
+kind = "site"
+name = "ground follow: landing -- fall speed 0, ground normal +0x194, move by the lift"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10015f0f"
+kind = "site"
+name = "ground follow: the object notified after the move"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001a687"
+kind = "site"
+name = "ground contact: the search filter excludes world face bits 0x200 and 0x8, class bit 8"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001affd"
+kind = "site"
+name = "contact point flag 2: handed to the object's interface slot 0x7c"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001b08f"
+kind = "site"
+name = "contact point flag 0x1000: its group runs once while the node stands"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001b446"
+kind = "site"
+name = "ground contact: body ground follow with the lift, averaged normal, dt, state bit 4, contact count"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001dd42"
+kind = "site"
+name = "unit pair: a mover heading into the obstacle's face is set back to its start"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001deea"
+kind = "site"
+name = "unit pair: small-face stop by class (message 0x201): < 235 needs 4, < 160 needs 3"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001e664"
+kind = "site"
+name = "world box for moving entries: IWorld geometry slot 10, type 2"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001e7ba"
+kind = "site"
+name = "world box: the soft margin 80 on the sides, 20 above the top"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001e007"
+kind = "site"
+name = "unit pair: the mover's sphere to the obstacle's interface 0x25 slot 3; a push returned is added"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10013fe0"
+kind = "function"
+name = "object walk-face query (iface 0x18 slot 7): cached; visits nodes' level 0 of the current variant"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10007edb"
+kind = "site"
+name = "mesh visitor: node slot record for the current variant, level 0"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10014670"
+kind = "function"
+name = "MBehaviour chassis profile getter (+0x7c0); callers read +0xc CanFly and +0x18 WalkChassis, never +0x10 CanJump"
+doc = "docs/24-motion.md"
 read = true
 
 [[entry]]

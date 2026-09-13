@@ -5089,6 +5089,7 @@ def check_ground(check, game: Path) -> None:
     lakes: dict[bool, Counter[str]] = {True: Counter(), False: Counter()}
     tut_lakes = None
     steep = faces0 = 0
+    walked: Counter[str] = Counter()
     words: list[Counter[int]] = [Counter() for _ in range(4)]
     for d in gamedir.maps(game):
         land = landmesh.load(d / "Land.msh")
@@ -5104,6 +5105,7 @@ def check_ground(check, game: Path) -> None:
                 water_ok &= m.surface in (WATER_SURFACE, materials.UNSET) and not m.damage_rate
         if d.name.lower() == "tut_1":
             tut = counts
+        _tally_walks(land, d.name.lower() == "tut_1", walked)
         if not (d / "Land.map").exists():
             continue
         areals = arealmap.load(d / "Land.map")
@@ -5138,8 +5140,9 @@ def check_ground(check, game: Path) -> None:
     check("Land.msh: some terrain faces are too steep to be ground",
           faces0 and 0 < steep < faces0 // 10,
           f"{steep} of {faces0} level-0 faces have a normal z of at most "
-          f"{landmesh.WALKABLE_NORMAL_Z} (cos 80 degrees), which the ground contact "
-          f"never takes as ground (Control.dll:0x1001a6fd)")
+          f"{landmesh.WALKABLE_NORMAL_Z} (cos 80 degrees), which neither of the ground "
+          f"contact's searches accepts (Control.dll:0x1001a6fd) and its walk leaves at "
+          f"once (Terrain.dll:0x10026630)")
     check("Land.map: an areal's flag words are 0/1, 0, a small value or a lake, and 0",
           set(words[0]) <= {0, 1} and set(words[1]) == set(words[3]) == {0}
           and all(w < 30 or w & arealmap.LAKE_BITS == arealmap.LAKE_BITS
@@ -5161,6 +5164,12 @@ def check_ground(check, game: Path) -> None:
     carriers = []
     shape_ok = ops_ok = dust_ok = True
     modes: dict[int, list[str]] = defaultdict(list)
+    # How a state is weighed and planned, and which states follow the ground.
+    edges = scaled = crossed = gap_agrees = 0
+    widest = 1.0
+    blending = all_axes = spanned = still = 0
+    unbounded: Counter[str] = Counter()
+    contact_states = contact_marked = marked = 0
     for path in all_archives(game):
         archive = NResArchive.open(path)
         for entry in archive:
@@ -5174,6 +5183,40 @@ def check_ground(check, game: Path) -> None:
             label = f"{path.name.lower()}/{entry.name.lower()}"
             modes[c.mode].append(label)
             total += 1
+
+            n = len(c.states)
+            for to in range(n):
+                for frm in range(n):
+                    raw = c.cost(to, frm)
+                    if raw >= control.NO_EDGE:
+                        continue
+                    factor = c.transition_factor(to, frm)
+                    edges += 1
+                    widest = max(widest, factor)
+                    scaled += raw > 0 and factor > 1
+                    crossed += raw * factor >= control.NO_EDGE
+                    # Control: the gap between the two velocity boxes.
+                    gap = max((max(0.0, c.states[frm].velocity[0][a] - c.states[to].velocity[1][a],
+                                   c.states[to].velocity[0][a] - c.states[frm].velocity[1][a])
+                               for a in range(3) if c.states[frm].flags >> a & 1), default=0.0)
+                    gap_agrees += abs(1 + gap - factor) < 1e-4
+            for s in c.states:
+                if s.mode & control.STATE_UNBOUNDED:
+                    unbounded[path.name.lower()] += 1
+                marked += bool(s.mode & control.STATE_GROUND_CONTACTS)
+                if c.counts[1]:
+                    contact_states += 1
+                    contact_marked += bool(s.mode & control.STATE_GROUND_CONTACTS)
+                if not s.blends:
+                    continue
+                blending += 1
+                all_axes += s.flags & 7 == 7
+                lo, hi = s.velocity
+                if s.blend_divisor > 0:
+                    spanned += abs(s.blend_divisor - max(h - m for m, h in zip(lo, hi,
+                                                                              strict=True))) < 1e-4
+                else:
+                    still += s.blend == 1.0
 
             def indexes(block, c=c):
                 return all(v == control.NO_GROUP or 0 <= v < c.counts[4] for v in block)
@@ -5221,6 +5264,84 @@ def check_ground(check, game: Path) -> None:
           and "bases.rlb/r_h_02.ctl" in modes[2],
           f"{', '.join(three)}; the integrator adds the world's 10.0 along -z only for "
           f"mode 3 (Control.dll:0x10015879).  Control: the hero, r_h_02, is mode 2")
+
+    check(".ctl: the loader scales a transition by the centre-to-minimum reach, not the box gap",
+          edges and scaled and crossed == 0 and gap_agrees < edges,
+          f"{edges} edges under 1,000,000; the factor 1 + largest |centre(to) - min(from)| "
+          f"over velocity axes + the same over spin axes (Control.dll:0x10001790) changes "
+          f"{scaled} non-zero costs, at most x{widest:.1f}, and lifts none to 1,000,000.  "
+          f"Control: one plus the gap between the velocity boxes gives the same factor on "
+          f"only {gap_agrees}")
+    check(".ctl: every blended state switches on all three velocity axes, and D is its span",
+          blending and all_axes == blending and spanned + still == blending and still,
+          f"{blending} states weigh their pairs by speed (Control.dll:0x1000555b); all switch "
+          f"on x, y and z, so lo = min(largest |min|, largest |max|) is finite.  "
+          f"D = largest ||max| - |min|| (0x100055d4) equals the box's largest span on "
+          f"{spanned}; on the other {still} D is 0, the weight stays 1, and their blend base "
+          f"is 1 anyway")
+    check(".ctl: state bit 0x40000, unbounded motion, is the rounds', trees' and stones'",
+          set(unbounded) == {"weapon.rlb", "static.rlb", "system.rlb"},
+          f"{dict(sorted(unbounded.items()))}: it skips the top-speed clamp, the slope brake "
+          f"and the turn-rate clamp (Control.dll:0x1001461e, 0x10015681, 0x10014c02); no "
+          f"chassis or animal state carries it")
+    check(".ctl: state bit 0x4 is set exactly on the states of controllers with contact points",
+          marked and contact_marked == contact_states == marked,
+          f"{marked} states carry it, all {contact_states} states of the controllers whose "
+          f"counts[1] declares contact points; with it the body falls under the world's "
+          f"gravity until a flagged contact reaches its ground (Control.dll:0x10015d60), "
+          f"without it the sphere is only lifted out of the ground (0x1001b3c3)")
+
+    # The mesh walk behind FindWorldFace: edges, winding and the crossing rule.
+    check("Land.msh: adjacency slot e is the edge from vertex e to e+1, and faces wind CCW",
+          walked["shared"] and walked["by_edge"] == walked["shared"]
+          and walked["ccw"] == walked["up"],
+          f"{walked['by_edge']} of {walked['shared']} neighbours share the positions of "
+          f"vertices e and e + 1; {walked['ccw']} of the {walked['up']} walkable faces wind "
+          f"counter-clockwise seen from above.  FindWorldFace's inside test and its "
+          f"crossing rule (Terrain.dll:0x10026340) both assume this")
+    check("Tut_1: the FindWorldFace rule walks to the face under the target",
+          walked["walks"] and walked["arrived"] == walked["walks"],
+          f"{walked['arrived']} of {walked['walks']} walks from a level-0 face's centroid to "
+          f"a point 7.6 or 10.3 away end on the one walkable level-0 face under it, "
+          f"crossing the edge whose first vertex lies right of the line and whose second "
+          f"lies left")
+
+
+def _tally_walks(land, sample: bool, out: Counter) -> None:
+    """Edge order and winding on every map; sampled walks on one (check_ground)."""
+    pos = land.positions
+
+    def key(v):
+        return tuple(round(x, 3) for x in pos[v])
+
+    for f, vs in enumerate(land.faces):
+        for e, nb in enumerate(land.adjacency[f]):
+            if nb == landmesh.NO_NEIGHBOUR:
+                continue
+            out["shared"] += 1
+            out["by_edge"] += {key(vs[e]), key(vs[(e + 1) % 3])} <= {key(v) for v in land.faces[nb]}
+        if land.face_normal[f][2] > landmesh.WALKABLE_NORMAL_Z:
+            out["up"] += 1
+            a, b, c = (pos[v] for v in vs)
+            out["ccw"] += (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]) > 0
+    if not sample:
+        return
+    faces0 = land.lod_faces(0)
+    boxes = {g: (min(pos[v][0] for v in land.faces[g]), max(pos[v][0] for v in land.faces[g]),
+                 min(pos[v][1] for v in land.faces[g]), max(pos[v][1] for v in land.faces[g]))
+             for g in faces0}
+    for f in faces0[::97]:
+        if land.face_normal[f][2] <= landmesh.WALKABLE_NORMAL_Z:
+            continue
+        cx, cy = (sum(pos[v][i] for v in land.faces[f]) / 3 for i in range(2))
+        for ox, oy in ((7.0, 3.0), (-5.0, 9.0)):
+            tx, ty = cx + ox, cy + oy
+            under = [g for g, (x0, x1, y0, y1) in boxes.items()
+                     if x0 <= tx <= x1 and y0 <= ty <= y1 and land.contains_xy(g, tx, ty)]
+            if len(under) != 1 or land.face_normal[under[0]][2] <= landmesh.WALKABLE_NORMAL_Z:
+                continue
+            out["walks"] += 1
+            out["arrived"] += land.walk(f, (cx, cy), (tx, ty)) == under[0]
 
 
 #: The component record's item step factor, which a door's or pod's step time
