@@ -28,8 +28,9 @@ and one areal is::
     uint32   vertex count V
     uint32   sub-block count B               (zero on every shipped map)
     float32  V x [3]                         polygon vertices, counter-clockwise
-    int32    (V + 3B) x [2]                  per-edge: neighbour areal, and a
-                                             second index whose role is unclear
+    int32    (V + 3B) x [2]                  per-edge: neighbour areal, and the
+                                             index of the same edge in that
+                                             neighbour (-1 on the boundary)
     B x { uint32 n; float32 n x [3] }
 
 so an areal occupies ``56 + V*20`` bytes when B is zero.
@@ -57,10 +58,18 @@ class Areal:
     centre: tuple[float, float]
     area: float
     vertices: list[tuple[float, float, float]]
-    #: One per vertex: ``(neighbour areal index, secondary index)``.  The
-    #: neighbour is ``NO_NEIGHBOUR`` on the outside of the mesh.
+    #: One per vertex: ``(neighbour areal, twin edge)``.  The twin is the
+    #: index of this same edge in the neighbour's own list, so a path walker
+    #: arrives knowing which edge it crossed -- the winged-edge link the land
+    #: mesh keeps in face field 13, in a whole ``int32`` here.  Both are
+    #: ``NO_NEIGHBOUR`` on the outside of the mesh.
     edges: list[tuple[int, int]]
     flags: tuple[int, int, int, int]
+
+    def twin(self, edge: int) -> tuple[int, int] | None:
+        """``(neighbour areal, its edge)`` across ``edge``, or None outside."""
+        neighbour, back = self.edges[edge]
+        return None if neighbour == NO_NEIGHBOUR else (neighbour, back)
 
     @property
     def neighbours(self) -> list[int]:

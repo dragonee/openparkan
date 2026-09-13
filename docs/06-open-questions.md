@@ -21,8 +21,10 @@ few fields are carried through without being understood:
 
 The navigation mesh is [solved](08-arealmap.md). Two fields are not:
 
-- An areal edge's second `int32`. It ranges beyond the areal count, so it is
-  not a second areal reference.
+- ~~An areal edge's second `int32`~~ — **answered: it is the twin edge**, the
+  index of the same edge in the neighbouring areal, right on 193418 of 193418
+  shared edges and `-1` on every boundary edge. See
+  [08-arealmap.md](08-arealmap.md).
 - The sub-block list (`B` in the record) is zero on every shipped map, so its
   contents are unexercised.
 

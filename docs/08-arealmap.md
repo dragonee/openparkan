@@ -49,8 +49,18 @@ entry's element-count field at offset +4 — see [01-nres.md](01-nres.md), which
 this discovery corrected.
 
 Edge field 0 is the index of the areal across that edge, or `-1` on the
-boundary of the mesh. Field 1 ranges beyond the areal count, so it is not a
-second areal reference; its meaning is unresolved.
+boundary of the mesh. **Field 1 is the twin edge** — the index of this same
+edge in the neighbour's own list — so a path walker crossing it arrives
+knowing which edge it came in by. On **193418 of 193418** shared edges it
+names the edge in the neighbour that points straight back, and it is `-1` on
+all 4280 boundary edges.
+
+It had been set aside because it "ranges beyond the areal count, so it is not
+a second areal reference". That was right and stopped one step short: it is an
+*edge* reference, and an areal has up to 285 of them. It is the same
+winged-edge link the land mesh keeps in face field 13, where it is packed into
+two bits because a triangle has three edges; see
+[03-terrain.md](03-terrain.md).
 
 ## What it looks like
 

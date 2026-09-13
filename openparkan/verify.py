@@ -1132,6 +1132,28 @@ def check_arealmap(check, game: Path) -> None:
     check("Land.map: areal adjacency is mutual", mutual == len(loaded),
           f"{mutual}/{len(loaded)} maps -- proves edge field 0 is the neighbour")
 
+    # Edge field 1 is the twin edge: the index of the same edge in the
+    # neighbour's list.  It was set aside as "ranges beyond the areal count, so
+    # not a second areal reference" -- true, because it is an edge reference.
+    twins = shared = outside_ok = outside = 0
+    for _, am in loaded:
+        for i, a in enumerate(am.areals):
+            for e in range(len(a.edges)):
+                across = a.twin(e)
+                if across is None:
+                    outside += 1
+                    outside_ok += a.edges[e][1] == arealmap.NO_NEIGHBOUR
+                    continue
+                shared += 1
+                nb, back = across
+                twins += (0 <= back < len(am.areals[nb].edges)
+                          and am.areals[nb].edges[back][0] == i)
+    check("Land.map: edge field 1 is the twin edge", twins == shared
+          and outside_ok == outside,
+          f"on {twins}/{shared} shared edges it names the edge in the neighbour "
+          f"that points straight back, and it is -1 on all {outside_ok}/"
+          f"{outside} boundary edges -- the land mesh's winged-edge link again")
+
     close = total = 0
     for _, am in loaded:
         for a in am.areals:
