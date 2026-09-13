@@ -80,9 +80,12 @@ target and the distance between them.
 **Only one radar counts per control system** — *read*. The component factory
 keeps a single radar pointer, overwritten by each class-8 record it builds
 (`0x1002d5d2`), and the query asks that one. *Measured*: no `.ctl` carries two.
-An assembled robot has two, though — the turret's radar slot and the radar part
-fitted to it (below) — and which of the two ends up as the pointer is
-*unknown*.
+An assembled robot's is the **fitted radar part**: the part is re-parsed into the
+turret's radar slot, the device the pointer already names
+([28-chassis.md](28-chassis.md#a-fitted-part-takes-over-its-slot--read-and-measured)).
+All 372 turreted robots fill that slot (*measured*), so on every shipped robot the
+sensitivities are 0.05, 0.7 and 25 and the range 250–700; the turret slot's 0.5/0.5/0.5
+at 500 or 800 is never used.
 
 ## What a target gives away — *read*
 
@@ -240,9 +243,6 @@ kind was not read.
 
 ## Not established
 
-- Which of a robot's two radar components — the turret's slot (0.5, 0.5, 0.5,
-  500 or 800) or the fitted part (0.05, 0.7, 25, 250–700) — the control system
-  ends up using.
 - How the mission file's 0/1 relation words become the runtime's 0 and 2.
 - What `IArealMap` does with the radar report, and what the player's map and
   radar display show — `iron3d.dll`'s drawing was not read.

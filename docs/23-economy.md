@@ -418,7 +418,7 @@ battery code.
 
 | | a building | a bot |
 |---|---|---|
-| batteries | `i_pws` parts holding 19.5–20, 50–52 a second | the chassis's own — 10,000 at 250 a second on 22 of the 28 in `bases.rlb` — plus internal `o_pws_b` batteries of 22,000–31,000 at 25.5–34.5 |
+| batteries | `i_pws` parts holding 19.5–20, 50–52 a second | the fitted battery, which replaces the chassis's 10,000 at 250: 3,000–4,080 at 5–6.8 a second small, 9,600–12,000 at 12–15 medium, 22,000–31,000 at 25.5–34.5 large ([28-chassis.md](28-chassis.md#a-fitted-part-takes-over-its-slot--read-and-measured)) |
 | refilled by | the clan's generators, through the distribution step | never by the distributor (*measured*: its registration needs bit 31 of `Type`, set on all 167 placed buildings and none of the 296 units); a docked unit gains 10% of a full charge a second (`Behavior.dll:0x10019372`, "Reloaded") |
 | main draw | the efficiency component, `(0.01 + Use_Power) × dt` | engines, first on the same channel |
 
@@ -440,10 +440,15 @@ recharges 80 a second of 8,000 a sector at 0.00015 a point; a bot's large
 `o_fsh_b` shields recharge 50–80 of 3,350–3,800 at 0.06 a point, and a chassis
 shield 10–100 at 2. A building's repair system restores 100 a second at 0.0002
 a point; a bot's large one, 50–80 at 0.06. (This page once said the building
-figures were free: an earlier survey rounded them to 0.) Engines carry a power figure of 20 on the
-chassis and 4.5–11.2 on the internal `o_eng` parts. So on a bot, moving,
-shield recharge and repair all cost charge, and weapons, served fourth, get
-what is left.
+figures were free: an earlier survey rounded them to 0.) A robot's engine is
+its fitted one, 0.75–11.2 a second at full speed; the chassis slot's 20 is
+replaced. So on a bot, moving, shield recharge and repair all cost charge, and
+weapons, served fourth, get what is left.
+
+*Derived*: a store gives at most its power figure × its charge a second
+(`0x100229a0`), so a robot's whole supply is its battery's 5–34.5 a second, not
+the chassis's 250. A small battery's 5–6.8 does not cover a small red laser at
+full rate (7.1 a second) on its own.
 
 ## The bot limit is the clan's mind count — *read*, and *measured*
 

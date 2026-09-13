@@ -182,7 +182,9 @@ components × N, 112 bytes each:
     char[32]  archive name, always "objects.rlb"
     char[32]  record name
     uint32    flags, 1 throughout
-    int32     attachment node in the parent's mesh, -1 on the root
+    int32     attachment: a node of the parent's mesh for a turret or gun, the
+              index of the parent controller's slot for an internal part or
+              clip; -1 on the root
     char[32]  display name
     uint32    class
     int32     child count

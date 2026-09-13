@@ -42,7 +42,7 @@ their gun's slot; and all 2,956 internal parts read as their class.
 | line | what | from |
 |---|---|---|
 | role | Type, role and behaviour profile | the `.dat` class word; `Behavior.dll:0x10008a80` |
-| chassis | name and code, locomotion, size; top speed, acceleration, payload and slope limit; body weight and node-0 hit points; build cost; the built-in battery and engine; the slots | `objects.dlb`, the chassis profile's `ChassisType`, the controller frame, `.ndp` density × slot volume |
+| chassis | name and code, locomotion, size; top speed, acceleration, payload and slope limit; body weight and node-0 hit points; build cost; the battery and engine it runs on; the slots | `objects.dlb`, the chassis profile's `ChassisType`, the controller frame, `.ndp` density × slot volume |
 | turret | name and code, mounting, HQ mark; sockets and how many are filled, built-in guns, hit points, the radar and deflector sizes it takes | the turret mesh's `Base_*` nodes, its controller and `.ndp` |
 | each part | family, name, where it is fitted, and the numbers that say what it does: an engine's drive and draw, a battery's capacity and output, a shield's sector strength, recharge and price, a detection shield's cuts and camouflage, a repair unit's regeneration, armour's share kept and the hit that goes through whole, a radar's range, a deflector's share | the part's class values |
 | each weapon | name, code, socket; energy, unlimited, or the fitted clip and its rounds; shots a second, damage a round, blast, guidance, range; damage and energy a second | `openparkan.weapons` |
@@ -50,48 +50,25 @@ their gun's slot; and all 2,956 internal parts read as their class.
 | cargo | 2,000 ore, loaded and unloaded at 100 a second, on builders and transports | `profiles.TRANSPORT_*` |
 | orders, wingman | the packages each menu offers the unit, and whether it is too big to capture | `openparkan.packages.packages_for` |
 
-What it leaves out, because it is not established: which of a turret's radar
-slot and fitted radar the control system uses; whether a fitted repair unit's
-values replace the chassis slot's; the magazine a fitted clip gives, which the
-sheet takes to be the clip's round count (a *guess*,
-[29-weapons.md](29-weapons.md#clips--measured-and-a-guess)); the whole unit's
-weight and spare payload.
+A fitted part replaces its slot
+([28-chassis.md](28-chassis.md#a-fitted-part-takes-over-its-slot--read-and-measured)), so the
+sheet's parts are what the unit runs on: its radar is the fitted radar, its repair
+unit the fitted one, a gun's magazine its clip's rounds, and its battery and engine
+the fitted ones — the chassis's own figures stand only where no part fills the
+slot. What it leaves out, because it is not established, is the whole unit's
+spare payload.
 
 ## An example
 
-`openparkan unit w_b_trk1`:
+`openparkan unit battle/w_b_trk1`:
 
 ```
-Medium Track Chs (M-42t)  (w_b_trk1.dat)
-  role      warrior, Type 0x1008000, profile prof_war.var
-  chassis   Medium Track Chs M-42t (R_M_04), tracked, size m
-            95 km/h, 30 m/s2, payload 36 t, brakes past 34 deg
-            body 6,000 kg, 950 HP; build 15 E / 70 O
-            built in: battery 10,000 at 250/s, engine 1 drawing 20/s
-            slots engine m, battery m, shield generator m, detection shield m, repair unit m, armour m
-  turret    Medium Battle Trt 3m1 (e_tur_mt_01), upright
-            3 sockets, 3 filled, 720 HP; takes i_rdr_m, i_def_m
-  armour            ARMOUR MA.Mk1 on the chassis: keeps 62% of a small hit; stops nothing from 2,688
-  engine            Medium engine on the chassis: drive 0.9; draw 3.1/s at full speed
-  battery           Medium Battery on the chassis: holds 12000; gives 15/s
-  shield generator  Med Shld generator on the chassis: per sector 2500 x 6; recharge 30/s; costs 0.05 a point
-  detection shield  Med detect.shld on the chassis: hides mass/electronics/drive 0.9/0.62/0.01; camouflage none
-  repair unit       Med repair unit on the chassis: regenerates 30 HP/s; costs 0.05 a point
-  radar             Medium sensor module on the turret: range 300 m; sensitivity 0.05/0.7/25
-  deflector         Medium deflector on the turret: stops 85% of a sector
-  weapon    Medium Howitzer M125How at Base_C_01: Med Howitzer HE clip, 100 rounds; 0.83/s, 400 a round, 2.5 m blast, guided, 350 m; 333 dmg/s, 0.33 E/s
-  weapon    Medium Rocket Lr MRL16S at Base_LU_01: Rocket pack II, 32 rounds; 1.33/s, 225 a round, 2 m blast, 250 m; 300 dmg/s, 0.32 E/s
-  weapon    Medium Rocket Lr MRL16S at Base_RU_01: Rocket pack II, 32 rounds; 1.33/s, 225 a round, 2 m blast, 250 m; 300 dmg/s, 0.32 E/s
-  firepower 933 a second (derived), weapons ask 0.97 E/s, reach 350 m
-  orders    Standby, Route, Seek and destroy, Guard, Refit; too big to capture
-  wingman   Standby, Seek and destroy, Attack, Refit, Follow me
-
 Large Track Chs (L-42t)  (w_b_trk1.dat)
   role      warrior, Type 0x1008000, profile prof_war.var
   chassis   Large Track Chs L-42t (R_B_04), tracked, size b
             90 km/h, 26 m/s2, payload 80 t, brakes past 34 deg
             body 20,000 kg, 4,500 HP; build 20 E / 120 O
-            built in: battery 10,000 at 250/s, engine 1 drawing 20/s
+            runs on: battery 31,000 at 34.5/s, engine drive 1 drawing 11.2/s at full speed
             slots engine b, battery b, shield generator b, detection shield b, repair unit b, armour b
   turret    Large Battle Turret 4L1 (e_tur_bt_01), upright
             4 sockets, 4 filled, 3,000 HP; takes i_rdr_b, i_def_b
@@ -107,7 +84,7 @@ Large Track Chs (L-42t)  (w_b_trk1.dat)
   weapon    Large Rocket Lr LRL9L at Base_RU_02: Rocket pack II, 18 rounds; 0.67/s, 1900 a round, 4 m blast, 450 m; 1267 dmg/s, 1.33 E/s
   weapon    Large Cannon L152mmC at Base_RU_01: Lrg Cannon AP clip, 60 rounds; 0.50/s, 900 a round, 500 m; 450 dmg/s, 0.50 E/s
   weapon    Large Cannon L152mmC at Base_LU_01: Lrg Cannon AP clip, 60 rounds; 0.50/s, 900 a round, 500 m; 450 dmg/s, 0.50 E/s
-  firepower 3433 a second (derived), weapons ask 3.67 E/s, reach 500 m
+  firepower 3433 a second (derived), weapons ask 3.67 E/s of a battery giving 34.5/s, reach 500 m
   orders    Standby, Route, Seek and destroy, Guard, Refit; too big to capture
   wingman   Standby, Seek and destroy, Attack, Refit, Follow me
 ```

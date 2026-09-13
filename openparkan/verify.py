@@ -4240,7 +4240,7 @@ def check_motion(check, game: Path) -> None:
                  for k, c in joined.items()}
     hero_engine = [e for k, e in engine_power.items() if k.upper() == "R_H_02"]
     second = sorted(k for k, b in batteries.items() if len(b) > 1)
-    check(".ctl: every chassis moves on one engine of 20 and a 10000 battery",
+    check(".ctl: every chassis declares an engine slot of 20 and a 10000 battery slot",
           joined and all(e == [20.0] for k, e in engine_power.items() if k.upper() != "R_H_02")
           and hero_engine and round(hero_engine[0][0], 3) == 0.1
           and all((10000.0, 250.0) in b for b in batteries.values()),
@@ -5992,6 +5992,153 @@ def check_units(check, game: Path) -> None:
           f"none unresolved")
 
 
+def _fits_slot(parent: control.Controller, index: int, type_id: int, member: str) -> bool:
+    """Whether the parent's component at ``index`` is a slot this part fits."""
+    slot = parent.components[index % len(parent.components)]
+    return slot.type_id == type_id and (not slot.label or member.startswith(slot.label.lower()))
+
+
+def check_loading(check, game: Path) -> None:
+    """A fitted internal part or clip is parsed into its parent's slot, by index."""
+    library = objects.ObjectLibrary(game / "objects.rlb")
+    opened: dict[str, NResArchive] = {}
+    cache: dict[str, control.Controller | None] = {}
+
+    def controller(member: str) -> control.Controller | None:
+        key = member.lower()
+        if key not in cache:
+            record = library.get(key)
+            ref = record.slot_with_suffix("ctl") if record else None
+            if record and ref is None and record.slots:     # a building: its body's
+                body = library.get(record.slots[0].member.lower())
+                ref = body.slot_with_suffix("ctl") if body else None
+            if ref is None:
+                cache[key] = None
+            else:
+                arch = opened.setdefault(ref.library.lower(), NResArchive.open(game / ref.library))
+                try:
+                    cache[key] = control.parse(arch.read_name(ref.member))
+                except KeyError:        # the six cut i_c06_l/i_c07_l clips name no .ctl
+                    cache[key] = None
+        return cache[key]
+
+    # 1. an internal part's attach index names its parent's slot
+    fits = total = shifted = 0
+    kinds: Counter[str] = Counter()
+    external = 0
+    for path in sorted(game.glob("UNITS/**/*.dat")):
+        unit = objects.load_unit(path)
+        parents = unit.parents()
+        for i, comp in enumerate(unit.components):
+            if parents[i] < 0:
+                continue
+            record = library.get(comp.ref.member.lower())
+            if record is None:
+                continue
+            if record.tag == objects.EXTERNAL_TAG:
+                external += 1
+                continue
+            if record.tag != objects.INTERNAL_TAG:
+                continue
+            parent = controller(unit.components[parents[i]].ref.member)
+            mine = controller(comp.ref.member)
+            if parent is None or mine is None or not mine.components:
+                continue
+            total += 1
+            kinds[comp.ref.member[:5].lower()] += 1
+            want = mine.components[0].type_id
+            member = comp.ref.member.lower()
+            fits += (0 <= comp.attach_node < len(parent.components)
+                     and _fits_slot(parent, comp.attach_node, want, member))
+            shifted += _fits_slot(parent, comp.attach_node + 1, want, member)
+    check("UNITS: an internal part's attach index is its parent's slot",
+          total and fits == total and shifted < total // 2,
+          f"all {fits}/{total} internal parts and clips ({len(kinds)} families) give as their "
+          f"attach node the index of the parent controller's component of their own class, "
+          f"whose label (where it has one) prefixes their name; one index on, {shifted} would. "
+          f"AniMesh.dll:0x100039d9 passes it and Control.dll:0x1002d890 re-parses that "
+          f"component from the part's record; the {external} external parts append instead")
+
+    # 2. the slots a robot declares are filled
+    filled: Counter[str] = Counter()
+    empty: list[str] = []
+    for path in sorted(game.glob("UNITS/**/*.dat")):
+        unit = objects.load_unit(path)
+        if not unit.components[0].ref.member.lower().startswith("r_"):
+            continue
+        parents = unit.parents()
+        for i, comp in enumerate(unit.components):
+            record = library.get(comp.ref.member.lower())
+            if record is None or record.tag not in ("BTLU", objects.EXTERNAL_TAG):
+                continue
+            parsed = controller(comp.ref.member)
+            if parsed is None:
+                continue
+            children = [(unit.components[j], library.get(unit.components[j].ref.member.lower()))
+                        for j in range(len(parents)) if parents[j] == i]
+            taken = {c.attach_node for c, rec in children
+                     if rec and rec.tag == objects.INTERNAL_TAG}
+            for k, slot in enumerate(parsed.components):
+                if slot.label:
+                    if k in taken:
+                        filled[slot.label[:5].lower()] += 1
+                    else:
+                        empty.append(f"{path.name} {slot.label}")
+    check("UNITS: a robot fills its slots, so the slots' own values are not the unit's",
+          filled["i_pws"] and filled["i_rdr"] == filled["i_def"] == filled["i_pws"]
+          and len(empty) == 3,
+          f"filled: battery {filled['i_pws']}, engine {filled['i_eng']}, shield "
+          f"{filled['i_fsh']}, detection shield {filled['i_dsh']}, repair {filled['i_rps']}, "
+          f"armour {filled['i_arm']}, radar {filled['i_rdr']}, deflector {filled['i_def']}, "
+          f"clips {sum(n for k, n in filled.items() if k.startswith('i_c'))}; empty: "
+          f"{', '.join(empty)}")
+
+    # 3. a clip carries no barrels and no label, so the gun keeps its own
+    guns: dict[str, control.Component] = {}
+    clips: list[tuple[str, control.Component]] = []
+    for name in library.records:
+        low = name.lower()
+        if low.startswith(("e_gun_", "i_c")):
+            parsed = controller(low)
+            firing = [p for p in parsed.components if p.type_id == control.GUN_TYPE] \
+                if parsed else []
+            if not firing:
+                continue
+            if low.startswith("e_gun_") and firing[0].label:
+                guns[firing[0].label.lower()] = firing[0]
+            elif low.startswith("i_c"):
+                clips.append((low, firing[0]))
+    paired = [(c, guns[n[:7]]) for n, c in clips if n[:7] in guns]
+    check("guns.rlb: a clip carries no barrels, so a fitted clip leaves its gun's barrels",
+          paired and all(not c.entries and not c.label for c, _ in paired)
+          and all(g.entries for _, g in paired),
+          f"all {len(paired)} clips with a gun declare no barrel entries and no label, "
+          f"where every such gun declares {min(len(g.entries) for _, g in paired)}-"
+          f"{max(len(g.entries) for _, g in paired)}; the gun class's parser "
+          f"(Control.dll:0x10029650) sets the rounds left from value 0 and the base parser "
+          f"appends barrels only from entries (0x10021dc4)")
+
+    # 4. what a robot runs on: the fitted battery and engine, by size and mark
+    rows: dict[str, list[tuple[float, float]]] = defaultdict(list)
+    intsys = NResArchive.open(game / "intsys.rlb")
+    for entry in intsys:
+        if entry.tag.upper().startswith("CTL") and entry.name.lower()[:5] in ("o_pws", "o_eng"):
+            part = control.parse(intsys.read(entry)).components[0]
+            rows[entry.name.lower()[:7]].append((part.values[0], part.power))
+    engines = [v for k, r in rows.items() if k.startswith("o_eng") for v, _ in r]
+    stores = {k: r for k, r in rows.items() if k.startswith("o_pws") and not k.endswith("f")}
+    check(".ctl: a robot's battery and engine are the fitted parts', not the chassis's",
+          engines and round(min(engines), 3) == 0.7 and max(engines) == 1.0
+          and stores and max(p for r in stores.values() for _, p in r) < 250
+          and max(v for r in stores.values() for v, _ in r) > 10000,
+          f"fitted engines drive {min(engines):.1f}-{max(engines):g} against the chassis "
+          f"slot's 1; fitted batteries hold "
+          + "; ".join(f"{k[-1]} {min(v for v, _ in r):g}-{max(v for v, _ in r):g} at "
+                      f"{min(p for _, p in r):g}-{max(p for _, p in r):g}/s"
+                      for k, r in sorted(stores.items()))
+          + " against the slot's 10000 at 250/s")
+
+
 def check_controls(check, game: Path) -> None:
     """The input layer: ScanCode.dsc, Command.dsc, the .man bindings, the .tbl tables."""
     keys = controls.scancodes(game)
@@ -7396,7 +7543,7 @@ def run(game: Path) -> int:
         check_motion, check_sensors, check_combat, check_ownership,
         check_capture, check_repair, check_chassis, check_weapons,
         check_turrets, check_packages, check_builder,
-        check_units,
+        check_units, check_loading,
         check_controls,
         check_behaviour, check_research, check_descriptions, check_saves,
         check_vocabulary, check_resources, check_briefing, check_settings,

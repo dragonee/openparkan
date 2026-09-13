@@ -118,8 +118,11 @@ What follows from it:
   power level bit (0x200); nothing in `Control.dll` asks an engine for 0x200
   (a sweep of every value-id query, not a proof). A starved engine's draw is
   what gets cut, not the machine's speed.
-- **Extra engines cannot raise top speed past the authored value**, but they
-  make up for load, damage and ground — and they do raise the turn rate.
+- **A robot has one engine, and its mark caps its speed.** The fitted engine replaces
+  the chassis slot's drive of 1 ([28-chassis.md](28-chassis.md#a-fitted-part-takes-over-its-slot--read-and-measured)),
+  so E is its drive, 0.7 on a Mk1 to 1.0 on a Mk4, times its condition and the gear.
+  An empty robot on flat ground reaches at most that fraction of the chassis's
+  authored top speed, and turns that much slower — *derived*.
 - **Load halves top speed at most**: a machine carrying its full payload runs
   at half speed on one healthy engine.
 
@@ -239,16 +242,18 @@ Every max speed that moves is a whole number of km/h except the hero's —
 
 ## What a full-speed minute costs — *measured*, then *derived*
 
-Every chassis above but the hero carries one engine of power 20, and all 22 a
-10,000 battery giving 250 a second (*measured*). At top speed in a factor-1
-state the engine draws 20 a second: **1,200 a minute, 12% of that battery**
-(*derived*). Half speed is half that; a factor-2 state doubles it; each
-internal engine adds its own power (0.75–11.2) on the same formula. The hero
-chassis's engine asks 0.1 and its factor is always 0: it walks for free.
+Every chassis controller declares an engine slot of power 20 and a battery slot of
+10,000 at 250 a second (*measured*), but a robot runs on the parts fitted into them
+([28-chassis.md](28-chassis.md#a-fitted-part-takes-over-its-slot--read-and-measured)).
+At top speed in a factor-1 state the fitted engine draws its own power figure — 0.75 on
+a small Mk1 to 11.2 on a large Mk4 — so a minute at full speed costs 45 of a small Mk1
+battery's 3,000 (1.5%) or 672 of a large Mk4's 31,000 (2.2%) — *derived*. Half speed is
+half that and a factor-2 state doubles it. The hero's built-in engine asks 0.1 and its
+factor is always 0: it walks for free.
 
-Six chassis carry a **second store** (*measured*): the Transformer, the L-7f,
-L-8f, S-6f and S-7f hold a further 1,000,000 at 1,000 a second — for them a
-minute at full speed is nothing — and the Small Tower a generator.
+Six chassis carry a **second store** with no slot (*measured*): the Transformer, the
+L-7f, L-8f, S-6f and S-7f hold a further 1,000,000 at 1,000 a second, and the Small
+Tower a generator; those stay beside the fitted battery.
 
 ## How the AI asks for speed — *read*
 

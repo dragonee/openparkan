@@ -78,7 +78,7 @@ uv run openparkan mission CAMPAIGN/CAMPAIGN.02/Mission.03 --list
 uv run openparkan sky Single.01 --frames                    # the day cycle
 uv run openparkan effects aim_exp_L                         # one effect's emitters
 uv run openparkan explosions                                # every .exp
-uv run openparkan unit w_b_trk1                             # a robot, whole
+uv run openparkan unit battle/w_b_trk1                      # a robot, whole
 uv run openparkan viewer SC_3 Tut_1 ILKON --out three-maps.html
 ```
 

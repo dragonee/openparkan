@@ -132,8 +132,10 @@ counted apart. The six that differ are all special:
   `Base_LU_01`**: all 16 `e_gun_ls_10` / `e_gun_ms_12` "Mobile builder modules"
   do, on the small and medium builders, and no other turret mounts one. What
   the module does is in [32-builder.md](32-builder.md).
-- **The radar and deflector parts don't use sockets.** They attach to the
-  turret's named body nodes (`BTmn_m1o1`, `LTdef_m1o1`, `GP_m1o1`, …).
+- **The radar and deflector parts don't use sockets.** Their attach field is not a
+  node: it is the index of the turret controller's radar slot (1) and deflector slot
+  (3), which the parts are re-parsed into
+  ([28-chassis.md](28-chassis.md#a-fitted-part-takes-over-its-slot--read-and-measured)).
 
 ## The turret decides what the unit is — *measured*, and *read*
 

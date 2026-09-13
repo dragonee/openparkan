@@ -175,9 +175,11 @@ deflector is six equal coefficients.
 | turrets (`turrets.rlb`, 55) | — | — | — | 0.5 |
 | building defences (`u_*_def`, 7) | — | — | — | 0.36 |
 
+The chassis rows are the slots' defaults: a fitted shield generator, deflector
+and armour replace them on every shipped robot but the Small Tower, which has no
+armour fitted ([28-chassis.md](28-chassis.md#a-fitted-part-takes-over-its-slot--read-and-measured)).
 No building controller carries a deflector: a building's shield absorbs only
-once something that does is fitted — which parts join a building's control
-system is not established here.
+once one is fitted (the `u_*_def` parts).
 
 ## Armour — *read*, and *measured*
 
@@ -263,9 +265,11 @@ anybody else" below).
   `i_rps` part. The two without are the target dummies `l_targ.dat` and
   `M_targ.dat`, on chassis `R_H_01` ("Hero target") and `R_H_03`. So do 70 building assemblies; the power mast, the four ruins and
   the small main teleport don't.
-- **Which values a unit uses is not established.** Every chassis's controller
-  declares its class-15 slot under the part's label with 1, 1, 1. Whether a
-  fitted part's values replace the slot's is open (below).
+- **A unit uses the fitted part's values.** Every chassis's controller declares its
+  class-15 slot under the part's label with 1, 1, 1, and the fitted repair unit is
+  re-parsed into that slot, replacing them
+  ([28-chassis.md](28-chassis.md#a-fitted-part-takes-over-its-slot--read-and-measured)).
+  All 372 turreted robots fill it (*measured*).
 
 What a full repair costs — *derived*, for a Small Wheel chassis (`r_l_03`, 2,621
 hit points over 12 nodes) brought back from the edge with no part destroyed,
@@ -273,9 +277,8 @@ at full power and with the repair unit's own node intact:
 
 | with | time | charge |
 |---|---|---|
-| a small MK1 repair unit | 238 s | 105 for the points + 19 idle ≈ 124, 1.2% of a 10,000 battery |
+| a small MK1 repair unit | 238 s | 105 for the points + 19 idle ≈ 124, 4% of the small MK1 battery's 3,000 |
 | a small MK4 | 154 s | 105 + 17 ≈ 122 |
-| the chassis slot's own values | 2,621 s | 2,621 + 2,621 = 5,242, 52% |
 
 **What the AI does with the switch** — *read*. The earlier note that nothing
 reads `Decision_RepairOn`/`Off` was wrong.
@@ -362,11 +365,6 @@ shield, battery and ammunition (`Behavior.dll:0x10018100`, `0x10019372`,
 
 - Which of ±x, ±y is a model's front, so which sector is "front".
 - Whether a round still collides with a sector that has nothing left.
-- Whether a fitted `i_rps` part's values replace the chassis slot's 1 / 1 / 1.
-  Every part's components are appended to the one control system, and the
-  repair class is not one it keeps a single pointer for
-  ([28-chassis.md](28-chassis.md#the-parts-join-one-control-system--read)), so
-  both would run and add up — *derived*, not seen at run time.
 - Who clears the behaviour flag `0x10` that lets a unit's takt switch its
   repair (`Behavior.dll:0x100067b0`'s caller), and so whether the AI overrides
   the switch while the player drives.

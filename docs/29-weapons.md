@@ -76,19 +76,26 @@ and `CIS_SWITCHOFF` when it is released, after `MCMD_SELECT` picked a weapon
 - **A launcher's magazine is its tubes**: 4, 9, 16 or 36, on 13 of 16. The
   winged SSMs hold 1 or 2 in three tubes.
 
-## Clips — *measured*, and a *guess*
+## Clips — *measured*, and *read*
 
 A clip carries its gun's values 1–3 and its gun's round — on all 58 clips in
 `objects.dlb`, against 2 paired at random — and its own round count and mass,
 both rising with the mark: 75 mm 300/400/500, 37 mm 300/600, medium cannon
 60/100, rocket packs 9/18 or 16/32, winged packs 1/2 or 2/4.
 
-That a fitted clip **fills its gun's slot** — its record parsed into the gun's
-labelled component, so its round count becomes the magazine — is a *guess*.
-What is read is the loader's side: given a component index, `0x10008b10`
-re-parses that existing component from the new record instead of building one
-(`0x10009045` → `0x1002d890`). Which index a clip is given, and whether by its
-label, is not read.
+**A fitted clip becomes the gun's magazine** — *read*, and *measured*. A clip is an
+internal part: the loader re-parses the gun's class-2 component from the clip's record
+([28-chassis.md](28-chassis.md#a-fitted-part-takes-over-its-slot--read-and-measured)).
+The gun class's parser (`Control.dll:0x10029650`) sets the capacitor full from value 1
+and the **rounds left** (`+0x124`) from value 0 — the clip's round count. The base
+parser appends barrels only from a record's entries (`0x10021dc4`), and all 58 clips
+declare none, so the gun keeps its own barrels (*measured*).
+
+**There is no reload.** Every write of the rounds left was searched: the constructor
+(`0x100295c4`), the parser (`0x100296d5`), a restore from a stream (`0x10029ba6`), each
+shot taking one unless the magazine is −1 (`0x1002a5e3`), and `IControl`'s set
+(`0x1002c374`), which is what the dock uses. A gun fires its clip round by round,
+every interval, until it is empty, and then only a dock refills it.
 
 A docked unit's guns gain 10% of the magazine a second, at least one round,
 reading property 0x800 (magazine) and writing 0x700 (rounds left)
@@ -228,8 +235,6 @@ The enemy variants and the huge guns:
 
 ## Not established
 
-- How a fitted clip reaches its gun's slot, and so whether the magazine in play
-  is the clip's round count or the gun's own value 0 (200 on the cannons).
 - Values 8–10, which the fire routine reads (`0x10029d3a`, `0x10029e50`) and
   every shipped gun leaves at 0.
 - What marks a barrel to be skipped (bit 0x40 of its attachment record,

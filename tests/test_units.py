@@ -52,3 +52,12 @@ def test_firepower_leaves_out_the_builder_beam():
                                                        "Bm", "BLD")])
     assert both.firepower == plain.firepower
     assert both.weapon_power == plain.weapon_power
+
+
+def test_a_fitted_battery_replaces_the_chassis_slot():
+    fitted = units.Part("battery", "i_pws_b_03", "Large Battery", "chassis",
+                        [("holds", "31000")], 20000.0, value=31000.0, power=34.5)
+    unit = sheet(parts=[fitted])
+    assert unit.battery == (31000.0, 34.5)
+    assert sheet().battery == (10000.0, 250.0)
+    assert "runs on: battery 31,000 at 34.5/s" in "\n".join(units.render(unit))

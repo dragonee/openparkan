@@ -3501,7 +3501,7 @@ read = true
 module = "AniMesh.dll"
 at = "0x10003760"
 kind = "function"
-name = "attach a part to an agent: list at +0x6e4 (0x4c each), merge its mesh into the model, load its .ctl into the agent's control system"
+name = "part attach, in list order: an EXTO part's mesh merged and its components appended; an INTO part or clip sent with its slot's component index to be parsed in place (0x100038db, 0x100039d9)"
 doc = "docs/28-chassis.md"
 read = true
 
@@ -4535,4 +4535,78 @@ at = "0x1001ce90"
 kind = "function"
 name = "registers the twelve BuildDat.lst schemes by name and building Type"
 doc = "docs/32-builder.md"
+read = true
+
+# --- a fitted part takes over its slot, ../docs/28-chassis.md ---
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x100036cb"
+kind = "site"
+name = "attach loop: every 0x4c-byte part entry in list order"
+doc = "docs/28-chassis.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x100038db"
+kind = "site"
+name = "part's objects.rlb tag == EXTO: merge its mesh and pass a node base; else only a component index"
+doc = "docs/28-chassis.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x100039d9"
+kind = "site"
+name = "internal part: component index = attach + the parent's first device index (interface 0x202 slot 17)"
+doc = "docs/28-chassis.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10008b75"
+kind = "site"
+name = "loader: no first node (+0xc4 == -1) skips the part's node and .ndp tables"
+doc = "docs/28-chassis.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10009045"
+kind = "site"
+name = "loader: component index -1 appends every section-4 record, else re-parses that one device"
+doc = "docs/28-chassis.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002d890"
+kind = "function"
+name = "re-parse device [index] from a part's record through its slot 7, keeping its node; class 27 refreshes the armour struct"
+doc = "docs/28-chassis.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002ecc0"
+kind = "function"
+name = "interface 0x202 slot 17: first device index whose +8 part id matches, -1 if none"
+doc = "docs/28-chassis.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002c374"
+kind = "site"
+name = "IControl set: a gun's rounds left (+0x124), the dock's 0x700"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10029ba6"
+kind = "site"
+name = "gun rounds left (+0x124) restored from a stream"
+doc = "docs/29-weapons.md"
 read = true

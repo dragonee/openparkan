@@ -94,35 +94,58 @@ records naming wheel, track or rotor nodes. `r_l_06` (S-6f) is a whole unit in o
 turret, camera, radar, deflector, detection shield and two guns — and no
 assembly uses it.
 
-## The parts join one control system — *read*
+## A fitted part takes over its slot — *read*, and *measured*
 
-Assembling a unit does not give each part its own machine. `AniMesh.dll`
-attaches every part to the one agent (`0x10003760`, a list of 76-byte entries at
-`+0x6e4`): it merges the part's mesh into the agent's model and sends the
-agent's control system the load message `0x80000020` with the part's three
-`(archive, member)` pairs, the part's id and its first node (`0x10003b6f`).
-`Control.dll`'s loader (`0x10008b10`) then **appends the part's components to
-the same device list**, rebasing their node indices into the merged model
-(`0x10009081`), skips the part's parameter block and animation states — those
-come from the first controller, the chassis's — and rebinds every device
-(`0x1000789c`).
+Assembling a unit does not give each part its own machine: every part goes into the
+one control system, and **how depends on the part's `objects.rlb` tag**.
 
-What that means for a slot and its part, which are then both in the list:
+- **An external part (`EXTO`: a turret, a gun) is appended.** `AniMesh.dll` attaches
+  the parts in list order (`0x100036cb`, 76-byte entries at `+0x6e4`); for an `EXTO`
+  (`0x100038db`) it merges the part's mesh into the agent's model and sends the
+  control system the load message `0x80000020` with the part's names, its id, the
+  node its mesh starts at and a component index of −1 (`0x10003b6f`).
+  `Control.dll`'s loader (`0x10008b10`) then builds every section-4 record into a new
+  device, rebasing its node (`0x10009045`, `0x10009081`), and loads the part's node
+  and `.ndp` tables.
+- **An internal part or a clip (`INTO`) replaces the component it is fitted to.** Its
+  mesh is not merged, and the message carries no node (−1) but a **component index**:
+  the `.dat`'s attach field plus the first device index of the parent part
+  (`0x100039d9`; interface `0x202`, slot 17, `0x1002ecc0`, finds a part's first
+  device by the id each device keeps at `+8`). With an index, the loader skips the
+  node and `.ndp` tables (`0x10008b75`) and hands the part's first component record
+  to `0x1002d890`, which **re-parses that existing device through its own class's
+  parser** (slot 7), keeping the device's node — and, for armour, refreshes the
+  armour numbers.
 
-- **Classes the control system keeps one of are the last loaded.** The factory
-  overwrites its single pointer for a turret (`+0x5c8`), fight shield (`+0x5cc`,
-  `0x1002d56e`), deflector (`+0x5d0`), radar (`+0x5d4`) and class 17 (`+0x5d8`)
-  with every record of that class, and the armour struct's three numbers with
-  every class-27 record (`0x1002d7fc`). A fitted shield generator, deflector,
-  radar or armour loaded after the chassis is the unit's. That parts load in
-  assembly order, chassis first, is a *guess*.
-- **Classes that are summed add up.** The drive sums every engine's value
-  (`0x1000fca0`, [24-motion.md](24-motion.md)), and every store is drawn on. So
-  a unit's engine figure is the chassis slot's 1 plus the fitted engine's, and
-  its charge is the slot's 10,000 plus the fitted battery's — *derived*.
+So for an internal part the `.dat`'s "attachment node" is not a node: it is **the
+index of the slot in its parent's controller**. *Measured*: all 3,828 internal parts
+and clips in `UNITS` give the index of a parent component of their own class, whose
+label, where it has one, prefixes their name (the animals' slots are unlabelled);
+shifted one index on, 687 would. The 1,417 external parts attach to mesh nodes.
 
-This settles the open question in [26-damage.md](26-damage.md) of which parts
-join a unit's control system: all of them.
+**What a unit ends up with** is therefore the fitted parts' figures, not the slots':
+
+| slot | on the chassis or turret | on a shipped robot |
+|---|---|---|
+| engine | drive 1, draw 20 a second | the fitted engine: drive 0.7–1.0, draw 0.75–11.2 |
+| battery | 10,000 at 250 a second | the fitted battery: 3,000–4,080 at 5–6.8 (small), 9,600–12,000 at 12–15 (medium), 22,000–31,000 at 25.5–34.5 (large) |
+| shield generator | 100–1,000 a sector | the fitted generator's 350–3,800 |
+| detection shield | all zero | the fitted shield's cuts and camouflage |
+| repair | 1 HP a second at 1 a point | the fitted repair unit's 11–80 at 0.04–0.06 |
+| armour | (0, 1, 0), no reduction | the fitted armour |
+| radar (turret) | 0.5/0.5/0.5, range 500 or 800 | the fitted radar: 0.05/0.7/25, range 250–700 |
+| deflector (turret) | 0.5 | the fitted deflector's 0.7–1.0 |
+| a gun's magazine | the gun's value 0 | the fitted clip's rounds |
+
+*Measured*: on the 374 robots every labelled slot is filled but three — the Small
+Tower's armour (`tower_s.dat`) and the two target dummies' engines. What is *added*
+rather than replaced is what has no slot: the hero's built-in engine, and the second
+1,000,000 store on five chassis and the Small Tower's generator, which are unlabelled
+records appended with the chassis.
+
+The single pointers the factory keeps (turret, fight shield, deflector, radar,
+class 17: `0x1002d56e`) point at the slot's device, which the fitted part re-parses
+in place, so they need no second look.
 
 ## What a chassis weighs — *read*, and *measured*
 
@@ -166,10 +189,12 @@ densities. The densities were computed to hit a design weight:
 | Large Wheel | L-32 | 17,500 | 70 |
 | Large Track | L-42t | 20,000 | 80 |
 
-A whole unit's weight follows the same sum over every part — *derived*. The
-tracked `w_b_trk1` comes to about 82.6 t (the chassis 20 t, the turret, guns and
-mounts 20.5 t, the internal parts 21.6 t, armour Mk3 at 22.5 × 915 of area 20.6
-t) against 80 t of payload plus the chassis's own 20; a tiny helicopter
+A whole unit's weight follows the same sum over the parts that bring nodes —
+the chassis, turret and guns — plus each internal part's and clip's own mass: an
+internal part's mesh is not loaded, so it adds no volume and no area — *derived*.
+The tracked `w_b_trk1` comes to about 80.6 t (the chassis 20 t, the turret and
+guns 20.5 t, the internal parts and clips 21.6 t, armour Mk3 at 22.5 × 824 of
+area 18.5 t) against 80 t of payload plus the chassis's own 20; a tiny helicopter
 `11tin1` to 2.5 t against 2.775 + 0.275. That the payload's "own node range"
 ([24-motion.md](24-motion.md#load--read-and-measured)) is the chassis's nodes
 is still a *guess*, and so these spare-payload figures are too.

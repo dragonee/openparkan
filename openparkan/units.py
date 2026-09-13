@@ -6,9 +6,10 @@ turret's sockets and clips in the guns.  Every piece is read elsewhere --
 ``25-sensors.md``, ``31-packages.md``, ``32-builder.md`` -- and this module
 puts them on one sheet: ``describe`` builds it, ``render`` prints it.
 
-What the sheet does not do is simulate.  The figures are the parts' own, the
-derived totals say so, and where the engine combines a chassis slot with a
-fitted part it shows both (``docs/28-chassis.md``).
+What the sheet does not do is simulate.  The figures are the parts' own and the
+derived totals say so.  A fitted internal part or clip replaces the slot it is
+fitted into (``docs/28-chassis.md``), so the parts listed are what the unit runs
+on; the chassis's own battery and engine stand only where nothing is fitted.
 """
 
 from __future__ import annotations
@@ -87,6 +88,10 @@ class Part:
     #: The part's own figures, labelled, in the order they are shown.
     figures: list[tuple[str, str]]
     mass: float
+    #: Its class's first value and its power figure: a battery's capacity and
+    #: output, an engine's drive and draw.
+    value: float = 0.0
+    power: float = 0.0
 
 
 @dataclass
@@ -139,6 +144,24 @@ class Unit:
     def firepower(self) -> float:
         """Damage a second over every weapon: *derived*, before armour and shields."""
         return sum(w.gun.damage_per_second for w in self.weapons if w.gun.type_id == 2)
+
+    def _runs_on(self, family: str, built_in: tuple[float, float]) -> tuple[float, float]:
+        fitted = next((p for p in self.parts if p.family == family and p.on == "chassis"), None)
+        return (fitted.value, fitted.power) if fitted else built_in
+
+    @property
+    def battery(self) -> tuple[float, float]:
+        """Capacity and output a second of what the unit runs on.
+
+        A fitted battery replaces the chassis's slot (docs/28-chassis.md); the
+        chassis's own figures stand only where no battery is fitted.
+        """
+        return self._runs_on("battery", self.chassis.battery if self.chassis else (0.0, 0.0))
+
+    @property
+    def engine(self) -> tuple[float, float]:
+        """Drive and draw at full speed of the engine the unit runs on."""
+        return self._runs_on("engine", self.chassis.engine if self.chassis else (0.0, 0.0))
 
     @property
     def weapon_power(self) -> float:
@@ -222,7 +245,8 @@ class Workshop:
             return None
         entry = self._entry(member)
         return Part(family=name, part=member, name=entry.name if entry else "", on=on,
-                    figures=_figures(type_id, one), mass=one.mass)
+                    figures=_figures(type_id, one), mass=one.mass,
+                    value=one.values[0], power=one.power)
 
     def turret(self, unit: objects.UnitDefinition, index: int) -> Turret | None:
         member = unit.components[index].ref.member
@@ -358,8 +382,8 @@ def render(unit: Unit) -> list[str]:
             f"            body {c.body_mass:,.0f} kg, {c.hit_points:,.0f} HP; build "
             f"{c.cost.build_energy:g} E / {c.cost.build_ore:g} O"
             + (", not for the player" if c.cost.free else ""),
-            f"            built in: battery {c.battery[0]:,.0f} at {c.battery[1]:g}/s, "
-            f"engine {c.engine[0]:g} drawing {c.engine[1]:g}/s",
+            f"            runs on: battery {unit.battery[0]:,.0f} at {unit.battery[1]:g}/s, "
+            f"engine drive {unit.engine[0]:g} drawing {unit.engine[1]:g}/s at full speed",
             "            slots " + ", ".join(f"{k} {s}" for k, s in c.slots.items()),
         ]
     t = unit.turret
@@ -397,7 +421,8 @@ def render(unit: Unit) -> list[str]:
                    f"{g.energy_per_second:.2f} E/s")
     if unit.weapons:
         out.append(f"  firepower {unit.firepower:.0f} a second (derived), weapons ask "
-                   f"{unit.weapon_power:.2f} E/s, reach {unit.reach:g} m")
+                   f"{unit.weapon_power:.2f} E/s of a battery giving {unit.battery[1]:g}/s, "
+                   f"reach {unit.reach:g} m")
     if unit.role in ("builder", "transport"):
         out.append(f"  cargo     {profiles.TRANSPORT_MAX_ORE:g} ore, loaded and unloaded at "
                    f"{profiles.TRANSPORT_ORE_ON_PER_SECOND:g}/s")

@@ -444,9 +444,11 @@ def cmd_unit(args, game: Path) -> int:
             print(f"{str(path.relative_to(game)):<36} {sheet.role:<9} "
                   f"{sheet.chassis.code:<7} {turret:<24} {sheet.firepower:6.0f} dmg/s")
         return 0
-    want = args.name.lower().replace("\\", "/")
+    want = args.name.lower().replace("\\", "/").removesuffix(".dat")
     found = [p for p in every
-             if p.stem.lower() == want or str(p.relative_to(game)).lower().endswith(want)]
+             if str(p.relative_to(game).with_suffix("")).lower().endswith(want)
+             and str(p.relative_to(game).with_suffix("")).lower()[-len(want) - 1:-len(want)]
+             in ("", "/")]
     if not found:
         print(f"no unit assembly matches {args.name!r}")
         return 1

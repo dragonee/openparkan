@@ -333,8 +333,11 @@ class Component:
     label: str
     #: One throughout the shipped data; role unknown.
     flags: int
-    #: Node index in the *parent* component's mesh that this part bolts onto.
-    #: The chassis, which has no parent, carries -1.
+    #: For a turret or gun (an ``EXTERNAL_TAG`` record), the node of the
+    #: parent's mesh it bolts onto.  For an internal part or clip
+    #: (``INTERNAL_TAG``), the index of the parent controller's component it
+    #: replaces -- its slot (``AniMesh.dll:0x100039d9``,
+    #: ``Control.dll:0x1002d890``).  The chassis, which has no parent, carries -1.
     attach_node: int
     class_id: int
     #: How many of the following components hang off this one.
@@ -349,6 +352,11 @@ class Component:
         """Whether this part is drawn on the outside of the machine."""
         return self.class_id in EXTERNAL_CLASSES
 
+
+#: ``objects.rlb`` record tags: a part appended to a unit's control system, with
+#: its mesh merged, and one parsed into its parent's slot in place.
+EXTERNAL_TAG = "EXTO"
+INTERNAL_TAG = "INTO"
 
 #: A unit's Type: the ``.dat`` class word, the mission property ``Type``, the
 #: numbers ``varset.var`` names.  A robot's is decided by its turret, and
