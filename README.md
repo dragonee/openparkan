@@ -162,8 +162,8 @@ PASS  MESH: path graph links join real nodes         1096/1096 links
 PASS  UNITS/*.dat: assemblies parse on a 112-byte stride 458/458 files, 5708 components
 PASS  UNITS/*.dat: components resolve in objects.rlb 5705/5708 resolve (3 do not; see docs/07-objects.md)
 PASS  every placed mission object reaches geometry   864/864 objects resolve to a .msh through objects.rlb
-PASS  MESH: flag bit 0x20 marks exactly the CP_* collision hulls 28 nodes carry the bit and every one is named CP_* or BTCP_*; 28/28 of the hulls that have geometry carry it, and the 6 that do not are empty. 18402 triangles a renderer must not draw
-PASS  MESH: level 0 fits inside the authored box once hulls are dropped 434/434 models fit inside their own box against 422/434 while the collision hulls are drawn
+PASS  MESH: flag bit 0x20 marks exactly the CP_* nodes 28 nodes carry the bit and every one is named CP_* or BTCP_*; 28/28 of those names that have geometry carry it, and the 6 that do not are empty. 18402 triangles that only the unit's own view draws
+PASS  MESH: level 0 fits inside the authored box once cockpits are dropped 434/434 models fit inside their own box against 422/434 while the cockpit nodes are drawn
 PASS  UNITS/*.dat: a socket that disagrees is a turret hung underneath 1306/1414 sockets carry the part's own rotation; of the 108 that do not, 83 are exactly 180 degrees and all 83 of those sit on a chassis whose own name says Flying or Helicopter
 PASS  objects.rlb: a .ndp is one damage record per node 542/542 tables are exactly 4 + n*76 bytes and 541 of them have one record per mesh node; 2203 records name an explosion
 PASS  MESH: a node with a second block is one that can be destroyed all 145 nodes that carry a second five-slot block name an explosion in their .ndp, and the block holds the same part with pieces gone: fewer triangles on 121/145

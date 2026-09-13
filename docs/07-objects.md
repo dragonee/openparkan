@@ -271,8 +271,19 @@ is at 16.49.
 
 The remaining 25 disagreements are 120° about (1, 1, 1) — a cyclic axis
 permutation — and two at 126°, all of them missile packs and shell clips on
-`e_gun_bl_17` "Large Winged SSM" and its kin. They are not understood, but
-they are no worse under this rule than the last.
+`e_gun_bl_17` "Large Winged SSM" and its kin.
+
+**They do not matter, because the engine throws the root away** — *read*.
+Mounting an external part merges its mesh into the unit's (`AniMesh.dll`
+`0x1000a460`, from the part attach at `0x100038db`): it takes one node fewer
+than the part has (`0x1000a719`), skipping node 0, and hangs every node whose
+parent was node 0 on the socket instead (`0x1000a7dd`). The root's own pose,
+rotation and all, never reaches the picture, so wherever socket and root
+disagree the socket wins — which is `socket ∘ root⁻¹` applied to the root's
+children, the rule above. Nor could the root hide geometry: **1417 of the 1417**
+external parts mounted in the shipped assemblies have a root node with no slot
+at all (*measured*). Why those 25 roots were authored turned is a question
+about the artists' tool, not about the game.
 
 All 458 files parse on the 112-byte stride, giving 5708 components. **5705
 resolve** in `objects.rlb`; three do not — `fr_l_mast`, `fr_l_tele` and
@@ -293,7 +304,7 @@ streams:
 | 6 | 6 | face | triangle, three `uint16` indices — **relative to the batch** |
 | 9 | 32 | sub-object | sub-object name |
 | 1 | 38 | node | flags, parent, `slot_index[lod * 5 + group]` |
-| 7 | 16 | face | face record: fields 1–3 are edge neighbours; the rest unresolved |
+| 7 | 16 | face | face record: flags, edge neighbours, normal, winged-edge link |
 | 13 | 20 | batch | draw batch: material, index range, vertex range |
 | 17 | 20 | node | building interior path graph — see below |
 | 10 | 4 | sub-object | one `uint32`, zero throughout |
@@ -349,15 +360,21 @@ Outpost (`fr_l_angar`), which you cross rather than enter.
 So `select(interior=True)` is a cutaway, `select()` is the building, and
 `select(interior=False)` is a shell that is far too short to be one.
 
-### Flag bit 5 marks a collision hull, which must not be drawn
+### Flag bit 5 marks the cockpit, which only the unit's own view draws
 
 28 nodes across the shipped archives carry flag bit `0x0020`, and **every one
 of them is named `CP_m1o1` (19) or `BTCP_m1o1` (9)**. Nothing else carries the
 bit. Six further `CP_m1o1` nodes do not, and all six are empty — the bit goes
-on the hulls that have geometry.
+on the ones that have geometry. All 28 are in `turrets.rlb`.
 
-A hull is a crude oversized box around the part it belongs to, and drawing it
-is conspicuous. On `o_bnt_la_01` the model's real geometry tops out at
+They were written up here as collision hulls. They are the **cockpit**: the
+geometry a unit's first-person view sees of the unit it sits in, and nobody
+else sees at all — see [the fifth slot](#the-fifth-slot-is-what-the-units-own-view-draws).
+The turret's `CameraCenter` control point sits on one on **54 of the 54**
+turret records whose mesh has one (*measured*).
+
+Drawn in a survey, a cockpit is a crude oversized box around the part it
+belongs to, and it is conspicuous. On `o_bnt_la_01` the model's real geometry tops out at
 z = 1.60, exactly the top of the authored box; its `CP_m1o1` reaches 3.55 —
 more than twice the building's height, wrapped around it as a translucent
 slab. On the twelve worst meshes the model's *bottom* matches the box's bottom
@@ -371,7 +388,8 @@ against 145. Twelve models is also exactly the set that no choice of animation
 frame could fix, which is how the hulls were found: the residual was never a
 pose problem.
 
-`ObjectMesh.select()` and the viewer both skip them. 18402 triangles.
+`ObjectMesh.select()` and the viewer both skip them, as a third-person view
+of the game does. 18402 triangles.
 
 ### Nodes, slots and levels of detail
 
@@ -418,24 +436,50 @@ Two things pin the reading down beyond the monotonicity:
 - 28 nodes carry only the fifth slot of their block. No node lacks geometry
   in variant 0 but has some in a later variant.
 
-### The fifth slot is collision geometry
+### The fifth slot is what the unit's own view draws
 
-Those 28 nodes are **exactly the 28 collision hulls** — flag bit 5, every one
-named `CP_*` or `BTCP_*` — so a hull keeps its geometry in the fifth slot and
-nowhere else. That is the measurement. On the 288 ordinary nodes that carry
-both a level 0 and a fifth slot, the fifth is **always a separate slot**, never
-one of the node's levels reused: a same-sized copy of level 0 on 141, a coarser
-shape on 137 (closest to level 1 on 83 of those), and finer on 10. Reading all
-316 as the geometry collision is tested against is the natural extension, but
-it is a reading — and **a round's hit test does not take slot 4**. It asks
-each node for level 0 of its current variant (`AniMesh.dll:0x10010c33` →
-`0x100124d0`), so a hull, which has no level 0 in any variant, is never struck
-(*measured*). What does read the fifth slot is still open. See
-[The hit test](26-damage.md#the-hit-test--read-and-measured).
+Those 28 nodes are **exactly the 28 flagged `0x20`** — every one named `CP_*`
+or `BTCP_*` — so a cockpit keeps its geometry in the fifth slot and nowhere
+else. On the 288 ordinary nodes that carry both a level 0 and a fifth slot,
+the fifth is **always a separate slot**, never one of the node's levels reused:
+a same-sized copy of level 0 on 141, a coarser shape on 137 (closest to level
+1 on 83 of those), and finer on 10 (*measured*). The meshes that carry fifth
+slots are 54 guns, 28 turrets, 11 chassis, 5 parts and 5 buildings.
 
-This also corrects why level 0 falls back to the fifth slot: not so that a node
-draws something rather than nothing, but because the only nodes it happens to
-are hulls, which are never drawn. `ObjectMesh.select` and the viewer skip them.
+**What reads it** — *read*:
+
+- **The view registers.** A turret's camera component creates the unit's
+  first-person view (`Control.dll:0x100238b0`, `World3D.dll!CreateObject` type
+  5) and hands that view to the unit's mesh through IAnimation slot 33
+  (`0x1002399a`), a list at mesh `+0x1c8`; it takes it back through slot 35
+  when the view goes (`0x100239cd`, and the component's destructor
+  `0x1002349a`). The component's mesh is the whole unit's: the control system
+  asks its aggregate for IAnimation (`Control.dll:0x1000791d`) and hands that
+  to every component (`0x100079e2`).
+- **The mesh asks.** Drawing, the mesh asks slot 34 whether the view drawing it
+  is in that list (`AniMesh.dll:0x10014bdb`). If it is, the level is **4**
+  (`0x10014be5`) instead of the one `CShade` picks by distance.
+- **Every node draws slot `variant × 5 + 4`** (`0x100124d0`, no fallback), so a
+  node with no fifth slot is **not drawn at all** in that view. A node flagged
+  `0x20` is handed to `CShade`'s mesh draw with mode 2 and any other with mode
+  1 (`0x10014e9a`), which that draw files under layers 10 and 9 where an
+  ordinary surface gets 0, or 5 when see-through (`Terrain.dll:0x1004553b`),
+  and in place of `CShade::SetClipStateForJoint` the mesh calls `CShade` slot
+  15 with 1 (`0x10014f85`).
+- The per-part draw behind the mesh's interface `0x20` slot 6
+  (`AniMesh.dll:0x100101d0`) takes the level as an argument and applies the
+  same two modes at level 4 (mode 0 for an agent of kind 3).
+
+So from inside, a unit is its fifth slots: the cockpit shell, and whatever of
+the hull and guns the artist gave a fifth slot to be seen from there. A round's
+hit test takes level 0 (`AniMesh.dll:0x10010c33` → `0x100124d0`), never this,
+so a cockpit is never struck
+([The hit test](26-damage.md#the-hit-test--read-and-measured)).
+
+This also corrects why level 0 falls back to the fifth slot in this library:
+the only nodes it happens to are cockpits, which a survey does not draw.
+`ObjectMesh.select` and the viewer skip them; `Subobject.cockpit_slot` names
+the slot.
 
 ### Every level is a simplification in place
 
@@ -547,12 +591,12 @@ nodes — so using it as a rest pose leaves a turret swung round to wherever its
 animation ended.
 
 Frame 0 of the run is the rest pose, and once the
-[collision hulls](#flag-bit-5-marks-a-collision-hull-which-must-not-be-drawn)
+[cockpit nodes](#flag-bit-5-marks-the-cockpit-which-only-the-units-own-view-draws)
 are skipped it puts **157 of 157** animated meshes inside their own authored
 box. So does the fallback key, and so does every other frame: the box does not
 discriminate between frames, because an animation stays inside it. What the
-box does discriminate is whether the hulls are drawn — 145 of 157 with them —
-which is how the twelve stragglers turned out not to be a pose question. The
+box does discriminate is whether the cockpits are drawn — 145 of 157 with
+them — which is how the twelve stragglers turned out not to be a pose question. The
 earlier "106 of 157 against 81 for the fallback" was the same measurement taken
 over all fifteen slot indices, before the slot index was understood; it was
 comparing two piles of superimposed levels of detail.
@@ -713,7 +757,7 @@ terrain's face record:
 +8   int16    normal x, over 32767
 +10  int16    normal y
 +12  int16    normal z
-+14  uint16   a class, below 64 on 240500 of the 241887
++14  uint16   the winged-edge link in its low six bits
 ```
 
 **The normal is exact.** Read as `int16` over 32767 it is unit length on all
@@ -727,10 +771,35 @@ positions** with the face that names them. Six do not, all in `s_stn_0_13`,
 and 362 share all three, which is a pair of coincident triangles. 51455 of the
 725661 slots are `0xFFFF`, the open edges of the model.
 
-The flags word takes six values — 0 on 233714 faces, then 2, 4, 16, 32 and 34
-— and the trailing field has the shape of the terrain's six-bit class without
-its cleanliness: 240500 faces sit below 64, and 1387 spread thinly over 230
-meshes go above. Neither is named.
+**The last word is the winged-edge link**, exactly as the terrain's field 13
+is ([03-terrain.md](03-terrain.md#field-13-is-the-winged-edge-link)): three
+2-bit codes, edge *e* at `(word >> 2e) & 3`, each the index of the matching
+edge back in the neighbour, 3 where there is none. Here it is checked by
+geometry rather than mutuality — the code names the neighbour's edge with the
+same two vertex positions on **674206 of 674206** in-range neighbours, and
+reads 3 on all **51455** open edges (*measured*). 240500 faces hold nothing
+above the six bits; the other 1387 do, and the extra bits recur at the same
+record positions across unrelated models — faces 120, 123 and 124 of a node's
+run on most trees carry `0x28c0`, `0x8800` and `0x4dc0` above their link —
+which is what an exporter's uncleared buffer looks like (*guess*).
+`ObjectMesh.edge_twin` reads it.
+
+**The flags word** takes six values — 0 on 233714 faces, then 2, 4, 16, 32 and
+34 (*measured*):
+
+| flag | faces | where |
+|---|---|---|
+| `0x02` | 6166 | **the floors of the buildings you walk through**: on exactly the 29 meshes with a path graph and nowhere else, and 5590 face straight up once posed |
+| `0x04` | 1355 | foliage (`TF2`, 707) and see-through glass and teleports in buildings; 1033 name a see-through material |
+| `0x10` | 384 | vertical faces in 20 buildings, 320 of them `R_NP13` |
+| `0x20` | 274 | building glass (`B_COMP_3G`, 234) and the bridge's additive `B_A_BRIGE` |
+
+A round passes through faces flagged 4 or 32 and strikes 2 and 16 — *read*,
+`Control.dll:0x1001d9fa` ([26-damage.md](26-damage.md#the-hit-test--read-and-measured)).
+What reads 2 and 16 is not established: the mesh visitor takes a required and
+an excluded triangle mask from its caller (`AniMesh.dll:0x10008120`), and
+`CBuilding::GetFirstIntersectedFace` forwards whatever filter it is given, so
+the answer is in whoever queries a building's faces.
 
 ### Indices are batch-relative
 
@@ -981,11 +1050,42 @@ not later frames — they are alternative renderings of the same surface, and
 the caller picks one:
 
 - the **43** two-track materials are the ground, and track 1 is the `M` twin
-  drawn unlit — see [03-terrain.md](03-terrain.md);
+  the landscape lays over the base as a second texture stage — see
+  [03-terrain.md](03-terrain.md#who-asks-for-track-1--read-and-measured);
 - the **two** eight-track ones, `B_LBL_01` and `R_LBL_01`, name cells 0 to 7
-  of one insignia sheet, blue and red.
+  of one insignia sheet, blue and red. `R_LBL_01` is in the wear of 23
+  turrets, 12 chassis and 7 static models, `B_LBL_01` in 19 buildings'
+  (*measured*).
 
 See `openparkan/materials.py`.
+
+### Who picks an object mesh's material track — *read*
+
+An object mesh does not fetch its materials itself; `CShade` does, and the
+mesh tells it which track. At the start of a draw (`AniMesh.dll:0x10014b30`,
+interface `0x18` slot 11) the mesh calls `CShade::StartMeshRender`
+(`Terrain.dll:0x100437c0`, at `AniMesh.dll:0x10014e0a`) with a material
+manager and a track; `CShade` keeps them at `+0xcb8` and `+0xcbc` and passes
+the track to the manager's slot 5 (`Terrain.dll:0x100454e6`) or slot 3
+(`0x10045521`) for every batch.
+
+- **The track** is what the unit's `ILifeSystem` slot 15 answers
+  (`AniMesh.dll:0x10014dee`, through the mesh's `+0x30`, `QueryInterface`
+  0x16): the control system's `+0x554` (`Control.dll:0x10008800`). The
+  constructor sets it to 0 (`0x100070d1`) and only slot 16 (`0x10008810`)
+  writes it; no caller of slot 16 has been found, so as far as is read an
+  object draws track 0 — cell 0 of an insignia sheet.
+- **The manager** is the mesh's own (`+0x24`, `QueryInterface` 0xd, taken at
+  `0x10007022`) — unless IAnimation slot 27 (`AniMesh.dll:0x10005970`) has
+  given it another. Slot 27 takes a face reference, asks the object that owns
+  the face for *its* manager (`0x100059e3`, into mesh `+0x204`) and keeps the
+  face's material handle at `+0x208`. From then on the mesh draws every batch
+  in that one material (interface `0x18` slot 3, `0x10013595`) with the owner's
+  manager and track 0. Who calls slot 27 is not established; something that
+  wants to wear the surface it hit is the obvious reader.
+
+The landscape draws through the same call with its own manager and track 0
+(`Terrain.dll:0x1001b95e`).
 
 ### Baked lighting
 
@@ -1093,9 +1193,31 @@ zero on 3432 of the 3599** points.
 **Where it is not zero, it is not floats.** Its second slot is an **int32: the
 node the point sits on** — a node of the same-stem mesh on 2984 of the 2985
 points that have one (*measured*, `ControlPoint.nodes`). The third slot holds
-the same number on 3338 of the 3599; where it differs — the wheels of `r_b_03`,
-many gun barrels — what the pair means is not established. On the hero turret
-`CameraCenter` names node 35 (`CP_m1o1`) and `TargetDirect` 34 (`GP_m1o1`).
+the same number on 3338 of the 3599. On the hero turret `CameraCenter` names
+node 35 (`CP_m1o1`) and `TargetDirect` 34 (`GP_m1o1`).
+
+**The two nodes do two jobs** — *read*:
+
+- **The second slot places the point.** Loading a part's `.cpt`, the control
+  system builds one 12-byte entry per point — the record, the part it came
+  with, and a node — and the node is the second slot and only the second slot
+  (`Control.dll:0x1000b22a`). A part's node 0 becomes its socket, and any other
+  node is shifted to where the part's nodes landed in the merged mesh
+  (`0x10008be8`). The point's world position and direction come from that node
+  (`0x1001b4f0`).
+- **The third slot is the node that carries it.** The ground contact reads it
+  for each of a state's contact points: it sets node mask bit `0x10` on that
+  node through IAnimation slot 8 (`0x1001a3aa`), and a contact point whose
+  third-slot node is destroyed — node record `+0x28` bit `0x10`, set when its
+  life reaches 0 (`0x10011071`) — no longer touches the ground (`0x1001ac0d`).
+  What mask bit `0x10` does in the mesh is not read.
+
+It fits the data (*measured*): on a chassis, where the two differ, the third
+is a node below the one the point sits on on **69 of 78** points — every
+`weel_*`, every `leg_*`, and most `dust_*` — so a wheel's contact point rides
+on the body and dies with the wheel. The other nine name −1 or a node past the
+mesh. On guns and rounds, where 156 more points differ, nothing in the ground
+contact reads them; whether anything else does was not searched.
 
 The third triple is a direction whose **length carries a magnitude**, which is
 what an earlier draft missed when it said `guns.rlb` and `parts.rlb` "store

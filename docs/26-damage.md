@@ -184,12 +184,13 @@ node −1.
 A round's query **passes through triangles flagged 4 or 32**, through batches
 flagged 8, and through batches flagged `0x200` unless the round's type carries
 `0x4000000` (`Control.dll:0x1001d9fa`). Flags 2 and 16 are struck. The fifth
-mesh slot and the 28 collision hulls are never tested
-([07-objects.md](07-objects.md#the-fifth-slot-is-collision-geometry)).
+mesh slot and the 28 cockpit nodes that have nothing else are never tested:
+the fifth slot is what a unit's own first-person view draws, not collision
+geometry ([07-objects.md](07-objects.md#the-fifth-slot-is-what-the-units-own-view-draws)).
 
 |  | *measured* |
 |---|---|
-| hulls a round can strike | none — 0 of 28 have a level 0 in any variant |
+| cockpit nodes a round can strike | none — 0 of 28 have a level 0 in any variant |
 | level-0 triangles a round passes through | 1306 of 129542, on 30 meshes: trees and the mines |
 | `r_h_01` / `r_h_03` / hero `r_h_02` | 4 / 6 / 9 nodes to hit, 104 / 174 / 230 triangles, none passed |
 
@@ -473,7 +474,11 @@ shield, battery and ammunition (`Behavior.dll:0x10018100`, `0x10019372`,
 - How the struck object and node reach `ILifeSystem` slot 8's hit. It carries
   the same five-integer reference the collision record does, but the copy was
   not found.
-- What reads a node's fifth slot, if a round's hit test does not.
+- ~~What reads a node's fifth slot, if a round's hit test does not.~~
+  **Answered**: the mesh draw, for a view the turret's camera component
+  registered with the unit's mesh — the first-person view draws every node's
+  fifth slot (`AniMesh.dll:0x10014be5`). See
+  [07-objects.md](07-objects.md#the-fifth-slot-is-what-the-units-own-view-draws).
 - Where a round's collision radius comes from. That it is the bounding sphere
   in its mesh's header is a *guess*.
 - Who clears the behaviour flag `0x10` that lets a unit's takt switch its

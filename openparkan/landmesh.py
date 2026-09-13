@@ -77,8 +77,19 @@ STREAM_UV2 = 18
 STREAM_BLEND = 14
 STREAM_DRAW_ORDER = 11
 DRAW_ORDER_STRIDE = 4
-#: Bit 4 of a draw-order entry's flags byte: this face opens a batch.
+#: Bit 4 of a draw-order entry's flags byte: this face opens a batch.  It is
+#: the one bit of the byte the landscape's draw reads (``Terrain.dll:0x1004399a``).
 DRAW_BATCH_START = 0x10
+#: What the engine writes into the rest of the byte when it rebuilds a cell's
+#: draw order after placing a building (``Terrain.dll:0x10060480`` and two
+#: siblings): bit 3 set, bits 5-6 set to 2, bits 0-2 clear.  That is the
+#: constant 0x48 every shipped entry carries.
+DRAW_FLAGS_BUILT = 0x48
+#: Bit 7, on 89 shipped entries of ``ILKON`` and ``SC_3``, has **no reader and
+#: no writer** in ``Terrain.dll``: the draw tests bit 4 alone and the
+#: rebuilders write every other bit through masks that leave bit 7 as it was.
+#: So it changes nothing the engine does.
+DRAW_FLAGS_UNREAD = 0x80
 STREAM_FACE = 21
 
 FACE_STRIDE = 28

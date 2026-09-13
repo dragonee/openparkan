@@ -31,8 +31,10 @@ The navigation mesh is [solved](08-arealmap.md). Two fields are not:
   index of the same edge in the neighbouring areal, right on 193418 of 193418
   shared edges and `-1` on every boundary edge. See
   [08-arealmap.md](08-arealmap.md).
-- The sub-block list (`B` in the record) is zero on every shipped map, so its
-  contents are unexercised.
+- ~~The sub-block list (`B` in the record)~~ — **answered: carried and never
+  used.** Its layout is three extra edge pairs and a point list per sub-block,
+  and the loader (`ArealMap.dll:0x10007640`) steps over both and keeps no
+  field for B. None ships. See [08-arealmap.md](08-arealmap.md).
 
 `MHallWay`'s path graph turned out to be mesh stream 17, carried by buildings
 — see [07-objects.md](07-objects.md).
@@ -89,20 +91,32 @@ outer ring is a clearance drawn around the building. See
 
 ## Object mesh leftovers
 
-- **The fifth slot of a variant** is **collision geometry**, as far as the data
-  goes: the 28 nodes carrying only a fifth slot are exactly the 28 collision
-  hulls, and on the 288 ordinary nodes with both it is always a separate slot
-  — a copy of level 0 on 141, coarser on 137. **A round's hit test does not
-  read it**: it takes level 0, so a hull is never struck. What does read the
-  fifth slot is open. See [07-objects.md](07-objects.md) and
-  [26-damage.md](26-damage.md#the-hit-test--read-and-measured).
+- ~~**The fifth slot of a variant**~~ — **answered: it is what the unit's own
+  first-person view draws.** The turret's camera component registers its view
+  with the unit's mesh, and the mesh draws slot `variant × 5 + 4` of every node
+  to that view. The 28 "collision hulls" carrying only a fifth slot are the
+  cockpit the view sits in — `CameraCenter` is on one on all 54 turret records
+  that have one. A round's hit test takes level 0 and never strikes them. See
+  [07-objects.md](07-objects.md#the-fifth-slot-is-what-the-units-own-view-draws).
 - ~~**Pose key `time`**~~ — answered: a key's time is **the frame at which
   its run first names it**, which is what an animation player interpolates
   between. See [07-objects.md](07-objects.md).
-- 25 of the 1414 attachments have a socket that turns the part by 120° about
-  (1, 1, 1) — a cyclic axis permutation — or by 126°. They are missile packs
-  and shell clips on the winged SSM launchers. The other 83 disagreements are
-  [solved](07-objects.md): a turret hung under a flying chassis.
+- ~~25 of the 1414 attachments have a socket that turns the part by 120°~~ —
+  **answered: the root's rotation never reaches the picture.** Mounting drops a
+  part's root node and hangs its children on the socket
+  (`AniMesh.dll:0x1000a7dd`), and all 1417 mounted parts' roots are empty. See
+  [07-objects.md](07-objects.md#how-parts-attach).
+- What reads object face flags 2 (the floors of the 29 walkable buildings) and
+  16. The mesh visitor takes its triangle masks from the caller
+  (`AniMesh.dll:0x10008120`), so the answer is in whoever queries a building's
+  faces other than a round.
+- What sets an object's material track (`ILifeSystem` slot 16,
+  `Control.dll:0x10008810`; nothing found) and who calls IAnimation slot 27,
+  which makes a mesh wear the material of a face it names
+  (`AniMesh.dll:0x10005970`). See
+  [07-objects.md](07-objects.md#who-picks-an-object-meshs-material-track--read).
+- What IAnimation node mask bit `0x10` does — the ground contact sets it on a
+  contact point's carrying node (`Control.dll:0x1001a3aa`).
 
 ## Unresolved terrain fields
 
@@ -130,16 +144,16 @@ outer ring is a clearance drawn around the building. See
   "about 95% set, in connected regions, tracking nothing", came of pooling the
   maps: those four files contribute 23439 clear faces with nothing under them.
   See [03-terrain.md](03-terrain.md).
-- The draw order's flags bit `0x80`. The byte takes **exactly four values**
-  across the library — `0x48`, `0x58`, `0xc8`, `0xd8` — so `0x08` and `0x40`
-  are set on every one of the 275882 entries and say nothing, `0x10` opens a
-  batch, and `0x80` is left. It is on **89 entries of two maps only**, `ILKON`
-  (76) and `SC_3` (13), in short runs mostly of length 2. The faces it marks
-  are ordinary: median area, free-edge count and level of detail all match the
-  rest of their map, and they are not degenerate or duplicated. The rest of
-  the face record is read: flags `0x004` is a second texture layer, `0x008`
-  water and `0x2000` a liquid bed, and fields 10..12 are the face's own
-  normal.
+- ~~The draw order's flags bit `0x80`~~ — **answered: inert.** The landscape's
+  draw reads bit `0x10` of the byte and nothing else (`Terrain.dll:0x1004399a`),
+  and the engine's own rebuilders write the other bits as `0x48` through masks
+  that keep bit 7 as it was; nothing reads or writes it. The 89 entries of
+  `ILKON` (76) and `SC_3` (13) that carry it change nothing. See
+  [03-terrain.md](03-terrain.md#what-the-engine-does-with-the-byte--read-and-measured).
+- ~~Who asks a ground material for its second track~~ — **answered: the
+  landscape's draw**, on every face that is not water, binding it as a second
+  texture at render phase 9 (`Terrain.dll:0x1002b4b6`). See
+  [03-terrain.md](03-terrain.md#who-asks-for-track-1--read-and-measured).
 
 ## Textures
 

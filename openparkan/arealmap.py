@@ -28,18 +28,26 @@ and one areal is::
     uint32   vertex count V
     uint32   sub-block count B               (zero on every shipped map)
     float32  V x [3]                         polygon vertices, counter-clockwise
-    int32    (V + 3B) x [2]                  per-edge: neighbour areal, and the
+    int32    V x [2]                         per-edge: neighbour areal, and the
                                              index of the same edge in that
                                              neighbour (-1 on the boundary)
-    B x { uint32 n; float32 n x [3] }
+    int32    3B x [2]                        three more pairs per sub-block
+    B x { uint32 n; float32 n x [3] }        a sub-block: n points
 
 so an areal occupies ``56 + V*20`` bytes when B is zero.
+
+The engine's loader (``ArealMap.dll:0x10007640``) keeps pointers into this
+payload rather than copying it, and what it keeps says what is used: the
+record's address, V, the vertex and edge pointers and the vertices' xy box.
+It walks past the ``3B`` pairs and the sub-blocks by their sizes and keeps
+**no** field for B -- so a sub-block, which no shipped map has, is carried and
+never used.
 """
 
 from __future__ import annotations
 
 import struct
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from .nres import NResArchive
@@ -49,6 +57,9 @@ HEADER_SIZE = 0x38
 
 #: Neighbour index used on an edge that has no areal on the far side.
 NO_NEIGHBOUR = -1
+
+#: How many extra ``int32`` pairs the edge list carries per sub-block.
+SUB_BLOCK_EDGES = 3
 
 #: The bits of an areal's third flag word that mark a lake: 240 and 242 on the
 #: shipped maps, against 1..29 on ground.  The low bits are not established.
@@ -69,6 +80,10 @@ class Areal:
     #: ``NO_NEIGHBOUR`` on the outside of the mesh.
     edges: list[tuple[int, int]]
     flags: tuple[int, int, int, int]
+    #: The ``3B`` pairs after the polygon's own, and the ``B`` sub-blocks' point
+    #: lists.  Empty on every shipped areal; the engine skips both.
+    extra_edges: list[tuple[int, int]] = field(default_factory=list)
+    sub_blocks: list[list[tuple[float, float, float]]] = field(default_factory=list)
 
     @property
     def lake(self) -> bool:
@@ -146,15 +161,18 @@ def _read_areal(data: bytes, pos: int) -> tuple[Areal, int]:
     vertices = [struct.unpack_from("<3f", data, p + i * 12) for i in range(nverts)]
     p += nverts * 12
 
-    edge_count = nverts + 3 * nblocks
-    edges = [struct.unpack_from("<2i", data, p + i * 8) for i in range(edge_count)]
+    edge_count = nverts + SUB_BLOCK_EDGES * nblocks
+    pairs = [struct.unpack_from("<2i", data, p + i * 8) for i in range(edge_count)]
     p += edge_count * 8
 
+    sub_blocks = []
     for _ in range(nblocks):
         n = struct.unpack_from("<I", data, p)[0]
+        sub_blocks.append([struct.unpack_from("<3f", data, p + 4 + i * 12) for i in range(n)])
         p += 4 + n * 12
 
-    return Areal(centre, area, vertices, edges, flags), p
+    return Areal(centre, area, vertices, pairs[:nverts], flags,
+                 pairs[nverts:], sub_blocks), p
 
 
 def load(path: str | Path) -> ArealMap:

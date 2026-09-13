@@ -32,14 +32,17 @@ indexed by vertex or by face.
 
 | Field | Meaning |
 |---|---|
-| 0 | flags; the value **1544** (`0x0608`) marks water |
-| 1 | surface bitfield; bit **`0x02`** marks water |
+| 0 | flags over a constant `0x600`; `0x004` a second layer, `0x008` water (**1544**, `0x0608`), `0x2000` a liquid bed |
+| 1 | surface bitfield; bit **`0x02`** marks water, bit `0x10` is clear on lava |
 | 2 | lo byte = layer-1 texture index, hi byte = layer-2 (`0xFF` = none) |
 | 3 | always `0xFFFF` |
 | 4, 5, 6 | vertex indices |
 | 7, 8, 9 | adjacent face across each edge (`0xFFFF` = mesh boundary) |
-| 10, 11, 12 | unresolved |
-| 13 | patch / sector id (0..62 on SC_3) |
+| 10, 11, 12 | the face's own normal, `int16` over 32767 |
+| 13 | the winged-edge link: three 2-bit edge codes |
+
+Each row is established in the sections below; the table used to call 10–12
+unresolved and 13 a patch id.
 
 ## The `.wea` name tables
 
@@ -150,6 +153,11 @@ cleanly on that boundary.
 
 So the ground is `mix(layer2, layer1, blend)`. Without it every texture
 boundary on the terrain is a hard polygon edge; the game's are gradients.
+
+The engine's own name for stream 18 is the **microtexture mapping** — *read*:
+`CLandscape`'s constructor asks the archive for type `0x12` and, failing,
+panics *"Unable to find microtexture mapping chunk"*. What that name implies
+for the draw is not read here.
 
 Draw it in **one pass**. Grouping faces by the pair `(layer 1, layer 2)`
 rather than by layer 1 alone costs almost nothing — 5 to 8 groups per map
@@ -338,7 +346,36 @@ a cell, and clear on all 248708 others — agreeing on every one of the 275882.
 Walk the order and change material wherever the bit is set, and the map draws.
 
 The rest of the byte is a constant `0x48` — bits 3 and 6 on every face — plus
-bit 7, which 89 faces carry and nothing yet explains.
+bit 7, which 89 faces carry.
+
+### What the engine does with the byte — *read*, and *measured*
+
+**The draw reads bit 4 and nothing else.** The landscape hands a cell's run of
+draw-order entries to `CShade`'s cell draw (`Terrain.dll:0x100438c0`, from the
+landscape render at `0x1001c35f`), which takes each entry's face index and
+tests `byte +2 >> 4 & 1` to know where a batch begins (`0x1004399a`).
+
+**The engine writes the byte itself.** Placing a building rebuilds draw
+order (`0x10064770`, called from the placement at `0x1000e430`) through three
+builders (`0x10060480`, `0x10062eb0`, `0x10064490`). The one at `0x10060480`
+walks a run and takes every face not yet taken whose texture pair is the one
+asked for and whose flags carry neither `0x20` nor `0x800` — one batch per
+pair, the same minimum-batch order the shipped files carry — and writes each
+entry the same way: bits 0–2 clear, bit 3 set, bits 5–6 set to 2, bit 4 on the
+first entry it writes. That is `0x48` plus the batch start, and **275882 of
+275882** shipped entries are exactly that once bit 7 is set aside
+(*measured*).
+
+**Bit 7 is inert.** Nothing in `Terrain.dll` tests it, sets it or clears it —
+searched as a shift by 7, a mask or test of `0x80`, a sign test after a byte
+load, and a test of `0x800000` on the whole entry: the builders write every
+other bit through masks (`0xfc`, `0xef`, `0xfb`, `0x9f`) that keep it as it
+was, and the only read of the byte is the bit-4 test. The same scan run for
+bit 4 finds its reader and its five writes, so the silence is the binary's.
+The 89 entries that carry it — **76 on `ILKON` and 13 on `SC_3`** — change
+nothing the game draws. Where they came from is not established; a tool that
+built the order with these masks over a reused buffer would leave exactly
+this.
 
 ## What fparkan's notes add, and what they do not
 
@@ -355,10 +392,10 @@ below was re-checked against the install before it was written down.
   library: 0 on 27538 faces, 2 on 2712, 16 on 244714 and 18 on 918.
 - Beside it the engine packs a **six-bit class** from six more mask bits —
   and **field 13 is exactly six bits wide**: every one of the 275882 faces
-  holds a value below 64, the largest 62, with 63 of the 64 occurring. So it
-  is a *set of flags*, not the index this document used to call it, which also
-  explains the negative result below: a bitfield's groups have no reason to be
-  spatial or to track a material.
+  holds a value below 64, the largest 62. The six bits turned out to be
+  three 2-bit edge codes, the [winged-edge link](#field-13-is-the-winged-edge-link),
+  not six flags as this bullet once concluded; either way its groups have no
+  reason to be spatial or to track a material.
 
 Two places where the reading here goes further. fparkan leaves the face
 record's last eight bytes uninterpreted; six of them are the face's own
@@ -370,8 +407,8 @@ both checked on all 275882 faces.
 
 An earlier draft read the last word of the face record as a patch or sector
 id, on the strength of its range (0..62, about 57 distinct values per map).
-It is six flags, as above.
-It is not. Grouping faces by it gives regions that **span the whole map**:
+It is not — it is the winged-edge link, above. Grouping faces by it gives
+regions that **span the whole map**:
 only 25 of 348 groups across six maps are even 20% tighter than a random
 subset of the same size, and the median group covers 100% of the map either
 way.
@@ -398,7 +435,7 @@ squares fit of `M = a·base + b` lands a residual of only 2 to 15 levels out of
 255 — so the twin is the base put through a per-texture brightness and
 contrast, aimed at mid-grey.
 
-**The two are not two layers of one draw.** A material's second `uint16`
+**The record does not make them two layers.** A material's second `uint16`
 counts *animation tracks*, not layers — see
 [07-objects.md](07-objects.md#the-second-count-is-animation-tracks-not-layers)
 — and on all 43 the two tracks hold a single key each, track 0 naming entry 0
@@ -406,34 +443,61 @@ and track 1 naming entry 1. A caller asking for track 1 gets one texture,
 exactly as a caller asking for track 0 does. Nothing in the record binds them
 together.
 
-What separates them is the **lighting**. An entry is a `D3DMATERIAL7`, and on
-38 of the 43 the first carries a **white diffuse over a black ambient** and
-the second the reverse — a **black diffuse over a white ambient**. Under
-fixed-function lighting that is the difference between a surface the scene
-light multiplies and one that shows at full brightness whatever the lighting.
-The base is lit; **the twin is drawn unlit**, which is exactly what a copy
-flattened towards mid-grey is for: the contrast a light would have supplied is
-already baked out of it.
+Their entries differ in **lighting**. An entry is a `D3DMATERIAL7`, and on 38
+of the 43 the first carries a **white diffuse over a black ambient** and the
+second the reverse — a **black diffuse over a white ambient**, which reads as
+unlit. An earlier draft concluded the twin is drawn unlit; the draw below takes
+only its texture, so those colours are not what shows.
 
 They are not bump maps, which an earlier draft guessed from `Iron_3D.ini`'s
-`EMBM=1`; not a mask, which the reader used to call them; and not a second
-texture stage, which the draft before this one called them. Nor are they
-simply the 16-bit and 32-bit variants of one texture: a bit-depth copy would
-not be pulled towards grey, and would not be pulled hardest exactly where the
-original is least grey.
+`EMBM=1`; not a mask, which the reader used to call them. Nor are they simply
+the 16-bit and 32-bit variants of one texture: a bit-depth copy would not be
+pulled towards grey, and would not be pulled hardest exactly where the
+original is least grey. They **are** a second texture stage — which a draft
+before this one said, and the one after it denied.
 
-The engine's multitexture path is real, and this is not it. `Ngi32.dll` keeps
-a table of 14 render phases at `0x10036a30`, several of them two-texture, and
-`CShade::ConfigureTextureAndAlphaBlendModes` asks the device which of them it
-supports at start-up; where the two-texture `MODULATE` phase is missing the
-engine falls back to a second pass. But a `MAT0` entry carries **one** texture
-and one cell, and the material manager hands back one entry at a time — so no
-material ever reaches that path. See
-[05-engine.md](05-engine.md#the-render-phase-table).
+### Who asks for track 1 — *read*, and *measured*
 
-**What is still open is who asks for track 1.** The selector is an argument to
-the material manager's `GetMaterialPhase`, and no caller of it has been found;
-the reader takes track 0, which is the lit half.
+**The landscape does, on every face that is not water.** `CShade`'s cell draw
+(`Terrain.dll:0x100438c0`) flushes each batch through a lighting helper
+(`0x1002b470`, called at `0x10043a3d` and for layer 2 from `0x1002c132`). When
+the device supports render phase 9 — `CShade::ConfigureTextureAndAlphaBlendModes`
+keeps that answer at `+0xbd8` (`0x10041274`) — and the batch's face is not
+water (its face word 1 bit `0x02`), the helper asks the material manager's
+slot 3 for **track 1** of the batch's material (`0x1002b4b6`) and makes it the
+surface's second stage: track 1's texture as the second texture, its whole
+image as the second cell, and phase **9** — `tex0 · tex1 · 2 · diffuse`,
+`MODULATE2X`, whose identity is mid-grey
+([05-engine.md](05-engine.md#the-render-phase-table)). It then returns no
+extra pass; on any other device, or on water, it goes on to build one where
+it needs to, textured with track 0 (`0x1002b96f`), for the lights it tests
+each vertex against.
+
+The helper runs only while the setting `MicroTexturingOn` is on (`CShade
++0xcc0`, the fifth of the 36 settings, default 1, and no `shade.cfg` ships
+to change it), the face carries flag `0x400` (all 173827 level-0 faces do, in the
+constant `0x600`), and a per-frame camera flag at `+0xbcc` is clear.
+
+What that reaches (*measured*, level 0 of all 33 maps): **164230 of the 172012
+faces that are not water** name a layer-1 material with a second track — all
+but `L08` and `L32` — and 17263 of their 17641 layer-2 materials do. None of
+the 1815 water faces does, and the draw never asks them. A material with one
+track answers with track 0: both of the manager's fetches take a track and
+clamp one outside the material's count to 0 (`World3D.dll:0x1000322f`).
+
+So on the default settings the ground is the base times its twin times two:
+where the twin is mid-grey it changes nothing, which is *derived* from the
+phase and explains why the twin is flattened towards grey. That this is what
+the engine calls microtexturing is a *guess* from the setting's name and the
+stream-18 chunk's.
+
+**Two things this entry used to say were wrong.** Slot 3 is not track-less:
+it takes `(handle, track, &out)` and uses the global clock, where slot 5 takes
+a time as well. And there *is* a five-argument call through slot 5
+(`Terrain.dll:0x100454e6`), in `CShade`'s mesh draw on a manager handed to
+`CShade::StartMeshRender` (`0x100437c0`) rather than stored where the earlier
+search looked. An object mesh passes its track there too — see
+[07-objects.md](07-objects.md#who-picks-an-object-meshs-material-track--read).
 
 ## The map is stored twice, at two levels of detail
 

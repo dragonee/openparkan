@@ -240,8 +240,12 @@ def check_terrain(check, game: Path) -> None:
     # The draw-order flags byte has exactly four values across the library, and
     # two of its bits are set on every entry, so they carry nothing.
     seen = Counter()
+    unread_by_map: Counter[str] = Counter()
     for folder in maps:
-        seen.update(landmesh.load(folder / "Land.msh").draw_flags)
+        flags = landmesh.load(folder / "Land.msh").draw_flags
+        seen.update(flags)
+        unread_by_map[folder.name] += sum(
+            1 for v in flags if v & landmesh.DRAW_FLAGS_UNREAD)
     always = 0xFF
     for v in seen:
         always &= v
@@ -251,6 +255,19 @@ def check_terrain(check, game: Path) -> None:
           f"0x08 and 0x40 are set on every one and say nothing, 0x10 opens a "
           f"batch, and 0x80 is on {sum(n for v, n in seen.items() if v & 0x80)} "
           f"entries of two maps")
+    # Terrain.dll's draw-order rebuilder (0x10060480 and two siblings) writes
+    # bits 0-6 as 0x48 plus the batch start and leaves bit 7 alone; the draw
+    # (0x1004399a) reads bit 4 and nothing reads bit 7.
+    rebuilt = sum(n for v, n in seen.items()
+                  if v & ~(landmesh.DRAW_BATCH_START | landmesh.DRAW_FLAGS_UNREAD)
+                  == landmesh.DRAW_FLAGS_BUILT)
+    carriers = {k: v for k, v in unread_by_map.items() if v}
+    check("Land.msh: bit 7 aside, the draw-order byte is what the engine's rebuilder writes",
+          rebuilt == sum(seen.values()) and len(carriers) == 2,
+          f"{rebuilt}/{sum(seen.values())} entries are 0x{landmesh.DRAW_FLAGS_BUILT:02x} "
+          f"plus the batch-start bit once bit 7 is set aside; bit 7 itself, which "
+          f"no instruction in Terrain.dll reads or writes, sits on "
+          f"{sum(carriers.values())} entries: {dict(sorted(carriers.items()))}")
 
     check("Land.msh: field 13 is the winged-edge link",
           mutual == twins and free_ok == slots,
@@ -643,10 +660,10 @@ def check_layers(check, game: Path) -> None:
     check("Land.msh: face field 13 is a six-bit field, not an id",
           six_bit == seen_faces and widest < 64,
           f"every one of the {seen_faces} faces holds a value below 64, the "
-          f"largest being {widest}, and 63 of the 64 occur -- so it is a set "
-          f"of six flags rather than an index, which is also why its groups "
-          f"are neither spatial nor tied to a material.  The surface word "
-          f"beside it uses two bits: {dict(sorted(surface_values.items()))}")
+          f"largest being {widest} -- three 2-bit edge codes, the winged-edge "
+          f"link, which is also why its groups are neither spatial nor tied to "
+          f"a material.  The surface word beside it uses two bits: "
+          f"{dict(sorted(surface_values.items()))}")
 
     check("Land.msh: face field 13 is not a spatial patch id", tight < loose * 0.1,
           f"{tight}/{tight + loose} groups are tighter than a random subset of "
@@ -655,6 +672,45 @@ def check_layers(check, game: Path) -> None:
     check("Land.msh: stream 14 is the weight of layer 1", dirty == 0,
           f"exactly 1.0 on all {clean} vertices no layer-2 face touches; "
           f"below it on {varying} of the {touched} that one does")
+
+    # The landscape's draw asks the material manager for track 1 on every face
+    # that is not water (Terrain.dll:0x1002b4b6) and binds its texture as the
+    # second stage at render phase 9; a material with one track answers with
+    # track 0.  What that reaches, over the fine level of every map:
+    lib = materials.MaterialLibrary(game / "Material.lib")
+    ground_twin = ground_all = water_twin = water_all = base_flag = faces_seen = 0
+    layer2_twin = layer2_all = 0
+    no_twin: set[str] = set()
+    for folder in maps:
+        m = landmesh.load(folder / "Land.msh")
+        for f in m.lod_faces(0):
+            faces_seen += 1
+            # the draw's lighting path also wants face flag 0x400
+            base_flag += bool(m.face_flags[f] & 0x400)
+            name = m.texture_name(1, m.face_tex1[f])
+            record = lib.get(name) if name else None
+            twin = bool(record and record.track_count >= materials.TWIN_TRACKS)
+            if m.is_water(f):
+                water_all += 1
+                water_twin += twin
+                continue
+            ground_all += 1
+            ground_twin += twin
+            if not twin and name:
+                no_twin.add(name)
+            if m.face_tex2[f] != landmesh.NO_TEXTURE:
+                name2 = m.texture_name(2, m.face_tex2[f])
+                record2 = lib.get(name2) if name2 else None
+                layer2_all += 1
+                layer2_twin += bool(record2 and record2.track_count >= materials.TWIN_TRACKS)
+    check("Land.msh: the ground the draw asks for a second track has one",
+          ground_twin > ground_all * 0.9 and water_all and water_twin == 0
+          and base_flag == faces_seen,
+          f"{ground_twin}/{ground_all} level-0 faces that are not water name a "
+          f"layer-1 material with a second track (the rest: {sorted(no_twin)}), "
+          f"and {layer2_twin}/{layer2_all} of their layer-2 materials do; none of "
+          f"the {water_all} water faces', which the draw never asks.  Face flag "
+          f"0x400, which the same path wants, is on {base_flag}/{faces_seen}")
 
 
 def _covers(mesh, faces, x: float, y: float) -> bool:
@@ -1597,6 +1653,43 @@ def check_objects(check, game: Path) -> None:
           f"frame and aim points are unit length.  The first triple is exactly "
           f"zero on {zeroed}/{seen}")
 
+    # A point's two node slots: the control system places it by the first
+    # (Control.dll:0x1000b22a); the ground contact lets a contact point live
+    # and die with the second (0x1001a3aa, 0x1001ac0d).  On a chassis, where
+    # the two differ, the second is a wheel or leg below the first.
+    bases = NResArchive.open(game / "bases.rlb")
+    differ = below = 0
+    carried: Counter[str] = Counter()
+    done: set[str] = set()
+    for record in lib.records.values():
+        mref, cref = record.mesh, record.slot_with_suffix("cpt")
+        if not mref or not cref or cref.library.lower() != "bases.rlb" \
+                or mref.library.lower() != "bases.rlb" or cref.member.lower() in done:
+            continue
+        done.add(cref.member.lower())
+        try:
+            points = objmesh.parse_control_points(bases.read_name(cref.member), cref.member)
+            chassis = objmesh.parse(bases.read_name(mref.member), mref.member)
+        except KeyError:
+            continue
+        for p in points:
+            if p.placed_on == p.carrier:
+                continue
+            differ += 1
+            k = p.carrier
+            while 0 <= k < len(chassis.nodes):
+                if k == p.placed_on:
+                    below += 1
+                    carried[re.sub(r"_?\d+$", "", p.name.split("_d")[0])] += 1
+                    break
+                parent = chassis.nodes[k].parent
+                k = -1 if parent == objmesh.NO_PARENT else parent
+    check("CTPT: where a chassis point's two nodes differ, the second carries it",
+          differ and below > differ * 0.85,
+          f"on {below}/{differ} chassis points whose two node slots differ, the "
+          f"second is a node below the first -- {dict(carried.most_common(6))}; "
+          f"the rest name -1 or a node past the mesh")
+
     # Draw batches carry the material assignment; no per-face field does.
     lib_mat = materials.MaterialLibrary(game / "Material.lib")
     tex_names = {e.name.upper() for e in NResArchive.open(game / "Textures.lib")}
@@ -1704,8 +1797,67 @@ def check_objects(check, game: Path) -> None:
           len(flag_values) < 10 and small_class > class_seen * 0.99,
           f"the flags word takes {dict(sorted(flag_values.items()))} and the "
           f"trailing field sits below 64 on {small_class}/{class_seen} faces "
-          f"-- the shape of the terrain's six-bit class, though not as clean: "
-          f"{class_seen - small_class} faces spread over the library go above")
+          f"-- the terrain's field 13 again; {class_seen - small_class} faces "
+          f"carry leftovers above the six bits")
+
+    # The trailing word's low six bits are the winged-edge link, checked by
+    # geometry: the code names the neighbour's edge with the same two vertex
+    # positions.  And flag 2 is a building's floor.
+    named = coded = open_edges = open_three = 0
+    floor_meshes: set[str] = set()
+    graph_meshes: set[str] = set()
+    floor_faces = floor_up = 0
+    for name in ARCHIVES:
+        ar = NResArchive.open(game / name)
+        for e in ar:
+            if e.tag != "MESH":
+                continue
+            m = objmesh.parse(ar.read(e), e.name)
+            if not m.face_class:
+                continue
+            if objmesh.read_path_graph(NResArchive(ar.read(e), e.name)) is not None:
+                graph_meshes.add(f"{name}/{e.name}")
+            P = m.positions
+            node_of = {}
+            if any(f & objmesh.FACE_BUILDING_FLOOR for f in m.face_flags):
+                floor_meshes.add(f"{name}/{e.name}")
+                for k, node in enumerate(m.nodes):
+                    for s in node.slot_index:
+                        if s != objmesh.NO_SLOT and s < len(m.slots):
+                            sl = m.slots[s]
+                            stop = sl.first_triangle + sl.triangle_count
+                            for t in range(sl.first_triangle, stop):
+                                node_of[t] = k
+            for i, tri in enumerate(m.triangles):
+                if m.face_flags[i] & objmesh.FACE_BUILDING_FLOOR:
+                    floor_faces += 1
+                    k = node_of.get(i)
+                    pose = m.world_pose(k) if k is not None else objmesh.IDENTITY_POSE
+                    floor_up += objmesh.quaternion_rotate(pose[1], m.face_normal[i])[2] > 0.9
+                for edge in range(3):
+                    j = m.face_adjacency[i][edge]
+                    back = m.edge_twin(i, edge)
+                    if j == objmesh.NO_FACE:
+                        open_edges += 1
+                        open_three += back is None
+                        continue
+                    if j >= len(m.triangles):
+                        continue
+                    named += 1
+                    mine = {P[tri[edge]], P[tri[(edge + 1) % 3]]}
+                    other = m.triangles[j]
+                    coded += back is not None and {P[other[back]], P[other[(back + 1) % 3]]} == mine
+    check("MESH: a face record's last word is the winged-edge link",
+          coded == named > 0 and open_three == open_edges,
+          f"its low six bits name, for each edge, the neighbour's edge with the "
+          f"same two vertex positions on {coded}/{named} in-range neighbours, "
+          f"and read 3 on all {open_three}/{open_edges} open edges -- the "
+          f"terrain's field 13, checked here by geometry")
+    check("MESH: face flag 2 is the floor of a building with a path graph",
+          floor_meshes == graph_meshes and floor_up > floor_faces * 0.85,
+          f"it is on {len(floor_meshes)} meshes, exactly the {len(graph_meshes)} "
+          f"that carry a path graph, and {floor_up}/{floor_faces} of its faces "
+          f"point straight up once posed")
 
     # A batch's vertex range is D3D's (BaseVertexIndex, NumVertices): the span
     # its indices reach, not a slice of the array it owns.
@@ -1857,6 +2009,39 @@ def check_objects(check, game: Path) -> None:
           + ("" if not failures else f" -- {failures[0]}"))
     check("UNITS/*.dat: components resolve in objects.rlb", missing <= 3,
           f"{comps - missing}/{comps} resolve ({missing} do not; see docs/07-objects.md)")
+
+    # Mounting an external part drops its root node and hangs the root's
+    # children on the socket (AniMesh.dll:0x1000a7cc), so the root's own pose
+    # never reaches the picture -- nor would geometry, and none has any.
+    part_meshes: dict[str, objmesh.ObjectMesh | None] = {}
+    mounted = empty_root = 0
+    for f in dats:
+        try:
+            unit = objects.load_unit(f)
+        except objects.ObjectFormatError:
+            continue
+        for c in unit.components[1:]:
+            part = lib.get(c.ref.member)
+            if part is None or part.tag != "EXTO" or not part.mesh:
+                continue
+            key = f"{part.mesh.library}/{part.mesh.member}".lower()
+            if key not in part_meshes:
+                try:
+                    blob = NResArchive.open(game / part.mesh.library).read_name(part.mesh.member)
+                    part_meshes[key] = objmesh.parse(blob, part.mesh.member)
+                except KeyError:
+                    part_meshes[key] = None
+            m = part_meshes[key]
+            if m is None or not m.nodes:
+                continue
+            mounted += 1
+            empty_root += all(s == objmesh.NO_SLOT for s in m.nodes[0].slot_index)
+    check("UNITS/*.dat: a mounted part's root node carries no geometry",
+          mounted and empty_root == mounted,
+          f"{empty_root}/{mounted} external parts mounted in the shipped "
+          f"assemblies have a root node with no slot at all -- the node the "
+          f"engine drops when it hangs the part on its socket, which is why a "
+          f"socket's rotation wins wherever it disagrees with the root's")
 
     # Every placed object must reach geometry, following FORT indirection.
     def record_mesh(rec, depth=0):
@@ -2498,8 +2683,8 @@ def check_poses(check, game: Path) -> None:
           posed_ok > raw_ok * 1.25,
           f"{posed_ok}/{total} with poses applied against {raw_ok}/{total} without")
 
-    # Sub-object flag bit 5 marks a collision hull.  The name says the same
-    # thing, and the two agree exactly.
+    # Sub-object flag bit 5 marks the cockpit, and the name says the same
+    # thing: the two agree exactly.
     marked = named = drawable = agree = hull_triangles = 0
     for _name, m in meshes:
         for node in m.nodes:
@@ -2509,22 +2694,22 @@ def check_poses(check, game: Path) -> None:
                 for i in node.slots_for_lod(0)
                 if i < len(m.slots)
             )
-            marked += node.is_collision
+            marked += node.is_cockpit
             named += hull
             if hull and triangles:
                 drawable += 1
-                agree += node.is_collision
+                agree += node.is_cockpit
                 hull_triangles += triangles
-    # The fifth slot of a variant is where collision geometry lives: the nodes
-    # carrying only that slot are exactly the collision hulls, and no ordinary
+    # The fifth slot of a variant is what the unit's own view draws: the nodes
+    # carrying only that slot are exactly the cockpit nodes, and no ordinary
     # node shares its fifth slot with one of its levels.
     only_fifth, hulls, shared, both = set(), set(), 0, 0
     for mesh_name, m in meshes:
         for k, node in enumerate(m.nodes):
             levels = [node.slot_index[i] for i in range(objmesh.LOD_COUNT)
                       if node.slot_index[i] != objmesh.NO_SLOT]
-            fifth = node.collision_slot()
-            if node.is_collision:
+            fifth = node.cockpit_slot()
+            if node.is_cockpit:
                 hulls.add((mesh_name, k))
             if fifth is None:
                 continue
@@ -2533,25 +2718,74 @@ def check_poses(check, game: Path) -> None:
             else:
                 both += 1
                 shared += fifth in levels
-    check("MESH: the fifth slot of a variant holds the collision hulls",
+    check("MESH: the nodes with only a fifth slot are the flag-0x20 nodes",
           only_fifth == hulls and hulls and shared == 0,
           f"the {len(only_fifth)} nodes carrying only a fifth slot are exactly "
-          f"the {len(hulls)} collision hulls; on the {both} ordinary nodes that "
+          f"the {len(hulls)} flagged 0x20; on the {both} ordinary nodes that "
           f"carry both, the fifth is a separate slot on all {both - shared}")
 
-    check("MESH: flag bit 0x20 marks exactly the CP_* collision hulls",
+    check("MESH: flag bit 0x20 marks exactly the CP_* nodes",
           marked == agree == drawable > 0 and marked < named,
           f"{marked} nodes carry the bit and every one is named CP_* or BTCP_*; "
-          f"{agree}/{drawable} of the hulls that have geometry carry it, and the "
-          f"{named - drawable} that do not are empty. {hull_triangles} triangles "
-          f"a renderer must not draw")
+          f"{agree}/{drawable} of those names that have geometry carry it, and "
+          f"the {named - drawable} that do not are empty. {hull_triangles} "
+          f"triangles that only the unit's own view draws")
+
+    # Those nodes are where the first-person view sits.  The turret's camera
+    # component registers its view with the unit's mesh (Control.dll:0x1002399a),
+    # the mesh draws its fifth slots to a registered view
+    # (AniMesh.dll:0x10014be5), and the view's eye is at CameraCenter.
+    library = objects.ObjectLibrary(game / "objects.rlb")
+    by_member = {name.lower(): m for name, m in meshes}
+    cockpit_archives: Counter[str] = Counter()
+    for name in archives:
+        path = game / name
+        if not path.exists():
+            continue
+        for entry in NResArchive.open(path):
+            found = by_member.get(entry.name.lower())
+            if found is not None and any(n.is_cockpit for n in found.nodes):
+                cockpit_archives[name] += 1
+    eyes = eyes_in = without = 0
+    opened_cpt: dict[str, NResArchive] = {}
+    for record in library.records.values():
+        mref, cref = record.mesh, record.slot_with_suffix("cpt")
+        if not mref or not cref:
+            continue
+        found = by_member.get(mref.member.lower())
+        if found is None:
+            continue
+        lib_name = cref.library.lower()
+        if lib_name not in opened_cpt:
+            opened_cpt[lib_name] = NResArchive.open(game / lib_name)
+        try:
+            points = objmesh.parse_control_points(
+                opened_cpt[lib_name].read_name(cref.member), cref.member)
+        except KeyError:
+            continue
+        has_cockpit = any(n.is_cockpit for n in found.nodes)
+        for point in points:
+            if point.name.lower() != "cameracenter":
+                continue
+            if not has_cockpit:
+                without += 1
+                continue
+            eyes += 1
+            node = point.placed_on
+            eyes_in += 0 <= node < len(found.nodes) and found.nodes[node].is_cockpit
+    check("MESH: the flag-0x20 nodes are the cockpit the turret's camera sits in",
+          set(cockpit_archives) == {"turrets.rlb"} and eyes and eyes_in == eyes,
+          f"the meshes that carry them are all in turrets.rlb "
+          f"({dict(cockpit_archives)}), and on {eyes_in}/{eyes} records whose "
+          f"mesh has one the CameraCenter control point sits on it; "
+          f"{without} camera points belong to meshes without one")
 
     # And dropping them is what makes every model fit the box it states.
     def within(m: objmesh.ObjectMesh, skip_hulls: bool) -> bool:
         lo = [math.inf] * 3
         hi = [-math.inf] * 3
         for i, node in enumerate(m.nodes):
-            if skip_hulls and node.is_collision:
+            if skip_hulls and node.is_cockpit:
                 continue
             pose = m.world_pose(i)
             for index in node.slots_for_lod(0):
@@ -2578,10 +2812,10 @@ def check_poses(check, game: Path) -> None:
     boxed = [m for _name, m in meshes if m.volume and m.nodes and m.slots]
     with_hulls = sum(within(m, False) for m in boxed)
     without = sum(within(m, True) for m in boxed)
-    check("MESH: level 0 fits inside the authored box once hulls are dropped",
+    check("MESH: level 0 fits inside the authored box once cockpits are dropped",
           without == len(boxed) > with_hulls,
           f"{without}/{len(boxed)} models fit inside their own box against "
-          f"{with_hulls}/{len(boxed)} while the collision hulls are drawn")
+          f"{with_hulls}/{len(boxed)} while the cockpit nodes are drawn")
 
     # The .ctl slot was the obvious place to look for the pose a parked unit
     # stands in.  It is not there: a controller's size tracks its own leading
