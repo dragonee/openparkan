@@ -3148,6 +3148,27 @@ def check_profiles(check, game: Path) -> None:
           f"storage {store_cap:g}, which sum to exactly that, so a lone full "
           f"mine reads {100 * mine_cap / profiles.HUD_ORE_FULL:.1f}%")
 
+    # The energy bar is the clan's net power over every clan's power.  On The
+    # Convoy the three generators are the same model, one each for the player
+    # and two enemies, so the bar's formula gives the player a third -- and the
+    # game shows 33% there.
+    convoy = [folder for folder in gamedir.missions(game)
+              if folder.parent.name.upper() == "CAMPAIGN.03" and folder.name == "Mission.02"]
+    if convoy:
+        mission_c = mission.load(convoy[0] / "data.tma")
+        gens = [o for o in mission_c.objects if "gener" in o.path.lower()]
+        models = {o.path.split("\\")[-1].lower() for o in gens}
+        player = sum(1 for o in gens if o.clan_id == 0)
+        owners = sorted({o.clan_id for o in gens})
+        check("data.tma: The Convoy gives the player a third of the map's power",
+              "convoy" in mission_c.title.lower() and len(gens) == 3
+              and len(models) == 1 and player == 1 and len(owners) == 3,
+              f"{mission_c.title!r} places {len(gens)} generators, all "
+              f"{sorted(models)}, one each for clans {owners}; the player's is "
+              f"one of three equal sources, so the energy bar reads "
+              f"{round(100 * player / len(gens))}% once nothing is left to "
+              f"recharge")
+
     check("data.tma: a placed holder's MaximumOre is the engine's own constant",
           set(by_value) == {profiles.MINE_MAX_ORE, profiles.TRANSPORT_MAX_ORE,
                             profiles.STORAGE_MAX_ORE}

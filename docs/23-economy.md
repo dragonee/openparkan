@@ -205,6 +205,13 @@ each clamped to 0..1 and shown as a whole percentage.
   still to be met is subtracted first, so it dips while buildings charge. The
   missions place between 0 and 5 generators, most often one or two, so what
   one generator is worth depends on the map.
+- **Confirmed in play on The Convoy** (`CAMPAIGN.03/Mission.02`), where the
+  game showed Energy 33%. The map places three generators, all `gener01.dat`,
+  one each for the player, `Enm1` and `Enm2` — a third of the map's power
+  (*measured*). The Ore 11% on the same screen is consistent but not provable
+  from the file: the player starts with no mine there — the two mines belong
+  to `Enm1` and a neutral clan, both empty — so it is a mine taken or built
+  and left to fill to 500.
 - The numbers do not jump: every 0.05 s each displayed value steps by one
   point toward its target. A bar whose value is 0 flashes on a half-second
   timer.
@@ -228,11 +235,11 @@ construction slows research.
   unread, so how much smaller is too.
 - **A mine ≈ 11%** — *read*, and exact. The ore bar divides held ore by 4500,
   one full mine plus one full storage, and a full mine holds 500: 11.1%.
-- **One power plant ≈ 33%** — *read*, and conditional. The energy bar is the
-  clan's net power over the power of every clan on the map, so one generator
-  reads a third when three equal generators exist and nothing is left to
-  recharge. The earlier guess here, that it came from a component averaging
-  three inputs, is withdrawn.
+- **One power plant ≈ 33%** — *read*, and confirmed on The Convoy. The energy
+  bar is the clan's net power over the power of every clan on the map, and
+  that map has three equal generators, one of them the player's. On a map
+  with two it would read 50%, with one 100%. The earlier guess here, that it
+  came from a component averaging three inputs, is withdrawn.
 
 ## Not established
 
