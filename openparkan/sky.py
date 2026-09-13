@@ -6,79 +6,60 @@ SunEditor"*.  Inside are ``CAtmosphere``, ``CAtmData``, ``CSun``,
 ``CreateAtmosphereObject``, "Illegal atmosphere object type", and the
 settings ``AtmSkyDetail``, ``AtmStarsOn``, ``AtmCloudsOn``, ``LensFlareOn``.
 
-What the file holds is a **day cycle**: a list of keyframes, each stamped with
-an hour and a minute, carrying the colours and intensities the sky takes at
-that time.  On ``CAMPAIGN.04/Mission.01`` the twelve keyframes run 00:20,
-01:24, 06:48, 12:34, 13:58, 15:00, 15:48, 19:20, 22:39, 23:20, 23:59, and the
-first colour group goes from ``#000025`` at twenty past midnight to ``#563868``
-at half past twelve while the light intensity climbs from 0.1 to 5.0.
+What the file holds is one or more **day cycles**: lists of keyframes, each
+stamped with an hour and a minute, carrying the colours and intensities the
+sky takes at that time and the weather event that fires there.
 
-Layout, which accounts for all 29 shipped files to the byte::
+The layout is read off the deserialiser (``Terrain.dll:0x100672d0``, which
+calls ``0x100660c0`` per section and ``0x10066230`` per keyframe), and it
+accounts for all 29 shipped files to the byte::
 
-    file header, 124 bytes
-        int32   -1                     magic
-        int32   5                      version
-        int32   section count, 1 or 2
-        int32   1
-        int32   keyframes in the first section
-        ...     see FileHeader below
-    keyframe x count
-    for each further section:
-        72 bytes                       the same block as bytes 52..123
-        keyframes to the end of the file
+    int32   -1                          magic
+    int32   5                           version
+    int32   section count, 1 or 2
+    for each section:
+        int32   1                       section version
+        int32   keyframe count
+        time    23:59                   read, never asked for
+        time    the day length          hours and minutes of real time
+        keyframe x count
+    time    the clock's start           section, hour and minute
+    int32   0                           read, never asked for
+    int32   0 or 1                      handed to the sky, which never reads it
 
 and one keyframe is::
 
-    88 bytes    22 slots: mostly BGRA colours, three of them float32
-    6 x string  the object's name in one slot, empty in the rest
-    float32[4]  intensities; the third tracks the sun through the day
-    int32 n
-    n x string  sound files -- "atm_rain1.wav" is the only one shipped
-    uint32[10]  a kind word, then the hour and minute
+    int32   3                           keyframe version
+    time    the keyframe's clock stamp
+    int32   the event opcode            0..9, see EVENT_OPCODES
+    88 bytes                            22 slots: BGRA colours, two float32
+    6 x string                          the object's name in the first
+    float32[4]                          sun sizes, light, weather intensity
+    int32 n, n x string                 up to four effect names
 
-A string is an ``int32`` length followed by that many bytes and no
-terminator, which is what ``MFile``'s string reader does.
+A ``time`` is 32 bytes -- six ``uint32`` and eight more bytes
+(``0x10086570``): the section at +0, the hour at +12, the minute at +16.  A
+string is an ``int32`` length and that many bytes, no terminator.
 
-The engine builds five kinds of atmosphere object -- **SUN, SKY, RAIN, SNOW
-and LIGHTNING** -- and they are numbered, out of the jump table the type-name
-switch uses: ``SUN`` 0, ``SKY`` 1, ``RAIN`` 2, ``SNOW`` 3, ``LIGHTNING`` 4.
+**An earlier reading of this file was off by one keyframe.**  It took the 84
+bytes before the first keyframe's slots as a 124-byte header and each
+keyframe's 40-byte preamble as a *trailer* of the keyframe before it, so every
+keyframe was stamped with the next one's time and opcode.  That is why no
+field of the file seemed to carry the opcode: the right word had been tested,
+against the wrong keyframe.
 
-The ten-valued opcode ``CAtmData::GetEvents`` dispatches on decodes
-completely, and not by the obvious rule: each case *writes* a phase and a type
-into a 20-byte event record, and read back off those writes the table is
-
-    0 start SUN    1 stop SUN    2 nothing
-    3 start RAIN   4 stop RAIN
-    5 start SNOW   6 stop SNOW   7 nothing
-    8 start LIGHTNING   9 stop LIGHTNING
-
-**2 and 7 do nothing** -- they share the switch's default -- and **SKY has no
-case at all**, which agrees with the sky being created outside the switch with
-a hardcoded id.  Phase 0 is the create side: the handler that takes it looks
-the object up and warns *"Atmosphere object already exists"*.
-
-**A second section is a second complete day cycle.**  Six of the 29 files
-carry one, and it is not an event list or a fragment: both sections of all six
-run 00h to 24h, and in five of them the second reuses **16 of the first's 17
-distinct colour blocks** at different times, with a flatter light curve.  It
-reads as a weather variant of the same day -- a guess; what is measured is
-that both are whole cycles over the same span.  What selects between them is
-open, and the engine's collector does take a section number.
-
-Which field of a keyframe carries that opcode is still **not established**,
-and the last word of the trailer -- the only field that spans 0 to 9 -- is
-ruled out for a sharper reason than before: 7 means *nothing happens*, and
-that word puts **all 59 ``moon`` keyframes and 60 of the 75 ``sun`` ones**
-there, which cannot be right for bodies that must be started and stopped.
-See ``docs/10-sky.md``.
+The sections are **played one after another** -- day 0, then day 1, then day
+0 again -- not chosen between: ``CAtmosphere`` keeps a cycle as long as all the
+sections' days together and walks a ``(section, seconds)`` position through
+them (``0x10070040``, ``CAtmData::GetTimeDiffInSec``).  The clock starts at
+the trailing time (``0x1006fab0``).
 
 The sibling ``sky.wea`` names the textures, in the same format model wears
 use, and **the slot index is the role**: the same nine slots in the same order
-in all 29 missions, with slots 1, 5, 6 and 8 naming the identical texture
-every time.  They are material names, so they resolve through ``Material.lib``
-exactly as the terrain's do -- and the material picks a cell of a sprite sheet
-as well as a texture, which is how one 2 x 2 ``SUN.0`` provides both the sun
-and the moon.
+in all 29 missions.  They are material names, so they resolve through
+``Material.lib`` exactly as the terrain's do.
+
+See ``docs/10-sky.md``.
 """
 
 from __future__ import annotations
@@ -92,11 +73,36 @@ from .mesh import read_wea
 
 MAGIC = 0xFFFFFFFF
 VERSION = 5
-HEADER_SIZE = 124
-#: Bytes 52..123 of the file header, repeated ahead of every later section.
-SECTION_HEADER_SIZE = 72
+#: Magic, version and the section count.
+FILE_HEADER_SIZE = 12
+#: ``0x10086570``: six ``uint32`` and eight bytes.
+TIME_SIZE = 32
+#: A section opens with its version, its keyframe count and two times.
+SECTION_VERSION = 1
+SECTION_HEADER_SIZE = 4 + 4 + TIME_SIZE + TIME_SIZE
+#: The file header and the first section's header: everything before the
+#: first keyframe.
+HEADER_SIZE = FILE_HEADER_SIZE + SECTION_HEADER_SIZE
+#: The clock's start time and two ``int32`` close the file.
+TRAILER_SIZE = TIME_SIZE + 4 + 4
+#: The keyframe version every shipped keyframe carries.  The reader also takes
+#: 2, which has no effect list, and 1, which stores twenty slots and makes
+#: slots 20 and 21 from slot 19 at 0.3 (``0x10066230``); no shipped file uses
+#: either.
+KEYFRAME_VERSION = 3
+#: The float32 0.3 a version-1 keyframe's slots 20 and 21 are scaled by.
+V1_SCALE = struct.unpack("<f", struct.pack("<f", 0.3))[0]
 SLOT_COUNT = 22
 NAME_SLOTS = 6
+#: The record filler copies at most this many effect names (``0x100692d0``).
+EFFECT_SLOTS = 4
+#: The first section's day length, as a file offset: its second time's hour.
+DAY_LENGTH_AT = FILE_HEADER_SIZE + 8 + TIME_SIZE + 12
+#: Offsets inside a ``time``.
+TIME_SECTION_AT = 0
+TIME_HOUR_AT = 12
+TIME_MINUTE_AT = 16
+
 #: Slots of the 88-byte block that hold a float32 rather than a colour: the
 #: fog's start and end over ``FOG_SCALE`` (``Terrain.dll:0x1007bbc5``).
 FLOAT_SLOTS = (5, 6)
@@ -105,21 +111,39 @@ FOG_END_SLOT = 6
 FOG_SCALE = 700.0
 
 #: What the sky does with the colour slots (``Terrain.dll:0x1006b2bc``).  Each
-#: group of four is a compass, the direction k x 90 degrees from +y towards
-#: +x: the horizon, which is ring 4 of the dome and the fog colour; ring 3;
-#: ring 2.  The apex and ring 1 take one colour.
+#: group of four is a compass, property k at k quarter turns of the camera's
+#: heading angle: the horizon, which is ring 4 of the dome and the fog colour;
+#: ring 3; ring 2.  The apex and ring 1 take one colour.
 HORIZON_SLOTS = (2, 3, 1, 4)
 RING3_SLOTS = (7, 10, 8, 9)
 RING2_SLOTS = (11, 14, 12, 13)
 APEX_SLOT = 15
+#: The cloud layer's material colour (``0x1007a4de``, drawn only with
+#: ``AtmCloudsOn``): property 15.
+CLOUD_SLOT = 18
 #: Added to every drawn material's emissive (``Terrain.dll:0x100308b8``): the
 #: scene's ambient light in all but name.
 SCENE_COLOUR_SLOT = 20
-#: The sun's colour, times the third intensity float (``0x1006ac9a``); what
-#: the sun does with it is not established.
+#: The sun object's main light: this colour times the third float
+#: (``0x1006ac9a``) is the colour of the directional light ``CSun`` makes
+#: (``0x1007eb9e``).  Rain and snow take their colour from it too.
 SUN_LIGHT_SLOT = 19
+#: The colour of the sun object's second directional light (``0x1007ed34``).
+SUN_SECOND_LIGHT_SLOT = 21
+#: Its alpha scales how far the flare gates brighten the main light
+#: (``0x1007ea14``).
+SUN_BOOST_SLOT = 17
+#: Read with the keyframe and never used: slot 0 is not copied into the event
+#: record at all, and slot 16 is copied and no consumer reads it
+#: (``0x100692d0``, ``0x1006a970``).  Slot 0 holds heap addresses.
+UNUSED_SLOTS = (0, 16)
 #: The name this module first gave the horizon group.
 DAY_CYCLE_SLOTS = HORIZON_SLOTS
+#: Which of the four floats is what.  The sun's on-screen extents are float 1
+#: across and float 2 up (``0x1007dfdf``); the third is the light; the fourth is the
+#: running weather's intensity, the one value rain, snow and lightning take
+#: (``0x1006ce00``).
+SUN_WIDTH_FLOAT, SUN_HEIGHT_FLOAT, LIGHT_FLOAT, WEATHER_FLOAT = 0, 1, 2, 3
 
 #: The dome (``Terrain.dll:0x100787f0``): a spherical cap this high, with this
 #: cap angle, in this many rings, and ``2 ** AtmSkyDetail`` segments -- 16 at
@@ -129,18 +153,12 @@ DOME_ANGLE = math.pi / 4
 DOME_RINGS = 5
 DOME_SEGMENTS = 16
 
-#: How long one in-game day lasts in real time, as ``uint32`` hours then
-#: ``uint32`` minutes, at bytes 64 and 68 of the header -- inside the 72-byte
-#: block that is repeated ahead of every further section, so each section
-#: declares its own.  ``CAtmData`` keeps ``hours * 3600 + minutes * 60`` per
-#: entry and the engine maps a keyframe's 24-hour clock stamp onto it as
-#: ``clock_seconds * that / 86400``; ``CAtmosphere::CAtmosphere`` turns the
-#: total into milliseconds.  See ``docs/10-sky.md``.
-DAY_LENGTH_AT = 64
 #: Seconds in the clock day a stamp is scaled against.
 CLOCK_DAY = 86400
 #: What a file says when its sky does not move: a day that lasts a real day.
 STATIC_DAY = (24, 0)
+#: Every section's first time says 23:59; nothing asks for it.
+SECTION_END = (23, 59)
 
 #: The five kinds of atmosphere object, numbered as ``Terrain.dll``'s
 #: type-name switch numbers them (the jump table at ``0x10070024``).
@@ -162,23 +180,14 @@ EVENT_OPCODES = {
 
 #: The opcodes that reach the default and do nothing.
 NO_EVENT = (2, 7)
+#: The one the shipped keyframes use for "nothing happens here".
+NOTHING = 7
 
 #: One event record the handler walks: phase, type, and two words of time.
 EVENT_RECORD = 20
 
-#: The trailer word that spans the opcode range but is **not** the opcode;
-#: see the module docstring.
-OPCODE_CANDIDATE = 9
-
-#: The other candidate, and the one a contiguous copy would predict.  The
-#: runtime keyframe holds the hour at ``+0x14``, the minute at ``+0x18`` and
-#: the opcode at ``+0x28`` (``Terrain.dll:0x100694bd`` copies that last one to
-#: the event record's ``+0x00``), so five dwords past the minute.  The
-#: trailer's time is not at a fixed index -- it sits at 4 when the kind word
-#: is ``KIND_WITH_PADDING`` and 3 otherwise -- so the word five past it is a
-#: *shifting* index, which the fixed reading above would have missed.  It is
-#: not the opcode either, and it fails the same way.
-OPCODE_CANDIDATE_SHIFTED = 5
+#: What each starting object is called here, by type.
+WEATHER_TYPES = {2: "rain", 3: "snow", 4: "lightning"}
 
 #: ``sky.wea`` slot -> what it is.  Fixed across all 29 missions.
 SLOT_ROLES = (
@@ -192,6 +201,10 @@ SLOT_ROLES = (
     "snow",
     "rain",
 )
+
+#: The ``sky.wea`` slot each starting object draws with, as the start cases of
+#: ``GetEvents`` hand it over: 3 or 4 for a body, 7 for snow, 8 for rain.
+EVENT_SLOT = {2: 8, 3: 7}
 
 #: The lens flare, as ``Terrain.dll``'s ``CSun::RenderFlare`` draws it: twelve
 #: sprites strung along the line from the sun's position on screen through the
@@ -220,9 +233,10 @@ FLARE_ELEMENTS = (
     (-1.1, 0.2, 0xFF7CC5C9, 0),
 )
 
-#: A keyframe names the atmosphere object it belongs to.  Four names appear:
-#: ``sun`` and ``moon``, which come in a start/stop pair, and these two, which
-#: appear once each in a section.  No shipped mission names snow.
+#: The effect names a starting event carries.  ``GetEvents`` takes rain's
+#: background sound and lightning's effect from the keyframe's effect list,
+#: and stops with *"Rain background sound not specified"* or *"Lightning
+#: effect not specified"* when the first entry is missing.
 RAIN_MARKER = "atm_rain1.wav"
 LIGHTNING_MARKER = "env_lightning"
 
@@ -242,6 +256,10 @@ FLARE_CONE_DEGREES = 15.0
 FLARE_HEIGHT_FULL = math.cos(math.radians(30.0))
 FLARE_HEIGHT_ZERO = math.cos(math.radians(60.0))
 
+#: How far the two flare gates lift the sun's main light: from its colour c to
+#: ``FLARE_LIGHT_BOOST * c`` (``0x1007ea14``).
+FLARE_LIGHT_BOOST = 5.0
+
 
 def flare_height_gate(height: float) -> float:
     """The second gate, given the height of a unit direction."""
@@ -253,9 +271,9 @@ def flare_height_gate(height: float) -> float:
 
 
 #: **Where the sun stands, and it is not in any file.**  ``CSun``'s two angles
-#: are constants in ``Terrain.dll``, picked by whether the keyframe's name is
-#: exactly ``sun``: an azimuth and a tilt from the zenith, in whole degrees.
-#: See ``docs/10-sky.md``.
+#: are constants in ``Terrain.dll``, picked by whether the starting keyframe's
+#: name is exactly ``sun``: an azimuth and a tilt from the zenith, in whole
+#: degrees.  See ``docs/10-sky.md``.
 BODY_ANGLES = {"sun": (90.0, 30.0), "moon": (0.0, 50.0)}
 
 #: The same three-int block's fourth field is the ``sky.wea`` slot the body
@@ -283,43 +301,77 @@ def body_elevation(name: str) -> float:
     """How far above the horizon a body stands, in degrees."""
     return math.degrees(math.asin(body_direction(name)[2]))
 
-#: The trailer opens with a kind word: 3 on 621 of the 656 shipped keyframes,
-#: 1 on 6, and 0 on the 29 that close a section.  The hour and minute follow
-#: it, one word later when the kind is 3.  Reading it that way gives a valid
-#: time on every keyframe and leaves all 29 first sections sorted by time;
-#: reading a fixed offset breaks on 18.
-KIND_WITH_PADDING = 3
+
+def body_for(name: str) -> str:
+    """Which body a starting ``SUN`` event makes: the engine tests ``== "sun"``."""
+    return "sun" if name == "sun" else "moon"
 
 
 class SkyFormatError(ValueError):
     pass
 
 
+@dataclass(frozen=True)
+class ClockTime:
+    """A 32-byte time: six ``uint32`` and eight bytes.
+
+    Only three of them are ever asked for -- the section at +0, the hour at
+    +12 and the minute at +16.  The last eight bytes hold 1 and an
+    uninitialised word in a section header, and zero everywhere else.
+    """
+
+    words: tuple[int, ...]
+
+    @property
+    def section(self) -> int:
+        return self.words[0]
+
+    @property
+    def hour(self) -> int:
+        return self.words[3]
+
+    @property
+    def minute(self) -> int:
+        return self.words[4]
+
+    @property
+    def seconds(self) -> int:
+        """Seconds since midnight on the 24-hour clock."""
+        return self.hour * 3600 + self.minute * 60
+
+    @classmethod
+    def of(cls, hour: int, minute: int, section: int = 0) -> ClockTime:
+        return cls((section, 0, 0, hour, minute, 0, 0, 0))
+
+
 @dataclass
 class Keyframe:
-    """The sky at one time of day."""
+    """The sky at one time of day, and the event that fires there."""
 
     hour: int
     minute: int
     #: 22 four-byte slots exactly as stored.
     slots: list[bytes]
-    #: The object this keyframe belongs to -- ``sun``, ``moon``,
-    #: ``env_lightning`` -- or an empty string.
-    name: str
-    #: Sound files the keyframe triggers.
-    sounds: list[str] = field(default_factory=list)
-    #: Four float32.  The third runs 0.1 at night to 5.0 at midday, so it
-    #: reads as a light intensity; the first two are 2.2 and 2.0 almost
-    #: everywhere.
+    #: The object this keyframe belongs to -- ``sun`` or ``moon`` -- or an
+    #: empty string.  The first of the six name strings; the other five are
+    #: empty on every shipped keyframe.
+    name: str = ""
+    #: The counted string list: rain's background sound or lightning's effect,
+    #: as stored, empty entries included.
+    effects: list[str] = field(default_factory=list)
+    #: Four float32: the sun sprite's width and height, the light, and the
+    #: running weather's intensity.
     intensity: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0)
-    #: The ten trailing uint32, with the time still in place.
-    trailer: tuple[int, ...] = ()
-
-    @property
-    def kind(self) -> int:
-        return self.trailer[0] if self.trailer else 0
+    #: The event opcode: what ``GetEvents`` does when the clock passes here.
+    opcode: int = NOTHING
+    #: The keyframe version word, 3 on every shipped keyframe.
+    version: int = KEYFRAME_VERSION
     #: Which section of the file this came from.
     section: int = 0
+    #: The six name strings as stored.
+    names: list[str] = field(default_factory=list)
+    #: The keyframe's own time as stored.
+    time: ClockTime | None = None
 
     @property
     def minutes(self) -> int:
@@ -327,25 +379,46 @@ class Keyframe:
         return self.hour * 60 + self.minute
 
     @property
+    def clock_seconds(self) -> int:
+        return self.hour * 3600 + self.minute * 60
+
+    @property
+    def sounds(self) -> list[str]:
+        """The non-empty effect names."""
+        return [e for e in self.effects if e]
+
+    @property
     def markers(self) -> list[str]:
-        """Every name this keyframe carries, the sound slots included."""
-        return [n for n in ([self.name] + list(self.sounds)) if n]
+        """Every name this keyframe carries, the effect list included."""
+        return [n for n in ([self.name] + self.sounds) if n]
+
+    @property
+    def event(self) -> tuple[int, int] | None:
+        """``(phase, type)``, or None where the opcode does nothing."""
+        return EVENT_OPCODES.get(self.opcode)
 
     @property
     def weather(self) -> str | None:
-        """``"rain"``, ``"lightning"``, or None if this keyframe starts neither.
+        """``"rain"``, ``"snow"`` or ``"lightning"`` if this keyframe starts it."""
+        event = self.event
+        if event is None or event[0] != 0:
+            return None
+        return WEATHER_TYPES.get(event[1])
 
-        The engine turns an atmosphere object on and off from a keyframe, and
-        the sun and the moon come in start/stop pairs.  Rain and lightning
-        appear once in a section, so where they stop is not established; see
-        ``docs/10-sky.md``.
-        """
-        for marker in self.markers:
-            if marker == RAIN_MARKER:
-                return "rain"
-            if marker == LIGHTNING_MARKER:
-                return "lightning"
-        return None
+    @property
+    def stops(self) -> str | None:
+        """The object type name this keyframe stops, or None."""
+        event = self.event
+        if event is None or event[0] != 1:
+            return None
+        return OBJECT_TYPES[event[1]]
+
+    @property
+    def body(self) -> str | None:
+        """``"sun"`` or ``"moon"`` if this keyframe starts a body."""
+        if self.event != (0, 0):
+            return None
+        return body_for(self.name)
 
     def colour(self, slot: int) -> tuple[int, int, int, int]:
         """One slot as ``(r, g, b, a)``.
@@ -360,12 +433,12 @@ class Keyframe:
 
     @property
     def sky(self) -> tuple[int, int, int, int]:
-        """The horizon straight ahead of +y: the fog colour looking north."""
+        """The horizon at heading zero: property 0, the fog colour there."""
         return self.colour(HORIZON_SLOTS[0])
 
     @property
     def horizon(self) -> list[tuple[int, int, int, int]]:
-        """The horizon at 0, 90, 180 and 270 degrees from +y towards +x."""
+        """The horizon at heading quarters 0, 1, 2 and 3."""
         return [self.colour(s) for s in HORIZON_SLOTS]
 
     @property
@@ -379,9 +452,20 @@ class Keyframe:
         return self.colour(APEX_SLOT)
 
     @property
+    def cloud_colour(self) -> tuple[int, int, int, int]:
+        """The cloud layer's material colour."""
+        return self.colour(CLOUD_SLOT)
+
+    @property
     def scene_colour(self) -> tuple[int, int, int, int]:
         """Added to every material's emissive."""
         return self.colour(SCENE_COLOUR_SLOT)
+
+    @property
+    def sun_light(self) -> tuple[float, float, float]:
+        """The main sun light's colour, 0..1 a channel times the light."""
+        r, g, b, _a = self.colour(SUN_LIGHT_SLOT)
+        return tuple(c / 255.0 * self.light for c in (r, g, b))
 
     @property
     def fog_start(self) -> float:
@@ -392,11 +476,12 @@ class Keyframe:
         return FOG_SCALE * self.number(FOG_END_SLOT)
 
     def fog_colour(self, heading: float) -> tuple[int, int, int, int]:
-        """The horizon in the direction ``heading``, radians from +y towards +x.
+        """The horizon at the camera's heading angle, in radians.
 
-        The heading's quadrant and its fraction through it blend the two
-        nearest horizon colours (``Terrain.dll:0x10079730``), at full alpha.
-        That the heading turns from +y towards +x is a guess.
+        The angle's quarter and its fraction through it blend the two nearest
+        horizon colours (``Terrain.dll:0x10079730``), at full alpha.  The angle
+        is ``atan2(m[0], m[4])`` of the camera's matrix (``0x100850f0``); where
+        that points in the world is not established.
         """
         quarter = (heading / (math.pi / 2)) % 4.0
         k = int(quarter) % 4
@@ -407,7 +492,11 @@ class Keyframe:
 
     @property
     def light(self) -> float:
-        return self.intensity[2]
+        return self.intensity[LIGHT_FLOAT]
+
+    @property
+    def weather_intensity(self) -> float:
+        return self.intensity[WEATHER_FLOAT]
 
 
 def dome(segments: int = DOME_SEGMENTS, rings: int = DOME_RINGS,
@@ -432,22 +521,72 @@ def dome(segments: int = DOME_SEGMENTS, rings: int = DOME_RINGS,
 
 
 @dataclass
+class Section:
+    """One day cycle's header: its keyframe count and how long its day lasts."""
+
+    index: int
+    version: int
+    count: int
+    #: The first time: 23:59 in all 35 shipped sections.  Read, never used.
+    end: ClockTime
+    #: The second time: how long this day lasts in real time.
+    day: ClockTime
+
+    @property
+    def day_seconds(self) -> int:
+        """What ``CAtmData`` keeps per section (``0x1006a070``)."""
+        return self.day.hour * 3600 + self.day.minute * 60
+
+
+@dataclass(frozen=True)
+class Event:
+    """One event as ``GetEvents`` produces it."""
+
+    section: int
+    #: Seconds into the section's day, as the engine scales the clock stamp.
+    seconds: int
+    phase: int
+    type: int
+    keyframe: Keyframe
+
+    @property
+    def kind(self) -> str:
+        if self.type == 0:
+            return body_for(self.keyframe.name)
+        return OBJECT_TYPES[self.type].lower()
+
+
+@dataclass
 class Atmosphere:
     source: Path
     version: int
     sections: int
     keyframes: list[Keyframe]
-    #: The file header, as it stands, for anything not yet named.
+    #: The bytes before the first keyframe: the file header and the first
+    #: section's header.
     header: bytes = b""
     #: Texture names from the sibling ``sky.wea``.
     textures: list[str] = field(default_factory=list)
+    #: Every section's header, in file order.
+    section_headers: list[Section] = field(default_factory=list)
+    #: Where the clock starts as the mission loads: section, hour and minute.
+    start: ClockTime = ClockTime.of(0, 0)
+    #: The ``int32`` after it, 0 in every shipped file and never asked for.
+    trailer_word: int = 0
+    #: The last ``int32``: passed to the sky as its sixth parameter, which the
+    #: sky stores and never reads.
+    sky_flag: int = 0
 
     def __len__(self) -> int:
         return len(self.keyframes)
 
+    # --- how long a day lasts -------------------------------------------
     @property
     def day(self) -> tuple[int, int]:
-        """How long one in-game day lasts in real time, as (hours, minutes)."""
+        """How long the first section's day lasts in real time, (hours, minutes)."""
+        if self.section_headers:
+            day = self.section_headers[0].day
+            return day.hour, day.minute
         if len(self.header) < DAY_LENGTH_AT + 8:
             return (0, 0)
         return struct.unpack_from("<2I", self.header, DAY_LENGTH_AT)
@@ -458,30 +597,185 @@ class Atmosphere:
         hours, minutes = self.day
         return hours * 3600 + minutes * 60
 
-    def real_seconds(self, hour: int, minute: int) -> float:
-        """When in real time a keyframe's clock stamp falls.
+    def section_day_seconds(self, section: int) -> int:
+        """How long one section's day lasts, in seconds."""
+        if self.section_headers:
+            return self.section_headers[section].day_seconds
+        return self.day_seconds
 
-        The engine's own arithmetic: the stamp's seconds since midnight,
-        scaled by the declared day length over a 24-hour clock.
+    @property
+    def section_count(self) -> int:
+        return len(self.section_headers) or max(1, self.sections)
+
+    @property
+    def cycle_seconds(self) -> int:
+        """All the sections' days end to end: the length of the whole cycle."""
+        return sum(self.section_day_seconds(i) for i in range(self.section_count))
+
+    def real_seconds(self, hour: int, minute: int, section: int = 0) -> int:
+        """When in its section's day a clock stamp falls, in seconds.
+
+        The engine's own arithmetic (``0x1006d460``): the stamp's seconds since
+        midnight, times the section's day length, over a 24-hour clock, in
+        integers.
         """
-        return (hour * 3600 + minute * 60) * self.day_seconds / CLOCK_DAY
+        return (hour * 3600 + minute * 60) * self.section_day_seconds(section) // CLOCK_DAY
 
-    def at(self, hour: int, minute: int = 0) -> Keyframe | None:
-        """The keyframe in force at a time of day.
+    # --- the clock -------------------------------------------------------
+    def between(self, a: tuple[int, int], b: tuple[int, int]) -> int:
+        """Seconds from position ``a`` to position ``b``, each ``(section, s)``.
+
+        ``CAtmData::GetTimeDiffInSec``: forward only, running out of ``a``'s
+        section, through every section between, and into ``b``'s -- wrapping
+        round the whole cycle when ``b`` is behind ``a``.
+        """
+        (sa, ta), (sb, tb) = a, b
+        if sa == sb and tb >= ta:
+            return tb - ta
+        total = self.section_day_seconds(sa) - ta
+        s = (sa + 1) % self.section_count
+        while s != sb:
+            total += self.section_day_seconds(s)
+            s = (s + 1) % self.section_count
+        return total + tb
+
+    @property
+    def start_position(self) -> tuple[int, int]:
+        """Where the clock starts, as ``(section, seconds into its day)``."""
+        section = self.start.section
+        return section, self.real_seconds(self.start.hour, self.start.minute, section)
+
+    @property
+    def start_offset(self) -> int:
+        """Seconds from the start of the cycle to the clock's start (``0x1006fab0``)."""
+        return self.between((0, 0), self.start_position)
+
+    def position(self, elapsed: float) -> tuple[int, float]:
+        """The cycle position ``elapsed`` real seconds after the mission loads.
+
+        ``CAtmosphere`` sets its epoch so the position at load is the start
+        offset, then takes the time since the epoch modulo the whole cycle and
+        walks it through the sections from section 0 (``0x10070040``).
+        """
+        cycle = self.cycle_seconds
+        if cycle <= 0:
+            return 0, 0.0
+        t = (self.start_offset + elapsed) % cycle
+        section = 0
+        while t >= self.section_day_seconds(section):
+            t -= self.section_day_seconds(section)
+            section = (section + 1) % self.section_count
+        return section, t
+
+    def clock(self, elapsed: float) -> tuple[int, int, int]:
+        """``(section, hour, minute)`` on the 24-hour clock at ``elapsed``."""
+        section, t = self.position(elapsed)
+        day = self.section_day_seconds(section)
+        seconds = t * CLOCK_DAY / day if day else 0.0
+        return section, int(seconds // 3600), int(seconds % 3600 // 60)
+
+    # --- the keyframes ---------------------------------------------------
+    def section_keyframes(self, section: int = 0) -> list[Keyframe]:
+        """One section's keyframes in time order, as the engine sorts them.
+
+        ``0x10067500`` bubble-sorts each section by ``hour * 60 + minute``
+        after loading; all 35 shipped sections are already in order.
+        """
+        return sorted((k for k in self.keyframes if k.section == section),
+                      key=lambda k: k.minutes)
+
+    def at(self, hour: int, minute: int = 0, section: int = 0) -> Keyframe | None:
+        """The keyframe in force at a time of day in one section.
 
         The latest keyframe at or before the time, wrapping to the last one of
-        the day before midnight.  Keyframes are not stored in time order in
-        every file, so they are sorted here.
+        the day before the first stamp.
         """
-        if not self.keyframes:
+        ordered = self.section_keyframes(section)
+        if not ordered:
             return None
         want = hour * 60 + minute
-        ordered = sorted(self.keyframes, key=lambda k: k.minutes)
         best = ordered[-1]
         for k in ordered:
             if k.minutes <= want:
                 best = k
         return best
+
+    def events(self) -> list[Event]:
+        """Every event in the cycle, in order: section, then time.
+
+        Opcodes 2 and 7 are left out, as ``GetEvents`` leaves them out.
+        """
+        out = []
+        for section in range(self.section_count):
+            for k in self.section_keyframes(section):
+                event = k.event
+                if event is None:
+                    continue
+                seconds = self.real_seconds(k.hour, k.minute, section)
+                out.append(Event(section, seconds, event[0], event[1], k))
+        return out
+
+    def events_between(self, a: tuple[int, int], b: tuple[int, int]) -> list[Event]:
+        """The events that fire as the clock runs from ``a`` to ``b``.
+
+        ``0x1006d740``: a keyframe fires when its scaled time ``t`` is
+        ``a <= t < b`` within a section; a span that leaves its section is
+        split at the section's end, and the rest taken from the start of
+        ``b``'s section.  (A span over three sections or more is taken
+        differently, and no shipped file has three.)
+        """
+        (sa, ta), (sb, tb) = a, b
+        spans = []
+        if sb == sa and tb >= ta:
+            spans.append((sa, ta, tb))
+        else:
+            spans.append((sa, ta, self.section_day_seconds(sa)))
+            spans.append((sb, 0, tb))
+        out = []
+        for section, lo, hi in spans:
+            out.extend(e for e in self.events()
+                       if e.section == section and lo <= e.seconds < hi)
+        return out
+
+    def lifetime(self, start: Event) -> int | None:
+        """How long a body started by ``start`` is given, in seconds.
+
+        ``GetEvents``' start-``SUN`` case (``0x1006dcb7``) looks for the first
+        stop-``SUN`` keyframe at or after the start, in its section and then
+        the later ones -- it never wraps back to section 0 -- and before the
+        end of the cycle, the last section's full day.  A stop stamped 24:00
+        is at that end and does not count.  None when no stop is found, where
+        the engine keeps whatever the previous search left.
+        """
+        last = self.section_count - 1
+        end = (last, self.section_day_seconds(last))
+        begin = (start.section, start.seconds)
+        for e in self.events():
+            if e.phase != 1 or e.type != 0:
+                continue
+            here = (e.section, e.seconds)
+            if here < begin or here >= end:
+                continue
+            return self.between(begin, here)
+        return None
+
+    def windows(self, section: int = 0) -> list[tuple[str, Keyframe, Keyframe | None]]:
+        """What runs when in one section: ``(kind, start, stop)``.
+
+        A body or a shower runs from its start keyframe to the next keyframe
+        that stops its object type; ``stop`` is None when none follows in the
+        section.
+        """
+        out = []
+        frames = self.section_keyframes(section)
+        for i, k in enumerate(frames):
+            event = k.event
+            if event is None or event[0] != 0:
+                continue
+            stop = next((j for j in frames[i + 1:] if j.event == (1, event[1])), None)
+            kind = body_for(k.name) if event[1] == 0 else WEATHER_TYPES[event[1]]
+            out.append((kind, k, stop))
+        return out
 
     def texture(self, role: str) -> str | None:
         """The material named for one of the nine ``sky.wea`` roles."""
@@ -515,87 +809,124 @@ def _read_string(data: bytes, pos: int) -> tuple[str, int]:
     return data[pos + 4 : pos + 4 + n].decode("latin-1"), pos + 4 + n
 
 
+def _read_time(data: bytes, pos: int) -> tuple[ClockTime, int]:
+    if pos + TIME_SIZE > len(data):
+        raise SkyFormatError(f"time runs past the end at {pos}")
+    return ClockTime(struct.unpack_from("<8I", data, pos)), pos + TIME_SIZE
+
+
 def _read_keyframe(data: bytes, pos: int, section: int) -> tuple[Keyframe, int]:
-    if pos + 88 > len(data):
+    if pos + 4 + TIME_SIZE + 4 > len(data):
         raise SkyFormatError(f"keyframe runs past the end at {pos}")
-    slots = [data[pos + i * 4 : pos + i * 4 + 4] for i in range(SLOT_COUNT)]
-    pos += 88
+    version = struct.unpack_from("<I", data, pos)[0]
+    if version not in (1, 2, 3):
+        raise SkyFormatError(f"keyframe version {version} at {pos}")
+    time, pos = _read_time(data, pos + 4)
+    opcode = struct.unpack_from("<I", data, pos)[0]
+    pos += 4
+
+    stored = SLOT_COUNT if version >= 2 else SLOT_COUNT - 2
+    if pos + stored * 4 > len(data):
+        raise SkyFormatError(f"keyframe slots run past the end at {pos}")
+    slots = [data[pos + i * 4 : pos + i * 4 + 4] for i in range(stored)]
+    pos += stored * 4
+    if version == 1:
+        # Slots 20 and 21 are made from slot 19's colour at 0.3 a channel,
+        # rounded to nearest, with no alpha.
+        b, g, r, _a = slots[19]
+        made = bytes(round(c * V1_SCALE) for c in (b, g, r)) + b"\0"
+        slots += [made, made]
 
     names = []
     for _ in range(NAME_SLOTS):
         name, pos = _read_string(data, pos)
         names.append(name)
 
+    if pos + 16 > len(data):
+        raise SkyFormatError(f"keyframe floats run past the end at {pos}")
     intensity = struct.unpack_from("<4f", data, pos)
     pos += 16
 
-    count = struct.unpack_from("<I", data, pos)[0]
-    pos += 4
-    if count > 64:
-        raise SkyFormatError(f"implausible sound count {count} at {pos - 4}")
-    sounds = []
-    for _ in range(count):
-        sound, pos = _read_string(data, pos)
-        sounds.append(sound)
-
-    if pos + 40 > len(data):
-        raise SkyFormatError(f"keyframe trailer runs past the end at {pos}")
-    trailer = struct.unpack_from("<10I", data, pos)
-    pos += 40
-    at = 4 if trailer[0] == KIND_WITH_PADDING else 3
+    effects = []
+    if version == 3:
+        count = struct.unpack_from("<I", data, pos)[0]
+        pos += 4
+        if count > 64:
+            raise SkyFormatError(f"implausible effect count {count} at {pos - 4}")
+        for _ in range(count):
+            effect, pos = _read_string(data, pos)
+            effects.append(effect)
 
     return (
         Keyframe(
-            hour=trailer[at],
-            minute=trailer[at + 1],
+            hour=time.hour,
+            minute=time.minute,
             slots=slots,
-            name=next((n for n in names if n), ""),
-            sounds=[s for s in sounds if s],
+            name=names[0],
+            effects=effects,
             intensity=intensity,
-            trailer=trailer,
+            opcode=opcode,
+            version=version,
             section=section,
+            names=names,
+            time=time,
         ),
         pos,
     )
 
 
-def load(path: str | Path) -> Atmosphere:
-    """Parse a ``sky.ske``, picking up the sibling ``sky.wea`` when present.
+def parse(data: bytes, source: Path = Path("sky.ske")) -> Atmosphere:
+    """Read an atmosphere from bytes, the way ``Terrain.dll:0x100672d0`` does.
 
     Raises SkyFormatError unless the file is consumed exactly, which is the
     same consistency check the other readers make.
     """
-    path = Path(path)
-    data = path.read_bytes()
-    if len(data) < HEADER_SIZE:
-        raise SkyFormatError(f"{path}: too short to be an atmosphere file")
-    magic, version, sections, _one, count = struct.unpack_from("<5I", data, 0)
+    if len(data) < FILE_HEADER_SIZE:
+        raise SkyFormatError(f"{source}: too short to be an atmosphere file")
+    magic, version, count = struct.unpack_from("<3I", data, 0)
     if magic != MAGIC:
-        raise SkyFormatError(f"{path}: expected magic {MAGIC:#x}, got {magic:#x}")
+        raise SkyFormatError(f"{source}: expected magic {MAGIC:#x}, got {magic:#x}")
     if version != VERSION:
-        raise SkyFormatError(f"{path}: version {version}, expected {VERSION}")
+        raise SkyFormatError(f"{source}: version {version}, expected {VERSION}")
+    if count > 16:
+        raise SkyFormatError(f"{source}: implausible section count {count}")
 
-    keyframes = []
-    pos = HEADER_SIZE
-    for _ in range(count):
-        frame, pos = _read_keyframe(data, pos, 0)
-        keyframes.append(frame)
-
-    # Later sections repeat the header's own 72-byte tail and then run to the
-    # end of the file.  Their keyframe count is not in either header -- the
-    # six shipped two-section files carry byte-identical section headers but
-    # 27 and 20 keyframes -- so the list is read until the bytes are gone.
-    section = 1
-    while pos < len(data):
-        pos += SECTION_HEADER_SIZE
-        while pos < len(data):
-            frame, pos = _read_keyframe(data, pos, section)
+    pos = FILE_HEADER_SIZE
+    sections: list[Section] = []
+    keyframes: list[Keyframe] = []
+    for index in range(count):
+        if pos + 8 > len(data):
+            raise SkyFormatError(f"{source}: section {index} runs past the end")
+        section_version, frames = struct.unpack_from("<2I", data, pos)
+        if section_version != SECTION_VERSION:
+            raise SkyFormatError(
+                f"{source}: section {index} version {section_version} at {pos}")
+        end, pos = _read_time(data, pos + 8)
+        day, pos = _read_time(data, pos)
+        sections.append(Section(index, section_version, frames, end, day))
+        for _ in range(frames):
+            frame, pos = _read_keyframe(data, pos, index)
             keyframes.append(frame)
-        section += 1
 
-    if pos != len(data):
-        raise SkyFormatError(f"{path}: parsed {pos} bytes of a {len(data)}-byte file")
+    if pos + TRAILER_SIZE != len(data):
+        raise SkyFormatError(
+            f"{source}: {len(data) - pos} bytes after the keyframes, "
+            f"expected {TRAILER_SIZE}")
+    start, pos = _read_time(data, pos)
+    trailer_word, sky_flag = struct.unpack_from("<2I", data, pos)
 
+    return Atmosphere(
+        source, version, count, keyframes, bytes(data[:HEADER_SIZE]),
+        section_headers=sections, start=start, trailer_word=trailer_word,
+        sky_flag=sky_flag,
+    )
+
+
+def load(path: str | Path) -> Atmosphere:
+    """Parse a ``sky.ske``, picking up the sibling ``sky.wea`` when present."""
+    path = Path(path)
+    atmosphere = parse(path.read_bytes(), path)
     wea = path.parent / "sky.wea"
-    textures = read_wea(wea.read_bytes()) if wea.exists() else []
-    return Atmosphere(path, version, sections, keyframes, data[:HEADER_SIZE], textures)
+    if wea.exists():
+        atmosphere.textures = read_wea(wea.read_bytes())
+    return atmosphere

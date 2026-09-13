@@ -166,10 +166,11 @@ module that reads it; the input tables beside them are [read](14-controls.md). `
 `effects.rlb` are [read](11-effects.md), though what the floats inside an
 emitter mean is not.
 
-`sky.ske` is [solved](10-sky.md) -- a day cycle of colour keyframes, all 29
-files to the byte, and bytes 64 and 68 of its header say how long the day
-lasts. Three things in it are not: what selects between a file's two days,
-which field carries the object type and opcode (three candidates are dead),
-and the rest of the 124-byte header.
+`sky.ske` is [solved](10-sky.md) -- day cycles of colour keyframes read the
+way `Terrain.dll` reads them, all 29 files to the byte: each keyframe carries
+its event opcode ahead of its slots, a file's two days play in turn, and the
+clock starts at the file's closing time. What is not established is on the
+engine's side of it: where the sun's two lights point, how the dome escapes
+the far plane and the fog, and which way the camera's heading angle faces.
 
 The ones that hold back a picture are triaged in [../TODO.md](../TODO.md).

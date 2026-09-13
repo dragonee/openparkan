@@ -635,7 +635,7 @@ at = "0x1006a850"
 kind = "function"
 name = "CAtmData::GetTimeDiffInSec"
 doc = "the binary's own assertion text"
-read = false
+read = true
 
 [[entry]]
 module = "Terrain.dll"
@@ -643,7 +643,7 @@ at = "0x1006dc10"
 kind = "function"
 name = "CAtmData::GetEvents"
 doc = "the binary's own assertion text"
-read = false
+read = true
 
 [[entry]]
 module = "Terrain.dll"
@@ -667,7 +667,7 @@ at = "0x10070040"
 kind = "function"
 name = "CAtmosphere::SendMsg"
 doc = "the binary's own assertion text"
-read = false
+read = true
 
 [[entry]]
 module = "Terrain.dll"
@@ -675,7 +675,7 @@ at = "0x10070520"
 kind = "function"
 name = "CAtmosphere::SetObjectState"
 doc = "the binary's own assertion text"
-read = false
+read = true
 
 [[entry]]
 module = "Terrain.dll"
@@ -1283,7 +1283,7 @@ read = false
 module = "Terrain.dll"
 at = "0x1006fab0"
 kind = "function"
-name = "the day cycle's length: clock seconds * day length / 86400"
+name = "CAtmosphere: the clock's start offset -- the closing time scaled by its section's day, from (0, 0)"
 doc = "docs/10-sky.md"
 read = true
 
@@ -1299,7 +1299,7 @@ read = true
 module = "Terrain.dll"
 at = "0x1009b988"
 kind = "datum"
-name = "CAtmData's vtable; slot 3 is the day length, 4 GetEvents, 6 GetTimeDiffInSec"
+name = "CAtmData's vtable; slot 3 the day lengths, 4 GetEvents, 5 interpolation, 6 GetTimeDiffInSec, 7 start time, 8 sky flag"
 doc = "docs/10-sky.md"
 read = true
 
@@ -1331,7 +1331,7 @@ read = true
 module = "Terrain.dll"
 at = "0x100695b0"
 kind = "function"
-name = "the .ske reader's hours and minutes accessor, from record +0x4c and +0x50"
+name = "the .ske reader's slot 4: a section's day length, hour and minute from section +0x4c and +0x50"
 doc = "docs/10-sky.md"
 read = true
 
@@ -1339,10 +1339,762 @@ read = true
 module = "Terrain.dll"
 at = "0x100692d0"
 kind = "function"
-name = "the .ske reader's record filler"
+name = "the .ske reader's record filler: opcode +0x28 -> +0x00, slot 0 not copied, slot 16 -> +0x50 unread, effects -> +0x88"
 doc = "docs/10-sky.md"
 read = true
 
+# --- the .ske layout, the clock, events, the sun's lights, ../docs/10-sky.md ---
+[[entry]]
+module = "Terrain.dll"
+at = "0x100671f0"
+kind = "function"
+name = "the .ske load: opens the file, reads it (0x100672d0), sorts each section (0x100676d0)"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x100672d0"
+kind = "function"
+name = ".ske file reader: magic -1, version 5, section count, sections of 0x60, then the closing time to +0x28 and two ints to +0x20, +0x24"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x100660c0"
+kind = "function"
+name = ".ske section reader: version 1, keyframe count, time A to +0x20, time B (day length) to +0x40, keyframes of 0xf0"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10066111"
+kind = "site"
+name = ".ske section reader: the day-length time read into section +0x40"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10066230"
+kind = "function"
+name = ".ske keyframe reader: version 3/2/1, time to +0x8, opcode to +0x28, slots from +0x2c, 6 strings, 4 floats, effect list (v3 only); v1 makes slots 20/21 from 19 x 0.3"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10067500"
+kind = "function"
+name = ".ske section sort: bubble sort of the 240-byte keyframes by hour*60+minute"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x100676b0"
+kind = "function"
+name = ".ske runtime keyframe: minutes of the day, +0x14 * 60 + +0x18"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10069190"
+kind = "function"
+name = ".ske reader constructor: vtable 0x1009b828, loads the file into +8"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1009b828"
+kind = "datum"
+name = ".ske reader vtable: 0 fill record, 1 section count, 2 keyframe count, 3 time A, 4 day length, 5 start time, 6 trailer int, 7 sky flag"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10069560"
+kind = "function"
+name = ".ske reader slot 1: section count"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10069580"
+kind = "function"
+name = ".ske reader slot 2: a section's keyframe count"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x100695f0"
+kind = "function"
+name = ".ske reader slot 3: a section's first time (23:59), hour and minute -- no caller"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10069630"
+kind = "function"
+name = ".ske reader slot 5: the closing time's section, hour and minute (the clock's start)"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10069660"
+kind = "function"
+name = ".ske reader slot 6: the int after the closing time -- no caller"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10069680"
+kind = "function"
+name = ".ske reader slot 7: the file's last int != 0, the sky's sixth parameter"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1006ec00"
+kind = "function"
+name = "CAtmData slot 7: forwards to the reader's slot 5, the clock's start time"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1006a5f0"
+kind = "function"
+name = "CAtmData slot 8: forwards to the reader's slot 7, the sky flag"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1006efcd"
+kind = "site"
+name = "CAtmosphere::CAtmosphere: +0x150 = sum of every section's day length x 1000, the whole cycle"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10070330"
+kind = "function"
+name = "CAtmosphere component slot 6: epoch +0x144 = game time - start offset +0x14c; last event position (0, 0)"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1007026c"
+kind = "site"
+name = "CAtmosphere::SendMsg takt: events handled only when a second or more has passed since the last position"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10070480"
+kind = "function"
+name = "CAtmosphere component slot 9: the cycle position (now - epoch) mod cycle as a 4-byte state"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x100705a0"
+kind = "function"
+name = "CAtmosphere interface +0x130 slot 9: set the clock to (section, seconds), reset the last position, run a takt"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1009ba80"
+kind = "datum"
+name = "CAtmosphere interface at +0x130: slot 9 sets the clock"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1009bad0"
+kind = "datum"
+name = "CAtmosphere component vtable: 5 SendMsg, 6 start at a game time, 9 get state, 10 SetObjectState"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1006d740"
+kind = "function"
+name = "CAtmData event query: one section, or split at the section end and resumed at 0 in the next"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1006d460"
+kind = "function"
+name = "CAtmData event collector: record per keyframe, t = clock seconds * day length / 86400, kept when from <= t < to"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1006d510"
+kind = "site"
+name = "CAtmData event collector: the section's day length, CAtmData slot 3"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1006e829"
+kind = "table"
+name = "CAtmData::GetEvents opcode jump table: 0/1 SUN, 3/4 RAIN, 5/6 SNOW, 8/9 LIGHTNING, 2 and 7 the default"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1006dcb7"
+kind = "site"
+name = "CAtmData::GetEvents start SUN: name == 'sun' picks 90/30/3 or 0/50/4, then the lifetime search"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1006de7b"
+kind = "site"
+name = "CAtmData::GetEvents lifetime search: the first opcode-1 keyframe at or after the start, before the cycle end, no wrap"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1006e3bb"
+kind = "site"
+name = "CAtmData::GetEvents start RAIN: block {8, first effect name}, 'Rain background sound not specified'"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1006e2bb"
+kind = "site"
+name = "CAtmData::GetEvents start SNOW: block {7}"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1006e5af"
+kind = "site"
+name = "CAtmData::GetEvents start LIGHTNING: block {first effect name}, 'Lightning effect not specified'"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1006cf64"
+kind = "table"
+name = "CAtmData interpolation switch by object type: SUN, SKY, RAIN, SNOW, LIGHTNING"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1006ce00"
+kind = "site"
+name = "CAtmData interpolation, RAIN: float 4, and slot 19 clamped to 0x50 a channel with alpha 0x96"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1006cd81"
+kind = "site"
+name = "CAtmData interpolation, SNOW: float 4, and slot 19 through 0x1006d120"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1006cef8"
+kind = "site"
+name = "CAtmData interpolation, LIGHTNING: float 4 alone"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1007c7c0"
+kind = "function"
+name = "CSun constructor: lifetime x 1000 to +0x2c, angles to +0x30/+0x34, two directional lights +0x20/+0x24"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1007cf23"
+kind = "site"
+name = "CSun constructor: light manager slot 12 with type 3 (directional), twice"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1007cfc5"
+kind = "site"
+name = "CSun constructor: light manager slot 13, flags 0x8000000 on the first light (0x10000000 on the second at 0x1007d020)"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1009c190"
+kind = "datum"
+name = "CSun vtable: 0 QueryInterface, 2 Render, 4 takt; property interface 0x1009c164 at +4"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1007eec0"
+kind = "function"
+name = "CSun QueryInterface: id 7 answers this+4, the property interface"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1007ef10"
+kind = "function"
+name = "CSun property setter (iface-relative): 0-2 +0x80..+0x88 light rgb, 3 +0x90, 4 +0x94 sizes, 5 +0x958 slot 17, 6 +0x960 slot 21"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1007ef95"
+kind = "table"
+name = "CSun property setter jump table, ids 0..6"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1007d8b0"
+kind = "function"
+name = "CSun takt: sprite extents, occlusion ray, flare gates, the two lights' colours"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1007d93d"
+kind = "site"
+name = "CSun takt: with the shader's flag bit 0, slot 17 through the shader's slot 5"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1007dfdf"
+kind = "site"
+name = "CSun takt: half-extents = camera slot 27 x 0.325 x 0.5 x float 1 (x) and float 2 (y)"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1007ea14"
+kind = "site"
+name = "CSun takt: main light = lerp(c, 5c, gate1^2 x gate2 x slot 17 alpha / 255)"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1007eb9e"
+kind = "site"
+name = "CSun takt: light manager slot 3, the main light's colour"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1007ed34"
+kind = "site"
+name = "CSun takt: light manager slot 3, the second light's colour from slot 21"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1007fa40"
+kind = "function"
+name = "CreateLightManager: 0x20-byte light manager, vtable 0x1009c1f0, records of 0x5c"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1009c1f0"
+kind = "datum"
+name = "light manager vtable: 3 colour, 4 range and three floats, 6 enable, 9 delete, 12 create, 13 flags, 18 bit 1"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10080040"
+kind = "function"
+name = "light manager slot 3: a light's colour, four floats at record +8"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x100800a0"
+kind = "function"
+name = "light manager slot 4: range +0x30, 1/range +0x54, three floats +0x38..+0x40; CSun never calls it"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10080190"
+kind = "function"
+name = "light manager slot 6: enable, record +0x4c bit 0, and the enabled counts"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x100806b0"
+kind = "function"
+name = "light manager slot 12: a new light of the given type at record +4"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x100807a0"
+kind = "function"
+name = "light manager slot 13: or flags into record +0x50"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10080a60"
+kind = "function"
+name = "light manager slot 18: record +0x4c bit 1, set when the argument is 0"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1002cf87"
+kind = "site"
+name = "CShade::EmbossBumpMap: lights flagged 0x10000000 are passed over"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1002d08d"
+kind = "site"
+name = "CShade::EmbossBumpMap: a type-3 light's direction from record +0x24"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10030ab3"
+kind = "site"
+name = "draw item setup: a type-3 light takes its direction from record +0x24"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1007824a"
+kind = "site"
+name = "CSky constructor: the six-dword parameter block copied to +0x548; +0x554 and the flag +0x55c never read"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1007be97"
+kind = "table"
+name = "CSky property setter jump table, ids 0..16; 15 to iface +0x5c, 16 to +0x540"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x100797b7"
+kind = "site"
+name = "CSky takt: colour mask +0x6c = 0xff00ff00 with the shader's flag bit 0, else 0xffffffff"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1007983e"
+kind = "site"
+name = "CSky takt: degrees = (camera slot 28's second angle + pi) x 180 x 1/pi; k = (deg/90 + 2) mod 4"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10079b05"
+kind = "site"
+name = "CSky takt: with the shader's flag bit 0, the fog colour through the shader's slot 5"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10077b20"
+kind = "function"
+name = "CSky static init: 1/pi to 0x100a72c8"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1007a37a"
+kind = "site"
+name = "CSky takt: layer draw, material block +0x484, matrix 0x100a7168, depth bits 3 (no test, no write)"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1007a408"
+kind = "site"
+name = "CSky takt: layer draw, material block +0x384, matrix at the camera, depth bits 2 (test, no write)"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1007a49e"
+kind = "site"
+name = "CSky takt: layer draw, material block +0x404, matrix at the camera, depth bits 2 (test, no write)"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1007a4de"
+kind = "site"
+name = "CSky takt: with AtmCloudsOn, property 15 / 255 to the cloud material's diffuse +0x308, +0x318.. zeroed"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1007ab51"
+kind = "site"
+name = "CSky takt: the cloud layer queued through the shader's slot 16"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x100a7138"
+kind = "datum"
+name = "CSky's static render record for its layers: flags 0, so the scene's fog applies"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10028500"
+kind = "function"
+name = "CShade slot 16: queue a draw item; 0x80-byte material block -> +0x70, flags -> +0x128, depth bits -> ZENABLE +0x12c, ZWRITEENABLE +0x12d, render layer"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x100302fb"
+kind = "site"
+name = "CStridedPrimitive::RenderVB: render state 7 ZENABLE = item +0x12c (14 ZWRITEENABLE = +0x12d at 0x10030318)"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1002f1e0"
+kind = "function"
+name = "strided primitive VB: FVF 0x1c2 (XYZ, diffuse, specular, tex1)"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1002f2c0"
+kind = "function"
+name = "strided primitive VB: FVF 0x1c4 (XYZRHW), the item flag 8 path"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1002f3a0"
+kind = "function"
+name = "strided primitive VB: FVF 0x2c2 (XYZ, diffuse, specular, tex2)"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1002f560"
+kind = "function"
+name = "strided primitive VB: FVF 0x112 (XYZ, normal, tex1), the item flag 0x10 path"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x100850f0"
+kind = "function"
+name = "CCamera slot 28: atan2(m4, m0), atan2(m0, m4), atan2(m8, |m0,m4|) of the camera matrix"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1009c620"
+kind = "datum"
+name = "CCamera vtable; slot 28 the three angles"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x100a6cac"
+kind = "datum"
+name = "render settings values (CSettings+4), 36 dwords by index; index 0 ForceSWFog has no reader"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1005f530"
+kind = "function"
+name = "InitializeSettings: caps check, then the settings interface to World3D CreateGameSettings slot 9 as id 0x1e"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1009b76c"
+kind = "datum"
+name = "render settings interface vtable: 0 QueryInterface, 2 set by index, 3 get by index"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1005f9c0"
+kind = "function"
+name = "render settings interface slot 3: value by index and whether it was set"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10028664"
+kind = "site"
+name = "CShade slot 16: ZENABLE byte = !(depth bits & 1), ZWRITEENABLE byte = !(depth bits & 2)"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10030318"
+kind = "site"
+name = "CStridedPrimitive::RenderVB: render state 14 ZWRITEENABLE = item +0x12d"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10030819"
+kind = "site"
+name = "draw item setup: the material block at item +0x70: +4 diffuse, +0x14 own emissive, +0x20 alpha, +0x24 specular, +0x44 power"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1007a4cb"
+kind = "site"
+name = "CSky takt: the cloud layer only with setting 20, AtmCloudsOn"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1005f5ab"
+kind = "site"
+name = "InitializeSettings: the settings interface to World3D's CreateGameSettings object, slot 9, id 0x1e"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1002f480"
+kind = "function"
+name = "strided primitive VB: FVF 0x2c2"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1002f640"
+kind = "function"
+name = "strided primitive VB: FVF 0x212 (XYZ, normal, tex2)"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1002f720"
+kind = "function"
+name = "strided primitive VB: FVF 0x212, the type-6 variant"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1002f800"
+kind = "function"
+name = "strided primitive VB: FVF 0x252 (XYZ, normal, diffuse, tex2)"
+doc = "docs/10-sky.md"
+read = true
 # --- the terrain's winged-edge link, ../docs/03-terrain.md -----------------
 [[entry]]
 module = "Terrain.dll"
@@ -7174,7 +7926,7 @@ read = true
 module = "Terrain.dll"
 at = "0x10066245"
 kind = "site"
-name = ".ske keyframe reader, kind 3: 32-byte header, an int at +0x28, 22 slots (16 and 17 swapped in memory), 6 strings, 4 floats, sounds"
+name = ".ske keyframe reader, version 3: the time at +8, the opcode at +0x28, 22 slots (16 and 17 swapped in memory), 6 strings, 4 floats, effects"
 doc = "docs/10-sky.md"
 read = true
 
@@ -7182,7 +7934,7 @@ read = true
 module = "Terrain.dll"
 at = "0x10086570"
 kind = "function"
-name = ".ske keyframe header reader: six dwords and eight bytes (hour at +0xc, minute at +0x10)"
+name = ".ske time reader: six dwords and eight bytes (section at +0, hour at +0xc, minute at +0x10)"
 doc = "docs/10-sky.md"
 read = true
 

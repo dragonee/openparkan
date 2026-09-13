@@ -164,10 +164,10 @@ written down is a question nobody reopens.
       icons all at once. **All 61 indexed textures carry a table and all 478
       cells fall inside their own.** It was blocking the weather sprites and
       every effect sprite. → [docs/02-texm.md](docs/02-texm.md)
-- [x] **The weather switch.** A keyframe names the atmosphere object it acts
-      on: `sun` and `moon` in start/stop pairs, `atm_rain1.wav` and
-      `env_lightning` once each. **14 of the 29 missions carry a marker** —
-      eight name rain, eight lightning, none snow — and rain now draws.
+- [x] **The weather switch.** A keyframe's opcode starts and stops an
+      atmosphere object: the sun and the moon, rain, snow and lightning, each
+      from a start to a later stop. **15 of the 29 missions start weather** —
+      eight rain, eight lightning, seven snow — and rain now draws.
       `CAtmData::GetEvents` dispatches on a ten-valued opcode whose branches
       pair up start/stop per object type, and the sky is created outside that
       switch with a hardcoded id. → [docs/10-sky.md](docs/10-sky.md)
@@ -457,9 +457,9 @@ written down is a question nobody reopens.
       `cos 30°` of the body's **height**, and the sun's height *is* `cos 30°`
       to the last bit: the two constants were chosen to bracket the two
       bodies, the sun flaring at full and the moon at 0.390. And the missions
-      back the picture — **32 of 35 sections hold one start/stop pair of each
-      body and none has them up at once**, the sun running about 01:30 to
-      15:00 and the moon 16:20 to midnight, which is what makes two fixed
+      back the picture — **33 of 35 sections hold one start/stop pair of each
+      body and none has them up at once**, the sun running about 00:30 to
+      14:30 and the moon 15:30 to 23:30, which is what makes two fixed
       positions a quarter turn apart coherent. The viewer's invented day arc
       is gone. → [docs/10-sky.md](docs/10-sky.md)
 - [x] **Coplanar geometry.** Two causes, both fixed. The terrain's two ground
@@ -731,72 +731,53 @@ Correct as far as it goes, but not what the game showed.
 All nine of `sky.wea`'s slots are accounted for and eight are drawn: the
 nebula, stars and clouds on the dome, the sun and moon as billboards at their
 own fixed places, the lens flare as a 2D overlay with both of the engine's
-gates, and rain where a mission asks for it (see
-[docs/10-sky.md](docs/10-sky.md)). The ninth is snow, and **no shipped mission
-names it**, so there is nothing to switch on.
+gates, and rain while a mission's keyframes run it (see
+[docs/10-sky.md](docs/10-sky.md)). The ninth is snow, and **seven missions
+snow** — six of them all day under `DUST_ADD`, a dust storm — so the viewer
+now has something to draw and does not draw it yet.
 
-What is left of the weather is where a shower *stops* — and this round showed
-why it was never going to be found in the file.
+**This round found the reader one keyframe out, and that closed most of the
+list.** Read off the deserialiser (`Terrain.dll:0x100672d0`, `0x100660c0`,
+`0x10066230`), a section is a version, a count and two times, and a keyframe
+is a version, a time and the **opcode** ahead of its 22 slots; the file closes
+on one more time and two ints. The old reader filed each keyframe's 40-byte
+preamble under the keyframe before, so every keyframe carried the next one's
+time and opcode. Read the right way:
 
-`CAtmData::GetEvents` (`0x1006dc10`) dispatches through a jump table at
-`0x1006e829`; cases 2 and 7 share the out-of-range target and do nothing,
-and the other eight pair up as start/stop per object type. Its records come
-from `0x1006d740`, which splits the query at midnight and calls the collector
-at `0x1006d460`. The collector asks the atmosphere data object for a section's
-keyframes one at a time and receives a **0x98-byte record whose layout is the
-engine's, not the file's**: `+0x00` the opcode, `+0x20` the hour, `+0x24` the
-minute, `+0x64` a *pointer* to the name. **The opcode is assembled in memory.**
+- **the opcode is the word ahead of slot 0** — 138 of 140 sun and moon
+  keyframes on `SUN`'s 0 and 1, every rain start naming its sound, every
+  lightning start its effect, and every start stopped later in its section.
+  The "trailer's last word" was the right field, tested against the wrong
+  keyframe;
+- **a shower stops at its stop opcode** (4, 6, 9), on a keyframe that names
+  nothing;
+- **the two sections play in turn**: `CAtmosphere` keeps one cycle as long as
+  both days together and walks a *(section, seconds)* position through them;
+- **the clock starts at the file's closing time** — 01:30 on Mission 01, 56
+  seconds into its 900-second day, with the sun up on all 29;
+- the header's other words are a section version, a 23:59 nothing asks for,
+  and editor memory; the last int is the sky's sixth parameter, never read;
+- a sun's lifetime runs to the first stop at or after it and **never wraps**
+  back to section 0.
 
-The data agrees. No slot of the 22 carries 0..9 across the 656 keyframes —
-slot 5 is the only small one and it is 0 throughout. The trailer's last word
-does span 0..9, but it puts **438 of 656** keyframes on case 7, the no-op,
-including 60 named `sun` and 59 named `moon` — bodies that must start and
-stop. So it is not the opcode, and the field hunt is closed as a dead end.
+It also read what the slots and floats do: slot 18 is the **clouds' colour**,
+slots 0 and 16 go nowhere, the fourth float is the **weather's intensity**,
+the first two size the sun's sprite, and the sun object is **two directional
+lights** coloured by slot 19 × the light (lifted up to 5× by the flare gates)
+and by slot 21. Fog is Direct3D's linear range vertex fog as far as
+`Terrain.dll` goes, and `ForceSWFog` is never read there.
 
-**The opcode vocabulary is now closed; the field is still open.** Going in
-through `Comp.ini`'s `CID_CLASSIC_ATMOSPHERIC` entry point reached the
-type-name switch, which numbers the five objects `SUN` 0, `SKY` 1, `RAIN` 2,
-`SNOW` 3, `LIGHTNING` 4, and then the ten opcodes themselves — read off what
-each case *writes* into its 20-byte event record, not guessed: 0/1 start/stop
-`SUN`, 3/4 `RAIN`, 5/6 `SNOW`, 8/9 `LIGHTNING`, with **2 and 7 doing nothing**
-and `SKY` absent because the sky is created outside the switch. Phase 0 is the
-create side. The rejection above now has an exact statement: that word puts
-**119 of the 140 named keyframes** on a do-nothing case.
-See [docs/10-sky.md](docs/10-sky.md). What is left is the field: the opcode
-reaches the record from a **240-byte runtime keyframe** at `+0x28` (the filler
-is `0x100692d0`, hour at `+0x14` and minute at `+0x18`; the copy itself is at
-`0x100694bd`), so the next handle is whatever fills that keyframe from the
-file.
+What is left, each with its handle in [docs/10-sky.md](docs/10-sky.md#not-resolved):
 
-**A third candidate is now dead, and it was the one worth killing.** Five
-dwords separate the minute from the opcode in memory, so a contiguous copy
-would put the opcode five words past the trailer's time — and the trailer's
-time is not at a fixed index, it sits at 4 when the kind word is 3 and at 3
-otherwise. A fixed-index test would have missed a field that moved; this one
-does not, and the word still puts **119 of the 140 named keyframes** on a
-do-nothing case. The copy is not contiguous in any case: the filler swaps
-`+0x34`/`+0x30` into `+0x04`/`+0x08`, so the file-to-memory order has to be
-read off the deserialiser, which has not been found yet.
-
-**The scale is answered: it is how long a day lasts.** The collector's
-conversion is `t = (hour * 3600 + minute * 60) * scale / 86400` — seconds
-since midnight, through a scale, over a day — and the scale comes from
-`CAtmData` slot 3, an array the constructor fills as `hours * 3600 +
-minutes * 60` from the `.ske` reader. In the file that pair is at header
-**bytes 64 and 68**: **21 of the 29 missions run an in-game day in 15 real
-minutes**, three in 40, two in 20, one in 9, and two declare a full 24 hours.
-Those last two are the check — a sky keeping real time never visibly moves,
-and they carry 5 keyframes against a minimum of 12 everywhere else.
-`CAtmosphere::CAtmosphere` runs the span through `GetTimeDiffInSec` and keeps
-it in milliseconds. It changes nothing on screen; it makes the sun's lifetime
-computable. See [docs/10-sky.md](docs/10-sky.md).
-
-One smaller unknown sits in the same file: most of the 124-byte header. The
-other, the keyframe count of a second section, is answered -- a second section
-is a **second whole day cycle**, 00h to 24h like the first and reusing 16 of
-its 17 colour blocks at different times, not a tail or an event list. It was
-tested as the event list and is not that. What selects between the two cycles
-is open.
+- **where the sun's lights point** — `CSun` never sets it, and no writer of a
+  directional light record's `+0x24` is found;
+- **how the dome escapes the far plane and the fog** — its layers are
+  depth-tested without writes, in render layer 1, on a record that takes the
+  scene's fog; how layer 1 is projected is the next read;
+- **the heading's world axis** — the angle is the compass heading of the
+  camera matrix's first column; that the column is the view axis is a guess;
+- what `CSun` does with a lifetime, and whether `ForceSWFog` is read outside
+  `Terrain.dll`.
 
 ### 2.2 Who asks a material for its second track
 

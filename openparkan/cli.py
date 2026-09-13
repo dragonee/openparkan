@@ -225,7 +225,8 @@ def cmd_sky(args, game: Path) -> int:
         atmosphere = sky.load(path)
         shown += 1
         label = str(folder.relative_to(game))
-        print(f"{label}  {len(atmosphere)} keyframes, {atmosphere.sections} section(s)")
+        print(f"{label}  {len(atmosphere)} keyframes, {atmosphere.sections} section(s), "
+              f"clock starts {atmosphere.start.hour:02d}:{atmosphere.start.minute:02d}")
         if atmosphere.textures:
             print(f"  sky.wea      {', '.join(t for t in atmosphere.textures if t)}")
         if not args.frames:
@@ -242,6 +243,9 @@ def cmd_sky(args, game: Path) -> int:
                 extra.append(frame.name)
             if frame.sounds:
                 extra.append(", ".join(frame.sounds))
+            if frame.event is not None:
+                phase, kind = frame.event
+                extra.append(f"{sky.PHASES[phase]} {sky.OBJECT_TYPES[kind]}")
             print(f"    {frame.hour:02d}:{frame.minute:02d}  sky #{r:02x}{g:02x}{b:02x}  "
                   f"light {frame.light:5.2f}  section {frame.section}"
                   + (f"  {' | '.join(extra)}" if extra else ""))

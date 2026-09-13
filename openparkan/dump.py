@@ -416,18 +416,28 @@ def fx_effects(path: Path, names: list[str] | None = None) -> dict:
 
 
 def atmosphere(path: Path, names: list[str] | None = None) -> dict:
-    """A ``sky.ske``: its sections, its day, and every keyframe's slots as stored."""
+    """A ``sky.ske``: its sections and their headers, every keyframe as stored, and
+    the time the clock starts at."""
     a = sky.load(path)
     return {
         "kind": "sky",
         "sections": a.sections,
         "day_seconds": a.day_seconds,
+        "section_headers": [
+            {"index": s.index, "version": s.version, "count": s.count,
+             "end": list(s.end.words), "day": list(s.day.words)}
+            for s in a.section_headers
+        ],
         "keyframes": [
-            {"hour": k.hour, "minute": k.minute, "section": k.section, "name": k.name,
-             "sounds": list(k.sounds), "slots": [list(s) for s in k.slots],
-             "intensity": vector(k.intensity), "trailer": list(k.trailer)}
+            {"version": k.version, "time": list(k.time.words), "opcode": k.opcode,
+             "hour": k.hour, "minute": k.minute, "section": k.section, "name": k.name,
+             "names": list(k.names), "effects": list(k.effects),
+             "slots": [list(s) for s in k.slots], "intensity": vector(k.intensity)}
             for k in a.keyframes
         ],
+        "start": list(a.start.words),
+        "trailer_word": a.trailer_word,
+        "sky_flag": a.sky_flag,
     }
 
 
