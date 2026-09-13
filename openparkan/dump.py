@@ -16,9 +16,11 @@ from __future__ import annotations
 
 import hashlib
 import math
+import struct
 from pathlib import Path
 
-from . import mission
+from . import landmesh, materials, mission
+from . import texm as textures
 from .nres import NResArchive
 
 
@@ -111,5 +113,112 @@ def mission_file(path: Path) -> dict:
     }
 
 
+def texm(path: Path, names: list[str] | None = None) -> dict:
+    """Textures of an archive -- the ``names`` given, or all -- decoded at level 0."""
+    archive = NResArchive.open(path)
+    wanted = {n.upper().split(".")[0] for n in names} if names else None
+    out = []
+    for e in archive:
+        if e.tag != "Texm" or (wanted is not None and e.name.upper().split(".")[0] not in wanted):
+            continue
+        blob = archive.read(e)
+        tex = textures.decode(blob)
+        flags14 = struct.unpack_from("<I", blob, 0x14)[0]
+        out.append({
+            "name": e.name,
+            "width": tex.width,
+            "height": tex.height,
+            "format": tex.fmt,
+            "mips": tex.mips,
+            "flags": tex.flags,
+            "flags14": flags14,
+            "alpha": textures.uploads_with_alpha(tex.fmt, flags14),
+            "pages": [[x, y, w, h] for x, y, w, h in tex.pages],
+            "rgba_sha256": hashlib.sha256(tex.rgba).hexdigest(),
+        })
+    return {"kind": "texm", "textures": out}
+
+
+def material_library(path: Path, names: list[str] | None = None) -> dict:
+    """Every ``MAT0`` record, entries and tracks included."""
+    lib = materials.MaterialLibrary(path)
+    return {
+        "kind": "materials",
+        "materials": [
+            {
+                "name": m.name,
+                "blend": m.blend,
+                "blend_mode": m.blend_mode,
+                "surface": m.surface,
+                "speed_factor": number(m.speed_factor),
+                "damage_rate": number(m.damage_rate),
+                "frames": m.frames,
+                "entries": [
+                    {"texture": e.texture, "cell": e.cell, "ambient": list(e.ambient),
+                     "diffuse": list(e.colour), "specular": list(e.specular),
+                     "emissive": list(e.emissive),
+                     "alphas": [e.ambient_alpha, e.diffuse_alpha, e.specular_alpha,
+                                e.emissive_alpha],
+                     "power": e.power}
+                    for e in m.entries
+                ],
+                "tracks": [{"kind": t.kind, "param": t.param,
+                            "keys": [[k.entry, k.time, k.unread] for k in t.keys]}
+                           for t in m.tracks],
+            }
+            for m in lib.materials.values()
+        ],
+    }
+
+
+#: How many height samples a side the land mesh dump takes, each at the centre of
+#: its square so none falls on a face edge the two readers index differently.
+HEIGHT_SAMPLES = 17
+
+
+def land_mesh(path: Path, names: list[str] | None = None) -> dict:
+    """A ``Land.msh``: every stream as parsed, and the elevation on a grid."""
+    land = landmesh.load(path)
+    (lo, hi) = land.bounds()
+    grid = []
+    for j in range(HEIGHT_SAMPLES):
+        for i in range(HEIGHT_SAMPLES):
+            x = lo[0] + (hi[0] - lo[0]) * (i + 0.5) / HEIGHT_SAMPLES
+            y = lo[1] + (hi[1] - lo[1]) * (j + 0.5) / HEIGHT_SAMPLES
+            z = land.height_at(x, y)
+            grid.append(None if z is None else number(z))
+    water = land.water_level()
+    return {
+        "kind": "landmesh",
+        "bounds": [vector(lo), vector(hi)],
+        "lod_split": land.lod_split,
+        "water_level": None if water is None else number(water),
+        "layer1": land.layer1_names,
+        "layer2": land.layer2_names,
+        "positions": [vector(p) for p in land.positions],
+        "normals": [vector(n) for n in land.normals],
+        "uv1": [vector(u) for u in land.uv1],
+        "uv2": [vector(u) for u in land.uv2],
+        "blend": vector(land.blend),
+        "faces": [
+            [list(land.faces[i]), list(land.adjacency[i]), land.face_flags[i],
+             land.face_surface[i], land.face_tex1[i], land.face_tex2[i],
+             vector(land.face_normal[i]), land.face_patch[i]]
+            for i in range(land.face_count)
+        ],
+        "cells": [[c.first, c.count] for c in land.cells],
+        "height_grid": grid,
+    }
+
+
+def _nres(path: Path, names: list[str] | None = None) -> dict:
+    return nres(path)
+
+
+def _mission(path: Path, names: list[str] | None = None) -> dict:
+    return mission_file(path)
+
+
 #: What ``openparkan dump`` and ``parkan-dump`` both accept, and the reader each runs.
-KINDS = {"nres": nres, "mission": mission_file}
+KINDS = {"nres": _nres, "mission": _mission, "texm": texm, "materials": material_library,
+         "landmesh": land_mesh}

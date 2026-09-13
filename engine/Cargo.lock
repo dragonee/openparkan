@@ -1325,6 +1325,7 @@ dependencies = [
  "anyhow",
  "bytemuck",
  "glam",
+ "parkan-world",
  "wgpu",
 ]
 

@@ -1,11 +1,12 @@
-//! A mission as M0 draws it: every placed object as a box, over a grid.
+//! A mission as M1 draws it: the map's ground, and every placed object as a box.
 
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use glam::{Vec2, Vec3};
+use glam::Vec3;
 use parkan_formats::{gamedir, mission};
 use parkan_render::{Marker, SceneData};
+use parkan_world::terrain::{self, Terrain};
 
 /// A loaded mission and where its hero stands.
 pub struct Loaded {
@@ -41,11 +42,8 @@ pub fn load(game: &Path, relative: &str) -> Result<Loaded> {
 
     let mut markers = Vec::new();
     let mut hero = None;
-    let (mut lo, mut hi) = (Vec2::splat(f32::MAX), Vec2::splat(f32::MIN));
     for object in &mission.objects {
         let position = Vec3::from_array(object.position);
-        lo = lo.min(position.truncate());
-        hi = hi.max(position.truncate());
         let (half_size, colour) =
             if is_hero(object) { (2.0, [1.0, 0.85, 0.2]) } else { (1.5, colour(object)) };
         if is_hero(object) && hero.is_none() {
@@ -53,16 +51,12 @@ pub fn load(game: &Path, relative: &str) -> Result<Loaded> {
         }
         markers.push(Marker { position, half_size, colour });
     }
-    let step = 50.0;
-    let scene = if markers.is_empty() {
-        SceneData::default()
-    } else {
-        SceneData {
-            markers,
-            grid_min: ((lo - Vec2::splat(step)) / step).floor() * step,
-            grid_max: ((hi + Vec2::splat(step)) / step).ceil() * step,
-            grid_step: step,
-        }
-    };
+    let scene = SceneData { markers, ..Default::default() };
     Ok(Loaded { mission, scene, hero })
+}
+
+/// The ground of the mission's map.
+pub fn terrain(game: &Path, loaded: &Loaded) -> Result<Terrain> {
+    let dir = terrain::map_dir(game, &loaded.mission.map_path)?;
+    terrain::build(game, &dir)
 }

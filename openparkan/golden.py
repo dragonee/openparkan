@@ -14,7 +14,7 @@ import subprocess
 from collections.abc import Iterator
 from pathlib import Path
 
-from . import dump
+from . import dump, landmesh, materials
 from .nres import is_nres
 
 #: How far two floats may differ, absolutely or relative to their size.
@@ -47,14 +47,41 @@ def differences(a, b, path: str = "$") -> Iterator[str]:
         yield f"{path}: {a!r} against {b!r}"
 
 
-def targets(game: Path) -> list[tuple[str, Path]]:
-    """What M0 reads: every archive in the install, and Mission 01's data.tma."""
+#: Mission 01's map.
+TUT_1 = Path("DATA/MAPS/Tut_1/Land.msh")
+
+
+def terrain_textures(game: Path) -> list[str]:
+    """Every texture Tut_1's two ground layers name, animation frames included."""
+    land = landmesh.load(game / TUT_1)
+    lib = materials.MaterialLibrary(game / "Material.lib")
+    names = set()
+    for layer in (land.layer1_names, land.layer2_names):
+        for name in layer:
+            material = lib.get(name)
+            if material:
+                names.update(material.frames)
+                names.update(e.texture for e in material.entries if e.texture)
+    return sorted(names)
+
+
+def targets(game: Path) -> list[tuple[str, Path, list[str]]]:
+    """What the engine reads so far.
+
+    M0: every archive and Mission 01's ``data.tma``.  M1: ``Material.lib``,
+    Tut_1's ``Land.msh`` and the textures its ground names.
+    """
     archives = sorted(p for p in game.rglob("*") if p.is_file() and is_nres(p))
-    return [("nres", p) for p in archives] + [("mission", game / MISSION_01 / "data.tma")]
+    return ([("nres", p, []) for p in archives]
+            + [("mission", game / MISSION_01 / "data.tma", []),
+               ("materials", game / "Material.lib", []),
+               ("landmesh", game / TUT_1, []),
+               ("texm", game / "Textures.lib", terrain_textures(game))])
 
 
-def engine_dump(engine: Path, kind: str, path: Path) -> dict:
-    done = subprocess.run([str(engine), kind, str(path)], capture_output=True, check=True)
+def engine_dump(engine: Path, kind: str, path: Path, names: list[str] | None = None) -> dict:
+    done = subprocess.run([str(engine), kind, str(path), *(names or [])],
+                          capture_output=True, check=True)
     return json.loads(done.stdout)
 
 
@@ -62,9 +89,9 @@ def run(game: Path, engine: Path, limit: int = 20) -> int:
     """Compare every target; print what differs.  Returns a process exit code."""
     failed = 0
     items = targets(game)
-    for kind, path in items:
-        ours = json.loads(json.dumps(dump.KINDS[kind](path)))
-        theirs = engine_dump(engine, kind, path)
+    for kind, path, names in items:
+        ours = json.loads(json.dumps(dump.KINDS[kind](path, names or None)))
+        theirs = engine_dump(engine, kind, path, names)
         found = list(differences(ours, theirs))
         name = path.relative_to(game)
         if found:

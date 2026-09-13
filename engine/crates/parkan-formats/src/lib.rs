@@ -6,7 +6,11 @@
 
 pub mod cursor;
 pub mod gamedir;
+pub mod landmesh;
+pub mod materials;
 pub mod mission;
 pub mod nres;
+pub mod texm;
+pub mod wea;
 
 pub use cursor::FormatError;

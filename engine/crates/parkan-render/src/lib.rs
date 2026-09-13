@@ -9,6 +9,10 @@ use bytemuck::{Pod, Zeroable};
 use glam::{Mat4, Vec2, Vec3};
 use wgpu::util::DeviceExt;
 
+pub mod terrain;
+
+pub use terrain::TerrainRenderer;
+
 pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 /// The colour format of an offscreen capture.
 pub const CAPTURE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
@@ -79,6 +83,7 @@ pub struct Renderer {
     triangles: Option<(wgpu::Buffer, u32)>,
     grid: Option<(wgpu::Buffer, u32)>,
     depth: Option<(wgpu::TextureView, u32, u32)>,
+    terrain: Option<TerrainRenderer>,
 }
 
 impl Renderer {
@@ -155,6 +160,7 @@ impl Renderer {
             triangles: None,
             grid: None,
             depth: None,
+            terrain: None,
         }
     }
 
@@ -183,6 +189,16 @@ impl Renderer {
         self.grid = upload(&lines, "grid");
     }
 
+    /// Draw this map's ground from now on.
+    pub fn set_terrain(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        terrain: &parkan_world::terrain::Terrain,
+    ) {
+        self.terrain = Some(TerrainRenderer::new(device, queue, self.format, terrain));
+    }
+
     /// Draw the scene into `target`, a view of a `width` × `height` texture.
     pub fn draw(
         &mut self,
@@ -206,6 +222,9 @@ impl Renderer {
             self.depth = Some((texture.create_view(&Default::default()), width, height));
         }
         queue.write_buffer(&self.camera, 0, bytemuck::bytes_of(&view_proj.to_cols_array()));
+        if let Some(terrain) = &self.terrain {
+            terrain.prepare(queue, view_proj);
+        }
         let mut encoder = device.create_command_encoder(&Default::default());
         {
             let depth = &self.depth.as_ref().expect("made above").0;
@@ -229,6 +248,9 @@ impl Renderer {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
+            if let Some(terrain) = &self.terrain {
+                terrain.draw(&mut pass);
+            }
             pass.set_bind_group(0, &self.bind_group, &[]);
             for (pipeline, geometry) in [(&self.lines, &self.grid), (&self.solid, &self.triangles)] {
                 if let Some((buffer, count)) = geometry {
@@ -242,10 +264,11 @@ impl Renderer {
     }
 }
 
-/// Render one frame offscreen and return it as RGBA8 rows, top row first.
+/// Render one frame offscreen with `renderer`, made for `CAPTURE_FORMAT`, and
+/// return it as RGBA8 rows, top row first.
 pub fn capture(
     gpu: &Gpu,
-    scene: &SceneData,
+    renderer: &mut Renderer,
     (width, height): (u32, u32),
     view_proj: Mat4,
 ) -> Result<Vec<u8>> {
@@ -260,8 +283,6 @@ pub fn capture(
         usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
         view_formats: &[],
     });
-    let mut renderer = Renderer::new(device, CAPTURE_FORMAT);
-    renderer.set_scene(device, scene);
     renderer.draw(device, &gpu.queue, &texture.create_view(&Default::default()), (width, height), view_proj);
 
     let row = 4 * width;

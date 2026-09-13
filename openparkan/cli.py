@@ -819,7 +819,7 @@ def cmd_dump(args, game: Path) -> int:
     path = Path(args.path)
     if args.kind == "mission" and path.is_dir():
         path = path / "data.tma"
-    print(json.dumps(dump.KINDS[args.kind](path), indent=1))
+    print(json.dumps(dump.KINDS[args.kind](path, args.names or None), indent=1))
     return 0
 
 
@@ -985,6 +985,7 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("dump", help="a file as the readers see it, in canonical JSON")
     p.add_argument("kind", choices=sorted(dump.KINDS))
     p.add_argument("path", help="an archive, or a mission's data.tma or directory")
+    p.add_argument("names", nargs="*", help="texm: only these textures")
     p.set_defaults(fn=cmd_dump)
 
     p = sub.add_parser("golden", help="compare the readers with the Rust engine's parkan-dump")

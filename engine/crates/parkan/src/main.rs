@@ -22,6 +22,7 @@ use camera::FlyCamera;
 use glam::Vec3;
 use parkan_formats::gamedir;
 use parkan_render::{Gpu, Renderer};
+use parkan_world::terrain::Terrain;
 use winit::application::ApplicationHandler;
 use winit::event::{DeviceEvent, DeviceId, ElementState, MouseButton, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
@@ -33,11 +34,17 @@ struct Args {
     mission: String,
     screenshot: Option<PathBuf>,
     size: (u32, u32),
+    top_down: bool,
 }
 
 fn args() -> Result<Args> {
-    let mut out =
-        Args { game: None, mission: gamedir::MISSION_01.to_owned(), screenshot: None, size: (1280, 720) };
+    let mut out = Args {
+        game: None,
+        mission: gamedir::MISSION_01.to_owned(),
+        screenshot: None,
+        size: (1280, 720),
+        top_down: false,
+    };
     let mut it = std::env::args().skip(1);
     while let Some(flag) = it.next() {
         let mut value = || it.next().with_context(|| format!("{flag} needs a value"));
@@ -45,6 +52,7 @@ fn args() -> Result<Args> {
             "--game" => out.game = Some(PathBuf::from(value()?)),
             "--mission" => out.mission = value()?,
             "--screenshot" => out.screenshot = Some(PathBuf::from(value()?)),
+            "--top-down" => out.top_down = true,
             "--size" => {
                 let v = value()?;
                 let (w, h) = v.split_once('x').context("--size is WIDTHxHEIGHT")?;
@@ -63,15 +71,30 @@ fn start_camera(loaded: &scene::Loaded) -> FlyCamera {
     }
 }
 
-fn screenshot(loaded: &scene::Loaded, out: &Path, (width, height): (u32, u32)) -> Result<()> {
+/// The whole map from straight above, north up, for comparing with
+/// `openparkan heightmap`.
+fn top_down(terrain: &Terrain, aspect: f32) -> glam::Mat4 {
+    let (lo, hi) = terrain.land.bounds();
+    let centre = Vec3::new((lo[0] + hi[0]) / 2.0, (lo[1] + hi[1]) / 2.0, hi[2] + 100.0);
+    let half = ((hi[0] - lo[0]).max(hi[1] - lo[1]) / 2.0).max(1.0);
+    let (hw, hh) = if aspect >= 1.0 { (half * aspect, half) } else { (half, half / aspect) };
+    let depth = hi[2] - lo[2] + 200.0;
+    // Near and far swapped: depth is reversed, so nearer is greater.
+    let proj = glam::Mat4::orthographic_rh(-hw, hw, -hh, hh, depth, 0.0);
+    proj * glam::Mat4::look_to_rh(centre, -Vec3::Z, Vec3::Y)
+}
+
+fn screenshot(loaded: &scene::Loaded, game: &Path, args: &Args, out: &Path) -> Result<()> {
+    let (width, height) = args.size;
     let gpu = pollster::block_on(Gpu::headless())?;
-    let camera = start_camera(loaded);
-    let pixels = parkan_render::capture(
-        &gpu,
-        &loaded.scene,
-        (width, height),
-        camera.view_proj(width as f32 / height as f32),
-    )?;
+    let terrain = scene::terrain(game, loaded)?;
+    let mut renderer = Renderer::new(&gpu.device, parkan_render::CAPTURE_FORMAT);
+    renderer.set_terrain(&gpu.device, &gpu.queue, &terrain);
+    renderer.set_scene(&gpu.device, &loaded.scene);
+    let aspect = width as f32 / height as f32;
+    let view_proj =
+        if args.top_down { top_down(&terrain, aspect) } else { start_camera(loaded).view_proj(aspect) };
+    let pixels = parkan_render::capture(&gpu, &mut renderer, (width, height), view_proj)?;
     let file = std::io::BufWriter::new(std::fs::File::create(out)?);
     let mut encoder = png::Encoder::new(file, width, height);
     encoder.set_color(png::ColorType::Rgba);
@@ -91,6 +114,7 @@ struct Running {
 
 struct App {
     loaded: scene::Loaded,
+    terrain: Terrain,
     camera: FlyCamera,
     running: Option<Running>,
     held: HashSet<KeyCode>,
@@ -115,6 +139,7 @@ impl App {
         }
         surface.configure(&gpu.device, &config);
         let mut renderer = Renderer::new(&gpu.device, config.format);
+        renderer.set_terrain(&gpu.device, &gpu.queue, &self.terrain);
         renderer.set_scene(&gpu.device, &self.loaded.scene);
         self.running = Some(Running { window, surface, config, gpu, renderer });
         Ok(())
@@ -231,13 +256,21 @@ fn main() -> Result<()> {
         )),
     );
     if let Some(out) = &args.screenshot {
-        return screenshot(&loaded, out, args.size);
+        return screenshot(&loaded, &game, &args, out);
     }
+    let terrain = scene::terrain(&game, &loaded)?;
     let event_loop = EventLoop::new()?;
     event_loop.set_control_flow(ControlFlow::Poll);
     let camera = start_camera(&loaded);
-    let mut app =
-        App { loaded, camera, running: None, held: HashSet::new(), looking: false, last: Instant::now() };
+    let mut app = App {
+        loaded,
+        terrain,
+        camera,
+        running: None,
+        held: HashSet::new(),
+        looking: false,
+        last: Instant::now(),
+    };
     event_loop.run_app(&mut app)?;
     Ok(())
 }
