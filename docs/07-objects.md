@@ -427,7 +427,11 @@ both a level 0 and a fifth slot, the fifth is **always a separate slot**, never
 one of the node's levels reused: a same-sized copy of level 0 on 141, a coarser
 shape on 137 (closest to level 1 on 83 of those), and finer on 10. Reading all
 316 as the geometry collision is tested against is the natural extension, but
-it is a reading — the engine's hit test has not been found taking slot 4.
+it is a reading — and **a round's hit test does not take slot 4**. It asks
+each node for level 0 of its current variant (`AniMesh.dll:0x10010c33` →
+`0x100124d0`), so a hull, which has no level 0 in any variant, is never struck
+(*measured*). What does read the fifth slot is still open. See
+[The hit test](26-damage.md#the-hit-test--read-and-measured).
 
 This also corrects why level 0 falls back to the fifth slot: not so that a node
 draws something rather than nothing, but because the only nodes it happens to

@@ -409,9 +409,9 @@ read = false
 module = "Terrain.dll"
 at = "0x100205c0"
 kind = "function"
-name = "CLadnscape::GetFirstIntersectedFace"
-doc = "the binary's own assertion text"
-read = false
+name = "CLadnscape::GetFirstIntersectedFace (iface 0x18 slot 6): grid walk along the segment, first cell with a hit"
+doc = "docs/26-damage.md"
+read = true
 
 [[entry]]
 module = "Terrain.dll"
@@ -5352,4 +5352,229 @@ at = "0x1000317f"
 kind = "site"
 name = "agent collision kind from objects.rlb tag: BTLU 4, BULL 9, WPNS 2, STAT 10; a child takes its parent's"
 doc = "docs/24-motion.md"
+read = true
+
+# --- the hit test, ../docs/26-damage.md ---
+[[entry]]
+module = "Control.dll"
+at = "0x1001cd50"
+kind = "function"
+name = "collision manager ctor (CreateCollManager, 0x44 bytes, vtable 0x1003c178; Terrain creates the world's)"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001c040"
+kind = "function"
+name = "collision pass (manager slot 3): moving entries vs world, pairs j<i swept-sphere broadphase, then GMSG 0x1b to each entry whose record flags are set"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001c330"
+kind = "function"
+name = "manager slot 4: set context (+0x3c), the world's collision entry"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001c340"
+kind = "function"
+name = "manager slot 5: add entry {internal, contact record}"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001e9f0"
+kind = "function"
+name = "swept sphere vs swept sphere: overlap at start, else first contact t in [0,1] (flag 4)"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001e1e0"
+kind = "function"
+name = "round vs map box (world slot 10, top doubled): nearest exit point by squared distance, record flag 2"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001d9d0"
+kind = "function"
+name = "round segment vs an entry's geometry (iface 0x18 slot 6, excl. batch 8|0x200, tri 0x24): nearest face, record flag 1"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001d630"
+kind = "function"
+name = "pair resolve: round vs kind-3/4 bubble (skips the shooter's own unit), bubble contacts sorted by distance (flag 4), then its mesh; non-rounds to 0x1001daf0"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001f290"
+kind = "function"
+name = "collision object ctor (0x68; internal block at +0x20: kind, id +4, owner +8, flags +0x10, start +0x18, end +0x24, radius +0x30 = -1)"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001fec0"
+kind = "function"
+name = "collision object message 1: start = end = world bounding-sphere centre (iface 0x18 slot 9 type 2), radius"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10020010"
+kind = "function"
+name = "collision object message 0x1c: end = world bounding-sphere centre"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001fe40"
+kind = "function"
+name = "collision object registers with the first ancestor answering 0x203 (manager slot 5)"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001f670"
+kind = "function"
+name = "collision flags from type: 0x20000 -> 2 (no segment target), 0x4000000 -> 4 (tests 0x200 batches), no 4 -> 8"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000d0c0"
+kind = "function"
+name = "round slot 23 (GMSG 0x1b): bubbles nearer than the face hit, penetrate if life > strength; else stop at the face or map edge, action group +0x4e4 (face) / +0x4e8 (edge)"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000cbb0"
+kind = "function"
+name = "round slot 22 tick: dt from +0xe4, script, seeker, command, update 0x100059a0, hit queue, range +0x4c8 minus distance moved"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "World3D.dll"
+at = "0x10006bf0"
+kind = "function"
+name = "world frame: broadcast message 1, collision pass (world 0x203 slot 3), broadcast 0x1c, then the posted queue"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1001dbe0"
+kind = "function"
+name = "landscape cell faces vs segment: face mask filter, one-sided plane unless face bit 8, point in triangle, nearest by squared distance"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10013ef0"
+kind = "function"
+name = "object segment query (iface 0x18 slot 6): every part once, mode 1 (no recursion); max = |segment| squared"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10010a50"
+kind = "function"
+name = "part vs segment: slot [variant*5+0] in the node's frame; hit = {object id, node, batch, triangle in batch, triangle, world point, dist^2}"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10008120"
+kind = "function"
+name = "mesh visitor: node, batch and triangle filters (required/excluded masks), three callbacks"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10011090"
+kind = "function"
+name = "triangle callback: plane from stream-7 normal, one-sided unless batch word bit 2, point in triangle, keep if dist^2 <= best"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Ngi32.dll"
+at = "0x10024410"
+kind = "site"
+name = "g_FastProc +0xb4 segment-plane (x87): n.v < 0, n.p0 + d >= 0, n.p1 + d < 0"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001d6af"
+kind = "site"
+name = "pair resolve: a kind-4 unit whose id is the round's owner gives no contact"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001d9fa"
+kind = "site"
+name = "round query masks: triangles flagged 0x24 and batches flagged 8 excluded, 0x200 too unless collision flag 4"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000d1b4"
+kind = "site"
+name = "round response: passes a shield sector when its life exceeds the sector's strength, losing that strength"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000d35b"
+kind = "site"
+name = "round response: a face hit runs action group +0x4e4"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000d36e"
+kind = "site"
+name = "round response: the map edge runs action group +0x4e8"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10010c33"
+kind = "site"
+name = "hit test: node slot record with variant -1 (current) and lod 0, so a hull is never struck"
+doc = "docs/26-damage.md"
 read = true

@@ -86,8 +86,10 @@ outer ring is a clearance drawn around the building. See
 - **The fifth slot of a variant** is **collision geometry**, as far as the data
   goes: the 28 nodes carrying only a fifth slot are exactly the 28 collision
   hulls, and on the 288 ordinary nodes with both it is always a separate slot
-  — a copy of level 0 on 141, coarser on 137. The hit test itself has not been
-  found reading it. See [07-objects.md](07-objects.md).
+  — a copy of level 0 on 141, coarser on 137. **A round's hit test does not
+  read it**: it takes level 0, so a hull is never struck. What does read the
+  fifth slot is open. See [07-objects.md](07-objects.md) and
+  [26-damage.md](26-damage.md#the-hit-test--read-and-measured).
 - ~~**Pose key `time`**~~ — answered: a key's time is **the frame at which
   its run first names it**, which is what an animation player interpolates
   between. See [07-objects.md](07-objects.md).

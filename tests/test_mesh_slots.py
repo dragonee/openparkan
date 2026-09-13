@@ -1,4 +1,4 @@
-"""A variant's fifth slot is collision geometry."""
+"""A variant's fifth slot, and the level a round is tested against."""
 
 from __future__ import annotations
 
@@ -46,3 +46,15 @@ def test_a_node_weighs_by_its_level_zero_slot_only():
     assert mesh.ObjectMesh.node_volume(model, 0) == 8.0
     # a hull's level 0 falls back to its collision slot for drawing; not for weight
     assert mesh.ObjectMesh.node_volume(model, 1) == 0.0
+
+
+def test_a_round_is_tested_against_level_zero_never_the_fifth_slot():
+    n = node([7, 8, N, N, 9])
+    assert n.hit_slot() == 7
+    assert n.collision_slot() == 9
+
+
+def test_a_hull_has_no_slot_to_hit():
+    n = node([N, N, N, N, 3], flags=mesh.SUBOBJECT_COLLISION, name="CP_m1o1")
+    assert n.hit_slot() is None
+    assert n.collision_slot() == 3

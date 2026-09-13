@@ -119,6 +119,92 @@ sphere has radius *r* and centre at distance *d* from a blast of radius *R*:
 | one sphere wholly inside the other | the whole blast |
 | otherwise | `damage × ((R + r − d) / 2R)³` |
 
+## The hit test — *read*, and *measured*
+
+**One pass a frame.** The world's frame (`World3D.dll:0x10006bf0`) runs in four
+steps, with no substeps:
+
+1. It sends every object message 1, the tick; a round moves and spends its
+   range here (`Control.dll:0x1000cbb0`).
+2. It runs the collision pass once (`Control.dll:0x1001c040`).
+3. It sends message `0x1c`.
+4. It delivers what the pass posted: message `0x1b` to every object whose
+   contact record was filled, which a round takes as its collision response
+   (`0x1000d0c0`).
+
+**Who takes part.** Every agent has a collision object: a kind, an owner, a
+swept sphere — a start, an end and a radius — and the object's geometry. The
+kind comes from the `objects.rlb` tag (`AniMesh.dll:0x1000317f`):
+
+| tag | records | kind |
+|---|---|---|
+| `BULL` | 67 | 9, a round |
+| `BTLU` | 63 | 4, a unit |
+| `WPNS` | 5 | 2 |
+| `STAT` | 81 | 10 |
+| any other | — | the kind of the object it hangs on |
+
+Only rounds and units carry a contact record. A collision object sets its
+start and end to its bounding sphere's centre on message 1 (`0x1001fec0`) and
+moves its end there again on message `0x1c` (`0x10020010`); how the two ends
+differ when the pass runs between them is *not established*.
+
+**The pass** does three things:
+
+- **A round against the ground.** A round's segment is clipped to the map box,
+  whose top is doubled (`0x1001e1e0`), and run through the landscape's
+  `GetFirstIntersectedFace` (`Terrain.dll:0x100205c0`). That walks the grid
+  cells along the segment from its start, tests each cell's faces with a
+  one-sided segment–plane test and a point-in-triangle test, and returns the
+  nearest hit in the first cell that has one (`0x1001dbe0`).
+- **Every pair, once.** A pair goes further only if one side has a contact
+  record and the two swept spheres touch within the frame (`0x1001e9f0`).
+- **A round against an object** (`0x1001d630`):
+  - **its own shooter is skipped** — a unit whose id is the round's owner gives
+    no contact at all (`0x1001d6af`);
+  - a unit's **bubble**, its bounding sphere, gives a contact, kept in order of
+    distance;
+  - then the round's segment is run through the object's mesh.
+
+  No clan is consulted here; a hit on one's own side is dropped later, in the
+  hit queue ([above](#a-hit-from-the-round-to-the-node--read)).
+
+**The mesh test** (`AniMesh.dll:0x10013ef0`) takes every node once, and for
+each node the triangles of **level 0 of its current variant**, in the node's
+frame (`0x10010a50`): a plane from the stream-7 face normal, one-sided, and a
+point in the triangle (`0x10011090`). The nearest hit by squared distance from
+the segment's start wins, and the record keeps **the object, the node, the
+batch, the triangle and the world point** — on the ground, the face, with the
+node −1.
+
+A round's query **passes through triangles flagged 4 or 32**, through batches
+flagged 8, and through batches flagged `0x200` unless the round's type carries
+`0x4000000` (`Control.dll:0x1001d9fa`). Flags 2 and 16 are struck. The fifth
+mesh slot and the 28 collision hulls are never tested
+([07-objects.md](07-objects.md#the-fifth-slot-is-collision-geometry)).
+
+|  | *measured* |
+|---|---|
+| hulls a round can strike | none — 0 of 28 have a level 0 in any variant |
+| level-0 triangles a round passes through | 1306 of 129542, on 30 meshes: trees and the mines |
+| `r_h_01` / `r_h_03` / hero `r_h_02` | 4 / 6 / 9 nodes to hit, 104 / 174 / 230 triangles, none passed |
+
+**What the round does** (`0x1000d0c0`):
+
+- **Bubbles.** It walks its bubble contacts nearer than its face hit. Where its
+  life exceeds the sector's strength
+  ([below](#shields-a-generator-a-deflector-six-sectors--read-and-measured)) it
+  passes through and loses that strength (`0x1000d1b4`). Otherwise it stops on
+  the bubble, runs its hit action group (`+0x4e4`) and spends all its life.
+- **A face or the map edge.** It moves to the recorded point and runs its
+  `+0x4e4` group for a face (`0x1000d35b`) or `+0x4e8` for the edge
+  (`0x1000d36e`).
+
+**Beams are rounds.** A laser flies at 10,000 m/s, but every test is a segment
+or a swept sphere over the frame, so nothing is sampled and nothing tunnels. 54
+of 66 rounds move further than their own radius even in a 0.01 s tick
+(*measured*).
+
 ## Shields: a generator, a deflector, six sectors — *read*, and *measured*
 
 A shield is **two parts**: the fight shield (class 9, `i_fsh`) holds six
@@ -158,6 +244,10 @@ delay after a hit — no timer in any of the class's methods. **Short of power
 the shield drains**: below the idle draw the charge is negative and the six
 sectors lose in proportion to what they hold, at up to `power / value 2` a
 second.
+
+**A spent sector still meets a round.** The contact is made, but a strength of
+0 is below any live round's life, so the round passes and loses nothing
+(`0x1000d1b4`).
 
 **The numbers** (*measured*): every fight shield is three values and zeros —
 a sector maximum, a recharge a second and the charge a point costs — and every
@@ -364,7 +454,17 @@ shield, battery and ammunition (`Behavior.dll:0x10018100`, `0x10019372`,
 ## Not established
 
 - Which of ±x, ±y is a model's front, so which sector is "front".
-- Whether a round still collides with a sector that has nothing left.
+- How a collision object's start and end differ when the pass runs: message 1
+  sets both to the sphere's centre, message `0x1c` moves the end, and the pass
+  runs between the two.
+- How the struck object and node reach `ILifeSystem` slot 8's hit. It carries
+  the same five-integer reference the collision record does, but the copy was
+  not found.
+- Whether a round's owner id is the unit or the gun that fired it — which
+  decides whether a turret's round can strike its own robot.
+- Which action in a round's `+0x4e4` group ends it; its collision response
+  does not.
+- What reads a node's fifth slot, if a round's hit test does not.
 - Who clears the behaviour flag `0x10` that lets a unit's takt switch its
   repair (`Behavior.dll:0x100067b0`'s caller), and so whether the AI overrides
   the switch while the player drives.

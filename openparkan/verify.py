@@ -4677,6 +4677,128 @@ LEVEL_RATIO = {"EASY": 0.5, "MEDIUM": 0.7, "HARD": 1.0}
 INDESTRUCTIBLE = 1_000_000.0
 
 
+#: Mission 01's dummies and the hero.
+MISSION_01_BODIES = ("r_h_01", "r_h_03", "r_h_02")
+#: The hero's four rounds, and the shortest tick a frame takes, in seconds.
+HERO_ROUNDS = ("bb_h_01", "bp_h_01", "bl_h_01", "bm_h_01")
+TICK_FLOOR = 0.01
+
+
+def check_hit_test(check, game: Path) -> None:
+    """The hit test: what a round is tested against, and why a segment."""
+    library = objects.ObjectLibrary(game / "objects.rlb")
+    opened: dict[str, NResArchive] = {}
+    meshes: dict[str, objmesh.ObjectMesh | None] = {}
+
+    def read(ref):
+        key = ref.library.lower()
+        if key not in opened:
+            opened[key] = NResArchive.open(game / key)
+        return opened[key].read_name(ref.member)
+
+    def mesh_of(record):
+        ref = record.mesh
+        key = f"{ref.library}/{ref.member}".lower()
+        if key not in meshes:
+            try:
+                meshes[key] = objmesh.parse(read(ref), ref.member)
+            except KeyError:
+                meshes[key] = None
+        return meshes[key]
+
+    for record in library.records.values():
+        if record.mesh:
+            mesh_of(record)
+    absent = sorted(k for k, m in meshes.items() if m is None)
+    present = [m for m in meshes.values() if m is not None]
+
+    # AniMesh.dll:0x10010c33 takes level 0 of the node's variant, so a hull,
+    # which keeps its geometry only in the fifth slot, is never struck.
+    hulls = [n for m in present for n in m.nodes if n.is_collision]
+    hulls_hit = sum(n.hit_slot(v) is not None
+                    for n in hulls for v in range(objmesh.VARIANT_COUNT))
+    solid = sum(n.hit_slot() is not None for m in present for n in m.nodes
+                if not n.is_collision)
+    fifth = sum(n.collision_slot() is not None for m in present for n in m.nodes)
+    check("mesh: a round is tested against level 0, which no collision hull has",
+          hulls and hulls_hit == 0 and solid > len(hulls),
+          f"{len(hulls)} hulls across {len(present)} meshes carry a level-0 slot in 0 "
+          f"of {objmesh.VARIANT_COUNT} variants; control: {solid} other nodes carry one. "
+          f"So the {fifth} fifth slots are not what a round hits "
+          f"({len(absent)} named meshes are absent from their archives)")
+
+    # Control.dll:0x1001d9fa: a round's query passes faces flagged 4 or 32.
+    skipped = tested = 0
+    carriers: Counter[str] = Counter()
+    flags: Counter[int] = Counter()
+    for key, m in meshes.items():
+        if m is None:
+            continue
+        for n in m.nodes:
+            index = n.hit_slot()
+            if index is None:
+                continue
+            s = m.slots[index]
+            faces = m.face_flags[s.first_triangle:s.first_triangle + s.triangle_count]
+            flags.update(faces)
+            passed = sum(1 for f in faces if f & objmesh.ROUND_SKIPS_FACE)
+            skipped += passed
+            tested += len(faces) - passed
+            if passed:
+                carriers[key.split("/")[-1]] += passed
+    check("mesh: a round passes through faces flagged 4 or 32, and strikes 2 and 16",
+          skipped and tested > 50 * skipped and flags[2] and flags[16],
+          f"level 0, variant 0: {skipped} of {skipped + tested} triangles let a round "
+          f"through, on {len(carriers)} meshes (most: "
+          + ", ".join(f"{k} {v}" for k, v in carriers.most_common(4))
+          + f"); face flags {dict(sorted(flags.items()))}")
+
+    tags = Counter(r.tag for r in library.records.values())
+    rows = []
+    bodies_ok = True
+    for name in MISSION_01_BODIES:
+        record = library.get(name)
+        m = mesh_of(record)
+        hit = [n.hit_slot() for n in m.nodes]
+        triangles = sum(m.slots[i].triangle_count for i in hit if i is not None)
+        bodies_ok &= (objects.COLLISION_KIND.get(record.tag) == objects.KIND_UNIT
+                      and triangles > 0 and not any(n.is_collision for n in m.nodes))
+        rows.append(f"{name}: {sum(i is not None for i in hit)} of {len(m.nodes)} "
+                    f"nodes, {triangles} triangles")
+    check("objects.rlb: Mission 01's dummies and hero are units with geometry to hit",
+          bodies_ok,
+          "; ".join(rows) + f".  Records by tag: {dict(sorted(tags.items()))}; "
+          f"BTLU is collision kind 4 and BULL 9 (AniMesh.dll:0x1000317f)")
+
+    # A round moves further than its own radius in one tick, which is why the
+    # test is a segment and a swept sphere rather than a sample.
+    names = frozenset(p.name.lower() for p in all_archives(game))
+    ratios = []
+    hero = []
+    missing = 0
+    for record in library.by_tag("BULL"):
+        try:
+            ctl = control.parse(read(record.slot_with_suffix("ctl")), names)
+        except KeyError:
+            missing += 1
+            continue
+        m = mesh_of(record)
+        radius = m.volume.radius if m and m.volume else 0.0
+        speed = ctl.triples[control.TRIPLE_TOP_SPEED][1]
+        if radius > 0 and speed > 0:
+            ratios.append((speed * TICK_FLOOR / radius, record.name.lower()))
+        if record.name.lower() in HERO_ROUNDS:
+            hero.append(f"{record.name.lower()} {speed:g} m/s to {ctl.bounds[0]:g}, "
+                        f"radius {radius:.2f}")
+    ratios.sort()
+    over = sum(1 for r, _ in ratios if r > 1)
+    check("weapon.rlb: most rounds cover more than their own radius in a 0.01 s tick",
+          len(hero) == len(HERO_ROUNDS) and over > len(ratios) // 2,
+          "; ".join(sorted(hero)) + f".  {over} of {len(ratios)} rounds outrun their "
+          f"radius (fastest {ratios[-1][1]} x{ratios[-1][0]:.0f}, slowest "
+          f"{ratios[0][1]} x{ratios[0][0]:.2f}; {missing} name an absent .ctl)")
+
+
 def check_combat(check, game: Path) -> None:
     """Damage, shields, armour and repair, against the shipped data."""
     names = frozenset(p.name.lower() for p in all_archives(game))
@@ -7940,7 +8062,7 @@ def run(game: Path) -> int:
         check_minimap_agreement, check_arealmap,
         check_grid, check_missions, check_objects, check_poses, check_lod, check_damage,
         check_effects, check_footprints, check_rsli, check_control, check_efficiency,
-        check_motion, check_ground, check_sensors, check_combat, check_ownership,
+        check_motion, check_ground, check_sensors, check_hit_test, check_combat, check_ownership,
         check_capture, check_repair, check_chassis, check_weapons,
         check_turrets, check_packages, check_builder,
         check_units, check_loading, check_search, check_construction,

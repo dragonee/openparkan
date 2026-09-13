@@ -83,8 +83,9 @@ SLOT_SIZE = 68
 #: the 288 ordinary nodes that carry both, the fifth is always a *separate*
 #: slot, never shared with a level: a same-sized copy of level 0 on 141, a
 #: coarser shape on 137 (nearest level 1 on 83 of them), finer on 10.  That
-#: last half is the reading rather than the measurement -- the engine's hit
-#: test has not been found reading slot 4.
+#: last half is the reading rather than the measurement -- and a round's hit
+#: test does **not** read slot 4: it takes level 0 (``HIT_LOD``), so a hull is
+#: never struck.  What reads the fifth slot is not established.
 COLLISION_SLOT = 4
 SLOTS_PER_VARIANT = 5
 LOD_COUNT = 4
@@ -99,6 +100,18 @@ VARIANT_COUNT = 3
 #: an explosion, and the tree's is `explode_tree.exp`.
 VARIANT_INTACT = 0
 NO_SLOT = 0xFFFF
+
+#: The level a round's hit test reads, in the node's current variant
+#: (``AniMesh.dll:0x10010c33`` asks ``0x100124d0`` for lod 0).
+HIT_LOD = 0
+#: Stream-7 face flags a round passes through (``Control.dll:0x1001d9fa``):
+#: 4 and 32.  Flags 2 and 16 are struck.
+ROUND_SKIPS_FACE = 0x24
+#: Stream-13 batch bits a round passes through: 8 always, 0x200 unless the
+#: round's type carries ``ROUND_TESTS_BATCH_200`` (``0x1001da02``).
+ROUND_SKIPS_BATCH = 0x8
+ROUND_SKIPS_BATCH_200 = 0x200
+ROUND_TESTS_BATCH_200 = 0x4000000
 #: Bit 0 of a sub-object's flags marks interior geometry.
 SUBOBJECT_INTERIOR = 0x0001
 #: Bit 5 marks a collision hull -- geometry the engine tests against but never
@@ -319,8 +332,20 @@ class Subobject:
         return bool(self.flags & SUBOBJECT_COLLISION)
 
     def collision_slot(self, variant: int = 0) -> int | None:
-        """The fifth slot of a variant: the geometry collision is tested on."""
+        """The fifth slot of a variant.
+
+        A round's hit test does not read it (``hit_slot``); what does is not
+        established.
+        """
         index = self.slot_index[variant * SLOTS_PER_VARIANT + COLLISION_SLOT]
+        return None if index == NO_SLOT else index
+
+    def hit_slot(self, variant: int = 0) -> int | None:
+        """The slot a round is tested against: level 0 of the variant, no fallback.
+
+        None on every collision hull, which carries no level 0.
+        """
+        index = self.slot_index[variant * SLOTS_PER_VARIANT + HIT_LOD]
         return None if index == NO_SLOT else index
 
     def slots_for_lod(self, lod: int = 0, variant: int = 0) -> list[int]:

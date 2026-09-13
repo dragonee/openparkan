@@ -358,6 +358,14 @@ class Component:
 EXTERNAL_TAG = "EXTO"
 INTERNAL_TAG = "INTO"
 
+#: An agent's collision kind, from its record tag (``AniMesh.dll:0x1000317f``):
+#: a unit 4, a round 9.  A record under any other tag takes the kind of the
+#: object it hangs on.  Kind 4 is also the agent the ground's damage rate
+#: reaches (``Control.dll:0x10012a66``).
+COLLISION_KIND = {"BTLU": 4, "BULL": 9, "WPNS": 2, "STAT": 10}
+KIND_UNIT = 4
+KIND_ROUND = 9
+
 #: A unit's Type: the ``.dat`` class word, the mission property ``Type``, the
 #: numbers ``varset.var`` names.  A robot's is decided by its turret, and
 #: ``Behavior.dll:0x10008a80`` picks its behaviour profile by it.
