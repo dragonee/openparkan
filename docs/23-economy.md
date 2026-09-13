@@ -212,6 +212,17 @@ each clamped to 0..1 and shown as a whole percentage.
   from the file: the player starts with no mine there — the two mines belong
   to `Enm1` and a neutral clan, both empty — so it is a mine taken or built
   and left to fill to 500.
+- **How the HUD reaches the distributor**, every link read. `iron3d.dll`
+  keeps a 0x68-byte record per clan from `world + 0x724`, and its `+0x50` is
+  the object `ai.dll`'s `CreateSuperAI` returns (stored at
+  `iron3d.dll:0x100391d9`). That SuperAI is 0x8b0 bytes with its vtable at
+  `ai.dll:0x100341b8`, and embeds a clan-brain object at `+0x7c` which, while
+  the SuperAI is being built, calls `CreateDistributor` — `ai.dll` imports it
+  from `Behavior.dll` — and keeps the result at its own `+0x3bc`
+  (`ai.dll:0x1000637d`). The HUD calls SuperAI slot 11, `0x10001fc0`, which
+  returns `[self + 0x438]` — that same pointer, `0x7c + 0x3bc` — and then
+  the distributor's slot 9, `return self + 0x30`, the block the distribution
+  step writes.
 - The numbers do not jump: every 0.05 s each displayed value steps by one
   point toward its target. A bar whose value is 0 flashes on a half-second
   timer.
@@ -250,8 +261,5 @@ construction slows research.
   `Transfer_Power_Out`, and the mining code takes the smaller of one side's
   rate and the other's contents. The loader that assigns them has not been
   read.
-- That the clan record's slot `0x2c`, which the HUD calls before the stats
-  getter, returns the distributor. The getter it then reaches returns exactly
-  the distributor's totals block, which is why the reading holds; the call
-  itself was not followed into `ai.dll`, which creates the distributors.
+
 - `fPriority`, and properties `0x300`–`0x305`.
