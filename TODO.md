@@ -572,6 +572,30 @@ written down is a question nobody reopens.
       case-sensitivity bug and the explanation was invented to fit it.
       → [docs/17-saves.md](docs/17-saves.md)
 
+- [x] **Save games, parsed to the last byte.** The writer
+      (`iron3d.dll:0x100a1590`) and loader (`0x100a2bd0`) give the sections:
+      header, the world from `World3D.dll`'s queue, objectives, per clan a word
+      and its mind list (length = the clan's `minds` in `data.tma`), 24-byte
+      records, unit designs in `.dat` layout, a `1, id, id` triple, and per clan
+      the SuperAI's state. **All six saves end exactly.** The world is one
+      record per object — id (top byte = the `objects.rlb` tag), 128-byte
+      archive and member, parent, chunk table — and a model's chunks are its
+      owners' own: the part list, the scale, the control system's placement,
+      the wizard's and the behaviour's. A part record's `+64/+68/+72` are the
+      parent part's id, the node or slot on it, and its own id (906/906). The
+      name and position are one record: 42 of 42 placements, 41 by name or the
+      `.dat`'s root part, one a plant upgraded since; scenery is tipped where it
+      moved. The header's second byte is the **difficulty**, not campaign vs
+      single. The 450-byte record was scenery and rounds in flight.
+      → [docs/17-saves.md](docs/17-saves.md)
+- [x] **The briefing player, read.** An edge belongs to the waypoint it
+      leaves; `flyaround` orbits the target once per `RotateTime`; `FadePercent`
+      is a black overlay faded to the next stop's over `FadeTime`; `LoopIndex`
+      replaces the next stop; `NoisePercent`, `WaitForText/Sound/Click` are
+      never read. A clan script plays a message by id through the SuperAI's
+      game callback (`MESSAGE_INFO`), and the game asks for 22 and 100 itself.
+      → [docs/21-briefing.md](docs/21-briefing.md)
+
 - [x] **The parts database, and what the research tree's floats are.**
       `objects.dlb` is an NRes archive of **395 `DSCR` members**, the same 395
       part ids in the same order as the tree's `TRF6`, and each is plain text
@@ -1019,52 +1043,31 @@ today; each is a small trap for anyone extending the code.
   no module asks `IControl` for them by class; all the engine holds for them is
   a power channel. What they were meant to be is not recorded anywhere.
   → [docs/18-vocabulary.md](docs/18-vocabulary.md)
-- **The three int32 that end a save's member record.** `+72` counts along a
-  group of parts but runs down as often as up, so it is not a slot number;
-  `+64` is not the component class (tested, and it disagrees on 953 of 957);
-  `+68` is small with some plainly uninitialised values. All three open.
-  → [docs/18-vocabulary.md](docs/18-vocabulary.md)
+- ~~The three int32 that end a save's member record~~ — **closed**. In a
+  part list (`AniMesh.dll:0x10003760`) `+64` is the parent part's id (0 for the
+  object), `+68` the node or slot on it, `+72` the part's own id, lowest-free;
+  906 of 906 resolve. The other narrow records were control-chunk and design
+  records. → [docs/18-vocabulary.md](docs/18-vocabulary.md)
 - ~~Which of `bu_` and `fr_` is which faction~~ — **closed: neither**. An
   `fr_` building is a `FORT` record whose first slot is the `bu_` `BTLU`
   record of the same suffix, and that record draws the `fr_` model;
   `CBuilding` loads it through `LoadAgent`. One set of models, 34 of 34.
   → [docs/18-vocabulary.md](docs/18-vocabulary.md)
-- The **save object graph**. Units, buildings, components, positions, damage,
-  resources and mission progress are all in a `.sav` and none is decoded. Two
-  record kinds are now identified rather than one: the **76-byte** part record
-  (812 of 1152 consecutive gaps) and a **450-byte world record** that grows in
-  steps of 8 (82 of 82 gaps below 500 are 450, 458, 466 or 474). The world
-  record names objects the mission places; the part record never does. The
-  8-byte step separates furniture from machinery — 33 of 37 scenery records
-  take none and none takes more than one, while all 45 others take at least
-  one — and three of 24 names appear with two counts, so it is partly
-  per-instance. What it counts is open.
-  The world record's `uint16` at `+0x1be` rises in file order on scenery and
-  is not an index into any mission list; the same offset on other classes is
-  not the same field, so the 450 bytes are a size and not a layout. In the
-  part record only the last twelve bytes are fields, and `+64`/`+68` belong to
-  different kinds — ammunition alone always uses `+64` (10 to 20, a round
-  count is the guess) and never `+68`.
-  The **writer is found**: `iron3d.dll:0x100a1637` emits `SLOT` and everything
-  after it through `fwrite` at `0x100b4b34`, which confirms the header
-  field-for-field and shows the body to be **length-prefixed blobs handed over
-  by a virtual call** — each one a subsystem's own memory, which is why no
-  record was ever designed. Walking that container reads two blobs on all six
-  saves before the next dword stops being a length.
-  Three routes in are ruled out and written up: **pointers do not resolve** to
-  file offsets under any constant base (best delta reaches 3 of 540 records),
-  the **part record carries no identity** (no field is unique per record), and
-  two saves of one mission differ **mostly in stack rubbish** -- the giveaway
-  being `0x0019xxxx`, the Windows main-thread stack range.
-  **Positions are in a save after all** — 42 `float32` triples match a position
-  their mission places once every byte offset is tried, against 10 on the
-  four-byte grid, and they cluster at `+0x143`, `+0x161` and `+0x1b1` of the
-  nearest world record, one offset per class. The earlier "not in a save"
-  reading rested on a dword-aligned scan. What is still open is the join
-  between a record's name and the position near it.
-  → [docs/17-saves.md](docs/17-saves.md) Whether the header's second
-  version byte really separates campaign from single is also open — one of six
-  saves has it set. → [docs/17-saves.md](docs/17-saves.md)
+- The **save object graph**, now that the container is
+  [parsed to the last byte](docs/17-saves.md) on all six saves. Read and
+  measured: the sections and their writers, the world record's head, chunk 0's
+  per-owner counts, the part list (`+64/+68/+72` = parent id, node/slot, own
+  id), the scale and the control chunk's flags, quaternion and position, the
+  objectives' state and exempt words, the unit designs, and the AI state's
+  size. Closed along the way: the name–position join (one record; 42/42), the
+  header's second byte (the difficulty, `iron3d.dll:0x10076010`), the
+  "450-byte record" (scenery and rounds, whose 143-byte control chunk grows by
+  8) and the "length-prefixed blobs" (only the world and the AI states are).
+  Still open: what the control chunk holds past `+32`, and its 8-byte steps;
+  the wizard's 2 and the behaviour's 4 chunks; a building's extra 4-byte chunk;
+  the clan word before each mind list (1 to 57); the game object's 24-byte
+  records at `+0x700`; the `1, id, id` triple; and the AI state's layout
+  (`ai.dll:0x100020f0`). → [docs/17-saves.md](docs/17-saves.md)
 - `.trf` **leftovers**, most of which are now closed
   ([docs/16-research.md](docs/16-research.md)). `TRFB` is the part-to-item
   mapping -- 395 parts onto 368 items, 27 of them mounting pairs, confirmed
@@ -1102,15 +1105,15 @@ today; each is a small trap for anyone extending the code.
   which `GiveDefaultOrder` gives a battle robot order 13 and the hero order 6, compared with a behaviour field only the constructor writes, so it
   never fires. What should have advanced the field is open.
   → [docs/22-settings.md](docs/22-settings.md)
-- The **briefing's four soft fields**, now that the flythrough is
-  [read](docs/21-briefing.md): what `flyaround` orbits (11 waypoints ask for
-  it and no field says a radius or an axis), which end of an edge `EdgeTime`
-  belongs to, what `RotateTime` rotates, and whether `NoisePercent` is static
-  or interference. `LoopIndex` is -1 on all 378, so what the engine would do
-  with any other value is untested by the data. A lead beside them:
-  `message_index` is an id rather than a position -- three files skip a
-  number -- so something asks for a message *by number*, and the AI script is
-  the obvious candidate.
+- ~~The **briefing's four soft fields**~~ — **closed** by reading the player
+  (`iron3d.dll:0x1002f480`): `flyaround` orbits the waypoint's target once
+  per `RotateTime`; `EdgeTime` belongs to the edge *leaving* a waypoint;
+  `RotateTime` is only the orbit's period; `NoisePercent` is never read;
+  `LoopIndex` names the stop to go to next. `message_index` is asked for by the
+  clan script through the SuperAI's game callback with `MESSAGE_INFO`
+  (`0x10060ce0`), and by the game itself for 22 and 100. Left: what game mode
+  4 is (training, a guess), how a briefing is skipped, and the spline's curve.
+  → [docs/21-briefing.md](docs/21-briefing.md)
 - ~~What handles `MCMD_WALK_F`~~ — **closed**. `World3D.dll` dispatches the
   whole `MCMD` space from one 21-entry table at `0x100109f8`, and entry 19
   shares its handler with `MCMD_FORWARD`, `MCMD_BACK` and `MCMD_WALK_B`; the

@@ -8738,18 +8738,28 @@ def check_saves(check, game: Path) -> None:
     other = [k for name, k in steps if not name.startswith(save.SCENERY)]
     varying = len({name for name, _ in steps
                    if len({k for n, k in steps if n == name}) > 1})
-    check("saves: the world record's step tells furniture from machinery",
-          steps and max(scenery) <= 1 and min(other) >= 1,
+    small = [o for path in save.saves(game) for o in save.read(path).objects
+             if o.counts and len(o.chunks) == 3]
+    grown = sum(o.size - save.WORLD_RECORD == o.chunks[2].size - save.CONTROL_SMALL
+                and (o.chunks[2].size - save.CONTROL_SMALL) % save.WORLD_STEP == 0
+                for o in small)
+    rounds = [o for o in small if o.kind == save.KIND_ROUND]
+    check("saves: the world record's step tells furniture from rounds in flight",
+          steps and max(scenery) <= 1 and min(other) >= 1
+          and grown == len(small) and all(o.kind in save.SMALL_KINDS for o in small),
           f"{scenery.count(0)}/{len(scenery)} scenery records take no step and "
-          f"none takes more than one; all {len(other)} others take at least one "
-          f"-- and {varying} of {len({n for n, _ in steps})} names appear with "
-          f"two counts, so it is partly the instance's own")
+          f"none takes more than one; all {len(other)} others -- rounds in "
+          f"flight, {len(rounds)} of the {len(small)} three-chunk records -- take "
+          f"at least one, and {varying} of {len({n for n, _ in steps})} names "
+          f"appear with two counts; on {grown}/{len(small)} the step is the "
+          f"control chunk growing past {save.CONTROL_SMALL} bytes")
 
-    rising = counted = 0
+    rising = counted = agree = 0
     for path in save.saves(game):
         s = save.read(path)
         blob = path.read_bytes()
         order = []
+        heads = {o.offset + save.RECORD_ARCHIVE: o for o in s.objects}
         for r in sorted(s.references, key=lambda r: r.offset):
             if r.field != save.MEMBER_AT[1] or not r.member.startswith(save.SCENERY):
                 continue
@@ -8759,39 +8769,214 @@ def check_saves(check, game: Path) -> None:
             value = struct.unpack_from("<H", blob, at)[0]
             if value != save.NO_INDEX:
                 order.append(value)
+            # On a 450-byte record that offset is the next record's id.
+            following = heads.get(r.offset + save.WORLD_RECORD)
+            agree += following is not None and following.serial & 0xFFFF == value
         if order:
             counted += 1
             rising += all(b > a for a, b in zip(order, order[1:], strict=False))
     check("saves: a scenery record carries an index that rises in file order",
-          counted and rising == counted,
+          counted and rising == counted and agree,
           f"{rising}/{counted} saves with scenery hold a uint16 at "
-          f"+{save.WORLD_INDEX_AT:#x} that only increases down the file -- an "
-          f"identity assigned in order, and not an index into the mission's "
-          f"own lists")
+          f"+{save.WORLD_INDEX_AT:#x} that only increases down the file; on "
+          f"{agree} records it is the serial of the next record's id, 450 "
+          f"bytes on")
+
+    parsed = [save.read(path, game) for path in save.saves(game)]
+    complete = sum(s.complete for s in parsed)
+    check("saves: every save parses to its last byte",
+          parsed and complete == len(parsed),
+          f"{complete}/{len(parsed)} read header, world, objectives, mind "
+          f"lists, designs and one AI state per clan and end exactly -- "
+          f"{sum(len(s.objects) for s in parsed)} objects, "
+          f"{sum(len(s.objectives) for s in parsed)} objectives, "
+          f"{sum(len(s.designs) for s in parsed)} designs; the mind lists' "
+          f"lengths are the clans' minds words from data.tma")
+
+    if (game / "objects.rlb").exists():
+        library_rlb = objects.ObjectLibrary(game / "objects.rlb")
+        models = [o for s in parsed for o in s.objects if o.archive]
+        tagged = sum(1 for o in models if library_rlb.get(o.member) is not None
+                     and save.KIND_TAGS.get(o.kind) == library_rlb.get(o.member).tag)
+        others = Counter(hex(o.kind) for s in parsed for o in s.objects if not o.archive)
+        check("saves: an object id's top byte is its member's objects.rlb tag",
+              models and tagged == len(models),
+              f"{tagged}/{len(models)} model objects -- "
+              + ", ".join(f"{k:#x} {t}" for k, t in save.KIND_TAGS.items())
+              + "; the rest are " + ", ".join(f"{n} x {k}" for k, n in sorted(others.items()))
+              + " (land, sky, research trees)")
+
+    levels = Counter(s.level_name for s in parsed)
+    check("saves: the header's second byte is a difficulty",
+          parsed and all(s.level in save.LEVELS for s in parsed),
+          f"every save holds one of {sorted(save.LEVELS)} -- "
+          + ", ".join(f"{n} {k}" for k, n in sorted(levels.items()))
+          + " -- the byte iron3d.dll's level ratio reads as EASY/MEDIUM/HARD")
+
+    counted_chunks = extra_ok = buildings = 0
+    for s in parsed:
+        for o in s.objects:
+            if not o.counts:
+                continue
+            owed = 1 + sum(o.counts)
+            if o.kind == save.KIND_BUILDING:
+                buildings += 1
+                extra_ok += len(o.chunks) == owed + 1 and o.chunks[-1].size == 4
+            else:
+                counted_chunks += len(o.chunks) == owed
+    models = sum(1 for s in parsed for o in s.objects if o.counts)
+    check("saves: chunk 0 counts every other chunk a model object holds",
+          models and counted_chunks == models - buildings and extra_ok == buildings,
+          f"{counted_chunks}/{models - buildings} units and scenery hold exactly "
+          f"1 + the sum of chunk 0's bytes; all {extra_ok}/{buildings} buildings "
+          f"hold one more, of 4 bytes")
+
+    homes = Counter()
+    for s in parsed:
+        spans = []
+        for o in s.objects:
+            spans.append((o.offset, o.offset + save.RECORD_HEAD, "record head"))
+            if o.counts:
+                first = 1 + o.counts[0]
+                for i, c in enumerate(o.chunks):
+                    label = ("part list" if 1 <= i < first
+                             else "control chunk" if i == first + 1 else "other chunk")
+                    spans.append((c.offset, c.offset + c.size, label))
+        designs_from = s.world.offset + s.world.size
+        for r in s.references:
+            label = "unit design" if r.offset >= designs_from else "unplaced"
+            for a, b, name in spans:
+                if a <= r.offset < b:
+                    label = name
+                    break
+            homes[label] += 1
+    design_parts = sum(len(d.components) for s in parsed for d in s.designs)
+    placed_refs = sum(homes.values()) - homes["unplaced"] - homes["other chunk"]
+    check("saves: every scanned reference sits in a field the parse names",
+          homes and placed_refs == sum(homes.values())
+          and homes["unit design"] == design_parts,
+          f"{placed_refs}/{sum(homes.values())} references -- "
+          + ", ".join(f"{n} in a {k}" for k, n in homes.most_common()))
+
+    lists = unique = parts_total = resolved = 0
+    for s in parsed:
+        for o in s.objects:
+            if not o.parts:
+                continue
+            lists += 1
+            ids = [p.id for p in o.parts]
+            unique += len(ids) == len(set(ids))
+            known = set(ids) | {save.ROOT_PART}
+            parts_total += len(ids)
+            resolved += sum(p.parent in known for p in o.parts)
+    check("saves: a part hangs off a part of the same object",
+          lists and unique == lists and resolved == parts_total,
+          f"{parts_total} part records in {lists} lists; +{save.PART_ID} is "
+          f"unique within all {unique}, and +{save.PART_PARENT} names the object "
+          f"({save.ROOT_PART}) or another part's id on {resolved}/{parts_total}")
 
     kinds = defaultdict(lambda: [0, 0, 0])
+    on_guns = 0
     library = game / descriptions.LIBRARY
     if library.exists():
-        parts = descriptions.read(library)
-        for path in save.saves(game):
-            blob = path.read_bytes()
-            for r in save.read(path).references:
-                part = parts.get(r.member)
-                if (r.field != save.MEMBER_AT[0] or part is None
-                        or r.offset + 76 > len(blob)):
-                    continue
-                a, b, _ = struct.unpack_from("<3i", blob, r.offset + save.PART_FIELDS[0])
-                row = kinds[part.kind]
-                row[0] += 1
-                row[1] += a != 0
-                row[2] += b != 0
+        catalogue = descriptions.read(library)
+        for s in parsed:
+            for o in s.objects:
+                by_id = {p.id: p for p in o.parts}
+                for p in o.parts:
+                    part = catalogue.get(p.member)
+                    if part is None:
+                        continue
+                    row = kinds[part.kind]
+                    row[0] += 1
+                    row[1] += p.parent != save.ROOT_PART
+                    row[2] += p.attach != 0
+                    holder = catalogue.get(by_id[p.parent].member) \
+                        if p.parent in by_id else None
+                    on_guns += part.kind == "AMM" and holder is not None \
+                        and holder.kind == "WPN"
         ammo = kinds.get("AMM", [0, 0, 0])
-        check("saves: the part record's two ints belong to different kinds",
-              ammo[0] and ammo[1] == ammo[0] and ammo[2] == 0,
-              f"all {ammo[0]} ammunition records carry a value at "
-              f"+{save.PART_FIELDS[0]} and zero at +{save.PART_FIELDS[1]}; "
+        check("saves: ammunition sits in slot 0 of its weapon",
+              ammo[0] and on_guns == ammo[0] and ammo[2] == 0,
+              f"all {on_guns}/{ammo[0]} ammunition parts hang off a WPN part at "
+              f"attachment 0; parent is a part / attachment non-zero on "
               + ", ".join(f"{k} {v[1]}/{v[0]} and {v[2]}/{v[0]}"
                           for k, v in sorted(kinds.items()) if k != "AMM"))
+
+    found = by_name = upright = turned = scaled = 0
+    for s in parsed:
+        tma = game / s.mission / "data.tma"
+        if not tma.exists():
+            continue
+        named = []
+        for o in mission.load(tma).objects:
+            if o.is_static:
+                name = o.path
+            else:
+                unit = objects.load_unit(game / o.path.replace("\\", "/"))
+                name = unit.components[0].ref.member if unit.components else ""
+            named.append((name.lower(), o))
+        for w in s.objects:
+            if w.position is None:
+                continue
+            for name, o in named:
+                if not all(abs(a - b) < 0.25 for a, b in zip(w.position, o.position, strict=True)):
+                    continue
+                found += 1
+                by_name += name == w.member.lower()
+                scaled += w.scale is not None and all(
+                    abs(a - b) < 1e-4 for a, b in zip(w.scale, o.scale, strict=True))
+                qw, qx, qy, qz = w.orientation
+                if abs(qx) < 1e-3 and abs(qy) < 1e-3:
+                    upright += 1
+                    gap = (-2 * math.atan2(qz, qw) - o.rotation + math.pi) % (2 * math.pi)
+                    turned += abs(gap - math.pi) < 0.01
+    check("saves: an object's placement is in its own record",
+          found and by_name >= found - 1 and scaled == found and turned == upright,
+          f"{found} objects stand where their mission placed them, read at "
+          f"+{save.CONTROL_POSITION} of their own control chunk; {by_name} carry "
+          f"the placed name or its .dat's root part (the other is a plant "
+          f"upgraded since); {scaled}/{found} hold its scale in the model chunk and "
+          f"{turned}/{upright} upright ones its angle a as (cos a/2, 0, 0, -sin a/2)")
+
+    near = exact = tilted_moved = scenery_total = 0
+    farthest = 0.0
+    for s in parsed:
+        tma = game / s.mission / "data.tma"
+        if not tma.exists():
+            continue
+        statics = [o for o in mission.load(tma).objects if o.is_static]
+        for w in s.objects:
+            if w.kind != save.KIND_SCENERY:
+                continue
+            scenery_total += 1
+            same = [o.position for o in statics if o.path.lower() == w.member.lower()]
+            if not same:
+                continue
+            gap = min(math.dist(w.position, p) for p in same)
+            farthest = max(farthest, gap)
+            near += gap < 6
+            upright_here = abs(w.orientation[1]) < 1e-3 and abs(w.orientation[2]) < 1e-3
+            if gap < 0.25 and upright_here:
+                exact += 1
+            else:
+                tilted_moved += not upright_here
+    check("saves: scenery keeps its own placement, tipped where it moved",
+          scenery_total and near == scenery_total
+          and exact + tilted_moved == scenery_total,
+          f"{near}/{scenery_total} scenery records lie within {farthest:.1f} of a "
+          f"placement of their own name; {exact} stand on it upright and every "
+          f"one of the other {tilted_moved} is tipped off the vertical")
+
+    table = behaviour.variables(game) if (
+        game / "MISSIONS" / "SCRIPTS" / behaviour.VARSET).exists() else []
+    sizes = [c.size for s in parsed for c in s.ai]
+    floor = save.AI_FIXED + save.AI_PER_VARIABLE * len(table)
+    check("saves: a clan's AI state is 2036 bytes and a word per script variable",
+          sizes and table and min(sizes) == floor and all(n % 4 == 0 for n in sizes),
+          f"{sizes.count(floor)}/{len(sizes)} clans hold exactly {save.AI_FIXED} + "
+          f"{save.AI_PER_VARIABLE} x {len(table)} varset.var declarations = {floor}; "
+          f"the rest {sorted(set(sizes) - {floor})}, whole words more")
 
     placed_hits = placed_total = 0
     for path in save.saves(game):
@@ -8826,20 +9011,6 @@ def check_saves(check, game: Path) -> None:
           f"places when every byte offset is tried, against {aligned_hits} on "
           f"the four-byte grid -- records sit at arbitrary offsets, so a "
           f"dword-aligned scan misses almost all of them")
-
-    walked = big = 0
-    for path in save.saves(game):
-        s = save.read(path)
-        if len(s.blobs) == save.BLOBS:
-            walked += 1
-            size = path.stat().st_size
-            big += s.blobs[0].size > size * 0.6
-    check("saves: the body opens as length-prefixed blobs, as the writer emits",
-          walked == len(save.saves(game)) and big == walked,
-          f"{walked}/{len(save.saves(game))} saves walk as {save.BLOBS} "
-          f"length-prefixed runs before the format changes, the first holding "
-          f"over 60% of the file -- the shape iron3d.dll's writer produces at "
-          f"0x100a1637 through fwrite")
 
     index = save.slots(game)
     filled = [x for x in index if not x.empty]
@@ -8984,8 +9155,8 @@ def check_vocabulary(check, game: Path) -> None:
           ordinals and len(small) >= len(ordinals) * 0.9,
           f"{len(small)}/{len(ordinals)} narrow records hold 1..{max(small)} at +72 and "
           f"{walk}/{len(ordinals) - 1} adjacent records differ by exactly one -- "
-          f"it counts along a group, but it runs down as often as up and its role "
-          f"is not established")
+          f"in a part list it is the part's own id, handed out lowest-free as "
+          f"parts come and go, which is why it runs down as often as up")
 
 
 def check_atmosphere_events(check, game: Path) -> None:
@@ -9600,6 +9771,56 @@ def check_briefing(check, game: Path) -> None:
           all(w.loop == briefing.NO_LOOP for _, w in stops),
           f"all {len(stops)} waypoints carry LoopIndex {briefing.NO_LOOP}")
 
+    orbits = [w for _, w in stops if w.wait == "flyaround"]
+    turning = [w for _, w in stops if w.rotate_time]
+    once = sum(abs(w.dwell - w.rotate_time) < 0.05 and w.wait_for_time for w in orbits)
+    splines = [w for _, w in stops if w.edge == "spline"]
+    check("briefing: a flyaround dwells for one turn of RotateTime",
+          orbits and turning == orbits and once == len(orbits)
+          and all(w.edge_time > 0 for w in splines),
+          f"RotateTime is set on exactly the {len(orbits)} flyaround waypoints "
+          f"and on no other of {len(stops)}; {once}/{len(orbits)} dwell within "
+          f"0.05 s of one revolution; all {len(splines)} spline edges have a "
+          f"positive EdgeTime, as the loader demands")
+
+    outs = ins = timed_outs = changes = carried = 0
+    dips = dipped = 0
+    for path in paths:
+        route = briefing.waypoints(path)
+        for i, w in enumerate(route[:-1]):
+            after = route[briefing.next_stop(route, i)]
+            if w.edge == "jump":
+                dips += 1
+                dipped += w.fade == after.fade == 0
+                continue
+            if w.fade != after.fade:
+                changes += 1
+                carried += w.fade_time > 0
+                if w.fade < after.fade:
+                    outs += 1
+                    timed_outs += abs(w.fade_time - w.edge_time) < 0.05
+                else:
+                    ins += 1
+    black = sum(r[0].fade == r[-1].fade == 100
+                for r in (briefing.waypoints(p) for p in paths))
+    check("briefing: FadePercent is the black, FadeTime its change to the next",
+          changes and carried == changes and timed_outs == outs
+          and dipped == dips and black == len(paths),
+          f"{carried}/{changes} changes of FadePercent between a waypoint and "
+          f"the next carry a FadeTime; every one of the {outs} fades to black "
+          f"lasts the edge leaving the waypoint ({timed_outs}), the {ins} fades "
+          f"in no longer; {dipped}/{dips} jumps sit between two clear waypoints "
+          f"and dip on their own; {black}/{len(paths)} briefings open and close "
+          f"black")
+
+    unused = sum(w.noise == 0 and not w.zoom and not w.zoom_time
+                 and not w.night_vision for _, w in stops)
+    check("briefing: the picture effects are never switched on",
+          unused == len(stops),
+          f"{unused}/{len(stops)} waypoints hold NoisePercent 0, ZoomOn and "
+          f"NightVisionOn false and no ZoomTime -- NoisePercent is not read by "
+          f"the player at all, and the other three would be")
+
     inside = above = sampled = 0
     clearance = []
     for path in paths:
@@ -9670,6 +9891,44 @@ def check_briefing(check, game: Path) -> None:
           f"string, and the same {len(with_role)} missions declare "
           f"{briefing.MESSAGE_ROLE}; message_index is an id, not a position -- "
           f"{gaps} files skip a number")
+
+    scripts_dir = game / "MISSIONS" / "SCRIPTS"
+    if not (scripts_dir / behaviour.VARSET).exists():
+        return
+    table = behaviour.variables(game)
+    names = {v.name: i for i, v in enumerate(table)}
+    by_stem = {p.stem.lower(): p for p in behaviour.scripts(game)}
+    asked = known = missions_with = 0
+    for f in files:
+        ids = {m.index for m in briefing.messages(f)}
+        literal = []
+        for clan in mission.load(f.parent / "data.tma").clans:
+            stem = clan.ai_script.replace("\\", "/").rsplit("/", 1)[-1].lower()
+            if stem not in by_stem:
+                continue
+            for handler in behaviour.read(by_stem[stem]).handlers:
+                for node in handler.nodes:
+                    if (node.calls and len(node.operands) > 1
+                            and node.operands[0] == names.get("MESSAGE_INFO")):
+                        arg = node.operands[1]
+                        if 0 <= arg < len(table) and table[arg].literal:
+                            literal.append(int(table[arg].name[1]))
+        missions_with += bool(literal)
+        asked += len(literal)
+        known += sum(v in ids for v in literal)
+    holders = {i: [f.parent for f in files
+                   if i in {m.index for m in briefing.messages(f)}]
+               for i in briefing.ENGINE_MESSAGES}
+    training = all(len(h) == 1 and h[0].parent.name.upper() == "CAMPAIGN.00"
+                   for h in holders.values())
+    check("briefing: a script asks for a message by its id",
+          asked and known == asked and training,
+          f"{known}/{asked} literal ids {len(files)} missions' clan scripts pass "
+          f"with MESSAGE_INFO are message_index values of that mission's "
+          f"messages.cfg ({missions_with} missions); the ids iron3d.dll asks "
+          f"for itself are in one file each -- "
+          + ", ".join(f"{i} in {'/'.join(h[0].parts[-2:]) if h else '-'}"
+                      for i, h in holders.items()))
 
 
 def check_settings(check, game: Path) -> None:

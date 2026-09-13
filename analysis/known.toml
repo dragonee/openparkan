@@ -735,12 +735,20 @@ name = "the same range trick for MCMD_UP and MCMD_DOWN"
 read = true
 doc = "docs/14-controls.md"
 
-# --- the save writer, ../docs/17-saves.md ----------------------------------
+# --- the save writer and its sections, ../docs/17-saves.md -----------------
+[[entry]]
+module = "iron3d.dll"
+at = "0x100a1590"
+kind = "function"
+name = "save writer: header, world, clans, objectives, clan words and mind lists, +0x700 records, designs, triple, AI states"
+read = true
+doc = "docs/17-saves.md"
+
 [[entry]]
 module = "iron3d.dll"
 at = "0x100a1637"
 kind = "site"
-name = "the save writer: SLOT and the length-prefixed blobs after it"
+name = "the save writer: SLOT, the only place it is written"
 read = true
 doc = "docs/17-saves.md"
 
@@ -752,6 +760,501 @@ name = "the fwrite the save body goes through"
 read = true
 doc = "docs/17-saves.md"
 
+[[entry]]
+module = "iron3d.dll"
+at = "0x100b48ed"
+kind = "function"
+name = "the fread the save loader goes through"
+read = true
+doc = "docs/17-saves.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100a1663"
+kind = "site"
+name = "header byte 2 = settings +0x150, the difficulty (EASY/MEDIUM/HARD)"
+read = true
+doc = "docs/17-saves.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100a170f"
+kind = "site"
+name = "the world: GetQueue()->slot 22 hands back pointer and size"
+read = true
+doc = "docs/17-saves.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100a1770"
+kind = "site"
+name = "per clan: the clan record's +0x10 word, then minds x mind-list entries"
+read = true
+doc = "docs/17-saves.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100a1799"
+kind = "site"
+name = "a mind-list entry: SuperAI slot 17 of j"
+read = true
+doc = "docs/17-saves.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100a181e"
+kind = "site"
+name = "a saved unit design: the 0xf0f1 magic, then +0x78 (Type), then the component tree"
+read = true
+doc = "docs/17-saves.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100a18b3"
+kind = "site"
+name = "per clan: the AI state, SuperAI slot 19 hands back pointer and size"
+read = true
+doc = "docs/17-saves.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100a2bd0"
+kind = "function"
+name = "save loader: the same sections read back; mind-list length from the clan record"
+read = true
+doc = "docs/17-saves.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100a2ced"
+kind = "site"
+name = "the loader's SLOT compare"
+read = true
+doc = "docs/17-saves.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100a2d42"
+kind = "site"
+name = "loader: header byte 2 stored back into settings +0x150"
+read = true
+doc = "docs/17-saves.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100a30d8"
+kind = "site"
+name = "loader: the clan word is read only when the version byte is >= 1"
+read = true
+doc = "docs/17-saves.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1006b180"
+kind = "function"
+name = "objectives writer: count, then char[255] text, state word, exempt word"
+read = true
+doc = "docs/17-saves.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1006b130"
+kind = "function"
+name = "all objectives complete: state 1, or a non-zero exempt word"
+read = true
+doc = "docs/17-saves.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1006b440"
+kind = "function"
+name = "objective state get (+0xc)"
+read = true
+doc = "docs/17-saves.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1006b450"
+kind = "function"
+name = "objective state set (+0xc): 1 complete, -1 failed, 0 open"
+read = true
+doc = "docs/17-saves.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10081990"
+kind = "function"
+name = "game object +0x700 member: count (slot 25), then 24-byte records (slot 26)"
+read = true
+doc = "docs/17-saves.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100557c0"
+kind = "function"
+name = "unit design i: 0x7c-byte entries from +0xb674, count at +0xb8e0 (at most 5)"
+read = true
+doc = "docs/17-saves.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100569b0"
+kind = "function"
+name = "design component writer: 108-byte body, child count, children recursively"
+read = true
+doc = "docs/17-saves.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10063130"
+kind = "function"
+name = "writes 1 and two ids (or -1) from the first type-1 entry of the +0x20 object's deque"
+read = true
+doc = "docs/17-saves.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1005b580"
+kind = "function"
+name = "returns the game object, [0x1010b5f8]"
+read = true
+doc = "docs/17-saves.md"
+
+[[entry]]
+module = "World3D.dll"
+at = "0x10005230"
+kind = "function"
+name = "GetQueue: the object queue singleton"
+read = true
+doc = "docs/17-saves.md"
+
+[[entry]]
+module = "World3D.dll"
+at = "0x10020a18"
+kind = "datum"
+name = "the object queue's vtable; slot 22 saves the world, slot 23 loads it"
+read = true
+doc = "docs/17-saves.md"
+
+[[entry]]
+module = "World3D.dll"
+at = "0x10009a90"
+kind = "function"
+name = "queue slot 22: the world blob, a 48-byte header (1, game time) then one record per object"
+read = true
+doc = "docs/17-saves.md"
+
+[[entry]]
+module = "World3D.dll"
+at = "0x10009bc0"
+kind = "function"
+name = "one world record: id, archive[128], member[128], parent, slot, size, prop 0x803, chunks; then children"
+read = true
+doc = "docs/17-saves.md"
+
+[[entry]]
+module = "World3D.dll"
+at = "0x10005140"
+kind = "function"
+name = "SetGameTime: the queue's time, 0x10032a38, which the world header holds"
+read = true
+doc = "docs/17-saves.md"
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x100201d4"
+kind = "datum"
+name = "the model object's vtable; slot 17 gathers its save chunks, slot 18 reads them back"
+read = true
+doc = "docs/17-saves.md"
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10002ff0"
+kind = "function"
+name = "model object setup: owners' save interfaces at +0x188 (0x10016a70's model), +0x18c control, +0x194 wizard, +0x190 behaviour"
+read = true
+doc = "docs/17-saves.md"
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10001c20"
+kind = "function"
+name = "slot 17: chunk 0 = a count byte per owner, then the part list and each owner's chunks"
+read = true
+doc = "docs/17-saves.md"
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10001d60"
+kind = "function"
+name = "slot 18: chunk 0's counts drive the owners' loads"
+read = true
+doc = "docs/17-saves.md"
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10003660"
+kind = "function"
+name = "the part list's save chunk: every entry but the first, 76 bytes each"
+read = true
+doc = "docs/17-saves.md"
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x100036a0"
+kind = "function"
+name = "the part list's load: size / 76 records, each attached"
+read = true
+doc = "docs/17-saves.md"
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10003760"
+kind = "function"
+name = "attach a part: lowest free id at +72; +68 made a node (EXTO) or slot (INTO) relative to part +64"
+read = true
+doc = "docs/17-saves.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x100020f0"
+kind = "function"
+name = "SuperAI slot 19: the AI state, 2036 bytes + 4 per script variable + 28 / 4 per open entry"
+read = true
+doc = "docs/17-saves.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x10002080"
+kind = "function"
+name = "SuperAI slot 17: a mind-list entry"
+read = true
+doc = "docs/17-saves.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x100555e4"
+kind = "datum"
+name = "the game callback CreateSuperAI keeps"
+read = true
+doc = "docs/21-briefing.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x1000135b"
+kind = "site"
+name = "interpreter initialiser stores the callback handler 0x1000c266 at +0x78"
+read = true
+doc = "docs/21-briefing.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x1000c266"
+kind = "site"
+name = "entry of the script handler stored at +0x78 (packed, no padding): two operands, then the game callback (0, a, b)"
+read = true
+doc = "docs/21-briefing.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x10003ff3"
+kind = "site"
+name = "game callback (1, CLAN_HERO_KILLED, a word) for a unit of Type 0x1020000; iron3d ignores kind 1"
+read = true
+doc = "docs/21-briefing.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x1000e4f2"
+kind = "site"
+name = "game callback with kind 2"
+read = true
+doc = "docs/21-briefing.md"
+# --- the briefing player and the message callback, ../docs/21-briefing.md --
+[[entry]]
+module = "iron3d.dll"
+at = "0x1002d140"
+kind = "function"
+name = "briefing waypoint loader: 24 keys into a 116-byte record; refuses a flat spline or flyaround"
+read = true
+doc = "docs/21-briefing.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1002e993"
+kind = "site"
+name = "WaitType flyaround = 1, only with a non-zero RotateTime rate; flyby too, if positive"
+read = true
+doc = "docs/21-briefing.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1002edd0"
+kind = "function"
+name = "briefing player slot 1: loads the waypoints into the vector at +0x38"
+read = true
+doc = "docs/21-briefing.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100e5c24"
+kind = "datum"
+name = "the briefing player's vtable: 1 load, 2 go to waypoint, 3 stop, 4 update"
+read = true
+doc = "docs/21-briefing.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1002f0d0"
+kind = "function"
+name = "player slot 2: arrive at waypoint n and run its dwell"
+read = true
+doc = "docs/21-briefing.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1002f1f0"
+kind = "function"
+name = "player slot 3: stop"
+read = true
+doc = "docs/21-briefing.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1002f480"
+kind = "function"
+name = "player slot 4: per frame -- dwell (WaitForTime x WaypointTime), edge, then the next stop"
+read = true
+doc = "docs/21-briefing.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1002f600"
+kind = "function"
+name = "the edge run on after a dwell ends in the same frame"
+read = true
+doc = "docs/21-briefing.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1002f6d0"
+kind = "function"
+name = "the edge out of waypoint i by its EdgeType: linear, spline, jump (half and half through black)"
+read = true
+doc = "docs/21-briefing.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1002fec0"
+kind = "function"
+name = "flyaround: orbit the target level at 2pi / RotateTime, radius and height from arrival"
+read = true
+doc = "docs/21-briefing.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10030120"
+kind = "function"
+name = "fade and zoom: this stop's value to the next's over FadeTime / ZoomTime; a jump keeps its own"
+read = true
+doc = "docs/21-briefing.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100305c0"
+kind = "function"
+name = "arrival: start eye, FadePercent/ZoomOn now and next, NightVisionOn, orbit radius and bearing, voice"
+read = true
+doc = "docs/21-briefing.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100308a0"
+kind = "function"
+name = "leave waypoint i: destination is LoopIndex if not -1, else i + 1"
+read = true
+doc = "docs/21-briefing.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10030a10"
+kind = "function"
+name = "spline set-up: end tangent from the destination's WaitType and EdgeType"
+read = true
+doc = "docs/21-briefing.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100315b0"
+kind = "function"
+name = "briefing screen draw: black overlay alpha = fade x 255, letterbox, current TextResID"
+read = true
+doc = "docs/21-briefing.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10094e90"
+kind = "function"
+name = "messages.cfg loader: a map from message_index to message"
+read = true
+doc = "docs/21-briefing.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10094e30"
+kind = "function"
+name = "play a message by id"
+read = true
+doc = "docs/21-briefing.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10060ce0"
+kind = "function"
+name = "the game callback: kind 0 switches on varset's Messages code; 1 MESSAGE_INFO plays message value"
+read = true
+doc = "docs/21-briefing.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10061038"
+kind = "table"
+name = "the callback's switch: 0 mission result, 1 message, 2 nothing, 3 done, 4 failed, 5 reopened"
+read = true
+doc = "docs/21-briefing.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100391a5"
+kind = "site"
+name = "the callback pushed into CreateSuperAI"
+read = true
+doc = "docs/21-briefing.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10058015"
+kind = "site"
+name = "plays message 22 when the game mode flag +0xe6 is set"
+read = true
+doc = "docs/21-briefing.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100638a9"
+kind = "site"
+name = "plays message 100 when the game mode flag +0xe6 is set"
+read = true
+doc = "docs/21-briefing.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1005c748"
+kind = "site"
+name = "the settings' mode word compared with 2, 3, 4 into flags +0xe4, +0xe5, +0xe6"
+read = true
+doc = "docs/21-briefing.md"
 # --- the .ctl controller, ../docs/13-control.md ----------------------------
 [[entry]]
 module = "AniMesh.dll"

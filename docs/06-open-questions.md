@@ -189,10 +189,12 @@ outer ring is a clearance drawn around the building. See
 `.scr` **node semantics** -- the structure is now [read](15-behaviour.md), all 58
 files end to end, but what a node does is not -- and the network protocol.
 The text layer around a mission is [read](21-briefing.md): the opening
-flythrough, its subtitles and voices, and the in-mission messages, through the
+flythrough, its subtitles and voices, how the player runs it, and the
+in-mission messages a clan script asks for by id, through the
 [resource descriptors](20-resources.md) that bind them. Save
-games in `SAVE/` are [partly read](17-saves.md): the header and what a save
-refers to, but not the object graph, which is a raw heap dump. The `.trf` archives are [read](16-research.md): 368 research
+games in `SAVE/` [parse to the last byte](17-saves.md): the sections, every
+object's record, part list and placement; most of each owner's chunk, and the
+AI state's layout, are not read. The `.trf` archives are [read](16-research.md): 368 research
 items, their costs, descriptions, classification bytes and state, and their
 prerequisite graph. The engine's own `.ini` files are now
 [read](22-settings.md) — the component registry, the two debug files, the

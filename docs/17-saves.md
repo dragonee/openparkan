@@ -3,37 +3,241 @@
 `SAVE/` holds up to seven slots, six of them filled in this installation, from
 20 KB to 106 KB, beside a `saveslots.cfg` that indexes them.
 
-**A save is not a designed file format.** It is the engine's live object graph
-written to disk more or less as it sat in memory: the classes' own 32-byte
-string fields, heap addresses left in place, and buffer tails that were never
-zeroed, so a name is not reliably NUL-terminated — `LFW-7 Warrior` is followed
-by `0f 00 00`, not a terminator. Reconstructing the graph would mean
-reconstructing the classes.
+**A save is a fixed sequence of sections, and all six parse to the last
+byte.** Most of the bytes inside the sections are the classes' own memory —
+string fields whose tails were never zeroed, so `LFW-7 Warrior` is followed
+by `0f 00 00` rather than a terminator, and a few words of stack — which is
+why the file looked like a heap dump for so long. But the order is fixed, and
+every section either says how long it is or takes its count from a place the
+reader can reach. The sequence below was *read* from the writer
+(`iron3d.dll:0x100a1590`) and its loader (`iron3d.dll:0x100a2bd0`), and
+*measured* against the six saves: `openparkan.save.read(path, game)` walks
+all six to their final byte.
 
-So this document does something narrower and says so plainly: it reads the
-header, which is a real header, and recovers **what a save refers to**, which
-is the part worth having and the part the installation can check.
-
-## The header
-
-Parsed strictly, and it reads on all six:
+## The header — *read* and *measured*
 
 ```
 char[4]   "SLOT"
 uint8     version, 1 everywhere
-uint8     0 on the five campaign saves, 1 on the single mission
+uint8     difficulty: 0 EASY, 1 MEDIUM, 2 HARD
 int32     length of the mission path
 char      path[length]     'missions/campaign/campaign.05/mission.01/'
 ```
 
-The path is the one genuinely length-prefixed string in the file; everything
-after it is fixed-size fields. All six paths resolve to an installed mission
-directory.
+The writer emits it field for field through one primitive, `0x100b4b34`,
+`fwrite(ptr, size, count, file)`; `mov dword ptr [esp + 0x4c], 0x544f4c53` at
+`0x100a1637` is the only place `SLOT` is written, and `0x100a2ced` in the
+loader compares against it.
+
+**The version is a real version.** The loader reads each clan's leading word
+(below) only when that byte is at least 1 (`0x100a30d8`), so a version-0 save
+simply lacks it.
+
+**The second byte is the difficulty, not campaign against single.** The writer
+takes it from the settings object's `+0x150` (`0x100a1663`), the loader writes
+it back there (`0x100a2d42`), and the level ratio at `iron3d.dll:0x10076010`
+reads that same field as `EASY`, `MEDIUM` or `HARD`. Five saves hold 0 and the
+one skirmish holds 1; an earlier draft read the correlation as the meaning.
+The path's own directory is what says campaign or single.
+
+## The sections — *read*, *measured* 6 of 6
+
+```
+header
+int32     size, then the world                     World3D.dll, below
+int32     clan count
+int32     objective count, then per objective
+              char[255] text, int32 state, int32 exempt
+per clan  int32 a word of the clan's (version >= 1)
+          int32 x minds    the clan's mind list: a unit id or -1
+int32     count, then 24-byte records
+int32     count, then per unit design
+              uint32 0xF0F1, uint32 Type, 112-byte components depth first
+int32     1, int32 id, int32 id
+int32     clan count again
+per clan  int32 size, then the clan's AI state     ai.dll, below
+```
+
+**The one count the file does not carry is a mind list's length.** The writer
+loops over the clan record's `+0x20`, which is the clan's `minds` word from
+`data.tma` ([04-missions.md](04-missions.md)), and writes no count; the loader
+does the same. So the world can be read from the save alone, and everything
+after it needs the mission. With it, all six saves end exactly: 216 objects,
+12 objectives, 4 designs and 20 AI states.
+
+What each section is:
+
+| section | who writes it | what it holds |
+|---|---|---|
+| world | `World3D.dll`'s queue, slot 22 (`0x10009a90`) | every game object, below |
+| objectives | `iron3d.dll:0x1006b180` | text, a state the script sets — 1 complete, −1 failed, 0 open — and a word that exempts the objective from the mission's completion test (`0x1006b130`) |
+| clan word | `0x100a1770`, the clan record's `+0x10` | 1 to 57; **unknown** |
+| mind list | the SuperAI's slot 17 per entry | a unit's id or −1, one per mind |
+| 24-byte records | the game object's `+0x700` member, `0x10081990` | none in four saves, 2 and 4 in two; **unknown** |
+| unit designs | `0x100569b0`, recursive | a whole `.dat` assembly in the `.dat`'s own layout ([07-objects.md](07-objects.md)): the 108-byte body, the child count, the children |
+| `1, id, id` | `iron3d.dll:0x10063130` over the object at `+0x20` | `1, -1, -1` in all six; **unknown** |
+| AI state | `ai.dll` SuperAI slot 19, `0x100020f0` | the clan script's state, below |
+
+**An earlier draft said the body was length-prefixed blobs throughout**, from
+walking `(int32 length, bytes)` twice before it failed. Only the world is
+such a blob, and so is each clan's AI state at the end. The walk's "second
+blob" was the clan count read as a length — `02 00 00 00`, taking two bytes of
+the objective count with it — and the next "length" it rejected ran into the
+first objective's text.
+
+## The world — *read* and *measured*
+
+The world is what `World3D.dll`'s object queue hands the writer from its slot
+22: a 48-byte header — a 1, the queue's game time (`0x10032a38`, the value
+`SetGameTime` sets), then ten words of stack — and one record per object,
+parent before child (`0x10009bc0`):
+
+```
+uint32    id              top byte a class, the rest a serial
+char[128] archive         'objects.rlb', or empty
+char[128] member          'fr_l_gener', 'DATA\MAPS\KM_14\land'
+int32     parent's id     0 for none
+int32     parent's slot   -1 for none
+uint32    bytes after this 276-byte head
+int32     property 0x803 of an object whose type slot answers 3, else 0
+uint32    n, then n chunk sizes, then the chunks
+```
+
+The archive and member names come from `World3D.dll`'s two name tables,
+3000 × 128 bytes each, indexed by the id's low word. The 128-byte archive
+field is what the reference scan below called the *wide* record.
+
+**The id's top byte is the `objects.rlb` tag of the member it names**
+(*measured*, 184 of 184 model objects):
+
+| top byte | tag | what | objects |
+|---|---|---|---:|
+| `0x13` | `FORT` | a building | 40 |
+| `0x14` | `BTLU` | a unit or creature | 60 |
+| `0x19` | `BULL` | a round in flight | 47 |
+| `0x1a` | `STAT` | scenery | 37 |
+| `0x11` | — | the landscape, no chunks | 6 |
+| `0x17` | — | the sky, one 4-byte chunk | 6 |
+| `0x1b` | — | a research tree, 3 chunks | 20 |
+
+**The chunks are the object's owners' own state.** The queue asks the object
+for them through its slot 17 — `AniMesh.dll:0x10001c20` for every model — and
+chunk 0 is a byte per owner saying how many chunks that owner wrote, in a
+fixed order, absent owners skipped:
+
+| owner | kept at | chunks it writes |
+|---|---|---|
+| the part list | `AniMesh` object `+0x6e4` | 1 if the object has parts, else 0 |
+| the model | `+0x188`, from `AniMesh.dll:0x10016a70` | 1: the object's scale |
+| the control system | `+0x18c`, from `Control.dll!LoadControlSystem` | 1: the placement, below |
+| the wizard | `+0x194`, from `Wizard.dll!CreateWizard` | 2 |
+| the behaviour | `+0x190`, from `Behavior.dll!CreateBehaviour` | 4 |
+
+Units hold `01 01 01 02 04` or, without parts, `00 01 01 02 04`; scenery and
+rounds `00 01 01`. The load side reads the bytes back the same way
+(`AniMesh.dll:0x10001d60`, slot 18). Every unit, scenery piece and round holds
+exactly 1 plus the sum of those bytes; **all 40 buildings hold one chunk more,
+of 4 bytes**, which no owner in the table accounts for (*measured*).
+
+### The 450-byte record was three chunks
+
+The records the reference scan measured as "450 bytes plus a multiple of 8"
+are scenery and rounds: a 276-byte head, the chunk table, a 3-byte chunk 0, a
+12-byte scale and a **143-byte control chunk that grows in 8-byte steps**:
+
+| control chunk | scenery | rounds |
+|---:|---:|---:|
+| 143 | 33 | 1 |
+| 151 | 4 | 27 |
+| 159 | 0 | 5 |
+| 167 | 0 | 14 |
+
+So the step that "separated the furniture from everything else" separates
+scenery from **rounds in flight** — the `bf_b_01`, `bp_b_04`, `bb_b_02` names
+are `BULL` records — and a name appearing with two step counts (`bp_b_03`,
+`bp_b_04`, `s_stone_13`) is two objects of that name in different states.
+What an 8-byte step holds is **not established**.
+
+The `uint16` that "rose in file order" at `+0x1be` of a scenery record was,
+on every 450-byte one, the serial of the next record's id — 450 bytes on,
+four bytes before that record's archive name (33 of 33).
+
+## The part list — *read* and *measured*
+
+A model's part list is `AniMesh.dll`'s own array, handed over whole
+(`0x10003660`) except for its first entry, which is the object itself:
+
+```
+char[32]  archive
+char[32]  member
+int32     +64  the id of the part this one hangs off; 0 for the object
+int32     +68  the node of that part's mesh it bolts to, or its slot
+int32     +72  this part's own id
+```
+
+`0x10003760` attaches a part: it gives it the lowest id not already in use,
+looks its member up in `objects.rlb`, and turns `+68` into a place on the
+machine by the record's tag — for an `EXTO` part it adds what the object at
+`+0x13c` answers from slot 14 for `+64` (one less when `+64` is not 0), for an
+`INTO` part what the object at `+0x164` answers from slot 17. That is the
+node-or-slot split the `.dat` attachment field has
+([07-objects.md](07-objects.md)), taken relative to the parent part.
+`0x100036a0` reads the chunk back as `size / 76` records, each attached in
+turn.
+
+Measured over 906 part records in 94 lists:
+
+- **`+72` is unique within every list**, 94 of 94. Ids are handed out
+  lowest-free as parts come and go, which is why [18-vocabulary.md](18-vocabulary.md)
+  saw the numbers run down as often as up.
+- **`+64` names the object (0) or another part of the same list, 906 of 906.**
+- **Every ammunition part hangs off a weapon (`WPN`) at attachment 0** — a
+  clip in slot 0 of its gun, 69 of 69. Every weapon hangs off another part at
+  a non-zero node, 154 of 154 (140 of them an `SHS` part, 14 a `BLD` one), and
+  every `SHS` part off the object itself, 57 of 57.
+
+The earlier "round count" reading of ammunition's `+64` was the gun's id.
+
+## The placement — *measured*
+
+The model's chunk is three floats, **the object's scale**. The control system's
+chunk opens on a flags word — `0x10000ff0` on all 184 — then **the orientation
+as a quaternion `(w, x, y, z)`** and **the position**, at `+4` and `+20`.
+
+So the name and the position were always in the same record, and the question
+of how to join them is answered by reading the record rather than by windows:
+
+- **42 objects stand within 0.25 of where their mission placed them**, every
+  one read at `+20` of its own control chunk — the same 42 the byte scan
+  found before the record was known.
+- **41 carry the placed name**: 11 scenery pieces their own, 30 units and
+  buildings the member of their `.dat`'s root part (a mission places
+  `gener01.dat`; the save names `fr_l_gener`). The 42nd was placed as a
+  `splant01.dat` (`fr_l_plant`) and saved as `fr_m_plant`: a plant upgraded
+  since.
+- All 42 hold the placement's scale, and the 34 upright ones its angle `a`
+  as `(cos a/2, 0, 0, −sin a/2)`.
+- **Scenery keeps its placement but not exactly.** All 37 scenery records lie
+  within 5.7 units of a placement of their own name; 7 stand on it upright
+  and every one of the other 30 is tipped off the vertical. That is why
+  `s_tree_55`'s saved (511.2, 163.0, 221.8) is not the mission's (509.5,
+  164.2, 222.2). Trees and stones settled onto the ground is the obvious
+  reading; it is a **guess**.
+
+## The AI state — *read* and *measured*
+
+Each clan's last section is what `ai.dll`'s SuperAI hands over from its slot
+19 (`0x100020f0`): a 2000-byte block, 36 more bytes of counts and small
+fields, four bytes for every script variable, and 28 for each open problem of
+one kind and four for each entry of another. `varset.var` declares 231
+variables ([15-behaviour.md](15-behaviour.md)), so a clan with nothing open
+holds **2036 + 4 × 231 = 2960 bytes — 16 of the 20 clans exactly**; the other
+four hold 2972 and 2988.
 
 ## What a save refers to
 
 | save | mission | map | research trees | members |
-|---|---|---|---:|---:|
+|---|---|---|---|---:|
 | `slot1` | `campaign.05/mission.01` | `KM_14` | `data.trf` | 114 |
 | `slot2` | `campaign.04/mission.01` | `C4M1` | `data.trf` | 81 |
 | `slot3` | `campaign.05/mission.01` | `KM_14` | `data.trf` | 18 |
@@ -42,226 +246,53 @@ directory.
 | `slot6` | `single.02` | `SC_1` | `scream.trf` | 540 |
 
 Every one of those maps and research trees is installed. `slot4` naming
-**four** trees is the interesting row: a mission with three opposing clans
-carries a [research tree](16-research.md) for each, plus the shared `data.trf`
-— which is what the per-mission wiring in those archives is *for*.
-
-The size of a save tracks how much world there is, not how far in you are:
-`slot3` and `slot5` are the same mission minutes apart and both 20 KB, while
-`slot6`'s skirmish holds 540 references.
+**four** trees is a mission with three opposing clans carrying a
+[research tree](16-research.md) for each, plus the shared `data.trf`: each
+tree is a world object of class `0x1b`.
 
 ## The member references
 
-The engine's record for "a thing from an archive" is two 32-byte string
-fields, the archive then the member:
+Before the sections were read, references were recovered by **scanning** for
+an archive name followed by a member name 32 or 128 bytes later. The scan is
+kept, because it checks the archive side independently: **1342 references,
+and all 1342 resolve** into the archive they name, the game's own lookup
+folding case (`objects.rlb` holds `r_l_03` where a save says `R_L_03`).
 
-```
-+0    objects.rlb\0   ...pointer junk...
-+32   i_arm_b_05\0    ...pointer junk...
-```
+Every one of the 1342 now has a home in the parse: **184 record heads** (the
+128-byte form), **906 part records**, **201 in control chunks** and **51
+design components**. The narrow form's measured stride — 812 of 1152 gaps
+exactly 76 — was the part lists, diluted by the other two populations.
 
-**The pair is written two ways**, and an earlier draft of this section knew
-only one of them. The member name sits 32 bytes after the archive name in the
-common record and **128** in a second one. A scan that looks only at 32 does
-not report the others as unresolved — it never counts them — so its hit rate
-flattered its coverage by about a fifth.
+## Three ways in that did not work
 
-Scanning for both shapes recovers **1342 references across the six saves, and
-all 1342 resolve** into the archive they name. This is still a **scan, not a
-parse**, and the reader says so; a perfect hit rate against real data is what
-it has instead of a decode.
+Written down because each is the obvious next idea.
 
-The two records are not one field written loosely. The wide one names objects
-the mission itself places — 7, 8, 8, 3 and 8 of them on five of the six saves
-— and **the narrow one names none, on any save**. So the wide record is a
-placed world object and the narrow one is something else, most likely the
-parts a machine is assembled from.
+**The pointers do not resolve to file offsets.** Taking every plausible
+pointer value and every record offset, the best constant delta maps **3 of
+540** records — noise. The records were written one at a time into a buffer,
+so a pointer identifies an object only to the engine that wrote it. The parse
+made the question moot: records carry ids, and a part's parent is an id.
 
-An earlier draft also explained four references that "do not resolve": they
-paired `objects.rlb` with `R_L_03`, `R_L_04` and `R_L_05`, and were read as
-part ids from the research tree's `TRF6` rather than archive members. **That
-was a case-sensitivity bug and the explanation was invented to fit it.**
-`objects.rlb` holds those members as `r_l_03`, `r_l_04` and `r_l_05`, and the
-game's own lookup folds case — `NResArchive.find` says so. Nothing in a save
-names a research part id where a member belongs.
-
-So the member field holds an archive member, always.
-
-## The two records have sizes
-
-Both records repeat at a measurable stride, and the strides differ — which is
-the strongest evidence yet that they are two kinds of thing.
-
-**The part record is 76 bytes.** 812 of the 1152 gaps between consecutive
-narrow records are exactly that, the two-string record
-[18-vocabulary.md](18-vocabulary.md) already measures fields in. The rest are
-88, 112 and larger, which is what runs separated by their owner's own data
-look like.
-
-**The world record is 450 bytes plus a multiple of 8.** Every one of the 82
-gaps below 500 bytes between wide records is 450, 458, 466 or 474 — 82 of 82,
-no other value — so a world object has a fixed part and a short variable one.
-
-The step is not noise: **it separates the map's furniture from everything
-else.**
-
-| | records | steps taken |
-|---|---:|---|
-| `s_tree_*`, `s_stone_*` | 37 | **0** on 33, 1 on 4, never more |
-| everything else | 45 | 1 on 26, 2 on 5, 3 on 14, **never 0** |
-
-The names in the second row are `objects.rlb` members like `bb_b_02` and
-`bp_b_04` — not `.dat` assemblies and not `objects.dlb` parts, so the step is
-not a count of anything the model files carry.
-
-Nor is it a constant of the model: **three of the 24 names appear with two
-different counts** (`bp_b_03` and `bp_b_04` at 2 and 3, `s_stone_13` at 0 and
-1), so the same object saved twice can take a different number of steps. That
-makes it at least partly the instance's own state. A list of attached parts
-remains the obvious reading and is still a **guess**; what is measured is the
-split and the variation.
-
-## Inside the world record
-
-The fixed part carries a `uint16` at **+0x1be** that, on scenery, **only ever
-increases down the file** — 7, 8, 9, 10, 12, 14, 22 in one save — with
-`0xffff` where it holds nothing. Five of the six saves have scenery and all
-five rise. So it is an identity assigned in order.
-
-It is **not an index into the mission**: not into its object list, not into
-its statics, not into its non-statics, under any shift. `slot3`'s counter 9 is
-`s_tree_54` where the mission's ninth object is `s_tree_93`, and the offsets
-between the two orders are not even constant.
-
-And the same offset is **not the same field on every object**. On fourteen
-records of `slot1` it holds the low half of `1.0f` instead. So the 450-byte
-record is a size, not a layout: the classes inside it differ, which is what a
-dump of live objects looks like and why this is hard.
-
-## Inside the part record
-
-A census of all 1158 part records puts real fields only in the last twelve
-bytes. Everything before is the 32-byte archive field, the 32-byte member
-field, and the uninitialised tails of both.
-
-The three `int32` are **not three fields every part uses.** They split by what
-the part is:
-
-| kind | non-zero at `+64` | non-zero at `+68` |
-|---|---:|---:|
-| `AMM` ammunition | **69 of 69** | **0 of 69** |
-| `WPN` weapons | 165 of 165 | 165 of 165 |
-| `SHS` chassis | 8 of 65 | 65 of 65 |
-| `BLD` buildings | 7 of 43 | 43 of 43 |
-| `DVC` devices | 146 of 615 | 530 of 615 |
-
-**Ammunition is the only kind that never uses `+64`'s neighbour**, and the
-only kind that always uses `+64`, where it holds 10 to 20. A round count is
-the obvious reading and `objects.dlb` cannot confirm it: its stat rows name
-the fields a part displays (`Weight`, `Blast area`, `Damage`) without giving
-values, so there is no capacity to compare against. **Guess**, marked as one.
-
-`+72` is the ordinal [18-vocabulary.md](18-vocabulary.md) describes, still
-unexplained.
-
-## What the writer does, from the writer
-
-`iron3d.dll` holds the save code — `slot%d.sav` and `/save/` are its strings —
-and the magic pins the routine exactly: `mov dword ptr [esp + 0x4c],
-0x544f4c53` at **`0x100a1637`** is the only place `SLOT` is written. Two more
-sites compare against it, at `0x1001332c` and `0x100a2ced`, which are the
-"is this a save?" check and the loader.
-
-Everything goes out through one primitive, **`0x100b4b34`**, called as
-`(ptr, size, count, handle)` — `fwrite`. Read in order, the calls *are* the
-header this project parses:
-
-```
-fwrite(&"SLOT", 4, 1, f)
-fwrite(&version, 1, 1, f)          a byte
-fwrite(&flag, 1, 1, f)             a byte, read from the game object's +0x150
-fwrite(&length, 4, 1, f)           strlen of the mission path
-fwrite(path, length, 1, f)
-```
-
-which is independent confirmation of a header that was worked out from the
-files.
-
-**The body is length-prefixed blobs, and each one is somebody's memory.** The
-writer repeats `fwrite(&length, 4, 1)` then `fwrite(bytes, length, 1)`, and
-the bytes come from a **virtual call** — `call [edx + 0x58]` hands back a
-pointer and a length. So a subsystem is asked for its state and gives back a
-block, which the writer copies out whole. That is why the body is a heap dump,
-why pointers and stack rubbish are in it, and why the layout differs from
-class to class: nobody ever designed a record.
-
-Walking a save that way — header, then `(int32 length, bytes)` — reads **two
-blobs on all six saves**, the first holding 60% to 88% of the file, before the
-next dword stops being a length (it is ASCII: `"0."`). So the container is
-real and this reader walks as far as it is sure of.
-
-## Three ways in that do not work
-
-Written down because each is the obvious next idea, and each costs an
-afternoon to rule out.
-
-**The pointers do not resolve to file offsets.** A heap dump usually keeps its
-pointers, and if the file were a contiguous image of a heap region then
-`file offset = address - base` for one constant base. It is not. Taking every
-plausible pointer value and every known record offset, and asking which delta
-maps the most *distinct* records, the best reaches **3 of 540** — noise. The
-records were written one at a time, not copied as a block, so a pointer
-identifies an object only to the engine that wrote it.
-
-**The part record has no identity.** If a record held its own address, the
-graph could be rebuilt from the file alone. No field in the 76 bytes is unique
-per record: across 114 records in one save the most varied field holds **26
-distinct values**, and most hold fewer than ten. A part record is a *value* —
-a kind and some state — not an entity something else can point at.
+**A part record carries no pointer identity.** No field is unique across a
+save — the most varied holds 26 distinct values in 114 records. The identity
+it does carry is local: `+72`, unique within its own list.
 
 **Two saves of one mission differ mostly in rubbish.** `slot3` and `slot5` are
-the same mission and **90.4% identical**. The differences are regular — one
-two-byte change per world record, every 450 bytes — which looks like the
-signal until you read it: the dword at `+0x54` is `0x0019f4e8` in `slot1`,
-which is the Windows main-thread **stack** range. It is uninitialised buffer,
-and it differs because the two saves were written with a different stack under
-them. Differential analysis works mechanically; those two saves are simply
-nearly the same state.
+90.4% identical, and the regular difference — a word every 450 bytes, `+0x54`
+holding `0x0019f4e8` — is the Windows main-thread **stack** range. The parse
+says why it recurs at that stride: `+0x54` is inside a record head's 128-byte
+archive field, and `World3D.dll:0x10009bc0` copies the two names into a stack
+buffer and writes all 128 bytes of each, tail and all. A field holding
+`0x0019xxxx` is stack junk; the world header's last ten words are another
+example.
 
-That last one is worth keeping as a **tool**: a field holding `0x0019xxxx` is
-stack junk, and so is a field that differs between two saves of identical
-state. Mapping the rubbish before decoding anything is the way to avoid
-inventing meaning for it — which this project has already done once, with the
-`R_L_03` "research part id" that was really a case-sensitivity bug.
+## Positions are off the four-byte grid
 
-## Positions are in a save, off the four-byte grid
-
-An earlier version of this section said a save does not store where anything
-stands, on the evidence that a scan found 10 matching `float32` triples across
-all six saves. **That scan stepped four bytes at a time.** The records sit at
-arbitrary byte offsets — the two-string fields are not aligned to anything —
-so three quarters of the file was never looked at.
-
-Stepping **one** byte finds **42** triples matching a position the mission
-places, against 10 on the dword grid. `slot4` alone accounts for 20 of its 27
-placed objects. The matches land at every alignment: 0, 1, 2 and 3.
-
-Relative to the nearest world record they cluster at **`+0x143`** (scenery),
-**`+0x161`** (`fr_b_ruin`) and **`+0x1b1`** (`fr_l_gener`) — three classes,
-three offsets, which is the same "450 bytes is a size, not a layout" result
-from the other side.
-
-What is **not** established is the join between a record's name and the
-position at its offset. Reading `+0x143` of every scenery record gives
-plausible, stable coordinates — `s_tree_55` is (511.2, 163.0, 221.8) in all
-three saves of that mission — but they are not the mission's placement of
-*that* name. So the field is real and the attribution is not; a record's name
-field and the position near it may belong to different objects, which the
-450-byte window cannot resolve.
-
-The lesson is the one this project keeps relearning: **an alignment assumption
-is an assumption.** A negative that rests on one is worth no more than the
-assumption.
+An earlier version said a save does not store where anything stands, on a scan
+that stepped four bytes at a time and found 10 matching triples. Stepping
+**one** byte finds **42**, at every alignment — the records sit wherever the
+variable-length chunks before them end. **An alignment assumption is an
+assumption**, and a negative resting on one is worth no more than it.
 
 ## `saveslots.cfg`
 
@@ -281,19 +312,23 @@ END
 
 The first object declares the slot count and is not itself a slot — it has no
 `filename`, which is how the reader tells them apart. Seven slots, six not
-empty, and each of those six names a `.sav` that is on disk; `slot7` is marked
-empty and no `slot7.sav` exists.
+empty, and each of those six names a `.sav` that is on disk.
 
-## What is not read here
+## Not established
 
-Everything else, which is most of the file:
-
-- **The object graph.** Units, buildings, their components, positions, damage,
-  the player's resources, mission progress — all present, none decoded. The
-  76-byte two-string record is the one structure identified, and it appears in
-  runs of a few to a few hundred, separated by the owning object's own data.
-- **The heap addresses.** `0x10106b98` appears at the same place in all six
-  saves, so some of what is written is a vtable pointer, meaningless off the
-  machine that wrote it.
-- Whether the version byte's second half really means campaign against single,
-  or something else that happens to correlate. One of six saves has it set.
+- **What most chunks hold.** The part list is read, the scale and the control
+  chunk's first 32 bytes measured; the rest of the control chunk, the wizard's two
+  chunks, the behaviour's four, a building's extra 4-byte chunk and a research
+  tree's three are not. The 8-byte step of a scenery piece's or round's
+  control chunk is the smallest handle.
+- **The clan word** before each mind list (`clan record + 0x10`, 1 to 57).
+  The next handle is whoever writes that field.
+- **The 24-byte records** of the game object's `+0x700` member and **the
+  `1, id, id` triple** from the object at `+0x20`.
+- **The AI state's layout** beyond its size: which 2000 bytes are fixed and
+  what the 28- and 4-byte entries are. `ai.dll:0x100020f0` is the writer and
+  its slot 20, `0x10002400`, the reader.
+- Whether a mind list's ids are the units' logical ids: `slot1`'s player list
+  holds 12, 27, 28 and 29, and the mission places a hero with logical id 12,
+  but the world records carry serials, not logical ids, so nothing in the
+  file joins the two yet.
