@@ -250,9 +250,8 @@ pub fn place_own_view(
     use glam::{Mat4, Quat};
     let hero = &play.hero;
     let t = hero.time_ms;
-    let (position, _) = hero.walker.drawn(t);
-    let unit = Mat4::from_translation(position)
-        * Mat4::from_quat(Quat::from_rotation_z(hero.walker.drawn_heading(t)));
+    let (position, yaw) = hero.walker.drawn(t);
+    let unit = Mat4::from_translation(position) * Mat4::from_quat(Quat::from_rotation_z(yaw));
     let mount = hero.mount();
     let frames = hero.walker.frames(t);
     let (a, b, weight) = (f64::from(frames.a), f64::from(frames.b), f64::from(frames.weight));

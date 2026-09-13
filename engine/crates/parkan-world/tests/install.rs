@@ -314,3 +314,44 @@ fn the_hero_destroys_mission_01s_five_targets() {
     dead.sort_unstable();
     assert_eq!(dead, dummies);
 }
+
+#[test]
+#[ignore = "needs the game install"]
+fn a_strafe_turns_the_hull_while_the_turret_holds_the_sight() {
+    use parkan_formats::{landmesh, mission};
+    use parkan_sim::ground::Ground;
+    use parkan_world::{assembly::Assembly, hero::Hero};
+
+    let game = gamedir::find(None).expect("a Parkan install: set PARKAN_DIR");
+    let dir = gamedir::resolve(&game, gamedir::MISSION_01).unwrap();
+    let m = mission::parse(&std::fs::read(dir.join("data.tma")).unwrap(), "Mission.01").unwrap();
+    let mut assembly = Assembly::new(&game).unwrap();
+    let mut hero = Hero::load(&mut assembly, &m).unwrap().expect("Mission 01 has a hero");
+    let land = landmesh::load(&gamedir::resolve(&game, "DATA/MAPS/Tut_1/Land.msh").unwrap()).unwrap();
+    let ground = Ground::new(land);
+    let wrap = |a: f32| (a + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI;
+    // The sight's heading against the unit's: the hull's yaw plus the turret's strafe
+    // offset (docs/24, docs/30). A strafe turns the hull; the turret takes it back.
+    let against_heading = |hero: &Hero| {
+        let (_, sight) = hero.sight().expect("the hero's turret has a sight");
+        wrap((-sight.x).atan2(sight.y) - hero.walker.drawn_heading(hero.time_ms))
+    };
+    let tick = 1000.0 / 60.0;
+    hero.tick(tick, [0.0; 2], &ground);
+    let rest = against_heading(&hero);
+
+    // Through the strafe turn itself: afterwards the run cycle sways the turret's socket.
+    hero.key("SCAN_A", true);
+    let mut turned = 0.0_f32;
+    for _ in 0..60 {
+        hero.tick(tick, [0.0; 2], &ground);
+        let t = hero.time_ms;
+        turned = turned.max(wrap(hero.walker.drawn(t).1 - hero.walker.drawn_heading(t)).abs());
+        let off = wrap(against_heading(&hero) - rest);
+        assert!(off.abs() < 0.005, "the sight drifted {off} rad from the heading at {t} ms");
+        if turned > std::f32::consts::FRAC_PI_2 - 0.01 {
+            return;
+        }
+    }
+    panic!("the hull turned only {turned} rad away from the heading");
+}

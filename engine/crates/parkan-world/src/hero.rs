@@ -217,6 +217,7 @@ impl Hero {
         pilot.mouse(mouse, &mut hands);
         self.time_ms += dt_ms;
         self.walk(ground);
+        self.rig.strafe = self.walker.strafe_offset(self.time_ms);
 
         // `World3D.dll:0x100109f8`: a gun's number toggles it and sends its arm state 1
         // or 2; -1 selects and resets every gun and sends every arm `0x21`.
@@ -274,7 +275,7 @@ impl Hero {
         let w = &mut self.walker;
         for _ in 0..MAX_STEPS {
             if w.controller.states.is_empty() || self.time_ms < w.machine.clock_ms {
-                return;
+                break;
             }
             let due = w.machine.clock_ms;
             w.advance(due, ground);
@@ -297,7 +298,7 @@ impl Hero {
     pub fn point(&self, index: usize) -> Option<(Vec3, Vec3)> {
         let p = self.points.get(index)?;
         let (position, _) = self.walker.drawn(self.time_ms);
-        let heading = Quat::from_rotation_z(self.walker.drawn_heading(self.time_ms));
+        let heading = Quat::from_rotation_z(self.walker.drawn(self.time_ms).1);
         let pose = self.turret_node(&self.mount(), usize::try_from(p.nodes().0).ok()?);
         let f = |v: [f64; 3]| Vec3::new(v[0] as f32, v[1] as f32, v[2] as f32);
         let at = f(pose.apply(p.position.map(f64::from)));
@@ -343,7 +344,7 @@ impl Hero {
     /// for the up, turned by free look ([`view`]).
     pub fn eye(&self) -> Eye {
         let (position, _) = self.walker.drawn(self.time_ms);
-        let heading = Quat::from_rotation_z(self.walker.drawn_heading(self.time_ms));
+        let heading = Quat::from_rotation_z(self.walker.drawn(self.time_ms).1);
         let mount = self.mount();
         let node = |p: &ControlPoint| usize::try_from(p.nodes().0).unwrap_or(0);
         let at = self.turret_node(&mount, node(&self.eye_point));

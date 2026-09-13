@@ -278,6 +278,9 @@ pub struct Rig {
     /// elevation; the caller keeps it.
     pub center_up: f32,
     pub shake: Shake,
+    /// The strafe offset the control takt hands the turret, in radians (`0x10005ab8`);
+    /// the caller keeps it. The yaw channel plays it on top of its value ([`Rig::frame_of`]).
+    pub strafe: f32,
 }
 
 impl Rig {
@@ -321,6 +324,7 @@ impl Rig {
             arms,
             center_up: 1.0,
             shake: Shake::default(),
+            strafe: 0.0,
             channels,
             values,
         }
@@ -386,12 +390,26 @@ impl Rig {
 
     /// The frame a mesh node plays, where a channel drives it: the first channel on
     /// that node that is driven and has frames.
+    ///
+    /// The yaw channel adds the strafe offset ÷ its span, negated on a hung turret, before
+    /// it wraps and inverts (docs/30): the offset turns the turret against the hull's
+    /// strafe turn without entering the channel's value or its rate.
     pub fn frame_of(&self, node: usize) -> Option<f32> {
         self.channels
             .iter()
             .zip(&self.values)
-            .find(|(c, _)| c.node == node as i32 && c.flags & CHANNEL_UNDRIVEN == 0 && c.first >= 0.0)
-            .map(|(c, &v)| c.frame(v))
+            .enumerate()
+            .find(|(_, (c, _))| c.node == node as i32 && c.flags & CHANNEL_UNDRIVEN == 0 && c.first >= 0.0)
+            .map(|(i, (c, &v))| c.frame(v + self.strafe_share(i, c)))
+    }
+
+    /// What channel `index` adds to its value for the strafe offset.
+    fn strafe_share(&self, index: usize, channel: &Channel) -> f32 {
+        if Some(index) != self.yaw || channel.span == 0.0 {
+            return 0.0;
+        }
+        let share = self.strafe / channel.span;
+        if self.upright { share } else { -share }
     }
 }
 
@@ -480,6 +498,26 @@ mod tests {
         }
         assert_eq!(rig.values[2], 1.0);
         assert_eq!(rig.frame_of(34), Some(57.0));
+    }
+
+    #[test]
+    fn the_yaw_channel_plays_the_strafe_offset_over_its_span_and_nothing_else_does() {
+        let mut rig = Rig::new(&hero());
+        let yaw = rig.yaw.unwrap();
+        let ch = rig.channels[yaw];
+        let node = ch.node as usize;
+        let pitch_node = rig.channels[rig.pitch.unwrap()].node as usize;
+        let (yaw_frame, pitch_frame) = (rig.frame_of(node), rig.frame_of(pitch_node));
+        // A quarter turn of strafe offset is a quarter of a 2π span on the yaw alone.
+        rig.strafe = -std::f32::consts::FRAC_PI_2;
+        let share = rig.strafe / ch.span;
+        assert_eq!(rig.frame_of(node), Some(ch.frame(rig.values[yaw] + share)));
+        assert_ne!(rig.frame_of(node), yaw_frame);
+        assert_eq!(rig.frame_of(pitch_node), pitch_frame);
+        assert_eq!(rig.values[yaw], Rig::new(&hero()).values[yaw], "the value does not take it");
+        // A hung turret takes it negated.
+        rig.upright = false;
+        assert_eq!(rig.frame_of(node), Some(ch.frame(rig.values[yaw] - share)));
     }
 
     #[test]
