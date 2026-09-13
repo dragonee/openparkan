@@ -816,10 +816,12 @@ def cmd_behaviour(args, game: Path) -> int:
         print(f"{match[0].name} has no handler {args.handler!r}; it has "
               + ", ".join(h.name for h in script.handlers))
         return 1
+    fml = match[0].with_suffix(behaviour.FORMULAS)
+    exprs = behaviour.formulas(match[0]) if fml.exists() else None
     print(f"{match[0].name}: {len(script.handlers)} handlers, {script.nodes} nodes")
-    print("# fnN, opN and tagN are numbered, not named -- the shipped files say "
-          "what they take, not what they do\n")
-    for line in behaviour.render(script, table, args.handler or ""):
+    print("# fnN indexes ai.dll's 73-slot function table; see docs/15-behaviour.md "
+          "for what each one reads\n")
+    for line in behaviour.render(script, table, args.handler or "", exprs):
         print(line)
     return 0
 

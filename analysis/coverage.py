@@ -209,9 +209,31 @@ class Module:
         boundary: set[int] = set()
         ends: dict[int, str] = {}
         edges: dict[int, set[int]] = defaultdict(set)
+        # A handler table the code writes rather than the linker: a run of
+        # `mov dword ptr [reg + k], <code address>`.  `ai.dll` fills its
+        # script interpreter's 73 handlers that way (0x1000128a), and the
+        # handlers have no padding and no direct caller, so without this
+        # 0x10007fd0..0x1000f4d7 reads as two functions of 30 KB.  One other
+        # instruction may sit inside the run: that table's last store comes
+        # after the `cmp` of the version gate.
+        stored: list[int] = []
+        other = 0
+        written: set[int] = set()
         for ins in self.sweep():
             boundary.add(ins.address)
             ends[ins.address + ins.size] = ins.mnemonic
+            ops = ins.operands
+            if ins.mnemonic == "mov" and len(ops) == 2 \
+                    and ops[0].type == X.X86_OP_MEM and ops[0].mem.base \
+                    and ops[1].type == X.X86_OP_IMM and self.in_text(ops[1].imm):
+                stored.append(ops[1].imm)
+                other = 0
+            elif stored:
+                other += 1
+                if other > 1:
+                    if len(stored) >= VTABLE_RUN:
+                        written.update(stored)
+                    stored, other = [], 0
             if ins.mnemonic == "call" and ins.operands[0].type == X.X86_OP_IMM:
                 t = ins.operands[0].imm
                 if self.in_text(t):
@@ -223,7 +245,7 @@ class Module:
                     if text:
                         strings[ins.address].append(text)
 
-        starts = set(targets) | {self.va0}
+        starts = set(targets) | written | {self.va0}
         for m in PADDING.finditer(self.data):
             if m.end() < len(self.data):
                 starts.add(self.va0 + m.end())

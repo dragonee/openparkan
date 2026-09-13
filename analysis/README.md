@@ -137,23 +137,44 @@ the research tree. Useful addresses, all in `ai.dll`:
 
 | address | what |
 |---|---|
-| `0x100014f9` | `cmp edi, 0x49` — the script version check; the error text calls them "not up to date" |
-| `0x1000129e` | the loader's initialiser, which writes 70 handler pointers at object offsets `0xc`..`0x120` |
-| `0x100122b5` | the dispatch loop: load `head[0]`, test against −1, `call [table + id*4]`, follow `[node+8]` to the next |
-| `0x10012313` | the branch taken when `head[0]` is −1 |
+| `0x10011b20` | the loader: the first word is the function-table length, then handlers of 0x14 bytes and nodes of 0x20 |
+| `0x1000128a` | the SuperAI constructor's **73** stores into the function table, `+0x0`..`+0x120`; slot *n* is function *n* |
+| `0x100014f9` | `cmp edi, 0x49` — the script's table length against 73; the error text calls them "not up to date", and loading goes on |
+| `0x10012020` | the node executor: `jmp [(head[3] + 1)*4 + 0x10012380]`, eight kinds |
+| `0x100122b5` | kind −1 with a function: `call [table + head[0]*4]` on the SuperAI, then the result slot into `head[1]` |
+| `0x10012313` | kind −1 without one: copy variable `head[2]`, or evaluate formula `trailer` (`0x10012343`) |
 
-See [../docs/15-behaviour.md](../docs/15-behaviour.md). The handlers carry no
-strings, so the binary does not name them.
+See [../docs/15-behaviour.md](../docs/15-behaviour.md).
+
+```
+uv run --group analysis python analysis/scrtable.py
+```
+
+re-derives the table, reads which operands each handler fetches, and checks
+the count against the scripts: exact on 55 of the 57 functions they call, and
+`openparkan.behaviour.ARGUMENTS` equal to the binary.
+
+**Two mistakes this cost, both worth keeping.**
+
+- **An address quoted mid-run hid the start of the run.** The first note began
+  counting stores at `0x1000129e`, the fourth of them, found 70, and concluded
+  70 slots could not cover 73 ids — so there was no mapping to look for. Read a
+  run from where it starts, not from where a search landed.
+- **A table written by code is invisible to the function finder.** The 73
+  handlers have no padding and no direct caller, so `coverage.py` fused them
+  into two functions of 30 KB, and one site read inside marked all of it read.
+  It now believes a run of six or more `mov [reg + k], <code address>` as it
+  believes a vtable in data; across the install that adds the 72 handlers it
+  lacked and two comparators in `Ngi32.dll`, nothing else.
 
 **No 73-entry switch, checked exhaustively.** Enumerating every jump table in
 `ai.dll` rather than searching for one -- match `jmp dword ptr [reg*4 + T]`
 and read the `cmp` that guards it -- gives **72 tables, the widest 13
-entries**. So the negative holds, and now for a reason that does not depend on
-what the search was looking for. Fourteen of those tables are the same 6-way
-switch on a value's type tag (`0x100127b0` and its neighbours): a string copy,
-`itoa` base 10, a hex form that writes its own `0x`, and a boolean test. The
-scripts declare only `DWORD` and `float`, so the interpreter holds more types
-than `varset.var` uses.
+entries**. That negative was right and is now explained: the 73 ids index a
+table of function pointers, not a switch. Fourteen of the jump tables are the
+same 6-way switch on a value's type tag (`0x100127b0` and its neighbours), and
+the interpreter names the six tags itself at `0x10037688`: `void`, `int`,
+`BOOL`, `float`, `char*`, `DWORD`.
 
 
 ## The component registry

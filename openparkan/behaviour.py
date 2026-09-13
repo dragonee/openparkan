@@ -6,7 +6,7 @@ more: a three-word header, then one record per handler, each carrying its own
 node list.  All 58 shipped scripts read end to end with nothing left over.
 
 ```
-int32   magic, always 73
+int32   73, the length of the function table
 int32   handler count
 handler x count:
     int32   name length
@@ -15,11 +15,14 @@ handler x count:
     int32   index, 0 upward in file order
     int32   node count
     node x count:
-        int32   head[4]     four reference fields, meanings open
-        int32   opcode      0..6
+        int32   head[0]     function id, or -1
+        int32   head[1]     destination variable, or -1
+        int32   head[2]     source variable, or a number, or -1
+        int32   head[3]     kind, -1..6
+        int32   opcode      an if's relation 0..5, else 6
         int32   operand count
         int32   operands[count]
-        int32   trailer
+        int32   trailer     formula index into the .fml, or -1
 ```
 
 Nine handlers are in **every** script -- `Init`, `Problems0`, `Mission`, four
@@ -38,23 +41,22 @@ first 23 declarations, which are the literal constants ``f0``..``f9`` and
 freely.  A node therefore reads its sources and writes its result, and which
 slot is which is settled.
 
-A node comes in **two forms**, and ``head[0]`` is what tells them apart.  With
-it set the node is a **call**: ``head[0]`` picks one of 57 functions, the
-operands are its arguments, and ``head[2]``, ``head[3]`` and the trailer are
-null on every one of the 2087.  With it unset ``head[3]`` takes over as the selector,
-with an arity of its own: tags 3 and 4 take one operand and the rest take
-none.  Two of the seven tags write a destination and the other five do not,
-and a node that writes carries exactly one source while a node that does not
-carries none -- 1718 and 1321, no exceptions.  The source is the trailer, a
-variable, or ``head[2]``, which the tag reads as a variable under -1 and as a
-plain number under 6.  Only opcode 6 ever carries ``head[0]``; the
-fixed-arity opcodes 0 to 5 never do.
+``head[3]`` is the node's **kind**, which ``ai.dll``'s executor switches on
+(``0x10012020``): -1 a statement, 0 an ``if``, 1 its ``end``, 2 a label, 3 a
+jump to a label, 4 a jump to another handler, 5 ``return``, 6 a constant.  A
+statement with ``head[0]`` set is a **call** of function ``head[0]`` -- an index
+straight into a 73-slot handler table, the operands its arguments and the
+result written to ``head[1]``; without it the statement copies the variable
+``head[2]`` or, failing that, evaluates **formula** ``trailer`` of the script's
+own ``.fml`` file.  An ``if`` compares its two operands under the relation its
+fifth word names (``RELATIONS``); that word is 6 on every other node.  The
+kinds' arities are fixed: ``if`` takes two operands, the two jumps one, the
+rest none.
 
-A function's signature is fixed: all 57 appear under one opcode, 52 of 57
-under a single operand count, and 56 of 57 either always write a destination
-or never do.  What each function *computes* is not read here, though the
-arguments say a good deal -- function 19 takes ``ClanBaseX``, ``ClanBaseY``
-and ``ClanID`` and appears only in ``Init``.  See ``docs/15-behaviour.md``.
+A function's signature is fixed: all 57 the scripts use take a single number
+of arguments but for five with optional trailing ones, and the handler behind
+each reads exactly that many (``ARGUMENTS``, out of the binary) on 55 of 57.
+See ``docs/15-behaviour.md``.
 
 Everything above is re-derived by ``uv run openparkan verify``.
 """
@@ -66,16 +68,56 @@ import struct
 from dataclasses import dataclass
 from pathlib import Path
 
-#: The first word of every script.
+#: The first word of every script.  It is the length of the function table
+#: the script was compiled against: ``ai.dll``'s loader allocates that many
+#: slots, its constructor fills 73 and warns "Scripts are not up to date" when
+#: the word says otherwise (``0x100014f9``).
 MAGIC = 73
+
+#: How many handlers the interpreter's function table holds; a call's
+#: ``head[0]`` indexes it directly.
+FUNCTION_TABLE = 73
 
 #: The byte between a handler's name and its index; 0 on all 677 records.
 NAME_PAD = 0
 
-#: Opcodes 0 to 5 take exactly two operands.  Opcode 6 is variadic.
+#: The fifth word.  On an ``IF`` node it is the relation, 0 to 5, and the node
+#: takes exactly two operands; on every other node it is 6.
 BINARY = range(0, 6)
 VARIADIC = 6
 OPCODES = range(0, 7)
+
+#: The relation an ``IF`` applies, by its fifth word -- read from the executor
+#: (``ai.dll:0x1001203f``).  Both operands are compared as unsigned ``DWORD``
+#: when the first is a ``DWORD``, and as floats otherwise.
+RELATIONS = ("<", "==", ">", "<=", ">=", "!=")
+
+#: ``head[3]``: what a node is.  ``ai.dll:0x10012038`` jumps on ``kind + 1``
+#: through an eight-entry table.
+STATEMENT = -1      # a call, or a copy from a variable or a formula
+IF = 0              # compare two operands; opens a block
+END = 1             # closes the innermost block
+LABEL = 2           # a jump target, which does nothing
+GOTO = 3            # continue at the label whose node index is the operand
+SWITCH = 4          # continue in the handler whose index is the operand
+RETURN = 5          # stop running the handler
+CONST = 6           # write head[2], as a plain number, to the destination
+
+#: How many operands each handler of the function table reads, by function
+#: id -- out of ``ai.dll`` by ``analysis/scrtable.py``, which fetches each
+#: operand the same way.  The scripts pass exactly this many on 55 of the 57
+#: functions they call; function 14 has an optional fourth the corpus never
+#: passes, and function 0 ignores the one it is given.
+ARGUMENTS = (
+    0, 1, 7, 0, 1, 2, 2, 0, 1, 0, 0, 1, 0, 2, 4, 11, 2, 2, 2, 3,
+    4, 2, 1, 3, 1, 5, 2, 3, 11, 1, 2, 2, 2, 1, 1, 2, 2, 1, 2, 1,
+    3, 1, 1, 0, 5, 0, 0, 2, 1, 0, 1, 2, 1, 1, 1, 1, 0, 2, 1, 1,
+    1, 1, 1, 1, 2, 0, 2, 1, 1, 1, 1, 3, 1,
+)
+
+#: The handlers that never write the interpreter's result slot.  A call to one
+#: of them never names a destination in the shipped scripts.
+VOID_FUNCTIONS = (4, 5, 6, 8, 9, 30, 43, 51, 57, 62)
 
 #: The widest operand list in the shipped scripts.
 MAX_OPERANDS = 11
@@ -86,34 +128,46 @@ FUNCTION_IDS = range(0, 73)
 
 #: ``head[3]`` on an assignment: these two write a destination, the rest
 #: (1 to 5) are the forms that write nothing.
-ASSIGN_TAGS = (-1, 6)
+ASSIGN_TAGS = (STATEMENT, CONST)
 
-#: ``head[3]`` is the non-call node's own selector, and like a function id it
-#: has a fixed arity.  Tags 3 and 4 take one operand; the rest take none.
-TAG_ARITY = {-1: 0, 1: 0, 2: 0, 3: 1, 4: 1, 5: 0, 6: 0}
+#: A node kind fixes its arity, the way a function id does.  The comparison
+#: takes two operands, the two jumps one, the rest none.
+TAG_ARITY = {STATEMENT: 0, IF: 2, END: 0, LABEL: 0, GOTO: 1, SWITCH: 1, RETURN: 0,
+             CONST: 0}
 
-#: The tag under which ``head[2]`` is a variable index, and the one under
+#: The kind under which ``head[2]`` is a variable index, and the one under
 #: which it is a plain number.
-REFERENCE_TAG = -1
-LITERAL_TAG = 6
+REFERENCE_TAG = STATEMENT
+LITERAL_TAG = CONST
 
-#: The tag that closes a block a comparison opened.  Across the corpus, 675
+#: The kind that closes a block a comparison opened.  Across the corpus, 675
 #: of 677 handlers hold exactly as many of these as comparisons and bracket
-#: cleanly, nesting up to five deep.
-CLOSE_TAG = 1
+#: cleanly, nesting up to five deep; the engine clamps a spare one at depth 0.
+CLOSE_TAG = END
 
-#: The three tags that end a block: 319 of their 320 nodes are immediately
-#: followed by a ``CLOSE_TAG``.  Tag 5 takes nothing, 3 and 4 take one
-#: operand each.
-EXIT_TAGS = (3, 4, 5)
+#: The three kinds that leave the code in front of them: a jump to a label, a
+#: jump to a handler, and ``return``.  Taken inside a block, each also drops
+#: every open block.  319 of their 320 nodes are the last thing in a block.
+EXIT_TAGS = (GOTO, SWITCH, RETURN)
 
-#: The one tag that is not a block terminator.  It sits at the outermost
-#: depth on 56 of 57, and what follows it is the handler's bookkeeping.
-MARKER_TAG = 2
+#: The label a ``GOTO`` lands on.  It does nothing when run.
+MARKER_TAG = LABEL
 
-#: The high half set on 55 of the literals.  Its meaning is open; a sign is
-#: the obvious guess and nothing tests it.
-LITERAL_FLAG = 0x8000_0000
+#: The bit set on 55 of the literals, and on every building's logical id: the
+#: ``varset.var`` constant ``CLASS_BUILDING``.  A mission gives it to every
+#: object it places that is not a unit.
+CLASS_BUILDING = 0x8000_0000
+LITERAL_FLAG = CLASS_BUILDING
+
+#: The owner word of a destroyed object.  Every comparison the scripts make
+#: against a variable set to 65534 tests it against function 52's answer --
+#: the owner clan of a logical id -- and fails an objective when they match.
+DESTROYED = 0xFFFE
+
+#: A script's formulas: ``<script>.fml`` beside it, one ``FUNCTION( , expr, )``
+#: line per statement that evaluates one.
+FORMULAS = ".fml"
+FORMULA_HEADER = "//FormulaSet export file"
 
 #: The engine's own event handlers: present in all 58 scripts.
 EVENTS = (
@@ -159,10 +213,11 @@ VARSET = "varset.var"
 #: ever used: the shipped file has no ``STRING`` declaration at all.
 DECLARATIONS = ("VAR", "STRING")
 
-#: The types those declarations carry, and how many of each.  ``ai.dll`` can
-#: hold at least six -- its value formatter switches six ways on a type tag --
-#: so the scripts use two of the interpreter's types.
+#: The types those declarations carry, and how many of each.  ``ai.dll`` holds
+#: six, by a type tag it names in a table of its own (``0x10037688``): 0
+#: ``void``, 1 ``int``, 2 ``BOOL``, 3 ``float``, 4 ``char*``, 5 ``DWORD``.
 TYPES = {"DWORD": 200, "float": 31}
+TYPE_TAGS = ("void", "int", "BOOL", "float", "char*", "DWORD")
 
 #: Declarations 0 to 22 are the read-only pool -- the float and integer
 #: literals 0..9, and the three values the engine writes itself.  A node's
@@ -182,10 +237,11 @@ class ScriptFormatError(ValueError):
 class Node:
     """One node of a handler.
 
-    ``operands`` and ``destination`` are indices into ``varset.var``.  The
-    rest of ``head`` is open: slot 0 runs -1..72 and indexes something this
-    reader has not found, slot 2 is -1 on all but 339 nodes with a handful of
-    values carrying the top bit, and slot 3 runs -1..6, the opcode's range.
+    ``operands`` and ``destination`` are indices into ``varset.var``, except
+    on the two jumps, whose one operand is a node or handler index.
+    ``head[0]`` is a function id, ``head[2]`` a variable or a number by kind,
+    ``head[3]`` the kind, ``opcode`` an ``IF``'s relation and ``trailer`` a
+    formula index.
     """
 
     head: tuple[int, int, int, int]
@@ -195,8 +251,34 @@ class Node:
 
     @property
     def binary(self) -> bool:
-        """True for the fixed-arity opcodes, which always carry two operands."""
+        """True for a comparison, which always carries two operands."""
         return self.opcode in BINARY
+
+    @property
+    def kind(self) -> int:
+        """``head[3]``: ``STATEMENT``, ``IF``, ``END``, ``LABEL``, ... ``CONST``."""
+        return self.head[3]
+
+    @property
+    def relation(self) -> str:
+        """An ``IF``'s comparison as its operator, or ``''`` on any other node."""
+        if not self.calls and self.kind == IF and self.opcode in BINARY:
+            return RELATIONS[self.opcode]
+        return ""
+
+    @property
+    def target(self) -> int:
+        """Where a jump goes: the label's node index for ``GOTO``, the handler's
+        index for ``SWITCH``, or ``NULL``."""
+        if not self.calls and self.kind in (GOTO, SWITCH) and self.operands:
+            return self.operands[0]
+        return NULL
+
+    @property
+    def formula(self) -> int:
+        """The formula a statement evaluates, as an index into its ``.fml``, or
+        ``NULL``."""
+        return self.trailer if not self.calls else NULL
 
     @property
     def function(self) -> int:
@@ -210,10 +292,11 @@ class Node:
 
     @property
     def source(self) -> int:
-        """The variable an assignment reads, or ``NULL``.
+        """The formula an assignment evaluates, or ``NULL``; see ``formula``.
 
         Only ever set on a node that writes, and never together with
-        ``immediate``.
+        ``immediate``.  It indexes the script's ``.fml``, not ``varset.var``:
+        the low indices that dominate made it look like the literal pool.
         """
         return self.trailer
 
@@ -262,8 +345,8 @@ class Node:
     def literal(self) -> int:
         """The number ``head[2]`` holds, or ``NULL`` if it is not one.
 
-        The flag bit, set on 55 of them, is left in place: this returns the
-        word as written.
+        ``CLASS_BUILDING``, set on 55 of them, is left in place: this returns
+        the word as written, sign and all.
         """
         return self.head[2] if self.tag == LITERAL_TAG else NULL
 
@@ -485,13 +568,43 @@ def name_at(table: list[Variable], index: int) -> str:
     return ""
 
 
-def render_node(node: Node, table: list[Variable]) -> str:
+_FUNCTION = re.compile(r"^\s*FUNCTION\(\s*[^,]*,(.*),[^,]*\)\s*;?\s*$")
+
+
+def parse_formulas(text: str, where: str = "<text>") -> list[str]:
+    """The expressions of one ``.fml``, in file order.
+
+    Each line is ``FUNCTION( , <expression>,  )`` -- the first and last fields
+    are empty on all 1379 shipped lines -- and the index is the position,
+    which is what a statement's trailer counts.
+    """
+    out: list[str] = []
+    for line in text.replace("\r\n", "\n").split("\n"):
+        if not line.strip() or line.lstrip().startswith("//"):
+            continue
+        found = _FUNCTION.match(line)
+        if not found:
+            raise ScriptFormatError(f"{where}: not a formula: {line.strip()!r}")
+        out.append(found.group(1).strip())
+    return out
+
+
+def formulas(path: Path) -> list[str]:
+    """Read the ``.fml`` beside a script; ``path`` may name either file."""
+    fml = path.with_suffix(FORMULAS)
+    return parse_formulas(fml.read_text("latin-1"), fml.name)
+
+
+def render_node(node: Node, table: list[Variable], exprs: list[str] | None = None,
+                handlers: tuple[str, ...] = ()) -> str:
     """One node as a line of pseudo-code.
 
-    Nothing here is named beyond what the data names.  A function is
-    ``fn15``, a fixed-arity opcode ``op1`` and a tag ``tag5``, because the
-    shipped files say what they take and not what they do.  The variables are
-    real names out of ``varset.var``.
+    The control flow is named because it is read from the executor: ``if``
+    with its relation, ``end``, ``label``, ``goto``, ``return``.  A function
+    stays ``fn15``: its table index is what the file holds.  Variables are
+    real names out of ``varset.var``; a formula prints as the expression its
+    ``.fml`` gives when ``exprs`` is passed, and a jump to a handler by name
+    when ``handlers`` is.
     """
     args = ", ".join(name_at(table, o) or str(o) for o in node.operands)
     into = name_at(table, node.destination) or ""
@@ -499,28 +612,44 @@ def render_node(node: Node, table: list[Variable]) -> str:
 
     if node.calls:
         return f"{lead}fn{node.function}({args})"
-    if node.opcode in BINARY:
-        return f"{lead}op{node.opcode}({args})"
+    if node.relation and len(node.operands) == 2:
+        a, b = (name_at(table, o) or str(o) for o in node.operands)
+        return f"if {a} {node.relation} {b}"
     if node.source != NULL:
-        return f"{lead}{name_at(table, node.source) or node.source}"
+        if exprs is not None and 0 <= node.source < len(exprs):
+            return f"{lead}{exprs[node.source]}"
+        return f"{lead}formula {node.source}"
     if node.reference != NULL:
         return f"{lead}{name_at(table, node.reference) or node.reference}"
     if node.literal != NULL:
-        value = node.literal
-        if value >= 0:
-            return f"{lead}{value}"
-        # Python ints are unbounded, so mask to the word the file holds.
-        return f"{lead}{value & 0xFFFF_FFFF & ~LITERAL_FLAG}  # flag {LITERAL_FLAG:#x} set"
+        value = node.literal & 0xFFFF_FFFF    # the word the file holds
+        if value & CLASS_BUILDING:
+            return f"{lead}CLASS_BUILDING|{value & ~CLASS_BUILDING}"
+        return f"{lead}{value}"
+    if node.kind == END and not args:
+        return "end"
+    if node.kind == LABEL and not args:
+        return "label"
+    if node.kind == RETURN and not args:
+        return "return"
+    if node.kind == GOTO and node.target != NULL:
+        return f"goto {node.target}"
+    if node.kind == SWITCH and node.target != NULL:
+        if 0 <= node.target < len(handlers):
+            return f"goto {handlers[node.target]}"
+        return f"goto handler {node.target}"
     return f"{lead}tag{node.tag}({args})" if args else f"{lead}tag{node.tag}"
 
 
-def render(script: Script, table: list[Variable], only: str = "") -> list[str]:
+def render(script: Script, table: list[Variable], only: str = "",
+           exprs: list[str] | None = None) -> list[str]:
     """A script as pseudo-code, one handler after another.
 
-    Indented on the bracketing a comparison and ``CLOSE_TAG`` make, which
-    holds on 675 of the corpus's 677 handlers.  The depth is clamped at zero
-    so the two that carry a spare closer still print.
+    Indented on the bracketing an ``if`` and ``end`` make, which holds on 675
+    of the corpus's 677 handlers.  The depth is clamped at zero, as the
+    engine clamps it, so the two that carry a spare ``end`` still print.
     """
+    names = tuple(h.name for h in script.handlers)
     lines: list[str] = []
     for handler in script.handlers:
         if only and handler.name != only:
@@ -530,7 +659,8 @@ def render(script: Script, table: list[Variable], only: str = "") -> list[str]:
         for index, node in enumerate(handler.nodes):
             if node.closes:
                 depth = max(0, depth - 1)
-            lines.append(f"  {index:4}  {'  ' * depth}{render_node(node, table)}")
+            text = render_node(node, table, exprs, names)
+            lines.append(f"  {index:4}  {'  ' * depth}{text}")
             if node.opens:
                 depth += 1
         lines.append("")
