@@ -4,7 +4,9 @@ A Rust engine for *Parkan: Iron Strategy* that reads the game's own install.
 Its first target is Phase One: load Mission 01, *Line of Fire*, put the hero
 at its start, and walk, look and shoot in first person.
 
-There is no code here yet. This directory holds what the code will follow:
+Milestone **M0** is in: the workspace, the NRes and mission readers, the
+golden cross-check, and a window over Mission 01's placed objects. This
+directory also holds what the rest will follow:
 
 - **`docs/`** is the source of truth. Every behaviour the engine implements is
   in a doc there, labelled *read* or *measured*, and re-derived by
@@ -19,6 +21,33 @@ There is no code here yet. This directory holds what the code will follow:
 The plan is Rust + wgpu (winit, glam; kira for sound later). It covers one
 workspace of `parkan-formats`, `parkan-sim`, `parkan-world`, `parkan-render`
 and `parkan`, in milestones M0 to M5.
+
+## Running it
+
+```
+cd engine
+cargo run --release -p parkan                                  # Mission 01, debug camera
+cargo run --release -p parkan -- --screenshot m0.png           # one frame to a PNG, no window
+cargo run --release -p parkan -- --mission MISSIONS/Single.01  # another mission
+```
+
+`--game DIR` or `PARKAN_DIR` points at the install when it is not beside this
+repository. In the window W/A/S/D and Q/E fly, holding the right mouse button
+turns, Shift flies faster and Escape quits.
+
+## Checks
+
+```
+cargo fmt --all --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace                 # synthetic bytes only
+cargo test --workspace -- --ignored    # against the install
+cargo build --release -p parkan-world && uv run openparkan golden
+```
+
+`openparkan golden` dumps every file the engine reads through both the Python
+readers and `parkan-dump`, and compares the two within 1e-5. At M0 that is
+every archive in the install and Mission 01's `data.tma`: 121 dumps.
 
 ## Stand-ins
 

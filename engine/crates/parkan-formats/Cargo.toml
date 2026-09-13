@@ -1,0 +1,13 @@
+[package]
+name = "parkan-formats"
+description = "Readers for Parkan: Iron Strategy's file formats, ported from openparkan"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,16 @@
+[package]
+name = "parkan-render"
+description = "The wgpu renderer; it never opens a file"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+bytemuck.workspace = true
+glam.workspace = true
+wgpu.workspace = true
+
+[lints]
+workspace = true

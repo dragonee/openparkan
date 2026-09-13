@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from collections import Counter
 from pathlib import Path
@@ -13,9 +14,11 @@ from . import (
     control,
     controls,
     descriptions,
+    dump,
     effects,
     font,
     gamedir,
+    golden,
     landmesh,
     mission,
     research,
@@ -811,6 +814,25 @@ def cmd_verify(args, game: Path) -> int:
     return verify.run(game)
 
 
+def cmd_dump(args, game: Path) -> int:
+    """Print what the readers make of a file, as the golden cross-check compares it."""
+    path = Path(args.path)
+    if args.kind == "mission" and path.is_dir():
+        path = path / "data.tma"
+    print(json.dumps(dump.KINDS[args.kind](path), indent=1))
+    return 0
+
+
+def cmd_golden(args, game: Path) -> int:
+    """Compare the Python readers with the engine's parkan-dump."""
+    engine = golden.find_engine(args.engine)
+    if engine is None or not engine.exists():
+        print("no parkan-dump found: build it with `cargo build -p parkan-world` in engine/, "
+              "or pass --engine", file=sys.stderr)
+        return 2
+    return golden.run(game, engine)
+
+
 def cmd_viewer(args, game: Path) -> int:
     names = args.maps or [d.name for d in gamedir.maps(game)]
     resolver = viewer.TextureResolver(game, max_size=args.texture_size)
@@ -959,6 +981,15 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("unit", help="describe a unit assembly whole, or list them")
     p.add_argument("name", nargs="?", help="a .dat name or path under UNITS, e.g. w_b_trk1")
     p.set_defaults(fn=cmd_unit)
+
+    p = sub.add_parser("dump", help="a file as the readers see it, in canonical JSON")
+    p.add_argument("kind", choices=sorted(dump.KINDS))
+    p.add_argument("path", help="an archive, or a mission's data.tma or directory")
+    p.set_defaults(fn=cmd_dump)
+
+    p = sub.add_parser("golden", help="compare the readers with the Rust engine's parkan-dump")
+    p.add_argument("--engine", help="the parkan-dump binary; default engine/target/*/parkan-dump")
+    p.set_defaults(fn=cmd_golden)
 
     p = sub.add_parser("viewer", help="build a self-contained 3D terrain viewer")
     p.add_argument("maps", nargs="*", help="map names; default is every map")

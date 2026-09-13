@@ -1,0 +1,36 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/parkan-formats",
+    "crates/parkan-world",
+    "crates/parkan-render",
+    "crates/parkan",
+]
+
+[workspace.package]
+edition = "2024"
+license = "MIT"
+version = "0.1.0"
+rust-version = "1.98"
+
+[workspace.dependencies]
+parkan-formats = { path = "crates/parkan-formats" }
+parkan-world = { path = "crates/parkan-world" }
+parkan-render = { path = "crates/parkan-render" }
+
+anyhow = "=1.0.104"
+bytemuck = { version = "=1.25.2", features = ["derive"] }
+glam = { version = "=0.29.3", features = ["bytemuck"] }
+png = "=0.18.1"
+pollster = "=0.4.0"
+serde_json = { version = "=1.0.151", features = ["preserve_order"] }
+sha2 = "=0.10.9"
+thiserror = "=2.0.20"
+wgpu = "=30.0.1"
+winit = "=0.30.13"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }

@@ -11,3 +11,6 @@ dist/
 /*.html
 /*.png
 .ruff_cache/
+
+# the Rust engine build
+/engine/target/
