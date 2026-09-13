@@ -69,7 +69,10 @@ zones    { uint32 kind; float32[3] centre; float32 inner; float32 outer }
 string   behaviour tree               MISSIONS\SCRIPTS\scream.trf
 uint32   minds: how many bots the clan may field, 2..17 -- see below
 uint32   relation count
-relations { string clan naThe word after the behaviour tree is **the clan's mind count** — how many bots
+relations { string clan name; uint32 relation }
+```
+
+The word after the behaviour tree is **the clan's mind count** — how many bots
 it may have at once, the game's "Available CPUs" (`iron3d.dll` string 3067),
 *read*. `MisLoad.dll:0x10003ca0` loads it into the clan record, `iron3d.dll`
 copies it (`0x10038ebd`) and fills the clan SuperAI's mind list with that many
@@ -91,8 +94,6 @@ This word was open until the construction code was read. The earlier note here
 measured what it is *not* — not the clan's type word, zone count or ally count, and
 equal to the clan count only by the chance of the common value 5 — and guessed
 a clan strength or AI level. It is a strength of a kind: a cap on the army.
-
- or the tree confirms it.
 
 The relation table is an **alliance matrix**: every clan lists every clan,
 with 1 towards itself and its allies and 0 towards its enemies. Zones appear
