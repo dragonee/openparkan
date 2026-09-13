@@ -335,15 +335,50 @@ read end to end in [23-economy.md](23-economy.md); class **8**, the radar
 its range, value 4 its rescan period), and class **10**, the detection shield
 and its camouflage, in [25-sensors.md](25-sensors.md).
 
-## The section-5 record
+## The section-5 record — *read*, and *measured*
 
 Nine `int32`, **then** the name pair:
 
 ```
-0x00  int32[9]   unresolved
+0x00  int32      flags: 0x80000000 and 0x10000000 bracket a conditional run,
+                 and 0x100022c0 decides whether a record applies (its test unread)
+0x04  int32[2]   unresolved
+0x0c  int32      the action, 0..27 (Control.dll:0x10002800, table 0x10003590)
+0x10  int32[4]   v4..v7, the action's arguments
+0x20  int32      unresolved
 0x24  char[32]   archive
 0x44  char[32]   member
 ```
+
+A group is a list of actions run in order: when a state is entered (its `+0x90`),
+from the 84-byte block (entry 0 at load, 2 to 4 on a round's hit, edge and range
+end, 10 to 20 by the ground's surface), or by a building's construction codes.
+The actions (*read*; counts *measured* across the 2925 records):
+
+| action | records | does |
+|---:|---:|---|
+| 0 | 202 | a call on the controller's `+0x1b4` (`0x10014400`, unread); first in every round group |
+| 1, 2 | 80, 30 | property `0x200` / `0x201` on the object |
+| 3 | 217 | **an effect** by name on control point v4, id v7 (`0x10002972`) |
+| 4 | 1203 | **an effect** by name on three control points v4..v6, at their centroid, id v7 (`0x10002a8d`) |
+| 5 | 72 | **an effect** by name in the world at the sphere `+0x38` gives — a building's construction sphere — scaled by its radius, id v7 (`0x10002e0e`); `fortif.rlb` only |
+| 7 | 0 | node v4 takes its whole life as damage (`0x10003087`) |
+| 8 | 22 | delete effect v4 (`0x10002fd4`) |
+| 10 | 462 | start effect v4 in time mode v5 |
+| 11 | 52 | restart effect v4 in its own mode once it has finished |
+| 12, 13 | 14, 0 | `IControl` slots 3 / 4 with (v4, v5, v6) × 0.001 — the missiles' (0, 1, 0) |
+| 14 | 11 | effect v4 takes its time from control point v5 (`0x10003031`) |
+| 15 | 75 | **remove the object** with no explosion (`0x10003341`) |
+| 17 | 69 | **kill it**: invulnerability off, then `ILifeSystem` slot 7, so its node 0 explodes (`0x100033d0`) |
+| 18, 19 | 42, 196 | switch effect v4 on / off |
+| 20 | 60 | on an agent of kind 3, a call through the object's interface 5 (`0x1000352e`); *unknown*; `fortif.rlb` only |
+| 21 | 60 | kill every unit in the construction sphere ([32-builder.md](32-builder.md)) |
+| 27 | 58 | **explode node v4** with the named `.exp` (`0x100030ce`) |
+
+Only actions 3, 4 and 5 name an effect in `effects.rlb`, and 27 an `.exp` in
+`weapon.rlb`; no other record carries a name. Codes 6, 9, 16 and 22–26 fall to
+the default and carry nothing. The effects themselves are in
+[11-effects.md](11-effects.md#how-an-effect-runs--read).
 
 This reader had that the other way round until the sections were walked:
 anchoring on the names put the ints where the names are, which is also where
@@ -359,8 +394,8 @@ records, carried only by the four archives that hold things which shoot.
 The meaning of the fields rather than their extent: what most classes'
 sixteen values mean, a component's 4-byte entries, section 1's conditions
 (its transition table is read in
-[24-motion.md](24-motion.md#playing-a-state--read-and-measured)), and the nine ints of a
-section-5 record. The 84-byte block is 21 section-5 group indices — entry 0
+[24-motion.md](24-motion.md#playing-a-state--read-and-measured)), and three of the nine
+ints of a section-5 record. The 84-byte block is 21 section-5 group indices — entry 0
 runs at load, entries 10–20 by the ground's surface id — in
 [24-motion.md](24-motion.md#the-eleven-surface-groups-switch-the-dust--measured). What section 1's states, the motion
 triples and a component's mass (`+0x1c`) do is in [24-motion.md](24-motion.md).
@@ -397,7 +432,8 @@ which **field of the frame** feeds the channels those handlers reach —
 `+0x5c8`, a 0xf4-byte object with 0x1c-stride channels defaulting to 0.5, and
 `+0x5cc`, a 0x120-byte one with two arrays of six floats.
 
-One smaller unknown sits beside the sections: the nine ints of the reference
-record. The 84-byte block is no longer one: its 21 entries are section-5 group
+The nine ints of the reference record are mostly read
+([above](#the-section-5-record--read-and-measured)). The 84-byte block is no
+longer an unknown either: its 21 entries are section-5 group
 indices, set on 273 of the 531 members
 ([24-motion.md](24-motion.md#the-eleven-surface-groups-switch-the-dust--measured)).

@@ -4979,7 +4979,7 @@ read = true
 module = "Control.dll"
 at = "0x10002800"
 kind = "function"
-name = "section-5 action group interpreter: switch on record +0xc (10 start effect id, 19 stop, 21 kill in sphere, 1/2 property 0x200/0x201)"
+name = "section-5 action interpreter: switch on record +0xc (3/4/5 effect by name, 8 delete, 10 start, 11 restart, 14 time from a point, 15 remove, 17 kill, 18/19 on/off, 21 kill in sphere, 27 explode node)"
 doc = "docs/32-builder.md"
 read = true
 
@@ -5003,7 +5003,7 @@ read = true
 module = "Control.dll"
 at = "0x10002f92"
 kind = "site"
-name = "action 10: start the controller's effect by id, with a mode"
+name = "action 10: start effect v4 now in time mode v5 (Effect.dll slot 0x2c)"
 doc = "docs/32-builder.md"
 read = true
 
@@ -5286,7 +5286,7 @@ read = true
 module = "Control.dll"
 at = "0x10002fb5"
 kind = "site"
-name = "action 11: the controller's effect interface slot 0x30 on an effect id (action 10 uses slot 0x2c with a mode)"
+name = "action 11: restart effect v4 in its own time mode once it has finished (Effect.dll slot 0x30)"
 doc = "docs/24-motion.md"
 read = true
 
@@ -6053,4 +6053,565 @@ at = "0x10012880"
 kind = "function"
 name = "node pose at a fractional frame: the run's key at round(f - 0.5), interpolated toward the next key by time; the node's fallback past its run"
 doc = "docs/07-objects.md"
+read = true
+
+# --- how an effect runs, section-5 actions, what an explosion plays, ../docs/11, 13 ---
+[[entry]]
+module = "Effect.dll"
+at = "0x100140c0"
+kind = "function"
+name = "CreateFxManager export: 0xb8-byte manager, returns its +4 interface"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "Effect.dll"
+at = "0x10003ae0"
+kind = "function"
+name = "FxManager constructor: instance, attach-point, value-point arrays at +0x48/+0x58/+0x68, vtables 0x1001e478/0x1001e470"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "Effect.dll"
+at = "0x1001e478"
+kind = "datum"
+name = "FxManager main vtable: 0x10 load, 0x14 create, 0x18 delete, 0x1c value, 0x20 scale, 0x28 place, 0x2c start, 0x30 restart, 0x34 value point, 0x3c on, 0x40 off"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "Effect.dll"
+at = "0x10003ca0"
+kind = "function"
+name = "FxManager QueryInterface: ids 0 and 0x13 give the main interface"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "Effect.dll"
+at = "0x10003d30"
+kind = "function"
+name = "FxManager message switch: 4 binds the owner's interfaces (QI 6, 0xb, 0x18, 0xa, 0x16, 0xd, 0xe, 0x109), 23/24 set/clear pause bit, 28 ticks"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "Effect.dll"
+at = "0x10003d54"
+kind = "site"
+name = "message 28: time in ms to +0x38; instances tick when within 50 ms of a command or 100 ms after the last tick"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "Effect.dll"
+at = "0x10004320"
+kind = "function"
+name = "manager slot 0x10: an FXID by (archive, member) to a template handle, loaded once and counted"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "Effect.dll"
+at = "0x10004590"
+kind = "function"
+name = "manager slot 0x14: create an instance of a template on (object, attach point) with a key"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "Effect.dll"
+at = "0x10004780"
+kind = "function"
+name = "manager slot 0x18: delete the instance with a key"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "Effect.dll"
+at = "0x100047d0"
+kind = "function"
+name = "manager slot 0x20: instance scale = the given triple x header +0x30"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "Effect.dll"
+at = "0x10004930"
+kind = "function"
+name = "manager slot 0x28: place an instance by a matrix relative to its attach point or the world"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "Effect.dll"
+at = "0x10004b00"
+kind = "function"
+name = "manager slot 0x2c (action 10): start an instance now in a given time mode"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "Effect.dll"
+at = "0x10004b40"
+kind = "function"
+name = "manager slot 0x30 (action 11): restart an instance in its own time mode once it has finished"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "Effect.dll"
+at = "0x10004b70"
+kind = "function"
+name = "manager slot 0x34 (action 14): the control point an instance's time mode 4 reads"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "Effect.dll"
+at = "0x10004bd0"
+kind = "function"
+name = "manager slot 0x3c (action 18): switch an instance on"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "Effect.dll"
+at = "0x10004c10"
+kind = "function"
+name = "manager slot 0x40 (action 19): switch an instance off"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "Effect.dll"
+at = "0x10007470"
+kind = "function"
+name = "instance constructor: manual value +0x28 = 0, scale 1, identity matrices"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "Effect.dll"
+at = "0x10007650"
+kind = "function"
+name = "instance from an FXID: header +4 mode, +8 duration (end = start + 1000 x s), +0x30 scale, flag 0x40 starts off; emitter factory"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "Effect.dll"
+at = "0x10007a00"
+kind = "table"
+name = "emitter factory jump table, types 1..10"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "Effect.dll"
+at = "0x10007a30"
+kind = "function"
+name = "instance on/off: off runs every emitter's update with t = -1"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "Effect.dll"
+at = "0x10007b00"
+kind = "function"
+name = "instance start: start = now, end = now + 1000 x duration, time mode = argument"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "Effect.dll"
+at = "0x10007b40"
+kind = "function"
+name = "instance restart request: +0xa0 |= 0x20"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "Effect.dll"
+at = "0x10008120"
+kind = "function"
+name = "instance update: honours a restart once now >= end (mode back to header +4), jitters t by header +0xc, runs the emitters"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "Effect.dll"
+at = "0x10005c60"
+kind = "function"
+name = "effect time t: 18 time modes, then flag 0x200 x linear, flag 0x20 ping-pong; stored at +0x34"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "Effect.dll"
+at = "0x10006100"
+kind = "table"
+name = "time-mode jump table, 18 entries"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "Effect.dll"
+at = "0x10006170"
+kind = "function"
+name = "instance tick: attach-point state switches emitters (flag 0x10 keeps them), t, update, delete at t >= 1 when flag 0x2"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "Effect.dll"
+at = "0x1001e78c"
+kind = "datum"
+name = "type-1 emitter vtable"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "Effect.dll"
+at = "0x1000f6e0"
+kind = "site"
+name = "type-1 update (vtable 0x1001e78c slot 2): switches a handle of manager +0x28 (owner QI 0xe) on inside the window +8..+12, off outside"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "Effect.dll"
+at = "0x1001f048"
+kind = "datum"
+name = "type-2 (sound) emitter vtable"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "Effect.dll"
+at = "0x10012eb0"
+kind = "function"
+name = "type-2 update: plays once t crosses block +8"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "Effect.dll"
+at = "0x1001e770"
+kind = "datum"
+name = "type-3 emitter vtable"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "Effect.dll"
+at = "0x100105f0"
+kind = "function"
+name = "type-3/9 update: window +32..+36; phase = a + (b - a) x^g from +8/+12/+16 (x = local progress, or seconds when +8 < 0)"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "Effect.dll"
+at = "0x100106c0"
+kind = "function"
+name = "type-3 render: (lo, hi) triples +40/+52 and +100/+112 shaped by per-axis gammas; alpha-like +20..+24^+28; frame = fract(phase)"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "Effect.dll"
+at = "0x1001e754"
+kind = "datum"
+name = "type-4 emitter vtable"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "Effect.dll"
+at = "0x100108f0"
+kind = "function"
+name = "type-4 update: window +32..+36 through a second block pointer at +0xfc"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "Effect.dll"
+at = "0x1001e360"
+kind = "datum"
+name = "type-5 emitter vtable"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "Effect.dll"
+at = "0x10002a20"
+kind = "function"
+name = "type-5 update: window +12..+16; seconds when +40 < 0"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "Effect.dll"
+at = "0x1001e228"
+kind = "datum"
+name = "type-7 emitter vtable"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "Effect.dll"
+at = "0x10001720"
+kind = "function"
+name = "type-7 init: +0x24 x +0x28 particles with random positions and velocities; block +4 = 1 orients the sprites"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "Effect.dll"
+at = "0x10001230"
+kind = "function"
+name = "type-7/10 update: window +20..+24"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "Effect.dll"
+at = "0x10001300"
+kind = "function"
+name = "type-7/10 render: particle age = (phase - spawn) / +0x1c, one-shot flag, drag, LOD budget"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "Effect.dll"
+at = "0x1001e71c"
+kind = "datum"
+name = "type-8 emitter vtable"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "Effect.dll"
+at = "0x100115c0"
+kind = "function"
+name = "type-8 update: window +16..+20 on t unless +0x8c"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "Effect.dll"
+at = "0x1001e700"
+kind = "datum"
+name = "type-9 emitter vtable: type 3's init and update, its own render"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "Effect.dll"
+at = "0x1001e24c"
+kind = "datum"
+name = "type-10 emitter vtable: type 7's update and render, its own init"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "Effect.dll"
+at = "0x100093d0"
+kind = "function"
+name = "effect sprite placement: four modes (camera-facing, along a vector, fixed, oriented)"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "Effect.dll"
+at = "0x10009930"
+kind = "function"
+name = "effect sprite draw: frame fraction and a 0..1 value to the shade, emitter flag bit 8 passed on"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10002972"
+kind = "site"
+name = "action 3: an effect by name on one control point (v4), id v7 or a fresh one"
+doc = "docs/13-control.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10002a8d"
+kind = "site"
+name = "action 4: an effect by name on three control points (v4..v6) at their centroid, id v7"
+doc = "docs/13-control.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10002e0e"
+kind = "site"
+name = "action 5: an effect by name in the world frame of the controller's sphere (+0x38), id v7"
+doc = "docs/13-control.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10002fd4"
+kind = "site"
+name = "action 8: delete the effect with id v4"
+doc = "docs/13-control.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10002ff3"
+kind = "site"
+name = "action 18: switch on the effect with id v4"
+doc = "docs/13-control.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10003031"
+kind = "site"
+name = "action 14: the effect with id v4 reads its time from control point v5"
+doc = "docs/13-control.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10003087"
+kind = "site"
+name = "action 7: node v4 takes its whole life as damage"
+doc = "docs/13-control.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x100030ce"
+kind = "site"
+name = "action 27: node v4's explosion becomes the named .exp and the node takes its whole life, so it plays"
+doc = "docs/13-control.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10003341"
+kind = "site"
+name = "action 15: the object is marked 0xfffe and removed after +0xe4, with no explosion"
+doc = "docs/13-control.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x100033d0"
+kind = "site"
+name = "action 17: clear invulnerability (+0x5b0) and kill through ILifeSystem slot 7, so node 0's .exp plays"
+doc = "docs/13-control.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x100034ac"
+kind = "site"
+name = "action 12: IControl slot 3 with v4..v6 x 0.001"
+doc = "docs/13-control.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x100034ed"
+kind = "site"
+name = "action 13: IControl slot 4 with v4..v6 x 0.001"
+doc = "docs/13-control.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001150b"
+kind = "site"
+name = "node damage stage: a contact record with no face gives surface 10 and keeps the contact's point"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x100115e3"
+kind = "site"
+name = "node damage stage: .exp placement (+0x14) picks the effect's axis: node columns, object columns, or 7 the struck face's vector (face +8)"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10011900"
+kind = "table"
+name = "node damage stage: placement jump table, 7 entries"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10011749"
+kind = "site"
+name = "node damage stage: effect scale = .exp radius on a round (agent kind 9), x the node's bounding radius otherwise"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x100117d0"
+kind = "site"
+name = "node damage stage: surface 0..10 plays .exp slot surface + 1"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x100117f7"
+kind = "site"
+name = "node damage stage: no surface, or its slot fails to load, plays slot 0"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000d069"
+kind = "site"
+name = "round tick: range spent -> +0x664, which runs block entry 4 next"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000d390"
+kind = "function"
+name = "round: block entry 4 (range end) when +0x664 is set"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000a200"
+kind = "function"
+name = "global .exp table: record by index"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x100033ba"
+kind = "site"
+name = "an agent creates its effect manager (CreateFxManager) and keeps QI 0x13 at +0x174"
+doc = "docs/11-effects.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x100172fa"
+kind = "site"
+name = "the landscape creates its effect manager, QI 0x13 at +0x7be8"
+doc = "docs/11-effects.md"
 read = true

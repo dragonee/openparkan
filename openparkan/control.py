@@ -76,6 +76,37 @@ BLOCK_ENTRIES = 21
 SURFACE_GROUPS_AT = 10
 SURFACES = 11
 NO_GROUP = -1
+#: Block entries a round runs: when its face hit, the map's edge and the end of
+#: its range stop it (``0x1000d35b``, ``0x1000d36e``, ``0x1000d390``).
+ENTRY_LOAD = 0
+ENTRY_HIT = 2
+ENTRY_EDGE = 3
+ENTRY_RANGE = 4
+
+#: A section-5 record's action, at int 3, and the interpreter's cases
+#: (``Control.dll:0x10002800``, table ``0x10003590``).  3, 4 and 5 start an
+#: effect named by the record on one control point, on three at their
+#: centroid, or in the construction sphere; 8, 10, 11, 18 and 19 delete,
+#: start, restart, switch on and switch off effect v4; 14 gives effect v4 its
+#: time from control point v5; 15 removes the object without an explosion,
+#: 17 kills it so node 0 explodes, 21 kills every unit in the construction
+#: sphere and 27 explodes node v4 with the named ``.exp``.
+ACTION_AT = 3
+ACT_CALL = 0
+ACT_EFFECT_POINT = 3
+ACT_EFFECT_POINTS = 4
+ACT_EFFECT_SPHERE = 5
+ACT_NODE_DAMAGE = 7
+ACT_EFFECT_DELETE = 8
+ACT_EFFECT_START = 10
+ACT_EFFECT_RESTART = 11
+ACT_EFFECT_TIME_POINT = 14
+ACT_REMOVE = 15
+ACT_KILL = 17
+ACT_EFFECT_ON = 18
+ACT_EFFECT_OFF = 19
+ACT_KILL_IN_SPHERE = 21
+ACT_EXPLODE_NODE = 27
 
 #: A component record's fixed part, and the fields inside it that are read.
 #: Thirteen of the factory's fourteen classes share one parser at
@@ -349,14 +380,11 @@ class ControlFormatError(ValueError):
 class Reference:
     """One ``(archive, member)`` pair inside a controller, and its nine ints.
 
-    The ints are small and unresolved.  The first three are zero on 1373,
-    1537 and 1474 of the 1651, the fourth is 3, 4 or 5 on 1230, and two of the
-    rest count upwards across a run -- 100, 101, 102 beside 12, 13, 14 --
-    which reads as an index rather than a parameter.
-
-    On 41 records the third reads as ASCII rather than a number, so these are
-    not the same nine fields on every record.  Both names resolve on all 1651;
-    the ints are the part to check before relying on them.
+    A record is one **action** in a group the controller runs in order
+    (``Control.dll:0x10002800``): int 0 carries flags, int 3 the action
+    (``ACT_*``) and ints 4-7 its arguments.  Only the effect actions 3, 4 and
+    5 and the explosion action 27 name anything.  Ints 1, 2 and 8 are not
+    read.
     """
 
     resource: ResourceRef
@@ -366,6 +394,15 @@ class Reference:
     #: The section-5 group the record sits in, which the block's entries and a
     #: state's action group (+0x90) index.  -1 when not known.
     group: int = -1
+
+    @property
+    def action(self) -> int:
+        return self.values[ACTION_AT]
+
+    @property
+    def args(self) -> tuple[int, ...]:
+        """v4 to v7."""
+        return tuple(self.values[ACTION_AT + 1:ACTION_AT + 5])
 
 
 @dataclass(frozen=True)
@@ -538,6 +575,11 @@ class Controller:
                     back[nxt] = state
                     heapq.heappush(queue, (cost + step, nxt))
         return None
+
+    def group(self, entry: int) -> list[Reference]:
+        """The records of the group block entry ``entry`` names, in order."""
+        index = self.groups[entry] if self.groups else NO_GROUP
+        return [] if index == NO_GROUP else [r for r in self.references if r.group == index]
 
     @property
     def load_group(self) -> int:

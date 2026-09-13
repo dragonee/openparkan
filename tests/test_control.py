@@ -273,3 +273,19 @@ def test_a_channel_names_the_node_it_plays(ctl):
     assert (ch.node, ch.origin, ch.point) == (7, 2, 3)
     assert ch.frame(0.25) == 52.0
     assert ch.frame(1.25) == 52.0
+
+
+def test_a_record_is_an_action_with_four_arguments(ctl, reference):
+    groups = [-1] * control.BLOCK_ENTRIES
+    groups[control.ENTRY_HIT] = 1
+    kill = (0, 0, 0, control.ACT_KILL, 0, 0, 0, 0, 0)
+    start = (0, 0, 0, control.ACT_EFFECT_START, 5, 0, 0, 0, 0)
+    blob = ctl(counts=(0, 0, 0, 0, 2),
+               block=struct.pack(f"<{control.BLOCK_ENTRIES}i", *groups),
+               groups=[[reference("", "", start)], [reference("", "", start),
+                                                    reference("", "", kill)]])
+    c = control.parse(blob)
+    assert [r.action for r in c.group(control.ENTRY_HIT)] == [
+        control.ACT_EFFECT_START, control.ACT_KILL]
+    assert c.group(control.ENTRY_HIT)[0].args == (5, 0, 0, 0)
+    assert c.group(control.ENTRY_EDGE) == []

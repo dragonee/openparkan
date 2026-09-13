@@ -397,11 +397,24 @@ Nine chassis set the surface entries: `r_b_03`, `r_b_04`, `r_b_05`, `r_l_01`,
 `r_l_03`, `r_l_04`, `r_m_01`, `r_m_03` and `r_m_04`. On all nine, surfaces 0
 and 2 share one group and 1 and 3–10 share another. The first group is all
 action 11 and the second all action 10, and every effect id they name is one
-of the chassis's `dust_*` emitters. Action 10 starts an effect with a mode;
-action 11 calls the same interface's slot `0x30` (`0x10002fb5`), and what that
-does is *unknown*. That it stops the dust — no dust on `L00` and `L08` — is a
-*guess*. The footstep effects (`step_*`) are not in these groups; they are
-named records of their own.
+of the chassis's `dust_*` emitters. **The dust shows on surfaces 0 and 2
+only** — `L08`, `L09` and `L00`, `L01`, `L19`, `L20`, `L28`, `L32`, `L40` —
+*read* and *measured*:
+
+- action 10 starts each dust effect in the record's time mode, which is **0** on
+  all nine: effect time held at a set value that is 0 unless something sets it
+  (`Effect.dll:0x100074a7`);
+- every dust effect's own mode is 15, the unit's speed over its top speed, and
+  every dust emitter's window starts at 0.2 (all five `dust_*` effects), so at
+  time 0 none emits;
+- action 11 (`0x10002fb5`, `Effect.dll:0x10004b40`) restarts the effect in its
+  own mode once it has finished — dust has no duration, so at once — which
+  gives it back to the unit's speed.
+
+So on the commonest ground, stone class 1, a wheeled or tracked chassis raises
+no dust, and on sand and grass it raises it above a fifth of its top speed
+([11-effects.md](11-effects.md#how-an-effect-runs--read)). The footstep effects
+(`step_*`) are not in these groups; they are named records of their own.
 
 ### Finding the ground — *read*
 
@@ -525,8 +538,8 @@ asks for the live top speed (IControl 145) and compares it with 1
 - Jumping and `CanJump`, the map edge, bridges (`m_bridge`). That buildings and
   bridges are ground through the same world-face query
   (`CBuilding::GetFirstIntersectedFace`) is a *guess* from the names.
-- What action 11 does; what register values 6 and 10 select in `IWorld` slot
-  10; the sign of the liquid-surface gap.
+- What register values 6 and 10 select in `IWorld` slot 10; the sign of the
+  liquid-surface gap.
 - The exact divisor D in a blended state's weight (`0x100057a3`), and what
   state bit `0x40000` changes in the integrators.
 - Whether the step velocity a state sets (`+0x200`, body `+0x4c`) replaces the

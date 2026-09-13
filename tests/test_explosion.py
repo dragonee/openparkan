@@ -50,3 +50,36 @@ def test_the_first_word_is_not_a_count():
 def test_anything_but_792_bytes_is_refused():
     with pytest.raises(effects.EffectFormatError, match="not the 792"):
         effects.parse_explosion(build_explosion()[:-64])
+
+
+def test_a_surface_plays_its_own_slot_and_falls_back_to_slot_zero():
+    names = [("effects.rlb", "exp_b_mn_bul")] + [
+        ("effects.rlb", f"exp_b_{tag}_bul") for tag in effects.SURFACE_TAGS[:7]]
+    got = effects.parse_explosion(build_explosion(names=names))
+    assert got.slot_for(7 - 1).member == "exp_b_gr_bul"
+    assert got.slot_for(7).member == "exp_b_mn_bul"
+    assert got.slot_for(None).member == "exp_b_mn_bul"
+    assert got.slot_for(0xFF).member == "exp_b_mn_bul"
+
+
+def build_effect(mode, duration, flags, emitters=()):
+    header = bytearray(effects.HEADER_SIZE)
+    struct.pack_into("<IIff I", header, 0, len(emitters), mode, duration, 0.0, flags)
+    struct.pack_into("<3f", header, effects.HEADER_SCALE_AT, 0.1, 0.1, 0.1)
+    return bytes(header) + b"".join(emitters)
+
+
+def test_an_effect_header_names_its_time_mode_duration_and_flags():
+    fx = effects.parse_effect(build_effect(effects.TIME_ONCE, 1.5,
+                                           effects.FX_DELETE_AT_END | effects.FX_KEEP_WHEN_HIDDEN))
+    assert (fx.mode, fx.duration) == (effects.TIME_ONCE, 1.5)
+    assert fx.flags & effects.FX_DELETE_AT_END
+    assert fx.scale == pytest.approx((0.1, 0.1, 0.1))
+
+
+def test_an_emitter_is_active_over_its_window():
+    block = bytearray(effects.EMITTER_SIZE[3])
+    struct.pack_into("<I", block, 0, 3)
+    struct.pack_into("<2f", block, effects.WINDOW_AT[3], 0.01, 0.5)
+    fx = effects.parse_effect(build_effect(effects.TIME_POINT, 0.75, 0, [bytes(block)]))
+    assert fx.emitters[0].window == pytest.approx((0.01, 0.5))

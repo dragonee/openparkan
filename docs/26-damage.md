@@ -199,6 +199,15 @@ mesh slot and the 28 collision hulls are never tested
 - **A face or the map edge.** It moves to the recorded point and runs its
   `+0x4e4` group for a face (`0x1000d35b`) or `+0x4e8` for the edge
   (`0x1000d36e`).
+- **What the groups do** (*measured* on all 66 rounds, the actions *read* in
+  [13-control.md](13-control.md#the-section-5-record--read-and-measured)): the
+  face group ends or replays its flight effect (19, 8 or 10) and **kills the
+  round** — action 17 on 63, invulnerability off and `ILifeSystem` slot 7, so
+  node 0's `.exp` plays and deals the hit; 15 on 3; the edge group always **removes** it (15), with no
+  explosion. At the **end of its range** (`0x1000d069`, block entry 4,
+  `0x1000d390`) 58 rounds explode node 0 with their own `*_end.exp` (action 27)
+  — a puff in the air, or for a missile its full blast — and the other 8 are
+  killed or removed.
 
 **Beams are rounds.** A laser flies at 10,000 m/s, but every test is a segment
 or a swept sphere over the frame, so nothing is sampled and nothing tunnels. 54
@@ -462,14 +471,13 @@ shield, battery and ammunition (`Behavior.dll:0x10018100`, `0x10019372`,
   not found.
 - Whether a round's owner id is the unit or the gun that fired it — which
   decides whether a turret's round can strike its own robot.
-- Which action in a round's `+0x4e4` group ends it; its collision response
-  does not.
 - What reads a node's fifth slot, if a round's hit test does not.
 - Who clears the behaviour flag `0x10` that lets a unit's takt switch its
   repair (`Behavior.dll:0x100067b0`'s caller), and so whether the AI overrides
   the switch while the player drives.
 - What `IControl` component query `0x77`, which the catalogue's Regeneration
   row reads (`iron3d.dll:0x1006f62c`), answers.
-- The surface index behind an `.exp`'s slots 1–11, and the two 1.0 floats.
+- The two 1.0 floats of an `.exp`. Its slots 1–11 are by ground surface
+  ([11-effects.md](11-effects.md#what-an-explosion-plays--read-and-measured)).
 - What agent kind 3 is, and what becomes of a kind-3 object whose node 0 is
   destroyed (it is marked `0xfffe` and not killed).

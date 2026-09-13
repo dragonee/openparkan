@@ -3691,11 +3691,10 @@ def check_effects(check, game: Path) -> None:
     # Types 9 and 3 read the same fields because 9's constructor installs 3's
     # vtable before overriding it; 7 and 10 are siblings on one 0x48 object.
     check("Effect.dll: the emitter classes fall into families",
-          reads[9] == reads[3] and reads[7] == reads[10]
-          and set(reads[4]) < set(reads[3]),
-          f"types 3 and 9 read the same {len(reads[3])} offsets, 7 and 10 the "
-          f"same {len(reads[7])}, and 4 reads a strict subset of 3's, short "
-          f"by {sorted(set(reads[3]) - set(reads[4]))}")
+          reads[9] == reads[3] == reads[4] and reads[7] == reads[10],
+          f"types 3, 4 and 9 read the same {len(reads[3])} offsets -- 4 reaches "
+          f"+32 and +36 through a second pointer to its block, at +0xfc "
+          f"(Effect.dll:0x100108f9) -- and 7 and 10 the same {len(reads[7])}")
 
     # And one field is identified by its shape rather than by the code: types
     # 1 and 2 keep a unit vector where the drawing types keep something else.
@@ -4654,6 +4653,188 @@ def check_playback(check, game: Path) -> None:
           f"1000 |dv| / (factor x rate) ms (Control.dll:0x10022120); the state word "
           f"clears on the third, at 0.9 / rate.  Control: no step is under the 100 ms "
           f"idle tick")
+
+
+def check_effect_timing(check, game: Path) -> None:
+    """How an effect runs: its time mode, its emitters' windows, the dust switch."""
+    library = effects.EffectLibrary(game / "effects.rlb")
+
+    def windows(shift: int) -> tuple[int, int, Counter[int]]:
+        ok = total = 0
+        bad: Counter[int] = Counter()
+        for fx in library:
+            for e in fx.emitters:
+                at = effects.WINDOW_AT.get(e.kind)
+                if at is None or at + shift < 4 or at + shift + 8 > len(e.body):
+                    continue
+                lo, hi = struct.unpack_from("<2f", e.body, at + shift)
+                good = 0.0 <= lo <= hi <= 1.0
+                ok += good
+                total += 1
+                bad[e.kind] += not good
+        return ok, total, bad
+
+    ok, total, bad = windows(0)
+    early, late = windows(-4)[0], windows(4)[0]
+    check("FXID: every emitter is active over an ordered span of effect time inside 0..1",
+          total and ok >= total - 1 and early < total // 5 and late < total // 5,
+          f"{ok} of {total} emitters' windows (Effect.dll, each class's update); outside: "
+          f"{ {k: v for k, v in bad.items() if v} }; control: read four bytes early "
+          f"{early}, late {late}")
+
+    modes = Counter(fx.mode for fx in library)
+    durations = sum(0.0 <= fx.duration < 1000.0 for fx in library)
+    denormal = sum(0 < struct.unpack_from("<f", fx.header, effects.HEADER_MODE_AT)[0] < 1e-30
+                   for fx in library)
+    check("FXID: the header's +4 is a time mode and +8 a duration in seconds",
+          len(library) and set(modes) <= set(range(effects.TIME_MODES))
+          and durations == len(library) and denormal == len(library) - modes[0],
+          f"modes {dict(sorted(modes.items()))} of the 18 the switch at "
+          f"Effect.dll:0x10005c60 takes; {durations} of {len(library)} durations lie in "
+          f"0..1000 s; control: +4 read as a float is a denormal on all {denormal} "
+          f"non-zero modes")
+
+    names = frozenset(p.name.lower() for p in all_archives(game))
+    bases = NResArchive.open(game / "bases.rlb")
+    carriers = held = restarted = idle = idle_total = 0
+    for entry in bases:
+        if not entry.tag.upper().startswith("CTL"):
+            continue
+        c = control.parse(bases.read(entry), names)
+        surf = c.surface_groups
+        if all(g == control.NO_GROUP for g in surf):
+            continue
+        carriers += 1
+        ids = {r.args[3]: r.resource.member.lower() for r in c.references
+               if r.resource.member and r.action in (control.ACT_EFFECT_POINT,
+                                                     control.ACT_EFFECT_POINTS)}
+        starts = [r for s, g in enumerate(surf) if s not in (0, 2)
+                  for r in c.references if r.group == g]
+        restarts = [r for s in (0, 2) for r in c.references if r.group == surf[s]]
+        held += all(r.action == control.ACT_EFFECT_START
+                    and r.args[1] == effects.TIME_MANUAL for r in starts)
+        restarted += all(r.action == control.ACT_EFFECT_RESTART for r in restarts)
+        for r in starts:
+            fx = library.get(ids.get(r.args[0], ""))
+            if fx is None:
+                continue
+            idle_total += 1
+            lows = [e.window[0] for e in fx.emitters if e.window]
+            idle += fx.mode == effects.TIME_MOTION and bool(lows) and min(lows) > 0.0
+    check(".ctl: the dust shows on surfaces 0 and 2 only",
+          carriers == 9 and held == restarted == carriers and idle_total and idle == idle_total,
+          f"on {held} of {carriers} dust chassis surfaces 1 and 3..10 start the dust in "
+          f"time mode 0, which holds its time at 0 (Effect.dll:0x100074a7), and every "
+          f"one of those {idle_total} dust effects is speed-driven (mode 15) with no "
+          f"emitter active at 0; on {restarted} surfaces 0 and 2 run action 11, which "
+          f"hands the effect back its own mode")
+
+
+def check_actions(check, game: Path) -> None:
+    """Section 5's actions, what ends a round, and what an explosion plays where."""
+    names = frozenset(p.name.lower() for p in all_archives(game))
+    codes: Counter[int] = Counter()
+    shifted: Counter[int] = Counter()
+    named: Counter[tuple[int, str]] = Counter()
+    rounds: dict[str, control.Controller] = {}
+    turret = None
+    handled = {0, 1, 2, 3, 4, 5, 7, 8, 10, 11, 12, 13, 14, 15, 17, 18, 19, 20, 21, 27}
+    for path in all_archives(game):
+        archive = NResArchive.open(path)
+        for entry in archive:
+            if not entry.tag.upper().startswith("CTL"):
+                continue
+            try:
+                c = control.parse(archive.read(entry), names)
+            except control.ControlFormatError:
+                continue
+            for r in c.references:
+                codes[r.action] += 1
+                shifted[r.args[0]] += 1
+                if r.resource.member:
+                    kind = "exp" if r.resource.member.lower().endswith(".exp") else "fx"
+                    named[(r.action, kind)] += 1
+            if path.name.lower() == "weapon.rlb":
+                rounds[entry.name.lower()] = c
+            if entry.name.lower() == "o_tur_ht_02.ctl":
+                turret = c
+    outside = sum(n for v, n in shifted.items() if v not in handled)
+    check(".ctl: a section-5 record's int 3 is the action the interpreter switches on",
+          set(codes) <= handled and outside > sum(shifted.values()) // 4
+          and set(named) == {(3, "fx"), (4, "fx"), (5, "fx"), (27, "exp")},
+          f"actions {dict(sorted(codes.items()))}, all cases of Control.dll:0x10002800; "
+          f"only 3, 4 and 5 name an effect and 27 an .exp: {dict(named)}.  Control: "
+          f"int 4 read as the action is outside the cases on {outside} of "
+          f"{sum(shifted.values())}")
+
+    ending: dict[int, Counter[str]] = {e: Counter() for e in (control.ENTRY_HIT,
+                                                                control.ENTRY_EDGE,
+                                                                control.ENTRY_RANGE)}
+    for c in rounds.values():
+        if not c.groups or c.groups[control.ENTRY_RANGE] == control.NO_GROUP:
+            continue
+        for entry, tally in ending.items():
+            acts = {r.action for r in c.group(entry)}
+            tally["explode" if control.ACT_EXPLODE_NODE in acts else
+                  "kill" if control.ACT_KILL in acts else
+                  "remove" if control.ACT_REMOVE in acts else "none"] += 1
+    hit, edge, end = (ending[e] for e in (control.ENTRY_HIT, control.ENTRY_EDGE,
+                                          control.ENTRY_RANGE))
+    check("weapon.rlb: a round is killed on a hit, removed at the edge, exploded at range",
+          hit["kill"] == 63 and hit["remove"] == 3 and edge == Counter(remove=66)
+          and end["explode"] == 58 and end["none"] == 0,
+          f"face hit (+0x4e4): {dict(hit)}; map edge (+0x4e8): {dict(edge)}; end of "
+          f"range: {dict(end)}.  Kill (17) takes invulnerability off and runs "
+          f"ILifeSystem slot 7, so node 0's .exp deals the hit; remove (15) plays "
+          f"nothing; explode (27) plays the named *_end.exp")
+
+    bound = {}
+    points = {}
+    if turret is not None:
+        for r in turret.group(control.ENTRY_LOAD):
+            if r.action == control.ACT_EFFECT_POINTS:
+                bound[r.resource.member.lower()] = tuple(r.args[:3])
+            elif r.action == control.ACT_EFFECT_TIME_POINT:
+                points[r.args[0]] = r.args[1]
+    flight = {name: sorted({r.resource.member.lower() for r in rounds[name].references
+                            if r.resource.member
+                            and not r.resource.member.lower().endswith(".exp")})
+              for name in ("bb_h_01.ctl", "bl_h_01.ctl", "bm_h_01.ctl", "bp_h_01.ctl")}
+    check("o_tur_ht_02: the hero's turret binds its nine effects to control points at load",
+          len(bound) == 9 and bound.get("hero_cannon") == (11, 12, 13)
+          and bound.get("hero_prifle") == (15, 16, 17)
+          and bound.get("hero_redlaser") == (4, 5, 6)
+          and len(points) == 7 and points.get(0) == 13
+          and flight["bb_h_01.ctl"] == ["hero_cannon_bullet"]
+          and flight["bl_h_01.ctl"] == ["hero_laser_bullet"],
+          f"{bound}; action 14 times effect ids {points} from those control points; "
+          f"the rounds fly with {flight}")
+
+    lib = materials.MaterialLibrary(game / "Material.lib")
+    by_surface: dict[int, list[str]] = defaultdict(list)
+    for m in lib.materials.values():
+        by_surface[m.surface].append(m.name.upper())
+    tags = effects.SURFACE_TAGS
+    witness = {"st": "STONE", "ic": "ICE", "mt": "B_", "gr": "TREE", "wt": "WATER",
+               "an": "BIRD", "sh": "SHIELD"}
+
+    def agree(shift: int) -> list[str]:
+        out = []
+        for surface in range(len(tags)):
+            slot = surface + shift
+            want = witness.get(tags[slot]) if 0 <= slot < len(tags) else None
+            if want and surface != 2 and any(want in n for n in by_surface[surface]):
+                out.append(f"{surface} {tags[slot]}")
+        return out
+
+    good = agree(0)
+    off = max(len(agree(-1)), len(agree(1)))
+    check(".exp: slot s + 1 is the effect for ground surface s",
+          len(good) == 7 and off <= 1
+          and all(n.startswith("WATER") for n in by_surface[WATER_SURFACE]),
+          f"the surfaces whose materials carry their slot's tag: {', '.join(good)} "
+          f"(Control.dll:0x100117d0 plays slot surface + 1); water is surface 7, "
+          f"{by_surface[7]}.  Control: one slot either way, {off} of 7 agree")
 
 
 def check_sensors(check, game: Path) -> None:
@@ -8438,7 +8619,8 @@ def run(game: Path) -> int:
         check_water, check_layers, check_materials, check_sky,
         check_minimap_agreement, check_arealmap,
         check_grid, check_missions, check_objects, check_poses, check_lod, check_damage,
-        check_effects, check_footprints, check_rsli, check_control, check_efficiency,
+        check_effects, check_effect_timing, check_actions, check_footprints, check_rsli,
+        check_control, check_efficiency,
         check_motion, check_playback, check_ground, check_sensors, check_hit_test,
         check_combat, check_ownership,
         check_capture, check_repair, check_chassis, check_weapons,

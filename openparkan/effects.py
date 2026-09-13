@@ -94,9 +94,72 @@ HIT_DIRECT = 2
 HIT_AREA = 3
 HIT_SHIELDS = 4
 
-#: The surface tag the effect in slots 1 to 11 carries in its name.  Which
-#: surface index the engine passes is not traced; these are the names' own.
+#: The surface tag the effect in slots 1 to 11 carries in its name.  Slot
+#: *s* + 1 plays for ground surface *s*, the class byte of the material struck
+#: (``Control.dll:0x100117d0``); slot 0 when the surface is unset or its slot
+#: does not load (``0x100117f7``).  A contact with no face is surface 10.
 SURFACE_TAGS = ("sn", "st", "gr", "sw", "ic", "mt", "gr", "wt", "al", "an", "sh")
+SURFACE_NO_FACE = 10
+
+#: Where an explosion's effect is aimed (``Control.dll:0x100115e3``): an axis
+#: of the exploding node, of the object, or the struck face's vector.
+PLACE_NODE_Y = 0
+PLACE_NODE_X = 1
+PLACE_NODE_Z = 3
+PLACE_OBJECT_X = 4
+PLACE_OBJECT_Y = 5
+PLACE_OBJECT_Z = 6
+PLACE_CONTACT = 7
+
+#: The header: emitter count, time mode, duration in seconds, the spread of a
+#: random jitter on effect time, flags, a number a global table must accept
+#: before the instance runs, random offset amplitudes, a point, and a scale
+#: (``Effect.dll:0x10007650``, ``0x10005c60``, ``0x10008120``).
+HEADER_MODE_AT = 4
+HEADER_DURATION_AT = 8
+HEADER_JITTER_AT = 12
+HEADER_FLAGS_AT = 16
+HEADER_GATE_AT = 20
+HEADER_OFFSET_AT = 24
+HEADER_POINT_AT = 36
+HEADER_SCALE_AT = 48
+
+#: Header flags.  4 and 0x1000 are not read.
+FX_JITTER = 0x1
+FX_DELETE_AT_END = 0x2
+FX_RANDOM_OFFSET = 0x8
+FX_KEEP_WHEN_HIDDEN = 0x10
+FX_PING_PONG = 0x20
+FX_START_OFF = 0x40
+FX_HOLD_UNLESS_PAUSED = 0x80
+FX_HOLD_WHILE_PAUSED = 0x100
+FX_TIMES_LINEAR = 0x200
+FX_DRAW_TEST = 0x800
+FX_SKIP_SECOND_TEST = 0x8000
+
+#: How effect time *t*, 0 to 1, is found (``Effect.dll:0x10005c60``): set from
+#: outside and 0 until set; once through the duration; looping; reversed; an
+#: owner's control-point value; speed over top speed (6-8 per axis); spin
+#: (10-12 per axis); one minus a point's or property's value; the larger of
+#: speed and spin; a point value that only rises or only falls.
+TIME_MANUAL = 0
+TIME_ONCE = 1
+TIME_LOOP = 2
+TIME_REVERSE = 3
+TIME_POINT = 4
+TIME_SPEED = 5
+TIME_SPIN = 9
+TIME_POINT_INVERSE = 13
+TIME_PROPERTY_INVERSE = 14
+TIME_MOTION = 15
+TIME_POINT_RISING = 16
+TIME_POINT_FALLING = 17
+TIME_MODES = 18
+
+#: Emitter type -> where the ``(low, high)`` span of effect time it is active
+#: in sits.  Outside it the emitter does nothing.  Type 2, the sound, plays
+#: once when *t* crosses its low value.
+WINDOW_AT = {1: 8, 2: 8, 3: 32, 4: 32, 5: 12, 7: 20, 8: 16, 9: 32, 10: 20}
 
 #: The 60 bytes before an effect's first emitter block.
 HEADER_SIZE = 60
@@ -136,11 +199,11 @@ NAME_FIELD = 32
 #: emitter's two distances and the direction at +52 are identified; see
 #: ``docs/11-effects.md``.
 READ_OFFSETS: dict[int, tuple[int, ...]] = {
-    1: (28, 32, 36, 52, 56, 60, 80, 84, 88, 92, 112, 116),
+    1: (8, 12, 28, 32, 36, 52, 56, 60, 80, 84, 88, 92, 112, 116),
     2: (8, 12, 28, 32, 36, 52, 56, 60, 64, 68, 72, 76),
     3: (8, 12, 24, 28, 32, 36, 40, 44, 48, 52, 56, 60,
         100, 104, 108, 112, 116, 120),
-    4: (8, 12, 24, 28, 40, 44, 48, 52, 56, 60,
+    4: (8, 12, 24, 28, 32, 36, 40, 44, 48, 52, 56, 60,
         100, 104, 108, 112, 116, 120),
     5: (4, 8, 12, 16, 24, 28, 32, 36, 40, 44),
     6: (),
@@ -201,6 +264,14 @@ class Explosion:
         """Every effect it names, in slot order."""
         return [r for r in self.slots if r]
 
+    def slot_for(self, surface: int | None) -> ResourceRef | None:
+        """The effect it plays on ground surface ``surface``, or slot 0."""
+        if surface is not None and 0 <= surface < len(SURFACE_TAGS):
+            ref = self.slots[surface + 1]
+            if ref:
+                return ref
+        return self.effect
+
 
 @dataclass(frozen=True)
 class Emitter:
@@ -242,6 +313,14 @@ class Emitter:
         }
 
     @property
+    def window(self) -> tuple[float, float] | None:
+        """The ``(low, high)`` span of effect time this emitter is active in."""
+        at = WINDOW_AT.get(self.kind)
+        if at is None or len(self.body) < at + 8:
+            return None
+        return struct.unpack_from("<2f", self.body, at)
+
+    @property
     def direction(self) -> tuple[float, float, float] | None:
         """The unit vector types 1 and 2 keep at +52, or None for the rest."""
         if self.kind not in DIRECTION_TYPES or len(self.body) < DIRECTION_AT + 12:
@@ -256,6 +335,31 @@ class Effect:
     name: str
     header: bytes
     emitters: list[Emitter]
+
+    @property
+    def mode(self) -> int:
+        """The header's time mode, ``TIME_*``."""
+        return struct.unpack_from("<I", self.header, HEADER_MODE_AT)[0]
+
+    @property
+    def duration(self) -> float:
+        """Seconds from start to end."""
+        return struct.unpack_from("<f", self.header, HEADER_DURATION_AT)[0]
+
+    @property
+    def flags(self) -> int:
+        """``FX_*``."""
+        return struct.unpack_from("<I", self.header, HEADER_FLAGS_AT)[0]
+
+    @property
+    def gate(self) -> int:
+        """The number a global table must accept first; its meaning is unknown."""
+        return struct.unpack_from("<I", self.header, HEADER_GATE_AT)[0]
+
+    @property
+    def scale(self) -> tuple[float, float, float]:
+        """What a requested size is multiplied by."""
+        return struct.unpack_from("<3f", self.header, HEADER_SCALE_AT)
 
     @property
     def materials(self) -> list[str]:

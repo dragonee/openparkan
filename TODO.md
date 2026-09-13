@@ -864,15 +864,15 @@ blocks to the byte, 144 `.exp` records parse, and a destroyed node's damage
 record reaches real sprites on 2189 of 2203 references. Nothing draws them: an
 explosion is transient and a static scene has nowhere to put one.
 
-Which floats in a block are **live** is settled — **176 of the 441** four-byte
+Which floats in a block are **live** is settled — **180 of the 441** four-byte
 slots across the ten block types — and the map now has a **third witness, from
 the data**. A slot the engine loads as a float should hold one, and every one
-of the **97347** reads of the 176 is finite and either exactly zero or between
-1e-6 and 1e6. The 127 dead slots manage **92.4%**: 5395 of their reads are
+of the **98987** reads of the 180 is finite and either exactly zero or between
+1e-6 and 1e6. The 123 dead slots manage **92.3%**: 5395 of their reads are
 NaN, denormal or absurd, which is what an editor's uncleared buffer looks
 like. The map came out of the vtables and used none of the values.
 
-The slots are now **typed**, if not named: 37 signed, 59 positive, 32 in
+The slots are now **typed**, if not named: 37 signed, 59 positive, 36 in
 0..1, 33 integral, and **15 that are always zero** — read by the engine and
 never set by the artists. And type 3's (low, high) triple is a **motif**, not
 a special case: type 10's `+80..+88` against `+128..+136` is ordered on 154 of
