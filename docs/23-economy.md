@@ -192,11 +192,14 @@ produces over what all of its consumers want.
 `M_Task_Research::OnBehaviourTakt` (`Behavior.dll:0x1002f730`) runs each tick.
 
 - **A research has three budgets** — ore and power, from the item's research
-  costs in the `.trf`, and a time budget taken from the clan — and the task
-  computes **the smallest of its three completion fractions**.
-- **Free technologies cost nothing.** While the clan's free-technology counter
-  is above zero, starting a research decrements it and sets the ore and power
-  budgets to zero. This is the mission's `FreeTechnoNum` property.
+  costs in the `.trf`, and time — and the task computes **the smallest of its
+  three completion fractions**.
+- **The time budget is the research centre's `FreeResearchTime`**, the same for
+  every technology it researches, and time accrues as plain `dt` in seconds —
+  see below.
+- **Free technologies cost nothing.** While the research centre's own
+  `FreeTechnoNum` is above zero, starting a research decrements it and sets the
+  ore and power budgets to zero.
 - **It draws `KPD × Use_Ore × dt` ore and `KPD × Use_Power × dt` power** each
   tick, the ore capped by the institute's own buffer, and then requests the ore
   still missing — half of it while more than 5 remains. `KPD` is logged by that
@@ -205,7 +208,39 @@ produces over what all of its consumers want.
   `0xe00` over one list of the building's components; `0x10019880`, the
   `SetPowerUsage` call, writes property `0x500` on each of them.
 
-*Unknown:* how the time budget accrues.
+### The four grants a mission gives a building — *read*, and *measured*
+
+Every placed object carries `FreeBotNum`, `FreeTechnoNum`,
+`FreeConstructionTime` and `FreeResearchTime` ([04-missions.md](04-missions.md)).
+`MBehaviour` registers them as property kinds 7 to 10 and its setter
+(`Behavior.dll:0x1000b470`, slot 2 of the interface at `+4`) writes kind 7 to
+`[self + 0x9e8]`, 8 to `+0x9f0`, 9 to `+0x9ec` and 10 to `+0x9f4`. **`self`
+there is the `+4` sub-object** — the setter reaches the object's own vtable
+through `[self − 4]` — so each field is four bytes further into the
+`MBehaviour` than the switch makes it look:
+
+| property | field | read by | before a mission sets it |
+|---|---|---|---|
+| `FreeBotNum` | `+0x9ec` | construction: "Begin to constructing free bot" while above zero, and decremented when a build completes | 0 |
+| `FreeConstructionTime` | `+0x9f0` | nothing found | 5 |
+| `FreeTechnoNum` | `+0x9f4` | research: free while above zero, and decremented | 0 |
+| `FreeResearchTime` | `+0x9f8` | research: `fTimeCost` of every research (`0x1002f942`) | 2 |
+
+The defaults are the constructor's (`0x10003a3c`). Read against them without
+the offset, the table would put the research time into the free-technology
+counter and the construction time into the free-bot counter.
+
+The missions agree with the corrected table (*measured*). `FreeBotNum` is
+non-zero on 27 objects, **all factories**; `FreeTechnoNum` on one, **a
+research centre** — the enhanced one in `CAMPAIGN.00/Mission.04`, with 5.
+`FreeConstructionTime` leaves 5 on 10 objects, every one a factory that grants
+bots, and `FreeResearchTime` leaves 2 only on that same research centre. So a
+research takes at least two seconds on every map but one, and what sets its
+pace is ore and power: the ore fraction grows at `KPD × Use_Ore × dt` over the
+ore cost, the power fraction likewise.
+
+`FreeConstructionTime`, by its values, is meant for the free bots, but no
+instruction reads `+0x9f0` — a search by displacement, not a proof.
 
 ## Efficiency is a building's size
 
@@ -283,8 +318,8 @@ time — with one difference in how ore is pulled.
   not multiplied by the tick's length.
 - Once power is fully collected it calls `SetPowerUsage(0)` and stops drawing;
   once ore is, it withdraws its request.
-- It **completes when all three are collected**, then decrements a clan counter
-  at `+0x9ec` — the free-bot count, a *guess* from the mission's `FreeBotNum`.
+- It **completes when all three are collected**, then decrements the
+  factory's own `FreeBotNum` if it is above zero (`0x1002a7f9`).
 - Until then its **progress is `min(time, ore, power)` as fractions, capped at
   1**, logged as "Construction in progress".
 
@@ -367,4 +402,4 @@ construction slows research.
 
 - What sets a component's level, the `0x200` factor — and so whether a short
   power supply lowers `KPD` itself.
-- How research's time budget accrues.
+- Where construction's time budget comes from, and what a free bot is spared.

@@ -3191,6 +3191,39 @@ def check_profiles(check, game: Path) -> None:
           f"2000 is on the transport and builder units and nothing else; "
           f"{sorted(by_value[profiles.STORAGE_MAX_ORE])} are at 4000")
 
+    # MBehaviour's property setter takes its +4 sub-object, so the four grants
+    # land four bytes past where the switch appears to put them: free bots on
+    # the counter construction spends, free technologies on the one research
+    # spends, and the research time on the field research reads as its budget.
+    placed = [o for d in gamedir.missions(game)
+              for o in mission.load(d / "data.tma").objects
+              if profiles.FREE_BOTS in o.properties]
+
+    def role(o) -> str:
+        parts = o.path.replace("\\", "/").split("/")
+        return parts[2].upper() if len(parts) > 3 else "?"
+
+    def value(o, name):
+        return o.properties[name].value
+
+    bots = Counter(role(o) for o in placed if value(o, profiles.FREE_BOTS))
+    technos = Counter(role(o) for o in placed if value(o, profiles.FREE_TECHNOLOGIES))
+    slow = [o for o in placed
+            if value(o, profiles.FREE_CONSTRUCTION_TIME) != profiles.CONSTRUCTION_TIME_DEFAULT]
+    long = [o for o in placed
+            if value(o, profiles.FREE_RESEARCH_TIME) != profiles.RESEARCH_TIME_DEFAULT]
+    check("data.tma: free bots are a factory's, free technologies a research centre's",
+          placed and set(bots) == {"PLANT"} and set(technos) == {"INSTITUT"}
+          and all(role(o) == "PLANT" and value(o, profiles.FREE_BOTS) for o in slow)
+          and all(role(o) == "INSTITUT" for o in long),
+          f"FreeBotNum is non-zero on {sum(bots.values())} objects, all factories; "
+          f"FreeTechnoNum on {sum(technos.values())}, a research centre; "
+          f"FreeConstructionTime leaves the engine's "
+          f"{profiles.CONSTRUCTION_TIME_DEFAULT:g} on {len(slow)} objects, every "
+          f"one a factory that grants bots; FreeResearchTime is the engine's "
+          f"{profiles.RESEARCH_TIME_DEFAULT:g} on {len(placed) - len(long)} of "
+          f"{len(placed)} and otherwise on {len(long)} research centre")
+
 
 def check_rsli(check, game: Path) -> None:
     """gamefont.rlb and sprites.lib -- the two archives that are not NRes."""

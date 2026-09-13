@@ -150,7 +150,10 @@ Each object carries its own property *names*, so the gameplay data model comes
 straight out of the mission file: `Invulnerability`, `Life state`, `LogicalID`,
 `ClanID`, `Type`, `MaxSpeedPercent`, `MaximumOre`, `CurrentOre`,
 `ChargeRadius`, `FreeBotNum`, `FreeTechnoNum`, `FreeConstructionTime`,
-`FreeResearchTime`, and six slots literally named `NOT USED`.
+`FreeResearchTime`, and six slots literally named `NOT USED`. The four
+`Free…` properties are a factory's free bots, a research centre's free
+technologies, and the research time — see
+[23-economy.md](23-economy.md#the-four-grants-a-mission-gives-a-building--read-and-measured).
 
 **`ClanID` is a 0-based index into the clan list** — not the clan's own `index`
 field, which is 1-based. All 463 owned objects have a ClanID in range, and on

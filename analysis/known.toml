@@ -1694,3 +1694,52 @@ kind = "site"
 name = "construction start: NewfOreCost = fOreCost / KPD"
 doc = "docs/23-economy.md"
 read = true
+
+# --- the four grants, ../docs/23-economy.md ---------------------------------
+[[entry]]
+module = "Behavior.dll"
+at = "0x1000b470"
+kind = "function"
+name = "MBehaviour property set by kind, self = +4: 7 FreeBotNum +0x9ec, 8 FreeTechnoNum +0x9f4, 9 FreeConstructionTime +0x9f0, 10 FreeResearchTime +0x9f8"
+doc = "docs/23-economy.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1000b5b0"
+kind = "function"
+name = "MBehaviour property get by kind, self = +4; mirrors the setter"
+doc = "docs/23-economy.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10059220"
+kind = "datum"
+name = "MBehaviour +4 interface vtable; slot 2 set property, slot 3 get"
+doc = "docs/23-economy.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10003a3c"
+kind = "site"
+name = "MBehaviour defaults: FreeConstructionTime 5, FreeResearchTime 2"
+doc = "docs/23-economy.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1002f942"
+kind = "site"
+name = "research start: fTimeCost = FreeResearchTime (+0x9f8)"
+doc = "docs/23-economy.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10029f03"
+kind = "site"
+name = "construction start: free bot while FreeBotNum (+0x9ec) > 0"
+doc = "docs/23-economy.md"
+read = true

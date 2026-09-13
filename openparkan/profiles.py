@@ -73,6 +73,19 @@ BUILDING_COST = 100.0
 #: one full storage, so a lone full mine reads 11%.
 HUD_ORE_FULL = MINE_MAX_ORE + STORAGE_MAX_ORE
 
+#: The four per-building grants a mission can set, by property name, and what
+#: ``MBehaviour`` holds in their fields before a mission does
+#: (``Behavior.dll:0x10003a3c``).  A factory builds its ``FreeBotNum`` bots at
+#: no cost; a research centre researches its ``FreeTechnoNum`` technologies at
+#: no cost; and ``FreeResearchTime`` is the time budget of *every* research
+#: the building starts, free or not, in seconds.
+FREE_BOTS = "FreeBotNum"
+FREE_TECHNOLOGIES = "FreeTechnoNum"
+FREE_CONSTRUCTION_TIME = "FreeConstructionTime"
+FREE_RESEARCH_TIME = "FreeResearchTime"
+CONSTRUCTION_TIME_DEFAULT = 5.0
+RESEARCH_TIME_DEFAULT = 2.0
+
 
 class ProfileFormatError(ValueError):
     pass
