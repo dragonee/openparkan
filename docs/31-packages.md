@@ -37,7 +37,7 @@ switch on exactly these numbers (*read*):
 | 17 | `ORDER_ROBOT_CAPTURE` | **the search task again**, restricted to building types `0x8017365e` (`0x100341a3`) | capturing |
 | 18 | *(undeclared)* | a task logging "ShowUpgrade" (`0x10059ae8`) | |
 | 19 | `ORDER_ROBOT_SHUTDOWN` | shutdown (`0x10059eec`) | shutting down |
-| 20 | `ORDER_ROBOT_LEAVE` | leave (`0x10059e38`): a place 150 m away, then 300 m | escaping — *guess* |
+| 20 | `ORDER_ROBOT_LEAVE` | leave (`0x10059e38`, "Leave"): **the escape**, below | escaping |
 | 21 | `ORDER_ROBOT_STAYGROUND` | stay ground (`0x10059eb0`) | standing |
 | 22 | `ORDER_ROBOT_FOLLOW` | follow (`0x10059dfc`) | following |
 | 23 | `ORDER_ROBOT_GETONBOARD` | get on board (`0x10059dc0`) | getting onboard |
@@ -149,7 +149,9 @@ readers were not traced, that is marked.
   and the next plan picks the same building again, so a capturer can hang about
   a ruin (*derived*). When the
   building turns the unit's own clan the task logs "Building [..] captured"
-  (`0x10030474`) and **plans the next one** at once. It never ends on its own.
+  (`0x10030474`) and, being a search by type, **plans the next one** at once
+  (`0x100304b9`): it does not end, and the code read gives it no escape — it
+  walks out of the building towards its next target (below).
   - **Rescan:** every 3 s plus up to 3 s, against 15 plus up to 15 s in the other
     modes (`0x100301b2`, `0x1003011b`); a plan also runs whenever the unit stops.
   - **No fighting on the way:** its interrupt priority is 0 for engagements
@@ -158,7 +160,11 @@ readers were not traced, that is marked.
 - **Capture building — search on one building.** The same class with the picked
   building's logic id, under the same size rule, and `SetTarget` also refuses
   one of the unit's own clan or a main teleport. It ends — successfully — when
-  the building is the unit's clan's.
+  the building is the unit's clan's (`0x100304a4`: the single-target flag
+  `+0x60` that `SetTarget` sets for a logic id). A mission script's
+  `ORDER_ROBOT_CAPTURE` by logic id takes the same path. With the task gone
+  and the unit standing in the building, **the unit takt gives it the escape**
+  (below).
 - **Guard — patrol.** Pick a unit, a building or a place (`0x1002d520`). The
   patrol task moves to a new random point around it on a timer (`0x1002dd90`),
   and only while `Behavior.ini`'s `DeterminMode` is 0 (`0x1002d900`). The
@@ -173,6 +179,12 @@ readers were not traced, that is marked.
 
   `Patrol_Attack_Range` is 400. That it is the range at which a guard engages
   is a *guess*; its reader was not found.
+
+  **A small unit told to guard a building of another clan captures it first**
+  (`0x1002da7a`): if the unit is of size class 2 or less, the patrol queues,
+  behind itself, a search on that building (a capture), an escape from it and a
+  patrol of it again, and ends. What the unit's `IBehaviour` slot `0x10` test
+  it also makes is *unknown*.
 - **Refit — reload.** `M_Task_Reload` walks to a ground-level dock and waits
   until life, charge and ammunition are at 98%
   ([27-ownership.md](27-ownership.md)). `ORDER_ROBOT_REPARE` builds the same
@@ -194,6 +206,70 @@ readers were not traced, that is marked.
   "Resource Found" (`0x10030535`) and ends. What sets the lodes was not traced.
 - **Transport minerals, Build, Upgrade.** These are the transport, build and
   upgrade tasks; [32-builder.md](32-builder.md) covers what they do.
+
+## The escape — *read*
+
+`ORDER_ROBOT_LEAVE` is the **escape**: a task that takes a unit off a building
+and out onto open ground. The game gives it: no menu entry offers it and no
+shipped mission script names it ([How the missions use them](#how-the-missions-use-them--measured)).
+
+**Where it goes** (start, `0x1002ba50`):
+
+- **With no target** it tries random points around the unit, each inside the
+  map by at least 100 and on a usable areal: 400 tries within 150 of it along
+  each axis, then 300 within 300, 200 within 400 and 200 within 1,000 — the log
+  names which ("Leave found 150m. place" …). With none it fails ("Cannot
+  Leave").
+- **Away from a building** (by its logic id) it takes a random point 20 to 70
+  beyond the building's bounding sphere, at a random angle, 200 tries
+  ("LeaveOut found").
+
+It walks there at the unit's speed × `Go_SpeedPercent`.
+
+**When it ends** (takt, `0x1002c100`): when the unit's walker has nothing
+left to do — no path, no step, no wait (`0x1003dd80`), which is when it has
+reached its point. Nothing in the takt tests the ground under the unit at the
+end: that the point, on a usable areal, is always off the building is a
+*guess* the 20-second check below backs. Two refinements:
+
+- an escape with no target that still finds the unit on a building after 20 s
+  stops it and routes it out through the building's own paths ("LEAVE IS TOO
+  !!!");
+- an escape from a named building is held while that building's state
+  (variable `0x205`) reads 1 or `0x309`, or its `0x20c` reads 1 — that this
+  keeps a unit clear while the building goes up is a *guess*
+  ([32-builder.md](32-builder.md)).
+
+**Nothing interrupts it**: its priority is 0 for every reason (`0x1002b9f0`),
+so an escaping unit neither engages nor refits on the way. When it ends, the
+task beneath it on the stack, if any, resumes.
+
+**Who gives it** — five places, all in `Behavior.dll`:
+
+| when | escape | inserted | read at |
+|---|---|---|---|
+| a unit **stands on a building** with **no order or a stop** — not a ruin, not a destroyed building, and not passing a test through the building's `IAnimation` (interface `0xb`, slot 16) whose meaning is *unknown* | no target | replacing | unit takt `0x10005408` |
+| the behaviour's control flag `0x10` is switched back on while the unit stands on a building | from that building | first | mode setter `0x10006f48` |
+| a factory has just made the unit | no target | replacing | `0x1002aa6e`, "Adding Robot to game..." |
+| a small unit guarding another clan's building, after capturing it | from that building | queued | patrol `0x1002da7a` |
+| a building begins its construction sphere, for every unit within its radius + 15 not already escaping or upgrading | from that building | first | ShowUpgrade `0x10031571` |
+
+So **a capture is followed by an escape when the capture task ends** —
+Capture building, a script's capture by logic id, or the guard sequence — the
+unit takt seeing an idle unit on the building. The menu's Search and capture
+does not end at a capture, so that path does not run. That the control flag
+`0x10` is the AI's, off while the player drives a unit — which would make the
+second row "the player lets go of a unit on a building" — is a *guess*: it fits
+the flag gating the unit's own takt, but the callers of the mode setter were
+not traced.
+
+*Against what the game looked like:* in play an escape follows every capture,
+and follows leaving a driven bot inside a building or on its grounds. The code
+read gives the second through the mode setter (if flag `0x10` is the player's
+hand, a *guess*) and the first only where the capture task ends: after Capture
+building or a script's capture, not after the menu's Search and capture, which
+replans at `0x100304b9`. What gives a Search and capture unit its escape, if
+anything does, is *unknown*.
 
 ## Where a search looks — *read*, and *measured*
 
@@ -311,8 +387,9 @@ What does gate packages, as read:
   through only if a dock is reachable (`0x100018a0`).
 - **With no order.** An animal's default order is 15, migrate; a mine's is to
   mine (`0x100088f0`). A unit placed inside a building gets a patrol inside it
-  ("Give default patrol inside building order", `0x1000ac4c`). For other units
-  no default order was found.
+  ("Give default patrol inside building order", `0x1000ac4c`). **A unit left
+  idle or stopped on a building escapes** from it ([The escape](#the-escape--read)).
+  For other units no default order was found.
 
 ## How the missions use them — *measured*
 
@@ -353,3 +430,9 @@ captures by logic id 34 times.
 - What reads `Patrol_Attack_Range`, and the building patrol speed of 80.
 - Which string the status line shows for which task.
 - Whether a wingman menu is what the second table is.
+- What the building's `IAnimation` test in the unit takt admits (interface
+  `0xb`, slot 16, given the unit's `IGameObject` slot-16 value), which keeps some
+  units on a building from escaping.
+- Who calls the behaviour's mode setter, and so whether flag `0x10` is the
+  player's hand on a unit.
+- What a building's variable `0x205` holds, which an escape from it waits out.

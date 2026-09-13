@@ -4131,7 +4131,7 @@ read = true
 module = "Behavior.dll"
 at = "0x10059e38"
 kind = "datum"
-name = "leave task vtable (order 20): a place 150 m, then 300 m, away"
+name = "leave task vtable (order 20, the escape): random open ground within 150/300/400/1000, or 20-70 beyond a building's sphere"
 doc = "docs/31-packages.md"
 read = true
 
@@ -5053,4 +5053,110 @@ at = "0x1005c50c"
 kind = "site"
 name = "construction sphere: 15 more radius on a mine"
 doc = "docs/32-builder.md"
+read = true
+
+# --- the escape, ../docs/31-packages.md ---
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1002b9c0"
+kind = "function"
+name = "leave task debug label 'Leave'"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1002b9f0"
+kind = "function"
+name = "leave task interrupt priority: 0 for every reason, so nothing breaks an escape"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1002ba10"
+kind = "function"
+name = "leave task SetTarget: TARGET_NOT_DEFINED, or a building by logic id (TARGET_BY_LOGIC_ID)"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1002ba50"
+kind = "function"
+name = "leave task start: a usable point within 150/300/400/1000 of the unit, or 20-70 beyond a building's sphere"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1002c100"
+kind = "function"
+name = "leave task takt: ends when the walker is idle; re-routes out of a building after 20 s; by building: waits out its 0x205 state"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10034b70"
+kind = "function"
+name = "task stack current task: the top of the stack, or the embedded idle task when empty"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10005408"
+kind = "site"
+name = "unit takt: a unit on a building (not a ruin, not destroyed) with no order or STOP is given LEAVE (not defined, replace)"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1000537d"
+kind = "site"
+name = "unit takt: LEAVE skipped when the building's IAnimation (0xb) slot 16 accepts the unit's IGameObject slot-16 value"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10006f48"
+kind = "site"
+name = "mode set: flag 0x10 turned on while on a building -> LEAVE by that building, parameter 100, inserted first"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1002a920"
+kind = "function"
+name = "factory: add the built robot to the game (CreateObjectFromScheme) and give it LEAVE (not defined, replace)"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1002da7a"
+kind = "site"
+name = "patrol takt: a small unit guarding a foreign building queues SEARCH on it, LEAVE by it, PATROL it, and ends"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10031571"
+kind = "site"
+name = "ShowUpgrade: LEAVE by the building, inserted first, for units within its sphere + 15 not already leaving or upgrading"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x100304a4"
+kind = "site"
+name = "search takt after a capture: a single-building search (+0x60) ends, a search by type replans"
+doc = "docs/31-packages.md"
 read = true

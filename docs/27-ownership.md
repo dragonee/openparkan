@@ -108,8 +108,17 @@ building of the capturer's own clan, and on a main teleport (`0x10030252`).
 `MakeInsideDest` refuses it again for anything bigger: "TypedSizes
 missmached".
 
-**The capturer walks to the pod** (`0x1003094f`) and the task ends when the
-building's clan is its own: "Building [..] captured" (`0x10030474`).
+**The capturer walks to the pod** (`0x1003094f`). When the building's clan is
+its own the task logs "Building [..] captured" (`0x10030474`); what follows
+depends on the order ([31-packages.md](31-packages.md#the-escape--read)):
+
+- **Capture building**, or a script's capture by logic id, **ends**, and the
+  unit — idle, standing in the building — is given an **escape** by its own takt
+  (`0x10005408`), which walks it to open ground within 150 and ends there;
+- **Search and capture** does not end: it plans the next building at once and
+  walks there;
+- a small unit sent to **guard** another clan's building captures it, escapes
+  from it and then guards it (`0x1002da7a`).
 
 **What fires it is the building's computer** — *read*, and *measured*. The
 building object is `Terrain.dll`'s `CBuilding`, and interface `0x17` is its
