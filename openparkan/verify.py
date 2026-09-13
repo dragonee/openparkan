@@ -7491,6 +7491,70 @@ def check_turrets(check, game: Path) -> None:
           f"records; +0x26 by size letter "
           + ", ".join(f"{k} {sorted(v)}" for k, v in sorted(size_codes.items())))
 
+    # iron3d.dll's Type function reads +0x23 and +0x24 as the part's kind and
+    # sub-kind: 9 and 33 make a turret, whose role byte then decides.
+    kind_codes: dict[str, set[int]] = defaultdict(set)
+    turret_sub: Counter[tuple[bool, bool]] = Counter()
+    part_codes: dict[str, set[tuple[int, int, int, int]]] = defaultdict(set)
+    for tree_path in research.trees(game):
+        for item in research.read(tree_path).items:
+            if not item.tail:
+                continue
+            for part in item.parts:
+                part_codes[part.lower()].add((item.tail[1], item.tail[2], item.tail[4],
+                                              item.tail[0]))
+            entry = catalogue.get(item.parts[0]) if item.parts else None
+            if not entry:
+                continue
+            kind_codes[entry.kind].add(item.tail[1])
+            turret_sub[(item.tail[1] == objects.PART_KIND_UNIT
+                        and item.tail[2] == objects.PART_SUB_TURRET,
+                        entry.kind == "SHS" and entry.sub == "TUR")] += 1
+    check(".trf: tail bytes +0x23 and +0x24 are the part's catalogue kind and sub-kind",
+          {k: sorted(v) for k, v in kind_codes.items()}
+          == {"BLD": [8], "SHS": [9], "ANM": [9], "AMM": [10], "DVC": [11], "WPN": [12]}
+          and set(turret_sub) == {(True, True), (False, False)},
+          "+0x23 by catalogue kind: "
+          + ", ".join(f"{k} {sorted(v)}" for k, v in sorted(kind_codes.items()))
+          + f"; +0x24 is 33 with +0x23 9 on exactly the {turret_sub[(True, True)]} "
+          f"SHS:TUR item records, of {sum(turret_sub.values())}")
+
+    ambiguous = sorted(p for p, c in part_codes.items() if len(c) > 1)
+    robot_ok = robot_all = building_ok = building_all = 0
+    building_off: Counter[tuple[int, int]] = Counter()
+    for path in sorted(game.glob("UNITS/**/*.dat")):
+        unit = objects.load_unit(path)
+        members = [c.ref.member.lower() for c in unit.components]
+        base = next(iter(part_codes.get(members[0], ())), None)
+        if base is None:
+            continue
+        if unit.is_building:
+            building_all += 1
+            got = objects.part_type(base[0], base[1], base[2], base[3])
+            building_ok += got == unit.kind
+            if got != unit.kind:
+                building_off[(base[1], unit.kind)] += 1
+        elif members[0].startswith("r_") and any(m.startswith("e_tur") for m in members):
+            turret = next(m for m in members if m.startswith("e_tur"))
+            codes = next(iter(part_codes[turret]))
+            robot_all += 1
+            robot_ok += objects.part_type(*codes[:2], codes[2], codes[3]) == unit.kind
+    ladder = set(controls.SCHEME_TYPES.values())
+    check("UNITS: iron3d's Type function over the research codes gives the class word",
+          not ambiguous and robot_all and robot_ok == robot_all
+          and building_all - building_ok == sum(building_off.values())
+          and set(sub for sub, _ in building_off) == {28}
+          and set(objects.BUILDING_SUB_TYPES.values()) - ladder == {0x80001000}
+          and set(objects.BUNKER_SIZE_TYPES.values()) <= ladder,
+          f"a robot's turret item (kind, sub-kind, size, role) gives its .dat's class "
+          f"word on {robot_ok}/{robot_all}; a building's base part on "
+          f"{building_ok}/{building_all}, the rest ruins (sub-kind 28, which the "
+          f"function leaves at 0): "
+          + ", ".join(f"sub-kind {sub} class word {kind:#x} x{n}"
+                      for (sub, kind), n in sorted(building_off.items()))
+          + ".  Control: every building Type "
+          "it gives is a BuildDat.lst scheme's but the bridge's 0x80001000")
+
     # --- the special turrets ----------------------------------------------------
     free = sorted(t for t in ids if t[7] != "b" and catalogue.get(t)
                   and not any((catalogue[t].build_energy, catalogue[t].build_ore,
@@ -7538,6 +7602,34 @@ def check_turrets(check, game: Path) -> None:
           + f" (clan types), the hero turret {dict(placed['e_tur_ht_02'])}, and none "
           f"is in UNITS/UNITS/AI.  Control: the paid battle turrets are placed "
           f"for players {player_battle} times")
+
+    # A tree's category byte is state bits (MisLoad.dll:0x10002aa0, 0x10002c10):
+    # 4 the item is in this tree, 1 it can be researched, 2 it has been.
+    present, researched = 4, 2
+    player = [p for p in research.trees(game) if re.search(r"(p|_pl)\.trf$", p.name, re.I)]
+    specials_in: Counter[str] = Counter()
+    hero_with_chassis = hero_trees = 0
+    states: set[int] = set()
+    for tree_path in research.trees(game):
+        state = {}
+        for item in research.read(tree_path).items:
+            states.add(item.category)
+            for part in item.parts:
+                state[part.lower()] = item.category
+        if state.get("e_tur_ht_02", 0) & present:
+            hero_trees += 1
+            hero_with_chassis += state.get("r_h_02", 0) != researched
+        if tree_path in player:
+            for tid in specials:
+                specials_in[tid] += bool(state.get(tid, 0) & present)
+    check(".trf: no player's tree holds a special turret, and no tree the hero's chassis",
+          player and states == {0, 2, 4, 5, 7} and not any(specials_in.values())
+          and hero_trees and hero_with_chassis == 0,
+          f"state bytes {sorted(states)}; in the {len(player)} player trees (*p, *_pl) "
+          f"the Transformer, Small tower and monster turrets are never present "
+          f"{dict(specials_in)}; the hero turret is present in {hero_trees} trees and "
+          f"its chassis r_h_02 in none of them, where it reads {researched}: "
+          f"researched but not in the tree")
 
     body: dict[str, float] = {}
     for tid in ids:
@@ -8509,6 +8601,29 @@ def check_player_input(check, game: Path) -> None:
                             ("SCAN_G_SUB", -1.0, 0.05, 1000), ("SCAN_G_SLASH", 0.0, 0.0, 0)]),
           f"{cruise}")
 
+    # MCMD_ROTATE_Z's value is the spin's z (World3D.dll:0x1000fe77 -> IControl
+    # slot 4, Control.dll:0x10004440), so the developers' own labels give +z's sense.
+    turns = sorted({(r.note, r.value) for t in machines for r in t
+                    if r.command == "MCMD_ROTATE_Z" and r.pressed})
+    check("m1.tbl, m2.tbl: turning left is a positive spin, turning right a negative one",
+          turns == [("OBJ_TURN_LEFT", 0.7), ("OBJ_TURN_RIGHT", -0.7)],
+          f"MCMD_ROTATE_Z press rows {turns}: +z turns a machine left, which is why a "
+          f"mouse count's -z turn (the pending turn is negated) turns it right")
+
+    plus = next(r for r in hero if r.key == "SCAN_G_PLUS")
+    command, held, runs = 0.0, 0.0, 0
+    while command < 1.0 and runs < 1000:        # an update every 50 ms, say
+        command, held, runs = plus.ramped(command, held), held + 50.0, runs + 1
+    ini = settings.sections(game / settings.DISPLAY_FILE).get("CS", {})
+    sensitivity = {k: int(ini.get(k, "-1")) for k in controls.INPUT_SETTINGS}
+    check("Iron_3D.ini: the shipped mouse and joystick sensitivities hand World3D 1.0",
+          sensitivity == {"MOUSE_SENS": 100, "JOY_SENS": 100, "MOUSE_REV_Y": 0, "JOY_REV_Y": 0}
+          and runs == 31,
+          f"{sensitivity}: iron3d.dll hands MOUSE_SENS x {controls.SENSITIVITY_SCALE} to "
+          f"World3D.dll setting {controls.INPUT_SETTINGS['MOUSE_SENS']:#x}, the mouse "
+          f"filter's multiplier, and both signs stay +1.  Control: a held keypad + takes "
+          f"{runs} runs of the input update from a stopped cruise to full")
+
     objs = NResArchive.open(game / "objects.rlb")
     bases = NResArchive.open(game / "bases.rlb")
     chassis = control.parse(bases.read_name("r_h_02.ctl"))
@@ -8585,6 +8700,38 @@ def check_turret_channels(check, game: Path) -> None:
           f"point before it, where the camera component's own node is the eye's on "
           f"only {on_node}")
 
+    # The camera builds its frame from the two points (Control.dll:0x100234c0):
+    # TargetDirect's vector looks, CameraCenter's position is the eye and its
+    # vector is the up that the side axis is crossed from.
+    ups: Counter[tuple[bool, tuple[float, ...]]] = Counter()
+    looks: Counter[tuple[float, ...]] = Counter()
+    hung_up: list[str] = []
+    for name in sorted(names):
+        stem = name[:-4]
+        if not name.endswith(".ctl") or stem + ".cpt" not in names:
+            continue
+        c = control.parse(turrets.read_name(name))
+        cp = objmesh.parse_control_points(turrets.read_name(stem + ".cpt"))
+        mount = next((p for p in c.components if p.type_id == control.TURRET_TYPE), None)
+        upright = bool(mount and mount.flags & control.MOUNT_UPRIGHT)
+        for comp in c.components:
+            if comp.type_id == control.CAMERA_TYPE and comp.entries:
+                chan = c.channels[comp.entries[0]]
+                up = tuple(round(v, 3) for v in cp[chan.point - 1].direction)
+                ups[(upright, up)] += 1
+                looks[tuple(round(v, 3) for v in cp[chan.point].direction)] += 1
+                if not upright and up[2] > 0:
+                    hung_up.append(stem)
+                break
+    check("turrets.rlb: CameraCenter's vector is the eye's up, TargetDirect's its look",
+          looks == Counter({(0.0, 1.0, 0.0): sum(looks.values())})
+          and {u for (upright, u) in ups if upright} == {(0.0, 0.0, 1.0)}
+          and ups[(False, (0.0, 0.0, -1.0))] > len(hung_up),
+          f"TargetDirect is +y on all {sum(looks.values())} cameras; CameraCenter is "
+          + ", ".join(f"{u} on {n} {'upright' if up else 'hung'}"
+                      for (up, u), n in sorted(ups.items()))
+          + f" -- the two hung turrets that keep +z are {', '.join(hung_up)}")
+
     m = objmesh.parse(turrets.read_name(HERO_TURRET_MESH), HERO_TURRET_MESH)
 
     def world(node: int, frame: int) -> objmesh.Pose:
@@ -8614,6 +8761,55 @@ def check_turret_channels(check, game: Path) -> None:
           f"{math.radians(hi - lo):.4f} rad against a span of {pitch.span:.4f}; at the "
           f"start value it is {level:+.2f}.  Control: yaw frames 49/51/53 face "
           f"{', '.join(f'{h:.0f}' for h in heads)} degrees, so 0.5 looks ahead")
+
+    # Every robot turret: a value is a frame, the keys are even, and the start is
+    # level -- so, with the engine's slerp between keys (Ngi32.dll:0x10014630),
+    # the aim is linear in the channel's value.
+    library = objects.ObjectLibrary(game / "objects.rlb")
+    yaw_ok = level_ok = turrets_seen = 0
+    sweeps: Counter[tuple[float, float]] = Counter()
+    for rid in sorted(r for r in library.records if r.lower().startswith("e_tur")):
+        record = library.get(rid)
+        c = control.parse(turrets.read_name(record.slot_with_suffix("ctl").member))
+        mount = c.components[0]
+        if mount.type_id != control.TURRET_TYPE or len(mount.entries) != 2:
+            continue
+        y, p = (c.channels[i] for i in mount.entries)
+        member = record.slot_with_suffix("msh").member
+        model = objmesh.parse(turrets.read_name(member), member)
+
+        def pose(node: int, frame: int, model=model) -> objmesh.Pose:
+            def local(k: int) -> objmesh.Pose:
+                track = model.track(k)
+                return model.keys[track[frame]].pose if track else model.local_pose(k)
+            out, parent = local(node), model.nodes[node].parent
+            while parent != objmesh.NO_PARENT:
+                out, parent = objmesh.compose(local(parent), out), model.nodes[parent].parent
+            return out
+
+        turrets_seen += 1
+        faces = []
+        for f in range(int(y.first), int(y.last) + 1):
+            x, fy, _ = objmesh.quaternion_rotate(pose(y.node, f)[1], (0.0, 1.0, 0.0))
+            faces.append(math.degrees(math.atan2(x, fy)))
+        yaw_ok += len(faces) == 5 and all(
+            abs((a - b + 180) % 360 - 180) < 1.0
+            for a, b in zip(faces, (180, -90, 0, 90, 180), strict=True))
+        ups = []
+        for f in range(int(p.first), int(p.last) + 1):
+            x, fy, z = objmesh.quaternion_rotate(pose(p.node, f)[1], (0.0, 1.0, 0.0))
+            ups.append(math.degrees(math.atan2(z, math.hypot(x, fy))))
+        even = len(ups) == 3 and abs((ups[1] - ups[0]) - (ups[2] - ups[1])) < 0.5
+        start = ups[0] + p.initial * (ups[-1] - ups[0])
+        level_ok += even and abs(start) < 1.0
+        sweeps[(round(ups[0], 1), round(ups[-1], 1))] += 1
+    check("turrets.rlb: every turret's aim keys are even, and every one starts level",
+          turrets_seen and yaw_ok == turrets_seen == level_ok,
+          f"{yaw_ok}/{turrets_seen} yaw channels face 180, -90, 0, 90 and 180 degrees on "
+          f"their five frames (so 0.25 looks to -x and 0.75 to +x); {level_ok} pitch "
+          f"channels rise in two equal steps and sit within a degree of level at their "
+          f"start value; pitch limits (degrees) "
+          + ", ".join(f"{lo:+g}..{hi:+g} x{n}" for (lo, hi), n in sorted(sweeps.items())))
 
     eye, sight = (next(q for q in cpt if q.name == n) for n in ("CameraCenter", "TargetDirect"))
     camera = [c for c in ctl.components if c.type_id == control.CAMERA_TYPE]

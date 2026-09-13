@@ -340,12 +340,82 @@ first reads the current triple.
     m  = counts × sensitivity × 0.95 + 0.05 × m_previous      (Y also × 1.2)
     Δv = clamp(m × 0.006, −1, 1) × invert × magnitude
 
-- `sensitivity` (`0x100234d0`) is `Iron_3D.ini`'s `MOUSE_SENS` × 0.01. The ini
-  read is at `iron3d.dll:0x1002a64d`. That it is the same value that reaches
-  `World3D`'s setter (`0x1000aa1d`) is a *guess*: the handoff was not traced.
-- `invert` is ±1, from `SetInverseMotion` (`0x10010e10`). The two globals
-  earlier read as sensitivities are these signs.
+- `sensitivity` (`0x100234d0`) is `Iron_3D.ini`'s `MOUSE_SENS` × 0.01
+  (*read*, [below](#the-ini-reaches-world3d--read)). The shipped ini says
+  100, so it is 1.0 (*measured*).
+- `invert` is ±1: mouse Y's (`0x100234f0`) follows `MOUSE_REV_Y`. Mouse X's
+  (`0x100234ec`) is +1 in the shipped game. `SetInverseMotion`
+  (`0x10010e10`) and setting `0x69` could change it, but no module imports
+  the export and `iron3d.dll` never sends the setting. The two globals earlier
+  read as sensitivities are these signs.
 - A joystick axis adds counts × invert × `JOY_SENS` × 0.01 × magnitude.
+
+### The ini reaches World3D — *read*
+
+`World3D.dll`'s `CreateGameSettings` object keeps a table of handlers by
+group (slot 9, `0x1000a640`). Slot 2 (`0x1000a3b0`) passes a setting on to
+its group's handler. The id is a dword, the group in its low word and the
+setting in its high one. `World3D.dll` registers group 10 for itself
+(`0x10014cca`), and that handler's slot 2 (`0x1000a820`) switches on the
+setting (`0x5a`–`0x6e`, table `0x1000aae0`).
+
+`iron3d.dll` reads `Iron_3D.ini` at load (`0x10061310`) and sends it on:
+
+| ini key | sent as | lands in (`World3D.dll`) |
+|---|---|---|
+| `MOUSE_SENS` × 0.01 | group 10, `0x66` | `0x1000aa1d` → `0x100234d0`, the mouse filter's multiplier |
+| `JOY_SENS` × 0.01 | group 10, `0x67` | `0x1000aa31` → `0x100234d4`, the joystick's |
+| `MOUSE_REV_Y` ≠ 0 | group 10, `0x6a` | `0x1000aa6a` → mouse Y's sign `0x100234f0` = −1, **and** joystick X's `0x100234f4`: the case falls through into `0x6b`'s |
+| `JOY_REV_Y` ≠ 0 | group 10, `0x6c` | `0x1000aaa9` → joystick Y's sign `0x100234f8` |
+| `EMBOSS_BUMP` | group 10, `0x6d` (and group 30, not `World3D.dll`'s) | `0x100234e8` |
+| 1 | group 10, `0x65` | `0x100234e0` |
+
+The handler's slot 4 (`0x1000adf0`) answers 0.5 for both sensitivities, and
+slot 5 answers 2.0: a slider's range, by the look of it (*guess*).
+`iron3d.dll:0x10061a50` sets the mouse sensitivity to that 0.5 in some screen
+states and puts the ini's value back in the others. It switches on
+`+0x710` at `0x100a4fc0`, and which states those are was not read.
+`iron3d.dll:0x1002a64d` is another `MOUSE_SENS` reader, into an options
+object's `+0x724`.
+
+### A row that stays down — *read*
+
+The table reader (`0x1000b601` pushes its format, `'%s %s %d %s %s %f %d %s %f %d'`)
+keeps each row as a 0x88-byte record in one of three tables:
+
+| Offset | Field |
+|---|---|
+| +0x04 | the modifier's scan code |
+| +0x5c | the key's |
+| +0x60 | 1 on the press row, 0 on the release row |
+| +0x64, +0x68 | class, `MCMD_` command |
+| +0x6c, +0x70, +0x74 | magnitude, index, state |
+| +0x78, +0x7c | ramp, ramp time in ms |
+| +0x80, +0x84 | active, and the game time it became so |
+
+**A key event activates its key's matching row and clears the other**
+(`0x1000f5a4`). A going-down event sets the press row active, stamped with
+the game clock (`SetGameTime`'s `0x10032a38`), and clears the release row.
+Coming up does the opposite.
+
+**Every active row is handed to the row handler on each update**
+(`0x1000f477`–`0x1000f514`), not once per event. What it does with a key
+row's value is the axis function's (`0x10010a50`):
+
+- **no ramp time**: the row's magnitude;
+- **a ramp time**: the current value moved toward the magnitude by
+  ramp × min(1, held ms ÷ ramp time), never past it. A release row clears
+  itself once it arrives; a press row stays active while its key is held.
+
+So the keypad's `+` and `−` steer the cruise command by a step per update
+([24-motion.md](24-motion.md#from-input-to-motion--read-and-measured)).
+
+The context object holds a second ramp for each of walking and turning
+(`+0x3d`/`+0x44`/`+0x4c`/`+0x50` and `+0x3e`/`+0x40`/`+0x48`/`+0x54`). The
+walk messages (19, 20) and `MCMD_ROTATE_Z` use it in place of the row's while
+it is switched on. It is set through the manager's slot 11 (`0x1000b380`). Who calls that was
+not traced: a scan for a literal kind of 1 or 2 found no caller, but it had no
+positive control, so it proves nothing.
 
 **The hero's rows** (*measured*, `hero.tbl`):
 

@@ -7437,7 +7437,7 @@ read = true
 module = "Control.dll"
 at = "0x100271c7"
 kind = "site"
-name = "turret: record +8 bit 0x4000000 (upright, t mounting) set -> negate the aim vector at +0x9c"
+name = "turret init: record +8 bit 0x4000000 (upright) set -> the aim triple +0x9c kept as 1 - v"
 doc = "docs/30-turrets.md"
 read = true
 
@@ -7461,7 +7461,7 @@ read = true
 module = "Control.dll"
 at = "0x10028990"
 kind = "function"
-name = "turret angle from the control system (called at 0x10005afa), negated when not upright"
+name = "turret: strafe offset z / yaw span into +0xe8, negated when not upright (called at 0x10005afa)"
 doc = "docs/30-turrets.md"
 read = true
 
@@ -7477,7 +7477,7 @@ read = true
 module = "Control.dll"
 at = "0x1002b7bb"
 kind = "site"
-name = "IControl getter: a component record's +8 bit 0x8000000 -- set on every HQ turret"
+name = "control system query 13: the turret's record +8 bit 0x8000000 -- set on every HQ turret"
 doc = "docs/30-turrets.md"
 read = true
 
@@ -9868,7 +9868,7 @@ read = true
 module = "World3D.dll"
 at = "0x1000aa1d"
 kind = "site"
-name = "game settings setter: writes the mouse sensitivity float 0x100234d0"
+name = "setting 0x66 (group 10): the mouse sensitivity float 0x100234d0, Iron_3D.ini MOUSE_SENS x 0.01"
 doc = "docs/14-controls.md"
 read = true
 
@@ -9982,7 +9982,7 @@ read = true
 module = "Control.dll"
 at = "0x100234c0"
 kind = "function"
-name = "camera slot 11: eye from its channel's control points (position and direction), shake offset x 0.02, free look, set on the view"
+name = "camera slot 11: eye = CameraCenter position + shake x 0.02, look = TargetDirect vector, up = CameraCenter vector; free look; set on the view"
 doc = "docs/30-turrets.md"
 read = true
 
@@ -10023,6 +10023,655 @@ module = "Terrain.dll"
 at = "0x1008c1d0"
 kind = "function"
 name = "camera: screen point to view ray, x by tan(fov/2), y by tan(fov/2) x height/width"
+doc = "docs/30-turrets.md"
+read = true
+
+# --- strafe, ramps, the ini, the eye's points, the shake, the class word, ../docs/14, 24, 30 ---
+[[entry]]
+module = "World3D.dll"
+at = "0x1000a3b0"
+kind = "site"
+name = "game settings slot 2: pass (group low word, setting high word, value) to the group's registered handler, its slot 2"
+doc = "docs/14-controls.md"
+read = true
+
+[[entry]]
+module = "World3D.dll"
+at = "0x1000a640"
+kind = "site"
+name = "game settings slot 9: register a handler for a settings group (at most 0x80)"
+doc = "docs/14-controls.md"
+read = true
+
+[[entry]]
+module = "World3D.dll"
+at = "0x1000a820"
+kind = "site"
+name = "settings group 10 handler slot 2: switch on setting 0x5a..0x6e through the table at 0x1000aae0"
+doc = "docs/14-controls.md"
+read = true
+
+[[entry]]
+module = "World3D.dll"
+at = "0x1000aae0"
+kind = "table"
+name = "group 10 setting switch: 0x66 -> 0x1000aa1d mouse sensitivity, 0x67 -> joystick, 0x6a -> mouse Y sign (falls through to 0x6b, joystick X sign), 0x6c -> joystick Y sign"
+doc = "docs/14-controls.md"
+read = true
+
+[[entry]]
+module = "World3D.dll"
+at = "0x1000aa31"
+kind = "site"
+name = "setting 0x67: the joystick sensitivity 0x100234d4 (JOY_SENS x 0.01)"
+doc = "docs/14-controls.md"
+read = true
+
+[[entry]]
+module = "World3D.dll"
+at = "0x1000aa6a"
+kind = "site"
+name = "setting 0x6a (MOUSE_REV_Y): mouse Y sign 0x100234f0 = -1 when set, then falls through into 0x6b's joystick X sign 0x100234f4"
+doc = "docs/14-controls.md"
+read = true
+
+[[entry]]
+module = "World3D.dll"
+at = "0x1000aaa9"
+kind = "site"
+name = "setting 0x6c (JOY_REV_Y): joystick Y sign 0x100234f8"
+doc = "docs/14-controls.md"
+read = true
+
+[[entry]]
+module = "World3D.dll"
+at = "0x1000adf0"
+kind = "site"
+name = "group 10 handler slot 4: 0.5 for settings 0x66 and 0x67 (slot 5 gives 2.0)"
+doc = "docs/14-controls.md"
+read = true
+
+[[entry]]
+module = "World3D.dll"
+at = "0x10014cca"
+kind = "site"
+name = "World3D registers its own settings handler (vtable 0x10020ae0) as group 10"
+doc = "docs/14-controls.md"
+read = true
+
+[[entry]]
+module = "World3D.dll"
+at = "0x10020ae0"
+kind = "datum"
+name = "settings group 10 handler vtable: slot 2 0x1000a820 set, slot 4 0x1000adf0, slot 5 0x1000aed0"
+doc = "docs/14-controls.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100617c0"
+kind = "site"
+name = "Iron_3D.ini apply: MOUSE_SENS x 0.01 sent to World3D settings as group 10, setting 0x66"
+doc = "docs/14-controls.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10061810"
+kind = "site"
+name = "Iron_3D.ini apply: JOY_SENS x 0.01 sent as group 10, setting 0x67"
+doc = "docs/14-controls.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10061a50"
+kind = "function"
+name = "set mouse sensitivity (0x66) to the handler's slot-4 0.5 when the argument is set, else back to the ini value kept at +0xe0"
+doc = "docs/14-controls.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100a4fc0"
+kind = "site"
+name = "screen-state switch on +0x710 that calls 0x10061a50 with a byte of the state"
+doc = "docs/14-controls.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1005b570"
+kind = "function"
+name = "the CreateGameSettings object iron3d keeps at 0x1010b60c"
+doc = "docs/14-controls.md"
+read = true
+
+[[entry]]
+module = "World3D.dll"
+at = "0x1000b601"
+kind = "site"
+name = ".tbl reader: format '%s %s %d %s %s %f %d %s %f %d'; 0x88-byte row, key +0x5c, pressed +0x60, class +0x64, command +0x68, magnitude +0x6c, index +0x70, state +0x74, ramp +0x78, ramp ms +0x7c, active +0x80, start +0x84"
+doc = "docs/14-controls.md"
+read = true
+
+[[entry]]
+module = "World3D.dll"
+at = "0x1000f100"
+kind = "function"
+name = "input manager update (vtable 0x10020b14 slot 4): mouse filter, active rows, then key events"
+doc = "docs/14-controls.md"
+read = true
+
+[[entry]]
+module = "World3D.dll"
+at = "0x1000f477"
+kind = "site"
+name = "input update: every row of the three tables with +0x80 == 1 is run through the row handler again"
+doc = "docs/14-controls.md"
+read = true
+
+[[entry]]
+module = "World3D.dll"
+at = "0x1000f5a4"
+kind = "site"
+name = "input update, key events (12 bytes: pressed, key, table): the matching row goes active with start = game time, the other is cleared"
+doc = "docs/14-controls.md"
+read = true
+
+[[entry]]
+module = "World3D.dll"
+at = "0x10010bd4"
+kind = "site"
+name = "axis function, key rows: target = magnitude, ramp +0x78, time +0x7c (or the context's walk/turn ramp)"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "World3D.dll"
+at = "0x10010c76"
+kind = "site"
+name = "ramp: t = min(1, (game time - row start) / ramp ms); move toward the target by ramp x t without passing it; a release row clears +0x80 on arrival"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "World3D.dll"
+at = "0x1000b380"
+kind = "site"
+name = "input manager slot 11: set the context's walk (kind 1: +0x3d/+0x44/+0x4c/+0x50) or turn (kind 2: +0x3e/+0x40/+0x48/+0x54) ramp"
+doc = "docs/14-controls.md"
+read = true
+
+[[entry]]
+module = "World3D.dll"
+at = "0x10020b14"
+kind = "datum"
+name = "input manager (CreateManManager 0x1000b230, 0x170 bytes) vtable: slot 3 load table, slot 4 update 0x1000f100, slot 11 ramp 0x1000b380"
+doc = "docs/14-controls.md"
+read = true
+
+[[entry]]
+module = "World3D.dll"
+at = "0x10010350"
+kind = "site"
+name = "MCMD_LEFT handler: y = +-1 by current sign, strafe angle (0.5 when walking, else 1) x pi/2 through IControl slot 20"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "World3D.dll"
+at = "0x10013a1c"
+kind = "site"
+name = "DirectInput mouse state copied as it comes: lX, lY, lZ into 0x107951d4..dc"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "World3D.dll"
+at = "0x10005140"
+kind = "function"
+name = "SetGameTime: the game clock 0x10032a38 the input rows stamp"
+doc = "docs/14-controls.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10014cf0"
+kind = "site"
+name = "attitude integrator: change in strafe angle (body +0x40 - +0x17c) kept at +0x188 and added to the step's turn after the clamp"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10014858"
+kind = "site"
+name = "attitude integrator: the pending turn is negated, spin = clamp(-(v - 0.5) x 2pi / (rate x dt))"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10014a96"
+kind = "site"
+name = "attitude integrator, turret-led (+0x65c, no pending turn): spin z = clamp(-(body +0x38 - 0.5) x 2pi / (rate z x dt), +-0.7)"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10014bc3"
+kind = "site"
+name = "turret-led: the hull's yaw step paid out of body +0x38 (wrapped) and kept in turns at +0x3c"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10005ab8"
+kind = "site"
+name = "control takt: turret offset z = (1 - s) x strafe change (+0x33c) - strafe angle (+0x330), handed to 0x10028990"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10005b13"
+kind = "site"
+name = "control takt, turret-led: turret aim x = +0x1ec - (1 - s) x +0x1f0"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x100294b0"
+kind = "site"
+name = "turret vtable slot 12: return the yaw offset +0xe8"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10021bd0"
+kind = "site"
+name = "channel update: the component's slot 12 offset is added to entry 0 before wrap and invert"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000ea66"
+kind = "site"
+name = "value setter: +0x65c = (agent kind +0x50 == 4) and the value is non-zero"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10031a38"
+kind = "site"
+name = "second writer of +0x65c: agent kind 4 and state 1"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002e8db"
+kind = "site"
+name = "interface 0x202 value 117: 1 when the control system's query 13 (the turret carries 0x8000000) is true"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10076f50"
+kind = "function"
+name = "IsHQ(unit): value 117 of the unit's first class-1 component"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10085b5e"
+kind = "site"
+name = "unit panel: for Type 0x1010000 the button at +0x588..+0x598 is white when IsHQ, grey 0xff808080 when not"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100847d5"
+kind = "site"
+name = "unit panel click: IsHQ, then enter CState mode 3"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10062c2e"
+kind = "site"
+name = "enter CState mode: mode 3 (SELECT_GUARD_TARGET_MODE) only for an object that passes IsHQ"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1005a5cc"
+kind = "site"
+name = "CState mode names: 0 FREE, 1 SELECT_ATTACK_TARGET, 2 SELECT_BUILDING, 3 SELECT_GUARD_TARGET, 4 SELECT_PLACE_FB, 5 SELECT_WAY, 6 SELECT_PLACE_FM"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10071f4e"
+kind = "site"
+name = "CMD_ENTER_STATE (730) case: IsHQ on the controlled unit"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001b4f0"
+kind = "function"
+name = "control point lookup: position (record +0xc) and vector (+0x18), scaled by the object, local when arg 2 is 1, else through the point's node"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10023603"
+kind = "site"
+name = "camera: CameraCenter's position and vector"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10023618"
+kind = "site"
+name = "camera: TargetDirect's vector, the look"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x100236bc"
+kind = "site"
+name = "camera: side = CameraCenter vector x look"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10023741"
+kind = "site"
+name = "camera: frame matrix with columns look, side, up, eye (CameraCenter position + shake)"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10004350"
+kind = "function"
+name = "vector cross product: ecx = edx x [stack]"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10023ab0"
+kind = "function"
+name = "camera shake impulse: |v|^2 >= 0.3 blends toward 0.5 v over +0xac; a smaller one during a blend starts the ring-down"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000c6e7"
+kind = "site"
+name = "machine tick: every camera component is handed (previous velocity - velocity) / step seconds"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10023566"
+kind = "site"
+name = "camera shake ring-down: offset x cos(pi/2 x +0xa8 x t) / (t + 1)^+0xa4"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10023677"
+kind = "site"
+name = "camera: shake offset clamped to unit length, times 0.02"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "Ngi32.dll"
+at = "0x10014630"
+kind = "function"
+name = "g_FastProc +0x44, generic build: shortest-arc quaternion slerp, linear within 1e-5 of parallel"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "Ngi32.dll"
+at = "0x10003bc6"
+kind = "site"
+name = "g_FastProc +0x44 installed as 0x10014630"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10054505"
+kind = "site"
+name = "unit writer: class word 0x20000000 for a chassis named a..., else the Type of the design's base part (+0x39c), or of its turret (+0xd240) when the base is kind 9"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10054551"
+kind = "site"
+name = "unit writer: the class word kept for the file"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1008a500"
+kind = "function"
+name = "part record from the research reader: +4 kind (slot 12), +8 sub-kind (11), +0xc size (17), +0x10 slot 18, +0x14 role (14)"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1008a590"
+kind = "function"
+name = "Type of a part: kind 9 sub 33 by role (3 trn, 4 bld, 5 hq, 6 hero, else war); kind 8 by sub-kind, a bunker by size"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10054767"
+kind = "site"
+name = "unit writer: a part's attach node from its design slot record +4"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "MisLoad.dll"
+at = "0x10002d80"
+kind = "function"
+name = "research reader slot 11: item byte +0x24, the part sub-kind"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "MisLoad.dll"
+at = "0x10002e10"
+kind = "function"
+name = "research reader slot 14: item byte +0x22, the role"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "MisLoad.dll"
+at = "0x10002db0"
+kind = "function"
+name = "research reader slot 17: item byte +0x26, the size"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "MisLoad.dll"
+at = "0x10002aa0"
+kind = "function"
+name = "research reader slot 3: item info -- researched (state bit 2), available (bit 1), present (bit 4), the four costs, the part id"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "MisLoad.dll"
+at = "0x10002c10"
+kind = "function"
+name = "research reader slot 7: research an item (set bits 1 and 2 if present), then make available every present item whose prerequisites are present and researched"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10061310"
+kind = "function"
+name = "Iron_3D.ini apply at load: RENDER_QUALITY, EMBOSS_BUMP, EMBM, REFLECTIONS, MOUSE_REV_Y, JOY_REV_Y, FORCE_SOFTWARE_CURSOR, MOUSE_SENS, JOY_SENS, then the World3D settings"
+doc = "docs/14-controls.md"
+read = true
+
+[[entry]]
+module = "World3D.dll"
+at = "0x1000b230"
+kind = "function"
+name = "CreateManManager: the 0x170-byte input manager, returned at +4"
+doc = "docs/14-controls.md"
+read = true
+
+[[entry]]
+module = "World3D.dll"
+at = "0x1000aed0"
+kind = "site"
+name = "group 10 handler slot 5: 2.0 for settings 0x66 and 0x67"
+doc = "docs/14-controls.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10054877"
+kind = "site"
+name = "unit writer: a second slot array's attach node from its record +4"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10062bc0"
+kind = "function"
+name = "enter a CState mode for an object; mode 3 needs IsHQ"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10104b18"
+kind = "datum"
+name = "CState handlers, 8 states x 8 modes"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10063a20"
+kind = "function"
+name = "CState handler, state 1 mode 3: IsHQ, then the unit's position and pi/2 on"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100647e0"
+kind = "function"
+name = "CState handler, state 4 mode 3: IsHQ, then the unit's position and pi/2 on"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10064900"
+kind = "function"
+name = "CState handler, state 3 mode 3: IsHQ, then the unit's position and pi/2 on"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1008a480"
+kind = "function"
+name = "research reader slot 3 wrapper: the part id of an item, or 0"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10048925"
+kind = "site"
+name = "a design screen asks the research reader for an item's part id"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x100236eb"
+kind = "site"
+name = "camera: up = look x side"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10023769"
+kind = "site"
+name = "camera: look-only frame when the side vanishes"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10023646"
+kind = "site"
+name = "camera: shake offset longer than 1 is normalised"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "MisLoad.dll"
+at = "0x10002de0"
+kind = "function"
+name = "research reader slot 18: item byte +0x25"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "World3D.dll"
+at = "0x1000fe77"
+kind = "site"
+name = "MCMD_ROTATE_Z: the row's value becomes the spin triple's z, handed to IControl slot 4 (Control.dll:0x10004440)"
 doc = "docs/30-turrets.md"
 read = true
 

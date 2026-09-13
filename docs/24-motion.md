@@ -292,11 +292,27 @@ What follows from it:
 - On release the angle returns to 0, and the command to 0 if nothing else is
   held.
 
-The body applies the *change* in strafe angle as a turn of its own
-(`0x10014cf0`: previous at `+0x17c`, delta at `+0x188`). How that turn divides
-between the legs and the turret was not read; that the legs turn and the
-turret holds its heading (see `0x100059a0` in
-[30-turrets.md](30-turrets.md)) is a *guess*.
+**The hull turns and the turret turns back** (*read*):
+
+- **The hull.** The attitude integrator adds the *change* in strafe angle to
+  the step's turn after the turn-rate clamp (`0x10014cf0`: previous angle at
+  body `+0x17c`, the change at `+0x188`), so the hull swings by the whole
+  change in one step.
+- **The turret.** The control takt (`0x100059a0`, at `0x10005ab8`) hands the
+  turret z = (1 − s) × change − angle, s being the fraction of the step
+  gone. That is −(previous + s × change). The turret keeps it ÷ its yaw span
+  at `+0xe8` (`0x10028990`), negated on a hung mounting.
+- **The yaw channel.** Its first entry adds that offset before it wraps and
+  inverts (`0x10021bd0`; slot 12, `0x100294b0`, returns it).
+- **What it does.** Pressing `A` walks forward on a hull turned π/2 while the turret
+  counter-turns, easing across the step, and the sight stays ahead. Only the
+  hull's yaw carries the strafe.
+
+A strafe to the left is +z on the hull. A right-handed frame (left gear at
+−x, below) makes that a left turn, and so do the tables, whose
+`OBJ_TURN_LEFT` key sends a +0.7 spin. The turret's frames make the matching
+counter-turn a right one ([30-turrets.md](30-turrets.md#aiming-and-the-camera--read-and-measured)).
+That the two cancel on screen is *derived*.
 
 **Turning is a pending turn.** The angle triple `+0x1e0` (body `+0x2c`) holds a
 rotation not yet made. Each tick the attitude integrator:
@@ -317,13 +333,22 @@ The two other axes have 1.57 rad/s, and triple 6 is (0, 0, 6.28): the hero
 turns only about z (*measured*). That triple 6 is the per-axis limit that
 forbids pitch and roll is a *guess*; triple 6 stays open below.
 
-**The keypad cruise** — *measured* rows, *unknown* effect:
+**The keypad cruise** — *measured* rows, *read* effect:
 
 - `*` sends `MCMD_FORWARD` 1 and `/` sends 0.
-- `+` and `−` send ±1 with the table's ramp 0.05 over 1000.
-- They reach the same handler as walking (`0x100101b2`). What the ramp does
-  there was not read. That a held `+` adds 0.05 a second to the command is a
-  *guess*.
+- `+` and `−` send ±1 with the table's ramp 0.05 over 1000. They reach the
+  walking handler (`0x100101b2`), which sets the command's y to what the
+  row's axis function returns (`0x10010a50`).
+- **A pressed key's row stays active**, and every active row is run again
+  on each input update (`World3D.dll:0x1000f477`). The key coming up clears it
+  ([14-controls.md](14-controls.md#a-row-that-stays-down--read)).
+- **Each run moves y toward ±1** by 0.05 × min(1, held ms ÷ 1000), and never
+  past it.
+- **So the ramp is a step per update, not per second.** The step grows over
+  the first second held and is 0.05 after that. At an update every 50 ms,
+  a stopped cruise reaches full in 31 runs, about 1.5 s. Letting go leaves y
+  where it got to.
+- The rate of the input update itself was not read.
 
 ## Running gear: legs, wheels and tracks by side — *read*, and *measured*
 
@@ -768,8 +793,13 @@ asks for the live top speed (IControl 145) and compares it with 1
   sets it.
 - Where G would ever differ from 1: no shipped material sets it
   ([Ground and collision](#ground-and-collision--read-and-measured)).
-- How the strafe angle's turn (`0x10014cf0`) is split between the hull and the
-  turret, and what `MCMD_FORWARD`'s ramp does.
+- ~~How the strafe angle's turn is split between the hull and the turret, and
+  what `MCMD_FORWARD`'s ramp does~~ — **read**: the hull takes the whole
+  change and the turret an offset that undoes it across the step; the ramp is
+  a growing step per input update
+  ([From input to motion](#from-input-to-motion--read-and-measured)).
+- How often `World3D.dll`'s input update (`0x1000f100`, the manager's slot 4)
+  runs, which sets how fast the keypad cruise ramps.
 - Which node range the payload sum counts as the chassis.
 - Triple 5 (+68), multiplied into the spin integrator (`0x10014b15`). Triple 6
   is read: the most the body leans per axis

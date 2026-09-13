@@ -39,15 +39,30 @@ are two mountings of one turret**:
 
 The bit is what the turret code reads (*read*). The turret class (constructor
 `Control.dll:0x10027050`, vtable `0x1003caf8`, kept at control-system `+0x5c8`)
-mirrors its aim on it: `0x100271c7` and `0x100276ed` when set, `0x100289b5` when
-clear. So a hanging turret turns the same way on screen as a standing one. Which
-axis is mirrored was not traced.
+flips its aim on it:
+
+- **Set (upright).** All three components of the aim triple are kept as 1 − v,
+  at init (`0x100271c7`) and again when read (`0x100276ed`).
+- **Clear (hung).** The strafe offset handed to the turret is negated
+  (`0x100289b5`, [Aiming and the camera](#aiming-and-the-camera--read-and-measured)).
+
+So the channels of a hung turret see the triple as stored, and the channels
+of an upright one see 1 − v. The node is upside down under a flyer, which is
+what makes the two agree on screen (*derived*, below).
 
 A second bit, **`0x8000000`, marks the HQ turrets** (*measured*). It is set on
 all 14 HQ records, both mountings. Of the rest, only `o_tur_lb_06` carries it,
 and its `t` twin doesn't: a slip in the data, by the look of it (*guess*).
-`IControl`'s getter tests the bit (`Control.dll:0x1002b7bb`); what for was not
-traced.
+
+**What reads it** (*read*):
+
+- **The control system.** It answers it as bool query 13 of its interface
+  `0x204`: slot 4 (`0x1002b410`) tests the turret's record flags
+  (`0x1002b7bb`).
+- **The component interface.** `0x202` turns that into value 117 (`0x1002e8db`).
+- **`iron3d.dll`.** Its `IsHQ(unit)` (`0x10076f50`) asks value 117 of the unit's
+  first class-1 component, and seven places call it. What they gate is in
+  [An HQ unit in play](#an-hq-unit-in-play--read).
 
 ## A turret is a turret, a radar, a camera and a deflector — *measured*, and *read*
 
@@ -73,6 +88,11 @@ traced.
 `World3D.dll!CreateObject` type 5 and hands it its values 0, 1 and 2
 (`0x100238b0`, *read*). By their numbers they are a near plane, a far plane
 and a field of view of 1.3 rad; the names are a *guess*.
+
+**Values 3–5 (1, 150, 1) have no reader found.** The camera class never
+touches its record past value 2. A scan of five modules for a value query
+with a literal id of 3, 4 or 5 finds seven, all in `Control.dll` and all on
+other classes (`0x100243dd`, `0x10024445`, …); that is the positive control.
 
 **The field of view is horizontal** (*read*, in `Terrain.dll`, whose
 `LoadCamera` `World3D.dll` re-exports):
@@ -153,9 +173,10 @@ hero turret the four channels animate `CP_m1o1`, `Turn_m1o1` (49–53),
 - **Pitch** spans two frames: π/2 on 57 turrets, 1.92 rad (110°) on the
   hero's.
 - **Where it starts**: the pitch channel starts at 0.111 on 52 turrets, 0.167
-  on 5 and 0.273 on the hero's. On the hero that start is level (below).
-  If it is level on the rest too, the limits are −10°…+80° and −15°…+75°
-  (*guess*).
+  on 5 and 0.273 on the hero's. **The start is level on every robot turret**
+  (*measured*, all 55 `e_tur` records, within a degree). So the limits are
+  −10°…+80° on 52, −15°…+75° on the Small tower's two and −30.5°…+79.4° on the
+  hero's.
 - **Rates**: yaw 0.5–0.85 turns a second (100 on the hero and two others),
   pitch 0.3–0.75 spans a second.
 
@@ -169,6 +190,21 @@ hero turret the four channels animate `CP_m1o1`, `Turn_m1o1` (49–53),
 - The engine plays frame = first + v × (last − first) on the node's own
   segment (*read*: `0x10009950` hands the node the pair and its value;
   `AniMesh.dll:0x10008b30` lerps across it).
+
+**The aim is linear in the value** (*read*, and *measured*):
+
+- **Between keys.** `AniMesh.dll:0x10012880` poses a fractional frame from the
+  key at or before it and the next. It lerps the position and hands the two
+  rotations to `Ngi32.dll`'s `g_FastProc` slot `+0x44`. That slot's generic
+  build (`Ngi32.dll:0x10014630`, set at `0x10003bc6`) is a shortest-arc slerp:
+  its weights come from the acos of the dot product, and it goes linear when
+  the dot is within 1e-5 of 1. The CPU-specific builds (`0x10017f50`, and the
+  one installed at `0x100040c6`) were not read.
+- **The keys are even.** On all 55 robot turrets the yaw frames face 180°,
+  −90°, 0°, +90° and 180° in turn: a quarter turn a frame, so 0.25 looks to −x
+  and 0.75 to +x. Every pitch channel rises in two equal steps. A slerp over
+  even keys about one axis turns at a constant rate, so the angle is linear in
+  v (*derived*).
 
 **How the aim moves** (*read*):
 
@@ -184,10 +220,54 @@ hero turret the four channels animate `CP_m1o1`, `Turn_m1o1` (49–53),
 - **The hero** tilts 0.25 × 0.006 × 1.2 × 1.92 = 0.0035 rad a filtered count,
   at most 0.75 × 1.92 = 1.44 rad/s. Its yaw channel is never sent a value: the
   hull turns instead.
-- **A machine's turret yaw** is also added into object `+0x1ec`
-  (`0x1002eb70`). The control takt sets the turret's yaw from it
-  (`0x100059a0`, when `+0x65c` is set and no turn is pending). What `+0x65c`
-  and `+0x1f0` are was not read.
+- **The strafe offset.** The turret's first entry also carries −(the strafe
+  angle, eased across the step) ÷ the yaw span, negated when hung
+  ([24-motion.md](24-motion.md#from-input-to-motion--read-and-measured)).
+- **A machine's turret leads its hull.** A change to the turret's yaw is also
+  added into control-system `+0x1ec` (body `+0x38`, `0x1002eb70`). `+0x65c` is
+  set on a unit (agent kind 4) once a value turns it on (`0x1000ea66`,
+  `0x10031a38`). With it set, and no normalised turn pending (`+0x35d`, which
+  `SetNormAngle` sets and the spin setter clears), the attitude integrator
+  (`0x10014a96`):
+  - turns the hull toward the turret: spin z = clamp(−(`+0x38` − 0.5) × 2π
+    ÷ (turn rate × dt), ±0.7);
+  - pays that turn back out of `+0x38`, and keeps the step in turns at `+0x3c`
+    (`+0x1f0`).
+  - The takt then re-aims the turret: yaw = `+0x1ec` − (1 − s) × `+0x1f0`
+    (`0x10005b13`). So the turret holds its heading while the hull comes round
+    under it.
+
+**Which way a count turns** (*read* chain, *derived* sign):
+
+- **Counts.** DirectInput's relative mouse state is copied as it comes
+  (`World3D.dll:0x10013a1c`), and in that API x grows to the right and y
+  toward the user.
+- **Pitch.** Mouse down adds to the stored y. An upright turret's channel
+  sees 1 − y, and pitch channels carry no invert flag (0 on all 58). So the
+  value falls, the frame falls toward `first`, and the sight lowers: every
+  pitch channel's elevation rises with its frame (*measured*). Mouse down looks
+  down unless `MOUSE_REV_Y` is set.
+- **A machine's yaw.** Mouse right adds to the stored x. The upright 1 − v
+  and the yaw channel's invert flag (3 on all 58) cancel, so the value rises
+  toward 0.75, which faces +x. The running gear puts the left side at −x
+  ([24-motion.md](24-motion.md#running-gear-legs-wheels-and-tracks-by-side--read-and-measured)),
+  so +x is right. Mouse right turns right.
+- **The hero's yaw.** Mouse right adds to the pending turn's z, and the
+  integrator turns the hull by −(z − 0.5) × 2π (`0x10014858` negates it). The
+  turret-led drive above uses the same form to bring a machine's hull round
+  to a turret turned toward +x. For that to follow the turret, −z must be a
+  right turn. So mouse right turns the hero right too.
+- **The developers' labels agree** (*measured*). In `m1.tbl` and `m2.tbl`
+  `OBJ_TURN_LEFT` sends `MCMD_ROTATE_Z` +0.7 and `OBJ_TURN_RIGHT` −0.7.
+  That value is the spin's z (`World3D.dll:0x1000fe77` → `IControl` slot 4,
+  `Control.dll:0x10004440`). So +z turns left, and a mouse count's −z turns
+  right.
+- **Three more consistencies.** `A` sets the strafe to +π/2, and it moves left
+  only if +z turns left. The turret's counter-turn toward +x cancels that. A
+  machine whose left gear is weaker gains +z spin, and veers toward its
+  damaged side.
+- **A hung turret** is the same on screen. Its channel sees the stored value,
+  not 1 − v, and its node is upside down.
 
 **The guns' sight** (*read* `0x10028130`, `0x1002a610`; *measured*):
 
@@ -207,11 +287,22 @@ hero turret the four channels animate `CP_m1o1`, `Turn_m1o1` (49–53),
 
 - **The camera's channel** points at `TargetDirect`, with `CameraCenter` the
   point just before it. This holds on all 58 turrets.
-- **Position and direction.** The camera takes a position and direction from
-  one point and a direction from the other (`0x10023603`, `0x10023618`), then
-  adds a shake offset × 0.02.
-- **Which point is which** is a *guess*, by the data: position from
-  `CameraCenter`, look from `TargetDirect`.
+- **Which point is which** (*read*). `Control.dll:0x1001b4f0` returns a
+  point's position (record `+0xc`) and vector (`+0x18`), scaled by the object
+  and carried into the world through its node.
+  - **The eye** is `CameraCenter`'s position, plus the shake
+    (`0x10023603`; `0x1002368b`).
+  - **The look** is `TargetDirect`'s vector (`0x10023618`).
+  - **The up** is `CameraCenter`'s own vector. The camera crosses it with the
+    look to get the side (`0x100236bc`), and the look with the side to get the
+    up (`0x100236eb`).
+  - **The frame** is a matrix whose columns are look, side, up and eye
+    (`0x10023741`). If the two vectors are parallel, a look-only frame is used
+    instead (`0x10023769`).
+- **The data agrees** (*measured*): `TargetDirect` is +y on all 58 cameras.
+  `CameraCenter`'s vector is +z on all 31 upright ones and −z on 25 of the 27
+  hung ones. The two hung exceptions are the Transformer's and the Small
+  tower's, which no mission hangs.
 - **A point's node.** A `.cpt` point's second float is an int32, the node it
   sits on ([07-objects.md](07-objects.md#ctpt--control-points)).
   - On the hero, `CameraCenter` sits at the origin of node 35, `CP_m1o1`: not
@@ -232,6 +323,31 @@ hero turret the four channels animate `CP_m1o1`, `Turn_m1o1` (49–53),
   Shift, or Shift + right button, sets both back to 0.5 at once.
 - **Other cameras.** No second camera component exists on the hero's turret.
   A third-person view was not found.
+- **Its signs** (*derived*). The side axis is up × look, which points left
+  (−x for an up of +z and a look of +y), and both angles go through the rotation routines the hull's
+  attitude uses, applied the same way round (`g_FastProc` `+0x3c`, then `+0x10`
+  on the frame). Shift + mouse right gives a negative yaw about up: right, like
+  the hull. Shift + mouse down gives a negative angle about the left axis,
+  which tips the look up. So of the two free-look axes exactly one runs
+  opposite to the main controls, and on these readings it is the vertical.
+  Checking this in the game is cheap and has not been done.
+
+**The camera shake** (*read*):
+
+- **What feeds it.** Each machine tick hands every camera component the
+  machine's change in velocity over the step, (previous − current) ÷ the step
+  in seconds (`0x1000c6e7`). The velocity comes from two successive pose
+  matrices; the previous one is kept at `+0x664`.
+- **A jolt** (`0x10023ab0`) whose squared size reaches 0.3 starts a blend.
+  The offset then runs from where it was (`+0xc8`) toward half the jolt
+  (`+0xb0`) at (t − start) ÷ `+0xac` (2.5 s); the start is stamped at `+0xa0`
+  and `+0xd4` is set.
+- **A smaller jolt** during a blend ends it. The offset reached becomes the
+  amplitude, and it rings down as amplitude × cos(π/2 × `+0xa8` × t) ÷
+  (t + 1)^`+0xa4`, with the constructor's 3 and 3 (`0x10023566`–`0x100235c3`).
+  A smaller jolt at any other time does nothing.
+- **The eye moves** by the offset clamped to unit length, times 0.02
+  (`0x10023646`, `0x10023677`): 2 cm at most.
 
 ## Gun sockets are the mesh's `Base_*` nodes — *measured*
 
@@ -292,9 +408,44 @@ exception:
   is the same role, for every turret item in all 29 trees: 1 for a bunker or
   tower turret, 6 on the hero chassis, 7 on animals, 255 on anything else.
 
-Which code writes the class word when the player designs a unit was not traced.
-The unit writer `iron3d.dll:0x100544b0` writes the `0xf0f1` magic at
-`0x10054f5f` and the class word after it.
+**A designed unit's class word comes from its turret's research item**
+(*read*, and *measured*). The unit writer `iron3d.dll:0x100544b0` writes the
+`0xf0f1` magic at `0x10054f5f`, and the class word after it is decided at
+`0x10054505`–`0x10054551`:
+
+- **An animal.** A chassis whose name starts with `a` is `0x20000000`.
+- **Otherwise the base part.** `0x1008a500` fills a record for the design's
+  base part (design `+0x39c`) through the research tree's reader. It takes
+  slot 12 (`+0x23`), slot 11 (`+0x24`), slot 18 (`+0x25`), slot 14 (`+0x22`,
+  the role) and slot 17 (`+0x26`, the size): `MisLoad.dll:0x10002d50`,
+  `0x10002d80`, `0x10002de0`, `0x10002e10`, `0x10002db0`.
+- **A chassis passes the question on.** If the base part's `+0x23` is 9, the
+  record is filled again for the design's second part (`+0xd240`), the
+  turret.
+- **The Type** (`0x1008a590`):
+
+| `+0x23` | `+0x24` | Type |
+|---:|---:|---|
+| 9 | 33 | by the role: 3 `0x1002000`, 4 `0x1004000`, 5 `0x1010000`, 6 `0x1020000`, any other `0x1008000` |
+| 8 | 17 | by the size: 1 `0x80010000`, 2 `0x80020000`, 3 `0x80040000` |
+| 8 | 16, 18–21, 24–26, 29, 30 | `0x80000040`, `0x80000400`, `0x80000004`, `0x80000010`, `0x80000008`, `0x80000200`, `0x80001000`, `0x80000002`, `0x80100000`, `0x80200000` |
+| anything else | | 0 |
+
+**The data bears it out** (*measured*):
+
+- **The codes.** Across the 10,672 item records of all 29 trees, `+0x23` is
+  the part's catalogue kind: 8 `BLD`, 9 `SHS` and `ANM`, 10 `AMM`, 11 `DVC`,
+  12 `WPN`. `+0x24` is 33 exactly on the 812 `SHS:TUR` records.
+- **Robots.** The function over each robot's turret item gives its `.dat`
+  class word on all 372 robots with a turret.
+- **Buildings.** Over each building's base part it gives the class word on 70
+  of 74. The other four are ruins, sub-kind 28, which the function leaves at 0
+  while their files say `0x80002000`.
+- **A control.** Every building Type it gives is one `ArealMap.dll` registers
+  for a `BuildDat.lst` scheme, but for the bridge's `0x80001000`.
+
+So **the research role byte is what makes a warbot, a transport, a builder or
+an HQ unit** when the player designs one.
 
 **The Type decides the commander's orders** (*read*). `iron3d.dll` keeps a table
 at `0x10104f98`: each record is an order, a Type mask and a string. It offers an
@@ -310,6 +461,29 @@ A second table at `0x10105150` lists Standby, Follow me, Search and capture,
 Seek and destroy, Attack, Capture building and Refit, for every robot. Where
 each table is used, and what each order does, is in
 [31-packages.md](31-packages.md).
+
+## An HQ unit in play — *read*
+
+Beyond its profile and its orders, **an HQ unit is one whose turret carries
+bit `0x8000000`**, and `iron3d.dll` asks that through `IsHQ` (`0x10076f50`) in
+seven places:
+
+- **The unit panel's button.** For a unit whose Type (`+0x2c`) is `0x1010000`, the button
+  at panel `+0x588`–`+0x598` is drawn white when the bit is set and grey
+  (`0xff808080`) when not (`0x10085b5e`). Clicking it checks the bit again
+  (`0x100847d5`) before it enters mode 3.
+- **Mode 3.** `0x10062bc0` enters a `CState` mode; mode 3 is
+  `SELECT_GUARD_TARGET_MODE` (the name switch at `0x1005a5cc`). It enters it
+  only if the object handed in passes `IsHQ` (`0x10062c2e`).
+- **Mode 3's handlers.** Three of the state table's handlers for mode 3
+  (`0x10063a20`, `0x100647e0`, `0x10064900`, table `0x10104b18`) test it again
+  before they hand the unit's position and π/2 on.
+- **Command 730, `CMD_ENTER_STATE`.** Its case tests it on the controlled unit
+  (`0x10071f4e`).
+
+So the bit unlocks a guard-target selection that other units' panels grey
+out. What the guard target then does for an HQ is the packages' side
+([31-packages.md](31-packages.md)), not read here.
 
 ## Every turret
 
@@ -367,23 +541,66 @@ tower, the three monsters and the hero's. Their chassis (`R_B_05`–`08`,
   fortification guns.
 
 Every turret, these six included, is in the part list of all 29 research trees,
-so a tree's part list doesn't gate them. What stops a factory building one was
-not traced. That a zero cost marks them unbuildable is a *guess*.
+so a tree's part list doesn't gate them. **A tree's state for them does.**
+
+- **The state is bits** (*read*). Each item's category byte is the tree's
+  starting state ([16-research.md](16-research.md)). `MisLoad.dll`'s reader hands it out as
+  bits (slot 3, `0x10002aa0`): 2 the item has been researched, 1 it can be,
+  4 it is in this tree.
+- **Researching sets them.** Slot 7 (`0x10002c10`) sets 1 and 2 on an item
+  that has 4. It then sets 1 on every present item whose prerequisites all
+  have 4 and 2. The shipped states are only 0, 2, 4, 5 and 7 (*measured*).
+- **What the trees say** (*measured*, all 29):
+  - In the 11 player trees (`*p.trf`, `tut*_pl.trf`) the Transformer, Small
+    tower and three monster turrets are never present.
+  - The monsters are present and researched (7) in the enemy trees (`*e.trf`)
+    and in `auto`.
+  - The Transformer and Small tower are present only in `full`.
+  - The hero turret is present in 9 trees, `c2m4p` and `c3m2p` among them.
+    In every one of those its chassis `r_h_02` reads 2, researched but not in
+    the tree.
+
+So the missions keep five of the six out of the player's trees, and the
+sixth's chassis. That a designer offers only parts with bit 4 is a *guess*.
+`iron3d.dll` reads item records through wrappers at `0x1008a480`–`0x1008a4f0`,
+used by the design screens from `0x10048925`, and which bits those screens
+test was not read. That a zero cost marks them unbuildable is still a *guess*.
 
 ## Not established
 
-- Which code sets a newly designed unit's class word, and whether it reads the
-  turret's research role byte.
-- Which way a mouse count tilts an upright turret on screen: the sign the 1 − v
-  stored at init and read back gives it.
-- What `IControl` does with the HQ bit, and what makes an HQ unit different in
-  play beyond its profile and the orders it is given.
+- ~~Which code sets a newly designed unit's class word, and whether it reads
+  the turret's research role byte~~ — **read**: `iron3d.dll:0x1008a590` over
+  the turret item's kind, sub-kind and role
+  ([The turret decides what the unit is](#the-turret-decides-what-the-unit-is--measured-and-read)).
+- ~~Which way a mouse count tilts an upright turret on screen~~ — **derived**:
+  mouse down lowers the sight and mouse right turns right, on the hero and on a
+  machine ([Aiming and the camera](#aiming-and-the-camera--read-and-measured)).
+  That Shift's free look runs vertically opposite is *derived* too, and not
+  checked in the game.
+- ~~What `IControl` does with the HQ bit~~ — **read**: query 13, value 117,
+  `iron3d.dll`'s `IsHQ`. What an HQ's guard target does
+  ([An HQ unit in play](#an-hq-unit-in-play--read)) is still open.
 - The Large transport's second slot, and which Large builder socket takes the
-  module.
-- Camera values 3–5 (1, 150, 1), the camera shake's constants (`+0xa4` 3,
-  `+0xa8` 3, `+0xac` 2.5) and what triggers it. The four class-24 components on
-  the hero turret are its weapon arms
+  module. **No module names the `Base_*` nodes.** A search of every DLL for
+  the string, and for `Base`/`BASE`/`ase_` as a four-byte constant, finds
+  nothing. The unit writer takes each part's node from the design's slot
+  records instead: three arrays of 0x330-byte records at design `+0xd220`,
+  `+0x1a0c4` and `+0x26f68`, the node at `+4` and the item at `+0x20`
+  (`0x10054767`, `0x10054877`). What fills them was not read.
+- ~~The camera shake's constants and what triggers it~~ — **read**: a jolt in
+  the machine's velocity, 2.5 s blend, cos(1.5π t) ÷ (t + 1)³ ring-down
+  ([The camera shake](#aiming-and-the-camera--read-and-measured)).
+  **Camera values 3–5 (1, 150, 1)** have no reader found. The four class-24
+  components on the hero turret are its weapon arms
   ([29-weapons.md](29-weapons.md#the-button-reaches-the-selected-guns)).
-- Whether the engine plays a channel's frames linearly in its value, and how the
-  HUD draws the aim point.
-- What prevents the player from building the six free turrets.
+- ~~Whether the engine plays a channel's frames linearly in its value~~ —
+  **read** and **measured**: slerp between even keys. **How the HUD draws the
+  aim point** was not traced. No crosshair object appears in `ui/hq.cfg` or
+  `ui/cursor.cfg` (whose `TARGET` is a hardware cursor, `ui/target_5.ani`).
+- What prevents the player from building the six free turrets — **narrowed**:
+  five are absent from every player tree and the hero's chassis from every tree
+  that holds its turret ([The turrets the player never builds](#the-turrets-the-player-never-builds--measured)).
+  Which state bits the design screen tests is the next handle.
+- How often the input update runs, and the 0.5 mouse sensitivity
+  `iron3d.dll:0x10061a50` sets in some screen states
+  ([14-controls.md](14-controls.md#the-ini-reaches-world3d--read)).
