@@ -97,6 +97,7 @@ cargo run --release -p parkan                                  # Mission 01, in 
 cargo run --release -p parkan -- --fly                         # a debug camera instead
 cargo run --release -p parkan -- --headless --ticks 180 --hold SCAN_W   # play 3 s holding W, no window
 cargo run --release -p parkan -- --screenshot run.png --ticks 120 --hold SCAN_W --mouse 6,-8
+cargo run --release -p parkan -- --hold SCAN_W,SCAN_LMOUSE --mouse 4,1 --trace   # the window, hands off
 cargo run --release -p parkan -- --screenshot m1.png           # one frame to a PNG, no window
 cargo run --release -p parkan -- --screenshot map.png --top-down --size 768x768
 cargo run --release -p parkan -- --screenshot tank.png --look 705,885,24,734,906,10   # from X,Y,Z at TX,TY,TZ
@@ -111,7 +112,9 @@ strafe, the mouse turns the hull and tilts the turret, and Shift with the
 mouse looks around. A click grabs the mouse; Escape lets it go, and quits once
 it is free. `--ticks N`, `--hold` (scan names) and `--mouse DX,DY` (counts a
 tick) play the hero at 60 ticks a second before a screenshot, or with
-`--headless` print where it got to. With `--fly`, W/A/S/D and Q/E fly, holding
+`--headless` print where it got to. In the window `--hold` keeps its keys down,
+`--mouse` adds its counts every tick and `--trace` prints where the hero is
+every second. With `--fly`, W/A/S/D and Q/E fly, holding
 the right mouse button turns and Shift flies faster.
 
 ## Checks

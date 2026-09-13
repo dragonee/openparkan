@@ -5,7 +5,7 @@
 //! ```text
 //! parkan [--game DIR] [--mission MISSIONS/…] [--fly]
 //!        [--screenshot OUT.png] [--size WxH] [--top-down] [--look X,Y,Z,TX,TY,TZ]
-//!        [--headless] [--ticks N] [--hold SCAN_W,SCAN_A] [--mouse DX,DY]
+//!        [--headless] [--ticks N] [--hold SCAN_W,SCAN_A] [--mouse DX,DY] [--trace]
 //! ```
 //!
 //! In the cockpit the hero's own input table drives it: W/S walk, A/D strafe,
@@ -16,7 +16,9 @@
 //!
 //! `--ticks`, `--hold` and `--mouse` play the hero for that many 60 Hz ticks
 //! holding those keys and moving the mouse by that many counts a tick, before a
-//! `--screenshot` or, with `--headless`, printing where it got to.
+//! `--screenshot` or, with `--headless`, printing where it got to. In the window
+//! `--hold` keeps those keys down and `--mouse` adds its counts every tick, and
+//! `--trace` prints where the hero is every second.
 
 mod audio;
 mod camera;
@@ -52,6 +54,8 @@ struct Args {
     /// `--look X,Y,Z,TX,TY,TZ`: a screenshot camera at X,Y,Z looking at TX,TY,TZ.
     look: Option<[f32; 6]>,
     headless: bool,
+    /// `--trace`: the window prints where the hero is every second of game time.
+    trace: bool,
     ticks: u32,
     hold: Vec<String>,
     mouse: [f32; 2],
@@ -67,6 +71,7 @@ fn args() -> Result<Args> {
         top_down: false,
         look: None,
         headless: false,
+        trace: false,
         ticks: 0,
         hold: Vec::new(),
         mouse: [0.0; 2],
@@ -81,6 +86,7 @@ fn args() -> Result<Args> {
             "--screenshot" => out.screenshot = Some(PathBuf::from(value()?)),
             "--top-down" => out.top_down = true,
             "--headless" => out.headless = true,
+            "--trace" => out.trace = true,
             "--ticks" => out.ticks = value()?.parse()?,
             "--hold" => out.hold = value()?.split(',').map(str::to_owned).collect(),
             "--mouse" => {
@@ -257,6 +263,9 @@ struct App {
     grabbed: bool,
     /// Mouse counts since the last tick.
     counts: [f32; 2],
+    /// `--mouse`: counts added every tick.
+    mouse: [f32; 2],
+    trace: bool,
     last: Instant,
     /// Real time not yet simulated, ms.
     owed: f64,
@@ -309,7 +318,11 @@ impl App {
         if let Some(play) = self.play.as_mut() {
             self.owed = (self.owed + elapsed).min(250.0);
             while self.owed >= TICK_MS {
-                play.tick(TICK_MS, self.counts);
+                let counts = [self.counts[0] + self.mouse[0], self.counts[1] + self.mouse[1]];
+                play.tick(TICK_MS, counts);
+                if self.trace && ((play.hero.time_ms / TICK_MS).round() as u64).is_multiple_of(60) {
+                    report(play);
+                }
                 self.counts = [0.0; 2];
                 self.owed -= TICK_MS;
             }
@@ -330,6 +343,14 @@ impl App {
 
     fn redraw(&mut self) {
         self.step();
+        // The sounds the ticks started play now, whether or not a frame can be drawn.
+        if let (Some(play), Some(audio)) = (self.play.as_mut(), self.audio.as_mut()) {
+            let eye = play.hero.eye();
+            let right = eye.forward.cross(eye.up);
+            for cue in std::mem::take(&mut play.cues) {
+                audio.play(&cue, eye.position, right);
+            }
+        }
         let Some(r) = self.running.as_mut() else { return };
         let frame = match r.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(frame) | wgpu::CurrentSurfaceTexture::Suboptimal(frame) => {
@@ -358,12 +379,6 @@ impl App {
                 let eye = play.hero.eye();
                 let view_proj = camera::first_person(&eye, aspect);
                 r.renderer.set_hud(&r.gpu.device, &r.gpu.queue, &scene::hud(play, aspect));
-                if let Some(audio) = self.audio.as_mut() {
-                    let right = eye.forward.cross(eye.up);
-                    for cue in std::mem::take(&mut play.cues) {
-                        audio.play(&cue, eye.position, right);
-                    }
-                }
                 scene::sync(
                     &mut r.renderer,
                     &r.gpu.device,
@@ -494,6 +509,10 @@ fn main() -> Result<()> {
     if let Some(p) = play.as_mut() {
         scene::hide(&mut world.objects, p.hero.object);
         p.draw_rounds(&mut world.store, &mut world.objects)?;
+        // `--hold` presses keys in the window too, for trying things without hands.
+        for key in &args.hold {
+            p.hero.key(key, true);
+        }
     }
     let event_loop = EventLoop::new()?;
     event_loop.set_control_flow(ControlFlow::Poll);
@@ -509,6 +528,8 @@ fn main() -> Result<()> {
         looking: false,
         grabbed: false,
         counts: [0.0; 2],
+        mouse: args.mouse,
+        trace: args.trace,
         last: Instant::now(),
         owed: 0.0,
         audio,
