@@ -78,6 +78,7 @@ uv run openparkan mission CAMPAIGN/CAMPAIGN.02/Mission.03 --list
 uv run openparkan sky Single.01 --frames                    # the day cycle
 uv run openparkan effects aim_exp_L                         # one effect's emitters
 uv run openparkan explosions                                # every .exp
+uv run openparkan unit w_b_trk1                             # a robot, whole
 uv run openparkan viewer SC_3 Tut_1 ILKON --out three-maps.html
 ```
 
@@ -217,6 +218,7 @@ of fields carried through the readers without being understood.
 - [30-turrets.md](docs/30-turrets.md) — turrets: two mountings, gun sockets, and the role a turret gives a unit
 - [31-packages.md](docs/31-packages.md) — the commander's packages: orders, tasks, and who may run what
 - [32-builder.md](docs/32-builder.md) — builders and transports: the beam, building, upgrading and carrying ore
+- [33-units.md](docs/33-units.md) — a whole robot on one sheet: `openparkan unit`
 
 ## Layout
 
@@ -236,6 +238,9 @@ openparkan/
   behaviour.py  .scr mission AI scripts, varset.var, and a pseudo-code view
   research.py   .trf research tree
   descriptions.py objects.dlb parts database
+  weapons.py    guns, ammunition clips and rounds
+  packages.py   orders, the commander's packages, and who may run them
+  units.py      a unit assembly described whole
   resources.py  .cfg resource descriptors and the PE string table
   briefing.py   briefing.cfg flythroughs and messages.cfg
   settings.py   the engine's .ini files and mission progress

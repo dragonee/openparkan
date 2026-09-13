@@ -104,20 +104,22 @@ class Armoury:
         self._archives: dict[str, NResArchive] = {}
         self._rounds: dict[str, Round | None] = {}
 
-    def _read(self, ref: objects.ResourceRef) -> bytes:
+    def read(self, ref: objects.ResourceRef) -> bytes:
+        """A member of any archive, opened once."""
         key = ref.library.lower()
         if key not in self._archives:
             self._archives[key] = NResArchive.open(self.game / key)
         return self._archives[key].read_name(ref.member)
 
-    def _controller(self, part: str) -> control.Controller | None:
+    def controller(self, part: str) -> control.Controller | None:
+        """The controller an ``objects.rlb`` record names, or None."""
         record = self.library.get(part)
         ref = record.slot_with_suffix("ctl") if record else None
-        return control.parse(self._read(ref)) if ref else None
+        return control.parse(self.read(ref)) if ref else None
 
     def values(self, part: str) -> tuple[float, ...]:
         """The sixteen values of a gun's or clip's firing component, or ()."""
-        parsed = self._controller(part)
+        parsed = self.controller(part)
         firing = [p for p in parsed.components
                   if p.type_id in (control.GUN_TYPE, control.BUILDER_TYPE)] if parsed else []
         return firing[0].values if firing else ()
@@ -138,14 +140,14 @@ class Armoury:
         record = self.library.get(member)
         if record is None or record.damage is None:
             return None
-        parsed = control.parse(self._read(record.slot_with_suffix("ctl")))
-        rows = objects.parse_damage(self._read(record.damage), record.damage.member)
+        parsed = control.parse(self.read(record.slot_with_suffix("ctl")))
+        rows = objects.parse_damage(self.read(record.damage), record.damage.member)
         damage = sum(row.durability for row in rows)
         first = None
         for i, row in enumerate(rows):
             if not row.explosion:
                 continue
-            blast = effects.parse_explosion(self._read(row.explosion), row.explosion.member)
+            blast = effects.parse_explosion(self.read(row.explosion), row.explosion.member)
             damage += blast.damage
             if i == 0:
                 first = blast
@@ -165,7 +167,7 @@ class Armoury:
 
     def gun(self, part: str) -> Gun | None:
         """The gun an ``e_gun_*`` record is, or None where it has none."""
-        parsed = self._controller(part)
+        parsed = self.controller(part)
         firing = [p for p in parsed.components
                   if p.type_id in (control.GUN_TYPE, control.BUILDER_TYPE)] if parsed else []
         if not firing:
@@ -189,7 +191,7 @@ class Armoury:
 
     def clip(self, part: str) -> Clip | None:
         """The clip an ``i_cNN_*`` record is, or None."""
-        parsed = self._controller(part)
+        parsed = self.controller(part)
         loads = [p for p in parsed.components if p.type_id == control.GUN_TYPE] if parsed else []
         if not loads:
             return None

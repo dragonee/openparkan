@@ -39,6 +39,7 @@ from . import (
     settings,
     sky,
     texm,
+    units,
     weapons,
 )
 from . import mesh as objmesh
@@ -5965,6 +5966,32 @@ def check_builder(check, game: Path) -> None:
           f"none of the other {len(others)} building models has either")
 
 
+def check_units(check, game: Path) -> None:
+    """units: every assembly described whole, and its pieces fitting together."""
+    workshop = units.Workshop(game)
+    sheets = [workshop.describe(p) for p in sorted(game.glob("UNITS/**/*.dat"))]
+    robots = [s for s in sheets if s.chassis is not None]
+    armed = [s for s in robots if s.turret is not None]
+    fitted = [(s, w) for s in armed for w in s.weapons]
+    socketed = sum(1 for s, w in fitted if w.socket in s.turret.sockets)
+    clipped = [(s, w) for s, w in fitted if w.clip]
+    matching = sum(1 for _, w in clipped if w.clip.family == w.gun.slot)
+    shots = sum(1 for _, w in fitted if w.gun.type_id != control.GUN_TYPE or w.gun.round)
+    check("units: every assembly describes, and a robot's guns sit in its turret's sockets",
+          len(sheets) == len(list(game.glob("UNITS/**/*.dat"))) and robots and armed
+          and socketed == len(fitted) and shots == len(fitted),
+          f"{len(sheets)} assemblies described, {len(robots)} on a robot chassis and "
+          f"{len(armed)} with a turret; all {len(fitted)} fitted guns sit on one of their "
+          f"turret's Base_* sockets and resolve to a round")
+    parts = [p for s in robots for p in s.parts]
+    check("units: a fitted clip is its gun's slot, and every internal part resolves",
+          clipped and matching == len(clipped) and parts
+          and all(p.figures for p in parts),
+          f"all {matching}/{len(clipped)} clips belong to the family their gun's slot "
+          f"names; {len(parts)} internal parts across the robots read as their class, "
+          f"none unresolved")
+
+
 def check_controls(check, game: Path) -> None:
     """The input layer: ScanCode.dsc, Command.dsc, the .man bindings, the .tbl tables."""
     keys = controls.scancodes(game)
@@ -7369,6 +7396,7 @@ def run(game: Path) -> int:
         check_motion, check_sensors, check_combat, check_ownership,
         check_capture, check_repair, check_chassis, check_weapons,
         check_turrets, check_packages, check_builder,
+        check_units,
         check_controls,
         check_behaviour, check_research, check_descriptions, check_saves,
         check_vocabulary, check_resources, check_briefing, check_settings,

@@ -25,6 +25,7 @@ from . import (
     settings,
     sky,
     texm,
+    units,
     verify,
     viewer,
 )
@@ -427,6 +428,31 @@ def cmd_explosions(args, game: Path) -> int:
                   f"  placement {record.placement}  -> "
                   + ", ".join(str(r) for r in record.effects))
     print(f"\n{shown} explosion definitions")
+    return 0
+
+
+def cmd_unit(args, game: Path) -> int:
+    """Describe a unit assembly whole, or list them all."""
+    workshop = units.Workshop(game)
+    every = sorted(game.glob("UNITS/**/*.dat"))
+    if not args.name:
+        for path in every:
+            sheet = workshop.describe(path)
+            if sheet.chassis is None:
+                continue
+            turret = sheet.turret.name if sheet.turret else "-"
+            print(f"{str(path.relative_to(game)):<36} {sheet.role:<9} "
+                  f"{sheet.chassis.code:<7} {turret:<24} {sheet.firepower:6.0f} dmg/s")
+        return 0
+    want = args.name.lower().replace("\\", "/")
+    found = [p for p in every
+             if p.stem.lower() == want or str(p.relative_to(game)).lower().endswith(want)]
+    if not found:
+        print(f"no unit assembly matches {args.name!r}")
+        return 1
+    for path in found:
+        print("\n".join(units.render(workshop.describe(path))))
+        print()
     return 0
 
 
@@ -927,6 +953,10 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser(
         "explosions", help="every .exp and the effects it sets off"
     ).set_defaults(fn=cmd_explosions)
+
+    p = sub.add_parser("unit", help="describe a unit assembly whole, or list them")
+    p.add_argument("name", nargs="?", help="a .dat name or path under UNITS, e.g. w_b_trk1")
+    p.set_defaults(fn=cmd_unit)
 
     p = sub.add_parser("viewer", help="build a self-contained 3D terrain viewer")
     p.add_argument("maps", nargs="*", help="map names; default is every map")
