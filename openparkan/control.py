@@ -177,6 +177,11 @@ STATE_SPIN_AT = 0x3C         # min xyz, then max xyz at +0x48
 #: ``+0x100`` (``0x1000c36f``), so this is the ``+0x154`` the engine draw
 #: multiplies by (``0x100266e1``).
 STATE_ENGINE_AT = 0x54
+#: The section-5 group entering the state runs (``0x1000c37c``), and the request
+#: code the state waits for, -1 for any (``0x10001140``).  A building's states
+#: answer the construction sphere's codes (docs/32-builder.md).
+STATE_ACTIONS_AT = 0x90
+STATE_REQUEST_AT = 0x98
 
 #: Each class's power channel, by type id -- ``Control.dll:0x1003ccc8``.
 POWER_CHANNEL = (0, 4, 4, 0, 2, 3, 0, 0, 2, 5, 5, 0, 0, 0, 1, 0,
@@ -319,6 +324,9 @@ class State:
     spin: tuple[tuple[float, float, float], tuple[float, float, float]]
     #: What the engine draw is multiplied by while this state is current.
     engine: float
+    #: The section-5 group entering it runs, and the request code it waits for.
+    actions: int = -1
+    request: int = -1
 
 
 @dataclass(frozen=True)
@@ -511,6 +519,8 @@ def read_states(blob: bytes, counts: tuple[int, ...]) -> tuple[State, ...]:
             velocity=(velocity[:3], velocity[3:]),
             spin=(spin[:3], spin[3:]),
             engine=struct.unpack_from("<f", blob, at + STATE_ENGINE_AT)[0],
+            actions=struct.unpack_from("<i", blob, at + STATE_ACTIONS_AT)[0],
+            request=struct.unpack_from("<i", blob, at + STATE_REQUEST_AT)[0],
         ))
     return tuple(out)
 

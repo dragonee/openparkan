@@ -4517,7 +4517,7 @@ read = true
 module = "Behavior.dll"
 at = "0x100312c0"
 kind = "function"
-name = "ShowUpgrade StartTask"
+name = "ShowUpgrade start: first phase; ORDER_ROBOT_LEAVE to every unit within the sphere radius + 15"
 doc = "docs/32-builder.md"
 read = true
 
@@ -4875,4 +4875,182 @@ at = "0x1005c540"
 kind = "function"
 name = "CBuilding::GetConstructionSphere (IBuilding slot 15): placement 2 -> world centre and radius"
 doc = "docs/31-packages.md"
+read = true
+
+# --- the construction sphere and the pod item, ../docs/32-builder.md ---
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10031150"
+kind = "function"
+name = "ShowUpgrade (order 18) SetTarget: param 0 Construct 5 phases, 1 CloseSphere 3, 2 finish 2 -- {code, flags, kick, seconds}"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10031680"
+kind = "function"
+name = "ShowUpgrade takt: phase change after seconds x 1000; code -> IControl 19; flag 1 sphere obstacle, 8 none; kick: ORDER_ROBOT_LEAVE to units within sphere radius + 20; done: building outline"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1001e007"
+kind = "site"
+name = "CreateObjectFromScheme: a building created in build mode (bit 2) is given order 18 param 0"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x100335a1"
+kind = "site"
+name = "M_Task_Upgrade on arrival: the old building is given order 18 param 1 (CloseSphere)"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10033790"
+kind = "site"
+name = "M_Task_Upgrade: the new building is given order 18 param 2"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1000a82c"
+kind = "site"
+name = "behaviour property 0x20c: 1 while the current task is order 18 (under construction)"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1000a6f3"
+kind = "site"
+name = "behaviour property 0x203/0x20b: an octagon round the construction sphere, r / cos 22.5 deg + 20, as the obstacle"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10006220"
+kind = "function"
+name = "behaviour slot 50: a building re-registers its areal-map obstacle"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1002c1ba"
+kind = "site"
+name = "leave task: keeps leaving while the building's phase code (property 0x205) is 1 or 0x309"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10004800"
+kind = "function"
+name = "IControl 19: set the request code +0x1ac that state conditions test"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10001140"
+kind = "site"
+name = "state condition: applies only when state +0x98 is the request code or -1"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000c37c"
+kind = "site"
+name = "entering a state runs its section-5 action group, state +0x90"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10002800"
+kind = "function"
+name = "section-5 action group interpreter: switch on record +0xc (10 start effect id, 19 stop, 21 kill in sphere, 1/2 property 0x200/0x201)"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10003590"
+kind = "table"
+name = "section-5 action jump table, 28 entries"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x100033e6"
+kind = "site"
+name = "action 21: every object of classes 0x4/0x10/0x400 inside the construction sphere is killed (ILifeSystem slot 7)"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10002f92"
+kind = "site"
+name = "action 10: start the controller's effect by id, with a mode"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10003012"
+kind = "site"
+name = "action 19: stop the controller's effect by id"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1003b1a0"
+kind = "datum"
+name = "object class bit table 0x1..0x800"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10020900"
+kind = "function"
+name = "base component update (doors, pods): progress 0..1 at 0.45 x input by state bits, state word to 0 at the end"
+doc = "docs/27-ownership.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002d260"
+kind = "function"
+name = "component time driver: steps each component's update from the control clock"
+doc = "docs/27-ownership.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1005bd70"
+kind = "function"
+name = "CBuilding construction sphere from the outer contours (Illegal placement otherwise)"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1005c50c"
+kind = "site"
+name = "construction sphere: 15 more radius on a mine"
+doc = "docs/32-builder.md"
 read = true

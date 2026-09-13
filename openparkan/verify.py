@@ -6205,6 +6205,159 @@ def check_search(check, game: Path) -> None:
           f"{packages.FLEE_RANGE:g} of a map's corner or off the map")
 
 
+#: Section-5 action codes (``Control.dll:0x10002800``): start and stop an
+#: effect, and kill every unit inside the building's construction sphere.
+ACT_START_EFFECT, ACT_STOP_EFFECT, ACT_KILL_IN_SPHERE = 10, 19, 21
+#: The request codes the construction sphere asks a building's controller for.
+SPHERE_REQUESTS = {6, 1, 2, 0, 8, 10}
+#: The sphere effects, by the id a building's actions name them with.
+SPHERE_EFFECTS = {9001: ("b_sphere_start", "b_sphere_start_bt"), 9002: ("b_sphere_sign",),
+                  9100: ("b_sphere_main",)}
+
+
+def _action_groups(blob: bytes,
+                   parsed: control.Controller) -> list[list[tuple[int, int, int, str]]]:
+    """Section 5 as groups of (action, id, mode, member) -- values [3], [4], [5] and [7] or name."""
+    pos = control.section4_start(parsed.counts) + sum(p.size for p in parsed.components)
+    pos += control.BLOCK_SIZE
+    out = []
+    for _ in range(parsed.counts[4]):
+        n = struct.unpack_from("<i", blob, pos)[0]
+        pos += 4
+        group = []
+        for _i in range(n):
+            ints = struct.unpack_from("<9i", blob, pos)
+            member = blob[pos + 68:pos + 100].split(b"\0")[0].decode("latin-1").lower()
+            group.append((ints[3], ints[4], ints[5], ints[7], member))
+            pos += control.REFERENCE_STRIDE
+        out.append(group)
+    return out
+
+
+def _animated_parts(blob: bytes,
+                    parsed: control.Controller) -> list[tuple[int, float, float, float]]:
+    """Section 2: (node, from frame, to frame, speed)."""
+    at = control.section4_start(parsed.counts) - parsed.counts[2] * control.SECTION2_RECORD
+    out = []
+    for i in range(parsed.counts[2]):
+        node, frm, to = struct.unpack_from("<i2f", blob, at + i * control.SECTION2_RECORD)
+        speed = struct.unpack_from("<f", blob, at + i * control.SECTION2_RECORD + 0x18)[0]
+        out.append((node, frm, to, speed))
+    return out
+
+
+def check_construction(check, game: Path) -> None:
+    """The construction sphere a building runs, and the items it opens."""
+    names = frozenset(p.name.lower() for p in all_archives(game))
+    buildings = {}
+    elsewhere = Counter()
+    for path in all_archives(game):
+        archive = NResArchive.open(path)
+        for entry in archive:
+            if not entry.tag.upper().startswith("CTL"):
+                continue
+            blob = archive.read(entry)
+            try:
+                parsed = control.parse(blob, names)
+            except control.ControlFormatError:
+                continue
+            if path.name.lower() == "fortif.rlb":
+                buildings[entry.name.lower()] = (blob, parsed)
+            else:
+                elsewhere.update(s.request for s in parsed.states)
+
+    # 1. every building controller answers the six request codes; nothing else does
+    codes_ok = graphs = 0
+    for _blob, parsed in buildings.values():
+        codes = [s.request for s in parsed.states if s.request != -1]
+        graphs += 1
+        codes_ok += sorted(codes) == sorted(SPHERE_REQUESTS)
+    check("fortif.rlb: a building's states answer the construction task's six request codes",
+          buildings and codes_ok == graphs and set(elsewhere) == {-1},
+          f"{codes_ok}/{graphs} building controllers carry exactly one state for each of "
+          f"{sorted(SPHERE_REQUESTS)} at state +0x98 (the rest -1); control: all "
+          f"{sum(elsewhere.values())} states in every other archive are -1.  A state "
+          f"applies only when +0x98 is the requested code or -1 (Control.dll:0x10001140)")
+
+    # 2. entering a state runs its action group; the request-2, 8 and 10 states kill in the sphere
+    kill_ok = 0
+    sphered: set[str] = set()
+    bt = set()
+    for name, (blob, parsed) in buildings.items():
+        table = _action_groups(blob, parsed)
+        killing = {s.request for s in parsed.states if s.request in (2, 8, 10)
+                   and 0 <= s.actions < len(table)
+                   and any(a == ACT_KILL_IN_SPHERE for a, *_ in table[s.actions])}
+        kill_ok += killing == {2, 8, 10}
+        named = {(ident, member) for group in table for a, _i, _m, ident, member in group
+                 if member}
+        found = {ident: member for ident, member in named if ident in SPHERE_EFFECTS}
+        if all(found.get(i) in allowed for i, allowed in SPHERE_EFFECTS.items()):
+            sphered.add(name)
+        if found.get(9001) == "b_sphere_start_bt":
+            bt.add(name)
+    check("fortif.rlb: the request-2, 8 and 10 states run the kill-in-sphere action",
+          buildings and kill_ok == len(buildings),
+          f"on {kill_ok}/{len(buildings)} building controllers the state asked for with "
+          f"code 2, 8 or 10 names (+0x90) a section-5 group holding action 21, which "
+          f"kills every object of classes 0x4/0x10/0x400 inside the construction sphere "
+          f"(Control.dll:0x100033e6)")
+    without = sorted(set(buildings) - sphered)
+    check("fortif.rlb: a building names the sign, start and main sphere effects",
+          sphered and bt and all("bunker" in n or "tower" in n for n in bt)
+          and all("ruin" in n or "mtp" in n for n in without),
+          f"{len(sphered)}/{len(buildings)} controllers bind effect ids 9001, 9002, 9100 to "
+          f"B_Sphere_Start, B_Sphere_Sign, B_Sphere_Main, the {len(bt)} bunkers and towers "
+          f"B_Sphere_Start_BT; the {len(without)} without are the ruins and main "
+          f"teleports: {', '.join(without)}")
+
+    # 3. doors and pods are animated mesh nodes: frames from -> to at a speed
+    spans = defaultdict(Counter)
+    speeds = defaultdict(Counter)
+    forwards = total = 0
+    for blob, parsed in buildings.values():
+        table = _animated_parts(blob, parsed)
+        for comp in parsed.components:
+            if comp.type_id not in (control.DOOR_TYPE, control.COMPUTER_TYPE):
+                continue
+            for e in comp.entries:
+                _node, frm, to, speed = table[e]
+                spans[comp.type_id][(int(frm), int(to))] += 1
+                speeds[comp.type_id][round(speed, 2)] += 1
+                total += 1
+                forwards += to > frm and speed > 0
+    doors, pods = spans[control.DOOR_TYPE], spans[control.COMPUTER_TYPE]
+    check("fortif.rlb: a door plays its node from frame 0, a pod mostly from 1 to 3",
+          total and forwards == total and doors[(0, 1)] >= sum(doors.values()) - 1
+          and pods[(1, 3)] > sum(pods.values()) // 2,
+          f"all {forwards}/{total} door and pod parts (section 2) run forwards at a positive "
+          f"speed; doors (from, to) {dict(doors)}, speeds {dict(speeds[control.DOOR_TYPE])}; pods "
+          f"{dict(pods)}, speeds {dict(speeds[control.COMPUTER_TYPE])}")
+
+    # 4. the builder's beam rounds carry no explosion, so a hit could do nothing
+    library = objects.ObjectLibrary(game / "objects.rlb")
+    weapon = NResArchive.open(game / "weapon.rlb")
+    beams = {}
+    armed = 0
+    for record in library.by_tag("BULL"):
+        ndp = record.damage
+        if ndp is None or ndp.library.lower() != "weapon.rlb":
+            continue
+        try:
+            rows = objects.parse_damage(weapon.read_name(ndp.member), ndp.member)
+        except KeyError:
+            continue
+        exploding = any(r.explosion for r in rows)
+        if record.name.lower().startswith("bld_"):
+            beams[record.name.lower()] = (sum(r.durability for r in rows), exploding)
+        else:
+            armed += exploding
+    check("weapon.rlb: a builder's beam round has no explosion to hit with",
+          beams and all(hp == 1 and not ex for hp, ex in beams.values()) and armed,
+          f"{', '.join(f'{k} {hp:g} HP' for k, (hp, _) in sorted(beams.items()))}, no "
+          f".exp; control: {armed} other rounds carry one")
+
+
 def check_controls(check, game: Path) -> None:
     """The input layer: ScanCode.dsc, Command.dsc, the .man bindings, the .tbl tables."""
     keys = controls.scancodes(game)
@@ -7609,7 +7762,7 @@ def run(game: Path) -> int:
         check_motion, check_sensors, check_combat, check_ownership,
         check_capture, check_repair, check_chassis, check_weapons,
         check_turrets, check_packages, check_builder,
-        check_units, check_loading, check_search,
+        check_units, check_loading, check_search, check_construction,
         check_controls,
         check_behaviour, check_research, check_descriptions, check_saves,
         check_vocabulary, check_resources, check_briefing, check_settings,

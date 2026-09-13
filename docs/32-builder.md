@@ -130,7 +130,10 @@ Every first building but the mine fits in the 2,000 a builder carries
    `CreateObjectFromScheme` (`0x1001d440`) with the scheme, the matrix and the
    builder's clan — refused if its bounding sphere hits another building —
    and take the cost out of the builder's ore. On failure the game is told
-   "Builder … failed to build" (`0x1000c9d1`).
+   "Builder … failed to build" (`0x1000c9d1`). A building made this way is
+   created in build mode, and `CreateObjectFromScheme` gives it **order 18 with
+   parameter 0** at once (`0x1001e007`): the construction sphere below. The
+   builder itself does nothing more.
 
 Three things follow from the code as written:
 
@@ -156,17 +159,18 @@ does. `Build_BuildDistance` (150) is bound by name and no read of it was found.
   whose level (property `0x209`) + 1 is still inside its scheme — else "dead,
   enemy or fully upgraded building". It needs an intact beam.
 - **GoToBuild**: a random point beside the building (`0x100338a0`).
-- **On arrival** the builder becomes **invulnerable** (property 162) and an
-  order 18 goes out — the hidden `ShowUpgrade` task (`0x10059ae8`), the
-  construction sphere; that it goes to the building is a *guess*.
+- **On arrival** the builder becomes **invulnerable** (property 162) and the
+  **old building** is given order 18 with parameter 1 (`0x100335a1`) — the
+  construction sphere below.
 - **50 seconds later** (`0x1003363f`) the old building is removed, the scheme's
   next `.dat` is created at the same matrix with level + 1, the old building's
-  ore is carried over, and the new building is given order 18.
+  ore is carried over, and the new building is given order 18 with parameter 2
+  (`0x10033790`).
 - **Then the builder waits** while the new building's property `0x20c` reads 1,
-  and when it stops, drops its invulnerability and is done. That `0x20c` = 1
-  means "under construction" is a *guess* that fits all three places it is read:
-  here, the transport refusing such a mine or storage, and an upgrade refusing
-  such a building.
+  and when it stops, drops its invulnerability and is done. `0x20c` is 1 exactly
+  while the building's current task is order 18 (`0x1000a82c`): "the sphere is
+  still running" — which is also what a transport refuses a mine or storage for,
+  and an upgrade a building.
 
 So an upgrade walks a building up its scheme — `smine01` → `mmine01` →
 `lmine01`, `sbunk01` → `sbunk02` → `sbunk03` — and **the task charges no ore**:
@@ -174,6 +178,88 @@ its only reads and writes of ore are the building's own, moved across. Whether
 something outside the task charges for an upgrade is not established. If the
 building changes hands on the way, or reads `0x20c` = 1 before the builder
 arrives, the builder drops its invulnerability and stops.
+
+## The construction sphere — *read*, and *measured*
+
+Order 18 makes the hidden `ShowUpgrade` task (vtable `0x10059ae8`) **on the
+building**. It is a list of timed phases picked by the order's parameter
+(`0x10031150`); each phase has a code, flags, a "clear the area" switch and a
+length in seconds, and the task steps to the next when the length runs out
+(`0x10031680`):
+
+| parameter | given | phases (code, seconds) | total |
+|---|---|---|---:|
+| 0 | a new building (`0x1001e007`) | 1 for 5 · — for 25 · — for 5 · 2 for 5 · 0 for 1 | 41 s |
+| 1 | the building being upgraded (`0x100335a1`) | `0x309` for 25 · — for 1 · 8 for 90 | 116 s |
+| 2 | the building an upgrade made (`0x10033790`) | 10 for 3 · 0 for 1 | 4 s |
+
+What a phase does when it starts:
+
+- **Its code goes to the building's controller** (IControl slot 19,
+  `Control.dll:0x10004800`), except `0x309`, and is kept as behaviour property
+  `0x205`. A building controller's states each carry a request code at `+0x98`;
+  a state applies only when that is the current code or −1
+  (`Control.dll:0x10001140`). Entering a state runs the state's **action group**
+  (`+0x90`, section 5; `Control.dll:0x1000c37c`, interpreter `0x10002800`).
+- **Clearing the area.** Every unit within the sphere's radius + 15 (on start)
+  or + 20 (on a phase change) is ordered `ORDER_ROBOT_LEAVE` to radius + 20
+  from the building, unless it is already leaving or upgrading. A leaving unit
+  keeps going while the building's code is 1 or `0x309` or `0x20c` is 1
+  (`0x1002c1ba`). This is the builder "escaping" — and, on an upgrade, the
+  builder is exempt because it is on `ORDER_ROBOT_UPGRADE`.
+- **The sphere as an obstacle.** A flag raises the sphere: the building's
+  ground-plan obstacle becomes an octagon round the sphere, radius
+  r / cos 22.5° + 20 (`0x1000a6f3`), re-registered on the areal map
+  (`0x10006220`), and property `0x202` reads the sphere centre's height instead
+  of 0 — which is what refuses "Go Inside Non-complete Building". When the
+  task ends the obstacle goes back to the building's own outline.
+- The last phase of parameters 0 and 2 carries a flag value 2 that the task's
+  step does not test (it tests 1, 8 and 4); what reads it is *unknown*.
+
+**What the building's controller does with the codes** — *measured*: every
+one of the 30 `fortif.rlb` building controllers has 14 states, and the codes
+6, 1, 2, 0, 8 and 10 each open exactly one of them; no state in any other
+archive (1,270) has a code. The action groups (a plant's, the rest alike):
+
+| code | action group |
+|---|---|
+| 1 | start effect 9002 — the **sign** (`B_Sphere_Sign`: glow, `build_sign.wav`) |
+| 2 | its state kills inside the sphere; the state before it on the chain starts 9100 — the **dome** (`B_Sphere_Main`: four `NE_Shield3`, `build_sphere.wav`) — and 9001 — the **ray** (`B_Sphere_Start`: plasma, lightning, `build_ray.wav`), stops the sign, and **kills inside the sphere** |
+| 8, 10 | **kill inside the sphere** |
+| 0 | stop the ray |
+
+Which state each code opens is *measured*; the path the controller takes
+between them (its transition table) is a *guess*. Code 6 is in every
+controller and in no phase.
+
+The **kill** (action 21, `Control.dll:0x100033e6`) takes the building's
+construction sphere, finds every world object of classes `0x4`, `0x10` and
+`0x400` inside it, and kills each through its life system. That these classes
+are units is a *guess*; how often it repeats while a code is held is *unknown*.
+
+**The sphere** is `CBuilding`'s construction sphere (`Terrain.dll:0x1005bd70`):
+built round the building's outer contours ("Illegal placement" without them),
+with 15 more radius on a mine (`0x1005c50c`).
+
+So a **new building**, which appears the moment the builder arrives, shows the
+sign for 5 s; for the next 30 s it sends everyone out, with the dome's obstacle
+up for the last 5; then the dome, the ray and the kill come on for 5 s, the ray
+stops, and a second later the task ends and the building is done — 41 s. An
+**upgrade** sends everyone but the builder out of the old building's sphere for
+25 s and then holds the dome with its kill (code 8); at 50 s the upgrade
+replaces the building, and the new one kills once more (code 10) and finishes
+in 4 s. *Measured*: 24 of 30 controllers name the three sphere effects; the 5
+bunkers and towers use `B_Sphere_Start_BT` for the ray; the six without are the
+ruins and main teleports, which nothing builds.
+
+### The beam — *read*, and *measured*
+
+Nothing in the build, upgrade or sphere tasks sets a unit's fire state (the
+only such writes are in the attack code, `0x10024f99`–`0x10025b74`), so **a
+builder never fires its beam to build**; the dome, ray and kill all belong to
+the building. The beams' rounds, `bld_b_01`, `bld_l_01` and `bld_m_01`, have
+1 hit point and **no explosion** — the only rounds of the 66 without one — so a
+hit would do nothing (*measured*). Whether the beam is fired at all is *unknown*.
 
 ## Transporting ore — *read*, and *measured*
 
@@ -218,12 +304,8 @@ laser (`e_gun_lc_03`, `e_gun_mc_20`).
 
 - Whether anything charges for an upgrade outside `M_Task_Upgrade`.
 - What the ore setter does when a building's cost exceeds what the builder holds.
-- What the new building's creation mode (2 for a build, 4 for an upgrade, passed
-  to `CreateObjectFromScheme`) changes, and whether a freshly built building runs
-  the `ShowUpgrade` sphere too.
-- When the beam is actually fired, and what hitting something with `bld_*_01`
-  does: no firing from the three tasks was traced.
-- Property `0x20c`: what sets it, and whether it is "under construction".
+- Whether a builder ever fires its beam, and how often the sphere's kill repeats
+  while a code is held.
 - The values of `Build_SpeedPercent` and `Transport_SpeedPercent`, and any reader
   of `Build_BuildDistance`.
 - What a transport does after waiting at a full storage (state 5's handler).

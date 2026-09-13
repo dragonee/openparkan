@@ -135,9 +135,16 @@ of `IBuilding` (`0x1005b250`) is where `iron3d.dll` stores its callback
   reports done, the building checks that the same object is still in the zone.
   Only then does it call the callback with the building and that object
   (`0x10057a41`). The pod closes when the object leaves, and it can fire again
-  5 seconds after it has closed. **How long the opening takes** (the capture's
-  "couple of seconds") is how long the item stays switched on. What switches it
-  back is *unknown*.
+  5 seconds after it has closed. **How long the opening takes.** The computer is an item, and an item's update
+  (`Control.dll:0x10020900`) moves a 0-to-1 progress by 0.45 a step while
+  switched on, back by 0.45 while switched off, and at the end clears the state
+  word (property `0x600`) the building waits on. A pod's rate is 1 (its record's
+  flags are 0 and its factor 1.0, *measured*), so **it opens in three steps**:
+  0.45, 0.9, 1. The update ignores the time it is handed; the steps come from
+  the controller's time driver (`0x1002d260`), whose period was not traced.
+  *Measured*: a pod's part plays its mesh node from frame 1 to 3, at speeds 0.2
+  to 0.5; a door from 0 to 1. Whether that animation is played at those speeds
+  alongside the progress was not found.
 - **The callback takes the building** (`iron3d.dll:0x10061050`).
   - **Same clan** (`0x100610c2`): nothing is captured; `0x10062630` runs
     instead, and is not read here.
@@ -236,9 +243,10 @@ generators between the players. `Multi.05`'s `Ntrl` is the exception: type 2.
 
 ## Not established
 
-- **How long a pod takes to open**: the computer item stays switched on for
-  some time before the building sees it done, and what switches it back
-  (`Control.dll` state word `+0x50`, property `0x600`) was not found.
+- **How long a pod takes to open, in seconds**: three item steps, and the step
+  period of the controller's time driver (`Control.dll:0x1002d260`, which
+  schedules each device through `0x10021a30`) is not traced. About 5 seconds in
+  play would mean steps of about 1.7 s (a *guess*).
 - What `iron3d.dll:0x10062630` does when a unit of the building's own clan
   opens the pod.
 - The hero's target field (record `+0x38`, `+4`) and what sets it; the game
