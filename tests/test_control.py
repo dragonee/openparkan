@@ -202,3 +202,22 @@ def test_an_archive_filter_rejects_a_name_it_does_not_know(ctl, reference):
     control.parse(blob)                                   # no filter: fine
     with pytest.raises(control.ControlFormatError):
         control.parse(blob, frozenset({"effects.rlb"}))
+
+
+def test_the_block_is_twenty_one_group_indices(ctl, reference):
+    groups = [-1] * control.BLOCK_ENTRIES
+    groups[0] = 1
+    groups[control.SURFACE_GROUPS_AT:] = [0, 1, 0] + [1] * 8
+    blob = ctl(counts=(0, 0, 0, 0, 2),
+               block=struct.pack(f"<{control.BLOCK_ENTRIES}i", *groups),
+               groups=[[reference("", "")], [reference("", ""), reference("", "")]])
+    c = control.parse(blob)
+    assert c.load_group == 1
+    assert c.surface_groups == (0, 1, 0) + (1,) * 8
+    assert [r.group for r in c.references] == [0, 1, 1]
+
+
+def test_an_unset_block_names_no_group(ctl):
+    c = control.parse(ctl())
+    assert c.load_group == control.NO_GROUP
+    assert c.surface_groups == (control.NO_GROUP,) * control.SURFACES

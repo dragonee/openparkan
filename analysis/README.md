@@ -241,10 +241,11 @@ Three lessons, all of which had already cost something:
 uv run --group analysis python analysis/vcalls.py
 ```
 
-Asked of the material manager, it answers two of the questions above at once —
-who calls index 5 (`../TODO.md` §2.2) and who reads the `MAT0` class byte
-(§2.4, now closed) — and it does so in two passes, because one pass is not
-enough.
+Asked of the material manager, it answered two of the questions above at once —
+who calls index 5 (`../TODO.md` §2.2) and who reads the `MAT0` class byte —
+and it does so in two passes, because one pass is not enough. **The second
+answer was wrong**: the class byte is read, by `Control.dll`, on a manager
+it gets from `QueryInterface` 0xd rather than one it stores (below).
 
 The **first** follows the pointer the way the compiler moves it: into object
 fields, through stack locals, and across call boundaries. That last one
@@ -267,7 +268,7 @@ the object, and discriminates on two things a taint does not need:
 | address | what |
 |---|---|
 | `0x10002aa0` | `LoadMatManager`: 0x470 bytes, vtable at `+0`, eleven slots |
-| `0x10003ab0` | slot 9 — returns `&material[id].class`, and nobody calls it |
+| `0x10003ab0` | slot 9 — returns `&material[id].class`; `Control.dll` calls it at `0x1001aaf5` and `0x100114fd` |
 | `0x100669f0` | the material array, 368 bytes a record; the class byte at `+0x154` |
 | `0x10069dd0` | `Terrain.dll`'s five-way factory, which passes the manager on |
 | `0x1005991f` | the trap: a five-argument call at index 5's offset, on another class |
@@ -287,6 +288,16 @@ Four more ways to be wrong, all of which this cost:
   nothing; the useful shape is a precise pass plus an exhaustive one.
 - **An offset is not an identity.** Two objects with a pointer at `+0x8` are
   not the same class. Ask what else the code calls on the receiver.
+- **A pointer need not be stored to be used.** Both passes start from where a
+  manager is kept, so they cover the modules that keep one. `Control.dll`
+  keeps none: it asks the object that owns a face for interface 0xd, calls
+  slot 9 on the answer and lets the local go. The class byte's "nobody calls
+  it" was that blind spot, and the ground contact was the caller. Search for
+  the interface request as well as for the stored pointer.
+- **A linear sweep stops at the first byte it cannot decode.**
+  `pe.Binary.xrefs_to` ran capstone once over `.text`, and on `Control.dll`
+  that ended at `0x1000e59a`, under a quarter of the way in. It now restarts a
+  byte later, as `vcalls.py` always did.
 
 
 ## Message dispatch, and the constant that is never compared

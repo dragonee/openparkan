@@ -251,7 +251,7 @@ parameter block, and then walks the body. That walk is the layout:
 | section 1 | `counts[0]` = A, `counts[1]` = B | A states of `156 + 16*B`, then an `A*A` table of floats |
 | section 2 | `counts[2]` = C | C records of 36 bytes; +20 a node, where a gun's barrels sit |
 | section 4 | `counts[3]` = D | D component records, each **type-dispatched** |
-| the block | — | a fixed **84 bytes**, copied into the object |
+| the block | — | a fixed **84 bytes**, copied into the object: 21 section-5 group indices ([24-motion.md](24-motion.md#the-eleven-surface-groups-switch-the-dust--measured)) |
 | section 5 | `counts[4]` = E | E groups: an int32 `n`, then `n` records of 100 bytes |
 
 Section 1's span is worth showing because the engine writes it twice. The
@@ -358,8 +358,10 @@ records, carried only by the four archives that hold things which shoot.
 
 The meaning of the fields rather than their extent: what most classes'
 sixteen values mean, a component's 4-byte entries, section 1's conditions and
-transition table, section 2's record contents, the 84-byte block's contents,
-and the nine ints of a section-5 record. What section 1's states, the motion
+transition table, section 2's record contents, and the nine ints of a
+section-5 record. The 84-byte block is 21 section-5 group indices — entry 0
+runs at load, entries 10–20 by the ground's surface id — in
+[24-motion.md](24-motion.md#the-eleven-surface-groups-switch-the-dust--measured). What section 1's states, the motion
 triples and a component's mass (`+0x1c`) do is in [24-motion.md](24-motion.md).
 
 ### Where to look next
@@ -394,7 +396,7 @@ which **field of the frame** feeds the channels those handlers reach —
 `+0x5c8`, a 0xf4-byte object with 0x1c-stride channels defaulting to 0.5, and
 `+0x5cc`, a 0x120-byte one with two arrays of six floats.
 
-Two smaller unknowns sit beside the sections: the 84-byte block at +128 — set
-on 525 members, and identical between `ctl_cam_fly` and `fr_b_plant` (a 1.0,
-a 250.0, then two `±FLT_MAX` boxes) but different in the guns — and the nine
-ints of the reference record.
+One smaller unknown sits beside the sections: the nine ints of the reference
+record. The 84-byte block is no longer one: its 21 entries are section-5 group
+indices, set on 273 of the 531 members
+([24-motion.md](24-motion.md#the-eleven-surface-groups-switch-the-dust--measured)).

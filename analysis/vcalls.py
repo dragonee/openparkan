@@ -1,9 +1,14 @@
 """Every call made through one C++ object's vtable, across the whole install.
 
-Two entries in `../TODO.md` are negatives -- nobody asks a material for its
+Two entries in `../TODO.md` were negatives -- nobody asks a material for its
 second animation track, nobody reads its class byte -- and a negative is only
 worth publishing if the search that produced it can be shown to find the
 things that *are* there.  This is that search, and it runs in two passes.
+
+The class-byte negative did not survive: both passes start from where a
+manager is *stored*, and ``Control.dll`` stores none -- it asks a face's owner
+for interface 0xd and calls slot 9 on the answer (``0x1001aaf5``).  A pointer
+obtained by ``QueryInterface`` is outside what this search can see.
 
 The first follows the pointer the way the compiler actually moves it, which is
 the part every earlier attempt got wrong:

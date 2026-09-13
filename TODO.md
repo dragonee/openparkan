@@ -697,22 +697,21 @@ written down is a question nobody reopens.
       `SC_1` and `Net_4_01`, are the same file under two names.
       → [docs/03-terrain.md](docs/03-terrain.md)
 
-- [x] **The `MAT0` class byte — nothing reads it.** The loader copies byte 4
-      into the runtime material's `+0x154`, and three instructions in the
-      whole of `World3D.dll` name that address: two stores and one accessor
-      that returns its address. The accessor is **slot 9 of the material
-      manager's eleven-slot vtable**, a two-argument call, and no module calls
-      it. The negative is controlled twice over. Following the pointer through
-      the object fields, stack locals and constructor arguments of the only
-      two modules that can hold a manager finds calls through slots 1, 2, 3
-      and 6 — including both sites already published — and none through 9.
-      Then, with no taint at all, **every one of the 87 indirect calls at that
-      vtable offset** in those modules: two have a receiver at an offset a
-      manager is stored at, and both pass three arguments where slot 9 takes
-      two. A renderer loses nothing by ignoring it — the one distinction it
-      draws that a renderer acts on is the ground's second track, and **all 43
-      two-track materials have a class below 5 while no material above it has
-      a second track**. → [docs/07-objects.md](docs/07-objects.md), `analysis/vcalls.py`
+- [x] **The `MAT0` class byte — the ground's surface id.** The loader copies
+      byte 4 into the runtime material's `+0x154`, and the accessor that
+      returns its address is **slot 9 of the material manager's eleven-slot
+      vtable**. This entry used to say no module calls it; `Control.dll` does,
+      in the ground contact (`0x1001aaf5`) and in a node's damage stage
+      (`0x100114fd`), on a manager it gets by `QueryInterface` 0xd from the
+      object that owns a face. The earlier search, controlled as it was, only
+      looked in the modules that *store* a manager. With it come the float
+      (G, 1.0 on all 905) and the dword (a damage rate: 10000 a second on the
+      liquid beds). A renderer still loses nothing by ignoring the byte — the
+      one distinction it draws that a renderer acts on is the ground's second
+      track, and **all 43 two-track materials have a class below 5 while no
+      material above it has a second track**. →
+      [docs/07-objects.md](docs/07-objects.md),
+      [docs/24-motion.md](docs/24-motion.md)
 
 ## 1. Wrong on screen today
 
@@ -848,6 +847,16 @@ The conclusion stands and is now stronger than "nothing found asks for
 another": the engine's own material fetch **has no track parameter to pass**,
 so reading track 0 is what the engine does, not a default this library picked.
 
+**One assumption above failed elsewhere.** "Three modules can hold a manager
+pointer" is not so: any module can ask a face's owner for one by
+`QueryInterface` 0xd, and that is how `Control.dll` reaches slot 9 (the class
+byte, [section 0](#0-done)). A sweep of every module for `QueryInterface` 0xd
+in its usual form — `mov edx, 0xd`, then a call through slot 0 — finds six
+sites — two in `AniMesh.dll`, two in `Control.dll`, one each in `Effect.dll`
+and `Terrain.dll` — and no call through index 5's `+0x14` within the 60
+instructions after any of them. `AniMesh.dll:0x100059e3` keeps its answer in an
+object field, `+0x204`, which that window does not follow.
+
 ### 2.3 Effects
 
 Both formats are [read](docs/11-effects.md) — 923 effects walk their emitter
@@ -903,13 +912,12 @@ and 4 that separate them are the magnitude in their `.exp`.
 
 ### 2.4 Two words in the `MAT0` header
 
-The class byte that used to be this entry is [closed](#0-done): the engine
-loads it and never reads it back. Two smaller unknowns survive it. The
-version-3 `float32` is 1.0 on all 905 records, and the version-4 `uint32` is 0
-on 901 and a *float* on the other four — 1000.0 twice and 9999.0 twice — so it
-is a distance or a range the engine reads as a dword. Both land in the runtime
-material beside the class byte, at `+0x15c` and `+0x160`, and both are as
-unread as it is.
+- [x] **Closed with the class byte** ([section 0](#0-done)). The version-3
+      `float32` is the ground's speed factor G, 1.0 on all 905 records; the
+      version-4 `uint32` holds a float, 0 on 901 and 1000.0 or 10000.0 on the
+      other four — hit points a second a unit loses standing on it. The ground
+      contact copies both (`Control.dll:0x1001aaf5`). →
+      [docs/24-motion.md](docs/24-motion.md)
 
 ---
 

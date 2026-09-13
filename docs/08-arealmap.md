@@ -31,7 +31,8 @@ One areal:
 0x08  float32  0, 0
 0x10  float32  area of the polygon
 0x14  float32  0, 0, 1.0
-0x20  uint32   1, 0, 1, 0
+0x20  uint32   flags: word 0 is 0 or 1; word 2 has all of 0xF0 set (240,
+               242) on a lake and 1..29 elsewhere; words 1 and 3 are 0
 0x30  uint32   vertex count V
 0x34  uint32   sub-block count B          zero on every shipped map
 0x38  float32  V × [3]                    polygon vertices
@@ -43,6 +44,13 @@ One areal:
 So an areal is `56 + V*20` bytes when B is zero — which is exactly the 196-byte
 stride visible in a hex dump of a 7-vertex areal, and the reason a fixed-stride
 guess almost worked and then fell apart.
+
+**A lake is its own areal.** Every areal whose third flag word has all of
+`0xF0` set covers only water and liquid-bed faces, and every other areal is
+ground apart from 12 shore faces (*measured* at the level-0 faces whose centre
+lies in exactly one areal; `Areal.lake`). Tut_1 has 5 such areals among
+378. What the low bits mean is not established; see
+[24-motion.md](24-motion.md#lakes-in-the-areal-map--measured).
 
 **The areal count is not in the payload.** It lives in the NRes directory
 entry's element-count field at offset +4 — see [01-nres.md](01-nres.md), which
@@ -85,6 +93,10 @@ Six checks in `uv run openparkan verify`, over all 33 maps:
 - **Areals tile the map** — the areas sum to the full square, to within 1%, on
   every map. The decomposition has no gaps and no overlaps.
 - **Every cell index is a real areal.**
+
+Two more sit with the ground checks: **the four flag words take only the
+values above** — 34662 areals — and **a lake areal holds only water and
+liquid-bed faces**, with a dozen shore faces the only exception the other way.
 
 ## How the layout was found
 

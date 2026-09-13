@@ -14,7 +14,9 @@ all zero are 212 bytes and nothing else.
 
 After the frame come the sections: section 1's animation states, section 2,
 section 4's components, an 84-byte block, and section 5's reference groups.
-Section 1 and section 4 are read; section 2 and the block are stepped over.
+Section 1, section 4 and the block are read; section 2 is stepped over.  The
+block is 21 section-5 group indices: entry 0 runs at load and entries 10..20
+run when the ground's surface id changes.
 See ``docs/13-control.md`` and, for what the numbers do, ``docs/24-motion.md``.
 
 Everything below is re-derived by ``uv run openparkan verify``.
@@ -44,6 +46,14 @@ SECTION1_PER_B = 16
 SECTION2_RECORD = 36
 BLOCK_SIZE = 84
 COMPONENT_TYPES = range(1, 31)
+
+#: The block is 21 int32 section-5 group indices (``Control.dll:0x100093ee``).
+#: Entry 0 runs at load; entries 10..20 are one per ground surface id, run
+#: when the id under the machine changes (``0x1001ab3e``).
+BLOCK_ENTRIES = 21
+SURFACE_GROUPS_AT = 10
+SURFACES = 11
+NO_GROUP = -1
 
 #: A component record's fixed part, and the fields inside it that are read.
 #: Thirteen of the factory's fourteen classes share one parser at
@@ -310,6 +320,9 @@ class Reference:
     values: tuple[int, ...]
     #: Byte offset of the record within the member, for anyone extending this.
     offset: int
+    #: The section-5 group the record sits in, which the block's entries and a
+    #: state's action group (+0x90) index.  -1 when not known.
+    group: int = -1
 
 
 @dataclass(frozen=True)
@@ -374,6 +387,18 @@ class Controller:
     #: Section 2's node words, one a record.  A gun's entries index these:
     #: its barrels.
     points: tuple[int, ...] = ()
+    #: The 84-byte block: 21 section-5 group indices, ``NO_GROUP`` for none.
+    groups: tuple[int, ...] = ()
+
+    @property
+    def load_group(self) -> int:
+        """The group the loader runs once (``Control.dll:0x10009408``)."""
+        return self.groups[0] if self.groups else NO_GROUP
+
+    @property
+    def surface_groups(self) -> tuple[int, ...]:
+        """One group per ground surface id 0..10, run when the id changes."""
+        return self.groups[SURFACE_GROUPS_AT:] or (NO_GROUP,) * SURFACES
 
     @property
     def named(self) -> list[ResourceRef]:
@@ -544,7 +569,7 @@ def reference_groups(blob: bytes, pos: int, count: int,
                      ) -> tuple[list[Reference], int] | None:
     """Read ``count`` reference groups at ``pos``.  None if they do not fit."""
     out: list[Reference] = []
-    for _ in range(count):
+    for group in range(count):
         if pos + 4 > len(blob):
             return None
         n = struct.unpack_from("<i", blob, pos)[0]
@@ -557,7 +582,7 @@ def reference_groups(blob: bytes, pos: int, count: int,
             if archives is not None and library and library.lower() not in archives:
                 return None
             values = struct.unpack_from(f"<{REFERENCE_INTS}i", blob, pos)
-            out.append(Reference(ResourceRef(library, member), values, pos))
+            out.append(Reference(ResourceRef(library, member), values, pos, group))
             pos += REFERENCE_STRIDE
     return out, pos
 
@@ -625,4 +650,5 @@ def parse(blob: bytes, archives: frozenset[str] | None = None) -> Controller:
         references=tuple(references),
         states=read_states(blob, counts),
         points=_points(blob, counts),
+        groups=struct.unpack_from(f"<{BLOCK_ENTRIES}i", blob, pos),
     )

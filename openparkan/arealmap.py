@@ -50,6 +50,10 @@ HEADER_SIZE = 0x38
 #: Neighbour index used on an edge that has no areal on the far side.
 NO_NEIGHBOUR = -1
 
+#: The bits of an areal's third flag word that mark a lake: 240 and 242 on the
+#: shipped maps, against 1..29 on ground.  The low bits are not established.
+LAKE_BITS = 0xF0
+
 
 @dataclass
 class Areal:
@@ -65,6 +69,15 @@ class Areal:
     #: ``NO_NEIGHBOUR`` on the outside of the mesh.
     edges: list[tuple[int, int]]
     flags: tuple[int, int, int, int]
+
+    @property
+    def lake(self) -> bool:
+        """Whether the third flag word has all of ``LAKE_BITS`` set.
+
+        Such an areal covers only water and liquid-bed faces, on every shipped
+        map, and every other areal is ground bar a dozen shore faces.
+        """
+        return self.flags[2] & LAKE_BITS == LAKE_BITS
 
     def twin(self, edge: int) -> tuple[int, int] | None:
         """``(neighbour areal, its edge)`` across ``edge``, or None outside."""

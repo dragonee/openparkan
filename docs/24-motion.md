@@ -186,11 +186,16 @@ hero.
 
 ## Ground and slope — *read*
 
-- **The ground scales top speed.** On contact `0x1001a450` asks the object
-  underneath for a surface record: +8 becomes `+0x1a8`, the factor G; +0xc
-  becomes `+0x1a4`, a rate at which kind-4 agents lose hit points while on it
-  (`0x10012a66`); +0 is a surface id 0–10 that picks one of eleven entries at
-  `+0x504` for `0x10002800`. Which surfaces carry which values is not read.
+- **The ground is the material under the unit.** Each tick the ground contact
+  (`0x1001a450`) finds the world face under the machine
+  ([below](#finding-the-ground--read)) and asks that face's owner, through its
+  interface 0xd, for **material manager slot 9 on the face's material id**
+  (`0x1001aaf5`; the id is world face `+0x74`). What comes back is the loaded
+  material's `+0x154` block: the `MAT0` class byte, the **surface id**; the
+  float, **G**, into `+0x1a8`; and the dword, **a damage rate**, into
+  `+0x1a4`. G scales top speed. An owner with no manager gives surface 10
+  (`0x1001aace`). When the surface id changes, block group `+0x504[id]` runs
+  (`0x1001ab3e`; an id above 10, such as `0xFF`, runs nothing).
 - **Mode 2 brakes on slopes.** Only when file +104 is 2 does the velocity
   integrator compare the ground's tilt with the cone at +112 (`0x100157ac`):
   with `c` the cosine of the tilt, a factor
@@ -201,10 +206,102 @@ hero.
 
 *Measured:* all 509 mode-0 controllers keep the default cone of 1.57079; all
 16 mode-2 controllers carry 0.6 rad (34°); the six mode-3 controllers carry
-0.6 or 1.52 and take a different branch (a height, `0x10015879`, unread).
+0.6 or 1.52 and take a different branch, the one that adds gravity
+([below](#gravity--read-and-measured)).
 Among the chassis, mode 2 is every wheeled and tracked chassis, the small and
 medium walkers, the Transformer, the Small Tower and the hero; the Large
 Walking Chs, the Tiny Spider and every flyer are mode 0 and ignore slope.
+
+## Ground and collision — *read*, and *measured*
+
+### What the shipped surfaces carry — *measured*
+
+| `MAT0` field | read into | on the 905 materials |
+|---|---|---|
+| +4 class byte | surface id `+0x1b0` | 0–10, or `0xFF` on 376 |
+| +6 float | G `+0x1a8` | **1.0 on every one** |
+| +10 dword, holding a float | rate `+0x1a4` | 10000 on `WATER_BOT` and `ENV_LAVA_BOT`, 1000 on `B_S0_DAM` and `B_DD1DK_DAM`, 0 on the rest |
+
+- **The ground never changes a machine's speed on shipped data**: G is 1
+  everywhere.
+- **Lake and lava beds kill.** An agent of kind 4 loses `dt × rate` hit points
+  through the node update each tick (`0x10012a66`). Kind 4 is every `BTLU`
+  record in `objects.rlb` — the units, the hero among them — because an
+  agent's kind comes from its object tag: `BTLU` 4, `BULL` 9, `WPNS` 2, `STAT`
+  10 (`AniMesh.dll:0x1000317f`). So a unit touching a bed loses 10000 hit
+  points a second. Every one of the 6102 bed faces is surface 1 with that rate.
+- **The terrain uses five surface ids.** Counting the faces of both levels of
+  detail, surface 1 covers 208406 (`L02`, `L33`, `L35` and most others), 2
+  covers 54220 (`L00`, `L19`, `L20`, `L28`, `L32`), 0 covers 9626 (`L08`), 7
+  the 1006 `WATER` faces, and `0xFF` the 2624 `ENV_NLAVA` lava surfaces.
+- **Tut_1** has 5250 faces of `L02` (1), 2208 of `L00` (2), 478 of
+  `WATER_BOT` (a bed, 1, at 10000) and 354 of `WATER` (7).
+
+### The eleven surface groups switch the dust — *measured*
+
+The 84-byte block after section 4 holds **21 section-5 group indices**. The
+loader rebases them and copies them to `+0x4dc` (`0x100093ee`), so `+0x504` is
+entries 10–20; entry 0 runs once at load (`0x10009408`). On all 531
+controllers every entry is -1 or a valid group, and read two bytes early none
+of the 273 blocks with an entry set still indexes groups.
+
+Nine chassis set the surface entries: `r_b_03`, `r_b_04`, `r_b_05`, `r_l_01`,
+`r_l_03`, `r_l_04`, `r_m_01`, `r_m_03` and `r_m_04`. On all nine, surfaces 0
+and 2 share one group and 1 and 3–10 share another. The first group is all
+action 11 and the second all action 10, and every effect id they name is one
+of the chassis's `dust_*` emitters. Action 10 starts an effect with a mode;
+action 11 calls the same interface's slot `0x30` (`0x10002fb5`), and what that
+does is *unknown*. That it stops the dust — no dust on `L00` and `L08` — is a
+*guess*. The footstep effects (`step_*`) are not in these groups; they are
+named records of their own.
+
+### Finding the ground — *read*
+
+1. **Body sphere.** The object's bounding sphere gives the centre and radius.
+   A radius under 20 is held to at most 7.5 (`0x1001a48e`); one of 20 or more
+   is kept. The centre goes into `+0x98`.
+2. **Keep the face.** If a face from the last tick is still held (`+0xa4`),
+   the engine walks the mesh from the last ground point (`+0x8c`) to the new
+   centre (`Terrain.dll` `CWorld::FindWorldFace`, slot 9, called at
+   `0x1001a627`) with the limit 0.173648, cos 80°.
+3. **Otherwise search.** An `IWorld` slot 10 query runs at the centre with 0.5,
+   in two passes (register values 6, then 10; `0x1001a6cc`, `0x1001a77d`). A
+   face is taken if its normal z is above 0.173648 (`0x1001a6fd`) and, on the
+   first pass, the hit lies below the centre. **A face steeper than 80° is
+   never ground** — 323 of the 173827 level-0 terrain faces across the maps
+   (*measured*).
+4. **Ground point.** The centre projected onto the face plane goes into
+   `+0x70` and the face normal into `+0x7c`; `+0x8c` keeps the point
+   (`0x1001a848`). With no face, the ground point is the centre.
+5. **Touching** means `|ground point − centre|² ≤ 2r²` (`0x1001a9f9`), and the
+   surface record is read only then. The exception is a face with world flag
+   `0x400` — the liquid bed, the terrain's `0x2000`: its record is read when an
+   `IWorld` slot 8 query for class `0x200`, the liquid surface, finds a gap
+   under the radius (`0x1001aa10`). Which way that gap is measured is
+   *unknown*.
+6. **Contact points.** The same face search runs again for each of the current
+   state's `counts[1]` contact points (`0x1001abcc`) — the feet, wheels or
+   tracks, placed on their nodes.
+
+### Gravity — *read*, and *measured*
+
+`CWorld` sets gravity to **10.0** at `+0xc` when it is built
+(`Terrain.dll:0x10024c1a`); slot 4 returns it and slot 5 sets it. Only a
+mode-3 controller uses it: the velocity integrator adds −g along world z,
+turned into the machine's frame (`0x10015879`). The six mode-3 controllers are
+the four `bf_*_01` rounds in `weapon.rlb` and the two hero targets `r_h_01`
+and `r_h_03`. **Modes 0 and 2 — every other machine, the hero `r_h_02`
+included — have no gravity term.** What holds them to the ground is the
+contact above; how the position is put back onto `+0x70` is *unknown*.
+
+### Lakes in the areal map — *measured*
+
+An areal whose third flag word has all of `0xF0` set (240 or 242 on the
+shipped maps) covers **only water and bed faces**: 1845 beds and 1272 water
+faces across the maps, counting the level-0 faces whose centre falls in
+exactly one areal. Every other areal is ground apart from 12 shore faces.
+Tut_1 has 5 lake areals among its 378. See
+[08-arealmap.md](08-arealmap.md).
 
 ## The chassis, in the game's own units — *measured*
 
@@ -272,15 +369,25 @@ asks for the live top speed (IControl 145) and compares it with 1
 
 ## Not established
 
-- Which ground surfaces carry which speed factor and damage rate — the record
-  behind `0x1001a450`'s query — and whether water is one of them.
+- Collision between objects: the shapes (sphere, cylinder, the fifth mesh
+  slot, the `.bas` polygon, the areal obstacles) and the response
+  (slide, stop or push).
+- How the body is snapped to the ground point, and whether a mode-0 or mode-2
+  machine ever falls.
+- Jumping and `CanJump`, the map edge, bridges (`m_bridge`). That buildings and
+  bridges are ground through the same world-face query
+  (`CBuilding::GetFirstIntersectedFace`) is a *guess* from the names.
+- What action 11 does; what register values 6 and 10 select in `IWorld` slot
+  10; the sign of the liquid-surface gap.
+- Where G would ever differ from 1: no shipped material sets it
+  ([Ground and collision](#ground-and-collision--read-and-measured)).
 - What writes the command triple the velocity integrator multiplies by top
   speed (`0x10014610`).
 - Which node range the payload sum counts as the chassis.
 - Triples 5 (+68) and 6 (+80): 6 clamps an attitude the spin integrator
   drives from a per-state selector (state +0x08), 5 is multiplied into it;
   what that attitude is on screen is not read.
-- The mode-3 height branch (`0x10015879`).
+- Whether any module calls `CWorld` slot 5 to change the 10.0 gravity.
 - Where `Speed_MaximumFactor` is applied, and what the unit's `+0x5fc` speed
   base is.
 - Whether a module outside `Control.dll` stops a machine whose engines are

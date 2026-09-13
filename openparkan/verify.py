@@ -806,12 +806,13 @@ def check_materials(check, game: Path) -> None:
           f"engine's own default.  The other {len(named_groups)} values sort "
           f"the library by role: {dict(sorted(named_groups.items()))}")
 
-    # Nothing in the engine reads the class byte back -- the manager's accessor
-    # for it is vtable slot 9 and no module calls it (analysis/vcalls.py).  So
-    # the question a renderer has to answer is what it loses by ignoring it,
-    # and the answer is nothing: the only distinction it draws that a renderer
-    # could act on is which materials carry the ground's second track, and the
-    # track count says that already.
+    # The simulation reads the class byte -- it is the ground's surface id,
+    # fetched through the manager's slot 9 (Control.dll:0x1001aaf5; see
+    # check_ground) -- but no drawing code does.  So the question a renderer
+    # has to answer is what it loses by ignoring it, and the answer is nothing:
+    # the only distinction it draws that a renderer could act on is which
+    # materials carry the ground's second track, and the track count says that
+    # already.
     ground = {e.name for e in records
               if raw.read(e)[4] < materials.GROUND_CLASSES}
     twins = {e.name for e in records
@@ -4309,6 +4310,186 @@ def check_motion(check, game: Path) -> None:
 MARKS = ("df", "01", "02", "03")
 
 
+#: The four materials that hurt a unit standing on them, and how fast.
+GROUND_RATES = {"water_bot": materials.LIQUID_BED_RATE,
+                "env_lava_bot": materials.LIQUID_BED_RATE,
+                "b_s0_dam": 1000.0, "b_dd1dk_dam": 1000.0}
+WATER_SURFACE = 7
+
+
+def check_ground(check, game: Path) -> None:
+    """The ground a unit stands on: surface records, surface groups, lakes, gravity."""
+    lib = materials.MaterialLibrary(game / "Material.lib")
+    mats = {m.name.lower(): m for m in (lib.get(e.name) for e in lib.archive
+                                        if e.tag == materials.MATERIAL_TAG)}
+
+    # The ground contact (Control.dll:0x1001aaf5) takes the class byte, the
+    # float and the dword of the material under the unit.
+    check("Material.lib: the ground's speed factor G is 1.0 on every material",
+          mats and all(m.speed_factor == 1.0 for m in mats.values()),
+          f"the float at +6 on all {len(mats)} records; the ground contact copies it "
+          f"to +0x1a8, so on shipped data no ground changes a machine's top speed")
+    rated = {n: m.damage_rate for n, m in mats.items() if m.damage_rate}
+    late = sum(struct.unpack_from("<f", lib.archive.read_name(n.upper()),
+                                  materials.SURFACE_FIELDS_AT + 7)[0] in GROUND_RATES.values()
+               for n in GROUND_RATES)
+    check("Material.lib: a damage rate is set on the two liquid beds and two damaged bases",
+          rated == GROUND_RATES and late == 0,
+          f"{rated}: the dword at +10, read as a float, is hit points a second an agent "
+          f"of kind 4 loses on that ground (Control.dll:0x10012a66); control: one byte "
+          f"late, {late} of the four rates survive")
+    classes = Counter(m.surface for m in mats.values())
+    check("Material.lib: the class byte is a surface id 0..10, or unset",
+          set(classes) <= set(range(control.SURFACES)) | {materials.UNSET},
+          f"{dict(sorted(classes.items()))}; the ground contact runs block group "
+          f"+0x504[id] only for an id of 10 or less (0x1001ab3e)")
+    check("Material.lib: the liquid beds are surface 1, water 7, lava's surface unset",
+          (mats["water_bot"].surface, mats["env_lava_bot"].surface,
+           mats["water"].surface, mats["env_nlava"].surface)
+          == (1, 1, WATER_SURFACE, materials.UNSET),
+          "a bed is walked as surface 1 and costs 10000 hit points a second")
+
+    # Which surfaces the terrain hands out, face by face.
+    per_surface: Counter[int] = Counter()
+    beds_ok = water_ok = True
+    tut = None
+    lakes: dict[bool, Counter[str]] = {True: Counter(), False: Counter()}
+    tut_lakes = None
+    steep = faces0 = 0
+    words: list[Counter[int]] = [Counter() for _ in range(4)]
+    for d in gamedir.maps(game):
+        land = landmesh.load(d / "Land.msh")
+        counts: Counter[tuple[str, int]] = Counter()
+        for fi in range(land.face_count):
+            name = land.layer1_names[land.face_tex1[fi]].lower()
+            m = mats[name]
+            per_surface[m.surface] += 1
+            counts[(name, m.surface)] += 1
+            if land.face_flags[fi] & landmesh.FLAGS_LIQUID_BED_BIT:
+                beds_ok &= m.surface == 1 and m.damage_rate == materials.LIQUID_BED_RATE
+            elif land.face_surface[fi] & landmesh.SURFACE_WATER_BIT:
+                water_ok &= m.surface in (WATER_SURFACE, materials.UNSET) and not m.damage_rate
+        if d.name.lower() == "tut_1":
+            tut = counts
+        if not (d / "Land.map").exists():
+            continue
+        areals = arealmap.load(d / "Land.map")
+        for a in areals.areals:
+            for i, word in enumerate(a.flags):
+                words[i][word] += 1
+        if d.name.lower() == "tut_1":
+            tut_lakes = Counter(a.flags[2] for a in areals.areals)
+        for fi in land.lod_faces(0):
+            faces0 += 1
+            steep += land.face_normal[fi][2] <= landmesh.WALKABLE_NORMAL_Z
+            a, b, c = land.faces[fi]
+            x = sum(land.positions[v][0] for v in (a, b, c)) / 3
+            y = sum(land.positions[v][1] for v in (a, b, c)) / 3
+            ids = areals.areals_at(x, y)
+            if len(ids) != 1:
+                continue
+            kind = ("bed" if land.face_flags[fi] & landmesh.FLAGS_LIQUID_BED_BIT else
+                    "water" if land.face_surface[fi] & landmesh.SURFACE_WATER_BIT else
+                    "ground")
+            lakes[areals.areals[ids[0]].lake][kind] += 1
+    check("Land.msh: the terrain's faces are surfaces 0, 1, 2 and 7, or unset lava",
+          set(per_surface) <= {0, 1, 2, WATER_SURFACE, materials.UNSET}
+          and beds_ok and water_ok,
+          f"faces by surface, both levels of detail: {dict(sorted(per_surface.items()))}; "
+          f"every liquid-bed face is surface 1 at 10000 a second and every water "
+          f"face 7 (or unset lava) with no rate")
+    want = {("l02", 1): 5250, ("l00", 2): 2208, ("water_bot", 1): 478,
+            ("water", WATER_SURFACE): 354}
+    check("Tut_1: the ground is L02 (1) and L00 (2), with a lake bed and water",
+          tut == want, f"{dict(tut) if tut else None}, faces across both levels of detail")
+    check("Land.msh: some terrain faces are too steep to be ground",
+          faces0 and 0 < steep < faces0 // 10,
+          f"{steep} of {faces0} level-0 faces have a normal z of at most "
+          f"{landmesh.WALKABLE_NORMAL_Z} (cos 80 degrees), which the ground contact "
+          f"never takes as ground (Control.dll:0x1001a6fd)")
+    check("Land.map: an areal's flag words are 0/1, 0, a small value or a lake, and 0",
+          set(words[0]) <= {0, 1} and set(words[1]) == set(words[3]) == {0}
+          and all(w < 30 or w & arealmap.LAKE_BITS == arealmap.LAKE_BITS
+                  for w in words[2]),
+          f"word 0 {dict(sorted(words[0].items()))}; words 1 and 3 always 0; "
+          f"word 2 {dict(sorted(words[2].items()))}")
+    check("Land.map: an areal with all of 0xF0 in its third flag word is a lake",
+          lakes[True]["water"] and not lakes[True]["ground"]
+          and lakes[False]["water"] + lakes[False]["bed"] < 20,
+          f"level-0 faces whose centre lies in one areal: lake areals hold "
+          f"{dict(lakes[True])}; control: the rest hold {dict(lakes[False])}")
+    check("Tut_1: five lake areals among 378",
+          tut_lakes is not None and tut_lakes.get(240) == 5
+          and sum(tut_lakes.values()) == 378, f"third flag words {dict(tut_lakes or {})}")
+
+    # The 84-byte block is 21 section-5 group indices; 10..20 are per surface.
+    names = frozenset(p.name.lower() for p in all_archives(game))
+    total = valid = early_valid = set_blocks = 0
+    carriers = []
+    shape_ok = ops_ok = dust_ok = True
+    modes: dict[int, list[str]] = defaultdict(list)
+    for path in all_archives(game):
+        archive = NResArchive.open(path)
+        for entry in archive:
+            if not entry.tag.upper().startswith("CTL"):
+                continue
+            blob = archive.read(entry)
+            try:
+                c = control.parse(blob, names)
+            except control.ControlFormatError:
+                continue
+            label = f"{path.name.lower()}/{entry.name.lower()}"
+            modes[c.mode].append(label)
+            total += 1
+
+            def indexes(block, c=c):
+                return all(v == control.NO_GROUP or 0 <= v < c.counts[4] for v in block)
+
+            valid += indexes(c.groups)
+            if any(v != control.NO_GROUP for v in c.groups):
+                set_blocks += 1
+                at = control.section4_start(c.counts) + sum(p.size for p in c.components)
+                early_valid += indexes(struct.unpack_from(
+                    f"<{control.BLOCK_ENTRIES}i", blob, at - 2))
+            surf = c.surface_groups
+            if all(v == control.NO_GROUP for v in surf):
+                continue
+            carriers.append(label)
+            quiet, loud = surf[0], surf[1]
+            shape_ok &= (surf[2] == quiet != loud and all(v == loud for v in surf[3:]))
+            by_id = {r.values[7]: r.resource.member.lower()
+                     for r in c.references if r.resource.member}
+            for group, action in ((quiet, 11), (loud, 10)):
+                records = [r for r in c.references if r.group == group]
+                ops_ok &= bool(records) and all(
+                    r.values[3] == action and not r.resource.member for r in records)
+                dust_ok &= all(by_id.get(r.values[4], "").startswith("dust")
+                               for r in records)
+    check(".ctl: the 84-byte block is 21 section-5 group indices",
+          total and valid == total and early_valid == 0,
+          f"every entry is -1 or a group on {valid}/{total} controllers; control: read "
+          f"two bytes early, {early_valid} of the {set_blocks} blocks with an entry set "
+          f"still index groups.  The loader copies them to +0x4dc (Control.dll:0x100093ee)")
+    check(".ctl: nine chassis switch a group by the ground's surface",
+          len(carriers) == 9 and all(n.startswith("bases.rlb/r_") for n in carriers)
+          and shape_ok,
+          f"{', '.join(carriers)}: on each, surfaces 0 and 2 share one group and "
+          f"1 and 3..10 another")
+    check(".ctl: surfaces 0 and 2 run action 11 and the rest action 10, on the dust",
+          carriers and ops_ok and dust_ok,
+          "every record in the first group is action 11 and in the second action 10, "
+          "and every effect id they name is one of the chassis's dust_* emitters")
+
+    three = sorted(modes[3])
+    check(".ctl: mode 3, which gravity reaches, is four rounds and two hero targets",
+          three == sorted(["weapon.rlb/bf_b_01.ctl", "weapon.rlb/bf_f_01.ctl",
+                           "weapon.rlb/bf_l_01.ctl", "weapon.rlb/bf_m_01.ctl",
+                           "bases.rlb/r_h_01.ctl", "bases.rlb/r_h_03.ctl"])
+          and "bases.rlb/r_h_02.ctl" in modes[2],
+          f"{', '.join(three)}; the integrator adds the world's 10.0 along -z only for "
+          f"mode 3 (Control.dll:0x10015879).  Control: the hero, r_h_02, is mode 2")
+
+
 def check_sensors(check, game: Path) -> None:
     """.ctl: radars and detect shields, and where the assemblies put them."""
     names = frozenset(p.name.lower() for p in all_archives(game))
@@ -7759,7 +7940,7 @@ def run(game: Path) -> int:
         check_minimap_agreement, check_arealmap,
         check_grid, check_missions, check_objects, check_poses, check_lod, check_damage,
         check_effects, check_footprints, check_rsli, check_control, check_efficiency,
-        check_motion, check_sensors, check_combat, check_ownership,
+        check_motion, check_ground, check_sensors, check_combat, check_ownership,
         check_capture, check_repair, check_chassis, check_weapons,
         check_turrets, check_packages, check_builder,
         check_units, check_loading, check_search, check_construction,

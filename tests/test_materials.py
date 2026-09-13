@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import struct
+
 import pytest
 
 from openparkan import materials
@@ -38,3 +40,16 @@ def test_an_index_past_the_translate_table_has_no_mode():
     assert m.blend_index == 0xF
     assert m.blend_mode is None
     assert m.blend_function is None
+
+
+def test_the_header_carries_the_ground_a_unit_stands_on():
+    header = struct.pack("<2HBBfI", 0, 0, 1, materials.UNSET, 1.0, 0x461C4000)
+    m = materials.parse("WATER_BOT", header)
+    assert m.surface == 1
+    assert m.speed_factor == 1.0
+    assert m.damage_rate == materials.LIQUID_BED_RATE
+
+
+def test_a_zero_dword_is_no_damage():
+    m = materials.parse("L02", struct.pack("<2HBBfI", 0, 0, 1, materials.UNSET, 1.0, 0))
+    assert m.damage_rate == 0.0

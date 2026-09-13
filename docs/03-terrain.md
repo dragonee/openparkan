@@ -179,6 +179,14 @@ every map that has water also carries a `WATER_BOT` material on the ground
 beneath it, and a lake bed nobody can see would not be worth authoring. The
 exact figure is a renderer choice.
 
+**The layer-1 material is also the ground a unit feels.** Its `MAT0` class
+byte is the surface id and its dword a damage rate. `WATER_BOT` and
+`ENV_LAVA_BOT` are surface 1 at 10000 hit points a second, so every liquid-bed
+face (flag `0x2000`) is lethal ground; `WATER` is surface 7 and `ENV_NLAVA` is
+unset. A face whose normal z is not above 0.173648 — steeper than 80° — is
+never taken as ground. See
+[24-motion.md](24-motion.md#ground-and-collision--read-and-measured).
+
 ## Streams 1 and 2 are the map's own spatial index
 
 Two streams, and together they are a **flat grid with a per-square list** —

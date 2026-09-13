@@ -114,6 +114,10 @@ STREAM_SQUARES = 1
 #: ``ENV_LAVA_BOT``, and on no other face of any map.
 FLAGS_LIQUID_BED_BIT = 0x2000
 
+#: cos 80 degrees.  A face whose normal z is not above this is never taken as
+#: ground by a unit's ground contact (``Control.dll:0x1001a6fd``).
+WALKABLE_NORMAL_Z = 0.173648
+
 #: Bit 2 of the face's *flags* word marks a face that carries a second
 #: texture layer: it is set on exactly the 32450 faces whose layer-2 index is
 #: not 0xFF, and on no other, across all 33 maps.

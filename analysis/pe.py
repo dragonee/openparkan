@@ -100,10 +100,27 @@ class Binary:
         return out
 
     # --- code ------------------------------------------------------------
+    def instructions(self):
+        """Every instruction in ``.text``, restarting a byte past any it cannot decode.
+
+        One capstone pass stops at the first undecodable byte -- on
+        ``Control.dll`` under a quarter of the way in -- and a search over
+        what it returns misses the rest of the module without a word.
+        """
+        off = 0
+        while off < len(self.text_data):
+            moved = False
+            for ins in self.md.disasm(self.text_data[off:], self.text_va + off):
+                moved = True
+                off = ins.address - self.text_va + ins.size
+                yield ins
+            if not moved:
+                off += 1
+
     def xrefs_to(self, value: int) -> list[Ref]:
         """Instructions whose immediate or displacement equals ``value``."""
         out = []
-        for ins in self.md.disasm(self.text_data, self.text_va):
+        for ins in self.instructions():
             for op in ins.operands:
                 if op.type == capstone.x86.X86_OP_IMM and op.imm == value:
                     out.append(Ref(ins.address, f"{ins.mnemonic} {ins.op_str}"))

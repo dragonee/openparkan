@@ -55,7 +55,7 @@ record in `objects.rlb`.
 What is open is the **meaning** of the fields rather than their extent: the
 sixteen values of most component classes
 ([23-economy.md](23-economy.md)), section 1's conditions and transition
-table, section 2's record contents, the 84-byte block, triples 2 and 6, and
+table, section 2's record contents, triples 2 and 6, and
 the nine ints of a section-5 record. The motion fields — acceleration, top
 speed, turn rate, slope mode and cone, payload, a state's velocity and spin
 boxes and engine factor — are [read](24-motion.md).
@@ -98,16 +98,16 @@ outer ring is a clearance drawn around the building. See
 
 ## Unresolved terrain fields
 
-- `MAT0`'s byte 4 is **answered, and the answer is that nothing reads it**.
-  Eleven values plus an unset `0xFF` sort materials into groups tracking their
-  names (all six `TREE*` share 6), so it reads as a shader id — but the loader
-  copies it to the runtime material's `+0x154` and the only code that names
-  that field's address is an accessor, slot 9 of the material manager's
-  vtable, which no module calls. The directory's flags byte beside it is the
-  field a renderer wants, and the one distinction the class byte draws that a
-  renderer would act on — the ground's second track — is in the track count
-  already. See [07-objects.md](07-objects.md#the-class-byte-is-loaded-and-never-read)
-  and [../analysis/README.md](../analysis/README.md).
+- `MAT0`'s byte 4 is **answered: it is the ground's surface id**. Eleven
+  values plus an unset `0xFF` sort materials into groups tracking their names
+  (all six `TREE*` share 6), so it reads as a shader id. The loader copies it
+  to the runtime material's `+0x154`, and the accessor for that field, slot 9
+  of the material manager's vtable, is called by `Control.dll`'s ground
+  contact on the material under a unit. An earlier answer, that no module
+  calls it, searched only the modules that store a manager. The directory's
+  flags byte beside it is the field a renderer wants. See
+  [07-objects.md](07-objects.md#the-class-byte-is-the-grounds-surface-id)
+  and [24-motion.md](24-motion.md#ground-and-collision--read-and-measured).
 - Terrain face field 13 is **answered: it is the winged-edge link**. Three
   2-bit codes, one per edge, each naming the matching edge back in the
   neighbouring face, with 3 for no neighbour — right on **817150 of 817150**

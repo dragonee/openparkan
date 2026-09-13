@@ -36,7 +36,13 @@ threshold: 0xFF for the two bytes at version < 2, 1.0 for the float at < 3, 0
 for the dword at < 4.  Every shipped record declares **version 6**, so all
 four are present and the header is 14 bytes on every one.  The float is 1.0
 on all 905 and the dword 0 on 901 -- the other four hold a float, 1000.0 or
-9999.0.
+10000.0.
+
+The four fields are **the ground a unit stands on**: ``Control.dll``'s ground
+contact asks the material manager for them by the id of the face under the
+unit (``0x1001aaf5``).  The class byte is the surface id, the float a speed
+factor and the dword the hit points a second the ground takes -- 10000 on the
+two liquid beds.  See ``docs/24-motion.md``.
 
 The entry
 ---------
@@ -118,9 +124,9 @@ additive glows and the smoke.
 
 "Additive" is read off the data rather than out of the engine: the naming, the
 black diffuse, the absent specular and the population all say it, and
-``Ngi32.dll``'s phase table has the `ADD` mode to do it with.  What the
-record's own class byte (+4) means is still open; this field is the one a
-renderer needs.
+``Ngi32.dll``'s phase table has the `ADD` mode to do it with.  The record's
+own class byte (+4) is the surface id the simulation reads; this field is the
+one a renderer needs.
 
 The tracks
 ----------
@@ -214,10 +220,17 @@ MAX_TRACKS = 20
 
 #: The class byte's values below this are the ground: every one of the 43
 #: two-track materials sits here and no material above it has a second track.
-#: The engine loads the byte and never reads it back -- see
-#: ``analysis/vcalls.py`` -- so this is the one distinction it carries that a
-#: renderer could have acted on, and the track count already carries it.
+#: A renderer loses nothing by ignoring the byte -- the track count already
+#: carries this -- but the simulation reads it: it is the surface id of the
+#: ground a unit stands on (``Control.dll:0x1001aaf5``).
 GROUND_CLASSES = 5
+
+#: Where the class byte, byte 5, the float and the dword sit in a record.
+SURFACE_FIELDS_AT = 4
+
+#: Hit points a second the two liquid beds, ``WATER_BOT`` and
+#: ``ENV_LAVA_BOT``, take from a unit standing on them.
+LIQUID_BED_RATE = 10000.0
 
 #: A material with a second track is the ground's ``M`` twin.
 TWIN_TRACKS = 2
@@ -335,6 +348,15 @@ class Material:
     entries: list[MaterialEntry] = field(default_factory=list)
     #: The tracks themselves.
     tracks: list[Track] = field(default_factory=list)
+    #: +4, the class byte: the surface id a unit standing on this material
+    #: reads (``Control.dll:0x1001aaf5``), 0..10, or ``UNSET``.
+    surface: int = UNSET
+    #: +6: the ground speed factor G.  1.0 on all 905.
+    speed_factor: float = 1.0
+    #: +10: hit points a second an agent of kind 4 loses standing on it.  A
+    #: float the engine keeps as a dword: 10000 on the two liquid beds, 1000
+    #: on two damaged bases, 0 on the rest.
+    damage_rate: float = 0.0
 
     @property
     def blend_index(self) -> int:
@@ -481,6 +503,8 @@ def parse(name: str, data: bytes, blend: int = BLEND_OPAQUE) -> Material:
     """
     count, tracks = struct.unpack_from("<2H", data, 0)
     entries = parse_entries(data, count)
+    surface, _unused, speed = struct.unpack_from("<BBf", data, SURFACE_FIELDS_AT)
+    rate = struct.unpack_from("<f", data, SURFACE_FIELDS_AT + 6)[0]
     return Material(
         name,
         count,
@@ -488,6 +512,9 @@ def parse(name: str, data: bytes, blend: int = BLEND_OPAQUE) -> Material:
         blend,
         entries,
         parse_tracks(data, HEADER_SIZE + count * ENTRY_STRIDE, tracks)[0],
+        surface=surface,
+        speed_factor=speed,
+        damage_rate=rate,
     )
 
 

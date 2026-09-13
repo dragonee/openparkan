@@ -216,7 +216,7 @@ doc = "TODO.md"
 module = "World3D.dll"
 at = "0x10003ab0"
 kind = "function"
-name = "manager slot 9: returns &material[id].class, and nobody calls it"
+name = "manager slot 9: returns &material[id].class; Control.dll calls it for the ground's surface id (0x1001aaf5, 0x100114fd)"
 read = true
 doc = "docs/07-objects.md"
 
@@ -5159,4 +5159,197 @@ at = "0x100304a4"
 kind = "site"
 name = "search takt after a capture: a single-building search (+0x60) ends, a search by type replans"
 doc = "docs/31-packages.md"
+read = true
+
+# --- R2: ground contact, surface records, gravity (docs/24-motion.md "Ground and collision") ---
+[[entry]]
+module = "Control.dll"
+at = "0x1001a48e"
+kind = "site"
+name = "ground contact: a body sphere under 20 in radius is held to at most 7.5"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001a627"
+kind = "site"
+name = "ground contact: IWorld slot 9 FindWorldFace walks from the last ground point (+0x8c) to the sphere centre (+0x98), walk limit 0.173648"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001a6cc"
+kind = "site"
+name = "ground contact, no face kept: IWorld slot 10 query at the centre; a face counts if its normal z > 0.173648 and the hit is below the centre"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001a77d"
+kind = "site"
+name = "ground contact: a second IWorld slot 10 query (register 10) with the same cos-80 normal test"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001a848"
+kind = "site"
+name = "ground contact: the centre projected onto the face plane is the ground point (+0x70); the face normal becomes +0x7c; +0x8c keeps the point"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001a9f9"
+kind = "site"
+name = "ground contact: touching when |ground point - centre|^2 <= 2 r^2"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001aa10"
+kind = "site"
+name = "ground contact: a face with world flag 0x400 (liquid bed) is re-tested by IWorld slot 8 with class 0x200 and the gap against the radius"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001aace"
+kind = "site"
+name = "ground contact: surface id defaults to 10 when the contact object answers no QI 0xd"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001aaf5"
+kind = "site"
+name = "ground contact: material manager slot 9 (&material[id].class) on the face's material id (world face +0x74): the caller docs/07 did not find"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001ab3e"
+kind = "site"
+name = "on a surface change: runs block group +0x504[class] (class <= 10, else none) through the action interpreter"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001abcc"
+kind = "site"
+name = "ground contact: repeats the face search for each of the current state's counts[1] contact points (+0x19c, records at +0xc4)"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10012a66"
+kind = "site"
+name = "ground damage: an agent of kind 4 loses dt x rate (+0x1a4) through the node update"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10015879"
+kind = "site"
+name = "mode 3: the integrator adds the world's gravity (IWorld slot 4) along -z, turned into the machine's frame"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x100093ee"
+kind = "site"
+name = "loader: the 84-byte .ctl block is 21 section-5 group indices, rebased, copied to +0x4dc (+0x504 = entries 10-20)"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10009408"
+kind = "site"
+name = "loader: block entry 0 is the group run once at load"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10002fb5"
+kind = "site"
+name = "action 11: the controller's effect interface slot 0x30 on an effect id (action 10 uses slot 0x2c with a mode)"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10024c1a"
+kind = "site"
+name = "CWorld constructor: gravity at +0xc = 10.0"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10026ae0"
+kind = "function"
+name = "CWorld slot 4: returns &gravity (+0xc)"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10026b00"
+kind = "function"
+name = "CWorld slot 5: sets gravity (+0xc)"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1009a630"
+kind = "datum"
+name = "CWorld vtable, 13 slots: 6 GetWorldFace, 8 ray query, 9 FindWorldFace, 11 PlaceObjectOnWorldFace"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001a6fd"
+kind = "site"
+name = "ground contact: a face is ground only if its normal z > 0.173648 (cos 80 degrees)"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x100114fd"
+kind = "site"
+name = "node damage stage: QI 0xd on a face's owner, material manager slot 9 on the face's material id -- the surface id, 10 without a manager"
+doc = "docs/07-objects.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1001a25a"
+kind = "site"
+name = "landscape QueryInterface 0xd: hands out the material manager field +0x7be0"
+doc = "docs/07-objects.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x1000317f"
+kind = "site"
+name = "agent collision kind from objects.rlb tag: BTLU 4, BULL 9, WPNS 2, STAT 10; a child takes its parent's"
+doc = "docs/24-motion.md"
 read = true
