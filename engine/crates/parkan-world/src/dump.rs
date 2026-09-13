@@ -9,7 +9,7 @@ use anyhow::{Context, Result};
 use parkan_formats::mission::{self, Value as PropertyValue};
 use parkan_formats::nres::Archive;
 use parkan_formats::pose::Pose;
-use parkan_formats::{control, controls, cpt, exp, landmesh, materials, mesh, ndp, texm, wea};
+use parkan_formats::{control, controls, cpt, exp, fxid, landmesh, materials, mesh, ndp, texm, wea};
 
 use crate::assembly;
 use serde_json::{Value, json};
@@ -471,6 +471,38 @@ pub fn explosions(path: &Path, names: &[String]) -> Result<Value> {
     Ok(json!({ "kind": "exp", "members": out }))
 }
 
+/// The `FXID` members of an archive: header fields, and each emitter's live floats.
+pub fn fx_effects(path: &Path, names: &[String]) -> Result<Value> {
+    let archive = Archive::open(path)?;
+    let mut out = Vec::new();
+    for member in members(&archive, fxid::FXID_TAG, names) {
+        let e = fxid::parse(archive.read_name(&member)?, &member)?;
+        let h = &e.header;
+        out.push(json!({
+            "name": member,
+            "header": {
+                "count": h.count,
+                "mode": h.mode,
+                "duration": number(h.duration),
+                "jitter": number(h.jitter),
+                "flags": h.flags,
+                "gate": h.gate,
+                "offset": vector(&h.offset),
+                "point": vector(&h.point),
+                "scale": vector(&h.scale),
+            },
+            "emitters": e.emitters.iter().map(|m| json!({
+                "kind": m.kind,
+                "word": m.word,
+                "resource": [m.resource.library, m.resource.member],
+                "window": m.window().map_or(Value::Null, |(lo, hi)| json!([number(lo), number(hi)])),
+                "live": m.live_floats().iter().map(|&(at, v)| json!([at, number(v)])).collect::<Vec<_>>(),
+            })).collect::<Vec<_>>(),
+        }));
+    }
+    Ok(json!({ "kind": "fxid", "members": out }))
+}
+
 /// A `.tbl`: every row, and the numbers the engine resolves its names to.
 pub fn input_table(path: &Path) -> Result<Value> {
     let rows = controls::load(path)?;
@@ -512,8 +544,9 @@ pub fn dump(kind: &str, path: &Path, names: &[String]) -> Result<Value> {
         "cpt" => control_points(path, names),
         "ndp" => damage_tables(path, names),
         "exp" => explosions(path, names),
+        "fxid" => fx_effects(path, names),
         other => anyhow::bail!(
-            "unknown kind {other:?}; expected nres, mission, texm, materials, landmesh, mesh, assembly, control, controls, cpt, ndp or exp"
+            "unknown kind {other:?}; expected nres, mission, texm, materials, landmesh, mesh, assembly, control, controls, cpt, ndp, exp or fxid"
         ),
     }
 }

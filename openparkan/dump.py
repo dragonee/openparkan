@@ -388,6 +388,33 @@ def explosions(path: Path, names: list[str] | None = None) -> dict:
     return {"kind": "exp", "members": out}
 
 
+def fx_effects(path: Path, names: list[str] | None = None) -> dict:
+    """The ``FXID`` members of an archive: header fields, and each emitter's live floats."""
+    import struct
+
+    archive = NResArchive.open(path)
+    members = names or [e.name for e in archive if e.tag == "FXID"]
+    out = []
+    for member in members:
+        e = effects.parse_effect(archive.read_name(member), member)
+        h = e.header
+        out.append({
+            "name": member,
+            "header": {"count": struct.unpack_from("<i", h, 0)[0], "mode": e.mode,
+                       "duration": number(e.duration),
+                       "jitter": number(struct.unpack_from("<f", h, 12)[0]),
+                       "flags": e.flags, "gate": e.gate,
+                       "offset": vector(struct.unpack_from("<3f", h, 24)),
+                       "point": vector(struct.unpack_from("<3f", h, 36)),
+                       "scale": vector(e.scale)},
+            "emitters": [{"kind": m.kind, "word": m.word, "resource": _ref(m.resource),
+                          "window": None if m.window is None else vector(m.window),
+                          "live": [[at, number(v)] for at, v in m.live_floats().items()]}
+                         for m in e.emitters],
+        })
+    return {"kind": "fxid", "members": out}
+
+
 def input_table(path: Path, names: list[str] | None = None) -> dict:
     """A ``.tbl``: every row, and the numbers the engine resolves its names to."""
     return {
@@ -415,4 +442,4 @@ def _mission(path: Path, names: list[str] | None = None) -> dict:
 KINDS = {"nres": _nres, "mission": _mission, "texm": texm, "materials": material_library,
          "landmesh": land_mesh, "mesh": object_mesh, "assembly": mission_assembly,
          "control": controllers, "controls": input_table, "cpt": control_points,
-         "ndp": damage_tables, "exp": explosions}
+         "ndp": damage_tables, "exp": explosions, "fxid": fx_effects}

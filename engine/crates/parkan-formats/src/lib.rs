@@ -9,6 +9,7 @@ pub mod controls;
 pub mod cpt;
 pub mod cursor;
 pub mod exp;
+pub mod fxid;
 pub mod gamedir;
 pub mod landmesh;
 pub mod materials;

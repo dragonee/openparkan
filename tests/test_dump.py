@@ -64,3 +64,18 @@ def test_damage_tables_and_explosions_dump_every_member(tmp_path, nres_archive):
     assert table["nodes"][0][1] == 500.0 and table["nodes"][0][3] == ["weapon.rlb", "bb_h_01.exp"]
     (e,) = dump.explosions(path)["members"]
     assert (e["kind"], e["damage"], e["radius"]) == (3, 170.0, 7.0)
+
+
+def test_effects_dump_their_header_and_each_emitters_live_floats(tmp_path, nres_archive):
+    import struct
+
+    header = struct.pack("<iIfff", 1, 1, 1.5, 0.0, 0.0) + bytes(40)
+    sprite = bytearray(200)
+    struct.pack_into("<I", sprite, 0, 3)
+    struct.pack_into("<2f", sprite, 32, 0.01, 0.5)
+    path = tmp_path / "effects.rlb"
+    path.write_bytes(nres_archive([("FXID", "glow", header + bytes(sprite))]))
+    (e,) = dump.fx_effects(path)["members"]
+    assert e["header"]["duration"] == 1.5 and e["emitters"][0]["kind"] == 3
+    assert e["emitters"][0]["window"][1] == 0.5
+    assert [32, e["emitters"][0]["window"][0]] in e["emitters"][0]["live"]
