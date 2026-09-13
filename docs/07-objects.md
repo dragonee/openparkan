@@ -1001,6 +1001,10 @@ Both counts come from the directory entry: nodes from the element-count field
 at +4, links from the field at +8. `size = 20*nodes + 40*links` holds on all
 29. Every link joins two real nodes (1096/1096).
 
+A node's first `uint32` is a **flag word**: some bits make the vertex a place —
+a charging dock, the control pod a capturer walks to, a mine's loading place.
+See [27-ownership.md](27-ownership.md).
+
 ## CTPT — control points
 
 Every record with geometry has a `.cpt` slot. The format is **two parallel

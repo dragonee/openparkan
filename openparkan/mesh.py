@@ -820,13 +820,33 @@ def parse_control_points(blob: bytes, source: str = "<cpt>") -> list[ControlPoin
     return out
 
 
+#: Hall-way vertex flags that make a vertex a *place*.  ``Behavior.dll``
+#: walks a building's places every tick (``0x10018ac0``).
+#: The control pod, where a capturer goes (``0x1003094c``).
+PLACE_POD = 0x40
+#: A dock: charges, repairs and rearms whoever of the clan or its allies stands
+#: in it (``0x10019251``).
+PLACE_DOCK = 0x20 | 0x200 | 0x400
+#: A mine's loading place and a storage's unloading place.
+PLACE_MINE = 0x8
+PLACE_STORE = 0x10
+#: A ground-level place, 10 wide and 12 high instead of 5 and 3
+#: (``0x100184f0``) -- the only kind a unit sent to reload will pick.
+PLACE_GROUND = 0x10000000
+
+
 @dataclass
 class PathNode:
     """A waypoint inside a building."""
 
     position: tuple[float, float, float]
+    #: The vertex's flags: ``PLACE_*`` make it somewhere a unit stands.
     a: int
     b: int
+
+    @property
+    def flags(self) -> int:
+        return self.a
 
 
 @dataclass

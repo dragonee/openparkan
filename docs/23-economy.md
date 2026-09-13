@@ -615,7 +615,5 @@ construction slows research.
 
 ## Not established
 
-- What makes a building a charging dock for units, and which task sends a bot
-  there on its own.
 - Whether a clan's AI re-orders a build that was refused for want of a mind
   (`ai.dll:0x10007fd0` is where to look).

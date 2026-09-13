@@ -211,6 +211,7 @@ of fields carried through the readers without being understood.
 - [24-motion.md](docs/24-motion.md) — how a machine moves: states, speed limits, running gear, load, and what moving costs
 - [25-sensors.md](docs/25-sensors.md) — radar, the detection shield and camouflage, and what the AI sees
 - [26-damage.md](docs/26-damage.md) — hits, explosions, shields and deflectors, armour, hit points and repair
+- [27-ownership.md](docs/27-ownership.md) — charging docks, control pods and capture, and the clan type
 
 ## Layout
 

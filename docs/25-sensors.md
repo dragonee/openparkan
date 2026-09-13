@@ -203,8 +203,10 @@ Every behaviour owns a **radar module** (`Behavior.dll:0x10023120`, at
   goes into two lists by clan: **hostile** (`0x1000d460`) and **friendly**
   (`0x1000d4f0`). A clan is hostile when the relation table says 0 and friendly
   when it says 2; a clan of kind 3 is neither to anyone, and a machine of a
-  kind-0 clan takes every other clan as hostile. Which clans have which kind
-  is *unknown* here.
+  kind-0 clan takes every other clan as hostile. Kinds 0 and 3 line up with
+  the mission file's nature and neutral clans
+  ([27-ownership.md](27-ownership.md#the-clan-word-is-a-type--measured-and-read)),
+  which is a *guess* that the two are the same number.
 - **Every 2.0–4.9 s it reports its position and radar range** to its clan's
   `IArealMap` (`0x1002355f`) — *guess*: marking the area the clan can see.
 
@@ -235,8 +237,7 @@ kind was not read.
 - Which of a robot's two radar components — the turret's slot (0.5, 0.5, 0.5,
   500 or 800) or the fitted part (0.05, 0.7, 25, 250–700) — the control system
   ends up using.
-- The clan kinds behind SuperAI slot 10, and how the mission file's 0/1
-  relation words become the runtime's 0 and 2.
+- How the mission file's 0/1 relation words become the runtime's 0 and 2.
 - What `IArealMap` does with the radar report, and what the player's map and
   radar display show — `iron3d.dll`'s drawing was not read.
 - Whether anything switches camouflage on for AI machines: no write of states

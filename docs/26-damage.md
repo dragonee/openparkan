@@ -215,7 +215,8 @@ skips destroyed parts; a kind-3 object's restores them too (`0x10022b00`,
 | `o_rps_f` | 80–200 | 0.0003–0.0006 |
 | buildings (26) | 100 | 0.0002 |
 
-**A docked unit** — one inside a building that services it — gains **10% of
+**A docked unit** — one standing in a building's dock
+([27-ownership.md](27-ownership.md)) — gains **10% of
 its full hit points a second, destroyed parts included**, 10% of its shield,
 10% of its battery (`Behavior.dll:0x10018100`, `0x10019372`), and each gun
 10% of its ammunition, at least one round (`0x100181e0`). `Behavior.dll`

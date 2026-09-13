@@ -52,7 +52,7 @@ trailer
 string   name                         "Player", "Clan I", "Plr", "Natur"
 int32    always -1
 float32  base x, base y
-uint32   clan index, 1-based
+uint32   clan type: 0 nature, 1 player, 2 enemy, 3 neutral
 string   AI script                    MISSIONS\SCRIPTS\scr_pl_1
 uint32   zone count
 zones    { uint32 kind; float32[3] centre; float32 inner; float32 outer }
@@ -78,7 +78,7 @@ instead, 18 clans exceed it. The two top clans of `Multi.01` to `Multi.04` get
 8 each.
 
 This word was open until the construction code was read. The earlier note here
-measured what it is *not* — not the clan index, zone count or ally count, and
+measured what it is *not* — not the clan's type word, zone count or ally count, and
 equal to the clan count only by the chance of the common value 5 — and guessed
 a clan strength or AI level. It is a strength of a kind: a cap on the army.
 
@@ -165,8 +165,9 @@ straight out of the mission file: `Invulnerability`, `Life state`, `LogicalID`,
 technologies, and the research time — see
 [23-economy.md](23-economy.md#the-four-grants-a-mission-gives-a-building--read-and-measured).
 
-**`ClanID` is a 0-based index into the clan list** — not the clan's own `index`
-field, which is 1-based. All 463 owned objects have a ClanID in range, and on
+**`ClanID` is a 0-based index into the clan list** — not the clan's type word,
+which this page once read as a 1-based index
+([27-ownership.md](27-ownership.md#the-clan-word-is-a-type--measured-and-read)). All 463 owned objects have a ClanID in range, and on
 skirmish and multiplayer maps 123 of 125 objects sit nearest the base of the
 clan they are assigned to.
 

@@ -185,9 +185,18 @@ class Zone:
     kind: int = 1
 
 
+#: A clan's type, the word ``Clan.type`` reads.
+CLAN_NATURE = 0
+CLAN_PLAYER = 1
+CLAN_ENEMY = 2
+CLAN_NEUTRAL = 3
+
+
 @dataclass
 class Clan:
     name: str
+    #: The clan's type -- ``CLAN_NATURE``, ``CLAN_PLAYER``, ``CLAN_ENEMY`` or
+    #: ``CLAN_NEUTRAL``.  Read here once as a 1-based index; see ``type``.
     index: int
     base: tuple[float, float]
     ai_script: str
@@ -210,6 +219,19 @@ class Clan:
         is destroyed or captured.  No placed clan exceeds it.
         """
         return self.unknown[1]
+
+    @property
+    def type(self) -> int:
+        """0 nature, 1 player, 2 enemy, 3 neutral.
+
+        The word after the base position.  It lines up with the clans' names
+        -- every animal clan is 0, every clan named neutral 3 but one -- and
+        matches the clan's 1-based position on only 61 of the 101.  The engine
+        treats 3 as neutral and 0 as nature: neither's bots send themselves to
+        a dock (``Behavior.dll:0x10017dbd``), and a radar drops both from its
+        contact lists.
+        """
+        return self.index
 
 
 @dataclass

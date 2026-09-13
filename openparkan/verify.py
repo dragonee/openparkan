@@ -1359,7 +1359,7 @@ def check_missions(check, game: Path) -> None:
           f"{good}/{good + bad} -- UNITS/*.dat on disk, scenery as STAT in objects.rlb")
 
     # ClanID indexes the clan list positionally; it is not the clan's own
-    # `index` field, which starts at 1 and repeats across campaign missions.
+    # type word, whose 1s and 2s repeat across campaign missions.
     owned = sum(1 for m in parsed for o in m.objects if o.clan_id is not None)
     in_range = sum(
         1 for m in parsed for o in m.objects
@@ -4627,6 +4627,150 @@ def check_combat(check, game: Path) -> None:
           f"node 0 goes, where a unit dies")
 
 
+#: The largest size class that may capture a building (``Behavior.dll:0x100301a9``).
+CAPTURE_SIZE = 2
+
+
+def _hall_ways(game: Path) -> dict[str, objmesh.PathGraph | None]:
+    fortif = NResArchive.open(game / "fortif.rlb")
+    out = {}
+    for e in fortif:
+        if e.tag == "MESH":
+            out[e.name.lower()] = objmesh.read_path_graph(NResArchive(fortif.read(e), e.name))
+    return out
+
+
+def _building_places(game: Path) -> dict[str, tuple[str, list[int]]]:
+    """Building root record -> (folder, hall-way flag words), via its ``.bas``."""
+    lib = objects.ObjectLibrary(game / "objects.rlb")
+    graphs = _hall_ways(game)
+    out: dict[str, tuple[str, list[int]]] = {}
+    for f in sorted(game.glob("UNITS/BUILDS/**/*.dat")):
+        root = objects.load_unit(f).components[0].ref.member.lower()
+        rec = lib.get(root)
+        bas = rec.footprint if rec else None
+        if bas is None:
+            continue
+        graph = graphs.get(bas.member.rsplit(".", 1)[0].lower() + ".msh")
+        if graph is not None:
+            out[root] = (f.parent.name.upper(), [n.flags for n in graph.nodes])
+    return out
+
+
+def check_ownership(check, game: Path) -> None:
+    """Charging docks and control pods in the hall-way graph; clan types."""
+    places = _building_places(game)
+    by_folder: dict[str, set[str]] = defaultdict(set)
+    pods: dict[str, int] = {}
+    inside: dict[str, int] = {}
+    ground: dict[str, int] = {}
+    for root, (folder, flags) in places.items():
+        by_folder[folder].add(root)
+        pods[root] = sum(1 for a in flags if a & objmesh.PLACE_POD)
+        docks = [a for a in flags if a & objmesh.PLACE_DOCK]
+        inside[root] = sum(1 for a in docks if not a & objmesh.PLACE_GROUND)
+        ground[root] = sum(1 for a in docks if a & objmesh.PLACE_GROUND)
+
+    def folders(table: dict[str, int]) -> set[str]:
+        return {places[r][0] for r, n in table.items() if n}
+
+    capturable = {"BUNKER", "GENER", "HANGAR", "INSTITUT", "MINE", "PLANT",
+                  "STORAGE", "TELEMAIN", "TOWER"}
+    one_pod = all(pods[r] == 1 for f in capturable for r in by_folder[f])
+    check("fortif.rlb: every capturable building has one pod",
+          one_pod and folders(pods) == capturable,
+          f"{sum(pods.values())} pods on {len([r for r in pods if pods[r]])} models; "
+          f"none on {', '.join(sorted(set(by_folder) - capturable))}")
+
+    pod_ground = sum(1 for _, flags in places.values()
+                     for a in flags if a & objmesh.PLACE_POD and a & objmesh.PLACE_GROUND)
+    check("fortif.rlb: a pod is always inside", pod_ground == 0,
+          f"{sum(pods.values())} pods, {pod_ground} ground-level")
+
+    dock_folders = folders(inside) | folders(ground)
+    check("fortif.rlb: docks are in bunkers, generators, hangars, plants, towers",
+          dock_folders == {"BUNKER", "GENER", "HANGAR", "PLANT", "TOWER", "RUIN"},
+          f"docks in {sorted(dock_folders)}; control: {sum(1 for r in places if pods[r])} "
+          f"pod models, {len([r for r in places if inside[r] or ground[r]])} dock models")
+
+    ground_models = {r: n for r, n in ground.items() if n}
+    check("fortif.rlb: ground-level docks: generator 2, hangar 1, plant 1 each",
+          ground_models == {"fr_l_gener": 2, "fr_l_angar": 1,
+                            "fr_b_plant": 1, "fr_m_plant": 1, "fr_l_plant": 1},
+          ", ".join(f"{r} {n}" for r, n in sorted(ground_models.items())))
+
+    inside_models = sorted(r for r, n in inside.items() if n)
+    check("fortif.rlb: an indoor dock in bunkers, towers, plants, generator, big ruin",
+          all(inside[r] == 1 for r in inside_models)
+          and {places[r][0] for r in inside_models}
+          == {"BUNKER", "TOWER", "PLANT", "GENER", "RUIN"},
+          f"{len(inside_models)} models, one each; ruin: "
+          f"{[r for r in inside_models if places[r][0] == 'RUIN']}")
+
+    # The Last Gate's lone charger: the player's large ruin, placed nowhere else.
+    loaded = [mission.load(p) for p in sorted(game.glob("MISSIONS/**/data.tma"))]
+    last = next(m for m in loaded if m.title.startswith("The Last Gate"))
+    players = {i for i, c in enumerate(last.clans) if c.type == mission.CLAN_PLAYER}
+    player = [o for o in last.objects
+              if o.clan_id in players and o.kind == mission.KIND_BUILDING]
+    ruin = [o for o in player if "b_ruin" in o.path.lower()]
+    placed = sorted({m.title for m in loaded for o in m.objects if "b_ruin" in o.path.lower()})
+    check("fortif.rlb: The Last Gate's player owns a dock with no pod",
+          len(player) == 1 and len(ruin) == 1 and len(placed) == 1
+          and inside["fr_b_ruin"] == 1 and pods["fr_b_ruin"] == 0,
+          f"player buildings {[o.path.split(chr(92))[-1] for o in player]}; the "
+          f"large ruin is placed only in {placed}")
+
+    # A capturer is tiny or small: every hero chassis is size letter h.
+    sizes: dict[str, Counter[int]] = defaultdict(Counter)
+    for f in sorted(game.glob("UNITS/UNITS/**/*.dat")):
+        root = objects.load_unit(f).components[0].ref.member
+        if root.lower().startswith("r_"):
+            sizes[f.parent.name.upper()][profiles.CHASSIS_SIZE[root[2].lower()]] += 1
+    hero_ok = set(sizes["HERO"]) <= set(range(1, CAPTURE_SIZE + 1))
+    battle_big = sum(n for s, n in sizes["BATTLE"].items() if s > CAPTURE_SIZE)
+    check("UNITS: every hero may capture", hero_ok and battle_big > 0,
+          f"hero sizes {dict(sizes['HERO'])}; control: {battle_big} of "
+          f"{sum(sizes['BATTLE'].values())} battle chassis are too big")
+
+    # The clan word is a type, not an index.
+    kinds: Counter[int] = Counter()
+    named = defaultdict(Counter)
+    at_position = total = 0
+    neutral_units = neutral_buildings = 0
+    for p in sorted(game.glob("MISSIONS/**/data.tma")):
+        m = mission.load(p)
+        for pos, clan in enumerate(m.clans):
+            total += 1
+            kinds[clan.type] += 1
+            at_position += clan.type == pos + 1
+            name = clan.name.lower()
+            group = ("neutral" if re.match(r"^n(eu)?tr|^clan iiin", name)
+                     else "nature" if re.match(r"^(an|nat|nar|bird)", name)
+                     else "other")
+            named[group][clan.type] += 1
+            if clan.type == mission.CLAN_NEUTRAL:
+                for o in m.objects_of_clan(pos):
+                    if o.kind == mission.KIND_UNIT:
+                        neutral_units += 1
+                    elif o.kind == mission.KIND_BUILDING:
+                        neutral_buildings += 1
+    check("data.tma: the clan word is a type 0..3",
+          set(kinds) == {0, 1, 2, 3} and at_position < total,
+          f"{dict(sorted(kinds.items()))} over {total} clans; control: equals the "
+          f"1-based position on {at_position}")
+    check("data.tma: neutral-named clans are type 3, nature type 0",
+          set(named["nature"]) == {mission.CLAN_NATURE}
+          and named["neutral"][mission.CLAN_NEUTRAL] == sum(named["neutral"].values()) - 1
+          and named["neutral"][mission.CLAN_ENEMY] == 1
+          and mission.CLAN_NEUTRAL not in named["other"],
+          f"neutral names {dict(named['neutral'])}, nature {dict(named['nature'])}, "
+          f"others {dict(named['other'])}")
+    check("data.tma: neutral clans own units and buildings",
+          neutral_units > 0 and neutral_buildings > 0,
+          f"{neutral_units} units, {neutral_buildings} buildings")
+
+
 def check_controls(check, game: Path) -> None:
     """The input layer: ScanCode.dsc, Command.dsc, the .man bindings, the .tbl tables."""
     keys = controls.scancodes(game)
@@ -6028,7 +6172,7 @@ def run(game: Path) -> int:
         check_minimap_agreement, check_arealmap,
         check_grid, check_missions, check_objects, check_poses, check_lod, check_damage,
         check_effects, check_footprints, check_rsli, check_control, check_efficiency,
-        check_motion, check_sensors, check_combat,
+        check_motion, check_sensors, check_combat, check_ownership,
         check_controls,
         check_behaviour, check_research, check_descriptions, check_saves,
         check_vocabulary, check_resources, check_briefing, check_settings,

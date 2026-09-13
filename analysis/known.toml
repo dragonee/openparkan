@@ -2912,3 +2912,213 @@ doc = "docs/26-damage.md"
 read = true
 
 # --- renames of existing entries --------------------------------------------
+
+# --- docks, control pods, capture and clan types, ../docs/27-ownership.md ---
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10018ac0"
+kind = "function"
+name = "building place tick: teleport, recharge/rearm docks (0x20|0x600), mine and storage places"
+doc = "docs/27-ownership.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10019251"
+kind = "site"
+name = "place flags & 0x20 or & 0x600: the place is a dock"
+doc = "docs/27-ownership.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10018310"
+kind = "function"
+name = "place occupancy refresh: objects in the place box"
+doc = "docs/27-ownership.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x100184f0"
+kind = "function"
+name = "place box: ground-level (0x10000000) 10 x 12, indoor 5 x 3"
+doc = "docs/27-ownership.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10018530"
+kind = "function"
+name = "place debug draw: blue ore places, red docks, green pod"
+doc = "docs/27-ownership.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10001270"
+kind = "function"
+name = "MakeInsideDest: pod needs size <= 2; other places must be ground-level"
+doc = "docs/27-ownership.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10001ab0"
+kind = "function"
+name = "go inside a building to a place of a flag"
+doc = "docs/27-ownership.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10059be0"
+kind = "datum"
+name = "M_Task_Reload vtable (orders 8 reload, 9 repair)"
+doc = "docs/27-ownership.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1002ea87"
+kind = "site"
+name = "Reload task: go to a place with any of 0x620"
+doc = "docs/27-ownership.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10017d50"
+kind = "function"
+name = "unit self-order to reload: DeterminMode 0, clan type not 0/3, and a need"
+doc = "docs/27-ownership.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1001cbe0"
+kind = "function"
+name = "charge need: device value 1 < 0.5"
+doc = "docs/27-ownership.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1001ca40"
+kind = "function"
+name = "ammunition need: over 80% of guns below 20%"
+doc = "docs/27-ownership.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10034510"
+kind = "function"
+name = "task from a self-order reason (3 -> M_Task_Reload)"
+doc = "docs/27-ownership.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10030110"
+kind = "function"
+name = "Go/Capture task SetTarget: foreign building, size <= 2, not a main teleport"
+doc = "docs/27-ownership.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x100306f0"
+kind = "function"
+name = "Go/Capture task StartTask: walk to the building's pod (0x40)"
+doc = "docs/27-ownership.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10030300"
+kind = "function"
+name = "Go/Capture task takt: 'Building [..] captured' once it is ours"
+doc = "docs/27-ownership.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10008e40"
+kind = "function"
+name = "MBehaviour::Capture(new clan): re-clan, move a building between distributors"
+doc = "docs/27-ownership.md"
+read = true
+
+[[entry]]
+module = "ArealMap.dll"
+at = "0x1000a7e0"
+kind = "function"
+name = "MHallWay::GetBestVertexOfType(from, any mask, required mask)"
+doc = "docs/27-ownership.md"
+read = true
+
+[[entry]]
+module = "ArealMap.dll"
+at = "0x10020a10"
+kind = "function"
+name = "SystemArealMap::GetClanType, 3 when out of range"
+doc = "docs/27-ownership.md"
+read = true
+
+[[entry]]
+module = "World3D.dll"
+at = "0x10004f50"
+kind = "function"
+name = "IQueue::ChangeOwner: broadcasts GMSG_CHANGE_OBJECT_OWNER (0x80000007)"
+doc = "docs/27-ownership.md"
+read = true
+
+[[entry]]
+module = "World3D.dll"
+at = "0x1000672b"
+kind = "site"
+name = "GMSG_CHANGE_OBJECT_OWNER handler: IBehaviour::Capture"
+doc = "docs/27-ownership.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10061145"
+kind = "site"
+name = "captured callback (entry 0x10061050, pushed at 0x10032e99): IBehaviour::Capture(capturer clan)"
+doc = "docs/27-ownership.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10061170"
+kind = "site"
+name = "captured callback: IQueue::ChangeOwner, broadcasting the new owner"
+doc = "docs/27-ownership.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10032e99"
+kind = "site"
+name = "registers the captured callback on a building's interface 0x17"
+doc = "docs/27-ownership.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100a48a0"
+kind = "function"
+name = "owner-change voice: VOICE_NBUILD/EBUILD/BUILD_CAPTURE"
+doc = "docs/27-ownership.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100394a0"
+kind = "function"
+name = "clan record type == 3 (neutral)"
+doc = "docs/27-ownership.md"
+read = true
