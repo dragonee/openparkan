@@ -67,37 +67,44 @@ and a transport's 1000; the missions and the engine agree with each other and
 not with the profiles. A builder carrying ore is what `Building_Cost` is paid
 from — a *guess*, since the construction task is unread.
 
-## How ore reaches a consumer — *open*, and a correction
+## How ore reaches a consumer — *read*, after two corrections
 
-An earlier version of this section said **a mine feeds nobody** until a
-transport carries its ore to a storage. **That was wrong, or at least not
-established, and the game says so itself.** The tutorial text in
-`TextRes.dll`:
+Every ore holder, **a mine as much as a storage, feeds consumers directly**.
+The distribution step (below) draws from each at **its efficiency times its
+`Transfer_Ore_OffBoard`**, per second, capped by what it holds — *read*, at
+`Behavior.dll:0x1001a8c6`. That off-board rate is **1 on a mine and 1 on a
+storage** (*measured*). So a mine on its own does supply the factory, slowly.
 
-> string 103 — "if you don't have a Warehouse, your Factory's production, for
-> instance, will be limited by the Mine's parameters"
->
-> string 101 — "the Mine works kinda slow, and if your base doesn't have a
-> Warehouse, you'll always have to wait to accumulate enough raw materials"
+The game says so in its tutorial, `TextRes.dll` string 101 — "the Mine works
+kinda slow, and if your base doesn't have a Warehouse, you'll always have to
+wait to accumulate enough raw materials" — and string 103: without a
+warehouse "your Factory's production … will be limited by the Mine's
+parameters". What a warehouse adds is a second outlet and a 4000 buffer that a
+transport fills from the mine at 100 a second, so the mine never sits full at
+500 and idle.
 
-So a mine does supply consumers directly, slowly; a warehouse stores ore and
-"teletransports" it to them; and a transport ships ore from mine to warehouse
-(string 104).
+**The id table**, read off `MBehaviour`'s variable getter
+(`Behavior.dll:0x1000a490`, vtable slot 26, a switch):
 
-What the claim rested on, and which link is suspect:
+| id | what it returns |
+|---|---|
+| `0x1001` | `Transfer_Ore_OnBoard` |
+| `0x1002` | efficiency × `Transfer_Ore_OffBoard`, computed on each call |
+| `0x1004` | `Transfer_Power_In` |
+| `0x1005` | `Transfer_Power_Out` |
 
-- The distribution step draws ore from a holder at the variable it reads as
-  id `0x1002`, capped by the holder's contents — *read*, at
-  `Behavior.dll:0x1001a8c6`.
-- Taking ids as `0x1000 +` position among a profile's floats, `0x1002` is
-  `Transfer_Ore_OnBoard`, which is **0 in a mine's profile and 20 in a
-  storage's** — *measured*.
-- But a placed mine does not use its profile's capacity: missions give every
-  mine 500, the engine's `Mine_MaxOre`, where the profile says 1000. The same is
-  probably true of its rate, which would come from `Mine_OrePerSecond`. Either
-  that or the id numbering is the link that breaks.
+`0x1003` is not handled at all, and a holder's ore contents are not one of
+these ids but a separate property, `0x2000100`, read and written through two
+other slots.
 
-*Unknown:* how a mine's output reaches the pool without a warehouse.
+**Two earlier versions of this section were wrong, in sequence.** The first
+said a mine feeds nobody until a transport carries its ore. The second
+retracted that on the tutorial's word but still read the rate as
+`Transfer_Ore_OnBoard` — 0 on a mine — because it took the ids to be
+`0x1000 +` a variable's position among the floats. That numbering was an
+inference, and only `0x1005` happened to agree with the real table. With the
+table read, the rate is the off-board one, a mine's is non-zero, and the
+tutorial and the code agree.
 
 ## Power is shared in two tiers — *read*
 
@@ -235,8 +242,9 @@ holds about 33%, a factory builds far slower when both are low, and
 construction slows research.
 
 - **Transport from mine to warehouse** — confirmed by the game's own tutorial
-  (strings 103, 104). A mine also supplies consumers directly, more slowly;
-  how is *unknown* — see the correction above.
+  (strings 103, 104). A mine also supplies consumers directly, at its
+  efficiency times an off-board rate of 1; a warehouse adds a second outlet and
+  a buffer a transport keeps full.
 - **Slower when low** — *read*, for both the factory and research. Power and
   ore accrue in proportion to efficiency, and progress is the smallest of the
   three completion fractions, so whichever resource is short sets the pace.
@@ -253,13 +261,5 @@ construction slows research.
   came from a component averaging three inputs, is withdrawn.
 
 ## Not established
-
-- **The variable ids.** The code reads profile variables by id — `0x1005` for
-  what a generator gives, `0x1002` for an ore holder's rate, `0x1001` for its
-  contents — and reading them as `0x1000 + position among the floats` makes
-  every use sensible: a generator's only non-zero power field is
-  `Transfer_Power_Out`, and the mining code takes the smaller of one side's
-  rate and the other's contents. The loader that assigns them has not been
-  read.
 
 - `fPriority`, and properties `0x300`–`0x305`.

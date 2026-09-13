@@ -1547,3 +1547,20 @@ kind = "datum"
 name = "SuperAI vtable"
 doc = "docs/23-economy.md"
 read = true
+
+# --- MBehaviour's variable ids, ../docs/23-economy.md -----------------------
+[[entry]]
+module = "Behavior.dll"
+at = "0x10059250"
+kind = "datum"
+name = "MBehaviour vtable; slot 26 gets a variable by id"
+doc = "docs/23-economy.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1000a490"
+kind = "function"
+name = "MBehaviour variable by id: 0x1001 OnBoard, 0x1002 KPD x OffBoard, 0x1004/5 power in/out"
+doc = "docs/23-economy.md"
+read = true

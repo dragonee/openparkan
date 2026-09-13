@@ -3113,12 +3113,21 @@ def check_profiles(check, game: Path) -> None:
           and set(sources) <= {"prof_generator.var", "prof_universal.var",
                                "prof_bunker.var"},
           f"Transfer_Power_Out is non-zero only on {sources} -- a debug "
-          f"profile and a bunker's trickle aside, the generator.  The ore "
-          f"rates are data too, and are not checked as a mechanism: a mine's "
-          f"profile says Transfer_Ore_OnBoard {mine[profiles.ORE_ON].value:g} "
-          f"and a storage's {storage[profiles.ORE_ON].value:g}, but a placed "
-          f"mine's capacity is not its profile's either, and the game's own "
-          f"tutorial says a mine does supply a factory")
+          f"profile and a bunker's trickle aside, the generator")
+
+    # The distribution step draws ore from a holder at variable 0x1002, which
+    # MBehaviour's getter computes as efficiency x Transfer_Ore_OffBoard.  An
+    # earlier reading took 0x1002 to be Transfer_Ore_OnBoard -- 0 on a mine --
+    # and concluded a mine feeds nobody, which the tutorial contradicts.
+    check("behpsp.res: a mine feeds consumers directly, as a storage does",
+          mine and storage and mine[profiles.ORE_OFF].value > 0
+          and storage[profiles.ORE_OFF].value > 0,
+          f"ore leaves a holder at efficiency x Transfer_Ore_OffBoard, which "
+          f"is {mine[profiles.ORE_OFF].value:g} on a mine and "
+          f"{storage[profiles.ORE_OFF].value:g} on a storage -- so a mine "
+          f"supplies a factory without a warehouse, slowly, as the tutorial "
+          f"says; Transfer_Ore_OnBoard, which is "
+          f"{mine[profiles.ORE_ON].value:g} on a mine, is what it accepts")
 
     # The object's own directory says what it is: UNITS\UNITS\TRANSPRT,
     # UNITS\UNITS\BUILDER, and the mine and storage models by name.
