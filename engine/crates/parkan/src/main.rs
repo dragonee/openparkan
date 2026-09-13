@@ -35,6 +35,8 @@ struct Args {
     screenshot: Option<PathBuf>,
     size: (u32, u32),
     top_down: bool,
+    /// `--look X,Y,Z,TX,TY,TZ`: a screenshot camera at X,Y,Z looking at TX,TY,TZ.
+    look: Option<[f32; 6]>,
 }
 
 fn args() -> Result<Args> {
@@ -44,6 +46,7 @@ fn args() -> Result<Args> {
         screenshot: None,
         size: (1280, 720),
         top_down: false,
+        look: None,
     };
     let mut it = std::env::args().skip(1);
     while let Some(flag) = it.next() {
@@ -53,6 +56,10 @@ fn args() -> Result<Args> {
             "--mission" => out.mission = value()?,
             "--screenshot" => out.screenshot = Some(PathBuf::from(value()?)),
             "--top-down" => out.top_down = true,
+            "--look" => {
+                let v: Vec<f32> = value()?.split(',').map(str::parse).collect::<Result<_, _>>()?;
+                out.look = Some(v.try_into().map_err(|_| anyhow::anyhow!("--look takes six numbers"))?);
+            }
             "--size" => {
                 let v = value()?;
                 let (w, h) = v.split_once('x').context("--size is WIDTHxHEIGHT")?;
@@ -87,13 +94,28 @@ fn top_down(terrain: &Terrain, aspect: f32) -> glam::Mat4 {
 fn screenshot(loaded: &scene::Loaded, game: &Path, args: &Args, out: &Path) -> Result<()> {
     let (width, height) = args.size;
     let gpu = pollster::block_on(Gpu::headless())?;
-    let terrain = scene::terrain(game, loaded)?;
+    let world = scene::world(game, loaded)?;
     let mut renderer = Renderer::new(&gpu.device, parkan_render::CAPTURE_FORMAT);
-    renderer.set_terrain(&gpu.device, &gpu.queue, &terrain);
-    renderer.set_scene(&gpu.device, &loaded.scene);
+    renderer.set_world(
+        &gpu.device,
+        &gpu.queue,
+        &world.store.textures,
+        Some(&world.terrain),
+        Some(&world.objects),
+    );
     let aspect = width as f32 / height as f32;
-    let view_proj =
-        if args.top_down { top_down(&terrain, aspect) } else { start_camera(loaded).view_proj(aspect) };
+    let view_proj = if args.top_down {
+        top_down(&world.terrain, aspect)
+    } else if let Some([x, y, z, tx, ty, tz]) = args.look {
+        let (eye, target) = (Vec3::new(x, y, z), Vec3::new(tx, ty, tz));
+        glam::Mat4::perspective_infinite_reverse_rh(
+            camera::DEBUG_FOV_Y_DEGREES.to_radians(),
+            aspect,
+            camera::NEAR,
+        ) * glam::Mat4::look_at_rh(eye, target, Vec3::Z)
+    } else {
+        start_camera(loaded).view_proj(aspect)
+    };
     let pixels = parkan_render::capture(&gpu, &mut renderer, (width, height), view_proj)?;
     let file = std::io::BufWriter::new(std::fs::File::create(out)?);
     let mut encoder = png::Encoder::new(file, width, height);
@@ -114,7 +136,7 @@ struct Running {
 
 struct App {
     loaded: scene::Loaded,
-    terrain: Terrain,
+    world: scene::World,
     camera: FlyCamera,
     running: Option<Running>,
     held: HashSet<KeyCode>,
@@ -139,8 +161,8 @@ impl App {
         }
         surface.configure(&gpu.device, &config);
         let mut renderer = Renderer::new(&gpu.device, config.format);
-        renderer.set_terrain(&gpu.device, &gpu.queue, &self.terrain);
-        renderer.set_scene(&gpu.device, &self.loaded.scene);
+        let w = &self.world;
+        renderer.set_world(&gpu.device, &gpu.queue, &w.store.textures, Some(&w.terrain), Some(&w.objects));
         self.running = Some(Running { window, surface, config, gpu, renderer });
         Ok(())
     }
@@ -258,13 +280,13 @@ fn main() -> Result<()> {
     if let Some(out) = &args.screenshot {
         return screenshot(&loaded, &game, &args, out);
     }
-    let terrain = scene::terrain(&game, &loaded)?;
+    let world = scene::world(&game, &loaded)?;
     let event_loop = EventLoop::new()?;
     event_loop.set_control_flow(ControlFlow::Poll);
     let camera = start_camera(&loaded);
     let mut app = App {
         loaded,
-        terrain,
+        world,
         camera,
         running: None,
         held: HashSet::new(),

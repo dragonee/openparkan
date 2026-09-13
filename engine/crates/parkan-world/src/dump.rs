@@ -5,10 +5,13 @@
 
 use std::path::Path;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use parkan_formats::mission::{self, Value as PropertyValue};
 use parkan_formats::nres::Archive;
-use parkan_formats::{landmesh, materials, texm};
+use parkan_formats::pose::Pose;
+use parkan_formats::{landmesh, materials, mesh, texm, wea};
+
+use crate::assembly;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
@@ -236,6 +239,80 @@ pub fn land_mesh(path: &Path) -> Result<Value> {
     }))
 }
 
+fn pose(p: &Pose) -> Value {
+    json!([p.translation, p.rotation])
+}
+
+/// One `MESH` member of an archive, `names[0]`, as the reader holds it.
+pub fn object_mesh(path: &Path, names: &[String]) -> Result<Value> {
+    let archive = Archive::open(path)?;
+    let member = names.first().map_or("", String::as_str);
+    let stem = member.rsplit_once('.').map_or(member, |(s, _)| s);
+    let wear = archive.read_name(&format!("{stem}.wea")).map(wea::parse).unwrap_or_default();
+    let m = mesh::parse(archive.read_name(member)?, member)?;
+    Ok(json!({
+        "kind": "mesh",
+        "name": member,
+        "wear": { "materials": wear.materials, "lightmaps": wear.lightmaps },
+        "nodes": m.nodes.iter().enumerate().map(|(i, n)| json!({
+            "name": n.name,
+            "flags": n.flags,
+            "parent": n.parent,
+            "anim_start": n.anim_start,
+            "fallback_key": n.fallback_key,
+            "slot_index": n.slot_index,
+            "world_pose": pose(&m.world_pose(i)),
+        })).collect::<Vec<_>>(),
+        "slots": m.slots.iter().map(|s| json!([
+            s.first_triangle, s.triangle_count, s.first_batch, s.batch_count,
+            vector(&s.aabb_min), vector(&s.aabb_max), vector(&s.sphere), number(s.area), number(s.volume),
+        ])).collect::<Vec<_>>(),
+        "batches": m.batches.iter().map(|b| json!([
+            b.material, b.flag, b.first_index, b.index_count, b.first_vertex, b.vertex_count,
+        ])).collect::<Vec<_>>(),
+        "triangles": m.triangles,
+        "positions": m.posed_positions(),
+        "normals": m.normals,
+        "uv": m.uv,
+        "lightmap_uv": m.lightmap_uv,
+        "keys": m.keys.iter().map(|k| json!([vector(&k.translation), number(k.time), k.rotation])).collect::<Vec<_>>(),
+        "frame_map": m.frame_map,
+        "frame_count": m.frame_count,
+        "root_pose": pose(&m.root_pose()),
+        "node_of_vertex": m.node_of_vertex(),
+        "sphere": m.sphere.map_or(Value::Null, |(c, r)| json!([vector(&c), number(r)])),
+    }))
+}
+
+/// Every object of a mission as the parts it is drawn from.
+pub fn mission_assembly(path: &Path) -> Result<Value> {
+    let tma = if path.is_dir() { path.join("data.tma") } else { path.to_path_buf() };
+    let data = std::fs::read(&tma)?;
+    let m = mission::parse(&data, &tma.display().to_string())?;
+    let game =
+        tma.ancestors().find(|d| d.join("objects.rlb").exists()).context("no install above the mission")?;
+    let mut built = assembly::Assembly::new(game)?;
+    let objects: Vec<Value> = m
+        .objects
+        .iter()
+        .map(|o| {
+            let parts = built.parts(o.kind, &o.path);
+            json!({
+                "kind": o.kind,
+                "path": o.path,
+                "parts": parts.iter().map(|p| json!({
+                    "library": p.reference.library,
+                    "member": p.reference.member,
+                    "pose": pose(&p.pose),
+                    "host": p.host,
+                    "node": p.node,
+                })).collect::<Vec<_>>(),
+            })
+        })
+        .collect();
+    Ok(json!({ "kind": "assembly", "objects": objects }))
+}
+
 /// Dump `path` as `kind`; `names` narrows a `texm` dump to those textures.
 pub fn dump(kind: &str, path: &Path, names: &[String]) -> Result<Value> {
     match kind {
@@ -245,6 +322,8 @@ pub fn dump(kind: &str, path: &Path, names: &[String]) -> Result<Value> {
         "texm" => texm(path, names),
         "materials" => material_library(path),
         "landmesh" => land_mesh(path),
+        "mesh" => object_mesh(path, names),
+        "assembly" => mission_assembly(path),
         other => anyhow::bail!("unknown kind {other:?}; expected nres, mission, texm, materials or landmesh"),
     }
 }

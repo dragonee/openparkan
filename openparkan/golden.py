@@ -14,7 +14,7 @@ import subprocess
 from collections.abc import Iterator
 from pathlib import Path
 
-from . import dump, landmesh, materials
+from . import assembly, dump, landmesh, materials, mission
 from .nres import is_nres
 
 #: How far two floats may differ, absolutely or relative to their size.
@@ -65,18 +65,33 @@ def terrain_textures(game: Path) -> list[str]:
     return sorted(names)
 
 
+def mission_meshes(game: Path) -> list[tuple[Path, str]]:
+    """Every mesh a Mission 01 object is drawn from, as ``(archive, member)``."""
+    m = mission.load(game / MISSION_01 / "data.tma")
+    built = assembly.Assembly(game)
+    found = set()
+    for o in m.objects:
+        for part in built.parts(o.kind, o.path):
+            archive = next(p for p in game.iterdir() if p.name.lower() == part.ref.library.lower())
+            found.add((archive, part.ref.member))
+    return sorted(found)
+
+
 def targets(game: Path) -> list[tuple[str, Path, list[str]]]:
     """What the engine reads so far.
 
     M0: every archive and Mission 01's ``data.tma``.  M1: ``Material.lib``,
-    Tut_1's ``Land.msh`` and the textures its ground names.
+    Tut_1's ``Land.msh`` and the textures its ground names.  M2: Mission 01's
+    assembly and every mesh its objects are drawn from.
     """
     archives = sorted(p for p in game.rglob("*") if p.is_file() and is_nres(p))
     return ([("nres", p, []) for p in archives]
             + [("mission", game / MISSION_01 / "data.tma", []),
                ("materials", game / "Material.lib", []),
                ("landmesh", game / TUT_1, []),
-               ("texm", game / "Textures.lib", terrain_textures(game))])
+               ("texm", game / "Textures.lib", terrain_textures(game)),
+               ("assembly", game / MISSION_01, [])]
+            + [("mesh", archive, [member]) for archive, member in mission_meshes(game)])
 
 
 def engine_dump(engine: Path, kind: str, path: Path, names: list[str] | None = None) -> dict:
@@ -94,6 +109,8 @@ def run(game: Path, engine: Path, limit: int = 20) -> int:
         theirs = engine_dump(engine, kind, path, names)
         found = list(differences(ours, theirs))
         name = path.relative_to(game)
+        if names and kind != "texm":
+            name = f"{name}:{names[0]}"
         if found:
             failed += 1
             print(f"DIFF  {kind} {name}: {len(found)} differences")

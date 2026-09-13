@@ -19,7 +19,8 @@ import math
 import struct
 from pathlib import Path
 
-from . import landmesh, materials, mission
+from . import assembly, landmesh, materials, mission
+from . import mesh as objmesh
 from . import texm as textures
 from .nres import NResArchive
 
@@ -211,6 +212,71 @@ def land_mesh(path: Path, names: list[str] | None = None) -> dict:
     }
 
 
+def _pose(pose) -> list:
+    return [vector(pose[0]), vector(pose[1])]
+
+
+def object_mesh(path: Path, names: list[str] | None = None) -> dict:
+    """One ``MESH`` member of an archive, ``names[0]``, as the reader holds it.
+
+    Positions are the posed ones a renderer draws, and every node carries its
+    world pose, so the dump checks the pose chain as well as the streams.
+    """
+    archive = NResArchive.open(path)
+    member = (names or [""])[0]
+    try:
+        wear = objmesh.parse_wear(archive.read_name(member.rsplit(".", 1)[0] + ".wea"))
+    except KeyError:
+        wear = objmesh.Wear()
+    m = objmesh.parse(archive.read_name(member), member, wear.materials)
+    return {
+        "kind": "mesh",
+        "name": member,
+        "wear": {"materials": wear.materials, "lightmaps": wear.lightmaps},
+        "nodes": [
+            {"name": n.name, "flags": n.flags, "parent": n.parent, "anim_start": n.anim_start,
+             "fallback_key": n.fallback_key, "slot_index": list(n.slot_index),
+             "world_pose": _pose(m.world_pose(i))}
+            for i, n in enumerate(m.nodes)
+        ],
+        "slots": [[s.first_triangle, s.triangle_count, s.first_batch, s.batch_count,
+                   vector(s.aabb_min), vector(s.aabb_max), vector(s.sphere),
+                   number(s.area), number(s.volume)] for s in m.slots],
+        "batches": [[b.material, b.flag, b.first_index, b.index_count, b.first_vertex,
+                     b.vertex_count] for b in m.batches],
+        "triangles": [list(t) for t in m.triangles],
+        "positions": [vector(v) for v in m.posed_positions()],
+        "normals": [vector(v) for v in m.normals],
+        "uv": [vector(v) for v in m.uv],
+        "lightmap_uv": [vector(v) for v in m.lightmap_uv],
+        "keys": [[vector(k.translation), number(k.time), vector(k.rotation)] for k in m.keys],
+        "frame_map": list(m.frame_map),
+        "frame_count": m.frame_count,
+        "root_pose": _pose(m.root_pose()),
+        "node_of_vertex": m.node_of_vertex(),
+        "sphere": None if m.volume is None else [vector(m.volume.centre), number(m.volume.radius)],
+    }
+
+
+def mission_assembly(path: Path, names: list[str] | None = None) -> dict:
+    """Every object of a mission as the parts it is drawn from, and where they sit."""
+    if path.is_dir():
+        path = path / "data.tma"
+    m = mission.load(path)
+    game = next(d for d in path.parents if (d / "objects.rlb").exists())
+    built = assembly.Assembly(game)
+    return {
+        "kind": "assembly",
+        "objects": [
+            {"kind": o.kind, "path": o.path,
+             "parts": [{"library": p.ref.library, "member": p.ref.member, "pose": _pose(p.pose),
+                        "host": p.host, "node": p.node}
+                       for p in built.parts(o.kind, o.path)]}
+            for o in m.objects
+        ],
+    }
+
+
 def _nres(path: Path, names: list[str] | None = None) -> dict:
     return nres(path)
 
@@ -221,4 +287,4 @@ def _mission(path: Path, names: list[str] | None = None) -> dict:
 
 #: What ``openparkan dump`` and ``parkan-dump`` both accept, and the reader each runs.
 KINDS = {"nres": _nres, "mission": _mission, "texm": texm, "materials": material_library,
-         "landmesh": land_mesh}
+         "landmesh": land_mesh, "mesh": object_mesh, "assembly": mission_assembly}

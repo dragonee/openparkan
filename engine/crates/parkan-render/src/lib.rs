@@ -9,9 +9,14 @@ use bytemuck::{Pod, Zeroable};
 use glam::{Mat4, Vec2, Vec3};
 use wgpu::util::DeviceExt;
 
+pub mod frame;
+pub mod models;
 pub mod terrain;
+pub mod textures;
 
+pub use models::ModelRenderer;
 pub use terrain::TerrainRenderer;
+pub use textures::GpuTextures;
 
 pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 /// The colour format of an offscreen capture.
@@ -84,6 +89,7 @@ pub struct Renderer {
     grid: Option<(wgpu::Buffer, u32)>,
     depth: Option<(wgpu::TextureView, u32, u32)>,
     terrain: Option<TerrainRenderer>,
+    objects: Option<ModelRenderer>,
 }
 
 impl Renderer {
@@ -161,6 +167,7 @@ impl Renderer {
             grid: None,
             depth: None,
             terrain: None,
+            objects: None,
         }
     }
 
@@ -189,14 +196,18 @@ impl Renderer {
         self.grid = upload(&lines, "grid");
     }
 
-    /// Draw this map's ground from now on.
-    pub fn set_terrain(
+    /// Draw this world from now on: its textures, its ground and its placed objects.
+    pub fn set_world(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        terrain: &parkan_world::terrain::Terrain,
+        textures: &[parkan_world::textures::Texture],
+        terrain: Option<&parkan_world::terrain::Terrain>,
+        objects: Option<&parkan_world::models::Objects>,
     ) {
-        self.terrain = Some(TerrainRenderer::new(device, queue, self.format, terrain));
+        let bank = GpuTextures::new(device, queue, textures);
+        self.terrain = terrain.map(|t| TerrainRenderer::new(device, self.format, t, &bank));
+        self.objects = objects.map(|o| ModelRenderer::new(device, self.format, o, &bank));
     }
 
     /// Draw the scene into `target`, a view of a `width` × `height` texture.
@@ -225,6 +236,9 @@ impl Renderer {
         if let Some(terrain) = &self.terrain {
             terrain.prepare(queue, view_proj);
         }
+        if let Some(objects) = &self.objects {
+            objects.prepare(queue, view_proj);
+        }
         let mut encoder = device.create_command_encoder(&Default::default());
         {
             let depth = &self.depth.as_ref().expect("made above").0;
@@ -250,6 +264,9 @@ impl Renderer {
             });
             if let Some(terrain) = &self.terrain {
                 terrain.draw(&mut pass);
+            }
+            if let Some(objects) = &self.objects {
+                objects.draw(&mut pass);
             }
             pass.set_bind_group(0, &self.bind_group, &[]);
             for (pipeline, geometry) in [(&self.lines, &self.grid), (&self.solid, &self.triangles)] {

@@ -1,21 +1,13 @@
 //! Drawing the ground built by `parkan_world::terrain`.
 
 use bytemuck::{Pod, Zeroable};
-use glam::{Mat4, Vec3};
+use glam::Mat4;
 use parkan_world::terrain::{Layer, Terrain};
 use wgpu::util::DeviceExt;
 
 use crate::DEPTH_FORMAT;
-
-/// The sun the ground is lit by until M5 reads the sky.
-///
-/// STAND-IN: docs/10-sky.md#not-resolved -- what the sun does with its values
-/// is not read, and no sky keyframe is interpolated yet.
-pub const LIGHT_DIRECTION: Vec3 = Vec3::new(-0.35, -0.45, -0.82);
-pub const LIGHT_COLOUR: [f32; 3] = [0.85, 0.85, 0.8];
-/// STAND-IN: docs/10-sky.md -- Mission 01's noon scene colour, 40/255 grey,
-/// held fixed until M5 interpolates the sky.
-pub const SCENE_COLOUR: [f32; 3] = [0.16, 0.16, 0.16];
+use crate::frame::FrameUniform;
+use crate::textures::GpuTextures;
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
@@ -25,15 +17,6 @@ struct GpuVertex {
     uv1: [f32; 2],
     uv2: [f32; 2],
     blend: f32,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy, Pod, Zeroable)]
-struct FrameUniform {
-    view_proj: [f32; 16],
-    light_direction: [f32; 4],
-    light_colour: [f32; 4],
-    scene_colour: [f32; 4],
 }
 
 #[repr(C)]
@@ -58,57 +41,12 @@ pub struct TerrainRenderer {
     groups: Vec<DrawGroup>,
 }
 
-fn upload_texture(
-    device: &wgpu::Device,
-    queue: &wgpu::Queue,
-    t: &parkan_world::terrain::Texture,
-) -> wgpu::TextureView {
-    let texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some(&t.name),
-        size: wgpu::Extent3d { width: t.width, height: t.height, depth_or_array_layers: 1 },
-        mip_level_count: t.levels.len() as u32,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Rgba8UnormSrgb,
-        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-        view_formats: &[],
-    });
-    for (level, pixels) in t.levels.iter().enumerate() {
-        let (w, h) = ((t.width >> level).max(1), (t.height >> level).max(1));
-        queue.write_texture(
-            wgpu::TexelCopyTextureInfo {
-                texture: &texture,
-                mip_level: level as u32,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            pixels,
-            wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(4 * w), rows_per_image: Some(h) },
-            wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
-        );
-    }
-    texture.create_view(&Default::default())
-}
-
-fn white(device: &wgpu::Device, queue: &wgpu::Queue) -> wgpu::TextureView {
-    upload_texture(
-        device,
-        queue,
-        &parkan_world::terrain::Texture {
-            name: "white".into(),
-            width: 1,
-            height: 1,
-            levels: vec![vec![255; 4]],
-        },
-    )
-}
-
 impl TerrainRenderer {
     pub fn new(
         device: &wgpu::Device,
-        queue: &wgpu::Queue,
         format: wgpu::TextureFormat,
         terrain: &Terrain,
+        textures: &GpuTextures,
     ) -> Self {
         let shader = device.create_shader_module(wgpu::include_wgsl!("terrain.wgsl"));
         let uniform = |binding, visibility| wgpu::BindGroupLayoutEntry {
@@ -227,27 +165,13 @@ impl TerrainRenderer {
             usage: wgpu::BufferUsages::INDEX,
         });
 
-        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            label: Some("ground"),
-            address_mode_u: wgpu::AddressMode::Repeat,
-            address_mode_v: wgpu::AddressMode::Repeat,
-            address_mode_w: wgpu::AddressMode::Repeat,
-            mag_filter: wgpu::FilterMode::Linear,
-            min_filter: wgpu::FilterMode::Linear,
-            mipmap_filter: wgpu::MipmapFilterMode::Linear,
-            anisotropy_clamp: 8,
-            ..Default::default()
-        });
-        let views: Vec<wgpu::TextureView> =
-            terrain.textures.iter().map(|t| upload_texture(device, queue, t)).collect();
-        let blank = white(device, queue);
-        let view_of = |layer: Option<&Layer>| layer.and_then(|l| l.texture).map_or(&blank, |i| &views[i]);
+        let view_of = |layer: Option<&Layer>| textures.view(layer.and_then(|l| l.texture));
         let groups = terrain
             .groups
             .iter()
             .map(|g| {
                 let tint = |l: Option<&Layer>, on: bool| {
-                    let [r, gr, b] = l.map_or([1.0; 3], |l| l.tint);
+                    let [r, gr, b] = l.map_or([1.0; 3], |l| l.diffuse);
                     [r, gr, b, f32::from(u8::from(on))]
                 };
                 let uniform = LayersUniform {
@@ -274,7 +198,7 @@ impl TerrainRenderer {
                         },
                         wgpu::BindGroupEntry {
                             binding: 3,
-                            resource: wgpu::BindingResource::Sampler(&sampler),
+                            resource: wgpu::BindingResource::Sampler(&textures.sampler),
                         },
                     ],
                 });
@@ -285,16 +209,7 @@ impl TerrainRenderer {
     }
 
     pub fn prepare(&self, queue: &wgpu::Queue, view_proj: Mat4) {
-        let d = LIGHT_DIRECTION.normalize();
-        let [r, g, b] = LIGHT_COLOUR;
-        let [sr, sg, sb] = SCENE_COLOUR;
-        let uniform = FrameUniform {
-            view_proj: view_proj.to_cols_array(),
-            light_direction: [d.x, d.y, d.z, 0.0],
-            light_colour: [r, g, b, 1.0],
-            scene_colour: [sr, sg, sb, 1.0],
-        };
-        queue.write_buffer(&self.frame, 0, bytemuck::bytes_of(&uniform));
+        queue.write_buffer(&self.frame, 0, bytemuck::bytes_of(&FrameUniform::new(view_proj)));
     }
 
     pub fn draw(&self, pass: &mut wgpu::RenderPass<'_>) {

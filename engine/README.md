@@ -4,15 +4,24 @@ A Rust engine for *Parkan: Iron Strategy* that reads the game's own install.
 Its first target is Phase One: load Mission 01, *Line of Fire*, put the hero
 at its start, and walk, look and shoot in first person.
 
-Milestones **M0** and **M1** are in:
+Milestones **M0**, **M1** and **M2** are in:
 
 - the workspace;
-- the NRes, mission, `Texm`, `Material.lib`, wear and `Land.msh` readers;
+- the NRes, mission, `Texm`, `Material.lib`, wear, `Land.msh`, object mesh,
+  `objects.rlb` and `.dat` readers;
 - the golden cross-check;
-- a window over Mission 01's ground.
+- a window over Mission 01.
 
-The ground is drawn with its two material layers blended, the file's own mip
-levels, and the placed objects as boxes. This
+The ground is drawn with its two material layers blended and the file's own
+mip levels. Every placed object is drawn from its assembly:
+
+- each part is mounted on its host's socket;
+- each node sits at its rest pose;
+- level 0 is drawn, and collision hulls never;
+- materials draw in the blend mode their flags byte names.
+
+Not yet: animation (M3), lightmaps (no Mission 01 mesh has one) and levels of
+detail beyond 0. This
 directory also holds what the rest will follow:
 
 - **`docs/`** is the source of truth. Every behaviour the engine implements is
@@ -36,6 +45,7 @@ cd engine
 cargo run --release -p parkan                                  # Mission 01, debug camera
 cargo run --release -p parkan -- --screenshot m1.png           # one frame to a PNG, no window
 cargo run --release -p parkan -- --screenshot map.png --top-down --size 768x768
+cargo run --release -p parkan -- --screenshot tank.png --look 705,885,24,734,906,10   # from X,Y,Z at TX,TY,TZ
 cargo run --release -p parkan -- --mission MISSIONS/Single.01  # another mission
 ```
 
@@ -56,7 +66,8 @@ cargo build --release -p parkan-world && uv run openparkan golden
 `openparkan golden` dumps every file the engine reads through both the Python
 readers and `parkan-dump`, and compares the two within 1e-5. At M0 that is
 every archive in the install, Mission 01's `data.tma`, `Material.lib`, Tut_1's
-`Land.msh` and the textures its ground names: 124 dumps.
+`Land.msh`, the textures its ground names, Mission 01's assembly (every
+object's parts and their poses) and the 19 meshes they use: 144 dumps.
 
 ## Stand-ins
 
@@ -66,6 +77,8 @@ a row here. A row leaves this table when research closes it.
 | milestone | what is unknown | stand-in | see |
 |---|---|---|---|
 | M1 | Whether water is drawn see-through: `WATER`'s material says opaque, and every lake has a `WATER_BOT` bed beneath | opaque, as the material says | [03](../docs/03-terrain.md#terrain-layers-name-materials-not-textures) |
+| M2 | How a placement's scale applies: the record carries 2 to 20 on Mission 01's trees and stones | a uniform scale of the placement matrix (under research) | [04](../docs/04-missions.md) |
+| M2 | Whether a blended material writes depth, and the alpha test's reference value | blended groups draw after opaque ones without writing depth; nothing is discarded (reference 0) | [07](../docs/07-objects.md#how-a-material-draws-is-in-the-archive-directory) |
 | M1 | Whether the scene's fog is Direct3D's vertex fog or the engine's own | per-pixel linear range fog, 0 to 700 × slot 6 (the two look the same) | [10](../docs/10-sky.md#not-resolved) |
 | M1 | How the 34142-radius dome escapes the far plane and a fog ending by 700 | draw the dome first, depth writes off, unfogged but for its rim | [10](../docs/10-sky.md#not-resolved) |
 | M1 | The heading angle's zero and direction for the fog colour | 0 along +y, turning towards +x, like the dome's segments | [10](../docs/10-sky.md#not-resolved) |
