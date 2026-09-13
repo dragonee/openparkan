@@ -3845,6 +3845,75 @@ def check_control(check, game: Path) -> None:
           f"is an {', '.join(sorted(tagged))} record")
 
 
+#: A building's model number, as its display name carries it, against the
+#: efficiency its controller gives it.
+EFFICIENCY_BY_MODEL = {"17": 1.0, "30": 3.0, "47": 5.0, "67": 7.0}
+#: The building roles whose size sets their efficiency.
+SIZED_ROLES = ("INSTITUT", "PLANT", "MINE")
+
+
+def check_efficiency(check, game: Path) -> None:
+    """.ctl: the efficiency component, and a building's size."""
+    names = frozenset(p.name.lower() for p in all_archives(game))
+    values = 0
+    finite = 0
+    efficiency: dict[str, list[float]] = defaultdict(list)
+    homes: set[str] = set()
+    others_zero = True
+    for path in all_archives(game):
+        archive = NResArchive.open(path)
+        for entry in archive:
+            if not entry.tag.upper().startswith("CTL"):
+                continue
+            try:
+                parsed = control.parse(archive.read(entry), names)
+            except control.ControlFormatError:
+                continue
+            for part in parsed.components:
+                values += len(part.values)
+                finite += sum(1 for v in part.values if math.isfinite(v))
+                if part.efficiency is not None:
+                    efficiency[entry.name.lower()].append(part.efficiency)
+                    homes.add(path.name.lower())
+                    others_zero &= not any(part.values[1:])
+
+    check(".ctl: a component's 64-byte block is sixteen floats",
+          finite == values > 0,
+          f"{finite}/{values} values across every component record are finite; "
+          f"the value getter at Control.dll:0x10021d00 indexes them by an id's "
+          f"low byte")
+
+    library = objects.ObjectLibrary(game / "objects.rlb")
+    rows = []
+    wrong = []
+    for role in SIZED_ROLES:
+        for dat in sorted((game / "UNITS" / "BUILDS" / role).glob("*.dat")):
+            unit = objects.load_unit(dat)
+            model = re.search(r"-(\d\d)", unit.label)
+            fort = library.get(unit.components[0].ref.member)
+            body = library.get(fort.slots[0].member) if fort and fort.slots else None
+            ctl = body.slot_with_suffix("ctl") if body else None
+            if not (model and ctl):
+                wrong.append(f"{dat.name} unresolved")
+                continue
+            got = sum(efficiency.get(ctl.member.lower(), []))
+            want = EFFICIENCY_BY_MODEL.get(model.group(1))
+            rows.append((dat.name, got))
+            if got != want:
+                wrong.append(f"{dat.name} {model.group(1)} has {got}")
+    sized = {ctl for ctl in efficiency
+             if any(f"_{r.lower()[:4]}" in ctl for r in SIZED_ROLES)}
+    rest = [v for ctl, vs in efficiency.items() if ctl not in sized for v in vs]
+    check(".ctl: a building's efficiency is its size",
+          rows and not wrong and set(rest) == {1.0} and others_zero
+          and homes == {"fortif.rlb"},
+          f"on all {len(rows)} research centre, factory and mine assemblies the "
+          f"controller's type-{control.EFFICIENCY_TYPE} value is 1, 3, 5 or 7 "
+          f"as the model is 17, 30, 47 or 67; every other building's is 1, the "
+          f"other fifteen values are zero, and the class lives only in "
+          f"{', '.join(sorted(homes))}{'; ' + ', '.join(wrong[:3]) if wrong else ''}")
+
+
 def check_controls(check, game: Path) -> None:
     """The input layer: ScanCode.dsc, Command.dsc, the .man bindings, the .tbl tables."""
     keys = controls.scancodes(game)
@@ -5245,7 +5314,8 @@ def run(game: Path) -> int:
         check_water, check_layers, check_materials, check_sky,
         check_minimap_agreement, check_arealmap,
         check_grid, check_missions, check_objects, check_poses, check_lod, check_damage,
-        check_effects, check_footprints, check_rsli, check_control, check_controls,
+        check_effects, check_footprints, check_rsli, check_control, check_efficiency,
+        check_controls,
         check_behaviour, check_research, check_descriptions, check_saves,
         check_vocabulary, check_resources, check_briefing, check_settings,
         check_research_streams, check_atmosphere_events,

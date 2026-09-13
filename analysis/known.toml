@@ -1438,7 +1438,7 @@ read = true
 module = "Behavior.dll"
 at = "0x100198e0"
 kind = "function"
-name = "KPD: sums property 0xe00, efficiency, over the control components"
+name = "KPD: sums property 0xe00, efficiency, over the class-26 component list"
 doc = "docs/23-economy.md"
 read = true
 
@@ -1446,7 +1446,7 @@ read = true
 module = "Control.dll"
 at = "0x1002bb40"
 kind = "function"
-name = "component property getter; 0xe00 on type 10 is (p300+p301+p302)/3"
+name = "IControl component property get: 0xe00 by class (26: 0x300; 10: mean of 3; 21: mean of 6)"
 doc = "docs/23-economy.md"
 read = true
 
@@ -1635,5 +1635,62 @@ module = "Behavior.dll"
 at = "0x10008f71"
 kind = "site"
 name = "a building behaviour removes itself from its clan's distributor"
+doc = "docs/23-economy.md"
+read = true
+
+# --- building efficiency, ../docs/23-economy.md ------------------------------
+[[entry]]
+module = "Control.dll"
+at = "0x10021d00"
+kind = "function"
+name = "component slot 4: value id -> float[low byte] x condition (0x100) x level (0x200)"
+doc = "docs/13-control.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002c2b0"
+kind = "function"
+name = "IControl component property set: 0x500 writes a class-26 component's +0xa4"
+doc = "docs/23-economy.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1003ce38"
+kind = "datum"
+name = "class-26 component vtable (object 0xa8 bytes)"
+doc = "docs/23-economy.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10024620"
+kind = "function"
+name = "detection test: target props 0x45/0x43/0x44 x values 0-2 x range falloff >= 1"
+doc = "docs/13-control.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x100186b0"
+kind = "function"
+name = "binds a building's components into lists by class; class 26 is the KPD list"
+doc = "docs/23-economy.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1002cf60"
+kind = "function"
+name = "mine task tick: fMinedOre += dt x Mine_OrePerSecond x KPD; BAD KPD below 0.1"
+doc = "docs/23-economy.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1002a2a7"
+kind = "site"
+name = "construction start: NewfOreCost = fOreCost / KPD"
 doc = "docs/23-economy.md"
 read = true

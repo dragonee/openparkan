@@ -201,16 +201,67 @@ produces over what all of its consumers want.
   tick, the ore capped by the institute's own buffer, and then requests the ore
   still missing — half of it while more than 5 remains. `KPD` is logged by that
   name: Russian *КПД*, efficiency.
-- **`KPD` is the sum of the institute's components' efficiencies.**
-  `0x100198e0` totals property `0xe00` over the building's control components;
-  `0x10019880`, the `SetPowerUsage` call, writes property `0x500` on each.
+- **`KPD` is the building's efficiency**, below. `0x100198e0` totals property
+  `0xe00` over one list of the building's components; `0x10019880`, the
+  `SetPowerUsage` call, writes property `0x500` on each of them.
 
-A component's efficiency is computed in `Control.dll:0x1002bb40` and depends on
-its type: **for type 10 it is `(p₃₀₀ + p₃₀₁ + p₃₀₂) × 1/3`**, the mean of three
-inputs, and type 21 sums five.
+*Unknown:* how the time budget accrues.
 
-*Unknown:* what properties `0x300`–`0x305` are, and how the time budget
-accrues.
+## Efficiency is a building's size
+
+**Which components count** — *read*. When a building's behaviour binds to its
+controller, `Behavior.dll:0x100186b0` asks `IControl` for its components class
+by class and files classes 26, 25, 29, 10 and 15 in five lists, with a sixth
+filled through another interface. The list `KPD` totals is **class 26**
+(`0x1001874c`).
+
+**What a class-26 component reports** — *read*. `Control.dll:0x1002bb40`
+answers property `0xe00` according to the component's class: class 26 returns
+its value `0x300`; class 10 the mean of `0x300`–`0x302`; class 21 the mean of
+`0x300`–`0x305`, six of them; class 5 its value `0x100`. Only class 26 reaches
+`KPD`.
+
+**What a value id is** — *read*. Every component's value getter
+(`Control.dll:0x10021d00`, vtable slot 4) takes an id's **low byte as an index
+into the sixteen floats** its `.ctl` record carries at `+0x2c`
+([13-control.md](13-control.md)), then multiplies by up to two run-time
+factors:
+
+| id bit | multiplies by |
+|---|---|
+| `0x100` | a value the owner reports for the component; slot 2 treats 0 as destroyed, so it is its condition — a *guess* |
+| `0x200` | a level held at `+0x4c`, which starts at 1 and can be set only while the component's state at `+0x50` is non-zero and it is not destroyed |
+
+So `0x300`–`0x305` are **the first six floats of the record, scaled by
+condition and level**, and an intact building's `KPD` is its class-26
+component's first float. What sets the level is unread.
+
+**The data** — *measured*. Class 26 occurs only in `fortif.rlb`, once per
+building controller (five times on the small main teleport), always with
+fifteen zeros after the first value. Its first value follows the model number
+in the building's name:
+
+| | small, -17 | medium, -30 | large, -47 | enhanced, -67 |
+|---|---|---|---|---|
+| research centre | 1 | 3 | 5 | 7 |
+| factory | 1 | 3 | 5 | — |
+| core mine | 1 | 3 | 5 | — |
+
+and every other building — storage, generator, tower, bunker, hangar, bridge,
+ruin — is 1.
+
+**What it multiplies** — *read*:
+
+- **A mine digs `Mine_OrePerSecond × KPD × dt`** into its own store, up to its
+  capacity (`Behavior.dll:0x1002d06c`, logged as `fMinedOre`): 50, 150 and 250
+  ore a second by size. A building with no `Use_Power` digs at a `KPD` of 1, and
+  one whose `KPD` is below 0.1 stops and logs `BAD KPD`.
+- **It gives ore at `KPD × Transfer_Ore_OffBoard`**, the `0x1002` id above.
+- **Research and construction draw ore and power `KPD` times faster.**
+- **A factory's ore cost is divided by `KPD`** when a build starts
+  (`0x1002a2a7`, logged as `NewfOreCost`), so a large factory pays a fifth of
+  what a small one does. Research's one `KPD` call multiplies; nothing there
+  divides a cost.
 
 ## Construction — *read*
 
@@ -314,4 +365,6 @@ construction slows research.
 
 ## Not established
 
-- Properties `0x300`–`0x305`.
+- What sets a component's level, the `0x200` factor — and so whether a short
+  power supply lowers `KPD` itself.
+- How research's time budget accrues.

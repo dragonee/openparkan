@@ -54,6 +54,22 @@ def test_a_component_carries_its_resource_and_label(ctl, component):
     assert one.size == control.COMPONENT_FIXED + 8 + 4 + len("i_eng_l") + 1
 
 
+def test_a_component_carries_sixteen_values(ctl, component):
+    part = component(10, values=(0.5, 0.25, 0.125) + (0.0,) * 12 + (2.0,))
+    one = control.parse(ctl(counts=(0, 0, 0, 1, 0), components=[part])).components[0]
+    assert len(one.values) == control.COMPONENT_VALUE_COUNT
+    assert one.values[:3] == (0.5, 0.25, 0.125)
+    assert one.values[-1] == 2.0
+
+
+def test_only_the_efficiency_class_has_an_efficiency(ctl, component):
+    parts = [component(control.EFFICIENCY_TYPE, values=(5.0,)),
+             component(10, values=(5.0,))]
+    got = control.parse(ctl(counts=(0, 0, 0, 2, 0), components=parts)).components
+    assert got[0].efficiency == 5.0
+    assert got[1].efficiency is None
+
+
 def test_named_gathers_from_components_and_groups(ctl, component, reference):
     blob = ctl(counts=(0, 0, 0, 1, 1),
                components=[component(1, "objects.rlb", "bb_l_01")],

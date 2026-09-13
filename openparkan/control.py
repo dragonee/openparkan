@@ -54,6 +54,15 @@ COMPONENT_NAME_AT = 0x6C
 COMPONENT_COUNT_AT = 0xAC
 #: A field the parser treats as absent when it is -1.
 COMPONENT_INDEX_AT = 0x18
+#: The 64 bytes the parser copies into the object whole, which the component's
+#: value getter (slot 4, ``0x10021d00``) indexes as sixteen floats by the low
+#: byte of a value id -- so ``0x300``-``0x305`` are the first six.
+COMPONENT_VALUES_AT = 0x2C
+COMPONENT_VALUE_COUNT = 16
+#: The building class whose first value is its efficiency, the ``KPD`` that
+#: ``Behavior.dll`` totals at ``0x100198e0`` over a building's components of
+#: this type and multiplies into research, construction and a mine's output.
+EFFICIENCY_TYPE = 26
 #: The smallest a controller can be.  The 128-byte frame and the 84-byte block
 #: are **not** adjacent in general -- sections 1, 2 and 4 lie between them --
 #: but a member with none of those is exactly the two, which is why 212 is the
@@ -240,6 +249,19 @@ class Component:
     #: Where the record starts, and how long it is.
     offset: int
     size: int
+    #: The sixteen floats at ``COMPONENT_VALUES_AT``.
+    values: tuple[float, ...] = ()
+
+    @property
+    def efficiency(self) -> float | None:
+        """A building's efficiency, where this is the class that carries it.
+
+        The engine scales the value by the component's condition and by a
+        level that starts at 1, so this is what an undamaged building runs at.
+        """
+        if self.type_id != EFFICIENCY_TYPE or not self.values:
+            return None
+        return self.values[0]
 
 
 def read_component(blob: bytes, pos: int) -> Component | None:
@@ -275,6 +297,8 @@ def read_component(blob: bytes, pos: int) -> Component | None:
         label=label,
         offset=pos,
         size=end - pos,
+        values=struct.unpack_from(f"<{COMPONENT_VALUE_COUNT}f", blob,
+                                  pos + COMPONENT_VALUES_AT),
     )
 
 

@@ -976,7 +976,8 @@ today; each is a small trap for anyone extending the code.
 - Object mesh **face flags** (0 on 233714 faces, then 2, 4, 16, 32, 34) and the
   **class** beside them, which sits below 64 on 240500 of 241887.
 - The `.ctl` fields' **meaning**, now that their extent is settled: the
-  component record's 64-byte block at +0x2c and its 4-byte entries, section
+  component record's sixteen values (class 26's first is a building's
+  efficiency, done) and its 4-byte entries, section
   1's and section 2's record contents, the 84-byte block, and the nine ints
   of a section-5 record.
 - Which `.ctl` field feeds which channel. Two of the three legs are now

@@ -54,7 +54,8 @@ label names a family of internal parts -- all 57 of them prefix an `INTO`
 record in `objects.rlb`.
 
 What is open is the **meaning** of the fields rather than their extent: the
-component record's 64-byte block at +0x2c, section 1's and section 2's record
+sixteen component values past class 26's efficiency
+([23-economy.md](23-economy.md)), section 1's and section 2's record
 contents, the 84-byte block, and the nine ints of a section-5 record. And
 **which field feeds which setter** is unmapped: the stub table names the
 interface but never receives an argument, so the mapping has to come from

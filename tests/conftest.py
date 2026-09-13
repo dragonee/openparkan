@@ -49,11 +49,12 @@ def nres_archive():
 
 def build_component(type_id: int, library: str = "", member: str = "",
                     entries: tuple[int, ...] = (), label: str = "",
-                    index: int = -1) -> bytes:
+                    index: int = -1, values: tuple[float, ...] = ()) -> bytes:
     """One section-4 record, laid out as ``Control.dll`` reads it."""
     rec = bytearray(control.COMPONENT_FIXED)
     struct.pack_into("<i", rec, 0, type_id)
     struct.pack_into("<i", rec, control.COMPONENT_INDEX_AT, index)
+    struct.pack_into(f"<{len(values)}f", rec, control.COMPONENT_VALUES_AT, *values)
     at = control.COMPONENT_NAME_AT
     rec[at:at + 32] = library.encode("latin-1").ljust(32, b"\0")
     rec[at + 32:at + 64] = member.encode("latin-1").ljust(32, b"\0")

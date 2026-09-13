@@ -278,7 +278,7 @@ the record's extent is common to all of them:
 ```
 0x00  int32      type id, 1..30
 0x18  int32      an index; the parser treats -1 as absent
-0x2c  byte[64]   copied whole into the object
+0x2c  float[16]  the component's values, copied whole into the object
 0x6c  char[32]   archive        what this part emits
 0x8c  char[32]   member
 0xac  int32      N -- how many 4-byte entries follow
@@ -296,6 +296,20 @@ The label is the good part. **All 57 distinct labels are a prefix of an
 radar, `i_eng_l` an engine, `i_fsh_f` a fight shield. So section 4 is the
 controller's **parts list**, and a component's label says which family of
 internal part it stands for. 395 of the 1066 records carry one.
+
+### The 64 bytes are the component's values
+
+**Sixteen floats**, and all 17056 of them across the 1066 records are finite.
+Every component class answers a *value id* through its vtable slot 4,
+`Control.dll:0x10021d00`, which takes the id's low byte as an index into these
+sixteen, multiplies by the owner's per-component figure when bit `0x100` is set,
+and by a run-time level at `+0x4c` when bit `0x200` is. So id `0x300` is value 0
+with both factors applied, and `0x300`–`0x305` are the first six. Which value
+means what depends on the class. One detection test (`0x10024620`) multiplies
+three of a target object's properties by values 0–2 and by a falloff over the
+range in value 3, and succeeds at 1 — a scanner's sensitivities, by the look of
+it, which is a *guess*. The one class read end to end is **26**, a building's
+efficiency: see [23-economy.md](23-economy.md).
 
 ## The section-5 record
 
@@ -318,8 +332,9 @@ is named there, which is why all 158 `objects.rlb` references are `BULL`
 records, carried only by the four archives that hold things which shoot.
 ### What is still not read
 
-The meaning of the fields rather than their extent: the component
-record's 64-byte block at +0x2c and its 4-byte entries, section 1's and
+The meaning of the fields rather than their extent: what each class's
+sixteen values mean, apart from class 26's first, and a component's 4-byte
+entries, section 1's and
 section 2's record contents, the 84-byte block's contents, and the nine
 ints of a section-5 record.
 
