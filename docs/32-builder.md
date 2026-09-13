@@ -142,14 +142,39 @@ Three things follow from the code as written:
   so the building appears the tick the builder arrives.
 - **Holding 100 is enough to set off**, whatever the building costs: the
   decision only compares with `Building_Cost`, and creation takes the full sum.
-  What the ore setter does with a result below zero is not read.
+- **So a builder's ore goes below zero** (*read*). The takt subtracts the cost
+  through `MBehaviour`'s property setter (slot 18, `0x100092c0`). The setter
+  stores the value into the property table as it is (`0x100269e0`), with no
+  floor and no cap, and then only marks it changed for the network. A builder
+  holding 150 that puts up a 1,080-ore bunker is left at −930. Its next build
+  fetches ore until it holds that building's cost again, and the room it loads
+  into is `MaximumOre` minus a negative number.
+- **It pays even when the building is refused** (*read*). `CreateBuilding`
+  (`0x10029240`) returns nothing to test. On a refusal it reports "failed to
+  build", and the takt (`0x10028e9a`) takes the cost and ends the task
+  regardless.
+- *Measured*: builders start with 200 or 2,000 ore, and 11 of the 12 schemes'
+  first buildings cost more than 200. So a builder placed with 200 goes into
+  debt on any building but a generator.
 - **A mine is never fetched for** — the builder goes straight to the site with
   whatever it holds — and the large mine, 3,460, is the one level no builder
   could carry.
 
 Nothing in the three tasks asks the unit's size (a search for property
 `0x201` in them finds nothing), so a small builder builds what a medium one
-does. `Build_BuildDistance` (150) is bound by name and no read of it was found.
+does.
+
+**The speeds and the distance** (*read*). `Build_SpeedPercent` and
+`Transport_SpeedPercent` are compiled as 1.0 (`0x10016250`; no file names them),
+so a builder and a transport walk at their full speed, held as every walk is
+([31-packages.md](31-packages.md#how-a-walks-speed-is-held--read)).
+`Build_BuildDistance` (150) is **never read**. The constants block is reached
+only through two getters, `0x10014650` and `0x10014660`, 83 calls in all.
+Following each result finds reads of 34 of the block's fields and none of its
+`+0x3c`.
+
+**The menu's build and upgrade rows need an intact beam too**
+(`iron3d.dll:0x10076da0`, [31-packages.md](31-packages.md#the-commanders-menus--measured-and-read)).
 
 ## Upgrading a building — *read*
 
@@ -174,8 +199,17 @@ does. `Build_BuildDistance` (150) is bound by name and no read of it was found.
 
 So an upgrade walks a building up its scheme — `smine01` → `mmine01` →
 `lmine01`, `sbunk01` → `sbunk02` → `sbunk03` — and **the task charges no ore**:
-its only reads and writes of ore are the building's own, moved across. Whether
-something outside the task charges for an upgrade is not established. If the
+its only reads and writes of ore are the building's own, moved across.
+**Nothing else charges for it either** (*read*, as a search). The menu's
+Upgrade entry gives the order and tests no ore (`iron3d.dll:0x10078f60`,
+`0x1007bbb0`). Across the install, the ore property `0x2000100` is pushed only
+by `Behavior.dll`'s own tasks and systems:
+- the distributor and the building place tick;
+- the default capacities (`0x10008790`) and a mission property;
+- the mine, research, construction, build, transport and upgrade tasks.
+
+`iron3d.dll` writes it once, into an order for a mine. No other module names
+it. None of these is on an upgrade's path but `M_Task_Upgrade`. If the
 building changes hands on the way, or reads `0x20c` = 1 before the builder
 arrives, the builder drops its invulnerability and stops.
 
@@ -235,7 +269,32 @@ controller and in no phase.
 The **kill** (action 21, `Control.dll:0x100033e6`) takes the building's
 construction sphere, finds every world object of classes `0x4`, `0x10` and
 `0x400` inside it, and kills each through its life system. That these classes
-are units is a *guess*; how often it repeats while a code is held is *unknown*.
+are units is a *guess*.
+
+**The kill repeats every 250 ms while the code is held** (*read*, and
+*measured*). The controller runs its action group each time it takes a state
+off its queue ([24-motion.md](24-motion.md#playing-a-state--read-and-measured)).
+Whenever the current state is an anchor that still applies, the planner
+(`Control.dll:0x100051c0`) queues the way back to it, `0x10004f50` walking the
+predecessors of the graph search rooted at that state (`0x100019d0`). That
+search starts every state at its own edge into the target, the target's
+self-edge included.
+*Measured*, on all 30 `fortif.rlb` controllers:
+- **The three kill states are anchors.** Each state asked for by code 2, 8 or 10
+  is fixed at a 250 ms step, with its boxes switched off, so load does not
+  scale its costs.
+- **Each has a self-edge of cost 1**, and the planner's way back from it is
+  that edge alone. The code-8 state has no other way out.
+
+So while the building's code stays 2, 8 or 10, the state takes itself again
+every step and kills inside the sphere four times a second:
+- about 20 times in a new building's 5-second code-2 phase;
+- for the rest of the upgrade on the old building, from 26 s until it is
+  replaced at 50 s;
+- about 12 times in the new building's 3-second code-10 phase.
+
+The state before code 2's, which starts the dome and the ray, kills once more
+as it passes.
 
 **The sphere** is `CBuilding`'s construction sphere (`Terrain.dll:0x1005bd70`):
 built round the building's outer contours ("Illegal placement" without them),
@@ -259,7 +318,24 @@ only such writes are in the attack code, `0x10024f99`–`0x10025b74`), so **a
 builder never fires its beam to build**; the dome, ray and kill all belong to
 the building. The beams' rounds, `bld_b_01`, `bld_l_01` and `bld_m_01`, have
 1 hit point and **no explosion** — the only rounds of the 66 without one — so a
-hit would do nothing (*measured*). Whether the beam is fired at all is *unknown*.
+hit would do nothing (*measured*).
+
+**Nothing fires it at all** (*read*, as a search):
+- **The AI.** `Behavior.dll` sends a fight state (`0x200`, interface `0x202`
+  slot 6) in two places. The component index comes from a gun record of a
+  turret's gun list (`0x10024f99`), or from a network message repeating one
+  ("Fireing", `0x1002536e`). A third `0x200` near them (`0x1002599c`) is a
+  property *read* through the device manager. A type-30 part is filed in the
+  turret's other list (`0x1001c137`), which only the beam checks read.
+- **The player.** `World3D.dll`'s row handler sends a state to the components
+  of the class a `.tbl` row names, found by an exact type match (the device
+  manager's slot 17, `Control.dll:0x1002c3c0`). No `CICLS_` name is 30, so no
+  row can reach a beam, and the selection it starts from takes only types 1, 2
+  and 4 (`World3D.dll:0x1000ed20`).
+- **The rest.** No other module sends `0x100` or `0x200` through a component
+  slot but `Control.dll`'s own parts.
+
+A player's builder cannot fire its beam either.
 
 ## Transporting ore — *read*, and *measured*
 
@@ -297,15 +373,38 @@ laser (`e_gun_lc_03`, `e_gun_mc_20`).
   ([23-economy.md](23-economy.md)) against the transport's 100, so a full mine
   of 500 empties in ten seconds and the transport leaves with about 1,000.
 - **Unloading**: 100 a second into the storage, never more than it has room
-  for. When the storage has less than 0.1 free the transport **waits beside
-  it** (state 5), trying up to 100 random nearby points (`0x100322fd`).
+  for. When the storage had less than 0.1 free as the tick began, the
+  transport **steps aside** (state 5): it tries up to 100 random points within
+  30 of the storage's unloading place, both ways on each axis, and walks to the
+  first its walker takes at a quarter of its speed (`0x100322fd`). When a tick
+  empties its cargo or fills the storage, it heads back to the mine (state 1).
+- **Waiting at a full storage** (state 5, `0x10032681`, *read*). Each tick it
+  looks again at its storage and its mine:
+  - either one gone ends the task ("Task Ended");
+  - either one belonging to another clan keeps it waiting;
+  - once the storage has **more than 0.5 free**, it sets off for the mine
+    (state 1). The go command (`0x100327b0`) picks the mine and the storage
+    afresh.
+
+  It still carries what it could not unload. At the mine it tops up to its
+  capacity and returns (state 2, then 3), so a transport kept waiting goes on
+  shuttling between a mine and a storage with room. The state names end at
+  OreOffBoard, and the task's own code never sets state 6, whose handler
+  would send it to the storage.
 
 ## Not established
 
-- Whether anything charges for an upgrade outside `M_Task_Upgrade`.
-- What the ore setter does when a building's cost exceeds what the builder holds.
-- Whether a builder ever fires its beam, and how often the sphere's kill repeats
-  while a code is held.
-- The values of `Build_SpeedPercent` and `Transport_SpeedPercent`, and any reader
-  of `Build_BuildDistance`.
-- What a transport does after waiting at a full storage (state 5's handler).
+- ~~Whether anything charges for an upgrade outside `M_Task_Upgrade`.~~ Nothing
+  does.
+- ~~What the ore setter does when a building's cost exceeds what the builder
+  holds.~~ It stores the negative result.
+- ~~Whether a builder ever fires its beam, and how often the sphere's kill
+  repeats.~~ Nothing fires it; the kill repeats every 250 ms.
+- ~~The values of `Build_SpeedPercent` and `Transport_SpeedPercent`, and any
+  reader of `Build_BuildDistance`.~~ 1.0 and 1.0 (already in
+  [24-motion.md](24-motion.md#how-the-ai-asks-for-speed--read)); nothing reads
+  the distance.
+- ~~What a transport does after waiting at a full storage.~~ Goes back to the
+  mine once the storage has more than 0.5 free.
+- What a mine's "ToMine", the amount of the lodes within 250, does to its
+  output ([31-packages.md](31-packages.md#mineral-lodes--read-and-measured)).

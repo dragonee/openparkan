@@ -479,6 +479,29 @@ CPUs" in the game's own interface (`iron3d.dll` string 3067).
   order in the queue, skipping any that fail in turn (`0x10034a30`). Nothing in
   the factory waits for a mind to come free: a new order has to come from the
   player or the clan's AI.
+- **When the refusal is seen** — *read*. An order to the end of a factory's
+  queue starts at once only if it is then the only task (`0x100178c0`); an
+  order to the start, or replacing, always starts at once. A start that fails
+  makes `MBehaviour::MakeNewOrder` (`0x10004280`) take its "Incorrect Order
+  parameter" way out and return 0, and `AddOrder` (`0x10004a90`) returns that.
+  An order queued behind another returns 1 and fails later, when it reaches the
+  top. The player's factory panel orders by replacing (`iron3d.dll:0x10087181`).
+- **Where the AI's builds come from** — *measured*. All 9 `ORDER_BUILDING_CONSTRUCT`
+  orders in the 58 scripts sit in a `PBM_ROBOT_NEEDED_Start` handler, one per
+  script. Each gives the order to the end of a factory's queue. It sets
+  `fn8(ST_SOLVED)` behind a comparison of `fn15`'s result with 1 (`op5`, 8 of
+  them) or with 0 (`op1`, `c1m3e`); what the two comparisons test is the
+  *guess* of [15-behaviour.md](15-behaviour.md).
+- **What `fn15` answers** — *read*. Its handler (`ai.dll:0x10008054`, the
+  table's fifteenth slot) gives the order through the unit's `AddOrder` and
+  leaves 1 in the interpreter's result (`+0x50`) when `AddOrder` returns
+  non-zero, 0 when it returns 0 or the unit is not found.
+- *Derived*, if `op5` is equality and that result is what `dT3` receives: a
+  factory with an empty queue and no free mind refuses at once, the problem
+  stays unsolved, and the handler orders again the next time the clan plans
+  `PBM_ROBOT_NEEDED`. A build queued behind another is accepted and marked
+  solved, then dropped when it reaches the top. `ai.dll:0x10007fd0`, named here
+  before, is only a helper in the handlers' code that evaluates one argument.
 
 So a clan with 5 minds can have at most 5 bots alive or under construction,
 and its factories stop until one is lost. Buildings take no mind.
@@ -622,5 +645,9 @@ construction slows research.
 
 ## Not established
 
-- Whether a clan's AI re-orders a build that was refused for want of a mind
-  (`ai.dll:0x10007fd0` is where to look).
+- Whether a clan's AI re-orders a build that was refused for want of a mind.
+  An immediate refusal makes `AddOrder` return 0 and `fn15` leave 0, so a
+  `PBM_ROBOT_NEEDED_Start` handler does not mark its problem solved. Still to
+  read: that the result reaches `dT3` and `op5` is equality (the interpreter's
+  semantics), and when the SuperAI plans `PBM_ROBOT_NEEDED` again. A build
+  refused later, behind another order, is not re-ordered by that handler.

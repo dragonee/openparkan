@@ -18,7 +18,7 @@ address given. *Guess* fits the evidence but is not established.
 task factory `MTaskStack::CreateTaskFromOrder` (`Behavior.dll:0x10033a80`) is a
 switch on exactly these numbers (*read*):
 
-| # | order | task built (vtable) | status text |
+| # | order | task built (vtable) | status line (*read*) |
 |---:|---|---|---|
 | 1 | `ORDER_ROBOT_STOP` | stop (`0x100596ac`) | stopping |
 | 2 | `ORDER_ROBOT_GO` | go (`0x10059e74`) | moving |
@@ -28,14 +28,15 @@ switch on exactly these numbers (*read*):
 | 6 | `ORDER_ROBOT_TRANSPORT` | transport (`0x10059ca8`) | transporting |
 | 7 | `ORDER_ROBOT_BUILD` | build (`0x10059c60`) | building |
 | 8, 9 | `ORDER_ROBOT_RELOAD`, `_REPARE` | `M_Task_Reload` (`0x10059be0`), one case for both | refitting, repairing |
-| 10 | `ORDER_BUILDING_MINE` | `M_Task_Mine` (`0x10059b60`) | |
-| 11 | `ORDER_BUILDING_CHARGE` | **none**: "Incorrect Order" | |
-| 12 | `ORDER_BUILDING_CONSTRUCT` | `M_Task_Construct` (`0x10059b24`) | |
-| 13 | `ORDER_ROBOT_RANDOMGO` | random go (`0x10059ba0`) | |
-| 14, 16 | *(undeclared)* | `M_Task_Research` (`0x10059f58`) | |
-| 15 | *(undeclared)* | migrate (`0x10059aac`), an animal's default order (`0x100088f0`) | |
+| 10 | `ORDER_BUILDING_MINE` | `M_Task_Mine` (`0x10059b60`) | unknown |
+| 11 | `ORDER_BUILDING_CHARGE` | **none**: "Incorrect Order" | unknown |
+| 12 | `ORDER_BUILDING_CONSTRUCT` | `M_Task_Construct` (`0x10059b24`) | unknown |
+| 13 | `ORDER_ROBOT_RANDOMGO` | random go (`0x10059ba0`) | unknown |
+| 14 | *(undeclared)* | `M_Task_Research` (`0x10059f58`): **one technology by its id**, from the player's research panel (below) | unknown |
+| 15 | *(undeclared)* | migrate (`0x10059aac`), an animal's default order (`0x100088f0`) | unknown |
+| 16 | *(undeclared)* | `M_Task_Research` again: **what a design needs, by its `.dat` name**, from the AI (below) | unknown |
 | 17 | `ORDER_ROBOT_CAPTURE` | **the search task again**, restricted to building types `0x8017365e` (`0x100341a3`) | capturing |
-| 18 | *(undeclared)* | a task logging "ShowUpgrade" (`0x10059ae8`) | |
+| 18 | *(undeclared)* | a task logging "ShowUpgrade" (`0x10059ae8`): **the construction sphere**, given only by `Behavior.dll` itself ([32-builder.md](32-builder.md)) | unknown |
 | 19 | `ORDER_ROBOT_SHUTDOWN` | shutdown (`0x10059eec`) | shutting down |
 | 20 | `ORDER_ROBOT_LEAVE` | leave (`0x10059e38`, "Leave"): **the escape**, below | escaping |
 | 21 | `ORDER_ROBOT_STAYGROUND` | stay ground (`0x10059eb0`) | standing |
@@ -47,12 +48,36 @@ An order carries a target, given as `TARGET_BY_LOGIC_ID` `0x201`, `_BY_PLACE`
 `0x202`, `_BY_TYPE` `0x203`, `_NOT_DEFINED` `0x204` or `_BY_NAME` `0x205`. It
 also carries an insert mode: to the end 1, to the start 2, or replace 3.
 
-A unit's status line is one of 18 strings, `iron3d.dll` 6180–6197 (*measured*):
+**Orders 14, 16 and 18 have no name anywhere**: `varset.var` does not declare
+them, and none of the thirteen game binaries carries an `ORDER_` string at
+all. The tasks' own log strings ("Research (%X)", "Migrate %d", "ShowUpgrade")
+name the task, not the order. What gives them is *read*:
+
+- **14** comes from the player's research panel (`iron3d.dll:0x100880b0`). For
+  a technology whose state in the clan's tree reads 0 and which is not already
+  queued (`0x10087c00`), it picks among the clan's research centres the living
+  one whose sphere is not running (`0x20c` reads 0) and which has the fewest
+  orders. It gives that centre order 14, target `0x204`, with the technology's
+  id as the parameter, **to the end** of its queue. The task's `SetTarget`
+  (`Behavior.dll:0x1002f470`) logs "Researching" for it.
+- **16** comes from `ai.dll` (`0x10011100`), **replacing**: target `0x205` with
+  a design's name. `SetTarget` loads that `.dat` ("Cannot Load DAT file", magic
+  `0xf0f1`) and researches what the design needs.
+- **18** is given by `CreateObjectFromScheme` and `M_Task_Upgrade` alone.
+
+**The status line** is one of 18 strings, `iron3d.dll` 6180–6197 (*measured*):
 no order, stopping, shutting down, standing, moving, escaping, following,
 getting onboard, attacking, patrolling, searching, transporting, building,
-refitting, repairing, capturing, upgrading, unknown. The text column above
-pairs them with orders by name. That pairing is a *guess*; which code picks the
-string was not read.
+refitting, repairing, capturing, upgrading, unknown. **The order at the head of
+the unit's order list picks it** (`iron3d.dll:0x10076f90`, a switch over 0–24,
+table `0x100770b8`; *read*). The unit's `IBehaviour` slot 4 gives the list's
+length and slot 5 the list; a record's first word is its order.
+- An empty list reads "no order".
+- Every order the table does not name reads "unknown": 10 to 16, 18, and
+  anything above 24.
+- So a unit on the menu's Search and capture (order 5) reads "searching"; only
+  a script's `ORDER_ROBOT_CAPTURE` reads "capturing".
+- The line is `"%s [%s]"`, the unit's name and this string.
 
 ## The commander's menus — *measured*, and *read*
 
@@ -85,9 +110,25 @@ the dispatcher `0x10079230`, which gives every selected unit its order with
 The HQ table holds rows 0–3 and 6–23 (22 rows). The masks are `0x0103e000`
 (every robot type), `0x01002000` (transports) and `0x01004000` (builders). The
 second table holds Standby, Follow me, Search and capture, Seek and destroy,
-Attack, Capture building and Refit (7 rows). That it is the **wingman menu**
-(`CMD_JAMES_WINGMAN_MENU`) is a *guess*, backed by *C01 Mission 3*'s tip, which
-names "Stand By" and "Follow Me" as commands to the player's wingman.
+Attack, Capture building and Refit (7 rows).
+
+**The second table is the wingman menu** (*read*, and *measured*).
+`CMD_JAMES_WINGMAN_MENU` (740) — "Activate wingman menu" in `Command.dsc`, bound
+to the tilde in `addition.man` and `ui_other.man` — reaches the game command
+handler's case `0x100724fe`. In the first-person views, and while the player's
+current unit record has its `+0xa2` set, that case calls the wingman selector
+(`iron3d.dll:0x1006db40`). The drive switch below sets `+0xa2` when the player
+takes a bot below auto-driver level 2. The selector toggles between off
+(state 0) and on (state 2), gathering friendly units from a list as it switches
+on; a Shift key changes how. While it is on, the first-person panel
+(`0x100431a0`) opens the order menu with its flag set (`0x1007a8e0` stores it at
+`+4`), and the menu builder (`0x1007aaa0`) then reads the second table for the
+selector's units instead of the HQ table. *C01 Mission 3*'s tip, which names
+"Stand By" and "Follow Me" as commands to the player's wingman, agrees.
+
+**Build and upgrade rows also need an intact beam** (*read*): the row test
+(`0x1007bbb0`) refuses them while `0x10076da0` finds the builder dead, without a
+type-30 component, or with that component's value `0x52` at 0 or below.
 
 **The Outpost is the building the files call a hangar** (*read*). The upgrade case for "Upgrade Outpost"
 pushes building type `0x80000040`, which `varset.var` calls
@@ -107,13 +148,22 @@ readers were not traced, that is marked.
 - **Standby — stay ground.** The unit stays where it is. Its interrupt
   priority is **0 for every reason** (`0x10031c80`), so nothing it sees makes
   the behaviour pull it off station. That fits the tip's "fixed firing point":
-  the guns still aim and fire through the unit's own fire control. That the
-  fire control runs independently of the task is a *guess*; it was not traced.
+  **the guns still aim and fire through the unit's own fire control**, which the
+  task sets to pick its own targets ([The fire control](#the-fire-control--read)).
 - **Route — go.** It walks to the place at `Go_SpeedPercent` 1.0 of the unit's
   speed and ends when it stops there ("We are staying... task over",
   `0x1002b670`), or fails if the place is unreachable. The go task will not be
-  interrupted by reasons 0–2 or 5, only 3 and 4 (`0x1002b390`). Whether the
-  menu can chain waypoints was not established: it issues one place.
+  interrupted by reasons 0–2 or 5, only 3 and 4 (`0x1002b390`).
+  **Route does not chain waypoints** (*read*, as a search). The dispatcher's
+  case for Route (`iron3d.dll:0x10079230`) first empties the unit record's list
+  of points (`+0xc0`, 8-byte x/y records, `0x1007c0a0`), then gives one `GO` to
+  the picked place, replacing. The unit record's constructor (`0x10074af0`)
+  builds that list. Another path (`0x10079f40`) gives a `PATROL` of
+  radius 300, replacing, on one of two units the record names or on the list's
+  *first* point, and empties the list. Nothing fills the list: every
+  store to an `+0xc4` field in `iron3d.dll`, the list's end, is one of these
+  emptyings or belongs to a panel layout. The go task holds one place, and a
+  later `GO` replaces it.
 - **Seek and destroy — search, no target.** `SetTarget` (`0x10030110`) sets
   the task's enemy mode for a target of `0x204`. Each plan picks **the nearest
   hostile warrior, builder or transport the clan knows of, within 3,000**, and
@@ -168,8 +218,8 @@ readers were not traced, that is marked.
 - **Guard — patrol.** Pick a unit, a building or a place (`0x1002d520`). The
   patrol task moves to a new random point around it on a timer (`0x1002dd90`),
   and only while `Behavior.ini`'s `DeterminMode` is 0 (`0x1002d900`). The
-  compiled defaults by target, by name (the building speed reads as a typo for
-  0.8 — *guess*):
+  compiled defaults by target, read where `SetTarget` (`0x1002d520`) and the
+  start (`0x1002d7c0`) take them:
 
   | guarding | radius | new point every | speed |
   |---|---:|---|---:|
@@ -177,8 +227,30 @@ readers were not traced, that is marked.
   | a building | 30 | 60 + up to 60 s | 80 |
   | a place | 60 | 20 + up to 10 s | 0.8 |
 
-  `Patrol_Attack_Range` is 400. That it is the range at which a guard engages
-  is a *guess*; its reader was not found.
+  **The building's 80 changes nothing a 1.0 would not** (*read*). A walk is
+  asked for at the unit's speed (`+0x5fc`) × the task's figure, and
+  `MWalker::SetTarget` (`0x1003bad0`) holds the request
+  ([How a walk's speed is held](#how-a-walks-speed-is-held--read)):
+  - no more than the unit's speed × `Movement_SpeedPercent` (1) ×
+    `Speed_MaximumFactor`, the difficulty profile's;
+  - no more than `Movement_MaxSpeed`, 600;
+  - no less than the unit's second figure × `Movement_MinSpeedPercent` (1);
+  - no less than 2.
+
+  The unit's takt copies the same control record into both `+0x5fc` and the
+  `+0x614` the cap reads (`0x1001bbe0`). So 80 × the speed is cut to the unit's
+  full speed × `Speed_MaximumFactor`, exactly what a unit guard's 1.0 gets.
+  Whether 80 was meant as 0.8 cannot be told from the code; in play it is full
+  speed.
+
+  **`Patrol_Attack_Range` (400) is never read** (*read*, as a search). The
+  constants block is reached only through two getters (`0x10014650`,
+  `0x10014660`, 83 calls), and following each result finds reads of 34 of its
+  fields, every other patrol constant among them, but none of `+0x30`.
+  `Build_BuildDistance` (`+0x3c`) is unread the same way. The range at which
+  a guard fights is the fire control's 500
+  ([The fire control](#the-fire-control--read)). The 400 a call for help uses
+  is a separate constant ([Between orders](#between-orders--read)).
 
   **A small unit told to guard a building of another clan captures it first**
   (`0x1002da7a`): if the unit is of size class 2 or less, the patrol queues,
@@ -200,10 +272,11 @@ readers were not traced, that is marked.
   - it closes at 0.8 + up to 0.2 of its speed and fights at 0.7 + up to 0.3;
   - it changes course every 4 + up to 4 s.
 - **Search minerals — search by type `0x10001000`.** The minerals mode picks
-  **the nearest mineral lode nobody has found yet**, from the whole map's list
-  (`ArealMap.dll`'s `SetMineralLode`, `0x10021db0`), not from what the clan has
-  seen. It walks there; within 10 m it marks the lode found for everyone, logs
-  "Resource Found" (`0x10030535`) and ends. What sets the lodes was not traced.
+  **the nearest mineral lode not yet found** (a lode's `+0xc` is 0,
+  `0x1003075d`), from the whole map's list, not from what the clan has seen. It
+  walks there; within 10 m it marks the lode found for everyone, logs "Resource
+  Found" (`0x10030535`) and ends. **The lodes come from the mission file**
+  ([Mineral lodes](#mineral-lodes--read-and-measured)).
 - **Transport minerals, Build, Upgrade.** These are the transport, build and
   upgrade tasks; [32-builder.md](32-builder.md) covers what they do.
 
@@ -235,10 +308,14 @@ end: that the point, on a usable areal, is always off the building is a
 - an escape with no target that still finds the unit on a building after 20 s
   stops it and routes it out through the building's own paths ("LEAVE IS TOO
   !!!");
-- an escape from a named building is held while that building's state
-  (variable `0x205`) reads 1 or `0x309`, or its `0x20c` reads 1 — that this
-  keeps a unit clear while the building goes up is a *guess*
-  ([32-builder.md](32-builder.md)).
+- an escape from a named building is held while that building's variable
+  `0x205` reads 1 or `0x309`, or its `0x20c` reads 1. **`0x205` is the
+  construction sphere's phase code** (*read*): the variable getter returns
+  `MBehaviour+0x9fc` for it (`0x1000a784`), which the sphere task writes at its
+  start and at each phase change (`0x1003130d`, `0x10031711`). 1 is the sign
+  and `0x309` the upgrade's clear-out ([32-builder.md](32-builder.md)), and
+  `0x20c` reads 1 while the sphere task runs. So an escape from a building
+  keeps going while that building's sphere clears its area.
 
 **Nothing interrupts it**: its priority is 0 for every reason (`0x1002b9f0`),
 so an escaping unit neither engages nor refits on the way. When it ends, the
@@ -248,8 +325,8 @@ task beneath it on the stack, if any, resumes.
 
 | when | escape | inserted | read at |
 |---|---|---|---|
-| a unit **stands on a building** with **no order or a stop** — not a ruin, not a destroyed building, and not passing a test through the building's `IAnimation` (interface `0xb`, slot 16) whose meaning is *unknown* | no target | replacing | unit takt `0x10005408` |
-| the behaviour's control flag `0x10` is switched back on while the unit stands on a building | from that building | first | mode setter `0x10006f48` |
+| a unit **stands on a building** with **no order or a stop** — not a ruin, not a destroyed building, and not attached to a damaged node of the building (below) | no target | replacing | unit takt `0x10005408` |
+| the behaviour's flag `0x10` is switched back on while the unit stands on a building: **the player lets go of the bot**, or raises its auto-driver level (below) | from that building | first | mode setter `0x10006f48` |
 | a factory has just made the unit | no target | replacing | `0x1002aa6e`, "Adding Robot to game..." |
 | a small unit guarding another clan's building, after capturing it | from that building | queued | patrol `0x1002da7a` |
 | a building begins its construction sphere, for every unit within its radius + 15 not already escaping or upgrading | from that building | first | ShowUpgrade `0x10031571` |
@@ -257,40 +334,100 @@ task beneath it on the stack, if any, resumes.
 So **a capture is followed by an escape when the capture task ends** —
 Capture building, a script's capture by logic id, or the guard sequence — the
 unit takt seeing an idle unit on the building. The menu's Search and capture
-does not end at a capture, so that path does not run. That the control flag
-`0x10` is the AI's, off while the player drives a unit — which would make the
-second row "the player lets go of a unit on a building" — is a *guess*: it fits
-the flag gating the unit's own takt, but the callers of the mode setter were
-not traced.
+does not end at a capture, so that path does not run.
+
+**The node test in the unit takt** (`0x1000537d`, *read*). The unit's parent
+object is the building it stands on. `IGameObject` slot 3 returns the parent
+and slot 16 the joint, the parent's node the unit is attached to (`+8` and
+`+0xc`, as `CGameObject::SetParent` stores them: `AniMesh.dll:0x10017510`,
+`0x10017570`, `0x10017ea0`). The building's `IAnimation`, which it hands on to
+its `AniMesh` agent (`Terrain.dll:0x10057c20` passes interface `0xb` on), gives
+in slot 16 that node's value, its `+0x1c` (`AniMesh.dll:0x100057f0`). A unit on
+a node with a non-zero value is not given the escape. The same value makes a
+building's place tick skip a hall-way place on that node (`Behavior.dll:0x10018b7e`).
+The loader zeroes the value, and `IAnimation` slot 17 (`0x10005810`) sets it.
+**Its one caller found is the node damage stage** (`Control.dll:0x100118c4`, in
+`0x10011220`). As a node's life falls, the control system gives its animation
+node the node's damage stage, held below the model's stage count. So **the value
+is how damaged the node is**, 0 while it is whole. Two things follow:
+- a unit attached to a damaged node of a building is not given the escape;
+- a building's hall-way place on a damaged node is out of use.
+
+The search that found it listed the slots called through each module's stored
+`IAnimation` (`Control.dll`'s `+0x20` among them). A search for interface `0xb`
+followed by a call at `+0x44` had found only the two slot-16 readers.
+
+**Flag `0x10` is the player's hand** (*read*). Each unit's agent carries a
+`Wizard.dll` object, and only it was found calling the mode setter
+(`IBehaviour` slot 10) with a whole-behaviour argument. A scan of every call at
+`+0x28` with −1 among its pushes, in all sixteen modules, finds
+`Wizard.dll:0x10003904`. The other twelve hits pass −1 last and have a
+different shape.
+- **Its mode.** Message `(6, 7, p)` to the unit's agent
+  (`AniMesh.dll:0x1000147c`) passes `p` to the wizard (`0x10001af0`): 0 is AI
+  mode, 1 the player's mode, 2 off.
+- **Its per-bit overrides** (slot 9, `0x10002070`): 0 follows the mode, 1 forces
+  a bit on, anything else forces it off.
+- **The flags** (`0x10003890`): bit 2, the behaviour's flag `0x10`, is on in AI
+  mode unless forced off, and on in the player's mode only when forced on.
+  Bits 4 and 8, flags `0x20` and `0x40`, work the same way from a second
+  override. Mode 2 clears everything.
+- **Taking a bot** (`iron3d.dll:0x10074ff0`, argument 1). The overrides follow
+  the bot's **auto-driver level** (`+0x9c`), which `CMD_JAMES_AUTO_DRIVER` (744)
+  steps 0 → 1 → 2 → 0 (`0x10075fc0`):
+
+  | level | flag `0x10` | flags `0x20`, `0x40` | mode sent |
+  |---:|---|---|---|
+  | 0 | forced off | forced off | 1, the player's |
+  | 1 | forced on | forced off | 1 |
+  | 2 | forced on | forced on | 0, AI |
+
+  The hero has every override forced off.
+- **Letting go** (argument 0). It sends mode 0 and forces every override on,
+  except on the hero, whose overrides all read 2, off.
+- So **letting go of a bot that stands on a building turns flag `0x10` back on,
+  and the mode setter gives the bot its escape**. Raising its auto-driver level
+  from 0 to 1 while it stands there does the same.
 
 *Against what the game looked like:* in play an escape follows every capture,
 and follows leaving a driven bot inside a building or on its grounds. The code
-read gives the second through the mode setter (if flag `0x10` is the player's
-hand, a *guess*) and the first only where the capture task ends: after Capture
-building or a script's capture, not after the menu's Search and capture, which
-replans at `0x100304b9`. What gives a Search and capture unit its escape, if
-anything does, is *unknown*.
+now gives the second through the wizard and the mode setter. It gives the first
+only where the capture task ends: after Capture building or a script's capture,
+not after the menu's Search and capture, which replans at `0x100304b9`. What
+gives a Search and capture unit its escape, if anything does, is *unknown*.
 
 ## Where a search looks — *read*, and *measured*
 
 **What the clan knows.** Enemy and building candidates come from the clan's
-**areal map**, not from the whole world and not from the unit's own radar list
-(`0x10015260`, `0x10015310`). That map keeps, for each areal, a snapshot of the
-units and buildings in it. Every 2.0–4.9 s each unit's radar module reports its
-position and radar range ([25-sensors.md](25-sensors.md)). The clan map then
-refreshes the snapshot of every areal within that range from the game's
-system map, and stamps it with the time (`ArealMap.dll:0x10001ec0`,
-`0x10001dd0`, `0x10001840`). So a search picks from **what the clan's radars
-have swept, as last seen there**. A building or unit in an areal no radar of
-the clan has covered is not a candidate. Whether a clan's map starts out
-knowing anything was not traced.
+**areal map**, not from the unit's own radar list (`0x10015260`,
+`0x10015310`). That map keeps, for each areal, a snapshot of the units and
+buildings in it: logic id, Type and clan. Two things refresh a snapshot from
+the game's system map, and each stamps it with the time
+(`ArealMap.dll:0x10001840`):
+- **The clan's own tick refreshes every areal** (*read*). The clan's SuperAI
+  creates the map (`ai.dll:0x10005cb0`, `CreateArealMap`) and sends it message 1
+  on each of its takts (`0x10001780`). On message 1 the map
+  (`ArealMap.dll:0x10001370`) runs a timer and, whenever it fires, refreshes all
+  its areals in turn. The constructor (`0x10001010`) sets the timer's words to
+  46 and 46 and its next time to 0 (`0x1002d570`: next = now + 46 × 64 ms + a
+  random byte × 46 × 64 / 256). So the first tick refreshes everything, and
+  then every **2.9 to 5.9 s**.
+- Every 2.0–4.9 s each unit's radar module reports its position and radar range
+  ([25-sensors.md](25-sensors.md)), and the map refreshes the areals within that
+  range at once (`0x10001ec0`, `0x10001dd0`).
+
+So **a clan's map holds the whole map from its first tick**, at most about
+5.9 s old, and sooner near its radars. The collectors never read the stamp:
+a search trusts any snapshot until the next refresh replaces it. An earlier
+version of this page said a search sees only what the clan's radars have swept.
+That reading missed the timed refresh.
 
 **The plan runs in this order** (`0x100306f0`), and the first that finds
 something is taken:
 
 | mode | candidates | pick |
 |---|---|---|
-| minerals | the map's undiscovered mineral lodes | nearest |
+| minerals | the map's mineral lodes not yet found | nearest |
 | capture | the clan's known buildings of the mask, not its own, not under construction, no main teleport or bridge | nearest across the ground, a generator at half distance |
 | capture, nothing found | the clan's known hostile warriors, builders and transports within 300 | a point away from them (below) |
 | enemies | the clan's known hostile warriors, builders and transports within 3,000 | nearest the walker accepts |
@@ -315,6 +452,49 @@ every map's navigation mesh starts at (0, 0), 33 of 33. So the point lies within
 300 of the map's corner, or off the map, where no areal is usable and the unit
 roams instead. That this is a slip in the game's code rather than a design is a
 *guess*.
+
+## Mineral lodes — *read*, and *measured*
+
+**The lodes are the mission's own records**, the trailer's list that
+[04-missions.md](04-missions.md) reads as per-clan viewpoints (*read*).
+- **Loading.** `MisLoad.dll`'s reader (`0x10001b10`) reads the objects and the
+  trailer. When the word before the object count (10 in every mission) is 5 or
+  more, the trailer ends with a count and that many 28-byte records. The reader
+  puts them at the mission's `+0x10`/`+0x14`, starting each at type
+  `0x10001000`.
+  `IMission` slots 12 and 13 (`0x10001520`, `0x10001530`) hand them out.
+- **Into the map.** `iron3d.dll:0x10081880` copies them into the system areal
+  map's list with `SetMineralLode` (`ArealMap.dll:0x10021db0`); a saved game
+  restores the same list from its file (`0x10081750`).
+
+A lode as the game keeps it, 24 bytes:
+
+| offset | from the file record | what |
+|---:|---|---|
+| `+0x00`, `+0x04` | x, y | where it lies |
+| `+0x08` | — (0) | the file's z is not copied |
+| `+0x0c` | the first word | **found**: a search skips a lode whose word is set |
+| `+0x10` | — (`0x10001000`) | the file's type word is not copied |
+| `+0x14` | the third word, a float | **amount** |
+
+The file's fourth word, a float, is not copied either.
+
+What uses them (*read*):
+- **Search minerals** walks to the nearest lode not found and, within 10, marks
+  it found.
+- **A mine** (`M_Task_Mine`'s `SetTarget`, `Behavior.dll:0x1002cd10`) adds up
+  the amounts of every lode within 250 of it as its "ToMine" (`MBehaviour+0x9e8`),
+  and marks each found.
+
+*Measured* over the 29 missions:
+- **28 lodes in 13 missions.** 16 missions have none; the rest carry 1 to 4.
+- **Every one of the 15 placed mines lies within 250 of a lode.** Control: 6 of
+  the 95 other buildings in those missions do, generators mostly.
+- **The amounts are powers of ten from 10⁴ to 10²⁰, or one less** (999,999
+  once, 9,999,999 twice). The type word is `0x10001000` on 25; the other 3
+  carry 0 and a fourth word of 100.
+- **17 start found.** The other 11 are open to Search minerals until a mine
+  within 250 marks them.
 
 ## Who may run which — *measured*, and *read*
 
@@ -351,11 +531,21 @@ bound at `0x10022e20`):
 | plant | 1 | | | | | | | | | | | | 1 | |
 | every other building | 1 | | | | | | | | | | | | | |
 
-**Nothing was found that reads these flags.** The search covered the
-displacements `+0x834`–`+0x868` on any base register, the `+0x820` block base,
-and indexed forms in `Behavior.dll`, `iron3d.dll` and `ai.dll`. So a builder's
-0 for Attack describes the design; whether the engine enforces it is *unknown*.
-What does gate packages, as read:
+**Nothing reads these flags** (*read*, as a search with controls):
+- **By offset.** The displacements `+0x834`–`+0x868` appear on no base register
+  but the stack in `Behavior.dll`, `iron3d.dll` and `ai.dll`, nor does the `+0x820`
+  block base outside its binder (`0x1000a2a0`) and getter (`0x10014680`). All 17
+  calls of the getter read the ore and power fields at `+0x54`–`+0x68`
+  ([26-damage.md](26-damage.md)).
+- **By id.** The behaviour's variable getter (`0x1000a490`) returns no address
+  in the block for any id.
+- **By name.** No file in the install but `Behavior.dll`, which binds them, and
+  `behpsp.res`, which sets them, names a `Task_*` flag (*measured*).
+
+So a builder's 0 for Attack describes the design, and nothing enforces it. The
+four medium builders that carry a gun engage like anyone else: the engagement
+inserts an attack whatever the profile says, and the attack task cancels only
+for want of a weapon (*derived*). What does gate packages, as read:
 
 - the menu masks (transports alone get Transport minerals; builders alone get
   building);
@@ -364,6 +554,32 @@ What does gate packages, as read:
 
 ## Between orders — *read*
 
+**The six interrupt reasons** (*read*). A self-given task is inserted by
+`0x100179c0` with a reason, and `0x10034510` builds its task from the reason:
+
+| reason | the task | who asks |
+|---:|---|---|
+| 0 | `M_Task_Attack` on the best-scoring hostile contact | the engagement below (`0x10017e70`) |
+| 1 | `M_Task_Attack` on a logic id | **retaliation**: a unit hit by an explosion attacks the object it came from (below) |
+| 2 | `M_Task_Attack` on a logic id | nothing found |
+| 3 | `M_Task_Reload`, a trip to a dock | refitting (`0x10017d50`) |
+| 4 | none: the builder returns nothing | nothing found |
+| 5 | `M_Task_Attack` on a **place** | **a call for help** (below) |
+
+So a task's priority for reasons 0–2 and 5 is its willingness to be pulled into
+a fight, for 3 into a refit. The only callers of `0x100179c0` are the four
+named, so reasons 2 and 4 are tested by the priorities but never asked.
+
+- **Retaliation and a call for help.** `MBehaviour::SendMsg` passes messages
+  `0x19` and `0x1a` to slot 67 (`0x10005b01` → `0x100064b0`), which logs
+  "Explode at [..] received from". Unless the unit is a building, it finds the
+  object the explosion came from and asks for a reason-1 attack on its logic id
+  (`0x10018060`). It then calls for help (`0x1000c260`): every warrior
+  (`0x1008000`) of its own clan's areal-map snapshot within **400** of it is
+  sent message `0x12d` with the victim's logic id. That message reaches slot 68
+  (`0x10005aee` → `0x100065a0`), a reason-5 attack on the victim's place
+  (`0x10018030`). The 400 is a constant of its own (`Behavior.dll:0x10059630`),
+  not `Patrol_Attack_Range`.
 - **Engaging.** Every behaviour tick, `0x10017e70` scores the radar module's
   hostile contacts ([25-sensors.md](25-sensors.md)) through the current task.
   By default a contact scores 0 beyond 500 (`0x10001010`). `0x100179c0` then
@@ -380,7 +596,9 @@ What does gate packages, as read:
   answers 1. **So a
   unit engages on its own while stopped, guarding, seeking and destroying or
   attacking, but not while standing by, moving on a route, capturing, searching
-  for minerals, building or transporting.**
+  for minerals, building or transporting.** Engaging here means taking up an
+  attack task. Picking a target to shoot at while the task goes on is the fire
+  control's, below.
 - **Refitting.** A unit whose life or charge is below half, or whose guns are
   mostly dry, sends itself to a dock as a reason-3 task
   ([27-ownership.md](27-ownership.md)). The default priority lets reason 3
@@ -390,6 +608,61 @@ What does gate packages, as read:
   ("Give default patrol inside building order", `0x1000ac4c`). **A unit left
   idle or stopped on a building escapes** from it ([The escape](#the-escape--read)).
   For other units no default order was found.
+
+## The fire control — *read*
+
+The object at `MBehaviour+0x35c` is the unit's **fire control** (constructor
+`Behavior.dll:0x10023e80`, takt `0x10023ff0`). Its mode, `+0x28`, picks the
+target the guns are pointed at (`0x100240a6`):
+
+| mode | target |
+|---:|---|
+| 0 | none |
+| 1 | the one it was given, by logic id (`+0x2c`) |
+| 2 | the hostile contact nearest the unit, within 500 (`0x100254b0`) |
+| 3, 4 | the two weighted pickers of [25-sensors.md](25-sensors.md) |
+
+It starts in mode 2. **A task asks for a mode when it starts**, and some again
+in their takt, through `0x10023f30` with {mode, logic id, 0.5}. The request is
+kept unless `+0x5c` or `+0x60` is set (by `0x10023fd0` and `0x10025a00`, not
+traced further). It also refreshes every gun's fire frequency with the difficulty
+profile's `Fire_FreqFactor` (`0x1001b650`). What the 0.5 does is not read.
+
+| mode | asked by |
+|---:|---|
+| 1 | attack (start, takt and manoeuvre) |
+| 2 | stop, go, patrol, search, transport, random go, stay ground, follow, leave |
+| 0 | shutdown, migrate |
+
+So **the search task's start asks for mode 2** like every task that moves.
+The fire control, run from the behaviour's takt with the unit's position
+(`0x100050fc`), then aims at the nearest hostile contact within 500 whatever the
+task's interrupt priority says. Standby asks for mode 2 as well, and a shut-down
+unit or a migrating animal asks for none. The takt does nothing while the
+behaviour's variable `0x208` is set. It sends the guns their fight state in the
+same function (`0x10024f99`), under aiming conditions not read here.
+
+## How a walk's speed is held — *read*
+
+A task asks its walker for a speed, the unit's speed (`+0x5fc`) × the task's
+figure. `MWalker::SetTarget` (`Behavior.dll:0x1003bad0`, at `0x1003be4f`) then
+holds it:
+
+```
+speed = min(speed, top × Movement_SpeedPercent × Speed_MaximumFactor)
+speed = min(speed, Movement_MaxSpeed)                     # 600
+speed = max(speed, low × Movement_MinSpeedPercent)
+speed = max(speed, 2)
+```
+
+`top` is `+0x614` and `low` is `+0x618`. The unit takt copies one control
+record (IControl query `0x12`) into both `+0x5fc`..`+0x610` and
+`+0x614`..`+0x628` (`0x1001bbe0`), so `top` is the same speed the task
+multiplied: record `+0x1c`, and `low` is its `+0x10`. `Movement_SpeedPercent`
+and `Movement_MinSpeedPercent` are 1. `Speed_MaximumFactor` is the difficulty
+profile's: 0.7 in `diff_slow`, 1 in the other four
+([24-motion.md](24-motion.md)). **A figure above 1 is therefore the same as 1**, and
+every task's walk is capped at the unit's speed × `Speed_MaximumFactor`.
 
 ## How the missions use them — *measured*
 
@@ -417,22 +690,39 @@ captures by logic id 34 times.
 
 ## Not established
 
-- Whether anything enforces a profile's task flags.
-- What sets the mineral lodes the minerals search picks from.
-- Whether a clan's areal map knows anything before its units' radars have swept
-  it, and how old a snapshot may be before a search still trusts it.
-- What the search task's start does to the unit's `+0x35c` controller (it asks
-  for mode 2, as other tasks do).
-- What reasons 1, 2, 4 and 5 of the interrupt priority are. 0 is an engagement
-  and 3 a refit.
-- What orders 14, 16 and 18 are called. 14 and 16 build the research task.
-- Whether Route can chain waypoints.
-- What reads `Patrol_Attack_Range`, and the building patrol speed of 80.
-- Which string the status line shows for which task.
-- Whether a wingman menu is what the second table is.
-- What the building's `IAnimation` test in the unit takt admits (interface
-  `0xb`, slot 16, given the unit's `IGameObject` slot-16 value), which keeps some
-  units on a building from escaping.
-- Who calls the behaviour's mode setter, and so whether flag `0x10` is the
-  player's hand on a unit.
-- What a building's variable `0x205` holds, which an escape from it waits out.
+- ~~Whether anything enforces a profile's task flags.~~ Nothing reads them
+  ([Who may run which](#who-may-run-which--measured-and-read)).
+- ~~What sets the mineral lodes.~~ The mission file's trailer records
+  ([Mineral lodes](#mineral-lodes--read-and-measured)).
+- ~~Whether a clan's areal map knows anything before its radars sweep, and how
+  old a snapshot a search trusts.~~ It refreshes every areal on its first tick
+  and every 2.9–5.9 s after; the stamp is never read
+  ([Where a search looks](#where-a-search-looks--read-and-measured)).
+- ~~What the search task's start does to the `+0x35c` controller.~~ It is the
+  fire control; mode 2 aims at the nearest hostile contact within 500
+  ([The fire control](#the-fire-control--read)).
+- ~~What interrupt reasons 1, 2, 4 and 5 are.~~ 1 retaliation, 5 a call for
+  help, 2 an attack and 4 nothing, neither of the last two ever asked
+  ([Between orders](#between-orders--read)).
+- ~~What orders 14, 16 and 18 are called.~~ Nothing in the install names them:
+  `varset.var` skips them and no binary carries an `ORDER_` string. What gives
+  them is read: research by id, research of a design by name, the construction
+  sphere ([The orders](#the-orders--measured)).
+- ~~Whether Route can chain waypoints.~~ It cannot: every `GO` the menus give
+  replaces, and the unit record's point list is only ever emptied.
+- ~~What reads `Patrol_Attack_Range`, and the building patrol speed of 80.~~
+  Nothing reads the range; 80 is cut to full speed by the walker.
+- ~~Which string the status line shows for which task.~~ By the head order.
+- ~~Whether a wingman menu is what the second table is.~~ It is.
+- ~~What the building's `IAnimation` test in the unit takt admits.~~ A unit on
+  a damaged node of the building: the node's value is its damage stage
+  ([The escape](#the-escape--read)). Whether other code than
+  `Control.dll:0x100118c4` sets the value was not searched beyond the stored
+  `IAnimation` pointers.
+- ~~Who calls the behaviour's mode setter.~~ `Wizard.dll`, from the player's
+  taking and letting go of a bot ([The escape](#the-escape--read)).
+- ~~What a building's variable `0x205` holds.~~ The sphere's phase code.
+- What a fire-control request's third value, 0.5, does, and what sets `+0x5c`
+  and `+0x60` to lock a unit's fire mode.
+- Who sends `MBehaviour` messages `0x19` and `0x1a`, the explosions that start a
+  retaliation.

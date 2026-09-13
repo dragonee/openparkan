@@ -26,8 +26,11 @@ few fields are carried through without being understood:
   mind count, how many bots it may field; see [04-missions.md](04-missions.md).
 - ~~The four words trailing each trailer viewpoint~~ — **answered: the
   trailer's records are mineral lodes**, not viewpoints; the words are a found
-  flag, the object type `0x10001000`, an amount and a word nothing reads.
-  What reads the amount off `SetMineralLode`'s record (`+0x14`) is open.
+  flag, the object type `0x10001000` (the type the minerals search asks for),
+  an amount and a float nothing reads. Every one of the 15 placed mines lies
+  within 250 of one. What reads the amount off `SetMineralLode`'s record
+  (`+0x14`) is open. See [04-missions.md](04-missions.md) and
+  [31-packages.md](31-packages.md#mineral-lodes--read-and-measured).
 - ~~Object `scale`'s axis order~~ — **answered**: x, y and z scale the
   model's own axes and the radius takes the largest; only vegetation and rock
   are scaled, and the engine applies it to them (218 placements carry a value
