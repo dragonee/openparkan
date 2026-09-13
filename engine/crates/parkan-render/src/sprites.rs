@@ -5,7 +5,10 @@
 use bytemuck::{Pod, Zeroable};
 use glam::{Mat4, Vec3};
 
+use wgpu::util::DeviceExt;
+
 use crate::DEPTH_FORMAT;
+use crate::frame::{Lighting, fog_override};
 use crate::textures::GpuTextures;
 
 #[repr(C)]
@@ -93,7 +96,7 @@ impl SpriteRenderer {
             label: Some("sprite camera"),
             entries: &[wgpu::BindGroupLayoutEntry {
                 binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX,
+                visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
                 ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Uniform,
                     has_dynamic_offset: false,
@@ -121,11 +124,21 @@ impl SpriteRenderer {
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                     count: None,
                 },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
             ],
         });
         let camera = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("sprite camera"),
-            size: 64,
+            size: 112,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -186,6 +199,11 @@ impl SpriteRenderer {
             .iter()
             .map(|l| {
                 let view = l.texture.and_then(|t| bank.views.get(t)).unwrap_or(&bank.white);
+                let toward = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("sprite fog"),
+                    contents: bytemuck::bytes_of(&fog_override(l.blend_mode)),
+                    usage: wgpu::BufferUsages::UNIFORM,
+                });
                 let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
                     label: Some("sprite skin"),
                     layout: &skin_layout,
@@ -198,6 +216,7 @@ impl SpriteRenderer {
                             binding: 1,
                             resource: wgpu::BindingResource::Sampler(&bank.sampler),
                         },
+                        wgpu::BindGroupEntry { binding: 2, resource: toward.as_entire_binding() },
                     ],
                 });
                 (l.blend_mode.min(5), group)
@@ -207,8 +226,21 @@ impl SpriteRenderer {
     }
 
     /// Upload this frame's quads, grouped by look.
-    pub fn prepare(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, view_proj: Mat4, quads: &[Quad]) {
-        queue.write_buffer(&self.camera, 0, bytemuck::bytes_of(&view_proj.to_cols_array()));
+    pub fn prepare(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        view_proj: Mat4,
+        lighting: &Lighting,
+        quads: &[Quad],
+    ) {
+        let mut camera = [0.0_f32; 28];
+        camera[..16].copy_from_slice(&view_proj.to_cols_array());
+        camera[16..20].copy_from_slice(&[lighting.eye.x, lighting.eye.y, lighting.eye.z, 1.0]);
+        let [r, g, b] = lighting.fog_colour;
+        camera[20..24].copy_from_slice(&[r, g, b, 1.0]);
+        camera[24..28].copy_from_slice(&[lighting.fog_start, lighting.fog_end, 0.0, 0.0]);
+        queue.write_buffer(&self.camera, 0, bytemuck::cast_slice(&camera));
         let mut sorted: Vec<&Quad> = quads.iter().filter(|q| q.look < self.looks.len()).collect();
         sorted.sort_by_key(|q| (self.looks[q.look].0, q.look));
         let mut vertices = Vec::with_capacity(sorted.len() * 6);

@@ -208,8 +208,8 @@ impl TerrainRenderer {
         Self { pipeline, frame, frame_bind_group, vertices, indices, groups }
     }
 
-    pub fn prepare(&self, queue: &wgpu::Queue, view_proj: Mat4) {
-        queue.write_buffer(&self.frame, 0, bytemuck::bytes_of(&FrameUniform::new(view_proj)));
+    pub fn prepare(&self, queue: &wgpu::Queue, view_proj: Mat4, lighting: &crate::frame::Lighting) {
+        queue.write_buffer(&self.frame, 0, bytemuck::bytes_of(&FrameUniform::new(view_proj, lighting)));
     }
 
     pub fn draw(&self, pass: &mut wgpu::RenderPass<'_>) {

@@ -2,12 +2,24 @@
 
 struct Frame {
     view_proj: mat4x4<f32>,
-    // STAND-IN: docs/10-sky.md#not-resolved -- a fixed sun until M5 reads the sky.
+    // The sun, as the sky's keyframes give it.
     light_direction: vec4<f32>,
     light_colour: vec4<f32>,
-    // The colour added to every material's emissive (sky slot 20), fixed until M5.
+    // The colour added to every material's emissive (sky slot 20).
     scene_colour: vec4<f32>,
+    fog_colour: vec4<f32>,
+    // x start, y end: linear range fog from the eye (docs/10-sky.md, "Fog").
+    fog: vec4<f32>,
+    eye: vec4<f32>,
 };
+
+fn fogged(colour: vec3<f32>, world: vec3<f32>, toward: vec4<f32>) -> vec3<f32> {
+    let d = distance(world, frame.eye.xyz);
+    let span = max(frame.fog.y - frame.fog.x, 0.001);
+    let keep = clamp((frame.fog.y - d) / span, 0.0, 1.0);
+    let fog = mix(frame.fog_colour.rgb, toward.rgb, toward.w);
+    return mix(fog, colour, keep);
+}
 
 struct Layers {
     tint1: vec4<f32>,
@@ -31,6 +43,7 @@ struct VertexIn {
 
 struct VertexOut {
     @builtin(position) clip: vec4<f32>,
+    @location(4) world: vec3<f32>,
     @location(0) normal: vec3<f32>,
     @location(1) uv1: vec2<f32>,
     @location(2) uv2: vec2<f32>,
@@ -41,6 +54,7 @@ struct VertexOut {
 fn vs_main(v: VertexIn) -> VertexOut {
     var out: VertexOut;
     out.clip = frame.view_proj * vec4<f32>(v.position, 1.0);
+    out.world = v.position;
     out.normal = v.normal;
     out.uv1 = v.uv1;
     out.uv2 = v.uv2;
@@ -57,6 +71,7 @@ fn fs_main(v: VertexOut) -> @location(0) vec4<f32> {
     }
     let n = normalize(v.normal);
     let diffuse = max(dot(n, -frame.light_direction.xyz), 0.0);
-    let light = frame.scene_colour.rgb + frame.light_colour.rgb * diffuse;
-    return vec4<f32>(colour * light, 1.0);
+    // A lit vertex colour is held to 1, as Direct3D's fixed-function lighting holds it.
+    let light = min(vec3<f32>(1.0), frame.scene_colour.rgb + frame.light_colour.rgb * diffuse);
+    return vec4<f32>(fogged(colour * light, v.world, vec4<f32>(0.0)), 1.0);
 }

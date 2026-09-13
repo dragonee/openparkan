@@ -27,6 +27,7 @@ struct GpuVertex {
 struct LookUniform {
     diffuse: [f32; 4],
     emissive: [f32; 4],
+    fog: [f32; 4],
 }
 
 /// The blend modes a pipeline exists for, opaque first.
@@ -220,7 +221,11 @@ impl ModelRenderer {
                     .map(|g| {
                         let [dr, dg, db] = g.look.diffuse;
                         let [er, eg, eb] = g.look.emissive;
-                        let uniform = LookUniform { diffuse: [dr, dg, db, 1.0], emissive: [er, eg, eb, 1.0] };
+                        let uniform = LookUniform {
+                            diffuse: [dr, dg, db, 1.0],
+                            emissive: [er, eg, eb, 1.0],
+                            fog: crate::frame::fog_override(g.look.blend_mode),
+                        };
                         let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                             label: Some(&g.look.material),
                             contents: bytemuck::bytes_of(&uniform),
@@ -294,8 +299,8 @@ impl ModelRenderer {
         }
     }
 
-    pub fn prepare(&self, queue: &wgpu::Queue, view_proj: Mat4) {
-        queue.write_buffer(&self.frame, 0, bytemuck::bytes_of(&FrameUniform::new(view_proj)));
+    pub fn prepare(&self, queue: &wgpu::Queue, view_proj: Mat4, lighting: &crate::frame::Lighting) {
+        queue.write_buffer(&self.frame, 0, bytemuck::bytes_of(&FrameUniform::new(view_proj, lighting)));
     }
 
     /// Opaque groups of every instance first, then each blended mode in turn.

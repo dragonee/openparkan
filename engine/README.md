@@ -58,6 +58,16 @@ M4 is under way: the hero fights.
 Not yet: sound, lights, particle streams, animated textures, shields, and
 what a dead object leaves behind.
 
+M5 has begun. The sky is the mission's `sky.ske`, interpolated on its clock:
+
+- the dome around the camera takes its apex, rings and horizon colours;
+- linear range fog runs from the eye to 700 × slot 6, in the horizon colour
+  of the heading, additive materials fogging to black;
+- the scene colour adds to every material's emissive, and the sun or the
+  moon lights the scene.
+
+Not yet: the HUD and sound.
+
 Not yet: lightmaps (no Mission 01 mesh has one) and levels of detail beyond 0.
 This directory also holds what the rest will follow:
 
@@ -127,9 +137,12 @@ a row here. A row leaves this table when research closes it.
 | M1 | Whether water is drawn see-through: `WATER`'s material says opaque, and every lake has a `WATER_BOT` bed beneath | opaque, as the material says | [03](../docs/03-terrain.md#terrain-layers-name-materials-not-textures) |
 | M2 | Whether a blended material writes depth, and the alpha test's reference value | blended groups draw after opaque ones without writing depth; nothing is discarded (reference 0) | [07](../docs/07-objects.md#how-a-material-draws-is-in-the-archive-directory) |
 | M1 | Whether the scene's fog is Direct3D's vertex fog or the engine's own | per-pixel linear range fog, 0 to 700 × slot 6 (the two look the same) | [10](../docs/10-sky.md#not-resolved) |
-| M1 | How the 34142-radius dome escapes the far plane and a fog ending by 700 | draw the dome first, depth writes off, unfogged but for its rim | [10](../docs/10-sky.md#not-resolved) |
+| M1 | How the 34142-radius dome escapes the far plane and a fog ending by 700, and what lies below its rim | draw the dome first at the camera, with no depth, unfogged but for its rim; clear the frame to the fog colour | [10](../docs/10-sky.md#the-dome) |
 | M1 | The heading angle's zero and direction for the fog colour | 0 along +y, turning towards +x, like the dome's segments | [10](../docs/10-sky.md#not-resolved) |
-| M1 | What the sun does with its seven values; the scene's light direction | a directional light coloured by slot 19 × the third float, pointing from the sun's fixed place | [10](../docs/10-sky.md#not-resolved) |
+| M1 | What the sun does with its seven values; the scene's light | a directional light along the sun's fixed direction while its keyframes have it up (the moon's otherwise), coloured by the sky keyframes' slot 19 × the third float, held to 1; a lit colour is held to 1 as fixed-function lighting holds it | [10](../docs/10-sky.md#where-the-sun-stands-and-it-is-not-in-a-file) |
+| M1 | Which keyframe fields start and stop the sun and the moon, and which section plays | a body is up from its first keyframe to its second in clock order; section 0 | [10](../docs/10-sky.md#not-resolved) |
+| M1 | The sky's textures: stars, clouds, the sun and moon sprites, the lens flare | not drawn | [10](../docs/10-sky.md#the-dome-the-fog-and-the-scene-colour--read-and-measured) |
+| M1 | The files' colours in a renderer that decodes textures to linear | sky, fog, scene and light colours decoded from sRGB to linear, so blends match the game's display-space ones | [10](../docs/10-sky.md#the-dome-the-fog-and-the-scene-colour--read-and-measured) |
 | M3 | How a body is put back on its ground point, and whether modes 0 and 2 fall | after each step the model's lowest point is set on the highest walkable face within the contact radius above it, as a mission places units | [24](../docs/24-motion.md#not-established) |
 | M3 | Collision between objects: shapes and response | none yet: units walk through each other and through buildings | [24](../docs/24-motion.md#not-established) |
 | M3 | Walls, the map edge, bridges, jumping | a step that ends over a face steeper than 80°, or off the ground mesh, is undone and the body stops; bridges and buildings are not ground | [24](../docs/24-motion.md#not-established) |
@@ -173,4 +186,4 @@ a row here. A row leaves this table when research closes it.
 | M4 | The effect manager's random generator | any uniform generator | [11](../docs/11-effects.md#how-an-effect-runs--read) |
 | M5 | What the class-24 arms' states 1, 2 and `0x21` play | unfold on select, fold on deselect | [29](../docs/29-weapons.md#not-established) |
 | M5 | The camera shake's trigger | no shake | [30](../docs/30-turrets.md#not-established) |
-| M5 | When a mission's sky clock starts | at 00:00 of the file's first section | [10](../docs/10-sky.md#not-resolved) |
+| M5 | When a mission's sky clock starts | at noon of its day | [10](../docs/10-sky.md#not-resolved) |

@@ -190,6 +190,9 @@ fn screenshot(loaded: &scene::Loaded, game: &Path, args: &Args, out: &Path) -> R
     if let Some(p) = play.as_ref() {
         renderer.set_sprite_looks(&gpu.device, &scene::sprite_looks(p));
     }
+    if world.atmosphere.is_some() {
+        renderer.set_dome(&gpu.device, &parkan_sim::sky::dome(), &parkan_sim::sky::dome_indices());
+    }
     let aspect = width as f32 / height as f32;
     let view_proj = if args.top_down {
         top_down(&world.terrain, aspect)
@@ -205,8 +208,21 @@ fn screenshot(loaded: &scene::Loaded, game: &Path, args: &Args, out: &Path) -> R
     } else {
         start_camera(loaded).view_proj(aspect)
     };
+    let (eye, forward, seconds) = match &play {
+        Some(p) => {
+            let e = p.hero.eye();
+            (e.position, e.forward, p.hero.time_ms / 1000.0)
+        }
+        None => {
+            let c = start_camera(loaded);
+            (c.position, c.forward(), 0.0)
+        }
+    };
+    if let Some((lighting, colours)) = scene::lighting(&world, seconds, eye, forward) {
+        renderer.set_lighting(lighting);
+        renderer.set_dome_colours(colours);
+    }
     if let Some(p) = play.as_mut() {
-        let eye = p.hero.eye().position;
         scene::sync(&mut renderer, &gpu.device, &gpu.queue, p, &world.objects, view_proj, eye);
     }
     let pixels = parkan_render::capture(&gpu, &mut renderer, (width, height), view_proj)?;
@@ -242,6 +258,7 @@ struct App {
     last: Instant,
     /// Real time not yet simulated, ms.
     owed: f64,
+    started: Instant,
 }
 
 impl App {
@@ -265,6 +282,9 @@ impl App {
         renderer.set_world(&gpu.device, &gpu.queue, &w.store.textures, Some(&w.terrain), Some(&w.objects));
         if let Some(p) = self.play.as_ref() {
             renderer.set_sprite_looks(&gpu.device, &scene::sprite_looks(p));
+        }
+        if w.atmosphere.is_some() {
+            renderer.set_dome(&gpu.device, &parkan_sim::sky::dome(), &parkan_sim::sky::dome_indices());
         }
         self.running = Some(Running { window, surface, config, gpu, renderer });
         Ok(())
@@ -319,6 +339,17 @@ impl App {
         };
         let view = frame.texture.create_view(&Default::default());
         let aspect = r.config.width as f32 / r.config.height.max(1) as f32;
+        let (eye, forward, seconds) = match &self.play {
+            Some(p) => {
+                let e = p.hero.eye();
+                (e.position, e.forward, p.hero.time_ms / 1000.0)
+            }
+            None => (self.camera.position, self.camera.forward(), self.started.elapsed().as_secs_f64()),
+        };
+        if let Some((lighting, colours)) = scene::lighting(&self.world, seconds, eye, forward) {
+            r.renderer.set_lighting(lighting);
+            r.renderer.set_dome_colours(colours);
+        }
         let view_proj = match self.play.as_mut() {
             Some(play) => {
                 let eye = play.hero.eye();
@@ -469,6 +500,7 @@ fn main() -> Result<()> {
         counts: [0.0; 2],
         last: Instant::now(),
         owed: 0.0,
+        started: Instant::now(),
     };
     event_loop.run_app(&mut app)?;
     Ok(())

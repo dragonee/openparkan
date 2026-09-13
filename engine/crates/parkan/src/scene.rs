@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use glam::Vec3;
-use parkan_formats::{gamedir, mission};
+use parkan_formats::{gamedir, mission, sky};
 use parkan_world::assembly::Assembly;
 use parkan_world::hero;
 use parkan_world::models::{self, Objects};
@@ -14,6 +14,7 @@ use parkan_world::textures::TextureStore;
 
 /// A loaded mission and where its hero stands.
 pub struct Loaded {
+    pub dir: PathBuf,
     pub mission: mission::Mission,
     /// The player's hero: position and heading, radians about z.
     pub hero: Option<(Vec3, f32)>,
@@ -35,7 +36,7 @@ pub fn load(game: &Path, relative: &str) -> Result<Loaded> {
         .iter()
         .find(|o| hero::is_hero(&o.path))
         .map(|o| (Vec3::from_array(o.position), o.rotation));
-    Ok(Loaded { mission, hero })
+    Ok(Loaded { dir, mission, hero })
 }
 
 /// The world a mission is drawn in: its textures, its map's ground, its objects.
@@ -43,6 +44,7 @@ pub struct World {
     pub store: TextureStore,
     pub terrain: Terrain,
     pub objects: Objects,
+    pub atmosphere: Option<sky::Atmosphere>,
 }
 
 pub fn world(game: &Path, loaded: &Loaded) -> Result<World> {
@@ -50,10 +52,49 @@ pub fn world(game: &Path, loaded: &Loaded) -> Result<World> {
     let terrain = terrain::build(&terrain::map_dir(game, &loaded.mission.map_path)?, &mut store)?;
     let mut assembly = Assembly::new(game)?;
     let objects = models::build(&mut assembly, &mut store, &loaded.mission)?;
-    Ok(World { store, terrain, objects })
+    let atmosphere = gamedir::resolve(&loaded.dir, "sky.ske")
+        .and_then(|p| std::fs::read(&p).ok().map(|b| (b, p)))
+        .and_then(|(b, p)| sky::parse(&b, &p.display().to_string()).ok());
+    Ok(World { store, terrain, objects, atmosphere })
 }
 
 pub use parkan_world::play::Play;
+
+/// STAND-IN: docs/10-sky.md#not-resolved -- the time of day a mission starts at is not
+/// read; its atmosphere clock starts at noon.
+pub const START_HOUR: f64 = 12.0;
+
+/// The light, fog and dome colours at `seconds` into the mission, seen from `eye`
+/// looking along `forward`; `None` without an atmosphere.
+pub fn lighting(
+    world: &World,
+    seconds: f64,
+    eye: Vec3,
+    forward: Vec3,
+) -> Option<(parkan_render::frame::Lighting, Vec<[f32; 3]>)> {
+    use parkan_render::frame::linear;
+    use parkan_sim::sky as atm;
+    let a = world.atmosphere.as_ref()?;
+    let clock = a.day_seconds() * START_HOUR / 24.0 + seconds;
+    let sky = atm::at(a, 0, clock)?;
+    // The heading from +y towards +x (docs/10-sky.md, "Fog").
+    let heading = forward.x.atan2(forward.y);
+    let fog = sky.fog_colour(heading);
+    // STAND-IN: docs/10-sky.md#the-dome-the-fog-and-the-scene-colour--read-and-measured --
+    // how CSun lights the scene is not traced: the body that is up shines along its
+    // direction in the sky keyframes' slot 19 × light, held to 1 as a D3D light is.
+    let body = if atm::body_up(a, 0, "sun", clock) { atm::SUN_DIRECTION } else { atm::MOON_DIRECTION };
+    let lighting = parkan_render::frame::Lighting {
+        light_direction: -body,
+        light_colour: linear(sky.sun_light.map(|c| c.clamp(0.0, 1.0))),
+        scene_colour: linear(sky.scene_colour),
+        fog_colour: linear(fog),
+        fog_start: sky.fog_start,
+        fog_end: sky.fog_end,
+        eye,
+    };
+    Some((lighting, sky.dome_colours(fog).into_iter().map(linear).collect()))
+}
 
 pub fn play(game: &Path, loaded: &Loaded) -> Result<Option<Play>> {
     Play::load(game, &loaded.mission)

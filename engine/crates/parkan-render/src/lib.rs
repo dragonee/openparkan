@@ -9,6 +9,7 @@ use bytemuck::{Pod, Zeroable};
 use glam::{Mat4, Vec2, Vec3};
 use wgpu::util::DeviceExt;
 
+pub mod dome;
 pub mod frame;
 pub mod models;
 pub mod sprites;
@@ -92,6 +93,8 @@ pub struct Renderer {
     terrain: Option<TerrainRenderer>,
     objects: Option<ModelRenderer>,
     bank: Option<GpuTextures>,
+    lighting: frame::Lighting,
+    dome: Option<(dome::DomeRenderer, Vec<[f32; 3]>)>,
     sprites: Option<sprites::SpriteRenderer>,
 }
 
@@ -172,6 +175,8 @@ impl Renderer {
             terrain: None,
             objects: None,
             bank: None,
+            lighting: frame::Lighting::default(),
+            dome: None,
             sprites: None,
         }
     }
@@ -223,6 +228,23 @@ impl Renderer {
         }
     }
 
+    /// The light and fog to draw with from now on; the clear colour follows the fog.
+    pub fn set_lighting(&mut self, lighting: frame::Lighting) {
+        self.lighting = lighting;
+    }
+
+    /// The sky dome's shape, drawn from now on.
+    pub fn set_dome(&mut self, device: &wgpu::Device, positions: &[glam::Vec3], indices: &[u32]) {
+        self.dome = Some((dome::DomeRenderer::new(device, self.format, positions, indices), Vec::new()));
+    }
+
+    /// The dome's vertex colours for this frame.
+    pub fn set_dome_colours(&mut self, colours: Vec<[f32; 3]>) {
+        if let Some((_, c)) = self.dome.as_mut() {
+            *c = colours;
+        }
+    }
+
     /// This frame's effect quads.
     pub fn set_sprites(
         &mut self,
@@ -232,7 +254,7 @@ impl Renderer {
         quads: &[sprites::Quad],
     ) {
         if let Some(s) = self.sprites.as_mut() {
-            s.prepare(device, queue, view_proj, quads);
+            s.prepare(device, queue, view_proj, &self.lighting, quads);
         }
     }
 
@@ -266,12 +288,23 @@ impl Renderer {
             self.depth = Some((texture.create_view(&Default::default()), width, height));
         }
         queue.write_buffer(&self.camera, 0, bytemuck::bytes_of(&view_proj.to_cols_array()));
+        if let Some((dome, colours)) = &self.dome {
+            dome.prepare(queue, view_proj, self.lighting.eye, colours);
+        }
         if let Some(terrain) = &self.terrain {
-            terrain.prepare(queue, view_proj);
+            terrain.prepare(queue, view_proj, &self.lighting);
         }
         if let Some(objects) = &self.objects {
-            objects.prepare(queue, view_proj);
+            objects.prepare(queue, view_proj, &self.lighting);
         }
+        // STAND-IN: docs/10-sky.md#the-dome -- what lies below the dome's rim is not
+        // read; the frame is cleared to the fog colour, so the horizon meets it.
+        let [fr, fg, fb] = self.lighting.fog_colour;
+        let clear = if self.lighting.fog_end < f32::MAX {
+            wgpu::Color { r: f64::from(fr), g: f64::from(fg), b: f64::from(fb), a: 1.0 }
+        } else {
+            CLEAR
+        };
         let mut encoder = device.create_command_encoder(&Default::default());
         {
             let depth = &self.depth.as_ref().expect("made above").0;
@@ -281,7 +314,7 @@ impl Renderer {
                     view: target,
                     depth_slice: None,
                     resolve_target: None,
-                    ops: wgpu::Operations { load: wgpu::LoadOp::Clear(CLEAR), store: wgpu::StoreOp::Store },
+                    ops: wgpu::Operations { load: wgpu::LoadOp::Clear(clear), store: wgpu::StoreOp::Store },
                 })],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                     view: depth,
@@ -295,6 +328,9 @@ impl Renderer {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
+            if let Some((dome, _)) = &self.dome {
+                dome.draw(&mut pass);
+            }
             if let Some(terrain) = &self.terrain {
                 terrain.draw(&mut pass);
             }
