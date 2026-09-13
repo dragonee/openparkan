@@ -57,10 +57,22 @@ string   AI script                    MISSIONS\SCRIPTS\scr_pl_1
 uint32   zone count
 zones    { uint32 kind; float32[3] centre; float32 inner; float32 outer }
 string   behaviour tree               MISSIONS\SCRIPTS\scream.trf
-uint32   varies
+uint32   2..17, meaning open -- see below
 uint32   relation count
 relations { string clan name; uint32 relation }
 ```
+
+The word after the behaviour tree is **open**, but it is not noise.
+*Measured:* it runs 2..17 over the 101 shipped clans and sits at 5 on 53 of
+them, nearly every fauna and neutral clan among them. It tracks none of the
+clan's index, zone count, ally count, object, unit or building counts, or its
+research tree's starting items or roots. It *does* equal the clan count on 26
+of the 101 — but 22 of those are the common value 5 landing in five-clan
+missions, and away from 5 it matches on 4 of 48, which is chance. The
+two competing clans of `Multi.01` to `Multi.04` carry equal values (8 and 8),
+and across the campaigns the main enemy's value climbs, reaching 17 on
+`CAMPAIGN.02/Mission.04`. *Guess:* a clan strength or AI level, set equal for
+matched opponents. Nothing in the file or the tree confirms it.
 
 The relation table is an **alliance matrix**: every clan lists every clan,
 with 1 towards itself and its allies and 0 towards its enemies. Zones appear

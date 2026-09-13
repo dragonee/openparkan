@@ -1209,6 +1209,35 @@ def check_missions(check, game: Path) -> None:
     if not parsed:
         return
 
+    # The word after a clan's behaviour-tree path.  Not solved; what is checked
+    # here is only what it is *not*, and where its values fall.
+    clans = [c for m in parsed for c in m.clans]
+    word = Counter(c.unknown[1] for c in clans)
+    common = word.most_common(1)[0][0]
+    # Judged away from the common value: 5 sits on half the clans, and five-clan
+    # missions are full of fauna at 5, so "equals the clan count" comes out true
+    # on 22 clans for no reason at all.
+    rare = [(c, m) for m in parsed for c in m.clans if c.unknown[1] != common]
+    by_count = sum(c.unknown[1] == len(m.clans)
+                   for m in parsed for c in m.clans)
+    unrelated = all(
+        sum(c.unknown[1] == f(c, m) for c, m in rare) * 10 < len(rare)
+        for f in (lambda c, m: c.index, lambda c, m: len(m.clans),
+                  lambda c, m: len(c.zones),
+                  lambda c, m: sum(v == 1 for v in c.relations.values())))
+    multi = {d.name: sorted((c.unknown[1] for c in m.clans), reverse=True)[:2]
+             for d, m in zip(dirs, parsed, strict=False)
+             if d.name in ("Multi.01", "Multi.02", "Multi.03", "Multi.04")}
+    check("data.tma: the word after a clan's tree path is not a count",
+          unrelated and all(a == b for a, b in multi.values()),
+          f"{min(word)}..{max(word)} over {len(clans)} clans, {word[common]} of "
+          f"them at {common}.  It equals the clan count on {by_count}, but away "
+          f"from {common} on only "
+          f"{sum(c.unknown[1] == len(m.clans) for c, m in rare)}/{len(rare)} -- "
+          f"the rest is {common} landing in {common}-clan missions -- and it "
+          f"matches the index, zone count or ally count on under a tenth.  The "
+          f"two top clans of Multi.01..04 carry equal values: {multi}")
+
     maps = {d.name for d in gamedir.maps(game)}
     resolved = sum(1 for m in parsed if m.map_name in maps)
     check("data.tma: the map it names exists", resolved == len(parsed),
