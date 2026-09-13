@@ -384,7 +384,9 @@ uint16   first triangle, triangle count
 uint16   first batch, batch count
 float32  aabb min[3], aabb max[3]
 float32  bounding sphere centre[3], radius
-uint32   x5
+float32  area            what armour is weighed by (28-chassis.md)
+float32  volume          the bounding box's; density x this is the node's mass
+uint32   x3
 ```
 
 `140 + 68 * count` accounts for stream 2 exactly on **all 434 meshes**.

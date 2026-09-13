@@ -212,6 +212,7 @@ of fields carried through the readers without being understood.
 - [25-sensors.md](docs/25-sensors.md) — radar, the detection shield and camouflage, and what the AI sees
 - [26-damage.md](docs/26-damage.md) — hits, explosions, shields and deflectors, armour, hit points and repair
 - [27-ownership.md](docs/27-ownership.md) — charging docks, control pods and capture, and the clan type
+- [28-chassis.md](docs/28-chassis.md) — chassis families, the slots they declare, weight, costs and research
 
 ## Layout
 

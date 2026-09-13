@@ -109,6 +109,12 @@ FREE_BOT_ORE = 0.0
 FREE_BOT_POWER = 1.0
 
 
+#: A chassis profile's ``ChassisType``.  The four ``chas_*.var`` profiles use
+#: 1-4; ``chas_worm.var``'s 5 is on no shipped chassis.
+CHASSIS_TYPE = {0: "building", 1: "flying", 2: "walking", 3: "wheeled", 4: "tracked",
+                5: "worm"}
+
+
 class ProfileFormatError(ValueError):
     pass
 

@@ -266,6 +266,14 @@ class Slot:
     batch_count: int
     aabb_min: tuple[float, float, float]
     aabb_max: tuple[float, float, float]
+    #: +0x20: a bounding sphere, centre and radius.
+    sphere: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0)
+    #: +0x30: the geometry's area -- ``AniMesh.dll:0x100051f0`` id 0xf, times
+    #: two of the object's scales.  Armour's first value is weighed by it.
+    area: float = 0.0
+    #: +0x34: the bounding box's volume -- id 0x10, times all three scales.
+    #: A node's ``.ndp`` density times this is its mass.
+    volume: float = 0.0
 
 
 @dataclass
@@ -441,6 +449,15 @@ class ObjectMesh:
         """A node's pose in its parent's frame."""
         key = self.rest_key(node)
         return IDENTITY_POSE if key is None else self.keys[key].pose
+
+    def node_volume(self, node: int, variant: int = 0) -> float:
+        """What ``Control.dll`` weighs a node by: its level-0 slot's volume, or 0.
+
+        Not ``slots_for_lod``: that falls back to another slot where a node has
+        no level 0, and the engine gets nothing there.
+        """
+        index = self.nodes[node].slot_index[variant * SLOTS_PER_VARIANT]
+        return 0.0 if index == NO_SLOT or index >= len(self.slots) else self.slots[index].volume
 
     def world_pose(self, node: int) -> Pose:
         """A node's pose in model space, composed down the parent chain."""
@@ -678,7 +695,9 @@ def parse(blob: bytes, name: str = "<mesh>", texture_names: list[str] | None = N
             slots.append(
                 Slot(ts, tc, bs, bc,
                      struct.unpack_from("<3f", raw_slots, o + 8),
-                     struct.unpack_from("<3f", raw_slots, o + 20))
+                     struct.unpack_from("<3f", raw_slots, o + 20),
+                     struct.unpack_from("<4f", raw_slots, o + 0x20),
+                     *struct.unpack_from("<2f", raw_slots, o + 0x30))
             )
 
     keys = []

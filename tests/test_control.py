@@ -71,6 +71,14 @@ def test_only_the_efficiency_class_has_an_efficiency(ctl, component):
     assert got[1].efficiency is None
 
 
+def test_a_labelled_record_is_a_slot(ctl, component):
+    parts = [component(control.ENGINE_TYPE, label="i_eng_b"),
+             component(control.GUN_TYPE, label="i_c05_b")]
+    engine, gun = control.parse(ctl(counts=(0, 0, 0, 2, 0), components=parts)).components
+    assert engine.slot == "i_eng_b"
+    assert gun.slot is None
+
+
 def test_a_component_carries_its_initial_state(ctl, component):
     parts = [component(24, index=33), component(control.REPAIR_TYPE)]
     turret, repair = control.parse(ctl(counts=(0, 0, 0, 2, 0), components=parts)).components

@@ -145,8 +145,9 @@ class NodeDamage:
     #: It is also the float that grows with the node, +0.56 with its volume
     #: in log space.  1000000 where it cannot be destroyed.
     durability: float
-    #: Times the node's volume, the node's mass (``Control.dll:0x1000fac0``) --
-    #: so a density, by the look of it.  104 distinct values over 2334
+    #: The node's density: times its level-0 slot's volume, its mass
+    #: (``Control.dll:0x1000fac0``).  On the player chassis the products sum
+    #: to round design weights, 275 kg to 20,000 kg.  104 distinct values over 2334
     #: records: 17 whole numbers (1000 on 549, 0, 10, 1, 300, 500 ...) on
     #: buildings, scenery and projectiles, and 87 fractional ones on unit
     #: parts.  They fall as the node grows, as a density that keeps a part's
@@ -248,6 +249,11 @@ def parse_base(blob: bytes, source: str = "<bas>") -> list[Footprint]:
     return out
 
 
+#: The slot of a robot chassis's ``BTLU`` record that names its behaviour
+#: profile, whose ``ChassisType`` is the locomotion.
+PROFILE_SLOT = 5
+
+
 @dataclass
 class ObjectRecord:
     """One record of ``objects.rlb``: a name, a tag, and its resource slots."""
@@ -261,6 +267,13 @@ class ObjectRecord:
             if s and s.suffix == suffix:
                 return s
         return None
+
+    @property
+    def profile(self) -> str | None:
+        """A chassis's behaviour profile in ``behpsp.res``, ``chas_trk.var``, or None."""
+        if self.tag != "BTLU" or len(self.slots) <= PROFILE_SLOT:
+            return None
+        return self.slots[PROFILE_SLOT].member or None
 
     @property
     def mesh(self) -> ResourceRef | None:

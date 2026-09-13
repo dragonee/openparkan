@@ -314,7 +314,10 @@ The label is the good part. **All 57 distinct labels are a prefix of an
 `INTO` record** — an internal part. `i_pws_f` is a power supply, `i_rdr_b` a
 radar, `i_eng_l` an engine, `i_fsh_f` a fight shield. So section 4 is the
 controller's **parts list**, and a component's label says which family of
-internal part it stands for. 395 of the 1066 records carry one.
+internal part it stands for. 395 of the 1066 records carry one. On a chassis
+the six `i_*_<size>` labels are its **slots**: all 1,889 internal parts fitted
+to shipped robots start with one of their chassis's labels
+([28-chassis.md](28-chassis.md#a-chassis-declares-its-slots--measured-and-read)).
 
 ### The 64 bytes are the component's values
 

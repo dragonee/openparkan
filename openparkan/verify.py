@@ -4987,6 +4987,205 @@ def check_repair(check, game: Path) -> None:
           f"is clamped at 0 as well (Control.dll:0x10010253), so nothing heals by hitting")
 
 
+#: The chassis a player can research and build: every one with a cost.
+PLAYER_CHASSIS = ("R_T_01", "R_T_02", "R_L_01", "R_L_02", "R_L_03", "R_L_04", "R_L_05",
+                  "R_M_01", "R_M_02", "R_M_03", "R_M_04", "R_B_01", "R_B_02", "R_B_03",
+                  "R_B_04")
+#: The words a chassis's objects.dlb name uses for each ChassisType.
+CHASSIS_TYPE_WORDS = {1: ("Flying", "Helicopter"),
+                      2: ("Walking", "Spider", "Transformer", "Tower", "Hero"),
+                      3: ("Wheel",), 4: ("Track",)}
+
+
+def _robots(game: Path):
+    for path in sorted(game.glob("UNITS/UNITS/**/*.dat")):
+        unit = objects.load_unit(path)
+        if unit.components[0].ref.member.lower().startswith("r_"):
+            yield path, unit
+
+
+def _on_disk(game: Path, path: str) -> Path:
+    """A mission's backslashed, case-blind object path, on this filesystem."""
+    here = game
+    for piece in path.replace("\\", "/").split("/"):
+        here = next(p for p in here.iterdir() if p.name.lower() == piece.lower())
+    return here
+
+
+def check_chassis(check, game: Path) -> None:
+    """Chassis: the slots a chassis declares, what fills them, and what it weighs."""
+    library = objects.ObjectLibrary(game / "objects.rlb")
+    bases = NResArchive.open(game / "bases.rlb")
+    labels: dict[str, list[control.Component]] = {}
+    for entry in bases:
+        if entry.tag.upper().startswith("CTL"):
+            parsed = control.parse(bases.read(entry))
+            labels[entry.name.lower()[:-4].upper()] = [p for p in parsed.components if p.label]
+
+    # 1. six labelled slots on node 0, each on the class its family names
+    robots = list(_robots(game))
+    used = sorted({u.components[0].ref.member.upper() for _, u in robots})
+    shapes = Counter()
+    wrong = []
+    for chassis in used:
+        slots = labels.get(chassis, [])
+        families = sorted(p.label[:5].lower() for p in slots)
+        shapes[tuple(families)] += 1
+        wrong += [f"{chassis} {p.label}" for p in slots
+                  if control.SLOT_FAMILIES.get(p.label[:5].lower()) != p.type_id or p.node != 0]
+    six = tuple(sorted(control.SLOT_FAMILIES))
+    hero = tuple(sorted(set(control.SLOT_FAMILIES) - {"i_eng"}))
+    check("bases.rlb: a chassis declares six labelled slots for internal parts",
+          not wrong and set(shapes) <= {six, hero, ("i_eng",)} and shapes[six] >= 15,
+          f"of the {len(used)} chassis robots use, {shapes[six]} declare engine, battery, fight "
+          f"shield, detection shield, repair and armour, each on node 0 and on the class its "
+          f"label names; the hero {shapes[hero]} (no engine), the targets {shapes[('i_eng',)]}")
+
+    # 2. a robot fills every slot of its chassis once, with a part whose name the label prefixes
+    fits = misfits = twice = 0
+    by_chassis: dict[str, list[str]] = defaultdict(list)
+    for _, unit in robots:
+        chassis = unit.components[0].ref.member.upper()
+        mine = [p.label.lower() for p in labels.get(chassis, [])]
+        seen = Counter()
+        pairs = zip(unit.components, unit.parents(), strict=True)
+        parts = [c.ref.member.lower() for c, parent in pairs
+                 if parent == 0 and c.ref.member.lower().startswith("i_")]
+        by_chassis[chassis].append(tuple(parts))
+        for part in parts:
+            hit = [label for label in mine if part.startswith(label)]
+            fits += bool(hit)
+            misfits += not hit
+            seen.update(hit)
+        twice += any(n > 1 for n in seen.values())
+    shuffled_misfits = 0
+    names = list(by_chassis)
+    rng = random.Random(1)
+    for chassis, fitted in by_chassis.items():
+        sizes = {p.label[-1] for p in labels[chassis]}
+        other = rng.choice([n for n in names
+                            if labels.get(n) and {p.label[-1] for p in labels[n]} != sizes]
+                           or names)
+        theirs = [p.label.lower() for p in labels.get(other, [])]
+        shuffled_misfits += sum(1 for parts in fitted for part in parts
+                                if not any(part.startswith(label) for label in theirs))
+    check("UNITS: a robot fills its chassis's slots, once each",
+          fits and not misfits and not twice and shuffled_misfits,
+          f"all {fits} internal parts on {len(robots)} robots start with one of their chassis's "
+          f"labels and no label is filled twice; given another size's chassis, "
+          f"{shuffled_misfits} would not fit")
+
+    # 3. a turret's size letter is its chassis's
+    same = other = 0
+    letters = []
+    for _, unit in robots:
+        chassis = unit.components[0].ref.member.lower()
+        for c, parent in zip(unit.components, unit.parents(), strict=True):
+            if parent == 0 and c.ref.member.lower().startswith("e_tur_"):
+                letters.append((chassis[2], c.ref.member.lower()[6]))
+    same = sum(1 for a, b in letters if a == b)
+    pool = [b for _, b in letters]
+    random.Random(2).shuffle(pool)
+    shuffled = sum(1 for (a, _), b in zip(letters, pool, strict=True) if a == b)
+    check("UNITS: a chassis carries a turret of its own size letter",
+          letters and same == len(letters) and shuffled < same,
+          f"{same}/{len(letters)} turrets share their chassis's size letter; shuffled, {shuffled}")
+
+    # 4. a BTLU record's sixth slot is its chassis profile, and the profile names the locomotion
+    held = profiles.load(game)
+    catalogue = descriptions.library(game)
+    rows = []
+    crossed = []
+    for name, record in library.records.items():
+        var = record.profile
+        if not name.startswith("r_") or var is None:
+            continue
+        kind = held[var]["ChassisType"].value
+        entry = catalogue.get(name.upper())
+        part = entry.name if entry else ""
+        rows.append((name, var, kind))
+        if part and not any(w in part for w in CHASSIS_TYPE_WORDS.get(kind, ())):
+            crossed.append(f"{name} {part} {var}")
+    kinds = Counter(profiles.CHASSIS_TYPE[k] for _, _, k in rows)
+    check("objects.rlb: a chassis record names its behaviour profile",
+          rows and not crossed and set(kinds) == {"flying", "walking", "wheeled", "tracked"},
+          f"{len(rows)} robot chassis records carry a behpsp.res chas_*.var sixth slot whose "
+          f"ChassisType agrees with the objects.dlb name: {dict(kinds)}"
+          + (f"; crossed {crossed[:3]}" if crossed else ""))
+
+    # 5. a player chassis's body weighs a round figure
+    boxes = exact = 0
+    masses = {}
+    for part in PLAYER_CHASSIS:
+        record = library.get(part.lower())
+        msh, ndp = record.mesh, record.damage
+        model = objmesh.parse(bases.read_name(msh.member), msh.member)
+        table = objects.parse_damage(bases.read_name(ndp.member), ndp.member)
+        for slot in model.slots:
+            box = math.prod(hi - lo for lo, hi in zip(slot.aabb_min, slot.aabb_max, strict=True))
+            boxes += 1
+            exact += abs(slot.volume - box) <= 1e-3 * max(1.0, slot.volume)
+        masses[part] = sum(row.unknown * model.node_volume(i)
+                           for i, row in enumerate(table[:len(model.nodes)]))
+    round_kg = [p for p, m in masses.items() if abs(m - 25 * round(m / 25)) < 0.5]
+    # control: the densities themselves are not round, so a round product is not free
+    fractional = set()
+    for part in PLAYER_CHASSIS:
+        ndp = library.get(part.lower()).slot_with_suffix("ndp")
+        table = objects.parse_damage(bases.read_name(ndp.member), ndp.member)
+        if any(r.unknown != int(r.unknown) for r in table):
+            fractional.add(part)
+    check("bases.rlb: a player chassis's body weighs a round figure",
+          exact == boxes and len(round_kg) >= len(PLAYER_CHASSIS) - 2
+          and len(fractional & set(round_kg)) >= len(round_kg) // 2,
+          f"{len(fractional & set(round_kg))} of the round ones carry fractional .ndp densities; "
+          f"a slot's volume (+0x34) is its box's volume on {exact}/{boxes}; density x LOD-0 "
+          f"volume summed over a chassis's nodes is a multiple of 25 kg on {len(round_kg)} of "
+          f"{len(PLAYER_CHASSIS)}: " + ", ".join(f"{p} {masses[p]:,.0f}" for p in PLAYER_CHASSIS))
+
+    # 6. the research ladder: a chassis needs the next smaller of its own kind
+    trees = [research.read(p) for p in research.trees(game)]
+    kind_of = {name.upper(): var for name, var, _ in rows}
+    size = {"T": 1, "L": 2, "M": 3, "B": 4}
+    ladder = broken = 0
+    for part in PLAYER_CHASSIS:
+        needs = Counter()
+        for tree in trees:
+            item = tree.item_for(part)
+            if item:
+                needs[tuple(sorted(p for i in item.requires for p in tree[i].parts
+                                   if p.upper().startswith("R_")))] += 1
+        modal = needs.most_common(1)[0][0] if needs else ()
+        for prior in modal:
+            prior = prior.upper()
+            ok = (kind_of.get(prior) == kind_of.get(part)
+                  and size[prior[2]] in (size[part[2]] - 1, size[part[2]]))
+            ladder += ok
+            broken += not ok
+    check(".trf: a chassis is researched from the one below it of the same kind",
+          ladder >= 10 and not broken,
+          f"in each chassis's commonest wiring across {len(trees)} trees, {ladder} prerequisite "
+          f"chassis are its own kind one size down or the same size; {broken} are not")
+
+    # 7. who places which chassis
+    use: dict[str, Counter] = defaultdict(Counter)
+    for tma in sorted(game.glob("MISSIONS/**/data.tma")):
+        m = mission.load(tma)
+        for o in m.objects:
+            if "units\\units" not in o.path.lower() or o.clan_id is None:
+                continue
+            unit = objects.load_unit(_on_disk(game, o.path))
+            chassis = unit.components[0].ref.member.upper()
+            use[chassis][m.clans[o.clan_id].type] += 1
+    hero_only = set(use["R_H_02"]) == {mission.CLAN_PLAYER}
+    special = ("R_B_06", "R_B_07", "R_B_08", "R_L_07")
+    enemy_only = all(set(use[c]) == {mission.CLAN_ENEMY} for c in special)
+    check("data.tma: only the player places the hero; the costless chassis are enemies'",
+          hero_only and enemy_only and any(mission.CLAN_PLAYER in use[c] for c in PLAYER_CHASSIS),
+          f"R_H_02 {dict(use['R_H_02'])}; " + ", ".join(f"{c} {dict(use[c])}" for c in special)
+          + " (clan types: 1 player, 2 enemy, 3 neutral)")
+
+
 def check_controls(check, game: Path) -> None:
     """The input layer: ScanCode.dsc, Command.dsc, the .man bindings, the .tbl tables."""
     keys = controls.scancodes(game)
@@ -6389,7 +6588,7 @@ def run(game: Path) -> int:
         check_grid, check_missions, check_objects, check_poses, check_lod, check_damage,
         check_effects, check_footprints, check_rsli, check_control, check_efficiency,
         check_motion, check_sensors, check_combat, check_ownership,
-        check_capture, check_repair,
+        check_capture, check_repair, check_chassis,
         check_controls,
         check_behaviour, check_research, check_descriptions, check_saves,
         check_vocabulary, check_resources, check_briefing, check_settings,

@@ -147,10 +147,13 @@ and the other flyers carry none.
 
 `0x1000fac0` weighs the machine:
 
-- each node: `.ndp` float +8 × the mesh node's volume (id 0x10, which
-  `AniMesh.dll:0x100051f0` scales by all three of the object's scale factors,
-  where id 0xf takes two — [25-sensors.md](25-sensors.md#what-a-target-gives-away--read));
-  that the `.ndp` float is a density is a *guess*
+- each node: `.ndp` float +8 × the volume of the node's level-0 geometry slot
+  (the slot record's `+0x34`, its bounding box's volume; id 0x10, which
+  `AniMesh.dll:0x100051f0` scales by all three of the object's scale factors)
+  — a density, which the round body weights of the player chassis bear out
+  ([28-chassis.md](28-chassis.md#what-a-chassis-weighs--read-and-measured))
+- when the unit has armour, armour's first value × the node's area (`+0x30`,
+  `0x1000fbac`)
 - each component: its **mass at record +0x1c**, in kg, added to its node
   (ids 0x100 and 0x200, `0x1002bb40`)
 - **spare payload** = file +124 + the mass of one node range the mesh reports

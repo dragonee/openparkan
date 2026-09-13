@@ -188,7 +188,9 @@ becomes (`0x10010030`)
 
 so armour takes most off small hits and nothing off a big one — a hit of
 `(1 − linear) / square` or more goes through whole. The rating is handed out
-as a property and plays no part in the sum. With more than one class-27 part
+as a property and plays no part in the sum; it is a weight per unit of area,
+which the mass sum multiplies by every node's area (`0x1000fbac`,
+[28-chassis.md](28-chassis.md#what-a-chassis-weighs--read-and-measured)). With more than one class-27 part
 the last one created wins.
 
 | (*measured*) | rating | keeps of a small hit | goes through whole from |
@@ -359,8 +361,11 @@ shield, battery and ammunition (`Behavior.dll:0x10018100`, `0x10019372`,
 
 - Which of ±x, ±y is a model's front, so which sector is "front".
 - Whether a round still collides with a sector that has nothing left.
-- Whether a fitted `i_rps` part's values replace the chassis slot's 1 / 1 / 1,
-  which decides how fast a robot really regenerates.
+- Whether a fitted `i_rps` part's values replace the chassis slot's 1 / 1 / 1.
+  Every part's components are appended to the one control system, and the
+  repair class is not one it keeps a single pointer for
+  ([28-chassis.md](28-chassis.md#the-parts-join-one-control-system--read)), so
+  both would run and add up — *derived*, not seen at run time.
 - Who clears the behaviour flag `0x10` that lets a unit's takt switch its
   repair (`Behavior.dll:0x100067b0`'s caller), and so whether the AI overrides
   the switch while the player drives.
@@ -369,5 +374,3 @@ shield, battery and ammunition (`Behavior.dll:0x10018100`, `0x10019372`,
 - The surface index behind an `.exp`'s slots 1–11, and the two 1.0 floats.
 - What agent kind 3 is, and what becomes of a kind-3 object whose node 0 is
   destroyed (it is marked `0xfffe` and not killed).
-- Which parts join a building's or a bot's control system, so which deflector
-  and armour a finished unit ends up with.

@@ -125,8 +125,15 @@ REPAIR_TYPE = 15
 DEFLECTOR_TYPE = 21
 #: Armour, ``i_arm``; ``CICLS`` has no name for it either.  Values: a rating,
 #: then a linear and a square factor -- a hit of D becomes
-#: ``min(D, linear x D + square x D^2)`` (``0x10010030``).
+#: ``min(D, linear x D + square x D^2)`` (``0x10010030``).  The first value is
+#: also a weight per unit of area, summed over every node (``0x1000fbac``).
 ARMOUR_TYPE = 27
+#: A chassis's labelled slots: the label's family, and the class it is on.  A
+#: part fits a slot when its ``objects.rlb`` name starts with the label, and
+#: the label's last letter is the size of part it takes.
+SLOT_FAMILIES = {"i_eng": ENGINE_TYPE, "i_pws": POWER_STORE_TYPE,
+                 "i_fsh": FIGHT_SHIELD_TYPE, "i_dsh": DETECT_SHIELD_TYPE,
+                 "i_rps": REPAIR_TYPE, "i_arm": ARMOUR_TYPE}
 
 #: A section-1 state: ``SECTION1_RECORD`` bytes, then ``counts[1]`` 16-byte
 #: conditions.  Bits 0-2 of the flags switch on the velocity box per axis and
@@ -371,6 +378,11 @@ class Component:
     node: int = 0
     #: The float at ``COMPONENT_MASS_AT``: what the part weighs, in kg.
     mass: float = 0.0
+
+    @property
+    def slot(self) -> str | None:
+        """The part family and size this record is a slot for, ``i_eng_b``, or None."""
+        return self.label.lower() if self.label[:5].lower() in SLOT_FAMILIES else None
 
     @property
     def state(self) -> int | None:

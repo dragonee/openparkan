@@ -3494,3 +3494,77 @@ kind = "site"
 name = "VOICE_REPAIR_SYS_ON / _OFF when the repair switch changes"
 doc = "docs/26-damage.md"
 read = true
+
+# --- chassis: slots, one control system, weight, ../docs/28-chassis.md ---
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10003760"
+kind = "function"
+name = "attach a part to an agent: list at +0x6e4 (0x4c each), merge its mesh into the model, load its .ctl into the agent's control system"
+doc = "docs/28-chassis.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10003b6f"
+kind = "site"
+name = "send 0x80000020 to the control system at +0x158: the part's three name pairs, part id +0xc0, base node +0xc4"
+doc = "docs/28-chassis.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x100124d0"
+kind = "function"
+name = "node slot record: slot_index[node * 19 + variant * 5 + lod] (variant -1 = current), 68-byte record or 0"
+doc = "docs/28-chassis.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10009081"
+kind = "site"
+name = "a loaded part's component nodes rebased into the agent's merged model"
+doc = "docs/28-chassis.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000789c"
+kind = "site"
+name = "after a part's .ctl loads (+0xc0 set), rebind every device (0x10021990)"
+doc = "docs/28-chassis.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000fbac"
+kind = "site"
+name = "node mass += armour rating (armour struct +0xc) x node area (id 0xf)"
+doc = "docs/28-chassis.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002d7fc"
+kind = "site"
+name = "armour struct +0xc = class-27 value 0, the rating; +4 value 1, +8 value 2; last class-27 part wins"
+doc = "docs/28-chassis.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002d56e"
+kind = "site"
+name = "fight shield pointer +0x5cc overwritten by every class-9 record, so the last one loaded is the unit's"
+doc = "docs/28-chassis.md"
+read = true
+
+[[entry]]
+module = "World3D.dll"
+at = "0x10014ce0"
+kind = "function"
+name = "UNITS .dat tree reader (magic 0xf0f1, class word, root, children via 0x10015300); size class from the root name's size letter"
+doc = "docs/28-chassis.md"
+read = true
