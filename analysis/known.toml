@@ -13222,8 +13222,514 @@ read = true
 module = "Behavior.dll"
 at = "0x10025107"
 kind = "site"
-name = "attack task: sets the target through interface 0x204 slot 16"
+name = "fight module reset: clears the turret target through interface 0x204 slot 16, SetTarget(0, 0)"
 doc = "docs/29-weapons.md"
+read = true
+
+# --- arms, mounts, who drives, the sight query, the AI's fire, pods and places, ../docs/29, 27 ---
+
+[[entry]]
+module = "Control.dll"
+at = "0x10028200"
+kind = "function"
+name = "turret follower: the mount heads for its arm-blended pitch target; returns the gun's ready byte (0 while the paired arm's progress is under 1, or a falling round has no solution)"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x100272a6"
+kind = "site"
+name = "turret init: each follower (flag 8, not 0x40) takes the next class-2 or class-30 component and the next class-24 arm (+0xc4, +0xd4 lists)"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10027ecd"
+kind = "site"
+name = "turret takt: each follower after yaw and pitch; flag 0x40 passed over, flag 0x2000 aimed without a gun"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10027f06"
+kind = "site"
+name = "turret takt: the paired arm's progress (+0x94), or 1.0 with no arm, is the mount's blend"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x100283e2"
+kind = "site"
+name = "follower: zero gravity (a mode-0 round) or a manual turret skips the ballistic solve; the gun is ready"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10028401"
+kind = "site"
+name = "follower: flight time of a falling round from speed (gun +0x94) and gravity (world x gun +0x98), lower arc first"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10028560"
+kind = "site"
+name = "follower: the elevation, acos between launch and straight line x 0.83 / channel span x the turret's up"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002c3c0"
+kind = "site"
+name = "interface 0x204 slot 17: the first component of class edx at or after an index, or -1"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x100297ef"
+kind = "site"
+name = "gun sample round: +0x98 = 1 when the round's mode (frame +104) is not 0, +0x94 = its top speed"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x100295b3"
+kind = "site"
+name = "gun constructor: ready byte +0x118 = 1"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10020a28"
+kind = "site"
+name = "item step: state low bits 1 move progress up, 2 down; bits 0xc: 4 wrap, 8 ping-pong, 0 clear the state at the end"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10020800"
+kind = "function"
+name = "base component (item) constructor: vtable 0x1003c448, state 5, progress +0x94 = 0; type 24 arms are built so"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1003c448"
+kind = "datum"
+name = "base component (item) vtable: slot 3 set state, slot 11 update 0x10020900"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002adc0"
+kind = "function"
+name = "sight query mask: every class bit 0x1..0x800 ORed into 0x10048260 (0xfff)"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10028640"
+kind = "function"
+name = "turret point trace: aim at the target, led by speed +0xa8 against its velocity (0x27) less the unit's own"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10028c40"
+kind = "function"
+name = "turret target lookup: the object by id (+0x94) and the world position of its node (+0x98) or its bounding centre"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002ea10"
+kind = "site"
+name = "interface 0x202 slot 4: property 0x54 is settable only on a turret, its lead speed +0xa8"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000deee"
+kind = "site"
+name = "control system property 0x27: the world velocity +0x200"
+doc = "docs/27-ownership.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000d9f0"
+kind = "function"
+name = "static init: 0x100430d4 = pi x 0.5, the steering angle of a target abeam"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000cd6d"
+kind = "site"
+name = "round steering: atan2 of the seeker heading's z and x against y, each over the tick"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x100248d6"
+kind = "site"
+name = "seeker tick: reads its value 1, the reach"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001b4f0"
+kind = "function"
+name = "control point to world: position from +0xc, direction from +0x18, in mode 2 through the node"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10003053"
+kind = "site"
+name = "action 14: the node is v5 plus the part's first node; the effect's time follows that node"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "World3D.dll"
+at = "0x1000b230"
+kind = "function"
+name = "CreateManManager: the manual controller; its interface 0x19 is the inner object, vtable 0x10020b14"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "World3D.dll"
+at = "0x10020b14"
+kind = "datum"
+name = "manual controller vtable: slot 5 the permission method 0x1000ed20"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "World3D.dll"
+at = "0x1000ef4e"
+kind = "site"
+name = "permission: a gun that starts selected gives its arm 0x21"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "World3D.dll"
+at = "0x1000ef9e"
+kind = "site"
+name = "permission: a hero's gun that starts deselected gives its arm 0x22"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "World3D.dll"
+at = "0x1000ee5e"
+kind = "site"
+name = "permission: a turret allowed to fire goes to CIS_MANUALCONTROL with aim (0.5, 0.5, 0)"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "World3D.dll"
+at = "0x10005d50"
+kind = "function"
+name = "SetStateForGameObjects: message 7 with the state to every object of a player"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "World3D.dll"
+at = "0x1000fcbf"
+kind = "site"
+name = "MCMD_LOCK: toggles property 0xb3 through interface 0x16"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Wizard.dll"
+at = "0x10003890"
+kind = "function"
+name = "permission refresh: mode (+0x1fc) and group words give the manual controller (0x19) bits 3 or the behaviour (0x10) its bits"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Wizard.dll"
+at = "0x10002070"
+kind = "function"
+name = "group words by mask: 1 unit, 2 unit, 0x10 group 5, 0x20 group 4, 0x40 group 2, 0x80 group 0, 0x100 group 3, 0x200 group 1"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Wizard.dll"
+at = "0x10001cd1"
+kind = "site"
+name = "message 7: 2 freezes, any other value becomes the mode word +0x1fc"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10074ff0"
+kind = "function"
+name = "hand a unit to the player (1) or back (0): Wizard group words, message 7, record +0xa2"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10023ff0"
+kind = "function"
+name = "fight module takt: a target; each turret aimed (SetTarget, lead 0x54, 0x400); each gun scored and fired one shot"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10025070"
+kind = "function"
+name = "fight module reset: SetTarget(0, 0), turrets to 0x400, guns off on their timers; from the mode set when flag 0x20 is on"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10024b1b"
+kind = "site"
+name = "fight module: a turret's SetTarget"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10024ba2"
+kind = "site"
+name = "fight module: the turret's lead speed (property 0x54) from one of its guns' round speed"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10024d30"
+kind = "site"
+name = "fight module: a round of 10000 damage or more fires only at a target id with nibble 3"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10024ebb"
+kind = "site"
+name = "fight module: fire threshold 0.85 on a building or +0x614 >= 0.5, else 0.45"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10024fa2"
+kind = "site"
+name = "fight module: CIS_SINGLEFIGHT 0x200 to the gun"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10024e58"
+kind = "site"
+name = "fight module: tasks 2, 3 and 5 fire on the timer whatever the score"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1001b4b0"
+kind = "function"
+name = "fight gun record: round damage (6), speed (0x54), magazine (0x800), frame flags and range; distance bands 5, (v+1)/2, 2(v+1)"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1001b9f0"
+kind = "function"
+name = "fight distance score: d/5 near, 1 to (v+1)/2, falling to 0 at 2(v+1); x (1 - rise / v)"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1001b650"
+kind = "function"
+name = "fight gun timer: 30 / magazine s plus as much at random when the magazine is over 2, else 0.5 + 1.5; over the difficulty"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x100050c5"
+kind = "site"
+name = "behaviour takt: the fight module runs while flag 0x40 is set"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10024fd0"
+kind = "function"
+name = "CWorld slot 7: the segment query over the world's object tree"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x100250c0"
+kind = "function"
+name = "segment query node: class bit in the mask, bounding sphere, interface 0x18 slot 6, then the children; nearest wins"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1001a174"
+kind = "site"
+name = "landscape QueryInterface answers 0x18"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10005600"
+kind = "function"
+name = "IAnimation slot 9: a node's phase (+0x114), which effect time mode 4 reads"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10003470"
+kind = "site"
+name = "LoadAgent: CreateManManager, kept as the agent's interface 0x19"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Effect.dll"
+at = "0x10005d3f"
+kind = "site"
+name = "time mode 4: the owner's IAnimation slot 9 on the bound node"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x100583a2"
+kind = "site"
+name = "CBuilding init: items of type 12 and 13 appended to doors and computers in item order; computer 0 is the first"
+doc = "docs/27-ownership.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002d792"
+kind = "site"
+name = "component factory: each new component appended to +0x5bc in load order"
+doc = "docs/27-ownership.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10062630"
+kind = "function"
+name = "same-clan pod: the player's driven unit or hero switches the view by the building's Type"
+doc = "docs/27-ownership.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10076d30"
+kind = "function"
+name = "boardable bot test: refuses no record, a removed object, no class-1 turret, a turret node with no life"
+doc = "docs/27-ownership.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100720e8"
+kind = "site"
+name = "Enter: the hero boards the bot, view state 1"
+doc = "docs/27-ownership.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10071ff8"
+kind = "site"
+name = "Enter: a bot is boardable when its record +0x30 is 4 and 0x10076d30 passes"
+doc = "docs/27-ownership.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100750c9"
+kind = "site"
+name = "takeover: record +0xa2 = 1 with message 7 and 1"
+doc = "docs/27-ownership.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10018492"
+kind = "site"
+name = "occupancy: counts an object only if its world speed (property 0x27) is at most the place bound +0x2c"
+doc = "docs/27-ownership.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1001851f"
+kind = "site"
+name = "place bound: 1000 at a place with a bit of 0x7c000, else 2"
+doc = "docs/27-ownership.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1000b315"
+kind = "site"
+name = "mission property list: ChargeRadius is kind 6"
+doc = "docs/27-ownership.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1000b688"
+kind = "site"
+name = "mission property get, kind 6 ChargeRadius: the constant 10000"
+doc = "docs/27-ownership.md"
 read = true
 
 # --- texture alpha, the sky dome, fog and scene colour, ../docs/02, 10 ---

@@ -62,7 +62,8 @@ and `CIS_SWITCHOFF` when it is released, after `MCMD_SELECT` picked a weapon
 ([14-controls.md](14-controls.md)). The gun keeps the state word
 (`0x1002a100`); `CIS_SINGLEFIGHT` (0x200) fires once and clears itself
 (`0x1002a09f`). The next section follows a shot from the button to the round.
-How the AI chooses among several weapons is not read here.
+The AI does not choose among its weapons: it scores each one
+([How the AI fires](#how-the-ai-fires--read)).
 
 ## Firing, from button to round — *read*, and *measured*
 
@@ -95,15 +96,78 @@ weapon commands this way (`World3D.dll:0x100109f8`):
 - Any other machine's guns start selected.
 - So **in Mission 01 the button fires the cannon and the laser together**
   until a number key changes the set.
-- What allows the player's unit to fire in the first place (the handler's
-  input bits, slot 10) was not traced.
+- The same method says who may fire at all
+  ([below](#who-may-drive-a-units-guns--read)).
 
 **The class-24 components are the arms.** The only controller that has any is
 the hero turret, which pairs four of them with its four guns (*measured*).
-Each arm's channels play frames 42–48 on the arm nodes. Type 24 is built as
-the generic device, the factory's default (`0x1002d6ec`). That state 1 unfolds
-an arm, 2 folds it, and `0x20` does either at once is a *guess* from the
-frames.
+Each arm's channels play frames 42–48 on the arm nodes.
+
+**An arm is an item** (*read*). Type 24 is built as the base component
+(`0x10020800`, the factory's default at `0x1002d6ec`), the class a door or a
+control pod is ([27-ownership.md](27-ownership.md#capture--read)).
+
+- **Its update** (`0x10020900`) moves a progress (`+0x94`, starting at 0) by
+  0.45 a step: toward 1 while the state word's low bits are 1, toward 0 while
+  they are 2 (`0x10020a28`). Every channel heads for the progress, and the
+  state clears when the progress passes its end.
+- **So 1 and `0x21` unfold an arm**, frames 42 → 48, and **2 and `0x22` fold
+  it**. The update reads only the bits 1, 2, 4 (wrap) and 8 (back and forth),
+  so `0x20` changes nothing.
+- **It takes 0.5 s.** All four arms' channels run at 2 a second, and the three
+  steps of 0.45, 0.45 and 0.1 last 225, 225 and 50 ms (*measured*).
+- **At the start** all four records hold state `0x21` (+0x18 = 33,
+  *measured*). The handler then sends `0x21` to the cannon's and laser's arms
+  and `0x22` to the plasma rifle's and the missiles' (`0x1000ef4e`,
+  `0x1000ef9e`). So two arms unfold and two stay folded.
+- **What an arm is for**: a gun on it is not ready until it is out
+  ([below](#a-gun-is-ready-once-its-arm-is-out--read-and-measured)).
+
+### Who may drive a unit's guns — *read*
+
+`World3D.dll`'s row handler is the unit's **manual controller**
+(`CreateManManager`, interface `0x19`). `AniMesh.dll` builds one for every
+agent (`0x10003470`).
+
+- **Its permission method** (`0x1000ed20`) takes a component, or −1 for the
+  unit, and two bits. Bit 0 lets that component take input and bit 1 lets it
+  fire; they are the bytes the rows test.
+- **Its caller is `Wizard.dll`** (`0x10003890`), which re-sends the bits for
+  every component whenever its words change. No other call of it was found; the
+  search followed the interface `0x19` pointers `Wizard.dll` and `iron3d.dll`
+  keep.
+
+The Wizard decides who drives:
+
+- **A mode word** (`+0x1fc`) is set by message 7: 1 is the player, 0 the AI,
+  and 2 freezes both (`0x10001cd1`).
+- **One word per group** (`+0x200`–`+0x21c`) is set through a mask
+  (`0x10002070`): 0 follows the mode, 1 gives the group to the AI, 3 to the
+  player, 2 to neither.
+- **The groups are the power channels** of
+  [23-economy.md](23-economy.md): interface `0x204` slot 9 (`0x1002c3a0`) looks
+  a component's class up in the same table (`Control.dll:0x1003ccc8`). Group 4
+  is the turret, the guns, the arms and the builder module (classes 1, 2, 22,
+  24, 30); 2 the camera, radar and seeker; 3 the engines; 5 the shields and
+  armour.
+- **The player's side** gets bits 3 from the manual controller. **The AI's
+  side** gets them from `MBehaviour`'s mode set (`Behavior.dll:0x100067b0`),
+  where the unit's bits 2, 4 and 8 become the flags `0x10` (movement), `0x20`
+  and `0x40` (the fight module).
+
+`iron3d.dll` hands a unit to the player at `0x10074ff0`:
+
+- **The hero** gets every group at once (mask `0xfff`, word 3). Every one of
+  its guns may fire, and none of its AI runs.
+- **A bot** gets groups 4, 5, 2 and 0 for the player, and message 7 with 1, so
+  the groups left at 0 follow the player too. Its record's `+0x9c` changes
+  this: 1 leaves the unit's own word with the AI, so its movement takt runs;
+  2 gives the AI the unit, its weapons and its shields, and sends message 7
+  with 0.
+- **Letting go** sends message 7 with 0 and hands the words back.
+
+So a unit's guns take the button once the player has taken it over. The
+selected byte then decides which of them the button reaches.
 
 ### The gun's takt: a stroke, then the interval
 
@@ -114,7 +178,10 @@ stroke or starts one. It starts one only if all of these hold:
 
 - it has rounds (state 5 otherwise);
 - its capacitor holds value 2 (state 6 otherwise);
-- its ready byte `+0x118` is set (state 7 otherwise, `0x10029d27`);
+- its ready byte `+0x118` is set (state 7 otherwise, `0x10029d27`). The
+  constructor sets it (`0x100295b3`), and a turret's takt then rewrites it
+  once its arm is out
+  ([below](#a-gun-is-ready-once-its-arm-is-out--read-and-measured));
 - its state word is non-zero.
 
 Values 8–10 add target gates: no shot at a target farther than value 8
@@ -155,6 +222,51 @@ value 3)` does not count the stroke. The missile barrels' channels carry flag
 4: they are timed but not animated. Every one of the 388 barrel channels in
 the install has a rate (*measured*).
 
+### A gun is ready once its arm is out — *read*, and *measured*
+
+The ready byte is set by the turret, through the gun's **mount**. A mount is a
+follower channel: a section-2 channel flagged 8, which joins the turret's list
+at load (`0x10009120`).
+
+**Pairing** (`0x10027170`, when the turret starts):
+
+- The turret's channels are its yaw and pitch, then the followers in load order.
+  A follower also flagged `0x40` is passed over.
+- The *n*-th follower left takes the next gun (class 2 or 30) and the next arm
+  (class 24), each found from just after the last one taken (`0x1002c3c0`), or
+  none.
+- *Measured*: on the hero turret, followers 4, 9, 21 and 25 take the cannon,
+  plasma rifle, laser and missiles, and arms 8 to 11. A fitted gun part carries
+  one follower of its own. On every controller but two, each follower finds a
+  gun; `e_gun_bl_03` and `e_gun_tl_02` have a follower and no gun. No channel
+  carries the `0x2000` flag the takt treats apart.
+
+**Each takt** (`0x10027ecd`), `0x10028200` moves each mount and returns its
+gun's ready byte (`0x10027f51`):
+
+1. **The arm's progress *p*** is read, or 1 where there is no arm. While
+   *p* < 1 the mount heads for (1 − *p*) × its initial value + *p* × the pitch
+   target, and **the gun is not ready**.
+2. **Once the arm is out**, the mount heads for the pitch channel's target.
+3. **A falling round adds an elevation.** The gun keeps its round's top speed
+   (`+0x94`) and a gravity flag (`+0x98`), which is 1 when the round's mode is
+   not 0 (`0x100297ef`). With *g* = the world's 10 × that flag and *d* the target
+   from `TurretCenter`, the mount solves for the flight time, *t*² =
+   2 (*A* ∓ √*D*) ÷ *g*² with *A* = *v*² − *g d*z and *D* = *A*² − *g*²|*d*|²,
+   the lower arc first (`0x10028401`). It rises by the angle between the launch
+   and the straight line × 0.83 ÷ the channel's span, signed by the z of
+   `TurretCenter`'s direction.
+   No solution leaves **the gun not ready**.
+4. **Otherwise the gun is ready.** A mode-0 round skips step 3 (its gravity is 0,
+   `0x100283e2`), and so does a turret in `CIS_MANUALCONTROL`. Every hero round is
+   mode 0; the four mode-3 rounds are the flamers' (*measured*).
+
+So on the hero (*derived*) **the cannon and the laser are ready half a second
+after their arms start unfolding**, and **a gun selected with its number key is
+ready half a second after the key**. The plasma rifle and the missiles are
+never ready until selected, and a gun deselected mid-fold stops being ready at
+once.
+
 ### Where the round leaves, and which way
 
 - **The muzzle** is the barrel channel's control point (+0x14), in world space,
@@ -172,8 +284,22 @@ the install has a rate (*measured*).
     point. The round flies from its muzzle straight at it (`0x1002a610`).
 - **With no hit** the round keeps its barrel's own direction.
 - **No spread and no lead** are applied to the player's shot.
-- *Guess*: that IWorld slot 7 meets objects as well as the ground. Its code
-  was not read.
+
+**What the sight ray meets** (*read*, `Terrain.dll:0x10024fd0`):
+
+- **IWorld slot 7 walks the world's object tree** from its root
+  (`0x100250c0`). Each object whose class bit is in the query's mask is tested
+  against its bounding sphere and then through its interface `0x18` slot 6.
+  Its children are walked the same way, and the nearest hit wins.
+- **The sight ray's mask is `0xfff`**, every class (`Control.dll:0x1002adc0`),
+  and it excludes no batch and no triangle.
+- **A round's own query differs** (`0x1001d9d0`): it asks for classes `0x41e`
+  only, and passes through triangles flagged 4 or 32 and batches flagged 8 or
+  `0x200` ([26-damage.md](26-damage.md)). So the sight can stop on a tree's
+  leaves that the round then flies through.
+- **The ground.** The landscape answers interface `0x18` as well
+  (`Terrain.dll:0x1001a174`). That it is one of the objects the ray walks was
+  not traced.
 
 ### The round's start
 
@@ -204,12 +330,42 @@ The round is created facing its direction with z up (`CreateObject` 9,
 
 A gun's target (`+0x108`) is its turret's (`0x10028130`). The turret's target
 is set through the unit's interface `0x204` slot 16, which also sets the
-unit's own seeker. `Behavior.dll`'s attack task calls it (`0x10025107`).
+unit's own seeker.
 
-What sets the hero's turret target in first-person play was **not found**.
-With no target, a seeker gives no heading
+**Only the AI sets it** (*read*):
+
+- **One writer.** The turret's target is written by its set-target method
+  (`0x100280d0`), and only the stream restore writes it besides.
+- **One way in.** That method is reached only through interface `0x204` slot 16
+  (`0x1002cb00`).
+- **Every caller was enumerated.** Each call at that slot's offset with a
+  target argument was listed in every module. Five are in `Behavior.dll`'s
+  fight code:
+  - `0x10024b1b` and `0x10024f8f` aim, in the fight module's takt;
+  - `0x10025107` clears the target with (0, 0) when the module is reset
+    (`0x10025070`, from the mode set once flag `0x20` is on, and from
+    `0x10031b30`);
+  - `0x100253dc` sits in `0x10025320`, which only the takt's playback branch
+    calls (`0x10004f13`), and `0x10025aa5` in `0x10025a00`, which only the
+    fight takt calls. Neither was read further.
+- **The sixth caller** is the gun handing its target to its round
+  (`0x1002a514`).
+- **Nothing else.** `iron3d.dll`, `World3D.dll`'s manual controller and
+  `Wizard.dll` never call it.
+- **The fight module runs only while `MBehaviour` flag `0x40` is set**
+  (`Behavior.dll:0x100050c5`). Taking the hero over clears it
+  ([above](#who-may-drive-a-units-guns--read)).
+
+So in first-person play the hero's turret keeps whatever target its AI last set,
+or none. With no target a seeker gives no heading
 ([Guided rounds](#guided-rounds-differ-in-how-hard-they-steer--read-and-measured)),
-so the plasma bolt and the missile fly straight.
+so the plasma bolt and the missile fly straight (*derived*).
+
+**Lead is the AI's too** (*read*). Property `0x54` on a turret is its lead speed
+`+0xa8` (`Control.dll:0x1002ea10`). The fight module copies a gun's round speed
+into it (`Behavior.dll:0x10024ba2`), and a turret in `CIS_POINTTRACE` aims at
+the point where a target moving at its velocity (property `0x27`) meets a round
+at that speed (`Control.dll:0x10028640`). Nothing sets it for the player.
 
 ### How a round ends — *read*, and *measured*
 
@@ -231,7 +387,7 @@ hit effect (action 10). The hero's missile explodes at range with
 `bm_h_01r.exp`, 200 in 10 m. Its hit `.exp` is 170 in 7 m. The other three
 hero rounds hit directly (*measured*).
 
-### What a shot plays — *read*, and *unknown*
+### What a shot plays — *read*, and *measured*
 
 - **Guns with a shot group.** 34 guns name a section-5 group at record +0xc.
   It runs when a barrel starts its stroke and holds only actions 10 (start an
@@ -243,11 +399,35 @@ hero rounds hit directly (*measured*).
     `GH_*_sfx` points (action 4, `0x10002a8d`).
   - It binds the first three to the barrel nodes and the sound effects to the
     arm nodes (action 14, `0x10003031`).
-  - **What starts them on a shot was not found**: the gun's code calls no
-    effect method.
+- **Nothing starts them. They follow a node** (*read*):
+  - **Action 14's second argument is a node** of the model, rebased by the
+    part's first node (`0x10003053`), not a control point.
+  - **An effect in time mode 4 takes its time from that node's phase**, through
+    the owner's IAnimation slot 9 (`Effect.dll:0x10005d3f`,
+    `AniMesh.dll:0x10005600`).
+  - **The phase is the value of the channel that plays the node**: channels hand
+    it over through IAnimation slot 10 each step (`Control.dll:0x10021a30`).
+- **The gun effects follow the barrels** (*measured*). `hero_cannon`,
+  `hero_prifle` and `hero_redlaser` are bound to nodes 13, 9 and 22, the three
+  barrels. Each barrel's value is 0 at rest, 0.5 as the round leaves, then 1,
+  then 0 again.
+  - `hero_cannon` shows one sprite set from 0.01 to 0.5 and another from 0.51
+    to 1, with its smoke and `H_fire_cannon.wav` from 0.01 to 1.
+  - `hero_redlaser` and `hero_prifle` sound `H_fire_*.wav` from 0.25 to 1.
+  - So the flash and the report play through each stroke, and on no other
+    frame.
+- **The `_sfx` follow the arms** (*measured*). The four are bound to nodes 11,
+  7, 19 and 15, the first channel of each arm, and each is one `H_gh_*.wav`
+  audible from 2 to 20 m in the window 0.15 to 1. They are the arms' own sounds
+  as they unfold, not the shots'.
+- **The missiles** have no barrel effect. Their launch is the round's own
+  `hero_gunfire_missile` (mode 1, 5 s, `H_fire_missile.wav` in its first
+  tenth).
 - **The rounds' own effects** start when the round loads: `hero_cannon_bullet`,
   `hero_prifle_bulletA`/`B`, `hero_laser_bullet`, and the missile's engine,
   smoke and `hero_gunfire_missile`.
+- How a sound emitter behaves across its window, once or looping, belongs to
+  [11-effects.md](11-effects.md#not-resolved).
 
 ## Energy or clips — *measured*
 
@@ -349,12 +529,75 @@ how wide it looks, and how fast it can turn.
 *Measured*: every missile round looks wider and turns faster than both guided
 shells. A howitzer shell corrects gently inside a 15° cone; a missile looks
 through about three times the angle and turns three to four times as fast; the
-winged SSMs look wide but turn slowly. The seeker's value 2 is not read by
-either method.
+winged SSMs look wide but turn slowly.
+
+**The steering** (*read*, `0x1000cd0a`):
+
+- **Two angles.** The seeker's heading, in the round's frame, becomes the angle
+  of its z against its y and of its x against its y (`0x1000cd6d`).
+- **±π/2 when the target is abeam.** When the forward part is 0 the angle is a
+  quarter turn, signed; `0x100430d4` holds π × 0.5, set at load (`0x1000d9f0`).
+  That is all the "scale on the steering command" is.
+- **One tick.** Each angle is divided by the tick (× −1000 ÷ ms,
+  `0x1000cd7d`) and clamped to the turn rate. A round asks to swing onto its
+  target within one tick, and the turn rate is what slows it.
+
+**Value 2 is read by nothing found.** The seeker's own methods read value 0
+(`0x100247a0`) and value 1 (`0x100248d6`). No request for value `0x302` in
+the install is aimed at a seeker. The same scan finds the radar's
+(`0x10024721`), the detect shield's (`0x1002bf67`) and the deflector's
+(`0x1002bfbb`).
 
 A seeker's target is the gun's target, handed to the round as it leaves
 ([The round's start](#the-rounds-start)). A turret's gun has its turret's
 target.
+
+## How the AI fires — *read*
+
+`Behavior.dll`'s **fight module** (`0x10023ff0`) runs from the behaviour takt
+while `MBehaviour` flag `0x40` is set. It never picks one weapon. It aims
+every turret and lets every gun fire when that gun's own score allows.
+
+**The target.** The module picks one target for the unit on a timer, by the
+selector's mode of [25-sensors.md](25-sensors.md): none, fixed, nearest,
+units only, or weighted by the areal figure (`0x100240ae`).
+
+**Each turret** in the module's table (`MBehaviour+0x64c`: 52 bytes a turret,
+88 a gun) is aimed at it (`0x10024b1b`–`0x10024c51`):
+
+- the unit's turret target is set (interface `0x204` slot 16);
+- the turret's lead speed is set to one of its guns' round speeds
+  (property `0x54`);
+- the turret is put in `CIS_POINTTRACE` (`0x400`).
+
+**Each gun is scored.** Its record (`0x1001b4b0`) keeps its round's damage
+(property 6), its round's speed *v* (property `0x54`), its magazine (property
+`0x800`), and the round frame's flags and range. Then:
+
+- **Heavy rounds are held back.** A gun whose round does 10,000 damage or more
+  fires only at a target whose id has 3 in its `0x0f000000` nibble
+  (`0x10024d30`). Those are the three winged SSM launchers (*measured*).
+- **Distance** (`0x1001b9f0`). The score rises from 0 to 1 over the first 5 m,
+  holds 1 out to (*v* + 1) ÷ 2, and falls to 0 at 2 (*v* + 1). It is then
+  multiplied by 1 − height ÷ *v*.
+- **Aim.** It is multiplied by two more factors from the turret's and the gun's
+  aim errors (interface `0x202` slot 10, `0x10024c92` and `0x10024d54`).
+- **Threshold.** The gun fires **one shot** (`CIS_SINGLEFIGHT`, `0x200`,
+  `0x10024fa2`) when the product clears 0.45, or 0.85 on a building and in
+  some other states (`0x10024ebb`).
+- **Its own timer.** The shot also waits for the gun's randomised timer: 30 ÷
+  magazine s plus up to as much again when the magazine holds more than 2,
+  otherwise 0.5 s plus up to 1.5. Both are divided by the difficulty profile's
+  value (`0x1001b5ec`, `0x1001b650`).
+- **During tasks 2, 3 and 5** every gun fires on its timer whatever its score
+  (`0x10024e58`).
+
+So a unit fires every gun whose score clears the bar, each on its own timer.
+
+*Derived*, from the distance score alone: a laser or taser (10,000 m/s)
+scores fully out to 5,000 m, a 350 m/s cannon to 175 m, and a 70 m/s missile
+only to 35 m and not at all beyond 142 m. `weapons.ai_distance_score` and
+`weapons.ai_fire_wait` compute them.
 
 ## The weapons the player builds — *measured*, with *derived* rates
 
@@ -433,16 +676,21 @@ The enemy variants and the huge guns:
 
 ## Not established
 
-- What sets the hero's turret target in first-person play, and so what a
-  player's missile follows.
-- What starts the hero turret's shot effects and sounds (`hero_cannon`, the
-  `*_sfx`), which its load group creates and binds to nodes (action 14).
-- How the turret's follower channels decide a gun's ready byte
-  (`0x10028200`), and which geometry IWorld slot 7, the convergence ray,
-  meets.
-- What allows the player's unit to fire (the row handler's per-component
-  bytes, `World3D.dll:0x1000ed20`), and what the arms' states 1, 2, `0x21` and
-  `0x22` play.
-- A seeker's value 2, and the scale on the steering command (`0x100430d4`, set at
-  `0x1000d9fc`).
-- How the AI picks a weapon when a unit has several.
+- Whether a target the hero's AI set before the player took over survives into
+  first-person play. Nothing clears it on takeover. Whether the fight module
+  ever runs for the hero before then was not followed: `iron3d.dll:0x100a3cd2`
+  sends all of a player's objects message 7 with 0, but when it runs is not
+  read.
+- Whether the landscape is one of the objects IWorld slot 7 walks, so that the
+  sight ray converges on the ground and not only on objects.
+- The vector a falling round's mount solves for when its turret has no target
+  (it is then the turret's aim triple, `Control.dll:0x10027e07`), and which way
+  the `0.83 × angle` elevation turns on a hanging turret.
+- `e_gun_bl_03` and `e_gun_tl_02` carry a follower and no gun. The turret's takt
+  reads the paired gun without a check, so either they are never fitted or the
+  follower pairs with a later part's gun; not traced.
+- The fight module's two aim factors (interface `0x202` slot 10), which of a
+  turret's guns lends its round speed as the lead (the turret record's `+0x1c`),
+  what tasks 2, 3 and 5 and `MBehaviour+0x614` are, and the target id's nibble
+  3 that frees the winged SSMs.
+- A seeker's value 2: read by nothing found.

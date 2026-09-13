@@ -1031,6 +1031,14 @@ PLACE_STORE = 0x10
 #: A ground-level place, 10 wide and 12 high instead of 5 and 3
 #: (``0x100184f0``) -- the only kind a unit sent to reload will pick.
 PLACE_GROUND = 0x10000000
+#: The main teleport's places (in 0x8000, out 0x4000, exit 0x10000, and two
+#: more bits the same test takes).
+PLACE_TELEPORT = 0x7C000
+#: A unit counts as in a place only while its world speed is at most this, in
+#: m/s (``Behavior.dll:0x10018492``, property 0x27): it must stand still.  At
+#: a teleport place the bound is 1000 (``0x1001851f``).
+PLACE_SPEED = 2.0
+PLACE_TELEPORT_SPEED = 1000.0
 
 
 @dataclass

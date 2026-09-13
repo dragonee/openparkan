@@ -75,6 +75,36 @@ For each unit in a dock that belongs to the building's clan or an ally
 
 So a unit sitting in a dock is full in ten seconds, whatever it is.
 
+**A unit must stand still to be in a place** (*read*, and *measured*):
+
+- **What is tested.** The occupancy refresh (`0x10018310`) takes each object
+  the hall way finds in the place's box. It reads the object's property `0x27`,
+  which is its world velocity (`Control.dll:0x1000deee`, `+0x200`). The object
+  counts only if that vector's length is at most the place's bound
+  (`0x10018492`).
+- **The bound** is set with the box (`0x100184f0`): 2 m/s, or 1000 at a place
+  with any bit of `0x7c000`, a teleport's (`0x1001851f`).
+- **Which places.** Five places carry such a bit: four on the main teleport
+  `fr_m_mtp` and one teleport-out place on the large ruin `fr_b_ruin`
+  (*measured*). The other 43 pods, docks and ore places count a unit only while
+  it stands.
+- **So a dock charges nobody driving through it**, and a capturer must stop on
+  the pod (*derived*).
+
+**No profile flag gates a dock** (*derived*). `behpsp.res` gives `Task_Charge`
+to the generator's profile, `Task_Mine` to the mine's and `Task_Construct` to
+the plant's. Each building profile names the one task its building does. None of
+the fourteen task flags is read by any code
+([31-packages.md](31-packages.md)), and a dock charges by its place flags alone
+(`0x10019251`). So the generator's `Task_Charge` has no effect, and a factory,
+Outpost, bunker or tower charges without it.
+
+**`ChargeRadius` is a constant** (*read*, and *measured*). The mission property
+is kind 6 of `MBehaviour`'s eleven (`0x1000b315`). Its getter returns 10000
+whatever is stored (`0x1000b688`), and its setter stores nothing (`0x1000b575`).
+All 463 placements hold 10000, locked. No mission could change it, and nothing
+docks by it.
+
 ## What sends a bot to a dock — *read*
 
 The orders `ORDER_ROBOT_RELOAD` (8) and `ORDER_ROBOT_REPARE` (9) of
@@ -172,14 +202,38 @@ of `IBuilding` (`0x1005b250`) is where `iron3d.dll` stores its callback
   | `fr_l_gener` | 0.7 | 1.43 s | 1.29 s |
 
   Doors open in 1 to 5 s the same way. Up to 100 ms more pass before the
-  first step starts. That the building's computer 0 is the file's first
-  class-13 part is a *guess*. It matters on 9 buildings, the mines, stores and
-  towers: their second class-13 part is a wrapping channel at rate 0.2, and
-  would capture at 4.5 s. On the other 9 buildings with two, both parts have
-  the same rate.
+  first step starts.
+
+  **Computer 0 is the file's first class-13 part** (*read*, and *measured*):
+
+  - `CBuilding` files its items in the item manager's order, appending each
+    class-13 item to its computers as it meets it (`Terrain.dll:0x100583a2`).
+  - The item manager's order is the control system's component list. The
+    loader appends one component per section-4 record, in file order
+    (`Control.dll:0x1000905f`, `0x1002d792`).
+  - It matters on 8 of the 18 buildings with two class-13 parts: the three
+    mines, the three stores and `fr_b_tower`, `fr_m_tower`. Their second part is
+    a wrapping channel at rate 0.2, which would capture at 4.5 s. Their pods
+    capture at 1.8 s.
+  - On the other 10, both parts have the same rate.
 - **The callback takes the building** (`iron3d.dll:0x10061050`).
-  - **Same clan** (`0x100610c2`): nothing is captured; `0x10062630` runs
-    instead, and is not read here.
+  - **Same clan** (`0x100610c2`): nothing is captured. `0x10062630` runs
+    instead, and **it opens the building for the player** (*read*):
+    - It acts only if a state the player's interface keeps is not 7
+      (`0x1006267e`, through `0x10044190`), and only for the player's own
+      unit: the unit's record must be the player's clan, and
+      either its `+0xa2` must be set (the player drives it,
+      [below](#a-neutral-unit-is-taken-by-the-hero--read-and-measured)) or it
+      must be a hero. An AI unit in its own pod does nothing.
+    - It then switches the view by the building's Type through `0x10062bc0`:
+      - the plant (`0x80000010`) to state 5 with page 5, and the institute
+        (`0x80000400`) to state 5 with page 4 (`0x10084d80`);
+      - the three bunkers to state 4;
+      - the medium and large towers to state 6, unless `0x10033e40` refuses;
+      - the generator, mine, storage and Outpost to `0x1007d0a0` and
+        `0x100a5660` instead.
+    - What each state shows was not read. That state 5 is the plant's or
+      institute's own screen is a *guess* from the pages.
   - **Any other clan, single player** (`0x10061192`): the building's record
     changes owner and calls `MBehaviour::Capture` with the newcomer's clan
     (`0x10032fd0`), then the voice below plays. **There is no check of
@@ -214,10 +268,14 @@ Capturing a bot is not done at a pod. It is the hero's **Enter** —
 (*measured*) — in `iron3d.dll`'s command handler (`0x10071cd0`, case
 `0x10071f08`):
 
-1. **The hero must be out on foot.** The game view must be in state 1 or 3,
-   and the player's hero record must have its flag `+0xa2` set. That flag is
-   set when the hero's body is shown and cleared when it is hidden
-   (`0x1006792a`, `0x1006788a`), so reading it as "on foot" is a *guess*.
+1. **The player must be driving the hero.** The game view must be in state 1
+   or 3, and the player's hero record must have its flag `+0xa2` set.
+   `iron3d.dll`'s takeover (`0x10074ff0`) sets that flag when it hands a unit
+   to the player (`0x100750c9`, with message 7 and 1) and clears it when it
+   hands the unit back (`0x10075092`, `0x10075148`)
+   ([29-weapons.md](29-weapons.md#who-may-drive-a-units-guns--read)). The
+   flag is also written where the hero's body is shown and hidden
+   (`0x1006792a`, `0x1006788a`) and in four more places not read.
 2. **The target must be a unit within 20.** It is the hero's current target.
    Its `Type` must have no bit outside `0x103e000` (`0x10071fad`): transport,
    builder, warrior, HQ or hero. It must be within 20 of the hero across the
@@ -225,8 +283,14 @@ Capturing a bot is not done at a pod. It is the hero's **Enter** —
 3. **If the target's clan is neutral (type 3),** the unit is captured on the
    spot: `MBehaviour::Capture` with the player's clan (`0x1007202a`), a new
    owner on its record, and a place in the player's clan list. If it is a bot
-   the hero can board, the hero then enters it (`0x10062bc0`). Otherwise a
-   message is shown.
+   the hero can board, the hero then enters it: the view goes to state 1 with
+   that bot (`0x100720e8`). Otherwise a message is shown.
+   - **A bot the hero can board** (*read*, `0x10071ff8`) is a record whose
+     `+0x30` is 4 and which `0x10076d30` does not refuse.
+   - That test refuses a missing record, an object already removed (its class
+     word is `0xfffe`), a unit with no class-1 turret, and one whose turret's
+     node has no life left (property `0x52`, the component's node life).
+   - So **a bot whose turret is shot off cannot be boarded**.
 4. **If not,** Enter only boards a bot of the player's own clan. An enemy's or
    an ally's bot cannot be taken this way.
 
@@ -275,17 +339,10 @@ generators between the players. `Multi.05`'s `Ntrl` is the exception: type 2.
 
 ## Not established
 
-- Which class-13 part is the building's computer 0 where there are two, and
-  so whether a mine, store or tower pod captures at 1.8 s or at 4.5 s.
-- What `iron3d.dll:0x10062630` does when a unit of the building's own clan
-  opens the pod.
-- The hero's target field (record `+0x38`, `+4`) and what sets it; the game
-  view states 1 and 3.
-- What `0x10076d30` rules out before the hero boards a bot.
-- Whether a unit must be standing still to count as in a place: the
-  occupancy test (`0x10018310`) compares a vector of the unit's to 2.0, and
-  that it is the velocity is a *guess*.
-- Why `behpsp.res` gives `Task_Charge` to the generator's profile and to no
-  other building's, when factories, Outposts, bunkers and towers have docks.
-- The mission property `ChargeRadius` is 10000 and locked on all 463 placed
-  buildings and units; nothing found reads it for docking.
+- What the game view's states 1, 3, 4, 5 and 6 show (`iron3d.dll:0x10062bc0`),
+  beyond state 1 being the one boarding a bot enters; what
+  `0x1007d0a0` and `0x100a5660` open for a generator, mine, storage or
+  Outpost; and what `0x10033e40` refuses on a tower.
+- The hero's target field (record `+0x38`, `+4`) and what sets it.
+- The other four writers of a unit record's `+0xa2` (`0x1005e7e8`,
+  `0x10074dbf`, `0x1007e2ad`, `0x100a2a73`).
