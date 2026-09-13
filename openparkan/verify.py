@@ -2069,6 +2069,94 @@ def check_sky(check, game: Path) -> None:
           f"{sky.BODY_ANGLES['moon'][0]:.0f}")
 
 
+#: The one header +0x14 bit shipped textures set, on 81 ARGB8888 textures.
+TEXTURE_BIT_26 = 0x04000000
+MISSION_01_SKY = "MISSIONS/CAMPAIGN/CAMPAIGN.00/Mission.01/sky.ske"
+
+
+def check_render_state(check, game: Path) -> None:
+    """What the renderer does: texture alpha, the sky's fog, dome and settings."""
+    archive = NResArchive.open(game / "Textures.lib")
+    word14: Counter[int] = Counter()
+    carriers: set[int] = set()
+    later = 0
+    formats: Counter[int] = Counter()
+    keyed = palettised = 0
+    for entry in archive:
+        data = archive.read(entry)
+        if data[:4] != b"Texm":
+            continue
+        _m, _w, _h, _mips, _flags, u14, u18, fmt = texm.HEADER.unpack_from(data, 0)
+        word14[u14] += 1
+        if u14:
+            carriers.add(fmt)
+        later += u18 != 0
+        formats[fmt] += 1
+        if fmt == texm.FMT_PALETTE8:
+            palettised += 1
+            tex = texm.decode(data)
+            body = data[texm.HEADER_SIZE + texm.PALETTE_SIZE:]
+            keyed += 0 in body[: tex.width * tex.height]
+    total = sum(formats.values())
+    alpha = sum(n for f, n in formats.items() if texm.uploads_with_alpha(f))
+    check("Textures.lib: nothing is colour-keyed; only 4444 and 8888 have alpha",
+          set(word14) == {0, TEXTURE_BIT_26} and carriers == {texm.FMT_ARGB8888}
+          and later and palettised and keyed == 0
+          and alpha == formats[texm.FMT_ARGB4444] + formats[texm.FMT_ARGB8888],
+          f"header +0x14 is 0 on {word14[0]} and {TEXTURE_BIT_26:#x} on "
+          f"{word14[TEXTURE_BIT_26]} (all 8888) of {total}, so neither alpha bit "
+          f"Ngi32.dll's upload tests (0x1000fdf6) is set: {alpha} textures, the 4444 "
+          f"and 8888 ones, get an alpha surface and the rest an opaque one.  No "
+          f"palettised texture draws index 0, the one an alpha surface would clear "
+          f"({keyed} of {palettised}).  Control: +0x18 is non-zero on {later}")
+
+    starts: Counter[float] = Counter()
+    ends: Counter[int] = Counter()
+    off = keyframes = 0
+    ordered = backwards = files = sides = 0
+    for path in sorted(game.glob("MISSIONS/**/sky.ske")):
+        atmosphere = sky.load(path)
+        for k in atmosphere.keyframes:
+            keyframes += 1
+            starts[k.fog_start] += 1
+            ends[round(k.fog_end)] += 1
+            off += 0 < k.number(sky.RING3_SLOTS[0]) <= 1
+            sides += k.slots[sky.HORIZON_SLOTS[1]] == k.slots[sky.HORIZON_SLOTS[3]]
+        k = atmosphere.brightest()
+        files += 1
+
+        def lum(c):
+            return 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]
+        apex, ring2, ring3 = (sum(lum(c) for c in ring) / len(ring) for ring in k.rings[:3])
+        ordered += apex <= ring2 <= ring3
+        backwards += ring3 <= ring2 <= apex
+    check("sky.ske: slots 5 and 6 are the fog's start and end over 700",
+          set(starts) == {0.0} and min(ends) >= 70 and max(ends) <= 700 and off == 0,
+          f"the start is 0 on all {starts[0.0]} keyframes and the end {min(ends)} to "
+          f"{max(ends)} units, 700 on {ends[700]} (Terrain.dll:0x1007bbc5); control: "
+          f"slot 7 read as a float lands in (0, 1] on {off}")
+    first = sky.load(game / MISSION_01_SKY)
+    first_ends = Counter(round(k.fog_end) for k in first.keyframes)
+    check("Mission 01: the fog ends between 420 and 700 units",
+          sorted(first_ends) == [420, 490, 525, 560, 700],
+          f"{dict(sorted(first_ends.items()))} over {len(first.keyframes)} keyframes of "
+          f"a {first.day_seconds:g}-second day")
+    check("sky.ske: the dome darkens from ring 3 up to the apex",
+          files and ordered == files and backwards < files and sides > 0.9 * keyframes,
+          f"at the brightest keyframe of {ordered} of {files} files the apex (slot 15) is "
+          f"no brighter than ring 2 (11-14), and ring 2 no brighter than ring 3 (7-10); "
+          f"control: the reverse holds on {backwards}.  The horizon on +x and -x "
+          f"(slots 3 and 4) match on {sides} of {keyframes}")
+
+    found = [p for p in game.rglob("*") if p.name.lower() == "shade.cfg"]
+    cfgs = list(game.rglob("*.cfg"))
+    check("install: no shade.cfg ships, so the renderer's compiled defaults apply",
+          not found and cfgs,
+          f"{len(found)} shade.cfg among {len(cfgs)} .cfg files; Terrain.dll reads it "
+          f"at 0x1005f652 and falls back to ForceSWFog 1, AtmSkyDetail 4 "
+          f"({2 ** 4} dome segments) at 0x1005fa80")
+
+
 def check_minimap_agreement(check, game: Path) -> None:
     """The strongest check available: our terrain vs the art the game ships."""
     pairs = [("SC_3", "sc3.tex"), ("Tut_1", "tut1.tex"), ("ILKON", "ilkon.tex"), ("K1F", "k1f.tex")]
@@ -8707,7 +8795,7 @@ def run(game: Path) -> int:
     print(f"verifying against {game}\n")
     checks = (
         check_nres, check_texm, check_terrain, check_uv,
-        check_water, check_layers, check_materials, check_sky,
+        check_water, check_layers, check_materials, check_sky, check_render_state,
         check_minimap_agreement, check_arealmap,
         check_grid, check_missions, check_objects, check_poses, check_lod, check_damage,
         check_effects, check_effect_timing, check_actions, check_footprints, check_rsli,

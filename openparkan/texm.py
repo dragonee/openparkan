@@ -7,7 +7,7 @@ Layout (see ``docs/02-texm.md``)::
     0x08  uint32   height
     0x0C  uint32   mip level count
     0x10  uint32   flags       (32 on every mip-mapped texture, 0 otherwise)
-    0x14  uint32   unknown     (always 0 in the shipped data)
+    0x14  uint32   flags       (0x4000000 on 81 ARGB8888 textures, 0 elsewhere)
     0x18  uint32   unknown     (varies; not needed to decode)
     0x1C  uint32   pixel format, spelled as a decimal channel-width literal:
                    8888, 888, 565, 4444, or 0 for 8-bit palettised
@@ -53,6 +53,13 @@ FMT_RGB565 = 565
 FMT_ARGB4444 = 4444
 FMT_XRGB8888 = 888
 FMT_ARGB8888 = 8888
+
+#: Header +0x14 bits that give a texture an alpha surface, and the second a
+#: 32-step fade on its palette (``Ngi32.dll:0x1000fdf6``, ``0x1000f620``).  No
+#: shipped texture sets either; ``0x4000000``, on 81 ARGB8888 textures, the
+#: loader does not test.
+ALPHA_SURFACE = 0x01000000
+FADE_PALETTE = 0x02000000
 
 _BYTES_PER_PIXEL = {
     FMT_PALETTE8: 1,
@@ -126,6 +133,15 @@ def parse_pages(data: bytes) -> list[tuple[int, int, int, int]]:
         )
         out.append((x, y, width, height))
     return out
+
+
+def uploads_with_alpha(fmt: int, flags14: int = 0) -> bool:
+    """Whether the engine gives a texture an alpha surface.
+
+    Only 4444, 8888 and the two header bits do.  A palettised texture goes to
+    an opaque surface, so no index is ever a colour key on shipped data.
+    """
+    return fmt in (FMT_ARGB4444, FMT_ARGB8888) or bool(flags14 & (ALPHA_SURFACE | FADE_PALETTE))
 
 
 def parse_header(data: bytes) -> tuple:

@@ -109,11 +109,9 @@ coherent, art-directed skies, which is the real check:
 | CAMPAIGN.02 | 10:10 | `#7bab0f` | `#ebff77` | `#ffff00` |
 
 — a pale violet daylight, a red sunset, and a toxic green world with a yellow
-sun. The viewer draws slot 1 as the zenith, slot 7 as the horizon and fog, and
-slot 18 as the sunlight, and scales the directional light by the third float.
-**Which group is which is an interpretation**, not a proved fact: what is
-proved is that the first group tracks the day cycle and that the second is
-consistently the lighter of the two.
+sun. **Which slot is which is now read**, and it is not what the viewer
+assumed (slot 1 the zenith, slot 7 the horizon, slot 18 the sunlight). See
+[The dome, the fog and the scene colour](#the-dome-the-fog-and-the-scene-colour--read-and-measured).
 
 ## Object types
 
@@ -349,8 +347,11 @@ followed, and it is what turns two clock times into a duration.
 
 ## What the viewer draws
 
-- The **nebula** on the dome, multiplied by the keyframe's zenith-to-horizon
-  gradient, so one draw gives "this sky at this hour".
+- The **nebula** on the dome, multiplied by a gradient from the keyframe's
+  apex (slot 15) to its horizon looking along +y (slot 2), so one draw gives
+  "this sky at this hour". The game's dome carries four compass horizons and
+  two rings between ([above](#the-dome-the-fog-and-the-scene-colour--read-and-measured));
+  the viewer keeps one of each.
 - The **stars** over it, additive, fading in as the day's light drops.
 - The **clouds** over that, tiled four times and tinted by the horizon colour.
 - The **sun** and **moon** as billboards, each at its own fixed place, and
@@ -429,6 +430,157 @@ never in the sky together. The three exceptions are two five-keyframe skies
 that name the sun on every keyframe and never the moon, and one that names
 each body once and stops neither.
 
+## The dome, the fog and the scene colour — *read*, and *measured*
+
+### How a keyframe reaches the sky
+
+Each takt, the atmosphere works through three steps:
+
+1. It interpolates the two keyframes around the clock for each object's type
+   (`CAtmData`, `0x1006a970`). Colours are lerped channel by channel, floats
+   linearly.
+2. It hands the values to the object as numbered properties (`0x10070a20`).
+3. The sky stores them. Its property interface is the one at object `+4`
+   (`QueryInterface` 7, `0x10075c70`), and the setter is `0x1007bd70`.
+
+Following the file's slots through the reader (`0x10066245`), the record
+filler (`0x100692d0`) and the sky case (`0x1006b2bc`) gives:
+
+| property | file slots | what the sky does with it |
+|---|---|---|
+| 0–3 | 2, 3, 1, 4 | the **horizon**: ring 4 of the dome, and the fog colour |
+| 4–7 | 7, 10, 8, 9 | ring 3 |
+| 8–11 | 11, 14, 12, 13 | ring 2 |
+| 12 | 15 | the apex and ring 1 |
+| 13 | 5 (float) | fog start ÷ 700 |
+| 14 | 6 (float) | fog end ÷ 700 |
+| 15 | 18 | stored at `+0x60`; use *unknown* |
+| 16 | 20 | the **scene colour**, below |
+
+Each group of four is a compass: property *k* belongs to the direction
+*k* × 90° from +y towards +x.
+
+The sun takes seven values of its own (`0x1006ac9a`):
+
+- slot 19's colour × the third float, the one the table above calls the light;
+- the first and second floats;
+- slots 17 and 21.
+
+What `CSun` does with them was not traced.
+
+**The reader.** The reader puts a 32-byte header in front of the slots
+(`0x10086570`), carrying the hour and the minute, with one more int
+between it and slot 0. So what this page calls a keyframe's trailer is
+really the next keyframe's kind word, header and that int. Slots 16 and 17
+swap places in memory, and slots 5 and 6 are read as floats.
+
+*Measured* across all 29 files:
+
+- slot 5 is 0.0 on all 656 keyframes;
+- slot 6 lies between 0.1 and 1.0;
+- at each file's brightest keyframe the apex (slot 15) is no brighter than
+  ring 2, and ring 2 no brighter than ring 3, on 29 of 29;
+- slots 3 and 4, the horizon at +x and −x, are identical on 637 of 656.
+
+### The dome
+
+The atmosphere builds the sky from a parameter block (`0x1006f1ba`): 10000,
+π/4, 1.0, 16, 5.
+
+**The shape** (`0x100787f0`) is a spherical cap.
+
+| | value |
+|---|---|
+| height | *W* = 10000 |
+| cap angle | *A* = π/4 |
+| sphere radius | *R* = *W* ÷ (2 sin²(*A*/2)) = 34142.1 |
+| rings | 5 |
+| segments | 2 to the power of the `AtmSkyDetail` setting (`0x1007ac8f`); 16 at the default 4 |
+
+The vertices:
+
+- vertex 0 is the apex, at *z* = *W*;
+- ring *r* of segment *j* sits at θ = *r*/5 · *A* and φ = *j* · 2π/segments,
+  at (*R* sinθ sinφ, *R* sinθ cosφ, *R* cosθ + *W* − *R*);
+- the rim, ring 5, is at *z* = 0 with a radius of 24142.
+
+**Where it is drawn.** The dome is drawn at the camera's position
+(`0x1007a17d`), so its rim lies at eye height.
+
+**Its colours** (`0x1007ac60`):
+
+- the apex and ring 1 take property 12;
+- rings 2, 3 and 4 take the three compass groups, from the top down;
+- within a ring, quadrant *k* runs from group[*k*] to group[*k* + 1], a
+  segment at a time;
+- the rim takes the fog colour every takt.
+
+**The clouds** use the same cap with its origin 5000 below the camera
+(`0x1007a08e`), and carry their own fog, from 5000 to 11380.7 (`0x1007a5d4`).
+
+### Fog
+
+**Fog is on for the whole scene.** `CShade`'s constructor sets `FOGENABLE`
+(`0x10042070`); only the 2D overlays switch it off and back on.
+
+**It is linear, range-based and starts at the eye.**
+
+- The sky writes the scene's render record in two places:
+  - fog vertex mode 3, `D3DFOG_LINEAR`, when it is built (`0x10078689`);
+  - start 700 × property 13 and end 700 × property 14, every update
+    (`0x1007bbc5`).
+- Each drawn item then applies either its own record's mode, start and end,
+  or the scene's (`0x10030620`). Applying a mode also sets `RANGEFOGENABLE`
+  (`0x10030f20`).
+- With slot 5 always 0, **fog starts at 0 and ends at 700 × slot 6**, which
+  is 70 to 700 units (*measured*). On Mission 01 it ends at 420, 490, 525,
+  560 or 700.
+
+**Its colour follows the camera's heading** (`0x10079730`):
+
+- the heading's quadrant *k* and its fraction *f* through that quadrant pick
+  the colour `lerp(horizon[k], horizon[k+1], f)`, at full alpha;
+- that colour becomes `FOGCOLOR` (`0x10079b28`) and the colour of every rim
+  vertex.
+
+So the fog is the horizon in the direction you look.
+
+**Blended geometry fogs to a neutral colour.** For the duration of a draw,
+the fog colour is swapped by blend mode (`0x1002ffea`; tables `0x1009a9c8`
+and `0x1009a9d0`):
+
+| blend mode | fog colour |
+|---|---|
+| additive (mode 2) | black |
+| mode 3 (`ZERO`/`SRCCOLOR`) | white |
+| mode 5 | grey `0x7f7f7f` |
+
+Otherwise glows would pick up fog colour rather than fade out.
+
+### The scene colour is added to every material
+
+The same record carries a colour: property 16, file slot 20
+(`0x1007bbc5`). Every drawn material gets **emissive = that colour + the
+material's own emissive**, and an ambient term of 0 (`0x100308b8`). It is the
+scene's ambient light in all but name — 40/255 grey at Mission 01's noon, a
+brighter violet at night.
+
+### The render settings
+
+`Terrain.dll` reads 36 settings from `shade.cfg` (`0x1005f652`). No
+`shade.cfg` ships (*measured*), so the compiled defaults apply
+(`0x1005fa80`):
+
+| setting | default |
+|---|---|
+| `ForceSWFog` | 1 |
+| `LightingOn` | 1 |
+| `AtmCloudsOn` | 1 |
+| `AtmStarsOn` | 1 |
+| `AtmSkyDetail` | 4 |
+| `LensFlareOn` | 1 |
+| `UseDXLighting` | 0 |
+
 ## Not resolved
 
 - **The sun's lifetime** is now computable. `GetEvents` maps the start and
@@ -464,4 +616,19 @@ each body once and stops neither.
   above. It still holds `23, 59` where a time would go — the same
   hours-and-minutes shape, constant on all 29 — `6939832` twice, and a couple
   of small counts.
-- Slots 0, 5, 15–17, 19–21 of the colour block, and the trailer past the time.
+- Slots 0 and 16 of the colour block; what property 15 (slot 18) does; what
+  the sun does with slots 17, 19 and 21. Every other slot's destination is
+  [read](#the-dome-the-fog-and-the-scene-colour--read-and-measured).
+- Whether Direct3D's vertex fog or the engine's own draws the fog: the scene
+  asks for linear range fog, and `ForceSWFog` defaults to 1. Both would give
+  the same linear fade from 0 to 700 × slot 6.
+- How the dome — 34142 in radius, drawn at the camera — escapes the camera's
+  far plane and a fog that ends by 700.
+- The heading's zero and direction: the second of the camera's three angles
+  is used (`0x10079730`), and that it turns from +y towards +x, like the
+  dome's segments, is a *guess*.
+- What the sun does with its seven values, what property 15 (slot 18) is
+  for, and what header bit `0x4000000` does on 81 textures.
+- The int just before slot 0 is the one the record filler copies to the
+  record's `+0x00` (runtime keyframe `+0x28`). It is the word ruled out above
+  as the opcode; what it holds is still open.

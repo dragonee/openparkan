@@ -139,9 +139,11 @@ outer ring is a clearance drawn around the building. See
 
 ## Textures
 
-- Palettised textures (format `0`) are decoded fully opaque. Whether a palette
-  index is treated as a colour key for transparency is unknown; foliage
-  textures suggest one probably is.
+- ~~Palettised textures and a colour key~~ — answered: **none is keyed**.
+  `Ngi32.dll` uploads a palettised texture to an opaque surface unless its
+  header asks for alpha, and no shipped header does. On an alpha surface it
+  would clear index 0, which no palettised image draws. No module sets
+  `COLORKEYENABLE`. See [02-texm.md](02-texm.md#what-the-loader-does-with-alpha--read-and-measured).
 
 ## Not looked at at all
 

@@ -12,7 +12,7 @@ offset  size  field
 0x08       4  uint32 height
 0x0C       4  uint32 mip level count
 0x10       4  uint32 flags — 32 on mip-mapped textures, 0 otherwise
-0x14       4  uint32, zero in every shipped texture
+0x14       4  uint32 flags — 0 on 312, 0x4000000 on 81 (all of them 8888)
 0x18       4  uint32, varies; not needed to decode
 0x1C       4  uint32 pixel format
 0x20     ...  pixel data, mip 0 first, each level half the previous
@@ -144,3 +144,40 @@ So foliage transparency is ordinary 8888 alpha, and a renderer wants an alpha
 **test** rather than blending for it: a tree is a pair of crossed planes, and
 a cutout needs no depth sorting. Without it a tree draws as a solid slab —
 and with it applied to everything, a power plant draws as a wireframe.
+
+### What the loader does with alpha — *read*, and *measured*
+
+`Ngi32.dll` picks each texture's surface when it uploads it (`0x1000fb30`). It
+copies the 32-byte header whole, so the word it tests is header `+0x14`
+(`0x1000fc39`), and **only four things get an alpha surface**
+(`0x1000fdf6`):
+
+- format `4444`;
+- format `8888`;
+- header `+0x14` bit `0x1000000`;
+- header `+0x14` bit `0x2000000`.
+
+Everything else — `565`, `888` and the palettised textures — goes to an
+opaque surface. There is one override: a caller's load flag `0x80000` sends
+even an alpha format to an opaque surface. Which callers pass it is not
+traced.
+
+**A palette gets alpha only on an alpha surface** (`0x1000f620`):
+
+- On an alpha surface, **index 0 is cleared to alpha 0** and indices 1–255
+  are opaque. That is a colour key on index 0.
+- With header bit `0x2000000` the palette becomes a 32-step fade instead. It
+  takes the colour of the index named in the flags' low byte, at alpha
+  7, 15, … 255.
+
+Neither case is reached on shipped data (*measured*):
+
+- no texture sets either bit, since `+0x14` is only 0 or `0x4000000`;
+- no palettised texture draws index 0 anyway.
+
+**So a palettised texture draws fully opaque**, and nothing is colour-keyed.
+No module ever sets `D3DRENDERSTATE_COLORKEYENABLE` either: a sweep of
+`Terrain.dll`, `World3D.dll`, `AniMesh.dll`, `Effect.dll`, `Ngi32.dll` and
+`iron3d.dll` finds no push of state 41. The same sweep does find every fog
+state site. What bit `0x4000000` does — set on 81 `8888` building textures
+(`PG*`, `GEN_*`) — is *unknown*; the loader does not test it.

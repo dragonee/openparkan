@@ -6968,3 +6968,332 @@ kind = "site"
 name = "attack task: sets the target through interface 0x204 slot 16"
 doc = "docs/29-weapons.md"
 read = true
+
+# --- texture alpha, the sky dome, fog and scene colour, ../docs/02, 10 ---
+[[entry]]
+module = "Terrain.dll"
+at = "0x10042070"
+kind = "site"
+name = "CShade constructor: render state FOGENABLE 1"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10030620"
+kind = "function"
+name = "draw item setup: render record flag 0x20 fog vertex mode, 0x40 fog start/end (else the scene defaults), material with the scene colour added to emissive"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10030735"
+kind = "site"
+name = "draw item setup: FOGSTART from the item's render record +0x28 (FOGEND +0x2c at 0x1003075f)"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x100307af"
+kind = "site"
+name = "draw item setup: FOGSTART/FOGEND back to the scene record's +0x40/+0x44"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10030f20"
+kind = "function"
+name = "fog vertex mode: RANGEFOGENABLE 1, then FOGVERTEXMODE = the record's mode"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x100308b8"
+kind = "site"
+name = "draw item material: emissive rgb = scene record colour + material +0x14..+0x1c; ambient 0; power 1 << mat+0x44"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1002ffea"
+kind = "site"
+name = "fog colour override by blend mode: saves FOGCOLOR and sets the mode's colour when table 0x1009a9c8 says so"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1009a9c8"
+kind = "datum"
+name = "per blend mode: whether to override the fog colour {0,0,1,1,0,1}"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1009a9d0"
+kind = "datum"
+name = "per blend mode fog colour: mode 2 (additive) 0xff000000, mode 3 0xffffffff, mode 5 0xff7f7f7f"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1003e63f"
+kind = "site"
+name = "CCamDistSortLayerVB::Render: the same per-mode fog colour override (tables 0x1009afd8, 0x1009afe0)"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1003d9f2"
+kind = "site"
+name = "render pass: scene render record copied from the shade's slot 7 into the defaults at 0x100a5d48"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10078689"
+kind = "site"
+name = "CSky constructor: scene render record flag 0x20, fog vertex mode 3 (linear)"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1007bbc5"
+kind = "site"
+name = "CSky update: scene render record flags 0x50: fog start 700 x slot 5, end 700 x slot 6, colour slot 20"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10079730"
+kind = "function"
+name = "CSky takt: fog colour = horizon quadrant colours lerped by camera heading -> FOGCOLOR and the rim ring"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10079b28"
+kind = "site"
+name = "CSky takt: render state FOGCOLOR = the heading colour"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1007ac60"
+kind = "function"
+name = "CSky update: rebuild the dome at 2^AtmSkyDetail segments, ring colours from the colour groups, UV layers, scene fog record"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x100787f0"
+kind = "function"
+name = "CSky dome geometry: spherical cap of height W, cap angle A, radius W/(2 sin^2(A/2)), apex + segments x rings"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10078180"
+kind = "function"
+name = "CSky constructor: six-dword parameter block to +0x548"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1006f1ba"
+kind = "site"
+name = "CAtmosphere creates the sky (type 1) with {10000, pi/4, 1.0, 16, 5, flag}"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1007bd70"
+kind = "function"
+name = "CSky property setter (interface at +4): ids 0..16 to the colour groups, apex, fog factors, scene colour"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10075c70"
+kind = "function"
+name = "CSky QueryInterface: id 7 answers this+4, the property interface"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10070a20"
+kind = "function"
+name = "CAtmosphere: for each object, interpolated values for its type pushed as properties 0..n"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1006a970"
+kind = "function"
+name = "CAtmData: interpolate the two keyframes around a time into values per object type (switch 0x1006cf64)"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1006b2bc"
+kind = "site"
+name = "CAtmData interpolation, SKY: 17 values from record +4,+0x10,+8,+0xc (horizon), +0x28.. (rings), +0x48 (apex), +0x1c/+0x18 (fog), +0x54, +0x5c"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1006ac9a"
+kind = "site"
+name = "CAtmData interpolation, SUN: slot 19 x light float, floats 1 and 2, slots 17 and 21"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10066245"
+kind = "site"
+name = ".ske keyframe reader, kind 3: 32-byte header, an int at +0x28, 22 slots (16 and 17 swapped in memory), 6 strings, 4 floats, sounds"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10086570"
+kind = "function"
+name = ".ske keyframe header reader: six dwords and eight bytes (hour at +0xc, minute at +0x10)"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1007a17d"
+kind = "site"
+name = "CSky takt: dome matrix = the camera's translation (x, y, z)"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1007a08e"
+kind = "site"
+name = "CSky takt: cloud layer matrix = the camera's translation with z - 5000"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1007a5d4"
+kind = "site"
+name = "CSky clouds: item render record flag 0x40, fog start 5000, end 11380.7"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1007ac8f"
+kind = "site"
+name = "CSky update: setting AtmSkyDetail picks dome segments from table 0x100a380c {1,2,4,8,16,32}"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1005eb10"
+kind = "function"
+name = "render settings table: 36 named settings, ForceSWFog first, AtmSkyDetail 22nd"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1005fa80"
+kind = "function"
+name = "CSettings defaults: ForceSWFog 1, LightingOn 1, AtmSkyDetail 4, LensFlareOn 1, UseDXLighting 0, PortalNear/FarDist 75/95"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1005f652"
+kind = "site"
+name = "CShade constructor: render settings read from shade.cfg"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Ngi32.dll"
+at = "0x100315e0"
+kind = "datum"
+name = "3D render interface vtable, 41 slots: 3 SetRenderState (cached), 4 GetRenderState, 6 blend mode"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Ngi32.dll"
+at = "0x10008700"
+kind = "function"
+name = "render interface SetRenderState: skips a locked or unchanged state, calls the device's slot 20"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Ngi32.dll"
+at = "0x1000fb30"
+kind = "function"
+name = "texture upload: header copy, palette, target format, mips"
+doc = "docs/02-texm.md"
+read = true
+
+[[entry]]
+module = "Ngi32.dll"
+at = "0x1000fc39"
+kind = "site"
+name = "texture upload: the 32-byte Texm header copied to +0x38, so +0x4c is header +0x14"
+doc = "docs/02-texm.md"
+read = true
+
+[[entry]]
+module = "Ngi32.dll"
+at = "0x1000fdf6"
+kind = "site"
+name = "texture upload: an alpha surface only for 4444, 8888 or header +0x14 bits 0x1000000/0x2000000"
+doc = "docs/02-texm.md"
+read = true
+
+[[entry]]
+module = "Ngi32.dll"
+at = "0x1000f620"
+kind = "function"
+name = "palette to surface: index 0 alpha 0 and the rest 0xff on an alpha surface; bit 0x2000000 makes a 32-step fade on a key index"
+doc = "docs/02-texm.md"
+read = true
+
+[[entry]]
+module = "World3D.dll"
+at = "0x100019c5"
+kind = "site"
+name = "text overlay: FOGENABLE 0 while it draws, 1 after (0x10001cff)"
+doc = "docs/10-sky.md"
+read = true

@@ -839,14 +839,12 @@ class ModelLibrary:
         return None
 
 
-#: Slots of a sky keyframe the viewer draws with.  Which of the three colour
-#: groups is the dome and which are fog and ambient is not established, but
-#: the first group is the one that tracks the day and the second is
-#: consistently lighter, so they read as zenith and horizon.  See
-#: docs/10-sky.md.
-SKY_ZENITH_SLOT = 1
-SKY_HORIZON_SLOT = 7
-SKY_SUN_SLOT = 18
+#: Slots of a sky keyframe the viewer draws with: the dome's apex, the
+#: horizon looking along +y (the fog colour that way), and the sun's colour.
+#: See docs/10-sky.md.
+SKY_ZENITH_SLOT = sky.APEX_SLOT
+SKY_HORIZON_SLOT = sky.HORIZON_SLOTS[0]
+SKY_SUN_SLOT = sky.SUN_LIGHT_SLOT
 
 
 def _skin_payload(bones: list[dict], skin: list[int], frames: int) -> dict:

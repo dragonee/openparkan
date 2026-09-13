@@ -97,10 +97,37 @@ HEADER_SIZE = 124
 SECTION_HEADER_SIZE = 72
 SLOT_COUNT = 22
 NAME_SLOTS = 6
-#: Slots of the 88-byte block that hold a float32 rather than a colour.
-FLOAT_SLOTS = (6,)
-#: Slots whose colour tracks the time of day; see the module docstring.
-DAY_CYCLE_SLOTS = (1, 2, 3, 4)
+#: Slots of the 88-byte block that hold a float32 rather than a colour: the
+#: fog's start and end over ``FOG_SCALE`` (``Terrain.dll:0x1007bbc5``).
+FLOAT_SLOTS = (5, 6)
+FOG_START_SLOT = 5
+FOG_END_SLOT = 6
+FOG_SCALE = 700.0
+
+#: What the sky does with the colour slots (``Terrain.dll:0x1006b2bc``).  Each
+#: group of four is a compass, the direction k x 90 degrees from +y towards
+#: +x: the horizon, which is ring 4 of the dome and the fog colour; ring 3;
+#: ring 2.  The apex and ring 1 take one colour.
+HORIZON_SLOTS = (2, 3, 1, 4)
+RING3_SLOTS = (7, 10, 8, 9)
+RING2_SLOTS = (11, 14, 12, 13)
+APEX_SLOT = 15
+#: Added to every drawn material's emissive (``Terrain.dll:0x100308b8``): the
+#: scene's ambient light in all but name.
+SCENE_COLOUR_SLOT = 20
+#: The sun's colour, times the third intensity float (``0x1006ac9a``); what
+#: the sun does with it is not established.
+SUN_LIGHT_SLOT = 19
+#: The name this module first gave the horizon group.
+DAY_CYCLE_SLOTS = HORIZON_SLOTS
+
+#: The dome (``Terrain.dll:0x100787f0``): a spherical cap this high, with this
+#: cap angle, in this many rings, and ``2 ** AtmSkyDetail`` segments -- 16 at
+#: the default of 4.  It is drawn at the camera, so its rim is at eye height.
+DOME_HEIGHT = 10000.0
+DOME_ANGLE = math.pi / 4
+DOME_RINGS = 5
+DOME_SEGMENTS = 16
 
 #: How long one in-game day lasts in real time, as ``uint32`` hours then
 #: ``uint32`` minutes, at bytes 64 and 68 of the header -- inside the 72-byte
@@ -333,17 +360,75 @@ class Keyframe:
 
     @property
     def sky(self) -> tuple[int, int, int, int]:
-        """The first day-cycle colour.
+        """The horizon straight ahead of +y: the fog colour looking north."""
+        return self.colour(HORIZON_SLOTS[0])
 
-        Which of the three colour groups is the dome and which are fog and
-        ambient is not established -- this is the group that most clearly
-        tracks the day, going near-black at midnight.
+    @property
+    def horizon(self) -> list[tuple[int, int, int, int]]:
+        """The horizon at 0, 90, 180 and 270 degrees from +y towards +x."""
+        return [self.colour(s) for s in HORIZON_SLOTS]
+
+    @property
+    def rings(self) -> list[list[tuple[int, int, int, int]]]:
+        """The dome's colours from the top down: apex, ring 2, ring 3, horizon."""
+        return [[self.colour(APEX_SLOT)] * 4, [self.colour(s) for s in RING2_SLOTS],
+                [self.colour(s) for s in RING3_SLOTS], self.horizon]
+
+    @property
+    def apex(self) -> tuple[int, int, int, int]:
+        return self.colour(APEX_SLOT)
+
+    @property
+    def scene_colour(self) -> tuple[int, int, int, int]:
+        """Added to every material's emissive."""
+        return self.colour(SCENE_COLOUR_SLOT)
+
+    @property
+    def fog_start(self) -> float:
+        return FOG_SCALE * self.number(FOG_START_SLOT)
+
+    @property
+    def fog_end(self) -> float:
+        return FOG_SCALE * self.number(FOG_END_SLOT)
+
+    def fog_colour(self, heading: float) -> tuple[int, int, int, int]:
+        """The horizon in the direction ``heading``, radians from +y towards +x.
+
+        The heading's quadrant and its fraction through it blend the two
+        nearest horizon colours (``Terrain.dll:0x10079730``), at full alpha.
+        That the heading turns from +y towards +x is a guess.
         """
-        return self.colour(DAY_CYCLE_SLOTS[0])
+        quarter = (heading / (math.pi / 2)) % 4.0
+        k = int(quarter) % 4
+        f = quarter - int(quarter)
+        a, b = self.horizon[k], self.horizon[(k + 1) % 4]
+        r, g, bl = (round(x + f * (y - x)) for x, y in zip(a[:3], b[:3], strict=True))
+        return r, g, bl, 255
 
     @property
     def light(self) -> float:
         return self.intensity[2]
+
+
+def dome(segments: int = DOME_SEGMENTS, rings: int = DOME_RINGS,
+         height: float = DOME_HEIGHT, angle: float = DOME_ANGLE
+         ) -> list[tuple[float, float, float]]:
+    """The dome's vertices around the camera: the apex, then ring by ring.
+
+    A ring *r* vertex *j* sits at theta = r / rings x angle and phi = j x 2 pi /
+    segments on a sphere of radius height / (2 sin^2(angle / 2)), dropped so
+    the apex is at ``height`` and the rim at 0.
+    """
+    radius = height / (2.0 * math.sin(angle / 2.0) ** 2)
+    out = [(0.0, 0.0, height)]
+    for r in range(1, rings + 1):
+        theta = r / rings * angle
+        for j in range(segments):
+            phi = j * 2.0 * math.pi / segments
+            out.append((radius * math.sin(theta) * math.sin(phi),
+                        radius * math.sin(theta) * math.cos(phi),
+                        radius * math.cos(theta) + height - radius))
+    return out
 
 
 @dataclass
