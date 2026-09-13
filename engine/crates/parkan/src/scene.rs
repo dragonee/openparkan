@@ -167,19 +167,22 @@ pub fn sync(
     eye: Vec3,
 ) {
     let quads: Vec<parkan_render::sprites::Quad> = play
-        .sprites()
+        .sprites(eye)
         .into_iter()
         .map(|(look, s)| parkan_render::sprites::Quad {
             look,
             corners: parkan_render::sprites::billboard(s.centre, s.along, s.width, eye),
             alpha: s.alpha,
+            overlay: s.overlay,
         })
         .collect();
     renderer.set_sprites(device, queue, view_proj, &quads);
+    // A building is never killed: its node 0's death leaves it standing as a shell.
     for object in std::mem::take(&mut play.killed) {
         if let Some(i) = objects.placed.iter().position(|&p| p == object) {
-            // STAND-IN: docs/26-damage.md#hit-points--read-and-measured -- what a dead
-            // object leaves (its explosion, wreck or damage stages) is not drawn: it goes.
+            // STAND-IN: docs/26-damage.md#hit-points--read-and-measured -- what a dead unit
+            // leaves, a wreck or its damage stages, is not read: its destroyed nodes'
+            // explosions play, and it is no longer drawn.
             renderer.set_instance(queue, i, glam::Mat4::IDENTITY, false);
         }
     }

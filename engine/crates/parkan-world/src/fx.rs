@@ -6,6 +6,7 @@ use std::path::Path;
 use std::rc::Rc;
 
 use anyhow::{Context, Result};
+use glam::Vec3;
 use parkan_formats::exp::Explosion;
 use parkan_formats::fxid::{self, Effect};
 use parkan_formats::gamedir;
@@ -90,6 +91,9 @@ impl Fx {
         mode: Option<u32>,
     ) -> bool {
         let Some(effect) = self.template(name) else { return false };
+        // STAND-IN: docs/11-effects.md#how-an-effect-runs--read -- the effect manager's
+        // random generator is not read: each instance takes the next seed of a linear
+        // congruential sequence.
         self.seed = self.seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
         self.instances.push((owner, Instance::new(effect, frame, size, now_ms, mode, self.seed)));
         true
@@ -156,18 +160,27 @@ impl Fx {
         self.instances.iter_mut().flat_map(|(_, i)| i.cues(now_ms)).collect()
     }
 
-    /// Drop the instances that have run their course.
+    /// Update every instance at `now_ms`, once their owners have placed them, and drop
+    /// the instances that have run their course.
     pub fn tick(&mut self, now_ms: f64) {
+        for (_, instance) in &mut self.instances {
+            instance.update(now_ms);
+        }
         self.instances.retain(|(_, i)| !i.finished(now_ms));
     }
 
     /// What every instance draws at `now_ms`, with the index of its material's look.
-    pub fn sprites(&self, now_ms: f64) -> Vec<(usize, Sprite)> {
+    /// `in_view` says whether a point is in view from the camera, for the instances
+    /// that test one.
+    ///
+    /// STAND-IN: docs/11-effects.md#not-resolved -- which draw call passes the pass
+    /// argument header flag 0x800 waits for is not read: 0x800 effects draw with the rest.
+    pub fn sprites(&self, now_ms: f64, in_view: impl Fn(Vec3) -> bool) -> Vec<(usize, Sprite)> {
         let mut out = Vec::new();
         let mut buffer = Vec::new();
         for (_, instance) in &self.instances {
             buffer.clear();
-            instance.sprites(now_ms, &mut buffer);
+            instance.sprites(now_ms, instance.test_point().is_none_or(&in_view), &mut buffer);
             out.extend(buffer.drain(..).filter_map(|s| Some((*self.look_of.get(&key(&s.material))?, s))));
         }
         out

@@ -191,6 +191,20 @@ fn the_heros_laser_kills_a_small_target_in_two_hits() {
     play.hero.rig.values[pitch] = value;
     play.hero.rig.aim[1] = 1.0 - value;
 
+    // A unit answers for its material: the base's skin is class 5, so a strike on it plays
+    // the `.exp`'s `mt` slot (docs/11-effects.md, "What an explosion plays").
+    let (o, s) = play.hero.sight().unwrap();
+    let (_, _, part) =
+        play.battle.combat.first_hit(&play.ground, None, o + s * 5.0, o + s * 200.0, 0.0).unwrap();
+    let struck = parkan_world::play::struck_wear(
+        &play.battle.combat.targets[t].parts[part],
+        &play.battle.wears[t][part],
+        o + s * 5.0,
+        o + s * 200.0,
+    )
+    .expect("a wear entry");
+    assert_eq!(play.materials.get(struck).map(|m| m.surface), Some(5), "{struck}");
+
     // The laser alone: key 1 deselects the cannon.
     play.hero.key("SCAN_W_1", true);
     play.hero.key("SCAN_LMOUSE", true);

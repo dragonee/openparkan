@@ -51,6 +51,10 @@ pub struct Battle {
     pub pools: Vec<Vec<usize>>,
     /// Each target's parts' nodes' `.exp`: what a node plays when it is destroyed.
     pub explosions: Vec<Vec<Vec<Option<Explosion>>>>,
+    /// Each target's parts' wears: the material names their batches index.
+    pub wears: Vec<Vec<Vec<String>>>,
+    /// Each target's mission object kind: building, unit, vegetation or rock.
+    pub placed_kinds: Vec<u32>,
     kind_of: HashMap<String, usize>,
 }
 
@@ -107,7 +111,9 @@ fn placement(position: [f32; 3], yaw: f32) -> Pose {
 
 impl Battle {
     /// Every placed object but `hero` as a target. Units and buildings take damage
-    /// through their parts' `.ndp`; scenery stops rounds and takes none.
+    /// through their parts' `.ndp`; scenery stops rounds and takes none. A mission's
+    /// building is a `CBuilding` around its agent, agent kind 3, which node 0's death
+    /// only marks (`docs/26-damage.md`, "Hit points").
     ///
     /// STAND-IN: docs/04-missions.md#the-scale -- whether vegetation and rock carry
     /// node life is not established; they take no damage.
@@ -121,6 +127,8 @@ impl Battle {
         let mut combat = Combat::default();
         let mut objects = Vec::new();
         let mut explosions = Vec::new();
+        let mut wears = Vec::new();
+        let mut placed_kinds = Vec::new();
         for (i, object) in mission.objects.iter().enumerate() {
             if Some(i) == hero {
                 continue;
@@ -131,10 +139,14 @@ impl Battle {
             let object_ratio = object_ratio(mission, object, player, ratio);
             let mut parts = Vec::new();
             let mut blasts = Vec::new();
+            let mut part_wears = Vec::new();
             let (mut lo, mut hi) = (Vec3::splat(f32::MAX), Vec3::splat(f32::MIN));
             for part in assembly.parts(object.kind, &object.path) {
                 let Some(loaded) = assembly.mesh(&part.reference) else { continue };
                 let mesh = Rc::new(loaded.mesh.clone());
+                // STAND-IN: docs/24-motion.md#playing-a-state--read-and-measured -- the poses
+                // other units are struck in are not played: every target's nodes stay at
+                // their rest poses.
                 let nodes: Vec<Pose> = (0..mesh.nodes.len())
                     .map(|n| {
                         let mut local = part.pose.compose(&mesh.world_pose(n));
@@ -172,9 +184,12 @@ impl Battle {
                         .map(|n| (n.parent != 0xFFFF).then_some(usize::from(n.parent)))
                         .collect();
                     let vital = mesh.nodes.iter().map(|n| n.flags & VITAL_NODE_FLAG != 0).collect();
-                    Life::new(&t, parents, vital, 1.0, object_ratio)
+                    let mut life = Life::new(&t, parents, vital, 1.0, object_ratio);
+                    life.building = object.kind == mission::KIND_BUILDING;
+                    life
                 });
                 parts.push(Part { mesh, nodes, scale, life });
+                part_wears.push(loaded.wear.materials.clone());
             }
             if parts.is_empty() || lo.x > hi.x {
                 continue;
@@ -183,6 +198,8 @@ impl Battle {
             combat.targets.push(Target { parts, centre, radius: (hi - lo).length() / 2.0, alive: true });
             objects.push(i);
             explosions.push(blasts);
+            wears.push(part_wears);
+            placed_kinds.push(object.kind);
         }
         Ok(Battle {
             combat,
@@ -190,6 +207,8 @@ impl Battle {
             kinds: Vec::new(),
             pools: Vec::new(),
             explosions,
+            wears,
+            placed_kinds,
             kind_of: HashMap::new(),
         })
     }

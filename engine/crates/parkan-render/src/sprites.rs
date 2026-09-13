@@ -25,6 +25,9 @@ pub struct Quad {
     pub look: usize,
     pub corners: [Vec3; 4],
     pub alpha: f32,
+    /// Drawn over the scene, with the depth test off (effect draw flag 1,
+    /// `docs/11-effects.md`, "Bit 8 and the tested point").
+    pub overlay: bool,
 }
 
 /// The corners of a sprite seen from `eye`: a square of side `width` facing the eye,
@@ -66,8 +69,9 @@ fn blend(mode: u8) -> wgpu::BlendState {
         2 => (F::SrcAlpha, F::One),
         3 => (F::Zero, F::Src),
         5 => (F::Dst, F::Src),
-        // STAND-IN: docs/07-objects.md -- a sprite whose material says opaque (0) or
-        // SRCALPHA/ZERO (1) is drawn alpha-blended, so its fade shows.
+        // STAND-IN: docs/07-objects.md#how-a-material-draws-is-in-the-archive-directory -- how
+        // a sprite whose material says opaque (0) or SRCALPHA/ZERO (1) blends is not read: it
+        // is drawn alpha-blended, so its fade shows.
         _ => (F::SrcAlpha, F::OneMinusSrcAlpha),
     };
     wgpu::BlendState { color: c(src, dst), alpha: c(F::One, F::OneMinusSrcAlpha) }
@@ -152,8 +156,13 @@ impl SpriteRenderer {
             bind_group_layouts: &[Some(&camera_layout), Some(&skin_layout)],
             immediate_size: 0,
         });
+        // Every blend mode twice: depth-tested, then over the scene with the depth test off.
+        // Neither writes depth; the sprites bit 8 draws carry `ZWRITEENABLE` off too
+        // (docs/11-effects.md, "Bit 8 and the tested point").
         let pipelines = (0..6u8)
-            .map(|mode| {
+            .flat_map(|mode| [(mode, false), (mode, true)])
+            .map(|(mode, overlay)| {
+                let depth_compare = if overlay { wgpu::CompareFunction::Always } else { wgpu::CompareFunction::Greater };
                 device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                     label: Some("sprite"),
                     layout: Some(&layout),
@@ -175,7 +184,7 @@ impl SpriteRenderer {
                     depth_stencil: Some(wgpu::DepthStencilState {
                         format: DEPTH_FORMAT,
                         depth_write_enabled: Some(false),
-                        depth_compare: Some(wgpu::CompareFunction::Greater),
+                        depth_compare: Some(depth_compare),
                         stencil: Default::default(),
                         bias: Default::default(),
                     }),
@@ -242,7 +251,7 @@ impl SpriteRenderer {
         camera[24..28].copy_from_slice(&[lighting.fog_start, lighting.fog_end, 0.0, 0.0]);
         queue.write_buffer(&self.camera, 0, bytemuck::cast_slice(&camera));
         let mut sorted: Vec<&Quad> = quads.iter().filter(|q| q.look < self.looks.len()).collect();
-        sorted.sort_by_key(|q| (self.looks[q.look].0, q.look));
+        sorted.sort_by_key(|q| (q.overlay, self.looks[q.look].0, q.look));
         let mut vertices = Vec::with_capacity(sorted.len() * 6);
         self.draws.clear();
         for q in sorted {
@@ -250,10 +259,10 @@ impl SpriteRenderer {
             let v = |i: usize| GpuVertex { position: q.corners[i].to_array(), uv: uv[i], alpha: q.alpha };
             let start = vertices.len() as u32;
             vertices.extend([v(0), v(1), v(2), v(0), v(2), v(3)]);
-            let mode = usize::from(self.looks[q.look].0);
+            let pipeline = usize::from(self.looks[q.look].0) * 2 + usize::from(q.overlay);
             match self.draws.last_mut() {
-                Some(d) if d.0 == mode && d.1 == q.look => d.3 += 6,
-                _ => self.draws.push((mode, q.look, start, 6)),
+                Some(d) if d.0 == pipeline && d.1 == q.look => d.3 += 6,
+                _ => self.draws.push((pipeline, q.look, start, 6)),
             }
         }
         if vertices.is_empty() {
@@ -280,8 +289,8 @@ impl SpriteRenderer {
         }
         pass.set_bind_group(0, &self.camera_group, &[]);
         pass.set_vertex_buffer(0, buffer.slice(..));
-        for &(mode, look, start, count) in &self.draws {
-            pass.set_pipeline(&self.pipelines[mode]);
+        for &(pipeline, look, start, count) in &self.draws {
+            pass.set_pipeline(&self.pipelines[pipeline]);
             pass.set_bind_group(1, &self.looks[look].1, &[]);
             pass.draw(start..start + count, 0..1);
         }

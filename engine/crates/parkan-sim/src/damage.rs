@@ -50,6 +50,11 @@ pub struct Life {
     pub vital: Vec<bool>,
     /// The armour fitted: its linear and square factors.
     pub armour: Option<(f32, f32)>,
+    /// Agent kind 3, a building: node 0 or a vital node dying only marks it.
+    pub building: bool,
+    /// The owner word reads `0xfffe` (`0x10011098`): node 0 or a vital node is destroyed.
+    pub marked: bool,
+    /// The object died: marked, and not a building.
     pub dead: bool,
 }
 
@@ -69,12 +74,14 @@ impl Life {
                 NodeLife { life: max, max, destroyed: false }
             })
             .collect();
-        Self { nodes, parents, vital, armour: None, dead: false }
+        Self { nodes, parents, vital, armour: None, building: false, marked: false, dead: false }
     }
 
     /// `0x10010f30`: a hit on one node, after armour; its life is held at 0, and a node
     /// at 0 is destroyed with its children (`0x10011130`). Node 0 or a vital node dying
-    /// kills the object. Returns the nodes this hit destroyed.
+    /// marks the object and kills it (`0x10011098`), unless it is a building, which is only
+    /// marked (`0x100110ab`): a shell whose model and other nodes stay, to be shot apart.
+    /// Returns the nodes this hit destroyed.
     pub fn hit(&mut self, node: usize, damage: f32) -> Vec<usize> {
         let Some(n) = self.nodes.get_mut(node) else { return Vec::new() };
         if n.destroyed || damage <= 0.0 {
@@ -95,7 +102,8 @@ impl Life {
             self.nodes[i].life = 0.0;
             destroyed.push(i);
             if i == 0 || self.vital.get(i).copied().unwrap_or(false) {
-                self.dead = true;
+                self.marked = true;
+                self.dead = !self.building;
             }
             stack.extend((0..self.nodes.len()).filter(|&c| self.parents[c] == Some(i)));
         }
@@ -106,6 +114,7 @@ impl Life {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use glam::Vec3;
     use parkan_formats::objects::ResourceRef;
 
     fn table(points: &[f32]) -> Vec<NodeDamage> {
@@ -150,6 +159,120 @@ mod tests {
         gone.sort_unstable();
         assert_eq!(gone, vec![0, 1, 2]);
         assert!(life.dead && life.nodes.iter().all(|n| n.destroyed && n.life == 0.0));
+    }
+
+    #[test]
+    fn a_building_whose_node_0_dies_is_only_marked_and_its_other_nodes_still_take_hits() {
+        // Node 1 hangs off node 0 and dies with it; node 2 is a root of its own.
+        let parents = vec![None, Some(0), None];
+        let mut life = Life::new(&table(&[1.0, 40_000.0, 40_000.0]), parents, vec![false; 3], 1.0, 1.0);
+        life.building = true;
+        let mut gone = life.hit(0, 5.0);
+        gone.sort_unstable();
+        assert_eq!(gone, vec![0, 1]);
+        assert!(life.marked && !life.dead, "a shell, not a dead object");
+        assert!(life.hit(2, 10_000.0).is_empty() && life.nodes[2].life == 30_000.0);
+        assert_eq!(life.hit(2, 30_000.0), vec![2]);
+        assert!(!life.dead);
+
+        let mut unit = Life::new(&table(&[1.0]), vec![None], vec![false], 1.0, 1.0);
+        unit.hit(0, 5.0);
+        assert!(unit.marked && unit.dead);
+    }
+
+    /// A 2 by 2 wall facing -y at `y`, one node of `hit_points`, placed as a building or not.
+    fn wall(y: f32, hit_points: f32, building: bool) -> crate::combat::Target {
+        use parkan_formats::mesh::{Mesh, NO_SLOT, Node, Slot};
+        use parkan_formats::pose::{IDENTITY, Pose};
+        let mesh = Mesh {
+            name: "wall".into(),
+            positions: vec![[-1.0, 0.0, 0.0], [1.0, 0.0, 0.0], [1.0, 0.0, 2.0], [-1.0, 0.0, 2.0]],
+            normals: Vec::new(),
+            uv: Vec::new(),
+            lightmap_uv: Vec::new(),
+            triangles: vec![[0, 1, 2], [0, 2, 3]],
+            nodes: vec![Node {
+                name: "wall".into(),
+                flags: 0,
+                parent: 0xFFFF,
+                anim_start: 0xFFFF,
+                fallback_key: 0,
+                slot_index: std::array::from_fn(|k| if k == 0 { 0 } else { NO_SLOT }),
+            }],
+            slots: vec![Slot {
+                first_triangle: 0,
+                triangle_count: 2,
+                first_batch: 0,
+                batch_count: 0,
+                aabb_min: [-1.0, 0.0, 0.0],
+                aabb_max: [1.0, 0.0, 2.0],
+                sphere: [0.0, 0.0, 1.0, 1.5],
+                area: 0.0,
+                volume: 0.0,
+            }],
+            batches: Vec::new(),
+            face_flags: vec![0, 0],
+            face_normals: vec![[0.0, -1.0, 0.0]; 2],
+            keys: Vec::new(),
+            frame_map: Vec::new(),
+            frame_count: 0,
+            sphere: None,
+        };
+        let mut life = Life::new(&table(&[hit_points]), vec![None], vec![false], 1.0, 1.0);
+        life.building = building;
+        let at = Vec3::new(20.0, y, 0.0);
+        let pose = Pose { translation: [20.0, f64::from(y), 0.0], ..IDENTITY };
+        crate::combat::Target {
+            parts: vec![crate::combat::Part {
+                mesh: std::rc::Rc::new(mesh),
+                nodes: vec![pose],
+                scale: 1.0,
+                life: Some(life),
+            }],
+            centre: at + Vec3::Z,
+            radius: 1.5,
+            alive: true,
+        }
+    }
+
+    #[test]
+    fn a_dead_buildings_shell_stays_in_the_world_and_still_stops_rounds() {
+        use crate::combat::{Combat, Event, RoundKind};
+        use parkan_formats::exp::{Explosion, HIT_DIRECT};
+        let laser = RoundKind {
+            name: "bl_h_01".into(),
+            top_speed: 10_000.0,
+            range: 1000.0,
+            radius: 0.12,
+            hit_points: 249.0,
+            hit: Some(Explosion {
+                kind: HIT_DIRECT,
+                damage: 1.0,
+                radius: 1.0,
+                values: [1.0; 2],
+                placement: 7,
+                slots: Vec::new(),
+            }),
+            range_end: None,
+        };
+        let g = crate::ground::tests::floor();
+        let mut c = Combat { kinds: vec![laser], targets: vec![wall(30.0, 1.0, true)], ..Default::default() };
+        let muzzle = Vec3::new(20.0, 5.0, 1.0);
+        for _ in 0..2 {
+            c.fire(0, None, muzzle, Vec3::Y, Vec3::ZERO, 1.0);
+            let events = c.tick(1.0 / 60.0, &g);
+            assert!(events.iter().any(|e| matches!(e, Event::Struck { target: Some(0), .. })), "{events:?}");
+            assert!(!events.iter().any(|e| matches!(e, Event::Killed { .. })), "a building is never killed");
+        }
+        let life = c.targets[0].parts[0].life.as_ref().unwrap();
+        assert!(life.marked && life.nodes[0].destroyed && c.targets[0].alive);
+
+        // A unit in its place dies at the first hit and lets the next round by.
+        c.targets = vec![wall(30.0, 1.0, false)];
+        c.fire(0, None, muzzle, Vec3::Y, Vec3::ZERO, 1.0);
+        assert!(c.tick(1.0 / 60.0, &g).iter().any(|e| matches!(e, Event::Killed { target: 0 })));
+        c.fire(0, None, muzzle, Vec3::Y, Vec3::ZERO, 1.0);
+        assert!(c.tick(1.0 / 60.0, &g).iter().any(|e| matches!(e, Event::Gone { .. })));
     }
 
     #[test]
