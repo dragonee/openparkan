@@ -21,7 +21,7 @@
 module = "ai.dll"
 at = "0x100014f9"
 kind = "site"
-name = "script version gate, cmp edi, 0x49"
+name = "script gate: the first word, the function-table length, against 0x49; warns only"
 read = true
 doc = "analysis/README.md"
 
@@ -29,7 +29,7 @@ doc = "analysis/README.md"
 module = "ai.dll"
 at = "0x1000129e"
 kind = "site"
-name = "interpreter initialiser: 70 handler pointers at +0xc..+0x120"
+name = "function table store 3 of 73; the run starts at 0x1000128a (once misread as 70 of them)"
 read = true
 doc = "analysis/README.md"
 
@@ -37,7 +37,7 @@ doc = "analysis/README.md"
 module = "ai.dll"
 at = "0x100122b5"
 kind = "site"
-name = "the dispatch loop"
+name = "a statement: call table[head[0]], result from +0x48 into head[1] as its type wants"
 read = true
 doc = "docs/15-behaviour.md"
 
@@ -45,9 +45,884 @@ doc = "docs/15-behaviour.md"
 module = "ai.dll"
 at = "0x10012313"
 kind = "site"
-name = "the branch taken when head[0] is -1"
+name = "a statement without a function: copy variable head[2], else the formula"
 read = true
 doc = "analysis/README.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x1000128a"
+kind = "site"
+name = "the first of 73 function-table stores, slots +0x0..+0x120, one per function id"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x10011b20"
+kind = "function"
+name = ".scr loader: function-table length, handlers of 0x14 bytes, nodes of 0x20"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x10011e70"
+kind = "function"
+name = "copy the constructor's function table into interpreter +0xc"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x100123a0"
+kind = "site"
+name = "interpreter +0x3c <- the SuperAI every handler runs on"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x10011f10"
+kind = "function"
+name = "run a handler, following handler switches until one returns"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x10011f40"
+kind = "function"
+name = "find a handler by name, -1 if absent"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x10011fb0"
+kind = "function"
+name = "step a handler's nodes from 0; node index 0xffffff means switch handler"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x10012020"
+kind = "function"
+name = "node executor: jump on head[3] + 1"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x10012380"
+kind = "table"
+name = "node executor's jump table, eight kinds -1..6"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x1001203f"
+kind = "site"
+name = "kind 0, if: relation 0..5 as < == > <= >= !=, DWORD or float by the first operand"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x100121c4"
+kind = "site"
+name = "kind 1, end: condition depth - 1, clamped at 0"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x100121e2"
+kind = "site"
+name = "kind 6, constant: written with no condition test"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x10012225"
+kind = "site"
+name = "kind 4: switch to the handler the operand names, depth reset"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x10012258"
+kind = "site"
+name = "kind 3: continue at the node the operand names, depth reset"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x10012285"
+kind = "site"
+name = "kind 5: return, when the innermost condition holds"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x10012343"
+kind = "site"
+name = "statement with neither function nor variable: evaluate formula[trailer], set as float"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x10002d30"
+kind = "function"
+name = "varset: variable by index, 0x30-byte records"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x10013190"
+kind = "function"
+name = "variable as float, switching on the type tag"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x10013570"
+kind = "site"
+name = "variable as DWORD, switching on the type tag"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x10013650"
+kind = "function"
+name = "variable set from a float"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x10013770"
+kind = "function"
+name = "variable set from a DWORD"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x10037688"
+kind = "datum"
+name = "type-name table: 0 void, 1 int, 2 BOOL, 3 float, 4 char*, 5 DWORD"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x10037c90"
+kind = "datum"
+name = "formula operator table: 13 named operators with arity and symbol"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x1003d770"
+kind = "datum"
+name = "'_Start' and '_Continue', appended to a raised problem's variable name"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x100059f0"
+kind = "function"
+name = "raise a problem: resolve <name>_Start/_Continue, skip a duplicate (code, p1, p2)"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x10004e50"
+kind = "function"
+name = "problem record, 0x64 bytes: code, p1..p3, weight +0x14, state +0x18, units +0x1c"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x10005710"
+kind = "function"
+name = "problem: set state; ST_SOLVED and ST_UNSOLVED release its units first"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x10005c10"
+kind = "function"
+name = "clan brain: unit record by logical id, 0x20-byte records at +0x10"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x10006700"
+kind = "function"
+name = "clan brain: base radius from the buildings within a range of the base"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x10006757"
+kind = "site"
+name = "base radius counts only logical ids with the top bit, the buildings"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x1000cf61"
+kind = "site"
+name = "script function 37: and 0x80000000 on a logical id picks the buildings"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x100052b9"
+kind = "site"
+name = "object slot 17 compared with the clan brain's clan number"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x1000698d"
+kind = "site"
+name = "object slot 17 compared with 0xfffe"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ArealMap.dll"
+at = "0x10001a57"
+kind = "site"
+name = "areal map slot 8 answers only a logical id with the top bit set"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10060ce0"
+kind = "function"
+name = "the message callback ai.dll's CreateSuperAI is handed: channel, kind, value"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10061038"
+kind = "table"
+name = "message kinds 0..5 on channel 0: system, info, hero killed, objective complete, failed, progress"
+read = true
+doc = "docs/15-behaviour.md"
+
+# The 73 handlers of the interpreter's function table, by function id.  The
+# slot is the id: analysis/scrtable.py re-derives the table and checks each
+# handler's operand count against the scripts.
+[[entry]]
+module = "ai.dll"
+at = "0x10008034"
+kind = "function"
+name = "script function 0: sets the result to 1 and reads nothing, a stub"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x10007fd0"
+kind = "function"
+name = "script function 1: reads a float operand and discards it, a stub"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x10009610"
+kind = "function"
+name = "script function 2: raise a problem: code, weight, two numbers, three parameters; handlers <name>_Start/_Continue"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x10009b99"
+kind = "function"
+name = "script function 3: the clan's power available minus power demanded, the distributor's totals"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x1000a0a3"
+kind = "function"
+name = "script function 4: release every unit of problem p"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x10009a6c"
+kind = "function"
+name = "script function 5: set problem p's state"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x10009fb6"
+kind = "function"
+name = "script function 6: attach a unit to the current problem, normal or critical"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x1000a107"
+kind = "function"
+name = "script function 7: release every unit of the current problem"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x10009b0d"
+kind = "function"
+name = "script function 8: set the current problem's state; 2 and 3 release its units"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x10009b86"
+kind = "function"
+name = "script function 9: does nothing"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x1000a97a"
+kind = "function"
+name = "script function 10: the first areal-map entry that is not the clan's"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x1000c5e7"
+kind = "function"
+name = "script function 11: 1 when the clan holds as many of a type as its dMax variable allows"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x10009bf1"
+kind = "function"
+name = "script function 12: the current problem's weight"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x100086fb"
+kind = "function"
+name = "script function 13: pick a unit: free of a type, a free capturer, or one busy on a lighter problem"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x10008a99"
+kind = "function"
+name = "script function 14: pick a unit: any of a type, any capturer, or the capturer soonest at a target"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x10008054"
+kind = "function"
+name = "script function 15: give a unit an order packet; result 1 taken, 0 refused, 5 no such unit"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x10009ced"
+kind = "function"
+name = "script function 16: free space for a resource, summed over the clan's buildings of a type"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x10009e39"
+kind = "function"
+name = "script function 17: a resource held, summed over the clan's buildings of a type"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x1000a148"
+kind = "function"
+name = "script function 18: a building site clear of objects near the base, into two variables"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x1000aa38"
+kind = "function"
+name = "script function 19: the clan's base x, y and clan number, written into its three operands"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x100093aa"
+kind = "function"
+name = "script function 20: set problem p's action"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x1000b717"
+kind = "function"
+name = "script function 21: release group g of problem p"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x1000ab1b"
+kind = "function"
+name = "script function 22: open a group in problem p"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x1000b845"
+kind = "function"
+name = "script function 23: add a unit to group g of problem p"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x1000b7c2"
+kind = "function"
+name = "script function 24: release group g of the current problem"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x1000ab85"
+kind = "function"
+name = "script function 25: form a group in the current problem: all free, battle units, or nearest to a strength"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x1000b937"
+kind = "function"
+name = "script function 26: add a unit to group g of the current problem"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x100094f1"
+kind = "function"
+name = "script function 27: set the current problem's action and its target"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x1000ba01"
+kind = "function"
+name = "script function 28: give every unit of a group the same order packet"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x1000c182"
+kind = "function"
+name = "script function 29: the current problem's parameter 0, 1 or 2; ERROR when it has none"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x1000c266"
+kind = "function"
+name = "script function 30: a mission message: kind and value to iron3d.dll's callback on channel 0"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x1000c2fd"
+kind = "function"
+name = "script function 31: count clan c's units whose type shares a bit with a class mask"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x1000c446"
+kind = "function"
+name = "script function 32: 1 when clan b is on clan a's list from the system areal map"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x1000c530"
+kind = "function"
+name = "script function 33: make handler Problems<n> the clan's problem handler"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x10009c30"
+kind = "function"
+name = "script function 34: count the clan's units of a type"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x1000c847"
+kind = "function"
+name = "script function 35: an enemy object with no PBM_BUILDING_CAPTURE raised, generators first; distance out"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x1000db98"
+kind = "function"
+name = "script function 36: the nearest enemy object; distance out"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x1000cedf"
+kind = "function"
+name = "script function 37: the nearest of the clan's buildings; distance out"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x1000cc9e"
+kind = "function"
+name = "script function 38: summed strength of clan c's battle units, free or all"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x1000ce59"
+kind = "function"
+name = "script function 39: 1 when a logical id names an object"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x1000d030"
+kind = "function"
+name = "script function 40: the nearest unclaimed place on the system areal map's list: x, y and distance out"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x1000d4a3"
+kind = "function"
+name = "script function 41: a test of a unit through the object at +0x40c"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x1000c0f5"
+kind = "function"
+name = "script function 42: writes a field of the current problem; unused"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x1000d54a"
+kind = "function"
+name = "script function 43: load the files in UNITS\\UNITS\\AI\\ into the object at +0x40c"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x1000d57e"
+kind = "function"
+name = "script function 44: a distance to a place or logical id, through 0x10006130"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x1000d753"
+kind = "function"
+name = "script function 45: summed strength of the current problem's units"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x1000db07"
+kind = "function"
+name = "script function 46: the base radius"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x1000d79b"
+kind = "function"
+name = "script function 47: an enemy near the base with no PBM_BASE_DEFENCE raised, the hero else the strongest"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x10009248"
+kind = "function"
+name = "script function 48: a capture-capable battle unit of the current problem; unused"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x1000db2e"
+kind = "function"
+name = "script function 49: the clan's free minds"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x1000de40"
+kind = "function"
+name = "script function 50: a unit of the current problem running a given order"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x1000e00c"
+kind = "function"
+name = "script function 51: reserve a unit from every problem (0xfffe), or free it"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x1000e0e4"
+kind = "function"
+name = "script function 52: the owner word of a logical id, object slot 17; ERROR if no object"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x1000e172"
+kind = "function"
+name = "script function 53: an entry of clan c's +0x40c place list with its second byte set; unused"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x1000e23c"
+kind = "function"
+name = "script function 54: a unit's current order; unused"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x1000e31a"
+kind = "function"
+name = "script function 55: 1 when an object lies inside a stored rectangle; unused"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x1000e430"
+kind = "function"
+name = "script function 56: the byte at SuperAI +0x431"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x1000e468"
+kind = "function"
+name = "script function 57: two values to iron3d.dll's callback on channel 2"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x1000e4ff"
+kind = "function"
+name = "script function 58: one of the clan's buildings of a kind; unused"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x1000e643"
+kind = "function"
+name = "script function 59: now plus a delay, in whole seconds"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x1000e6a0"
+kind = "function"
+name = "script function 60: 1 once a time has passed, else ERROR"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x1000e70f"
+kind = "function"
+name = "script function 61: an object's type word, object slot 14; ERROR if no object"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x1000e79d"
+kind = "function"
+name = "script function 62: set the current problem's weight"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x1000e811"
+kind = "function"
+name = "script function 63: 1 when an object stands inside the base radius"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x1000e8e7"
+kind = "function"
+name = "script function 64: the nearest enemy inside the base radius; distance out"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x1000ec32"
+kind = "function"
+name = "script function 65: a flag of the object at +0x40c"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x1000ec72"
+kind = "function"
+name = "script function 66: an object's type word, and a float weight by building type out"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x1000eec7"
+kind = "function"
+name = "script function 67: the clan's nearest factory; distance out"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x1000efe1"
+kind = "function"
+name = "script function 68: recompute the base radius from the clan's buildings within r"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x1000f06c"
+kind = "function"
+name = "script function 69: store a count at SuperAI +0x41c"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x1000f0d3"
+kind = "function"
+name = "script function 70: a random number below n"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x1000f12e"
+kind = "function"
+name = "script function 71: the nearest enemy object of a type; distance out"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x1000f477"
+kind = "function"
+name = "script function 72: an object's property 0x201"
+read = true
+doc = "docs/15-behaviour.md"
 
 # --- the component registry, ../docs/22-settings.md ------------------------
 [[entry]]

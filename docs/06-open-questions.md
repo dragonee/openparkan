@@ -192,8 +192,10 @@ outer ring is a clearance drawn around the building. See
 
 ## Not looked at at all
 
-`.scr` **node semantics** -- the structure is now [read](15-behaviour.md), all 58
-files end to end, but what a node does is not -- and the network protocol.
+The network protocol. `.scr` **node semantics** are now [read](15-behaviour.md)
+as far as the interpreter goes -- every node kind, the 73-slot function table
+and what each handler does one call deep -- though the engine calls below the
+handlers are not.
 The text layer around a mission is [read](21-briefing.md): the opening
 flythrough, its subtitles and voices, how the player runs it, and the
 in-mission messages a clan script asks for by id, through the

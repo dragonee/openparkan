@@ -1,22 +1,32 @@
 # The behaviour scripts — `.scr`
 
 `MISSIONS/SCRIPTS/` holds 58 `.scr` files, from 286 bytes to 21050. They are
-the mission AI, and `ai.dll` loads them. This reads **all 58 end to end with
-nothing left over** — 677 handlers and 6065 nodes — and resolves every one of
-their 9239 operands against the symbol table the game ships beside them.
+the mission AI, and `ai.dll` loads and runs them. This reads **all 58 end to
+end with nothing left over** — 677 handlers and 6065 nodes — resolves every one
+of their 9239 operands against the symbol table the game ships beside them,
+and reads the interpreter that runs them: what every kind of node does, and
+which of the engine's 73 script functions each call reaches.
 
-Before this they were the project's largest unread format. The feasibility
-note called them "the main obstacle" and split the problem in two: parsing the
-graph is a weekend, making the nodes *behave* is months. That split is real,
-and this document is the first half. **What a node does is not read here** —
-but what it reads and what it writes are, by name.
+The feasibility note called the scripts "the main obstacle" and split the
+problem in two: parsing the graph is a weekend, making the nodes *behave* is
+months. The first half is done, and the second is further along than that
+estimate: the control flow is **read** from the executor, every call is mapped
+to its handler, and the functions are named as far as their code says —
+problems raised and solved, units picked and ordered, targets found. What a
+handler asks of the engine below it (a unit's strength, a distance) is
+mostly not followed.
+
+**Every claim is tagged**: *measured* is re-derived by `openparkan verify`,
+*read* comes from the disassembly at the address given (all `ai.dll` unless
+another module is named), *derived* follows from the two, *guess* fits and is
+not established.
 
 ## The file
 
 Three words, then one record per handler, each carrying its own node list.
 
 ```
-int32   magic, always 73
+int32   73, the length of the function table
 int32   handler count
 handler x count:
     int32   name length
@@ -25,17 +35,26 @@ handler x count:
     int32   index, 0 upward in file order
     int32   node count
     node x count:
-        int32   head[4]                  four reference fields, meanings open
-        int32   opcode                   0..6
+        int32   head[0]                  function id, or -1
+        int32   head[1]                  destination variable, or -1
+        int32   head[2]                  source variable, or a number, or -1
+        int32   head[3]                  kind, -1..6
+        int32   relation                 an if's comparison 0..5, else 6
         int32   operand count
         int32   operands[count]
-        int32   trailer
+        int32   trailer                  formula index, or -1
 ```
 
 Nothing is aligned and nothing is padded: a name of 18 bytes leaves everything
 after it on an odd offset, which is why a naive scan for `int32` records finds
-nothing. The magic is **73** in all 58 files, the byte after a name is **0** on
-all 677 records, and every handler's index is its own position.
+nothing. The first word is **73** in all 58 files, the byte after a name is
+**0** on all 677 records, and every handler's index is its own position.
+
+The loader is `0x10011b20` (*read*). It reads the first word into the
+interpreter and allocates that many four-byte slots, then reads handlers into
+0x14-byte records and nodes into 0x20-byte ones, keeping the four head words,
+the relation, the operand list and the trailer. It also reads the name's
+terminating byte, which is what the `0` after a name is.
 
 A script carries 9 to 37 handlers and 1 to 585 nodes.
 
@@ -55,14 +74,25 @@ Two kinds, and the names tell them apart.
 | `Hero_Teleported` | the player |
 
 That they are universal is what makes them the engine's rather than a
-mission's: a mission cannot omit one. Five more names appear in a single
-script each — `All_Defence`, `BUILD_MINE`, and the difficulty handlers `Easy`,
-`Normal` and `Hard`.
+mission's: a mission cannot omit one. The SuperAI constructor looks up
+`Mission`, `Problems0`, `Mech_GeneratorFound` and `Fort_Task_Complete` by name,
+and reports "Script error - details in ai.log" when either of the last two is
+missing (`0x1000160b`, *read*); function 33 can replace `Problems0` with any
+`Problems<n>`.
+
+Five more names are neither — `All_Defence`, in seven scripts, and
+`BUILD_MINE` and the difficulty handlers `Easy`, `Normal` and `Hard`, in one
+each. (An earlier note put all five in a single script each.) They are
+**subroutines**: nothing calls them by name, and they are exactly the handlers
+the kind-4 jump reaches (*measured*, below).
 
 **The rest are AI problems**, prefixed `PBM_`, and they come in halves. Every
 `PBM_X_Start` in a file has a matching `PBM_X_Continue` — **across all 58
-files, without a single exception**. So a problem is written as a pair: what
-to do when it is raised, and what to do while it lasts.
+files, without a single exception**. The engine is why: function 2 raises a
+problem by the *name* of the variable it is given, appending `_Start` and
+`_Continue` (`0x1003d770`) and looking both handlers up; if either is missing
+the problem is not raised (`0x100059f0`, *read*). So a problem is written as a
+pair: what to do when it is raised, and what to do while it lasts.
 
 Fourteen problems appear across the corpus, and a script carries 0 to 13:
 
@@ -75,32 +105,6 @@ Fourteen problems appear across the corpus, and a script carries 0 to 13:
 | `PBM_PLACE_PROTECT` | 7 | | `PBM_MINE_NEEDED` | 1 |
 | `PBM_ATTACK_UNIT` | 6 | | `PBM_N_E_ENERGY` | 1 |
 | `PBM_BUILDING_CAPTURE` | 6 | | `PBM_UPGRADE_NEEDED` | 1 |
-
-They read as a strategy layer's vocabulary — capture a building, defend the
-base, need a robot, route transport, make research.
-
-## The node, and the one thing its shape proves
-
-A node is four head fields, an opcode, a counted operand list and a trailer.
-The opcode runs 0 to 6, and **its arity is fixed by its value**:
-
-| opcode | nodes | operands |
-|---:|---:|---|
-| 0 | 68 | exactly 2 |
-| 1 | 662 | exactly 2 |
-| 2 | 57 | exactly 2 |
-| 3 | 28 | exactly 2 |
-| 4 | 35 | exactly 2 |
-| 5 | 89 | exactly 2 |
-| 6 | 5126 | 0 to 11 |
-
-**939 nodes on opcodes 0–5 take two operands and not one takes any other
-number.** That is not a coincidence of the corpus; it is the shape of six
-fixed-arity operators against one variadic form, and it is the strongest
-structural claim this document makes. Six binary operators is the size of a
-comparison set, and opcode 6 — five sixths of all nodes — is what a call or a
-sequence looks like. Both readings are *unconfirmed*, and the reader names
-neither: it exposes `opcode` and `binary` and stops there.
 
 ## The vocabulary: `varset.var`
 
@@ -126,8 +130,8 @@ VAR( DWORD, ClanID, 0);
 
 **231 declarations, and the index is the position.** Every one of the 9239
 operands indexes it and none falls outside. The first node of `Init` in the
-first script reads 224, 225, 226 — `ClanBaseX`, `ClanBaseY`, `ClanID`, which is
-what setting a mission up looks like.
+first script reads 224, 225, 226 — `ClanBaseX`, `ClanBaseY`, `ClanID`, which
+function 19 fills in.
 
 Read the file in order or not at all: eleven declarations end in a stray `;`
 and four of those sit in the middle, so a parser that drops them shifts every
@@ -135,19 +139,12 @@ index after it.
 
 **Two types are declared and a third is only documented.** All 231 are `VAR`:
 **200 `DWORD` and 31 `float`**, and the `STRING(...)` form the header
-advertises is never used once. The engine is readier than the data: `ai.dll`
-carries a value formatter that switches six ways on a type tag — a string
-copy, decimal through `itoa`, a hex form that writes its own `0x`, a boolean
-test and two more — and fourteen near-identical methods switch on the same
-tag. So the script vocabulary uses two of at least six types the interpreter
-can hold. Which tag is which type is not established.
-
-A negative worth keeping, now checked exhaustively rather than by search:
-**there is no 73-entry switch in `ai.dll`.** Enumerating every jump table in
-the binary — 72 of them — the widest has **13 entries**, so the 73 function
-ids are not dispatched by a switch anywhere. The 70-entry handler table the
-loader builds remains the only dispatch, and the id-to-slot mapping stays
-open.
+advertises is never used once. The interpreter holds six, and names them in a
+table of its own (`0x10037688`, *read*): **0 `void`, 1 `int`, 2 `BOOL`, 3
+`float`, 4 `char*`, 5 `DWORD`**. The getters agree — `0x10013190` loads a type-3
+value with `fld`, a type-5 one zero-extended with `fild qword`, and tests a
+type-2 one against zero. A variable is a 0x30-byte record with the tag at `+8`
+and its value behind the pointer at `+0x20` (`0x10002d30`).
 
 ### Which slot reads and which writes
 
@@ -160,12 +157,14 @@ freely. Those 23 are exactly the things you cannot assign to:
 |---|---|
 | `f0`–`f9` | the float literals 0 to 9 |
 | `d0`–`d9` | the integer literals 0 to 9 |
-| `dCurrentProblem`, `dCurrentSender`, `fDifficulty` | written by the engine at load |
+| `dCurrentProblem`, `dCurrentSender`, `fDifficulty` | written by the engine |
 
-That last row is confirmed from the other side: `ai.dll` resolves
-`dCurrentProblem` and `dCurrentSender` by name immediately after the version
-check, along with ten more it writes itself. So a node reads its sources and
-writes its result, and 3561 of the 6065 write nowhere at all.
+That last row is confirmed from the other side: the SuperAI constructor
+resolves `dCurrentProblem` and `dCurrentSender` by name right after the table
+gate and keeps pointers to them at `+0x868` and `+0x86c`, along with ten more —
+the six `dMax*` limits, which function 11 compares against, and four factors
+(`0x10001535`, *read*). So a node reads its sources and writes its
+result, and 3561 of the 6065 write nowhere at all.
 
 The same table serves the `.fml` formula files beside the scripts: of the 15
 identifiers they use, 11 are `varset.var` declarations and the other four are
@@ -175,13 +174,20 @@ the format's own keywords (`FUNCTION`, `FormulaSet`, `export`, `file`).
 
 Not `Behavior.dll`. **`ai.dll`** carries `.scr`, `.var`, `.fml` and
 `MISSIONS\SCRIPTS\`; `Behavior.dll` carries `ResTree` and owns the research
-tree instead. The loader checks the first word against 73 and, on a mismatch,
-prints
+tree instead.
 
-> `(AI.DLL) ERROR: Scripts are not up to date !`
+The first word is **the length of the function table the script was compiled
+against** (*read*). The SuperAI constructor allocates `word × 4` bytes, writes
+73 handler addresses into them (`0x1000128a`), compares the word with 73
+(`0x100014f9`) and on a mismatch prints
 
-so 73 is a **format version**, not a magic number — the engine's own words for
-it. Nothing in the corpus carries any other value.
+> `(AI.DLL) ERROR: Scripts are not up to date ! Get newer version from REL\MISSIONS\SCRIPTS`
+
+— and carries on: the table is copied into the interpreter either way
+(`0x10011e70`). An earlier note here called 73 a format version; it is that in
+effect, since a script built against a shorter table would name functions that
+moved, but the number itself is a count. Nothing in the corpus carries any
+other value.
 
 ### What `.trf` turned out to be
 
@@ -194,260 +200,448 @@ descriptions, `TRFA` stat templates for a UI panel
 an operand ceiling of 228 — is a coincidence, and a good reminder that a
 number landing in the right range is not evidence.
 
-## The node has two forms, and `head[0]` tells them apart
+## The kind — `head[3]`
 
-`head[0]` was the last field with no reading at all. It has one, and it
-splits the node in two — *measured*, with no exceptions in 6065 nodes.
+The node executor is `0x10012020`, and the first thing it does is jump on
+`head[3] + 1` through an eight-entry table (`0x10012380`, *read*). So
+`head[3]` is **what the node is**, and each kind carries a fixed arity —
+*measured* on all 939 comparisons and **3039 of 3039** other nodes that are
+not calls:
 
-### A call
+| kind | node | operands | does | nodes |
+|---:|---|---:|---|---:|
+| −1 | **statement** | args | a call, or `dest = variable`, or `dest = formula` | 3539 |
+| 0 | **if** | 2 | compare; opens a block | 939 |
+| 1 | **end** | 0 | closes the innermost block | 944 |
+| 2 | **label** | 0 | nothing — a jump target | 57 |
+| 3 | **goto** | 1 | continue at the node the operand indexes | 85 |
+| 4 | **switch** | 1 | continue in the handler the operand indexes | 25 |
+| 5 | **return** | 0 | stop | 210 |
+| 6 | **constant** | 0 | `dest = head[2]`, as a number | 266 |
 
-**2087 nodes carry `head[0]`, and every one is opcode 6.** On all 2087,
-`head[2]`, `head[3]` and the trailer are **null**. So a node with a function
-uses only the function, its operands and its destination:
+The fifth word, which this page used to call the opcode, is **the relation of
+an `if`** (`0x1001203f`, *read*): 0 `<`, 1 `==`, 2 `>`, 3 `<=`, 4 `>=`, 5 `!=`.
+All 939 comparisons are kind 0 and carry 0 to 5; all 5126 other nodes carry 6
+(*measured*). The old reading — "six binary operators is the size of a
+comparison set" — was right, and the arity split it rested on is the `if`
+taking two operands.
+
+| relation | 0 `<` | 1 `==` | 2 `>` | 3 `<=` | 4 `>=` | 5 `!=` |
+|---|---:|---:|---:|---:|---:|---:|
+| nodes | 68 | 662 | 57 | 28 | 35 | 89 |
+
+When the first operand's type tag is 5 both are fetched as `DWORD` and compared
+**unsigned** — so `ERROR`, `0xffffffff`, is greater than everything; otherwise
+both are fetched as floats. The scripts never mix the two: **902 comparisons
+are `DWORD` against `DWORD` and 37 float against float** (*measured*).
+
+### A statement
+
+**2087 statements carry `head[0]`**, and every one is a call: `head[2]` and the
+trailer are null on all 2087. The executor indexes the interpreter's function
+table with `head[0]` and calls the handler with nothing on the stack
+(`0x100122c9`, *read*):
 
 ```
-head[0]      which function, 57 distinct over 0..72
-operands     its arguments
+head[0]      which function: a slot of the 73-entry table
+operands     its arguments, which the handler fetches itself
 head[1]      where the result goes, or null
 ```
 
-A function's signature is fixed by its number:
+The other statements copy. With `head[2]` set the destination takes that
+**variable** (`0x10012313`); with neither, the destination takes the value of
+**formula `trailer`** (`0x10012343`, both *read*):
 
-| | |
-|---|---:|
-| appear under a single opcode | **57 of 57** |
-| take a single number of arguments | **52 of 57** |
-| either always write a destination or never | **56 of 57** |
-
-That is a function table. The five with a variable count (14, 15, 25, 28, 44)
-take 2–3, 9–11, 1/4/5, 10–11 and 4–5 arguments, which reads as optional
-trailing ones.
-
-### An assignment
-
-The other 3039 opcode-6 nodes have no function, and they write from one of two
-places. The correspondence is exact:
-
-| writes | `head[2]` | trailer | operands | nodes |
+| statement | `head[0]` | `head[2]` | trailer | nodes |
 |---|---|---|---|---:|
-| yes | — | set | — | 1379 |
-| yes | set | — | — | 339 |
-| no | — | — | — | 1211 |
-| no | — | — | one | 110 |
+| call | set | — | — | 2087, 786 of them writing a destination |
+| `dest = formula` | — | — | set | 1379 |
+| `dest = variable` | — | set | — | 73 |
 
-**All 1718 nodes that write carry exactly one of the two sources, and all 1321
-that write nothing carry neither.** The trailer is a variable index — 1379 of
-1379 valid, and the commonest are `f0`, `f1`, `f2`, the literal pool — so that
-form is `destination = variable`. `head[2]` is a small integer, 1 to 16 mostly,
-with the top bit set on 55 of 339, and its destination is a **`DWORD` on all
-339**, never a float.
+**The trailer is a formula index, not a variable** — a correction. This page
+read it as a variable because all 1379 values are below 231 and the commonest
+are 0, 1 and 2, which `varset.var` names `f0`, `f1`, `f2`. They are formulas 0,
+1 and 2 of the script's own `.fml`, and the data says so without the binary
+(*measured*):
 
-And `head[3]` is a **selector of its own**, the way `head[0]` is for a call,
-with its own fixed arity — *measured*, **3039 of 3039**:
+- **58 of 58 scripts** have exactly as many `FUNCTION` lines in their `.fml` as
+  statements with a trailer — **1379** of each across the corpus.
+- **1379 of 1379** trailers index their file, and on every one the formula is
+  the node's own line — the *n*th trailer points at line *n* — or the first
+  earlier line with the identical text. The script compiler shared duplicates.
 
-| tag | operands | writes | nodes |
-|---:|---:|---|---:|
-| −1 | 0 | yes, from a variable | 1452 |
-| 1 | 0 | no | 944 |
-| 2 | 0 | no | 57 |
-| 3 | **1** | no | 85 |
-| 4 | **1** | no | 25 |
-| 5 | 0 | no | 210 |
-| 6 | 0 | yes, from a number | 266 |
+A `.fml` is `//FormulaSet export file`, a blank line, and one
+`FUNCTION( , <expression>,  )` per formula, the outer fields empty on all 1379.
+The expressions use numbers, `+ - * ( )` and eleven variables:
+`fTemp + 0.00001`, `dPlaceProtectHits - dTemp`, `20 + 55*fDifficulty`. The
+evaluator knows more than that — a table of **13 operators** (`0x10037c90`,
+*read*) names `Addition`, `Subtraction`, `Multiplication`, `Division`, `Power`,
+`And`, `Or`, `Sign change`, `Not`, `Normalisator`, `Significator`,
+`Booleanisator` and `Absolute`. A formula's value is set through the float
+setter (`0x10013650`), so it is truncated when the destination is a `DWORD`.
 
-So the 110 nodes carrying a single operand are exactly tags 3 and 4, and
-nothing else distinguishes them from the 1211 bare ones.
-
-### `head[2]` is a variable under one tag and a number under the other
+### `head[2]` is a variable under one kind and a number under the other
 
 The two readings are hard to separate for small values, because the literal
 pool sits at the front of `varset.var` — `f7` is at index 7 *and* has the
-value 7. The tag separates them anyway:
+value 7. The kind separates them anyway, and the executor agrees:
 
-- **Tag −1** — all 73 values are valid indices, and only **three distinct ones
-  are ever used**: `d2`, `ERROR`, `dTemp3`. Scattered, named, meaningful. This
-  is a variable.
-- **Tag 6** — **63 of 266 cannot be an index at all**: 55 carry a flag in the
-  high half (`0x8000_0000`) and two are `4094` and `65534`, past the end of a
-  231-entry table. The rest run **densely from 1 to 28** with one gap, which is
-  what a small integer looks like and not what a choice of variables looks
-  like. This is a number.
+- **Kind −1** — all 73 values are valid indices, and only **three distinct ones
+  are ever used**: `d2`, `ERROR`, `dTemp3`. A variable, copied (`0x10013a80`).
+- **Kind 6** — **63 of 266 cannot be an index at all**: 55 carry the top bit
+  and two are `4094` and `65534`. The rest run **densely from 1 to 28** with
+  one gap. A number, written with the `DWORD` setter when the destination is a
+  `DWORD` (`0x100121e2`) — and all 266 destinations are.
 
-The flag on those 55 is **unknown**; a sign is the obvious guess and nothing
-here tests it. `Node.reference` and `Node.literal` return one or the other and
-`NULL` for the wrong tag.
+## The function table — *read*, and *measured* against the scripts
 
-### What the functions are — *guess*
+The SuperAI constructor writes **73 handler addresses** into the table, at
+offsets `+0x0` to `+0x120` (`0x1000128a`..`0x100014fc`), all distinct. An
+earlier note counted **70**, from `+0xc`: the first three stores sit before the
+address it quoted. So **function *n* is slot *n***: 73 slots for the ids 0 to 72
+the scripts use, and the old "70 slots cannot cover 73 ids" was the miscount.
 
-Nothing names them; `ai.dll` holds no run of 73 identifiers. But the arguments
-do the work, because they are `varset.var` names and the developers wrote
-those in full:
+That is checked against the data rather than asserted.
+`analysis/scrtable.py` cuts each handler at the next function start and reads
+which operands it fetches — the handlers are unoptimised, so an argument is
+always the current node's operand pointer followed by `[pointer + 4k]` — and
+compares the count with the scripts:
 
-| fn | uses | its arguments include | reading |
+- on **55 of the 57** functions the scripts call, the handler reads **exactly**
+  as many operands as the longest call passes. The other two: function 0's
+  handler reads none of the one it is given, and function 14 reads an optional
+  fourth that only a `TARGET_BY_PLACE` target uses, which no script passes;
+- **38 of 38** functions whose calls write a destination have a handler that
+  writes the result slot, and the 8 called handlers that never write it are
+  never given one.
+
+`openparkan.behaviour.ARGUMENTS` carries the per-handler counts and
+`scrtable.py` checks them against the binary.
+
+### How a handler runs
+
+The handlers are methods of the **SuperAI** (vtable `0x100341b8`), the 0x8b0-byte
+object `CreateSuperAI` builds per clan ([23-economy.md](23-economy.md)). The
+interpreter is embedded at its `+8` and points back at it (`0x100123a0`), so a
+handler's `this` is the SuperAI and the fields below are the SuperAI's
+(*read*):
+
+| SuperAI | interpreter | |
+|---|---|---|
+| `+0x10` | `+0x8` | function-table length |
+| `+0x14` | `+0xc` | the function table |
+| `+0x18` | `+0x10` | the variables |
+| `+0x2c` | `+0x24` | the formulas, 0x28-byte records |
+| `+0x48` | `+0x40` | the running handler |
+| `+0x4c` | `+0x44` | the running node |
+| `+0x50` | `+0x48` | the result slot, cleared before each call |
+| `+0x54` | `+0x4c` | the condition bytes, one per open block, 32 of them |
+| `+0x74` | `+0x6c` | how many blocks are open |
+
+A handler finds its arguments through the running handler and node, and
+fetches each with the getter it wants — as `DWORD` (`0x10013570`), as float
+(`0x10013190`), or not at all, when it writes the variable back (functions
+18, 19, 25, 35–37, 40, 47, 64, 66, 67 and 71 write an operand). It leaves its
+answer in the result slot, and the executor sets the destination through the
+float setter when the destination is a float and the `DWORD` setter otherwise
+(`0x100122e5`). A handler returning a float leaves its bits.
+
+### What the functions do
+
+Named from their code — each line is what the handler does, one call deep —
+with the scripts' vocabulary where it settles a name the code leaves open
+(`dFreeMindNumber = fn49()`). *p* is a problem index, *g* a group, *id* a
+logical id, *clan* a clan number. "Out" marks an operand the handler writes.
+Unused functions are the sixteen no shipped script calls.
+
+**Problems.** The clan's planner. A problem is a 0x64-byte record
+(`0x10004e50`): its code (`PBM_*`), three parameters, a float **weight** at
+`+0x14`, a state at `+0x18` (`ST_*`), its units and its groups.
+
+| fn | uses | arguments | does |
 |---:|---:|---|---|
-| 30 | 244 | `MESSAGE_INFO`, `OBJECTIVE_COMPLETE` | show a message, tick an objective |
-| 15 | 236 | `ORDER_ROBOT_PATROL`, `INSERT_ORDER_REPLACE`, `fSuccess` | give a robot an order |
-| 8 | 179 | `ST_SOLVING`, `ST_SOLVED` | set the problem's state |
-| 2 | 176 | `PBM_ROBOT_NEEDED`, `ROBOT_BATTLEUNIT` | raise a problem |
-| 27 | 147 | `ACTION_DESTROY`, `EXP_TARGET_BY_LOGIC_ID` | set a group's action |
-| 28 | 85 | `dAttackGroup`, `ORDER_ROBOT_ATTACK` | order a group |
-| 25 | 85 | `TAKE_BY_HITS`, `TARGET_BY_PLACE` → `dAttackGroup` | form a group |
-| 19 | 58 | `ClanBaseX`, `ClanBaseY`, `ClanID` | place the clan's base |
+| 2 | 176 | code, weight, *a*, *b*, *p1*, *p2*, *p3* | raise the problem the code's variable names; not again while one with the same code, *p1* and *p2* stands (`0x10004c50`) |
+| 8 | 179 | state | set the running problem's state; `ST_SOLVED` and `ST_UNSOLVED` release its units first |
+| 12 | 91 | — | the running problem's weight |
+| 62 | 7 | weight | set it |
+| 29 | 163 | 0, 1 or 2 | the running problem's *p1*, *p2* or *p3*; `ERROR` if it has none |
+| 27 | 147 | action, target kind, target | record an `ACTION_*` and its target on the running problem |
+| 6 | 54 | *id*, `UNIT_NORMAL`/`_CRITICAL` | attach a unit to the running problem, marked critical or not |
+| 7 | 28 | — | release the running problem's units |
+| 45 | 14 | — | the running problem's units' summed strength |
+| 50 | 14 | order | a unit of the running problem executing that order |
+| 33 | — | *n* | run `Problems<n>` as the problem handler from now on |
+| 4, 5, 20, 42, 48 | — | *p*, … | 7, 8, 27 on problem *p*; a field; a capture-capable unit |
 
-Function 19 appears in `Init` and nowhere else, which is where placing a base
-belongs. What each `ORDER_*` a script gives does is in
-[31-packages.md](31-packages.md); `ORDER_ROBOT_CAPTURE` is the search task
-restricted to buildings, not a task of its own. These readings are **guesses from the argument vocabulary** and the
-reader names none of them: it exposes `Node.function` as a number.
+**The weight is a priority** (*read*). Functions 13, 14 and 25 take a unit that
+is busy on another problem only when that problem's weight is **below** the
+running one's (`0x100089a5`), and the scripts raise a sub-problem at a hair
+above their own — `fTemp = fn12()`, `fTemp = fTemp + 0.00001`, then
+`fn2(PBM_ROBOT_NEEDED, fTemp, …)`. A unit reserved with function 51 (problem
+slot `0xfffe`) is taken by nobody.
+
+**Groups** live inside a problem.
+
+| fn | uses | arguments | does |
+|---:|---:|---|---|
+| 25 | 85 | `TAKE_*`, [strength in/out, target kind, target…] | open a group in the running problem and fill it: `TAKE_ALL_FREE` every free unit; `TAKE_ALL_BATTLE_UNITS` every battle unit that is free or on a problem of another code; `TAKE_BY_HITS` battle units nearest the target, free ones first and then those on lighter problems, until their summed strength reaches the amount — writing back what it gathered when that falls short. `ERROR`, and no group, if it gathers nothing |
+| 28 | 85 | *g*, then as function 15 | give every unit of the group the order; 1 if all took it |
+| 24 | 7 | *g* | release the group |
+| 21, 22, 23, 26 | — | … | release, open and add to a group |
+
+**Units.**
+
+| fn | uses | arguments | does |
+|---:|---:|---|---|
+| 15 | 236 | *id*, order, insert, parameter, four floats, target kind, target… | build an order packet and give it to the unit: result 1 taken, 0 refused, **5 no such unit**. The packet is [31-packages.md](31-packages.md)'s |
+| 14 | 53 | `UNIT_ANY_UNIT` type · `UNIT_ANY_CAPTURER` · `UNIT_ANY_NEAREST_CAPTURER` target kind, target | pick a unit: one of a type, a capturer, or the capturer that reaches the target soonest by distance over its live top speed (IControl 145, `0x100091b0`) |
+| 13 | 2 | `UNIT_FREE_UNIT`/`_FREE_CAPTURER`/`_ANY_UNIT`, type | pick a free unit of a type, a free capturer, or one free or on a lighter problem |
+| 51 | 39 | *id*, `TRUE`/`FALSE` | reserve a unit from every problem, or free it |
+| 34 | 29 | type | how many units of that type the clan has |
+| 31 | 48 | *clan*, class mask | how many of clan *clan*'s units have a type sharing a bit with the mask |
+| 38 | 13 | *clan*, `FREE_UNITS`/`ALL_UNITS` | the summed strength of that clan's battle units |
+| 11 | 11 | type | 1 when the clan already has as many of the type as its `dMax*` variable allows, or when a per-type counter the brain keeps (`+0x3e0`..`+0x3f8`) is set |
+| 49 | 9 | — | the clan's free minds |
+| 39 | 1 | *id* | 1 when the id names an object |
+| 52 | 47 | *id* | the object's **owner**, its slot 17; `ERROR` if none |
+| 61 | 7 | *id* | the object's type word, its slot 14; `ERROR` if none |
+| 66 | 6 | *id*, float out | the type word, and 0.04 for a generator, 0.05 for a factory, 0 for other buildings |
+| 72 | 1 | *id* | the object's property `0x201` |
+| 54, 58 | — | … | a unit's current order; one of the clan's buildings |
+
+**Places and targets.** The SuperAI keeps its base's centre at `+0x80`/`+0x84`
+and a radius at `+0x88`. *Enemy* below is an object of another clan whose entry
+in the SuperAI's clan table (`+0x448`, 16 bytes a clan) is 0; that the table
+holds the mission's alliance matrix, 0 towards enemies, is a *guess*. The
+distances come from `0x10006130`, which takes the float *f* as well; what *f*
+changes is not read.
+
+| fn | uses | arguments | does |
+|---:|---:|---|---|
+| 19 | 58 | x out, y out, clan out | write the base's centre and the clan's number into the three — it reads the base, it does not place it |
+| 68 | 9 | range | recompute the base radius from the clan's buildings within range of the centre |
+| 63 | 3 | *id* | 1 when the object stands inside the base radius |
+| 44 | 21 | *f*, *clan*, target kind, target… | a distance to a place or an object |
+| 18 | 2 | x out, y out | a building site spiralling out from the base, at least 250 from every object and place it knows |
+| 40 | 1 | x out, y out, distance out | the nearest unclaimed place on the list the system areal map gives (slots 25 and 26) — a mineral site, going by its one caller, `PBM_MINE_NEEDED_Start` |
+| 35 | 5 | *f*, distance out | an enemy object no `PBM_BUILDING_CAPTURE` is raised for: a generator first, then a factory, a mine, a research centre, a storage, anything else last |
+| 36 | 2 | *f*, distance out | the nearest enemy object |
+| 71 | 9 | *f*, type, distance out | the nearest enemy object of a type |
+| 64 | 3 | *f*, distance out | the nearest enemy inside the base radius |
+| 47 | 8 | range, strength out | an enemy within range of the base that no `PBM_BASE_DEFENCE` is raised for: the hero if one is there, else the strongest |
+| 37 | 3 | distance out | the nearest of the clan's own buildings |
+| 67 | 2 | distance out | the clan's nearest factory |
+| 10, 46, 55 | — | … | an areal-map entry of another clan; the base radius; a bounds test |
+
+**Economy.**
+
+| fn | uses | arguments | does |
+|---:|---:|---|---|
+| 3 | 3 | — | the clan's power available minus power demanded — the distributor's totals the HUD reads ([23-economy.md](23-economy.md)) |
+| 16 | 1 | type, resource | free space for the resource, summed over the clan's buildings of the type |
+| 17 | 1 | type, resource | the resource held, summed; `RESOURCE_LEFT_ORE` asks property `0x105` |
+
+**The mission.**
+
+| fn | uses | arguments | does |
+|---:|---:|---|---|
+| 30 | 244 | kind, value | hand both to the message callback `iron3d.dll` gives `CreateSuperAI` (`iron3d.dll:0x10060ce0`), channel 0 |
+| 57 | 14 | *a*, *b* | the same callback, channel 2 |
+| 59 | 26 | delay | now plus the delay, in whole seconds (`+0x854`, which the constructor sets from `timeGetTime` over 1000) |
+| 60 | 20 | time | 1 once that time has passed, else `ERROR` |
+| 70 | 1 | *n* | a random number below *n* |
+| 32 | 62 | *clan a*, *clan b* | 1 when *b* is on the list the system areal map's slot 33 gives for *a* |
+| 43 | 10 | — | load the files in `UNITS\UNITS\AI\` into the object at `+0x40c`, which also keeps the place list function 40 reads |
+| 41 | 2 | *id* | a test of the unit through that object; `FALSE` ends `PBM_MAKE_RESEARCH_Start` as solved |
+| 65, 56 | 1, 2 | — | a flag of that object (`dLargeResearched = fn65()`); the byte at `+0x431` |
+| 69 | 7 | *n* | store *n* at `+0x41c` |
+| 53 | — | *clan* | an entry of that clan's place list |
+| 0, 1, 9 | 6, —, 8 | | stubs: 0 sets the result to 1, 1 reads a float and drops it, 9 does nothing |
+
+The callback's channel 0 is the mission's message switch, and its six kinds are
+`varset.var`'s own (`iron3d.dll:0x10061038`, *read*): `SYSTEM_MESSAGE` with
+`MISSION_FAILED` plays `VOICE_MISSION_FAIL` and with `MISSION_COMPLETE`
+`VOICE_MISSION_COMPLETE`, each recording the outcome;
+`OBJECTIVE_COMPLETE` fetches resource 5040 from `services.dll`'s resource
+manager and plays `VOICE_OBJ_COMPLETE`; `OBJECTIVE_FAILED` fetches 5041;
+`OBJECTIVE_PROGRESS` updates the objective the value numbers; `MESSAGE_INFO`
+hands its value to `iron3d.dll:0x10094e30`; `CLAN_HERO_KILLED` does nothing.
 
 ## Reading a script
 
-Every field of a node now has a role, so a handler can be printed as
-pseudo-code. `openparkan behaviour c1m2e PBM_BUILDING_INF_CAPTURE_Start`:
+With the kinds read, the renderer names the control flow and prints formulas
+as the expressions their `.fml` gives. `openparkan behaviour c1m2e
+PBM_BUILDING_INF_CAPTURE_Start`:
 
 ```
    0  dX = fn29(d0)
    1  dT = fn14(UNIT_ANY_NEAREST_CAPTURER, TARGET_BY_LOGIC_ID, dX)
-   2  op1(dT, ERROR)
-   3  fTemp = fn12()
-   ...
-   7  fn2(PBM_ROBOT_NEEDED, fTemp, dTemp1, dTemp2, ROBOT_BATTLEUNIT, NONE, SELECT_FASTEST)
-   8  tag5
-   9  tag1
+   2  if dT == ERROR
+   3    fTemp = fn12()
+   4    fTemp = fTemp + 0.00001
+   5    dTemp1 = 25
+   6    dTemp2 = 24
+   7    fn2(PBM_ROBOT_NEEDED, fTemp, dTemp1, dTemp2, ROBOT_BATTLEUNIT, NONE, SELECT_FASTEST)
+   8    return
+   9  end
   10  fn15(dT, ORDER_ROBOT_CAPTURE, INSERT_ORDER_REPLACE, NONE, f0, f0, f0, f0, TARGET_BY_LOGIC_ID, dX)
   11  fn6(dT, UNIT_NORMAL)
+  12  dTemp3 = fn29(d2)
+  13  dT3 = dTemp3
+  14  if dTemp3 == d0
+  15    goto 31
+  16  end
   17  dAttackGroup = fn25(TAKE_BY_HITS, dTemp3, TARGET_BY_LOGIC_ID, dT)
-  30  fn28(dAttackGroup, ORDER_ROBOT_PATROL, INSERT_ORDER_REPLACE, ...)
+  ...
+  27  if dAttackGroup == ERROR
+  28    goto 31
+  29  end
+  30  fn28(dAttackGroup, ORDER_ROBOT_PATROL, INSERT_ORDER_REPLACE, NONE, f0, f0, f0, f0, TARGET_BY_LOGIC_ID, dT)
+  31  label
   32  fn27(ACTION_DESTROY, EXP_TARGET_BY_LOGIC_ID, dX)
+  33  fn27(ACTION_CAPTURE_BUILDING, EXP_TARGET_BY_LOGIC_ID, dX)
+  34  fn8(ST_SOLVING)
 ```
 
-**`fnN`, `opN` and `tagN` are numbered, not named**, and the renderer will not
-name them: the shipped files say what they take, not what they do. Everything
-else on those lines is a real name out of `varset.var`.
+Read with the table: take the building this problem was raised for; pick the
+capturer that gets there first; if there is none, raise `PBM_ROBOT_NEEDED` a
+hair above this problem's weight and stop. Otherwise order it to capture and
+attach it. If the problem's third parameter asks for an escort, gather units
+by strength to that amount — and if the escort came up short, ask for battle
+robots too — then patrol them round the capturer. Either way, record that the
+building is to be destroyed or captured and mark the problem as being solved.
+The **functions** still print as numbers, because the table index is what the
+file holds; the words are the table above.
 
-Read as English, that handler finds the nearest capturer, asks for a battle
-robot if there is none, orders the one it has to capture, takes a group by
-hits, patrols it and marks the target for destruction. That is a *reading*,
-and the only part of it the data states is the argument names.
+### Blocks — *read*, and *measured*
 
-### A comparison opens a block and tag 1 closes it — *measured*
+An `if` pushes its result onto the condition bytes, ANDed with the enclosing
+block's, and `end` pops (`0x1001219f`, `0x100121c4`). A statement, a goto, a
+switch and a return check the innermost condition before they act; **the
+constant does not** — `0x100121e2` writes its number whatever the condition.
+**63 of the 266 constants sit inside a block** (*measured*), so on a false
+branch they still land.
 
-The tags are not scattered, and the counts give it away: there are **944 tag-1
-nodes against 939 comparisons**. Per handler the match is near-exact.
-
-- **675 of 677 handlers hold exactly as many bare tag-1 nodes as
-  comparisons**, and bracket cleanly — the depth never goes negative and ends
-  at zero. Nesting reaches **five** deep.
+- **675 of 677 handlers hold exactly as many `end`s as `if`s**, and bracket
+  cleanly — the depth never goes negative and ends at zero. Nesting reaches
+  **five** deep, against 32 condition bytes.
 - The two that do not are both `Mission` handlers, in `c2m2p.scr` and
-  `c4m1p.scr`, and each carries a spare closer.
-- **tag 5 is followed immediately by tag 1 on 210 of 210** nodes, so it is
-  always the last thing inside a block.
-- **tag 3 follows a comparison on 82 of 85**, and is one of the two tags that
-  take an operand.
+  `c4m1p.scr`, carrying spare `end`s. The engine clamps the depth at zero
+  (`0x100121cb`), so they are harmless.
+- **`return` is followed immediately by `end` on 210 of 210** nodes, and the
+  jumps on 109 of 110: an exit is written as the last thing in its block.
 
-So the renderer indents, and the result reads as guard clauses:
+### The jumps — *read*, and *measured*
 
-```
- 0  dT = fn50(ORDER_ROBOT_CAPTURE)
- 1  op5(dT, ERROR)
- 2    tag5
- 3  tag1
- 4  fn7()
- 5  dX = fn29(d0)
- 6  dT = fn14(UNIT_ANY_NEAREST_CAPTURER, TARGET_BY_LOGIC_ID, dX)
- 7  op1(dT, ERROR)
- 8    fTemp = fn12()
-12    fn2(PBM_ROBOT_NEEDED, fTemp, ..., ROBOT_BATTLEUNIT, NONE, SELECT_FASTEST)
-13    tag5
-14  tag1
-15  fn15(dT, ORDER_ROBOT_CAPTURE, INSERT_ORDER_REPLACE, ...)
-```
+**Kinds 3, 4 and 5 are goto, switch and return**, and when taken each clears
+every open block (`0x10012258`, `0x10012225`, `0x10012285`):
 
-### What the other tags do — *measured*, and then a reading
+- **goto** sets the running node to its operand minus one, so the next node
+  run is the operand. **85 of 85** gotos name a **label** in their own handler
+  (*measured*), all but one forward; 52 of the 57 labels are aimed at and one
+  sits inside a block (`c5m1p.scr`, `PBM_BASE_DEFENCE_Start`).
+- **switch** makes its operand the running handler and starts it at node 0.
+  **25 of 25** name a handler of the same script, and the ones they reach —
+  `All_Defence` (21 times, from `PBM_BASE_DEFENCE_Start`), `Easy`, `Normal`,
+  `Hard` (from `Mission`) and `BUILD_MINE` — are **exactly** the five handlers
+  that are neither events nor problems.
+- **return** stops the handler, and so does running off its end
+  (`0x10011ffd`).
+- **label** does nothing at all.
 
-With the blocks established, the remaining tags sort themselves.
+**A dead end, written down.** This page once read the goto's operand as a
+weight, because its commonest value, 26, is `fPry` in `varset.var`, and argued
+that a problem's `_Start` returning a priority is how a planner would rank its
+work. The operand is a **node index**: 26 is node 26. The switch's `d9`,
+`dCurrentSender` and `dBaseFactor` are handlers 19, 21 and 30 — `All_Defence`
+wherever it happens to sit — and `f3`, `f4`, `f5` are `Easy`, `Normal` and
+`Hard`. The label is not "where a handler stops planning" but where its gotos
+land, which is where the bookkeeping sits. There *is* a priority,
+and it is the problem's weight, above.
 
-**Tags 3, 4 and 5 end the block they sit in.** Across the corpus they are
-**followed immediately by a closer on 319 of 320** nodes — tag 5 on 210/210,
-tag 4 on 25/25, tag 3 on 84/85 — and they sit at depth 1 or deeper. They
-differ only in what they carry: tag 5 nothing, tags 3 and 4 one operand each.
+## The top bit is `CLASS_BUILDING` — *measured*, and *read*
 
-Tag 3's operand is the interesting one. It is a **weight**:
+The 55 constants with the top bit set are **logical ids of buildings**.
 
-| operand | nodes |
-|---|---:|
-| `fPry` | 26 |
-| `dArealFactor` | 24 |
-| `fAgressive` | 10 |
-| `dMaxPlant` | 7 |
-| `dUnitBattleFactor`, `dMaxMine`, `fPlentyResourceAmount` | 2 each |
+- `varset.var` declares `CLASS_BUILDING` as `0x80000000`, and **all 14
+  `BUILDING_*` types carry it** while none of the 11 robot, resource and class
+  words does. Function 31 tests `type & mask`, so `CLASS_ROBOT` counts every
+  robot type (*read*, `0x1000c42a`).
+- A mission gives the bit to **568 of 568** placed objects that are not units —
+  buildings, vegetation, rocks — and to **0 of 296** units, in their
+  `LogicalID` ([04-missions.md](04-missions.md)).
+- **47 of 48** flagged constants in scripts a mission names are the logical id
+  of a building that mission places, against **39%** of missions at large; 7
+  more sit in scripts no mission names. The one miss is `c2m4e.scr`'s
+  `0x80000008` on `Mission.04`.
+- The engine tests the bit on logical ids to mean *building*: the areal map's
+  slot 8 answers only an id that carries it (`ArealMap.dll:0x10001a57`),
+  function 37 masks it to pick the clan's buildings (`0x1000cf61`), and the base
+  radius counts only ids with it (`0x10006757`, all *read*).
 
-Tag 4's is more mixed — `d9` on 9 of 25, then `dCurrentSender`,
-`dMaxTransport`, `dBaseFactor`.
+The constants flow into what takes a logical id — function 52 (33 calls),
+function 15's target (27), and functions 44, 2 and 72 (5). The renderer
+prints them `CLASS_BUILDING|3`.
 
-**Tag 2 is not a terminator.** It sits at the outermost depth on **56 of 57**,
-is followed by a closer only once, and ends 18 handlers outright. What comes
-after it is the handler's bookkeeping: `fn27(ACTION_DESTROY, ...)` and
-`fn27(ACTION_CAPTURE_BUILDING, ...)` on 45 nodes, `fn8(ST_SOLVING)` on 26,
-`fn2(PBM_…)` on 55. It appears only in `PBM_*_Start` (27), `PBM_*_Continue`
-(18) and `Problems0` (12).
+## 65534 is a destroyed object's owner — *read*, and *measured*
 
-*Guess*, and only this much: a comparison is an `if` and tag 1 its end; tags
-3, 4 and 5 are three ways of leaving a block, with tag 5 a plain return and
-tag 3 a return carrying a priority — `fPry` reads as exactly that, and an AI
-problem's `_Start` handler returning a weight is how a planner would rank what
-to do next. Tag 2 marks where a handler stops planning and starts committing.
-The bracketing and the counts are measured; the words for them are not, and
-the renderer prints `tagN`.
+Function 52 answers **an object's slot 17**, and slot 17 is its owner word:
+`ai.dll` compares it with the clan brain's own clan number (`0x100052b9`) and,
+elsewhere, with `0xfffe` (`0x1000698d`, *read*). `0xfffe` is what a destroyed
+object's owner word is set to ([26-damage.md](26-damage.md)).
 
-## What the interpreter looks like
+The scripts use it that way. Seven player scripts set a variable to 65534,
+and **11 of 11** comparisons against it test function 52's answer
+(*measured*) — just before `OBJECTIVE_FAILED` and `SYSTEM_MESSAGE,
+MISSION_FAILED`. `c1m3p.scr` has the same three blocks but sets the variable to
+**4094**, `0xffe`: an owner word never equals it, so its three "building
+destroyed" failures can never fire (*derived*; that 4094 is a slip for 65534 is
+a *guess*). `c3m3p.scr` sets 65534 and never compares it.
 
-`ai.dll` runs these scripts, and its dispatch loop is at **`0x100122b5`**:
+The scripts read two other answers beside it: 0, the player's clan
+(`PLAYER_CLAN`), ticks the objective, and 1 marks it in progress.
 
-```
-mov  eax, dword ptr [edi]        ; the node's first field
-cmp  eax, -1
-je   0x10012313                  ; -1 goes the other way
-mov  edx, dword ptr [esi + 0xc]  ; the handler table
-call dword ptr [edx + eax*4]     ; table[head[0]]
-mov  edi, dword ptr [edi + 8]    ; on to the next node
-```
+## Naming the functions from the binary
 
-That is the two-form node **confirmed from the code**, and it was derived from
-the data first: `head[0]` is loaded, tested against −1, and either indexes a
-handler table or takes the other branch. Nothing about the split was a
-reading. The last line also says nodes are a **linked list** once loaded,
-whatever they are on disk.
+The first pass concluded the binary would not name them: the handlers carry no
+strings and index structures with no names. Two things were in the way, and
+neither was the binary.
 
-The handler table is written contiguously by the loader's initialiser at
-**`0x1000129e`** — **70 stores**, at object offsets `0xc` through `0x120`,
-four bytes apart with no gaps, and all **70 targets distinct**. They are real
-functions with ordinary prologues.
+- **The table was miscounted**, so there seemed to be no mapping to find. With
+  73 slots the id is the slot, and the operand counts line up 55 of 57.
+- **`coverage.py` fused the handlers.** They have no padding and no direct
+  caller, so `0x10007fd0`..`0x1000f4d7` came out as two functions of 30 KB, and
+  any site read inside one marked the lot read. It now believes a run of six
+  or more code addresses stored by code, as it already believed one stored in
+  data; that adds exactly the 72 handlers it lacked and two comparators in
+  `Ngi32.dll`, and nothing else.
 
-**The mapping from a function id to one of those 70 slots is not
-established.** The scripts use ids 0 to 72 with 57 distinct values, and 70
-slots cannot cover 73 ids. Nothing writes past `0x120`, and the base the
-dispatch indexes from is loaded out of another object, so which slot is id 0
-stays open.
-
-### Naming the functions from the binary did not work
-
-The handlers index the interpreter's own structures — `imul eax, 0x14` for one
-stride, `shl ecx, 5` for another — and call helpers. **None of the ones
-inspected references a string.** There is no name table, no debug text and no
-log line to hang an identifier on, which is why the readings in this document
-come from the argument vocabulary instead. Naming them properly means
-following the helpers into the engine's object model, which is the
-multi-month half and is not attempted here.
+After that the handlers are short and their helpers shorter, and the SuperAI
+names its own fields: the constructor links `dMaxBuilder` into `+0x870`, so the
+handler that reads `+0x870` for `ROBOT_BUILDER` is checking a limit. What is
+not followed is the engine side of the object calls — slot 17 is an owner,
+property `0x201` is 1 or 2 on a unit functions 13, 14 and 48 count as a
+capturer — which is why the table stops one call deep.
 
 ## What is not read here
 
-- **What the 57 functions compute**, and what the six fixed-arity opcodes do.
-  The shapes are settled; the meanings are the months-long half, and they are
-  gameplay rather than format.
-- **What the exit tags mean.** Their shape is read — 3, 4 and 5 end a block,
-  2 does not — but whether tag 3's weight is a priority, and what separates
-  the three exits, is not.
-- **The flag bit on 55 literals** (`0x8000_0000`), and the two sentinel
-  values `4094` and `65534`.
-- **`.trf`**, the research tree — identified above, not read.
+- **What the helpers below the handlers compute.** A unit's *strength*
+  (`0x100065e0`: IControl property `0x36` and object property `0x204`), a
+  distance (`0x10006130`), the problem's action record (`+0x34`), the object at
+  `+0x40c` behind functions 40, 41, 43, 53 and 65, and the areal-map list
+  function 32 tests. The table says what each handler does with them.
+- **The two numbers a problem is raised with** — `fn2`'s third and fourth
+  arguments, kept at `+0x24` and `+0x2c` (`25` and `24` above) — and what the
+  engine does with a problem once raised: which handler runs when, and who
+  writes `dCurrentProblem` and `dCurrentSender`.
+- **Channel 2 of the message callback** (function 57), what `MESSAGE_INFO`'s
+  value selects in `iron3d.dll`, and the `+0x41c` count function 69 stores.
+- **Whether any script depends on a constant landing inside a false block.**
+  The engine does it 63 times over; the scripts may overwrite the variable
+  before reading it every time.
+- **Five labels no goto aims at**, and why one label sits inside a block.
+- **`.fml` operators the corpus never uses** — `Division`, `Power`, `And`,
+  `Or`, `Not`, `Sign change` and the one-letter `N`, `S`, `B` and `A` —
+  beyond their names and arities.
+- **`.trf`**, the research tree — identified above, and read in
+  [16-research.md](16-research.md).

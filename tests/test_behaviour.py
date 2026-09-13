@@ -209,7 +209,7 @@ def test_a_call_carries_a_function_and_nothing_else():
     assert node.immediate == behaviour.NULL
 
 
-def test_an_assignment_reads_a_variable_through_the_trailer():
+def test_an_assignment_evaluates_a_formula_through_the_trailer():
     data = build_script([("Init", [build_node(head=(-1, 171, -1, -1), trailer=4)])])
     node = behaviour.parse(data).handlers[0].nodes[0]
     assert not node.calls
@@ -288,20 +288,40 @@ def test_the_other_forms_render(tmp_path):
         data = build_script([("Init", [build_node(head, opcode, operands, trailer)])])
         return behaviour.render_node(behaviour.parse(data).handlers[0].nodes[0], table)
 
-    assert one((-1, 4, -1, -1), trailer=0) == "dTemp = f0"
+    assert one((-1, 4, -1, -1), trailer=0) == "dTemp = formula 0"
     assert one((-1, 4, 28, 6)) == "dTemp = 28"
-    assert one((-1, 4, 174, -1)) == "dTemp = 174"
-    assert one((-1, -1, -1, 5)) == "tag5"
-    assert one((-1, -1, -1, 3), operands=(2,)) == "tag3(d0)"
-    assert one((-1, -1, -1, -1), opcode=1, operands=(0, 2)) == "op1(f0, d0)"
+    assert one((-1, 4, 5, -1)) == "dTemp = ClanID"
+    assert one((-1, -1, -1, 5)) == "return"
+    assert one((-1, -1, -1, 2)) == "label"
+    assert one((-1, -1, -1, 1)) == "end"
+    assert one((-1, -1, -1, 3), operands=(2,)) == "goto 2"
+    assert one((-1, -1, -1, 4), operands=(7,)) == "goto handler 7"
+    assert one((-1, -1, -1, 0), opcode=1, operands=(0, 2)) == "if f0 == d0"
+    assert one((-1, -1, -1, 0), opcode=5, operands=(0, 2)) == "if f0 != d0"
 
 
-def test_a_flagged_literal_is_shown_as_flagged(tmp_path):
+def test_a_formula_renders_as_its_expression(tmp_path):
+    table = behaviour.variables(write_varset(tmp_path))
+    exprs = behaviour.parse_formulas(FML)
+    data = build_script([("Init", [build_node((-1, 4, -1, -1), trailer=1)])])
+    node = behaviour.parse(data).handlers[0].nodes[0]
+    assert behaviour.render_node(node, table, exprs) == "dTemp = fTemp + 0.00001"
+
+
+def test_a_jump_to_a_handler_renders_its_name(tmp_path):
+    table = behaviour.variables(write_varset(tmp_path))
+    script = behaviour.parse(build_script([
+        ("Mission", [build_node((-1, -1, -1, 4), operands=(1,))]),
+        ("Easy", []),
+    ]))
+    assert behaviour.render(script, table)[1].endswith("goto Easy")
+
+
+def test_a_flagged_literal_is_shown_as_a_building(tmp_path):
     table = behaviour.variables(write_varset(tmp_path))
     data = build_script([("Init", [build_node((-1, 4, -2147483643, 6))])])
     line = behaviour.render_node(behaviour.parse(data).handlers[0].nodes[0], table)
-    assert line.startswith("dTemp = 5")
-    assert "flag" in line
+    assert line == "dTemp = CLASS_BUILDING|5"
 
 
 def test_render_can_pick_one_handler(tmp_path):
@@ -335,23 +355,23 @@ def test_an_assignment_tagged_one_does_not_close():
 def test_render_indents_the_block(tmp_path):
     table = behaviour.variables(write_varset(tmp_path))
     script = behaviour.parse(build_script([("Init", [
-        build_node(opcode=1, operands=(0, 2)),
+        build_node(head=(-1, -1, -1, 0), opcode=1, operands=(0, 2)),
         build_node(head=(-1, -1, -1, 5)),
         build_node(head=(-1, -1, -1, 1)),
         build_node(head=(19, -1, -1, -1)),
     ])]))
     body = [x[8:] for x in behaviour.render(script, table)[1:5]]
-    assert body == ["op1(f0, d0)", "  tag5", "tag1", "fn19()"]
+    assert body == ["if f0 == d0", "  return", "end", "fn19()"]
 
 
 def test_render_survives_a_spare_closer(tmp_path):
-    """Two shipped handlers carry one; the depth must not go negative."""
+    """Two shipped handlers carry one; the engine clamps the depth at zero."""
     table = behaviour.variables(write_varset(tmp_path))
     script = behaviour.parse(build_script([("Init", [
         build_node(head=(-1, -1, -1, 1)),
         build_node(head=(19, -1, -1, -1)),
     ])]))
-    assert [x[8:] for x in behaviour.render(script, table)[1:3]] == ["tag1", "fn19()"]
+    assert [x[8:] for x in behaviour.render(script, table)[1:3]] == ["end", "fn19()"]
 
 
 def test_the_exit_tags_terminate_and_the_marker_does_not():
@@ -375,3 +395,63 @@ def test_the_exit_tags_carry_what_the_corpus_says():
     assert behaviour.TAG_ARITY[3] == 1
     assert behaviour.TAG_ARITY[4] == 1
     assert behaviour.TAG_ARITY[behaviour.MARKER_TAG] == 0
+    assert behaviour.TAG_ARITY[behaviour.IF] == 2
+
+
+FML = """\
+//FormulaSet export file
+
+FUNCTION( , 25,  )
+FUNCTION( , fTemp + 0.00001,  )
+FUNCTION( , 20 + 55*fDifficulty,  )
+"""
+
+
+def test_a_formula_file_reads_in_order():
+    assert behaviour.parse_formulas(FML.replace("\n", "\r\n")) == [
+        "25", "fTemp + 0.00001", "20 + 55*fDifficulty",
+    ]
+
+
+def test_a_line_that_is_not_a_formula_is_refused():
+    with pytest.raises(behaviour.ScriptFormatError, match="not a formula"):
+        behaviour.parse_formulas("VAR( DWORD, d0, 0)\n")
+
+
+def test_formulas_are_read_beside_the_script(tmp_path):
+    (tmp_path / "x.fml").write_text(FML, "latin-1")
+    assert behaviour.formulas(tmp_path / "x.scr")[0] == "25"
+
+
+def test_an_if_names_its_relation_and_nothing_else_does():
+    nodes = [build_node(head=(-1, -1, -1, 0), opcode=r, operands=(0, 1)) for r in range(6)]
+    nodes.append(build_node(head=(-1, 4, 28, 6)))
+    read = behaviour.parse(build_script([("Init", nodes)])).handlers[0].nodes
+    assert [n.relation for n in read] == [*behaviour.RELATIONS, ""]
+    assert behaviour.RELATIONS == ("<", "==", ">", "<=", ">=", "!=")
+
+
+def test_the_jumps_name_their_targets():
+    data = build_script([("Init", [
+        build_node(head=(-1, -1, -1, 3), operands=(2,)),
+        build_node(head=(-1, -1, -1, 4), operands=(0,)),
+        build_node(head=(-1, -1, -1, 2)),
+        build_node(head=(-1, 4, -1, -1), trailer=7),
+    ])])
+    goto, switch, label, formula = behaviour.parse(data).handlers[0].nodes
+    assert goto.target == 2 and switch.target == 0
+    assert label.target == behaviour.NULL
+    assert formula.formula == 7 and goto.formula == behaviour.NULL
+
+
+def test_the_function_table_is_seventy_three_long():
+    assert behaviour.FUNCTION_TABLE == behaviour.MAGIC == 73
+    assert len(behaviour.ARGUMENTS) == behaviour.FUNCTION_TABLE
+    assert max(behaviour.ARGUMENTS) == behaviour.MAX_OPERANDS
+    assert set(behaviour.VOID_FUNCTIONS) < set(range(behaviour.FUNCTION_TABLE))
+
+
+def test_a_building_id_carries_the_class_bit():
+    assert behaviour.CLASS_BUILDING == behaviour.LITERAL_FLAG == 0x8000_0000
+    assert behaviour.DESTROYED == 65534
+    assert behaviour.TYPE_TAGS[3] == "float" and behaviour.TYPE_TAGS[5] == "DWORD"

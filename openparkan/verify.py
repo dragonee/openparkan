@@ -7564,16 +7564,25 @@ def check_packages(check, game: Path) -> None:
     # Scripts.
     tables = behaviour.variables(game)
     used: Counter[str] = Counter()
+    # Call arguments only: a statement's trailer is a formula index, and read
+    # as a variable name it once added RELOAD, FOLLOW, GETONBOARD and RANDOMGO
+    # to the orders given (docs/15-behaviour.md).
     for path in behaviour.scripts(game):
-        for line in behaviour.render(behaviour.read(path), tables):
-            used.update(re.findall(r"\b(ORDER_(?:ROBOT|BUILDING)_[A-Z]+)\b", line))
+        for h in behaviour.read(path).handlers:
+            for n in h.nodes:
+                if n.calls:
+                    used.update(name for o in n.operands
+                                if re.fullmatch(r"ORDER_(?:ROBOT|BUILDING)_[A-Z]+",
+                                                name := behaviour.name_at(tables, o)))
     never = sorted(set(packages.ORDERS) - set(used))
     check("*.scr: patrol, attack and capture are the orders mission scripts give most",
           used and set(used) <= set(packages.ORDERS)
           and [n for n, _ in used.most_common(3)] == [
               "ORDER_ROBOT_PATROL", "ORDER_ROBOT_ATTACK", "ORDER_ROBOT_CAPTURE"]
-          and never == ["ORDER_BUILDING_CHARGE", "ORDER_ROBOT_LEAVE", "ORDER_ROBOT_REPARE",
-                        "ORDER_ROBOT_STAYGROUND"],
+          and never == ["ORDER_BUILDING_CHARGE", "ORDER_ROBOT_FOLLOW",
+                        "ORDER_ROBOT_GETONBOARD", "ORDER_ROBOT_LEAVE",
+                        "ORDER_ROBOT_RANDOMGO", "ORDER_ROBOT_RELOAD",
+                        "ORDER_ROBOT_REPARE", "ORDER_ROBOT_STAYGROUND"],
           ", ".join(f"{n[6:]} {k}" for n, k in used.most_common())
           + f"; never: {', '.join(never)}")
 
@@ -8634,7 +8643,7 @@ def check_behaviour(check, game: Path) -> None:
             if n.source == behaviour.NULL and n.immediate == behaviour.NULL]
     check("behaviour: an assignment carries exactly one source, and only when it writes",
           plain and len(sourced) == len(writers) and len(bare) == len(quiet),
-          f"{len(writers)}/{len(writers)} nodes that write carry a variable or an "
+          f"{len(writers)}/{len(writers)} nodes that write carry a formula or an "
           f"immediate but never both, and {len(bare)}/{len(quiet)} that write "
           f"nothing carry neither")
 
@@ -8711,8 +8720,8 @@ def check_behaviour(check, game: Path) -> None:
           exits and ended >= exits - 1 and outer >= marker - 1,
           f"tags {', '.join(str(t) for t in behaviour.EXIT_TAGS)} are followed "
           f"immediately by a closer on {ended}/{exits} nodes, while tag "
-          f"{behaviour.MARKER_TAG} sits at the outermost depth on {outer}/{marker} "
-          f"and is followed by the handler's bookkeeping instead")
+          f"{behaviour.MARKER_TAG}, the label they jump to, sits at the outermost "
+          f"depth on {outer}/{marker}")
 
     def _kind(n):
         if n.calls:
@@ -8774,6 +8783,209 @@ def check_behaviour(check, game: Path) -> None:
           f"no destination names any of the first {behaviour.READ_ONLY} "
           f"({literals} literals {pool[0]}..{pool[19]} plus {', '.join(pool[20:])}), "
           f"while {len(read)} of them are read as operands")
+
+    check_behaviour_flow(check, game, scripts, table)
+
+
+def check_behaviour_flow(check, game: Path, scripts, table) -> None:
+    """What the executor does with a node, measured on the scripts.
+
+    The kinds, the relation word, the formula index and the jump targets are
+    read from ai.dll's executor (0x10012020); these hold the corpus to them.
+    """
+    B = behaviour
+    nodes = [n for s in scripts for h in s.handlers for n in h.nodes]
+    ifs = [n for n in nodes if not n.calls and n.opcode in B.BINARY]
+    rest = [n for n in nodes if n.calls or n.opcode not in B.BINARY]
+    check("behaviour: head[3] is the node's kind, and only an if uses the relation word",
+          ifs and all(n.kind == B.IF for n in ifs)
+          and all(n.opcode == B.VARIADIC for n in rest)
+          and not any(n.kind == B.IF for n in rest),
+          f"all {len(ifs)} comparisons are kind {B.IF}, and the fifth word is "
+          f"{B.VARIADIC} on all {len(rest)} other nodes -- it is the relation "
+          f"({' '.join(B.RELATIONS)}), not an opcode")
+
+    kinds = Counter((table[n.operands[0]].type, table[n.operands[1]].type) for n in ifs)
+    mixed = sum(v for (a, b), v in kinds.items() if a != b)
+    check("behaviour: a comparison compares like with like",
+          ifs and not mixed,
+          f"{kinds[('DWORD', 'DWORD')]} compare two DWORDs and "
+          f"{kinds[('float', 'float')]} two floats; {mixed} mix them, so which "
+          f"path the executor takes -- by the first operand's type -- never matters")
+
+    fml_count = matched = in_range = first = total = 0
+    missing = []
+    for s in scripts:
+        fml = s.source.with_suffix(B.FORMULAS)
+        if not fml.exists():
+            missing.append(s.source.name)
+            continue
+        exprs = B.formulas(s.source)
+        fml_count += len(exprs)
+        trailers = [n.formula for h in s.handlers for n in h.nodes if n.formula != B.NULL]
+        total += len(trailers)
+        matched += len(trailers) == len(exprs)
+        for i, t in enumerate(trailers):
+            if 0 <= t < len(exprs):
+                in_range += 1
+                first += exprs[t] == exprs[i] and exprs.index(exprs[i]) == t
+    check("behaviour: the trailer indexes the script's own .fml",
+          scripts and not missing and matched == len(scripts) and in_range == total
+          and first == total and fml_count == total,
+          f"{matched}/{len(scripts)} scripts carry exactly as many FUNCTION lines as "
+          f"nodes with a trailer ({fml_count} and {total} in all); {in_range}/{total} "
+          f"trailers index their file, and on {first} the formula is the node's own "
+          f"line or the first identical one before it -- the compiler shared them")
+
+    gotos = labels = targeted = inside = 0
+    switches = []
+    bad = []
+    for s in scripts:
+        for h in s.handlers:
+            marks = {i for i, n in enumerate(h.nodes) if not n.calls and n.kind == B.LABEL}
+            labels += len(marks)
+            aimed = set()
+            for i, n in enumerate(h.nodes):
+                if n.calls:
+                    continue
+                if n.kind == B.GOTO:
+                    gotos += 1
+                    if n.target in marks:
+                        aimed.add(n.target)
+                    else:
+                        bad.append(f"{s.source.name}:{h.name}:{i}")
+                if n.kind == B.SWITCH:
+                    ok = 0 <= n.target < len(s.handlers)
+                    switches.append((ok, s.handlers[n.target].name if ok else "", h.name))
+            targeted += len(aimed)
+            depth = 0
+            for n in h.nodes:
+                if n.closes:
+                    depth = max(0, depth - 1)
+                if not n.calls and n.kind == B.CONST and depth:
+                    inside += 1
+                if n.opens:
+                    depth += 1
+    check("behaviour: a goto lands on a label in its own handler",
+          gotos and not bad,
+          f"{gotos - len(bad)}/{gotos} tag-{B.GOTO} operands are the node index of a "
+          f"tag-{B.LABEL} node in the same handler; {targeted} of the {labels} labels "
+          f"are aimed at -- the operand read as fPry was node 26")
+
+    reached = {name for ok, name, _ in switches if ok}
+    carried = Counter(h.name for s in scripts for h in s.handlers
+                      if not h.problem and h.name not in B.EVENTS)
+    check("behaviour: a jump to a handler names one, and those handlers are reached no other way",
+          switches and all(ok for ok, _, _ in switches) and reached == set(carried),
+          f"{len(switches)}/{len(switches)} tag-{B.SWITCH} operands index a handler of "
+          f"the same script, and the {len(reached)} they reach are exactly the handlers "
+          f"that are neither events nor problems -- "
+          + ", ".join(f"{n} in {k}" for n, k in sorted(carried.items()))
+          + " scripts")
+
+    consts = sum(1 for n in nodes if not n.calls and n.kind == B.CONST)
+    check("behaviour: some constants sit inside a block the executor does not guard",
+          consts and 0 < inside < consts,
+          f"{inside} of the {consts} kind-{B.CONST} constants sit inside an if; "
+          f"ai.dll:0x100121e2 writes them without testing the condition, unlike "
+          f"every other kind")
+
+    calls = [n for n in nodes if n.calls]
+    over = [n for n in calls if len(n.operands) > B.ARGUMENTS[n.function]]
+    longest = defaultdict(int)
+    for n in calls:
+        longest[n.function] = max(longest[n.function], len(n.operands))
+    exact = sum(1 for f, k in longest.items() if k == B.ARGUMENTS[f])
+    void = [n for n in calls if n.function in B.VOID_FUNCTIONS
+            and n.destination != B.NULL]
+    check("behaviour: a call passes what its handler reads",
+          calls and all(n.function == 0 for n in over)
+          and exact >= len(longest) - 2 and not void,
+          f"on {exact} of the {len(longest)} functions the scripts call, the longest "
+          f"call passes exactly the operands ai.dll's handler reads; "
+          f"{len(over)} calls pass more, all to function 0, whose handler reads none; "
+          f"no call to the {len(B.VOID_FUNCTIONS)} handlers that never write a "
+          f"result names a destination")
+
+    # --- the building bit and the destroyed sentinel -------------------------
+    building = [v for v in table if v.name.startswith("BUILDING_")]
+    other_types = [v for v in table if v.name.startswith(("ROBOT_", "RESOURCE_"))
+                   or v.name in ("CLASS_ROBOT", "CLASS_ANIMAL")]
+    as_int = {v.name: int(v.default, 0) for v in building + other_types
+              if v.default and v.default[0].isdigit()}
+    class_bit = next((v for v in table if v.name == "CLASS_BUILDING"), None)
+    placed = Counter()
+    by_stem = defaultdict(list)
+    loaded = []
+    for d in gamedir.missions(game):
+        m = mission.load(d / "data.tma")
+        loaded.append(m)
+        for o in m.objects:
+            flagged = bool(o.logical_id & B.CLASS_BUILDING)
+            placed[(o.kind == mission.KIND_UNIT, flagged)] += 1
+        for c in m.clans:
+            by_stem[c.ai_script.replace("\\", "/").split("/")[-1].lower()].append(m)
+    check("behaviour: CLASS_BUILDING is the top bit of a building's type and logical id",
+          class_bit is not None and int(class_bit.default, 0) == B.CLASS_BUILDING
+          and all(as_int[v.name] & B.CLASS_BUILDING for v in building)
+          and not any(as_int[v.name] & B.CLASS_BUILDING for v in other_types)
+          and placed[(True, True)] == 0 and placed[(False, False)] == 0,
+          f"varset.var declares CLASS_BUILDING {B.CLASS_BUILDING:#x}, all "
+          f"{len(building)} BUILDING_ types carry it and none of the "
+          f"{len(other_types)} robot, resource and class words does; across the "
+          f"missions {placed[(False, True)]}/{placed[(False, True)] + placed[(False, False)]} "
+          f"placed objects that are not units carry it in their logical id and "
+          f"{placed[(True, True)]}/{placed[(True, True)] + placed[(True, False)]} units do")
+
+    named = found = unused = 0
+    chance = []
+    for s in scripts:
+        users = by_stem.get(s.source.stem.lower(), [])
+        for h in s.handlers:
+            for n in h.nodes:
+                if n.calls or n.kind != B.CONST or not n.head[2] & B.CLASS_BUILDING:
+                    continue
+                word = n.head[2] & 0xFFFF_FFFF
+                if not users:
+                    unused += 1
+                    continue
+                named += 1
+                found += any(o.kind == mission.KIND_BUILDING
+                             and o.logical_id & 0xFFFF_FFFF == word
+                             for m in users for o in m.objects)
+                chance.append(sum(any(o.kind == mission.KIND_BUILDING
+                                      and o.logical_id & 0xFFFF_FFFF == word
+                                      for o in m.objects) for m in loaded) / len(loaded))
+    control = sum(chance) / len(chance) if chance else 1
+    check("behaviour: a flagged literal is a building of the mission that runs the script",
+          named and found >= named - 1 and control < 0.6,
+          f"{found}/{named} flagged literals in scripts a mission names are the "
+          f"logical id of a building that mission places, against "
+          f"{100 * control:.0f}% of missions at large; {unused} more sit in scripts "
+          f"no mission names")
+
+    compared = against = 0
+    for s in scripts:
+        sentinel = {n.destination for h in s.handlers for n in h.nodes
+                    if not n.calls and n.kind == B.CONST and n.head[2] in (4094, B.DESTROYED)}
+        for h in s.handlers:
+            last: dict[int, str] = {}
+            for n in h.nodes:
+                if not n.calls and n.kind == B.IF:
+                    for x, y in (n.operands, n.operands[::-1]):
+                        if x in sentinel and last.get(x, "sentinel") == "sentinel":
+                            compared += 1
+                            against += last.get(y) == "fn52"
+                if n.destination != B.NULL:
+                    last[n.destination] = (
+                        f"fn{n.function}" if n.calls else
+                        "sentinel" if n.kind == B.CONST and n.head[2] in (4094, B.DESTROYED)
+                        else "other")
+    check("behaviour: 65534 is compared with an object's owner",
+          compared and against == compared,
+          f"{against}/{compared} comparisons against a variable holding 65534 or "
+          f"4094 test it against function 52's answer, the owner word of a logical "
+          f"id, which a destroyed object sets to {B.DESTROYED:#x}")
 
 
 def check_varset_types(check, game: Path) -> None:

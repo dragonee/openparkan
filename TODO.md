@@ -548,8 +548,9 @@ written down is a question nobody reopens.
       `_Continue` in all 58 files without exception**. The node's opcode runs
       0..6 and its arity is fixed by its value: **939 nodes on opcodes 0–5
       take exactly two operands and not one takes any other number**, against
-      5126 on opcode 6 taking 0 to 11. What a node *does* is the months-long
-      half and is untouched. → [docs/15-behaviour.md](docs/15-behaviour.md)
+      5126 on opcode 6 taking 0 to 11. What a node *does* was then read from
+      the executor: opcodes 0–5 are an `if`'s relation.
+      → [docs/15-behaviour.md](docs/15-behaviour.md)
 
 - [x] **Save games, as far as they go.** A `.sav` is **not a designed format**
       — it is the engine's live object graph written out as it sat in memory,
@@ -637,8 +638,8 @@ written down is a question nobody reopens.
       literals `f0`..`f9`, `d0`..`d9` and the three the engine writes itself —
       while the operands read those freely. Two corrections fell out: `ai.dll`
       loads the scripts, not `Behavior.dll`, which owns the research tree; and
-      the leading 73 is a **format version**, since a mismatch prints "Scripts
-      are not up to date". The `.trf` lead was wrong — those archives are the
+      the leading 73 is the **length of the function table**, checked with
+      "Scripts are not up to date". The `.trf` lead was wrong — those archives are the
       research tree, and `TRF0` being 64 × 230 against an operand ceiling of
       228 is a coincidence. → [docs/15-behaviour.md](docs/15-behaviour.md)
 
@@ -1020,22 +1021,25 @@ today; each is a small trap for anyone extending the code.
   that lists it; the frame reaches a channel only through a generic
   device's motion inputs (forward speed ÷ triple 3 on the wheels).
   → [docs/14-controls.md](docs/14-controls.md)
-- What the `.scr` **functions and opcodes compute**. The node's *shape* is now
-  fully read ([15-behaviour.md](docs/15-behaviour.md)): `head[0]` selects one
-  of 57 functions with a fixed signature, or the node assigns from a variable
-  or an immediate. What each function does is the months-long half, and the
-  argument vocabulary gives readings but not proof, and the binary will not
-  hand it over cheaply: the interpreter's dispatch is found
-  (`ai.dll:0x100122b5`, which confirms the node's two forms from the code) and
-  so is its 70-entry handler table (`0x1000129e`), but **none of the handlers
-  references a string** and 70 slots cannot cover the 73 ids the scripts use,
-  so the id-to-slot mapping is open too. There is no 73-entry switch either,
-  and that is now exhaustive rather than a search result: all **72** jump
-  tables in `ai.dll` were enumerated and the widest holds 13 entries. The node's tags are read
-  the same way round: 1 closes a block, 3, 4 and 5 end one, 2 marks where a
-  handler stops planning — but whether tag 3's `fPry` weight is a priority,
-  and what separates the three exits, is not. The flag bit on 55 literals
-  (`0x8000_0000`) and the sentinels `4094` and `65534` go with them.
+- What the `.scr` **functions compute below the first call**. The rest of the
+  node is now read from `ai.dll`'s executor
+  ([15-behaviour.md](docs/15-behaviour.md)). The function table has **73**
+  slots, not 70 — an earlier count started at the fourth store — so function
+  *n* is slot *n*, and each handler reads exactly the operands the scripts pass
+  on 55 of 57. `head[3]` is the node's kind: statement, `if` (the fifth word is
+  its relation, `< == > <= >= !=`), `end`, label, goto a label, switch to a
+  handler, return, constant. The trailer is a **formula index** into the
+  script's own `.fml` (1379 of 1379), not a variable. All 73 handlers are named
+  one call deep: problems raised by the variable's name plus
+  `_Start`/`_Continue`, whose float weight is the priority units are taken by;
+  groups, orders, unit picking, targets, timers, mission messages. The top bit
+  on 55 literals is `CLASS_BUILDING`, a building's logical id (47 of 48 match a
+  building of the mission), and 65534 is the owner word of a destroyed object,
+  which the scripts compare with function 52's answer 11 of 11 times;
+  `c1m3p.scr` writes 4094 instead, so its check never fires. What is left is
+  the engine side of those calls — a unit's strength, the distance helper, the
+  object at SuperAI `+0x40c`, channel 2 of the message callback — and whether
+  any script depends on the constant kind ignoring its block's condition.
 - ~~**Component classes 6, 7, 14 and 16-18**~~ — **narrowed**. 17 is the
   rounds' seeker (20 components). 6, 7, 14, 16 and 18 are in no shipped
   controller, `Control.dll`'s factory builds them as its generic device, and
