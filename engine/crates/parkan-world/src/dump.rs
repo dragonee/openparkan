@@ -503,23 +503,37 @@ pub fn fx_effects(path: &Path, names: &[String]) -> Result<Value> {
     Ok(json!({ "kind": "fxid", "members": out }))
 }
 
-/// A `sky.ske`: its sections, its day, and every keyframe's slots as stored.
+/// A `sky.ske`: its sections and their headers, every keyframe as stored, and the
+/// time the clock starts at.
 pub fn atmosphere(path: &Path) -> Result<Value> {
     let a = sky::parse(&std::fs::read(path)?, &path.display().to_string())?;
     Ok(json!({
         "kind": "sky",
         "sections": a.sections,
         "day_seconds": a.day_seconds() as i64,
+        "section_headers": a.section_headers.iter().map(|s| json!({
+            "index": s.index,
+            "version": s.version,
+            "count": s.count,
+            "end": s.end.0,
+            "day": s.day.0,
+        })).collect::<Vec<_>>(),
         "keyframes": a.keyframes.iter().map(|k| json!({
+            "version": k.version,
+            "time": k.time.0,
+            "opcode": k.opcode,
             "hour": k.hour,
             "minute": k.minute,
             "section": k.section,
             "name": k.name,
-            "sounds": k.sounds,
+            "names": k.names,
+            "effects": k.effects,
             "slots": k.slots,
             "intensity": vector(&k.intensity),
-            "trailer": k.trailer,
         })).collect::<Vec<_>>(),
+        "start": a.start.0,
+        "trailer_word": a.trailer_word,
+        "sky_flag": a.sky_flag,
     }))
 }
 

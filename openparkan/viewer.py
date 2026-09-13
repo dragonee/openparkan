@@ -913,38 +913,28 @@ def build_sky_payload(folder: Path, resolver: TextureResolver | None = None) -> 
 
     # Every keyframe of the first section, in time order; that is the day and
     # the viewer's time control walks it.
-    frames = sorted(
-        (k for k in atmosphere.keyframes if k.section == 0), key=lambda k: k.minutes
-    )
+    frames = atmosphere.section_keyframes(0)
     peak = max((k.light for k in frames), default=1.0) or 1.0
+    index = {id(k): i for i, k in enumerate(frames)}
 
-    # A keyframe that names atm_rain1.wav starts rain, and one that names
-    # env_lightning starts lightning.  Where they stop is not written down --
-    # the sun and moon come in start/stop pairs, these appear once -- so the
-    # viewer runs the weather from its keyframe to the next keyframe that
-    # names anything at all.  See docs/10-sky.md.
+    # Each keyframe carries an event opcode: a body, rain, snow or lightning
+    # starts on one keyframe and stops on a later one.  Rain and snow are
+    # drawn; lightning only named.  No section has the sun and the moon up at
+    # once, which is what makes two fixed positions a quarter turn apart a
+    # coherent thing for the engine to do.  See docs/10-sky.md.
     weather = [""] * len(frames)
-    running = ""
-    for i, k in enumerate(frames):
-        if k.markers:
-            running = k.weather or ""
-        weather[i] = running
-
-    # The sun and the moon come in start/stop pairs -- the engine's opcodes
-    # run even to start and odd to stop -- so a keyframe naming a body toggles
-    # it.  32 of the 35 shipped sections hold exactly one pair of each, the sun
-    # up from about 01:30 to 15:00 and the moon from 16:20 to midnight, and no
-    # section has them up at once.  That is what makes two fixed positions a
-    # quarter turn apart a coherent thing for the engine to do: only one of
-    # them is ever in the sky.
     up: list[list[str]] = [[] for _ in frames]
-    for name in sky.BODY_ANGLES:
-        showing = False
-        for i, k in enumerate(frames):
-            if k.name == name:
-                showing = not showing
-            if showing:
-                up[i].append(name)
+    for kind, start, stop in atmosphere.windows(0):
+        first = index[id(start)]
+        last = index[id(stop)] if stop is not None else len(frames)
+        for i in range(first, last):
+            if kind in sky.BODY_ANGLES:
+                if kind not in up[i]:
+                    up[i].append(kind)
+            elif kind != "lightning" and not weather[i]:
+                weather[i] = kind
+    # The keyframe in force when the mission's clock starts.
+    opening = atmosphere.at(atmosphere.start.hour, atmosphere.start.minute, 0)
     payload = {
         "zenith": _pack_colour(brightest.colour(SKY_ZENITH_SLOT)),
         "horizon": _pack_colour(brightest.colour(SKY_HORIZON_SLOT)),
@@ -959,6 +949,8 @@ def build_sky_payload(folder: Path, resolver: TextureResolver | None = None) -> 
                 "z": _pack_colour(k.colour(SKY_ZENITH_SLOT)),
                 "h": _pack_colour(k.colour(SKY_HORIZON_SLOT)),
                 "s": _pack_colour(k.colour(SKY_SUN_SLOT)),
+                # The cloud layer's own colour.
+                "c": _pack_colour(k.cloud_colour),
                 "l": round(k.light, 3),
                 # How dark this keyframe is against the day's peak, which is
                 # what decides whether the stars show.
@@ -969,6 +961,8 @@ def build_sky_payload(folder: Path, resolver: TextureResolver | None = None) -> 
             for i, k in enumerate(frames)
         ],
         "peak": frames.index(brightest) if brightest in frames else 0,
+        # Where the mission's sky clock starts: the file's closing time.
+        "start": index.get(id(opening), 0) if opening is not None else 0,
         # The lens flare is a constant of the engine rather than of the
         # mission, but it travels with the sky so the viewer has it in one
         # place.  See sky.FLARE_ELEMENTS.

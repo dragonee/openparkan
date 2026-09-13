@@ -1897,8 +1897,7 @@ def check_sky(check, game: Path) -> None:
     parsed = 0
     frames = 0
     dated = 0
-    ordered = 0
-    varying: list[bool] = []
+    ordered = sections_seen = 0
     failures = []
     for path in files:
         try:
@@ -1908,25 +1907,24 @@ def check_sky(check, game: Path) -> None:
             continue
         parsed += 1
         frames += len(atmosphere)
-        first = [k for k in atmosphere.keyframes if k.section == 0]
-        dated += all(0 <= k.hour <= 24 and 0 <= k.minute < 60 for k in first)
-        ordered += all(
-            first[i].minutes <= first[i + 1].minutes for i in range(len(first) - 2)
-        )
-        # The light runs dark at night and bright by day, and its low point
-        # falls in the small hours.
-        bright = atmosphere.brightest()
-        dark = min(atmosphere.keyframes, key=lambda k: k.light)
-        if bright is not None and bright.light > dark.light:
-            varying.append(dark.minutes <= 120)
+        dated += all(0 <= k.hour <= 24 and 0 <= k.minute < 60 for k in atmosphere.keyframes)
+        # Terrain.dll:0x10067500 bubble-sorts each section after loading; the
+        # files never need it.
+        for index in range(atmosphere.section_count):
+            stored = [k.minutes for k in atmosphere.keyframes if k.section == index]
+            sections_seen += 1
+            ordered += stored == sorted(stored)
     check("sky.ske: parses to the byte", parsed == len(files),
-          f"{parsed}/{len(files)} files, {frames} keyframes"
+          f"{parsed}/{len(files)} files, {frames} keyframes, read as Terrain.dll:0x100672d0 "
+          f"reads them: per section a version, a count and two times, per keyframe a "
+          f"version, a time and the opcode ahead of the slots, and a closing time"
           + ("" if not failures else f" -- {failures[0]}"))
     check("sky.ske: keyframes carry a time of day", dated == parsed,
-          f"{dated}/{parsed} files hold an hour 0-24 and a minute 0-59 in "
-          f"every keyframe of their first section")
-    check("sky.ske: keyframes run in time order", ordered >= parsed * 0.9,
-          f"{ordered}/{parsed} files are sorted by time")
+          f"{dated}/{parsed} files hold an hour 0-24 and a minute 0-59 in every keyframe "
+          f"of every section")
+    check("sky.ske: keyframes run in time order", ordered == sections_seen,
+          f"{ordered}/{sections_seen} sections are stored sorted by time, which the "
+          f"engine's sort after loading (0x10067500) leaves alone")
 
     # Bytes 64 and 68 of the header say how long one in-game day lasts in real
     # time.  The engine keeps `hours * 3600 + minutes * 60` and scales every
@@ -2025,25 +2023,32 @@ def check_sky(check, game: Path) -> None:
           f"{', '.join(n for group in flare_names for n in group)} have an "
           f"alpha channel, which is what an additive sprite needs")
 
-    # Rain and lightning are named by a keyframe; snow never is.
-    weathered = Counter()
-    with_marker = 0
+    # A starting event takes what it needs from its keyframe's effect list:
+    # GetEvents stops with "Rain background sound not specified" or "Lightning
+    # effect not specified" when the first entry is empty.  Snow needs nothing.
+    starts: Counter[str] = Counter()
+    supplied: Counter[str] = Counter()
+    with_weather = 0
     for path in files:
         try:
             atmosphere = sky.load(path)
         except sky.SkyFormatError:
             continue
         kinds = atmosphere.weather()
-        with_marker += bool(kinds)
-        for kind in kinds:
-            weathered[kind] += 1
-    check("sky.ske: a keyframe names the weather it starts",
-          weathered.get("rain", 0) > 0 and weathered.get("lightning", 0) > 0
-          and "snow" not in weathered,
-          f"{with_marker}/{parsed} missions carry a weather marker: "
-          f"{weathered.get('rain', 0)} name {sky.RAIN_MARKER} and "
-          f"{weathered.get('lightning', 0)} name {sky.LIGHTNING_MARKER}; "
-          f"none names snow")
+        with_weather += bool(kinds)
+        for kind, frames_ in kinds.items():
+            for frame in frames_:
+                starts[kind] += 1
+                first = frame.effects[0] if frame.effects else ""
+                supplied[kind] += first == {"rain": sky.RAIN_MARKER,
+                                            "lightning": sky.LIGHTNING_MARKER}.get(kind, first)
+    check("sky.ske: a starting event carries the effect the engine asks for",
+          starts["rain"] and starts["lightning"] and starts["snow"]
+          and supplied == starts,
+          f"{with_weather}/{parsed} missions start weather: {starts['rain']} rain starts all "
+          f"name {sky.RAIN_MARKER} first, {starts['lightning']} lightning starts all name "
+          f"{sky.LIGHTNING_MARKER} (Terrain.dll:0x1006e3bb, 0x1006e5af); "
+          f"{starts['snow']} snow starts need and name nothing")
 
     # The sub-image cell indexes the texture's own Page table -- on every
     # entry of every material, now that the entries can be walked.
@@ -2077,15 +2082,69 @@ def check_sky(check, game: Path) -> None:
                         (0, 128, 128, 128), (128, 128, 128, 128)],
           f"{sun_pages} -- cell 0 is the corona, cell 2 the moon")
 
-    check("sky.ske: the third float is a day/night light", all(varying),
-          f"on all {len(varying)} files whose light varies, its low point falls "
-          f"within two hours of midnight ({parsed - len(varying)} files hold a "
-          f"single value across a night-time cycle)")
+    # The third float is the sun object's light (0x1006ac9a).  A body starts
+    # and stops with it at its lowest, so the light fades in and out with the
+    # body -- which only reads true with each opcode on its own keyframe.  The
+    # control attributes every keyframe's time and opcode to the keyframe
+    # before it, the way this reader once did.
+    faded = windows_seen = shifted_faded = 0
+    for path in files:
+        try:
+            atmosphere = sky.load(path)
+        except sky.SkyFormatError:
+            continue
+        for index in range(atmosphere.section_count):
+            ordered_frames = atmosphere.section_keyframes(index)
+            for kind, start, stop in atmosphere.windows(index):
+                if kind not in sky.BODY_ANGLES or stop is None:
+                    continue
+                i, j = ordered_frames.index(start), ordered_frames.index(stop)
+                inside = ordered_frames[i + 1:j]
+                if not inside:
+                    continue
+                windows_seen += 1
+                faded += max(start.light, stop.light) <= min(k.light for k in inside)
+                before = ordered_frames[i - 1:j] if i else []
+                if len(before) >= 3:
+                    shifted_faded += (max(before[0].light, before[-1].light)
+                                      <= min(k.light for k in before[1:-1]))
+    check("sky.ske: a body starts and stops with the light at its lowest",
+          windows_seen and faded == windows_seen and shifted_faded < windows_seen // 2,
+          f"on {faded}/{windows_seen} sun and moon windows with keyframes inside, the "
+          f"third float at the start and the stop is no higher than anywhere between "
+          f"(0.0-0.2 against up to 5.0); control: moved one keyframe back, as an "
+          f"earlier reading of the file attributed them, it holds on {shifted_faded}")
+
+    # Slot 18 is the cloud layer's material colour (Terrain.dll:0x1007a4de).
+    # Clouds are brightest when the light is: red at a body's rise, near white
+    # at the brightest keyframe.  Control: slot 16, which nothing reads.
+    def luminance(c):
+        return 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]
+    lit_clouds = lit_control = varying_files = 0
+    for path in files:
+        try:
+            atmosphere = sky.load(path)
+        except sky.SkyFormatError:
+            continue
+        group = atmosphere.section_keyframes(0)
+        peak = max(group, key=lambda k: k.light)
+        if all(k.light == peak.light for k in group):
+            continue
+        varying_files += 1
+        lit_clouds += luminance(peak.cloud_colour) >= max(
+            luminance(k.cloud_colour) for k in group)
+        lit_control += len({k.slots[16] for k in group}) > 1 and luminance(
+            peak.colour(16)) >= max(luminance(k.colour(16)) for k in group)
+    check("sky.ske: the clouds are brightest at the brightest keyframe",
+          varying_files and lit_clouds >= varying_files * 0.8 and lit_control < varying_files // 2,
+          f"on {lit_clouds}/{varying_files} files whose light varies, slot 18 -- the cloud "
+          f"layer's colour -- is at its brightest where the third float is (#f0f5ff on "
+          f"Mission 01, #ac2800 as the sun rises); control: slot 16 does so on {lit_control}")
 
     # Where the sun stands is not in the file -- CSun takes two whole-degree
     # angles from a block Terrain.dll fills with constants, picked by whether
-    # the keyframe's name is exactly "sun".  Nothing in the data can confirm a
-    # constant directly, but three things it implies are checkable.
+    # the starting keyframe's name is exactly "sun".  Nothing in the data can
+    # confirm a constant directly, but three things it implies are checkable.
 
     # One: the engine's test is name == "sun", so the only two names that can
     # reach it must be the two it distinguishes.
@@ -2100,39 +2159,33 @@ def check_sky(check, game: Path) -> None:
         except sky.SkyFormatError:
             continue
         for k in atmosphere.keyframes:
-            if k.name:
+            if k.body:
                 named[k.name] = named.get(k.name, 0) + 1
-        for section in sorted({k.section for k in atmosphere.keyframes}):
+        for section in range(atmosphere.section_count):
             sections += 1
-            window = {}
-            for name in sky.BODY_ANGLES:
-                marks = sorted(
-                    k.minutes for k in atmosphere.keyframes
-                    if k.name == name and k.section == section
-                )
-                if len(marks) == 2:
-                    window[name] = marks
-            if len(window) == 2:
+            window: dict[str, list[tuple[int, int]]] = {}
+            for kind, start, stop in atmosphere.windows(section):
+                if kind in sky.BODY_ANGLES and stop is not None:
+                    window.setdefault(kind, []).append((start.minutes, stop.minutes))
+            if all(len(window.get(name, [])) == 1 for name in sky.BODY_ANGLES):
                 paired += 1
-                (rise, set_), (moonrise, moonset) = window["sun"], window["moon"]
+                (rise, set_), (moonrise, moonset) = window["sun"][0], window["moon"][0]
                 overlaps += not (set_ <= moonrise or moonset <= rise)
             else:
                 odd.append(f"{path.parent.name}/{section}")
     bodies = {n: named.get(n, 0) for n in sky.BODY_ANGLES}
-    check("sky.ske: the only bodies a keyframe names are the sun and the moon",
-          set(named) - {sky.RAIN_MARKER, sky.LIGHTNING_MARKER}
-          == set(sky.BODY_ANGLES),
-          f"{bodies} against the engine's single test, name == 'sun'")
-    check("sky.ske: the sun and the moon come in start/stop pairs",
-          paired >= sections - 3,
-          f"{paired}/{sections} sections hold exactly one pair of each; the "
-          f"other {len(odd)} are two five-keyframe skies that name only the "
-          f"sun and one that names each body once, so the reader toggles on "
-          f"each mark rather than assuming a pair")
+    check("sky.ske: the only bodies a starting keyframe names are the sun and the moon",
+          set(named) == set(sky.BODY_ANGLES),
+          f"{bodies} starts against the engine's single test, name == 'sun'")
+    check("sky.ske: the sun and the moon each run from a start to a stop",
+          paired >= sections - 2,
+          f"{paired}/{sections} sections hold exactly one sun and one moon window, opcode "
+          f"0 to opcode 1; the other {len(odd)} are the two 24-hour skies, which run the "
+          f"sun twice and never the moon")
     check("sky.ske: the sun and the moon are never up together", overlaps == 0,
-          f"{overlaps} of {paired} paired sections overlap -- the sun runs "
-          f"about 01:30 to 15:00 and the moon 16:20 to midnight, which is what "
-          f"makes two fixed positions a quarter turn apart coherent")
+          f"{overlaps} of {paired} such sections overlap -- the sun runs about 00:30 to "
+          f"14:30 and the moon 15:30 to 23:30, which is what makes two fixed positions a "
+          f"quarter turn apart coherent")
 
     # Two: the block's fourth field is 3 for the sun and 4 for the moon, and
     # SLOT_ROLES -- read out of sky.wea, quite separately -- says the same.
@@ -8388,61 +8441,156 @@ def check_atmosphere_events(check, game: Path) -> None:
           f"{len(named)} of {len(frames)} keyframes carry a name -- "
           + ", ".join(f"{n} x{c}" for n, c in sorted(names.items())))
 
-    cycles = wholes = 0
-    reused = []
+    atmospheres = []
     for path in sorted(game.rglob("sky.ske")):
         try:
-            atmosphere = sky.load(path)
+            atmospheres.append((path, sky.load(path)))
         except (sky.SkyFormatError, struct.error):
             continue
-        sections = sorted({f.section for f in atmosphere.keyframes})
-        if len(sections) < 2:
+
+    # The sections are not alternatives: CAtmosphere keeps one cycle as long
+    # as all their days together (0x1006efcd) and walks through them in turn
+    # (0x10070040).  Each section's own header counts its keyframes.
+    cycles = wholes = 0
+    reused = []
+    counts = []
+    for _path, atmosphere in atmospheres:
+        if atmosphere.section_count < 2:
             continue
         cycles += 1
         spans = []
-        for index in sections:
-            group = [f for f in atmosphere.keyframes if f.section == index]
-            spans.append((min(f.hour for f in group), max(f.hour for f in group)))
+        for index in range(atmosphere.section_count):
+            group = atmosphere.section_keyframes(index)
+            spans.append((group[0].hour, group[-1].hour))
         wholes += all(lo == 0 and hi == 24 for lo, hi in spans)
         blocks = [{b"".join(f.slots) for f in atmosphere.keyframes if f.section == i}
-                  for i in sections[:2]]
+                  for i in range(2)]
         reused.append(len(blocks[0] & blocks[1]))
+        counts.append(tuple(h.count for h in atmosphere.section_headers))
     if cycles:
-        check("sky: a second section is a second whole day, not a fragment",
+        check("sky: a second section is a second whole day, played after the first",
               wholes == cycles,
-              f"{wholes}/{cycles} files with two sections have both running "
-              f"00h to 24h, the second reusing {max(reused)} of the first's "
-              f"colour blocks at its own times")
+              f"{wholes}/{cycles} files with two sections have both running 00h to 24h, "
+              f"the second reusing {max(reused)} of the first's colour blocks at its own "
+              f"times; each section header counts its own keyframes "
+              f"{dict(Counter(counts))}, and the cycle is both days end to end")
 
-    candidate = [f.trailer[sky.OPCODE_CANDIDATE] for f in frames
-                 if len(f.trailer) > sky.OPCODE_CANDIDATE]
-    in_range = sum(0 <= v <= 9 for v in candidate)
-    dead = sum(f.trailer[sky.OPCODE_CANDIDATE] in sky.NO_EVENT
-               for f in named if len(f.trailer) > sky.OPCODE_CANDIDATE)
-    check("sky: the field that spans the opcode range is not the opcode",
-          dead > len(named) // 2 and in_range < len(candidate),
-          f"{in_range}/{len(candidate)} of that word is in 0..9, and it puts "
-          f"{dead}/{len(named)} of the named keyframes on a do-nothing case -- "
-          f"so the sun and moon would never start or stop")
+    # The opcode is the word ahead of slot 0.  A name only matters on a SUN
+    # start, so the check is that the bodies sit on SUN's opcodes.  Control:
+    # the same word read as the previous keyframe's trailer, which is how it
+    # was first tested and dropped.
+    on_sun = shifted_on_sun = bodies = 0
+    for _path, atmosphere in atmospheres:
+        for index in range(atmosphere.section_count):
+            group = atmosphere.section_keyframes(index)
+            for i, frame in enumerate(group):
+                if frame.name not in sky.BODY_ANGLES:
+                    continue
+                bodies += 1
+                on_sun += frame.opcode in (0, 1)
+                later = group[i + 1].opcode if i + 1 < len(group) else sky.NOTHING
+                shifted_on_sun += later in (0, 1)
+    check("sky: the word ahead of slot 0 is the event opcode",
+          bodies and on_sun >= bodies - 2 and shifted_on_sun < bodies // 4,
+          f"{on_sun}/{bodies} keyframes naming the sun or the moon carry SUN's start or "
+          f"stop (the other {bodies - on_sun} are the middle keyframes of the two "
+          f"24-hour skies, which name the sun on every keyframe); control: the next "
+          f"keyframe's word, the old trailer reading, gives {shifted_on_sun}")
 
-    # The runtime keyframe puts the opcode five dwords past the minute, so a
-    # contiguous copy from the file would put it five past the trailer's time
-    # -- and the trailer's time shifts by one with the kind word, which the
-    # fixed index above would miss.  It fails the same way, which closes the
-    # "the index just moved" escape rather than finding the field.
-    def shifted(frame):
-        at = 4 if frame.kind == sky.KIND_WITH_PADDING else 3
-        i = at + sky.OPCODE_CANDIDATE_SHIFTED
-        return frame.trailer[i] if i < len(frame.trailer) else None
-    moved = [v for v in (shifted(f) for f in frames) if v is not None]
-    moved_dead = sum(shifted(f) in sky.NO_EVENT for f in named)
-    check("sky: nor is the word the runtime layout would predict",
-          moved_dead > len(named) // 2,
-          f"the runtime keyframe holds the opcode five dwords past the minute, "
-          f"so a contiguous copy would put it five past the trailer's time -- "
-          f"which shifts with the kind word.  That word is in 0..9 on "
-          f"{sum(0 <= v <= 9 for v in moved)}/{len(moved)} keyframes and still "
-          f"puts {moved_dead}/{len(named)} named ones on a do-nothing case")
+    # Every start is followed by its own stop in the same section.
+    started: Counter[str] = Counter()
+    stopped: Counter[str] = Counter()
+    for _path, atmosphere in atmospheres:
+        for index in range(atmosphere.section_count):
+            for kind, _start, stop in atmosphere.windows(index):
+                started[kind] += 1
+                stopped[kind] += stop is not None
+    check("sky: every start is stopped later in its section",
+          started == stopped and set(started) == {"sun", "moon", "rain", "snow", "lightning"},
+          ", ".join(f"{kind} {stopped[kind]}/{started[kind]}" for kind in sorted(started))
+          + " -- rain by opcode 4, snow 6 and lightning 9 on keyframes that name nothing, "
+          "which is why no stop could be found by name")
+
+    # Snow.  sky.wea's slot 7 names SNOWFLAKE in 23 missions and DUST_ADD in 6,
+    # and the six are the ones that snow from 00:00 to 23:59 -- a dust storm
+    # the length of the day.
+    dusty = all_day = snowflake_snow = 0
+    for _path, atmosphere in atmospheres:
+        material = atmosphere.texture("snow")
+        snows = [(s, t) for kind, s, t in atmosphere.windows(0) if kind == "snow"]
+        if material != "SNOWFLAKE":
+            dusty += 1
+            all_day += (bool(snows) and snows[0][0].minutes == 0
+                        and snows[-1][1] is not None
+                        and snows[-1][1].minutes == 23 * 60 + 59)
+        elif snows:
+            snowflake_snow += 1
+    check("sky: the missions whose snow slot is not SNOWFLAKE snow all day",
+          dusty and all_day == dusty,
+          f"{all_day}/{dusty} missions naming DUST_ADD in sky.wea slot 7 start SNOW at "
+          f"00:00 and stop it at 23:59; {snowflake_snow} SNOWFLAKE mission snows, in "
+          f"three spells")
+
+    # The fourth float is what rain, snow and lightning take (0x1006ce00):
+    # non-zero only while weather runs, the stopping keyframe included.
+    wet = wet_inside = dry = 0
+    for _path, atmosphere in atmospheres:
+        for index in range(atmosphere.section_count):
+            group = atmosphere.section_keyframes(index)
+            inside: set[int] = set()
+            for kind, start, stop in atmosphere.windows(index):
+                if kind in sky.BODY_ANGLES:
+                    continue
+                first = group.index(start)
+                last = group.index(stop) if stop is not None else len(group) - 1
+                inside.update(range(first, last + 1))
+            for i, frame in enumerate(group):
+                if frame.weather_intensity:
+                    wet += 1
+                    wet_inside += i in inside
+                elif i not in inside:
+                    dry += 1
+    check("sky.ske: the fourth float is the running weather's intensity",
+          wet and wet_inside == wet,
+          f"{wet_inside}/{wet} keyframes with a non-zero fourth float lie inside a rain, "
+          f"snow or lightning spell (its stop included); it is 0 on all {dry} "
+          f"keyframes outside one")
+
+    # The file closes on the clock's start time (0x1006fab0), and every
+    # mission opens with the sun up.
+    in_section_0 = sunlit = 0
+    for _path, atmosphere in atmospheres:
+        in_section_0 += atmosphere.start.section == 0
+        minute = atmosphere.start.hour * 60 + atmosphere.start.minute
+        sunlit += any(kind == "sun" and s.minutes <= minute < (t.minutes if t else 1440)
+                      for kind, s, t in atmosphere.windows(atmosphere.start.section))
+    opening = Counter(f"{a.start.hour:02d}:{a.start.minute:02d}" for _p, a in atmospheres)
+    check("sky.ske: the closing time is where the clock starts, with the sun up",
+          in_section_0 == sunlit == len(atmospheres),
+          f"{in_section_0}/{len(atmospheres)} in section 0, at "
+          f"{dict(sorted(opening.items()))}; the sun is up at that time on {sunlit}")
+
+    # What the rest of the file holds.  The last int32 is the sky's sixth
+    # parameter, which CSky stores and never reads; it is 1 exactly where the
+    # section headers carry the uninitialised word 6939832, which marks the
+    # editor session that saved the file rather than a choice of the mission.
+    versions = Counter(f.version for _p, a in atmospheres for f in a.keyframes)
+    headers = [h for _p, a in atmospheres for h in a.section_headers]
+    ends = Counter((h.end.hour, h.end.minute) for h in headers)
+    flag_matches = sum(
+        (a.sky_flag == 1) == (a.section_headers[0].day.words[7] == 6939832)
+        for _p, a in atmospheres)
+    check("sky.ske: the header's other fields are constants and editor state",
+          set(versions) == {sky.KEYFRAME_VERSION}
+          and all(h.version == sky.SECTION_VERSION for h in headers)
+          and set(ends) == {sky.SECTION_END}
+          and all(a.trailer_word == 0 for _p, a in atmospheres)
+          and flag_matches == len(atmospheres),
+          f"keyframe version {sky.KEYFRAME_VERSION} on {versions[sky.KEYFRAME_VERSION]}, "
+          f"section version 1 and a first time of 23:59 on {len(headers)}/{len(headers)} "
+          f"sections, the int after the closing time 0 on all; the last int is 1 on "
+          f"{sum(a.sky_flag == 1 for _p, a in atmospheres)} files, and agrees with the "
+          f"header's uninitialised word 6939832 on {flag_matches}/{len(atmospheres)}")
 
 
 def check_research_streams(check, game: Path) -> None:

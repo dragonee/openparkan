@@ -360,13 +360,12 @@ if (typeof THREE === "undefined" || typeof pako === "undefined") {
     buildRain(sky);
   }
 
-  // Rain.  A keyframe that names atm_rain1.wav starts it, and one that names
-  // env_lightning starts lightning; eight of the 29 missions carry each, and
-  // none names snow.  Where the weather stops is not written down -- the sun
-  // and moon come in start/stop pairs, these appear once -- so the payload
-  // runs it to the next keyframe that names anything, which on Single.01 is a
-  // wet morning from 07:00 to 15:00.  The drops are the mission's own
-  // RAIN_DROP: cell 21 of EFFECT6.0, a 16 x 16 icon its Page table points at.
+  // Rain.  A keyframe's event opcode starts it and a later keyframe's stops
+  // it -- 3 and 4 -- and the payload marks every keyframe in between; on
+  // Single.01 that is a wet morning from 05:40 to 11:00.  Snow (5 and 6) and
+  // lightning (8 and 9) run the same way and are not drawn here.  The drops
+  // are the mission's own RAIN_DROP: cell 21 of EFFECT6.0, a 16 x 16 icon
+  // its Page table points at.
   const RAIN_BOX = 900;
   const RAIN_DROPS = 1400;
   const RAIN_FALL = 900;      // units a second
@@ -521,13 +520,15 @@ if (typeof THREE === "undefined" || typeof pako === "undefined") {
     sun.intensity = Math.min(1.15, 0.55 + 0.22 * frame.l);
     if (dome) tintDome(dome.geometry, frame.z, frame.h);
     if (starLayer) starLayer.material.opacity = frame.n;
-    if (cloudLayer) cloudLayer.material.color = new THREE.Color(frame.h);
+    // The clouds' own colour, slot 18, where the payload carries it.
+    if (cloudLayer) cloudLayer.material.color = new THREE.Color(
+      frame.c !== undefined ? frame.c : frame.h);
 
     rainWanted = frame.w === "rain" ? 0.85 : 0;
 
     // Which body is up.  Both the sun and the moon come in start/stop pairs
-    // and no mission has them up at once -- the sun runs about 01:30 to 15:00
-    // and the moon 16:20 to midnight -- so at most one of these is drawn, each
+    // and no mission has them up at once -- the sun runs about 00:30 to 14:30
+    // and the moon 15:30 to 23:30 -- so at most one of these is drawn, each
     // at its own fixed place.
     const lit = frame.u || [];
     const sunUp = lit.indexOf("sun") >= 0;
@@ -557,9 +558,12 @@ if (typeof THREE === "undefined" || typeof pako === "undefined") {
       const slider = document.getElementById("time");
       if (slider) {
         slider.max = String(Math.max(0, day.length - 1));
-        slider.value = String(missionSky.peak || 0);
+        // Open at the keyframe in force when the mission's sky clock starts.
+        slider.value = String(missionSky.start !== undefined
+          ? missionSky.start : (missionSky.peak || 0));
       }
-      applyKeyframe(day[missionSky.peak || 0] || {
+      applyKeyframe(day[missionSky.start !== undefined
+        ? missionSky.start : (missionSky.peak || 0)] || {
         z: missionSky.zenith, h: missionSky.horizon, s: missionSky.sunColour,
         l: missionSky.light, n: 0, t: missionSky.time,
       });

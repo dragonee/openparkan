@@ -145,11 +145,10 @@ a row here. A row leaves this table when research closes it.
 |---|---|---|---|
 | M1 | Whether water is drawn see-through: `WATER`'s material says opaque, and every lake has a `WATER_BOT` bed beneath | opaque, as the material says | [03](../docs/03-terrain.md#terrain-layers-name-materials-not-textures) |
 | M2 | Whether a blended material writes depth, and the alpha test's reference value | blended groups draw after opaque ones without writing depth; nothing is discarded (reference 0) | [07](../docs/07-objects.md#how-a-material-draws-is-in-the-archive-directory) |
-| M1 | Whether the scene's fog is Direct3D's vertex fog or the engine's own | per-pixel linear range fog, 0 to 700 × slot 6 (the two look the same) | [10](../docs/10-sky.md#not-resolved) |
+| M1 | Whether `ForceSWFog` is read outside `Terrain.dll`, which asks Direct3D for linear range vertex fog and never reads it | per-pixel linear range fog, 0 to 700 × slot 6 (the two look the same) | [10](../docs/10-sky.md#not-resolved) |
 | M1 | How the 34142-radius dome escapes the far plane and a fog ending by 700, and what lies below its rim | draw the dome first at the camera, with no depth, unfogged but for its rim; clear the frame to the fog colour | [10](../docs/10-sky.md#the-dome) |
-| M1 | The heading angle's zero and direction for the fog colour | 0 along +y, turning towards +x, like the dome's segments | [10](../docs/10-sky.md#not-resolved) |
-| M1 | What the sun does with its seven values; the scene's light | a directional light along the sun's fixed direction while its keyframes have it up (the moon's otherwise), coloured by the sky keyframes' slot 19 × the third float, held to 1; a lit colour is held to 1 as fixed-function lighting holds it | [10](../docs/10-sky.md#where-the-sun-stands-and-it-is-not-in-a-file) |
-| M1 | Which keyframe fields start and stop the sun and the moon, and which section plays | a body is up from its first keyframe to its second in clock order; section 0 | [10](../docs/10-sky.md#not-resolved) |
+| M1 | Which camera axis the fog's heading angle measures: the compass heading, 0 at +y towards +x, of the camera matrix's first column | the view direction's heading, 0 along +y, turning towards +x, like the dome's segments | [10](../docs/10-sky.md#not-resolved) |
+| M1 | Where the sun object's two directional lights point | a directional light along the sun's fixed direction while its keyframes have it up (the moon's otherwise), coloured by the sky keyframes' slot 19 × the third float, held to 1; a lit colour is held to 1 as fixed-function lighting holds it | [10](../docs/10-sky.md#not-resolved) |
 | M1 | The sky's textures: stars, clouds, the sun and moon sprites, the lens flare | not drawn | [10](../docs/10-sky.md#the-dome-the-fog-and-the-scene-colour--read-and-measured) |
 | M1 | The files' colours in a renderer that decodes textures to linear | sky, fog, scene and light colours decoded from sRGB to linear, so blends match the game's display-space ones | [10](../docs/10-sky.md#the-dome-the-fog-and-the-scene-colour--read-and-measured) |
 | M3 | How a body is put back on its ground point, and whether modes 0 and 2 fall | after each step the model's lowest point is set on the highest walkable face within the contact radius above it, as a mission places units | [24](../docs/24-motion.md#not-established) |
@@ -197,4 +196,15 @@ a row here. A row leaves this table when research closes it.
 | M5 | The camera shake's trigger | no shake | [30](../docs/30-turrets.md#not-established) |
 | M5 | How the HUD draws the aim point and the guns | a crosshair at the centre; a slot a gun, lit while selected, with magazine and capacitor bars | [30](../docs/30-turrets.md#not-established) |
 | M5 | How a sound falls off between its near and far distances, and how it is panned | linear in distance; panned by its direction against the eye's right | [11](../docs/11-effects.md#emitter-types--read-and-measured) |
-| M5 | When a mission's sky clock starts | at noon of its day | [10](../docs/10-sky.md#not-resolved) |
+
+### Read since the stand-in was written
+
+Research has closed these, and the code still carries the stand-in. The next
+engine pass replaces each with what was read and removes its row.
+
+| milestone | the code's stand-in | what is read | see |
+|---|---|---|---|
+| M1 | the dome is drawn with no depth | its layers are depth-tested without depth writes (render states 7 and 14, `Terrain.dll:0x100302fb`), in render layer 1, on a record that takes the scene's fog | [10](../docs/10-sky.md#the-dome) |
+| M1 | one directional light, coloured by slot 19 × the third float and held to 1 | the sun object is two directional lights: slot 19 × the third float, lifted up to 5× by the flare gates, and slot 21 | [10](../docs/10-sky.md#what-the-sun-does-with-its-seven-values) |
+| M1 | a body is up from its first keyframe to its second in clock order; section 0 | a keyframe's opcode is the word ahead of slot 0; a body starts on its opcode and lasts to the first stop at or after it, never wrapping back to section 0; a file's sections play in turn, as one cycle | [10](../docs/10-sky.md#a-bodys-lifetime) |
+| M5 | at noon of its day | at the file's closing time, in section 0: 01:30 on Mission 01, 56 s into its 900-s day | [10](../docs/10-sky.md#where-the-clock-starts) |

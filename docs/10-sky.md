@@ -13,41 +13,87 @@ alongside `CAtmosphere`, `CAtmData`, `CSun`, `CreateAtmosphereObject`,
 `"Illegal atmosphere object type"`, and the settings `AtmSkyDetail`,
 `AtmStarsOn`, `AtmCloudsOn`, `LensFlareOn`.
 
-What it holds is a **day cycle**: a list of keyframes, each stamped with an
-hour and a minute, carrying the colours and intensities the sky takes at that
-moment. All 29 shipped files parse to the byte.
+What it holds is one or two **day cycles**: lists of keyframes, each stamped
+with an hour and a minute, carrying the colours and intensities the sky takes
+at that moment and the weather event that fires there. All 29 shipped files
+parse to the byte.
 
-## Layout
+## Layout — *read*
+
+The deserialiser is an unoptimised run of `MFile` reads, so the order reads
+straight off it: the file at `Terrain.dll:0x100672d0`, a section at
+`0x100660c0`, a keyframe at `0x10066230`, and the 32-byte time they all use
+at `0x10086570`.
 
 ```
-file header, 124 bytes
-    int32   -1                       magic
-    int32   5                        version
-    int32   1 or 2                   section count
-    int32   1
-    int32   keyframes in section 0
-    ...                              time-of-day settings, see below
-keyframe x count
-for each further section:
-    72 bytes                         a copy of file header bytes 52..123
-    keyframes, to the end of the file
+int32   -1                          magic
+int32   5                           version
+int32   section count, 1 or 2
+for each section:
+    int32   1                       section version
+    int32   keyframe count
+    time    23:59                   read, never asked for
+    time    the day length          hours and minutes of real time
+    keyframe x count
+time    the clock's start           section, hour and minute
+int32   0                           read, never asked for
+int32   0 or 1                      the sky's sixth parameter, never read
 ```
 
 and one keyframe is
 
 ```
-88 bytes    22 four-byte slots: BGRA colours, three of them float32
-6 x string  the object's name in one slot, empty in the other five
-float32[4]  intensities
-int32 n
-n x string  sound files
-uint32[10]  a kind word, then the hour and the minute
+int32   3                           keyframe version
+time    the keyframe's clock stamp
+int32   the event opcode            0..9
+88 bytes                            22 slots: BGRA colours, two float32
+6 x string                          the object's name in the first
+float32[4]                          the sun's two extents, the light, the weather
+int32 n, n x string                 up to four effect names
 ```
 
-Bytes **64 and 68** of the header are two `uint32` holding **how long one
-in-game day lasts in real time**, as hours then minutes. They sit inside the
-72-byte block repeated ahead of every further section, so each section
-declares its own. 21 of the 29 missions run a day in a quarter of an hour:
+A **time** is six `uint32` and eight more bytes. Three of its fields are ever
+asked for: the section at `+0`, the hour at `+0xc` and the minute at `+0x10`.
+A **string** is an `int32` length followed by that many bytes with no
+terminator.
+
+The keyframe reader also takes **version 2**, which has no effect list, and
+**version 1**, which stores twenty slots and makes slots 20 and 21 from slot
+19 at 0.3 a channel; both print *"Warning! Atmosphere file version is not up
+to date"*. Every shipped keyframe is version 3 (*measured*, 656 of 656).
+
+After loading, `0x10067500` bubble-sorts each section by `hour * 60 +
+minute`. All 35 shipped sections are stored in order already (*measured*).
+
+### An earlier reading was one keyframe out
+
+This page used to describe a 124-byte file header, a 72-byte block "copied"
+ahead of a second section, and a ten-word *trailer* after each keyframe whose
+first word was a "kind" of 3, 1 or 0. That reading consumed every file to the
+byte, which is why it survived, and it was wrong in one way that mattered:
+**each keyframe was stamped with the time and opcode of the keyframe after
+it.** The 40 bytes ahead of a keyframe's slots are its own version, time and
+opcode; the old reader filed them under the keyframe before.
+
+The other fields of the old reading fall out of the same shift:
+
+| old reading | what it is |
+|---|---|
+| "kind word" 3, on 621 keyframes | the next keyframe's version |
+| "kind word" 1, on 6 | the second section's version, 1 |
+| "kind word" 0, on 29 | the section field of the file's closing time |
+| the 72-byte "copy of the header" | the second section's day-length time and its first keyframe's preamble |
+| "a second section's count is in neither header" | it is in its own header: 27 or 20 |
+
+Every time-of-day claim the old reading supported moved by one keyframe, and
+they are restated below. The colours and intensities belonged to the right
+keyframes all along.
+
+## How long a day lasts — *read*, and *measured*
+
+The second time in each section header is **how long that section's day
+lasts in real time**. For the first section its hour and minute sit at file
+bytes **64 and 68**. 21 of the 29 missions run a day in a quarter of an hour:
 
 | hours, minutes | seconds | files |
 |---|---|---|
@@ -57,72 +103,82 @@ declares its own. 21 of the 29 missions run a day in a quarter of an hour:
 | 0, 9 | 540 | 1 |
 | 24, 0 | 86400 | 2 |
 
-The engine keeps `hours * 3600 + minutes * 60` per entry and maps a keyframe's
-24-hour clock stamp onto it linearly — `clock_seconds * that / 86400` — so on
-a 15-minute day noon falls 450 seconds in. `CAtmosphere::CAtmosphere` runs the
-whole span through `CAtmData::GetTimeDiffInSec` and keeps the answer in
-milliseconds.
+The chain is now traced to the byte. The section reader keeps the time at
+section `+0x40` (`0x10066111`); the reader interface's slot 4 (`0x100695b0`)
+returns its hour and minute from `+0x4c` and `+0x50`; `CAtmData::CAtmData`
+(`0x1006a070`) keeps `hours * 3600 + minutes * 60` per section and hands the
+array out as its slot 3 (`0x1006a5d0`).
 
-The two files declaring a full **24 hours** are the giveaway, and they are the
-check: a sky that keeps real time never visibly moves, and those two carry
-**5 keyframes against a minimum of 12** everywhere else. They have nothing to
-animate. The chain is `CAtmosphere::CAtmosphere` (`Terrain.dll:0x1006ec30`) ->
-`0x1006fab0` -> `CAtmData` slot 3 (`0x1006a5d0`), which returns an array the
-constructor fills from the reader's `0x100695b0`. That the array's source is
-*this* pair of header words is the reading rather than a traced byte: it is
-the only varying time-shaped pair in the header, it is inside the repeated
-section block, and it sorts the static skies out exactly.
+A keyframe's 24-hour stamp is mapped onto its section's day linearly, in
+integers — `clock_seconds * day_seconds / 86400` (`0x1006d460`) — so on a
+15-minute day noon falls 450 seconds in.
 
-A **string** is an `int32` length followed by that many bytes with no
-terminator, which is what `MFile`'s string reader does — `Terrain.dll`'s
-deserialiser is an unoptimised run of `fread(ptr, 4, 1, file)` calls, so the
-field order reads straight off the disassembly.
+The two files declaring a full **24 hours** are the check: a sky that keeps
+real time never visibly moves, and those two carry **5 keyframes against a
+minimum of 12** everywhere else.
 
-## The kind word and the time
+## The clock: sections in turn, and where it starts — *read*
 
-The keyframe's trailer opens with a kind word: **3** on 621 of the 656 shipped
-keyframes, **1** on 6, and **0** on the 29 that close a section. The hour and
-minute follow it — one word later when the kind is 3. Reading it that way
-gives a valid time on every keyframe and leaves all 29 first sections sorted
-by time; reading a fixed offset breaks on 18 of them.
+### A file's sections are played one after another
 
-`CAMPAIGN.04/Mission.01` is the clearest file: twelve keyframes at 00:20,
-01:24, 06:48, 12:34, 13:58, 15:00, 15:48, 19:20, 22:39, 23:20, 23:59, 00:00.
+Six files carry a second section, and nothing chooses between them: **the
+atmosphere plays section 0's day, then section 1's, then section 0's again.**
 
-## What the numbers are
+- `CAtmosphere::CAtmosphere` sums every section's day length into one cycle,
+  in milliseconds, at `+0x150` (`0x1006efcd`).
+- A position on the clock is a pair, *(section, seconds into its day)*.
+  `CAtmData::GetTimeDiffInSec` (`0x1006a850`) measures from one position to
+  another forward only: out of the first section, through every section
+  between, into the second, wrapping round the whole cycle.
+- Each takt (`CAtmosphere::SendMsg`, message 6 subcode 1, `0x10070040`) takes
+  the time since the atmosphere's epoch modulo the whole cycle, and walks it
+  through the sections from section 0.
 
-The **third of the four float32** is the light. Across the 27 files whose
-value varies at all, its low point falls within two hours of midnight; on
-`CAMPAIGN.04/Mission.01` it runs 0.1 at 00:20 up to 5.0 at 12:34 and back
-down. The other two are 2.2 and 2.0 almost everywhere.
+So a two-section file is a **two-day cycle**. Both sections of all six run
+00h to 24h, and in five of them the second reuses 16 of the first's 17
+distinct colour blocks at different times (*measured*). The difference is
+the weather: on five files the second day rains from 04:40 to 09:00.
 
-The 88-byte block is **three groups of four colours** plus singles, stored
-BGRA — the same DirectDraw convention as the textures, and confirmed by the
-float slots decoding correctly little-endian. Slots 1–4 are the group that
-tracks the day, going near-black at midnight. Reading them that way produces
-coherent, art-directed skies, which is the real check:
+### Where the clock starts
 
-| mission | brightest keyframe | slot 1 | slot 7 | slot 18 |
-|---|---|---|---|---|
-| CAMPAIGN.00 | 11:00 | `#afa5dc` | `#d7d7ff` | `#f0f5ff` |
-| CAMPAIGN.01 / Mission.01 | 20:00 | `#962800` | `#ff6312` | `#821800` |
-| CAMPAIGN.02 | 10:10 | `#7bab0f` | `#ebff77` | `#ffff00` |
+The time that closes the file is the start. `0x1006fab0` asks `CAtmData`
+(slot 7, `0x1006ec00`) for it, which asks the reader (slot 5, `0x10069630`)
+for its section, hour and minute. It scales the stamp by that section's day
+length and measures from *(0, 0)* to it; `CAtmosphere::CAtmosphere` keeps the
+answer × 1000 at `+0x14c`. The component's slot 6 (`0x10070330`), given the
+game time, sets the epoch that far back, and resets the last event position
+to *(0, 0)*.
 
-— a pale violet daylight, a red sunset, and a toxic green world with a yellow
-sun. **Which slot is which is now read**, and it is not what the viewer
-assumed (slot 1 the zenith, slot 7 the horizon, slot 18 the sunlight). See
-[The dome, the fog and the scene colour](#the-dome-the-fog-and-the-scene-colour--read-and-measured).
+*Measured*, all 29 files start in section 0:
 
-## Object types
+| start | files |
+|---|---:|
+| 01:30 | 10 |
+| 00:30 | 6 |
+| 01:00 | 6 |
+| 01:20 | 5 |
+| 09:55, 09:45 | 1 each, the two 24-hour skies |
+
+Every one of them is inside the sun's window, so **every mission opens with
+the sun up**. Mission 01 starts at 01:30 of a 900-second day: 56 seconds in.
+
+Because the last event position starts at *(0, 0)*, the first takt fires every
+event stamped before the start — the sun's start at 00:30 included — so the
+bodies and weather due by then exist as the mission begins.
+
+Two other ways to move the clock are in the code and neither is traced
+further: `CAtmosphere::SetObjectState` (`0x10070520`) writes `+0x14c` from a
+four-byte state record, and the interface at `+0x130` has a slot 9
+(`0x100705a0`) that jumps the clock to a given *(section, seconds)* and runs a
+takt. Who calls either is not established.
+
+## Events — *read*, and *measured*
+
+### The ten opcodes
 
 `Terrain.dll`'s factory is a five-way switch — **SUN, SKY, RAIN, SNOW,
 LIGHTNING** — allocating classes of 0x9e8, 0x560, 0xc0, 0xb8 bytes and one
-more. A keyframe's name slot carries `sun`, `moon` or `env_lightning`, and the
-counted string list carries sound files (`atm_rain1.wav` is the only one
-shipped).
-
-**The five are numbered**, which an earlier draft of this section did not
-know. `CAtmosphere`'s event handler at `0x1006fbb0` dispatches a type through
+more. `CAtmosphere`'s event handler at `0x1006fbb0` dispatches a type through
 a jump table at `0x10070024`, and each case copies that type's name into a
 buffer for its log line:
 
@@ -130,12 +186,10 @@ buffer for its log line:
 |---|---|---|---|---|---|
 | | `SUN` | `SKY` | `RAIN` | `SNOW` | `LIGHTNING` |
 
-### The ten opcodes, decoded
-
-`CAtmData::GetEvents` dispatches on a ten-valued opcode, and each of its cases
-**writes** a phase and a type into a 20-byte event record — `{phase, type,
-two words of time, one more}`. Read off those writes rather than guessed, the
-table is:
+`CAtmData::GetEvents` (`0x1006dc10`) dispatches on a ten-valued opcode through
+the jump table at `0x1006e829`, and each case **writes** a phase and a type
+into a 20-byte event record — `{phase, type, two words of position, a pointer
+to a parameter block}`:
 
 | opcode | | opcode | | opcode | |
 |---:|---|---:|---|---:|---|
@@ -144,54 +198,109 @@ table is:
 | 5 | start `SNOW` | 6 | stop `SNOW` | 7 | *nothing* |
 | 8 | start `LIGHTNING` | 9 | stop `LIGHTNING` | | |
 
-Two things fall out of it. **2 and 7 share the switch's default and do
-nothing** — which is what "cases 2 and 7 share the out-of-range target" in the
-earlier note actually meant. And **`SKY` has no case at all**, which agrees
-with the separate finding that the sky is created outside the switch with a
-hardcoded id: a sky is never started or stopped because it is always there.
+**2 and 7 share the switch's default and do nothing**, and **`SKY` has no
+case**: the sky is created directly by `CAtmosphere`, with a hardcoded `1`,
+so every mission has one and no keyframe has to ask. Phase **0 is the create
+side**: the handler that takes it resolves the type name, looks the object
+up, and warns *"Atmosphere object already exists - %s"*.
 
-The pairing is not the arithmetic one. `type * 2 + phase` would put `RAIN` at
-4 and 5; the cases say 3 and 4. The gaps at 2 and 7 are where the enum's
-author left room, and the only way to get the table right is to read what each
-case stores.
+What each start case hands its object:
 
-Phase **0 is the create side**: the handler that takes it resolves the type
-name, looks the object up, and warns *"Atmosphere object already exists - %s"*.
+| start | parameter block | from the keyframe |
+|---|---|---|
+| `SUN` | lifetime, azimuth, tilt, `sky.wea` slot | the name, compared with `"sun"` |
+| `RAIN` | **8** and a sound name | the first effect name, or *"Rain background sound not specified"* |
+| `SNOW` | **7** | nothing |
+| `LIGHTNING` | an effect name | the first effect name, or *"Lightning effect not specified"* |
 
-### Which field carries the opcode — still open, and three candidates are dead
+The two constants are *read*; that they are `sky.wea` slots is *derived*:
+they are the rain and snow entries of `SLOT_ROLES`, as the sun's 3 and 4 are
+its sun and moon.
 
-The opcode is assembled in memory. The collector fills a 0x98-byte record from
-a **240-byte runtime keyframe** (the filler is at `0x100692d0`): hour at
-`+0x14`, minute at `+0x18`, the opcode at `+0x28`, and six `c_str()` pointers
-at `+0x64`…`+0x78` — the file's six name slots, so the runtime keyframe is the
-file's keyframe expanded.
+### The opcode is the word ahead of slot 0
 
-The trailer's last word is the only field in the file that spans 0 to 9, and
-it is **ruled out**, for a sharper reason than the first attempt had. Now that
-7 is known to mean *nothing happens*, the objection is exact: that word puts
-**119 of the 140 named keyframes** — all 59 `moon` and 60 of the 75 `sun` — on
-a do-nothing case. Bodies that must rise and set cannot all be no-ops. Six
-keyframes, the last of six files, carry an uninitialised `6939832` there as
-well.
+The collector (`0x1006d460`) fills a 0x98-byte event record from each
+240-byte runtime keyframe (the filler is `0x100692d0`); the runtime keyframe
+is the file's keyframe as the reader lays it out, time at `+0x8`, the
+opcode word at `+0x28`, slot 0 at `+0x2c`. The filler copies `+0x28` to the
+record's `+0x00` (`0x100694bd`), and that is the word `GetEvents` switches on.
 
-So the type vocabulary is closed and the field that selects it is not.
+Three file candidates were once tested and all three failed — the trailer's
+last word, the word five past the trailer's time, and the second section. The
+first two are the same word on every version-3 keyframe, and it **was** the
+opcode: it was being tested against the keyframe before its own. Read against the right keyframe (*measured*):
 
-Two candidates were tested and both failed, which is worth writing down so
-they are not tried again. The first is the trailer word above. The second was
-the **second section**: the collector takes a section number, six files carry
-a second section, and it looked like the event list to the day cycle's
-colours. It is not. Both sections of all six run **00h to 24h**, and in five of
-them the second reuses **16 of the first's 17 distinct colour blocks** at
-different times with a flatter light curve, and carries `sun` and `moon` names
-of its own. It is a *second complete day cycle* — a weather variant of the
-same day is the obvious reading and a **guess**; what is measured is that both
-are whole cycles over the same span. `Single.01`'s pair share only 5 blocks,
-so the variant can be a wholly different day. What selects between them is
-open.
+- the sun and the moon are named on 140 keyframes, and **138 carry opcode 0
+  or 1**; the other two are the middle keyframes of the two 24-hour skies,
+  which name the sun on all five keyframes. Control: the same word read the
+  old way, off the next keyframe, gives 11;
+- all **9 rain starts** name `atm_rain1.wav` first and all **8 lightning
+  starts** name `env_lightning` first — the two things `GetEvents` refuses to
+  run without;
+- **every start is stopped later in its own section**: sun 37 of 37, moon 33
+  of 33, rain 9 of 9, snow 9 of 9, lightning 8 of 8.
 
-That also answers, in passing, the smaller unknown recorded here as "the
-keyframe count of a second section": the count is not the question, because
-the section is not a tail of the first.
+`env_lightning` is an effect name, not an object name: it sits in the counted
+list with the rain sound, never in the six name strings.
+
+### Where a shower stops, and snow
+
+**A shower stops at its stop opcode** — 4 for rain, 6 for snow, 9 for
+lightning — on a keyframe that names nothing, which is why a stop was never
+found by name. *Measured*:
+
+| weather | missions | spells |
+|---|---:|---|
+| rain | 8 | 04:40–09:00 on seven (the second day on five of them), and Single.01's 05:40–11:00 and 01:30–22:50 |
+| snow | 7 | 00:00–23:59 on six, and three spells on `CAMPAIGN.05/Mission.01` |
+| lightning | 8 | 00:01–23:58 on six, 05:10–08:30 and 02:40–21:10 |
+
+**Snow is shipped.** An earlier note said no mission asks for it because no
+keyframe *names* it; snow needs no name. The six missions that snow all day —
+`CAMPAIGN.03`'s four, `Multi.01` and `Multi.03` — are exactly the six whose
+`sky.wea` puts `DUST_ADD` rather than `SNOWFLAKE` in its snow slot: a dust
+storm the length of the day, with lightning through it. `CAMPAIGN.05/Mission.01`
+snows `SNOWFLAKE` three times.
+
+The **fourth float** is what the weather runs at: rain and snow take it with a
+colour made from slot 19, lightning takes it alone (`0x1006ce00`,
+`0x1006cd81`, `0x1006cef8`). It is non-zero on 137 keyframes, all inside a
+spell or on its stop, and 0 on all 495 outside one (*measured*).
+
+### How a keyframe's clock becomes an event time
+
+```
+t = (hour * 3600 + minute * 60) * day_seconds / 86400
+```
+
+in integers, where `day_seconds` is **the keyframe's own section's declared
+day length** (`CAtmData` slot 3, `0x1006a5d0`, called by the collector at
+`0x1006d510`). That settles what an earlier version of this section called
+an unfollowed virtual call.
+
+A keyframe fires when the clock passes it: `GetEvents` takes the keyframes
+with `from <= t < to` between the last position and the current one; a span
+that leaves its section is split at the section's end and continued from the
+start of the next (`0x1006d740`). A takt only asks when at least a second has
+passed (`0x1007026c`). A keyframe stamped 24:00 has `t` equal to the day
+length and never fires: 27 of the 29 carry opcode 7 anyway, and the other two
+are the 24-hour skies' closing sun stops.
+
+### A body's lifetime
+
+On a `SUN` start (`0x1006dcb7`), `GetEvents` looks for the body's end
+itself, testing each keyframe's record for opcode 1 (`0x1006de7b`): the
+**first stop-`SUN` keyframe at or after the start**, in the start's section
+and then the later ones, and before the end of the cycle — the last
+section's full day. It **does not wrap back to section 0**, and a
+stop stamped 24:00 lies on that end and does not count. The lifetime is the
+forward distance between the two positions. When nothing is found the block
+keeps whatever the previous search left, which happens on the two 24-hour
+skies' second sun start.
+
+Mission 01's sun is given 525 seconds (00:30 to 14:30 of a 900-second day)
+and its moon 300 (15:30 to 23:30). What `CSun` does with the lifetime once
+it has it (`× 1000` at `+0x2c`) is not traced.
 
 ## The sibling `sky.wea` — the slot index is the role
 
@@ -208,7 +317,7 @@ same order:
 | 4 | moon | `ENV_MOON` | four variants |
 | 5 | lens flare | `ENV_FLARE_00` | **yes** |
 | 6 | lens flare | `ENV_FLARE_01` | **yes** |
-| 7 | snow | `SNOWFLAKE` | two variants |
+| 7 | snow | `SNOWFLAKE`, `DUST_ADD` | two variants |
 | 8 | rain | `RAIN_DROP` | **yes** |
 
 Not one of those names is in `Textures.lib`. They are **material** names, and
@@ -234,6 +343,40 @@ Two do not fit: `ENV_SUN_2` and `ENV_MOON_5` both name `SUN4.0` with cells 4
 and 5, which are past the end of a 2 x 2 grid, and `SUN4.0`'s two sprites sit
 in the cells a 2 x 2 would number 1 and 3. The reader falls back to the whole
 texture for an index it cannot place rather than guess.
+
+## What the numbers are
+
+The 88-byte block is **colours stored BGRA** — the same DirectDraw convention
+as the textures — with slots 5 and 6 read as floats. Every slot but two now
+has a *read* destination; see
+[the table below](#the-dome-the-fog-and-the-scene-colour--read-and-measured).
+Reading them that way produces coherent, art-directed skies:
+
+| mission | brightest keyframe | slot 1 | slot 7 | slot 18, the clouds |
+|---|---|---|---|---|
+| CAMPAIGN.00 | 07:00 | `#afa5dc` | `#d7d7ff` | `#f0f5ff` |
+| CAMPAIGN.01 / Mission.01 | all five equal | `#962800` | `#ff6312` | `#821800` |
+| CAMPAIGN.02 | 06:00 | `#7bab0f` | `#ebff77` | `#ffff00` |
+
+— a pale violet daylight, a red sunset, and a toxic green world under yellow
+cloud.
+
+The four floats (*read*, `0x1006ac9a`, `0x1007dfdf`, `0x1006ce00`):
+
+| float | what | shipped |
+|---:|---|---|
+| 1 | the sun sprite's extent across | 2.2 almost everywhere |
+| 2 | the sun sprite's extent up | 2.0 almost everywhere |
+| 3 | the light: the sun object's main light is slot 19 × this | 0.0 to 5.0 |
+| 4 | the running weather's intensity | 0 unless a spell runs |
+
+**The light fades out as a body sets.** On all 66 sun and moon windows with
+keyframes inside, the third float at the start and at the stop is no higher
+than anywhere between — 0.0 to 0.2, against up to 5.0 (*measured*; control,
+read the old way, 0). On `CAMPAIGN.04/Mission.01` it runs 0.1 at the sun's
+start at 00:20, 5.0 at 06:48, and 0.1 again at its stop at 13:58. Between a
+body's stop and the next one's start it stands at 1.0 on many files, where
+no body is up to use it.
 
 ## The lens flare
 
@@ -273,105 +416,11 @@ on-axis, and the ramp is then squared. The second ramps on **how high the body
 stands** — see [below](#where-the-sun-stands-and-it-is-not-in-a-file). Both
 sets of cosines are cached at load from constants of 15, 30 and 60 degrees.
 
-The whole flare is skipped when the first gate falls below **0.1**, and the
-composite intensity also brightens the sun's own billboard: the engine lerps
-each of its three colour channels from `c` to `5c`, so a sun on the view axis
-draws up to five times its own colour.
-
-## The weather, and how the engine reads a keyframe
-
-A keyframe carries names, and the names say which atmosphere object it acts
-on. Four appear across the 656 shipped keyframes: **`sun`** (73) and
-**`moon`** (65), which come in start/stop pairs, and **`atm_rain1.wav`** (9)
-and **`env_lightning`** (9), which appear once in a section.
-
-That is the weather switch. **14 of the 29 missions carry a marker — eight
-name rain and eight name lightning — and not one names snow.** The rain
-markers are all early morning: 02:40, 05:10, 05:40 and 07:00.
-
-`Terrain.dll` says what the engine does with them.
-`CAtmosphere::HandleEvents` walks a list of 20-byte events built by
-`CAtmData::GetEvents` (`0x1006dc10`), and each event's second word is the
-object type it passes to `CreateAtmosphereObject` — a five-way switch,
-allocating 0x9e8, 0x560, 0xc0, 0xb8 and one more. `GetEvents` dispatches on a
-ten-valued opcode at the head of its keyframe record through a jump table at
-`0x1006e829`, and the ten branches pair up exactly — cases 2 and 7 share the
-*same* target as the out-of-range default, so they do nothing at all:
-
-| opcode | object type | action |
-|---:|---:|---|
-| 0, 1 | 0 | start, stop — and branch 0 compares the name to `"sun"` |
-| 2, 7 | — | nothing |
-| 3, 4 | 2 | start, stop |
-| 5, 6 | 3 | start, stop |
-| 8, 9 | 4 | start, stop |
-
-Even starts, odd stops. Object type **1** is never created from an event, and
-the reason is visible one call site up: the sky is created directly, with a
-hardcoded `1`, which is why every mission has one and no keyframe has to ask.
-
-### The opcode is not a field of the file
-
-`GetEvents` gets its records from `0x1006d740`, which splits the query at
-midnight and calls `0x1006d460` once or twice. That is the collector: it asks
-the atmosphere data object for a section's keyframe count and then for each
-keyframe in turn, receiving a **0x98-byte record** whose layout is the
-engine's, not the file's — `+0x00` the opcode, `+0x20` the hour, `+0x24` the
-minute, `+0x64` a **pointer** to the name that branch 0 compares against
-`"sun"`.
-
-So the opcode is assembled in memory, which is why looking for it in the file
-comes up empty, and the data says the same. None of the 22 four-byte slots
-carries a value in 0..9 on all 656 keyframes — slot 5 is the only small one
-and it is 0 throughout. The trailer's last word does span 0..9, but it puts
-**438 of the 656** keyframes on case 7, the no-op, and among them 60 named
-`sun` and 59 named `moon` — bodies that must start and stop. It is not the
-opcode.
-
-**So where a shower stops is still unknown**, and the reason is now clear:
-nothing in `sky.ske` says. The sun and moon come in start/stop pairs of
-*named* keyframes; rain and lightning appear once in a section.
-
-### How a keyframe's clock becomes an event time
-
-The same collector shows the conversion the sun's lifetime needed:
-
-```
-t = (hour * 3600 + minute * 60) * scale / 86400
-```
-
-— the seconds since midnight, scaled by a per-section value the collector
-fetches through the data object's vtable and divided by a day. What that scale
-*is* is the last piece: it comes from a virtual call that has not been
-followed, and it is what turns two clock times into a duration.
-
-## What the viewer draws
-
-- The **nebula** on the dome, multiplied by a gradient from the keyframe's
-  apex (slot 15) to its horizon looking along +y (slot 2), so one draw gives
-  "this sky at this hour". The game's dome carries four compass horizons and
-  two rings between ([above](#the-dome-the-fog-and-the-scene-colour--read-and-measured));
-  the viewer keeps one of each.
-- The **stars** over it, additive, fading in as the day's light drops.
-- The **clouds** over that, tiled four times and tinted by the horizon colour.
-- The **sun** and **moon** as billboards, each at its own fixed place, and
-  only whichever one the keyframes say is up.
-- **Rain**, when the mission's keyframes ask for it: the drops are its own
-  `RAIN_DROP` sprite, cell 21 of `EFFECT6.0`, falling in a 900-unit box that
-  rides with the camera.
-- The **lens flare**, as a 2D overlay drawn after the scene — it is in the
-  lens, not the world, so it takes no depth test. The twelve elements and
-  their tables are the engine's, and so is the second gate — full for the sun,
-  0.39 for the moon, nothing when neither is up. Only the first gate is
-  adapted: its 15° cone is calibrated to the game's field of view and would
-  almost never open against an orbiting camera that looks down at the terrain,
-  so the same linear-then-squared ramp is driven by the sun's distance from
-  the centre of the screen instead.
-
-The **sun and moon stand still**, each at its own fixed place, and only one of
-them is ever up — see the next section. The time-of-day control walks the
-keyframes, and the scene's light points at whichever body is in the sky so the
-shading and the sky agree.
+The whole flare is skipped when the first gate falls below **0.1**. The same
+gates also **brighten the sun's main light**, not its sprite, as this page
+used to say: the colour handed to the light manager (`0x1007eb9e`) is
+`lerp(c, 5c, gate1² × gate2 × slot 17's alpha / 255)` (`0x1007ea14`), so a
+sun on the view axis lights the scene at up to five times its colour.
 
 ## Where the sun stands, and it is not in a file
 
@@ -379,9 +428,9 @@ It was never going to be found in `sky.ske`, because it is not in any file:
 **`CSun`'s two angles are constants in `Terrain.dll`**, and the only thing the
 mission chooses is *when* the sun is up.
 
-The chain is short. `CAtmData::GetEvents` walks the keyframes; on the
-start opcode it compares the keyframe's name against the literal `"sun"` and
-fills a four-`int32` block in the DLL's own data from that one test:
+On the start-`SUN` opcode `GetEvents` compares the keyframe's first name
+against the literal `"sun"` and fills a four-`int32` block in the DLL's own
+data from that one test:
 
 | field | `name == "sun"` | anything else | what `CSun` does with it |
 |---|---:|---:|---|
@@ -420,15 +469,13 @@ measures.
 Nothing ever rewrites the two angles: `Render` rebuilds the same matrix from
 them every frame. The sun does not travel.
 
-What the mission does choose is **when**, and the data backs the reading. A
-keyframe naming a body toggles it, the engine's opcodes running even to start
-and odd to stop, and **32 of the 35 shipped sections hold exactly one pair of
-each** — the sun up from about 01:30 to 15:00, the moon from 16:20 to
-midnight. **No section has them up at once**, on any of the 29 missions, which
-is what makes two fixed positions only a quarter turn apart coherent: they are
-never in the sky together. The three exceptions are two five-keyframe skies
-that name the sun on every keyframe and never the moon, and one that names
-each body once and stops neither.
+What the mission does choose is **when**, and the data backs the reading.
+**33 of the 35 shipped sections hold exactly one sun window and one moon
+window**, opcode 0 to opcode 1 — the sun up from about 00:30 to 14:30, the
+moon from 15:30 to 23:30. **No section has them up at once**, which is what
+makes two fixed positions only a quarter turn apart coherent: they are never
+in the sky together. The other two sections are the 24-hour skies, which run
+the sun twice and never the moon.
 
 ## The dome, the fog and the scene colour — *read*, and *measured*
 
@@ -440,10 +487,12 @@ Each takt, the atmosphere works through three steps:
    (`CAtmData`, `0x1006a970`). Colours are lerped channel by channel, floats
    linearly.
 2. It hands the values to the object as numbered properties (`0x10070a20`).
-3. The sky stores them. Its property interface is the one at object `+4`
-   (`QueryInterface` 7, `0x10075c70`), and the setter is `0x1007bd70`.
+3. The object stores them. Its property interface is the one at object `+4`
+   (`QueryInterface` 7); the sky's setter is `0x1007bd70`, the sun's
+   `0x1007ef10`. Their field offsets are relative to that interface, so the
+   object's own are four more.
 
-Following the file's slots through the reader (`0x10066245`), the record
+Following the file's slots through the reader (`0x10066230`), the record
 filler (`0x100692d0`) and the sky case (`0x1006b2bc`) gives:
 
 | property | file slots | what the sky does with it |
@@ -454,38 +503,76 @@ filler (`0x100692d0`) and the sky case (`0x1006b2bc`) gives:
 | 12 | 15 | the apex and ring 1 |
 | 13 | 5 (float) | fog start ÷ 700 |
 | 14 | 6 (float) | fog end ÷ 700 |
-| 15 | 18 | stored at `+0x60`; use *unknown* |
+| 15 | 18 | the **cloud layer's colour**, below |
 | 16 | 20 | the **scene colour**, below |
 
-Each group of four is a compass: property *k* belongs to the direction
+Each group of four is a compass: property *k* belongs to the dome segment at
 *k* × 90° from +y towards +x.
 
-The sun takes seven values of its own (`0x1006ac9a`):
+**Two slots go nowhere.** The record filler copies no field from the runtime
+keyframe's `+0x2c`, so **slot 0** never leaves the reader; across the 656
+keyframes it holds 18 distinct values that look like heap addresses
+(`0x09ab0b57`, `0x0043d7e0`), editor memory saved by accident (*measured*).
+**Slot 16** is copied to the record's `+0x50`, and no case of the
+interpolation reads that field.
 
-- slot 19's colour × the third float, the one the table above calls the light;
-- the first and second floats;
-- slots 17 and 21.
+**The clouds' colour.** Only with `AtmCloudsOn` (`0x1007a4cb`), the sky puts
+property 15's R, G and B ÷ 255 at `+0x308`..`+0x310` and zeroes
+`+0x318`..`+0x320` (`0x1007a4de`–`0x1007a5b3`), then queues the cloud layer
+with `+0x304` as its material block (`0x1007ab51`). The draw item keeps that
+block at `+0x70`, and the item setup builds the Direct3D material from it
+(`0x10030819`): its `+4` is the diffuse colour and its `+0x14` the material's
+own emissive, to which the scene colour is added. So the clouds are slot 18
+in diffuse, and the scene colour alone in emissive. *Measured*: on 24 of the 27 files whose light varies, slot
+18 is at its brightest where the light is — `#f0f5ff` at Mission 01's
+brightest keyframe, `#ac2800` as its sun rises. Control: slot 16, 6.
 
-What `CSun` does with them was not traced.
+### What the sun does with its seven values
 
-**The reader.** The reader puts a 32-byte header in front of the slots
-(`0x10086570`), carrying the hour and the minute, with one more int
-between it and slot 0. So what this page calls a keyframe's trailer is
-really the next keyframe's kind word, header and that int. Slots 16 and 17
-swap places in memory, and slots 5 and 6 are read as floats.
+The sun case (`0x1006ac9a`) makes seven values, and `CSun`'s setter stores
+them (`0x1007ef10`):
 
-*Measured* across all 29 files:
+| property | value | `CSun` | used by |
+|---:|---|---|---|
+| 0–2 | slot 19's R, G, B ÷ 255 × the third float | `+0x84`..`+0x8c` | the main light's colour |
+| 3 | the first float | `+0x94` | the sprite's extent across |
+| 4 | the second float | `+0x98` | the sprite's extent up |
+| 5 | slot 17 | `+0x95c` | its alpha scales the flare's boost of the main light |
+| 6 | slot 21 | `+0x964` | the second light's colour |
 
-- slot 5 is 0.0 on all 656 keyframes;
-- slot 6 lies between 0.1 and 1.0;
-- at each file's brightest keyframe the apex (slot 15) is no brighter than
-  ring 2, and ring 2 no brighter than ring 3, on 29 of 29;
-- slots 3 and 4, the horizon at +x and −x, are identical on 637 of 656.
+**The sun object is two directional lights.** Its constructor asks the light
+manager (`CreateLightManager`, `0x1007fa40`) for two lights of type 3 —
+`D3DLIGHT_DIRECTIONAL` (slot 12, `0x100806b0`) — and flags the first
+`0x8000000` and the second `0x10000000` (slot 13, `0x100807a0`). Every takt
+(`0x1007d8b0`) it sets the first's colour to the first three values, lifted by
+the flare gates as [above](#the-lens-flare), and the second's to slot 21
+(slot 3, `0x10080040`). The emboss bump-mapping pass,
+`CShade::EmbossBumpMap` (`0x1002ce40`), passes over a `0x10000000` light
+(`0x1002cf87`); where else each is used is not traced.
+
+**Their direction is not set by `CSun`.** It calls the light manager at slots
+3, 6, 9, 12, 13 and 18 and never at the one that writes a position
+(slot 4, `0x100800a0`). A type-3 light's direction is the three floats at
+its record's `+0x24`, both where the Direct3D light is built (`0x10030ab3`)
+and in the emboss pass (`0x1002d08d`), and no writer of that field has been
+found.
+
+The sun's on-screen half-extents are `float 1 × 0.1625 × camera slot 27`
+across and `float 2 ×` the same up (`0x1007dfdf`), which the takt tests
+against the screen's edges. When the shader's flag bit 0 is set, the sun
+passes slot 17 through the shader's slot 5 first, and the sky does the same
+to its fog colour (`0x1007d93d`, `0x10079b05`); the sky also sets its colour
+mask to `0xff00ff00` in that mode, which reads as a green night-vision filter
+(*guess*).
 
 ### The dome
 
 The atmosphere builds the sky from a parameter block (`0x1006f1ba`): 10000,
-π/4, 1.0, 16, 5.
+π/4, 1.0, 16, 5, and a flag from the file's last `int32`. The sky copies the
+six words to `+0x548` (`0x1007824a`) and reads four of them; the 16 is
+replaced by `AtmSkyDetail`, and **nothing reads the flag** — the other
+functions that touch offset `0x55c` in `Terrain.dll` belong to larger
+objects and read `+0x560` and `+0x564` beside it.
 
 **The shape** (`0x100787f0`) is a spherical cap.
 
@@ -506,6 +593,23 @@ The vertices:
 
 **Where it is drawn.** The dome is drawn at the camera's position
 (`0x1007a17d`), so its rim lies at eye height.
+
+**How it is queued.** The sky's layers go through the shader's slot 16
+(`0x10028500`) into render layer 1, with the static render record at
+`0x100a7138`, whose flags are 0 — so they take the scene's fog, not their
+own. Bits 0 and 1 of one argument become the draw item's `ZENABLE` and
+`ZWRITEENABLE` bytes (`+0x12c`, `+0x12d`, each set when its bit is clear,
+`0x10028664`), which the item renderer sets as render states 7 and 14
+(`0x100302fb`, `0x10030318`):
+
+| draw | material block | matrix | `ZENABLE` | `ZWRITEENABLE` |
+|---|---|---|---:|---:|
+| `0x1007a37a` | `+0x484` | `0x100a7168` | 0 | 0 |
+| `0x1007a408`, `0x1007a49e` | `+0x384`, `+0x404` | at the camera | 1 | 0 |
+
+So the layers drawn at the camera are depth-tested and write no depth.
+Neither says how a 34142-radius cap escapes the far plane, or a fog that ends
+by 700.
 
 **Its colours** (`0x1007ac60`):
 
@@ -536,14 +640,43 @@ The vertices:
   is 70 to 700 units (*measured*). On Mission 01 it ends at 420, 490, 525,
   560 or 700.
 
+**It is Direct3D's vertex fog, as far as `Terrain.dll` goes.**
+
+- The only fog states `Terrain.dll`, `World3D.dll` and `Ngi32.dll` set are
+  `FOGENABLE`, `FOGCOLOR`, `FOGSTART`, `FOGEND`, `RANGEFOGENABLE` and
+  `FOGVERTEXMODE`; none pushes `FOGTABLEMODE` ahead of a call.
+- The item renderer submits untransformed vertices — FVF `0x1c2`, `0x2c2`,
+  `0x112`, `0x212` and `0x252`, all `D3DFVF_XYZ` (`0x1002f1e0`–`0x1002f800`)
+  — for which Direct3D computes the vertex fog itself. The one pre-transformed
+  path, FVF `0x1c4` behind the item flag 8 (`0x1002f2c0`), is outside it.
+- **`ForceSWFog` is never read.** Its value lands at `CSettings+4`, the first
+  entry of the table at `0x100a6cac`; every one of the 41 indexed reads of
+  that table in `Terrain.dll` resolves to another setting — `AtmCloudsOn`,
+  `AtmSkyDetail` and `LensFlareOn` among them — and nothing reads the table's
+  first entry directly. The settings interface is registered with
+  `World3D.dll`'s `CreateGameSettings` object under id `0x1e` (`0x1005f5ab`),
+  and its getter (slot 3, `0x1005f9c0`) could still hand the value to another
+  module.
+
 **Its colour follows the camera's heading** (`0x10079730`):
 
-- the heading's quadrant *k* and its fraction *f* through that quadrant pick
-  the colour `lerp(horizon[k], horizon[k+1], f)`, at full alpha;
-- that colour becomes `FOGCOLOR` (`0x10079b28`) and the colour of every rim
-  vertex.
+- the camera's slot 28 (`0x100850f0`) returns three angles of its matrix *m*:
+  `atan2(m[4], m[0])`, `atan2(m[0], m[4])` and
+  `atan2(m[8], √(m[0]² + m[4]²))` — the compass heading of the matrix's first
+  column in two conventions, and that column's pitch;
+- the sky takes the second, *b*, and forms degrees as (*b* + π) · 180 ÷ π
+  (`0x10077b20` caches 1/π), then *k* = (⌊deg ÷ 90⌋ + 2) mod 4 and
+  *f* = (deg mod 90) ÷ 90. The π and the 2 cancel: *k* is the quarter of *b*
+  itself, counted from 0, and *f* the fraction through it;
+- the colour `lerp(horizon[k], horizon[k+1], f)`, alpha forced to 255,
+  becomes `FOGCOLOR` (`0x10079b28`) and the colour of every rim vertex.
 
-So the fog is the horizon in the direction you look.
+So *b* = 0 gives property 0, and *b* grows from +y towards +x. The matrices
+here are column-vector (the camera's translation is `m[3]`, `m[7]`, `m[11]`,
+`0x1007a17d`), so the first column is one of the camera's own axes in world
+space. That it is the axis the camera looks along — which would make the fog
+exactly the horizon in the direction you look — is a *guess*: it is the only
+axis the angle getter describes.
 
 **Blended geometry fogs to a neutral colour.** For the duration of a draw,
 the fog colour is swapped by blend mode (`0x1002ffea`; tables `0x1009a9c8`
@@ -562,8 +695,8 @@ Otherwise glows would pick up fog colour rather than fade out.
 The same record carries a colour: property 16, file slot 20
 (`0x1007bbc5`). Every drawn material gets **emissive = that colour + the
 material's own emissive**, and an ambient term of 0 (`0x100308b8`). It is the
-scene's ambient light in all but name — 40/255 grey at Mission 01's noon, a
-brighter violet at night.
+scene's ambient light in all but name — 40/255 grey at Mission 01's brightest
+keyframe, a brighter violet at night.
 
 ### The render settings
 
@@ -573,64 +706,74 @@ brighter violet at night.
 
 | setting | default |
 |---|---|
-| `ForceSWFog` | 1 |
+| `ForceSWFog` | 1, never read |
 | `LightingOn` | 1 |
 | `AtmCloudsOn` | 1 |
-| `AtmStarsOn` | 1 |
+| `AtmStarsOn` | 1, never read in `Terrain.dll` either |
 | `AtmSkyDetail` | 4 |
 | `LensFlareOn` | 1 |
 | `UseDXLighting` | 0 |
 
+## What the viewer draws
+
+- The **nebula** on the dome, multiplied by a gradient from the keyframe's
+  apex (slot 15) to its horizon at heading zero (slot 2), so one draw gives
+  "this sky at this hour". The game's dome carries four compass horizons and
+  two rings between; the viewer keeps one of each.
+- The **stars** over it, additive, fading in as the day's light drops.
+- The **clouds** over that, tiled four times and tinted by their own colour,
+  slot 18.
+- The **sun** and **moon** as billboards, each at its own fixed place, and
+  only while the keyframes' opcodes have it up.
+- **Rain** while a rain spell runs: the drops are its own `RAIN_DROP` sprite,
+  cell 21 of `EFFECT6.0`, falling in a 900-unit box that rides with the
+  camera. Snow is marked in the payload and not drawn; lightning is neither.
+- The **lens flare**, as a 2D overlay drawn after the scene — it is in the
+  lens, not the world, so it takes no depth test. The twelve elements and
+  their tables are the engine's, and so is the second gate — full for the sun,
+  0.39 for the moon, nothing when neither is up. Only the first gate is
+  adapted: its 15° cone is calibrated to the game's field of view and would
+  almost never open against an orbiting camera that looks down at the terrain,
+  so the same linear-then-squared ramp is driven by the sun's distance from
+  the centre of the screen instead.
+
+The time-of-day control walks the first section's keyframes and opens on the
+one in force when the mission's clock starts. The scene's light points at
+whichever body is up, so the shading and the sky agree; the game's own light
+direction is not established.
+
 ## Not resolved
 
-- **The sun's lifetime** is now computable. `GetEvents` maps the start and
-  stop keyframes' clock times through the scale and takes the difference,
-  wrapping round the section — and the scale is the declared day length
-  above, so the duration is `(stop - start) * day_seconds / 86400`. What is
-  left is only that no shipped file has been walked end to end against a
-  running game to confirm the wrap.
-- **Snow.** No shipped mission names it, so there is nothing to switch on.
-  `SNOWFLAKE` resolves — it is cell 20 of `EFFECT6.0`, a 16 x 16 icon — and
-  the viewer would draw it the same way it draws rain if a mission asked.
-- **Where a shower stops.** The sun and moon come in start/stop pairs and rain
-  does not, so the viewer runs the weather to the next keyframe that names
-  anything. That is a reading, not a fact.
-- ~~The keyframe count of a second section~~ — not the question, as above:
-  a second section is a second whole day, and the reader takes its keyframes
-  to the end of the file, which consumes all six exactly. What *selects*
-  between the two days is open.
-- Which field selects the object type, and which carries the opcode. The
-  runtime side is pinned: the filler at `Terrain.dll:0x100692d0` copies the
-  240-byte keyframe's `+0x28` to the event record's `+0x00` (at `0x100694bd`),
-  with the hour at `+0x14` and the minute at `+0x18`. Two file candidates are
-  dead. The trailer's last word spans 0..9 but puts 119 of the 140 named
-  keyframes on a do-nothing case; and so does **the word a contiguous copy
-  would predict** — five dwords past the trailer's time, which is a *shifting*
-  index because the time sits at 4 when the kind word is 3 and at 3 otherwise.
-  That second test exists because the first used a fixed index and would have
-  missed a moved field. It did not move. The copy is not contiguous anyway:
-  the filler swaps `+0x34`/`+0x30` into `+0x04`/`+0x08` and `+0x3c`/`+0x38`
-  into `+0x0c`/`+0x10`, so the file-to-memory order has to be read off the
-  deserialiser rather than predicted.
-- The rest of the 124-byte file header. Bytes 64 and 68 are the day length,
-  above. It still holds `23, 59` where a time would go — the same
-  hours-and-minutes shape, constant on all 29 — `6939832` twice, and a couple
-  of small counts.
-- Slots 0 and 16 of the colour block; what property 15 (slot 18) does; what
-  the sun does with slots 17, 19 and 21. Every other slot's destination is
-  [read](#the-dome-the-fog-and-the-scene-colour--read-and-measured).
-- Whether Direct3D's vertex fog or the engine's own draws the fog: the scene
-  asks for linear range fog, and `ForceSWFog` defaults to 1. Both would give
-  the same linear fade from 0 to 700 × slot 6.
-- How the dome — 34142 in radius, drawn at the camera — escapes the camera's
-  far plane and a fog that ends by 700.
-- The heading's zero and direction: the second of the camera's three angles
-  is used (`0x10079730`), and that it turns from +y towards +x, like the
-  dome's segments, is a *guess*.
-- What the sun does with its seven values, what property 15 (slot 18) is
-  for, and what header bit `0x4000000` does on 81 textures.
-- When a mission's sky clock starts: at which keyframe, or which hour, the
-  day begins as the mission loads.
-- The int just before slot 0 is the one the record filler copies to the
-  record's `+0x00` (runtime keyframe `+0x28`). It is the word ruled out above
-  as the opcode; what it holds is still open.
+- **Where the sun's lights point.** `CSun` makes two directional lights and
+  sets only their colours; the field a directional light is drawn with, the
+  light record's `+0x24`, has no writer found. Next handle: the light
+  manager's other callers and whatever fills its records each frame.
+- **What `CSun` does with the lifetime** it is given, and so whether a body
+  started before the clock's start keeps its full lifetime from its own
+  keyframe or from creation.
+- **How the 34142-radius dome escapes the far plane and a fog ending by
+  700.** Its layers are depth-tested without depth writes, in render layer 1,
+  on a record that takes the scene's fog. Next handle: how layer 1 is drawn —
+  its projection, and the fog defaults the render pass copies from the
+  shader's slot 7 at `0x1003d9f2`.
+- **Whether `ForceSWFog` does anything outside `Terrain.dll`**, through the
+  settings interface's getter. Inside it the scene asks Direct3D for linear
+  range-based vertex fog on untransformed vertices.
+- **The heading's world axis.** The angle is the compass heading of the
+  camera matrix's first column, 0 along +y and turning towards +x; that the
+  first column is the view direction is a *guess*.
+- The sun sprite's extent unit, camera slot 27, and the shader's slot 5
+  colour filter and its flag bit 0.
+- ~~Which field carries the opcode~~ — the word ahead of slot 0; the three
+  dead candidates were one keyframe out.
+- ~~What selects between a file's two day cycles~~ — nothing: they play in
+  turn.
+- ~~When a mission's sky clock starts~~ — at the file's closing time.
+- ~~Where a rain shower stops~~ — at its stop opcode.
+- ~~The rest of the file header~~ — the section version, a keyframe count,
+  a 23:59 nobody reads and the day length; the uninitialised `6939832` is in
+  the times' last eight bytes, and marks the editor session that saved the
+  file: it is there exactly on the 12 files whose last `int32` is 1.
+- ~~Slots 0 and 16; property 15; the sun's seven values~~ — unused, unused,
+  the clouds' colour, and two lights' colours and the sprite's size.
+- What header bit `0x4000000` does on 81 textures.

@@ -198,17 +198,28 @@ mod tests {
             section: 0,
             slots,
             name: String::new(),
-            sounds: Vec::new(),
+            names: vec![String::new(); 6],
+            effects: Vec::new(),
             intensity: [0.0; 4],
-            trailer: [0; 10],
+            opcode: 7,
+            version: 3,
+            time: parkan_formats::sky::ClockTime::of(hour, 0),
         }
     }
 
     fn atmosphere() -> Atmosphere {
-        let mut header = vec![0u8; 124];
+        let mut header = vec![0u8; parkan_formats::sky::HEADER_SIZE];
         header[64..68].copy_from_slice(&0u32.to_le_bytes());
         header[68..72].copy_from_slice(&24u32.to_le_bytes());
-        Atmosphere { sections: 1, header, keyframes: vec![keyframe(18, 200, 1.0), keyframe(6, 100, 0.5)] }
+        Atmosphere {
+            sections: 1,
+            header,
+            section_headers: Vec::new(),
+            keyframes: vec![keyframe(18, 200, 1.0), keyframe(6, 100, 0.5)],
+            start: Default::default(),
+            trailer_word: 0,
+            sky_flag: 0,
+        }
     }
 
     #[test]
