@@ -312,7 +312,8 @@ def controllers(path: Path, names: list[str] | None = None) -> dict:
                  "pair_b": vector(s.pair_b), "blend": number(s.blend),
                  "length": number(s.length), "velocity": _box(s.velocity),
                  "spin": _box(s.spin), "engine": number(s.engine), "actions": s.actions,
-                 "request": s.request}
+                 "request": s.request,
+                 "contacts": [[k.point, k.flags, k.group] for k in s.contacts]}
                 for s in c.states
             ],
             "costs": vector(c.costs),

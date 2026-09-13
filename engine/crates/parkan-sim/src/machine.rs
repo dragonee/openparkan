@@ -5,15 +5,21 @@
 //! and velocity integrators once with that length as dt, and moves the body by
 //! its velocity or by the animation's root stride. So a walk plays one stride of
 //! animation per stride of ground, and position advances in steps, not ticks.
+//! After the move the ground contact holds the body on the ground, and each tick
+//! the map edge keeps it inside the world's box.
 
 use std::collections::VecDeque;
 
 use glam::Vec3;
-use parkan_formats::control::{Controller, STATE_FIXED, STATE_JITTER, State};
+use parkan_formats::control::{
+    ANY_REQUEST, CONTACT_SUPPORT, Controller, STATE_FIXED, STATE_GROUND_CONTACTS, STATE_JITTER, State,
+};
+use parkan_formats::cpt::ControlPoint;
 use parkan_formats::mesh::Mesh;
+use parkan_formats::pose::Pose;
 
 use crate::ground::{Ground, Hit, contact_radius};
-use crate::motion::{self, Body, Limits, SLOPE_MODE};
+use crate::motion::{self, Body, GRAVITY, Limits, SLOPE_MODE};
 
 /// A step is held to 0.01–5 s (`0x100057d6`).
 pub const STEP_MIN: f32 = 0.01;
@@ -53,9 +59,12 @@ pub fn blend_weight(state: &State, speed: f32) -> f32 {
     let on = |a: usize| state.flags & (1 << a) != 0;
     let (lo_box, hi_box) = state.velocity;
     let largest = |v: [f32; 3]| (0..3).filter(|&a| on(a)).fold(0.0_f32, |m, a| m.max(v[a].abs()));
+    // STAND-IN: docs/24-motion.md#playing-a-state--read-and-measured -- lo and D are read
+    // over all three velocity axes, D as the largest ||max| − |min||; here both are taken
+    // over the switched-on axes and D as the largest span (max − min). Every shipped
+    // state that blends switches on all three axes, and where the two D differ its blend
+    // base is 1, so the weight is the same.
     let lo = largest(lo_box).min(largest(hi_box));
-    // STAND-IN: docs/24-motion.md#playing-a-state--read-and-measured -- D, a box
-    // extent, taken as the largest span of the switched-on axes.
     let d = (0..3).filter(|&a| on(a)).fold(0.0_f32, |m, a| m.max(hi_box[a] - lo_box[a]));
     let p = if d > 0.0 { ((speed - lo) / d).clamp(0.0, 1.0) } else { 1.0 };
     p + (1.0 - p) * state.blend
@@ -73,6 +82,9 @@ pub struct Machine {
     /// This step's weight toward pair B, and the last step's.
     pub q: f32,
     pub q_prev: f32,
+    /// The request code the controller holds (IControl slot 19,
+    /// `docs/32-builder.md`); a state with a code of its own applies only while it is this.
+    pub request: i32,
     seed: u32,
 }
 
@@ -82,6 +94,31 @@ pub struct Frames {
     pub a: f32,
     pub b: f32,
     pub weight: f32,
+}
+
+/// The model a machine's contact points are placed on, and its control points.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Feet {
+    pub mesh: Mesh,
+    pub points: Vec<ControlPoint>,
+}
+
+impl Feet {
+    /// Where control point `point` stands in the model's frame with the mesh posed at
+    /// `frames`, on the node its first triple's third slot names (docs/13), with node 0,
+    /// the body, held at the origin: the body's own move already carries the travel of
+    /// node 0 that a stride measures.
+    pub fn place(&self, point: i32, frames: Frames) -> Option<Vec3> {
+        let p = self.points.get(usize::try_from(point).ok()?)?;
+        let node = usize::try_from(p.nodes().1).ok().filter(|&n| n < self.mesh.nodes.len())?;
+        let (a, b, w) = (f64::from(frames.a), f64::from(frames.b), f64::from(frames.weight));
+        let pose = self.mesh.world_pose_by(node, |n| {
+            let local = self.mesh.blended_pose(n, a, b, w);
+            if n == 0 { Pose { translation: [0.0; 3], ..local } } else { local }
+        });
+        let at = pose.apply(p.position.map(f64::from));
+        Some(Vec3::new(at[0] as f32, at[1] as f32, at[2] as f32))
+    }
 }
 
 /// A machine on the ground: its controller, its body and its state clock.
@@ -97,20 +134,40 @@ pub struct Walker {
     pub from: (Vec3, f32),
     /// The unit's heading when the current step began.
     pub from_heading: f32,
-    /// The body sphere's radius as the ground contact holds it.
+    /// The body sphere's centre in the model's frame, its radius as the ground contact
+    /// holds it, and its radius whole, which the map edge insets the box by.
+    pub centre: Vec3,
     pub radius: f32,
+    pub sphere_radius: f32,
     /// How far the origin stands above the model's lowest point.
     pub base: f32,
-    /// The face the body last stood on.
+    /// The face the ground search last found under the body's centre.
     pub ground: Option<Hit>,
+    /// The contact points' model, where the controller has contacts and the object
+    /// control points.
+    pub feet: Option<Feet>,
 }
 
 impl Walker {
-    pub fn new(controller: Controller, mesh: &Mesh, position: Vec3, yaw: f32) -> Self {
+    /// A machine from its controller, its mesh and the object's control points.
+    pub fn new(
+        controller: Controller,
+        mesh: &Mesh,
+        points: &[ControlPoint],
+        position: Vec3,
+        yaw: f32,
+    ) -> Self {
         let strides = strides(&controller, mesh);
-        let radius = contact_radius(mesh.sphere.map_or(1.0, |(_, r)| r));
+        let (centre, sphere) = mesh.sphere.map_or((Vec3::ZERO, 1.0), |(c, r)| (Vec3::from_array(c), r));
         let base = -mesh.lowest().unwrap_or(0.0) as f32;
-        Self::with_strides(controller, strides, radius, base, position, yaw)
+        let contacts = controller.states.iter().any(|s| !s.contacts.is_empty());
+        let mut walker = Self::with_strides(controller, strides, contact_radius(sphere), base, position, yaw);
+        walker.centre = centre;
+        walker.sphere_radius = sphere;
+        if contacts && !points.is_empty() {
+            walker.feet = Some(Feet { mesh: mesh.clone(), points: points.to_vec() });
+        }
+        walker
     }
 
     pub fn with_strides(
@@ -122,8 +179,9 @@ impl Walker {
         yaw: f32,
     ) -> Self {
         // G is 1.0 on every shipped material (docs/24, measured).
-        // STAND-IN: docs/24-motion.md#load--read-and-measured -- the spare payload
-        // needs the node range the payload counts as the chassis; taken as empty, r = 1.
+        // STAND-IN: docs/24-motion.md#load--read-and-measured -- the load is read
+        // (component masses, node density × volume, part 0's nodes given back) but not
+        // weighed here: spare payload is taken as the whole payload, r = 1.
         let limits = Limits::live(&controller, motion::engine_drive(&controller), 1.0, 1.0);
         let body = Body::new(position, yaw);
         Self {
@@ -142,29 +200,35 @@ impl Walker {
                 step_ms: 0.0,
                 q: 1.0,
                 q_prev: 1.0,
+                // STAND-IN: docs/32-builder.md#the-construction-sphere--read-and-measured --
+                // the code a controller holds before any is sent is not read; none, so a
+                // state waiting for a code of its own does not apply until one is sent.
+                request: ANY_REQUEST,
                 seed: 0x2545_F491,
             },
             from: (position, yaw),
             from_heading: yaw,
+            centre: Vec3::ZERO,
             radius,
+            sphere_radius: radius,
             base,
             ground: None,
+            feet: None,
         }
     }
 
-    /// Run every state step due by `t_ms`.
+    /// Run every state step due by `t_ms`, then one pass of the map edge.
     pub fn advance(&mut self, t_ms: f64, ground: &Ground) {
         if self.controller.states.is_empty() {
             return;
         }
         let mut steps = 0;
         while t_ms >= self.machine.clock_ms && steps < MAX_STEPS {
-            let current = &self.controller.states[self.machine.current];
-            if current.anchor() || self.machine.queue.is_empty() {
+            // 1. Only an anchor plans. 2. The next state comes off the queue; with
+            // nothing queued nothing is taken, and the current state plays again.
+            if self.controller.states[self.machine.current].anchor() {
                 self.plan();
             }
-            // STAND-IN: docs/24-motion.md#playing-a-state--read-and-measured -- with
-            // nothing queued the current state plays again.
             if let Some(next) = self.machine.queue.pop_front() {
                 self.machine.current = next;
             }
@@ -174,25 +238,27 @@ impl Walker {
         if steps == MAX_STEPS {
             self.machine.clock_ms = t_ms;
         }
+        self.keep_inside(ground);
     }
 
     /// `0x100051c0`: an anchor that still applies queues the cheapest cycle back to
     /// itself; otherwise the path to the cheapest other anchor that applies.
     fn plan(&mut self) {
-        let (v, s) = (self.body.velocity, self.body.spin);
+        let (v, s, code) = (self.body.velocity, self.body.spin, self.machine.request);
         let c = &self.controller;
         let current = self.machine.current;
         // STAND-IN: docs/24-motion.md#section-1-is-the-animation-state-graph--read-and-measured
-        // -- a state's 16-byte conditions are taken as met, and its use count as
-        // unlimited.
-        if c.states[current].applies(v, s)
+        // -- a state's contacts are read to need their nodes intact (0x100) or destroyed
+        // (0x200), but node life is not modelled here: those conditions are taken as met.
+        // The use count +0x94 is not read; unlimited.
+        if c.states[current].applies(v, s, code)
             && let Some((path, _)) = c.path_by(&self.costs, current, current)
         {
             self.machine.queue = path.into();
             return;
         }
         let best = (0..c.states.len())
-            .filter(|&j| j != current && c.states[j].anchor() && c.states[j].applies(v, s))
+            .filter(|&j| j != current && c.states[j].anchor() && c.states[j].applies(v, s, code))
             .filter_map(|j| c.path_by(&self.costs, current, j))
             .min_by(|a, b| a.1.total_cmp(&b.1));
         if let Some((path, _)) = best {
@@ -249,57 +315,128 @@ impl Walker {
         }
         let step = (step_ms / 1000.0) as f32;
 
-        // STAND-IN: docs/24-motion.md#from-input-to-motion--read-and-measured -- the
-        // body turns by the change in strafe angle (`0x10014cf0`); at what rate is not
-        // read, so it is turned at once.
-        self.body.yaw = wrap_angle(self.body.yaw + self.body.strafe - self.body.strafe_turned);
-        self.body.strafe_turned = self.body.strafe;
         let turned = motion::integrate_turn(&mut self.body.pending, &self.limits, step);
-        // STAND-IN: docs/24-motion.md#from-input-to-motion--read-and-measured -- triple 6
-        // is (0, 0, 6.28) on the hero; only the turn about z is applied.
-        self.body.yaw = wrap_angle(self.body.yaw + turned[2]);
+        // `0x10014cf0`: the change in strafe angle is added to the step's turn after the
+        // turn-rate clamp, so the hull swings by the whole change in one step.
+        let change = self.body.strafe - self.body.strafe_previous;
+        self.body.strafe_previous = self.body.strafe;
+        self.body.strafe_change = change;
+        self.body.yaw = wrap_angle(self.body.yaw + turned[2] + change);
         self.body.spin = turned.map(|t| t / step);
         motion::integrate_velocity(&mut self.body.velocity, self.body.command, &self.limits, step);
-        if self.controller.mode == SLOPE_MODE
-            && let Some(hit) = self.ground
-        {
+        if self.controller.mode == SLOPE_MODE {
             let along = self.body.to_world(Vec3::from_array(self.body.velocity));
+            let normal = self.body.ground_normal;
             // STAND-IN: docs/24-motion.md#ground-and-slope--read -- the brake is read to
             // act one way across the slope; taken as uphill, against the face normal.
-            if along.x * hit.normal.x + along.y * hit.normal.y < 0.0 {
-                let factor = motion::slope_factor(hit.normal.z, self.controller.cone);
+            if along.x * normal.x + along.y * normal.y < 0.0 {
+                let factor = motion::slope_factor(normal.z, self.controller.cone);
                 motion::brake(&mut self.body.velocity, factor, &self.limits, step);
             }
         }
 
+        // A velocity-driven state moves by the velocity clamped into its own box
+        // (`0x10001160`, `0x1001592b`); the integrated velocity itself is kept.
         let moved = if state.by_velocity() {
-            self.body.to_world(Vec3::from_array(self.body.velocity)) * step
+            self.body.to_world(Vec3::from_array(state.clamp_velocity(self.body.velocity))) * step
         } else {
             let q = self.machine.q;
             self.body.to_world(stride.a * (1.0 - q) + stride.b * q)
         };
         self.body.position += moved;
-        self.follow_ground(ground);
+        self.hold(ground, &state, step);
     }
 
-    /// Put the body on the ground under it.
+    /// The ground contact (`0x1001a450`) and the lift it moves the body by
+    /// (`0x10015d60`): docs/24-motion.md, "Holding the body on the ground".
     ///
-    /// STAND-IN: docs/24-motion.md#not-established -- how the body is put back on the
-    /// ground point, the map edge and collision are not read. The model's lowest
-    /// point is set on the highest walkable face within the contact radius above it,
-    /// as a mission places a unit (docs/07-objects.md, "The ground datum"); with no
-    /// face there, or only a wall, the step's travel is undone and the body stops.
+    /// The body sphere's centre is searched for the ground. In a state with bit `0x4` and
+    /// contact points the lift is the largest gap from a flag-1 contact up to the ground
+    /// under it, and the body falls under gravity until the fall would not stay above
+    /// that lift; in any other state the sphere is only lifted out of the ground, by
+    /// (ground − centre) + r while the ground lies less than r below. When the lift is
+    /// taken the fall speed returns to 0 and the sphere's and contacts' normals, averaged,
+    /// become the ground normal. A point with no face under it has itself as its ground.
+    ///
+    /// STAND-IN: docs/24-motion.md#holding-the-body-on-the-ground--read-and-measured --
+    /// not read: when the ground contact runs and its dt, the pose the contact points
+    /// are placed by, the second sphere's radius r₂, and what a sphere with no face under
+    /// it does. It runs after every state step with dt the step, the contacts on the
+    /// step's last frames with node 0's translation left out, r₂ = r, and a sphere with
+    /// no face is not lifted.
+    fn hold(&mut self, ground: &Ground, state: &State, dt: f32) {
+        let r = self.radius;
+        let centre = self.body.position + self.body.to_world(self.centre);
+        let hit = ground.search(centre, r);
+        self.ground = hit;
+        let last = Frames { a: state.pair_a[1], b: state.pair_b[1], weight: self.machine.q };
+        let contacts: Vec<(Vec3, Option<Hit>)> = match &self.feet {
+            Some(feet) if state.mode & STATE_GROUND_CONTACTS != 0 => state
+                .contacts
+                .iter()
+                .filter(|c| c.flags & CONTACT_SUPPORT != 0)
+                .filter_map(|c| feet.place(c.point, last))
+                .map(|at| {
+                    let p = self.body.position + self.body.to_world(at);
+                    (p, ground.search(p, r))
+                })
+                .collect(),
+            _ => Vec::new(),
+        };
+        let lift = if contacts.is_empty() {
+            hit.filter(|h| centre.z - h.point.z < r).map(|h| h.point.z - centre.z + r)
+        } else {
+            let lift =
+                contacts.iter().map(|(p, h)| h.map_or(0.0, |h| h.point.z - p.z)).fold(f32::MIN, f32::max);
+            let fall = motion::fall(self.body.fall_speed, dt);
+            if fall > lift {
+                self.body.position.z += fall;
+                self.body.fall_speed -= GRAVITY * dt;
+                None
+            } else {
+                Some(lift)
+            }
+        };
+        if let Some(lift) = lift {
+            self.body.position.z += lift;
+            self.body.fall_speed = 0.0;
+            let normals: Vec<Vec3> =
+                hit.iter().chain(contacts.iter().filter_map(|(_, h)| h.as_ref())).map(|h| h.normal).collect();
+            if !normals.is_empty() {
+                self.body.ground_normal = normals.iter().sum::<Vec3>() / normals.len() as f32;
+            }
+        }
+    }
+
+    /// `0x1001e650`, once a tick: the map edge's push on the body sphere, taken as a
+    /// machine takes a push (`0x1000c990`), horizontally in a state with bit `0x4`.
+    ///
+    /// STAND-IN: docs/24-motion.md#collision-between-objects--read -- how interface
+    /// `0x25` slot 3 turns an object's level-0 triangles into a push is not read, and the
+    /// rest of the pair response is not modelled: no collision between objects, so units
+    /// walk through each other and through buildings.
+    pub fn keep_inside(&mut self, ground: &Ground) {
+        let (lo, hi) = ground.world_box();
+        let centre = self.body.position + self.body.to_world(self.centre);
+        let push = motion::edge_push(centre, self.sphere_radius, lo, hi);
+        let flat = self
+            .controller
+            .states
+            .get(self.machine.current)
+            .is_some_and(|s| s.mode & STATE_GROUND_CONTACTS != 0);
+        self.body.position += if flat { motion::horizontal(push) } else { push };
+    }
+
+    /// Stand the body on the ground at once, as a mission places a unit: its lowest
+    /// point on the highest face below it, or up to the contact radius above it
+    /// (docs/07-objects.md, "The ground datum"). For setting a scene up; the ground
+    /// contact holds it from the next step.
     pub fn follow_ground(&mut self, ground: &Ground) {
         let p = self.body.position;
-        match ground.below(p.x, p.y, p.z - self.base + self.radius) {
-            Some(hit) if hit.walkable() => {
-                self.body.position.z = hit.point.z + self.base;
-                self.ground = Some(hit);
-            }
-            _ => {
-                self.body.position = self.from.0;
-                self.body.velocity = [0.0; 3];
-            }
+        if let Some(hit) = ground.below(p.x, p.y, p.z - self.base + self.radius) {
+            self.body.position.z = hit.point.z + self.base;
+            self.body.fall_speed = 0.0;
+            self.ground = Some(hit);
         }
     }
 
@@ -312,9 +449,16 @@ impl Walker {
         (position, yaw)
     }
 
-    /// The unit's heading drawn at `t_ms`.
+    /// The unit's heading drawn at `t_ms`: the drawn hull's yaw plus the turret's strafe
+    /// offset then, which is the heading at the step's start plus the phase's share of
+    /// the hull's own turn.
     pub fn drawn_heading(&self, t_ms: f64) -> f32 {
         self.from_heading + wrap_angle(self.body.heading() - self.from_heading) * self.phase(t_ms)
+    }
+
+    /// The strafe offset the turret is handed at `t_ms`, in radians (`0x10005ab8`).
+    pub fn strafe_offset(&self, t_ms: f64) -> f32 {
+        self.body.strafe_offset(self.phase(t_ms))
     }
 
     /// The step's phase at `t_ms`, 0 to 1.
@@ -345,15 +489,25 @@ pub fn wrap_angle(a: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ground::tests::floor;
-    use parkan_formats::control::{NO_EDGE, STATE_ANCHOR, STATE_BY_VELOCITY, TRIPLE_ACCELERATION};
+    use crate::ground::tests::quads;
+    use parkan_formats::control::{Contact, NO_EDGE, STATE_ANCHOR, STATE_BY_VELOCITY, TRIPLE_ACCELERATION};
+    use parkan_formats::mesh::{Key, NO_PARENT, NO_SLOT, Node};
+    use std::f32::consts::{FRAC_PI_2, FRAC_PI_4};
 
     const ALL_AXES: u32 = 0b111;
+    const DT: f64 = 1000.0 / 60.0;
 
-    /// Standing (anchor, |vy| ≤ 2, 50 ms) and walking (anchor, velocity-driven,
-    /// vy 2 to 14.5, 0.5 of stride a step), each cycling on itself.
-    fn walker(position: Vec3, yaw: f32) -> Walker {
-        let stand = State {
+    /// A 1000 m level field at 0, and a post at 1000..1001 standing 100 high, so the
+    /// world's box has a top well above the field.
+    fn field() -> Ground {
+        quads(&[
+            [[0.0, 0.0, 0.0], [1000.0, 0.0, 0.0], [1000.0, 1000.0, 0.0], [0.0, 1000.0, 0.0]],
+            [[1000.0, 0.0, 100.0], [1001.0, 0.0, 100.0], [1001.0, 1.0, 100.0], [1000.0, 1.0, 100.0]],
+        ])
+    }
+
+    fn stand() -> State {
+        State {
             flags: ALL_AXES,
             mode: STATE_ANCHOR,
             velocity: ([-0.5, -2.0, -0.5], [0.5, 2.0, 0.5]),
@@ -362,7 +516,13 @@ mod tests {
             blend: 1.0,
             length: 50.0,
             ..Default::default()
-        };
+        }
+    }
+
+    /// Standing (anchor, |vy| ≤ 2, 50 ms) and walking (anchor, velocity-driven,
+    /// vy 2 to 14.5, 0.5 of stride a step), each cycling on itself; the sphere, radius
+    /// 2 about the origin, is only lifted out of the ground.
+    fn walker(position: Vec3, yaw: f32) -> Walker {
         let walk = State {
             flags: ALL_AXES,
             mode: STATE_ANCHOR | STATE_BY_VELOCITY,
@@ -373,7 +533,7 @@ mod tests {
             ..Default::default()
         };
         let mut c = crate::motion::tests::hero();
-        c.states = vec![stand, walk];
+        c.states = vec![stand(), walk];
         c.costs = vec![0.0, 1.0, 1.0, 0.0];
         assert!(c.costs.iter().all(|&x| x < NO_EDGE));
         let strides = vec![Stride::default(), Stride { a: Vec3::ZERO, b: Vec3::new(0.0, 0.5, 0.0) }];
@@ -382,15 +542,15 @@ mod tests {
 
     #[test]
     fn holding_forward_walks_at_the_top_speed_one_stride_a_step() {
-        let g = floor();
-        let mut w = walker(Vec3::new(5.0, 5.0, 3.0), 0.0);
+        let g = field();
+        let mut w = walker(Vec3::new(500.0, 500.0, 2.0), 0.0);
         w.body.command = [0.0, 1.0, 0.0];
         w.advance(1000.0, &g);
         assert_eq!(w.machine.current, 1);
         assert_eq!(w.body.velocity, [0.0, 14.0, 0.0]);
         assert!((w.machine.step_ms - 500.0 / 14.0).abs() < 1e-3, "{}", w.machine.step_ms);
-        assert_eq!(w.body.position.z, 0.0);
-        assert!(w.body.position.y > 5.0 + 10.0, "{}", w.body.position.y);
+        assert_eq!(w.body.position.z, 2.0, "the sphere rests on the ground");
+        assert!(w.body.position.y > 500.0 + 10.0, "{}", w.body.position.y);
         w.body.command = [0.0; 3];
         w.advance(3000.0, &g);
         assert_eq!(w.machine.current, 0);
@@ -398,29 +558,226 @@ mod tests {
     }
 
     #[test]
-    fn a_wall_stops_the_body_before_it() {
-        let g = floor();
-        let facing_east = -std::f32::consts::FRAC_PI_2;
-        let mut w = walker(Vec3::new(30.0, 20.0, 0.0), facing_east);
+    fn a_velocity_driven_step_moves_by_the_velocity_clamped_into_its_box() {
+        let g = field();
+        let mut w = walker(Vec3::new(500.0, 500.0, 2.0), 0.0);
+        w.controller.states[1].velocity.1[1] = 10.0;
+        w.machine.current = 1;
+        w.body.velocity = [0.0, 14.0, 0.0];
         w.body.command = [0.0, 1.0, 0.0];
-        w.advance(3000.0, &g);
-        assert!(w.body.position.x <= 40.0 && w.body.position.x > 36.0, "{}", w.body.position.x);
+        w.advance(0.0, &g);
+        let step = (w.machine.step_ms / 1000.0) as f32;
+        assert!((w.body.position.y - 500.0 - 10.0 * step).abs() < 1e-4, "{}", w.body.position.y);
+        assert_eq!(w.body.velocity, [0.0, 14.0, 0.0], "the integrated velocity is kept");
+    }
+
+    #[test]
+    fn only_an_anchor_plans_and_with_nothing_queued_the_state_plays_again() {
+        let g = field();
+        let mut w = walker(Vec3::new(500.0, 500.0, 2.0), 0.0);
+        w.controller.states[1].mode = STATE_BY_VELOCITY;
+        w.machine.current = 1;
+        w.advance(500.0, &g);
+        assert_eq!(w.machine.current, 1, "a state between anchors does not plan");
+        assert!(w.machine.queue.is_empty());
+        w.machine.current = 0;
+        w.advance(1000.0, &g);
+        assert_eq!(w.machine.current, 0, "standing still applies: its cycle");
+    }
+
+    #[test]
+    fn a_state_waiting_for_a_request_code_applies_once_the_controller_holds_it() {
+        let g = field();
+        let mut w = walker(Vec3::new(500.0, 500.0, 2.0), 0.0);
+        // Standing needs 5 m/s, which it never has; the other anchor waits for code 6.
+        w.controller.states[0].velocity = ([-0.5, 5.0, -0.5], [0.5, 6.0, 0.5]);
+        w.controller.states[1] = State { request: 6, ..stand() };
+        w.advance(500.0, &g);
+        assert_eq!(w.machine.current, 0);
+        w.machine.request = 6;
+        w.advance(1000.0, &g);
+        assert_eq!(w.machine.current, 1);
     }
 
     #[test]
     fn a_pending_turn_turns_the_body_during_steps() {
-        let g = floor();
-        let mut w = walker(Vec3::new(20.0, 20.0, 0.0), 0.0);
+        let g = field();
+        let mut w = walker(Vec3::new(500.0, 500.0, 2.0), 0.0);
         w.body.pending[2] = 0.75;
         w.advance(500.0, &g);
-        assert!((w.body.yaw - std::f32::consts::FRAC_PI_2).abs() < 1e-4, "{}", w.body.yaw);
+        assert!((w.body.yaw - FRAC_PI_2).abs() < 1e-4, "{}", w.body.yaw);
         assert!((w.body.pending[2] - 0.5).abs() < 1e-6);
     }
 
     #[test]
+    fn the_hull_takes_the_whole_strafe_change_after_the_turn_clamp_and_the_turret_eases_it_back() {
+        let g = field();
+        let mut w = walker(Vec3::new(500.0, 500.0, 2.0), 0.0);
+        w.limits.turn = [0.1; 3];
+        w.body.pending[2] = 0.75;
+        w.body.strafe = FRAC_PI_2;
+        w.advance(0.0, &g);
+        // One 50 ms step: the pending quarter turn pays out 0.005, the strafe all of it.
+        assert!((w.body.yaw - (FRAC_PI_2 + 0.005)).abs() < 1e-5, "{}", w.body.yaw);
+        assert_eq!((w.body.strafe_previous, w.body.strafe_change), (FRAC_PI_2, FRAC_PI_2));
+        assert!((w.body.heading() - 0.005).abs() < 1e-5);
+        let start = w.machine.step_start_ms;
+        assert_eq!(w.strafe_offset(start), 0.0, "the turret still faces ahead as the step begins");
+        assert!((w.strafe_offset(start + 25.0) + FRAC_PI_4).abs() < 1e-5);
+        assert_eq!(w.strafe_offset(start + 50.0), -FRAC_PI_2);
+        // The hull drawn at any phase plus the offset is the heading eased by the turn alone.
+        let (_, yaw) = w.drawn(start + 25.0);
+        assert!((yaw + w.strafe_offset(start + 25.0) - w.drawn_heading(start + 25.0)).abs() < 1e-5);
+        // The next step has no change: the offset is the whole angle, held.
+        w.advance(50.0, &g);
+        assert_eq!(w.body.strafe_change, 0.0);
+        assert_eq!(w.strafe_offset(w.machine.step_start_ms), -FRAC_PI_2);
+    }
+
+    #[test]
+    fn a_body_without_contacts_is_lifted_out_of_the_ground_and_never_falls() {
+        let g = field();
+        let mut sunk = walker(Vec3::new(500.0, 500.0, 0.5), 0.0);
+        sunk.advance(0.0, &g);
+        assert_eq!(sunk.body.position.z, 2.0, "lifted by (ground - centre) + r");
+        let mut high = walker(Vec3::new(500.0, 500.0, 5.0), 0.0);
+        high.advance(3000.0, &g);
+        assert_eq!(high.body.position.z, 5.0);
+    }
+
+    /// A body, node 0, whose frame 1 lunges it 5 forward and 0.2 up, and a leg hung from
+    /// it that frame 1 lifts 0.3, with a control point 1 below each.
+    fn legs() -> (Mesh, Vec<ControlPoint>) {
+        let node = |parent: u16, anim_start: u16| Node {
+            name: String::new(),
+            flags: 0,
+            parent,
+            anim_start,
+            fallback_key: 4,
+            slot_index: [NO_SLOT; 15],
+        };
+        let key =
+            |time: f32, translation: [f32; 3]| Key { translation, time, rotation: [1.0, 0.0, 0.0, 0.0] };
+        let mesh = Mesh {
+            name: "legs".into(),
+            positions: Vec::new(),
+            normals: Vec::new(),
+            uv: Vec::new(),
+            lightmap_uv: Vec::new(),
+            triangles: Vec::new(),
+            nodes: vec![node(NO_PARENT, 0), node(0, 2)],
+            slots: Vec::new(),
+            batches: Vec::new(),
+            face_flags: Vec::new(),
+            face_normals: Vec::new(),
+            keys: vec![
+                key(0.0, [0.0; 3]),
+                key(1.0, [0.0, 5.0, 0.2]),
+                key(0.0, [0.0; 3]),
+                key(1.0, [0.0, 0.0, 0.3]),
+                key(0.0, [0.0; 3]),
+            ],
+            frame_map: vec![0, 1, 2, 3],
+            frame_count: 2,
+            sphere: None,
+        };
+        let point = |node: u32| ControlPoint {
+            name: String::new(),
+            a: [0.0, f32::from_bits(node), f32::from_bits(node)],
+            position: [0.0, 0.0, -1.0],
+            direction: [0.0, 0.0, 1.0],
+        };
+        (mesh, vec![point(0), point(1)])
+    }
+
+    /// Standing on two contacts in 50 ms steps, the mesh posed at frame 1, which lifts
+    /// the second leg.
+    fn on_legs(z: f32, flags: [u32; 2]) -> Walker {
+        let (mesh, points) = legs();
+        let mut c = crate::motion::tests::hero();
+        c.counts[1] = 2;
+        let contact = |point: i32, flags: u32| Contact { point, flags, group: -1 };
+        c.states = vec![State {
+            mode: STATE_ANCHOR | STATE_GROUND_CONTACTS,
+            pair_a: [1.0, 1.0],
+            pair_b: [1.0, 1.0],
+            contacts: vec![contact(0, flags[0]), contact(1, flags[1])],
+            ..stand()
+        }];
+        c.costs = vec![0.0];
+        Walker::new(c, &mesh, &points, Vec3::new(500.0, 500.0, z), 0.0)
+    }
+
+    #[test]
+    fn a_body_on_contacts_falls_under_gravity_until_one_lands() {
+        let g = field();
+        let mut w = on_legs(3.0, [CONTACT_SUPPORT; 2]);
+        w.advance(0.0, &g);
+        assert!((w.body.position.z - (3.0 - 0.0125)).abs() < 1e-6, "{}", w.body.position.z);
+        assert!((w.body.fall_speed + 0.5).abs() < 1e-6);
+        w.advance(50.0, &g);
+        assert!((w.body.position.z - (3.0 - 0.0125 - 0.0375)).abs() < 1e-5);
+        w.advance(2000.0, &g);
+        // The body's point lands 1 below the origin, its lunge left out; the lifted leg
+        // is 0.3 short.
+        assert!((w.body.position.z - 1.0).abs() < 1e-5, "{}", w.body.position.z);
+        let feet = w.feet.as_ref().unwrap();
+        let last = Frames { a: 1.0, b: 1.0, weight: 1.0 };
+        assert_eq!(feet.place(0, last), Some(Vec3::new(0.0, 0.0, -1.0)));
+        assert_eq!(feet.place(1, last), Some(Vec3::new(0.0, 0.0, -0.7)));
+        assert_eq!(w.body.fall_speed, 0.0);
+        assert_eq!(w.body.ground_normal, Vec3::Z);
+        w.advance(4000.0, &g);
+        assert!((w.body.position.z - 1.0).abs() < 1e-5, "it stays");
+    }
+
+    #[test]
+    fn only_a_flag_one_contact_holds_the_body_up_and_a_sunken_one_lifts_it() {
+        let g = field();
+        let mut w = on_legs(1.0, [0, CONTACT_SUPPORT]);
+        w.advance(2000.0, &g);
+        assert!((w.body.position.z - 0.7).abs() < 1e-5, "the lifted leg lands: {}", w.body.position.z);
+        let mut sunk = on_legs(0.2, [CONTACT_SUPPORT; 2]);
+        sunk.advance(0.0, &g);
+        assert!((sunk.body.position.z - 1.0).abs() < 1e-5, "{}", sunk.body.position.z);
+    }
+
+    #[test]
+    fn the_map_edge_keeps_the_body_inside_and_a_body_on_contacts_takes_its_push_flat() {
+        let g = field();
+        // The box runs to x 1001, so the side inset by 2 is at 999: 4 back and the band's 3.
+        let mut w = walker(Vec3::new(1003.0, 500.0, 2.0), 0.0);
+        w.keep_inside(&g);
+        assert!((w.body.position.x - 996.0).abs() < 1e-4, "{}", w.body.position.x);
+        // 150 is 50 above the box's top: 30 back down and the band's 3.
+        let mut flyer = walker(Vec3::new(500.0, 500.0, 150.0), 0.0);
+        flyer.keep_inside(&g);
+        assert!((flyer.body.position.z - 117.0).abs() < 1e-4, "{}", flyer.body.position.z);
+        let mut legs = on_legs(150.0, [CONTACT_SUPPORT; 2]);
+        legs.keep_inside(&g);
+        assert_eq!(legs.body.position, Vec3::new(500.0, 500.0, 150.0), "a push straight down is dropped");
+    }
+
+    #[test]
+    fn walking_into_the_map_edge_stops_inside_its_band() {
+        let g = field();
+        let facing_east = -FRAC_PI_2;
+        let mut w = walker(Vec3::new(850.0, 500.0, 2.0), facing_east);
+        w.body.command = [0.0, 1.0, 0.0];
+        let mut t = 0.0;
+        while t < 20_000.0 {
+            t += DT;
+            w.advance(t, &g);
+        }
+        // 60 passes a second: the band's push matches 14 m/s some 6 m into it.
+        let x = w.body.position.x;
+        assert!(x > 999.0 - 80.0 && x < 999.0 - 70.0, "{x}");
+    }
+
+    #[test]
     fn between_steps_the_body_and_the_blend_are_interpolated() {
-        let g = floor();
-        let mut w = walker(Vec3::new(5.0, 5.0, 0.0), 0.0);
+        let g = field();
+        let mut w = walker(Vec3::new(500.0, 500.0, 2.0), 0.0);
         w.body.command = [0.0, 1.0, 0.0];
         w.advance(1000.0, &g);
         let mid = w.machine.step_start_ms + w.machine.step_ms / 2.0;

@@ -17,6 +17,17 @@ pub const SLOPE_MODE: i32 = 2;
 pub const SLOPE_BRAKE: f32 = 1.5;
 /// A pending triple at rest: nothing left to turn.
 pub const NO_TURN: f32 = 0.5;
+/// The world's gravity, `CWorld` `+0xc` (`Terrain.dll:0x10024c1a`); nothing changes it.
+pub const GRAVITY: f32 = 10.0;
+/// The map edge (`Control.dll:0x1001e7ba`): the band inside an inset side that pushes
+/// back, and how hard; the height above the box's top that is let in, and how hard.
+pub const EDGE_BAND: f32 = 80.0;
+pub const EDGE_BAND_PUSH: f32 = 3.0 * 0.0125;
+pub const EDGE_ABOVE: f32 = 20.0;
+pub const EDGE_ABOVE_PUSH: f32 = 3.0 * 0.05;
+/// A push made horizontal keeps its length, its x and y scaled up at most this much
+/// (`Control.dll:0x1000ca44`).
+pub const HORIZONTAL_SCALE_MOST: f32 = 4.0;
 
 /// The live block's speeds and rates (`0x1000fca0`), per axis.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -98,7 +109,63 @@ pub fn integrate_turn(pending: &mut [f32; 3], limits: &Limits, dt: f32) -> [f32;
     step
 }
 
+/// The fall a body tries this step (`Control.dll:0x10015d91`): `(v − g dt ÷ 2) dt`,
+/// with `v` its fall speed.
+pub fn fall(fall_speed: f32, dt: f32) -> f32 {
+    (fall_speed - GRAVITY * dt / 2.0) * dt
+}
+
+/// `0x1001e650`: the push that keeps a sphere at `centre` inside the box `lo`..`hi`.
+///
+/// Hard: past an x or y side inset by `radius`, back to it; more than 20 above the top,
+/// back to that; nothing from below. Soft: within 80 of an inset side,
+/// 3 × 0.0125 × min(depth, 80), the depth into that band; above the top,
+/// 3 × 0.05 × min(height, 20).
+pub fn edge_push(centre: Vec3, radius: f32, lo: Vec3, hi: Vec3) -> Vec3 {
+    let mut push = Vec3::ZERO;
+    for a in 0..2 {
+        let (low, high) = (lo[a] + radius, hi[a] - radius);
+        if centre[a] < low {
+            push[a] += low - centre[a];
+        } else if centre[a] > high {
+            push[a] += high - centre[a];
+        }
+        let (in_low, in_high) = (centre[a] - low, high - centre[a]);
+        if in_low < EDGE_BAND {
+            push[a] += EDGE_BAND_PUSH * (EDGE_BAND - in_low).min(EDGE_BAND);
+        }
+        if in_high < EDGE_BAND {
+            push[a] -= EDGE_BAND_PUSH * (EDGE_BAND - in_high).min(EDGE_BAND);
+        }
+    }
+    let above = centre.z - hi.z;
+    if above > EDGE_ABOVE {
+        push.z -= above - EDGE_ABOVE;
+    }
+    if above > 0.0 {
+        push.z -= EDGE_ABOVE_PUSH * above.min(EDGE_ABOVE);
+    }
+    push
+}
+
+/// A push as a machine in a state with contact points takes it (`0x1000ca44`): z
+/// dropped, x and y scaled up to keep the length, at most ×4.
+pub fn horizontal(push: Vec3) -> Vec3 {
+    let flat = push.with_z(0.0);
+    let across = flat.length();
+    if across <= 0.0 {
+        return Vec3::ZERO;
+    }
+    flat * (push.length() / across).min(HORIZONTAL_SCALE_MOST)
+}
+
 /// A machine's place and motion.
+///
+/// STAND-IN: docs/24-motion.md#the-hull-leans-and-rights-itself--read-and-measured --
+/// the lean (state `+0x08`, triple 6) and the righting (bits `0x30`/`0xC0`, triple 5)
+/// are read but not modelled, and the vector bits `0x30` right the hull toward is not
+/// read: the body has a yaw alone, takes only the turn about z, and neither leans nor
+/// rights. Every hero state leans on no axis and rights toward world up.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Body {
     /// World position of the object's origin.
@@ -113,9 +180,17 @@ pub struct Body {
     pub command: [f32; 3],
     /// The turn not yet made (`+0x1e0`), 0.5 at rest.
     pub pending: [f32; 3],
-    /// The strafe angle asked for (`+0x1f4`), and how much of it the body has turned.
+    /// The strafe angle asked for (`+0x1f4`).
     pub strafe: f32,
-    pub strafe_turned: f32,
+    /// The strafe angle the attitude integrator last took up (body `+0x17c`), and the
+    /// change it added to the hull's turn that step (`+0x188`).
+    pub strafe_previous: f32,
+    pub strafe_change: f32,
+    /// The fall speed, 0 or less (body `+0xac`).
+    pub fall_speed: f32,
+    /// The averaged ground normal of the last landing (body `+0x194`), which the slope
+    /// brake reads.
+    pub ground_normal: Vec3,
 }
 
 impl Body {
@@ -128,7 +203,10 @@ impl Body {
             command: [0.0; 3],
             pending: [NO_TURN; 3],
             strafe: 0.0,
-            strafe_turned: 0.0,
+            strafe_previous: 0.0,
+            strafe_change: 0.0,
+            fall_speed: 0.0,
+            ground_normal: Vec3::Z,
         }
     }
 
@@ -138,13 +216,18 @@ impl Body {
         Vec3::new(v.x * c - v.y * s, v.x * s + v.y * c, v.z)
     }
 
-    /// Where the unit looks: the body's heading less the strafe it has turned.
-    ///
-    /// STAND-IN: docs/24-motion.md#from-input-to-motion--read-and-measured -- how the
-    /// strafe turn splits between hull and turret is not read; the legs turn and the
-    /// turret holds its heading.
+    /// Where the unit looks once a step is done: the hull's yaw plus the turret's strafe
+    /// offset at the step's end, −(the strafe angle taken up) (`Control.dll:0x10005ab8`).
     pub fn heading(&self) -> f32 {
-        self.yaw - self.strafe_turned
+        self.yaw - self.strafe_previous
+    }
+
+    /// The strafe offset the control takt hands the turret at phase `s` of the step
+    /// (`0x10005ab8`): `(1 − s) × change − angle`, which is −(previous + s × change), in
+    /// radians. The turret keeps it ÷ its yaw span, negated on a hung mounting, and its
+    /// yaw channel's first entry adds that before it wraps and inverts (docs/30).
+    pub fn strafe_offset(&self, s: f32) -> f32 {
+        (1.0 - s) * self.strafe_change - self.strafe_previous
     }
 
     pub fn forward(&self) -> Vec3 {
@@ -235,6 +318,50 @@ pub(crate) mod tests {
         let mut rest = [0.5; 3];
         assert_eq!(integrate_turn(&mut rest, &live, 0.05), [0.0; 3]);
         assert_eq!(rest, [0.5; 3]);
+    }
+
+    #[test]
+    fn a_fall_is_the_speed_less_half_a_steps_gravity_times_the_step() {
+        assert!((fall(0.0, 0.05) + 0.0125).abs() < 1e-7);
+        assert!((fall(-0.5, 0.05) + 0.0375).abs() < 1e-7);
+    }
+
+    #[test]
+    fn the_map_edge_pushes_back_hard_past_an_inset_side_and_softly_within_eighty() {
+        let (lo, hi) = (Vec3::new(0.0, 0.0, -10.0), Vec3::new(1000.0, 1000.0, 50.0));
+        let deep = Vec3::new(500.0, 500.0, 0.0);
+        assert_eq!(edge_push(deep, 2.0, lo, hi), Vec3::ZERO);
+        // 40 inside the inset side at x 998: 40 into the band, 1.5 back.
+        let p = edge_push(Vec3::new(958.0, 500.0, 0.0), 2.0, lo, hi);
+        assert!((p.x + 1.5).abs() < 1e-5 && p.y == 0.0 && p.z == 0.0, "{p}");
+        // 5 past it: back to the side, and the whole band's 3.
+        let p = edge_push(Vec3::new(1003.0, 500.0, 0.0), 2.0, lo, hi);
+        assert!((p.x + 8.0).abs() < 1e-4, "{p}");
+        let p = edge_push(Vec3::new(1.0, -4.0, 0.0), 2.0, lo, hi);
+        assert!((p.x - 4.0).abs() < 1e-4 && (p.y - 9.0).abs() < 1e-4, "{p}");
+        // Above the top: softly up to 20, and back to 20 past it; nothing from below.
+        assert!((edge_push(Vec3::new(500.0, 500.0, 60.0), 2.0, lo, hi).z + 1.5).abs() < 1e-5);
+        assert!((edge_push(Vec3::new(500.0, 500.0, 75.0), 2.0, lo, hi).z + 8.0).abs() < 1e-4);
+        assert_eq!(edge_push(Vec3::new(500.0, 500.0, -500.0), 2.0, lo, hi), Vec3::ZERO);
+    }
+
+    #[test]
+    fn a_push_made_horizontal_keeps_its_length_up_to_four_times_its_breadth() {
+        assert_eq!(horizontal(Vec3::new(3.0, 0.0, 4.0)), Vec3::new(5.0, 0.0, 0.0));
+        assert_eq!(horizontal(Vec3::new(1.0, 0.0, 10.0)), Vec3::new(4.0, 0.0, 0.0));
+        assert_eq!(horizontal(Vec3::new(0.0, 0.0, -3.0)), Vec3::ZERO);
+    }
+
+    #[test]
+    fn the_turret_is_handed_minus_the_previous_angle_plus_the_change_eased_across_the_step() {
+        let mut b = Body::new(Vec3::ZERO, 0.0);
+        b.strafe_previous = std::f32::consts::FRAC_PI_2;
+        b.strafe_change = std::f32::consts::FRAC_PI_2;
+        b.yaw = std::f32::consts::FRAC_PI_2;
+        assert_eq!(b.strafe_offset(0.0), 0.0);
+        assert!((b.strafe_offset(0.5) + std::f32::consts::FRAC_PI_4).abs() < 1e-6);
+        assert_eq!(b.strafe_offset(1.0), -std::f32::consts::FRAC_PI_2);
+        assert_eq!(b.heading(), b.yaw + b.strafe_offset(1.0));
     }
 
     #[test]

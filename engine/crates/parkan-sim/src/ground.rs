@@ -1,8 +1,8 @@
 //! The ground under a machine: `docs/24-motion.md`, "Finding the ground".
 //!
 //! The faces a unit stands on are level 0 of the map's `Land.msh`, less the water
-//! surface, which is a class of its own; under a lake the ground is the bed. A
-//! face is ground only while its normal z is above cos 80°.
+//! surface, which is a class of its own; under a lake the ground is the bed. The
+//! search takes a face only while its normal z is above cos 80°.
 
 use glam::Vec3;
 use parkan_formats::landmesh::LandMesh;
@@ -42,6 +42,8 @@ pub struct Ground {
     lo: [f32; 2],
     size: [usize; 2],
     cells: Vec<Vec<u32>>,
+    /// The mesh's bounding box: its stream-2 header's corners are exactly this.
+    world: ([f32; 3], [f32; 3]),
 }
 
 impl Ground {
@@ -71,13 +73,18 @@ impl Ground {
                 }
             }
         }
-        Self { land, lo, size, cells }
+        Self { land, lo, size, cells, world: (lo3, hi3) }
     }
 
     /// The map's extent in x and y.
     pub fn bounds(&self) -> ([f32; 2], [f32; 2]) {
-        let (lo, hi) = self.land.bounds();
+        let (lo, hi) = self.world;
         ([lo[0], lo[1]], [hi[0], hi[1]])
+    }
+
+    /// The map's box, the one the rounds are clipped to: the ground mesh's bounds.
+    pub fn world_box(&self) -> (Vec3, Vec3) {
+        (Vec3::from_array(self.world.0), Vec3::from_array(self.world.1))
     }
 
     /// A segment through the ground (`Terrain.dll:0x100205c0`): the cells along its xy
@@ -85,8 +92,12 @@ impl Ground {
     /// the nearest strike in the first cell that has one.
     ///
     /// STAND-IN: docs/26-damage.md#the-hit-test--read-and-measured -- the landscape's
-    /// own cell size is not this index's; the water surface, mask bit 8 by the look of
-    /// it, is passed through.
+    /// own cell size is not read; this index's 16 m cells.
+    ///
+    /// STAND-IN: docs/26-damage.md#the-hit-test--read-and-measured -- whether a round's
+    /// ground test strikes the water surface is not read; it passes through: the index
+    /// holds no face whose `Land.msh` surface bitfield has bit `0x02`, so a round meets
+    /// the bed.
     pub fn segment(&self, p0: Vec3, p1: Vec3) -> Option<crate::hit::Strike> {
         let cell_of = |p: Vec3| (((p.x - self.lo[0]) / CELL).floor(), ((p.y - self.lo[1]) / CELL).floor());
         let (mut cx, mut cy) = cell_of(p0);
@@ -130,37 +141,86 @@ impl Ground {
         None
     }
 
-    /// The highest ground face at `(x, y)` whose plane there is not above `top`.
-    pub fn below(&self, x: f32, y: f32, top: f32) -> Option<Hit> {
+    /// The ground faces whose triangle holds `(x, y)`, in the file's order, which is the
+    /// landscape's cell order, each with its barycentric height there.
+    fn holding(&self, x: f32, y: f32) -> impl Iterator<Item = (usize, f32)> + '_ {
         let cx = ((x - self.lo[0]) / CELL).floor();
         let cy = ((y - self.lo[1]) / CELL).floor();
-        if cx < 0.0 || cy < 0.0 || cx as usize >= self.size[0] || cy as usize >= self.size[1] {
-            return None;
-        }
-        let mut best: Option<Hit> = None;
-        for &f in &self.cells[cy as usize * self.size[0] + cx as usize] {
+        let inside = cx >= 0.0 && cy >= 0.0 && (cx as usize) < self.size[0] && (cy as usize) < self.size[1];
+        let cell: &[u32] = if inside { &self.cells[cy as usize * self.size[0] + cx as usize] } else { &[] };
+        cell.iter().filter_map(move |&f| {
             let face = &self.land.faces[f as usize];
             let [a, b, c] = face.vertices.map(|v| Vec3::from_array(self.land.positions[usize::from(v)]));
             let den = (b.y - c.y) * (a.x - c.x) + (c.x - b.x) * (a.y - c.y);
             if den.abs() < 1e-9 {
-                continue;
+                return None;
             }
             let l1 = ((b.y - c.y) * (x - c.x) + (c.x - b.x) * (y - c.y)) / den;
             let l2 = ((c.y - a.y) * (x - c.x) + (a.x - c.x) * (y - c.y)) / den;
             let l3 = 1.0 - l1 - l2;
             if l1 < -1e-5 || l2 < -1e-5 || l3 < -1e-5 {
-                continue;
+                return None;
             }
-            let z = l1 * a.z + l2 * b.z + l3 * c.z;
+            Some((f as usize, l1 * a.z + l2 * b.z + l3 * c.z))
+        })
+    }
+
+    /// The highest ground face at `(x, y)` whose plane there is not above `top`.
+    pub fn below(&self, x: f32, y: f32, top: f32) -> Option<Hit> {
+        let mut best: Option<Hit> = None;
+        for (f, z) in self.holding(x, y) {
             if z <= top && best.is_none_or(|h| z > h.point.z) {
                 best = Some(Hit {
-                    face: f as usize,
+                    face: f,
                     point: Vec3::new(x, y, z),
-                    normal: Vec3::from_array(face.normal),
+                    normal: Vec3::from_array(self.land.faces[f].normal),
                 });
             }
         }
         best
+    }
+
+    /// The walk-face query (`IWorld` slot 10, `Terrain.dll:0x10026b20`) on the landscape:
+    /// the first face whose triangle holds `p`'s xy and whose plane lies at or above `p`
+    /// (register 6) or at or below it (register 10). The hit is `p` dropped vertically
+    /// onto the plane through the face's first vertex (`Control.dll:0x1001bfc0`).
+    pub fn query(&self, p: Vec3, up: bool) -> Option<Hit> {
+        self.holding(p.x, p.y).find_map(|(f, _)| {
+            let face = &self.land.faces[f];
+            let normal = Vec3::from_array(face.normal);
+            if normal.z.abs() < 1e-6 {
+                return None;
+            }
+            let v = Vec3::from_array(self.land.positions[usize::from(face.vertices[0])]);
+            let z = v.z - (normal.x * (p.x - v.x) + normal.y * (p.y - v.y)) / normal.z;
+            let right_way = if up { z >= p.z } else { z <= p.z };
+            right_way.then_some(Hit { face: f, point: Vec3::new(p.x, p.y, z), normal })
+        })
+    }
+
+    /// The ground contact's search from `p` (`Control.dll:0x1001a6cc`, `0x1001a77d`):
+    /// the face above if it is walkable and less than `r2` above, else the face below if
+    /// it is walkable, else the face above whatever it is (`0x1001a7e1`).
+    ///
+    /// STAND-IN: docs/24-motion.md#finding-the-ground--read -- the walk from the face
+    /// held last tick (`FindWorldFace`) is read but not modelled: the face is searched
+    /// fresh each step.
+    ///
+    /// STAND-IN: docs/24-motion.md#not-established -- which scene objects the walk-face
+    /// query visits (types 1 and 3) is not read; the landscape alone is ground, and
+    /// bridges and buildings are not.
+    pub fn search(&self, p: Vec3, r2: f32) -> Option<Hit> {
+        let up = self.query(p, true);
+        if let Some(h) = up
+            && h.walkable()
+            && h.point.z - p.z < r2
+        {
+            return up;
+        }
+        match self.query(p, false) {
+            Some(h) if h.walkable() => Some(h),
+            _ => up,
+        }
     }
 }
 
@@ -204,18 +264,72 @@ pub(crate) mod tests {
             face([1, 5, 2], steep, 0),
             face([6, 7, 8], [0.0, 0.0, 1.0], SURFACE_WATER_BIT),
         ];
+        mesh(positions, faces)
+    }
+
+    fn mesh(positions: Vec<[f32; 3]>, faces: Vec<Face>) -> Ground {
         let land = LandMesh {
             normals: vec![[0.0, 0.0, 1.0]; positions.len()],
             uv1: vec![[0.0; 2]; positions.len()],
             uv2: vec![[0.0; 2]; positions.len()],
             blend: vec![1.0; positions.len()],
             positions,
-            cells: vec![Cell { first: 0, count: 5 }],
+            cells: vec![Cell { first: 0, count: faces.len() as u16 }],
             faces,
             layer1: Vec::new(),
             layer2: Vec::new(),
         };
         Ground::new(land)
+    }
+
+    /// Ground from quads, each four corners counter-clockwise from above, split in two
+    /// triangles with their normals from the geometry.
+    pub(crate) fn quads(quads: &[[[f32; 3]; 4]]) -> Ground {
+        let mut positions = Vec::new();
+        let mut faces = Vec::new();
+        for q in quads {
+            let at = positions.len() as u16;
+            positions.extend_from_slice(q);
+            for corners in [[0u16, 1, 2], [0, 2, 3]] {
+                let [a, b, c] = corners.map(|i| Vec3::from_array(q[usize::from(i)]));
+                let n = (b - a).cross(c - a).normalize();
+                faces.push(face(corners.map(|i| at + i), n.to_array(), 0));
+            }
+        }
+        mesh(positions, faces)
+    }
+
+    #[test]
+    fn the_search_takes_a_sunken_face_above_within_r2_and_otherwise_the_face_below() {
+        // A floor at 0 under a shelf at 1 over x 0 to 20.
+        let g = quads(&[
+            [[0.0, 0.0, 0.0], [40.0, 0.0, 0.0], [40.0, 40.0, 0.0], [0.0, 40.0, 0.0]],
+            [[0.0, 0.0, 1.0], [20.0, 0.0, 1.0], [20.0, 40.0, 1.0], [0.0, 40.0, 1.0]],
+        ]);
+        let p = Vec3::new(10.0, 10.0, 0.5);
+        assert_eq!(g.query(p, true).unwrap().point, Vec3::new(10.0, 10.0, 1.0));
+        assert_eq!(g.query(p, false).unwrap().point, Vec3::new(10.0, 10.0, 0.0));
+        assert_eq!(g.search(p, 1.0).unwrap().point.z, 1.0, "sunk 0.5 into the shelf, within r2");
+        assert_eq!(g.search(p, 0.4).unwrap().point.z, 0.0, "the shelf is too far above");
+        assert_eq!(g.search(Vec3::new(30.0, 10.0, 0.5), 1.0).unwrap().point.z, 0.0);
+        assert_eq!(g.search(Vec3::new(50.0, 10.0, 0.5), 1.0), None, "off the mesh");
+    }
+
+    #[test]
+    fn with_nothing_walkable_the_search_keeps_the_face_above_whatever_it_is() {
+        // A face at 85 degrees, rising 11.4 over x 0 to 1.
+        let g = quads(&[[[0.0, 0.0, 0.0], [1.0, 0.0, 11.43], [1.0, 10.0, 11.43], [0.0, 10.0, 0.0]]]);
+        let hit = g.search(Vec3::new(0.5, 5.0, 0.0), 1.0).unwrap();
+        assert!(!hit.walkable());
+        assert!((hit.point.z - 5.715).abs() < 1e-2, "{}", hit.point.z);
+        assert_eq!(g.search(Vec3::new(0.5, 5.0, 10.0), 1.0), None, "below, and not walkable");
+    }
+
+    #[test]
+    fn the_world_box_is_the_ground_meshs_bounds() {
+        let (lo, hi) = floor().world_box();
+        assert_eq!((lo, hi), (Vec3::ZERO, Vec3::new(41.0, 40.0, 40.0)));
+        assert_eq!(floor().bounds(), ([0.0, 0.0], [41.0, 40.0]));
     }
 
     #[test]

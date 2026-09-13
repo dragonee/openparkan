@@ -30,9 +30,11 @@ pub const SENSITIVITY_SCALE: f32 = 0.01;
 pub const STRAFE: f32 = FRAC_PI_2;
 pub const STRAFE_WALKING: f32 = FRAC_PI_4;
 
-/// STAND-IN: docs/14-controls.md#from-a-row-to-a-command--read-and-measured -- the
-/// signs `SetInverseMotion` starts with are not read; chosen so the mouse moved right
-/// turns right and moved down looks down.
+/// The mouse's signs. The game's are +1 on both (`MOUSE_REV_Y` clear), and its attitude
+/// integrator turns the hull by −(z − 0.5) × 2π (`Control.dll:0x10014858`); here the
+/// integrator does not negate, so mouse X's sign carries that negation instead. On
+/// screen the two agree, as docs/30-turrets.md derives: the mouse moved right turns the
+/// hull right, and moved down lowers the sight.
 pub const INVERT: [f32; 2] = [-1.0, 1.0];
 
 /// The mouse filter's memory.
@@ -80,14 +82,25 @@ pub struct Pilot {
     pub invert: [f32; 2],
     filter: MouseFilter,
     shift: bool,
-    /// The walk command held: 1, −1 or 0.
+    /// What the walking handler last set the command's y to.
     walk: f32,
-    /// 1 while strafing left, −1 right.
-    strafe: f32,
+    /// The strafe keys held: left, right.
+    strafing: [bool; 2],
+    /// The ramp rows active, each with the game time it became so (row `+0x80`,
+    /// `+0x84`).
+    active: Vec<(Action, f64)>,
+    /// The game clock as the last input update saw it.
+    clock_ms: f64,
     /// The fire button is held: `MCMD_STATE` to the selected guns.
     pub fire: bool,
     /// `MCMD_SELECT` rows not yet taken: a gun's number, or −1 for all of them.
     pub selects: Vec<i32>,
+}
+
+/// `value` moved toward `target` by at most `reach`, never past it.
+fn approach(value: f32, target: f32, reach: f32) -> f32 {
+    let gap = target - value;
+    if gap.abs() <= reach { target } else { value + reach.copysign(gap) }
 }
 
 impl Pilot {
@@ -100,7 +113,9 @@ impl Pilot {
             filter: MouseFilter::default(),
             shift: false,
             walk: 0.0,
-            strafe: 0.0,
+            strafing: [false; 2],
+            active: Vec::new(),
+            clock_ms: 0.0,
             fire: false,
             selects: Vec::new(),
         }
@@ -128,13 +143,55 @@ impl Pilot {
     }
 
     /// A key or button going down or up.
+    ///
+    /// A row with a ramp time is not run by the event: the event makes the key's
+    /// matching row active, stamped with the game clock, and clears its other row
+    /// (`World3D.dll:0x1000f5a4`), and the input update runs it.
+    ///
+    /// STAND-IN: docs/14-controls.md#a-row-that-stays-down--read -- every active row is
+    /// read to run again on each input update, but what the walk, strafe and weapon
+    /// handlers do when run again while their key is held is not (a select row run again
+    /// would toggle its gun each update); a row without a ramp time runs once, as its key
+    /// goes down or comes up.
     pub fn key(&mut self, key: &str, pressed: bool, hands: &mut Hands) {
         let rows = self.matching(key, pressed);
         if key == SHIFT {
             self.shift = pressed;
         }
+        self.active.retain(|(row, _)| row.key != key);
         for row in &rows {
-            self.apply(row, None, hands);
+            if row.ramp_time != 0 {
+                self.active.push((row.clone(), self.clock_ms));
+            } else {
+                self.apply(row, None, hands);
+            }
+        }
+    }
+
+    /// The input update (`World3D.dll:0x1000f477`): every active ramp row is run again,
+    /// moving its value toward the row's magnitude by ramp × min(1, held ms ÷ ramp
+    /// time), never past it (`0x10010a50`). A press row stays active while its key is
+    /// down; a release row clears itself once it arrives.
+    ///
+    /// STAND-IN: docs/24-motion.md#not-established -- how often `World3D.dll`'s input
+    /// update runs is not read, and it paces the ramp; the caller runs it once a
+    /// rendered frame, and once a tick where nothing is rendered.
+    pub fn update(&mut self, now_ms: f64, hands: &mut Hands) {
+        self.clock_ms = now_ms;
+        for (row, since) in std::mem::take(&mut self.active) {
+            let held = (now_ms - since).max(0.0) as f32;
+            let reach = row.ramp * (held / row.ramp_time as f32).min(1.0);
+            let arrived = match row.code() {
+                MCMD_WALK_F | MCMD_WALK_B | MCMD_FORWARD => {
+                    self.walk = approach(hands.body.command[1], row.value, reach);
+                    hands.body.command[1] = self.walk;
+                    self.walk == row.value
+                }
+                _ => true,
+            };
+            if row.pressed || !arrived {
+                self.active.push((row, since));
+            }
         }
     }
 
@@ -155,18 +212,11 @@ impl Pilot {
     /// `0x1000fb40`: a row's call. An axis row adds `amount`; any other row sets.
     fn apply(&mut self, row: &Action, amount: Option<f32>, hands: &mut Hands) {
         match row.code() {
-            MCMD_WALK_F | MCMD_WALK_B | MCMD_FORWARD if row.ramp == 0.0 => {
+            MCMD_WALK_F | MCMD_WALK_B | MCMD_FORWARD => {
                 self.walk = row.value;
-                self.drive(hands.body);
+                hands.body.command[1] = row.value;
             }
-            MCMD_LEFT => {
-                self.strafe = row.value;
-                self.drive(hands.body);
-            }
-            MCMD_RIGHT => {
-                self.strafe = -row.value;
-                self.drive(hands.body);
-            }
+            code @ (MCMD_LEFT | MCMD_RIGHT) => self.strafe(code == MCMD_LEFT, row.pressed, hands.body),
             code @ (MCMD_ANGLE_X | MCMD_ANGLE_Y | MCMD_ANGLE_Z) => {
                 let component = match code {
                     MCMD_ANGLE_X => 0,
@@ -191,29 +241,29 @@ impl Pilot {
             controls::MCMD_SELECT if row.class_id() == controls::CICLS_MULTIGUN => {
                 self.selects.push(row.index);
             }
-            // STAND-IN: docs/24-motion.md#from-input-to-motion--read-and-measured -- what
-            // the keypad cruise's ramp does is not read; ramp rows do nothing.
             _ => {}
         }
     }
 
-    /// `SetTangAccel` and `SetStrafeAngle` from what is held: walking sets the
-    /// command's y; strafing sets it to ±1 in the current direction and turns by ±π/2,
-    /// ±π/4 while walking.
-    fn drive(&self, body: &mut Body) {
-        let direction = if self.walk < 0.0 { -1.0 } else { 1.0 };
-        body.command[1] = if self.walk != 0.0 {
-            self.walk
-        } else if self.strafe != 0.0 {
-            direction
+    /// `MCMD_LEFT` or `MCMD_RIGHT` going down or up: `SetTangAccel` and
+    /// `SetStrafeAngle` (docs/24-motion.md, "From input to motion"). Going down sets the
+    /// command's y to ±1 with the sign of the current direction, and the angle to +π/2
+    /// left or −π/2 right, ±π/4 while already walking; the angle is set as the key goes
+    /// down and not worked out again. Coming up returns the angle to 0, and the command
+    /// to 0 if nothing else is held.
+    fn strafe(&mut self, left: bool, pressed: bool, body: &mut Body) {
+        let side = usize::from(!left);
+        self.strafing[side] = pressed;
+        if pressed {
+            body.command[1] = if body.command[1] < 0.0 { -1.0 } else { 1.0 };
+            let angle = if self.walk != 0.0 { STRAFE_WALKING } else { STRAFE };
+            body.strafe = if left { angle } else { -angle };
         } else {
-            0.0
-        };
-        // STAND-IN: docs/24-motion.md#from-input-to-motion--read-and-measured -- the
-        // angle is set as each key goes down; here it follows whatever is held, and
-        // backing up mirrors it so strafing left still goes left.
-        let angle = if self.walk != 0.0 { STRAFE_WALKING } else { STRAFE };
-        body.strafe = self.strafe * direction * angle;
+            body.strafe = 0.0;
+            if self.walk == 0.0 && !self.strafing[1 - side] {
+                body.command[1] = 0.0;
+            }
+        }
     }
 }
 
@@ -225,6 +275,11 @@ mod tests {
     fn hero_table() -> Vec<Action> {
         let text = b"KEY   SCAN_NULL SCAN_A 1 CICLS_UNKNOWN MCMD_LEFT  1.0 0 0 0.0 0
 KEY   SCAN_NULL SCAN_A 0 CICLS_UNKNOWN MCMD_LEFT  0.0 1 0 0.0 0
+KEY   SCAN_NULL SCAN_D 1 CICLS_UNKNOWN MCMD_RIGHT  1.0 0 0 0.0 0
+KEY   SCAN_NULL SCAN_D 0 CICLS_UNKNOWN MCMD_RIGHT  0.0 1 0 0.0 0
+KEY   SCAN_NULL SCAN_G_PLUS 1 CICLS_UNKNOWN MCMD_FORWARD  1.0 0 0 0.05 1000
+KEY   SCAN_NULL SCAN_G_SUB 1 CICLS_UNKNOWN MCMD_FORWARD -1.0 0 0 0.05 1000
+KEY   SCAN_NULL SCAN_G_SLASH 1 CICLS_UNKNOWN MCMD_FORWARD  0.0 0 0 0.0 0
 KEY   SCAN_NULL SCAN_W 1 CICLS_UNKNOWN MCMD_WALK_F  1.0 0 0 0.0 0
 KEY   SCAN_NULL SCAN_W 0 CICLS_UNKNOWN MCMD_WALK_F  0.0 0 0 0.0 0
 KEY   SCAN_NULL SCAN_S 1 CICLS_UNKNOWN MCMD_WALK_B -1.0 0 0 0.0 0
@@ -267,19 +322,65 @@ KEY   SCAN_NULL SCAN_W_3 1 CICLS_MULTIGUN MCMD_SELECT 0.0 3 0 0.0 0
     }
 
     #[test]
-    fn walking_and_strafing_set_the_command_and_the_angle() {
+    fn walking_and_strafing_set_the_command_and_the_angle_as_each_key_goes_down() {
         let mut pilot = Pilot::new(hero_table(), 100.0);
         let mut r = rig();
         pilot.key("SCAN_W", true, &mut r.hands());
         assert_eq!(r.body.command[1], 1.0);
         pilot.key("SCAN_A", true, &mut r.hands());
-        assert_eq!(r.body.strafe, FRAC_PI_4);
+        assert_eq!((r.body.command[1], r.body.strafe), (1.0, FRAC_PI_4), "a quarter while walking");
         pilot.key("SCAN_W", false, &mut r.hands());
-        assert_eq!((r.body.command[1], r.body.strafe), (1.0, FRAC_PI_2));
+        assert_eq!(
+            (r.body.command[1], r.body.strafe),
+            (0.0, FRAC_PI_4),
+            "W's release sends 0; A's angle stays"
+        );
         pilot.key("SCAN_A", false, &mut r.hands());
         assert_eq!((r.body.command[1], r.body.strafe), (0.0, 0.0));
+
+        pilot.key("SCAN_D", true, &mut r.hands());
+        assert_eq!((r.body.command[1], r.body.strafe), (1.0, -FRAC_PI_2), "a half from standing");
+        pilot.key("SCAN_W", true, &mut r.hands());
+        assert_eq!(r.body.strafe, -FRAC_PI_2, "not worked out again from what is held");
+        pilot.key("SCAN_W", false, &mut r.hands());
+        pilot.key("SCAN_D", false, &mut r.hands());
+        assert_eq!((r.body.command[1], r.body.strafe), (0.0, 0.0));
+
         pilot.key("SCAN_S", true, &mut r.hands());
         assert_eq!(r.body.command[1], -1.0);
+        pilot.key("SCAN_A", true, &mut r.hands());
+        assert_eq!((r.body.command[1], r.body.strafe), (-1.0, FRAC_PI_4), "backing up: not mirrored");
+        pilot.key("SCAN_A", false, &mut r.hands());
+        assert_eq!((r.body.command[1], r.body.strafe), (-1.0, 0.0), "S is still held");
+    }
+
+    #[test]
+    fn a_cruise_row_held_steps_the_command_on_each_update_by_a_step_that_grows_over_a_second() {
+        let mut pilot = Pilot::new(hero_table(), 100.0);
+        let mut r = rig();
+        pilot.key("SCAN_G_PLUS", true, &mut r.hands());
+        assert_eq!(r.body.command[1], 0.0, "the event only makes the row active");
+        pilot.update(0.0, &mut r.hands());
+        assert_eq!(r.body.command[1], 0.0, "held no time at all");
+        pilot.update(500.0, &mut r.hands());
+        assert!((r.body.command[1] - 0.025).abs() < 1e-6, "{}", r.body.command[1]);
+        pilot.update(2000.0, &mut r.hands());
+        assert!((r.body.command[1] - 0.075).abs() < 1e-6, "{}", r.body.command[1]);
+        for k in 0..30 {
+            pilot.update(2050.0 + 50.0 * f64::from(k), &mut r.hands());
+        }
+        assert_eq!(r.body.command[1], 1.0, "never past the magnitude");
+        pilot.key("SCAN_G_PLUS", false, &mut r.hands());
+        pilot.key("SCAN_G_SUB", true, &mut r.hands());
+        // Down at 3500, the last update's clock: 0.005 at 100 ms held, 0.05 at 1100.
+        pilot.update(3600.0, &mut r.hands());
+        pilot.update(4600.0, &mut r.hands());
+        assert!((r.body.command[1] - 0.945).abs() < 1e-6, "{}", r.body.command[1]);
+        pilot.key("SCAN_G_SUB", false, &mut r.hands());
+        pilot.update(9000.0, &mut r.hands());
+        assert!((r.body.command[1] - 0.945).abs() < 1e-6, "letting go leaves it where it got to");
+        pilot.key("SCAN_G_SLASH", true, &mut r.hands());
+        assert_eq!(r.body.command[1], 0.0);
     }
 
     #[test]

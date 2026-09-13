@@ -136,8 +136,15 @@ impl Hero {
         let rows = controls::load(&gamedir::resolve(&assembly.game, &table).context("no input table")?)?;
         let pilot = Pilot::new(rows, mouse_sensitivity(&assembly.game));
 
+        // The chassis's control points place its contacts: the feet (docs/24).
+        let feet_slot =
+            assembly.library.get(&chassis_part.record).and_then(|r| r.slot_with_suffix("cpt")).cloned();
+        let feet = match feet_slot {
+            Some(slot) => cpt::parse(&read_member(assembly, &slot.library, &slot.member)?, &slot.member)?,
+            None => Vec::new(),
+        };
         let position = Vec3::from_array(placed.position);
-        let walker = Walker::new(chassis_ctl, &chassis.mesh, position, placed.rotation);
+        let walker = Walker::new(chassis_ctl, &chassis.mesh, &feet, position, placed.rotation);
         Ok(Some(Hero {
             object,
             walker,
@@ -168,6 +175,13 @@ impl Hero {
     pub fn key(&mut self, scan: &str, pressed: bool) {
         let (pilot, mut hands) = self.hands();
         pilot.key(scan, pressed, &mut hands);
+    }
+
+    /// The input update at the current game time: the rows held down run again.
+    pub fn update_input(&mut self) {
+        let now = self.time_ms;
+        let (pilot, mut hands) = self.hands();
+        pilot.update(now, &mut hands);
     }
 
     /// Fit the turret's guns: each class-2 component, the round its record names

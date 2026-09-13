@@ -368,6 +368,7 @@ pub fn controllers(path: &Path, names: &[String]) -> Result<Value> {
                 "engine": number(s.engine),
                 "actions": s.actions,
                 "request": s.request,
+                "contacts": s.contacts.iter().map(|k| json!([k.point, k.flags, k.group])).collect::<Vec<_>>(),
             })).collect::<Vec<_>>(),
             "costs": vector(&c.costs),
             "live_costs": vector(&c.live_costs()),

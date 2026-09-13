@@ -135,6 +135,8 @@ fn rehearse(play: &mut scene::Play, args: &Args) {
     }
     let mut kills = Vec::new();
     for tick in 0..args.ticks {
+        // Nothing is rendered here: the input update runs once a tick.
+        play.hero.update_input();
         for e in play.tick(TICK_MS, args.mouse) {
             if let parkan_sim::combat::Event::Killed { target } = e {
                 kills.push(play.battle.objects[target]);
@@ -342,6 +344,10 @@ impl App {
     }
 
     fn redraw(&mut self) {
+        // The input update runs once a rendered frame.
+        if let Some(play) = self.play.as_mut() {
+            play.hero.update_input();
+        }
         self.step();
         // The sounds the ticks started play now, whether or not a frame can be drawn.
         if let (Some(play), Some(audio)) = (self.play.as_mut(), self.audio.as_mut()) {

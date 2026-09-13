@@ -40,9 +40,17 @@ pub const UNSET: u8 = 0xFF;
 pub const NO_EDGE: f32 = 1_000_000.0;
 
 pub const STATE_ANCHOR: u32 = 0x1;
+/// The body falls until a contact lands; without it the sphere is only lifted out of
+/// the ground (`Control.dll:0x1001b3c3`). Set on exactly the states that have contacts.
+pub const STATE_GROUND_CONTACTS: u32 = 0x4;
 pub const STATE_BY_VELOCITY: u32 = 0x10000;
 pub const STATE_FIXED: u32 = 0x100000;
 pub const STATE_JITTER: u32 = 0x1000000;
+/// A state's request code that any code the controller holds matches (`0x10001140`).
+pub const ANY_REQUEST: i32 = -1;
+
+/// A contact's point counts toward the body's ground gap and normal (`0x1001b00a`).
+pub const CONTACT_SUPPORT: u32 = 0x1;
 
 pub const CHANNEL_WRAP: i32 = 0x1;
 pub const CHANNEL_INVERT: i32 = 0x2;
@@ -83,13 +91,25 @@ fn name(b: &[u8], at: usize) -> Option<String> {
     Some(latin1(&field[..end]))
 }
 
-#[derive(Clone, Debug, Default, PartialEq)]
+/// One of a state's 16-byte conditions: a foot, wheel or leg (`docs/13-control.md`,
+/// "Section 1's conditions are contacts").
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Contact {
+    /// A control point of the object's `.cpt`.
+    pub point: i32,
+    pub flags: u32,
+    /// The section-5 group run when the point lands, or -1.
+    pub group: i32,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct State {
     pub flags: u32,
     pub velocity: ([f32; 3], [f32; 3]),
     pub spin: ([f32; 3], [f32; 3]),
     pub engine: f32,
     pub actions: i32,
+    /// The code the controller must hold for the state to apply, or `ANY_REQUEST`.
     pub request: i32,
     pub mode: u32,
     pub pair_a: [f32; 2],
@@ -97,6 +117,28 @@ pub struct State {
     pub blend: f32,
     /// A fixed step length in ms; 0 lets speed and stride set it.
     pub length: f32,
+    /// `counts[1]` contacts, the same points in every state of a controller.
+    pub contacts: Vec<Contact>,
+}
+
+impl Default for State {
+    /// Everything zero, except that the state asks for no request code.
+    fn default() -> Self {
+        Self {
+            flags: 0,
+            velocity: ([0.0; 3], [0.0; 3]),
+            spin: ([0.0; 3], [0.0; 3]),
+            engine: 0.0,
+            actions: 0,
+            request: ANY_REQUEST,
+            mode: 0,
+            pair_a: [0.0; 2],
+            pair_b: [0.0; 2],
+            blend: 0.0,
+            length: 0.0,
+            contacts: Vec::new(),
+        }
+    }
 }
 
 impl State {
@@ -108,14 +150,24 @@ impl State {
         self.mode & STATE_BY_VELOCITY != 0
     }
 
-    /// Whether `velocity` and `spin` lie inside the boxes the flags switch on.
-    pub fn applies(&self, velocity: [f32; 3], spin: [f32; 3]) -> bool {
-        (0..3).all(|a| {
-            let inside = |bit: u32, value: f32, (lo, hi): ([f32; 3], [f32; 3])| {
-                self.flags & (1 << bit) == 0 || (lo[a] <= value && value <= hi[a])
-            };
-            inside(a as u32, velocity[a], self.velocity) && inside(a as u32 + 4, spin[a], self.spin)
-        })
+    /// `0x10001000`: whether `velocity` and `spin` lie inside the boxes the flags switch
+    /// on, and the state's request code is `ANY_REQUEST` or the code the controller
+    /// holds (`0x10001140`). The contacts' conditions are the caller's.
+    pub fn applies(&self, velocity: [f32; 3], spin: [f32; 3], request: i32) -> bool {
+        (self.request == ANY_REQUEST || self.request == request)
+            && (0..3).all(|a| {
+                let inside = |bit: u32, value: f32, (lo, hi): ([f32; 3], [f32; 3])| {
+                    self.flags & (1 << bit) == 0 || (lo[a] <= value && value <= hi[a])
+                };
+                inside(a as u32, velocity[a], self.velocity) && inside(a as u32 + 4, spin[a], self.spin)
+            })
+    }
+
+    /// `velocity` clamped into the velocity box, axis by axis (`0x10001160`). An axis
+    /// the flags leave off holds −FLT_MAX..FLT_MAX in every shipped state.
+    pub fn clamp_velocity(&self, velocity: [f32; 3]) -> [f32; 3] {
+        let (lo, hi) = self.velocity;
+        std::array::from_fn(|a| velocity[a].max(lo[a]).min(hi[a]))
     }
 }
 
@@ -375,6 +427,16 @@ pub fn parse(b: &[u8], source: &str) -> Result<Controller, FormatError> {
                 engine: f32_at(b, at + 0x54),
                 actions: i32_at(b, at + 0x90),
                 request: i32_at(b, at + 0x98),
+                contacts: (0..per_b)
+                    .map(|j| {
+                        let c = at + SECTION1_RECORD + SECTION1_PER_B * j;
+                        Contact {
+                            point: i32_at(b, c),
+                            flags: u32_at(b, c + 4).expect("inside"),
+                            group: i32_at(b, c + 8),
+                        }
+                    })
+                    .collect(),
             }
         })
         .collect();
@@ -472,8 +534,50 @@ mod tests {
     #[test]
     fn a_state_applies_inside_the_boxes_its_flags_switch_on() {
         let s = State { flags: 0b10, velocity: ([0.0, 2.0, 0.0], [0.0, 10.0, 0.0]), ..Default::default() };
-        assert!(s.applies([100.0, 5.0, 0.0], [9.0; 3]));
-        assert!(!s.applies([0.0, 12.0, 0.0], [0.0; 3]));
+        assert!(s.applies([100.0, 5.0, 0.0], [9.0; 3], ANY_REQUEST));
+        assert!(!s.applies([0.0, 12.0, 0.0], [0.0; 3], ANY_REQUEST));
+        assert!(s.applies([0.0, 5.0, 0.0], [0.0; 3], 6), "a state asking for no code takes any");
+    }
+
+    #[test]
+    fn a_state_with_a_request_code_applies_only_while_the_controller_holds_it() {
+        let s = State { request: 6, ..Default::default() };
+        assert!(s.applies([0.0; 3], [0.0; 3], 6));
+        assert!(!s.applies([0.0; 3], [0.0; 3], 8));
+        assert!(!s.applies([0.0; 3], [0.0; 3], ANY_REQUEST));
+    }
+
+    #[test]
+    fn a_step_moves_by_the_velocity_clamped_into_the_box() {
+        let s = State { velocity: ([-0.5, 2.0, -0.5], [0.5, 10.0, 0.5]), ..Default::default() };
+        assert_eq!(s.clamp_velocity([1.0, 14.0, 0.0]), [0.5, 10.0, 0.0]);
+        assert_eq!(s.clamp_velocity([0.0, 1.0, -3.0]), [0.0, 2.0, -0.5]);
+    }
+
+    #[test]
+    fn a_states_contacts_follow_its_record() {
+        // One state with two contacts: 156 bytes, then 16 a contact, then one cost.
+        let per_state = SECTION1_RECORD + 2 * SECTION1_PER_B;
+        let mut b = vec![0u8; HEADER_SIZE + per_state + 4 + BLOCK_SIZE];
+        for (k, n) in [1i32, 2, 0, 0, 0].iter().enumerate() {
+            b[4 * k..4 * k + 4].copy_from_slice(&n.to_le_bytes());
+        }
+        let at = HEADER_SIZE;
+        b[at + 0x98..at + 0x9c].copy_from_slice(&ANY_REQUEST.to_le_bytes());
+        for (j, (point, flags, group)) in [(0i32, 0x125u32, 3i32), (2, 0x125, 4)].into_iter().enumerate() {
+            let c = at + SECTION1_RECORD + SECTION1_PER_B * j;
+            b[c..c + 4].copy_from_slice(&point.to_le_bytes());
+            b[c + 4..c + 8].copy_from_slice(&flags.to_le_bytes());
+            b[c + 8..c + 12].copy_from_slice(&group.to_le_bytes());
+        }
+        let block = HEADER_SIZE + per_state + 4;
+        b[block..block + 4 * BLOCK_ENTRIES].fill(0xFF);
+        let c = parse(&b, "t").unwrap();
+        assert_eq!(c.states[0].request, ANY_REQUEST);
+        assert_eq!(
+            c.states[0].contacts,
+            vec![Contact { point: 0, flags: 0x125, group: 3 }, Contact { point: 2, flags: 0x125, group: 4 }]
+        );
     }
 
     /// Three states in a ring, 0 -> 1 -> 2 -> 0 at 1 each, and a short cut 0 -> 2 at 5.
