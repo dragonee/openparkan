@@ -90,6 +90,159 @@ name = "the component row counter"
 read = true
 doc = "analysis/README.md"
 
+# --- the component loaders, object classes and Behavior.ini, ../docs/22-settings.md ---
+[[entry]]
+module = "World3D.dll"
+at = "0x10007a50"
+kind = "function"
+name = "LoadObjectFromDisk: object class 1..11 -> registry id (1:0, 2/4/9:3, 3:1, 5:2, 7:5, 10:4, 11:7); 6 and 8 illegal; QI 6 on the result"
+read = true
+doc = "docs/22-settings.md"
+
+[[entry]]
+module = "World3D.dll"
+at = "0x10014980"
+kind = "function"
+name = "LoadComponent: a registry id straight to its loader (the shader's only route)"
+read = true
+doc = "docs/22-settings.md"
+
+[[entry]]
+module = "World3D.dll"
+at = "0x10008428"
+kind = "site"
+name = "AddNewObjectToGame: a scale other than 1,1,1 goes to QI 0x18 slot 15"
+read = true
+doc = "docs/04-missions.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10016640"
+kind = "function"
+name = "LoadLandscape: 0x7d40 bytes, CLandscape::CLandscape, returns the object"
+read = true
+doc = "docs/22-settings.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x100552a0"
+kind = "function"
+name = "LoadBuilding: 0xfc bytes, CBuilding::CBuilding, returns +0x8"
+read = true
+doc = "docs/22-settings.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10083920"
+kind = "function"
+name = "LoadCamera: 0x1a4 bytes, CCamera::CCamera, returns +0x134"
+read = true
+doc = "docs/22-settings.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10069d60"
+kind = "function"
+name = "CreateAtmosphere: 0x1ac bytes, CAtmosphere::CAtmosphere, returns +0x138"
+read = true
+doc = "docs/22-settings.md"
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10016a00"
+kind = "function"
+name = "LoadAgent: null names refused; 0x7bc bytes, load 0x10002ff0, destroyed on failure; returns +0x130"
+read = true
+doc = "docs/22-settings.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10055e95"
+kind = "site"
+name = "CBuilding::CBuilding: the FORT record's first slot through AniMesh.dll!LoadAgent"
+read = true
+doc = "docs/18-vocabulary.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10032a69"
+kind = "site"
+name = "CPrimBuffer::CPrimBuffer: LoadComponent(6), the shader"
+read = true
+doc = "docs/22-settings.md"
+
+[[entry]]
+module = "ArealMap.dll"
+at = "0x10015541"
+kind = "site"
+name = "CreateObjectFromScheme: object class 3 for a scheme type with the top bit, else 4"
+read = true
+doc = "docs/22-settings.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100a24b5"
+kind = "site"
+name = "mission load: AddNewObjectToGame class 7, the sky"
+read = true
+doc = "docs/22-settings.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002d6ec"
+kind = "site"
+name = "component factory default: the generic 0xa4 device (0x10020800) for 3, 6, 7, 11-14, 16, 18, 20, 22-25, 28, 29"
+read = true
+doc = "docs/18-vocabulary.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10003080"
+kind = "function"
+name = "Behavior.ini reader: LockBehaviour 0x10066bac, GiveDefaultOrder 0x10066bbc, DefaultOrderPhase 0x1005d374"
+read = true
+doc = "docs/22-settings.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1005d374"
+kind = "datum"
+name = "DefaultOrderPhase, 1 by default"
+read = true
+doc = "docs/22-settings.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10066bbc"
+kind = "datum"
+name = "GiveDefaultOrder"
+read = true
+doc = "docs/22-settings.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10004c40"
+kind = "function"
+name = "behaviour tick: default order when GiveDefaultOrder and +0xa00 == DefaultOrderPhase; order 13 to Type 0x1008000, 6 to 0x1002000"
+read = true
+doc = "docs/22-settings.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10003a68"
+kind = "site"
+name = "MBehaviour constructor: +0xa00 = 0, its only write found"
+read = true
+doc = "docs/22-settings.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1008ac50"
+kind = "function"
+name = "Iron_3D.ini [CS] FULL_RESEARCH_TREE non-zero"
+read = true
+doc = "docs/22-settings.md"
+
 # --- the research tree's loader, ../docs/16-research.md --------------------
 [[entry]]
 module = "MisLoad.dll"
@@ -151,7 +304,7 @@ doc = "analysis/README.md"
 module = "MisLoad.dll"
 at = "0x10002f60"
 kind = "function"
-name = "slot 44: TRFB index -> part id and the item that researches it"
+name = "IResearch slot 21: TRFB index -> part id and the item that researches it"
 read = true
 doc = "analysis/README.md"
 
@@ -159,7 +312,7 @@ doc = "analysis/README.md"
 module = "MisLoad.dll"
 at = "0x10002d50"
 kind = "function"
-name = "first of ten per-field getters over the 40-byte record"
+name = "IResearch slot 12: byte +0x23 (kind), first of ten per-field getters"
 read = true
 doc = "analysis/README.md"
 
@@ -167,7 +320,7 @@ doc = "analysis/README.md"
 module = "MisLoad.dll"
 at = "0x1000e18c"
 kind = "datum"
-name = "the .trf reader's vtable; slot 6 loads"
+name = "IResearch, the .trf reader's vtable (32 slots); slot 6 loads"
 read = true
 doc = "analysis/README.md"
 
@@ -175,9 +328,290 @@ doc = "analysis/README.md"
 module = "MisLoad.dll"
 at = "0x1000e130"
 kind = "datum"
-name = "the loaded tree's vtable, 55 slots"
+name = "the research game object's vtable, 23 slots; QI 0x502 gives the reader, IResearch at 0x1000e18c"
 read = true
 doc = "analysis/README.md"
+
+[[entry]]
+module = "MisLoad.dll"
+at = "0x100027a0"
+kind = "function"
+name = "research game object QI: 0 or 6 itself, 0x502 the reader at +0x130"
+read = true
+doc = "docs/16-research.md"
+
+[[entry]]
+module = "MisLoad.dll"
+at = "0x10002f00"
+kind = "function"
+name = "IResearch slot 19: TRF0 +0x18 + TRF9 base, the description"
+read = true
+doc = "docs/16-research.md"
+
+[[entry]]
+module = "MisLoad.dll"
+at = "0x10003780"
+kind = "function"
+name = "IResearch slot 29: TRF1's directory flag, 'contains debugging information'"
+read = true
+doc = "docs/16-research.md"
+
+[[entry]]
+module = "MisLoad.dll"
+at = "0x10002aa0"
+kind = "function"
+name = "IResearch slot 3: b_res (bit 2), b_avail (bit 1), bit 4, four costs, part name"
+read = true
+doc = "docs/16-research.md"
+
+[[entry]]
+module = "MisLoad.dll"
+at = "0x10002c10"
+kind = "function"
+name = "IResearch slot 7: complete a research, then give AVAILABLE to items whose prerequisites are in and researched"
+read = true
+doc = "docs/16-research.md"
+
+[[entry]]
+module = "MisLoad.dll"
+at = "0x10002b60"
+kind = "function"
+name = "IResearch slot 5: set an item's progress float (+0x38)"
+read = true
+doc = "docs/16-research.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100605d6"
+kind = "site"
+name = "'Research tree contains debugging information' unless FULL_RESEARCH_TREE"
+read = true
+doc = "docs/16-research.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1008a500"
+kind = "function"
+name = "a part's class from IResearch bytes +0x23, +0x24, +0x25, +0x26, +0x22"
+read = true
+doc = "docs/16-research.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1008a590"
+kind = "function"
+name = "part class -> object Type: building by sub-kind (bunker by size), turret by role"
+read = true
+doc = "docs/16-research.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10048220"
+kind = "function"
+name = "a part list of up to 64: objects.dlb opened, only member existence asked; 'name (code)'"
+read = true
+doc = "docs/19-descriptions.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100487a4"
+kind = "site"
+name = "the one reference to objects.dlb"
+read = true
+doc = "docs/19-descriptions.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1002fe0f"
+kind = "site"
+name = "research task: progress capped at 1 and set through IResearch slot 5"
+read = true
+doc = "docs/16-research.md"
+
+# --- data.tma's loader and what places a mission, ../docs/04-missions.md ---
+[[entry]]
+module = "MisLoad.dll"
+at = "0x10001000"
+kind = "function"
+name = "CreateMissionData: 0x4c bytes, IMission vtable 0x1000e0e8"
+read = true
+doc = "docs/04-missions.md"
+
+[[entry]]
+module = "MisLoad.dll"
+at = "0x1000e0e8"
+kind = "datum"
+name = "IMission vtable: 2 load, 3 map path, 6 clan count, 9 object count, 10 object, 11 the word after the map path, 12/13 lodes, 14 properties"
+read = true
+doc = "docs/04-missions.md"
+
+[[entry]]
+module = "MisLoad.dll"
+at = "0x10001200"
+kind = "function"
+name = "IMission slot 2: open data.tma; routes, clan table, objects and trailer"
+read = true
+doc = "docs/04-missions.md"
+
+[[entry]]
+module = "MisLoad.dll"
+at = "0x100015b0"
+kind = "function"
+name = "clan table: version 1..6, 88-byte clans; below 6 the alliances from the clan types"
+read = true
+doc = "docs/04-missions.md"
+
+[[entry]]
+module = "MisLoad.dll"
+at = "0x10001b10"
+kind = "function"
+name = "objects and trailer: object version, records, map path, v2 word + description, v5 lode word + 28-byte lodes"
+read = true
+doc = "docs/04-missions.md"
+
+[[entry]]
+module = "MisLoad.dll"
+at = "0x10003900"
+kind = "function"
+name = "object record by version: clan v3, LID v4, turns, scale v10 (else 1), name v7, flag v8, host and vertex v9, properties v6"
+read = true
+doc = "docs/04-missions.md"
+
+[[entry]]
+module = "MisLoad.dll"
+at = "0x10003ab0"
+kind = "function"
+name = "property table: leading word dropped, count, 32-byte properties"
+read = true
+doc = "docs/04-missions.md"
+
+[[entry]]
+module = "MisLoad.dll"
+at = "0x10004040"
+kind = "function"
+name = "lode record: position and four words, 28 bytes; its version argument unused"
+read = true
+doc = "docs/04-missions.md"
+
+[[entry]]
+module = "MisLoad.dll"
+at = "0x10001d80"
+kind = "function"
+name = "placement matrix Rz(z) Ry(y) Rx(x), position as translation"
+read = true
+doc = "docs/04-missions.md"
+
+[[entry]]
+module = "MisLoad.dll"
+at = "0x10001440"
+kind = "function"
+name = "IMission slot 10: object record out; zero position and turns while a vertex is set"
+read = true
+doc = "docs/04-missions.md"
+
+[[entry]]
+module = "MisLoad.dll"
+at = "0x10001510"
+kind = "function"
+name = "IMission slot 11: the word after the map path; no caller found"
+read = true
+doc = "docs/04-missions.md"
+
+[[entry]]
+module = "MisLoad.dll"
+at = "0x10001530"
+kind = "function"
+name = "IMission slot 13: a lode's position and first three words"
+read = true
+doc = "docs/04-missions.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100a1f90"
+kind = "function"
+name = "mission load: CreateMissionData, clans, placement, lodes"
+read = true
+doc = "docs/04-missions.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100a3ea0"
+kind = "function"
+name = "mission placement: buildings by LID first, units (host building, vertex), scenery with its scale"
+read = true
+doc = "docs/04-missions.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10033cb0"
+kind = "function"
+name = "building creation: start flag -> dwCreateFlag bit 0, a LID bit 2; CreateObjectFromScheme"
+read = true
+doc = "docs/04-missions.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10077480"
+kind = "function"
+name = "unit creation: CreateObjectFromScheme with the host building and vertex"
+read = true
+doc = "docs/04-missions.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10081880"
+kind = "function"
+name = "lodes: IMission slots 12/13 -> 24-byte records (type 0x10001000) -> SetMineralLode"
+read = true
+doc = "docs/04-missions.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10081c10"
+kind = "function"
+name = "draws env_mineral at each lode's ground point"
+read = true
+doc = "docs/04-missions.md"
+
+[[entry]]
+module = "ArealMap.dll"
+at = "0x10015290"
+kind = "function"
+name = "CreateObjectFromScheme worker: mind, host building and vertex, class 3/4, dwCreateFlag bits 1/2/4/8/0x10/0x20"
+read = true
+doc = "docs/04-missions.md"
+
+[[entry]]
+module = "ArealMap.dll"
+at = "0x10015a0d"
+kind = "site"
+name = "dwCreateFlag bit 0 on a building: IBuilding slot 12 with 2"
+read = true
+doc = "docs/04-missions.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10056cb0"
+kind = "function"
+name = "IBuilding slot 12: set CBuilding +0xb8 (constructor 1)"
+read = true
+doc = "docs/04-missions.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10056cd0"
+kind = "function"
+name = "IBuilding slot 13: get CBuilding +0xb8; no caller found"
+read = true
+doc = "docs/04-missions.md"
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10014770"
+kind = "function"
+name = "interface 0x18 slot 15: set scale; x, y, z per axis, radius by the largest"
+read = true
+doc = "docs/04-missions.md"
 
 # --- the material manager, ../docs/07-objects.md, ../docs/03-terrain.md ----
 [[entry]]

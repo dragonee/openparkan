@@ -50,8 +50,22 @@ TAG = "DSCR"
 #: How many parts it describes.
 PARTS = 395
 
-#: The size letter of the classification line, as in a part id.
+#: The size letter of the classification line, as in a part id.  ``A`` (27
+#: parts), ``N`` (the five creatures) and ``E`` (the three enhanced buildings)
+#: are letters no part id uses; the research tree files ``A``, ``H`` and ``N``
+#: as size 4 and ``E`` as 5.
 SIZES = {"B": "large", "M": "medium", "L": "small", "T": "tiny", "H": "huge"}
+
+#: The ``A<n>`` token that closes the classification line, by size letter.  It
+#: follows the letter on 358 of 395 parts; the 37 that differ are all weapons
+#: and ammunition -- launchers, their packs and the level-0 large guns.
+GRADES = {"T": "A0", "L": "A1", "N": "A1", "M": "A2", "B": "A3", "E": "A4",
+          "A": "A5", "H": "A5"}
+
+#: Nothing in the game reads this file's text.  ``iron3d.dll`` opens it once
+#: (``0x100487a4``) and only asks whether a member exists for a part id; the
+#: tree's ``TRF0`` carries the kind, sub-kinds and size as numbers, and has no
+#: field for the group, the level, the mark or the grade.
 
 #: The group in the ``//G<n>:L<n>`` line: the catalogue's top-level tab, and
 #: the kinds that belong to it.  Armament is one tab holding both the weapons
@@ -122,7 +136,8 @@ class Description:
     #: The sub-kind chain, ``:``-joined where there is more than one.
     sub: str
     mark: str
-    #: Whatever follows the mark -- one ``A<n>`` token throughout.  Unread.
+    #: Whatever follows the mark -- one ``A<n>`` token throughout, a size
+    #: grade; see ``GRADES``.
     tail: tuple[str, ...]
     upgrade: int
     research_energy: float
@@ -161,6 +176,16 @@ class Description:
     @property
     def size_word(self) -> str:
         return SIZES.get(self.size, self.size)
+
+    @property
+    def grade(self) -> str:
+        """The ``A<n>`` token, or '' when the line has none."""
+        return self.tail[0] if self.tail else ""
+
+    @property
+    def graded(self) -> bool:
+        """True when the grade is the one the size letter implies."""
+        return bool(self.grade) and GRADES.get(self.size) == self.grade
 
     @property
     def kind_word(self) -> str:

@@ -478,7 +478,8 @@ def cmd_mission(args, game: Path) -> int:
     if m.description and m.description != m.title:
         print(f"  (in data.tma) {m.description!r}")
     print(f"  map          {m.map_name}  ({m.map_path})")
-    print(f"  viewpoints   {len(m.viewpoints)}")
+    found = sum(lode.found for lode in m.lodes)
+    print(f"  lodes        {len(m.lodes)}  ({found} already found)")
     if m.routes:
         pts = ", ".join(f"#{r.id}:{len(r.points)}pt" for r in m.routes)
         print(f"  routes       {len(m.routes)}  ({pts})")

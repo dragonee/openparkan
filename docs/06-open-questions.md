@@ -11,17 +11,31 @@ few fields are carried through without being understood:
   maximum.** Every instance keeps its value between them; `-1` on an int is
   no maximum, equal bounds lock the value, and `CurrentOre`'s maximum is its
   object's `MaximumOre`. See [04-missions.md](04-missions.md).
-- The four words after an object's instance name (`0, -1, -1, 1` throughout).
-- ~~The word before the object count, always 10.~~ **Answered**: the object
-  record version; the scale is read from 10 on. See [04-missions.md](04-missions.md#the-scale).
+- ~~The four words after an object's instance name (`0, -1, -1, 1`
+  throughout)~~ — **answered**, and they were not constant: a building's start
+  flag (it marks one half of each bridge pair), the logical id of the building
+  a unit starts inside and the hall-way vertex it stands at (13 units), and
+  the property table's own leading word. `MisLoad.dll` names them all; see
+  [04-missions.md](04-missions.md#what-the-objects-words-do--read-and-measured).
+- ~~The word before the object count, always 10~~ — **answered: the object
+  record's version**; the scale is read from 10 on
+  ([04-missions.md](04-missions.md#the-scale)), and the "always 6" before the
+  clans is the clan table's. The word after an object's path, "varies", is its
+  clan index.
 - ~~The word after a clan's behaviour-tree path.~~ **Answered**: the clan's
   mind count, how many bots it may field; see [04-missions.md](04-missions.md).
-- The four words trailing each trailer viewpoint.
-- Object `scale` is uniform wherever it is set: 218 placements, 0.2 to 21. The
-  engine applies it to vegetation and rock, see
-  [04-missions.md](04-missions.md#the-scale). The reader stores
-  the floats in file order as x, y, z, but the axis order is still untested
-  by the data, since no placement is non-uniform.
+- ~~The four words trailing each trailer viewpoint~~ — **answered: the
+  trailer's records are mineral lodes**, not viewpoints; the words are a found
+  flag, the object type `0x10001000`, an amount and a word nothing reads.
+  What reads the amount off `SetMineralLode`'s record (`+0x14`) is open.
+- ~~Object `scale`'s axis order~~ — **answered**: x, y and z scale the
+  model's own axes and the radius takes the largest; only vegetation and rock
+  are scaled, and the engine applies it to them (218 placements carry a value
+  other than 1, 0.2 to 21; see [04-missions.md](04-missions.md#the-scale)).
+  Uniform on all 864, so the data still does not exercise the axis order.
+- What reads a building's start flag back (`IBuilding` slot 13, `CBuilding
+  +0xb8`), and the word after the map path, which `IMission` slot 11 returns to
+  no caller found.
 
 ## Land.map leftovers
 
@@ -179,8 +193,8 @@ flythrough, its subtitles and voices, and the in-mission messages, through the
 [resource descriptors](20-resources.md) that bind them. Save
 games in `SAVE/` are [partly read](17-saves.md): the header and what a save
 refers to, but not the object graph, which is a raw heap dump. The `.trf` archives are [read](16-research.md): 368 research
-items and their prerequisite graph, though four floats and three of the twelve
-streams inside them are not. The engine's own `.ini` files are now
+items, their costs, descriptions, classification bytes and state, and their
+prerequisite graph. The engine's own `.ini` files are now
 [read](22-settings.md) — the component registry, the two debug files, the
 display settings and the mission-progress dispatcher, each matched to the
 module that reads it; the input tables beside them are [read](14-controls.md). `*.ctl` and `*.ndp` are identified above; `*.exp` and

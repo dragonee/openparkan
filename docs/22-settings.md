@@ -88,6 +88,50 @@ holding two arrays of 200 elements, 8 and 12 bytes wide. What it shades is not
 established, and it was followed here only far enough to rule it out as the
 unfound caller of §2.2's material-track selector.
 
+### What the loaders do, and who asks for them — *read*
+
+**Every loader allocates its object, constructs it with the four arguments it
+was given, and returns an interface of it** — a pointer some way into the
+object, which `World3D.dll` then asks for interface 6, the game object:
+
+| entry | allocates | constructor | returns |
+|---|---:|---|---|
+| `LoadLandscape` | 0x7d40 | `CLandscape::CLandscape` (`Terrain.dll:0x100166a0`) | the object |
+| `LoadBuilding` | 0xfc | `CBuilding::CBuilding` (`0x10055310`) | `+0x8` |
+| `LoadCamera` | 0x1a4 | `CCamera::CCamera` (`0x100839c0`) | `+0x134` |
+| `LoadAgent` | 0x7bc | `AniMesh.dll:0x10001000`, then the load `0x10002ff0`; destroyed if that fails | `+0x130` |
+| `CreateAtmosphere` | 0x1ac | `CAtmosphere::CAtmosphere` (`0x1006ec30`) | `+0x138` |
+| `CreateShader` | 0xb8 | once, then the kept pointer | the object |
+| `LoadResearch` | 0x138 | a 0x80-byte `.trf` reader at `+0x130` ([16-research.md](16-research.md)) | the object |
+
+`LoadAgent` refuses a null library or member name. `CBuilding`'s constructor
+reads the `FORT` record it is given and loads the record's first slot through
+`LoadAgent` — a building is a fortification around an agent
+([18-vocabulary.md](18-vocabulary.md)).
+
+**The callers name an object *class*, not a registry id.** `World3D.dll`'s
+`0x10007a50` — its error calls it `LoadObjectFromDisk: Illegal Class` — maps a
+class from 1 to 11 onto a registry row, and passes the row's loader
+`(library, member, 0, player)`:
+
+| class | id | loader | asked for by |
+|---:|---:|---|---|
+| 1 | 0 | `LoadLandscape` | |
+| 2, 4, 9 | 3 | `LoadAgent` | 4 a robot from `CreateObjectFromScheme`; 9 what a controller emits (`Control.dll`) |
+| 3 | 1 | `LoadBuilding` | a building from `CreateObjectFromScheme` (`ArealMap.dll:0x10015541`), and `iron3d.dll` |
+| 5 | 2 | `LoadCamera` | `iron3d.dll`, `Control.dll` |
+| 7 | 5 | `CreateAtmosphere` | the mission's sky (`iron3d.dll:0x100a24b5`) |
+| 10 | 4 | `LoadAgent` | mission scenery (`iron3d.dll:0x100a4334`) |
+| 11 | 7 | `LoadResearch` | |
+
+Classes 6 and 8 are illegal, and no class reaches id 6: the shader is loaded by
+`World3D.dll`'s `LoadComponent` (`0x10014980`), which takes the id itself, and
+`Terrain.dll` calls it with 6 from four constructors — `CPrimBuffer`'s
+(`0x10032a10`), `CShade`'s (`0x10041370`), `CAtmosphere`'s and `CCamera`'s.
+`CreateObjectFromScheme` picks class 3 or 4 by the top bit of the scheme's
+type, which a building's carries. The puppet and the static being one loader
+is the same thing seen from the other side: scenery is an agent of class 10.
+
 ## The two debug files
 
 `Behavior.ini` (14 switches) and `ArealMap.ini` (10) share a **five-switch
@@ -107,9 +151,27 @@ at all**. So the switch named `LockBehaviour` locks the layer that gives
 orders, not the interpreter that carries them out.
 
 `DefaultOrderPhase = 10` is the one number here that looks like it indexes
-something. The `.scr` scripts number nothing 0–13 that it could index, and the
-14 AI problems are only alphabetically ordered by this project, not by the
-engine — so it is **unknown**, not a problem id.
+something, and it does not index anything (*read*). `Behavior.dll`'s reader
+(`0x10003080`) keeps it at `0x1005d374` (1 by default) beside
+`GiveDefaultOrder` at `0x10066bbc`. Its only reader is the behaviour's tick
+(`0x10004c40`): when `GiveDefaultOrder` is on, the behaviour is not locked
+(`LockBehaviour`, `0x10066bac`, off; two of the behaviour's own flags clear),
+and **the behaviour's `+0xa00` equals `DefaultOrderPhase`**, it gives a battle
+robot (`Type` `0x1008000`) order 13 and the hero (`0x1002000`) order 6 —
+`ORDER_ROBOT_RANDOMGO` and `ORDER_ROBOT_TRANSPORT` by
+[31-packages.md](31-packages.md)'s numbering (`0x10004c80`). So it is a phase
+number compared with a behaviour field, not an index. *Derived*: the only
+write to `+0xa00` found is the constructor's 0 (`0x10003a68`; a search over
+every base register, and the variable-by-id interface hands out no pointer to
+it), so with the shipped 10 — or the default 1 — the default order never
+fires even when `GiveDefaultOrder` is switched on.
+
+`Iron_3D.ini` has a key the shipped file does not carry: `[CS]
+FULL_RESEARCH_TREE`. `iron3d.dll:0x1008ac50` reads it as non-zero or not; it
+silences the warning a research tree with debugging information raises
+([16-research.md](16-research.md)), and four part-list builders of the panels
+take its inverse as a flag (`0x10048292`, `0x100520ee`, `0x10052ac6`,
+`0x10053321`). *Guess*: it shows every part whether researched or not.
 
 ## `Iron_3D.ini` and `dispatcher.ini` — the player's, not the game's
 
@@ -138,13 +200,19 @@ the campaign looks like, not a statement about the format.
 
 ## What this does not say
 
-- **What the loaders do.** Eight entry points are named; only their addresses
-  are established here.
+- ~~**What the loaders do.**~~ — **followed one level**, above: what each
+  allocates, constructs and returns, and which object class reaches which.
+  What the landscape, camera and atmosphere constructors read is theirs to
+  document ([03-terrain.md](03-terrain.md), [10-sky.md](10-sky.md)).
 - **What a shader component is.** `CID_SHADER` allocates and is never followed
-  further.
+  further; `CPrimBuffer`, `CShade`, `CAtmosphere` and `CCamera` load it.
 - **Whether the engine accepts more component ids than eight.** The registry
-  is a file, so presumably yes; nothing was tested.
-- **`DefaultOrderPhase`**, as above.
+  is a file, but `LoadObjectFromDisk` knows only the seven ids its classes map
+  to, so a new id would be reachable through `LoadComponent` alone.
+- ~~**`DefaultOrderPhase`**~~ — **read**, above: a phase compared with a
+  behaviour field nothing but the constructor writes. What was meant to
+  advance that field is not established.
+- **What `FULL_RESEARCH_TREE` does to the part lists.**
 
 Everything above except the export addresses is re-derived by
 `uv run openparkan verify`; those come from `analysis/registry.py`.

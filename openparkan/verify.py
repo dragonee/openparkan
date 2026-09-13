@@ -1447,6 +1447,97 @@ def check_missions(check, game: Path) -> None:
           ratio > 0.95,
           f"{near}/{near_total} ({ratio:.1%}) on skirmish and multiplayer maps")
 
+    # The words MisLoad.dll's object reader names (0x10003900), against the
+    # data.  Two version words, then the record's own.
+    versions = Counter((m.unknown_pre_objects, m.lode_version) for m in parsed)
+    everything = [o for m in parsed for o in m.objects]
+    headers = Counter(o.unknown[2][3] for o in everything)
+    check("data.tma: the words before the objects and lodes are versions",
+          versions == Counter({(mission.OBJECT_VERSION, 1): len(parsed)})
+          and headers == Counter({1: len(everything)}),
+          f"object record version {mission.OBJECT_VERSION} and lode table word 1 "
+          f"on {len(parsed)}/{len(dirs)} missions; the property table's own "
+          f"leading word, which the reader discards, is 1 on {headers[1]}/"
+          f"{len(everything)} objects")
+
+    owned_objects = [o for o in everything if o.clan_id is not None]
+    indexed = sum(o.clan_index == o.clan_id for o in owned_objects)
+    level = sum(o.angles[:2] == (0.0, 0.0) for o in everything)
+    check("data.tma: the word after a path is the owning clan",
+          owned_objects and indexed == len(owned_objects) and level == len(everything),
+          f"{indexed}/{len(owned_objects)} owned objects carry their ClanID in "
+          f"it, which iron3d.dll indexes its clan records with; and the two "
+          f"'padding' words are the turns about x and y, 0 on "
+          f"{level}/{len(everything)}")
+
+    places = _building_places(game)
+    inside = hosted = same_clan = heroes_in_bunkers = 0
+    for m in parsed:
+        by_id = {o.logical_id: o for o in m.objects}
+        for o in m.objects:
+            if o.host is None and o.vertex is None:
+                continue
+            inside += 1
+            building = by_id.get(o.host)
+            if (building is None or building.kind != mission.KIND_BUILDING
+                    or o.kind != mission.KIND_UNIT or o.vertex is None):
+                continue
+            unit = objects.load_unit(game / building.path.replace("\\", "/"))
+            place = places.get(unit.components[0].ref.member.lower())
+            hosted += place is not None and 0 <= o.vertex < len(place[1])
+            same_clan += building.clan_id == o.clan_id
+            heroes_in_bunkers += (place is not None and place[0] == "BUNKER"
+                                  and "\\HERO\\" in o.path.upper())
+    check("data.tma: a unit can start inside a building, at a hall-way vertex",
+          inside and hosted == inside and same_clan == heroes_in_bunkers == inside - 1,
+          f"{hosted}/{inside} objects with the words set are units naming a "
+          f"building's logical id and a vertex of its hall-way graph -- "
+          f"{same_clan} their own clan's, {heroes_in_bunkers} of them heroes in "
+          f"a bunker; the other "
+          f"{len(everything) - inside} set both to -1")
+
+    flagged = Counter(o.kind for o in everything if o.start_flag)
+    pairs = halves = 0
+    for m in parsed:
+        bridges = [o for o in m.objects
+                   if o.kind == mission.KIND_BUILDING and "BRIDGE" in o.path.upper()]
+        for a in bridges:
+            for b in bridges:
+                turn = abs((b.rotation - a.rotation) % (2 * math.pi) - math.pi)
+                if a.logical_id < b.logical_id and a.path == b.path and turn < 1e-3:
+                    pairs += 1
+                    later = b.start_flag and not a.start_flag
+                    halves += bool(later) and abs(b.rotation - a.rotation - math.pi) < 1e-3
+    check("data.tma: a building's start flag marks one half of each bridge",
+          pairs and halves == pairs,
+          f"on {halves}/{pairs} bridge pairs exactly one half sets it, the one "
+          f"with the later logical id and the angle pi further on; "
+          f"{flagged[mission.KIND_BUILDING]} buildings set it in all, and "
+          f"{flagged[mission.KIND_UNIT]} units and "
+          f"{flagged[mission.KIND_VEGETATION] + flagged[mission.KIND_ROCK]} "
+          f"pieces of scenery whose flag is never passed on")
+
+    uniform = sum(o.scale[0] == o.scale[1] == o.scale[2] for o in everything)
+    scaled = Counter(o.kind for o in everything if o.scale != (1.0, 1.0, 1.0))
+    check("data.tma: scale is uniform, and it is scenery that is scaled",
+          uniform == len(everything)
+          and scaled[mission.KIND_BUILDING] == 0 and scaled[mission.KIND_UNIT] == 2,
+          f"x = y = z on {uniform}/{len(everything)}; "
+          f"{scaled[mission.KIND_VEGETATION]} trees and "
+          f"{scaled[mission.KIND_ROCK]} rocks are not 1, no building, and two "
+          f"animals whose scale no creator is handed")
+
+    lodes = [lode for m in parsed for lode in m.lodes]
+    typed = sum(lode.object_type == mission.MINERAL_LODE for lode in lodes)
+    per_clan = sum(len(m.lodes) == len(m.clans) for m in parsed)
+    check("data.tma: the trailer's records are mineral lodes",
+          lodes and typed >= len(lodes) - 3 and per_clan < len(parsed) // 2,
+          f"{len(lodes)} records on {sum(1 for m in parsed if m.lodes)} missions, "
+          f"{typed} typed {mission.MINERAL_LODE:#x} -- the minerals search's "
+          f"type -- and {sum(lode.found for lode in lodes)} already found; the "
+          f"count equals the clan count on only {per_clan} of {len(parsed)}, so "
+          f"they are not a viewpoint per clan")
+
 
 #: A placement whose lowest level-0 vertex stands this far above the ground floats.
 FLOATING = 0.25
@@ -8765,7 +8856,6 @@ def check_vocabulary(check, game: Path) -> None:
     library = game / "objects.rlb"
     if not library.exists():
         return
-    names = sorted(e.name for e in NResArchive(library.read_bytes()).entries)
 
     sizes = {"b": "large", "m": "medium", "l": "small", "t": "tiny", "f": "huge"}
     labels: dict[str, str] = {}
@@ -8839,16 +8929,45 @@ def check_vocabulary(check, game: Path) -> None:
           f"not a component class; the kind letter splits "
           + ", ".join(f"{k}:{v}" for k, v in sorted(kinds.items())))
 
-    shared = defaultdict(set)
-    for name in names:
-        bits = name.split("_")
-        if len(bits) >= 3 and len(bits[0]) == 2:
-            shared["_".join(bits[1:])].add(bits[0])
-    both = {k: v for k, v in shared.items() if {"bu", "fr"} <= v}
-    check("vocabulary: two building sets cover the same list of functions",
-          len(both) >= 8,
-          f"bu_ and fr_ both supply {len(both)} of the same suffixes -- "
-          + ", ".join(sorted({k.rsplit('_', 1)[-1] for k in both})[:7]) + ", ...")
+    # bu_ and fr_ are not two sides: a building's FORT record names its body,
+    # a BTLU record, which names the fr_ models.  Terrain.dll's CBuilding
+    # loads the first slot through AniMesh.dll's LoadAgent (0x10055e95).
+    records = objects.ObjectLibrary(library)
+    forts = records.by_tag("FORT")
+    bodies = {r.name.lower(): r for r in records.by_tag("BTLU")
+              if r.name.lower().startswith("bu_")}
+    named = drawn = 0
+    for fort in forts:
+        body = bodies.get(fort.slots[0].member.lower()) if fort.slots else None
+        if body is None or fort.slots[0].member.lower() != "bu_" + fort.name.lower()[3:]:
+            continue
+        named += 1
+        stem = fort.slots[1].member.lower().rsplit(".", 1)[0]
+        drawn += all(s.library.lower() == "fortif.rlb"
+                     and s.member.lower().rsplit(".", 1)[0] == stem for s in body.slots)
+    check("vocabulary: bu_ is a building's body, not a second set of models",
+          forts and named == len(forts) == len(bodies) and drawn == named,
+          f"{named}/{len(forts)} FORT records, all fr_, name in their first slot "
+          f"the bu_ BTLU record of the same suffix, and all {len(bodies)} bu_ "
+          f"records are named so; {drawn} of them draw on the fr_ model their "
+          f"building's .bas names -- one set of models, the six towers sharing two")
+
+    # The component classes World3D.dll's resolver leaves unnamed.
+    archive_names = frozenset(p.name.lower() for p in all_archives(game))
+    classes = Counter()
+    for path in all_archives(game):
+        archive = NResArchive.open(path)
+        for entry in archive:
+            if entry.tag.upper().startswith("CTL"):
+                for component in control.parse(archive.read(entry), archive_names).components:
+                    classes[component.type_id] += 1
+    unnamed = (6, 7, 14, 16, 17, 18)
+    check("vocabulary: of the unnamed component classes only 17 ships",
+          classes and [c for c in unnamed if classes[c]] == [control.SEEKER_TYPE],
+          f"{sum(classes.values())} components over {len(classes)} classes; "
+          + ", ".join(f"{c}: {classes[c]}" for c in unnamed)
+          + " -- 17 is the rounds' seeker, and no controller carries 6, 7, 14, "
+          "16 or 18")
 
     # The narrow record only: +72 is a field of that layout, and the wide
     # record puts its member name at 128, so the offset means nothing there.
@@ -9075,7 +9194,25 @@ def check_research_streams(check, game: Path) -> None:
     check("research: TRF1 is one byte per item and its flag is never set",
           flagged == 0 and sized == len(directories),
           f"{sized}/{len(directories)} archives hold {research.ITEMS} bytes of "
-          f"TRF1, and {flagged} set the boolean the loader keeps beside it")
+          f"TRF1, and {flagged} set the boolean the loader keeps beside it -- "
+          f"the flag iron3d.dll reads as 'contains debugging information'")
+
+    # +0x18 is a TRF9 offset: IResearch slot 19 adds it to the stream's base.
+    landed = records = described = 0
+    for path, d in zip(paths, directories, strict=True):
+        archive = NResArchive(path.read_bytes())
+        base, text = archive.read(d["TRF0"]), archive.read(d["TRF9"])
+        starts = {0} | {i + 1 for i, byte in enumerate(text) if byte == 0}
+        for index in range(len(base) // research.RECORD):
+            at = struct.unpack_from("<i", base, index * research.RECORD + 0x18)[0]
+            records += 1
+            landed += at in starts
+            described += text[at:at + 1] not in (b"", b"\0")
+    check("research: the record's +0x18 is its description in TRF9",
+          records and landed == records and described == 150 * len(paths),
+          f"{landed}/{records} land on a string start in TRF9, and "
+          f"{described // len(paths)} per archive on text -- the 150 items that "
+          f"have a description; the rest point at an empty string")
 
     absent = {tag for d in directories for tag in research.STREAMS if tag not in d}
     together = sum(("TRF3" in d) == ("TRF5" in d) for d in directories)
@@ -9138,6 +9275,80 @@ def check_research_streams(check, game: Path) -> None:
           "distinct values per byte at +0x22..+0x27: "
           + ", ".join(str(len(s)) for s in spread)
           + " -- each narrow, which a packed word's bytes would not be")
+
+    library = game / descriptions.LIBRARY
+    if library.exists():
+        parts = descriptions.read(library)
+        tokens: list[defaultdict[int, set[str]]] = [defaultdict(set) for _ in range(3)]
+        joined = named = 0
+        for tree in trees:
+            for item in tree.items:
+                for pid in item.parts:
+                    part = parts.get(pid)
+                    if part is None:
+                        continue
+                    joined += 1
+                    chain = part.sub.split(":")
+                    kind = "SHS" if part.kind == "ANM" else part.kind
+                    branch = chain[1] if part.kind == "BLD" and len(chain) > 1 else ""
+                    tokens[0][item.tail[1]].add(kind)
+                    tokens[1][item.tail[2]].add(chain[0])
+                    tokens[2][item.tail[3]].add(branch)
+                    named += (item.part_kind == kind and item.part_sub == chain[0]
+                              and item.part_branch == branch)
+        single = all(len(s) == 1 for table in tokens for s in table.values())
+        kinds = ", ".join(sorted({t for s in tokens[0].values() for t in s}))
+        check("research: +0x23..+0x25 are the library's classification line",
+              joined and single and named == joined,
+              f"over {joined} part entries every value of the three bytes stands "
+              f"for one token of {descriptions.LIBRARY}'s line -- kind "
+              f"{len(tokens[0])} values ({kinds}), "
+              f"sub-kind {len(tokens[1])}, a building's second sub-kind "
+              f"{len(tokens[2]) - 1} and 255 -- and {named} match "
+              f"research.PART_KINDS/SUBS/BRANCHES")
+
+    states = Counter(item.category for tree in trees for item in tree.items)
+    opened = [(tree, item) for tree in trees for item in tree.items
+              if item.category == research.IN_TREE | research.AVAILABLE]
+    waiting = [(tree, item) for tree in trees for item in tree.items
+               if item.category == research.IN_TREE]
+    ready = sum(all(tree[r].researched for r in item.requires) for tree, item in opened)
+    blocked = sum(not all(tree[r].researched for r in item.requires)
+                  for tree, item in waiting)
+    check("research: TRF1 is in-tree, researched and available bits",
+          set(states) <= {0, 2, 4, 5, 7} and opened and ready == len(opened)
+          and waiting and blocked == len(waiting),
+          f"five values across {sum(states.values())} items ("
+          + ", ".join(f"{k}: {v}" for k, v in sorted(states.items()))
+          + f"); every 5, in the tree and available, has all its prerequisites "
+          f"researched ({ready}/{len(opened)}) and every 4 waits on one "
+          f"({blocked}/{len(waiting)}) -- the rule MisLoad.dll re-applies when a "
+          f"research completes; 7s are granted outright")
+
+    typed = matched = 0
+    ruins = Counter()
+    first = trees[0] if trees else None
+    for d in gamedir.missions(game) if first else ():
+        m = mission.load(d / "data.tma")
+        for o in m.objects:
+            if o.kind != mission.KIND_BUILDING or o.type_id is None:
+                continue
+            unit = objects.load_unit(game / o.path.replace("\\", "/"))
+            item = first.item_for(unit.components[0].ref.member)
+            if item is None:
+                continue
+            typed += 1
+            if item.object_type == o.type_id & 0xFFFFFFFF:
+                matched += 1
+            else:
+                ruins[(item.part_sub, o.type_id & 0xFFFFFFFF)] += 1
+    check("research: a building's Type follows from its sub-kind",
+          typed and matched == typed - 3 and set(ruins) == {("RUN", 0x80002000)},
+          f"{matched}/{typed} placed buildings carry the Type iron3d.dll derives "
+          f"from their root part's sub-kind and, for a bunker, size "
+          f"(0x1008a590); the other "
+          + ", ".join(f"{n} {sub} placed as {t:#x}" for (sub, t), n in ruins.items())
+          + ", which the derivation leaves at 0")
 
     agreed = pairs = 0
     for path, d in zip(paths, directories, strict=True):
@@ -9252,6 +9463,17 @@ def check_descriptions(check, game: Path) -> None:
           f"UpgradeLevel implies -- "
           + ", ".join(f"{k}:{v[0]}..{v[1]}" for k, v in sorted(descriptions.BANDS.items()))
           + f"; the {len(stray)} that do not are " + ", ".join(stray))
+
+    graded = [p for p in parts.values() if p.graded]
+    ungraded = Counter(p.kind for p in parts.values() if not p.graded)
+    check("descriptions: the A<n> token is a size grade",
+          len(graded) == len(parts) - 37 and set(ungraded) == {"WPN", "AMM"},
+          f"{len(graded)}/{len(parts)} parts carry the grade their size letter "
+          f"implies -- "
+          + ", ".join(f"{k} {v}" for k, v in descriptions.GRADES.items())
+          + "; the other "
+          + " and ".join(f"{n} {k}" for k, n in sorted(ungraded.items()))
+          + " are launchers, their packs and the level-0 large guns")
 
     free = [p for p in parts.values() if not p.researched]
     check("descriptions: what costs nothing to research is what you start with",

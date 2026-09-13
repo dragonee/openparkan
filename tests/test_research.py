@@ -202,3 +202,42 @@ def test_an_items_tail_names_its_role_size_and_level():
     assert (item.role, item.size, item.upgrade_level) == (research.ROLE_BUILDER, 1, 2)
     bare = research.Item(1, "", "", 0, (0.0, 0.0, 0.0, 0.0), (), ())
     assert bare.role == research.ROLE_NONE
+
+
+def test_the_record_id_is_an_offset_into_trf9():
+    """+0x18 is where the item's description starts in TRF9."""
+    data = build_trf(ITEMS)
+    archive = research.NResArchive(data)
+    members = [(e.tag, e.name, archive.read(e)) for e in archive.entries]
+    trf0 = bytearray(dict((t, b) for t, _, b in members)["TRF0"])
+    text = b"\0A lab that thinks.\0"
+    for index, at in enumerate((0, 1, 0)):
+        struct.pack_into("<i", trf0, index * research.RECORD + 0x18, at)
+    rebuilt = [(t, n, bytes(trf0) if t == "TRF0" else b) for t, n, b in members]
+    t = research.parse(build_nres(rebuilt + [("TRF9", research.MEMBER, text)]))
+    assert [i.description for i in t.items] == ["", "A lab that thinks.", ""]
+
+
+def test_the_middle_bytes_are_the_classification_line():
+    bunker = research.Item(0, "Small Bunker", "B", 4, (0.0,) * 4, (), (),
+                           tail=(research.ROLE_NONE, 8, 17, 81, 1, 0))
+    assert (bunker.part_kind, bunker.part_sub, bunker.part_branch) == ("BLD", "BUN", "BLD")
+    assert bunker.object_type == 0x80010000
+    turret = research.Item(1, "HQ turret", "T", 4, (0.0,) * 4, (), (),
+                           tail=(research.ROLE_HQ, 9, 33, 255, 3, 1))
+    assert turret.part_branch == "" and turret.object_type == 0x1020000
+    battle = research.Item(2, "Battle turret", "T", 4, (0.0,) * 4, (), (),
+                           tail=(research.ROLE_BATTLE, 9, 33, 255, 2, 1))
+    assert battle.object_type == research.TURRET_DEFAULT_TYPE
+    gun = research.Item(3, "Gun", "G", 4, (0.0,) * 4, (), (),
+                        tail=(research.ROLE_NONE, 12, 49, 255, 3, 2))
+    assert gun.part_kind == "WPN" and gun.object_type == 0
+
+
+def test_trf1_is_three_state_bits():
+    open_now = research.Item(0, "", "", 5, (0.0,) * 4, (), ())
+    assert open_now.in_tree and open_now.available and not open_now.researched
+    granted = research.Item(1, "", "", 7, (0.0,) * 4, (), ())
+    assert granted.researched and granted.available
+    creature = research.Item(2, "", "", 2, (0.0,) * 4, (), ())
+    assert creature.researched and not creature.in_tree
