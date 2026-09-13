@@ -248,6 +248,25 @@ def test_a_state_carries_its_frame_pairs_blend_and_length(ctl, state):
     assert s.anchor and s.by_velocity
 
 
+def test_a_state_names_what_leans_the_hull(ctl, state):
+    blob = bytearray(ctl(counts=(1, 0, 0, 0, 0), states=[state()]))
+    struct.pack_into("<I", blob, control.HEADER_SIZE + control.STATE_LEAN_AT, 0x8389)
+    (s,) = control.parse(bytes(blob)).states
+    assert s.lean_word == 0x8389 and s.lean == (0x89, 0x83, 0)
+    assert s.lean_source(0) == ("acceleration", 1, True)   # squats pulling away
+    assert s.lean_source(1) == ("turn", 2, True)           # leans out of a turn
+    assert s.lean_source(2) is None
+
+
+def test_a_flyer_state_banks_and_a_walker_state_does_not(ctl, state):
+    blob = bytearray(ctl(counts=(2, 0, 0, 0, 0), states=[state(), state()]))
+    struct.pack_into("<I", blob, control.HEADER_SIZE + control.STATE_LEAN_AT, 0x0386)
+    fly, walk = control.parse(bytes(blob)).states
+    assert fly.lean_source(0) == ("velocity", 2, True)
+    assert fly.lean_source(1) == ("turn", 2, False)
+    assert all(walk.lean_source(axis) is None for axis in range(3))
+
+
 def test_the_cheapest_path_reads_the_table_row_as_the_destination(ctl, state):
     blob = bytearray(ctl(counts=(3, 0, 0, 0, 0), states=[state()] * 3))
     at = control.HEADER_SIZE + 3 * control.SECTION1_RECORD

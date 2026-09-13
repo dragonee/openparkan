@@ -30,10 +30,10 @@ and why the 84-byte block read as a trailer until the layout was recovered.
 ```
 0x00  int32[5]   section counts
 0x14  float[3]   +20   triple 1   acceleration
-0x20  float[3]   +32   triple 2   never read; zero on 518
+0x20  float[3]   +32   triple 2   not read in Control.dll; zero on 518; y the AI's speed floor
 0x2c  float[3]   +44   triple 3   top speed, m/s
 0x38  float[3]   +56   triple 4   turn rate; two-pi on 364
-0x44  float[3]   +68   triple 5   1.0 on 418
+0x44  float[3]   +68   triple 5   how fast the hull rights itself; 1.0 on 418
 0x50  float[3]   +80   triple 6   the most the body leans, rad; two-pi on 422
 0x5c  int32      +92   0 on 324, else 1000, 2000, 5000
 0x60  float[2]   +96   zero on 512
@@ -104,12 +104,15 @@ come from.
 acceleration, doubled), triple 3 (+44, the top speed in m/s) and triple 4
 (+56, the turn rate). Triple 6 bounds the body's lean
 ([below](#the-lean-and-triple-6--read-and-measured)). Triple 5 is multiplied
-into the spin integrator (`0x10014b15`) and not named. **Triple 2 is never
-read** (*read*): no code in `Control.dll` reaches +32..+40 in the authored
+into the spin integrator (`0x10014b15`): the share of the hull's tilt righted
+each step ([24-motion.md](24-motion.md#the-hull-leans-and-rights-itself--read-and-measured)).
+**Triple 2 is never read in `Control.dll`** (*read*): no code there reaches +32..+40 in the authored
 block (the `+0x46c` pointer and the body's `+0x1ac`), the live copy
 (`+0x47c`..`+0x484`, the body's `+0x1b0`) or the property interface, while
 the same scan finds triples 1, 3, 4, 5 and 6. 518 of the 531 files leave it
-zero (*measured*). Three members side by side:
+zero (*measured*). Outside it, `Behavior.dll:0x1003bed0` reads its forward
+component as the AI walker's speed floor
+([24-motion.md](24-motion.md#how-the-ai-asks-for-speed--read)). Three members side by side:
 
 | | `ctl_cam_fly` | `o_c01_l_01` (a gun) | `fr_b_plant` (a factory) |
 |---|---|---|---|
@@ -624,8 +627,9 @@ is wired to a message.
 
 ### Not established
 
-- Triple 5 (+68): multiplied into the spin integrator (`0x10014b15`); what it
-  stands for.
+- ~~Triple 5 (+68): multiplied into the spin integrator (`0x10014b15`); what it
+  stands for~~ — **read**: how fast the hull rights itself
+  ([24-motion.md](24-motion.md#the-hull-leans-and-rights-itself--read-and-measured)).
 - Class 3's value 0 (0.5 on eight records), the camera's values 3–5, the
   hero's arms' values 1 and 4.
 - The section-5 record's int 8 (`+0x20`): not read by the interpreter, the only

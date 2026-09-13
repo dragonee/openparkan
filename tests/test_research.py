@@ -85,6 +85,15 @@ def test_a_tree_reads_its_items():
     assert t[0].kind == "main"
 
 
+def test_the_category_byte_is_three_state_bits():
+    t = research.parse(build_trf(ITEMS))
+    basic, main = t[2], t[0]                  # 7 and 4
+    assert basic.in_tree and basic.available and basic.researched
+    assert main.in_tree and not main.available and not main.researched
+    out = research.parse(build_trf([("Set Piece", "SP", 0, (0.0,) * 4, ())]))[0]
+    assert not (out.in_tree or out.available or out.researched)
+
+
 def test_prerequisites_and_unlocks_are_transposes():
     t = research.parse(build_trf(ITEMS))
     assert t[0].requires == ()

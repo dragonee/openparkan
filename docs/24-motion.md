@@ -21,6 +21,8 @@ address given, *guess* fits the evidence and is not established.
 | `+0x1b4` | the motion body (`0x10014260`); it keeps its own pointers, `+0x1ac` authored and `+0x1b0` live (`0x100143e0`) |
 | `+0x1c8` | **velocity**, in the machine's own frame, y forward (body `+0x14`) |
 | `+0x1d4` | spin: angular velocity, z is yaw (body `+0x20`) |
+| `+0x21c` | the settle angles: the pitch and roll that would stand the hull up (body `+0x68`, `0x1000c576`) |
+| `+0x254` | the lean: pitch, roll and yaw offsets in radians (body `+0xa0`, `0x10014e5f`) |
 | `+0x354`, `+0x358` | the left and right running gear's mean life (`0x10012a40`) |
 | `+0x538` | total mass, kg (`0x1000fac0`) |
 | `+0x4d8` | spare payload, kg — the live copy of file +124 |
@@ -36,8 +38,8 @@ conditions behind a pointer (`0x10001730`).
 | Offset | Field |
 |---|---|
 | +0x00 | flags: bits 0–2 switch on the velocity box per axis, bits 4–6 the spin box |
-| +0x04 | flags: bit 0 an **anchor** the planner chooses among (`0x1000524c`); `0x10000` moves by velocity; `0x100000` a fixed step with no motion; `0x1000000` jitters the step ([Playing a state](#playing-a-state--read-and-measured)) |
-| +0x08..+0x0a | what leans the body about x, y, z ([13-control.md](13-control.md#the-lean-and-triple-6--read-and-measured)) |
+| +0x04 | flags: bit 0 an **anchor** the planner chooses among (`0x1000524c`); `0x10000` moves by velocity; `0x100000` a fixed step with no motion; `0x1000000` jitters the step ([Playing a state](#playing-a-state--read-and-measured)); `0x10`–`0x80` and `0x400000` how the hull rights itself ([The hull leans](#the-hull-leans-and-rights-itself--read-and-measured)) |
+| +0x08..+0x0a | the lean: one selector byte per axis, what leans the body about x, y, z ([The hull leans](#the-hull-leans-and-rights-itself--read-and-measured), [13-control.md](13-control.md#the-lean-and-triple-6--read-and-measured)) |
 | +0x0c, +0x10 | frame pair **A**: first and last frame |
 | +0x14, +0x18 | frame pair **B**: first and last frame |
 | +0x1c | the blend base toward B |
@@ -266,6 +268,22 @@ What follows from it:
   power level bit (0x200); nothing in `Control.dll` asks an engine for 0x200
   (a sweep of every value-id query, not a proof). A starved engine's draw is
   what gets cut, not the machine's speed.
+- **No other module stops it either** — *read*, as a search.
+  - A device's power level is its property 1 (`0x1002bbb1`).
+  - Outside `Control.dll`, that property is asked for once in the whole
+    install: `Behavior.dll:0x100182ba`. That is a docked unit's guns being
+    refilled, on class 2 only. The positive control is `Control.dll`'s own
+    ask, at `0x1002e6dd`.
+  - What the AI does watch is the live top speed. A unit's behaviour copies
+    it every takt ([below](#how-the-ai-asks-for-speed--read)).
+  - While it is at least 0.5 and above triple 2's forward component, the takt
+    sets flag `0x800` at `+0xa04` and runs the walker
+    (`Behavior.dll:0x100051b0`).
+  - Once it is not, the takt clears the flag and, if the flag was set, clears
+    the walker's three target queues (`0x1000528f`, `0x1003dc90`): the AI
+    stops driving it.
+  - Engines and running gear shot to nothing trip that. A flat battery does
+    not, because it never lowers the top speed.
 - **A robot has one engine, and its mark caps its speed.** The fitted engine replaces
   the chassis slot's drive of 1 ([28-chassis.md](28-chassis.md#a-fitted-part-takes-over-its-slot--read-and-measured)),
   so E is its drive, 0.7 on a Mk1 to 1.0 on a Mk4, times its condition and the gear.
@@ -329,9 +347,11 @@ So the mouse queues a turn and the hull pays it out. On the hero:
 - the turn rate is **25.12 rad/s** about z (`r_h_02` triple 4, *measured*);
 - so the hull keeps up with any hand.
 
-The two other axes have 1.57 rad/s, and triple 6 is (0, 0, 6.28): the hero
-turns only about z (*measured*). That triple 6 is the per-axis limit that
-forbids pitch and roll is a *guess*; triple 6 stays open below.
+The two other axes have 1.57 rad/s. Triple 6 is (0, 0, 6.28) on the hero
+(*measured*), but it is not what keeps the hero from pitching or rolling. It
+limits the lean, and every hero state leans on no axis
+([below](#the-hull-leans-and-rights-itself--read-and-measured)). An earlier
+*guess* on this page, that triple 6 was the per-axis turn limit, was wrong.
 
 **The keypad cruise** — *measured* rows, *read* effect:
 
@@ -349,6 +369,82 @@ forbids pitch and roll is a *guess*; triple 6 stays open below.
   a stopped cruise reaches full in 31 runs, about 1.5 s. Letting go leaves y
   where it got to.
 - The rate of the input update itself was not read.
+
+## The hull leans and rights itself — *read*, and *measured*
+
+Triples 5 (+68) and 6 (+80) do not limit the turn. They shape how the hull
+sits: **triple 6 is the most it leans** on each axis, and **triple 5 is how
+fast it rights itself**. Both take effect in the spin integrator
+(`0x10014780`), once a state step. Axis x is pitch and y is roll, since y
+points forward.
+
+**The lean follows the state's `+0x08` word** (`0x10014e46`).
+
+- Byte 0 drives pitch, byte 1 roll and byte 2 yaw.
+- In each byte the low seven bits pick a source (jump table `0x1001538c`), and
+  bit `0x80` negates it:
+
+  | selector | source, on that byte's axis of the machine |
+  |---:|---|
+  | 1, 2, 3 | this step's turn about x, y, z ÷ (authored turn rate × dt) |
+  | 4, 5, 6 | velocity x, y, z ÷ the authored top speed on that axis |
+  | 8, 9, 10 | this step's change of velocity on x, y, z (body `+0x170`, `0x10015906`) ÷ the authored acceleration |
+  | 0, 7 | none: the lean on that axis is set to 0 |
+
+- The target is that fraction × triple 6 on the axis (`0x10014f80`).
+- The lean (`+0x254`) moves toward it by at most the live turn rate × dt, and
+  is held within ± triple 6 (`0x100151ae`).
+- It is turned into a rotation (body `+0x90`, the last step's kept at `+0x80`).
+  The drawn body takes it, blended between the two by the step's phase
+  (`0x10015a50`).
+
+*Measured*: 28 of the 1,690 states set the word, in 16 controllers.
+
+| word | on | pitch | roll |
+|---|---|---|---|
+| `0x0386` | every state of the other eight flyers, and all 10 of the `a_a_l2` animal's | −(vertical speed ÷ top) | the turn about z: banks into a turn |
+| `0x8389` | the six wheeled and tracked chassis | −(forward speed gained ÷ acceleration): squats as it pulls away | −(the turn about z): leans out of a turn |
+| `0x8405` | the Tiny Helicopter T-2 | forward speed ÷ top: nose down | −(sideways speed ÷ top) |
+
+Byte 2 is 0 on all 1,690, so nothing leans in yaw and triple 6's z of 6.28 is
+never used. Every walker, the hero and four of the five animals carry 0
+everywhere: they never lean, whatever their triple 6. The flyers' triple 6
+allows 0.1 to 0.76 rad; the wheeled and tracked chassis 0.15 to 0.25 rad of
+pitch and 0.02 to 0.1 of roll.
+
+**Righting follows the state's `+0x04` bits** (`0x1000c3a2`, in the machine
+tick).
+
+- **Bit `0x400000`** skips the step.
+- **Bits `0x40` and `0x80`** aim at the world's up, (0, 0, 1), turned into the
+  hull's frame by its matrix (`+0x264`).
+- **Bits `0x10` and `0x20`** aim instead at the vector at `+0x348`. Nothing in
+  `Control.dll` writes that offset by displacement; that it is the ground's
+  normal is a *guess*.
+- Pitch is taken from the target when bit `0x10` or `0x40` is set, and roll
+  when `0x20` or `0x80` is; an axis not taken is left at 0 (`0x1000c4af`).
+- The angles land in `+0x21c`. Each step the hull turns by triple 5 × those
+  angles, on top of its spin (`0x10014b0b`).
+- The same bits zero the spin about x and y (`0x10014af9`).
+
+So triple 5 is the share of the hull's tilt taken back each step: 1 rights it
+at once, 0.15 slowly, 0.01 (the L-8f) barely.
+
+*Measured*, across the same 1,690 states:
+
+- **808 aim at up** (`0xC0`): every flyer, the hero and its two targets, the
+  small and medium walkers, the Transformer, the Small Tower, 14 of the Tiny
+  Spider's 27 states and one of the Large Walking Chs's 92, three of the five
+  animals, and 44 trees.
+- **390 aim at `+0x348`** (`0x30`): the six wheeled and tracked chassis, the
+  other 91 Large Walking and 13 Tiny Spider states, the other two animals, 15
+  stones, 21 trees and one `system.rlb` controller.
+- **421 skip it** (`0x400000`): the 420 building states and one in
+  `system.rlb`. The 70 rounds set none of these bits, and the flying camera
+  sets `0x40` alone.
+
+That the wheeled and tracked chassis follow the slope and the rest stand
+upright is *derived* from this, and the guess about `+0x348` above.
 
 ## Running gear: legs, wheels and tracks by side — *read*, and *measured*
 
@@ -383,8 +479,28 @@ and the other flyers carry none.
   `0x1000fbac`)
 - each component: its **mass at record +0x1c**, in kg, added to its node
   (ids 0x100 and 0x200, `0x1002bb40`)
-- **spare payload** = file +124 + the mass of one node range the mesh reports
-  (the chassis's own, by the look of it — *guess*) − the total, never below 0
+- **spare payload** = file +124 + the chassis's own body − the total, never
+  below 0 (`0x1000fc51`)
+
+**The chassis's own body is the root object's nodes** — *read*.
+
+- **The range.** The sum asks the model, through `AniMesh.dll` interface slots
+  14 and 15 with part id 0, for the first node carrying that id and how many
+  do (`0x1000fafa`, `0x1000fb08`; `AniMesh.dll:0x10005780`, `0x100057c0`).
+- **The node records.** A model node record (`0x130` bytes at model `+0x1a8`)
+  begins with the id of the part that brought it (`AniMesh.dll:0x100123eb`).
+- **Id 0 is the root.**
+  - The agent enters its own object as part 0 when it is built
+    (`AniMesh.dll:0x1000311f`), and merges that mesh with id 0
+    (`0x10016a70`).
+  - Every part attached after it takes the smallest id not yet used, so 1 or
+    more (`0x10003775`). They are attached in the assembly's order
+    ([28-chassis.md](28-chassis.md#a-fitted-part-takes-over-its-slot--read-and-measured)).
+  - On a robot the root is the chassis.
+- **What comes back.** Only those nodes' density × volume returns to spare
+  payload (`0x1000fb6f`). Armour's weight on them does not, since it is added
+  after (`0x1000fbac`). So a chassis's body never eats into its payload, and
+  its armour does.
 
 The stat panel shows **file +124 × 0.001 as "Max payload" in t** and the total
 mass × 0.001 as "Weight" (`iron3d.dll:0x1006f300`, IControl 136 and 124).
@@ -420,6 +536,18 @@ hero.
   `+0x1a4`. G scales top speed. An owner with no manager gives surface 10
   (`0x1001aace`). When the surface id changes, block group `+0x504[id]` runs
   (`0x1001ab3e`; an id above 10, such as `0xFF`, runs nothing).
+- **G comes from the file and nowhere else** — *read*, as a search of every
+  write.
+  - In `Control.dll`, only two instructions write `+0x1a8`: the constructor's
+    1.0 (`0x10006ec9`) and the ground contact's copy (`0x1001aafd`). The
+    contact keeps the last value while the machine touches no face.
+  - In `World3D.dll`, only the material loader writes the float the
+    contact copies, material `+0x15c`. It sets 1.0 first (`0x1000451a`), then
+    the header's float when the record's version is 3 or more
+    (`0x1000458b`).
+  - No other module holds the manager's record array.
+  - So G could differ from 1 only through a `MAT0` record, and none shipped
+    has it ([below](#what-the-shipped-surfaces-carry--measured)).
 - **Mode 2 brakes on slopes.** Only when file +104 is 2 does the velocity
   integrator compare the ground's tilt with the cone at +112 (`0x100157ac`):
   with `c` the cosine of the tilt, a factor
@@ -694,6 +822,22 @@ through the ground contact instead: a state with contact points falls at the
 same 10.0 until a contact lands
 ([Holding the body on the ground](#holding-the-body-on-the-ground--read-and-measured)).
 
+**Nothing changes the 10.0** — *read*, as a search.
+
+- **Who holds a world.** Terrain.dll's `GetWorld` is imported by
+  `Control.dll`, `World3D.dll`, `iron3d.dll`, `AniMesh.dll`, `ai.dll`,
+  `Effect.dll`, `ArealMap.dll` and `Behavior.dll`. `Behavior.dll` never
+  calls its import.
+- **The calls on it.** Where a module keeps the result, the calls through it
+  were followed: `World3D.dll` only releases it, `ai.dll` calls slot 8, and
+  `Control.dll`'s calls through a field at `+0x44` reach slots 3, 4 and 6 to
+  11, never 5.
+- **Slot 5.** It takes the world and a pointer to one float, and pops 8
+  (`Terrain.dll:0x10026b00`). Every indirect call at `+0x14` with exactly two
+  pushes was listed across all 16 modules: 117 sites. None is on a world
+  pointer. The same scan at `+0x10` returns the one known gravity read,
+  `Control.dll:0x10015887`, which is the control.
+
 ### Lakes in the areal map — *measured*
 
 An areal whose third flag word has all of `0xF0` set (240 or 242 on the
@@ -755,17 +899,56 @@ Tower a generator; those stay beside the fitted battery.
 ## How the AI asks for speed — *read*
 
 `MBehaviour`'s orders take a fraction of the unit's speed (`Behavior.dll`
-`+0x5fc`, from an object record the unit reports): a go order at
-`Go_SpeedPercent` (`0x1002b59b`). The compiled defaults (`0x10016250`) are 1
-for going, building, transport and patrolling a unit; 0.8 for patrolling a
-place and for pathfinding near a building; 80 for patrolling a building (sic);
-`Attack_MinAttackSpeedPercent` 0.7 with `Del` 0.3, `MinNearing` 0.8 with
-`Del` 0.2; `Movement_InsideBuilding_Speed` 3; `Movement_MaxSpeed` 600. `diff_slow.var` sets
-`Speed_MaximumFactor` to 0.7 where the other four difficulties set 1; where
-it is applied is not read. The mission property `MaxSpeedPercent` reads back
+`+0x5fc`): a go order at `Go_SpeedPercent` (`0x1002b59b`). The compiled
+defaults (`0x10016250`) are 1 for going, building, transport and patrolling a
+unit; 0.8 for patrolling a place and for pathfinding near a building; 80 for
+patrolling a building (sic); `Attack_MinAttackSpeedPercent` 0.7 with `Del`
+0.3, `MinNearing` 0.8 with `Del` 0.2; `Movement_InsideBuilding_Speed` 3;
+`Movement_SpeedPercent` and `Movement_MinSpeedPercent` 1;
+`Movement_MaxSpeed` 600. The mission property `MaxSpeedPercent` reads back
 `Movement_SpeedPercent` and its setter does nothing (`0x1000b621`). `ai.dll`
 asks for the live top speed (IControl 145) and compares it with 1
 (`0x100091b0`).
+
+**`+0x5fc` is the live block's forward top speed.**
+
+- **When it is taken.** Every unit takt starts by copying six live figures
+  (`Behavior.dll:0x10005133` into `0x1001bbe0`). The source is the answer to
+  IControl slot 13 with id `0x12`, which is the live parameter block at
+  control `+0x470` (`Control.dll:0x1000dd6f`).
+- **What is copied**, twice over (once at `+0x5fc`, again at `+0x614`):
+
+  | behaviour | live block | what |
+  |---|---|---|
+  | `+0x5fc` | `+0x1c` (file +48) | top speed, forward |
+  | `+0x600` | `+0x10` (file +36) | triple 2, forward |
+  | `+0x604`, `+0x608` | `+0x18`, `+0x20` | top speed, x and z |
+  | `+0x60c` | `+0x2c` (file +64) | turn rate about z |
+  | `+0x610` | `+0x04` | acceleration, forward (twice the file's) |
+
+- **So the base is the limited speed.** It is the authored top × G × E ×
+  (1 + r) ÷ 2, not the authored top.
+
+**`Speed_MaximumFactor` caps what the AI asks the walker for.**
+
+- **Where.** An order hands its speed to `MWalker::SetTarget`
+  (`Behavior.dll:0x1003bad0`, called from 15 places). It holds the speed in
+  turn (the cap is at `0x1003be4f`):
+  1. to at most the live forward top × `Movement_SpeedPercent` ×
+     `Speed_MaximumFactor`;
+  2. to at most `Movement_MaxSpeed`, 600;
+  3. to at least triple 2's forward component × `Movement_MinSpeedPercent`
+     (`0x1003bed0`);
+  4. to at least 2 m/s (`0x1003bf05`).
+- **Where the factor lives.** It is the first float of the difficulty profile
+  at the behaviour's `+0x8d4` ([26-damage.md](26-damage.md)).
+- **What it does.** `diff_slow.var` sets it to 0.7 where the other four
+  difficulties set 1 (*measured*), so on that difficulty an AI unit is driven
+  at no more than 70% of what its engines and load allow — *derived*.
+- **Triple 2's forward component is the walker's floor.** It is 0.6 on the
+  walkers, the Transformer and the hero, 0.49 on the Tiny Spider, 0.1 on the
+  Small Tower and the two targets, and 0 on every wheeled, tracked and flying
+  chassis. That is under the 2 m/s floor either way — *measured*.
 
 ## Not established
 
@@ -791,8 +974,9 @@ asks for the live top speed (IControl 145) and compares it with 1
   interface slot `0x7c` (`0x1001affd`), and flag `0x20`. Flag `0x1000` runs the
   record's group once while its node stands (`0x1001b08f`); no shipped record
   sets it.
-- Where G would ever differ from 1: no shipped material sets it
-  ([Ground and collision](#ground-and-collision--read-and-measured)).
+- ~~Where G would ever differ from 1~~ — answered: nowhere but a `MAT0`
+  record; the constructor and the ground contact are its only writers
+  ([Ground and slope](#ground-and-slope--read)).
 - ~~How the strafe angle's turn is split between the hull and the turret, and
   what `MCMD_FORWARD`'s ramp does~~ — **read**: the hull takes the whole
   change and the turret an offset that undoes it across the step; the ramp is
@@ -800,12 +984,25 @@ asks for the live top speed (IControl 145) and compares it with 1
   ([From input to motion](#from-input-to-motion--read-and-measured)).
 - How often `World3D.dll`'s input update (`0x1000f100`, the manager's slot 4)
   runs, which sets how fast the keypad cruise ramps.
-- Which node range the payload sum counts as the chassis.
-- Triple 5 (+68), multiplied into the spin integrator (`0x10014b15`). Triple 6
-  is read: the most the body leans per axis
-  ([13-control.md](13-control.md#the-lean-and-triple-6--read-and-measured)).
-- Whether any module calls `CWorld` slot 5 to change the 10.0 gravity.
-- Where `Speed_MaximumFactor` is applied, and what the unit's `+0x5fc` speed
-  base is.
-- Whether a module outside `Control.dll` stops a machine whose engines are
-  unpowered.
+- ~~Which node range the payload sum counts as the chassis~~ — answered: part
+  0's nodes, the root object's ([Load](#load--read-and-measured)).
+- ~~Triples 5 and 6~~ — answered: 6 is the most the hull leans
+  ([13-control.md](13-control.md#the-lean-and-triple-6--read-and-measured))
+  and 5 how fast it rights itself
+  ([The hull leans](#the-hull-leans-and-rights-itself--read-and-measured)).
+  Still open there: who writes the vector at control `+0x348` that bits
+  `0x10` and `0x20` right the hull toward.
+- ~~Whether any module calls `CWorld` slot 5~~ — answered: none does
+  ([Gravity](#gravity--read-and-measured)).
+- ~~Where `Speed_MaximumFactor` is applied, and the `+0x5fc` speed base~~ —
+  answered: it caps an order's speed in `MWalker::SetTarget`, and the base is
+  the live forward top speed
+  ([How the AI asks for speed](#how-the-ai-asks-for-speed--read)).
+- ~~Whether a module outside `Control.dll` stops a machine whose engines are
+  unpowered~~ — answered: none reads an engine's power level; the AI stops
+  driving a unit whose live top speed falls to its floor
+  ([What sets the live limits](#what-sets-the-live-limits--read)).
+- What behaviour flag `0x800` (`+0xa04`) changes besides clearing the walker.
+  Triple 2 is never read inside `Control.dll` — nothing reaches +32..+40 in
+  either copy of the block ([13-control.md](13-control.md)) — and the AI reads
+  its forward component as a floor.
