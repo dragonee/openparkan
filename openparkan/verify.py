@@ -3138,6 +3138,16 @@ def check_profiles(check, game: Path) -> None:
                         ("transprt", "builder") else leaf)
                 by_value[prop.value].add(kind)
     carriers = by_value.get(profiles.TRANSPORT_MAX_ORE, set())
+    mine_cap = min(by_value) if by_value else 0
+    store_cap = max(by_value) if by_value else 0
+    check("data.tma: one mine and one storage at capacity fill the HUD's ore bar",
+          mine_cap + store_cap == profiles.HUD_ORE_FULL
+          and round(100 * mine_cap / profiles.HUD_ORE_FULL) == 11,
+          f"the HUD divides held ore by {profiles.HUD_ORE_FULL:g} "
+          f"(iron3d.dll:0x1006d927); a placed mine holds {mine_cap:g} and a "
+          f"storage {store_cap:g}, which sum to exactly that, so a lone full "
+          f"mine reads {100 * mine_cap / profiles.HUD_ORE_FULL:.1f}%")
+
     check("data.tma: a placed holder's MaximumOre is the engine's own constant",
           set(by_value) == {profiles.MINE_MAX_ORE, profiles.TRANSPORT_MAX_ORE,
                             profiles.STORAGE_MAX_ORE}

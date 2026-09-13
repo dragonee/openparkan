@@ -68,6 +68,11 @@ TRANSPORT_ORE_OFF_PER_SECOND = 100.0
 TRANSPORT_BUILDING_DIST = 80.0
 BUILDING_COST = 100.0
 
+#: The HUD's ore bar is ore held in the clan's mines and storages over this --
+#: ``iron3d.dll:0x1006d927`` multiplies by 1/4500.  It is one full mine plus
+#: one full storage, so a lone full mine reads 11%.
+HUD_ORE_FULL = MINE_MAX_ORE + STORAGE_MAX_ORE
+
 
 class ProfileFormatError(ValueError):
     pass

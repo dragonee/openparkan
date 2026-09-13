@@ -1465,3 +1465,36 @@ kind = "function"
 name = "distributor slot 11: the tick, dt from a millisecond clock"
 doc = "docs/23-economy.md"
 read = true
+
+# --- the strategic HUD's ore and energy bars, ../docs/23-economy.md --------
+[[entry]]
+module = "iron3d.dll"
+at = "0x1006d290"
+kind = "function"
+name = "the Ore/Energy panel's constructor: labels are string ids 5092, 5093"
+doc = "docs/23-economy.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1006d510"
+kind = "function"
+name = "the Ore/Energy panel's draw: itoa + '%', flashes a zero value"
+doc = "docs/23-economy.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1006d8f0"
+kind = "function"
+name = "the Ore/Energy panel's update: ore/4500, net power over every clan's power"
+doc = "docs/23-economy.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1001ac40"
+kind = "function"
+name = "distributor slot 9: return self + 0x30, the totals block"
+doc = "docs/23-economy.md"
+read = true

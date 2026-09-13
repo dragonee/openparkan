@@ -178,6 +178,37 @@ time — with one difference in how ore is pulled.
 - Until then its **progress is `min(time, ore, power)` as fractions, capped at
   1**, logged as "Construction in progress".
 
+## What the HUD shows — *read*
+
+In strategic control the top right carries two bars, **Ore** and **Energy**,
+each with a percentage beside it. The labels are string ids 5092 and 5093 in
+`iron3d.dll`'s own string table, the panel is built at `0x1006d290`, drawn at
+`0x1006d510`, and updated at `0x1006d8f0`, which asks the player clan's
+distributor for its totals — `0x1001ac40`, `return self + 0x30` — and computes:
+
+```
+Ore     = ore held in the clan's mines and storages / 4500
+Energy  = (power available − power demanded) / power available, summed over every clan
+```
+
+each clamped to 0..1 and shown as a whole percentage.
+
+- **4500 is one full mine plus one full storage** — `Mine_MaxOre` 500 plus
+  `Storage_MaxOre` 4000 — so **a lone full mine reads 500 / 4500 = 11%**.
+  A mine that is full and not being drawn from sits there, which is the "a
+  mine gives 11% constantly" the game shows. A full storage alone reads 89%;
+  both full read 100%. (The scale is *read*; that it equals the two
+  capacities is *measured*.)
+- **Energy is a share of the whole map's power**, not a fill level. The
+  denominator sums every clan's available power, so owning one generator of
+  three equal ones, with nothing outstanding to recharge, reads 33%. Demand
+  still to be met is subtracted first, so it dips while buildings charge. The
+  missions place between 0 and 5 generators, most often one or two, so what
+  one generator is worth depends on the map.
+- The numbers do not jump: every 0.05 s each displayed value steps by one
+  point toward its target. A bar whose value is 0 flashes on a half-second
+  timer.
+
 ## Against what the game looked like
 
 The HUD shows ore and power as percentages, a mine gives about 11%, a
@@ -195,10 +226,13 @@ construction slows research.
   ore from the same pool the institute draws 3 and 1 from, so while it builds
   the institute's tier gets a smaller share. Which tier each sits in is
   unread, so how much smaller is too.
-- **One plant ≈ 33%** — *guess*. A type-10 component's efficiency is a mean of
-  three, so one input of three fully met is exactly a third. Nothing yet ties
-  that to the HUD.
-- **A mine ≈ 11%** — *unknown*. The HUD's formula is not read.
+- **A mine ≈ 11%** — *read*, and exact. The ore bar divides held ore by 4500,
+  one full mine plus one full storage, and a full mine holds 500: 11.1%.
+- **One power plant ≈ 33%** — *read*, and conditional. The energy bar is the
+  clan's net power over the power of every clan on the map, so one generator
+  reads a third when three equal generators exist and nothing is left to
+  recharge. The earlier guess here, that it came from a component averaging
+  three inputs, is withdrawn.
 
 ## Not established
 
@@ -209,10 +243,8 @@ construction slows research.
   `Transfer_Power_Out`, and the mining code takes the smaller of one side's
   rate and the other's contents. The loader that assigns them has not been
   read.
-- The HUD's ore and power percentages. Ruled out so far: `iron3d.dll`'s
-  `targeter_energy` is a weapon's charge; the `"%s : %d%%"` tooltip is an
-  object's own field times 100; the low-resources voice fires on message
-  `0x104` sent from elsewhere; and the distributor's vtable slot 11 is its
-  tick, not a getter. The distributor is created by `ai.dll`, not through
-  `Comp.ini`.
+- That the clan record's slot `0x2c`, which the HUD calls before the stats
+  getter, returns the distributor. The getter it then reaches returns exactly
+  the distributor's totals block, which is why the reading holds; the call
+  itself was not followed into `ai.dll`, which creates the distributors.
 - `fPriority`, and properties `0x300`–`0x305`.
