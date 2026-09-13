@@ -134,7 +134,12 @@ class NodeDamage:
     #: node, correlating +0.56 with its volume in log space against +0.19 for
     #: the other float.  1000000 on the nodes that cannot be destroyed.
     durability: float
-    #: Unresolved.  1000 on 549 records, then 0, 10, 1, 300 and 500.
+    #: Unresolved, and not a handful of values: 104 distinct over 2334
+    #: records.  The 17 whole numbers (1000 on 549, 0, 10, 1, 300, 500 ...)
+    #: sit on buildings, scenery and projectiles and read as authored.  The
+    #: other 87 are fractional -- 91.008, 1124.23 -- on 873 records that are
+    #: all unit parts, and read as computed.  They fall as the node grows
+    #: (log-log -0.46 against its bounding volume), so not a mass.
     unknown: float
     #: The explosion to play, as an ``(archive, member)`` pair like any other.
     explosion: ResourceRef

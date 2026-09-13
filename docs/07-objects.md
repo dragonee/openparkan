@@ -136,7 +136,7 @@ the mesh they belong to.
 ```
 int32    flags        0 throughout, except 1 on scenery and 112 on projectiles
 float32  durability   1000000 where the node cannot be destroyed
-float32  ...          unresolved; 1000 on 549 records, then 0, 10, 1, 300, 500
+float32  ...          unresolved; 104 distinct values, see below
 char[32] archive      the explosion's library
 char[32] member       the explosion, a .exp
 ```

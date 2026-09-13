@@ -61,8 +61,13 @@ interface but never receives an argument, so the mapping has to come from
 `AniMesh.dll`, the only module that calls `LoadControlSystem`.
 
 Its sibling `.ndp` is [solved and read](07-objects.md). One field of it is not:
-the second `float32` of a record, 1000 on 549 of them and then 0, 10, 1, 300
-and 500.
+the second `float32` of a record. It was written up as "1000 on 549, then 0,
+10, 1, 300 and 500", which is the whole numbers only: the field takes **104
+distinct values** over 2334 records. The 17 whole ones sit on buildings,
+scenery and projectiles and read as authored; the other 87 are fractional —
+91.008, 1124.23 — on 873 records that are **all unit parts** (`EXTO`, `BTLU`)
+and read as computed. They *fall* as a node grows, log-log −0.46 against its
+bounding volume, so whatever they are it is not a mass or a size.
 
 ## CTPT field roles outside static.rlb
 
@@ -85,9 +90,9 @@ and then 2, 1, 1, 1, which reads as two parallel arrays rather than pairs.
   hulls, and on the 288 ordinary nodes with both it is always a separate slot
   — a copy of level 0 on 141, coarser on 137. The hit test itself has not been
   found reading it. See [07-objects.md](07-objects.md).
-- **Pose key `time`.** The `float32` at offset 12 of a stream-8 key is an
-  integer frame number in every one of the 34049 keys, ranging 0..473. It is
-  not used by a static renderer.
+- ~~**Pose key `time`**~~ — answered: a key's time is **the frame at which
+  its run first names it**, which is what an animation player interpolates
+  between. See [07-objects.md](07-objects.md).
 - 25 of the 1414 attachments have a socket that turns the part by 120° about
   (1, 1, 1) — a cyclic axis permutation — or by 126°. They are missile packs
   and shell clips on the winged SSM launchers. The other 83 disagreements are
@@ -154,8 +159,9 @@ module that reads it; the input tables beside them are [read](14-controls.md). `
 emitter mean is not.
 
 `sky.ske` is [solved](10-sky.md) -- a day cycle of colour keyframes, all 29
-files to the byte. Three things in it are not: the keyframe count of a second
-section, which field selects the object type (SUN, SKY, RAIN, SNOW,
-LIGHTNING), and most of the 124-byte file header.
+files to the byte, and bytes 64 and 68 of its header say how long the day
+lasts. Three things in it are not: what selects between a file's two days,
+which field carries the object type and opcode (three candidates are dead),
+and the rest of the 124-byte header.
 
 The ones that hold back a picture are triaged in [../TODO.md](../TODO.md).

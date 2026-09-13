@@ -2993,6 +2993,8 @@ def check_damage(check, game: Path) -> None:
 
     parsed = total = per_node = 0
     named = 0
+    second_float: Counter[float] = Counter()
+    computed_by_tag: Counter[str] = Counter()
     variant_nodes = variant_named = 0
     nested = blocks = 0
     shrinks = compared = 0
@@ -3007,6 +3009,10 @@ def check_damage(check, game: Path) -> None:
             continue
         parsed += 1
         named += sum(1 for row in table if row.explosion)
+        for row in table:
+            second_float[row.unknown] += 1
+            if row.unknown != int(row.unknown):
+                computed_by_tag[record.tag] += 1
 
         blob = member(record.mesh)
         if blob is None:
@@ -3050,6 +3056,16 @@ def check_damage(check, game: Path) -> None:
           f"{parsed}/{total} tables are exactly 4 + n*{objects.DAMAGE_STRIDE} "
           f"bytes and {per_node} of them have one record per mesh node; "
           f"{named} records name an explosion")
+
+    whole = {v: n for v, n in second_float.items() if v == int(v)}
+    check("objects.rlb: a .ndp record's second float is not a handful of values",
+          len(second_float) > 50 and set(computed_by_tag) <= {"EXTO", "BTLU"},
+          f"{len(second_float)} distinct values over {sum(second_float.values())} "
+          f"records.  {len(whole)} are whole numbers -- the commonest "
+          f"{sorted(whole.items(), key=lambda kv: -kv[1])[:4]} -- and the other "
+          f"{len(second_float) - len(whole)} are not, on "
+          f"{sum(computed_by_tag.values())} records that are all unit parts: "
+          f"{dict(computed_by_tag)}")
 
     check("MESH: the five-slot blocks are filled in order",
           nested == blocks > 0,

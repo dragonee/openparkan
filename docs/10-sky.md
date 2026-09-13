@@ -160,7 +160,7 @@ case stores.
 Phase **0 is the create side**: the handler that takes it resolves the type
 name, looks the object up, and warns *"Atmosphere object already exists - %s"*.
 
-### Which field carries the opcode — still open, and one candidate is dead
+### Which field carries the opcode — still open, and three candidates are dead
 
 The opcode is assembled in memory. The collector fills a 0x98-byte record from
 a **240-byte runtime keyframe** (the filler is at `0x100692d0`): hour at
@@ -443,10 +443,10 @@ each body once and stops neither.
 - **Where a shower stops.** The sun and moon come in start/stop pairs and rain
   does not, so the viewer runs the weather to the next keyframe that names
   anything. That is a reading, not a fact.
-- **The keyframe count of a second section.** Six files have two; their
-  72-byte section headers are byte-identical yet hold 27 and 20 keyframes, so
-  the count is not in them. The reader takes the second section's keyframes to
-  the end of the file, which consumes all six exactly.
+- ~~The keyframe count of a second section~~ — not the question, as above:
+  a second section is a second whole day, and the reader takes its keyframes
+  to the end of the file, which consumes all six exactly. What *selects*
+  between the two days is open.
 - Which field selects the object type, and which carries the opcode. The
   runtime side is pinned: the filler at `Terrain.dll:0x100692d0` copies the
   240-byte keyframe's `+0x28` to the event record's `+0x00` (at `0x100694bd`),
