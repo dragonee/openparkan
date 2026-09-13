@@ -2015,7 +2015,7 @@ read = true
 module = "Control.dll"
 at = "0x1000fac0"
 kind = "function"
-name = "mass: node .ndp +8 x mesh property 0x10, components' mass (0x100) on their node (0x200); spare payload +0x4d8"
+name = "model totals: +0x530 area, +0x534 volume, +0x538 mass (.ndp +8 x node volume, plus part mass +0x1c on its node); spare payload +0x4d8"
 doc = "docs/24-motion.md"
 read = true
 
@@ -2185,4 +2185,406 @@ at = "0x100091b0"
 kind = "site"
 name = "asks IControl 145, the live top speed, and compares it with 1"
 doc = "docs/24-motion.md"
+read = true
+
+# --- sensors: radar, detect shield, signatures, AI contacts, ../docs/25-sensors.md ---
+
+[[entry]]
+module = "Control.dll"
+at = "0x10024310"
+kind = "function"
+name = "class-8 (radar) constructor: base component, vtable 0x1003c800"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1003c800"
+kind = "datum"
+name = "radar vtable: the base component's 16 slots but for its destructor"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10024390"
+kind = "function"
+name = "radar scan: off or broken -> none; cached until now >= last + value 4; sphere query of radius value 3; skips self; detection test each"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10024638"
+kind = "site"
+name = "detection test: a target whose slot-0x2c word is 0xfffe is never detected"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002c400"
+kind = "function"
+name = "IControl radar contacts (slot 10): the radar pointer's scan, or 0 with no radar"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002d5d2"
+kind = "site"
+name = "component factory keeps one radar pointer at +0x5d4: the last class-8 record loaded"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002d4b0"
+kind = "function"
+name = "component factory: type id -> class by a 30-byte index table; 9, 21, 8, 17 also kept at +0x5cc..+0x5d8"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10021820"
+kind = "function"
+name = "component slot 2: 1 when its node's life is 0 (destroyed)"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10026470"
+kind = "function"
+name = "class-10 (detect shield) constructor: starts in state 0x2000, camouflage off"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10026510"
+kind = "function"
+name = "detect shield level: in 0x1000, drops to 0x2000 when level x (power + value 4) < power"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10026570"
+kind = "function"
+name = "detect shield set state: 0x1000 on, 0x2000 off, 0x4000 toggles (CIS_CHAMELEON_INV)"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002bd94"
+kind = "site"
+name = "component get 0xb00, class 10: max(0, 1 - value 0'), x max(0, 1 - value 3) while camouflaged"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002be95"
+kind = "site"
+name = "component get 0xc00, class 10: max(0, 1 - value 1'), x max(0, 1 - value 3) while camouflaged"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002c088"
+kind = "site"
+name = "component get 0xd00, class 10: max(0, 1 - value 2'), x max(0, 1 - value 3) while camouflaged"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000e1f0"
+kind = "site"
+name = "property 0x45: mass (+0x538) x every detect shield's 0xb00"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000e267"
+kind = "site"
+name = "property 0x43: area (+0x530) x object get 3 x every detect shield's 0xc00"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000e31c"
+kind = "site"
+name = "property 0x44: volume (+0x534) x object get 4 x every detect shield's 0xd00"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002d47a"
+kind = "site"
+name = "power tick: +0x5dc = power asked a second on channels 0, 2, 5"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002d496"
+kind = "site"
+name = "power tick: +0x5e0 = power asked a second on channels 0, 3, 4"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002b567"
+kind = "site"
+name = "IControl object get 3: the channel 0/2/5 demand a second"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002b57e"
+kind = "site"
+name = "IControl object get 4: the channel 0/3/4 demand a second"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002b6ec"
+kind = "site"
+name = "IControl object get 8: the radar's value 3, its range"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002b712"
+kind = "site"
+name = "IControl object get 9: the radar's value 4, its period"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x100051f0"
+kind = "function"
+name = "mesh node get: 0xa +0x14, 0xd +0x18, 0xe a word, 0xf two object scales x +0x30, 0x10 three scales x +0x34"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10023120"
+kind = "function"
+name = "MBehaviour radar module constructor: timers 7+rand x 23 and 31+rand x 46 (x64 ms), three id arrays"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x100234e0"
+kind = "function"
+name = "radar module takt: rescan on the first timer; on the second, IArealMap slot 12 (position, range)"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10023240"
+kind = "function"
+name = "radar module scan: IControl contacts (edx 0x10); drops clan kind 0/3, buildings, self; hostile and friendly lists by slots 0xd0/0xd4"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1000d460"
+kind = "function"
+name = "MBehaviour slot 0xd0: is this clan hostile"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1000d4f0"
+kind = "function"
+name = "MBehaviour slot 0xd4: is this clan friendly"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1004c550"
+kind = "function"
+name = "randomised timer: fires when now > next; next = now + w4 x 64 + rand8 x w6 x 64 / 256"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10025410"
+kind = "function"
+name = "target selector: mode 0 none, 1 fixed, 2-4 pickers over the hostile radar list; cached on a timer"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x100254b0"
+kind = "function"
+name = "target picker: the hostile contact nearest a point, within 500"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x100255a0"
+kind = "function"
+name = "target picker mode 3: hostile contacts within 500, units only (a building logs a stub warning)"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10017e70"
+kind = "function"
+name = "scores the hostile radar contacts through the task stack and orders against the best"
+doc = "docs/25-sensors.md"
+read = false
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10034930"
+kind = "function"
+name = "MTaskStack::StartTask: a start that fails logs 'Cannot StartTask', reports, and removes the order"
+doc = "docs/23-economy.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10034a30"
+kind = "function"
+name = "MTaskStack takt: a finished task is removed and the next started; failing starts fall through to the next"
+doc = "docs/23-economy.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10029c30"
+kind = "site"
+name = "Task_Construct start: no free mind -> log and return 0"
+doc = "docs/23-economy.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10059b24"
+kind = "datum"
+name = "M_Task_Construct vtable: slot 0 type 12, 2 abort, 3 order, 6 start, 7 takt"
+doc = "docs/23-economy.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10076e40"
+kind = "function"
+name = "player machine: its class-10 component is in state 0x1000 (camouflage on)"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100a5310"
+kind = "function"
+name = "cockpit voice cues on state change: VOICE_CHAMELEON_SYS_ON/OFF among them"
+doc = "docs/25-sensors.md"
+read = false
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10039330"
+kind = "function"
+name = "clan mind list: count of free entries (-1)"
+doc = "docs/23-economy.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000dcc0"
+kind = "function"
+name = "control system property get (ids 1-180); 0x43-0x45 are the radar signatures"
+doc = "docs/25-sensors.md"
+read = false
+
+[[entry]]
+module = "Control.dll"
+at = "0x100243e0"
+kind = "site"
+name = "radar scan: next scan time = now + value 4"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10024441"
+kind = "site"
+name = "radar scan: query radius = value 3"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002446c"
+kind = "site"
+name = "radar scan: world sphere query (own position, range, filter)"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1002355f"
+kind = "site"
+name = "radar module: IArealMap slot 12 (position, radar range, time) on the second timer"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x100256e0"
+kind = "function"
+name = "target picker mode 4: hostile contacts within 500, 1 / ((d + 10) x (areal figure + 10))"
+doc = "docs/25-sensors.md"
+read = false
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1003f760"
+kind = "function"
+name = "walker: reads the radar module's list of every kept contact"
+doc = "docs/25-sensors.md"
+read = false
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10005560"
+kind = "function"
+name = "MBehaviour slot 0xb4: pops the order and reports 'Order Done'"
+doc = "docs/23-economy.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x100247a0"
+kind = "function"
+name = "class-17 reset: +0x94 = cos(value 0)"
+doc = "docs/25-sensors.md"
 read = true

@@ -91,6 +91,21 @@ def test_a_component_carries_its_mass(ctl, component):
     assert one.mass == 1350.0
 
 
+def test_a_radar_has_a_range(ctl, component):
+    parts = [component(control.RADAR_TYPE, values=(0.05, 0.7, 25.0, 400.0, 750.0)),
+             component(control.ENGINE_TYPE, values=(0.0, 0.0, 0.0, 400.0))]
+    radar, engine = control.parse(ctl(counts=(0, 0, 0, 2, 0), components=parts)).components
+    assert radar.sensor_range == 400.0
+    assert engine.sensor_range is None
+
+
+def test_a_detect_shield_has_a_camouflage(ctl, component):
+    part = component(control.DETECT_SHIELD_TYPE, values=(0.9, 0.45, 0.01, 0.84, 0.2))
+    one = control.parse(ctl(counts=(0, 0, 0, 1, 0), components=[part])).components[0]
+    assert one.camouflage == pytest.approx(0.84)
+    assert one.sensor_range is None
+
+
 def test_section_one_reads_as_states(ctl, state):
     walk = state(flags=0x2, velocity=((0.0, 0.6, 0.0), (0.0, 12.0, 0.0)), engine=1.5,
                  conditions=2)

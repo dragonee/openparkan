@@ -147,8 +147,10 @@ and the other flyers carry none.
 
 `0x1000fac0` weighs the machine:
 
-- each node: `.ndp` float +8 × a mesh node property (id 0x10); that the
-  first is a density and the second a volume is a *guess*
+- each node: `.ndp` float +8 × the mesh node's volume (id 0x10, which
+  `AniMesh.dll:0x100051f0` scales by all three of the object's scale factors,
+  where id 0xf takes two — [25-sensors.md](25-sensors.md#what-a-target-gives-away--read));
+  that the `.ndp` float is a density is a *guess*
 - each component: its **mass at record +0x1c**, in kg, added to its node
   (ids 0x100 and 0x200, `0x1002bb40`)
 - **spare payload** = file +124 + the mass of one node range the mesh reports
@@ -157,8 +159,11 @@ and the other flyers carry none.
 The stat panel shows **file +124 × 0.001 as "Max payload" in t** and the total
 mass × 0.001 as "Weight" (`iron3d.dll:0x1006f300`, IControl 136 and 124).
 
-*Measured:* only the twelve internal engines carry a mass, and within each
-size it rises with the engine's value and draw:
+*Measured:* every internal part but armour carries a mass — 100 to 40,000 kg
+over the 104 in `intsys.rlb`, against 0 on all 24 armour parts — and so does
+every `o_cNN` gun, 6.25 to 6,000. The slots a gun mount, a chassis or a
+building declares for its parts carry none, bar one detection-shield slot of 10. An internal engine's mass
+rises with its value and draw:
 
 | | df (0.7) | 01 (0.8) | 02 (0.9) | 03 (1.0) |
 |---|---|---|---|---|
@@ -261,8 +266,7 @@ asks for the live top speed (IControl 145) and compares it with 1
   behind `0x1001a450`'s query — and whether water is one of them.
 - What writes the command triple the velocity integrator multiplies by top
   speed (`0x10014610`).
-- The mesh node property (0x10) that the `.ndp` +8 float multiplies into
-  mass, and which node range counts as the chassis.
+- Which node range the payload sum counts as the chassis.
 - Triples 5 (+68) and 6 (+80): 6 clamps an attitude the spin integrator
   drives from a per-state selector (state +0x08), 5 is multiplied into it;
   what that attitude is on screen is not read.

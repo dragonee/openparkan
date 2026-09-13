@@ -4272,6 +4272,192 @@ def check_motion(check, game: Path) -> None:
           f"engines weigh 0.  Control.dll:0x1000fac0 adds a part's mass to its node")
 
 
+#: ``CICLS`` classes the checks below name: armour (``i_arm``) and the gun.
+ARMOUR_TYPE = 27
+GUN_TYPE = 2
+#: The four marks of an internal part, by name suffix: MK1 to MK4.
+MARKS = ("df", "01", "02", "03")
+
+
+def check_sensors(check, game: Path) -> None:
+    """.ctl: radars and detect shields, and where the assemblies put them."""
+    names = frozenset(p.name.lower() for p in all_archives(game))
+    radars: list[tuple[str, str, control.Component]] = []
+    shields: list[tuple[str, str, control.Component]] = []
+    most_radars = 0
+    seekers: set[str] = set()
+    seeker_count = 0
+    for path in all_archives(game):
+        archive = NResArchive.open(path)
+        for entry in archive:
+            if not entry.tag.upper().startswith("CTL"):
+                continue
+            try:
+                parsed = control.parse(archive.read(entry), names)
+            except control.ControlFormatError:
+                continue
+            seekers.update(path.name.lower() for p in parsed.components if p.type_id == 17)
+            seeker_count += sum(1 for p in parsed.components if p.type_id == 17)
+            here = [p for p in parsed.components if p.type_id == control.RADAR_TYPE]
+            most_radars = max(most_radars, len(here))
+            radars += [(path.name.lower(), entry.name.lower(), p) for p in here]
+            shields += [(path.name.lower(), entry.name.lower(), p)
+                        for p in parsed.components if p.type_id == control.DETECT_SHIELD_TYPE]
+
+    # -- radar values ------------------------------------------------------
+    parts = {n[:-4]: p for lib, n, p in radars if lib == "intsys.rlb"}
+    others = [(n, p) for lib, n, p in radars if lib != "intsys.rlb"]
+    part_triples = {p.values[:3] for p in parts.values()}
+    other_triples = {p.values[:3] for _n, p in others}
+    periods = {p.values[control.RADAR_PERIOD] for _l, _n, p in radars}
+    tail_zero = all(not any(p.values[5:]) for _l, _n, p in radars)
+    check(".ctl: radar: three sensitivities, a range and a rescan period",
+          len(radars) == 76 and len(parts) == 12
+          and {tuple(round(v, 3) for v in t) for t in part_triples} == {(0.05, 0.7, 25.0)}
+          and other_triples == {(0.5, 0.5, 0.5)}
+          and periods == {750.0} and tail_zero
+          and all(p.values[control.RADAR_RANGE] > 0 for _l, _n, p in radars),
+          f"{len(radars)} class-8 components: the {len(parts)} radar parts read "
+          f"0.05/0.7/25, the {len(others)} others 0.5/0.5/0.5; value 4 is "
+          f"{sorted(periods)} on all; values 5-15 zero: {tail_zero}")
+
+    def spread(values):
+        return f"{min(values):.2f}-{max(values):.2f}"
+
+    slot_range = {(p.label.lower(), p.values[control.RADAR_RANGE]) for lib, _n, p in radars
+                  if lib == "turrets.rlb"}
+    part_power = [p.power for p in parts.values()]
+    fort = sorted({p.values[control.RADAR_RANGE] for lib, _n, p in radars if lib == "parts.rlb"})
+    check(".ctl: radar: slots, fortifications and parts differ",
+          slot_range == {("i_rdr_l", 500.0), ("i_rdr_m", 800.0), ("i_rdr_b", 800.0)}
+          and {p.power for lib, _n, p in radars if lib == "turrets.rlb"} == {1.0}
+          and {round(p.power, 3) for lib, _n, p in radars if lib == "parts.rlb"} == {0.01}
+          and fort == [500.0, 600.0, 750.0]
+          and {(lib, p.values[control.RADAR_RANGE]) for lib, _n, p in radars
+               if lib in ("animals.rlb", "bases.rlb")} == {("animals.rlb", 500.0),
+                                                        ("bases.rlb", 500.0)}
+          and round(min(part_power), 2) == 0.08 and round(max(part_power), 2) == 0.30,
+          f"turret slots {sorted(slot_range)} at power 1; bunker/tower radars "
+          f"{fort} at 0.01; animals and r_l_06 500; radar parts power "
+          f"{spread(part_power)}")
+
+    ladders = {}
+    for size in "lmb":
+        ladders[size] = [parts[f"o_rdr_{size}_{m}"].values[control.RADAR_RANGE] for m in MARKS]
+    check(".ctl: radar: a part's range grows with its mark",
+          all(a < b for r in ladders.values() for a, b in zip(r, r[1:], strict=False)),
+          "; ".join(f"{s} {'/'.join(f'{v:g}' for v in r)}" for s, r in ladders.items()))
+
+    check(".ctl: radar: no controller carries two",
+          most_radars == 1,
+          f"at most {most_radars} class-8 component in any one .ctl -- the "
+          f"control system keeps one radar pointer (Control.dll:0x1002d5d2)")
+
+    check(".ctl: class 17 is only on projectiles",
+          seekers == {"weapon.rlb"} and seeker_count == 20,
+          f"{seeker_count} class-17 components, all in {sorted(seekers)}")
+
+    # -- what a part weighs, which the mass signature totals ----------------
+    masses: dict[tuple[str, int], list[float]] = defaultdict(list)
+    for lib in ("intsys.rlb", "guns.rlb"):
+        archive = NResArchive.open(game / lib)
+        for entry in archive:
+            if entry.tag.upper().startswith("CTL"):
+                # a gun is an o_cNN controller; an o_gun mount only declares slots
+                kind = "gun" if entry.name.lower().startswith("o_c") else "slot"
+                for part in control.parse(archive.read(entry), names).components:
+                    masses[(lib if lib == "intsys.rlb" else kind, part.type_id)].append(
+                        part.mass)
+    armour = masses.pop(("intsys.rlb", ARMOUR_TYPE), [])
+    guns = masses.get(("gun", GUN_TYPE), [])
+    slots = [v for (where, _t), vs in masses.items() if where == "slot" for v in vs]
+    rest = [v for (where, _t), vs in masses.items() if where == "intsys.rlb" for v in vs]
+    check(".ctl: every internal part but armour, and every gun, has a mass",
+          armour and not any(armour) and rest and min(rest) == 100.0
+          and max(rest) == 40000.0 and guns and min(guns) > 0 and slots and not any(slots),
+          f"{len(armour)} armour parts weigh 0; the other {len(rest)} intsys.rlb "
+          f"parts {min(rest):g}-{max(rest):g} kg and the {len(guns)} o_cNN guns "
+          f"{min(guns):g}-{max(guns):g}, where the {len(slots)} slots the gun mounts "
+          f"declare weigh 0.  Control.dll:0x1000fac0 totals them into the mass signature")
+
+    # -- detect shields ----------------------------------------------------
+    lib = descriptions.library(game)
+    dsh = {n[:-4]: p for l_, n, p in shields if l_ == "intsys.rlb"}
+    slots = [(n, p) for l_, n, p in shields if l_ == "bases.rlb" and p.label]
+    joined = []
+    for name, part in sorted(dsh.items()):
+        entry = lib.get("i" + name[1:])
+        stat = next((s.field for s in (entry.stats if entry else ())
+                     if s.label.lower().startswith("supres")), None)
+        joined.append((name, part.values[control.CAMOUFLAGE], stat))
+    zero_is_df = all((v == 0) == name.endswith("_df") for name, v, _s in joined)
+    stat_agrees = all((v == 0) == (s == '"0.0"') for _n, v, s in joined)
+    # control: the stat would agree trivially if every part printed 0.0
+    printed = Counter(s for _n, _v, s in joined)
+    cuts = [v for n, v, _s in joined if not n.endswith("_df")]
+    check(".ctl: detect shield: camouflage is value 3, not on MK1",
+          len(joined) == 12 and zero_is_df and stat_agrees and len(printed) == 4,
+          f"value 3 is 0 on the {sum(1 for n, *_ in joined if n.endswith('_df'))} "
+          f"_df parts and {min(cuts):g}-{max(cuts):g} on the other "
+          f"{sum(1 for n, *_ in joined if not n.endswith('_df'))}; objects.dlb "
+          f"prints Supression {dict(sorted(printed.items()))}, 0.0 exactly there")
+
+    powers = {size: [dsh[f"o_dsh_{size}_{m}"].power for m in MARKS] for size in "lmb"}
+    cuts012 = {size: {dsh[f"o_dsh_{size}_{m}"].values[:3] for m in MARKS} for size in "lmb"}
+    check(".ctl: detect shield: its three cuts are per size",
+          all(len(v) == 1 for v in cuts012.values()),
+          "; ".join(f"{s} " + "/".join(f"{x:g}" for x in next(iter(v)))
+                    + f" at power {spread(powers[s])}" for s, v in cuts012.items()))
+
+    camo = {}
+    for size in "lmb":
+        camo[size] = [(dsh[f"o_dsh_{size}_{m}"].values[control.CAMOUFLAGE],
+                       dsh[f"o_dsh_{size}_{m}"].values[control.CAMOUFLAGE_POWER]) for m in MARKS]
+    rising = all(a[0] < b[0] and a[1] < b[1]
+                 for r in camo.values() for a, b in zip(r, r[1:], strict=False))
+    check(".ctl: detect shield: cut and price rise with mark",
+          rising,
+          "; ".join(f"{s} " + " ".join(f"{c:g}@{w:g}" for c, w in r)
+                    for s, r in camo.items()))
+
+    check(".ctl: detect shield: a chassis has an empty slot",
+          len(slots) == 22 and all(not any(p.values) for _n, p in slots)
+          and all(any(p.values[:3]) for p in dsh.values()),
+          f"{len(slots)} labelled i_dsh records on bases.rlb chassis, all sixteen "
+          f"values zero; the {len(dsh)} intsys parts carry theirs")
+
+    # -- where the assemblies put them --------------------------------------
+    robots = 0
+    placed = 0
+    buildings: Counter[tuple[str, int]] = Counter()
+    for path in sorted(game.glob("UNITS/**/*.dat")):
+        unit = objects.load_unit(path)
+        parent = unit.parents()
+        member = [c.ref.member.lower() for c in unit.components]
+        turrets = [i for i, m in enumerate(member) if m.startswith("e_tur")]
+        rdr = [i for i, m in enumerate(member) if m.startswith("i_rdr")]
+        dsh_parts = [i for i, m in enumerate(member) if m.startswith("i_dsh")]
+        if turrets:
+            robots += 1
+            placed += (len(turrets) == 1 and len(rdr) == 1 and parent[rdr[0]] == turrets[0]
+                       and len(dsh_parts) == 1 and parent[dsh_parts[0]] == 0)
+        elif rdr or dsh_parts:
+            placed -= 1000          # a radar part off a turret would fail this
+        if member[0].startswith("fr_"):
+            kind = "bunker/tower" if ("bunker" in member[0] or "tow" in member[0]) else "other"
+            buildings[(kind, sum(1 for m in member if m.startswith("e_gun_fs")))] += 1
+    check("UNITS: a robot's radar is on its turret",
+          robots == 372 and placed == robots,
+          f"{placed}/{robots} assemblies with a turret carry one i_rdr part on it "
+          f"and one i_dsh part on the chassis; none without a turret carries either")
+
+    check("UNITS: only bunkers and towers see",
+          buildings[("bunker/tower", 1)] == 27 and buildings[("other", 0)] == 49
+          and len(buildings) == 2,
+          f"{buildings[('bunker/tower', 1)]} bunkers and towers carry one "
+          f"e_gun_fs radar; the other {buildings[('other', 0)]} buildings none")
+
+
 def check_controls(check, game: Path) -> None:
     """The input layer: ScanCode.dsc, Command.dsc, the .man bindings, the .tbl tables."""
     keys = controls.scancodes(game)
@@ -5673,7 +5859,7 @@ def run(game: Path) -> int:
         check_minimap_agreement, check_arealmap,
         check_grid, check_missions, check_objects, check_poses, check_lod, check_damage,
         check_effects, check_footprints, check_rsli, check_control, check_efficiency,
-        check_motion,
+        check_motion, check_sensors,
         check_controls,
         check_behaviour, check_research, check_descriptions, check_saves,
         check_vocabulary, check_resources, check_briefing, check_settings,

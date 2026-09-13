@@ -462,6 +462,14 @@ CPUs" in the game's own interface (`iron3d.dll` string 3067).
   (`0x10029910`).
 - **What the player hears.** When the player clan has none free, the
   constructor plays `VOICE_NO_CPU` (`iron3d.dll:0x1005ee43`).
+- **A refused build is dropped, not retried** — *read*. A factory's orders are
+  tasks on a stack (`Behavior.dll:0x10034930`). When `Task_Construct` cannot
+  find a free mind its start returns failure (`0x10029c30`); the stack logs
+  "Cannot StartTask", reports the order back the same way as a finished one —
+  "Reported that Order Done" (`0x10005560`) — removes it, and starts the next
+  order in the queue, skipping any that fail in turn (`0x10034a30`). Nothing in
+  the factory waits for a mind to come free: a new order has to come from the
+  player or the clan's AI.
 
 So a clan with 5 minds can have at most 5 bots alive or under construction,
 and its factories stop until one is lost. Buildings take no mind.
@@ -608,4 +616,5 @@ construction slows research.
 - The second object scale on node life (`+0x660`).
 - What makes a building a charging dock for units, and which task sends a bot
   there on its own.
-- Whether a factory refused for want of a mind retries by itself.
+- Whether a clan's AI re-orders a build that was refused for want of a mind
+  (`ai.dll:0x10007fd0` is where to look).

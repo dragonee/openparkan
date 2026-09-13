@@ -324,11 +324,11 @@ Every component class answers a *value id* through its vtable slot 4,
 sixteen, multiplies by the owner's per-component figure when bit `0x100` is set,
 and by a run-time level at `+0x4c` when bit `0x200` is. So id `0x300` is value 0
 with both factors applied, and `0x300`–`0x305` are the first six. Which value
-means what depends on the class. One detection test (`0x10024620`) multiplies
-three of a target object's properties by values 0–2 and by a falloff over the
-range in value 3, and succeeds at 1 — a scanner's sensitivities, by the look of
-it, which is a *guess*. The one class read end to end is **26**, a building's
-efficiency: see [23-economy.md](23-economy.md).
+means what depends on the class. Class **26**, a building's efficiency, is
+read end to end in [23-economy.md](23-economy.md); class **8**, the radar
+(values 0–2 sensitivities to a target's mass, electronics and drive, value 3
+its range, value 4 its rescan period), and class **10**, the detection shield
+and its camouflage, in [25-sensors.md](25-sensors.md).
 
 ## The section-5 record
 

@@ -80,9 +80,21 @@ POWER_STORE_TYPE = 19
 #: the machine's drive (``Control.dll:0x1000fca0``, property ``0xe00``).
 ENGINE_TYPE = 5
 #: What the part weighs, in kg, a float.  ``Control.dll:0x1000fac0`` adds it to
-#: the mass of the node the part sits on.  Only the twelve ``o_eng`` parts
-#: carry one in the shipped data.
+#: the mass of the node the part sits on.  Every internal part but armour
+#: carries one, and every gun; the slots a mount or chassis declares do not.
 COMPONENT_MASS_AT = 0x1C
+#: ``CICLS_RADAR``.  Values 0-2 are its sensitivities to a target's three
+#: signatures, value 3 its range and value 4 how long a scan stays good, in
+#: the control clock's milliseconds (``Control.dll:0x10024390``, ``0x10024620``).
+RADAR_TYPE = 8
+RADAR_RANGE = 3
+RADAR_PERIOD = 4
+#: ``CICLS_DETECTSHIELD``, the stealth system.  Values 0-2 cut the three
+#: signatures, value 3 cuts all three again while camouflage is on, and value 4
+#: is what camouflage costs a second (``0x1002bd94``, ``0x100264b0``).
+DETECT_SHIELD_TYPE = 10
+CAMOUFLAGE = 3
+CAMOUFLAGE_POWER = 4
 
 #: A section-1 state: ``SECTION1_RECORD`` bytes, then ``counts[1]`` 16-byte
 #: conditions.  Bits 0-2 of the flags switch on the velocity box per axis and
@@ -342,6 +354,20 @@ class Component:
         if self.type_id != EFFICIENCY_TYPE or not self.values:
             return None
         return self.values[0]
+
+    @property
+    def sensor_range(self) -> float | None:
+        """A radar's range, or None for any other class."""
+        if self.type_id != RADAR_TYPE or not self.values:
+            return None
+        return self.values[RADAR_RANGE]
+
+    @property
+    def camouflage(self) -> float | None:
+        """How much a detect shield's camouflage cuts, or None for any other class."""
+        if self.type_id != DETECT_SHIELD_TYPE or not self.values:
+            return None
+        return self.values[CAMOUFLAGE]
 
 
 def read_component(blob: bytes, pos: int) -> Component | None:
