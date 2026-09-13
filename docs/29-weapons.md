@@ -42,20 +42,212 @@ and clip (*measured*).
 less than value 2 → no shot, unless value 1 is 0 (the animals' guns fire
 free); otherwise the gun fires, takes value 2 from the capacitor, sets its
 level to `capacitor ÷ value 1`, and waits value 3 ms. Each round fired takes
-one from the magazine unless the magazine is −1 (`0x1002a5e3`).
+one from the magazine unless the magazine is −1 (`0x1002a5e3`). The wait
+starts only once the barrel has finished its stroke, so **value 3 is not the
+whole time between shots**
+([Firing, from button to round](#firing-from-button-to-round--read-and-measured)).
 
-**Barrels.** A component's entries name the section-2 records its barrels sit
-on. One shot fires the next barrel in turn (`0x1002a0d2`) — so a 9-tube
-launcher looses one rocket every interval — **or every barrel at once when
-record +8 carries bit `0x2000000`** (`0x10029fcc`). Seven multi-beam lasers and
-the three builders set it (*measured*).
+**Barrels.** A component's entries name the section-2 channels its barrels
+are. One shot fires the next barrel in turn (`0x1002a0d2`) — so a 9-tube
+launcher looses one rocket every stroke and interval — **or every barrel at
+once when record +8 carries bit `0x2000000`** (`0x10029fcc`). Seven
+multi-beam lasers and the three builders set it (*measured*). Either way a
+barrel whose channel takes the previous channel's value (flag `0x40`,
+[30-turrets.md](30-turrets.md#aiming-and-the-camera--read-and-measured)) is
+passed over (`0x10029ff5`).
 
 **Firing** (*read*). The input tables send `MCMD_STATE` with
 `CIS_CONTINUEFIGHT` (0x100) to `CICLS_MULTIGUN` while the fire button is held
 and `CIS_SWITCHOFF` when it is released, after `MCMD_SELECT` picked a weapon
 ([14-controls.md](14-controls.md)). The gun keeps the state word
 (`0x1002a100`); `CIS_SINGLEFIGHT` (0x200) fires once and clears itself
-(`0x1002a09f`). How the AI chooses among several weapons is not read here.
+(`0x1002a09f`). The next section follows a shot from the button to the round.
+How the AI chooses among several weapons is not read here.
+
+## Firing, from button to round — *read*, and *measured*
+
+### The button reaches the selected guns
+
+The hero's left mouse button sends `MCMD_STATE` with index −1:
+`CIS_CONTINUEFIGHT` on the press and `CIS_SWITCHOFF` on the release. Keys 0–8
+send `MCMD_SELECT` with index −1 or 1–8 (*measured*, `hero.tbl`).
+
+`World3D.dll`'s row handler keeps two bytes for each component the player may
+drive. One says it may fire; the other says it is **selected**. It routes the
+weapon commands this way (`World3D.dll:0x100109f8`):
+
+| row | what happens |
+|---|---|
+| `MCMD_STATE`, index −1 | the state goes to **every selected gun** (`0x100105ed`) |
+| `MCMD_STATE`, index *n* | the state goes to the *n*-th gun, selected or not |
+| `MCMD_SELECT` *n* | **toggles** the *n*-th gun (`0x10010770`). Selecting resets it (state `0x1000`) and sends the *n*-th class-24 component state 1. Deselecting switches the gun off and sends that component state 2 |
+| `MCMD_SELECT` −1 | selects and resets every gun, and sends every class-24 component `0x21` (`0x1001084a`) |
+| `MCMD_MISSILE` | the state goes to the selected guns whose round's frame +116 carries `0x10` (`0x1001065f`) |
+| `MCMD_FIRE_ALL` | the state goes to every gun (`0x100106d3`) |
+
+**Which guns start selected** (`World3D.dll:0x1000ed20`, *read*):
+
+- A gun whose round's frame +116 carries 4 starts selected. On the hero those
+  are the cannon and the laser (`bb_h_01`, `bl_h_01`).
+- Otherwise, when the driven object's type is `0x1020000`, the hero's, the gun
+  starts deselected. On the hero
+  those are the plasma rifle and the missiles.
+- Any other machine's guns start selected.
+- So **in Mission 01 the button fires the cannon and the laser together**
+  until a number key changes the set.
+- What allows the player's unit to fire in the first place (the handler's
+  input bits, slot 10) was not traced.
+
+**The class-24 components are the arms.** The only controller that has any is
+the hero turret, which pairs four of them with its four guns (*measured*).
+Each arm's channels play frames 42–48 on the arm nodes. Type 24 is built as
+the generic device, the factory's default (`0x1002d6ec`). That state 1 unfolds
+an arm, 2 folds it, and `0x20` does either at once is a *guess* from the
+frames.
+
+### The gun's takt: a stroke, then the interval
+
+A component is woken when its next-event time (`+0x10`, in ms) passes. The
+time driver catches up, running several events in one frame if it has to
+(`0x1002d2e2`). At each wake the gun's fire method either continues a barrel
+stroke or starts one. It starts one only if all of these hold:
+
+- it has rounds (state 5 otherwise);
+- its capacitor holds value 2 (state 6 otherwise);
+- its ready byte `+0x118` is set (state 7 otherwise, `0x10029d27`);
+- its state word is non-zero.
+
+Values 8–10 add target gates: no shot at a target farther than value 8
+(`0x10029e37`) or further off the barrel than the angle value 10
+(`0x10029edd`), and a value-9 delay in seconds counted down first
+(`0x10029f2c`). They are zero on every
+shipped gun, so no gate applies.
+
+**A barrel stroke has four steps** (`0x1002a190`):
+
+| step | what happens | read at |
+|---|---|---|
+| 1 | the barrel's channel heads for 0.5, and the gun's own section-5 group runs (component record +0xc) | `0x1002a1df` |
+| 2 | **the round leaves** | `0x1002a266` |
+| 3 | the channel heads for 1.0 | `0x1002a5a8` |
+| 4 | the channel snaps back to 0 and the magazine loses one | `0x1002a5c1` |
+
+- **Timing.** After steps 1 and 3 the gun sleeps until the channel arrives:
+  1000 × distance ÷ rate ms, so 500 ÷ rate each (`0x10022120`).
+- **After step 4.** The shot is done: the capacitor pays value 2, the gun
+  sleeps value 3 ms, and the next barrel is up.
+- **A stroke always finishes**, even if the button is released during it.
+
+So **one shot takes 1000 ÷ rate ms of stroke plus value 3**, give or take a
+frame at each wake, and the round leaves halfway through the stroke. On the hero
+(*measured*):
+
+| gun | round | barrel point | channel rate | value 3, ms | one shot, ms | shots a second |
+|---|---|---|---:|---:|---:|---:|
+| cannon | `bb_h_01` | `Mgun_d` | 4 | 0 | 250 | 4 |
+| plasma rifle | `bp_h_01` | `Plaz_d` | 2 | 250 | 750 | 1.33 |
+| laser | `bl_h_01` | `Laz_d` | 4 | 200 | 450 | 2.22 |
+| missiles | `bm_h_01` | `Roc_d1`, then `Roc_d2` | 1, 2.5 | 1,250 | 2,250, then 1,650 | 0.51 |
+
+The cannon's value 3 of 0 is therefore not unlimited fire. Its barrel's
+stroke limits it to four shots a second. The stat panel's `1000 ÷ max(1,
+value 3)` does not count the stroke. The missile barrels' channels carry flag
+4: they are timed but not animated. Every one of the 388 barrel channels in
+the install has a rate (*measured*).
+
+### Where the round leaves, and which way
+
+- **The muzzle** is the barrel channel's control point (+0x14), in world space,
+  position and direction (`0x1002a302`): `Mgun_d` is 0.895 along +y on
+  `Gun01_m1o1`.
+- **The direction converges on the sight** when the gun sits on a turret and
+  its round's controller is mode 0 (`0x1002a34c`). Every round but the four
+  lobbed `bf_*_01` is mode 0.
+  - The turret gives each of its guns two points: the yaw channel's second
+    point and the pitch channel's point (`0x10028130`). On all 59 turret
+    components those are **`TurretCenter` and `TargetDirect`** (*measured*).
+  - The gun casts a ray from `TurretCenter` along `TargetDirect`, from 5 m to
+    1,000,000 m, into the world's segment query (IWorld slot 7, `0x1002a768`).
+  - The first hit, pushed out to at least 100 m (`0x1002a7be`), is the aim
+    point. The round flies from its muzzle straight at it (`0x1002a610`).
+- **With no hit** the round keeps its barrel's own direction.
+- **No spread and no lead** are applied to the player's shot.
+- *Guess*: that IWorld slot 7 meets objects as well as the ground. Its code
+  was not read.
+
+### The round's start
+
+The round is created facing its direction with z up (`CreateObject` 9,
+`0x1002a387`) and set up before it joins the game (`AddObjectToGame`,
+`0x1002a58f`):
+
+- **Owner** (property `0x7f`, `0x1002a3dc`): the id of the object whose control
+  system holds the gun. That is **the whole robot**, since a unit's parts
+  share one control system
+  ([28-chassis.md](28-chassis.md#a-fitted-part-takes-over-its-slot--read-and-measured)).
+  The hit test skips that id.
+- **Level ratio:** property `0xb4`, the gun's `+0x180`.
+- **Velocity:** its top speed along its own y, plus the shooter's world
+  velocity (`+0x200`, which the body adds to its position each step,
+  `0x10015920`). It is set with `SetWorldSpeed` (`0x1002a4b4`).
+  - `SetTangSpeed` behind it sets the **free-flight** byte (`0x100044a0`), and
+    while that byte is set the integrator does not pull the velocity toward
+    the command (`0x100153f4`). So a round keeps its launch speed.
+  - A mode-0 round's sideways components of that velocity, in its own frame,
+    bleed off at 0.003 m/s per elapsed ms (`0x1000ceec`).
+  - A round whose command (property `0x20`) is already non-zero at spawn gets
+    `SetTangAccel` with it too. No such round was found.
+- **Target:** the gun's target, through the round's interface `0x204` slot 16
+  (`0x1002a514`), which sets its seeker's target (`0x1002cb00`).
+
+### Guided rounds follow the turret's target
+
+A gun's target (`+0x108`) is its turret's (`0x10028130`). The turret's target
+is set through the unit's interface `0x204` slot 16, which also sets the
+unit's own seeker. `Behavior.dll`'s attack task calls it (`0x10025107`).
+
+What sets the hero's turret target in first-person play was **not found**.
+With no target, a seeker gives no heading
+([Guided rounds](#guided-rounds-differ-in-how-hard-they-steer--read-and-measured)),
+so the plasma bolt and the missile fly straight.
+
+### How a round ends — *read*, and *measured*
+
+A round's controller names three groups in its 84-byte block: entry 2 runs on
+a hit (`+0x4e4`), entry 3 at the map edge (`+0x4e8`) and entry 4 at the end of
+its range (`+0x4ec`). On all 66 rounds (*measured*):
+
+| group | action | what it does | rounds |
+|---|---|---|---|
+| hit | 17 (`0x100033d0`) | clears invulnerability and **kills the round** through `ILifeSystem`, so its own `.ndp` explosion goes off where it stopped | 63 |
+| hit | 15 (`0x10003341`) | marks it dead and takes it out of the collision pass, with no explosion | the 3 builder beams |
+| map edge | 15 | the same | all 66 |
+| range | 27 (`0x100030ce`) | **explodes it with a named `.exp`**: `<round>_end.exp` on bullets, beams and shells, `<round>r.exp` on rockets and missiles | 58 |
+| range | 17 or 15 | as above | the animal shots and builder beams |
+
+Each group also starts with action 0, which stops the body (`0x10002926`).
+Where a round carries a tracer, the group stops it (action 19) or starts a
+hit effect (action 10). The hero's missile explodes at range with
+`bm_h_01r.exp`, 200 in 10 m. Its hit `.exp` is 170 in 7 m. The other three
+hero rounds hit directly (*measured*).
+
+### What a shot plays — *read*, and *unknown*
+
+- **Guns with a shot group.** 34 guns name a section-5 group at record +0xc.
+  It runs when a barrel starts its stroke and holds only actions 10 (start an
+  effect), 4 (create one) or 10 with 11 (*measured*). An example is the
+  builder's `gunf_builder`.
+- **The hero's guns name none.**
+  - The turret's load group creates `hero_cannon`, `hero_prifle` and
+    `hero_redlaser` at the barrel points, and the `*_sfx` effects at the
+    `GH_*_sfx` points (action 4, `0x10002a8d`).
+  - It binds the first three to the barrel nodes and the sound effects to the
+    arm nodes (action 14, `0x10003031`).
+  - **What starts them on a shot was not found**: the gun's code calls no
+    effect method.
+- **The rounds' own effects** start when the round loads: `hero_cannon_bullet`,
+  `hero_prifle_bulletA`/`B`, `hero_laser_bullet`, and the missile's engine,
+  smoke and `hero_gunfire_missile`.
 
 ## Energy or clips — *measured*
 
@@ -160,11 +352,17 @@ through about three times the angle and turns three to four times as fast; the
 winged SSMs look wide but turn slowly. The seeker's value 2 is not read by
 either method.
 
+A seeker's target is the gun's target, handed to the round as it leaves
+([The round's start](#the-rounds-start)). A turret's gun has its turret's
+target.
+
 ## The weapons the player builds — *measured*, with *derived* rates
 
 Damage a round is the panel's; damage a second is `damage × shots a second`,
 × the beams on a salvo gun. It ignores armour, shields and the level ratio
-([26-damage.md](26-damage.md)).
+([26-damage.md](26-damage.md)). *Shots a second* is the stat panel's `1000 ÷ max(1,
+value 3)`; a gun also waits out its barrel's stroke first, so it fires more slowly than
+this ([Firing, from button to round](#firing-from-button-to-round--read-and-measured)).
 
 | weapon | code | kind | ammunition | energy a shot | ms between shots | shots a second | barrels | damage a round | blast m | round m/s | range m | damage a second | energy a second |
 |---|---|---|---|---:|---:|---:|---|---:|---:|---:|---:|---:|---:|
@@ -235,10 +433,16 @@ The enemy variants and the huge guns:
 
 ## Not established
 
-- Values 8–10, which the fire routine reads (`0x10029d3a`, `0x10029e50`) and
-  every shipped gun leaves at 0.
-- What marks a barrel to be skipped (bit 0x40 of its attachment record,
-  `0x10029ff5`); the control-point word of section 2 matches it on the seven lasers.
+- What sets the hero's turret target in first-person play, and so what a
+  player's missile follows.
+- What starts the hero turret's shot effects and sounds (`hero_cannon`, the
+  `*_sfx`), which its load group creates and binds to nodes (action 14).
+- How the turret's follower channels decide a gun's ready byte
+  (`0x10028200`), and which geometry IWorld slot 7, the convergence ray,
+  meets.
+- What allows the player's unit to fire (the row handler's per-component
+  bytes, `World3D.dll:0x1000ed20`), and what the arms' states 1, 2, `0x21` and
+  `0x22` play.
 - A seeker's value 2, and the scale on the steering command (`0x100430d4`, set at
   `0x1000d9fc`).
 - How the AI picks a weapon when a unit has several.

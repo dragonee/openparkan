@@ -161,7 +161,10 @@ differ when the pass runs between them is *not established*.
   record and the two swept spheres touch within the frame (`0x1001e9f0`).
 - **A round against an object** (`0x1001d630`):
   - **its own shooter is skipped** — a unit whose id is the round's owner gives
-    no contact at all (`0x1001d6af`);
+    no contact at all (`0x1001d6af`). The owner is the whole robot that fired
+    it, not the gun (`0x1002a3dc`,
+    [29-weapons.md](29-weapons.md#the-rounds-start)), so a turret's round never
+    strikes its own robot;
   - a unit's **bubble**, its bounding sphere, gives a contact, kept in order of
     distance;
   - then the round's segment is run through the object's mesh.
@@ -469,8 +472,6 @@ shield, battery and ammunition (`Behavior.dll:0x10018100`, `0x10019372`,
 - How the struck object and node reach `ILifeSystem` slot 8's hit. It carries
   the same five-integer reference the collision record does, but the copy was
   not found.
-- Whether a round's owner id is the unit or the gun that fired it — which
-  decides whether a turret's round can strike its own robot.
 - What reads a node's fifth slot, if a round's hit test does not.
 - Who clears the behaviour flag `0x10` that lets a unit's takt switch its
   repair (`Behavior.dll:0x100067b0`'s caller), and so whether the AI overrides

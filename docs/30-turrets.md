@@ -189,6 +189,20 @@ hero turret the four channels animate `CP_m1o1`, `Turn_m1o1` (49–53),
   (`0x100059a0`, when `+0x65c` is set and no turn is pending). What `+0x65c`
   and `+0x1f0` are was not read.
 
+**The guns' sight** (*read* `0x10028130`, `0x1002a610`; *measured*):
+
+- **What the turret hands each gun.** Its target, the yaw channel's second
+  point and the pitch channel's point. On all 59 turret components those
+  points are `TurretCenter` and `TargetDirect`.
+- **The ray.** A gun aims its round at the first thing a ray from
+  `TurretCenter` along `TargetDirect` meets, and at no nearer than 100 m. The
+  camera looks along the same `TargetDirect`, so the shot goes where the
+  crosshair is (*derived*).
+- **Follower channels.** A channel flagged 8 joins the turret's list
+  (`0x10009120`). Each tick the turret aims its gun's mount with it and sets
+  that gun's ready byte (`0x10027f51`). How it decides is not read. On the hero
+  there is one per gun: `Gun01`, `Plz01`, `Lz01` and `Rk01`.
+
 **The first-person eye** (*read* `0x100234c0`; *measured* on the hero):
 
 - **The camera's channel** points at `TargetDirect`, with `CameraCenter` the
@@ -367,8 +381,9 @@ not traced. That a zero cost marks them unbuildable is a *guess*.
 - The Large transport's second slot, and which Large builder socket takes the
   module.
 - Camera values 3–5 (1, 150, 1), the camera shake's constants (`+0xa4` 3,
-  `+0xa8` 3, `+0xac` 2.5) and what triggers it, and the four class-24
-  components on the hero turret.
+  `+0xa8` 3, `+0xac` 2.5) and what triggers it. The four class-24 components on
+  the hero turret are its weapon arms
+  ([29-weapons.md](29-weapons.md#the-button-reaches-the-selected-guns)).
 - Whether the engine plays a channel's frames linearly in its value, and how the
   HUD draws the aim point.
 - What prevents the player from building the six free turrets.

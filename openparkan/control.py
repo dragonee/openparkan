@@ -204,6 +204,16 @@ SEEKER_TYPE = 17
 #: turret see ``MOUNT_*``.
 COMPONENT_FLAGS_AT = 0x08
 SALVO = 0x2000000
+#: A section-5 group of the controller a gun runs when a barrel starts its
+#: stroke (``Control.dll:0x1002a1df``), or -1.  34 guns set one.
+COMPONENT_GROUP_AT = 0x0C
+#: The hero turret's weapon arms, one per gun; built as the factory's generic
+#: device (``0x1002d6ec``).  No other controller has any.
+ARM_TYPE = 24
+#: A barrel stroke: the channel heads for 0.5, the round leaves, the channel
+#: heads for 1.0, then snaps back (``0x1002a190``) -- a whole value at the
+#: channel's rate, before the gun's interval starts.
+STROKE_MS = 1000.0
 #: ``CICLS_FIGHTSHIELD``, the shield generator.  Values: a sector's maximum, the
 #: recharge a second, the charge a point costs (``Control.dll:0x100257b0``).
 FIGHT_SHIELD_TYPE = 9
@@ -435,6 +445,11 @@ class Channel:
     #: +32: ``CHANNEL_*``; 3, wrapping and inverted, on every turret yaw.
     flags: int
 
+    @property
+    def stroke_ms(self) -> float:
+        """How long a barrel on this channel takes to fire, 0 to 0.5 to 1."""
+        return STROKE_MS / self.rate if self.rate > 0 else 0.0
+
     def frame(self, value: float) -> float:
         """The frame the node plays at ``value``.
 
@@ -638,6 +653,8 @@ class Component:
     mass: float = 0.0
     #: The word at ``COMPONENT_FLAGS_AT``.
     flags: int = 0
+    #: The group at ``COMPONENT_GROUP_AT``, ``NO_GROUP`` for none.
+    group: int = -1
 
     @property
     def slot(self) -> str | None:
@@ -719,6 +736,7 @@ def read_component(blob: bytes, pos: int) -> Component | None:
         node=struct.unpack_from("<i", blob, pos + COMPONENT_NODE_AT)[0],
         mass=struct.unpack_from("<f", blob, pos + COMPONENT_MASS_AT)[0],
         flags=struct.unpack_from("<I", blob, pos + COMPONENT_FLAGS_AT)[0],
+        group=struct.unpack_from("<i", blob, pos + COMPONENT_GROUP_AT)[0],
     )
 
 

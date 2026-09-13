@@ -6615,3 +6615,356 @@ kind = "site"
 name = "the landscape creates its effect manager, QI 0x13 at +0x7be8"
 doc = "docs/11-effects.md"
 read = true
+
+# --- firing, from button to round, ../docs/29, 30 ---
+[[entry]]
+module = "World3D.dll"
+at = "0x100105ed"
+kind = "site"
+name = "MCMD_STATE: index n sets the n-th component of the class; index -1 every one whose fire byte (+0x59) and selected byte (+0x5a) are set"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "World3D.dll"
+at = "0x10010770"
+kind = "site"
+name = "MCMD_SELECT n on a gun: toggles its selected byte; selecting resets the gun (state 0x1000) and gives the n-th class-24 arm state 1, deselecting gives the gun 0 and the arm 2"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "World3D.dll"
+at = "0x1001084a"
+kind = "site"
+name = "MCMD_SELECT -1: every allowed gun selected, reset (0x1000) and its arm given state 0x21"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "World3D.dll"
+at = "0x1001065f"
+kind = "site"
+name = "MCMD_MISSILE: the row state to every selected gun whose round frame +116 carries 0x10"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "World3D.dll"
+at = "0x100106d3"
+kind = "site"
+name = "MCMD_FIRE_ALL: the row state to every allowed gun"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "World3D.dll"
+at = "0x1000ed20"
+kind = "function"
+name = "input slot 10, allow a component input (bit 0) and fire (bit 1); a gun starts selected with its arm at 0x21, except on the hero (type 0x1020000) unless its round frame +116 carries 4"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002d2e2"
+kind = "site"
+name = "time driver: runs a component's slot 11 each time its next-event time (+0x10) passes, several times in one frame if it must catch up"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10029d27"
+kind = "site"
+name = "gun fire: ready byte +0x118 clear -> state 7, no shot"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10029e37"
+kind = "site"
+name = "gun fire with value 8 > 0: target beyond value 8 -> state 7"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10029edd"
+kind = "site"
+name = "gun fire with value 8 > 0: barrel more than value 10 off its target -> state 8"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10029f2c"
+kind = "site"
+name = "gun fire with value 9 > 0: counts a delay (+0x170, seconds) down before firing"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002a1df"
+kind = "site"
+name = "barrel stroke step 3: the barrel channel heads for 0.5, the gun record +0xc group runs, the gun wakes when it arrives"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002a266"
+kind = "site"
+name = "barrel stroke step 2: the round leaves, at the channel's control point"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002a302"
+kind = "site"
+name = "shot: world position and direction of the barrel channel's control point (0x1001b4f0 mode 2)"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002a34c"
+kind = "site"
+name = "shot: converge on the sight when the turret linked the gun (+0x110, +0x114) and the round's mode is 0 (+0x98)"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002a387"
+kind = "site"
+name = "shot: CreateObject(9) with the round, placed at the muzzle facing the barrel direction with z up (0x1002b0f0)"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002a3dc"
+kind = "site"
+name = "shot: the round gets the shooter's +0x550 word, property 0x7f = the id of the object whose control system holds the gun, 0xb4 = the level ratio"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002a4b4"
+kind = "site"
+name = "shot: velocity = orientation x (0, round top speed, 0) + the shooter's world velocity (+0x200), set with SetWorldSpeed; a round with a command keeps it with SetTangAccel"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002a514"
+kind = "site"
+name = "shot: the round's interface 0x204 slot 16 SetTarget(gun +0x108)"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002a58f"
+kind = "site"
+name = "shot: AddObjectToGame(round)"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002a5a8"
+kind = "site"
+name = "barrel stroke step 1: the barrel channel heads for 1.0 (0x1002b370)"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002a5c1"
+kind = "site"
+name = "barrel stroke step 0: the channel snaps back to 0, the magazine loses one, the shot is done"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x100221e0"
+kind = "function"
+name = "run section-5 group k of a component's own part: the part's first group (owner list +0x460) + k"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002b370"
+kind = "function"
+name = "channel entry: start = value, target = v, wrapped or clamped"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002a610"
+kind = "function"
+name = "gun convergence: a ray from the sight's origin point (+0x114) along its direction (+0x110), 5 m to 1e6 m, through IWorld slot 7; the hit, held at least 100 m out, becomes the barrel's aim"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002a768"
+kind = "site"
+name = "gun convergence: IWorld slot 7 segment query with the filter of 0x10048260"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002a7be"
+kind = "site"
+name = "gun convergence: a hit nearer than 100 m (0x100424b4) is pushed out to 100 m along the sight"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x100063e3"
+kind = "site"
+name = "global 0x100424b4 = 100.0, the nearest a gun converges"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10028130"
+kind = "function"
+name = "turret relink: each of its guns gets the turret's target (+0x94) and its sight points, +0x114 from the yaw channel's second point and +0x110 from the pitch channel's point"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x100280d0"
+kind = "function"
+name = "turret set target (+0x94, +0x98), then relinks its guns"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002cb00"
+kind = "function"
+name = "interface 0x204 slot 16 SetTarget: the object's turret (+0x5c8) and seeker (+0x5d8)"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1003d1b4"
+kind = "datum"
+name = "interface 0x204 vtable (object +0xc): slot 16 SetTarget"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x100044a0"
+kind = "function"
+name = "IControl slot 5 SetTangSpeed: velocity (+0x1c8) = v and the free-flight byte +0x35c set"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x100045b0"
+kind = "function"
+name = "IControl slot 6 SetWorldSpeed: world vector into the body frame, then SetTangSpeed"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000442b"
+kind = "site"
+name = "SetTangAccel clears the free-flight byte +0x35c"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x100153f4"
+kind = "site"
+name = "velocity integrator skips the approach to the command while the free-flight byte (body +0x1a8) is set"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000ddc9"
+kind = "site"
+name = "property 0x20: the command triple +0x1bc"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000e9df"
+kind = "site"
+name = "property set 0x7f: owner id +0x54c, passed to the collision object"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000ceec"
+kind = "site"
+name = "round tick, mode 0: x and z of the body velocity move toward 0 by 0.003 x elapsed ms"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10002926"
+kind = "site"
+name = "action 0: stop the body (0x10014400)"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10009120"
+kind = "site"
+name = "loader: a channel flagged 8 joins the turret's (+0x5c8) entries"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10027f51"
+kind = "site"
+name = "turret takt: a follower channel aims its gun's mount (0x10028200) and sets that gun's ready byte +0x118"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002e60b"
+kind = "site"
+name = "interface 0x202 slot 3 property 0x64 on a gun: its copy of the round frame (+0x9c)"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10025107"
+kind = "site"
+name = "attack task: sets the target through interface 0x204 slot 16"
+doc = "docs/29-weapons.md"
+read = true

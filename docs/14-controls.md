@@ -320,6 +320,10 @@ all three `.man` files equally well (17 each).
 | `MCMD_ANGLE_X/Y/Z`, class 0 | `SetNormAngle` (`0x10004500`) | the unit's normalised angle triple `+0x1e0` |
 | `MCMD_ANGLE_X/Y/Z`, class *c*, index *i* | the component interface (object `+8`, slot 14, `0x1002eb70`) | that component's triple: a turret's `+0x9c`, a camera's `+0x94` |
 
+The weapon rows go to the guns, not to `IControl`. `MCMD_STATE` with index −1
+reaches every **selected** gun, and `MCMD_SELECT` toggles which guns are
+selected ([29-weapons.md](29-weapons.md#the-button-reaches-the-selected-guns)).
+
 **An angle row edits one component of a triple.** `ANGLE_X`, `_Y` and `_Z` are
 components 0, 1 and 2 (`0x1000fee1`, `0x1000ffcc`, `0x100100b7`). The handler
 first reads the current triple.

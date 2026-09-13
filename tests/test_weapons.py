@@ -33,3 +33,12 @@ def test_a_gun_that_fires_in_turn_hits_with_one():
 
 def test_an_interval_under_a_millisecond_is_held_to_one():
     assert gun(interval_ms=0.0).shots_per_second == 1000.0
+
+
+def test_a_shot_is_the_barrel_stroke_and_then_the_interval():
+    cannon = gun(interval_ms=0.0, stroke_ms=(250.0,))
+    assert cannon.shot_ms == 250.0
+    assert cannon.fire_rate == pytest.approx(4.0)
+    assert cannon.shots_per_second == 1000.0
+    laser = gun(interval_ms=200.0, stroke_ms=(250.0,))
+    assert laser.fire_rate == pytest.approx(1000.0 / 450.0)

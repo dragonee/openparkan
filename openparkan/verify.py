@@ -5983,6 +5983,97 @@ TURRET_ROLE_TYPE = {research.ROLE_BATTLE: objects.TYPE_WARRIOR,
                     research.ROLE_HQ: objects.TYPE_HQ, research.ROLE_HERO: objects.TYPE_HERO}
 
 
+def check_firing(check, game: Path) -> None:
+    """Firing a gun: the button, the selected guns, the barrel stroke, the sight."""
+    rows = controls.table(game / "hero.tbl")
+    guns_rows = [r for r in rows if r.target == "CICLS_MULTIGUN"]
+    fire = sorted((r.key, r.pressed, r.index, r.state) for r in guns_rows
+                  if r.command == "MCMD_STATE")
+    select = sorted((r.index, r.pressed) for r in guns_rows if r.command == "MCMD_SELECT")
+    check("hero.tbl: the left button fires every selected gun; 0 selects all, 1..8 toggle one",
+          fire == [("SCAN_LMOUSE", False, -1, "CIS_SWITCHOFF"),
+                   ("SCAN_LMOUSE", True, -1, "CIS_CONTINUEFIGHT")]
+          and select == [(-1, True)] + [(i, True) for i in range(1, 9)],
+          f"button rows {fire}: index -1 reaches every gun whose selected byte is set "
+          f"(World3D.dll:0x100105ed); select rows by index {[i for i, _ in select]}")
+
+    names = frozenset(p.name.lower() for p in all_archives(game))
+    arms_where = []
+    shot_groups: Counter[bool] = Counter()
+    group_actions: Counter[tuple[int, ...]] = Counter()
+    barrels = rateless = sights_total = 0
+    sights: Counter[tuple[str, str]] = Counter()
+    for path in all_archives(game):
+        archive = NResArchive.open(path)
+        members = {e.name.lower() for e in archive}
+        for entry in archive:
+            if not entry.tag.upper().startswith("CTL"):
+                continue
+            try:
+                c = control.parse(archive.read(entry), names)
+            except control.ControlFormatError:
+                continue
+            if any(p.type_id == control.ARM_TYPE for p in c.components):
+                arms_where.append(f"{path.name.lower()}/{entry.name.lower()}")
+            points = None
+            stem = entry.name.lower()[:-4]
+            for p in c.components:
+                if p.type_id in (control.GUN_TYPE, control.BUILDER_TYPE):
+                    shot_groups[p.group != control.NO_GROUP] += 1
+                    if p.group != control.NO_GROUP:
+                        group_actions[tuple(sorted({r.action for r in c.references
+                                                    if r.group == p.group}))] += 1
+                    for e in p.entries:
+                        barrels += 1
+                        rateless += c.channels[e].rate <= 0 or c.channels[e].origin != -1
+                elif p.type_id == control.TURRET_TYPE and len(p.entries) >= 2:
+                    if points is None and stem + ".cpt" in members:
+                        points = [q.name for q in objmesh.parse_control_points(
+                            archive.read_name(stem + ".cpt"))]
+                    if not points:
+                        continue
+                    yaw, pitch = (c.channels[i] for i in p.entries[:2])
+                    sights_total += 1
+                    sights[(points[yaw.origin], points[pitch.point])] += 1
+    check(".ctl: a turret's guns aim along a ray from TurretCenter through TargetDirect",
+          list(sights) == [("TurretCenter", "TargetDirect")] and barrels and rateless == 0,
+          f"the yaw channel's second point (+0x10) and the pitch channel's point (+0x14) "
+          f"on {sights_total} turret components: {dict(sights)}; a gun aims its round at "
+          f"the first thing that ray meets, no nearer than 100 m (Control.dll:0x1002a610, "
+          f"0x1002a7be).  All {barrels} barrel channels have a rate and no second point, "
+          f"so every stroke ends and the round leaves from the one point")
+    check(".ctl: only the hero turret has class-24 components; 34 guns run a shot group",
+          arms_where == ["turrets.rlb/o_tur_ht_02.ctl"] and shot_groups[True] == 34
+          and set(group_actions) <= {(control.ACT_EFFECT_START,),
+                                     (control.ACT_EFFECT_POINTS,),
+                                     (control.ACT_EFFECT_START, control.ACT_EFFECT_RESTART)},
+          f"arms on {arms_where}; record +0xc names a group on {shot_groups[True]} of "
+          f"{sum(shot_groups.values())} guns, holding only actions {dict(group_actions)}")
+
+    turrets = NResArchive.open(game / "turrets.rlb")
+    tur = control.parse(turrets.read_name("o_tur_ht_02.ctl"), names)
+    points = [q.name for q in objmesh.parse_control_points(turrets.read_name("o_tur_ht_02.cpt"))]
+    guns = [p for p in tur.components if p.type_id == control.GUN_TYPE]
+    arms = [p for p in tur.components if p.type_id == control.ARM_TYPE]
+    arm_frames = {(tur.channels[e].first, tur.channels[e].last) for p in arms for e in p.entries}
+    shots = [(points[tur.channels[e].point], tur.channels[e].rate,
+              round(tur.channels[e].stroke_ms + p.values[control.GUN_INTERVAL]))
+             for p in guns for e in p.entries]
+    cannon = guns[0].values[control.GUN_INTERVAL] if guns else 0.0
+    check("o_tur_ht_02: a hero shot is its barrel's stroke and then the gun's interval",
+          [p.resource.member.lower() for p in guns] == ["bb_h_01", "bp_h_01", "bl_h_01",
+                                                         "bm_h_01"]
+          and len(arms) == len(guns) and arm_frames == {(42.0, 48.0)}
+          and [s[0] for s in shots] == ["Mgun_d", "Plaz_d", "Laz_d", "Roc_d1", "Roc_d2"]
+          and [s[2] for s in shots] == [250, 750, 450, 2250, 1650]
+          and all(p.group == control.NO_GROUP for p in guns),
+          f"barrel point, rate and ms a shot: {shots} (1000 / rate of stroke, "
+          f"Control.dll:0x1002a190, then value 3), so the cannon fires "
+          f"{1000 / shots[0][2]:g} a second where its panel's 1000 / max(1, value 3) "
+          f"says {1000 / max(1.0, cannon):g}.  Four arms play frames {arm_frames}; no "
+          f"hero gun names a shot group")
+
+
 def _turret_role(text: tuple[str, ...]) -> int:
     first = text[0].lower() if text else ""
     return {"warbot": objects.TYPE_WARRIOR, "cargobot": objects.TYPE_TRANSPORT,
@@ -8623,7 +8714,7 @@ def run(game: Path) -> int:
         check_control, check_efficiency,
         check_motion, check_playback, check_ground, check_sensors, check_hit_test,
         check_combat, check_ownership,
-        check_capture, check_repair, check_chassis, check_weapons,
+        check_capture, check_repair, check_chassis, check_weapons, check_firing,
         check_turrets, check_packages, check_builder,
         check_units, check_loading, check_search, check_construction,
         check_controls, check_player_input, check_turret_channels,

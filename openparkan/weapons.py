@@ -61,10 +61,12 @@ class Gun:
     shot_energy: float
     interval_ms: float
     barrels: int
-    #: Barrels whose section-2 record names a node.
+    #: Barrels whose section-2 record names a control point.
     beams: int
     salvo: bool
     round: Round | None
+    #: Each barrel's stroke in ms, which comes before the interval.
+    stroke_ms: tuple[float, ...] = ()
 
     @property
     def uses_clips(self) -> bool:
@@ -72,7 +74,25 @@ class Gun:
 
     @property
     def shots_per_second(self) -> float:
+        """The stat panel's figure, ``1000 / max(1, interval)``.
+
+        It leaves out the barrel's stroke; ``fire_rate`` counts it.
+        """
         return 1000.0 / max(1.0, self.interval_ms)
+
+    @property
+    def shot_ms(self) -> float:
+        """A barrel's stroke plus the interval: the time one shot takes."""
+        if not self.stroke_ms:
+            return self.interval_ms
+        stroke = (max(self.stroke_ms) if self.salvo
+                  else sum(self.stroke_ms) / len(self.stroke_ms))
+        return stroke + self.interval_ms
+
+    @property
+    def fire_rate(self) -> float:
+        """Shots a second as the gun takes them, stroke and interval."""
+        return 1000.0 / max(1.0, self.shot_ms)
 
     @property
     def energy_per_second(self) -> float:
@@ -187,6 +207,8 @@ class Armoury:
                       if 0 <= e < len(parsed.points) and parsed.points[e] != -1),
             salvo=bool(one.flags & control.SALVO),
             round=self.round(one.resource.member) if one.resource.member else None,
+            stroke_ms=tuple(parsed.channels[e].stroke_ms for e in one.entries
+                            if 0 <= e < len(parsed.channels)),
         )
 
     def clip(self, part: str) -> Clip | None:
