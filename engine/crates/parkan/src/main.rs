@@ -187,8 +187,8 @@ fn screenshot(loaded: &scene::Loaded, game: &Path, args: &Args, out: &Path) -> R
         Some(&world.terrain),
         Some(&world.objects),
     );
-    if let Some(p) = play.as_mut() {
-        scene::sync(&mut renderer, &gpu.queue, p, &world.objects);
+    if let Some(p) = play.as_ref() {
+        renderer.set_sprite_looks(&gpu.device, &scene::sprite_looks(p));
     }
     let aspect = width as f32 / height as f32;
     let view_proj = if args.top_down {
@@ -205,6 +205,10 @@ fn screenshot(loaded: &scene::Loaded, game: &Path, args: &Args, out: &Path) -> R
     } else {
         start_camera(loaded).view_proj(aspect)
     };
+    if let Some(p) = play.as_mut() {
+        let eye = p.hero.eye().position;
+        scene::sync(&mut renderer, &gpu.device, &gpu.queue, p, &world.objects, view_proj, eye);
+    }
     let pixels = parkan_render::capture(&gpu, &mut renderer, (width, height), view_proj)?;
     let file = std::io::BufWriter::new(std::fs::File::create(out)?);
     let mut encoder = png::Encoder::new(file, width, height);
@@ -259,6 +263,9 @@ impl App {
         let mut renderer = Renderer::new(&gpu.device, config.format);
         let w = &self.world;
         renderer.set_world(&gpu.device, &gpu.queue, &w.store.textures, Some(&w.terrain), Some(&w.objects));
+        if let Some(p) = self.play.as_ref() {
+            renderer.set_sprite_looks(&gpu.device, &scene::sprite_looks(p));
+        }
         self.running = Some(Running { window, surface, config, gpu, renderer });
         Ok(())
     }
@@ -314,8 +321,18 @@ impl App {
         let aspect = r.config.width as f32 / r.config.height.max(1) as f32;
         let view_proj = match self.play.as_mut() {
             Some(play) => {
-                scene::sync(&mut r.renderer, &r.gpu.queue, play, &self.world.objects);
-                camera::first_person(&play.hero.eye(), aspect)
+                let eye = play.hero.eye();
+                let view_proj = camera::first_person(&eye, aspect);
+                scene::sync(
+                    &mut r.renderer,
+                    &r.gpu.device,
+                    &r.gpu.queue,
+                    play,
+                    &self.world.objects,
+                    view_proj,
+                    eye.position,
+                );
+                view_proj
             }
             None => self.camera.view_proj(aspect),
         };

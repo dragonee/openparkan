@@ -11,6 +11,7 @@ use wgpu::util::DeviceExt;
 
 pub mod frame;
 pub mod models;
+pub mod sprites;
 pub mod terrain;
 pub mod textures;
 
@@ -90,6 +91,8 @@ pub struct Renderer {
     depth: Option<(wgpu::TextureView, u32, u32)>,
     terrain: Option<TerrainRenderer>,
     objects: Option<ModelRenderer>,
+    bank: Option<GpuTextures>,
+    sprites: Option<sprites::SpriteRenderer>,
 }
 
 impl Renderer {
@@ -168,6 +171,8 @@ impl Renderer {
             depth: None,
             terrain: None,
             objects: None,
+            bank: None,
+            sprites: None,
         }
     }
 
@@ -208,6 +213,27 @@ impl Renderer {
         let bank = GpuTextures::new(device, queue, textures);
         self.terrain = terrain.map(|t| TerrainRenderer::new(device, self.format, t, &bank));
         self.objects = objects.map(|o| ModelRenderer::new(device, self.format, o, &bank));
+        self.bank = Some(bank);
+    }
+
+    /// The looks effect sprites draw with, by index, from the textures `set_world` uploaded.
+    pub fn set_sprite_looks(&mut self, device: &wgpu::Device, looks: &[sprites::SpriteLook]) {
+        if let Some(bank) = &self.bank {
+            self.sprites = Some(sprites::SpriteRenderer::new(device, self.format, looks, bank));
+        }
+    }
+
+    /// This frame's effect quads.
+    pub fn set_sprites(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        view_proj: Mat4,
+        quads: &[sprites::Quad],
+    ) {
+        if let Some(s) = self.sprites.as_mut() {
+            s.prepare(device, queue, view_proj, quads);
+        }
     }
 
     /// Move a placed object's instance to `matrix`, or hide it.
@@ -274,6 +300,9 @@ impl Renderer {
             }
             if let Some(objects) = &self.objects {
                 objects.draw(&mut pass);
+            }
+            if let Some(sprites) = &self.sprites {
+                sprites.draw(&mut pass);
             }
             pass.set_bind_group(0, &self.bind_group, &[]);
             for (pipeline, geometry) in [(&self.lines, &self.grid), (&self.solid, &self.triangles)] {

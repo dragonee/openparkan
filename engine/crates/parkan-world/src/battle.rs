@@ -6,7 +6,10 @@ use std::rc::Rc;
 
 use anyhow::Result;
 use glam::{Mat4, Vec3};
-use parkan_formats::control::{self, ACT_EXPLODE_NODE, ENTRY_RANGE, TRIPLE_TOP_SPEED};
+use parkan_formats::control::{
+    self, ACT_EFFECT_POINTS, ACT_EXPLODE_NODE, ENTRY_LOAD, ENTRY_RANGE, TRIPLE_TOP_SPEED,
+};
+use parkan_formats::cpt::{self, ControlPoint};
 use parkan_formats::exp::{self, Explosion};
 use parkan_formats::mission::{self, Mission, Value};
 use parkan_formats::ndp::{self, NodeDamage};
@@ -32,6 +35,10 @@ pub const POOL: usize = 32;
 pub struct Loaded {
     pub record: String,
     pub frame_flags: i32,
+    /// The effects its load group creates: a name on three control points.
+    pub effects: Vec<(String, [usize; 3])>,
+    /// Its record's control points.
+    pub points: Vec<ControlPoint>,
 }
 
 pub struct Battle {
@@ -42,6 +49,8 @@ pub struct Battle {
     pub kinds: Vec<Loaded>,
     /// Each round kind's pooled instances, once drawing is set up.
     pub pools: Vec<Vec<usize>>,
+    /// Each target's parts' nodes' `.exp`: what a node plays when it is destroyed.
+    pub explosions: Vec<Vec<Vec<Option<Explosion>>>>,
     kind_of: HashMap<String, usize>,
 }
 
@@ -111,6 +120,7 @@ impl Battle {
         let player = hero.and_then(|h| mission.objects.get(h)).and_then(mission::Object::clan_id);
         let mut combat = Combat::default();
         let mut objects = Vec::new();
+        let mut explosions = Vec::new();
         for (i, object) in mission.objects.iter().enumerate() {
             if Some(i) == hero {
                 continue;
@@ -120,6 +130,7 @@ impl Battle {
             let damageable = !matches!(object.kind, mission::KIND_VEGETATION | mission::KIND_ROCK);
             let object_ratio = object_ratio(mission, object, player, ratio);
             let mut parts = Vec::new();
+            let mut blasts = Vec::new();
             let (mut lo, mut hi) = (Vec3::splat(f32::MAX), Vec3::splat(f32::MIN));
             for part in assembly.parts(object.kind, &object.path) {
                 let Some(loaded) = assembly.mesh(&part.reference) else { continue };
@@ -139,7 +150,22 @@ impl Battle {
                     lo = lo.min(c - Vec3::splat(r * scale));
                     hi = hi.max(c + Vec3::splat(r * scale));
                 }
-                let life = damageable.then(|| table(assembly, &part.record)).flatten().map(|t| {
+                let nodes_table = damageable.then(|| table(assembly, &part.record)).flatten();
+                blasts.push(
+                    nodes_table
+                        .iter()
+                        .flatten()
+                        .map(|d| {
+                            let r = if d.explosion.library.is_empty() {
+                                ResourceRef { library: part.reference.library.clone(), ..d.explosion.clone() }
+                            } else {
+                                d.explosion.clone()
+                            };
+                            explosion(assembly, &r)
+                        })
+                        .collect(),
+                );
+                let life = nodes_table.map(|t| {
                     let parents = mesh
                         .nodes
                         .iter()
@@ -156,8 +182,16 @@ impl Battle {
             let centre = (lo + hi) / 2.0;
             combat.targets.push(Target { parts, centre, radius: (hi - lo).length() / 2.0, alive: true });
             objects.push(i);
+            explosions.push(blasts);
         }
-        Ok(Battle { combat, objects, kinds: Vec::new(), pools: Vec::new(), kind_of: HashMap::new() })
+        Ok(Battle {
+            combat,
+            objects,
+            kinds: Vec::new(),
+            pools: Vec::new(),
+            explosions,
+            kind_of: HashMap::new(),
+        })
     }
 
     /// The round kind a `BULL` record fires, loaded once.
@@ -194,7 +228,18 @@ impl Battle {
             hit,
             range_end,
         });
-        self.kinds.push(Loaded { record: record.to_owned(), frame_flags: controller.flags });
+        let effects = controller
+            .group(ENTRY_LOAD)
+            .into_iter()
+            .filter(|r| r.action() == ACT_EFFECT_POINTS && !r.resource.member.is_empty())
+            .map(|r| {
+                (r.resource.member.clone(), [4, 5, 6].map(|k| usize::try_from(r.values[k]).unwrap_or(0)))
+            })
+            .collect();
+        let points = find("cpt")
+            .and_then(|c| read(assembly, &c).and_then(|b| cpt::parse(&b, &c.member).ok()))
+            .unwrap_or_default();
+        self.kinds.push(Loaded { record: record.to_owned(), frame_flags: controller.flags, effects, points });
         self.pools.push(Vec::new());
         let k = self.combat.kinds.len() - 1;
         self.kind_of.insert(key, k);

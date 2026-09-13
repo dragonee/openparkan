@@ -7,6 +7,7 @@
 
 pub mod combat;
 pub mod damage;
+pub mod effects;
 pub mod ground;
 pub mod guns;
 pub mod hit;

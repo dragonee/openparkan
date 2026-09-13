@@ -26,6 +26,10 @@ pub const NO_GROUP: i32 = -1;
 /// A section-5 record's int 3 is its action; 27 explodes a node with the named `.exp`.
 pub const ACTION_AT: usize = 3;
 pub const ACT_EXPLODE_NODE: i32 = 27;
+/// Action 4 creates an effect on three control points v4..v6 under id v7; action 14
+/// drives an effect id v4 from the value at point v5.
+pub const ACT_EFFECT_POINTS: i32 = 4;
+pub const ACT_EFFECT_TIME_POINT: i32 = 14;
 pub const TRIPLE_AT: [usize; 6] = [20, 32, 44, 56, 68, 80];
 /// Triples by index: acceleration (live copy doubled), top speed, turn rate.
 pub const TRIPLE_ACCELERATION: usize = 0;

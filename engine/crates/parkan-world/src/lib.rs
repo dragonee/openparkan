@@ -1,6 +1,7 @@
 pub mod assembly;
 pub mod battle;
 pub mod dump;
+pub mod fx;
 pub mod hero;
 pub mod models;
 pub mod play;

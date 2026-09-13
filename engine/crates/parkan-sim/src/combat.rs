@@ -46,6 +46,8 @@ pub struct RoundKind {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Round {
+    /// Unique among the rounds a `Combat` has fired.
+    pub id: u64,
     pub kind: usize,
     /// The target id of the robot that fired it, which it never strikes.
     pub owner: Option<usize>,
@@ -107,6 +109,7 @@ pub struct Combat {
     pub kinds: Vec<RoundKind>,
     pub rounds: Vec<Round>,
     pub targets: Vec<Target>,
+    pub fired: u64,
 }
 
 /// World xyz to the f64 poses use.
@@ -129,10 +132,12 @@ impl Combat {
         direction: Vec3,
         shooter_velocity: Vec3,
         ratio: f32,
-    ) {
-        let Some(k) = self.kinds.get(kind) else { return };
+    ) -> Option<u64> {
+        let k = self.kinds.get(kind)?;
         let forward = direction.normalize_or(Vec3::Y);
+        self.fired += 1;
         self.rounds.push(Round {
+            id: self.fired,
             kind,
             owner,
             previous: muzzle,
@@ -143,6 +148,7 @@ impl Combat {
             ratio,
             expired: false,
         });
+        Some(self.fired)
     }
 
     /// The nearest thing a segment meets: the ground, or a live target other than
@@ -418,6 +424,7 @@ mod tests {
         let mut c = Combat {
             kinds: vec![laser()],
             rounds: Vec::new(),
+            fired: 0,
             targets: vec![post(Vec3::new(20.0, 30.0, 0.0), 500.0)],
         };
         let muzzle = Vec3::new(20.0, 5.0, 1.0);
@@ -455,6 +462,7 @@ mod tests {
         let mut c = Combat {
             kinds: vec![missile],
             rounds: Vec::new(),
+            fired: 0,
             targets: vec![post(Vec3::new(20.0, 16.0, 0.0), 5000.0), post(Vec3::new(20.0, 12.0, 0.0), 5000.0)],
         };
         // Fired by the nearer post, from inside it: it passes its owner and flies on.

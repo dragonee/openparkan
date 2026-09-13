@@ -59,8 +59,36 @@ pub fn play(game: &Path, loaded: &Loaded) -> Result<Option<Play>> {
     Play::load(game, &loaded.mission)
 }
 
-/// Bring the drawing up to date with the battle: hide what died, place the rounds.
-pub fn sync(renderer: &mut parkan_render::Renderer, queue: &wgpu::Queue, play: &mut Play, objects: &Objects) {
+/// The looks the effects draw with, for the renderer.
+pub fn sprite_looks(play: &Play) -> Vec<parkan_render::sprites::SpriteLook> {
+    play.fx
+        .looks
+        .iter()
+        .map(|l| parkan_render::sprites::SpriteLook { texture: l.texture, blend_mode: l.blend_mode })
+        .collect()
+}
+
+/// Bring the drawing up to date with the battle: hide what died, place the rounds, and
+/// hand over this frame's effect sprites as seen from `eye`.
+pub fn sync(
+    renderer: &mut parkan_render::Renderer,
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    play: &mut Play,
+    objects: &Objects,
+    view_proj: glam::Mat4,
+    eye: Vec3,
+) {
+    let quads: Vec<parkan_render::sprites::Quad> = play
+        .sprites()
+        .into_iter()
+        .map(|(look, s)| parkan_render::sprites::Quad {
+            look,
+            corners: parkan_render::sprites::billboard(s.centre, s.along, s.width, eye),
+            alpha: s.alpha,
+        })
+        .collect();
+    renderer.set_sprites(device, queue, view_proj, &quads);
     for object in std::mem::take(&mut play.killed) {
         if let Some(i) = objects.placed.iter().position(|&p| p == object) {
             // STAND-IN: docs/26-damage.md#hit-points--read-and-measured -- what a dead

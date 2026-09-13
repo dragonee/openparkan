@@ -49,8 +49,14 @@ M4 is under way: the hero fights.
   node in reach, less armour. A dead node takes its children with it, and
   node 0 takes the object.
 - On Mission 01 the laser kills a target in two hits of 250.
+- Effects play from `effects.rlb`: each emitter inside its window of effect
+  time. The turret's flashes hang on the barrel points, timed by the barrel
+  channels; rounds carry their tracers and bolts. A strike plays its `.exp`
+  by the surface it met, and a destroyed node plays its own. Sprites and
+  particle bursts are drawn in their materials' blend modes.
 
-Not yet: effects and sound, shields, and what a dead object leaves behind.
+Not yet: sound, lights, particle streams, animated textures, shields, and
+what a dead object leaves behind.
 
 Not yet: lightmaps (no Mission 01 mesh has one) and levels of detail beyond 0.
 This directory also holds what the rest will follow:
@@ -160,7 +166,9 @@ a row here. A row leaves this table when research closes it.
 | M4 | How the two ends of a collision object's sweep differ | the round's position before its move this tick, and after | [26](../docs/26-damage.md#not-established) |
 | M4 | Whether a unit answers for its material when a round strikes it | slot 0 of the `.exp` on a unit; the surface's slot on the ground | [11](../docs/11-effects.md#not-resolved) |
 | M4 | The collision radius of a round | the mesh header's bounding sphere | [26](../docs/26-damage.md#not-established) |
-| M4 | Most emitter floats: colour and alpha over life, emission rates, bolt length | per type as in `design/r5-effects.md`; flag bit 8 ignored | [11](../docs/11-effects.md#not-resolved) |
+| M4 | Most emitter floats: colour and alpha over life, emission rates, bolt length | sprites (3, 4, 9) move +40→+52 and grow +100→+112 by progress through the window, alpha 1→+24 to the power +28; a bolt (5) is +24 wide and min(+36, +32 × 1000 × s) long behind its origin; a burst (7, 10) is max(1, +16) particles between velocities +44 and +56, spread +68, living +28 of the window, sized +92→+104, fading; streams (8) are not drawn; flag bit 8 ignored | [11](../docs/11-effects.md#not-resolved) |
+| M4 | An effect's jitter (flag 1), the owner values of time modes 5–15, and a phase's animated texture frames | no jitter; modes 5–15 read a speed fraction the caller sets; frame 0 of every texture | [11](../docs/11-effects.md#how-an-effect-runs--read) |
+| M4 | How a sprite whose material says opaque blends | alpha-blended, so its fade shows | [07](../docs/07-objects.md#how-a-material-draws-is-in-the-archive-directory) |
 | M4 | Whether emitter type 1 is a light | a point light at the attach point, or nothing until M5 | [11](../docs/11-effects.md#not-resolved) |
 | M4 | The effect manager's random generator | any uniform generator | [11](../docs/11-effects.md#how-an-effect-runs--read) |
 | M5 | What the class-24 arms' states 1, 2 and `0x21` play | unfold on select, fold on deselect | [29](../docs/29-weapons.md#not-established) |
