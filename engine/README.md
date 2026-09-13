@@ -4,11 +4,13 @@ A Rust engine for *Parkan: Iron Strategy* that reads the game's own install.
 Its first target is Phase One: load Mission 01, *Line of Fire*, put the hero
 at its start, and walk, look and shoot in first person.
 
-Milestones **M0**, **M1** and **M2** are in:
+Milestones **M0** to **M5** are in, each with the stand-ins listed below:
 
 - the workspace;
 - the NRes, mission, `Texm`, `Material.lib`, wear, `Land.msh`, object mesh,
-  `objects.rlb`, `.dat`, controller (`.ctl`) and input table (`.tbl`) readers;
+  `objects.rlb`, `.dat`, controller (`.ctl`), input table (`.tbl`), control
+  point (`.cpt`), damage table (`.ndp`), explosion (`.exp`), effect (`FXID`)
+  and atmosphere (`sky.ske`) readers;
 - the golden cross-check;
 - a window over Mission 01.
 
@@ -20,7 +22,7 @@ mip levels. Every placed object is drawn from its assembly:
 - level 0 is drawn, and collision hulls never;
 - materials draw in the blend mode their flags byte names.
 
-M3 is under way. The window opens in the hero's cockpit on Mission 01:
+**M3.** The window opens in the hero's cockpit on Mission 01:
 
 - `parkan-sim` plays the chassis controller's states on their own clock. The
   live limits and the velocity and pending-turn integrators run once a state
@@ -35,7 +37,7 @@ M3 is under way. The window opens in the hero's cockpit on Mission 01:
 On Tut_1 the hero holding W runs at 14 m/s. Not drawn yet: the hero itself
 and its animation, when seen from outside.
 
-M4 is under way: the hero fights.
+**M4.** The hero fights.
 
 - Its turret's four guns keep the game's clock: a four-step barrel stroke,
   then the interval.
@@ -55,10 +57,10 @@ M4 is under way: the hero fights.
   by the surface it met, and a destroyed node plays its own. Sprites and
   particle bursts are drawn in their materials' blend modes.
 
-Not yet: sound, lights, particle streams, animated textures, shields, and
-what a dead object leaves behind.
+Not yet: lights, particle streams, animated textures, shields, and what a
+dead object leaves behind.
 
-M5 has begun. The sky is the mission's `sky.ske`, interpolated on its clock:
+**M5.** The sky is the mission's `sky.ske`, interpolated on its clock:
 
 - the dome around the camera takes its apex, rings and horizon colours;
 - linear range fog runs from the eye to 700 × slot 6, in the horizon colour
@@ -83,7 +85,7 @@ This directory also holds what the rest will follow:
   established and the engine has to choose one. It is the only list of
   guesses.
 
-The plan is Rust + wgpu (winit, glam; kira for sound later). It covers one
+The plan is Rust + wgpu (winit, glam; kira for sound). It covers one
 workspace of `parkan-formats`, `parkan-sim`, `parkan-world`, `parkan-render`
 and `parkan`, in milestones M0 to M5.
 
@@ -127,7 +129,9 @@ readers and `parkan-dump`, and compares the two within 1e-5. At M0 that is
 every archive in the install, Mission 01's `data.tma`, `Material.lib`, Tut_1's
 `Land.msh`, the textures its ground names, Mission 01's assembly (every
 object's parts and their poses) and the 19 meshes they use. From M3 it adds
-every controller, archive by archive, and the three input tables: 157 dumps.
+every controller and control point list, archive by archive, and the three
+input tables; from M4 every damage table, explosion and effect; from M5 every
+mission's atmosphere: 212 dumps.
 
 ## Stand-ins
 
