@@ -327,7 +327,7 @@ def cmd_control(args, game: Path) -> int:
         print(f"  +92   {c.scale}   +96 {c.pair[0]:g}, {c.pair[1]:g}   "
               f"+104 {c.mode}   +116 {c.flags}")
         print(f"  bounds {c.bounds[0]:g}, {c.bounds[1]:g}   "
-              f"cone {c.cone:.5f}   reach {c.reach:g}")
+              f"cone {c.cone:.5f}   payload {c.payload:g}")
         for k in c.components:
             label = f"  {k.label}" if k.label else ""
             entries = f"  {len(k.entries)} entries" if k.entries else ""

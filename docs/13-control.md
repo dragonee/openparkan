@@ -29,20 +29,20 @@ and why the 84-byte block read as a trailer until the layout was recovered.
 
 ```
 0x00  int32[5]   section counts
-0x14  float[3]   +20   triple 1
+0x14  float[3]   +20   triple 1   acceleration
 0x20  float[3]   +32   triple 2
-0x2c  float[3]   +44   triple 3
-0x38  float[3]   +56   triple 4   two-pi on 364
+0x2c  float[3]   +44   triple 3   top speed, m/s
+0x38  float[3]   +56   triple 4   turn rate; two-pi on 364
 0x44  float[3]   +68   triple 5   1.0 on 418
 0x50  float[3]   +80   triple 6   two-pi on 422
 0x5c  int32      +92   0 on 324, else 1000, 2000, 5000
 0x60  float[2]   +96   zero on 512
-0x68  int32      +104  0, 2 or 3
+0x68  int32      +104  0, 2 or 3; 2 brakes on slopes
 0x6c  float      +108  -1.0 on 465
-0x70  float      +112  pi/2 on 509
+0x70  float      +112  the slope cone; pi/2 on 509
 0x74  int32      +116  0 on 342, else 3, 4, 16
 0x78  float      +120  -1.0 on 433
-0x7c  float      +124  FLT_MAX on 502
+0x7c  float      +124  payload, kg; FLT_MAX on 502
 0x80  ...        +128  the 84-byte block, or 0xFF
 ```
 
@@ -99,10 +99,11 @@ come from.
 
 ### What the numbers look like
 
-**Which triple is which is mostly not established.** One is: an engine's power
-draw divides the agent's speed by the largest component of triple 3 (file
-+44), so triple 3 is the top speed ([23-economy.md](23-economy.md)).
-Three members side by side:
+**Three of the triples are now named** ([24-motion.md](24-motion.md)):
+`Control.dll:0x1000fca0` makes the live limits from triple 1 (+20, the
+acceleration, doubled), triple 3 (+44, the top speed in m/s) and triple 4
+(+56, the turn rate). Triple 5 is multiplied into the spin integrator
+(`0x10014b15`); triples 2 and 6 are not named. Three members side by side:
 
 | | `ctl_cam_fly` | `o_c01_l_01` (a gun) | `fr_b_plant` (a factory) |
 |---|---|---|---|
@@ -114,10 +115,9 @@ Three members side by side:
 
 The flying camera is the legible one: 100 on triple 3 against 20 on triple 1
 is a speed against an acceleration, and the **0.6 in the middle component of
-triple 4** — 34°, where the other two axes are free — is the one place in 531
-files where a single axis is clamped on its own. That is what a pitch limit on
-a camera looks like. It is a reading, not a fact, and nothing else in the data
-tests it.
+triple 4** is the one place in 531 files where a single axis's turn rate is
+set on its own. This page once read it as a pitch limit; triple 4 is a rate,
+so it is a slow turn about one axis.
 
 ## The frame is the live object's parameter block
 
@@ -155,8 +155,8 @@ they look like. The "whole turn" is **6.28**, and the "half cone" is
 the engine's bits rather than the real values, since the point is to match the
 file.
 
-This does not name the fields, and it does not say which triple feeds which
-channel. What it does settle is that there is nothing else to find about the
+This does not name the fields — [24-motion.md](24-motion.md) names the ones
+the motion code uses. What it does settle is that there is nothing else to find about the
 *shape*: the frame has no hidden structure, it is one C++ object's floats, and
 anything further has to come from what reads them.
 
@@ -194,7 +194,7 @@ offset:
 | +4, +8 | read, 5 sites |
 | +16 | the source pointer — 13 reads, 1 write |
 | +20 | address taken (the copy's destination) |
-| +44, +48, +52 | `fcomp` — compared, not multiplied in; +48's address is also taken |
+| +44, +48, +52 | `fcomp`, and multiplied into the live top speed (`0x1000fd5d`); +48's address is also taken |
 | +56 | `fcomp` |
 | +88, +104 | read as dwords |
 | +92 | read, 3 sites |
@@ -202,17 +202,18 @@ offset:
 | +116 | `test byte ptr [ptr + 0x60], 1` — a **bitfield**, bit 0 |
 | +124 | 8 reads and **2 writes** in the integrator at `0x1000f412` |
 
-Two things follow. **`+124` is not a parameter** — it is written at run time, so
-the `FLT_MAX` the constructor puts there is an initial value, not a limit the
-artist set. And **`+116` is a bitfield**: every one of the 531 values is below
+Two things follow. **`+124` is the payload**, in kg. This page once called it
+not a parameter because it is written at run time; the writes are to the live
+copy at `+0x4d8`, which holds the payload still spare
+([24-motion.md](24-motion.md#load--read-and-measured)). And **`+116` is a bitfield**: every one of the 531 values is below
 32, bits 0 to 4 are used, and bit 0 — the one the engine tests — is set on 111.
 
-**Seventeen of the thirty-two slots are never touched anywhere in
-`Control.dll` outside the initialiser**: +12, +24, +28, +32, +36, +40, +60,
-+64, +68, +72, +76, +80, +84, +96, +100, +112, +120. That includes two whole
-triples and the half-cone at +112. They are either read by another module
-through the interface, or dead. This says nothing about which; it says only
-that the DLL that owns the block mostly does not look at it.
+**The list of slots "never touched" that stood here was wrong.** It followed
+only the `+0x46c` pointer and plain displacements. The motion body keeps two
+pointers of its own (`+0x1ac` authored, `+0x1b0` live), and code steps through
+them with pointer arithmetic: +24, +28, +60 and +64 are read at `0x1000fca0`,
++68 to +76 at `0x10014b15`, +112 at `0x100157ac`. No untouched list is claimed
+now.
 
 ### The property interface is not where the names are
 
@@ -237,9 +238,8 @@ of an interface-wide id space of 180. Of those 37:
 - **nineteen are not a plain pointer** at all: they compute or convert rather
   than hand out a field.
 
-So the interface exposes **three** of the block's thirty-two slots. The
-seventeen slots nothing in `Control.dll` touches are not reached this way
-either, and whatever reads them — if anything does — is somewhere else again.
+So the interface exposes **three** of the block's thirty-two slots; the
+motion code reads the rest directly.
 
 ## The sections
 
@@ -248,7 +248,7 @@ parameter block, and then walks the body. That walk is the layout:
 
 | Order | Governed by | Size |
 |---|---|---|
-| section 1 | `counts[0]` = A, `counts[1]` = B | A records of `156 + 16*B`, then `A*A` int32 |
+| section 1 | `counts[0]` = A, `counts[1]` = B | A states of `156 + 16*B`, then an `A*A` table of floats |
 | section 2 | `counts[2]` = C | C records of 36 bytes |
 | section 4 | `counts[3]` = D | D component records, each **type-dispatched** |
 | the block | — | a fixed **84 bytes**, copied into the object |
@@ -305,8 +305,9 @@ six power channels served in a fixed order. The int at `+4` is the part's
 **node**: all 781 components beside a same-named `.ndp` index inside it, and
 the part's powers scale with that node's remaining life. An engine's draw
 divides its speed by the largest component of the frame's **third triple**,
-which makes that triple the per-axis top speed — the flying camera's 100. See
-[23-economy.md](23-economy.md#a-power-shortage-lowers-efficiency-once-the-batteries-run-down--read-and-measured).
+the per-axis top speed — the flying camera's 100. See
+[23-economy.md](23-economy.md#a-power-shortage-lowers-efficiency-once-the-batteries-run-down--read-and-measured)
+and [24-motion.md](24-motion.md).
 
 The label is the good part. **All 57 distinct labels are a prefix of an
 `objects.rlb` member, and every one of the 186 members they reach is an
@@ -350,11 +351,11 @@ is named there, which is why all 158 `objects.rlb` references are `BULL`
 records, carried only by the four archives that hold things which shoot.
 ### What is still not read
 
-The meaning of the fields rather than their extent: what each class's
-sixteen values mean, apart from class 26's first, and a component's 4-byte
-entries, section 1's and
-section 2's record contents, the 84-byte block's contents, and the nine
-ints of a section-5 record.
+The meaning of the fields rather than their extent: what most classes'
+sixteen values mean, a component's 4-byte entries, section 1's conditions and
+transition table, section 2's record contents, the 84-byte block's contents,
+and the nine ints of a section-5 record. What section 1's states, the motion
+triples and a component's mass (`+0x1c`) do is in [24-motion.md](24-motion.md).
 
 ### Where to look next
 

@@ -12,10 +12,10 @@ accelerations and angle limits, and an 84-byte block that six members leave
 entirely unset.  The frame is exact -- the five files whose section counts are
 all zero are 212 bytes and nothing else.
 
-What follows the frame is **not** read.  The sections are variable-length and
-nest, so their sizes are not a function of the counts: the three sections that
-appear alone give strides of 160, 36 and 180, and no assignment of fixed
-strides satisfies the other 520 members.  See ``docs/13-control.md``.
+After the frame come the sections: section 1's animation states, section 2,
+section 4's components, an 84-byte block, and section 5's reference groups.
+Section 1 and section 4 are read; section 2 and the block are stepped over.
+See ``docs/13-control.md`` and, for what the numbers do, ``docs/24-motion.md``.
 
 Everything below is re-derived by ``uv run openparkan verify``.
 """
@@ -76,6 +76,25 @@ COMPONENT_POWER_AT = 0x20
 #: A power store -- ``CICLS_POWERSTOR``, the ``i_pws`` batteries.  Its first
 #: value is its capacity, negative on a generator, which never runs dry.
 POWER_STORE_TYPE = 19
+#: ``CICLS_ENGINE``.  Its first value, times its condition, is what it adds to
+#: the machine's drive (``Control.dll:0x1000fca0``, property ``0xe00``).
+ENGINE_TYPE = 5
+#: What the part weighs, in kg, a float.  ``Control.dll:0x1000fac0`` adds it to
+#: the mass of the node the part sits on.  Only the twelve ``o_eng`` parts
+#: carry one in the shipped data.
+COMPONENT_MASS_AT = 0x1C
+
+#: A section-1 state: ``SECTION1_RECORD`` bytes, then ``counts[1]`` 16-byte
+#: conditions.  Bits 0-2 of the flags switch on the velocity box per axis and
+#: bits 4-6 the spin box; a state applies while the machine's velocity and spin
+#: lie inside the boxes it switches on (``Control.dll:0x10001000``).
+STATE_FLAGS_AT = 0x00
+STATE_VELOCITY_AT = 0x24     # min xyz, then max xyz at +0x30
+STATE_SPIN_AT = 0x3C         # min xyz, then max xyz at +0x48
+#: The state's engine factor.  The control system copies the current state to
+#: ``+0x100`` (``0x1000c36f``), so this is the ``+0x154`` the engine draw
+#: multiplies by (``0x100266e1``).
+STATE_ENGINE_AT = 0x54
 
 #: Each class's power channel, by type id -- ``Control.dll:0x1003ccc8``.
 POWER_CHANNEL = (0, 4, 4, 0, 2, 3, 0, 0, 2, 5, 5, 0, 0, 0, 1, 0,
@@ -101,6 +120,17 @@ COUNT_AT = (0, 4, 8, 12, 16)
 #: The six float triples, in order.  Each is a per-axis ``(x, y, z)``: the
 #: three components are equal on 440, 521, 438, 484, 504 and 502 of the 531.
 TRIPLE_AT = (20, 32, 44, 56, 68, 80)
+#: The triples ``Control.dll:0x1000fca0`` turns into live limits, by index.
+#: Acceleration is doubled live; top speed is m/s with y forward, capped at the
+#: authored value; the turn rate scales with the engines and the load.
+TRIPLE_ACCELERATION = 0
+TRIPLE_TOP_SPEED = 2
+TRIPLE_TURN = 3
+#: The ``mode`` that brakes on a slope steeper than ``cone``
+#: (``Control.dll:0x100157ac``).
+SLOPE_MODE = 2
+#: The stat panel shows top speed times this as km/h (``iron3d.dll:0x1006f3c7``).
+KMH_PER_MS = 3.6
 
 #: The file's own two-pi, on all three components of the triple at +56 on 364
 #: members and of the triple at +80 on 422.  A limit of a whole turn is the
@@ -150,7 +180,7 @@ DEFAULT_INTS = (92, 104, 116)
 #: walks the body in this order.
 #:
 #: * **section 1** -- ``counts[0]`` records of ``SECTION1_RECORD + 16 *
-#:   counts[1]`` bytes, then ``counts[0] ** 2`` int32.  The engine computes the
+#:   counts[1]`` bytes, then ``counts[0] ** 2`` floats, a transition table.  The engine computes the
 #:   whole span as ``A * (4 * A + 16 * B + 156)`` when it skips the section,
 #:   which is the same arithmetic.
 #: * **section 2** -- ``counts[2]`` records of 36 bytes.
@@ -196,14 +226,27 @@ class Reference:
 
 
 @dataclass(frozen=True)
-class Controller:
-    """The 212-byte frame at the head of a ``.ctl`` member.
+class State:
+    """One section-1 record: an animation state the controller moves between."""
 
-    The triples are per-axis and their roles are **not** established.  What is
-    established is their shape and their defaults: ``Control.dll`` drives an
-    ``IControl`` of speeds, accelerations and angle limits, the two triples
-    that default to a whole turn are angular, and every one of the 12744 float
-    reads across the block's 24 float slots is finite.
+    #: The flags at +0: which axes of the two boxes are switched on.
+    flags: int
+    #: The velocity box, ``(min xyz, max xyz)``, in m/s with y forward.
+    velocity: tuple[tuple[float, float, float], tuple[float, float, float]]
+    #: The spin box, ``(min xyz, max xyz)``, in rad/s with z yaw.
+    spin: tuple[tuple[float, float, float], tuple[float, float, float]]
+    #: What the engine draw is multiplied by while this state is current.
+    engine: float
+
+
+@dataclass(frozen=True)
+class Controller:
+    """The 212-byte frame at the head of a ``.ctl`` member, and its sections.
+
+    The triples are per-axis.  +20 is the acceleration, +44 the top speed and
+    +56 the turn rate (``TRIPLE_*``); +32, +68 and +80 are not established.
+    Every one of the 12744 float reads across the block's 24 float slots is
+    finite.
     """
 
     #: The five section counts at +0..+16.  All five are zero on five members,
@@ -215,16 +258,19 @@ class Controller:
     scale: int
     #: +96 and +100: zero on 512.
     pair: tuple[float, float]
-    #: +104: 0, 2 or 3.  Unresolved.
+    #: +104: 0, 2 or 3.  2 brakes on slopes steeper than ``cone``; 3 takes a
+    #: branch of its own that is not read.
     mode: int
     #: +108 and +120: -1.0 on 465 and 433, otherwise a positive bound.
     bounds: tuple[float, float]
-    #: +112: ``pi/2`` on 509.
+    #: +112: the steepest slope a mode-2 machine climbs freely, in radians.
+    #: The default 1.57079 on 509; 0.6 on every mode-2 controller.
     cone: float
     #: +116: 0 on 342, then 3, 4, 16.  Unresolved.
     flags: int
-    #: +124: ``FLT_MAX`` on 502.
-    reach: float
+    #: +124: the most the machine can carry, in kg; the stat panel shows it
+    #: times 0.001 as tonnes.  ``FLT_MAX`` on 502 that carry nothing.
+    payload: float
     #: True when +128 to the end is the unset fill.
     bare: bool
     #: Section 4: what this controller is made of, and what each part emits.
@@ -233,6 +279,8 @@ class Controller:
     #: other 219 being components' own resources.  In the 136 members that
     #: carry no components at all, none of section 5's records is named.
     references: tuple[Reference, ...]
+    #: Section 1: the animation states.
+    states: tuple[State, ...] = ()
 
     @property
     def named(self) -> list[ResourceRef]:
@@ -276,6 +324,8 @@ class Component:
     power: float = 0.0
     #: The int at ``COMPONENT_NODE_AT``: an index into the object's ``.ndp``.
     node: int = 0
+    #: The float at ``COMPONENT_MASS_AT``: what the part weighs, in kg.
+    mass: float = 0.0
 
     @property
     def channel(self) -> int:
@@ -331,7 +381,25 @@ def read_component(blob: bytes, pos: int) -> Component | None:
                                   pos + COMPONENT_VALUES_AT),
         power=struct.unpack_from("<f", blob, pos + COMPONENT_POWER_AT)[0],
         node=struct.unpack_from("<i", blob, pos + COMPONENT_NODE_AT)[0],
+        mass=struct.unpack_from("<f", blob, pos + COMPONENT_MASS_AT)[0],
     )
+
+
+def read_states(blob: bytes, counts: tuple[int, ...]) -> tuple[State, ...]:
+    """Section 1's states, which start right after the frame."""
+    stride = SECTION1_RECORD + SECTION1_PER_B * counts[1]
+    out = []
+    for i in range(counts[0]):
+        at = HEADER_SIZE + i * stride
+        velocity = struct.unpack_from("<6f", blob, at + STATE_VELOCITY_AT)
+        spin = struct.unpack_from("<6f", blob, at + STATE_SPIN_AT)
+        out.append(State(
+            flags=struct.unpack_from("<I", blob, at + STATE_FLAGS_AT)[0],
+            velocity=(velocity[:3], velocity[3:]),
+            spin=(spin[:3], spin[3:]),
+            engine=struct.unpack_from("<f", blob, at + STATE_ENGINE_AT)[0],
+        ))
+    return tuple(out)
 
 
 def section4_start(counts: tuple[int, ...]) -> int:
@@ -422,8 +490,9 @@ def parse(blob: bytes, archives: frozenset[str] | None = None) -> Controller:
         ),
         cone=struct.unpack_from("<f", blob, 112)[0],
         flags=struct.unpack_from("<i", blob, 116)[0],
-        reach=struct.unpack_from("<f", blob, 124)[0],
+        payload=struct.unpack_from("<f", blob, 124)[0],
         bare=set(blob[HEADER_SIZE:]) == {UNSET},
         components=tuple(components),
         references=tuple(references),
+        states=read_states(blob, counts),
     )

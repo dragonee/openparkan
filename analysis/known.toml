@@ -1953,3 +1953,236 @@ kind = "function"
 name = "clan reader: ..., behaviour tree, minds (+0x40), relations"
 doc = "docs/04-missions.md"
 read = true
+
+# --- motion: states, speed limits, running gear, load, ../docs/24-motion.md ---
+[[entry]]
+module = "Control.dll"
+at = "0x10001000"
+kind = "function"
+name = "state condition: velocity box bits 0-2, spin box bits 4-6, component conditions 0x100/0x200, uses +0x94"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10001470"
+kind = "function"
+name = "state list: A 0xa0-byte records, each the 156-byte file record and a pointer to its B x 16 conditions"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10001730"
+kind = "function"
+name = "state record copy: 156 bytes, then B x 16 condition bytes behind the pointer at +0x9c"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x100051c0"
+kind = "function"
+name = "state selection: cheapest A x A transition below 1e6 into a state whose bounds hold"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10005370"
+kind = "function"
+name = "motion step: dt = +0x120 ms x 0.001 clamped 0.01..5 s; spin then velocity integrator"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000c36f"
+kind = "site"
+name = "controller tick copies the current state record into +0x100, the engine factor landing at +0x154"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x100266e1"
+kind = "site"
+name = "engine draw multiplied by the state's engine factor (+0x154)"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000fac0"
+kind = "function"
+name = "mass: node .ndp +8 x mesh property 0x10, components' mass (0x100) on their node (0x200); spare payload +0x4d8"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000fca0"
+kind = "function"
+name = "speed limits: engines' value x condition x mean side gear; top x (1+r)/2 x surface, capped; turn x (1.5r+0.5); accel x 2"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000fd06"
+kind = "site"
+name = "speed limits: (left gear + right gear) / 2 x the engine sum"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000fd55"
+kind = "site"
+name = "speed limits: the ground's speed factor (+0x1a8) multiplies top speed"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10011920"
+kind = "function"
+name = "part detach: its mass leaves the total, returns to spare payload, limits recomputed"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10012a40"
+kind = "function"
+name = "running gear: mean life of .ndp flag 0x20 nodes -> +0x354, 0x40 -> +0x358; ground damage on kind 4"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10014260"
+kind = "function"
+name = "motion body constructor, embedded at control system +0x1b4"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x100143e0"
+kind = "function"
+name = "motion body init: +0x1ac the authored parameter block, +0x1b0 the live one"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10014780"
+kind = "function"
+name = "spin integrator: yaw rate gains (right gear - left gear) x forward speed / top forward speed"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001478e"
+kind = "site"
+name = "spin integrator: right gear life (+0x358) minus left (+0x354)"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x100153c0"
+kind = "function"
+name = "velocity integrator: toward command x live top speed at live accel per axis; mode-2 slope brake; top-speed clamp"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x100157ac"
+kind = "site"
+name = "slope brake: cos of the cone (+112) against the ground tilt, mode 2 only"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001a450"
+kind = "function"
+name = "ground contact: surface record +8 -> speed factor +0x1a8, +0xc -> damage rate +0x1a4, id -> +0x1b0"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000dd96"
+kind = "site"
+name = "IControl 144: the authored top speed's forward component (file +48)"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000e184"
+kind = "site"
+name = "IControl 136: the authored payload (file +124)"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000e1a2"
+kind = "site"
+name = "IControl 137: the spare payload (+0x4d8)"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000e0b4"
+kind = "site"
+name = "IControl 104 and 124: the total mass (+0x538)"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1006f070"
+kind = "function"
+name = "stat panel keyword: payload 0, maxspeed 1, weight 2, wattage 3, product 4, Frate 5, ..."
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1006f300"
+kind = "function"
+name = "stat panel value: payload = IControl 136 x 0.001, maxspeed = 144 x 3.6, weight = 124 x 0.001"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1000b621"
+kind = "site"
+name = "mission property MaxSpeedPercent reads Movement_SpeedPercent (+0x94); its setter does nothing"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1002b59b"
+kind = "site"
+name = "go order: speed = the unit's +0x5fc x Go_SpeedPercent"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "ai.dll"
+at = "0x100091b0"
+kind = "site"
+name = "asks IControl 145, the live top speed, and compares it with 1"
+doc = "docs/24-motion.md"
+read = true

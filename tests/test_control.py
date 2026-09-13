@@ -30,6 +30,7 @@ def test_the_parameter_block_reads_as_triples(ctl):
     assert c.triples[0] == (2.5, 2.5, 2.5)
     assert c.triples[3] == pytest.approx((control.FULL_TURN,) * 3)
     assert c.cone == pytest.approx(control.HALF_CONE)
+    assert c.triples[control.TRIPLE_TURN] == pytest.approx((control.FULL_TURN,) * 3)
 
 
 def test_sections_one_and_two_are_stepped_over(ctl, reference):
@@ -82,6 +83,24 @@ def test_a_component_names_its_node(ctl, component):
     part = component(5, node=17)
     one = control.parse(ctl(counts=(0, 0, 0, 1, 0), components=[part])).components[0]
     assert one.node == 17
+
+
+def test_a_component_carries_its_mass(ctl, component):
+    part = component(control.ENGINE_TYPE, mass=1350.0)
+    one = control.parse(ctl(counts=(0, 0, 0, 1, 0), components=[part])).components[0]
+    assert one.mass == 1350.0
+
+
+def test_section_one_reads_as_states(ctl, state):
+    walk = state(flags=0x2, velocity=((0.0, 0.6, 0.0), (0.0, 12.0, 0.0)), engine=1.5,
+                 conditions=2)
+    stand = state(conditions=2)
+    c = control.parse(ctl(counts=(2, 2, 0, 0, 0), states=[walk, stand]))
+    assert len(c.states) == 2
+    assert c.states[0].flags == 0x2
+    assert c.states[0].velocity == ((0.0, pytest.approx(0.6), 0.0), (0.0, 12.0, 0.0))
+    assert c.states[0].engine == 1.5
+    assert c.states[1].engine == 0.0
 
 
 def test_every_channel_is_served_once():

@@ -124,11 +124,20 @@ class ResourceRef:
         return f"{self.library}/{self.member}" if self else "-"
 
 
+#: ``NodeDamage.flags`` bits marking a machine's left and right running gear --
+#: legs, wheels, tracks.  ``Control.dll:0x10012a40`` averages the life of each
+#: side's nodes; both sides' mean scales the drive, their difference makes the
+#: machine veer.
+LEFT_GEAR = 0x20
+RIGHT_GEAR = 0x40
+
+
 @dataclass(frozen=True)
 class NodeDamage:
     """What happens to one node of a model when it is shot to pieces."""
 
-    #: Zero throughout, except 1 on scenery and 112 on projectiles.  Flags.
+    #: Flags: 0 on most; 1 on scenery; 112 on projectiles; ``LEFT_GEAR`` and
+    #: ``RIGHT_GEAR`` on a machine's running gear.
     flags: int
     #: The node's hit points.  ``Control.dll:0x1000f940`` sets a node's life to
     #: this times two object scales, and a component on the node is scaled by

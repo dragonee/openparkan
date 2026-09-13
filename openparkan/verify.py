@@ -3846,7 +3846,7 @@ def check_control(check, game: Path) -> None:
           f"file + 0x{control.FIELD_BASE:x}{worst}")
 
     reads = [v for c in parsed for t in c.triples for v in t]
-    reads += [v for c in parsed for v in (*c.pair, *c.bounds, c.cone, c.reach)]
+    reads += [v for c in parsed for v in (*c.pair, *c.bounds, c.cone, c.payload)]
     finite = sum(1 for v in reads if math.isfinite(v))
     check(".ctl: every float in the parameter block is a float",
           finite == len(reads) > 0,
@@ -3863,11 +3863,11 @@ def check_control(check, game: Path) -> None:
     turn = sum(1 for c in parsed
                if all(abs(v - control.FULL_TURN) <= 0.01 for v in c.triples[5]))
     cone = sum(1 for c in parsed if abs(c.cone - control.HALF_CONE) <= 1e-4)
-    reach = sum(1 for c in parsed if c.reach >= control.FLT_MAX)
+    unlimited = sum(1 for c in parsed if c.payload >= control.FLT_MAX)
     check(".ctl: the angle limits carry the engine's own defaults",
           turn > len(parsed) * 0.7 and cone > len(parsed) * 0.9
-          and reach > len(parsed) * 0.9,
-          f"a whole turn on {turn}, pi/2 on {cone}, FLT_MAX on {reach} "
+          and unlimited > len(parsed) * 0.9,
+          f"a whole turn on {turn}, pi/2 on {cone}, FLT_MAX payload on {unlimited} "
           f"of {len(parsed)}")
 
     flags = [c.flags for c in parsed]
@@ -4100,6 +4100,176 @@ def check_efficiency(check, game: Path) -> None:
           f"below which it gets less than it draws is at most "
           f"{100 * worst[1]:.1f}% ({worst[0]}); every one of {len(powers)} power "
           f"figures is finite and non-negative")
+
+
+#: A payload the game treats as no limit, in kg: 1000 t and 10000 t.
+NO_LIMIT_PAYLOAD = (1_000_000.0, 10_000_000.0)
+
+
+def check_motion(check, game: Path) -> None:
+    """.ctl: how a machine moves -- states, speed limits, running gear, load."""
+    names = frozenset(p.name.lower() for p in all_archives(game))
+    every: list[tuple[str, str, control.Controller]] = []
+    for path in all_archives(game):
+        archive = NResArchive.open(path)
+        for entry in archive:
+            if not entry.tag.upper().startswith("CTL"):
+                continue
+            try:
+                parsed = control.parse(archive.read(entry), names)
+            except control.ControlFormatError:
+                continue
+            every.append((path.name.lower(), entry.name.lower(), parsed))
+
+    # Section 1 is a list of states: the bounds a flag switches on are ordered
+    # boxes, and the ones it leaves off are the open interval.
+    states = [s for _lib, _name, c in every for s in c.states]
+    ordered = unordered = off_open = off_other = 0
+    for s in states:
+        for box, (lo, hi) in enumerate((s.velocity, s.spin)):
+            for axis in range(3):
+                if s.flags & (1 << (axis + 4 * box)):
+                    ordered += lo[axis] <= hi[axis]
+                    unordered += lo[axis] > hi[axis]
+                elif lo[axis] == -control.FLT_MAX and hi[axis] == control.FLT_MAX:
+                    off_open += 1
+                else:
+                    off_other += 1
+    check(".ctl: section 1 is a list of states whose flags switch their bounds on",
+          states and ordered and off_open and not unordered and not off_other,
+          f"{len(states)} states; the {ordered} bounds a flag bit enables all read "
+          f"min <= max, and the {off_open} it leaves off are all -FLT_MAX..FLT_MAX "
+          f"(bits 0-2 velocity, bits 4-6 spin; Control.dll:0x10001000)")
+
+    factors = Counter(s.engine for s in states)
+    hero = Counter(s.engine for lib, name, c in every
+                   if (lib, name) == ("bases.rlb", "r_h_02.ctl") for s in c.states)
+    check(".ctl: a state's engine factor is 0, 1, 1.5 or 2, and the hero's is always 0",
+          set(factors) == {0.0, 1.0, 1.5, 2.0} and set(hero) == {0.0},
+          ", ".join(f"{v:g} on {n}" for v, n in sorted(factors.items()))
+          + f" of {len(states)} states; the current state's is the +0x154 the engine "
+          f"draw multiplies by (Control.dll:0x100266e1); all {hero[0.0]} states of "
+          f"r_h_02, the hero chassis, carry 0")
+
+    # .ndp flags 0x20 and 0x40 sit on one side each of the model.
+    left = right = wrong = other_neg = other_pos = models = 0
+    for libname in ("bases.rlb", "animals.rlb"):
+        archive = NResArchive.open(game / libname)
+        meshes = {e.name.lower()[:-4]: e for e in archive
+                  if e.tag.upper().startswith("MESH")}
+        for entry in archive:
+            stem = entry.name.lower()[:-4]
+            if not entry.name.lower().endswith(".ndp") or stem not in meshes:
+                continue
+            rows = objects.parse_damage(archive.read(entry), entry.name)
+            if not any(r.flags & (objects.LEFT_GEAR | objects.RIGHT_GEAR) for r in rows):
+                continue
+            model = objmesh.parse(archive.read(meshes[stem]), meshes[stem].name)
+            models += 1
+            for i, row in enumerate(rows):
+                x = model.world_pose(i)[0][0]
+                if row.flags == objects.LEFT_GEAR:
+                    left += x < 0
+                    wrong += x >= 0
+                elif row.flags == objects.RIGHT_GEAR:
+                    right += x > 0
+                    wrong += x <= 0
+                elif abs(x) > 0.05:
+                    other_neg += x < 0
+                    other_pos += x > 0
+    check(".ndp: flag 0x20 marks a machine's left running gear, 0x40 its right",
+          models and left and right and not wrong and other_neg and other_pos,
+          f"in {models} chassis and animal models, all {left} nodes flagged 0x20 rest "
+          f"at x < 0 and all {right} flagged 0x40 at x > 0, where their other "
+          f"off-centre nodes split {other_neg} and {other_pos}.  Control.dll:0x10012a40 "
+          f"averages each side's life")
+
+    parts = descriptions.read(game / descriptions.LIBRARY)
+    bases = NResArchive.open(game / "bases.rlb")
+    ctl = {e.name.lower(): e for e in bases if e.tag.upper().startswith("CTL")}
+    panels = [p for p in parts.values()
+              if p.group == 2 and {(s.field, s.unit) for s in p.stats}
+              >= {("weight", "t"), ("payload", "t"), ("maxspeed", "kmph")}]
+    joined = {p.part: control.parse(bases.read(ctl[p.part.lower() + ".ctl"]))
+              for p in panels if p.part.lower() + ".ctl" in ctl}
+    check("objects.dlb: a chassis shows its weight and payload in t, its speed in km/h",
+          panels and len(joined) == len(panels),
+          f"{len(panels)} chassis descriptions carry all three rows, and every one "
+          f"names a same-stem controller in bases.rlb; iron3d.dll:0x1006f300 fills "
+          f"them from +124 x 0.001, +48 x 3.6 and the total mass x 0.001")
+
+    # What moving costs: one engine of power 20 and one 10000 battery on every
+    # chassis but the hero's, whose engine asks 0.1.
+    engine_power = {k: [p.power for p in c.components if p.type_id == control.ENGINE_TYPE]
+                    for k, c in joined.items()}
+    batteries = {k: sorted((p.values[0], p.power) for p in c.components
+                           if p.type_id == control.POWER_STORE_TYPE)
+                 for k, c in joined.items()}
+    hero_engine = [e for k, e in engine_power.items() if k.upper() == "R_H_02"]
+    second = sorted(k for k, b in batteries.items() if len(b) > 1)
+    check(".ctl: every chassis moves on one engine of 20 and a 10000 battery",
+          joined and all(e == [20.0] for k, e in engine_power.items() if k.upper() != "R_H_02")
+          and hero_engine and round(hero_engine[0][0], 3) == 0.1
+          and all((10000.0, 250.0) in b for b in batteries.values()),
+          f"all {len(joined)} chassis carry a store of 10000 at 250 a second, and all "
+          f"but the hero's an engine asking 20 (the hero's asks "
+          f"{hero_engine[0][0] if hero_engine else '?':.2g}); {len(second)} carry a "
+          f"second store ({', '.join(second)})")
+
+    top = control.TRIPLE_TOP_SPEED
+    moving = {k: c.triples[top][1] for k, c in joined.items() if c.triples[top][1] >= 1.0}
+    kmh = [k for k, v in moving.items()
+           if abs(v * control.KMH_PER_MS - round(v * control.KMH_PER_MS)) < 0.01]
+    ms = [k for k, v in moving.items() if abs(v - round(v)) < 0.01]
+    check(".ctl: a chassis's top speed is authored in km/h and stored in m/s",
+          moving and len(kmh) >= len(moving) - 1 and len(ms) < len(kmh),
+          f"+48 x 3.6 is a whole number of km/h on {len(kmh)} of the {len(moving)} "
+          f"chassis that move (not on {', '.join(sorted(set(moving) - set(kmh)))}); "
+          f"+48 itself is a whole number of m/s on {len(ms)}")
+
+    by_size: dict[int, list[float]] = defaultdict(list)
+    unlimited = []
+    for part, c in joined.items():
+        if c.payload in NO_LIMIT_PAYLOAD:
+            unlimited.append(part)
+        elif part.lower()[2] in profiles.CHASSIS_SIZE:
+            by_size[profiles.CHASSIS_SIZE[part.lower()[2]]].append(c.payload)
+    ranks = sorted(by_size)
+    rising = all(max(by_size[a]) < min(by_size[b]) for a, b in zip(ranks, ranks[1:], strict=False))
+    check(".ctl: a chassis's payload (+124, kg) rises with its size, without overlap",
+          len(ranks) == 4 and rising,
+          "; ".join(f"size {r}: {min(by_size[r]) / 1000:g}-{max(by_size[r]) / 1000:g} t"
+                    for r in ranks)
+          + f"; {len(unlimited)} carry a no-limit 1000 or 10000 t "
+          f"({', '.join(sorted(unlimited))})")
+
+    modes: dict[int, Counter[float]] = defaultdict(Counter)
+    for _lib, _name, c in every:
+        modes[c.mode][round(c.cone, 4)] += 1
+    check(".ctl: the slope cone is authored only where the mode reads it",
+          set(modes[0]) == {round(control.HALF_CONE, 4)}
+          and set(modes[control.SLOPE_MODE]) == {0.6},
+          "; ".join(f"mode {m}: " + ", ".join(f"{cone:g} on {n}"
+                                             for cone, n in sorted(c.items()))
+                    for m, c in sorted(modes.items()))
+          + ".  Only mode 2 compares the ground's tilt with +112 (Control.dll:0x100157ac)")
+
+    engines = [(name, p.values[0], p.power, p.mass) for lib, name, c in every
+               if lib == "intsys.rlb" for p in c.components
+               if p.type_id == control.ENGINE_TYPE]
+    elsewhere = [p.mass for lib, _name, c in every if lib != "intsys.rlb"
+                 for p in c.components if p.type_id == control.ENGINE_TYPE]
+    rows_ok = True
+    detail = []
+    for size in "lmb":
+        mine = sorted((v, w, m) for n, v, w, m in engines if n.startswith(f"o_eng_{size}_"))
+        rows_ok &= len(mine) == 4 and all(a[1] < b[1] and a[2] < b[2]
+                                          for a, b in zip(mine, mine[1:], strict=False))
+        detail.append(f"{size}: " + ", ".join(f"{v:.1f}/{w:g}/{m:g}" for v, w, m in mine))
+    check(".ctl: an internal engine's mass (+0x1c) and draw rise with its value",
+          engines and rows_ok and not any(elsewhere),
+          f"value/power/kg by size -- {'; '.join(detail)}; the {len(elsewhere)} other "
+          f"engines weigh 0.  Control.dll:0x1000fac0 adds a part's mass to its node")
 
 
 def check_controls(check, game: Path) -> None:
@@ -5503,6 +5673,7 @@ def run(game: Path) -> int:
         check_minimap_agreement, check_arealmap,
         check_grid, check_missions, check_objects, check_poses, check_lod, check_damage,
         check_effects, check_footprints, check_rsli, check_control, check_efficiency,
+        check_motion,
         check_controls,
         check_behaviour, check_research, check_descriptions, check_saves,
         check_vocabulary, check_resources, check_briefing, check_settings,

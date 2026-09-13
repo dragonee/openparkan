@@ -44,7 +44,8 @@ and the rest pose that this file was once expected to explain all turned out
 to live in the mesh.
 
 The **sections** are read too, and all 531 members now walk end to end: section
-1 (`counts[0]` records of `156 + 16*counts[1]`, then `counts[0]**2` int32),
+1 (`counts[0]` animation states of `156 + 16*counts[1]`, then a `counts[0]**2`
+table of floats),
 section 2 (`counts[2]` records of 36 bytes), section 4 (`counts[3]` component
 records, one shape for all 30 type ids), an 84-byte block and section 5
 (`counts[4]` groups of an int32 and that many 100-byte records). A component's
@@ -52,12 +53,12 @@ label names a family of internal parts -- all 57 of them prefix an `INTO`
 record in `objects.rlb`.
 
 What is open is the **meaning** of the fields rather than their extent: the
-sixteen component values past class 26's efficiency
-([23-economy.md](23-economy.md)), section 1's and section 2's record
-contents, the 84-byte block, and the nine ints of a section-5 record. And
-**which field feeds which setter** is unmapped: the stub table names the
-interface but never receives an argument, so the mapping has to come from
-`AniMesh.dll`, the only module that calls `LoadControlSystem`.
+sixteen values of most component classes
+([23-economy.md](23-economy.md)), section 1's conditions and transition
+table, section 2's record contents, the 84-byte block, triples 2 and 6, and
+the nine ints of a section-5 record. The motion fields — acceleration, top
+speed, turn rate, slope mode and cone, payload, a state's velocity and spin
+boxes and engine factor — are [read](24-motion.md).
 
 Its sibling `.ndp` is [solved and read](07-objects.md). One field of it is not:
 the second `float32` of a record. It was written up as "1000 on 549, then 0,

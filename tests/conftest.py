@@ -50,12 +50,13 @@ def nres_archive():
 def build_component(type_id: int, library: str = "", member: str = "",
                     entries: tuple[int, ...] = (), label: str = "",
                     index: int = -1, values: tuple[float, ...] = (),
-                    power: float = 0.0, node: int = 0) -> bytes:
+                    power: float = 0.0, node: int = 0, mass: float = 0.0) -> bytes:
     """One section-4 record, laid out as ``Control.dll`` reads it."""
     rec = bytearray(control.COMPONENT_FIXED)
     struct.pack_into("<i", rec, 0, type_id)
     struct.pack_into("<i", rec, control.COMPONENT_NODE_AT, node)
     struct.pack_into("<f", rec, control.COMPONENT_POWER_AT, power)
+    struct.pack_into("<f", rec, control.COMPONENT_MASS_AT, mass)
     struct.pack_into("<i", rec, control.COMPONENT_INDEX_AT, index)
     struct.pack_into(f"<{len(values)}f", rec, control.COMPONENT_VALUES_AT, *values)
     at = control.COMPONENT_NAME_AT
@@ -81,14 +82,28 @@ def build_reference(library: str, member: str,
     return bytes(rec)
 
 
+def build_state(flags: int = 0, velocity=((0.0,) * 3, (0.0,) * 3),
+                spin=((0.0,) * 3, (0.0,) * 3), engine: float = 0.0,
+                conditions: int = 0) -> bytes:
+    """One section-1 state and its ``conditions`` zeroed 16-byte conditions."""
+    rec = bytearray(control.SECTION1_RECORD + control.SECTION1_PER_B * conditions)
+    struct.pack_into("<I", rec, control.STATE_FLAGS_AT, flags)
+    struct.pack_into("<6f", rec, control.STATE_VELOCITY_AT, *velocity[0], *velocity[1])
+    struct.pack_into("<6f", rec, control.STATE_SPIN_AT, *spin[0], *spin[1])
+    struct.pack_into("<f", rec, control.STATE_ENGINE_AT, engine)
+    return bytes(rec)
+
+
 def build_ctl(counts=(0, 0, 0, 0, 0), params=None, components=(), groups=(),
-              block=None) -> bytes:
+              block=None, states=()) -> bytes:
     """A whole controller: frame, sections, the block, the reference groups."""
     a, b, c, _d, _e = counts
     out = bytearray(struct.pack("<5i", *counts))
     values = params if params is not None else [0.0] * 27
     out += struct.pack("<27f", *values)
-    out += bytes(a * (control.SECTION1_RECORD + control.SECTION1_PER_B * b))
+    stride = control.SECTION1_RECORD + control.SECTION1_PER_B * b
+    body = b"".join(states)
+    out += body + bytes(a * stride - len(body))
     out += bytes(4 * a * a)
     out += bytes(c * control.SECTION2_RECORD)
     for part in components:
@@ -109,6 +124,11 @@ def ctl():
 @pytest.fixture
 def component():
     return build_component
+
+
+@pytest.fixture
+def state():
+    return build_state
 
 
 @pytest.fixture

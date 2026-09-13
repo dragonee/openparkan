@@ -425,7 +425,7 @@ Each class prices its own draw in its vtable slot 5, read per class:
 |---|---|
 | default — doors, computers, radar, deflectors, armour | `power` while switched on and intact (`0x10021860`) |
 | efficiency (26) | `power + usage` (`0x1002e540`) |
-| engine (5) | `power × speed ÷ top speed × a factor at +0x154` (`0x100265c0`), each the largest of three axes: *speed* from three floats of the live controller (`+0x1c8`) that read as its velocity — a *guess* — and *top speed* from the controller frame's third triple, which this settles as a speed limit |
+| engine (5) | `power × speed ÷ top speed × the state's factor` (`0x100265c0`), speed and top speed each the largest of three axes: the machine's velocity (`+0x1c8`) against the controller frame's third triple; the factor at `+0x154` is the current animation state's, 0 at rest and on the hero ([24-motion.md](24-motion.md)) |
 | gun (2, 30) | `power` plus whatever its capacitor lacks of value 1; its level is the capacitor's fill (`0x10029a40`, `0x10029a90`) |
 | fight shield (9) | `power` plus `value 2 ×` the recharge it does: `min(value 1 × condition, value 0 × 6 − the six sectors' strength)` (`0x10025700`) |
 | detect shield (10) | `power`, plus value 4 while it is in mode `0x1000` (`0x100264b0`) |
@@ -605,8 +605,7 @@ construction slows research.
 
 ## Not established
 
-- The engine draw's factor at `+0x154`, and the second object scale on node
-  life (`+0x660`).
+- The second object scale on node life (`+0x660`).
 - What makes a building a charging dock for units, and which task sends a bot
   there on its own.
 - Whether a factory refused for want of a mind retries by itself.

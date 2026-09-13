@@ -208,6 +208,7 @@ of fields carried through the readers without being understood.
 - [21-briefing.md](docs/21-briefing.md) — `briefing.cfg`, the opening flythrough
 - [22-settings.md](docs/22-settings.md) — the engine's five `.ini` files
 - [23-economy.md](docs/23-economy.md) — ore and power: who makes, carries, shares and spends them
+- [24-motion.md](docs/24-motion.md) — how a machine moves: states, speed limits, running gear, load, and what moving costs
 
 ## Layout
 
