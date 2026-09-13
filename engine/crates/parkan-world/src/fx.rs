@@ -162,6 +162,10 @@ impl Fx {
 
     /// Update every instance at `now_ms`, once their owners have placed them, and drop
     /// the instances that have run their course.
+    ///
+    /// STAND-IN: docs/11-effects.md#how-an-effect-runs--read -- the manager updates an
+    /// instance once 100 ms have passed since its last update; here every instance
+    /// updates on every tick the caller runs.
     pub fn tick(&mut self, now_ms: f64) {
         for (_, instance) in &mut self.instances {
             instance.update(now_ms);

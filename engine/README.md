@@ -19,20 +19,29 @@ mip levels. Every placed object is drawn from its assembly:
 
 - each part is mounted on its host's socket;
 - each node sits at its rest pose;
-- level 0 is drawn, and collision hulls never;
+- level 0 is drawn; a node's fifth slot, its cockpit, only in the hero's own view;
 - materials draw in the blend mode their flags byte names.
 
 **M3.** The window opens in the hero's cockpit on Mission 01:
 
 - `parkan-sim` plays the chassis controller's states on their own clock. The
   live limits and the velocity and pending-turn integrators run once a state
-  step. The body moves by its velocity or by the animation's root stride.
+  step. The body moves by its velocity, held inside the state's box, or by the
+  animation's root stride. Only an anchor plans, and a state applies only to
+  its request code.
 - The planner scales the file's transition costs as the loader does, so the
   run cycle keeps running forward.
-- `hero.tbl` drives it through the game's mouse filter.
+- The ground contact holds the body: a state without bit `0x4` is only lifted
+  onto the ground; one with it falls under gravity 10 until a foot lands. The
+  map edge clamps the body inside the world box and pushes it back from the
+  last 80 m.
+- `hero.tbl` drives it through the game's mouse filter. A strafe key sets the
+  angle as it goes down; the hull takes the turn and the turret's yaw channel
+  takes it back. A held ramp row eases the keypad cruise toward full.
 - The turret's pitch channel tilts the sight. The eye stands at
-  `CameraCenter` and looks along `TargetDirect` with a horizontal field of
-  view of 1.3 rad.
+  `CameraCenter`, looks along `TargetDirect` with a horizontal field of view
+  of 1.3 rad, takes `CameraCenter`'s own vector as up, and shakes with the
+  body's jolts. The hero's own view draws its cockpit.
 
 On Tut_1 the hero holding W runs at 14 m/s. Not drawn yet: the hero itself
 and its animation, when seen from outside.
@@ -42,31 +51,42 @@ and its animation, when seen from outside.
 - Its turret's four guns keep the game's clock: a four-step barrel stroke,
   then the interval.
 - The fire and number keys reach the selected guns. The cannon and the laser
-  start selected.
-- A round leaves its muzzle aimed at what the sight meets, and flies with the
-  shooter's velocity. Its side speed bleeds off, and its range runs out.
+  start selected, and their arms unfold from folded. Each mount blends from
+  its rest toward the pitch by its arm's progress, and a gun fires only once
+  its arm is out.
+- A round leaves its muzzle aimed at what the sight meets (a sight that passes
+  no triangle), and flies with the shooter's velocity. Its side speed bleeds
+  off, and its range runs out.
 - Each frame a round's segment is tested against the ground, the map box and
   every live object's level-0 triangles.
 - A hit does the round's `.exp` damage to the node struck, or blasts every
   node in reach, less armour. A dead node takes its children with it, and
-  node 0 takes the object.
+  node 0 takes the object; a building stays, a shell that can still be shot
+  apart.
 - On Mission 01 the laser kills a target in two hits of 250.
 - Effects play from `effects.rlb`: each emitter inside its window of effect
   time. The turret's flashes hang on the barrel points, timed by the barrel
-  channels; rounds carry their tracers and bolts. A strike plays its `.exp`
-  by the surface it met, and a destroyed node plays its own. Sprites and
-  particle bursts are drawn in their materials' blend modes.
+  channels; rounds carry their tracers, bolts and streams. A strike plays its
+  `.exp` by the surface it met, or on a unit by the struck batch's material,
+  and a destroyed node plays its own. Sprites, bolts, streams and bursts fade
+  as their emitters say, in their materials' blend modes; a bit-8 emitter
+  draws over the scene while its effect's tested point is in view.
 
-Not yet: lights, particle streams, animated textures, shields, and what a
-dead object leaves behind.
+Not yet: lights, animated textures, shields, and what a dead unit leaves
+behind.
 
-**M5.** The sky is the mission's `sky.ske`, interpolated on its clock:
+**M5.** The sky is the mission's `sky.ske`, interpolated on its clock, which
+starts at the file's closing time and plays its sections in turn:
 
 - the dome around the camera takes its apex, rings and horizon colours;
 - linear range fog runs from the eye to 700 × slot 6, in the horizon colour
   of the heading, additive materials fogging to black;
-- the scene colour adds to every material's emissive, and the sun or the
-  moon lights the scene.
+- the sun and the moon are up from their start keyframe to their stop, and
+  while one is up the sun object's two lights shine: slot 19, lifted by the
+  flare gates, and slot 21;
+- the lit colour, the scene colour and the material's emissive and diffuse
+  under both lights, is formed in the files' display space, held to 1, and
+  decoded.
 
 Sound plays each effect's sound emitters from `sounds.lib`, WAV and MS ADPCM
 through kira, as their effect time passes their trigger. A HUD shows a
@@ -143,37 +163,47 @@ a row here. A row leaves this table when research closes it.
 
 | milestone | what is unknown | stand-in | see |
 |---|---|---|---|
-| M1 | Whether water is drawn see-through: `WATER`'s material says opaque, and every lake has a `WATER_BOT` bed beneath | opaque, as the material says | [03](../docs/03-terrain.md#terrain-layers-name-materials-not-textures) |
+| M1 | Whether water is drawn see-through: `WATER`'s material says opaque, and every lake has a `WATER_BOT` bed beneath | opaque: the terrain draws every material opaque, whatever its blend | [03](../docs/03-terrain.md#terrain-layers-name-materials-not-textures) |
 | M2 | Whether a blended material writes depth, and the alpha test's reference value | blended groups draw after opaque ones without writing depth; nothing is discarded (reference 0) | [07](../docs/07-objects.md#how-a-material-draws-is-in-the-archive-directory) |
-| M1 | Whether `ForceSWFog` is read outside `Terrain.dll`, which asks Direct3D for linear range vertex fog and never reads it | per-pixel linear range fog, 0 to 700 × slot 6 (the two look the same) | [10](../docs/10-sky.md#not-resolved) |
-| M1 | How the 34142-radius dome escapes the far plane and a fog ending by 700, and what lies below its rim | draw the dome first at the camera, with no depth, unfogged but for its rim; clear the frame to the fog colour | [10](../docs/10-sky.md#the-dome) |
+| M1 | Whether `ForceSWFog` is read outside `Terrain.dll`, which asks Direct3D for linear range vertex fog and never reads it | per-pixel linear range fog on the distance to the eye, from 700 × slot 5 to 700 × slot 6 | [10](../docs/10-sky.md#not-resolved) |
+| M1 | How the 34142-radius dome escapes the far plane and a fog ending by 700, and what lies below its rim | draw the dome first at the camera, depth-tested without writing depth under a projection with no far plane, unfogged but for its rim; clear the frame to the fog colour | [10](../docs/10-sky.md#the-dome) |
 | M1 | Which camera axis the fog's heading angle measures: the compass heading, 0 at +y towards +x, of the camera matrix's first column | the view direction's heading, 0 along +y, turning towards +x, like the dome's segments | [10](../docs/10-sky.md#not-resolved) |
-| M1 | Where the sun object's two directional lights point | a directional light along the sun's fixed direction while its keyframes have it up (the moon's otherwise), coloured by the sky keyframes' slot 19 × the third float, held to 1; a lit colour is held to 1 as fixed-function lighting holds it | [10](../docs/10-sky.md#not-resolved) |
+| M1 | Where the sun object's two directional lights point | both lights shine from the fixed place of the body that is up; none while no body is up | [10](../docs/10-sky.md#not-resolved) |
 | M1 | The sky's textures: stars, clouds, the sun and moon sprites, the lens flare | not drawn | [10](../docs/10-sky.md#the-dome-the-fog-and-the-scene-colour--read-and-measured) |
-| M1 | The files' colours in a renderer that decodes textures to linear | sky, fog, scene and light colours decoded from sRGB to linear, so blends match the game's display-space ones | [10](../docs/10-sky.md#the-dome-the-fog-and-the-scene-colour--read-and-measured) |
+| M1 | The files' colours in a renderer that decodes textures to linear | sky, fog and dome colours and texture tints decoded from sRGB to linear; the lit colour (scene colour, material emissive and diffuse, both lights) formed from the files' values, held to 1, then decoded, so blends match the game's display-space ones | [10](../docs/10-sky.md#the-dome-the-fog-and-the-scene-colour--read-and-measured) |
+| M3 | What the draw layers 10 and 9 a fifth slot is filed under do (`Terrain.dll:0x1004553b`), and `CShade` slot 15 | the fifth slots draw with the scene, depth-tested, lit and fogged like any model | [07](../docs/07-objects.md#the-fifth-slot-is-what-the-units-own-view-draws) |
 | M3 | How an object's interface `0x25` slot 3 turns its level-0 triangles into a push on a sphere; the rest of the pair response is read | none yet: units walk through each other and through buildings; to come, push the sphere out along the nearest triangle's normal by its penetration | [24](../docs/24-motion.md#collision-between-objects--read) |
-| M3 | Which scene objects the walk-face query visits (types 1 and 3), so which bridges and buildings are ground | a step that ends over a face steeper than 80°, or off the ground mesh, is undone and the body stops; bridges and buildings are not ground | [24](../docs/24-motion.md#not-established) |
+| M3 | Which scene objects the walk-face query visits (types 1 and 3), so which bridges and buildings are ground | the landscape alone is ground: bridges and buildings are not | [24](../docs/24-motion.md#not-established) |
+| M3 | When the ground contact runs and with what dt, the pose its contact points use, the second sphere's radius r₂, and what lifts a sphere with no face under it | after every state step, with the step as dt; contacts on the step's last frames with node 0's translation left out; r₂ = r; no lift | [24](../docs/24-motion.md#holding-the-body-on-the-ground--read-and-measured) |
 | M3 | A state's use count `+0x94` | unlimited | [24](../docs/24-motion.md#section-1-is-the-animation-state-graph--read-and-measured) |
-| M3 | The state a machine starts in, and what plays when nothing is queued | state 0; the current state plays again | [24](../docs/24-motion.md#playing-a-state--read-and-measured) |
+| M3 | The state a machine starts in | state 0 | [24](../docs/24-motion.md#playing-a-state--read-and-measured) |
+| M3 | The request code a controller holds before any is sent | none (−1): a state waiting for a code of its own does not apply until one is sent; no Mission 01 state has one | [32](../docs/32-builder.md#the-construction-sphere--read-and-measured) |
 | M3 | The game's random source for a jittering step | xorshift | [24](../docs/24-motion.md#playing-a-state--read-and-measured) |
 | M3 | What vector a state with righting bits `0x30` stands the hull toward (control `+0x348`, no writer found) | none yet: the hull neither leans nor rights; to come, the ground contact's face normal, and world up for bits `0xC0` as read | [24](../docs/24-motion.md#the-hull-leans-and-rights-itself--read-and-measured) |
-| M3 | Which way across a slope the mode-2 brake acts | uphill, against the face normal | [24](../docs/24-motion.md#ground-and-slope--read) |
-| M3 | How often `World3D.dll`'s input update runs, which paces the keypad cruise ramp | ramp rows do nothing | [24](../docs/24-motion.md#not-established) |
+| M3 | Which way across a slope the mode-2 brake acts | uphill, against the averaged ground normal of the last landing | [24](../docs/24-motion.md#ground-and-slope--read) |
+| M3 | How often `World3D.dll`'s input update runs, which paces the keypad cruise ramp | once a rendered frame, and once a 60 Hz tick where nothing is rendered | [24](../docs/24-motion.md#not-established) |
+| M3 | What the walk, strafe and weapon handlers do when an active row runs again each input update while held | only ramp rows run again; any other row runs once, as its key goes down or comes up | [14](../docs/14-controls.md#a-row-that-stays-down--read) |
 | M3 | A chord with no row of its own, such as Shift+W | the plain row | [14](../docs/14-controls.md#the-table) |
+| M3 | How the camera builds its look-only frame when its up is parallel to the look (`0x10023769`) | any frame about the look; no shipped camera's pitch reaches it | [30](../docs/30-turrets.md#aiming-and-the-camera--read-and-measured) |
 | M4 | Whether a target the hero's AI set before the player took over survives | none: nothing sets it while the player drives, so the plasma bolt and the missile fly straight | [29](../docs/29-weapons.md#not-established) |
-| M4 | Whether the landscape is one of the objects the sight ray (IWorld slot 7) walks; it skips no batch or triangle | the ground (less the water surface) and every live object's level-0 mesh, as the hit test does, out to the map's far corner | [29](../docs/29-weapons.md#not-established) |
+| M4 | Whether the landscape is one of the objects the sight ray (IWorld slot 7) walks; it skips no batch or triangle | the ground (less the water surface) and every live object's level-0 mesh, passing no triangle, as far as the map's diagonal and 200 m more | [29](../docs/29-weapons.md#not-established) |
+| M4 | What a falling round's mount solves for with no target (the aim triple, `0x10027e07`), which way its lift turns on a hung turret, and whether a player's turret is in `CIS_MANUALCONTROL` | the stored aim triple as the vector, the lift signed by `TurretCenter`'s z, and the solve runs (no hero round falls) | [29](../docs/29-weapons.md#not-established) |
 | M4 | How a gun's capacitor refills | full again every tick (the power tick is not modelled) | [23](../docs/23-economy.md#bots-spend-power-through-the-same-code-priced-by-part--read-and-measured) |
+| M4 | Whether a round's ground test strikes the water surface | it passes through: the ground index holds no face with `Land.msh` surface bit `0x02`, so a round meets the bed | [26](../docs/26-damage.md#the-hit-test--read-and-measured) |
 | M4 | The point-in-triangle test of the hit test (`0x10011090`), and the landscape's own cell size | an edge test on the triangle's winding; the ground index's 16 m cells | [26](../docs/26-damage.md#the-hit-test--read-and-measured) |
 | M4 | Which node flag makes a node vital | the mesh node's `0x200` | [26](../docs/26-damage.md#hit-points--read-and-measured) |
 | M4 | Whether vegetation and rock take damage | they stop rounds and take none | [04](../docs/04-missions.md#the-scale) |
-| M4 | What a dead object leaves: its explosion, wreck and damage stages | it vanishes | [26](../docs/26-damage.md#hit-points--read-and-measured) |
-| M4 | Shields: bubble contacts and sectors | not modelled; no Mission 01 target has one | [26](../docs/26-damage.md#shields-a-generator-a-deflector-six-sectors--read-and-measured) |
+| M4 | What a dead unit leaves: its wreck and damage stages | its destroyed nodes' explosions play and it is no longer drawn (a building stays as a shell, as read) | [26](../docs/26-damage.md#hit-points--read-and-measured) |
+| M4 | Shields: bubble contacts and sectors | not modelled: no bubble stops a round, a blast skips its shield step and kind 4 does nothing; Mission 01's `tut1_e1`, `tut1_mf1` and `helic` carry fight shields and deflectors | [26](../docs/26-damage.md#shields-a-generator-a-deflector-six-sectors--read-and-measured) |
 | M4 | Poses of other units for the hit test | their rest poses: other units' animation is not played | [24](../docs/24-motion.md#playing-a-state--read-and-measured) |
-| M4 | The rest of the emitter floats: what the fade value scales, what a particle's exponent-shaped triples are, a bolt's widths | sprites (3, 4, 9) move +40→+52 and grow +100→+112 by progress through the window, alpha 1→+24 to the power +28; a bolt (5) is +24 wide and min(+36, +32 × 1000 × s) long behind its origin; a burst (7, 10) is max(1, +16) particles between velocities +44 and +56, spread +68, living +28 of the window, sized +92→+104, fading; streams (8) are not drawn; flag bit 8 ignored | [11](../docs/11-effects.md#not-resolved) |
-| M4 | An effect's jitter (flag 1), the owner values of time modes 5–15, and a phase's animated texture frames | no jitter; modes 5–15 read a speed fraction the caller sets; frame 0 of every texture | [11](../docs/11-effects.md#how-an-effect-runs--read) |
+| M4 | The rest of the emitter floats: what the fade value scales, what a particle's exponent-shaped triples are, a bolt's widths | sprites (3, 4, 9) move +40→+52 and grow +100→+112 straight by progress through the window, per-axis powers left out; a burst (7, 10) flies between velocities +44 and +56, spread +68, its age progress over +28, sized +92→+104; a stream (8) particle sits at +88→+100 and grows +136→+148 by its age in seconds; a bolt's sprites are +24 wide, its fade straight across the window; a fade value is the quad's alpha | [11](../docs/11-effects.md#not-resolved) |
+| M4 | An effect's jitter (flag 1), the owner values of time modes 5–15, and a phase's animated texture frames | no jitter; modes 5–15 all read the owner's speed over its top speed, set on rounds; frame 0 of every texture | [11](../docs/11-effects.md#how-an-effect-runs--read) |
 | M4 | How a sprite whose material says opaque blends | alpha-blended, so its fade shows | [07](../docs/07-objects.md#how-a-material-draws-is-in-the-archive-directory) |
 | M4 | How the shade lights with a type-1 light's range and attenuation; type 1 is a light in the owner's `CLightManager` | none yet; to come, Direct3D's fixed-function falloff, 1 / (a0 + a1·d + a2·d²) inside the range | [11](../docs/11-effects.md#not-resolved) |
-| M4 | Which draw pass draws header-flag-0x800 effects; who sets the manager's target point a bolt starts from | 0x800 effects draw with the rest; a round's target point is where it was fired from | [11](../docs/11-effects.md#not-resolved) |
+| M4 | Which draw pass draws header-flag-0x800 effects; who sets the manager's target point a bolt starts from | 0x800 effects draw with the rest; a bolt starts where its effect started | [11](../docs/11-effects.md#not-resolved) |
+| M4 | When a stream emits its first particle | on its first update inside its window | [11](../docs/11-effects.md#bolts-streams-and-fades--read-and-measured) |
+| M4 | How often an effect instance tests its point's view, and what the ray through the world meets | every frame, against what a round meets (the ground less its water surface, and every live object's level-0 mesh) | [11](../docs/11-effects.md#bit-8-and-the-tested-point--read-and-measured) |
+| M4 | What a building (a `CBuilding` aggregating its agent) answers for a strike's material, and a node's wear base | a strike on a building plays slot 0; the batch's material byte alone indexes the wear | [11](../docs/11-effects.md#what-an-explosion-plays--read-and-measured) |
 | M4 | The effect manager's random generator | any uniform generator | [11](../docs/11-effects.md#how-an-effect-runs--read) |
 | M5 | How the HUD draws the aim point and the guns | a crosshair at the centre; a slot a gun, lit while selected, with magazine and capacitor bars | [30](../docs/30-turrets.md#not-established) |
 | M5 | How a sound falls off between its near and far distances, and how it is panned | linear in distance; panned by its direction against the eye's right | [11](../docs/11-effects.md#emitter-types--read-and-measured) |
@@ -185,28 +215,10 @@ engine pass replaces each with what was read and removes its row.
 
 | milestone | the code's stand-in | what is read | see |
 |---|---|---|---|
-| M1 | the dome is drawn with no depth | its layers are depth-tested without depth writes (render states 7 and 14, `Terrain.dll:0x100302fb`), in render layer 1, on a record that takes the scene's fog | [10](../docs/10-sky.md#the-dome) |
-| M1 | one directional light, coloured by slot 19 × the third float and held to 1 | the sun object is two directional lights: slot 19 × the third float, lifted up to 5× by the flare gates, and slot 21 | [10](../docs/10-sky.md#what-the-sun-does-with-its-seven-values) |
-| M1 | a body is up from its first keyframe to its second in clock order; section 0 | a keyframe's opcode is the word ahead of slot 0; a body starts on its opcode and lasts to the first stop at or after it, never wrapping back to section 0; a file's sections play in turn, as one cycle | [10](../docs/10-sky.md#a-bodys-lifetime) |
-| M3 | a state's 16-byte conditions are taken as met | they are contacts: `0x100` makes a state need its contact point's node intact and `0x200` destroyed, a walker's limping states | [24](../docs/24-motion.md#section-1-is-the-animation-state-graph--read-and-measured) |
-| M3 | after each step the model's lowest point is set on the highest walkable face within the contact radius above it, as a mission places units | the ground point is the centre dropped onto the face plane; a state without bit `0x4` is only lifted, by (ground − centre) + r when the ground is within r below; a state with it — every state of a controller with contact points — falls under gravity 10 until a contact lands | [24](../docs/24-motion.md#holding-the-body-on-the-ground--read-and-measured) |
-| M3 | a step off the ground mesh is undone and the body stops | the map edge is a hard clamp to the world box inset by r (z up to +20) and a soft push within 80 of a side; there is no jumping (`CanJump` is never read) | [24](../docs/24-motion.md#the-map-edge--read) |
-| M3 | the face under the point, found fresh each step | the walk starts in the held face and crosses at most 24 faces toward the centre, stopping on one too steep; register 6 searches up (walkable, less than r2 above) and 10 down, and the up hit is taken if neither is | [24](../docs/24-motion.md#finding-the-ground--read) |
-| M3 | the largest span of the velocity box's switched-on axes | the largest difference between an axis's absolute max and absolute min, over all three velocity axes; D = 0 leaves the weight at 1 | [24](../docs/24-motion.md#playing-a-state--read-and-measured) |
-| M3 | invert (−1, +1): mouse right turns the hull right, mouse up tilts the sight up; free look yaw follows the hull | derived, and the same: mouse right turns right and mouse down lowers the sight (Shift free look's vertical comes out opposite) | [14](../docs/14-controls.md#from-a-row-to-a-command--read-and-measured) |
-| M3 | position from `CameraCenter`, direction from `TargetDirect`, up the look node's +z | the eye is `CameraCenter`'s position (plus the shake × 0.02), the look `TargetDirect`'s vector, and the up `CameraCenter`'s vector, −z on a hung turret | [30](../docs/30-turrets.md#aiming-and-the-camera--read-and-measured) |
-| M3 | the legs turn at once and the turret holds its heading; the angle follows the keys held, mirrored while backing up | the hull takes the whole change in strafe angle, after the turn clamp, and the turret is handed −(previous + s × change) (`Control.dll:0x10005ab8`) | [24](../docs/24-motion.md#from-input-to-motion--read-and-measured) |
-| M3 | ramp rows do nothing | a pressed ramp row stays active and moves the cruise toward ±1 by 0.05 × min(1, held ms / 1000) on every input update | [14](../docs/14-controls.md#a-row-that-stays-down--read) |
-| M3 | the player's own unit is not drawn in first person | the unit's own view draws every node's fifth slot, the cockpit; a node without one is not drawn | [07](../docs/07-objects.md#the-fifth-slot-is-what-the-units-own-view-draws) |
-| M3 | none: spare payload is the whole payload, r = 1 | part id 0's nodes, the root object's: the chassis on a robot | [24](../docs/24-motion.md#load--read-and-measured) |
-| M3 | only the turn about z is applied | triple 6 is the most the body leans on each axis, from the sources a state's `+0x08` picks; triple 5 is the share of the tilt taken back each step, toward world up (bits `0xC0`) or a vector (`0x30`) | [24](../docs/24-motion.md#the-hull-leans-and-rights-itself--read-and-measured) |
-| M3 | it steps toward the pitch channel's value at its own rate; flag 0x40 copies the previous channel | the mount is blended (1 − p) × its rest + p × the pitch, by its arm's unfold progress p | [29](../docs/29-weapons.md#a-gun-is-ready-once-its-arm-is-out--read-and-measured) |
-| M4 | start the gun's effect and `_sfx` at step 1 of each barrel stroke, driven 0 to 1 by the barrel channel | nothing starts them: a time-mode-4 effect follows its node's animation value, so the gun effects follow the barrel nodes through each stroke and the `_sfx` follow the arm nodes — arm sounds, not shot sounds | [11](../docs/11-effects.md#time-mode-4-is-a-nodes-animation-value--read-and-measured) |
-| M4 | slot 0 of the `.exp` on a unit; the surface's slot on the ground | a unit answers for its material: a strike on a unit plays the slot for the struck batch's material class, `mt` (slot 6) on Mission 01's dummies and hero | [11](../docs/11-effects.md#what-an-explosion-plays--read-and-measured) |
-| M4 | a bolt min(+36, +32 × 1000 × s) long; alpha 1 → +24 to the power +28; streams not drawn; flag bit 8 ignored | a bolt runs from its start point to where the effect is now, floor(length / +36) sprites, 1 to +20; a stream emits every lerp(+24, +28) s into a ring of +36; a fade is start + (end − start) × x^power (a sprite's +20, +24, +28); bit 8 draws with the depth test off while the header's tested point is in view | [11](../docs/11-effects.md#bolts-streams-and-fades--read-and-measured) |
-| M4 | `water_level − centre.z < r` | `centre.z − surface.z < r` (`Control.dll:0x1001aa99`), the opposite sign | [24](../docs/24-motion.md#finding-the-ground--read) |
-| M4 | the mesh header's bounding sphere | the stream-2 header sphere, times the object's largest scale; the code's comment calls it a guess | [26](../docs/26-damage.md#the-hit-test--read-and-measured) |
-| M4 | a gun is always ready | a gun is ready once its arm is fully out; a falling round also needs a firing solution | [29](../docs/29-weapons.md#a-gun-is-ready-once-its-arm-is-out--read-and-measured) |
-| M4 | selecting a gun unfolds its arm toward frame 48 at the arm channel's rate, deselecting folds it; guns selected at the start begin unfolded | `0x21` unfolds an arm to frame 48 and `0x22` folds it, 0.45 a step (0.5 s on the hero); at the start the cannon's and laser's arms are sent `0x21`, the rifle's and missile's `0x22` | [29](../docs/29-weapons.md#the-button-reaches-the-selected-guns) |
-| M5 | at noon of its day | at the file's closing time, in section 0: 01:30 on Mission 01, 56 s into its 900-s day | [10](../docs/10-sky.md#where-the-clock-starts) |
-| M5 | no shake | each tick hands the camera the change in velocity; a jolt of squared size 0.3 or more blends the eye's offset toward 0.5 v over 2.5 s, a smaller one rings down, and the eye moves by the offset × 0.02 | [30](../docs/30-turrets.md#aiming-and-the-camera--read-and-measured) |
+| M3 | a state's contacts are parsed, but their `0x100`/`0x200` conditions are taken as met (node life is not modelled) | `0x100` makes a state need its contact point's node intact and `0x200` destroyed, a walker's limping states | [24](../docs/24-motion.md#section-1-is-the-animation-state-graph--read-and-measured) |
+| M3 | the ground face is found fresh each step, by an up and a down pass over its cell | the walk starts in the held face and crosses at most 24 faces toward the centre, stopping on one too steep | [24](../docs/24-motion.md#finding-the-ground--read) |
+| M3 | D is the largest span of the velocity box's switched-on axes | the largest difference between an axis's absolute max and absolute min, over all three velocity axes; D = 0 leaves the weight at 1 (no shipped state's weight changes) | [24](../docs/24-motion.md#playing-a-state--read-and-measured) |
+| M3 | the invert constants (−1, +1) with an integrator that does not negate, and free look's yaw negated to undo the mirrored X | the game's mouse X invert is +1 and its integrator negates; on screen the two agree: mouse right turns right, mouse down lowers the sight, and Shift free look's vertical runs opposite | [14](../docs/14-controls.md#from-a-row-to-a-command--read-and-measured) |
+| M3 | no spare payload is computed: r = 1 | the chassis is part id 0's nodes, the root object's (the hero's r is about 1 anyway) | [24](../docs/24-motion.md#load--read-and-measured) |
+| M3 | only the turn about z is applied | triple 6 is the most the body leans on each axis, from the sources a state's `+0x08` picks; triple 5 is the share of the tilt taken back each step, toward world up (bits `0xC0`) or a vector (`0x30`); no hero state leans | [24](../docs/24-motion.md#the-hull-leans-and-rights-itself--read-and-measured) |
+| M4 | every effect instance updates on every tick | the manager updates an instance once 100 ms have passed since its last update | [11](../docs/11-effects.md#how-an-effect-runs--read) |
