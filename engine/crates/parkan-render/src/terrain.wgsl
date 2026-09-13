@@ -2,17 +2,31 @@
 
 struct Frame {
     view_proj: mat4x4<f32>,
-    // The sun, as the sky's keyframes give it.
+    // The sun object's two directional lights: the direction each travels, and its
+    // colour in the files' display space (docs/10-sky.md).
     light_direction: vec4<f32>,
     light_colour: vec4<f32>,
-    // The colour added to every material's emissive (sky slot 20).
+    second_direction: vec4<f32>,
+    second_colour: vec4<f32>,
+    // The colour added to every material's emissive (sky slot 20), display space.
     scene_colour: vec4<f32>,
+    // Linear.
     fog_colour: vec4<f32>,
     // x start, y end: linear range fog from the eye (docs/10-sky.md, "Fog").
     fog: vec4<f32>,
     eye: vec4<f32>,
 };
 
+// A display-space colour as the linear value an sRGB target needs (frame.rs `linear`).
+fn linear(c: vec3<f32>) -> vec3<f32> {
+    let low = c / 12.92;
+    let high = pow((max(c, vec3<f32>(0.0)) + 0.055) / 1.055, vec3<f32>(2.4));
+    return select(high, low, c <= vec3<f32>(0.04045));
+}
+
+// STAND-IN: docs/10-sky.md#not-resolved -- whether ForceSWFog is read outside Terrain.dll,
+// which asks Direct3D for linear range vertex fog, is not read; the fog is taken per
+// fragment, which looks the same.
 fn fogged(colour: vec3<f32>, world: vec3<f32>, toward: vec4<f32>) -> vec3<f32> {
     let d = distance(world, frame.eye.xyz);
     let span = max(frame.fog.y - frame.fog.x, 0.001);
@@ -22,6 +36,7 @@ fn fogged(colour: vec3<f32>, world: vec3<f32>, toward: vec4<f32>) -> vec3<f32> {
 }
 
 struct Layers {
+    // Each layer material's diffuse, decoded to linear.
     tint1: vec4<f32>,
     // w is 1 when the faces wear a second layer.
     tint2: vec4<f32>,
@@ -70,8 +85,11 @@ fn fs_main(v: VertexOut) -> @location(0) vec4<f32> {
         colour = mix(under, colour, v.blend);
     }
     let n = normalize(v.normal);
-    let diffuse = max(dot(n, -frame.light_direction.xyz), 0.0);
-    // A lit vertex colour is held to 1, as Direct3D's fixed-function lighting holds it.
-    let light = min(vec3<f32>(1.0), frame.scene_colour.rgb + frame.light_colour.rgb * diffuse);
-    return vec4<f32>(fogged(colour * light, v.world, vec4<f32>(0.0)), 1.0);
+    let a = max(dot(n, -frame.light_direction.xyz), 0.0);
+    let b = max(dot(n, -frame.second_direction.xyz), 0.0);
+    // A lit vertex colour is held to 1, as Direct3D's fixed-function lighting holds it,
+    // then decoded.
+    let lights = frame.light_colour.rgb * a + frame.second_colour.rgb * b;
+    let lit = min(vec3<f32>(1.0), frame.scene_colour.rgb + lights);
+    return vec4<f32>(fogged(colour * linear(lit), v.world, vec4<f32>(0.0)), 1.0);
 }

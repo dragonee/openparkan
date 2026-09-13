@@ -1,16 +1,34 @@
-//! What every lit pipeline reads once a frame: the camera, the light and the fog.
+//! What every lit pipeline reads once a frame: the camera, the lights and the fog.
+//!
+//! The lit colour is formed as fixed-function lighting forms it, from the files' own
+//! display-space colours, and held to 1; the shaders decode it once, and decode the
+//! fog, the dome and the textures, to the linear values an sRGB target blends.
 
 use bytemuck::{Pod, Zeroable};
 use glam::{Mat4, Vec3};
 
-/// The light and fog a frame is drawn with.
+/// A directional light.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Light {
+    /// The direction light travels.
+    pub direction: Vec3,
+    /// In the files' display space; it may pass 1, as a lifted sun does.
+    pub colour: [f32; 3],
+}
+
+impl Light {
+    pub const OFF: Light = Light { direction: Vec3::NEG_Z, colour: [0.0; 3] };
+}
+
+/// The lights and fog a frame is drawn with.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Lighting {
-    /// The direction light travels.
-    pub light_direction: Vec3,
-    pub light_colour: [f32; 3],
-    /// Added to every material's emissive (sky slot 20).
+    /// The sun object's two directional lights (`docs/10-sky.md`, "What the sun does
+    /// with its seven values").
+    pub lights: [Light; 2],
+    /// Added to every material's emissive (sky slot 20), in display space.
     pub scene_colour: [f32; 3],
+    /// Linear, as the target blends it.
     pub fog_colour: [f32; 3],
     /// Linear range fog from the eye: none at `fog_start`, whole at `fog_end`.
     pub fog_start: f32,
@@ -19,14 +37,15 @@ pub struct Lighting {
 }
 
 impl Default for Lighting {
-    /// A fixed sun and no fog, for a world with no sky.
-    ///
-    /// STAND-IN: docs/10-sky.md#not-resolved -- what the sun does with its values is
-    /// not read; this is used only where there is no atmosphere.
+    /// A fixed light and no fog, for a world drawn without an atmosphere. Every mission
+    /// directory has a `sky.ske` (`docs/10-sky.md`), so this lights a scene only when
+    /// the file fails to load.
     fn default() -> Self {
         Self {
-            light_direction: Vec3::new(-0.35, -0.45, -0.82),
-            light_colour: [0.85, 0.85, 0.8],
+            lights: [
+                Light { direction: Vec3::new(-0.35, -0.45, -0.82), colour: [0.85, 0.85, 0.8] },
+                Light::OFF,
+            ],
             scene_colour: [0.16, 0.16, 0.16],
             fog_colour: [0.05, 0.06, 0.08],
             fog_start: 0.0,
@@ -42,6 +61,8 @@ pub struct FrameUniform {
     pub view_proj: [f32; 16],
     pub light_direction: [f32; 4],
     pub light_colour: [f32; 4],
+    pub second_direction: [f32; 4],
+    pub second_colour: [f32; 4],
     pub scene_colour: [f32; 4],
     pub fog_colour: [f32; 4],
     /// Start, end.
@@ -51,12 +72,18 @@ pub struct FrameUniform {
 
 impl FrameUniform {
     pub fn new(view_proj: Mat4, l: &Lighting) -> Self {
-        let d = l.light_direction.normalize_or(Vec3::NEG_Z);
+        let direction = |light: &Light| {
+            let d = light.direction.normalize_or(Vec3::NEG_Z);
+            [d.x, d.y, d.z, 0.0]
+        };
         let rgb = |c: [f32; 3]| [c[0], c[1], c[2], 1.0];
+        let [a, b] = &l.lights;
         Self {
             view_proj: view_proj.to_cols_array(),
-            light_direction: [d.x, d.y, d.z, 0.0],
-            light_colour: rgb(l.light_colour),
+            light_direction: direction(a),
+            light_colour: rgb(a.colour),
+            second_direction: direction(b),
+            second_colour: rgb(b.colour),
             scene_colour: rgb(l.scene_colour),
             fog_colour: rgb(l.fog_colour),
             fog: [l.fog_start, l.fog_end, 0.0, 0.0],
@@ -66,7 +93,12 @@ impl FrameUniform {
 }
 
 /// A colour the files give in display space, as the linear value a shader writing to
-/// an sRGB target needs (the game blends in display space; our textures decode to linear).
+/// an sRGB target needs; the shaders' `linear` is the same curve.
+///
+/// STAND-IN: docs/10-sky.md#the-dome-the-fog-and-the-scene-colour--read-and-measured --
+/// how the files' colours meet textures decoded to linear is not read (the game blends
+/// in display space); the sky's, the fog's, the texture tints and the lit colour are
+/// decoded from sRGB, so blends come out as the game's display-space ones.
 pub fn linear(c: [f32; 3]) -> [f32; 3] {
     c.map(|v| if v <= 0.04045 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) })
 }
@@ -79,5 +111,38 @@ pub fn fog_override(mode: u8) -> [f32; 4] {
         3 => [1.0, 1.0, 1.0, 1.0],
         5 => [0.212, 0.212, 0.212, 1.0],
         _ => [0.0; 4],
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_frame_carries_both_lights_in_the_layout_the_shaders_read() {
+        let mut l = Lighting::default();
+        l.lights[1] = Light { direction: Vec3::new(0.0, 0.0, -2.0), colour: [0.3, 0.3, 0.4] };
+        let u = FrameUniform::new(Mat4::IDENTITY, &l);
+        // A mat4 and eight vec4s, no padding: what `Frame` in model.wgsl and terrain.wgsl is.
+        assert_eq!(std::mem::size_of::<FrameUniform>(), 64 + 8 * 16);
+        assert_eq!(u.second_direction, [0.0, 0.0, -1.0, 0.0], "normalised");
+        assert_eq!(u.second_colour, [0.3, 0.3, 0.4, 1.0]);
+        assert_eq!(u.light_colour, [0.85, 0.85, 0.8, 1.0], "display space, as given");
+    }
+
+    #[test]
+    fn a_lifted_light_keeps_its_colour_past_1() {
+        let l = Lighting {
+            lights: [Light { direction: Vec3::NEG_Z, colour: [2.5, 1.0, 0.0] }, Light::OFF],
+            ..Lighting::default()
+        };
+        assert_eq!(FrameUniform::new(Mat4::IDENTITY, &l).light_colour, [2.5, 1.0, 0.0, 1.0]);
+    }
+
+    #[test]
+    fn linear_is_the_srgb_decode() {
+        let [black, mid, white] = linear([0.0, 0.5, 1.0]);
+        assert_eq!(black, 0.0);
+        assert!((mid - 0.214).abs() < 1e-3 && (white - 1.0).abs() < 1e-6);
     }
 }

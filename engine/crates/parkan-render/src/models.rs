@@ -169,8 +169,10 @@ impl ModelRenderer {
                     },
                     depth_stencil: Some(wgpu::DepthStencilState {
                         format: DEPTH_FORMAT,
-                        // STAND-IN: docs/07-objects.md -- whether a blended phase
-                        // writes depth is not read; blended draws come last and do not.
+                        // STAND-IN: docs/07-objects.md#how-a-material-draws-is-in-the-archive-directory
+                        // -- whether a blended material writes depth, and the alpha test's
+                        // reference, are not read; blended draws come last and write no
+                        // depth, and nothing is discarded.
                         depth_write_enabled: Some(blend.is_none()),
                         depth_compare: Some(wgpu::CompareFunction::Greater),
                         stencil: Default::default(),
@@ -219,6 +221,7 @@ impl ModelRenderer {
                     .groups
                     .iter()
                     .map(|g| {
+                        // Display space: the shader forms the lit colour from them, then decodes it.
                         let [dr, dg, db] = g.look.diffuse;
                         let [er, eg, eb] = g.look.emissive;
                         let uniform = LookUniform {

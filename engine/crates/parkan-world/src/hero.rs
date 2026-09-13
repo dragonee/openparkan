@@ -320,7 +320,7 @@ impl Hero {
     }
 
     /// The turret's pose in the unit's frame, with the chassis playing its frames.
-    fn mount(&self) -> Pose {
+    pub fn mount(&self) -> Pose {
         let f = self.walker.frames(self.time_ms);
         let chassis = &self.chassis.mesh;
         let (a, b, w) = (f64::from(f.a), f64::from(f.b), f64::from(f.weight));
@@ -329,7 +329,7 @@ impl Hero {
     }
 
     /// A turret node's pose in the unit's frame.
-    fn turret_node(&self, mount: &Pose, node: usize) -> Pose {
+    pub fn turret_node(&self, mount: &Pose, node: usize) -> Pose {
         let mesh = &self.turret.mesh;
         let local = |n: usize| match self.rig.frame_of(n) {
             Some(frame) => mesh.pose_at(n, f64::from(frame)),

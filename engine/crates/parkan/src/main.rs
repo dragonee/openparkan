@@ -183,8 +183,9 @@ fn screenshot(loaded: &scene::Loaded, game: &Path, args: &Args, out: &Path) -> R
     let mut world = scene::world(game, loaded)?;
     let mut play =
         if args.fly || args.top_down || args.look.is_some() { None } else { scene::play(game, loaded)? };
+    let mut view = None;
     if let Some(p) = play.as_mut() {
-        scene::hide(&mut world.objects, p.hero.object);
+        view = Some(scene::own_view(&mut world.objects, &mut world.store, p)?);
         p.draw_rounds(&mut world.store, &mut world.objects)?;
         rehearse(p, args);
     }
@@ -217,12 +218,17 @@ fn screenshot(loaded: &scene::Loaded, game: &Path, args: &Args, out: &Path) -> R
     } else {
         start_camera(loaded).view_proj(aspect)
     };
-    let (eye, forward, seconds) = match &play {
-        Some(p) => {
+    // Where the fog is measured from and the flare gate looks along: the camera drawn.
+    let (eye, forward, seconds) = match (&play, args.look) {
+        (Some(p), _) => {
             let e = p.hero.eye();
             (e.position, e.forward, p.hero.time_ms / 1000.0)
         }
-        None => {
+        (None, Some([x, y, z, tx, ty, tz])) => {
+            let (eye, target) = (Vec3::new(x, y, z), Vec3::new(tx, ty, tz));
+            (eye, (target - eye).normalize_or(Vec3::Y), 0.0)
+        }
+        (None, None) => {
             let c = start_camera(loaded);
             (c.position, c.forward(), 0.0)
         }
@@ -233,6 +239,9 @@ fn screenshot(loaded: &scene::Loaded, game: &Path, args: &Args, out: &Path) -> R
     }
     if let Some(p) = play.as_mut() {
         scene::sync(&mut renderer, &gpu.device, &gpu.queue, p, &world.objects, view_proj, eye);
+        if let Some(v) = &view {
+            scene::place_own_view(&mut renderer, &gpu.queue, v, p);
+        }
         renderer.set_hud(&gpu.device, &gpu.queue, &scene::hud(p, aspect));
     }
     let pixels = parkan_render::capture(&gpu, &mut renderer, (width, height), view_proj)?;
@@ -258,6 +267,8 @@ struct App {
     world: scene::World,
     /// The hero's cockpit, or `None` to fly.
     play: Option<scene::Play>,
+    /// What the hero's own view draws of it.
+    view: Option<scene::OwnView>,
     camera: FlyCamera,
     running: Option<Running>,
     held: HashSet<KeyCode>,
@@ -394,6 +405,9 @@ impl App {
                     view_proj,
                     eye.position,
                 );
+                if let Some(v) = &self.view {
+                    scene::place_own_view(&mut r.renderer, &r.gpu.queue, v, play);
+                }
                 view_proj
             }
             None => self.camera.view_proj(aspect),
@@ -512,8 +526,9 @@ fn main() -> Result<()> {
     }
     let mut world = scene::world(&game, &loaded)?;
     let mut play = if args.fly { None } else { scene::play(&game, &loaded)? };
+    let mut view = None;
     if let Some(p) = play.as_mut() {
-        scene::hide(&mut world.objects, p.hero.object);
+        view = Some(scene::own_view(&mut world.objects, &mut world.store, p)?);
         p.draw_rounds(&mut world.store, &mut world.objects)?;
         // `--hold` presses keys in the window too, for trying things without hands.
         for key in &args.hold {
@@ -528,6 +543,7 @@ fn main() -> Result<()> {
         loaded,
         world,
         play,
+        view,
         camera,
         running: None,
         held: HashSet::new(),

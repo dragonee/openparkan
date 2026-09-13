@@ -6,7 +6,7 @@ use parkan_world::terrain::{Layer, Terrain};
 use wgpu::util::DeviceExt;
 
 use crate::DEPTH_FORMAT;
-use crate::frame::FrameUniform;
+use crate::frame::{FrameUniform, linear};
 use crate::textures::GpuTextures;
 
 #[repr(C)]
@@ -121,6 +121,10 @@ impl TerrainRenderer {
                 bias: Default::default(),
             }),
             multisample: Default::default(),
+            // STAND-IN: docs/03-terrain.md#terrain-layers-name-materials-not-textures --
+            // whether water is drawn see-through is not read (`WATER` says opaque, and
+            // every lake has a `WATER_BOT` bed beneath); no layer's blend mode is read,
+            // and the ground, water included, draws opaque.
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
                 entry_point: Some("fs_main"),
@@ -170,8 +174,9 @@ impl TerrainRenderer {
             .groups
             .iter()
             .map(|g| {
+                // A texture tinted by a display-space colour: both decoded, then multiplied.
                 let tint = |l: Option<&Layer>, on: bool| {
-                    let [r, gr, b] = l.map_or([1.0; 3], |l| l.diffuse);
+                    let [r, gr, b] = linear(l.map_or([1.0; 3], |l| l.diffuse));
                     [r, gr, b, f32::from(u8::from(on))]
                 };
                 let uniform = LayersUniform {

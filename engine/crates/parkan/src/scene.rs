@@ -60,34 +60,42 @@ pub fn world(game: &Path, loaded: &Loaded) -> Result<World> {
 
 pub use parkan_world::play::Play;
 
-/// STAND-IN: docs/10-sky.md#not-resolved -- the time of day a mission starts at is not
-/// read; its atmosphere clock starts at noon.
-pub const START_HOUR: f64 = 12.0;
-
-/// The light, fog and dome colours at `seconds` into the mission, seen from `eye`
+/// The lights, fog and dome colours at `seconds` into the mission, seen from `eye`
 /// looking along `forward`; `None` without an atmosphere.
+///
+/// The clock starts at the file's closing time and plays the sections in turn; the sun
+/// object's two lights shine while a body is up (docs/10-sky.md).
 pub fn lighting(
     world: &World,
     seconds: f64,
     eye: Vec3,
     forward: Vec3,
 ) -> Option<(parkan_render::frame::Lighting, Vec<[f32; 3]>)> {
-    use parkan_render::frame::linear;
+    use parkan_render::frame::{Light, linear};
     use parkan_sim::sky as atm;
     let a = world.atmosphere.as_ref()?;
-    let clock = a.day_seconds() * START_HOUR / 24.0 + seconds;
-    let sky = atm::at(a, 0, clock)?;
-    // The heading from +y towards +x (docs/10-sky.md, "Fog").
+    let now = atm::position(a, seconds);
+    let sky = atm::at(a, now)?;
+    // STAND-IN: docs/10-sky.md#not-resolved -- which camera axis the fog's heading angle
+    // measures is not read; the view direction's heading, 0 along +y turning towards +x.
     let heading = forward.x.atan2(forward.y);
     let fog = sky.fog_colour(heading);
-    // STAND-IN: docs/10-sky.md#the-dome-the-fog-and-the-scene-colour--read-and-measured --
-    // how CSun lights the scene is not traced: the body that is up shines along its
-    // direction in the sky keyframes' slot 19 × light, held to 1 as a D3D light is.
-    let body = if atm::body_up(a, 0, "sun", clock) { atm::SUN_DIRECTION } else { atm::MOON_DIRECTION };
+    // No shipped section has the sun and the moon up at once; where two bodies are up,
+    // the first started lights the scene.
+    let lights = match atm::bodies_up(a, seconds).first() {
+        Some(&body) => {
+            let [main, second] = atm::sun_lights(&sky, body, forward);
+            // STAND-IN: docs/10-sky.md#not-resolved -- where the sun object's two lights
+            // point is not read (CSun sets only their colours); both shine from the
+            // body's fixed place.
+            let direction = -body.direction();
+            [Light { direction, colour: main }, Light { direction, colour: second }]
+        }
+        None => [Light::OFF; 2],
+    };
     let lighting = parkan_render::frame::Lighting {
-        light_direction: -body,
-        light_colour: linear(sky.sun_light.map(|c| c.clamp(0.0, 1.0))),
-        scene_colour: linear(sky.scene_colour),
+        lights,
+        scene_colour: sky.scene_colour,
         fog_colour: linear(fog),
         fog_start: sky.fog_start,
         fog_end: sky.fog_end,
@@ -180,14 +188,78 @@ pub fn sync(
     }
 }
 
-/// Take the hero's own placement out of what is drawn: the eye is inside it.
+/// Which of the hero's meshes a node of its own view belongs to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Mount {
+    Chassis,
+    Turret,
+}
+
+/// The player's unit as its own view draws it: an instance for each node with a fifth
+/// slot, following that node's pose.
+pub struct OwnView {
+    nodes: Vec<(usize, Mount, usize)>,
+}
+
+/// Draw the hero from now on as its own view does (docs/07-objects.md, "The fifth slot is
+/// what the unit's own view draws"): every node's slot `variant × 5 + 4`, the cockpit and
+/// whatever of the hull and guns has one, and nothing of a node without. The hero's
+/// placement, its level 0, leaves `objects`. The chassis and the turret are the meshes
+/// the hero poses; Mission 01's hero has no other part.
 ///
-/// STAND-IN: docs/30-turrets.md#aiming-and-the-camera--read-and-measured -- whether the
-/// game draws the player's own unit in first person is not read; it is not drawn.
-pub fn hide(objects: &mut Objects, object: usize) {
-    if let Some(i) = objects.placed.iter().position(|&p| p == object) {
+/// STAND-IN: docs/07-objects.md#the-fifth-slot-is-what-the-units-own-view-draws -- what the
+/// draw layers 10 and 9 a fifth slot is filed under do is not read; it draws with the
+/// scene, depth-tested, lit and fogged like any model.
+pub fn own_view(objects: &mut Objects, store: &mut TextureStore, play: &Play) -> Result<OwnView> {
+    if let Some(i) = objects.placed.iter().position(|&p| p == play.hero.object) {
         objects.placed.remove(i);
         objects.instances.remove(i);
+    }
+    let mut nodes = Vec::new();
+    for (mount, loaded) in [(Mount::Chassis, &play.hero.chassis), (Mount::Turret, &play.hero.turret)] {
+        for node in 0..loaded.mesh.nodes.len() {
+            let Some(model) = models::build_view_node(loaded, node, 0, |name| store.look(name))? else {
+                continue;
+            };
+            objects.models.push(model);
+            objects.instances.push(models::Instance {
+                model: objects.models.len() - 1,
+                position: [0.0; 3],
+                rotation: 0.0,
+                scale: 1.0,
+                hidden: true,
+            });
+            objects.placed.push(usize::MAX);
+            nodes.push((objects.instances.len() - 1, mount, node));
+        }
+    }
+    Ok(OwnView { nodes })
+}
+
+/// Put each node of the hero's own view where the hero's pose has it this frame: the
+/// chassis playing its frames, the turret its channels, as the eye is placed.
+pub fn place_own_view(
+    renderer: &mut parkan_render::Renderer,
+    queue: &wgpu::Queue,
+    view: &OwnView,
+    play: &Play,
+) {
+    use glam::{Mat4, Quat};
+    let hero = &play.hero;
+    let t = hero.time_ms;
+    let (position, _) = hero.walker.drawn(t);
+    let unit = Mat4::from_translation(position)
+        * Mat4::from_quat(Quat::from_rotation_z(hero.walker.drawn_heading(t)));
+    let mount = hero.mount();
+    let frames = hero.walker.frames(t);
+    let (a, b, weight) = (f64::from(frames.a), f64::from(frames.b), f64::from(frames.weight));
+    let chassis = &hero.chassis.mesh;
+    for &(instance, part, node) in &view.nodes {
+        let pose = match part {
+            Mount::Chassis => chassis.world_pose_by(node, |n| chassis.blended_pose(n, a, b, weight)),
+            Mount::Turret => hero.turret_node(&mount, node),
+        };
+        renderer.set_instance(queue, instance, unit * models::pose_matrix(&pose), true);
     }
 }
 

@@ -27,8 +27,10 @@ pub struct Look {
     pub material: String,
     /// Index into `TextureStore::textures`, or `None` when nothing resolves.
     pub texture: Option<usize>,
-    /// The diffuse colour the scene light multiplies.
+    /// The diffuse colour the scene light multiplies, 0..1 in display space as the file
+    /// gives it; the renderer decodes it with the rest of the lit colour.
     pub diffuse: [f32; 3],
+    /// Likewise the emissive colour, to which the scene colour is added.
     pub emissive: [f32; 3],
     /// The engine's blend mode id: 0 opaque, 2 additive, 4 alpha, 3 and 5 modulate.
     pub blend_mode: u8,

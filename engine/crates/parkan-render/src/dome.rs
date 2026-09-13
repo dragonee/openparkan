@@ -14,6 +14,20 @@ struct GpuVertex {
     colour: [f32; 3],
 }
 
+/// How the dome meets the depth buffer. The sky's draws at the camera, as the dome is
+/// drawn, are depth-tested and write no depth; only the one on a fixed matrix
+/// (`0x1007a37a`) turns the test off (render states 7 and 14, `Terrain.dll:0x100302fb`).
+/// Drawn first into a cleared buffer, the test passes everywhere.
+pub fn depth_state() -> wgpu::DepthStencilState {
+    wgpu::DepthStencilState {
+        format: DEPTH_FORMAT,
+        depth_write_enabled: Some(false),
+        depth_compare: Some(wgpu::CompareFunction::Greater),
+        stencil: Default::default(),
+        bias: Default::default(),
+    }
+}
+
 pub struct DomeRenderer {
     pipeline: wgpu::RenderPipeline,
     camera: wgpu::Buffer,
@@ -76,15 +90,9 @@ impl DomeRenderer {
             },
             primitive: wgpu::PrimitiveState { cull_mode: None, ..Default::default() },
             // STAND-IN: docs/10-sky.md#the-dome -- how the engine keeps a 34 km dome past
-            // its far plane and out of the fog is not read: it is drawn first, behind
-            // everything, without depth.
-            depth_stencil: Some(wgpu::DepthStencilState {
-                format: DEPTH_FORMAT,
-                depth_write_enabled: Some(false),
-                depth_compare: Some(wgpu::CompareFunction::Always),
-                stencil: Default::default(),
-                bias: Default::default(),
-            }),
+            // its far plane and out of a fog that ends by 700 is not read: it is drawn
+            // first, under a projection with no far plane, unfogged but for its rim.
+            depth_stencil: Some(depth_state()),
             multisample: Default::default(),
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
@@ -124,10 +132,32 @@ impl DomeRenderer {
     }
 
     pub fn draw(&self, pass: &mut wgpu::RenderPass<'_>) {
+        // STAND-IN: docs/10-sky.md#the-dome-the-fog-and-the-scene-colour--read-and-measured
+        // -- how the sky's textures draw (the nebula, the stars, the clouds, the sun and
+        // moon sprites, the lens flare) is not read; none is drawn, only the dome's
+        // vertex colours.
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, &self.group, &[]);
         pass.set_vertex_buffer(0, self.vertices.slice(..));
         pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
         pass.draw_indexed(0..self.count, 0, 0..1);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_dome_is_depth_tested_without_writing_depth_and_passes_against_a_cleared_buffer() {
+        let state = depth_state();
+        assert_eq!(state.depth_write_enabled, Some(false));
+        assert_eq!(state.depth_compare, Some(wgpu::CompareFunction::Greater), "the scene's own test");
+        // Reverse depth clears to 0; the dome's rim, 24 km out at eye height, still
+        // lands in front of that under a projection with no far plane.
+        let proj = Mat4::perspective_infinite_reverse_rh(1.0, 16.0 / 9.0, 0.1);
+        let rim = proj * Mat4::look_to_rh(Vec3::ZERO, Vec3::Y, Vec3::Z);
+        let depth = rim.project_point3(Vec3::new(0.0, 24_142.1, 0.0)).z;
+        assert!(depth > 0.0 && depth < 1.0, "{depth}");
     }
 }
