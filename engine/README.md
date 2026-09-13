@@ -8,7 +8,7 @@ Milestones **M0**, **M1** and **M2** are in:
 
 - the workspace;
 - the NRes, mission, `Texm`, `Material.lib`, wear, `Land.msh`, object mesh,
-  `objects.rlb` and `.dat` readers;
+  `objects.rlb`, `.dat`, controller (`.ctl`) and input table (`.tbl`) readers;
 - the golden cross-check;
 - a window over Mission 01.
 
@@ -67,7 +67,8 @@ cargo build --release -p parkan-world && uv run openparkan golden
 readers and `parkan-dump`, and compares the two within 1e-5. At M0 that is
 every archive in the install, Mission 01's `data.tma`, `Material.lib`, Tut_1's
 `Land.msh`, the textures its ground names, Mission 01's assembly (every
-object's parts and their poses) and the 19 meshes they use: 144 dumps.
+object's parts and their poses) and the 19 meshes they use. From M3 it adds
+every controller, archive by archive, and the three input tables: 157 dumps.
 
 ## Stand-ins
 

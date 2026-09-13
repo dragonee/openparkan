@@ -1,0 +1,451 @@
+//! A `.ctl` controller: parameters, animation states, channels, components and
+//! action groups. See `docs/13-control.md`, `docs/24-motion.md` and
+//! `openparkan/control.py`.
+
+use crate::cursor::{FormatError, latin1, u32_at};
+use crate::objects::ResourceRef;
+
+/// The NRes tag every `.ctl` member carries.
+pub const CTL_TAG: &str = "CTLD";
+pub const HEADER_SIZE: usize = 128;
+pub const BLOCK_SIZE: usize = 84;
+pub const FRAME_SIZE: usize = HEADER_SIZE + BLOCK_SIZE;
+pub const SECTION1_RECORD: usize = 156;
+pub const SECTION1_PER_B: usize = 16;
+pub const SECTION2_RECORD: usize = 36;
+pub const COMPONENT_FIXED: usize = 0xB0;
+pub const REFERENCE_STRIDE: usize = 100;
+pub const REFERENCE_NAME_AT: usize = 36;
+pub const BLOCK_ENTRIES: usize = 21;
+pub const TRIPLE_AT: [usize; 6] = [20, 32, 44, 56, 68, 80];
+/// Triples by index: acceleration (live copy doubled), top speed, turn rate.
+pub const TRIPLE_ACCELERATION: usize = 0;
+pub const TRIPLE_TOP_SPEED: usize = 2;
+pub const TRIPLE_TURN: usize = 3;
+pub const UNSET: u8 = 0xFF;
+/// A transition cost at or above this is no edge.
+pub const NO_EDGE: f32 = 1_000_000.0;
+
+pub const STATE_ANCHOR: u32 = 0x1;
+pub const STATE_BY_VELOCITY: u32 = 0x10000;
+pub const STATE_FIXED: u32 = 0x100000;
+pub const STATE_JITTER: u32 = 0x1000000;
+
+pub const CHANNEL_WRAP: i32 = 0x1;
+pub const CHANNEL_INVERT: i32 = 0x2;
+
+pub const TURRET_TYPE: i32 = 1;
+pub const GUN_TYPE: i32 = 2;
+pub const CAMERA_TYPE: i32 = 4;
+pub const ENGINE_TYPE: i32 = 5;
+pub const MOUNT_UPRIGHT: u32 = 0x0400_0000;
+
+fn f32_at(b: &[u8], at: usize) -> f32 {
+    f32::from_le_bytes(b[at..at + 4].try_into().expect("4 bytes"))
+}
+
+fn i32_at(b: &[u8], at: usize) -> i32 {
+    u32_at(b, at).expect("inside the controller") as i32
+}
+
+fn triple(b: &[u8], at: usize) -> [f32; 3] {
+    [f32_at(b, at), f32_at(b, at + 4), f32_at(b, at + 8)]
+}
+
+/// A 32-byte NUL-padded ASCII name, or `None` if the bytes are not one.
+fn name(b: &[u8], at: usize) -> Option<String> {
+    let field = b.get(at..at + 32)?;
+    let end = field.iter().position(|&c| c == 0)?;
+    if end == 0 || !field[..end].iter().all(|c| (32..127).contains(c)) {
+        return None;
+    }
+    Some(latin1(&field[..end]))
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct State {
+    pub flags: u32,
+    pub velocity: ([f32; 3], [f32; 3]),
+    pub spin: ([f32; 3], [f32; 3]),
+    pub engine: f32,
+    pub actions: i32,
+    pub request: i32,
+    pub mode: u32,
+    pub pair_a: [f32; 2],
+    pub pair_b: [f32; 2],
+    pub blend: f32,
+    /// A fixed step length in ms; 0 lets speed and stride set it.
+    pub length: f32,
+}
+
+impl State {
+    pub fn anchor(&self) -> bool {
+        self.mode & STATE_ANCHOR != 0
+    }
+
+    pub fn by_velocity(&self) -> bool {
+        self.mode & STATE_BY_VELOCITY != 0
+    }
+
+    /// Whether `velocity` and `spin` lie inside the boxes the flags switch on.
+    pub fn applies(&self, velocity: [f32; 3], spin: [f32; 3]) -> bool {
+        (0..3).all(|a| {
+            let inside = |bit: u32, value: f32, (lo, hi): ([f32; 3], [f32; 3])| {
+                self.flags & (1 << bit) == 0 || (lo[a] <= value && value <= hi[a])
+            };
+            inside(a as u32, velocity[a], self.velocity) && inside(a as u32 + 4, spin[a], self.spin)
+        })
+    }
+}
+
+/// A section-2 record: an animated, rate-limited value from 0 to 1.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Channel {
+    pub node: i32,
+    pub first: f32,
+    pub last: f32,
+    pub initial: f32,
+    pub origin: i32,
+    pub point: i32,
+    /// Value per second.
+    pub rate: f32,
+    /// Radians from 0 to 1.
+    pub span: f32,
+    pub flags: i32,
+}
+
+impl Channel {
+    /// The frame the channel's node plays at `value`.
+    pub fn frame(&self, value: f32) -> f32 {
+        let mut v =
+            if self.flags & CHANNEL_WRAP != 0 { value.rem_euclid(1.0) } else { value.clamp(0.0, 1.0) };
+        if self.flags & CHANNEL_INVERT != 0 {
+            v = 1.0 - v;
+        }
+        self.first + v * (self.last - self.first)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Component {
+    pub type_id: i32,
+    pub resource: ResourceRef,
+    pub index: Option<i32>,
+    pub entries: Vec<i32>,
+    pub label: String,
+    pub values: [f32; 16],
+    pub power: f32,
+    pub node: i32,
+    pub mass: f32,
+    pub flags: u32,
+    pub group: i32,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Reference {
+    pub resource: ResourceRef,
+    pub values: [i32; 9],
+    pub group: usize,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Controller {
+    pub counts: [i32; 5],
+    pub triples: [[f32; 3]; 6],
+    pub scale: i32,
+    pub pair: [f32; 2],
+    pub mode: i32,
+    pub bounds: [f32; 2],
+    pub cone: f32,
+    pub flags: i32,
+    pub payload: f32,
+    pub bare: bool,
+    pub states: Vec<State>,
+    /// `states.len()²` transition costs, the row the destination.
+    pub costs: Vec<f32>,
+    pub channels: Vec<Channel>,
+    pub components: Vec<Component>,
+    pub groups: [i32; BLOCK_ENTRIES],
+    pub references: Vec<Reference>,
+}
+
+impl Controller {
+    /// What moving from state `from` to state `to` costs; the row is the destination.
+    pub fn cost(&self, to: usize, from: usize) -> f32 {
+        self.costs[to * self.states.len() + from]
+    }
+
+    /// The cheapest run of states from `from` to `to`, without `from` and with `to`,
+    /// and what it costs.
+    ///
+    /// Dijkstra rooted at the target, the way the planner runs it (`0x100019d0`):
+    /// each state starts at its direct cost to `to` and relaxes through the states
+    /// settled before it, until `from` is settled. A cost of `NO_EDGE` or more is no
+    /// edge. With `from == to` that is the cheapest cycle back, or the diagonal.
+    pub fn path(&self, from: usize, to: usize) -> Option<(Vec<usize>, f32)> {
+        let n = self.states.len();
+        if from >= n || to >= n {
+            return None;
+        }
+        let edge = |to: usize, from: usize| Some(self.cost(to, from)).filter(|&c| c < NO_EDGE);
+        let mut dist: Vec<f32> = (0..n).map(|k| edge(to, k).unwrap_or(f32::INFINITY)).collect();
+        let mut next = vec![to; n];
+        let mut settled = vec![false; n];
+        loop {
+            let open = (0..n).filter(|&k| !settled[k] && dist[k].is_finite());
+            let k = open.min_by(|&a, &b| dist[a].total_cmp(&dist[b]))?;
+            settled[k] = true;
+            if k == from {
+                break;
+            }
+            if k == to {
+                continue;
+            }
+            for j in (0..n).filter(|&j| !settled[j]) {
+                if let Some(step) = edge(k, j)
+                    && dist[k] + step < dist[j]
+                {
+                    dist[j] = dist[k] + step;
+                    next[j] = k;
+                }
+            }
+        }
+        let mut out = Vec::new();
+        let mut state = from;
+        loop {
+            state = next[state];
+            out.push(state);
+            if state == to || out.len() > n {
+                break;
+            }
+        }
+        Some((out, dist[from]))
+    }
+}
+
+fn section4_start(counts: &[i32; 5]) -> usize {
+    let (a, b, c) = (counts[0] as usize, counts[1] as usize, counts[2] as usize);
+    HEADER_SIZE + a * (SECTION1_RECORD + SECTION1_PER_B * b) + 4 * a * a + c * SECTION2_RECORD
+}
+
+/// One section-4 record at `pos` and the offset just past it, or `None` if it does
+/// not read as one.
+fn component(b: &[u8], pos: usize) -> Option<(Component, usize)> {
+    if pos + COMPONENT_FIXED > b.len() {
+        return None;
+    }
+    let type_id = i32_at(b, pos);
+    let count = i32_at(b, pos + 0xAC);
+    if !(1..31).contains(&type_id) || !(0..=4096).contains(&count) {
+        return None;
+    }
+    let mut end = pos + COMPONENT_FIXED;
+    if end + 4 * count as usize + 4 > b.len() {
+        return None;
+    }
+    let entries = (0..count as usize).map(|i| i32_at(b, end + 4 * i)).collect();
+    end += 4 * count as usize;
+    let length = i32_at(b, end);
+    end += 4;
+    let mut label = String::new();
+    if length != 0 {
+        if !(0 < length && length < 4096) || end + length as usize + 1 > b.len() {
+            return None;
+        }
+        let raw = &b[end..end + length as usize + 1];
+        let stop = raw.iter().position(|&c| c == 0).unwrap_or(raw.len());
+        label = latin1(&raw[..stop]);
+        end += length as usize + 1;
+    }
+    let index = i32_at(b, pos + 0x18);
+    let part = Component {
+        type_id,
+        resource: ResourceRef {
+            library: name(b, pos + 0x6C).unwrap_or_default(),
+            member: name(b, pos + 0x6C + 32).unwrap_or_default(),
+        },
+        index: (index != -1).then_some(index),
+        entries,
+        label,
+        values: std::array::from_fn(|k| f32_at(b, pos + 0x2C + 4 * k)),
+        power: f32_at(b, pos + 0x20),
+        node: i32_at(b, pos + 0x04),
+        mass: f32_at(b, pos + 0x1C),
+        flags: u32_at(b, pos + 0x08).expect("inside"),
+        group: i32_at(b, pos + 0x0C),
+    };
+    Some((part, end))
+}
+
+/// Parse a `.ctl` member.
+pub fn parse(b: &[u8], source: &str) -> Result<Controller, FormatError> {
+    let bad = |m: String| FormatError::invalid(source, m);
+    if b.len() < FRAME_SIZE {
+        return Err(bad(format!("{} bytes, short of the {FRAME_SIZE}-byte frame", b.len())));
+    }
+    let counts: [i32; 5] = std::array::from_fn(|k| i32_at(b, 4 * k));
+    if counts.iter().any(|&n| n < 0) {
+        return Err(bad(format!("negative section count in {counts:?}")));
+    }
+    if counts.iter().all(|&n| n == 0) && b.len() != FRAME_SIZE {
+        return Err(bad("no sections but trailing bytes".into()));
+    }
+    let (a, per_b, c) = (counts[0] as usize, counts[1] as usize, counts[2] as usize);
+    let stride = SECTION1_RECORD + SECTION1_PER_B * per_b;
+    if section4_start(&counts) > b.len() {
+        return Err(bad("sections run past the end".into()));
+    }
+    let states = (0..a)
+        .map(|i| {
+            let at = HEADER_SIZE + i * stride;
+            State {
+                flags: u32_at(b, at).expect("inside"),
+                mode: u32_at(b, at + 0x04).expect("inside"),
+                pair_a: [f32_at(b, at + 0x0C), f32_at(b, at + 0x10)],
+                pair_b: [f32_at(b, at + 0x14), f32_at(b, at + 0x18)],
+                blend: f32_at(b, at + 0x1C),
+                length: f32_at(b, at + 0x20),
+                velocity: (triple(b, at + 0x24), triple(b, at + 0x30)),
+                spin: (triple(b, at + 0x3C), triple(b, at + 0x48)),
+                engine: f32_at(b, at + 0x54),
+                actions: i32_at(b, at + 0x90),
+                request: i32_at(b, at + 0x98),
+            }
+        })
+        .collect();
+    let costs_at = HEADER_SIZE + a * stride;
+    let costs = (0..a * a).map(|k| f32_at(b, costs_at + 4 * k)).collect();
+    let section2 = section4_start(&counts) - c * SECTION2_RECORD;
+    let channels = (0..c)
+        .map(|i| {
+            let at = section2 + i * SECTION2_RECORD;
+            Channel {
+                node: i32_at(b, at),
+                first: f32_at(b, at + 4),
+                last: f32_at(b, at + 8),
+                initial: f32_at(b, at + 12),
+                origin: i32_at(b, at + 16),
+                point: i32_at(b, at + 20),
+                rate: f32_at(b, at + 24),
+                span: f32_at(b, at + 28),
+                flags: i32_at(b, at + 32),
+            }
+        })
+        .collect();
+    let mut pos = section4_start(&counts);
+    let mut components = Vec::new();
+    for n in 0..counts[3] {
+        let (part, end) =
+            component(b, pos).ok_or_else(|| bad(format!("component {n} does not read at {pos}")))?;
+        pos = end;
+        components.push(part);
+    }
+    if pos + BLOCK_SIZE > b.len() {
+        return Err(bad("no room for the block".into()));
+    }
+    let groups = std::array::from_fn(|k| i32_at(b, pos + 4 * k));
+    let mut at = pos + BLOCK_SIZE;
+    let mut references = Vec::new();
+    for group in 0..counts[4] as usize {
+        if at + 4 > b.len() {
+            return Err(bad(format!("reference groups do not read at {at}")));
+        }
+        let n = i32_at(b, at);
+        at += 4;
+        if n < 0 || at + n as usize * REFERENCE_STRIDE > b.len() {
+            return Err(bad(format!("reference group {group} does not fit")));
+        }
+        for _ in 0..n {
+            references.push(Reference {
+                resource: ResourceRef {
+                    library: name(b, at + REFERENCE_NAME_AT).unwrap_or_default(),
+                    member: name(b, at + REFERENCE_NAME_AT + 32).unwrap_or_default(),
+                },
+                values: std::array::from_fn(|k| i32_at(b, at + 4 * k)),
+                group,
+            });
+            at += REFERENCE_STRIDE;
+        }
+    }
+    if at != b.len() {
+        return Err(bad(format!("consumed {at} of {} bytes", b.len())));
+    }
+    Ok(Controller {
+        counts,
+        triples: TRIPLE_AT.map(|t| triple(b, t)),
+        scale: i32_at(b, 92),
+        pair: [f32_at(b, 96), f32_at(b, 100)],
+        mode: i32_at(b, 104),
+        bounds: [f32_at(b, 108), f32_at(b, 120)],
+        cone: f32_at(b, 112),
+        flags: i32_at(b, 116),
+        payload: f32_at(b, 124),
+        bare: b[HEADER_SIZE..].iter().all(|&v| v == UNSET),
+        states,
+        costs,
+        channels,
+        components,
+        groups,
+        references,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_smallest_controller_is_the_frame_and_the_block() {
+        let mut b = vec![0u8; FRAME_SIZE];
+        b[HEADER_SIZE..].fill(UNSET);
+        let c = parse(&b, "t").unwrap();
+        assert!(c.bare && c.states.is_empty() && c.groups == [-1; BLOCK_ENTRIES]);
+        b.push(0);
+        assert!(parse(&b, "t").is_err());
+    }
+
+    #[test]
+    fn a_state_applies_inside_the_boxes_its_flags_switch_on() {
+        let s = State { flags: 0b10, velocity: ([0.0, 2.0, 0.0], [0.0, 10.0, 0.0]), ..Default::default() };
+        assert!(s.applies([100.0, 5.0, 0.0], [9.0; 3]));
+        assert!(!s.applies([0.0, 12.0, 0.0], [0.0; 3]));
+    }
+
+    /// Three states in a ring, 0 -> 1 -> 2 -> 0 at 1 each, and a short cut 0 -> 2 at 5.
+    fn ring(diagonal: f32) -> Controller {
+        let mut costs = vec![NO_EDGE; 9];
+        let mut edge = |from: usize, to: usize, c: f32| costs[to * 3 + from] = c;
+        edge(0, 1, 1.0);
+        edge(1, 2, 1.0);
+        edge(2, 0, 1.0);
+        edge(0, 2, 5.0);
+        edge(0, 0, diagonal);
+        Controller { states: vec![State::default(); 3], costs, ..Default::default() }
+    }
+
+    #[test]
+    fn the_planner_takes_the_cheapest_run_and_the_row_is_the_destination() {
+        let c = ring(NO_EDGE);
+        assert_eq!(c.path(0, 2), Some((vec![1, 2], 2.0)));
+        assert_eq!(c.path(0, 0), Some((vec![1, 2, 0], 3.0)));
+        assert_eq!(c.path(2, 1), Some((vec![0, 1], 2.0)));
+        assert_eq!(ring(0.5).path(0, 0), Some((vec![0], 0.5)));
+    }
+
+    #[test]
+    fn a_wrapping_inverted_channel_plays_its_frames_backwards() {
+        let ch = Channel {
+            node: 1,
+            first: 49.0,
+            last: 53.0,
+            initial: 0.5,
+            origin: -1,
+            point: 1,
+            rate: 100.0,
+            span: 1.0,
+            flags: 3,
+        };
+        assert_eq!(ch.frame(0.25), 52.0);
+        assert_eq!(ch.frame(1.25), 52.0);
+    }
+}

@@ -14,8 +14,8 @@ import subprocess
 from collections.abc import Iterator
 from pathlib import Path
 
-from . import assembly, dump, landmesh, materials, mission
-from .nres import is_nres
+from . import assembly, control, controls, dump, landmesh, materials, mission
+from .nres import NResArchive, is_nres
 
 #: How far two floats may differ, absolutely or relative to their size.
 TOLERANCE = 1e-5
@@ -65,6 +65,10 @@ def terrain_textures(game: Path) -> list[str]:
     return sorted(names)
 
 
+def _has_controllers(path: Path) -> bool:
+    return any(e.tag == control.CTL_TAG for e in NResArchive.open(path))
+
+
 def mission_meshes(game: Path) -> list[tuple[Path, str]]:
     """Every mesh a Mission 01 object is drawn from, as ``(archive, member)``."""
     m = mission.load(game / MISSION_01 / "data.tma")
@@ -82,7 +86,8 @@ def targets(game: Path) -> list[tuple[str, Path, list[str]]]:
 
     M0: every archive and Mission 01's ``data.tma``.  M1: ``Material.lib``,
     Tut_1's ``Land.msh`` and the textures its ground names.  M2: Mission 01's
-    assembly and every mesh its objects are drawn from.
+    assembly and every mesh its objects are drawn from.  M3: every controller
+    and the three input tables.
     """
     archives = sorted(p for p in game.rglob("*") if p.is_file() and is_nres(p))
     return ([("nres", p, []) for p in archives]
@@ -91,7 +96,9 @@ def targets(game: Path) -> list[tuple[str, Path, list[str]]]:
                ("landmesh", game / TUT_1, []),
                ("texm", game / "Textures.lib", terrain_textures(game)),
                ("assembly", game / MISSION_01, [])]
-            + [("mesh", archive, [member]) for archive, member in mission_meshes(game)])
+            + [("mesh", archive, [member]) for archive, member in mission_meshes(game)]
+            + [("control", p, []) for p in archives if _has_controllers(p)]
+            + [("controls", game / name, []) for name in controls.TABLES])
 
 
 def engine_dump(engine: Path, kind: str, path: Path, names: list[str] | None = None) -> dict:

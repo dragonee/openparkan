@@ -19,7 +19,7 @@ import math
 import struct
 from pathlib import Path
 
-from . import assembly, landmesh, materials, mission
+from . import assembly, control, controls, landmesh, materials, mission
 from . import mesh as objmesh
 from . import texm as textures
 from .nres import NResArchive
@@ -277,6 +277,70 @@ def mission_assembly(path: Path, names: list[str] | None = None) -> dict:
     }
 
 
+def _box(box) -> list:
+    return [vector(box[0]), vector(box[1])]
+
+
+def controllers(path: Path, names: list[str] | None = None) -> dict:
+    """The ``.ctl`` members of an archive, all of them unless ``names`` picks some."""
+    archive = NResArchive.open(path)
+    members = names or [e.name for e in archive if e.tag == control.CTL_TAG]
+    out = []
+    for member in members:
+        c = control.parse(archive.read_name(member))
+        out.append({
+            "name": member,
+            "counts": list(c.counts),
+            "triples": [vector(t) for t in c.triples],
+            "scale": c.scale, "pair": vector(c.pair), "mode": c.mode,
+            "bounds": vector(c.bounds), "cone": number(c.cone), "flags": c.flags,
+            "payload": number(c.payload), "bare": c.bare,
+            "states": [
+                {"flags": s.flags, "mode": s.mode, "pair_a": vector(s.pair_a),
+                 "pair_b": vector(s.pair_b), "blend": number(s.blend),
+                 "length": number(s.length), "velocity": _box(s.velocity),
+                 "spin": _box(s.spin), "engine": number(s.engine), "actions": s.actions,
+                 "request": s.request}
+                for s in c.states
+            ],
+            "costs": vector(c.costs),
+            "channels": [
+                [ch.node, number(ch.first), number(ch.last), number(ch.initial), ch.origin,
+                 ch.point, number(ch.rate), number(ch.span), ch.flags]
+                for ch in c.channels
+            ],
+            "components": [
+                {"type_id": k.type_id, "library": k.resource.library,
+                 "member": k.resource.member, "index": k.index, "entries": list(k.entries),
+                 "label": k.label, "values": vector(k.values), "power": number(k.power),
+                 "node": k.node, "mass": number(k.mass), "flags": k.flags, "group": k.group}
+                for k in c.components
+            ],
+            "groups": list(c.groups),
+            "references": [
+                {"library": r.resource.library, "member": r.resource.member,
+                 "values": list(r.values), "group": r.group}
+                for r in c.references
+            ],
+        })
+    return {"kind": "control", "controllers": out}
+
+
+def input_table(path: Path, names: list[str] | None = None) -> dict:
+    """A ``.tbl``: every row, and the numbers the engine resolves its names to."""
+    return {
+        "kind": "controls",
+        "rows": [
+            {"device": a.device, "modifier": a.modifier, "key": a.key, "pressed": a.pressed,
+             "target": a.target, "command": a.command, "value": number(a.value),
+             "index": a.index, "state": a.state, "ramp": number(a.ramp),
+             "ramp_time": a.ramp_time, "note": a.note, "code": a.code,
+             "class_id": a.class_id, "bits": a.bits}
+            for a in controls.table(path)
+        ],
+    }
+
+
 def _nres(path: Path, names: list[str] | None = None) -> dict:
     return nres(path)
 
@@ -287,4 +351,5 @@ def _mission(path: Path, names: list[str] | None = None) -> dict:
 
 #: What ``openparkan dump`` and ``parkan-dump`` both accept, and the reader each runs.
 KINDS = {"nres": _nres, "mission": _mission, "texm": texm, "materials": material_library,
-         "landmesh": land_mesh, "mesh": object_mesh, "assembly": mission_assembly}
+         "landmesh": land_mesh, "mesh": object_mesh, "assembly": mission_assembly,
+         "control": controllers, "controls": input_table}

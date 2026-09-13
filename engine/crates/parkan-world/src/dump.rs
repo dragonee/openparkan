@@ -9,7 +9,7 @@ use anyhow::{Context, Result};
 use parkan_formats::mission::{self, Value as PropertyValue};
 use parkan_formats::nres::Archive;
 use parkan_formats::pose::Pose;
-use parkan_formats::{landmesh, materials, mesh, texm, wea};
+use parkan_formats::{control, controls, landmesh, materials, mesh, texm, wea};
 
 use crate::assembly;
 use serde_json::{Value, json};
@@ -313,6 +313,102 @@ pub fn mission_assembly(path: &Path) -> Result<Value> {
     Ok(json!({ "kind": "assembly", "objects": objects }))
 }
 
+fn bounds_box(b: &([f32; 3], [f32; 3])) -> Value {
+    json!([vector(&b.0), vector(&b.1)])
+}
+
+/// The `.ctl` members of an archive, all of them unless `names` picks some.
+pub fn controllers(path: &Path, names: &[String]) -> Result<Value> {
+    let archive = Archive::open(path)?;
+    let members: Vec<String> = if names.is_empty() {
+        archive.entries.iter().filter(|e| e.tag() == control::CTL_TAG).map(|e| e.name.clone()).collect()
+    } else {
+        names.to_vec()
+    };
+    let mut out = Vec::new();
+    for member in &members {
+        let c = control::parse(archive.read_name(member)?, member)?;
+        out.push(json!({
+            "name": member,
+            "counts": c.counts,
+            "triples": c.triples.iter().map(|t| vector(t)).collect::<Vec<_>>(),
+            "scale": c.scale,
+            "pair": vector(&c.pair),
+            "mode": c.mode,
+            "bounds": vector(&c.bounds),
+            "cone": number(c.cone),
+            "flags": c.flags,
+            "payload": number(c.payload),
+            "bare": c.bare,
+            "states": c.states.iter().map(|s| json!({
+                "flags": s.flags,
+                "mode": s.mode,
+                "pair_a": vector(&s.pair_a),
+                "pair_b": vector(&s.pair_b),
+                "blend": number(s.blend),
+                "length": number(s.length),
+                "velocity": bounds_box(&s.velocity),
+                "spin": bounds_box(&s.spin),
+                "engine": number(s.engine),
+                "actions": s.actions,
+                "request": s.request,
+            })).collect::<Vec<_>>(),
+            "costs": vector(&c.costs),
+            "channels": c.channels.iter().map(|ch| json!([
+                ch.node, number(ch.first), number(ch.last), number(ch.initial), ch.origin,
+                ch.point, number(ch.rate), number(ch.span), ch.flags,
+            ])).collect::<Vec<_>>(),
+            "components": c.components.iter().map(|k| json!({
+                "type_id": k.type_id,
+                "library": k.resource.library,
+                "member": k.resource.member,
+                "index": k.index,
+                "entries": k.entries,
+                "label": k.label,
+                "values": vector(&k.values),
+                "power": number(k.power),
+                "node": k.node,
+                "mass": number(k.mass),
+                "flags": k.flags,
+                "group": k.group,
+            })).collect::<Vec<_>>(),
+            "groups": c.groups,
+            "references": c.references.iter().map(|r| json!({
+                "library": r.resource.library,
+                "member": r.resource.member,
+                "values": r.values,
+                "group": r.group,
+            })).collect::<Vec<_>>(),
+        }));
+    }
+    Ok(json!({ "kind": "control", "controllers": out }))
+}
+
+/// A `.tbl`: every row, and the numbers the engine resolves its names to.
+pub fn input_table(path: &Path) -> Result<Value> {
+    let rows = controls::load(path)?;
+    Ok(json!({
+        "kind": "controls",
+        "rows": rows.iter().map(|a| json!({
+            "device": a.device,
+            "modifier": a.modifier,
+            "key": a.key,
+            "pressed": a.pressed,
+            "target": a.target,
+            "command": a.command,
+            "value": number(a.value),
+            "index": a.index,
+            "state": a.state,
+            "ramp": number(a.ramp),
+            "ramp_time": a.ramp_time,
+            "note": a.note,
+            "code": a.code(),
+            "class_id": a.class_id(),
+            "bits": a.bits(),
+        })).collect::<Vec<_>>(),
+    }))
+}
+
 /// Dump `path` as `kind`; `names` narrows a `texm` dump to those textures.
 pub fn dump(kind: &str, path: &Path, names: &[String]) -> Result<Value> {
     match kind {
@@ -324,7 +420,11 @@ pub fn dump(kind: &str, path: &Path, names: &[String]) -> Result<Value> {
         "landmesh" => land_mesh(path),
         "mesh" => object_mesh(path, names),
         "assembly" => mission_assembly(path),
-        other => anyhow::bail!("unknown kind {other:?}; expected nres, mission, texm, materials or landmesh"),
+        "control" => controllers(path, names),
+        "controls" => input_table(path),
+        other => anyhow::bail!(
+            "unknown kind {other:?}; expected nres, mission, texm, materials, landmesh, mesh, assembly, control or controls"
+        ),
     }
 }
 
