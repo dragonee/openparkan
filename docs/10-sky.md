@@ -447,7 +447,19 @@ each body once and stops neither.
   72-byte section headers are byte-identical yet hold 27 and 20 keyframes, so
   the count is not in them. The reader takes the second section's keyframes to
   the end of the file, which consumes all six exactly.
-- Which field selects the object type.
+- Which field selects the object type, and which carries the opcode. The
+  runtime side is pinned: the filler at `Terrain.dll:0x100692d0` copies the
+  240-byte keyframe's `+0x28` to the event record's `+0x00` (at `0x100694bd`),
+  with the hour at `+0x14` and the minute at `+0x18`. Two file candidates are
+  dead. The trailer's last word spans 0..9 but puts 119 of the 140 named
+  keyframes on a do-nothing case; and so does **the word a contiguous copy
+  would predict** — five dwords past the trailer's time, which is a *shifting*
+  index because the time sits at 4 when the kind word is 3 and at 3 otherwise.
+  That second test exists because the first used a fixed index and would have
+  missed a moved field. It did not move. The copy is not contiguous anyway:
+  the filler swaps `+0x34`/`+0x30` into `+0x04`/`+0x08` and `+0x3c`/`+0x38`
+  into `+0x0c`/`+0x10`, so the file-to-memory order has to be read off the
+  deserialiser rather than predicted.
 - The rest of the 124-byte file header. Bytes 64 and 68 are the day length,
   above. It still holds `23, 59` where a time would go — the same
   hours-and-minutes shape, constant on all 29 — `6939832` twice, and a couple

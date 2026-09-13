@@ -765,8 +765,19 @@ create side. The rejection above now has an exact statement: that word puts
 **119 of the 140 named keyframes** on a do-nothing case.
 See [docs/10-sky.md](docs/10-sky.md). What is left is the field: the opcode
 reaches the record from a **240-byte runtime keyframe** at `+0x28` (the filler
-is `0x100692d0`, hour at `+0x14` and minute at `+0x18`), so the next handle is
-whatever fills that keyframe from the file.
+is `0x100692d0`, hour at `+0x14` and minute at `+0x18`; the copy itself is at
+`0x100694bd`), so the next handle is whatever fills that keyframe from the
+file.
+
+**A third candidate is now dead, and it was the one worth killing.** Five
+dwords separate the minute from the opcode in memory, so a contiguous copy
+would put the opcode five words past the trailer's time — and the trailer's
+time is not at a fixed index, it sits at 4 when the kind word is 3 and at 3
+otherwise. A fixed-index test would have missed a field that moved; this one
+does not, and the word still puts **119 of the 140 named keyframes** on a
+do-nothing case. The copy is not contiguous in any case: the filler swaps
+`+0x34`/`+0x30` into `+0x04`/`+0x08`, so the file-to-memory order has to be
+read off the deserialiser, which has not been found yet.
 
 **The scale is answered: it is how long a day lasts.** The collector's
 conversion is `t = (hour * 3600 + minute * 60) * scale / 86400` — seconds

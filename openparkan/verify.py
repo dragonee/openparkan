@@ -4520,6 +4520,25 @@ def check_atmosphere_events(check, game: Path) -> None:
           f"{dead}/{len(named)} of the named keyframes on a do-nothing case -- "
           f"so the sun and moon would never start or stop")
 
+    # The runtime keyframe puts the opcode five dwords past the minute, so a
+    # contiguous copy from the file would put it five past the trailer's time
+    # -- and the trailer's time shifts by one with the kind word, which the
+    # fixed index above would miss.  It fails the same way, which closes the
+    # "the index just moved" escape rather than finding the field.
+    def shifted(frame):
+        at = 4 if frame.kind == sky.KIND_WITH_PADDING else 3
+        i = at + sky.OPCODE_CANDIDATE_SHIFTED
+        return frame.trailer[i] if i < len(frame.trailer) else None
+    moved = [v for v in (shifted(f) for f in frames) if v is not None]
+    moved_dead = sum(shifted(f) in sky.NO_EVENT for f in named)
+    check("sky: nor is the word the runtime layout would predict",
+          moved_dead > len(named) // 2,
+          f"the runtime keyframe holds the opcode five dwords past the minute, "
+          f"so a contiguous copy would put it five past the trailer's time -- "
+          f"which shifts with the kind word.  That word is in 0..9 on "
+          f"{sum(0 <= v <= 9 for v in moved)}/{len(moved)} keyframes and still "
+          f"puts {moved_dead}/{len(named)} named ones on a do-nothing case")
+
 
 def check_research_streams(check, game: Path) -> None:
     """What MisLoad.dll's loader requires of a .trf, checked against the files."""

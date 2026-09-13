@@ -143,6 +143,16 @@ EVENT_RECORD = 20
 #: see the module docstring.
 OPCODE_CANDIDATE = 9
 
+#: The other candidate, and the one a contiguous copy would predict.  The
+#: runtime keyframe holds the hour at ``+0x14``, the minute at ``+0x18`` and
+#: the opcode at ``+0x28`` (``Terrain.dll:0x100694bd`` copies that last one to
+#: the event record's ``+0x00``), so five dwords past the minute.  The
+#: trailer's time is not at a fixed index -- it sits at 4 when the kind word
+#: is ``KIND_WITH_PADDING`` and 3 otherwise -- so the word five past it is a
+#: *shifting* index, which the fixed reading above would have missed.  It is
+#: not the opcode either, and it fails the same way.
+OPCODE_CANDIDATE_SHIFTED = 5
+
 #: ``sky.wea`` slot -> what it is.  Fixed across all 29 missions.
 SLOT_ROLES = (
     "nebula",
