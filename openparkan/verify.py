@@ -30,6 +30,7 @@ from . import (
     materials,
     mission,
     objects,
+    profiles,
     research,
     resources,
     rsli,
@@ -3079,6 +3080,78 @@ def check_damage(check, game: Path) -> None:
           f"pieces gone: fewer triangles on {shrinks}/{compared}")
 
 
+def check_profiles(check, game: Path) -> None:
+    """behpsp.res and the economy it carries, against the missions."""
+    if not (game / profiles.ARCHIVE).exists():
+        return
+    archive = NResArchive.open(game / profiles.ARCHIVE)
+    parsed, failures, types = {}, [], set()
+    for entry in archive:
+        try:
+            parsed[entry.name] = profiles.parse(archive.read(entry), entry.name)
+        except profiles.ProfileFormatError as exc:
+            failures.append(str(exc))
+            continue
+        types.update(v.type for v in parsed[entry.name].values())
+    check("behpsp.res: every profile walks to the byte",
+          not failures and len(parsed) == len(archive)
+          and types == set(profiles.TYPES),
+          f"{len(parsed)}/{len(archive)} .var members, variable types "
+          f"{sorted(profiles.TYPES[t] for t in types)} -- the three type names "
+          f"MVarSet::LinkVar checks"
+          + ("" if not failures else f" -- {failures[0]}"))
+
+    buildings = {name: vars_ for name, vars_ in parsed.items()
+                 if name.startswith("prof_") and profiles.POWER_OUT in vars_}
+    sources = {name: vars_[profiles.POWER_OUT].value
+               for name, vars_ in buildings.items()
+               if vars_[profiles.POWER_OUT].value > 0}
+    mine = buildings.get("prof_mine.var", {})
+    storage = buildings.get("prof_storage.var", {})
+    check("behpsp.res: the generator is the power source, and a mine feeds nothing",
+          sources.get("prof_generator.var") == 10
+          and set(sources) <= {"prof_generator.var", "prof_universal.var",
+                               "prof_bunker.var"}
+          and mine and mine[profiles.ORE_ON].value == 0
+          and storage and storage[profiles.ORE_ON].value > 0,
+          f"Transfer_Power_Out is non-zero only on {sources}; the distribution "
+          f"step draws ore from a holder at its Transfer_Ore_OnBoard rate, which "
+          f"is {mine[profiles.ORE_ON].value:g} on a mine and "
+          f"{storage[profiles.ORE_ON].value:g} on a storage -- so a mine's ore "
+          f"reaches nobody until something carries it")
+
+    # The object's own directory says what it is: UNITS\UNITS\TRANSPRT,
+    # UNITS\UNITS\BUILDER, and the mine and storage models by name.
+    by_value: dict[float, set[str]] = defaultdict(set)
+    mines_at: set[float] = set()
+    for folder in gamedir.missions(game):
+        for obj in mission.load(folder / "data.tma").objects:
+            prop = obj.properties.get("MaximumOre")
+            if prop is None:
+                continue
+            parts = obj.path.lower().split("\\")
+            leaf = parts[-1]
+            if "mine" in leaf:
+                mines_at.add(prop.value)
+            if prop.value:
+                kind = (parts[-2] if len(parts) > 1 and parts[-2] in
+                        ("transprt", "builder") else leaf)
+                by_value[prop.value].add(kind)
+    carriers = by_value.get(profiles.TRANSPORT_MAX_ORE, set())
+    check("data.tma: a placed holder's MaximumOre is the engine's own constant",
+          set(by_value) == {profiles.MINE_MAX_ORE, profiles.TRANSPORT_MAX_ORE,
+                            profiles.STORAGE_MAX_ORE}
+          and mines_at == {profiles.MINE_MAX_ORE}
+          and all("mine" in n for n in by_value[profiles.MINE_MAX_ORE])
+          and carriers == {"transprt", "builder"}
+          and all("sto" in n for n in by_value[profiles.STORAGE_MAX_ORE]),
+          f"the missions carry exactly {sorted(by_value)} -- Mine_MaxOre, "
+          f"Transport_MaxOre and Storage_MaxOre as Behavior.dll compiles them.  "
+          f"Every mine is at 500 {sorted(by_value[profiles.MINE_MAX_ORE])}; "
+          f"2000 is on the transport and builder units and nothing else; "
+          f"{sorted(by_value[profiles.STORAGE_MAX_ORE])} are at 4000")
+
+
 def check_rsli(check, game: Path) -> None:
     """gamefont.rlb and sprites.lib -- the two archives that are not NRes."""
     archives = []
@@ -5136,7 +5209,7 @@ def run(game: Path) -> int:
         check_behaviour, check_research, check_descriptions, check_saves,
         check_vocabulary, check_resources, check_briefing, check_settings,
         check_research_streams, check_atmosphere_events,
-        check_varset_types,
+        check_varset_types, check_profiles,
     )
     for fn in checks:
         fn(check, game)

@@ -207,6 +207,7 @@ of fields carried through the readers without being understood.
 - [20-resources.md](docs/20-resources.md) — the `.cfg` resource descriptor and `TextRes.dll`
 - [21-briefing.md](docs/21-briefing.md) — `briefing.cfg`, the opening flythrough
 - [22-settings.md](docs/22-settings.md) — the engine's five `.ini` files
+- [23-economy.md](docs/23-economy.md) — ore and power: who makes, carries, shares and spends them
 
 ## Layout
 

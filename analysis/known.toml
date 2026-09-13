@@ -1091,7 +1091,7 @@ at = "0x1002f730"
 kind = "function"
 name = "M_Task_Research::OnBehaviourTakt"
 doc = "the binary's own assertion text"
-read = false
+read = true
 
 [[entry]]
 module = "Behavior.dll"
@@ -1391,4 +1391,61 @@ at = "0x100346e0"
 kind = "datum"
 name = "six 40-byte alpha-blend mode records of {render state, value}"
 doc = "docs/07-objects.md"
+read = true
+
+# --- the economy, ../docs/23-economy.md -------------------------------------
+[[entry]]
+module = "Behavior.dll"
+at = "0x10016250"
+kind = "function"
+name = "behaviour constants' constructor: Mine_OrePerSecond 50, Storage_MaxOre 4000, ..."
+doc = "docs/23-economy.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10016480"
+kind = "function"
+name = "binds the 70 behaviour constants by name through LinkVar"
+doc = "docs/23-economy.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10022e20"
+kind = "function"
+name = "binds a behaviour profile's variables: Type, CanMove, ... Use_Ore"
+doc = "docs/23-economy.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10019e80"
+kind = "function"
+name = "the clan's ore and power distribution step, two-tier fill"
+doc = "docs/23-economy.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10019880"
+kind = "function"
+name = "SetPowerUsage: writes property 0x500 on every control component"
+doc = "docs/23-economy.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x100198e0"
+kind = "function"
+name = "KPD: sums property 0xe00, efficiency, over the control components"
+doc = "docs/23-economy.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002bb40"
+kind = "function"
+name = "component property getter; 0xe00 on type 10 is (p300+p301+p302)/3"
+doc = "docs/23-economy.md"
 read = true
