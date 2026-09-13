@@ -6482,6 +6482,255 @@ name = "class-17 reset: +0x94 = cos(value 0)"
 doc = "docs/25-sensors.md"
 read = true
 
+# --- sensors: clan relations, camouflage, the kept-contact list, ../docs/25-sensors.md ---
+[[entry]]
+module = "MisLoad.dll"
+at = "0x100015b0"
+kind = "function"
+name = "clan section loader: clans (0x58 each); per clan a relation array filed by name; neutral rows and columns 1; every clan 2 towards itself"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "MisLoad.dll"
+at = "0x10001903"
+kind = "site"
+name = "relation loader: lstrcmpiA matches a relation record's name to a clan"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "MisLoad.dll"
+at = "0x1000195c"
+kind = "site"
+name = "relation loader: a neutral clan's (type 3) whole row = 1"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "MisLoad.dll"
+at = "0x100019b2"
+kind = "site"
+name = "relation loader: a clan's word towards itself = 2"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "MisLoad.dll"
+at = "0x100019cb"
+kind = "site"
+name = "relation loader: every word towards a neutral clan = 1"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "MisLoad.dll"
+at = "0x1000136d"
+kind = "site"
+name = "IMission clan info +0x18: the clan's relation array (+0x54)"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100a27e3"
+kind = "site"
+name = "mission load: clan SuperAI slot 7 (j, 2) towards itself"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100a2800"
+kind = "site"
+name = "mission load: clan SuperAI slot 7 (j, relation array[j]), or 2 with no array"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "ai.dll"
+at = "0x1000f780"
+kind = "function"
+name = "GetSuperAI(clan): the SuperAI table entry, 0 at 64 or above"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "ai.dll"
+at = "0x10001f50"
+kind = "function"
+name = "SuperAI slot 7: set the relation towards a clan (clan brain 0x10005e80)"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "ai.dll"
+at = "0x10001f70"
+kind = "function"
+name = "SuperAI slot 8: the relation word towards a clan (-1 at 64 or above)"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "ai.dll"
+at = "0x10005e80"
+kind = "function"
+name = "clan brain set relation: word at +0x3cc+16c, attitude 1/6, 1/2, 5/6 for 0/1/2; mirrored into the other clan's SuperAI"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "ai.dll"
+at = "0x10005f10"
+kind = "function"
+name = "clan brain relation get: +0x3cc + clan x 16"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "ai.dll"
+at = "0x100057f0"
+kind = "function"
+name = "clan brain constructor: all 64 relations word 1, attitude 1/6"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "ai.dll"
+at = "0x10005f30"
+kind = "function"
+name = "clan brain relation takt: attitude clamp 0..1, word 0 below 1/3, 2 above 2/3, else 1; eases 0.0033 to 0.2833/0.49995/0.7166 within the band; mirrors a change"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "ai.dll"
+at = "0x10005f46"
+kind = "site"
+name = "relation takt: attitude change field +4 subtracted (no writer found)"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "ai.dll"
+at = "0x10005f60"
+kind = "site"
+name = "relation takt: attitude change field +8 added (no writer found)"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100602cd"
+kind = "site"
+name = "world setup: SystemArealMap slot 11 SetClanType(i, clan record +0xc, the file's type word)"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100601a5"
+kind = "site"
+name = "world setup: the landscape's interface 0x302, the system areal map, kept at +0xae8"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "ArealMap.dll"
+at = "0x10014580"
+kind = "function"
+name = "GetSystemArealMap: the queue's landscape, interface 0x302"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10005db1"
+kind = "site"
+name = "MBehaviour +0x48 = GetSystemArealMap (slot 10 GetClanType feeds the hostile and friendly tests)"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10009130"
+kind = "function"
+name = "MBehaviour SetClan: +0x4c GetSuperAI(clan), +0x54 its IArealMap (slot 12), +0x50 slot 10; clan 0xfffe sets the killed flag 0x1000"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10017f49"
+kind = "site"
+name = "engagement check: a hostile contact within 150 m across the ground forbids camouflage"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10017fb8"
+kind = "site"
+name = "engagement check: camouflage only 10000 ms or more after MBehaviour +0xb4, the last target handed to the turret"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10017fdd"
+kind = "site"
+name = "engagement check: camouflage on iff hostile contacts, none within 150 m, 10 s since the last target; else off"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10024f8f"
+kind = "site"
+name = "fire control: interface 0x204 slot 16 SetTarget on its fire timer"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10025009"
+kind = "site"
+name = "fire control: MBehaviour +0xb4 = the takt's time after setting a target"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10023283"
+kind = "site"
+name = "radar module scan: empties the hostile (+0x50) and friendly (+0x64) lists, not +0x3c"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10023446"
+kind = "site"
+name = "radar module scan: every kept contact appended to +0x3c, which nothing empties"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1000e910"
+kind = "function"
+name = "MAttay<T>::Insert(items, count, at): at -1 appends; no uniqueness test"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10020230"
+kind = "function"
+name = "MAttay<T> clear: count = 0"
+doc = "docs/25-sensors.md"
+read = true
+
 # --- damage, shields, armour and repair, ../docs/26-damage.md ---------------
 
 [[entry]]
@@ -6801,6 +7050,239 @@ module = "Behavior.dll"
 at = "0x1003356f"
 kind = "site"
 name = "Task_Upgrade makes the upgrading unit invulnerable (property 162 = 1)"
+doc = "docs/26-damage.md"
+read = true
+
+# --- damage: sweep ends, round radius, hit reference, sectors, kind 3, ../docs/26-damage.md ---
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10001370"
+kind = "function"
+name = "agent message dispatch (interface 6): message 1 to behaviour +0x17c, wizard +0x178, collision object +0x170, control system +0x158, then 0x1c to the collision object"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x100013d8"
+kind = "site"
+name = "agent message 1: the collision object hears it before the control system ticks"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x1000145a"
+kind = "site"
+name = "agent message 1: message 0x1c to the collision object right after the control system's tick"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x1000337b"
+kind = "site"
+name = "agent build: CreateCollObject, interface 0x28 kept at +0x170"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10003174"
+kind = "site"
+name = "agent build: an agent with a parent takes the parent's kind (IGameObject slot 11) instead of its tag's"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10003488"
+kind = "site"
+name = "agent build, kind 3: wizard, behaviour, hall-way graph (0x303), man manager, own collision manager (0x203)"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10057da0"
+kind = "function"
+name = "CBuilding IGameObject slot 11: kind 3"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10055e95"
+kind = "site"
+name = "CBuilding constructor: LoadAgent with the building itself as the agent's parent"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10057b30"
+kind = "function"
+name = "CBuilding IGameObject slot 13: send a message; interface 6 goes on to its agent (+0x30)"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x1000a891"
+kind = "site"
+name = "part attach: the part record copies its mesh's stream-2 header box, sphere (+0x60) and cylinder; the root part also into the object (+0x54, +0x114, +0x134)"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10009510"
+kind = "function"
+name = "posed bounding sphere: part centres weighted by radius, radius max(|c - C| + r), centre x scales, radius x the largest scale"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10014580"
+kind = "function"
+name = "interface 0x18 slot 9: the bounding sphere; type 2 moves the centre to world space (matrix +0x160), radius as is"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001f530"
+kind = "function"
+name = "collision object messages: 1 start = end = centre, 4 attach interfaces, 21 register, 0x1c end = centre"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000d23f"
+kind = "site"
+name = "round response: a round stopped by a bubble writes {object, node -2, sector} as its face reference"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10011479"
+kind = "site"
+name = "node stage: the round's contact reference (object, node, batch or sector) copied into the hit +0xc/+0x10/+0x14"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x100113db"
+kind = "site"
+name = "node stage: the only fetch of an .exp record; +4, +8, +0x14 and the names are read, +0xc and +0x10 not"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000a220"
+kind = "function"
+name = "resource table add: a mapped NRes member by archive and name, reference-counted; returns its index"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002c666"
+kind = "site"
+name = "shield sector: the hit offset turned into the object's frame (g_FastProc +0x8c, the matrix's transpose)"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Ngi32.dll"
+at = "0x1001ca00"
+kind = "site"
+name = "g_FastProc +0x8c (SSE): v' = M^T v over the 3x3, in place"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Ngi32.dll"
+at = "0x1001ca90"
+kind = "site"
+name = "g_FastProc +0x8c (SSE, aligned matrix): v' = M^T v over the 3x3, in place"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1006f621"
+kind = "site"
+name = "stat panel field 13 'regener': interface 0x202 slot 3, id 0x77, device 0"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002e887"
+kind = "site"
+name = "interface 0x202 slot 3 id 0x77: component query 0x1100"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002c1b6"
+kind = "site"
+name = "component query 0x1100: class 15 value 0 x condition, class 9 value 1 x condition, else nothing"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10004c40"
+kind = "function"
+name = "MBehaviour takt: killed flag 0x1000 returns at once; else places, radar module, building or unit takt, fire control"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10004d54"
+kind = "site"
+name = "MBehaviour takt: a behaviour flagged killed (0x1000) does nothing more"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10004d65"
+kind = "site"
+name = "MBehaviour takt: the object's clan word 0xfffe sets the killed flag 0x1000"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10003c85"
+kind = "site"
+name = "MBehaviour constructor: the only clear of flags 0x1000 and 4"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10008cc0"
+kind = "site"
+name = "Capture(): dwNewClan == DETID_KILLED, 0xfffe, sets the killed flag"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1007dee0"
+kind = "function"
+name = "registered-object walker: records whose +0x24 equals the argument and whose +0x2c has no bit outside a mask, skipping any whose object answers 0xfffe"
 doc = "docs/26-damage.md"
 read = true
 

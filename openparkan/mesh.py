@@ -505,6 +505,18 @@ class ObjectMesh:
     #: The authored bounding volume from the stream-2 header, if present.
     volume: BoundingVolume | None = None
 
+    def collision_radius(self, scale: tuple[float, float, float] = (1.0, 1.0, 1.0)) -> float:
+        """The radius of an agent's swept sphere when this mesh is all it has.
+
+        A part keeps its stream-2 header's sphere (``AniMesh.dll:0x1000a891``);
+        the agent's sphere is those spheres' union at the current pose, times
+        the largest of the object's three scales (``0x10009510``), and that
+        radius is what the collision object sweeps (``Control.dll:0x1001fec0``).
+        With a single part -- every round -- the union is the header's own
+        sphere.  0 when the mesh carries no header.
+        """
+        return self.volume.radius * max(scale) if self.volume else 0.0
+
     def rest_key(self, node: int) -> int | None:
         """Index of the pose key that puts a node in its rest position.
 

@@ -153,11 +153,30 @@ shield draws `value 4` a second on top of its power figure (`0x100264b0`), and
 shield that is a level under 0.09 / 0.29, 31% — derived from the table below.
 The cockpit says so: `iron3d.dll` watches the player's class-10
 component for state `0x1000` (`0x10076e40`) and plays `VOICE_CHAMELEON_SYS_ON`
-or `_OFF` when it changes. A behaviour's device manager can switch every
+or `_OFF` when it changes.
+
+**When the AI wears it** — *read*. A behaviour's device manager switches every
 detection shield's camouflage on (`0x1000`) or off (`0x2000`)
-(`Behavior.dll:0x10019a10`), and starting any task switches it off
-(`0x10034930`), as it does the repair system
-([26-damage.md](26-damage.md)).
+(`Behavior.dll:0x10019a10`), sending only when the answer changes (`+0xae`).
+Two things ask it:
+
+- **The engagement check** of a unit's takt (`0x10017e70`), which runs when its
+  timer comes round and the unit does not send itself to a dock. It asks for
+  camouflage **on** when all three hold (`0x10017fdd`), and **off** otherwise:
+  1. the radar module's hostile list is not empty;
+  2. no hostile contact is within **150 m** of the unit across the ground
+     (`0x10017f49`);
+  3. at least **10 s** have passed since the unit's fire control last handed
+     its turret a target (`0x10017fb8`; the time is stamped at `0x10025009`,
+     right after interface `0x204` slot 16, `SetTarget`).
+
+  So an AI machine hides while it has seen enemies that are not yet close and
+  it has not been shooting, and drops the cloak when one comes within 150 m or
+  it opens fire. The check is skipped altogether for a neutral clan's units
+  and while `Behavior.ini`'s `DeterminMode` is set, and a building has no such
+  takt.
+- **Starting any task** switches it off (`0x10034930`), as it does the repair
+  system ([26-damage.md](26-damage.md)).
 
 *Measured*, the twelve parts in `intsys.rlb`:
 
@@ -207,17 +226,45 @@ Every behaviour owns a **radar module** (`Behavior.dll:0x10023120`, at
 
 - **Every 0.45–1.9 s it re-reads the contacts** (`0x10023240`). It asks its
   machine's `IControl` for the radar's list, and for each contact looks up the
-  owning clan and drops it if that clan's kind (the clan SuperAI's slot 10) is
-  0 or 3, if it is a building, or if it is the machine itself. What is left
-  goes into two lists by clan: **hostile** (`0x1000d460`) and **friendly**
-  (`0x1000d4f0`). A clan is hostile when the relation table says 0 and friendly
-  when it says 2; a clan of kind 3 is neither to anyone, and a machine of a
-  kind-0 clan takes every other clan as hostile. Kinds 0 and 3 line up with
-  the mission file's nature and neutral clans
-  ([27-ownership.md](27-ownership.md#the-clan-word-is-a-type--measured-and-read)),
-  which is a *guess* that the two are the same number.
+  owning clan and drops it if that clan's type is 0 or 3, if it is a building,
+  or if it is the machine itself. What is left goes into two lists by clan:
+  **hostile** (`0x1000d460`) and **friendly** (`0x1000d4f0`). A clan is
+  hostile when its relation says 0 and friendly when it says 2
+  ([below](#clan-relations-the-files-words-straight-through--read-and-measured));
+  a clan of type 3 is neither to anyone, and a machine of a type-0 clan takes
+  every other clan as hostile.
+- **The type is the mission file's clan word** — *read*. The behaviour asks the
+  system areal map, which it keeps at `+0x48` (`Behavior.dll:0x10005db1`), for
+  `GetClanType` (slot 10, `ArealMap.dll:0x10020a10`). `iron3d.dll` fills that
+  same map from each clan record's `+0xc`, the file's word, through
+  `SetClanType` (slot 11, `iron3d.dll:0x100602cd`); both reach the map as the
+  landscape's interface `0x302` (`ArealMap.dll:0x10014580`,
+  `iron3d.dll:0x100601a5`). So types 0 and 3 are the file's nature and neutral
+  clans ([27-ownership.md](27-ownership.md#the-clan-word-is-a-type--measured-and-read)).
+  An earlier note here named the clan SuperAI's slot 10; that slot takes no
+  clan and is not what the list consults.
+- **Every scan also appends each kept contact to a third list** (`+0x3c`,
+  `0x10023446`) — hostile, friendly or neither — and that list is **never
+  emptied** — *read*, as a search. The scan clears only the hostile and
+  friendly lists (`0x10023283`, `0x10023290`); the same search finds those two
+  clears and nothing for `+0x3c` or the behaviour's `+0x4e4`, and only the
+  behaviour's constructor and destructor touch it otherwise. Its one reader,
+  the walker at `0x1003f760`, **is called by nothing**: no call, jump or
+  pointer anywhere in `Behavior.dll` names it, where the same byte search finds
+  the scan's one caller and the three of its neighbour `0x1003f3a0`. So the
+  list grows by a scan's worth of ids every second or two for the unit's life
+  and nothing uses it.
 - **Every 2.0–4.9 s it reports its position and radar range** to its clan's
-  `IArealMap` (`0x1002355f`) — *guess*: marking the area the clan can see.
+  `IArealMap` (`0x1002355f`). The clan map refreshes its snapshot of every
+  areal the report reaches — the one the unit stands in, and each neighbour
+  whose shared edge starts within the radar's range, spreading outwards — from
+  the system map's lists of the units and buildings there, and stamps it with
+  the time (`ArealMap.dll:0x10001ec0`, `0x10001dd0`, `0x10001840`;
+  [31-packages.md](31-packages.md#where-a-search-looks--read-and-measured)).
+  **The refresh applies no detection test**: every object the system map lists
+  in those areals is copied in, whatever its signatures, shield or camouflage.
+  So a camouflaged machine drops off the enemy's radar lists but not off an
+  enemy clan's areal map, where its searches look.
 
 **Targets come from the hostile list.** The target selector (`0x10025410`),
 refreshed on a timer, picks by mode: none, a given target, or one of three
@@ -240,18 +287,80 @@ kind was not read.
   order to attack a building names it instead.
 - **Nothing here makes an AI unit flee**; no code that reads the radar lists
   was found to do so. That is a search, not a proof.
+- **A missile's seeker ignores all of this.** Class 17 follows the target its
+  gun hands it while it is within range and inside its cone
+  ([29-weapons.md](29-weapons.md#guided-rounds-differ-in-how-hard-they-steer--read-and-measured));
+  its tick (`Control.dll:0x100247c0`) reads the target's node position and
+  life and no signature, so camouflage does not throw off a round already
+  flying — *read*.
+
+## Clan relations: the file's words, straight through — *read*, and *measured*
+
+The relation words in `data.tma` ([04-missions.md](04-missions.md)) are **0
+hostile, 1 neutral and 2 allied**, and they are what each clan's SuperAI
+holds. Nothing maps a 0/1 file onto a 0/2 runtime.
+
+1. **The loader files them by name** (`MisLoad.dll:0x100015b0`). Each clan
+   gets an array with one word per clan; each relation record lands under the
+   clan its name matches, ignoring case (`lstrcmpiA`, `0x10001903`); a clan
+   named by no record stays 0. Then a neutral clan's whole row becomes 1
+   (`0x1000195c`), every entry towards a neutral clan becomes 1, and **every
+   clan's word towards itself becomes 2** (`0x100019b2`). The clan info hands
+   the array out at `+0x18` (`0x1000136d`).
+2. **`iron3d.dll` gives every word to the clan's SuperAI** (`0x100a2773`):
+   slot 7 with 2 towards itself (`0x100a27e3`) and the array's word towards the
+   others (`0x100a2800`), or 2 when a clan has no array.
+3. **The SuperAI keeps the word and an attitude** (`ai.dll:0x10005e80`): the
+   word itself, which slot 8 returns (`0x10005f10`) and which the behaviour's
+   hostile and friendly tests read, and a float attitude of 1/6, 1/2 or 5/6
+   for a word of 0, 1 or 2. Setting clan *i*'s word towards *j* also writes it
+   into *j*'s SuperAI towards *i*.
+4. **Each clan-brain takt re-reads the word from the attitude**
+   (`0x10005f30`): below 1/3 it is 0, above 2/3 it is 2, otherwise 1. The
+   attitude then moves 0.0033 a takt, never across the band's edge: a hostile
+   one up to 0.2833, a neutral one back to 0.49995, an allied one down to
+   0.7166. So a relation stays where the mission put it. What would
+   move an attitude across a band — the two change fields the takt adds and
+   subtracts — was not found written (a search for their offsets).
+
+*Measured*, over the 101 clans of the 29 shipped missions: towards other clans
+the words are 0 on 135, 1 on 137 and 2 on 28, and every clan that names itself
+writes 1, which the loader turns into 2. No name misses its clan, and every word
+to or from a neutral clan is already 1. After the loader's rules every pair of
+clans holds the **same word both ways**: 69 pairs hostile, 69 neutral and 14
+allied. On Mission 01 the player (`Plr`) and the target dummies (`Trgt`) are
+neutral to each other, as are `Trgt` and `Enm`.
+
+What follows for sensors: a clan's units put only the machines of clans at 0
+in their hostile lists and only those at 2 in their friendly ones — a neutral
+clan's machine is in neither, and an allied clan's is friendly.
 
 ## Not established
 
-- How the mission file's 0/1 relation words become the runtime's 0 and 2.
-- What `IArealMap` does with the radar report, and what the player's map and
-  radar display show — `iron3d.dll`'s drawing was not read.
-- What asks an AI machine's device manager to switch camouflage *on*: task
-  start switches it off (`0x10034930`), and no caller that switches it on was
-  traced.
-- The third list the radar module fills, of every kept contact
-  (`+0x3c`, read by the walker at `0x1003f760`): where it is emptied was not
-  found.
-- Class 17, found only on projectiles in `weapon.rlb`, draws on the sensor
-  channel and takes the cosine of its value 0 (`Control.dll:0x100247a0`), so
-  *guess*: a missile seeker's cone. It does not use the detection test above.
+- ~~How the mission file's 0/1 relation words become the runtime's 0 and 2.~~
+  Answered: the file holds 0, 1 and 2, and they pass straight through
+  ([Clan relations](#clan-relations-the-files-words-straight-through--read-and-measured)).
+- What the player's map and radar display show. `IArealMap`'s side of the
+  radar report is answered ([above](#what-the-ai-does-with-it--read)), but
+  `iron3d.dll`'s drawing was not read. One negative, as a search:
+  `iron3d.dll` never makes the two radar queries the behaviour makes —
+  `IControl` slot 10 with id `0x10` for the contact list, slot 4 with id 8 for
+  the range — where the same search finds both in `Behavior.dll`
+  (`0x1002336b`, `0x10023243`); so the cockpit does not draw the radar
+  component's scan in that form. Handles: the cockpit HUD draw
+  `iron3d.dll:0x1003fb90`, which draws rings of radius 56 and 68 about a centre
+  and prints the `RADAR` label (`0x1004011d`), and `0x10073550`, which loads
+  `minimap` and `map_compass_icon`.
+- ~~What asks an AI machine's device manager to switch camouflage *on*.~~
+  Answered: the unit takt's engagement check
+  ([When the AI wears it](#the-detection-shield-hides-all-three-and-camouflage-hides-them-again--read-and-measured)).
+- ~~Where the radar module's list of every kept contact (`+0x3c`) is
+  emptied.~~ Answered: nowhere, and its only reader is dead code
+  ([above](#what-the-ai-does-with-it--read)).
+- ~~Class 17 on projectiles.~~ Answered in
+  [29-weapons.md](29-weapons.md#guided-rounds-differ-in-how-hard-they-steer--read-and-measured):
+  a missile's seeker, `cos(value 0)` its cone. It does not use the detection
+  test above.
+- What would move a SuperAI's attitude from one relation band to another:
+  nothing was found writing the two change fields its takt applies
+  (`ai.dll:0x10005f46`, `0x10005f60`).
