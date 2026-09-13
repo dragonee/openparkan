@@ -30,11 +30,11 @@ and why the 84-byte block read as a trailer until the layout was recovered.
 ```
 0x00  int32[5]   section counts
 0x14  float[3]   +20   triple 1   acceleration
-0x20  float[3]   +32   triple 2
+0x20  float[3]   +32   triple 2   never read; zero on 518
 0x2c  float[3]   +44   triple 3   top speed, m/s
 0x38  float[3]   +56   triple 4   turn rate; two-pi on 364
 0x44  float[3]   +68   triple 5   1.0 on 418
-0x50  float[3]   +80   triple 6   two-pi on 422
+0x50  float[3]   +80   triple 6   the most the body leans, rad; two-pi on 422
 0x5c  int32      +92   0 on 324, else 1000, 2000, 5000
 0x60  float[2]   +96   zero on 512
 0x68  int32      +104  0, 2 or 3; 2 brakes on slopes
@@ -99,11 +99,17 @@ come from.
 
 ### What the numbers look like
 
-**Three of the triples are now named** ([24-motion.md](24-motion.md)):
+**Four of the triples are now named** ([24-motion.md](24-motion.md)):
 `Control.dll:0x1000fca0` makes the live limits from triple 1 (+20, the
 acceleration, doubled), triple 3 (+44, the top speed in m/s) and triple 4
-(+56, the turn rate). Triple 5 is multiplied into the spin integrator
-(`0x10014b15`); triples 2 and 6 are not named. Three members side by side:
+(+56, the turn rate). Triple 6 bounds the body's lean
+([below](#the-lean-and-triple-6--read-and-measured)). Triple 5 is multiplied
+into the spin integrator (`0x10014b15`) and not named. **Triple 2 is never
+read** (*read*): no code in `Control.dll` reaches +32..+40 in the authored
+block (the `+0x46c` pointer and the body's `+0x1ac`), the live copy
+(`+0x47c`..`+0x484`, the body's `+0x1b0`) or the property interface, while
+the same scan finds triples 1, 3, 4, 5 and 6. 518 of the 531 files leave it
+zero (*measured*). Three members side by side:
 
 | | `ctl_cam_fly` | `o_c01_l_01` (a gun) | `fr_b_plant` (a factory) |
 |---|---|---|---|
@@ -118,6 +124,48 @@ is a speed against an acceleration, and the **0.6 in the middle component of
 triple 4** is the one place in 531 files where a single axis's turn rate is
 set on its own. This page once read it as a pitch limit; triple 4 is a rate,
 so it is a slow turn about one axis.
+
+### The lean, and triple 6 — *read*, and *measured*
+
+A machine **leans**: the motion body keeps a per-axis tilt at `+0xa0`
+(controller `+0x254`) and turns it into its tilt quaternion `+0x90`
+(`0x10015251`). A state's bytes **+0x08, +0x09, +0x0a** say what leans it about
+x, y and z (`0x10014e8d`; table `0x1001538c`):
+
+| selector | source, about or along x, y, z |
+|---:|---|
+| 1, 2, 3 | the turn made this step ÷ (dt × authored triple 4) |
+| 4, 5, 6 | the velocity ÷ authored triple 3 |
+| 7, 0 | nothing |
+| 8, 9, 10 | the step's change of velocity (body `+0x170`, `0x10015906`) ÷ authored triple 1 |
+| + `0x80` | negated |
+
+The lean heads for *source × live triple 6* at *dt × live turn rate* and is
+held within ±triple 6 (`0x100151ae`). So **triple 6 is the most the body leans
+about each axis, in radians**, reached at full speed, turn or acceleration.
+A state with no selector does not lean, which is why the default whole turn
+does no harm.
+
+*Measured*: 28 states in 16 controllers select a lean, and every axis they
+lean carries an authored triple-6 limit (32 of 32); z, which none leans, keeps
+6.28 on all 16.
+
+- **The flyers and the animal `a_a_l2`** (9 controllers, `0x86, 0x03`): about
+  x from the negated vertical speed, and about y — **a bank** — from the yaw
+  turn, up to 0.76 rad.
+- **The six- and four-wheelers** (`r_*_03`, `r_*_04`, `0x89, 0x83`): about x
+  from the negated forward acceleration and about y from the negated yaw turn,
+  0.15–0.25 rad and 0.02–0.1.
+- **`r_t_02`** (`0x05, 0x84`): about x from the forward speed, about y from the
+  negated sideways speed.
+
+Which way a positive lean tips the model on screen was not traced through the
+quaternion.
+
+The only other reader of the lean is a generic device's input
+([below](#the-entries-are-channels-and-a-devices-inputs--read-and-measured)),
+which no shipped device selects; `0x1001789a` and `0x10017d9b` only serialise
+it.
 
 ## The frame is the live object's parameter block
 
@@ -284,11 +332,12 @@ the record's extent is common to all of them:
                  a turret's 0x4000000 is its ground mounting, 0x8000000 an HQ
 0x18  int32      the initial state (CIS_ switch values); -1 keeps the class's default
 0x20  float      power: a consumer's draw a second, a battery's output
+0x24  float[2]   a generic device's two input weights
 0x2c  float[16]  the component's values, copied whole into the object
 0x6c  char[32]   archive        what this part emits
 0x8c  char[32]   member
 0xac  int32      N -- how many 4-byte entries follow
-0xb0  int32[N]   the entries
+0xb0  int32[N]   the entries: the section-2 channels it drives
       int32      L
       char[L+1]  a label, where L is not zero
 ```
@@ -335,29 +384,89 @@ read end to end in [23-economy.md](23-economy.md); class **8**, the radar
 its range, value 4 its rescan period), and class **10**, the detection shield
 and its camouflage, in [25-sensors.md](25-sensors.md).
 
+**Where each class's values are read** (*measured*: which of the sixteen are
+ever non-zero):
+
+| class | values set | read in |
+|---|---|---|
+| 2 gun, 30 builder's beam | 0–3 | [29-weapons.md](29-weapons.md) |
+| 4 camera | 0–5, the same six on all 61 | 0–2 in [30-turrets.md](30-turrets.md); 3–5 not read |
+| 5 engine | 0 | [24-motion.md](24-motion.md) |
+| 8 radar, 10 detect shield | 0–4 | [25-sensors.md](25-sensors.md) |
+| 9 fight shield, 15 repair, 21 deflector, 27 armour | 0–2, 0–1, 0–5, 0–2 | [26-damage.md](26-damage.md) |
+| 17 seeker | 0–2 | 0–1 in [29-weapons.md](29-weapons.md); 2 reaches `IDeviceManager` id 12 |
+| 19 battery, 26 efficiency | 0 | [23-economy.md](23-economy.md) |
+| 3 generic device | 0 (0.5 on 8 flyer records) | not read |
+| 24 the hero's arms | 1 and 4 | not read |
+| 1, 12, 13, 25, 29 | none | — |
+
+So the only values not yet read are class 3's value 0, the camera's 3–5 and
+the arms' 1 and 4.
+
+### The entries are channels, and a device's inputs — *read*, and *measured*
+
+**A component's entries are channel indices.** The parser adds the part's
+first section-2 channel to each and keeps it as a 20-byte channel link in the
+component's list at `+0x1c` (`Control.dll:0x10021de7`): a gun's barrels, a
+turret's yaw and pitch, a door's leaves, a wheel. *Measured*: all **885**
+entries, on 474 components, index a channel of their own controller, and 861
+of the 991 channels are driven by some component. No frame field feeds a
+channel: a channel moves at its own rate toward what its component asks.
+
+**The generic device takes its rate from the motion.** The factory builds
+classes 3, 6, 7, 11–14, 16, 18, 20, 22–25, 28 and 29 as one device
+(`0x1002d6ec`, `0x10020800`). Its update adds two inputs, selected by the flags
+word's bytes 1 and 2 and weighted by the floats at `+0x24` and `+0x28`
+(`0x10020985`); a non-zero byte 0 selects an input that sets the progress
+outright. A selector *s* (`0x10020d90`, `0x10020ea0`):
+
+| *s* | input |
+|---:|---|
+| 2, 3, 4 | spin about x, y, z |
+| 5, 6, 7 | the same, negated |
+| 8, 9, 10 | the lean ÷ authored triple 6 |
+| 11, 12, 13 | the velocity ÷ authored triple 3 |
+| 14 | the speed ÷ the authored top speed, as lengths |
+| other | the default: 1 as the first input, 0 as the second, the progress unchanged as byte 0 |
+
+*Measured*, over the 276 generic devices: selectors 12 (39), 4 (20), 7 (14)
+and 1 (24), nothing else. **The running gear of the wheeled and tracked
+chassis** (`r_*_03`, `r_*_04`) is 28 class-3 records whose rate is forward
+speed ÷ top speed plus or minus half the yaw rate — (12, 7) on the records
+whose flags' top byte is 1 and (12, 4) on those with 2, weights 1.0 and 0.5 on
+all 28 — so the two sides turn at different speeds in a turn. Eleven records
+on `r_b_02`, `r_l_02`, `r_l_05` and `r_m_02` set their progress from
+selector 12, forward speed, and six on `r_l_03` and `r_m_03` from 4, the yaw
+rate. This is the frame reaching a channel: through triple 3, never directly.
+
 ## The section-5 record — *read*, and *measured*
 
 Nine `int32`, **then** the name pair:
 
 ```
-0x00  int32      flags: 0x80000000 and 0x10000000 bracket a conditional run,
-                 and 0x100022c0 decides whether a record applies (its test unread)
-0x04  int32[2]   unresolved
+0x00  int32      flags: 0x40000000 / 0x20000000 test the conditions,
+                 0x80000000 opens a run, 0x10000000 closes it (below)
+0x04  int32      the condition mask: one bit per condition byte
+0x08  int32      the inversion: the masked bytes that count when clear
 0x0c  int32      the action, 0..27 (Control.dll:0x10002800, table 0x10003590)
 0x10  int32[4]   v4..v7, the action's arguments
-0x20  int32      unresolved
+0x20  int32      not read; 1.0 as a float on two records
 0x24  char[32]   archive
 0x44  char[32]   member
 ```
 
 A group is a list of actions run in order: when a state is entered (its `+0x90`),
+when a contact lands (its `+8`, [below](#section-1s-conditions-are-contacts--read-and-measured)),
 from the 84-byte block (entry 0 at load, 2 to 4 on a round's hit, edge and range
-end, 10 to 20 by the ground's surface), or by a building's construction codes.
+end, 6 and 7 at critical damage, 9 on control message 12, 10 to 20 by the
+ground's surface), by a component (a gun's `+0xc`; a generic device's `+0x10`
+and `+0x14` as it starts and stops working, `0x10020951` and `0x10020931`), or
+by a building's construction codes.
 The actions (*read*; counts *measured* across the 2925 records):
 
 | action | records | does |
 |---:|---:|---|
-| 0 | 202 | a call on the controller's `+0x1b4` (`0x10014400`, unread); first in every round group |
+| 0 | 202 | **stop the body**: its command, velocity, spin and step velocity go to zero (`0x10014400`); first in every round group |
 | 1, 2 | 80, 30 | property `0x200` / `0x201` on the object |
 | 3 | 217 | **an effect** by name on control point v4, id v7 (`0x10002972`) |
 | 4 | 1203 | **an effect** by name on three control points v4..v6, at their centroid, id v7 (`0x10002a8d`) |
@@ -371,7 +480,7 @@ The actions (*read*; counts *measured* across the 2925 records):
 | 15 | 75 | **remove the object** with no explosion (`0x10003341`) |
 | 17 | 69 | **kill it**: invulnerability off, then `ILifeSystem` slot 7, so its node 0 explodes (`0x100033d0`) |
 | 18, 19 | 42, 196 | switch effect v4 on / off |
-| 20 | 60 | on an agent of kind 3, a call through the object's interface 5 (`0x1000352e`); *unknown*; `fortif.rlb` only |
+| 20 | 60 | **place the building**: on an agent of kind 3, the object's parent's `ITerrain` (interface 5) slot 3, `CLandscape::PlaceBuilding` (`0x1000352e`, `Terrain.dll:0x1000df10`); `fortif.rlb` only, in every building's construction states |
 | 21 | 60 | kill every unit in the construction sphere ([32-builder.md](32-builder.md)) |
 | 27 | 58 | **explode node v4** with the named `.exp` (`0x100030ce`) |
 
@@ -389,51 +498,141 @@ Across both places a controller names **1769** resources and **every one
 resolves**. The 219 on components are what the part emits — a gun's projectile
 is named there, which is why all 158 `objects.rlb` references are `BULL`
 records, carried only by the four archives that hold things which shoot.
-### What is still not read
 
-The meaning of the fields rather than their extent: what most classes'
-sixteen values mean, a component's 4-byte entries, section 1's conditions
-(its transition table is read in
-[24-motion.md](24-motion.md#playing-a-state--read-and-measured)), and three of the nine
-ints of a section-5 record. The 84-byte block is 21 section-5 group indices — entry 0
-runs at load, entries 10–20 by the ground's surface id — in
-[24-motion.md](24-motion.md#the-eleven-surface-groups-switch-the-dust--measured). What section 1's states, the motion
-triples and a component's mass (`+0x1c`) do is in [24-motion.md](24-motion.md).
+### A record's condition, and runs — *read*, and *measured*
 
-### Where to look next
+A controller keeps **sixteen condition bytes** at `+0x378`, and a record's
+ints 1 and 2 test them (`0x100022c0`):
 
-`LoadControlSystem` takes **three `(archive, member)` pairs** — six name
-strings — copies them into a local block and hands it to a message dispatch.
-Its only caller, at `AniMesh.dll:0x100032e7`, pushes them from three fields of
-the agent at `+0x80`, `+0xc0` and `+0x100`, each an archive name followed by a
-member name 0x20 later, plus a kind argument the callee compares against 9. The object is 0x668 or 0x670 bytes
-with **six vtables** (`0x1003d298`, `0x1003d254`, `0x1003d1fc`, `0x1003d1b4`,
-`0x1003d1a0`, `0x1003d198`) and the interface it returns is the last of them,
-at `+0x14`. The message it sends is `0x80000020`, whose only handler is the function
-at `0x10007830` (the branch at `0x10007890`). It calls **`0x10008b10`** — the
-loader proper — which resolves a name through the resource manager at
-`0x10042700`, then reads a
-`count` dword and walks records at a **36-byte** stride (`add esi, 0x24` at
-`0x10008be1`), which is the same 36 bytes the reference record ends with.
+| byte | set when |
+|---:|---|
+| 0–10 | the machine stands on ground surface id *i* — one of them, rewritten whenever the id changes (`0x10002790`, `0x1001ab21`) |
+| 7 | then overwritten with the face's world flag `0x400`, **the liquid bed** (`0x1001ab2d`) |
+| 14 | the machine is critically damaged ([below](#critical-damage-block-entries-6-and-7--read-and-measured)) |
+| 15 | a copy of `+0x618`, taken before each group runs (`0x1000286d`); control message 7 with argument 2 sets it (`0x10007be9`); with it set, node damage passed with its third argument set is added to the node's `+0x10` and the life put back (`0x10010fe6`) |
+| 11–13 | never |
 
-A sibling handler at `0x100314f0` — its `0x80000023` branch — shows the idiom
-the sections are likely to follow: a **flags byte** whose bits gate optional
-blocks, each block a run of `int32` terminated by `-1`. That is consistent with
-the `-1` fills throughout these files, and it is the next thing to test.
+Condition *i* **holds** when bit *i* of the mask is set and byte *i* is set —
+or clear, where bit *i* of the inversion is set. A record flagged
+**`0x40000000` runs when any masked condition holds**, one flagged
+`0x20000000` when all of them do, and a record with neither always runs.
 
-**What the controller's messages are is now settled.** Its dispatch is a
-16-way jump table on the message number, and that range is exactly `MCMD_` 1
-to 16 — the movement commands the input tables send, whose numbers are
-recovered in [14-controls.md](14-controls.md). Three commands the shipped
-tables use fall outside it: `MCMD_WALK_F` (19), `MCMD_WALK_B` (20) and
-`MCMD_LOCK` (21), so walking a machine is handled somewhere else entirely.
-What remains open is narrower than it was: not *what the messages are*, but
-which **field of the frame** feeds the channels those handlers reach —
-`+0x5c8`, a 0xf4-byte object with 0x1c-stride channels defaulting to 0.5, and
-`+0x5cc`, a 0x120-byte one with two arrays of six floats.
+Records group into **runs** (`0x100028b2`). `0x80000000` opens one; the next
+`0x10000000` record closes it, and runs on its own condition **or when no
+record since the opening one has run** — an *else*. So a run is a switch.
 
-The nine ints of the reference record are mostly read
-([above](#the-section-5-record--read-and-measured)). The 84-byte block is no
-longer an unknown either: its 21 entries are section-5 group
-indices, set on 273 of the 531 members
-([24-motion.md](24-motion.md#the-eleven-surface-groups-switch-the-dust--measured)).
+*Measured*: 37 records test conditions, all with `0x40000000` and a single
+mask bit, on bytes 0, 1, 2, 5, 7, 8, 9 and 10; every inversion lies inside its
+mask. Eight runs open and eight close, none left open. The hero's footstep
+groups are the clearest (`r_h_02`, one per foot):
+
+| surface (tag) | step effect |
+|---|---|
+| 5 (`mt`) | `step_hm` |
+| 1 (`st`) | `step_hs` |
+| 2 (`gr`) | `step_hg` |
+| 8 (`al`) | `step_ha` |
+| 10 (`sh`; also a face whose owner has no materials) | `step_hf` |
+| 9, and the else | `step_hg` |
+
+— metal, stone and grass by the surface's own tag, 8 of the 12 effect letters
+against 2 with the surfaces shifted by one. The critically damaged hero
+starts `smoke_fr_01` only while byte 7 is clear: no smoke over a liquid bed
+(*derived*).
+
+### Section 1's conditions are contacts — *read*, and *measured*
+
+A state's `counts[1]` 16-byte conditions are its **contacts** — a foot, a
+wheel, a leg — and the same points in every state (961 of 961, *measured*).
+The engine keeps one 0x5c-byte entry per contact at `+0xc4`
+([24-motion.md](24-motion.md#finding-the-ground--read)):
+
+```
++0   int32   a control point of the object's .cpt; the node is its third slot
++4   uint32  flags
++8   int32   the section-5 group run when the point lands, or -1
++12  int32   0 in every file; the load writes the planted gap here
+```
+
+| flag | meaning |
+|---|---|
+| `0x100` | the state applies only while this point's node is **intact** (`0x10001107`) |
+| `0x200` | … only while it is **destroyed** — a node at 0 life, status `0x10` (`0x1001106c`, `0x1001ac39`) |
+| `0x4` | a destroyed point falls back to the next control point whose node is intact (`0x1001ac75`) |
+| `0x1` | the point's ground gap, point and normal count toward the body's (`0x1001b00a`) |
+| `0x2` | the node is put on the ground through `IAnimation` slot 31 (`0x1001afcb`) |
+| `0x1000` | set at load on the states whose last pose holds the point within 0.1 of its rest height (`0x1001a328`) |
+| `0x10`, `0x20` | ask the load to derive `0x1` from that, and `0x2` from the point's axis standing within 0.05 of upright (`0x1001a314`) |
+
+**A contact that lands runs its group**: an intact point in a `0x1000` state
+that was not planted in the one before runs `+8` (`0x1001b08f`). Those are the
+**footsteps**: 22 groups in `bases.rlb` and `animals.rlb` are reached from
+nowhere else.
+
+**The state test, then, is about damage**, not about the ground. *Measured*:
+2634 contacts on 961 states; the 1363 on controllers with a same-stem `.cpt`
+all index it (`LeftFoot`, `foot_fl`, `leg_fl`, `weel_fr`, `Placement`); `+12`
+is zero on all 2634. 102 states need a destroyed contact — 81 on `r_b_05`, 11
+on `r_l_01`, 9 on `r_m_01`, 1 on `r_b_01` — and every contact on them sits on a
+running-gear node, 103 left (`.ndp` `0x20`) and 103 right (`0x40`): **the
+walkers limp** when a leg is shot off.
+
+### Critical damage: block entries 6 and 7 — *read*, and *measured*
+
+After a node takes damage the node update (`0x10012a40`) decides whether the
+machine is **critical**:
+
+- **with running gear** (`.ndp` flags `0x70`, *n* nodes): when their life
+  fractions sum to *n* / 2 − 1 or less (`0x10012ad6`) — on a machine with one
+  gear node a side, both gone (*derived*);
+- **without**: below 20% of its full hit points, 30% for an agent of kind 10
+  (`0x10012bda`, `0x1000fa85`).
+
+Becoming critical runs **block entry 6** and sets condition byte 14
+(`0x10012bfb`); from then on the machine **burns**, losing 10% of the life it
+had at that moment times the update's dt (`0x10012c1c`). Recovering runs
+**entry 7** and clears the byte (`0x10012b12`).
+
+*Measured*: 32 controllers set entry 6, all set entry 7, and every entry-6
+group switches effects on (action 18) that the entry-7 group switches off
+(19): `smoke_fr_01` on 21, flames on the trees, `aim_fire_S` on four.
+Entry 9 runs on control message 12 (`0x10007cab`); entries 1, 5 and 8 are
+read by nothing, and no shipped controller sets 1, 5, 8 or 9.
+
+### What the loader is handed
+
+`LoadControlSystem` takes **three `(archive, member)` pairs** from the agent's
+`+0x80`, `+0xc0` and `+0x100` (`AniMesh.dll:0x100032e7`), plus a kind. The
+message it sends is `0x80000020`, handled at `0x10007830`, which calls the
+loader `0x10008b10`. The pairs are **the `.ctl`**, **the `.ndp`**, read at 76
+bytes a record into the node records (`0x10008c6b`), and **the `.cpt`**, read
+at 36 bytes into the control-point table at `+0x54` (`0x10008be1`), whose
+entries keep the point's node (`0x1000b210`). The 36-byte stride this page
+once matched against the reference record is the control point's.
+
+The control system with that dispatcher installs six vtables
+(`0x1000728d`): `0x1003b5e0` at +0 (`IControl`), `0x1003b59c` at +4
+(`ILifeSystem`), `0x1003b544` at +8 (interface `0x202`), `0x1003b4fc` at +0xc
+(`IDeviceManager`, `0x204`), `0x1003b4e8` and `0x1003b4e0`. The six this page
+listed before (`0x1003d198` at +0x14, `0x100314da`) are a second class's, and
+its +0xc vtable `0x1003d1b4` has the same slot 4. **The 16-way jump table once
+taken for the controller's `MCMD_` dispatch is that slot 4**, a getter by id —
+see [14-controls.md](14-controls.md#the-join-with-the-controller--read). Input
+reaches the controller through `IControl`'s setters and the component
+interface, and walking through `World3D.dll`'s own table, so no frame field
+is wired to a message.
+
+### Not established
+
+- Triple 5 (+68): multiplied into the spin integrator (`0x10014b15`); what it
+  stands for.
+- Class 3's value 0 (0.5 on eight records), the camera's values 3–5, the
+  hero's arms' values 1 and 4.
+- The section-5 record's int 8 (`+0x20`): not read by the interpreter, the only
+  code that walks the records; 1.0 as a float on the two `eng_rb_0?_snd`
+  records.
+- Which way a positive lean tips the model on screen.
+- What control message 7's arguments 0, 1 and 2 stand for, and so what byte 15
+  and `+0x618` mean; no shipped record tests byte 15.
+- `IDeviceManager` ids 5 and 6: what the gun's `+0x174` (the round's property
+  `0x35`) is.

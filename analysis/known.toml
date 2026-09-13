@@ -1264,6 +1264,479 @@ name = "the only caller of the three-field message dispatch"
 read = true
 doc = "docs/13-control.md"
 
+# --- .ctl fields: section-5 conditions, contacts, lean, device inputs, ../docs/13-control.md ---
+[[entry]]
+module = "Control.dll"
+at = "0x100022c0"
+kind = "function"
+name = "section-5 record gate: 0x40000000 any / 0x20000000 all masked condition bytes (+4 mask, +8 inversion); neither always runs"
+read = true
+doc = "docs/13-control.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x100028b2"
+kind = "site"
+name = "action interpreter: 0x80000000 opens a run; 0x10000000 closes it and runs when nothing since the opening did"
+read = true
+doc = "docs/13-control.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000286d"
+kind = "site"
+name = "action interpreter: condition byte 15 = +0x618 before each group"
+read = true
+doc = "docs/13-control.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x10002280"
+kind = "function"
+name = "condition bytes +0x378..+0x387 cleared"
+read = true
+doc = "docs/13-control.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x10002790"
+kind = "function"
+name = "condition bytes 0..10 = (surface id == i)"
+read = true
+doc = "docs/13-control.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001ab2d"
+kind = "site"
+name = "ground contact, surface change: condition byte 7 = world face flag 0x400, the liquid bed"
+read = true
+doc = "docs/13-control.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x10007cab"
+kind = "site"
+name = "control message 12: runs block entry 9 (+0x500)"
+read = true
+doc = "docs/13-control.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x10007be9"
+kind = "site"
+name = "control message 7: argument 2 sets +0x618 (condition byte 15); 0 and 1 clear it"
+read = true
+doc = "docs/13-control.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x10010fe6"
+kind = "site"
+name = "node damage: with the third argument and +0x618 set, the damage is added to +0x10 and the life put back"
+read = true
+doc = "docs/13-control.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x10014400"
+kind = "function"
+name = "motion body stop (action 0): command +0x08, velocity +0x14, spin +0x20, step velocity +0x4c zeroed"
+read = true
+doc = "docs/13-control.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000352e"
+kind = "site"
+name = "action 20: kind-3 agent -> CGameObject GetParent -> QI 5 ITerrain -> slot 3 (CLandscape::PlaceBuilding) with the object"
+read = true
+doc = "docs/13-control.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x10012ad6"
+kind = "site"
+name = "node update after damage: critical when running-gear (.ndp 0x70) life fractions sum to n/2 - 1 or less"
+read = true
+doc = "docs/13-control.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x10012bda"
+kind = "site"
+name = "node update: with no running gear, critical below +0x594 (full life x 0.2, x 0.3 on kind 10)"
+read = true
+doc = "docs/13-control.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x10012bfb"
+kind = "site"
+name = "becoming critical: block entry 6 (+0x4f4), condition byte 14 set, +0x594 = life now"
+read = true
+doc = "docs/13-control.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x10012b12"
+kind = "site"
+name = "leaving critical: block entry 7 (+0x4f8), condition byte 14 cleared"
+read = true
+doc = "docs/13-control.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x10012c1c"
+kind = "site"
+name = "while critical: loses 0.1 x the life at the break x dt (0x10010ba0)"
+read = true
+doc = "docs/13-control.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000fa85"
+kind = "site"
+name = "load: +0x594 = full life x 0.2 (global 0x100424a8), x 0.3 on kind 10 (0x100424ac)"
+read = true
+doc = "docs/13-control.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x100063c5"
+kind = "site"
+name = "globals: critical fractions 0.2 and 0.3, burn rate 0.1 (0x100424b0)"
+read = true
+doc = "docs/13-control.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x10001107"
+kind = "site"
+name = "state condition: contact flag 0x100 needs its entry's +0x59 (node intact) set, 0x200 clear"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001ac39"
+kind = "site"
+name = "ground contact: a contact's +0x59 = its control point's node (.cpt third slot) not destroyed (status 0x10)"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001106c"
+kind = "site"
+name = "node damage: a node at 0 life gets status flag 0x10, destroyed"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001ac75"
+kind = "site"
+name = "contact flag 0x4: a destroyed point falls back to the next control point whose node is intact"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001afcb"
+kind = "site"
+name = "contact flag 0x2 on an intact point: IAnimation slot 31 places its node at the ground point"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001b00a"
+kind = "site"
+name = "contact flag 0x1: the point's height gap, ground point and normal count toward the body's (averaged)"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001b08f"
+kind = "site"
+name = "contact flag 0x1000 on an intact point not yet landed: run section-5 group contact +8, mark landed (+0x5a)"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001a328"
+kind = "site"
+name = "load, per state: contact flag 0x1000 when its point in the state's last pose is within 0.1 of its rest height"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001a314"
+kind = "site"
+name = "load: contact flag 0x10 derives 0x1 from planting, 0x20 derives 0x2 from 1 - axis z < 0.05"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x10008be1"
+kind = "site"
+name = "loader: the third name pair's 36-byte records (the .cpt) into the control point table +0x54"
+read = true
+doc = "docs/13-control.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x10008c6b"
+kind = "site"
+name = "loader: the second name pair's 76-byte records (the .ndp) into node records"
+read = true
+doc = "docs/13-control.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000b210"
+kind = "function"
+name = "control point entry: record pointer, a second word, node = record +4 (-1 without a record)"
+read = true
+doc = "docs/13-control.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x10021de7"
+kind = "site"
+name = "component parser: each 4-byte entry + the part's first channel -> a 20-byte channel link at +0x1c"
+read = true
+doc = "docs/13-control.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x10014e8d"
+kind = "site"
+name = "lean: state +0x08 byte per axis, low 7 bits a source (table 0x1001538c), 0x80 negates; x live triple 6"
+read = true
+doc = "docs/13-control.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x10014f37"
+kind = "site"
+name = "lean sources 8-10: the step's change of velocity (body +0x170) over authored triple 1"
+read = true
+doc = "docs/13-control.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x10015906"
+kind = "site"
+name = "velocity integrator end: body +0x170 = new velocity - the velocity the step began with"
+read = true
+doc = "docs/13-control.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x100151ae"
+kind = "site"
+name = "lean body +0xa0 held within +-live triple 6 per axis"
+read = true
+doc = "docs/13-control.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x10015251"
+kind = "site"
+name = "lean turned into the tilt quaternion +0x90 (previous kept at +0x80)"
+read = true
+doc = "docs/13-control.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x10020ea0"
+kind = "function"
+name = "device input (axis, kind): spin, -spin, lean / authored triple 6, velocity / authored top speed; axis -1 lengths"
+read = true
+doc = "docs/13-control.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x10020951"
+kind = "site"
+name = "generic device starts working: section-5 group record +0x10 (0x100221e0), then +0x99 set"
+read = true
+doc = "docs/13-control.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x10020931"
+kind = "site"
+name = "generic device stops (state 0 or state 1): section-5 group record +0x14, +0x99 cleared"
+read = true
+doc = "docs/13-control.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x10020985"
+kind = "site"
+name = "generic device rate: selector(flags byte 1) x record +0x24 + selector(byte 2) x record +0x28"
+read = true
+doc = "docs/13-control.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1003b4fc"
+kind = "datum"
+name = "IDeviceManager (0x204) vtable at control system +0xc: slot 4 get 0x1002b410, slot 5 set 0x1002ba30"
+read = true
+doc = "docs/14-controls.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002b9e8"
+kind = "table"
+name = "IDeviceManager slot 4's 16-entry id table -- once read as MCMD_ 1..16"
+read = true
+doc = "docs/14-controls.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002b595"
+kind = "site"
+name = "IDeviceManager get 5/6: guns (5 skips state 1) sum +0x174 x 1000 / max(value 3, 1)"
+read = true
+doc = "docs/14-controls.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002b6ae"
+kind = "site"
+name = "IDeviceManager get 7: fight shield's six sector fills x 1/6"
+read = true
+doc = "docs/14-controls.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002b738"
+kind = "site"
+name = "IDeviceManager get 10-12: the seeker (+0x5d8) values 1, 0, 2"
+read = true
+doc = "docs/14-controls.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002b7d3"
+kind = "site"
+name = "IDeviceManager get 14-16: fight shield and deflector products"
+read = true
+doc = "docs/14-controls.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002986c"
+kind = "site"
+name = "a gun, on the round it fires: IDeviceManager get 10 (the round's seeker value 1)"
+read = true
+doc = "docs/14-controls.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x10007d58"
+kind = "site"
+name = "control message 20: re-initialise -- 0x10009420, node reset, weights, speed limits"
+read = true
+doc = "docs/14-controls.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x10007d0f"
+kind = "site"
+name = "control message 21: sub-code 5 with a matching time runs the control takt 0x100059a0"
+read = true
+doc = "docs/14-controls.md"
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10007277"
+kind = "site"
+name = "agent message 20: re-initialise, then the load's two follow-up calls (0x10009510, 0x1000af10)"
+read = true
+doc = "docs/14-controls.md"
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x1000729b"
+kind = "site"
+name = "agent message 21: switch on a sub-code 2..9 (table 0x100073a8)"
+read = true
+doc = "docs/14-controls.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x100180bd"
+kind = "site"
+name = "IDeviceManager get 1 (battery fill) after QI 0x204"
+read = true
+doc = "docs/14-controls.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10005e34"
+kind = "site"
+name = "QI 5 is ITerrain: 'Root object not support ITerrain'"
+read = true
+doc = "docs/13-control.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1001a120"
+kind = "function"
+name = "landscape QueryInterface: 0/6 +4, 1 +0x13c, 5 ITerrain +0x134, 0xd material manager, 0x18 +0x138"
+read = true
+doc = "docs/13-control.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1009a438"
+kind = "datum"
+name = "ITerrain vtable (landscape +0x134): slot 3 CLandscape::PlaceBuilding 0x1000df10"
+read = true
+doc = "docs/13-control.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1000df10"
+kind = "function"
+name = "CLandscape::PlaceBuilding(object): its placement, then insertion attempts ('Building insertion finally failed!')"
+read = true
+doc = "docs/13-control.md"
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10020d28"
+kind = "datum"
+name = "CGameObject interface 6 vtable: 0 QI, 2 SetParent, 3 GetParent"
+read = true
+doc = "docs/13-control.md"
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10017570"
+kind = "function"
+name = "CGameObject GetParent (interface 6 slot 3): +8"
+read = true
+doc = "docs/13-control.md"
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x100174c0"
+kind = "function"
+name = "interface 6 QueryInterface: 0 and 6 itself, anything else the owner at +4"
+read = true
+doc = "docs/13-control.md"
+
 # --- names the binaries carry themselves --------------------------------
 #
 # Recovered by `coverage.py --names`: a release build with no symbols still

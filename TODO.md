@@ -511,12 +511,12 @@ written down is a question nobody reopens.
       name resolver for every family the tables use, so the engine's own
       numbers are recoverable: all **174** scan codes (the real IBM PC set-1
       codes — `SCAN_A` is 30, `SCAN_ESC` 1, `SCAN_F1` 59), 22 `MCMD_`
-      commands, 13 `CICLS_` classes and 15 `CIS_` state bits. The
-      controller's dispatch is a 16-way jump table, and **`MCMD_` 1 to 16 is
-      exactly that range** — the join the previous entry was missing.
-      `MCMD_WALK_F` (19), `MCMD_WALK_B` (20) and `MCMD_LOCK` (21) fall
-      outside it on 14 of the 116 rows, so walking is not the movement
-      controller's job. It is `World3D.dll`'s: one 21-entry table covers
+      commands, 13 `CICLS_` classes and 15 `CIS_` state bits. The match
+      once drawn here between `MCMD_` 1 to 16 and a 16-way jump table in
+      `Control.dll` was by count and is **withdrawn**: that table is
+      `IDeviceManager`'s getter, and `Control.dll`'s messages 20 and 21 are
+      the agent's reset and sub-coded takt, not `MCMD_WALK_B` and
+      `MCMD_LOCK`. Commands are `World3D.dll`'s: one 21-entry table covers
       the whole `MCMD` space, and walking shares its handler with driving.
       → [docs/14-controls.md](docs/14-controls.md)
 
@@ -999,28 +999,27 @@ today; each is a small trap for anyone extending the code.
   384 vertical building faces. What reads 2 and 16 is open: the mesh visitor
   takes its triangle masks from its caller (`AniMesh.dll:0x10008120`).
   → [docs/07-objects.md](docs/07-objects.md#stream-7-is-the-per-face-record)
-- The `.ctl` fields' **meaning**, now that their extent is settled: the
-  component record's sixteen values (class 26's first is a building's
-  efficiency, done) and its 4-byte entries, section
-  1's and section 2's record contents, the 84-byte block, and the nine ints
-  of a section-5 record.
-- Which `.ctl` field feeds which channel. Two of the three legs are now
-  closed. The message side: the controller dispatches `MCMD_` 1..16. The
-  storage side: the frame from +20 on **is** the live object's parameter
-  block at `file + 0x45c`, proved by the initialiser at `0x10006689`
-  writing a default into all 27 slots that is the commonest value in the
-  shipped files, 27 for 27. What is left is only the wiring between them —
-  the handlers for messages 8..12 reach indexed channels on two sub-objects
-  (`+0x5c8`, a 0xf4-byte class with 0x1c-stride channels defaulting to 0.5;
-  `+0x5cc`, a 0x120-byte class with two arrays of six floats), and nothing
-  yet says which triple either was loaded from. The property interface is
-  **not** the route: 143 of its 180 ids fall to a default, and of the 37 it
-  implements only six reach the block — three fields (+20, +48, +124)
-  through three get/set pairs. The read/write scan narrows
-  it: **17 of the 32 slots are never touched in `Control.dll` outside the
-  initialiser**, `+124` turns out to be run-time state rather than a
-  parameter, `+116` is a bitfield whose bit 0 the engine tests, and
-  `+44`/`+48`/`+52`/`+56` are compared rather than multiplied in.
+- The `.ctl` fields' **meaning** — mostly read now
+  ([docs/13-control.md](docs/13-control.md)). Section 1's conditions are
+  **contacts** (a control point, flags, a landing group): `0x100`/`0x200`
+  make a state need that point's node intact or destroyed, so walkers limp;
+  a section-5 record's ints 1-2 are a **mask and inversion over sixteen
+  condition bytes** (surface id, liquid bed, critical damage), with
+  `0x80000000`/`0x10000000` bracketing a switch; action 0 stops the body and
+  action 20 hands a building to `CLandscape::PlaceBuilding`; a component's
+  4-byte entries are the **channels it drives** (885 of 885); triple 6 is the
+  **most the body leans**, and triple 2 is never read. Still open: triple 5,
+  class 3's value 0, the camera's values 3-5, the hero's arms' values 1 and
+  4, the record's int 8, and what control message 7's argument selects.
+- ~~Which `.ctl` field feeds which channel~~ — **closed, and the question was
+  malformed.** The "16-way message dispatch" it rested on is
+  `IDeviceManager` slot 4, a getter by id (`Control.dll:0x1002b410`), and
+  the two slots its handlers touched are the radar and the seeker seen from
+  `+0xc`. Rows reach the controller through `IControl`'s setters and the
+  component interface; a channel moves at its own rate for the component
+  that lists it; the frame reaches a channel only through a generic
+  device's motion inputs (forward speed ÷ triple 3 on the wheels).
+  → [docs/14-controls.md](docs/14-controls.md)
 - What the `.scr` **functions and opcodes compute**. The node's *shape* is now
   fully read ([15-behaviour.md](docs/15-behaviour.md)): `head[0]` selects one
   of 57 functions with a fixed signature, or the node assigns from a variable

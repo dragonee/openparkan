@@ -55,9 +55,11 @@ SCHEME_TYPES = {
 #: A ``.tbl`` row has eleven fields before the trailing text.
 TABLE_FIELDS = 11
 
-#: The controller's own message dispatch is a 16-way jump table on the command
-#: number, so these are the commands it handles itself.  Walking and locking
-#: are outside it and go somewhere else.
+#: ``MCMD_`` 1 to 16, the span once matched to a 16-way jump table in
+#: ``Control.dll`` and read as the controller's own dispatch.  That table is
+#: ``IDeviceManager`` slot 4, a getter by id (``0x1002b410``), so nothing
+#: dispatches on this span; ``World3D.dll``'s one table covers 1 to 21
+#: (``MCMD_DISPATCH``).  Kept for the reading it records.
 DISPATCHED = range(1, 17)
 
 #: What a resolver returns for a name it does not know.
@@ -77,9 +79,8 @@ DEVICES = ("KEY", "MOUSE")
 # and the family's default otherwise (-1 for most, 0 for the classes).
 # The names are the files'; the numbers are the engine's.
 
-#: Movement command -> the number the engine dispatches on.  The
-#: controller's own jump table covers 1 to 16; ``MCMD_WALK_F``,
-#: ``MCMD_WALK_B`` and ``MCMD_LOCK`` fall outside it.
+#: Movement command -> the number the engine dispatches on, in
+#: ``World3D.dll``'s row handler (``MCMD_DISPATCH``).
 MCMD = {
     "MCMD_DUMMY": 0,
     "MCMD_STATE": 1,
@@ -594,7 +595,7 @@ class Action:
 
     @property
     def dispatched(self) -> bool:
-        """True when the movement controller handles this command itself."""
+        """True for a command numbered 1 to 16 (``DISPATCHED``), which no dispatch uses."""
         return self.code in DISPATCHED
 
 

@@ -82,6 +82,20 @@ ENTRY_LOAD = 0
 ENTRY_HIT = 2
 ENTRY_EDGE = 3
 ENTRY_RANGE = 4
+#: Block entries the node update runs (``0x10012a40``): 6 when the machine
+#: becomes critically damaged, 7 when it stops being so.  Critical is running
+#: gear whose summed life fractions fall to ``n / 2 - 1`` or below for ``n``
+#: gear nodes (``.ndp`` flags ``0x70``); a machine with none is critical below
+#: ``CRITICAL_LIFE`` of its full hit points (``CRITICAL_LIFE_STATIC`` for an
+#: agent of kind 10, ``0x1000fa85``).  While critical it loses ``BURN_RATE``
+#: of the life it had when it became so, times the node update's dt
+#: (``0x10012c1c``).  32 controllers set both entries, and every group
+#: switches an effect on (6) and the same one off (7): smoke, a tree's flames.
+ENTRY_CRITICAL = 6
+ENTRY_RECOVERED = 7
+CRITICAL_LIFE = 0.2
+CRITICAL_LIFE_STATIC = 0.3
+BURN_RATE = 0.1
 
 #: A section-5 record's action, at int 3, and the interpreter's cases
 #: (``Control.dll:0x10002800``, table ``0x10003590``).  3, 4 and 5 start an
@@ -107,6 +121,38 @@ ACT_EFFECT_ON = 18
 ACT_EFFECT_OFF = 19
 ACT_KILL_IN_SPHERE = 21
 ACT_EXPLODE_NODE = 27
+#: Action 0 zeroes the motion body's command, velocity, spin and step velocity
+#: (``0x10014400``); action 20, on an agent of kind 3, hands the object to its
+#: parent's ``ITerrain`` (interface 5) slot 3, ``CLandscape::PlaceBuilding``
+#: (``Terrain.dll:0x1000df10``).
+ACT_STOP = ACT_CALL
+ACT_PLACE_BUILDING = 20
+
+#: A record's int 0 and ints 1-2 gate it (``Control.dll:0x100022c0``,
+#: ``0x100028b2``).  Ints 1 and 2 are a mask and an inversion over the
+#: controller's sixteen **condition bytes**: condition ``i`` holds when byte
+#: ``i`` is set, or when it is clear and bit ``i`` of the inversion is set.
+#: ``REF_ANY`` runs the record when any masked condition holds, ``REF_ALL``
+#: when every one does; a record with neither always runs.  ``REF_OPEN`` opens
+#: a run and ``REF_ELSE`` closes it: the closing record also runs when no
+#: record since the opening one did.  Int 8 is not read.
+REF_OPEN = 0x80000000
+REF_ANY = 0x40000000
+REF_ALL = 0x20000000
+REF_ELSE = 0x10000000
+MASK_AT = 1
+INVERT_AT = 2
+#: The condition bytes (controller ``+0x378``).  Bytes 0-10 say which ground
+#: surface id the machine stands on (``0x10002790``, set when the id
+#: changes); byte 7 is then overwritten with the face's liquid-bed flag
+#: (world flag ``0x400``, ``0x1001ab2d``); byte 14 is set while the machine
+#: is critically damaged (``ENTRY_CRITICAL``); byte 15 is a copy of
+#: ``+0x618``, which message 7 with argument 2 sets.  Bytes 11-13 are never
+#: set.
+CONDITIONS = 16
+COND_BED = 7
+COND_CRITICAL = 14
+COND_MODE = 15
 
 #: A component record's fixed part, and the fields inside it that are read.
 #: Thirteen of the factory's fourteen classes share one parser at
@@ -207,6 +253,23 @@ SALVO = 0x2000000
 #: A section-5 group of the controller a gun runs when a barrel starts its
 #: stroke (``Control.dll:0x1002a1df``), or -1.  34 guns set one.
 COMPONENT_GROUP_AT = 0x0C
+#: A component's 4-byte entries are **section-2 channel indices**, rebased by
+#: the part's first channel and kept as the channels the component drives
+#: (``Control.dll:0x10021de7``): a gun's barrels, a turret's yaw and pitch, a
+#: wheel.  All 885 shipped entries name a channel of their controller.
+#:
+#: The factory's generic device (classes 3, 6, 7, 11-14, 16, 18, 20, 22-25,
+#: 28, 29; ``0x10020800``) takes its rate from the machine's motion: the
+#: flags word's bytes 1 and 2 select two inputs, weighted by the floats at
+#: ``+0x24`` and ``+0x28`` (``0x10020985``); a non-zero byte 0 selects one
+#: that sets its progress outright.  A selector ``s`` from 2 to 13 is
+#: ``DEVICE_INPUT_KINDS[(s - 2) // 3]`` on axis ``(s - 2) % 3``; 14 is the
+#: speed's length over the top speed's; anything else is the default, 1 for
+#: the first input and 0 for the second (``0x10020d90``, ``0x10020ea0``).
+COMPONENT_WEIGHTS_AT = 0x24
+DEVICE_INPUT_KINDS = ("spin", "-spin", "lean", "speed")
+DEVICE_INPUT_FIRST = 2
+DEVICE_INPUT_LENGTH = 14
 #: The hero turret's weapon arms, one per gun; built as the factory's generic
 #: device (``0x1002d6ec``).  No other controller has any.
 ARM_TYPE = 24
@@ -276,6 +339,43 @@ NO_EDGE = 1_000_000.0
 #: answer the construction sphere's codes (docs/32-builder.md).
 STATE_ACTIONS_AT = 0x90
 STATE_REQUEST_AT = 0x98
+#: Bytes +0x08..+0x0a pick what leans the body about x, y and z
+#: (``0x10014e8d``): 1-3 the turn about x, y or z this step over dt x the
+#: authored turn rate, 4-6 the velocity along x, y or z over the authored top
+#: speed, 8-10 the last step's change of velocity (``0x10015906``) over the
+#: authored acceleration; ``LEAN_NEGATE`` flips it.  The lean heads for that fraction of triple 6 at
+#: the live turn rate, is held within triple 6, and turns the body's tilt
+#: (``0x100151ae``, ``0x10015251``).
+STATE_LEAN_AT = 0x08
+LEAN_NEGATE = 0x80
+LEAN_TURN = (1, 2, 3)
+LEAN_VELOCITY = (4, 5, 6)
+LEAN_ACCELERATION = (8, 9, 10)
+#: A state's 16-byte conditions are its **contacts**, one per foot, wheel or
+#: leg, the same points in every state of a controller:
+#:
+#: * +0 a control point of the object's ``.cpt``, placed on the node its third
+#:   slot names (``0x1001ac0d``);
+#: * +4 flags.  ``NEEDS_INTACT`` and ``NEEDS_DESTROYED`` make the state apply
+#:   only while that point's node is intact, or destroyed (``0x10001107``,
+#:   ``0x1001ac39``) -- a walker's limping states.  ``CONTACT_FALLBACK`` moves a
+#:   destroyed point on to the next control point whose node is intact.
+#:   ``CONTACT_SUPPORT`` counts it in the body's ground height, and
+#:   ``CONTACT_PLACE`` puts the node on the ground (``0x1001b00a``,
+#:   ``0x1001afcb``).  ``CONTACT_PLANTED`` is set at load on the states whose
+#:   last pose holds the point within ``PLANTED_WITHIN`` of its rest height
+#:   (``0x1001a328``); ``0x10`` and ``0x20`` ask the load to set
+#:   ``CONTACT_SUPPORT`` and ``CONTACT_PLACE`` from the pose as well.
+#: * +8 the section-5 group run when the point lands: when a planted state
+#:   follows one where it was not (``0x1001b0a5``) -- footsteps.
+#: * +12 zero in the file; the load writes the planted gap there.
+CONTACT_SUPPORT = 0x1
+CONTACT_PLACE = 0x2
+CONTACT_FALLBACK = 0x4
+NEEDS_INTACT = 0x100
+NEEDS_DESTROYED = 0x200
+CONTACT_PLANTED = 0x1000
+PLANTED_WITHIN = 0.1
 
 #: Each class's power channel, by type id -- ``Control.dll:0x1003ccc8``.
 POWER_CHANNEL = (0, 4, 4, 0, 2, 3, 0, 0, 2, 5, 5, 0, 0, 0, 1, 0,
@@ -284,6 +384,31 @@ POWER_CHANNEL = (0, 4, 4, 0, 2, 3, 0, 0, 2, 5, 5, 0, 0, 0, 1, 0,
 #: Each group gets ``min(1, what is left / what it wants)``; the stores, on
 #: channel 1, come last and drain by the share that was used.
 POWER_ORDER = ((3,), (0,), (2, 5), (4,), (1,))
+#: What the control system answers through ``IDeviceManager`` (interface
+#: 0x204, the sub-object at +0xc) slot 4, by id: a 16-way table
+#: (``Control.dll:0x1002b410``, table ``0x1002b9e8``).  This is the table once
+#: taken for a dispatch of ``MCMD_`` 1-16.  ``Behavior.dll`` asks for 1, 2, 5, 6
+#: and 7, ``ArealMap.dll`` for 6, ``iron3d.dll`` for 2, and a fired round's
+#: gun for 10-12.  "Guns" figures are ``+0x174`` (the round's property 0x35)
+#: times 1000 over the gun's interval, at least 1 ms.
+DEVICE_QUERIES = {
+    1: "battery fill",
+    2: "battery capacity",
+    3: "channel 0/2/5 demand a second",
+    4: "channel 0/3/4 demand a second",
+    5: "guns not in state 1, a second",
+    6: "all guns, a second",
+    7: "fight shield: mean sector fill",
+    8: "radar value 3, range",
+    9: "radar value 4, period",
+    10: "seeker value 1",
+    11: "seeker value 0",
+    12: "seeker value 2",
+    13: "turret is an HQ turret",
+    14: "shield fill x deflector values 0-5 x shield value 0",
+    15: "deflector values 0-5 x shield value 0",
+    16: "deflector value 0 x shield value 0",
+}
 #: The smallest a controller can be.  The 128-byte frame and the 84-byte block
 #: are **not** adjacent in general -- sections 1, 2 and 4 lie between them --
 #: but a member with none of those is exactly the two, which is why 212 is the
@@ -307,6 +432,11 @@ TRIPLE_AT = (20, 32, 44, 56, 68, 80)
 TRIPLE_ACCELERATION = 0
 TRIPLE_TOP_SPEED = 2
 TRIPLE_TURN = 3
+#: Triple 6 is the most the body leans about each axis, in radians
+#: (``STATE_LEAN_AT``).  Triple 2 is never read: nothing in ``Control.dll``
+#: reaches +32..+40 in either copy of the block, and 518 of 531 leave it zero.
+TRIPLE_LEAN = 5
+TRIPLE_UNREAD = 1
 #: The ``mode`` that brakes on a slope steeper than ``cone``
 #: (``Control.dll:0x100157ac``).
 SLOPE_MODE = 2
@@ -391,10 +521,10 @@ class Reference:
     """One ``(archive, member)`` pair inside a controller, and its nine ints.
 
     A record is one **action** in a group the controller runs in order
-    (``Control.dll:0x10002800``): int 0 carries flags, int 3 the action
-    (``ACT_*``) and ints 4-7 its arguments.  Only the effect actions 3, 4 and
-    5 and the explosion action 27 name anything.  Ints 1, 2 and 8 are not
-    read.
+    (``Control.dll:0x10002800``): int 0 carries flags, ints 1 and 2 its
+    condition (``REF_*``), int 3 the action (``ACT_*``) and ints 4-7 its
+    arguments.  Only the effect actions 3, 4 and 5 and the explosion action 27
+    name anything.  Int 8 is not read.
     """
 
     resource: ResourceRef
@@ -413,6 +543,55 @@ class Reference:
     def args(self) -> tuple[int, ...]:
         """v4 to v7."""
         return tuple(self.values[ACTION_AT + 1:ACTION_AT + 5])
+
+    @property
+    def flags(self) -> int:
+        return self.values[0] & 0xFFFFFFFF
+
+    @property
+    def mask(self) -> int:
+        """The condition bytes the record looks at, one bit each."""
+        return self.values[MASK_AT] & 0xFFFF
+
+    @property
+    def inverted(self) -> int:
+        """The masked conditions that hold on a clear byte rather than a set one."""
+        return self.values[INVERT_AT] & 0xFFFF
+
+    def holds(self, conditions) -> bool:
+        """Whether the record's own condition lets it run.
+
+        ``conditions`` is the controller's sixteen condition bytes, as truth
+        values.  A record flagged neither ``REF_ANY`` nor ``REF_ALL`` always
+        runs; ``REF_ANY`` wins over ``REF_ALL`` when both are set.
+        """
+        if not self.flags & (REF_ANY | REF_ALL):
+            return True
+        met = [bool(conditions[i]) != bool(self.inverted >> i & 1)
+               for i in range(CONDITIONS) if self.mask >> i & 1]
+        return any(met) if self.flags & REF_ANY else all(met)
+
+
+def run_group(records, conditions) -> list[Reference]:
+    """The records of one group that run, in order, given the condition bytes.
+
+    A ``REF_OPEN`` record opens a run unless one is open; the next ``REF_ELSE``
+    record closes it, and runs on its own condition or when no record since
+    the run opened has run.
+    """
+    out: list[Reference] = []
+    inside = ran = False
+    for record in records:
+        forced = False
+        if record.flags & REF_OPEN and not inside:
+            inside, ran = True, False
+        if record.flags & REF_ELSE:
+            forced = inside and not ran
+            inside = ran = False
+        if forced or record.holds(conditions):
+            out.append(record)
+            ran = True
+    return out
 
 
 @dataclass(frozen=True)
@@ -464,6 +643,24 @@ class Channel:
 
 
 @dataclass(frozen=True)
+class Contact:
+    """One of a state's 16-byte conditions: a foot, wheel or leg (``CONTACT_*``)."""
+
+    #: +0: a control point of the object's ``.cpt``.
+    point: int
+    #: +4: ``CONTACT_*``, ``NEEDS_INTACT``, ``NEEDS_DESTROYED``.
+    flags: int
+    #: +8: the section-5 group run when the point lands, or -1.
+    group: int = -1
+
+    def allows(self, intact: bool) -> bool:
+        """Whether this condition lets its state apply, given the point's node."""
+        if self.flags & NEEDS_INTACT and not intact:
+            return False
+        return not (self.flags & NEEDS_DESTROYED and intact)
+
+
+@dataclass(frozen=True)
 class State:
     """One section-1 record: an animation state the controller moves between."""
 
@@ -488,6 +685,10 @@ class State:
     blend: float = 1.0
     #: A fixed step length in ms; 0 lets speed and stride set it.
     length: float = 0.0
+    #: The contacts, one per ``counts[1]``, the same points in every state.
+    contacts: tuple[Contact, ...] = ()
+    #: +0x08..+0x0a: what leans the body about x, y and z (``STATE_LEAN_AT``).
+    lean: tuple[int, int, int] = (0, 0, 0)
 
     @property
     def anchor(self) -> bool:
@@ -497,13 +698,23 @@ class State:
     def by_velocity(self) -> bool:
         return bool(self.mode & STATE_BY_VELOCITY)
 
+    def allows(self, intact) -> bool:
+        """Whether the contacts let this state apply.
+
+        ``intact`` says, per contact, whether its point's node is intact; the
+        velocity and spin boxes and the request code are tested besides
+        (``Control.dll:0x10001000``).
+        """
+        return all(c.allows(ok) for c, ok in zip(self.contacts, intact, strict=True))
+
 
 @dataclass(frozen=True)
 class Controller:
     """The 212-byte frame at the head of a ``.ctl`` member, and its sections.
 
-    The triples are per-axis.  +20 is the acceleration, +44 the top speed and
-    +56 the turn rate (``TRIPLE_*``); +32, +68 and +80 are not established.
+    The triples are per-axis.  +20 is the acceleration, +44 the top speed,
+    +56 the turn rate, +68 is multiplied into the spin and +80 is the most the
+    body leans (``TRIPLE_*``); +32 is never read.
     Every one of the 12744 float reads across the block's 24 float slots is
     finite.
     """
@@ -655,7 +866,8 @@ class Component:
     #: The int32 at +0x18, the initial state word, or None where -1 keeps the
     #: class's default.  See ``state``.
     index: int | None
-    #: The 4-byte entries after the fixed part.
+    #: The 4-byte entries after the fixed part: the section-2 channels the
+    #: component drives.
     entries: tuple[int, ...]
     #: The length-prefixed string at the end, empty where the length is zero.
     label: str
@@ -674,6 +886,14 @@ class Component:
     flags: int = 0
     #: The group at ``COMPONENT_GROUP_AT``, ``NO_GROUP`` for none.
     group: int = -1
+    #: The two floats at ``COMPONENT_WEIGHTS_AT``: a generic device's input
+    #: weights.
+    weights: tuple[float, float] = (0.0, 0.0)
+
+    @property
+    def inputs(self) -> tuple[int, int, int]:
+        """The flags word's three low bytes: a generic device's input selectors."""
+        return (self.flags & 0xFF, self.flags >> 8 & 0xFF, self.flags >> 16 & 0xFF)
 
     @property
     def slot(self) -> str | None:
@@ -756,7 +976,21 @@ def read_component(blob: bytes, pos: int) -> Component | None:
         mass=struct.unpack_from("<f", blob, pos + COMPONENT_MASS_AT)[0],
         flags=struct.unpack_from("<I", blob, pos + COMPONENT_FLAGS_AT)[0],
         group=struct.unpack_from("<i", blob, pos + COMPONENT_GROUP_AT)[0],
+        weights=struct.unpack_from("<2f", blob, pos + COMPONENT_WEIGHTS_AT),
     )
+
+
+def device_input(selector: int) -> tuple[str, int] | None:
+    """What a generic device's input selector reads: a kind and an axis.
+
+    The axis is 0-2, or -1 for a length; None is the default input.
+    """
+    if selector == DEVICE_INPUT_LENGTH:
+        return DEVICE_INPUT_KINDS[3], -1
+    if DEVICE_INPUT_FIRST <= selector < DEVICE_INPUT_LENGTH:
+        kind, axis = divmod(selector - DEVICE_INPUT_FIRST, 3)
+        return DEVICE_INPUT_KINDS[kind], axis
+    return None
 
 
 def read_states(blob: bytes, counts: tuple[int, ...]) -> tuple[State, ...]:
@@ -779,6 +1013,11 @@ def read_states(blob: bytes, counts: tuple[int, ...]) -> tuple[State, ...]:
             pair_b=struct.unpack_from("<2f", blob, at + STATE_PAIR_B_AT),
             blend=struct.unpack_from("<f", blob, at + STATE_BLEND_AT)[0],
             length=struct.unpack_from("<f", blob, at + STATE_LENGTH_AT)[0],
+            contacts=tuple(
+                Contact(*struct.unpack_from("<iIi", blob,
+                                            at + SECTION1_RECORD + SECTION1_PER_B * j))
+                for j in range(counts[1])),
+            lean=tuple(blob[at + STATE_LEAN_AT:at + STATE_LEAN_AT + 3]),
         ))
     return tuple(out)
 

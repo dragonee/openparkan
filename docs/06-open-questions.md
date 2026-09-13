@@ -72,12 +72,18 @@ records, one shape for all 30 type ids), an 84-byte block and section 5
 label names a family of internal parts -- all 57 of them prefix an `INTO`
 record in `objects.rlb`.
 
-What is open is the **meaning** of the fields rather than their extent: the
-sixteen values of most component classes
-([23-economy.md](23-economy.md)), section 1's conditions, triples 2 and 6, and
-the nine ints of a section-5 record. The motion fields — acceleration, top
-speed, turn rate, slope mode and cone, payload, a state's velocity and spin
-boxes and engine factor — are [read](24-motion.md).
+Most of the **meaning** is read now too. Section 1's conditions are contacts
+(feet, wheels, legs) whose `0x100`/`0x200` make a state need a node intact or
+destroyed; triple 6 is the most the body leans and triple 2 is never read; a
+component's entries are the channels it drives; a section-5 record's ints 1
+and 2 are a mask and inversion over sixteen condition bytes (the ground
+surface, the liquid bed, critical damage), and actions 0 and 20 stop the body
+and place a building ([13-control.md](13-control.md)). What is open: triple 5,
+class 3's value 0, the camera's values 3–5, the hero's arms' values 1 and 4,
+the record's int 8, and what control message 7's argument selects
+([13-control.md](13-control.md#not-established)). The motion fields —
+acceleration, top speed, turn rate, slope mode and cone, payload, a state's
+velocity and spin boxes and engine factor — are [read](24-motion.md).
 
 Section 1's frame pairs, step lengths, flags and transition table, and section
 2's channels, are [read too](24-motion.md#playing-a-state--read-and-measured).
