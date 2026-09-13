@@ -24,7 +24,7 @@ practice — format facts yes, code no — is set out in
 | **Assembled units and buildings** | done — the `.dat` component tree, and each part mounted at its socket's full pose |
 | **Damage tables** | done — `.ndp`, 542 tables, one record per node, 2203 explosions named |
 | **Building footprints** | done — `.bas`, 30 ground plans; the one independent check on object placement |
-| **Effects** | done — `effects.rlb`, 923 effects and 4737 emitters; 144 `.exp` explosions; and which 176 of a block's floats the engine actually reads |
+| **Effects** | done — `effects.rlb`, 923 effects and 4737 emitters; 144 `.exp` explosions; and which 180 of a block's floats the engine actually reads; how an effect is timed, switched and chosen by surface |
 | **Materials** | done — `Material.lib`, all 905 records end to end: a `D3DMATERIAL7` per entry, the animation tracks over them, and every batch reaching a texture |
 | **Baked lighting** | done — `lightmap.lib`, 21 buildings, per-batch |
 | **Building interiors** | done — the internal nodes are 29460 triangles behind 10725 of shell, and the viewer cuts buildings open; path graph for 29 |
@@ -42,6 +42,7 @@ practice — format facts yes, code no — is set out in
 | **Resource bindings** | done — the `desc = "resource"` descriptor, 132 objects across 32 `.cfg` files binding 751 names into seven libraries, all resolving; and `TextRes.dll`'s string table, the game's own 173 lines of dialogue, read without a PE dependency |
 | **Save games** | partial — the header confirmed against `iron3d.dll`'s own writer (`0x100a1637`, everything through one `fwrite`), the body walked as the length-prefixed blobs that writer emits, and **1342 of 1342** archive-member references resolving across two record widths. `openparkan saves` lists what a save holds in the game's own words. The per-class blob layouts are the engine's classes and are not decoded |
 | **Behaviour scripts, semantics** | partial — every field of a node now has a role: a call selecting one of 57 functions with a fixed signature, or a tagged operation with its own arity, assigning from a variable or a number. What the functions, opcodes and tags *compute* is not started |
+| **Engine research (Phase R)** | done — the hit test, the ground and gravity, the player's controls and eye, animation playback, effects, firing and the sky's fog, each in `docs/` with `verify` checks; [`engine/`](engine/README.md) lists the unknowns the engine must stand in for. No engine code yet |
 
 ## Quickstart
 

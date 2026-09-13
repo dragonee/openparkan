@@ -629,6 +629,8 @@ brighter violet at night.
   dome's segments, is a *guess*.
 - What the sun does with its seven values, what property 15 (slot 18) is
   for, and what header bit `0x4000000` does on 81 textures.
+- When a mission's sky clock starts: at which keyframe, or which hour, the
+  day begins as the mission loads.
 - The int just before slot 0 is the one the record filler copies to the
   record's `+0x00` (runtime keyframe `+0x28`). It is the word ruled out above
   as the opcode; what it holds is still open.

@@ -473,6 +473,8 @@ shield, battery and ammunition (`Behavior.dll:0x10018100`, `0x10019372`,
   the same five-integer reference the collision record does, but the copy was
   not found.
 - What reads a node's fifth slot, if a round's hit test does not.
+- Where a round's collision radius comes from. That it is the bounding sphere
+  in its mesh's header is a *guess*.
 - Who clears the behaviour flag `0x10` that lets a unit's takt switch its
   repair (`Behavior.dll:0x100067b0`'s caller), and so whether the AI overrides
   the switch while the player drives.

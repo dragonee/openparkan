@@ -380,7 +380,7 @@ It is also interleaved in face order rather than run-length, does not
 determine the texture pair or the surface word, and does not track elevation.
 Its groups are wildly uneven — 1, 2, 4 and 384 faces on SC_3. So field 13 is
 not what a renderer would cull by — but the map does carry a grid, in
-[stream 2](#stream-2-is-the-maps-own-spatial-index), which is.
+[stream 2](#streams-1-and-2-are-the-maps-own-spatial-index), which is.
 
 ## The `*M` twin is the material's second track, drawn unlit
 
