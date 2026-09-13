@@ -381,6 +381,41 @@ TYPE_BUILDING = 0x80000000
 #: turret is a gun socket.
 TURRET_MOUNT_NODES = ("Base_TM", "Base_TL")
 
+#: A research item record's ``+0x23`` and ``+0x24``: the catalogue kind and
+#: sub-kind of the part, as numbers -- 8 ``BLD``, 9 ``SHS``/``ANM``, 10 ``AMM``,
+#: 11 ``DVC``, 12 ``WPN``; under 9, 32 a chassis, 33 a turret, 34 a target.
+PART_KIND_BUILDING = 8
+PART_KIND_UNIT = 9
+PART_SUB_TURRET = 33
+PART_SUB_BUNKER = 17
+#: What ``iron3d.dll:0x1008a590`` makes of a turret item's role byte (+0x22);
+#: any other role is a warrior.
+TURRET_ROLE_TYPES = {3: TYPE_TRANSPORT, 4: TYPE_BUILDER, 5: TYPE_HQ, 6: TYPE_HERO}
+#: ... and of a building item's sub-kind.  A bunker (17) takes its Type from
+#: the item's size byte (+0x26) instead; 22, 23, 27 and 28 give none.
+BUILDING_SUB_TYPES = {16: 0x80000040, 18: 0x80000400, 19: 0x80000004, 20: 0x80000010,
+                      21: 0x80000008, 24: 0x80000200, 25: 0x80001000, 26: 0x80000002,
+                      29: 0x80100000, 30: 0x80200000}
+BUNKER_SIZE_TYPES = {1: 0x80010000, 2: 0x80020000, 3: 0x80040000}
+
+
+def part_type(kind: int, sub: int, size: int, role: int) -> int:
+    """The Type a research item gives the assembly it heads, 0 for none.
+
+    This is the class word ``iron3d.dll``'s unit writer puts after the
+    ``0xf0f1`` magic (``0x10054551``): a turret's role decides a robot, a
+    building's sub-kind (or a bunker's size) decides a building.  The writer
+    asks it of the design's base part and, when that is a chassis, of its
+    turret; a chassis whose name starts with ``a`` is an animal outright.
+    """
+    if kind == PART_KIND_UNIT and sub == PART_SUB_TURRET:
+        return TURRET_ROLE_TYPES.get(role, TYPE_WARRIOR)
+    if kind == PART_KIND_BUILDING:
+        if sub == PART_SUB_BUNKER:
+            return BUNKER_SIZE_TYPES.get(size, 0)
+        return BUILDING_SUB_TYPES.get(sub, 0)
+    return 0
+
 
 @dataclass
 class UnitDefinition:

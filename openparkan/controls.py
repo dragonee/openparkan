@@ -598,6 +598,41 @@ class Action:
         """True for a command numbered 1 to 16 (``DISPATCHED``), which no dispatch uses."""
         return self.code in DISPATCHED
 
+    def ramped(self, current: float, held_ms: float) -> float:
+        """The command this row leaves after one more run of the input update.
+
+        A key row that goes down becomes *active* and is run again on every
+        update until its key comes up (``World3D.dll:0x1000f477``).  Without a
+        ramp time the row sends its value outright.  With one, each run moves
+        the command from ``current`` toward ``value`` by
+        ``ramp * min(1, held_ms / ramp_time)`` without passing it, and the
+        result is kept within [-1, 1] (``World3D.dll:0x10010a50``).  So a held
+        ``+`` on the keypad steps the cruise by a growing amount for its first
+        second and by 0.05 a run after that -- a step per update, not per second.
+        """
+        if self.ramp_time <= 0:
+            return max(-1.0, min(1.0, self.value))
+        step = self.ramp * min(1.0, held_ms / self.ramp_time)
+        if current < self.value:
+            out = min(current + step, self.value)
+        else:
+            out = max(current - step, self.value)
+        return max(-1.0, min(1.0, out))
+
+
+#: ``Iron_3D.ini`` keys ``iron3d.dll`` hands to ``World3D.dll``'s settings
+#: group 10 at load (``iron3d.dll:0x10061310``): each is sent as setting id,
+#: and the id picks a global in ``World3D.dll``'s handler (``0x1000a820``).
+#: The two sensitivities are the ini integer times 0.01.
+INPUT_SETTINGS = {
+    "MOUSE_SENS": 0x66,     # the mouse filter's multiplier 0x100234d0
+    "JOY_SENS": 0x67,       # the joystick multiplier 0x100234d4
+    "MOUSE_REV_Y": 0x6A,    # mouse Y sign 0x100234f0, and by fall-through joystick X's
+    "JOY_REV_Y": 0x6C,      # joystick Y sign 0x100234f8
+}
+#: What the ini integer is multiplied by before it is handed over.
+SENSITIVITY_SCALE = 0.01
+
 
 def table(path: Path) -> list[Action]:
     """Read one ``.tbl``.  Raises unless every row has its eleven fields."""

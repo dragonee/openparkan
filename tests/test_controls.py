@@ -202,3 +202,24 @@ def test_every_build_scheme_is_a_building_type():
     assert all(t & 0x80000000 for t in controls.SCHEME_TYPES.values())
     assert controls.BuildScheme("Mine", ()).type == 0x80000004
     assert controls.BuildScheme("Bridge", ()).type is None
+
+
+class TestRamp:
+    """A ramped row moves the command a step per update, growing over its time."""
+
+    def row(self, value: float, ramp: float, ramp_time: int) -> controls.Action:
+        return controls.Action("KEY", "SCAN_NULL", "SCAN_G_PLUS", True, "CICLS_UNKNOWN",
+                               "MCMD_FORWARD", value, 0, "0", ramp, ramp_time, "OBJ_SPEED_MORE")
+
+    def test_half_way_through_the_ramp_time_the_step_is_half(self):
+        assert self.row(1.0, 0.05, 1000).ramped(0.0, 500) == pytest.approx(0.025)
+
+    def test_after_the_ramp_time_the_step_is_the_whole_ramp(self):
+        assert self.row(1.0, 0.05, 1000).ramped(0.5, 4000) == pytest.approx(0.55)
+
+    def test_it_never_passes_the_value(self):
+        assert self.row(1.0, 0.05, 1000).ramped(0.99, 4000) == 1.0
+        assert self.row(-1.0, 0.05, 1000).ramped(-0.98, 4000) == -1.0
+
+    def test_a_row_without_a_ramp_time_sends_its_value(self):
+        assert self.row(1.0, 0.0, 0).ramped(0.3, 0) == 1.0

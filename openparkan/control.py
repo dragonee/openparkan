@@ -25,6 +25,7 @@ Everything below is re-derived by ``uv run openparkan verify``.
 from __future__ import annotations
 
 import heapq
+import math
 import struct
 from dataclasses import dataclass
 
@@ -221,11 +222,30 @@ CAMOUFLAGE_POWER = 4
 TURRET_TYPE = 1
 CAMERA_TYPE = 4
 #: A turret component's flags: ``MOUNT_UPRIGHT`` on every ground (``e_tur_?t``)
-#: turret and clear on its twin hung under a flyer (``e_tur_?b``) -- the turret
-#: mirrors its aim on it (``0x100271c7``, ``0x100289b5``); ``MOUNT_HQ`` on the
-#: HQ turrets, which ``IControl``'s getter tests (``0x1002b7bb``).
+#: turret and clear on its twin hung under a flyer (``e_tur_?b``) -- an upright
+#: turret keeps its aim triple as 1 - v (``0x100271c7``, ``0x100276ed``) and a
+#: hung one negates the strafe offset (``0x100289b5``); ``MOUNT_HQ`` on the
+#: HQ turrets, which the control system answers as query 13
+#: (``0x1002b7bb``) and ``iron3d.dll`` reads as component value 117.
 MOUNT_UPRIGHT = 0x04000000
 MOUNT_HQ = 0x08000000
+#: The camera's shake (``0x100234c0``), which the machine tick feeds with the
+#: change in the machine's velocity over each step (``0x1000c6e7``).  A jolt
+#: whose squared size reaches ``SHAKE_JOLT_SQ`` blends the offset toward half
+#: of it over ``SHAKE_BLEND_S``; the next smaller one lets it ring down as
+#: ``offset * cos(pi/2 * SHAKE_FREQUENCY * t) / (t + 1) ** SHAKE_DECAY``.  The
+#: eye moves by the offset clamped to unit length, times ``SHAKE_SCALE``.
+SHAKE_DECAY = 3.0          # camera +0xa4
+SHAKE_FREQUENCY = 3.0      # camera +0xa8
+SHAKE_BLEND_S = 2.5        # camera +0xac
+SHAKE_JOLT_SQ = 0.3
+SHAKE_SCALE = 0.02
+
+
+def shake_ring(offset: tuple[float, float, float], seconds: float) -> tuple[float, float, float]:
+    """The camera's shake offset ``seconds`` after it started ringing down."""
+    k = math.cos(math.pi / 2 * SHAKE_FREQUENCY * seconds) / (seconds + 1.0) ** SHAKE_DECAY
+    return (offset[0] * k, offset[1] * k, offset[2] * k)
 #: ``CICLS_DOOR`` and ``CICLS_COMPUTER``.  ``Terrain.dll``'s building files
 #: its controller's items by these (``0x100583a2``), and runs its first
 #: computer as the control pod (``0x10057550``).

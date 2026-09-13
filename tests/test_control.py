@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import struct
 
 import pytest
@@ -372,6 +373,8 @@ def test_a_generic_device_names_its_inputs(ctl, component):
     assert control.device_input(7) == ("-spin", 2)
     assert control.device_input(14) == ("speed", -1)
     assert control.device_input(1) is None
+
+
 def test_the_transition_factor_reaches_from_source_minimum_to_destination_centre(ctl, state):
     walk = state(flags=0x2, velocity=((-0.6, 6.0, -0.6), (0.6, 14.0, 0.6)))
     near = state(flags=0x2, velocity=((-0.6, 2.0, -0.6), (0.6, 10.0, 0.6)))
@@ -395,3 +398,12 @@ def test_the_blend_weight_divides_by_the_largest_absolute_difference(ctl, state)
     assert s.blend_weight(20.0) == 1.0 and s.blend_weight(0.0) == 1.0
     # a box symmetric about zero has D = 0: the weight stays 1
     assert still.blend_divisor == 0.0 and still.blend_weight(1.0) == 1.0
+
+
+def test_the_camera_shake_rings_down_from_its_offset():
+    assert control.shake_ring((1.0, 0.0, 0.0), 0.0) == (1.0, 0.0, 0.0)
+    # a third of a period on, cos(pi/2 * 3 * 1/3) is 0
+    assert abs(control.shake_ring((1.0, 0.0, 0.0), 1 / 3)[0]) < 1e-9
+    # after a second it is down by (1 + 1) ** 3 and cos(1.5 pi) is 0 again
+    x = control.shake_ring((0.0, 2.0, 0.0), 2.0)[1]
+    assert abs(x - 2.0 * math.cos(3 * math.pi) / 27) < 1e-9
