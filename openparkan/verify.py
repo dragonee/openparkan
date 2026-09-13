@@ -3224,6 +3224,41 @@ def check_profiles(check, game: Path) -> None:
           f"{profiles.RESEARCH_TIME_DEFAULT:g} on {len(placed) - len(long)} of "
           f"{len(placed)} and otherwise on {len(long)} research centre")
 
+    # The size letters the construction task reads: a chassis's third
+    # character and a building's fourth.  The names agree with the model
+    # codes the labels carry -- T-, S-, M-, L- for chassis, -17, -30, -47, -67
+    # for buildings -- so the classes are sizes, smallest first.
+    chassis: dict[str, Counter[str]] = defaultdict(Counter)
+    for dat in sorted((game / "UNITS" / "UNITS").rglob("*.dat")):
+        try:
+            unit = objects.load_unit(dat)
+        except objects.ObjectFormatError:
+            continue
+        member = unit.components[0].ref.member if unit.components else ""
+        code = re.search(r"\(([A-Z])-", unit.label)
+        if re.match(r"(?i)r_[a-z]_", member) and code:
+            chassis[member[2].lower()][code.group(1)] += 1
+    model = {"t": "T", "l": "S", "m": "M", "b": "L"}
+    blds: dict[str, set[str]] = defaultdict(set)
+    for dat in sorted((game / "UNITS" / "BUILDS").rglob("*.dat")):
+        unit = objects.load_unit(dat)
+        member = unit.components[0].ref.member.lower()
+        number = re.search(r"-(\d\d)", unit.label)
+        # A bridge's code is its span over its width, BS-32/20, not a size.
+        if member.startswith("fr_") and number and "/" not in unit.label:
+            blds[member[3]].add(number.group(1))
+    check("UNITS: a name's size letter is the model's size",
+          set(chassis) == set(model) <= set(profiles.CHASSIS_SIZE)
+          and all(set(codes) == {model[k]} for k, codes in chassis.items())
+          and blds.get("l") == {"17"} and blds.get("m") == {"30"}
+          and blds.get("b") == {"47"} and blds.get("e") == {"67"},
+          f"chassis R_T_, R_L_, R_M_, R_B_ carry model codes "
+          f"{', '.join(model[k] + '-' for k in 'tlmb')} on "
+          f"{sum(sum(c.values()) for c in chassis.values())} assemblies, sizes "
+          f"{[profiles.CHASSIS_SIZE[k] for k in 'tlmb']}; buildings fr_l_, fr_m_, "
+          f"fr_b_, fr_e_ carry -17, -30, -47, -67 (bridges aside), sizes "
+          f"{[profiles.BUILDING_SIZE[k] for k in 'lmbe']}")
+
 
 def check_rsli(check, game: Path) -> None:
     """gamefont.rlb and sprites.lib -- the two archives that are not NRes."""
@@ -3893,6 +3928,9 @@ def check_efficiency(check, game: Path) -> None:
     efficiency: dict[str, list[float]] = defaultdict(list)
     homes: set[str] = set()
     others_zero = True
+    families: dict[str, Counter[int]] = defaultdict(Counter)
+    buildings: dict[str, control.Controller] = {}
+    powers = []
     for path in all_archives(game):
         archive = NResArchive.open(path)
         for entry in archive:
@@ -3902,7 +3940,12 @@ def check_efficiency(check, game: Path) -> None:
                 parsed = control.parse(archive.read(entry), names)
             except control.ControlFormatError:
                 continue
+            if path.name.lower() == "fortif.rlb":
+                buildings[entry.name.lower()] = parsed
             for part in parsed.components:
+                powers.append(part.power)
+                if part.label:
+                    families[part.label[:5].lower()][part.type_id] += 1
                 values += len(part.values)
                 finite += sum(1 for v in part.values if math.isfinite(v))
                 if part.efficiency is not None:
@@ -3945,6 +3988,56 @@ def check_efficiency(check, game: Path) -> None:
           f"as the model is 17, 30, 47 or 67; every other building's is 1, the "
           f"other fifteen values are zero, and the class lives only in "
           f"{', '.join(sorted(homes))}{'; ' + ', '.join(wrong[:3]) if wrong else ''}")
+
+    # A component's type id is the engine's CICLS class: every label family
+    # sits on one type, and every family CICLS has a name for sits on that
+    # name's number -- which is what lets the power channels be named.
+    by_number = {v: k for k, v in controls.CICLS.items()}
+    single = all(len(types) == 1 for types in families.values())
+    named = {family: by_number[next(iter(types))] for family, types in families.items()
+             if next(iter(types)) in by_number}
+    want = {"i_pws": "CICLS_POWERSTOR", "i_fsh": "CICLS_FIGHTSHIELD",
+            "i_dsh": "CICLS_DETECTSHIELD", "i_eng": "CICLS_ENGINE",
+            "i_rdr": "CICLS_RADAR", "i_rps": "CICLS_REPAIRSYS"}
+    check(".ctl: a component's type id is the engine's CICLS class",
+          families and single and all(named.get(f) == n for f, n in want.items())
+          and all(n == "CICLS_MULTIGUN" for f, n in named.items() if f.startswith("i_c")),
+          f"each of {len(families)} label families sits on one type id, and the "
+          f"named ones agree: " + ", ".join(f"{f} {named.get(f, '?')[6:]}"
+                                            for f in sorted(want)))
+
+    # Power, per controller tick: stores give up to their power figure a second
+    # times their charge; channel 3 is served first, and on every building the
+    # efficiency component is alone there.  So its level -- the 0x200 factor in
+    # KPD -- stays at 1 until the batteries hold less than draw / output.
+    role_profile = {"_inst": "prof_institute.var", "_plan": "prof_plant.var",
+                    "_mine": "prof_mine.var"}
+    held = profiles.load(game) if (game / profiles.ARCHIVE).exists() else {}
+    alone = []
+    margins = []
+    for name, parsed in sorted(buildings.items()):
+        parts = parsed.components
+        if not any(p.type_id == control.EFFICIENCY_TYPE for p in parts):
+            continue
+        first = [p for p in parts if p.channel in control.POWER_ORDER[0]]
+        alone.append(all(p.type_id == control.EFFICIENCY_TYPE for p in first))
+        stores = [p for p in parts if p.type_id == control.POWER_STORE_TYPE
+                  and p.values[0] > 0]
+        role = next((r for r in role_profile if r in name), None)
+        if role and stores and role_profile[role] in held:
+            draw = (sum(p.power for p in first)
+                    + held[role_profile[role]][profiles.USE_POWER].value)
+            margins.append((name, draw / sum(p.power for p in stores)))
+    worst = max(margins, key=lambda m: m[1]) if margins else ("-", 1.0)
+    check(".ctl: a building's batteries keep its efficiency whole until nearly empty",
+          alone and all(alone) and margins and worst[1] < 0.1
+          and all(math.isfinite(v) and v >= 0 for v in powers),
+          f"on all {len(alone)} building controllers with an efficiency component "
+          f"it is the only thing on channel 3, served first; across "
+          f"{len(margins)} research centres, factories and mines the charge "
+          f"below which it gets less than it draws is at most "
+          f"{100 * worst[1]:.1f}% ({worst[0]}); every one of {len(powers)} power "
+          f"figures is finite and non-negative")
 
 
 def check_controls(check, game: Path) -> None:

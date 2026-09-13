@@ -269,7 +269,8 @@ factors:
 
 So `0x300`–`0x305` are **the first six floats of the record, scaled by
 condition and level**, and an intact building's `KPD` is its class-26
-component's first float. What sets the level is unread.
+component's first float. The level is its share of the building's own power,
+below.
 
 **The data** — *measured*. Class 26 occurs only in `fortif.rlb`, once per
 building controller (five times on the small main teleport), always with
@@ -298,6 +299,58 @@ ruin — is 1.
   what a small one does. Research's one `KPD` call multiplies; nothing there
   divides a cost.
 
+## A power shortage lowers efficiency, once the batteries run down — *read*, and *measured*
+
+A building does not run on the clan's power directly. It runs on its own
+**batteries** — its class-19 components, `CICLS_POWERSTOR`, the `i_pws` parts —
+and the distribution step above is what refills them.
+
+**The distribution step's "charge" is the batteries** (*read*). The building's
+control system answers the step's two questions over its class-19 components:
+the fill is `Σ capacity × charge / Σ capacity` (`Control.dll:0x1002b42b`) and
+the capacity `Σ capacity` (`0x1002b4e9`), capacity being a battery's first
+value. Topping a building up writes the new fill into every battery's charge
+(`0x1002bae6`). A battery with a negative capacity makes the whole building
+read full: that is a generator's (`fr_l_gener`, −1).
+
+**Every controller tick spends the batteries** (*read*,
+`Control.dll:0x1002d340`, `dt` in seconds). Each component reports a flow
+through its vtable slot 5. A battery gives `min(output × charge × condition ×
+dt, capacity × charge × condition)`; a consumer takes `(power + usage) × dt`,
+where *power* is a float in its record at `+0x20` and *usage* is what
+`SetPowerUsage` gave it. What the batteries give is then handed out **by
+channel, in a fixed order**, each class having one channel
+(`Control.dll:0x1003ccc8`):
+
+| served | channel | classes in it |
+|---|---|---|
+| 1st | 3 | engines (5), **the efficiency component (26)**, 16, 20 |
+| 2nd | 0 | doors (12), computers (13), repair (15), elevators (11), 3, 25, … |
+| 3rd | 2 and 5 | radar (8), camera (4); shields (9, 10), deflectors (21), armour (27) |
+| 4th | 4 | turrets (1), guns (2), 22, 24, 30 |
+| last | 1 | the batteries (19), and 14 |
+
+Each channel's consumers all get the same **level**, `min(1, what is left /
+what the channel wants)` (`0x1002dca0`), written through slot 6 into the `+0x4c`
+factor above; the batteries, served last, drain by the share of their output
+that was used. The class numbers are the engine's `CICLS_` ids (*measured*:
+every `.ctl` label family sits on one class, and the named ones agree —
+`i_pws` on 19, `i_fsh` 9, `i_dsh` 10, `i_eng` 5, `i_rdr` 8, `i_rps` 15).
+
+**So a building's efficiency is served first and alone** (*measured*). On all
+27 building controllers that have an efficiency component, it is the only
+thing on channel 3. Its own power figure is 0.01; the batteries put out 50 to
+52 a second at full charge, holding 19.5 to 20. Its level — and `KPD` — stays
+at 1 until the batteries hold less than `(0.01 + Use_Power) / output`: **8.0%
+for a small factory**, about 6% for a research centre, 2% for a mine.
+Below that it falls in proportion to the charge.
+
+That is how a short clan slows its work. The distribution step refills every
+building's batteries by `Available / Total` of what they lack; a working
+building drains its own; and once its charge sinks under that threshold its
+`KPD` drops with it — and with `KPD` its ore and power collection, a mine's
+digging, and so its progress. Until then a shortage costs nothing but charge.
+
 ## Construction — *read*
 
 `M_Task_Construct::OnBehaviourTakt` (`Behavior.dll:0x1002a4f0`) is the factory
@@ -305,6 +358,9 @@ building a bot, and it has the same three budgets as research — ore, power and
 time — with one difference in how ore is pulled.
 
 - **Time** accrues as plain `dt`; **power** as `KPD × Use_Power × dt`.
+- **A paid bot's time budget is 5 seconds**, whatever the bot: the start
+  routine (`0x10029ba0`) sets it before anything else and only a free bot
+  changes it. Ore and power, from the bot's technology, set the pace.
 - **Ore** is requested each tick as
 
   ```
@@ -322,6 +378,30 @@ time — with one difference in how ore is pulled.
   factory's own `FreeBotNum` if it is above zero (`0x1002a7f9`).
 - Until then its **progress is `min(time, ore, power)` as fractions, capped at
   1**, logged as "Construction in progress".
+
+**What a free bot is spared** — *read*, at `0x10029f13`. While the factory's
+`FreeBotNum` is above zero a build logs "Begin to constructing free bot" and
+costs **no ore and 1 power**, in place of its technology's price. It is not
+quicker: its time budget comes from a table of factory size against chassis
+size (`0x1002a000`), in seconds —
+
+| factory | tiny | small | medium | large |
+|---|---|---|---|---|
+| small | 30 | 60 | — | — |
+| medium | 20 | 35 | 60 | — |
+| large | 10 | 20 | 40 | 60 |
+
+— and 20 for anything else. The mission's `FreeConstructionTime` plays no part.
+
+**Sizes are letters in names** — *read*, and *measured*. A chassis's third
+character is its size (`t` 1, `l` and `h` 2, `m` 3, `b` 4) and a building's
+fourth (`l` 2, `m` 3, `b` 4, `e` 5), read at `0x10029e10` and `0x1000cee0`. A
+factory refuses a chassis bigger than itself — "Robot SizedType not match". The
+letters agree with the model codes in the labels: `R_T_` chassis are `T-`,
+`R_L_` `S-`, `R_M_` `M-`, `R_B_` `L-`, on all 299 that carry one, and `fr_l_`,
+`fr_m_`, `fr_b_`, `fr_e_` buildings are -17, -30, -47 and -67. So a small
+factory builds tiny and small chassis, a medium one adds medium, and a large
+one every size.
 
 ## What the HUD shows — *read*
 
@@ -386,10 +466,13 @@ construction slows research.
 - **Slower when low** — *read*, for both the factory and research. Power and
   ore accrue in proportion to efficiency, and progress is the smallest of the
   three completion fractions, so whichever resource is short sets the pace.
-- **Construction slowing research** — *read*, when the clan is short. Every
-  consumer gets the same fraction of what it lacks, `Available / Total`, and a
-  building factory adds its own want to `Total`. With a surplus the fraction
-  is already 1 and building costs research nothing.
+  Power reaches it through the building's batteries: efficiency falls once they
+  drop below a few percent.
+- **Construction slowing research** — *read*, when the clan is short for long
+  enough. Every building's batteries get the same fraction of what they lack,
+  `Available / Total`, and a working factory adds its own lack to `Total`. The
+  research centre slows once its batteries fall under 6%; with a surplus the
+  fraction is 1 and building costs research nothing.
 - **A mine ≈ 11%** — *read*, and exact. The ore bar divides held ore by 4500,
   one full mine plus one full storage, and a full mine holds 500: 11.1%.
 - **One power plant ≈ 33%** — *read*, and confirmed on The Convoy. The energy
@@ -400,6 +483,7 @@ construction slows research.
 
 ## Not established
 
-- What sets a component's level, the `0x200` factor — and so whether a short
-  power supply lowers `KPD` itself.
-- Where construction's time budget comes from, and what a free bot is spared.
+- How often the distribution step runs against the controller tick, and so
+  the charge a busy building settles at when its clan is short.
+- The owner's per-component figure, the `0x100` factor: 0 means destroyed, and
+  that it is condition is a *guess*.

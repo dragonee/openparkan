@@ -70,6 +70,20 @@ def test_only_the_efficiency_class_has_an_efficiency(ctl, component):
     assert got[1].efficiency is None
 
 
+def test_a_component_carries_its_power_and_channel(ctl, component):
+    parts = [component(control.POWER_STORE_TYPE, power=25.0, values=(10.0,)),
+             component(control.EFFICIENCY_TYPE, power=0.01, values=(1.0,))]
+    store, work = control.parse(ctl(counts=(0, 0, 0, 2, 0), components=parts)).components
+    assert store.power == 25.0 and store.channel == 1
+    assert work.power == pytest.approx(0.01) and work.channel == 3
+
+
+def test_every_channel_is_served_once():
+    served = [c for group in control.POWER_ORDER for c in group]
+    assert sorted(served) == sorted(set(control.POWER_CHANNEL))
+    assert len(control.POWER_CHANNEL) == control.COMPONENT_TYPES.stop
+
+
 def test_named_gathers_from_components_and_groups(ctl, component, reference):
     blob = ctl(counts=(0, 0, 0, 1, 1),
                components=[component(1, "objects.rlb", "bb_l_01")],

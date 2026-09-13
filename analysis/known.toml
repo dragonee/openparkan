@@ -1743,3 +1743,92 @@ kind = "site"
 name = "construction start: free bot while FreeBotNum (+0x9ec) > 0"
 doc = "docs/23-economy.md"
 read = true
+
+# --- power inside a building, ../docs/23-economy.md ---------------------------
+[[entry]]
+module = "Control.dll"
+at = "0x1002d340"
+kind = "function"
+name = "controller power tick: flows by slot 5, supply cascaded over channels 3, 0, 2|5, 4, 1"
+doc = "docs/23-economy.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002dca0"
+kind = "function"
+name = "serve one channel group: level = min(1, left / demand) via slot 6; returns what is left"
+doc = "docs/23-economy.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1003ccc8"
+kind = "datum"
+name = "power channel by component class"
+doc = "docs/23-economy.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10021890"
+kind = "function"
+name = "component slot 6: set level (+0x4c) while on and not destroyed"
+doc = "docs/23-economy.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x100229a0"
+kind = "function"
+name = "battery flow: min(output x charge x condition x dt, capacity x charge x condition)"
+doc = "docs/23-economy.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10022a60"
+kind = "function"
+name = "battery slot 6: drain charge by the share of output used"
+doc = "docs/23-economy.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002e540"
+kind = "function"
+name = "class-26 flow: -(power + usage) x dt"
+doc = "docs/23-economy.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002b410"
+kind = "function"
+name = "IControl object get: 1 battery fill (1 if any capacity < 0), 2 battery capacity, ..."
+doc = "docs/23-economy.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002ba30"
+kind = "function"
+name = "IControl object set: 1 writes every battery's charge"
+doc = "docs/23-economy.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10029ba0"
+kind = "function"
+name = "construction start: time budget 5 s; free bot 0 ore, 1 power, time by factory x chassis size"
+doc = "docs/23-economy.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1000cee0"
+kind = "function"
+name = "MBehaviour size class from a name letter: building l2 m3 b4 e5"
+doc = "docs/23-economy.md"
+read = true

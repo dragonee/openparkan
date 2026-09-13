@@ -86,6 +86,28 @@ FREE_RESEARCH_TIME = "FreeResearchTime"
 CONSTRUCTION_TIME_DEFAULT = 5.0
 RESEARCH_TIME_DEFAULT = 2.0
 
+#: How long a paid bot takes, in seconds, whatever it is: the construction
+#: task starts every build with this budget (``Behavior.dll:0x10029bea``) and
+#: only a free bot replaces it.
+BUILD_SECONDS = 5.0
+#: A size class from a name's size letter.  A chassis carries it third
+#: (``R_T_02``) and a building fourth (``fr_l_plant``); a factory builds a
+#: chassis no bigger than itself.  ``Behavior.dll:0x10029e10`` for chassis,
+#: ``0x1000cee0`` for buildings.
+CHASSIS_SIZE = {"t": 1, "l": 2, "h": 2, "m": 3, "b": 4}
+BUILDING_SIZE = {"l": 2, "m": 3, "b": 4, "e": 5}
+#: A free bot's build time in seconds, by factory size and chassis size
+#: (``0x1002a000``); any pair not listed takes 20.
+FREE_BOT_SECONDS = {
+    (2, 1): 30.0, (2, 2): 60.0,
+    (3, 1): 20.0, (3, 2): 35.0, (3, 3): 60.0,
+    (4, 1): 10.0, (4, 2): 20.0, (4, 3): 40.0, (4, 4): 60.0,
+}
+FREE_BOT_SECONDS_OTHERWISE = 20.0
+#: What a free bot costs instead of its technology's price.
+FREE_BOT_ORE = 0.0
+FREE_BOT_POWER = 1.0
+
 
 class ProfileFormatError(ValueError):
     pass

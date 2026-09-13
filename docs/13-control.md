@@ -278,6 +278,7 @@ the record's extent is common to all of them:
 ```
 0x00  int32      type id, 1..30
 0x18  int32      an index; the parser treats -1 as absent
+0x20  float      power: a consumer's draw a second, a battery's output
 0x2c  float[16]  the component's values, copied whole into the object
 0x6c  char[32]   archive        what this part emits
 0x8c  char[32]   member
@@ -289,6 +290,16 @@ the record's extent is common to all of them:
 
 **All 531 members now walk end to end**, 1066 component records among them,
 every one carrying an id in 1..30 — 20 of the 30 ids are used.
+
+**The type id is the engine's `CICLS_` class.** Every label family below sits
+on exactly one id, and each family the input tables have a name for sits on
+that name's number: `i_pws` on 19 (`POWERSTOR`), `i_fsh` on 9, `i_dsh` on 10,
+`i_eng` on 5, `i_rdr` on 8, `i_rps` on 15, and every `i_cNN` gun on 2
+(`MULTIGUN`). The float at `+0x20` is the class's **power figure** — zero on
+all 64 turrets, 152 guns and every door and computer, 0.01 on each building's
+efficiency component, 5 to 1000 on batteries — and each class draws on one of
+six power channels served in a fixed order; see
+[23-economy.md](23-economy.md#a-power-shortage-lowers-efficiency-once-the-batteries-run-down--read-and-measured).
 
 The label is the good part. **All 57 distinct labels are a prefix of an
 `objects.rlb` member, and every one of the 186 members they reach is an

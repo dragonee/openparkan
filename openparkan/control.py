@@ -63,6 +63,22 @@ COMPONENT_VALUE_COUNT = 16
 #: ``Behavior.dll`` totals at ``0x100198e0`` over a building's components of
 #: this type and multiplies into research, construction and a mine's output.
 EFFICIENCY_TYPE = 26
+#: The component's power figure, a float: what a consumer draws a second on
+#: top of whatever usage it is given, and what a power store puts out a second
+#: at full charge.  Read by every class's flow slot (``0x1002e540``,
+#: ``0x100229a0``) and answered as property ``0x500``.
+COMPONENT_POWER_AT = 0x20
+#: A power store -- ``CICLS_POWERSTOR``, the ``i_pws`` batteries.  Its first
+#: value is its capacity, negative on a generator, which never runs dry.
+POWER_STORE_TYPE = 19
+
+#: Each class's power channel, by type id -- ``Control.dll:0x1003ccc8``.
+POWER_CHANNEL = (0, 4, 4, 0, 2, 3, 0, 0, 2, 5, 5, 0, 0, 0, 1, 0,
+                 3, 2, 0, 1, 3, 5, 4, 0, 4, 0, 3, 5, 0, 0, 4)
+#: The order a controller's tick (``0x1002d340``) serves the channels in.
+#: Each group gets ``min(1, what is left / what it wants)``; the stores, on
+#: channel 1, come last and drain by the share that was used.
+POWER_ORDER = ((3,), (0,), (2, 5), (4,), (1,))
 #: The smallest a controller can be.  The 128-byte frame and the 84-byte block
 #: are **not** adjacent in general -- sections 1, 2 and 4 lie between them --
 #: but a member with none of those is exactly the two, which is why 212 is the
@@ -251,6 +267,13 @@ class Component:
     size: int
     #: The sixteen floats at ``COMPONENT_VALUES_AT``.
     values: tuple[float, ...] = ()
+    #: The float at ``COMPONENT_POWER_AT``.
+    power: float = 0.0
+
+    @property
+    def channel(self) -> int:
+        """The power channel this class draws from, or supplies on."""
+        return POWER_CHANNEL[self.type_id]
 
     @property
     def efficiency(self) -> float | None:
@@ -299,6 +322,7 @@ def read_component(blob: bytes, pos: int) -> Component | None:
         size=end - pos,
         values=struct.unpack_from(f"<{COMPONENT_VALUE_COUNT}f", blob,
                                   pos + COMPONENT_VALUES_AT),
+        power=struct.unpack_from("<f", blob, pos + COMPONENT_POWER_AT)[0],
     )
 
 
