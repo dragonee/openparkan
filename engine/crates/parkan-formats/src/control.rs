@@ -17,6 +17,15 @@ pub const COMPONENT_FIXED: usize = 0xB0;
 pub const REFERENCE_STRIDE: usize = 100;
 pub const REFERENCE_NAME_AT: usize = 36;
 pub const BLOCK_ENTRIES: usize = 21;
+/// Block entries: the group run at load, on a hit, at the map edge, at the range end.
+pub const ENTRY_LOAD: usize = 0;
+pub const ENTRY_HIT: usize = 2;
+pub const ENTRY_EDGE: usize = 3;
+pub const ENTRY_RANGE: usize = 4;
+pub const NO_GROUP: i32 = -1;
+/// A section-5 record's int 3 is its action; 27 explodes a node with the named `.exp`.
+pub const ACTION_AT: usize = 3;
+pub const ACT_EXPLODE_NODE: i32 = 27;
 pub const TRIPLE_AT: [usize; 6] = [20, 32, 44, 56, 68, 80];
 /// Triples by index: acceleration (live copy doubled), top speed, turn rate.
 pub const TRIPLE_ACCELERATION: usize = 0;
@@ -44,6 +53,8 @@ pub const TURRET_TYPE: i32 = 1;
 pub const GUN_TYPE: i32 = 2;
 pub const CAMERA_TYPE: i32 = 4;
 pub const ENGINE_TYPE: i32 = 5;
+/// The hero turret's weapon arms, one a gun, in the guns' order.
+pub const ARM_TYPE: i32 = 24;
 pub const MOUNT_UPRIGHT: u32 = 0x0400_0000;
 
 fn f32_at(b: &[u8], at: usize) -> f32 {
@@ -154,6 +165,12 @@ pub struct Reference {
     pub group: usize,
 }
 
+impl Reference {
+    pub fn action(&self) -> i32 {
+        self.values[ACTION_AT]
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Controller {
     pub counts: [i32; 5],
@@ -176,6 +193,16 @@ pub struct Controller {
 }
 
 impl Controller {
+    /// The records of the group block entry `entry` names, in order.
+    pub fn group(&self, entry: usize) -> Vec<&Reference> {
+        match self.groups.get(entry) {
+            Some(&index) if index != NO_GROUP => {
+                self.references.iter().filter(|r| r.group as i32 == index).collect()
+            }
+            _ => Vec::new(),
+        }
+    }
+
     /// What moving from state `from` to state `to` costs; the row is the destination.
     pub fn cost(&self, to: usize, from: usize) -> f32 {
         self.costs[to * self.states.len() + from]

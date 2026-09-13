@@ -35,6 +35,23 @@ M3 is under way. The window opens in the hero's cockpit on Mission 01:
 On Tut_1 the hero holding W runs at 14 m/s. Not drawn yet: the hero itself
 and its animation, when seen from outside.
 
+M4 is under way: the hero fights.
+
+- Its turret's four guns keep the game's clock: a four-step barrel stroke,
+  then the interval.
+- The fire and number keys reach the selected guns. The cannon and the laser
+  start selected.
+- A round leaves its muzzle aimed at what the sight meets, and flies with the
+  shooter's velocity. Its side speed bleeds off, and its range runs out.
+- Each frame a round's segment is tested against the ground, the map box and
+  every live object's level-0 triangles.
+- A hit does the round's `.exp` damage to the node struck, or blasts every
+  node in reach, less armour. A dead node takes its children with it, and
+  node 0 takes the object.
+- On Mission 01 the laser kills a target in two hits of 250.
+
+Not yet: effects and sound, shields, and what a dead object leaves behind.
+
 Not yet: lightmaps (no Mission 01 mesh has one) and levels of detail beyond 0.
 This directory also holds what the rest will follow:
 
@@ -131,7 +148,15 @@ a row here. A row leaves this table when research closes it.
 | M4 | What sets the hero's turret target in first-person play | none: the plasma bolt and the missile fly straight | [29](../docs/29-weapons.md#not-established) |
 | M4 | What starts the hero's muzzle flash and shot sounds | start the gun's effect and `_sfx` at step 1 of each barrel stroke, driven 0 to 1 by the barrel channel | [29](../docs/29-weapons.md#not-established) |
 | M4 | How the turret's follower channels set a gun's ready byte | always ready | [29](../docs/29-weapons.md#not-established) |
-| M4 | What geometry the sight ray (IWorld slot 7) meets | terrain and every object's level-0 mesh, as the hit test does | [29](../docs/29-weapons.md#not-established) |
+| M4 | What geometry the sight ray (IWorld slot 7) meets | the ground (less the water surface) and every live object's level-0 mesh, as the hit test does, out to the map's far corner | [29](../docs/29-weapons.md#not-established) |
+| M4 | What the class-24 arm states do | selecting a gun unfolds its arm toward frame 48 at the arm channel's rate, deselecting folds it; guns selected at the start begin unfolded | [29](../docs/29-weapons.md#the-button-reaches-the-selected-guns) |
+| M4 | How a gun's capacitor refills | full again every tick (the power tick is not modelled) | [23](../docs/23-economy.md#bots-spend-power-through-the-same-code-priced-by-part--read-and-measured) |
+| M4 | The point-in-triangle test of the hit test (`0x10011090`), and the landscape's own cell size | an edge test on the triangle's winding; the ground index's 16 m cells | [26](../docs/26-damage.md#the-hit-test--read-and-measured) |
+| M4 | Which node flag makes a node vital | the mesh node's `0x200` | [26](../docs/26-damage.md#hit-points--read-and-measured) |
+| M4 | Whether vegetation and rock take damage | they stop rounds and take none | [04](../docs/04-missions.md#the-scale) |
+| M4 | What a dead object leaves: its explosion, wreck and damage stages | it vanishes | [26](../docs/26-damage.md#hit-points--read-and-measured) |
+| M4 | Shields: bubble contacts and sectors | not modelled; no Mission 01 target has one | [26](../docs/26-damage.md#shields-a-generator-a-deflector-six-sectors--read-and-measured) |
+| M4 | Poses of other units for the hit test | their rest poses: other units' animation is not played | [24](../docs/24-motion.md#playing-a-state--read-and-measured) |
 | M4 | How the two ends of a collision object's sweep differ | the round's position before its move this tick, and after | [26](../docs/26-damage.md#not-established) |
 | M4 | Whether a unit answers for its material when a round strikes it | slot 0 of the `.exp` on a unit; the surface's slot on the ground | [11](../docs/11-effects.md#not-resolved) |
 | M4 | The collision radius of a round | the mesh header's bounding sphere | [26](../docs/26-damage.md#not-established) |

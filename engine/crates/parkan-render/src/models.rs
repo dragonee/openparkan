@@ -65,7 +65,9 @@ struct GpuModel {
 
 struct GpuInstance {
     model: usize,
+    buffer: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
+    visible: bool,
 }
 
 pub struct ModelRenderer {
@@ -268,18 +270,28 @@ impl ModelRenderer {
                 let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                     label: Some("instance"),
                     contents: bytemuck::bytes_of(&matrix.to_cols_array()),
-                    usage: wgpu::BufferUsages::UNIFORM,
+                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
                 });
                 let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
                     label: Some("instance"),
                     layout: &instance_layout,
                     entries: &[wgpu::BindGroupEntry { binding: 0, resource: buffer.as_entire_binding() }],
                 });
-                GpuInstance { model: i.model, bind_group }
+                GpuInstance { model: i.model, buffer, bind_group, visible: !i.hidden }
             })
             .collect();
 
         Self { pipelines, frame, frame_bind_group, models, instances }
+    }
+
+    /// Move instance `index` to `matrix`, or hide it.
+    pub fn set_instance(&mut self, queue: &wgpu::Queue, index: usize, matrix: Mat4, visible: bool) {
+        if let Some(i) = self.instances.get_mut(index) {
+            i.visible = visible;
+            if visible {
+                queue.write_buffer(&i.buffer, 0, bytemuck::bytes_of(&matrix.to_cols_array()));
+            }
+        }
     }
 
     pub fn prepare(&self, queue: &wgpu::Queue, view_proj: Mat4) {
@@ -291,7 +303,7 @@ impl ModelRenderer {
         pass.set_bind_group(0, &self.frame_bind_group, &[]);
         for (mode, pipeline) in &self.pipelines {
             pass.set_pipeline(pipeline);
-            for instance in &self.instances {
+            for instance in self.instances.iter().filter(|i| i.visible) {
                 let model = &self.models[instance.model];
                 let mut bound = false;
                 for g in model.groups.iter().filter(|g| g.mode == *mode) {

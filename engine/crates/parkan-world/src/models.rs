@@ -53,6 +53,8 @@ pub struct Instance {
     pub rotation: f32,
     /// Uniform; the record's for scenery, 1 for units and buildings.
     pub scale: f32,
+    /// Not drawn: a pooled instance waiting for use, or something destroyed.
+    pub hidden: bool,
 }
 
 pub struct Objects {
@@ -62,7 +64,9 @@ pub struct Objects {
     pub placed: Vec<usize>,
 }
 
-fn build_model(
+/// The model an object placed with `kind` and `path` is drawn with, or `None` when
+/// nothing resolves. Scenery kinds take `path` as an `objects.rlb` record name.
+pub fn build_model(
     assembly: &mut Assembly,
     store: &mut TextureStore,
     kind: u32,
@@ -145,6 +149,7 @@ pub fn build(assembly: &mut Assembly, store: &mut TextureStore, mission: &Missio
                 position: object.position,
                 rotation: object.rotation,
                 scale: object.placed_scale(),
+                hidden: false,
             });
             placed.push(i);
         }

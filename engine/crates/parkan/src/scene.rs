@@ -5,10 +5,9 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use glam::Vec3;
-use parkan_formats::{gamedir, landmesh, mission};
-use parkan_sim::ground::Ground;
+use parkan_formats::{gamedir, mission};
 use parkan_world::assembly::Assembly;
-use parkan_world::hero::{self, Hero};
+use parkan_world::hero;
 use parkan_world::models::{self, Objects};
 use parkan_world::terrain::{self, Terrain};
 use parkan_world::textures::TextureStore;
@@ -54,18 +53,24 @@ pub fn world(game: &Path, loaded: &Loaded) -> Result<World> {
     Ok(World { store, terrain, objects })
 }
 
-/// The hero, and the ground it walks on.
-pub struct Play {
-    pub hero: Hero,
-    pub ground: Ground,
-}
+pub use parkan_world::play::Play;
 
 pub fn play(game: &Path, loaded: &Loaded) -> Result<Option<Play>> {
-    let mut assembly = Assembly::new(game)?;
-    let Some(hero) = Hero::load(&mut assembly, &loaded.mission)? else { return Ok(None) };
-    let dir = terrain::map_dir(game, &loaded.mission.map_path)?;
-    let land = landmesh::load(&gamedir::resolve(&dir, "Land.msh").context("the map has no Land.msh")?)?;
-    Ok(Some(Play { hero, ground: Ground::new(land) }))
+    Play::load(game, &loaded.mission)
+}
+
+/// Bring the drawing up to date with the battle: hide what died, place the rounds.
+pub fn sync(renderer: &mut parkan_render::Renderer, queue: &wgpu::Queue, play: &mut Play, objects: &Objects) {
+    for object in std::mem::take(&mut play.killed) {
+        if let Some(i) = objects.placed.iter().position(|&p| p == object) {
+            // STAND-IN: docs/26-damage.md#hit-points--read-and-measured -- what a dead
+            // object leaves (its explosion, wreck or damage stages) is not drawn: it goes.
+            renderer.set_instance(queue, i, glam::Mat4::IDENTITY, false);
+        }
+    }
+    for (i, matrix, visible) in play.battle.round_instances() {
+        renderer.set_instance(queue, i, matrix, visible);
+    }
 }
 
 /// Take the hero's own placement out of what is drawn: the eye is inside it.

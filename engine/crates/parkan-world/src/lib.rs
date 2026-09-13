@@ -1,6 +1,9 @@
 pub mod assembly;
+pub mod battle;
 pub mod dump;
 pub mod hero;
 pub mod models;
+pub mod play;
+pub mod settings;
 pub mod terrain;
 pub mod textures;

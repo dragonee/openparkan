@@ -131,3 +131,81 @@ fn the_heros_eye_looks_level_along_its_heading_and_pitches_with_the_turret() {
     assert!((up.z.asin().to_degrees() - 79.4).abs() < 1.0, "{}", up.z.asin().to_degrees());
     assert!((hero.eye().position - eye.position).length() < 0.05, "pitch does not move the eye");
 }
+
+#[test]
+#[ignore = "needs the game install"]
+fn the_heros_laser_kills_a_small_target_in_two_hits() {
+    use glam::Vec3;
+    use parkan_formats::mission;
+    use parkan_sim::combat::Event;
+    use parkan_world::play::Play;
+
+    let game = gamedir::find(None).expect("a Parkan install: set PARKAN_DIR");
+    let dir = gamedir::resolve(&game, gamedir::MISSION_01).unwrap();
+    let m = mission::parse(&std::fs::read(dir.join("data.tma")).unwrap(), "Mission.01").unwrap();
+    let mut play = Play::load(&game, &m).unwrap().expect("Mission 01 has a hero");
+    let hero_guns: Vec<bool> = play.hero.guns.iter().map(|g| g.selected).collect();
+    assert_eq!(hero_guns, vec![true, false, true, false], "cannon and laser start selected (docs/29)");
+
+    // Object 1 is an l_targ, r_h_01: node 0 has 500 hit points, and the Trgt clan is
+    // the player's ally, so no level ratio.
+    let object = 1;
+    assert!(m.objects[object].path.to_ascii_lowercase().ends_with("l_targ.dat"));
+    let t = play.battle.objects.iter().position(|&o| o == object).unwrap();
+    let life = play.battle.combat.targets[t].parts[0].life.as_ref().unwrap();
+    assert_eq!(life.nodes[0].max, 500.0);
+
+    // Stand 30 m off it, facing it, on the ground its post stands on: not in Tut_1's
+    // lake, whose bed lies far below.
+    let centre = play.battle.combat.targets[t].centre;
+    let base = m.objects[object].position[2];
+    let at = (0..16)
+        .map(|k| {
+            let a = k as f32 * std::f32::consts::TAU / 16.0;
+            centre + Vec3::new(a.cos(), a.sin(), 0.0) * 30.0
+        })
+        .find(|p| play.ground.below(p.x, p.y, 1000.0).is_some_and(|h| h.point.z > base - 9.0))
+        .expect("somewhere level to stand");
+    let facing = (centre - at).with_z(0.0).normalize();
+    let w = &mut play.hero.walker;
+    w.body.position = Vec3::new(at.x, at.y, centre.z + 20.0);
+    w.body.yaw = (-facing.x).atan2(facing.y);
+    w.from = (w.body.position, w.body.yaw);
+    w.from_heading = w.body.yaw;
+    w.follow_ground(&play.ground);
+    play.tick(1000.0 / 60.0, [0.0; 2]);
+
+    // Tilt the sight until it meets the target's node 0, the base whose death kills it.
+    let pitch = play.hero.rig.pitch.unwrap();
+    let meets = |play: &mut Play, value: f32| {
+        play.hero.rig.values[pitch] = value;
+        let (o, s) = play.hero.sight().unwrap();
+        play.battle
+            .combat
+            .first_hit(&play.ground, None, o + s * 5.0, o + s * 200.0, 0.0)
+            .is_some_and(|(strike, target, _)| target == Some(t) && strike.node == Some(0))
+    };
+    let hitting: Vec<f32> = (0..=100).map(|k| k as f32 / 100.0).filter(|&v| meets(&mut play, v)).collect();
+    assert!(!hitting.is_empty(), "some pitch puts the sight on the target's base");
+    let value = hitting[hitting.len() / 2];
+    play.hero.rig.values[pitch] = value;
+    play.hero.rig.aim[1] = 1.0 - value;
+
+    // The laser alone: key 1 deselects the cannon.
+    play.hero.key("SCAN_W_1", true);
+    play.hero.key("SCAN_LMOUSE", true);
+    let mut damage = Vec::new();
+    let mut killed_at = None;
+    for tick in 0..90 {
+        for e in play.tick(1000.0 / 60.0, [0.0; 2]) {
+            match e {
+                Event::Damaged { target, node, damage: d, .. } if target == t => damage.push((node, d)),
+                Event::Killed { target } if target == t => killed_at = Some(tick),
+                _ => {}
+            }
+        }
+    }
+    assert!(killed_at.is_some(), "killed; damage {damage:?}");
+    assert_eq!(damage, vec![(0, 250.0), (0, 250.0)], "each laser hit is 249 + 1 on node 0");
+    assert_eq!(play.killed, vec![object]);
+}

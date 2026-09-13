@@ -210,6 +210,13 @@ impl Renderer {
         self.objects = objects.map(|o| ModelRenderer::new(device, self.format, o, &bank));
     }
 
+    /// Move a placed object's instance to `matrix`, or hide it.
+    pub fn set_instance(&mut self, queue: &wgpu::Queue, index: usize, matrix: Mat4, visible: bool) {
+        if let Some(objects) = self.objects.as_mut() {
+            objects.set_instance(queue, index, matrix, visible);
+        }
+    }
+
     /// Draw the scene into `target`, a view of a `width` × `height` texture.
     pub fn draw(
         &mut self,

@@ -10,17 +10,20 @@ use std::rc::Rc;
 
 use anyhow::{Context, Result};
 use glam::{Quat, Vec3};
-use parkan_formats::control::{self, CAMERA_TYPE, Controller};
+use parkan_formats::control::{self, ARM_TYPE, CAMERA_TYPE, Controller, GUN_TYPE};
 use parkan_formats::cpt::{self, ControlPoint};
 use parkan_formats::mission::Mission;
 use parkan_formats::pose::{Pose, rotate};
 use parkan_formats::{controls, gamedir};
 use parkan_sim::ground::Ground;
+use parkan_sim::guns::{CONTINUE_FIGHT, Gun, STATE_OFF, Shot};
 use parkan_sim::input::{Hands, Pilot};
 use parkan_sim::machine::Walker;
 use parkan_sim::turret::Rig;
+use parkan_sim::turret::step_toward;
 
 use crate::assembly::{Assembly, LoadedMesh, Part};
+use crate::battle::{Battle, STARTS_SELECTED};
 
 /// What `Iron_3D.ini` sets the mouse to when it says nothing.
 pub const DEFAULT_MOUSE_SENS: f32 = 100.0;
@@ -54,6 +57,15 @@ pub struct Hero {
     /// The camera's position and direction points.
     pub eye_point: ControlPoint,
     pub look_point: ControlPoint,
+    /// The turret's controller and control points.
+    pub turret_controller: Controller,
+    pub points: Vec<ControlPoint>,
+    /// The turret's guns, and the round kind each fires in its `Battle`.
+    pub guns: Vec<Gun>,
+    pub rounds: Vec<Option<usize>>,
+    /// Each gun's arm: the channels of the class-24 component paired with it.
+    pub arms: Vec<Vec<usize>>,
+    fire_held: bool,
     /// Game time, ms.
     pub time_ms: f64,
 }
@@ -73,14 +85,8 @@ fn controller(assembly: &mut Assembly, record: &str) -> Result<Option<Controller
 
 /// `MOUSE_SENS` from `Iron_3D.ini`.
 pub fn mouse_sensitivity(game: &Path) -> f32 {
-    gamedir::resolve(game, "Iron_3D.ini")
-        .and_then(|p| std::fs::read(p).ok())
-        .and_then(|b| {
-            String::from_utf8_lossy(&b).lines().find_map(|line| {
-                let (key, value) = line.split_once('=')?;
-                key.trim().eq_ignore_ascii_case("MOUSE_SENS").then(|| value.trim().parse().ok())?
-            })
-        })
+    crate::settings::value(game, "CS", "MOUSE_SENS")
+        .and_then(|v| v.parse().ok())
         .unwrap_or(DEFAULT_MOUSE_SENS)
 }
 
@@ -142,6 +148,12 @@ impl Hero {
             socket: usize::try_from(turret_part.node).unwrap_or(0),
             eye_point,
             look_point,
+            turret_controller: turret_ctl,
+            points,
+            guns: Vec::new(),
+            rounds: Vec::new(),
+            arms: Vec::new(),
+            fire_held: false,
             time_ms: 0.0,
         }))
     }
@@ -158,14 +170,118 @@ impl Hero {
         pilot.key(scan, pressed, &mut hands);
     }
 
-    /// One tick of game time: the mouse counts since the last, then the machine and
-    /// the turret.
-    pub fn tick(&mut self, dt_ms: f64, mouse: [f32; 2], ground: &Ground) {
+    /// Fit the turret's guns: each class-2 component, the round its record names
+    /// loaded into `battle`. A gun whose round's frame +116 carries 4 starts selected;
+    /// on the hero the rest start deselected (`World3D.dll:0x1000ed20`).
+    pub fn arm(&mut self, battle: &mut Battle, assembly: &mut Assembly) {
+        self.guns.clear();
+        self.rounds.clear();
+        let components = self.turret_controller.components.clone();
+        self.arms = components
+            .iter()
+            .filter(|c| c.type_id == ARM_TYPE)
+            .map(|c| c.entries.iter().filter_map(|&e| usize::try_from(e).ok()).collect())
+            .collect();
+        for (i, c) in components.iter().enumerate().filter(|(_, c)| c.type_id == GUN_TYPE) {
+            let mut gun = Gun::new(i, c, &self.turret_controller.channels);
+            let kind = battle.round_kind(assembly, &c.resource.member);
+            gun.selected = kind.is_some_and(|k| battle.kinds[k].frame_flags & STARTS_SELECTED != 0);
+            // STAND-IN: docs/29-weapons.md#the-button-reaches-the-selected-guns -- selecting
+            // sends the gun's arm state 1 and deselecting state 2, which by the frames
+            // unfold and fold it; a gun selected at the start begins unfolded.
+            if gun.selected
+                && let Some(arm) = self.arms.get(self.guns.len())
+            {
+                for &c in arm {
+                    if let Some(v) = self.rig.values.get_mut(c) {
+                        *v = 1.0;
+                    }
+                }
+            }
+            self.guns.push(gun);
+            self.rounds.push(kind);
+        }
+    }
+
+    /// One tick of game time: the mouse counts since the last, then the machine, the
+    /// turret and the guns. Returns the rounds that left, by gun.
+    pub fn tick(&mut self, dt_ms: f64, mouse: [f32; 2], ground: &Ground) -> Vec<(usize, Shot)> {
         let (pilot, mut hands) = self.hands();
         pilot.mouse(mouse, &mut hands);
         self.time_ms += dt_ms;
         self.walker.advance(self.time_ms, ground);
         self.rig.update((dt_ms / 1000.0) as f32);
+
+        // `World3D.dll:0x100109f8`: a gun's number toggles it; -1 selects and resets all.
+        for n in std::mem::take(&mut self.pilot.selects) {
+            if n < 0 {
+                for g in &mut self.guns {
+                    g.selected = true;
+                    g.reset();
+                }
+            } else if let Some(g) = usize::try_from(n - 1).ok().and_then(|i| self.guns.get_mut(i)) {
+                g.toggle();
+            }
+        }
+        // `MCMD_STATE` index -1 reaches the selected guns as the button goes down or up.
+        if self.pilot.fire != self.fire_held {
+            self.fire_held = self.pilot.fire;
+            let state = if self.fire_held { CONTINUE_FIGHT } else { STATE_OFF };
+            for g in self.guns.iter_mut().filter(|g| g.selected) {
+                g.state = state;
+            }
+        }
+        let dt = (dt_ms / 1000.0) as f32;
+        for (g, arm) in self.guns.iter().zip(&self.arms) {
+            let target = if g.selected { 1.0 } else { 0.0 };
+            for &c in arm {
+                if let (Some(ch), Some(v)) = (self.rig.channels.get(c), self.rig.values.get(c).copied()) {
+                    self.rig.values[c] = step_toward(v, target, ch.rate, dt, false);
+                }
+            }
+        }
+        let mut shots = Vec::new();
+        for (i, g) in self.guns.iter_mut().enumerate() {
+            g.recharge();
+            shots.extend(g.tick(self.time_ms).into_iter().map(|s| (i, s)));
+            for b in &g.barrels {
+                if let Some(v) = self.rig.values.get_mut(b.channel) {
+                    *v = b.value(self.time_ms);
+                }
+            }
+        }
+        shots
+    }
+
+    /// The hero's world velocity.
+    pub fn world_velocity(&self) -> Vec3 {
+        self.walker.body.to_world(Vec3::from_array(self.walker.body.velocity))
+    }
+
+    /// A turret control point in the world: its position and direction.
+    pub fn point(&self, index: usize) -> Option<(Vec3, Vec3)> {
+        let p = self.points.get(index)?;
+        let (position, _) = self.walker.drawn(self.time_ms);
+        let heading = Quat::from_rotation_z(self.walker.drawn_heading(self.time_ms));
+        let pose = self.turret_node(&self.mount(), usize::try_from(p.nodes().0).ok()?);
+        let f = |v: [f64; 3]| Vec3::new(v[0] as f32, v[1] as f32, v[2] as f32);
+        let at = f(pose.apply(p.position.map(f64::from)));
+        let dir = f(rotate(pose.rotation, p.direction.map(f64::from)));
+        Some((position + heading * at, heading * dir))
+    }
+
+    /// The sight a turret hands its guns (`0x10028130`): the yaw channel's second point
+    /// and the pitch channel's point, `TurretCenter` and `TargetDirect`.
+    pub fn sight(&self) -> Option<(Vec3, Vec3)> {
+        let ch = |c: Option<usize>| c.and_then(|c| self.rig.channels.get(c));
+        let origin = self.point(usize::try_from(ch(self.rig.yaw)?.origin).ok()?)?.0;
+        let direction = self.point(usize::try_from(ch(self.rig.pitch)?.point).ok()?)?.1;
+        Some((origin, direction))
+    }
+
+    /// A barrel's muzzle (`0x1002a302`): its channel's control point, in the world.
+    pub fn muzzle(&self, channel: usize) -> Option<(Vec3, Vec3)> {
+        self.point(usize::try_from(self.rig.channels.get(channel)?.point).ok()?)
     }
 
     /// The turret's pose in the unit's frame, with the chassis playing its frames.

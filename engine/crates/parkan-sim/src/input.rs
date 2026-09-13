@@ -84,8 +84,10 @@ pub struct Pilot {
     walk: f32,
     /// 1 while strafing left, −1 right.
     strafe: f32,
-    /// The fire button is held.
+    /// The fire button is held: `MCMD_STATE` to the selected guns.
     pub fire: bool,
+    /// `MCMD_SELECT` rows not yet taken: a gun's number, or −1 for all of them.
+    pub selects: Vec<i32>,
 }
 
 impl Pilot {
@@ -100,6 +102,7 @@ impl Pilot {
             walk: 0.0,
             strafe: 0.0,
             fire: false,
+            selects: Vec::new(),
         }
     }
 
@@ -185,6 +188,9 @@ impl Pilot {
             controls::MCMD_STATE if row.class_id() == controls::CICLS_MULTIGUN => {
                 self.fire = row.pressed && row.bits() != 0;
             }
+            controls::MCMD_SELECT if row.class_id() == controls::CICLS_MULTIGUN => {
+                self.selects.push(row.index);
+            }
             // STAND-IN: docs/24-motion.md#from-input-to-motion--read-and-measured -- what
             // the keypad cruise's ramp does is not read; ramp rows do nothing.
             _ => {}
@@ -229,6 +235,7 @@ MOUSE SCAN_LSHIFT SCAN_MOUSE_X 1 CICLS_CAMERA MCMD_ANGLE_X 0.1 1 MAN_WRAP 0.0 0
 KEY   SCAN_NULL SCAN_LSHIFT 0 CICLS_CAMERA MCMD_ANGLE_X 0.5 1 MAN_NOTWRAP 0.0 0
 MOUSE SCAN_NULL SCAN_LMOUSE 1 CICLS_MULTIGUN MCMD_STATE 0.0 -1 CIS_CONTINUEFIGHT 0.0 0
 MOUSE SCAN_NULL SCAN_LMOUSE 0 CICLS_MULTIGUN MCMD_STATE 0.0 -1 CIS_SWITCHOFF 0.0 0
+KEY   SCAN_NULL SCAN_W_3 1 CICLS_MULTIGUN MCMD_SELECT 0.0 3 0 0.0 0
 ";
         controls::parse(text, "hero.tbl").unwrap()
     }
@@ -293,5 +300,7 @@ MOUSE SCAN_NULL SCAN_LMOUSE 0 CICLS_MULTIGUN MCMD_STATE 0.0 -1 CIS_SWITCHOFF 0.0
         assert!(pilot.fire);
         pilot.key("SCAN_LMOUSE", false, &mut r.hands());
         assert!(!pilot.fire);
+        pilot.key("SCAN_W_3", true, &mut r.hands());
+        assert_eq!(pilot.selects, vec![3]);
     }
 }

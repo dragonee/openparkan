@@ -126,11 +126,19 @@ fn rehearse(play: &mut scene::Play, args: &Args) {
     for key in &args.hold {
         play.hero.key(key, true);
     }
+    let mut kills = Vec::new();
     for tick in 0..args.ticks {
-        play.hero.tick(TICK_MS, args.mouse, &play.ground);
+        for e in play.tick(TICK_MS, args.mouse) {
+            if let parkan_sim::combat::Event::Killed { target } = e {
+                kills.push(play.battle.objects[target]);
+            }
+        }
         if args.headless && (tick + 1) % 60 == 0 {
             report(play);
         }
+    }
+    if args.headless && !kills.is_empty() {
+        println!("killed mission objects {kills:?}");
     }
 }
 
@@ -139,7 +147,7 @@ fn report(play: &scene::Play) {
     let b = &h.walker.body;
     let eye = h.eye();
     println!(
-        "t {:6.2} s  at ({:.2}, {:.2}, {:.2})  speed {:5.2} m/s  heading {:+.3}  state {:3}  look ({:+.3}, {:+.3}, {:+.3})",
+        "t {:6.2} s  at ({:.2}, {:.2}, {:.2})  speed {:5.2} m/s  heading {:+.3}  state {:3}  look ({:+.3}, {:+.3}, {:+.3})  rounds {}  targets alive {}",
         h.time_ms / 1000.0,
         b.position.x,
         b.position.y,
@@ -150,6 +158,13 @@ fn report(play: &scene::Play) {
         eye.forward.x,
         eye.forward.y,
         eye.forward.z,
+        play.battle.combat.rounds.len(),
+        play.battle
+            .combat
+            .targets
+            .iter()
+            .filter(|t| t.alive && t.parts.iter().any(|p| p.life.is_some()))
+            .count(),
     );
 }
 
@@ -161,6 +176,7 @@ fn screenshot(loaded: &scene::Loaded, game: &Path, args: &Args, out: &Path) -> R
         if args.fly || args.top_down || args.look.is_some() { None } else { scene::play(game, loaded)? };
     if let Some(p) = play.as_mut() {
         scene::hide(&mut world.objects, p.hero.object);
+        p.draw_rounds(&mut world.store, &mut world.objects)?;
         rehearse(p, args);
     }
     let mut renderer = Renderer::new(&gpu.device, parkan_render::CAPTURE_FORMAT);
@@ -171,6 +187,9 @@ fn screenshot(loaded: &scene::Loaded, game: &Path, args: &Args, out: &Path) -> R
         Some(&world.terrain),
         Some(&world.objects),
     );
+    if let Some(p) = play.as_mut() {
+        scene::sync(&mut renderer, &gpu.queue, p, &world.objects);
+    }
     let aspect = width as f32 / height as f32;
     let view_proj = if args.top_down {
         top_down(&world.terrain, aspect)
@@ -260,7 +279,7 @@ impl App {
         if let Some(play) = self.play.as_mut() {
             self.owed = (self.owed + elapsed).min(250.0);
             while self.owed >= TICK_MS {
-                play.hero.tick(TICK_MS, self.counts, &play.ground);
+                play.tick(TICK_MS, self.counts);
                 self.counts = [0.0; 2];
                 self.owed -= TICK_MS;
             }
@@ -293,8 +312,11 @@ impl App {
         };
         let view = frame.texture.create_view(&Default::default());
         let aspect = r.config.width as f32 / r.config.height.max(1) as f32;
-        let view_proj = match &self.play {
-            Some(play) => camera::first_person(&play.hero.eye(), aspect),
+        let view_proj = match self.play.as_mut() {
+            Some(play) => {
+                scene::sync(&mut r.renderer, &r.gpu.queue, play, &self.world.objects);
+                camera::first_person(&play.hero.eye(), aspect)
+            }
             None => self.camera.view_proj(aspect),
         };
         r.renderer.draw(&r.gpu.device, &r.gpu.queue, &view, (r.config.width, r.config.height), view_proj);
@@ -410,9 +432,10 @@ fn main() -> Result<()> {
         return screenshot(&loaded, &game, &args, out);
     }
     let mut world = scene::world(&game, &loaded)?;
-    let play = if args.fly { None } else { scene::play(&game, &loaded)? };
-    if let Some(p) = &play {
+    let mut play = if args.fly { None } else { scene::play(&game, &loaded)? };
+    if let Some(p) = play.as_mut() {
         scene::hide(&mut world.objects, p.hero.object);
+        p.draw_rounds(&mut world.store, &mut world.objects)?;
     }
     let event_loop = EventLoop::new()?;
     event_loop.set_control_flow(ControlFlow::Poll);

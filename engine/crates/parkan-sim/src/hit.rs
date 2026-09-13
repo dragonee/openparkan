@@ -57,7 +57,10 @@ fn arr(v: Vec3) -> [f64; 3] {
 /// A segment through a posed mesh (`AniMesh.dll:0x10013ef0`): every node once, its
 /// level-0 slot of variant 0 in the node's frame, `world[i]` placing node `i`. The
 /// nearest strike by squared distance from `p0` wins.
-pub fn segment_mesh(mesh: &Mesh, world: &[Pose], p0: Vec3, p1: Vec3) -> Option<Strike> {
+///
+/// `scale` is the object's uniform scale: the poses carry it in their translations,
+/// and the node frames are scaled by it, as `SetScale` recomposes them (docs/04).
+pub fn segment_mesh(mesh: &Mesh, world: &[Pose], scale: f32, p0: Vec3, p1: Vec3) -> Option<Strike> {
     let mut best = (p1 - p0).length_squared();
     let mut out = None;
     for (i, node) in mesh.nodes.iter().enumerate() {
@@ -67,7 +70,7 @@ pub fn segment_mesh(mesh: &Mesh, world: &[Pose], p0: Vec3, p1: Vec3) -> Option<S
             continue;
         }
         let back = pose.invert();
-        let (q0, q1) = (vec(back.apply(arr(p0))), vec(back.apply(arr(p1))));
+        let (q0, q1) = (vec(back.apply(arr(p0))) / scale, vec(back.apply(arr(p1))) / scale);
         let first = usize::from(s.first_triangle);
         let last = (first + usize::from(s.triangle_count)).min(mesh.triangles.len());
         for t in first..last {
@@ -81,10 +84,10 @@ pub fn segment_mesh(mesh: &Mesh, world: &[Pose], p0: Vec3, p1: Vec3) -> Option<S
             if !inside(q, a, b, c) {
                 continue;
             }
-            let d2 = (q - q0).length_squared();
+            let d2 = (q - q0).length_squared() * scale * scale;
             if d2 <= best {
                 best = d2;
-                out = Some(Strike { point: vec(pose.apply(arr(q))), d2, node: Some(i), triangle: t });
+                out = Some(Strike { point: vec(pose.apply(arr(q * scale))), d2, node: Some(i), triangle: t });
             }
         }
     }
@@ -219,15 +222,30 @@ mod tests {
     }
 
     #[test]
+    fn a_scaled_object_is_struck_on_its_scaled_geometry() {
+        let (mesh, _) = wall();
+        let strike = segment_mesh(&mesh, &[IDENTITY], 2.0, Vec3::ZERO, Vec3::new(0.0, 20.0, 0.0)).unwrap();
+        assert_eq!(strike.point, Vec3::new(0.0, 10.0, 0.0));
+        assert_eq!(strike.d2, 100.0);
+    }
+
+    #[test]
     fn a_segment_strikes_the_nearest_node_and_passes_flagged_triangles() {
         let (mut mesh, world) = wall();
-        let strike = segment_mesh(&mesh, &world, Vec3::ZERO, Vec3::new(0.0, 10.0, 0.0)).unwrap();
+        let strike = segment_mesh(&mesh, &world, 1.0, Vec3::ZERO, Vec3::new(0.0, 10.0, 0.0)).unwrap();
         // The second node's triangle, nearer at y = 3, is flagged 0x24: the first is struck.
         assert_eq!((strike.node, strike.point), (Some(0), Vec3::new(0.0, 5.0, 0.0)));
         mesh.face_flags[1] = 0;
-        let strike = segment_mesh(&mesh, &world, Vec3::ZERO, Vec3::new(0.0, 10.0, 0.0)).unwrap();
+        let strike = segment_mesh(&mesh, &world, 1.0, Vec3::ZERO, Vec3::new(0.0, 10.0, 0.0)).unwrap();
         assert_eq!((strike.node, strike.point), (Some(1), Vec3::new(0.0, 3.0, 0.0)));
-        assert_eq!(segment_mesh(&mesh, &world, Vec3::new(0.0, 10.0, 0.0), Vec3::ZERO), None, "from behind");
-        assert_eq!(segment_mesh(&mesh, &world, Vec3::new(3.0, 0.0, 0.0), Vec3::new(3.0, 10.0, 0.0)), None);
+        assert_eq!(
+            segment_mesh(&mesh, &world, 1.0, Vec3::new(0.0, 10.0, 0.0), Vec3::ZERO),
+            None,
+            "from behind"
+        );
+        assert_eq!(
+            segment_mesh(&mesh, &world, 1.0, Vec3::new(3.0, 0.0, 0.0), Vec3::new(3.0, 10.0, 0.0)),
+            None
+        );
     }
 }

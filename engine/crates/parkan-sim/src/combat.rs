@@ -66,6 +66,8 @@ pub struct Part {
     pub mesh: Rc<Mesh>,
     /// Each node's world pose.
     pub nodes: Vec<Pose>,
+    /// The object's uniform scale, which `nodes` carry in their translations.
+    pub scale: f32,
     /// Its nodes' hit points; `None` where it takes no damage.
     pub life: Option<Life>,
 }
@@ -163,7 +165,7 @@ impl Combat {
                 continue;
             }
             for (p, part) in target.parts.iter().enumerate() {
-                if let Some(s) = segment_mesh(&part.mesh, &part.nodes, p0, p1)
+                if let Some(s) = segment_mesh(&part.mesh, &part.nodes, part.scale, p0, p1)
                     && best.as_ref().is_none_or(|(b, _, _)| s.d2 < b.d2)
                 {
                     best = Some((s, Some(id), p));
@@ -301,7 +303,9 @@ impl Combat {
                             .filter_map(|(n, node)| {
                                 let slot = part.mesh.slots.get(usize::from(node.slot_index[0]))?;
                                 let [cx, cy, cz, r] = slot.sphere;
-                                let centre = vec(part.nodes.get(n)?.apply(arr(Vec3::new(cx, cy, cz))));
+                                let local = Vec3::new(cx, cy, cz) * part.scale;
+                                let centre = vec(part.nodes.get(n)?.apply(arr(local)));
+                                let r = r * part.scale;
                                 Some((n, blast(damage, e.radius, r, (centre - point).length())))
                             })
                             .filter(|&(_, d)| d > 0.0)
@@ -389,7 +393,7 @@ mod tests {
         let life = Life::new(&table, vec![None], vec![false], 1.0, 1.0);
         let pose = Pose { translation: [f64::from(at.x), f64::from(at.y), f64::from(at.z)], ..IDENTITY };
         Target {
-            parts: vec![Part { mesh: Rc::new(mesh), nodes: vec![pose], life: Some(life) }],
+            parts: vec![Part { mesh: Rc::new(mesh), nodes: vec![pose], scale: 1.0, life: Some(life) }],
             centre: at + Vec3::Z,
             radius: 1.5,
             alive: true,
