@@ -42,8 +42,9 @@ BUILD_SCHEMES = "BuildDat.lst"
 #: the engine reads all twelve (``SCHEME_TYPES``): the header is stale.
 BUILD_SCHEME_DECLARED = 11
 #: The building Type of each scheme, as ``ArealMap.dll:0x1001ce90`` registers
-#: them.  A scheme's list is its Type's upgrade ladder: a builder builds the
-#: first, and each upgrade moves the building one on.
+#: them.  ``Hangar`` is the file's name for the Outpost.  A scheme's list is its
+#: Type's upgrade ladder: a builder builds the first, and each upgrade moves the
+#: building one on.
 SCHEME_TYPES = {
     "Bunker_Small": 0x80010000, "Bunker_Medium": 0x80020000, "Bunker_Large": 0x80040000,
     "Generator": 0x80000002, "Mine": 0x80000004, "Storage": 0x80000008,

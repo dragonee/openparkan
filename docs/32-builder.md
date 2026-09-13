@@ -105,7 +105,7 @@ differ — [16-research.md](16-research.md)):
 | Institute | `sinst01` | 560 | 655, 800, 900 |
 | Storage | `sstore01` | 670 | 1,015, 1,410 |
 | Bunker_Small | `sbunk01` | 695 | 805, 840 |
-| Hangar | `shang01` | 720 | — |
+| Hangar (the Outpost) | `shang01` | 720 | — |
 | Plant | `splant01` | 770 | 1,215, 1,910 |
 | Bunker_Medium | `mbunk01` | 1,080 | 1,210, 1,375 |
 | Tower_Medium | `mtow01` | 1,100 | 1,195, 1,325 |

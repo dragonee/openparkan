@@ -41,7 +41,7 @@ mesh:
 | tower (both meshes) | 1 | 1 (`0x620`) | — |
 | factory (small, medium, large) | 1 | 1 (`0x600`) | 1 (`0x10000400`) |
 | generator | 1 | 1 (`0x620`) | 2 (`0x10000620`, `0x10000020`) |
-| hangar | 1 | — | 1 (`0x10000620`) |
+| Outpost (`fr_l_angar`) | 1 | — | 1 (`0x10000620`) |
 | research centre, mine, storage, main teleport | 1 | — | — |
 | large ruin | — | 1 (`0x620`) | — |
 | bridges, the other ruins | — | — | — |
@@ -56,11 +56,12 @@ Against what the game looked like: docks in factories, a repair depot, power
 stations, bunkers and towers, small ones indoors and large ones outside. The
 data agrees on all but two points. Only one generator model ships
 (`fr_l_gener`; the `L Power Maste` has no hall way at all). And no building is
-named a repair depot in the data: the hangar is the one building left with a
-ground-level dock, and the command menu names its build and upgrade entries
-**Outpost** — *posterunek* in Polish — pushing `BUILDING_HANGAR`
+named a repair depot in the data: that building is the **Outpost** —
+*posterunek* in Polish — the one building left with a ground-level dock. Its
+files call it a hangar (`fr_l_angar`, "Small Hangar", `BUILDING_HANGAR`), and
+the command menu's "Build Outpost" and "Upgrade Outpost" push that Type
 (`iron3d.dll:0x1007baf7`, [31-packages.md](31-packages.md)). Every dock
-repairs, not only the hangar's.
+repairs, not only the Outpost's.
 
 ## What a dock gives — *read*
 
@@ -84,7 +85,7 @@ at 98% (`0x1002ed3b`), and leaves.
 
 **It only picks a ground-level dock.** `MakeInsideDest` (`0x10001270`) asks for
 the ground-level bit on every place except the pod (`0x10001357`). So a bot
-sent to reload goes to a generator's two outdoor docks, a hangar's, or a
+sent to reload goes to a generator's two outdoor docks, an Outpost's, or a
 factory's — never to a bunker's or a tower's, which serve whoever walks in.
 
 **A bot orders itself there** (`0x10017d50`) when any of these holds:
@@ -229,7 +230,7 @@ of both kinds ([25-sensors.md](25-sensors.md#what-the-ai-does-with-it--read)),
 so the AI does not pick animals or neutrals as targets on its own.
 
 **Neutrals own things** (*measured*): 22 units and 28 buildings across the
-shipped missions — factories, a hangar, a bunker and a generator in the first campaign's
+shipped missions — factories, an Outpost, a bunker and a generator in the first campaign's
 tutorials, bridges, and on four multiplayer maps a research centre, a mine or
 generators between the players. `Multi.05`'s `Ntrl` is the exception: type 2.
 
@@ -247,6 +248,6 @@ generators between the players. `Multi.05`'s `Ntrl` is the exception: type 2.
   occupancy test (`0x10018310`) compares a vector of the unit's to 2.0, and
   that it is the velocity is a *guess*.
 - Why `behpsp.res` gives `Task_Charge` to the generator's profile and to no
-  other building's, when factories, hangars, bunkers and towers have docks.
+  other building's, when factories, Outposts, bunkers and towers have docks.
 - The mission property `ChargeRadius` is 10000 and locked on all 463 placed
   buildings and units; nothing found reads it for docking.

@@ -50,7 +50,7 @@ What the shipped tables give node 0 (*measured*):
 | internal parts (`intsys.rlb`, `o_*`) | 1 |
 | bunkers, research centres, towers | 40,000–100,000 |
 | bridges | 120,000–200,000 |
-| mines, plants, stores, hangars, generators, the medium `mtp` | 1 on node 0; parts 40,000–500,000 |
+| mines, plants, stores, Outposts, generators, the medium `mtp` | 1 on node 0; parts 40,000–500,000 |
 
 ## The difficulty ratio — *read*, and *measured*
 

@@ -193,7 +193,7 @@ the target and the radar. What hides a machine is its own shield.
 - **Of the buildings, only bunkers and towers can see.** All 27 carry one
   "Bunker radar" or "Tower radar" (`e_gun_fs_*`, range 500–750); the other 49
   building assemblies — factories, power plants, mines, storages, research
-  centres, hangars, teleports, bridges — carry no radar at all.
+  centres, Outposts, teleports, bridges — carry no radar at all.
 - **Animals** have a radar built into their controller.
 
 ## What the AI does with it — *read*

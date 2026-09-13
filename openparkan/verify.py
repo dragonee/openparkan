@@ -4692,13 +4692,13 @@ def check_ownership(check, game: Path) -> None:
           f"{sum(pods.values())} pods, {pod_ground} ground-level")
 
     dock_folders = folders(inside) | folders(ground)
-    check("fortif.rlb: docks are in bunkers, generators, hangars, plants, towers",
+    check("fortif.rlb: docks are in bunkers, generators, Outposts, plants, towers",
           dock_folders == {"BUNKER", "GENER", "HANGAR", "PLANT", "TOWER", "RUIN"},
           f"docks in {sorted(dock_folders)}; control: {sum(1 for r in places if pods[r])} "
           f"pod models, {len([r for r in places if inside[r] or ground[r]])} dock models")
 
     ground_models = {r: n for r, n in ground.items() if n}
-    check("fortif.rlb: ground-level docks: generator 2, hangar 1, plant 1 each",
+    check("fortif.rlb: ground-level docks: generator 2, Outpost 1, plant 1 each",
           ground_models == {"fr_l_gener": 2, "fr_l_angar": 1,
                             "fr_b_plant": 1, "fr_m_plant": 1, "fr_l_plant": 1},
           ", ".join(f"{r} {n}" for r, n in sorted(ground_models.items())))

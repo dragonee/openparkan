@@ -89,7 +89,7 @@ Attack, Capture building and Refit (7 rows). That it is the **wingman menu**
 (`CMD_JAMES_WINGMAN_MENU`) is a *guess*, backed by *C01 Mission 3*'s tip, which
 names "Stand By" and "Follow Me" as commands to the player's wingman.
 
-**The Outpost is the hangar** (*read*). The upgrade case for "Upgrade Outpost"
+**The Outpost is the building the files call a hangar** (*read*). The upgrade case for "Upgrade Outpost"
 pushes building type `0x80000040`, which `varset.var` calls
 `BUILDING_HANGAR` (`iron3d.dll:0x1007baf7`). The other six cases push mine
 `…04`, storage `…08`, plant `…10`, institute `…400`, medium tower `0x80100000`

@@ -300,7 +300,7 @@ in the building's name:
 | factory | 1 | 3 | 5 | — |
 | core mine | 1 | 3 | 5 | — |
 
-and every other building — storage, generator, tower, bunker, hangar, bridge,
+and every other building — storage, generator, tower, bunker, Outpost, bridge,
 ruin — is 1.
 
 **What it multiplies** — *read*:

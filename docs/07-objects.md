@@ -342,7 +342,7 @@ Hiding the `o*` nodes opens a building up — the bunker turns out to be an
 octagonal chamber with corridors running off it — and the cross-check holds:
 **all 21 of the meshes with an interior also carry a path graph** to walk it.
 The 8 that carry a graph without internal nodes are the bridges, ruins and the
-hangar, which you cross rather than enter.
+Outpost (`fr_l_angar`), which you cross rather than enter.
 
 So `select(interior=True)` is a cutaway, `select()` is the building, and
 `select(interior=False)` is a shell that is far too short to be one.
