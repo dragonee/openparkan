@@ -71,6 +71,13 @@ def test_only_the_efficiency_class_has_an_efficiency(ctl, component):
     assert got[1].efficiency is None
 
 
+def test_a_component_carries_its_initial_state(ctl, component):
+    parts = [component(24, index=33), component(control.REPAIR_TYPE)]
+    turret, repair = control.parse(ctl(counts=(0, 0, 0, 2, 0), components=parts)).components
+    assert turret.state == 33
+    assert repair.state is None
+
+
 def test_a_component_carries_its_power_and_channel(ctl, component):
     parts = [component(control.POWER_STORE_TYPE, power=25.0, values=(10.0,)),
              component(control.EFFICIENCY_TYPE, power=0.01, values=(1.0,))]

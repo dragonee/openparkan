@@ -3300,3 +3300,197 @@ kind = "site"
 name = "base component slot 3: set the state word +0x50 and mark it changed"
 doc = "docs/27-ownership.md"
 read = true
+
+# --- repair: the switch, the AI's decision, no one else's repair, ../docs/26-damage.md ---
+
+[[entry]]
+module = "Control.dll"
+at = "0x10022ae0"
+kind = "function"
+name = "class-15 (repair system) constructor: state +0x50 = 0, switched off"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1003c648"
+kind = "datum"
+name = "repair system vtable: 1 restore-destroyed flag, 3 set state, 5 draw, 6 flow"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10022c90"
+kind = "function"
+name = "repair slot 3 set state: CIS_SWITCH_INV (0x40) toggles 0x20 and 0"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10021f30"
+kind = "function"
+name = "component set state: +0x50 = state, +0x34 |= 0x10000 when it changes"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10021d86"
+kind = "site"
+name = "component parser: record +0x18 is the initial state unless -1"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000e9c2"
+kind = "site"
+name = "property 0x31 set: node update by max x fraction - life, destroyed nodes included"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000b360"
+kind = "function"
+name = "node-table property handler: id 0 -> property 0xa2, id 1 -> life fraction 0x31"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10010253"
+kind = "site"
+name = "hit on a node: armoured damage clamped at 0"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10017c70"
+kind = "function"
+name = "repair decision: on if (needs service or life < Decision_RepairOn) and charge > 0.3; off if (not needed and life > Decision_RepairOff) or charge < 0.1"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x100146a0"
+kind = "function"
+name = "difficulty profile getter: [+0x20] + 0x8d4 (RepairOn +0x10, RepairOff +0x14)"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10014680"
+kind = "function"
+name = "behaviour profile getter: [+0x20] + 0x820; 17 callers read only +0x54..+0x68"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10019a80"
+kind = "function"
+name = "device manager: every repair system to CIS_SWITCHON (0x20) or off, skipped when unchanged (+0xaf)"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10019a10"
+kind = "function"
+name = "device manager: every detection shield's camouflage on (0x1000) or off (0x2000)"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x100199b0"
+kind = "function"
+name = "device manager: every class-29 component to state 1 or 2"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10019ae0"
+kind = "function"
+name = "device manager: empty stub called at task start with 1"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10005110"
+kind = "function"
+name = "MBehaviour unit takt (vtable +0xe0): dock and attack self-orders, else repair decision"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x100054a0"
+kind = "function"
+name = "MBehaviour building takt (vtable +0xe4): ammunition, repair decision on timer +0x930"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x100050a2"
+kind = "site"
+name = "takt dispatch: a building (Type bit 31) runs +0xe4, a unit with flag 0x10 runs +0xe0"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x100344b0"
+kind = "table"
+name = "CreateTaskFromOrder jump table, order - 1: 8 and 9 share the M_Task_Reload case"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1001c660"
+kind = "function"
+name = "set own object's life fraction (0x31) to 1"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x100067b0"
+kind = "function"
+name = "IBehaviour mode set (vtable +0x28): argument bits 2, 4, 8 -> flags 0x10, 0x20, 0x40"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1001816a"
+kind = "site"
+name = "dock: life fraction set (0x31) on a unit standing in the place"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10076e10"
+kind = "function"
+name = "player unit's repair system on: first class-15 component in state 0x20"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100a5485"
+kind = "site"
+name = "VOICE_REPAIR_SYS_ON / _OFF when the repair switch changes"
+doc = "docs/26-damage.md"
+read = true

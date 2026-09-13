@@ -150,7 +150,11 @@ shield draws `value 4` a second on top of its power figure (`0x100264b0`), and
 shield that is a level under 0.09 / 0.29, 31% — derived from the table below.
 The cockpit says so: `iron3d.dll` watches the player's class-10
 component for state `0x1000` (`0x10076e40`) and plays `VOICE_CHAMELEON_SYS_ON`
-or `_OFF` when it changes.
+or `_OFF` when it changes. A behaviour's device manager can switch every
+detection shield's camouflage on (`0x1000`) or off (`0x2000`)
+(`Behavior.dll:0x10019a10`), and starting any task switches it off
+(`0x10034930`), as it does the repair system
+([26-damage.md](26-damage.md)).
 
 *Measured*, the twelve parts in `intsys.rlb`:
 
@@ -240,9 +244,9 @@ kind was not read.
 - How the mission file's 0/1 relation words become the runtime's 0 and 2.
 - What `IArealMap` does with the radar report, and what the player's map and
   radar display show — `iron3d.dll`'s drawing was not read.
-- Whether anything switches camouflage on for AI machines: no write of states
-  `0x1000` or `0x4000` to a class-10 component was found outside the input
-  tables.
+- What asks an AI machine's device manager to switch camouflage *on*: task
+  start switches it off (`0x10034930`), and no caller that switches it on was
+  traced.
 - The third list the radar module fills, of every kept contact
   (`+0x3c`, read by the walker at `0x1003f760`): where it is emptied was not
   found.

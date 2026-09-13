@@ -4852,6 +4852,141 @@ def check_capture(check, game: Path) -> None:
           f"case 0x2da of iron3d.dll's command handler 0x10071cd0")
 
 
+#: The difficulty profiles in ``behpsp.res``.
+DIFFICULTY_PROFILES = ("diff_strong.var", "diff_normal.var", "diff_weak.var",
+                       "diff_slow.var", "diff_stupid.var")
+
+
+def check_repair(check, game: Path) -> None:
+    """The repair system: off until switched, self-only, and the AI's thresholds."""
+    names = frozenset(p.name.lower() for p in all_archives(game))
+    repairs: list[tuple[str, str, control.Component]] = []
+    initial: dict[int, Counter] = defaultdict(Counter)
+    for path in all_archives(game):
+        archive = NResArchive.open(path)
+        for entry in archive:
+            if not entry.tag.upper().startswith("CTL"):
+                continue
+            try:
+                parsed = control.parse(archive.read(entry), names)
+            except control.ControlFormatError:
+                continue
+            for part in parsed.components:
+                initial[part.type_id][part.state] += 1
+                if part.type_id == control.REPAIR_TYPE:
+                    repairs.append((path.name.lower(), entry.name.lower(), part))
+
+    # 1. every repair system ships switched off: its record leaves the state
+    # word (+0x18) at -1, so the class constructor's 0 stands.
+    set_elsewhere = {t: dict(c) for t, c in initial.items() if set(c) != {None}}
+    check("class 15: every repair system ships switched off",
+          repairs and set(initial[control.REPAIR_TYPE]) == {None} and set_elsewhere,
+          f"all {len(repairs)} class-15 records leave +0x18 at -1, so the "
+          f"constructor's state 0 stands (Control.dll:0x10022ae0); control: "
+          f"classes {sorted(set_elsewhere)} do set it -- {set_elsewhere}")
+
+    # 2. the player's key toggles it: the tables send CIS_SWITCH_INV to the class
+    cis = controls.CIS
+    rows = []
+    for name in controls.TABLES:
+        rows += [(name, a) for a in controls.table(game / name)
+                 if a.target == "CICLS_REPAIRSYS"]
+    label = controls.commands(game).get("CMD_REPAIRSYS_ON", "")
+    check("controls: one key toggles the repair system in every table",
+          len(rows) == len(controls.TABLES)
+          and all(a.command == "MCMD_STATE" and a.state == "CIS_SWITCH_INV"
+                  and a.pressed for _, a in rows)
+          and cis["CIS_SWITCHON"] == control.STATE_ON
+          and cis["CIS_SWITCH_INV"] == control.STATE_TOGGLE
+          and "repair" in label.lower(),
+          f"{', '.join(f'{n} {a.key}' for n, a in rows)} send MCMD_STATE "
+          f"CIS_SWITCH_INV ({cis['CIS_SWITCH_INV']:#x}) to CICLS_REPAIRSYS -- "
+          f"Command.dsc calls it {label!r}; the class toggles 0 and "
+          f"CIS_SWITCHON ({cis['CIS_SWITCHON']:#x})")
+
+    # 3. a repair unit has no reach: two values, the rest zero
+    tails = all(not any(p.values[2:]) for _, _, p in repairs)
+    parts = {n[:-4]: p for lib, n, p in repairs if lib == "intsys.rlb"}
+    ladder_ok = True
+    detail = []
+    for size in "lmbf":
+        mine = [parts.get(f"o_rps_{size}_{m}") for m in MARKS]
+        if not all(mine):
+            ladder_ok = False
+            continue
+        rates = [p.values[0] for p in mine]
+        costs = {round(p.values[1], 5) for p in mine}
+        ladder_ok &= all(a < b for a, b in zip(rates, rates[1:], strict=False))
+        detail.append(f"{size} {'/'.join(f'{r:g}' for r in rates)} HP/s at "
+                      f"{'/'.join(f'{c:g}' for c in sorted(costs, reverse=True))} a point")
+    check("class 15: a repair unit is a rate and a price, and nothing else",
+          repairs and tails and ladder_ok and len(parts) == 16,
+          f"values 2-15 zero on all {len(repairs)} -- no range, no target; the "
+          f"16 intsys parts by mark: {'; '.join(detail)}")
+
+    # 4. the catalogue calls what it does regeneration
+    lib = descriptions.library(game)
+    panels = {k: [(s.label, s.unit) for s in d.stats] for k, d in lib.items()
+              if k.lower().startswith("i_rps_")}
+    check("objects.dlb: a repair unit's stat is Regeneration, in HP/s",
+          len(panels) == 16 and all(("Regeneration", "HP/s") in v for v in panels.values()),
+          f"{sum(('Regeneration', 'HP/s') in v for v in panels.values())}/{len(panels)} "
+          f"i_rps catalogue entries show Regeneration HP/s")
+
+    # 5. every robot and nearly every building is fitted with one
+    fitted: Counter = Counter()
+    without: list[str] = []
+    for dat in sorted(game.glob("UNITS/**/*.dat")):
+        unit = objects.load_unit(dat)
+        members = [c.ref.member.lower() for c in unit.components]
+        root = members[0] if members else ""
+        kind = ("robot" if root.startswith("r_") else
+                "building" if root.startswith("fr_") else "other")
+        count = sum(1 for m in members if m.startswith("i_rps"))
+        fitted[(kind, count)] += 1
+        if kind != "other" and not count:
+            without.append(root)
+    robots = {n: c for (k, n), c in fitted.items() if k == "robot"}
+    buildings = {n: c for (k, n), c in fitted.items() if k == "building"}
+    # the exceptions are the two firing-range targets, the power mast, the
+    # ruins and the small main teleport
+    expected = {"r_h_01", "r_h_03", "fr_l_mast", "fr_b_ruin", "fr_e_ruin",
+                "fr_m_ruin", "fr_l_ruin", "fr_l_mtp"}
+    check("UNITS: every robot and building but a few carries one repair unit",
+          set(robots) <= {0, 1} and set(buildings) <= {0, 1} and set(without) == expected,
+          f"robots with one: {robots.get(1, 0)}, without: {robots.get(0, 0)}; "
+          f"buildings with one: {buildings.get(1, 0)}, without: {buildings.get(0, 0)} "
+          f"-- the exceptions are {', '.join(sorted(set(without)))}")
+
+    # 6. the AI's thresholds switch on low and off high
+    held = profiles.load(game)
+    pairs = {n: (held[n]["Decision_RepairOn"].value, held[n]["Decision_RepairOff"].value)
+             for n in DIFFICULTY_PROFILES if n in held}
+    check("behpsp.res: an AI repairs from Decision_RepairOn up to Decision_RepairOff",
+          len(pairs) == len(DIFFICULTY_PROFILES)
+          and all(0 < on < off < 1 for on, off in pairs.values()),
+          "; ".join(f"{n[5:-4]} on below {on:g}, off above {off:g}"
+                    for n, (on, off) in pairs.items())
+          + " (Behavior.dll:0x10017c70)")
+
+    # 7. no hit heals: every explosion's damage is at least zero
+    damages = []
+    for path in sorted(game.glob("*.rlb")) + sorted(game.glob("*.lib")):
+        try:
+            archive = NResArchive.open(path)
+        except NotAnNResArchive:
+            continue
+        for entry in archive:
+            if entry.name.lower().endswith(".exp"):
+                blob = archive.read(entry)
+                if len(blob) == effects.EXPLOSION_SIZE:
+                    damages.append(effects.parse_explosion(blob, entry.name).damage)
+    check("*.exp: no explosion does negative damage",
+          damages and min(damages) >= 0,
+          f"{len(damages)} explosions, damage {min(damages):g}..{max(damages):g}; a hit "
+          f"is clamped at 0 as well (Control.dll:0x10010253), so nothing heals by hitting")
+
+
 def check_controls(check, game: Path) -> None:
     """The input layer: ScanCode.dsc, Command.dsc, the .man bindings, the .tbl tables."""
     keys = controls.scancodes(game)
@@ -6254,7 +6389,7 @@ def run(game: Path) -> int:
         check_grid, check_missions, check_objects, check_poses, check_lod, check_damage,
         check_effects, check_footprints, check_rsli, check_control, check_efficiency,
         check_motion, check_sensors, check_combat, check_ownership,
-        check_capture,
+        check_capture, check_repair,
         check_controls,
         check_behaviour, check_research, check_descriptions, check_saves,
         check_vocabulary, check_resources, check_briefing, check_settings,

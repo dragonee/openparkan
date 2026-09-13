@@ -57,8 +57,16 @@ COMPONENT_COUNT_AT = 0xAC
 #: (``Control.dll:0x1000dc40``, id 1), which scales every value read with
 #: bit ``0x100``.
 COMPONENT_NODE_AT = 0x04
-#: A field the parser treats as absent when it is -1.
-COMPONENT_INDEX_AT = 0x18
+#: The component's initial state word, in the input layer's ``CIS_`` values;
+#: -1 keeps the class's own default (``Control.dll:0x10021d86``).  Read here
+#: once as an index, hence the second name.
+COMPONENT_STATE_AT = 0x18
+COMPONENT_INDEX_AT = COMPONENT_STATE_AT
+#: A switchable component's state: ``CIS_SWITCHOFF``, ``CIS_SWITCHON``, and
+#: ``CIS_SWITCH_INV``, which flips between them (``0x10022c90``).
+STATE_OFF = 0x00
+STATE_ON = 0x20
+STATE_TOGGLE = 0x40
 #: The 64 bytes the parser copies into the object whole, which the component's
 #: value getter (slot 4, ``0x10021d00``) indexes as sixteen floats by the low
 #: byte of a value id -- so ``0x300``-``0x305`` are the first six.
@@ -107,7 +115,8 @@ GUN_TYPE = 2
 FIGHT_SHIELD_TYPE = 9
 SHIELD_SECTORS = 6
 #: ``CICLS_REPAIRSYS``.  Values: the points it restores a second, the charge
-#: a point costs (``0x10022bb0``).
+#: a point costs (``0x10022bb0``).  It repairs only its own object, starts
+#: switched off, and values 2-15 are zero on every record: it has no reach.
 REPAIR_TYPE = 15
 #: The deflector, ``i_def``; ``CICLS`` has no name for it.  Values 0-5: how
 #: much of each shield sector stops damage (``0x1002ca30``).  The bubble is up
@@ -344,7 +353,8 @@ class Component:
 
     type_id: int
     resource: ResourceRef
-    #: The int32 at +0x18, or None where the parser's -1 means absent.
+    #: The int32 at +0x18, the initial state word, or None where -1 keeps the
+    #: class's default.  See ``state``.
     index: int | None
     #: The 4-byte entries after the fixed part.
     entries: tuple[int, ...]
@@ -361,6 +371,11 @@ class Component:
     node: int = 0
     #: The float at ``COMPONENT_MASS_AT``: what the part weighs, in kg.
     mass: float = 0.0
+
+    @property
+    def state(self) -> int | None:
+        """The state the component starts in, or None for its class's default."""
+        return self.index
 
     @property
     def channel(self) -> int:

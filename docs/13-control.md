@@ -280,7 +280,7 @@ the record's extent is common to all of them:
 ```
 0x00  int32      type id, 1..30
 0x04  int32      the model node it sits on, an index into the object's .ndp
-0x18  int32      an index; the parser treats -1 as absent
+0x18  int32      the initial state (CIS_ switch values); -1 keeps the class's default
 0x20  float      power: a consumer's draw a second, a battery's output
 0x2c  float[16]  the component's values, copied whole into the object
 0x6c  char[32]   archive        what this part emits

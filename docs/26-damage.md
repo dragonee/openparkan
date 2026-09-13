@@ -199,41 +199,173 @@ the last one created wins.
 | `o_arm_m` | 10–22.5 | 62–34% | 2,688–3,035 |
 | `o_arm_b` | 17.5–30 | 51–22% | 2,464–2,790 |
 
-## Repair — *read*, and *measured*
+## Repair: a unit's own repair unit, switched on and off — *read*, and *measured*
 
-**Every object repairs itself** with its class-15 part (`0x10022bb0`): the
-charge left after its idle draw buys `charge / value 1` points, at most
-`value 0 × condition` a second, never negative. They go to the nodes **in
-index order**, each topped up before the next (`0x10010ba0`). A unit's repair
-skips destroyed parts; a kind-3 object's restores them too (`0x10022b00`,
-`0x10010b10`).
+The **repair unit** a robot carries is its **repair system**, class 15
+(`CICLS_REPAIRSYS`, the `i_rps` parts). The **repair mode** you toggle is that
+system's switch. Both are about the unit's *own* hit points: nothing in the
+code lets a repair unit mend another unit or a building (see "Nobody repairs
+anybody else" below).
 
-| (*measured*) | points /s | charge /point |
+**It is a switch, and it ships off** — *read*, and *measured*.
+- A component's state word is `+0x50`. The repair class's constructor sets it
+  to 0 (`Control.dll:0x10022ae0`).
+- The component record's `+0x18`, which [13-control.md](13-control.md) calls "an
+  index", is really the **initial state**: the parser copies it over the
+  constructor's value unless it is -1 (`0x10021d86`).
+  - All 64 class-15 records leave it at -1, so **every repair system starts
+    switched off**.
+  - Other classes do use the field: 33 on the 4 class-24 turret records, 0 on
+    the 24 class-25 building records, 9 on the 2 class-29 records.
+- The state values are the input layer's own `CIS_` numbers:
+  - 0 is `CIS_SWITCHOFF`, `0x20` is `CIS_SWITCHON`.
+  - `0x40`, `CIS_SWITCH_INV`, toggles: the class turns `0x20` into 0 and
+    anything else into `0x20` (`0x10022c90`).
+- **The G key toggles it** — *measured*. `hero.tbl`, `m1.tbl` and `m2.tbl` each
+  bind `SCAN_G` to `CICLS_REPAIRSYS MCMD_STATE CIS_SWITCH_INV`, which
+  `Command.dsc` calls `CMD_REPAIRSYS_ON`, "Repair on/off".
+- **The cockpit announces it.** `iron3d.dll` reads the player's unit's first
+  class-15 component and counts `0x20` as on (`0x10076e10`). When that changes
+  it plays `VOICE_REPAIR_SYS_ON` or `_OFF` (`0x100a5485`).
+
+**What it does while on** — *read* (`0x10022b20`, `0x10022bb0`).
+- **Off, or on a destroyed node:** it draws nothing and repairs nothing.
+- **On:** each power tick it asks for its power figure (the *idle* draw) plus
+  `value 1 ×` the hit points it would restore. It restores at most
+  `value 0 ×` its node's condition a second, never more than the object lacks.
+- **Short of power:** after the idle draw, the charge left buys
+  `charge ÷ value 1` points.
+- **Where the points go:** to the object's *own* nodes, in index order
+  (`0x10010ba0` on the owner, `+0x3c`).
+  - A unit's repair skips destroyed parts; a kind-3 object's restores them
+    (`0x10022b00`).
+- **Running cost:** left on at full health it costs only its idle figure.
+  Being a class-15 part, it draws on power channel 0, served second.
+- **No reach:** values 2–15 are zero on all 64 records (*measured*), so there
+  is no range, no target and no radius. The catalogue agrees: all 16 `i_rps`
+  entries in `objects.dlb` show a single **"Regeneration", in HP/s**.
+
+**The numbers** — *measured*.
+
+| part | Regeneration, HP/s by mark | charge a point | idle draw a second |
+|---|---|---|---|
+| `o_rps_l` small | 11 / 13 / 15 / 17 | 0.04 | 0.08–0.11 |
+| `o_rps_m` medium | 30 / 32 / 34 / 36 | 0.05 | 0.18–0.21 |
+| `o_rps_b` large | 50 / 60 / 70 / 80 | 0.06 | 0.27–0.31 |
+| `o_rps_f` fortification | 80 / 110 / 150 / 200 | 0.0006 → 0.0003 | 0.01 |
+| a chassis's own slot (`bases.rlb`, 22) | 1 | 1 | 1 |
+| a building's own (`fortif.rlb`, 26) | 100 | 0.0002 | 0.01 |
+
+- **Who carries one:** 372 robot assemblies, all but two, carry exactly one
+  `i_rps` part. The two without are the target dummies `l_targ.dat` and
+  `M_targ.dat`, on chassis `R_H_01` ("Hero target") and `R_H_03`. So do 70 building assemblies; the power mast, the four ruins and
+  the small main teleport don't.
+- **Which values a unit uses is not established.** Every chassis's controller
+  declares its class-15 slot under the part's label with 1, 1, 1. Whether a
+  fitted part's values replace the slot's is open (below).
+
+What a full repair costs — *derived*, for a Small Wheel chassis (`r_l_03`, 2,621
+hit points over 12 nodes) brought back from the edge with no part destroyed,
+at full power and with the repair unit's own node intact:
+
+| with | time | charge |
 |---|---|---|
-| chassis (22) | 1 | 1 |
-| `o_rps_l` / `_m` / `_b` | 11–17 / 30–36 / 50–80 | 0.04 / 0.05 / 0.06 |
-| `o_rps_f` | 80–200 | 0.0003–0.0006 |
-| buildings (26) | 100 | 0.0002 |
+| a small MK1 repair unit | 238 s | 105 for the points + 19 idle ≈ 124, 1.2% of a 10,000 battery |
+| a small MK4 | 154 s | 105 + 17 ≈ 122 |
+| the chassis slot's own values | 2,621 s | 2,621 + 2,621 = 5,242, 52% |
 
-**A docked unit** — one standing in a building's dock
-([27-ownership.md](27-ownership.md)) — gains **10% of
-its full hit points a second, destroyed parts included**, 10% of its shield,
-10% of its battery (`Behavior.dll:0x10018100`, `0x10019372`), and each gun
-10% of its ammunition, at least one round (`0x100181e0`). `Behavior.dll`
-answers "needs service" (`0x1001c700`) when an object's life is below 0.5 —
-0.9 for a building — its property `0x32` below 0.6, or a component's value
-`0x400` below 0.2; which of its six callers act on that is not traced.
+**What the AI does with the switch** — *read*. The earlier note that nothing
+reads `Decision_RepairOn`/`Off` was wrong.
+- **Where the thresholds live.** A behaviour keeps its difficulty profile at
+  `+0x8d4` (bound at `Behavior.dll:0x1000a2f4` by `0x10019bd0`, read through
+  `0x100146a0`); `Decision_RepairOn` is its `+0x10`, `Decision_RepairOff` its
+  `+0x14`.
+- **The decision** (`0x10017c70`) reads the object's life fraction and battery
+  charge, then:
+  - **switches repair on** when the unit *needs service* — life under 0.5, or
+    under 0.9 for a building (`0x1001c700`) — *or* its life is under
+    `Decision_RepairOn`, **provided its charge is over 30%**;
+  - **switches it off** when it does not need service and its life is over
+    `Decision_RepairOff`, **or whenever its charge falls under 10%**.
+- **How the switch is applied.** It goes through the behaviour's device
+  manager (`+0x3d0`). That manager collects every class-15 component into one
+  list (`0x100186b0`) and sends each `CIS_SWITCHON` or `CIS_SWITCHOFF`
+  (`0x10019a80`). Its sibling sends the detection shield's camouflage on and
+  off the same way (`0x10019a10`).
+- **Starting any task turns repair off**, and camouflage too
+  (`0x10034930`). The next decision turns repair back on if it is needed. The
+  manager remembers the last state it sent (`+0xaf`) and sends nothing when
+  asked for the same again, so a switch the player flipped by key in between
+  is not seen by it.
+- **When the decision runs.**
+  - A building runs it on its takt timer (`0x100054a0`).
+  - A unit runs it on its takt (`0x10005110`) unless that tick sent it to a
+    dock or into an attack (`0x10017d50`, `0x10017e70`).
+  - The unit takt needs bit `0x10` of the behaviour's flags, which the
+    behaviour's mode setter derives from its argument (`0x100067b0`). Who
+    clears it, for instance while the player drives the unit, is not traced.
+  - Clans of type 3 skip the takt altogether (`0x10005070`).
+
+| profile (*measured*) | `Decision_RepairOn` | `Decision_RepairOff` | a unit switches on below | and off above |
+|---|---|---|---|---|
+| `diff_strong` | 0.8 | 0.9 | 80% | 90% |
+| `diff_normal`, `diff_slow`, `diff_stupid` | 0.5 | 0.8 | 50% | 80% |
+| `diff_weak` | 0.1 | 0.3 | 50% (needing service overrides) | 50% |
+
+The last two columns are *derived* from the rule above. A building needs
+service below 90%, so under every profile it repairs below 90% while its charge
+allows.
+
+**Nobody repairs anybody else** — *read*, as a search. Everything in the
+shipped code that raises a node's life:
+1. **The repair system**, on its own object only (`Control.dll:0x10022c87`).
+2. **Setting the life fraction, property `0x31`**, through `ILifeSystem`
+   slot 6 or the control system's main interface, slot 14 (`0x1000e980` →
+   `0x1000e9c2`, which also
+   restores destroyed parts). Across all twelve modules, the only callers
+   that pass `0x31` are:
+   - `Behavior.dll:0x1001816a`, the **dock**, on the units standing in it
+     ([27-ownership.md](27-ownership.md));
+   - `0x1001c69b`, which fills the behaviour's **own** object to full — every
+     takt while `Behavior.ini`'s `DeterminMode` is set or a demo records or
+     plays back (`0x10004e1f`), and on one internal message (`0x1000934c`);
+   - `Control.dll:0x1000b382`, an object property handler whose ids 0 and 1
+     set invulnerability and life (what calls it is not traced; mission
+     properties, by the look of it — *guess*).
+3. **The other callers of the node update** (`0x10010ba0`) all pass damage:
+   collision (`0x1000d212`, `0x1000d2f9`), the ground (`0x10012a7e`) and
+   vital nodes (`0x10012c37`).
+4. **A hit cannot heal**: the armoured damage is clamped at 0
+   (`0x10010253`), and every one of the 144 `.exp` files does 0 or more
+   (*measured*).
+
+The orders say the same.
+- **Orders 8 and 9 build the same task.** `ORDER_ROBOT_RELOAD` (8) and
+  `ORDER_ROBOT_REPARE` (9) share one case in `MTaskStack::CreateTaskFromOrder`
+  (`0x10033a80`, table `0x100344b0`): `M_Task_Reload`, a trip to a dock.
+- **No repair-another order exists** among `varset.var`'s orders.
+- **`Task_Repare` does nothing.** The behaviour-profile flag is bound with
+  the other `Task_*` flags (`0x10022e20`, struct `+0x820`, `Task_Repare` at
+  `+0x2c`), but nothing reads it. The struct has no direct reads, and all 17
+  calls of its getter `0x10014680` read the ore and power fields at
+  `+0x54`–`+0x68`.
+
+What *can* restore someone else is a dock: a unit standing in one gains 10% of
+its full hit points a second, destroyed parts included, plus 10% of its
+shield, battery and ammunition (`Behavior.dll:0x10018100`, `0x10019372`,
+`0x100181e0`).
 
 ## Not established
 
 - Which of ±x, ±y is a model's front, so which sector is "front".
 - Whether a round still collides with a sector that has nothing left.
-- What `Decision_RepairOn` / `Decision_RepairOff` (0.1–0.8 / 0.3–0.9 by
-  difficulty) switch: `Behavior.dll:0x10019bd0` binds them and nothing found
-  reads their offsets.
-- Whether any unit repairs another: the only code found that heals someone
-  else's nodes is the dock. `Task_Repare` is a profile flag whose task class
-  was not identified.
+- Whether a fitted `i_rps` part's values replace the chassis slot's 1 / 1 / 1,
+  which decides how fast a robot really regenerates.
+- Who clears the behaviour flag `0x10` that lets a unit's takt switch its
+  repair (`Behavior.dll:0x100067b0`'s caller), and so whether the AI overrides
+  the switch while the player drives.
+- What `IControl` component query `0x77`, which the catalogue's Regeneration
+  row reads (`iron3d.dll:0x1006f62c`), answers.
 - The surface index behind an `.exp`'s slots 1–11, and the two 1.0 floats.
 - What agent kind 3 is, and what becomes of a kind-3 object whose node 0 is
   destroyed (it is marked `0xfffe` and not killed).
