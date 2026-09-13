@@ -5,8 +5,10 @@
 //! behaviour is not established the code says `STAND-IN` and names the doc
 //! section, and `engine/README.md` lists it.
 
+pub mod combat;
 pub mod damage;
 pub mod ground;
+pub mod guns;
 pub mod hit;
 pub mod input;
 pub mod machine;
