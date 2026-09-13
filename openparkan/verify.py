@@ -1392,6 +1392,100 @@ def check_missions(check, game: Path) -> None:
           f"{near}/{near_total} ({ratio:.1%}) on skirmish and multiplayer maps")
 
 
+#: A placement whose lowest level-0 vertex stands this far above the ground floats.
+FLOATING = 0.25
+
+
+def check_scale(check, game: Path) -> None:
+    """A placement's scale: read from version 10, uniform, applied to scenery only."""
+    versions: Counter[int] = Counter()
+    by_kind: Counter[tuple[int, bool]] = Counter()
+    uniform = 0
+    scaled_units = []
+    first: Counter[tuple[str, float]] = Counter()
+    parsed = []
+    for d in gamedir.missions(game):
+        m = mission.load(d / "data.tma")
+        parsed.append(m)
+        versions[m.unknown_pre_objects] += 1
+        for o in m.objects:
+            scaled = o.scale != (1.0, 1.0, 1.0)
+            by_kind[(o.kind, scaled)] += 1
+            uniform += o.scale[0] == o.scale[1] == o.scale[2]
+            if scaled and o.kind not in mission.SCALED_KINDS:
+                scaled_units.append(f"{d.name} {o.path.split(chr(92))[-1]} {o.scale[0]:g}")
+            if scaled and d.as_posix().endswith("CAMPAIGN.00/Mission.01"):
+                first[(o.path.lower(), o.scale[0])] += 1
+    total = sum(by_kind.values())
+    scaled = sum(n for (_k, s), n in by_kind.items() if s)
+    check("data.tma: every object record is version 10, the one with a scale",
+          set(versions) == {mission.SCALE_VERSION},
+          f"the word before the object count is {dict(versions)} over "
+          f"{sum(versions.values())} missions; MisLoad.dll:0x100039bf reads the three "
+          f"floats only at {mission.SCALE_VERSION} or more")
+    check("data.tma: 218 placements carry a uniform scale other than 1",
+          scaled == 218 and uniform == total,
+          f"{scaled} of {total} placements, uniform on {uniform}; by (kind, scaled): "
+          f"{dict(sorted(by_kind.items()))}")
+    check("data.tma: only scenery and two animals are scaled",
+          by_kind[(mission.KIND_BUILDING, True)] == 0 and len(scaled_units) == 2
+          and all("tushka" in u for u in scaled_units),
+          f"no building; units {scaled_units}, built from their .dat with the matrix "
+          f"alone (iron3d.dll:0x10033cdb), so theirs is not applied")
+    check("Mission 01: seventeen scaled trees and stones",
+          sum(first.values()) == 17 and all(p.startswith(("s_tree", "s_stone")) for p, _ in first),
+          f"(member, scale): count {dict(sorted(first.items()))}")
+
+    # At their scale, scaled scenery stands on the ground; at scale 1 about half floats.
+    library = objects.ObjectLibrary(game / "objects.rlb")
+    archives: dict[str, NResArchive] = {}
+    lows: dict[str, float | None] = {}
+    lands: dict[str, landmesh.LandMesh] = {}
+
+    def lowest(name: str) -> float | None:
+        if name not in lows:
+            record = library.get(name)
+            ref = record.mesh if record else None
+            lows[name] = None
+            if ref is not None:
+                archive = archives.setdefault(
+                    ref.library.lower(), NResArchive.open(game / ref.library.lower()))
+                m = objmesh.parse(archive.read_name(ref.member), ref.member)
+                posed = m.posed_positions()
+                zs = [posed[v][2] for tri in m.select(0) for v in tri]
+                lows[name] = min(zs) if zs else None
+        return lows[name]
+
+    tally: Counter[str] = Counter()
+    for m in parsed:
+        msh = game / "DATA" / "MAPS" / m.map_name / "Land.msh"
+        if not msh.is_file():
+            continue
+        land = lands.setdefault(m.map_name, landmesh.load(msh))
+        for o in m.objects:
+            if o.kind not in mission.SCALED_KINDS:
+                continue
+            low = lowest(o.path)
+            ground = land.height_at(o.position[0], o.position[1])
+            if low is None or ground is None:
+                continue
+            tag = "tree" if o.kind == mission.KIND_VEGETATION else "stone"
+            if o.placed_scale != 1.0:
+                tally[f"{tag} scaled"] += 1
+                tally[f"{tag} floats at its scale"] += (
+                    o.position[2] + o.placed_scale * low - ground > FLOATING)
+                tally[f"{tag} floats at scale 1"] += o.position[2] + low - ground > FLOATING
+            else:
+                tally[f"{tag} unscaled"] += 1
+                tally[f"{tag} unscaled floats"] += o.position[2] + low - ground > FLOATING
+    check("mission scenery: at its scale, a scaled tree or stone stands on the ground",
+          all(tally[f"{t} floats at its scale"] * 10 < tally[f"{t} floats at scale 1"]
+              and tally[f"{t} floats at its scale"] * 10 < tally[f"{t} scaled"]
+              for t in ("tree", "stone")),
+          f"{dict(tally)} (floating: lowest level-0 vertex more than {FLOATING} above "
+          f"the ground); control: the placements at scale 1")
+
+
 def check_objects(check, game: Path) -> None:
     """objects.rlb reference records, object meshes, and unit assemblies."""
     lib = objects.ObjectLibrary(game / "objects.rlb")
@@ -8797,7 +8891,8 @@ def run(game: Path) -> int:
         check_nres, check_texm, check_terrain, check_uv,
         check_water, check_layers, check_materials, check_sky, check_render_state,
         check_minimap_agreement, check_arealmap,
-        check_grid, check_missions, check_objects, check_poses, check_lod, check_damage,
+        check_grid, check_missions, check_scale, check_objects, check_poses, check_lod,
+        check_damage,
         check_effects, check_effect_timing, check_actions, check_footprints, check_rsli,
         check_control, check_efficiency,
         check_motion, check_playback, check_ground, check_sensors, check_hit_test,

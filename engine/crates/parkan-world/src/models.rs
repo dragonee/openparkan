@@ -51,8 +51,7 @@ pub struct Instance {
     pub position: [f32; 3],
     /// Radians about z.
     pub rotation: f32,
-    /// STAND-IN: docs/04-missions.md -- the record's scale, applied uniformly
-    /// until research says how the engine uses it.
+    /// Uniform; the record's for scenery, 1 for units and buildings.
     pub scale: f32,
 }
 
@@ -145,7 +144,7 @@ pub fn build(assembly: &mut Assembly, store: &mut TextureStore, mission: &Missio
                 model,
                 position: object.position,
                 rotation: object.rotation,
-                scale: object.scale[0],
+                scale: object.placed_scale(),
             });
             placed.push(i);
         }

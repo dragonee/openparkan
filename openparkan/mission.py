@@ -57,6 +57,14 @@ KIND_UNIT = 1
 KIND_VEGETATION = 2
 KIND_ROCK = 3
 
+#: MisLoad reads an object's scale only from this record version on (the word
+#: before the object count), and uses (1, 1, 1) below it.
+SCALE_VERSION = 10
+#: The kinds built at their placement's scale.  Units and buildings are built
+#: from their ``.dat`` with the placement matrix alone, whatever the record
+#: says.  See docs/04-missions.md "The scale".
+SCALED_KINDS = (KIND_VEGETATION, KIND_ROCK)
+
 KIND_NAMES = {
     KIND_BUILDING: "building",
     KIND_UNIT: "unit",
@@ -260,6 +268,11 @@ class MissionObject:
     def is_static(self) -> bool:
         """True when ``path`` names a STAT member of objects.rlb, not a file."""
         return self.kind in (KIND_VEGETATION, KIND_ROCK)
+
+    @property
+    def placed_scale(self) -> float:
+        """The uniform scale the object is built at: the record's for scenery, else 1."""
+        return self.scale[0] if self.kind in SCALED_KINDS else 1.0
 
     @property
     def clan_id(self) -> int | None:

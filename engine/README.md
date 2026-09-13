@@ -27,7 +27,7 @@ directory also holds what the rest will follow:
 - **`docs/`** is the source of truth. Every behaviour the engine implements is
   in a doc there, labelled *read* or *measured*, and re-derived by
   `uv run openparkan verify`.
-- **`design/`** keeps the seven Phase R research notes, R1 to R7. They turn
+- **`design/`** keeps the eight Phase R research notes, R1 to R8. They turn
   the docs into implementable steps. Where a note and `docs/` disagree,
   `docs/` wins, and each note says at its top what has been superseded.
 - **The table below** lists the places where the game's behaviour is not
@@ -77,7 +77,6 @@ a row here. A row leaves this table when research closes it.
 | milestone | what is unknown | stand-in | see |
 |---|---|---|---|
 | M1 | Whether water is drawn see-through: `WATER`'s material says opaque, and every lake has a `WATER_BOT` bed beneath | opaque, as the material says | [03](../docs/03-terrain.md#terrain-layers-name-materials-not-textures) |
-| M2 | How a placement's scale applies: the record carries 2 to 20 on Mission 01's trees and stones | a uniform scale of the placement matrix (under research) | [04](../docs/04-missions.md) |
 | M2 | Whether a blended material writes depth, and the alpha test's reference value | blended groups draw after opaque ones without writing depth; nothing is discarded (reference 0) | [07](../docs/07-objects.md#how-a-material-draws-is-in-the-archive-directory) |
 | M1 | Whether the scene's fog is Direct3D's vertex fog or the engine's own | per-pixel linear range fog, 0 to 700 × slot 6 (the two look the same) | [10](../docs/10-sky.md#not-resolved) |
 | M1 | How the 34142-radius dome escapes the far plane and a fog ending by 700 | draw the dome first, depth writes off, unfogged but for its rim | [10](../docs/10-sky.md#not-resolved) |

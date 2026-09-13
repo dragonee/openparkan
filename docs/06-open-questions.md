@@ -12,12 +12,16 @@ few fields are carried through without being understood:
   no maximum, equal bounds lock the value, and `CurrentOre`'s maximum is its
   object's `MaximumOre`. See [04-missions.md](04-missions.md).
 - The four words after an object's instance name (`0, -1, -1, 1` throughout).
-- The word before the object count, always 10.
+- ~~The word before the object count, always 10.~~ **Answered**: the object
+  record version; the scale is read from 10 on. See [04-missions.md](04-missions.md#the-scale).
 - ~~The word after a clan's behaviour-tree path.~~ **Answered**: the clan's
   mind count, how many bots it may field; see [04-missions.md](04-missions.md).
 - The four words trailing each trailer viewpoint.
-- Object `scale` is `1,1,1` in every shipped mission, so the axis order is
-  unverified.
+- Object `scale` is uniform wherever it is set: 218 placements, 0.2 to 21. The
+  engine applies it to vegetation and rock, see
+  [04-missions.md](04-missions.md#the-scale). The reader stores
+  the floats in file order as x, y, z, but the axis order is still untested
+  by the data, since no placement is non-uniform.
 
 ## Land.map leftovers
 

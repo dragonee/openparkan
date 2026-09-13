@@ -13,6 +13,8 @@ pub const KIND_BUILDING: u32 = 0;
 pub const KIND_UNIT: u32 = 1;
 pub const KIND_VEGETATION: u32 = 2;
 pub const KIND_ROCK: u32 = 3;
+/// The kinds built at their placement's scale.
+pub const SCALED_KINDS: [u32; 2] = [KIND_VEGETATION, KIND_ROCK];
 
 pub const TYPE_FLOAT: u32 = 0;
 
@@ -81,6 +83,13 @@ pub struct Object {
 impl Object {
     pub fn property(&self, name: &str) -> Option<&Property> {
         self.properties.iter().find(|p| p.name == name)
+    }
+
+    /// The uniform scale the object is built at: the record's for vegetation and rock,
+    /// 1 for units and buildings, which are built from their `.dat` with the matrix alone.
+    /// See `docs/04-missions.md` "The scale".
+    pub fn placed_scale(&self) -> f32 {
+        if SCALED_KINDS.contains(&self.kind) { self.scale[0] } else { 1.0 }
     }
 
     pub fn clan_id(&self) -> Option<i64> {
@@ -273,6 +282,15 @@ mod tests {
         assert_eq!(m.map_name(), "Tut_1");
         assert_eq!(m.description, "Line of fire");
         assert_eq!(m.viewpoints[0].unknown, [1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn only_scenery_is_built_at_its_placement_scale() {
+        let mut hero = parse(&sample(), "t").unwrap().objects.remove(0);
+        hero.scale = [1.5; 3];
+        assert_eq!(hero.placed_scale(), 1.0);
+        hero.kind = KIND_ROCK;
+        assert_eq!(hero.placed_scale(), 1.5);
     }
 
     #[test]

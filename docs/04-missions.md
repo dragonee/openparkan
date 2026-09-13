@@ -40,7 +40,7 @@ routes   { uint32 id; uint32 point count; float32[3] × count }
 uint32   always 6
 uint32   clan count
 clans    × clan count
-uint32   always 10
+uint32   object record version, always 10    the scale is read from 10 on
 uint32   object count
 objects  × object count
 trailer
@@ -97,14 +97,18 @@ string   path
 uint32   varies
 int32    logical id                   also repeated as the LogicalID property
 float32  x, y, z
-uint32   two words, always 0
-float32  rotation, radians
-float32  scale x, y, z                1,1,1 throughout the shipped data
+float32  rotation x, y, radians       always 0
+float32  rotation z, radians          about the map's up axis
+float32  scale x, y, z                uniform; 218 of 864 are not 1
 string   instance name                empty for scenery
 uint32   four words: 0, -1, -1, 1
 uint32   property count
 properties × count
 ```
+
+The six floats after the position are one rotation triple
+(`MisLoad.dll:0x10003900`), and the placement matrix is built as Rz·Ry·Rx
+(`0x10001d80`), so the two zero words are rotation x and y stored as 0.0.
 
 `path` resolves two different ways depending on `kind`. Buildings and units
 name a `.dat` definition file under `UNITS/`; vegetation and rock name a
@@ -113,7 +117,7 @@ missions resolve** — 463 files on disk, 401 archive members.
 
 ### The rotation's sense
 
-`rotation` turns the object about the map's up axis, and the bridges settle
+`rotation z` turns the object about the map's up axis, and the bridges settle
 which way. A bridge is placed as **two halves back to back**: nine pairs
 across seven missions, each pair's angles exactly π apart to four decimals —
 `+0.0370` and `+3.1786` on Tut_1, `-0.0789` and `+3.0627` on KM_4. Their
@@ -129,6 +133,58 @@ It is worth stating because nothing else in the shipped data tests it.
 Buildings and units placed at an arbitrary heading simply face somewhere, and
 a wrong sense looks like a design decision. Two objects that must interlock
 are the only witness.
+
+### The scale
+
+The three scale floats are **always equal**. **218 of 864** placements carry a
+value other than 1, from 0.2 to 21 — shrunk as well as enlarged:
+
+- 134 of 303 vegetation, 0.3 to 11;
+- 82 of 98 rock, 0.2 to 21;
+- two units, the `tushka` animals on CAMPAIGN.02/Mission.03, at 1.5 and 1.25.
+
+No building is scaled. Mission 01 has 17: `s_tree_04` at 2, 2.5 and 3, and six
+stones at 8 to 20.
+
+**Only vegetation and rock are drawn at their scale.** MisLoad reads the scale
+from record version 10 on (`MisLoad.dll:0x100039bf`). The placement matrix it
+hands out is rotation and translation alone (`0x10001d80`), and the scale
+travels beside the matrix (`GetObject`, `0x10001440`, out +0x44).
+
+iron3d gives vegetation and rock to World3D's `AddNewObjectToGame` with the
+scale in a parameter block (`iron3d.dll:0x100a4334`). A scale other than
+(1, 1, 1) goes to the object's mesh interface `SetScale`
+(`World3D.dll:0x100083f4`, `AniMesh.dll:0x10014770`). Units and buildings are
+built from their `.dat` with the matrix alone (`iron3d.dll:0x10033cdb`), so
+the two animals' scale is never applied.
+
+`SetScale` scales **the object**, not only its drawing:
+
+- every node's matrices are recomposed with the scale;
+- the pose walk multiplies the root's axes by it (`0x10008c8f`);
+- both bounding boxes, the bounding sphere and the cylinder are scaled;
+- the node area and volume getters scale by two and three of the factors.
+
+The mesh hit test works in each node's frame
+([26-damage.md](26-damage.md)), so a round meets the scaled tree.
+
+Measured against the terrain, taking the lowest level-0 vertex after poses:
+
+| | placements | more than 0.25 above the ground |
+|---|---|---|
+| scaled trees, at their scale | 134 | **2** |
+| the same, at scale 1 | 134 | 63 |
+| scaled stones, at their scale | 82 | **2** |
+| the same, at scale 1 | 82 | 44 |
+| unscaled trees (control) | 169 | 10 |
+| unscaled stones (control) | 16 | 2 |
+
+Drawn at scale 1, nearly half the scaled scenery would hang in the air. At its
+scale it is dug in, like the control.
+
+**Unknown:** whether vegetation and rock carry node life, so whether a scaled
+tree is also tougher; and whether anything calls `SetScale` on a unit while
+the game runs.
 
 ### Property
 

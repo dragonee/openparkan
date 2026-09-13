@@ -7297,3 +7297,107 @@ kind = "site"
 name = "text overlay: FOGENABLE 0 while it draws, 1 after (0x10001cff)"
 doc = "docs/10-sky.md"
 read = true
+# --- R8: a placed object's scale (docs/04-missions.md "Object", docs/07-objects.md) ---
+[[entry]]
+module = "MisLoad.dll"
+at = "0x10003900"
+kind = "function"
+name = "object record reader: kind +0x2c, marker +0x50, path +0x30, +0x54 (v3), logical id +0x5c (v4), position +0x08, rotation triple +0x14, scale +0x20 (v10), name +0x40 (v7)"
+doc = "docs/04-missions.md"
+read = true
+
+[[entry]]
+module = "MisLoad.dll"
+at = "0x100039bf"
+kind = "site"
+name = "object record reader: the scale triple is read only at record version 10 or later, else (1, 1, 1)"
+doc = "docs/04-missions.md"
+read = true
+
+[[entry]]
+module = "MisLoad.dll"
+at = "0x10001440"
+kind = "function"
+name = "IMission slot 10 GetObject: out +0 kind, +4 placement matrix, +0x44 scale, +0x54 logical id, +0x58 name, +0x5c path"
+doc = "docs/04-missions.md"
+read = true
+
+[[entry]]
+module = "MisLoad.dll"
+at = "0x10001d80"
+kind = "function"
+name = "placement matrix from a translation and a rotation triple: Rz(z) Ry(y) Rx(x), no scale"
+doc = "docs/04-missions.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100a3f7a"
+kind = "site"
+name = "mission load: IMission slot 10 for every object into a 0x74-byte buffer, sorted into lists by kind"
+doc = "docs/04-missions.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100a4334"
+kind = "site"
+name = "mission load: a scenery object goes to AddNewObjectToGame with its matrix and a parameter block carrying the scale (copied at 0x100a42ef)"
+doc = "docs/04-missions.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10033cdb"
+kind = "site"
+name = "mission load: a unit or building goes to CreateObjectFromScheme with its matrix only; the scale is not passed"
+doc = "docs/04-missions.md"
+read = true
+
+[[entry]]
+module = "World3D.dll"
+at = "0x100083f4"
+kind = "site"
+name = "AddNewObjectToGame: a scale other than (1, 1, 1) goes to the object's interface 0x18 slot 15 (SetScale)"
+doc = "docs/04-missions.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10014750"
+kind = "function"
+name = "interface 0x18 slot 14 GetScale: the object's scale triple (+0x158)"
+doc = "docs/07-objects.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10014770"
+kind = "function"
+name = "interface 0x18 slot 15 SetScale: flag +0x154 = scale != 1; stores the scale; rescales every node's matrices, both bounding boxes, the sphere and the cylinder"
+doc = "docs/07-objects.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10008c8f"
+kind = "site"
+name = "pose walk: with the scale flag set, the root's axes are multiplied by the scale triple"
+doc = "docs/07-objects.md"
+read = true
+
+[[entry]]
+module = "MisLoad.dll"
+at = "0x1000e0e8"
+kind = "datum"
+name = "IMission vtable (slot 10 GetObject 0x10001440)"
+doc = "docs/04-missions.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x1002053c"
+kind = "datum"
+name = "interface 0x18 (mesh geometry) vtable: slot 14 GetScale, slot 15 SetScale"
+doc = "docs/07-objects.md"
+read = true

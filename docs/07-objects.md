@@ -634,8 +634,10 @@ wheels or feet do. Both are the same rule seen from two ends, and both are
 tight: 75% of units put their lowest vertex within one unit of the terrain,
 and the median unit is **0.03** off it.
 
-Vegetation and rock are the two kinds this fits least well, for a reason the
-data itself gives — see [Local origins](#local-origins) below.
+Vegetation and rock are the two kinds this fits least well, for reasons the
+data itself gives — see [Local origins](#local-origins) below. More than half
+of their placements are scaled, and z = 0 lands on the placement height only
+after the scale is applied.
 
 The figures moved slightly when the terrain gained its levels of detail:
 `height_at` samples the fine level alone now, and the placement checks
@@ -1114,3 +1116,10 @@ exactly. Read as "the mission z is the model origin" that is consistent — the
 tree is authored hanging below its origin and placed high enough to make up
 for it — but it means a mis-set placement is invisible in the data, and it is
 why vegetation's residuals are the widest of the four kinds.
+
+The other half of the reason is **scale**. 216 of the 401 vegetation and rock
+placements carry a uniform scale, 0.2 to 21, which the engine applies to the
+whole object ([04-missions.md](04-missions.md#the-scale)).
+Measured with the scale applied, only 2 of 134 scaled trees and 2 of 82 scaled
+stones have their lowest vertex more than 0.25 above the ground. Measured at
+scale 1, 63 and 44 do. `s_tree_59` itself is placed at scale 1 both times.

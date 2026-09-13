@@ -17,7 +17,8 @@ Each node of a model has a life, built from its `.ndp` record
 ([07-objects.md](07-objects.md#ndp-is-a-damage-table-one-record-per-node)):
 
 - **Maximum** = the `.ndp` hit points × the object's **volume scale** (its three
-  scales multiplied, `+0x548`, `0x10009ee0`; 1 in every shipped mission) × the
+  scales multiplied, `+0x548`, `0x10009ee0`; 1 in every shipped mission, since
+  units and buildings are built without the placement's scale) × the
   **level ratio** (`+0x660`, below). Changing either scale rescales every
   node's life and maximum in proportion (`0x10009f90`).
 - **Damage** lowers a node's life, clamped at 0 (`0x10010f30`). A part's
