@@ -14,7 +14,7 @@ import subprocess
 from collections.abc import Iterator
 from pathlib import Path
 
-from . import assembly, control, controls, dump, landmesh, materials, mission
+from . import assembly, control, controls, dump, gamedir, landmesh, materials, mission
 from .nres import NResArchive, is_nres
 
 #: How far two floats may differ, absolutely or relative to their size.
@@ -88,7 +88,7 @@ def targets(game: Path) -> list[tuple[str, Path, list[str]]]:
     Tut_1's ``Land.msh`` and the textures its ground names.  M2: Mission 01's
     assembly and every mesh its objects are drawn from.  M3: every controller,
     every control point list and the three input tables.  M4: every damage
-    table, explosion and effect.
+    table, explosion and effect.  M5: every mission's atmosphere.
     """
     archives = sorted(p for p in game.rglob("*") if p.is_file() and is_nres(p))
     return ([("nres", p, []) for p in archives]
@@ -103,6 +103,8 @@ def targets(game: Path) -> list[tuple[str, Path, list[str]]]:
             + [("ndp", p, []) for p in archives if _has_tag(p, "NDPR")]
             + [("exp", p, []) for p in archives if _has_tag(p, "EXPL")]
             + [("fxid", p, []) for p in archives if _has_tag(p, "FXID")]
+            + [("sky", d / "sky.ske", []) for d in gamedir.missions(game)
+               if (d / "sky.ske").exists()]
             + [("controls", game / name, []) for name in controls.TABLES])
 
 

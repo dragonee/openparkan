@@ -19,6 +19,7 @@ pub mod ndp;
 pub mod nres;
 pub mod objects;
 pub mod pose;
+pub mod sky;
 pub mod texm;
 pub mod wea;
 

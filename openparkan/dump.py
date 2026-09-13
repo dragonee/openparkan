@@ -19,7 +19,7 @@ import math
 import struct
 from pathlib import Path
 
-from . import assembly, control, controls, effects, landmesh, materials, mission, objects
+from . import assembly, control, controls, effects, landmesh, materials, mission, objects, sky
 from . import mesh as objmesh
 from . import texm as textures
 from .nres import NResArchive
@@ -415,6 +415,22 @@ def fx_effects(path: Path, names: list[str] | None = None) -> dict:
     return {"kind": "fxid", "members": out}
 
 
+def atmosphere(path: Path, names: list[str] | None = None) -> dict:
+    """A ``sky.ske``: its sections, its day, and every keyframe's slots as stored."""
+    a = sky.load(path)
+    return {
+        "kind": "sky",
+        "sections": a.sections,
+        "day_seconds": a.day_seconds,
+        "keyframes": [
+            {"hour": k.hour, "minute": k.minute, "section": k.section, "name": k.name,
+             "sounds": list(k.sounds), "slots": [list(s) for s in k.slots],
+             "intensity": vector(k.intensity), "trailer": list(k.trailer)}
+            for k in a.keyframes
+        ],
+    }
+
+
 def input_table(path: Path, names: list[str] | None = None) -> dict:
     """A ``.tbl``: every row, and the numbers the engine resolves its names to."""
     return {
@@ -442,4 +458,5 @@ def _mission(path: Path, names: list[str] | None = None) -> dict:
 KINDS = {"nres": _nres, "mission": _mission, "texm": texm, "materials": material_library,
          "landmesh": land_mesh, "mesh": object_mesh, "assembly": mission_assembly,
          "control": controllers, "controls": input_table, "cpt": control_points,
-         "ndp": damage_tables, "exp": explosions, "fxid": fx_effects}
+         "ndp": damage_tables, "exp": explosions, "fxid": fx_effects,
+         "sky": atmosphere}

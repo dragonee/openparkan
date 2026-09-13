@@ -9,7 +9,7 @@ use anyhow::{Context, Result};
 use parkan_formats::mission::{self, Value as PropertyValue};
 use parkan_formats::nres::Archive;
 use parkan_formats::pose::Pose;
-use parkan_formats::{control, controls, cpt, exp, fxid, landmesh, materials, mesh, ndp, texm, wea};
+use parkan_formats::{control, controls, cpt, exp, fxid, landmesh, materials, mesh, ndp, sky, texm, wea};
 
 use crate::assembly;
 use serde_json::{Value, json};
@@ -503,6 +503,26 @@ pub fn fx_effects(path: &Path, names: &[String]) -> Result<Value> {
     Ok(json!({ "kind": "fxid", "members": out }))
 }
 
+/// A `sky.ske`: its sections, its day, and every keyframe's slots as stored.
+pub fn atmosphere(path: &Path) -> Result<Value> {
+    let a = sky::parse(&std::fs::read(path)?, &path.display().to_string())?;
+    Ok(json!({
+        "kind": "sky",
+        "sections": a.sections,
+        "day_seconds": a.day_seconds() as i64,
+        "keyframes": a.keyframes.iter().map(|k| json!({
+            "hour": k.hour,
+            "minute": k.minute,
+            "section": k.section,
+            "name": k.name,
+            "sounds": k.sounds,
+            "slots": k.slots,
+            "intensity": vector(&k.intensity),
+            "trailer": k.trailer,
+        })).collect::<Vec<_>>(),
+    }))
+}
+
 /// A `.tbl`: every row, and the numbers the engine resolves its names to.
 pub fn input_table(path: &Path) -> Result<Value> {
     let rows = controls::load(path)?;
@@ -545,8 +565,9 @@ pub fn dump(kind: &str, path: &Path, names: &[String]) -> Result<Value> {
         "ndp" => damage_tables(path, names),
         "exp" => explosions(path, names),
         "fxid" => fx_effects(path, names),
+        "sky" => atmosphere(path),
         other => anyhow::bail!(
-            "unknown kind {other:?}; expected nres, mission, texm, materials, landmesh, mesh, assembly, control, controls, cpt, ndp, exp or fxid"
+            "unknown kind {other:?}; expected nres, mission, texm, materials, landmesh, mesh, assembly, control, controls, cpt, ndp, exp, fxid or sky"
         ),
     }
 }

@@ -79,3 +79,19 @@ def test_effects_dump_their_header_and_each_emitters_live_floats(tmp_path, nres_
     assert e["header"]["duration"] == 1.5 and e["emitters"][0]["kind"] == 3
     assert e["emitters"][0]["window"][1] == 0.5
     assert [32, e["emitters"][0]["window"][0]] in e["emitters"][0]["live"]
+
+
+def test_an_atmosphere_dumps_its_keyframes(tmp_path):
+    import struct
+
+    header = struct.pack("<5I", 0xFFFFFFFF, 5, 1, 1, 1) + bytes(44) + struct.pack("<2I", 0, 15)
+    header += bytes(124 - len(header))
+    key = bytes(range(88)) + struct.pack("<I", 3) + b"sun" + struct.pack("<I", 0) * 5
+    key += struct.pack("<4f", 2.2, 2.0, 5.0, 0.0) + struct.pack("<I", 0)
+    key += struct.pack("<10I", 1, 0, 0, 12, 30, 0, 0, 0, 0, 0)
+    path = tmp_path / "sky.ske"
+    path.write_bytes(header + key)
+    out = dump.atmosphere(path)
+    (k,) = out["keyframes"]
+    assert (out["day_seconds"], k["hour"], k["minute"], k["name"]) == (900, 12, 30, "sun")
+    assert k["slots"][1] == [4, 5, 6, 7]
