@@ -149,11 +149,34 @@ of `IBuilding` (`0x1005b250`) is where `iron3d.dll` stores its callback
   switched on, back by 0.45 while switched off, and at the end clears the state
   word (property `0x600`) the building waits on. A pod's rate is 1 (its record's
   flags are 0 and its factor 1.0, *measured*), so **it opens in three steps**:
-  0.45, 0.9, 1. The update ignores the time it is handed; the steps come from
-  the controller's time driver (`0x1002d260`), whose period was not traced.
-  *Measured*: a pod's part plays its mesh node from frame 1 to 3, at speeds 0.2
-  to 0.5; a door from 0 to 1. Whether that animation is played at those speeds
-  alongside the progress was not found.
+  0.45, 0.9, 1. **A step lasts as long as its slowest channel needs**
+  (*read*). The time driver (`0x1002d260`) starts the next step when the last
+  one ends. Each step sets its end to 1000 × |Δvalue| ÷ (factor × channel rate)
+  ms after its start, taking the longest over the item's channels
+  (`0x10022120`). A step that moves nothing lasts 100 ms (`0x10020d72`). The
+  channels interpolate linearly across the step (`0x10021a30`) and play the
+  node's frames. So an item opens fully in **1 ÷ rate seconds**, and the state
+  word clears when the third step starts, at **0.9 ÷ rate**. That is when the
+  building sees the pod open.
+
+  *Measured*, the first class-13 part of each of the 21 buildings (item factor
+  1 and flags 0 on all 95 doors and pods):
+
+  | Buildings | Pod rate | Open | Capture fires |
+  |---|---:|---:|---:|
+  | the three power plants, `fr_m_bunker` | 0.2 | 5 s | 4.5 s |
+  | `fr_b_bunker`, `fr_l_bunker`, `fr_b_inst`, `fr_e_inst`, `fr_l_inst`, `fr_m_inst` | 0.25 | 4 s | 3.6 s |
+  | `fr_l_angar` | 0.3 | 3.33 s | 3 s |
+  | `fr_m_mtp` | 0.4 | 2.5 s | 2.25 s |
+  | the three mines, three stores and `fr_b_tower`, `fr_m_tower` | 0.5 | 2 s | 1.8 s |
+  | `fr_l_gener` | 0.7 | 1.43 s | 1.29 s |
+
+  Doors open in 1 to 5 s the same way. Up to 100 ms more pass before the
+  first step starts. That the building's computer 0 is the file's first
+  class-13 part is a *guess*. It matters on 9 buildings, the mines, stores and
+  towers: their second class-13 part is a wrapping channel at rate 0.2, and
+  would capture at 4.5 s. On the other 9 buildings with two, both parts have
+  the same rate.
 - **The callback takes the building** (`iron3d.dll:0x10061050`).
   - **Same clan** (`0x100610c2`): nothing is captured; `0x10062630` runs
     instead, and is not read here.
@@ -252,10 +275,8 @@ generators between the players. `Multi.05`'s `Ntrl` is the exception: type 2.
 
 ## Not established
 
-- **How long a pod takes to open, in seconds**: three item steps, and the step
-  period of the controller's time driver (`Control.dll:0x1002d260`, which
-  schedules each device through `0x10021a30`) is not traced. About 5 seconds in
-  play would mean steps of about 1.7 s (a *guess*).
+- Which class-13 part is the building's computer 0 where there are two, and
+  so whether a mine, store or tower pod captures at 1.8 s or at 4.5 s.
 - What `iron3d.dll:0x10062630` does when a unit of the building's own clan
   opens the pod.
 - The hero's target field (record `+0x38`, `+4`) and what sets it; the game

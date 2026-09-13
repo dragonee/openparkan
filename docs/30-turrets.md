@@ -118,12 +118,32 @@ shield bubble ([26-damage.md](26-damage.md)).
 
 | Offset | Field |
 |---|---|
+| +0 | the **node** the channel animates |
 | +4, +8 | first and last animation frame |
 | +0xc | initial value, 0–1 |
-| +0x14 | a **control point** in the same-stem `.cpt` (not a node) |
+| +0x10 | a second control point, or −1: the camera channel's `CameraCenter` |
+| +0x14 | a **control point** in the same-stem `.cpt` |
 | +0x18 | rate: value per second |
 | +0x1c | span: radians from value 0 to 1 |
 | +0x20 | flags; 3 on every yaw channel |
+
+**The node is +0** (*read*, loader `0x10008fb9`; *measured*). All 991 channels
+of the controllers that `objects.rlb` pairs with a mesh name a node of that
+mesh. On 588 of the 593 that span frames, those frames move the node, posed as
+the engine poses it. As a control, the next node moves on 149, and +0x14 read
+as a node on 87. On the
+hero turret the four channels animate `CP_m1o1`, `Turn_m1o1` (49–53),
+`GP_m1o1` (55–57) and the barrel `Gun02_m1o1` (58–60).
+
+**The flags** (`+0x20`, *read* `0x10009950`, `0x10021a30`):
+
+| Flag | Meaning |
+|---|---|
+| 1 | wraps |
+| 2 | inverts, 1 − v |
+| 4 | is not driven by the component update (the camera) |
+| 8 | joins the turret's list (the gun mounts that follow pitch) |
+| `0x40` | takes the previous channel's value (`AR_*`, `AL_*`) |
 
 **A turret's two component entries are its yaw and pitch channels.**
 
@@ -146,8 +166,9 @@ shield bubble ([26-damage.md](26-damage.md)).
 - The pitch frames 55, 56 and 57 tilt `GP_m1o1`'s sight to −30.5°, +24.4° and
   +79.4°. That is a 1.919-rad sweep against the channel's 1.920, and the
   initial 0.2727 lands within 0.6° of level.
-- That the engine plays frame = first + v × (last − first) is a *guess*; the
-  spans agree with it.
+- The engine plays frame = first + v × (last − first) on the node's own
+  segment (*read*: `0x10009950` hands the node the pair and its value;
+  `AniMesh.dll:0x10008b30` lerps across it).
 
 **How the aim moves** (*read*):
 

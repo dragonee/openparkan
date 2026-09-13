@@ -67,3 +67,34 @@ def test_a_control_point_names_its_node_in_its_first_triple():
     point = mesh.ControlPoint("CameraCenter", (0.0, as_float, as_float),
                               (0.0, 0.0, 0.0), (0.0, 1.0, 0.0))
     assert point.nodes == (35, 35)
+
+
+def animated(keys):
+    m = mesh.ObjectMesh.__new__(mesh.ObjectMesh)
+    object.__setattr__(m, "nodes", [mesh.Subobject(
+        name="Turn", flags=0, parent=mesh.NO_PARENT, anim_start=0,
+        fallback_key=len(keys) - 1, slot_index=[N] * 15)])
+    object.__setattr__(m, "keys", keys)
+    object.__setattr__(m, "frame_map", list(range(len(keys))))
+    object.__setattr__(m, "frame_count", len(keys))
+    return m
+
+
+def test_a_pose_between_two_keys_is_blended_by_time():
+    q = (1.0, 0.0, 0.0, 0.0)
+    m = animated([mesh.PoseKey((0.0, 0.0, 0.0), 0.0, q), mesh.PoseKey((2.0, 0.0, 0.0), 1.0, q),
+                  mesh.PoseKey((9.0, 0.0, 0.0), 2.0, q)])
+    assert m.pose_at(0, 0.0)[0] == (0.0, 0.0, 0.0)
+    assert m.pose_at(0, 0.25)[0] == (0.5, 0.0, 0.0)
+    assert m.pose_at(0, 1.0)[0] == (2.0, 0.0, 0.0)
+    assert m.pose_at(0, 7.0)[0] == (9.0, 0.0, 0.0)
+
+
+def test_two_frames_and_a_weight():
+    q = (1.0, 0.0, 0.0, 0.0)
+    m = animated([mesh.PoseKey((0.0, 0.0, 0.0), 0.0, q), mesh.PoseKey((4.0, 0.0, 0.0), 1.0, q),
+                  mesh.PoseKey((8.0, 0.0, 0.0), 2.0, q)])
+    assert m.blended_pose(0, 0.0, 2.0, 0.0)[0] == (0.0, 0.0, 0.0)
+    assert m.blended_pose(0, 0.0, 2.0, 1.0)[0] == (8.0, 0.0, 0.0)
+    assert m.blended_pose(0, 0.0, 2.0, 0.5)[0] == (4.0, 0.0, 0.0)
+    assert m.blended_pose(0, -1.0, 1.0, 0.5)[0] == (4.0, 0.0, 0.0)

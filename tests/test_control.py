@@ -232,3 +232,44 @@ def test_section_two_reads_as_channels(ctl):
         49.0, 53.0, 0.5, 1, 100.0, 3)
     assert pitch.point == -1
     assert abs(pitch.span - 1.92) < 1e-6
+
+
+def test_a_state_carries_its_frame_pairs_blend_and_length(ctl, state):
+    blob = bytearray(ctl(counts=(1, 0, 0, 0, 0), states=[state()]))
+    at = control.HEADER_SIZE
+    struct.pack_into("<I", blob, at + control.STATE_MODE_AT,
+                     control.STATE_ANCHOR | control.STATE_BY_VELOCITY)
+    struct.pack_into("<5f", blob, at + control.STATE_PAIR_A_AT, 5.0, 6.0, 9.0, 13.0, 0.6)
+    struct.pack_into("<f", blob, at + control.STATE_LENGTH_AT, 125.0)
+    (s,) = control.parse(bytes(blob)).states
+    assert (s.pair_a, s.pair_b, s.length) == ((5.0, 6.0), (9.0, 13.0), 125.0)
+    assert abs(s.blend - 0.6) < 1e-6
+    assert s.anchor and s.by_velocity
+
+
+def test_the_cheapest_path_reads_the_table_row_as_the_destination(ctl, state):
+    blob = bytearray(ctl(counts=(3, 0, 0, 0, 0), states=[state()] * 3))
+    at = control.HEADER_SIZE + 3 * control.SECTION1_RECORD
+    no = control.NO_EDGE
+    # row = to, column = from: 0 -> 1 costs 1, 1 -> 2 costs 1, 0 -> 2 costs 5
+    table = [no, no, no,
+             1.0, no, no,
+             5.0, 1.0, no]
+    struct.pack_into("<9f", blob, at, *table)
+    c = control.parse(bytes(blob))
+    assert c.cost(1, 0) == 1.0
+    assert c.path(0, 2) == [1, 2]
+    assert c.path(2, 0) is None
+
+
+def test_a_channel_names_the_node_it_plays(ctl):
+    blob = bytearray(ctl(counts=(0, 0, 1, 0, 0), points=(3,),
+                         channels=[(49.0, 53.0, 0.5, 100.0, 6.28,
+                                    control.CHANNEL_WRAP | control.CHANNEL_INVERT)]))
+    at = control.section4_start((0, 0, 1, 0, 0)) - control.SECTION2_RECORD
+    struct.pack_into("<i", blob, at + control.SECTION2_NODE_AT, 7)
+    struct.pack_into("<i", blob, at + control.SECTION2_ORIGIN_AT, 2)
+    (ch,) = control.parse(bytes(blob)).channels
+    assert (ch.node, ch.origin, ch.point) == (7, 2, 3)
+    assert ch.frame(0.25) == 52.0
+    assert ch.frame(1.25) == 52.0

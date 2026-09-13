@@ -24,6 +24,7 @@ Everything below is re-derived by ``uv run openparkan verify``.
 
 from __future__ import annotations
 
+import heapq
 import struct
 from dataclasses import dataclass
 
@@ -40,13 +41,24 @@ HEADER_SIZE = 128
 #: plays mesh frames ``first``..``last``.  Its +20 word is a control point of
 #: the same-stem ``.cpt`` -- a barrel, a turret's ``TurretDirect`` or
 #: ``TargetDirect`` -- or -1 on none.
+#: +0 is the mesh node the channel animates (``Control.dll:0x10008fb9``) and
+#: +16 a second control point, the camera channel's ``CameraCenter``.
+SECTION2_NODE_AT = 0
 SECTION2_FIRST_AT = 4
 SECTION2_INITIAL_AT = 12
+SECTION2_ORIGIN_AT = 16
 SECTION2_POINT_AT = 20
 SECTION2_RATE_AT = 24
 SECTION2_FLAGS_AT = 32
-#: The earlier name, from when the word was read as a node.
-SECTION2_NODE_AT = SECTION2_POINT_AT
+#: A channel's flags (``0x10009950``, ``0x10021a30``): the value wraps; the
+#: node plays 1 - v; the component update does not drive it (the camera); it
+#: joins the turret's list (gun mounts that follow pitch); it takes the
+#: previous channel's value.
+CHANNEL_WRAP = 0x1
+CHANNEL_INVERT = 0x2
+CHANNEL_UNDRIVEN = 0x4
+CHANNEL_TURRET = 0x8
+CHANNEL_FOLLOWS = 0x40
 
 #: Section 1's record, section 2's record, the fixed block the loader copies
 #: after the component records, and the component type ids the factory at
@@ -197,6 +209,27 @@ STATE_SPIN_AT = 0x3C         # min xyz, then max xyz at +0x48
 #: ``+0x100`` (``0x1000c36f``), so this is the ``+0x154`` the engine draw
 #: multiplies by (``0x100266e1``).
 STATE_ENGINE_AT = 0x54
+#: +0x04 the state's mode bits; +0x0c and +0x14 its two frame pairs, A and B;
+#: +0x1c the blend base toward B; +0x20 a fixed step length in ms, or 0.
+STATE_MODE_AT = 0x04
+STATE_PAIR_A_AT = 0x0C
+STATE_PAIR_B_AT = 0x14
+STATE_BLEND_AT = 0x1C
+STATE_LENGTH_AT = 0x20
+#: An anchor the planner chooses among (``0x100051c0``); a state that moves
+#: the body by velocity x step (``0x10015920``); a fixed step that integrates
+#: nothing (``0x100053ab``); a step jittered by up to 12.5% (``0x100057d6``).
+STATE_ANCHOR = 0x1
+STATE_BY_VELOCITY = 0x10000
+STATE_FIXED = 0x100000
+STATE_JITTER = 0x1000000
+#: A step is held to this many seconds, and a fixed-length velocity state is
+#: cut so that speed x step stays within ``FIXED_STEP_REACH`` (``0x1000550e``).
+STEP_MIN = 0.01
+STEP_MAX = 5.0
+FIXED_STEP_REACH = 5.0
+#: A transition cost at or above this is no edge.
+NO_EDGE = 1_000_000.0
 #: The section-5 group entering the state runs (``0x1000c37c``), and the request
 #: code the state waits for, -1 for any (``0x10001140``).  A building's states
 #: answer the construction sphere's codes (docs/32-builder.md).
@@ -346,19 +379,36 @@ class Channel:
     pitch channel names ``TargetDirect``.
     """
 
+    #: +0: the mesh node the channel animates, on a segment of its own.
+    node: int
     #: +4 and +8: the mesh frames the value plays from 0 to 1.
     first: float
     last: float
     #: +12: the value it starts at.  0.5 looks ahead on a yaw channel.
     initial: float
+    #: +16: a second control point or -1 -- the camera channel's
+    #: ``CameraCenter``.
+    origin: int
     #: +20: a control point of the same-stem ``.cpt``, or -1.
     point: int
     #: +24: value per second.
     rate: float
     #: +28: radians from value 0 to 1.
     span: float
-    #: +32: 3 on every turret yaw channel.
+    #: +32: ``CHANNEL_*``; 3, wrapping and inverted, on every turret yaw.
     flags: int
+
+    def frame(self, value: float) -> float:
+        """The frame the node plays at ``value``.
+
+        ``0x10009950`` hands the node the pair and its value, and
+        ``AniMesh.dll:0x10008b30`` lerps across it.  Whether the inversion
+        applies before or after a wrap is not established; here it follows.
+        """
+        v = value % 1.0 if self.flags & CHANNEL_WRAP else min(1.0, max(0.0, value))
+        if self.flags & CHANNEL_INVERT:
+            v = 1.0 - v
+        return self.first + v * (self.last - self.first)
 
 
 @dataclass(frozen=True)
@@ -376,6 +426,24 @@ class State:
     #: The section-5 group entering it runs, and the request code it waits for.
     actions: int = -1
     request: int = -1
+    #: +0x04: ``STATE_ANCHOR``, ``STATE_BY_VELOCITY``, ``STATE_FIXED``,
+    #: ``STATE_JITTER``.
+    mode: int = 0
+    #: The two frame pairs a step plays, first and last, and the blend base
+    #: toward B.
+    pair_a: tuple[float, float] = (0.0, 0.0)
+    pair_b: tuple[float, float] = (0.0, 0.0)
+    blend: float = 1.0
+    #: A fixed step length in ms; 0 lets speed and stride set it.
+    length: float = 0.0
+
+    @property
+    def anchor(self) -> bool:
+        return bool(self.mode & STATE_ANCHOR)
+
+    @property
+    def by_velocity(self) -> bool:
+        return bool(self.mode & STATE_BY_VELOCITY)
 
 
 @dataclass(frozen=True)
@@ -427,8 +495,49 @@ class Controller:
     #: Section 2 whole: the channels a component's entries name -- a gun's
     #: barrels, a turret's yaw and pitch, a camera's eye.
     channels: tuple[Channel, ...] = ()
+    #: Section 1's transition table, ``A x A`` floats, the row the destination.
+    costs: tuple[float, ...] = ()
     #: The 84-byte block: 21 section-5 group indices, ``NO_GROUP`` for none.
     groups: tuple[int, ...] = ()
+
+    def cost(self, to: int, frm: int) -> float:
+        """What moving from state ``frm`` to state ``to`` costs.
+
+        The row is the destination: on every zero-cost edge the source's pair
+        B ends on the frame the destination's starts.
+        """
+        return self.costs[to * len(self.states) + frm]
+
+    def path(self, frm: int, to: int) -> list[int] | None:
+        """The cheapest run of states from ``frm`` to ``to``, without ``frm``.
+
+        Dijkstra over the file's costs, as the planner runs it
+        (``0x100019d0``).  The engine also multiplies each cost at load by one
+        plus the largest gap between the two states' boxes (``0x10001790``);
+        that is not applied here.
+        """
+        best = {frm: 0.0}
+        back: dict[int, int] = {}
+        queue = [(0.0, frm)]
+        while queue:
+            cost, state = heapq.heappop(queue)
+            if state == to and state != frm:
+                out = []
+                while state != frm:
+                    out.append(state)
+                    state = back[state]
+                return out[::-1]
+            if cost > best.get(state, float("inf")):
+                continue
+            for nxt in range(len(self.states)):
+                step = self.cost(nxt, state)
+                if step >= NO_EDGE or nxt == state:
+                    continue
+                if cost + step < best.get(nxt, float("inf")):
+                    best[nxt] = cost + step
+                    back[nxt] = state
+                    heapq.heappush(queue, (cost + step, nxt))
+        return None
 
     @property
     def load_group(self) -> int:
@@ -586,8 +695,20 @@ def read_states(blob: bytes, counts: tuple[int, ...]) -> tuple[State, ...]:
             engine=struct.unpack_from("<f", blob, at + STATE_ENGINE_AT)[0],
             actions=struct.unpack_from("<i", blob, at + STATE_ACTIONS_AT)[0],
             request=struct.unpack_from("<i", blob, at + STATE_REQUEST_AT)[0],
+            mode=struct.unpack_from("<I", blob, at + STATE_MODE_AT)[0],
+            pair_a=struct.unpack_from("<2f", blob, at + STATE_PAIR_A_AT),
+            pair_b=struct.unpack_from("<2f", blob, at + STATE_PAIR_B_AT),
+            blend=struct.unpack_from("<f", blob, at + STATE_BLEND_AT)[0],
+            length=struct.unpack_from("<f", blob, at + STATE_LENGTH_AT)[0],
         ))
     return tuple(out)
+
+
+def read_costs(blob: bytes, counts: tuple[int, ...]) -> tuple[float, ...]:
+    """Section 1's A x A transition table, which follows the states."""
+    a = counts[0]
+    at = HEADER_SIZE + a * (SECTION1_RECORD + SECTION1_PER_B * counts[1])
+    return struct.unpack_from(f"<{a * a}f", blob, at)
 
 
 def _points(blob: bytes, counts: tuple[int, ...]) -> tuple[int, ...]:
@@ -605,6 +726,8 @@ def read_channels(blob: bytes, counts: tuple[int, ...]) -> tuple[Channel, ...]:
         first, last, initial = struct.unpack_from("<3f", blob, base + SECTION2_FIRST_AT)
         rate, span = struct.unpack_from("<2f", blob, base + SECTION2_RATE_AT)
         out.append(Channel(
+            node=struct.unpack_from("<i", blob, base + SECTION2_NODE_AT)[0],
+            origin=struct.unpack_from("<i", blob, base + SECTION2_ORIGIN_AT)[0],
             first=first, last=last, initial=initial,
             point=struct.unpack_from("<i", blob, base + SECTION2_POINT_AT)[0],
             rate=rate, span=span,
@@ -708,5 +831,6 @@ def parse(blob: bytes, archives: frozenset[str] | None = None) -> Controller:
         states=read_states(blob, counts),
         points=_points(blob, counts),
         channels=read_channels(blob, counts),
+        costs=read_costs(blob, counts),
         groups=struct.unpack_from(f"<{BLOCK_ENTRIES}i", blob, pos),
     )

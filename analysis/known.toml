@@ -1983,7 +1983,7 @@ read = true
 module = "Control.dll"
 at = "0x100051c0"
 kind = "function"
-name = "state selection: cheapest A x A transition below 1e6 into a state whose bounds hold"
+name = "state planner: only on an anchor (+0x04 bit 0); an anchor that applies queues the path back to itself, else the cheapest path (Dijkstra over table[to][from]) to an applying anchor"
 doc = "docs/24-motion.md"
 read = true
 
@@ -1991,7 +1991,7 @@ read = true
 module = "Control.dll"
 at = "0x10005370"
 kind = "function"
-name = "motion step: dt = +0x120 ms x 0.001 clamped 0.01..5 s; spin then velocity integrator"
+name = "state step: its length from +0x20 ms, or root stride / speed, jittered, held to 0.01..5 s; attitude and velocity integrators run once with dt = step; body moves by velocity or root stride"
 doc = "docs/24-motion.md"
 read = true
 
@@ -5035,7 +5035,7 @@ read = true
 module = "Control.dll"
 at = "0x1002d260"
 kind = "function"
-name = "component time driver: steps each component's update from the control clock"
+name = "component time driver: starts a component's next step when t passes its end; a step ends at the longest channel time 1000 |dv| / (factor x rate) ms, or 100 ms"
 doc = "docs/27-ownership.md"
 read = true
 
@@ -5796,4 +5796,261 @@ at = "0x1008c1d0"
 kind = "function"
 name = "camera: screen point to view ray, x by tan(fov/2), y by tan(fov/2) x height/width"
 doc = "docs/30-turrets.md"
+read = true
+
+# --- playing a state, channels and item timing, ../docs/24, 27, 30 ---
+[[entry]]
+module = "Control.dll"
+at = "0x1000c2a5"
+kind = "site"
+name = "machine tick: while the clock +0xdc is not ahead of t, plan (0x100051c0), pop the queue into the current state, run its action group, run the state step"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000c38c"
+kind = "site"
+name = "machine tick: the state step 0x10005370 after copying the queued state and running its +0x90 group"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x100053ab"
+kind = "site"
+name = "state step: state +0x04 bit 0x100000 -- a fixed +0x20 ms step with no motion integration"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000550e"
+kind = "site"
+name = "state step: a velocity-driven (0x10000) state with a fixed length is cut so speed x step <= 5"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x100057a3"
+kind = "site"
+name = "state step: blend weight +0xf8 = p + (1 - p) x state +0x1c, p from the speed across the velocity box"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x100057c1"
+kind = "site"
+name = "state step with no fixed length: step = ((1 - q) x |root stride A| + q x |root stride B|) / speed"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x100057d6"
+kind = "site"
+name = "state step: +0x04 bit 0x1000000 jitters the step by up to +-12.5%; then held to 0.01..5 s"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x100019d0"
+kind = "function"
+name = "state graph: Dijkstra rooted at the target over table[to][from]; stops at the current state; returns the path cost"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10001790"
+kind = "function"
+name = "state graph load: live cost = file cost x (1 + largest gap between the two states' velocity and spin boxes)"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10019df0"
+kind = "function"
+name = "per state: root strides from IAnimation slot 0x80 -- +0x58/+0x64 over pair A, +0x74/+0x80 over pair B, starts at +0x68/+0x84"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10015920"
+kind = "function"
+name = "body: a velocity-driven state moves the position by velocity x step"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10015990"
+kind = "function"
+name = "body: any other state moves the position by its blended root stride, turned into the world; velocity +0x4c = stride / step"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10015a50"
+kind = "function"
+name = "body per frame: attitude slerped and position lerped from the step's start by the phase s"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x100078ff"
+kind = "site"
+name = "attach: the agent's interfaces 6, 0xb (IAnimation, +0x20), 0x18 and 0x20 into +0x1c..+0x28"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10008fb9"
+kind = "site"
+name = "loader: a section-2 record becomes a channel -- node +0x00, two control points +0x10/+0x14, flags +0x20"
+doc = "docs/13-control.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10009950"
+kind = "function"
+name = "channel init: the node gets its own frame segment (first, last) and its initial value, wrapped (flag 1) or clamped, inverted by flag 2"
+doc = "docs/13-control.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10021a30"
+kind = "function"
+name = "component channels: value = from + (to - from) x progress through the step, short way when wrapping; IAnimation slot 0x28 on the node"
+doc = "docs/13-control.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10022120"
+kind = "function"
+name = "step length: end = max(end, start + 1000 x |to - from| / (factor x channel rate)) ms"
+doc = "docs/27-ownership.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x100221b0"
+kind = "function"
+name = "step: +0x14 = 1 / (end - start), the progress rate the channels interpolate by"
+doc = "docs/27-ownership.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10020a3a"
+kind = "site"
+name = "item step: progress -= 0.45 x factor while closing (+= at 0x10020a48 while opening)"
+doc = "docs/27-ownership.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10020d72"
+kind = "site"
+name = "item step: a step no channel lengthens lasts 100 ms"
+doc = "docs/27-ownership.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10020d90"
+kind = "function"
+name = "item value helper: value id low byte 2..14 from a table, otherwise the default"
+doc = "docs/27-ownership.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x1002057c"
+kind = "datum"
+name = "IAnimation vtable (interface 0xb): slot 8 node flags, 10 node phase, 12 node frames, 25 phase and weight, 26 frame pairs, 32 root pose"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10005890"
+kind = "function"
+name = "IAnimation slot 25 (+0x64): phase s -> +0x1f4, weight w -> +0x1f8"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x100058f0"
+kind = "function"
+name = "IAnimation slot 26 (+0x68): frame pair A -> +0x1e4/+0x1e8, pair B -> +0x1ec/+0x1f0"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10005df0"
+kind = "function"
+name = "IAnimation slot 32 (+0x80): node 0's translation at the current phase and weight"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10005500"
+kind = "function"
+name = "IAnimation slot 8 (+0x20): set or clear node mask bits; bit 3 gives the node its own frame segment"
+doc = "docs/13-control.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10005630"
+kind = "function"
+name = "IAnimation slot 10 (+0x28): a node's own phase -> +0x114 and weight -> +0x118"
+doc = "docs/13-control.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x100056c0"
+kind = "function"
+name = "IAnimation slot 12 (+0x30): a node's own frame pairs -> +0x100..+0x10c"
+doc = "docs/13-control.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10008b30"
+kind = "function"
+name = "pose walk: frame A = lerp(A0, A1, s), frame B = lerp(B0, B1, s); a node with its own segment uses its own phase and weight"
+doc = "docs/07-objects.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10012560"
+kind = "function"
+name = "node pose from frames A and B at weight w: A alone at w 0 (or B < 0), B alone at w 1; else slerp and lerp"
+doc = "docs/07-objects.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10012880"
+kind = "function"
+name = "node pose at a fractional frame: the run's key at round(f - 0.5), interpolated toward the next key by time; the node's fallback past its run"
+doc = "docs/07-objects.md"
 read = true

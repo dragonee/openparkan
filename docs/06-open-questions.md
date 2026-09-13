@@ -54,11 +54,13 @@ record in `objects.rlb`.
 
 What is open is the **meaning** of the fields rather than their extent: the
 sixteen values of most component classes
-([23-economy.md](23-economy.md)), section 1's conditions and transition
-table, triples 2 and 6, and
+([23-economy.md](23-economy.md)), section 1's conditions, triples 2 and 6, and
 the nine ints of a section-5 record. The motion fields — acceleration, top
 speed, turn rate, slope mode and cone, payload, a state's velocity and spin
 boxes and engine factor — are [read](24-motion.md).
+
+Section 1's frame pairs, step lengths, flags and transition table, and section
+2's channels, are [read too](24-motion.md#playing-a-state--read-and-measured).
 
 Its sibling `.ndp` is [solved and read](07-objects.md), the second `float32`
 included: ~~what it is~~ — answered, it times the node's volume is the node's

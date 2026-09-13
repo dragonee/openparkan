@@ -202,6 +202,30 @@ def compose(parent: Pose, child: Pose) -> Pose:
     return ((px + rx, py + ry, pz + rz), quaternion_multiply(pq, cq))
 
 
+def quaternion_slerp(
+    a: tuple[float, float, float, float], b: tuple[float, float, float, float], t: float
+) -> tuple[float, float, float, float]:
+    """Interpolate two unit rotations the short way round."""
+    dot = sum(x * y for x, y in zip(a, b, strict=True))
+    if dot < 0.0:
+        b, dot = tuple(-x for x in b), -dot
+    if dot > 0.9995:
+        out = tuple(x + t * (y - x) for x, y in zip(a, b, strict=True))
+    else:
+        theta = math.acos(dot)
+        sa, sb = math.sin((1.0 - t) * theta), math.sin(t * theta)
+        out = tuple((sa * x + sb * y) / math.sin(theta) for x, y in zip(a, b, strict=True))
+    norm = math.sqrt(sum(x * x for x in out)) or 1.0
+    return tuple(x / norm for x in out)
+
+
+def blend(a: Pose, b: Pose, t: float) -> Pose:
+    """A lerp of the translations and a slerp of the rotations."""
+    (ta, qa), (tb, qb) = a, b
+    return (tuple(x + t * (y - x) for x, y in zip(ta, tb, strict=True)),
+            quaternion_slerp(qa, qb, t))
+
+
 def invert(pose: Pose) -> Pose:
     """The pose that undoes ``pose``."""
     (x, y, z), (w, qx, qy, qz) = pose
@@ -532,6 +556,46 @@ class ObjectMesh:
                         if v < len(out):
                             out[v] = i
         return out
+
+    def pose_at(self, node: int, frame: float) -> Pose:
+        """A node's pose at a fractional frame, as ``AniMesh.dll:0x10012880`` finds it.
+
+        The key is the run's entry at ``round(frame - 0.5)``.  Past the run,
+        on a node that is not animated, or where the entry is at or beyond the
+        node's fallback key, the fallback key is used.  At a key's time, or
+        the next key's in stream 8, that key is taken whole; otherwise the two
+        are blended by time.
+        """
+        n = self.nodes[node]
+        index = n.fallback_key
+        k = int(math.floor(frame - 0.5 + 0.5))
+        if n.is_animated and 0 <= k < self.frame_count:
+            entry = self.frame_map[n.anim_start + k]
+            if entry < n.fallback_key:
+                index = entry
+        if index >= len(self.keys):
+            return IDENTITY_POSE
+        key = self.keys[index]
+        if frame == key.time or index + 1 >= len(self.keys):
+            return key.pose
+        nxt = self.keys[index + 1]
+        if frame == nxt.time or nxt.time == key.time:
+            return nxt.pose if frame == nxt.time else key.pose
+        return blend(key.pose, nxt.pose, (frame - key.time) / (nxt.time - key.time))
+
+    def blended_pose(self, node: int, frame_a: float, frame_b: float, weight: float) -> Pose:
+        """Two frames and a weight, as a controller hands them (``0x10012560``).
+
+        Frame A alone at weight 0 or when B is negative, frame B alone at
+        weight 1 or when A is negative, a blend between otherwise.
+        """
+        use_a = weight < 1.0 and frame_a >= 0
+        use_b = weight > 0.0 and frame_b >= 0
+        if use_a and use_b:
+            return blend(self.pose_at(node, frame_a), self.pose_at(node, frame_b), weight)
+        if use_b:
+            return self.pose_at(node, frame_b)
+        return self.pose_at(node, max(frame_a, 0.0))
 
     def track(self, node: int) -> list[int]:
         """The pose key a node takes at each frame, or ``[]`` if it is still.

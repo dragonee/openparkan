@@ -36,8 +36,11 @@ conditions behind a pointer (`0x10001730`).
 | Offset | Field |
 |---|---|
 | +0x00 | flags: bits 0–2 switch on the velocity box per axis, bits 4–6 the spin box |
-| +0x04 | flags; bit 0 lets a state take part in selection (`0x1000524c`) |
-| +0x14, +0x18, +0x1c | by their values a first frame, a last frame and a rate — *guess* |
+| +0x04 | flags: bit 0 an **anchor** the planner chooses among (`0x1000524c`); `0x10000` moves by velocity; `0x100000` a fixed step with no motion; `0x1000000` jitters the step ([Playing a state](#playing-a-state--read-and-measured)) |
+| +0x0c, +0x10 | frame pair **A**: first and last frame |
+| +0x14, +0x18 | frame pair **B**: first and last frame |
+| +0x1c | the blend base toward B |
+| +0x20 | the step's fixed length in ms; 0 lets speed set it |
 | +0x24 / +0x30 | velocity box, min xyz / max xyz |
 | +0x3c / +0x48 | spin box, min xyz / max xyz |
 | **+0x54** | **the engine factor** |
@@ -45,14 +48,104 @@ conditions behind a pointer (`0x10001730`).
 | 16 × B | conditions: bit 0x100 needs a byte of the i-th 0x5c-byte entry at `+0xc4` set, 0x200 needs it clear (`0x10001107`); what the entries are is not read |
 
 A state applies while the machine's velocity and spin lie inside the boxes its
-flags switch on (`0x10001000`); the engine moves to the cheapest transition in
-the table whose cost is below 1,000,000 and whose target applies (`0x100051c0`).
+flags switch on (`0x10001000`). An anchor that stops applying queues the
+cheapest path to an anchor that does (`0x100051c0`); the table's row is the
+destination
+([Playing a state](#playing-a-state--read-and-measured)).
 
 *Measured:* 1,690 states in 207 controllers. The 4,323 bounds a flag bit
 switches on all read min ≤ max; the 5,817 it leaves off are all exactly
 −FLT_MAX..FLT_MAX. On `r_l_01` (Small Walking Chs) the boxes read like gaits:
 standing within ±0.6 m/s, walking forward 0.6–12, running 12–25 and backward
 the same negated, turning in place with yaw between ±0.1 and ±2.28 rad/s.
+
+## Playing a state — *read*, and *measured*
+
+A controller runs its states one at a time on a clock of its own (`+0xdc`, in
+ms). Each tick, while that clock is not ahead of the game's time, the machine
+tick (`0x1000bcf0`, loop at `0x1000c2a5`):
+
+1. plans, if the current state is an anchor (below);
+2. takes the next state off its queue, copies it to `+0x100` and runs its
+   action group (`+0x90`);
+3. runs one **state step** (`0x10005370`, at `0x1000c38c`), which moves the
+   clock on by the step's length.
+
+**How long a step lasts** (`0x10005370`):
+
+| State | Step |
+|---|---|
+| `+0x04` bit `0x100000` | `+0x20` ms, and nothing is integrated: 420 building states in `fortif.rlb` and one in `system.rlb` (*measured*) |
+| `+0x20` set | `+0x20` ms; a velocity-driven state is cut so that speed × step ≤ 5 (`0x1000550e`) |
+| `+0x20` = 0 | ((1 − q) × stride A + q × stride B) ÷ speed (`0x100057c1`) |
+
+- **Then** bit `0x1000000` jitters it by up to ±12.5% (30 states), and it is
+  held to 0.01–5 s (`0x100057d6`).
+- **Speed** is the largest component of the velocity in the machine's frame.
+- **A stride** is how far node 0, the body, moves from a pair's first frame to
+  its last. It is measured once per state through the mesh
+  (`0x10019df0`), into `+0x58`–`+0x8c`; those bytes are zero in all 1,690
+  states in the files.
+
+**What moves the body.**
+
+- A velocity-driven state (`0x10000`) moves it by velocity × step
+  (`0x10015920`).
+- Any other state moves it by its blended root stride, (1 − q) A + q B, turned
+  into the world (`0x10015990`).
+- The attitude and velocity integrators run once a step, with dt the step.
+- Between steps the drawn body is interpolated by the phase s (`0x10015a50`).
+
+**What the mesh plays** (`0x100059a0`, through `AniMesh.dll`'s interface
+`0xb` at `+0x20`):
+
+- **Phase:** s = (t − step start) ÷ step length, held to 0–1.
+- **Frames:** A = A₀ + s (A₁ − A₀) and B = B₀ + s (B₁ − B₀)
+  (`AniMesh.dll:0x10008b30`).
+- **Weight:** w eases from the last step's q to this step's over the first
+  quarter: u = min(4s, 1), w = (1 − u) q₋₁ + u q.
+- **q** is 1, except on a state that is neither velocity-driven nor fixed in
+  length. There q = p + (1 − p) × `+0x1c`, where p = (speed − lo) ÷ D held to
+  0–1 (`0x100057a3`). lo is the smaller of the velocity box's largest |min| and
+  largest |max|. D is a box extent; that it is the box's span is a *guess*.
+- **Pose:** each node takes frame A's pose at w = 0, frame B's at w = 1, and a
+  blend between ([07-objects.md](07-objects.md#how-the-engine-plays-it--read)).
+
+So a walk plays one stride of animation per stride of ground covered, and the
+feet do not slide.
+
+**Which state comes next** (`0x100051c0`):
+
+- **Only an anchor plans** (bit 0; 593 of the 1,690 states). The states
+  between anchors play from the queue.
+- **An anchor that still applies** queues the path back to itself: a whole
+  cycle.
+- **Otherwise** it queues the path to the cheapest other anchor that applies,
+  and that anchor's use count `+0x94` goes down by one unless it is −1.
+- **The path** is the cheapest by Dijkstra (`0x100019d0`).
+  - The row is the destination: `table[to][from]` (*measured*: all 826
+    zero-cost edges join a state whose B ends where the next one's starts; read
+    the other way, none do).
+  - A cost of 1,000,000 or more is no edge.
+  - At load each cost is multiplied by one plus the largest gap between the two
+    states' boxes (`0x10001790`).
+
+**The hero** (*measured*, `r_h_02` against `R_H_02.msh`):
+
+- **Standing** is state 0: frame 2, 50 ms steps, |vy| ≤ 2 m/s.
+- **Starting to walk** plays frames 65→66 or 3→4 in two 125 ms halves (states
+  1–2 into the cycle at 9, or 5–6 into it at 33).
+- **The walk cycle** is frames 5→13, in third-of-a-frame steps (states 33–44,
+  then 9–20). Backward plays the same frames reversed. The walk box is vy 2 to
+  10.
+- **The run cycle** is frames 18→34, in steps of 4/3 frame (states 73–96). It
+  is entered through half-frame transitions, q 0.6, that blend toward pair A,
+  frame 2. The run box is vy 6 to 14.
+- **Strides:** the body node moves 0.08–0.14 a walk step and 0.46–0.49 a run
+  step, and all 72 velocity-driven states stride the way their box runs. A walk
+  cycle covers 2.445 and a run cycle 5.674.
+- **So** a walk cycle at 5 m/s takes 0.49 s, and a run cycle at the hero's
+  14 m/s takes 0.405 s (*derived*).
 
 ## The engine factor is the state's — *read*, and *measured*
 
@@ -75,7 +168,8 @@ So **the hero on foot spends no energy walking**, and neither do most animals.
 
 ## Speed is a target approached at a fixed acceleration — *read*
 
-Each tick (`0x10005370`, dt = elapsed ms × 0.001, held to 0.01–5 s) the
+Each state step (`0x10005370`, dt = the step's length, held to 0.01–5 s:
+[Playing a state](#playing-a-state--read-and-measured)) the
 velocity integrator (`0x100153c0`) moves each axis of the velocity toward
 *command × live top speed* by at most *live acceleration × dt*, stops at the
 target, and clamps the result to the live top speed (`0x10016810`). The
@@ -433,6 +527,10 @@ asks for the live top speed (IControl 145) and compares it with 1
   (`CBuilding::GetFirstIntersectedFace`) is a *guess* from the names.
 - What action 11 does; what register values 6 and 10 select in `IWorld` slot
   10; the sign of the liquid-surface gap.
+- The exact divisor D in a blended state's weight (`0x100057a3`), and what
+  state bit `0x40000` changes in the integrators.
+- Whether the step velocity a state sets (`+0x200`, body `+0x4c`) replaces the
+  integrated velocity `+0x1c8` the boxes are tested against.
 - Where G would ever differ from 1: no shipped material sets it
   ([Ground and collision](#ground-and-collision--read-and-measured)).
 - How the strafe angle's turn (`0x10014cf0`) is split between the hull and the

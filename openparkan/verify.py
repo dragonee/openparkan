@@ -4490,6 +4490,172 @@ def check_ground(check, game: Path) -> None:
           f"mode 3 (Control.dll:0x10015879).  Control: the hero, r_h_02, is mode 2")
 
 
+#: The component record's item step factor, which a door's or pod's step time
+#: divides by (``Control.dll:0x10022120``); and the step an item's progress
+#: takes (``0x10020900``).
+ITEM_FACTOR_AT = 0x24
+ITEM_STEP = 0.45
+
+
+def check_playback(check, game: Path) -> None:
+    """How a controller plays: frame pairs, strides, the table, channels, item time."""
+    names = frozenset(p.name.lower() for p in all_archives(game))
+    bases = NResArchive.open(game / "bases.rlb")
+    hero = control.parse(bases.read_name("r_h_02.ctl"), names)
+    body = objmesh.parse(bases.read_name("R_H_02.msh"), "R_H_02.msh")
+
+    frames = body.frame_count
+    inside = sum(all(0 <= f < frames for f in (*s.pair_a, *s.pair_b)) for s in hero.states)
+    boxes = sum(all(0 <= f < frames for f in (*s.velocity[0][:2], *s.velocity[1][:2]))
+                for s in hero.states)
+    check("r_h_02: every state names two frame pairs inside the hero mesh's frames",
+          len(hero.states) == 105 and inside == 105 and boxes < 50,
+          f"{inside} of {len(hero.states)} states' pairs A (+0x0c) and B (+0x14) lie in "
+          f"the {frames} frames of R_H_02.msh; control: {boxes} velocity boxes (+0x24) do")
+
+    walk = run = 0.0
+    driven = along = 0
+    for s in hero.states:
+        start, end = (body.pose_at(0, f)[0] for f in s.pair_b)
+        d = [b - a for a, b in zip(start, end, strict=True)]
+        if not s.by_velocity:
+            continue
+        driven += 1
+        vy = s.velocity[0][1]
+        along += (d[1] > 0) == (vy > 0) and abs(d[1]) > abs(d[0])
+        if vy > 0 and 5 <= min(s.pair_b) and max(s.pair_b) <= 13:
+            walk += math.hypot(*d)
+        if vy > 0 and 18 <= min(s.pair_b) and max(s.pair_b) <= 34:
+            run += math.hypot(*d)
+    check("r_h_02: a walk cycle covers 2.445 and a run cycle 5.674, the way the boxes run",
+          driven == 72 and along == driven and abs(walk - 2.445) < 0.01
+          and abs(run - 5.674) < 0.01,
+          f"{along} of {driven} velocity-driven states move the body node along +y "
+          f"where their box's vy is positive and -y where it is negative; walk frames "
+          f"5-13 move it {walk:.3f}, run frames 18-34 {run:.3f}.  A step lasts "
+          f"stride / speed (Control.dll:0x100057b3), so a walk cycle at 5 m/s takes "
+          f"{walk / 5:.2f} s and a run cycle at 14 m/s {run / 14:.3f} s")
+
+    joined = backwards = edges = anchors = states = 0
+    fixed: Counter[str] = Counter()
+    for path in all_archives(game):
+        archive = NResArchive.open(path)
+        for entry in archive:
+            if not entry.tag.upper().startswith("CTL"):
+                continue
+            try:
+                c = control.parse(archive.read(entry), names)
+            except control.ControlFormatError:
+                continue
+            n = len(c.states)
+            states += n
+            anchors += sum(s.anchor for s in c.states)
+            fixed[path.name.lower()] += sum(bool(s.mode & control.STATE_FIXED)
+                                            for s in c.states)
+            for to in range(n):
+                for frm in range(n):
+                    if frm == to or c.cost(to, frm) != 0:
+                        continue
+                    edges += 1
+                    joined += c.states[frm].pair_b[1] == c.states[to].pair_b[0]
+                    backwards += c.states[to].pair_b[1] == c.states[frm].pair_b[0]
+    check(".ctl: the transition table's row is the destination",
+          edges and joined == edges and backwards == 0,
+          f"on {joined} of {edges} zero-cost edges table[to][from] joins a state whose "
+          f"pair B ends on the frame the next one's starts; control: read the other "
+          f"way, {backwards} do.  {anchors} of the {states} states are anchors the "
+          f"planner chooses among (Control.dll:0x100051c0)")
+    check(".ctl: the fixed, motionless step 0x100000 is the buildings'",
+          fixed["fortif.rlb"] == 420 and sum(fixed.values()) == 421,
+          f"{dict(+fixed)}")
+
+    library = objects.ObjectLibrary(game / "objects.rlb")
+    opened: dict[str, NResArchive] = {}
+
+    def read(ref):
+        key = ref.library.lower()
+        if key not in opened:
+            opened[key] = NResArchive.open(game / key)
+        return opened[key].read_name(ref.member)
+
+    def moves(m, node, first, last):
+        if not 0 <= node < len(m.nodes) or not m.nodes[node].is_animated:
+            return False
+        base = m.pose_at(node, first)
+        for f in range(int(first) + 1, int(last) + 1):
+            t, q = m.pose_at(node, f)
+            if math.dist(base[0], t) > 1e-4 or 1 - abs(sum(
+                    x * y for x, y in zip(base[1], q, strict=True))) > 1e-6:
+                return True
+        return False
+
+    seen = set()
+    total = in_range = spans = hit = shifted = as_point = 0
+    for record in library.records.values():
+        ref, msh = record.slot_with_suffix("ctl"), record.mesh
+        if not ref or not msh or (ref.library.lower(), ref.member.lower()) in seen:
+            continue
+        seen.add((ref.library.lower(), ref.member.lower()))
+        try:
+            c = control.parse(read(ref), names)
+            m = objmesh.parse(read(msh), msh.member)
+        except (KeyError, control.ControlFormatError):
+            continue
+        for ch in c.channels:
+            total += 1
+            in_range += 0 <= ch.node < len(m.nodes)
+            if ch.last > ch.first >= 0 and ch.last < m.frame_count:
+                spans += 1
+                hit += moves(m, ch.node, ch.first, ch.last)
+                shifted += moves(m, ch.node + 1, ch.first, ch.last)
+                as_point += moves(m, ch.point, ch.first, ch.last)
+    check(".ctl: a channel's +0 is the mesh node its frames move",
+          total and in_range == total and hit >= spans - 10
+          and 3 * shifted < hit and 3 * as_point < hit,
+          f"+0 names a node of the object's mesh on {in_range} of {total} channels, and "
+          f"on {hit} of the {spans} that span frames those frames move it; controls: "
+          f"the next node moves on {shifted}, +20 read as a node on {as_point}")
+
+    turrets = NResArchive.open(game / "turrets.rlb")
+    tur = control.parse(turrets.read_name("o_tur_ht_02.ctl"), names)
+    tm = objmesh.parse(turrets.read_name("o_tur_ha_02.msh"), "o_tur_ha_02.msh")
+    named = [(tm.nodes[ch.node].name, ch.first, ch.last, ch.flags) for ch in tur.channels[:4]]
+    check("o_tur_ht_02: the hero turret's channels animate its eye, yaw, pitch and barrel",
+          named == [("CP_m1o1", 0, 0, 4), ("Turn_m1o1", 49, 53, 3), ("GP_m1o1", 55, 57, 0),
+                    ("Gun02_m1o1", 58, 60, 0)],
+          f"{named}: yaw wraps and inverts (3), the eye is not driven (4)")
+
+    fortif = NResArchive.open(game / "fortif.rlb")
+    factors: Counter[tuple[int, float]] = Counter()
+    pods: dict[str, float] = {}
+    for entry in fortif:
+        if not entry.tag.upper().startswith("CTL"):
+            continue
+        blob = fortif.read(entry)
+        c = control.parse(blob, names)
+        rates = []
+        for comp in c.components:
+            if comp.type_id not in (control.DOOR_TYPE, control.COMPUTER_TYPE):
+                continue
+            factor = struct.unpack_from("<f", blob, comp.offset + ITEM_FACTOR_AT)[0]
+            factors[(comp.flags, factor)] += 1
+            if comp.type_id == control.COMPUTER_TYPE:
+                rates.append(min(c.channels[k].rate for k in comp.entries))
+        if rates:
+            pods[entry.name.lower()] = rates[0]
+    by_time = Counter(round(1 / r, 2) for r in pods.values())
+    slowest = sorted(n for n, r in pods.items() if round(1 / r, 2) == 5.0)
+    check("fortif.rlb: a pod opens in 1 / rate seconds, 1.43 to 5 s, and captures at 0.9 of it",
+          set(factors) == {(0, 1.0)} and len(pods) == 21 and min(by_time) == 1.43
+          and max(by_time) == 5.0 and all(ITEM_STEP / r >= 0.1 for r in pods.values()),
+          f"all {sum(factors.values())} doors and pods carry flags 0 and step factor 1; "
+          f"a building's first pod opens in (s: buildings) {dict(sorted(by_time.items()))}; "
+          f"5 s on {', '.join(slowest)}.  Three 0.45 steps, each "
+          f"1000 |dv| / (factor x rate) ms (Control.dll:0x10022120); the state word "
+          f"clears on the third, at 0.9 / rate.  Control: no step is under the 100 ms "
+          f"idle tick")
+
+
 def check_sensors(check, game: Path) -> None:
     """.ctl: radars and detect shields, and where the assemblies put them."""
     names = frozenset(p.name.lower() for p in all_archives(game))
@@ -8273,7 +8439,8 @@ def run(game: Path) -> int:
         check_minimap_agreement, check_arealmap,
         check_grid, check_missions, check_objects, check_poses, check_lod, check_damage,
         check_effects, check_footprints, check_rsli, check_control, check_efficiency,
-        check_motion, check_ground, check_sensors, check_hit_test, check_combat, check_ownership,
+        check_motion, check_playback, check_ground, check_sensors, check_hit_test,
+        check_combat, check_ownership,
         check_capture, check_repair, check_chassis, check_weapons,
         check_turrets, check_packages, check_builder,
         check_units, check_loading, check_search, check_construction,

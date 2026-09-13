@@ -587,6 +587,34 @@ Nine of the 34 rigs move their root more than a unit; `R_H_02`'s lunges 5.7
 forward and comes back to zero, so the loop closes. A few of the creatures'
 do not, and those snap at the wrap.
 
+#### How the engine plays it — *read*
+
+`AniMesh.dll` poses a node at a fractional frame f (`0x10012880`):
+
+- **The key** is the run's entry at round(f − 0.5). Past the run, on a node
+  that is not animated, or at or beyond the node's fallback key, the fallback
+  key is used.
+- **Between keys** it takes that key or the next one in stream 8 when f equals
+  its time. Otherwise it interpolates between them by time: a lerp of the
+  translation and a slerp of the rotation.
+
+A controller hands the mesh **two frames and a weight**:
+
+- **The frames:** frame A and frame B, each a lerp across its state's pair.
+- **The weight** w (`0x10012560`): frame A alone at w = 0 or when B is
+  negative, frame B alone at w = 1 or when A is negative, and a slerp and lerp
+  between the two otherwise, the short way round.
+
+**A node can have its own segment.**
+
+- **Where it comes from:** a controller channel gives its node one
+  (`0x10005500` bit 3).
+- **What it holds:** frames A = −1 and B = the channel's first and last, at
+  weight 1.
+- **How it plays:** the node plays first + v × (last − first) for the
+  channel's value v, whatever state the body is in
+  ([13-control.md](13-control.md)).
+
 `ObjectMesh.track(node)` returns the key per frame; `animated` says whether
 there is anything to play.
 
