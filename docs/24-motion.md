@@ -79,8 +79,11 @@ Each tick (`0x10005370`, dt = elapsed ms × 0.001, held to 0.01–5 s) the
 velocity integrator (`0x100153c0`) moves each axis of the velocity toward
 *command × live top speed* by at most *live acceleration × dt*, stops at the
 target, and clamps the result to the live top speed (`0x10016810`). The
-command is the body's `+0x08` triple — what writes it (`0x10014610`, from the
-state and the input) is not read.
+command is the body's `+0x08` triple, `IControl` `+0x1bc`, and `SetTangAccel`
+(`0x100043d0`) writes it — from the input table
+([From input to motion](#from-input-to-motion--read-and-measured)) or the AI.
+`0x10014610` does not write it: it clamps the velocity and turns it into the
+world frame.
 
 - **Triple 1 (+20) is the acceleration**, and the live copy is **twice** the
   authored value (`0x1000fe26`).
@@ -125,6 +128,57 @@ What follows from it:
   authored top speed, and turns that much slower — *derived*.
 - **Load halves top speed at most**: a machine carrying its full payload runs
   at half speed on one healthy engine.
+
+## From input to motion — *read*, and *measured*
+
+**Walking.** `W` sends `MCMD_WALK_F` 1 and `S` sends `MCMD_WALK_B` −1.
+
+- Both set the command's y to ±1, so the hero walks at the full live top
+  speed: 14 m/s, `r_h_02` triple 3 (*measured*).
+- Release sends 0.
+- `World3D.dll` tracks what is held in flags at row `+0x20`/`+0x24`, and in
+  global `0x10795244`, "walking".
+
+**Strafing** is `A`/`D`, `MCMD_LEFT`/`RIGHT`. It is not the command's x axis:
+
+- The command's y goes to ±1, with the sign of the current direction.
+- `SetStrafeAngle` gets ±π/2, or ±π/4 while already walking (globals
+  `0x1079523c` left, `0x10795240` right).
+- On release the angle returns to 0, and the command to 0 if nothing else is
+  held.
+
+The body applies the *change* in strafe angle as a turn of its own
+(`0x10014cf0`: previous at `+0x17c`, delta at `+0x188`). How that turn divides
+between the legs and the turret was not read; that the legs turn and the
+turret holds its heading (see `0x100059a0` in
+[30-turrets.md](30-turrets.md)) is a *guess*.
+
+**Turning is a pending turn.** The angle triple `+0x1e0` (body `+0x2c`) holds a
+rotation not yet made. Each tick the attitude integrator:
+
+- reads it as (v − 0.5) × 2π radians per axis (`0x1001480f`);
+- turns the body by at most the live turn rate × dt, scaling all three axes by
+  the same factor so the largest one fits;
+- adds the step back into the triple and wraps it (`0x100149d2`), so the
+  triple returns to 0.5 when the turn is done.
+
+So the mouse queues a turn and the hull pays it out. On the hero:
+
+- mouse X is 0.15 × 0.006 × 2π = **0.00565 rad (0.32°) a filtered count**;
+- the turn rate is **25.12 rad/s** about z (`r_h_02` triple 4, *measured*);
+- so the hull keeps up with any hand.
+
+The two other axes have 1.57 rad/s, and triple 6 is (0, 0, 6.28): the hero
+turns only about z (*measured*). That triple 6 is the per-axis limit that
+forbids pitch and roll is a *guess*; triple 6 stays open below.
+
+**The keypad cruise** — *measured* rows, *unknown* effect:
+
+- `*` sends `MCMD_FORWARD` 1 and `/` sends 0.
+- `+` and `−` send ±1 with the table's ramp 0.05 over 1000.
+- They reach the same handler as walking (`0x100101b2`). What the ramp does
+  there was not read. That a held `+` adds 0.05 a second to the command is a
+  *guess*.
 
 ## Running gear: legs, wheels and tracks by side — *read*, and *measured*
 
@@ -381,8 +435,8 @@ asks for the live top speed (IControl 145) and compares it with 1
   10; the sign of the liquid-surface gap.
 - Where G would ever differ from 1: no shipped material sets it
   ([Ground and collision](#ground-and-collision--read-and-measured)).
-- What writes the command triple the velocity integrator multiplies by top
-  speed (`0x10014610`).
+- How the strafe angle's turn (`0x10014cf0`) is split between the hull and the
+  turret, and what `MCMD_FORWARD`'s ramp does.
 - Which node range the payload sum counts as the chassis.
 - Triples 5 (+68) and 6 (+80): 6 clamps an attitude the spin integrator
   drives from a per-state selector (state +0x08), 5 is multiplied into it;

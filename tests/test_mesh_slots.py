@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import struct
+
 from openparkan import mesh
 
 N = mesh.NO_SLOT
@@ -58,3 +60,10 @@ def test_a_hull_has_no_slot_to_hit():
     n = node([N, N, N, N, 3], flags=mesh.SUBOBJECT_COLLISION, name="CP_m1o1")
     assert n.hit_slot() is None
     assert n.collision_slot() == 3
+
+
+def test_a_control_point_names_its_node_in_its_first_triple():
+    as_float = struct.unpack("<f", struct.pack("<i", 35))[0]
+    point = mesh.ControlPoint("CameraCenter", (0.0, as_float, as_float),
+                              (0.0, 0.0, 0.0), (0.0, 1.0, 0.0))
+    assert point.nodes == (35, 35)

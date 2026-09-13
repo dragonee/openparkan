@@ -33,7 +33,7 @@ def test_the_parameter_block_reads_as_triples(ctl):
     assert c.triples[control.TRIPLE_TURN] == pytest.approx((control.FULL_TURN,) * 3)
 
 
-def test_sections_one_and_two_are_stepped_over(ctl, reference):
+def test_sections_one_and_two_do_not_hide_section_five(ctl, reference):
     blob = ctl(counts=(2, 3, 4, 0, 1),
                groups=[[reference("effects.rlb", "dust_03")]])
     c = control.parse(blob)
@@ -221,3 +221,14 @@ def test_an_unset_block_names_no_group(ctl):
     c = control.parse(ctl())
     assert c.load_group == control.NO_GROUP
     assert c.surface_groups == (control.NO_GROUP,) * control.SURFACES
+
+
+def test_section_two_reads_as_channels(ctl):
+    blob = ctl(counts=(0, 0, 2, 0, 0), points=(1, -1),
+               channels=[(49.0, 53.0, 0.5, 100.0, 6.28, 3),
+                         (55.0, 57.0, 0.25, 0.75, 1.92, 0)])
+    yaw, pitch = control.parse(blob).channels
+    assert (yaw.first, yaw.last, yaw.initial, yaw.point, yaw.rate, yaw.flags) == (
+        49.0, 53.0, 0.5, 1, 100.0, 3)
+    assert pitch.point == -1
+    assert abs(pitch.span - 1.92) < 1e-6

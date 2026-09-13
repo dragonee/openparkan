@@ -5578,3 +5578,222 @@ kind = "site"
 name = "hit test: node slot record with variant -1 (current) and lod 0, so a hull is never struck"
 doc = "docs/26-damage.md"
 read = true
+
+# --- the player's controls, turret aim and the eye, ../docs/14, 24, 30 ---
+[[entry]]
+module = "World3D.dll"
+at = "0x1000fb40"
+kind = "function"
+name = ".tbl row handler: MCMD dispatch; ANGLE_X/Y/Z edit component 0/1/2 of the target's normalised triple, then IControl slot 18 (class 0) or interface 0x202 slot 14 (class, index)"
+doc = "docs/14-controls.md"
+read = true
+
+[[entry]]
+module = "World3D.dll"
+at = "0x100100b7"
+kind = "site"
+name = "MCMD_ANGLE_Z: mouse (0x1fe/0x1ff) and joystick (0x24e-0x253) rows add to the current value, other rows set it; MAN_WRAP wraps into [0,1), MAN_NOTWRAP clamps"
+doc = "docs/14-controls.md"
+read = true
+
+[[entry]]
+module = "World3D.dll"
+at = "0x10010a50"
+kind = "function"
+name = "axis delta of a row: mouse = clamp(filtered counts x 0.006, +-1) x invert sign x magnitude; joystick = counts x invert x joy sensitivity x 0.01 x magnitude"
+doc = "docs/14-controls.md"
+read = true
+
+[[entry]]
+module = "World3D.dll"
+at = "0x1000f24b"
+kind = "site"
+name = "mouse filter: m = counts x sensitivity x 0.95 + 0.05 x previous m, Y also x 1.2; zeroed when the mouse stops"
+doc = "docs/14-controls.md"
+read = true
+
+[[entry]]
+module = "World3D.dll"
+at = "0x10010e10"
+kind = "function"
+name = "SetInverseMotion: four axis signs (0x100234ec mouse X, 0x100234f0 mouse Y, 0x100234f4, 0x100234f8), -1 where the argument is set"
+doc = "docs/14-controls.md"
+read = true
+
+[[entry]]
+module = "World3D.dll"
+at = "0x100234ec"
+kind = "datum"
+name = "mouse X invert sign, 1.0 or -1.0 (not a sensitivity)"
+doc = "docs/14-controls.md"
+read = true
+
+[[entry]]
+module = "World3D.dll"
+at = "0x100234d0"
+kind = "datum"
+name = "mouse sensitivity multiplier on raw counts, 1.0 by default"
+doc = "docs/14-controls.md"
+read = true
+
+[[entry]]
+module = "World3D.dll"
+at = "0x1000aa1d"
+kind = "site"
+name = "game settings setter: writes the mouse sensitivity float 0x100234d0"
+doc = "docs/14-controls.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1002a64d"
+kind = "site"
+name = "Iron_3D.ini MOUSE_SENS read as an integer x 0.01 into settings +0x724"
+doc = "docs/14-controls.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x100043d0"
+kind = "function"
+name = "IControl SetTangAccel: the command triple +0x1bc (motion body +0x08)"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10004500"
+kind = "function"
+name = "IControl SetNormAngle: the pending-turn triple +0x1e0 (body +0x2c), sets +0x35d"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10004560"
+kind = "function"
+name = "IControl SetStrafeAngle: the strafe angle +0x1f4"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10008010"
+kind = "function"
+name = "interface 0x202 QueryInterface thunk: the interface sits at object +8"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002eb70"
+kind = "function"
+name = "interface 0x202 slot 14, set a component's angles: turret triple +0x9c (x change also into object +0x1ec), camera triple +0x94"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001480f"
+kind = "site"
+name = "attitude integrator: pending turn = (triple - 0.5) x 2pi per axis, limited by live turn rate x dt"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x100149d2"
+kind = "site"
+name = "attitude integrator: the step taken is added back into the triple and wrapped, so it returns to 0.5"
+doc = "docs/24-motion.md"
+read = true
+
+# --- aiming and the camera, ../docs/30-turrets.md ---
+
+[[entry]]
+module = "Control.dll"
+at = "0x10027170"
+kind = "function"
+name = "turret slot 1: aim triple +0x9c/+0xa0 from the initial value (+0xc) of its two channels' section-2 records; upright mounting stores 1 - v"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10027765"
+kind = "site"
+name = "turret handler: dt = (owner +0xdc - +0xd8) x 0.001 s"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10027779"
+kind = "site"
+name = "turret handler: steps channel 0 toward aim x and channel 1 toward aim y"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x100289f0"
+kind = "function"
+name = "channel step: move a channel's value toward its target by at most section-2 rate x dt, the short way round on a wrapping channel"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x100059a0"
+kind = "function"
+name = "control takt: body update, then turret aim; with +0x65c set and no pending turn, turret yaw = +0x1ec - (1 - s) x +0x1f0"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x100234c0"
+kind = "function"
+name = "camera slot 11: eye from its channel's control points (position and direction), shake offset x 0.02, free look, set on the view"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10023788"
+kind = "site"
+name = "camera free look (mode 0x200): pitch (0.5 - y) x pi about the side axis, yaw (0.5 - x) x 2pi about the up axis, roll 0"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x100415a1"
+kind = "site"
+name = "camera: +0x98 = tan(field of view +0x58 x 0.5)"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10077982"
+kind = "site"
+name = "camera viewport: +0x94 = height / width"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1007f190"
+kind = "function"
+name = "camera viewport set: centre, 2/width, and 2/height x (height/width) -- the field of view spans the width"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1008c1d0"
+kind = "function"
+name = "camera: screen point to view ray, x by tan(fov/2), y by tan(fov/2) x height/width"
+doc = "docs/30-turrets.md"
+read = true

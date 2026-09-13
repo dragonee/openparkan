@@ -222,6 +222,14 @@ The two slots hold different classes: `+0x5c8` is a 0xf4-byte object whose
 constructor lays out channels of stride 0x1c defaulting to 0.5, `+0x5cc` a
 0x120-byte one with two arrays of six floats defaulting to 1.0 and 0.0.
 
+**That match is by count, and the rows do not travel this way** (*read*,
+[below](#from-a-row-to-a-command--read-and-measured)). A `.tbl` row is
+interpreted in `World3D.dll` (`0x1000fb40`) and reaches `Control.dll` through
+`IControl`'s setters and the component interface at object `+8`, not as a
+message numbered like the command. So which messages the 16-way table takes is
+still open; that its two slots are the factory's single turret (`+0x5c8`) and
+fight shield (`+0x5cc`) fits a component dispatch, not `MCMD_` (*guess*).
+
 **The three commands the shipped tables use that fall outside 1..16 are
 `MCMD_WALK_F` (19), `MCMD_WALK_B` (20) and `MCMD_LOCK` (21)** — 14 of the 116
 rows. The movement controller cannot be what handles them, so walking a
@@ -300,6 +308,50 @@ schemes, and `hero.man`, `table_1.man` and `table_2.man` sit beside them by
 name. The names pair them; the contents do not settle it, since all three
 tables draw on the same command families and `hero.tbl`'s named actions match
 all three `.man` files equally well (17 each).
+
+## From a row to a command — *read*, and *measured*
+
+`World3D.dll`'s row handler (`0x1000fb40`) turns a row into one of three calls:
+
+| row | call | what it holds |
+|---|---|---|
+| `MCMD_WALK_F` / `WALK_B` / `FORWARD`, class 0 | `IControl` `SetTangAccel` (`Control.dll:0x100043d0`) | the command triple `+0x1bc`, y forward, in top speeds |
+| `MCMD_LEFT` / `RIGHT`, class 0 | `SetTangAccel` and `SetStrafeAngle` (`0x10004560`, `+0x1f4`) | walk, and the strafe angle |
+| `MCMD_ANGLE_X/Y/Z`, class 0 | `SetNormAngle` (`0x10004500`) | the unit's normalised angle triple `+0x1e0` |
+| `MCMD_ANGLE_X/Y/Z`, class *c*, index *i* | the component interface (object `+8`, slot 14, `0x1002eb70`) | that component's triple: a turret's `+0x9c`, a camera's `+0x94` |
+
+**An angle row edits one component of a triple.** `ANGLE_X`, `_Y` and `_Z` are
+components 0, 1 and 2 (`0x1000fee1`, `0x1000ffcc`, `0x100100b7`). The handler
+first reads the current triple.
+
+- **Mouse and joystick rows add** to the component (scan codes `0x1fe`,
+  `0x1ff` and `0x24e`–`0x253`).
+- **Every other row sets it.** So a key row's 0.5 is a position, not a step.
+- The state field then applies:
+  - `MAN_WRAP` wraps the value into [0, 1);
+  - `MAN_NOTWRAP` clamps it to [0, 1].
+
+**What a mouse row adds** (`0x10010a50`, filter at `0x1000f24b`):
+
+    m  = counts × sensitivity × 0.95 + 0.05 × m_previous      (Y also × 1.2)
+    Δv = clamp(m × 0.006, −1, 1) × invert × magnitude
+
+- `sensitivity` (`0x100234d0`) is `Iron_3D.ini`'s `MOUSE_SENS` × 0.01. The ini
+  read is at `iron3d.dll:0x1002a64d`. That it is the same value that reaches
+  `World3D`'s setter (`0x1000aa1d`) is a *guess*: the handoff was not traced.
+- `invert` is ±1, from `SetInverseMotion` (`0x10010e10`). The two globals
+  earlier read as sensitivities are these signs.
+- A joystick axis adds counts × invert × `JOY_SENS` × 0.01 × magnitude.
+
+**The hero's rows** (*measured*, `hero.tbl`):
+
+- **Mouse X** turns the unit: `ANGLE_Z`, 0.15, wrapping, class 0.
+- **Mouse Y** tilts the turret: `CICLS_TURRET` index 1, `ANGLE_Y`, 0.25,
+  clamped.
+- **The machine tables** `m1.tbl` and `m2.tbl` send mouse X to the turret
+  instead (`ANGLE_X`).
+- **The table is the chassis's.** The hero chassis record `r_h_02` names
+  `hero.tbl`; `r_l_06` names `m2.tbl`.
 
 ## `BuildDat.lst`
 

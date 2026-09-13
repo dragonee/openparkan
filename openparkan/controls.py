@@ -542,8 +542,11 @@ class Action:
 
     ``value`` is the magnitude the command carries -- 1.0 as a key goes down
     and 0.0 as it comes up for a movement, negative for the opposite
-    direction, and a fraction for a rate.  ``ramp`` and ``ramp_time`` are set
-    on six rows only, the speed-step keys among them.
+    direction.  On an ``MCMD_ANGLE_*`` row a mouse or joystick axis **adds**
+    ``value`` times its filtered counts to a normalised angle, and any other
+    key **sets** the angle to ``value``, 0.5 being the centre
+    (``World3D.dll:0x1000fb40``).  ``ramp`` and ``ramp_time`` are set on six
+    rows only, the speed-step keys among them.
     """
 
     #: ``KEY`` or ``MOUSE``.

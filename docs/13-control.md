@@ -249,7 +249,7 @@ parameter block, and then walks the body. That walk is the layout:
 | Order | Governed by | Size |
 |---|---|---|
 | section 1 | `counts[0]` = A, `counts[1]` = B | A states of `156 + 16*B`, then an `A*A` table of floats |
-| section 2 | `counts[2]` = C | C records of 36 bytes; +20 a node, where a gun's barrels sit |
+| section 2 | `counts[2]` = C | C records of 36 bytes: **channels** — frames, initial value, a control point at +20, rate, span ([30-turrets.md](30-turrets.md#aiming-and-the-camera--read-and-measured)) |
 | section 4 | `counts[3]` = D | D component records, each **type-dispatched** |
 | the block | — | a fixed **84 bytes**, copied into the object: 21 section-5 group indices ([24-motion.md](24-motion.md#the-eleven-surface-groups-switch-the-dust--measured)) |
 | section 5 | `counts[4]` = E | E groups: an int32 `n`, then `n` records of 100 bytes |
@@ -358,7 +358,7 @@ records, carried only by the four archives that hold things which shoot.
 
 The meaning of the fields rather than their extent: what most classes'
 sixteen values mean, a component's 4-byte entries, section 1's conditions and
-transition table, section 2's record contents, and the nine ints of a
+transition table, and the nine ints of a
 section-5 record. The 84-byte block is 21 section-5 group indices — entry 0
 runs at load, entries 10–20 by the ground's surface id — in
 [24-motion.md](24-motion.md#the-eleven-surface-groups-switch-the-dust--measured). What section 1's states, the motion

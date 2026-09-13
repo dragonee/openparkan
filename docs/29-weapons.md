@@ -119,7 +119,7 @@ slot-1 method (`0x100296f0`).
 Seven lasers print a number instead of `damage` in `objects.dlb`. Each is
 exactly **the beams it fires at once × one round** — 1350 = 3 × 450 on the
 Large Red Laser, 840 = 2 × 420 on the Medium Dbl R.Las — counting the barrels
-whose section-2 record names a node (*measured*).
+whose section-2 record names a control point (*measured*).
 
 ## The rounds — *measured*, and *read*
 
@@ -238,7 +238,7 @@ The enemy variants and the huge guns:
 - Values 8–10, which the fire routine reads (`0x10029d3a`, `0x10029e50`) and
   every shipped gun leaves at 0.
 - What marks a barrel to be skipped (bit 0x40 of its attachment record,
-  `0x10029ff5`); the node word of section 2 matches it on the seven lasers.
+  `0x10029ff5`); the control-point word of section 2 matches it on the seven lasers.
 - A seeker's value 2, and the scale on the steering command (`0x100430d4`, set at
   `0x1000d9fc`).
 - How the AI picks a weapon when a unit has several.

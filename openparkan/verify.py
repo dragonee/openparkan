@@ -6837,6 +6837,217 @@ def check_controls(check, game: Path) -> None:
           f"names an iron3d.dll command")
 
 
+#: The hero's turret, its mesh, and the node its eye and sight sit on.
+HERO_TURRET = "o_tur_ht_02"
+HERO_TURRET_MESH = "o_tur_ha_02.msh"
+EYE_NODE, SIGHT_NODE = 35, 34
+
+
+def _rows(rows, modifier: str, key: str, pressed: bool = True):
+    return [r for r in rows if r.modifier == modifier and r.key == key and r.pressed == pressed]
+
+
+def check_player_input(check, game: Path) -> None:
+    """The hero's rows: what walks, what turns, what looks."""
+    hero = controls.table(game / "hero.tbl")
+    machines = [controls.table(game / name) for name in ("m1.tbl", "m2.tbl")]
+
+    mx = _rows(hero, "SCAN_NULL", "SCAN_MOUSE_X")
+    my = _rows(hero, "SCAN_NULL", "SCAN_MOUSE_Y")
+    turret_x = [_rows(t, "SCAN_NULL", "SCAN_MOUSE_X") for t in machines]
+    check("hero.tbl: mouse X turns the hull and mouse Y tilts the turret",
+          len(mx) == 1 and mx[0].class_id == 0 and mx[0].command == "MCMD_ANGLE_Z"
+          and mx[0].value == 0.15 and mx[0].state == "MAN_WRAP"
+          and len(my) == 1 and my[0].target == "CICLS_TURRET" and my[0].index == 1
+          and my[0].command == "MCMD_ANGLE_Y" and my[0].value == 0.25
+          and my[0].state == "MAN_NOTWRAP"
+          and all(len(r) == 1 and r[0].target == "CICLS_TURRET"
+                  and r[0].command == "MCMD_ANGLE_X" for r in turret_x),
+          f"X: {mx[0].command} {mx[0].value} {mx[0].state} on the unit; Y: "
+          f"{my[0].target} index {my[0].index} {my[0].command} {my[0].value} "
+          f"{my[0].state}.  Control: m1.tbl and m2.tbl send mouse X to the turret")
+
+    walk = {(r.key, r.pressed): (r.command, r.value) for r in hero
+            if r.modifier == "SCAN_NULL" and r.key in ("SCAN_W", "SCAN_S", "SCAN_A", "SCAN_D")}
+    want = {("SCAN_W", True): ("MCMD_WALK_F", 1.0), ("SCAN_W", False): ("MCMD_WALK_F", 0.0),
+            ("SCAN_S", True): ("MCMD_WALK_B", -1.0), ("SCAN_S", False): ("MCMD_WALK_B", 0.0),
+            ("SCAN_A", True): ("MCMD_LEFT", 1.0), ("SCAN_A", False): ("MCMD_LEFT", 0.0),
+            ("SCAN_D", True): ("MCMD_RIGHT", 1.0), ("SCAN_D", False): ("MCMD_RIGHT", 0.0)}
+    check("hero.tbl: W and S walk at the full command, A and D strafe, a release sends 0",
+          walk == want, f"{len(walk)} rows: " + ", ".join(
+              f"{k[0][5:]}{'' if k[1] else ' up'} {c[5:]} {v:g}"
+              for k, (c, v) in sorted(walk.items())))
+
+    lx = _rows(hero, "SCAN_LSHIFT", "SCAN_MOUSE_X")
+    ly = _rows(hero, "SCAN_LSHIFT", "SCAN_MOUSE_Y")
+    centre = [r for r in hero if r.target == "CICLS_CAMERA"
+              and r.command in ("MCMD_ANGLE_X", "MCMD_ANGLE_Y")
+              and r.key in ("SCAN_LSHIFT", "SCAN_RMOUSE")]
+    check("hero.tbl: Shift looks around the camera, and letting go centres it",
+          len(lx) == 1 and lx[0].value == 0.1 and lx[0].state == "MAN_WRAP"
+          and len(ly) == 1 and ly[0].value == 0.15 and ly[0].state == "MAN_NOTWRAP"
+          and len(centre) == 4 and all(r.value == 0.5 for r in centre)
+          and {(r.key, r.pressed) for r in centre}
+          == {("SCAN_RMOUSE", True), ("SCAN_LSHIFT", False)},
+          f"Shift+X adds {lx[0].value} wrapping, Shift+Y {ly[0].value} clamped; "
+          f"{len(centre)} rows set the camera's angles to 0.5 on Shift up or Shift+RMB")
+
+    cruise = sorted((r.key, r.value, r.ramp, r.ramp_time) for r in hero
+                    if r.command == "MCMD_FORWARD")
+    check("hero.tbl: the keypad cruise is MCMD_FORWARD, two rows with a 0.05 ramp over 1000",
+          cruise == sorted([("SCAN_G_ASTERISK", 1.0, 0.0, 0), ("SCAN_G_PLUS", 1.0, 0.05, 1000),
+                            ("SCAN_G_SUB", -1.0, 0.05, 1000), ("SCAN_G_SLASH", 0.0, 0.0, 0)]),
+          f"{cruise}")
+
+    objs = NResArchive.open(game / "objects.rlb")
+    bases = NResArchive.open(game / "bases.rlb")
+    chassis = control.parse(bases.read_name("r_h_02.ctl"))
+    top, turn, limit = (chassis.triples[i] for i in (control.TRIPLE_TOP_SPEED,
+                                                      control.TRIPLE_TURN, 5))
+    record, other = objs.read_name("r_h_02"), objs.read_name("r_l_06")
+    check("objects.rlb: the hero chassis names hero.tbl; it walks 14 m/s and turns 25.12 rad/s",
+          b"hero.tbl" in record and b"m2.tbl" in other and b"hero.tbl" not in other
+          and top == (1.0, 14.0, 1.0) and abs(turn[2] - 25.12) < 1e-4
+          and limit[:2] == (0.0, 0.0),
+          f"r_h_02 top speed {top}, turn {tuple(round(x, 2) for x in turn)}, triple 6 "
+          f"{tuple(round(x, 2) for x in limit)}.  Control: r_l_06 names m2.tbl")
+
+
+def check_turret_channels(check, game: Path) -> None:
+    """A turret aims by two channels, and the hero's eye rides its sight."""
+    turrets = NResArchive.open(game / "turrets.rlb")
+    names = {e.name.lower() for e in turrets}
+    ctl = control.parse(turrets.read_name(HERO_TURRET + ".ctl"))
+    cpt = objmesh.parse_control_points(turrets.read_name(HERO_TURRET + ".cpt"))
+    points = [p.name for p in cpt]
+    turret = [c for c in ctl.components if c.type_id == control.TURRET_TYPE]
+    yaw, pitch = (ctl.channels[i] for i in turret[0].entries)
+    check("turrets.rlb: the hero's turret yaws over frames 49-53 and pitches 1.92 rad over 55-57",
+          len(turret) == 1 and turret[0].flags & control.MOUNT_UPRIGHT
+          and (yaw.first, yaw.last, yaw.initial, yaw.rate) == (49.0, 53.0, 0.5, 100.0)
+          and abs(yaw.span - 6.28) < 1e-4 and (pitch.first, pitch.last) == (55.0, 57.0)
+          and abs(pitch.initial - 0.2727) < 1e-3 and abs(pitch.span - 1.9199) < 1e-3
+          and pitch.rate == 0.75
+          and points[yaw.point] == "TurretDirect" and points[pitch.point] == "TargetDirect",
+          f"yaw: frames {yaw.first:g}-{yaw.last:g}, start {yaw.initial:g}, {yaw.rate:g}/s, "
+          f"span {yaw.span:.4f}, point {points[yaw.point]}; pitch: frames "
+          f"{pitch.first:g}-{pitch.last:g}, start {pitch.initial:.4f}, {pitch.rate:g}/s, "
+          f"span {pitch.span:.4f}, point {points[pitch.point]}")
+
+    shapes: Counter[tuple] = Counter()
+    total = named = guns = barrels_ok = cameras = paired = on_node = 0
+    for name in sorted(names):
+        stem = name[:-4]
+        if not name.endswith(".ctl") or stem + ".cpt" not in names:
+            continue
+        c = control.parse(turrets.read_name(name))
+        cp = objmesh.parse_control_points(turrets.read_name(stem + ".cpt"))
+        pts = [p.name for p in cp]
+        for comp in c.components:
+            if comp.type_id == control.TURRET_TYPE and len(comp.entries) == 2:
+                y, p = (c.channels[i] for i in comp.entries)
+                total += 1
+                named += pts[y.point] == "TurretDirect" and pts[p.point] == "TargetDirect"
+                shapes[(round(y.span, 2), round(p.span, 2), y.last - y.first,
+                        p.last - p.first, y.flags)] += 1
+            elif comp.type_id == control.GUN_TYPE:
+                for i in comp.entries:
+                    guns += 1
+                    point = c.channels[i].point
+                    barrels_ok += 0 <= point < len(pts) and pts[point] not in (
+                        "TurretCenter", "TurretDirect", "CameraCenter", "TargetDirect")
+            elif comp.type_id == control.CAMERA_TYPE and comp.entries:
+                cameras += 1
+                point = c.channels[comp.entries[0]].point
+                paired += (0 < point < len(pts) and pts[point] == "TargetDirect"
+                           and pts[point - 1] == "CameraCenter")
+                eye = next(q for q in cp if q.name == "CameraCenter")
+                on_node += eye.nodes[0] == comp.node
+    check("turrets.rlb: every turret's two channels point at TurretDirect and TargetDirect",
+          total and named == total,
+          f"{named}/{total}; (yaw span, pitch span, yaw frames, pitch frames, yaw flags): "
+          f"{dict(shapes)}")
+    check("turrets.rlb: a section-2 record names a control point, not a node",
+          guns and barrels_ok == guns and cameras and paired == cameras
+          and on_node < cameras,
+          f"{barrels_ok}/{guns} gun channels name one of the turret's barrel points; "
+          f"{paired}/{cameras} camera channels name TargetDirect with CameraCenter the "
+          f"point before it, where the camera component's own node is the eye's on "
+          f"only {on_node}")
+
+    m = objmesh.parse(turrets.read_name(HERO_TURRET_MESH), HERO_TURRET_MESH)
+
+    def world(node: int, frame: int) -> objmesh.Pose:
+        def local(k: int) -> objmesh.Pose:
+            track = m.track(k)
+            return m.keys[track[frame]].pose if track else m.local_pose(k)
+        pose, parent = local(node), m.nodes[node].parent
+        while parent != objmesh.NO_PARENT:
+            pose, parent = objmesh.compose(local(parent), pose), m.nodes[parent].parent
+        return pose
+
+    def elevation(frame: int) -> float:
+        x, y, z = objmesh.quaternion_rotate(world(SIGHT_NODE, frame)[1], (0.0, 1.0, 0.0))
+        return math.degrees(math.atan2(z, math.hypot(x, y)))
+
+    def heading(frame: int) -> float:
+        x, y, _ = objmesh.quaternion_rotate(world(1, frame)[1], (0.0, 1.0, 0.0))
+        return math.degrees(math.atan2(x, y))
+
+    lo, mid, hi = (elevation(f) for f in (55, 56, 57))
+    level = lo + pitch.initial * (hi - lo)
+    heads = [heading(f) for f in (49, 51, 53)]
+    check("o_tur_ha_02.msh: the pitch frames sweep the sight by the channel's span, from level",
+          abs(math.radians(hi - lo) - pitch.span) < 0.02 and abs(level) < 1.0 and lo < 0 < hi
+          and abs(heads[1]) < 1.0 and all(abs(abs(h) - 180) < 1.0 for h in heads[::2]),
+          f"GP_m1o1 looks {lo:.1f}, {mid:.1f}, {hi:.1f} degrees up on frames 55-57, "
+          f"{math.radians(hi - lo):.4f} rad against a span of {pitch.span:.4f}; at the "
+          f"start value it is {level:+.2f}.  Control: yaw frames 49/51/53 face "
+          f"{', '.join(f'{h:.0f}' for h in heads)} degrees, so 0.5 looks ahead")
+
+    eye, sight = (next(q for q in cpt if q.name == n) for n in ("CameraCenter", "TargetDirect"))
+    camera = [c for c in ctl.components if c.type_id == control.CAMERA_TYPE]
+    poses = {f: world(EYE_NODE, f) for f in (51, 55, 56, 57)}
+    at = poses[51][0]
+    still = all(max(abs(a - b) for a, b in zip(poses[f][0], at, strict=True)) < 1e-6
+                for f in (55, 56, 57))
+    check("o_tur_ha_02.msh: the eye is CP_m1o1, 0.88 over the turret root, and does not pitch",
+          len(camera) == 1 and eye.nodes == (EYE_NODE, EYE_NODE)
+          and sight.nodes == (SIGHT_NODE, SIGHT_NODE)
+          and m.nodes[EYE_NODE].name == "CP_m1o1" and m.nodes[SIGHT_NODE].name == "GP_m1o1"
+          and eye.position == (0.0, 0.0, 0.0) and sight.direction == (0.0, 1.0, 0.0)
+          and not m.track(EYE_NODE) and m.track(SIGHT_NODE)
+          and still and 0.8 < at[2] < 0.95,
+          f"CameraCenter sits at the origin of node {eye.nodes[0]} "
+          f"({m.nodes[eye.nodes[0]].name}), at {tuple(round(v, 3) for v in at)} in the "
+          f"turret's frame over every pitch frame; TargetDirect is +y on node "
+          f"{sight.nodes[0]} ({m.nodes[sight.nodes[0]].name}), which they tilt")
+
+    # A point's second float is an int32 node of its same-stem objmesh.
+    in_range = with_mesh = same = every = 0
+    for path in all_archives(game):
+        archive = NResArchive.open(path)
+        members = {e.name.lower() for e in archive}
+        for name in members:
+            if not name.endswith(".cpt"):
+                continue
+            cp = objmesh.parse_control_points(archive.read_name(name))
+            every += len(cp)
+            same += sum(p.nodes[0] == p.nodes[1] for p in cp)
+            if name[:-4] + ".msh" not in members:
+                continue
+            try:
+                model = objmesh.parse(archive.read_name(name[:-4] + ".msh"), name)
+            except Exception:
+                continue
+            with_mesh += len(cp)
+            in_range += sum(0 <= p.nodes[0] < len(model.nodes) for p in cp)
+    check("CTPT: a control point's first triple carries its node as an int32",
+          with_mesh and with_mesh - in_range <= 1 and same < every,
+          f"read as an int32, slot 1 names a node of the same-stem mesh on {in_range} of "
+          f"{with_mesh} points; slot 2 is the same number on {same} of {every}")
+
+
 def check_behaviour(check, game: Path) -> None:
     """The behaviour scripts: MISSIONS/SCRIPTS/*.scr."""
     paths = behaviour.scripts(game)
@@ -8066,7 +8277,7 @@ def run(game: Path) -> int:
         check_capture, check_repair, check_chassis, check_weapons,
         check_turrets, check_packages, check_builder,
         check_units, check_loading, check_search, check_construction,
-        check_controls,
+        check_controls, check_player_input, check_turret_channels,
         check_behaviour, check_research, check_descriptions, check_saves,
         check_vocabulary, check_resources, check_briefing, check_settings,
         check_research_streams, check_atmosphere_events,

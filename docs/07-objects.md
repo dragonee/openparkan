@@ -1060,6 +1060,13 @@ nine floats are.
 The reading is `(zero, position, vector)`, and the first triple is **exactly
 zero on 3432 of the 3599** points.
 
+**Where it is not zero, it is not floats.** Its second slot is an **int32: the
+node the point sits on** — a node of the same-stem mesh on 2984 of the 2985
+points that have one (*measured*, `ControlPoint.nodes`). The third slot holds
+the same number on 3338 of the 3599; where it differs — the wheels of `r_b_03`,
+many gun barrels — what the pair means is not established. On the hero turret
+`CameraCenter` names node 35 (`CP_m1o1`) and `TargetDirect` 34 (`GP_m1o1`).
+
 The third triple is a direction whose **length carries a magnitude**, which is
 what an earlier draft missed when it said `guns.rlb` and `parts.rlb` "store
 scalars such as `Width` in a vector slot". They do not. On a frame or an aim

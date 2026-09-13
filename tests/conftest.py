@@ -97,7 +97,7 @@ def build_state(flags: int = 0, velocity=((0.0,) * 3, (0.0,) * 3),
 
 
 def build_ctl(counts=(0, 0, 0, 0, 0), params=None, components=(), groups=(),
-              block=None, states=(), points=()) -> bytes:
+              block=None, states=(), points=(), channels=()) -> bytes:
     """A whole controller: frame, sections, the block, the reference groups."""
     a, b, c, _d, _e = counts
     out = bytearray(struct.pack("<5i", *counts))
@@ -109,7 +109,12 @@ def build_ctl(counts=(0, 0, 0, 0, 0), params=None, components=(), groups=(),
     out += bytes(4 * a * a)
     for i in range(c):
         rec = bytearray(control.SECTION2_RECORD)
-        struct.pack_into("<i", rec, control.SECTION2_NODE_AT, points[i] if i < len(points) else 0)
+        if i < len(channels):
+            first, last, initial, rate, span, flags = channels[i]
+            struct.pack_into("<3f", rec, control.SECTION2_FIRST_AT, first, last, initial)
+            struct.pack_into("<2f", rec, control.SECTION2_RATE_AT, rate, span)
+            struct.pack_into("<i", rec, control.SECTION2_FLAGS_AT, flags)
+        struct.pack_into("<i", rec, control.SECTION2_POINT_AT, points[i] if i < len(points) else 0)
         out += rec
     for part in components:
         out += part

@@ -14,9 +14,9 @@ all zero are 212 bytes and nothing else.
 
 After the frame come the sections: section 1's animation states, section 2,
 section 4's components, an 84-byte block, and section 5's reference groups.
-Section 1, section 4 and the block are read; section 2 is stepped over.  The
-block is 21 section-5 group indices: entry 0 runs at load and entries 10..20
-run when the ground's surface id changes.
+All of them are read.  Section 2 is channels -- a turret's yaw and pitch, a
+gun's barrels -- and the block is 21 section-5 group indices: entry 0 runs at
+load and entries 10..20 run when the ground's surface id changes.
 See ``docs/13-control.md`` and, for what the numbers do, ``docs/24-motion.md``.
 
 Everything below is re-derived by ``uv run openparkan verify``.
@@ -35,8 +35,18 @@ CTL_TAG = "CTLD"
 #: The frame: five counts and the 27-dword parameter block.
 HEADER_SIZE = 128
 
-#: The node word of a section-2 record: where a barrel sits, -1 on none.
-SECTION2_NODE_AT = 20
+#: A section-2 record is a **channel**: an animated value from 0 to 1 that
+#: steps toward a target by at most ``rate`` a second (``0x100289f0``) and
+#: plays mesh frames ``first``..``last``.  Its +20 word is a control point of
+#: the same-stem ``.cpt`` -- a barrel, a turret's ``TurretDirect`` or
+#: ``TargetDirect`` -- or -1 on none.
+SECTION2_FIRST_AT = 4
+SECTION2_INITIAL_AT = 12
+SECTION2_POINT_AT = 20
+SECTION2_RATE_AT = 24
+SECTION2_FLAGS_AT = 32
+#: The earlier name, from when the word was read as a node.
+SECTION2_NODE_AT = SECTION2_POINT_AT
 
 #: Section 1's record, section 2's record, the fixed block the loader copies
 #: after the component records, and the component type ids the factory at
@@ -326,6 +336,32 @@ class Reference:
 
 
 @dataclass(frozen=True)
+class Channel:
+    """One section-2 record: an animated, rate-limited value from 0 to 1.
+
+    ``Control.dll``'s turret steps the value toward its target by at most
+    ``rate`` a second (``0x100289f0``), the short way round on a wrapping
+    channel; ``span`` is the radians 0..1 covers.  On every turret the yaw
+    channel spans 2 pi over four frames and names ``TurretDirect``, and the
+    pitch channel names ``TargetDirect``.
+    """
+
+    #: +4 and +8: the mesh frames the value plays from 0 to 1.
+    first: float
+    last: float
+    #: +12: the value it starts at.  0.5 looks ahead on a yaw channel.
+    initial: float
+    #: +20: a control point of the same-stem ``.cpt``, or -1.
+    point: int
+    #: +24: value per second.
+    rate: float
+    #: +28: radians from value 0 to 1.
+    span: float
+    #: +32: 3 on every turret yaw channel.
+    flags: int
+
+
+@dataclass(frozen=True)
 class State:
     """One section-1 record: an animation state the controller moves between."""
 
@@ -384,9 +420,13 @@ class Controller:
     references: tuple[Reference, ...]
     #: Section 1: the animation states.
     states: tuple[State, ...] = ()
-    #: Section 2's node words, one a record.  A gun's entries index these:
-    #: its barrels.
+    #: Section 2's control-point words, one a record: an index into the
+    #: same-stem ``.cpt``, or -1.  A gun's entries index these records: its
+    #: barrels.
     points: tuple[int, ...] = ()
+    #: Section 2 whole: the channels a component's entries name -- a gun's
+    #: barrels, a turret's yaw and pitch, a camera's eye.
+    channels: tuple[Channel, ...] = ()
     #: The 84-byte block: 21 section-5 group indices, ``NO_GROUP`` for none.
     groups: tuple[int, ...] = ()
 
@@ -552,8 +592,25 @@ def read_states(blob: bytes, counts: tuple[int, ...]) -> tuple[State, ...]:
 
 def _points(blob: bytes, counts: tuple[int, ...]) -> tuple[int, ...]:
     at = section4_start(counts) - counts[2] * SECTION2_RECORD
-    return tuple(struct.unpack_from("<i", blob, at + i * SECTION2_RECORD + SECTION2_NODE_AT)[0]
+    return tuple(struct.unpack_from("<i", blob, at + i * SECTION2_RECORD + SECTION2_POINT_AT)[0]
                  for i in range(counts[2]))
+
+
+def read_channels(blob: bytes, counts: tuple[int, ...]) -> tuple[Channel, ...]:
+    """Section 2 as channels."""
+    at = section4_start(counts) - counts[2] * SECTION2_RECORD
+    out = []
+    for i in range(counts[2]):
+        base = at + i * SECTION2_RECORD
+        first, last, initial = struct.unpack_from("<3f", blob, base + SECTION2_FIRST_AT)
+        rate, span = struct.unpack_from("<2f", blob, base + SECTION2_RATE_AT)
+        out.append(Channel(
+            first=first, last=last, initial=initial,
+            point=struct.unpack_from("<i", blob, base + SECTION2_POINT_AT)[0],
+            rate=rate, span=span,
+            flags=struct.unpack_from("<i", blob, base + SECTION2_FLAGS_AT)[0],
+        ))
+    return tuple(out)
 
 
 def section4_start(counts: tuple[int, ...]) -> int:
@@ -650,5 +707,6 @@ def parse(blob: bytes, archives: frozenset[str] | None = None) -> Controller:
         references=tuple(references),
         states=read_states(blob, counts),
         points=_points(blob, counts),
+        channels=read_channels(blob, counts),
         groups=struct.unpack_from(f"<{BLOCK_ENTRIES}i", blob, pos),
     )

@@ -69,18 +69,28 @@ traced.
 - The part's own values are in `intsys.rlb` ([25-sensors.md](25-sensors.md),
   [26-damage.md](26-damage.md)).
 
-**The camera** (class 4, constructor `0x100233d0`) creates a view and hands it
-its values 0, 1 and 2 (`0x100238b0`, *read*). By their numbers they are a near
-plane, a far plane and a field of view of 1.3 rad (74°); the names are a
-*guess*.
+**The camera** (class 4, constructor `0x100233d0`) creates a view with
+`World3D.dll!CreateObject` type 5 and hands it its values 0, 1 and 2
+(`0x100238b0`, *read*). By their numbers they are a near plane, a far plane
+and a field of view of 1.3 rad; the names are a *guess*.
 
-**Turn rates.** No turret authors a turn rate or a limit (*measured*): all 58
-controllers in `turrets.rlb` carry the constructor's defaults on every frame
-slot ([13-control.md](13-control.md)). The player's input aims the turret
-through `CICLS_TURRET`, with `MCMD_ANGLE_X` (0.15, wrapping) and `MCMD_ANGLE_Y`
-(0.25, not wrapping) ([14-controls.md](14-controls.md)): a turret turns all the
-way round and pitches within limits. Where those limits come from was not
-traced.
+**The field of view is horizontal** (*read*, in `Terrain.dll`, whose
+`LoadCamera` `World3D.dll` re-exports):
+
+- The camera keeps tan of half its angle (`0x100415a1`).
+- It scales screen x by that alone, and y by it × height ÷ width
+  (`0x1007f190`, `0x10077982`, `0x1008c1d0`).
+- At 4:3 that is 74° across and 59° down.
+
+Two links in this are *guesses*: that type 5 is that camera, and that value 2
+is the angle it keeps. See
+[Aiming and the camera](#aiming-and-the-camera--read-and-measured).
+
+**Turn rates and limits are not in the frame.** All 58 controllers in
+`turrets.rlb` carry the constructor's defaults on every frame slot
+([13-control.md](13-control.md)). A turret's rates and limits are its two
+**channels**, section-2 records
+([Aiming and the camera](#aiming-and-the-camera--read-and-measured)).
 
 **Hit points** (*measured*). The turret, its radar and its deflector sit on
 three separate nodes, each with its own `.ndp` hit points:
@@ -100,6 +110,93 @@ three separate nodes, each with its own `.ndp` hit points:
 "Body" is the node under the class-1 component. Shooting the radar node blinds
 the unit ([25-sensors.md](25-sensors.md)); shooting the deflector node drops the
 shield bubble ([26-damage.md](26-damage.md)).
+
+## Aiming and the camera — *read*, and *measured*
+
+**A section-2 record is a channel** (*read*, turret code
+`0x10027170`/`0x100289f0`; *measured* on all 58 turrets):
+
+| Offset | Field |
+|---|---|
+| +4, +8 | first and last animation frame |
+| +0xc | initial value, 0–1 |
+| +0x14 | a **control point** in the same-stem `.cpt` (not a node) |
+| +0x18 | rate: value per second |
+| +0x1c | span: radians from value 0 to 1 |
+| +0x20 | flags; 3 on every yaw channel |
+
+**A turret's two component entries are its yaw and pitch channels.**
+
+- **Pointing** (*measured*): on all 58 turrets the yaw channel points at
+  `TurretDirect` and the pitch channel at `TargetDirect`.
+- **Yaw** spans 6.28 over four frames on every turret.
+- **Pitch** spans two frames: π/2 on 57 turrets, 1.92 rad (110°) on the
+  hero's.
+- **Where it starts**: the pitch channel starts at 0.111 on 52 turrets, 0.167
+  on 5 and 0.273 on the hero's. On the hero that start is level (below).
+  If it is level on the rest too, the limits are −10°…+80° and −15°…+75°
+  (*guess*).
+- **Rates**: yaw 0.5–0.85 turns a second (100 on the hero and two others),
+  pitch 0.3–0.75 spans a second.
+
+**The value is an animation frame** (*measured* on `o_tur_ha_02.msh`):
+
+- The yaw frames 49, 51 and 53 turn `Turn_m1o1` to 180°, 0° and 180°, so 0.5
+  looks ahead.
+- The pitch frames 55, 56 and 57 tilt `GP_m1o1`'s sight to −30.5°, +24.4° and
+  +79.4°. That is a 1.919-rad sweep against the channel's 1.920, and the
+  initial 0.2727 lands within 0.6° of level.
+- That the engine plays frame = first + v × (last − first) is a *guess*; the
+  spans agree with it.
+
+**How the aim moves** (*read*):
+
+- **Storing the target.** The component interface stores the target triple at
+  `+0x9c` (`0x1002eb70`).
+- **The mounting.** An upright (`t`) turret keeps it as 1 − v, at init
+  (`0x100271c7`) and again when read (`0x100276ed`). So the channel sees v.
+- **The step.** Each tick, with dt = elapsed ms × 0.001 (`0x10027765`), each
+  channel moves toward its target by at most rate × dt (`0x100289f0`). A
+  wrapping channel takes the short way round.
+- **The pitch clamp.** Mouse Y is clamped to [0, 1] by the row, so the
+  channel's span is the pitch limit.
+- **The hero** tilts 0.25 × 0.006 × 1.2 × 1.92 = 0.0035 rad a filtered count,
+  at most 0.75 × 1.92 = 1.44 rad/s. Its yaw channel is never sent a value: the
+  hull turns instead.
+- **A machine's turret yaw** is also added into object `+0x1ec`
+  (`0x1002eb70`). The control takt sets the turret's yaw from it
+  (`0x100059a0`, when `+0x65c` is set and no turn is pending). What `+0x65c`
+  and `+0x1f0` are was not read.
+
+**The first-person eye** (*read* `0x100234c0`; *measured* on the hero):
+
+- **The camera's channel** points at `TargetDirect`, with `CameraCenter` the
+  point just before it. This holds on all 58 turrets.
+- **Position and direction.** The camera takes a position and direction from
+  one point and a direction from the other (`0x10023603`, `0x10023618`), then
+  adds a shake offset × 0.02.
+- **Which point is which** is a *guess*, by the data: position from
+  `CameraCenter`, look from `TargetDirect`.
+- **A point's node.** A `.cpt` point's second float is an int32, the node it
+  sits on ([07-objects.md](07-objects.md#ctpt--control-points)).
+  - On the hero, `CameraCenter` sits at the origin of node 35, `CP_m1o1`: not
+    animated, flag `0x20`, a child of `Eye_m1o1`.
+  - `TargetDirect` is +y on node 34, `GP_m1o1`, which the pitch frames tilt.
+  - The eye is 0.876 above the turret root and 0.16 forward, and it does not
+    move with pitch.
+  - The camera component's own node is the eye's on only 7 of 58 turrets, so
+    the point is what places it.
+
+**Free look** (`0x10023788`, *read*; rows *measured*):
+
+- **Mode.** In mode `0x200`, the constructor's, the camera turns its view by
+  its own triple `+0x94`.
+- **Pitch** is (0.5 − y) × π about the side axis. Clamped, that is ±90°.
+- **Yaw** is (0.5 − x) × 2π about the up axis, wrapping. Roll is 0.
+- **Rows.** Shift + mouse X adds 0.1 a step, Shift + mouse Y 0.15. Releasing
+  Shift, or Shift + right button, sets both back to 0.5 at once.
+- **Other cameras.** No second camera component exists on the hero's turret.
+  A third-person view was not found.
 
 ## Gun sockets are the mesh's `Base_*` nodes — *measured*
 
@@ -242,12 +339,15 @@ not traced. That a zero cost marks them unbuildable is a *guess*.
 
 - Which code sets a newly designed unit's class word, and whether it reads the
   turret's research role byte.
-- Which axis the mounting bit mirrors, and where a turret's pitch limits and
-  turn speed come from.
+- Which way a mouse count tilts an upright turret on screen: the sign the 1 − v
+  stored at init and read back gives it.
 - What `IControl` does with the HQ bit, and what makes an HQ unit different in
   play beyond its profile and the orders it is given.
 - The Large transport's second slot, and which Large builder socket takes the
   module.
-- Camera values 3–5 (1, 150, 1), and the four class-24 components on the hero
-  turret.
+- Camera values 3–5 (1, 150, 1), the camera shake's constants (`+0xa4` 3,
+  `+0xa8` 3, `+0xac` 2.5) and what triggers it, and the four class-24
+  components on the hero turret.
+- Whether the engine plays a channel's frames linearly in its value, and how the
+  HUD draws the aim point.
 - What prevents the player from building the six free turrets.

@@ -837,6 +837,19 @@ class ControlPoint:
     position: tuple[float, float, float]
     direction: tuple[float, float, float]
 
+    @property
+    def nodes(self) -> tuple[int, int]:
+        """The first triple's second and third slots, read as the int32 they are.
+
+        The first names a node of the same-stem mesh on all but one of the
+        points that have one; the second is the same number on 3338 of the
+        3599, and where they differ -- ``r_b_03``'s wheels, a gun's barrels --
+        the second is the part's own node.  On the hero's turret both name the
+        node the point sits on.  What the pair means where it differs is not
+        established.
+        """
+        return tuple(struct.unpack("<i", struct.pack("<f", v))[0] for v in self.a[1:])
+
 
 def parse_control_points(blob: bytes, source: str = "<cpt>") -> list[ControlPoint]:
     """Parse a ``CTPT`` payload.

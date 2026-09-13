@@ -55,7 +55,7 @@ record in `objects.rlb`.
 What is open is the **meaning** of the fields rather than their extent: the
 sixteen values of most component classes
 ([23-economy.md](23-economy.md)), section 1's conditions and transition
-table, section 2's record contents, triples 2 and 6, and
+table, triples 2 and 6, and
 the nine ints of a section-5 record. The motion fields — acceleration, top
 speed, turn rate, slope mode and cone, payload, a state's velocity and spin
 boxes and engine factor — are [read](24-motion.md).
