@@ -498,9 +498,11 @@ seven places:
   at panel `+0x588`–`+0x598` is drawn white when the bit is set and grey
   (`0xff808080`) when not (`0x10085b5e`). Clicking it checks the bit again
   (`0x100847d5`) before it enters mode 3.
-- **Mode 3.** `0x10062bc0` enters a `CState` mode; mode 3 is
-  `SELECT_GUARD_TARGET_MODE` (the name switch at `0x1005a5cc`). It enters it
-  only if the object handed in passes `IsHQ` (`0x10062c2e`).
+- **Mode 3.** `0x10062bc0` enters a `CState` mode; mode 3 is an HQ's command
+  view ([39-boarding.md](39-boarding.md#the-game-view-keeps-a-stack-of-modes--read);
+  the name switch at `0x1005a5cc` once read as its name reads another
+  variable). It enters it only if the object handed in passes `IsHQ`
+  (`0x10062c2e`).
 - **Mode 3's handlers.** Three of the state table's handlers for mode 3
   (`0x10063a20`, `0x100647e0`, `0x10064900`, table `0x10104b18`) test it again
   before they hand the unit's position and π/2 on.

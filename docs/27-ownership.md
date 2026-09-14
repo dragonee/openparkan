@@ -302,8 +302,10 @@ Capturing a bot is not done at a pod. It is the hero's **Enter** —
    to the player (`0x100750c9`, with message 7 and 1) and clears it when it
    hands the unit back (`0x10075092`, `0x10075148`)
    ([29-weapons.md](29-weapons.md#who-may-drive-a-units-guns--read)). The
-   flag is also written where the hero's body is shown and hidden
-   (`0x1006792a`, `0x1006788a`) and in four more places not read.
+   flag's other writers are the record's constructor and binding, a
+   briefing's start and end, and the help screen as it opens and closes
+   (`0x1006788a`, `0x1006792a`), not the hero's body
+   ([39-boarding.md](39-boarding.md#the-other-writers-of-0xa2--read)).
 2. **The target must be a unit within 20.** It is the hero's current target
    ([25-sensors.md](25-sensors.md#the-players-target--read-and-measured)). A
    neutral unit makes itself that target the first time the hero comes within
@@ -315,7 +317,8 @@ Capturing a bot is not done at a pod. It is the hero's **Enter** —
    spot: `MBehaviour::Capture` with the player's clan (`0x1007202a`), a new
    owner on its record, and a place in the player's clan list. If it is a bot
    the hero can board, the hero then enters it: the view goes to state 1 with
-   that bot (`0x100720e8`). Otherwise a message is shown.
+   that bot (`0x100720e8`), as boarding one's own bot does
+   ([39-boarding.md](39-boarding.md)). Otherwise a message is shown.
    - **A bot the hero can board** (*read*, `0x10071ff8`) is a record whose
      `+0x30` is 4 and which `0x10076d30` does not refuse.
    - That test refuses a missing record, an object already removed (its class
@@ -377,5 +380,7 @@ generators between the players. `Multi.05`'s `Ntrl` is the exception: type 2.
   building and make it the interface's current one
   ([Capture](#capture--read)).
 - The hero's target field (record `+0x38`, `+4`) and what sets it.
-- The other four writers of a unit record's `+0xa2` (`0x1005e7e8`,
-  `0x10074dbf`, `0x1007e2ad`, `0x100a2a73`).
+- ~~The other four writers of a unit record's `+0xa2` (`0x1005e7e8`,
+  `0x10074dbf`, `0x1007e2ad`, `0x100a2a73`).~~ The briefing's end, the
+  record's binding and constructor, and the briefing's start
+  ([39-boarding.md](39-boarding.md#the-other-writers-of-0xa2--read)).

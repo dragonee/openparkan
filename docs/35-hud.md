@@ -152,8 +152,8 @@ spans on the 640 × 480 screen:
 - **The rounds** are `"%4d"` of `+0x10`, padded to four characters before
   centring. They read string 5094, *INF*, instead when `+0xc` is −1. They also
   read *INF* when the first word of the game's `+0x20` list is 6: that list
-  is the interface's `CState`, and 6 its mode `SELECT_PLACE_FM`
-  ([30-turrets.md](30-turrets.md)).
+  is the interface's `CState` mode stack, and 6 a building's screen
+  ([39-boarding.md](39-boarding.md#the-game-view-keeps-a-stack-of-modes--read)).
 - **The bar is the gun's charge, not its ammunition.** The fill is interface
   `0x202`'s property `0x62`, the component's level (`0x204` id 1,
   `Control.dll:0x1002bbb1`). For a gun the level is capacitor ÷ value 1
@@ -290,10 +290,11 @@ re-derived by `verify`):
 - ~~What the display object's two scale queries return.~~ Answered: the mode's
   width ÷ 640 and height ÷ 480
   ([How the radar draws](#how-the-radar-draws--read)).
-- ~~The game's `+0x20` list.~~ Answered: it is the interface's `CState`, whose
-  modes `0x1005a5cc` names; 6 is `SELECT_PLACE_FM` and 5 `SELECT_WAY`
-  ([30-turrets.md](30-turrets.md)). What the player is doing in them is not
-  read.
+- ~~The game's `+0x20` list.~~ Answered: it is the interface's `CState`, a
+  stack of modes: 0 on foot, 1 in a bot, 3 an HQ, 4–6 a building's screen, 7
+  the game menu ([39-boarding.md](39-boarding.md#the-game-view-keeps-a-stack-of-modes--read)).
+  The names at `0x1005a5cc`, once read as its modes, belong to a separate
+  global.
 - How a non-hero unit's gun gets its name (`0x1008a470`, `0x1008a4b0`).
 - ~~The widget at the HUD's `+0x10` (`0x1003ed60`, id 5).~~ Answered: the
   indicators ([below](#the-indicators--read-and-seen)).
@@ -1084,7 +1085,7 @@ lifting a pause, leaving after an outcome, the help screen, a briefing.
 ### Not established
 
 - The game's `+0x30` overlay.
-- What `CState` mode 7 is.
+- ~~What `CState` mode 7 is.~~ The game menu ([39-boarding.md](39-boarding.md#the-game-view-keeps-a-stack-of-modes--read)).
 - The network game's statistics (`0x1006b470`).
 - Why the lines read about 127 rather than 120 in the recording (their shadow,
   or the video's compression).

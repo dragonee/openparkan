@@ -19577,14 +19577,6 @@ doc = "docs/35-hud.md"
 
 [[entry]]
 module = "iron3d.dll"
-at = "0x10063500"
-kind = "function"
-name = "CState handler: a rejected landing shows 6211 with VOICE_RISK_AREA, sets the CState's +0x31 and stamps +0x2c"
-read = true
-doc = "docs/35-hud.md"
-
-[[entry]]
-module = "iron3d.dll"
 at = "0x10062950"
 kind = "function"
 name = "CState takt: flags entries whose record's owner word is 0xfffe; clears +0x31 once 3 s have passed"
@@ -21152,3 +21144,347 @@ kind = "site"
 name = "open for the player: a generator, mine, storage or Outpost is selected (0x1007d0a0) and made current (0x100a5660)"
 read = true
 doc = "docs/27-ownership.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10063500"
+kind = "function"
+name = "leaving a bot: the place search (0x10063350); none shows 6211 with VOICE_RISK_AREA, sets the CState's +0x31, stamps +0x2c; else rows (-F x z, -F, z) and the place"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10072238"
+kind = "site"
+name = "CMD 735 CMD_ROLLBACK_STATE: the CState stack rolls back (0x10062ff0)"
+read = true
+doc = "docs/39-boarding.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10062ff0"
+kind = "function"
+name = "CState roll back: with more than one record, handler [front x 8 + next]; pops unless +0x30; again while the new front's +0xc"
+read = true
+doc = "docs/39-boarding.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100637c0"
+kind = "function"
+name = "CState handler mode 0 -> 1, boarding: outer camera off, hero detached, hero's view off, bot selected and taken, +0xaec, state word 1, message 100 for a flyer in mode 4"
+read = true
+doc = "docs/39-boarding.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100637ed"
+kind = "site"
+name = "boarding: the hero's object detached through its parent (IGameObject slot 3, then the parent's slot 5)"
+read = true
+doc = "docs/39-boarding.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100638b2"
+kind = "site"
+name = "boarding ends in World3D stdClearKeyboard"
+read = true
+doc = "docs/39-boarding.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100638c0"
+kind = "function"
+name = "CState handler mode 1 -> 0, leaving: place (0x10063500) or refuse; hero re-attached, IControl slot 12 kinds 1-3, deselect, hero taken, bot let go, state word 1"
+read = true
+doc = "docs/39-boarding.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1006391f"
+kind = "site"
+name = "leaving: the hero's object attached under the level's +0xae0 (slot 4, AttachChild)"
+read = true
+doc = "docs/39-boarding.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10063a17"
+kind = "site"
+name = "leaving ends in World3D stdClearKeyboard"
+read = true
+doc = "docs/39-boarding.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10063350"
+kind = "function"
+name = "leaving's place search: a broken or gone bot (bot x - 1, y - 1); else 8 places at r = both +0x94 radii, i x pi/4 from +x; landscape face, not liquid, a flyer < 10 above; z = top surface + 8"
+read = true
+doc = "docs/39-boarding.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100633ce"
+kind = "site"
+name = "place search: the angle step, the float pi/4 at 0x100e61c0"
+read = true
+doc = "docs/39-boarding.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1006346a"
+kind = "site"
+name = "place search: a face with world flag 0x200 (liquid) is refused"
+read = true
+doc = "docs/39-boarding.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1006347c"
+kind = "site"
+name = "place search: a flyer must be less than 10 (0x100e5d6c) above the found point"
+read = true
+doc = "docs/39-boarding.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100634ad"
+kind = "site"
+name = "place search: a broken or gone bot puts the hero at (bot x - 1, bot y - 1), untested"
+read = true
+doc = "docs/39-boarding.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100634e4"
+kind = "site"
+name = "place search: height = the top landscape or building surface + 8 (0x100e5d00)"
+read = true
+doc = "docs/39-boarding.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100a14d0"
+kind = "function"
+name = "top surface at (x, y) from the world's top down: landscape (mask 2), buildings (8), scenery (0x400), units (0x10) by flags; 0 when none"
+read = true
+doc = "docs/39-boarding.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10072be0"
+kind = "function"
+name = "the first record of the player's clan whose Type lies within a mask (0x1020000: the hero), skipping removed objects"
+read = true
+doc = "docs/39-boarding.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10074dcf"
+kind = "site"
+name = "unit record bind: auto-driver level +0x9c = 2 in parameter mode 3 (+0xe5), else 0"
+read = true
+doc = "docs/39-boarding.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1007d0a0"
+kind = "function"
+name = "select a unit: VOICE_SELECTED with the speaker's suffix unless already selected or mode 3; exclusive clears the others; record +0x80 = 1"
+read = true
+doc = "docs/39-boarding.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1007d270"
+kind = "function"
+name = "clear the selection: every record +0x80 = 0, +0x84 = -1"
+read = true
+doc = "docs/39-boarding.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10075160"
+kind = "function"
+name = "a unit record's camera view off: flag bit 0 cleared"
+read = true
+doc = "docs/39-boarding.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10075180"
+kind = "function"
+name = "a unit record's camera view on: flag bit 0 set"
+read = true
+doc = "docs/39-boarding.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100a5660"
+kind = "function"
+name = "set the driven unit record (+0xaec)"
+read = true
+doc = "docs/39-boarding.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100a5680"
+kind = "function"
+name = "set the level's +0xaf0 record"
+read = true
+doc = "docs/39-boarding.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10038ad0"
+kind = "function"
+name = "outer camera off: in view state 3 sets state 1 and drops the outer view"
+read = true
+doc = "docs/39-boarding.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100755a9"
+kind = "site"
+name = "a driven bot's record goes: roll back in CState modes 1, 2, 5, 7 (table 0x1007563c)"
+read = true
+doc = "docs/39-boarding.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10067820"
+kind = "function"
+name = "help screen open: manual controller slot 9, driven unit +0xa2 = 0, game paused"
+read = true
+doc = "docs/39-boarding.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100678c0"
+kind = "function"
+name = "help screen close: manual controller slot 10, driven unit +0xa2 = 1, pause lifted"
+read = true
+doc = "docs/39-boarding.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100722dc"
+kind = "site"
+name = "CMD 749 CMD_HELP: toggles the help screen"
+read = true
+doc = "docs/39-boarding.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10072359"
+kind = "site"
+name = "CMD 748 CMD_GAME_MENU: pushes CState mode 7, or rolls back when the menu is up"
+read = true
+doc = "docs/39-boarding.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10071c10"
+kind = "function"
+name = "a window message through the ui bindings: a key down to its command (0x10071cd0), a release to 0x10072740"
+read = true
+doc = "docs/39-boarding.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100a0fe7"
+kind = "site"
+name = "window messages the interface's handlers do not take go to the bindings (0x10071c10)"
+read = true
+doc = "docs/39-boarding.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1005e748"
+kind = "site"
+name = "game loop: TranslateMessage on every message"
+read = true
+doc = "docs/39-boarding.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10061b45"
+kind = "site"
+name = "voice suffix by speaker: building _B; size 1-2 _S, 4-5 _B, 3 none"
+read = true
+doc = "docs/39-boarding.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1010c388"
+kind = "datum"
+name = "the commander's cursor mode the CState name switch (0x1005a5cc) reads; not the +0x20 stack's mode"
+read = true
+doc = "docs/39-boarding.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1007e5f7"
+kind = "site"
+name = "unit record bind: +0x88..+0x94 filled from the object's interface 0x20 sphere (centre, radius)"
+read = true
+doc = "docs/39-boarding.md"
+
+[[entry]]
+module = "World3D.dll"
+at = "0x10011830"
+kind = "function"
+name = "stdClearKeyboard: PeekMessage-removes 0x100-0x108 and 0x200-0x209, clears the key state"
+read = true
+doc = "docs/39-boarding.md"
+
+[[entry]]
+module = "World3D.dll"
+at = "0x1000fbb4"
+kind = "site"
+name = "row handler: the command triple prefilled from IControl property 0x20"
+read = true
+doc = "docs/39-boarding.md"
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10017580"
+kind = "function"
+name = "CGameObject::AttachChild (IGameObject slot 4)"
+read = true
+doc = "docs/39-boarding.md"
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10001f80"
+kind = "function"
+name = "agent IGameObject slot 5: DetachChild (0x10017680), then the child's slot 12"
+read = true
+doc = "docs/39-boarding.md"
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10017680"
+kind = "function"
+name = "CGameObject::DetachChild"
+read = true
+doc = "docs/39-boarding.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x10004690"
+kind = "function"
+name = "IControl slot 12: a 4x4 matrix, kind 3 into +0x264, kind 1 +0x2a4, kind 2 all three"
+read = true
+doc = "docs/39-boarding.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1009a5f0"
+kind = "datum"
+name = "object class to query mask, 1 << class"
+read = true
+doc = "docs/39-boarding.md"

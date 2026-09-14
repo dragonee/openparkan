@@ -634,7 +634,9 @@ through `0x1007d4e0`. That it is a loss is *derived* from the voices it plays.
   game fails (`0x10075619`). The panel then reads *"MISSION FAILED..."*.
 - **It does nothing** once the state word is 3.
 - **In mode 3,** the loss of the driven unit is handled elsewhere.
-- **A driven bot's loss** goes to `0x10062ff0`, which was not followed.
+- **A driven bot's loss** goes to `0x10062ff0`, the mode stack's rollback: from
+  a bot the hero is put out beside it
+  ([39-boarding.md](39-boarding.md#when-the-driven-bot-is-lost--read)).
 - **In a network game,** losing another clan's hero while at most one hero is left
   wins the mission (`0x10075381`; `0x10072cb0` counts `Type` `0x1020000`,
   *derived*).
@@ -671,7 +673,8 @@ in this order:
    (*derived*, above).
 5. **If the bot can be boarded**, the hero boards it: its record's `+0x30` is
    4 and its class-1 turret still has life. The view goes to state 1 with that
-   bot, and the player drives the bot from then on.
+   bot, and the player drives the bot from then on
+   ([39-boarding.md](39-boarding.md)).
 
 ## Ambient sound — *read* in part
 
@@ -727,5 +730,6 @@ in this order:
   [After the outcome](#after-the-outcome--read-and-measured)), though
   `CLAN_HERO_KILLED` does nothing in this build
   ([21-briefing.md](21-briefing.md#messagescfg--the-in-mission-dialogue)) and
-  Mission 01's script never fails. What a driven bot's loss does
-  (`0x10062ff0`) is not followed.
+  Mission 01's script never fails. ~~What a driven bot's loss does
+  (`0x10062ff0`) is not followed.~~ It rolls the mode stack back, which puts
+  the hero out ([39-boarding.md](39-boarding.md#when-the-driven-bot-is-lost--read)).

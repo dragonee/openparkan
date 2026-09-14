@@ -15117,6 +15117,145 @@ def check_walker(check, game: Path) -> None:
           f"(triple 3) and yaw turn rate (triple 4 z)")
 
 
+#: A robot chassis record's slot that names its input table (the library field is blank).
+CHASSIS_TABLE_SLOT = 6
+#: The four rows ``m2.tbl`` adds to ``m1.tbl``: (key, pressed, command, magnitude).
+FLYER_ROWS = {("SCAN_R", True, "MCMD_UP", 1.0), ("SCAN_R", False, "MCMD_UP", 0.0),
+              ("SCAN_F", True, "MCMD_DOWN", -1.0), ("SCAN_F", False, "MCMD_DOWN", 0.0)}
+
+
+def check_boarding(check, game: Path) -> None:
+    """Boarding and leaving a large bot: the keys, the tables a driven bot uses, the tests."""
+    lib = objects.ObjectLibrary(game / "objects.rlb")
+    held = profiles.load(game)
+    tables: dict[str, list[str]] = defaultdict(list)
+    crossed = []
+    for name, record in sorted(lib.records.items()):
+        if not name.startswith("r_") or record.profile is None:
+            continue
+        slots = record.slots
+        table = slots[CHASSIS_TABLE_SLOT].member.lower() if len(slots) > CHASSIS_TABLE_SLOT else ""
+        flying = profiles.CHASSIS_TYPE[held[record.profile]["ChassisType"].value] == "flying"
+        tables[table].append(name)
+        want = "hero.tbl" if name == "r_h_02" else "m2.tbl" if flying else "m1.tbl"
+        if table != want:
+            crossed.append(f"{name} {table}")
+    check("objects.rlb: a chassis names m2.tbl when it flies, m1.tbl otherwise",
+          not crossed and len(tables["m2.tbl"]) == 9 and tables["hero.tbl"] == ["r_h_02"]
+          and len(tables["m1.tbl"]) == 14,
+          f"slot {CHASSIS_TABLE_SLOT}'s member: m2.tbl on {len(tables['m2.tbl'])} flying "
+          f"chassis, m1.tbl on {len(tables['m1.tbl'])}, hero.tbl on {tables['hero.tbl']}"
+          + (f"; crossed {crossed}" if crossed else ""))
+
+    def rows(name: str) -> set[tuple]:
+        return {(r.device, r.modifier, r.key, r.pressed, r.target, r.command, r.value, r.index,
+                 r.state) for r in controls.table(game / name)}
+
+    m1, m2 = rows("m1.tbl"), rows("m2.tbl")
+    added = {(r[2], r[3], r[5], r[6]) for r in m2 - m1}
+    t1 = {(b.command, b.chord) for b in controls.bindings(game / "table_1.man")}
+    t2 = {(b.command, b.chord) for b in controls.bindings(game / "table_2.man")}
+    bots = {(b.command, b.chord) for b in controls.bindings(game / "ui_bots.man")}
+    climb = {("CMD_OBJ_MOVE_UP", "SCAN_R"), ("CMD_OBJ_MOVE_DOWN", "SCAN_F")}
+    check("m2.tbl: a flyer's table is m1.tbl with R and F sending MCMD_UP and MCMD_DOWN",
+          m1 < m2 and added == FLYER_ROWS and t2 - t1 == climb and t1 < t2 and climb <= bots,
+          f"{len(m1)} rows of m1.tbl all in m2.tbl, which adds {sorted(added)}; table_2.man "
+          f"adds {sorted(t2 - t1)}, and ui_bots.man binds them too")
+
+    words = controls.commands(game)
+    keys = {}
+    for man in ("addition.man", "ui_other.man"):
+        keys[man] = {b.command: b.chord for b in controls.bindings(game / man)}
+    enter, leave = "CMD_ENTER_STATE", "CMD_ROLLBACK_STATE"
+    check("addition.man, ui_other.man: Enter boards a warbot (730) and Esc leaves it (735)",
+          all(k.get(enter) == "SCAN_W_ENTER" and k.get(leave) == "SCAN_ESC" for k in keys.values())
+          and controls.CMD_GAME.get(enter) == 730 and controls.CMD_GAME.get(leave) == 735
+          and "warbot" in words.get(enter, "") and words.get(leave, "").startswith("Leave warbot"),
+          f"{enter} {controls.CMD_GAME.get(enter)} {words.get(enter)!r} on Enter; {leave} "
+          f"{controls.CMD_GAME.get(leave)} {words.get(leave)!r} on Esc, in both files")
+
+    sizes: Counter[tuple[int, str]] = Counter()
+    for _, unit in _robots(game):
+        root = unit.components[0].ref.member.lower()
+        turret = any(p == 0 and c.ref.member.lower().startswith("e_tur_")
+                     for c, p in zip(unit.components, unit.parents(), strict=True))
+        record = lib.get(root)
+        if turret and record is not None and record.profile in held:
+            kind = profiles.CHASSIS_TYPE[held[record.profile]["ChassisType"].value]
+            sizes[(profiles.CHASSIS_SIZE[root[2]], kind)] += 1
+    large = sum(n for (s, _), n in sizes.items() if s == 4)
+    large_fly = sizes[(4, "flying")]
+    bases = NResArchive.open(game / "bases.rlb")
+    l2f = control.parse(bases.read_name("r_b_02.ctl"))
+    top = l2f.triples[control.TRIPLE_TOP_SPEED]
+    check("UNITS: a boardable bot is size class 4; the L-2f flies at 110 km/h and climbs at 15 m/s",
+          large == 86 and large_fly == 10 and l2f.mode == 0
+          and abs(top[1] * 3.6 - 110.0) < 0.01 and top[2] == 15.0 and top[0] == 4.0,
+          f"{large} turreted robot assemblies stand on a b chassis (size class 4, record +0x30 "
+          f"== 4 at iron3d.dll:0x10071ff8), {large_fly} of them flying; r_b_02 mode {l2f.mode}, "
+          f"top speed {tuple(round(v, 2) for v in top)} m/s")
+
+    found = defaultdict(list)
+    for path in sorted((game / "MISSIONS").rglob("messages.cfg")):
+        for m in briefing.messages(path):
+            if m.index in (22, 100):
+                found[m.index].append((path.parent.relative_to(game / "MISSIONS").as_posix(),
+                                       m.text_id, m.info_system))
+    check("messages.cfg: the game's own message 100 is Mission 02's T02_H06, alone",
+          found[100] == [("CAMPAIGN/CAMPAIGN.00/Mission.02", "T02_H06", True)]
+          and [f[0] for f in found[22]] == ["CAMPAIGN/CAMPAIGN.00/Mission.03"],
+          f"index 100: {found[100]}; index 22: {[f[:2] for f in found[22]]} -- the ids "
+          f"iron3d.dll asks for itself, 100 on boarding a flyer (0x100638a7)")
+
+    voices = {k: v for block in mission.load_cfg(game / "ui" / "game_resources.cfg").values()
+              for k, v in block.items()}
+    path = game / "iron3d.dll"
+    if not path.exists():
+        return
+    iron = path.read_bytes()
+    at = _image_at(iron)
+    strings = resources.strings(iron)
+
+    def f32(va: int) -> float:
+        return struct.unpack("<f", at(va, 4))[0]
+
+    def u32(va: int) -> int:
+        return struct.unpack("<I", at(va, 4))[0]
+
+    def calls(site: int) -> int:
+        return (site + 5 + struct.unpack("<i", at(site + 1, 4))[0]) & 0xFFFFFFFF
+
+    # Enter's distance, the place search's step, height gap, lift and fallback.
+    consts = {0x100E4BC4: 20.0, 0x100E61C0: math.pi / 4, 0x100E5D6C: 10.0, 0x100E5D00: 8.0,
+              0x100E59CC: 1.0}
+    sites = {0x10071FE7: b"\xd8\x1d" + struct.pack("<I", 0x100E4BC4),
+             0x100633CE: b"\xd8\x0d" + struct.pack("<I", 0x100E61C0),
+             0x1006347C: b"\xd8\x1d" + struct.pack("<I", 0x100E5D6C),
+             0x100634E4: b"\xd8\x05" + struct.pack("<I", 0x100E5D00),
+             0x100634B0: b"\xd8\x25" + struct.pack("<I", 0x100E59CC),
+             0x1006348A: b"\x83\xfd\x08", 0x10071FF8: b"\x83\x7e\x30\x04",
+             0x100638A7: b"\x6a\x64", 0x100723B3: b"\x6a\x07"}
+    values_ok = all(abs(f32(va) - v) < 1e-6 for va, v in consts.items())
+    sites_ok = all(at(va, len(code)) == code for va, code in sites.items())
+    table = [u32(0x100726DC + 4 * i) for i in range(7)]
+    rollback = at(0x10072238, 2) == b"\x8b\xce" and calls(0x1007223A) == 0x10062FF0
+    handlers = u32(0x10104B18 + 4 * 1) == 0x100637C0 and u32(0x10104B18 + 4 * 8) == 0x100638C0
+    enter = at(0x100720E4, 4) == b"\x6a\x00\x6a\x01" and calls(0x100720E8) == 0x10062BC0
+    world = game / "World3D.dll"
+    clear = world.exists() and _image_at(world.read_bytes())(0x1001183D, 14) == (
+        b"\x6a\x01\x68\x08\x01\x00\x00\x68\x00\x01\x00\x00\x8d\x44")
+    check("iron3d.dll: Enter within 20 m, Esc rolls back, eight places at pi/4, < 10 m, + 8",
+          values_ok and sites_ok and table[5] == 0x10072238 and rollback and handlers and enter
+          and clear and strings.get(6211) == "Risk area! Landing impossible."
+          and at(0x10104C88, 16) == b"VOICE_RISK_AREA\0"
+          and voices.get("VOICE_SELECTED_B", "").strip('"') == "vr_sel_b.wav"
+          and voices.get("VOICE_RISK_AREA", "").strip('"') == "vc_002.wav",
+          f"distance {f32(0x100E4BC4):g}; step {f32(0x100E61C0):.6f} x 8; a flyer under "
+          f"{f32(0x100E5D6C):g} m; height + {f32(0x100E5D00):g}; command 735 -> {table[5]:#x} "
+          f"-> 0x10062ff0; handlers 0->1 {u32(0x10104B1C):#x}, 1->0 {u32(0x10104B38):#x}; "
+          f"stdClearKeyboard drops 0x100-0x108; 6211 {strings.get(6211)!r}")
+
+
 def run(game: Path) -> int:
     """Run every check against ``game``.  Returns a process exit code."""
     results: list[tuple[str, bool, str]] = []
@@ -15145,6 +15284,7 @@ def run(game: Path) -> int:
         check_targeting, check_target_marks, check_ai_fight, check_turrets, check_packages,
         check_target_panel,
         check_wingman,
+        check_boarding,
         check_builder,
         check_units, check_loading, check_search, check_construction,
         check_controls, check_player_input, check_turret_channels,
