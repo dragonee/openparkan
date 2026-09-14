@@ -56,6 +56,42 @@ pub struct Terrain {
     pub groups: Vec<Group>,
     /// The water's box, on a map with water.
     pub water: Option<WaterBox>,
+    /// The inner rings of the placed buildings, across the ground, where the landscape is cut
+    /// away (docs/03, "Placing a building cuts the landscape").
+    pub cuts: Vec<Vec<[f32; 2]>>,
+}
+
+/// Every placed building's inner `.bas` ring, placed by its position and angle, across the
+/// ground (`IBasement` slot 4, docs/03, "Placing a building cuts the landscape").
+pub fn building_cuts(
+    assembly: &mut crate::assembly::Assembly,
+    mission: &parkan_formats::mission::Mission,
+) -> Vec<Vec<[f32; 2]>> {
+    let mut out = Vec::new();
+    for o in mission.objects.iter().filter(|o| o.kind == parkan_formats::mission::KIND_BUILDING) {
+        let parts = assembly.parts(o.kind, &o.path);
+        let Some(root) = parts.iter().find(|p| p.host == -1) else { continue };
+        let Some(slot) = assembly.library.record_slot(assembly.library.get(&root.record), "bas", 0) else {
+            continue;
+        };
+        let Some(rings) = assembly
+            .archive(&slot.library)
+            .and_then(|a| a.read_name(&slot.member).ok())
+            .and_then(|data| parkan_formats::basement::parse(data, &slot.member).ok())
+        else {
+            continue;
+        };
+        let Some(inner) = rings.first() else { continue };
+        let (s, c) = o.rotation.sin_cos();
+        out.push(
+            inner
+                .points
+                .iter()
+                .map(|p| [o.position[0] + p[0] * c - p[1] * s, o.position[1] + p[0] * s + p[1] * c])
+                .collect(),
+        );
+    }
+    out
 }
 
 /// The box `land`'s water faces' vertices widen from empty (`0x1001d5d0`), its corners handed
@@ -123,7 +159,7 @@ pub fn build(map_dir: &Path, store: &mut TextureStore) -> Result<Terrain> {
         groups.push(Group { start, count: faces.len() as u32 * 3, layer1, layer2, water, bed });
     }
     let water = water_box(&land);
-    Ok(Terrain { land, vertices, indices, groups, water })
+    Ok(Terrain { land, vertices, indices, groups, water, cuts: Vec::new() })
 }
 
 #[cfg(test)]

@@ -786,6 +786,47 @@ pub fn research_tree(path: &Path) -> Result<Value> {
     }))
 }
 
+/// A buildings archive's ground plans and hall ways: every `.bas` member's rings, and every
+/// mesh's stream 17, by member name.
+pub fn buildings(path: &Path) -> Result<Value> {
+    let archive = Archive::open(path)?;
+    let mut plans = serde_json::Map::new();
+    let mut halls = serde_json::Map::new();
+    for e in &archive.entries {
+        let lower = e.name.to_ascii_lowercase();
+        if lower.ends_with(".bas") {
+            let rings = parkan_formats::basement::parse(archive.read(e)?, &e.name)?;
+            plans.insert(
+                e.name.clone(),
+                Value::Array(
+                    rings
+                        .iter()
+                        .map(|r| {
+                            json!({
+                                "points": r.points.iter().map(|p| vector(p)).collect::<Vec<_>>(),
+                                "traced": r.traced.iter().map(|&(t, c)| json!([t, c])).collect::<Vec<_>>(),
+                            })
+                        })
+                        .collect(),
+                ),
+            );
+        } else if e.tag() == "MESH" {
+            let hall = parkan_formats::hallway::parse(archive.read(e)?, &e.name)?;
+            if hall.vertices.is_empty() {
+                continue;
+            }
+            halls.insert(
+                e.name.clone(),
+                json!({
+                    "vertices": hall.vertices.iter().map(|v| json!([vector(&v.position), v.flags, v.joint])).collect::<Vec<_>>(),
+                    "links": hall.links.iter().map(|l| json!([l.start, l.end])).collect::<Vec<_>>(),
+                }),
+            );
+        }
+    }
+    Ok(json!({"kind": "buildings", "plans": plans, "halls": halls}))
+}
+
 /// Dump `path` as `kind`; `names` narrows a `texm` dump to those textures.
 pub fn dump(kind: &str, path: &Path, names: &[String]) -> Result<Value> {
     match kind {
@@ -814,8 +855,9 @@ pub fn dump(kind: &str, path: &Path, names: &[String]) -> Result<Value> {
         "varset" => variable_table(path),
         "fml" => formula_set(path),
         "research" => research_tree(path),
+        "buildings" => buildings(path),
         other => anyhow::bail!(
-            "unknown kind {other:?}; expected nres, mission, texm, materials, landmesh, mesh, assembly, control, controls, cpt, ndp, exp, fxid, sky, cfg, strings, progression, rsli, font, man, scr, varset, fml or research"
+            "unknown kind {other:?}; expected nres, mission, texm, materials, landmesh, mesh, assembly, control, controls, cpt, ndp, exp, fxid, sky, cfg, strings, progression, rsli, font, man, scr, varset, fml, research or buildings"
         ),
     }
 }

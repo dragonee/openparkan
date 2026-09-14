@@ -1579,3 +1579,26 @@ fn mission_02s_factory_builds_a_free_warbot_in_a_minute_which_escapes_and_comple
     let p = play.progression.as_ref().unwrap();
     assert_eq!(p.progress.objectives[1].state, 1, "{:?}", p.progress.objectives);
 }
+
+#[test]
+#[ignore = "needs the game install"]
+fn mission_02s_large_factory_cuts_the_ground_from_under_it_and_lets_the_hero_through_its_doorway() {
+    let (mut play, _) = mission_02_play();
+    // Over the pod the landscape is gone: the ground there is the factory's pod floor, 12.4
+    // under its base, not Tut_2's sand at 151.7 (docs/03, "Placing a building cuts the
+    // landscape").
+    let under = play.ground.below(391.28, 740.08, 145.0).expect("a floor under the pod");
+    assert_eq!(under.solid.map(|s| s.0), Some(0), "{under:?}");
+    assert!((under.point.z - 139.35).abs() < 0.5, "{under:?}");
+    assert!(play.ground.cut(391.28, 740.08) && !play.ground.cut(300.0, 556.0));
+    // Walked at the entrance, the hero goes through its black doorway into the hall.
+    assert!(play.stand_at(395.8, 915.0, 3.117));
+    play.hero.key("SCAN_W", true);
+    for _ in 0..(6 * 60) {
+        play.hero.update_input();
+        play.tick(1000.0 / 60.0, [0.0; 2]);
+    }
+    let at = play.hero.walker.body.position;
+    assert!(at.y < 860.0, "in the hall, past the door at 877: {at}");
+    assert_eq!(play.hero.walker.ground.and_then(|h| h.solid).map(|s| s.0), Some(0));
+}

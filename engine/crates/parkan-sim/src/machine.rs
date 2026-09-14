@@ -380,7 +380,12 @@ impl Walker {
                 motion::integrate_velocity(&mut self.body.velocity, self.body.command, &self.limits, step)
             }
         }
-        if self.controller.mode == SLOPE_MODE {
+        // STAND-IN: docs/24-motion.md#the-ground-inside-a-building--read-in-part-and-measured
+        // -- how a walker climbs a building's stairs is not read; a recording shows the hero
+        // climbing the Large Factory's, whose faces stand at up to 67°, so on a building's
+        // faces the slope brake is left out.
+        let on_building = self.ground.is_some_and(|h| h.solid.is_some());
+        if self.controller.mode == SLOPE_MODE && !on_building {
             let along = self.body.to_world(Vec3::from_array(self.body.velocity));
             let normal = self.body.ground_normal;
             // STAND-IN: docs/24-motion.md#ground-and-slope--read -- the brake is read to

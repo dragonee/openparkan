@@ -41,6 +41,10 @@ struct Layers {
     tint1: vec4<f32>,
     // w is 1 when the faces wear a second layer.
     tint2: vec4<f32>,
+    // The buildings' cut mask: its origin x and y, texels a unit, and w 1 when there is one;
+    // then its width and height.
+    cut: vec4<f32>,
+    cut_size: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> frame: Frame;
@@ -48,6 +52,20 @@ struct Layers {
 @group(1) @binding(1) var layer1: texture_2d<f32>;
 @group(1) @binding(2) var layer2: texture_2d<f32>;
 @group(1) @binding(3) var ground: sampler;
+@group(1) @binding(4) var cuts: texture_2d<f32>;
+
+// Whether a building has cut the landscape away here (docs/03, "Placing a building cuts the
+// landscape").
+fn cut_away(world: vec3<f32>) -> bool {
+    if layers.cut.w < 0.5 {
+        return false;
+    }
+    let t = (world.xy - layers.cut.xy) * layers.cut.z;
+    if t.x < 0.0 || t.y < 0.0 || t.x >= layers.cut_size.x || t.y >= layers.cut_size.y {
+        return false;
+    }
+    return textureLoad(cuts, vec2<i32>(t), 0).r > 0.5;
+}
 
 struct VertexIn {
     @location(0) position: vec3<f32>,
@@ -90,7 +108,7 @@ fn lit_at(normal: vec3<f32>) -> vec3<f32> {
 
 @fragment
 fn fs_main(v: VertexOut) -> @location(0) vec4<f32> {
-    if frame.fog.w > 0.5 && v.world.z < frame.fog.z {
+    if (frame.fog.w > 0.5 && v.world.z < frame.fog.z) || cut_away(v.world) {
         discard;
     }
     var colour = textureSample(layer1, ground, v.uv1).rgb * layers.tint1.rgb;
@@ -130,6 +148,9 @@ fn bump_at(uv: vec2<f32>) -> vec2<f32> {
 
 @fragment
 fn fs_water(v: VertexOut) -> @location(0) vec4<f32> {
+    if cut_away(v.world) {
+        discard;
+    }
     let size = water.box_.zw - water.box_.xy;
     let over = vec2<f32>(1.0 - (v.world.y - water.box_.y) / size.y, 1.0 - (v.world.x - water.box_.x) / size.x);
     let bumped = over + water.bump.z * bump_at(water.bump.y * over + vec2<f32>(water.bump.x));

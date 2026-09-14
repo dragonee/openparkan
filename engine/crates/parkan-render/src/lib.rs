@@ -255,7 +255,7 @@ impl Renderer {
         objects: Option<&parkan_world::models::Objects>,
     ) {
         let bank = GpuTextures::new(device, queue, textures);
-        self.terrain = terrain.map(|t| TerrainRenderer::new(device, self.format, t, &bank));
+        self.terrain = terrain.map(|t| TerrainRenderer::new(device, queue, self.format, t, &bank));
         self.objects = objects.map(|o| ModelRenderer::new(device, self.format, o, &bank));
         self.reflection_frame = self.objects.as_ref().map(|o| o.view_frame(device));
         self.bank = Some(bank);

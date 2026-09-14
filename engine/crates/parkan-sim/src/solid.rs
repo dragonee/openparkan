@@ -68,7 +68,7 @@ fn vec(v: [f64; 3]) -> Vec3 {
 
 impl Solid {
     /// The faces of a target's posed parts, with `surface(part, material)` naming a batch's
-    /// material's surface id and damage rate: each node's level-0 slot of the variant its
+    /// material's surface id, damage rate and whether its faces let a mover through: each node's level-0 slot of the variant its
     /// stage draws, and nothing of a hidden node, which the walk-face and push visitors pass
     /// over (`AniMesh.dll:0x1000ce90`, `0x1000dfe0`).
     pub fn from_parts(
@@ -76,7 +76,7 @@ impl Solid {
         centre: Vec3,
         radius: f32,
         ground: bool,
-        surface: impl Fn(usize, u16) -> Option<(u8, f32)>,
+        surface: impl Fn(usize, u16) -> Option<(u8, f32, bool)>,
     ) -> Self {
         let mut faces = Vec::new();
         let mut nodes = Vec::new();
@@ -104,12 +104,14 @@ impl Solid {
                         (from..from + count).contains(&t)
                     });
                     let material = batch.and_then(|b| surface(p, b.material));
+                    let passes = material.is_some_and(|m| m.2);
+                    let flags = mesh.face_flags.get(t).copied().unwrap_or(0);
                     faces.push(SolidFace {
                         a,
                         b,
                         c,
                         normal,
-                        triangle_flags: mesh.face_flags.get(t).copied().unwrap_or(0),
+                        triangle_flags: if passes { flags | COLLISION_SKIPS_FACE } else { flags },
                         surface: material.map(|m| m.0),
                         damage_rate: material.map_or(0.0, |m| m.1),
                     });

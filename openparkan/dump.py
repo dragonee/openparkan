@@ -688,10 +688,32 @@ def _mission(path: Path, names: list[str] | None = None) -> dict:
 
 
 #: What ``openparkan dump`` and ``parkan-dump`` both accept, and the reader each runs.
+def buildings(path: Path, names: list[str] | None = None) -> dict:
+    """A buildings archive's ground plans and hall ways: every ``.bas`` member's rings, and
+    every mesh's stream 17, by member name."""
+    from . import objects as objs
+    archive = NResArchive.open(path)
+    plans = {}
+    halls = {}
+    for e in archive.entries:
+        if e.name.lower().endswith(".bas"):
+            rings = objs.parse_base(archive.read(e), e.name)
+            plans[e.name] = [{"points": [vector(p) for p in r.points],
+                              "traced": [[t, c] for t, c in r.traced]} for r in rings]
+        elif e.tag == "MESH":
+            graph = objmesh.read_path_graph(NResArchive(archive.read(e), e.name))
+            if graph is None or not graph.nodes:
+                continue
+            halls[e.name] = {"vertices": [[vector(n.position), n.a, n.b] for n in graph.nodes],
+                             "links": [[link.start, link.end] for link in graph.links]}
+    return {"kind": "buildings", "plans": plans, "halls": halls}
+
+
 KINDS = {"nres": _nres, "mission": _mission, "texm": texm, "materials": material_library,
          "landmesh": land_mesh, "mesh": object_mesh, "assembly": mission_assembly,
          "control": controllers, "controls": input_table, "cpt": control_points,
          "ndp": damage_tables, "exp": explosions, "fxid": fx_effects,
          "sky": atmosphere, "cfg": cfg_file, "strings": pe_strings, "progression": progression,
          "rsli": rsli_archive, "font": game_font, "scr": script, "varset": variable_table,
-         "fml": formula_set, "man": key_bindings, "research": research_tree}
+         "fml": formula_set, "man": key_bindings, "research": research_tree,
+         "buildings": buildings}

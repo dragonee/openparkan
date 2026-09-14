@@ -117,6 +117,19 @@ pub enum Mode {
     Factory(usize),
 }
 
+/// The material a building's doorway quads wear: drawn black, it hides the inside.
+pub const DOORWAY_MATERIAL: &str = "DEFAULT";
+
+/// Whether a face of material `name` lets a mover through.
+///
+/// STAND-IN: docs/24-motion.md#the-ground-inside-a-building--read-in-part-and-measured --
+/// where a gathered face's batch word, whose 8 and 0x200 the collision query passes, comes
+/// from is not traced; a recording shows the hero walking through the Large Factory's black
+/// `DEFAULT` doorway, so that material's faces pass.
+pub fn doorway(name: &str) -> bool {
+    name.eq_ignore_ascii_case(DOORWAY_MATERIAL)
+}
+
 /// What a target is beside what a round strikes: its clan, its `Type` word, its logical id.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Unit {
@@ -435,9 +448,13 @@ impl Play {
         }
         // Every target's faces, for the ground a building gives and the collision pass.
         let mut ground = Ground::new(land);
+        ground.cuts = terrain::building_cuts(&mut assembly, mission)
+            .into_iter()
+            .map(parkan_sim::ground::Cut::new)
+            .collect();
         let materials_for = |t: usize, part: usize, material: u16| {
             let name = battle.wears.get(t)?.get(part)?.get(usize::from(material & 0xFF))?;
-            materials.get(name).map(|m| (m.surface, m.damage_rate))
+            materials.get(name).map(|m| (m.surface, m.damage_rate, doorway(name)))
         };
         ground.solids = battle
             .combat
@@ -1104,7 +1121,7 @@ impl Play {
         let solid =
             Solid::from_parts(&target.parts, target.centre, target.radius, building, |part, material| {
                 let name = wears.get(part)?.get(usize::from(material & 0xFF))?;
-                materials.get(name).map(|m| (m.surface, m.damage_rate))
+                materials.get(name).map(|m| (m.surface, m.damage_rate, doorway(name)))
             });
         let mut solid = solid;
         if let Some(b) = self.buildings.iter().find(|b| b.target == t) {

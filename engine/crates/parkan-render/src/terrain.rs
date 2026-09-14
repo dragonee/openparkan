@@ -25,6 +25,56 @@ struct GpuVertex {
 struct LayersUniform {
     tint1: [f32; 4],
     tint2: [f32; 4],
+    /// The cut mask's origin x and y, texels a unit, and 1 when there is one; its size.
+    cut: [f32; 4],
+    cut_size: [f32; 4],
+}
+
+/// Whether (x, y) lies inside an outline, by the crossing test.
+fn contains(points: &[[f32; 2]], x: f32, y: f32) -> bool {
+    let mut inside = false;
+    for i in 0..points.len() {
+        let (a, b) = (points[i], points[(i + 1) % points.len()]);
+        if (a[1] > y) != (b[1] > y) && x < a[0] + (y - a[1]) / (b[1] - a[1]) * (b[0] - a[0]) {
+            inside = !inside;
+        }
+    }
+    inside
+}
+
+/// Texels a unit in the mask of where buildings cut the landscape away.
+pub const CUT_TEXELS_PER_UNIT: f32 = 2.0;
+
+/// The mask of the buildings' inner rings over their joint box: 255 inside a ring. Its origin,
+/// width and height; a 1 × 1 empty mask with no rings.
+pub fn cut_mask(cuts: &[Vec<[f32; 2]>]) -> ([f32; 2], u32, u32, Vec<u8>) {
+    let mut lo = [f32::MAX; 2];
+    let mut hi = [f32::MIN; 2];
+    for p in cuts.iter().flatten() {
+        lo = [lo[0].min(p[0]), lo[1].min(p[1])];
+        hi = [hi[0].max(p[0]), hi[1].max(p[1])];
+    }
+    if cuts.is_empty() || lo[0] > hi[0] {
+        return ([0.0; 2], 1, 1, vec![0]);
+    }
+    let size = |a: usize| (((hi[a] - lo[a]) * CUT_TEXELS_PER_UNIT).ceil() as u32 + 1).min(8192);
+    let (w, h) = (size(0), size(1));
+    let mut mask = vec![0u8; (w * h) as usize];
+    for ring in cuts {
+        let rlo = ring.iter().fold([f32::MAX; 2], |m, p| [m[0].min(p[0]), m[1].min(p[1])]);
+        let rhi = ring.iter().fold([f32::MIN; 2], |m, p| [m[0].max(p[0]), m[1].max(p[1])]);
+        let texel = |v: f32, a: usize| ((v - lo[a]) * CUT_TEXELS_PER_UNIT).floor().max(0.0) as u32;
+        for y in texel(rlo[1], 1)..=texel(rhi[1], 1).min(h - 1) {
+            for x in texel(rlo[0], 0)..=texel(rhi[0], 0).min(w - 1) {
+                let cx = lo[0] + (x as f32 + 0.5) / CUT_TEXELS_PER_UNIT;
+                let cy = lo[1] + (y as f32 + 0.5) / CUT_TEXELS_PER_UNIT;
+                if contains(ring, cx, cy) {
+                    mask[(y * w + x) as usize] = 255;
+                }
+            }
+        }
+    }
+    (lo, w, h, mask)
 }
 
 struct DrawGroup {
@@ -126,6 +176,7 @@ pub struct TerrainRenderer {
 impl TerrainRenderer {
     pub fn new(
         device: &wgpu::Device,
+        queue: &wgpu::Queue,
         format: wgpu::TextureFormat,
         terrain: &Terrain,
         textures: &GpuTextures,
@@ -167,6 +218,7 @@ impl TerrainRenderer {
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                     count: None,
                 },
+                texture(4),
             ],
         });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -302,6 +354,42 @@ impl TerrainRenderer {
             usage: wgpu::BufferUsages::INDEX,
         });
 
+        // Where the buildings cut the landscape away (docs/03, "Placing a building cuts the
+        // landscape"): nothing of the ground draws inside an inner ring.
+        let (cut_origin, cut_w, cut_h, cut_texels) = cut_mask(&terrain.cuts);
+        let cut_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("terrain cuts"),
+            size: wgpu::Extent3d { width: cut_w, height: cut_h, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::R8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &cut_texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &cut_texels,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(cut_w),
+                rows_per_image: Some(cut_h),
+            },
+            wgpu::Extent3d { width: cut_w, height: cut_h, depth_or_array_layers: 1 },
+        );
+        let cut_view = cut_texture.create_view(&Default::default());
+        let cut = [
+            cut_origin[0],
+            cut_origin[1],
+            CUT_TEXELS_PER_UNIT,
+            f32::from(u8::from(!terrain.cuts.is_empty())),
+        ];
+        let cut_size = [cut_w as f32, cut_h as f32, 0.0, 0.0];
         let view_of = |layer: Option<&Layer>| textures.view(layer.and_then(|l| l.still.texture));
         let groups = terrain
             .groups
@@ -318,6 +406,8 @@ impl TerrainRenderer {
                         g.layer2.as_ref(),
                         g.layer2.as_ref().is_some_and(|l| l.still.texture.is_some()),
                     ),
+                    cut,
+                    cut_size,
                 };
                 let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                     label: Some("terrain layers"),
@@ -340,6 +430,10 @@ impl TerrainRenderer {
                         wgpu::BindGroupEntry {
                             binding: 3,
                             resource: wgpu::BindingResource::Sampler(&textures.sampler),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 4,
+                            resource: wgpu::BindingResource::TextureView(&cut_view),
                         },
                     ],
                 });

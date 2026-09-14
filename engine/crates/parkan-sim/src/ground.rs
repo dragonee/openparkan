@@ -45,10 +45,39 @@ impl Hit {
 /// What the map's water level is taken as with no water (`Terrain.dll:0x10017d60`).
 pub const NO_WATER_LEVEL: f32 = -1.0;
 
+/// A building's inner ring in the world, across the ground: the landscape is cut from under it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Cut {
+    pub points: Vec<[f32; 2]>,
+    pub lo: [f32; 2],
+    pub hi: [f32; 2],
+}
+
+impl Cut {
+    pub fn new(points: Vec<[f32; 2]>) -> Self {
+        let lo = points.iter().fold([f32::MAX; 2], |m, p| [m[0].min(p[0]), m[1].min(p[1])]);
+        let hi = points.iter().fold([f32::MIN; 2], |m, p| [m[0].max(p[0]), m[1].max(p[1])]);
+        Self { points, lo, hi }
+    }
+
+    pub fn holds(&self, x: f32, y: f32) -> bool {
+        (self.lo[0]..=self.hi[0]).contains(&x)
+            && (self.lo[1]..=self.hi[1]).contains(&y)
+            && parkan_formats::basement::contains(&self.points, x, y)
+    }
+}
+
 pub struct Ground {
     pub land: LandMesh,
     /// Placed objects' faces, by the caller's numbering; a building's are ground.
     pub solids: Vec<Solid>,
+    /// Where placed buildings have cut the landscape away (docs/03, "Placing a building cuts
+    /// the landscape").
+    ///
+    /// STAND-IN: docs/03-terrain.md#for-an-engine -- the insertion's patch and basement faces
+    /// are not built: the landscape is left out only inside a building's inner ring, and keeps
+    /// its own faces between the inner and the outer ring.
+    pub cuts: Vec<Cut>,
     lo: [f32; 2],
     size: [usize; 2],
     cells: Vec<Vec<u32>>,
@@ -84,7 +113,7 @@ impl Ground {
                 }
             }
         }
-        Self { land, solids: Vec::new(), lo, size, cells, water, world: (lo3, hi3) }
+        Self { land, solids: Vec::new(), cuts: Vec::new(), lo, size, cells, water, world: (lo3, hi3) }
     }
 
     /// The height the map gives its water (`Terrain.dll:0x10019180`, `ITerrain` slot 11, docs/35-hud.md,
@@ -145,7 +174,8 @@ impl Ground {
                         continue;
                     };
                     let d2 = (q - p0).length_squared();
-                    if crate::hit::inside(q, a, b, c) && best.is_none_or(|s| d2 < s.d2) {
+                    if crate::hit::inside(q, a, b, c) && best.is_none_or(|s| d2 < s.d2) && !self.cut(q.x, q.y)
+                    {
                         best = Some(crate::hit::Strike { point: q, d2, node: None, triangle: f as usize });
                     }
                 }
@@ -166,8 +196,14 @@ impl Ground {
 
     /// The ground faces whose triangle holds `(x, y)`, in the file's order, which is the
     /// landscape's cell order, each with its barycentric height there.
+    /// Whether a building has cut the landscape away at (x, y).
+    pub fn cut(&self, x: f32, y: f32) -> bool {
+        self.cuts.iter().any(|c| c.holds(x, y))
+    }
+
     fn holding(&self, x: f32, y: f32) -> impl Iterator<Item = (usize, f32)> + '_ {
-        self.holding_in(&self.cells, x, y)
+        let cut = self.cut(x, y);
+        self.holding_in(&self.cells, x, y).filter(move |_| !cut)
     }
 
     fn holding_in<'a>(
