@@ -119,7 +119,7 @@ Not yet: lightmaps (no Mission 01 mesh has one) and levels of detail beyond 0.
 
 On Mission 01 the hero is greeted in route 0, destroying the five targets
 completes the first objective and capturing both neutral warbots the second.
-Not yet: boarding a captured bot, the AI, and the ambient variations.
+Not yet: boarding a captured bot, and the ambient variations.
 
 **M7.** The hero sounds, and meets the world.
 
@@ -137,6 +137,20 @@ Not yet: boarding a captured bot, the AI, and the ambient variations.
 - The tilde opens the wingman menu on the friendly warbots on the radar
   (Shift+tilde to pick them by number), a digit gives its row's order, and the
   last one chosen acknowledges.
+- A wingman carries its order out. The task the order builds tells its walker
+  where to go, the walker cuts that into timed points, and the Wizard follows
+  them, writing the machine's velocity and turning its hull; a flyer's points
+  keep every axis. Standby holds. Follow me keeps within 20 + 20 of the hero.
+  Seek and destroy hunts the nearest hostile warrior, builder or transport and
+  roams when there is none; Search and capture looks for a building to take and
+  roams; Capture building walks to its building; Refit fails with no dock.
+  Between orders a unit engages the nearest hostile within 500, and an attack
+  circles 50–100 short of its target.
+- A wingman's fire control points its turret at the nearest hostile within 500,
+  or at what its attack is on. Guns fitted as parts of their own are armed, and
+  each fires one shot when its AI timer runs out and its score clears the bar,
+  or freely while the unit searches or attacks. On Mission 01 both wingmen,
+  sent to seek and destroy, fly to `tut1_e1` and destroy it.
 - A lake's bed kills. The ground contact reads the rate of what it touches,
   or of a bed whose water lies less than r below the body sphere's centre, and
   every 250 ms or so a unit's nodes each lose the same share of their life.
@@ -313,6 +327,16 @@ engine pass replaces each with what was read and removes its row.
 | M8 | The game's random source for a life update's spread | a 16-bit xorshift (7, 9, 8), seeded apart per unit | [24](../docs/24-motion.md#water-and-lava-beds-kill--read-and-measured) |
 | M8 | What follows the hero's death | the hero stops where it died, the mission fails with its voice and string 1013, and the progression stops | [34](../docs/34-progression.md#not-established) |
 | M8 | A material's start stamp, from which its track is played, and the random a mode-3 track jumps by | the world clock's 0 for every material; a hash of the clock | [07](../docs/07-objects.md#how-a-material-reaches-the-device--read-and-measured) |
+| M8 | The areal search, the local path and its obstacle contours; the Wizard's heading curve | the straight line to the place, cut into at least three points a second or more apart at the walk's velocity, ending in the read stop; the heading is the curve's velocity's direction | [24](../docs/24-motion.md#not-established) |
+| M8 | How a velocity the Wizard writes combines with the velocity integrator, and whether its spin is a rate or a fraction | a driven machine takes the written velocity as its own and turns toward the heading at up to its live yaw rate | [24](../docs/24-motion.md#not-established) |
+| M8 | The height a flyer's points are given; who reads `Movement_FlyHeight` | at least `FlyNearLandHeight`, 15, above the ground under the point | [24](../docs/24-motion.md#not-established) |
+| M8 | Which units run their behaviour | only the player's clan's robots, the wingmen; every other unit stands where it was placed | [31](../docs/31-packages.md#between-orders--read) |
+| M8 | How an engagement scores the radar's contacts through the task; follow's and refit's priorities for one | the nearest hostile unit within 500 is the best; follow and refit answer 0; an attack running is not given another | [31](../docs/31-packages.md#between-orders--read) |
+| M8 | The follower's two timers; the behaviour's random source | it measures once a second; a 32-bit xorshift | [31](../docs/31-packages.md#what-each-package-does--read) |
+| M8 | A building's pod, the generator's half distance, the construction phase, which areals are usable, and a dock for a refit | a capture walks to the building's placement; the retreat, read to lie off the map, roams; a roam takes the first point tried; no dock is modelled, so a refit always fails at its start | [31](../docs/31-packages.md#where-a-search-looks--read-and-measured) |
+| M8 | How the turret turns a traced point into its targets (`0x10028bb0`), its aim stage, and the gun's report codes | each channel moves on by the angle the sight is off, at the rate a small nudge turns it; θ is 0 once both channels reach their targets and π before; a guided gun's θ is its lock left × π | [29](../docs/29-weapons.md#how-the-ai-fires--read) |
+| M8 | A gun fitted as a part of its own: its ready byte and its barrels' recoil | ready; its recoil is not played | [29](../docs/29-weapons.md#a-gun-is-ready-once-its-arm-is-out--read-and-measured) |
+| M8 | Which difficulty profile a wingman holds: `Speed_MaximumFactor` | 1, as four of the five profiles set it | [26](../docs/26-damage.md#the-difficulty-ratio--read-and-measured) |
 
 ## Departures
 

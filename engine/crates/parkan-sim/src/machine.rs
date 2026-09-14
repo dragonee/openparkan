@@ -20,6 +20,7 @@ use parkan_formats::mesh::Mesh;
 
 use crate::ground::{Ground, Hit, contact_radius};
 use crate::motion::{self, Body, GRAVITY, Limits, SLOPE_MODE};
+use crate::wizard::Drive;
 
 /// A step is held to 0.01–5 s (`0x100057d6`).
 pub const STEP_MIN: f32 = 0.01;
@@ -166,6 +167,9 @@ pub struct Walker {
     /// since the caller last took them.
     pub planted: Vec<bool>,
     pub landed: Vec<usize>,
+    /// What the Wizard writes, when the AI drives: the velocity is taken as the machine's
+    /// own, and the hull turns toward the heading.
+    pub drive: Option<Drive>,
 }
 
 impl Walker {
@@ -249,6 +253,7 @@ impl Walker {
             planting: Vec::new(),
             planted: Vec::new(),
             landed: Vec::new(),
+            drive: None,
         }
     }
 
@@ -350,7 +355,18 @@ impl Walker {
         }
         let step = (step_ms / 1000.0) as f32;
 
-        let turned = motion::integrate_turn(&mut self.body.pending, &self.limits, step);
+        // STAND-IN: docs/24-motion.md#not-established -- how the velocity integrator's pull
+        // toward the command combines with a velocity the Wizard writes, and whether its
+        // spin is a rate or a fraction, are not read: a driven machine takes the written
+        // velocity as its own and turns toward the heading at up to its live yaw rate.
+        let turned = match self.drive.and_then(|d| d.heading) {
+            Some(heading) => {
+                let most = self.limits.turn[2].abs() * step;
+                [0.0, 0.0, wrap_angle(heading - self.body.yaw).clamp(-most, most)]
+            }
+            None if self.drive.is_some() => [0.0; 3],
+            None => motion::integrate_turn(&mut self.body.pending, &self.limits, step),
+        };
         // `0x10014cf0`: the change in strafe angle is added to the step's turn after the
         // turn-rate clamp, so the hull swings by the whole change in one step.
         let change = self.body.strafe - self.body.strafe_previous;
@@ -358,7 +374,12 @@ impl Walker {
         self.body.strafe_change = change;
         self.body.yaw = wrap_angle(self.body.yaw + turned[2] + change);
         self.body.spin = turned.map(|t| t / step);
-        motion::integrate_velocity(&mut self.body.velocity, self.body.command, &self.limits, step);
+        match self.drive {
+            Some(d) => self.body.velocity = d.in_frame(self.body.yaw, self.limits.top_speed),
+            None => {
+                motion::integrate_velocity(&mut self.body.velocity, self.body.command, &self.limits, step)
+            }
+        }
         if self.controller.mode == SLOPE_MODE {
             let along = self.body.to_world(Vec3::from_array(self.body.velocity));
             let normal = self.body.ground_normal;

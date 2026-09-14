@@ -5,6 +5,7 @@
 //! behaviour is not established the code says `STAND-IN` and names the doc
 //! section, and `engine/README.md` lists it.
 
+pub mod behaviour;
 pub mod combat;
 pub mod damage;
 pub mod effects;
@@ -21,3 +22,4 @@ pub mod sky;
 pub mod solid;
 pub mod targeting;
 pub mod turret;
+pub mod wizard;

@@ -699,25 +699,8 @@ fn captured_warbots_answer_the_wingman_menu_with_the_order_its_row_gives() {
     use parkan_sim::orders::{FOLLOW, STAYGROUND, State, Target};
     use parkan_world::play::View;
 
-    let (mut play, m) = mission_01_play();
-    let tick = 1000.0 / 60.0;
-    let target_of = |path: &str| {
-        let object = m.objects.iter().position(|o| o.path.to_ascii_lowercase().ends_with(path)).unwrap();
-        play.battle.objects.iter().position(|&o| o == object).unwrap()
-    };
-    let (mf1, helic) = (target_of("tut1_mf1.dat"), target_of("helic.dat"));
-    for bot in [mf1, helic] {
-        stand_facing(&mut play, bot, 12.0, 3.5);
-        play.tick(tick, [0.0; 2]);
-        while play.targets.current != Some(bot) {
-            play.targets.select_next();
-        }
-        assert!(play.enter());
-    }
-    // A radar takt later both are the player's, and on its radar: wingmen.
-    for _ in 0..60 {
-        play.tick(tick, [0.0; 2]);
-    }
+    // A radar takt after the capture both are the player's, and on its radar: wingmen.
+    let (mut play, [mf1, helic, _]) = mission_01_wingmen();
     assert_eq!(play.wingmen().len(), 2);
     let eye = play.hero.eye();
     let view = |shift| View { eye: eye.position, look: eye.forward, view_proj: glam::Mat4::IDENTITY, shift };
@@ -824,4 +807,96 @@ fn mission_01s_buoys_hold_the_hero_off_their_cones() {
         let eye = play.hero.eye().position.truncate().distance(b.truncate());
         assert!(closest > 3.0 && eye > 3.0, "buoy {buoy}: the hero came within {closest}, its eye {eye}");
     }
+}
+
+/// Mission 01 with both neutral warbots captured and a radar takt later on the hero's
+/// radar: the play, and the targets of `tut1_mf1`, `helic` and the hostile `tut1_e1`.
+fn mission_01_wingmen() -> (parkan_world::play::Play, [usize; 3]) {
+    let (mut play, m) = mission_01_play();
+    let tick = 1000.0 / 60.0;
+    let target_of = |path: &str| {
+        let object = m.objects.iter().position(|o| o.path.to_ascii_lowercase().ends_with(path)).unwrap();
+        play.battle.objects.iter().position(|&o| o == object).unwrap()
+    };
+    let bots = [target_of("tut1_mf1.dat"), target_of("helic.dat"), target_of("tut1_e1.dat")];
+    for bot in [bots[0], bots[1]] {
+        stand_facing(&mut play, bot, 12.0, 3.5);
+        play.tick(tick, [0.0; 2]);
+        while play.targets.current != Some(bot) {
+            play.targets.select_next();
+        }
+        assert!(play.enter());
+    }
+    for _ in 0..60 {
+        play.tick(tick, [0.0; 2]);
+    }
+    (play, bots)
+}
+
+#[test]
+#[ignore = "needs the game install"]
+fn wingmen_follow_seek_and_destroy_stand_by_and_fail_a_refit_with_no_dock() {
+    use glam::Vec3;
+    use parkan_sim::behaviour::Task;
+    use parkan_world::play::{Play, View};
+
+    let tick = 1000.0 / 60.0;
+    let order = |play: &mut Play, row: usize| {
+        let eye = play.hero.eye();
+        let view =
+            View { eye: eye.position, look: eye.forward, view_proj: glam::Mat4::IDENTITY, shift: false };
+        play.command("CMD_JAMES_WINGMAN_MENU", &view);
+        assert!(play.wingman_digit(row));
+    };
+    let run = |play: &mut Play, seconds: usize| {
+        for _ in 0..60 * seconds {
+            play.tick(tick, [0.0; 2]);
+        }
+    };
+    let at =
+        |play: &Play, t: usize| play.robots.iter().find(|(rt, _)| *rt == t).unwrap().1.walker.body.position;
+    let task =
+        |play: &Play, t: usize| play.robots.iter().find(|(rt, _)| *rt == t).unwrap().1.behaviour.task();
+
+    // Follow me (docs/31): the hero leaves them 130 m behind; they close to within the
+    // radius and its slack, 20 + 20, and hold there.
+    let (mut play, [mf1, helic, e1]) = mission_01_wingmen();
+    assert!(play.robots.iter().all(|(t, r)| ![mf1, helic].contains(t) || (r.flyer && !r.guns.is_empty())));
+    assert_eq!(play.hero.guns.len(), 4, "the hero's own guns only");
+    order(&mut play, 2);
+    let start = play.hero.walker.body.position;
+    put(&mut play.hero.robot.walker, &play.ground, start + Vec3::new(60.0, -120.0, 40.0));
+    run(&mut play, 15);
+    let hero = play.hero.walker.body.position;
+    for bot in [mf1, helic] {
+        let off = at(&play, bot).truncate().distance(hero.truncate());
+        assert!(off < 45.0, "a follower keeps near: {off}");
+        assert!(matches!(task(&play, bot), Task::Follow { .. }));
+    }
+
+    // Standby: they hold where they are.
+    order(&mut play, 1);
+    run(&mut play, 1);
+    let held = [at(&play, mf1), at(&play, helic)];
+    put(&mut play.hero.robot.walker, &play.ground, start);
+    run(&mut play, 5);
+    assert!([mf1, helic].iter().zip(held).all(|(&b, p)| at(&play, b).distance(p) < 2.0), "standby holds");
+
+    // Refit: Mission 01 has no dock, so the task fails at its start and they stop.
+    order(&mut play, 7);
+    run(&mut play, 1);
+    assert!([mf1, helic].iter().all(|&b| !matches!(task(&play, b), Task::Reload)));
+
+    // Seek and destroy: the one hostile warrior on the map, `tut1_e1`, is hunted and shot.
+    order(&mut play, 4);
+    let mut killed = None;
+    for s in 0..60 {
+        run(&mut play, 1);
+        if !play.battle.combat.targets[e1].alive {
+            killed = Some(s);
+            break;
+        }
+    }
+    assert!(killed.is_some(), "the wingmen destroy tut1_e1");
+    assert!(play.killed.contains(&play.battle.objects[e1]));
 }

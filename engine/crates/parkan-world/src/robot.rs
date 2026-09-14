@@ -10,17 +10,20 @@ use std::rc::Rc;
 use anyhow::{Context, Result};
 use glam::{Quat, Vec3};
 use parkan_formats::control::{
-    self, CAMERA_TYPE, Controller, GUN_TYPE, RADAR_PERIOD, RADAR_RANGE, RADAR_TYPE, TURRET_TYPE,
+    self, CAMERA_TYPE, Channel, Component, Controller, GUN_TYPE, RADAR_PERIOD, RADAR_RANGE, RADAR_TYPE,
+    TURRET_TYPE,
 };
 use parkan_formats::cpt::{self, ControlPoint};
 use parkan_formats::mission::Mission;
 use parkan_formats::pose::{Pose, multiply, rotate};
+use parkan_sim::behaviour::Behaviour;
 use parkan_sim::damage::GroundDamage;
 use parkan_sim::ground::Ground;
 use parkan_sim::guns::{Gun, Shot, Sight, TargetGate};
 use parkan_sim::machine::Walker;
 use parkan_sim::targeting::Radar;
 use parkan_sim::turret::{ARM_FOLD, ARM_UNFOLD, Rig, view};
+use parkan_sim::wizard::{Wizard, yaw_along};
 
 use crate::assembly::{Assembly, LoadedMesh, Part};
 use crate::battle::{Battle, STARTS_SELECTED};
@@ -47,10 +50,25 @@ pub struct Eye {
 /// that part it hangs on.
 #[derive(Clone)]
 pub struct RobotPart {
+    /// The `objects.rlb` record the part is built from.
+    pub record: String,
     pub mesh: Rc<LoadedMesh>,
     pub host: i32,
     pub node: i32,
 }
+
+/// A gun fitted as a part of its own (`e_gun_*` on a turret socket, docs/29): the part,
+/// and its controller's channels and control points, which its barrels name.
+#[derive(Clone, Debug)]
+pub struct GunPart {
+    pub part: usize,
+    pub channels: Vec<Channel>,
+    pub points: Vec<ControlPoint>,
+}
+
+/// The profile whose chassis flies: `CanFly` without `WalkChassis` is on it alone of the
+/// six (docs/24, "How the AI drives a machine").
+pub const FLYING_PROFILE: &str = "chas_fly.var";
 
 pub struct Robot {
     /// The mission object the robot is.
@@ -75,9 +93,19 @@ pub struct Robot {
     /// The turret's controller and control points.
     pub turret_controller: Controller,
     pub points: Vec<ControlPoint>,
-    /// The turret's guns, and the round kind each fires in its `Battle`.
+    /// The turret's guns, then the guns fitted as parts; the round kind each fires in its
+    /// `Battle`; and for a fitted gun, its part.
     pub guns: Vec<Gun>,
     pub rounds: Vec<Option<usize>>,
+    pub gun_parts: Vec<Option<GunPart>>,
+    /// Whether its chassis flies: its movement points keep every axis.
+    pub flyer: bool,
+    /// The points it follows, and what it does with its orders, when the AI drives it.
+    pub wizard: Wizard,
+    pub behaviour: Behaviour,
+    /// When each gun may next fire on the AI's timer, and the target its guns were given.
+    pub next_shot_ms: Vec<f64>,
+    pub fire_target: Option<usize>,
     /// The unit's one radar: its fitted radar part's, else its turret's (docs/25).
     pub radar: Radar,
     /// The collision sphere in the unit's frame: its centre and radius.
@@ -159,7 +187,12 @@ impl Robot {
             {
                 turret_index = robot_parts.len();
             }
-            robot_parts.push(RobotPart { mesh, host: part.host, node: part.node });
+            robot_parts.push(RobotPart {
+                record: part.record.clone(),
+                mesh,
+                host: part.host,
+                node: part.node,
+            });
         }
         let turret_mesh = assembly.mesh(&turret_part.reference).context("the turret mesh does not load")?;
         let points = match assembly
@@ -226,8 +259,19 @@ impl Robot {
             Some(b'b') => 4,
             _ => 0,
         };
+        let flyer = assembly
+            .library
+            .get(&chassis_part.record)
+            .and_then(|r| r.slot_with_suffix("var"))
+            .is_some_and(|v| v.member.eq_ignore_ascii_case(FLYING_PROFILE));
         Ok(Some(Robot {
             object,
+            flyer,
+            wizard: Wizard::default(),
+            behaviour: Behaviour::new((object as u32).wrapping_mul(2_654_435_761)),
+            next_shot_ms: Vec::new(),
+            fire_target: None,
+            gun_parts: Vec::new(),
             size_class,
             order: None,
             parts: robot_parts,
@@ -263,24 +307,71 @@ impl Robot {
     pub fn arm(&mut self, battle: &mut Battle, assembly: &mut Assembly) {
         self.guns.clear();
         self.rounds.clear();
+        self.gun_parts.clear();
         let components = self.turret_controller.components.clone();
         for (i, c) in components.iter().enumerate().filter(|(_, c)| c.type_id == GUN_TYPE) {
             let mut gun = Gun::new(i, c, &self.turret_controller.channels);
-            let kind = battle.round_kind(assembly, &c.resource.member);
+            let kind = self.fit(&mut gun, c, battle, assembly);
             gun.selected = kind.is_some_and(|k| battle.kinds[k].frame_flags & STARTS_SELECTED != 0);
-            // The gun keeps its round's top speed and whether it falls (`0x100297ef`).
-            gun.round_speed = kind.map_or(0.0, |k| battle.combat.kinds[k].top_speed);
-            gun.falls = controller(assembly, &c.resource.member).ok().flatten().is_some_and(|r| r.mode != 0);
-            // Values 8-10 from the round: its range, and a guided round's cone and lock.
-            if let Some(k) = kind.map(|k| &battle.combat.kinds[k]) {
-                gun.link(TargetGate::new(k.range, k.seeker.map(|s| (s.cone, s.reach, s.lock_ms))));
-            }
             if let Some(arm) = self.rig.arms.get_mut(self.guns.len()) {
                 arm.send(if gun.selected { ARM_UNFOLD } else { ARM_FOLD });
             }
             self.guns.push(gun);
             self.rounds.push(kind);
+            self.gun_parts.push(None);
         }
+        // The guns fitted as parts of their own: each part's controller's class-2 component.
+        for p in 0..self.parts.len() {
+            if p == self.chassis_part || p == self.turret_part {
+                continue;
+            }
+            let record = self.parts[p].record.clone();
+            let Some(ctl) = controller(assembly, &record).ok().flatten() else { continue };
+            let points = assembly
+                .library
+                .get(&record)
+                .and_then(|r| r.slot_with_suffix("cpt"))
+                .cloned()
+                .and_then(|slot| read_member(assembly, &slot.library, &slot.member).ok().map(|b| (b, slot)))
+                .and_then(|(b, slot)| cpt::parse(&b, &slot.member).ok())
+                .unwrap_or_default();
+            for (i, c) in ctl.components.iter().enumerate().filter(|(_, c)| c.type_id == GUN_TYPE) {
+                let mut gun = Gun::new(i, c, &ctl.channels);
+                let kind = self.fit(&mut gun, c, battle, assembly);
+                // STAND-IN: docs/29-weapons.md#a-gun-is-ready-once-its-arm-is-out--read-and-measured
+                // -- a gun fitted as a part has no mount on the turret's list: its ready byte
+                // is taken as set, and its barrels' recoil is not played.
+                gun.ready = true;
+                gun.selected = true;
+                self.guns.push(gun);
+                self.rounds.push(kind);
+                self.gun_parts.push(Some(GunPart {
+                    part: p,
+                    channels: ctl.channels.clone(),
+                    points: points.clone(),
+                }));
+            }
+        }
+        self.next_shot_ms = vec![0.0; self.guns.len()];
+    }
+
+    /// A gun's round loaded into `battle`, and what the gun keeps of it: its top speed,
+    /// whether it falls (`0x100297ef`), and values 8-10 from it, its range and a guided
+    /// round's cone and lock.
+    fn fit(
+        &self,
+        gun: &mut Gun,
+        c: &Component,
+        battle: &mut Battle,
+        assembly: &mut Assembly,
+    ) -> Option<usize> {
+        let kind = battle.round_kind(assembly, &c.resource.member);
+        gun.round_speed = kind.map_or(0.0, |k| battle.combat.kinds[k].top_speed);
+        gun.falls = controller(assembly, &c.resource.member).ok().flatten().is_some_and(|r| r.mode != 0);
+        if let Some(k) = kind.map(|k| &battle.combat.kinds[k]) {
+            gun.link(TargetGate::new(k.range, k.seeker.map(|s| (s.cone, s.reach, s.lock_ms))));
+        }
+        kind
     }
 
     /// Hand the turret's guns `target` (`iron3d.dll:0x10091a80`): the turret is in
@@ -311,24 +402,24 @@ impl Robot {
         }
         self.rig.update((dt_ms / 1000.0) as f32, &mut self.guns);
         // What each gun's gate sees: the unit, its barrel point's direction, its target.
-        let sights: Vec<Sight> = self
-            .guns
-            .iter()
-            .map(|g| Sight {
+        let sights: Vec<Sight> = (0..self.guns.len())
+            .map(|i| Sight {
                 unit: self.walker.body.position,
-                barrel: g
-                    .barrels
-                    .get(g.current)
-                    .and_then(|b| self.muzzle(b.channel))
-                    .map_or(Vec3::Y, |m| m.1),
-                target: g.target.and(self.target_point),
+                barrel: self.gun_muzzle(i, self.guns[i].current).map_or(Vec3::Y, |m| m.1),
+                target: self.guns[i].target.and(self.target_point),
             })
             .collect();
         let mut shots = Vec::new();
         for (i, (g, sight)) in self.guns.iter_mut().zip(sights).enumerate() {
             g.sight = sight;
+            if self.gun_parts.get(i).is_some_and(Option::is_some) {
+                g.ready = true;
+            }
             g.recharge();
             shots.extend(g.tick(self.time_ms).into_iter().map(|s| (i, s)));
+            if self.gun_parts.get(i).is_some_and(Option::is_some) {
+                continue;
+            }
             for b in &g.barrels {
                 if let Some(v) = self.rig.values.get_mut(b.channel) {
                     *v = b.value(self.time_ms);
@@ -388,6 +479,52 @@ impl Robot {
     /// A barrel's muzzle (`0x1002a302`): its channel's control point, in the world.
     pub fn muzzle(&self, channel: usize) -> Option<(Vec3, Vec3)> {
         self.point(usize::try_from(self.rig.channels.get(channel)?.point).ok()?)
+    }
+
+    /// Barrel `barrel` of gun `gun`'s muzzle in the world: a turret gun's through the
+    /// turret's channels, a fitted gun's through its own part's control point.
+    pub fn gun_muzzle(&self, gun: usize, barrel: usize) -> Option<(Vec3, Vec3)> {
+        let barrel = self.guns.get(gun)?.barrels.get(barrel)?;
+        let Some(Some(fitted)) = self.gun_parts.get(gun) else { return self.muzzle(barrel.channel) };
+        let point = fitted.points.get(usize::try_from(fitted.channels.get(barrel.channel)?.point).ok()?)?;
+        let (position, yaw) = self.walker.drawn(self.time_ms);
+        let heading = Quat::from_rotation_z(yaw);
+        let pose = self.part_pose(fitted.part, usize::try_from(point.nodes().0).unwrap_or(0));
+        let f = |v: [f64; 3]| Vec3::new(v[0] as f32, v[1] as f32, v[2] as f32);
+        let at = f(pose.apply(point.position.map(f64::from)));
+        let dir = f(rotate(pose.rotation, point.direction.map(f64::from)));
+        Some((position + heading * at, heading * dir))
+    }
+
+    /// The turret put in `CIS_POINTTRACE` on `point` (`0x10024c51`): its yaw and pitch
+    /// targets set so the sight looks at it.
+    ///
+    /// STAND-IN: docs/29-weapons.md#how-the-ai-fires--read -- how the turret turns a traced
+    /// point into its targets (`0x10028bb0`) is not read: each channel is moved on from its
+    /// value by the angle the sight is off, at the rate a small nudge of the channel turns
+    /// the sight, the aim being linear in the value (docs/30).
+    pub fn aim_at(&mut self, point: Vec3) {
+        let Some((origin, direction)) = self.sight() else { return };
+        let want = point - origin;
+        let yaw = |d: Vec3| yaw_along(d).unwrap_or(0.0);
+        let rise = |d: Vec3| d.z.atan2(d.truncate().length());
+        for (axis, channel) in [(0, self.rig.yaw), (1, self.rig.pitch)] {
+            let Some(c) = channel else { continue };
+            let angle = |d: Vec3| if axis == 0 { yaw(d) } else { rise(d) };
+            let wraps = self.rig.channels[c].flags & control::CHANNEL_WRAP != 0;
+            let now = self.rig.values[c];
+            let nudge = if now > 0.99 { -0.01 } else { 0.01 };
+            self.rig.values[c] = now + nudge;
+            let nudged = self.sight().map_or(direction, |s| s.1);
+            self.rig.values[c] = now;
+            let rate = parkan_sim::machine::wrap_angle(angle(nudged) - angle(direction)) / nudge;
+            if rate.abs() < 1e-3 {
+                continue;
+            }
+            let v = now + parkan_sim::machine::wrap_angle(angle(want) - angle(direction)) / rate;
+            let v = if wraps { v.rem_euclid(1.0) } else { v.clamp(0.0, 1.0) };
+            self.rig.aim[axis] = if self.rig.upright { 1.0 - v } else { v };
+        }
     }
 
     /// A chassis node's pose in the unit's frame, the chassis playing its frames as the
