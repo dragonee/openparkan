@@ -244,8 +244,11 @@ that builds what the warbot designer draws, and a warbot the hero boards.
   a building of another clan changes owner with "Building is captured" and its
   voice, and for the player's hero a plant opens the factory screen.
 - The landscape is cut away inside a building's inner ground-plan ring, from the
-  ground queries and the draw; its black `DEFAULT` doorway quads let a mover
-  through, and the slope brake is left out on its faces. Lightmaps light a
+  ground queries and the draw; its black doorway and portal quads let a mover
+  through, its floors (triangle flag 2) do not push a walker, a push down on a
+  unit standing on it is taken whole, and the slope brake is left out on its
+  faces, so the hero walks in by the Large Factory's west side door and down its
+  ramps and stairs to the pod. Lightmaps light a
   building's lit batches, and each building runs its load group: the Large
   Factory's lamps, screens and chimney smoke, Mission 01's bridge lights.
 - The factory screen, laid out as docs/36 reads it, replaces the HUD in view
@@ -269,9 +272,9 @@ that builds what the warbot designer draws, and a warbot the hero boards.
 
 On Mission 02 the factory's pod captures it, the design is built in 60 s, the
 hero flies the warbot to the island, gets out and takes the Outpost from its
-pod, and the mission is won. Not yet: the walk from the factory's door down to
-its pod, whose stairs and walls still stop the walker (use `--pod`); the chimney
-smoke is orange where the recording's is black; the designer's save and load;
+pod, and the mission is won. Not yet: the front door's hall does not lead to the
+pod (the recording's hero takes the west side door); the chimney smoke is orange
+where the recording's is black; the designer's save and load;
 the own panel's unit while aboard.
 
 This directory also holds what the rest will follow:
@@ -461,7 +464,8 @@ engine pass replaces each with what was read and removes its row.
 | M7 | How a playing sound's position, near, far and volume become gain | a sound keeps the linear gain and pan it started with, a loop included | [11](../docs/11-effects.md#type-2-is-a-sound--read-and-measured) |
 | M7 | What `0x1000e900` accepts past its first edge test, and the class the small-face stop reads | a face whose plane has the centre in front within the radius, measured to the triangle's nearest point; the hero's class is its size class, 2, so small faces never stop it | [24](../docs/24-motion.md#collision-between-objects--read) |
 | M7 | The batch flags 8 and 0x200 a collision's face query passes: a mesh's batch record carries no such word | no batch passes | [24](../docs/24-motion.md#collision-between-objects--read) |
-| M7 | How a machine gets onto a ramp whose faces push its sphere back | the hero is always the mover and nothing else is pushed, and a building's walkable faces never push | [24](../docs/24-motion.md#standing-on-a-bridge--read-and-measured) |
+| M7 | Which pairs the collision pass moves besides the hero's | the hero is always the mover and nothing else is pushed | [24](../docs/24-motion.md#collision-between-objects--read) |
+| M11 | Who sets a collision object's flags, so which movers carry 8 and keep the floors (triangle flag 2) in their push-out | no mover carries 8: every floor lets a mover by | [24](../docs/24-motion.md#not-established) |
 | M8 | The two labels a wingman line draws beside its number, and where the panel and the order menu stand on screen | the unit's name; wingmen down the left 19 apart from (20, 100), rows 19 apart from (220, 250), on a 640 by 480 screen | [31](../docs/31-packages.md#the-wingman-menu-from-first-person--read-and-measured) |
 | M8 | Whether a digit the wingman selector takes also reaches the input table that toggles the hero's guns | it does not | [31](../docs/31-packages.md#the-wingman-menu-from-first-person--read-and-measured) |
 | M8 | What a unit record's `+0x30` is, which picks capturers and the acknowledgement voices | the size class of the chassis's name: t 1, l and h 2, m 3, b 4 | [31](../docs/31-packages.md#the-wingman-menu-from-first-person--read-and-measured) |
@@ -506,8 +510,8 @@ engine pass replaces each with what was read and removes its row.
 | M11 | How the cursor is shown in view mode 5 | the system's cursor, with the grab let go | [36](../docs/36-factory.md#not-established) |
 | M11 | Which areals the escape's random points must be on | the first point tried within 150 of the unit, inside the map by 100 | [31](../docs/31-packages.md#the-escape--read) |
 | M11 | The heights and textures of the patch and basement faces a building's insertion stitches in | the landscape is left out only inside a building's inner ring, from the ground queries and the draw, and keeps its own faces between the inner and outer rings | [03](../docs/03-terrain.md#for-an-engine) |
-| M11 | Where a gathered face's batch word, whose 8 and 0x200 the collision query passes, comes from | the faces of the `DEFAULT` material, a building's black doorway quads, let a mover through, as a recording shows | [24](../docs/24-motion.md#the-ground-inside-a-building--read-in-part-and-measured) |
-| M11 | How a walker climbs a building's stairs against the push and the slope brake | on a building's faces the slope brake is left out; the walkable faces still do not push (M7) | [24](../docs/24-motion.md#the-ground-inside-a-building--read-in-part-and-measured) |
+| M11 | Where a gathered face's batch word, whose 8 and 0x200 the collision query passes, comes from | the faces of the `DEFAULT`, `PORTAL_001` and `PORTAL_004` materials, a building's black doorway and portal quads, let a mover through, as a recording shows | [24](../docs/24-motion.md#the-ground-inside-a-building--read-in-part-and-measured) |
+| M11 | Whether the slope brake reads a building's stair faces | on a building's faces the slope brake is left out | [24](../docs/24-motion.md#the-ground-inside-a-building--read-in-part-and-measured) |
 | M11 | Which of a turret's nodes the boarding test's property `0x52` reads the life of | the turret part's node 0 | [39](../docs/39-boarding.md#boarding--read) |
 | M11 | The heading the hero is given on leaving a bot, read as (F.x, −F.y) under an assumed matrix layout | the hero faces the bot | [39](../docs/39-boarding.md#not-established) |
 | M11 | The name a bot's gun takes in the weapons list (`0x1008a470`, not followed) | the gun part's code in the player clan's research tree, or NONAME | [35](../docs/35-hud.md#the-weapons-list--read-and-measured) |

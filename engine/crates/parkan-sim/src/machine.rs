@@ -504,7 +504,11 @@ impl Walker {
             .states
             .get(self.machine.current)
             .is_some_and(|s| s.mode & STATE_GROUND_CONTACTS != 0);
-        self.body.position += if flat { motion::horizontal(push) } else { push };
+        // A machine whose parent is a building takes a push that points down whole
+        // (`Control.dll:0x1000c9eb`, docs/24, "Collision between objects").
+        let on_building = self.ground.is_some_and(|h| h.solid.is_some());
+        let whole = !flat || (on_building && push.z <= 0.0);
+        self.body.position += if whole { push } else { motion::horizontal(push) };
     }
 
     /// The body sphere's centre in the world.

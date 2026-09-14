@@ -16,6 +16,8 @@ pub const WALK_MARGIN: f32 = 0.5;
 /// A triangle flagged 4 passes a collision's faces: the big trees' leaves
 /// (`Control.dll:0x1001db5f`–`0x1001dbb8`).
 pub const COLLISION_SKIPS_FACE: u16 = 0x4;
+/// A triangle flagged 2 is a floor, which the push-out passes for a mover without flag 8.
+pub const FLOOR_FACE: u16 = 0x2;
 /// A push is held to this many radii (`AniMesh.dll:0x1000df50`, `0x10020970`).
 pub const PUSH_RADII: f32 = 4.0;
 /// A push below this squared length is no contact (`Control.dll:0x1001e05f`).
@@ -233,11 +235,15 @@ fn closest_on_triangle(p: Vec3, a: Vec3, b: Vec3, c: Vec3) -> Vec3 {
 /// carries no such word, so they are a flag set on the loaded batch that is not traced,
 /// and no batch passes, as a round's query takes it.
 ///
-/// STAND-IN: docs/24-motion.md#standing-on-a-bridge--read-and-measured -- how a machine
-/// gets onto a building's ramp while the ramp's faces push its sphere back is not read:
-/// a building's walkable faces, which the ground contact stands machines on, do not push.
-fn passes(face: &SolidFace, obstacle: &Solid) -> bool {
-    face.triangle_flags & COLLISION_SKIPS_FACE != 0 || (obstacle.ground && face.normal.z >= WALKABLE_NORMAL_Z)
+/// The push-out's own filter drops the floors, triangles flagged 2, unless the mover's
+/// collision flags carry 8 (`Control.dll:0x1001db2b`, `0x1001dbce`, docs/24, "The way to the
+/// pod").
+///
+/// STAND-IN: docs/24-motion.md#not-established -- who sets a collision object's flags is
+/// not read: no mover carries 8, so every floor lets a mover by, as a recording shows the
+/// hero walking the Large Factory's ramps and stairs.
+fn passes(face: &SolidFace, _obstacle: &Solid) -> bool {
+    face.triangle_flags & (COLLISION_SKIPS_FACE | FLOOR_FACE) != 0
 }
 
 /// A mover's sphere, from `start` to `end`, against an obstacle's faces

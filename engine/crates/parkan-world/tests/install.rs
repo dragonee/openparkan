@@ -1862,3 +1862,55 @@ fn mission_02_is_won_by_the_factory_the_warbot_it_builds_and_the_outpost_on_the_
     assert_eq!(p.progress.objectives.iter().map(|o| o.state).collect::<Vec<_>>()[..3], [1, 1, 1]);
     assert_eq!(p.progress.outcome, Some(true), "MISSION COMPLETE");
 }
+
+#[test]
+#[ignore = "needs the game install"]
+fn mission_02s_hero_walks_in_by_the_factorys_west_door_down_to_its_pod_and_captures_it() {
+    use parkan_world::play::Mode;
+
+    // The hall-way vertices of docs/24, "The way to the pod", from outside the west side door.
+    let route = [
+        [352.77, 789.66],
+        [363.75, 789.39],
+        [369.87, 789.24],
+        [370.33, 793.67],
+        [375.68, 793.70],
+        [386.35, 793.44],
+        [392.52, 792.99],
+        [392.30, 783.93],
+        [392.19, 778.47],
+        [391.63, 755.86],
+        [391.47, 749.50],
+        [391.24, 740.08],
+    ];
+    let (mut play, _) = mission_02_play();
+    assert!(play.stand_at(337.36, 790.04, -std::f32::consts::FRAC_PI_2));
+    play.hero.key("SCAN_W", true);
+    let mut next = 0;
+    let mut arrived = None;
+    for tick in 0..(60 * 60) {
+        let at = play.hero.walker.body.position;
+        while next < route.len() && glam::Vec2::from_array(route[next]).distance(at.truncate()) < 1.2 {
+            next += 1;
+        }
+        if next == route.len() {
+            if arrived.is_none() {
+                arrived = Some(tick);
+                play.hero.key("SCAN_W", false);
+            }
+        } else {
+            let to = glam::Vec2::from_array(route[next]) - at.truncate();
+            play.hero.walker.body.yaw = (-to.x).atan2(to.y);
+        }
+        play.update_input();
+        play.tick(1000.0 / 60.0, [0.0; 2]);
+        if play.mode() != Mode::OnFoot {
+            break;
+        }
+    }
+    let at = play.hero.walker.body.position;
+    let arrived = arrived.unwrap_or_else(|| panic!("stopped before vertex {next} of the route, at {at}"));
+    assert!(arrived < 40 * 60, "on the pod {} s in", arrived / 60);
+    assert!((at.z - 140.7).abs() < 1.0, "on the pod room's floor: {at}");
+    assert!(matches!(play.mode(), Mode::Factory(0)), "the pod captured the factory and opened its screen");
+}

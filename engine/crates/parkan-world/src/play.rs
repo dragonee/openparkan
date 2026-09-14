@@ -143,17 +143,18 @@ pub const VOICE_SELECTED_B: &str = "VOICE_SELECTED_B";
 /// (`0x100638a7`, docs/34 "Mission 02").
 pub const MESSAGE_FLYER_TAKEN: i64 = 100;
 
-/// The material a building's doorway quads wear: drawn black, it hides the inside.
-pub const DOORWAY_MATERIAL: &str = "DEFAULT";
+/// The see-through materials a building's doorways and portals wear (docs/24, "The way to
+/// the pod").
+pub const PORTAL_MATERIALS: [&str; 3] = ["DEFAULT", "PORTAL_001", "PORTAL_004"];
 
 /// Whether a face of material `name` lets a mover through.
 ///
 /// STAND-IN: docs/24-motion.md#the-ground-inside-a-building--read-in-part-and-measured --
 /// where a gathered face's batch word, whose 8 and 0x200 the collision query passes, comes
 /// from is not traced; a recording shows the hero walking through the Large Factory's black
-/// `DEFAULT` doorway, so that material's faces pass.
+/// `DEFAULT` doorway and its `PORTAL_001` quads, so those materials' faces pass.
 pub fn doorway(name: &str) -> bool {
-    name.eq_ignore_ascii_case(DOORWAY_MATERIAL)
+    PORTAL_MATERIALS.iter().any(|m| name.eq_ignore_ascii_case(m))
 }
 
 /// What a target is beside what a round strikes: its clan, its `Type` word, its logical id.
