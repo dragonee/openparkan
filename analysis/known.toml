@@ -23080,3 +23080,189 @@ kind = "datum"
 name = "the designer's picked record (0x330, 0x10046610): name, side +0xc0, item +0xf0, time +0xbc, double click +0xb8"
 read = true
 doc = "docs/37-designer.md"
+
+# --- how a building's inside is lit: the lightmap pass, docs/07-objects.md ---
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10045098"
+kind = "site"
+name = "CShade mesh draw: a batch record's flag 0x2000 marks a lit batch (the lightmap's)"
+read = true
+doc = "docs/07-objects.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10045963"
+kind = "site"
+name = "lit batch: the stream table's +0x28 (stream 18) becomes the draw item's second UV set (+0x158)"
+read = true
+doc = "docs/07-objects.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10045d8c"
+kind = "site"
+name = "lit batch: the material manager's slot 8 with the record's +8 answers the lightmap's texture"
+read = true
+doc = "docs/07-objects.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10045d97"
+kind = "site"
+name = "lit batch: the draw item and its lightmap handed to 0x1002c1a0"
+read = true
+doc = "docs/07-objects.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1002c1a0"
+kind = "function"
+name = "CShade lightmap set-up: diffuse into self-light, diffuse and power 0; phase 3 with the lightmap as texture 2, or a second unlit pass"
+read = true
+doc = "docs/07-objects.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1002c1bb"
+kind = "site"
+name = "lightmap set-up: the item's self-light rgb (+0x14..) takes its diffuse rgb (+0x4..), which is then zeroed"
+read = true
+doc = "docs/07-objects.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1002c201"
+kind = "site"
+name = "lightmap set-up: one pass when CShade+0x1918 (phase 3 supported) is set"
+read = true
+doc = "docs/07-objects.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1002c219"
+kind = "site"
+name = "lightmap set-up: render phase 3 (tex0 x tex1 x diffuse), second cell -1, blend CShade+0xbf4"
+read = true
+doc = "docs/07-objects.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1002c353"
+kind = "site"
+name = "lightmap second pass: a new item, unlit (flags 0x404), the page on stream 18, phase +0x1920, blend table entry 3"
+read = true
+doc = "docs/07-objects.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x100411d2"
+kind = "site"
+name = "ConfigureTextureAndAlphaBlendModes: CShade+0x1918 = IsPhaseSupported(3)"
+read = true
+doc = "docs/07-objects.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1004112e"
+kind = "site"
+name = "ConfigureTextureAndAlphaBlendModes: CShade+0x1920 = 7 where phase 7 is supported, else 1"
+read = true
+doc = "docs/07-objects.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x100411f2"
+kind = "site"
+name = "ConfigureTextureAndAlphaBlendModes: CShade+0xbf4 = blend table entry 0 with phase 3, entry 3 without"
+read = true
+doc = "docs/07-objects.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10046a98"
+kind = "site"
+name = "InitAlphaBlendModeTranslateTable: entry 0 = mode 0 (entry 3 = mode 3 at 0x10046abf)"
+read = true
+doc = "docs/07-objects.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1004569e"
+kind = "site"
+name = "mesh draw: the phase-6 path (two UV sets over one image) only for a batch without the lightmap flag"
+read = true
+doc = "docs/07-objects.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10046c91"
+kind = "site"
+name = "CShade+0xcc8 = shade setting 25, which gates the mesh draw's phase-6 path"
+read = true
+doc = "docs/07-objects.md"
+
+[[entry]]
+module = "World3D.dll"
+at = "0x100031a0"
+kind = "function"
+name = "material manager slot 8: the lightmap texture of key (wear << 16 | index into its LIGHTMAPS list)"
+read = true
+doc = "docs/07-objects.md"
+
+[[entry]]
+module = "World3D.dll"
+at = "0x10003e1c"
+kind = "site"
+name = "wear loader: the LIGHTMAPS keyword, its count to +0x358[wear] and its handles to +0x240[wear]"
+read = true
+doc = "docs/07-objects.md"
+
+[[entry]]
+module = "World3D.dll"
+at = "0x10003f24"
+kind = "site"
+name = "wear loader: each LIGHTMAPS name loaded through 0x10004cb0 (load flags 0x200000)"
+read = true
+doc = "docs/07-objects.md"
+
+[[entry]]
+module = "World3D.dll"
+at = "0x10004cb0"
+kind = "function"
+name = "a lightmap texture by name from the lightmap library, refcounted; 'LightMap %s not found.'"
+read = true
+doc = "docs/07-objects.md"
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10016135"
+kind = "site"
+name = "mesh stream set-up: stream 18 (the lightmap's UVs) at the stream table's +0x64, stride 4 (CShade's +0x28)"
+read = true
+doc = "docs/07-objects.md"
+
+[[entry]]
+module = "Ngi32.dll"
+at = "0x10036ae0"
+kind = "datum"
+name = "render phase table record 4: phase 3, two stages: texture x diffuse, texture x current, alpha the diffuse's, no alpha test"
+read = true
+doc = "docs/07-objects.md"
+
+[[entry]]
+module = "Ngi32.dll"
+at = "0x10036c14"
+kind = "datum"
+name = "render phase table record 11: phase 7, one stage: texture x diffuse, alpha the diffuse's, alpha test on"
+read = true
+doc = "docs/07-objects.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10044fcf"
+kind = "site"
+name = "CShade mesh draw: the loop over the mesh's batch records (+0xcb0 slot 3)"
+read = true
+doc = "docs/07-objects.md"

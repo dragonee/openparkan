@@ -637,6 +637,60 @@ from rest, and at a walk the lifts are 0.1003 to 0.1218. So how often the
 walk sounds depends on float rounding, and on which height the live record
 holds.
 
+### A building's load group — *read*, and *measured*
+
+**A building runs its load group like any controller.** The controller
+loader runs block entry 0's group once, when the file loads
+(`0x10009408`). It does not ask what the owner is. A building's agent loads
+its record's `.ctl` like any agent's; `CBuilding` walks that same control
+system's items for its doors and pods
+([27-ownership.md](27-ownership.md#capture--read)). So the section-5 effects in
+a `fortif.rlb` controller's load group are created as the building is placed.
+They hang on the building's own control points and nodes, as the hero's
+turret's hang on its (*derived*, [29-weapons.md](29-weapons.md)).
+
+*Measured*: 28 of the 30 `fortif.rlb` controllers have a load group. Their
+most common effects are:
+- the screens `f_pict_13` (81), `f_pict_08` (50), `f_pict_11` (28) and `f_pict_10` (23);
+- the small lights `f_smalllight_r` (65), `_y` (48) and `_g` (40), and `f_signlight_g` (30);
+- the door sounds `door_open_01` and `door_close_01` (52 each);
+- the construction sphere `b_sphere_*`;
+- `f_recharge_r` over docks (15), and `smoke_fr_02` (6);
+- the bridges' `f_brige_ray` (5) and `f_brige_light_b` (3).
+
+**The Large Factory's** (`fr_b_plant.ctl`, 55 records):
+
+| action | effect | on | ids |
+|---|---|---|---|
+| 4 | `f_signlight_g` ×4, `f_blinklight_r` ×2, `f_smalllight_y` ×4, `f_smalllight_r` ×6, `f_blinklight_g` | control points 99–113, 120, 121 (`Sign_Entrance*`, `Sign_Type1`, …) | 11–27 |
+| 4 | `f_pict_08`, `_10`, `_11`, `_13` ×22 | points 0–21, the consoles | 1000–1021 |
+| 4 | `f_recharge_r` ×2 | points 114–116 and 117–119 (`Rech_*`), the dock | 2000, 2001 |
+| 4 | `smoke_fr_02` ×3 | points 122–130 (`Smoke*`), the three chimneys | 3300–3302 |
+| 5 | `b_sphere_start`, `b_sphere_sign`, `b_sphere_main` | the construction sphere | 9001, 9002, 9100 |
+| 3 | `door_open_01`, `door_close_01` on each door | nodes 3, 16, 14 | 8000–8005 |
+| 10 | start 3000, 3001 in mode 2 | — | no record of the group makes either id |
+
+What those effects are ([11-effects.md](11-effects.md#how-an-effect-runs--read), *measured*):
+- **The lights** are mode 1 (1 s) or, for the blinkers, mode 2 (2 s) with
+  ping-pong. They carry flags `0x400` and `0x800`: drawn only while their
+  tested point is in view, and only by the draw pass that passes its argument.
+- **The screens and the smoke** are mode 0, whose time stays 0 until
+  something sets it, so the emitters whose windows hold 0 run.
+- **The door sounds** are modes 16 and 17: the door node's animation value
+  while it only rises, or only falls. So the open sound plays as the door
+  opens and the close sound as it closes.
+- **Every one is switched on** at the default preset: Lights, Shield or Smoke
+  ([11-effects.md](11-effects.md#which-effects-run-the-settings-switch--read-and-measured)).
+
+*Seen*: in *The Constructor*'s recording the factory's chimneys smoke from the
+briefing on (12 s), and its consoles glow inside (100 s).
+
+**For an engine:** when a building is placed, run its controller's load group
+as the hero's turret's is run. That means the effects of actions 3 and 4 on
+the building's nodes and control points, each placed through the building's
+placement and node pose, and actions 10 and 11 by id. Leave action 5 to
+construction.
+
 ### Critical damage: block entries 6 and 7 — *read*, and *measured*
 
 After a node takes damage the node update (`0x10012a40`) decides whether the

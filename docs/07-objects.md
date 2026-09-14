@@ -1292,6 +1292,112 @@ lightmap:
 So a building's lit surfaces and its unlit ones are separate batches, and a
 renderer binds the lightmap per batch rather than per model.
 
+### How a lightmapped batch is drawn — *read*, and *measured*
+
+**The lightmap replaces the scene's light on a lit batch.** `CShade`'s mesh
+draw (`Terrain.dll`, the batch loop from `0x10044fcf`) takes each batch record
+the mesh hands it (`+0xcb0` slot 3). Bit `0x2000` of the record's flags word
+marks a lit batch (`0x10045098`), and for one the draw also expands the UV set
+at stream-table `+0x28` (`0x10045963`). That is stream 18: `AniMesh.dll` puts
+stream 18 there with a stride of 4 (`0x10016135`), next to stream 5 at `+0x20`.
+Once the draw item is built, it asks the mesh's material manager for the
+lightmap's texture and hands it to `0x1002c1a0` (`0x10045d64`–`0x10045d97`).
+
+- **The texture.** The call is manager slot 8 (vtable `0x100209e4` + 0x20,
+  `World3D.dll:0x100031a0`). It takes the record's `+8` as a key: the wear's
+  index in the high word and a lightmap's index in its `LIGHTMAPS` list in the
+  low word. It returns that lightmap's texture handle. The wear loader filled
+  the list from the section's names (`0x10003e1c`), each loaded through
+  `0x10004cb0` from `lightmap.lib` like any texture (`0x10003f24`). *Measured:*
+  all 21 `LIGHTMAPS` sections hold exactly one page, so every lit batch takes
+  index 0. That index 0 is the material word's high byte, with `0xFF` for
+  none, is *derived*; the writer of the flag was not traced.
+- **The material is rewritten** (`0x1002c1a0`, before anything else, on the
+  draw item's copy of the entry): the diffuse rgb becomes the self-light rgb,
+  the diffuse rgb becomes 0, and the power word becomes 0. In the terms of
+  [How a material reaches the device](#how-a-material-reaches-the-device--read-and-measured),
+  the device material gets:
+  - diffuse 0, so no light reaches the batch;
+  - emissive = scene colour + the entry's **diffuse**;
+  - specular unchanged, at power 1;
+  - diffuse alpha still the entry's ambient alpha.
+- **Where the device can combine two textures in one pass**, which is where
+  `IsPhaseSupported(3)` answered yes into `CShade+0x1918` (`0x100411d2`), the
+  same item gets:
+  - the lightmap as its **second texture** (`+0xbc`);
+  - the whole page as its second cell (`+0xc4` = −1);
+  - render phase **3** (`0x1002c219`);
+  - blend mode `+0xbf4`, which is the translate table's entry 0, mode 0 `ONE/ZERO` (`0x100411f2`).
+
+  Phase 3 (`Ngi32.dll`'s phase table, record 4) is:
+  - stage 0 `MODULATE(TEXTURE, DIFFUSE)`, alpha `SELECTARG2`;
+  - stage 1 `MODULATE(TEXTURE, CURRENT)`, alpha `SELECTARG2`;
+  - no alpha test.
+- **Otherwise** a second item draws the lightmap over the first, unlit
+  (flags `0x404`, `0x1002c353`):
+  - its only texture is the page, on stream 18's UVs;
+  - its vertex colour is the constant `0xffffffff`;
+  - its phase is `CShade+0x1920`: 7, `MODULATE(TEXTURE, DIFFUSE)`, where the device has it, else 1 (`0x1004112e`);
+  - its blend is the table's entry 3, mode 3, `ZERO/SRCCOLOR`, which multiplies what is already drawn.
+
+  The first item keeps its own phase and blend. The colour comes out the same
+  (*derived*).
+
+So, on the one-pass path:
+
+```
+rgb   = texture.rgb × lightmap.rgb × clamp(scene + material diffuse + specular)
+alpha = material ambient alpha            (the texture's alpha is not used)
+```
+
+drawn opaque, with no alpha test, fogged like any batch (nothing on this path
+touches the fog state, [10-sky.md](10-sky.md)). The page is `RGB565` decoded
+as any texture: each channel 0..1, so white leaves a surface as its texture
+has it and the rest darken and tint it. There is no ×2.
+
+*Measured* over the 21 lightmapped meshes of `fortif.rlb`:
+- **What the rule covers.** All 972 lit batches use flags-2 materials, the
+  ordinary lit skin ([How a material draws](#how-a-material-draws-is-in-the-archive-directory)),
+  so the opaque blend changes nothing any of them had.
+- **Their diffuse** is `#ffffff` on 518 and `#cdcdcd` on 361 of the 972. A
+  white one saturates the clamp whatever the scene colour, so it shows
+  texture × lightmap at full strength, day or night.
+- **The other batches.** The same buildings' 4,469 unlit batches (3,390 at
+  flags 2, 1,079 at flags 4) draw as any model does
+  ([How a material reaches the device](#how-a-material-reaches-the-device--read-and-measured)).
+  The sun's lights reach them indoors as out. Nothing on this path tests where
+  the camera is; that nothing else darkens an inside is a search, not a proof.
+- **`fr_b_plant_00.0`**, the Large Factory's page, is 256 × 256. A third of
+  its texels have a channel at 250 or more, its median brightness is 115 and
+  its mean is (129, 121, 93): saturated green, orange and purple patches over
+  white.
+
+*Seen*, on *The Constructor*'s recording (95–108 s): the factory's inside is
+dark grey metal under green lamps and lavender walls, as a surface
+modulated by those patches is.
+
+**The pod's green glass** is not a lightmap either. The pod's nodes 24 and 25
+(`i16`, `i17`) draw 22 batches of `B_COMP_3G`:
+- flags 4, blended `SRCALPHA/INVSRCALPHA`;
+- a black diffuse, so unlit, over an ambient `#71ff71`;
+- the texture `SUN4.0`.
+
+It is a translucent green shell, and from inside it tints everything behind it.
+
+**The phase-6 path never takes a lit batch.** It draws two UV sets over one
+image, and needs `CShade`'s setting 25 (`+0xcc8`) and a device with phase 6.
+The draw takes it only when the lightmap flag is clear (`0x1004569e`). Which
+setting 25 is was not read.
+
+**For an engine:**
+1. Load each wear's `LIGHTMAPS` pages. Keep stream 18's UVs, over 1024.
+2. For a batch whose material word's high byte is `0x00`, draw with the
+   lightmap as a second texture on those UVs, and shade the vertex as
+   `clamp(scene + material diffuse)`. Add the specular term if you draw one;
+   no light's diffuse applies. Multiply the texture, the lightmap and that
+   colour; alpha is the material's ambient alpha. Draw it opaque and fogged.
+3. Draw every other batch of the building as any model's.
+
 ### Winding is consistent, so culling is safe
 
 On **434 of the 435** object meshes, over 95% of triangles wind the same way

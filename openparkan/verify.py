@@ -7904,6 +7904,183 @@ def check_building_entry(check, game: Path) -> None:
           f"{min(outpost_floor):.2f}; no lightmap")
 
 
+#: D3D texture stage state and operation codes the phase table's triples carry.
+D3DTSS_COLOROP, D3DTSS_COLORARG1, D3DTSS_COLORARG2, D3DTSS_ALPHAOP = 1, 2, 3, 4
+D3DTOP_MODULATE, D3DTOP_SELECTARG2 = 4, 3
+D3DTA_DIFFUSE, D3DTA_CURRENT, D3DTA_TEXTURE = 0, 1, 2
+D3DRS_ALPHATESTENABLE = 15
+
+
+def _phase_record(ngi_at, index: int) -> tuple[int, dict]:
+    """Record ``index`` of ``Ngi32.dll``'s render phase table (``0x10036a30``, 44 bytes
+    each): its phase and its triples as {(stage, state): value}, render states under
+    stage -1."""
+    rec = struct.unpack("<11I", ngi_at(0x10036A30 + 44 * index, 44))
+    body = ngi_at(rec[2], 12 * rec[3])
+    triples = {}
+    for k in range(rec[3]):
+        stage, state, value = struct.unpack_from("<3I", body, 12 * k)
+        triples[(-1 if stage == 0xFFFFFFFF else stage, state)] = value
+    return rec[0], triples
+
+
+def check_building_lighting(check, game: Path) -> None:
+    """How a building's inside is lit and drawn: the lightmap pass, the pod's glass, and
+    the load group's lights, screens and smoke."""
+    paths = {name: game / name for name in
+             ("Terrain.dll", "World3D.dll", "AniMesh.dll", "Ngi32.dll", "fortif.rlb",
+              "lightmap.lib", "Material.lib", "effects.rlb")}
+    if not all(p.exists() for p in paths.values()):
+        return
+    t_at, w_at, a_at, n_at = (_image_at(paths[n].read_bytes()) for n in
+                              ("Terrain.dll", "World3D.dll", "AniMesh.dll", "Ngi32.dll"))
+
+    def dword(at, va: int) -> int:
+        return struct.unpack("<I", at(va, 4))[0]
+
+    def call_target(at, va: int) -> int:
+        return (va + 5 + struct.unpack("<i", at(va + 1, 4))[0]) & 0xFFFFFFFF
+
+    # 1. The lit batch: its flag, stream 18 as the second UV set, its lightmap from the
+    # material manager's slot 8, and 0x1002c1a0's rewrite and phase 3.
+    flag = t_at(0x10045098, 6) == bytes.fromhex("81e200200000")
+    uv1 = t_at(0x10045963, 6) == bytes.fromhex("8b512083c228")
+    fetch = (t_at(0x10045D73, 3) == bytes.fromhex("8b5108")
+             and t_at(0x10045D8C, 3) == b"\xff\x52\x20"
+             and call_target(t_at, 0x10045D97) == 0x1002C1A0)
+    slot8 = dword(w_at, 0x100209E4 + 4 * 8)
+    key = w_at(0x100031AF, 10) == bytes.fromhex("c1e9108b8c8a40020000")
+    wear = (w_at(0x10003E1C, 5) == bytes.fromhex("6874360210")
+            and w_at(0x10023674, 10) == b"LIGHTMAPS\0"
+            and call_target(w_at, 0x10003F24) == 0x10004CB0)
+    stream18 = a_at(0x10016122, 2) == b"\x6a\x12" and a_at(0x10016135, 3) == bytes.fromhex("894764")
+    swap = (t_at(0x1002C1B8, 6) == bytes.fromhex("8b4204894114")
+            and all(t_at(va, 7) == bytes.fromhex(code) for va, code in (
+                (0x1002C1D9, "c7410c00000000"), (0x1002C1E3, "c7420800000000"),
+                (0x1002C1ED, "c7400400000000"), (0x1002C1F7, "c7414400000000"))))
+    one_pass = (t_at(0x1002C201, 7) == bytes.fromhex("83ba1819000000")
+                and t_at(0x1002C210, 6) == bytes.fromhex("8988bc000000")
+                and t_at(0x1002C219, 10) == bytes.fromhex("c782c800000003000000")
+                and t_at(0x1002C23E, 10) == bytes.fromhex("c781c4000000ffffffff")
+                and t_at(0x100411B3, 5) == bytes.fromhex("ba03000000")
+                and t_at(0x100411D2, 6) == bytes.fromhex("898118190000"))
+    two_pass = (t_at(0x1002C353, 10) == bytes.fromhex("c7812801000004040000")
+                and t_at(0x1004112E, 10) == bytes.fromhex("c7822019000007000000")
+                and t_at(0x10046A98, 10) == bytes.fromhex("c781fc0b000000000000")
+                and t_at(0x10046ABF, 10) == bytes.fromhex("c781080c000003000000"))
+    phase, triples = _phase_record(n_at, 4)
+    modulate = {
+        (0, D3DTSS_COLOROP): D3DTOP_MODULATE, (0, D3DTSS_COLORARG1): D3DTA_TEXTURE,
+        (0, D3DTSS_COLORARG2): D3DTA_DIFFUSE, (0, D3DTSS_ALPHAOP): D3DTOP_SELECTARG2,
+        (1, D3DTSS_COLOROP): D3DTOP_MODULATE, (1, D3DTSS_COLORARG1): D3DTA_TEXTURE,
+        (1, D3DTSS_COLORARG2): D3DTA_CURRENT, (1, D3DTSS_ALPHAOP): D3DTOP_SELECTARG2,
+        (-1, D3DRS_ALPHATESTENABLE): 0,
+    }
+    phase3 = phase == 3 and all(triples.get(k) == v for k, v in modulate.items())
+    phase7, triples7 = _phase_record(n_at, 11)
+    phase7 = phase7 == 7 and triples7.get((0, D3DTSS_COLOROP)) == D3DTOP_MODULATE
+    check("Terrain.dll: a lit batch takes its lightmap as a second texture, and no light",
+          flag and uv1 and fetch and slot8 == 0x100031A0 and key and wear and stream18 and swap
+          and one_pass and two_pass and phase3 and phase7,
+          f"flag 0x2000 (0x10045098) adds the stream table's +0x28, AniMesh's stream 18 "
+          f"(0x10016135), and fetches the lightmap by the record's +8 through the material "
+          f"manager's slot 8 ({slot8:#x}: wear << 16 | index into its LIGHTMAPS list); "
+          f"0x1002c1a0 moves the diffuse into the self-light and zeroes it and the power, "
+          f"then, with phase 3 supported, sets the lightmap as texture 2 and phase 3 "
+          f"(record 4: stage 0 texture x diffuse, stage 1 texture x current, alpha the "
+          f"diffuse's, no alpha test: {phase3}), blend table entry 0; else a second unlit "
+          f"pass, phase 7 or 1 over blend mode 3 ({two_pass and phase7})")
+
+    # 2. The data: one page a wear, what the lit batches' materials are, the factory's page.
+    fortif = NResArchive.open(paths["fortif.rlb"])
+    library = materials.MaterialLibrary(paths["Material.lib"])
+    pages_each = Counter()
+    by_kind = Counter()
+    white = 0
+    for entry in fortif:
+        if not entry.name.lower().endswith(".msh"):
+            continue
+        try:
+            wear_file = objmesh.parse_wear(fortif.read_name(entry.name[:-4] + ".wea"))
+        except KeyError:
+            continue
+        if not wear_file.lightmaps:
+            continue
+        pages_each[len(wear_file.lightmaps)] += 1
+        m = objmesh.parse(fortif.read(entry), entry.name)
+        for b in m.batches:
+            mat = library.get(wear_file.materials[b.material])
+            by_kind[(b.is_lit, mat.blend if mat else None)] += 1
+            if b.is_lit and mat and mat.entries and mat.entries[0].colour == (255, 255, 255):
+                white += 1
+    lit = sum(n for (is_lit, _), n in by_kind.items() if is_lit)
+    lit_flags = {blend for (is_lit, blend) in by_kind if is_lit}
+    unlit = {blend: n for (is_lit, blend), n in by_kind.items() if not is_lit}
+    lightmaps = NResArchive.open(paths["lightmap.lib"])
+    page = texm.decode(lightmaps.read_name("fr_b_plant_00.0"))
+    texels = [page.rgba[i:i + 3] for i in range(0, len(page.rgba), 4)]
+    bright = sum(1 for t in texels if max(t) >= 250) / len(texels)
+    median = statistics.median(sum(t) / 3 for t in texels)
+    check("MESH: every lightmapped building has one page, and lights only its plain skins",
+          pages_each == Counter({1: 21}) and lit == 972 and lit_flags == {2}
+          and unlit == {2: 3390, 4: 1079} and white == 518
+          and (page.width, page.height) == (256, 256) and 0.3 < bright < 0.4 and 110 < median < 120,
+          f"LIGHTMAPS pages per wear {dict(pages_each)}; {lit} lit batches, materials at flags "
+          f"{sorted(lit_flags)}, {white} of them with a white diffuse; unlit {unlit}; "
+          f"fr_b_plant_00.0 {page.width}x{page.height}, {bright:.0%} of texels with a channel "
+          f"at 250 or more, median brightness {median:.0f}")
+
+    # 3. The pod's glass: nodes 24 and 25 of fr_b_plant draw a blended, unlit green.
+    plant = objmesh.parse(fortif.read_name("fr_b_plant.msh"), "fr_b_plant.msh")
+    plant_wear = objmesh.parse_wear(fortif.read_name("fr_b_plant.wea"))
+    glass = set()
+    batches = 0
+    for n in (24, 25):
+        slot = plant.slots[plant.nodes[n].slot_index[0]]
+        for i in range(slot.first_batch, slot.first_batch + slot.batch_count):
+            glass.add(plant_wear.materials[plant.batches[i].material])
+            batches += 1
+    shell = library.get("B_COMP_3G")
+    first = shell.entries[0] if shell and shell.entries else None
+    check("MESH: the Large Factory's pod is a translucent green shell",
+          glass == {"B_COMP_3G"} and batches == 22 and shell.blend == 4 and first is not None
+          and first.colour == (0, 0, 0) and first.ambient == (113, 255, 113),
+          f"nodes 24, 25 ({plant.nodes[24].name}, {plant.nodes[25].name}): {batches} batches of "
+          f"{sorted(glass)}, flags {shell.blend if shell else None}, diffuse "
+          f"{first.colour if first else None}, ambient {first.ambient if first else None}, "
+          f"texture {first.texture if first else None}")
+
+    # 4. The load group: the factory's lights, screens, dock glow, smoke and door sounds.
+    ctl = control.parse(fortif.read_name("fr_b_plant.ctl"))
+    group = ctl.group(0)
+    actions = Counter(r.action for r in group)
+    points = objmesh.parse_control_points(fortif.read_name("fr_b_plant.cpt"))
+    smoke = [r.args[:3] for r in group if r.resource and r.resource.member == "smoke_fr_02"]
+    smoke_named = all(points[p].name.lower().startswith("smoke") for a in smoke for p in a)
+    doors = sorted({r.args[0] for r in group if r.action == 3})
+    with_load = sum(1 for e in fortif if e.name.lower().endswith(".ctl")
+                    and control.parse(fortif.read(e)).group(0))
+    fx = NResArchive.open(paths["effects.rlb"])
+    headers = {n: effects.parse_effect(fx.read_name(n), n) for n in
+               ("f_signlight_g", "f_blinklight_r", "f_pict_13", "smoke_fr_02",
+                "door_open_01", "door_close_01")}
+    modes = {n: e.mode for n, e in headers.items()}
+    lights_hidden = all(headers[n].flags & 0xC00 == 0xC00
+                        for n in ("f_signlight_g", "f_blinklight_r"))
+    switched_on = all(effects.setting_enabled(e.gate) for e in headers.values())
+    check("CONTROL: a building's load group lights its signs, screens, dock and chimneys",
+          len(group) == 55 and actions == Counter({4: 44, 3: 6, 5: 3, 10: 2}) and len(smoke) == 3
+          and smoke_named and doors == [3, 14, 16] and with_load == 28
+          and modes == {"f_signlight_g": 1, "f_blinklight_r": 2, "f_pict_13": 0, "smoke_fr_02": 0,
+                        "door_open_01": 16, "door_close_01": 17}
+          and lights_hidden and switched_on,
+          f"fr_b_plant.ctl's load group: {len(group)} records, actions {dict(actions)}; "
+          f"smoke_fr_02 on points {smoke} ({'Smoke*' if smoke_named else 'not all Smoke*'}); "
+          f"door sounds on nodes {doors}; {with_load} of the fortif controllers have a load "
+          f"group; time modes {modes}; the lights carry 0x400 and 0x800: {lights_hidden}; "
+          f"all switched on at the default preset: {switched_on}")
+
+
 #: The difficulty profiles in ``behpsp.res``.
 DIFFICULTY_PROFILES = ("diff_strong.var", "diff_normal.var", "diff_weak.var",
                        "diff_slow.var", "diff_stupid.var")
@@ -16022,7 +16199,8 @@ def run(game: Path) -> int:
         check_motion, check_playback, check_ground, check_sensors, check_hit_test,
         check_collision, check_lake_and_buoys,
         check_combat, check_ownership,
-        check_capture, check_building_entry, check_repair, check_chassis, check_weapons,
+        check_capture, check_building_entry, check_building_lighting, check_repair,
+        check_chassis, check_weapons,
         check_firing,
         check_moving_parts,
         check_targeting, check_target_marks, check_ai_fight, check_turrets, check_packages,

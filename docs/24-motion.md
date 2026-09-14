@@ -1104,8 +1104,11 @@ camera is: the node flag the draw skips starts clear (`AniMesh.dll:0x10012407`)
 and only a destroyed node sets it
 ([26-damage.md](26-damage.md#a-hit-from-the-round-to-the-node--read)). The
 interior's coloured lamps are the building's lightmap on its lit batches
-([07-objects.md](07-objects.md#baked-lighting)). How the lightmap combines with
-the lit colour is not established.
+([07-objects.md](07-objects.md#baked-lighting)): the lightmap replaces the
+scene's light on them, times their texture
+([How a lightmapped batch is drawn](07-objects.md#how-a-lightmapped-batch-is-drawn--read-and-measured)).
+Its consoles, signs, lamps, chimney smoke and dock glow are its controller's
+load group ([13-control.md](13-control.md#a-buildings-load-group--read-and-measured)).
 
 **The Large Factory and the Outpost of *The Constructor*** (*measured*, in
 model space with z up from the placement):
@@ -1512,7 +1515,8 @@ points are given is not traced. `Movement_FlyHeight` is 40 and
   ([Walking into a building](#walking-into-a-building--read-and-measured)).
 - How the building's mesh builds the capsule a door part is tested against
   (`Terrain.dll:0x1005a27f`), the node whose box bounds a pod's zone in height
-  (`0x10058607`), and how a lightmap combines with a batch's lit colour.
+  (`0x10058607`). ~~How a lightmap combines with a batch's lit colour~~ —
+  **read**: [07-objects.md](07-objects.md#how-a-lightmapped-batch-is-drawn--read-and-measured).
 - How a walker climbs a building's ramp while the ramp's own faces push its
   sphere back.
 - Which `Land.msh` faces carry the world face bit `0x8` and class bit 8 that
