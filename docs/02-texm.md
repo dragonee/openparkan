@@ -88,6 +88,20 @@ four 128 x 32 strips, eight 64 x 64 tiles, eight 30 x 30 discs and five
 for fall inside their own** — which is what makes the reading safe, since a
 wrong stride would run off the end almost immediately.
 
+### How a cell is drawn — *read*
+
+A cell is a rewrite of the texture coordinates, not a texture matrix.
+`Ngi32.dll` turns the table into rectangles when it uploads the texture
+(`0x1000ff60`): record 0 is the whole texture, `u0 = 0, du = 1, v0 = 0,
+dv = 1`, and record *i* + 1 is page *i* as `u0 = x / W, du = width / W,
+v0 = y / H, dv = height / H`. The texture's slot 7 (`0x100101d0`) selects one
+and slot 13 (`0x100101c0`) returns it; the draw then rewrites every vertex,
+`u' = u0 + u × du` and `v' = v0 + v × dv` (`0x100076d0`). With the object
+mesh's `uint16` coordinates the engine folds the 1/1024 into the scale,
+`u' = u0 + raw × du / 1024` (`Terrain.dll:0x10038a01`). Wrapping still
+applies, so coordinates beyond 0..1 run out of the cell into its neighbours.
+See [07-objects.md](07-objects.md#how-a-material-reaches-the-device--read-and-measured).
+
 ## Usage
 
 ```

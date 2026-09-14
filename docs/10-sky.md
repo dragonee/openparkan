@@ -522,8 +522,8 @@ property 15's R, G and B ÷ 255 at `+0x308`..`+0x310` and zeroes
 with `+0x304` as its material block (`0x1007ab51`). The draw item keeps that
 block at `+0x70`, and the item setup builds the Direct3D material from it
 (`0x10030819`): its `+4` is the diffuse colour and its `+0x14` the material's
-own emissive, to which the scene colour is added. So the clouds are slot 18
-in diffuse, and the scene colour alone in emissive. *Measured*: on 24 of the 27 files whose light varies, slot
+**ambient** colour, to which the scene colour is added to make the emissive.
+So the clouds are slot 18 in diffuse, and the scene colour alone in emissive. *Measured*: on 24 of the 27 files whose light varies, slot
 18 is at its brightest where the light is — `#f0f5ff` at Mission 01's
 brightest keyframe, `#ac2800` as its sun rises. Control: slot 16, 6.
 
@@ -694,9 +694,13 @@ Otherwise glows would pick up fog colour rather than fade out.
 
 The same record carries a colour: property 16, file slot 20
 (`0x1007bbc5`). Every drawn material gets **emissive = that colour + the
-material's own emissive**, and an ambient term of 0 (`0x100308b8`). It is the
+material's ambient colour**, and an ambient term of 0 (`0x100308b8`). It is the
 scene's ambient light in all but name — 40/255 grey at Mission 01's brightest
-keyframe, a brighter violet at night.
+keyframe, a brighter violet at night. An earlier draft said the material's own
+emissive; the block offsets `+0x14..+0x1c` are the entry's ambient, and the
+entry's emissive is never read. Nothing sets `D3DRS_AMBIENT`, so the zero
+ambient term is moot: a material's ambient colour is its self-light. See
+[07-objects.md](07-objects.md#how-a-material-reaches-the-device--read-and-measured).
 
 ### The render settings
 

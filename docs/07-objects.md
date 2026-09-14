@@ -890,17 +890,20 @@ long:
 
 ```
 +0   uint8[3] ambient  rgb      +3  uint8 ambient  alpha, per cent
-+4   uint8[3] diffuse  rgb      +7  uint8 diffuse  alpha, per cent
-+8   uint8[3] specular rgb      +11 uint8 specular alpha, per cent
-+12  uint8[3] emissive rgb      +15 uint8 emissive alpha, per cent
++4   uint8[3] diffuse  rgb      +7  uint8 diffuse  alpha, over 255
++8   uint8[3] specular rgb      +11 uint8 specular alpha, over 255
++12  uint8[3] emissive rgb      +15 uint8 emissive alpha, over 255
 +16  uint8    specular power
 +17  int8     sub-image, -1 for the whole texture
 +18  char[16] texture name
 ```
 
-The parser multiplies the four alpha bytes by 0.01 and the twelve colour
-bytes by 1/255, and **not one of the 12572 alpha bytes exceeds 100** — a test
-no wrong stride and no wrong header length survives. The stride used to be
+The parser multiplies the **ambient** alpha byte by 0.01 and the other fifteen
+colour and alpha bytes by 1/255 (`World3D.dll:0x100046ba` against
+`0x10004628`; an earlier draft had all four alphas per cent). **Not one of the
+12572 alpha bytes exceeds 100** — a test no wrong stride and no wrong header
+length survives. Only the ambient alpha ever reaches the device, as the
+diffuse alpha (below), so the other three scales change nothing on screen. The stride used to be
 read as 40 with the entries starting at 12, which is why the names were
 extracted by pattern and why eight materials looked like they named textures
 nobody shipped. They do not: read by offset, all 905 name a texture in
@@ -1110,6 +1113,129 @@ the track to the manager's slot 5 (`Terrain.dll:0x100454e6`) or slot 3
 
 The landscape draws through the same call with its own manager and track 0
 (`Terrain.dll:0x1001b95e`).
+
+### How a material reaches the device — *read*, and *measured*
+
+Mission 01's objective buoys (`s_tree_29`) are the worked example: the
+beam is `HLP_RAY_R` (16 batches), the lamp `HLP_LAMP_R` (2) and the base ring
+`HLP_PLACE_R` (6), from the model's wear (*measured*).
+
+**Loading** (`World3D.dll:0x100045f7`..`0x100049b7`). The 34-byte file entry
+becomes a 76-byte `D3DMATERIAL7` plus two fields:
+
+| file | loaded | scale |
+|---|---|---|
+| +0..+2 ambient rgb | +0x10..+0x18 | ÷255 |
+| +3 ambient alpha | +0x1c | ×0.01 |
+| +4..+6 diffuse rgb, +7 alpha | +0x00..+0x0c | ÷255 |
+| +8..+11 specular | +0x20..+0x2c | ÷255 |
+| +12..+15 emissive | +0x30..+0x3c | ÷255 |
+| +16 power | +0x40 | int |
+| name | +0x44 | texture handle (`0x10004b10`); −1 when the name is empty |
+| +17 cell | +0x48 | int8; −1 when the name is empty |
+
+A track's word splits at `0x100049ff` into **mode = word & 7** and **lerp mask
+= word >> 3**; each key keeps its entry as a dword and its time as the
+`uint16`. Across the 962 tracks the modes are 821 × 0, 96 × 1, 44 × 2 and
+1 × 3, and the masks 848 × 0, 106 × 1, 3 × 3, 3 × 7, 1 × 17 and 1 × 2
+(*measured*).
+
+**Playing a track.** The manager has two fetches:
+
+- **slot 3** (`0x100031f0`) takes the world clock in milliseconds
+  (`[0x10032a38]`, the low dword of `0x10029c88`) less the material's start
+  stamp (its list record `+4`, set by slot 10 at `0x10003ae0`). The period is
+  the **last key's time**, and the mode picks through the table at
+  `0x10003668`: **0 loops** (time mod period), **1 ping-pongs**, **2 plays
+  once** and holds the last key, **3 jumps** to `rand() % period`;
+- **slot 5** (`0x10003680`) takes a fraction instead: outside 0..1 it becomes
+  0.5, and the time is last-key-time × fraction.
+
+Either way the brackets are the same (`0x10003758`): the key *i* is the
+largest with `key[i-1].time <= t < key[i].time`, and *i* = 0 when none is. The
+material shown is `lerp(key[i].entry, key[i+1 mod n].entry, f)` with
+`f = (t - key[i-1].time) / (key[i].time - key[i-1].time)` and
+`key[-1].time = 0`. So **a key's time is when its interval ends**, and the
+next key's entry has arrived by then: the loop is continuous, and it wraps
+back to key 0's entry at the period. A single-key track shows its entry as is.
+
+The lerp (`0x10003030`) is per mask bit — **1 ambient rgb, 2 diffuse rgb, 4
+specular rgb, 8 emissive rgb, 0x10 ambient alpha** — and every other field,
+the power, the **texture and the cell**, comes from `key[i].entry` unchanged.
+The texture and cell therefore **step**; only colours glide.
+
+**The device material** is built per draw item (`Terrain.dll:0x10030819`,
+under `CStridedPrimitive::RenderVB` at `0x1002ff27`) from the phase the mesh
+draw copied to the item's `+0x70` (`0x10029aa0`):
+
+```
+diffuse.rgb  = entry diffuse          diffuse.a  = entry AMBIENT alpha
+ambient      = 0, 0, 0, 1
+specular.rgb = entry specular         specular.a = 1
+emissive.rgb = scene colour + entry AMBIENT rgb
+power        = 1 << entry power
+```
+
+The scene colour is the sky's property 16
+([10-sky.md](10-sky.md#the-scene-colour-is-added-to-every-material)). **The
+entry's own emissive is never read** — the `+0x14..+0x1c` of the item block is
+the ambient colour. No module sets `D3DRS_AMBIENT` (no `push 0x8b` in
+`Terrain.dll`, `Ngi32.dll` or `AniMesh.dll`), so the material's ambient term
+multiplies zero anyway: **the ambient colour of a material is its self-light.**
+Lighting itself is `D3DRS_LIGHTING = (draw flags >> 4) & 1`
+(`Ngi32.dll:0x10007630`); a mesh batch draws with flags `0x404`, plus `0x10`
+when its record's `[+0x20]+0x10` is 0 (`Terrain.dll:0x100455e4`). Flag 4
+turns culling off (`0x10007662`), so every mesh batch is two-sided. A batch whose ambient alpha is below 1 is
+queued as translucent (`0x10045567`).
+
+So for a lit batch, with the texture stage modulating:
+
+```
+rgb   = texture.rgb × clamp(scene + ambient + Σ lights × diffuse + specular)
+alpha = texture.a × ambient alpha
+```
+
+and the blend mode only says what is done with it: flags 0 and 2 write it
+(`ONE/ZERO`), 4 and 5 blend it over (`SRCALPHA/INVSRCALPHA`, alpha-tested),
+8 adds it (`SRCALPHA/ONE`, alpha-tested). A black diffuse carrying an ambient
+colour is the unlit glow, and it is common: 210 at flags 8, 171 at 4, 112 at
+2 and 1 at 5 (*measured*).
+
+**The cell** is a UV rewrite, not a texture matrix. `Ngi32.dll`'s page setup
+(`0x1000ff60`) keeps a rectangle per cell — record 0 the whole texture
+`(0, 1, 0, 1)`, record *i*+1 `(x/W, w/W, y/H, h/H)` from the `Page` table —
+and `SetCell`, texture slot 7 (`0x100101d0`), picks one; `RenderVB` calls it at
+`0x100301f6`. Slot 13 (`0x100101c0`) hands the rectangle back and the draw
+rewrites stage 0's coordinates in place, `u' = u0 + u × du`,
+`v' = v0 + v × dv` (`0x100076d0`). The strided path asks both stages'
+textures for their rectangles itself (`Terrain.dll:0x10038815`) and applies
+them as it expands the streams.
+
+**Object UVs are over 1024, not 256.** The strided expansion
+(`Terrain.dll:0x10038400`) reads stream 5's `uint16` pair and computes
+`u0 + uint16 × (du × K)` (`0x10038a01`), with `K = 1/1024` set by the static
+initialiser at `0x10035070`. `AniMesh.dll` hands stream 5 over with a stride
+of 4 (`0x100160cc`, from the slot filled at `0x10016035`), and its own hit
+query decodes the same stream with its own 1/1024 (`0x10013d08`). The beam
+shows why this matters: its raw UVs run 0..1024 × 0..1018, **exactly one
+cell** at 1/1024, and four cells wide by two tall at 1/256 (*measured*). Of
+the 3399 object batches whose material asks for a cell, 2626 reach no further
+than 1024 (*measured*).
+
+**The buoy.** `HLP_RAY_R` is flags 4 (blended), texture `SUN4.0` — 256 × 256
+ARGB4444 whose cells 0 to 2 are the 64 × 128 strips at (0,0), (64,0) and
+(0,128) — with a black diffuse, ambient alpha 1 and ambient
+`#dc1414`, `#f00019` and `#ffb97d` on cells 0, 1 and 2. Its one track is mode
+0, mask 1, keys (entry 0, 50), (1, 100), (2, 150), (1, 200) (*measured*). So
+over a 200 ms loop the cell steps 0, 1, 2, 1 every 50 ms while the ambient
+glides 0 → 1 → 2 → 1 → 0, and the beam draws
+`SUN4.0 strip × clamp(scene + ambient)`, blended on the strip's own alpha:
+at Mission 01's 40/255 grey that is about (1.0, 0.24, 0.24) — **a
+translucent pinkish red, flickering towards a pale orange-white**, one strip
+per face. `HLP_LAMP_R` (flags 2, `S12N2.0`, whole texture) and `HLP_PLACE_R`
+(flags 2, `COMP_2.0`, whole texture) are the same track over ambients
+`#dc0000` → `#ff3c19` → `#ffa587` and `#dc0000` → `#f08c19` → `#ffb97d`: opaque
+surfaces that glow red and pulse five times a second (*derived*).
 
 ### Baked lighting
 

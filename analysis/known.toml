@@ -1515,14 +1515,6 @@ doc = "docs/03-terrain.md"
 
 [[entry]]
 module = "World3D.dll"
-at = "0x10003680"
-kind = "function"
-name = "manager slot 5: GetMaterialPhase (handle, track, time, &out); called from CShade's mesh draw (Terrain.dll:0x100454e6)"
-read = true
-doc = "docs/03-terrain.md"
-
-[[entry]]
-module = "World3D.dll"
 at = "0x10003ab0"
 kind = "function"
 name = "manager slot 9: returns &material[id].class; Control.dll calls it for the ground's surface id (0x1001aaf5, 0x100114fd)"
@@ -4322,14 +4314,6 @@ module = "Terrain.dll"
 at = "0x10030318"
 kind = "site"
 name = "CStridedPrimitive::RenderVB: render state 14 ZWRITEENABLE = item +0x12d"
-doc = "docs/10-sky.md"
-read = true
-
-[[entry]]
-module = "Terrain.dll"
-at = "0x10030819"
-kind = "site"
-name = "draw item setup: the material block at item +0x70: +4 diffuse, +0x14 own emissive, +0x20 alpha, +0x24 specular, +0x44 power"
 doc = "docs/10-sky.md"
 read = true
 
@@ -14639,14 +14623,6 @@ read = true
 
 [[entry]]
 module = "Terrain.dll"
-at = "0x10030620"
-kind = "function"
-name = "draw item setup: render record flag 0x20 fog vertex mode, 0x40 fog start/end (else the scene defaults), material with the scene colour added to emissive"
-doc = "docs/10-sky.md"
-read = true
-
-[[entry]]
-module = "Terrain.dll"
 at = "0x10030735"
 kind = "site"
 name = "draw item setup: FOGSTART from the item's render record +0x28 (FOGEND +0x2c at 0x1003075f)"
@@ -14666,14 +14642,6 @@ module = "Terrain.dll"
 at = "0x10030f20"
 kind = "function"
 name = "fog vertex mode: RANGEFOGENABLE 1, then FOGVERTEXMODE = the record's mode"
-doc = "docs/10-sky.md"
-read = true
-
-[[entry]]
-module = "Terrain.dll"
-at = "0x100308b8"
-kind = "site"
-name = "draw item material: emissive rgb = scene record colour + material +0x14..+0x1c; ambient 0; power 1 << mat+0x44"
 doc = "docs/10-sky.md"
 read = true
 
@@ -16734,3 +16702,203 @@ kind = "site"
 name = "unit handed to the player: the wizard's movement points emptied"
 doc = "docs/24-motion.md"
 read = true
+
+[[entry]]
+module = "World3D.dll"
+at = "0x10003680"
+kind = "function"
+name = "manager slot 5: GetMaterialPhase (handle, track, fraction, &out) -- fraction outside 0..1 is 0.5, t = last key time x fraction; called from CShade's mesh draw (Terrain.dll:0x100454e6)"
+read = true
+doc = "docs/03-terrain.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10030819"
+kind = "site"
+name = "draw item setup: the material block at item +0x70: +4 diffuse, +0x14 AMBIENT rgb (into emissive), +0x20 ambient alpha (into diffuse alpha), +0x24 specular, +0x44 power; the entry emissive is never read"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10030620"
+kind = "function"
+name = "draw item setup: render record flag 0x20 fog vertex mode, 0x40 fog start/end (else the scene defaults), material with emissive = scene colour + entry ambient, ambient 0"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x100308b8"
+kind = "site"
+name = "draw item material: emissive rgb = scene record colour + block +0x14..+0x1c, the entry's AMBIENT rgb; ambient 0; power 1 << block +0x44"
+doc = "docs/10-sky.md"
+read = true
+
+[[entry]]
+module = "World3D.dll"
+at = "0x10004628"
+kind = "site"
+name = "material loader: ambient rgb x 1/255 into entry +0x10..+0x18"
+read = true
+doc = "docs/07-objects.md"
+
+[[entry]]
+module = "World3D.dll"
+at = "0x100046ba"
+kind = "site"
+name = "material loader: ambient alpha x 0.01 into entry +0x1c -- the only alpha on a per-cent scale"
+read = true
+doc = "docs/07-objects.md"
+
+[[entry]]
+module = "World3D.dll"
+at = "0x10003286"
+kind = "site"
+name = "manager slot 3: jump on the track mode through 0x10003668 -- 0 loop, 1 ping-pong, 2 once, 3 rand() % period"
+read = true
+doc = "docs/07-objects.md"
+
+[[entry]]
+module = "World3D.dll"
+at = "0x10003758"
+kind = "site"
+name = "material phase: key bracket search, key[i-1].time <= t < key[i].time, i = 0 when none; lerp key[i].entry to key[i+1 mod n].entry"
+read = true
+doc = "docs/07-objects.md"
+
+[[entry]]
+module = "World3D.dll"
+at = "0x10003030"
+kind = "function"
+name = "material lerp (A, B, fraction, &out, mask): 1 ambient rgb, 2 diffuse rgb, 4 specular rgb, 8 emissive rgb, 0x10 ambient alpha; the rest and the power from A"
+read = true
+doc = "docs/07-objects.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x100455e4"
+kind = "site"
+name = "mesh batch draw flags 0x404, | 0x10 (lit) when the batch record's [+0x20]+0x10 is 0"
+read = true
+doc = "docs/07-objects.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10045567"
+kind = "site"
+name = "mesh batch: ambient alpha below 1 queues the batch as translucent"
+read = true
+doc = "docs/07-objects.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x100301f6"
+kind = "site"
+name = "RenderVB: texture slot 7 SetCell with the item's cell (+0xc0)"
+read = true
+doc = "docs/07-objects.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10035070"
+kind = "function"
+name = "static initialiser: 1/1024 into 0x100a5c6c, the scale of an object mesh's uint16 UVs"
+read = true
+doc = "docs/07-objects.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10038400"
+kind = "function"
+name = "strided expansion: positions, int8 normals / 127, and uint16 UVs as u0 + raw x du / 1024 for both stages"
+read = true
+doc = "docs/07-objects.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10038815"
+kind = "site"
+name = "strided expansion: texture slot 13, the stage's cell rectangle"
+read = true
+doc = "docs/07-objects.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10038a01"
+kind = "site"
+name = "strided expansion: u = raw uint16 x (du / 1024) + u0 into vertex +0x18"
+read = true
+doc = "docs/07-objects.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1002bcdd"
+kind = "site"
+name = "landscape vertex build: the layer-1 UV pair from the landscape mesh's slot 8 x 1/1024 (which stream not traced)"
+read = true
+doc = "docs/06-open-questions.md"
+
+[[entry]]
+module = "Ngi32.dll"
+at = "0x1000ff60"
+kind = "function"
+name = "texture page setup: rect 0 = (0, 1, 0, 1); rect i+1 = (x/W, w/W, y/H, h/H) from the Page table"
+read = true
+doc = "docs/02-texm.md"
+
+[[entry]]
+module = "Ngi32.dll"
+at = "0x100101d0"
+kind = "function"
+name = "texture slot 7: SetCell"
+read = true
+doc = "docs/02-texm.md"
+
+[[entry]]
+module = "Ngi32.dll"
+at = "0x100101c0"
+kind = "function"
+name = "texture slot 13: the current cell's rectangle"
+read = true
+doc = "docs/02-texm.md"
+
+[[entry]]
+module = "Ngi32.dll"
+at = "0x100075e0"
+kind = "function"
+name = "draw: CLIPPING = !(flags & 1), LIGHTING = (flags >> 4) & 1, CULLMODE = flags & 4 ? NONE : CW; rewrites stage-0 UVs by the cell rect"
+read = true
+doc = "docs/07-objects.md"
+
+[[entry]]
+module = "Ngi32.dll"
+at = "0x100076d0"
+kind = "site"
+name = "draw: u' = u0 + u x du, v' = v0 + v x dv, in place"
+read = true
+doc = "docs/02-texm.md"
+
+[[entry]]
+module = "Ngi32.dll"
+at = "0x10007630"
+kind = "site"
+name = "draw: SetRenderState(LIGHTING, (flags >> 4) & 1)"
+read = true
+doc = "docs/07-objects.md"
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10015fd0"
+kind = "function"
+name = "mesh stream table: stream 1 +0, 3 +0xc, 4 +0x10, 5 +0x14, 8 +0x18, 19 +0x1c, 10 +0x20, 7 +0x24, 13 +0x28, 6 +0x2c, 15 +0x34, 18 +0x64; strided descriptor with UV stride 4"
+read = true
+doc = "docs/07-objects.md"
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10013d08"
+kind = "site"
+name = "triangle query flag 8: stream 5 UVs x 1/1024"
+read = true
+doc = "docs/07-objects.md"

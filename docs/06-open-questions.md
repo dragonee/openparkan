@@ -153,6 +153,24 @@ outer ring is a clearance drawn around the building. See
   [07-objects.md](07-objects.md#who-picks-an-object-meshs-material-track--read).
 - What IAnimation node mask bit `0x10` does — the ground contact sets it on a
   contact point's carrying node (`Control.dll:0x1001a3aa`).
+- How a material draws is **read** — the device material, the track playback
+  and the cell rewrite; see
+  [07-objects.md](07-objects.md#how-a-material-reaches-the-device--read-and-measured).
+  Left open:
+  - who sets a mesh batch record's flag 4, which makes `CShade` fetch the
+    material by fraction (slot 5, record `+0x1c`) instead of on the world
+    clock (slot 3) — and who calls slot 10, which stamps a material's start
+    time. Neither changes a looping track's look, only its phase;
+  - what the batch record's `[+0x20]+0x10` is. When it is 0 the batch draws
+    lit; when not, unlit, and then Direct3D takes the vertex colour, which is
+    not traced;
+  - the texture stage's colour and alpha operations for a mesh batch (a
+    renderer can assume `MODULATE`) and the alpha-test reference;
+  - whether the landscape's layer UVs are over 1024 as well. The vertex build
+    multiplies the pair the landscape mesh's slot 8 hands back for layer 1 by
+    1/1024 (`Terrain.dll:0x1002bcdd`, also `0x1001ae50`); if that pair is
+    `Land.msh` stream 5, the 8.8 reading in [03-terrain.md](03-terrain.md)
+    is four times too dense.
 
 ## Unresolved terrain fields
 

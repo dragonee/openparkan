@@ -51,18 +51,21 @@ An entry is a **D3DMATERIAL7 written as bytes**, and that is why it is 34
 long::
 
     +0   uint8[3] ambient  rgb      +3  uint8 ambient  alpha, per cent
-    +4   uint8[3] diffuse  rgb      +7  uint8 diffuse  alpha, per cent
-    +8   uint8[3] specular rgb      +11 uint8 specular alpha, per cent
-    +12  uint8[3] emissive rgb      +15 uint8 emissive alpha, per cent
+    +4   uint8[3] diffuse  rgb      +7  uint8 diffuse  alpha, over 255
+    +8   uint8[3] specular rgb      +11 uint8 specular alpha, over 255
+    +12  uint8[3] emissive rgb      +15 uint8 emissive alpha, over 255
     +16  uint8    specular power
     +17  int8     sub-image, -1 for the whole texture
     +18  char[16] texture name
 
-The colours are bytes over 255 and the alphas **per cent** -- the parser
-multiplies the four alpha bytes by 0.01 and the twelve colour bytes by
-1/255.  Not one of the 12572 alpha bytes exceeds 100, which no wrong offset
-survives.  The longest shipped name is 12 characters and seven entries name
-nothing at all, which the engine reads as "no texture".
+The colours are bytes over 255 and so are three of the alphas -- the parser
+multiplies only the **ambient** alpha by 0.01 (``World3D.dll:0x100046ba``).
+Not one of the 12572 alpha bytes exceeds 100, which no wrong offset survives.
+The ambient alpha is the only one the device sees, as the diffuse alpha, and
+the ambient colour plus the scene colour is the emissive; the entry's own
+emissive is never read.  See ``docs/07-objects.md``.  The longest shipped
+name is 12 characters and seven entries name nothing at all, which the engine
+reads as "no texture".
 
 Getting the stride right is what makes every material resolve.  The names
 used to be extracted by pattern, and the pattern swallowed whatever
@@ -209,8 +212,10 @@ CELL_OFFSET = 17
 NAME_OFFSET = 18
 NAME_FIELD = ENTRY_STRIDE - NAME_OFFSET
 
-#: The four alphas are per cent -- the engine multiplies each by 0.01.
+#: The ambient alpha is per cent -- the engine multiplies it by 0.01 ...
 ALPHA_FULL = 100
+#: ... and the other three alphas by 1/255, like the colours.
+COLOUR_FULL = 255
 
 #: A cell of -1 asks for the whole texture rather than one of its pages.
 WHOLE_TEXTURE = -1
@@ -307,11 +312,14 @@ class Key:
 class Track:
     """One animation of a material, over its entries."""
 
-    #: The low three bits of the track's word.  0 on 821 of the 918 tracks and
-    #: on every track of every multi-track material, so it distinguishes
-    #: playback rather than role.
+    #: The low three bits of the track's word: the playback mode -- 0 loops,
+    #: 1 ping-pongs, 2 plays once, 3 jumps at random (``World3D.dll``'s table
+    #: at ``0x10003668``).  0 on 821 of the 962 tracks and on every track of
+    #: every multi-track material.
     kind: int
-    #: The rest of that word.  0 on 848.
+    #: The rest of that word: which fields glide between keys -- 1 ambient
+    #: rgb, 2 diffuse rgb, 4 specular rgb, 8 emissive rgb, 0x10 ambient alpha
+    #: (``0x10003030``).  0 on 848.  Texture and cell always step.
     param: int
     keys: list[Key] = field(default_factory=list)
 
@@ -488,9 +496,9 @@ def parse_entries(data: bytes, count: int) -> list[MaterialEntry]:
                 specular=_colour(blk, SPECULAR_OFFSET),
                 emissive=_colour(blk, EMISSIVE_OFFSET),
                 ambient_alpha=blk[AMBIENT_OFFSET + ALPHA_STEP] / ALPHA_FULL,
-                diffuse_alpha=blk[DIFFUSE_OFFSET + ALPHA_STEP] / ALPHA_FULL,
-                specular_alpha=blk[SPECULAR_OFFSET + ALPHA_STEP] / ALPHA_FULL,
-                emissive_alpha=blk[EMISSIVE_OFFSET + ALPHA_STEP] / ALPHA_FULL,
+                diffuse_alpha=blk[DIFFUSE_OFFSET + ALPHA_STEP] / COLOUR_FULL,
+                specular_alpha=blk[SPECULAR_OFFSET + ALPHA_STEP] / COLOUR_FULL,
+                emissive_alpha=blk[EMISSIVE_OFFSET + ALPHA_STEP] / COLOUR_FULL,
                 power=blk[POWER_OFFSET],
             )
         )

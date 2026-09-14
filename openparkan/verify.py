@@ -801,8 +801,8 @@ def check_materials(check, game: Path) -> None:
     slots = sum(m.entry_count for m in lib.materials.values()) * 4
     check("Material.lib: an entry is a D3DMATERIAL7 and 34 bytes long",
           here == total > rival,
-          f"at a 14-byte header and a stride of 34 all four alpha bytes are a "
-          f"percentage -- 100 or below, over {slots} slots -- and the 16-byte "
+          f"at a 14-byte header and a stride of 34 all four alpha bytes are "
+          f"100 or below, over {slots} slots -- and the 16-byte "
           f"name field is terminated ASCII, in every entry of {here}/{total} "
           f"records; the best of twelve other (base, stride) pairs -- the "
           f"shorter headers the version gate would have produced among them "
@@ -1128,6 +1128,138 @@ def check_materials(check, game: Path) -> None:
     check("terrain layer names resolve through Material.lib", through == named,
           f"{through}/{named} reach a texture through a material, against "
           f"{direct}/{named} looked up in Textures.lib directly")
+
+
+#: The objects the buoy example draws: Mission 01's objective marker.
+BUOY_RECORD = "s_tree_29"
+BUOY_BEAM, BUOY_LAMP, BUOY_PLACE = "HLP_RAY_R", "HLP_LAMP_R", "HLP_PLACE_R"
+#: The engine's scale for an object mesh's ``uint16`` UVs
+#: (``Terrain.dll:0x10035070``) -- not the 256 ``mesh.py`` reads them over.
+OBJECT_UV_FULL = 1024
+MESH_ARCHIVES = (
+    "static.rlb", "intsys.rlb", "turrets.rlb", "guns.rlb", "parts.rlb",
+    "weapon.rlb", "animals.rlb", "bases.rlb", "fortif.rlb", "system.rlb",
+)
+
+
+def check_material_draw(check, game: Path) -> None:
+    """How a material draws: the track fields, the glow, the cell, the buoy."""
+    lib = materials.MaterialLibrary(game / "Material.lib")
+    textures = NResArchive.open(game / "Textures.lib")
+
+    # The track word: mode in the low three bits, the lerp mask above.
+    modes, masks = Counter(), Counter()
+    multi = ascending = starts_at_zero = 0
+    unsorted = []
+    for name, m in lib.materials.items():
+        for t in m.tracks:
+            modes[t.kind] += 1
+            masks[t.param] += 1
+            if len(t.keys) > 1:
+                multi += 1
+                times = [k.time for k in t.keys]
+                if all(a < b for a, b in zip(times, times[1:], strict=False)):
+                    ascending += 1
+                else:
+                    unsorted.append(name)
+                starts_at_zero += times[0] == 0
+    check("Material.lib: a track's mode is 0 to 3, its mask five bits",
+          set(modes) <= {0, 1, 2, 3} and all(p < 0x20 for p in masks),
+          f"modes {dict(sorted(modes.items()))} (loop, ping-pong, once, random) "
+          f"and masks {dict(sorted(masks.items()))} over {sum(modes.values())} "
+          f"tracks -- no mode past the four-way table at World3D.dll:0x10003668 "
+          f"and no mask bit past 0x10, the ambient alpha")
+
+    # The bracket search reads a key's time as the END of its interval: key
+    # 0's entry holds from 0.  A start time would put some first key at 0.
+    check("Material.lib: a key's time ends its interval",
+          multi and starts_at_zero == 0 and ascending >= multi - 1,
+          f"0 of {multi} multi-key tracks put their first key at time 0, and "
+          f"{ascending} run strictly ascending -- what a search for "
+          f"key[i-1].time <= t < key[i].time needs (the exception: "
+          f"{', '.join(unsorted) or 'none'})")
+
+    # The device never reads the entry's emissive; the ambient is the glow.
+    glow = Counter()
+    for m in lib.materials.values():
+        if m.entries and m.entries[0].colour == (0, 0, 0) \
+                and m.entries[0].ambient != (0, 0, 0):
+            glow[m.blend] += 1
+    entries = [e for m in lib.materials.values() for e in m.entries]
+    emissive = sum(e.emissive != (0, 0, 0) for e in entries)
+    check("Material.lib: the glow is a black diffuse under an ambient colour",
+          glow[materials.BLEND_ADD] > 200 and emissive < len(entries) // 20,
+          f"{dict(sorted(glow.items()))} materials by flags draw a black "
+          f"diffuse with an ambient colour -- self-light, since the device's "
+          f"emissive is scene + ambient -- while only {emissive} of "
+          f"{len(entries)} entries carry the emissive nothing reads")
+
+    # The buoy.
+    beam, lamp, place = (lib.materials[n] for n in (BUOY_BEAM, BUOY_LAMP, BUOY_PLACE))
+    track = [(k.entry, k.time) for k in beam.tracks[0].keys]
+    same = all([(t.kind, t.param, [(k.entry, k.time) for k in t.keys])
+                for t in m.tracks] == [(0, 1, track)] for m in (beam, lamp, place))
+    pages = texm.parse_pages(textures.read_name(beam.entries[0].texture))
+    cells = [e.cell for e in beam.entries]
+    strips = [pages[c] for c in cells]
+    check("Material.lib: the buoy beam steps SUN4.0's strips under a red glow",
+          beam.blend == materials.BLEND_ALPHA and cells == [0, 1, 2] and same
+          and track == [(0, 50), (1, 100), (2, 150), (1, 200)]
+          and all(e.colour == (0, 0, 0) and e.ambient_alpha == 1.0 for e in beam.entries)
+          and all(w == 64 and h == 128 for _, _, w, h in strips),
+          f"{BUOY_BEAM} is flags {beam.blend} on {beam.entries[0].texture}, "
+          f"cells {cells} = (x, y, w, h) {strips}, ambient "
+          f"{['#{:02x}{:02x}{:02x}'.format(*e.ambient) for e in beam.entries]}; its track, "
+          f"shared with {BUOY_LAMP} and {BUOY_PLACE}, is mode 0 mask 1 keys "
+          f"{track} -- cells 0 1 2 1 every 50 ms, the colour gliding")
+
+    # The beam's UVs fill exactly one cell at the engine's 1/1024.
+    parts = assembly.Assembly(game)
+    ref = parts.record_mesh(parts.library.get(BUOY_RECORD))
+    mesh = parts.mesh(ref)
+    wear = parts.wear(ref)
+    beam_index = wear.materials.index(BUOY_BEAM)
+    reach = [0, 0]
+    for b in mesh.batches:
+        if b.material != beam_index:
+            continue
+        first, count = b.triangles
+        for t in range(first, first + count):
+            for vi in mesh.triangles[t]:
+                raw = [round(c * objmesh.UV_FIXED_POINT_SCALE) for c in mesh.uv[vi]]
+                reach = [max(a, c) for a, c in zip(reach, raw, strict=True)]
+
+    # And across every object batch that asks for a cell.
+    inside = cell_batches = 0
+    for name in MESH_ARCHIVES:
+        ar = NResArchive.open(game / name)
+        for e in ar:
+            if e.tag != "MESH":
+                continue
+            try:
+                palette = objmesh.parse_wear(
+                    ar.read_name(e.name.rsplit(".", 1)[0] + ".wea")).materials
+                m = objmesh.parse(ar.read(e), e.name, palette)
+            except (KeyError, ValueError, struct.error):
+                continue
+            for b in m.batches:
+                mat = lib.materials.get(palette[b.material].upper()) \
+                    if b.material < len(palette) else None
+                if mat is None or mat.whole_texture:
+                    continue
+                first, count = b.triangles
+                hi = max((round(c * objmesh.UV_FIXED_POINT_SCALE)
+                          for t in range(first, first + count)
+                          for vi in m.triangles[t] for c in m.uv[vi]), default=0)
+                cell_batches += 1
+                inside += hi <= OBJECT_UV_FULL
+    check("objects: a stream-5 UV is over 1024, so a cell stays in its page",
+          reach[0] == OBJECT_UV_FULL and OBJECT_UV_FULL * 0.99 <= reach[1] <= OBJECT_UV_FULL
+          and inside > cell_batches * 3 // 4,
+          f"{BUOY_BEAM}'s batches on {BUOY_RECORD} reach raw {reach[0]} x "
+          f"{reach[1]}: one cell at 1/1024, four cells by two at 1/256; "
+          f"{inside} of {cell_batches} batches whose material names a cell "
+          f"reach no further than 1024")
 
 
 def check_water(check, game: Path) -> None:
@@ -12235,8 +12367,8 @@ def run(game: Path) -> int:
     print(f"verifying against {game}\n")
     checks = (
         check_nres, check_texm, check_terrain, check_uv,
-        check_water, check_layers, check_materials, check_sky, check_render_state,
-        check_minimap_agreement, check_arealmap,
+        check_water, check_layers, check_materials, check_material_draw, check_sky,
+        check_render_state, check_minimap_agreement, check_arealmap,
         check_grid, check_missions, check_scale, check_objects, check_poses, check_lod,
         check_damage,
         check_effects, check_effect_timing, check_sounds, check_actions, check_footprints,
