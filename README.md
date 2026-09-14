@@ -221,6 +221,7 @@ of fields carried through the readers without being understood.
 - [32-builder.md](docs/32-builder.md) — builders and transports: the beam, building, upgrading and carrying ore
 - [33-units.md](docs/33-units.md) — a whole robot on one sheet: `openparkan unit`
 - [34-progression.md](docs/34-progression.md) — a mission's progression: routes as trigger areas, the Mission handler, messages, objectives and the win
+- [35-hud.md](docs/35-hud.md) — the cockpit HUD: the weapons list, the message box, the radar and the target and own-unit panels
 
 ## Layout
 
