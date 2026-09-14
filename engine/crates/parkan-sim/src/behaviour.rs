@@ -47,6 +47,9 @@ pub const ATTACK_TIMER_MS: (f64, f64) = (8000.0, 8000.0);
 pub const ATTACK_BUILDING_INSIDE: (f32, f32) = (20.0, 5.0);
 /// The attack's tries at a point.
 pub const ATTACK_TRIES: usize = 77;
+/// The escape's first ring of tries: points within this of the unit along each axis,
+/// inside the map by the roaming inset (`0x1002ba50`).
+pub const LEAVE_REACH: f32 = 150.0;
 /// The fight module's bars (`0x10024e7a`): a flyer's, and a walker's.
 pub const FIRE_BAR_FLYER: f32 = 0.45;
 pub const FIRE_BAR_WALKER: f32 = 0.85;
@@ -128,6 +131,11 @@ pub enum Task {
         fighting: bool,
         next_ms: f64,
     },
+    /// The escape (`ORDER_ROBOT_LEAVE`): off a building to open ground, ending when the
+    /// walker has nothing left to do; its priority is 0 for every reason (`0x1002b9f0`).
+    Leave {
+        goal: Option<Vec3>,
+    },
 }
 
 impl Task {
@@ -161,6 +169,7 @@ impl Task {
             }
             (orders::SEARCH, _) => Task::Search { search: Search::Enemies, next_ms: 0.0 },
             (orders::RELOAD, _) => Task::Reload,
+            (orders::LEAVE, _) => Task::Leave { goal: None },
             (orders::ATTACK, Target::LogicId(id)) => {
                 Task::Attack { target: Some(id), fighting: false, next_ms: 0.0 }
             }
@@ -355,6 +364,28 @@ impl Behaviour {
                 }
                 self.fire = FireMode::Nearest;
                 Some(Takt { walk, target: self.fire_target(senses), fire_freely: true })
+            }
+            // STAND-IN: docs/31-packages.md#the-escape--read -- which areals are usable is not
+            // modelled: the first point tried within 150 of the unit, inside the map by 100.
+            Task::Leave { goal: None } => {
+                let (lo, hi) = senses.bounds;
+                let pick = |me: &mut Self, a: usize| {
+                    let (from, to) = (lo[a] + ROAM_INSET, hi[a] - ROAM_INSET);
+                    let v = at[a] + (me.random() * 2.0 - 1.0) * LEAVE_REACH;
+                    if to > from { v.clamp(from, to) } else { (lo[a] + hi[a]) / 2.0 }
+                };
+                let goal = Vec3::new(pick(self, 0), pick(self, 1), at.z);
+                *self.tasks.last_mut()? = Task::Leave { goal: Some(goal) };
+                self.fire = FireMode::None;
+                Some(Takt { walk: Walk::To(goal, 1.0), target: None, fire_freely: false })
+            }
+            Task::Leave { goal: Some(goal) } => {
+                if senses.walker_idle {
+                    return None;
+                }
+                self.fire = FireMode::None;
+                let _ = goal;
+                Some(Takt { walk: Walk::Keep, target: None, fire_freely: false })
             }
             Task::Attack { target, fighting, next_ms } => {
                 if !senses.has_weapon {

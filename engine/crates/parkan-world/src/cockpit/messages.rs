@@ -78,19 +78,25 @@ pub fn wrap(font: &GameFont, text: &str, width: f32) -> (Vec<String>, bool) {
 
 /// The box, while one lives and is shown.
 pub fn draw(cockpit: &mut Cockpit, ink: &mut Ink, now_ms: f64) {
+    draw_at(cockpit, ink, now_ms, LEFT, TOP, WIDTH);
+}
+
+/// The box at (`left`, `top`), `width` wide: the cockpit's at the top, a building screen's at
+/// the bottom right (docs/36, "The screens' draw in mode 5").
+pub fn draw_at(cockpit: &mut Cockpit, ink: &mut Ink, now_ms: f64, left: f32, top: f32, width: f32) {
     if cockpit.messages.shown.as_ref().is_some_and(|s| now_ms - s.made_ms > LIFETIME_MS) {
         cockpit.messages.shown = None;
     }
     let Some(shown) = cockpit.messages.shown.as_ref().filter(|_| !cockpit.messages.hidden) else { return };
-    let (lines, cut) = wrap(ink.font, &shown.text, WIDTH - TEXT_MARGIN);
+    let (lines, cut) = wrap(ink.font, &shown.text, width - TEXT_MARGIN);
     let l = ink.line_step();
     let k = if cut { 2.0 } else { 1.0 };
     let n = lines.len() as f32;
     let height = (n + k) * l + (k * l / 2.0).floor() + 16.0;
-    let (x0, y0, x1, y1) = (LEFT, TOP, LEFT + WIDTH, TOP + height);
+    let (x0, y0, x1, y1) = (left, top, left + width, top + height);
     ink.painter.fill(
         crate::hud::Blend::Alpha,
-        [x0 + EDGE, y0 + EDGE, WIDTH - 2.0 * EDGE, height - 2.0 * EDGE],
+        [x0 + EDGE, y0 + EDGE, width - 2.0 * EDGE, height - 2.0 * EDGE],
         argb(FILL),
     );
     frame(cockpit, ink, [x0, y0, x1, y1]);

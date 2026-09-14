@@ -606,6 +606,44 @@ pub fn own_view(objects: &mut Objects, store: &mut TextureStore, play: &Play) ->
     Ok(OwnView { nodes, outside, placed: objects.placed.clone(), targets })
 }
 
+/// Units the play has made since the last call, drawn node by node as `own_view` draws a
+/// target: whether any was added, and the world must be uploaded again.
+pub fn add_targets(
+    objects: &mut Objects,
+    store: &mut TextureStore,
+    view: &mut OwnView,
+    play: &mut Play,
+) -> Result<bool> {
+    let added = std::mem::take(&mut play.added);
+    for &t in &added {
+        let target = &play.battle.combat.targets[t];
+        for (p, part) in target.parts.iter().enumerate() {
+            let Some(loaded) = play.battle.meshes.get(t).and_then(|m| m.get(p)) else { continue };
+            for node in 0..part.mesh.nodes.len() {
+                let stages = part.life.as_ref().and_then(|l| l.nodes.get(node)).map_or(1, |l| l.stages);
+                for variant in 0..usize::from(stages) {
+                    let Some(model) = models::build_node(loaded, node, variant, |name| store.look(name))?
+                    else {
+                        continue;
+                    };
+                    objects.models.push(model);
+                    objects.instances.push(models::Instance {
+                        model: objects.models.len() - 1,
+                        position: [0.0; 3],
+                        rotation: 0.0,
+                        scale: 1.0,
+                        hidden: true,
+                    });
+                    objects.placed.push(usize::MAX);
+                    view.placed.push(usize::MAX);
+                    view.targets.push((objects.instances.len() - 1, t, p, node, variant));
+                }
+            }
+        }
+    }
+    Ok(!added.is_empty())
+}
+
 /// Put each node of the hero's own view where the hero's pose has it this frame: the
 /// chassis playing its frames, the turret its channels, as the eye is placed. From
 /// `outside`, as a briefing's camera sees it, the hero is drawn whole instead: each node's

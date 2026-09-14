@@ -90,7 +90,7 @@ fn number(v: Value) -> i64 {
 /// The level ratio an object's hit points take: the difficulty's, for a warrior, HQ
 /// or hero of a clan not allied with the player's, and 1 otherwise.
 pub fn object_ratio(
-    mission: &Mission,
+    clans: &[mission::Clan],
     object: &mission::Object,
     player_clan: Option<i64>,
     ratio: f32,
@@ -100,9 +100,8 @@ pub fn object_ratio(
     if !RATIO_TYPES.contains(&kind) {
         return 1.0;
     }
-    let name = mission.clans.get(clan as usize).map(|c| c.name.as_str());
-    let allied = mission
-        .clans
+    let name = clans.get(clan as usize).map(|c| c.name.as_str());
+    let allied = clans
         .get(player as usize)
         .and_then(|p| p.relations.iter().find(|(n, _)| Some(n.as_str()) == name))
         .is_some_and(|&(_, relation)| relation != 0);
@@ -168,95 +167,103 @@ impl Battle {
         ratio: f32,
     ) -> Result<Battle> {
         let player = hero.and_then(|h| mission.objects.get(h)).and_then(mission::Object::clan_id);
-        let mut combat = Combat::default();
-        let mut objects = Vec::new();
-        let mut explosions = Vec::new();
-        let mut wears = Vec::new();
-        let mut placed_kinds = Vec::new();
-        let mut meshes = Vec::new();
-        let mut death_ms = Vec::new();
+        let mut battle = Battle {
+            combat: Combat::default(),
+            objects: Vec::new(),
+            kinds: Vec::new(),
+            pools: Vec::new(),
+            explosions: Vec::new(),
+            wears: Vec::new(),
+            placed_kinds: Vec::new(),
+            meshes: Vec::new(),
+            death_ms: Vec::new(),
+            kind_of: HashMap::new(),
+        };
         for (i, object) in mission.objects.iter().enumerate() {
             if Some(i) == hero {
                 continue;
             }
-            let scale = object.placed_scale();
-            let place = placement(object.position, object.rotation);
-            let damageable = !matches!(object.kind, mission::KIND_VEGETATION | mission::KIND_ROCK);
-            let object_ratio = object_ratio(mission, object, player, ratio);
-            let mut parts = Vec::new();
-            let mut blasts = Vec::new();
-            let mut part_wears = Vec::new();
-            let mut part_meshes = Vec::new();
-            let mut lasts = 0.0;
-            let (mut lo, mut hi) = (Vec3::splat(f32::MAX), Vec3::splat(f32::MIN));
-            for part in assembly.parts(object.kind, &object.path) {
-                let Some(loaded) = assembly.mesh(&part.reference) else { continue };
-                if parts.is_empty() {
-                    let ctl =
-                        assembly.library.get(&part.record).and_then(|r| r.slot_with_suffix("ctl")).cloned();
-                    lasts = ctl
-                        .and_then(|c| read(assembly, &c).and_then(|b| control::parse(&b, &c.member).ok()))
-                        .map_or(0.0, |c| f64::from(c.death_ms));
-                }
-                part_meshes.push(loaded.clone());
-                let mesh = Rc::new(loaded.mesh.clone());
-                // STAND-IN: docs/24-motion.md#playing-a-state--read-and-measured -- the poses
-                // other units are struck in are not played: every target's nodes stay at
-                // their rest poses.
-                let nodes: Vec<Pose> = (0..mesh.nodes.len())
-                    .map(|n| {
-                        let mut local = part.pose.compose(&mesh.world_pose(n));
-                        local.translation = local.translation.map(|v| v * f64::from(scale));
-                        place.compose(&local)
-                    })
-                    .collect();
-                for (n, node) in mesh.nodes.iter().enumerate() {
-                    let Some(slot) = mesh.slots.get(usize::from(node.slot_index[0])) else { continue };
-                    let [cx, cy, cz, r] = slot.sphere;
-                    let c = nodes[n].apply([cx, cy, cz].map(|v| f64::from(v * scale)));
-                    let c = Vec3::new(c[0] as f32, c[1] as f32, c[2] as f32);
-                    lo = lo.min(c - Vec3::splat(r * scale));
-                    hi = hi.max(c + Vec3::splat(r * scale));
-                }
-                let (life, part_blasts) = if damageable {
-                    part_damage(assembly, &part, &mesh, object_ratio, object.kind == mission::KIND_BUILDING)
-                } else {
-                    (None, Vec::new())
-                };
-                blasts.push(part_blasts);
-                parts.push(Part { mesh, nodes, scale, life });
-                part_wears.push(loaded.wear.materials.clone());
-            }
-            if parts.is_empty() || lo.x > hi.x {
-                continue;
-            }
-            let centre = (lo + hi) / 2.0;
-            combat.targets.push(Target {
-                parts,
-                centre,
-                radius: (hi - lo).length() / 2.0,
-                alive: true,
-                position: Vec3::from_array(object.position),
-            });
-            objects.push(i);
-            explosions.push(blasts);
-            wears.push(part_wears);
-            placed_kinds.push(object.kind);
-            meshes.push(part_meshes);
-            death_ms.push(lasts);
+            battle.add(assembly, &mission.clans, object, i, player, ratio);
         }
-        Ok(Battle {
-            combat,
-            objects,
-            kinds: Vec::new(),
-            pools: Vec::new(),
-            explosions,
-            wears,
-            placed_kinds,
-            meshes,
-            death_ms,
-            kind_of: HashMap::new(),
-        })
+        Ok(battle)
+    }
+
+    /// Placed object `object`, numbered `index`, as a new target, with its clans' relations
+    /// to `player` for the level ratio; its target, or `None` when nothing of it loads.
+    pub fn add(
+        &mut self,
+        assembly: &mut Assembly,
+        clans: &[mission::Clan],
+        object: &mission::Object,
+        index: usize,
+        player: Option<i64>,
+        ratio: f32,
+    ) -> Option<usize> {
+        let scale = object.placed_scale();
+        let place = placement(object.position, object.rotation);
+        let damageable = !matches!(object.kind, mission::KIND_VEGETATION | mission::KIND_ROCK);
+        let object_ratio = object_ratio(clans, object, player, ratio);
+        let mut parts = Vec::new();
+        let mut blasts = Vec::new();
+        let mut part_wears = Vec::new();
+        let mut part_meshes = Vec::new();
+        let mut lasts = 0.0;
+        let (mut lo, mut hi) = (Vec3::splat(f32::MAX), Vec3::splat(f32::MIN));
+        for part in assembly.parts(object.kind, &object.path) {
+            let Some(loaded) = assembly.mesh(&part.reference) else { continue };
+            if parts.is_empty() {
+                let ctl = assembly.library.get(&part.record).and_then(|r| r.slot_with_suffix("ctl")).cloned();
+                lasts = ctl
+                    .and_then(|c| read(assembly, &c).and_then(|b| control::parse(&b, &c.member).ok()))
+                    .map_or(0.0, |c| f64::from(c.death_ms));
+            }
+            part_meshes.push(loaded.clone());
+            let mesh = Rc::new(loaded.mesh.clone());
+            // STAND-IN: docs/24-motion.md#playing-a-state--read-and-measured -- the poses
+            // other units are struck in are not played: every target's nodes stay at
+            // their rest poses.
+            let nodes: Vec<Pose> = (0..mesh.nodes.len())
+                .map(|n| {
+                    let mut local = part.pose.compose(&mesh.world_pose(n));
+                    local.translation = local.translation.map(|v| v * f64::from(scale));
+                    place.compose(&local)
+                })
+                .collect();
+            for (n, node) in mesh.nodes.iter().enumerate() {
+                let Some(slot) = mesh.slots.get(usize::from(node.slot_index[0])) else { continue };
+                let [cx, cy, cz, r] = slot.sphere;
+                let c = nodes[n].apply([cx, cy, cz].map(|v| f64::from(v * scale)));
+                let c = Vec3::new(c[0] as f32, c[1] as f32, c[2] as f32);
+                lo = lo.min(c - Vec3::splat(r * scale));
+                hi = hi.max(c + Vec3::splat(r * scale));
+            }
+            let (life, part_blasts) = if damageable {
+                part_damage(assembly, &part, &mesh, object_ratio, object.kind == mission::KIND_BUILDING)
+            } else {
+                (None, Vec::new())
+            };
+            blasts.push(part_blasts);
+            parts.push(Part { mesh, nodes, scale, life });
+            part_wears.push(loaded.wear.materials.clone());
+        }
+        if parts.is_empty() || lo.x > hi.x {
+            return None;
+        }
+        let centre = (lo + hi) / 2.0;
+        self.combat.targets.push(Target {
+            parts,
+            centre,
+            radius: (hi - lo).length() / 2.0,
+            alive: true,
+            position: Vec3::from_array(object.position),
+        });
+        self.objects.push(index);
+        self.explosions.push(blasts);
+        self.wears.push(part_wears);
+        self.placed_kinds.push(object.kind);
+        self.meshes.push(part_meshes);
+        self.death_ms.push(lasts);
+        Some(self.combat.targets.len() - 1)
     }
 
     /// The round kind a `BULL` record fires, loaded once.

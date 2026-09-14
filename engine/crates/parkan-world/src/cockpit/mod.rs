@@ -3,6 +3,7 @@
 //! corners. Each frame gives the HUD's art as painter batches, its `GAME_FONT` text, and the
 //! views of units its panels hold. See `docs/35-hud.md`.
 
+pub mod factory;
 pub mod map;
 pub mod messages;
 pub mod objectives;
@@ -100,6 +101,7 @@ pub struct Cockpit {
     pub ring_since_ms: f64,
     pub objectives: objectives::Screen,
     pub map: map::SatelliteMap,
+    pub factory: factory::Screen,
 }
 
 impl Cockpit {
@@ -117,6 +119,7 @@ impl Cockpit {
             water_level: play.ground.water_level(),
             ring_since_ms: 0.0,
             objectives: objectives::Screen::default(),
+            factory: factory::Screen::default(),
             map: map::SatelliteMap::new(
                 crate::settings::value(game, "CS", "MAP_ALPHA").and_then(|v| v.parse().ok()),
             ),
@@ -144,6 +147,19 @@ impl Cockpit {
             Ink { painter: Painter::new(space), text: Vec::new(), font, menu_runs: Vec::new(), menu };
         if objectives::draw(self, &mut ink, play, now_ms) {
             return Drawn { batches: ink.painter.batches, menu_text: ink.menu_runs, ..Drawn::default() };
+        }
+        // A building's screen in place of the HUD, with the satellite map and the message box
+        // (`0x1008d444`).
+        if let crate::play::Mode::Factory(t) = play.mode() {
+            factory::draw(self, &mut ink, play, t, now_ms);
+            ink.painter.pin = Pin::TOP_RIGHT;
+            map::draw(self, &mut ink, play, now_ms);
+            return Drawn {
+                batches: ink.painter.batches,
+                text: ink.text,
+                menu_text: ink.menu_runs,
+                ..Drawn::default()
+            };
         }
         let mut voices = Vec::new();
         let water_level = self.water_level;

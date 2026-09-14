@@ -6,7 +6,7 @@
 //! parkan [--game DIR] [--mission MISSIONS/…] [--fly]
 //!        [--screenshot OUT.png] [--size WxH] [--top-down] [--look X,Y,Z,TX,TY,TZ]
 //!        [--headless] [--ticks N] [--hold SCAN_W,SCAN_A] [--mouse DX,DY] [--trace] [--sway]
-//!        [--capture-idle] [--stretch-hud] [--outcome won|lost] [--text "…"] [--face NAME,DISTANCE] [--at X,Y,YAW]
+//!        [--capture-idle] [--stretch-hud] [--outcome won|lost] [--text "…"] [--face NAME,DISTANCE] [--at X,Y,YAW] [--pod NAME]
 //!        [--skip-briefing] [--briefing-at SECONDS] [--objectives] [--map]
 //! ```
 //!
@@ -99,6 +99,8 @@ struct Args {
     face: Option<(String, f32)>,
     /// `--at X,Y,YAW`: the hero starts on the ground at X,Y, turned to YAW.
     at: Option<[f32; 3]>,
+    /// `--pod NAME`: the hero starts on the control pod of the building whose path ends in NAME.
+    pod: Option<String>,
     /// `--skip-briefing`: the mission starts in the cockpit, as Esc in its briefing would.
     skip_briefing: bool,
     /// `--briefing-at SECONDS`: a screenshot of the briefing that far in.
@@ -129,6 +131,7 @@ fn args() -> Result<Args> {
         text: None,
         face: None,
         at: None,
+        pod: None,
         skip_briefing: false,
         briefing_at: None,
         objectives: false,
@@ -166,6 +169,7 @@ fn args() -> Result<Args> {
                 let v: Vec<f32> = value()?.split(',').map(str::parse).collect::<Result<_, _>>()?;
                 out.at = Some(v.try_into().map_err(|_| anyhow::anyhow!("--at takes X,Y,YAW"))?);
             }
+            "--pod" => out.pod = Some(value()?.to_ascii_lowercase()),
             "--ticks" => out.ticks = value()?.parse()?,
             "--hold" => out.hold = value()?.split(',').map(str::to_owned).collect(),
             "--mouse" => {
@@ -228,6 +232,18 @@ fn rehearse(play: &mut scene::Play, loaded: &scene::Loaded, args: &Args) {
         match target {
             Some(t) if play.stand_facing(t, *distance, 0.0) => {}
             _ => eprintln!("--face: no place {distance} from an object {name}"),
+        }
+    }
+    if let Some(name) = &args.pod {
+        let target = play.battle.objects.iter().position(|&o| {
+            loaded
+                .mission
+                .objects
+                .get(o)
+                .is_some_and(|m| m.path.to_ascii_lowercase().ends_with(name.as_str()))
+        });
+        if !target.is_some_and(|t| play.stand_on_pod(t)) {
+            eprintln!("--pod: no building {name} with a pod");
         }
     }
     if let Some([x, y, yaw]) = args.at
@@ -479,6 +495,8 @@ struct App {
     /// The mission's briefing while it plays, and when its first frame was drawn.
     briefing: Option<parkan_world::briefing::Briefing>,
     briefing_clock: Option<Instant>,
+    /// Where the cursor is in the window, in pixels.
+    cursor: [f32; 2],
 }
 
 /// The mission's briefing, unless `--skip-briefing` or `--fly`; a play has its world paused
@@ -611,6 +629,9 @@ impl App {
             return;
         }
         let Some(play) = self.play.as_mut() else { return };
+        // A building's screen has the hero handed away: its table takes no key
+        // (`0x10074ff0` with 0, docs/36), and only the screens' commands act.
+        let on_foot = play.mode() == parkan_world::play::Mode::OnFoot;
         // While the wingman selector is open a digit is its (`iron3d.dll:0x100710fa`).
         let digit = scan
             .strip_prefix("SCAN_W_")
@@ -623,7 +644,8 @@ impl App {
                     play.wingman_digit(n);
                 }
             }
-            _ => play.hero.key(scan, pressed),
+            _ if on_foot => play.hero.key(scan, pressed),
+            _ => {}
         }
         if !pressed {
             self.scans.remove(scan);
@@ -660,6 +682,7 @@ impl App {
                     CMD_DEC_MAP_ALPHA => screens.map.step_alpha(false, now),
                     // `0x1007255b`: no wingman menu while the objectives are up.
                     CMD_JAMES_WINGMAN_MENU if screens.objectives.up => {}
+                    _ if !on_foot => {}
                     _ => {
                         play.command(&command, &view);
                     }
@@ -724,6 +747,13 @@ impl App {
     }
 
     fn redraw(&mut self) {
+        // A building's screen shows the cursor (docs/36, "For an engine").
+        //
+        // STAND-IN: docs/36-factory.md#not-established -- how the cursor is shown in mode 5
+        // is not followed: the system's cursor, the grab let go.
+        if self.grabbed && self.play.as_ref().is_some_and(|p| p.mode() != parkan_world::play::Mode::OnFoot) {
+            self.grab(false);
+        }
         // The input update runs once a rendered frame.
         if let Some(play) = self.play.as_mut() {
             play.hero.update_input();
@@ -739,6 +769,37 @@ impl App {
             }
             if b.finished() {
                 self.end_briefing();
+            }
+        }
+        // A unit a factory made is drawn from now on, and named on the HUD.
+        if let (Some(play), Some(view)) = (self.play.as_mut(), self.view.as_mut()) {
+            let names: Vec<String> = play.added.iter().map(|&t| play.names[t].clone()).collect();
+            let added = scene::add_targets(&mut self.world.objects, &mut self.world.store, view, play)
+                .and_then(|added| {
+                    if added {
+                        play.draw_rounds(&mut self.world.store, &mut self.world.objects)?;
+                    }
+                    Ok(added)
+                });
+            match added {
+                Ok(true) => {
+                    if let Some(r) = self.running.as_mut() {
+                        let (d, q) = (&r.gpu.device, &r.gpu.queue);
+                        r.renderer.set_world(
+                            d,
+                            q,
+                            &self.world.store.textures,
+                            Some(&self.world.terrain),
+                            Some(&self.world.objects),
+                        );
+                        r.renderer.set_sprite_looks(d, &scene::sprite_looks(play));
+                    }
+                    if let Some(hud) = self.hud.as_mut() {
+                        hud.cockpit.panels.names.extend(names);
+                    }
+                }
+                Ok(false) => {}
+                Err(e) => eprintln!("cannot draw a new unit: {e:#}"),
             }
         }
         // The sounds the ticks started play now, whether or not a frame can be drawn.
@@ -907,6 +968,16 @@ impl ApplicationHandler for App {
                     }
                     return;
                 }
+                // `CMD_ROLLBACK_STATE` (735, Esc): a building's screen gives the hero back (docs/36).
+                if code == KeyCode::Escape
+                    && event.state == ElementState::Pressed
+                    && outcome.is_none()
+                    && let Some(play) = self.play.as_mut()
+                    && play.mode() != parkan_world::play::Mode::OnFoot
+                {
+                    play.roll_back();
+                    return;
+                }
                 if code == KeyCode::Escape && event.state == ElementState::Pressed {
                     // `iron3d.dll:0x10070e2c`: once the outcome is recorded Esc leaves the mission.
                     //
@@ -945,9 +1016,27 @@ impl ApplicationHandler for App {
                     self.held.remove(&code);
                 }
             }
+            WindowEvent::CursorMoved { position, .. } => {
+                self.cursor = [position.x as f32, position.y as f32];
+            }
             WindowEvent::MouseInput { state, button, .. } => {
                 let pressed = state == ElementState::Pressed;
                 if self.briefing.is_some() {
+                    return;
+                }
+                if let Some(play) = self.play.as_mut()
+                    && let parkan_world::play::Mode::Factory(t) = play.mode()
+                {
+                    if pressed
+                        && button == MouseButton::Left
+                        && let Some(r) = self.running.as_ref()
+                    {
+                        let space = hud_space(r.config.width, r.config.height, &self.args);
+                        let at = space.layout(self.cursor, parkan_world::hud::Pin::TOP_LEFT);
+                        if let Some(click) = parkan_world::cockpit::factory::click(play, t, at) {
+                            play.factory_click(t, click);
+                        }
+                    }
                     return;
                 }
                 if self.play.is_some() && pressed && !self.grabbed {
@@ -1041,6 +1130,7 @@ fn main() -> Result<()> {
         held: HashSet::new(),
         looking: false,
         grabbed: false,
+        cursor: [0.0; 2],
         counts: [0.0; 2],
         mouse: args.mouse,
         trace: args.trace,

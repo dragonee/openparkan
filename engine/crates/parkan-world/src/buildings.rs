@@ -215,6 +215,11 @@ impl Building {
         Some((Vec3::new(c[0] as f32, c[1] as f32, c[2] as f32), r * part.scale))
     }
 
+    /// The pod node's sphere centre in the world.
+    pub fn pod_centre(&self, part: &Part) -> Option<Vec3> {
+        Self::sphere(part, self.pod.as_ref()?.node).map(|(c, _)| c)
+    }
+
     /// Whether `at` is in the pod's zone: within 0.8 of the pod part's radius across the
     /// ground of its centre, and within its box in height (`0x10059d80`).
     ///

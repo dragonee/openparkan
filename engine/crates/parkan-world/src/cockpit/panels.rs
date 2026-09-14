@@ -449,6 +449,7 @@ fn status(play: &Play, t: usize) -> u32 {
         Task::Search { .. } => robot.order.map_or(5, |o| if o.code == 17 { 17 } else { 5 }),
         Task::Reload => 8,
         Task::Attack { .. } => 3,
+        Task::Leave { .. } => 20,
     };
     order_status(order)
 }

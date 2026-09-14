@@ -6,6 +6,8 @@
 pub const ATTACK: i32 = 3;
 pub const SEARCH: i32 = 5;
 pub const RELOAD: i32 = 8;
+/// `ORDER_ROBOT_LEAVE`, the escape (docs/31, "The escape").
+pub const LEAVE: i32 = 20;
 pub const STAYGROUND: i32 = 0x15;
 pub const FOLLOW: i32 = 0x16;
 /// Follow me's parameter: the radius it keeps within.

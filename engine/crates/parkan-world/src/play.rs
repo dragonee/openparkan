@@ -18,7 +18,9 @@ use parkan_formats::exp::Explosion;
 use parkan_formats::landmesh::FLAGS_LIQUID_BED_BIT;
 use parkan_formats::materials::Library;
 use parkan_formats::mesh::{NO_SLOT, SLOTS_PER_VARIANT};
-use parkan_formats::mission::{Clan, KIND_BUILDING, KIND_ROCK, KIND_UNIT, KIND_VEGETATION, Mission, Value};
+use parkan_formats::mission::{
+    self, Clan, KIND_BUILDING, KIND_ROCK, KIND_UNIT, KIND_VEGETATION, Mission, Value,
+};
 use parkan_formats::pose::Pose;
 use parkan_formats::{gamedir, landmesh};
 use parkan_sim::behaviour::{
@@ -42,6 +44,7 @@ use parkan_sim::wizard::{GROUND_POINT, straight_walk, walk_speed};
 use crate::assembly::Assembly;
 use crate::battle::Battle;
 use crate::buildings::{Building, Child, Fired, Standing};
+use crate::factory::{Factory, Project, VOICE_UNIT_READY};
 use crate::fx::{Fx, Owner};
 use crate::hero::Hero;
 use crate::models::Objects;
@@ -86,6 +89,8 @@ pub const SPEED_MAXIMUM_FACTOR: f32 = 1.0;
 pub const AIM_SETTLED: f32 = 0.005;
 /// A plant's `Type`: its pod opens the factory screen for the player (docs/27, "Capture").
 pub const BUILDING_PLANT: u32 = 0x8000_0010;
+/// A generator's `Type` (docs/27, "Capture").
+pub const BUILDING_GENERATOR: u32 = 0x8000_0002;
 /// The System line an ownership change shows (`iron3d.dll:0x100a48a0`).
 pub const STRING_BUILDING_CAPTURED: u32 = 5039;
 /// What the player hears when a building changes hands: taken from a neutral or an ally,
@@ -94,6 +99,13 @@ pub const VOICE_NBUILD_CAPTURE: &str = "VOICE_NBUILD_CAPTURE";
 pub const VOICE_EBUILD_CAPTURE: &str = "VOICE_EBUILD_CAPTURE";
 pub const VOICE_BUILD_CAPTURE: &str = "VOICE_BUILD_CAPTURE";
 pub const VOICE_SELECTED: &str = "VOICE_SELECTED";
+
+/// A produced unit's object number: past every mission's objects, so no mission object is
+/// taken for it.
+pub const SPAWNED_OBJECTS: usize = 1 << 20;
+/// `CLASS_ROBOT`: a Type word with this bit is a robot, which holds one of its clan's minds
+/// (docs/23, "The bot limit is the clan's mind count").
+pub const CLASS_ROBOT: u32 = 0x0100_0000;
 
 /// A view mode on the interface's stack (docs/39-boarding.md, "The game view keeps a stack
 /// of modes"): the hero on foot, or a building's screen.
@@ -222,6 +234,14 @@ pub struct Play {
     pub modes: Vec<Mode>,
     /// The buildings the player has selected, by target.
     pub selected: Vec<usize>,
+    /// The plants, and what each builds.
+    pub factories: Vec<Factory>,
+    /// The difficulty's level ratio a unit's hit points take (docs/26).
+    pub ratio: f32,
+    /// How many units the play has made.
+    pub spawned: usize,
+    /// Units made since the drawing last caught up, by target.
+    pub added: Vec<usize>,
 }
 
 /// A round about to leave a barrel.
@@ -322,8 +342,8 @@ impl Play {
         let Some(mut hero) = Hero::load(&mut assembly, mission)? else { return Ok(None) };
         let dir = terrain::map_dir(game, &mission.map_path)?;
         let land = landmesh::load(&gamedir::resolve(&dir, "Land.msh").context("the map has no Land.msh")?)?;
-        let mut battle =
-            Battle::load(&mut assembly, mission, Some(hero.object), settings::level_ratio(game))?;
+        let ratio = settings::level_ratio(game);
+        let mut battle = Battle::load(&mut assembly, mission, Some(hero.object), ratio)?;
         hero.arm(&mut battle, &mut assembly);
         let mut robots = Vec::new();
         for t in 0..battle.objects.len() {
@@ -446,6 +466,9 @@ impl Play {
         let buildings: Vec<Building> = (0..target_count)
             .filter_map(|t| Building::load(&mut assembly, mission, battle.objects[t], t))
             .collect();
+        let factories: Vec<Factory> = (0..target_count)
+            .filter_map(|t| Factory::load(&mut assembly, mission, battle.objects[t], t))
+            .collect();
         let mut play = Play {
             hero,
             ground,
@@ -478,6 +501,10 @@ impl Play {
             buildings,
             modes: vec![Mode::OnFoot],
             selected: Vec::new(),
+            factories,
+            ratio,
+            spawned: 0,
+            added: Vec::new(),
         };
         for i in 0..play.turret_effects.len() {
             let e = play.turret_effects[i].clone();
@@ -522,6 +549,19 @@ impl Play {
     pub fn stand_at(&mut self, x: f32, y: f32, yaw: f32) -> bool {
         let Some(hit) = self.ground.below(x, y, 10_000.0) else { return false };
         self.place_hero(Vec3::new(x, y, hit.point.z + 2.0), yaw);
+        true
+    }
+
+    /// Stand the hero on the control pod of the building that is target `t`, from above its
+    /// centre. False when it has none.
+    pub fn stand_on_pod(&mut self, t: usize) -> bool {
+        let Some(b) = self.buildings.iter().find(|b| b.target == t) else { return false };
+        let Some(part) = self.battle.combat.targets.get(t).and_then(|x| x.parts.get(b.part)) else {
+            return false;
+        };
+        let Some(centre) = b.pod_centre(part) else { return false };
+        let yaw = self.hero.walker.body.yaw;
+        self.place_hero(centre + Vec3::Z * 4.0, yaw);
         true
     }
 
@@ -887,6 +927,7 @@ impl Play {
         let now = self.hero.time_ms;
         if !self.paused {
             self.tick_buildings(now);
+            self.tick_factories(dt_ms);
         }
         let mut events = self.ground_damage(now);
         let launches = launches(&self.hero.robot, None, &shots, &self.battle, &self.ground);
@@ -1196,6 +1237,172 @@ impl Play {
             self.hero.release_keys();
             self.modes.push(Mode::Factory(t));
         }
+    }
+
+    /// Clan `clan`'s minds not held: its mission's count less every live robot of the clan
+    /// (the hero among them) and every build its factories are running (docs/23, "The bot
+    /// limit is the clan's mind count").
+    pub fn free_minds(&self, clan: i64) -> usize {
+        let minds =
+            usize::try_from(clan).ok().and_then(|c| self.clans.get(c)).map_or(0, |c| c.minds as usize);
+        let robots = self
+            .units
+            .iter()
+            .zip(&self.battle.combat.targets)
+            .filter(|(u, target)| u.clan == Some(clan) && u.type_word & CLASS_ROBOT != 0 && target.alive)
+            .count();
+        let hero = usize::from(clan == self.player_clan && !self.hero.dead());
+        let building = if clan == self.player_clan {
+            self.factories
+                .iter()
+                .filter(|f| self.units[f.target].clan == Some(clan) && f.build.is_some())
+                .count()
+        } else {
+            0
+        };
+        minds.saturating_sub(robots + hero + building)
+    }
+
+    /// A click on the factory screen of the plant that is target `target` (docs/36, "What the
+    /// controls do").
+    pub fn factory_click(&mut self, target: usize, click: crate::cockpit::factory::Click) {
+        use crate::cockpit::factory::Click;
+        let free = self.free_minds(self.player_clan);
+        let Some(f) = self.factories.iter_mut().find(|f| f.target == target) else { return };
+        match click {
+            Click::Exit => {
+                self.roll_back();
+            }
+            Click::Build | Click::Batch => {
+                let batch = click == Click::Batch;
+                if f.idle() {
+                    f.start(batch, free);
+                } else {
+                    f.stop(batch);
+                }
+            }
+            Click::Recent(i) => f.selected = Some(i),
+            Click::Active => f.selected = None,
+            // The designer opens from the screen (docs/37), which the cockpit keeps.
+            Click::Constructor => {}
+        }
+    }
+
+    /// Every factory's build for this tick: a bot that completes appears at its creation
+    /// vertex, of the factory's clan, and is given the escape (docs/36, "Production").
+    fn tick_factories(&mut self, dt_ms: f64) {
+        for f in 0..self.factories.len() {
+            let Some(project) = self.factories[f].takt((dt_ms / 1000.0) as f32) else { continue };
+            let factory = &self.factories[f];
+            let t = factory.target;
+            let clan = self.units[t].clan.unwrap_or(self.player_clan);
+            let place = factory.creation.as_ref().and_then(|v| {
+                let part = self.battle.combat.targets.get(t)?.parts.first()?;
+                crate::factory::vertex_world(v, part)
+            });
+            let Some(at) = place.or_else(|| self.battle.combat.targets.get(t).map(|x| x.position)) else {
+                continue;
+            };
+            if let Some(unit) = self.spawn(&project, clan, at, 0.0) {
+                if let Some((_, robot)) = self.robots.iter_mut().find(|(rt, _)| *rt == unit) {
+                    let leave = orders::Order {
+                        code: orders::LEAVE,
+                        parameter: 0,
+                        target: orders::Target::NotDefined,
+                    };
+                    robot.order = Some(leave);
+                    robot.behaviour.order(&leave);
+                }
+                if clan == self.player_clan
+                    && let Some(v) = self.progression.as_ref().and_then(|p| p.sound(VOICE_UNIT_READY))
+                {
+                    self.says.push(Say::Voice(v));
+                }
+            }
+            let free = self.free_minds(clan);
+            let factory = &mut self.factories[f];
+            if factory.batch {
+                factory.batch = false;
+                factory.start(true, free);
+            }
+        }
+    }
+
+    /// Make a unit of `project`'s design for clan `clan` at `at`, turned to `yaw`
+    /// (`CreateObjectFromScheme`, `Behavior.dll:0x1001d180`): a new target, robot, clan
+    /// unit and name, joining its clan's list. Its target, or none when its design does not
+    /// load as a robot.
+    pub fn spawn(&mut self, project: &Project, clan: i64, at: Vec3, yaw: f32) -> Option<usize> {
+        let logical_id =
+            self.units.iter().map(|u| u.logical_id).chain([self.hero_id]).max().unwrap_or(0).max(0) + 1;
+        let property = |name: &str, value: Value| mission::Property {
+            name: name.to_owned(),
+            kind: 0,
+            value,
+            minimum: value,
+            maximum: value,
+        };
+        let placed = mission::Object {
+            kind: KIND_UNIT,
+            path: project.path.clone(),
+            unknown_q: 0,
+            logical_id,
+            position: at.to_array(),
+            pad: [0; 2],
+            rotation: yaw,
+            scale: [1.0; 3],
+            name: String::new(),
+            tail: (0, 0, 0, 0),
+            properties: vec![
+                property("ClanID", Value::Int(clan as i32)),
+                property("Type", Value::Int(project.type_word as i32)),
+            ],
+        };
+        let index = SPAWNED_OBJECTS + self.spawned;
+        let mut robot = Robot::load_placed(&mut self.assembly, &placed, index).ok().flatten()?;
+        let t = self.battle.add(
+            &mut self.assembly,
+            &self.clans,
+            &placed,
+            index,
+            Some(self.player_clan),
+            self.ratio,
+        )?;
+        robot.arm(&mut self.battle, &mut self.assembly);
+        for k in &self.battle.kinds {
+            for (name, _) in &k.effects {
+                self.fx.template(name);
+            }
+        }
+        for kind in &self.battle.combat.kinds {
+            for e in kind.hit.iter().chain(kind.range_end.iter()) {
+                self.fx.preload_explosion(e);
+            }
+        }
+        let profiles = gamedir::resolve(&self.assembly.game, parkan_formats::profiles::ARCHIVE)
+            .and_then(|p| parkan_formats::nres::Archive::open(&p).ok());
+        let designation =
+            crate::robot::designation(&mut self.assembly, profiles.as_ref(), KIND_UNIT, &placed.path);
+        self.units.push(Unit {
+            clan: Some(clan),
+            type_word: project.type_word,
+            logical_id,
+            kind: KIND_UNIT,
+            announced: false,
+            designation,
+        });
+        self.names.push(project.name.clone());
+        self.deleted.push(false);
+        let target = &self.battle.combat.targets[t];
+        let solid = Solid::from_parts(&target.parts, target.centre, target.radius, false, |_, _| None);
+        self.ground.solids.push(solid);
+        self.robots.push((t, robot));
+        if let Some(p) = self.progression.as_mut() {
+            p.progress.join(logical_id, clan, project.type_word, at, self.hero.time_ms);
+        }
+        self.spawned += 1;
+        self.added.push(t);
+        Some(t)
     }
 
     /// The ground's rate a machine's ground contact reads (docs/24, "Holding the body on

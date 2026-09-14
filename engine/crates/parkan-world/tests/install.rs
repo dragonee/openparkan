@@ -1525,3 +1525,57 @@ fn mission_02s_factory_door_opens_for_the_hero_on_its_forecourt_and_shuts_after_
     }
     assert!(shut_at.is_some(), "the door shuts once free");
 }
+
+#[test]
+#[ignore = "needs the game install"]
+fn mission_02s_factory_builds_a_free_warbot_in_a_minute_which_escapes_and_completes_the_objective() {
+    use parkan_world::factory::Project;
+
+    let (mut play, _) = mission_02_play();
+    let game = gamedir::find(None).unwrap();
+    let path = "UNITS\\bld_unit_-2147483647.dat";
+    let data =
+        std::fs::read(gamedir::resolve(&game, path).expect("the install's design for Tut_2's factory"))
+            .unwrap();
+    let type_word = u32::from_le_bytes(data[4..8].try_into().unwrap());
+    let f =
+        play.factories.iter().position(|f| f.logic_id == 0x8000_0001_u32 as i32).expect("the Large Factory");
+    assert_eq!((play.factories[f].size, play.factories[f].free_bots), (4, 100));
+    let project = Project {
+        path: path.to_owned(),
+        name: "LFW-2 Warrior".into(),
+        type_word,
+        chassis_size: 4,
+        ore: 411.0,
+        power: 226.5,
+    };
+    let t = play.factories[f].target;
+    play.units[t].clan = Some(play.player_clan);
+    play.factories[f].accept(project);
+    let free = play.free_minds(play.player_clan);
+    assert_eq!(free, 1, "two minds, the hero holds one");
+    assert!(play.factories[f].start(true, free));
+    assert_eq!(play.free_minds(play.player_clan), 0);
+    let robots = play.robots.len();
+    let mut ticks = 0;
+    while play.robots.len() == robots && ticks < 70 * 60 {
+        play.tick(1000.0 / 60.0, [0.0; 2]);
+        ticks += 1;
+    }
+    let seconds = ticks as f32 / 60.0;
+    assert!((59.9..60.2).contains(&seconds), "built in {seconds} s");
+    let (unit, robot) = play.robots.last().unwrap();
+    assert_eq!(play.units[*unit].clan, Some(play.player_clan));
+    let at = robot.walker.body.position;
+    assert!((at.truncate() - glam::Vec2::new(393.75, 854.91)).length() < 1.0, "at the creation vertex: {at}");
+    assert!(matches!(robot.behaviour.task(), parkan_sim::behaviour::Task::Leave { .. }));
+    assert_eq!(play.factories[f].free_bots, 99);
+    // Batch starts no second bot: no mind is free.
+    assert!(play.factories[f].build.is_none());
+    // "Build a warbot" completes on a Mission run: Plr robots = 2 (docs/34, "Mission 02").
+    for _ in 0..(3 * 60) {
+        play.tick(1000.0 / 60.0, [0.0; 2]);
+    }
+    let p = play.progression.as_ref().unwrap();
+    assert_eq!(p.progress.objectives[1].state, 1, "{:?}", p.progress.objectives);
+}

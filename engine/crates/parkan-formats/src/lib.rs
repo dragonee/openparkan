@@ -13,6 +13,7 @@ pub mod exp;
 pub mod font;
 pub mod fxid;
 pub mod gamedir;
+pub mod hallway;
 pub mod landmesh;
 pub mod materials;
 pub mod mesh;

@@ -239,6 +239,15 @@ impl Robot {
     /// turret component.
     pub fn load(assembly: &mut Assembly, mission: &Mission, object: usize) -> Result<Option<Robot>> {
         let Some(placed) = mission.objects.get(object) else { return Ok(None) };
+        Self::load_placed(assembly, placed, object)
+    }
+
+    /// Placed object `placed`, numbered `object`, as a robot.
+    pub fn load_placed(
+        assembly: &mut Assembly,
+        placed: &parkan_formats::mission::Object,
+        object: usize,
+    ) -> Result<Option<Robot>> {
         let parts: Vec<Part> = assembly.parts(placed.kind, &placed.path);
         let Some(chassis_part) = parts.iter().find(|p| p.host == -1).cloned() else { return Ok(None) };
         let Some(chassis) = assembly.mesh(&chassis_part.reference) else { return Ok(None) };

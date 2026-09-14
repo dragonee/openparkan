@@ -4,6 +4,7 @@ pub mod briefing;
 pub mod buildings;
 pub mod cockpit;
 pub mod dump;
+pub mod factory;
 pub mod fx;
 pub mod hero;
 pub mod hud;
