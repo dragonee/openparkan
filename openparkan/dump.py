@@ -19,7 +19,20 @@ import math
 import struct
 from pathlib import Path
 
-from . import assembly, control, controls, effects, landmesh, materials, mission, objects, sky
+from . import (
+    assembly,
+    briefing,
+    control,
+    controls,
+    effects,
+    gamedir,
+    landmesh,
+    materials,
+    mission,
+    objects,
+    resources,
+    sky,
+)
 from . import mesh as objmesh
 from . import texm as textures
 from .nres import NResArchive
@@ -457,6 +470,93 @@ def input_table(path: Path, names: list[str] | None = None) -> dict:
     }
 
 
+def cfg_file(path: Path, names: list[str] | None = None) -> dict:
+    """A ``.cfg``: its blocks in order, its resource descriptors, and the objective list
+    and messages the progression readers take from it."""
+    blocks = mission.load_cfg(path)
+    return {
+        "kind": "cfg",
+        "objects": [{"name": name, "properties": [[k, v] for k, v in props.items()]}
+                    for name, props in blocks.items()],
+        "descriptors": [{"role": d.role, "library": d.library, "libtype": d.libtype,
+                         "type": d.type, "numbered": d.numbered,
+                         "bindings": [[k, v] for k, v in d.bindings.items()]}
+                        for d in resources.descriptors(path)],
+        "objectives": [{"text": o.text, "exempt": o.exempt} for o in mission.objectives(path)],
+        "messages": [{"name": m.name, "index": m.index, "text_id": m.text_id,
+                      "voice_id": m.voice_id, "info_system": m.info_system}
+                     for m in briefing.messages(path)],
+    }
+
+
+def pe_strings(path: Path, names: list[str] | None = None) -> dict:
+    """A PE image's ``RT_STRING`` table, by id."""
+    table = resources.strings(Path(path).read_bytes())
+    return {"kind": "strings", "strings": [[k, table[k]] for k in sorted(table)]}
+
+
+def _install(path: Path) -> Path:
+    for p in (path, *path.parents):
+        if gamedir.looks_like_install(p):
+            return p
+    raise FileNotFoundError(f"{path} is not inside a Parkan install")
+
+
+def _sound(game: Path, d: resources.Descriptor | None, member: str | None) -> dict | None:
+    """A bound sound as the install holds it: its library, its member, whether it is there."""
+    if d is None or member is None:
+        return None
+    library = resources.locate(game, d.library)
+    if library is None:
+        return None
+    try:
+        found = any(e.name.lower() == member.lower() for e in NResArchive.open(library).entries)
+    except (OSError, ValueError):
+        found = False
+    return {"library": library.relative_to(game).as_posix(), "member": member, "found": found}
+
+
+def progression(path: Path, names: list[str] | None = None) -> dict:
+    """A mission directory's progression resources: its objectives, each message's text
+    and voice, and its ambient sound, resolved against the install around it."""
+    path = Path(path)
+    game = _install(path)
+    cfg = path / "mission.cfg"
+    own = resources.descriptors(cfg) if cfg.is_file() else []
+    out: dict = {"kind": "progression",
+                 "objectives": [{"text": o.text, "exempt": o.exempt}
+                                for o in (mission.objectives(cfg) if cfg.is_file() else [])],
+                 "messages": []}
+    if (path / briefing.MESSAGES).is_file():
+        text = resources.TextResources.open(game)
+        ui = game / "ui" / "game_resources.cfg"
+        found = own + (resources.descriptors(ui) if ui.is_file() else [])
+        for m in briefing.messages(path / briefing.MESSAGES):
+            hit = resources.bound(found, m.voice_id)
+            out["messages"].append({
+                "index": m.index, "name": m.name, "text": text.get(m.text_id),
+                "voice": _sound(game, *hit) if hit else None, "info_system": m.info_system})
+    role = {}
+    for d in own:
+        role.setdefault(d.role, d)
+    loop, variation = role.get("ambient_music_loop"), role.get("ambient_music_variation")
+
+    def gather(prefix: str) -> list[dict]:
+        sounds, n = [], 1
+        while variation is not None:
+            s = _sound(game, variation, variation.get(f"{prefix}VARIATION{n}"))
+            if s is None:
+                break
+            sounds.append(s)
+            n += 1
+        return sounds
+
+    out["ambient"] = {"theme": _sound(game, loop, loop.get("THEME") if loop else None),
+                      "default": gather("DEFAULT_"), "day": gather("DAY_"),
+                      "night": gather("NIGHT_")}
+    return out
+
+
 def _nres(path: Path, names: list[str] | None = None) -> dict:
     return nres(path)
 
@@ -470,4 +570,4 @@ KINDS = {"nres": _nres, "mission": _mission, "texm": texm, "materials": material
          "landmesh": land_mesh, "mesh": object_mesh, "assembly": mission_assembly,
          "control": controllers, "controls": input_table, "cpt": control_points,
          "ndp": damage_tables, "exp": explosions, "fxid": fx_effects,
-         "sky": atmosphere}
+         "sky": atmosphere, "cfg": cfg_file, "strings": pe_strings, "progression": progression}

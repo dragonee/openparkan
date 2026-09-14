@@ -563,6 +563,79 @@ pub fn input_table(path: &Path) -> Result<Value> {
     }))
 }
 
+/// A `.cfg`: its blocks in order, its resource descriptors, and the objective list and
+/// messages the progression readers take from it.
+pub fn cfg_file(path: &Path) -> Result<Value> {
+    use parkan_formats::{cfg, resources as res};
+    let blocks = cfg::parse(&std::fs::read(path)?);
+    let pairs = |p: &[(String, String)]| p.iter().map(|(k, v)| json!([k, v])).collect::<Vec<_>>();
+    Ok(json!({
+        "kind": "cfg",
+        "objects": blocks.0.iter().map(|b| json!({ "name": b.name, "properties": pairs(&b.properties) })).collect::<Vec<_>>(),
+        "descriptors": res::descriptors(&blocks).iter().map(|d| json!({
+            "role": d.role,
+            "library": d.library,
+            "libtype": d.libtype,
+            "type": d.type_id,
+            "numbered": d.numbered(),
+            "bindings": pairs(&d.bindings),
+        })).collect::<Vec<_>>(),
+        "objectives": cfg::objectives(&blocks).iter().map(|o| json!({ "text": o.text, "exempt": o.exempt })).collect::<Vec<_>>(),
+        "messages": cfg::messages(&blocks).iter().map(|m| json!({
+            "name": m.name,
+            "index": m.index,
+            "text_id": m.text_id,
+            "voice_id": m.voice_id,
+            "info_system": m.info_system,
+        })).collect::<Vec<_>>(),
+    }))
+}
+
+/// A PE image's `RT_STRING` table, by id.
+pub fn pe_strings(path: &Path) -> Result<Value> {
+    let table = parkan_formats::resources::strings(&std::fs::read(path)?, None, &path.display().to_string())?;
+    Ok(json!({ "kind": "strings", "strings": table.iter().map(|(k, v)| json!([k, v])).collect::<Vec<_>>() }))
+}
+
+/// A mission directory's progression resources: its objectives, each message's text and
+/// voice, and its ambient sound, resolved against the install around it.
+pub fn progression(path: &Path) -> Result<Value> {
+    use crate::resources::{self, Sound};
+    let game = path
+        .ancestors()
+        .find(|p| parkan_formats::gamedir::looks_like_install(p))
+        .with_context(|| format!("{} is not inside a Parkan install", path.display()))?;
+    let sound = |s: Option<&Sound>| match s {
+        None => Value::Null,
+        Some(s) => {
+            let relative = s.library.strip_prefix(game).unwrap_or(&s.library);
+            let parts: Vec<String> =
+                relative.components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect();
+            json!({ "library": parts.join("/"), "member": s.member, "found": s.exists() })
+        }
+    };
+    let many = |list: &[Sound]| list.iter().map(|s| sound(Some(s))).collect::<Vec<_>>();
+    let messages = resources::Messages::load(game, path)?;
+    let ambient = resources::ambient(game, path)?;
+    Ok(json!({
+        "kind": "progression",
+        "objectives": resources::objectives(path)?.iter().map(|o| json!({ "text": o.text, "exempt": o.exempt })).collect::<Vec<_>>(),
+        "messages": messages.0.iter().map(|m| json!({
+            "index": m.index,
+            "name": m.name,
+            "text": m.text,
+            "voice": sound(m.voice.as_ref()),
+            "info_system": m.info_system,
+        })).collect::<Vec<_>>(),
+        "ambient": {
+            "theme": sound(ambient.theme.as_ref()),
+            "default": many(&ambient.default),
+            "day": many(&ambient.day),
+            "night": many(&ambient.night),
+        },
+    }))
+}
+
 /// Dump `path` as `kind`; `names` narrows a `texm` dump to those textures.
 pub fn dump(kind: &str, path: &Path, names: &[String]) -> Result<Value> {
     match kind {
@@ -581,8 +654,11 @@ pub fn dump(kind: &str, path: &Path, names: &[String]) -> Result<Value> {
         "exp" => explosions(path, names),
         "fxid" => fx_effects(path, names),
         "sky" => atmosphere(path),
+        "cfg" => cfg_file(path),
+        "strings" => pe_strings(path),
+        "progression" => progression(path),
         other => anyhow::bail!(
-            "unknown kind {other:?}; expected nres, mission, texm, materials, landmesh, mesh, assembly, control, controls, cpt, ndp, exp, fxid or sky"
+            "unknown kind {other:?}; expected nres, mission, texm, materials, landmesh, mesh, assembly, control, controls, cpt, ndp, exp, fxid, sky, cfg, strings or progression"
         ),
     }
 }

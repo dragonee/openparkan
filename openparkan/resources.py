@@ -165,6 +165,15 @@ def descriptors(path: str | Path) -> list[Descriptor]:
     return out
 
 
+def bound(found: list[Descriptor], name: str) -> tuple[Descriptor, str] | None:
+    """The first of ``found``, in order, that binds ``name``, and what it binds it to."""
+    for d in found:
+        value = d.get(name)
+        if value is not None:
+            return d, value
+    return None
+
+
 def locate(game: Path, library: str) -> Path | None:
     """Resolve a descriptor's ``library`` against the installation.
 

@@ -88,7 +88,9 @@ def targets(game: Path) -> list[tuple[str, Path, list[str]]]:
     Tut_1's ``Land.msh`` and the textures its ground names.  M2: Mission 01's
     assembly and every mesh its objects are drawn from.  M3: every controller,
     every control point list and the three input tables.  M4: every damage
-    table, explosion and effect.  M5: every mission's atmosphere.
+    table, explosion and effect.  M5: every mission's atmosphere.  Progression: every
+    ``.cfg``, the text and interface string tables, and each mission's objectives,
+    messages and ambient sound resolved.
     """
     archives = sorted(p for p in game.rglob("*") if p.is_file() and is_nres(p))
     return ([("nres", p, []) for p in archives]
@@ -105,7 +107,12 @@ def targets(game: Path) -> list[tuple[str, Path, list[str]]]:
             + [("fxid", p, []) for p in archives if _has_tag(p, "FXID")]
             + [("sky", d / "sky.ske", []) for d in gamedir.missions(game)
                if (d / "sky.ske").exists()]
-            + [("controls", game / name, []) for name in controls.TABLES])
+            + [("controls", game / name, []) for name in controls.TABLES]
+            + [("cfg", p, []) for p in sorted(game.rglob("*"))
+               if p.is_file() and p.suffix.lower() == ".cfg"]
+            + [("strings", game / "DATA" / "TextRes.dll", []), ("strings", game / "iron3d.dll", [])]
+            + [("progression", d, []) for d in gamedir.missions(game)
+               if (d / "mission.cfg").is_file()])
 
 
 def engine_dump(engine: Path, kind: str, path: Path, names: list[str] | None = None) -> dict:

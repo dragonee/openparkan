@@ -5,6 +5,7 @@ pub mod fx;
 pub mod hero;
 pub mod models;
 pub mod play;
+pub mod resources;
 pub mod settings;
 pub mod terrain;
 pub mod textures;

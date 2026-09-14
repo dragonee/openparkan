@@ -4,6 +4,7 @@
 //! doc in `docs/` gives. Nothing here opens a window or holds game state; the
 //! readers take bytes and return plain data.
 
+pub mod cfg;
 pub mod control;
 pub mod controls;
 pub mod cpt;
@@ -19,6 +20,7 @@ pub mod ndp;
 pub mod nres;
 pub mod objects;
 pub mod pose;
+pub mod resources;
 pub mod sky;
 pub mod texm;
 pub mod wea;
