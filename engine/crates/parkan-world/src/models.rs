@@ -171,6 +171,25 @@ pub fn build_view_node(
     Ok((!model.indices.is_empty()).then_some(model))
 }
 
+/// One node's level-0 slot of variant 0, in the node's own frame, for drawing a robot
+/// node by node as its pose moves; `None` where the node draws nothing there.
+pub fn build_node(
+    loaded: &LoadedMesh,
+    node: usize,
+    mut look: impl FnMut(&str) -> Result<Look>,
+) -> Result<Option<Model>> {
+    let m = &loaded.mesh;
+    let Some(n) = m.nodes.get(node).filter(|n| !n.is_collision()) else { return Ok(None) };
+    let Some(slot) = n.slot_for_lod(0, 0) else { return Ok(None) };
+    let mut model = Model { name: format!("{} node {node}", m.name), ..Default::default() };
+    model.push_slot(m, &loaded.wear.materials, slot, &mut look, |vi| Vertex {
+        position: m.positions.get(vi).copied().unwrap_or_default(),
+        normal: m.normals.get(vi).copied().unwrap_or([0.0, 0.0, 1.0]).map(|c| c as f32),
+        uv: m.uv.get(vi).copied().unwrap_or_default().map(|c| c as f32),
+    })?;
+    Ok((!model.indices.is_empty()).then_some(model))
+}
+
 /// A pose as the matrix that places a point in its frame.
 pub fn pose_matrix(pose: &Pose) -> Mat4 {
     let axis = |v: [f64; 3]| {

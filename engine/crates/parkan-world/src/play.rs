@@ -33,6 +33,7 @@ use crate::models::Objects;
 use crate::progress::{
     Progression, STRING_VACANT_VEHICLE, Say, TARGET_SELECTED, VOICE_ENEMY_DETECTED, VOICE_UNIT_DETECTED,
 };
+use crate::robot::Robot;
 use crate::textures::TextureStore;
 use crate::{settings, terrain};
 
@@ -127,6 +128,8 @@ pub struct Play {
     pub targets: TargetList,
     /// The mission's progression, once loaded (docs/34).
     pub progression: Option<Progression>,
+    /// Every unit but the hero that is a robot, with the target it is in the battle.
+    pub robots: Vec<(usize, Robot)>,
     /// What the game says, not yet shown or played.
     pub says: Vec<Say>,
 }
@@ -258,6 +261,14 @@ impl Play {
             .collect();
         let player_clan = mission.objects[hero.object].clan_id().unwrap_or(0);
         let hero_id = mission.objects[hero.object].logical_id;
+        let mut robots = Vec::new();
+        for (t, &o) in battle.objects.iter().enumerate() {
+            if mission.objects[o].kind == KIND_UNIT
+                && let Some(robot) = Robot::load(&mut assembly, mission, o)?
+            {
+                robots.push((t, robot));
+            }
+        }
         let mut play = Play {
             hero,
             ground,
@@ -276,6 +287,7 @@ impl Play {
             targets: TargetList::default(),
             progression: None,
             says: Vec::new(),
+            robots,
         };
         for i in 0..play.turret_effects.len() {
             let e = play.turret_effects[i].clone();
@@ -490,6 +502,7 @@ impl Play {
     /// battle's frame, then the effects.
     pub fn tick(&mut self, dt_ms: f64, mouse: [f32; 2]) -> Vec<Event> {
         self.update_targets();
+        self.tick_robots(dt_ms);
         let from = self.hero.collision_centre();
         let shots = self.hero.tick(dt_ms, mouse, &self.ground);
         self.collide(from);
@@ -586,6 +599,42 @@ impl Play {
                 .is_some_and(|f| f.flags & FLAGS_LIQUID_BED_BIT != 0);
         }
         out
+    }
+
+    /// Every other robot's tick: its machine and its turret, then its target in the battle
+    /// and its faces follow where it stands.
+    fn tick_robots(&mut self, dt_ms: f64) {
+        for (t, robot) in &mut self.robots {
+            let Some(target) = self.battle.combat.targets.get_mut(*t) else { continue };
+            if !target.alive {
+                continue;
+            }
+            robot.advance(dt_ms, &self.ground);
+            robot.takt(dt_ms);
+            let place = robot.placement();
+            let (mut lo, mut hi) = (Vec3::splat(f32::MAX), Vec3::splat(f32::MIN));
+            for (p, part) in target.parts.iter_mut().enumerate() {
+                for n in 0..part.nodes.len() {
+                    part.nodes[n] = place.compose(&robot.part_pose(p, n));
+                    let Some(slot) = part.mesh.slots.get(usize::from(part.mesh.nodes[n].slot_index[0]))
+                    else {
+                        continue;
+                    };
+                    let [cx, cy, cz, r] = slot.sphere;
+                    let c = part.nodes[n].apply([cx, cy, cz].map(f64::from));
+                    let c = Vec3::new(c[0] as f32, c[1] as f32, c[2] as f32);
+                    lo = lo.min(c - Vec3::splat(r));
+                    hi = hi.max(c + Vec3::splat(r));
+                }
+            }
+            if lo.x <= hi.x {
+                target.centre = (lo + hi) / 2.0;
+            }
+            target.position = robot.walker.body.position;
+            if let Some(solid) = self.ground.solids.get_mut(*t) {
+                *solid = Solid::from_parts(&target.parts, target.centre, target.radius, false, |_, _| None);
+            }
+        }
     }
 
     /// The collision pass for the hero (docs/24, "Collision between objects"), after its

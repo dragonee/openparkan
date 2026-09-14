@@ -42,9 +42,23 @@ pub struct Eye {
     pub near: f32,
 }
 
+/// One external part of a robot: its mesh, the part it hangs from (or -1) and the node of
+/// that part it hangs on.
+#[derive(Clone)]
+pub struct RobotPart {
+    pub mesh: Rc<LoadedMesh>,
+    pub host: i32,
+    pub node: i32,
+}
+
 pub struct Robot {
     /// The mission object the robot is.
     pub object: usize,
+    /// Every external part with a mesh, as the assembly lists them; the chassis and the
+    /// turret among them.
+    pub parts: Vec<RobotPart>,
+    pub chassis_part: usize,
+    pub turret_part: usize,
     pub walker: Walker,
     pub rig: Rig,
     pub chassis: Rc<LoadedMesh>,
@@ -125,6 +139,21 @@ impl Robot {
             }
         }
         let Some((turret_part, turret_ctl)) = turret else { return Ok(None) };
+        let mut robot_parts = Vec::new();
+        let (mut chassis_index, mut turret_index) = (0, 0);
+        for part in &parts {
+            let Some(mesh) = assembly.mesh(&part.reference) else { continue };
+            if part.host == -1 && part.record == chassis_part.record {
+                chassis_index = robot_parts.len();
+            }
+            if part.record == turret_part.record
+                && part.host == turret_part.host
+                && part.node == turret_part.node
+            {
+                turret_index = robot_parts.len();
+            }
+            robot_parts.push(RobotPart { mesh, host: part.host, node: part.node });
+        }
         let turret_mesh = assembly.mesh(&turret_part.reference).context("the turret mesh does not load")?;
         let points = match assembly
             .library
@@ -184,6 +213,9 @@ impl Robot {
         let collision = (centre, spheres.iter().map(|s| s.0.distance(centre) + s.1).fold(0.0, f32::max));
         Ok(Some(Robot {
             object,
+            parts: robot_parts,
+            chassis_part: chassis_index,
+            turret_part: turret_index,
             walker,
             rig,
             chassis,
@@ -376,6 +408,33 @@ impl Robot {
     /// The turret's pose in the unit's frame, with the chassis playing its frames.
     pub fn mount(&self) -> Pose {
         self.chassis_pose(self.socket).compose(&self.turret.mesh.root_pose().invert())
+    }
+
+    /// Node `node` of part `part` posed in the unit's frame: the chassis playing its frames,
+    /// the turret its channels, and any other part hanging at rest on its host's node as
+    /// the assembly mounts it.
+    pub fn part_pose(&self, part: usize, node: usize) -> Pose {
+        if part == self.chassis_part {
+            return self.chassis_pose(node);
+        }
+        if part == self.turret_part {
+            return self.turret_node(&self.mount(), node);
+        }
+        let Some(p) = self.parts.get(part) else { return parkan_formats::pose::IDENTITY };
+        let own = p.mesh.mesh.world_pose(node);
+        match (usize::try_from(p.host), usize::try_from(p.node)) {
+            (Ok(host), Ok(socket)) if host < part => {
+                self.part_pose(host, socket).compose(&p.mesh.mesh.root_pose().invert()).compose(&own)
+            }
+            _ => own,
+        }
+    }
+
+    /// Where the robot is drawn now: its position and heading as a placement.
+    pub fn placement(&self) -> Pose {
+        let (position, yaw) = self.walker.drawn(self.time_ms);
+        let half = f64::from(yaw) / 2.0;
+        Pose { translation: position.to_array().map(f64::from), rotation: [half.cos(), 0.0, 0.0, half.sin()] }
     }
 
     /// A turret node's pose in the unit's frame.

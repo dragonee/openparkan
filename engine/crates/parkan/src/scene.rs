@@ -299,6 +299,9 @@ enum Mount {
 /// slot, following that node's pose.
 pub struct OwnView {
     nodes: Vec<(usize, Mount, usize)>,
+    /// Every other robot drawn node by node as it moves: an instance, the robot, its part
+    /// and the node.
+    robots: Vec<(usize, usize, usize, usize)>,
 }
 
 /// Draw the hero from now on as its own view does (docs/07-objects.md, "The fifth slot is
@@ -333,7 +336,33 @@ pub fn own_view(objects: &mut Objects, store: &mut TextureStore, play: &Play) ->
             nodes.push((objects.instances.len() - 1, mount, node));
         }
     }
-    Ok(OwnView { nodes })
+    // A robot that moves is drawn from its nodes, each at its own pose, in place of the
+    // model built whole at rest: its level-0 slots, as the static model draws them.
+    let mut robots = Vec::new();
+    for (r, (_, robot)) in play.robots.iter().enumerate() {
+        if let Some(i) = objects.placed.iter().position(|&p| p == robot.object) {
+            objects.placed.remove(i);
+            objects.instances.remove(i);
+        }
+        for (p, part) in robot.parts.iter().enumerate() {
+            for node in 0..part.mesh.mesh.nodes.len() {
+                let Some(model) = models::build_node(&part.mesh, node, |name| store.look(name))? else {
+                    continue;
+                };
+                objects.models.push(model);
+                objects.instances.push(models::Instance {
+                    model: objects.models.len() - 1,
+                    position: [0.0; 3],
+                    rotation: 0.0,
+                    scale: 1.0,
+                    hidden: true,
+                });
+                objects.placed.push(usize::MAX);
+                robots.push((objects.instances.len() - 1, r, p, node));
+            }
+        }
+    }
+    Ok(OwnView { nodes, robots })
 }
 
 /// Put each node of the hero's own view where the hero's pose has it this frame: the
@@ -356,6 +385,12 @@ pub fn place_own_view(
             Mount::Turret => hero.turret_node(&mount, node),
         };
         renderer.set_instance(queue, instance, unit * models::pose_matrix(&pose), true);
+    }
+    for &(instance, r, part, node) in &view.robots {
+        let (target, robot) = &play.robots[r];
+        let alive = play.battle.combat.targets.get(*target).is_some_and(|t| t.alive);
+        let pose = robot.placement().compose(&robot.part_pose(part, node));
+        renderer.set_instance(queue, instance, models::pose_matrix(&pose), alive);
     }
 }
 

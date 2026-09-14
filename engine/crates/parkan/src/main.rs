@@ -205,11 +205,7 @@ fn screenshot(loaded: &scene::Loaded, game: &Path, args: &Args, out: &Path) -> R
     let (width, height) = args.size;
     let gpu = pollster::block_on(Gpu::headless())?;
     let mut world = scene::world(game, loaded)?;
-    let mut play = if args.fly || args.top_down || args.look.is_some() {
-        None
-    } else {
-        scene::play(game, loaded, args.sway)?
-    };
+    let mut play = if args.fly || args.top_down { None } else { scene::play(game, loaded, args.sway)? };
     let mut view = None;
     if let Some(p) = play.as_mut() {
         view = Some(scene::own_view(&mut world.objects, &mut world.store, p)?);
@@ -247,13 +243,17 @@ fn screenshot(loaded: &scene::Loaded, game: &Path, args: &Args, out: &Path) -> R
     };
     // Where the fog is measured from and the flare gate looks along: the camera drawn.
     let (eye, forward, seconds) = match (&play, args.look) {
-        (Some(p), _) => {
+        (_, Some([x, y, z, tx, ty, tz])) => {
+            let (eye, target) = (Vec3::new(x, y, z), Vec3::new(tx, ty, tz));
+            (
+                eye,
+                (target - eye).normalize_or(Vec3::Y),
+                play.as_ref().map_or(0.0, |p| p.hero.time_ms / 1000.0),
+            )
+        }
+        (Some(p), None) => {
             let e = p.hero.eye();
             (e.position, e.forward, p.hero.time_ms / 1000.0)
-        }
-        (None, Some([x, y, z, tx, ty, tz])) => {
-            let (eye, target) = (Vec3::new(x, y, z), Vec3::new(tx, ty, tz));
-            (eye, (target - eye).normalize_or(Vec3::Y), 0.0)
         }
         (None, None) => {
             let c = start_camera(loaded);
