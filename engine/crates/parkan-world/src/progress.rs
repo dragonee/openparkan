@@ -119,9 +119,10 @@ impl Host for Answers<'_> {
             }
             31 => self.progress.robots(int(args, 0), i64::from(args.dword(1))) as u32,
             32 => u32::from(self.progress.areals.holds(int(args, 0), int(args, 1))),
+            52 => self.progress.owner(args.dword(0) as i32),
             // STAND-IN: docs/15-behaviour.md#what-the-functions-do -- the engine answers only
             // the functions a campaign's player script needs for its messages and
-            // objectives (19, 30, 31, 32); any other call does nothing and answers 0.
+            // objectives (19, 30, 31, 32, 52); any other call does nothing and answers 0.
             other => {
                 self.unanswered.insert(other);
                 0
@@ -163,6 +164,10 @@ impl Progression {
         let exempt: Vec<bool> = objectives.iter().map(|o| o.exempt).collect();
         let messages = Messages::load(game, mission_dir)?;
         let mut progress = Progress::new(&mission.routes, &exempt, messages.0.iter().map(|m| m.index));
+        // Every building with a logical id answers function 52 with its owner.
+        for o in mission.objects.iter().filter(|o| o.kind == mission::KIND_BUILDING) {
+            progress.place_building(o.logical_id, o.clan_id().unwrap_or(-1));
+        }
         for o in mission.objects.iter().filter(|o| o.kind == mission::KIND_UNIT && o.logical_id >= 0) {
             let type_word = o.property("Type").map_or(0, |p| number(p.value)) as u32;
             progress.join(

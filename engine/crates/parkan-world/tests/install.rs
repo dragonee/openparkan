@@ -1358,3 +1358,80 @@ fn mission_01s_objectives_screen_lists_its_three_objectives_and_its_map_takes_th
         "the minimap is drawn"
     );
 }
+
+#[test]
+#[ignore = "needs the game install"]
+fn mission_02s_briefing_flies_its_waypoints_in_the_recordings_time() {
+    use parkan_world::briefing::Briefing;
+
+    let game = gamedir::find(None).expect("a Parkan install: set PARKAN_DIR");
+    let dir = gamedir::resolve(&game, gamedir::MISSION_02).unwrap();
+    let mut b = Briefing::open(&game, &dir).unwrap().expect("Mission 02 has a briefing");
+    assert_eq!((b.title.as_str(), b.flythrough.stops.len()), ("The Constructor", 18));
+    let (mut t, mut changes, mut voices) = (0.0, Vec::new(), Vec::new());
+    let mut last = String::from("-");
+    while !b.finished() && t < 200.0 {
+        voices.extend(b.frame(t).into_iter().map(|s| s.member));
+        if b.subtitle() != last {
+            last = b.subtitle().to_owned();
+            changes.push((t, last.clone()));
+        }
+        t += 1.0 / 60.0;
+    }
+    // The recording's subtitle strip, frame by frame: its first subtitle at 2.40 s, and each
+    // later change; the objectives screen replaces its briefing at 69.83 s.
+    let at = |needle: &str| {
+        let blank = needle.is_empty();
+        changes.iter().find(|(_, s)| s.starts_with(needle) && s.is_empty() == blank).map(|c| c.0).unwrap()
+    };
+    let start = 2.40;
+    for (needle, recording) in [
+        ("Long time", 6.30),
+        ("", 20.53),
+        ("Watch out", 22.57),
+        ("Battle Mission", 42.27),
+        ("Take control", 44.30),
+        ("Control the factory", 56.00),
+        ("Move east", 63.17),
+    ] {
+        let model = at(needle) + start;
+        assert!((model - recording).abs() < 0.35, "{needle}: {model} against {recording}");
+    }
+    assert!((t + start - 69.83).abs() < 0.35, "the briefing ends at {}", t + start);
+    assert_eq!(voices.first().map(String::as_str), Some("t02_t01.wav"));
+    assert_eq!(voices.len(), 7, "{voices:?}");
+}
+
+fn mission_02_play() -> (parkan_world::play::Play, parkan_formats::mission::Mission) {
+    use parkan_formats::mission;
+    use parkan_world::play::Play;
+
+    let game = gamedir::find(None).expect("a Parkan install: set PARKAN_DIR");
+    let dir = gamedir::resolve(&game, gamedir::MISSION_02).unwrap();
+    let m = mission::parse(&std::fs::read(dir.join("data.tma")).unwrap(), "Mission.02").unwrap();
+    let mut play = Play::load(&game, &m).unwrap().expect("Mission 02 has a hero");
+    play.load_progression(&game, &dir, &m).unwrap();
+    (play, m)
+}
+
+#[test]
+#[ignore = "needs the game install"]
+fn mission_02s_script_greets_the_hero_and_leaves_its_captures_open_until_they_are_made() {
+    let (mut play, _) = mission_02_play();
+    play.tick(1000.0 / 60.0, [0.0; 2]);
+    let p = play.progression.as_mut().unwrap();
+    assert!(p.unanswered.is_empty(), "tut2_pl2 calls only what the engine answers: {:?}", p.unanswered);
+    // The hero starts in route 0: message 6, T02_I01 (docs/34, "Mission 02").
+    let played: Vec<i64> = p.progress.played.iter().filter(|(_, v)| **v).map(|(k, _)| *k).collect();
+    assert_eq!(played, vec![6]);
+    // Function 52 reads the neutral factory and Outpost as clan 2's: no objective is done.
+    let (factory, outpost) = (0x8000_0001_u32 as i32, 0x8000_0003_u32 as i32);
+    assert_eq!((p.progress.owner(factory), p.progress.owner(outpost)), (2, 2));
+    assert!(p.progress.objectives.iter().all(|o| o.state == 0));
+    // The factory taken: objective 0 and messages 7 and 11 on the next run.
+    p.progress.captured(factory, 0);
+    let notices = p.run("Mission");
+    assert!(notices.contains(&parkan_sim::progression::Notice::ObjectiveComplete { index: 0 }));
+    assert!(p.progress.played[&7] && p.progress.played[&11]);
+    assert_eq!(p.progress.objectives.iter().map(|o| o.state).collect::<Vec<_>>(), vec![1, 0, 0, 0]);
+}

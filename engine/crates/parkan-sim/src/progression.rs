@@ -2,7 +2,7 @@
 //! them, how many robots each clan has, when the player clan's `Mission` handler
 //! runs, and what its message and objective calls do. See `docs/34-progression.md`.
 //!
-//! The script itself runs elsewhere; this answers its functions 30, 31 and 32 and
+//! The script itself runs elsewhere; this answers its functions 30, 31, 32 and 52 and
 //! keeps the state they read and write.
 
 use std::collections::BTreeMap;
@@ -32,6 +32,11 @@ pub const OBJECTIVE_PROGRESS: i64 = 5;
 /// `SYSTEM_MESSAGE`'s two outcomes.
 pub const MISSION_FAILED: i64 = 0;
 pub const MISSION_COMPLETE: i64 = 1;
+/// Function 52's answers besides a clan's index: a destroyed object's owner word
+/// (`Behavior.dll:0x1000698d`), and `ERROR` when no object answers the id
+/// (`ai.dll:0x1000e153`).
+pub const DESTROYED_OWNER: u32 = 0xfffe;
+pub const NO_OBJECT: u32 = 0xffff_ffff;
 
 /// Whether a route's outline holds the point (x, y): the crossing test
 /// `ArealMap.dll:0x10017b90` makes. A ray from the point toward +x crosses the outline,
@@ -109,6 +114,15 @@ pub struct Unit {
     next_takt_ms: f64,
 }
 
+/// A placed object with a logical id that is not a unit: a building, whose owner function
+/// 52 reads.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Building {
+    pub id: i32,
+    pub clan: i64,
+    pub alive: bool,
+}
+
 /// One objective: whether the completion test passes over it, and its state (1 complete).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Objective {
@@ -138,6 +152,7 @@ pub enum Notice {
 pub struct Progress {
     pub areals: Areals,
     pub units: Vec<Unit>,
+    pub buildings: Vec<Building>,
     pub objectives: Vec<Objective>,
     /// Each `messages.cfg` id, and whether it has played.
     pub played: BTreeMap<i64, bool>,
@@ -154,6 +169,7 @@ impl Progress {
         Self {
             areals: Areals::new(routes),
             units: Vec::new(),
+            buildings: Vec::new(),
             objectives: exempt.iter().map(|&exempt| Objective { exempt, state: 0 }).collect(),
             played: messages.into_iter().map(|id| (id, false)).collect(),
             outcome: None,
@@ -222,7 +238,28 @@ impl Progress {
         self.units.iter().filter(|u| u.alive && u.clan == clan && i64::from(u.type_word) & mask != 0).count()
     }
 
-    /// A unit destroyed.
+    /// A building with a logical id, owned by clan `clan`.
+    pub fn place_building(&mut self, id: i32, clan: i64) {
+        self.buildings.push(Building { id, clan, alive: true });
+    }
+
+    /// Function 52 (`ai.dll:0x1000e0e4`): the owner word of the object with logical id `id`,
+    /// a clan's index; 65534 once it is destroyed; `ERROR` when no object answers the id
+    /// (docs/34, "What the scripts ask").
+    pub fn owner(&self, id: i32) -> u32 {
+        let found = self
+            .units
+            .iter()
+            .map(|u| (u.id, u.clan, u.alive))
+            .chain(self.buildings.iter().map(|b| (b.id, b.clan, b.alive)));
+        match found.into_iter().find(|&(i, _, _)| i == id) {
+            Some((_, _, false)) => DESTROYED_OWNER,
+            Some((_, clan, true)) => clan as u32,
+            None => NO_OBJECT,
+        }
+    }
+
+    /// A unit or building destroyed.
     ///
     /// STAND-IN: docs/34-progression.md#function-31-how-many-robots-a-clan-has--read -- how
     /// a destroyed unit leaves its clan's list is not read: it leaves it, and every route's.
@@ -230,14 +267,21 @@ impl Progress {
         for u in self.units.iter_mut().filter(|u| u.id == id) {
             u.alive = false;
         }
+        for b in self.buildings.iter_mut().filter(|b| b.id == id) {
+            b.alive = false;
+        }
         self.areals.leave(id);
     }
 
-    /// A unit captured into `clan`: it leaves its old clan's count and joins the new one's
-    /// (`MBehaviour::Capture`, docs/27; how the lists change is derived, docs/34).
+    /// A unit or building captured into `clan`: a unit leaves its old clan's count and joins
+    /// the new one's (`MBehaviour::Capture`, docs/27; how the lists change is derived,
+    /// docs/34).
     pub fn captured(&mut self, id: i32, clan: i64) {
         for u in self.units.iter_mut().filter(|u| u.id == id) {
             u.clan = clan;
+        }
+        for b in self.buildings.iter_mut().filter(|b| b.id == id) {
+            b.clan = clan;
         }
     }
 
@@ -302,6 +346,20 @@ impl Progress {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn function_52_answers_a_buildings_clan_its_destroyed_word_or_error() {
+        let mut p = Progress::new(&[], &[], []);
+        let factory = 0x8000_0001_u32 as i32;
+        p.place_building(factory, 2);
+        p.join(1, 0, 0x0102_0000, Vec3::ZERO, 0.0);
+        assert_eq!((p.owner(factory), p.owner(1)), (2, 0));
+        p.captured(factory, 0);
+        assert_eq!(p.owner(factory), 0);
+        p.destroyed(factory);
+        assert_eq!(p.owner(factory), DESTROYED_OWNER);
+        assert_eq!(p.owner(0x8000_0003_u32 as i32), NO_OBJECT);
+    }
 
     fn square(id: u32, x0: f32, y0: f32, side: f32) -> Route {
         let points =

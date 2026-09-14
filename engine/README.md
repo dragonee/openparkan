@@ -391,7 +391,7 @@ engine pass replaces each with what was read and removes its row.
 | M6 | The order the resource manager looks a sound's name up in | the first descriptor that binds the name wins, the mission's own before `ui/game_resources.cfg`; every training message resolves to the member its briefing or tutorial descriptor names | [20](../docs/20-resources.md#what-this-does-not-say) |
 | M6 | The three signatures a radar weighs against its sensitivities | every live object within the radar's range is detected | [25](../docs/25-sensors.md#a-scan-is-a-sphere-a-falloff-and-three-tests--read) |
 | M6 | Whether a guided round's velocity turns with it | it is kept in the round's frame, as a machine's is, and turns with it | [29](../docs/29-weapons.md#guided-rounds-differ-in-how-hard-they-steer--read-and-measured) |
-| M6 | What the script functions other than 19, 30, 31 and 32 do in play | a player script's other calls do nothing and answer 0; Mission 01's script calls none | [15](../docs/15-behaviour.md#what-the-functions-do) |
+| M6 | What the script functions other than 19, 30, 31, 32 and 52 do in play | a player script's other calls do nothing and answer 0; Missions 01 and 02's scripts call none | [15](../docs/15-behaviour.md#what-the-functions-do) |
 | M6 | String 6223's key | a repeated message says string 6170 alone | [34](../docs/34-progression.md#not-established) |
 | M6 | Whether scenery is among a radar's contacts | a target needs a unit record: trees and rocks are never listed | [25](../docs/25-sensors.md#the-players-target--read-and-measured) |
 | M6 | The unit record's `+0x98` and `+0x94`: where the right button's ray starts, and the margin its pick keeps from the unit | both 0 | [25](../docs/25-sensors.md#the-players-target--read-and-measured) |
