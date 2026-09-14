@@ -13470,6 +13470,325 @@ def check_progression(check, game: Path) -> None:
           + f"; ui/game_resources.cfg voices {endings}")
 
 
+#: Mission 02, the second training mission, whose progression docs/34 walks.
+MISSION_02 = "MISSIONS/CAMPAIGN/CAMPAIGN.00/Mission.02"
+
+#: ``varset.var``'s ``CLASS_ANIMAL``, and function 52, a logical id's owner.
+CLASS_ANIMAL = 0x20000000
+FN_OWNER = 52
+
+#: What ``tut2_pl2``'s ``Mission`` handler does (docs/34): for each test, the call
+#: and its first argument, the value its answer is compared with, then the
+#: objectives completed and the messages played inside the block.
+MISSION_02_TESTS = [
+    (FN_IN_ROUTE, 0, 1, [], [6]),
+    (FN_IN_ROUTE, 1, 1, [], [10]),
+    (FN_IN_ROUTE, 2, 1, [], [12]),
+    (FN_IN_ROUTE, 3, 1, [], [13]),
+    (FN_IN_ROUTE, 4, 1, [], [14]),
+    (FN_OWNER, 0x80000001, 0, [0], [7, 11]),
+    (FN_OWNER, 0x80000001, 0xFFFFFFFF, [], []),
+    (FN_COUNT, 0, 2, [1], [8]),
+    (FN_OWNER, 0x80000003, 0, [2], []),
+    (FN_OWNER, 0x80000003, 0xFFFFFFFF, [], []),
+    (FN_COUNT, 1, 0, [3], [9]),
+]
+
+#: The text each message id of Mission 02's ``messages.cfg`` names.
+MISSION_02_TEXTS = {6: "T02_I01", 10: "T02_H01", 12: "T02_H03", 13: "T02_H04",
+                    14: "T02_H05", 7: "T02_I02", 11: "T02_H02", 8: "T02_I03",
+                    9: "T02_I04", 100: "T02_H06"}
+
+#: Mission 02's routes 1 to 4 as docs/34 gives them: x and y extents, rounded.
+MISSION_02_ROUTE_BOXES = {
+    1: (146, 671, 593, 844), 2: (207, 616, 874, 1008),
+    3: (509, 651, 1054, 1236), 4: (919, 1289, 665, 1127),
+}
+
+
+def _handler_value(table, nodes, formulas: list[str], at: int, var: int) -> int | None:
+    """``_script_value``, and besides it a ``varset.var`` constant by name or a
+    formula that is a bare number, as a 32-bit word."""
+    value = _script_value(table, nodes, at, var)
+    if value is not None:
+        return value & 0xFFFFFFFF
+    if 0 <= var < len(table) and table[var].name.isupper():
+        try:
+            return int(table[var].default, 0) & 0xFFFFFFFF
+        except ValueError:
+            return None
+    for node in reversed(nodes[:at]):
+        if node.destination != var:
+            continue
+        if (not node.calls and 0 <= node.formula < len(formulas)
+                and formulas[node.formula].isdigit()):
+            return int(formulas[node.formula])
+        return None
+    return None
+
+
+def _handler_tests(table, handler, formulas: list[str]) -> list[tuple]:
+    """Each block that compares a function's answer, as ``MISSION_02_TESTS`` lists
+    them: the call, its first argument, the value compared with, and the
+    objectives and messages the calls inside the block give."""
+    names = {v.name: i for i, v in enumerate(table)}
+    kinds = {names["OBJECTIVE_COMPLETE"]: 0, names["MESSAGE_INFO"]: 1}
+    tests: list[tuple] = []
+    last = None
+    stack: list[tuple | None] = []
+
+    def value(at: int, var: int) -> int | None:
+        return _handler_value(table, handler.nodes, formulas, at, var)
+
+    for i, node in enumerate(handler.nodes):
+        if node.calls and node.function in (FN_COUNT, FN_IN_ROUTE, FN_OWNER):
+            last = (node.function, value(i, node.operands[0]), node.destination)
+        elif node.calls and node.function == 30 and node.operands[0] in kinds:
+            open_test = next((t for t in reversed(stack) if t is not None), None)
+            if open_test is not None:
+                open_test[3 + kinds[node.operands[0]]].append(value(i, node.operands[1]))
+        elif node.opens:
+            test = None
+            if last and node.operands[0] == last[2] and node.relation == "==":
+                test = (last[0], last[1], value(i, node.operands[1]), [], [])
+                tests.append(test)
+            stack.append(test)
+        elif node.closes and stack:
+            stack.pop()
+    return tests
+
+
+def check_mission_02(check, game: Path) -> None:
+    """Mission 02, The Constructor, as its data and scripts drive it (docs/34)."""
+    d02 = game / MISSION_02
+    scripts_dir = game / "MISSIONS" / "SCRIPTS"
+    if not (d02 / "data.tma").exists() or not (scripts_dir / behaviour.VARSET).exists():
+        return
+    table = behaviour.variables(game)
+    m = mission.load(d02 / "data.tma")
+    stems = [c.ai_script.replace("\\", "/").rsplit("/", 1)[-1] for c in m.clans]
+    scripts = [behaviour.read(scripts_dir / f"{s}.scr") for s in stems]
+    called = [sorted({n.function for h in s.handlers for n in h.nodes if n.calls})
+              for s in scripts]
+    player = scripts[0]
+    formulas = behaviour.formulas(scripts_dir / f"{stems[0]}.scr")
+    tests = _handler_tests(table, next(h for h in player.handlers if h.name == "Mission"),
+                           formulas)
+    units = [o for o in m.objects if o.kind == mission.KIND_UNIT]
+    hero = next(o for o in units if "\\HERO\\" in o.path.upper())
+    buildings = {o.logical_id & 0xFFFFFFFF: o for o in m.objects
+                 if o.kind != mission.KIND_UNIT and o.logical_id != -1}
+    named = [(buildings.get(a), m.clans[buildings[a].clan_id].type if a in buildings else None)
+             for f, a, *_ in tests if f == FN_OWNER]
+    owned = sorted({Path(b.path.replace("\\", "/")).name for b, _ in named if b})
+    check("Mission 02: tut2_pl2's tests, and what each one gives",
+          [(f, a, v, o, s) for f, a, v, o, s in tests] == MISSION_02_TESTS
+          and called == [[19, 30, 31, 32, 52], [19], [19]]
+          and all(t is not None and t == mission.CLAN_NEUTRAL for _, t in named)
+          and owned == ["lplant01.dat", "shang01.dat"]
+          and all(r[1] == hero.logical_id or r[0] != FN_IN_ROUTE for r in [
+              (n.function, _handler_value(table, h.nodes, formulas, i, n.operands[1]))
+              for h in player.handlers for i, n in enumerate(h.nodes)
+              if n.calls and n.function == FN_IN_ROUTE]),
+          f"{stems} call functions {called}; tut2_pl2 tests routes 0-4 on id "
+          f"{hero.logical_id} (messages 6, 10, 12, 13, 14), function 52 of "
+          f"CLASS_BUILDING|1 and |3 -- {', '.join(owned)}, "
+          f"both a neutral clan's -- against 0 (objectives 0 and 2) and ERROR, "
+          f"clan 0's robots = 2 (objective 1, message 8) and clan 1's animals = 0 "
+          f"(objective 3, message 9)")
+
+    by_index = {msg.index: msg for msg in briefing.messages(d02 / briefing.MESSAGES)}
+    texts = {i: by_index[i].text_id for i in MISSION_02_TEXTS if i in by_index}
+    helps = sorted(i for i, msg in by_index.items() if msg.info_system)
+    asked = sorted({v for *_, s in tests for v in s})
+    listed = mission.objectives(d02 / "mission.cfg")
+    check("Mission 02: its messages, and the objectives the script completes",
+          texts == MISSION_02_TEXTS and helps == [10, 11, 12, 13, 14, 100]
+          and 100 not in asked
+          and [o.exempt for o in listed] == [False, False, False, True]
+          and sorted(o for *_, obj, _ in tests for o in obj) == [0, 1, 2, 3],
+          f"ids {asked} name {[texts[i] for i in asked]}; info_system on {helps}; "
+          f"message 100 ({texts.get(100)}) is not the script's; the objectives are "
+          f"{len(listed)}, the last a bonus, and the script completes 0-3")
+
+    types = [c.type for c in m.clans]
+    by_route = {r.id: r for r in m.routes}
+    x, y, _ = hero.position
+    holding = [i for i, r in sorted(by_route.items()) if r.contains(x, y)]
+    corners = [math.hypot(px - x, py - y) for px, py, _ in by_route[0].points]
+    boxes = {i: (round(min(q[0] for q in r.points)), round(max(q[0] for q in r.points)),
+                 round(min(q[1] for q in r.points)), round(max(q[1] for q in r.points)))
+             for i, r in by_route.items() if i}
+    anml = m.clans[1]
+    medusas = [o for o in units if o.clan_id == 1]
+    home = [min(math.hypot(o.position[0] - z.position[0], o.position[1] - z.position[1])
+                for z in anml.zones) for o in medusas]
+    in_route_4 = [by_route[4].contains(z.position[0], z.position[1]) for z in anml.zones]
+    robots = Counter(o.clan_id for o in units if (o.type_id or 0) & CLASS_ROBOT)
+    animals = Counter(o.clan_id for o in units if (o.type_id or 0) & CLASS_ANIMAL)
+    owners = {Path(o.path.replace("\\", "/")).name: o.clan_id
+              for o in m.objects if o.kind != mission.KIND_UNIT and o.clan_id is not None}
+    with_player = [lm for lm in (mission.load(p) for p in
+                                 sorted((game / "MISSIONS").rglob("data.tma")))
+                   if any(c.type == mission.CLAN_PLAYER for c in lm.clans)]
+    players_first = sum(lm.clans[0].type == mission.CLAN_PLAYER for lm in with_player)
+    check("Mission 02: the clans, the start, the medusas' pastures",
+          types == [mission.CLAN_PLAYER, mission.CLAN_NATURE, mission.CLAN_NEUTRAL]
+          and [c.minds for c in m.clans] == [2, 5, 5]
+          and m.relations() == [[2, 0, 1], [0, 2, 1], [1, 1, 2]]
+          and holding == [0] and max(corners) < 10
+          and boxes == MISSION_02_ROUTE_BOXES
+          and dict(robots) == {0: 1} and dict(animals) == {1: 2}
+          and owners == {"lplant01.dat": 2, "shang01.dat": 2, "gener01.dat": 0}
+          and [(z.inner, z.outer) for z in anml.zones] == [(20.0, 40.0), (20.0, 50.0)]
+          and max(home) < 10 and in_route_4 == [True, False]
+          and with_player and players_first == len(with_player),
+          f"clans {[c.name for c in m.clans]} of types {types}, minds "
+          f"{[c.minds for c in m.clans]}, relations {m.relations()}; the hero in route "
+          f"{holding}, corners {min(corners):.1f}-{max(corners):.1f} m; routes 1-4 span "
+          f"{boxes}; robots {dict(robots)}, animals {dict(animals)}; owners {owners}; "
+          f"Anml's zones {[(z.inner, z.outer) for z in anml.zones]}, the medusas "
+          f"{', '.join(f'{h:.1f}' for h in home)} m from a centre, the first zone in "
+          f"route 4; a player clan comes first on {players_first}/{len(with_player)} "
+          f"missions that have one")
+
+    armoury = weapons.Armoury(game)
+    record = armoury.library.get("a_l_03")
+    gun = armoury.gun("a_l_03")
+    parsed = armoury.controller("a_l_03")
+    rows = objects.parse_damage(armoury.read(record.damage), record.damage.member)
+    radar = [p for p in parsed.components if p.type_id == 8]
+    profile = record.slots[5].member.lower() if len(record.slots) > 5 else ""
+    tent = objects.load_unit(game / "UNITS" / "UNITS" / "ANIMAL" / "tent.dat")
+    check("Mission 02: a medusa, the tentacle it is",
+          record.tag == "BTLU" and profile == "chas_fly.var"
+          and [c.ref.member.lower() for c in tent.components] == ["a_l_03"]
+          and tent.kind == CLASS_ANIMAL
+          and parsed.triples[control.TRIPLE_TOP_SPEED] == (2.0, 13.0, 2.0)
+          and len(radar) == 1 and radar[0].values[3] == 500
+          and gun is not None and gun.magazine == -1 and gun.interval_ms == 500
+          and gun.round.speed == 90 and gun.round.range == 200
+          and gun.round.damage == 400 and gun.round.blast == 5
+          and len(rows) == 13 and rows[0].durability == 2500
+          and sorted(r.durability for r in rows[1:]) == [1.0] + [500.0] * 11,
+          f"tent.dat is {record.name} ({record.tag}, {profile}); top speed "
+          f"{parsed.triples[control.TRIPLE_TOP_SPEED]} (x, y forward, z), radar range "
+          f"{radar[0].values[3]:g}; its gun fires every {gun.interval_ms:g} ms, a "
+          f"{gun.round.speed:g} m/s round to {gun.round.range:g} m for "
+          f"{gun.round.damage:g} in radius {gun.round.blast:g}; {len(rows)} nodes, "
+          f"node 0 {rows[0].durability:g}")
+
+    land = landmesh.load(game / "DATA" / "MAPS" / m.map_name / "land.msh")
+    level0 = [f for f in land.lod_faces(0) if not land.is_water(f)]
+    water = land.water_faces()
+
+    def key(v):
+        return round(land.positions[v][0], 2), round(land.positions[v][1], 2)
+
+    def bed(f):
+        return bool(land.face_flags[f] & landmesh.FLAGS_LIQUID_BED_BIT)
+
+    edges: dict = defaultdict(list)
+    for f in level0:
+        a, b, c = land.faces[f]
+        for u, w in ((a, b), (b, c), (c, a)):
+            edges[frozenset((key(u), key(w)))].append(f)
+    outpost = next(o for o in m.objects if o.path.upper().endswith("SHANG01.DAT"))
+    start = next(f for f in level0 if land.contains_xy(f, *outpost.position[:2]))
+    island = {start}
+    todo = [start]
+    while todo:
+        f = todo.pop()
+        a, b, c = land.faces[f]
+        for u, w in ((a, b), (b, c), (c, a)):
+            for g in edges[frozenset((key(u), key(w)))]:
+                if g not in island and not bed(g):
+                    island.add(g)
+                    todo.append(g)
+    ix = [land.positions[v][0] for f in island for v in land.faces[f]]
+    iy = [land.positions[v][1] for f in island for v in land.faces[f]]
+    beds = [f for f in level0 if bed(f)]
+    shore = {key(v) for f in island for v in land.faces[f]} & {
+        key(v) for f in beds for v in land.faces[f]}
+    mainland = {key(v) for f in level0 if not bed(f) and f not in island
+                for v in land.faces[f]} & {key(v) for f in beds for v in land.faces[f]}
+    gap = min(math.dist(p, q) for p in shore for q in mainland)
+    levels = {land.positions[v][2] for f in water for v in land.faces[f]}
+    wx = [land.positions[v][0] for f in water for v in land.faces[f]]
+    wy = [land.positions[v][1] for f in water for v in land.faces[f]]
+    check("Mission 02: the Outpost's island is ringed by lake bed",
+          len(water) == 126 and levels == {150.0} and len(beds) == 103
+          and not bed(start) and len(island) == 52
+          and min(wx) < min(ix) and max(ix) < max(wx) and min(wy) < min(iy) and max(iy) < max(wy)
+          and gap > 45,
+          f"{len(water)} water faces at z {sorted(levels)}, {len(beds)} level-0 bed "
+          f"faces; the bed-free ground joined to the Outpost is {len(island)} faces, "
+          f"x {min(ix):.1f}-{max(ix):.1f}, y {min(iy):.1f}-{max(iy):.1f}, inside the "
+          f"water; the shortest way to the mainland crosses {gap:.1f} m of bed")
+
+    behavior = game / "Behavior.dll"
+    areal = game / "ArealMap.dll"
+    iron = game / "iron3d.dll"
+    ai = game / "ai.dll"
+    if not all(p.exists() for p in (behavior, areal, iron, ai)):
+        return
+    beh = _image_at(behavior.read_bytes())
+    amap = _image_at(areal.read_bytes())
+    aid = _image_at(ai.read_bytes())
+
+    def f32(at, va):
+        return struct.unpack("<f", at(va, 4))[0]
+
+    cases = struct.unpack("<6I", beh(0x1002C8F8, 24))
+    check("Mission 02: the migrate task's pasture, point and gate",
+          beh(0x1002C9D7, 5) == b"\x68" + struct.pack("<f", 120.0)
+          and beh(0x1002C9DF, 5) == b"\x68" + struct.pack("<f", 60.0)
+          and beh(0x1002CA36, 5) == b"\x68" + struct.pack("<f", 10.0)
+          and beh(0x1002CA3B, 5) == b"\x68" + struct.pack("<f", 5.0)
+          and amap(0x1002AB37, 6) == b"\x66\xc7\x40\x18" + struct.pack("<H", 937)
+          and amap(0x1002AB3D, 6) == b"\x66\xc7\x40\x1a" + struct.pack("<H", 1875)
+          and abs(f32(beh, 0x10059770) * 32767 - 1) < 1e-3
+          and f32(beh, 0x100597E8) == struct.unpack("<f", struct.pack("<f", 0.2))[0]
+          and f32(beh, 0x10059144) == 10.0
+          and cases == (0x1002C6C9, 0x1002C799, 0x1002C6C9, 0x1002C8DF, 0x1002C8DF,
+                        0x1002C6C9)
+          and beh(0x10017A1E, 5) == b"\x3d" + struct.pack("<I", CLASS_ANIMAL)
+          and beh(0x10017A25, 3) == b"\x83\xff\x0f"
+          and amap(0x10001A4D, 3) == b"\xff\x61\x54"
+          and aid(0x1000E144, 3) == b"\xff\x51\x1c"
+          and aid(0x1000E153, 7) == b"\xc7\x42\x50\xff\xff\xff\xff"
+          and aid(0x1000E165, 3) == b"\xff\x51\x44",
+          "migrate: its pasture timer (60, 120) s and its point timer (5, 10) s, the "
+          "clan's pasture held for 937 + 1875 x rand8/256 words of 64 ms, the point's "
+          "fractions rand/32767 held to 0.2, the score 1/(d + 10); reasons 0, 2, 5 "
+          "one case, 1 another, 3 and 4 the default; an animal engages only on order "
+          "15; function 52 asks slot 7 then the object's slot 17, ERROR when none")
+
+    image = iron.read_bytes()
+    at = _image_at(image)
+    sections, _ = resources._sections(image)
+    lfanew = struct.unpack_from("<I", image, 0x3C)[0]
+    base = struct.unpack_from("<I", image, lfanew + 24 + 28)[0]
+    text_rva, text_size, _ = sections[0]
+    setter = [c for c, t in _calls(at, base + text_rva, text_size) if t == 0x100A4F90]
+    passed = [_pushed_before(at, c, 16) for c in setter]
+    body = at(base + text_rva, text_size)
+    stores = [(base + text_rva + i, struct.unpack_from("<I", body, i + 6)[0])
+              for i in range(len(body) - 10)
+              if body[i] == 0xC7 and 0x80 <= body[i + 1] <= 0x87 and body[i + 1] != 0x84
+              and body[i + 2:i + 6] == b"\x10\x07\x00\x00"]
+    fives = [va for va, v in stores if v == 5]
+    check("Mission 02: only the briefing sets the level's state word to 5",
+          len(setter) == 39 and set(passed) == {1, 2, 3, 4, 6}
+          and fives == [0x100A2A91] and {v for _, v in stores} == {1, 4, 5}
+          and at(0x100638A7, 2) == b"\x6a\x64"
+          and at(0x10075F79, 5) == b"\x68" + struct.pack("<I", 0x207),
+          f"{len(setter)} calls of the setter pass {sorted(set(passed))}; "
+          f"{len(stores)} stores of an immediate write {sorted(v for _, v in stores)}, "
+          f"5 only at {', '.join(f'{v:#x}' for v in fives)}; message 100 is pushed at "
+          f"0x100638a7 behind the flyer test on property 0x207")
+
+
 #: The outcome panel's words, by the game's state word: its title, then its lines
 #: (``iron3d.dll:0x1009f8b0``).
 OUTCOME_STRINGS = {
@@ -14654,7 +14973,7 @@ def run(game: Path) -> int:
         check_controls, check_player_input, check_turret_channels,
         check_behaviour, check_research, check_descriptions, check_saves,
         check_vocabulary, check_resources, check_briefing, check_briefing_screen,
-        check_progression, check_outcome,
+        check_progression, check_mission_02, check_outcome,
         check_hud_top,
         check_hud_radar,
         check_hud_screens,

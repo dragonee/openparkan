@@ -20687,3 +20687,188 @@ kind = "site"
 name = "Iron_3D.ini EMBM to group 0x1e, setting 30"
 read = true
 doc = "docs/03-terrain.md"
+
+# --- Mission 02, The Constructor: function 52, the medusas' migration, ../docs/34-progression.md, ../docs/31-packages.md ---
+[[entry]]
+module = "ai.dll"
+at = "0x1000e153"
+kind = "site"
+name = "script function 52: no object answers the logical id, so the result is ERROR"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x1000e165"
+kind = "site"
+name = "script function 52: the object's slot 17, its owner word, is the result"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "ArealMap.dll"
+at = "0x10001a40"
+kind = "function"
+name = "clan ArealMap slot 7: the object by logical id, handed on to the SystemArealMap's slot 21"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "ArealMap.dll"
+at = "0x10021020"
+kind = "function"
+name = "SystemArealMap slot 21: the object by logical id"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "ArealMap.dll"
+at = "0x10022230"
+kind = "function"
+name = "SystemArealMap slot 47: a clan's current migration areal, kept until the clan's timer runs out, then rand() % count"
+read = true
+doc = "docs/31-packages.md"
+
+[[entry]]
+module = "ArealMap.dll"
+at = "0x100221a0"
+kind = "function"
+name = "SystemArealMap slot 36: a clan's migration areal record -- centre, inner radius, outer radius"
+read = true
+doc = "docs/31-packages.md"
+
+[[entry]]
+module = "ArealMap.dll"
+at = "0x1002ab20"
+kind = "function"
+name = "a clan's migration areal list: timer words 937 and 1875 (x 64 ms, 60 s + up to 120 s), no current areal"
+read = true
+doc = "docs/31-packages.md"
+
+[[entry]]
+module = "ArealMap.dll"
+at = "0x1002d530"
+kind = "function"
+name = "timer restart: now + fixed x 64 + rand8 x random x 64 / 256"
+read = true
+doc = "docs/31-packages.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1002c9d0"
+kind = "function"
+name = "migrate start: the clan's pasture into +0x60, timer +0x58 (60, 120) s, walk to a point, timer +0x64 (5, 10) s"
+read = true
+doc = "docs/31-packages.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1002ca60"
+kind = "function"
+name = "migrate tick: fire control mode 0; a new pasture and point when +0x58 runs out, a new point when the walker is idle and +0x64 has run out"
+read = true
+doc = "docs/31-packages.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1002c640"
+kind = "function"
+name = "migrate interrupt priority: an engagement 1 when the animal and the contact are within the pasture's outer radius, retaliation always 1"
+read = true
+doc = "docs/31-packages.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1002c8f8"
+kind = "table"
+name = "migrate priority's reason switch: 0, 2 and 5 the engagement case, 1 retaliation, 3 and 4 the default"
+read = true
+doc = "docs/31-packages.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1002c910"
+kind = "function"
+name = "migrate contact score: 1 / (d + 10) within the inner radius of the pasture's centre, else 0"
+read = true
+doc = "docs/31-packages.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1002cba0"
+kind = "function"
+name = "migrate: walk to the pasture centre + (u, v) x inner, u and v rand/32767 held to 0.2, up to 50 tries"
+read = true
+doc = "docs/31-packages.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10059770"
+kind = "datum"
+name = "1/32767: rand() to a fraction"
+read = true
+doc = "docs/31-packages.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x100597e8"
+kind = "datum"
+name = "0.2: the least fraction of the inner radius a migration point lies out along each axis"
+read = true
+doc = "docs/31-packages.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10059144"
+kind = "datum"
+name = "10: the migrate score's distance bias"
+read = true
+doc = "docs/31-packages.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10017a1e"
+kind = "site"
+name = "engagement: an animal (Type 0x20000000) engages only while its order is 15, migrate"
+read = true
+doc = "docs/31-packages.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10017f75"
+kind = "site"
+name = "engagement: a contact is kept only when it scores above the best so far, which starts at 0"
+read = true
+doc = "docs/31-packages.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100638a7"
+kind = "site"
+name = "message 100 pushed, in game mode 4 (+0xe6), when the unit the player takes over is a flyer (0x10075f70)"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100a4f70"
+kind = "function"
+name = "restore the level's state word +0x710 from +0x714"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "ArealMap.dll"
+at = "0x1002ab37"
+kind = "site"
+name = "a clan migration timer's fixed word, 937 (x 64 ms)"
+read = true
+doc = "docs/31-packages.md"
+
+[[entry]]
+module = "ArealMap.dll"
+at = "0x1002ab3d"
+kind = "site"
+name = "a clan migration timer's random word, 1875 (x 64 ms)"
+read = true
+doc = "docs/31-packages.md"

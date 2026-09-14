@@ -539,7 +539,10 @@ both in the training campaign — 22 in `CAMPAIGN.00/Mission.03`, 100 in
 - **What game mode 4 is.** `iron3d.dll:0x1005c748` compares the settings
   object's first word with 2, 3 and 4 into three flags; mode 4 is the one that
   asks for messages 22 and 100, which only training missions carry, so the
-  training campaign is the likely reading — a **guess**.
+  training campaign is the likely reading — a **guess**. Message 100 is asked
+  when the unit the player takes over is a flyer (`0x10075f70`), and a
+  recording of Mission 02 played from the campaign shows it as the hero boards
+  its warbot ([34-progression.md](34-progression.md#seen-in-a-recording)).
 - ~~How a briefing is skipped~~ — Esc sets the player's finished byte and
   the next frame ends it as if the path had run out
   ([How the briefing is shown](#when-it-runs--read)). **What `WaitForClick`

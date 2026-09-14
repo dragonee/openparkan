@@ -754,6 +754,58 @@ named, so reasons 2 and 4 are tested by the priorities but never asked.
   idle or stopped on a building escapes** from it ([The escape](#the-escape--read)).
   For other units no default order was found.
 
+### Migrate: an animal's pasture — *read*, and *measured*
+
+Order 15's task (vtable `0x10059aac`) keeps an animal on its clan's pastures,
+the clan's zones as the mission file gives them: a centre, an inner radius and
+an outer one ([04-missions.md](04-missions.md)), which `IMission` slot 8 hands
+the areal map as the clan's *migration areals* (slot 35, `0x100220e0`).
+
+- **One pasture a clan.** The system areal map keeps a current pasture per
+  clan (slot 47, `ArealMap.dll:0x10022230`). It answers the same one until the
+  clan's timer runs out, then picks `rand() % count` — the same one again,
+  possibly — and restarts the timer. The timer's words are 937 and 1875, ×64
+  ms (`0x1002ab37`, `0x1002ab3d`): **60 s, plus up to 120 s**.
+- **The start** (`Behavior.dll:0x1002c9d0`) asks for the clan's pasture into
+  `+0x60`, starts its own timer at 60 + up to 120 s (`+0x58`), walks to a
+  point, and starts a second timer at 5 + up to 10 s (`+0x64`). Both use the
+  attack task's timer helper, (fixed, random) in seconds (`0x1004c4c0`).
+- **The point** (`0x1002cba0`): the pasture's centre plus (*u* × inner,
+  *v* × inner), where *u* and *v* are each `rand()` over 32767 held to at least
+  0.2 (`0x10059770`, `0x100597e8`), and the centre's own height. **Both
+  offsets are positive**, so the point always lies in the square to the +x, +y
+  side of the centre, 0.2 to 1 inner radius along each axis. It tries up to 50
+  points until the walker takes one.
+- **Each tick** (`0x1002ca60`) asks the fire control for mode 0, no target of
+  its own. When the long timer has run out it asks for the pasture again and
+  walks to a new point. Otherwise, when the walker is idle and the short timer
+  has run out, it walks to a new point; while the walker is busy it restarts
+  the short timer.
+- **What it lets through.** A migrating animal is the one animal that engages
+  at all (`0x10017a1e`, [above](#between-orders--read)), and the task decides
+  what:
+  - **The score** (slot 13, `0x1002c910`): a hostile contact within the inner
+    radius of the pasture's centre scores 1 / (*d* + 10), *d* its distance
+    from the centre (`0x10059144`); anything else scores 0. The engagement
+    takes only a contact scoring above 0 (`0x10017f75`).
+  - **The priority** (slot 12, `0x1002c640`), by reason
+    (`0x1002c8f8`): for an engagement, reasons 0, 2 and 5, it is 1 when the
+    animal itself is within the outer radius of the centre and the contact
+    within it too, and 0 otherwise. For **retaliation**, reason 1, it is always
+    1. Reasons 3 and 4 get the default. The task also fills in two figures for
+    the attack it lets through — 20, 10, 25 or 35 by where the two stand, and
+    a circle about the centre of the outer radius plus 20, 80 or 100 — which
+    `0x100179c0` merges into the new task (not followed further).
+- **So** (*derived*): a grazing animal fires at nothing. It attacks a hostile
+  unit that comes within the inner radius of its clan's current pasture while
+  it is itself inside the outer radius, and anything that hurts it. The attack
+  is then the animal's version of [the attack](#the-attack-tick-by-tick--read).
+
+*Measured:* only nature clans carry zones — 12 of the 15, each with animals
+of its own. One more places animals with no zone at all, where slot 47 has no
+pasture to give (what the task does then is not read). Mission 02's two
+pastures are in [34-progression.md](34-progression.md#mission-02-the-constructor-end-to-end--derived).
+
 ## The fire control — *read*
 
 The object at `MBehaviour+0x35c` is the unit's **fire control** (constructor

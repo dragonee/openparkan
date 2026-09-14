@@ -444,7 +444,7 @@ slot `0xfffe`) is taken by nobody.
 | 11 | 11 | type | 1 when the clan already has as many of the type as its `dMax*` variable allows, or when a per-type counter the brain keeps (`+0x3e0`..`+0x3f8`) is set |
 | 49 | 9 | — | the clan's free minds |
 | 39 | 1 | *id* | 1 when the id names an object |
-| 52 | 47 | *id* | the object's **owner**, its slot 17; `ERROR` if none |
+| 52 | 47 | *id* | the object's **owner**, its slot 17: a clan's index, 65534 once destroyed; `ERROR` only when no object answers the id. The object is the system areal map's by logical id, asked through the clan areal map's slot 7 ([34-progression.md](34-progression.md#what-the-scripts-ask--read-and-measured)) |
 | 61 | 7 | *id* | the object's type word, its slot 14; `ERROR` if none |
 | 66 | 6 | *id*, float out | the type word, and 0.04 for a generator, 0.05 for a factory, 0 for other buildings |
 | 72 | 1 | *id* | the object's property `0x201` |

@@ -297,6 +297,199 @@ island", "Capture the neutral warbots", "Destroy the enemy warbot".
      objective;
   3. then the messages the handler asks for next.
 
+## Mission 02, *The Constructor*, end to end — *derived*
+
+`CAMPAIGN.00/Mission.02` on Tut_2: capture a factory, build a warbot in it,
+fly the warbot to an island and capture the Outpost there. The mechanics it
+leans on have their own pages — entering and taking a building
+([27-ownership.md](27-ownership.md)), the factory's screen and its production
+(36-factory.md), the designer (37-designer.md, 38-designs.md), boarding and
+flying a bot (39-boarding.md). This section is the mission as its files and
+its script drive it.
+
+### What the mission places — *measured*
+
+| clan | index | type | minds | script | zones |
+|---|---:|---|---:|---|---|
+| `Plr` | 0 | 1, player | 2 | `tut2_pl2` | — |
+| `Anml` | 1 | 0, nature | 5 | `tut2_en` | (1068.8, 1076.8) inner 20, outer 40; (915.1, 990.0) inner 20, outer 50 |
+| `Ntrl` | 2 | 3, neutral | 5 | `tut2_nt` | — |
+
+`Plr` and `Anml` are hostile to each other both ways; `Ntrl` is neutral to
+both, and both to it ([04-missions.md](04-missions.md)).
+
+| logical id | what | clan | where |
+|---|---|---|---|
+| 1 | the hero, `tut2_p.dat` | `Plr` | (300.3, 556.1) |
+| 2, 3 | two medusas, `tent.dat` | `Anml` | (924.3, 987.4), (908.2, 986.5) |
+| `CLASS_BUILDING`\|1 | the Large Factory, `lplant01.dat` (`fr_b_plant`, Type `0x80000010`) | `Ntrl` | (392.4, 788.7) |
+| `CLASS_BUILDING`\|3 | the Outpost, `shang01.dat` (`fr_l_angar`, Type `0x80000040`, with a shield generator) | `Ntrl` | (1289.1, 793.5), on the island |
+| `CLASS_BUILDING`\|5 | a generator, `gener01.dat` | `Plr` | (874.0, 330.4) |
+
+Four trees make up the rest. There is no mine or storage, so the factory
+screen's Ore reads 0% the whole mission ([23-economy.md](23-economy.md#what-the-hud-shows--read)).
+The player's two minds are one for the hero and one to spare, so the player
+can have **one bot besides the hero** ([23-economy.md](23-economy.md#the-bot-limit-is-the-clans-mind-count--read-and-measured)).
+
+**The island is ringed by a lake bed.** Tut_2's water is 126 faces, all at
+z 150. Under it 103 level-0 faces carry the bed bit, z 115.8 to 150. The
+bed-free ground joined to the Outpost's face is 52 faces, x 1219.5–1368.6,
+y 729.0–954.4, z 150 to 151.67, and it touches the mainland nowhere: the
+shortest way off crosses 49 m of bed. A walker whose sphere meets a bed under
+shallow water dies ([24-motion.md](24-motion.md#water-and-lava-beds-kill--read-and-measured)),
+so the island can only be reached by air.
+
+### What the scripts ask — *read*, and *measured*
+
+**Only the player's script does anything.** `tut2_en` and `tut2_nt` call
+function 19 in `Init` and have no other node. The medusas and the neutrals run
+on their behaviour's defaults. `tut2_pl2` calls functions 19, 30, 31, 32 and
+**52**, the one the others do not: a building's owner.
+
+**Function 52** (`ai.dll:0x1000e0e4`) asks the clan areal map (the SuperAI's
+`+0x3d8`) for the object with the logical id. That map's slot 7 hands the
+question to the system areal map's slot 21, the object by logical id
+(`ArealMap.dll:0x10001a40` → `0x10021020`). No object gives `ERROR`,
+`0xffffffff` (`0x1000e153`); otherwise the answer is the object's slot 17
+(`0x1000e165`), its owner word
+([15-behaviour.md](15-behaviour.md#65534-is-a-destroyed-objects-owner--read-and-measured)).
+
+- **The argument.** `dT1 = CLASS_BUILDING|1` is the constant `0x80000001`,
+  the Large Factory's `LogicalID`, and `CLASS_BUILDING|3` the Outpost's.
+- **The answer is a clan's index** (*derived*). The script compares it with
+  `d0`, 0, which `varset.var` also names `PLAYER_CLAN`. Players come first in a
+  mission's clan list: on all 28 missions with a player clan, index 0 is one
+  (*measured*). A destroyed building answers 65534, and only an id with no
+  object answers `ERROR`.
+- **The failure branches never fire in play** (*derived*). A building that
+  dies keeps its object, whose owner word reads 65534
+  ([26-damage.md](26-damage.md)), so its id never stops answering. Nor can
+  either building die of rounds: a plant's and a hangar's node 0 has no
+  level-0 geometry to strike, and that a blast cannot reach it is docs/26's
+  *guess*. The hero's death still fails the mission
+  ([After the outcome](#after-the-outcome--read-and-measured)).
+- **For an engine that answers 0 to a function it does not know**, both
+  captures read done on the first run.
+
+**The route tests** are Mission 01's latch, on the hero's id 1: a message
+plays on a run that finds the hero in some route after a run that found it in
+none. The hero starts inside route 0, a square whose corners lie 9.7–9.9 m
+from it.
+
+| run finds | then | message says |
+|---|---|---|
+| the hero in route 0, its start | 6 | `T02_I01` capture the Large Factory, the building with three pipes |
+| the hero in route 1 (x 146–671, y 593–844, about the factory; a notch x 347–438, y 698–823 leaves the building out) | 10 | `T02_H01` capturing buildings: go inside, get on the green platform |
+| the hero in route 2 (x 207–616, y 874–1008, north of the factory) | 12 | `T02_H03` the factory's assembly line and repair station |
+| the hero in route 3 (x 509–651, y 1054–1236) | 13 | `T02_H04` the animals' habitat and the medusas |
+| the hero in route 4 (x 919–1289, y 665–1127, from the medusas' eastern pasture, which it holds, over the lake's western half onto the island's western part) | 14 | `T02_H05` large warbots: Tab, Enter, and Escape to get out |
+
+**The count tests**, each held by its own `df` flag:
+
+| run finds | then | message says |
+|---|---|---|
+| function 52 of the factory = 0 | objective 0, then 7 and 11 | `T02_I02` the factory runs itself; `T02_H02` the constructor button |
+| `Plr` robots = 2 | objective 1, then 8 | `T02_I03` get out: the warbot comes out through the factory gates |
+| function 52 of the Outpost = 0 | objective 2 | — |
+| `Anml` animals (`CLASS_ANIMAL`) = 0 | objective 3, then 9 | `T02_I04` the enemy is done for |
+
+- **"= 2" is exact, and cannot be overshot.** The hero is one robot and the
+  minds allow one more, so the count reaches 2 with the first bot built and
+  stays there (*derived*).
+- **The objectives** are `mission.cfg`'s three primary ones — "Capture the
+  Large Factory", "Build a warbot", "Capture the Outpost on the island" — and
+  one bonus, "Destroy hostile animals". The script completes 0 to 3, so the
+  mission is won on the run that completes the last of 0, 1 and 2; the medusas
+  may be left alive.
+- **Messages 0–5** (`T02_T01`…`T02_T06`) are the briefing's lines.
+- **Message 100**, `T02_H06` — flying a warbot, PageUp and PageDn — is never
+  asked for by the script. `iron3d.dll` asks for it itself (`0x100638a7`) in
+  game mode 4 when the unit the player takes over is a flyer: `0x10075f70`
+  tests the unit's property `0x207`, its chassis type, for 1. That call is
+  part of boarding (39-boarding.md).
+
+### The medusas — *read*, and *measured*
+
+`tent.dat` is one record, `A_L_03`, "L Brainless Tentacle": a `BTLU` creature
+with the flyer profile `chas_fly.var`, Type `CLASS_ANIMAL`.
+
+- **Its controller**, `a_a_l3.ctl`: a battery, an engine, a turret, a radar
+  of range 500, and one gun. Top speed 13 m/s forward and 2 across and up
+  ([24-motion.md](24-motion.md)).
+- **The gun** never runs dry and fires every 500 ms. Its round, `ba_a_03`,
+  flies at 90 m/s for 200 m and does 400 in a blast of radius 5.
+- **Its nodes**: 13; node 0 has 2,500 hit points, eleven have 500, one has 1,
+  and node 0 blows up with `selfexp_anl_03a.exp`.
+
+**What they do.** With no order an animal migrates
+([31-packages.md](31-packages.md#migrate-an-animals-pasture--read-and-measured)).
+Both medusas start 7.7 and 9.6 m from the centre of the western pasture, and
+their clan changes pasture every 60–180 s at random. A grazing medusa shoots at
+nothing. It attacks a hostile unit — the hero, or the player's warbot — that
+comes within 20 m of the current pasture's centre, and anything that hurts it
+(*derived*). The briefing's `T02_T03` says as much: they attack only those who
+trespass on their territory.
+
+**Destroying both** empties `Anml`'s count, which completes the bonus
+objective with `T02_I04`. How a dead unit leaves the count is not read; the
+recording below shows it happen.
+
+### Seen in a recording
+
+Timings from a 30 fps recording of the mission, played through. Each line is
+the first frame that shows it, sampled every 2 s, or every 0.1 to 0.5 s where a
+time is given to a tenth.
+
+| time | what |
+|---|---|
+| 0–69.5 s | the briefing, ending in black |
+| 70.5–76.5 s | the objectives screen, "Primary objectives" and "Additional objectives" ([35-hud.md](35-hud.md#the-objectives-screen)) |
+| 76.5 s | the cockpit, `T02_I01` already up: asked while the objectives screen hid it |
+| 88 s | `T02_H01`, route 1 |
+| 106.4 s | the factory screen opens, its message box reading "Building is captured" from the System. Objective 0, `T02_I02` and `T02_H02` are not seen: the designer covers the screen from 107.8 s, and when the factory screen is back the box's 20 s are long past |
+| 107.8–155.5 s | the designer |
+| 156–157 s | the factory screen, the design listed |
+| 178 s | `T02_H03`, route 2 |
+| 194 s | `T02_H04`, route 3 |
+| ~195–218 s | the hero fights two medusas flying high over the ground; green acid lands around it |
+| 219.0 s | objective 1 and `T02_I03`: the warbot exists |
+| ~227 s | objective 3 and `T02_I04` |
+| 236 s | "Recieved message is already in history": a route the hero had been in before |
+| ~249 s | the hero boards the LFW-2 Warrior; `T02_H06`, message 100 |
+| 268–286 s | "already in history" again, in flight |
+| ~312 s | `T02_H05`, route 4, with the hero inside the warbot over the lake |
+| 340.5 s | "Building is captured": the Outpost |
+| 341.5 s | "MISSION COMPLETE !" |
+
+Three things follow from it.
+
+- **The hero's route follows the bot it rides.** Route 4 lies 500 m east of the
+  factory, where the hero boarded, and its message plays while the hero is
+  aboard.
+- **The warbot took 63 s** from the design's acceptance (about 156 s) to the
+  handler run that counted it. A free bot of a large chassis in a large
+  factory is timed at 60 s ([23-economy.md](23-economy.md#construction--read)),
+  and the plant has `FreeBotNum` 100; the handler runs every 2 s.
+- **The screenshot's "Energy 5%" is a moment in a climb.** As the factory
+  screen opens, Energy reads 1% at 106.4 s and 20% at 107.7 s, about 15 points
+  a second, while Ore flashes 0% on and off each half second. The display steps
+  a point toward its target at most every 0.05 s
+  ([23-economy.md](23-economy.md#what-the-hud-shows--read)); if that is tested
+  once a frame, at 30 frames a second a step waits every other frame, 15 a
+  second (*derived*). The target itself is not derived here.
+
+### For an engine
+
+1. **Answer function 52**: by logical id, the owner's clan index — 65534
+   once destroyed, `ERROR` for an id with no object.
+2. **Count what the missions count.** A bot the factory builds joins `Plr`,
+   and a dead medusa leaves `Anml`.
+3. **Report the hero's route from the bot** while it rides one.
+4. **Let the medusas graze and defend** as above, from `Anml`'s two zones.
+5. **Ask for message 100** the first time the player takes over a flyer, in a
+   training mission (game mode 4 is a *guess*, [21-briefing.md](21-briefing.md#not-established)).
+6. **Win** when objectives 0, 1 and 2 are all complete, whatever objective 3 is.
+
 ## After the outcome — *read*, and *measured*
 
 A won or lost mission does not stop. The HUD gives way to a panel that names
@@ -512,8 +705,20 @@ in this order:
     in [35-hud.md](35-hud.md#how-the-radar-draws--read): the screen's width over
     640 and its height over 480;
   - who sends the game message 3 that sets the state word to 2.
-- Whether the hero keeps reporting its route while it sits inside a boarded
-  bot. The route tests name the hero's id, not the bot's.
+- ~~Whether the hero keeps reporting its route while it sits inside a boarded
+  bot.~~ It does, where the bot goes: in a recording of Mission 02 route 4's
+  message plays while the hero flies the warbot over the lake
+  ([Mission 02](#seen-in-a-recording)). How its position reaches the report
+  is boarding's (39-boarding.md).
+- Whether the `Mission` handler runs while a building's screen or the
+  designer is up. The frame's gate is the level's state word at 5 or the
+  pause byte `+0xe8`. Only the briefing writes 5 (`iron3d.dll:0x100a2a91`):
+  the other eight writes of an immediate store 1 or 4, and all 39 calls of the
+  setter (`0x100a4f90`) pass 1, 2, 3, 4 or 6 (*measured*). Whether those
+  screens set the pause byte was not read.
+- Mission 02's medusas: what the attack does with the figures and the circle
+  the migrate task gives it, and how a flyer's migration point, which takes
+  the pasture centre's height, meets its flying height.
 - What the behaviour does with the message 6 it sends itself for each tactical
   areal it is in.
 - The ambient variations' schedule.
