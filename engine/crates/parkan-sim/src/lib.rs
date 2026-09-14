@@ -14,5 +14,6 @@ pub mod hit;
 pub mod input;
 pub mod machine;
 pub mod motion;
+pub mod progression;
 pub mod sky;
 pub mod turret;

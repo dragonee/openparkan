@@ -3,8 +3,11 @@
 //!
 //! A gun wakes when its next event is due, and either continues a barrel stroke or
 //! starts one. The round leaves halfway through the stroke; the interval starts
-//! only once the stroke is done.
+//! only once the stroke is done. A gun whose round has a range keeps a target gate,
+//! and one whose round is guided waits for a target and a lock ("A guided gun waits
+//! for a lock").
 
+use glam::Vec3;
 use parkan_formats::control::{CHANNEL_FOLLOWS, Channel, Component};
 
 pub const MAGAZINE: usize = 0;
@@ -21,6 +24,53 @@ pub const CONTINUE_FIGHT: i32 = 0x100;
 pub const SINGLE_FIGHT: i32 = 0x200;
 /// Barrel stroke steps, counting down (`0x1002a190`).
 const STROKE: u8 = 4;
+/// What a gun reports of its target gate (`+0x11c`): a shot may go, no target, the
+/// target out of range, the target off the barrel.
+pub const GATE_CLEAR: i32 = 1;
+pub const GATE_NO_TARGET: i32 = 2;
+pub const GATE_OUT_OF_RANGE: i32 = 7;
+pub const GATE_OFF_BARREL: i32 = 8;
+
+/// A gun's values 8, 10 and 9, as it fills them from the round it links
+/// (`Control.dll:0x100297e0`–`0x10029907`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TargetGate {
+    /// The round's range, cut to its seeker's reach; no gate when not positive.
+    pub range: f32,
+    /// The cosine of the seeker's cone, or −1.
+    pub cone_cos: f32,
+    /// The seeker's lock in seconds, or −1: below zero the gun is unguided.
+    pub lock_s: f32,
+}
+
+impl TargetGate {
+    pub const NONE: Self = Self { range: 0.0, cone_cos: -1.0, lock_s: -1.0 };
+
+    /// The gate for a round of `range` with a seeker of (cone rad, reach, lock ms).
+    pub fn new(range: f32, seeker: Option<(f32, f32, f32)>) -> Self {
+        let range = range.max(0.0);
+        match seeker {
+            Some((cone, reach, lock_ms)) => {
+                Self { range: range.min(reach), cone_cos: cone.cos(), lock_s: lock_ms * 0.001 }
+            }
+            None => Self { range, cone_cos: -1.0, lock_s: -1.0 },
+        }
+    }
+
+    /// A turret in `CIS_MANUALCONTROL` hands its target only to such a gun (`0x10028164`).
+    pub fn guided(&self) -> bool {
+        self.lock_s >= 0.0
+    }
+}
+
+/// What the gate looks at: where the unit is, which way the barrel point faces, and
+/// where the gun's target is.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Sight {
+    pub unit: Vec3,
+    pub barrel: Vec3,
+    pub target: Option<Vec3>,
+}
 
 /// One barrel: its channel and where its stroke is.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -90,6 +140,14 @@ pub struct Gun {
     /// controller's mode is not 0, `0x100297ef`).
     pub round_speed: f32,
     pub falls: bool,
+    pub gate: TargetGate,
+    pub sight: Sight,
+    /// The target it hands its rounds (`+0x108`), by the caller's numbering.
+    pub target: Option<usize>,
+    /// The lock left, s (`+0x170`), and the gate's last report.
+    pub lock: f32,
+    pub report: i32,
+    last_wake_ms: f64,
     start_ms: f64,
     next_ms: f64,
     started: bool,
@@ -130,6 +188,12 @@ impl Gun {
             ready: true,
             round_speed: 0.0,
             falls: false,
+            gate: TargetGate::NONE,
+            sight: Sight::default(),
+            target: None,
+            lock: TargetGate::NONE.lock_s,
+            report: GATE_NO_TARGET,
+            last_wake_ms: 0.0,
             start_ms: 0.0,
             next_ms: 0.0,
             started: false,
@@ -151,6 +215,20 @@ impl Gun {
         self.started = false;
     }
 
+    /// Link its round (`0x100297ef`): the gate from the round, and the lock full.
+    pub fn link(&mut self, gate: TargetGate) {
+        self.gate = gate;
+        self.lock = gate.lock_s;
+    }
+
+    /// The turret relinks it with `target` (`0x10028130`, `0x1002a160`): state 2 and the
+    /// lock full again.
+    pub fn relink(&mut self, target: Option<usize>) {
+        self.target = target;
+        self.report = GATE_NO_TARGET;
+        self.lock = self.gate.lock_s;
+    }
+
     /// Top the capacitor up.
     ///
     /// STAND-IN: docs/23-economy.md#bots-spend-power-through-the-same-code-priced-by-part--read-and-measured
@@ -169,6 +247,9 @@ impl Gun {
             if self.next_ms == self.start_ms || !self.started {
                 self.next_ms = now_ms;
             }
+            if !self.started {
+                self.last_wake_ms = now_ms;
+            }
             self.start_ms = self.next_ms;
             self.fire_step(self.start_ms, &mut shots);
             self.started = true;
@@ -180,6 +261,8 @@ impl Gun {
     /// `0x10029ca0`: continue a stroke, or start one when the gun has rounds, charge,
     /// its ready byte and a state.
     fn fire_step(&mut self, t: f64, shots: &mut Vec<Shot>) {
+        let since_s = ((t - self.last_wake_ms) * 0.001) as f32;
+        self.last_wake_ms = t;
         if self.barrels.is_empty() {
             return;
         }
@@ -190,19 +273,55 @@ impl Gun {
             }
             return;
         }
-        if self.rounds == 0
-            || (self.capacitor > 0.0 && self.charge < self.shot_energy)
-            || !self.ready
-            || self.state == STATE_OFF
-        {
+        if self.rounds == 0 || (self.capacitor > 0.0 && self.charge < self.shot_energy) || !self.ready {
             return;
         }
+        // The gate runs whether or not the button is held (`0x10029d3a`).
+        if self.gate.range > 0.0 && !self.gate_passes(since_s) {
+            return;
+        }
+        if self.state == STATE_OFF {
+            return;
+        }
+        self.lock = self.gate.lock_s;
         let firing: Vec<usize> =
             if self.salvo { (0..self.barrels.len()).collect() } else { vec![self.current] };
         for b in firing {
             self.barrels[b].step = STROKE;
             self.advance(b, t, shots);
         }
+    }
+
+    /// The target gate (`0x10029d3a`–`0x10029f60`), `since_s` after the last wake: whether
+    /// a stroke may start.
+    fn gate_passes(&mut self, since_s: f32) -> bool {
+        let g = self.gate;
+        let Some(target) = self.sight.target else {
+            if g.lock_s > 0.0 {
+                self.report = GATE_NO_TARGET;
+                return false;
+            }
+            return true;
+        };
+        let line = target - self.sight.unit;
+        if line.length_squared() > g.range * g.range {
+            self.report = GATE_OUT_OF_RANGE;
+            self.lock = g.lock_s;
+            return false;
+        }
+        if g.cone_cos > 0.0
+            && self.sight.barrel.normalize_or_zero().dot(line.normalize_or_zero()) <= g.cone_cos
+        {
+            self.report = GATE_OFF_BARREL;
+            self.lock = g.lock_s;
+            return false;
+        }
+        self.report = GATE_CLEAR;
+        if g.lock_s > 0.0 && self.lock > 0.0 {
+            self.lock -= since_s;
+            return false;
+        }
+        true
     }
 
     /// `0x1002a190`: one step of a barrel's stroke.
@@ -337,6 +456,45 @@ mod tests {
         laser.ready = false;
         assert_eq!(laser.tick(1230.0).len(), 1, "the round still leaves");
         assert!(laser.tick(3000.0).is_empty(), "and no stroke follows");
+    }
+
+    #[test]
+    fn a_guided_gun_fires_only_at_a_target_in_range_and_cone_once_its_lock_runs_out() {
+        // The hero's plasma rifle: 150 m, 0.25 rad, 0.25 s.
+        let plasma = |target: Option<Vec3>| {
+            let mut g = gun([-1.0, 0.0, 0.0, 0.0], &[4.0]);
+            g.link(TargetGate::new(150.0, Some((0.25, 500.0, 250.0))));
+            g.sight = Sight { unit: Vec3::ZERO, barrel: Vec3::Y, target };
+            g
+        };
+        let g = plasma(None);
+        assert_eq!(g.gate.range, 150.0);
+        assert!(g.gate.guided() && (g.gate.cone_cos - 0.9689).abs() < 1e-4);
+
+        let mut g = plasma(None);
+        assert!(hold(&mut g, 1000.0).is_empty(), "no target, no shot");
+        assert_eq!(g.report, GATE_NO_TARGET);
+        let mut g = plasma(Some(Vec3::new(0.0, 200.0, 0.0)));
+        assert!(hold(&mut g, 1000.0).is_empty(), "out of range");
+        assert_eq!((g.report, g.lock), (GATE_OUT_OF_RANGE, 0.25));
+        let mut g = plasma(Some(Vec3::new(60.0, 100.0, 0.0)));
+        assert!(hold(&mut g, 1000.0).is_empty(), "0.54 rad off the barrel");
+        assert_eq!((g.report, g.lock), (GATE_OFF_BARREL, 0.25));
+
+        // In range and in the cone: the lock counts down from the first wake, then a stroke,
+        // whose start fills the lock again.
+        let mut g = plasma(Some(Vec3::new(10.0, 100.0, 0.0)));
+        g.relink(Some(3));
+        let shots = hold(&mut g, 1000.0);
+        assert!(shots.len() >= 2 && shots[0] >= 250.0, "{shots:?}");
+        assert!(shots[1] - shots[0] >= 250.0, "{shots:?}");
+        assert_eq!(g.report, GATE_CLEAR);
+
+        // The cannon, unguided and with no target, meets no gate.
+        let mut cannon = gun([500.0, 20.0, 0.1, 0.0], &[4.0]);
+        cannon.link(TargetGate::new(500.0, None));
+        assert!(!cannon.gate.guided());
+        assert_eq!(hold(&mut cannon, 1000.0).len(), 4);
     }
 
     #[test]

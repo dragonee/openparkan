@@ -183,9 +183,73 @@ pub fn load(path: &Path) -> Result<Vec<Action>, FormatError> {
     parse(&std::fs::read(path)?, &path.display().to_string())
 }
 
+/// The key bindings `iron3d.dll` reads for the game itself (docs/14-controls.md).
+pub const GAME_BINDINGS: &str = "ui_other.man";
+/// `iron3d.dll`'s commands the player's target and the hero's Enter answer to
+/// (`openparkan/controls.py`'s `CMD_GAME`).
+pub const CMD_ENTER_STATE: &str = "CMD_ENTER_STATE";
+pub const CMD_JAMES_SELECT_TARGET: &str = "CMD_JAMES_SELECT_TARGET";
+pub const CMD_JAMES_SELECT_ENEMY: &str = "CMD_JAMES_SELECT_ENEMY";
+pub const CMD_JAMES_SELECT_FRIEND: &str = "CMD_JAMES_SELECT_FRIEND";
+pub const CMD_JAMES_AIM_TARGET: &str = "CMD_JAMES_AIM_TARGET";
+
+/// One line of a `.man`: a command, and the key chord that runs it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Binding {
+    pub command: String,
+    /// A held key, or `SCAN_NULL`.
+    pub modifier: String,
+    pub key: String,
+}
+
+/// Parse a `.man`'s text: every line that is not blank is three fields.
+pub fn bindings(data: &[u8], source: &str) -> Result<Vec<Binding>, FormatError> {
+    let text = latin1(data).replace("\r\n", "\n");
+    let mut out = Vec::new();
+    for (number, line) in text.split('\n').enumerate() {
+        let fields: Vec<&str> = line.split_whitespace().collect();
+        match fields[..] {
+            [] => {}
+            [command, modifier, key] => out.push(Binding {
+                command: command.to_owned(),
+                modifier: modifier.to_owned(),
+                key: key.to_owned(),
+            }),
+            _ => {
+                return Err(FormatError::invalid(
+                    source,
+                    format!("line {}: {} fields, not 3", number + 1, fields.len()),
+                ));
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// The command `key` runs with `held` down: a chord whose modifier is held first, else
+/// one with none.
+pub fn command_for<'a>(bindings: &'a [Binding], key: &str, held: impl Fn(&str) -> bool) -> Option<&'a str> {
+    let on_key = || bindings.iter().filter(move |b| b.key == key);
+    on_key()
+        .find(|b| b.modifier != NO_MODIFIER && held(&b.modifier))
+        .or_else(|| on_key().find(|b| b.modifier == NO_MODIFIER))
+        .map(|b| b.command.as_str())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_binding_line_is_three_fields_and_a_held_modifier_wins() {
+        let text = b"CMD_CAMERA_CENTER SCAN_LSHIFT SCAN_RMOUSE\r\n\r\nCMD_JAMES_AIM_TARGET SCAN_NULL SCAN_RMOUSE\r\n";
+        let b = bindings(text, "m").unwrap();
+        assert_eq!(b.len(), 2);
+        assert_eq!(command_for(&b, "SCAN_RMOUSE", |_| false), Some(CMD_JAMES_AIM_TARGET));
+        assert_eq!(command_for(&b, "SCAN_RMOUSE", |m| m == "SCAN_LSHIFT"), Some("CMD_CAMERA_CENTER"));
+        assert_eq!(command_for(&b, "SCAN_TAB", |_| false), None);
+        assert!(bindings(b"CMD_X SCAN_NULL\n", "m").is_err());
+    }
 
     #[test]
     fn a_row_resolves_its_names() {

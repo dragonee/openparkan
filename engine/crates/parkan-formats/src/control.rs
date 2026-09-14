@@ -65,6 +65,17 @@ pub const TURRET_TYPE: i32 = 1;
 pub const GUN_TYPE: i32 = 2;
 pub const CAMERA_TYPE: i32 = 4;
 pub const ENGINE_TYPE: i32 = 5;
+/// `CICLS_RADAR`: values 0–2 its sensitivities, 3 its range, 4 how long a scan holds
+/// (docs/25-sensors.md).
+pub const RADAR_TYPE: i32 = 8;
+pub const RADAR_RANGE: usize = 3;
+pub const RADAR_PERIOD: usize = 4;
+/// A guided round's seeker: value 0 its cone in radians, 1 its reach, 2 the lock its
+/// gun waits, in ms (docs/29-weapons.md).
+pub const SEEKER_TYPE: i32 = 17;
+pub const SEEKER_CONE: usize = 0;
+pub const SEEKER_REACH: usize = 1;
+pub const SEEKER_LOCK: usize = 2;
 /// The hero turret's weapon arms, one a gun, in the guns' order.
 pub const ARM_TYPE: i32 = 24;
 pub const MOUNT_UPRIGHT: u32 = 0x0400_0000;

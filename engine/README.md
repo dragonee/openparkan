@@ -223,6 +223,11 @@ engine pass replaces each with what was read and removes its row.
 | M3 | no spare payload is computed: r = 1 | the chassis is part id 0's nodes, the root object's (the hero's r is about 1 anyway) | [24](../docs/24-motion.md#load--read-and-measured) |
 | M3 | only the turn about z is applied | triple 6 is the most the body leans on each axis, from the sources a state's `+0x08` picks; triple 5 is the share of the tilt taken back each step, toward world up (bits `0xC0`) or a vector (`0x30`); no hero state leans | [24](../docs/24-motion.md#the-hull-leans-and-rights-itself--read-and-measured) |
 | M4 | every effect instance updates on every tick | the manager updates an instance once 100 ms have passed since its last update | [11](../docs/11-effects.md#how-an-effect-runs--read) |
+| M6 | The clock unit of the object takt that times a unit's route reports, its rand8, and when a unit's first takt runs | game milliseconds; the engine's own generator; one timer after the unit joins | [34](../docs/34-progression.md#who-stands-in-a-route--read) |
+| M6 | A unit also reports when its navigation areal changes | the engine keeps no navigation areals: only a move of more than 5 sends a report | [34](../docs/34-progression.md#who-stands-in-a-route--read) |
+| M6 | The `Mission` handler is timed by `timeGetTime`, real time | game time | [34](../docs/34-progression.md#when-the-mission-handler-runs--read) |
+| M6 | How a destroyed unit leaves function 31's list | it leaves its clan's count and every route's list | [34](../docs/34-progression.md#function-31-how-many-robots-a-clan-has--read) |
+| M6 | What `OBJECTIVE_FAILED` does past fetching string 5041, and what `OBJECTIVE_PROGRESS` shows | the failure shows the string and changes no state; progress shows nothing | [34](../docs/34-progression.md#objectives-and-the-end-of-a-mission--read-and-measured) |
 
 ## Departures
 
