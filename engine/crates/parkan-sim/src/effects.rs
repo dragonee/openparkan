@@ -50,14 +50,32 @@ impl Frame {
     }
 }
 
+/// A sound block's +4: 2 or 3 make it a loop (`Effect.dll:0x10012d3e`).
+pub const SOUND_MODE_AT: usize = 4;
+pub const SOUND_LOOPS: [u32; 2] = [2, 3];
+
+/// What a sound emitter asks of the sound server.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CueKind {
+    /// Play once, stopping and starting again a copy still playing.
+    Once,
+    /// Play, and play again each time it ends, until stopped.
+    Loop,
+    /// Stop the loop with this cue's key.
+    Stop,
+}
+
 /// A sound to play: a type-2 emitter's `sounds.lib` member, where, and the distances
-/// it is heard fully and last heard at (+64, +68).
+/// it is heard fully and last heard at (+64, +68). `key` names the instance and the
+/// emitter, so a loop can be stopped.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Cue {
     pub sound: String,
     pub position: Vec3,
     pub near: f32,
     pub far: f32,
+    pub key: (u64, usize),
+    pub kind: CueKind,
 }
 
 /// A quad to draw: a material, a centre, a length along a direction and a width.
@@ -110,8 +128,11 @@ pub struct Instance {
     /// Where a bolt starts: where the effect was when it started.
     pub start_point: Vec3,
     seed: u32,
-    /// *t* when the sounds were last looked at, −1 before.
+    /// The caller's number for the instance, which its sounds' keys carry.
+    pub id: u64,
+    /// The sound emitters' previous time (`+0x9c`), 0 at load, and the loops playing.
     heard_t: f32,
+    looping: Vec<usize>,
     streams: Vec<Stream>,
     /// Seconds since the start, and where the effect was, at the last update.
     updated: Option<(f32, Vec3)>,
@@ -187,7 +208,9 @@ impl Instance {
             speed: 0.0,
             start_point: frame.origin,
             seed,
-            heard_t: -1.0,
+            id: 0,
+            heard_t: 0.0,
+            looping: Vec::new(),
             streams,
             updated: None,
         }
@@ -292,22 +315,58 @@ impl Instance {
         self.updated = Some((seconds, origin));
     }
 
-    /// The sounds whose trigger *t* has crossed since the last call: a type-2 emitter
-    /// plays once as *t* passes its +8 (`Effect.dll:0x10012f42`).
+    /// What the sound emitters ask for at `now_ms` (`Effect.dll:0x10012eb0`). A one-shot
+    /// takes a *t* of exactly 1 as 0 (`0x10012f2d`) and plays when the previous time is
+    /// at or below both that *t* and its trigger +8, and the trigger is below *t*; the
+    /// taken *t* becomes the previous time. A loop plays while low +8 ≤ *t* ≤ high +12 and
+    /// stops outside (`0x10012fca`, `0x10013008`).
     pub fn cues(&mut self, now_ms: f64) -> Vec<Cue> {
         let t = self.t(now_ms);
+        let taken = if t == 1.0 { 0.0 } else { t };
         let before = self.heard_t;
-        self.heard_t = t;
-        self.effect
-            .emitters
-            .iter()
-            .filter(|e| e.kind == EMITTER_SOUND && !e.resource.member.is_empty())
-            .filter(|e| before < e.f(8) && t >= e.f(8))
-            .map(|e| Cue {
+        self.heard_t = taken;
+        let mut out = Vec::new();
+        for (i, e) in self.effect.emitters.iter().enumerate() {
+            if e.kind != EMITTER_SOUND || e.resource.member.is_empty() {
+                continue;
+            }
+            let cue = |kind| Cue {
                 sound: e.resource.member.clone(),
                 position: self.frame.origin,
                 near: e.f(64),
                 far: e.f(68),
+                key: (self.id, i),
+                kind,
+            };
+            if SOUND_LOOPS.contains(&word(e, SOUND_MODE_AT)) {
+                let inside = e.f(8) <= t && t <= e.f(12);
+                let playing = self.looping.contains(&i);
+                if inside && !playing {
+                    self.looping.push(i);
+                    out.push(cue(CueKind::Loop));
+                } else if !inside && playing {
+                    self.looping.retain(|&l| l != i);
+                    out.push(cue(CueKind::Stop));
+                }
+            } else if before <= taken && before <= e.f(8) && e.f(8) < taken {
+                out.push(cue(CueKind::Once));
+            }
+        }
+        out
+    }
+
+    /// Stops for the loops still playing, as the instance goes (slot 5, `0x10013170`).
+    pub fn silence(&mut self) -> Vec<Cue> {
+        let effect = self.effect.clone();
+        std::mem::take(&mut self.looping)
+            .into_iter()
+            .map(|i| Cue {
+                sound: effect.emitters[i].resource.member.clone(),
+                position: self.frame.origin,
+                near: 0.0,
+                far: 0.0,
+                key: (self.id, i),
+                kind: CueKind::Stop,
             })
             .collect()
     }
@@ -625,6 +684,43 @@ mod tests {
         assert!(fx.cues(30.0).is_empty());
         fx.value = 0.5;
         assert_eq!(fx.cues(40.0).len(), 1, "the next stroke");
+    }
+
+    #[test]
+    fn a_one_shot_that_sat_at_one_plays_again_on_the_way_down_and_a_loop_plays_inside_its_window() {
+        // An arm's sound: a trigger of 0.15. Out to exactly 1, then folding.
+        let arm = block(2, 148, &[(8, 0.15), (12, 1.0), (64, 2.0), (68, 20.0)], "H_gh_cannon.wav");
+        let frame = Frame::along(Vec3::ZERO, Vec3::X, 1.0);
+        let mut fx = Instance::new(effect(TIME_POINT, 0.0, 0, vec![arm]), frame, 1.0, 0.0, None, 1);
+        fx.value = 0.5;
+        assert_eq!(fx.cues(0.0).len(), 1, "unfolding past 0.15");
+        fx.value = 1.0;
+        assert!(fx.cues(10.0).is_empty(), "out: 1 is taken as 0");
+        fx.value = 0.9;
+        assert_eq!(fx.cues(20.0).len(), 1, "folding: from 0 past 0.15 again");
+        fx.value = 0.5;
+        assert!(fx.cues(30.0).is_empty());
+        // Folded from short of 1: silent.
+        fx.value = 0.8;
+        fx.cues(40.0);
+        fx.value = 0.3;
+        assert!(fx.cues(50.0).is_empty());
+
+        let breath =
+            with_word(block(2, 148, &[(8, 0.2), (12, 0.8), (64, 1.0), (68, 4.0)], "H_breath.wav"), 4, 2);
+        let mut fx = Instance::new(effect(TIME_POINT, 0.0, 0, vec![breath]), frame, 1.0, 0.0, None, 1);
+        fx.id = 7;
+        fx.value = 0.1;
+        assert!(fx.cues(0.0).is_empty());
+        fx.value = 0.5;
+        let start = fx.cues(10.0);
+        assert_eq!((start.len(), start[0].kind, start[0].key), (1, CueKind::Loop, (7, 0)));
+        assert!(fx.cues(20.0).is_empty(), "still playing");
+        fx.value = 0.9;
+        assert_eq!(fx.cues(30.0)[0].kind, CueKind::Stop);
+        fx.value = 0.5;
+        fx.cues(40.0);
+        assert_eq!(fx.silence()[0].kind, CueKind::Stop, "the instance goes");
     }
 
     #[test]

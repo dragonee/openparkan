@@ -11,7 +11,7 @@ use kira::sound::static_sound::{StaticSoundData, StaticSoundHandle};
 use kira::{AudioManager, AudioManagerSettings, Decibels, DefaultBackend, Panning};
 use parkan_formats::gamedir;
 use parkan_formats::nres::Archive;
-use parkan_sim::effects::Cue;
+use parkan_sim::effects::{Cue, CueKind};
 use parkan_world::resources::Sound;
 
 pub struct Audio {
@@ -23,6 +23,10 @@ pub struct Audio {
     /// The voice queue (`ISoundServer` slot 4): what waits, and what plays.
     voices: VecDeque<StaticSoundData>,
     voice: Option<StaticSoundHandle>,
+    /// The effects' loops playing, by instance and emitter.
+    loops: HashMap<(u64, usize), StaticSoundHandle>,
+    /// The last one-shot each emitter played, which it stops before playing again.
+    onces: HashMap<(u64, usize), StaticSoundHandle>,
 }
 
 /// How loud a cue is heard `distance` away: whole within `near`, nothing past `far`.
@@ -51,6 +55,8 @@ impl Audio {
                 named: HashMap::new(),
                 voices: VecDeque::new(),
                 voice: None,
+                loops: HashMap::new(),
+                onces: HashMap::new(),
             }),
             Err(e) => {
                 eprintln!("no sound: {e}");
@@ -127,6 +133,12 @@ impl Audio {
     /// STAND-IN: docs/11-effects.md#emitter-types--read-and-measured -- how a sound is
     /// placed between the speakers is not read; it pans by its direction.
     pub fn play(&mut self, cue: &Cue, eye: Vec3, right: Vec3) {
+        if cue.kind == CueKind::Stop {
+            if let Some(mut handle) = self.loops.remove(&cue.key) {
+                handle.stop(Default::default());
+            }
+            return;
+        }
         let offset = cue.position - eye;
         let g = gain(offset.length(), cue.near, cue.far);
         if g <= 0.0 {
@@ -135,7 +147,22 @@ impl Audio {
         let Some(sound) = self.sound(&cue.sound) else { return };
         let pan = offset.normalize_or_zero().dot(right.normalize_or_zero()).clamp(-1.0, 1.0);
         let volume = Decibels((20.0 * g.log10()).max(Decibels::SILENCE.0));
-        let _ = self.manager.play(sound.volume(volume).panning(Panning(pan)));
+        let sound = sound.volume(volume).panning(Panning(pan));
+        if cue.kind == CueKind::Loop {
+            // STAND-IN: docs/11-effects.md#type-2-is-a-sound--read-and-measured -- a playing
+            // sound's position, near, far and volume go to the server each update; how they
+            // become gain is not read, and a loop keeps the gain and pan it started with.
+            if let Ok(handle) = self.manager.play(sound.loop_region(..)) {
+                self.loops.insert(cue.key, handle);
+            }
+        } else {
+            if let Some(mut old) = self.onces.remove(&cue.key) {
+                old.stop(Default::default());
+            }
+            if let Ok(handle) = self.manager.play(sound) {
+                self.onces.insert(cue.key, handle);
+            }
+        }
     }
 }
 

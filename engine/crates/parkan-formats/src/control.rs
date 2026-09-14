@@ -29,6 +29,21 @@ pub const ACT_EXPLODE_NODE: i32 = 27;
 /// Action 4 creates an effect on three control points v4..v6 under id v7; action 14
 /// drives an effect id v4 from the value at point v5.
 pub const ACT_EFFECT_POINTS: i32 = 4;
+/// Action 3 creates an effect by name on node v4 under id v7; action 10 starts effect v4
+/// in time mode v5 (docs/13, "The section-5 record").
+pub const ACT_EFFECT_NODE: i32 = 3;
+pub const ACT_START_EFFECT: i32 = 10;
+/// A record's int 0: 0x40000000 runs it when any masked condition holds, 0x20000000 when
+/// all do, a record with neither always runs; 0x80000000 opens a run and 0x10000000
+/// closes it (`0x100022c0`, `0x100028b2`). Ints 1 and 2 are the mask and the inversion.
+pub const REF_OPEN: u32 = 0x8000_0000;
+pub const REF_ANY: u32 = 0x4000_0000;
+pub const REF_ALL: u32 = 0x2000_0000;
+pub const REF_ELSE: u32 = 0x1000_0000;
+/// The controller's sixteen condition bytes: 0–10 the ground's surface id, one-hot, then
+/// 7 the liquid bed's flag; 14 critical damage; 15 a copy of `+0x618`.
+pub const CONDITIONS: usize = 16;
+pub const COND_BED: usize = 7;
 pub const ACT_EFFECT_TIME_POINT: i32 = 14;
 pub const TRIPLE_AT: [usize; 6] = [20, 32, 44, 56, 68, 80];
 /// Triples by index: acceleration (live copy doubled), top speed, turn rate.
@@ -51,6 +66,11 @@ pub const ANY_REQUEST: i32 = -1;
 
 /// A contact's point counts toward the body's ground gap and normal (`0x1001b00a`).
 pub const CONTACT_SUPPORT: u32 = 0x1;
+/// Set at load on the states whose last pose holds the contact within 0.1 of its rest
+/// height: the states that end on that foot (`0x1001a2d5`).
+pub const CONTACT_PLANTED: u32 = 0x1000;
+/// How close a state's last pose must hold a contact to its rest height (`0x1003c03c`).
+pub const PLANTED_WITHIN: f32 = 0.1;
 
 pub const CHANNEL_WRAP: i32 = 0x1;
 pub const CHANNEL_INVERT: i32 = 0x2;
@@ -236,6 +256,46 @@ impl Reference {
     pub fn action(&self) -> i32 {
         self.values[ACTION_AT]
     }
+
+    pub fn flags(&self) -> u32 {
+        self.values[0] as u32
+    }
+
+    /// Whether the record's own condition lets it run over the condition bytes.
+    pub fn holds(&self, conditions: &[bool; CONDITIONS]) -> bool {
+        let flags = self.flags();
+        if flags & (REF_ANY | REF_ALL) == 0 {
+            return true;
+        }
+        let (mask, inverted) = (self.values[1] as u32 & 0xFFFF, self.values[2] as u32 & 0xFFFF);
+        let mut met = (0..CONDITIONS)
+            .filter(|&i| mask >> i & 1 != 0)
+            .map(|i| conditions[i] != (inverted >> i & 1 != 0));
+        if flags & REF_ANY != 0 { met.any(|m| m) } else { met.all(|m| m) }
+    }
+}
+
+/// The records of one group that run, in order (`Control.dll:0x100028b2`): a record that
+/// opens a run opens it unless one is open; the next that closes it also runs when no
+/// record since the run opened has run.
+pub fn run_group<'a>(records: &[&'a Reference], conditions: &[bool; CONDITIONS]) -> Vec<&'a Reference> {
+    let mut out = Vec::new();
+    let (mut inside, mut ran) = (false, false);
+    for &r in records {
+        let mut forced = false;
+        if r.flags() & REF_OPEN != 0 && !inside {
+            (inside, ran) = (true, false);
+        }
+        if r.flags() & REF_ELSE != 0 {
+            forced = inside && !ran;
+            (inside, ran) = (false, false);
+        }
+        if forced || r.holds(conditions) {
+            out.push(r);
+            ran = true;
+        }
+    }
+    out
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -268,6 +328,11 @@ impl Controller {
             }
             _ => Vec::new(),
         }
+    }
+
+    /// The records of group `index`, in order.
+    pub fn group_at(&self, index: i32) -> Vec<&Reference> {
+        self.references.iter().filter(|r| r.group as i32 == index).collect()
     }
 
     /// What moving from state `from` to state `to` costs; the row is the destination.
@@ -531,6 +596,38 @@ pub fn parse(b: &[u8], source: &str) -> Result<Controller, FormatError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_run_plays_its_first_matching_record_or_else_its_closing_one() {
+        // r_h_02's foot group: metal, stone, grass, alloy, flesh, then grass for 9 or else.
+        let record = |flags: u32, byte: u32, id: i32| Reference {
+            resource: ResourceRef::default(),
+            values: [flags as i32, 1 << byte, 0, ACT_START_EFFECT, id, 1, 0, 0, 0],
+            group: 0,
+        };
+        let group = [
+            record(REF_OPEN | REF_ANY, 5, 101),
+            record(REF_ANY, 1, 201),
+            record(REF_ANY, 2, 301),
+            record(REF_ANY, 8, 401),
+            record(REF_ANY, 10, 501),
+            record(REF_ELSE | REF_ANY, 9, 301),
+        ];
+        let refs: Vec<&Reference> = group.iter().collect();
+        let on = |surface: usize| {
+            let mut c = [false; CONDITIONS];
+            c[surface] = true;
+            run_group(&refs, &c).iter().map(|r| r.values[4]).collect::<Vec<_>>()
+        };
+        assert_eq!(on(5), vec![101]);
+        assert_eq!(on(1), vec![201]);
+        assert_eq!(on(9), vec![301], "its own condition");
+        assert_eq!(on(3), vec![301], "the else");
+        // An inversion counts a clear byte.
+        let mut clear = record(REF_ANY, 7, 9);
+        clear.values[2] = 1 << 7;
+        assert!(clear.holds(&[false; CONDITIONS]) && !clear.holds(&[true; CONDITIONS]));
+    }
 
     #[test]
     fn the_smallest_controller_is_the_frame_and_the_block() {

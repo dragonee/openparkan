@@ -276,6 +276,9 @@ engine pass replaces each with what was read and removes its row.
 | M6 | How the HUD marks the player's target | four corners around its bounding sphere on screen: red for a hostile, green for a friend, amber otherwise | [25](../docs/25-sensors.md#the-players-target--read-and-measured) |
 | M6 | Where the game draws a message's text and for how long | each line 8 s, the newest four stacked above the guns, wrapped to 70% of the screen | [34](../docs/34-progression.md#not-established) |
 | M6 | Whether a type-5 descriptor loops its sound, and when the ambient variations play | the theme loops from the mission's load; the variations are not played | [34](../docs/34-progression.md#ambient-sound--read-in-part) |
+| M7 | Which pose the live contact record's height comes from when the loader decides which states plant a foot | the rest pose | [13](../docs/13-control.md#a-footstep-end-to-end--read-and-measured) |
+| M7 | A contact's node life, which decides whether a foot can land | every contact is intact | [13](../docs/13-control.md#section-1s-conditions-are-contacts--read-and-measured) |
+| M7 | How a playing sound's position, near, far and volume become gain | a sound keeps the linear gain and pan it started with, a loop included | [11](../docs/11-effects.md#type-2-is-a-sound--read-and-measured) |
 
 ## Departures
 

@@ -12,7 +12,8 @@ use std::collections::VecDeque;
 
 use glam::Vec3;
 use parkan_formats::control::{
-    ANY_REQUEST, CONTACT_SUPPORT, Controller, STATE_FIXED, STATE_GROUND_CONTACTS, STATE_JITTER, State,
+    ANY_REQUEST, CONTACT_PLANTED, CONTACT_SUPPORT, Controller, PLANTED_WITHIN, STATE_FIXED,
+    STATE_GROUND_CONTACTS, STATE_JITTER, State,
 };
 use parkan_formats::cpt::ControlPoint;
 use parkan_formats::mesh::Mesh;
@@ -114,6 +115,24 @@ impl Feet {
         let at = pose.apply(p.position.map(f64::from));
         Some(Vec3::new(at[0] as f32, at[1] as f32, at[2] as f32))
     }
+
+    /// Whether `state`'s last pose plants control point `point` (`0x1001a2d5`–`0x1001a328`):
+    /// the mesh posed at pair B's last frame with all of the weight on B, the root's own
+    /// height kept, puts the point within 0.1 of its height at rest.
+    ///
+    /// STAND-IN: docs/13-control.md#a-footstep-end-to-end--read-and-measured -- which pose
+    /// the live contact record's height is taken from at load is not read: the rest pose.
+    pub fn planted(&self, point: i32, state: &State) -> bool {
+        let Some(p) = self.points.get(usize::try_from(point).unwrap_or(usize::MAX)) else { return false };
+        let Some(node) = usize::try_from(p.nodes().1).ok().filter(|&n| n < self.mesh.nodes.len()) else {
+            return false;
+        };
+        let b = f64::from(state.pair_b[1]);
+        let height = |pose: parkan_formats::pose::Pose| pose.apply(p.position.map(f64::from))[2] as f32;
+        let last = height(self.mesh.world_pose_by(node, |n| self.mesh.blended_pose(n, b, b, 1.0)));
+        let rest = height(self.mesh.world_pose(node));
+        (last - rest).abs() <= PLANTED_WITHIN
+    }
 }
 
 /// A machine on the ground: its controller, its body and its state clock.
@@ -141,6 +160,12 @@ pub struct Walker {
     /// The contact points' model, where the controller has contacts and the object
     /// control points.
     pub feet: Option<Feet>,
+    /// Per state, per contact: whether the state plants it (`0x1000`, set at load).
+    pub planting: Vec<Vec<bool>>,
+    /// Each contact's live planted byte (`+0x5a`), and the contacts that have landed
+    /// since the caller last took them.
+    pub planted: Vec<bool>,
+    pub landed: Vec<usize>,
 }
 
 impl Walker {
@@ -160,7 +185,19 @@ impl Walker {
         walker.centre = centre;
         walker.sphere_radius = sphere;
         if contacts && !points.is_empty() {
-            walker.feet = Some(Feet { mesh: mesh.clone(), points: points.to_vec() });
+            let feet = Feet { mesh: mesh.clone(), points: points.to_vec() };
+            walker.planting = walker
+                .controller
+                .states
+                .iter()
+                .map(|s| {
+                    s.contacts
+                        .iter()
+                        .map(|c| c.flags & CONTACT_PLANTED != 0 || feet.planted(c.point, s))
+                        .collect()
+                })
+                .collect();
+            walker.feet = Some(feet);
         }
         walker
     }
@@ -209,6 +246,9 @@ impl Walker {
             base,
             ground: None,
             feet: None,
+            planting: Vec::new(),
+            planted: Vec::new(),
+            landed: Vec::new(),
         }
     }
 
@@ -340,6 +380,26 @@ impl Walker {
         };
         self.body.position += moved;
         self.hold(ground, &state, step);
+        self.land(self.machine.current, &state);
+    }
+
+    /// The ground contact's pass over the contacts (`0x1001b081`–`0x1001b0be`): a contact
+    /// the state plants that was not planted lands, and runs its group; one the state
+    /// does not plant is no longer planted. There is no ground distance in the test.
+    ///
+    /// STAND-IN: docs/13-control.md#section-1s-conditions-are-contacts--read-and-measured
+    /// -- node life is not modelled on the walker: every contact is intact.
+    fn land(&mut self, current: usize, state: &State) {
+        let Some(plants) = self.planting.get(current) else { return };
+        self.planted.resize(state.contacts.len(), false);
+        for (i, &plants) in plants.iter().enumerate().take(state.contacts.len()) {
+            if plants && !self.planted[i] {
+                self.planted[i] = true;
+                self.landed.push(i);
+            } else if !plants {
+                self.planted[i] = false;
+            }
+        }
     }
 
     /// The ground contact (`0x1001a450`) and the lift it moves the body by

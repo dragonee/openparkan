@@ -98,3 +98,34 @@ fn holding_w_runs_the_hero_at_fourteen_metres_a_second_in_run_steps() {
     assert_eq!(w.machine.current, 0, "stopped, standing again");
     assert!(lowest_contact(&w, &ground).abs() < 1e-3, "standing on a foot");
 }
+
+#[test]
+#[ignore = "needs the game install"]
+fn a_running_hero_lands_three_steps_a_run_cycle() {
+    let (mut w, ground, _) = hero();
+    w.body.command = [0.0, 1.0, 0.0];
+    let mut t = 0.0;
+    while t < 1000.0 {
+        t += 1000.0 / 60.0;
+        w.advance(t, &ground);
+    }
+    w.landed.clear();
+    let mut entered = Vec::new();
+    let mut last = w.machine.step_start_ms;
+    while t < 2000.0 {
+        t += 1000.0 / 60.0;
+        w.advance(t, &ground);
+        if w.machine.step_start_ms != last {
+            last = w.machine.step_start_ms;
+            for c in w.landed.drain(..) {
+                entered.push((w.machine.current, c));
+            }
+        }
+    }
+    // docs/13, "A footstep, end to end": the left foot lands entering 90 and 78, the right
+    // entering 78, once a 0.405 s cycle.
+    let per_second = entered.len() as f32;
+    assert!((6.0..=9.0).contains(&per_second), "{per_second} steps in a second: {entered:?}");
+    let states: std::collections::BTreeSet<usize> = entered.iter().map(|&(s, _)| s).collect();
+    assert!(states.iter().all(|s| [78, 90].contains(s)), "{entered:?}");
+}

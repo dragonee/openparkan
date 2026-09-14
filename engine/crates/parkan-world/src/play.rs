@@ -6,11 +6,15 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 use glam::{Mat4, Vec3};
-use parkan_formats::control::{ACT_EFFECT_POINTS, ACT_EFFECT_TIME_POINT, ENTRY_LOAD};
+use parkan_formats::control::{
+    ACT_EFFECT_NODE, ACT_EFFECT_POINTS, ACT_EFFECT_TIME_POINT, ACT_START_EFFECT, COND_BED, CONDITIONS,
+    ENTRY_LOAD, run_group,
+};
 use parkan_formats::controls::{
     CMD_ENTER_STATE, CMD_JAMES_AIM_TARGET, CMD_JAMES_SELECT_ENEMY, CMD_JAMES_SELECT_FRIEND,
     CMD_JAMES_SELECT_TARGET,
 };
+use parkan_formats::landmesh::FLAGS_LIQUID_BED_BIT;
 use parkan_formats::materials::Library;
 use parkan_formats::mission::{Clan, KIND_BUILDING, KIND_ROCK, KIND_UNIT, KIND_VEGETATION, Mission, Value};
 use parkan_formats::{gamedir, landmesh};
@@ -91,6 +95,14 @@ pub struct TurretEffect {
     pub driven_by: Option<usize>,
 }
 
+/// A chassis load-group effect on a node (action 3): its name, the node, its id.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NodeEffect {
+    pub name: String,
+    pub node: usize,
+    pub id: i32,
+}
+
 pub struct Play {
     pub hero: Hero,
     pub ground: Ground,
@@ -99,6 +111,7 @@ pub struct Play {
     pub fx: Fx,
     pub materials: Library,
     pub turret_effects: Vec<TurretEffect>,
+    pub chassis_effects: Vec<NodeEffect>,
     /// Mission objects that have died, not yet taken out of the drawing.
     pub killed: Vec<usize>,
     /// Sounds started and not yet played.
@@ -177,6 +190,22 @@ impl Play {
         for e in &turret_effects {
             fx.template(&e.name);
         }
+        // The chassis's load group puts effects on its nodes: the hero's steps on its feet
+        // (docs/13, "A footstep, end to end"). The chassis is the part whose first node is 0.
+        let chassis_effects: Vec<NodeEffect> = hero
+            .walker
+            .controller
+            .group(ENTRY_LOAD)
+            .iter()
+            .filter(|r| r.action() == ACT_EFFECT_NODE && !r.resource.member.is_empty())
+            .filter_map(|r| {
+                Some(NodeEffect {
+                    name: r.resource.member.clone(),
+                    node: usize::try_from(r.values[4]).ok()?,
+                    id: r.values[7],
+                })
+            })
+            .collect();
         for k in &battle.kinds {
             for (name, _) in &k.effects {
                 fx.template(name);
@@ -218,6 +247,7 @@ impl Play {
             fx,
             materials,
             turret_effects,
+            chassis_effects,
             killed: Vec::new(),
             cues: Vec::new(),
             units,
@@ -232,6 +262,10 @@ impl Play {
             let e = play.turret_effects[i].clone();
             let frame = play.turret_frame(&e);
             play.fx.start(Owner::Turret(e.id), &e.name, frame, 1.0, 0.0, None);
+        }
+        for e in play.chassis_effects.clone() {
+            let (at, y) = play.hero.chassis_point(e.node);
+            play.fx.start(Owner::Chassis(e.id), &e.name, Frame::along(at, y, 1.0), 1.0, 0.0, None);
         }
         Ok(Some(play))
     }
@@ -437,6 +471,7 @@ impl Play {
     pub fn tick(&mut self, dt_ms: f64, mouse: [f32; 2]) -> Vec<Event> {
         self.update_targets();
         let shots = self.hero.tick(dt_ms, mouse, &self.ground);
+        self.footsteps();
         let now = self.hero.time_ms;
         for (g, shot) in shots {
             let (Some(Some(kind)), Some(gun)) = (self.hero.rounds.get(g).copied(), self.hero.guns.get(g))
@@ -491,7 +526,7 @@ impl Play {
                 instance.speed = speed;
             }
         }
-        self.fx.instances.retain(|(o, _)| match o {
+        self.fx.retain(|o, _| match o {
             Owner::Round(id) => rounds.iter().any(|r| r.id == *id),
             _ => true,
         });
@@ -508,6 +543,53 @@ impl Play {
         }
         self.progress();
         events
+    }
+
+    /// The condition bytes the ground gives (`Control.dll:0x10002790`, `0x1001ab2d`): byte i
+    /// set for the surface id i under the body, then byte 7 the face's liquid-bed flag.
+    fn ground_conditions(&self) -> [bool; CONDITIONS] {
+        let mut out = [false; CONDITIONS];
+        if let Some(hit) = self.hero.walker.ground {
+            if let Some(s) = self.surface(hit.face).map(usize::from).filter(|&s| s <= 10) {
+                out[s] = true;
+            }
+            out[COND_BED] =
+                self.ground.land.faces.get(hit.face).is_some_and(|f| f.flags & FLAGS_LIQUID_BED_BIT != 0);
+        }
+        out
+    }
+
+    /// The chassis's node effects follow their nodes, and each foot that landed runs its
+    /// contact's group over the ground's condition bytes: action 10 restarts its step
+    /// effect in the record's time mode (docs/13, "A footstep, end to end").
+    fn footsteps(&mut self) {
+        let now = self.hero.time_ms;
+        for e in self.chassis_effects.clone() {
+            let (at, y) = self.hero.chassis_point(e.node);
+            for instance in self.fx.owned(Owner::Chassis(e.id)) {
+                instance.frame = Frame::along(at, y, 1.0);
+            }
+        }
+        let landed = std::mem::take(&mut self.hero.walker.landed);
+        if landed.is_empty() {
+            return;
+        }
+        let conditions = self.ground_conditions();
+        let controller = &self.hero.walker.controller;
+        let Some(state) = controller.states.get(self.hero.walker.machine.current) else { return };
+        let mut starts = Vec::new();
+        for c in landed {
+            let Some(contact) = state.contacts.get(c).filter(|c| c.group >= 0) else { continue };
+            let records = controller.group_at(contact.group);
+            for r in run_group(&records, &conditions) {
+                if r.action() == ACT_START_EFFECT {
+                    starts.push((r.values[4], u32::try_from(r.values[5]).ok()));
+                }
+            }
+        }
+        for (id, mode) in starts {
+            self.fx.restart(Owner::Chassis(id), now, mode);
+        }
     }
 
     /// The progression's takts and handler, and what they say.

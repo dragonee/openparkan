@@ -575,3 +575,39 @@ fn a_neutral_warbot_makes_itself_the_target_and_enter_captures_both_for_the_seco
     assert_eq!(p.progress.objectives[1].state, 1, "Ntrl has none and Plr has at least two");
     assert!(p.progress.played[&13] && p.progress.played[&19]);
 }
+
+#[test]
+#[ignore = "needs the game install"]
+fn the_hero_sounds_its_steps_as_it_runs_and_its_arm_as_a_gun_is_put_away() {
+    use parkan_sim::effects::CueKind;
+
+    let (mut play, _) = mission_01_play();
+    let tick = 1000.0 / 60.0;
+    // The cannon's arm out first: it starts selected and unfolds.
+    for _ in 0..120 {
+        play.hero.update_input();
+        play.tick(tick, [0.0; 2]);
+    }
+    play.cues.clear();
+    play.hero.key("SCAN_W_1", true);
+    play.hero.update_input();
+    play.hero.key("SCAN_W_1", false);
+    for _ in 0..60 {
+        play.hero.update_input();
+        play.tick(tick, [0.0; 2]);
+    }
+    let arm: Vec<String> =
+        play.cues.iter().filter(|c| c.kind == CueKind::Once).map(|c| c.sound.to_ascii_lowercase()).collect();
+    assert!(arm.iter().any(|s| s.starts_with("h_gh")), "deselecting the cannon sounds its arm: {arm:?}");
+
+    play.cues.clear();
+    play.hero.key("SCAN_W", true);
+    for _ in 0..120 {
+        play.hero.update_input();
+        play.tick(tick, [0.0; 2]);
+    }
+    let steps = play.cues.iter().filter(|c| c.sound.to_ascii_lowercase().starts_with("step_h")).count();
+    // docs/13: three steps a 0.405 s run cycle, and the first second starts up through
+    // walk and transition states.
+    assert!(steps >= 6, "{steps} steps in 2 s: {:?}", play.cues.iter().map(|c| &c.sound).collect::<Vec<_>>());
+}

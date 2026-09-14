@@ -409,6 +409,17 @@ impl Hero {
         })
     }
 
+    /// A chassis node in the world: where it is and its second axis.
+    pub fn chassis_point(&self, node: usize) -> (Vec3, Vec3) {
+        let (position, yaw) = self.walker.drawn(self.time_ms);
+        let heading = Quat::from_rotation_z(yaw);
+        let pose = self.chassis_pose(node);
+        let f = |v: [f64; 3]| Vec3::new(v[0] as f32, v[1] as f32, v[2] as f32);
+        let at = f(pose.apply([0.0; 3]));
+        let y = f(rotate(pose.rotation, [0.0, 1.0, 0.0]));
+        (position + heading * at, heading * y)
+    }
+
     /// The turret's pose in the unit's frame, with the chassis playing its frames.
     pub fn mount(&self) -> Pose {
         self.chassis_pose(self.socket).compose(&self.turret.mesh.root_pose().invert())

@@ -27,6 +27,8 @@ pub enum Owner {
     Round(u64),
     /// One of the hero turret's load-group effects, by its record's id.
     Turret(i32),
+    /// One of the hero chassis's load-group effects on a node, by its record's id.
+    Chassis(i32),
 }
 
 /// A material's look for sprites: its texture and blend mode.
@@ -41,6 +43,9 @@ pub struct Fx {
     templates: HashMap<String, Option<Rc<Effect>>>,
     pub instances: Vec<(Owner, Instance)>,
     seed: u32,
+    /// The number the next instance takes, and the loops its removals stopped.
+    next_id: u64,
+    stops: Vec<Cue>,
     look_of: HashMap<String, usize>,
     pub looks: Vec<Look>,
 }
@@ -57,6 +62,8 @@ impl Fx {
             templates: HashMap::new(),
             instances: Vec::new(),
             seed: 1,
+            next_id: 1,
+            stops: Vec::new(),
             look_of: HashMap::new(),
             looks: Vec::new(),
         })
@@ -95,8 +102,34 @@ impl Fx {
         // random generator is not read: each instance takes the next seed of a linear
         // congruential sequence.
         self.seed = self.seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
-        self.instances.push((owner, Instance::new(effect, frame, size, now_ms, mode, self.seed)));
+        let mut instance = Instance::new(effect, frame, size, now_ms, mode, self.seed);
+        instance.id = self.next_id;
+        self.next_id += 1;
+        self.instances.push((owner, instance));
         true
+    }
+
+    /// Restart every instance `owner` holds at `now_ms`, in `mode` or its own (action 10).
+    pub fn restart(&mut self, owner: Owner, now_ms: f64, mode: Option<u32>) {
+        for i in self.owned(owner) {
+            let length = i.end_ms - i.start_ms;
+            i.start_ms = now_ms;
+            i.end_ms = now_ms + length;
+            i.mode = mode.unwrap_or(i.effect.header.mode);
+        }
+    }
+
+    /// Keep the instances `keep` says, silencing the loops of the rest.
+    pub fn retain(&mut self, mut keep: impl FnMut(&Owner, &Instance) -> bool) {
+        let mut stops = Vec::new();
+        self.instances.retain_mut(|(o, i)| {
+            let kept = keep(o, i);
+            if !kept {
+                stops.extend(i.silence());
+            }
+            kept
+        });
+        self.stops.extend(stops);
     }
 
     /// The effect an `.exp` plays on `surface` (`Control.dll:0x100117d0`): slot surface + 1
@@ -147,7 +180,7 @@ impl Fx {
 
     /// Forget every instance `owner` holds.
     pub fn remove(&mut self, owner: Owner) {
-        self.instances.retain(|(o, _)| *o != owner);
+        self.retain(|o, _| *o != owner);
     }
 
     /// Every instance `owner` holds.
@@ -157,7 +190,9 @@ impl Fx {
 
     /// Every sound an instance starts by `now_ms`.
     pub fn cues(&mut self, now_ms: f64) -> Vec<Cue> {
-        self.instances.iter_mut().flat_map(|(_, i)| i.cues(now_ms)).collect()
+        let mut out = std::mem::take(&mut self.stops);
+        out.extend(self.instances.iter_mut().flat_map(|(_, i)| i.cues(now_ms)));
+        out
     }
 
     /// Update every instance at `now_ms`, once their owners have placed them, and drop
@@ -170,7 +205,7 @@ impl Fx {
         for (_, instance) in &mut self.instances {
             instance.update(now_ms);
         }
-        self.instances.retain(|(_, i)| !i.finished(now_ms));
+        self.retain(|_, i| !i.finished(now_ms));
     }
 
     /// What every instance draws at `now_ms`, with the index of its material's look.
