@@ -45,6 +45,8 @@ struct Look {
     emissive: vec4<f32>,
     // The fog colour this material's blend mode draws toward; w 1 where it overrides.
     fog: vec4<f32>,
+    // The cell's rectangle: u0, v0, du, dv.
+    cell: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> frame: Frame;
@@ -80,14 +82,16 @@ fn vs_main(v: VertexIn) -> VertexOut {
 
 @fragment
 fn fs_main(v: VertexOut) -> @location(0) vec4<f32> {
-    let texel = textureSample(skin, skin_sampler, v.uv);
+    // The cell rewrites the coordinates in place: u0 + u × du, v0 + v × dv.
+    let texel = textureSample(skin, skin_sampler, look.cell.xy + v.uv * look.cell.zw);
     let n = normalize(v.normal);
     let a = max(dot(n, -frame.light_direction.xyz), 0.0);
     let b = max(dot(n, -frame.second_direction.xyz), 0.0);
-    // D3D's lit vertex colour, modulated by the texture: emissive (plus the scene colour
-    // the sky adds to every material) and the diffuse lights, held to 1 as fixed-function
-    // lighting holds it, then decoded.
+    // D3D's lit vertex colour, modulated by the texture: emissive (the material's ambient
+    // colour plus the scene colour the sky adds to every material) and the diffuse lights,
+    // held to 1 as fixed-function lighting holds it, then decoded. The alpha is the
+    // texture's times the material's ambient alpha.
     let lights = frame.light_colour.rgb * a + frame.second_colour.rgb * b;
     let lit = min(vec3<f32>(1.0), look.emissive.rgb + frame.scene_colour.rgb + look.diffuse.rgb * lights);
-    return vec4<f32>(fogged(texel.rgb * linear(lit), v.world, look.fog), texel.a);
+    return vec4<f32>(fogged(texel.rgb * linear(lit), v.world, look.fog), texel.a * look.diffuse.a);
 }

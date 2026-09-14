@@ -40,7 +40,13 @@ fn upload(device: &wgpu::Device, queue: &wgpu::Queue, t: &Texture) -> wgpu::Text
 
 impl GpuTextures {
     pub fn new(device: &wgpu::Device, queue: &wgpu::Queue, textures: &[Texture]) -> Self {
-        let white = Texture { name: "white".into(), width: 1, height: 1, levels: vec![vec![255; 4]] };
+        let white = Texture {
+            name: "white".into(),
+            width: 1,
+            height: 1,
+            levels: vec![vec![255; 4]],
+            pages: Vec::new(),
+        };
         Self {
             views: textures.iter().map(|t| upload(device, queue, t)).collect(),
             white: upload(device, queue, &white),

@@ -169,19 +169,22 @@ impl TerrainRenderer {
             usage: wgpu::BufferUsages::INDEX,
         });
 
-        let view_of = |layer: Option<&Layer>| textures.view(layer.and_then(|l| l.texture));
+        let view_of = |layer: Option<&Layer>| textures.view(layer.and_then(|l| l.still.texture));
         let groups = terrain
             .groups
             .iter()
             .map(|g| {
                 // A texture tinted by a display-space colour: both decoded, then multiplied.
                 let tint = |l: Option<&Layer>, on: bool| {
-                    let [r, gr, b] = linear(l.map_or([1.0; 3], |l| l.diffuse));
+                    let [r, gr, b] = linear(l.map_or([1.0; 3], |l| l.still.diffuse));
                     [r, gr, b, f32::from(u8::from(on))]
                 };
                 let uniform = LayersUniform {
                     tint1: tint(Some(&g.layer1), true),
-                    tint2: tint(g.layer2.as_ref(), g.layer2.as_ref().is_some_and(|l| l.texture.is_some())),
+                    tint2: tint(
+                        g.layer2.as_ref(),
+                        g.layer2.as_ref().is_some_and(|l| l.still.texture.is_some()),
+                    ),
                 };
                 let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                     label: Some("terrain layers"),

@@ -12,11 +12,39 @@ fn tut_1_builds_its_ground_from_resolved_textures() {
     let mut store = TextureStore::open(&game).unwrap();
     let t = terrain::build(&dir, &mut store).unwrap();
     assert_eq!(t.indices.len() as usize / 3, t.land.lod_split());
-    assert!(t.groups.iter().all(|g| g.layer1.texture.is_some()), "every layer-1 material resolves");
+    assert!(t.groups.iter().all(|g| g.layer1.still.texture.is_some()), "every layer-1 material resolves");
     let water: Vec<_> = t.groups.iter().filter(|g| g.water).collect();
     assert!(!water.is_empty() && water.iter().all(|g| g.layer1.material == "WATER"));
-    let blue = water[0].layer1.diffuse;
+    let blue = water[0].layer1.still.diffuse;
     assert!(blue[2] > blue[0], "water is tinted blue by its material: {blue:?}");
+}
+
+#[test]
+#[ignore = "needs the game install"]
+fn a_buoys_beam_flickers_through_three_cells_of_sun4_in_pinkish_red() {
+    use parkan_world::textures::WHOLE_CELL;
+
+    let game = gamedir::find(None).expect("a Parkan install: set PARKAN_DIR");
+    let mut store = TextureStore::open(&game).unwrap();
+    // docs/07-objects.md, "How a material reaches the device": flags 4, `SUN4.0`, ambient
+    // #dc1414, #f00019 and #ffb97d on cells 0, 1 and 2, keys at 50, 100, 150 and 200 ms.
+    let beam = store.look("HLP_RAY_R").unwrap();
+    assert_eq!(beam.blend_mode, 4);
+    let texture = &store.textures[beam.still.texture.unwrap()];
+    assert_eq!((texture.name.to_ascii_uppercase().as_str(), texture.width), ("SUN4.0", 256));
+    let a = beam.animation.as_ref().expect("its track plays");
+    let cells: Vec<[f32; 4]> = a.keys.iter().map(|k| k.0.cell).collect();
+    let strip = |x: f32, y: f32| [x, y, 0.25, 0.5];
+    assert_eq!(cells, vec![strip(0.0, 0.0), strip(0.25, 0.0), strip(0.0, 0.5), strip(0.25, 0.0)]);
+    assert_eq!(a.keys.iter().map(|k| k.1).collect::<Vec<_>>(), vec![50.0, 100.0, 150.0, 200.0]);
+    let byte = |c: [f32; 3]| c.map(|v| (v * 255.0).round() as u8);
+    assert_eq!(byte(beam.at(0.0).ambient), [0xdc, 0x14, 0x14]);
+    assert_eq!(byte(beam.at(100.0).ambient), [0xff, 0xb9, 0x7d], "entry 2 has arrived at key 1's end");
+    assert_eq!(beam.at(125.0).cell, strip(0.0, 0.5));
+    assert_eq!((beam.still.alpha, beam.still.diffuse), (1.0, [0.0; 3]), "a black diffuse: the unlit glow");
+    // The lamp and the base ring draw whole textures, opaque.
+    let lamp = store.look("HLP_LAMP_R").unwrap();
+    assert_eq!((lamp.blend_mode, lamp.still.cell), (0, WHOLE_CELL));
 }
 
 #[test]

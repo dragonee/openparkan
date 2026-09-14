@@ -300,7 +300,7 @@ streams:
 |---|---|---|---|
 | 3 | 12 | vertex | position, `float32` x/y/z, **Z up** |
 | 4 | 4 | vertex | normal, `int8` x/y/z ÷ 127, plus a padding byte |
-| 5 | 4 | vertex | UV, `uint16` 8.8 fixed point |
+| 5 | 4 | vertex | UV, `uint16` over 1024 ([below](#how-a-material-reaches-the-device--read-and-measured)) |
 | 6 | 6 | face | triangle, three `uint16` indices — **relative to the batch** |
 | 9 | 32 | sub-object | sub-object name |
 | 1 | 38 | node | flags, parent, `slot_index[lod * 5 + group]` |

@@ -34,6 +34,8 @@ pub struct Lighting {
     pub fog_start: f32,
     pub fog_end: f32,
     pub eye: Vec3,
+    /// The world clock, ms, that material tracks play on.
+    pub clock_ms: f64,
 }
 
 impl Default for Lighting {
@@ -51,6 +53,7 @@ impl Default for Lighting {
             fog_start: 0.0,
             fog_end: f32::MAX,
             eye: Vec3::ZERO,
+            clock_ms: 0.0,
         }
     }
 }

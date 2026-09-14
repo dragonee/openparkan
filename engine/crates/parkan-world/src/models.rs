@@ -245,6 +245,7 @@ mod tests {
     use parkan_formats::wea::Wear;
 
     use super::*;
+    use crate::textures::Phase;
 
     fn slot(first_triangle: u16, first_batch: u16) -> Slot {
         Slot {
@@ -319,13 +320,7 @@ mod tests {
     }
 
     fn look(name: &str) -> Result<Look> {
-        Ok(Look {
-            material: name.to_owned(),
-            texture: None,
-            diffuse: [1.0; 3],
-            emissive: [0.0; 3],
-            blend_mode: 0,
-        })
+        Ok(Look { material: name.to_owned(), blend_mode: 0, still: Phase::PLAIN, animation: None })
     }
 
     #[test]

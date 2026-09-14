@@ -21,7 +21,10 @@ mip levels. Every placed object is drawn from its assembly:
 - each part is mounted on its host's socket;
 - each node sits at its rest pose;
 - level 0 is drawn; a node's fifth slot, its cockpit, only in the hero's own view;
-- materials draw in the blend mode their flags byte names.
+- materials draw in the blend mode their flags byte names, two-sided, each
+  batch's UVs over 1024 into its entry's cell of the texture, and a material
+  whose track has more than one key plays it: the cell and texture step with
+  the keys and the masked colours glide.
 
 **M3.** The window opens in the hero's cockpit on Mission 01:
 
@@ -85,9 +88,10 @@ starts at the file's closing time and plays its sections in turn:
 - the sun and the moon are up from their start keyframe to their stop, and
   while one is up the sun object's two lights shine: slot 19, lifted by the
   flare gates, and slot 21;
-- the lit colour, the scene colour and the material's emissive and diffuse
-  under both lights, is formed in the files' display space, held to 1, and
-  decoded.
+- the lit colour, the scene colour and the material's ambient colour (its
+  self-light) and diffuse under both lights, is formed in the files' display
+  space, held to 1, and decoded; the texture's alpha is scaled by the ambient
+  alpha.
 
 Sound plays each effect's sound emitters from `sounds.lib`, WAV and MS ADPCM
 through kira, as their effect time passes their trigger. A HUD shows a
@@ -223,7 +227,7 @@ a row here. A row leaves this table when research closes it.
 | M1 | Which camera axis the fog's heading angle measures: the compass heading, 0 at +y towards +x, of the camera matrix's first column | the view direction's heading, 0 along +y, turning towards +x, like the dome's segments | [10](../docs/10-sky.md#not-resolved) |
 | M1 | Where the sun object's two directional lights point | both lights shine from the fixed place of the body that is up; none while no body is up | [10](../docs/10-sky.md#not-resolved) |
 | M1 | The sky's textures: stars, clouds, the sun and moon sprites, the lens flare | not drawn | [10](../docs/10-sky.md#the-dome-the-fog-and-the-scene-colour--read-and-measured) |
-| M1 | The files' colours in a renderer that decodes textures to linear | sky, fog and dome colours and texture tints decoded from sRGB to linear; the lit colour (scene colour, material emissive and diffuse, both lights) formed from the files' values, held to 1, then decoded, so blends match the game's display-space ones | [10](../docs/10-sky.md#the-dome-the-fog-and-the-scene-colour--read-and-measured) |
+| M1 | The files' colours in a renderer that decodes textures to linear | sky, fog and dome colours and texture tints decoded from sRGB to linear; the lit colour (scene colour, material ambient and diffuse, both lights) formed from the files' values, held to 1, then decoded, so blends match the game's display-space ones | [10](../docs/10-sky.md#the-dome-the-fog-and-the-scene-colour--read-and-measured) |
 | M3 | What the draw layers 10 and 9 a fifth slot is filed under do (`Terrain.dll:0x1004553b`), and `CShade` slot 15 | the fifth slots draw with the scene, depth-tested, lit and fogged like any model | [07](../docs/07-objects.md#the-fifth-slot-is-what-the-units-own-view-draws) |
 | M3 | When the ground contact runs and with what dt, the frames its contact points are placed at, the second sphere's radius r₂, and what lifts a sphere with no face under it | after every state step, with the step as dt; contacts on the step's last frames; r₂ = r; no lift | [24](../docs/24-motion.md#holding-the-body-on-the-ground--read-and-measured) |
 | M3 | A state's use count `+0x94` | unlimited | [24](../docs/24-motion.md#section-1-is-the-animation-state-graph--read-and-measured) |
@@ -308,6 +312,7 @@ engine pass replaces each with what was read and removes its row.
 | M8 | The acknowledgement's xorshift: its shifts and seed | 7, 9, 8 from 0xACE1, never repeating the last voice | [31](../docs/31-packages.md#the-wingman-menu-from-first-person--read-and-measured) |
 | M8 | The game's random source for a life update's spread | a 16-bit xorshift (7, 9, 8), seeded apart per unit | [24](../docs/24-motion.md#water-and-lava-beds-kill--read-and-measured) |
 | M8 | What follows the hero's death | the hero stops where it died, the mission fails with its voice and string 1013, and the progression stops | [34](../docs/34-progression.md#not-established) |
+| M8 | A material's start stamp, from which its track is played, and the random a mode-3 track jumps by | the world clock's 0 for every material; a hash of the clock | [07](../docs/07-objects.md#how-a-material-reaches-the-device--read-and-measured) |
 
 ## Departures
 

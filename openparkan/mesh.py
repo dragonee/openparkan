@@ -11,7 +11,7 @@ the same numeric-type-as-stream-selector convention as the terrain
      2      68  slot        a 140-byte header, then geometry slots
      3      12  vertex      position, float32 x/y/z
      4       4  vertex      normal, int8 x/y/z / 127, then one padding byte
-     5       4  vertex      UV, uint16 8.8 fixed point
+     5       4  vertex      UV, uint16 over 1024
     18       4  vertex      lightmap UV, uint16 over 1024; only on the 21
                              buildings whose wear has a LIGHTMAPS section
      6       6  face        triangle, three uint16 indices *relative to the
@@ -179,14 +179,17 @@ NO_ANIMATION = 0xFFFF
 #: ``node_of_vertex`` where no node's slot reaches a vertex.
 NO_NODE = -1
 
-#: UVs use the same 8.8 fixed point as the terrain.
-UV_FIXED_POINT_SCALE = 256.0
+#: UVs are uint16 over 1024, not the terrain's 8.8 fixed point: the strided
+#: expansion multiplies stream 5 by 1/1024 (``Terrain.dll:0x10038a01``), so a
+#: material's cell is one cell of its page (docs/07-objects.md, "How a material
+#: reaches the device").
+UV_FIXED_POINT_SCALE = 1024.0
 
-#: Lightmap UVs are the same uint16 over 1024, not 256: they address one page
-#: of an atlas, so they never leave 0..1.  Every one of the 21 lightmapped
-#: meshes tops out at exactly ``round((1 - 0.5 / width) * 1024)`` for its own
-#: lightmap's width -- 1022 for a 256-pixel page, 1020 for a 128 -- which is
-#: the half-texel inset an atlas is authored with.
+#: Lightmap UVs are the same uint16 over 1024: they address one page of an
+#: atlas, so they never leave 0..1.  Every one of the 21 lightmapped meshes tops
+#: out at exactly ``round((1 - 0.5 / width) * 1024)`` for its own lightmap's
+#: width -- 1022 for a 256-pixel page, 1020 for a 128 -- which is the half-texel
+#: inset an atlas is authored with.
 LIGHTMAP_UV_SCALE = 1024.0
 
 

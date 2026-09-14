@@ -172,7 +172,7 @@ impl Fx {
                 continue;
             }
             let look = store.look(&m)?;
-            self.looks.push(Look { texture: look.texture, blend_mode: look.blend_mode });
+            self.looks.push(Look { texture: look.still.texture, blend_mode: look.blend_mode });
             self.look_of.insert(key(&m), self.looks.len() - 1);
         }
         Ok(())

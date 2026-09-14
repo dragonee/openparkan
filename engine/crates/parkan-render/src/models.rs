@@ -5,9 +5,12 @@
 //! `SRCALPHA/ONE`, additive; 3 `ZERO/SRCCOLOR`; 4 `SRCALPHA/INVSRCALPHA`; 5
 //! `DESTCOLOR/SRCCOLOR`. Every mode but 0 also alpha-tests.
 
+use std::cell::Cell;
+
 use bytemuck::{Pod, Zeroable};
 use glam::{Mat4, Quat, Vec3};
 use parkan_world::models::Objects;
+use parkan_world::textures::{Animation, Phase};
 use wgpu::util::DeviceExt;
 
 use crate::DEPTH_FORMAT;
@@ -28,6 +31,23 @@ struct LookUniform {
     diffuse: [f32; 4],
     emissive: [f32; 4],
     fog: [f32; 4],
+    cell: [f32; 4],
+}
+
+impl LookUniform {
+    /// A phase as the device material takes it (docs/07, "How a material reaches the
+    /// device"): diffuse with the ambient alpha, the ambient colour as the emissive the
+    /// scene colour is added to, and the cell's rectangle.
+    fn new(phase: &Phase, blend_mode: u8) -> Self {
+        let [dr, dg, db] = phase.diffuse;
+        let [ar, ag, ab] = phase.ambient;
+        Self {
+            diffuse: [dr, dg, db, phase.alpha],
+            emissive: [ar, ag, ab, 1.0],
+            fog: crate::frame::fog_override(blend_mode),
+            cell: phase.cell,
+        }
+    }
 }
 
 /// The blend modes a pipeline exists for, opaque first.
@@ -55,7 +75,11 @@ struct DrawGroup {
     start: u32,
     count: u32,
     mode: u8,
-    bind_group: wgpu::BindGroup,
+    look: wgpu::Buffer,
+    /// A bind group for each texture the material's phases draw, and the one drawn now.
+    bind_groups: Vec<(Option<usize>, wgpu::BindGroup)>,
+    current: Cell<usize>,
+    animation: Option<Animation>,
 }
 
 struct GpuModel {
@@ -164,7 +188,9 @@ impl ModelRenderer {
                     primitive: wgpu::PrimitiveState {
                         topology: wgpu::PrimitiveTopology::TriangleList,
                         front_face: wgpu::FrontFace::Ccw,
-                        cull_mode: Some(wgpu::Face::Back),
+                        // `Ngi32.dll:0x10007662`: a mesh batch's draw flags carry 4, culling
+                        // off, so every batch is two-sided.
+                        cull_mode: None,
                         ..Default::default()
                     },
                     depth_stencil: Some(wgpu::DepthStencilState {
@@ -222,36 +248,47 @@ impl ModelRenderer {
                     .iter()
                     .map(|g| {
                         // Display space: the shader forms the lit colour from them, then decodes it.
-                        let [dr, dg, db] = g.look.diffuse;
-                        let [er, eg, eb] = g.look.emissive;
-                        let uniform = LookUniform {
-                            diffuse: [dr, dg, db, 1.0],
-                            emissive: [er, eg, eb, 1.0],
-                            fog: crate::frame::fog_override(g.look.blend_mode),
-                        };
+                        let uniform = LookUniform::new(&g.look.still, g.look.blend_mode);
                         let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                             label: Some(&g.look.material),
                             contents: bytemuck::bytes_of(&uniform),
-                            usage: wgpu::BufferUsages::UNIFORM,
+                            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
                         });
-                        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                            label: Some(&g.look.material),
-                            layout: &look_layout,
-                            entries: &[
-                                wgpu::BindGroupEntry { binding: 0, resource: buffer.as_entire_binding() },
-                                wgpu::BindGroupEntry {
-                                    binding: 1,
-                                    resource: wgpu::BindingResource::TextureView(
-                                        textures.view(g.look.texture),
-                                    ),
-                                },
-                                wgpu::BindGroupEntry {
-                                    binding: 2,
-                                    resource: wgpu::BindingResource::Sampler(&textures.sampler),
-                                },
-                            ],
-                        });
-                        DrawGroup { start: g.start, count: g.count, mode: g.look.blend_mode, bind_group }
+                        let mut bind_groups: Vec<(Option<usize>, wgpu::BindGroup)> = Vec::new();
+                        let phases = std::iter::once(&g.look.still)
+                            .chain(g.look.animation.iter().flat_map(|a| a.keys.iter().map(|k| &k.0)));
+                        for phase in phases {
+                            if bind_groups.iter().any(|(t, _)| *t == phase.texture) {
+                                continue;
+                            }
+                            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                                label: Some(&g.look.material),
+                                layout: &look_layout,
+                                entries: &[
+                                    wgpu::BindGroupEntry { binding: 0, resource: buffer.as_entire_binding() },
+                                    wgpu::BindGroupEntry {
+                                        binding: 1,
+                                        resource: wgpu::BindingResource::TextureView(
+                                            textures.view(phase.texture),
+                                        ),
+                                    },
+                                    wgpu::BindGroupEntry {
+                                        binding: 2,
+                                        resource: wgpu::BindingResource::Sampler(&textures.sampler),
+                                    },
+                                ],
+                            });
+                            bind_groups.push((phase.texture, bind_group));
+                        }
+                        DrawGroup {
+                            start: g.start,
+                            count: g.count,
+                            mode: g.look.blend_mode,
+                            look: buffer,
+                            bind_groups,
+                            current: Cell::new(0),
+                            animation: g.look.animation.clone(),
+                        }
                     })
                     .collect();
                 GpuModel {
@@ -302,8 +339,16 @@ impl ModelRenderer {
         }
     }
 
+    /// The frame's uniforms, and every played material's phase at the lighting's clock:
+    /// its colours and cell, and the texture its key names.
     pub fn prepare(&self, queue: &wgpu::Queue, view_proj: Mat4, lighting: &crate::frame::Lighting) {
         queue.write_buffer(&self.frame, 0, bytemuck::bytes_of(&FrameUniform::new(view_proj, lighting)));
+        for g in self.models.iter().flat_map(|m| &m.groups) {
+            let Some(animation) = &g.animation else { continue };
+            let phase = animation.at(lighting.clock_ms);
+            queue.write_buffer(&g.look, 0, bytemuck::bytes_of(&LookUniform::new(&phase, g.mode)));
+            g.current.set(g.bind_groups.iter().position(|(t, _)| *t == phase.texture).unwrap_or(0));
+        }
     }
 
     /// Opaque groups of every instance first, then each blended mode in turn.
@@ -321,7 +366,7 @@ impl ModelRenderer {
                         pass.set_index_buffer(model.indices.slice(..), wgpu::IndexFormat::Uint32);
                         bound = true;
                     }
-                    pass.set_bind_group(2, &g.bind_group, &[]);
+                    pass.set_bind_group(2, &g.bind_groups[g.current.get()].1, &[]);
                     pass.draw_indexed(g.start..g.start + g.count, 0, 0..1);
                 }
             }

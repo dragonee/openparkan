@@ -34,7 +34,7 @@ pub const NODE_INTERIOR: u16 = 0x0001;
 pub const NODE_COLLISION: u16 = 0x0020;
 /// The high byte of a batch's material word when the batch takes the lightmap.
 pub const BATCH_LIT: u16 = 0x00;
-pub const UV_SCALE: f64 = 256.0;
+pub const UV_SCALE: f64 = 1024.0;
 pub const LIGHTMAP_UV_SCALE: f64 = 1024.0;
 pub const QUATERNION_SCALE: f64 = 32767.0;
 

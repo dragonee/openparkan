@@ -100,6 +100,7 @@ pub fn lighting(
         fog_start: sky.fog_start,
         fog_end: sky.fog_end,
         eye,
+        clock_ms: seconds * 1000.0,
     };
     Some((lighting, sky.dome_colours(fog).into_iter().map(linear).collect()))
 }
