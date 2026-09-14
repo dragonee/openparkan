@@ -7911,6 +7911,276 @@ D3DTA_DIFFUSE, D3DTA_CURRENT, D3DTA_TEXTURE = 0, 1, 2
 D3DRS_ALPHATESTENABLE = 15
 
 
+def _floor_grid(tris, cell: float) -> dict[tuple[int, int], list[float]]:
+    """Every walkable face's height at each grid point it covers: (i, j) -> heights."""
+    heights: dict[tuple[int, int], list[float]] = defaultdict(list)
+    for a, b, c in tris:
+        u = (b[0] - a[0], b[1] - a[1], b[2] - a[2])
+        v = (c[0] - a[0], c[1] - a[1], c[2] - a[2])
+        n = (u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0])
+        length = math.sqrt(sum(k * k for k in n)) or 1.0
+        d = (b[1] - c[1]) * (a[0] - c[0]) + (c[0] - b[0]) * (a[1] - c[1])
+        if n[2] / length <= 0.173648 or abs(d) < 1e-9:
+            continue
+        xs, ys = (a[0], b[0], c[0]), (a[1], b[1], c[1])
+        for gx in range(math.ceil(min(xs) / cell), math.floor(max(xs) / cell) + 1):
+            for gy in range(math.ceil(min(ys) / cell), math.floor(max(ys) / cell) + 1):
+                x, y = gx * cell, gy * cell
+                w1 = ((b[1] - c[1]) * (x - c[0]) + (c[0] - b[0]) * (y - c[1])) / d
+                w2 = ((c[1] - a[1]) * (x - c[0]) + (a[0] - c[0]) * (y - c[1])) / d
+                if min(w1, w2, 1 - w1 - w2) >= -1e-6:
+                    heights[(gx, gy)].append(w1 * a[2] + w2 * b[2] + (1 - w1 - w2) * c[2])
+    return heights
+
+
+def _floor_flood(heights, start, goal, rise: float, cell: float) -> tuple[float, float] | None:
+    """The shortest walk over the floor grid from one (point, height) to another, a step
+    rising or falling at most `rise`: its length and the lowest floor on it, or None."""
+    import heapq
+
+    def at(p):
+        k = (round(p[0] / cell), round(p[1] / cell))
+        return k, round(min(heights[k], key=lambda h: abs(h - p[2])), 3)
+
+    s, g = at(start), at(goal)
+    best = {s: 0.0}
+    low = {s: s[1]}
+    queue = [(0.0, s)]
+    while queue:
+        d, (k, z) = heapq.heappop(queue)
+        if (k, z) == g:
+            return d, low[g]
+        if d > best[(k, z)]:
+            continue
+        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            k2 = (k[0] + dx, k[1] + dy)
+            for z2 in heights.get(k2, ()):
+                node = (k2, round(z2, 3))
+                if abs(node[1] - z) <= rise and d + cell < best.get(node, math.inf):
+                    best[node] = d + cell
+                    low[node] = min(low[(k, z)], node[1])
+                    heapq.heappush(queue, (d + cell, node))
+    return None
+
+
+def check_building_ground(check, game: Path) -> None:
+    """The ground inside a building: the landscape cut from under it, the collision
+    query's filter, its doorways, its hall way's frame and the way down to its pod."""
+    paths = {n: game / n for n in ("Terrain.dll", "Control.dll", "AniMesh.dll", "World3D.dll")}
+    if not all(p.exists() for p in paths.values()):
+        return
+    t_at, c_at, a_at, w_at = (_image_at(paths[n].read_bytes()) for n in
+                              ("Terrain.dll", "Control.dll", "AniMesh.dll", "World3D.dll"))
+    t_strings = paths["Terrain.dll"].read_bytes()
+
+    def dword(at, va: int) -> int:
+        return struct.unpack("<I", at(va, 4))[0]
+
+    def cstring(at, va: int) -> str:
+        return at(va, 64).split(b"\0")[0].decode("latin-1")
+
+    # 1. The placement: retries by turning; the .bas's two ring sets; the insertion's steps.
+    turn = struct.unpack("<ff", t_at(0x1009A208, 4) + t_at(0x1009A218, 4))
+    retry = (t_at(0x1000E3CE, 1) == b"\xe8"
+             and dword(t_at, 0x1000E3CF) + 0x1000E3D3 == 0x1000E430)
+    basement = [dword(t_at, 0x1009B57C + 4 * k) for k in (3, 4)]
+    rings = (t_at(0x10056106, 3) == b"\x89\x50\x50" and t_at(0x100564F5, 3) == b"\x89\x50\x44")
+    logs = {va: cstring(t_at, dword(t_at, site + 1)).strip() for site, va in
+            ((0x10010611, 0x10010611), (0x10010742, 0x10010742), (0x100133D4, 0x100133D4),
+             (0x10011A22, 0x10011A22))}
+    link = t_at(0x1000C8E7, 3) == b"\x80\xcd\x80"
+    skips = (t_at(0x10060530, 3) == bytes.fromhex("83e120")
+             and t_at(0x10060547, 6) == bytes.fromhex("81e100080000"))
+    check("Terrain.dll: a building's placement deletes the landscape its contour covers",
+          math.isclose(turn[0], 0.01, rel_tol=1e-6)
+          and math.isclose(turn[1], 2 * math.pi, rel_tol=1e-6)
+          and retry and basement == [0x10057DB0, 0x10057ED0] and rings and link and skips
+          and sorted(logs.values()) == sorted(["Face deleted(INSIDE) #%d",
+                                               "Face deleted(ISECTED) #%d", "Replacing face #%d",
+                                               "New basement faces qty = %d"])
+          and b"Final outer contour and inner contour intersect" in t_strings,
+          f"PlaceBuilding (0x1000df10) calls the insertion (0x1000e430) turning by {turn[0]:g} rad "
+          f"up to {turn[1]:.5f}; CBuilding keeps the .bas's first ring set at +0x50 and the "
+          f"second at +0x44, which IBasement slots 4 and 3 ({basement[1]:#x}, {basement[0]:#x}) "
+          f"hand out in world space; the insertion logs {sorted(logs.values())}, links a border "
+          f"edge as 0x8000 | n (0x1000c8e7), and the draw-order builder skips faces flagged "
+          f"0x20 and 0x800")
+
+    fortif = NResArchive.open(game / "fortif.rlb")
+    entries = {e.name.lower(): e for e in fortif}
+    shapes = []
+    for name, entry in entries.items():
+        if name.endswith(".bas"):
+            blob = fortif.read(entry)
+            count_a, points = struct.unpack_from("<2i", blob, 0)
+            after_a = 8 + (points + 1) * 12 + 8 * points
+            count_b, points_b = struct.unpack_from("<2i", blob, after_a)
+            end = after_a + 8 + (points_b + 1) * 12
+            shapes.append((count_a, count_b, end == len(blob)))
+    tut2 = mission.load(game / "MISSIONS/CAMPAIGN/CAMPAIGN.00/Mission.02/data.tma")
+    land = landmesh.load(game / "DATA/MAPS/Tut_2/land.msh")
+
+    def inside(poly, x, y):
+        hit = False
+        for i in range(len(poly)):
+            (x1, y1), (x2, y2) = poly[i][:2], poly[(i + 1) % len(poly)][:2]
+            if (y1 > y) != (y2 > y) and x < x1 + (y - y1) * (x2 - x1) / (y2 - y1):
+                hit = not hit
+        return hit
+
+    cut = {}
+    for stem, placed_name in (("fr_b_plant", "lplant01"), ("fr_l_angar", "shang01")):
+        placed = next(o for o in tut2.objects if placed_name in o.path.lower())
+        r = placed.rotation
+
+        def world(p, placed=placed, r=r):
+            return (placed.position[0] + p[0] * math.cos(r) - p[1] * math.sin(r),
+                    placed.position[1] + p[0] * math.sin(r) + p[1] * math.cos(r))
+
+        inner, outer = (objects.parse_base(fortif.read(entries[stem + ".bas"]), stem))
+        ring = [world(p) for p in outer.points]
+        whole = crossing = 0
+        for face in land.lod_faces(0):
+            corners = [land.positions[v] for v in land.faces[face]]
+            flags = [inside(ring, p[0], p[1]) for p in corners]
+            centre = (sum(p[0] for p in corners) / 3, sum(p[1] for p in corners) / 3)
+            whole += all(flags)
+            crossing += (not all(flags)) and (any(flags) or inside(ring, *centre))
+        cut[stem] = (whole, crossing, len(inner.points), len(outer.points),
+                     round(max(abs(p[2]) for p in inner.points + outer.points), 2))
+    bare = all(f & 0x820 == 0 for path in sorted(game.glob("DATA/MAPS/*/land.msh"))
+               for f in landmesh.load(path).face_flags)
+    check("fortif.rlb, Tut_2: every .bas holds one traced ring and one clearance ring",
+          len(shapes) == 30 and all(s == (1, 1, True) for s in shapes)
+          and cut == {"fr_b_plant": (0, 13, 20, 14, 0.0), "fr_l_angar": (0, 5, 26, 12, 0.0)}
+          and bare,
+          f"{len(shapes)} .bas members, each a count of 1, its ring with the traced arrays, a "
+          f"count of 1 and a ring without: {Counter(shapes)}; on Tut_2's level 0 the Large "
+          f"Factory's outer ring holds (wholly inside, cut, inner corners, outer corners, "
+          f"largest |z|) {cut['fr_b_plant']} and the Outpost's {cut['fr_l_angar']}; no shipped "
+          f"landscape face carries 0x20 or 0x800: {bare}")
+
+    # 2. The collision query's filter, the door face, and the doorway quads.
+    mover = c_at(0x1001DB1E, 3) == b"\x8b\x41\x10" and c_at(0x1001DB48, 3) == b"\x83\xcf\x08"
+    triangle_mask = c_at(0x1001DBAD, 11) == bytes.fromhex("c78424c800000004000000")
+    tests = (a_at(0x1000DBD7, 3) == b"\x8b\x46\x10" and a_at(0x1000DBDC, 4) == b"\x8b\x4c\x2a\x40"
+             and a_at(0x1000DBFE, 4) == b"\x8b\x4c\x2a\x44")
+    door_bit = a_at(0x1000DBBA, 11) == bytes.fromhex("c78424c000000010000000")
+    names = frozenset(p.name.lower() for p in all_archives(game))
+    exact = subset = carried = 0
+    for name, entry in entries.items():
+        if not name.endswith(".msh"):
+            continue
+        stem = name[:-4]
+        mesh = objmesh.parse(fortif.read(entry), stem)
+        flagged = {mesh.node_of_triangle(t) for t, f in enumerate(mesh.face_flags) if f & 0x10}
+        flagged.discard(None)
+        if not flagged or stem + ".ctl" not in entries:
+            continue
+        carried += 1
+        ctl = control.parse(fortif.read(entries[stem + ".ctl"]), names)
+        doors = {p.node for p in ctl.components if p.type_id == control.DOOR_TYPE}
+        exact += flagged == doors
+        subset += flagged < doors
+    plant = objmesh.parse(fortif.read(entries["fr_b_plant.msh"]), "fr_b_plant")
+    wear = objmesh.parse_wear(fortif.read(entries["fr_b_plant.wea"]))
+    default = [t for b in plant.batches if wear.materials[b.material].upper() == "DEFAULT"
+               for t in range(b.triangles[0], sum(b.triangles))]
+    level0 = [t for t in default if plant.node_of_triangle(t) is not None]
+    interior = [t for t in level0 if plant.nodes[plant.node_of_triangle(t)].is_interior]
+    pos = plant.posed_positions()
+    doorway = [(plant.node_of_triangle(t),
+                {tuple(round(c, 1) for c in pos[v]) for v in plant.triangles[t]})
+               for t in (118, 119, 2294)]
+    doorway_ok = [n for n, _ in doorway] == [1, 1, 2] and {118, 119, 2294} <= set(default)
+    corners = set().union(*(c for _, c in doorway))
+    library = materials.MaterialLibrary(game / "Material.lib")
+    fallback = library.get("DEFAULT")
+    entry = next(e for e in NResArchive.open(game / "Material.lib") if e.name.upper() == "DEFAULT")
+    shade = fallback.variant(0) if fallback else None
+    falls_back = cstring(w_at, dword(w_at, 0x10004355)) == "DEFAULT"
+    check("Control.dll, AniMesh.dll, fortif.rlb: what a collision passes; door faces; doorways",
+          mover and triangle_mask and tests and door_bit and carried == 20 and exact == 17
+          and subset == 2 and len(default) == 87 and len(level0) == 80 and len(interior) == 70
+          and all(plant.face_flags[t] == 0 for t in default) and doorway_ok
+          and {c[1] for c in corners} == {89.3} and {c[0] for c in corners} == {-11.0, 11.0}
+          and {c[2] for c in corners} == {0.0, 15.4} and fallback is not None
+          and entry.element_count == 4 and shade.colour == (0, 0, 0) and shade.diffuse_alpha == 0.0
+          and shade.texture == "DEFAULT.0" and falls_back,
+          f"the pair query's filter excludes batch flags 8, and 0x200 unless the mover's flags "
+          f"(+0x10) carry 4, and triangle flags 4; the push-out tests a gathered face's batch "
+          f"word (+0x40) and triangle word (+0x44), and a triangle flagged 0x10 goes to the "
+          f"door test; triangle flag 0x10 lies exactly on the door nodes of {exact} of the "
+          f"{carried} meshes that carry it (on a subset of them on {subset}); fr_b_plant has "
+          f"{len(default)} DEFAULT triangles, {len(level0)} at level 0 and {len(interior)} of "
+          f"those interior, all with triangle flags 0; triangles 118, 119 (node 1) and 2294 "
+          f"(node 2) "
+          f"span the doorway {sorted(corners)}; DEFAULT is directory flags {entry.element_count}, "
+          f"colour {shade.colour}, diffuse alpha {shade.diffuse_alpha}, texture {shade.texture}, "
+          f"and World3D.dll's fallback material")
+
+    # 3. The hall way's second word is the vertex's node; the plant's graph is three groups.
+    def graph_of(stem):
+        raw = fortif.read(entries[stem + ".msh"])
+        mesh = objmesh.parse(raw, stem)
+        return mesh, objmesh.read_path_graph(NResArchive(raw, stem))
+
+    def pod_centre(mesh, stem):
+        ctl = control.parse(fortif.read(entries[stem + ".ctl"]), names)
+        part = next(p for p in ctl.components if p.type_id == control.COMPUTER_TYPE)
+        s = mesh.slots[mesh.nodes[part.node].hit_slot()]
+        return objmesh.apply(mesh.world_pose(part.node), s.sphere[:3])
+
+    placed = {}
+    for stem in ("fr_b_plant", "fr_l_angar"):
+        mesh, graph = graph_of(stem)
+        pod = next(n for n in graph.nodes if n.flags & objmesh.PLACE_POD)
+        posed = objmesh.apply(mesh.world_pose(pod.b), pod.position)
+        centre = pod_centre(mesh, stem)
+        placed[stem] = (pod.b, round(math.dist(posed[:2], centre[:2]), 2),
+                        round(math.dist(pod.position[:2], centre[:2]), 1))
+        if stem == "fr_b_plant":
+            plant_graph = graph
+    links: dict[int, set[int]] = defaultdict(set)
+    for link in plant_graph.links:
+        links[link.start].add(link.end)
+        links[link.end].add(link.start)
+    seen: set[int] = set()
+    groups = []
+    for start in range(len(plant_graph.nodes)):
+        if start in seen:
+            continue
+        stack, group = [start], {start}
+        while stack:
+            for j in links[stack.pop()]:
+                if j not in group:
+                    group.add(j)
+                    stack.append(j)
+        seen |= group
+        groups.append(len(group))
+    check("fortif.rlb: a hall-way vertex sits on its node; the Large Factory's graph is split",
+          placed["fr_b_plant"][0] == 0x17 and placed["fr_b_plant"][1] < 0.1
+          and placed["fr_l_angar"][1] < 0.4
+          and min(placed["fr_b_plant"][2], placed["fr_l_angar"][2]) > 10
+          and sorted(g for g in groups if g > 1) == [9, 13, 62],
+          f"pod places (node, distance across the ground from the pod's centre posed through "
+          f"that node, distance raw): {placed}; the Large Factory's hall way falls into groups "
+          f"of {sorted(groups)} vertices with no link between them")
+
+    # 4. The way down to the pod is stairs.
+    tris = [t for ts in _posed_level0(plant).values() for t in ts]
+    grid = _floor_grid(tris, 0.5)
+    forecourt, pod_floor = (0.0, 98.0, 0.0), (0.06, -48.66, -12.4)
+    tight = _floor_flood(grid, forecourt, pod_floor, 0.3, 0.5)
+    stairs = _floor_flood(grid, forecourt, pod_floor, 0.6, 0.5)
+    check("fortif.rlb: the Large Factory's pod floor is reached from its forecourt by stairs",
+          tight is None and stairs is not None and 230 < stairs[0] < 250
+          and -14.5 < stairs[1] < -13.5,
+          f"over the level-0 walkable faces on a half-metre grid, from the forecourt to the pod "
+          f"floor at -12.4: rising at most 0.3 a step {tight}; at most 0.6 {stairs} "
+          f"(length, lowest floor on the way)")
+
+
 def _phase_record(ngi_at, index: int) -> tuple[int, dict]:
     """Record ``index`` of ``Ngi32.dll``'s render phase table (``0x10036a30``, 44 bytes
     each): its phase and its triples as {(stage, state): value}, render states under
@@ -16199,7 +16469,8 @@ def run(game: Path) -> int:
         check_motion, check_playback, check_ground, check_sensors, check_hit_test,
         check_collision, check_lake_and_buoys,
         check_combat, check_ownership,
-        check_capture, check_building_entry, check_building_lighting, check_repair,
+        check_capture, check_building_entry, check_building_lighting, check_building_ground,
+        check_repair,
         check_chassis, check_weapons,
         check_firing,
         check_moving_parts,

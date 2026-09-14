@@ -1425,6 +1425,12 @@ A node's first `uint32` is a **flag word**: some bits make the vertex a place â€
 a charging dock, the control pod a capturer walks to, a mine's loading place.
 See [27-ownership.md](27-ownership.md).
 
+The second `uint32` is **the node the vertex hangs on** (*measured*). A vertex's
+position is in that node's frame, and posed through the node it lands on its
+place: the pod places of the Large Factory and the Outpost land over their pods
+([24-motion.md](24-motion.md#the-ground-inside-a-building--read-in-part-and-measured)).
+Taken raw, in the model's frame, they sit tens of metres off.
+
 ## CTPT â€” control points
 
 Every record with geometry has a `.cpt` slot. The format is **two parallel

@@ -23266,3 +23266,203 @@ kind = "site"
 name = "CShade mesh draw: the loop over the mesh's batch records (+0xcb0 slot 3)"
 read = true
 doc = "docs/07-objects.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1000e3ce"
+kind = "site"
+name = "PlaceBuilding: call the insertion with the matrix turned by the retry angle"
+read = true
+doc = "docs/03-terrain.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1009a208"
+kind = "datum"
+name = "float 0.01: PlaceBuilding's retry turn"
+read = true
+doc = "docs/03-terrain.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1009a218"
+kind = "datum"
+name = "float 2 pi: PlaceBuilding gives up past a whole turn"
+read = true
+doc = "docs/03-terrain.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1000e642"
+kind = "site"
+name = "insertion: IBasement slot 4, the inner (traced) contours in world space"
+read = true
+doc = "docs/03-terrain.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1000e664"
+kind = "site"
+name = "insertion: IBasement slot 3, the outer (clearance) contours in world space"
+read = true
+doc = "docs/03-terrain.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10057db0"
+kind = "function"
+name = "IBasement slot 3: the building's second .bas ring set (+0x44), placed by its matrix in mode 2"
+read = true
+doc = "docs/03-terrain.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10057ed0"
+kind = "function"
+name = "IBasement slot 4: the building's first .bas ring set (+0x50, with its traced arrays), placed in mode 2"
+read = true
+doc = "docs/03-terrain.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1009b57c"
+kind = "datum"
+name = "IBasement vtable (CBuilding + 4): slot 3 0x10057db0, slot 4 0x10057ed0"
+read = true
+doc = "docs/03-terrain.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10056040"
+kind = "site"
+name = "CBuilding::CBuilding: the .bas read, a ring count, rings with triangle and corner arrays, then a ring count and rings without"
+read = true
+doc = "docs/03-terrain.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10056106"
+kind = "site"
+name = ".bas loader: the first ring set's count into +0x50"
+read = true
+doc = "docs/03-terrain.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x100564f5"
+kind = "site"
+name = ".bas loader: the second ring set's count into +0x44"
+read = true
+doc = "docs/03-terrain.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x100104de"
+kind = "site"
+name = "insertion: a landscape face's state, 1 inside the contour, 3 cut by it; each listed as (face, -1)"
+read = true
+doc = "docs/03-terrain.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10010611"
+kind = "site"
+name = "insertion: logs 'Face deleted(INSIDE) #%d'"
+read = true
+doc = "docs/03-terrain.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10010742"
+kind = "site"
+name = "insertion: logs 'Face deleted(ISECTED) #%d'"
+read = true
+doc = "docs/03-terrain.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1000c8e7"
+kind = "site"
+name = "insertion: a border edge's neighbour becomes 0x8000 | n, a link onto the basement ('OUTER LINK')"
+read = true
+doc = "docs/03-terrain.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x100133d4"
+kind = "site"
+name = "insertion: a patch face written over a deleted one, normal as int16 over 32767 ('Replacing face #%d')"
+read = true
+doc = "docs/03-terrain.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10011a22"
+kind = "site"
+name = "insertion: logs 'New basement faces qty = %d'"
+read = true
+doc = "docs/03-terrain.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10060530"
+kind = "site"
+name = "draw-order builder: a face flagged 0x20 is left out"
+read = true
+doc = "docs/03-terrain.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10060547"
+kind = "site"
+name = "draw-order builder: a face flagged 0x800 is left out"
+read = true
+doc = "docs/03-terrain.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001db1e"
+kind = "site"
+name = "pair face query: the mover's collision flags (+0x10) pick whether batches flagged 0x200 pass"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001db48"
+kind = "site"
+name = "pair face query: batch flag 8 always excluded, into the filter's +0x14"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001dbad"
+kind = "site"
+name = "pair face query: triangle flag 4 excluded"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x1000dbd7"
+kind = "site"
+name = "push-out: a gathered face's batch word (+0x40) against the filter's +0x10/+0x14, its triangle word (+0x44) against +0x18/+0x1c"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x1000dbba"
+kind = "site"
+name = "push-out: a face whose triangle word carries 0x10 goes to the building's door test"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "World3D.dll"
+at = "0x10004354"
+kind = "site"
+name = "material load: a name not found falls back to DEFAULT"
+read = true
+doc = "docs/24-motion.md"

@@ -1159,6 +1159,116 @@ nothing. Inside the Outpost, at 334–338 s, it is captured the same way.
 6. Leaving is walking out: a door ahead opens as the unit nears it, and once a
    landscape face is nearer the unit is the landscape's again.
 
+### The ground inside a building — *read* in part, and *measured*
+
+**The landscape is gone from under a building** (*derived*). Placing it deletes
+every landscape face inside or across its `.bas` outer contour, and stitches in
+new faces only outside the inner one
+([03-terrain.md](03-terrain.md#placing-a-building-cuts-the-landscape--read-in-outline-and-measured)).
+So inside the building the walk-face query
+([Finding the ground](#finding-the-ground--read)) meets only the building's
+level-0 faces. Its down pass takes the nearest walkable face under the body's
+centre, and its up pass one less than r₂ above it. A unit can go down to the
+Large Factory's pod floor at −12.4, although Tut_2's ground under the building
+lies only 0.08 below its base. An engine that keeps the landscape draws sand
+through the floor, and can hold a walker up on ground that is not there.
+
+**What the collision query lets through** (*read*). The pair's face query
+(`Control.dll:0x1001daf0`) builds its filter from the mover's collision flags
+(`+0x10`, `0x1001db1e`):
+- It excludes batches flagged `8` always, and `0x200` unless the mover's flags
+  carry 4 (`0x1001db25`–`0x1001db48`, into the filter's `+0x14`).
+- It excludes triangles flagged 4 (`0x1001dbad`).
+
+`AniMesh.dll`'s push-out tests each gathered face against the filter: its
+batch word at `+0x40` against required and excluded masks `+0x10`/`+0x14`, and
+its triangle word at `+0x44` against `+0x18`/`+0x1c` (`0x1000dbd7`–`0x1000dc19`).
+A face whose triangle word carries **`0x10`** goes on to the door test
+(`0x1000dbba`, `0x1000dc5b`–`0x1000dd46`): the building's `IsDoorOpen` for the
+face's node, and the face is dropped while it is open.
+
+*Measured*: triangle flag `0x10` is the **door face**. On 17 of the 20 meshes
+that carry it, the flagged triangles lie exactly on the controller's class-12
+door nodes. On two institutes they lie on all their door nodes but one. On the
+generator they lie on other nodes than its doors. Where a face's batch word
+(`8`, `0x200`) comes from is not traced.
+
+**The doorways are black quads** (*measured*, and *seen*). `fr_b_plant` carries
+87 triangles of the material `DEFAULT`, all with triangle flags 0. 80 are at
+level 0, and 70 of those are on interior nodes. 8 of the 10 on outer nodes have
+a coincident twin on an interior node, facing the other way. At the entrance
+they are triangles 118 and 119 on node 1 (`o01`) and triangle 2294 on node 2
+(`i06`), all at y 89.3 across x −11…11, z 0…15.4. That is the whole doorway, a
+step outside the door `i05`.
+- `DEFAULT` is `Material.lib`'s flags-4 material: blend mode 4, a black diffuse
+  with alpha 0, and the texture `DEFAULT.0`, 16 × 16, black and opaque.
+  `World3D.dll` also falls back to it for a material it cannot find
+  (`0x10004354`).
+- *Seen*: the recording's entrance is black from outside at 88–93 s, and the
+  hero walks through it at 94.5 s.
+- So the quad draws black, which hides the interior from outside. It does not
+  stop a walker (*derived*). By the filter above, something passes it: its
+  batch word carrying `8` or `0x200` is the only way the read code allows, and
+  that it does is a *guess*.
+
+**The hall way's second word is the vertex's node** (*measured*). Posed through
+the node it names, a vertex lands where it belongs:
+- the Outpost's pod place on node 1 lands 0.3 from its pod's centre across the
+  ground;
+- the Large Factory's pod place (node `0x17`) lands at (0.02, −48.66, −11.02),
+  over the pod floor.
+
+Raw, the same vertices sit tens of metres off.
+
+**The Large Factory's hall way is three groups with no link between them**
+(*measured*): the forecourt and entrance, 9 vertices on nodes 1 and 4; the
+interior with the pod, 62 vertices; and the rear, 13. So the graph does not
+route a walk from the door to the pod. What joins its groups is not read.
+
+**The way down to the pod is stairs** (*measured*). A flood over the building's
+walkable level-0 faces on a half-metre grid, from the forecourt at 0, reaches
+the pod floor only when a step may rise more than 0.3 m. With steps of up to
+0.6 m it gets there in about 240 m, the lowest floor on the way near −14. One
+such way runs:
+- along the left corridor at 0 to 1.1;
+- up a flight to a gallery at 7.1;
+- down two flights of about 30° to −5.6;
+- down a third to about −14;
+- up onto the pod's floor at −12.4.
+
+Treads rise up to 0.56 between half-metre samples, and the steepest walkable
+face on the way stands at 67°. The recording takes the hero from the door to
+the pod in about 8 s (94.5 to 102 s). That fits a shorter way than the flood's,
+or a faster walk; which way it took is not established.
+
+**How a walker climbs them** is not established. The lift puts the feet on the
+highest contact face under them whatever its height
+([Holding the body on the ground](#holding-the-body-on-the-ground--read-and-measured)),
+so steps are not what stops a walker. The push-out is: a stair face within r of
+the body sphere's centre pushes it along the face's normal. With state bit 4
+that push is made horizontal and lengthened, down the slope, and only a push
+pointing down on a unit whose parent is a building is taken whole
+([Collision between objects](#collision-between-objects--read)). Nothing read
+exempts a building's floors from that push. Triangle flag 2 marks exactly the
+walk-through floors ([07-objects.md](07-objects.md#stream-7-is-the-per-face-record)),
+and what reads it is not established.
+
+**For an engine**, walking into a building:
+
+1. Cut the landscape under every building
+   ([03-terrain.md](03-terrain.md#for-an-engine)): inside the outer ring the
+   building's faces are the only ground and the only thing drawn.
+2. Find the ground inside by the walk-face query over the building's level-0
+   faces (normal z above cos 80°): the nearest below the centre, or one less
+   than r₂ above it.
+3. Collide against the building's faces, the one stood on included, except:
+   - triangles flagged 4;
+   - door faces (flag `0x10`) while their door is open;
+   - STAND-IN, from the recording: the `DEFAULT` doorway quads.
+4. STAND-IN until the stair question is read: a building's walkable faces do
+   not push a walker. Then its stairs are climbed by the lift alone.
+5. Draw `DEFAULT` as its material says: black.
+
 ### What a buoy does to a walker — *read*, *measured*, and not established
 
 The five buoys on Mission 01 — objects 25, 26, 27, 29 and 30 — are `s_tree_29`,
@@ -1518,7 +1628,13 @@ points are given is not traced. `Movement_FlyHeight` is 40 and
   (`0x10058607`). ~~How a lightmap combines with a batch's lit colour~~ —
   **read**: [07-objects.md](07-objects.md#how-a-lightmapped-batch-is-drawn--read-and-measured).
 - How a walker climbs a building's ramp while the ramp's own faces push its
-  sphere back.
+  sphere back. The way into the Large Factory is stairs, which the lift alone
+  would climb, and nothing read exempts their faces from the push
+  ([The ground inside a building](#the-ground-inside-a-building--read-in-part-and-measured)).
+- Where a gathered face's batch word (`+0x40`, the `8` and `0x200` the collision
+  query excludes) comes from, and so whether the `DEFAULT` doorway quads carry
+  it; what joins the Large Factory's three hall-way groups; and what reads
+  triangle flag 2.
 - Which `Land.msh` faces carry the world face bit `0x8` and class bit 8 that
   the ground search excludes; the landscape converts them to its own mask at
   `Terrain.dll:0x10022da0` (world `0x8` → `0x20`, `0x200` → `0x20000`,

@@ -379,6 +379,96 @@ nothing the game draws. Where they came from is not established; a tool that
 built the order with these masks over a reused buffer would leave exactly
 this.
 
+## Placing a building cuts the landscape — *read* in outline, and *measured*
+
+A building does not stand on the landscape: it is let into it. What its
+placement changes decides what a unit walking inside it finds underfoot and
+what the camera sees through its floor
+([24-motion.md](24-motion.md#the-ground-inside-a-building--read-in-part-and-measured)).
+
+**The placement retries by turning** (*read*). `CLandscape::PlaceBuilding`
+(`Terrain.dll:0x1000df10`) takes the building's matrix and calls the insertion
+(`0x1000e430`, at `0x1000e3ce`) with the matrix turned about z by an angle
+that starts at 0. If the insertion fails it adds 0.01 rad (`0x1009a208`) and
+tries again, up to 2π (`0x1009a218`), and only then logs *"Building insertion
+finally failed!"*. A building that fits goes in at its own angle.
+
+**The two rings of its `.bas` are the two contours** (*read*). `CBuilding`'s
+loader (`0x10056040`) reads the member as two ring sets. First comes a count,
+then that many rings, each of a point count, its points closed by the first
+again, and one int array of triangles and one of corners. This set is kept at
+the building's `+0x50` (`0x10056106`). Then comes a second count and its rings,
+which have no arrays; that set is kept at `+0x44` (`0x100564f5`). So the
+"marker 1" of [07-objects.md](07-objects.md#bas-is-a-buildings-ground-plan) is a
+ring count, and every shipped `.bas` holds one ring of each kind (*measured*).
+`IBasement`, the interface at `CBuilding + 4` (vtable `0x1009b57c`), hands out
+each set in world space: slot 4 (`0x10057ed0`) the traced **inner** ring, and
+slot 3 (`0x10057db0`) the clearance, **outer** ring. The insertion asks for both
+(`0x1000e642`, `0x1000e664`).
+
+**The insertion deletes the landscape inside the contour and stitches in new
+faces** (*read* in outline: what follows is the function's own log strings
+placed against the code that prints them; the geometry between them is not
+transcribed).
+- It seeks the landscape face under each contour vertex (*"Seeking face with
+  vertex (%f, %f)"*, `CTerrain::FindFaceInWing`), and fails with *"Contour of
+  building ran out of landscape"* or *"Building has 0 vertices in outer
+  contours"*.
+- It sorts the landscape faces it meets into state 1, **inside** the contour,
+  and state 3, **cut** by it (`0x100104de`). It lists each as a deleted face,
+  the pair (face, −1), and logs *"Face deleted(INSIDE) #%d"* (`0x10010611`)
+  and *"Face deleted(ISECTED) #%d"* (`0x10010742`).
+- It triangulates what is left of the cut faces outside the contour (*"There
+  were %d outside triangles"*, *"New faces in patch qty = %d"*) and writes them
+  over the deleted faces' slots (*"Replacing face #%d"*, `0x100133d4`), normals
+  included.
+- It builds the **basement**, the faces between the outer contour and the
+  inner one (*"New basement faces qty = %d"*, `0x10011a22`; *"Final outer
+  contour and inner contour intersect"* when the two cross).
+- An edge of a landscape face that now borders the basement takes
+  `0x8000 | n` as its neighbour (*"OUTER LINK!!!!, #%d"*, `0x1000c8e7`), so a
+  walk across the mesh can step from the landscape onto the basement.
+- The cell's draw order is then rebuilt ([above](#what-the-engine-does-with-the-byte--read-and-measured)).
+  That builder leaves out every face whose flags carry `0x20` or `0x800`
+  (`0x10060530`, `0x10060547`). Landscape `0x20` is world face bit `0x8`, which
+  the ground search also excludes
+  ([24-motion.md](24-motion.md#finding-the-ground--read)). No writer of either
+  bit was found in the insertion (a scan of its range for `or` and masked
+  writes), and no shipped face carries them.
+
+**Nothing of the landscape is left inside the inner contour** (*derived*). The
+faces there are deleted, and neither the patch nor the basement reaches past
+the inner ring. The building's own faces are the only ground there, and the only
+thing drawn.
+
+*Measured*, on Tut_2 at level 0 (the rings placed by the mission's position and
+angle; both at the building's own z = 0):
+
+| | Large Factory (`fr_b_plant`) | Outpost (`fr_l_angar`) |
+|---|---|---|
+| inner ring | 20 corners, x −38.4…38.4, y −96.0…108.5, 13389 m² | 26 corners, x −26.4…34.5, y −37.3…32.7, 2874 m² |
+| outer ring | 14 corners, x −49.0…49.0, y −105.6…118.1, 19249 m² | 12 corners, x −37.4…46.0, y −48.4…43.8, 6140 m² |
+| landscape faces wholly inside the outer ring | 0 | 0 |
+| landscape faces it cuts | 13 | 5 |
+
+Tut_2's ground is a few large faces where the buildings stand, so every face
+under them is a cut face: the pod room's floor at −12.4 lies under faces that
+the placement deletes.
+
+### For an engine
+
+1. Take the building's two `.bas` rings, the first inner and the second outer,
+   placed by its matrix.
+2. Delete every landscape face inside the outer ring or crossing it, from the
+   draw and from every ground and collision query.
+3. Fill the ring between the outer contour and the landscape faces that remain
+   with new faces on the landscape's heights, and the ring between the outer
+   and inner contours with basement faces.
+   STAND-IN until read: the heights and textures the patch and the basement
+   take. The contours' own z is the building's base, and the landscape's
+   heights at the outer contour are a fair guess.
+4. Inside the inner ring, the building's level-0 faces are the ground.
+
 ## What fparkan's notes add, and what they do not
 
 [fparkan](https://fparkan.popov.link/) publishes its own reverse-engineering
