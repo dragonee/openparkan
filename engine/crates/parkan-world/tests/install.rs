@@ -812,7 +812,13 @@ fn mission_01s_buoys_hold_the_hero_off_their_cones() {
 /// Mission 01 with both neutral warbots captured and a radar takt later on the hero's
 /// radar: the play, and the targets of `tut1_mf1`, `helic` and the hostile `tut1_e1`.
 fn mission_01_wingmen() -> (parkan_world::play::Play, [usize; 3]) {
+    mission_01_captured(false)
+}
+
+/// [`mission_01_wingmen`], a captured bot given Standby when `standby`.
+fn mission_01_captured(standby: bool) -> (parkan_world::play::Play, [usize; 3]) {
     let (mut play, m) = mission_01_play();
+    play.capture_standby = standby;
     let tick = 1000.0 / 60.0;
     let target_of = |path: &str| {
         let object = m.objects.iter().position(|o| o.path.to_ascii_lowercase().ends_with(path)).unwrap();
@@ -899,4 +905,35 @@ fn wingmen_follow_seek_and_destroy_stand_by_and_fail_a_refit_with_no_dock() {
     }
     assert!(killed.is_some(), "the wingmen destroy tut1_e1");
     assert!(play.killed.contains(&play.battle.objects[e1]));
+}
+
+#[test]
+#[ignore = "needs the game install"]
+fn a_captured_bot_stands_by_until_ordered_and_with_no_order_engages_as_the_games_does() {
+    use parkan_sim::behaviour::Task;
+    use parkan_world::play::Play;
+
+    let tick = 1000.0 / 60.0;
+    let tasks = |play: &Play, bots: &[usize]| -> Vec<Task> {
+        bots.iter().map(|&b| play.robots.iter().find(|(t, _)| *t == b).unwrap().1.behaviour.task()).collect()
+    };
+    // `tut1_e1` stands about 470 from the two bots: within the engagement's 500.
+    let (mut play, [mf1, helic, _]) = mission_01_captured(true);
+    let at: Vec<_> = [mf1, helic].iter().map(|&b| play.battle.combat.targets[b].position).collect();
+    for _ in 0..600 {
+        play.tick(tick, [0.0; 2]);
+    }
+    assert!(tasks(&play, &[mf1, helic]).iter().all(|t| *t == Task::StayGround));
+    for (&b, p) in [mf1, helic].iter().zip(at) {
+        assert!(play.battle.combat.targets[b].position.distance(p) < 1.0, "standby holds");
+    }
+
+    let (mut play, [mf1, helic, _]) = mission_01_captured(false);
+    for _ in 0..60 {
+        play.tick(tick, [0.0; 2]);
+    }
+    assert!(
+        tasks(&play, &[mf1, helic]).iter().any(|t| matches!(t, Task::Attack { .. })),
+        "no order: it engages"
+    );
 }

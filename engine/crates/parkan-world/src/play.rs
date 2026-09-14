@@ -164,6 +164,8 @@ pub struct Play {
     pub names: Vec<String>,
     pub selector: Selector,
     voice_pick: VoicePick,
+    /// Whether a captured bot is given Standby ([`Play::enter`]); off, as the game's.
+    pub capture_standby: bool,
     /// What the game says, not yet shown or played.
     pub says: Vec<Say>,
 }
@@ -375,6 +377,7 @@ impl Play {
             names,
             selector: Selector::default(),
             voice_pick: VoicePick::default(),
+            capture_standby: false,
             robots,
         };
         for i in 0..play.turret_effects.len() {
@@ -644,6 +647,18 @@ impl Play {
         self.units[t].clan = Some(self.player_clan);
         if let Some(p) = self.progression.as_mut() {
             p.progress.captured(u.logical_id, self.player_clan);
+        }
+        // DEPARTURE: docs/27-ownership.md#a-neutral-unit-is-taken-by-the-hero--read-and-measured
+        // -- the game's capture changes only the unit's clan, SuperAI and areal map and gives
+        // it no order, so it engages a hostile within 500 on its own; with
+        // `capture_standby` it is given Standby, and holds until the player orders it.
+        if self.capture_standby
+            && let Some((_, robot)) = self.robots.iter_mut().find(|(rt, _)| *rt == t)
+        {
+            let standby =
+                orders::Order { code: orders::STAYGROUND, parameter: 0, target: orders::Target::NotDefined };
+            robot.order = Some(standby);
+            robot.behaviour.order(&standby);
         }
         true
     }

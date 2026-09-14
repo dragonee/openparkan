@@ -202,7 +202,8 @@ tick) play the hero at 60 ticks a second before a screenshot, or with
 `--headless` print where it got to. In the window `--hold` keeps its keys down,
 `--mouse` adds its counts every tick and `--trace` prints where the hero is
 every second. The view holds the heading the hero moves along; `--sway` lets it
-swing with the gait as the game's does. With `--fly`, W/A/S/D and Q/E fly, holding
+swing with the gait as the game's does. A captured bot stands by until it is
+ordered; `--capture-idle` leaves it with no order, as the game's capture does. With `--fly`, W/A/S/D and Q/E fly, holding
 the right mouse button turns and Shift flies faster.
 
 ## Checks
@@ -347,3 +348,4 @@ has a row here, and a switch that restores the game's behaviour.
 | what the game does | what the engine does | switch | see |
 |---|---|---|---|
 | The hero's body node yaws with the gait, ±10° once a run cycle, and the turret, eye, sight and barrels swing with it | node 0 keeps only the part of its turn not about its up axis, so the view, the sight and the barrels hold the heading the body moves along | `--sway` | [30](../docs/30-turrets.md#aiming-and-the-camera--read-and-measured) |
+| A capture changes only the unit's clan, SuperAI and areal map, and gives it no order, so a captured bot engages a hostile within 500 on its own | a captured bot is given Standby, and holds until the player orders it | `--capture-idle` | [27](../docs/27-ownership.md#a-neutral-unit-is-taken-by-the-hero--read-and-measured) |

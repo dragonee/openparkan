@@ -105,12 +105,14 @@ pub fn lighting(
     Some((lighting, sky.dome_colours(fog).into_iter().map(linear).collect()))
 }
 
-/// The mission's play, with the hero's view held steady against its gait unless `sway`,
-/// and its progression when its script and messages load.
-pub fn play(game: &Path, loaded: &Loaded, sway: bool) -> Result<Option<Play>> {
+/// The mission's play, with the hero's view held steady against its gait unless `--sway`,
+/// a captured bot standing by unless `--capture-idle`, and its progression when its
+/// script and messages load.
+pub fn play(game: &Path, loaded: &Loaded, args: &crate::Args) -> Result<Option<Play>> {
     let mut play = Play::load(game, &loaded.mission)?;
     if let Some(p) = play.as_mut() {
-        p.hero.steady = !sway;
+        p.hero.steady = !args.sway;
+        p.capture_standby = !args.capture_idle;
         if let Err(e) = p.load_progression(game, &loaded.dir, &loaded.mission) {
             eprintln!("no mission progression: {e:#}");
         }
