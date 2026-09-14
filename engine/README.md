@@ -203,7 +203,8 @@ tick) play the hero at 60 ticks a second before a screenshot, or with
 `--mouse` adds its counts every tick and `--trace` prints where the hero is
 every second. The view holds the heading the hero moves along; `--sway` lets it
 swing with the gait as the game's does. A captured bot stands by until it is
-ordered; `--capture-idle` leaves it with no order, as the game's capture does. With `--fly`, W/A/S/D and Q/E fly, holding
+ordered; `--capture-idle` leaves it with no order, as the game's capture does. The
+target is bracketed in its clan's mark colour; `--no-bracket` hides the bracket. With `--fly`, W/A/S/D and Q/E fly, holding
 the right mouse button turns and Shift flies faster.
 
 ## Checks
@@ -312,7 +313,6 @@ engine pass replaces each with what was read and removes its row.
 | M6 | Whether scenery is among a radar's contacts | a target needs a unit record: trees and rocks are never listed | [25](../docs/25-sensors.md#the-players-target--read-and-measured) |
 | M6 | The unit record's `+0x98` and `+0x94`: where the right button's ray starts, and the margin its pick keeps from the unit | both 0 | [25](../docs/25-sensors.md#the-players-target--read-and-measured) |
 | M6 | Boarding a captured bot is read, but the engine drives only the hero | the captured unit joins the player's clan and stays where it stands; Enter on the player's own unit does nothing | [27](../docs/27-ownership.md#a-neutral-unit-is-taken-by-the-hero--read-and-measured) |
-| M6 | How the HUD marks the player's target | four corners around its bounding sphere on screen: red for a hostile, green for a friend, amber otherwise | [25](../docs/25-sensors.md#the-players-target--read-and-measured) |
 | M6 | Where the game draws a message's text and for how long | each line 8 s, the newest four stacked above the guns, wrapped to 70% of the screen | [34](../docs/34-progression.md#not-established) |
 | M6 | Whether a type-5 descriptor loops its sound, and when the ambient variations play | the theme loops from the mission's load; the variations are not played | [34](../docs/34-progression.md#ambient-sound--read-in-part) |
 | M7 | Which pose the live contact record's height comes from when the loader decides which states plant a foot | the rest pose | [13](../docs/13-control.md#a-footstep-end-to-end--read-and-measured) |
@@ -349,3 +349,4 @@ has a row here, and a switch that restores the game's behaviour.
 |---|---|---|---|
 | The hero's body node yaws with the gait, ±10° once a run cycle, and the turret, eye, sight and barrels swing with it | node 0 keeps only the part of its turn not about its up axis, so the view, the sight and the barrels hold the heading the body moves along | `--sway` | [30](../docs/30-turrets.md#aiming-and-the-camera--read-and-measured) |
 | A capture changes only the unit's clan, SuperAI and areal map, and gives it no order, so a captured bot engages a hostile within 500 on its own | a captured bot is given Standby, and holds until the player orders it | `--capture-idle` | [27](../docs/27-ownership.md#a-neutral-unit-is-taken-by-the-hero--read-and-measured) |
+| In the cockpit nothing in the world is bracketed: the target is framed in the target panel at the bottom left and outlined on the radar, in its clan's mark colour | four corners around the target's bounding sphere, in that colour: the player's clan light blue, nature yellow, a neutral clan grey, then by word 1 magenta, 2 cyan, 0 red | `--no-bracket` | [25](../docs/25-sensors.md#how-the-game-colours-what-it-marks--read-and-measured) |

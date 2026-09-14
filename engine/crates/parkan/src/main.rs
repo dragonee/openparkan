@@ -6,7 +6,7 @@
 //! parkan [--game DIR] [--mission MISSIONS/…] [--fly]
 //!        [--screenshot OUT.png] [--size WxH] [--top-down] [--look X,Y,Z,TX,TY,TZ]
 //!        [--headless] [--ticks N] [--hold SCAN_W,SCAN_A] [--mouse DX,DY] [--trace] [--sway]
-//!        [--capture-idle] [--text "…"]
+//!        [--capture-idle] [--no-bracket] [--text "…"]
 //! ```
 //!
 //! In the cockpit the hero's own input table drives it: W/S walk, A/D strafe,
@@ -26,6 +26,8 @@
 //!
 //! A captured bot stands by until it is given an order; `--capture-idle` leaves it with
 //! none, as the game's capture does, so it engages a hostile within 500 on its own.
+//! The target is bracketed in the colour the game marks its clan in; `--no-bracket`
+//! draws no bracket, as the game's cockpit draws none.
 //!
 //! `--text` draws a string in the game font near the top of a `--screenshot`.
 
@@ -69,6 +71,8 @@ struct Args {
     sway: bool,
     /// `--capture-idle`: a captured bot is given no order, as the game's capture gives none.
     capture_idle: bool,
+    /// `--no-bracket`: the target is not bracketed in the world, as the game's cockpit.
+    no_bracket: bool,
     /// `--text`: a string a screenshot draws in the game font.
     text: Option<String>,
     ticks: u32,
@@ -89,6 +93,7 @@ fn args() -> Result<Args> {
         trace: false,
         sway: false,
         capture_idle: false,
+        no_bracket: false,
         text: None,
         ticks: 0,
         hold: Vec::new(),
@@ -107,6 +112,7 @@ fn args() -> Result<Args> {
             "--trace" => out.trace = true,
             "--sway" => out.sway = true,
             "--capture-idle" => out.capture_idle = true,
+            "--no-bracket" => out.no_bracket = true,
             "--text" => out.text = Some(value()?),
             "--ticks" => out.ticks = value()?.parse()?,
             "--hold" => out.hold = value()?.split(',').map(str::to_owned).collect(),

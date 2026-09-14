@@ -937,3 +937,23 @@ fn a_captured_bot_stands_by_until_ordered_and_with_no_order_engages_as_the_games
         "no order: it engages"
     );
 }
+
+#[test]
+#[ignore = "needs the game install"]
+fn mission_01_marks_dummies_magenta_the_enemy_red_neutral_bots_grey_and_its_own_light_blue() {
+    use parkan_world::play::{MARK_HOSTILE, MARK_NEUTRAL, MARK_NEUTRAL_CLAN, MARK_OWN};
+
+    // docs/25, "How the game colours what it marks".
+    let (play, [mf1, helic, e1]) = mission_01_captured(false);
+    let (fresh, m) = mission_01_play();
+    let colour = |play: &parkan_world::play::Play, t: usize| play.mark_colour(play.units[t].clan);
+    let dummies: Vec<usize> = (0..fresh.units.len())
+        .filter(|&t| m.objects[fresh.battle.objects[t]].path.to_ascii_lowercase().contains("targ.dat"))
+        .collect();
+    assert_eq!(dummies.len(), 5);
+    assert!(dummies.iter().all(|&t| colour(&fresh, t) == MARK_NEUTRAL), "the Trgt clan's word 1: magenta");
+    assert_eq!(colour(&fresh, e1), MARK_HOSTILE);
+    assert_eq!((colour(&fresh, mf1), colour(&fresh, helic)), (MARK_NEUTRAL_CLAN, MARK_NEUTRAL_CLAN));
+    assert_eq!((colour(&play, mf1), colour(&play, helic)), (MARK_OWN, MARK_OWN), "captured: the player's");
+    assert_eq!(play.mark_colour(Some(play.player_clan)), [128, 128, 255]);
+}

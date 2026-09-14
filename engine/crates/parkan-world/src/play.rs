@@ -60,8 +60,18 @@ pub const CAPTURE_REACH: f32 = 20.0;
 /// A clan type: 0 nature, 3 neutral (docs/27).
 pub const CLAN_NATURE: u32 = 0;
 pub const CLAN_NEUTRAL: u32 = 3;
-/// A relation word toward a clan the list counts as hostile.
+/// A relation word toward a clan the list counts as hostile, neutral and allied.
 pub const RELATION_HOSTILE: u32 = 0;
+pub const RELATION_NEUTRAL: u32 = 1;
+pub const RELATION_ALLIED: u32 = 2;
+/// The colours a mark takes (`iron3d.dll:0x10065440`), r, g, b.
+pub const MARK_OWN: [u8; 3] = [128, 128, 255];
+pub const MARK_NATURE: [u8; 3] = [255, 255, 0];
+pub const MARK_NEUTRAL_CLAN: [u8; 3] = [160, 160, 160];
+pub const MARK_NEUTRAL: [u8; 3] = [255, 0, 255];
+pub const MARK_ALLIED: [u8; 3] = [0, 255, 255];
+pub const MARK_HOSTILE: [u8; 3] = [255, 0, 0];
+pub const MARK_OTHER: [u8; 3] = [255, 255, 0];
 /// `FlyNearLandHeight`, bound by name (docs/24): how high a flyer's points keep.
 pub const FLY_NEAR_LAND: f32 = 15.0;
 /// STAND-IN: docs/26-damage.md#the-difficulty-ratio--read-and-measured -- which difficulty
@@ -166,6 +176,8 @@ pub struct Play {
     voice_pick: VoicePick,
     /// Whether a captured bot is given Standby ([`Play::enter`]); off, as the game's.
     pub capture_standby: bool,
+    /// Whether the HUD brackets the target in the world (`scene::hud`); off, as the game's.
+    pub bracket: bool,
     /// What the game says, not yet shown or played.
     pub says: Vec<Say>,
 }
@@ -378,6 +390,7 @@ impl Play {
             selector: Selector::default(),
             voice_pick: VoicePick::default(),
             capture_standby: false,
+            bracket: false,
             robots,
         };
         for i in 0..play.turret_effects.len() {
@@ -410,6 +423,30 @@ impl Play {
                 .iter()
                 .find(|(name, _)| *name == them.name)
                 .is_some_and(|&(_, w)| w == RELATION_HOSTILE)
+    }
+
+    /// The colour the game marks an object of clan `clan` in, seen by the player's clan
+    /// (`iron3d.dll:0x10065440`, docs/25, "How the game colours what it marks"): the
+    /// player's own light blue, a nature clan yellow, a neutral clan grey whatever its
+    /// words, then by the marked clan's word towards the player's: 1 magenta, 2 cyan, 0
+    /// red, any other yellow.
+    pub fn mark_colour(&self, clan: Option<i64>) -> [u8; 3] {
+        let Some(clan) = clan else { return MARK_OTHER };
+        if clan == self.player_clan {
+            return MARK_OWN;
+        }
+        let Some(them) = self.clan(clan) else { return MARK_OTHER };
+        let us = self.clan(self.player_clan).map(|c| c.name.as_str());
+        match them.kind {
+            CLAN_NATURE => MARK_NATURE,
+            CLAN_NEUTRAL => MARK_NEUTRAL_CLAN,
+            _ => match them.relations.iter().find(|(name, _)| Some(name.as_str()) == us).map(|&(_, w)| w) {
+                Some(RELATION_NEUTRAL) => MARK_NEUTRAL,
+                Some(RELATION_ALLIED) => MARK_ALLIED,
+                Some(RELATION_HOSTILE) => MARK_HOSTILE,
+                _ => MARK_OTHER,
+            },
+        }
     }
 
     fn clan(&self, clan: i64) -> Option<&Clan> {

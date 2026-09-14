@@ -106,13 +106,15 @@ pub fn lighting(
 }
 
 /// The mission's play, with the hero's view held steady against its gait unless `--sway`,
-/// a captured bot standing by unless `--capture-idle`, and its progression when its
+/// a captured bot standing by unless `--capture-idle`, the target bracketed unless
+/// `--no-bracket`, and its progression when its
 /// script and messages load.
 pub fn play(game: &Path, loaded: &Loaded, args: &crate::Args) -> Result<Option<Play>> {
     let mut play = Play::load(game, &loaded.mission)?;
     if let Some(p) = play.as_mut() {
         p.hero.steady = !args.sway;
         p.capture_standby = !args.capture_idle;
+        p.bracket = !args.no_bracket;
         if let Err(e) = p.load_progression(game, &loaded.dir, &loaded.mission) {
             eprintln!("no mission progression: {e:#}");
         }
@@ -219,26 +221,24 @@ impl Subtitles {
 /// STAND-IN: docs/30-turrets.md#not-established -- how the game's HUD draws the aim
 /// point and the guns is not read.
 ///
-/// STAND-IN: docs/25-sensors.md#the-players-target--read-and-measured -- how the HUD marks
-/// the player's target is not read: four corners around its bounding sphere on screen,
-/// red for a hostile, green for a friend, amber otherwise.
+/// DEPARTURE: docs/25-sensors.md#how-the-game-colours-what-it-marks--read-and-measured --
+/// in the cockpit the game brackets nothing in the world: it frames the target in its
+/// target panel and outlines its radar mark, neither of which is drawn yet. With
+/// [`Play::bracket`] four corners stand around the target's bounding sphere on screen,
+/// in the colour the game marks its clan in.
 pub fn hud(play: &Play, aspect: f32, view_proj: glam::Mat4) -> Vec<parkan_render::hud::Rect> {
     use parkan_render::hud::Rect;
     let mut out = Vec::new();
-    if let Some(t) = play.targets.current
+    if play.bracket
+        && let Some(t) = play.targets.current
         && let Some(c) = play.contacts().get(t).copied()
         && let Some([x, y]) = parkan_world::play::on_screen(view_proj, c.centre, c.radius)
     {
         let edge = view_proj * (c.centre + Vec3::Z * c.radius).extend(1.0);
         let half_h = if edge.w > 1e-6 { (edge.y / edge.w - y).abs().clamp(0.02, 0.8) } else { 0.02 };
         let half_w = half_h / aspect.max(0.1);
-        let colour = if c.hostile {
-            [1.0, 0.2, 0.15, 0.9]
-        } else if c.friend {
-            [0.3, 1.0, 0.3, 0.9]
-        } else {
-            [1.0, 0.75, 0.2, 0.9]
-        };
+        let [r, g, b] = play.mark_colour(play.units[t].clan).map(|v| f32::from(v) / 255.0);
+        let colour = [r, g, b, 0.9];
         let (lw, lh) = (half_w * 0.35, half_h * 0.35);
         let (tw, th) = (0.003 / aspect.max(0.1), 0.003);
         for (sx, sy) in [(-1.0, -1.0), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)] {
