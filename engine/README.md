@@ -153,8 +153,9 @@ Not yet: boarding a captured bot, and the ambient variations.
   sent to seek and destroy, fly to `tut1_e1` and destroy it.
 - A unit or building takes damage node by node, as read. A node at or below
   half its life (on a part with a damaged model) draws that damaged block, with
-  its explosion; at nothing a part is knocked off, flies drawn for three
-  seconds, then explodes and goes, and its children go with it. When the base
+  its explosion; at nothing a part is knocked off and falls, drawn, until it
+  meets the ground or three seconds pass, then explodes and goes, and its
+  children go with it. When the base
   dies every part still standing goes with its explosion, and the unit is
   deleted its controller's `+92` ms later. A hidden node is not drawn, struck,
   collided with or stood on.
@@ -344,7 +345,7 @@ engine pass replaces each with what was read and removes its row.
 | M8 | How the turret turns a traced point into its targets (`0x10028bb0`), its aim stage, and the gun's report codes | each channel moves on by the angle the sight is off, at the rate a small nudge turns it; θ is 0 once both channels reach their targets and π before; a guided gun's θ is its lock left × π | [29](../docs/29-weapons.md#how-the-ai-fires--read) |
 | M8 | A gun fitted as a part of its own: its ready byte and its barrels' recoil | ready; its recoil is not played | [29](../docs/29-weapons.md#a-gun-is-ready-once-its-arm-is-out--read-and-measured) |
 | M8 | Which difficulty profile a wingman holds: `Speed_MaximumFactor` | 1, as four of the five profiles set it | [26](../docs/26-damage.md#the-difficulty-ratio--read-and-measured) |
-| M8 | How a knocked-off part flies: its push, its spin, its update, and the world query that ends a flight early | it leaves at 6 m/s away from the unit's centre and 8 m/s up, falls under gravity to the ground under it and turns at 3 rad/s about a level axis across its path, for the whole three seconds | [26](../docs/26-damage.md#not-established) |
+| M8 | How a knocked-off part flies: its push, its spin, its update, and the world query that ends a flight early | it drops off at 2 m/s away from the unit's centre, falls under gravity turning at 3 rad/s about a level axis across its path, and its flight ends when its sphere meets the ground (the player remembers a part falling about half a second): a dummy's side panel goes 1.3 s after it is knocked off | [26](../docs/26-damage.md#not-established) |
 | M8 | A unit's life system holds all its models' nodes under one root | a life per part: a dead unit destroys its other parts' roots, and a part's root, having no parent, is never knocked off | [26](../docs/26-damage.md#what-a-damaged-node-a-destroyed-part-and-a-dead-unit-draw--read-and-measured) |
 | M8 | The statuses 4 and 8, a node copying its parent's life fraction or its stage | not modelled; no Mission 01 node carries them | [26](../docs/26-damage.md#what-a-damaged-node-a-destroyed-part-and-a-dead-unit-draw--read-and-measured) |
 

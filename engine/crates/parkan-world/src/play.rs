@@ -232,8 +232,8 @@ fn launches(
 
 /// How a knocked-off part leaves, stand-ins for the unread flight model (see
 /// [`Play::knock_off`]): its speed away from the unit and up, m/s, and its turn, rad/s.
-pub const FLIGHT_SPEED_OUT: f32 = 6.0;
-pub const FLIGHT_SPEED_UP: f32 = 8.0;
+pub const FLIGHT_SPEED_OUT: f32 = 2.0;
+pub const FLIGHT_SPEED_UP: f32 = 0.0;
 pub const FLIGHT_SPIN: f32 = 3.0;
 
 /// A knocked-off part in flight: the node knocked off, and it and the nodes it carries at
@@ -248,6 +248,9 @@ pub struct Flight {
     pub centre: Vec3,
     pub velocity: Vec3,
     pub axis: Vec3,
+    /// Its sphere's radius, and whether it has met the ground.
+    pub radius: f32,
+    pub landed: bool,
     pub base: Vec<(usize, Pose)>,
 }
 
@@ -864,10 +867,11 @@ impl Play {
     /// they stand.
     ///
     /// STAND-IN: docs/26-damage.md#not-established -- the flight model (`0x100131da`) is read
-    /// to move the part, lower its velocity's z each tick and hand the mesh its matrix, but
-    /// not transcribed: the part leaves at 6 m/s away from the unit's centre and 8 m/s up,
-    /// falls under gravity to the ground under it, and turns at 3 rad/s about a level axis
-    /// across its path.
+    /// to move the part, lower its velocity's z each tick and hand the mesh its matrix, and a
+    /// world query to end the flight early, but none of it is transcribed: the part drops
+    /// off at 2 m/s away from the unit's centre, falls under gravity turning at 3 rad/s
+    /// about a level axis across its path, and its flight ends when its sphere meets the
+    /// ground. The player remembers a destroyed part falling for about half a second.
     fn knock_off(&mut self, target: usize, part: usize, node: usize, now: f64) {
         let Some(t) = self.battle.combat.targets.get(target) else { return };
         let Some(p) = t.parts.get(part) else { return };
@@ -898,19 +902,27 @@ impl Play {
             centre,
             velocity: away * FLIGHT_SPEED_OUT + Vec3::Z * FLIGHT_SPEED_UP,
             axis: Vec3::new(-away.y, away.x, 0.0),
+            radius: p
+                .mesh
+                .nodes
+                .get(node)
+                .and_then(|n| p.mesh.slots.get(usize::from(n.slot_index[0])))
+                .map_or(0.0, |s| s.sphere[3] * p.scale),
+            landed: false,
             base: carried.into_iter().map(|n| (n, p.nodes[n])).collect(),
         });
     }
 
     /// Every flying part where its flight has it at `now`.
     fn fly(&mut self, now: f64) {
-        self.flights.retain(|f| now - f.start_ms <= FLIGHT_MS + 1000.0);
-        for f in &self.flights {
+        self.flights.retain(|f| now - f.start_ms <= FLIGHT_MS + 1000.0 && !f.landed);
+        for f in &mut self.flights {
             let t = ((now - f.start_ms).min(FLIGHT_MS) / 1000.0) as f32;
             let mut at = f.centre + f.velocity * t - Vec3::Z * (GRAVITY / 2.0 * t * t);
             let floor = self.ground.below(at.x, at.y, at.z + 1000.0).map(|h| h.point.z);
-            if let Some(z) = floor.filter(|&z| at.z < z) {
-                at.z = z;
+            if let Some(z) = floor.filter(|&z| at.z - f.radius <= z) {
+                at.z = at.z.max(z);
+                f.landed = true;
             }
             let half = f64::from(FLIGHT_SPIN * t) / 2.0;
             let (sin, cos) = (half.sin(), half.cos());
@@ -928,6 +940,11 @@ impl Play {
                 if let Some(pose) = part.nodes.get_mut(*n) {
                     *pose = flight.compose(base);
                 }
+            }
+            if f.landed
+                && let Some(life) = part.life.as_mut()
+            {
+                life.end_flight(f.node, now);
             }
         }
     }

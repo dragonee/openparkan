@@ -1008,24 +1008,25 @@ fn a_dummys_part_is_damaged_at_half_knocked_off_at_nothing_and_its_base_takes_th
     assert_eq!(life(&play).nodes[1].block(), 1);
     assert!(play.fx.instances.len() > sprites, "explode_aim_S plays");
 
-    // Nothing left: knocked off, it flies drawn for three seconds, then explodes and goes.
+    // Nothing left: knocked off, it drops, drawn, until it meets the ground, then explodes
+    // and goes.
     let before = play.battle.combat.targets[t].parts[0].nodes[1].translation;
     let events = hit(&mut play, 1, 400.0);
     assert!(has(&events, &|e| matches!(e, Event::KnockedOff { target, node: 1, .. } if *target == t)));
-    for _ in 0..60 {
-        play.tick(tick, [0.0; 2]);
+    let (mut gone_at, mut dropped) = (None, 0.0);
+    for k in 1..=200 {
+        let events = play.tick(tick, [0.0; 2]);
+        if has(&events, &|e| matches!(e, Event::Hidden { target, node: 1, .. } if *target == t)) {
+            gone_at = Some(k);
+            break;
+        }
+        let now = play.battle.combat.targets[t].parts[0].nodes[1].translation;
+        dropped = before[2] - now[2];
     }
-    let now = play.battle.combat.targets[t].parts[0].nodes[1].translation;
-    let moved = (0..3).map(|i| (now[i] - before[i]).powi(2)).sum::<f64>().sqrt();
-    assert!(moved > 3.0 && !life(&play).nodes[1].hidden(), "a second on it has flown {moved}");
-    let mut gone = false;
-    for _ in 0..130 {
-        gone |= has(
-            &play.tick(tick, [0.0; 2]),
-            &|e| matches!(e, Event::Hidden { target, node: 1, .. } if *target == t),
-        );
-    }
-    assert!(gone && life(&play).nodes[1].hidden(), "gone after its flight");
+    let seconds = gone_at.map(|k| k as f32 / 60.0);
+    assert!(seconds.is_some_and(|s| (0.1..=1.5).contains(&s)), "gone once it lands: {seconds:?}");
+    assert!(dropped > 0.2, "it fell {dropped} before it went");
+    assert!(life(&play).nodes[1].hidden());
     assert!(play.battle.combat.targets[t].alive, "the rest stands");
     assert!(!play.ground.solids[t].faces.is_empty());
 

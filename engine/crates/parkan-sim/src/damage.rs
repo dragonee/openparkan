@@ -275,6 +275,16 @@ impl Life {
         changes
     }
 
+    /// A flight ended early, as the world query at `0x100134c1` ends one: its time is up
+    /// at the next takt.
+    pub fn end_flight(&mut self, node: usize, now_ms: f64) {
+        for (n, end) in &mut self.flights {
+            if *n == node {
+                *end = end.min(now_ms);
+            }
+        }
+    }
+
     /// The life its nodes have left.
     pub fn total(&self) -> f32 {
         self.nodes.iter().map(|n| n.life).sum()
