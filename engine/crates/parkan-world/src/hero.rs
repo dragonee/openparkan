@@ -10,15 +10,18 @@ use std::rc::Rc;
 
 use anyhow::{Context, Result};
 use glam::{Quat, Vec3};
-use parkan_formats::control::{self, CAMERA_TYPE, Controller, GUN_TYPE};
+use parkan_formats::control::{
+    self, CAMERA_TYPE, Controller, GUN_TYPE, RADAR_PERIOD, RADAR_RANGE, RADAR_TYPE,
+};
 use parkan_formats::cpt::{self, ControlPoint};
 use parkan_formats::mission::Mission;
 use parkan_formats::pose::{Pose, multiply, rotate};
 use parkan_formats::{controls, gamedir};
 use parkan_sim::ground::Ground;
-use parkan_sim::guns::{CONTINUE_FIGHT, Gun, STATE_OFF, Shot};
+use parkan_sim::guns::{CONTINUE_FIGHT, Gun, STATE_OFF, Shot, Sight, TargetGate};
 use parkan_sim::input::{Hands, Pilot};
 use parkan_sim::machine::Walker;
+use parkan_sim::targeting::Radar;
 use parkan_sim::turret::{ARM_FOLD, ARM_UNFOLD, ITEM_CLOSING, ITEM_OPENING, Rig, view};
 
 use crate::assembly::{Assembly, LoadedMesh, Part};
@@ -26,6 +29,10 @@ use crate::battle::{Battle, STARTS_SELECTED};
 
 /// What `Iron_3D.ini` sets the mouse to when it says nothing.
 pub const DEFAULT_MOUSE_SENS: f32 = 100.0;
+/// A unit without a radar senses 1 m (`Control.dll:0x1000e7fc`); every shipped radar
+/// holds a scan 750 ms.
+pub const NO_RADAR_RANGE: f32 = 1.0;
+pub const NO_RADAR_PERIOD_MS: f32 = 750.0;
 /// Machine steps one tick runs one at a time before it hands the rest to the machine.
 const MAX_STEPS: usize = 2000;
 
@@ -64,6 +71,10 @@ pub struct Hero {
     /// The turret's guns, and the round kind each fires in its `Battle`.
     pub guns: Vec<Gun>,
     pub rounds: Vec<Option<usize>>,
+    /// The unit's one radar: its fitted radar part's, else its turret's (docs/25).
+    pub radar: Radar,
+    /// Where the guns' target stands, for their gates; the caller sets it each tick.
+    pub target_point: Option<Vec3>,
     fire_held: bool,
     /// Whether the turret, and the eye in it, are held steady against the body's gait
     /// yaw ([`Hero::chassis_pose`]). Off, the view swings as the game's does.
@@ -162,6 +173,19 @@ impl Hero {
         };
         let position = Vec3::from_array(placed.position);
         let walker = Walker::new(chassis_ctl, &chassis.mesh, &feet, position, placed.rotation);
+
+        // Only one radar counts: a fitted radar part takes over the turret's radar slot
+        // (docs/25-sensors.md, "A scan is a sphere, a falloff and three tests").
+        let mut radar = None;
+        for part in &parts {
+            let Some(c) = controller(assembly, &part.record)? else { continue };
+            if let Some(r) = c.components.iter().find(|k| k.type_id == RADAR_TYPE)
+                && (radar.is_none() || part.record != turret_part.record)
+            {
+                radar = Some(Radar::new(r.values[RADAR_RANGE], r.values[RADAR_PERIOD]));
+            }
+        }
+        let radar = radar.unwrap_or_else(|| Radar::new(NO_RADAR_RANGE, NO_RADAR_PERIOD_MS));
         Ok(Some(Hero {
             object,
             walker,
@@ -176,6 +200,8 @@ impl Hero {
             points,
             guns: Vec::new(),
             rounds: Vec::new(),
+            radar,
+            target_point: None,
             fire_held: false,
             steady: false,
             velocity: Vec3::ZERO,
@@ -219,11 +245,24 @@ impl Hero {
             // The gun keeps its round's top speed and whether it falls (`0x100297ef`).
             gun.round_speed = kind.map_or(0.0, |k| battle.combat.kinds[k].top_speed);
             gun.falls = controller(assembly, &c.resource.member).ok().flatten().is_some_and(|r| r.mode != 0);
+            // Values 8-10 from the round: its range, and a guided round's cone and lock.
+            if let Some(k) = kind.map(|k| &battle.combat.kinds[k]) {
+                gun.link(TargetGate::new(k.range, k.seeker.map(|s| (s.cone, s.reach, s.lock_ms))));
+            }
             if let Some(arm) = self.rig.arms.get_mut(self.guns.len()) {
                 arm.send(if gun.selected { ARM_UNFOLD } else { ARM_FOLD });
             }
             self.guns.push(gun);
             self.rounds.push(kind);
+        }
+    }
+
+    /// Hand the turret's guns `target` (`iron3d.dll:0x10091a80`): the turret is in
+    /// `CIS_MANUALCONTROL`, so only its guided guns take it (`Control.dll:0x10028164`), and
+    /// every gun's lock starts again.
+    pub fn relink(&mut self, target: Option<usize>) {
+        for g in &mut self.guns {
+            g.relink(if g.gate.guided() { target } else { None });
         }
     }
 
@@ -272,8 +311,23 @@ impl Hero {
         }
         // The turret's takt: its channels, the arms, and each mount's gun's ready byte.
         self.rig.update((dt_ms / 1000.0) as f32, &mut self.guns);
+        // What each gun's gate sees: the unit, its barrel point's direction, its target.
+        let sights: Vec<Sight> = self
+            .guns
+            .iter()
+            .map(|g| Sight {
+                unit: self.walker.body.position,
+                barrel: g
+                    .barrels
+                    .get(g.current)
+                    .and_then(|b| self.muzzle(b.channel))
+                    .map_or(Vec3::Y, |m| m.1),
+                target: g.target.and(self.target_point),
+            })
+            .collect();
         let mut shots = Vec::new();
-        for (i, g) in self.guns.iter_mut().enumerate() {
+        for (i, (g, sight)) in self.guns.iter_mut().zip(sights).enumerate() {
+            g.sight = sight;
             g.recharge();
             shots.extend(g.tick(self.time_ms).into_iter().map(|s| (i, s)));
             for b in &g.barrels {

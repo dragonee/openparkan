@@ -417,3 +417,159 @@ fn the_game_font_opens_and_lays_out_a_line() {
     assert!(width > 100.0 && width < 300.0, "the line is {width} pixels");
     assert!(placed.windows(2).all(|w| w[1].at[0] > w[0].at[0]), "the pen only moves right");
 }
+
+/// Mission 01's play with its progression, the hero standing still.
+fn mission_01_play() -> (parkan_world::play::Play, parkan_formats::mission::Mission) {
+    use parkan_formats::mission;
+    use parkan_world::play::Play;
+
+    let game = gamedir::find(None).expect("a Parkan install: set PARKAN_DIR");
+    let dir = gamedir::resolve(&game, gamedir::MISSION_01).unwrap();
+    let m = mission::parse(&std::fs::read(dir.join("data.tma")).unwrap(), "Mission.01").unwrap();
+    let mut play = Play::load(&game, &m).unwrap().expect("Mission 01 has a hero");
+    play.load_progression(&game, &dir, &m).unwrap();
+    (play, m)
+}
+
+/// Stand the hero `distance` from `target`'s placement, facing it, on the ground.
+fn stand_facing(play: &mut parkan_world::play::Play, target: usize, distance: f32, around: f32) {
+    use glam::Vec3;
+    let at_target = play.battle.combat.targets[target].position;
+    let at = (0..16)
+        .map(|k| around + k as f32 * std::f32::consts::TAU / 16.0)
+        .map(|a| at_target + Vec3::new(a.cos(), a.sin(), 0.0) * distance)
+        .find(|p| play.ground.below(p.x, p.y, 1000.0).is_some_and(|h| h.point.z > at_target.z - 9.0))
+        .expect("somewhere level to stand");
+    let facing = (at_target - at).with_z(0.0).normalize();
+    let w = &mut play.hero.walker;
+    w.body.position = Vec3::new(at.x, at.y, at_target.z + 20.0);
+    w.body.yaw = (-facing.x).atan2(facing.y);
+    w.follow_ground(&play.ground);
+    w.from = (w.body.position, w.body.yaw);
+    w.from_heading = w.body.yaw;
+}
+
+#[test]
+#[ignore = "needs the game install"]
+fn mission_01_greets_the_hero_and_completes_its_first_objective_once_the_targets_are_gone() {
+    use parkan_world::progress::Say;
+
+    let (mut play, _) = mission_01_play();
+    let tick = 1000.0 / 60.0;
+    play.tick(tick, [0.0; 2]);
+    let p = play.progression.as_ref().unwrap();
+    assert!(p.unanswered.is_empty(), "tut1_pl2 calls only what the engine answers: {:?}", p.unanswered);
+    // The hero starts inside route 0: messages 11 and 14 on the first run (docs/34).
+    let played: Vec<i64> = p.progress.played.iter().filter(|(_, v)| **v).map(|(k, _)| *k).collect();
+    assert_eq!(played, vec![11, 14]);
+    let welcome = p.messages.get(11).and_then(|m| m.text.clone()).expect("T01_I01's text");
+    assert!(play.says.contains(&Say::Text(welcome)));
+    let voices = play.says.iter().filter(|s| matches!(s, Say::Voice(v) if v.exists())).count();
+    assert_eq!(voices, 2, "{:?}", play.says);
+    play.says.clear();
+
+    // The five targets go: Trgt's robots count down, and the next run completes objective 0.
+    let trgt: Vec<i32> = play
+        .progression
+        .as_ref()
+        .unwrap()
+        .progress
+        .units
+        .iter()
+        .filter(|u| u.clan == 1)
+        .map(|u| u.id)
+        .collect();
+    assert_eq!(trgt.len(), 5);
+    for id in trgt {
+        play.progression.as_mut().unwrap().progress.destroyed(id);
+    }
+    for _ in 0..130 {
+        play.tick(tick, [0.0; 2]);
+    }
+    let p = play.progression.as_ref().unwrap();
+    assert_eq!(p.progress.objectives.iter().map(|o| o.state).collect::<Vec<_>>(), vec![1, 0, 0]);
+    assert!(p.progress.played[&17] && p.progress.played[&12]);
+    assert_eq!(p.progress.outcome, None);
+    let done = p.strings[&parkan_world::progress::STRING_OBJECTIVE_COMPLETE].clone();
+    assert!(play.says.contains(&Say::Text(done)), "{:?}", play.says);
+}
+
+#[test]
+#[ignore = "needs the game install"]
+fn the_plasma_rifle_holds_its_fire_without_a_target_and_its_bolt_follows_one() {
+    let (mut play, m) = mission_01_play();
+    let tick = 1000.0 / 60.0;
+    // The plasma rifle alone: 1 and 3 deselect the cannon and the laser, 2 selects it.
+    for key in ["SCAN_W_1", "SCAN_W_3", "SCAN_W_2"] {
+        play.hero.key(key, true);
+        play.tick(tick, [0.0; 2]);
+        play.hero.key(key, false);
+    }
+    let selected: Vec<bool> = play.hero.guns.iter().map(|g| g.selected).collect();
+    assert_eq!(selected, vec![false, true, false, false]);
+    assert!(play.hero.guns[1].gate.guided());
+    play.hero.key("SCAN_LMOUSE", true);
+    for _ in 0..180 {
+        play.tick(tick, [0.0; 2]);
+        assert!(play.battle.combat.rounds.is_empty(), "nothing on the radar at the start, so no bolt");
+    }
+    assert_eq!(play.targets.current, None);
+
+    // 60 m off a dummy: the list's takt picks it, and the rifle fires once its 0.25 s lock
+    // runs out, handing the bolt its target.
+    let object = m.objects.iter().position(|o| o.path.to_ascii_lowercase().ends_with("l_targ.dat")).unwrap();
+    let t = play.battle.objects.iter().position(|&o| o == object).unwrap();
+    stand_facing(&mut play, t, 60.0, 0.0);
+    let mut fired = None;
+    for _ in 0..180 {
+        play.tick(tick, [0.0; 2]);
+        if let Some(r) = play.battle.combat.rounds.first() {
+            fired = Some(*r);
+            break;
+        }
+    }
+    assert!(play.targets.current.is_some(), "the takt picked a target");
+    let round = fired.expect("a bolt leaves once a target is held");
+    assert_eq!(round.target, play.targets.current);
+    assert!(play.battle.combat.kinds[round.kind].seeker.is_some());
+}
+
+#[test]
+#[ignore = "needs the game install"]
+fn a_neutral_warbot_makes_itself_the_target_and_enter_captures_both_for_the_second_objective() {
+    use parkan_world::progress::{STRING_VACANT_VEHICLE, Say};
+
+    let (mut play, m) = mission_01_play();
+    let tick = 1000.0 / 60.0;
+    let target_of = |path: &str| {
+        let object = m.objects.iter().position(|o| o.path.to_ascii_lowercase().ends_with(path)).unwrap();
+        play.battle.objects.iter().position(|&o| o == object).unwrap()
+    };
+    let (mf1, helic) = (target_of("tut1_mf1.dat"), target_of("helic.dat"));
+    let vacant = play.progression.as_ref().unwrap().strings[&STRING_VACANT_VEHICLE].clone();
+
+    for (bot, name) in [(mf1, "tut1_mf1"), (helic, "helic")] {
+        stand_facing(&mut play, bot, 12.0, 3.5);
+        play.tick(tick, [0.0; 2]);
+        assert!(play.units[bot].announced, "{name} announced itself");
+        // Both stand within the hero's sensor range: Tab steps the list to this one.
+        for _ in 0..play.targets.listed.len() {
+            if play.targets.current == Some(bot) {
+                break;
+            }
+            play.targets.select_next();
+        }
+        assert_eq!(play.targets.current, Some(bot));
+        assert!(play.enter(), "Enter captures {name}");
+        assert_eq!(play.units[bot].clan, Some(play.player_clan));
+    }
+    assert!(play.says.contains(&Say::Text(vacant)));
+    for _ in 0..130 {
+        play.tick(tick, [0.0; 2]);
+    }
+    let p = play.progression.as_ref().unwrap();
+    assert_eq!(p.progress.robots(3, 0x0100_0000), 0);
+    assert_eq!(p.progress.robots(0, 0x0100_0000), 3);
+    assert_eq!(p.progress.objectives[1].state, 1, "Ntrl has none and Plr has at least two");
+    assert!(p.progress.played[&13] && p.progress.played[&19]);
+}

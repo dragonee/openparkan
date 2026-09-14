@@ -1,26 +1,85 @@
-//! A mission played: the hero, the ground it walks on, the battle around it and
-//! the effects it plays.
+//! A mission played: the hero, the ground it walks on, the battle around it, the
+//! effects it plays, the player's target and the mission's progression.
 
+use std::collections::HashMap;
 use std::path::Path;
 
 use anyhow::{Context, Result};
-use glam::Vec3;
+use glam::{Mat4, Vec3};
 use parkan_formats::control::{ACT_EFFECT_POINTS, ACT_EFFECT_TIME_POINT, ENTRY_LOAD};
+use parkan_formats::controls::{
+    CMD_ENTER_STATE, CMD_JAMES_AIM_TARGET, CMD_JAMES_SELECT_ENEMY, CMD_JAMES_SELECT_FRIEND,
+    CMD_JAMES_SELECT_TARGET,
+};
 use parkan_formats::materials::Library;
-use parkan_formats::mission::{KIND_BUILDING, Mission};
+use parkan_formats::mission::{Clan, KIND_BUILDING, KIND_ROCK, KIND_UNIT, KIND_VEGETATION, Mission, Value};
 use parkan_formats::{gamedir, landmesh};
 use parkan_sim::combat::{Event, Part, Round};
 use parkan_sim::effects::{Cue, Frame, Sprite};
 use parkan_sim::ground::Ground;
 use parkan_sim::hit::segment_mesh;
+use parkan_sim::targeting::{Contact, TargetList};
 
 use crate::assembly::Assembly;
 use crate::battle::Battle;
 use crate::fx::{Fx, Owner};
 use crate::hero::Hero;
 use crate::models::Objects;
+use crate::progress::{
+    Progression, STRING_VACANT_VEHICLE, Say, TARGET_SELECTED, VOICE_ENEMY_DETECTED, VOICE_UNIT_DETECTED,
+};
 use crate::textures::TextureStore;
 use crate::{settings, terrain};
+
+/// `Type` words the target list leaves out: a hero of the player's clan, a bridge and a
+/// ruin (`iron3d.dll:0x10091c80`).
+pub const ROBOT_HERO: u32 = 0x0102_0000;
+pub const BUILDING_BRIDGE: u32 = 0x8000_1000;
+pub const BUILDING_RUINE: u32 = 0x8000_2000;
+/// Enter takes a unit whose `Type` has no bit outside these (`iron3d.dll:0x10071fad`)
+/// within 20 across the ground (`0x10071fe7`).
+pub const CAPTURABLE_TYPES: u32 = 0x0103_e000;
+pub const CAPTURE_REACH: f32 = 20.0;
+/// A clan type: 0 nature, 3 neutral (docs/27).
+pub const CLAN_NATURE: u32 = 0;
+pub const CLAN_NEUTRAL: u32 = 3;
+/// A relation word toward a clan the list counts as hostile.
+pub const RELATION_HOSTILE: u32 = 0;
+
+/// What a target is beside what a round strikes: its clan, its `Type` word, its logical id.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Unit {
+    pub clan: Option<i64>,
+    pub type_word: u32,
+    pub logical_id: i32,
+    /// Placed as a unit, a building, or scenery.
+    pub kind: u32,
+    /// A neutral unit has made itself the hero's target once (`+0x134`).
+    pub announced: bool,
+}
+
+/// Where the player looks from: for the right button's pick.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct View {
+    pub eye: Vec3,
+    pub look: Vec3,
+    pub view_proj: Mat4,
+}
+
+/// Where a sphere is on screen under `view_proj`, in NDC, when it lies inside the six
+/// planes of the view.
+pub fn on_screen(view_proj: Mat4, centre: Vec3, radius: f32) -> Option<[f32; 2]> {
+    let [r0, r1, r2, r3] = [0, 1, 2, 3].map(|i| view_proj.row(i));
+    for plane in [r3 + r0, r3 - r0, r3 + r1, r3 - r1, r2, r3 - r2] {
+        let n = plane.truncate();
+        let length = n.length();
+        if length > 1e-6 && (n.dot(centre) + plane.w) / length < -radius {
+            return None;
+        }
+    }
+    let clip = view_proj * centre.extend(1.0);
+    (clip.w > 1e-6).then(|| [clip.x / clip.w, clip.y / clip.w])
+}
 
 /// A turret load-group effect: its name, the three control points it sits on, its id,
 /// and the node whose channel value drives it (action 14).
@@ -44,6 +103,18 @@ pub struct Play {
     pub killed: Vec<usize>,
     /// Sounds started and not yet played.
     pub cues: Vec<Cue>,
+    /// Each target's clan, type and logical id.
+    pub units: Vec<Unit>,
+    pub clans: Vec<Clan>,
+    /// The player's clan, and the hero's logical id.
+    pub player_clan: i64,
+    pub hero_id: i32,
+    /// The driven unit's target list (docs/25).
+    pub targets: TargetList,
+    /// The mission's progression, once loaded (docs/34).
+    pub progression: Option<Progression>,
+    /// What the game says, not yet shown or played.
+    pub says: Vec<Say>,
 }
 
 /// A round's own frame: y along its flight, z up, x to its side.
@@ -119,6 +190,26 @@ impl Play {
         for e in battle.explosions.iter().flatten().flatten().flatten() {
             fx.preload_explosion(e);
         }
+        let number = |v: Value| match v {
+            Value::Int(i) => i64::from(i),
+            Value::Float(f) => f as i64,
+        };
+        let units = battle
+            .objects
+            .iter()
+            .map(|&o| {
+                let object = &mission.objects[o];
+                Unit {
+                    clan: object.clan_id(),
+                    type_word: object.property("Type").map_or(0, |p| number(p.value)) as u32,
+                    logical_id: object.logical_id,
+                    kind: object.kind,
+                    announced: false,
+                }
+            })
+            .collect();
+        let player_clan = mission.objects[hero.object].clan_id().unwrap_or(0);
+        let hero_id = mission.objects[hero.object].logical_id;
         let mut play = Play {
             hero,
             ground: Ground::new(land),
@@ -129,6 +220,13 @@ impl Play {
             turret_effects,
             killed: Vec::new(),
             cues: Vec::new(),
+            units,
+            clans: mission.clans.clone(),
+            player_clan,
+            hero_id,
+            targets: TargetList::default(),
+            progression: None,
+            says: Vec::new(),
         };
         for i in 0..play.turret_effects.len() {
             let e = play.turret_effects[i].clone();
@@ -136,6 +234,164 @@ impl Play {
             play.fx.start(Owner::Turret(e.id), &e.name, frame, 1.0, 0.0, None);
         }
         Ok(Some(play))
+    }
+
+    /// Load the mission's progression from `mission_dir`: its player clan's script, its
+    /// messages and objectives.
+    pub fn load_progression(&mut self, game: &Path, mission_dir: &Path, mission: &Mission) -> Result<()> {
+        self.progression = Some(Progression::load(game, mission_dir, mission, self.hero.object)?);
+        Ok(())
+    }
+
+    /// Whether clan `other` is hostile to the player's: another clan, not nature's, toward
+    /// which the player's clan's relation word is 0 (`iron3d.dll:0x10039440`).
+    pub fn hostile(&self, other: Option<i64>) -> bool {
+        let Some(other) = other.filter(|&c| c != self.player_clan) else { return false };
+        let (Some(them), Some(us)) = (self.clan(other), self.clan(self.player_clan)) else { return false };
+        them.kind != CLAN_NATURE
+            && us
+                .relations
+                .iter()
+                .find(|(name, _)| *name == them.name)
+                .is_some_and(|&(_, w)| w == RELATION_HOSTILE)
+    }
+
+    fn clan(&self, clan: i64) -> Option<&Clan> {
+        usize::try_from(clan).ok().and_then(|c| self.clans.get(c))
+    }
+
+    /// What the target list knows of every target.
+    ///
+    /// STAND-IN: docs/25-sensors.md#the-players-target--read-and-measured -- whether scenery
+    /// is among the radar's contacts is not read: a target must have a unit record, and
+    /// trees and rocks have none, so they are never listed.
+    pub fn contacts(&self) -> Vec<Contact> {
+        self.battle
+            .combat
+            .targets
+            .iter()
+            .zip(&self.units)
+            .map(|(t, u)| {
+                let friend = u.clan == Some(self.player_clan);
+                Contact {
+                    position: t.position,
+                    centre: t.centre,
+                    radius: t.radius,
+                    alive: t.alive && !matches!(u.kind, KIND_VEGETATION | KIND_ROCK),
+                    building: u.kind == KIND_BUILDING,
+                    hostile: self.hostile(u.clan),
+                    friend,
+                    unlisted: (friend && u.type_word == ROBOT_HERO)
+                        || u.type_word == BUILDING_BRIDGE
+                        || u.type_word == BUILDING_RUINE,
+                }
+            })
+            .collect()
+    }
+
+    /// A new target: `TARGET_SELECTED`, and the guided guns take it (`0x10090a70`).
+    fn target_changed(&mut self) {
+        self.hero.relink(self.targets.current);
+        if let Some(s) = self.progression.as_ref().and_then(|p| p.sound(TARGET_SELECTED)) {
+            self.says.push(Say::Sound(s));
+        }
+    }
+
+    fn say_sound(&mut self, name: &str, voice: bool) {
+        if let Some(s) = self.progression.as_ref().and_then(|p| p.sound(name)) {
+            self.says.push(if voice { Say::Voice(s) } else { Say::Sound(s) });
+        }
+    }
+
+    /// The target list's takt on the hero, and the neutral units that make themselves its
+    /// target (`iron3d.dll:0x100757ad`).
+    fn update_targets(&mut self) {
+        let world = self.contacts();
+        let unit = self.hero.walker.body.position;
+        let range = self.hero.radar.range;
+        let contacts = self.hero.radar.scan(self.hero.time_ms, unit, &world).to_vec();
+        let changes = self.targets.takt(unit, range, &contacts, &world);
+        if changes.target {
+            self.target_changed();
+        }
+        if changes.enemy_detected {
+            self.say_sound(VOICE_ENEMY_DETECTED, true);
+        }
+        for (i, seen) in world.iter().enumerate() {
+            let u = self.units[i];
+            let neutral = u.clan.and_then(|c| self.clan(c)).is_some_and(|c| c.kind == CLAN_NEUTRAL);
+            if u.announced || !neutral || u.kind != KIND_UNIT || !seen.alive {
+                continue;
+            }
+            if seen.position.truncate().distance(unit.truncate()) <= range {
+                self.units[i].announced = true;
+                if self.targets.set(Some(i)) {
+                    self.target_changed();
+                }
+                if let Some(text) =
+                    self.progression.as_ref().and_then(|p| p.strings.get(&STRING_VACANT_VEHICLE))
+                {
+                    self.says.push(Say::Text(text.clone()));
+                }
+                self.say_sound(VOICE_UNIT_DETECTED, true);
+            }
+        }
+        self.hero.target_point = self.targets.current.and_then(|t| world.get(t)).map(|c| c.position);
+    }
+
+    /// One of `iron3d.dll`'s commands (`0x10071cd0`), the player looking from `view`.
+    /// Returns whether it was one this answers.
+    ///
+    /// STAND-IN: docs/25-sensors.md#the-players-target--read-and-measured -- the unit
+    /// record's `+0x98` and `+0x94`, where the right button's ray starts and the margin
+    /// its pick keeps from the unit, are not read: both are 0.
+    pub fn command(&mut self, command: &str, view: &View) -> bool {
+        let world = self.contacts();
+        let unit = self.hero.walker.body.position;
+        let changed = match command {
+            CMD_JAMES_SELECT_TARGET => self.targets.select_next(),
+            CMD_JAMES_SELECT_ENEMY => self.targets.select_nearest(unit, &world, |c| c.hostile),
+            CMD_JAMES_SELECT_FRIEND => self.targets.select_nearest(unit, &world, |c| c.friend),
+            CMD_JAMES_AIM_TARGET => {
+                let range = self.hero.radar.range;
+                self.targets.aim(unit, view.eye, view.look, 0.0, 0.0, range, &world, |c, r| {
+                    on_screen(view.view_proj, c, r)
+                })
+            }
+            CMD_ENTER_STATE => {
+                self.enter();
+                false
+            }
+            _ => return false,
+        };
+        if changed {
+            self.target_changed();
+        }
+        true
+    }
+
+    /// `CMD_ENTER_STATE` (`iron3d.dll:0x10071f08`, docs/27): the hero's target, a unit
+    /// within 20 across the ground, is captured into the player's clan when its clan is
+    /// neutral.
+    ///
+    /// STAND-IN: docs/27-ownership.md#a-neutral-unit-is-taken-by-the-hero--read-and-measured
+    /// -- the hero boarding what it captured is read, but the engine drives only the hero:
+    /// the captured unit stays where it stands, and Enter on a unit of the player's own
+    /// clan does nothing.
+    pub fn enter(&mut self) -> bool {
+        let Some(t) = self.targets.current else { return false };
+        let u = self.units[t];
+        let position = self.battle.combat.targets[t].position;
+        let neutral = u.clan.and_then(|c| self.clan(c)).is_some_and(|c| c.kind == CLAN_NEUTRAL);
+        let near = position.truncate().distance(self.hero.walker.body.position.truncate()) <= CAPTURE_REACH;
+        if u.kind != KIND_UNIT || u.type_word & !CAPTURABLE_TYPES != 0 || !near || !neutral {
+            return false;
+        }
+        self.units[t].clan = Some(self.player_clan);
+        if let Some(p) = self.progression.as_mut() {
+            p.progress.captured(u.logical_id, self.player_clan);
+        }
+        true
     }
 
     /// Give the rounds models and pooled instances among `objects`, and resolve the
@@ -179,6 +435,7 @@ impl Play {
     /// One tick: the hero, then every round that left one of its barrels, then the
     /// battle's frame, then the effects.
     pub fn tick(&mut self, dt_ms: f64, mouse: [f32; 2]) -> Vec<Event> {
+        self.update_targets();
         let shots = self.hero.tick(dt_ms, mouse, &self.ground);
         let now = self.hero.time_ms;
         for (g, shot) in shots {
@@ -194,7 +451,8 @@ impl Play {
             let direction = aim.map_or(barrel, |p| p - muzzle);
             // The player's guns carry no level ratio: property 180 goes to hostile units only.
             let velocity: Vec3 = self.hero.world_velocity();
-            if let Some(id) = self.battle.combat.fire(kind, None, muzzle, direction, velocity, 1.0, None) {
+            let target = gun.target;
+            if let Some(id) = self.battle.combat.fire(kind, None, muzzle, direction, velocity, 1.0, target) {
                 // The round's load group creates its flight effects at spawn.
                 let round = *self.battle.combat.rounds.last().expect("just fired");
                 for (name, points) in self.battle.kinds[kind].effects.clone() {
@@ -243,9 +501,34 @@ impl Play {
         for e in &events {
             if let Event::Killed { target } = e {
                 self.killed.push(self.battle.objects[*target]);
+                if let Some(p) = self.progression.as_mut() {
+                    p.progress.destroyed(self.units[*target].logical_id);
+                }
             }
         }
+        self.progress();
         events
+    }
+
+    /// The progression's takts and handler, and what they say.
+    fn progress(&mut self) {
+        if self.progression.is_none() {
+            return;
+        }
+        let mut at: HashMap<i32, Vec3> = self
+            .units
+            .iter()
+            .zip(&self.battle.combat.targets)
+            .map(|(u, t)| (u.logical_id, t.position))
+            .collect();
+        at.insert(self.hero_id, self.hero.walker.body.position);
+        let now = self.hero.time_ms;
+        let Some(p) = self.progression.as_mut() else { return };
+        let notices = p.tick(now, |id| at.get(&id).copied());
+        for n in &notices {
+            let says = p.say(n);
+            self.says.extend(says);
+        }
     }
 
     /// A round's control points in the world, as action 4's frame.
