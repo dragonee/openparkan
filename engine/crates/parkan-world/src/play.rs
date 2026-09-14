@@ -510,9 +510,14 @@ impl Play {
             })
             .collect();
         let target_count = battle.combat.targets.len();
-        let buildings: Vec<Building> = (0..target_count)
+        let mut buildings: Vec<Building> = (0..target_count)
             .filter_map(|t| Building::load(&mut assembly, mission, battle.objects[t], t))
             .collect();
+        for b in &mut buildings {
+            if let Some(part) = battle.combat.targets.get(b.target).and_then(|t| t.parts.get(b.part)) {
+                b.place_zone(part);
+            }
+        }
         let factories: Vec<Factory> = (0..target_count)
             .filter_map(|t| Factory::load(&mut assembly, mission, battle.objects[t], t))
             .collect();
@@ -1674,11 +1679,12 @@ impl Play {
             announced: false,
             designation,
         });
-        // A built bot is numbered by its clan: one more than the units the clan has named,
-        // the hero among them (`0x10075d50`, docs/38, "The name").
+        // A built bot is numbered by its clan: one more than the units the clan had named,
+        // the hero among them (`0x10075d50`, docs/38, "The name"); the count here holds the
+        // new unit already.
         let named = self.units.iter().filter(|u| u.clan == Some(clan) && u.kind == KIND_UNIT).count()
             + usize::from(clan == self.player_clan);
-        let name = project.name.replacen("-X ", &format!("-{} ", named + 1), 1);
+        let name = project.name.replacen("-X ", &format!("-{named} "), 1);
         self.names.push(name);
         self.deleted.push(false);
         let target = &self.battle.combat.targets[t];

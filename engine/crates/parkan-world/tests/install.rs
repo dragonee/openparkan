@@ -1806,3 +1806,59 @@ fn mission_02s_hero_boards_its_warbot_flies_it_and_gets_out_where_it_may_land() 
     );
     assert!((out.y - bot.y).abs() < 0.5 && out.x > bot.x);
 }
+
+#[test]
+#[ignore = "needs the game install"]
+fn mission_02_is_won_by_the_factory_the_warbot_it_builds_and_the_outpost_on_the_island() {
+    use parkan_world::factory::Project;
+    use parkan_world::play::Mode;
+
+    let (mut play, _) = mission_02_play();
+    let tick = |play: &mut parkan_world::play::Play, seconds: f32| {
+        for _ in 0..(seconds * 60.0) as usize {
+            play.update_input();
+            play.tick(1000.0 / 60.0, [0.0; 2]);
+        }
+    };
+    // 1. The Large Factory's pod: captured, its screen opens, objective 0.
+    let factory = play.buildings.iter().find(|b| b.doors.len() == 3).unwrap().target;
+    assert!(play.stand_on_pod(factory));
+    tick(&mut play, 6.0);
+    assert_eq!(play.mode(), Mode::Factory(factory));
+    // 2. A design accepted and built: a free L-2f in 60 s; objective 1.
+    let f = play.factories.iter().position(|f| f.target == factory).unwrap();
+    play.factories[f].accept(Project {
+        path: "UNITS\\bld_unit_-2147483647.dat".into(),
+        name: "LFW-X Warrior".into(),
+        type_word: 0x0100_8000,
+        chassis_size: 4,
+        ore: 411.0,
+        power: 226.5,
+        lines: Vec::new(),
+        sphere: None,
+    });
+    play.factory_click(factory, parkan_world::cockpit::factory::Click::Batch);
+    assert!(play.factories[f].build.is_some());
+    play.factory_click(factory, parkan_world::cockpit::factory::Click::Exit);
+    assert_eq!(play.mode(), Mode::OnFoot);
+    tick(&mut play, 64.0);
+    let bot = play.robots.last().map(|r| r.0).unwrap();
+    assert_eq!(play.names[bot], "LFW-2 Warrior");
+    // 3. Aboard, over the island's west shore, down to land, out.
+    play.hero.walker.body.position =
+        play.robots.last().unwrap().1.walker.body.position + glam::Vec3::new(6.0, 0.0, 0.0);
+    assert!(play.board(bot));
+    let over_island = glam::Vec3::new(1320.0, 880.0, 165.0);
+    play.robots.last_mut().unwrap().1.walker.body.position = over_island;
+    play.key("SCAN_F", true);
+    tick(&mut play, 8.0);
+    play.key("SCAN_F", false);
+    assert!(play.roll_back(), "out on the island: the bot at {}", play.driven().walker.body.position);
+    // 4. The Outpost's pod: captured, objective 2, and the mission is won.
+    let outpost = play.buildings.iter().find(|b| b.doors.is_empty()).unwrap().target;
+    assert!(play.stand_on_pod(outpost));
+    tick(&mut play, 6.0);
+    let p = play.progression.as_ref().unwrap();
+    assert_eq!(p.progress.objectives.iter().map(|o| o.state).collect::<Vec<_>>()[..3], [1, 1, 1]);
+    assert_eq!(p.progress.outcome, Some(true), "MISSION COMPLETE");
+}

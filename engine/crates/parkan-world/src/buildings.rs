@@ -82,6 +82,8 @@ pub struct Building {
     pub scale: f32,
     pub doors: Vec<Door>,
     pub pod: Option<Pod>,
+    /// The pod's zone: its node's sphere at rest, as placed.
+    pub zone: Option<(Vec3, f32)>,
     /// The controller's channels, which the items name.
     controller: Controller,
 }
@@ -170,6 +172,7 @@ impl Building {
                 scale: placed.placed_scale(),
                 doors,
                 pod,
+                zone: None,
                 controller,
             });
         }
@@ -215,9 +218,14 @@ impl Building {
         Some((Vec3::new(c[0] as f32, c[1] as f32, c[2] as f32), r * part.scale))
     }
 
-    /// The pod node's sphere centre in the world.
-    pub fn pod_centre(&self, part: &Part) -> Option<Vec3> {
-        Self::sphere(part, self.pod.as_ref()?.node).map(|(c, _)| c)
+    /// Keep the pod's zone from `part`'s nodes as placed, before anything plays them.
+    pub fn place_zone(&mut self, part: &Part) {
+        self.zone = self.pod.as_ref().and_then(|p| Self::sphere(part, p.node));
+    }
+
+    /// The pod's zone's centre in the world.
+    pub fn pod_centre(&self, _part: &Part) -> Option<Vec3> {
+        self.zone.map(|z| z.0)
     }
 
     /// Whether `at` is in the pod's zone: within 0.8 of the pod part's radius across the
@@ -226,10 +234,10 @@ impl Building {
     /// STAND-IN: docs/24-motion.md#walking-into-a-building--read-and-measured -- which node's
     /// box bounds the zone in height (`0x10058607`) is not read. The pod node's own level-0
     /// box is under a metre tall and above the floor a unit stands on (0.9 on Mission 02's
-    /// Large Factory), so the pod node's sphere bounds it in height instead.
-    pub fn in_zone(&self, part: &Part, at: Vec3) -> bool {
-        let Some(pod) = &self.pod else { return false };
-        let Some((centre, radius)) = Self::sphere(part, pod.node) else { return false };
+    /// Large Factory), and the Outpost's pod node plays 8.7 m up to its first frame, so the
+    /// pod node's sphere as placed, at rest, bounds the zone in height.
+    pub fn in_zone(&self, _part: &Part, at: Vec3) -> bool {
+        let Some((centre, radius)) = self.zone else { return false };
         centre.truncate().distance(at.truncate()) <= POD_ZONE_SHARE * radius
             && (at.z - centre.z).abs() <= radius
     }
