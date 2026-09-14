@@ -362,7 +362,8 @@ impl Play {
         let world = self.contacts();
         let unit = self.hero.walker.body.position;
         let range = self.hero.radar.range;
-        let contacts = self.hero.radar.scan(self.hero.time_ms, unit, &world).to_vec();
+        let now = self.hero.time_ms;
+        let contacts = self.hero.radar.scan(now, unit, &world).to_vec();
         let changes = self.targets.takt(unit, range, &contacts, &world);
         if changes.target {
             self.target_changed();

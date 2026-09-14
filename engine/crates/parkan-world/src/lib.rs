@@ -7,6 +7,7 @@ pub mod models;
 pub mod play;
 pub mod progress;
 pub mod resources;
+pub mod robot;
 pub mod settings;
 pub mod terrain;
 pub mod text;
