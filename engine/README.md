@@ -230,6 +230,50 @@ Not yet: the view from under the water, which draws only the beds. The lake
 comes out bluer than the recording's, whose water is brighter than the sky it
 reflects (not established).
 
+**M11.** Mission 02, *The Constructor*: buildings taken and entered, a factory
+that builds what the warbot designer draws, and a warbot the hero boards.
+
+- The mission's script is answered: function 52 gives a building's owner, so
+  its captures complete only when made. Its briefing's subtitles change within
+  0.35 s of a recording's.
+- A building's controller gives its doors and its control pod. A unit standing
+  on the building is its child: a door opens for a child near it, is open when
+  its item stops, lets units through its faces, and closes 5 s after opening
+  once free. A building's faces push the units on it too. The pod opens for a
+  child in its zone and, when it has opened with the child still there, fires:
+  a building of another clan changes owner with "Building is captured" and its
+  voice, and for the player's hero a plant opens the factory screen.
+- The landscape is cut away inside a building's inner ground-plan ring, from the
+  ground queries and the draw; its black `DEFAULT` doorway quads let a mover
+  through, and the slope brake is left out on its faces. Lightmaps light a
+  building's lit batches, and each building runs its load group: the Large
+  Factory's lamps, screens and chimney smoke, Mission 01's bridge lights.
+- The factory screen, laid out as docs/36 reads it, replaces the HUD in view
+  mode 5: the Ore and Energy rows, the header and exit, the project box with its
+  icons, free minds and turning preview, and the production row. Build and
+  batch start `M_Task_Construct`'s budgets (a free bot costs no ore, 1 power and
+  its size-table time), and the finished bot appears at the hall way's creation
+  vertex, numbered by its clan (LFW-2), escapes, joins its clan's list and
+  announces itself.
+- The warbot designer, as docs/37 and docs/38 read it: the source and destination
+  panels with their tabs, rows, turning previews and part boxes; the project
+  view with its prompt, callout and unit box (mass and spare payload, top speed,
+  defence, offence, sensor range, red when over); fitting by double click with
+  every slot filled from its `_df` part; accept hands the design to the factory.
+  The catalogue is the player clan's research tree.
+- Enter boards a large bot of the player's clan within 20: the hero leaves the
+  world, the bot's own table drives it (R and F climb and sink a flyer), its
+  cockpit and camera make the view, and the HUD is the bot's. Esc gets out at
+  the first place about it over land, low enough for a flyer, or says "Risk
+  area! Landing impossible."
+
+On Mission 02 the factory's pod captures it, the design is built in 60 s, the
+hero flies the warbot to the island, gets out and takes the Outpost from its
+pod, and the mission is won. Not yet: the walk from the factory's door down to
+its pod, whose stairs and walls still stop the walker (use `--pod`); the chimney
+smoke is orange where the recording's is black; the designer's save and load;
+the own panel's unit while aboard.
+
 This directory also holds what the rest will follow:
 
 - **`docs/`** is the source of truth. Every behaviour the engine implements is
@@ -299,6 +343,13 @@ slots, accept hands the design to the factory, and exit or Esc closes it.
 `--designer` draws a screenshot with the designer open on the first factory,
 and `--design PART,…` fits those parts to it in turn; `accept` among them
 clicks accept, leaving the factory screen with the project.
+
+Standing on a building's control pod captures it; `--pod NAME` starts the hero
+on the pod of the building whose path ends in NAME (`--pod lplant01.dat` on
+Mission 02), and `--at X,Y,YAW` anywhere on the ground. Enter boards a large bot
+of the player's clan the hero has targeted within 20 m, and Esc gets out;
+`--drive PATH` makes a unit of that design beside the hero and boards it
+(`--drive 'UNITS\bld_unit_-2147483647.dat'`).
 
 ## Checks
 
