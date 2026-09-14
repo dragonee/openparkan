@@ -307,7 +307,7 @@ streams:
 | 7 | 16 | face | face record: flags, edge neighbours, normal, winged-edge link |
 | 13 | 20 | batch | draw batch: material, index range, vertex range |
 | 17 | 20 | node | building interior path graph — see below |
-| 10 | 4 | sub-object | one `uint32`, zero throughout |
+| 10 | — | node | a label a node: `uint32` length, the bytes and a NUL; empty throughout `static.rlb`, a socket's part prefix on units ([38-designs.md](38-designs.md#sockets-carry-the-part-prefix-they-take--measured-and-read)) |
 | 2 | 68 | slot | 140-byte header, then triangle and batch ranges |
 | 8, 15, 19 | — | — | animation keys and auxiliary streams, unresolved |
 

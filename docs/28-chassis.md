@@ -96,9 +96,11 @@ page item's name at `+0xc4`) works like this:
 - **Guns.** `e_gun_` is built the same way (`0x10048311`).
 
 So the size letter and the slot label are kept by what the editor offers,
-not by what the engine accepts. Where each page item's name comes from is not
-traced, so that the internal-part pages are keyed on the slot labels is still
-a *guess*.
+not by what the engine accepts. ~~Where each page item's name comes from is not
+traced.~~ Answered in [38-designs.md](38-designs.md): the turret and gun pages
+are keyed on the sockets' mesh labels (`e_tur_bb`, `universal_bl`), the
+internal-part pages on the slot labels, and a chosen chassis or turret fills
+each slot with its `<label>_df` part.
 
 **The slot records carry defaults** — *measured*. Every chassis's engine slot
 is value 1 at power 20, its battery 10,000 at 250 a second, its repair slot 1

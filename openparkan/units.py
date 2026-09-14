@@ -201,6 +201,49 @@ class Load:
         return self.total > self.payload + self.body
 
 
+@dataclass(frozen=True)
+class NodeMass:
+    """One merged node of an assembly: what it weighs and how much it can take."""
+
+    #: The ``.ndp`` density, and the level-0 slot's volume and area.
+    density: float
+    volume: float
+    area: float
+    #: The ``.ndp`` hit points.
+    life: float
+    #: Whether the node came with the root, the chassis's own body.
+    root: bool
+
+
+@dataclass
+class Assembly:
+    """An assembly put together as ``AniMesh.dll`` and ``Control.dll`` load it.
+
+    The root brings every node and record; a turret or gun brings its nodes
+    but its node 0, where it attaches, and appends its records; an internal
+    part or clip replaces the record at its slot (docs/28-chassis.md).
+    """
+
+    #: The root controller's authored payload (+124) and forward top speed (+48).
+    payload: float
+    top_speed: float
+    devices: list[control.Component]
+    nodes: list[NodeMass]
+
+    def of_type(self, type_id: int) -> list[control.Component]:
+        return [d for d in self.devices if d.type_id == type_id]
+
+    @property
+    def load(self) -> Load:
+        """What it weighs (``Control.dll:0x1000fac0``)."""
+        armour = self.of_type(control.ARMOUR_TYPE)
+        per_area = armour[-1].values[0] if armour else 0.0
+        total = sum(n.density * n.volume + per_area * n.area for n in self.nodes)
+        total += sum(d.mass for d in self.devices)
+        body = sum(n.density * n.volume for n in self.nodes if n.root)
+        return Load(payload=self.payload, body=body, total=total)
+
+
 class Workshop:
     """Everything a sheet is read from, opened once for many units."""
 
@@ -225,8 +268,8 @@ class Workshop:
         ref = record.mesh
         return mesh.parse(self.armoury.read(ref), ref.member) if ref else None
 
-    def _node_weights(self, record: objects.ObjectRecord) -> list[tuple[float, float, float]]:
-        """Each node's (density, level-0 volume, level-0 area); zeros without a slot."""
+    def _node_weights(self, record: objects.ObjectRecord, root: bool) -> list[NodeMass]:
+        """Each node's density, level-0 volume and area, and life; zeros without a slot."""
         model = self._mesh(record)
         rows = self._damage(record)
         if model is None:
@@ -235,49 +278,47 @@ class Workshop:
         for node, row in zip(model.nodes, rows, strict=False):
             index = node.slot_index[0]
             slot = model.slots[index] if 0 <= index < len(model.slots) else None
-            out.append((row.unknown, slot.volume if slot else 0.0, slot.area if slot else 0.0))
+            out.append(NodeMass(row.unknown, slot.volume if slot else 0.0,
+                                slot.area if slot else 0.0, row.durability, root))
         return out
 
-    def weigh(self, dat: str | Path) -> Load | None:
-        """What an assembly weighs, and so its spare payload; None without a root controller.
+    def assemble(self, unit: objects.UnitDefinition) -> Assembly | None:
+        """The assembly's merged nodes and devices; None without a root controller.
 
-        Parts join in the file's order.  The root brings every node and record;
-        a turret or gun brings its nodes but its node 0, where it attaches, and
-        appends its records; an internal part or clip replaces the record at
-        its slot (docs/28-chassis.md).
+        Parts join in the file's order.
         """
-        unit = objects.load_unit(Path(dat))
         parents = unit.parents()
-        devices: list[control.Component] = []
+        assembly = None
         first_device: dict[int, int] = {}
-        nodes: list[tuple[float, float, float, bool]] = []
-        payload = None
         for i, c in enumerate(unit.components):
             member = c.ref.member.lower()
             record = self.library.get(member)
             parsed = self.armoury.controller(member)
             if record is None or parsed is None:
                 continue
+            if i == 0:
+                assembly = Assembly(payload=parsed.payload,
+                                    top_speed=parsed.triples[control.TRIPLE_TOP_SPEED][1],
+                                    devices=[], nodes=[])
+            if assembly is None:
+                continue
             if i == 0 or record.tag == objects.EXTERNAL_TAG:
-                if i == 0:
-                    payload = parsed.payload
-                first_device[i] = len(devices)
-                devices.extend(parsed.components)
-                weights = self._node_weights(record)
-                nodes.extend((*w, i == 0) for w in (weights if i == 0 else weights[1:]))
+                first_device[i] = len(assembly.devices)
+                assembly.devices.extend(parsed.components)
+                weights = self._node_weights(record, i == 0)
+                assembly.nodes.extend(weights if i == 0 else weights[1:])
             elif record.tag == objects.INTERNAL_TAG and parsed.components \
                     and parents[i] in first_device:
                 slot = first_device[parents[i]] + c.attach_node
-                if 0 <= slot < len(devices):
-                    devices[slot] = parsed.components[0]
-        if payload is None:
-            return None
-        armour = [d for d in devices if d.type_id == control.ARMOUR_TYPE]
-        per_area = armour[-1].values[0] if armour else 0.0
-        total = sum(density * volume + per_area * area for density, volume, area, _ in nodes)
-        total += sum(d.mass for d in devices)
-        body = sum(density * volume for density, volume, _area, root in nodes if root)
-        return Load(payload=payload, body=body, total=total)
+                if 0 <= slot < len(assembly.devices):
+                    assembly.devices[slot] = parsed.components[0]
+        return assembly
+
+    def weigh(self, dat: str | Path | objects.UnitDefinition) -> Load | None:
+        """What an assembly weighs, and so its spare payload; None without a root controller."""
+        unit = dat if isinstance(dat, objects.UnitDefinition) else objects.load_unit(Path(dat))
+        assembly = self.assemble(unit)
+        return assembly.load if assembly else None
 
     def _damage(self, record: objects.ObjectRecord) -> list[objects.NodeDamage]:
         ref = record.damage

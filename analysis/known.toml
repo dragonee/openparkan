@@ -21488,3 +21488,451 @@ kind = "datum"
 name = "object class to query mask, 1 << class"
 read = true
 doc = "docs/39-boarding.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1006f6d0"
+kind = "function"
+name = "Iron_3D.ini [TEMP]: NORMALIZE, OFFENCE_MIN/MAX, DEFENCE_MIN/MAX into 0x1010bf60..0x1010bf70"
+doc = "docs/38-designs.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1006fc00"
+kind = "function"
+name = "constructor unit box: title, weight/spare 124/137 '%-.f / %-.f', speed 145 x 3.6, defence 177, offence 178, sensor 0x50; returns spare > 0"
+doc = "docs/38-designs.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1006ff14"
+kind = "site"
+name = "unit box: the weight figures red 0xffff0000 unless the spare payload is above 0, else 0xffb4b4ff"
+doc = "docs/38-designs.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100700e3"
+kind = "site"
+name = "unit box defence: with [TEMP] NORMALIZE, 0 / 100 / round(100 / (max - min) x (v - min))"
+doc = "docs/38-designs.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100702f5"
+kind = "site"
+name = "unit box offence: the same normalisation over OFFENCE_MIN/MAX"
+doc = "docs/38-designs.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1007068e"
+kind = "site"
+name = "unit box returns true only when the spare payload is above 0"
+doc = "docs/38-designs.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100765e0"
+kind = "function"
+name = "design name '%s-%s %s': three letters, itoa(n) or 'X' for 0, the class word"
+doc = "docs/38-designs.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10076490"
+kind = "function"
+name = "class word by Type: 6200 transport, 6201 builder, 6202 warrior, 6203 HQ, 6204 hero, else 6205 Unknown"
+doc = "docs/38-designs.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10075eb2"
+kind = "site"
+name = "unit naming: the clan's count is raised for every unit named, Human and Animal included"
+doc = "docs/38-designs.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1004f37b"
+kind = "site"
+name = "constructor draw: the design's name (number 0) over the unit box"
+doc = "docs/38-designs.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10050409"
+kind = "site"
+name = "constructor: accept enabled by a design, a fitted turret (+0xad7f) and spare payload; save by a design"
+doc = "docs/38-designs.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100510a8"
+kind = "site"
+name = "constructor save: needs a design; opens the name entry (+0xad7e)"
+doc = "docs/38-designs.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1008a879"
+kind = "site"
+name = "catalogue collector: keeps a prefix match only if researched and in the tree, unless FULL_RESEARCH_TREE"
+doc = "docs/38-designs.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1008a9a0"
+kind = "function"
+name = "catalogue collector over several prefixes: TRFB order, any prefix matching"
+doc = "docs/38-designs.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10048338"
+kind = "site"
+name = "gun page: a socket label ending 'r' lists e_gun_<size>c then e_gun_<size>l, else e_gun_ + its last two letters"
+doc = "docs/38-designs.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10048aec"
+kind = "site"
+name = "chassis page: the grade from game +0x2c +8 +0x18 picks r_t..r_b"
+doc = "docs/38-designs.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1004878b"
+kind = "site"
+name = "a constructor page holds at most 64 rows"
+doc = "docs/38-designs.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100519e0"
+kind = "function"
+name = "constructor: fit the part of a research item by its category (0x1008a690)"
+doc = "docs/38-designs.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1008a690"
+kind = "function"
+name = "part category: 0 chassis, 1 turret or building turret/defence/upgrade, 2 weapon or building radar, 3 device, 4 ammo, 5 building, 6 brain, 7 armour"
+doc = "docs/38-designs.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10051bb0"
+kind = "function"
+name = "constructor chassis fit: preview object, interfaces 0xb and 0x202, turret page from node labels, slots filled with <label>_df"
+doc = "docs/38-designs.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10051e5a"
+kind = "site"
+name = "chassis fit: each node's label (AniMesh slot 6) becomes a turret page row"
+doc = "docs/38-designs.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10052017"
+kind = "site"
+name = "chassis fit: i_brn_ slots skipped, i_arm_ slots filed on the armour page"
+doc = "docs/38-designs.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100520bc"
+kind = "site"
+name = "chassis fit: a slot's default part is its label + '_df', fitted when offered"
+doc = "docs/38-designs.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10052570"
+kind = "function"
+name = "constructor turret fit"
+doc = "docs/38-designs.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100525a4"
+kind = "site"
+name = "turret fit: sets the turret-fitted flag +0xad7f"
+doc = "docs/38-designs.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10052a92"
+kind = "site"
+name = "turret fit: '_df' defaults for its slots"
+doc = "docs/38-designs.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10052fb0"
+kind = "function"
+name = "constructor gun fit"
+doc = "docs/38-designs.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100532ed"
+kind = "site"
+name = "gun fit: '_df' default clip"
+doc = "docs/38-designs.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10052d10"
+kind = "function"
+name = "constructor device fit"
+doc = "docs/38-designs.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10053510"
+kind = "function"
+name = "constructor ammunition fit"
+doc = "docs/38-designs.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100537b0"
+kind = "function"
+name = "constructor armour fit"
+doc = "docs/38-designs.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100514e7"
+kind = "site"
+name = "constructor accept: the Type (animal for an 'a' chassis, else the turret's), then per mode"
+doc = "docs/38-designs.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100516b3"
+kind = "site"
+name = "constructor accept, robot mode: the design to <game>\\units\\temp_unit.dat"
+doc = "docs/38-designs.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100544b0"
+kind = "function"
+name = "design writer: 0xf0f1, Type, the design tree's components"
+doc = "docs/38-designs.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10050c28"
+kind = "site"
+name = "constructor save: the design to units/<name>.dat"
+doc = "docs/38-designs.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100511b3"
+kind = "site"
+name = "constructor load list: units/*.dat but bld_unit_, view_unit_, temp_unit"
+doc = "docs/38-designs.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100513bf"
+kind = "site"
+name = "constructor cancel: design dropped, root page reopened by mode r_, fr_, a_"
+doc = "docs/38-designs.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10055c70"
+kind = "function"
+name = "open the constructor: +4, mode +0x28, grade +0x18"
+doc = "docs/38-designs.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1009810a"
+kind = "site"
+name = "factory screen opens the constructor in mode 1 with its unit record's +0x30"
+doc = "docs/38-designs.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100983e2"
+kind = "site"
+name = "factory: the design to %s\\units\\view_unit_%d.dat, its logic id"
+doc = "docs/38-designs.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1009842f"
+kind = "site"
+name = "factory: the design to %s\\units\\bld_unit_%d.dat when 0x10086cf0 allows"
+doc = "docs/38-designs.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10013940"
+kind = "function"
+name = "property 177, defence: first node with area's max life / armour value 1, + device id 16"
+doc = "docs/38-designs.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000e735"
+kind = "site"
+name = "machine property 0xb1: defence, 0x10013940"
+doc = "docs/38-designs.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000e7c7"
+kind = "site"
+name = "machine property 0xb2: offence, device getter id 6"
+doc = "docs/38-designs.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002b62b"
+kind = "site"
+name = "IDeviceManager get 6: every gun's +0x174 x 1000 / max(value 3, 1), none skipped"
+doc = "docs/38-designs.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002b99d"
+kind = "site"
+name = "IDeviceManager get 16: deflector value 0 x fight shield value 0, both present"
+doc = "docs/38-designs.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x100054b0"
+kind = "function"
+name = "main interface slot 6: node i's label (0x10012530)"
+doc = "docs/38-designs.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10012530"
+kind = "function"
+name = "node label: the mesh's +0x20 length-prefixed list, entry = node index; null when empty"
+doc = "docs/38-designs.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10007e70"
+kind = "function"
+name = "main interface slot 19: node count +0x1ac"
+doc = "docs/38-designs.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1002a1a8"
+kind = "site"
+name = "construction start: the bot's price, recursive part cost over its design tree"
+doc = "docs/38-designs.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10051413"
+kind = "site"
+name = "constructor cancel: the root page by mode, 1 r_, 2 fr_, 3 a_"
+doc = "docs/38-designs.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10051e50"
+kind = "site"
+name = "chassis fit: the loop over the preview's nodes (AniMesh slot 19 count)"
+doc = "docs/38-designs.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10055ca6"
+kind = "site"
+name = "open the constructor: the fifth argument, the grade, into +0x18"
+doc = "docs/38-designs.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10090900"
+kind = "function"
+name = "catalogue: does a part id start with the prefix"
+doc = "docs/38-designs.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1010bf60"
+kind = "datum"
+name = "[TEMP] NORMALIZE; OFFENCE_MIN +4, OFFENCE_MAX +8, DEFENCE_MIN +0xc"
+doc = "docs/38-designs.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1010bf70"
+kind = "datum"
+name = "[TEMP] DEFENCE_MAX"
+doc = "docs/38-designs.md"
+read = true

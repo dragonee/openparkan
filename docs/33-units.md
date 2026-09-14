@@ -37,6 +37,10 @@ them carry a turret (the two target dummies do not); all 865 fitted guns sit in
 one of their turret's sockets and resolve to a round; all 588 clips belong to
 their gun's slot; and all 2,956 internal parts read as their class.
 
+A design made in the robot constructor is the same tree, written in slot then
+socket order, and the constructor's unit box rates it with the running unit's own
+properties ([38-designs.md](38-designs.md)).
+
 ## What the sheet shows
 
 | line | what | from |

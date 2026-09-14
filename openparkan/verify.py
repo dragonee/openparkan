@@ -24,6 +24,7 @@ from . import (
     control,
     controls,
     descriptions,
+    designs,
     effects,
     font,
     gamedir,
@@ -10387,6 +10388,212 @@ def check_builder(check, game: Path) -> None:
           f"none of the other {len(others)} building models has either")
 
 
+#: Mission 02's designer as the recording shows it, 107.5 s to 155.5 s (the unit box read
+#: at 2 frames a second): each change in order, then the box's five lines and whether its
+#: payload figures are red.  "turret" and "gun bl"/"gun bc" fit on the next free socket of
+#: that label; a part name replaces the part of its family; "-gun" takes the last gun off.
+DESIGNER_RECORDING = (
+    ("chassis R_B_02", ["26 / 39 t", "66 kph", "12 %", "0 %", "0 m"], False),
+    ("turret e_tur_bb_01", ["37 / 28 t", "58 kph", "23 %", "0 %", "350 m"], False),
+    ("gun bl e_gun_bl_15", ["41 / 24 t", "55 kph", "23 %", "5 %", "350 m"], False),
+    ("gun bl e_gun_bl_15", ["44 / 21 t", "53 kph", "23 %", "9 %", "350 m"], False),
+    ("gun bc e_gun_bc_06", ["51 / 14 t", "48 kph", "23 %", "17 %", "350 m"], False),
+    ("gun bc e_gun_bc_06", ["58 / 7 t", "43 kph", "23 %", "25 %", "350 m"], False),
+    ("i_arm_b_02", ["62 / 3 t", "40 kph", "27 %", "25 %", "350 m"], False),
+    ("i_eng_b_01 i_pws_b_01", ["64 / 1 t", "45 kph", "27 %", "25 %", "350 m"], False),
+    ("i_fsh_b_01", ["64 / 1 t", "45 kph", "27 %", "25 %", "350 m"], False),
+    ("i_dsh_b_01", ["65 / 0 t", "44 kph", "27 %", "25 %", "350 m"], False),
+    ("i_rps_b_01", ["66 / 0 t", "44 kph", "27 %", "25 %", "350 m"], True),
+    ("i_rdr_b_01", ["66 / 0 t", "44 kph", "27 %", "25 %", "400 m"], True),
+    ("i_def_b_01", ["66 / 0 t", "44 kph", "28 %", "25 %", "400 m"], True),
+    ("-gun", ["59 / 6 t", "48 kph", "28 %", "17 %", "400 m"], False),
+    ("-gun", ["52 / 13 t", "54 kph", "28 %", "9 %", "400 m"], False),
+    ("-gun", ["49 / 16 t", "57 kph", "28 %", "5 %", "400 m"], False),
+    ("-gun", ["45 / 20 t", "60 kph", "28 %", "0 %", "400 m"], False),
+)
+#: The box of the design the recording accepts to production at 155.5 s.
+DESIGNER_ACCEPTED = ["59 / 6 t", "48 kph", "28 %", "17 %", "400 m"]
+#: Every part the recording's designer lists on Mission 02.
+DESIGNER_SEEN = ("R_B_02", "e_tur_bb_01", "e_gun_bl_15", "e_gun_bc_06", "i_arm_b_df",
+                 "i_arm_b_01", "i_arm_b_02", "i_eng_b_df", "i_eng_b_01", "i_pws_b_df",
+                 "i_pws_b_01", "i_fsh_b_df", "i_fsh_b_01", "i_dsh_b_df", "i_dsh_b_01",
+                 "i_rps_b_01", "i_rdr_b_df", "i_rdr_b_01", "i_def_b_df", "i_def_b_01",
+                 "i_c15_b_df")
+
+
+def check_designs(check, game: Path) -> None:
+    """designs: the robot constructor's catalogue, defaults, unit box, name and file."""
+    iron_path = game / "iron3d.dll"
+    tree_path = game / "MISSIONS" / "SCRIPTS" / "tut2_pl.trf"
+    if not iron_path.exists() or not tree_path.exists():
+        return
+    shop = units.Workshop(game)
+
+    # Stream 10: a label a node; chassis sockets name turrets, turret sockets guns.
+    meshes = exact = one_a_node = 0
+    labels: dict[str, list[str]] = {}
+    for part, record in sorted(shop.library.records.items()):
+        if not record.mesh:
+            continue
+        try:
+            inner = NResArchive(shop.armoury.read(record.mesh), record.mesh.member)
+        except (NotAnNResArchive, KeyError, ValueError):
+            continue
+        streams = {e.type_id: inner.read(e) for e in inner}
+        if designs.SOCKET_LABEL_STREAM not in streams:
+            continue
+        meshes += 1
+        try:
+            found = designs.socket_labels(streams[designs.SOCKET_LABEL_STREAM])
+        except ValueError:
+            continue
+        exact += 1
+        labels[part] = found
+        model = shop._mesh(record)
+        one_a_node += model is not None and len(model.nodes) == len(found)
+    turrets = turret_fit = guns = gun_fit = 0
+    for path in sorted(game.glob("UNITS/**/*.dat")):
+        unit = objects.load_unit(path)
+        parents = unit.parents()
+        for i, c in enumerate(unit.components):
+            if parents[i] < 0:
+                continue
+            host = unit.components[parents[i]].ref.member.lower()
+            got = labels.get(host, [])
+            socket = got[c.attach_node].lower() if 0 <= c.attach_node < len(got) else ""
+            member = c.ref.member.lower()
+            if member.startswith(designs.TURRET_PREFIX) and host.startswith("r_"):
+                turrets += 1
+                turret_fit += bool(socket) and member.startswith(socket)
+            elif member.startswith(designs.GUN_PREFIX) and host.startswith(designs.TURRET_PREFIX):
+                guns += 1
+                gun_fit += bool(socket) and member.startswith(designs.gun_prefixes(socket))
+    slots = defaults = 0
+    for part in shop.library.records:
+        if not part.startswith(("r_", designs.TURRET_PREFIX, designs.GUN_PREFIX)):
+            continue
+        parsed = shop.armoury.controller(part)
+        for c in parsed.components if parsed else ():
+            label = c.label.lower()
+            if label and not label.startswith(designs.BRAIN_PREFIX):
+                slots += 1
+                defaults += shop.library.get(label + designs.DEFAULT_SUFFIX) is not None
+    check("designs: mesh stream 10 is a socket label a node, and the parts fit their labels",
+          exact == meshes and one_a_node == meshes - 1 and turret_fit == turrets - 1
+          and gun_fit == guns and defaults == slots,
+          f"{exact}/{meshes} streams parse as length-prefixed strings, {one_a_node} one a node; "
+          f"{turret_fit}/{turrets} turrets start with their chassis socket's label, "
+          f"{gun_fit}/{guns} guns take their socket's e_gun_ prefix (r: c or l); "
+          f"{defaults}/{slots} labelled slots (brains aside) have a <label>_df part")
+
+    # The constructor's code: the page rules, the defaults, the unit box's properties.
+    iron = iron_path.read_bytes()
+    at = _image_at(iron)
+    builder = at(0x10048220, 0x1180)
+    fill = at(0x10051FDB, 0x2D0)
+    box = at(0x1006FC00, 0xB00)
+    pages = (b"\x80\x7d\x01\x72" in builder and b"\x6a\x63" in builder and b"\x6a\x6c" in builder
+             and b"\x80\x3e\x72" in builder and b"\x68\xe8\x3f\x10\x10" in builder
+             and all(at(va, 4) == text for va, text in (
+                 (0x10103FFC, b"r_t\0"), (0x10103FF8, b"r_l\0"), (0x10103FF4, b"r_m\0"),
+                 (0x10103FF0, b"r_b\0"), (0x101040A4, b"_df\0"))))
+    fills = (b"\x68\xb0\x40\x10\x10" in fill and b"\x68\xa8\x40\x10\x10" in fill
+             and fill.count(b"\xa4\x40\x10\x10") == 2)
+    unit_box = (all(p in box for p in (b"\x6a\x7c", b"\x68\x89\x00\x00\x00",
+                                       b"\x68\x91\x00\x00\x00", b"\x68\xb1\x00\x00\x00",
+                                       b"\x68\xb2\x00\x00\x00", b"\x6a\x50",
+                                       b"\x68\xff\xb4\xb4\xff", b"\xb8\x00\x00\xff\xff"))
+                and at(0x10104EE0, 12) == b"%-.f / %-.f\0")
+    temp = settings.sections(game / "Iron_3D.ini").get(designs.TEMP_SECTION, {})
+    ranges = ((float(temp.get("OFFENCE_MIN", "nan")), float(temp.get("OFFENCE_MAX", "nan")))
+              == designs.OFFENCE_RANGE
+              and (float(temp.get("DEFENCE_MIN", "nan")), float(temp.get("DEFENCE_MAX", "nan")))
+              == designs.DEFENCE_RANGE and temp.get("NORMALIZE") == "1")
+    cat = _image_at((game / "Control.dll").read_bytes())
+    defence_code = cat(0x10013940, 0xC8)
+    rated = (b"\x8b\x8e\xb4\x05\x00\x00" in defence_code and b"\xd8\x71\x04" in defence_code
+             and b"\xba\x10\x00\x00\x00" in defence_code)
+    strings = resources.strings(iron)
+    check("iron3d.dll: the constructor's pages, _df defaults and unit box properties",
+          pages and fills and unit_box and ranges and rated
+          and strings.get(6202) == "Warrior" and strings.get(6205) == "Unknown",
+          f"0x10048220 pages r_t..r_b by grade, e_tur_ by label, e_gun_ + two letters "
+          f"('r': c and l) {pages}; 0x10051fdb skips i_brn_, files i_arm_ apart and appends "
+          f"_df {fills}; 0x1006fc00 reads 124/137 '%-.f / %-.f', 145, 177, 178, 0x50 "
+          f"{unit_box}; [TEMP] offence {designs.OFFENCE_RANGE}, defence "
+          f"{designs.DEFENCE_RANGE} {ranges}; Control.dll:0x10013940 divides by armour +4 and "
+          f"adds device id 16 {rated}")
+
+    # The catalogue Mission 02's player is offered, and the recording's designer re-derived.
+    catalogue = designs.Catalogue(research.read(tree_path))
+    designer = designs.Designer(shop, catalogue)
+    offered = [p for p in catalogue.tree.part_ids if catalogue.offered(p)]
+    pages_ok = (catalogue.page(designs.chassis_prefixes(4)) == ["R_B_02"]
+                and catalogue.page(("e_tur_bb",)) == ["e_tur_bb_01"]
+                and catalogue.page(designs.gun_prefixes("universal_bl")) == ["e_gun_bl_15"]
+                and catalogue.page(designs.gun_prefixes("central_bc")) == ["e_gun_bc_06"]
+                and all(catalogue.offered(p) for p in DESIGNER_SEEN))
+    design = turret = None
+    seen = 0
+    names = []
+    accepted = (0.0, 0.0, False)
+    for step, lines, red in DESIGNER_RECORDING:
+        verb, *args = step.split()
+        if verb == "chassis":
+            design = designer.chassis(args[0])
+        elif verb == "turret":
+            turret = designer.fit_turret(design, args[0])
+        elif verb == "gun":
+            used = {c.attach for c in turret.children if c.kind == designs.CLASS_GUN}
+            socket = next(i for i, s in enumerate(designer.labels(turret.part))
+                          if s.endswith(args[0]) and i not in used)
+            designer.fit_gun(turret, args[1], socket)
+        elif verb == "-gun":
+            turret.children.pop()
+        else:
+            for part in (verb, *args):
+                for node in design.walk():
+                    if node.part[:7] == part[:7] and node.kind != designs.CLASS_CLIP:
+                        node.part = part
+        rating = designer.rate(design)
+        seen += rating.lines() == lines and rating.full == red
+        kind = designer.type_word(design)
+        word = strings.get(designs.CLASS_WORDS.get(kind, designs.UNKNOWN_WORD), "")
+        names.append(designs.name(designer.letters(design, kind), 0, word))
+        if lines == DESIGNER_ACCEPTED:
+            accepted = designer.price(design)
+    check("designs: Mission 02's catalogue, and its designer's unit box as recorded",
+          len(offered) == 32 and pages_ok and seen == len(DESIGNER_RECORDING)
+          and names[0] == "LF?-X Unknown" and names[1] == "LFW-X Warrior"
+          and accepted == (411.0, 226.5, True),
+          f"tut2_pl.trf offers {len(offered)} parts, chassis {catalogue.page(('r_',))}, one "
+          f"turret and one gun a socket label {pages_ok}; {seen}/{len(DESIGNER_RECORDING)} "
+          f"recorded unit boxes re-derived line for line; named {names[0]!r} then "
+          f"{names[1]!r}; the design accepted at 155.5 s prices {accepted[0]:g} ore and "
+          f"{accepted[1]:g} energy")
+
+    # The files the constructor and the factory write are the design tree, in slot order.
+    everything = designs.Designer(shop, designs.Catalogue(
+        research.read(game / "MISSIONS" / "SCRIPTS" / "data.trf"), full=True))
+    units_dir = game / "UNITS"
+    built = sorted(units_dir.glob("bld_unit_*.dat"))
+    written = built + sorted(units_dir.glob("view_unit_*.dat")) + [units_dir / "temp_unit.dat"]
+    again = 0
+    for path in written:
+        unit = objects.load_unit(path)
+        tree = designs.Part.from_unit(unit)
+        again += designs.dat_bytes(everything.unit(tree, unit.kind)) == path.read_bytes()
+    pairs = sum((units_dir / p.name.replace("bld_", "view_")).read_bytes() == p.read_bytes()
+                for p in built)
+    temp = (units_dir / "temp_unit.dat").read_bytes()
+    temp_is = [p.name for p in built if p.read_bytes() == temp]
+    check("designs: the factory's bld_unit/view_unit files and temp_unit.dat are design trees",
+          again == len(written) and pairs == len(built) - 1 and len(temp_is) == 1,
+          f"{again}/{len(written)} files re-written byte for byte from their trees (slots, "
+          f"then sockets, ascending; labels 'name (code)'); {pairs} of {len(built)} bld/view "
+          f"pairs identical; temp_unit.dat is {temp_is}")
+
+
 def check_units(check, game: Path) -> None:
     """units: every assembly described whole, and its pieces fitting together."""
     workshop = units.Workshop(game)
@@ -15286,6 +15493,7 @@ def run(game: Path) -> int:
         check_wingman,
         check_boarding,
         check_builder,
+        check_designs,
         check_units, check_loading, check_search, check_construction,
         check_controls, check_player_input, check_turret_channels,
         check_behaviour, check_research, check_descriptions, check_saves,
