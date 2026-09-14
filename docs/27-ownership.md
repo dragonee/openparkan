@@ -238,8 +238,9 @@ of `IBuilding` (`0x1005b250`) is where `iron3d.dll` stores its callback
       - the medium and large towers to state 6, unless `0x10033e40` refuses;
       - the generator, mine, storage and Outpost to `0x1007d0a0` and
         `0x100a5660` instead.
-    - What each state shows was not read. That state 5 is the plant's or
-      institute's own screen is a *guess* from the pages.
+    - State 5 with page 5 is the plant's own screen, the factory screen
+      (*read*, [36-factory.md](36-factory.md)). What the other states show was
+      not read.
     - Before switching, it sends command 740, `CMD_JAMES_WINGMAN_MENU`, through
       the command handler when an interface object's flag is set
       (`0x100626dd`) — which reads as closing the wingman menu when it is up
@@ -373,8 +374,9 @@ generators between the players. `Multi.05`'s `Ntrl` is the exception: type 2.
 
 ## Not established
 
-- What the game view's states 1, 3, 4, 5 and 6 show (`iron3d.dll:0x10062bc0`),
-  beyond state 1 being the one boarding a bot enters; and what `0x10033e40`
+- What the game view's states 1, 3, 4 and 6 show (`iron3d.dll:0x10062bc0`),
+  beyond state 1 being the one boarding a bot enters (state 5 with page 5 is
+  the factory screen, [36-factory.md](36-factory.md)); and what `0x10033e40`
   refuses on a tower. ~~What `0x1007d0a0` and `0x100a5660` open for a
   generator, mine, storage or Outpost~~ — **read**: no screen; they select the
   building and make it the interface's current one

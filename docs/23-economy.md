@@ -512,6 +512,9 @@ instead, 18 would exceed it.
 
 ## Construction — *read*
 
+The player gives the order from the factory screen, and the bot leaves by the
+factory's creation vertex: [36-factory.md](36-factory.md#production--read).
+
 `M_Task_Construct::OnBehaviourTakt` (`Behavior.dll:0x1002a4f0`) is the factory
 building a bot, and it has the same three budgets as research — ore, power and
 time — with one difference in how ore is pulled.

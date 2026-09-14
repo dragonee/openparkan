@@ -15227,6 +15227,235 @@ def check_hud_screens(check, game: Path) -> None:
           f"list's 0xff646400 squares and the yellow camera with its 7-unit tick: {extras}")
 
 
+#: The factory screen's words (``iron3d.dll``'s string table), docs/36-factory.md.
+FACTORY_STRINGS = {
+    1607: "Factory", 6240: "There are no available projects.",
+    6241: "Use warbot constructor to build bots.", 1511: "Warbot constructor",
+    1553: "Start production", 3070: "Stop production", 6238: "Start batch production",
+    6239: "Stop batch production", 3067: "Available CPUs", 3068: "Recent projects",
+    3069: "Constructed bot", 6248: "Ore not required, warbot components available",
+    6249: "Ore required", 5039: "Building is captured", 5092: "Ore", 5093: "Energy",
+    2111: "Cannot build warbot!",
+}
+
+#: The factory panel's pieces from ``ui/hq.cfg`` as its constructor (``0x10096650``) loads
+#: them: name -> (page, width, height).
+FACTORY_PIECES = {
+    "constructor_icon": ("ui_menu", 30, 15), "build_icon": ("ui_menu", 30, 15),
+    "stop_build_icon": ("ui_menu", 30, 15), "brain_icon": ("ui_menu", 15, 15),
+    "project_icon": ("ui_menu", 15, 15), "active_project": ("ui_menu", 30, 15),
+    "batch_build_icon": ("ui_menu3", 30, 15), "batch_stop_build_icon": ("ui_menu3", 30, 15),
+    "free_bots_icon": ("ui_menu3", 30, 15), "no_free_bots_icon": ("ui_menu3", 30, 15),
+    "short_button_frame_off": ("ui_menu3", 21, 22), "short_button_frame_on": ("ui_menu3", 21, 22),
+    "long_button_frame_off": ("ui_menu3", 36, 22), "long_button_frame_on": ("ui_menu3", 36, 22),
+}
+
+#: The factory box the constructor fixes (``0x1009716c``), and where a new bot appears on
+#: Tut_2: the Large Factory's creation vertex through its joint node.
+FACTORY_BOX = (51, 20, 369, 148)
+TUT2_CREATION = (393.75, 854.91, 154.05)
+
+
+def check_factory_screen(check, game: Path) -> None:
+    """The factory screen a player's factory pod opens, and production to the bot outside."""
+    path = game / "iron3d.dll"
+    if not path.exists():
+        return
+    iron = path.read_bytes()
+    at = _image_at(iron)
+    beh = _image_at((game / "Behavior.dll").read_bytes())
+    strings = resources.strings(iron)
+
+    def u32(read, va: int) -> int:
+        return struct.unpack("<I", read(va, 4))[0]
+
+    def targets(read, va: int, n: int) -> list[int]:
+        return [t for _, t in _calls(read, va, n)]
+
+    # 1. The words and the pieces: the constructor loads the fourteen pieces and the ten
+    # tooltips, the draw the two lines of an empty factory.
+    ctor = at(0x10096650, 0xB5B)
+    draw = at(0x10097490, 0xB5B)
+    tips = [1553, 1511, 3067, 3068, 3069, 3070, 6238, 6239, 6248, 6249]
+    pushed = {struct.unpack_from("<I", ctor, i + 1)[0] for i in range(len(ctor) - 5)
+              if ctor[i] == 0x68}
+    names = {at(va, 32).split(b"\0")[0] for va in pushed if 0x10100000 <= va < 0x1010B000}
+    loaded = [n for n in FACTORY_PIECES if n.encode() in names]
+    tipped = [t for t in tips if b"\xba" + struct.pack("<I", t) in ctor]
+    empty = b"\x68\x60\x18\x00\x00" in draw and b"\x68\x61\x18\x00\x00" in draw \
+        and b"\x68\xff\xc0\xc0\xff" in draw
+    words = {k: strings.get(k) for k in FACTORY_STRINGS}
+    check("iron3d.dll: the factory screen's words, tooltips and pieces",
+          words == FACTORY_STRINGS and tipped == tips and len(loaded) == len(FACTORY_PIECES)
+          and empty and at(0x10083A6B, 5) == b"\xbf\x47\x06\x00\x00",
+          f"{len(loaded)}/{len(FACTORY_PIECES)} hq.cfg pieces and tooltips "
+          f"{[words.get(t) for t in tipped]} loaded by 0x10096650; page 5's title "
+          f"{words.get(1607)!r}; an empty factory reads {words.get(6240)!r} / "
+          f"{words.get(6241)!r} in #c0c0ff: {empty}")
+
+    hq = {k.lower(): {kk.lower(): vv for kk, vv in v.items()}
+          for k, v in resources.load_cfg(game / "ui" / "hq.cfg").items()}
+    art = _hud_art(game)
+    placed = []
+    for name, (page, w, h) in FACTORY_PIECES.items():
+        p = hq.get(name, {})
+        rect = tuple(int(p.get(k, -1)) for k in ("offset_x", "offset_y", "width", "height"))
+        placed.append(p.get("texture") == page and rect[2:] == (w, h) and art(page, *rect)[1])
+    check("ui/hq.cfg: the factory panel's 14 pieces, their sizes and art",
+          all(placed),
+          f"{sum(placed)}/{len(placed)} on their page at their size with ink: 30 x 15 icons, "
+          f"the project and brain icons 15 x 15, short frames 21 x 22, long frames 36 x 22")
+
+    # 2. The layout: the fixed box, the pen the commander panel gives, the fill, and the rows'
+    # widths from compaund.cfg summing to the box's and the message box's edges.
+    fixed = at(0x1009716C, 28) == bytes.fromhex(
+        "c7461014000000c7461c94000000c7460c33000000c7461871010000")
+    pen = at(0x100838E2, 4) == b"\x6a\x15\x6a\x33" and targets(at, 0x100838E2, 12) == [0x10097490]
+    fill = at(0x100975EB, 5) == b"\xb9\x00\x80\x00\x80" \
+        and targets(at, 0x100975EB, 12) == [0x1009AFA0] and b"\x68\x88\x00\x00\x00" in draw
+    cfg = {k.lower(): v for k, v in resources.load_cfg(game / "ui" / "compaund.cfg").items()}
+
+    def width(name: str) -> int:
+        return int(cfg.get(name, {}).get("width", 0))
+
+    x0, y0, x1, y1 = FACTORY_BOX
+    header = x0 + width("ccres_ending_text") + 278 + width("ccres_exit_button_off")
+    row = x0 + width("ccres_ending_stub") + width("ccres_long_button_normal") \
+        + width("ccres_ray_emitter_off") + 136 + 11 + 2 * width("ccres_long_button_off") \
+        + width("ccres_ending_stub")
+    resources_row = width("ccres_ending_text") + 35 + width("ccres_separator_left_text") \
+        + width("ccres_ray_emitter_off") + 205 + width("ccres_ray_ending")
+    head = at(0x10083A20, 0x1DD)
+    rows = at(0x1006D510, 0x3D0)
+    widths = b"\x68\x16\x01\x00\x00" in head and b"\x6a\x23" in rows \
+        and b"\x68\xcd\x00\x00\x00" in rows and b"\xc7\x44\x24\x1c\x80\x02\x00\x00" in rows \
+        and b"\xc7\x44\x24\x18\x15\x00\x00\x00" in rows
+    check("iron3d.dll: the factory box (51, 20)-(369, 148), and rows that fill it",
+          fixed and pen and fill and widths and header == x1 and row == x1 - 1
+          and resources_row == 640 - 374,
+          f"0x1009716c fixes the box {FACTORY_BOX}: {fixed}; the commander panel draws the "
+          f"panel with the pen at (51, 21): {pen}; filled 0x80008000 with a 136 bar: {fill}; "
+          f"from the skin's widths the header ends at {header}, the bottom row at {row} and "
+          f"the Ore/Energy rows span {resources_row} from x 640, the mode-5 message box's width")
+
+    # 3. Opening and closing: the same-clan pod pushes mode 5 and page 5; mode 5 draws the
+    # commander panel and no cockpit HUD; the exit button and 735 pop the mode.
+    opens = at(0x1006270F, 5) == b"\x6a\x00\x56\x6a\x05" \
+        and targets(at, 0x1006270F, 28) == [0x10062BC0, 0x10084D80] \
+        and at(0x10084DE3, 7) == b"\x6a\x01\x68\x10\x00\x00\x80"
+    mode5 = u32(at, 0x1008D5AC + 5 * 4)
+    drawn = targets(at, mode5, 0x1008D5AB - mode5)
+    panel = mode5 == 0x1008D444 and 0x100836F0 in drawn and 0x10043B20 not in drawn \
+        and at(0x1008D518, 2) == b"\x6a\x01"
+    keys = {b.command: b.chord for b in controls.bindings(game / "ui_other.man")}
+    rollback = u32(at, 0x100726DC + 5 * 4)
+    closes = rollback == 0x10072238 and targets(at, rollback, 8) == [0x10062FF0] \
+        and targets(at, 0x100846AC, 0x4A) == [0x10084D80, 0x10044190, 0x10062FF0] \
+        and controls.CMD_GAME.get("CMD_ROLLBACK_STATE") == 735 \
+        and keys.get("CMD_ROLLBACK_STATE") == "SCAN_ESC"
+    check("iron3d.dll: the pod opens mode 5 on page 5; exit and Esc (735) pop it",
+          opens and panel and closes,
+          f"0x10062630 pushes mode 5 with the building, page 5 = Type 0x80000010: {opens}; "
+          f"mode 5 draws at {mode5:#x} the commander panel without its column and no HUD: "
+          f"{panel}; 735 ({keys.get('CMD_ROLLBACK_STATE')}) at {rollback:#x} and the exit "
+          f"button pop the mode: {closes}")
+
+    # 4. The controls, projects and the order: the click reaches the designer, start, stop,
+    # the active project and the recent ones; start gives order 12 by name, replacing.
+    clicks = targets(at, 0x10098040, 0x256)
+    controls_ok = all(t in clicks for t in (0x10055C70, 0x100986E0, 0x10098720, 0x100985F0,
+                                            0x100982A0))
+    order = at(0x10086F90, 0x2C6)
+    ordered = all(bytes.fromhex(p) in order for p in (
+        "c74424380c000000", "c744244405020000", "817c2424f1f00000", "6a03"))
+    files = at(0x10105688, 26) == b"%s\\units\\view_unit_%d.dat\0" \
+        and at(0x1010566C, 25) == b"%s\\units\\bld_unit_%d.dat\0"
+    recent = at(0x100558E4, 11) == bytes.fromhex("8d8178b60000ba05000000") \
+        and targets(at, 0x100517CB, 13) == [0x100982A0]
+    batch = 0x10086F90 in targets(at, 0x100874B0, 0x124) \
+        and 0x10039330 in targets(at, 0x100874B0, 0x124) \
+        and targets(at, 0x1005EDBE, 6) == [0x100874B0]
+    check("iron3d.dll: the controls start order 12 by name; five recent projects; batch",
+          controls_ok and ordered and files and recent and batch,
+          f"0x10098040 reaches the designer, start, stop, the active and recent projects: "
+          f"{controls_ok}; 0x10086f90 checks 0xf0f1 and gives order 12, TARGET_BY_NAME, "
+          f"replacing: {ordered}; view_unit/bld_unit files: {files}; five slots, accept "
+          f"selects project 0: {recent}; the frame's factory walk restarts a batch: {batch}")
+
+    # 5. The bot: creation vertex 0x800 then 0x80, 15 above the ground as the fallback, the
+    # escape; FreeBotNum answers 0x803; the unit callback voices VOICE_UNIT_READY.
+    voices = {b for d in resources.descriptors(game / "ui" / "game_resources.cfg")
+              for b in d.bindings}
+    made = beh(0x100299EA, 5) == b"\x68\x00\x08\x00\x00" \
+        and beh(0x10029A05, 5) == b"\x68\x80\x00\x00\x00" \
+        and beh(0x1002AA6E, 8) == bytes.fromhex("c744247814000000") \
+        and struct.unpack("<f", beh(0x10059974, 4))[0] == 15.0 \
+        and beh(0x1000A868, 6) == bytes.fromhex("8d82ec090000") \
+        and b"Placing Robot inside Building " in (game / "Behavior.dll").read_bytes()
+    ready = at(0x10033398, 7) == bytes.fromhex("68903403106a02") \
+        and b"\xbf\x70\x38\x10\x10" in at(0x10033490, 0x1BD) \
+        and {"VOICE_UNIT_READY", "VOICE_SELECTED", "VOICE_NO_CPU"} <= voices
+    check("Behavior.dll: the bot at the creation vertex with the escape; VOICE_UNIT_READY",
+          made and ready,
+          f"0x100299a0 asks vertex bit 0x800 then 0x80, 0x1002a920 lifts the fallback 15 and "
+          f"orders LEAVE (20), 0x803 answers FreeBotNum's +0x9ec: {made}; iron3d.dll's object "
+          f"callback 2 voices VOICE_UNIT_READY: {ready}")
+
+    # 6. Measured: one creation vertex on each factory model, on node 4; where it puts Tut_2's
+    # bot; the design files; Tut_2's free bot.
+    fortif = NResArchive.open(game / "fortif.rlb")
+    vertices = {}
+    none_80 = True
+    for e in fortif:
+        if e.tag != "MESH":
+            continue
+        graph = objmesh.read_path_graph(NResArchive(fortif.read(e), e.name))
+        if graph is None:
+            continue
+        none_80 &= not any(n.flags & 0x80 for n in graph.nodes)
+        found = [n for n in graph.nodes if n.flags & 0x800]
+        if found:
+            vertices[e.name.lower()] = (found, objmesh.parse(fortif.read(e), e.name))
+    plants = {"fr_b_plant.msh", "fr_m_plant.msh", "fr_l_plant.msh"}
+    on_node4 = set(vertices) == plants and all(
+        len(f) == 1 and f[0].b == 4 and m.subobjects[4].lower() == "i01_0_m1o1"
+        for f, m in vertices.values())
+    tut2 = mission.load(game / "MISSIONS/CAMPAIGN/CAMPAIGN.00/Mission.02/data.tma")
+    plant = next(o for o in tut2.objects if o.path.lower().endswith("lplant01.dat"))
+    root = objects.load_unit(game / "UNITS/BUILDS/PLANT/lplant01.dat").components[0].ref.member
+    where = None
+    if "fr_b_plant.msh" in vertices:
+        (v,), m = vertices["fr_b_plant.msh"]
+        lx, ly, lz = objmesh.apply(m.world_pose(v.b), v.position)
+        c, s = math.cos(plant.rotation), math.sin(plant.rotation)
+        px, py, pz = plant.position
+        where = (px + c * lx - s * ly, py + s * lx + c * ly, pz + lz)
+    placed_ok = where is not None and all(abs(a - b) < 0.05 for a, b in zip(where, TUT2_CREATION,
+                                                                           strict=True))
+    free = plant.properties["FreeBotNum"].value
+    check("fortif.rlb: one creation vertex (0x800) per factory, on node 4; Tut_2's spot",
+          on_node4 and none_80 and placed_ok and root.lower() == "fr_b_plant" and free == 100,
+          f"vertices with 0x800 on {sorted(vertices)}, each one on node 4 i01_0_m1o1: "
+          f"{on_node4}; no vertex anywhere has 0x80: {none_80}; Tut_2's {root} (FreeBotNum "
+          f"{free}) puts its bot at {tuple(round(a, 2) for a in where) if where else None}")
+
+    designs = sorted((game / "UNITS").glob("*_unit*.dat"))
+    magic = all(p.read_bytes()[:4] == b"\xf1\xf0\x00\x00" for p in designs)
+    kinds = Counter(objects.load_unit(p).kind for p in designs)
+    pairs = [(p, game / "UNITS" / p.name.replace("bld_", "view_"))
+             for p in designs if p.name.startswith("bld_")]
+    same = sum(a.read_bytes() == b.read_bytes() for a, b in pairs if b.exists())
+    tut2_design = game / "UNITS" / f"bld_unit_{plant.logical_id}.dat"
+    chassis = objects.load_unit(tut2_design).components[0].ref.member \
+        if tut2_design.exists() else None
+    check("UNITS: the factories' design files are 0xf0f1 assemblies, build and view",
+          designs and magic and same == len(pairs) - 1 and chassis == "R_B_02",
+          f"{len(designs)} files ({len(pairs)} pairs and temp_unit.dat) start 0xf0f1 and load "
+          f"with Types {{{', '.join(f'{k:#x}: {n}' for k, n in sorted(kinds.items()))}}}; "
+          f"{same} pairs identical; Tut_2's Large Factory ({plant.logical_id}) holds a "
+          f"{chassis} design")
+
+
 def check_settings(check, game: Path) -> None:
     """The engine's own configuration files, and which module owns each."""
     registry_path = game / settings.COMPONENTS_FILE
@@ -15502,6 +15731,7 @@ def run(game: Path) -> int:
         check_hud_top,
         check_hud_radar,
         check_hud_screens,
+        check_factory_screen,
         check_settings,
         check_research_streams, check_atmosphere_events,
         check_varset_types, check_profiles, check_walker,

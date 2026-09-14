@@ -21936,3 +21936,363 @@ kind = "datum"
 name = "[TEMP] DEFENCE_MAX"
 doc = "docs/38-designs.md"
 read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10096650"
+kind = "function"
+name = "factory panel constructor: box (51,20)-(369,148), 14 hq.cfg pieces, 10 tooltips"
+read = true
+doc = "docs/36-factory.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10097490"
+kind = "function"
+name = "factory panel draw at the pen: box, empty texts 6240/6241 or the project, icons, bottom row"
+read = true
+doc = "docs/36-factory.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10098000"
+kind = "function"
+name = "factory panel hit test: (x, y)-(x+318, y+164)"
+read = true
+doc = "docs/36-factory.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10098040"
+kind = "function"
+name = "factory panel click: constructor, build, batch, active project, recent projects"
+read = true
+doc = "docs/36-factory.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100982a0"
+kind = "function"
+name = "select recent project i: parts researched; write view_unit and (idle) bld_unit files; preview"
+read = true
+doc = "docs/36-factory.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100985f0"
+kind = "function"
+name = "show the unit in production: project -1, preview from the production file"
+read = true
+doc = "docs/36-factory.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100986e0"
+kind = "function"
+name = "start production (batch flag) when the clan has a free mind"
+read = true
+doc = "docs/36-factory.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10098720"
+kind = "function"
+name = "stop production when the button's batch kind matches; reselect project 0"
+read = true
+doc = "docs/36-factory.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10097410"
+kind = "function"
+name = "hand the factory panel a building: its clan factory record"
+read = true
+doc = "docs/36-factory.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10086cf0"
+kind = "function"
+name = "factory record: idle and not batch"
+read = true
+doc = "docs/36-factory.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10086d10"
+kind = "function"
+name = "factory record: the order query's progress (0-100)"
+read = true
+doc = "docs/36-factory.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10086e20"
+kind = "function"
+name = "factory record: building property 0x803, FreeBotNum"
+read = true
+doc = "docs/36-factory.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10086e80"
+kind = "function"
+name = "factory record refresh: idle = current order != 12; batch restart"
+read = true
+doc = "docs/36-factory.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10086f90"
+kind = "function"
+name = "start a design: 0xf0f1 file, ORDER_BUILDING_CONSTRUCT by name (0x205), replacing"
+read = true
+doc = "docs/36-factory.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10087260"
+kind = "function"
+name = "stop: abort the factory's order 12 (IAgent slot 40), clear file and batch"
+read = true
+doc = "docs/36-factory.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100874b0"
+kind = "function"
+name = "per frame: refresh each factory record, restart a batch while a mind is free"
+read = true
+doc = "docs/36-factory.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100875e0"
+kind = "function"
+name = "add a factory record: project -1, no file, idle, not batch"
+read = true
+doc = "docs/36-factory.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100836f0"
+kind = "function"
+name = "commander panel draw: resource rows, column unless arg 2, page header and page"
+read = true
+doc = "docs/36-factory.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10083a20"
+kind = "function"
+name = "commander page header: title by page (5: 1607 Factory) and the exit button"
+read = true
+doc = "docs/36-factory.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10084d80"
+kind = "site"
+name = "commander panel page switch: 5 = buildings of Type 0x80000010"
+read = true
+doc = "docs/36-factory.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100841a0"
+kind = "function"
+name = "commander panel click: exit button, page 5 to the factory panel"
+read = true
+doc = "docs/36-factory.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10062ff0"
+kind = "function"
+name = "view mode stack pop: transition handler from top to next"
+read = true
+doc = "docs/36-factory.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10064430"
+kind = "function"
+name = "view mode transition 0 -> 5: hero handed back, view building and unit"
+read = true
+doc = "docs/36-factory.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100644b0"
+kind = "function"
+name = "view mode transition 5 -> 0: hero handed to the player again"
+read = true
+doc = "docs/36-factory.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10033490"
+kind = "function"
+name = "object callback 2: clan SuperAI slot 4 event 1, VOICE_UNIT_READY for the player"
+read = true
+doc = "docs/36-factory.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10055c70"
+kind = "function"
+name = "open the warbot designer for a factory"
+read = true
+doc = "docs/36-factory.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1009a9e0"
+kind = "function"
+name = "compound-control pen: long icon button, icon 30x15 at (+10,+2) by variant colour"
+read = true
+doc = "docs/36-factory.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1009a260"
+kind = "function"
+name = "compound-control pen: exit button, icon 13x13 at (+15,+3)"
+read = true
+doc = "docs/36-factory.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1007db80"
+kind = "function"
+name = "select a building: VOICE_SELECTED if new, deselect units, factory panel"
+read = true
+doc = "docs/36-factory.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10070700"
+kind = "function"
+name = "a unit's name in yellow GAME_FONT at the pen"
+read = true
+doc = "docs/36-factory.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1008d444"
+kind = "site"
+name = "screens' draw, view mode 5: designer, or the commander panel without column; no HUD"
+read = true
+doc = "docs/36-factory.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10072238"
+kind = "site"
+name = "command 735 CMD_ROLLBACK_STATE: pop the view mode"
+read = true
+doc = "docs/36-factory.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100846ac"
+kind = "site"
+name = "commander exit button: page 0, pop view mode 5"
+read = true
+doc = "docs/36-factory.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100517d2"
+kind = "site"
+name = "designer accept: the factory panel selects project 0"
+read = true
+doc = "docs/36-factory.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10033398"
+kind = "site"
+name = "register object callback 2 (0x10033490)"
+read = true
+doc = "docs/36-factory.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100558da"
+kind = "site"
+name = "recent projects: count the filled of five 0x7c slots"
+read = true
+doc = "docs/36-factory.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1009716c"
+kind = "site"
+name = "factory panel box: +0x10 20, +0x1c 148, +0xc 51, +0x18 369"
+read = true
+doc = "docs/36-factory.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x100299a0"
+kind = "function"
+name = "construct task set-up: creation vertex 0x800 then 0x80, joint alive, target by name"
+read = true
+doc = "docs/36-factory.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1001d180"
+kind = "function"
+name = "CreateObjectFromScheme: read a 0xf0f1 design file, create its unit"
+read = true
+doc = "docs/36-factory.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1001d440"
+kind = "function"
+name = "create a unit: free mind, place inside a building at a hall-way vertex"
+read = true
+doc = "docs/36-factory.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10004bb0"
+kind = "function"
+name = "IAgent slot 6: copy the current order; progress x 100 (100 with none)"
+read = true
+doc = "docs/36-factory.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1000a860"
+kind = "site"
+name = "property 0x803 answers +0x9ec, FreeBotNum"
+read = true
+doc = "docs/36-factory.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1002aa6e"
+kind = "site"
+name = "a factory's new unit: ORDER_ROBOT_LEAVE (20)"
+read = true
+doc = "docs/36-factory.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1001d4fe"
+kind = "site"
+name = "placing robot inside building: translation from the vertex's world position"
+read = true
+doc = "docs/36-factory.md"
+
+[[entry]]
+module = "ArealMap.dll"
+at = "0x1000a760"
+kind = "function"
+name = "IHallWay slot 5: a vertex's world position through its joint node"
+read = true
+doc = "docs/36-factory.md"
