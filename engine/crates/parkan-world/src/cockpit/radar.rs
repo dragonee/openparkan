@@ -95,7 +95,7 @@ pub fn draw(cockpit: &mut Cockpit, ink: &mut Ink, play: &Play, water_level: f32)
     p.piece(piece(ui_menu3, [199.0, 0.0, 15.0, 28.0]), [396.0, 383.0, 411.0, 411.0], white);
 
     // The altitude (`0x1003f6a0`): height above the map's water.
-    let body = &play.hero.walker.body;
+    let body = &play.driven().walker.body;
     let altitude = (body.position.z - water_level).round() as i32;
     let e = bar(altitude_percent(altitude)) as f32;
     ink.painter.piece(piece(page6, [121.0, e, 31.0, 105.0 - e]), [271.0, 347.0 + e, 240.0, 452.0], argb(BAR));
@@ -103,7 +103,7 @@ pub fn draw(cockpit: &mut Cockpit, ink: &mut Ink, play: &Play, water_level: f32)
 
     // The speed (`0x1003f900`): the step velocity, over the forward top speed, in km/h.
     let speed = (glam::Vec3::from_array(body.velocity).length() * 3.6).round() as i32;
-    let top = (play.hero.walker.controller.triples[parkan_formats::control::TRIPLE_TOP_SPEED][1] * 3.6)
+    let top = (play.driven().walker.controller.triples[parkan_formats::control::TRIPLE_TOP_SPEED][1] * 3.6)
         .round() as i32;
     let percent = if top != 0 { (speed * 100 / top).clamp(0, 100) } else { 0 };
     let e = bar(percent) as f32;
@@ -111,7 +111,7 @@ pub fn draw(cockpit: &mut Cockpit, ink: &mut Ink, play: &Play, water_level: f32)
     ink.centred(&speed.to_string(), 388.0, 28.0, 446.0, WHITE);
 
     // The view wedge: the camera's field, always up.
-    let eye = play.hero.eye();
+    let eye = play.eye();
     let half = eye.fov_x / 2.0;
     let corner = |a: f32| {
         (
@@ -148,7 +148,7 @@ pub fn draw(cockpit: &mut Cockpit, ink: &mut Ink, play: &Play, water_level: f32)
     }
 
     // The sweep ring, and its ping each period.
-    let period_ms = f64::from(play.hero.radar.period_ms) * RING_PERIOD_PER_MS * 1000.0;
+    let period_ms = f64::from(play.driven().radar.period_ms) * RING_PERIOD_PER_MS * 1000.0;
     let now_ms = play.hero.time_ms;
     if period_ms > 0.0 {
         if now_ms - cockpit.ring_since_ms > period_ms {
@@ -165,7 +165,7 @@ pub fn draw(cockpit: &mut Cockpit, ink: &mut Ink, play: &Play, water_level: f32)
     }
 
     // The contacts: the driven unit's target list.
-    let range = play.hero.radar.range;
+    let range = play.driven().radar.range;
     let contacts = play.contacts();
     let [sx, sy] = ink.painter.space.scales();
     let scale = ink.painter.space.scale();
@@ -234,7 +234,7 @@ pub fn draw(cockpit: &mut Cockpit, ink: &mut Ink, play: &Play, water_level: f32)
 /// landing warning are not built: the figure is lit and the warning grey; and the auto-driver
 /// level is the hero's, which nothing steps.
 fn indicators(ink: &mut Ink, play: &Play, page6: u16, ui_menu: u16, ui_menu3: u16) {
-    let switches = play.hero.pilot.switches;
+    let switches = play.driving.as_ref().map_or(play.hero.pilot.switches, |d| d.pilot.switches);
     let level = play.auto_driver;
     let states = [
         u8::from(switches.repair),

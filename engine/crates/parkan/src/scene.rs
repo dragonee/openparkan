@@ -583,6 +583,9 @@ pub struct OwnView {
     /// Every target with node life drawn node by node: an instance, the target, its part,
     /// the node and the variant that instance draws.
     targets: Vec<(usize, usize, usize, usize, usize)>,
+    /// A boarded bot's own view: an instance for each node's fifth slot, with the target, its
+    /// part and the node (docs/39, "The view and the HUD").
+    cockpits: Vec<(usize, usize, usize, usize)>,
 }
 
 /// Draw the hero from now on as its own view does (docs/07-objects.md, "The fifth slot is
@@ -680,7 +683,7 @@ pub fn own_view(objects: &mut Objects, store: &mut TextureStore, play: &Play) ->
             }
         }
     }
-    Ok(OwnView { nodes, outside, placed: objects.placed.clone(), targets })
+    Ok(OwnView { nodes, outside, placed: objects.placed.clone(), targets, cockpits: Vec::new() })
 }
 
 /// Units the play has made since the last call, drawn node by node as `own_view` draws a
@@ -691,8 +694,34 @@ pub fn add_targets(
     view: &mut OwnView,
     play: &mut Play,
 ) -> Result<bool> {
-    let added = std::mem::take(&mut play.added);
-    for &t in &added {
+    let mut added = std::mem::take(&mut play.added);
+    // A boarded bot's cockpit, the first time it is boarded.
+    if let Some(t) = play.driving.as_ref().map(|d| d.target)
+        && !view.cockpits.iter().any(|c| c.1 == t)
+        && let Some((_, robot)) = play.robots.iter().find(|(rt, _)| *rt == t)
+    {
+        for (p, part) in robot.parts.iter().enumerate() {
+            for node in 0..part.mesh.mesh.nodes.len() {
+                let Some(model) = models::build_view_node(&part.mesh, node, 0, store)? else { continue };
+                objects.models.push(model);
+                objects.instances.push(models::Instance {
+                    model: objects.models.len() - 1,
+                    position: [0.0; 3],
+                    rotation: 0.0,
+                    scale: 1.0,
+                    hidden: true,
+                });
+                objects.placed.push(usize::MAX);
+                view.placed.push(usize::MAX);
+                view.cockpits.push((objects.instances.len() - 1, t, p, node));
+            }
+        }
+        if view.cockpits.iter().any(|c| c.1 == t) {
+            added.push(usize::MAX);
+        }
+    }
+    let added: Vec<usize> = added;
+    for &t in added.iter().filter(|&&t| t != usize::MAX) {
         let target = &play.battle.combat.targets[t];
         for (p, part) in target.parts.iter().enumerate() {
             let Some(loaded) = play.battle.meshes.get(t).and_then(|m| m.get(p)) else { continue };
@@ -732,6 +761,10 @@ pub fn place_own_view(
     outside: bool,
 ) {
     use glam::{Mat4, Quat};
+    // Aboard a bot the hero is out of the world, and the bot's cockpit is drawn in place of
+    // its hull (docs/39, "Boarding").
+    let driven = play.driving.as_ref().map(|d| d.target);
+    let outside = outside && driven.is_none();
     let hero = &play.hero;
     let t = hero.time_ms;
     let (position, yaw) = hero.walker.drawn(t);
@@ -742,7 +775,19 @@ pub fn place_own_view(
             Mount::Chassis => hero.chassis_pose(node),
             Mount::Turret => hero.turret_node(&mount, node),
         };
-        renderer.set_instance(queue, instance, unit * models::pose_matrix(&pose), !outside);
+        renderer.set_instance(
+            queue,
+            instance,
+            unit * models::pose_matrix(&pose),
+            !outside && driven.is_none(),
+        );
+    }
+    for &(instance, t, p, node) in &view.cockpits {
+        let placed = (Some(t) == driven)
+            .then(|| play.robots.iter().find(|(rt, _)| *rt == t))
+            .flatten()
+            .map(|(_, robot)| models::pose_matrix(&robot.placement().compose(&robot.part_pose(p, node))));
+        renderer.set_instance(queue, instance, placed.unwrap_or(Mat4::IDENTITY), placed.is_some());
     }
     for &(instance, part, node, variant) in &view.outside {
         let index = match part {
@@ -769,7 +814,7 @@ pub fn place_own_view(
             Some(life) => !life.hidden() && life.block() == variant,
             None => variant == 0,
         };
-        let visible = shown && !play.deleted.get(t).copied().unwrap_or(false);
+        let visible = shown && !play.deleted.get(t).copied().unwrap_or(false) && Some(t) != driven;
         let matrix = models::pose_matrix(&part.nodes[node]) * glam::Mat4::from_scale(Vec3::splat(part.scale));
         renderer.set_instance(queue, instance, matrix, visible);
     }

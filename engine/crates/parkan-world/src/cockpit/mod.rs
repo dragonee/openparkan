@@ -106,6 +106,27 @@ pub struct Cockpit {
     pub map: map::SatelliteMap,
     pub factory: factory::Screen,
     pub designer: designer::Screen,
+    /// Each part's code in the player clan's research tree, by lower-case record name.
+    pub gun_codes: BTreeMap<String, String>,
+}
+
+/// Each part's code in the player clan's research tree, by lower-case part name.
+fn gun_codes(game: &Path, play: &Play) -> BTreeMap<String, String> {
+    let tree =
+        usize::try_from(play.player_clan).ok().and_then(|c| play.clans.get(c)).map(|c| c.behaviour.clone());
+    let Some(tree) = tree.filter(|t| !t.is_empty()) else { return BTreeMap::new() };
+    let Some(data) = parkan_formats::gamedir::resolve(game, &tree).and_then(|p| std::fs::read(p).ok()) else {
+        return BTreeMap::new();
+    };
+    let Ok(tree) = parkan_formats::research::parse(&data, &tree) else { return BTreeMap::new() };
+    tree.part_ids
+        .iter()
+        .zip(&tree.part_items)
+        .filter_map(|(part, &item)| {
+            let code = tree.items.get(item)?.code.clone();
+            Some((part.to_ascii_lowercase(), code))
+        })
+        .collect()
 }
 
 impl Cockpit {
@@ -125,6 +146,7 @@ impl Cockpit {
             objectives: objectives::Screen::default(),
             factory: factory::Screen::default(),
             designer: designer::Screen::default(),
+            gun_codes: gun_codes(game, play),
             map: map::SatelliteMap::new(
                 crate::settings::value(game, "CS", "MAP_ALPHA").and_then(|v| v.parse().ok()),
             ),

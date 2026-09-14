@@ -1716,3 +1716,93 @@ fn mission_02s_large_factorys_lit_batches_take_its_256_lightmap_page() {
     .expect("the hero");
     assert!(hero.groups.iter().all(|g| g.lightmap.is_none()));
 }
+
+#[test]
+#[ignore = "needs the game install"]
+fn mission_02s_hero_boards_its_warbot_flies_it_and_gets_out_where_it_may_land() {
+    use parkan_world::factory::Project;
+    use parkan_world::play::Mode;
+    use parkan_world::progress::Say;
+
+    let (mut play, _) = mission_02_play();
+    let path = "UNITS\\bld_unit_-2147483647.dat";
+    let project = Project {
+        path: path.to_owned(),
+        name: "LFW-2 Warrior".into(),
+        type_word: 0x0100_8000,
+        chassis_size: 4,
+        ore: 0.0,
+        power: 0.0,
+        lines: Vec::new(),
+        sphere: None,
+    };
+    let hero_at = play.hero.walker.body.position;
+    let t = play
+        .spawn(&project, play.player_clan, hero_at + glam::Vec3::new(8.0, 0.0, 1.0), 0.0)
+        .expect("the L-2f");
+    for _ in 0..30 {
+        play.tick(1000.0 / 60.0, [0.0; 2]);
+    }
+    play.says.clear();
+    assert!(play.boardable(t), "the player's own large bot within 20");
+    assert!(play.board(t));
+    assert_eq!(play.mode(), Mode::Driving(t));
+    // A flyer taken over asks for the mission's message 100, T02_H06 (docs/34, "Mission 02").
+    assert!(
+        play.says.iter().any(|s| matches!(s, Say::Text(_, text) if text.contains("altitude"))),
+        "{:?}",
+        play.says
+    );
+    let frozen = play.hero.walker.body.position;
+    let eye = play.eye();
+    let bot_at = play.driven().walker.body.position;
+    assert!(eye.position.distance(bot_at) < 10.0, "the eye is the bot's");
+    // R climbs.
+    let z0 = play.driven().walker.body.position.z;
+    play.key("SCAN_R", true);
+    for _ in 0..(3 * 60) {
+        play.update_input();
+        play.tick(1000.0 / 60.0, [0.0; 2]);
+    }
+    play.key("SCAN_R", false);
+    let z1 = play.driven().walker.body.position.z;
+    assert!(z1 - z0 > 15.0, "climbed from {z0} to {z1}");
+    assert_eq!(play.hero.walker.body.position, frozen, "the hero is out of the world");
+    // W flies forward.
+    let a = play.driven().walker.body.position;
+    play.key("SCAN_W", true);
+    for _ in 0..(2 * 60) {
+        play.update_input();
+        play.tick(1000.0 / 60.0, [0.0; 2]);
+    }
+    play.key("SCAN_W", false);
+    let b = play.driven().walker.body.position;
+    assert!(a.truncate().distance(b.truncate()) > 20.0, "flew from {a} to {b}");
+    // High up, getting out is refused: "Risk area! Landing impossible."
+    play.says.clear();
+    assert!(!play.roll_back());
+    assert_eq!(play.mode(), Mode::Driving(t));
+    assert!(
+        play.says.iter().any(|s| matches!(s, Say::Text(_, text) if text.starts_with("Risk area"))),
+        "{:?}",
+        play.says
+    );
+    // F sinks to the ground; then the hero gets out beside the bot, facing it.
+    play.key("SCAN_F", true);
+    for _ in 0..(6 * 60) {
+        play.update_input();
+        play.tick(1000.0 / 60.0, [0.0; 2]);
+    }
+    play.key("SCAN_F", false);
+    let bot = play.driven().walker.body.position;
+    let reach = play.driven().collision.1 + play.hero.collision.1;
+    assert!(play.roll_back(), "low over land it may land: bot at {bot}");
+    assert_eq!(play.mode(), Mode::OnFoot);
+    // The first place, due +x of the bot at both spheres' radii (docs/39, "Leaving").
+    let out = play.hero.walker.body.position;
+    assert!(
+        (out.truncate().distance(bot.truncate()) - reach).abs() < 0.5,
+        "out at {out}, the bot at {bot}, {reach}"
+    );
+    assert!((out.y - bot.y).abs() < 0.5 && out.x > bot.x);
+}

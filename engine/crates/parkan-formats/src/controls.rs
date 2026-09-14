@@ -81,6 +81,8 @@ pub const MAN_WRAP: i32 = 0;
 pub const MAN_NOTWRAP: i32 = 1;
 pub const MAN: [(&str, i32); 2] = [("MAN_WRAP", MAN_WRAP), ("MAN_NOTWRAP", MAN_NOTWRAP)];
 
+pub const MCMD_UP: i32 = 11;
+pub const MCMD_DOWN: i32 = 12;
 pub const MCMD_STATE: i32 = 1;
 pub const MCMD_ANGLE_X: i32 = 5;
 pub const MCMD_ANGLE_Y: i32 = 6;

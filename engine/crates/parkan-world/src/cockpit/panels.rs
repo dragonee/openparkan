@@ -252,8 +252,8 @@ pub fn draw(
 
 /// The hero's sphere in the world: its agent sphere carried by its body.
 fn hero_sphere(play: &Play) -> (Vec3, f32) {
-    let body = &play.hero.walker.body;
-    let (centre, radius) = play.hero.collision;
+    let body = &play.driven().walker.body;
+    let (centre, radius) = play.driven().collision;
     (body.position + Quat::from_rotation_z(body.heading()) * centre, radius)
 }
 
@@ -297,7 +297,8 @@ fn panel(
 
     let contacts = play.contacts();
     let (hero_centre, hero_radius) = hero_sphere(play);
-    let shown = if own { None } else { Some(play.targets.current?) };
+    // Aboard a bot, the own panel is the bot's (docs/39, "The view and the HUD").
+    let shown = if own { play.driving.as_ref().map(|d| d.target) } else { Some(play.targets.current?) };
     let (centre, radius, designation, life, building) = match shown {
         None => (
             hero_centre,
@@ -344,7 +345,7 @@ fn panel(
 
     // 5: the frame about the target in the world.
     let distance = if own { 0.0 } else { hero_centre.distance(centre) };
-    if let Some(t) = shown {
+    if let Some(t) = shown.filter(|_| !own) {
         frame(cockpit, ink, play, t, centre, radius, distance, view_proj, now_ms);
     }
 
@@ -355,7 +356,7 @@ fn panel(
     let [px0, py0] = space.pixel([rect[0], rect[1]], pin);
     let [px1, py1] = space.pixel([rect[2], rect[3]], pin);
     let direction = if own {
-        let h = play.hero.walker.body.heading();
+        let h = play.driven().walker.body.heading();
         Vec3::new(-h.sin(), h.cos(), 0.0)
     } else {
         let mut d = (centre - hero_centre).normalize_or(Vec3::Y);

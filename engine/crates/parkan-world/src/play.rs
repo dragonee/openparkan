@@ -114,9 +114,34 @@ pub const CLASS_ROBOT: u32 = 0x0100_0000;
 pub enum Mode {
     /// Mode 0.
     OnFoot,
+    /// Mode 1 with the robot that is target `t`: the player drives it (docs/39).
+    Driving(usize),
     /// Mode 5 with the building that is target `t`: the factory screen (docs/36).
     Factory(usize),
 }
+
+/// The bot the player has boarded, and the pilot its own input table drives it with.
+pub struct Driving {
+    pub target: usize,
+    pub pilot: parkan_sim::input::Pilot,
+    fire_held: bool,
+}
+
+/// A unit the hero boards: size class 4, a `b` chassis (docs/39, "Boarding").
+pub const BOARDABLE_SIZE: u8 = 4;
+/// Leaving tries eight places about the bot, π/4 apart from +x (`iron3d.dll:0x100633ce`); a
+/// flyer must be less than this above the place's ground (`0x1006347c`); the hero is dropped
+/// this far above the highest surface there (`0x100634e4`).
+pub const LEAVE_PLACES: usize = 8;
+pub const LEAVE_FLYER_HEIGHT: f32 = 10.0;
+pub const LEAVE_DROP: f32 = 8.0;
+/// "Risk area! Landing impossible." (`0x10063542`), and its voice.
+pub const STRING_RISK_AREA: u32 = 6211;
+pub const VOICE_RISK_AREA: &str = "VOICE_RISK_AREA";
+pub const VOICE_SELECTED_B: &str = "VOICE_SELECTED_B";
+/// The mission message `iron3d.dll` asks for when the player takes over a flyer
+/// (`0x100638a7`, docs/34 "Mission 02").
+pub const MESSAGE_FLYER_TAKEN: i64 = 100;
 
 /// The material a building's doorway quads wear: drawn black, it hides the inside.
 pub const DOORWAY_MATERIAL: &str = "DEFAULT";
@@ -258,6 +283,8 @@ pub struct Play {
     pub added: Vec<usize>,
     /// Every building's load-group effects, and the value each door-driven one last showed.
     pub building_effects: Vec<(BuildingEffects, Vec<f32>)>,
+    /// The bot the player drives, while the hero is aboard it.
+    pub driving: Option<Driving>,
 }
 
 /// A round about to leave a barrel.
@@ -533,6 +560,7 @@ impl Play {
             spawned: 0,
             added: Vec::new(),
             building_effects,
+            driving: None,
         };
         for i in 0..play.turret_effects.len() {
             let e = play.turret_effects[i].clone();
@@ -744,11 +772,20 @@ impl Play {
     /// The target list's takt on the hero, and the neutral units that make themselves its
     /// target (`iron3d.dll:0x100757ad`).
     fn update_targets(&mut self) {
-        let world = self.contacts();
-        let unit = self.hero.walker.body.position;
-        let range = self.hero.radar.range;
+        let mut world = self.contacts();
+        let driven = self.driving.as_ref().map(|d| d.target);
+        if let Some(c) = driven.and_then(|t| world.get_mut(t)) {
+            // The driven bot is not its own contact.
+            c.alive = false;
+        }
+        let unit = self.driven().walker.body.position;
+        let range = self.driven().radar.range;
         let now = self.hero.time_ms;
-        let contacts = self.hero.radar.scan(now, unit, &world).to_vec();
+        let radar = match driven.and_then(|t| self.robots.iter_mut().find(|(rt, _)| *rt == t)) {
+            Some((_, robot)) => &mut robot.radar,
+            None => &mut self.hero.radar,
+        };
+        let contacts = radar.scan(now, unit, &world).to_vec();
         let changes = self.targets.takt(unit, range, &contacts, &world);
         if changes.target {
             self.target_changed();
@@ -798,7 +835,7 @@ impl Play {
                 })
             }
             CMD_ENTER_STATE => {
-                self.enter();
+                self.enter_or_board();
                 false
             }
             // `0x10075fc0`: the level steps 0, 1, 2 and round.
@@ -996,8 +1033,14 @@ impl Play {
     /// battle's frame, then the effects.
     pub fn tick(&mut self, dt_ms: f64, mouse: [f32; 2]) -> Vec<Event> {
         self.update_targets();
-        self.tick_robots(dt_ms);
-        let shots = if self.hero.dead() {
+        self.tick_robots(dt_ms, mouse);
+        // A driven bot that is lost puts the hero out at once (`0x10062ff0`).
+        if let Some(d) = self.driving.as_ref()
+            && !self.battle.combat.targets.get(d.target).is_some_and(|x| x.alive)
+        {
+            self.leave();
+        }
+        let shots = if self.hero.dead() || self.driving.is_some() {
             self.hero.time_ms += dt_ms;
             Vec::new()
         } else {
@@ -1212,8 +1255,163 @@ impl Play {
         if self.modes.len() <= 1 {
             return false;
         }
+        if let Mode::Driving(_) = self.mode() {
+            return self.leave();
+        }
         self.modes.pop();
         true
+    }
+
+    /// The unit the player drives: the boarded bot, or the hero.
+    pub fn driven(&self) -> &Robot {
+        self.driving
+            .as_ref()
+            .and_then(|d| self.robots.iter().find(|(t, _)| *t == d.target))
+            .map_or(&self.hero.robot, |(_, r)| r)
+    }
+
+    /// The first-person eye: the driven unit's camera.
+    pub fn eye(&self) -> crate::robot::Eye {
+        self.driven().eye().unwrap_or_else(|| self.hero.eye())
+    }
+
+    /// A key or button to the unit the player drives.
+    pub fn key(&mut self, scan: &str, pressed: bool) {
+        match self.driving.as_mut() {
+            Some(d) => {
+                if let Some((_, robot)) = self.robots.iter_mut().find(|(t, _)| *t == d.target) {
+                    crate::hero::drive_key(robot, &mut d.pilot, scan, pressed);
+                }
+            }
+            None => self.hero.key(scan, pressed),
+        }
+    }
+
+    /// The input update of the unit the player drives.
+    pub fn update_input(&mut self) {
+        match self.driving.as_mut() {
+            Some(d) => {
+                if let Some((_, robot)) = self.robots.iter_mut().find(|(t, _)| *t == d.target) {
+                    crate::hero::drive_input(robot, &mut d.pilot, false);
+                }
+            }
+            None => self.hero.update_input(),
+        }
+    }
+
+    /// Whether Enter boards target `t` (`iron3d.dll:0x10071ff8`, `0x10076d30`, docs/39,
+    /// "Boarding"): a unit of the player's clan, of size class 4, whose turret still has life,
+    /// less than 20 away across the ground, while the player is on foot.
+    ///
+    /// STAND-IN: docs/39-boarding.md#boarding--read -- which of the turret's nodes property
+    /// `0x52` reads the life of is not traced: the turret part's node 0.
+    pub fn boardable(&self, t: usize) -> bool {
+        let Some(u) = self.units.get(t) else { return false };
+        let Some((_, robot)) = self.robots.iter().find(|(rt, _)| *rt == t) else { return false };
+        let Some(target) = self.battle.combat.targets.get(t) else { return false };
+        let turret_alive = node_alive(target.parts.get(robot.turret_part).and_then(|p| p.life.as_ref()), 0);
+        let near = robot.walker.body.position.truncate().distance(self.hero.walker.body.position.truncate())
+            < CAPTURE_REACH;
+        self.mode() == Mode::OnFoot
+            && u.kind == KIND_UNIT
+            && u.clan == Some(self.player_clan)
+            && robot.size_class == BOARDABLE_SIZE
+            && target.alive
+            && turret_alive
+            && near
+    }
+
+    /// Board target `t` (`0x100720e8`): the hero leaves the world, the bot is selected with
+    /// `VOICE_SELECTED_B`, the player takes it at auto-driver level 0 with every held key let
+    /// go, and a flyer taken over asks for the mission's message 100.
+    pub fn board(&mut self, t: usize) -> bool {
+        if !self.boardable(t) {
+            return false;
+        }
+        let Some(r) = self.robots.iter().position(|(rt, _)| *rt == t) else { return false };
+        let chassis = self.robots[r].1.parts[self.robots[r].1.chassis_part].record.clone();
+        let Ok(pilot) = crate::hero::Hero::pilot_for(&mut self.assembly, &chassis) else { return false };
+        self.hero.release_keys();
+        let robot = &mut self.robots[r].1;
+        robot.wizard.clear();
+        robot.walker.drive = None;
+        let flyer = robot.flyer;
+        self.driving = Some(Driving { target: t, pilot, fire_held: false });
+        self.modes.push(Mode::Driving(t));
+        self.say_sound(VOICE_SELECTED_B, true);
+        if flyer && let Some(p) = self.progression.as_mut() {
+            let notices = p.progress.call(parkan_sim::progression::MESSAGE_INFO, MESSAGE_FLYER_TAKEN);
+            for n in &notices {
+                let says = p.say(n);
+                self.says.extend(says);
+            }
+        }
+        true
+    }
+
+    /// Leave the boarded bot (`0x10063350`, `0x100638c0`, docs/39, "Leaving"): the first of
+    /// eight places about it with landscape under it that is not water, and for a flyer less
+    /// than 10 below it, takes the hero 8 above the highest surface there, facing the bot.
+    /// With none, "Risk area! Landing impossible." and the player stays aboard.
+    pub fn leave(&mut self) -> bool {
+        let Some(d) = self.driving.as_ref() else { return false };
+        let t = d.target;
+        let Some((_, robot)) = self.robots.iter().find(|(rt, _)| *rt == t) else { return false };
+        let at = robot.walker.body.position;
+        let r = robot.collision.1 + self.hero.collision.1;
+        let flyer = robot.flyer;
+        let alive = self.battle.combat.targets.get(t).is_some_and(|x| x.alive);
+        let place = if alive {
+            (0..LEAVE_PLACES).find_map(|i| {
+                let a = i as f32 * std::f32::consts::FRAC_PI_4;
+                let p = at + Vec3::new(a.cos(), a.sin(), 0.0) * r;
+                let face = self.ground.query(Vec3::new(p.x, p.y, at.z), false)?;
+                let land = self.ground.land.faces.get(face.face?)?;
+                let wet = land.is_water() || land.flags & FLAGS_LIQUID_BED_BIT != 0;
+                if wet || (flyer && at.z - face.point.z >= LEAVE_FLYER_HEIGHT) {
+                    return None;
+                }
+                Some(p)
+            })
+        } else {
+            // A bot that is broken or gone puts the hero at (x − 1, y − 1), untested (`0x100634ad`).
+            Some(at - Vec3::new(1.0, 1.0, 0.0))
+        };
+        let Some(place) = place else {
+            if let Some(text) =
+                self.progression.as_ref().and_then(|p| p.strings.get(&STRING_RISK_AREA)).cloned()
+            {
+                self.says.push(Say::Text(crate::progress::Sender::System, text));
+            }
+            self.say_sound(VOICE_RISK_AREA, true);
+            return false;
+        };
+        let top = self.ground.below(place.x, place.y, 10_000.0).map_or(place.z, |h| h.point.z);
+        let toward = (at - place).with_z(0.0).normalize_or(Vec3::Y);
+        // STAND-IN: docs/39-boarding.md#not-established -- the heading is read as (F.x, −F.y)
+        // under an assumed matrix layout; the hero is turned to face the bot.
+        let yaw = (-toward.x).atan2(toward.y);
+        if let Some(mut d) = self.driving.take()
+            && let Some((_, robot)) = self.robots.iter_mut().find(|(rt, _)| *rt == d.target)
+        {
+            crate::hero::drive_input(robot, &mut d.pilot, true);
+            robot.walker.body.command = [0.0; 3];
+        }
+        self.modes.retain(|m| !matches!(m, Mode::Driving(_)));
+        self.hero.walker.body.velocity = [0.0; 3];
+        self.place_hero(Vec3::new(place.x, place.y, top + LEAVE_DROP), yaw);
+        self.hero.release_keys();
+        true
+    }
+
+    /// Enter (`CMD_ENTER_STATE`): a neutral unit is captured, and one of the player's own
+    /// that can be boarded is boarded.
+    fn enter_or_board(&mut self) -> bool {
+        if self.enter() {
+            return true;
+        }
+        let Some(t) = self.targets.current else { return false };
+        self.board(t)
     }
 
     /// Every building's doors and pod for this tick, with the units standing on it (a unit
@@ -1222,6 +1420,7 @@ impl Play {
     fn tick_buildings(&mut self, now: f64) {
         let mut children: Vec<(usize, Standing)> = Vec::new();
         if !self.hero.dead()
+            && self.driving.is_none()
             && let Some((s, _)) = self.hero.walker.ground.and_then(|h| h.solid)
         {
             children.push((
@@ -1475,7 +1674,12 @@ impl Play {
             announced: false,
             designation,
         });
-        self.names.push(project.name.clone());
+        // A built bot is numbered by its clan: one more than the units the clan has named,
+        // the hero among them (`0x10075d50`, docs/38, "The name").
+        let named = self.units.iter().filter(|u| u.clan == Some(clan) && u.kind == KIND_UNIT).count()
+            + usize::from(clan == self.player_clan);
+        let name = project.name.replacen("-X ", &format!("-{} ", named + 1), 1);
+        self.names.push(name);
         self.deleted.push(false);
         let target = &self.battle.combat.targets[t];
         let solid = Solid::from_parts(&target.parts, target.centre, target.radius, false, |_, _| None);
@@ -1615,7 +1819,7 @@ impl Play {
                 (Some(i), s)
             })
             .collect();
-        if !self.hero.dead() {
+        if !self.hero.dead() && self.driving.is_none() {
             let hero = Seen {
                 id: self.hero_id,
                 position: self.hero.walker.body.position,
@@ -1636,7 +1840,7 @@ impl Play {
     ///
     /// STAND-IN: docs/31-packages.md#between-orders--read -- the behaviour runs only on the
     /// player's clan's robots, the wingmen; every other unit stands where it was placed.
-    fn tick_robots(&mut self, dt_ms: f64) {
+    fn tick_robots(&mut self, dt_ms: f64, mouse: [f32; 2]) {
         let seen = self.seen();
         let mut fired = Vec::new();
         for r in 0..self.robots.len() {
@@ -1644,13 +1848,21 @@ impl Play {
             if !self.battle.combat.targets.get(t).is_some_and(|target| target.alive) {
                 continue;
             }
-            if !self.paused && self.units[t].clan == Some(self.player_clan) {
+            let driven = self.driving.as_ref().is_some_and(|d| d.target == t);
+            if !self.paused && !driven && self.units[t].clan == Some(self.player_clan) {
                 self.behave(r, dt_ms, &seen);
             }
             let (t, robot) = &mut self.robots[r];
             let target = &mut self.battle.combat.targets[*t];
-            robot.advance(dt_ms, &self.ground);
-            let shots = robot.takt(dt_ms);
+            let shots = match self.driving.as_mut().filter(|d| d.target == *t) {
+                Some(d) => {
+                    crate::hero::drive(robot, &mut d.pilot, &mut d.fire_held, dt_ms, mouse, &self.ground)
+                }
+                None => {
+                    robot.advance(dt_ms, &self.ground);
+                    robot.takt(dt_ms)
+                }
+            };
             robot.turn_devices(|p, n| node_alive(target.parts.get(p).and_then(|part| part.life.as_ref()), n));
             if !shots.is_empty() {
                 fired.push((r, shots));
@@ -1907,7 +2119,9 @@ impl Play {
             .zip(&self.battle.combat.targets)
             .map(|(u, t)| (u.logical_id, t.position))
             .collect();
-        at.insert(self.hero_id, self.hero.walker.body.position);
+        // A recording shows the hero's route reported where the bot it rides goes (docs/34,
+        // "Mission 02").
+        at.insert(self.hero_id, self.driven().walker.body.position);
         let now = self.hero.time_ms;
         let Some(p) = self.progression.as_mut() else { return };
         let notices = p.tick(now, |id| at.get(&id).copied());

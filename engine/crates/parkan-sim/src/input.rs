@@ -275,6 +275,9 @@ impl Pilot {
                 hands.body.command[1] = row.value;
             }
             code @ (MCMD_LEFT | MCMD_RIGHT) => self.strafe(code == MCMD_LEFT, row.pressed, hands.body),
+            // `World3D.dll:0x1001059b`: the command's z, which a flyer climbs and sinks by
+            // (docs/39-boarding.md, "Driving").
+            controls::MCMD_UP | controls::MCMD_DOWN => hands.body.command[2] = row.value,
             code @ (MCMD_ANGLE_X | MCMD_ANGLE_Y | MCMD_ANGLE_Z) => {
                 let component = match code {
                     MCMD_ANGLE_X => 0,

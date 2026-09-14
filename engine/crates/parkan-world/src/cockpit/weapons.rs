@@ -13,6 +13,8 @@ pub const RIGHT_EDGE: f32 = 640.0;
 /// The hero's guns' names, in turn (`0x10074b71`).
 pub const HERO_GUN_NAMES: [u32; 4] = [3071, 3072, 3073, 3074];
 pub const STRING_INF: u32 = 5094;
+/// A gun whose name is not found (`0x1003ecb0`).
+pub const NONAME: &str = "NONAME";
 pub const STRING_OUT_OF_RANGE: u32 = 6250;
 /// The row's text while the wingman selector is on, and a name out of range.
 pub const GREY: u32 = 0xff80_8080;
@@ -72,7 +74,7 @@ pub struct Latches(Vec<[bool; 3]>);
 pub fn draw(cockpit: &mut Cockpit, ink: &mut Ink, play: &Play) -> Vec<&'static str> {
     let now_ms = play.hero.time_ms;
     let selecting = play.selector.state != State::Off;
-    let guns = &play.hero.guns;
+    let guns = &play.driven().guns;
     let mut voices = Vec::new();
     cockpit.weapons.0.resize(guns.len(), [false; 3]);
     let top = (ink.font.line_height).round();
@@ -121,6 +123,21 @@ pub fn draw(cockpit: &mut Cockpit, ink: &mut Ink, play: &Play) -> Vec<&'static s
         }
         let (name, name_colour) = if out_of_range && gun.selected && !selecting {
             (cockpit.string(STRING_OUT_OF_RANGE).to_owned(), OUT_OF_RANGE)
+        } else if play.driving.is_some() {
+            // Any unit but the hero looks its gun's name up from the component
+            // (`0x1008a470`), and falls back to NONAME.
+            //
+            // STAND-IN: docs/35-hud.md#the-weapons-list--read-and-measured -- the lookup is not
+            // followed: the gun part's code in the player clan's research tree.
+            let robot = play.driven();
+            let code = robot
+                .gun_parts
+                .get(i)
+                .and_then(Option::as_ref)
+                .and_then(|g| robot.parts.get(g.part))
+                .and_then(|p| cockpit.gun_codes.get(&p.record.to_ascii_lowercase()))
+                .cloned();
+            (code.unwrap_or_else(|| NONAME.to_owned()), row_colour)
         } else {
             let id = HERO_GUN_NAMES.get(i).copied().unwrap_or(0);
             (cockpit.string(id).to_owned(), row_colour)

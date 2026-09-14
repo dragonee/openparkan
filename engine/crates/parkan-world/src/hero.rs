@@ -66,14 +66,7 @@ impl Hero {
         let placed = &mission.objects[object];
         let parts = assembly.parts(placed.kind, &placed.path);
         let chassis = parts.iter().find(|p| p.host == -1).context("the hero has no chassis")?;
-        let table = assembly
-            .library
-            .get(&chassis.record)
-            .and_then(|r| r.slots.iter().find(|s| s.suffix() == "tbl"))
-            .map(|s| s.member.clone())
-            .context("the chassis names no input table")?;
-        let rows = controls::load(&gamedir::resolve(&assembly.game, &table).context("no input table")?)?;
-        let pilot = Pilot::new(rows, mouse_sensitivity(&assembly.game));
+        let pilot = Hero::pilot_for(assembly, &chassis.record.clone())?;
         // The robot's parts, those whose meshes load, in its order.
         let (mut lives, mut blasts) = (Vec::new(), Vec::new());
         for part in &parts {
@@ -89,6 +82,19 @@ impl Hero {
         let r = &mut self.robot;
         let hands = Hands { body: &mut r.walker.body, turret: &mut r.rig.aim, camera: &mut r.rig.look };
         (&mut self.pilot, hands)
+    }
+
+    /// A pilot for a unit's own input table: its chassis record's `.tbl`
+    /// (docs/39-boarding.md, "Driving": `m2.tbl` for a flyer, `m1.tbl` for the rest).
+    pub fn pilot_for(assembly: &mut Assembly, chassis_record: &str) -> Result<Pilot> {
+        let table = assembly
+            .library
+            .get(chassis_record)
+            .and_then(|r| r.slots.iter().find(|s| s.suffix() == "tbl"))
+            .map(|s| s.member.clone())
+            .context("the chassis names no input table")?;
+        let rows = controls::load(&gamedir::resolve(&assembly.game, &table).context("no input table")?)?;
+        Ok(Pilot::new(rows, mouse_sensitivity(&assembly.game)))
     }
 
     /// A key or button, by its scan name.
@@ -114,40 +120,7 @@ impl Hero {
     /// guns the number keys select and the button fires, then the turret and the guns.
     /// Returns the rounds that left, by gun.
     pub fn tick(&mut self, dt_ms: f64, mouse: [f32; 2], ground: &Ground) -> Vec<(usize, Shot)> {
-        let (pilot, mut hands) = self.hands();
-        pilot.mouse(mouse, &mut hands);
-        self.robot.advance(dt_ms, ground);
-
-        // `World3D.dll:0x100109f8`: a gun's number toggles it and sends its arm state 1
-        // or 2; -1 selects and resets every gun and sends every arm `0x21`.
-        let r = &mut self.robot;
-        for n in std::mem::take(&mut self.pilot.selects) {
-            if n < 0 {
-                for g in &mut r.guns {
-                    g.selected = true;
-                    g.reset();
-                }
-                for a in &mut r.rig.arms {
-                    a.send(ARM_UNFOLD);
-                }
-            } else if let Some(i) = usize::try_from(n - 1).ok()
-                && let Some(g) = r.guns.get_mut(i)
-            {
-                g.toggle();
-                if let Some(a) = r.rig.arms.get_mut(i) {
-                    a.send(if g.selected { ITEM_OPENING } else { ITEM_CLOSING });
-                }
-            }
-        }
-        // `MCMD_STATE` index -1 reaches the selected guns as the button goes down or up.
-        if self.pilot.fire != self.fire_held {
-            self.fire_held = self.pilot.fire;
-            let state = if self.fire_held { CONTINUE_FIGHT } else { STATE_OFF };
-            for g in r.guns.iter_mut().filter(|g| g.selected) {
-                g.state = state;
-            }
-        }
-        let shots = self.robot.takt(dt_ms);
+        let shots = drive(&mut self.robot, &mut self.pilot, &mut self.fire_held, dt_ms, mouse, ground);
         let lives = &self.lives;
         self.robot.turn_devices(|p, n| crate::play::node_alive(lives.get(p).and_then(Option::as_ref), n));
         shots
@@ -161,5 +134,77 @@ impl Hero {
     /// The first-person eye (see [`Robot::eye`]); the hero always has a camera.
     pub fn eye(&self) -> Eye {
         self.robot.eye().expect("the hero's turret has a camera")
+    }
+}
+
+/// One tick of a unit driven from `pilot`: the mouse counts since the last, then the
+/// machine, the guns the number keys select and the button fires, then the turret and the
+/// guns. Returns the rounds that left, by gun.
+pub fn drive(
+    robot: &mut Robot,
+    pilot: &mut Pilot,
+    fire_held: &mut bool,
+    dt_ms: f64,
+    mouse: [f32; 2],
+    ground: &Ground,
+) -> Vec<(usize, Shot)> {
+    {
+        let hands = &mut Hands {
+            body: &mut robot.walker.body,
+            turret: &mut robot.rig.aim,
+            camera: &mut robot.rig.look,
+        };
+        pilot.mouse(mouse, hands);
+    }
+    robot.advance(dt_ms, ground);
+
+    // `World3D.dll:0x100109f8`: a gun's number toggles it and sends its arm state 1
+    // or 2; -1 selects and resets every gun and sends every arm `0x21`.
+    let r = robot;
+    for n in std::mem::take(&mut pilot.selects) {
+        if n < 0 {
+            for g in &mut r.guns {
+                g.selected = true;
+                g.reset();
+            }
+            for a in &mut r.rig.arms {
+                a.send(ARM_UNFOLD);
+            }
+        } else if let Some(i) = usize::try_from(n - 1).ok()
+            && let Some(g) = r.guns.get_mut(i)
+        {
+            g.toggle();
+            if let Some(a) = r.rig.arms.get_mut(i) {
+                a.send(if g.selected { ITEM_OPENING } else { ITEM_CLOSING });
+            }
+        }
+    }
+    // `MCMD_STATE` index -1 reaches the selected guns as the button goes down or up.
+    if pilot.fire != *fire_held {
+        *fire_held = pilot.fire;
+        let state = if *fire_held { CONTINUE_FIGHT } else { STATE_OFF };
+        for g in r.guns.iter_mut().filter(|g| g.selected) {
+            g.state = state;
+        }
+    }
+    r.takt(dt_ms)
+}
+
+/// A key to a unit driven from `pilot`.
+pub fn drive_key(robot: &mut Robot, pilot: &mut Pilot, scan: &str, pressed: bool) {
+    let hands =
+        &mut Hands { body: &mut robot.walker.body, turret: &mut robot.rig.aim, camera: &mut robot.rig.look };
+    pilot.key(scan, pressed, hands);
+}
+
+/// The input update of a unit driven from `pilot`, or every key coming up.
+pub fn drive_input(robot: &mut Robot, pilot: &mut Pilot, release: bool) {
+    let now = robot.time_ms;
+    let hands =
+        &mut Hands { body: &mut robot.walker.body, turret: &mut robot.rig.aim, camera: &mut robot.rig.look };
+    if release {
+        pilot.release_all(hands);
+    } else {
+        pilot.update(now, hands);
     }
 }

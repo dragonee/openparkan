@@ -143,7 +143,7 @@ pub fn draw(cockpit: &mut Cockpit, ink: &mut Ink, play: &Play, now_ms: f64) {
         );
     }
     // The hero, a walker, always outlined and with its heading line, green unselected.
-    let hero = &play.hero;
+    let hero = play.driven();
     let colour = play.mark_colour(Some(play.player_clan)).map(|v| f32::from(v) / 255.0);
     let yaw = hero.walker.body.yaw;
     unit_mark(

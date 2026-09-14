@@ -6,7 +6,7 @@
 //! parkan [--game DIR] [--mission MISSIONS/…] [--fly]
 //!        [--screenshot OUT.png] [--size WxH] [--top-down] [--look X,Y,Z,TX,TY,TZ]
 //!        [--headless] [--ticks N] [--hold SCAN_W,SCAN_A] [--mouse DX,DY] [--trace] [--sway]
-//!        [--capture-idle] [--stretch-hud] [--outcome won|lost] [--text "…"] [--face NAME,DISTANCE] [--at X,Y,YAW] [--pod NAME] [--designer] [--design PART,…]
+//!        [--capture-idle] [--stretch-hud] [--outcome won|lost] [--text "…"] [--face NAME,DISTANCE] [--at X,Y,YAW] [--pod NAME] [--drive PATH] [--designer] [--design PART,…]
 //!        [--skip-briefing] [--briefing-at SECONDS] [--objectives] [--map]
 //! ```
 //!
@@ -101,6 +101,8 @@ struct Args {
     at: Option<[f32; 3]>,
     /// `--pod NAME`: the hero starts on the control pod of the building whose path ends in NAME.
     pod: Option<String>,
+    /// `--drive PATH`: a unit of that design is made beside the hero, and the hero boards it.
+    drive: Option<String>,
     /// `--designer`: a screenshot with the warbot designer open on the first factory, and
     /// `--design PART,…` the parts fitted to it in turn.
     designer: bool,
@@ -136,6 +138,7 @@ fn args() -> Result<Args> {
         face: None,
         at: None,
         pod: None,
+        drive: None,
         designer: false,
         design: Vec::new(),
         skip_briefing: false,
@@ -176,6 +179,7 @@ fn args() -> Result<Args> {
                 out.at = Some(v.try_into().map_err(|_| anyhow::anyhow!("--at takes X,Y,YAW"))?);
             }
             "--pod" => out.pod = Some(value()?.to_ascii_lowercase()),
+            "--drive" => out.drive = Some(value()?),
             "--designer" => out.designer = true,
             "--design" => out.design = value()?.split(',').map(str::to_owned).collect(),
             "--ticks" => out.ticks = value()?.parse()?,
@@ -259,13 +263,41 @@ fn rehearse(play: &mut scene::Play, loaded: &scene::Loaded, args: &Args) {
     {
         eprintln!("--at: no ground at {x}, {y}");
     }
+    if let Some(path) = &args.drive {
+        let data =
+            parkan_formats::gamedir::resolve(&play.assembly.game, path).and_then(|p| std::fs::read(p).ok());
+        let type_word = data
+            .as_ref()
+            .and_then(|d| d.get(4..8))
+            .map_or(0, |b| u32::from_le_bytes(b.try_into().unwrap_or([0; 4])));
+        let project = parkan_world::factory::Project {
+            path: path.clone(),
+            name: String::new(),
+            type_word,
+            chassis_size: 4,
+            ore: 0.0,
+            power: 0.0,
+            lines: Vec::new(),
+            sphere: None,
+        };
+        let at = play.hero.walker.body.position + Vec3::new(8.0, 0.0, 1.0);
+        match play.spawn(&project, play.player_clan, at, play.hero.walker.body.yaw) {
+            Some(t) => {
+                play.tick(TICK_MS, [0.0; 2]);
+                if !play.board(t) {
+                    eprintln!("--drive: cannot board {path}");
+                }
+            }
+            None => eprintln!("--drive: {path} is not a robot"),
+        }
+    }
     for key in &args.hold {
-        play.hero.key(key, true);
+        play.key(key, true);
     }
     let mut kills = Vec::new();
     for tick in 0..args.ticks {
         // Nothing is rendered here: the input update runs once a tick.
-        play.hero.update_input();
+        play.update_input();
         for e in play.tick(TICK_MS, args.mouse) {
             if let parkan_sim::combat::Event::Killed { target } = e {
                 kills.push(play.battle.objects[target]);
@@ -345,6 +377,12 @@ fn screenshot(loaded: &scene::Loaded, game: &Path, args: &Args, out: &Path) -> R
             progression.progress.outcome = Some(outcome);
         }
     }
+    // What the rehearsal made, and a boarded bot's cockpit, are drawn too.
+    if let (Some(p), Some(v)) = (play.as_mut(), view.as_mut())
+        && scene::add_targets(&mut world.objects, &mut world.store, v, p)?
+    {
+        p.draw_rounds(&mut world.store, &mut world.objects)?;
+    }
     let mut renderer = Renderer::new(&gpu.device, parkan_render::CAPTURE_FORMAT);
     renderer.set_world(
         &gpu.device,
@@ -372,7 +410,7 @@ fn screenshot(loaded: &scene::Loaded, game: &Path, args: &Args, out: &Path) -> R
     } else if let Some(b) = &briefing {
         camera::first_person(&b.eye(), aspect)
     } else if let Some(p) = &play {
-        camera::first_person(&p.hero.eye(), aspect)
+        camera::first_person(&p.eye(), aspect)
     } else {
         start_camera(loaded).view_proj(aspect)
     };
@@ -387,7 +425,7 @@ fn screenshot(loaded: &scene::Loaded, game: &Path, args: &Args, out: &Path) -> R
             )
         }
         (Some(p), None) => {
-            let e = briefing.as_ref().map_or_else(|| p.hero.eye(), |b| b.eye());
+            let e = briefing.as_ref().map_or_else(|| p.eye(), |b| b.eye());
             (e.position, e.forward, p.hero.time_ms / 1000.0)
         }
         (None, None) => {
@@ -663,7 +701,9 @@ impl App {
         let Some(play) = self.play.as_mut() else { return };
         // A building's screen has the hero handed away: its table takes no key
         // (`0x10074ff0` with 0, docs/36), and only the screens' commands act.
-        let on_foot = play.mode() == parkan_world::play::Mode::OnFoot;
+        // The player drives the hero on foot, or the bot it boarded.
+        let on_foot =
+            matches!(play.mode(), parkan_world::play::Mode::OnFoot | parkan_world::play::Mode::Driving(_));
         // While the wingman selector is open a digit is its (`iron3d.dll:0x100710fa`).
         let digit = scan
             .strip_prefix("SCAN_W_")
@@ -676,7 +716,7 @@ impl App {
                     play.wingman_digit(n);
                 }
             }
-            _ if on_foot => play.hero.key(scan, pressed),
+            _ if on_foot => play.key(scan, pressed),
             _ => {}
         }
         if !pressed {
@@ -693,7 +733,7 @@ impl App {
             .running
             .as_ref()
             .map_or(16.0 / 9.0, |r| r.config.width as f32 / r.config.height.max(1) as f32);
-        let eye = play.hero.eye();
+        let eye = play.eye();
         let view = parkan_world::play::View {
             eye: eye.position,
             look: eye.forward,
@@ -783,7 +823,9 @@ impl App {
         //
         // STAND-IN: docs/36-factory.md#not-established -- how the cursor is shown in mode 5
         // is not followed: the system's cursor, the grab let go.
-        if self.grabbed && self.play.as_ref().is_some_and(|p| p.mode() != parkan_world::play::Mode::OnFoot) {
+        if self.grabbed
+            && self.play.as_ref().is_some_and(|p| matches!(p.mode(), parkan_world::play::Mode::Factory(_)))
+        {
             self.grab(false);
         }
         // The designer goes with the factory screen it was opened from.
@@ -795,7 +837,7 @@ impl App {
         }
         // The input update runs once a rendered frame.
         if let Some(play) = self.play.as_mut() {
-            play.hero.update_input();
+            play.update_input();
         }
         self.step();
         // The briefing's clock starts on its first drawn frame; its voices play at once.
@@ -843,7 +885,7 @@ impl App {
         }
         // The sounds the ticks started play now, whether or not a frame can be drawn.
         if let (Some(play), Some(audio)) = (self.play.as_mut(), self.audio.as_mut()) {
-            let eye = play.hero.eye();
+            let eye = play.eye();
             let right = eye.forward.cross(eye.up);
             for cue in std::mem::take(&mut play.cues) {
                 audio.play(&cue, eye.position, right);
@@ -894,7 +936,7 @@ impl App {
         let aspect = r.config.width as f32 / r.config.height.max(1) as f32;
         let (eye, forward, seconds) = match &self.play {
             Some(p) => {
-                let e = self.briefing.as_ref().map_or_else(|| p.hero.eye(), |b| b.eye());
+                let e = self.briefing.as_ref().map_or_else(|| p.eye(), |b| b.eye());
                 (e.position, e.forward, p.hero.time_ms / 1000.0)
             }
             None => (self.camera.position, self.camera.forward(), self.started.elapsed().as_secs_f64()),
@@ -907,7 +949,7 @@ impl App {
         let view_proj = match self.play.as_mut() {
             Some(play) => {
                 let briefing = self.briefing.as_ref();
-                let eye = briefing.map_or_else(|| play.hero.eye(), |b| b.eye());
+                let eye = briefing.map_or_else(|| play.eye(), |b| b.eye());
                 let view_proj = camera::first_person(&eye, aspect);
                 let mut runs = Vec::new();
                 if let Some(panel) = play.panel() {
@@ -1173,7 +1215,7 @@ fn main() -> Result<()> {
         p.draw_rounds(&mut world.store, &mut world.objects)?;
         // `--hold` presses keys in the window too, for trying things without hands.
         for key in &args.hold {
-            p.hero.key(key, true);
+            p.key(key, true);
         }
     }
     let event_loop = EventLoop::new()?;
