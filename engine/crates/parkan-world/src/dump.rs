@@ -618,6 +618,15 @@ pub fn input_table(path: &Path) -> Result<Value> {
     }))
 }
 
+/// A `.man`: every binding, command and chord, as written.
+pub fn key_bindings(path: &Path) -> Result<Value> {
+    let bindings = controls::bindings(&std::fs::read(path)?, &path.display().to_string())?;
+    Ok(json!({
+        "kind": "man",
+        "bindings": bindings.iter().map(|b| json!({ "command": b.command, "modifier": b.modifier, "key": b.key })).collect::<Vec<_>>(),
+    }))
+}
+
 /// A `.cfg`: its blocks in order, its resource descriptors, and the objective list and
 /// messages the progression readers take from it.
 pub fn cfg_file(path: &Path) -> Result<Value> {
@@ -753,11 +762,12 @@ pub fn dump(kind: &str, path: &Path, names: &[String]) -> Result<Value> {
         "progression" => progression(path),
         "rsli" => rsli_archive(path),
         "font" => game_font(path),
+        "man" => key_bindings(path),
         "scr" => script(path),
         "varset" => variable_table(path),
         "fml" => formula_set(path),
         other => anyhow::bail!(
-            "unknown kind {other:?}; expected nres, mission, texm, materials, landmesh, mesh, assembly, control, controls, cpt, ndp, exp, fxid, sky, cfg, strings, progression, rsli, font, scr, varset or fml"
+            "unknown kind {other:?}; expected nres, mission, texm, materials, landmesh, mesh, assembly, control, controls, cpt, ndp, exp, fxid, sky, cfg, strings, progression, rsli, font, man, scr, varset or fml"
         ),
     }
 }

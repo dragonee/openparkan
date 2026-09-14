@@ -181,11 +181,11 @@ every archive in the install, Mission 01's `data.tma`, `Material.lib`, Tut_1's
 `Land.msh`, the textures its ground names, Mission 01's assembly (every
 object's parts and their poses) and the 19 meshes they use. From M3 it adds
 every controller and control point list, archive by archive, and the three
-input tables; from M4 every damage table, explosion and effect; from M5 every
+input tables, and from M6 the key bindings; from M4 every damage table, explosion and effect; from M5 every
 mission's atmosphere, both RsLi archives and the game font; from M6 every
 `.cfg`, the text and interface string tables, each mission's objectives,
 messages and ambient sound resolved, and every behaviour script, its formulas
-and `varset.var`: 436 dumps.
+and `varset.var`: 448 dumps.
 
 ## Stand-ins
 

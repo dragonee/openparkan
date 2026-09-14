@@ -473,6 +473,13 @@ def input_table(path: Path, names: list[str] | None = None) -> dict:
     }
 
 
+def key_bindings(path: Path, names: list[str] | None = None) -> dict:
+    """A ``.man``: every binding, command and chord, as written."""
+    return {"kind": "man",
+            "bindings": [{"command": b.command, "modifier": b.modifier, "key": b.key}
+                         for b in controls.bindings(path)]}
+
+
 def cfg_file(path: Path, names: list[str] | None = None) -> dict:
     """A ``.cfg``: its blocks in order, its resource descriptors, and the objective list
     and messages the progression readers take from it."""
@@ -640,4 +647,4 @@ KINDS = {"nres": _nres, "mission": _mission, "texm": texm, "materials": material
          "ndp": damage_tables, "exp": explosions, "fxid": fx_effects,
          "sky": atmosphere, "cfg": cfg_file, "strings": pe_strings, "progression": progression,
          "rsli": rsli_archive, "font": game_font, "scr": script, "varset": variable_table,
-         "fml": formula_set}
+         "fml": formula_set, "man": key_bindings}

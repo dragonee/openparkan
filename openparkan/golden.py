@@ -120,6 +120,8 @@ def targets(game: Path) -> list[tuple[str, Path, list[str]]]:
             + [("sky", d / "sky.ske", []) for d in gamedir.missions(game)
                if (d / "sky.ske").exists()]
             + [("controls", game / name, []) for name in controls.TABLES]
+            + [("man", p, []) for p in sorted(game.glob("*"))
+               if p.suffix.lower() == ".man"]
             + [("cfg", p, []) for p in sorted(game.rglob("*"))
                if p.is_file() and p.suffix.lower() == ".cfg"]
             + [("strings", game / "DATA" / "TextRes.dll", []), ("strings", game / "iron3d.dll", [])]

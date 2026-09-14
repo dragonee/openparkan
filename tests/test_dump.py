@@ -146,3 +146,14 @@ def test_a_script_its_formulas_and_the_variable_table_dump_as_stored(tmp_path):
     assert dump.variable_table(var)["variables"] == [
         {"kind": "VAR", "type": "DWORD", "name": "ERROR", "default": "0xffffffff"}]
     assert {"scr", "fml", "varset"} <= set(dump.KINDS)
+
+
+def test_a_key_binding_file_dumps_each_chord_as_written(tmp_path):
+    path = tmp_path / "ui.man"
+    path.write_bytes(b"CMD_CAMERA_CENTER SCAN_LSHIFT SCAN_RMOUSE\r\n\r\n"
+                     b"CMD_JAMES_AIM_TARGET SCAN_NULL SCAN_RMOUSE\r\n")
+    out = dump.key_bindings(path)
+    assert out["kind"] == "man" and "man" in dump.KINDS
+    assert out["bindings"][1] == {"command": "CMD_JAMES_AIM_TARGET", "modifier": "SCAN_NULL",
+                                  "key": "SCAN_RMOUSE"}
+    json.dumps(out)
