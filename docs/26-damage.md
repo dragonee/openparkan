@@ -59,9 +59,11 @@ Each node of a model has a life, built from its `.ndp` record
   on all 18 others. A round, which strikes level 0 only
   ([the hit test](#the-hit-test--read-and-measured)), can never hit that node;
   that a blast cannot either, having no sphere to overlap, is a *guess*.
-- **Damage stages.** A node with *N* damage states (the extra mesh blocks) is
-  in stage `N − ceil(N × life / max)`; each step up plays the node's `.exp`
-  explosion (`0x10011220`).
+- **Damage stages.** A node with *N* stages — its mesh blocks in a row that
+  have a level-0 slot, block 0 included — is in stage
+  `N − ceil(N × life / max)`; each step up plays the node's `.exp` explosion
+  (`0x10011220`). Which block that draws, and what happens at the last stage,
+  is [below](#what-a-damaged-node-a-destroyed-part-and-a-dead-unit-draw--read-and-measured).
 
 What the shipped tables give node 0 (*measured*):
 
@@ -77,6 +79,145 @@ What the shipped tables give node 0 (*measured*):
 | bunkers, research centres, towers | 40,000–100,000 |
 | bridges | 120,000–200,000 |
 | mines, plants, stores, Outposts, generators, the medium `mtp` | 1 on node 0; parts 40,000–500,000 |
+
+## What a damaged node, a destroyed part and a dead unit draw — *read*, and *measured*
+
+`Control.dll` keeps a node's life in a 44-byte record (`+0x55c`): `+4` its
+parent, `+8` life, `+0x14` life ÷ maximum, `+0x18` its stage, `+0x1c` its
+stage count, `+0x24` its explosion, `+0x28` its status. It tells the unit's
+mesh what to draw through `IAnimation` (`+0x20`), whose `AniMesh.dll` node
+records are 0x130 bytes (`+0x1a8`): `+8` the mesh node, `+0x14` a flags word,
+`+0x18` the parent, `+0x1c` the stage value, `+0x124` life ÷ maximum.
+
+**What the loader takes from the mesh** (`0x1000f940`).
+
+- The parent: query `0xd`, the mesh record's `+0x18` (`AniMesh.dll:0x1000523d`).
+- Status bits from query `0xe`, **the mesh node's own flags word**
+  (`AniMesh.dll:0x10005242`): `0x200` → status 1, a vital node
+  (`0x1000f9aa`); **`0x100` → status 2, a node that is never hidden**
+  (`0x1000f9bd`); `0x400` → 4 and `0x1` without `0x80` → 8, a node that copies
+  its parent's life fraction or its stage (`0x1000f9d0`, `0x1000f9e3`;
+  `0x1001130e`–`0x10011344`).
+- **The stage count**: `IAnimation` slot 18 (`AniMesh.dll:0x10005840`) counts
+  variants 0, 1 and 2 in a row whose level-0 slot exists; none gives 1
+  (`0x1000fa0b`).
+
+**The stage** (`0x10011220`) is `N − ceil(N × life / max)`, held to *N*
+(`0x10011346`–`0x10011389`). When it changes, a rise plays the node's `.exp`
+when it names one (`0x100113b2`–`0x100113be`). Then:
+
+- **The block drawn.** `IAnimation` slot 17 is given the stage held below *N*,
+  `min(stage, N − 1)` (`0x100118b1`–`0x100118c4`), into the node's `+0x1c`
+  (`AniMesh.dll:0x10005810`). The mesh draw asks every node for
+  `slot_index[stage × 5 + level]` (`0x100124d0` with variant −1, which reads
+  `+0x1c`; `0x10014e65`), and a node with no slot there draws nothing.
+- **The last stage hides the node.** At stage *N* — which only a life of 0
+  gives — a node without status 2 goes through `0x10011920` with 0
+  (`0x100118cd`–`0x100118e2`). That sets status `0x20`, and sets **flag 1 in
+  the mesh record's flags word** through `IAnimation` slot 8 (`0x10011a52`;
+  slot 8 is `AniMesh.dll:0x10005500`, which clears the flags it is given when
+  its operation word is odd and sets them otherwise). It also takes the node's area
+  and volume (queries `0xf`, `0x10`) and its mass out of the totals, and
+  recomputes the live limits
+  ([24-motion.md](24-motion.md#what-sets-the-live-limits--read)).
+  Leaving stage *N* again, under repair, clears flags 1 and 4
+  (`0x1001199e`).
+- **A node with flag 1 is gone from the world.** The mesh draw skips it
+  (`AniMesh.dll:0x10014e57`, and the second draw loop at `0x100150a2`). So do
+  the node visitors of the walk-face query (`0x1000ce90`), the collision push
+  (`0x1000dfe0`) and the segment hit test (`0x100106d0`, `0x10010dc0`), each
+  answering nothing for it. A hidden part is not drawn, not stood on, not
+  collided with and not struck.
+
+**Children go with their parent** (`0x10011130`). After a tick's hits the
+walk runs from node 0 down (`0x10013127`, `0x10013136`). A node whose stage
+rose, or which is destroyed, hands each child a hit of minus its life
+(`0x100111df`–`0x100111ed`). The child is marked `0x80` when the parent is
+flying off (status `0x40` or `0x80`) and `0x100` otherwise
+(`0x100111ab`–`0x100111d4`).
+
+**A destroyed part is first knocked off** (*read*). Before that walk, every
+node with status `0x10` is offered to the control system's main-interface
+slot 25 (`0x100102a0`, from `0x10012fce`–`0x10012fe2`). It takes a node:
+
+- with a parent (`+4` not −1), on an agent that is not a building (kind 3);
+- whose status has none of `0x1ce` (`0x100102dc`) — not never-hidden, not
+  copying, not already flying or marked;
+- while the byte at `0x100424a0` is set. The static initialiser
+  `0x10006350` (listed at `0x1003e1bc`) sets it to 1 and `0x100424a4` to
+  3000.0, and nothing else writes either.
+
+The part gets status `0x40`, flag 4 in its mesh flags word (`0x10010741`),
+and a 0x88-byte flight record in the list at `+0x568` (`0x10010720`) that
+ends 3000 ms on (`0x10010613`). **While it flies its stage is skipped**
+(`0x10011306`), and so is that of each child it takes down (`0x80`). They
+stay drawn, and they hang off the flying part (*derived*: a child's model
+matrix is its parent's times its own,
+[07-objects.md](07-objects.md#node-poses)). The flight update
+(`0x100131da`–`0x100135b6`) moves the part, lowers its velocity's z each tick
+(`0x100133a2`) and hands its matrix to the mesh (`IAnimation` slot 5,
+`0x100133fe`). At its end time
+(`0x10013494`), or earlier when a world query ends it (`0x100134c1`), the
+record goes and the part's status turns `0x40` into `0x100`
+(`0x10013568`–`0x1001357c`). The walk from node 0 then runs (`0x100135b6`): the
+part reaches stage *N*, **its `.exp` plays and it is hidden**, and its
+children with it.
+
+**A dead unit is deleted** (*read*). When node 0 or a vital node is destroyed
+and the agent is not a building (`0x100110ab`) nor carries `+0x104` bit
+`0x10000000`:
+
+- the owner word becomes `0xfffe`;
+- the death time `+0x59c` becomes now + **the controller's `+92`**, in ms
+  (`+0x4b8`, [13-control.md](13-control.md#the-frame-is-the-live-objects-parameter-block);
+  `0x100110b1`–`0x100110ce`; the clock `+0xe4` counts milliseconds);
+- message `0x15` with 7 goes to the object at `+0x34` (`0x100110ee`);
+- node 0 takes a hit of minus the unit's total life, and its stage runs
+  (`0x10011105`–`0x1001110f`).
+
+The control tick compares the death time with the clock and, once it has
+passed, calls `World3D.dll!KillGameObject` with the object's id
+(`0x1000c93f`–`0x1000c977`, `0x1000d080`–`0x1000d0af`). That looks the object
+up and deletes it (`World3D.dll:0x100088a0` → `0x100087e0`). Node 0 dying has
+already destroyed and hidden every node below it that is not never-hidden, so
+**a unit vanishes with its explosions and is removed a moment later**. A
+building is only marked, and its never-hidden nodes stay as the shell
+(above).
+
+**What the shipped files give** (*measured*):
+
+- **Stage counts** across the 2340 nodes of the meshes the library's records
+  name: 1 on 1598, 2 on 130, 3 on 15, and no level-0 slot on 597 (counted as
+  1).
+- **Never hidden** (mesh node flag `0x100`) on 60 nodes, all on the 33
+  `bu_*` building records: the shells.
+- **The controller's `+92`**: 0 on 333 records, then 5000 on 118, 1000 on 42,
+  2000 on 22, 3000 on 21, 11000 on 3. On the chassis: 2000 on 20, 5000 on 2,
+  3000 and 1000 on one each.
+- **Mission 01's dummies.** Neither has a vital node or a never-hidden node,
+  and every node names an explosion.
+
+  | chassis | node | parent | stages | hit points | explosion | controller `+92` |
+  |---|---|---|---:|---:|---|---:|
+  | `r_h_01` (`l_targ.dat`) | 0 `ASbs` | — | 1 | 500 | `explode_aim_S` | 3000 |
+  | | 1 `ASd1` | 0 | 2 | 800 | `explode_aim_S` | |
+  | | 2 `ASd2` | 0 | 2 | 800 | `explode_aim_S` | |
+  | | 3 `ASd3` | 2 | 2 | 600 | `explode_aim_S` | |
+  | `r_h_03` (`M_targ.dat`) | 0 `ALbs` | — | 1 | 1400 | `explode_aim_L` | 5000 |
+  | | 1–5 `ALd1`…`ALd5` | 0 | 2 | 1000 each | `explode_aim_L` | |
+
+**So, shooting a dummy** (*derived* from the reads above):
+
+- A part at or below half its life draws its damaged block, with an
+  explosion.
+- At 0 it is knocked off. It flies, drawn, for three seconds, then explodes
+  and is gone.
+- `ASd2` reaching its damaged block kills its child `ASd3`: `ASd3` explodes and
+  is hidden where it stands, since its parent is not flying.
+- `ASd2` destroyed takes `ASd3` along on its flight.
+- The base, node 0, reaching 0 hides it and every part still standing, each
+  with its explosion. The unit is deleted three seconds later on `l_targ`,
+  five on `M_targ`.
 
 ## The difficulty ratio — *read*, and *measured*
 
@@ -586,3 +727,19 @@ shield, battery and ammunition (`Behavior.dll:0x10018100`, `0x10019372`,
   with its `0xfffe` owner word is not read.
 - What `iron3d.dll` does with an object whose owner word is `0xfffe`: 37
   compares with the value, one read (`0x1007dee0`, which skips it).
+- ~~What a destroyed node draws, and what a dead unit leaves.~~ Answered: a
+  node draws the block of its stage held below its stage count; at the last
+  stage it is hidden from the draw, the ground, collisions and hits unless its
+  mesh flags carry `0x100`; a destroyed part is first knocked off and flies
+  for three seconds; a dead unit is deleted the controller's `+92` ms after it
+  dies ([What a damaged node, a destroyed part and a dead unit draw](#what-a-damaged-node-a-destroyed-part-and-a-dead-unit-draw--read-and-measured)).
+- How a knocked-off part flies: the push and spin it is given (`0x100102a0`,
+  its subtree's box and mass from `0x10010760`),
+  how its update integrates them, and what the world query at `0x100134c1`
+  asks before it ends the flight.
+- What `+0x104` bit `0x10000000` is, which spares an object the death timer,
+  and what message `0x15` with 7 does at the object it is sent to.
+- Who sends an agent message 6 with `0x16`, which deletes it through
+  `KillGameObject` from `AniMesh.dll` (`0x10001602`).
+- What the mesh node flag `0x10` means: it is on `ASd1`, `ASd3` and every part
+  of `r_h_03`, and the life loader does not read it.

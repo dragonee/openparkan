@@ -5665,14 +5665,6 @@ read = true
 
 [[entry]]
 module = "Control.dll"
-at = "0x10011920"
-kind = "function"
-name = "part detach: its mass leaves the total, returns to spare payload, limits recomputed"
-doc = "docs/24-motion.md"
-read = true
-
-[[entry]]
-module = "Control.dll"
 at = "0x10012a40"
 kind = "function"
 name = "running gear: mean life of .ndp flag 0x20 nodes -> +0x354, 0x40 -> +0x358; ground damage on kind 4"
@@ -16344,14 +16336,6 @@ doc = "docs/24-motion.md"
 
 [[entry]]
 module = "AniMesh.dll"
-at = "0x1000dfe0"
-kind = "function"
-name = "push-out visitor node test: the node's level-0 slot sphere against the query sphere"
-read = true
-doc = "docs/24-motion.md"
-
-[[entry]]
-module = "AniMesh.dll"
 at = "0x1000e0c0"
 kind = "function"
 name = "push-out visitor triangle: 0x1000e900 against the sphere; a direction and distance into the world, kept sorted by distance"
@@ -16395,14 +16379,6 @@ module = "AniMesh.dll"
 at = "0x10020954"
 kind = "datum"
 name = "walk-face visitor vtable (slot 2): node test 0x1000ce90, triangle 0x1000cfa0"
-read = true
-doc = "docs/24-motion.md"
-
-[[entry]]
-module = "AniMesh.dll"
-at = "0x1000ce90"
-kind = "function"
-name = "walk-face visitor node test: the point within the slot sphere's radius x scale plus the margin, in x and y"
 read = true
 doc = "docs/24-motion.md"
 
@@ -17694,3 +17670,531 @@ kind = "site"
 name = "right button pick: a candidate's centre projected"
 read = true
 doc = "docs/25-sensors.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x10011920"
+kind = "function"
+name = "last damage stage: status 0x20 and mesh flag 1 hide the node; its area, volume and mass leave the totals and the limits are recomputed (with 1, restored)"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x1000dfe0"
+kind = "function"
+name = "push-out visitor node test: none for a hidden node (mesh flag 1), else the node's level-0 slot sphere against the query sphere"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x1000ce90"
+kind = "function"
+name = "walk-face visitor node test: none for a hidden node (mesh flag 1), else the point within the slot sphere's radius x scale plus the margin, in x and y"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000f9aa"
+kind = "site"
+name = "life loader: mesh node flag 0x200 -> status 1, vital"
+read = true
+doc = "docs/26-damage.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000f9bd"
+kind = "site"
+name = "life loader: mesh node flag 0x100 -> status 2, never hidden at the last stage"
+read = true
+doc = "docs/26-damage.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000f9d0"
+kind = "site"
+name = "life loader: mesh node flag 0x400 -> status 4, copies the parent's life fraction"
+read = true
+doc = "docs/26-damage.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000f9e3"
+kind = "site"
+name = "life loader: mesh node flag 1 without 0x80 -> status 8, copies the parent's stage"
+read = true
+doc = "docs/26-damage.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000fa0b"
+kind = "site"
+name = "life loader: a stage count of 0 (IAnimation slot 18) is held to 1"
+read = true
+doc = "docs/26-damage.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001130e"
+kind = "site"
+name = "damage stage: status 4 copies +0x14 and status 8 +0x18 from the parent record"
+read = true
+doc = "docs/26-damage.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x10011344"
+kind = "site"
+name = "damage stage: the copied stage joins the held-to-N compare"
+read = true
+doc = "docs/26-damage.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x10011346"
+kind = "site"
+name = "damage stage: N - ceil(N x life fraction)"
+read = true
+doc = "docs/26-damage.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x10011389"
+kind = "site"
+name = "damage stage: the stage held to the count N"
+read = true
+doc = "docs/26-damage.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x10011306"
+kind = "site"
+name = "damage stage: a destroyed node flying off (status 0x40 or 0x80) skips its stage"
+read = true
+doc = "docs/26-damage.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x100113b2"
+kind = "site"
+name = "damage stage: a rise plays the node's .exp"
+read = true
+doc = "docs/26-damage.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x100113be"
+kind = "site"
+name = "damage stage: no .exp named (+0x24 == -1), nothing plays"
+read = true
+doc = "docs/26-damage.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x100118b1"
+kind = "site"
+name = "damage stage: min(stage, N - 1) for IAnimation slot 17"
+read = true
+doc = "docs/26-damage.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x100118cd"
+kind = "site"
+name = "damage stage: a node without status 2 at stage N is hidden (0x10011920 with 0)"
+read = true
+doc = "docs/26-damage.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x100118e2"
+kind = "site"
+name = "damage stage: the hide or restore call"
+read = true
+doc = "docs/26-damage.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x10011a52"
+kind = "site"
+name = "last stage: status 0x20 and IAnimation slot 8 sets mesh flag 1, hidden"
+read = true
+doc = "docs/26-damage.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001199e"
+kind = "site"
+name = "leaving the last stage: IAnimation slot 8 clears mesh flags 1 and 4"
+read = true
+doc = "docs/26-damage.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x100111ab"
+kind = "site"
+name = "child walk: a child not yet 0x40/0x100 is marked 0x80 under a flying parent, 0x100 otherwise"
+read = true
+doc = "docs/26-damage.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x100111d4"
+kind = "site"
+name = "child walk: the child's mark stored"
+read = true
+doc = "docs/26-damage.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x100111df"
+kind = "site"
+name = "child walk: a parent whose stage rose or which is destroyed hits the child for minus its life"
+read = true
+doc = "docs/26-damage.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x100111ed"
+kind = "site"
+name = "child walk: the hit that kills the child"
+read = true
+doc = "docs/26-damage.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x10012fce"
+kind = "site"
+name = "hit application: every node with status 0x10 is offered to main slot 25, knock-off"
+read = true
+doc = "docs/26-damage.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x10012fe2"
+kind = "site"
+name = "hit application: the knock-off call through main slot 25"
+read = true
+doc = "docs/26-damage.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x10013127"
+kind = "site"
+name = "hit application: after damage, the child walk from node 0"
+read = true
+doc = "docs/26-damage.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x10013136"
+kind = "site"
+name = "hit application: the child walk call"
+read = true
+doc = "docs/26-damage.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x100102a0"
+kind = "function"
+name = "main slot 25: knock a destroyed non-root part off; status 0x40, mesh flag 4, a flight record for 3000 ms"
+read = true
+doc = "docs/26-damage.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x100102dc"
+kind = "site"
+name = "knock-off: refused for status 0x1ce (kept, copying, flying or marked)"
+read = true
+doc = "docs/26-damage.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x10010613"
+kind = "site"
+name = "knock-off: the flight's end, now + 3000.0 from 0x100424a4"
+read = true
+doc = "docs/26-damage.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x10010720"
+kind = "site"
+name = "knock-off: the 0x88-byte flight record added to the list at +0x568"
+read = true
+doc = "docs/26-damage.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x10010741"
+kind = "site"
+name = "knock-off: IAnimation slot 8 sets mesh flag 4"
+read = true
+doc = "docs/26-damage.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x10010760"
+kind = "function"
+name = "a node's intact subtree: its box, area and mass, for a flying part"
+read = true
+doc = "docs/26-damage.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x100131da"
+kind = "site"
+name = "flight update: each record of the list at +0x568"
+read = true
+doc = "docs/26-damage.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x100133a2"
+kind = "site"
+name = "flight update: the part's velocity z lowered each tick"
+read = true
+doc = "docs/26-damage.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x100133fe"
+kind = "site"
+name = "flight update: the part's matrix handed to the mesh, IAnimation slot 5"
+read = true
+doc = "docs/26-damage.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x10013494"
+kind = "site"
+name = "flight update: ends once its end time has passed"
+read = true
+doc = "docs/26-damage.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x100134c1"
+kind = "site"
+name = "flight update: a world query at +0x44 slot 8 that can end it earlier (not read)"
+read = true
+doc = "docs/26-damage.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x10013568"
+kind = "site"
+name = "flight end: status 0x40 cleared"
+read = true
+doc = "docs/26-damage.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001357c"
+kind = "site"
+name = "flight end: status 0x100 set, so the part's stage runs and hides it"
+read = true
+doc = "docs/26-damage.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x100135b6"
+kind = "site"
+name = "flight end: the child walk from node 0"
+read = true
+doc = "docs/26-damage.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x100110b1"
+kind = "site"
+name = "death: the controller's +92 (+0x4b8) ms read for the death time"
+read = true
+doc = "docs/26-damage.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x100110ce"
+kind = "site"
+name = "death: +0x59c = clock + the delay"
+read = true
+doc = "docs/26-damage.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x100110ee"
+kind = "site"
+name = "death: message 0x15 with 7 to the object at +0x34"
+read = true
+doc = "docs/26-damage.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x10011105"
+kind = "site"
+name = "death: node 0 hit for minus the unit's total life"
+read = true
+doc = "docs/26-damage.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001110f"
+kind = "site"
+name = "death: node 0's stage"
+read = true
+doc = "docs/26-damage.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000c93f"
+kind = "site"
+name = "control tick: the death time against the clock"
+read = true
+doc = "docs/26-damage.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000c977"
+kind = "site"
+name = "control tick: World3D!KillGameObject once the death time has passed"
+read = true
+doc = "docs/26-damage.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000d080"
+kind = "site"
+name = "control tick (second body): the death time against the clock"
+read = true
+doc = "docs/26-damage.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000d0af"
+kind = "site"
+name = "control tick (second body): World3D!KillGameObject"
+read = true
+doc = "docs/26-damage.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x10006350"
+kind = "function"
+name = "static initialiser: knock-off switch 0x100424a0 = 1, flight 0x100424a4 = 3000.0"
+read = true
+doc = "docs/26-damage.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x100424a0"
+kind = "datum"
+name = "byte: parts knock off when set; only 0x10006350 writes it"
+read = true
+doc = "docs/26-damage.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x100424a4"
+kind = "datum"
+name = "float: a knocked-off part's flight, 3000 ms"
+read = true
+doc = "docs/26-damage.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1003e1bc"
+kind = "datum"
+name = "static initialiser table entry for 0x10006350"
+read = true
+doc = "docs/26-damage.md"
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x1000523d"
+kind = "site"
+name = "IAnimation slot 3 query 0xd: the node record's parent +0x18"
+read = true
+doc = "docs/26-damage.md"
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10005242"
+kind = "site"
+name = "IAnimation slot 3 query 0xe: the mesh node's flags word"
+read = true
+doc = "docs/26-damage.md"
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10005840"
+kind = "function"
+name = "IAnimation slot 18: a node's stage count, variants 0-2 in a row with a level-0 slot"
+read = true
+doc = "docs/26-damage.md"
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10014e57"
+kind = "site"
+name = "mesh draw: a node with flag 1 is skipped"
+read = true
+doc = "docs/26-damage.md"
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10014e65"
+kind = "site"
+name = "mesh draw: the slot for the node's stage (variant -1)"
+read = true
+doc = "docs/26-damage.md"
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x100150a2"
+kind = "site"
+name = "second draw loop: a node with flag 1 is skipped"
+read = true
+doc = "docs/26-damage.md"
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x100106d0"
+kind = "function"
+name = "segment hit node visitor: answers nothing for a node with flag 1"
+read = true
+doc = "docs/26-damage.md"
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10010dc0"
+kind = "function"
+name = "segment hit node visitor: answers nothing for a node with flag 1"
+read = true
+doc = "docs/26-damage.md"
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10001602"
+kind = "site"
+name = "agent message 6 with 0x16: KillGameObject on itself"
+read = true
+doc = "docs/26-damage.md"
+
+[[entry]]
+module = "World3D.dll"
+at = "0x100088a0"
+kind = "function"
+name = "KillGameObject: the object by id, then DeleteGameObject"
+read = true
+doc = "docs/26-damage.md"
+
+[[entry]]
+module = "World3D.dll"
+at = "0x100087e0"
+kind = "function"
+name = "DeleteGameObject"
+read = true
+doc = "docs/26-damage.md"

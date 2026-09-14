@@ -3829,6 +3829,118 @@ def check_damage(check, game: Path) -> None:
           f"pieces gone: fewer triangles on {shrinks}/{compared}")
 
 
+#: A mesh node flag the life loader turns into "never hidden" (``Control.dll:0x1000f9bd``).
+NODE_NEVER_HIDDEN = 0x100
+#: A mesh node flag the life loader turns into "vital" (``Control.dll:0x1000f9aa``).
+NODE_VITAL = 0x200
+
+#: Mission 01's dummies, by chassis: each node's name, parent, stage count, hit points
+#: and explosion, and the controller's +92, the ms a dead unit lasts.
+MISSION_01_DUMMIES = {
+    "r_h_01": ([("ASbs_m1o1", None, 1, 500.0), ("ASd1_m1o1", 0, 2, 800.0),
+                ("ASd2_m1o1", 0, 2, 800.0), ("ASd3_m1o1", 2, 2, 600.0)],
+               "explode_aim_S.exp", 3000),
+    "r_h_03": ([("ALbs_m1o1", None, 1, 1400.0)]
+               + [(f"ALd{k}_m1o1", 0, 2, 1000.0) for k in range(1, 6)],
+               "explode_aim_L.exp", 5000),
+}
+
+
+def _stage_count(node) -> int:
+    """How many of blocks 0, 1 and 2 in a row have a level-0 slot (``AniMesh.dll:0x10005840``)."""
+    n = 0
+    for variant in range(objmesh.VARIANT_COUNT):
+        if node.slot_index[variant * objmesh.SLOTS_PER_VARIANT] == objmesh.NO_SLOT:
+            break
+        n += 1
+    return n
+
+
+def check_node_stages(check, game: Path) -> None:
+    """What a damaged node draws, which nodes are never hidden, and how long the dead last."""
+    library = objects.ObjectLibrary(game / "objects.rlb")
+    opened: dict[str, NResArchive] = {}
+
+    def member(ref) -> bytes | None:
+        if ref is None or not ref.member:
+            return None
+        try:
+            if ref.library not in opened:
+                opened[ref.library] = NResArchive.open(game / ref.library)
+            return opened[ref.library].read_name(ref.member)
+        except (KeyError, ValueError, FileNotFoundError):
+            return None
+
+    stages: Counter[int] = Counter()
+    never_hidden: Counter[str] = Counter()
+    chassis_delay: Counter[int] = Counter()
+    for record in library.records.values():
+        blob = member(record.mesh)
+        if blob is not None:
+            try:
+                model = objmesh.parse(blob, record.mesh.member)
+            except (ValueError, struct.error):
+                model = None
+            for node in model.nodes if model else ():
+                stages[_stage_count(node)] += 1
+                if node.flags & NODE_NEVER_HIDDEN:
+                    never_hidden[record.name] += 1
+        if record.name.lower().startswith("r_"):
+            raw = member(record.slot_with_suffix("ctl"))
+            if raw is not None:
+                chassis_delay[control.parse(raw).scale] += 1
+
+    check("MESH: a node's stages are its blocks with a level-0 slot in a row",
+          stages[1] > stages[2] > stages[3] > 0 and stages[0] > 0,
+          f"1 on {stages[1]} nodes, 2 on {stages[2]}, 3 on {stages[3]}, and no "
+          f"level-0 slot on {stages[0]} (the life loader counts those as 1, "
+          f"Control.dll:0x1000fa0b)")
+    check("MESH: only building shells are never hidden (node flag 0x100)",
+          sum(never_hidden.values()) > 0
+          and all(name.lower().startswith("bu_") for name in never_hidden),
+          f"{sum(never_hidden.values())} nodes over {len(never_hidden)} records, all "
+          f"bu_* buildings; every other node is hidden at its last stage "
+          f"(Control.dll:0x100118cd)")
+    check("controller +92: a dead chassis lasts one to five seconds",
+          set(chassis_delay) <= {1000, 2000, 3000, 5000} and chassis_delay[2000] > 0,
+          f"{dict(sorted(chassis_delay.items()))} over the r_* chassis: ms added to the "
+          f"clock at death before KillGameObject (Control.dll:0x100110b1)")
+
+    seen = {}
+    for name in MISSION_01_DUMMIES:
+        record = library.get(name)
+        model = objmesh.parse(member(record.mesh), record.mesh.member)
+        table = objects.parse_damage(member(record.damage), record.damage.member)
+        rows = [(node.name, None if node.parent == objmesh.NO_PARENT else node.parent,
+                 _stage_count(node), row.durability)
+                for node, row in zip(model.nodes, table, strict=True)]
+        explosions = {row.explosion.member for row in table}
+        flagged = any(node.flags & (NODE_NEVER_HIDDEN | NODE_VITAL) for node in model.nodes)
+        delay = control.parse(member(record.slot_with_suffix("ctl"))).scale
+        seen[name] = (rows, explosions, flagged, delay)
+    check("Mission 01's dummies: parts of two stages on a base of one",
+          all(seen[n][0] == rows and seen[n][1] == {exp} and not seen[n][2]
+              and seen[n][3] == delay
+              for n, (rows, exp, delay) in MISSION_01_DUMMIES.items()),
+          "; ".join(f"{n}: " + ", ".join(f"{r[0].split('_')[0]} {r[2]}x{r[3]:g}" for r in rows)
+                    + f", {'/'.join(sorted(exp))}, +92 {delay}, "
+                    f"{'a vital or kept node' if flagged else 'no vital or kept node'}"
+                    for n, (rows, exp, flagged, delay) in seen.items()))
+
+    # The knock-off switch and its flight time are set once, by a static initialiser.
+    image = (game / "Control.dll").read_bytes()
+    sections, _ = resources._sections(image)
+    at = resources._offset(sections, 0x100063B4 - 0x10000000)
+    stored = image[at:at + 17]
+    switch = stored[:7] == bytes.fromhex("c605a024041001")
+    flight = (stored[7:13] == bytes.fromhex("c705a4240410")
+              and struct.unpack_from("<f", stored, 13)[0])
+    check("Control.dll: a destroyed part is knocked off and flies for 3000 ms",
+          switch and flight == 3000.0 and b"KillGameObject" in image,
+          f"0x100063b4 stores 1 in the switch at 0x100424a0 and {flight} in 0x100424a4; "
+          f"KillGameObject imported {b'KillGameObject' in image}")
+
+
 def check_profiles(check, game: Path) -> None:
     """behpsp.res and the economy it carries, against the missions."""
     if not (game / profiles.ARCHIVE).exists():
@@ -12632,7 +12744,7 @@ def run(game: Path) -> int:
         check_water, check_layers, check_materials, check_material_draw, check_sky,
         check_render_state, check_minimap_agreement, check_arealmap,
         check_grid, check_missions, check_scale, check_objects, check_poses, check_lod,
-        check_damage,
+        check_damage, check_node_stages,
         check_effects, check_effect_timing, check_sounds, check_actions, check_footprints,
         check_rsli,
         check_control, check_efficiency,

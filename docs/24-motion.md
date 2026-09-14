@@ -261,7 +261,8 @@ it writes
 
 It runs at load, at reset, after any node takes damage (the flag at `+0x598`
 set in `0x10010f30`, `0x1001102f`, acted on next tick by `0x10012a40`), and
-when a part comes off (`0x10011920`).
+when a node reaches or leaves its last damage stage, taking its area, volume and mass
+out of the totals or back (`0x10011920`).
 
 What follows from it:
 

@@ -540,6 +540,16 @@ vertices are wholly disjoint from block 0's on all 135, never a subset. A
 renderer that draws intact scenery wants block 0 and nothing else, which is
 what `slots_for_lod` takes by default; nothing is missing from the picture.
 
+**Which block a damaged node draws** (*read*). The mesh draw picks
+`slot_index[stage × 5 + level]`, the stage being the value the node's life
+system handed the mesh (`AniMesh.dll:0x100124d0` with variant −1). The life
+system counts a node's stages as its blocks in a row with a level-0 slot
+(`0x10005840`, *measured*: 1 on 1598 nodes, 2 on 130, 3 on 15, none on 597)
+and hands the mesh its stage held below that count. At its last stage, a
+life of 0, the node is hidden from the draw unless its flags word carries
+`0x100`, which only the 60 shell nodes of the `bu_*` building records do. See
+[26-damage.md](26-damage.md#what-a-damaged-node-a-destroyed-part-and-a-dead-unit-draw--read-and-measured).
+
 ### The stream 2 header is the model's authored extent
 
 The 140 bytes before the first slot are 35 floats:

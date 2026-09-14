@@ -35,7 +35,7 @@ and why the 84-byte block read as a trailer until the layout was recovered.
 0x38  float[3]   +56   triple 4   turn rate; two-pi on 364
 0x44  float[3]   +68   triple 5   how fast the hull rights itself; 1.0 on 418
 0x50  float[3]   +80   triple 6   the most the body leans, rad; two-pi on 422
-0x5c  int32      +92   0 on 324, else 1000, 2000, 5000
+0x5c  int32      +92   ms a dead object lasts; 0 on 324, else 1000, 2000, 5000
 0x60  float[2]   +96   zero on 512
 0x68  int32      +104  0, 2 or 3; 2 brakes on slopes
 0x6c  float      +108  -1.0 on 465
@@ -248,7 +248,7 @@ offset:
 | +44, +48, +52 | `fcomp`, and multiplied into the live top speed (`0x1000fd5d`); +48's address is also taken |
 | +56 | `fcomp` |
 | +88, +104 | read as dwords |
-| +92 | read, 3 sites |
+| +92 | read, 3 sites: the death delay, ms, added to the clock when the object dies ([26-damage.md](26-damage.md#what-a-damaged-node-a-destroyed-part-and-a-dead-unit-draw--read-and-measured)) |
 | +108 | read, 5 sites |
 | +116 | `test byte ptr [ptr + 0x60], 1` — a **bitfield**, bit 0 |
 | +124 | 8 reads and **2 writes** in the integrator at `0x1000f412` |

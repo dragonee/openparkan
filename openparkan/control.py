@@ -893,7 +893,8 @@ class Controller:
     counts: tuple[int, int, int, int, int]
     #: The six ``(x, y, z)`` triples at +20, +32, +44, +56, +68 and +80.
     triples: tuple[tuple[float, float, float], ...]
-    #: +92: 0 on 324, then 5000, 1000, 2000 -- a round count, not a float.
+    #: +92: the ms a dead object lasts before it is deleted (``+0x4b8``, see
+    #: docs/26-damage.md); 0 on 324, then 5000, 1000, 2000.
     scale: int
     #: +96 and +100: zero on 512.
     pair: tuple[float, float]
