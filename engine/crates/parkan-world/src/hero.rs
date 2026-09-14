@@ -13,7 +13,7 @@ use glam::{Quat, Vec3};
 use parkan_formats::control::{self, CAMERA_TYPE, Controller, GUN_TYPE};
 use parkan_formats::cpt::{self, ControlPoint};
 use parkan_formats::mission::Mission;
-use parkan_formats::pose::{Pose, rotate};
+use parkan_formats::pose::{Pose, multiply, rotate};
 use parkan_formats::{controls, gamedir};
 use parkan_sim::ground::Ground;
 use parkan_sim::guns::{CONTINUE_FIGHT, Gun, STATE_OFF, Shot};
@@ -65,6 +65,9 @@ pub struct Hero {
     pub guns: Vec<Gun>,
     pub rounds: Vec<Option<usize>>,
     fire_held: bool,
+    /// Whether the turret, and the eye in it, are held steady against the body's gait
+    /// yaw ([`Hero::chassis_pose`]). Off, the view swings as the game's does.
+    pub steady: bool,
     /// The machine's velocity over its last step, from the two poses either side.
     velocity: Vec3,
     /// Game time, ms.
@@ -82,6 +85,19 @@ fn controller(assembly: &mut Assembly, record: &str) -> Result<Option<Controller
     };
     let data = read_member(assembly, &slot.library, &slot.member)?;
     Ok(Some(control::parse(&data, &slot.member)?))
+}
+
+/// `pose` with its turn about z, measured from `rest`, taken out: the swing that is left
+/// of rest⁻¹ × pose once its twist about z is removed, applied to `rest`.
+fn without_yaw(pose: &Pose, rest: &Pose) -> Pose {
+    let [w, x, y, z] = rest.rotation;
+    let relative = multiply([w, -x, -y, -z], pose.rotation);
+    let length = relative[0].hypot(relative[3]);
+    if length < 1e-9 {
+        return *pose;
+    }
+    let untwist = [relative[0] / length, 0.0, 0.0, -relative[3] / length];
+    Pose { rotation: multiply(rest.rotation, multiply(relative, untwist)), ..*pose }
 }
 
 /// `MOUSE_SENS` from `Iron_3D.ini`.
@@ -161,6 +177,7 @@ impl Hero {
             guns: Vec::new(),
             rounds: Vec::new(),
             fire_held: false,
+            steady: false,
             velocity: Vec3::ZERO,
             time_ms: 0.0,
         }))
@@ -320,13 +337,27 @@ impl Hero {
         self.point(usize::try_from(self.rig.channels.get(channel)?.point).ok()?)
     }
 
-    /// The turret's pose in the unit's frame, with the chassis playing its frames.
-    pub fn mount(&self) -> Pose {
+    /// A chassis node's pose in the unit's frame, the chassis playing its frames as the
+    /// pose walk does ([`parkan_formats::mesh::Mesh::walk_pose`]).
+    ///
+    /// DEPARTURE: docs/30-turrets.md#aiming-and-the-camera--read-and-measured -- the game's
+    /// body node yaws with the gait (±10° once a run cycle on the hero), and the turret,
+    /// the eye, the sight and the barrels swing with it. With [`Hero::steady`] node 0 keeps
+    /// only the part of its turn that is not about its up axis, so all of them hold the
+    /// cycle's mean heading, which is the heading the body moves along.
+    pub fn chassis_pose(&self, node: usize) -> Pose {
         let f = self.walker.frames(self.time_ms);
         let chassis = &self.chassis.mesh;
         let (a, b, w) = (f64::from(f.a), f64::from(f.b), f64::from(f.weight));
-        let socket = chassis.world_pose_by(self.socket, |n| chassis.blended_pose(n, a, b, w));
-        socket.compose(&self.turret.mesh.root_pose().invert())
+        chassis.world_pose_by(node, |n| {
+            let pose = chassis.walk_pose(n, a, b, w);
+            if n == 0 && self.steady { without_yaw(&pose, &chassis.local_pose(0)) } else { pose }
+        })
+    }
+
+    /// The turret's pose in the unit's frame, with the chassis playing its frames.
+    pub fn mount(&self) -> Pose {
+        self.chassis_pose(self.socket).compose(&self.turret.mesh.root_pose().invert())
     }
 
     /// A turret node's pose in the unit's frame.
@@ -362,5 +393,35 @@ impl Hero {
             fov_x: values[2],
             near: values[0],
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn about(axis: [f64; 3], angle: f64) -> [f64; 4] {
+        let s = (angle / 2.0).sin();
+        [(angle / 2.0).cos(), axis[0] * s, axis[1] * s, axis[2] * s]
+    }
+
+    fn close(a: [f64; 4], b: [f64; 4]) -> bool {
+        let d = a.iter().zip(&b).map(|(x, y)| x * y).sum::<f64>().abs();
+        (d - 1.0).abs() < 1e-9
+    }
+
+    #[test]
+    fn without_yaw_takes_out_the_turn_about_up_and_keeps_the_rest() {
+        let rest = Pose { translation: [0.0; 3], rotation: about([1.0, 0.0, 0.0], 0.3) };
+        let tilt = about([0.0, 1.0, 0.0], 0.05);
+        let turned = Pose {
+            translation: [1.0, 2.0, 3.0],
+            rotation: multiply(rest.rotation, multiply(tilt, about([0.0, 0.0, 1.0], 0.17))),
+        };
+        let steady = without_yaw(&turned, &rest);
+        assert_eq!(steady.translation, [1.0, 2.0, 3.0]);
+        assert!(close(steady.rotation, multiply(rest.rotation, tilt)), "{:?}", steady.rotation);
+        let only_yaw = Pose { rotation: multiply(rest.rotation, about([0.0, 0.0, 1.0], -0.17)), ..rest };
+        assert!(close(without_yaw(&only_yaw, &rest).rotation, rest.rotation));
     }
 }

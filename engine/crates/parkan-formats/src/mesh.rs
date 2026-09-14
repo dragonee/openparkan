@@ -235,6 +235,14 @@ impl Mesh {
         }
     }
 
+    /// [`Mesh::blended_pose`] as the pose walk uses it (`AniMesh.dll:0x10008d88`): the
+    /// root node keeps its rotation but not its translation, so a body turns in the
+    /// picture and its stride is carried by the object's own move instead.
+    pub fn walk_pose(&self, node: usize, frame_a: f64, frame_b: f64, weight: f64) -> Pose {
+        let pose = self.blended_pose(node, frame_a, frame_b, weight);
+        if node == 0 { Pose { translation: [0.0; 3], ..pose } } else { pose }
+    }
+
     /// The pose a host's socket replaces when this mesh is mounted.
     pub fn root_pose(&self) -> Pose {
         self.nodes.iter().position(|n| n.parent == NO_PARENT).map_or(IDENTITY, |i| self.local_pose(i))

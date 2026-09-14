@@ -104,8 +104,13 @@ pub fn lighting(
     Some((lighting, sky.dome_colours(fog).into_iter().map(linear).collect()))
 }
 
-pub fn play(game: &Path, loaded: &Loaded) -> Result<Option<Play>> {
-    Play::load(game, &loaded.mission)
+/// The mission's play, with the hero's view held steady against its gait unless `sway`.
+pub fn play(game: &Path, loaded: &Loaded, sway: bool) -> Result<Option<Play>> {
+    let mut play = Play::load(game, &loaded.mission)?;
+    if let Some(p) = play.as_mut() {
+        p.hero.steady = !sway;
+    }
+    Ok(play)
 }
 
 /// The HUD: a crosshair at the screen's centre, where the sight looks, and a slot for
@@ -253,12 +258,9 @@ pub fn place_own_view(
     let (position, yaw) = hero.walker.drawn(t);
     let unit = Mat4::from_translation(position) * Mat4::from_quat(Quat::from_rotation_z(yaw));
     let mount = hero.mount();
-    let frames = hero.walker.frames(t);
-    let (a, b, weight) = (f64::from(frames.a), f64::from(frames.b), f64::from(frames.weight));
-    let chassis = &hero.chassis.mesh;
     for &(instance, part, node) in &view.nodes {
         let pose = match part {
-            Mount::Chassis => chassis.world_pose_by(node, |n| chassis.blended_pose(n, a, b, weight)),
+            Mount::Chassis => hero.chassis_pose(node),
             Mount::Turret => hero.turret_node(&mount, node),
         };
         renderer.set_instance(queue, instance, unit * models::pose_matrix(&pose), true);

@@ -5,7 +5,7 @@
 //! ```text
 //! parkan [--game DIR] [--mission MISSIONS/…] [--fly]
 //!        [--screenshot OUT.png] [--size WxH] [--top-down] [--look X,Y,Z,TX,TY,TZ]
-//!        [--headless] [--ticks N] [--hold SCAN_W,SCAN_A] [--mouse DX,DY] [--trace]
+//!        [--headless] [--ticks N] [--hold SCAN_W,SCAN_A] [--mouse DX,DY] [--trace] [--sway]
 //! ```
 //!
 //! In the cockpit the hero's own input table drives it: W/S walk, A/D strafe,
@@ -19,6 +19,9 @@
 //! `--screenshot` or, with `--headless`, printing where it got to. In the window
 //! `--hold` keeps those keys down and `--mouse` adds its counts every tick, and
 //! `--trace` prints where the hero is every second.
+//!
+//! The hero's view holds the heading it moves along; `--sway` lets it swing with the
+//! gait, ten degrees each way on a run, as the game's does.
 
 mod audio;
 mod camera;
@@ -56,6 +59,8 @@ struct Args {
     headless: bool,
     /// `--trace`: the window prints where the hero is every second of game time.
     trace: bool,
+    /// `--sway`: the view swings with the hero's gait, as the game's does.
+    sway: bool,
     ticks: u32,
     hold: Vec<String>,
     mouse: [f32; 2],
@@ -72,6 +77,7 @@ fn args() -> Result<Args> {
         look: None,
         headless: false,
         trace: false,
+        sway: false,
         ticks: 0,
         hold: Vec::new(),
         mouse: [0.0; 2],
@@ -87,6 +93,7 @@ fn args() -> Result<Args> {
             "--top-down" => out.top_down = true,
             "--headless" => out.headless = true,
             "--trace" => out.trace = true,
+            "--sway" => out.sway = true,
             "--ticks" => out.ticks = value()?.parse()?,
             "--hold" => out.hold = value()?.split(',').map(str::to_owned).collect(),
             "--mouse" => {
@@ -181,8 +188,11 @@ fn screenshot(loaded: &scene::Loaded, game: &Path, args: &Args, out: &Path) -> R
     let (width, height) = args.size;
     let gpu = pollster::block_on(Gpu::headless())?;
     let mut world = scene::world(game, loaded)?;
-    let mut play =
-        if args.fly || args.top_down || args.look.is_some() { None } else { scene::play(game, loaded)? };
+    let mut play = if args.fly || args.top_down || args.look.is_some() {
+        None
+    } else {
+        scene::play(game, loaded, args.sway)?
+    };
     let mut view = None;
     if let Some(p) = play.as_mut() {
         view = Some(scene::own_view(&mut world.objects, &mut world.store, p)?);
@@ -516,7 +526,7 @@ fn main() -> Result<()> {
         )),
     );
     if args.headless {
-        let mut play = scene::play(&game, &loaded)?.context("the mission has no hero to play")?;
+        let mut play = scene::play(&game, &loaded, args.sway)?.context("the mission has no hero to play")?;
         rehearse(&mut play, &args);
         report(&play);
         return Ok(());
@@ -525,7 +535,7 @@ fn main() -> Result<()> {
         return screenshot(&loaded, &game, &args, out);
     }
     let mut world = scene::world(&game, &loaded)?;
-    let mut play = if args.fly { None } else { scene::play(&game, &loaded)? };
+    let mut play = if args.fly { None } else { scene::play(&game, &loaded, args.sway)? };
     let mut view = None;
     if let Some(p) = play.as_mut() {
         view = Some(scene::own_view(&mut world.objects, &mut world.store, p)?);

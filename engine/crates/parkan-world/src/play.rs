@@ -281,9 +281,10 @@ impl Play {
                 // Placement 7 turns the effect to the struck face; a round's `.exp` radius is its size.
                 self.fx.explode(&exp, surface, Frame::along(*point, axis, 1.0), exp.radius, now);
             }
-            Event::Exploded { kind, point, at_range: true } => {
+            Event::Exploded { kind, point, forward, at_range: true } => {
+                // Placement 0 on a round: along its second axis, the way it flies (docs/29).
                 if let Some(exp) = self.battle.combat.kinds[*kind].range_end.clone() {
-                    self.fx.explode(&exp, None, Frame::along(*point, Vec3::Z, 1.0), exp.radius, now);
+                    self.fx.explode(&exp, None, Frame::along(*point, *forward, 1.0), exp.radius, now);
                 }
             }
             Event::Damaged { target, part, destroyed, .. } => {

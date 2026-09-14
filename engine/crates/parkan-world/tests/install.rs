@@ -355,3 +355,46 @@ fn a_strafe_turns_the_hull_while_the_turret_holds_the_sight() {
     }
     panic!("the hull turned only {turned} rad away from the heading");
 }
+
+#[test]
+#[ignore = "needs the game install"]
+fn the_heros_eye_swings_with_the_run_but_never_lunges_and_holds_steady_when_asked() {
+    use parkan_formats::{landmesh, mission};
+    use parkan_sim::ground::Ground;
+    use parkan_world::{assembly::Assembly, hero::Hero};
+
+    let game = gamedir::find(None).expect("a Parkan install: set PARKAN_DIR");
+    let dir = gamedir::resolve(&game, gamedir::MISSION_01).unwrap();
+    let m = mission::parse(&std::fs::read(dir.join("data.tma")).unwrap(), "Mission.01").unwrap();
+    let land = landmesh::load(&gamedir::resolve(&game, "DATA/MAPS/Tut_1/Land.msh").unwrap()).unwrap();
+    let ground = Ground::new(land);
+    let wrap = |a: f32| (a + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI;
+    // Over 3 s holding W, from the first second on: the most the eye's look turns from the
+    // unit's heading, and the most the eye stands out from the body across the ground.
+    let run = |steady: bool| {
+        let mut assembly = Assembly::new(&game).unwrap();
+        let mut hero = Hero::load(&mut assembly, &m).unwrap().expect("Mission 01 has a hero");
+        hero.steady = steady;
+        hero.key("SCAN_W", true);
+        let (mut swing, mut reach) = (0.0_f32, 0.0_f32);
+        for tick in 0..180 {
+            hero.tick(1000.0 / 60.0, [0.0; 2], &ground);
+            if tick < 60 {
+                continue;
+            }
+            let t = hero.time_ms;
+            let eye = hero.eye();
+            swing =
+                swing.max(wrap((-eye.forward.x).atan2(eye.forward.y) - hero.walker.drawn_heading(t)).abs());
+            reach = reach.max((eye.position - hero.walker.drawn(t).0).truncate().length());
+        }
+        (swing, reach)
+    };
+    // The body node yaws 10 degrees each way on a run (docs/30), and its travel is cleared (docs/07).
+    let (swing, reach) = run(false);
+    assert!((swing.to_degrees() - 10.0).abs() < 1.5, "the game's view swings {} degrees", swing.to_degrees());
+    assert!(reach < 1.0, "the eye stands {reach} m out from the body");
+    let (swing, reach) = run(true);
+    assert!(swing.to_degrees() < 0.5, "the steady view still swings {} degrees", swing.to_degrees());
+    assert!(reach < 1.0, "the steady eye stands {reach} m out from the body");
+}

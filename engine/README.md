@@ -134,7 +134,8 @@ it is free. `--ticks N`, `--hold` (scan names) and `--mouse DX,DY` (counts a
 tick) play the hero at 60 ticks a second before a screenshot, or with
 `--headless` print where it got to. In the window `--hold` keeps its keys down,
 `--mouse` adds its counts every tick and `--trace` prints where the hero is
-every second. With `--fly`, W/A/S/D and Q/E fly, holding
+every second. The view holds the heading the hero moves along; `--sway` lets it
+swing with the gait as the game's does. With `--fly`, W/A/S/D and Q/E fly, holding
 the right mouse button turns and Shift flies faster.
 
 ## Checks
@@ -174,7 +175,7 @@ a row here. A row leaves this table when research closes it.
 | M3 | What the draw layers 10 and 9 a fifth slot is filed under do (`Terrain.dll:0x1004553b`), and `CShade` slot 15 | the fifth slots draw with the scene, depth-tested, lit and fogged like any model | [07](../docs/07-objects.md#the-fifth-slot-is-what-the-units-own-view-draws) |
 | M3 | How an object's interface `0x25` slot 3 turns its level-0 triangles into a push on a sphere; the rest of the pair response is read | none yet: units walk through each other and through buildings; to come, push the sphere out along the nearest triangle's normal by its penetration | [24](../docs/24-motion.md#collision-between-objects--read) |
 | M3 | Which scene objects the walk-face query visits (types 1 and 3), so which bridges and buildings are ground | the landscape alone is ground: bridges and buildings are not | [24](../docs/24-motion.md#not-established) |
-| M3 | When the ground contact runs and with what dt, the pose its contact points use, the second sphere's radius r₂, and what lifts a sphere with no face under it | after every state step, with the step as dt; contacts on the step's last frames with node 0's translation left out; r₂ = r; no lift | [24](../docs/24-motion.md#holding-the-body-on-the-ground--read-and-measured) |
+| M3 | When the ground contact runs and with what dt, the frames its contact points are placed at, the second sphere's radius r₂, and what lifts a sphere with no face under it | after every state step, with the step as dt; contacts on the step's last frames; r₂ = r; no lift | [24](../docs/24-motion.md#holding-the-body-on-the-ground--read-and-measured) |
 | M3 | A state's use count `+0x94` | unlimited | [24](../docs/24-motion.md#section-1-is-the-animation-state-graph--read-and-measured) |
 | M3 | The state a machine starts in | state 0 | [24](../docs/24-motion.md#playing-a-state--read-and-measured) |
 | M3 | The request code a controller holds before any is sent | none (−1): a state waiting for a code of its own does not apply until one is sent; no Mission 01 state has one | [32](../docs/32-builder.md#the-construction-sphere--read-and-measured) |
@@ -222,3 +223,13 @@ engine pass replaces each with what was read and removes its row.
 | M3 | no spare payload is computed: r = 1 | the chassis is part id 0's nodes, the root object's (the hero's r is about 1 anyway) | [24](../docs/24-motion.md#load--read-and-measured) |
 | M3 | only the turn about z is applied | triple 6 is the most the body leans on each axis, from the sources a state's `+0x08` picks; triple 5 is the share of the tilt taken back each step, toward world up (bits `0xC0`) or a vector (`0x30`); no hero state leans | [24](../docs/24-motion.md#the-hull-leans-and-rights-itself--read-and-measured) |
 | M4 | every effect instance updates on every tick | the manager updates an instance once 100 ms have passed since its last update | [11](../docs/11-effects.md#how-an-effect-runs--read) |
+
+## Departures
+
+A departure is where the engine does something the game is read *not* to do,
+for comfort. Each is marked in the code as `// DEPARTURE: docs/NN#section`,
+has a row here, and a switch that restores the game's behaviour.
+
+| what the game does | what the engine does | switch | see |
+|---|---|---|---|
+| The hero's body node yaws with the gait, ±10° once a run cycle, and the turret, eye, sight and barrels swing with it | node 0 keeps only the part of its turn not about its up axis, so the view, the sight and the barrels hold the heading the body moves along | `--sway` | [30](../docs/30-turrets.md#aiming-and-the-camera--read-and-measured) |

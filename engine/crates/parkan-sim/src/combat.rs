@@ -98,7 +98,8 @@ pub enum Event {
     /// A round struck a target's node, or the ground (`target` `None`).
     Struck { round: Round, target: Option<usize>, part: usize, node: Option<usize>, point: Vec3 },
     /// An explosion went off: a round's on a hit, or its range end's.
-    Exploded { kind: usize, point: Vec3, at_range: bool },
+    /// `forward` is the round's own y, the axis a placement-0 effect goes off along.
+    Exploded { kind: usize, point: Vec3, forward: Vec3, at_range: bool },
     /// Damage landed on a node.
     Damaged { target: usize, part: usize, node: usize, damage: f32, destroyed: Vec<usize> },
     /// A target died.
@@ -261,7 +262,12 @@ impl Combat {
         for r in rounds {
             let k = self.kinds[r.kind].clone();
             if r.expired {
-                events.push(Event::Exploded { kind: r.kind, point: r.position, at_range: true });
+                events.push(Event::Exploded {
+                    kind: r.kind,
+                    point: r.position,
+                    forward: r.forward,
+                    at_range: true,
+                });
                 if let Some(e) = &k.range_end {
                     self.explode(e, &k, &r, r.position, None, &mut events);
                 }
@@ -280,7 +286,12 @@ impl Combat {
                         node: strike.node,
                         point: strike.point,
                     });
-                    events.push(Event::Exploded { kind: r.kind, point: strike.point, at_range: false });
+                    events.push(Event::Exploded {
+                        kind: r.kind,
+                        point: strike.point,
+                        forward: r.forward,
+                        at_range: false,
+                    });
                     if let Some(e) = &k.hit {
                         let direct = target.zip(strike.node).map(|(t, n)| (t, part, n));
                         self.explode(e, &k, &r, strike.point, direct, &mut events);

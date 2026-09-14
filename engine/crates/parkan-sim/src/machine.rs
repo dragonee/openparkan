@@ -16,7 +16,6 @@ use parkan_formats::control::{
 };
 use parkan_formats::cpt::ControlPoint;
 use parkan_formats::mesh::Mesh;
-use parkan_formats::pose::Pose;
 
 use crate::ground::{Ground, Hit, contact_radius};
 use crate::motion::{self, Body, GRAVITY, Limits, SLOPE_MODE};
@@ -105,17 +104,13 @@ pub struct Feet {
 
 impl Feet {
     /// Where control point `point` stands in the model's frame with the mesh posed at
-    /// `frames`, on the node its first triple's third slot names (docs/13), with node 0,
-    /// the body, held at the origin: the body's own move already carries the travel of
-    /// node 0 that a stride measures.
+    /// `frames`, on the node its first triple's third slot names (docs/13). The pose walk
+    /// leaves out node 0's travel ([`Mesh::walk_pose`]): the body's own move carries it.
     pub fn place(&self, point: i32, frames: Frames) -> Option<Vec3> {
         let p = self.points.get(usize::try_from(point).ok()?)?;
         let node = usize::try_from(p.nodes().1).ok().filter(|&n| n < self.mesh.nodes.len())?;
         let (a, b, w) = (f64::from(frames.a), f64::from(frames.b), f64::from(frames.weight));
-        let pose = self.mesh.world_pose_by(node, |n| {
-            let local = self.mesh.blended_pose(n, a, b, w);
-            if n == 0 { Pose { translation: [0.0; 3], ..local } } else { local }
-        });
+        let pose = self.mesh.world_pose_by(node, |n| self.mesh.walk_pose(n, a, b, w));
         let at = pose.apply(p.position.map(f64::from));
         Some(Vec3::new(at[0] as f32, at[1] as f32, at[2] as f32))
     }
@@ -359,11 +354,10 @@ impl Walker {
     /// become the ground normal. A point with no face under it has itself as its ground.
     ///
     /// STAND-IN: docs/24-motion.md#holding-the-body-on-the-ground--read-and-measured --
-    /// not read: when the ground contact runs and its dt, the pose the contact points
-    /// are placed by, the second sphere's radius r₂, and what a sphere with no face under
+    /// not read: when the ground contact runs and its dt, the frames the contact points
+    /// are placed at, the second sphere's radius r₂, and what a sphere with no face under
     /// it does. It runs after every state step with dt the step, the contacts on the
-    /// step's last frames with node 0's translation left out, r₂ = r, and a sphere with
-    /// no face is not lifted.
+    /// step's last frames, r₂ = r, and a sphere with no face is not lifted.
     fn hold(&mut self, ground: &Ground, state: &State, dt: f32) {
         let r = self.radius;
         let centre = self.body.position + self.body.to_world(self.centre);
