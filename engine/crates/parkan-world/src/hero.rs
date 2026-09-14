@@ -141,7 +141,10 @@ impl Hero {
                 g.state = state;
             }
         }
-        self.robot.takt(dt_ms)
+        let shots = self.robot.takt(dt_ms);
+        let lives = &self.lives;
+        self.robot.turn_devices(|p, n| crate::play::node_alive(lives.get(p).and_then(Option::as_ref), n));
+        shots
     }
 
     /// Whether the hero is dead: its chassis's node 0, or a vital node, destroyed.

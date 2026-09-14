@@ -437,6 +437,7 @@ mod tests {
             mass: 0.0,
             flags,
             group: -1,
+            weights: [0.0; 2],
         }
     }
 

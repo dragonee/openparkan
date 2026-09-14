@@ -8,6 +8,7 @@
 pub mod behaviour;
 pub mod combat;
 pub mod damage;
+pub mod device;
 pub mod effects;
 pub mod ground;
 pub mod guns;

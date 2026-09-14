@@ -262,6 +262,7 @@ pub(crate) mod tests {
             mass: 0.0,
             flags: 0,
             group: -1,
+            weights: [0.0; 2],
         };
         let mut c =
             Controller { mode: SLOPE_MODE, cone: 0.6, components: vec![engine], ..Default::default() };

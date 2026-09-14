@@ -10,14 +10,15 @@ use std::rc::Rc;
 use anyhow::{Context, Result};
 use glam::{Quat, Vec3};
 use parkan_formats::control::{
-    self, CAMERA_TYPE, Channel, Component, Controller, GUN_TYPE, RADAR_PERIOD, RADAR_RANGE, RADAR_TYPE,
-    TURRET_TYPE,
+    self, CAMERA_TYPE, CHANNEL_UNDRIVEN, Channel, Component, Controller, GUN_TYPE, RADAR_PERIOD, RADAR_RANGE,
+    RADAR_TYPE, SIMPLE_TYPE, TRIPLE_TOP_SPEED, TURRET_TYPE,
 };
 use parkan_formats::cpt::{self, ControlPoint};
 use parkan_formats::mission::Mission;
 use parkan_formats::pose::{Pose, multiply, rotate};
 use parkan_sim::behaviour::Behaviour;
 use parkan_sim::damage::GroundDamage;
+use parkan_sim::device::{Item, Motion};
 use parkan_sim::ground::Ground;
 use parkan_sim::guns::{Gun, Shot, Sight, TargetGate};
 use parkan_sim::machine::Walker;
@@ -121,6 +122,22 @@ pub struct Robot {
     pub time_ms: f64,
     /// What the ground under it deals it, and when its life next updates.
     pub ground_damage: GroundDamage,
+    /// The parts that move by themselves: the chassis controller's generic devices and
+    /// radars, which pose chassis nodes, and the turret's, which drive its channels
+    /// (docs/28-chassis.md, "What a device's value turns").
+    pub chassis_devices: Vec<Item>,
+    pub turret_devices: Vec<Item>,
+}
+
+/// A controller's items that drive channels: its generic devices and its radars.
+pub fn devices(controller: &Controller) -> Vec<Item> {
+    controller
+        .components
+        .iter()
+        .enumerate()
+        .filter(|(_, k)| matches!(k.type_id, SIMPLE_TYPE | RADAR_TYPE) && !k.entries.is_empty())
+        .map(|(i, k)| Item::new(i, k, &controller.channels))
+        .collect()
 }
 
 fn read_member(assembly: &mut Assembly, library: &str, member: &str) -> Result<Vec<u8>> {
@@ -284,6 +301,8 @@ impl Robot {
             None => Vec::new(),
         };
         let position = Vec3::from_array(placed.position);
+        let chassis_devices = devices(&chassis_ctl);
+        let turret_devices = devices(&turret_ctl);
         let walker = Walker::new(chassis_ctl, &chassis.mesh, &feet, position, placed.rotation);
 
         // Only one radar counts: a fitted radar part takes over the turret's radar slot
@@ -355,6 +374,8 @@ impl Robot {
             time_ms: 0.0,
             // Units apart update their lives apart.
             ground_damage: GroundDamage::new(0.0, (object as u16).wrapping_mul(40_503)),
+            chassis_devices,
+            turret_devices,
         }))
     }
 
@@ -489,6 +510,45 @@ impl Robot {
         shots
     }
 
+    /// The parts that move by themselves, at the current game time: each item's steps due,
+    /// its channels played, and the turret's written into its channel values. `alive`
+    /// says whether node `node` of part `part` still has life (slot 2, `0x10021820`).
+    ///
+    /// The machine's lean is 0: the body does not lean (see [`parkan_sim::motion::Body`]).
+    pub fn turn_devices(&mut self, alive: impl Fn(usize, usize) -> bool) {
+        let body = &self.walker.body;
+        let motion = Motion {
+            spin: body.spin,
+            lean: [0.0; 3],
+            velocity: body.velocity,
+            top: self.walker.controller.triples[TRIPLE_TOP_SPEED],
+        };
+        let node = |c: &Controller, d: &Item| usize::try_from(c.components[d.component].node).ok();
+        for d in &mut self.chassis_devices {
+            let live = node(&self.walker.controller, d).is_none_or(|n| alive(self.chassis_part, n));
+            d.tick(self.time_ms, &motion, live);
+        }
+        for d in &mut self.turret_devices {
+            let live = node(&self.turret_controller, d).is_none_or(|n| alive(self.turret_part, n));
+            d.tick(self.time_ms, &motion, live);
+            for (&e, &v) in d.entries.iter().zip(&d.now) {
+                if let Some(value) = self.rig.values.get_mut(e) {
+                    *value = v;
+                }
+            }
+        }
+    }
+
+    /// The frame a chassis node plays where one of its devices drives it: the first driven
+    /// channel on that node that has frames.
+    pub fn device_frame(&self, node: usize) -> Option<f32> {
+        self.chassis_devices
+            .iter()
+            .flat_map(|d| d.channels.iter().zip(&d.now))
+            .find(|(c, _)| c.node == node as i32 && c.flags & CHANNEL_UNDRIVEN == 0 && c.first >= 0.0)
+            .map(|(c, &v)| c.frame(v))
+    }
+
     /// Run the machine's steps due by now one at a time, handing the camera each step's
     /// jolt: (previous − current velocity) ÷ the step in seconds, the velocity from the
     /// poses either side of the step (`Control.dll:0x1000c6e7`, docs/30, "The camera shake").
@@ -600,6 +660,9 @@ impl Robot {
         let chassis = &self.chassis.mesh;
         let (a, b, w) = (f64::from(f.a), f64::from(f.b), f64::from(f.weight));
         chassis.world_pose_by(node, |n| {
+            if let Some(frame) = self.device_frame(n) {
+                return chassis.pose_at(n, f64::from(frame));
+            }
             let pose = chassis.walk_pose(n, a, b, w);
             if n == 0 && self.steady { without_yaw(&pose, &chassis.local_pose(0)) } else { pose }
         })

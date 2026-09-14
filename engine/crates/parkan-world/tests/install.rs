@@ -1157,3 +1157,71 @@ fn mission_01s_cockpit_names_its_units_lists_its_guns_and_frames_its_target_as_r
     let later = cockpit.draw(&play, Space::new(640.0, 480.0), &font, view_proj);
     assert!(!later.text.iter().any(|r| r.text.starts_with("from:")), "the box lives 20 s");
 }
+
+#[test]
+#[ignore = "needs the game install"]
+fn mission_01s_helicopter_turns_its_rotors_and_the_warbots_their_dishes_as_read() {
+    use glam::DQuat;
+    use parkan_formats::pose::Pose;
+
+    let (mut play, m) = mission_01_play();
+    let robot = |play: &parkan_world::play::Play, name: &str| {
+        play.robots
+            .iter()
+            .position(|(t, _)| m.objects[play.battle.objects[*t]].path.to_ascii_lowercase().ends_with(name))
+            .unwrap_or_else(|| panic!("{name} is a robot"))
+    };
+    let (helic, mf1, e1) =
+        (robot(&play, "helic.dat"), robot(&play, "tut1_mf1.dat"), robot(&play, "tut1_e1.dat"));
+    let node = |mesh: &parkan_formats::mesh::Mesh, name: &str| {
+        mesh.nodes.iter().position(|n| n.name.eq_ignore_ascii_case(name)).unwrap_or_else(|| panic!("{name}"))
+    };
+    let r = &play.robots[helic].1;
+    let (top, bottom) = (node(&r.chassis.mesh, "Tup_m1o1"), node(&r.chassis.mesh, "Tdn_m1o1"));
+    let dish = [
+        (helic, node(&r.turret.mesh, "TTrad_m1o1")),
+        (mf1, node(&play.robots[mf1].1.turret.mesh, "TMrad_m1o1")),
+        (e1, node(&play.robots[e1].1.turret.mesh, "TTrad_m1o1")),
+    ];
+    let quat = |p: Pose| DQuat::from_xyzw(p.rotation[1], p.rotation[2], p.rotation[3], p.rotation[0]);
+    let chassis = |play: &parkan_world::play::Play, n| quat(play.robots[helic].1.chassis_pose(n));
+    let turret = |play: &parkan_world::play::Play, (r, n): (usize, usize)| {
+        let robot = &play.robots[r].1;
+        quat(robot.turret_node(&robot.mount(), n))
+    };
+    // The short way about the node's own z from one pose to the next.
+    let turn = |a: DQuat, b: DQuat| {
+        let d = a.inverse() * b;
+        let angle = 2.0 * d.z.atan2(d.w);
+        (angle + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI
+    };
+    play.tick(1000.0 / 60.0, [0.0; 2]);
+    let (mut rotors, mut dishes) =
+        ([chassis(&play, top), chassis(&play, bottom)], dish.map(|d| turret(&play, d)));
+    let (mut turned, mut dish_turned) = ([0.0; 2], [0.0; 3]);
+    for _ in 0..120 {
+        play.tick(1000.0 / 60.0, [0.0; 2]);
+        for (k, n) in [top, bottom].into_iter().enumerate() {
+            let now = chassis(&play, n);
+            turned[k] += turn(rotors[k], now) / std::f64::consts::TAU;
+            rotors[k] = now;
+        }
+        for (k, d) in dish.into_iter().enumerate() {
+            let now = turret(&play, d);
+            dish_turned[k] += turn(dishes[k], now) / std::f64::consts::TAU;
+            dishes[k] = now;
+        }
+    }
+    // Two seconds: the rotors 7.3 turns a second the opposite ways, the dishes 0.5.
+    assert!(
+        (turned[0].abs() - 14.6).abs() < 0.3 && (turned[1].abs() - 14.6).abs() < 0.3,
+        "rotors {turned:?}"
+    );
+    assert!(turned[0].signum() != turned[1].signum(), "opposite ways: {turned:?}");
+    for t in dish_turned {
+        assert!((t.abs() - 1.0).abs() < 0.05, "dishes {dish_turned:?}");
+    }
+    // The M-2f hovers: its wings hold flat, frame 2.
+    let wing = node(&play.robots[mf1].1.chassis.mesh, "LTwng_m1o1");
+    assert_eq!(play.robots[mf1].1.device_frame(wing), Some(2.0));
+}

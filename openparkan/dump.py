@@ -344,7 +344,8 @@ def controllers(path: Path, names: list[str] | None = None) -> dict:
                 {"type_id": k.type_id, "library": k.resource.library,
                  "member": k.resource.member, "index": k.index, "entries": list(k.entries),
                  "label": k.label, "values": vector(k.values), "power": number(k.power),
-                 "node": k.node, "mass": number(k.mass), "flags": k.flags, "group": k.group}
+                 "node": k.node, "mass": number(k.mass), "flags": k.flags, "group": k.group,
+                 "weights": vector(k.weights)}
                 for k in c.components
             ],
             "groups": list(c.groups),
@@ -496,6 +497,16 @@ def cfg_file(path: Path, names: list[str] | None = None) -> dict:
         "messages": [{"name": m.name, "index": m.index, "text_id": m.text_id,
                       "voice_id": m.voice_id, "info_system": m.info_system}
                      for m in briefing.messages(path)],
+        "waypoints": [{"name": w.name, "camera": list(w.camera), "target": list(w.target),
+                       "edge": w.edge, "wait": w.wait, "edge_time": w.edge_time,
+                       "dwell": w.dwell, "rotate_time": w.rotate_time,
+                       "fade_time": w.fade_time, "zoom_time": w.zoom_time,
+                       "wait_for": [w.wait_for_text, w.wait_for_sound, w.wait_for_time,
+                                    w.wait_for_click],
+                       "text_id": w.text_id, "sound_id": w.sound_id, "noise": w.noise,
+                       "fade": w.fade, "zoom": w.zoom, "night_vision": w.night_vision,
+                       "loop": w.loop}
+                      for w in briefing.waypoints(path)],
     }
 
 

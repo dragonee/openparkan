@@ -178,6 +178,80 @@ pub fn messages(blocks: &Blocks) -> Vec<Message> {
         .collect()
 }
 
+/// What `LoopIndex` holds in every shipped waypoint: go on to the next in file order.
+pub const NO_LOOP: i64 = -1;
+
+/// One stop of a `briefing.cfg` flythrough, as written (`iron3d.dll:0x1002d140` loads
+/// it). See `docs/21-briefing.md`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Waypoint {
+    pub name: String,
+    /// `CameraX/Y/Z` and `TargetX/Y/Z`: eye and look-at, in world space.
+    pub camera: [f64; 3],
+    pub target: [f64; 3],
+    /// `EdgeType`: `linear`, `spline` or `jump`, how the camera leaves this stop.
+    pub edge: String,
+    /// `WaitType`: `continuous`, `stay` or `flyaround`, what it does while here.
+    pub wait: String,
+    /// `EdgeTime`: seconds the edge leaving this stop takes.
+    pub edge_time: f64,
+    /// `WaypointTime`: seconds of dwell, when `WaitForTime` is set.
+    pub dwell: f64,
+    /// `RotateTime`: seconds a `flyaround` takes to go round once.
+    pub rotate_time: f64,
+    pub fade_time: f64,
+    pub zoom_time: f64,
+    pub wait_for_text: bool,
+    pub wait_for_sound: bool,
+    pub wait_for_time: bool,
+    pub wait_for_click: bool,
+    /// `TextResID` and `SoundResID`: the subtitle and the voice.
+    pub text_id: String,
+    pub sound_id: String,
+    /// `NoisePercent` and `FadePercent`, as written.
+    pub noise: f64,
+    pub fade: f64,
+    pub zoom: bool,
+    pub night_vision: bool,
+    /// `LoopIndex`: the stop to go to after this one, or [`NO_LOOP`].
+    pub loop_index: i64,
+}
+
+/// Every block of a `briefing.cfg`, in file order. Ports `openparkan.briefing.waypoints`.
+pub fn waypoints(blocks: &Blocks) -> Vec<Waypoint> {
+    blocks
+        .0
+        .iter()
+        .map(|b| {
+            let get = |k: &str| b.get(k).unwrap_or("");
+            let n = |k: &str| number(get(k));
+            Waypoint {
+                name: b.name.clone(),
+                camera: [n("CameraX"), n("CameraY"), n("CameraZ")],
+                target: [n("TargetX"), n("TargetY"), n("TargetZ")],
+                edge: get("EdgeType").to_owned(),
+                wait: get("WaitType").to_owned(),
+                edge_time: n("EdgeTime"),
+                dwell: n("WaypointTime"),
+                rotate_time: n("RotateTime"),
+                fade_time: n("FadeTime"),
+                zoom_time: n("ZoomTime"),
+                wait_for_text: flag(get("WaitForText")),
+                wait_for_sound: flag(get("WaitForSound")),
+                wait_for_time: flag(get("WaitForTime")),
+                wait_for_click: flag(get("WaitForClick")),
+                text_id: get("TextResID").to_owned(),
+                sound_id: get("SoundResID").to_owned(),
+                noise: n("NoisePercent"),
+                fade: n("FadePercent"),
+                zoom: flag(get("ZoomOn")),
+                night_vision: flag(get("NightVisionOn")),
+                loop_index: b.get("LoopIndex").map_or(NO_LOOP, |v| number(v).trunc() as i64),
+            }
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -237,6 +311,22 @@ mod tests {
         assert_eq!((m[0].index, m[0].text_id.as_str(), m[0].voice_id.as_str()), (11, "T01_I01", "T01_I01"));
         assert!(!m[0].info_system && m[1].info_system);
         assert_eq!([m[1].index, m[2].index, m[3].index], [2, 0, -1]);
+    }
+
+    #[test]
+    fn waypoints_read_every_field_and_default_the_loop_to_none() {
+        let text = "object WayPoint0\r\n CameraX = 767.965\r\n CameraY = 164.519\r\n CameraZ = 118.899\r\n \
+                    TargetZ = 11.945\r\n EdgeType = \"spline\"\r\n WaitType = \"continuous\"\r\n \
+                    EdgeTime = 3.70\r\n RotateTime = 10.048\r\n WaitForTime = true\r\n \
+                    TextResID = \"T01_T01\"\r\n FadePercent = 100\r\n LoopIndex = -1\r\nend\r\n\
+                    object WayPoint1\r\n LoopIndex = 3\r\n ZoomOn = TRUE\r\nend\r\nobject WayPoint2\r\nend\r\n";
+        let w = waypoints(&parse(text.as_bytes()));
+        assert_eq!(w.len(), 3);
+        assert_eq!((w[0].camera, w[0].target), ([767.965, 164.519, 118.899], [0.0, 0.0, 11.945]));
+        assert_eq!((w[0].edge.as_str(), w[0].wait.as_str(), w[0].edge_time), ("spline", "continuous", 3.7));
+        assert_eq!((w[0].rotate_time, w[0].fade, w[0].text_id.as_str()), (10.048, 100.0, "T01_T01"));
+        assert!(w[0].wait_for_time && !w[0].wait_for_sound && w[1].zoom);
+        assert_eq!([w[0].loop_index, w[1].loop_index, w[2].loop_index], [NO_LOOP, 3, NO_LOOP]);
     }
 
     #[test]

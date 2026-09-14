@@ -1177,6 +1177,7 @@ impl Play {
             let target = &mut self.battle.combat.targets[*t];
             robot.advance(dt_ms, &self.ground);
             let shots = robot.takt(dt_ms);
+            robot.turn_devices(|p, n| node_alive(target.parts.get(p).and_then(|part| part.life.as_ref()), n));
             if !shots.is_empty() {
                 fired.push((r, shots));
             }
@@ -1528,6 +1529,12 @@ impl Play {
             self.battle.combat.first_hit(&self.ground, None, eye, point, 0.0).is_none()
         })
     }
+}
+
+/// Whether node `node` of a part with this life still has life; a part that takes no
+/// damage always does.
+pub fn node_alive(life: Option<&parkan_sim::damage::Life>, node: usize) -> bool {
+    life.and_then(|l| l.nodes.get(node)).is_none_or(|l| !l.destroyed)
 }
 
 #[cfg(test)]

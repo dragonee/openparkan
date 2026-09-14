@@ -83,6 +83,9 @@ pub const CHANNEL_FOLLOWS: i32 = 0x40;
 
 pub const TURRET_TYPE: i32 = 1;
 pub const GUN_TYPE: i32 = 2;
+/// `CICLS_SIMPLE`: a generic device, which turns wheels and rotors from the machine's
+/// motion (docs/28-chassis.md).
+pub const SIMPLE_TYPE: i32 = 3;
 pub const CAMERA_TYPE: i32 = 4;
 pub const ENGINE_TYPE: i32 = 5;
 /// `CICLS_RADAR`: values 0–2 its sensitivities, 3 its range, 4 how long a scan holds
@@ -254,6 +257,9 @@ pub struct Component {
     pub mass: f32,
     pub flags: u32,
     pub group: i32,
+    /// The two floats at `+0x24`: a generic device's or a radar's input weights
+    /// (docs/28-chassis.md, "The class-3 records turn the wheels").
+    pub weights: [f32; 2],
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -479,6 +485,7 @@ fn component(b: &[u8], pos: usize) -> Option<(Component, usize)> {
         mass: f32_at(b, pos + 0x1C),
         flags: u32_at(b, pos + 0x08).expect("inside"),
         group: i32_at(b, pos + 0x0C),
+        weights: [f32_at(b, pos + 0x24), f32_at(b, pos + 0x28)],
     };
     Some((part, end))
 }
