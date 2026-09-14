@@ -2069,6 +2069,270 @@ doc = "docs/21-briefing.md"
 
 [[entry]]
 module = "iron3d.dll"
+at = "0x10030dd0"
+kind = "function"
+name = "briefing object: 0x1ac bytes, title and text strings, the path player at +0x24, kept at 0x1010a148"
+read = true
+doc = "docs/21-briefing.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10030ed0"
+kind = "function"
+name = "destroy the briefing object and clear 0x1010a148"
+read = true
+doc = "docs/21-briefing.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10030f00"
+kind = "function"
+name = "the briefing object, from 0x1010a148"
+read = true
+doc = "docs/21-briefing.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10030f10"
+kind = "function"
+name = "briefing destructor: resource manager slot 10, 3D sound slot 11, THEME through the sound server's slot 2"
+read = true
+doc = "docs/21-briefing.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10031130"
+kind = "function"
+name = "briefing start: mission.cfg briefing filename, title from the game's +0xd4, [CS] SUBTITLES, cd_track, view 1.04 rad near 3 far 700"
+read = true
+doc = "docs/21-briefing.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100319e0"
+kind = "function"
+name = "briefing viewport: (0, 75)-(width, height - 75), or the whole display"
+read = true
+doc = "docs/21-briefing.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10031840"
+kind = "function"
+name = "subtitle: re-wrap the current TextResID's text in GAME_FONT to 640 when the id changes"
+read = true
+doc = "docs/21-briefing.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10093140"
+kind = "function"
+name = "text wrap: tokens into lines while they fit 0.98 x width x sx pixels; newline breaks"
+read = true
+doc = "docs/21-briefing.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100364a0"
+kind = "function"
+name = "briefing view: World3D object type 5, its interface 8, the angle, near and far into the parameter block"
+read = true
+doc = "docs/21-briefing.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10036c90"
+kind = "function"
+name = "zoom: angle = (1 - z) x 1.04 + 0.2 z through interface 0x12 slot 10"
+read = true
+doc = "docs/21-briefing.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10036ad0"
+kind = "function"
+name = "path player: the fade level at +0x18"
+read = true
+doc = "docs/21-briefing.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10030220"
+kind = "function"
+name = "aim at waypoint 0: columns F = to the target, R = z x F, U = F x R, the eye"
+read = true
+doc = "docs/21-briefing.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100303d0"
+kind = "function"
+name = "place the camera at an eye looking at a point, z up"
+read = true
+doc = "docs/21-briefing.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1002cc50"
+kind = "function"
+name = "spline build: p0, p1, a = T V0, b = T V1, c2 = 3(p1-p0) - 2a - b, c3 = a + b - 2(p1-p0)"
+read = true
+doc = "docs/21-briefing.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1002ce90"
+kind = "function"
+name = "spline point at s: p0 + a u + c2 u^2 + c3 u^3, u = s / T, ends clamped"
+read = true
+doc = "docs/21-briefing.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1002cfa0"
+kind = "function"
+name = "spline velocity at s: (a + 2 c2 u + 3 c3 u^2) / T; T V0 and T V1 at the ends"
+read = true
+doc = "docs/21-briefing.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10031fa0"
+kind = "function"
+name = "vector cross product, edx x argument"
+read = true
+doc = "docs/21-briefing.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1002d0e0"
+kind = "function"
+name = "vector difference, edx - argument"
+read = true
+doc = "docs/21-briefing.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10030880"
+kind = "function"
+name = "length of a vector's x and y"
+read = true
+doc = "docs/21-briefing.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10030850"
+kind = "function"
+name = "sign of a 2D cross product: 1 or -1"
+read = true
+doc = "docs/21-briefing.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1008d200"
+kind = "function"
+name = "screen layer draw: in state 5 only the briefing screen, else HUD, map, objectives"
+read = true
+doc = "docs/21-briefing.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100a55c0"
+kind = "function"
+name = "per-state camera update; state 5 updates the briefing path with ITimer slot 2"
+read = true
+doc = "docs/21-briefing.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100a1ca0"
+kind = "function"
+name = "set property 0x20a to the flag on every world object whose Type is not 0x1020000"
+read = true
+doc = "docs/21-briefing.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100a4f90"
+kind = "function"
+name = "set the level's state word +0x710, the old one to +0x714"
+read = true
+doc = "docs/21-briefing.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1005e7a4"
+kind = "site"
+name = "game frame: in state 5 a finished briefing (+0x1a4) ends -- destroy, 0x20a cleared, state 1, only_briefing"
+read = true
+doc = "docs/21-briefing.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100a2a91"
+kind = "site"
+name = "mission set-up: state word 5 once the briefing has started and 0x20a is set"
+read = true
+doc = "docs/21-briefing.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1005dfb1"
+kind = "site"
+name = "mission load: fgets the mission directory's descr into the game's +0xd4"
+read = true
+doc = "docs/21-briefing.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1005e128"
+kind = "site"
+name = "mission load: open the objectives screen when not a save and the parameter block's +0x154 is 1"
+read = true
+doc = "docs/21-briefing.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1002fd63"
+kind = "site"
+name = "linear edge: |P1 - P0| / EdgeTime into all three components of +0x174"
+read = true
+doc = "docs/21-briefing.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1002e885"
+kind = "site"
+name = "waypoint loader: +0x6c = 2pi / RotateTime, 0 without one"
+read = true
+doc = "docs/21-briefing.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1000ab0d"
+kind = "site"
+name = "MBehaviour property 0x20a at +0xa08: set stops the unit, clear sends the planner to where it stands"
+read = true
+doc = "docs/21-briefing.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10004f20"
+kind = "site"
+name = "MBehaviour takt returns while +0xa08 (property 0x20a) is set"
+read = true
+doc = "docs/21-briefing.md"
+
+[[entry]]
+module = "services.dll"
+at = "0x10008e70"
+kind = "function"
+name = "resource manager slot 10: free its cached resource list"
+read = true
+doc = "docs/21-briefing.md"
+
+[[entry]]
+module = "iron3d.dll"
 at = "0x10094e30"
 kind = "function"
 name = "play a message by id"

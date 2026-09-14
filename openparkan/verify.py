@@ -13020,6 +13020,232 @@ def check_briefing(check, game: Path) -> None:
                       for i, h in holders.items()))
 
 
+#: The briefing screen's GUI-server calls (``iron3d.dll:0x100315b0``), in the order it
+#: makes them; each a run of bytes, several runs one after another.
+BRIEFING_SCREEN = (
+    ("fade: black, alpha round(fade x 255), alpha kept",
+     ("d9433c8b5500d80dc8590e10", "6a0133f6df7c24208b4c2420c1e118")),
+    ("top bar (0,0)-(640,75)", ("5668000000ff6a4b68800200005656",)),
+    ("bottom bar (0,405)-(640,480)", ("5668000000ff68e00100006880020000689501000056",)),
+    ("title: MENU_FONT (+0x14), (20,20), #808080", ("8b40148b550068808080ff6a146a145350",)),
+    ("step: round((GAME_FONT height + 1) / sy)",
+     ("8b7010", "4089442418db4424188bcfd95c2418ff5214d87c2418")),
+    ("lines: (10, 410 + i x step), #808080", ("bf9a010000", "68808080ff576a0a", "83c10c03fa")),
+    ("viewport back to y 75 .. height - 75", ("c74424284b000000", "83e84b")),
+)
+
+#: The briefing camera (``iron3d.dll:0x1003152d``): two zeros, a handle, then the angle,
+#: the near and the far pushed as floats.
+BRIEFING_CAMERA = (1.04, 3.0, 700.0)
+
+
+def _wav_seconds(data: bytes) -> float | None:
+    """A RIFF WAVE's length in seconds: ``fact`` samples over the rate, else data over bytes/s."""
+    if data[:4] != b"RIFF" or data[8:12] != b"WAVE":
+        return None
+    rate = per_second = samples = size = None
+    i = 12
+    while i + 8 <= len(data):
+        chunk, length = data[i:i + 4], struct.unpack_from("<I", data, i + 4)[0]
+        if chunk == b"fmt ":
+            _, _, rate, per_second = struct.unpack_from("<HHII", data, i + 8)
+        elif chunk == b"fact":
+            samples = struct.unpack_from("<I", data, i + 8)[0]
+        elif chunk == b"data":
+            size = length
+        i += 8 + length + (length & 1)
+    if samples and rate:
+        return samples / rate
+    return size / per_second if size is not None and per_second else None
+
+
+def check_briefing_screen(check, game: Path) -> None:
+    """How iron3d.dll shows a briefing: the screen, the camera, the curve, the paused world."""
+    path = game / "iron3d.dll"
+    if not path.exists():
+        return
+    at = _image_at(path.read_bytes())
+
+    def floats(va: int, n: int = 1) -> tuple[float, ...]:
+        return struct.unpack(f"<{n}f", at(va, 4 * n))
+
+    def runs(body: bytes, patterns: tuple[str, ...], start: int = 0) -> int | None:
+        """Where the last of ``patterns`` ends when each follows the one before, or None."""
+        for hexed in patterns:
+            found = body.find(bytes.fromhex(hexed), start)
+            if found < 0:
+                return None
+            start = found + len(hexed) // 2
+        return start
+
+    screen = at(0x100315B0, 0x286)
+    where, order = 0, []
+    for name, patterns in BRIEFING_SCREEN:
+        end = runs(screen, patterns, where)
+        order.append((name, end is not None))
+        if end is not None:
+            where = end
+    check("iron3d.dll: the briefing screen is a fade, two bars, a title, subtitles",
+          all(ok for _, ok in order) and floats(0x100E59C8) == (255.0,),
+          "0x100315b0 in order: " + "; ".join(
+              f"{name}{'' if ok else ' MISSING'}" for name, ok in order)
+          + f"; the fade's factor at 0x100e59c8 is {floats(0x100E59C8)[0]:g}")
+
+    pushes = at(0x1003152D, 0x14)
+    angle = near = far = None
+    if pushes[:5] == bytes.fromhex("6a006a0050") and pushes[5::5][:3] == b"hhh":
+        angle, near, far = (struct.unpack_from("<f", pushes, 6 + 5 * k)[0] for k in range(3))
+    got = tuple(round(v, 6) for v in (angle, near, far)) if angle is not None else ()
+    rect = at(0x100319E0, 0x3C)
+    zoom = at(0x10036D02, 6) == bytes.fromhex("d80d685c0e10") and floats(0x100E5C68)[0] == \
+        struct.unpack("<f", struct.pack("<f", 0.2))[0]
+    check("iron3d.dll: the briefing camera is 1.04 rad across, 3 to 700, framed 75 in",
+          got == tuple(round(struct.unpack("<f", struct.pack("<f", v))[0], 6)
+                       for v in BRIEFING_CAMERA)
+          and b"\xc7\x46\x04\x4b\x00\x00\x00" in rect and b"\x83\xe8\x4b" in rect and zoom,
+          f"0x10031532 pushes angle {angle or 0:.2f}, near {near or 0:g}, far {far or 0:g}; "
+          f"0x100319e0 makes the "
+          f"viewport (0, 75)-(width, height - 75); the zoom 0x10036c90 blends the angle "
+          f"toward {floats(0x100E5C68)[0]:.2f}")
+
+    def text(va: int) -> bytes:
+        return at(va, 16).split(b"\0")[0]
+
+    title_read = (at(0x1005DFB1, 5) == b"\x68" + struct.pack("<I", 0x10103434)
+                  and text(0x10103434) == b"descr"
+                  and at(0x1005E04F, 5) == bytes.fromhex("6880000000")
+                  and at(0x1005E084, 6) == bytes.fromhex("8d8ed4000000"))
+    title_used = at(0x100313CE, 5) == bytes.fromhex("05d4000000")
+    switch = (at(0x100313EA, 10) == b"\x68" + struct.pack("<I", 0x10103584)
+              + b"\x68" + struct.pack("<I", 0x10102468)
+              and text(0x10103584) == b"SUBTITLES" and text(0x10102468) == b"CS")
+    titles = {}
+    for cfg in briefing.briefings(game):
+        descr = cfg.parent / "descr"
+        first = descr.read_bytes().split(b"\n")[0].rstrip(b"\r") if descr.exists() else b""
+        titles[cfg.parent] = first.decode("latin-1")
+    one = titles.get(game / MISSION_01, "")
+    check("iron3d.dll: the title is descr's first line; [CS] SUBTITLES shows the text",
+          title_read and title_used and switch and titles
+          and all(titles.values()) and one == "Line of Fire",
+          f"the mission loader fgets 128 bytes of 'descr' into the game's +0xd4 "
+          f"(0x1005dfb1); the briefing copies +0xd4 (0x100313ce) and reads "
+          f"[{text(0x10102468).decode()}] {text(0x10103584).decode()}; "
+          f"{sum(map(bool, titles.values()))}/{len(titles)} briefing missions have a "
+          f"titled descr, Mission 01's '{one}'")
+
+    wrap_call = next((t for c, t in _calls(at, 0x100318E3, 10) if c == 0x100318E3), 0)
+    check("iron3d.dll: the subtitle wraps at 0.98 of 640 in GAME_FONT",
+          at(0x100318CF, 10) == bytes.fromhex("8b40106a016880020000")
+          and wrap_call == 0x10093140
+          and at(0x100931BD, 6) == bytes.fromhex("d80d28670e10")
+          and abs(floats(0x100E6728)[0] - 0.98) < 1e-6,
+          f"0x10031840 wraps the +0x10 font's text to 640 through {wrap_call:#x}, "
+          f"which fills while the words fit {floats(0x100E6728)[0]:.2f} x 640 x sx pixels")
+
+    build = at(0x1002CC50, 0x238)
+    three = bytes.fromhex("d80d145c0e10")
+    setup = at(0x10030D33, 0x90)
+    curves = [c for c, t in _calls(at, 0x10030D33, 0x90) if t == 0x1002CC50]
+    eye_first = setup.find(bytes.fromhex("8d8e94000000e8"))
+    look_then = setup.find(bytes.fromhex("8d8efc000000e8"))
+    check("iron3d.dll: a spline edge is a cubic Hermite over EdgeTime",
+          floats(0x100E5C14) == (3.0,) and build.count(three) == 3
+          and build.count(b"\xdc\xc0") == 3 and b"\xc2\x14\x00" in build[-8:]
+          and bytes.fromhex("d87134") in at(0x1002CE90, 0x100)
+          and at(0x1002CFA0, 0xF3).count(three) == 1
+          and len(curves) == 2 and 0 <= eye_first < look_then,
+          "0x1002cc50 keeps p0, a = T V0, c2 = 3(p1 - p0) - 2a - b, c3 = a + b - 2(p1 - p0) "
+          "(three x 3.0, three doublings); 0x1002ce90 divides by T; 0x1002cfa0 has the one "
+          "3u^2; 0x10030a10 builds the eye's curve (+0x94) and then the look-at's (+0xfc)")
+
+    speed = at(0x1002FD63, 0x15) == bytes.fromhex(
+        "d871208d8e74010000d9542420d954241cd95c2418")
+    omega = (at(0x1002E885, 13) == bytes.fromhex("d905205c0e10d8742420d95d6c")
+             and abs(floats(0x100E5C20)[0] - 2 * math.pi) < 1e-5)
+    check("iron3d.dll: a linear edge's velocity is one speed three times",
+          speed and omega,
+          "0x1002fd63: |P1 - P0| / EdgeTime stored into all three of +0x174, which a "
+          "following spline takes as its start tangent; the loader keeps 2pi / RotateTime "
+          "at +0x6c (0x1002e885), the orbit rate the flyaround and its tangent use")
+
+    pause_calls = [(c, t) for c, t in _calls(at, 0x100A2A7A, 0x21)]
+    end_calls = [(c, t) for c, t in _calls(at, 0x1005E7FE, 0x18)]
+    paused = (at(0x100A2A7A, 2) == b"\x6a\x01" and (0x100A2A7E, 0x100A1CA0) in pause_calls
+              and at(0x100A2A91, 10) == bytes.fromhex("c78510070000") + struct.pack("<I", 5)
+              and at(0x100A1D02, 5) == bytes.fromhex("3d00000201")
+              and at(0x100A1D12, 5) == bytes.fromhex("680a020000")
+              and at(0x1005E801, 1) == b"\x53" and (0x1005E802, 0x100A1CA0) in end_calls
+              and at(0x1005E80A, 2) == b"\x6a\x01" and (0x1005E80C, 0x100A4F90) in end_calls)
+    gated = (at(0x1008D302, 7) == bytes.fromhex("83bf1007000005")
+             and at(0x1005E7A4, 7) == bytes.fromhex("83b81007000005")
+             and at(0x1005E7B6, 6) == bytes.fromhex("8a88a4010000")
+             and at(0x10070E64, 7) == bytes.fromhex("83be1007000005")
+             and at(0x10070E75, 7) == bytes.fromhex("c680a401000001"))
+    behaviour_ok = False
+    bpath = game / "Behavior.dll"
+    if bpath.exists():
+        bat = _image_at(bpath.read_bytes())
+        behaviour_ok = (bat(0x1000AAF9, 6) == bytes.fromhex("81e905020000")
+                        and bat(0x1000AB01, 3) == bytes.fromhex("83e904")
+                        and bat(0x1000AB06, 1) == b"\x49"
+                        and bat(0x1000AB18, 6) == bytes.fromhex("89b7080a0000")
+                        and bat(0x10004F20, 8) == bytes.fromhex("39ae080a00000f85"))
+    check("iron3d.dll: in state 5 only the briefing draws, and all but the hero pause",
+          paused and gated and behaviour_ok,
+          "0x100a2a7a sets property 0x20a to 1 on every object not Type 0x1020000 "
+          "(0x100a1ca0) and the state word to 5; the frame (0x1005e7a4) ends it on the "
+          "finished byte +0x1a4, which Esc sets (0x10070e75), with 0x20a back to 0 and "
+          "state 1; the screen layer draws only the briefing in 5 (0x1008d302); "
+          "Behavior.dll keeps 0x205 + 4 + 1 at +0xa08 (0x1000ab18) and its takt returns "
+          "while it is set (0x10004f20)")
+
+    lib_path = game / "voices.lib"
+    if not lib_path.exists():
+        return
+    lib = NResArchive.open(lib_path)
+    members = {e.name.lower(): e for e in lib}
+    voiced = fit = zero = stops = 0
+    worst = (0.0, "")
+    one_length = 0.0
+    for cfg in briefing.briefings(game):
+        route = briefing.waypoints(cfg)
+        stops += len(route)
+        zero += sum(w.edge_time <= 0 for w in route)
+        bound: dict[str, str] = {}
+        for d in resources.descriptors(cfg.parent / "mission.cfg"):
+            if d.role == briefing.BRIEFING_ROLE:
+                bound = {k.lower(): v for k, v in d.bindings.items()}
+        clock, i, arrivals, seen = 0.0, 0, [], 0
+        while i is not None and seen <= len(route):
+            arrivals.append((i, clock))
+            w = route[i]
+            clock += (w.dwell if w.wait_for_time else 0.0) + w.edge_time
+            i = briefing.next_stop(route, i)
+            seen += 1
+        if cfg.parent == game / MISSION_01:
+            one_length = clock
+        spoken = [(t, route[k].sound_id) for k, t in arrivals if route[k].sound_id]
+        for n, (t, sound) in enumerate(spoken):
+            member = members.get(bound.get(sound.lower(), "").lower())
+            seconds = _wav_seconds(lib.read(member)) if member else None
+            if seconds is None:
+                continue
+            voiced += 1
+            until = spoken[n + 1][0] if n + 1 < len(spoken) else clock
+            over = t + seconds - until
+            fit += over <= 0
+            if over > worst[0]:
+                worst = (over, f"{cfg.parent.parent.name}/{cfg.parent.name} {sound}")
+    check("briefing: the voices fit their waypoints, and no edge is instant",
+          voiced == 165 and fit == voiced - 1 and worst[0] < 0.1 and zero == 0
+          and abs(one_length - 97.965) < 1e-3,
+          f"played from arrival, {fit}/{voiced} voices end before the next voice or the "
+          f"briefing's end; the other, {worst[1]}, runs {worst[0]:.2f} s over; "
+          f"{zero}/{stops} waypoints have an EdgeTime of 0; Mission 01 lasts "
+          f"{one_length:.3f} s")
+
+
 #: Mission 01, the first training mission, whose progression docs/34 walks.
 MISSION_01 = "MISSIONS/CAMPAIGN/CAMPAIGN.00/Mission.01"
 
@@ -14427,7 +14653,8 @@ def run(game: Path) -> int:
         check_units, check_loading, check_search, check_construction,
         check_controls, check_player_input, check_turret_channels,
         check_behaviour, check_research, check_descriptions, check_saves,
-        check_vocabulary, check_resources, check_briefing, check_progression, check_outcome,
+        check_vocabulary, check_resources, check_briefing, check_briefing_screen,
+        check_progression, check_outcome,
         check_hud_top,
         check_hud_radar,
         check_hud_screens,
