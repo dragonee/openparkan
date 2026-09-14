@@ -50,6 +50,9 @@ impl LookUniform {
     }
 }
 
+/// An instance's uniform: its matrix, and the colour a view paints it in.
+const INSTANCE_FLOATS: usize = 20;
+
 /// The blend modes a pipeline exists for, opaque first.
 pub const BLEND_MODES: [u8; 6] = [0, 1, 2, 3, 4, 5];
 
@@ -95,8 +98,16 @@ struct GpuInstance {
     visible: bool,
 }
 
+/// The frame uniforms of a second look at some instances, as [`ModelRenderer::view_frame`]
+/// makes them.
+pub struct ViewFrame {
+    buffer: wgpu::Buffer,
+    bind_group: wgpu::BindGroup,
+}
+
 pub struct ModelRenderer {
     pipelines: Vec<(u8, wgpu::RenderPipeline)>,
+    frame_layout: wgpu::BindGroupLayout,
     frame: wgpu::Buffer,
     frame_bind_group: wgpu::BindGroup,
     models: Vec<GpuModel>,
@@ -312,9 +323,11 @@ impl ModelRenderer {
             .iter()
             .map(|i| {
                 let matrix = placement(i.position, i.rotation, i.scale);
+                let mut contents = [0.0f32; INSTANCE_FLOATS];
+                contents[..16].copy_from_slice(&matrix.to_cols_array());
                 let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                     label: Some("instance"),
-                    contents: bytemuck::bytes_of(&matrix.to_cols_array()),
+                    contents: bytemuck::cast_slice(&contents),
                     usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
                 });
                 let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -326,10 +339,11 @@ impl ModelRenderer {
             })
             .collect();
 
-        Self { pipelines, frame, frame_bind_group, models, instances }
+        Self { pipelines, frame_layout, frame, frame_bind_group, models, instances }
     }
 
-    /// Move instance `index` to `matrix`, or hide it.
+    /// Move instance `index` to `matrix`, or hide it from the scene; a view still draws a
+    /// hidden instance where it was last put.
     pub fn set_instance(&mut self, queue: &wgpu::Queue, index: usize, matrix: Mat4, visible: bool) {
         if let Some(i) = self.instances.get_mut(index) {
             i.visible = visible;
@@ -337,6 +351,41 @@ impl ModelRenderer {
                 queue.write_buffer(&i.buffer, 0, bytemuck::bytes_of(&matrix.to_cols_array()));
             }
         }
+    }
+
+    /// Put instance `index` at `matrix` without showing or hiding it.
+    pub fn move_instance(&self, queue: &wgpu::Queue, index: usize, matrix: Mat4) {
+        if let Some(i) = self.instances.get(index) {
+            queue.write_buffer(&i.buffer, 0, bytemuck::bytes_of(&matrix.to_cols_array()));
+        }
+    }
+
+    /// The colour instance `index` is painted in where a view paints.
+    pub fn paint_instance(&self, queue: &wgpu::Queue, index: usize, colour: [f32; 4]) {
+        if let Some(i) = self.instances.get(index) {
+            queue.write_buffer(&i.buffer, 64, bytemuck::cast_slice(&colour));
+        }
+    }
+
+    /// Uniforms for a view of its own.
+    pub fn view_frame(&self, device: &wgpu::Device) -> ViewFrame {
+        let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("model view frame"),
+            size: std::mem::size_of::<FrameUniform>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("model view frame"),
+            layout: &self.frame_layout,
+            entries: &[wgpu::BindGroupEntry { binding: 0, resource: buffer.as_entire_binding() }],
+        });
+        ViewFrame { buffer, bind_group }
+    }
+
+    /// A view's uniforms for this frame.
+    pub fn prepare_view(&self, queue: &wgpu::Queue, frame: &ViewFrame, uniform: &FrameUniform) {
+        queue.write_buffer(&frame.buffer, 0, bytemuck::bytes_of(uniform));
     }
 
     /// The frame's uniforms, and every played material's phase at the lighting's clock:
@@ -354,9 +403,46 @@ impl ModelRenderer {
     /// Opaque groups of every instance first, then each blended mode in turn.
     pub fn draw(&self, pass: &mut wgpu::RenderPass<'_>) {
         pass.set_bind_group(0, &self.frame_bind_group, &[]);
+        self.draw_instances(pass, self.instances.iter().filter(|i| i.visible));
+    }
+
+    /// Only `indices`, shown or hidden, through a view's uniforms; a painted view draws every
+    /// group opaque, as the game's panel view sets blend mode 0 (docs/35-hud.md).
+    pub fn draw_view(
+        &self,
+        pass: &mut wgpu::RenderPass<'_>,
+        frame: &ViewFrame,
+        indices: &[usize],
+        painted: bool,
+    ) {
+        pass.set_bind_group(0, &frame.bind_group, &[]);
+        let instances = indices.iter().filter_map(|&i| self.instances.get(i));
+        if !painted {
+            self.draw_instances(pass, instances);
+            return;
+        }
+        let Some((_, opaque)) = self.pipelines.first() else { return };
+        pass.set_pipeline(opaque);
+        for instance in instances {
+            let model = &self.models[instance.model];
+            pass.set_bind_group(1, &instance.bind_group, &[]);
+            pass.set_vertex_buffer(0, model.vertices.slice(..));
+            pass.set_index_buffer(model.indices.slice(..), wgpu::IndexFormat::Uint32);
+            for g in &model.groups {
+                pass.set_bind_group(2, &g.bind_groups[g.current.get()].1, &[]);
+                pass.draw_indexed(g.start..g.start + g.count, 0, 0..1);
+            }
+        }
+    }
+
+    fn draw_instances<'a>(
+        &'a self,
+        pass: &mut wgpu::RenderPass<'_>,
+        instances: impl Iterator<Item = &'a GpuInstance> + Clone,
+    ) {
         for (mode, pipeline) in &self.pipelines {
             pass.set_pipeline(pipeline);
-            for instance in self.instances.iter().filter(|i| i.visible) {
+            for instance in instances.clone() {
                 let model = &self.models[instance.model];
                 let mut bound = false;
                 for g in model.groups.iter().filter(|g| g.mode == *mode) {

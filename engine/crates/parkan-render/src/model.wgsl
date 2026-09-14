@@ -15,6 +15,8 @@ struct Frame {
     // x start, y end: linear range fog from the eye (docs/10-sky.md, "Fog").
     fog: vec4<f32>,
     eye: vec4<f32>,
+    // x 1: every instance draws flat in its paint (a HUD panel's view of a unit).
+    paint: vec4<f32>,
 };
 
 // A display-space colour as the linear value an sRGB target needs (frame.rs `linear`).
@@ -37,6 +39,8 @@ fn fogged(colour: vec3<f32>, world: vec3<f32>, toward: vec4<f32>) -> vec3<f32> {
 
 struct Instance {
     model: mat4x4<f32>,
+    // The colour a view paints the instance in.
+    paint: vec4<f32>,
 };
 
 struct Look {
@@ -66,6 +70,7 @@ struct VertexOut {
     @location(0) normal: vec3<f32>,
     @location(1) uv: vec2<f32>,
     @location(2) world: vec3<f32>,
+    @location(3) paint: vec4<f32>,
 };
 
 @vertex
@@ -77,11 +82,20 @@ fn vs_main(v: VertexIn) -> VertexOut {
     // The model matrix is a rotation and a uniform scale.
     out.normal = (instance.model * vec4<f32>(v.normal, 0.0)).xyz;
     out.uv = v.uv;
+    out.paint = instance.paint;
     return out;
 }
 
 @fragment
 fn fs_main(v: VertexOut) -> @location(0) vec4<f32> {
+    if frame.paint.x > 0.5 {
+        // STAND-IN: docs/35-hud.md#the-unit-in-the-middle--read-and-seen -- how the camera
+        // applies the colour it is handed in mode 2 is not read. Measured on the recording of
+        // Mission 01: an intact dummy flat at about (39, 162, 41) and a mostly destroyed part
+        // at (140, 59, 38), the node colour lifted by 0.15; bots shade a little with the light.
+        let lift = 0.1 + 0.1 * max(dot(normalize(v.normal), -frame.light_direction.xyz), 0.0);
+        return vec4<f32>(linear(min(v.paint.rgb + vec3<f32>(lift), vec3<f32>(1.0))), 1.0);
+    }
     // The cell rewrites the coordinates in place: u0 + u × du, v0 + v × dv.
     let texel = textureSample(skin, skin_sampler, look.cell.xy + v.uv * look.cell.zw);
     let n = normalize(v.normal);

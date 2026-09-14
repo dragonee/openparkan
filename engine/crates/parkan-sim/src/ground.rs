@@ -42,6 +42,9 @@ impl Hit {
     }
 }
 
+/// What the map's water level is taken as with no water (`Terrain.dll:0x10017d60`).
+pub const NO_WATER_LEVEL: f32 = -1.0;
+
 pub struct Ground {
     pub land: LandMesh,
     /// Placed objects' faces, by the caller's numbering; a building's are ground.
@@ -82,6 +85,18 @@ impl Ground {
             }
         }
         Self { land, solids: Vec::new(), lo, size, cells, water, world: (lo3, hi3) }
+    }
+
+    /// The height the map gives its water (`Terrain.dll:0x10019180`, `ITerrain` slot 11, docs/35-hud.md,
+    /// "The altitude"): the z of the first vertex of the first face whose surface is water, or
+    /// −1 on a map with none.
+    pub fn water_level(&self) -> f32 {
+        self.land
+            .faces
+            .iter()
+            .find(|f| f.is_water())
+            .and_then(|f| self.land.positions.get(usize::from(f.vertices[0])))
+            .map_or(NO_WATER_LEVEL, |p| p[2])
     }
 
     /// The map's extent in x and y.

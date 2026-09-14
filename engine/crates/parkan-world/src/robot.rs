@@ -136,6 +136,73 @@ fn controller(assembly: &mut Assembly, record: &str) -> Result<Option<Controller
     Ok(Some(control::parse(&data, &slot.member)?))
 }
 
+/// A chassis record's size class: `R_H_02`'s letter after `R_` (`Behavior.dll:0x1000cee0`), t
+/// 1, l or h 2, m 3, b 4, and 0 for anything else.
+pub fn chassis_size(record: &str) -> u8 {
+    match record.as_bytes().get(2).map(u8::to_ascii_lowercase) {
+        Some(b't') => 1,
+        Some(b'l' | b'h') => 2,
+        Some(b'm') => 3,
+        Some(b'b') => 4,
+        _ => 0,
+    }
+}
+
+/// What a unit is and carries, as the HUD shows it (docs/35-hud.md, "The target panel and the
+/// player's own unit").
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Designation {
+    /// 1–4, or 0 unknown.
+    pub size_class: u8,
+    /// Its chassis profile's `ChassisType`: 1 flying, 2 walking, 3 wheeled, 4 tracked; 0
+    /// unknown.
+    pub chassis_type: u8,
+    /// A battery with a capacity.
+    pub battery: bool,
+    /// Both a fight shield and a deflector, without which no sector is drawn.
+    pub shielded: bool,
+    pub repair: bool,
+    pub detection_shield: bool,
+}
+
+/// A placed object's designation: its size class and chassis type from its chassis part, the
+/// one hanging from nothing, and its equipment from every part's controller. `profiles` is
+/// `behpsp.res`.
+pub fn designation(
+    assembly: &mut Assembly,
+    profiles: Option<&parkan_formats::nres::Archive>,
+    kind: u32,
+    path: &str,
+) -> Designation {
+    let mut out = Designation::default();
+    let mut deflector = false;
+    for record in assembly.records(path) {
+        let Some(c) = controller(assembly, &record).ok().flatten() else { continue };
+        for k in &c.components {
+            match k.type_id {
+                control::BATTERY_TYPE if k.values[control::BATTERY_CAPACITY] > 0.0 => out.battery = true,
+                control::FIGHT_SHIELD_TYPE => out.shielded = true,
+                control::REPAIR_TYPE => out.repair = true,
+                control::DETECT_SHIELD_TYPE => out.detection_shield = true,
+                control::DEFLECTOR_TYPE => deflector = true,
+                _ => {}
+            }
+        }
+    }
+    out.shielded &= deflector;
+    let parts = assembly.parts(kind, path);
+    let Some(chassis) = parts.iter().find(|p| p.host == -1) else { return out };
+    let chassis_type = assembly
+        .library
+        .get(&chassis.record)
+        .and_then(|r| r.slot_with_suffix("var"))
+        .and_then(|slot| profiles?.read_name(&slot.member).ok())
+        .and_then(|data| parkan_formats::profiles::parse(data, "var").ok())
+        .and_then(|vars| vars.into_iter().find(|v| v.name == parkan_formats::profiles::CHASSIS_TYPE))
+        .map_or(0, |v| v.value.clamp(0.0, 255.0) as u8);
+    Designation { size_class: chassis_size(&chassis.record), chassis_type, ..out }
+}
+
 /// `pose` with its turn about z, measured from `rest`, taken out: the swing that is left
 /// of rest⁻¹ × pose once its twist about z is removed, applied to `rest`.
 fn without_yaw(pose: &Pose, rest: &Pose) -> Pose {
@@ -251,14 +318,7 @@ impl Robot {
         let centre =
             if weight > 0.0 { spheres.iter().map(|s| s.0 * s.1).sum::<Vec3>() / weight } else { Vec3::ZERO };
         let collision = (centre, spheres.iter().map(|s| s.0.distance(centre) + s.1).fold(0.0, f32::max));
-        // `R_H_02`: the letter after `R_` (`Behavior.dll:0x1000cee0`).
-        let size_class = match chassis_part.record.as_bytes().get(2).map(u8::to_ascii_lowercase) {
-            Some(b't') => 1,
-            Some(b'l' | b'h') => 2,
-            Some(b'm') => 3,
-            Some(b'b') => 4,
-            _ => 0,
-        };
+        let size_class = chassis_size(&chassis_part.record);
         let flyer = assembly
             .library
             .get(&chassis_part.record)

@@ -94,6 +94,14 @@ pub const MCMD_WALK_B: i32 = 20;
 pub const CICLS_TURRET: i32 = 1;
 pub const CICLS_MULTIGUN: i32 = 2;
 pub const CICLS_CAMERA: i32 = 4;
+pub const CICLS_DETECTSHIELD: i32 = 10;
+pub const CICLS_REPAIRSYS: i32 = 15;
+pub const CIS_SWITCHON: i32 = 0x20;
+pub const CIS_SWITCH_INV: i32 = 0x40;
+pub const CIS_ON: i32 = 0x1000;
+pub const CIS_OFF: i32 = 0x2000;
+/// `CIS_CHAMELEON_INV` to a detection shield, `CIS_INFRARED_INV` to a camera.
+pub const CIS_INV: i32 = 0x4000;
 
 fn lookup(table: &[(&str, i32)], name: &str) -> Option<i32> {
     table.iter().find(|(n, _)| *n == name).map(|&(_, v)| v)
@@ -193,6 +201,8 @@ pub const CMD_JAMES_SELECT_ENEMY: &str = "CMD_JAMES_SELECT_ENEMY";
 pub const CMD_JAMES_SELECT_FRIEND: &str = "CMD_JAMES_SELECT_FRIEND";
 pub const CMD_JAMES_AIM_TARGET: &str = "CMD_JAMES_AIM_TARGET";
 pub const CMD_JAMES_WINGMAN_MENU: &str = "CMD_JAMES_WINGMAN_MENU";
+pub const CMD_JAMES_AUTO_DRIVER: &str = "CMD_JAMES_AUTO_DRIVER";
+pub const CMD_PAGER: &str = "CMD_PAGER";
 
 /// One line of a `.man`: a command, and the key chord that runs it.
 #[derive(Clone, Debug, PartialEq, Eq)]

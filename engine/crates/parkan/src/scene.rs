@@ -106,15 +106,13 @@ pub fn lighting(
 }
 
 /// The mission's play, with the hero's view held steady against its gait unless `--sway`,
-/// a captured bot standing by unless `--capture-idle`, the target bracketed unless
-/// `--no-bracket`, and its progression when its
-/// script and messages load.
+/// a captured bot standing by unless `--capture-idle`, and its progression when its script
+/// and messages load.
 pub fn play(game: &Path, loaded: &Loaded, args: &crate::Args) -> Result<Option<Play>> {
     let mut play = Play::load(game, &loaded.mission)?;
     if let Some(p) = play.as_mut() {
         p.hero.steady = !args.sway;
         p.capture_standby = !args.capture_idle;
-        p.bracket = !args.no_bracket;
         if let Err(e) = p.load_progression(game, &loaded.dir, &loaded.mission) {
             eprintln!("no mission progression: {e:#}");
         }
@@ -168,26 +166,22 @@ pub fn panel_runs(panel: &parkan_world::play::Panel) -> Vec<parkan_world::text::
 pub const PANEL_TITLE_SLOT: usize = 0;
 pub const PANEL_LINES_SLOT: usize = 1;
 
-/// The outcome panel on a `width` × `height` screen (`iron3d.dll:0x1009f8b0`, docs/34, "After
-/// the outcome"), in place of the HUD: a black box at 60% and, centred on x 320 of a 640 ×
-/// 480 layout, the title in `menu` at y 50, green won and red lost, and the lines in `game`,
-/// grey, from y 75 one font height + 2 apart. The box runs from (x₀, 35) to (640 − x₀, the
-/// pen after the last line + 15), x₀ being the leftmost text's x less 30. Returns the box,
-/// the title's run and the lines' runs.
-///
-/// STAND-IN: docs/34-progression.md#after-the-outcome--read-and-measured -- the two display
-/// scale queries a font's height and a text's width pass through are not read: the layout
-/// and its fonts scale by the screen's height over 480, the 640-wide layout centred across
-/// the screen. On the recording of Mission 01's win the box runs 225 to 415 by 35 to about 98.
+/// The outcome panel on `space` (`iron3d.dll:0x1009f8b0`, docs/34, "After the outcome"), in
+/// place of the HUD: a black box at 60% and, centred on x 320 of the 640 × 480 layout, pinned
+/// to the screen's top middle, the title in `menu` at y 50, green won and red lost, and the
+/// lines in `game`, grey, from y 75 one font height + 2 apart. The box runs from (x₀, 35) to
+/// (640 − x₀, the pen after the last line + 15), x₀ being the leftmost text's x less 30.
+/// Returns the box, the title's run and the lines' runs. On the recording of Mission 01's win
+/// the box runs 225 to 415 by 35 to about 98.
 pub fn outcome_panel(
     panel: &parkan_world::progress::OutcomePanel,
     menu: &parkan_world::text::GameFont,
     game: &parkan_world::text::GameFont,
-    (width, height): (f32, f32),
+    space: parkan_world::hud::Space,
 ) -> (Vec<parkan_render::hud::Rect>, Vec<parkan_world::text::TextRun>, Vec<parkan_world::text::TextRun>) {
     use parkan_world::text::{Align, TextRun};
-    let s = height / 480.0;
-    let at = |x: f32, y: f32| [(x - 320.0) * s / (width / 2.0), 1.0 - y * s / (height / 2.0)];
+    let s = space.scale();
+    let at = |x: f32, y: f32| space.ndc([x, y], parkan_world::hud::Pin::TOP);
     let rgb = |r: u8, g: u8, b: u8| [r, g, b].map(|c| f32::from(c) / 255.0);
     let [tr, tg, tb] = if panel.won { rgb(0x64, 0xff, 0x64) } else { rgb(0xff, 0x64, 0x64) };
     let [lr, lg, lb] = rgb(0xf0, 0xf0, 0xf0);
@@ -237,7 +231,7 @@ pub fn draw_outcome(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     play: &Play,
-    screen: (f32, f32),
+    screen: parkan_world::hud::Space,
 ) -> bool {
     let panel = play.progression.as_ref().and_then(|p| p.panel());
     let laid = match (&panel, renderer.font_slot(PANEL_TITLE_SLOT), renderer.font_slot(PANEL_LINES_SLOT)) {
@@ -255,119 +249,157 @@ pub fn draw_outcome(
     true
 }
 
-/// The lines of the message history on screen, each with when it goes.
-///
-/// STAND-IN: docs/34-progression.md#not-established -- where the game draws a message's
-/// text and for how long is not read: each line shows for 8 s, the newest four stacked
-/// up from just above the guns, wrapped to 70% of the screen.
-#[derive(Default)]
-pub struct Subtitles {
-    lines: std::collections::VecDeque<(String, f64)>,
-    /// The font the lines wrap by.
-    font: Option<parkan_world::text::GameFont>,
+/// The font slot the cockpit's text is drawn in.
+pub const HUD_TEXT_SLOT: usize = 2;
+
+/// The cockpit HUD (docs/35-hud.md): its state, and `GAME_FONT` to lay its text out in.
+pub struct Hud {
+    pub cockpit: parkan_world::cockpit::Cockpit,
+    pub font: parkan_world::text::GameFont,
+    /// `--stretch-hud`: the layout stretches to the screen as the game's does.
+    pub stretch: bool,
 }
 
-impl Subtitles {
-    pub const SECONDS: f64 = 8.0;
-    pub const SHOWN: usize = 4;
-    /// Where the lowest line ends, in NDC, and the gap between lines, in font pixels.
-    pub const BOTTOM: f32 = -0.78;
-    pub const GAP: f32 = 6.0;
+/// The cockpit for `play`: the interface's pages into `renderer`, `GAME_FONT` into its slot.
+pub fn hud(
+    renderer: &mut parkan_render::Renderer,
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    game: &Path,
+    play: &Play,
+    stretch: bool,
+) -> Result<Hud> {
+    use parkan_world::text::GameFont;
+    let pages = parkan_world::hud::Pages::open(game)?;
+    renderer.set_ui_pages(device, queue, &pages.pages);
+    renderer.set_font_slot(device, queue, HUD_TEXT_SLOT, GameFont::ui(game, "GAME_FONT")?);
+    Ok(Hud {
+        cockpit: parkan_world::cockpit::Cockpit::open(game, &pages, play)?,
+        font: GameFont::ui(game, "GAME_FONT")?,
+        stretch,
+    })
+}
 
-    pub fn new(font: Option<parkan_world::text::GameFont>) -> Self {
-        Self { lines: Default::default(), font }
+/// This frame's cockpit, or none while `shown` is false: its art, its text and the views of
+/// the units its panels hold. Returns what it asks to be heard.
+#[allow(clippy::too_many_arguments)]
+pub fn draw_hud(
+    renderer: &mut parkan_render::Renderer,
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    hud: &mut Hud,
+    play: &Play,
+    view: &OwnView,
+    (width, height): (u32, u32),
+    view_proj: glam::Mat4,
+    lighting: Option<parkan_render::frame::Lighting>,
+    shown: bool,
+) -> (Vec<&'static str>, Vec<&'static str>) {
+    if !shown {
+        renderer.set_ui(device, queue, (width, height), &[]);
+        renderer.set_text_slot(device, queue, HUD_TEXT_SLOT, &[]);
+        renderer.set_views(device, Vec::new());
+        return (Vec::new(), Vec::new());
     }
-
-    pub fn push(&mut self, text: String, now_s: f64) {
-        self.lines.push_back((text, now_s + Self::SECONDS));
-    }
-
-    /// The text to draw at `now_s` on a screen `width` × `height` pixels.
-    pub fn runs(&mut self, now_s: f64, width: f32, height: f32) -> Vec<parkan_world::text::TextRun> {
-        use parkan_world::text::{Align, TextRun};
-        self.lines.retain(|(_, until)| *until > now_s);
-        let Some(font) = self.font.as_ref() else { return Vec::new() };
-        let pixel = 2.0 / height.max(1.0);
-        let mut bottom = Self::BOTTOM;
-        let mut out = Vec::new();
-        for (text, _) in self.lines.iter().rev().take(Self::SHOWN) {
-            let run = TextRun {
-                align: Align::Centre,
-                wrap: Some(width * 0.7),
-                colour: [1.0, 0.95, 0.7, 1.0],
-                ..TextRun::new(text.as_str(), [0.0, 0.0])
+    let space = parkan_world::hud::Space {
+        stretch: hud.stretch,
+        ..parkan_world::hud::Space::new(width as f32, height as f32)
+    };
+    let drawn = hud.cockpit.draw(play, space, &hud.font, view_proj);
+    renderer.set_ui(device, queue, (width, height), &drawn.batches);
+    renderer.set_text_slot(device, queue, HUD_TEXT_SLOT, &drawn.text);
+    let views = drawn
+        .views
+        .iter()
+        .map(|v| {
+            // The view has no fog: it stands a unit's width from what it shows.
+            let lighting = parkan_render::frame::Lighting {
+                fog_end: f32::MAX,
+                fog_start: f32::MAX,
+                eye: v.eye,
+                ..lighting.unwrap_or_default()
             };
-            let rows = font.lines(&run).len() as f32;
-            let top = bottom + rows * font.line_height * run.scale * pixel;
-            out.push(TextRun { anchor: [0.0, top], ..run });
-            bottom = top + Self::GAP * pixel;
-        }
-        out
-    }
+            let (instances, paints) = unit_instances(renderer, queue, view, play, v.unit);
+            parkan_render::ModelView {
+                viewport: v.viewport,
+                view_proj: v.view_proj(),
+                lighting,
+                instances,
+                paints: Some(paints),
+            }
+        })
+        .collect();
+    renderer.set_views(device, views);
+    (drawn.voices, drawn.sounds)
 }
 
-/// The HUD: a crosshair at the screen's centre, where the sight looks, and a slot for
-/// each gun, lit while selected, with its magazine and capacitor as bars.
-///
-/// STAND-IN: docs/30-turrets.md#not-established -- how the game's HUD draws the aim
-/// point and the guns is not read.
-///
-/// DEPARTURE: docs/25-sensors.md#how-the-game-colours-what-it-marks--read-and-measured --
-/// in the cockpit the game brackets nothing in the world: it frames the target in its
-/// target panel and outlines its radar mark, neither of which is drawn yet. With
-/// [`Play::bracket`] four corners stand around the target's bounding sphere on screen,
-/// in the colour the game marks its clan in.
-pub fn hud(play: &Play, aspect: f32, view_proj: glam::Mat4) -> Vec<parkan_render::hud::Rect> {
-    use parkan_render::hud::Rect;
-    let mut out = Vec::new();
-    if play.bracket
-        && let Some(t) = play.targets.current
-        && let Some(c) = play.contacts().get(t).copied()
-        && let Some([x, y]) = parkan_world::play::on_screen(view_proj, c.centre, c.radius)
-    {
-        let edge = view_proj * (c.centre + Vec3::Z * c.radius).extend(1.0);
-        let half_h = if edge.w > 1e-6 { (edge.y / edge.w - y).abs().clamp(0.02, 0.8) } else { 0.02 };
-        let half_w = half_h / aspect.max(0.1);
-        let [r, g, b] = play.mark_colour(play.units[t].clan).map(|v| f32::from(v) / 255.0);
-        let colour = [r, g, b, 0.9];
-        let (lw, lh) = (half_w * 0.35, half_h * 0.35);
-        let (tw, th) = (0.003 / aspect.max(0.1), 0.003);
-        for (sx, sy) in [(-1.0, -1.0), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)] {
-            let (cx, cy) = (x + sx * half_w, y + sy * half_h);
-            let horizontal = [cx.min(cx - sx * lw), cx.max(cx - sx * lw)];
-            let vertical = [cy.min(cy - sy * lh), cy.max(cy - sy * lh)];
-            out.push(Rect { min: [horizontal[0], cy - th], max: [horizontal[1], cy + th], colour });
-            out.push(Rect { min: [cx - tw, vertical[0]], max: [cx + tw, vertical[1]], colour });
+/// The instances that draw `unit` (a battle target, or the hero with none) as its nodes stand
+/// now, each with its node's colour by its life (docs/35-hud.md, "The unit in the middle").
+fn unit_instances(
+    renderer: &parkan_render::Renderer,
+    queue: &wgpu::Queue,
+    view: &OwnView,
+    play: &Play,
+    unit: Option<usize>,
+) -> (Vec<usize>, Vec<[f32; 3]>) {
+    use parkan_world::cockpit::panels::node_colour;
+    let colour = |life: Option<&parkan_sim::damage::NodeLife>| {
+        node_colour(life.map_or(1.0, |l| if l.max > 0.0 { l.life / l.max } else { 1.0 }))
+    };
+    let mut instances = Vec::new();
+    let mut paints = Vec::new();
+    match unit {
+        None => {
+            let hero = &play.hero;
+            let (position, yaw) = hero.walker.drawn(hero.time_ms);
+            let placed = glam::Mat4::from_translation(position)
+                * glam::Mat4::from_quat(glam::Quat::from_rotation_z(yaw));
+            let mount = hero.mount();
+            for &(instance, part, node, variant) in &view.outside {
+                let index = match part {
+                    Mount::Chassis => hero.chassis_part,
+                    Mount::Turret => hero.turret_part,
+                };
+                let life = hero.lives.get(index).and_then(Option::as_ref).and_then(|l| l.nodes.get(node));
+                let shown = life.map_or(variant == 0, |l| !l.hidden() && l.block() == variant);
+                if !shown {
+                    continue;
+                }
+                let pose = match part {
+                    Mount::Chassis => hero.chassis_pose(node),
+                    Mount::Turret => hero.turret_node(&mount, node),
+                };
+                renderer.move_instance(queue, instance, placed * models::pose_matrix(&pose));
+                instances.push(instance);
+                paints.push(colour(life));
+            }
+        }
+        Some(t) => {
+            let Some(target) = play.battle.combat.targets.get(t) else { return (instances, paints) };
+            let noded: Vec<_> = view.targets.iter().filter(|e| e.1 == t).collect();
+            if noded.is_empty() {
+                let object = play.battle.objects[t];
+                if let Some(i) = renderer_placed(view, object) {
+                    instances.push(i);
+                    paints.push(colour(None));
+                }
+            }
+            for &&(instance, _, p, node, variant) in &noded {
+                let Some(part) = target.parts.get(p) else { continue };
+                let life = part.life.as_ref().and_then(|l| l.nodes.get(node));
+                if life.map_or(variant == 0, |l| !l.hidden() && l.block() == variant) {
+                    instances.push(instance);
+                    paints.push(colour(life));
+                }
+            }
         }
     }
-    let (w, h) = (0.02 / aspect.max(0.1), 0.02);
-    let (tw, th) = (0.002 / aspect.max(0.1), 0.002);
-    let white = [1.0, 1.0, 1.0, 0.8];
-    out.push(Rect { min: [-w, -th], max: [-w / 3.0, th], colour: white });
-    out.push(Rect { min: [w / 3.0, -th], max: [w, th], colour: white });
-    out.push(Rect { min: [-tw, -h], max: [tw, -h / 3.0], colour: white });
-    out.push(Rect { min: [-tw, h / 3.0], max: [tw, h], colour: white });
-    for (i, g) in play.hero.guns.iter().enumerate() {
-        let x0 = -0.95 + i as f32 * 0.12;
-        let (x1, y0, y1) = (x0 + 0.1, -0.95, -0.85);
-        let frame = if g.selected { [1.0, 0.8, 0.2, 0.9] } else { [0.4, 0.4, 0.4, 0.6] };
-        out.push(Rect { min: [x0, y0], max: [x1, y1], colour: [0.0, 0.0, 0.0, 0.4] });
-        out.push(Rect { min: [x0, y1], max: [x1, y1 + 0.008], colour: frame });
-        let full = |v: f32| x0 + 0.005 + (x1 - x0 - 0.01) * v.clamp(0.0, 1.0);
-        let magazine = if g.magazine < 0 { 1.0 } else { g.rounds as f32 / g.magazine.max(1) as f32 };
-        let charge = if g.capacitor > 0.0 { g.charge / g.capacitor } else { 1.0 };
-        out.push(Rect {
-            min: [x0 + 0.005, y0 + 0.055],
-            max: [full(magazine), y0 + 0.08],
-            colour: [0.9, 0.9, 0.9, 0.9],
-        });
-        out.push(Rect {
-            min: [x0 + 0.005, y0 + 0.02],
-            max: [full(charge), y0 + 0.045],
-            colour: [0.3, 0.7, 1.0, 0.9],
-        });
-    }
-    out
+    (instances, paints)
+}
+
+/// The instance a whole placed object draws with, if it has one.
+fn renderer_placed(view: &OwnView, object: usize) -> Option<usize> {
+    view.placed.iter().position(|&p| p == object)
 }
 
 /// The looks the effects draw with, for the renderer.
@@ -424,6 +456,11 @@ enum Mount {
 /// slot, following that node's pose.
 pub struct OwnView {
     nodes: Vec<(usize, Mount, usize)>,
+    /// The hero from outside, for its own panel: an instance for each level-0 slot of each
+    /// variant its nodes' stages draw, hidden from the scene.
+    outside: Vec<(usize, Mount, usize, usize)>,
+    /// Which object each instance places, `usize::MAX` for a node's.
+    placed: Vec<usize>,
     /// Every target with node life drawn node by node: an instance, the target, its part,
     /// the node and the variant that instance draws.
     targets: Vec<(usize, usize, usize, usize, usize)>,
@@ -470,6 +507,31 @@ pub fn own_view(objects: &mut Objects, store: &mut TextureStore, play: &Play) ->
             nodes.push((objects.instances.len() - 1, mount, node));
         }
     }
+    let mut outside = Vec::new();
+    for (mount, loaded, part) in [
+        (Mount::Chassis, &play.hero.chassis, play.hero.chassis_part),
+        (Mount::Turret, &play.hero.turret, play.hero.turret_part),
+    ] {
+        let life = play.hero.lives.get(part).and_then(Option::as_ref);
+        for node in 0..loaded.mesh.nodes.len() {
+            let stages = life.and_then(|l| l.nodes.get(node)).map_or(1, |l| l.stages);
+            for variant in 0..usize::from(stages) {
+                let Some(model) = models::build_node(loaded, node, variant, |name| store.look(name))? else {
+                    continue;
+                };
+                objects.models.push(model);
+                objects.instances.push(models::Instance {
+                    model: objects.models.len() - 1,
+                    position: [0.0; 3],
+                    rotation: 0.0,
+                    scale: 1.0,
+                    hidden: true,
+                });
+                objects.placed.push(usize::MAX);
+                outside.push((objects.instances.len() - 1, mount, node, variant));
+            }
+        }
+    }
     // A unit or building that takes damage is drawn from its nodes, each at its own pose,
     // in place of the model built whole at rest: every level-0 slot of each variant its
     // stages draw, one shown at a time (docs/26, "What a damaged node, a destroyed part and
@@ -500,7 +562,7 @@ pub fn own_view(objects: &mut Objects, store: &mut TextureStore, play: &Play) ->
             }
         }
     }
-    Ok(OwnView { nodes, targets })
+    Ok(OwnView { nodes, outside, placed: objects.placed.clone(), targets })
 }
 
 /// Put each node of the hero's own view where the hero's pose has it this frame: the
@@ -606,6 +668,8 @@ pub fn scan_name(code: winit::keyboard::KeyCode) -> Option<&'static str> {
         K::NumpadAdd => "SCAN_G_PLUS",
         K::NumpadSubtract => "SCAN_G_SUB",
         K::NumpadDivide => "SCAN_G_SLASH",
+        K::F1 => "SCAN_F1",
+        K::F2 => "SCAN_F2",
         _ => return None,
     })
 }

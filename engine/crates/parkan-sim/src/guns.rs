@@ -229,6 +229,40 @@ impl Gun {
         self.lock = self.gate.lock_s;
     }
 
+    /// The word the HUD's lamp and name read for this gun at `now_ms` (docs/35-hud.md, "The
+    /// weapons list"): 5 no rounds, 6 its capacitor short of a shot, 7 not ready, 3 a
+    /// stroke under way, 4 waiting its interval; then the gate's 2 for a guided gun with no
+    /// target, or 7 or 8 against the target it has; 1 a guided gun locking; else 0, ready.
+    ///
+    /// STAND-IN: docs/29-weapons.md#the-guns-takt-a-stroke-then-the-interval -- where the
+    /// takt stores codes 0 and 3–6 (`0x100295ba`–`0x1002a167`) is not read: the word is
+    /// taken from the gun's state now rather than kept from the last point that wrote it.
+    pub fn lamp_report(&self, now_ms: f64) -> i32 {
+        let guided = self.gate.lock_s > 0.0;
+        if self.rounds == 0 {
+            5
+        } else if self.capacitor > 0.0 && self.charge < self.shot_energy {
+            6
+        } else if !self.ready {
+            7
+        } else if self.barrels.iter().any(|b| b.step != 0) {
+            3
+        } else if self.started && now_ms < self.next_ms {
+            4
+        } else if guided && self.sight.target.is_none() {
+            GATE_NO_TARGET
+        } else if self.gate.range > 0.0
+            && self.sight.target.is_some()
+            && matches!(self.report, GATE_OUT_OF_RANGE | GATE_OFF_BARREL)
+        {
+            self.report
+        } else if guided && self.lock > 0.0 {
+            1
+        } else {
+            0
+        }
+    }
+
     /// Top the capacitor up.
     ///
     /// STAND-IN: docs/23-economy.md#bots-spend-power-through-the-same-code-priced-by-part--read-and-measured

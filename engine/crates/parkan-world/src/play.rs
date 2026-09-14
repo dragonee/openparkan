@@ -94,6 +94,8 @@ pub struct Unit {
     pub kind: u32,
     /// A neutral unit has made itself the hero's target once (`+0x134`).
     pub announced: bool,
+    /// What it is and carries, which the HUD shows.
+    pub designation: crate::robot::Designation,
 }
 
 /// Where the player looks from: for the right button's pick.
@@ -163,6 +165,10 @@ pub struct Play {
     pub cues: Vec<Cue>,
     /// Each target's clan, type and logical id.
     pub units: Vec<Unit>,
+    /// What the hero is and carries, which its own panel shows.
+    pub hero_designation: crate::robot::Designation,
+    /// The driven unit's auto-driver level, 0–2, which `CMD_JAMES_AUTO_DRIVER` steps (docs/31).
+    pub auto_driver: u8,
     pub clans: Vec<Clan>,
     /// The player's clan, and the hero's logical id.
     pub player_clan: i64,
@@ -179,8 +185,6 @@ pub struct Play {
     voice_pick: VoicePick,
     /// Whether a captured bot is given Standby ([`Play::enter`]); off, as the game's.
     pub capture_standby: bool,
-    /// Whether the HUD brackets the target in the world (`scene::hud`); off, as the game's.
-    pub bracket: bool,
     /// Knocked-off parts in flight.
     pub flights: Vec<Flight>,
     /// Dead units and when each is deleted; and each target deleted.
@@ -356,20 +360,29 @@ impl Play {
             Value::Int(i) => i64::from(i),
             Value::Float(f) => f as i64,
         };
-        let units = battle
-            .objects
-            .iter()
-            .map(|&o| {
-                let object = &mission.objects[o];
-                Unit {
-                    clan: object.clan_id(),
-                    type_word: object.property("Type").map_or(0, |p| number(p.value)) as u32,
-                    logical_id: object.logical_id,
-                    kind: object.kind,
-                    announced: false,
-                }
-            })
-            .collect();
+        let profiles = gamedir::resolve(game, parkan_formats::profiles::ARCHIVE)
+            .and_then(|p| parkan_formats::nres::Archive::open(&p).ok());
+        let hero_designation = {
+            let object = &mission.objects[hero.object];
+            crate::robot::designation(&mut assembly, profiles.as_ref(), object.kind, &object.path)
+        };
+        let mut units = Vec::new();
+        for &o in &battle.objects {
+            let object = &mission.objects[o];
+            let designation = if object.kind == KIND_UNIT {
+                crate::robot::designation(&mut assembly, profiles.as_ref(), object.kind, &object.path)
+            } else {
+                Default::default()
+            };
+            units.push(Unit {
+                clan: object.clan_id(),
+                type_word: object.property("Type").map_or(0, |p| number(p.value)) as u32,
+                logical_id: object.logical_id,
+                kind: object.kind,
+                announced: false,
+                designation,
+            });
+        }
         // Every target's faces, for the ground a building gives and the collision pass.
         let mut ground = Ground::new(land);
         let materials_for = |t: usize, part: usize, material: u16| {
@@ -412,6 +425,8 @@ impl Play {
             killed: Vec::new(),
             cues: Vec::new(),
             units,
+            hero_designation,
+            auto_driver: 0,
             clans: mission.clans.clone(),
             player_clan,
             hero_id,
@@ -422,7 +437,6 @@ impl Play {
             selector: Selector::default(),
             voice_pick: VoicePick::default(),
             capture_standby: false,
-            bracket: false,
             flights: Vec::new(),
             deaths: Vec::new(),
             deleted: vec![false; target_count],
@@ -445,6 +459,30 @@ impl Play {
     pub fn load_progression(&mut self, game: &Path, mission_dir: &Path, mission: &Mission) -> Result<()> {
         self.progression = Some(Progression::load(game, mission_dir, mission, self.hero.object)?);
         Ok(())
+    }
+
+    /// Stand the hero `distance` from target `target` on level ground, facing it: the first of
+    /// sixteen places about it, from `around` radians, whose ground is no more than 9 below the
+    /// target's. False where there is none.
+    pub fn stand_facing(&mut self, target: usize, distance: f32, around: f32) -> bool {
+        let Some(at_target) = self.battle.combat.targets.get(target).map(|t| t.position) else {
+            return false;
+        };
+        let Some(at) = (0..16)
+            .map(|k| around + k as f32 * std::f32::consts::TAU / 16.0)
+            .map(|a| at_target + Vec3::new(a.cos(), a.sin(), 0.0) * distance)
+            .find(|p| self.ground.below(p.x, p.y, 1000.0).is_some_and(|h| h.point.z > at_target.z - 9.0))
+        else {
+            return false;
+        };
+        let facing = (at_target - at).with_z(0.0).normalize();
+        let w = &mut self.hero.walker;
+        w.body.position = Vec3::new(at.x, at.y, at_target.z + 20.0);
+        w.body.yaw = (-facing.x).atan2(facing.y);
+        w.follow_ground(&self.ground);
+        w.from = (w.body.position, w.body.yaw);
+        w.from_heading = w.body.yaw;
+        true
     }
 
     /// Whether clan `other` is hostile to the player's: another clan, not nature's, toward
@@ -560,7 +598,7 @@ impl Play {
                 if let Some(text) =
                     self.progression.as_ref().and_then(|p| p.strings.get(&STRING_VACANT_VEHICLE))
                 {
-                    self.says.push(Say::Text(text.clone()));
+                    self.says.push(Say::Text(crate::progress::Sender::System, text.clone()));
                 }
                 self.say_sound(VOICE_UNIT_DETECTED, true);
             }
@@ -589,6 +627,15 @@ impl Play {
             }
             CMD_ENTER_STATE => {
                 self.enter();
+                false
+            }
+            // `0x10075fc0`: the level steps 0, 1, 2 and round.
+            //
+            // STAND-IN: docs/31-packages.md#the-wingman-menu-from-first-person--read-and-measured
+            // -- the level decides a bot's overrides when the player takes it, and the player
+            // never takes one here: it steps and does nothing else.
+            parkan_formats::controls::CMD_JAMES_AUTO_DRIVER => {
+                self.auto_driver = (self.auto_driver + 1) % 3;
                 false
             }
             CMD_JAMES_WINGMAN_MENU => {

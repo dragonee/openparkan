@@ -94,8 +94,8 @@ starts at the file's closing time and plays its sections in turn:
   alpha.
 
 Sound plays each effect's sound emitters from `sounds.lib`, WAV and MS ADPCM
-through kira, as their effect time passes their trigger. A HUD shows a
-crosshair and the guns: which are selected, their magazines and capacitors.
+through kira, as their effect time passes their trigger. A HUD showed a
+crosshair and the guns, until M9 drew the game's own.
 
 Not yet: lightmaps (no Mission 01 mesh has one) and levels of detail beyond 0.
 
@@ -110,7 +110,7 @@ Not yet: lightmaps (no Mission 01 mesh has one) and levels of detail beyond 0.
 - The hero's target list keeps its fitted radar's contacts, drops a dead or
   distant target and picks the nearest hostile, friend or listed object. Tab,
   E, T and the right button pick as `ui_other.man` binds them, and a neutral
-  unit makes itself the target once in sensor range. The HUD marks the target.
+  unit makes itself the target once in sensor range.
 - A new target reaches the guided guns only. The plasma rifle and the
   missiles hold their fire without a target, out of range or off the barrel,
   count their lock down, and their rounds' seekers steer onto it. Enter
@@ -171,6 +171,31 @@ Not yet: boarding a captured bot, and the ambient variations.
   is red, and adds R to restart and L to load. Esc then leaves, and R restarts
   the mission.
 
+**M9.** The cockpit's HUD, as `iron3d.dll` draws it on its 640 × 480 layout from
+the interface's pages and `ui/compaund.cfg` and `ui/hq.cfg`'s pieces.
+
+- The weapons list at the top right: a row a gun, its key, a lamp by its state
+  (black unselected; green, yellow or red by what it reports), its rounds or
+  INF, and its name over a bar its charge fills, red, olive or green. A guided
+  gun with no target, out of range or off the barrel reads OUT OF RANGE.
+- The message box at the top: the newest line, headed by whom it is from, six
+  lines at most with "Press F1 to see more", for 20 s; F2 hides it.
+- The radar: the target list's contacts in their clan's colours (a flyer a
+  cross, a building a bigger square, the target outlined), turning with the
+  camera, the view's wedge, north and south, the sweep ring and its ping, the
+  range; the altitude over the map's water and the speed in km/h beside it; and
+  under it the indicators: repair (G), infrared (N), camouflage (H) and the
+  auto-driver's level (Y).
+- The target panel at the bottom left and the hero's at the bottom right: the
+  unit seen through its panel's camera, each node green whole and red
+  destroyed; six shield sectors for a unit with a fight shield and a deflector;
+  its life arc and its battery arc; its name ("TFW-2 Warrior", "Human") and,
+  for a wingman, its order; the target's distance, and a square about it in
+  the world, easing in from the screen's middle.
+- The reticle at the middle.
+- The HUD's art, text and outcome panel blend in display space, as the game's
+  16-bit surfaces did: a weapon bar reads the recording's (74, 146, 92).
+
 This directory also holds what the rest will follow:
 
 - **`docs/`** is the source of truth. Every behaviour the engine implements is
@@ -217,8 +242,13 @@ tick) play the hero at 60 ticks a second before a screenshot, or with
 `--mouse` adds its counts every tick and `--trace` prints where the hero is
 every second. The view holds the heading the hero moves along; `--sway` lets it
 swing with the gait as the game's does. A captured bot stands by until it is
-ordered; `--capture-idle` leaves it with no order, as the game's capture does. The
-target is bracketed in its clan's mark colour; `--no-bracket` hides the bracket. With `--fly`, W/A/S/D and Q/E fly, holding
+ordered; `--capture-idle` leaves it with no order, as the game's capture does. F2
+hides the message box or shows it again; G, H and N switch the repair system,
+camouflage and infrared, and Y steps the auto-driver. The HUD keeps its layout's
+shape on a wide window, its panels on the window's corners; `--stretch-hud`
+stretches it as the game's does. `--face NAME,DISTANCE` stands the hero that far
+from the mission object whose path ends in NAME, facing it, before `--ticks`
+play. With `--fly`, W/A/S/D and Q/E fly, holding
 the right mouse button turns and Shift flies faster.
 
 ## Checks
@@ -289,7 +319,6 @@ a row here. A row leaves this table when research closes it.
 | M4 | How often an effect instance tests its point's view, and what the ray through the world meets | every frame, against what a round meets (the ground less its water surface, and every live object's level-0 mesh) | [11](../docs/11-effects.md#bit-8-and-the-tested-point--read-and-measured) |
 | M4 | What a building (a `CBuilding` aggregating its agent) answers for a strike's material, and a node's wear base | a strike on a building plays slot 0; the batch's material byte alone indexes the wear | [11](../docs/11-effects.md#what-an-explosion-plays--read-and-measured) |
 | M4 | The effect manager's random generator | any uniform generator | [11](../docs/11-effects.md#how-an-effect-runs--read) |
-| M5 | How the HUD draws the aim point and the guns | a crosshair at the centre; a slot a gun, lit while selected, with magazine and capacitor bars | [30](../docs/30-turrets.md#not-established) |
 | M5 | How a sound falls off between its near and far distances, and how it is panned | linear in distance; panned by its direction against the eye's right | [11](../docs/11-effects.md#emitter-types--read-and-measured) |
 | M5 | How the game turns a string's characters into the font's glyph indices | ASCII as its own index; Cyrillic by code page 866, where the font draws it (А–Я at 0x80, а–п at 0xA0, р–я at 0xE0); anything else draws `?` | [12](../docs/12-rsli.md#what-is-inside) |
 | M5 | How tall a glyph is drawn and how far apart lines are: a record has no bottom edge | the atlas's row pitch, 18 pixels, for both | [12](../docs/12-rsli.md#what-is-inside) |
@@ -326,7 +355,6 @@ engine pass replaces each with what was read and removes its row.
 | M6 | Whether scenery is among a radar's contacts | a target needs a unit record: trees and rocks are never listed | [25](../docs/25-sensors.md#the-players-target--read-and-measured) |
 | M6 | The unit record's `+0x98` and `+0x94`: where the right button's ray starts, and the margin its pick keeps from the unit | both 0 | [25](../docs/25-sensors.md#the-players-target--read-and-measured) |
 | M6 | Boarding a captured bot is read, but the engine drives only the hero | the captured unit joins the player's clan and stays where it stands; Enter on the player's own unit does nothing | [27](../docs/27-ownership.md#a-neutral-unit-is-taken-by-the-hero--read-and-measured) |
-| M6 | Where the game draws a message's text and for how long | each line 8 s, the newest four stacked above the guns, wrapped to 70% of the screen | [34](../docs/34-progression.md#not-established) |
 | M6 | Whether a type-5 descriptor loops its sound, and when the ambient variations play | the theme loops from the mission's load; the variations are not played | [34](../docs/34-progression.md#ambient-sound--read-in-part) |
 | M7 | Which pose the live contact record's height comes from when the loader decides which states plant a foot | the rest pose | [13](../docs/13-control.md#a-footstep-end-to-end--read-and-measured) |
 | M7 | A contact's node life, which decides whether a foot can land | every contact is intact | [13](../docs/13-control.md#section-1s-conditions-are-contacts--read-and-measured) |
@@ -339,7 +367,6 @@ engine pass replaces each with what was read and removes its row.
 | M8 | What a unit record's `+0x30` is, which picks capturers and the acknowledgement voices | the size class of the chassis's name: t 1, l and h 2, m 3, b 4 | [31](../docs/31-packages.md#the-wingman-menu-from-first-person--read-and-measured) |
 | M8 | The acknowledgement's xorshift: its shifts and seed | 7, 9, 8 from 0xACE1, never repeating the last voice | [31](../docs/31-packages.md#the-wingman-menu-from-first-person--read-and-measured) |
 | M8 | The game's random source for a life update's spread | a 16-bit xorshift (7, 9, 8), seeded apart per unit | [24](../docs/24-motion.md#water-and-lava-beds-kill--read-and-measured) |
-| M8 | The two display scale queries a font's height and a text's width pass through to the 640 × 480 layout | the layout and its fonts scale by the screen's height over 480, the 640-wide layout centred across the screen; on the recording of Mission 01's win the title's glyphs step about 3% wider than their advances | [34](../docs/34-progression.md#after-the-outcome--read-and-measured) |
 | M8 | The shell's menus after a mission, the load-game screen, and `MISSIONS/dispatcher.ini` | Esc after the outcome closes the window, L does nothing, and a win is not written to the install | [34](../docs/34-progression.md#after-the-outcome--read-and-measured) |
 | M8 | A material's start stamp, from which its track is played, and the random a mode-3 track jumps by | the world clock's 0 for every material; a hash of the clock | [07](../docs/07-objects.md#how-a-material-reaches-the-device--read-and-measured) |
 | M8 | The areal search, the local path and its obstacle contours; the Wizard's heading curve | the straight line to the place, cut into at least three points a second or more apart at the walk's velocity, ending in the read stop; the heading is the curve's velocity's direction | [24](../docs/24-motion.md#not-established) |
@@ -350,6 +377,18 @@ engine pass replaces each with what was read and removes its row.
 | M8 | The follower's two timers; the behaviour's random source | it measures once a second; a 32-bit xorshift | [31](../docs/31-packages.md#what-each-package-does--read) |
 | M8 | A building's pod, the generator's half distance, the construction phase, which areals are usable, and a dock for a refit | a capture walks to the building's placement; the retreat, read to lie off the map, roams; a roam takes the first point tried; no dock is modelled, so a refit always fails at its start | [31](../docs/31-packages.md#where-a-search-looks--read-and-measured) |
 | M8 | How the turret turns a traced point into its targets (`0x10028bb0`), its aim stage, and the gun's report codes | each channel moves on by the angle the sight is off, at the rate a small nudge turns it; θ is 0 once both channels reach their targets and π before; a guided gun's θ is its lock left × π | [29](../docs/29-weapons.md#how-the-ai-fires--read) |
+| M9 | Where a gun's takt stores its report codes 0 and 3–6, which the weapons list's lamp reads | the code from the gun's state now: 5 no rounds, 6 short of charge, 7 not ready, 3 stroking, 4 waiting its interval; then the gate's 2, 7 or 8; 1 locking; 0 ready | [29](../docs/29-weapons.md#the-guns-takt-a-stroke-then-the-interval) |
+| M9 | The charge level of a gun with no capacity, which only a shot sets | its bar shows full | [29](../docs/29-weapons.md#a-gun-is-a-capacitor-a-magazine-and-a-clock--read) |
+| M9 | Where the message box's frame puts its corners 2–4 and its right and bottom edges | each corner where its quarter turn clockwise carries the top left's art; the top and turned right edges as they are, the bottom and left mirrored | [35](../docs/35-hud.md#the-message-box--read-and-measured) |
+| M9 | Which caller hands a unit's name its class word, and which robots are *"Tiny Tower"* | each class letter its own word (W *Warrior*, T *Transport*, B *Builder*, C *Comm. Center*); no robot is a Tiny Tower | [35](../docs/35-hud.md#name-and-status--read-and-seen) |
+| M9 | The component value `0x400` the *"Dangerous!"* line asks for | no unit is called dangerous | [35](../docs/35-hud.md#name-and-status--read-and-seen) |
+| M9 | A panel's battery arc and shield sectors: batteries and shields are not simulated | a unit with a battery reads full and one without empty, so the low battery voice never plays; every sector of a unit with a fight shield and a deflector reads full | [23](../docs/23-economy.md#bots-spend-power-through-the-same-code-priced-by-part--read-and-measured) |
+| M9 | A wingman's order queue, which its status line names | the running task names the order: none *no order*, standby *standing*, follow *following*, search *searching* (*capturing* for a capture), refit *refitting*, attack *attacking* | [31](../docs/31-packages.md#the-orders--measured) |
+| M9 | The driven unit record's `+0x10 ÷ +0x14` in the scale of the square about the target | the camera's focal length: the square's half-side is two thirds of the target's projected radius, then held as read | [35](../docs/35-hud.md#the-frame-around-the-target-in-the-world--read) |
+| M9 | How the panel camera draws a mesh in the colour it is handed in mode 2 | flat, untextured and opaque, the node colour lifted by 0.1 and by 0.1 more with the light: an intact dummy (38, 166, 38) against the recording's (39, 162, 41) | [35](../docs/35-hud.md#the-unit-in-the-middle--read-and-seen) |
+| M9 | The interface's `CState` and the landing warning the indicators show; the repair system, camouflage and infrared themselves | the figure is lit and the warning grey; G, H and N turn switches that only the indicators read, and Y steps a level nothing else reads | [35](../docs/35-hud.md#the-indicators--read-and-seen) |
+| M9 | What the camera view's property 0, which places the reticle's dot, is | the dot stays at the middle | [35](../docs/35-hud.md#the-reticle--read) |
+| M9 | The stage sets a sprite may pick, and how the 2D layer samples | every sprite the default; pages sampled nearest | [35](../docs/35-hud.md#how-the-radar-draws--read) |
 | M8 | A gun fitted as a part of its own: its ready byte and its barrels' recoil | ready; its recoil is not played | [29](../docs/29-weapons.md#a-gun-is-ready-once-its-arm-is-out--read-and-measured) |
 | M8 | Which difficulty profile a wingman holds: `Speed_MaximumFactor` | 1, as four of the five profiles set it | [26](../docs/26-damage.md#the-difficulty-ratio--read-and-measured) |
 | M8 | How a knocked-off part flies: its push, its spin, its update, and the world query that ends a flight early | it drops off at 2 m/s away from the unit's centre, falls under gravity turning at 3 rad/s about a level axis across its path, and its flight ends when its sphere meets the ground (the player remembers a part falling about half a second): a dummy's side panel goes 1.3 s after it is knocked off | [26](../docs/26-damage.md#not-established) |
@@ -366,4 +405,4 @@ has a row here, and a switch that restores the game's behaviour.
 |---|---|---|---|
 | The hero's body node yaws with the gait, ±10° once a run cycle, and the turret, eye, sight and barrels swing with it | node 0 keeps only the part of its turn not about its up axis, so the view, the sight and the barrels hold the heading the body moves along | `--sway` | [30](../docs/30-turrets.md#aiming-and-the-camera--read-and-measured) |
 | A capture changes only the unit's clan, SuperAI and areal map, and gives it no order, so a captured bot engages a hostile within 500 on its own | a captured bot is given Standby, and holds until the player orders it | `--capture-idle` | [27](../docs/27-ownership.md#a-neutral-unit-is-taken-by-the-hero--read-and-measured) |
-| In the cockpit nothing in the world is bracketed: the target is framed in the target panel at the bottom left and outlined on the radar, in its clan's mark colour | four corners around the target's bounding sphere, in that colour: the player's clan light blue, nature yellow, a neutral clan grey, then by word 1 magenta, 2 cyan, 0 red | `--no-bracket` | [25](../docs/25-sensors.md#how-the-game-colours-what-it-marks--read-and-measured) |
+| The HUD's 640 × 480 layout and the outcome panel scale by the screen's width over 640 across and its height over 480 down, so on a wide screen they stretch | the layout scales by the height alone and each element keeps its pin to the screen's edges: the panels in the bottom corners, the weapons at the top right, the radar at the bottom middle, the reticle in the middle | `--stretch-hud` | [35](../docs/35-hud.md#how-the-radar-draws--read) |

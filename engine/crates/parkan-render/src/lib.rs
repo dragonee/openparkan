@@ -17,6 +17,7 @@ pub mod sprites;
 pub mod terrain;
 pub mod text;
 pub mod textures;
+pub mod ui;
 
 pub use models::ModelRenderer;
 pub use terrain::TerrainRenderer;
@@ -49,6 +50,19 @@ pub struct SceneData {
     pub grid_min: Vec2,
     pub grid_max: Vec2,
     pub grid_step: f32,
+}
+
+/// A second look at some placed objects, drawn after the scene and the HUD art under it:
+/// `instances`, shown or hidden, through their own camera and light, into `viewport`
+/// (x, y, width, height in screen pixels, y down) over depth of their own; each flat in its
+/// paint where one is given.
+#[derive(Clone, Debug)]
+pub struct ModelView {
+    pub viewport: [f32; 4],
+    pub view_proj: Mat4,
+    pub lighting: frame::Lighting,
+    pub instances: Vec<usize>,
+    pub paints: Option<Vec<[f32; 3]>>,
 }
 
 /// A device and its queue.
@@ -85,6 +99,9 @@ impl Gpu {
 
 pub struct Renderer {
     format: wgpu::TextureFormat,
+    /// The same target without its sRGB decoding, which the HUD's art and text blend in, as
+    /// the game's 16-bit surfaces did.
+    display: wgpu::TextureFormat,
     solid: wgpu::RenderPipeline,
     lines: wgpu::RenderPipeline,
     camera: wgpu::Buffer,
@@ -102,6 +119,8 @@ pub struct Renderer {
     /// Text in other fonts, drawn after `text` in slot order.
     more_text: Vec<Option<text::TextRenderer>>,
     sprites: Option<sprites::SpriteRenderer>,
+    ui: Option<ui::UiRenderer>,
+    views: Vec<(ModelView, models::ViewFrame)>,
 }
 
 impl Renderer {
@@ -171,6 +190,7 @@ impl Renderer {
         };
         Self {
             format,
+            display: format.remove_srgb_suffix(),
             solid: pipeline(wgpu::PrimitiveTopology::TriangleList, "solid"),
             lines: pipeline(wgpu::PrimitiveTopology::LineList, "lines"),
             camera,
@@ -187,11 +207,18 @@ impl Renderer {
             text: None,
             more_text: Vec::new(),
             sprites: None,
+            ui: None,
+            views: Vec::new(),
         }
     }
 
     pub fn format(&self) -> wgpu::TextureFormat {
         self.format
+    }
+
+    /// The format the HUD is drawn in: the target's, read without sRGB decoding.
+    pub fn display_format(&self) -> wgpu::TextureFormat {
+        self.display
     }
 
     pub fn set_scene(&mut self, device: &wgpu::Device, scene: &SceneData) {
@@ -256,8 +283,33 @@ impl Renderer {
 
     /// This frame's HUD rectangles.
     pub fn set_hud(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, rects: &[hud::Rect]) {
-        let hud = self.hud.get_or_insert_with(|| hud::HudRenderer::new(device, self.format));
+        let display = self.display;
+        let hud = self.hud.get_or_insert_with(|| hud::HudRenderer::new(device, display));
         hud.prepare(device, queue, rects);
+    }
+
+    /// Draw the HUD's art from `pages` from now on; until then [`Renderer::set_ui`] draws
+    /// nothing.
+    pub fn set_ui_pages(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        pages: &[parkan_world::hud::Page],
+    ) {
+        self.ui = Some(ui::UiRenderer::new(device, queue, self.display, pages));
+    }
+
+    /// This frame's HUD art on a `width` × `height` screen, drawn before the HUD rectangles.
+    pub fn set_ui(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        size: (u32, u32),
+        batches: &[parkan_world::hud::Batch],
+    ) {
+        if let Some(ui) = self.ui.as_mut() {
+            ui.prepare(device, queue, size, batches);
+        }
     }
 
     /// Draw text in `font` from now on; until then [`Renderer::set_text`] draws nothing.
@@ -267,7 +319,7 @@ impl Renderer {
         queue: &wgpu::Queue,
         font: parkan_world::text::GameFont,
     ) {
-        self.text = Some(text::TextRenderer::new(device, queue, self.format, font));
+        self.text = Some(text::TextRenderer::new(device, queue, self.display, font));
     }
 
     /// This frame's text, drawn after the HUD.
@@ -294,7 +346,7 @@ impl Renderer {
         if self.more_text.len() <= slot {
             self.more_text.resize_with(slot + 1, || None);
         }
-        self.more_text[slot] = Some(text::TextRenderer::new(device, queue, self.format, font));
+        self.more_text[slot] = Some(text::TextRenderer::new(device, queue, self.display, font));
     }
 
     /// This frame's text in slot `slot`'s font.
@@ -333,6 +385,25 @@ impl Renderer {
         }
     }
 
+    /// This frame's views of placed objects, drawn in order.
+    pub fn set_views(&mut self, device: &wgpu::Device, views: Vec<ModelView>) {
+        let Some(objects) = &self.objects else { return };
+        let mut frames: Vec<models::ViewFrame> = self.views.drain(..).map(|(_, f)| f).collect();
+        frames.truncate(views.len());
+        while frames.len() < views.len() {
+            frames.push(objects.view_frame(device));
+        }
+        self.views = views.into_iter().zip(frames).collect();
+    }
+
+    /// Put a placed object's instance at `matrix` for the views without showing or hiding it
+    /// in the scene.
+    pub fn move_instance(&self, queue: &wgpu::Queue, index: usize, matrix: Mat4) {
+        if let Some(objects) = &self.objects {
+            objects.move_instance(queue, index, matrix);
+        }
+    }
+
     /// Move a placed object's instance to `matrix`, or hide it.
     pub fn set_instance(&mut self, queue: &wgpu::Queue, index: usize, matrix: Mat4, visible: bool) {
         if let Some(objects) = self.objects.as_mut() {
@@ -340,12 +411,14 @@ impl Renderer {
         }
     }
 
-    /// Draw the scene into `target`, a view of a `width` × `height` texture.
+    /// Draw the scene into `target`, a view of a `width` × `height` texture, and the HUD into
+    /// `display`, a view of the same texture in [`Renderer::display_format`].
     pub fn draw(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         target: &wgpu::TextureView,
+        display: &wgpu::TextureView,
         (width, height): (u32, u32),
         view_proj: Mat4,
     ) {
@@ -371,6 +444,16 @@ impl Renderer {
         }
         if let Some(objects) = &self.objects {
             objects.prepare(queue, view_proj, &self.lighting);
+            for (view, frame) in &self.views {
+                let mut uniform = frame::FrameUniform::new(view.view_proj, &view.lighting);
+                if let Some(paints) = &view.paints {
+                    uniform.paint = [1.0, 0.0, 0.0, 0.0];
+                    for (&i, &[r, g, b]) in view.instances.iter().zip(paints) {
+                        objects.paint_instance(queue, i, [r, g, b, 1.0]);
+                    }
+                }
+                objects.prepare_view(queue, frame, &uniform);
+            }
         }
         for text in self.more_text.iter().flatten() {
             text.resize(queue, (width, height));
@@ -421,15 +504,6 @@ impl Renderer {
             if let Some(sprites) = &self.sprites {
                 sprites.draw(&mut pass);
             }
-            if let Some(hud) = &self.hud {
-                hud.draw(&mut pass);
-            }
-            if let Some(text) = &self.text {
-                text.draw(&mut pass);
-            }
-            for text in self.more_text.iter().flatten() {
-                text.draw(&mut pass);
-            }
             pass.set_bind_group(0, &self.bind_group, &[]);
             for (pipeline, geometry) in [(&self.lines, &self.grid), (&self.solid, &self.triangles)] {
                 if let Some((buffer, count)) = geometry {
@@ -439,8 +513,71 @@ impl Renderer {
                 }
             }
         }
+        let depth = &self.depth.as_ref().expect("made above").0;
+        if let Some(ui) = &self.ui {
+            let mut pass = pass_over(&mut encoder, display, depth, "hud under", wgpu::LoadOp::Load);
+            ui.draw(&mut pass, false);
+        }
+        if let Some(objects) = &self.objects {
+            for (view, frame) in &self.views {
+                let [x, y, w, h] = view.viewport;
+                let (x0, y0) = (x.max(0.0), y.max(0.0));
+                let (x1, y1) = ((x + w).min(width as f32), (y + h).min(height as f32));
+                if x1 - x0 < 1.0 || y1 - y0 < 1.0 {
+                    continue;
+                }
+                let mut pass = pass_over(&mut encoder, target, depth, "view", wgpu::LoadOp::Clear(0.0));
+                pass.set_viewport(x, y, w, h, 0.0, 1.0);
+                pass.set_scissor_rect(x0 as u32, y0 as u32, (x1 - x0) as u32, (y1 - y0) as u32);
+                objects.draw_view(&mut pass, frame, &view.instances, view.paints.is_some());
+            }
+        }
+        {
+            let mut pass = pass_over(&mut encoder, display, depth, "overlay", wgpu::LoadOp::Load);
+            if let Some(ui) = &self.ui {
+                ui.draw(&mut pass, true);
+            }
+            if let Some(hud) = &self.hud {
+                hud.draw(&mut pass);
+            }
+            if let Some(text) = &self.text {
+                text.draw(&mut pass);
+            }
+            for text in self.more_text.iter().flatten() {
+                text.draw(&mut pass);
+            }
+        }
         queue.submit([encoder.finish()]);
     }
+}
+
+/// A pass that draws over what `target` and `depth` hold, clearing or keeping the depth.
+fn pass_over<'e>(
+    encoder: &'e mut wgpu::CommandEncoder,
+    target: &wgpu::TextureView,
+    depth: &wgpu::TextureView,
+    label: &str,
+    depth_load: wgpu::LoadOp<f32>,
+) -> wgpu::RenderPass<'e> {
+    encoder
+        .begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some(label),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: target,
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store },
+            })],
+            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                view: depth,
+                depth_ops: Some(wgpu::Operations { load: depth_load, store: wgpu::StoreOp::Store }),
+                stencil_ops: None,
+            }),
+            timestamp_writes: None,
+            occlusion_query_set: None,
+            multiview_mask: None,
+        })
+        .forget_lifetime()
 }
 
 /// Render one frame offscreen with `renderer`, made for `CAPTURE_FORMAT`, and
@@ -460,9 +597,20 @@ pub fn capture(
         dimension: wgpu::TextureDimension::D2,
         format: CAPTURE_FORMAT,
         usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
-        view_formats: &[],
+        view_formats: &[CAPTURE_FORMAT.remove_srgb_suffix()],
     });
-    renderer.draw(device, &gpu.queue, &texture.create_view(&Default::default()), (width, height), view_proj);
+    let display = texture.create_view(&wgpu::TextureViewDescriptor {
+        format: Some(CAPTURE_FORMAT.remove_srgb_suffix()),
+        ..Default::default()
+    });
+    renderer.draw(
+        device,
+        &gpu.queue,
+        &texture.create_view(&Default::default()),
+        &display,
+        (width, height),
+        view_proj,
+    );
 
     let row = 4 * width;
     let padded = row.div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT) * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;

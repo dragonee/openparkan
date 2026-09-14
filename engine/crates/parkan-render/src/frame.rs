@@ -71,6 +71,8 @@ pub struct FrameUniform {
     /// Start, end.
     pub fog: [f32; 4],
     pub eye: [f32; 4],
+    /// x 1 where the instances draw in their paint, as a HUD panel's view does.
+    pub paint: [f32; 4],
 }
 
 impl FrameUniform {
@@ -91,6 +93,7 @@ impl FrameUniform {
             fog_colour: rgb(l.fog_colour),
             fog: [l.fog_start, l.fog_end, 0.0, 0.0],
             eye: [l.eye.x, l.eye.y, l.eye.z, 1.0],
+            paint: [0.0; 4],
         }
     }
 }
@@ -126,8 +129,10 @@ mod tests {
         let mut l = Lighting::default();
         l.lights[1] = Light { direction: Vec3::new(0.0, 0.0, -2.0), colour: [0.3, 0.3, 0.4] };
         let u = FrameUniform::new(Mat4::IDENTITY, &l);
-        // A mat4 and eight vec4s, no padding: what `Frame` in model.wgsl and terrain.wgsl is.
-        assert_eq!(std::mem::size_of::<FrameUniform>(), 64 + 8 * 16);
+        // A mat4 and nine vec4s, no padding: what `Frame` in model.wgsl is, and terrain.wgsl's
+        // less the last.
+        assert_eq!(std::mem::size_of::<FrameUniform>(), 64 + 9 * 16);
+        assert_eq!(u.paint, [0.0; 4], "the scene does not paint");
         assert_eq!(u.second_direction, [0.0, 0.0, -1.0, 0.0], "normalised");
         assert_eq!(u.second_colour, [0.3, 0.3, 0.4, 1.0]);
         assert_eq!(u.light_colour, [0.85, 0.85, 0.8, 1.0], "display space, as given");

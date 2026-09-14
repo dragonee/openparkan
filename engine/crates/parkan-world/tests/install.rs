@@ -470,26 +470,13 @@ fn mission_01_play() -> (parkan_world::play::Play, parkan_formats::mission::Miss
 
 /// Stand the hero `distance` from `target`'s placement, facing it, on the ground.
 fn stand_facing(play: &mut parkan_world::play::Play, target: usize, distance: f32, around: f32) {
-    use glam::Vec3;
-    let at_target = play.battle.combat.targets[target].position;
-    let at = (0..16)
-        .map(|k| around + k as f32 * std::f32::consts::TAU / 16.0)
-        .map(|a| at_target + Vec3::new(a.cos(), a.sin(), 0.0) * distance)
-        .find(|p| play.ground.below(p.x, p.y, 1000.0).is_some_and(|h| h.point.z > at_target.z - 9.0))
-        .expect("somewhere level to stand");
-    let facing = (at_target - at).with_z(0.0).normalize();
-    let w = &mut play.hero.walker;
-    w.body.position = Vec3::new(at.x, at.y, at_target.z + 20.0);
-    w.body.yaw = (-facing.x).atan2(facing.y);
-    w.follow_ground(&play.ground);
-    w.from = (w.body.position, w.body.yaw);
-    w.from_heading = w.body.yaw;
+    assert!(play.stand_facing(target, distance, around), "somewhere level to stand");
 }
 
 #[test]
 #[ignore = "needs the game install"]
 fn mission_01_greets_the_hero_and_completes_its_first_objective_once_the_targets_are_gone() {
-    use parkan_world::progress::Say;
+    use parkan_world::progress::{Say, Sender};
 
     let (mut play, _) = mission_01_play();
     let tick = 1000.0 / 60.0;
@@ -499,8 +486,9 @@ fn mission_01_greets_the_hero_and_completes_its_first_objective_once_the_targets
     // The hero starts inside route 0: messages 11 and 14 on the first run (docs/34).
     let played: Vec<i64> = p.progress.played.iter().filter(|(_, v)| **v).map(|(k, _)| *k).collect();
     assert_eq!(played, vec![11, 14]);
-    let welcome = p.messages.get(11).and_then(|m| m.text.clone()).expect("T01_I01's text");
-    assert!(play.says.contains(&Say::Text(welcome)));
+    let welcome = p.messages.get(11).expect("message 11");
+    let sender = if welcome.info_system { Sender::Information } else { Sender::Training };
+    assert!(play.says.contains(&Say::Text(sender, welcome.text.clone().expect("T01_I01's text"))));
     let voices = play.says.iter().filter(|s| matches!(s, Say::Voice(v) if v.exists())).count();
     assert_eq!(voices, 2, "{:?}", play.says);
     play.says.clear();
@@ -528,7 +516,7 @@ fn mission_01_greets_the_hero_and_completes_its_first_objective_once_the_targets
     assert!(p.progress.played[&17] && p.progress.played[&12]);
     assert_eq!(p.progress.outcome, None);
     let done = p.strings[&parkan_world::progress::STRING_OBJECTIVE_COMPLETE].clone();
-    assert!(play.says.contains(&Say::Text(done)), "{:?}", play.says);
+    assert!(play.says.contains(&Say::Text(Sender::System, done)), "{:?}", play.says);
 }
 
 #[test]
@@ -585,7 +573,7 @@ fn the_plasma_rifle_holds_its_fire_without_a_target_and_its_bolt_follows_one() {
 #[test]
 #[ignore = "needs the game install"]
 fn a_neutral_warbot_makes_itself_the_target_and_enter_captures_both_for_the_second_objective() {
-    use parkan_world::progress::{STRING_VACANT_VEHICLE, Say};
+    use parkan_world::progress::{STRING_VACANT_VEHICLE, Say, Sender};
 
     let (mut play, m) = mission_01_play();
     let tick = 1000.0 / 60.0;
@@ -611,7 +599,7 @@ fn a_neutral_warbot_makes_itself_the_target_and_enter_captures_both_for_the_seco
         assert!(play.enter(), "Enter captures {name}");
         assert_eq!(play.units[bot].clan, Some(play.player_clan));
     }
-    assert!(play.says.contains(&Say::Text(vacant)));
+    assert!(play.says.contains(&Say::Text(Sender::System, vacant)));
     for _ in 0..130 {
         play.tick(tick, [0.0; 2]);
     }
@@ -1063,4 +1051,109 @@ fn the_outcome_panels_fonts_are_the_640_by_480_menu_and_game_fonts_of_font_lib()
     // recording's ink running 128 from the first to the end of the "!".
     assert_eq!(menu.advance("MISSION COMPLETE !"), 125.0);
     assert!(menu.advance("MISSION COMPLETE !") > text.advance("MISSION COMPLETE !"));
+}
+
+#[test]
+#[ignore = "needs the game install"]
+fn mission_01s_cockpit_names_its_units_lists_its_guns_and_frames_its_target_as_read() {
+    use glam::{Mat4, Vec3};
+    use parkan_world::cockpit::Cockpit;
+    use parkan_world::hud::{Pages, Space};
+    use parkan_world::play::Play;
+    use parkan_world::progress::Sender;
+    use parkan_world::text::GameFont;
+
+    // docs/35-hud.md: the pages by the textures resource, the two skin files' pieces.
+    let game = gamedir::find(None).expect("a Parkan install: set PARKAN_DIR");
+    let (mut play, m) = mission_01_play();
+    let pages = Pages::open(&game).unwrap();
+    let page = |name: &str| pages.pages[pages.index(name).unwrap()].name.to_ascii_lowercase();
+    assert_eq!(
+        (page("ui_menu"), page("ui_menu3"), page("page9")),
+        ("ui_menu1.tex".into(), "ui_menu3.tex".into(), "ui_tex9.tex".into())
+    );
+    let mut cockpit = Cockpit::open(&game, &pages, &play).unwrap();
+    for name in [
+        "ccres_ray_body",
+        "ccres_green_lamp",
+        "ccres_frame_corner_3",
+        "targeter_back",
+        "back_shld",
+        "bott_shld",
+    ] {
+        assert!(cockpit.skin.get(name).is_some(), "{name}");
+    }
+    assert_eq!(cockpit.skin.get("ccres_frame_edge_v").unwrap().turns, 1);
+    assert!((cockpit.water_level + 1.725).abs() < 1e-3, "Tut_1's water: {}", cockpit.water_level);
+
+    // "Name and status": each clan counts its own units in file order.
+    let target_of = |play: &Play, suffix: &str| {
+        (0..play.units.len())
+            .filter(|&t| m.objects[play.battle.objects[t]].path.to_ascii_lowercase().ends_with(suffix))
+            .collect::<Vec<_>>()
+    };
+    let name = |t: usize| cockpit.panels.names[t].clone();
+    let (mf1, helic, e1) = (
+        target_of(&play, "tut1_mf1.dat")[0],
+        target_of(&play, "helic.dat")[0],
+        target_of(&play, "tut1_e1.dat")[0],
+    );
+    assert_eq!(
+        (name(mf1), name(helic), name(e1)),
+        ("MFW-1 Warrior".into(), "TFW-2 Warrior".into(), "TSW-1 Warrior".into())
+    );
+    let mut dummies = target_of(&play, "targ.dat");
+    dummies.sort_by_key(|&t| play.battle.objects[t]);
+    assert_eq!(
+        dummies.iter().map(|&t| name(t)).collect::<Vec<_>>(),
+        (1..=5).map(|n| format!("SSW-{n} Warrior")).collect::<Vec<_>>()
+    );
+    assert_eq!(cockpit.panels.hero_name, "Human");
+    // "Mission 01": the hero and the bots carry a battery and shields; the dummies neither.
+    let d = |t: usize| play.units[t].designation;
+    assert!(play.hero_designation.battery && play.hero_designation.shielded);
+    assert!([mf1, helic, e1].iter().all(|&t| d(t).battery && d(t).shielded));
+    assert!(dummies.iter().all(|&t| !d(t).battery && !d(t).shielded));
+    assert_eq!((d(helic).chassis_type, d(mf1).chassis_type, d(dummies[0]).chassis_type), (1, 1, 2));
+
+    // A frame with the helicopter targeted and a long message in the box.
+    assert!(play.stand_facing(helic, 40.0, 0.0));
+    for _ in 0..30 {
+        play.tick(1000.0 / 60.0, [0.0; 2]);
+    }
+    play.targets.set(Some(helic));
+    let now = play.hero.time_ms;
+    cockpit.messages.show(Sender::Information, "word ".repeat(80), now);
+    let font = GameFont::ui(&game, "GAME_FONT").unwrap();
+    let eye = play.hero.eye();
+    let view_proj = Mat4::perspective_infinite_reverse_rh(1.0, 4.0 / 3.0, 0.5)
+        * Mat4::look_to_rh(eye.position, eye.forward, Vec3::Z);
+    let drawn = cockpit.draw(&play, Space::new(640.0, 480.0), &font, view_proj);
+    let texts: Vec<&str> = drawn.text.iter().map(|r| r.text.as_str()).collect();
+    for want in [
+        "AUTOCANNON 25mm",
+        "PLASMA RIFLE LS",
+        "BATTLE LASER ER",
+        "AWB MISSILE",
+        " 500",
+        "INF",
+        "   4",
+        "300",
+        "TFW-2 Warrior",
+        "Human",
+        "from: Information assistant",
+        "Press F1 to see more",
+    ] {
+        assert!(texts.contains(&want), "{want:?} in {texts:?}");
+    }
+    assert_eq!(texts.iter().filter(|t| t.starts_with("word")).count(), 6, "six lines at most");
+    assert!(texts.iter().any(|t| t.ends_with(" m") && t.len() <= 5), "the distance: {texts:?}");
+    assert_eq!(drawn.views.len(), 2);
+    assert_eq!((drawn.views[0].unit, drawn.views[1].unit), (Some(helic), None));
+    assert_eq!(drawn.views[0].viewport, [9.0, 315.0, 128.0, 128.0]);
+    assert_eq!(drawn.views[1].viewport, [503.0, 315.0, 128.0, 128.0]);
+    // 20 s on the box is gone.
+    play.hero.time_ms += 20_001.0;
+    let later = cockpit.draw(&play, Space::new(640.0, 480.0), &font, view_proj);
+    assert!(!later.text.iter().any(|r| r.text.starts_with("from:")), "the box lives 20 s");
 }

@@ -6,7 +6,7 @@
 //! parkan [--game DIR] [--mission MISSIONS/…] [--fly]
 //!        [--screenshot OUT.png] [--size WxH] [--top-down] [--look X,Y,Z,TX,TY,TZ]
 //!        [--headless] [--ticks N] [--hold SCAN_W,SCAN_A] [--mouse DX,DY] [--trace] [--sway]
-//!        [--capture-idle] [--no-bracket] [--outcome won|lost] [--text "…"]
+//!        [--capture-idle] [--stretch-hud] [--outcome won|lost] [--text "…"] [--face NAME,DISTANCE]
 //! ```
 //!
 //! In the cockpit the hero's own input table drives it: W/S walk, A/D strafe,
@@ -26,11 +26,14 @@
 //!
 //! A captured bot stands by until it is given an order; `--capture-idle` leaves it with
 //! none, as the game's capture does, so it engages a hostile within 500 on its own.
-//! The target is bracketed in the colour the game marks its clan in; `--no-bracket`
-//! draws no bracket, as the game's cockpit draws none.
+//! The cockpit's HUD keeps the game's 640 × 480 layout round on a wide window, its corners
+//! on the window's; `--stretch-hud` stretches it across as the game's does. F2 hides the
+//! message box or shows it again.
 //!
-//! `--text` draws a string in the game font near the top of a `--screenshot`, and
-//! `--outcome won|lost` draws a screenshot's mission as won or lost.
+//! `--text` draws a string in the game font near the top of a `--screenshot`,
+//! `--outcome won|lost` draws a screenshot's mission as won or lost, and `--face NAME,DISTANCE`
+//! stands the hero that far from the mission object whose path ends in NAME, facing it, before
+//! `--ticks` play.
 //!
 //! Once a mission is won or lost its panel takes the HUD's place and play goes on under
 //! it: Esc leaves, and after a loss R restarts the mission.
@@ -76,12 +79,14 @@ struct Args {
     sway: bool,
     /// `--capture-idle`: a captured bot is given no order, as the game's capture gives none.
     capture_idle: bool,
-    /// `--no-bracket`: the target is not bracketed in the world, as the game's cockpit.
-    no_bracket: bool,
+    /// `--stretch-hud`: the HUD's layout stretches to the window, as the game's does.
+    stretch_hud: bool,
     /// `--outcome won|lost`: a screenshot's mission is taken to have that outcome.
     outcome: Option<bool>,
     /// `--text`: a string a screenshot draws in the game font.
     text: Option<String>,
+    /// `--face NAME,DISTANCE`: the hero starts that far from that object, facing it.
+    face: Option<(String, f32)>,
     ticks: u32,
     hold: Vec<String>,
     mouse: [f32; 2],
@@ -100,9 +105,10 @@ fn args() -> Result<Args> {
         trace: false,
         sway: false,
         capture_idle: false,
-        no_bracket: false,
+        stretch_hud: false,
         outcome: None,
         text: None,
+        face: None,
         ticks: 0,
         hold: Vec::new(),
         mouse: [0.0; 2],
@@ -120,9 +126,14 @@ fn args() -> Result<Args> {
             "--trace" => out.trace = true,
             "--sway" => out.sway = true,
             "--capture-idle" => out.capture_idle = true,
-            "--no-bracket" => out.no_bracket = true,
+            "--stretch-hud" => out.stretch_hud = true,
             "--outcome" => out.outcome = Some(value()? == "won"),
             "--text" => out.text = Some(value()?),
+            "--face" => {
+                let v = value()?;
+                let (name, distance) = v.split_once(',').context("--face is NAME,DISTANCE")?;
+                out.face = Some((name.to_ascii_lowercase(), distance.parse()?));
+            }
             "--ticks" => out.ticks = value()?.parse()?,
             "--hold" => out.hold = value()?.split(',').map(str::to_owned).collect(),
             "--mouse" => {
@@ -142,6 +153,14 @@ fn args() -> Result<Args> {
         }
     }
     Ok(out)
+}
+
+/// The screen the HUD's layout is drawn on, stretched with `--stretch-hud`.
+fn hud_space(width: u32, height: u32, args: &Args) -> parkan_world::hud::Space {
+    parkan_world::hud::Space {
+        stretch: args.stretch_hud,
+        ..parkan_world::hud::Space::new(width as f32, height as f32)
+    }
 }
 
 fn start_camera(loaded: &scene::Loaded) -> FlyCamera {
@@ -164,8 +183,21 @@ fn top_down(terrain: &Terrain, aspect: f32) -> glam::Mat4 {
     proj * glam::Mat4::look_to_rh(centre, -Vec3::Z, Vec3::Y)
 }
 
-/// Play the hero for `--ticks`, holding `--hold` and moving `--mouse`.
-fn rehearse(play: &mut scene::Play, args: &Args) {
+/// Play the hero for `--ticks`, holding `--hold` and moving `--mouse`, from `--face`.
+fn rehearse(play: &mut scene::Play, loaded: &scene::Loaded, args: &Args) {
+    if let Some((name, distance)) = &args.face {
+        let target = play.battle.objects.iter().position(|&o| {
+            loaded
+                .mission
+                .objects
+                .get(o)
+                .is_some_and(|m| m.path.to_ascii_lowercase().ends_with(name.as_str()))
+        });
+        match target {
+            Some(t) if play.stand_facing(t, *distance, 0.0) => {}
+            _ => eprintln!("--face: no place {distance} from an object {name}"),
+        }
+    }
     for key in &args.hold {
         play.hero.key(key, true);
     }
@@ -181,7 +213,7 @@ fn rehearse(play: &mut scene::Play, args: &Args) {
         if args.headless {
             // With no window, what the game says is printed.
             for say in std::mem::take(&mut play.says) {
-                if let parkan_world::progress::Say::Text(text) = say {
+                if let parkan_world::progress::Say::Text(_, text) = say {
                     println!("  says: {text}");
                 }
             }
@@ -232,7 +264,7 @@ fn screenshot(loaded: &scene::Loaded, game: &Path, args: &Args, out: &Path) -> R
     if let Some(p) = play.as_mut() {
         view = Some(scene::own_view(&mut world.objects, &mut world.store, p)?);
         p.draw_rounds(&mut world.store, &mut world.objects)?;
-        rehearse(p, args);
+        rehearse(p, loaded, args);
         if let (Some(outcome), Some(progression)) = (args.outcome, p.progression.as_mut()) {
             progression.progress.outcome = Some(outcome);
         }
@@ -294,27 +326,35 @@ fn screenshot(loaded: &scene::Loaded, game: &Path, args: &Args, out: &Path) -> R
         if let Some(v) = &view {
             scene::place_own_view(&mut renderer, &gpu.queue, v, p);
         }
-        renderer.set_hud(&gpu.device, &gpu.queue, &scene::hud(p, aspect, view_proj));
         scene::panel_fonts(&mut renderer, &gpu.device, &gpu.queue, game);
-        if scene::draw_outcome(&mut renderer, &gpu.device, &gpu.queue, p, (width as f32, height as f32)) {
-            renderer.set_font(&gpu.device, &gpu.queue, parkan_world::text::GameFont::open(game)?);
-            renderer.set_text(&gpu.device, &gpu.queue, &[]);
-            play.as_mut().expect("in play").says.clear();
-        }
-    }
-    // What the game said during the rehearsal, as the window shows it.
-    let mut subtitles = scene::Subtitles::new(parkan_world::text::GameFont::open(game).ok());
-    if let Some(p) = play.as_mut() {
-        let now = p.hero.time_ms / 1000.0;
-        for say in std::mem::take(&mut p.says) {
-            if let parkan_world::progress::Say::Text(text) = say {
-                subtitles.push(text, now);
+        let outcome =
+            scene::draw_outcome(&mut renderer, &gpu.device, &gpu.queue, p, hud_space(width, height, args));
+        match scene::hud(&mut renderer, &gpu.device, &gpu.queue, game, p, args.stretch_hud) {
+            Ok(mut hud) => {
+                // What the game said during the rehearsal: the newest line is in the box.
+                let now = p.hero.time_ms;
+                for say in std::mem::take(&mut p.says) {
+                    if let parkan_world::progress::Say::Text(sender, text) = say {
+                        hud.cockpit.messages.show(sender, text, now);
+                    }
+                }
+                let lighting = scene::lighting(&world, seconds, eye, forward).map(|l| l.0);
+                if let Some(v) = &view {
+                    scene::draw_hud(
+                        &mut renderer,
+                        &gpu.device,
+                        &gpu.queue,
+                        &mut hud,
+                        p,
+                        v,
+                        (width, height),
+                        view_proj,
+                        lighting,
+                        !outcome,
+                    );
+                }
             }
-        }
-        let runs = subtitles.runs(now, width as f32, height as f32);
-        if !runs.is_empty() && args.text.is_none() {
-            renderer.set_font(&gpu.device, &gpu.queue, parkan_world::text::GameFont::open(game)?);
-            renderer.set_text(&gpu.device, &gpu.queue, &runs);
+            Err(e) => eprintln!("no cockpit HUD: {e:#}"),
         }
     }
     if let Some(text) = &args.text {
@@ -371,7 +411,8 @@ struct App {
     /// The game's own key chords, and the scan names held down.
     bindings: Vec<parkan_formats::controls::Binding>,
     scans: HashSet<&'static str>,
-    subtitles: scene::Subtitles,
+    /// The cockpit's HUD, once the window has a renderer to load it into.
+    hud: Option<scene::Hud>,
     /// What the window was opened with, for a restart.
     args: Args,
 }
@@ -391,6 +432,8 @@ impl App {
         if let Some(srgb) = caps.formats.iter().copied().find(wgpu::TextureFormat::is_srgb) {
             config.format = srgb;
         }
+        // The HUD draws into the same frame read without sRGB decoding.
+        config.view_formats = vec![config.format.remove_srgb_suffix()];
         surface.configure(&gpu.device, &config);
         let mut renderer = Renderer::new(&gpu.device, config.format);
         let w = &self.world;
@@ -406,6 +449,12 @@ impl App {
             Err(e) => eprintln!("no game font: {e:#}"),
         }
         scene::panel_fonts(&mut renderer, &gpu.device, &gpu.queue, &self.game);
+        if let Some(p) = self.play.as_ref() {
+            match scene::hud(&mut renderer, &gpu.device, &gpu.queue, &self.game, p, self.args.stretch_hud) {
+                Ok(hud) => self.hud = Some(hud),
+                Err(e) => eprintln!("no cockpit HUD: {e:#}"),
+            }
+        }
         self.running = Some(Running { window, surface, config, gpu, renderer });
         Ok(())
     }
@@ -422,6 +471,9 @@ impl App {
             let (d, q) = (&r.gpu.device, &r.gpu.queue);
             r.renderer.set_world(d, q, &world.store.textures, Some(&world.terrain), Some(&world.objects));
             r.renderer.set_sprite_looks(d, &scene::sprite_looks(&play));
+            self.hud = scene::hud(&mut r.renderer, d, q, &self.game, &play, self.args.stretch_hud)
+                .map_err(|e| eprintln!("no cockpit HUD: {e:#}"))
+                .ok();
         }
         self.audio = audio::Audio::open(&self.game);
         if let Some(a) = self.audio.as_mut()
@@ -433,7 +485,6 @@ impl App {
         self.world = world;
         self.play = Some(play);
         self.view = Some(view);
-        self.subtitles = scene::Subtitles::new(parkan_world::text::GameFont::open(&self.game).ok());
         self.scans.clear();
         self.owed = 0.0;
         Ok(())
@@ -479,6 +530,12 @@ impl App {
             shift: self.scans.contains("SCAN_LSHIFT") || self.scans.contains("SCAN_RSHIFT"),
         };
         let command = command.to_owned();
+        if command == parkan_formats::controls::CMD_PAGER {
+            if let Some(hud) = self.hud.as_mut() {
+                hud.cockpit.messages.pager();
+            }
+            return;
+        }
         play.command(&command, &view);
     }
 
@@ -537,12 +594,14 @@ impl App {
         }
         // What the game says: its text on screen, its voices queued, its sounds at once.
         if let Some(play) = self.play.as_mut() {
-            let now = play.hero.time_ms / 1000.0;
+            let now = play.hero.time_ms;
             for say in std::mem::take(&mut play.says) {
                 match say {
-                    parkan_world::progress::Say::Text(text) => {
+                    parkan_world::progress::Say::Text(sender, text) => {
                         println!("{text}");
-                        self.subtitles.push(text, now);
+                        if let Some(hud) = self.hud.as_mut() {
+                            hud.cockpit.messages.show(sender, text, now);
+                        }
                     }
                     parkan_world::progress::Say::Voice(s) => {
                         if let Some(a) = self.audio.as_mut() {
@@ -571,6 +630,10 @@ impl App {
             }
         };
         let view = frame.texture.create_view(&Default::default());
+        let display = frame.texture.create_view(&wgpu::TextureViewDescriptor {
+            format: Some(r.renderer.display_format()),
+            ..Default::default()
+        });
         let aspect = r.config.width as f32 / r.config.height.max(1) as f32;
         let (eye, forward, seconds) = match &self.play {
             Some(p) => {
@@ -583,21 +646,18 @@ impl App {
             r.renderer.set_lighting(lighting);
             r.renderer.set_dome_colours(colours);
         }
+        let lighting = scene::lighting(&self.world, seconds, eye, forward).map(|l| l.0);
         let view_proj = match self.play.as_mut() {
             Some(play) => {
                 let eye = play.hero.eye();
                 let view_proj = camera::first_person(&eye, aspect);
-                r.renderer.set_hud(&r.gpu.device, &r.gpu.queue, &scene::hud(play, aspect, view_proj));
-                let mut runs = self.subtitles.runs(
-                    play.hero.time_ms / 1000.0,
-                    r.config.width as f32,
-                    r.config.height as f32,
-                );
+                let mut runs = Vec::new();
                 if let Some(panel) = play.panel() {
                     runs.extend(scene::panel_runs(&panel));
                 }
-                let screen = (r.config.width as f32, r.config.height as f32);
-                if scene::draw_outcome(&mut r.renderer, &r.gpu.device, &r.gpu.queue, play, screen) {
+                let screen = hud_space(r.config.width, r.config.height, &self.args);
+                let outcome = scene::draw_outcome(&mut r.renderer, &r.gpu.device, &r.gpu.queue, play, screen);
+                if outcome {
                     runs.clear();
                 }
                 r.renderer.set_text(&r.gpu.device, &r.gpu.queue, &runs);
@@ -612,12 +672,43 @@ impl App {
                 );
                 if let Some(v) = &self.view {
                     scene::place_own_view(&mut r.renderer, &r.gpu.queue, v, play);
+                    if let Some(hud) = self.hud.as_mut() {
+                        let (voices, sounds) = scene::draw_hud(
+                            &mut r.renderer,
+                            &r.gpu.device,
+                            &r.gpu.queue,
+                            hud,
+                            play,
+                            v,
+                            (r.config.width, r.config.height),
+                            view_proj,
+                            lighting,
+                            !outcome,
+                        );
+                        if let (Some(audio), Some(progression)) =
+                            (self.audio.as_mut(), play.progression.as_ref())
+                        {
+                            for sound in voices.into_iter().filter_map(|n| progression.sound(n)) {
+                                audio.queue(&sound);
+                            }
+                            for sound in sounds.into_iter().filter_map(|n| progression.sound(n)) {
+                                audio.play_now(&sound);
+                            }
+                        }
+                    }
                 }
                 view_proj
             }
             None => self.camera.view_proj(aspect),
         };
-        r.renderer.draw(&r.gpu.device, &r.gpu.queue, &view, (r.config.width, r.config.height), view_proj);
+        r.renderer.draw(
+            &r.gpu.device,
+            &r.gpu.queue,
+            &view,
+            &display,
+            (r.config.width, r.config.height),
+            view_proj,
+        );
         r.gpu.queue.present(frame);
     }
 }
@@ -737,7 +828,7 @@ fn main() -> Result<()> {
     );
     if args.headless {
         let mut play = scene::play(&game, &loaded, &args)?.context("the mission has no hero to play")?;
-        rehearse(&mut play, &args);
+        rehearse(&mut play, &loaded, &args);
         report(&play);
         return Ok(());
     }
@@ -785,7 +876,7 @@ fn main() -> Result<()> {
         game: game.clone(),
         bindings: scene::bindings(&game),
         scans: HashSet::new(),
-        subtitles: scene::Subtitles::new(parkan_world::text::GameFont::open(&game).ok()),
+        hud: None,
         args: args.clone(),
     };
     event_loop.run_app(&mut app)?;

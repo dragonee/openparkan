@@ -8,8 +8,9 @@
 use std::f32::consts::{FRAC_PI_2, FRAC_PI_4};
 
 use parkan_formats::controls::{
-    self, Action, CICLS_CAMERA, CICLS_TURRET, MCMD_ANGLE_X, MCMD_ANGLE_Y, MCMD_ANGLE_Z, MCMD_FORWARD,
-    MCMD_LEFT, MCMD_RIGHT, MCMD_WALK_B, MCMD_WALK_F, UNKNOWN_CLASS,
+    self, Action, CICLS_CAMERA, CICLS_DETECTSHIELD, CICLS_REPAIRSYS, CICLS_TURRET, CIS_INV, CIS_OFF, CIS_ON,
+    CIS_SWITCH_INV, MCMD_ANGLE_X, MCMD_ANGLE_Y, MCMD_ANGLE_Z, MCMD_FORWARD, MCMD_LEFT, MCMD_RIGHT,
+    MCMD_WALK_B, MCMD_WALK_F, UNKNOWN_CLASS,
 };
 
 use crate::motion::Body;
@@ -95,6 +96,47 @@ pub struct Pilot {
     pub fire: bool,
     /// `MCMD_SELECT` rows not yet taken: a gun's number, or −1 for all of them.
     pub selects: Vec<i32>,
+    /// The switches the table's state rows turn, which the HUD's indicators show.
+    pub switches: Switches,
+}
+
+/// A unit's switched systems, as the input table's `MCMD_STATE` rows leave them.
+///
+/// STAND-IN: docs/35-hud.md#the-indicators--read-and-seen -- the repair system, the detection
+/// shield's camouflage and the camera's infrared are not simulated: a row turns only the
+/// switch, which does nothing else.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Switches {
+    /// The repair system's `0x20`: `CIS_SWITCHON` sets it, `CIS_SWITCHOFF` clears it and
+    /// `CIS_SWITCH_INV` flips it (`Control.dll:0x10022c90`, docs/26).
+    pub repair: bool,
+    /// The detection shield's camouflage: `0x1000` on, `0x2000` off, `0x4000` flips it
+    /// (`0x10026570`, docs/25).
+    pub camouflage: bool,
+    /// The camera's infrared: the same three bits (`0x10023a00`).
+    pub infrared: bool,
+}
+
+impl Switches {
+    /// A state row's bits to the switch of its class.
+    pub fn state(&mut self, class: i32, bits: i32) {
+        let turn = |on: &mut bool| match bits {
+            CIS_ON => *on = true,
+            CIS_OFF => *on = false,
+            CIS_INV => *on = !*on,
+            _ => {}
+        };
+        match class {
+            CICLS_REPAIRSYS => match bits {
+                CIS_SWITCH_INV => self.repair = !self.repair,
+                0 => self.repair = false,
+                _ => self.repair = true,
+            },
+            CICLS_DETECTSHIELD => turn(&mut self.camouflage),
+            CICLS_CAMERA => turn(&mut self.infrared),
+            _ => {}
+        }
+    }
 }
 
 /// `value` moved toward `target` by at most `reach`, never past it.
@@ -118,6 +160,7 @@ impl Pilot {
             clock_ms: 0.0,
             fire: false,
             selects: Vec::new(),
+            switches: Switches::default(),
         }
     }
 
@@ -241,6 +284,7 @@ impl Pilot {
             controls::MCMD_SELECT if row.class_id() == controls::CICLS_MULTIGUN => {
                 self.selects.push(row.index);
             }
+            controls::MCMD_STATE if row.pressed => self.switches.state(row.class_id(), row.bits()),
             _ => {}
         }
     }
@@ -270,6 +314,19 @@ impl Pilot {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_state_rows_turn_repair_camouflage_and_infrared_as_their_classes_take_the_bits() {
+        let mut s = Switches::default();
+        s.state(CICLS_REPAIRSYS, CIS_SWITCH_INV);
+        s.state(CICLS_DETECTSHIELD, CIS_INV);
+        s.state(CICLS_CAMERA, CIS_ON);
+        assert_eq!(s, Switches { repair: true, camouflage: true, infrared: true });
+        s.state(CICLS_REPAIRSYS, CIS_SWITCH_INV);
+        s.state(CICLS_DETECTSHIELD, CIS_INV);
+        s.state(CICLS_CAMERA, CIS_OFF);
+        assert_eq!(s, Switches::default());
+    }
     use glam::Vec3;
 
     fn hero_table() -> Vec<Action> {

@@ -21,6 +21,10 @@ pub const STRING_VACANT_VEHICLE: u32 = 3040;
 pub const STRING_OBJECTIVE_COMPLETE: u32 = 5040;
 pub const STRING_OBJECTIVE_FAILED: u32 = 5041;
 pub const STRING_IN_HISTORY: u32 = 6170;
+/// The message box's headers (docs/35-hud.md, "The message box").
+pub const STRING_FROM_SYSTEM: u32 = 1541;
+pub const STRING_FROM_TRAINING: u32 = 3057;
+pub const STRING_FROM_INFORMATION: u32 = 6214;
 /// The outcome panel's lines (docs/34, "After the outcome").
 pub const STRING_PRESS_ESC: u32 = 5082;
 pub const STRING_PRESS_R: u32 = 3075;
@@ -33,11 +37,33 @@ pub const VOICE_UNIT_DETECTED: &str = "VOICE_UNIT_DETECTED";
 pub const VOICE_ENEMY_DETECTED: &str = "VOICE_ENEMY_DETECTED";
 pub const TARGET_SELECTED: &str = "TARGET_SELECTED";
 
+/// Whom a line is from, which heads its message box (`iron3d.dll:0x1007f750`, docs/35-hud.md,
+/// "The message box"): the game's own lines are kind 2, the System's; a script's message
+/// is the Information assistant's when it sets `info_system`, the Training assistant's
+/// otherwise.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Sender {
+    System,
+    Training,
+    Information,
+}
+
+impl Sender {
+    /// The string the box's header reads.
+    pub fn header(self) -> u32 {
+        match self {
+            Sender::System => STRING_FROM_SYSTEM,
+            Sender::Training => STRING_FROM_TRAINING,
+            Sender::Information => STRING_FROM_INFORMATION,
+        }
+    }
+}
+
 /// What the game says: a line into the message history, a voice queued behind the ones
 /// playing (`ISoundServer` slot 4), or a sound played at once (slot 2).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Say {
-    Text(String),
+    Text(Sender, String),
     Voice(Sound),
     Sound(Sound),
 }
@@ -204,7 +230,8 @@ impl Progression {
     }
 
     fn string(&self, id: u32) -> Option<Say> {
-        self.strings.get(&id).map(|s| Say::Text(s.clone()))
+        // The game's own lines go through `0x1007eb60`, as kind 2 (docs/35-hud.md).
+        self.strings.get(&id).map(|s| Say::Text(Sender::System, s.clone()))
     }
 
     /// A sound `ui/game_resources.cfg` or the mission binds `name` to.
@@ -224,7 +251,8 @@ impl Progression {
         match *notice {
             Notice::Message { id, first: true } => {
                 if let Some(m) = self.messages.get(id) {
-                    out.extend(m.text.clone().map(Say::Text));
+                    let sender = if m.info_system { Sender::Information } else { Sender::Training };
+                    out.extend(m.text.clone().map(|t| Say::Text(sender, t)));
                     out.extend(m.voice.clone().map(Say::Voice));
                 }
             }

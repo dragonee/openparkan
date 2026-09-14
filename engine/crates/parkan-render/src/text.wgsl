@@ -36,18 +36,12 @@ fn vs_main(v: VertexIn) -> VertexOut {
     return out;
 }
 
-// A display-space colour as the linear value an sRGB target needs (frame.rs `linear`).
-fn linear(c: vec3<f32>) -> vec3<f32> {
-    let low = c / 12.92;
-    let high = pow((max(c, vec3<f32>(0.0)) + 0.055) / 1.055, vec3<f32>(2.4));
-    return select(high, low, c <= vec3<f32>(0.04045));
-}
-
 @fragment
 fn fs_main(v: VertexOut) -> @location(0) vec4<f32> {
     // Black is keyed out; any other texel is the run's colour times its own brightness, so
-    // a font's grey shadow draws dark. Both are in display space, decoded once formed.
+    // a font's grey shadow draws dark. The target is read without sRGB decoding, so both
+    // and the blend are in display space.
     let texel = textureSample(atlas, atlas_sampler, v.uv).rgb;
     let keyed = select(0.0, 1.0, max(texel.r, max(texel.g, texel.b)) > 0.0);
-    return vec4<f32>(linear(texel * v.colour.rgb), v.colour.a * keyed);
+    return vec4<f32>(texel * v.colour.rgb, v.colour.a * keyed);
 }

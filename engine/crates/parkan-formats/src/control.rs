@@ -98,6 +98,17 @@ pub const SEEKER_REACH: usize = 1;
 pub const SEEKER_LOCK: usize = 2;
 /// The hero turret's weapon arms, one a gun, in the guns' order.
 pub const ARM_TYPE: i32 = 24;
+/// `CICLS_FIGHTSHIELD`, the shield generator's six sectors (docs/26-damage.md).
+pub const FIGHT_SHIELD_TYPE: i32 = 9;
+/// `CICLS_DETECTSHIELD` (docs/25-sensors.md).
+pub const DETECT_SHIELD_TYPE: i32 = 10;
+/// `CICLS_REPAIRSYS` (docs/26-damage.md).
+pub const REPAIR_TYPE: i32 = 15;
+/// `CICLS_POWERSTOR`, a battery: value 0 its capacity (docs/23-economy.md).
+pub const BATTERY_TYPE: i32 = 19;
+pub const BATTERY_CAPACITY: usize = 0;
+/// The deflector, which decides how much of each shield sector stops (docs/26-damage.md).
+pub const DEFLECTOR_TYPE: i32 = 21;
 pub const MOUNT_UPRIGHT: u32 = 0x0400_0000;
 
 fn f32_at(b: &[u8], at: usize) -> f32 {

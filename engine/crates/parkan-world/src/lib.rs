@@ -1,8 +1,10 @@
 pub mod assembly;
 pub mod battle;
+pub mod cockpit;
 pub mod dump;
 pub mod fx;
 pub mod hero;
+pub mod hud;
 pub mod models;
 pub mod play;
 pub mod progress;
