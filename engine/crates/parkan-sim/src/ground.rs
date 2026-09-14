@@ -49,6 +49,8 @@ pub struct Ground {
     lo: [f32; 2],
     size: [usize; 2],
     cells: Vec<Vec<u32>>,
+    /// The water surface's faces, indexed apart: the liquid surface the bed's test asks for.
+    water: Vec<Vec<u32>>,
     /// The mesh's bounding box: its stream-2 header's corners are exactly this.
     world: ([f32; 3], [f32; 3]),
 }
@@ -59,11 +61,10 @@ impl Ground {
         let lo = [lo3[0], lo3[1]];
         let size = [0, 1].map(|a| (((hi3[a] - lo3[a]) / CELL).floor() as usize + 1).max(1));
         let mut cells = vec![Vec::new(); size[0] * size[1]];
+        let mut water = vec![Vec::new(); size[0] * size[1]];
         for f in land.lod_faces(0) {
             let face = &land.faces[f];
-            if face.is_water() {
-                continue;
-            }
+            let index = if face.is_water() { &mut water } else { &mut cells };
             let ps = face.vertices.map(|v| land.positions[usize::from(v)]);
             let cell = |p: f32, a: usize| (((p - lo[a]) / CELL).floor().max(0.0) as usize).min(size[a] - 1);
             let (x0, x1) = (
@@ -76,11 +77,11 @@ impl Ground {
             );
             for y in y0..=y1 {
                 for x in x0..=x1 {
-                    cells[y * size[0] + x].push(f as u32);
+                    index[y * size[0] + x].push(f as u32);
                 }
             }
         }
-        Self { land, solids: Vec::new(), lo, size, cells, world: (lo3, hi3) }
+        Self { land, solids: Vec::new(), lo, size, cells, water, world: (lo3, hi3) }
     }
 
     /// The map's extent in x and y.
@@ -151,10 +152,19 @@ impl Ground {
     /// The ground faces whose triangle holds `(x, y)`, in the file's order, which is the
     /// landscape's cell order, each with its barycentric height there.
     fn holding(&self, x: f32, y: f32) -> impl Iterator<Item = (usize, f32)> + '_ {
+        self.holding_in(&self.cells, x, y)
+    }
+
+    fn holding_in<'a>(
+        &'a self,
+        index: &'a [Vec<u32>],
+        x: f32,
+        y: f32,
+    ) -> impl Iterator<Item = (usize, f32)> + 'a {
         let cx = ((x - self.lo[0]) / CELL).floor();
         let cy = ((y - self.lo[1]) / CELL).floor();
         let inside = cx >= 0.0 && cy >= 0.0 && (cx as usize) < self.size[0] && (cy as usize) < self.size[1];
-        let cell: &[u32] = if inside { &self.cells[cy as usize * self.size[0] + cx as usize] } else { &[] };
+        let cell: &[u32] = if inside { &index[cy as usize * self.size[0] + cx as usize] } else { &[] };
         cell.iter().filter_map(move |&f| {
             let face = &self.land.faces[f as usize];
             let [a, b, c] = face.vertices.map(|v| Vec3::from_array(self.land.positions[usize::from(v)]));
@@ -170,6 +180,15 @@ impl Ground {
             }
             Some((f as usize, l1 * a.z + l2 * b.z + l3 * c.z))
         })
+    }
+
+    /// The liquid surface's height over or under `(x, y)` nearest `z` (`IWorld` slot 8,
+    /// `Terrain.dll:0x10025ba0`): the same vertical query in both directions, for the
+    /// faces whose `Land.msh` surface bitfield has bit `0x02` (world flag `0x200`).
+    pub fn water(&self, x: f32, y: f32, z: f32) -> Option<f32> {
+        self.holding_in(&self.water, x, y)
+            .map(|(_, h)| h)
+            .min_by(|a, b| (a - z).abs().total_cmp(&(b - z).abs()))
     }
 
     /// The highest ground face at `(x, y)` whose plane there is not above `top`, a
@@ -366,6 +385,8 @@ pub(crate) mod tests {
         let hit = g.below(30.0, 5.0, 100.0).unwrap();
         assert_eq!(hit.point.z, 0.0);
         assert!(hit.walkable());
+        assert_eq!((g.water(30.0, 5.0, 0.0), g.water(30.0, 5.0, 9.0)), (Some(5.0), Some(5.0)));
+        assert_eq!(g.water(5.0, 30.0, 0.0), None, "the sheet covers only the first half");
     }
 
     #[test]

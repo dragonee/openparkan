@@ -12,7 +12,7 @@ use parkan_formats::exp::{Explosion, HIT_AREA, HIT_DIRECT, HIT_SHIELDS};
 use parkan_formats::mesh::Mesh;
 use parkan_formats::pose::Pose;
 
-use crate::damage::{Life, blast, round_hit};
+use crate::damage::{Life, blast, round_hit, share_loss};
 use crate::ground::Ground;
 use crate::hit::{ROUND_SKIPS_FACE, SIGHT_SKIPS_FACE, Strike, map_edge, segment_mesh_passing, swept_spheres};
 
@@ -419,6 +419,32 @@ impl Combat {
             HIT_SHIELDS => {}
             _ => {}
         }
+    }
+
+    /// What a unit's ground deals it in a life update (docs/24, "Water and lava beds kill"):
+    /// `loss` shared over the nodes of every part that takes damage, as a hit's events.
+    pub fn ground_loss(&mut self, t: usize, loss: f32) -> Vec<Event> {
+        let mut events = Vec::new();
+        let Some(target) = self.targets.get_mut(t).filter(|t| t.alive) else { return events };
+        let (parts, mut lives): (Vec<usize>, Vec<&mut Life>) = target
+            .parts
+            .iter_mut()
+            .enumerate()
+            .filter_map(|(p, part)| Some((p, part.life.as_mut()?)))
+            .unzip();
+        let before: Vec<f32> = lives.iter().map(|l| l.total()).collect();
+        let gone = share_loss(&mut lives, loss);
+        for (i, destroyed) in gone.into_iter().enumerate() {
+            let damage = before[i] - lives[i].total();
+            if damage > 0.0 {
+                events.push(Event::Damaged { target: t, part: parts[i], node: 0, damage, destroyed });
+            }
+        }
+        if target.dead() {
+            target.alive = false;
+            events.push(Event::Killed { target: t });
+        }
+        events
     }
 
     fn damage(&mut self, t: usize, p: usize, n: usize, damage: f32, events: &mut Vec<Event>) {

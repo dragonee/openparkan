@@ -32,6 +32,8 @@ pub struct SolidFace {
     pub triangle_flags: u16,
     /// The ground surface id of the face's material, if it has one.
     pub surface: Option<u8>,
+    /// The damage a second the material deals what touches it (`+0x1a4`).
+    pub damage_rate: f32,
 }
 
 /// One node's level-0 slot: its sphere in the world, and its faces.
@@ -61,13 +63,13 @@ fn vec(v: [f64; 3]) -> Vec3 {
 
 impl Solid {
     /// The faces of a target's posed parts, with `surface(part, material)` naming a batch's
-    /// material's surface id.
+    /// material's surface id and damage rate.
     pub fn from_parts(
         parts: &[Part],
         centre: Vec3,
         radius: f32,
         ground: bool,
-        surface: impl Fn(usize, u16) -> Option<u8>,
+        surface: impl Fn(usize, u16) -> Option<(u8, f32)>,
     ) -> Self {
         let mut faces = Vec::new();
         let mut nodes = Vec::new();
@@ -97,13 +99,15 @@ impl Solid {
                         let (from, count) = b.triangles();
                         (from..from + count).contains(&t)
                     });
+                    let material = batch.and_then(|b| surface(p, b.material));
                     faces.push(SolidFace {
                         a,
                         b,
                         c,
                         normal,
                         triangle_flags: mesh.face_flags.get(t).copied().unwrap_or(0),
-                        surface: batch.and_then(|b| surface(p, b.material)),
+                        surface: material.map(|m| m.0),
+                        damage_rate: material.map_or(0.0, |m| m.1),
                     });
                 }
                 let [cx, cy, cz, r] = slot.sphere;
@@ -338,7 +342,8 @@ mod tests {
             Vec3::new(10.0, 10.0, z),
             Vec3::new(0.0, 10.0, z),
         );
-        let face = |a, b, c| SolidFace { a, b, c, normal, triangle_flags: 0, surface: Some(5) };
+        let face =
+            |a, b, c| SolidFace { a, b, c, normal, triangle_flags: 0, surface: Some(5), damage_rate: 0.0 };
         Solid {
             centre: Vec3::new(5.0, 5.0, z),
             radius: 7.1,
@@ -370,7 +375,15 @@ mod tests {
             Vec3::new(0.0, 10.0, 10.0),
             Vec3::new(0.0, -10.0, 10.0),
         );
-        let face = |a, b, c| SolidFace { a, b, c, normal: -Vec3::X, triangle_flags: 0, surface: None };
+        let face = |a, b, c| SolidFace {
+            a,
+            b,
+            c,
+            normal: -Vec3::X,
+            triangle_flags: 0,
+            surface: None,
+            damage_rate: 0.0,
+        };
         let wall = Solid {
             centre: Vec3::ZERO,
             radius: 14.2,

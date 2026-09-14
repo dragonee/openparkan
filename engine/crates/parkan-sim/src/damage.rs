@@ -83,12 +83,16 @@ impl Life {
     /// marked (`0x100110ab`): a shell whose model and other nodes stay, to be shot apart.
     /// Returns the nodes this hit destroyed.
     pub fn hit(&mut self, node: usize, damage: f32) -> Vec<usize> {
+        let damage = self.armour.map_or(damage, |(l, s)| armour(damage, l, s));
+        self.lose(node, damage)
+    }
+
+    /// `0x10010f30` past the armour: `damage` off one node, as [`Life::hit`] takes it.
+    pub fn lose(&mut self, node: usize, damage: f32) -> Vec<usize> {
         let Some(n) = self.nodes.get_mut(node) else { return Vec::new() };
         if n.destroyed || damage <= 0.0 {
             return Vec::new();
         }
-        let damage = self.armour.map_or(damage, |(l, s)| armour(damage, l, s));
-        let n = &mut self.nodes[node];
         n.life = (n.life - damage).max(0.0);
         if n.life > 0.0 {
             return Vec::new();
@@ -109,6 +113,96 @@ impl Life {
         }
         destroyed
     }
+
+    /// The life its nodes have left.
+    pub fn total(&self) -> f32 {
+        self.nodes.iter().map(|n| n.life).sum()
+    }
+}
+
+/// A life update's wait, and how far either side of it one may fall
+/// (`Control.dll:0x10006364`, `0x1000c774`–`0x1000c7c1`).
+pub const LIFE_UPDATE_MS: f64 = 250.0;
+pub const LIFE_UPDATE_SPREAD_MS: f64 = 125.0;
+
+/// `0x10010ba0` with its first flag clear, the way the ground's damage is taken: the loss
+/// is held to the unit's total life, and every node of every one of `lives` loses the
+/// same share of its own life, with no armour asked. No node reaches 0 until the loss
+/// reaches the total, and then all do. Returns each life's destroyed nodes.
+pub fn share_loss(lives: &mut [&mut Life], loss: f32) -> Vec<Vec<usize>> {
+    let total: f32 = lives.iter().map(|l| l.total()).sum();
+    if total <= 0.0 || loss <= 0.0 {
+        return vec![Vec::new(); lives.len()];
+    }
+    let share = (loss / total).min(1.0);
+    lives
+        .iter_mut()
+        .map(|life| {
+            (0..life.nodes.len())
+                .flat_map(|n| {
+                    let take = share * life.nodes[n].life;
+                    life.lose(n, take)
+                })
+                .collect()
+        })
+        .collect()
+}
+
+/// What the ground under a machine deals it (docs/24-motion.md, "Water and lava beds
+/// kill"): the rate its ground contact last read, spent in life updates about every
+/// quarter second.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct GroundDamage {
+    /// Damage a second: the material record's `+0x1a4` of the last face touched.
+    pub rate: f32,
+    last_ms: f64,
+    next_ms: f64,
+    seed: u16,
+}
+
+impl GroundDamage {
+    /// Its first update due one wait from `now_ms`; `seed` sets the unit's spread apart.
+    pub fn new(now_ms: f64, seed: u16) -> Self {
+        let mut g = Self { rate: 0.0, last_ms: now_ms, next_ms: now_ms, seed: seed | 1 };
+        g.next_ms = now_ms + g.wait();
+        g
+    }
+
+    /// 250 ms, plus a 16-bit random × 250/65536, less 125.
+    ///
+    /// STAND-IN: docs/24-motion.md#water-and-lava-beds-kill--read-and-measured -- the game's
+    /// random source is not read; a 16-bit xorshift (7, 9, 8).
+    fn wait(&mut self) -> f64 {
+        let mut x = self.seed;
+        x ^= x << 7;
+        x ^= x >> 9;
+        x ^= x << 8;
+        self.seed = x;
+        LIFE_UPDATE_MS + f64::from(x) * LIFE_UPDATE_MS / 65536.0 - LIFE_UPDATE_SPREAD_MS
+    }
+
+    /// The contact read a face's record: a touched face's rate, or a wet bed's.
+    pub fn read(&mut self, rate: f32) {
+        self.rate = rate;
+    }
+
+    /// The loss the life update due by `now_ms` deals, if one is due: the rate × the seconds
+    /// since the last update (`0x1000c7e6`, `0x10012a7e`).
+    pub fn update(&mut self, now_ms: f64) -> Option<f32> {
+        if now_ms < self.next_ms {
+            return None;
+        }
+        let dt = ((now_ms - self.last_ms) * 0.001) as f32;
+        self.last_ms = now_ms;
+        self.next_ms = now_ms + self.wait();
+        Some(self.rate.max(0.0) * dt)
+    }
+}
+
+/// Whether a body sphere touches the ground point found under its centre: within √2 r
+/// (`Control.dll:0x1001a9f9`).
+pub fn touching(ground_point: glam::Vec3, centre: glam::Vec3, r: f32) -> bool {
+    (ground_point - centre).length_squared() <= 2.0 * r * r
 }
 
 #[cfg(test)]
@@ -281,5 +375,45 @@ mod tests {
     fn the_level_ratio_scales_every_nodes_life() {
         let life = Life::new(&table(&[500.0]), vec![None], vec![false], 1.0, 0.7);
         assert_eq!(life.nodes[0].max, 350.0);
+    }
+
+    #[test]
+    fn a_ground_loss_takes_a_share_of_every_node_and_kills_them_all_at_the_total() {
+        // The hero's two models, 2881 and 4474, with a node in each vital to nothing.
+        let mut chassis = Life::new(&table(&[881.0, 2000.0]), vec![None, Some(0)], vec![false; 2], 1.0, 1.0);
+        let mut turret = Life::new(&table(&[4000.0, 474.0]), vec![None, None], vec![false; 2], 1.0, 1.0);
+        chassis.armour = Some((0.5, 0.0001));
+        for _ in 0..2 {
+            let gone = share_loss(&mut [&mut chassis, &mut turret], 2500.0);
+            assert!(gone.iter().all(Vec::is_empty) && !chassis.dead && !turret.dead);
+        }
+        let left = chassis.total() + turret.total();
+        assert!((left - 2355.0).abs() < 0.1, "no armour asked: {left}");
+        assert!((chassis.nodes[1].life / chassis.nodes[0].life - 2000.0 / 881.0).abs() < 1e-3);
+        let gone = share_loss(&mut [&mut chassis, &mut turret], 2500.0);
+        assert_eq!(gone, vec![vec![0, 1], vec![0, 1]]);
+        assert!(chassis.dead && turret.dead && chassis.total() == 0.0);
+    }
+
+    #[test]
+    fn the_life_update_comes_every_quarter_second_give_or_take_an_eighth() {
+        let mut g = GroundDamage::new(0.0, 7);
+        assert_eq!(g.update(100.0), None);
+        g.read(10_000.0);
+        let (mut last, mut t) = (0.0, 0.0);
+        let mut updates = 0;
+        while updates < 200 {
+            t += 1.0;
+            if let Some(loss) = g.update(t) {
+                let gap = t - last;
+                assert!((125.0..=376.0).contains(&gap), "{gap}");
+                assert!((loss - 10.0 * gap as f32).abs() < 1e-2, "rate × the seconds since the last");
+                last = t;
+                updates += 1;
+            }
+        }
+        assert!((t / 200.0 - 250.0).abs() < 25.0, "{}", t / 200.0);
+        let wide = glam::Vec3::new(0.0, 0.0, 2.0);
+        assert!(touching(glam::Vec3::ZERO, wide, 1.5) && !touching(glam::Vec3::ZERO, wide, 1.4));
     }
 }

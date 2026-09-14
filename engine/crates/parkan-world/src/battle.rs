@@ -12,6 +12,7 @@ use parkan_formats::control::{
 };
 use parkan_formats::cpt::{self, ControlPoint};
 use parkan_formats::exp::{self, Explosion};
+use parkan_formats::mesh::Mesh;
 use parkan_formats::mission::{self, Mission, Value};
 use parkan_formats::ndp::{self, NodeDamage};
 use parkan_formats::objects::ResourceRef;
@@ -104,6 +105,34 @@ pub fn object_ratio(
     if allied { 1.0 } else { ratio }
 }
 
+/// A part's nodes' hit points from its record's `.ndp`, at the level ratio `ratio`, and what
+/// each node plays when it is destroyed; no life where the record names no table.
+pub fn part_damage(
+    assembly: &mut Assembly,
+    part: &crate::assembly::Part,
+    mesh: &Mesh,
+    ratio: f32,
+    building: bool,
+) -> (Option<Life>, Vec<Option<Explosion>>) {
+    let Some(nodes_table) = table(assembly, &part.record) else { return (None, Vec::new()) };
+    let blasts = nodes_table
+        .iter()
+        .map(|d| {
+            let r = if d.explosion.library.is_empty() {
+                ResourceRef { library: part.reference.library.clone(), ..d.explosion.clone() }
+            } else {
+                d.explosion.clone()
+            };
+            explosion(assembly, &r)
+        })
+        .collect();
+    let parents = mesh.nodes.iter().map(|n| (n.parent != 0xFFFF).then_some(usize::from(n.parent))).collect();
+    let vital = mesh.nodes.iter().map(|n| n.flags & VITAL_NODE_FLAG != 0).collect();
+    let mut life = Life::new(&nodes_table, parents, vital, 1.0, ratio);
+    life.building = building;
+    (Some(life), blasts)
+}
+
 /// A pose placed at `position`, turned `yaw` about z.
 fn placement(position: [f32; 3], yaw: f32) -> Pose {
     let half = f64::from(yaw) / 2.0;
@@ -163,32 +192,12 @@ impl Battle {
                     lo = lo.min(c - Vec3::splat(r * scale));
                     hi = hi.max(c + Vec3::splat(r * scale));
                 }
-                let nodes_table = damageable.then(|| table(assembly, &part.record)).flatten();
-                blasts.push(
-                    nodes_table
-                        .iter()
-                        .flatten()
-                        .map(|d| {
-                            let r = if d.explosion.library.is_empty() {
-                                ResourceRef { library: part.reference.library.clone(), ..d.explosion.clone() }
-                            } else {
-                                d.explosion.clone()
-                            };
-                            explosion(assembly, &r)
-                        })
-                        .collect(),
-                );
-                let life = nodes_table.map(|t| {
-                    let parents = mesh
-                        .nodes
-                        .iter()
-                        .map(|n| (n.parent != 0xFFFF).then_some(usize::from(n.parent)))
-                        .collect();
-                    let vital = mesh.nodes.iter().map(|n| n.flags & VITAL_NODE_FLAG != 0).collect();
-                    let mut life = Life::new(&t, parents, vital, 1.0, object_ratio);
-                    life.building = object.kind == mission::KIND_BUILDING;
-                    life
-                });
+                let (life, part_blasts) = if damageable {
+                    part_damage(assembly, &part, &mesh, object_ratio, object.kind == mission::KIND_BUILDING)
+                } else {
+                    (None, Vec::new())
+                };
+                blasts.push(part_blasts);
                 parts.push(Part { mesh, nodes, scale, life });
                 part_wears.push(loaded.wear.materials.clone());
             }

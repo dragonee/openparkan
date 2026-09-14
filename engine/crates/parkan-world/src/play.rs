@@ -14,15 +14,20 @@ use parkan_formats::controls::{
     CMD_ENTER_STATE, CMD_JAMES_AIM_TARGET, CMD_JAMES_SELECT_ENEMY, CMD_JAMES_SELECT_FRIEND,
     CMD_JAMES_SELECT_TARGET, CMD_JAMES_WINGMAN_MENU,
 };
+use parkan_formats::exp::Explosion;
 use parkan_formats::landmesh::FLAGS_LIQUID_BED_BIT;
 use parkan_formats::materials::Library;
 use parkan_formats::mission::{Clan, KIND_BUILDING, KIND_ROCK, KIND_UNIT, KIND_VEGETATION, Mission, Value};
+use parkan_formats::pose::Pose;
 use parkan_formats::{gamedir, landmesh};
 use parkan_sim::combat::{Event, Part, Round};
+use parkan_sim::damage::{Life, share_loss, touching};
 use parkan_sim::effects::{Cue, Frame, Sprite};
 use parkan_sim::ground::Ground;
 use parkan_sim::hit::segment_mesh;
+use parkan_sim::machine::Walker;
 use parkan_sim::orders::{self, ACKNOWLEDGEMENTS, Digit, Picked, Selector, VoicePick};
+use parkan_sim::progression::Notice;
 use parkan_sim::solid::{self, NO_CONTACT, Solid};
 use parkan_sim::targeting::{Contact, TargetList};
 
@@ -261,7 +266,7 @@ impl Play {
         let mut ground = Ground::new(land);
         let materials_for = |t: usize, part: usize, material: u16| {
             let name = battle.wears.get(t)?.get(part)?.get(usize::from(material & 0xFF))?;
-            materials.get(name).map(|m| m.surface)
+            materials.get(name).map(|m| (m.surface, m.damage_rate))
         };
         ground.solids = battle
             .combat
@@ -630,11 +635,18 @@ impl Play {
     pub fn tick(&mut self, dt_ms: f64, mouse: [f32; 2]) -> Vec<Event> {
         self.update_targets();
         self.tick_robots(dt_ms);
-        let from = self.hero.collision_centre();
-        let shots = self.hero.tick(dt_ms, mouse, &self.ground);
-        self.collide(from);
-        self.footsteps();
+        let shots = if self.hero.dead() {
+            self.hero.time_ms += dt_ms;
+            Vec::new()
+        } else {
+            let from = self.hero.collision_centre();
+            let shots = self.hero.tick(dt_ms, mouse, &self.ground);
+            self.collide(from);
+            self.footsteps();
+            shots
+        };
         let now = self.hero.time_ms;
+        let mut events = self.ground_damage(now);
         for (g, shot) in shots {
             let (Some(Some(kind)), Some(gun)) = (self.hero.rounds.get(g).copied(), self.hero.guns.get(g))
             else {
@@ -658,7 +670,7 @@ impl Play {
                 }
             }
         }
-        let events = self.battle.combat.tick((dt_ms / 1000.0) as f32, &self.ground);
+        events.extend(self.battle.combat.tick((dt_ms / 1000.0) as f32, &self.ground));
         for e in &events {
             self.effects_for(e, now);
         }
@@ -703,10 +715,93 @@ impl Play {
                 }
             }
         }
-        self.progress();
+        // STAND-IN: docs/34-progression.md#not-established -- what follows the hero's death
+        // is not established: the mission fails, and its progression stops.
+        if !self.hero.dead() {
+            self.progress();
+        }
         events
     }
 
+    /// The ground's rate a machine's ground contact reads (docs/24, "Holding the body on
+    /// the ground", step 5): a face's material's, when the body sphere touches the ground
+    /// point; a liquid bed's, when the water over it lies less than r below the sphere's
+    /// centre. `None` when nothing is read, and the machine keeps the rate it had.
+    fn ground_rate(&self, walker: &Walker) -> Option<f32> {
+        let hit = walker.ground?;
+        let centre = walker.sphere_centre();
+        let r = walker.radius;
+        match (hit.face, hit.solid) {
+            (Some(f), _) => {
+                let land = &self.ground.land;
+                let face = land.faces.get(f)?;
+                let read = if face.flags & FLAGS_LIQUID_BED_BIT != 0 {
+                    self.ground.water(centre.x, centre.y, centre.z).is_some_and(|z| centre.z - z < r)
+                } else {
+                    touching(hit.point, centre, r)
+                };
+                let name = land.layer1.get(usize::from(face.tex1))?;
+                read.then(|| self.materials.get(name).map(|m| m.damage_rate)).flatten()
+            }
+            (None, Some((s, f))) => touching(hit.point, centre, r)
+                .then(|| self.ground.solids.get(s)?.faces.get(f).map(|face| face.damage_rate))
+                .flatten(),
+            _ => None,
+        }
+    }
+
+    /// Every unit's life update that is due (docs/24, "Water and lava beds kill"): the rate
+    /// its ground contact read × the seconds since its last, shared over its nodes. A hero
+    /// that dies stops, and the mission fails.
+    fn ground_damage(&mut self, now: f64) -> Vec<Event> {
+        let mut events = Vec::new();
+        for r in 0..self.robots.len() {
+            let t = self.robots[r].0;
+            if !self.battle.combat.targets.get(t).is_some_and(|target| target.alive) {
+                continue;
+            }
+            if let Some(rate) = self.ground_rate(&self.robots[r].1.walker) {
+                self.robots[r].1.ground_damage.read(rate);
+            }
+            let robot = &mut self.robots[r].1;
+            if let Some(loss) = robot.ground_damage.update(robot.time_ms)
+                && loss > 0.0
+            {
+                events.extend(self.battle.combat.ground_loss(t, loss));
+            }
+        }
+        if self.hero.dead() {
+            return events;
+        }
+        if let Some(rate) = self.ground_rate(&self.hero.walker) {
+            self.hero.ground_damage.read(rate);
+        }
+        let Some(loss) = self.hero.ground_damage.update(now).filter(|&l| l > 0.0) else { return events };
+        let (parts, mut lives): (Vec<usize>, Vec<&mut Life>) =
+            self.hero.lives.iter_mut().enumerate().filter_map(|(p, l)| Some((p, l.as_mut()?))).unzip();
+        let gone = share_loss(&mut lives, loss);
+        let place = self.hero.placement();
+        for (p, destroyed) in parts.into_iter().zip(gone) {
+            let mesh = self.hero.parts[p].mesh.clone();
+            for n in destroyed {
+                let Some(Some(exp)) = self.hero.blasts.get(p).and_then(|b| b.get(n)).cloned() else {
+                    continue;
+                };
+                let Some(slot) = mesh.mesh.slots.get(usize::from(mesh.mesh.nodes[n].slot_index[0])) else {
+                    continue;
+                };
+                let node = place.compose(&self.hero.part_pose(p, n));
+                self.node_blast(&exp, &node, slot.sphere, 1.0, now);
+            }
+        }
+        if self.hero.dead()
+            && let Some(p) = self.progression.as_mut()
+        {
+            let says = p.say(&Notice::MissionFailed);
+            self.says.extend(says);
+        }
+        events
+    }
     /// The condition bytes the ground gives (`Control.dll:0x10002790`, `0x1001ab2d`): byte i
     /// set for the surface id i under the body, then byte 7 the face's liquid-bed flag.
     fn ground_conditions(&self) -> [bool; CONDITIONS] {
@@ -915,23 +1010,23 @@ impl Play {
                     let Some(slot) = p.mesh.slots.get(usize::from(p.mesh.nodes[n].slot_index[0])) else {
                         continue;
                     };
-                    let [cx, cy, cz, r] = slot.sphere;
-                    let c = p.nodes[n].apply([cx, cy, cz].map(|v| f64::from(v * p.scale)));
-                    let centre = Vec3::new(c[0] as f32, c[1] as f32, c[2] as f32);
-                    let y = parkan_formats::pose::rotate(p.nodes[n].rotation, [0.0, 1.0, 0.0]);
-                    let axis = Vec3::new(y[0] as f32, y[1] as f32, y[2] as f32);
-                    // Placement 0 is the node's second axis; a node's size is the radius × its sphere's.
-                    self.fx.explode(
-                        &exp,
-                        None,
-                        Frame::along(centre, axis, 1.0),
-                        exp.radius * r * p.scale,
-                        now,
-                    );
+                    let (node, sphere, scale) = (p.nodes[n], slot.sphere, p.scale);
+                    self.node_blast(&exp, &node, sphere, scale, now);
                 }
             }
             _ => {}
         }
+    }
+
+    /// A destroyed node's explosion, on the node posed at `node` with its slot's `sphere`.
+    /// Placement 0 is the node's second axis; a node's size is the radius × its sphere's.
+    fn node_blast(&mut self, exp: &Explosion, node: &Pose, sphere: [f32; 4], scale: f32, now: f64) {
+        let [cx, cy, cz, r] = sphere;
+        let c = node.apply([cx, cy, cz].map(|v| f64::from(v * scale)));
+        let centre = Vec3::new(c[0] as f32, c[1] as f32, c[2] as f32);
+        let y = parkan_formats::pose::rotate(node.rotation, [0.0, 1.0, 0.0]);
+        let axis = Vec3::new(y[0] as f32, y[1] as f32, y[2] as f32);
+        self.fx.explode(exp, None, Frame::along(centre, axis, 1.0), exp.radius * r * scale, now);
     }
 
     /// Every effect sprite at the current time, as seen from `eye`: an instance that tests

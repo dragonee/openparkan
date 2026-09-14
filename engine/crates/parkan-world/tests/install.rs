@@ -717,3 +717,62 @@ fn captured_warbots_answer_the_wingman_menu_with_the_order_its_row_gives() {
     assert_eq!(orders.iter().filter(|&&c| c == STAYGROUND).count(), 1);
     assert_eq!(orders.iter().filter(|&&c| c == FOLLOW).count(), 1);
 }
+
+/// Stand a machine at `at`'s xy on the ground below it.
+fn put(w: &mut parkan_sim::machine::Walker, ground: &parkan_sim::ground::Ground, at: glam::Vec3) {
+    w.body.position = at;
+    w.follow_ground(ground);
+    w.from = (w.body.position, w.body.yaw);
+}
+
+#[test]
+#[ignore = "needs the game install"]
+fn a_lake_bed_kills_the_hero_and_a_warbot_within_a_second() {
+    use glam::Vec3;
+    use parkan_sim::combat::Event;
+    use parkan_sim::damage::Life;
+    use parkan_world::play::Play;
+    use parkan_world::progress::{STRING_MISSION_FAILED, Say};
+
+    let (mut play, _) = mission_01_play();
+    let tick = 1000.0 / 60.0;
+    let lives = |play: &Play| -> f32 { play.hero.lives.iter().flatten().map(Life::total).sum() };
+
+    // On dry ground at the start, five seconds take nothing.
+    let full = lives(&play);
+    for _ in 0..300 {
+        play.tick(tick, [0.0; 2]);
+    }
+    assert!(!play.hero.dead() && lives(&play) == full && full > 7000.0, "{full}");
+
+    // Tut_1's lake east of the start: a `WATER_BOT` bed at -10.9 under water at -1.7
+    // (docs/24, "Water and lava beds kill").
+    let lake = Vec3::new(682.0, 667.0, 20.0);
+    assert!(play.ground.water(lake.x, lake.y, 0.0).is_some_and(|z| (z + 1.73).abs() < 0.01));
+    let bot = play.robots[0].0;
+    put(&mut play.robots[0].1.walker, &play.ground, lake + Vec3::new(8.0, 0.0, 0.0));
+    put(&mut play.hero.robot.walker, &play.ground, lake);
+    play.says.clear();
+
+    let (mut hero_died, mut bot_died) = (None, None);
+    for k in 1..=90 {
+        let events = play.tick(tick, [0.0; 2]);
+        if play.hero.dead() && hero_died.is_none() {
+            hero_died = Some(k as f32 / 60.0);
+        }
+        if events.iter().any(|e| matches!(e, Event::Killed { target } if *target == bot)) {
+            bot_died = Some(k as f32 / 60.0);
+        }
+    }
+    assert!(hero_died.is_some_and(|s| (0.2..=1.15).contains(&s)), "the hero dies in the lake: {hero_died:?}");
+    assert!(bot_died.is_some_and(|s| s <= 1.15), "and the warbot: {bot_died:?}");
+    assert!(!play.battle.combat.targets[bot].alive && lives(&play) == 0.0);
+    let failed = play.progression.as_ref().unwrap().strings[&STRING_MISSION_FAILED].clone();
+    assert!(play.says.contains(&Say::Text(failed)), "{:?}", play.says);
+
+    let at = play.hero.walker.body.position;
+    for _ in 0..60 {
+        play.tick(tick, [0.0; 2]);
+    }
+    assert_eq!(play.hero.walker.body.position, at, "a dead hero stays where it died");
+}

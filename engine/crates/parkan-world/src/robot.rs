@@ -15,6 +15,7 @@ use parkan_formats::control::{
 use parkan_formats::cpt::{self, ControlPoint};
 use parkan_formats::mission::Mission;
 use parkan_formats::pose::{Pose, multiply, rotate};
+use parkan_sim::damage::GroundDamage;
 use parkan_sim::ground::Ground;
 use parkan_sim::guns::{Gun, Shot, Sight, TargetGate};
 use parkan_sim::machine::Walker;
@@ -90,6 +91,8 @@ pub struct Robot {
     velocity: Vec3,
     /// Game time, ms.
     pub time_ms: f64,
+    /// What the ground under it deals it, and when its life next updates.
+    pub ground_damage: GroundDamage,
 }
 
 fn read_member(assembly: &mut Assembly, library: &str, member: &str) -> Result<Vec<u8>> {
@@ -246,6 +249,8 @@ impl Robot {
             steady: false,
             velocity: Vec3::ZERO,
             time_ms: 0.0,
+            // Units apart update their lives apart.
+            ground_damage: GroundDamage::new(0.0, (object as u16).wrapping_mul(40_503)),
         }))
     }
 

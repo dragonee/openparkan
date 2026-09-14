@@ -117,6 +117,28 @@ On Mission 01 the hero is greeted in route 0, destroying the five targets
 completes the first objective and capturing both neutral warbots the second.
 Not yet: boarding a captured bot, the AI, and the ambient variations.
 
+**M7.** The hero sounds, and meets the world.
+
+- A gun's arm sounds as it is put away, and an effect's loop plays while
+  inside its window. Each foot that lands runs its contact's group over the
+  ground's condition bytes, which restarts its step effect and sound.
+- A building's faces are ground, so the hero walks over a bridge on its deck.
+  Every other placed object pushes the hero's swept body sphere off its faces;
+  a big tree's leaves let it by.
+
+**M8.** Other units, and what they are told.
+
+- Every other unit is a robot: its machine and turret tick, it is drawn node by
+  node, and it is struck where it stands.
+- The tilde opens the wingman menu on the friendly warbots on the radar
+  (Shift+tilde to pick them by number), a digit gives its row's order, and the
+  last one chosen acknowledges.
+- A lake's bed kills. The ground contact reads the rate of what it touches,
+  or of a bed whose water lies less than r below the body sphere's centre, and
+  every 250 ms or so a unit's nodes each lose the same share of their life.
+  On Mission 01's lake the hero dies 0.6 s in; it stops where it died, and the
+  mission fails.
+
 This directory also holds what the rest will follow:
 
 - **`docs/`** is the source of truth. Every behaviour the engine implements is
@@ -284,6 +306,8 @@ engine pass replaces each with what was read and removes its row.
 | M8 | Whether a digit the wingman selector takes also reaches the input table that toggles the hero's guns | it does not | [31](../docs/31-packages.md#the-wingman-menu-from-first-person--read-and-measured) |
 | M8 | What a unit record's `+0x30` is, which picks capturers and the acknowledgement voices | the size class of the chassis's name: t 1, l and h 2, m 3, b 4 | [31](../docs/31-packages.md#the-wingman-menu-from-first-person--read-and-measured) |
 | M8 | The acknowledgement's xorshift: its shifts and seed | 7, 9, 8 from 0xACE1, never repeating the last voice | [31](../docs/31-packages.md#the-wingman-menu-from-first-person--read-and-measured) |
+| M8 | The game's random source for a life update's spread | a 16-bit xorshift (7, 9, 8), seeded apart per unit | [24](../docs/24-motion.md#water-and-lava-beds-kill--read-and-measured) |
+| M8 | What follows the hero's death | the hero stops where it died, the mission fails with its voice and string 1013, and the progression stops | [34](../docs/34-progression.md#not-established) |
 
 ## Departures
 

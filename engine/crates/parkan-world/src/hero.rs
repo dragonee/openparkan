@@ -6,14 +6,17 @@ use std::ops::{Deref, DerefMut};
 use std::path::Path;
 
 use anyhow::{Context, Result};
+use parkan_formats::exp::Explosion;
 use parkan_formats::mission::Mission;
 use parkan_formats::{controls, gamedir};
+use parkan_sim::damage::Life;
 use parkan_sim::ground::Ground;
 use parkan_sim::guns::{CONTINUE_FIGHT, STATE_OFF, Shot};
 use parkan_sim::input::{Hands, Pilot};
 use parkan_sim::turret::{ARM_UNFOLD, ITEM_CLOSING, ITEM_OPENING};
 
 use crate::assembly::Assembly;
+use crate::battle::part_damage;
 pub use crate::robot::{Eye, NO_RADAR_PERIOD_MS, NO_RADAR_RANGE, Robot};
 
 /// What `Iron_3D.ini` sets the mouse to when it says nothing.
@@ -35,6 +38,10 @@ pub struct Hero {
     pub robot: Robot,
     pub pilot: Pilot,
     fire_held: bool,
+    /// Each of the robot's parts' node life, and what its nodes play when destroyed. The
+    /// player's own hero is never given the difficulty ratio (docs/26).
+    pub lives: Vec<Option<Life>>,
+    pub blasts: Vec<Vec<Option<Explosion>>>,
 }
 
 impl Deref for Hero {
@@ -67,7 +74,15 @@ impl Hero {
             .context("the chassis names no input table")?;
         let rows = controls::load(&gamedir::resolve(&assembly.game, &table).context("no input table")?)?;
         let pilot = Pilot::new(rows, mouse_sensitivity(&assembly.game));
-        Ok(Some(Hero { robot, pilot, fire_held: false }))
+        // The robot's parts, those whose meshes load, in its order.
+        let (mut lives, mut blasts) = (Vec::new(), Vec::new());
+        for part in &parts {
+            let Some(mesh) = assembly.mesh(&part.reference) else { continue };
+            let (life, blast) = part_damage(assembly, part, &mesh.mesh, 1.0, false);
+            lives.push(life);
+            blasts.push(blast);
+        }
+        Ok(Some(Hero { robot, pilot, fire_held: false, lives, blasts }))
     }
 
     fn hands(&mut self) -> (&mut Pilot, Hands<'_>) {
@@ -127,6 +142,11 @@ impl Hero {
             }
         }
         self.robot.takt(dt_ms)
+    }
+
+    /// Whether the hero is dead: its chassis's node 0, or a vital node, destroyed.
+    pub fn dead(&self) -> bool {
+        self.lives.get(self.robot.chassis_part).and_then(Option::as_ref).is_some_and(|l| l.dead)
     }
 
     /// The first-person eye (see [`Robot::eye`]); the hero always has a camera.
