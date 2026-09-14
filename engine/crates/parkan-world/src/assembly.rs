@@ -40,13 +40,42 @@ pub struct Assembly {
     pub library: objects::Library,
     archives: HashMap<String, Option<Archive>>,
     meshes: HashMap<(String, String), Option<std::rc::Rc<LoadedMesh>>>,
+    /// `.dat` assemblies held in memory under a virtual path, read before the disk.
+    units: HashMap<String, Vec<u8>>,
+}
+
+/// A unit path as the in-memory table keys it: separators one way, case folded.
+fn unit_key(path: &str) -> String {
+    path.replace('\\', "/").to_ascii_lowercase()
 }
 
 impl Assembly {
     pub fn new(game: &Path) -> Result<Self> {
         let library =
             objects::Library::open(&gamedir::resolve(game, "objects.rlb").context("no objects.rlb")?)?;
-        Ok(Self { game: game.to_path_buf(), library, archives: HashMap::new(), meshes: HashMap::new() })
+        Ok(Self {
+            game: game.to_path_buf(),
+            library,
+            archives: HashMap::new(),
+            meshes: HashMap::new(),
+            units: HashMap::new(),
+        })
+    }
+
+    /// Hold a `.dat` assembly in memory under `path`, as a design the constructor or the
+    /// factory writes (`UNITS\temp_unit.dat`, `UNITS\bld_unit_<id>.dat`), so that
+    /// [`Assembly::parts`] and [`Assembly::records`] load it without a file on disk.
+    pub fn register_unit(&mut self, path: &str, bytes: Vec<u8>) {
+        self.units.insert(unit_key(path), bytes);
+    }
+
+    /// A unit's `.dat` bytes: the one registered under `path`, else the file.
+    fn unit_bytes(&self, path: &str) -> Option<std::borrow::Cow<'_, [u8]>> {
+        if let Some(bytes) = self.units.get(&unit_key(path)) {
+            return Some(std::borrow::Cow::Borrowed(bytes));
+        }
+        let file = gamedir::resolve(&self.game, path)?;
+        std::fs::read(&file).ok().map(std::borrow::Cow::Owned)
     }
 
     pub fn archive(&mut self, name: &str) -> Option<&Archive> {
@@ -78,8 +107,7 @@ impl Assembly {
     /// The visible parts of an object placed with this kind and path.
     /// Every component record a unit's `.dat` names, internal parts included, in order.
     pub fn records(&self, path: &str) -> Vec<String> {
-        let Some(file) = gamedir::resolve(&self.game, path) else { return Vec::new() };
-        let Ok(data) = std::fs::read(&file) else { return Vec::new() };
+        let Some(data) = self.unit_bytes(path) else { return Vec::new() };
         objects::parse_unit(&data, path)
             .map(|unit| unit.components.iter().map(|c| c.reference.member.clone()).collect())
             .unwrap_or_default()
@@ -94,8 +122,7 @@ impl Assembly {
                 })
                 .unwrap_or_default();
         }
-        let Some(file) = gamedir::resolve(&self.game, path) else { return Vec::new() };
-        let Ok(data) = std::fs::read(&file) else { return Vec::new() };
+        let Some(data) = self.unit_bytes(path) else { return Vec::new() };
         let Ok(unit) = objects::parse_unit(&data, path) else { return Vec::new() };
         let Ok(parents) = unit.parents() else { return Vec::new() };
         let mut references: Vec<Option<ResourceRef>> = Vec::new();

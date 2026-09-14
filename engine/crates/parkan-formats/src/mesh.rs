@@ -15,6 +15,8 @@ pub const STREAM_FACE: u32 = 7;
 pub const FACE_STRIDE: usize = 16;
 pub const STREAM_POSE_KEY: u32 = 8;
 pub const STREAM_NAME: u32 = 9;
+/// One label a node: a socket's part prefix, `e_tur_bb` on a chassis (docs/38-designs.md).
+pub const STREAM_LABEL: u32 = 10;
 pub const STREAM_BATCH: u32 = 13;
 pub const STREAM_LIGHTMAP_UV: u32 = 18;
 pub const STREAM_FRAME_MAP: u32 = 19;
@@ -305,6 +307,30 @@ impl Mesh {
         }
         out
     }
+}
+
+/// A `MESH` payload's node labels, stream 10: each a `uint32` length, then that many bytes
+/// and a NUL when the length is not 0 (docs/38-designs.md, "Sockets carry the part prefix
+/// they take"). Empty when the mesh has no such stream.
+pub fn labels(blob: &[u8], name: &str) -> Result<Vec<String>, FormatError> {
+    let inner = Archive::parse(blob.to_vec(), name.to_owned())?;
+    let Some(entry) = inner.entries.iter().rev().find(|e| e.type_id() == STREAM_LABEL) else {
+        return Ok(Vec::new());
+    };
+    let raw = inner.read(entry)?;
+    let mut out = Vec::new();
+    let mut at = 0;
+    while at + 4 <= raw.len() {
+        let size = u32::from_le_bytes(raw[at..at + 4].try_into().expect("4 bytes")) as usize;
+        let text = raw.get(at + 4..(at + 4 + size).min(raw.len())).unwrap_or(&[]);
+        let end = text.iter().position(|&b| b == 0).unwrap_or(text.len());
+        out.push(latin1(&text[..end]));
+        at += 4 + if size > 0 { size + 1 } else { 0 };
+    }
+    if at != raw.len() {
+        return Err(FormatError::invalid(name, format!("labels run {at} bytes into {}", raw.len())));
+    }
+    Ok(out)
 }
 
 /// Parse a `MESH` payload.

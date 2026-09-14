@@ -258,9 +258,11 @@ pub fn object_mesh(path: &Path, names: &[String]) -> Result<Value> {
     let stem = member.rsplit_once('.').map_or(member, |(s, _)| s);
     let wear = archive.read_name(&format!("{stem}.wea")).map(wea::parse).unwrap_or_default();
     let m = mesh::parse(archive.read_name(member)?, member)?;
+    let labels = mesh::labels(archive.read_name(member)?, member)?;
     Ok(json!({
         "kind": "mesh",
         "name": member,
+        "labels": labels,
         "wear": { "materials": wear.materials, "lightmaps": wear.lightmaps },
         "nodes": m.nodes.iter().enumerate().map(|(i, n)| json!({
             "name": n.name,
@@ -760,6 +762,30 @@ pub fn formula_set(path: &Path) -> Result<Value> {
     Ok(json!({ "kind": "fml", "formulas": formulas }))
 }
 
+/// A research tree, `.trf`: every item's columns, and the parts in `TRFB` order.
+pub fn research_tree(path: &Path) -> Result<Value> {
+    let tree = parkan_formats::research::parse(&std::fs::read(path)?, &path.display().to_string())?;
+    Ok(json!({
+        "kind": "research",
+        "part_ids": tree.part_ids,
+        "part_items": tree.part_items,
+        "items": tree.items.iter().map(|i| json!({
+            "name": i.name,
+            "code": i.code,
+            "category": i.category,
+            "values": vector(&i.values),
+            "requires": i.requires,
+            "unlocks": i.unlocks,
+            "parts": i.parts,
+            "part_index": i.part_index,
+            "tail": i.tail,
+            "description": i.description,
+            "template": i.template,
+            "object_type": i.object_type(),
+        })).collect::<Vec<_>>(),
+    }))
+}
+
 /// Dump `path` as `kind`; `names` narrows a `texm` dump to those textures.
 pub fn dump(kind: &str, path: &Path, names: &[String]) -> Result<Value> {
     match kind {
@@ -787,8 +813,9 @@ pub fn dump(kind: &str, path: &Path, names: &[String]) -> Result<Value> {
         "scr" => script(path),
         "varset" => variable_table(path),
         "fml" => formula_set(path),
+        "research" => research_tree(path),
         other => anyhow::bail!(
-            "unknown kind {other:?}; expected nres, mission, texm, materials, landmesh, mesh, assembly, control, controls, cpt, ndp, exp, fxid, sky, cfg, strings, progression, rsli, font, man, scr, varset or fml"
+            "unknown kind {other:?}; expected nres, mission, texm, materials, landmesh, mesh, assembly, control, controls, cpt, ndp, exp, fxid, sky, cfg, strings, progression, rsli, font, man, scr, varset, fml or research"
         ),
     }
 }

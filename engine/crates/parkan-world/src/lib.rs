@@ -3,6 +3,7 @@ pub mod battle;
 pub mod briefing;
 pub mod buildings;
 pub mod cockpit;
+pub mod designs;
 pub mod dump;
 pub mod factory;
 pub mod fx;

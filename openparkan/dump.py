@@ -250,9 +250,13 @@ def object_mesh(path: Path, names: list[str] | None = None) -> dict:
     except KeyError:
         wear = objmesh.Wear()
     m = objmesh.parse(archive.read_name(member), member, wear.materials)
+    from . import designs
+    inner = NResArchive(archive.read_name(member), member)
+    streams = {e.type_id: inner.read(e) for e in inner}
     return {
         "kind": "mesh",
         "name": member,
+        "labels": designs.socket_labels(streams.get(designs.SOCKET_LABEL_STREAM, b"")),
         "wear": {"materials": wear.materials, "lightmaps": wear.lightmaps},
         "nodes": [
             {"name": n.name, "flags": n.flags, "parent": n.parent, "anim_start": n.anim_start,
@@ -643,6 +647,38 @@ def formula_set(path: Path, names: list[str] | None = None) -> dict:
     return {"kind": "fml", "formulas": behaviour.formulas(path)}
 
 
+def research_tree(path: Path, names: list[str] | None = None) -> dict:
+    """A research tree, ``.trf``: every item's columns, and the parts in ``TRFB`` order."""
+    from . import research
+    tree = research.read(path)
+    archive = NResArchive.open(path)
+    blob = {e.tag: archive.read(e) for e in archive.entries}
+    table = blob.get("TRFB", b"")
+    templates = blob.get("TRFA", b"")
+
+    def template(index: int) -> str:
+        at = struct.unpack_from("<i", blob["TRF0"], index * research.RECORD + 28)[0]
+        if at < 0 or at >= len(templates):
+            return ""
+        end = templates.find(b"\0", at)
+        return templates[at:end if end >= 0 else len(templates)].decode("latin-1")
+
+    return {
+        "kind": "research",
+        "part_ids": list(tree.part_ids),
+        "part_items": [struct.unpack_from("<HH", table, k * research.PART)[1]
+                       for k in range(len(table) // research.PART)],
+        "items": [
+            {"name": i.name, "code": i.code, "category": i.category, "values": vector(i.values),
+             "requires": list(i.requires), "unlocks": list(i.unlocks), "parts": list(i.parts),
+             "part_index": i.part_index, "tail": list(i.tail), "description": i.description,
+             "template": template(i.index),
+             "object_type": objects.part_type(i.tail[1], i.tail[2], i.tail[4], i.tail[0])}
+            for i in tree.items
+        ],
+    }
+
+
 def _nres(path: Path, names: list[str] | None = None) -> dict:
     return nres(path)
 
@@ -658,4 +694,4 @@ KINDS = {"nres": _nres, "mission": _mission, "texm": texm, "materials": material
          "ndp": damage_tables, "exp": explosions, "fxid": fx_effects,
          "sky": atmosphere, "cfg": cfg_file, "strings": pe_strings, "progression": progression,
          "rsli": rsli_archive, "font": game_font, "scr": script, "varset": variable_table,
-         "fml": formula_set, "man": key_bindings}
+         "fml": formula_set, "man": key_bindings, "research": research_tree}

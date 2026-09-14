@@ -23,6 +23,7 @@ pub mod nres;
 pub mod objects;
 pub mod pose;
 pub mod profiles;
+pub mod research;
 pub mod resources;
 pub mod rsli;
 pub mod scr;

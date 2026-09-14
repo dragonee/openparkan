@@ -24,6 +24,7 @@ from . import (
     landmesh,
     materials,
     mission,
+    research,
     rsli,
 )
 from .nres import NResArchive, is_nres
@@ -131,7 +132,8 @@ def targets(game: Path) -> list[tuple[str, Path, list[str]]]:
             + [("font", game / "gamefont.rlb", [])]
             + [("scr", p, []) for p in behaviour.scripts(game)]
             + [("fml", p.with_suffix(behaviour.FORMULAS), []) for p in behaviour.scripts(game)]
-            + [("varset", game / "MISSIONS" / "SCRIPTS" / behaviour.VARSET, [])])
+            + [("varset", game / "MISSIONS" / "SCRIPTS" / behaviour.VARSET, [])]
+            + [("research", p, []) for p in research.trees(game)])
 
 
 def engine_dump(engine: Path, kind: str, path: Path, names: list[str] | None = None) -> dict:
