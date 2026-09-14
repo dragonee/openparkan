@@ -231,6 +231,9 @@ class Message:
     index: int
     text_id: str
     voice_id: str
+    #: ``info_system``: the history files it as kind 4 rather than 3
+    #: (``iron3d.dll:0x10095519``); what that changes is not read.
+    info_system: bool = False
 
 
 def waypoints(path: str | Path) -> list[Waypoint]:
@@ -274,6 +277,7 @@ def messages(path: str | Path) -> list[Message]:
             index=int(_number(p.get("message_index", "-1"))),
             text_id=p.get("text_resource", ""),
             voice_id=p.get("voice_resource", ""),
+            info_system=_flag(p.get("info_system", "")),
         ))
     return out
 

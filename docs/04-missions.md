@@ -56,6 +56,14 @@ the start flag from 8, the host building and its vertex from 9, and the scale
 from 10 — an older record gets a scale of 1. Every shipped mission is 10
 (*measured*, 29 of 29).
 
+**The routes are polygons, not paths** (*read*). `IMission` slot 8
+(`MisLoad.dll:0x10001380`) makes each one the system areal map's *tactical
+areal* of its id. A unit's behaviour reports which of them it stands in, and a
+script asks with function 32, which is how a campaign mission notices the
+player walking into an area. The clan record's zones are handed over in the
+same call as the clan's *migration* areals, and they are not the ones a script
+tests. See [34-progression.md](34-progression.md).
+
 ### Clan
 
 ```

@@ -195,6 +195,13 @@ places:
 - **`iron3d.dll` itself**, in game mode 4: id 22 from the order menu
   (`0x10058015`) and id 100 from `0x100638a9`.
 
+**How a message plays** is [34-progression.md](34-progression.md#messages--read-and-measured)'s
+(*read*):
+- the first request voices it through the sound server's queue, so voices
+  play one after another, and files its text in the message history;
+- a repeat only adds "Recieved message is already in history";
+- a message can set a fourth key, `info_system`, on 46 of the 99.
+
 Measured against the scripts: **every call a script makes with a message
 constant goes through one function id, `fn30`** — 244 calls, 99 of them
 `MESSAGE_INFO` — and **all 22 literal ids** the clan scripts of 13 missions

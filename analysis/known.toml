@@ -600,9 +600,9 @@ doc = "docs/15-behaviour.md"
 module = "ai.dll"
 at = "0x1000c446"
 kind = "function"
-name = "script function 32: 1 when clan b is on clan a's list from the system areal map"
+name = "script function 32: 1 when logical id b is on tactical areal a's unit list (SystemArealMap slot 33) -- a unit in a route"
 read = true
-doc = "docs/15-behaviour.md"
+doc = "docs/34-progression.md"
 
 [[entry]]
 module = "ai.dll"
@@ -9625,7 +9625,7 @@ read = true
 module = "ArealMap.dll"
 at = "0x10039810"
 kind = "datum"
-name = "SystemArealMap vtable: 6 areal record, 7 areal at a point, 10 GetClanType, 21 object by LID, 25 lode count, 26 lode record, 46 write lode"
+name = "SystemArealMap vtable: 6 areal record, 7 areal at a point, 10 GetClanType, 17 register a logical id, 18 a unit's tactical report, 21 object by LID, 25 lode count, 26 lode record, 28-33 tactical areals, 35 migration areals, 46 write lode"
 doc = "docs/31-packages.md"
 read = true
 
@@ -14942,3 +14942,386 @@ kind = "site"
 name = "round tick: the length moved comes off the remaining range +0x4c8, whether or not the move was cut"
 doc = "docs/29-weapons.md"
 read = true
+# --- mission progression, ../docs/34-progression.md --------------------
+[[entry]]
+module = "MisLoad.dll"
+at = "0x10001a30"
+kind = "function"
+name = "data.tma routes: count, then 12-byte records (id, point count, points)"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "MisLoad.dll"
+at = "0x10003fc0"
+kind = "function"
+name = "one route: id, point count, 12-byte points"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "MisLoad.dll"
+at = "0x10001380"
+kind = "function"
+name = "IMission slot 8: SetTacticArealNum(routes), areal i the route whose id is i; each clan's zones as its migration areals (slot 35)"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "ArealMap.dll"
+at = "0x10020e60"
+kind = "function"
+name = "SystemArealMap slot 17: register a logical id; the flag picks the building counter"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "ArealMap.dll"
+at = "0x1002b2f0"
+kind = "function"
+name = "MLogicIDMap add: next serial & 0xffffff, top bit for a building"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "ArealMap.dll"
+at = "0x1001fb40"
+kind = "function"
+name = "SystemArealMap slot 18: a unit's report -- out of every tactical areal's list, into each whose outline holds its x, y"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "ArealMap.dll"
+at = "0x10017b90"
+kind = "function"
+name = "crossing test: a point in a closed xy outline, odd crossings of a ray to +x"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "ArealMap.dll"
+at = "0x10021eb0"
+kind = "function"
+name = "SystemArealMap slot 28: tactical areal count"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "ArealMap.dll"
+at = "0x10021ec0"
+kind = "function"
+name = "SystemArealMap slot 29: SetTacticArealNum"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "ArealMap.dll"
+at = "0x10021f40"
+kind = "function"
+name = "SystemArealMap slot 30: a tactical areal's vertex count"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "ArealMap.dll"
+at = "0x10021f60"
+kind = "function"
+name = "SystemArealMap slot 31: SetTacticArealVertexNum(i, n, 12-byte points)"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "ArealMap.dll"
+at = "0x10022000"
+kind = "function"
+name = "SystemArealMap slot 32: a tactical areal's vertices"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "ArealMap.dll"
+at = "0x10022040"
+kind = "function"
+name = "SystemArealMap slot 33: a tactical areal's unit list (count, ids); 'Incorrect TacticalAtrealID'"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "ArealMap.dll"
+at = "0x100220e0"
+kind = "function"
+name = "SystemArealMap slot 35: 'Create migration areals for clan'"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1000af70"
+kind = "function"
+name = "tactical report: with a logical id, when |dx|+|dy| > 5 or the areal changed, slot 18, then message 6 per tactical areal it is in"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10006350"
+kind = "function"
+name = "MBehaviour slot 65, message 1: with flag 2 (id attached) the tactical report on its timer"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x100039c2"
+kind = "site"
+name = "MBehaviour constructor: the tactical report timer words 31 and 46"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10005f91"
+kind = "site"
+name = "logical id attached: the first tactical report at once"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x100059f5"
+kind = "site"
+name = "MBehaviour message 1 calls slot 65"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x10001b80"
+kind = "function"
+name = "SuperAI slot 9: the Mission handler, when timeGetTime reaches a module-wide next (then +2000 ms)"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x10001ae0"
+kind = "function"
+name = "SuperAI slot 5: the Init handler, once"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x100017f0"
+kind = "site"
+name = "SuperAI takt: next = now + 7000 + rand % 1000 ms, the seconds clock +0x854 += 7, then the Problems handler"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x1000160b"
+kind = "site"
+name = "SuperAI constructor: the Mission, Problems0, Mech_GeneratorFound and Fort_Task_Complete handler indices"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x100016ae"
+kind = "site"
+name = "SuperAI constructor: this SuperAI into the per-clan table 0x10055398"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x10055398"
+kind = "datum"
+name = "SuperAI per clan number; function 31 walks the named clan's unit list (+0x8c)"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x10054c68"
+kind = "datum"
+name = "the Mission handler's next run time, one for the module"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1005ed85"
+kind = "site"
+name = "game frame: the local player's clan (+0xad0) runs SuperAI slot 9, then every clan slot 3"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100952d0"
+kind = "function"
+name = "message play: the first time its voice through 0x10061ac0 and the history; again, strings 6170 and 6223 only"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100950dc"
+kind = "site"
+name = "messages.cfg: a message's optional info_system flag"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10061ac0"
+kind = "function"
+name = "a voice by name (with _S or _B by the speaker's kind when one is given) to ISoundServer slot 4"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10060f5e"
+kind = "site"
+name = "OBJECTIVE_COMPLETE: after the state, the completion test; true sends SYSTEM_MESSAGE MISSION_COMPLETE"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10060d9f"
+kind = "site"
+name = "MISSION_COMPLETE: VOICE_MISSION_COMPLETE, the outcome word 0, +0x157 = 1"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10060e89"
+kind = "site"
+name = "OBJECTIVE_COMPLETE on an open objective: string 5040, VOICE_OBJ_COMPLETE, state 1"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1006a79b"
+kind = "site"
+name = "objective list: primary_objectives first, exempt 0"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1006a96a"
+kind = "site"
+name = "objective list: a bonus objective, exempt 1"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1005e2e1"
+kind = "site"
+name = "mission load: THEME straight to ISoundServer slot 2"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1005f8f1"
+kind = "site"
+name = "ambient_music_variation: DEFAULT_/DAY_/NIGHT_ VARIATION1.. gathered while the key exists"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10077511"
+kind = "site"
+name = "a unit placed: its clan's SuperAI slot 4 with event 1 and its logical id"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "services.dll"
+at = "0x1003a4a4"
+kind = "datum"
+name = "ISoundServer vtable: 2 play now, 4 queue, 5 clear, 6 advance, 7/8 enable, 9 enabled"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "services.dll"
+at = "0x10011bb0"
+kind = "function"
+name = "ISoundServer slot 2: play a named sound at once"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "services.dll"
+at = "0x10011ab0"
+kind = "function"
+name = "ISoundServer slot 4: queue a named sound; it starts at once when the queue is empty"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "services.dll"
+at = "0x100119e0"
+kind = "function"
+name = "ISoundServer slot 6: when the front sound has stopped, pop it and start the next"
+read = true
+doc = "docs/34-progression.md"
+[[entry]]
+module = "Behavior.dll"
+at = "0x10005fc5"
+kind = "site"
+name = "logical id attached: MBehaviour flag 2 (+0xa04), which the object takt's tactical report needs"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10095519"
+kind = "site"
+name = "message play: the history entry is kind 3, or 4 with info_system"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10064604"
+kind = "site"
+name = "a call through a +0x50 pointer's slot 9 after a lookup of Type 0x1020000; not followed, may not be a SuperAI"
+read = false
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10064629"
+kind = "site"
+name = "a call through a +0x50 pointer's slot 9; not followed, may not be a SuperAI"
+read = false
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10067887"
+kind = "site"
+name = "a call through a +0x50 pointer's slot 9 on +0xaec or +0xaf0; not followed, may not be a SuperAI"
+read = false
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100a2a6a"
+kind = "site"
+name = "a call through a +0x50 pointer's slot 9; not followed, may not be a SuperAI"
+read = false
+doc = "docs/34-progression.md"

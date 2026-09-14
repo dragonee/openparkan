@@ -78,7 +78,10 @@ mission's: a mission cannot omit one. The SuperAI constructor looks up
 `Mission`, `Problems0`, `Mech_GeneratorFound` and `Fort_Task_Complete` by name,
 and reports "Script error - details in ai.log" when either of the last two is
 missing (`0x1000160b`, *read*); function 33 can replace `Problems0` with any
-`Problems<n>`.
+`Problems<n>`. `Init` runs once, from SuperAI slot 5. `Mission` runs from
+slot 9, at most every 2 s, and the game frame calls that slot only for the
+local player's clan. The problem handler runs from the clan's takt, every 7 to
+8 s. See [34-progression.md](34-progression.md#when-the-mission-handler-runs--read).
 
 Five more names are neither — `All_Defence`, in seven scripts, and
 `BUILD_MINE` and the difficulty handlers `Easy`, `Normal` and `Hard`, in one
@@ -398,7 +401,7 @@ slot `0xfffe`) is taken by nobody.
 | 13 | 2 | `UNIT_FREE_UNIT`/`_FREE_CAPTURER`/`_ANY_UNIT`, type | pick a free unit of a type, a free capturer, or one free or on a lighter problem |
 | 51 | 39 | *id*, `TRUE`/`FALSE` | reserve a unit from every problem, or free it |
 | 34 | 29 | type | how many units of that type the clan has |
-| 31 | 48 | *clan*, class mask | how many of clan *clan*'s units have a type sharing a bit with the mask |
+| 31 | 48 | *clan*, class mask | how many of clan *clan*'s units have a type sharing a bit with the mask: the entries of that clan's SuperAI unit list (`0x10055398[clan] +0x8c`) whose logical id is set ([34-progression.md](34-progression.md)) |
 | 38 | 13 | *clan*, `FREE_UNITS`/`ALL_UNITS` | the summed strength of that clan's battle units |
 | 11 | 11 | type | 1 when the clan already has as many of the type as its `dMax*` variable allows, or when a per-type counter the brain keeps (`+0x3e0`..`+0x3f8`) is set |
 | 49 | 9 | — | the clan's free minds |
@@ -450,7 +453,7 @@ changes is not read.
 | 59 | 26 | delay | now plus the delay, in whole seconds (`+0x854`, which the constructor sets from `timeGetTime` over 1000) |
 | 60 | 20 | time | 1 once that time has passed, else `ERROR` |
 | 70 | 1 | *n* | a random number below *n* |
-| 32 | 62 | *clan a*, *clan b* | 1 when *b* is on the list the system areal map's slot 33 gives for *a* |
+| 32 | 62 | *route*, *id* | 1 when the unit with logical id *id* was last reported inside route *route*, the system areal map's tactical areal of that id (slot 33). Read here once as two clans; 36 of 36 resolved calls pass a route id and a unit's logical id ([34-progression.md](34-progression.md)) |
 | 43 | 10 | — | load the files in `UNITS\UNITS\AI\` into the object at `+0x40c`, which also keeps the place list function 40 reads |
 | 41 | 2 | *id* | a test of the unit through that object; `FALSE` ends `PBM_MAKE_RESEARCH_Start` as solved |
 | 65, 56 | 1, 2 | — | a flag of that object (`dLargeResearched = fn65()`); the byte at `+0x431` |
@@ -628,14 +631,19 @@ capturer — which is why the table stops one call deep.
 - **What the helpers below the handlers compute.** A unit's *strength*
   (`0x100065e0`: IControl property `0x36` and object property `0x204`), a
   distance (`0x10006130`), the problem's action record (`+0x34`), the object at
-  `+0x40c` behind functions 40, 41, 43, 53 and 65, and the areal-map list
-  function 32 tests. The table says what each handler does with them.
+  `+0x40c` behind functions 40, 41, 43, 53 and 65. The table says what each
+  handler does with them. ~~The areal-map list function 32 tests~~ is now read:
+  a route's list of the units last reported inside it
+  ([34-progression.md](34-progression.md)).
 - **The two numbers a problem is raised with** — `fn2`'s third and fourth
   arguments, kept at `+0x24` and `+0x2c` (`25` and `24` above) — and what the
-  engine does with a problem once raised: which handler runs when, and who
-  writes `dCurrentProblem` and `dCurrentSender`.
-- **Channel 2 of the message callback** (function 57), what `MESSAGE_INFO`'s
-  value selects in `iron3d.dll`, and the `+0x41c` count function 69 stores.
+  engine does with a problem once raised: which problem handler runs when, and
+  who writes `dCurrentProblem` and `dCurrentSender`. When `Init`, `Mission` and
+  `Problems<n>` run is read in [34-progression.md](34-progression.md).
+- **Channel 2 of the message callback** (function 57), and the `+0x41c` count
+  function 69 stores. What `MESSAGE_INFO`'s value selects in `iron3d.dll` is
+  read: a `messages.cfg` id, played as [34-progression.md](34-progression.md)
+  describes.
 - **Whether any script depends on a constant landing inside a false block.**
   The engine does it 63 times over; the scripts may overwrite the variable
   before reading it every time.

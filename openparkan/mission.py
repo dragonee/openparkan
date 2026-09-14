@@ -384,8 +384,38 @@ class MissionObject:
 
 @dataclass
 class Route:
+    """A polygon on the ground: the system areal map's **tactical areal** ``id``.
+
+    ``IMission`` slot 8 (``MisLoad.dll:0x10001380``) sets as many tactical
+    areals as there are routes and gives areal *i* the points of the route
+    whose id is *i*.  A unit is in it when ``contains`` holds for its x and y;
+    the script function 32 asks that of a logical id (docs/34-progression.md).
+    """
+
     id: int
     points: list[tuple[float, float, float]]
+
+    def contains(self, x: float, y: float) -> bool:
+        """The crossing test ``ArealMap.dll:0x10017b90`` makes, in x and y only.
+
+        A ray from the point towards +x crosses the closed outline an odd
+        number of times.  An edge counts when its ends lie on either side of
+        the point's y (one at or above it, one below) and it meets the ray at
+        or right of the point; z is ignored.
+        """
+        inside = False
+        if not self.points:
+            return inside
+        px, py = self.points[-1][0], self.points[-1][1]
+        for cx, cy, _ in self.points:
+            if (cy >= y) != (py >= y):
+                if cx >= x and px >= x:
+                    inside = not inside
+                elif (cx >= x) != (px >= x):
+                    if cx + (px - cx) * (y - cy) / (py - cy) >= x:
+                        inside = not inside
+            px, py = cx, cy
+        return inside
 
 
 @dataclass
@@ -620,6 +650,9 @@ def load_cfg(path: str | Path) -> dict[str, dict[str, str]]:
     Returns ``{object_name: {property: value}}``.  Values keep their source
     form minus surrounding quotes.  A shipped comment in the file notes that
     the object names are what matter, not the property names.
+
+    A header is the word ``object`` on its own: ``objective1 = ...`` inside
+    ``primary_objectives`` starts with the same six letters and is a property.
     """
     out: dict[str, dict[str, str]] = {}
     current: dict[str, str] | None = None
@@ -627,12 +660,39 @@ def load_cfg(path: str | Path) -> dict[str, dict[str, str]]:
         line = raw.split("#", 1)[0].strip()
         if not line:
             continue
+        words = line.split(None, 1)
         if line.lower() == "end":
             current = None
-        elif line.lower().startswith("object"):
-            name = line.split(None, 1)[1].strip() if len(line.split(None, 1)) > 1 else ""
+        elif words[0].lower() == "object":
+            name = words[1].strip() if len(words) > 1 else ""
             current = out.setdefault(name, {})
         elif current is not None and "=" in line:
             key, value = line.split("=", 1)
             current[key.strip()] = value.strip().strip('"')
     return out
+
+
+#: The two ``mission.cfg`` objects ``iron3d.dll:0x1006a780`` builds the
+#: objective list from, primary first.
+PRIMARY_OBJECTIVES = "primary_objectives"
+BONUS_OBJECTIVES = "bonus_objectives"
+
+
+@dataclass(frozen=True)
+class Objective:
+    """One line of a mission's objective list.
+
+    A script names it by its position -- the primary objectives in file order,
+    then the bonus ones -- and ``exempt`` is set on the bonus ones, which the
+    completion test (``iron3d.dll:0x1006b130``) passes over.
+    """
+
+    text: str
+    exempt: bool
+
+
+def objectives(path: str | Path) -> list[Objective]:
+    """The objective list ``mission.cfg`` at ``path`` gives, in script order."""
+    blocks = load_cfg(path)
+    return ([Objective(t, False) for t in blocks.get(PRIMARY_OBJECTIVES, {}).values()]
+            + [Objective(t, True) for t in blocks.get(BONUS_OBJECTIVES, {}).values()])

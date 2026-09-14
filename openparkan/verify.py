@@ -11389,6 +11389,230 @@ def check_briefing(check, game: Path) -> None:
                       for i, h in holders.items()))
 
 
+#: Mission 01, the first training mission, whose progression docs/34 walks.
+MISSION_01 = "MISSIONS/CAMPAIGN/CAMPAIGN.00/Mission.01"
+
+#: Mission 01's routes 1 to 4 as docs/34 gives them: x and y extents, rounded.
+MISSION_01_ROUTE_BOXES = {
+    1: (441, 713, 322, 677), 2: (671, 1020, 268, 667),
+    3: (610, 1008, 666, 938), 4: (364, 969, 961, 1392),
+}
+
+#: ``varset.var``'s ``CLASS_ROBOT``: function 31's mask for "robots".
+CLASS_ROBOT = 0x01000000
+
+#: The two script functions a mission's progression turns on: 31 counts a
+#: clan's units by class, 32 asks whether a unit stands in a route.
+FN_COUNT, FN_IN_ROUTE = 31, 32
+
+#: ``iron3d.dll``'s own strings for an objective's end and a repeated message.
+PROGRESSION_STRINGS = {
+    5040: "Objective is completed",
+    5041: "Objective has failed",
+    6170: "Recieved message is already in history",
+    6223: "Press %s to see it.",
+}
+
+
+#: The voices the mission callback names, as ``ui/game_resources.cfg`` binds them.
+PROGRESSION_VOICES = {
+    "VOICE_OBJ_COMPLETE": "vc_obj_cpl.wav",
+    "VOICE_MISSION_COMPLETE": "vc_mis_cpl.wav",
+    "VOICE_MISSION_FAIL": "vc_mis_fail.wav",
+}
+
+
+def _script_value(table, nodes, at: int, var: int) -> int | None:
+    """What operand ``var`` holds at node ``at``: a pool constant, or the last
+    literal the handler wrote to it before then; ``None`` when neither."""
+    if 0 <= var < len(table) and table[var].literal:
+        return int(table[var].default)
+    for node in reversed(nodes[:at]):
+        if node.destination != var:
+            continue
+        if not node.calls and node.tag == behaviour.CONST and node.literal != behaviour.NULL:
+            return node.literal
+        return None
+    return None
+
+
+def check_progression(check, game: Path) -> None:
+    """A mission's progression: routes, zone tests, counts, messages, objectives."""
+    scripts_dir = game / "MISSIONS" / "SCRIPTS"
+    if not (scripts_dir / behaviour.VARSET).exists():
+        return
+    table = behaviour.variables(game)
+    names = {v.name: i for i, v in enumerate(table)}
+    by_stem = {p.stem.lower(): p for p in behaviour.scripts(game)}
+    dirs = sorted(p.parent for p in (game / "MISSIONS").rglob("data.tma"))
+    loaded = [(d, mission.load(d / "data.tma")) for d in dirs]
+
+    def clan_scripts(m):
+        for clan in m.clans:
+            stem = clan.ai_script.replace("\\", "/").rsplit("/", 1)[-1].lower()
+            if stem in by_stem:
+                yield clan, behaviour.read(by_stem[stem])
+
+    numbered = sum(sorted(r.id for r in m.routes) == list(range(len(m.routes)))
+                   for _, m in loaded)
+    routes = sum(len(m.routes) for _, m in loaded)
+    calls = in_route = on_unit = heroes = 0
+    for _, m in loaded:
+        ids = {r.id for r in m.routes}
+        units = {o.logical_id: o for o in m.objects if o.kind == mission.KIND_UNIT}
+        for _, script in clan_scripts(m):
+            for handler in script.handlers:
+                for i, node in enumerate(handler.nodes):
+                    if not (node.calls and node.function == FN_IN_ROUTE):
+                        continue
+                    calls += 1
+                    route = _script_value(table, handler.nodes, i, node.operands[0])
+                    unit = _script_value(table, handler.nodes, i, node.operands[1])
+                    in_route += route in ids
+                    on_unit += unit in units
+                    heroes += unit in units and "\\HERO\\" in units[unit].path.upper()
+    check("progression: a route is a tactical areal, by its id",
+          numbered == len(loaded) and routes,
+          f"{routes} routes on {len(loaded)} missions, ids 0..n-1 on {numbered}: "
+          f"IMission slot 8 gives tactical areal i the route whose id is i")
+    check("progression: function 32 asks whether a unit is in a route",
+          calls and in_route == on_unit == calls,
+          f"{calls} calls in the scripts missions name: the first argument is one "
+          f"of that mission's route ids on {in_route}, the second a unit's logical "
+          f"id there on {on_unit} -- {heroes} the hero's, {calls - heroes} another unit's")
+
+    d01 = game / MISSION_01
+    if not (d01 / "data.tma").exists():
+        return
+    m01 = mission.load(d01 / "data.tma")
+    by_id = {r.id: r for r in m01.routes}
+    units = [o for o in m01.objects if o.kind == mission.KIND_UNIT]
+    hero = next(o for o in units if "\\HERO\\" in o.path.upper())
+    x, y, _ = hero.position
+    holding = [i for i, r in sorted(by_id.items()) if r.contains(x, y)]
+    neutral = [o for o in units if m01.clans[o.clan_id].index == mission.CLAN_NEUTRAL]
+    neutral_in = {i for o in neutral for i, r in by_id.items()
+                  if r.contains(o.position[0], o.position[1])}
+    corner = max(math.hypot(px - x, py - y) for px, py, _ in by_id[0].points)
+    boxes = {i: (round(min(q[0] for q in r.points)), round(max(q[0] for q in r.points)),
+                 round(min(q[1] for q in r.points)), round(max(q[1] for q in r.points)))
+             for i, r in by_id.items() if i}
+    check("Mission 01: route 0 is the hero's start, route 3 the neutrals'",
+          holding == [0] and neutral_in == {3} and len(neutral) == 2
+          and len(by_id[0].points) == 4 and corner < 3
+          and boxes == MISSION_01_ROUTE_BOXES,
+          f"the hero (logical id {hero.logical_id}) starts inside route {holding}, "
+          f"four corners at most {corner:.1f} m away; the {len(neutral)} "
+          f"neutral units ({', '.join(o.path.rsplit(chr(92), 1)[-1] for o in neutral)}) "
+          f"stand in route {sorted(neutral_in)}; routes 1-4 span x, y {boxes}")
+
+    robots = Counter(o.clan_id for o in units if (o.type_id or 0) & CLASS_ROBOT)
+    counted = []
+    for _, script in clan_scripts(m01):
+        for handler in script.handlers:
+            for i, node in enumerate(handler.nodes):
+                if node.calls and node.function == FN_COUNT:
+                    counted.append(_script_value(table, handler.nodes, i, node.operands[0]))
+    target_clan = next(i for i, c in enumerate(m01.clans) if c.name == "Trgt")
+    check("Mission 01: the robots function 31 counts, by clan",
+          dict(robots) == {0: 1, target_clan: 5, 2: 1, 3: 2}
+          and all(o.type_id & CLASS_ROBOT for o in units)
+          and set(counted) == {0, 1, 2, 3},
+          f"CLASS_ROBOT is set on all {len(units)} units' Type; by clan "
+          f"{dict(sorted(robots.items()))} -- the hero alone for Plr, five targets, "
+          f"one enemy, two neutrals (a warrior each); tut1_pl2 counts clans "
+          f"{sorted(set(counted))}")
+
+    kinds = {names[k] for k in ("OBJECTIVE_COMPLETE", "OBJECTIVE_FAILED",
+                                "OBJECTIVE_PROGRESS")}
+    fits = total = 0
+    misses: set[str] = set()
+    m01_values: list[int] = []
+    for d, m in loaded:
+        cfg = d / "mission.cfg"
+        if not cfg.exists():
+            continue
+        size = len(mission.objectives(cfg))
+        for _, script in clan_scripts(m):
+            for handler in script.handlers:
+                for i, node in enumerate(handler.nodes):
+                    if not (node.calls and node.function == 30
+                            and node.operands[0] in kinds):
+                        continue
+                    value = _script_value(table, handler.nodes, i, node.operands[1])
+                    if value is None:
+                        continue
+                    total += 1
+                    fits += value < size
+                    if value >= size:
+                        misses.add(script.source.stem)
+                    if d == d01:
+                        m01_values.append(value)
+    listed = mission.objectives(d01 / "mission.cfg")
+    c2m3 = mission.objectives(game / "MISSIONS/CAMPAIGN/CAMPAIGN.02/Mission.03/mission.cfg")
+    check("progression: a script names an objective by its place in the list",
+          total and fits == total - 2 and misses == {"c2m3p"}
+          and len(listed) == 3 and not any(o.exempt for o in listed)
+          and sorted(m01_values) == [0, 1, 2],
+          f"{fits}/{total} objective values the scripts pass fit their mission's "
+          f"primary + bonus list; the 2 that do not are c2m3p's, past a list of "
+          f"{len(c2m3)}; "
+          f"Mission 01 lists {len(listed)} primary objectives and completes "
+          f"{sorted(m01_values)}")
+
+    voices = resources.locate(game, "voices.lib")
+    members = ({e.name.lower() for e in NResArchive.open(voices).entries}
+               if voices else set())
+    files = sorted((game / "MISSIONS" / "CAMPAIGN" / "CAMPAIGN.00").glob(
+        f"*/{briefing.MESSAGES}"))
+    exact = present = lines = 0
+    for f in files:
+        roles = {d.role: d for d in resources.descriptors(f.parent / "mission.cfg")}
+        spoken = {w.sound_id.lower() for w in briefing.waypoints(f.parent / briefing.BRIEFING)
+                  if w.sound_id}
+        for msg in briefing.messages(f):
+            lines += 1
+            by_briefing = roles.get(briefing.BRIEFING_ROLE)
+            by_tutorial = roles.get(briefing.MESSAGE_ROLE)
+            member = ((by_briefing and by_briefing.get(msg.voice_id))
+                      or (by_tutorial and by_tutorial.get(msg.voice_id)) or "")
+            present += member.lower() in members
+            briefed = bool(by_briefing and by_briefing.get(msg.voice_id))
+            exact += briefed == (msg.voice_id.lower() in spoken) and (
+                briefed or bool(by_tutorial and by_tutorial.get(msg.voice_id)))
+    check("progression: a training message's voice is the briefing's or the tutorial's",
+          files and exact == lines == present,
+          f"{lines} messages in the {len(files)} training missions: {exact} are bound "
+          f"by briefing_sounds exactly when the briefing speaks them and by "
+          f"tutorial_voices otherwise; {present} name a member of voices.lib")
+
+    every = [(f, m) for f in sorted(game.rglob(briefing.MESSAGES))
+             for m in briefing.messages(f)]
+    flagged = [(f, m) for f, m in every if m.info_system]
+    training = {f.parent for f in files}
+    helps = sum("_H" in m.text_id.upper() for f, m in flagged if f.parent in training)
+    later = sum(f.parent not in training for f, _ in flagged)
+    check("progression: info_system marks the help lines and the later campaigns'",
+          len(every) == briefing.MESSAGES_TOTAL
+          and helps == sum("_H" in m.text_id.upper() for f, m in every if f.parent in training)
+          and later == sum(f.parent not in training for f, _ in every)
+          and len(flagged) == helps + later,
+          f"{len(flagged)}/{len(every)} messages set it: all {helps} training lines "
+          f"named _H, and all {later} messages outside the training campaign; no "
+          f"training briefing or instructor line")
+
+    strings = resources.strings((game / "iron3d.dll").read_bytes())
+    game_voices: dict[str, str] = {}
+    for d in resources.descriptors(game / "ui" / "game_resources.cfg"):
+        game_voices.update({k: v.lower() for k, v in d.bindings.items()})
+    endings = {k: game_voices.get(k) for k in PROGRESSION_VOICES}
+    check("progression: iron3d.dll's words for objectives and repeated messages",
+          all(strings.get(k) == v for k, v in PROGRESSION_STRINGS.items())
+          and endings == PROGRESSION_VOICES,
+          "; ".join(f"{k} {strings.get(k)!r}" for k in PROGRESSION_STRINGS)
+          + f"; ui/game_resources.cfg voices {endings}")
+
+
 def check_settings(check, game: Path) -> None:
     """The engine's own configuration files, and which module owns each."""
     registry_path = game / settings.COMPONENTS_FILE
@@ -11476,7 +11700,8 @@ def run(game: Path) -> int:
         check_units, check_loading, check_search, check_construction,
         check_controls, check_player_input, check_turret_channels,
         check_behaviour, check_research, check_descriptions, check_saves,
-        check_vocabulary, check_resources, check_briefing, check_settings,
+        check_vocabulary, check_resources, check_briefing, check_progression,
+        check_settings,
         check_research_streams, check_atmosphere_events,
         check_varset_types, check_profiles,
     )
