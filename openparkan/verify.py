@@ -6834,6 +6834,58 @@ def _land_z(land, x, y):
     return dry, wet
 
 
+def check_lake_and_buoys(check, game: Path) -> None:
+    """Mission 01: how much life the hero has for a lake bed, and the buoys' faces."""
+    m = mission.load(game / MISSION_01_DATA)
+    asm = assembly.Assembly(game)
+    hero = next(o for o in m.objects if "\\hero\\" in o.path.lower())
+    lives = {}
+    for component in objects.load_unit(asm.unit_file(hero.path)).components:
+        record = asm.library.get(component.ref.member)
+        ref = record.damage if record else None
+        if ref is None:
+            continue
+        rows = objects.parse_damage(asm.archive(ref.library).read_name(ref.member), ref.member)
+        lives[component.ref.member.lower()] = (len(rows), sum(r.durability for r in rows))
+    models = {k: v for k, v in lives.items() if v[0] > 1}
+    fitted = [v for k, v in lives.items() if v[0] == 1]
+    total = sum(life for _, life in lives.values())
+    bed = materials.MaterialLibrary(game / "Material.lib").get("WATER_BOT")
+    updates = math.ceil(total / (bed.damage_rate * 0.25))
+    check("Mission 01: a lake bed takes the hero's life on the third life update",
+          models == {"r_h_02": (10, 2881), "e_tur_ht_02": (36, 4474)}
+          and len(fitted) == 7 and all(v == (1, 1) for v in fitted) and total == 7362
+          and bed.damage_rate == 10000 and bed.surface == 1 and updates == 3
+          and math.ceil((total - 7) / (bed.damage_rate * 0.25)) == 3,
+          f"hero models {models}, {len(fitted)} fitted parts of 1 hit point; {total:g} in all; "
+          f"WATER_BOT surface {bed.surface}, rate {bed.damage_rate:g} a second, so "
+          f"{bed.damage_rate * 0.25:g} per 250 ms update and {updates} updates to die, "
+          f"with or without the fitted parts")
+
+    buoys = [(i, o.kind, o.placed_scale) for i, o in enumerate(m.objects)
+             if o.path.lower() == "s_tree_29"]
+    normals, count = Counter(), 0
+    for part in asm.parts(buoys[0][1], "s_tree_29"):
+        mesh = asm.mesh(part.ref)
+        for node in mesh.nodes:
+            s = node.hit_slot(0)
+            if s is None:
+                continue
+            slot = mesh.slots[s]
+            for t in range(slot.first_triangle, slot.first_triangle + slot.triangle_count):
+                count += 1
+                normals[round(mesh.face_normal[t][2], 2)] += 1
+    check("Mission 01: five buoys, 36 vertical faces and 12 at normal z 0.49",
+          [i for i, _, _ in buoys] == [25, 26, 27, 29, 30]
+          and all(kind == 2 and scale == 1 for _, kind, scale in buoys)
+          and count == 178 and normals[0.49] == 12 and normals[0.0] == 36,
+          f"s_tree_29 at objects {[i for i, _, _ in buoys]}, kinds and scales "
+          f"{sorted({(k, s) for _, k, s in buoys})}; {count} level-0 triangles, "
+          f"normal z {sorted(normals.items())}; control: the cone's horizontal part "
+          f"{math.sqrt(1 - 0.49 ** 2):.2f} leaves a flattened push "
+          f"{1 - math.sqrt(1 - 0.49 ** 2):.0%} of a step short")
+
+
 def check_collision(check, game: Path) -> None:
     """Collision and the ground on Mission 01: the bridge's deck, obstacles' spheres and flags."""
     m = mission.load(game / MISSION_01_DATA)
@@ -12461,7 +12513,7 @@ def run(game: Path) -> int:
         check_rsli,
         check_control, check_efficiency,
         check_motion, check_playback, check_ground, check_sensors, check_hit_test,
-        check_collision,
+        check_collision, check_lake_and_buoys,
         check_combat, check_ownership,
         check_capture, check_repair, check_chassis, check_weapons, check_firing,
         check_targeting, check_ai_fight, check_turrets, check_packages, check_wingman,

@@ -6983,14 +6983,6 @@ read = true
 
 [[entry]]
 module = "Control.dll"
-at = "0x10010ba0"
-kind = "function"
-name = "heal: nodes topped up in index order (or pro rata), destroyed nodes only when flagged"
-doc = "docs/26-damage.md"
-read = true
-
-[[entry]]
-module = "Control.dll"
 at = "0x10022b00"
 kind = "function"
 name = "repair slot 1: flags a type-3 object's repair system to restore destroyed parts"
@@ -17246,3 +17238,179 @@ kind = "site"
 name = "gun report +0x11c = 2"
 doc = "docs/29-weapons.md"
 read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10010ba0"
+kind = "function"
+name = "node update: heal tops nodes up in index order (or pro rata), destroyed nodes only when flagged; a loss is held to the total life and taken pro rata (flag 1 clear) or from the last node down"
+doc = "docs/26-damage.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001ab06"
+kind = "site"
+name = "ground contact: the material record's rate dword copied to +0x1a4 (G to +0x1a8 before it)"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x10006364"
+kind = "site"
+name = "machine life update base wait: 250.0 ms"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000c774"
+kind = "site"
+name = "machine tick: life update wait = 250 + rand16 x 250/65536 - 125 ms past the last"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000c7ce"
+kind = "site"
+name = "machine tick: the life update also runs while the counter +0xd4 is above 0"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000c7e6"
+kind = "site"
+name = "life update dt = elapsed ms x 0.001"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000c7f5"
+kind = "site"
+name = "life update: node update 0x10012a40(dt)"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000c7fd"
+kind = "site"
+name = "life update: power tick 0x1002d340(dt)"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000c843"
+kind = "site"
+name = "machine tick: counts +0xd4 down"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x10012a47"
+kind = "site"
+name = "node update: an invulnerable object (+0x5b0) takes no ground damage"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x10012a7e"
+kind = "site"
+name = "ground damage: 0x10010ba0(-rate x dt, 0, 0)"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x10010bb1"
+kind = "site"
+name = "node update: nothing for an object with +0x618 set"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x10010c6f"
+kind = "site"
+name = "node update: a loss is held to the current total life +0x590"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x10010d87"
+kind = "site"
+name = "node update, flag 1 set: a loss is taken whole from the last node down"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x10010e22"
+kind = "site"
+name = "node update, flag 1 clear: share = held loss / total"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x10010eb7"
+kind = "site"
+name = "node update: a loss hands every node -share x its life (0x10010f30)"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x10010ef7"
+kind = "site"
+name = "node update: stage update 0x10011130 after a pro-rata loss"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000cae6"
+kind = "site"
+name = "machine push (message 0x1b): the push added to the pose matrices, velocity kept"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001f2c6"
+kind = "site"
+name = "collision object constructor: the pair handler +0x40 zeroed; no other writer found"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001dd24"
+kind = "site"
+name = "collision face stop: A's +0x38 slot 6 with B's centre segment, no radius"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1000cfb1"
+kind = "site"
+name = "size class of a unit (kind 4): the name's third letter, b4 h2 l2 m3 t1, else 0"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x1000e900"
+kind = "function"
+name = "push-out triangle test: plane distance 0..r, the centre projected; outside an edge, the edge or corner closest point"
+read = true
+doc = "docs/24-motion.md"

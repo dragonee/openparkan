@@ -525,7 +525,9 @@ shipped code that raises a node's life:
      properties, by the look of it — *guess*).
 3. **The other callers of the node update** (`0x10010ba0`) all pass damage:
    collision (`0x1000d212`, `0x1000d2f9`), the ground (`0x10012a7e`) and
-   vital nodes (`0x10012c37`).
+   vital nodes (`0x10012c37`). The ground's loss is shared: every node gives
+   up the same share of its own life, and none is destroyed until all of them
+   are ([24-motion.md](24-motion.md#water-and-lava-beds-kill--read-and-measured)).
 4. **A hit cannot heal**: the armoured damage is clamped at 0
    (`0x10010253`), and every one of the 144 `.exp` files does 0 or more
    (*measured*).

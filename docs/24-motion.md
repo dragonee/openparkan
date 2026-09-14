@@ -580,17 +580,89 @@ Walking Chs, the Tiny Spider and every flyer are mode 0 and ignore slope.
 - **The ground never changes a machine's speed on shipped data**: G is 1
   everywhere.
 - **Lake and lava beds kill.** An agent of kind 4 loses `dt × rate` hit points
-  through the node update each tick (`0x10012a66`). Kind 4 is every `BTLU`
-  record in `objects.rlb` — the units, the hero among them — because an
+  through the node update on each of its life updates (`0x10012a66`). Kind 4
+  is every `BTLU` record in `objects.rlb` — the units, the hero among them — because an
   agent's kind comes from its object tag: `BTLU` 4, `BULL` 9, `WPNS` 2, `STAT`
   10 (`AniMesh.dll:0x1000317f`). So a unit touching a bed loses 10000 hit
   points a second. Every one of the 6102 bed faces is surface 1 with that rate.
+  [Water and lava beds, in detail](#water-and-lava-beds-kill--read-and-measured)
+  gives the cadence and how the loss is shared.
 - **The terrain uses five surface ids.** Counting the faces of both levels of
   detail, surface 1 covers 208406 (`L02`, `L33`, `L35` and most others), 2
   covers 54220 (`L00`, `L19`, `L20`, `L28`, `L32`), 0 covers 9626 (`L08`), 7
   the 1006 `WATER` faces, and `0xFF` the 2624 `ENV_NLAVA` lava surfaces.
 - **Tut_1** has 5250 faces of `L02` (1), 2208 of `L00` (2), 478 of
   `WATER_BOT` (a bed, 1, at 10000) and 354 of `WATER` (7).
+
+### Water and lava beds kill — *read*, and *measured*
+
+**When the rate is read** (*read*). The ground contact copies a face's
+material record — the surface id, G and the rate at `+0x1a4` — only when the
+body sphere touches the face, `|ground point − centre|² ≤ 2r²`
+(`0x1001a9f9`). A liquid bed (world face flag `0x400`) is read instead when
+the liquid surface above it lies less than r below the sphere's centre
+(`0x1001aa99`), and the record's dword is loaded as a float (`0x1001ab06`). A
+machine touching no face keeps the last rate it read, as it keeps G.
+
+**When it is spent** (*read*). The machine's tick runs a **life update** once
+250 ms have passed since the last, give or take 125: the wait is 250
+(`0x10006364`) plus a 16-bit random times 250/65536, less 125
+(`0x1000c774`–`0x1000c7c1`). The update's dt is the elapsed milliseconds ×
+0.001 (`0x1000c7e6`), and it hands that to the node update and to the power
+tick (`0x1000c7f5`, `0x1000c7fd`). The node update (`0x10012a40`):
+
+- does nothing to an **invulnerable** object (`+0x5b0`, `0x10012a47`);
+- when the rate is above 0 and the agent's kind is 4 (`+0x50`, `0x10012a66`),
+  calls `0x10010ba0` with **−rate × dt** and both of its flags clear
+  (`0x10012a7e`).
+
+The update also runs on every tick while the counter `+0xd4` is above 0
+(`0x1000c7ce`); the tick counts it down (`0x1000c843`). Who sets it is not
+traced.
+
+**How the loss is shared** (*read*, `0x10010ba0`). An object with `+0x618` set
+takes nothing (`0x10010bb1`). A loss is held to the object's current total life
+(`+0x590`, `0x10010c6f`). Then:
+
+- **First flag clear**, as the node update passes it: every node loses **the
+  same share of its own current life**. The share is the held loss over the
+  total (`0x10010e22`), and each node is handed −share × its life through
+  `0x10010f30` (`0x10010eb7`–`0x10010ede`). The stage update follows
+  (`0x10010ef7`).
+- **First flag set**: the loss is taken whole from the last node down to node 0
+  (`0x10010d87`–`0x10010e07`).
+
+So on ground damage no node reaches 0 until the loss reaches the total, and
+then every node does in the same update. Node 0 goes with the rest, and the
+object dies as any whose node 0 is destroyed
+([26-damage.md](26-damage.md#hit-points--read-and-measured)). No shield and no
+armour is asked.
+
+**On Mission 01** (*measured*, then *derived*). The hero's two models carry
+7355 hit points — `r_h_02` 2881 over 10 nodes, `e_tur_ht_02` 4474 over 36 —
+and its seven fitted parts 1 each, 7362 in all. Whether the fitted parts count
+in the unit's total is not traced, and the answer below holds either way. The
+player's own hero is never given the difficulty ratio
+([26-damage.md](26-damage.md#the-difficulty-ratio--read-and-measured)).
+
+- **Time to die** (*derived*). A loss of 10000 × dt means the hero dies on the
+  first life update that brings the time charged to 0.74 s. dt counts from the
+  previous update, and that one may have been on dry ground, so up to one
+  interval before the hero reached the bed is charged too. An even 250 ms
+  cadence kills on the **third** update in the lake, 2500 each: 0.5–0.75 s after
+  the feet are wet. With the ±125 ms jitter the span is about 0.4–1.1 s.
+- **Wading** (*derived*). A bed reads wet once the water surface is less than
+  r = 2.18 below the sphere's centre. Where the engine puts the hero's sphere,
+  that is feet within about 0.9 of the water line. Walking onto a lake's bed is
+  death within a second.
+- **A flyer** (*derived*) whose sphere keeps more than r above the water never
+  reads the bed. Whether a flying machine runs the ground contact at all is not
+  traced.
+- **The water does not slow a unit on its way in**: G is 1 on `WATER_BOT`, as
+  on every material.
+- **Leaving keeps the rate** (*derived* from the first paragraph). A unit that
+  jumps off a bed and touches nothing still carries 10000 until it lands on a
+  face whose rate is 0.
 
 ### The eleven surface groups switch the dust — *measured*
 
@@ -865,10 +937,12 @@ starts at 0:
      overlaps B's sphere is visited (`0x1000dfe0`). Each triangle that
      `0x1000e900` accepts, given the triangle, its plane and the sphere, gives a
      direction to B's centre and a distance, turned into the world
-     (`0x1000e0c0`). The faces are kept sorted by distance. That the direction
-     runs from the triangle's closest point, and that the test is the distance
-     against r, is *derived* from how the next step uses them;
-     `0x1000e900` itself was not read.
+     (`0x1000e0c0`). The faces are kept sorted by distance. `0x1000e900`
+     (*read*) passes over a triangle whose plane lies behind the centre or more
+     than r in front of it. It projects the centre into the plane and keeps
+     that point when it is inside the edges; otherwise it takes the closest
+     point on an edge or a corner (`0x1000eb70`). So a face pushes only from its
+     front, from its closest point.
    - **Hidden faces go.** A face whose centroid is hidden from B's centre by
      another gathered face is dropped: the segment from the centre to the
      centroid meets that face inside its triangle, edges included
@@ -939,6 +1013,54 @@ has joined. That is not settled.
 The hero is the smaller sphere against every one of them, so it is always the
 mover. Its sphere is pushed out of their triangles, and its segment is
 stopped by their faces. A leaf never stops it.
+
+### What a buoy does to a walker — *read*, *measured*, and not established
+
+The five buoys on Mission 01 — objects 25, 26, 27, 29 and 30 — are `s_tree_29`,
+kind 2 at scale 1 (*measured*). Its model `s_tree_0_29` has 178 level-0
+triangles at two dozen slopes. 36 are vertical, and 12 face out and up at
+normal z 0.49, a horizontal part h of about 0.87. That the 0.49 faces are the
+ones a walker meets head-on is *derived* from the creep measured below, which
+matches that h.
+
+**What the read steps do at it** (*read*):
+
+- **No handler of its own.** The collision object's constructor
+  (`0x1001f290`) zeroes the handler at `+0x40` (`0x1001f2c6`), and no other
+  writer was found among the collision code's functions. So the pair takes the
+  default path, `0x1001d630` → `0x1001daf0`.
+- **The face stop is a point's segment.** Step 1's query goes through A's
+  `+0x38` slot 6, `AniMesh.dll:0x10013ef0`, with two points and no radius
+  (`0x1001dd24`). It stops B only when B's **centre** would cross a face.
+- **The small-face stop needs class 3 or 4.** `0x1000cee0` gives a unit its
+  class from the third letter of a name (`Behavior.dll:0x1000cfb1`). Which name
+  it is handed is not traced. `tut1_p` gives `t`, 1, and `r_h_02` gives `h`,
+  2, so the hero is 2 at most.
+- **The push-out is flattened.** Step 3 pushes B's sphere out along each face
+  from the face's closest point. The machine then drops the push's z and scales
+  x and y back up to its length, at most ×4 (`0x1000ca44`), and keeps its
+  velocity.
+
+**So a sloped face gives way** (*derived*). A walker moves a step s straight
+into a face whose normal has horizontal part h. The sphere sinks s × h into the
+face's plane, and the push out has that length. Flattened, all of that length
+points back along the face's horizontal normal. The walker is left s × (1 − h)
+inside the face. A vertical face (h = 1) stops it dead. The buoy's cone
+(h ≈ 0.87) lets it creep 13% of every step, and any glancing contact adds a
+sideways part that slides it round. The centre meets a face, and step 1 stops
+it, only after about 2.18 ÷ 0.06 ≈ 36 such steps.
+
+**On openparkan's engine**, which follows the steps above (*measured*): the hero
+walked head-on into buoy 26 moves in 0.06 for each 0.46 step. A sideways push
+of about 0.05 a step grows until it slides past.
+
+**Not established.** No read step stops a class-2 walker at a small sloped
+object. Whether the original game lets the hero through a buoy has not been
+seen here. What could stop it, all unconfirmed:
+
+- a handler set at `+0x40` by code outside the functions searched;
+- a class of 3 or more reaching message `0x201`;
+- a stop that tests the swept sphere rather than the centre's segment.
 
 ### The map edge — *read*
 
@@ -1220,16 +1342,26 @@ points are given is not traced. `Movement_FlyHeight` is 40 and
   over the unhidden faces within the sphere, nearest first, and is held to 4r;
   the 0.5 is how far off a triangle, in x and y, a point may still find it
   ([Collision between objects](#collision-between-objects--read),
-  [Finding the ground](#finding-the-ground--read)). What `0x1000e900` tests
-  exactly is not read, and whether any `Terrain.dll` class answers `0x25` is
-  not checked.
+  [Finding the ground](#finding-the-ground--read)). `0x1000e900` is now read
+  too: a face in front of the centre within r, from its closest point. Whether
+  any `Terrain.dll` class answers `0x25` is not checked.
 - ~~Which scene nodes are types 1 and 3~~ — **read** for buildings: a
   `CBuilding`'s slot 11 is 3, so a bridge is ground. That a unit's and a tree's
   slot 11 give their collision kinds 4 and 10, so they are not ground, is
   *derived*. Still open: what class message
   `0x201` returns through a mover's interface `0x10` (the size class is a
-  *guess*), the masses property `0x7c` gives a unit and a static object, and
-  who sets a collision entry's skip flag 1.
+  *guess*; that class is read from a name's third letter, `Behavior.dll:0x1000cfb1`,
+  but which name is not traced), the masses property `0x7c` gives a unit and a
+  static object, and who sets a collision entry's skip flag 1.
+- **What stops a walker at a small sloped object**, such as a buoy. No read
+  step does
+  ([What a buoy does to a walker](#what-a-buoy-does-to-a-walker--read-measured-and-not-established)).
+  Nor is it known who, if anyone, sets a collision object's pair handler
+  (`+0x40`).
+- Who sets the machine's counter `+0xd4`, which runs the life update — and so
+  the ground damage — on every tick
+  ([Water and lava beds kill](#water-and-lava-beds-kill--read-and-measured)).
+  Whether a flying machine runs the ground contact at all.
 - Whether `PlaceObjectOnWorldFace`'s reparenting sends a collision object its
   message 21, so that a machine on a building's deck leaves the world's
   collision manager for the building's; and so whether a bridge's own faces

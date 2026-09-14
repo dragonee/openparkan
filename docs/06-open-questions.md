@@ -171,6 +171,12 @@ outer ring is a clearance drawn around the building. See
     1/1024 (`Terrain.dll:0x1002bcdd`, also `0x1001ae50`); if that pair is
     `Land.msh` stream 5, the 8.8 reading in [03-terrain.md](03-terrain.md)
     is four times too dense.
+- What stops a walker at a small sloped object such as Mission 01's buoys
+  (`s_tree_29`). The read collision steps let the hero creep through a sloped
+  face and slide round it: the face stop tests only the centre's segment, the
+  small-face stop needs size class 3 or more, and the push-out is flattened.
+  Nobody was found to set a collision object's own pair handler (`+0x40`). See
+  [24-motion.md](24-motion.md#what-a-buoy-does-to-a-walker--read-measured-and-not-established).
 
 ## Unresolved terrain fields
 
