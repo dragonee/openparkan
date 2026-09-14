@@ -13284,6 +13284,391 @@ def check_hud_top(check, game: Path) -> None:
           f"{bound}; each name a string in iron3d.dll: {len(named_in)}/3")
 
 
+#: The radar's sprites, cut in this order by its constructor (``iron3d.dll:0x1003f340``):
+#: the page the doc names, then x, y, w, h.  Then the gauges' bar art, cut each frame, and
+#: page7's fan, which the wedge takes on its own UVs.
+RADAR_CUTS = (("page6", 156, 0, 99, 153), ("page6", 155, 0, 100, 153), ("page6", 192, 154, 9, 11),
+              ("ui_menu3", 215, 0, 15, 28), ("ui_menu3", 199, 0, 15, 28))
+RADAR_ART = (("page6", 121, 0, 31, 105), ("page7", 128, 0, 128, 64))
+#: Where ``0x1003fb90`` draws the halves and the two icons: (x0, y0, x1, y1), white.
+RADAR_DRAWS = ((320, 327, 221, 480), (320, 327, 421, 480), (230, 383, 245, 411),
+               (396, 383, 411, 411))
+#: The floats the radar's draw reads: the wedge's radius, its fan's radius, centre and
+#: texel, the arrows' ring, the contacts' disc, 5 degrees and the angles, the ring's period
+#: factor, the range figure's box, the halving, and the marks' sizes.
+RADAR_FLOATS = (75.0, 64.0, 192.0, 1 / 256, 68.0, 56.0, 60.0, math.radians(5.0), 4.71228,
+                -4.71228, math.pi / 2, math.pi, 0.002, 37.0, 303.0, 0.5, 5.0, 4.0, 3.0)
+#: The gauges' floats (``0x1003f6a0``, ``0x1003f900``): the box, its two x, and km/h.
+GAUGE_FLOATS = (28.0, 226.0, 388.0, 3.6, 0.5)
+#: The two gauges' bars (x0, x1, and the colour; y from 347 + e to 452).
+GAUGE_BARS = ((271, 240, 0xFFFFB450), (370, 401, 0xFFFFB450))
+
+#: The indicators' sprites (``0x1003ed60``): three lamps, then eight icons by slot.
+INDICATOR_CUTS = (("page6", 202, 154, 17, 20), ("page6", 220, 154, 17, 20),
+                  ("page6", 238, 154, 17, 20),
+                  ("ui_menu", 97, 126, 15, 15), ("ui_menu", 238, 222, 15, 15),
+                  ("ui_menu", 239, 126, 15, 15), ("ui_menu", 223, 142, 15, 15),
+                  ("ui_menu3", 180, 27, 15, 15), ("ui_menu", 113, 94, 15, 15),
+                  ("ui_menu", 113, 110, 15, 15), ("ui_menu", 81, 94, 15, 15))
+#: Each slot's x (``0x1003f270``).
+INDICATOR_X = (222, 240, 258, 280, 344, 366, 384, 402)
+
+#: The reticle's sprites (``0x10042d10``) and where ``0x10042ed0`` draws them, in #37ff37.
+RETICLE_CUTS = (("page9", 168, 0, 82, 15), ("page9", 77, 0, 64, 64), ("page9", 54, 28, 23, 23))
+RETICLE_DRAWS = ((288, 208, 352, 272), (279, 220, 300, 199), (279, 260, 300, 281),
+                 (361, 220, 340, 199), (361, 260, 340, 281), (232, 233, 314, 248),
+                 (408, 233, 326, 248))
+
+_HUD_PUSH = rb"(?:\x53|\x6a.|\x68.{4})"
+#: A cut's call: turn (then maybe `mov byte [esp+d], 0`), h, w, y, x; 256.0 and the page;
+#: `this` into ecx, maybe `mov [esp+d], bl`; the call.
+_HUD_CUT = re.compile(
+    rb"(" + _HUD_PUSH + rb"(?:\xc6\x44\x24.\x00)?" + _HUD_PUSH + rb"{4})"
+    rb"\x68\x00\x00\x80\x43[\x50-\x57](?:\x8d\x4e.|\x8d\x8e.{4}|\x8b[\xc8-\xcf])"
+    rb"(?:\x88\x5c\x24.)?\xe8(.{4})", re.S)
+#: A draw's call with the stage 0, blend 1 and black specular every HUD sprite here takes:
+#: the colour, then y1, x1, y0, x0 (each maybe followed by a `lea esi`), `this`, the call.
+_HUD_DRAW = re.compile(
+    rb"\x6a\x00\x6a\x01\x68\x00\x00\x00\xff(\x6a.|\x68.{4})"
+    rb"((?:(?:\x68.{4}|\x6a.)(?:\x8d\xb7.{4}|\x8d\x77.)?){4})"
+    rb"(?:\x8d\x4e.|\x8d\x8e.{4}|\x8d\x8f.{4}\x89\x54\x24.\x89\x44\x24.|\x8b[\xc8-\xcf])"
+    rb"\xe8(.{4})", re.S)
+
+
+def _push_run(run: bytes, floats: bool) -> list | None:
+    """A run of pushes' values in push order: `push ebx` (zero in these widgets) is 0, an
+    imm8 is sign-extended, an imm32 an int or a float; the fillers the patterns allow are
+    stepped over."""
+    out: list = []
+    pos = 0
+    while pos < len(run):
+        op = run[pos]
+        if op == 0x53:
+            out.append(0)
+            pos += 1
+        elif op == 0x6A:
+            out.append(struct.unpack_from("<b", run, pos + 1)[0])
+            pos += 2
+        elif op == 0x68:
+            out.append(struct.unpack_from("<f" if floats else "<i", run, pos + 1)[0])
+            pos += 5
+        elif run[pos:pos + 3] == b"\xc6\x44\x24":
+            pos += 5
+        elif run[pos:pos + 2] == b"\x8d\xb7":
+            pos += 6
+        elif run[pos:pos + 2] == b"\x8d\x77":
+            pos += 3
+        else:
+            return None
+    return out
+
+
+def _hud_sprites(at, start: int, size: int) -> tuple[list, list]:
+    """A function's sprite cuts (x, y, w, h, turn) and draws (x0, y0, x1, y1, colour), in
+    order, from its calls to ``0x1008f830`` and ``0x1008f970``."""
+    body = at(start, size)
+    cuts, draws = [], []
+    for m in _HUD_CUT.finditer(body):
+        call = start + m.end() - 5
+        if (call + 5 + struct.unpack("<i", m.group(2))[0]) & 0xFFFFFFFF != 0x1008F830:
+            continue
+        values = _push_run(m.group(1), True)
+        if values and len(values) == 5:
+            turn, h, w, y, x = values
+            cuts.append((round(x), round(y), round(w), round(h), round(turn)))
+    for m in _HUD_DRAW.finditer(body):
+        call = start + m.end() - 5
+        if (call + 5 + struct.unpack("<i", m.group(3))[0]) & 0xFFFFFFFF != 0x1008F970:
+            continue
+        colour = _push_run(m.group(1), False)
+        corners = _push_run(m.group(2), False)
+        if colour and corners and len(corners) == 4:
+            y1, x1, y0, x0 = corners
+            draws.append((x0, y0, x1, y1, colour[0] & 0xFFFFFFFF))
+    return cuts, draws
+
+
+def _floats_read(at, start: int, size: int) -> list[float]:
+    """The float32 constants a function's x87 ops read by absolute address."""
+    out = []
+    for m in re.finditer(rb"[\xd8\xd9]([\x05\x0d\x15\x1d\x25\x2d\x35\x3d])(.{4})",
+                         at(start, size), re.S):
+        try:
+            out.append(struct.unpack("<f", at(struct.unpack("<I", m.group(2))[0], 4))[0])
+        except (resources.ResourceFormatError, struct.error):
+            continue
+    return out
+
+
+def _hud_art(game: Path):
+    """A function giving, for a page name and a rect, the page's entry name and whether the
+    rect lies on the page with alpha on at least a sixteenth of its pixels."""
+    roles = {d.role: d.bindings for d in resources.descriptors(game / "ui" / "game_resources.cfg")}
+    pages = roles.get("textures", {})
+    ui = NResArchive.open(game / "ui" / "ui.lib")
+    entries = list(ui)
+    decoded: dict[int, object] = {}
+
+    def art(page: str, x: int, y: int, w: int, h: int) -> tuple[str | None, bool]:
+        index = int(pages.get(page, -1))
+        if not 0 <= index < len(entries):
+            return None, False
+        if index not in decoded:
+            decoded[index] = texm.decode(ui.read(entries[index]))
+        tex = decoded[index]
+        if x < 0 or y < 0 or x + w > tex.width or y + h > tex.height:
+            return entries[index].name, False
+        inked = sum(tex.rgba[(yy * tex.width + xx) * 4 + 3] > 0
+                    for yy in range(y, y + h) for xx in range(x, x + w))
+        return entries[index].name, inked * 16 >= w * h
+
+    return art
+
+
+def check_hud_radar(check, game: Path) -> None:
+    """The cockpit HUD's radar, its gauges, the indicators under it and the reticle."""
+    path = game / "iron3d.dll"
+    services = game / "services.dll"
+    if not path.exists() or not services.exists():
+        return
+    iron = path.read_bytes()
+    at = _image_at(iron)
+    svc = _image_at(services.read_bytes())
+    art = _hud_art(game)
+
+    # The two scales: the display mode's record keeps width x 1/640 and height x 1/480, and
+    # IDisplay slots 4 and 5 return them.
+    mode = re.search(rb"\xd8\x0d(.{4})\xd9\x58\x10\xd8\x0d(.{4})\xd9\x58\x14", svc(0x10004610, 64),
+                     re.S)
+    scales = [struct.unpack("<f", svc(struct.unpack("<I", g)[0], 4))[0] for g in mode.groups()] \
+        if mode else []
+    vtable = [struct.unpack("<I", svc(0x1003A1F8 + 4 * i, 4))[0] for i in (4, 5)]
+    getters = [svc(v, 7) for v in vtable]
+    gui = [struct.unpack("<I", svc(0x1003A198 + 4 * i, 4))[0] for i in range(7)]
+    circle, fill = svc(gui[2], 0x150), svc(gui[4], 0x130)
+    check("services.dll: the HUD's 640 x 480 is stretched by width/640 and height/480",
+          len(scales) == 2 and math.isclose(scales[0] * 640, 1, rel_tol=1e-5)
+          and math.isclose(scales[1] * 480, 1, rel_tol=1e-5)
+          and getters == [b"\xd9\x81\x14\x05\x00\x00\xc3", b"\xd9\x81\x18\x05\x00\x00\xc3"]
+          and b"\xd9\x40\x10\xd9\x99\x14\x05\x00\x00\xd9\x40\x14\xd9\x99\x18\x05\x00\x00"
+          in svc(0x10004ec0, 0x40)
+          and b"\x6a\x10\x68\xe0\x01\x00\x00\x68\x80\x02\x00\x00" in svc(0x10004462, 16)
+          and svc(gui[0], 7) == b"\x8a\x44\x24\x04\x88\x41\x04"
+          and b"\x6a\x15\x52\x6a\x0d\x6a\x03" in circle and b"\x6a\x04\x52\x6a\x0c\x6a\x05" in fill,
+          f"0x10004610 keeps x and y by {[round(1 / s, 3) for s in scales if s]}ths; slots 4 "
+          f"and 5 ({[hex(v) for v in vtable]}) read +0x514 and +0x518, which a mode change "
+          f"copies; the default mode 640 x 480; the GUI server's slot 0 keeps the scaling flag,"
+          f" slot 2 draws a 21-point line strip, slot 4 a 4-point triangle strip")
+
+    # The radar: its cuts, where it draws them, and the art under each rect.
+    cuts, _ = _hud_sprites(at, 0x1003F340, 0x35C)
+    _, draws = _hud_sprites(at, 0x1003FB90, 0x200)
+    placed = [art(*r) for r in RADAR_CUTS + RADAR_ART]
+    centre = b"\xc7\x46\x0c\x00\x00\xa0\x43\xc7\x46\x10\x00\x00\xc6\x43" in at(0x1003F340, 0x80)
+    check("iron3d.dll: the radar's disc, icons and arrow, cut and placed about (320, 396)",
+          [c[:4] for c in cuts] == [r[1:] for r in RADAR_CUTS] and all(c[4] == 0 for c in cuts)
+          and [d[:4] for d in draws[:4]] == list(RADAR_DRAWS)
+          and all(d[4] == 0xFFFFFFFF for d in draws[:4]) and centre
+          and [p for p, _ in placed] == ["ui_tex6.tex"] * 3 + ["ui_menu3.tex"] * 2
+          + ["ui_tex6.tex", "ui_tex7.tex"] and all(ok for _, ok in placed),
+          f"0x1003f340 cuts {cuts}; 0x1003fb90 draws {draws[:4]}; centre (320, 396) held "
+          f"{centre}; pages {[p for p, _ in placed]}, every rect on its page and inked: "
+          f"{sum(ok for _, ok in placed)}/{len(placed)}")
+
+    # The radar's draw: its constants, its colours, and what it asks the unit.
+    body = at(0x1003FB90, 0xC90)
+    floats = _floats_read(at, 0x1003FB90, 0xC90)
+    missing = [f for f in RADAR_FLOATS if not any(math.isclose(f, g, rel_tol=1e-5) for g in floats)]
+    pushed = {name: b"\x68" + struct.pack("<I", v) in body for name, v in (
+        ("north 0xff0a0ae1", 0xFF0A0AE1), ("south 0xffe10a0a", 0xFFE10A0A),
+        ("ring 0x8c009b00", 0x8C009B00), ("range 0xff00ff00", 0xFF00FF00),
+        ("chosen 0xffff00ff", 0xFFFF00FF), ("period id 0xa9", 0xA9), ("range y 467", 0x1D3))}
+    shape = at(0x10075F70, 28) == bytes.fromhex(
+        "8b414485c074188b08680702000050ff51688b0833d283f9010f94c2")
+    wedge = b"\x6a\x03\x8d\x86\x60\x03\x00\x00\x50\x6a\x0d\x6a\x05" in body \
+        and b"\xd9\x84\x24\xc8\x00\x00\x00" in body and b"\xba\x06\x00\x00\x00" in body
+    sounds = next((d.bindings for d in resources.descriptors(game / "ui" / "game_resources.cfg")
+                   if d.role == "sounds"), {})
+    check("iron3d.dll: the radar's wedge, north and south, contacts, ring and range figure",
+          not missing and all(pushed.values()) and shape and wedge
+          and b"RADAR\0" in iron and sounds.get("RADAR", "").lower() == "i_radar.wav"
+          and b"\x6a\x50" in at(0x10091B30, 0x20),
+          f"0x1003fb90 reads {len(floats)} floats, lacking {missing}; pushes {pushed}; "
+          f"0x10075f70 tests the behaviour's variable 0x207 for 1: {shape}; the wedge is a "
+          f"3-vertex fan from the camera's parameters +0x14 x 0.5: {wedge}; RADAR is "
+          f"{sounds.get('RADAR')}; 0x10091b30 asks property 0x50")
+
+    # The gauges: the figures' boxes, km/h, the bars' art, place and colour, and the sums.
+    gauges = at(0x1003F6A0, 0x4F0)
+    bars = [(struct.unpack("<i", m.group(5))[0], struct.unpack("<i", m.group(3))[0],
+             struct.unpack("<I", m.group(1))[0], struct.unpack("<i", m.group(2))[0],
+             struct.unpack("<I", m.group(4))[0])
+            for m in re.finditer(rb"\x68(.{4})\x68(.{4})\x68(.{4})\x81\xc6(.{4})\x56\x68(.{4})"
+                                 rb"\x8b\xcf\xe8", gauges, re.S)]
+    cut_art = len(re.findall(rb"\x68\x00\x00\xf8\x41.{0,12}\x68\x00\x00\xf2\x42"
+                             rb"\x68\x00\x00\x80\x43\x52\xe8", gauges, re.S))
+    gfloats = _floats_read(at, 0x1003F6A0, 0x4F0)
+    gmissing = [f for f in GAUGE_FLOATS
+                if not any(math.isclose(f, g, rel_tol=1e-5) for g in gfloats)]
+    sums = all(p in gauges for p in (
+        bytes.fromhex("8d4e646bc964b81f85eb51f7e9c1fa06"),  # (a + 100) x 100 / 200
+        bytes.fromhex("8bc66bc06499f7f9"),                  # v x 100 / top
+        bytes.fromhex("d981d80a0000"), bytes.fromhex("d9400c"),  # the world's W, the record's z
+        b"\x6a\x28", b"\x68\x90\x00\x00\x00", b"\x6a\xff\x68\xbe\x01\x00\x00"))
+    check("iron3d.dll: altitude above the world's +0xad8 and speed in km/h, bars of 105",
+          [(b[0], b[1], b[2]) for b in bars] == list(GAUGE_BARS)
+          and all(b[3] == 452 and b[4] == 347 for b in bars) and cut_art == 2 and not gmissing
+          and sums and gauges.count(bytes.fromhex("b9690000002bce")) == 2
+          and gauges.count(b"\x6b\xc9\x69") == 2,
+          f"bars (x0, x1, colour, y1, y0 +) {[(b[0], b[1], hex(b[2]), b[3], b[4]) for b in bars]}; "
+          f"page6 (121, e) 31 wide cut {cut_art} times; floats lacking {gmissing}; the sums, "
+          f"properties 0x28 and 0x90, white figures at y 446: {sums}")
+
+    # What the figures ask: property 0xa9 is the radar's period and 0x90 the forward top
+    # speed (Control.dll's two getters' case tables).
+    ctl = game / "Control.dll"
+    period = top = None
+    if ctl.exists():
+        cat = _image_at(ctl.read_bytes())
+        machine = re.search(rb"\x8d\x41\xda\x3d\x8d\x00\x00\x00\x0f\x87.{4}\x33\xd2\x8a\x90(.{4})"
+                            rb"\xff\x24\x95(.{4})", cat(0x1000E6C0, 0x40), re.S)
+        base_get = re.search(rb"\x48\x3d\xb3\x00\x00\x00\x0f\x87.{4}\x33\xc9\x8a\x88(.{4})"
+                             rb"\xff\x24\x8d(.{4})", cat(0x1000DCC0, 0xA0), re.S)
+
+        def case(match, bias: int, prop: int) -> bytes:
+            index, table = (struct.unpack("<I", g)[0] for g in match.groups())
+            slot = cat(index + prop - bias, 1)[0]
+            return cat(struct.unpack("<I", cat(table + 4 * slot, 4))[0], 40)
+
+        if machine and base_get:
+            period = b"\xba\x09\x00\x00\x00" in case(machine, 0x26, 0xA9)
+            top = b"\x8b\x91\x6c\x04\x00\x00\x83\xc2\x1c" in case(base_get, 1, 0x90)
+    check("Control.dll: property 0xa9 is the radar's period (id 9), 0x90 the top speed at +48",
+          period is True and top is True,
+          f"the machine getter 0x1000e6c0 sends 0xa9 to the device getter as 9: {period}; the "
+          f"base getter 0x1000dcc0 answers 0x90 with the +0x46c block's +0x1c, file +48: {top}")
+
+    # The altitude's zero: ITerrain slot 11 returns the landscape's +0x7cdc, the first water
+    # face's first vertex z (-1 without one), which the world keeps at +0xad8.
+    terrain = game / "Terrain.dll"
+    zero = False
+    if terrain.exists():
+        t_image = terrain.read_bytes()
+        tat = _image_at(t_image)
+        slot11 = tat(struct.unpack("<I", tat(0x1009A438 + 44, 4))[0], 16)
+        zero = slot11 == bytes.fromhex("558bec51894dfc8b45fcd980a87b0000") \
+            and bytes.fromhex("c781dc7c0000000080bf") in t_image \
+            and bytes.fromhex("250000020085c0") in t_image \
+            and bytes.fromhex("8b42088981dc7c0000") in t_image and 0x7CDC - 0x7BA8 == 0x134
+    kept = re.search(rb"\xba\x05\x00\x00\x00\xff\x10\x85\xc0\x74.\x8b\x4c\x24.\x8b\x01\xff\x50\x2c"
+                     rb"\xd9\x9e\xd8\x0a\x00\x00", iron, re.S) is not None
+    tut = game / "DATA" / "MAPS" / "Tut_1" / "Land.msh"
+    level = landmesh.load(tut).water_level() if tut.exists() else None
+    check("Terrain.dll: the altitude's zero is the water plane; Tut_1's at -1.725 m",
+          zero and kept and level is not None and math.isclose(level, -1.7255, abs_tol=1e-3),
+          f"ITerrain (landscape +0x134) slot 11 reads +0x7ba8, the landscape's +0x7cdc, set "
+          f"from the first face with surface bit 0x02 (runtime 0x20000) or -1: {zero}; "
+          f"iron3d.dll keeps it at the world's +0xad8: {kept}; Tut_1's water plane {level}")
+
+    # The flyer's cross: MBehaviour variable 0x207 is the chassis profile, ChassisType first.
+    behavior = game / "Behavior.dll"
+    first = None
+    if behavior.exists():
+        b_image = behavior.read_bytes()
+        bat = _image_at(b_image)
+        switch = re.search(rb"\x8d\x88\xfe\xfd\xff\xff\x83\xf9\x0a\x0f\x87.{4}\xff\x24\x8d(.{4})",
+                           b_image, re.S)
+        binder = re.search(rb"\x81\xc1\xc0\x07\x00\x00\xe8(.{4})", b_image, re.S)
+        profile = False
+        if switch:
+            table = struct.unpack("<I", switch.group(1))[0]
+            profile = bat(struct.unpack("<I", bat(table + 4 * 5, 4))[0], 13) == bytes.fromhex(
+                "8b8424240100005e05c0070000")
+        if binder and profile:
+            sections, _ = resources._sections(b_image)
+            lfanew = struct.unpack_from("<I", b_image, 0x3C)[0]
+            base = struct.unpack_from("<I", b_image, lfanew + 24 + 28)[0]
+            call = next(v + binder.start() + 6 - raw for v, size, raw in sections
+                        if raw <= binder.start() + 6 < raw + size) + base
+            target = (call + 5 + struct.unpack("<i", binder.group(1))[0]) & 0xFFFFFFFF
+            head = bat(target, 40)
+            name_at = head.find(b"\x57\x68")
+            if name_at >= 0:
+                first = bat(struct.unpack_from("<I", head, name_at + 2)[0], 16).split(b"\0")[0]
+    check("Behavior.dll: the radar's cross is a flyer, ChassisType 1 of the chassis profile",
+          first == b"ChassisType" and profiles.CHASSIS_TYPE.get(1) == "flying",
+          f"variable 0x207 answers the profile at +0x7c0, whose binder links {first!r} first; "
+          f"type 1 is {profiles.CHASSIS_TYPE.get(1)}")
+
+    # The indicators: lamps and icons, their slots' x, and what lights each.
+    icuts, _ = _hud_sprites(at, 0x1003ED60, 0x3B4)
+    iplaced = [art(*r) for r in INDICATOR_CUTS]
+    icon = at(0x1003F270, 0xD0)
+    table_x = re.search(rb"\x69\xc9\x8c\x00\x00\x00((?:\xc7\x44\x24..{4}){8})", icon, re.S)
+    xs = [struct.unpack_from("<i", table_x.group(1), 4 + 8 * i)[0] for i in range(8)] \
+        if table_x else []
+    look = all(p in icon for p in (
+        bytes.fromhex("68e40100008d46125068cb01000056"),    # lamp (x, 459) - (x + 18, 484)
+        bytes.fromhex("68de0100008d56105268cf0100004656"),  # icon (x + 1, 463) - (x + 16, 478)
+        bytes.fromhex("8d4c290c"), bytes.fromhex("8d8c2bb0010000"),  # lamp by state, icon by slot
+        bytes.fromhex("bf808080ff"), bytes.fromhex("81e70100ffff4f")))  # grey 0; red 2; white 1
+    draw = at(0x1003F150, 0x118)
+    states = all(p in draw for p in (
+        bytes.fromhex("85c0740983f801740433c0eb05b801000000506a03"),  # CState mode 0 or 1
+        bytes.fromhex("8a4b31f6d91bc983e102516a04"),                  # +0x31 -> state 2
+        bytes.fromhex("8b8f9c00000033d285c90f94c28bce526a05"),        # auto-driver 0, 1, 2
+        bytes.fromhex("83fa010f94c08bce506a06"), bytes.fromhex("83fb020f94c1516a07")))
+    readers = bytes.fromhex(
+        "568b71608b066a0f6a0056ff502483f8ff74108b0e5056ff511483f820") in at(0x10076E10, 40) \
+        and bytes.fromhex("6a0a6a0056ff502483f8ff74128b0e5056ff51143d00100000") \
+        in at(0x10076E40, 32) \
+        and at(0x10035C20, 16) == bytes.fromhex("85c9740d8b0151ff5050c1e80583e001")
+    camera = False
+    if ctl.exists():
+        handler = _image_at(ctl.read_bytes())(0x10023A00, 0xA4)
+        camera = re.search(rb"\x81\xfe\x00\x10\x00\x00\x5f\x74.\x81\xfe\x00\x20\x00\x00\x74."
+                           rb"\x81\xfe\x00\x40\x00\x00\x75.\x8b\x4c\x24\x08\xa8\x20", handler,
+                           re.S) is not None and b"\x0c\x20" in handler and b"\x24\xdf" in handler
+    rows = {(a.key, a.target, a.state) for a in controls.table(game / "hero.tbl")}
+    keyed = {("SCAN_G", "CICLS_REPAIRSYS", "CIS_SWITCH_INV"),
+             ("SCAN_H", "CICLS_DETECTSHIELD", "CIS_CHAMELEON_INV"),
+             ("SCAN_N", "CICLS_CAMERA", "CIS_INFRARED_INV")} <= rows
+    driver = {b.command: b.chord for b in controls.bindings(game / "ui_other.man")}
+    strings = resources.strings(iron)
+    risk = b"\xbb\x01\x00\x00\x00\xba\x43\x18\x00\x00" in at(0x10063500, 0x180) \
+        and b"\x88\x5e\x31" in at(0x10063500, 0x180) \
+        and bytes.fromhex("d81d145c0e10dfe0f6c4417513c6463100") in at(0x10062950, 0xE0) \
+        and struct.unpack("<f", at(0x100E5C14, 4))[0] == 3.0
+    check("iron3d.dll: the indicators -- repair, infrared, camouflage, mode, risk, auto-driver",
+          [c[:4] for c in icuts] == [r[1:] for r in INDICATOR_CUTS]
+          and xs == list(INDICATOR_X) and look and states and readers and camera and keyed
+          and driver.get("CMD_JAMES_AUTO_DRIVER") == "SCAN_Y" and risk
+          and strings.get(6211) == "Risk area! Landing impossible."
+          and all(ok for _, ok in iplaced)
+          and [p for p, _ in iplaced] == ["ui_tex6.tex"] * 3 + ["ui_menu1.tex"] * 4
+          + ["ui_menu3.tex"] + ["ui_menu1.tex"] * 3,
+          f"0x1003ed60 cuts {icuts}; slots at x {xs}; lamp and icon rects, grey/white/red "
+          f"{look}; 0x1003f150's states {states}; class 15 state 0x20, class 10 state 0x1000, "
+          f"view flag 0x20: {readers}; the camera class sets, clears and flips 0x20: {camera}; "
+          f"hero.tbl G/H/N {keyed}; Y {driver.get('CMD_JAMES_AUTO_DRIVER')}; 6211 "
+          f"{strings.get(6211)!r} lights slot 4 red for 3.0 s {risk}; art inked "
+          f"{sum(ok for _, ok in iplaced)}/{len(iplaced)}")
+
+    # The reticle.
+    rcuts, _ = _hud_sprites(at, 0x10042D10, 0x190)
+    _, rdraws = _hud_sprites(at, 0x10042ED0, 0x223)
+    rplaced = [art(*r) for r in RETICLE_CUTS]
+    dot = b"\x68\x00\xff\x00\xff" in at(0x10042ED0, 0x223) \
+        and any(math.isclose(f, 24.0) for f in _floats_read(at, 0x10042ED0, 0x223))
+    check("iron3d.dll: the reticle's circle, arcs and ticks about (320, 240), and its dot",
+          [c[:4] for c in rcuts] == [r[1:] for r in RETICLE_CUTS]
+          and [d[:4] for d in rdraws] == list(RETICLE_DRAWS)
+          and all(d[4] == 0xFF37FF37 for d in rdraws) and dot
+          and all(ok and p == "ui_tex9.tex" for p, ok in rplaced),
+          f"0x10042d10 cuts {rcuts}; 0x10042ed0 draws {[d[:4] for d in rdraws]} in "
+          f"{sorted({hex(d[4]) for d in rdraws})}; a green dot 24 x the camera's offsets: {dot}")
+
+
 def check_settings(check, game: Path) -> None:
     """The engine's own configuration files, and which module owns each."""
     registry_path = game / settings.COMPONENTS_FILE
@@ -13412,6 +13797,7 @@ def run(game: Path) -> int:
         check_behaviour, check_research, check_descriptions, check_saves,
         check_vocabulary, check_resources, check_briefing, check_progression, check_outcome,
         check_hud_top,
+        check_hud_radar,
         check_settings,
         check_research_streams, check_atmosphere_events,
         check_varset_types, check_profiles, check_walker,

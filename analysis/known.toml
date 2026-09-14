@@ -17459,9 +17459,9 @@ doc = "docs/25-sensors.md"
 module = "iron3d.dll"
 at = "0x10075f70"
 kind = "function"
-name = "unit record test choosing the radar mark's shape (not read)"
-read = false
-doc = "docs/25-sensors.md"
+name = "radar mark shape: the unit behaviour's variable 0x207, the chassis profile, has ChassisType 1 (a flyer): a cross"
+read = true
+doc = "docs/35-hud.md"
 
 [[entry]]
 module = "iron3d.dll"
@@ -19148,5 +19148,365 @@ module = "Behavior.dll"
 at = "0x1000cb10"
 kind = "function"
 name = "IBehaviour slot 42: set the name when it is empty; +0xa74 = 1"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1003f340"
+kind = "function"
+name = "radar widget constructor (id 0): centre (320, 396); page6 halves (156,0) 99x153 and (155,0) 100x153, arrow (192,154) 9x11; ui_menu3 icons (215,0) and (199,0) 15x28; page7 kept at +0x3c0"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1003f6a0"
+kind = "function"
+name = "radar altitude gauge: round(record +0xc - world +0xad8), white, centred in 28 from x 226 at y 446; bar p = (a+100)x100/200, page6 (121, e) 31 wide into (271, 347+e)-(240, 452) in 0xffffb450"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1003f900"
+kind = "function"
+name = "radar speed gauge: round(property 0x28 x 3.6) against round(property 0x90 x 3.6), centred in 28 from x 388; bar (370, 347+e)-(401, 452)"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1003fd40"
+kind = "site"
+name = "radar view wedge: camera parameters +0x14 x 0.5; a 3-vertex fan, corners 75 out at pi/2 +- half, UVs on page7's fan about (192, 64) r 64"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1003fe9c"
+kind = "site"
+name = "radar heading: atan2 of the camera matrix's first column; north arrow at theta - pi/2 in 0xff0a0ae1, south at + pi in 0xffe10a0a, on radius 56-68 +- 5 degrees"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100402ef"
+kind = "site"
+name = "radar contact: bearing - heading + pi/2, at 60 x distance / sensor range from the centre"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10040094"
+kind = "site"
+name = "radar sweep: property 0xa9 x 0.002 s; a ring of int(60 t / P) in 0x8c009b00; the RADAR sound each period unless the game's +0xe5"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1004061d"
+kind = "site"
+name = "radar range figure: round(sensor range), GAME_FONT green, y 467, centred in 37 from x 303"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100e5dd4"
+kind = "datum"
+name = "radar widget vtable: 1 draw 0x1003fb90"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1003ed60"
+kind = "function"
+name = "indicator widget constructor (id 5): page6 lamps (202/220/238, 154) 17x20; eight 15x15 icons on ui_menu and ui_menu3"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100e5dcc"
+kind = "datum"
+name = "indicator widget vtable: 1 draw 0x1003f150"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1003f150"
+kind = "function"
+name = "indicator draw: repair 0x10076e10, infrared 0x10035c20, camouflage 0x10076e40, CState mode 0 or 1, CState +0x31 red, auto-driver +0x9c 0/1/2"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1003f270"
+kind = "function"
+name = "one indicator: lamp by state at (x, 459)-(x+18, 484), icon at (x+1, 463)-(x+16, 478) grey 0xff808080 / white / red; x 222 240 258 280 344 366 384 402"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10035c20"
+kind = "function"
+name = "camera view flag 0x20, infrared on"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10042ed0"
+kind = "function"
+name = "reticle draw: circle (288,208)-(352,272), four mirrored arcs, two mirrored ruler strips, all 0xff37ff37 blended; a 2x2 green dot at 24 x the camera's property 0 [+0], [+0x10]"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100e5e80"
+kind = "datum"
+name = "reticle widget vtable: 1 draw 0x10042ed0"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1008fa30"
+kind = "function"
+name = "2D sprite draw on four given corners: (xs, ys, colour, specular, blend, stage)"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10091b30"
+kind = "function"
+name = "a target list's sensor range: its unit's property 0x50, 1 when absent or not positive"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1007e6a0"
+kind = "function"
+name = "a unit record's camera view: its first class-4 component's interface 8, kept at +0x4c, the interface pass set as its callback"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10072d10"
+kind = "function"
+name = "game record by object id (+0x28) from the registry's +0x720 list, the units (derived)"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100728a0"
+kind = "function"
+name = "game record by object id (+0x28) from the registry's +0x71c list, the buildings (derived)"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10063500"
+kind = "function"
+name = "CState handler: a rejected landing shows 6211 with VOICE_RISK_AREA, sets the CState's +0x31 and stamps +0x2c"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10062950"
+kind = "function"
+name = "CState takt: flags entries whose record's owner word is 0xfffe; clears +0x31 once 3 s have passed"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100a1ec6"
+kind = "site"
+name = "world load: +0xad8 = the landscape's ITerrain slot 11, the water plane"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "services.dll"
+at = "0x10004610"
+kind = "function"
+name = "display mode record: width, height, bits; +0xc aspect, +0x10 width x 1/640, +0x14 height x 1/480"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "services.dll"
+at = "0x10004a80"
+kind = "function"
+name = "IDisplay slot 4: the HUD's x scale, +0x514"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "services.dll"
+at = "0x10004a90"
+kind = "function"
+name = "IDisplay slot 5: the HUD's y scale, +0x518"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "services.dll"
+at = "0x100015c0"
+kind = "function"
+name = "GUI server constructor: vtable 0x1003a198, scale flag 1, a 20-step unit circle"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "services.dll"
+at = "0x1003a198"
+kind = "datum"
+name = "GUI server vtable, 7 slots: flag, line, circle, rectangle, fill, text, triangle"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "services.dll"
+at = "0x100022b0"
+kind = "function"
+name = "GUI server slot 0: coordinates scaled (1) or screen pixels (0), +4"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "services.dll"
+at = "0x100017f0"
+kind = "function"
+name = "GUI server slot 1: a line (x0, y0, x1, y1, colour, clip)"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "services.dll"
+at = "0x10001910"
+kind = "function"
+name = "GUI server slot 2: a circle outline as a 21-point line strip (x, y, r, colour, clip)"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "services.dll"
+at = "0x10001a60"
+kind = "function"
+name = "GUI server slot 3: a rectangle outline, a 5-point strip; alpha forced to 255 unless kept"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "services.dll"
+at = "0x10001bc0"
+kind = "function"
+name = "GUI server slot 4: a filled rectangle, a 4-point triangle strip; alpha forced unless kept"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "services.dll"
+at = "0x10001cf0"
+kind = "function"
+name = "GUI server slot 5: text (font, string, x, y, colour), the colour set with a black shadow"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "services.dll"
+at = "0x10001de0"
+kind = "function"
+name = "GUI server slot 6: a triangle outline about (x, y), apex at y - r"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x10023a00"
+kind = "function"
+name = "camera class state: 0x1000 sets the view's flag 0x20 (infrared), 0x2000 clears it, 0x4000 flips it"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000dd8c"
+kind = "site"
+name = "property 0x90: the +0x46c block's +0x1c, file +48, the forward top speed"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000e831"
+kind = "site"
+name = "machine property 0xa9: the device getter's id 9, the radar's period"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1000a571"
+kind = "site"
+name = "MBehaviour variable 0x207: the chassis profile at +0x7c0, ChassisType first"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10019180"
+kind = "function"
+name = "ITerrain slot 11: +0x7ba8, the landscape's +0x7cdc, the water plane's z"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10017d60"
+kind = "site"
+name = "landscape load: +0x7cdc = -1 before the faces are searched"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10017df7"
+kind = "site"
+name = "landscape load: +0x7cdc = z of the first vertex of the first face with surface bit 0x02"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "Ngi32.dll"
+at = "0x10008680"
+kind = "function"
+name = "render slot 6: blend mode edx from the six {state, value} records"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "Ngi32.dll"
+at = "0x10008750"
+kind = "function"
+name = "render slot 30: a texture and a stage set chosen by edx (not read)"
 read = true
 doc = "docs/35-hud.md"

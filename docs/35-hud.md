@@ -26,10 +26,10 @@ its id.
 
 | HUD field | built by | size | id | what it is |
 |---|---|---|---|---|
-| `+0x14` | `0x10042d10` | 0x1b0 | not read | the reticle: page9's circle (77, 0) 64 × 64, corner arc (54, 28) 23 × 23 and ruler (168, 0) 82 × 15, drawn about (320, 240) in `#37ff37` |
-| `+0x10` | `0x1003ed60` | 0x610 | 5 | not triaged here (page6, `ui_menu`, `ui_menu3`) |
+| `+0x14` | `0x10042d10` | 0x1b0 | 8 | the reticle: page9's circle (77, 0) 64 × 64, corner arc (54, 28) 23 × 23 and ruler (168, 0) 82 × 15, drawn about (320, 240) in `#37ff37` ([below](#the-reticle--read)) |
+| `+0x10` | `0x1003ed60` | 0x610 | 5 | the indicators under the radar ([below](#the-indicators--read-and-seen)) |
 | `+0x0c` | holder, then `0x1009c9f0` | 0x10 + 0x5a0 | 6 | **the weapons list** and the guided lock ([25-sensors.md](25-sensors.md#how-the-game-colours-what-it-marks--read-and-measured)) |
-| `+0x18` | `0x1003f340` | 0x3c8 | not read | the radar (draw `0x1003fb90`) |
+| `+0x18` | `0x1003f340` | 0x3c8 | 0 | the radar (draw `0x1003fb90`, [below](#the-radar--read-and-seen)) |
 | `+0x1c` | `0x10040a60` | 0x2f0 | 1 | the target panel |
 | `+0x20` | `0x10040a60` | 0x2f0 | 2 | the player's own unit |
 | `+0x24` | `0x1003eb30` | 0x314 | 10 | the wingman panel: 16 lines 19 apart ([31-packages.md](31-packages.md#the-wingman-menu-from-first-person--read-and-measured)) |
@@ -47,8 +47,9 @@ beside the HUD ([below](#the-message-box--read-and-measured)).
   quad given x₁ < x₀ draws the sprite mirrored**.
 - **Screen scale.** Every coordinate is multiplied by two queries of the
   display object before it reaches the device: `services.dll`'s `getDisplay`,
-  slots 4 and 5, one per axis. Text widths are divided by the same two. What
-  the queries return is not read.
+  slots 4 and 5, one per axis. Text widths are divided by the same two. The
+  two are the display mode's width ÷ 640 and height ÷ 480
+  ([below](#how-the-radar-draws--read)).
 
 **The compound-control skin** is `ui/compaund.cfg`: 39 named pieces, each a
 texture name, an offset, a size and an optional rotation. The texture
@@ -149,8 +150,9 @@ spans on the 640 × 480 screen:
 
 - **The rounds** are `"%4d"` of `+0x10`, padded to four characters before
   centring. They read string 5094, *INF*, instead when `+0xc` is −1. They also
-  read *INF* when the first word of the game's `+0x20` list is 6, which is not
-  identified.
+  read *INF* when the first word of the game's `+0x20` list is 6: that list
+  is the interface's `CState`, and 6 its mode `SELECT_PLACE_FM`
+  ([30-turrets.md](30-turrets.md)).
 - **The bar is the gun's charge, not its ammunition.** The fill is interface
   `0x202`'s property `0x62`, the component's level (`0x204` id 1,
   `Control.dll:0x1002bbb1`). For a gun the level is capacitor ÷ value 1
@@ -282,17 +284,289 @@ re-derived by `verify`):
 
 ### Not established
 
-- What the display object's two scale queries return, and so how the
-  640 × 480 screen maps to a larger one. Text is measured in the device's
-  pixels and divided back.
-- The game's `+0x20` list: its first word 6 turns every rounds count to *INF*,
-  and 5 moves the message box. Neither value is named.
+- ~~What the display object's two scale queries return.~~ Answered: the mode's
+  width ÷ 640 and height ÷ 480
+  ([How the radar draws](#how-the-radar-draws--read)).
+- ~~The game's `+0x20` list.~~ Answered: it is the interface's `CState`, whose
+  modes `0x1005a5cc` names; 6 is `SELECT_PLACE_FM` and 5 `SELECT_WAY`
+  ([30-turrets.md](30-turrets.md)). What the player is doing in them is not
+  read.
 - How a non-hero unit's gun gets its name (`0x1008a470`, `0x1008a4b0`).
-- The widget at the HUD's `+0x10` (`0x1003ed60`, id 5).
+- ~~The widget at the HUD's `+0x10` (`0x1003ed60`, id 5).~~ Answered: the
+  indicators ([below](#the-indicators--read-and-seen)).
 
 ## The radar and the indicators below it
 
-To be written.
+Three of the widgets the HUD builder (`iron3d.dll:0x100433a0`) makes draw the
+middle of the screen:
+- **the radar**: widget id 0, constructor `0x1003f340`, draw `0x1003fb90`, with
+  its two gauges `0x1003f6a0` and `0x1003f900`;
+- **the row of indicators** under it: id 5, `0x1003ed60`, draw `0x1003f150`;
+- **the reticle**: id 8, `0x10042d10`, draw `0x10042ed0`.
+
+A fifth tag is used here. *Seen* marks what a gameplay recording of Mission 01
+shows (960 × 720, so 1.5 × the HUD's space). `openparkan verify` cannot re-derive
+it.
+
+### How the radar draws — *read*
+
+This adds to [Everything is drawn on a 640 × 480
+screen](#everything-is-drawn-on-a-640--480-screen--read).
+
+**The two scales.** `services.dll` keeps them in the display mode's record
+(`0x10004610`):
+- `sx`, the mode's width × 1/640, which `IDisplay` slot 4 returns
+  (`0x10004a80`);
+- `sy`, its height × 1/480, from slot 5 (`0x10004a90`).
+
+So at a wider aspect the HUD stretches rather than keeping its shape
+(*derived*).
+
+**The sprite draw's other arguments** (`0x1008f970`, after the corners):
+- **Colour** is the vertex colour. It multiplies the art (*seen*: the gauges'
+  grey art shows orange).
+- **Blend** 1 selects `Ngi32.dll`'s blend mode 4 (`SRCALPHA`/`INVSRCALPHA` with
+  alpha test, [07-objects.md](07-objects.md); slot 6, `0x10008680`). Blend 0
+  selects mode 0.
+- **Stage** picks slot 30's stage set, 7 or 1 (`0x10008750`, not read). Every
+  sprite here passes 0.
+- **Four corners.** `0x1008fa30` draws a cut on four given corners.
+
+**Lines, circles, rectangles and text** come from `services.dll`'s GUI server,
+the display's `+8` (vtable `0x1003a198`):
+
+| slot | what | arguments |
+|---:|---|---|
+| 0 | coordinates are HUD units (1, the default) or screen pixels (0) | flag |
+| 1 | a line | x0, y0, x1, y1, colour, clip |
+| 2 | a circle outline, 20 segments | x, y, r, colour, clip |
+| 3 | a rectangle outline | x0, y0, x1, y1, colour, keep alpha |
+| 4 | a filled rectangle | x0, y0, x1, y1, colour, keep alpha |
+| 5 | text with a black shadow | font, string, x, y, colour |
+| 6 | a triangle outline, apex up at `y − r` | x, y, r, colour |
+
+The addresses are `0x100022b0`, `0x100017f0`, `0x10001910`, `0x10001a60`,
+`0x10001bc0`, `0x10001cf0` and `0x10001de0`. Unless told to keep it, a
+rectangle's alpha is forced to 255.
+
+### The radar — *read*, and *seen*
+
+**The art.** The radar's centre is `(320, 396)`, held at the widget's `+0xc` and
+`+0x10` (`0x1003f3a5`). Every sprite is blended.
+
+| what | page | source | destination | colour |
+|---|---|---|---|---|
+| the disc, left half | page6 | (156, 0) 99 × 153 | (320, 327) → (221, 480), mirrored | white |
+| the disc, right half | page6 | (155, 0) 100 × 153 | (320, 327) → (421, 480) | white |
+| the altitude icon | ui_menu3 | (215, 0) 15 × 28 | (230, 383) → (245, 411) | white |
+| the speed icon | ui_menu3 | (199, 0) 15 × 28 | (396, 383) → (411, 411) | white |
+| the altitude bar | page6 | (121, e) 31 × (105 − e) | (271, 347 + e) → (240, 452), mirrored | (255, 180, 80) |
+| the speed bar | page6 | (121, e) 31 × (105 − e) | (370, 347 + e) → (401, 452) | (255, 180, 80) |
+| the view wedge | page7 | a fan about (192, 64), radius 64 | a triangle about the centre, radius 75 | white |
+| north and south | page6 | (192, 154) 9 × 11 | four corners on the ring | blue, red |
+
+- **The art is the disc's right half.** Its straight left edge is the disc's
+  middle; the left half is the same art mirrored.
+- **The disc's art also holds** the boxes for the two figures and the slots for
+  the indicators' lamps.
+- **`page6`, `page7` and `ui_menu3`** are `ui_tex6.tex`, `ui_tex7.tex` and
+  `ui_menu3.tex` (*measured*).
+
+**The order** (`0x1003fb90`):
+1. the two halves and the two icons;
+2. the altitude (`0x1003f6a0`), then the speed (`0x1003f900`);
+3. the view wedge;
+4. north and south;
+5. the sweep ring;
+6. the contacts;
+7. the range figure.
+
+**The view wedge is the camera's field of view.**
+- **The camera.** `0x1007e6a0` finds the unit's first class-4 component. It
+  keeps that component's view (interface 8) at the record's `+0x4c`.
+- **The angle.** The view's slot 7 fills a parameter block. Its `+0x14` is the
+  camera's value 2, which `Control.dll:0x100238b0` writes there beside values 0
+  and 1 at `+0xc` and `+0x10`. That value is 1.3 rad on every camera
+  ([30-turrets.md](30-turrets.md)).
+- **The shape.** The wedge is one triangle (`0x1003fd40`). Its apex is at the
+  centre. Its far corners are 75 from it at π/2 ± half the angle, measured with
+  y up, so **the wedge always points up**. Their UVs take the same angles on
+  page7's fan, radius 64 about (192, 64).
+- **Its width.** A 1.3 rad view makes it 74.5° wide (*derived*).
+
+**The disc turns with the camera** (*read*, `0x1003fe9c`).
+- **The heading.** θ is the angle of the first column (x, y) of the camera
+  matrix, from the view's interface 6, property 2 (`[+0]`, `[+0x10]`). It is an
+  arctangent of y ÷ x, less π when x ≤ 0, so it is `atan2`.
+- **North and south.** North is drawn at θ − π/2, clockwise from up; south is
+  opposite.
+- **A contact.** A contact at bearing β (the angle of the vector to it) is drawn
+  at β − θ + π/2 counter-clockwise from the right, with y up
+  (`0x100402ef`).
+- **Which axis faces** (*seen*). That this column is the direction the camera
+  faces is *seen*: at 128 s the hero still faces its targets to the east, and
+  the north mark stands on the left.
+
+**North and south** (`0x1003ffa0`, `0x10040078`).
+- **The shape.** page6's arrow is drawn on four corners. Its top row is at radius
+  68 and its bottom row at radius 56, at its angle ± 5°, so it points outward.
+- **The colours.** North is blue (10, 10, 225) and south red (225, 10, 10).
+
+**The contacts** are the entries of the driven unit's target list
+([25-sensors.md](25-sensors.md#the-players-target--read-and-measured)).
+- **Its record.** Each id is looked up among the game's units (`0x10072d10`),
+  then its buildings (`0x100728a0`). Which list is which is *derived* from what
+  each branch calls.
+- **What is skipped.** An entry with neither record is skipped, and so is one
+  whose owner word is `0xfffe` or `0xffff`.
+- **The colour.** It is the clan rule's (`0x10065440`).
+- **The place.** `d` is the distance across the ground from the translation of
+  the unit's own matrix to the record's `+4`, `+8`. The contact goes at
+  `60 × d ÷ R` from the centre, where `R` is the sensor range: property `0x50`,
+  through `0x10091b30`, and 1 m without a radar. Nothing clamps it. The list
+  holds only what the radar found within its range, so a contact lands inside
+  the 60-unit disc (*derived*).
+- **The marks** are drawn in screen pixels (GUI slot 0 set to 0):
+
+  | mark | when | size |
+  |---|---|---|
+  | a cross | a unit whose chassis profile's `ChassisType` is 1, a flyer | arms `int(4·sx)` wide and `int(4·sy)` tall, each rounded down to even |
+  | a filled square | any other unit | `int(3·sx)` × `int(3·sy)` |
+  | a filled square | a building | `int(5·sx)` × `int(5·sy)` |
+  | a rectangle outline | the list's current target (`+4`) | from 2 px left of and above the mark to 2 px (the cross) or 1 px (the squares) beyond it, unscaled |
+  | a magenta triangle outline | a unit chosen in the wingman selector (`0x1006df50`) | radius `int(5·sx)`, GUI slot 6 |
+
+  - **Which chassis flies.** The test is `0x10075f70`. It reads the unit
+    behaviour's variable `0x207`, which `Behavior.dll:0x1000a571` answers with
+    the chassis profile at `+0x7c0`; `ChassisType` is that profile's first
+    field.
+  - **Seen, 150 s.** `helic`, a flyer, is a grey cross.
+  - **Seen, 230 s.** Both captured flyers are light-blue crosses and the
+    current target is outlined; `tut1_e1` is a red square.
+  - **Seen, 128 s.** The target dummies do not show at all.
+
+**The sweep ring and its ping** (`0x10040094`).
+- **When it runs.** Only while the unit answers property `0xa9`. The machine
+  getter (`Control.dll:0x1000e6c0`) sends that id to the device getter as 9, the
+  radar's value 4, its period, via `0x1000e831` ([14-controls.md](14-controls.md)).
+- **Its length.** `P` is that period × 0.002 s, so 750 ms gives 1.5 s.
+- **The ring.** Each frame a circle of radius `int(60 × t ÷ P)` is drawn about
+  the centre, in HUD units, in (0, 155, 0) at alpha 140.
+- **The ping.** When `t` passes `P` the stamp restarts. Unless the game object's
+  byte `+0xe5` is set, the sound `RADAR` (`i_radar.wav`, `game_resources.cfg`)
+  plays.
+- **Seen.** `i_radar.wav` matches in the recording's audio at gaps that are
+  multiples of 1.51 s, from 110 s to 255 s. The ring is too faint to pick out in
+  the video.
+- **A correction.** The `RADAR` string at `0x1004011d` is that sound's name, not
+  a label.
+
+**The range figure** (`0x1004061d`).
+- **The value.** `R`, rounded.
+- **The look.** `GAME_FONT`, green (0, 255, 0), at y 467.
+- **The place.** It is centred in the 37 units from x 303:
+  `x = round(303 + (37 − width ÷ sx) ÷ 2)`, where the width comes from the
+  font's slot 6 in pixels.
+- **On the hero.** Its radar reads 300 m ([33-units.md](33-units.md)), the
+  recording's 300.
+
+**The altitude** (left, `0x1003f6a0`).
+- **The figure.** `a = round(z − W)`, in white `GAME_FONT` at y 446, centred in
+  the 28 units from x 226.
+  - `z` is the unit record's `+0xc`.
+  - `W` is the world's `+0xad8`. The world fills it once at load, from the
+    landscape's `ITerrain` slot 11 (`iron3d.dll:0x100a1ec6`).
+- **What W is.** Slot 11 (`Terrain.dll:0x10019180`) returns the z of the first
+  vertex of the first face whose surface has bit `0x02`, water. It is −1 on a
+  map with none (`0x10017d60`, `0x10017df7`).
+  - Water is one flat plane per map (`check_water`), so **the altitude is
+    height above the water** (*derived*).
+  - Tut_1's water lies at −1.725 m (*measured*).
+- **The bar.**
+  - `p = (a + 100) × 100 ÷ 200`, held to 0..100, and
+    `e = (100 − p) × 105 ÷ 100`, both in integers.
+  - The bar's art starts `e` rows down, so it fills from the bottom: empty at
+    100 m below the water, half at the water, full 100 m above.
+- **Seen.** 25 falling to 22 while the hero walks down the island at 126–129 s.
+
+**The speed** (right, `0x1003f900`).
+- **The figures.**
+  - `v = round(speed × 3.6)`, where `speed` is property `0x28`, the length of
+    the step velocity ([24-motion.md](24-motion.md)).
+  - `top = round(top speed × 3.6)`, where `top speed` is property `0x90`
+    (`Control.dll:0x1000dd8c`): the controller block's forward top speed at
+    file `+48`, which the stat panel prints as "Max speed".
+- **The look.** White `GAME_FONT` at y 446, centred in the 28 units from x 388.
+- **The bar.** `p = v × 100 ÷ top` (0 with no top), held to 0..100; then as the
+  altitude.
+- **Seen.** 50 while the hero runs at 14 m/s (50.4 km/h), and 0 standing.
+
+### The indicators — *read*, and *seen*
+
+Eight slots share one draw (`0x1003f270`), given a slot and a state 0, 1 or 2:
+
+- **The lamp.** page6's (202 + 18 × state, 154), 17 × 20, drawn white and
+  blended at `(x, 459) → (x + 18, 484)`. The three lamps are dark, lit white and
+  lit red.
+- **The icon.** 15 × 15, at `(x + 1, 463) → (x + 16, 478)`. It is tinted grey
+  (128, 128, 128) for state 0, white for 1 and red (255, 0, 0) for 2.
+
+| slot | x | icon | state 1 (2 for slot 4) when | key |
+|---:|---:|---|---|---|
+| 0 | 222 | ui_menu (97, 126), a wrench | the repair system is on: the first class-15 component in state `0x20` (`0x10076e10`) | G, `CMD_REPAIRSYS_ON` |
+| 1 | 240 | ui_menu (238, 222) | the camera's infrared is on: the view's flag `0x20` (`0x10035c20`) | N, `CMD_CAMERA_INFRARED` |
+| 2 | 258 | ui_menu (239, 126) | camouflage is on: the class-10 component in state `0x1000` (`0x10076e40`) | H, `CMD_CAMOUFLAGE_WEAR` |
+| 3 | 280 | ui_menu (223, 142), a figure | the interface's `CState` mode is 0 (`FREE`) or 1 (`SELECT_ATTACK_TARGET`) | — |
+| 4 | 344 | ui_menu3 (180, 27) | red for 3 s after *"Risk area! Landing impossible."* | — |
+| 5 | 366 | ui_menu (113, 94), a palm | the unit's auto-driver level (`+0x9c`) is 0 | Y, `CMD_JAMES_AUTO_DRIVER` |
+| 6 | 384 | ui_menu (113, 110) | the level is 1 | Y |
+| 7 | 402 | ui_menu (81, 94) | the level is 2 | Y |
+
+- **Infrared.** The camera class (`Control.dll:0x10023a00`) sets the view's flag
+  `0x20` on state `0x1000`, clears it on `0x2000` and flips it on `0x4000`.
+  That last is `CIS_INFRARED_INV`, which `hero.tbl` sends on N.
+- **The mode.** The `CState` is the game object's `+0x20`, and its mode is the
+  front of its stack ([30-turrets.md](30-turrets.md)).
+- **The warning.**
+  - `0x10063500` shows string 6211 with `VOICE_RISK_AREA`, sets the `CState`'s
+    byte `+0x31` and stamps the time.
+  - The `CState` takt (`0x10062950`) clears the byte once 3 s have passed.
+  - Slot 4 is otherwise grey.
+- **The auto-driver.** Y steps the level 0 → 1 → 2 → 0
+  ([31-packages.md](31-packages.md)). `ui_other_d.man` puts it on A.
+- **Seen.**
+  - Grey icons read about 133 in the recording and lit ones 255.
+  - Repair (slot 0) and camouflage (slot 2) turn from grey to lit between 112 s
+    and 118 s, while the tutorial goes through the battle suit's systems.
+  - The figure and the palm stay lit throughout; the other slots stay grey.
+
+### The reticle — *read*
+
+All of it is green (55, 255, 55) and blended (`0x10042ed0`):
+
+| piece | page9 source | destinations |
+|---|---|---|
+| the circle | (77, 0) 64 × 64 | (288, 208) → (352, 272) |
+| the corner arcs | (54, 28) 23 × 23 | (279, 260) → (300, 281); (279, 220) → (300, 199); (361, 260) → (340, 281); (361, 220) → (340, 199) |
+| the tick strips | (168, 0) 82 × 15 | (232, 233) → (314, 248); (408, 233) → (326, 248) |
+
+- **The corner arcs** are one art, mirrored into the four corners.
+- **The tick strips** are the same art twice, the second mirrored.
+- **A dot.** Last comes a 2 × 2 filled green (0, 255, 0) square at
+  `(320 − 24·b, 240 − 24·a)`. `a` and `b` are `[+0]` and `[+0x10]` of the
+  camera view's interface 6, property 0.
+
+### Not established
+
+- What the camera's property 0 holds, so what the reticle's dot shows.
+- In which view states the three widgets are drawn.
+- The game object's byte `+0xe5`, which silences the radar's ping.
+- Where text's `(x, y)` sits on a glyph: the font's slot 7 takes it as given.
+- Slot 30's stage sets 1 and 7.
+- What slot 3's `CState` modes 0 and 1 mean to the player.
+- Why the target dummies are not on the radar. The list holds radar contacts
+  only, so they are presumably never detected (*guess*: a dummy gives off no
+  signature).
 
 ## The target panel and the player's own unit
 

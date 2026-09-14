@@ -493,8 +493,9 @@ holds decides:
   draws). Each entry of the driven unit's target list is placed at its bearing
   and distance, as a small mark in the colour of its owner word's clan
   (`0x100402bd`). The current target's mark also gets an outline in the same
-  colour (`0x100403d4`, `0x100404d1`). Which of a square and a cross a mark is
-  was not transcribed (`0x10075f70`).
+  colour (`0x100403d4`, `0x100404d1`). A flyer's mark is a cross and any other
+  unit's a square (`0x10075f70`,
+  [35-hud.md](35-hud.md#the-radar--read-and-seen)).
 - **The target panel** (`0x10040f30`). The widget `0x10040940` hands it the
   driven unit's current target, list `+4`.
   - **Where.** A 150 × 174 panel at the bottom left of the HUD's 640 × 480,
@@ -569,8 +570,9 @@ first two take the rule's colour.
   both sounds
   ([How the game colours what it marks](#how-the-game-colours-what-it-marks--read-and-measured)).
   Still open there:
-  - the radar mark's shape (`0x10075f70`);
-  - the target panel frame's scale;
+  - ~~the radar mark's shape (`0x10075f70`)~~, answered in
+    [35-hud.md](35-hud.md#the-radar--read-and-seen);
+  - ~~the target panel frame's scale~~, answered in [35-hud.md](35-hud.md);
   - the unit marker's gap (the record's slot 5);
   - what fills the clan record's list at `+0x54`, which decides which other
     clans' units get a marker.
@@ -583,14 +585,14 @@ first two take the rule's colour.
   `IControl` slot 10 with id `0x10` for the contact list, slot 4 with id 8 for
   the range — where the same search finds both in `Behavior.dll`
   (`0x1002336b`, `0x10023243`); so the cockpit does not draw the radar
-  component's scan in that form. Handles: the cockpit HUD draw
-  `iron3d.dll:0x1003fb90`, which draws rings of radius 56 and 68 about a centre
-  and prints the `RADAR` label (`0x1004011d`), and `0x10073550`, which loads
-  `minimap` and `map_compass_icon`. Narrowed: that radar draws the driven
-  unit's target list, each entry in its clan's colour, and the map marks units
-  and buildings in the same colours
+  component's scan in that form. ~~The cockpit radar~~ is answered in
+  [35-hud.md](35-hud.md#the-radar--read-and-seen): it draws the driven unit's
+  target list about the camera's heading, and its `RADAR` string
+  (`0x1004011d`) is a sound's name, not a label. Still open: the map,
+  `0x10073550`, which loads `minimap` and `map_compass_icon`, marks units and
+  buildings in the same colours
   ([How the game colours what it marks](#how-the-game-colours-what-it-marks--read-and-measured));
-  the rest of both is not read.
+  the rest of it is not read.
 - ~~What asks an AI machine's device manager to switch camouflage *on*.~~
   Answered: the unit takt's engagement check
   ([When the AI wears it](#the-detection-shield-hides-all-three-and-camouflage-hides-them-again--read-and-measured)).
