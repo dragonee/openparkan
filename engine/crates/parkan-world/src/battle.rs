@@ -7,7 +7,8 @@ use std::rc::Rc;
 use anyhow::Result;
 use glam::{Mat4, Vec3};
 use parkan_formats::control::{
-    self, ACT_EFFECT_POINTS, ACT_EXPLODE_NODE, ENTRY_LOAD, ENTRY_RANGE, TRIPLE_TOP_SPEED,
+    self, ACT_EFFECT_POINTS, ACT_EXPLODE_NODE, ENTRY_LOAD, ENTRY_RANGE, SEEKER_CONE, SEEKER_LOCK,
+    SEEKER_REACH, SEEKER_TYPE, TRIPLE_TOP_SPEED, TRIPLE_TURN,
 };
 use parkan_formats::cpt::{self, ControlPoint};
 use parkan_formats::exp::{self, Explosion};
@@ -15,7 +16,7 @@ use parkan_formats::mission::{self, Mission, Value};
 use parkan_formats::ndp::{self, NodeDamage};
 use parkan_formats::objects::ResourceRef;
 use parkan_formats::pose::Pose;
-use parkan_sim::combat::{Combat, Part, RoundKind, Target};
+use parkan_sim::combat::{Combat, Part, RoundKind, Seeker, Target};
 use parkan_sim::damage::{Life, VITAL_NODE_FLAG};
 
 use crate::assembly::Assembly;
@@ -195,7 +196,13 @@ impl Battle {
                 continue;
             }
             let centre = (lo + hi) / 2.0;
-            combat.targets.push(Target { parts, centre, radius: (hi - lo).length() / 2.0, alive: true });
+            combat.targets.push(Target {
+                parts,
+                centre,
+                radius: (hi - lo).length() / 2.0,
+                alive: true,
+                position: Vec3::from_array(object.position),
+            });
             objects.push(i);
             explosions.push(blasts);
             wears.push(part_wears);
@@ -246,6 +253,13 @@ impl Battle {
             hit_points,
             hit,
             range_end,
+            // A missile's class-17 seeker, and the frame's fourth triple it turns at (docs/29).
+            seeker: controller.components.iter().find(|c| c.type_id == SEEKER_TYPE).map(|c| Seeker {
+                cone: c.values[SEEKER_CONE],
+                reach: c.values[SEEKER_REACH],
+                lock_ms: c.values[SEEKER_LOCK],
+            }),
+            turn_rate: controller.triples[TRIPLE_TURN],
         });
         let effects = controller
             .group(ENTRY_LOAD)

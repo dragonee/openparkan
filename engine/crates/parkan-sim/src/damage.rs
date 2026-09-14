@@ -232,6 +232,7 @@ mod tests {
             centre: at + Vec3::Z,
             radius: 1.5,
             alive: true,
+            position: at,
         }
     }
 
@@ -254,12 +255,13 @@ mod tests {
                 slots: Vec::new(),
             }),
             range_end: None,
+            ..RoundKind::default()
         };
         let g = crate::ground::tests::floor();
         let mut c = Combat { kinds: vec![laser], targets: vec![wall(30.0, 1.0, true)], ..Default::default() };
         let muzzle = Vec3::new(20.0, 5.0, 1.0);
         for _ in 0..2 {
-            c.fire(0, None, muzzle, Vec3::Y, Vec3::ZERO, 1.0);
+            c.fire(0, None, muzzle, Vec3::Y, Vec3::ZERO, 1.0, None);
             let events = c.tick(1.0 / 60.0, &g);
             assert!(events.iter().any(|e| matches!(e, Event::Struck { target: Some(0), .. })), "{events:?}");
             assert!(!events.iter().any(|e| matches!(e, Event::Killed { .. })), "a building is never killed");
@@ -269,9 +271,9 @@ mod tests {
 
         // A unit in its place dies at the first hit and lets the next round by.
         c.targets = vec![wall(30.0, 1.0, false)];
-        c.fire(0, None, muzzle, Vec3::Y, Vec3::ZERO, 1.0);
+        c.fire(0, None, muzzle, Vec3::Y, Vec3::ZERO, 1.0, None);
         assert!(c.tick(1.0 / 60.0, &g).iter().any(|e| matches!(e, Event::Killed { target: 0 })));
-        c.fire(0, None, muzzle, Vec3::Y, Vec3::ZERO, 1.0);
+        c.fire(0, None, muzzle, Vec3::Y, Vec3::ZERO, 1.0, None);
         assert!(c.tick(1.0 / 60.0, &g).iter().any(|e| matches!(e, Event::Gone { .. })));
     }
 

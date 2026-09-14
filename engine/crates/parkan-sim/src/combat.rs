@@ -25,8 +25,20 @@ pub const SIGHT_FROM: f32 = 5.0;
 pub const SIGHT_TO: f32 = 1_000_000.0;
 pub const NEAREST_AIM: f32 = 100.0;
 
+/// A guided round's class-17 seeker (docs/29-weapons.md, "Guided rounds differ in how
+/// hard they steer").
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Seeker {
+    /// Value 0: the cone's half-angle, radians.
+    pub cone: f32,
+    /// Value 1: how far it follows a target, m.
+    pub reach: f32,
+    /// Value 2: the lock its gun waits, ms.
+    pub lock_ms: f32,
+}
+
 /// What every round of one record shares.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct RoundKind {
     pub name: String,
     /// The controller's top speed along y.
@@ -42,11 +54,11 @@ pub struct RoundKind {
     pub hit: Option<Explosion>,
     /// The `.exp` block entry 4's action 27 names, at the end of the range.
     pub range_end: Option<Explosion>,
+    pub seeker: Option<Seeker>,
+    /// The controller's fourth triple: the most it turns about each axis, rad/s.
+    pub turn_rate: [f32; 3],
 }
 
-/// STAND-IN: docs/29-weapons.md#not-established -- whether a target the hero's AI set
-/// before the player took over survives is not established; nothing sets the turret's
-/// target while the player drives, so a round carries none and a guided one flies straight.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Round {
     /// Unique among the rounds a `Combat` has fired.
@@ -62,6 +74,8 @@ pub struct Round {
     pub forward: Vec3,
     pub remaining: f32,
     pub ratio: f32,
+    /// The target its gun handed it (`0x1002a514`), which its seeker follows.
+    pub target: Option<usize>,
     expired: bool,
 }
 
@@ -85,6 +99,8 @@ pub struct Target {
     pub centre: Vec3,
     pub radius: f32,
     pub alive: bool,
+    /// The object's placement: where a gun's gate and a seeker find it.
+    pub position: Vec3,
 }
 
 impl Target {
@@ -116,6 +132,36 @@ pub struct Combat {
     pub fired: u64,
 }
 
+/// One tick of a seeker's steering (`Control.dll:0x100247c0`, `0x1000cd0a`). The seeker
+/// answers while the target is within its reach and inside its cone. Its heading, in
+/// the round's frame, gives two angles, of z against y and of x against y, a quarter
+/// turn when the target is abeam. Each is asked for within the tick and held to the
+/// turn rate about its axis.
+///
+/// STAND-IN: docs/29-weapons.md#guided-rounds-differ-in-how-hard-they-steer--read-and-measured
+/// -- whether a round's velocity turns with it is not read: it is kept in the round's
+/// frame, as a machine's is, so it turns with the round.
+fn steer(r: &mut Round, seeker: Seeker, turn: [f32; 3], target: Vec3, dt: f32) {
+    let to = target - r.position;
+    let distance = to.length();
+    if dt <= 0.0
+        || distance <= 0.0
+        || distance > seeker.reach
+        || r.forward.dot(to / distance) < seeker.cone.cos()
+    {
+        return;
+    }
+    let side = r.forward.cross(Vec3::Z).normalize_or(Vec3::X);
+    let up = side.cross(r.forward).normalize_or(Vec3::Z);
+    let (x, y, z) = (to.dot(side), to.dot(r.forward), to.dot(up));
+    let angle = |a: f32| if y == 0.0 { std::f32::consts::FRAC_PI_2.copysign(a) } else { (a / y).atan() };
+    let pitch = (angle(z) / dt).clamp(-turn[0], turn[0]) * dt;
+    let yaw = (-angle(x) / dt).clamp(-turn[2], turn[2]) * dt;
+    let q = glam::Quat::from_axis_angle(up, yaw) * glam::Quat::from_axis_angle(side, pitch);
+    r.forward = (q * r.forward).normalize_or(r.forward);
+    r.velocity = q * r.velocity;
+}
+
 /// World xyz to the f64 poses use.
 fn arr(v: Vec3) -> [f64; 3] {
     [f64::from(v.x), f64::from(v.y), f64::from(v.z)]
@@ -127,7 +173,8 @@ fn vec(v: [f64; 3]) -> Vec3 {
 
 impl Combat {
     /// A round leaves a muzzle (`0x1002a387`): facing `direction` with z up, at its top
-    /// speed plus the shooter's world velocity, in free flight.
+    /// speed plus the shooter's world velocity, in free flight, with its gun's `target`.
+    #[allow(clippy::too_many_arguments)]
     pub fn fire(
         &mut self,
         kind: usize,
@@ -136,6 +183,7 @@ impl Combat {
         direction: Vec3,
         shooter_velocity: Vec3,
         ratio: f32,
+        target: Option<usize>,
     ) -> Option<u64> {
         let k = self.kinds.get(kind)?;
         let forward = direction.normalize_or(Vec3::Y);
@@ -150,6 +198,7 @@ impl Combat {
             forward,
             remaining: k.range,
             ratio,
+            target,
             expired: false,
         });
         Some(self.fired)
@@ -230,8 +279,15 @@ impl Combat {
     /// One frame of `dt` seconds.
     pub fn tick(&mut self, dt: f32, ground: &Ground) -> Vec<Event> {
         let mut events = Vec::new();
-        // Message 1: every round moves and spends its range (`0x1000cbb0`).
+        // Message 1: every round moves and spends its range (`0x1000cbb0`), a guided one
+        // turning toward its target first (`0x1000ccc5`).
         for r in &mut self.rounds {
+            let k = &self.kinds[r.kind];
+            if let Some(seeker) = k.seeker
+                && let Some(target) = r.target.and_then(|t| self.targets.get(t)).filter(|t| t.alive)
+            {
+                steer(r, seeker, k.turn_rate, target.position, dt);
+            }
             let side = r.forward.cross(Vec3::Z).normalize_or(Vec3::X);
             let up = side.cross(r.forward).normalize_or(Vec3::Z);
             let bleed = SIDEWAYS_BLEED * dt * 1000.0;
@@ -442,6 +498,7 @@ mod tests {
             centre: at + Vec3::Z,
             radius: 1.5,
             alive: true,
+            position: at,
         }
     }
 
@@ -454,6 +511,7 @@ mod tests {
             hit_points: 249.0,
             hit: Some(explosion(HIT_DIRECT, 1.0, 1.0)),
             range_end: Some(explosion(HIT_DIRECT, 1.0, 1.0)),
+            ..RoundKind::default()
         }
     }
 
@@ -468,7 +526,7 @@ mod tests {
         };
         let muzzle = Vec3::new(20.0, 5.0, 1.0);
         for shot in 0..2 {
-            c.fire(0, None, muzzle, Vec3::Y, Vec3::ZERO, 1.0);
+            c.fire(0, None, muzzle, Vec3::Y, Vec3::ZERO, 1.0, None);
             let events = c.tick(1.0 / 60.0, &g);
             assert!(c.rounds.is_empty(), "the round ended in its first frame");
             let damage: Vec<f32> = events
@@ -481,7 +539,7 @@ mod tests {
         let life = c.targets[0].parts[0].life.as_ref().unwrap();
         assert!(life.dead && !c.targets[0].alive);
         // Dead, it no longer stops a round: this one runs to the map's edge.
-        c.fire(0, None, muzzle, Vec3::Y, Vec3::ZERO, 1.0);
+        c.fire(0, None, muzzle, Vec3::Y, Vec3::ZERO, 1.0, None);
         let events = c.tick(1.0 / 60.0, &g);
         assert!(events.iter().any(|e| matches!(e, Event::Gone { .. })), "{events:?}");
     }
@@ -507,6 +565,49 @@ mod tests {
     }
 
     #[test]
+    fn a_seeker_turns_its_round_onto_a_target_in_its_cone_at_its_turn_rate() {
+        let g = floor();
+        let missile = RoundKind {
+            name: "bm_h_01".into(),
+            top_speed: 70.0,
+            range: 350.0,
+            radius: 0.4,
+            hit_points: 200.0,
+            seeker: Some(Seeker { cone: 0.85, reach: 500.0, lock_ms: 4000.0 }),
+            turn_rate: [1.4, 1.4, 1.4],
+            ..RoundKind::default()
+        };
+        // A target 30 degrees right of the launch line and one 60 degrees left, beyond the cone.
+        let right = post(Vec3::new(10.0 + 150.0 * 0.5, 10.0 + 150.0 * 0.866, 30.0), 5000.0);
+        let wide = post(Vec3::new(10.0 - 150.0 * 0.866, 10.0 + 150.0 * 0.5, 30.0), 5000.0);
+        let mut c = Combat { kinds: vec![missile], targets: vec![right, wide], ..Default::default() };
+        let from = Vec3::new(10.0, 10.0, 30.0);
+        c.fire(0, None, from, Vec3::Y, Vec3::ZERO, 1.0, Some(0));
+        c.fire(0, None, from, Vec3::Y, Vec3::ZERO, 1.0, Some(1));
+        c.fire(0, None, from, Vec3::Y, Vec3::ZERO, 1.0, None);
+        let dt = 1.0 / 60.0;
+        c.tick(dt, &g);
+        let turned = c.rounds[0].forward.angle_between(Vec3::Y);
+        assert!((turned - 1.4 * dt).abs() < 1e-3, "one tick turns {turned} rad, at most the rate");
+        assert!(c.rounds[0].forward.x > 0.0, "toward the right");
+        assert!(
+            (c.rounds[0].velocity.normalize() - c.rounds[0].forward).length() < 1e-4,
+            "its velocity turns too"
+        );
+        assert_eq!(c.rounds[1].forward, Vec3::Y, "outside the cone the seeker gives no heading");
+        assert_eq!(c.rounds[2].forward, Vec3::Y, "with no target it flies straight");
+
+        // Past the test floor's edge: the steering alone, a second of it.
+        let mut r = c.rounds[0];
+        let (seeker, turn, at) = (c.kinds[0].seeker.unwrap(), c.kinds[0].turn_rate, c.targets[0].position);
+        for _ in 0..60 {
+            steer(&mut r, seeker, turn, at, dt);
+            r.position += r.velocity * dt;
+        }
+        assert!(r.forward.dot((at - r.position).normalize()) > 0.999, "on the target after a second");
+    }
+
+    #[test]
     fn a_missile_blasts_at_the_end_of_its_range_and_its_owner_is_never_struck() {
         let g = floor();
         let missile = RoundKind {
@@ -517,6 +618,7 @@ mod tests {
             hit_points: 200.0,
             hit: Some(explosion(HIT_AREA, 170.0, 7.0)),
             range_end: Some(explosion(HIT_AREA, 200.0, 10.0)),
+            ..RoundKind::default()
         };
         let mut c = Combat {
             kinds: vec![missile],
@@ -525,7 +627,7 @@ mod tests {
             targets: vec![post(Vec3::new(20.0, 16.0, 0.0), 5000.0), post(Vec3::new(20.0, 12.0, 0.0), 5000.0)],
         };
         // Fired by the nearer post, from inside it: it passes its owner and flies on.
-        c.fire(0, Some(1), Vec3::new(20.0, 11.0, 1.0), Vec3::Y, Vec3::ZERO, 1.0);
+        c.fire(0, Some(1), Vec3::new(20.0, 11.0, 1.0), Vec3::Y, Vec3::ZERO, 1.0, None);
         let mut events = Vec::new();
         for _ in 0..20 {
             events.extend(c.tick(1.0 / 60.0, &g));
@@ -549,7 +651,7 @@ mod tests {
         let g = floor();
         let mut c = Combat { kinds: vec![laser()], ..Default::default() };
         c.kinds[0].top_speed = 10.0;
-        c.fire(0, None, Vec3::new(10.0, 10.0, 30.0), Vec3::Y, Vec3::new(2.0, 0.0, 0.0), 1.0);
+        c.fire(0, None, Vec3::new(10.0, 10.0, 30.0), Vec3::Y, Vec3::new(2.0, 0.0, 0.0), 1.0, None);
         c.tick(0.5, &g);
         let v = c.rounds[0].velocity;
         assert!((v.x - 0.5).abs() < 1e-4 && (v.y - 10.0).abs() < 1e-4, "{v}");

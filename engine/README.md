@@ -155,7 +155,9 @@ every archive in the install, Mission 01's `data.tma`, `Material.lib`, Tut_1's
 object's parts and their poses) and the 19 meshes they use. From M3 it adds
 every controller and control point list, archive by archive, and the three
 input tables; from M4 every damage table, explosion and effect; from M5 every
-mission's atmosphere, both RsLi archives and the game font: 215 dumps.
+mission's atmosphere, both RsLi archives and the game font; from M6 every
+`.cfg`, the text and interface string tables, and each mission's objectives,
+messages and ambient sound resolved: 319 dumps.
 
 ## Stand-ins
 
@@ -232,6 +234,9 @@ engine pass replaces each with what was read and removes its row.
 | M6 | The `Mission` handler is timed by `timeGetTime`, real time | game time | [34](../docs/34-progression.md#when-the-mission-handler-runs--read) |
 | M6 | How a destroyed unit leaves function 31's list | it leaves its clan's count and every route's list | [34](../docs/34-progression.md#function-31-how-many-robots-a-clan-has--read) |
 | M6 | What `OBJECTIVE_FAILED` does past fetching string 5041, and what `OBJECTIVE_PROGRESS` shows | the failure shows the string and changes no state; progress shows nothing | [34](../docs/34-progression.md#objectives-and-the-end-of-a-mission--read-and-measured) |
+| M6 | The order the resource manager looks a sound's name up in | the first descriptor that binds the name wins, the mission's own before `ui/game_resources.cfg`; every training message resolves to the member its briefing or tutorial descriptor names | [20](../docs/20-resources.md#what-this-does-not-say) |
+| M6 | The three signatures a radar weighs against its sensitivities | every live object within the radar's range is detected | [25](../docs/25-sensors.md#a-scan-is-a-sphere-a-falloff-and-three-tests--read) |
+| M6 | Whether a guided round's velocity turns with it | it is kept in the round's frame, as a machine's is, and turns with it | [29](../docs/29-weapons.md#guided-rounds-differ-in-how-hard-they-steer--read-and-measured) |
 
 ## Departures
 

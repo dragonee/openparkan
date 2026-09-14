@@ -16,4 +16,5 @@ pub mod machine;
 pub mod motion;
 pub mod progression;
 pub mod sky;
+pub mod targeting;
 pub mod turret;

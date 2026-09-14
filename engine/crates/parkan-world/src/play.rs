@@ -194,7 +194,7 @@ impl Play {
             let direction = aim.map_or(barrel, |p| p - muzzle);
             // The player's guns carry no level ratio: property 180 goes to hostile units only.
             let velocity: Vec3 = self.hero.world_velocity();
-            if let Some(id) = self.battle.combat.fire(kind, None, muzzle, direction, velocity, 1.0) {
+            if let Some(id) = self.battle.combat.fire(kind, None, muzzle, direction, velocity, 1.0, None) {
                 // The round's load group creates its flight effects at spawn.
                 let round = *self.battle.combat.rounds.last().expect("just fired");
                 for (name, points) in self.battle.kinds[kind].effects.clone() {
