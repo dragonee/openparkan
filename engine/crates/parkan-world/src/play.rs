@@ -17,6 +17,7 @@ use parkan_formats::controls::{
 use parkan_formats::exp::Explosion;
 use parkan_formats::landmesh::FLAGS_LIQUID_BED_BIT;
 use parkan_formats::materials::Library;
+use parkan_formats::mesh::{NO_SLOT, SLOTS_PER_VARIANT};
 use parkan_formats::mission::{Clan, KIND_BUILDING, KIND_ROCK, KIND_UNIT, KIND_VEGETATION, Mission, Value};
 use parkan_formats::pose::Pose;
 use parkan_formats::{gamedir, landmesh};
@@ -24,12 +25,14 @@ use parkan_sim::behaviour::{
     FIRE_BAR_FLYER, FIRE_BAR_WALKER, Seen, Senses, Walk, distance_score, fire_wait_ms,
 };
 use parkan_sim::combat::{Event, Part, Round};
+use parkan_sim::damage::FLIGHT_MS;
 use parkan_sim::damage::{Life, share_loss, touching};
 use parkan_sim::effects::{Cue, Frame, Sprite};
 use parkan_sim::ground::Ground;
 use parkan_sim::guns::SINGLE_FIGHT;
-use parkan_sim::hit::segment_mesh;
+use parkan_sim::hit::ROUND_SKIPS_FACE;
 use parkan_sim::machine::Walker;
+use parkan_sim::motion::GRAVITY;
 use parkan_sim::orders::{self, ACKNOWLEDGEMENTS, Digit, Picked, Selector, VoicePick};
 use parkan_sim::progression::Notice;
 use parkan_sim::solid::{self, NO_CONTACT, Solid};
@@ -178,6 +181,11 @@ pub struct Play {
     pub capture_standby: bool,
     /// Whether the HUD brackets the target in the world (`scene::hud`); off, as the game's.
     pub bracket: bool,
+    /// Knocked-off parts in flight.
+    pub flights: Vec<Flight>,
+    /// Dead units and when each is deleted; and each target deleted.
+    pub deaths: Vec<(usize, f64)>,
+    pub deleted: Vec<bool>,
     /// What the game says, not yet shown or played.
     pub says: Vec<Say>,
 }
@@ -222,6 +230,27 @@ fn launches(
         .collect()
 }
 
+/// How a knocked-off part leaves, stand-ins for the unread flight model (see
+/// [`Play::knock_off`]): its speed away from the unit and up, m/s, and its turn, rad/s.
+pub const FLIGHT_SPEED_OUT: f32 = 6.0;
+pub const FLIGHT_SPEED_UP: f32 = 8.0;
+pub const FLIGHT_SPIN: f32 = 3.0;
+
+/// A knocked-off part in flight: the node knocked off, and it and the nodes it carries at
+/// their poses when it left; the point it turns about, how fast it left, and the level axis
+/// it turns about.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Flight {
+    pub target: usize,
+    pub part: usize,
+    pub node: usize,
+    pub start_ms: f64,
+    pub centre: Vec3,
+    pub velocity: Vec3,
+    pub axis: Vec3,
+    pub base: Vec<(usize, Pose)>,
+}
+
 /// A round's own frame: y along its flight, z up, x to its side.
 fn round_axes(r: &Round) -> [Vec3; 3] {
     let y = r.forward;
@@ -237,9 +266,8 @@ fn round_axes(r: &Round) -> [Vec3; 3] {
 /// wear base the material byte is ORed with is not read: the byte alone indexes the wear,
 /// as the drawing does.
 pub fn struck_wear<'a>(part: &Part, wear: &'a [String], p0: Vec3, p1: Vec3) -> Option<&'a str> {
-    let strike = segment_mesh(&part.mesh, &part.nodes, part.scale, p0, p1)?;
-    let node = part.mesh.nodes.get(strike.node?)?;
-    let slot = part.mesh.slots.get(usize::from(node.slot_index[0]))?;
+    let strike = part.segment(p0, p1, ROUND_SKIPS_FACE)?;
+    let slot = part.mesh.slots.get(usize::from(part.slot(strike.node?)?))?;
     let first = usize::from(slot.first_batch);
     let batches = part.mesh.batches.get(first..first + usize::from(slot.batch_count))?;
     let batch = batches.iter().find(|b| {
@@ -368,6 +396,7 @@ impl Play {
                 if object.name.is_empty() { stem.to_owned() } else { object.name.clone() }
             })
             .collect();
+        let target_count = battle.combat.targets.len();
         let mut play = Play {
             hero,
             ground,
@@ -391,6 +420,9 @@ impl Play {
             voice_pick: VoicePick::default(),
             capture_standby: false,
             bracket: false,
+            flights: Vec::new(),
+            deaths: Vec::new(),
+            deleted: vec![false; target_count],
             robots,
         };
         for i in 0..play.turret_effects.len() {
@@ -758,8 +790,27 @@ impl Play {
         let launches = launches(&self.hero.robot, None, &shots, &self.battle, &self.ground);
         self.launch(launches, now);
         events.extend(self.battle.combat.tick((dt_ms / 1000.0) as f32, &self.ground));
+        events.extend(self.battle.combat.takt_lives(now));
         for e in &events {
             self.effects_for(e, now);
+            match *e {
+                Event::KnockedOff { target, part, node } => self.knock_off(target, part, node, now),
+                Event::Staged { target, .. } | Event::Hidden { target, .. } => self.rebuild_solid(target),
+                Event::Killed { target } => {
+                    self.deaths
+                        .push((target, now + self.battle.death_ms.get(target).copied().unwrap_or(0.0)));
+                }
+                _ => {}
+            }
+        }
+        self.fly(now);
+        // `World3D.dll!KillGameObject` once a dead unit's time is up (`Control.dll:0x1000c977`).
+        let (due, waiting): (Vec<_>, Vec<_>) = self.deaths.iter().partition(|(_, at)| now >= *at);
+        self.deaths = waiting;
+        for (target, _) in due {
+            self.deleted[target] = true;
+            self.flights.retain(|f| f.target != target);
+            self.killed.push(self.battle.objects[target]);
         }
         // Turret effects follow their points and the channels that drive them.
         for i in 0..self.turret_effects.len() {
@@ -795,11 +846,10 @@ impl Play {
         self.cues.extend(cues);
         self.fx.tick(now);
         for e in &events {
-            if let Event::Killed { target } = e {
-                self.killed.push(self.battle.objects[*target]);
-                if let Some(p) = self.progression.as_mut() {
-                    p.progress.destroyed(self.units[*target].logical_id);
-                }
+            if let Event::Killed { target } = e
+                && let Some(p) = self.progression.as_mut()
+            {
+                p.progress.destroyed(self.units[*target].logical_id);
             }
         }
         // STAND-IN: docs/34-progression.md#not-established -- what follows the hero's death
@@ -808,6 +858,100 @@ impl Play {
             self.progress();
         }
         events
+    }
+
+    /// A destroyed part knocked off (docs/26): it and the nodes it carries fly from where
+    /// they stand.
+    ///
+    /// STAND-IN: docs/26-damage.md#not-established -- the flight model (`0x100131da`) is read
+    /// to move the part, lower its velocity's z each tick and hand the mesh its matrix, but
+    /// not transcribed: the part leaves at 6 m/s away from the unit's centre and 8 m/s up,
+    /// falls under gravity to the ground under it, and turns at 3 rad/s about a level axis
+    /// across its path.
+    fn knock_off(&mut self, target: usize, part: usize, node: usize, now: f64) {
+        let Some(t) = self.battle.combat.targets.get(target) else { return };
+        let Some(p) = t.parts.get(part) else { return };
+        let Some(life) = p.life.as_ref() else { return };
+        let mut carried = vec![node];
+        let mut k = 0;
+        while k < carried.len() {
+            let n = carried[k];
+            carried.extend((0..life.parents.len()).filter(|&c| life.parents[c] == Some(n)));
+            k += 1;
+        }
+        let at = p.nodes[node].translation.map(|v| v as f32);
+        let centre =
+            p.mesh.nodes.get(node).and_then(|n| p.mesh.slots.get(usize::from(n.slot_index[0]))).map_or(
+                Vec3::from_array(at),
+                |s| {
+                    let c = p.nodes[node]
+                        .apply([s.sphere[0], s.sphere[1], s.sphere[2]].map(|v| f64::from(v * p.scale)));
+                    Vec3::new(c[0] as f32, c[1] as f32, c[2] as f32)
+                },
+            );
+        let away = (centre - t.centre).with_z(0.0).normalize_or(Vec3::X);
+        self.flights.push(Flight {
+            target,
+            part,
+            node,
+            start_ms: now,
+            centre,
+            velocity: away * FLIGHT_SPEED_OUT + Vec3::Z * FLIGHT_SPEED_UP,
+            axis: Vec3::new(-away.y, away.x, 0.0),
+            base: carried.into_iter().map(|n| (n, p.nodes[n])).collect(),
+        });
+    }
+
+    /// Every flying part where its flight has it at `now`.
+    fn fly(&mut self, now: f64) {
+        self.flights.retain(|f| now - f.start_ms <= FLIGHT_MS + 1000.0);
+        for f in &self.flights {
+            let t = ((now - f.start_ms).min(FLIGHT_MS) / 1000.0) as f32;
+            let mut at = f.centre + f.velocity * t - Vec3::Z * (GRAVITY / 2.0 * t * t);
+            let floor = self.ground.below(at.x, at.y, at.z + 1000.0).map(|h| h.point.z);
+            if let Some(z) = floor.filter(|&z| at.z < z) {
+                at.z = z;
+            }
+            let half = f64::from(FLIGHT_SPIN * t) / 2.0;
+            let (sin, cos) = (half.sin(), half.cos());
+            let rotation =
+                [cos, f64::from(f.axis.x) * sin, f64::from(f.axis.y) * sin, f64::from(f.axis.z) * sin];
+            let turned = parkan_formats::pose::rotate(rotation, f.centre.to_array().map(f64::from));
+            let moved = at.to_array().map(f64::from);
+            let flight = Pose { translation: [0, 1, 2].map(|i| moved[i] - turned[i]), rotation };
+            let Some(part) =
+                self.battle.combat.targets.get_mut(f.target).and_then(|t| t.parts.get_mut(f.part))
+            else {
+                continue;
+            };
+            for (n, base) in &f.base {
+                if let Some(pose) = part.nodes.get_mut(*n) {
+                    *pose = flight.compose(base);
+                }
+            }
+        }
+    }
+
+    /// A placed object's faces again, once its nodes' blocks or visibility changed; a robot's
+    /// are rebuilt every tick.
+    fn rebuild_solid(&mut self, t: usize) {
+        if self.robots.iter().any(|(rt, _)| *rt == t) {
+            return;
+        }
+        let (Some(target), Some(wears)) = (self.battle.combat.targets.get(t), self.battle.wears.get(t))
+        else {
+            return;
+        };
+        let building = self.battle.placed_kinds.get(t) == Some(&KIND_BUILDING);
+        let materials = &self.materials;
+        let solid =
+            Solid::from_parts(&target.parts, target.centre, target.radius, building, |part, material| {
+                let name = wears.get(part)?.get(usize::from(material & 0xFF))?;
+                materials.get(name).map(|m| (m.surface, m.damage_rate))
+            });
+        if let Some(s) = self.ground.solids.get_mut(t) {
+            *s = Solid { present: s.present, ..solid };
+        }
     }
 
     /// The ground's rate a machine's ground contact reads (docs/24, "Holding the body on
@@ -1273,25 +1417,25 @@ impl Play {
                     self.fx.explode(&exp, None, Frame::along(*point, *forward, 1.0), exp.radius, now);
                 }
             }
-            Event::Damaged { target, part, destroyed, .. } => {
-                for &n in destroyed {
-                    let Some(Some(exp)) = self
-                        .battle
-                        .explosions
-                        .get(*target)
-                        .and_then(|p| p.get(*part))
-                        .and_then(|p| p.get(n))
-                        .cloned()
-                    else {
-                        continue;
-                    };
-                    let p = &self.battle.combat.targets[*target].parts[*part];
-                    let Some(slot) = p.mesh.slots.get(usize::from(p.mesh.nodes[n].slot_index[0])) else {
-                        continue;
-                    };
-                    let (node, sphere, scale) = (p.nodes[n], slot.sphere, p.scale);
-                    self.node_blast(&exp, &node, sphere, scale, now);
-                }
+            // A node's stage rising plays its `.exp` at its sphere's centre (docs/26).
+            Event::Staged { target, part, node } => {
+                let Some(Some(exp)) = self
+                    .battle
+                    .explosions
+                    .get(*target)
+                    .and_then(|p| p.get(*part))
+                    .and_then(|p| p.get(*node))
+                    .cloned()
+                else {
+                    return;
+                };
+                let p = &self.battle.combat.targets[*target].parts[*part];
+                let block = p.life.as_ref().and_then(|l| l.nodes.get(*node)).map_or(0, |l| l.block());
+                let slots = p.mesh.nodes[*node].slot_index;
+                let slot = [slots[block * SLOTS_PER_VARIANT], slots[0]].into_iter().find(|&s| s != NO_SLOT);
+                let Some(slot) = slot.and_then(|s| p.mesh.slots.get(usize::from(s))) else { return };
+                let (pose, sphere, scale) = (p.nodes[*node], slot.sphere, p.scale);
+                self.node_blast(&exp, &pose, sphere, scale, now);
             }
             _ => {}
         }

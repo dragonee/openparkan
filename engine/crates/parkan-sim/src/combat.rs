@@ -12,9 +12,9 @@ use parkan_formats::exp::{Explosion, HIT_AREA, HIT_DIRECT, HIT_SHIELDS};
 use parkan_formats::mesh::Mesh;
 use parkan_formats::pose::Pose;
 
-use crate::damage::{Life, blast, round_hit, share_loss};
+use crate::damage::{Change, Life, blast, round_hit, share_loss};
 use crate::ground::Ground;
-use crate::hit::{ROUND_SKIPS_FACE, SIGHT_SKIPS_FACE, Strike, map_edge, segment_mesh_passing, swept_spheres};
+use crate::hit::{ROUND_SKIPS_FACE, SIGHT_SKIPS_FACE, Strike, map_edge, segment_mesh_slots, swept_spheres};
 
 /// A mode-0 round's sideways speed, in its own frame, bleeds off at this many m/s a
 /// millisecond (`Control.dll:0x1000ceec`).
@@ -91,6 +91,29 @@ pub struct Part {
     pub life: Option<Life>,
 }
 
+impl Part {
+    /// The level-0 slot node `node` draws and is struck through: its stage's variant's, or
+    /// none once it is hidden (docs/26, "What a damaged node, a destroyed part and a dead
+    /// unit draw").
+    pub fn slot(&self, node: usize) -> Option<u16> {
+        let n = self.mesh.nodes.get(node)?;
+        let block = match self.life.as_ref().and_then(|l| l.nodes.get(node)) {
+            Some(life) if life.hidden() => return None,
+            Some(life) => life.block(),
+            None => 0,
+        };
+        n.slot_index
+            .get(block * parkan_formats::mesh::SLOTS_PER_VARIANT)
+            .copied()
+            .filter(|&s| s != parkan_formats::mesh::NO_SLOT)
+    }
+
+    /// A segment through the part as it stands, passing the triangles flagged `passes`.
+    pub fn segment(&self, p0: Vec3, p1: Vec3, passes: u16) -> Option<Strike> {
+        segment_mesh_slots(&self.mesh, &self.nodes, self.scale, p0, p1, passes, |i| self.slot(i))
+    }
+}
+
 /// Something a round can strike.
 #[derive(Clone, Debug)]
 pub struct Target {
@@ -116,8 +139,15 @@ pub enum Event {
     /// An explosion went off: a round's on a hit, or its range end's.
     /// `forward` is the round's own y, the axis a placement-0 effect goes off along.
     Exploded { kind: usize, point: Vec3, forward: Vec3, at_range: bool },
-    /// Damage landed on a node.
-    Damaged { target: usize, part: usize, node: usize, damage: f32, destroyed: Vec<usize> },
+    /// Damage landed on a node, and whether it destroyed it.
+    Damaged { target: usize, part: usize, node: usize, damage: f32, destroyed: bool },
+    /// A node's stage rose: its explosion plays (docs/26, "What a damaged node, a destroyed
+    /// part and a dead unit draw").
+    Staged { target: usize, part: usize, node: usize },
+    /// A node reached its last stage and is gone from the world.
+    Hidden { target: usize, part: usize, node: usize },
+    /// A destroyed part was knocked off, and flies from now.
+    KnockedOff { target: usize, part: usize, node: usize },
     /// A target died.
     Killed { target: usize },
     /// A round left the map, with no explosion.
@@ -130,6 +160,26 @@ pub struct Combat {
     pub rounds: Vec<Round>,
     pub targets: Vec<Target>,
     pub fired: u64,
+}
+
+/// A unit dead (`0x10011098`): out of the fight, and every part goes with node 0, which
+/// takes the unit's whole life so the walk takes every node below it (`0x10011105`).
+///
+/// STAND-IN: docs/26-damage.md#what-a-damaged-node-a-destroyed-part-and-a-dead-unit-draw--read-and-measured
+/// -- a unit's life system holds the nodes of all its models under one root; the engine
+/// keeps a life per part, so a dead unit's other parts' roots are destroyed with it, and a
+/// part's root has no parent to be knocked off from.
+fn kill(target: &mut Target) {
+    target.alive = false;
+    for part in target.parts.iter_mut().skip(1) {
+        let Some(life) = part.life.as_mut() else { continue };
+        for root in 0..life.nodes.len() {
+            if life.parents[root].is_none() {
+                let all = life.nodes[root].life;
+                life.lose(root, all.max(f32::MIN_POSITIVE));
+            }
+        }
+    }
 }
 
 /// One tick of a seeker's steering (`Control.dll:0x100247c0`, `0x1000cd0a`). The seeker
@@ -238,7 +288,7 @@ impl Combat {
                 continue;
             }
             for (p, part) in target.parts.iter().enumerate() {
-                if let Some(s) = segment_mesh_passing(&part.mesh, &part.nodes, part.scale, p0, p1, passes)
+                if let Some(s) = part.segment(p0, p1, passes)
                     && best.as_ref().is_none_or(|(b, _, _)| s.d2 < b.d2)
                 {
                     best = Some((s, Some(id), p));
@@ -396,8 +446,8 @@ impl Combat {
                             .nodes
                             .iter()
                             .enumerate()
-                            .filter_map(|(n, node)| {
-                                let slot = part.mesh.slots.get(usize::from(node.slot_index[0]))?;
+                            .filter_map(|(n, _)| {
+                                let slot = part.mesh.slots.get(usize::from(part.slot(n)?))?;
                                 let [cx, cy, cz, r] = slot.sphere;
                                 let local = Vec3::new(cx, cy, cz) * part.scale;
                                 let centre = vec(part.nodes.get(n)?.apply(arr(local)));
@@ -437,12 +487,37 @@ impl Combat {
         for (i, destroyed) in gone.into_iter().enumerate() {
             let damage = before[i] - lives[i].total();
             if damage > 0.0 {
+                let destroyed = !destroyed.is_empty();
                 events.push(Event::Damaged { target: t, part: parts[i], node: 0, damage, destroyed });
             }
         }
         if target.dead() {
             target.alive = false;
             events.push(Event::Killed { target: t });
+        }
+        events
+    }
+
+    /// Every target's lives after the tick's hits, at `now_ms` ([`Life::takt`]): the stages
+    /// that rose, the nodes hidden and the parts knocked off, as events.
+    pub fn takt_lives(&mut self, now_ms: f64) -> Vec<Event> {
+        let mut events = Vec::new();
+        for (t, target) in self.targets.iter_mut().enumerate() {
+            // A death by any other way than a round, the ground's loss say.
+            if target.alive && target.dead() {
+                kill(target);
+                events.push(Event::Killed { target: t });
+            }
+            for (p, part) in target.parts.iter_mut().enumerate() {
+                let Some(life) = part.life.as_mut() else { continue };
+                for change in life.takt(now_ms) {
+                    events.push(match change {
+                        Change::Staged(node) => Event::Staged { target: t, part: p, node },
+                        Change::Hidden(node) => Event::Hidden { target: t, part: p, node },
+                        Change::KnockedOff(node) => Event::KnockedOff { target: t, part: p, node },
+                    });
+                }
+            }
         }
         events
     }
@@ -455,7 +530,7 @@ impl Combat {
         let now_dead = life.dead;
         events.push(Event::Damaged { target: t, part: p, node: n, damage, destroyed });
         if now_dead && !was_dead && p == 0 {
-            target.alive = false;
+            kill(target);
             events.push(Event::Killed { target: t });
         }
     }

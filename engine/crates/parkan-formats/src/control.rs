@@ -302,7 +302,9 @@ pub fn run_group<'a>(records: &[&'a Reference], conditions: &[bool; CONDITIONS])
 pub struct Controller {
     pub counts: [i32; 5],
     pub triples: [[f32; 3]; 6],
-    pub scale: i32,
+    /// `+92`: how long a dead object lasts before it is deleted, ms (docs/26, "What a
+    /// damaged node, a destroyed part and a dead unit draw").
+    pub death_ms: i32,
     pub pair: [f32; 2],
     pub mode: i32,
     pub bounds: [f32; 2],
@@ -576,7 +578,7 @@ pub fn parse(b: &[u8], source: &str) -> Result<Controller, FormatError> {
     Ok(Controller {
         counts,
         triples: TRIPLE_AT.map(|t| triple(b, t)),
-        scale: i32_at(b, 92),
+        death_ms: i32_at(b, 92),
         pair: [f32_at(b, 96), f32_at(b, 100)],
         mode: i32_at(b, 104),
         bounds: [f32_at(b, 108), f32_at(b, 120)],

@@ -33,11 +33,73 @@ pub fn round_hit(ratio: f32, hit_points: f32, explosion_damage: f32) -> f32 {
     ratio * (hit_points + explosion_damage)
 }
 
+/// A mesh node flag the loader reads as never hidden: a building's shell
+/// (`Control.dll:0x1000f9bd`).
+pub const NEVER_HIDDEN_NODE_FLAG: u16 = 0x100;
+
+/// A node's status bits (the life record's `+0x28`, docs/26, "What a damaged node, a
+/// destroyed part and a dead unit draw").
+pub const STATUS_VITAL: u32 = 0x1;
+pub const STATUS_NEVER_HIDDEN: u32 = 0x2;
+pub const STATUS_DESTROYED: u32 = 0x10;
+pub const STATUS_HIDDEN: u32 = 0x20;
+/// Knocked off and flying; taken down by a part that is flying; taken down where it stood.
+pub const STATUS_FLYING: u32 = 0x40;
+pub const STATUS_CARRIED: u32 = 0x80;
+pub const STATUS_DOWN: u32 = 0x100;
+/// A destroyed node with any of these is not knocked off (`0x100102dc`).
+pub const KNOCK_OFF_BARS: u32 = 0x1ce;
+/// How long a knocked-off part flies (`Control.dll:0x100424a4`, set by `0x10006350`).
+pub const FLIGHT_MS: f64 = 3000.0;
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct NodeLife {
     pub life: f32,
     pub max: f32,
     pub destroyed: bool,
+    /// Its stage count: how many of variants 0, 1 and 2 in a row have a level-0 slot, 1
+    /// when none does (`AniMesh.dll:0x10005840`).
+    pub stages: u8,
+    pub stage: u8,
+    pub status: u32,
+}
+
+impl NodeLife {
+    /// The variant it draws: its stage held below its count (`0x100118b1`).
+    pub fn block(&self) -> usize {
+        usize::from(self.stage.min(self.stages.saturating_sub(1)))
+    }
+
+    /// Gone from the world: not drawn, struck, collided with or stood on.
+    pub fn hidden(&self) -> bool {
+        self.status & STATUS_HIDDEN != 0
+    }
+
+    /// Flying off, or carried by a part that is.
+    pub fn flying(&self) -> bool {
+        self.status & (STATUS_FLYING | STATUS_CARRIED) != 0
+    }
+
+    /// `N − ceil(N × life ÷ max)`, held to N (`0x10011346`–`0x10011389`); a node with no hit
+    /// points stays whole.
+    fn stage_now(&self) -> u8 {
+        if self.max <= 0.0 {
+            return 0;
+        }
+        let n = f32::from(self.stages);
+        (n - (n * self.life / self.max).ceil()).clamp(0.0, n) as u8
+    }
+}
+
+/// What a life takt did to a node, for the world to show.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Change {
+    /// Its stage rose: its `.exp` plays (`0x100113b2`).
+    Staged(usize),
+    /// It reached its last stage and is gone (`0x10011920`).
+    Hidden(usize),
+    /// It was knocked off, and flies from now (`0x100102a0`).
+    KnockedOff(usize),
 }
 
 /// An object's nodes' hit points.
@@ -50,17 +112,20 @@ pub struct Life {
     pub vital: Vec<bool>,
     /// The armour fitted: its linear and square factors.
     pub armour: Option<(f32, f32)>,
-    /// Agent kind 3, a building: node 0 or a vital node dying only marks it.
+    /// Agent kind 3, a building: node 0 or a vital node dying only marks it, and no part is
+    /// knocked off.
     pub building: bool,
     /// The owner word reads `0xfffe` (`0x10011098`): node 0 or a vital node is destroyed.
     pub marked: bool,
     /// The object died: marked, and not a building.
     pub dead: bool,
+    /// Each flying part and when its flight ends, ms.
+    pub flights: Vec<(usize, f64)>,
 }
 
 impl Life {
     /// `0x1000f940`: life = maximum = the `.ndp` hit points × the volume scale × the
-    /// level ratio.
+    /// level ratio; one stage a node until [`Life::staged`] says otherwise.
     pub fn new(
         table: &[NodeDamage],
         parents: Vec<Option<usize>>,
@@ -71,47 +136,143 @@ impl Life {
         let nodes = (0..parents.len())
             .map(|i| {
                 let max = table.get(i).map_or(0.0, |d| d.durability) * volume_scale * level_ratio;
-                NodeLife { life: max, max, destroyed: false }
+                let status = if vital.get(i).copied().unwrap_or(false) { STATUS_VITAL } else { 0 };
+                NodeLife { life: max, max, destroyed: false, stages: 1, stage: 0, status }
             })
             .collect();
-        Self { nodes, parents, vital, armour: None, building: false, marked: false, dead: false }
+        Self {
+            nodes,
+            parents,
+            vital,
+            armour: None,
+            building: false,
+            marked: false,
+            dead: false,
+            flights: Vec::new(),
+        }
     }
 
-    /// `0x10010f30`: a hit on one node, after armour; its life is held at 0, and a node
-    /// at 0 is destroyed with its children (`0x10011130`). Node 0 or a vital node dying
-    /// marks the object and kills it (`0x10011098`), unless it is a building, which is only
-    /// marked (`0x100110ab`): a shell whose model and other nodes stay, to be shot apart.
-    /// Returns the nodes this hit destroyed.
-    pub fn hit(&mut self, node: usize, damage: f32) -> Vec<usize> {
+    /// Each node's stage count, and which nodes are never hidden.
+    ///
+    /// STAND-IN: docs/26-damage.md#what-a-damaged-node-a-destroyed-part-and-a-dead-unit-draw--read-and-measured
+    /// -- the statuses 4 and 8, a node copying its parent's life fraction or stage, are
+    /// read but not modelled; no Mission 01 node carries them.
+    pub fn staged(mut self, stages: &[u8], never_hidden: &[bool]) -> Self {
+        for (i, n) in self.nodes.iter_mut().enumerate() {
+            n.stages = stages.get(i).copied().unwrap_or(1).max(1);
+            if never_hidden.get(i).copied().unwrap_or(false) {
+                n.status |= STATUS_NEVER_HIDDEN;
+            }
+        }
+        self
+    }
+
+    /// `0x10010f30`: a hit on one node, after armour; its life is held at 0, and a node at
+    /// 0 is destroyed. Node 0 or a vital node dying marks the object and kills it
+    /// (`0x10011098`), unless it is a building, which is only marked (`0x100110ab`). What
+    /// the loss does to the node's stage, its children and its drawing waits for the
+    /// object's next [`Life::takt`]. Returns whether this hit destroyed the node.
+    pub fn hit(&mut self, node: usize, damage: f32) -> bool {
         let damage = self.armour.map_or(damage, |(l, s)| armour(damage, l, s));
         self.lose(node, damage)
     }
 
     /// `0x10010f30` past the armour: `damage` off one node, as [`Life::hit`] takes it.
-    pub fn lose(&mut self, node: usize, damage: f32) -> Vec<usize> {
-        let Some(n) = self.nodes.get_mut(node) else { return Vec::new() };
+    pub fn lose(&mut self, node: usize, damage: f32) -> bool {
+        let Some(n) = self.nodes.get_mut(node) else { return false };
         if n.destroyed || damage <= 0.0 {
-            return Vec::new();
+            return false;
         }
         n.life = (n.life - damage).max(0.0);
         if n.life > 0.0 {
-            return Vec::new();
+            return false;
         }
-        let mut destroyed = Vec::new();
-        let mut stack = vec![node];
+        self.destroy(node);
+        true
+    }
+
+    fn destroy(&mut self, node: usize) {
+        let n = &mut self.nodes[node];
+        n.life = 0.0;
+        n.destroyed = true;
+        n.status |= STATUS_DESTROYED;
+        if node == 0 || n.status & STATUS_VITAL != 0 {
+            self.marked = true;
+            self.dead = !self.building;
+        }
+    }
+
+    /// The nodes in walk order, parents before children.
+    fn walk_order(&self) -> Vec<usize> {
+        let mut order = Vec::with_capacity(self.nodes.len());
+        let mut stack: Vec<usize> =
+            (0..self.nodes.len()).rev().filter(|&i| self.parents[i].is_none()).collect();
         while let Some(i) = stack.pop() {
-            if std::mem::replace(&mut self.nodes[i].destroyed, true) {
-                continue;
-            }
-            self.nodes[i].life = 0.0;
-            destroyed.push(i);
-            if i == 0 || self.vital.get(i).copied().unwrap_or(false) {
-                self.marked = true;
-                self.dead = !self.building;
-            }
-            stack.extend((0..self.nodes.len()).filter(|&c| self.parents[c] == Some(i)));
+            order.push(i);
+            stack.extend((0..self.nodes.len()).rev().filter(|&c| self.parents[c] == Some(i)));
         }
-        destroyed
+        order
+    }
+
+    /// The object's life after a tick's hits, at `now_ms` (`0x10012fce`, `0x10011130`,
+    /// `0x100131da`):
+    ///
+    /// 1. **Flights end** once their time is up: flying turns to down (`0x10013568`).
+    /// 2. **Destroyed parts are knocked off**: a destroyed node with a parent, on an object
+    ///    that is not a building, with none of the bars, flies for three seconds.
+    /// 3. **The walk** from the roots down: a node not flying takes its stage; a rise plays
+    ///    its explosion, and the last stage hides it unless it is never hidden. A node whose
+    ///    stage rose, or which is destroyed, destroys each child, carried along when it is
+    ///    flying and down where it stands otherwise.
+    pub fn takt(&mut self, now_ms: f64) -> Vec<Change> {
+        let mut changes = Vec::new();
+        let (ended, flying): (Vec<_>, Vec<_>) = self.flights.iter().partition(|(_, end)| now_ms >= *end);
+        self.flights = flying;
+        for (n, _) in ended {
+            let status = &mut self.nodes[n].status;
+            *status = (*status & !STATUS_FLYING) | STATUS_DOWN;
+        }
+        for i in 0..self.nodes.len() {
+            let n = self.nodes[i];
+            if n.destroyed && self.parents[i].is_some() && !self.building && n.status & KNOCK_OFF_BARS == 0 {
+                self.nodes[i].status |= STATUS_FLYING;
+                self.flights.push((i, now_ms + FLIGHT_MS));
+                changes.push(Change::KnockedOff(i));
+            }
+        }
+        for i in self.walk_order() {
+            let mut rose = false;
+            if !self.nodes[i].flying() {
+                let (old, new) = (self.nodes[i].stage, self.nodes[i].stage_now());
+                if new != old {
+                    rose = new > old;
+                    self.nodes[i].stage = new;
+                    if rose {
+                        changes.push(Change::Staged(i));
+                    }
+                    let n = &mut self.nodes[i];
+                    if new == n.stages && n.status & (STATUS_NEVER_HIDDEN | STATUS_HIDDEN) == 0 {
+                        n.status |= STATUS_HIDDEN;
+                        changes.push(Change::Hidden(i));
+                    }
+                }
+            }
+            if rose || self.nodes[i].destroyed {
+                let mark = if self.nodes[i].flying() { STATUS_CARRIED } else { STATUS_DOWN };
+                let children: Vec<usize> =
+                    (0..self.nodes.len()).filter(|&c| self.parents[c] == Some(i)).collect();
+                for c in children {
+                    if !self.nodes[c].destroyed {
+                        self.destroy(c);
+                    }
+                    let status = &mut self.nodes[c].status;
+                    if *status & STATUS_FLYING == 0 {
+                        *status = (*status & !(STATUS_CARRIED | STATUS_DOWN)) | mark;
+                    }
+                }
+            }
+        }
+        changes
     }
 
     /// The life its nodes have left.
@@ -139,7 +300,7 @@ pub fn share_loss(lives: &mut [&mut Life], loss: f32) -> Vec<Vec<usize>> {
         .iter_mut()
         .map(|life| {
             (0..life.nodes.len())
-                .flat_map(|n| {
+                .filter(|&n| {
                     let take = share * life.nodes[n].life;
                     life.lose(n, take)
                 })
@@ -241,33 +402,86 @@ mod tests {
         assert_eq!(round_hit(0.7, 149.0, 1.0), 105.0);
     }
 
-    #[test]
-    fn node_zero_dying_kills_the_object_and_its_children_with_it() {
+    /// The small target dummy `r_h_01`: a base, two parts on it and a third on the second,
+    /// the parts with a damaged block (docs/26, "What the shipped files give").
+    fn dummy() -> Life {
         let parents = vec![None, Some(0), Some(0), Some(2)];
-        let mut life = Life::new(&table(&[500.0, 800.0, 800.0, 600.0]), parents, vec![false; 4], 1.0, 1.0);
-        assert!(life.hit(3, 600.0) == vec![3] && !life.dead);
-        assert!(life.hit(0, 200.0).is_empty());
-        assert_eq!(life.nodes[0].life, 300.0);
-        life.hit(0, 200.0);
-        let mut gone = life.hit(0, 200.0);
-        gone.sort_unstable();
-        assert_eq!(gone, vec![0, 1, 2]);
-        assert!(life.dead && life.nodes.iter().all(|n| n.destroyed && n.life == 0.0));
+        Life::new(&table(&[500.0, 800.0, 800.0, 600.0]), parents, vec![false; 4], 1.0, 1.0)
+            .staged(&[1, 2, 2, 2], &[false; 4])
     }
 
     #[test]
-    fn a_building_whose_node_0_dies_is_only_marked_and_its_other_nodes_still_take_hits() {
-        // Node 1 hangs off node 0 and dies with it; node 2 is a root of its own.
+    fn a_part_draws_its_damaged_block_at_half_life_and_is_knocked_off_at_nothing() {
+        let mut life = dummy();
+        assert!(life.takt(0.0).is_empty());
+        assert!(!life.hit(1, 400.0));
+        assert_eq!(
+            life.takt(10.0),
+            vec![Change::Staged(1)],
+            "half its life: the damaged block, and its .exp"
+        );
+        assert_eq!((life.nodes[1].stage, life.nodes[1].block()), (1, 1));
+        assert!(life.hit(1, 400.0) && !life.dead);
+        assert_eq!(life.takt(20.0), vec![Change::KnockedOff(1)]);
+        assert!(life.nodes[1].flying() && !life.nodes[1].hidden(), "it flies, drawn");
+        assert!(life.takt(3000.0).is_empty(), "its stage waits while it flies");
+        assert_eq!(life.takt(3020.0), vec![Change::Staged(1), Change::Hidden(1)], "then explodes and goes");
+        assert!(life.nodes[1].status & STATUS_DOWN != 0);
+        assert!(life.takt(4000.0).is_empty(), "once");
+    }
+
+    #[test]
+    fn a_damaged_parent_takes_its_child_down_where_it_stands_and_a_flying_one_carries_it() {
+        let mut life = dummy();
+        life.hit(2, 400.0);
+        assert_eq!(life.takt(0.0), vec![Change::Staged(2), Change::Staged(3), Change::Hidden(3)]);
+        assert!(life.nodes[3].destroyed && life.nodes[3].status & STATUS_DOWN != 0);
+        assert!(life.takt(10.0).is_empty(), "a node taken down is not knocked off");
+
+        let mut life = dummy();
+        life.hit(2, 800.0);
+        assert_eq!(life.takt(0.0), vec![Change::KnockedOff(2)]);
+        assert!(
+            life.nodes[3].destroyed && life.nodes[3].flying() && !life.nodes[3].hidden(),
+            "carried along"
+        );
+        let mut end = life.takt(3000.0);
+        end.sort_by_key(|c| format!("{c:?}"));
+        assert_eq!(end, vec![Change::Hidden(2), Change::Hidden(3), Change::Staged(2), Change::Staged(3)]);
+    }
+
+    #[test]
+    fn node_zero_dying_kills_the_object_and_hides_every_part_still_standing() {
+        let mut life = dummy();
+        life.hit(1, 800.0);
+        life.takt(0.0);
+        assert!(life.hit(0, 500.0) && life.dead && life.marked);
+        let changes = life.takt(10.0);
+        assert!(changes.contains(&Change::Hidden(0)) && changes.contains(&Change::Hidden(2)));
+        assert!(changes.contains(&Change::Hidden(3)) && !changes.contains(&Change::Hidden(1)), "{changes:?}");
+        assert!(life.nodes[1].flying(), "a part already flying keeps flying");
+        assert!(life.nodes.iter().all(|n| n.destroyed && n.life == 0.0));
+    }
+
+    #[test]
+    fn a_building_whose_node_0_dies_is_only_marked_and_its_shell_stays() {
+        // Node 1 hangs off node 0 and dies with it; node 2 is a root of its own; node 0 is
+        // never hidden.
         let parents = vec![None, Some(0), None];
-        let mut life = Life::new(&table(&[1.0, 40_000.0, 40_000.0]), parents, vec![false; 3], 1.0, 1.0);
+        let mut life = Life::new(&table(&[1.0, 40_000.0, 40_000.0]), parents, vec![false; 3], 1.0, 1.0)
+            .staged(&[1, 1, 1], &[true, false, false]);
         life.building = true;
-        let mut gone = life.hit(0, 5.0);
-        gone.sort_unstable();
-        assert_eq!(gone, vec![0, 1]);
+        assert!(life.hit(0, 5.0));
         assert!(life.marked && !life.dead, "a shell, not a dead object");
-        assert!(life.hit(2, 10_000.0).is_empty() && life.nodes[2].life == 30_000.0);
-        assert_eq!(life.hit(2, 30_000.0), vec![2]);
-        assert!(!life.dead);
+        assert_eq!(life.takt(0.0), vec![Change::Staged(0), Change::Staged(1), Change::Hidden(1)]);
+        assert!(!life.nodes[0].hidden(), "never hidden");
+        assert!(!life.hit(2, 10_000.0) && life.nodes[2].life == 30_000.0);
+        assert!(life.hit(2, 30_000.0) && !life.dead);
+        assert_eq!(
+            life.takt(10.0),
+            vec![Change::Staged(2), Change::Hidden(2)],
+            "no part of a building flies"
+        );
 
         let mut unit = Life::new(&table(&[1.0]), vec![None], vec![false], 1.0, 1.0);
         unit.hit(0, 5.0);

@@ -12,13 +12,13 @@ use parkan_formats::control::{
 };
 use parkan_formats::cpt::{self, ControlPoint};
 use parkan_formats::exp::{self, Explosion};
-use parkan_formats::mesh::Mesh;
+use parkan_formats::mesh::{Mesh, NO_SLOT, SLOTS_PER_VARIANT};
 use parkan_formats::mission::{self, Mission, Value};
 use parkan_formats::ndp::{self, NodeDamage};
 use parkan_formats::objects::ResourceRef;
 use parkan_formats::pose::Pose;
 use parkan_sim::combat::{Combat, Part, RoundKind, Seeker, Target};
-use parkan_sim::damage::{Life, VITAL_NODE_FLAG};
+use parkan_sim::damage::{Life, NEVER_HIDDEN_NODE_FLAG, VITAL_NODE_FLAG};
 
 use crate::assembly::Assembly;
 use crate::models::{Instance, Objects, build_model};
@@ -57,6 +57,10 @@ pub struct Battle {
     pub wears: Vec<Vec<Vec<String>>>,
     /// Each target's mission object kind: building, unit, vegetation or rock.
     pub placed_kinds: Vec<u32>,
+    /// Each target's parts' meshes with their wears, for drawing them node by node.
+    pub meshes: Vec<Vec<Rc<crate::assembly::LoadedMesh>>>,
+    /// How long each target lasts once dead: its first part's controller's `+92`, ms.
+    pub death_ms: Vec<f64>,
     kind_of: HashMap<String, usize>,
 }
 
@@ -128,7 +132,17 @@ pub fn part_damage(
         .collect();
     let parents = mesh.nodes.iter().map(|n| (n.parent != 0xFFFF).then_some(usize::from(n.parent))).collect();
     let vital = mesh.nodes.iter().map(|n| n.flags & VITAL_NODE_FLAG != 0).collect();
-    let mut life = Life::new(&nodes_table, parents, vital, 1.0, ratio);
+    // `AniMesh.dll:0x10005840`: variants 0, 1 and 2 in a row with a level-0 slot; none is 1.
+    let stages: Vec<u8> = mesh
+        .nodes
+        .iter()
+        .map(|n| {
+            let run = (0..3).take_while(|&v| n.slot_index[v * SLOTS_PER_VARIANT] != NO_SLOT).count();
+            run.max(1) as u8
+        })
+        .collect();
+    let never_hidden: Vec<bool> = mesh.nodes.iter().map(|n| n.flags & NEVER_HIDDEN_NODE_FLAG != 0).collect();
+    let mut life = Life::new(&nodes_table, parents, vital, 1.0, ratio).staged(&stages, &never_hidden);
     life.building = building;
     (Some(life), blasts)
 }
@@ -159,6 +173,8 @@ impl Battle {
         let mut explosions = Vec::new();
         let mut wears = Vec::new();
         let mut placed_kinds = Vec::new();
+        let mut meshes = Vec::new();
+        let mut death_ms = Vec::new();
         for (i, object) in mission.objects.iter().enumerate() {
             if Some(i) == hero {
                 continue;
@@ -170,9 +186,19 @@ impl Battle {
             let mut parts = Vec::new();
             let mut blasts = Vec::new();
             let mut part_wears = Vec::new();
+            let mut part_meshes = Vec::new();
+            let mut lasts = 0.0;
             let (mut lo, mut hi) = (Vec3::splat(f32::MAX), Vec3::splat(f32::MIN));
             for part in assembly.parts(object.kind, &object.path) {
                 let Some(loaded) = assembly.mesh(&part.reference) else { continue };
+                if parts.is_empty() {
+                    let ctl =
+                        assembly.library.get(&part.record).and_then(|r| r.slot_with_suffix("ctl")).cloned();
+                    lasts = ctl
+                        .and_then(|c| read(assembly, &c).and_then(|b| control::parse(&b, &c.member).ok()))
+                        .map_or(0.0, |c| f64::from(c.death_ms));
+                }
+                part_meshes.push(loaded.clone());
                 let mesh = Rc::new(loaded.mesh.clone());
                 // STAND-IN: docs/24-motion.md#playing-a-state--read-and-measured -- the poses
                 // other units are struck in are not played: every target's nodes stay at
@@ -216,6 +242,8 @@ impl Battle {
             explosions.push(blasts);
             wears.push(part_wears);
             placed_kinds.push(object.kind);
+            meshes.push(part_meshes);
+            death_ms.push(lasts);
         }
         Ok(Battle {
             combat,
@@ -225,6 +253,8 @@ impl Battle {
             explosions,
             wears,
             placed_kinds,
+            meshes,
+            death_ms,
             kind_of: HashMap::new(),
         })
     }

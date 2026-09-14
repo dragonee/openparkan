@@ -350,7 +350,7 @@ pub fn controllers(path: &Path, names: &[String]) -> Result<Value> {
             "name": member,
             "counts": c.counts,
             "triples": c.triples.iter().map(|t| vector(t)).collect::<Vec<_>>(),
-            "scale": c.scale,
+            "scale": c.death_ms,
             "pair": vector(&c.pair),
             "mode": c.mode,
             "bounds": vector(&c.bounds),

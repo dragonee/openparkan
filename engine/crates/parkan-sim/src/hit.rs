@@ -76,14 +76,26 @@ pub fn segment_mesh_passing(
     p1: Vec3,
     passes: u16,
 ) -> Option<Strike> {
+    segment_mesh_slots(mesh, world, scale, p0, p1, passes, |i| mesh.nodes.get(i).map(|n| n.slot_index[0]))
+}
+
+/// [`segment_mesh_passing`] through the slot `slot_of` names for each node, or none: the
+/// level-0 slot of the variant its stage draws, and nothing of a hidden node
+/// (`AniMesh.dll:0x10010c33` → `0x100124d0`, `0x100106d0`).
+pub fn segment_mesh_slots(
+    mesh: &Mesh,
+    world: &[Pose],
+    scale: f32,
+    p0: Vec3,
+    p1: Vec3,
+    passes: u16,
+    slot_of: impl Fn(usize) -> Option<u16>,
+) -> Option<Strike> {
     let mut best = (p1 - p0).length_squared();
     let mut out = None;
-    for (i, node) in mesh.nodes.iter().enumerate() {
-        let slot = node.slot_index[0];
+    for i in 0..mesh.nodes.len() {
+        let Some(slot) = slot_of(i).filter(|&s| s != NO_SLOT) else { continue };
         let (Some(pose), Some(s)) = (world.get(i), mesh.slots.get(usize::from(slot))) else { continue };
-        if slot == NO_SLOT {
-            continue;
-        }
         let back = pose.invert();
         let (q0, q1) = (vec(back.apply(arr(p0))) / scale, vec(back.apply(arr(p1))) / scale);
         let first = usize::from(s.first_triangle);

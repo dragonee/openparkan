@@ -249,6 +249,11 @@ fn the_heros_laser_kills_a_small_target_in_two_hits() {
     }
     assert!(killed_at.is_some(), "killed; damage {damage:?}");
     assert_eq!(damage, vec![(0, 250.0), (0, 250.0)], "each laser hit is 249 + 1 on node 0");
+    // Deleted once its controller's +92, 3000 ms, has passed (docs/26).
+    play.hero.key("SCAN_LMOUSE", false);
+    for _ in 0..200 {
+        play.tick(1000.0 / 60.0, [0.0; 2]);
+    }
     assert_eq!(play.killed, vec![object]);
 }
 
@@ -337,6 +342,10 @@ fn the_hero_destroys_mission_01s_five_targets() {
         }
         play.hero.key("SCAN_LMOUSE", false);
         assert!(killed, "object {object} dies within 10 s of fire");
+    }
+    // The big dummies are deleted five seconds after they die.
+    for _ in 0..330 {
+        play.tick(1000.0 / 60.0, [0.0; 2]);
     }
     let mut dead = play.killed.clone();
     dead.sort_unstable();
@@ -547,7 +556,16 @@ fn the_plasma_rifle_holds_its_fire_without_a_target_and_its_bolt_follows_one() {
 
     // 60 m off a dummy: the list's takt picks it, and the rifle fires once its 0.25 s lock
     // runs out, handing the bolt its target.
-    let object = m.objects.iter().position(|o| o.path.to_ascii_lowercase().ends_with("l_targ.dat")).unwrap();
+    let object = m
+        .objects
+        .iter()
+        .position(|o| {
+            o.path
+                .to_ascii_lowercase()
+                .to_ascii_lowercase()
+                .ends_with(&std::env::var("TARG").unwrap_or("l_targ.dat".into()).to_ascii_lowercase())
+        })
+        .unwrap();
     let t = play.battle.objects.iter().position(|&o| o == object).unwrap();
     stand_facing(&mut play, t, 60.0, 0.0);
     let mut fired = None;
@@ -904,7 +922,8 @@ fn wingmen_follow_seek_and_destroy_stand_by_and_fail_a_refit_with_no_dock() {
         }
     }
     assert!(killed.is_some(), "the wingmen destroy tut1_e1");
-    assert!(play.killed.contains(&play.battle.objects[e1]));
+    run(&mut play, 6);
+    assert!(play.killed.contains(&play.battle.objects[e1]) && play.deleted[e1]);
 }
 
 #[test]
@@ -956,4 +975,69 @@ fn mission_01_marks_dummies_magenta_the_enemy_red_neutral_bots_grey_and_its_own_
     assert_eq!((colour(&fresh, mf1), colour(&fresh, helic)), (MARK_NEUTRAL_CLAN, MARK_NEUTRAL_CLAN));
     assert_eq!((colour(&play, mf1), colour(&play, helic)), (MARK_OWN, MARK_OWN), "captured: the player's");
     assert_eq!(play.mark_colour(Some(play.player_clan)), [128, 128, 255]);
+}
+
+#[test]
+#[ignore = "needs the game install"]
+fn a_dummys_part_is_damaged_at_half_knocked_off_at_nothing_and_its_base_takes_the_rest() {
+    use parkan_sim::combat::Event;
+    use parkan_world::play::Play;
+
+    let (mut play, m) = mission_01_play();
+    let tick = 1000.0 / 60.0;
+    let target_of =
+        |play: &Play, object: usize| play.battle.objects.iter().position(|&o| o == object).unwrap();
+    // Object 1, an `l_targ` on `r_h_01`: base ASbs, ASd1 and ASd2 on it, ASd3 on ASd2
+    // (docs/26, "What the shipped files give").
+    assert!(m.objects[1].path.to_ascii_lowercase().ends_with("l_targ.dat"));
+    let t = target_of(&play, 1);
+    let big = target_of(&play, 31);
+    assert_eq!((play.battle.death_ms[t], play.battle.death_ms[big]), (3000.0, 5000.0));
+    let life = |play: &Play| play.battle.combat.targets[t].parts[0].life.clone().unwrap();
+    assert_eq!(life(&play).nodes.iter().map(|n| n.stages).collect::<Vec<_>>(), vec![1, 2, 2, 2]);
+    let hit = |play: &mut Play, node: usize, damage: f32| {
+        play.battle.combat.targets[t].parts[0].life.as_mut().unwrap().hit(node, damage);
+        play.tick(tick, [0.0; 2])
+    };
+    let has = |events: &[Event], want: &dyn Fn(&Event) -> bool| events.iter().any(want);
+
+    // Half its life: the damaged block, and its explosion.
+    let sprites = play.fx.instances.len();
+    let events = hit(&mut play, 1, 400.0);
+    assert!(has(&events, &|e| matches!(e, Event::Staged { target, node: 1, .. } if *target == t)));
+    assert_eq!(life(&play).nodes[1].block(), 1);
+    assert!(play.fx.instances.len() > sprites, "explode_aim_S plays");
+
+    // Nothing left: knocked off, it flies drawn for three seconds, then explodes and goes.
+    let before = play.battle.combat.targets[t].parts[0].nodes[1].translation;
+    let events = hit(&mut play, 1, 400.0);
+    assert!(has(&events, &|e| matches!(e, Event::KnockedOff { target, node: 1, .. } if *target == t)));
+    for _ in 0..60 {
+        play.tick(tick, [0.0; 2]);
+    }
+    let now = play.battle.combat.targets[t].parts[0].nodes[1].translation;
+    let moved = (0..3).map(|i| (now[i] - before[i]).powi(2)).sum::<f64>().sqrt();
+    assert!(moved > 3.0 && !life(&play).nodes[1].hidden(), "a second on it has flown {moved}");
+    let mut gone = false;
+    for _ in 0..130 {
+        gone |= has(
+            &play.tick(tick, [0.0; 2]),
+            &|e| matches!(e, Event::Hidden { target, node: 1, .. } if *target == t),
+        );
+    }
+    assert!(gone && life(&play).nodes[1].hidden(), "gone after its flight");
+    assert!(play.battle.combat.targets[t].alive, "the rest stands");
+    assert!(!play.ground.solids[t].faces.is_empty());
+
+    // The base: every part still standing goes with it, and the unit is deleted 3 s on.
+    let events = hit(&mut play, 0, 500.0);
+    assert!(has(&events, &|e| matches!(e, Event::Killed { target } if *target == t)));
+    play.tick(tick, [0.0; 2]);
+    assert!([0, 2, 3].iter().all(|&n| life(&play).nodes[n].hidden()), "{:?}", life(&play).nodes);
+    assert!(play.ground.solids[t].faces.is_empty(), "nothing left to collide with");
+    assert!(!play.deleted[t]);
+    for _ in 0..185 {
+        play.tick(tick, [0.0; 2]);
+    }
+    assert!(play.deleted[t] && play.killed.contains(&1));
 }

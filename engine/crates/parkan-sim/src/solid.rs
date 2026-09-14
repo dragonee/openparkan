@@ -6,7 +6,6 @@
 //! once, with the triangle's flags, its batch's flags and its material's surface id.
 
 use glam::Vec3;
-use parkan_formats::mesh::NO_SLOT;
 
 use crate::combat::Part;
 use crate::ground::WALKABLE_NORMAL_Z;
@@ -63,7 +62,9 @@ fn vec(v: [f64; 3]) -> Vec3 {
 
 impl Solid {
     /// The faces of a target's posed parts, with `surface(part, material)` naming a batch's
-    /// material's surface id and damage rate.
+    /// material's surface id and damage rate: each node's level-0 slot of the variant its
+    /// stage draws, and nothing of a hidden node, which the walk-face and push visitors pass
+    /// over (`AniMesh.dll:0x1000ce90`, `0x1000dfe0`).
     pub fn from_parts(
         parts: &[Part],
         centre: Vec3,
@@ -75,15 +76,12 @@ impl Solid {
         let mut nodes = Vec::new();
         for (p, part) in parts.iter().enumerate() {
             let mesh = &part.mesh;
-            for (i, node) in mesh.nodes.iter().enumerate() {
+            for i in 0..mesh.nodes.len() {
                 let (Some(pose), Some(slot)) =
-                    (part.nodes.get(i), mesh.slots.get(usize::from(node.slot_index[0])))
+                    (part.nodes.get(i), part.slot(i).and_then(|s| mesh.slots.get(usize::from(s))))
                 else {
                     continue;
                 };
-                if node.slot_index[0] == NO_SLOT {
-                    continue;
-                }
                 let place = |v: [f32; 3]| vec(pose.apply(v.map(|x| f64::from(x * part.scale))));
                 let turn = |v: [f32; 3]| vec(parkan_formats::pose::rotate(pose.rotation, v.map(f64::from)));
                 let first = usize::from(slot.first_triangle).min(mesh.triangles.len());

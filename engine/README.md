@@ -151,6 +151,13 @@ Not yet: boarding a captured bot, and the ambient variations.
   each fires one shot when its AI timer runs out and its score clears the bar,
   or freely while the unit searches or attacks. On Mission 01 both wingmen,
   sent to seek and destroy, fly to `tut1_e1` and destroy it.
+- A unit or building takes damage node by node, as read. A node at or below
+  half its life (on a part with a damaged model) draws that damaged block, with
+  its explosion; at nothing a part is knocked off, flies drawn for three
+  seconds, then explodes and goes, and its children go with it. When the base
+  dies every part still standing goes with its explosion, and the unit is
+  deleted its controller's `+92` ms later. A hidden node is not drawn, struck,
+  collided with or stood on.
 - A lake's bed kills. The ground contact reads the rate of what it touches,
   or of a bed whose water lies less than r below the body sphere's centre, and
   every 250 ms or so a unit's nodes each lose the same share of their life.
@@ -264,7 +271,6 @@ a row here. A row leaves this table when research closes it.
 | M4 | The point-in-triangle test of the hit test (`0x10011090`), and the landscape's own cell size | an edge test on the triangle's winding; the ground index's 16 m cells | [26](../docs/26-damage.md#the-hit-test--read-and-measured) |
 | M4 | Which node flag makes a node vital | the mesh node's `0x200` | [26](../docs/26-damage.md#hit-points--read-and-measured) |
 | M4 | Whether vegetation and rock take damage | they stop rounds and take none | [04](../docs/04-missions.md#the-scale) |
-| M4 | What a dead unit leaves: its wreck and damage stages | its destroyed nodes' explosions play and it is no longer drawn (a building stays as a shell, as read) | [26](../docs/26-damage.md#hit-points--read-and-measured) |
 | M4 | Shields: bubble contacts and sectors | not modelled: no bubble stops a round, a blast skips its shield step and kind 4 does nothing; Mission 01's `tut1_e1`, `tut1_mf1` and `helic` carry fight shields and deflectors | [26](../docs/26-damage.md#shields-a-generator-a-deflector-six-sectors--read-and-measured) |
 | M4 | Poses of other units for the hit test | their rest poses: other units' animation is not played | [24](../docs/24-motion.md#playing-a-state--read-and-measured) |
 | M4 | The rest of the emitter floats: what the fade value scales, what a particle's exponent-shaped triples are, a bolt's widths | sprites (3, 4, 9) move +40→+52 and grow +100→+112 straight by progress through the window, per-axis powers left out; a burst (7, 10) flies between velocities +44 and +56, spread +68, its age progress over +28, sized +92→+104; a stream (8) particle sits at +88→+100 and grows +136→+148 by its age in seconds; a bolt's sprites are +24 wide, its fade straight across the window; a fade value is the quad's alpha | [11](../docs/11-effects.md#not-resolved) |
@@ -338,6 +344,9 @@ engine pass replaces each with what was read and removes its row.
 | M8 | How the turret turns a traced point into its targets (`0x10028bb0`), its aim stage, and the gun's report codes | each channel moves on by the angle the sight is off, at the rate a small nudge turns it; θ is 0 once both channels reach their targets and π before; a guided gun's θ is its lock left × π | [29](../docs/29-weapons.md#how-the-ai-fires--read) |
 | M8 | A gun fitted as a part of its own: its ready byte and its barrels' recoil | ready; its recoil is not played | [29](../docs/29-weapons.md#a-gun-is-ready-once-its-arm-is-out--read-and-measured) |
 | M8 | Which difficulty profile a wingman holds: `Speed_MaximumFactor` | 1, as four of the five profiles set it | [26](../docs/26-damage.md#the-difficulty-ratio--read-and-measured) |
+| M8 | How a knocked-off part flies: its push, its spin, its update, and the world query that ends a flight early | it leaves at 6 m/s away from the unit's centre and 8 m/s up, falls under gravity to the ground under it and turns at 3 rad/s about a level axis across its path, for the whole three seconds | [26](../docs/26-damage.md#not-established) |
+| M8 | A unit's life system holds all its models' nodes under one root | a life per part: a dead unit destroys its other parts' roots, and a part's root, having no parent, is never knocked off | [26](../docs/26-damage.md#what-a-damaged-node-a-destroyed-part-and-a-dead-unit-draw--read-and-measured) |
+| M8 | The statuses 4 and 8, a node copying its parent's life fraction or its stage | not modelled; no Mission 01 node carries them | [26](../docs/26-damage.md#what-a-damaged-node-a-destroyed-part-and-a-dead-unit-draw--read-and-measured) |
 
 ## Departures
 

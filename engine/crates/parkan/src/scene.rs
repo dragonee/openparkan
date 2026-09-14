@@ -310,12 +310,10 @@ pub fn sync(
         })
         .collect();
     renderer.set_sprites(device, queue, view_proj, &quads);
-    // A building is never killed: its node 0's death leaves it standing as a shell.
+    // A dead unit is deleted its controller's +92 ms after it dies (docs/26); a building is
+    // never killed. An object drawn node by node has hidden its nodes before.
     for object in std::mem::take(&mut play.killed) {
         if let Some(i) = objects.placed.iter().position(|&p| p == object) {
-            // STAND-IN: docs/26-damage.md#hit-points--read-and-measured -- what a dead unit
-            // leaves, a wreck or its damage stages, is not read: its destroyed nodes'
-            // explosions play, and it is no longer drawn.
             renderer.set_instance(queue, i, glam::Mat4::IDENTITY, false);
         }
     }
@@ -335,9 +333,9 @@ enum Mount {
 /// slot, following that node's pose.
 pub struct OwnView {
     nodes: Vec<(usize, Mount, usize)>,
-    /// Every other robot drawn node by node as it moves: an instance, the robot, its part
-    /// and the node.
-    robots: Vec<(usize, usize, usize, usize)>,
+    /// Every target with node life drawn node by node: an instance, the target, its part,
+    /// the node and the variant that instance draws.
+    targets: Vec<(usize, usize, usize, usize, usize)>,
 }
 
 /// Draw the hero from now on as its own view does (docs/07-objects.md, "The fifth slot is
@@ -350,9 +348,18 @@ pub struct OwnView {
 /// draw layers 10 and 9 a fifth slot is filed under do is not read; it draws with the
 /// scene, depth-tested, lit and fogged like any model.
 pub fn own_view(objects: &mut Objects, store: &mut TextureStore, play: &Play) -> Result<OwnView> {
-    if let Some(i) = objects.placed.iter().position(|&p| p == play.hero.object) {
-        objects.placed.remove(i);
-        objects.instances.remove(i);
+    // Every whole model drawn node by node leaves first: removing one shifts the instances
+    // after it, so no node's instance may be counted before the last removal.
+    let noded: Vec<usize> = (0..play.battle.combat.targets.len())
+        .filter(|&t| play.battle.combat.targets[t].parts.iter().any(|p| p.life.is_some()))
+        .collect();
+    let leaving: Vec<usize> =
+        std::iter::once(play.hero.object).chain(noded.iter().map(|&t| play.battle.objects[t])).collect();
+    for object in leaving {
+        if let Some(i) = objects.placed.iter().position(|&p| p == object) {
+            objects.placed.remove(i);
+            objects.instances.remove(i);
+        }
     }
     let mut nodes = Vec::new();
     for (mount, loaded) in [(Mount::Chassis, &play.hero.chassis), (Mount::Turret, &play.hero.turret)] {
@@ -372,33 +379,37 @@ pub fn own_view(objects: &mut Objects, store: &mut TextureStore, play: &Play) ->
             nodes.push((objects.instances.len() - 1, mount, node));
         }
     }
-    // A robot that moves is drawn from its nodes, each at its own pose, in place of the
-    // model built whole at rest: its level-0 slots, as the static model draws them.
-    let mut robots = Vec::new();
-    for (r, (_, robot)) in play.robots.iter().enumerate() {
-        if let Some(i) = objects.placed.iter().position(|&p| p == robot.object) {
-            objects.placed.remove(i);
-            objects.instances.remove(i);
-        }
-        for (p, part) in robot.parts.iter().enumerate() {
-            for node in 0..part.mesh.mesh.nodes.len() {
-                let Some(model) = models::build_node(&part.mesh, node, |name| store.look(name))? else {
-                    continue;
-                };
-                objects.models.push(model);
-                objects.instances.push(models::Instance {
-                    model: objects.models.len() - 1,
-                    position: [0.0; 3],
-                    rotation: 0.0,
-                    scale: 1.0,
-                    hidden: true,
-                });
-                objects.placed.push(usize::MAX);
-                robots.push((objects.instances.len() - 1, r, p, node));
+    // A unit or building that takes damage is drawn from its nodes, each at its own pose,
+    // in place of the model built whole at rest: every level-0 slot of each variant its
+    // stages draw, one shown at a time (docs/26, "What a damaged node, a destroyed part and
+    // a dead unit draw"). A robot's nodes move with it, and a knocked-off part flies.
+    let mut targets = Vec::new();
+    for t in noded {
+        let target = &play.battle.combat.targets[t];
+        for (p, part) in target.parts.iter().enumerate() {
+            let Some(loaded) = play.battle.meshes.get(t).and_then(|m| m.get(p)) else { continue };
+            for node in 0..part.mesh.nodes.len() {
+                let stages = part.life.as_ref().and_then(|l| l.nodes.get(node)).map_or(1, |l| l.stages);
+                for variant in 0..usize::from(stages) {
+                    let Some(model) = models::build_node(loaded, node, variant, |name| store.look(name))?
+                    else {
+                        continue;
+                    };
+                    objects.models.push(model);
+                    objects.instances.push(models::Instance {
+                        model: objects.models.len() - 1,
+                        position: [0.0; 3],
+                        rotation: 0.0,
+                        scale: 1.0,
+                        hidden: true,
+                    });
+                    objects.placed.push(usize::MAX);
+                    targets.push((objects.instances.len() - 1, t, p, node, variant));
+                }
             }
         }
     }
-    Ok(OwnView { nodes, robots })
+    Ok(OwnView { nodes, targets })
 }
 
 /// Put each node of the hero's own view where the hero's pose has it this frame: the
@@ -422,11 +433,17 @@ pub fn place_own_view(
         };
         renderer.set_instance(queue, instance, unit * models::pose_matrix(&pose), true);
     }
-    for &(instance, r, part, node) in &view.robots {
-        let (target, robot) = &play.robots[r];
-        let alive = play.battle.combat.targets.get(*target).is_some_and(|t| t.alive);
-        let pose = robot.placement().compose(&robot.part_pose(part, node));
-        renderer.set_instance(queue, instance, models::pose_matrix(&pose), alive);
+    for &(instance, t, p, node, variant) in &view.targets {
+        let Some(part) = play.battle.combat.targets.get(t).and_then(|target| target.parts.get(p)) else {
+            continue;
+        };
+        let shown = match part.life.as_ref().and_then(|l| l.nodes.get(node)) {
+            Some(life) => !life.hidden() && life.block() == variant,
+            None => variant == 0,
+        };
+        let visible = shown && !play.deleted.get(t).copied().unwrap_or(false);
+        let matrix = models::pose_matrix(&part.nodes[node]) * glam::Mat4::from_scale(Vec3::splat(part.scale));
+        renderer.set_instance(queue, instance, matrix, visible);
     }
 }
 
