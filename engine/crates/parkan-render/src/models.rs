@@ -406,6 +406,12 @@ impl ModelRenderer {
         self.draw_instances(pass, self.instances.iter().filter(|i| i.visible));
     }
 
+    /// Every shown instance through a view's uniforms, as the water's reflection draws them.
+    pub fn draw_through(&self, pass: &mut wgpu::RenderPass<'_>, frame: &ViewFrame) {
+        pass.set_bind_group(0, &frame.bind_group, &[]);
+        self.draw_instances(pass, self.instances.iter().filter(|i| i.visible));
+    }
+
     /// Only `indices`, shown or hidden, through a view's uniforms; a painted view draws every
     /// group opaque, as the game's panel view sets blend mode 0 (docs/35-hud.md).
     pub fn draw_view(

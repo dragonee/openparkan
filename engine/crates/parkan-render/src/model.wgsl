@@ -12,7 +12,8 @@ struct Frame {
     scene_colour: vec4<f32>,
     // Linear.
     fog_colour: vec4<f32>,
-    // x start, y end: linear range fog from the eye (docs/10-sky.md, "Fog").
+    // x start, y end: linear range fog from the eye (docs/10-sky.md, "Fog"); z the height
+    // nothing below draws at where w is 1, a reflection's clip plane.
     fog: vec4<f32>,
     eye: vec4<f32>,
     // x 1: every instance draws flat in its paint (a HUD panel's view of a unit).
@@ -88,6 +89,9 @@ fn vs_main(v: VertexIn) -> VertexOut {
 
 @fragment
 fn fs_main(v: VertexOut) -> @location(0) vec4<f32> {
+    if frame.fog.w > 0.5 && v.world.z < frame.fog.z {
+        discard;
+    }
     if frame.paint.x > 0.5 {
         // STAND-IN: docs/35-hud.md#the-unit-in-the-middle--read-and-seen -- how the camera
         // applies the colour it is handed in mode 2 is not read. Measured on the recording of

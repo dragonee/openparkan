@@ -17,6 +17,14 @@ fn tut_1_builds_its_ground_from_resolved_textures() {
     assert!(!water.is_empty() && water.iter().all(|g| g.layer1.material == "WATER"));
     let blue = water[0].layer1.still.diffuse;
     assert!(blue[2] > blue[0], "water is tinted blue by its material: {blue:?}");
+    // The water's box, as docs/03-terrain.md measures it.
+    let w = t.water.expect("Tut_1 has water");
+    let near = |a: f32, b: f32| (a - b).abs() < 0.06;
+    assert!(
+        near(w.min[0], 385.5) && near(w.max[0], 1480.5) && near(w.min[1], 255.8) && near(w.max[1], 1531.7),
+        "{w:?}"
+    );
+    assert!(near(w.level, -1.7255), "{w:?}");
 }
 
 #[test]

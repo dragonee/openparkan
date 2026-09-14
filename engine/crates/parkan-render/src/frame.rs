@@ -68,7 +68,8 @@ pub struct FrameUniform {
     pub second_colour: [f32; 4],
     pub scene_colour: [f32; 4],
     pub fog_colour: [f32; 4],
-    /// Start, end.
+    /// Start, end; then the height nothing below draws at, where w is 1 (a reflection's clip
+    /// plane).
     pub fog: [f32; 4],
     pub eye: [f32; 4],
     /// x 1 where the instances draw in their paint, as a HUD panel's view does.
@@ -95,6 +96,13 @@ impl FrameUniform {
             eye: [l.eye.x, l.eye.y, l.eye.z, 1.0],
             paint: [0.0; 4],
         }
+    }
+
+    /// The same frame, drawing nothing below `height`.
+    pub fn clipped_below(mut self, height: f32) -> Self {
+        self.fog[2] = height;
+        self.fog[3] = 1.0;
+        self
     }
 }
 

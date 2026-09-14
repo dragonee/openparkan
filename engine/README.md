@@ -219,6 +219,16 @@ the interface's pages and `ui/compaund.cfg` and `ui/hq.cfg`'s pieces.
   channels as `Control.dll`'s item does, so the T-2's rotors turn 7.3 times a
   second, every robot turret's dish once in two seconds, and the M-2f's wings
   and engines swing out above half its top speed.
+- Water reflects, the `REFLECTION_SHIFTED` way the install's `Iron_3D.ini`
+  picks: each frame the dome, the ground and the objects above the water are
+  drawn from the eye mirrored in the water plane into a 256 texture covering
+  the water's box, clipped half a unit below the water. A water face shows it
+  through the drifting environment bump map, times its lit colour; a lake's
+  bed is not drawn from above.
+
+Not yet: the view from under the water, which draws only the beds. The lake
+comes out bluer than the recording's, whose water is brighter than the sky it
+reflects (not established).
 
 This directory also holds what the rest will follow:
 
@@ -311,7 +321,7 @@ a row here. A row leaves this table when research closes it.
 
 | milestone | what is unknown | stand-in | see |
 |---|---|---|---|
-| M1 | Whether water is drawn see-through: `WATER`'s material says opaque, and every lake has a `WATER_BOT` bed beneath | opaque: the terrain draws every material opaque, whatever its blend | [03](../docs/03-terrain.md#terrain-layers-name-materials-not-textures) |
+| M1 | Whether the water surface is blended over the frame beneath it | opaque: the terrain draws every material opaque, whatever its blend | [03](../docs/03-terrain.md#not-established) |
 | M2 | Whether a blended material writes depth, and the alpha test's reference value | blended groups draw after opaque ones without writing depth; nothing is discarded (reference 0) | [07](../docs/07-objects.md#how-a-material-draws-is-in-the-archive-directory) |
 | M1 | Whether `ForceSWFog` is read outside `Terrain.dll`, which asks Direct3D for linear range vertex fog and never reads it | per-pixel linear range fog on the distance to the eye, from 700 × slot 5 to 700 × slot 6 | [10](../docs/10-sky.md#not-resolved) |
 | M1 | How the 34142-radius dome escapes the far plane and a fog ending by 700, and what lies below its rim | draw the dome first at the camera, depth-tested without writing depth under a projection with no far plane, unfogged but for its rim; clear the frame to the fog colour | [10](../docs/10-sky.md#the-dome) |
@@ -424,6 +434,9 @@ engine pass replaces each with what was read and removes its row.
 | M10 | The default `SUBTITLES` is read with | subtitles show when the key is absent (the install sets 1) | [21](../docs/21-briefing.md#when-it-runs--read) |
 | M10 | That a unit record's `+0xd8` and `+0xdc`, which the satellite map's heading line runs along, are its heading | the line runs along the hero's facing | [35](../docs/35-hud.md#not-established-4) |
 | M10 | Which clans' units the map marks besides the player's: the player clan record's `+0x54` list | the player's own units only | [25](../docs/25-sensors.md#not-established) |
+| M10 | Whether a cull mode changes for the mirrored reflection frame | the faces that face the mirrored eye draw, as a mirror shows them | [03](../docs/03-terrain.md#not-established) |
+| M10 | What the reflection camera's pass flags `0x120` leave out | the effects' sprites; the dome, the ground less its water and beds, and every shown object draw | [03](../docs/03-terrain.md#not-established) |
+| M10 | How far the water's bump map displaces its lookup | a signed byte stands for −1 to 1 at 127, so the largest offset is 0.01 × 64 ÷ 127 of the box | [03](../docs/03-terrain.md#not-established) |
 | M10 | What a device's byte 0 of 1 adds from the machine's list at `+0xc4` | nothing: its channels hold their initial values (no Mission 01 unit has one) | [28](../docs/28-chassis.md#not-established) |
 | M8 | A gun fitted as a part of its own: its ready byte and its barrels' recoil | ready; its recoil is not played | [29](../docs/29-weapons.md#a-gun-is-ready-once-its-arm-is-out--read-and-measured) |
 | M8 | Which difficulty profile a wingman holds: `Speed_MaximumFactor` | 1, as four of the five profiles set it | [26](../docs/26-damage.md#the-difficulty-ratio--read-and-measured) |

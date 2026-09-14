@@ -121,6 +121,8 @@ pub struct Renderer {
     sprites: Option<sprites::SpriteRenderer>,
     ui: Option<ui::UiRenderer>,
     views: Vec<(ModelView, models::ViewFrame)>,
+    /// The objects' uniforms through the water's reflection camera.
+    reflection_frame: Option<models::ViewFrame>,
 }
 
 impl Renderer {
@@ -209,6 +211,7 @@ impl Renderer {
             sprites: None,
             ui: None,
             views: Vec::new(),
+            reflection_frame: None,
         }
     }
 
@@ -254,6 +257,7 @@ impl Renderer {
         let bank = GpuTextures::new(device, queue, textures);
         self.terrain = terrain.map(|t| TerrainRenderer::new(device, self.format, t, &bank));
         self.objects = objects.map(|o| ModelRenderer::new(device, self.format, o, &bank));
+        self.reflection_frame = self.objects.as_ref().map(|o| o.view_frame(device));
         self.bank = Some(bank);
     }
 
@@ -442,6 +446,19 @@ impl Renderer {
         if let Some(terrain) = &self.terrain {
             terrain.prepare(queue, view_proj, &self.lighting);
         }
+        let reflection = self
+            .terrain
+            .as_mut()
+            .and_then(|t| t.prepare_reflection(device, queue, &self.lighting, (width, height)));
+        if let Some((reflected, uniform)) = &reflection {
+            if let Some((dome, _)) = &self.dome {
+                let [x, y, z, _] = uniform.eye;
+                dome.prepare_reflection(queue, *reflected, Vec3::new(x, y, z));
+            }
+            if let (Some(objects), Some(frame)) = (&self.objects, &self.reflection_frame) {
+                objects.prepare_view(queue, frame, uniform);
+            }
+        }
         if let Some(objects) = &self.objects {
             objects.prepare(queue, view_proj, &self.lighting);
             for (view, frame) in &self.views {
@@ -470,6 +487,42 @@ impl Renderer {
             CLEAR
         };
         let mut encoder = device.create_command_encoder(&Default::default());
+        // The water's reflection first (`Terrain.dll:0x100844c0`): the dome, the ground and the
+        // objects through the mirrored camera into the reflection's texture.
+        //
+        // STAND-IN: docs/03-terrain.md#not-established -- what the reflection camera's pass
+        // flags 0x120 leave out is not read; the effects' sprites are left out.
+        if let (Some(terrain), Some(_)) = (&self.terrain, &reflection)
+            && let Some((colour, depth)) = terrain.reflection_targets()
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("reflection"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: colour,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations { load: wgpu::LoadOp::Clear(clear), store: wgpu::StoreOp::Store },
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: depth,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(0.0),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            if let Some((dome, _)) = &self.dome {
+                dome.draw_reflection(&mut pass);
+            }
+            terrain.draw_reflection(&mut pass);
+            if let (Some(objects), Some(frame)) = (&self.objects, &self.reflection_frame) {
+                objects.draw_through(&mut pass, frame);
+            }
+        }
         {
             let depth = &self.depth.as_ref().expect("made above").0;
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {

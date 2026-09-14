@@ -10,7 +10,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 use parkan_formats::gamedir;
-use parkan_formats::landmesh::{self, LandMesh, NO_TEXTURE};
+use parkan_formats::landmesh::{self, FLAGS_LIQUID_BED_BIT, LandMesh, NO_TEXTURE};
 
 use crate::textures::{Look, TextureStore};
 
@@ -35,6 +35,18 @@ pub struct Group {
     pub layer1: Layer,
     pub layer2: Option<Layer>,
     pub water: bool,
+    /// A liquid's bed (face flag `0x2000`), which is not drawn while the camera is above the
+    /// liquid (`Terrain.dll:0x10043c43`).
+    pub bed: bool,
+}
+
+/// The box every water face lies in, at the water level (`Terrain.dll:0x10017e6e`): the
+/// reflection texture covers it (docs/03-terrain.md, "The water box").
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct WaterBox {
+    pub min: [f32; 2],
+    pub max: [f32; 2],
+    pub level: f32,
 }
 
 pub struct Terrain {
@@ -42,6 +54,28 @@ pub struct Terrain {
     pub vertices: Vec<Vertex>,
     pub indices: Vec<u32>,
     pub groups: Vec<Group>,
+    /// The water's box, on a map with water.
+    pub water: Option<WaterBox>,
+}
+
+/// The box `land`'s water faces' vertices widen from empty (`0x1001d5d0`), its corners handed
+/// out at its top (`0x10022630`).
+pub fn water_box(land: &LandMesh) -> Option<WaterBox> {
+    let (mut min, mut max) = ([f32::MAX; 3], [f32::MIN; 3]);
+    for face in land.faces.iter().filter(|f| f.is_water()) {
+        for &v in &face.vertices {
+            let p = land.positions[usize::from(v)];
+            for a in 0..3 {
+                min[a] = min[a].min(p[a]);
+                max[a] = max[a].max(p[a]);
+            }
+        }
+    }
+    (min[0] < max[0] && min[1] < max[1]).then_some(WaterBox {
+        min: [min[0], min[1]],
+        max: [max[0], max[1]],
+        level: max[2],
+    })
 }
 
 /// The map directory a mission's `map_path` names: `DATA\MAPS\Tut_1\land`.
@@ -65,14 +99,17 @@ pub fn build(map_dir: &Path, store: &mut TextureStore) -> Result<Terrain> {
         })
         .collect();
 
-    let mut buckets: BTreeMap<(u8, u8, bool), Vec<usize>> = BTreeMap::new();
+    let mut buckets: BTreeMap<(u8, u8, bool, bool), Vec<usize>> = BTreeMap::new();
     for fi in land.lod_faces(0) {
         let f = &land.faces[fi];
-        buckets.entry((f.tex1, f.tex2, f.is_water())).or_default().push(fi);
+        buckets
+            .entry((f.tex1, f.tex2, f.is_water(), f.flags & FLAGS_LIQUID_BED_BIT != 0))
+            .or_default()
+            .push(fi);
     }
     let mut indices = Vec::new();
     let mut groups = Vec::new();
-    for ((tex1, tex2, water), faces) in buckets {
+    for ((tex1, tex2, water, bed), faces) in buckets {
         let start = indices.len() as u32;
         for fi in &faces {
             indices.extend(land.faces[*fi].vertices.map(u32::from));
@@ -83,9 +120,10 @@ pub fn build(map_dir: &Path, store: &mut TextureStore) -> Result<Terrain> {
             Some(name) if tex2 != NO_TEXTURE => Some(store.look(name)?),
             _ => None,
         };
-        groups.push(Group { start, count: faces.len() as u32 * 3, layer1, layer2, water });
+        groups.push(Group { start, count: faces.len() as u32 * 3, layer1, layer2, water, bed });
     }
-    Ok(Terrain { land, vertices, indices, groups })
+    let water = water_box(&land);
+    Ok(Terrain { land, vertices, indices, groups, water })
 }
 
 #[cfg(test)]

@@ -32,6 +32,9 @@ pub struct DomeRenderer {
     pipeline: wgpu::RenderPipeline,
     camera: wgpu::Buffer,
     group: wgpu::BindGroup,
+    /// The reflection camera's, for the water's reflection.
+    reflection_camera: wgpu::Buffer,
+    reflection_group: wgpu::BindGroup,
     vertices: wgpu::Buffer,
     indices: wgpu::Buffer,
     count: u32,
@@ -69,6 +72,17 @@ impl DomeRenderer {
             label: Some("dome camera"),
             layout: &layout,
             entries: &[wgpu::BindGroupEntry { binding: 0, resource: camera.as_entire_binding() }],
+        });
+        let reflection_camera = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("dome reflection camera"),
+            size: 64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let reflection_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("dome reflection camera"),
+            layout: &layout,
+            entries: &[wgpu::BindGroupEntry { binding: 0, resource: reflection_camera.as_entire_binding() }],
         });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("dome"),
@@ -115,7 +129,17 @@ impl DomeRenderer {
             contents: bytemuck::cast_slice(indices),
             usage: wgpu::BufferUsages::INDEX,
         });
-        Self { pipeline, camera, group, vertices, indices, count, positions: positions.to_vec() }
+        Self {
+            pipeline,
+            camera,
+            group,
+            reflection_camera,
+            reflection_group,
+            vertices,
+            indices,
+            count,
+            positions: positions.to_vec(),
+        }
     }
 
     /// This frame's camera and the dome's colours, one a vertex.
@@ -129,6 +153,21 @@ impl DomeRenderer {
             .map(|(p, c)| GpuVertex { position: p.to_array(), colour: *c })
             .collect();
         queue.write_buffer(&self.vertices, 0, bytemuck::cast_slice(&vertices));
+    }
+
+    /// The reflection camera, at its own eye, for [`DomeRenderer::draw_reflection`].
+    pub fn prepare_reflection(&self, queue: &wgpu::Queue, view_proj: Mat4, eye: Vec3) {
+        let placed = view_proj * Mat4::from_translation(eye);
+        queue.write_buffer(&self.reflection_camera, 0, bytemuck::bytes_of(&placed.to_cols_array()));
+    }
+
+    /// The dome as the reflection camera sees it.
+    pub fn draw_reflection(&self, pass: &mut wgpu::RenderPass<'_>) {
+        pass.set_pipeline(&self.pipeline);
+        pass.set_bind_group(0, &self.reflection_group, &[]);
+        pass.set_vertex_buffer(0, self.vertices.slice(..));
+        pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
+        pass.draw_indexed(0..self.count, 0, 0..1);
     }
 
     pub fn draw(&self, pass: &mut wgpu::RenderPass<'_>) {
