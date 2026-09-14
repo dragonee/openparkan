@@ -3036,14 +3036,6 @@ read = false
 
 [[entry]]
 module = "Terrain.dll"
-at = "0x100839c0"
-kind = "function"
-name = "CCamera::CCamera"
-doc = "the binary's own assertion text"
-read = false
-
-[[entry]]
-module = "Terrain.dll"
 at = "0x100849e0"
 kind = "function"
 name = "CCamera::DrawMaterial"
@@ -20047,3 +20039,387 @@ kind = "site"
 name = "the land record's +8, the map's side, against a position near the map edge"
 read = true
 doc = "docs/35-hud.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x100839c0"
+kind = "function"
+name = "CCamera::CCamera: mode +0x1a0 from the name (REFLECTION_SHIFTED 2, REFLECTION 1, else 0), buffering camera +0x198/+0x19c, I3DRender +0x184, CShade +0x188"
+doc = "docs/03-terrain.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1005f390"
+kind = "function"
+name = "render setting record: name, type (0 float, 1 int, 2 bool), group"
+read = true
+doc = "docs/03-terrain.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10083e20"
+kind = "function"
+name = "CCamera reflection draw: skipped without water or a water face last frame; the scene camera's fov and flags; REFLECTION mirrors the transform in z = h, REFLECTION_SHIFTED looks up from (x, y, 2h - z) through the water box; clip plane z >= h - 0.5"
+read = true
+doc = "docs/03-terrain.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x100844c0"
+kind = "function"
+name = "CCamera::Render (slot 5): EMBM reflection and depth clear, the 0x800 pass, plain reflection and depth clear, the world (flags 0x120 on a reflection camera), the 0x1000 pass"
+read = true
+doc = "docs/03-terrain.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10084a70"
+kind = "function"
+name = "CCamera slot 13: flags (+0x164); bit 0x10 to the buffering camera"
+read = true
+doc = "docs/03-terrain.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10084ad0"
+kind = "function"
+name = "CCamera slot 20: flags (+0x164)"
+read = true
+doc = "docs/03-terrain.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10081340"
+kind = "function"
+name = "LoadBufferingCamera: 0x2ac bytes, CBufferingCamera, returns +8"
+read = true
+doc = "docs/03-terrain.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x100813e0"
+kind = "function"
+name = "CBufferingCamera::CBufferingCamera: target 1, viewport 0,0,320,200, owner camera at +0xc"
+read = true
+doc = "docs/03-terrain.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10081a40"
+kind = "function"
+name = "CBufferingCamera slot 29, projection: near 5, far 700, fov (slot 17), or the window (+0x28c) in mode 2; render slot 25"
+read = true
+doc = "docs/03-terrain.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10081ba0"
+kind = "function"
+name = "CBufferingCamera slot 3, begin: current camera, projection, CShade StartOfFrame (slot 30)"
+read = true
+doc = "docs/03-terrain.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10081c70"
+kind = "function"
+name = "CBufferingCamera slot 4, end: a target-2 camera copies the frame into its texture (+0x22c)"
+read = true
+doc = "docs/03-terrain.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10081e80"
+kind = "function"
+name = "CBufferingCamera slot 7: target kind (+0x224: 1 the frame, 2 a texture) and texture (+0x22c)"
+read = true
+doc = "docs/03-terrain.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10081ed0"
+kind = "function"
+name = "CBufferingCamera slot 8: viewport rect (+0x10)"
+read = true
+doc = "docs/03-terrain.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10081f20"
+kind = "function"
+name = "CBufferingCamera slot 9: projection mode (+0x230), 2 the window"
+read = true
+doc = "docs/03-terrain.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10081f60"
+kind = "function"
+name = "CBufferingCamera slot 10: field of view (+0x234)"
+read = true
+doc = "docs/03-terrain.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10081f90"
+kind = "function"
+name = "CBufferingCamera slot 27: projection window, left, top, width, height, depth (+0x28c)"
+read = true
+doc = "docs/03-terrain.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x100820f0"
+kind = "function"
+name = "CBufferingCamera slot 16: projection mode (+0x230)"
+read = true
+doc = "docs/03-terrain.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10082120"
+kind = "function"
+name = "CBufferingCamera slot 17: field of view (+0x234)"
+read = true
+doc = "docs/03-terrain.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10082fd0"
+kind = "function"
+name = "CBufferingCamera slot 23: +0x280; no caller found through slot 0x5c"
+read = true
+doc = "docs/03-terrain.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10083010"
+kind = "function"
+name = "CBufferingCamera slot 24: +0x280, which CShade keeps as +0xbcc"
+read = true
+doc = "docs/03-terrain.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10083140"
+kind = "function"
+name = "CBufferingCamera slot 32: parent camera (+0x284)"
+read = true
+doc = "docs/03-terrain.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10022630"
+kind = "function"
+name = "landscape interface 0x22 slot 3: the water box's top corners at the water level, (min x, min y), (max x, min y), (max x, max y), (min x, max y)"
+read = true
+doc = "docs/03-terrain.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1001d5d0"
+kind = "function"
+name = "static init: the empty box, eight corners of +-FLT_MAX (0x100a5a18)"
+read = true
+doc = "docs/03-terrain.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x100491e0"
+kind = "function"
+name = "the EMBM bump map: du, dv = round(EMBMMaxVal x cos, sin 4 x 3.14159 x (i/32 + j/32 - 1))"
+read = true
+doc = "docs/03-terrain.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10046b40"
+kind = "function"
+name = "CShade slot 31, end of frame: water met this frame (+0x1671) into +0x1670"
+read = true
+doc = "docs/03-terrain.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10042910"
+kind = "function"
+name = "CShade slot 25: a water face was met last frame (+0x1670)"
+read = true
+doc = "docs/03-terrain.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1002ca80"
+kind = "function"
+name = "CShade EMBM water surface: UV 1 over the water box, UV 0 = EMBMBumpTile x UV 1 + (ms mod EMBMBumpMove) / EMBMBumpMove, bump matrix Coeff00/Coeff11, phase 10, bump map and reflection"
+read = true
+doc = "docs/03-terrain.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10045ef0"
+kind = "function"
+name = "CShade::StartOfFrame (slot 30): the camera, its position (+0xb98), +0xbcc, the under-liquid flag (+0xbb0)"
+read = true
+doc = "docs/03-terrain.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10041370"
+kind = "function"
+name = "CShade::CShade: with UseReflections and UseEMBMReflections, the reflection texture and the 32 x 32 bump map"
+read = true
+doc = "docs/03-terrain.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1001fde4"
+kind = "site"
+name = "CLandscape::Initialize: the reflection camera under UseReflections, REFLECTION_SHIFTED under UseEMBMReflections, else REFLECTION"
+read = true
+doc = "docs/03-terrain.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10017e6e"
+kind = "site"
+name = "CLandscape::CLandscape: the water box widened by faces with 0x20000 (field 1 bit 0x02)"
+read = true
+doc = "docs/03-terrain.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10043c43"
+kind = "site"
+name = "cell draw: a liquid-bed face (0x2000) is not drawn above the liquid"
+read = true
+doc = "docs/03-terrain.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1004449b"
+kind = "site"
+name = "cell draw: a water face is not drawn under REFLECTION; +0x1671 set before (0x10044488)"
+read = true
+doc = "docs/03-terrain.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10043b39"
+kind = "site"
+name = "cell draw: a water batch under REFLECTION_SHIFTED draws through 0x1002ca80"
+read = true
+doc = "docs/03-terrain.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10046da5"
+kind = "site"
+name = "CShade: UseReflections and UseEMBMReflections into +0x1668 and +0x166c"
+read = true
+doc = "docs/03-terrain.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x100466d5"
+kind = "site"
+name = "StartOfFrame: +0xbb0 set when IWorld slot 8 finds a class-2 face at or above the camera"
+read = true
+doc = "docs/03-terrain.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10084426"
+kind = "site"
+name = "reflection draw: clip plane 0 (0, 0, 1, 0.5 - h) enabled around the reflection camera's draw"
+read = true
+doc = "docs/03-terrain.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x100423a0"
+kind = "site"
+name = "CShade::CShade: the reflection texture's side, the largest power of two within the screen, 256 at most"
+read = true
+doc = "docs/03-terrain.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10084762"
+kind = "site"
+name = "CCamera::Render: world pass flags 0x120 for a reflection camera"
+read = true
+doc = "docs/03-terrain.md"
+
+[[entry]]
+module = "Ngi32.dll"
+at = "0x10007ca0"
+kind = "function"
+name = "render slot 10: Clear the depth buffer (D3DCLEAR_ZBUFFER, z 1), whole or a rect"
+read = true
+doc = "docs/03-terrain.md"
+
+[[entry]]
+module = "Ngi32.dll"
+at = "0x10008aa0"
+kind = "function"
+name = "render slot 19: SetClipPlane(index, plane)"
+read = true
+doc = "docs/03-terrain.md"
+
+[[entry]]
+module = "Ngi32.dll"
+at = "0x10007170"
+kind = "function"
+name = "render slot 25, camera: viewport (8), perspective (1) or window (0x10) projection, view (2)"
+read = true
+doc = "docs/03-terrain.md"
+
+[[entry]]
+module = "Ngi32.dll"
+at = "0x10007030"
+kind = "function"
+name = "projection matrix: perspective from the field of view, or a window at depth d; depth far/(far - near) (z - near)"
+read = true
+doc = "docs/03-terrain.md"
+
+[[entry]]
+module = "Ngi32.dll"
+at = "0x10009450"
+kind = "function"
+name = "view matrix from a camera transform: forward as depth, left negated as x, up as y"
+read = true
+doc = "docs/03-terrain.md"
+
+[[entry]]
+module = "Ngi32.dll"
+at = "0x10036a30"
+kind = "datum"
+name = "render phase table, 20 x 44 bytes; record 16 is phase 10: BUMPENVMAP, then texture x diffuse, diffuse alpha"
+read = true
+doc = "docs/03-terrain.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10061736"
+kind = "site"
+name = "Iron_3D.ini REFLECTIONS to Terrain.dll's settings (group 0x1e), setting 26"
+read = true
+doc = "docs/03-terrain.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1006177b"
+kind = "site"
+name = "Iron_3D.ini EMBOSS_BUMP to group 0x1e, setting 25"
+read = true
+doc = "docs/03-terrain.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10061795"
+kind = "site"
+name = "Iron_3D.ini EMBM to group 0x1e, setting 30"
+read = true
+doc = "docs/03-terrain.md"

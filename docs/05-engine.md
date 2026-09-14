@@ -63,7 +63,8 @@ BITDEPTH=32
 ```
 
 `EMBM` is environment-mapped bump mapping, a DX6-era feature. Everything here
-maps onto modern Metal / Vulkan / WebGPU without difficulty.
+maps onto modern Metal / Vulkan / WebGPU without difficulty. `REFLECTIONS` and
+`EMBM` are what water is drawn with: see [03-terrain.md](03-terrain.md#water-reflects--read-and-measured).
 
 ### The device is `IDirect3DDevice7`
 

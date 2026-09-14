@@ -718,6 +718,8 @@ ambient term is moot: a material's ambient colour is its self-light. See
 | `LensFlareOn` | 1 |
 | `UseDXLighting` | 0 |
 
+The water's settings, `UseReflections` to `EMBMBumpMove`, are in [03-terrain.md](03-terrain.md#water-reflects--read-and-measured).
+
 ## What the viewer draws
 
 - The **nebula** on the dome, multiplied by a gradient from the keyframe's

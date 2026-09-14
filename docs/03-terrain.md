@@ -185,7 +185,9 @@ Two things follow that a flat-colour stand-in was hiding:
 Water is drawn see-through here. The material declares no transparency, but
 every map that has water also carries a `WATER_BOT` material on the ground
 beneath it, and a lake bed nobody can see would not be worth authoring. The
-exact figure is a renderer choice.
+exact figure is a renderer choice. The game itself does neither: with its
+shipped settings a lake from above shows a reflection, not its texture, and
+its bed is drawn only from under the water ([Water reflects](#water-reflects--read-and-measured)).
 
 **The layer-1 material is also the ground a unit feels.** Its `MAT0` class
 byte is the surface id and its dword a damage rate. `WATER_BOT` and
@@ -549,3 +551,220 @@ survey camera frames the whole map, so here it is a toggle.
 An earlier deduplication pass — keep the first face of each set of triangles
 with identical positions — is gone. It removed exactly the 46186 the
 simplifier had not touched and kept every one that flickered.
+
+## Water reflects — *read*, and *measured*
+
+A lake is not drawn with its own texture, and not with a fixed environment
+map or the dome's colours. **It is the scene drawn a second time, through a camera
+standing at the eye mirrored in the water plane** (`Terrain.dll`). There are
+two ways of doing that, and the shipped `Iron_3D.ini` picks the second:
+
+- **`REFLECTION`**: the mirrored scene is drawn into the frame, and the water
+  faces are left out, so the lake is a hole in the ground it shows through.
+- **`REFLECTION_SHIFTED`**: the mirrored scene is drawn into a small texture,
+  and each water face draws that texture through an environment-mapped bump
+  map, tinted by its lit colour.
+
+### The settings — *read*
+
+`Terrain.dll`'s 36 render settings are named by `0x1005eb10`, each through
+`0x1005f390` (a name, a type — 0 float, 1 int, 2 bool — and a group), and
+kept at `0x100a6cac` + 4 × index. The defaults are set at `0x1005fa80`, and
+no `shade.cfg` ships to change them ([10-sky.md](10-sky.md#the-render-settings)).
+The water's:
+
+| index | setting | type | default | set by |
+|---:|---|---|---|---|
+| 25 | `UseEmbossBump` | bool | 1 | `EMBOSS_BUMP` (`iron3d.dll:0x1006177b`) |
+| 26 | `UseReflections` | bool | 1 | `REFLECTIONS` (`iron3d.dll:0x10061736`) |
+| 30 | `UseEMBMReflections` | bool | 0 | `EMBM` (`iron3d.dll:0x10061795`) |
+| 31 | `EMBMCoeff00` | float | 0.01 | — |
+| 32 | `EMBMCoeff11` | float | 0.01 | — |
+| 33 | `EMBMMaxVal` | int | 64 | — |
+| 34 | `EMBMBumpTile` | float | 100 | — |
+| 35 | `EMBMBumpMove` | int | 10000 | — |
+
+`iron3d.dll` reads `Iron_3D.ini` at load (`0x10061310`) and sends each key,
+as 0 or 1, through the game-settings object to group 30, the page
+`Terrain.dll` registers as `0x1e`: `REFLECTIONS` as setting 26, `EMBOSS_BUMP`
+as 25 (besides `World3D.dll`'s `0x6d`, [02-texm.md](02-texm.md)), `EMBM` as
+30. **The install's ini says `REFLECTIONS=1` and `EMBM=1`, so the game runs
+the `REFLECTION_SHIFTED` way** (*measured*). `CShade` copies settings 26 and
+30 when it is built (`+0x1668`, `+0x166c`; `0x10046da5`).
+
+### The reflection camera — *read*
+
+`CLandscape::Initialize` makes it only while `UseReflections` is on
+(`0x1001fde4`): a `CCamera` (`0x100839c0`) named `REFLECTION_SHIFTED` when
+`UseEMBMReflections` is on (`0x1001fe75`) and `REFLECTION` when it is not
+(`0x1001fec9`). The name is its mode, `+0x1a0`: 2 or 1, and 0 on every other
+camera (`0x10083a54`). Its buffering camera (`CBufferingCamera`,
+`0x100813e0`) is told where to draw (slot 7, `0x10081e80`):
+
+- `REFLECTION` draws into the frame, over the whole screen, with a
+  perspective projection;
+- `REFLECTION_SHIFTED` draws into a texture `CShade` makes for it
+  (`0x10041370`) and copies itself there when its draw ends (`0x10081d02`):
+  square, the largest power of two not above the screen's smaller side but
+  at most 256 (`0x100423a0`) — **256 at 640 × 480 and at every size above** —
+  with a window projection (mode 2, `0x10081f20`).
+
+Both start with a field of view of 1.7 (slot 10, `0x10081f60`; read back by
+slot 17, `0x10082120`) and flags 1. A buffering camera's projection (slot
+29, `0x10081a40`, set up each time its draw begins) passes a near plane of
+**5** and a far plane of **700** (`0x10081a76`). A camera's transform is a
+matrix whose columns are its forward axis, its left, its up and its position:
+`Ngi32.dll` builds the view from it with forward as depth, left negated as x
+and up as y (`0x10009450`).
+
+### When it draws — *read*
+
+`CCamera::Render` (`0x100844c0`), for a camera of mode 0, runs:
+
+1. with `UseReflections` and `UseEMBMReflections` both on: **the reflection
+   draw**, then a clear of the device's depth buffer (render slot 10, `Clear`
+   with `D3DCLEAR_ZBUFFER` and z 1, `Ngi32.dll:0x10007ca0`);
+2. the world's `0x800` pass, and the end of that render;
+3. with `UseReflections` on alone: the reflection draw, and the depth clear;
+4. the world, and the `0x1000` pass.
+
+The reflection camera itself hands the world the pass flags `0x120`
+(`0x10084762`) and never reflects.
+
+**The reflection draw** (`0x10083e20`) does nothing when the map has no
+water — `ITerrain` slot 11 answers −1 (`0x10083e7d`) — or when no water face
+was met in the frame before: the cell draw sets `CShade +0x1671` when it
+meets one (`0x10044488`), the end of each frame moves it to `+0x1670`
+(`0x10046b40`), and the draw asks for that (shade slot 25, `0x10042910`).
+Otherwise, with *h* the water level and (*x*, *y*, *z*) the eye, it gives the
+reflection camera the scene camera's field of view and flags, and then:
+
+- **`REFLECTION`**: the scene camera's transform reflected in the plane
+  *z* = *h* — the identity with −1 for z and 2*h* in z's translation
+  (`0x100842f8`, multiplied at `0x100843ce`).
+- **`REFLECTION_SHIFTED`**: a transform at the mirrored eye (*x*, *y*,
+  2*h* − *z*) whose forward axis is world +z, left +y and up +x
+  (`0x1008409c`): **it looks straight up out of the water**, a mirrored frame.
+  Its window (slot 27, `0x10081f90`) is the water box below, seen from that
+  transform at depth *d* = *z* − *h* (`0x100842e2`). `Ngi32.dll` projects a
+  window (left *l*, top *t*, width *w*, height *v*, depth *d*) as a
+  perspective one (`0x100070d3`): x′ = 2*d*/*w* · x + (2*l* + *w*)/*w* · z,
+  y′ = 2*d*/*v* · y − (2*t* + *v*)/*v* · z, w′ = z, with depth
+  far/(far − near) · (z − near). So the texture holds the whole water box as
+  the mirrored eye sees it: every point of the water plane lands on its own
+  texel, whichever way the player looks, which is what a planar mirror needs
+  (*derived*).
+- Then it sets clip plane 0 to (0, 0, 1, 0.5 − *h*) (render slot 19,
+  `SetClipPlane`, `Ngi32.dll:0x10008aa0`), enables it (render state 152,
+  `CLIPPLANEENABLE`), draws the reflection camera, and disables it
+  (`0x10084426`–`0x10084483`): **nothing below *h* − 0.5 reaches the
+  reflection**.
+
+### The water box — *read*, and *measured*
+
+At load the landscape widens an empty box — every corner ±`FLT_MAX`
+(`0x1001d5d0`) — by the vertices of every face whose first word, field 0 and
+field 1 read as one dword, carries `0x20000`: field 1's bit `0x02`, the water
+faces (`0x10017e6e`). Its interface `0x22` (`+0x144`, `0x1001a182`) hands
+out, from slot 3 (`0x10022630`), the box's four top corners at the water
+level: (min x, min y), (max x, min y), (max x, max y), (min x, max y).
+
+*Measured* on the 11 maps with water: Tut_1's box runs from x 385.5 to 1480.5
+and y 255.8 to 1531.7 at *h* −1.7255, 1095 × 1276, **4.28 × 4.98 units a texel**
+of the 256 texture. The boxes run from 119 × 663 (0.47 × 2.59 a texel) to
+`Net_2_07`'s whole 3793-unit map (14.8).
+
+### How a water face draws — *read*
+
+`CShade`'s cell draw (`0x100438c0`), for a camera above the water:
+
+- **a liquid-bed face** (field 0 `0x2000`) **is not drawn** (`0x10043c43`,
+  `0x10043c9f`), whatever the settings;
+- **a water face**, with `UseReflections` on, marks the frame (above), and:
+  - under `REFLECTION` **is not drawn** (`0x1004449b`);
+  - under `REFLECTION_SHIFTED` its batch draws as a surface of its own
+    (`0x1002ca80`, called at `0x10043b39` and `0x100443cb`): the batch's
+    vertices and colours, with two new UV sets, two textures and render
+    phase 10.
+- With `UseReflections` off a water face draws its material like the ground.
+
+**The `REFLECTION_SHIFTED` surface** (`0x1002ca80`), for a vertex at
+(*x*, *y*) and the box from (*x*₀, *y*₀) to (*x*₁, *y*₁):
+
+| | |
+|---|---|
+| texture 0 | a 32 × 32 bump map `CShade` makes (`0x100425cd`, `0x100491e0`) |
+| texture 1 | the reflection |
+| UV set 1 | u = 1 − (*y* − *y*₀)/(*y*₁ − *y*₀), v = 1 − (*x* − *x*₀)/(*x*₁ − *x*₀) |
+| UV set 0 | `EMBMBumpTile` × set 1 + *t* on both, *t* = (clock ms mod `EMBMBumpMove`) ÷ `EMBMBumpMove`: the bump map repeats 100 times across the box and drifts one tile along its diagonal every 10 s |
+| bump matrix | 00 `EMBMCoeff00`, 01 and 10 zero, 11 `EMBMCoeff11`; luminance scale 1, offset 0 |
+| phase | 10 (`0x1002cdc3`) |
+
+**Phase 10** is `Ngi32.dll`'s record 16 (table at `0x10036a30`): stage 0 is
+`BUMPENVMAP` of texture 0, stage 1 is texture 1 × diffuse, and the alpha is
+the diffuse's; both stages filter by point, and the record turns on the alpha
+test (`GREATEREQUAL`). So the water shows **the reflection, displaced by the
+bump map, times the face's lit colour** — `WATER_M`'s is `(99, 212, 255)`,
+`WATER`'s `(77, 106, 255)` — and neither water texture is drawn at all.
+
+**The bump map** (`0x100491e0`): the texel in column *i* and row *j* holds
+du = round(`EMBMMaxVal` × cos 4π(*i*/32 + *j*/32 − 1)) and dv the same with
+sin, as two signed bytes (cos `0x1008e160`, sin `0x1008e820`; π is taken as
+3.14159) — a wave of constant length 64 turning along the diagonal, two
+turns across a tile.
+
+**Under the water it turns round.** The frame's flag `+0xbb0` (`0x100466d5`)
+is set when `IWorld` slot 8's vertical search for class-2 faces — the liquid
+surface Control.dll asks for too ([24-motion.md](24-motion.md)) — finds one at
+the camera's position (`+0xb98`, column 3 of the camera's matrix) not below
+the camera. Then, with `UseReflections` on, only bed faces that are not water
+draw; with it off, beds and water. The camera it tests is the one drawing, so
+the reflection camera, under the water by construction, sets it whenever its
+eye is over a lake (*derived*).
+
+### What the recording shows — *measured*
+
+Mission 01's recording (960 × 720):
+
+- **At 150 s a smoke column mirrors in the lake.** Down the column at x 370–395,
+  the smoke is dark from y 335 to 400, above a strip of sand (400–420) and
+  the shore line (425); its image is dark from 430 to about 485 — the same
+  column, mirrored about y ≈ 412, soft-edged and a little shorter.
+- The open lake beside it is **(162, 248, 253)**, against a horizon sky of
+  (174, 167, 215) at the top left: cyan like `WATER_M`'s diffuse, and brighter
+  in green than the sky it would reflect.
+- At 240 s the water under the island's cliff is a dark teal band, **smeared
+  in vertical streaks** (mean (34, 55, 53) over x 40–300, y 440–470) — the
+  cliff's image, blurred and displaced.
+- In the briefing at 1:31 the lake before the island is a greenish, darker
+  image of its hillside.
+
+A planar mirror, soft and wavering: what a 256 texture over a 1095 × 1276
+box, displaced by the bump map, would give (*derived*). The colours are not
+yet reproduced (below).
+
+### Not established
+
+- **The lake's brightness.** Phase 10 multiplies the reflection by the lit
+  colour, which the device clamps to 1, so the water can be no brighter than
+  what it reflects; the recording's open water is brighter in green than its
+  sky. Either the reflection texture holds something brighter than the
+  horizon, the lit colour reaches the stage unclamped, or that machine did
+  not draw phase 10 (its record needs capability `0x1`).
+- **What the pass flags `0x120` leave out of the reflection** — the world
+  draw passes them on to what it draws (`0x1001c8a8`), and their tests were
+  not followed.
+- **Culling in a mirrored frame.** Both reflection transforms have a
+  determinant of −1, which turns every triangle's winding round on screen;
+  whether a cull mode is changed for the reflection was not found.
+- **How the water blends.** The phase leaves the alpha to the diffuse's; the
+  surface clears its flag `0x400` (`0x1002cd82`); whether the water is
+  blended over the frame beneath it was not read.
+- **How far the bump displaces.** `D3DFMT_V8U8`-style values are signed and
+  stand for −1 to 1 on the device, which would make the largest displacement
+  0.01 × 64 ÷ 127 ≈ 0.005 of the box, about 5.5 units on Tut_1 (*derived*
+  from Direct3D's convention, not from this binary).
+- **`CShade +0xbcc`.** Every water test above also asks that it be 0; it is
+  the buffering camera's `+0x280` (slot 24, `0x10083010`), and no call to
+  its setter (slot 23, `0x10082fd0`) was found — searched as every call
+  through slot `0x5c` in `Terrain.dll` — so it is taken as always 0.

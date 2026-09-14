@@ -1291,6 +1291,163 @@ def check_water(check, game: Path) -> None:
           f"without writing depth")
 
 
+#: ``Terrain.dll``'s render settings by index, as ``0x1005eb10`` names them.
+REFLECTION_SETTINGS = {25: ("UseEmbossBump", 2), 26: ("UseReflections", 2),
+                       30: ("UseEMBMReflections", 2), 31: ("EMBMCoeff00", 0),
+                       32: ("EMBMCoeff11", 0), 33: ("EMBMMaxVal", 1), 34: ("EMBMBumpTile", 0),
+                       35: ("EMBMBumpMove", 1)}
+
+
+def check_water_reflection(check, game: Path) -> None:
+    """Water reflects: the settings, the reflection camera, the water box, phase 10."""
+    paths = [game / name for name in ("Terrain.dll", "iron3d.dll", "Ngi32.dll")]
+    if not all(p.exists() for p in paths):
+        return
+    terrain, iron, ngi = (p.read_bytes() for p in paths)
+    t_at, i_at, n_at = _image_at(terrain), _image_at(iron), _image_at(ngi)
+
+    def cstr(at, va: int) -> str:
+        return at(va, 40).split(b"\0")[0].decode("latin-1")
+
+    def f32(word: int) -> float:
+        return struct.unpack("<f", struct.pack("<I", word))[0]
+
+    # The names: from the 16th on, each record is `push type; push name; lea ecx;
+    # call 0x1005f390; mov esi, eax; mov ecx, 9; mov edi, table + 0x24 * index`
+    # (the first 15 are built inline); every one ends copying into its slot.
+    table = 0x100A6798
+    body = t_at(0x1005EB10, 2161)
+    slots = {(v - table) // 0x24 for v in (struct.unpack("<I", m.group(1))[0]
+                                           for m in re.finditer(rb"\xbf(....)", body, re.S))
+             if table <= v < table + 36 * 0x24 and (v - table) % 0x24 == 0}
+    named = {}
+    record_code = rb"\x6a(.)\x68(....)\x8d\x8d....\xe8....\x8b\xf0\xb9\x09\x00\x00\x00\xbf(....)"
+    for m in re.finditer(record_code, body, re.S):
+        slot = (struct.unpack("<I", m.group(3))[0] - table) // 0x24
+        named[slot] = (cstr(t_at, struct.unpack("<I", m.group(2))[0]), m.group(1)[0])
+    # The defaults: `mov dword [reg + disp], imm32` on the settings object.
+    defaults = {}
+    body = t_at(0x1005FA80, 746)
+    for m in re.finditer(rb"\xc7[\x80-\x87](....)(....)|\xc7[\x40-\x47](.)(....)", body, re.S):
+        disp = struct.unpack("<I", m.group(1))[0] if m.group(1) else m.group(3)[0]
+        defaults[(disp - 4) // 4] = struct.unpack("<I", m.group(2) or m.group(4))[0]
+    got = {i: named.get(i) for i in REFLECTION_SETTINGS}
+    values = {i: defaults.get(i) for i in REFLECTION_SETTINGS}
+    want = {25: 1, 26: 1, 30: 0, 33: 64, 35: 10000}
+    floats = {31: 0.01, 32: 0.01, 34: 100.0}
+    check("Terrain.dll: the water's settings and their defaults",
+          slots == set(range(36)) and got == REFLECTION_SETTINGS
+          and all(values[i] == v for i, v in want.items())
+          and all(values[i] is not None and abs(f32(values[i]) - v) < 1e-6
+                  for i, v in floats.items()),
+          f"{len(slots)} table slots filled at 0x1005eb10, {len(named)} through 0x1005f390; "
+          + ", ".join(f"{i} {got[i][0] if got[i] else '?'} = "
+                      f"{f32(values[i]) if i in floats and values[i] is not None else values[i]}"
+                      for i in sorted(REFLECTION_SETTINGS)))
+
+    # iron3d.dll hands the ini's keys to group 0x1e, Terrain.dll's page.
+    sends = {
+        "REFLECTIONS": (0x10061450, 0x10061493, b"\x0f\x95\x44\x24\x28", 0x1006171e,
+                        b"\x8a\x4c\x24\x1c", 0x10061736, b"\x66\xc7\x44\x24\x12\x1a\x00"),
+        "EMBOSS_BUMP": (0x100613BA, 0x100613FD, b"\x0f\x95\x44\x24\x2a", 0x10061747,
+                        b"\x8a\x4c\x24\x1e", 0x1006177B, b"\x66\xc7\x44\x24\x16\x19\x00"),
+        "EMBM": (0x100613E8, 0x10061432, b"\x0f\x95\x44\x24\x2b", 0x1006179A,
+                 b"\x8a\x5c\x24\x1f", 0x10061795, b"\x66\x89\x5c\x24\x12"),
+    }
+    sent = {}
+    for key, (push, flag_at, flag, use_at, use, id_at, id_code) in sends.items():
+        pushed = (i_at(push, 1) == b"\x68"
+                  and cstr(i_at, struct.unpack("<I", i_at(push + 1, 4))[0]) == key)
+        sent[key] = pushed and i_at(flag_at, 5) == flag and i_at(use_at, 4) == use \
+            and i_at(id_at, len(id_code)) == id_code
+    group = i_at(0x1006172C, 5) == b"\xbb\x1e\x00\x00\x00"
+    ini = settings.sections(game / "Iron_3D.ini").get("CS", {})
+    check("iron3d.dll: REFLECTIONS, EMBOSS_BUMP and EMBM reach settings 26, 25 and 30",
+          all(sent.values()) and group and ini.get("REFLECTIONS") == "1" and ini.get("EMBM") == "1",
+          f"each key's value becomes a flag (setne) that is sent with group 0x1e and setting "
+          f"0x1a, 0x19 and 0x1e at 0x10061736, 0x1006177b, 0x10061795: {sent}; the ini ships "
+          f"REFLECTIONS={ini.get('REFLECTIONS')} EMBM={ini.get('EMBM')}, so the game runs "
+          f"REFLECTION_SHIFTED")
+
+    # The camera: its two names, the mirror and the clip plane.
+    def word(va: int) -> int:
+        return struct.unpack("<I", t_at(va, 4))[0]
+
+    def pushes(va: int) -> str | None:
+        return cstr(t_at, word(va + 1)) if t_at(va, 1) == b"\x68" else None
+
+    def call_to(va: int) -> int:
+        return (va + 5 + struct.unpack("<i", t_at(va + 1, 4))[0]) & 0xFFFFFFFF
+
+    names = (pushes(0x1001FE75), pushes(0x1001FEC9))
+    camera = call_to(0x1001FE7D) == call_to(0x1001FED1) == 0x100839C0
+    guards = (t_at(0x1001FDE4, 5) == b"\xba\x1a\x00\x00\x00"
+              and t_at(0x1001FE41, 5) == b"\xb8\x1e\x00\x00\x00")
+    mirror = (t_at(0x10083E7D, 7) == b"\x81\x7d\xfc\x00\x00\x80\xbf"
+              and t_at(0x1008435C, 10) == b"\xc7\x85\xe0\xfd\xff\xff\x00\x00\x80\xbf"
+              and t_at(0x10084366, 6) == b"\xd9\x05\x04\xa2\x09\x10"
+              and f32(word(0x1009A204)) == 2.0
+              and t_at(0x100843F7, 6) == b"\xd9\x05\xfc\xa1\x09\x10"
+              and f32(word(0x1009A1FC)) == 0.5)
+    clip = (t_at(0x10084426, 7) == b"\x6a\x01\x68\x98\x00\x00\x00"
+            and t_at(0x10084461, 7) == b"\x6a\x00\x68\x98\x00\x00\x00")
+    check("Terrain.dll: the reflection camera, its mirror and its clip plane",
+          names == ("REFLECTION_SHIFTED", "REFLECTION") and camera and guards and mirror and clip,
+          f"CLandscape::Initialize, under setting 26, pushes {names[0]!r} under setting 30 and "
+          f"{names[1]!r} otherwise into CCamera::CCamera 0x100839c0 ({camera}); the draw at "
+          f"0x10083e20 skips a water level of -1, mirrors with -1 and 2 x h, and brackets the "
+          f"draw with render state 152 (CLIPPLANEENABLE) 1 and 0 about plane z + 0.5 - h "
+          f"({mirror and clip})")
+
+    # The textures: the reflection capped at 256, the bump map 32 square; phase 10.
+    sizes = (t_at(0x100423A0, 7) == b"\x81\x7d\xec\x00\x01\x00\x00"
+             and t_at(0x100425CD, 6) == b"\x66\xc7\x45\xe2\x20\x00")
+    surface = t_at(0x1002CDC3, 10) == b"\xc7\x82\xc8\x00\x00\x00\x0a\x00\x00\x00"
+    bump = (t_at(0x100492C3, 5) == b"\xb9\x21\x00\x00\x00"
+            and struct.unpack("<d", t_at(0x1009B2E8, 8))[0] == 4.0
+            and abs(struct.unpack("<d", t_at(0x1009B2E0, 8))[0] - 3.14159) < 1e-6
+            and call_to(0x100492F6) == 0x1008E160 and call_to(0x10049328) == 0x1008E820)
+    record = struct.unpack_from("<11I", n_at(0x10036A30 + 44 * 16, 44))
+    states = n_at(record[2], 12 * record[3])
+    triples = {(s, k): v for s, k, v in (struct.unpack_from("<3I", states, 12 * i)
+                                         for i in range(record[3]))}
+    bumpenv, modulate, selectarg2, texture, diffuse, current = 22, 4, 3, 2, 0, 1
+    phase = (record[0] == 10 and triples.get((0, 1)) == bumpenv and triples.get((0, 2)) == texture
+             and triples.get((0, 3)) == current and triples.get((1, 1)) == modulate
+             and triples.get((1, 2)) == texture and triples.get((1, 3)) == diffuse
+             and triples.get((1, 4)) == selectarg2 and triples.get((1, 6)) == diffuse)
+    check("Terrain.dll: the water surface is phase 10, BUMPENVMAP then reflection x diffuse",
+          sizes and surface and bump and phase,
+          f"CShade caps the reflection texture at 256 and makes a 32-square bump map "
+          f"({sizes}) of EMBMMaxVal (setting 33) x cos and sin of 4 x 3.14159 (i + j)/32 "
+          f"({bump}); "
+          f"0x1002ca80 sets phase 10 ({surface}); Ngi32.dll's record 16 is phase {record[0]}: "
+          f"stage 0 op {triples.get((0, 1))} (BUMPENVMAP), stage 1 op {triples.get((1, 1))} "
+          f"(MODULATE) of texture and diffuse, alpha op {triples.get((1, 4))} of the diffuse")
+
+    # The water box the texture covers, from Land.msh.
+    boxes = {}
+    for d in gamedir.maps(game):
+        m = landmesh.load(d / "Land.msh")
+        faces = [i for i in range(m.face_count) if m.is_water(i)]
+        if not faces:
+            continue
+        vs = {v for i in faces for v in m.faces[i]}
+        xs = [m.positions[v][0] for v in vs]
+        ys = [m.positions[v][1] for v in vs]
+        boxes[d.name] = (min(xs), min(ys), max(xs), max(ys), m.water_level())
+    tut = boxes.get("Tut_1")
+    texels = sorted(max(b[2] - b[0], b[3] - b[1]) / 256 for b in boxes.values())
+    check("Land.msh: Tut_1's water box is 1095 x 1276, 4.3 x 5.0 units a reflection texel",
+          tut is not None and len(boxes) == 11
+          and [round(v, 1) for v in tut[:4]] == [385.5, 255.8, 1480.5, 1531.7]
+          and round(tut[4], 4) == -1.7255,
+          f"the bounding box of the water faces' vertices on {len(boxes)} maps; Tut_1 "
+          f"{tut and [round(v, 1) for v in tut[:4]]} at h {tut and round(tut[4], 4)}; the "
+          f"texture's larger texel runs from {texels[0]:.2f} to {texels[-1]:.2f} units across "
+          f"the maps")
+
+
 def check_arealmap(check, game: Path) -> None:
     """The navigation mesh, whose layout came out of ArealMap.dll."""
     maps = [d for d in gamedir.maps(game) if (d / "Land.map").exists()]
@@ -14250,7 +14407,8 @@ def run(game: Path) -> int:
     print(f"verifying against {game}\n")
     checks = (
         check_nres, check_texm, check_terrain, check_uv,
-        check_water, check_layers, check_materials, check_material_draw, check_sky,
+        check_water, check_water_reflection, check_layers, check_materials, check_material_draw,
+        check_sky,
         check_render_state, check_minimap_agreement, check_arealmap,
         check_grid, check_missions, check_scale, check_objects, check_poses, check_lod,
         check_damage, check_node_stages,
