@@ -495,16 +495,22 @@ in this order:
 
 - The clock unit of the behaviour takt that times the route reports.
 - How a destroyed or captured unit leaves function 31's list.
-- Where a message's text is drawn and for how long.
-- What `info_system` changes on screen: it makes a history entry kind 4
-  rather than 3.
+- ~~Where a message's text is drawn and for how long.~~ Answered: in the
+  message box at the top, for 20 seconds
+  ([35-hud.md](35-hud.md#the-message-box--read-and-measured)).
+- ~~What `info_system` changes on screen: it makes a history entry kind 4
+  rather than 3.~~ Answered: the box's header, *from: Information assistant*
+  rather than *from: Training assistant*
+  ([35-hud.md](35-hud.md#the-message-box--read-and-measured)).
 - ~~What the game shows after `MISSION_COMPLETE`.~~ A panel in place of the HUD,
   until Esc exits to the menus, which record the win
   ([After the outcome](#after-the-outcome--read-and-measured)). Still open:
   - what the shell's campaign branch (`0x10009c10`) and single-mission branch
     (`0x10009f40`) show, and so what leads to the next mission;
   - which parameter modes 3 and 4 are;
-  - the display's two scale queries that place the panel's text;
+  - ~~the display's two scale queries that place the panel's text~~, answered
+    in [35-hud.md](35-hud.md#how-the-radar-draws--read): the screen's width over
+    640 and its height over 480;
   - who sends the game message 3 that sets the state word to 2.
 - Whether the hero keeps reporting its route while it sits inside a boarded
   bot. The route tests name the hero's id, not the bot's.

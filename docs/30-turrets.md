@@ -620,9 +620,11 @@ test was not read. That a zero cost marks them unbuildable is still a *guess*.
   components on the hero turret are its weapon arms
   ([29-weapons.md](29-weapons.md#the-button-reaches-the-selected-guns)).
 - ~~Whether the engine plays a channel's frames linearly in its value~~ —
-  **read** and **measured**: slerp between even keys. **How the HUD draws the
-  aim point** was not traced. No crosshair object appears in `ui/hq.cfg` or
-  `ui/cursor.cfg` (whose `TARGET` is a hardware cursor, `ui/target_5.ani`).
+  **read** and **measured**: slerp between even keys. ~~How the HUD draws the
+  aim point~~: the reticle widget draws it from page9's art about the screen's
+  middle ([35-hud.md](35-hud.md#the-reticle--read)); no crosshair object
+  appears in `ui/hq.cfg` or `ui/cursor.cfg` (whose `TARGET` is a hardware
+  cursor, `ui/target_5.ani`).
 - What prevents the player from building the six free turrets — **narrowed**:
   five are absent from every player tree and the hero's chassis from every tree
   that holds its turret ([The turrets the player never builds](#the-turrets-the-player-never-builds--measured)).
