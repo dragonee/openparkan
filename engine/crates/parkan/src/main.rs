@@ -6,6 +6,7 @@
 //! parkan [--game DIR] [--mission MISSIONS/…] [--fly]
 //!        [--screenshot OUT.png] [--size WxH] [--top-down] [--look X,Y,Z,TX,TY,TZ]
 //!        [--headless] [--ticks N] [--hold SCAN_W,SCAN_A] [--mouse DX,DY] [--trace] [--sway]
+//!        [--text "…"]
 //! ```
 //!
 //! In the cockpit the hero's own input table drives it: W/S walk, A/D strafe,
@@ -22,6 +23,8 @@
 //!
 //! The hero's view holds the heading it moves along; `--sway` lets it swing with the
 //! gait, ten degrees each way on a run, as the game's does.
+//!
+//! `--text` draws a string in the game font near the top of a `--screenshot`.
 
 mod audio;
 mod camera;
@@ -61,6 +64,8 @@ struct Args {
     trace: bool,
     /// `--sway`: the view swings with the hero's gait, as the game's does.
     sway: bool,
+    /// `--text`: a string a screenshot draws in the game font.
+    text: Option<String>,
     ticks: u32,
     hold: Vec<String>,
     mouse: [f32; 2],
@@ -78,6 +83,7 @@ fn args() -> Result<Args> {
         headless: false,
         trace: false,
         sway: false,
+        text: None,
         ticks: 0,
         hold: Vec::new(),
         mouse: [0.0; 2],
@@ -94,6 +100,7 @@ fn args() -> Result<Args> {
             "--headless" => out.headless = true,
             "--trace" => out.trace = true,
             "--sway" => out.sway = true,
+            "--text" => out.text = Some(value()?),
             "--ticks" => out.ticks = value()?.parse()?,
             "--hold" => out.hold = value()?.split(',').map(str::to_owned).collect(),
             "--mouse" => {
@@ -253,6 +260,16 @@ fn screenshot(loaded: &scene::Loaded, game: &Path, args: &Args, out: &Path) -> R
             scene::place_own_view(&mut renderer, &gpu.queue, v, p);
         }
         renderer.set_hud(&gpu.device, &gpu.queue, &scene::hud(p, aspect));
+    }
+    if let Some(text) = &args.text {
+        use parkan_world::text::{Align, GameFont, TextRun};
+        renderer.set_font(&gpu.device, &gpu.queue, GameFont::open(game)?);
+        let run = TextRun {
+            align: Align::Centre,
+            wrap: Some(width as f32 * 0.6),
+            ..TextRun::new(text, [0.0, 0.8])
+        };
+        renderer.set_text(&gpu.device, &gpu.queue, &[run]);
     }
     let pixels = parkan_render::capture(&gpu, &mut renderer, (width, height), view_proj)?;
     let file = std::io::BufWriter::new(std::fs::File::create(out)?);

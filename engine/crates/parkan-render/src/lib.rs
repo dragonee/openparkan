@@ -15,6 +15,7 @@ pub mod hud;
 pub mod models;
 pub mod sprites;
 pub mod terrain;
+pub mod text;
 pub mod textures;
 
 pub use models::ModelRenderer;
@@ -97,6 +98,7 @@ pub struct Renderer {
     lighting: frame::Lighting,
     dome: Option<(dome::DomeRenderer, Vec<[f32; 3]>)>,
     hud: Option<hud::HudRenderer>,
+    text: Option<text::TextRenderer>,
     sprites: Option<sprites::SpriteRenderer>,
 }
 
@@ -180,6 +182,7 @@ impl Renderer {
             lighting: frame::Lighting::default(),
             dome: None,
             hud: None,
+            text: None,
             sprites: None,
         }
     }
@@ -254,6 +257,33 @@ impl Renderer {
         hud.prepare(device, queue, rects);
     }
 
+    /// Draw text in `font` from now on; until then [`Renderer::set_text`] draws nothing.
+    pub fn set_font(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        font: parkan_world::text::GameFont,
+    ) {
+        self.text = Some(text::TextRenderer::new(device, queue, self.format, font));
+    }
+
+    /// This frame's text, drawn after the HUD.
+    pub fn set_text(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        runs: &[parkan_world::text::TextRun],
+    ) {
+        if let Some(t) = self.text.as_mut() {
+            t.prepare(device, queue, runs);
+        }
+    }
+
+    /// The font text is drawn in, once [`Renderer::set_font`] has given one.
+    pub fn font(&self) -> Option<&parkan_world::text::GameFont> {
+        self.text.as_ref().map(text::TextRenderer::font)
+    }
+
     /// This frame's effect quads.
     pub fn set_sprites(
         &mut self,
@@ -306,6 +336,9 @@ impl Renderer {
         if let Some(objects) = &self.objects {
             objects.prepare(queue, view_proj, &self.lighting);
         }
+        if let Some(text) = &self.text {
+            text.resize(queue, (width, height));
+        }
         // STAND-IN: docs/10-sky.md#the-dome -- what lies below the dome's rim is not
         // read; the frame is cleared to the fog colour, so the horizon meets it.
         let [fr, fg, fb] = self.lighting.fog_colour;
@@ -351,6 +384,9 @@ impl Renderer {
             }
             if let Some(hud) = &self.hud {
                 hud.draw(&mut pass);
+            }
+            if let Some(text) = &self.text {
+                text.draw(&mut pass);
             }
             pass.set_bind_group(0, &self.bind_group, &[]);
             for (pipeline, geometry) in [(&self.lines, &self.grid), (&self.solid, &self.triangles)] {

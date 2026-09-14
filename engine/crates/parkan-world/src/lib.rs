@@ -8,4 +8,5 @@ pub mod play;
 pub mod resources;
 pub mod settings;
 pub mod terrain;
+pub mod text;
 pub mod textures;

@@ -10,7 +10,7 @@ Milestones **M0** to **M5** are in, each with the stand-ins listed below:
 - the NRes, mission, `Texm`, `Material.lib`, wear, `Land.msh`, object mesh,
   `objects.rlb`, `.dat`, controller (`.ctl`), input table (`.tbl`), control
   point (`.cpt`), damage table (`.ndp`), explosion (`.exp`), effect (`FXID`)
-  and atmosphere (`sky.ske`) readers;
+  atmosphere (`sky.ske`), RsLi archive and game font (`gamefont.rlb`) readers;
 - the golden cross-check;
 - a window over Mission 01.
 
@@ -155,7 +155,7 @@ every archive in the install, Mission 01's `data.tma`, `Material.lib`, Tut_1's
 object's parts and their poses) and the 19 meshes they use. From M3 it adds
 every controller and control point list, archive by archive, and the three
 input tables; from M4 every damage table, explosion and effect; from M5 every
-mission's atmosphere: 212 dumps.
+mission's atmosphere, both RsLi archives and the game font: 215 dumps.
 
 ## Stand-ins
 
@@ -208,6 +208,10 @@ a row here. A row leaves this table when research closes it.
 | M4 | The effect manager's random generator | any uniform generator | [11](../docs/11-effects.md#how-an-effect-runs--read) |
 | M5 | How the HUD draws the aim point and the guns | a crosshair at the centre; a slot a gun, lit while selected, with magazine and capacitor bars | [30](../docs/30-turrets.md#not-established) |
 | M5 | How a sound falls off between its near and far distances, and how it is panned | linear in distance; panned by its direction against the eye's right | [11](../docs/11-effects.md#emitter-types--read-and-measured) |
+| M5 | How the game turns a string's characters into the font's glyph indices | ASCII as its own index; Cyrillic by code page 866, where the font draws it (А–Я at 0x80, а–п at 0xA0, р–я at 0xE0); anything else draws `?` | [12](../docs/12-rsli.md#what-is-inside) |
+| M5 | How tall a glyph is drawn and how far apart lines are: a record has no bottom edge | the atlas's row pitch, 18 pixels, for both | [12](../docs/12-rsli.md#what-is-inside) |
+| M5 | How far the pen moves after a glyph: a record's advance is one less than its span, so `l` advances 1 | the advance + 1, the span, on every record; a space, a placeholder, moves 9 | [12](../docs/12-rsli.md#what-is-inside) |
+| M5 | How the game draws its font: its 8-bit blend table and the text's colour | the atlas's brightness as coverage, sampled nearest, tinted by the run's colour and alpha-blended over everything after the HUD | [12](../docs/12-rsli.md#what-is-inside) |
 
 ### Read since the stand-in was written
 

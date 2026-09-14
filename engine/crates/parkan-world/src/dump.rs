@@ -9,7 +9,9 @@ use anyhow::{Context, Result};
 use parkan_formats::mission::{self, Value as PropertyValue};
 use parkan_formats::nres::Archive;
 use parkan_formats::pose::Pose;
-use parkan_formats::{control, controls, cpt, exp, fxid, landmesh, materials, mesh, ndp, sky, texm, wea};
+use parkan_formats::{
+    control, controls, cpt, exp, font, fxid, landmesh, materials, mesh, ndp, rsli, sky, texm, wea,
+};
 
 use crate::assembly;
 use serde_json::{Value, json};
@@ -538,6 +540,59 @@ pub fn atmosphere(path: &Path) -> Result<Value> {
     }))
 }
 
+/// An RsLi archive's header and decrypted directory, one SHA-256 per unpacked member.
+pub fn rsli_archive(path: &Path) -> Result<Value> {
+    let archive = rsli::Archive::open(path)?;
+    let entries = archive
+        .entries
+        .iter()
+        .map(|e| {
+            Ok(json!({
+                "name": e.name,
+                "flags": e.flags,
+                "order": e.order,
+                "size": e.size,
+                "offset": e.offset,
+                "packed": e.packed,
+                "sha256": hex(&archive.read(e)?),
+            }))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    Ok(json!({
+        "kind": "rsli",
+        "presorted": archive.presorted,
+        "total": archive.total,
+        "seed": archive.seed,
+        "entries": entries,
+    }))
+}
+
+/// `gamefont.rlb`: the font's header words and glyph records, its atlas decoded through
+/// the palette, and the palette with its blend table.
+pub fn game_font(path: &Path) -> Result<Value> {
+    let archive = rsli::Archive::open(path)?;
+    let tft = font::parse_font(&archive.read_name("ARIALTEX.TFT")?, "ARIALTEX.TFT")?;
+    let pal = font::parse_palette(&archive.read_name("PAL.PAL")?, "PAL.PAL")?;
+    let atlas = tft.decode_atlas(&pal, "ARIALTEX.TFT")?;
+    let glyphs: Vec<Value> =
+        tft.glyphs.iter().map(|g| json!([number(g.u0), number(g.u1), number(g.v0), g.advance])).collect();
+    Ok(json!({
+        "kind": "font",
+        "header": tft.header,
+        "glyphs": glyphs,
+        "rows": vector(&tft.rows()),
+        "atlas": {
+            "width": atlas.width,
+            "height": atlas.height,
+            "format": atlas.format,
+            "mips": atlas.mips,
+            "rgba_sha256": hex(&atlas.levels[0]),
+        },
+        "palette": (0..=255u8).map(|i| json!(pal.colour(i))).collect::<Vec<_>>(),
+        "blend_sha256": hex(&pal.blend),
+    }))
+}
+
 /// A `.tbl`: every row, and the numbers the engine resolves its names to.
 pub fn input_table(path: &Path) -> Result<Value> {
     let rows = controls::load(path)?;
@@ -657,8 +712,10 @@ pub fn dump(kind: &str, path: &Path, names: &[String]) -> Result<Value> {
         "cfg" => cfg_file(path),
         "strings" => pe_strings(path),
         "progression" => progression(path),
+        "rsli" => rsli_archive(path),
+        "font" => game_font(path),
         other => anyhow::bail!(
-            "unknown kind {other:?}; expected nres, mission, texm, materials, landmesh, mesh, assembly, control, controls, cpt, ndp, exp, fxid, sky, cfg, strings or progression"
+            "unknown kind {other:?}; expected nres, mission, texm, materials, landmesh, mesh, assembly, control, controls, cpt, ndp, exp, fxid, sky, cfg, strings, progression, rsli or font"
         ),
     }
 }

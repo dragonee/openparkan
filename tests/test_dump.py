@@ -100,3 +100,27 @@ def test_an_atmosphere_dumps_its_keyframes(tmp_path):
     assert (out["day_seconds"], k["hour"], k["minute"], k["name"], k["opcode"]) == (900, 12, 30, "sun", 0)
     assert k["slots"][1] == [4, 5, 6, 7]
     assert out["start"][3:5] == [1, 30]
+
+
+def test_an_rsli_archive_dumps_its_decrypted_directory(tmp_path):
+    import struct
+
+    from openparkan import rsli
+
+    payload = b"xyz"
+    record = bytearray(rsli.ENTRY_SIZE)
+    record[:5] = b"A.BIN"
+    struct.pack_into("<2h3I", record, 0x10, rsli.STORE_RAW, 0, 3,
+                     rsli.HEADER_SIZE + rsli.ENTRY_SIZE, len(payload))
+    header = bytearray(rsli.HEADER_SIZE)
+    header[:4] = b"NL\x00\x01"
+    struct.pack_into("<2h", header, 4, 1, 1)
+    struct.pack_into("<2I", header, 0x10, 3, 0x5A5A)
+    path = tmp_path / "t.lib"
+    path.write_bytes(bytes(header) + rsli.decrypt_table(bytes(record), 0x5A5A) + payload)
+    out = dump.rsli_archive(path)
+    assert out["kind"] == "rsli" and out["seed"] == 0x5A5A
+    (entry,) = out["entries"]
+    assert entry["name"] == "A.BIN" and entry["size"] == 3
+    assert entry["sha256"] == hashlib.sha256(b"xyz").hexdigest()
+    json.dumps(out)

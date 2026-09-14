@@ -398,3 +398,22 @@ fn the_heros_eye_swings_with_the_run_but_never_lunges_and_holds_steady_when_aske
     assert!(swing.to_degrees() < 0.5, "the steady view still swings {} degrees", swing.to_degrees());
     assert!(reach < 1.0, "the steady eye stands {reach} m out from the body");
 }
+
+#[test]
+#[ignore = "needs the game install"]
+fn the_game_font_opens_and_lays_out_a_line() {
+    use parkan_world::text::{GameFont, TextRun};
+
+    let game = gamedir::find(None).expect("a Parkan install: set PARKAN_DIR");
+    let font = GameFont::open(&game).unwrap();
+    // A 128 × 128 atlas of seven rows 18 pixels apart (docs/12).
+    assert_eq!((font.width, font.height), (128, 128));
+    assert_eq!(font.atlas.len(), 128 * 128 * 4);
+    assert_eq!(font.line_height, 18.0);
+    let run = TextRun::new("Objective is completed", [0.0, 0.0]);
+    let placed = font.layout(&run);
+    assert_eq!(placed.len(), "Objectiveiscompleted".len(), "every letter is drawn, no space is");
+    let width = font.width(&run);
+    assert!(width > 100.0 && width < 300.0, "the line is {width} pixels");
+    assert!(placed.windows(2).all(|w| w[1].at[0] > w[0].at[0]), "the pen only moves right");
+}

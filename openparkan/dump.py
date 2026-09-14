@@ -25,12 +25,14 @@ from . import (
     control,
     controls,
     effects,
+    font,
     gamedir,
     landmesh,
     materials,
     mission,
     objects,
     resources,
+    rsli,
     sky,
 )
 from . import mesh as objmesh
@@ -557,6 +559,42 @@ def progression(path: Path, names: list[str] | None = None) -> dict:
     return out
 
 
+def rsli_archive(path: Path, names: list[str] | None = None) -> dict:
+    """An RsLi archive's header and decrypted directory, one SHA-256 per unpacked member."""
+    archive = rsli.RsLiArchive.open(path)
+    return {
+        "kind": "rsli",
+        "presorted": archive.presorted,
+        "total": archive.total,
+        "seed": archive.seed,
+        "entries": [
+            {"name": e.name, "flags": e.flags, "order": e.order, "size": e.size,
+             "offset": e.offset, "packed": e.packed,
+             "sha256": hashlib.sha256(archive.read(e)).hexdigest()}
+            for e in archive
+        ],
+    }
+
+
+def game_font(path: Path, names: list[str] | None = None) -> dict:
+    """``gamefont.rlb``: the font's header words and glyph records, its atlas decoded
+    through the palette, and the palette with its blend table."""
+    archive = rsli.RsLiArchive.open(path)
+    tft = font.parse_font(archive.read_name("ARIALTEX.TFT"))
+    pal = font.parse_palette(archive.read_name("PAL.PAL"))
+    atlas = textures.decode(tft.atlas, palette=pal.raw)
+    return {
+        "kind": "font",
+        "header": list(struct.unpack_from("<4i", tft.header, 4)),
+        "glyphs": [[number(g.u0), number(g.u1), number(g.v0), g.advance] for g in tft.glyphs],
+        "rows": vector(tft.rows),
+        "atlas": {"width": atlas.width, "height": atlas.height, "format": atlas.fmt,
+                  "mips": atlas.mips, "rgba_sha256": hashlib.sha256(atlas.rgba).hexdigest()},
+        "palette": [list(c) for c in pal.colours],
+        "blend_sha256": hashlib.sha256(pal.blend).hexdigest(),
+    }
+
+
 def _nres(path: Path, names: list[str] | None = None) -> dict:
     return nres(path)
 
@@ -570,4 +608,5 @@ KINDS = {"nres": _nres, "mission": _mission, "texm": texm, "materials": material
          "landmesh": land_mesh, "mesh": object_mesh, "assembly": mission_assembly,
          "control": controllers, "controls": input_table, "cpt": control_points,
          "ndp": damage_tables, "exp": explosions, "fxid": fx_effects,
-         "sky": atmosphere, "cfg": cfg_file, "strings": pe_strings, "progression": progression}
+         "sky": atmosphere, "cfg": cfg_file, "strings": pe_strings, "progression": progression,
+         "rsli": rsli_archive, "font": game_font}
