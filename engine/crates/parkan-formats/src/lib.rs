@@ -23,6 +23,7 @@ pub mod objects;
 pub mod pose;
 pub mod resources;
 pub mod rsli;
+pub mod scr;
 pub mod sky;
 pub mod texm;
 pub mod wea;

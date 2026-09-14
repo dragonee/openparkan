@@ -548,7 +548,11 @@ def variables(game: Path) -> list[Variable]:
     lines and the trailing ``;`` some declarations carry are both tolerated;
     dropping either would shift every index after it.
     """
-    path = game / "MISSIONS" / "SCRIPTS" / VARSET
+    return variables_file(game / "MISSIONS" / "SCRIPTS" / VARSET)
+
+
+def variables_file(path: Path) -> list[Variable]:
+    """Read the declarations of the ``varset.var`` at ``path``; see ``variables``."""
     out: list[Variable] = []
     for line in path.read_text("latin-1").replace("\r\n", "\n").split("\n"):
         body = "" if line.lstrip().startswith("//") else line.split("//")[0]

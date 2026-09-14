@@ -14,7 +14,18 @@ import subprocess
 from collections.abc import Iterator
 from pathlib import Path
 
-from . import assembly, control, controls, dump, gamedir, landmesh, materials, mission, rsli
+from . import (
+    assembly,
+    behaviour,
+    control,
+    controls,
+    dump,
+    gamedir,
+    landmesh,
+    materials,
+    mission,
+    rsli,
+)
 from .nres import NResArchive, is_nres
 
 #: How far two floats may differ, absolutely or relative to their size.
@@ -90,7 +101,8 @@ def targets(game: Path) -> list[tuple[str, Path, list[str]]]:
     every control point list and the three input tables.  M4: every damage
     table, explosion and effect.  M5: every mission's atmosphere, every RsLi archive
     and the game font.  Progression: every ``.cfg``, the text and interface string
-    tables, and each mission's objectives, messages and ambient sound resolved.
+    tables, each mission's objectives, messages and ambient sound resolved, every
+    behaviour script, its formulas, and ``varset.var``.
     """
     archives = sorted(p for p in game.rglob("*") if p.is_file() and is_nres(p))
     return ([("nres", p, []) for p in archives]
@@ -114,7 +126,10 @@ def targets(game: Path) -> list[tuple[str, Path, list[str]]]:
             + [("progression", d, []) for d in gamedir.missions(game)
                if (d / "mission.cfg").is_file()]
             + [("rsli", p, []) for p in sorted(game.rglob("*")) if p.is_file() and rsli.is_rsli(p)]
-            + [("font", game / "gamefont.rlb", [])])
+            + [("font", game / "gamefont.rlb", [])]
+            + [("scr", p, []) for p in behaviour.scripts(game)]
+            + [("fml", p.with_suffix(behaviour.FORMULAS), []) for p in behaviour.scripts(game)]
+            + [("varset", game / "MISSIONS" / "SCRIPTS" / behaviour.VARSET, [])])
 
 
 def engine_dump(engine: Path, kind: str, path: Path, names: list[str] | None = None) -> dict:

@@ -9,8 +9,9 @@ Milestones **M0** to **M5** are in, each with the stand-ins listed below:
 - the workspace;
 - the NRes, mission, `Texm`, `Material.lib`, wear, `Land.msh`, object mesh,
   `objects.rlb`, `.dat`, controller (`.ctl`), input table (`.tbl`), control
-  point (`.cpt`), damage table (`.ndp`), explosion (`.exp`), effect (`FXID`)
-  atmosphere (`sky.ske`), RsLi archive and game font (`gamefont.rlb`) readers;
+  point (`.cpt`), damage table (`.ndp`), explosion (`.exp`), effect (`FXID`),
+  atmosphere (`sky.ske`), RsLi archive and game font (`gamefont.rlb`), behaviour
+  script (`.scr`), formula (`.fml`) and variable table (`varset.var`) readers;
 - the golden cross-check;
 - a window over Mission 01.
 
@@ -156,8 +157,9 @@ object's parts and their poses) and the 19 meshes they use. From M3 it adds
 every controller and control point list, archive by archive, and the three
 input tables; from M4 every damage table, explosion and effect; from M5 every
 mission's atmosphere, both RsLi archives and the game font; from M6 every
-`.cfg`, the text and interface string tables, and each mission's objectives,
-messages and ambient sound resolved: 319 dumps.
+`.cfg`, the text and interface string tables, each mission's objectives,
+messages and ambient sound resolved, and every behaviour script, its formulas
+and `varset.var`: 436 dumps.
 
 ## Stand-ins
 
@@ -214,6 +216,9 @@ a row here. A row leaves this table when research closes it.
 | M5 | How tall a glyph is drawn and how far apart lines are: a record has no bottom edge | the atlas's row pitch, 18 pixels, for both | [12](../docs/12-rsli.md#what-is-inside) |
 | M5 | How far the pen moves after a glyph: a record's advance is one less than its span, so `l` advances 1 | the advance + 1, the span, on every record; a space, a placeholder, moves 9 | [12](../docs/12-rsli.md#what-is-inside) |
 | M5 | How the game draws its font: its 8-bit blend table and the text's colour | the atlas's brightness as coverage, sampled nearest, tinted by the run's colour and alpha-blended over everything after the HUD | [12](../docs/12-rsli.md#what-is-inside) |
+| M6 | How the loader turns a `varset.var` default into a value | an integer type reads hex after `0x`, a decimal, or a float truncated; a float reads its decimal; anything else is 0 (every shipped default reads either way) | [15](../docs/15-behaviour.md#the-vocabulary-varsetvar) |
+| M6 | The formula parser and evaluator, beyond the operator table's priorities | parse by those priorities, left to right among equals, in doubles; `!` is 1 for 0, `&` and `\|` are logical, `N` holds to 0..1, `S` is the sign, `B` is 1 for non-zero, `A` the absolute value; an unknown name is refused (the shipped formulas use numbers, variables, `+ - *` and brackets) | [15](../docs/15-behaviour.md#a-statement) |
+| M6 | What a node naming a variable, operand, formula or handler that does not exist reads | the node does nothing; a switch to no handler ends the run; a run stops after a million nodes | [15](../docs/15-behaviour.md#how-a-handler-runs) |
 
 ### Read since the stand-in was written
 

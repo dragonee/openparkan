@@ -124,3 +124,25 @@ def test_an_rsli_archive_dumps_its_decrypted_directory(tmp_path):
     assert entry["name"] == "A.BIN" and entry["size"] == 3
     assert entry["sha256"] == hashlib.sha256(b"xyz").hexdigest()
     json.dumps(out)
+
+
+def test_a_script_its_formulas_and_the_variable_table_dump_as_stored(tmp_path):
+    import struct
+
+    node = struct.pack("<6i", 19, -1, -1, -1, 6, 3) + struct.pack("<3i", 224, 225, 226) \
+        + struct.pack("<i", -1)
+    scr = tmp_path / "t.scr"
+    scr.write_bytes(struct.pack("<ii", 73, 1) + struct.pack("<i", 4) + b"Init" + b"\0"
+                    + struct.pack("<ii", 0, 1) + node)
+    fml = tmp_path / "t.fml"
+    fml.write_bytes(b"//FormulaSet export file\r\n\r\nFUNCTION( , 20 + 55*fDifficulty,  )\r\n")
+    var = tmp_path / "varset.var"
+    var.write_bytes(b"//VAR( Type, Name, DefValue)\r\nVAR( DWORD, ERROR,\t0xffffffff);\t// all\r\n")
+
+    (handler,) = dump.script(scr)["handlers"]
+    assert handler["nodes"] == [{"head": [19, -1, -1, -1], "opcode": 6,
+                                 "operands": [224, 225, 226], "trailer": -1}]
+    assert dump.formula_set(fml)["formulas"] == ["20 + 55*fDifficulty"]
+    assert dump.variable_table(var)["variables"] == [
+        {"kind": "VAR", "type": "DWORD", "name": "ERROR", "default": "0xffffffff"}]
+    assert {"scr", "fml", "varset"} <= set(dump.KINDS)

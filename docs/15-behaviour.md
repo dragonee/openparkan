@@ -349,6 +349,44 @@ answer in the result slot, and the executor sets the destination through the
 float setter when the destination is a float and the `DWORD` setter otherwise
 (`0x100122e5`). A handler returning a float leaves its bits.
 
+### Values, one type into another — *read*
+
+What an engine running the scripts has to reproduce, value by value:
+
+- **The getters.** As a float (`0x10013190`): an `int` signed, a `DWORD`
+  unsigned (`fild qword` of the zero-extended word), a `BOOL` 1.0 or 0.0, a
+  float as it is. As a `DWORD` (`0x10013570`): an `int` or `DWORD` as it is, a
+  `BOOL` 0 or 1, a float truncated toward zero by `_ftol`.
+- **The setters.** From a float (`0x10013650`, typed at `0x10012c00`): an
+  `int` or `DWORD` takes it truncated by `_ftol`, a `BOOL` 1 unless it compares
+  equal to 0.0. From a `DWORD` (`0x10013770`, typed at `0x10012fe0`): an `int`
+  or `DWORD` takes the word, a `BOOL` 0 or 1, a float the word unsigned.
+- **The result slot is four bytes, written two ways.** A call's destination
+  that is a float takes the slot's bits *as a float*; any other type takes the
+  slot through the `DWORD` setter (`0x100122ea`). A constant goes the other way
+  round: a `DWORD` destination takes it through the `DWORD` setter, any other
+  its bits through the float setter (`0x100121f7`).
+- **A copy is whole.** `dest = variable` is the variable record's assignment
+  (`0x10013a80`): the destination takes the source's type along with its
+  value.
+- **An `if` on floats is the x87's.** An unordered pair passes `<`, `==` and
+  `<=` and fails `>`, `>=` and `!=` (`0x1001211a`–`0x1001218b`). A relation
+  outside 0..5 fails.
+- **A kind outside −1..6** runs as a statement with no condition test: the
+  executor's bounds check jumps past the test (`0x10012032` to `0x100122b5`).
+- **A switch** leaves the running node at `0xfffffe`. The step after it makes
+  `0xffffff`, which ends the handler (`0x10011ffd`), and a handler that ends on
+  `0xffffff` is run again from node 0 as whichever handler is now current
+  (`0x10011f2f`). So a goto to node `0xffffff` would restart its own handler.
+- **The condition bytes are not bounded.** An `if` writes the byte at the
+  current depth without checking it against the 32 the SuperAI reserves; the
+  shipped scripts nest five deep.
+- **The formula evaluator's operator table** (`0x10037c90`) is 13 records of a
+  256-byte name, then arity, symbol, a flag and a priority: `+` `-` `|` 1,
+  `*` `/` `&` 2, `^` 3, the unary `-` and `!` 1, and the one-letter `N`, `S`,
+  `B`, `A` 100, flagged. How the parser uses the priorities, and what the
+  flagged four compute, is not read.
+
 ### What the functions do
 
 Named from their code — each line is what the handler does, one call deep —

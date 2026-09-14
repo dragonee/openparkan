@@ -10,7 +10,7 @@ use parkan_formats::mission::{self, Value as PropertyValue};
 use parkan_formats::nres::Archive;
 use parkan_formats::pose::Pose;
 use parkan_formats::{
-    control, controls, cpt, exp, font, fxid, landmesh, materials, mesh, ndp, rsli, sky, texm, wea,
+    control, controls, cpt, exp, font, fxid, landmesh, materials, mesh, ndp, rsli, scr, sky, texm, wea,
 };
 
 use crate::assembly;
@@ -691,6 +691,45 @@ pub fn progression(path: &Path) -> Result<Value> {
     }))
 }
 
+/// A `.scr`: every handler and every node's words, as stored.
+pub fn script(path: &Path) -> Result<Value> {
+    let s = scr::parse(&std::fs::read(path)?, &path.display().to_string())?;
+    Ok(json!({
+        "kind": "scr",
+        "magic": s.magic,
+        "handlers": s.handlers.iter().map(|h| json!({
+            "name": h.name,
+            "index": h.index,
+            "nodes": h.nodes.iter().map(|n| json!({
+                "head": n.head,
+                "opcode": n.opcode,
+                "operands": n.operands,
+                "trailer": n.trailer,
+            })).collect::<Vec<_>>(),
+        })).collect::<Vec<_>>(),
+    }))
+}
+
+/// A `varset.var`: every declaration in order, its default as written.
+pub fn variable_table(path: &Path) -> Result<Value> {
+    let variables = scr::parse_variables(&std::fs::read(path)?, &path.display().to_string())?;
+    Ok(json!({
+        "kind": "varset",
+        "variables": variables.iter().map(|v| json!({
+            "kind": v.kind,
+            "type": v.type_name,
+            "name": v.name,
+            "default": v.default,
+        })).collect::<Vec<_>>(),
+    }))
+}
+
+/// A `.fml`: its expressions in order.
+pub fn formula_set(path: &Path) -> Result<Value> {
+    let formulas = scr::parse_formulas(&std::fs::read(path)?, &path.display().to_string())?;
+    Ok(json!({ "kind": "fml", "formulas": formulas }))
+}
+
 /// Dump `path` as `kind`; `names` narrows a `texm` dump to those textures.
 pub fn dump(kind: &str, path: &Path, names: &[String]) -> Result<Value> {
     match kind {
@@ -714,8 +753,11 @@ pub fn dump(kind: &str, path: &Path, names: &[String]) -> Result<Value> {
         "progression" => progression(path),
         "rsli" => rsli_archive(path),
         "font" => game_font(path),
+        "scr" => script(path),
+        "varset" => variable_table(path),
+        "fml" => formula_set(path),
         other => anyhow::bail!(
-            "unknown kind {other:?}; expected nres, mission, texm, materials, landmesh, mesh, assembly, control, controls, cpt, ndp, exp, fxid, sky, cfg, strings, progression, rsli or font"
+            "unknown kind {other:?}; expected nres, mission, texm, materials, landmesh, mesh, assembly, control, controls, cpt, ndp, exp, fxid, sky, cfg, strings, progression, rsli, font, scr, varset or fml"
         ),
     }
 }

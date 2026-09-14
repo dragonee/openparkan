@@ -21,6 +21,7 @@ from pathlib import Path
 
 from . import (
     assembly,
+    behaviour,
     briefing,
     control,
     controls,
@@ -595,6 +596,35 @@ def game_font(path: Path, names: list[str] | None = None) -> dict:
     }
 
 
+def script(path: Path, names: list[str] | None = None) -> dict:
+    """A ``.scr``: every handler and every node's words, as stored."""
+    s = behaviour.read(path)
+    return {
+        "kind": "scr",
+        "magic": s.magic,
+        "handlers": [
+            {"name": h.name, "index": h.index,
+             "nodes": [{"head": list(n.head), "opcode": n.opcode, "operands": list(n.operands),
+                        "trailer": n.trailer} for n in h.nodes]}
+            for h in s.handlers
+        ],
+    }
+
+
+def variable_table(path: Path, names: list[str] | None = None) -> dict:
+    """A ``varset.var``: every declaration in order, its default as written."""
+    return {
+        "kind": "varset",
+        "variables": [{"kind": v.kind, "type": v.type, "name": v.name, "default": v.default}
+                      for v in behaviour.variables_file(path)],
+    }
+
+
+def formula_set(path: Path, names: list[str] | None = None) -> dict:
+    """A ``.fml``: its expressions in order."""
+    return {"kind": "fml", "formulas": behaviour.formulas(path)}
+
+
 def _nres(path: Path, names: list[str] | None = None) -> dict:
     return nres(path)
 
@@ -609,4 +639,5 @@ KINDS = {"nres": _nres, "mission": _mission, "texm": texm, "materials": material
          "control": controllers, "controls": input_table, "cpt": control_points,
          "ndp": damage_tables, "exp": explosions, "fxid": fx_effects,
          "sky": atmosphere, "cfg": cfg_file, "strings": pe_strings, "progression": progression,
-         "rsli": rsli_archive, "font": game_font}
+         "rsli": rsli_archive, "font": game_font, "scr": script, "varset": variable_table,
+         "fml": formula_set}

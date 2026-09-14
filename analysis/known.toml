@@ -15765,3 +15765,51 @@ kind = "site"
 name = "gun stroke start: state 3 and the lock back to value 9"
 doc = "docs/29-weapons.md"
 read = true
+
+[[entry]]
+module = "ai.dll"
+at = "0x10012c00"
+kind = "function"
+name = "a variable set from a float by its type: _ftol into int and DWORD, != 0.0 into BOOL"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x10012fe0"
+kind = "function"
+name = "a variable set from a DWORD by its type: unsigned into a float, != 0 into BOOL"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x10013a80"
+kind = "function"
+name = "variable record assignment: the destination takes the source's type and value"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x100036e0"
+kind = "function"
+name = "a variable's type tag"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x100122b5"
+kind = "site"
+name = "statement without the condition test: where a kind outside -1..6 lands"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x100122ea"
+kind = "site"
+name = "a call's result: a float destination takes the slot's bits as a float, others as a DWORD"
+read = true
+doc = "docs/15-behaviour.md"
