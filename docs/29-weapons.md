@@ -554,16 +554,30 @@ at the muzzle, and not at all beyond it (*derived*).
     frame.
 - **The `_sfx` follow the arms** (*measured*). The four are bound to nodes 11,
   7, 19 and 15, the first channel of each arm, and each is one `H_gh_*.wav`
-  audible from 2 to 20 m in the window 0.15 to 1. They are the arms' own sounds
-  as they unfold, not the shots'.
+  audible from 2 to 20 m, a one-shot with its trigger at 0.15. They are the
+  arms' own sounds, not the shots'.
+- **An arm sounds both ways** (*derived*). The arm channels carry no flag, so
+  the node's value is the channel's: 0 folded, exactly 1 out, since an arm's
+  progress ends on its end value and its channels head for it
+  ([above](#the-button-reaches-the-selected-guns)). A one-shot sound plays as
+  its time crosses the trigger going up, and takes a time of exactly 1 as 0
+  ([11-effects.md](11-effects.md#type-2-is-a-sound--read-and-measured)). So
+  `H_gh_*.wav` plays **as a gun is selected**, when its arm passes 0.15 on the
+  way out, and **again as it is deselected**, on the first update after the
+  arm leaves 1. An arm folded before it was all the way out stays silent.
+- **Selecting a gun also calls the game** (*read*): after the arm's state 1,
+  `World3D.dll`'s toggle calls the callback its host handed it with (0, `0xe`)
+  (`0x10010805`, the pointer at `0x1013b59c`, set at `0x10013ec2`).
+  Deselecting does not. What the host does with `0xe` is not traced;
+  `ui/game_resources.cfg` binds no weapon-selection sound (*measured*).
 - **The missiles** have no barrel effect. Their launch is the round's own
   `hero_gunfire_missile` (mode 1, 5 s, `H_fire_missile.wav` in its first
   tenth).
 - **The rounds' own effects** start when the round loads: `hero_cannon_bullet`,
   `hero_prifle_bulletA`/`B`, `hero_laser_bullet`, and the missile's engine,
   smoke and `hero_gunfire_missile`.
-- How a sound emitter behaves across its window, once or looping, belongs to
-  [11-effects.md](11-effects.md#not-resolved).
+- How a sound emitter behaves across its window, once or looping, is
+  [read in 11-effects.md](11-effects.md#type-2-is-a-sound--read-and-measured).
 
 ## Energy or clips — *measured*
 
@@ -836,3 +850,7 @@ The enemy variants and the huge guns:
   target from unguided guns only in `0x200`, so whether an AI unit's cannon
   keeps a range gate depends on the state `Behavior.dll` sends (`0x200` or
   `0x400`, [32-builder.md](32-builder.md)); not followed.
+- What the host does with the (0, `0xe`) call `World3D.dll` makes when a gun
+  is selected (`0x10010805`), and whether an arm's channel meets exactly 1 in
+  the arm's own channel update, which the arm sounds depend on (the turret
+  update's step, `0x100289f0`, is read; the base component's is not).

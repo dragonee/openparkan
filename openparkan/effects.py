@@ -222,8 +222,8 @@ TIME_POINT_FALLING = 17
 TIME_MODES = 18
 
 #: Emitter type -> where the ``(low, high)`` span of effect time it is active
-#: in sits.  Outside it the emitter does nothing.  Type 2, the sound, plays
-#: once when *t* crosses its low value.
+#: in sits.  Outside it the emitter does nothing.  Type 2, the sound, is a
+#: one-shot at its low value or a loop inside the span, by ``SOUND_MODE_AT``.
 WINDOW_AT = {1: 8, 2: 8, 3: 32, 4: 32, 5: 12, 7: 20, 8: 16, 9: 32, 10: 20}
 
 #: The 60 bytes before an effect's first emitter block.
@@ -247,6 +247,12 @@ RESOURCE_AT = {2: 84, 3: 136, 4: 136, 5: 48, 7: 144, 8: 184, 9: 136, 10: 144}
 
 #: The one emitter type that plays a sound rather than drawing something.
 EMITTER_SOUND = 2
+#: A sound block's +4: 2 or 3 make it a **loop** that plays while effect time
+#: is inside its window (``Effect.dll:0x10012d3e``, ``0x10012fca``); anything
+#: else a **one-shot** that plays as time crosses +8 going up, a time of exactly
+#: 1.0 counting as 0 (``0x10012f2d``).
+SOUND_MODE_AT = 4
+SOUND_LOOPS = (2, 3)
 
 #: Bit 8 of the type word.  Set on 1811 of the 4737 emitters, all of them
 #: sprites or particles (types 3, 4, 7, 8 and 9).  It asks the instance to test
@@ -443,6 +449,12 @@ class Emitter:
     @property
     def is_sound(self) -> bool:
         return self.kind == EMITTER_SOUND
+
+    @property
+    def sound_loops(self) -> bool:
+        """Whether a sound plays over its whole window rather than once at +8."""
+        mode = struct.unpack_from("<I", self.body, SOUND_MODE_AT)[0] if len(self.body) >= 8 else 0
+        return self.is_sound and mode in SOUND_LOOPS
 
     @property
     def flagged(self) -> bool:

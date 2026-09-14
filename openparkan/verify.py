@@ -5882,6 +5882,159 @@ def check_effect_timing(check, game: Path) -> None:
           f"0x100114fd reads its class, so slot 6, {effects.SURFACE_TAGS[5]!r}, plays")
 
 
+def _planted_steps(c: control.Controller, m, points, order: list[int]) -> tuple[list, float]:
+    """The footsteps a state sequence sounds, and the closest a foot comes to 0.1.
+
+    A contact is planted in a state when its point, at pair B's last frame, lies
+    within ``PLANTED_WITHIN`` of its height in the rest pose (``0x1001a2d5``); a
+    step is a planted state after one that was not (``0x1001b08f``).
+    """
+    def height(point: int, frame: float) -> float:
+        p = points[point]
+        node = p.nodes[0]
+        pose = m.blended_pose(node, frame, frame, 1.0)
+        parent = m.nodes[node].parent
+        while parent != objmesh.NO_PARENT and parent < len(m.nodes):
+            pose = objmesh.compose(m.blended_pose(parent, frame, frame, 1.0), pose)
+            parent = m.nodes[parent].parent
+        return objmesh.apply(pose, p.position)[2]
+
+    def rest_height(point: int) -> float:
+        return objmesh.apply(m.world_pose(points[point].nodes[0]), points[point].position)[2]
+
+    rest = {k.point: rest_height(k.point) for k in c.states[order[0]].contacts}
+    was: dict[int, bool | None] = dict.fromkeys(rest)
+    steps, nearest = [], math.inf
+    for s in order + order[:1]:
+        for k in c.states[s].contacts:
+            gap = abs(height(k.point, c.states[s].pair_b[1]) - rest[k.point])
+            nearest = min(nearest, abs(gap - control.PLANTED_WITHIN))
+            planted = gap < control.PLANTED_WITHIN
+            if planted and was[k.point] is False:
+                steps.append((s, k.point))
+            was[k.point] = planted
+    return steps, nearest
+
+
+def check_sounds(check, game: Path) -> None:
+    """Sound emitters, the gun arms' sounds and the hero's footsteps."""
+    library = effects.EffectLibrary(game / "effects.rlb")
+    modes: Counter[int] = Counter()
+    for fx in library:
+        for e in fx.emitters:
+            if e.is_sound:
+                modes[struct.unpack_from("<I", e.body, effects.SOUND_MODE_AT)[0]] += 1
+    sfx = [library.get(f"hero_{g}_sfx") for g in ("cannon", "prifle", "redlaser", "missile")]
+    breath = library.get("hero_breath")
+    breath_sound = next((e for e in breath.emitters if e.is_sound), None) if breath else None
+    steps = [fx for fx in library if fx.name.lower().startswith("step_")]
+    step_shape = Counter((fx.mode, fx.duration, len(fx.emitters), fx.emitters[0].is_sound,
+                          fx.emitters[0].sound_loops, fx.emitters[0].window) for fx in steps)
+    arms_one_shot = all(fx and fx.mode == effects.TIME_POINT and len(fx.emitters) == 1
+                        and fx.emitters[0].is_sound and not fx.emitters[0].sound_loops
+                        and abs(fx.emitters[0].window[0] - 0.15) < 1e-6 for fx in sfx)
+    check("FXID: a sound is a one-shot at +8, or a loop over its window when +4 is 2 or 3",
+          sum(modes.values()) == 517 and modes[0] == 411 and modes[2] == 106
+          and set(modes) == {0, 2} and arms_one_shot and len(steps) == 9
+          and all(not fx.emitters[0].sound_loops for fx in steps)
+          and breath_sound is not None and breath_sound.sound_loops
+          and breath_sound.audible_range == (1.0, 4.0),
+          f"+4 over the {sum(modes.values())} sound emitters: {dict(sorted(modes.items()))} "
+          f"(Effect.dll:0x10012d3e keeps 2 or 3 as the loop byte); the four hero arm sounds "
+          f"are time-mode-4 one-shots at 0.15: {arms_one_shot}; all {len(steps)} step_* "
+          f"effects are one-shots; hero_breath's H_breath.wav loops, audible "
+          f"{breath_sound.audible_range if breath_sound else None}")
+    check("FXID: every step_* effect is 0.5 s of one one-shot sound with its trigger at 0.1",
+          len(step_shape) == 1 and next(iter(step_shape))[:5] == (effects.TIME_MANUAL, 0.5, 1, True,
+                                                                  False)
+          and all(abs(a - b) < 1e-6
+                  for a, b in zip(next(iter(step_shape))[5], (0.1, 0.9), strict=True)),
+          f"{dict(step_shape)} (mode, duration, emitters, sound, loops, window) over "
+          f"{sorted(fx.name for fx in steps)}")
+
+    names = frozenset(p.name.lower() for p in all_archives(game))
+    turrets = NResArchive.open(game / "turrets.rlb")
+    turret = control.parse(turrets.read_name("o_tur_ht_02.ctl"), names)
+    arm_nodes = {11, 7, 19, 15}
+    arm_channels = [ch for ch in turret.channels if ch.node in arm_nodes and ch.first == 42.0]
+    check(".ctl: the hero's arm channels carry no flag, so their nodes' values run 0 to 1",
+          len(arm_channels) == 4 and all(ch.flags == 0 and ch.last == 48.0 for ch in arm_channels),
+          f"channels on nodes {sorted(ch.node for ch in arm_channels)}, frames 42-48, flags "
+          f"{[ch.flags for ch in arm_channels]}: the nodes the four _sfx effects take their "
+          f"time from (docs/29)")
+
+    cfg = game / "ui" / "game_resources.cfg"
+    bound = [k for d in resources.descriptors(cfg) for k in d.bindings] if cfg.is_file() else []
+    weapon_sel = [k for k in bound if "WEAP" in k.upper() and "SEL" in k.upper()]
+    check("ui/game_resources.cfg binds no weapon-selection sound",
+          bound and not weapon_sel and "TARGET_SELECTED" in bound,
+          f"{len(bound)} bindings; weapon and select together: {weapon_sel}; weapon voices "
+          f"{[k for k in bound if 'WEAP' in k.upper()]}")
+
+    # Action 3's v4 is a node; the hero's step groups.
+    node_ok = past_cpt = total = 0
+    contact_groups: Counter[tuple] = Counter()
+    for arcname in ("bases.rlb", "animals.rlb", "static.rlb", "turrets.rlb", "fortif.rlb",
+                    "parts.rlb"):
+        path = game / arcname
+        if not path.is_file():
+            continue
+        arc = NResArchive.open(path)
+        entries = {e.name.lower(): e for e in arc}
+        for name, entry in entries.items():
+            if not name.endswith(".ctl") or name[:-4] + ".msh" not in entries:
+                continue
+            try:
+                c = control.parse(arc.read(entry), names)
+            except control.ControlFormatError:
+                continue
+            for s in c.states:
+                for k in s.contacts:
+                    if k.group >= 0:
+                        contact_groups[tuple(sorted({(r.action, r.args[1]) for r in c.references
+                                                     if r.group == k.group}))] += 1
+            points_of = [r for r in c.references if r.action == control.ACT_EFFECT_POINT]
+            if not points_of:
+                continue
+            m = objmesh.parse(arc.read(entries[name[:-4] + ".msh"]), name)
+            cpt = entries.get(name[:-4] + ".cpt")
+            points = objmesh.parse_control_points(arc.read(cpt)) if cpt else []
+            for r in points_of:
+                total += 1
+                node_ok += 0 <= r.args[0] < len(m.nodes)
+                past_cpt += not 0 <= r.args[0] < len(points)
+    check(".ctl: action 3 places its effect on a node, not a control point",
+          total == 183 and node_ok == total and past_cpt == 18
+          and contact_groups[((control.ACT_EFFECT_START, 1),)] == 800
+          and contact_groups[((control.ACT_EFFECT_START, 0), (control.ACT_EFFECT_START, 1),
+                              (control.ACT_EFFECT_RESTART, 0))] == 368,
+          f"{node_ok} of {total} action-3 records on controllers with a same-stem mesh name one "
+          f"of its nodes; {past_cpt} lie past the same-stem .cpt (Control.dll:0x100029bb rebases "
+          f"v4 by the part's first node, as action 14 does); contact groups: "
+          f"{contact_groups.most_common(3)}")
+
+    bases = NResArchive.open(game / "bases.rlb")
+    hero = control.parse(bases.read_name("r_h_02.ctl"), names)
+    mesh = objmesh.parse(bases.read_name("R_H_02.msh"), "r_h_02")
+    points = objmesh.parse_control_points(bases.read_name("R_H_02.CPT"))
+    load = [r for r in hero.references if r.group == hero.groups[control.ENTRY_LOAD]
+            and r.action == control.ACT_EFFECT_POINT
+            and r.resource.member.lower().startswith("step_")]
+    feet = {points[k.point].nodes[0]: points[k.point].name for k in hero.states[0].contacts}
+    placed = {r.args[0] for r in load}
+    run, run_near = _planted_steps(hero, mesh, points, list(range(85, 91)) + list(range(73, 79)))
+    walk, walk_near = _planted_steps(hero, mesh, points, list(range(33, 45)) + list(range(9, 21)))
+    check("r_h_02: the steps sit on the feet's nodes, and land three times a run and a walk cycle",
+          len(load) == 10 and placed == set(feet) == {4, 8}
+          and sorted(run) == [(78, 0), (78, 2), (90, 0)]
+          and sorted(walk) == [(9, 2), (12, 2), (18, 0)],
+          f"the load group's {len(load)} step effects sit on nodes {sorted(placed)}, which "
+          f"{feet} sit on; planted against the rest pose's height, the run (states 85-90, "
+          f"73-78) steps {run} and the walk (33-44, 9-20) {walk}, (state, contact); the "
+          f"nearest a foot comes to the 0.1 line: {run_near:.4f} at a run, {walk_near:.4f} "
+          f"at a walk")
+
+
 def check_actions(check, game: Path) -> None:
     """Section 5's actions, what ends a round, and what an explosion plays where."""
     names = frozenset(p.name.lower() for p in all_archives(game))
@@ -11815,7 +11968,8 @@ def run(game: Path) -> int:
         check_minimap_agreement, check_arealmap,
         check_grid, check_missions, check_scale, check_objects, check_poses, check_lod,
         check_damage,
-        check_effects, check_effect_timing, check_actions, check_footprints, check_rsli,
+        check_effects, check_effect_timing, check_sounds, check_actions, check_footprints,
+        check_rsli,
         check_control, check_efficiency,
         check_motion, check_playback, check_ground, check_sensors, check_hit_test,
         check_combat, check_ownership,

@@ -85,8 +85,10 @@ channels it drives; a section-5 record's ints 1 and 2 are a mask and inversion
 over sixteen condition bytes (the ground surface, the liquid bed, critical
 damage), and actions 0 and 20 stop the body and place a building
 ([13-control.md](13-control.md)). What is open: class 3's value 0, the
-camera's values 3–5, the hero's arms' values 1 and 4, the record's int 8, and
-what control message 7's argument selects
+camera's values 3–5, the hero's arms' values 1 and 4, the record's int 8, the
+height a live contact record holds when the loader decides which states plant
+a foot (it decides the walk's footsteps), and what control message 7's
+argument selects
 ([13-control.md](13-control.md#not-established)). The motion fields —
 acceleration, top speed, turn rate, slope mode and cone, payload, a state's
 velocity and spin boxes and engine factor, and triples 5 and 6 with a state's

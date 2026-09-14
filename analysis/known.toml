@@ -12765,7 +12765,7 @@ read = true
 module = "Effect.dll"
 at = "0x10012eb0"
 kind = "function"
-name = "type-2 update: plays once t crosses block +8"
+name = "type-2 update: one-shot (loop byte clear) plays when previous <= +8 < t, t of exactly 1.0 taken as 0, restarting a playing sound; loop plays while +8 <= t <= +12 and stops outside; while playing hands the server message 0x38e"
 doc = "docs/11-effects.md"
 read = true
 
@@ -13269,7 +13269,7 @@ read = true
 module = "Control.dll"
 at = "0x10002972"
 kind = "site"
-name = "action 3: an effect by name on one control point (v4), id v7 or a fresh one"
+name = "action 3: an effect by name on node v4 (rebased by the part's first node, AniMesh slot 14), id v7 or a fresh one"
 doc = "docs/13-control.md"
 read = true
 
@@ -15813,3 +15813,155 @@ kind = "site"
 name = "a call's result: a float destination takes the slot's bits as a float, others as a DWORD"
 read = true
 doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "Effect.dll"
+at = "0x10012cc0"
+kind = "function"
+name = "type-2 destructor (vtable 0x1001f048 slot 0): stops and releases its sound"
+read = true
+doc = "docs/11-effects.md"
+
+[[entry]]
+module = "Effect.dll"
+at = "0x10012d10"
+kind = "function"
+name = "type-2 load (slot 1): sound server from the manager, loop byte +0x94 = (block +4 is 2 or 3), position/direction lerps from +16/+28 and +40/+52, near +64, far +68, volume +72->+76, opens and stops the sound, previous time 0"
+read = true
+doc = "docs/11-effects.md"
+
+[[entry]]
+module = "Effect.dll"
+at = "0x10012d3e"
+kind = "site"
+name = "type-2 load: the loop byte +0x94 from block +4 of 2 or 3"
+read = true
+doc = "docs/11-effects.md"
+
+[[entry]]
+module = "Effect.dll"
+at = "0x10012f2d"
+kind = "site"
+name = "type-2 update, one-shot: a time equal to 1.0 (0x1001e220) is taken as 0"
+read = true
+doc = "docs/11-effects.md"
+
+[[entry]]
+module = "Effect.dll"
+at = "0x10012f42"
+kind = "site"
+name = "type-2 update, one-shot: previous <= t, previous <= trigger +8, trigger < t"
+read = true
+doc = "docs/11-effects.md"
+
+[[entry]]
+module = "Effect.dll"
+at = "0x10012fca"
+kind = "site"
+name = "type-2 update, loop: inside +8..+12 a sound not playing starts (server slot 6)"
+read = true
+doc = "docs/11-effects.md"
+
+[[entry]]
+module = "Effect.dll"
+at = "0x10013008"
+kind = "site"
+name = "type-2 update, loop: outside the window a playing sound stops (server slot 7)"
+read = true
+doc = "docs/11-effects.md"
+
+[[entry]]
+module = "Effect.dll"
+at = "0x1001300b"
+kind = "site"
+name = "type-2 update while playing: position, near, far and volume lerped by window progress go to server slot 4 as message 0x38e"
+read = true
+doc = "docs/11-effects.md"
+
+[[entry]]
+module = "Effect.dll"
+at = "0x10013170"
+kind = "function"
+name = "type-2 switch off (slot 5): stops a playing sound"
+read = true
+doc = "docs/11-effects.md"
+
+[[entry]]
+module = "Effect.dll"
+at = "0x1001e220"
+kind = "datum"
+name = "1.0f: the time a one-shot sound takes as 0"
+read = true
+doc = "docs/11-effects.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x100029bb"
+kind = "site"
+name = "action 3: AniMesh slot 14 (the part's first node) - 1 added to v4, a node"
+read = true
+doc = "docs/13-control.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001a2d5"
+kind = "site"
+name = "state load, per contact: the point at the state's last pose (pair B last frame, weight 1) plus the root's height, against the live record's +0x14"
+read = true
+doc = "docs/13-control.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1003c03c"
+kind = "datum"
+name = "0.1f: how near a contact's last-pose height must lie to its live height to be planted (0x1000)"
+read = true
+doc = "docs/13-control.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1003c038"
+kind = "datum"
+name = "0.05f: how near upright a contact's axis must stand for flag 0x20 to set 0x2"
+read = true
+doc = "docs/13-control.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001b081"
+kind = "site"
+name = "ground contact, per contact: skipped without +0x59; planted byte +0x5a clear and state contact 0x1000 runs group +8 and sets it; set without 0x1000 clears it"
+read = true
+doc = "docs/13-control.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001a017"
+kind = "site"
+name = "contact load: the point's position at load goes into the live contact record (+0xc..+0x14) copied in by 0x1001b6a0"
+read = true
+doc = "docs/13-control.md"
+
+[[entry]]
+module = "World3D.dll"
+at = "0x10010805"
+kind = "site"
+name = "MCMD_SELECT toggle, select: after arm state 1 the host callback (0x1013b59c) with (0, 0xe); deselect makes no call"
+read = true
+doc = "docs/29-weapons.md"
+
+[[entry]]
+module = "World3D.dll"
+at = "0x1013b59c"
+kind = "datum"
+name = "the host's callback World3D calls with (0, event)"
+read = true
+doc = "docs/29-weapons.md"
+
+[[entry]]
+module = "World3D.dll"
+at = "0x10013ec2"
+kind = "site"
+name = "world init: stores the host's callback at 0x1013b59c"
+read = true
+doc = "docs/29-weapons.md"

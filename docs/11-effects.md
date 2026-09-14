@@ -394,7 +394,7 @@ channel numbers instead, the seven name a channel on that node twice.
 | type | class | window (block offsets) | what the code shows | what it is |
 |---:|---|---|---|---|
 | 1 | 0xf0, vtable `0x1001e78c` | +8..+12 | creates a light in the owner's light manager, interface `0xe` (`0x1000f4b0`), switches it on inside the window and off outside, and hands it a position, direction, colour, range and attenuation every update (`0x1000f6e0`) | a **light** — [below](#type-1-is-a-light--read-and-measured) |
-| 2 | 0xa0, `0x1001f048` | trigger at +8 | plays once *t* crosses +8 (`0x10012f42`) | the **sound**; near/far at +64/+68 |
+| 2 | 0xa0, `0x1001f048` | trigger +8, window +8..+12 | +4 of 0: plays as *t* crosses +8 going up; +4 of 2 or 3: plays while *t* is inside the window (`0x10012eb0`) | the **sound**; near/far at +64/+68 — [below](#type-2-is-a-sound--read-and-measured) |
 | 3 | 0xfc, `0x1001e770` | +32..+36 | a phase *a* + (*b* − *a*)·*x*^*g* from +8/+12/+16, *x* the progress through the window or seconds when +8 < 0 (`0x100105f0`); the (low, high) triples +40/+52 and +100/+112 shaped by per-axis powers; a 0..1 value +20..+24 to the power +28 and the phase's fractional part go to the draw (`0x100106c0`) | a **sprite** that moves (+40/+52) and grows (+100/+112) over its window — muzzle flashes, glows, bullets |
 | 4 | 0x104, `0x1001e754` | +32..+36 | type 3's phase (`0x100108f0`) | a sprite variant |
 | 5 | 0x54, `0x1001e360` | +12..+16 | a phase from +40, seconds when negative (`0x10002a20`); a start point, and sprites along the line from it to where the effect is now (`0x10002be0`) | a **bolt**: laser and shock tails, `hero_laser_bullet` — [below](#bolts-streams-and-fades--read-and-measured) |
@@ -441,6 +441,46 @@ the light's owner (`Terrain.dll:0x10047a52`), and `EmulatePointLights` leaves
 out one flagged `0x20000000` (`0x1002a200`). How the shade turns range and
 attenuation into light on a surface is not read here; that it is Direct3D's
 fixed-function falloff is a *guess* from the layout.
+
+### Type 2 is a sound — *read*, and *measured*
+
+**At load** (slot 1, `0x10012d10`) the emitter takes the sound server from its
+manager (`+0x18`), opens its sound (`0x100065a0`, a handle at `+0x98`, −1 when
+the member does not load) and stops it at once (server slot 7), and sets its
+**previous time** `+0x9c` to 0. Block **+4** picks one of two behaviours: 2 or 3
+set the byte `+0x94` (`0x10012d3e`), anything else clears it.
+
+**Each update** (slot 2, `0x10012eb0`), with *t* the effect time:
+
+- **+4 not 2 or 3: a one-shot.** A *t* of exactly 1.0 is taken as 0
+  (`0x10012f2d`, the constant at `0x1001e220`). The sound plays when
+  previous ≤ *t*, previous ≤ trigger (+8) and trigger < *t*
+  (`0x10012f42`–`0x10012f73`). A sound still playing is stopped first and
+  started again (server slots 11, 7 and 6). Either way *t*, with 1.0 taken as
+  0, becomes the previous time.
+- **+4 of 2 or 3: a loop.** While low (+8) ≤ *t* ≤ high (+12) a sound that is
+  not playing is started (`0x10012fca`–`0x10012fe8`), so it plays again each
+  time it ends. Outside the window a playing sound is stopped
+  (`0x10013008`).
+- **While a sound plays** (`0x1001300b`) the update hands the server, as message
+  `0x38e`, a position lerped from +16 to +28 across the window and carried into
+  the owner's frame, a near distance +64 and a far distance +68, and a volume
+  lerped from +72 to +76. The lerps of +64 and +68 run from each value to
+  itself: they do not change.
+- **Switched off** (slot 5, `0x10013170`), a playing sound is stopped.
+
+So a one-shot **plays again on the way down** once it has sat at 1.0
+(*derived*). A time of exactly 1.0 leaves the previous time at 0, so the first
+update below 1.0 crosses the trigger from 0. A one-shot that falls from
+anything short of 1.0 stays silent, and a mode-1 effect that ends at 1.0 plays
+nothing more while it holds there.
+
+*Measured* over the 517 sound emitters: +4 is 0 on 411 and 2 on 106, and 3 on
+none. The 106 loops are what hums or breathes: the chassis engines
+(`eng_rb_*`, `eng_rl_*`), the doors, the animals' sounds and breath, and the
+hero's `hero_breath`, `H_breath.wav` looping from 1 to 4 m over the whole of
+its 3-second time. Every `step_*` effect and all four hero arm sounds are
+one-shots.
 
 ### Bolts, streams and fades — *read*, and *measured*
 
@@ -620,6 +660,11 @@ Read one slot either way, none of the seven name witnesses agrees.
   two sprites, smoke, a sound and a light.
 
 ## Not resolved
+
+- **The sound server's slots**: 6 starts, 7 stops and 11 answers whether a
+  sound plays, as the emitter uses them (*derived*); what message `0x38e`'s
+  +80 float is (0 on the step and arm sounds), and how near, far and volume
+  become gain.
 
 - **The rest of each emitter's floats.** The window, the phase, the sprite's
   moving and growing triples, the light, the bolt's segments, the stream's

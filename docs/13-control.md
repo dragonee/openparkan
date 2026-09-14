@@ -471,7 +471,7 @@ The actions (*read*; counts *measured* across the 2925 records):
 |---:|---:|---|
 | 0 | 202 | **stop the body**: its command, velocity, spin and step velocity go to zero (`0x10014400`); first in every round group |
 | 1, 2 | 80, 30 | property `0x200` / `0x201` on the object |
-| 3 | 217 | **an effect** by name on control point v4, id v7 (`0x10002972`) |
+| 3 | 217 | **an effect** by name on **node** v4, id v7 (`0x10002972`): v4 is rebased by the part's first node through `AniMesh` slot 14, as action 14's is (`0x100029bb`) |
 | 4 | 1203 | **an effect** by name on three control points v4..v6, at their centroid, id v7 (`0x10002a8d`) |
 | 5 | 72 | **an effect** by name in the world at the sphere `+0x38` gives — a building's construction sphere — scaled by its radius, id v7 (`0x10002e0e`); `fortif.rlb` only |
 | 7 | 0 | node v4 takes its whole life as damage (`0x10003087`) |
@@ -580,6 +580,63 @@ on `r_l_01`, 9 on `r_m_01`, 1 on `r_b_01` — and every contact on them sits on 
 running-gear node, 103 left (`.ndp` `0x20`) and 103 right (`0x40`): **the
 walkers limp** when a leg is shot off.
 
+### A footstep, end to end — *read*, and *measured*
+
+**Which states plant a foot** is worked out at load (`0x1001a2d5`–`0x1001a328`).
+For each state and each contact the loader poses the mesh at the state's last
+pose — pair B's last frame, all of the weight on B — and finds the contact
+point, its height carried back up by the root's own height at that pose. When
+that height lies within 0.1 (`0x1003c03c`) of the height the live contact record
+holds (`+0x14`), the contact gains `0x1000`. Flag `0x10` then sets or clears
+`0x1` to match, and `0x20` sets `0x2` when the point's axis stands within 0.05
+of upright.
+
+**A foot lands** in the ground contact's pass over the contacts
+(`0x1001b081`–`0x1001b0be`), with no ground distance in the test:
+
+1. a contact whose node is gone (`+0x59` clear) is passed over;
+2. if its live **planted** byte `+0x5a` is clear and the current state's contact
+   carries `0x1000`, its group `+8` runs (`0x10002800`) and the byte is set;
+3. if the byte is set and the state's contact lacks `0x1000`, the byte is
+   cleared.
+
+So a step sounds once each time the machine enters a state that ends on that
+foot after one that did not.
+
+**What the group plays.** The ground's surface id sets condition bytes 0–10 one
+at a time, byte *i* to (id = *i*) (`0x10002790`), when the id changes; byte 7 is
+then the liquid bed's flag instead
+([24-motion.md](24-motion.md#finding-the-ground--read)). `r_h_02`'s two
+groups are a single run each: action 10 starts effect 101, 201, 301, 401 or
+501 (+ the foot, 1 or 2) in time mode 1 for bytes 5, 1, 2, 8 and 10, and 301
+for byte 9 or when nothing else ran. The load group (block entry 0) created
+them with action 3 on nodes 4 and 8, the feet `LeftFoot` and `RightFoot` sit
+on: `step_hm`, `step_hs`, `step_hg`, `step_ha` and `step_hf`. So the step plays
+**at the foot's node** (*measured*).
+
+**What a step is** (*measured*, all nine `step_*` effects): header mode 0 and
+0.5 s, and one one-shot sound whose trigger is 0.1 — `step_h?.wav` from 1 to
+50 m (2 to 60 for metal), `step_r?.wav` from 10 to 80, `step_rh.wav` from 15 to
+350 on the transformer. Started in mode 1, its time crosses 0.1 about 50 ms
+after the foot lands, within the effect manager's 100 ms updates
+([11-effects.md](11-effects.md#how-an-effect-runs--read)).
+
+*Measured* across the install:
+
+- all 183 action-3 records of controllers with a same-stem mesh name a node of
+  it, while 18 of them lie past the same-stem `.cpt`;
+- the contact groups hold only action 10 in mode 1 (800 contacts) or actions 10
+  and 11 in modes 0 and 1 (368).
+
+*Derived* on `r_h_02`, with the rest pose's height as the live record's (see
+below): at a run, whose cycle takes 12 states, the left foot lands entering
+states 90 and 78 and the right entering 78; at a walk, 24 states, the right foot
+lands entering 9 and 12 and the left entering 18. Most feet clear 0.1 by a
+wide margin at a run (0.13–0.55), but the left foot at state 78 sits 0.0991
+from rest, and at a walk the lifts are 0.1003 to 0.1218. So how often the
+walk sounds depends on float rounding, and on which height the live record
+holds.
+
 ### Critical damage: block entries 6 and 7 — *read*, and *measured*
 
 After a node takes damage the node update (`0x10012a40`) decides whether the
@@ -640,3 +697,7 @@ is wired to a message.
   and `+0x618` mean; no shipped record tests byte 15.
 - `IDeviceManager` ids 5 and 6: what the gun's `+0x174` (the round's property
   `0x35`) is.
+- The height a live contact record holds at `+0x14` when the loader compares
+  each state's last pose with it: the record is filled from the point's
+  position at load (`0x1001a017`, copied in by `0x1001b6a0`), and which pose the
+  mesh holds then is not read. The rest pose is assumed above.
