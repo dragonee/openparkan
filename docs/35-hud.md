@@ -3,7 +3,8 @@
 What the player sees over the world while driving a unit: the weapons list at
 the top right, the message box at the top, the radar in the middle at the
 bottom, the target panel at the bottom left and the player's own unit at the
-bottom right. This page reads how `iron3d.dll` builds and draws them, and
+bottom right; and over them, the objectives screen on F12 and the satellite
+map on M. This page reads how `iron3d.dll` builds and draws them, and
 measures the result against the install's art and a recording of Mission 01.
 
 **Every claim is tagged**, as in [15-behaviour.md](15-behaviour.md):
@@ -265,7 +266,9 @@ re-derived by `verify`):
   to y + (*n* + *k*) *l* + ⌊*k l* / 2⌋ + 16.
 - **The frame** (`0x1009afa0`, `0x1009abf0`):
   - `frame_corner_1`–`_4` (8 × 8, turned 0°, 90°, 180°, 270°) at the corners;
-  - `frame_edge_h` and `_v` (47 × 5, stretched) along the sides between them;
+  - `frame_edge_h` and `_v` (47 × 5, stretched) along the sides between them,
+    placed as [the satellite map's frame](#the-panel-in-the-cockpit--read-and-seen)
+    reads;
   - the inside filled from 5 in, in `0x80008000`, green at half alpha.
 - **The header** is white at (x + 8, y + 9).
 - **The lines** are `#dcdcdc`, from 1.5 *l* below the header, *l* apart.
@@ -938,3 +941,343 @@ hit, and prints *"SSW-1 Warrior"* above a falling distance.
 - The component value `0x400` in the *"Dangerous!"* test.
 - The other six bits of draw flags `0x7f0`.
 - Whether the view's begin (interface `0x12` slot 3) clears depth.
+
+## The objectives screen
+
+The mission's objectives, centred over a dimmed view: *"Primary objectives"*
+in green, a line an objective with its state, and *"Press F12 to close"*. It
+opens by itself when a mission starts and closes 7 seconds later; F12 opens
+and closes it at will.
+
+### Who draws it, and what it hides — *read*
+
+**The interface's screens** are one object, the game's `+0x2c`, built as the
+mission loads (`0x1008ce90`, called at `0x1005e0f1`):
+
+| field | built by | size | what it is |
+|---|---|---|---|
+| `+0x04` | `0x100433a0` | 0x15c | the cockpit HUD ([above](#everything-is-drawn-on-a-640--480-screen--read)) |
+| `+0x10` | `0x1006a210` | 0x594 | **the objectives screen** |
+| `+0x14` | `0x10072f90` | 0x264 | **the satellite map** ([below](#the-satellite-map)) |
+| `+0x1c` | `0x100672c0` | 0x290 | the help screen, titled `Help:` |
+| `+0x24` | a byte of its own | 1 | the pause byte Esc clears first ([34-progression.md](34-progression.md#after-the-outcome--read-and-measured)) |
+
+The other fields (`+0x08`, `+0x0c`, `+0x18`, `+0x20`) were not read.
+
+**Its draw** (`0x1008d200`) runs in the interface pass while the mission is
+being played ([34-progression.md](34-progression.md#after-the-outcome--read-and-measured)).
+During a briefing (the level's state word `+0x710` is 5) it draws only the
+briefing (`0x1008d319`). Otherwise it switches on the `CState` mode
+([30-turrets.md](30-turrets.md)); in modes 0–2 and 6 (`0x1008d37f`) it draws,
+in order:
+
+1. the HUD's widgets (`0x10043b20`), when the player drives a unit;
+2. the satellite map (`0x10073750`);
+3. the message box (`0x1007f4f0`);
+4. the game's `+0x30` overlay (its slot 7, not read);
+5. the objectives screen (`0x1006a9d0`), which draws nothing unless it is up
+   (its byte `+0x592`).
+
+**While the screen is up, it alone is drawn** in those modes: the test of
+`+0x592` at `0x1008d3ac` jumps past steps 1–4 (`0x1008d3f6`, `0x1008d411`).
+No HUD, no map, no message box. In modes 3–5 (`0x1008d51c`, `0x1008d444`) the
+map and the message box still draw, under it.
+
+**What else stops** (*read*):
+- the interface's mouse handlers return at once (`0x1008d6ef` in
+  `0x1008d690`; `0x1008dad8` in the cursor pick `0x1008da40`);
+- the tooltip timer (`0x1009bc20`) is not run (`0x10060c7e`);
+- `CMD_JAMES_WINGMAN_MENU` (740) does nothing (`0x1007255b`).
+
+The mission is not paused: the game frame's tests
+([34-progression.md](34-progression.md#when-the-mission-handler-runs--read))
+do not look at the screen (*derived*). The player's controls go through the
+unit's control table and still turn the view (*seen*, 100–106 s). A message
+that arrives meanwhile voices at once. Its box is made then and is 20 s old
+from that moment, so it shows for what is left of its 20 s once the screen
+closes (*derived*; *seen*: a box at 107 s).
+
+### What it shows — *read*, and *seen*
+
+**Built once** (`0x1006a210`):
+- the footer from 1017 *"Press %s to close"* and the name of the key bound to
+  `CMD_JAMES_MISSION_OBJ`, 731 (`0x1006a2b5`);
+- the header 3062 *"Primary objectives"*, and 3061 *"Additional objectives"*.
+
+In a network game (the game's `+0xe4`) the header is 6247 *"Multiplayer
+statistics"*, with `ui/hq.cfg`'s `objpanel_icon_hero` and
+`objpanel_icon_system` sprites. That game's statistics (`0x1006b470`) are not
+read.
+
+**Drawn each frame** (`0x1006a9d0`, the list `0x1006ac10`), on the 640 × 480
+screen, all in `MENU_FONT` (the game's `+0x14`) through the GUI server's text
+with a shadow (slot 5):
+
+| what | where | colour | text |
+|---|---|---|---|
+| the dim | a filled rectangle (0, 0)–(640, 480), slot 4, alpha kept | black at `0x99`, 60%; at `0xcc`, 80%, in `CState` modes 3–5 | — |
+| the header | y 80 | `0xff00ff00`, green | 3062 |
+| each primary objective | y 110 + 20 *i* | by its state | `"%s : %s"`, the objective's text and its state word |
+| the bonus header, when there is a bonus objective | y 260 | green | 3061 |
+| each bonus objective | y 290 + 20 *i* | by its state | as above |
+| the footer | y 450 | white | 1017 with the key |
+
+- **Centred on x 320.** A text starts at 320 − round(*w* ÷ sx × 0.5). *w* is
+  the font's width for it in screen pixels (the font's slot 6), and sx is the
+  display's horizontal scale
+  ([How the radar draws](#how-the-radar-draws--read)). The bonus header
+  halves after rounding, 320 − ⌊round(*w* ÷ sx) ÷ 2⌋.
+- **The step is a fixed 20**, not the font's height.
+- **Which list** an objective is in follows its exempt word: 0 primary, 1
+  bonus ([34-progression.md](34-progression.md#objectives-and-the-end-of-a-mission--read-and-measured)).
+- **The text is `mission.cfg`'s as written.** Mission 01's carry their own
+  numbers: *"1. Destroy all the targets on the island"*.
+- **The state word** (`0x1006af90`):
+
+  | state | word | colour |
+  |---:|---|---|
+  | 1 | 1014 *complete* | `0xffebebeb` |
+  | −1 | 1027 *failed* | `0xffff6464` |
+  | anything else, 0 open | 1015 *in progress* | `0xff787878` |
+
+*Seen* in the recording at 103 s:
+- the header's top is at 81.3, centred on 319.0;
+- the three lines' tops are at 110.7, 130.7 and 151.3, centred on 319.7;
+- the footer's top is at 451.3;
+- the header reads (15, 237, 16) and the footer white;
+- the lines' brightest pixels are about 127 grey;
+- the view behind is visibly darker than before and after.
+
+### When it opens and closes — *read*, and *seen*
+
+**When a mission starts** (`0x1005e117`), the screen opens and arms its
+closing: `+0x592`, `+0x590` and `+0x591` are all set to 1. That needs both:
+- the parameter block's `+0x154` set. A load from inside the game clears it
+  ([34-progression.md](34-progression.md#after-the-outcome--read-and-measured)),
+  so at least a game loaded that way does not open it (*derived*);
+- the game's `+0xe5` clear, parameter mode not 3.
+
+**It closes by itself 7 seconds after it is first drawn** (`0x1006ab94`):
+1. The first draw with `+0x591` set stamps the time into `+0x58c` and clears
+   `+0x591`.
+2. Every later draw asks the timer for the seconds since
+   ([The message box](#the-message-box--read-and-measured)).
+3. Once they pass 7.0 (the float at `0x100e63a8`), `+0x592` and `+0x590` are
+   cleared.
+
+The draw does not run during a briefing, so the 7 s run from its end
+(*derived*). *Seen*: in the recording the screen is up from 99.55 s to
+106.65 s (±0.05), 7.1 s, starting on the first frame after the briefing's fade.
+
+**F12**, `CMD_JAMES_MISSION_OBJ` (731, `0x1007210e`), toggles `+0x592`. It is
+refused in `CState` mode 7, while the help screen is up, or while the game is
+paused (the screens object's `+0x24`).
+- **Closing** clears `+0x590`, which disarms the timer.
+- **Opening** leaves `+0x590` as it was, so a screen opened with F12 stays up
+  until it is closed (*derived*).
+
+**Esc** (the character handler, `0x10070e85`) closes the screen when it is up
+and the `CState` mode is not 7. The earlier uses of Esc come first
+([34-progression.md](34-progression.md#after-the-outcome--read-and-measured)):
+lifting a pause, leaving after an outcome, the help screen, a briefing.
+
+### Not established
+
+- The game's `+0x30` overlay.
+- What `CState` mode 7 is.
+- The network game's statistics (`0x1006b470`).
+- Why the lines read about 127 rather than 120 in the recording (their shadow,
+  or the video's compression).
+
+## The satellite map
+
+A 266-unit square at the top right, over where the weapons list was: the
+mission's minimap tinted green and see-through, a compass in its corner, and
+marks for the player's units and buildings.
+
+### The object — *read*
+
+It is the screens object's `+0x14` (`0x10072f90`, vtable `0x100e64bc`).
+
+**Its rects** (`0x100560b0` builds (x₀, y₀, x₁, y₁)):
+
+| field | rect | used |
+|---|---|---|
+| `+0x1bc` | (374, 0)–(640, 266) | **in the cockpit** |
+| `+0x1f8` | (374, 63)–(640, 329) | in the commander's views |
+| `+0x214` | (374, 43)–(640, 350) | around that one, with its title bar |
+
+**The alpha** (`+0x90`) is `iron_3d.ini`'s `[CS]` `MAP_ALPHA`, 128 when it is
+absent, held to 30–255. The destructor (`0x10073360`) writes it back. The
+shipped `Iron_3D.ini` says 128.
+
+**Loaded with the mission** (`0x10073550`, from `0x1008d5d0`):
+- the minimap: the whole 256 × 256 of the texture `mission.cfg`'s `minimap`
+  resource names, which the resource manager's slot 3 opens (`0x100736e7`).
+  Every map in `ui/minimap.lib` is 256 × 256 (*measured*), and Mission 01's is
+  `tut1.tex` ([04-missions.md](04-missions.md));
+- `exit_icon` and `map_compass_icon`, from the skin at the game's `+0xac`:
+  `ui_menu` (241, 70) 13 × 13, and page6 (132, 106) 21 × 42. That skin is
+  `ui/hq.cfg`, the one file that names them (*derived*);
+- 5074 *"Satellite map"*, the commander's title.
+
+### Opening it — *read*
+
+- **M**, `CMD_JAMES_SATELLITE_MAP` (739, `0x100724dd`), opens it
+  (`0x100740f0` sets `+0x261`) or closes it (`0x10074100` clears `+0x261` and
+  `+0x262`). Nothing else is tested.
+- **] and [**, `CMD_INC_MAP_ALPHA` (751, `0x10072657`) and `CMD_DEC_MAP_ALPHA`
+  (752, `0x1007266b`), work only while it is open:
+  - the alpha gains 12 (`0x10074550`) or loses 12 (`0x100745b0`), held to
+    30–255;
+  - `+0x262` is set and the time stamped, so the alpha's label shows for 1 s.
+
+  So *Increase map transparency*, as `Command.dsc` calls 751, makes the map
+  more opaque (*derived*).
+- **The weapons list** draws no rows while it is open
+  ([The weapons list](#the-weapons-list--read-and-measured)).
+- It is also opened and closed from the commander's screens (`0x1002c778`,
+  `0x10079993`, `0x10084630`, `0x1008437d`, `0x1008fd18`), and closed by Esc in
+  view state 2 (`0x10071027`); none of these was followed.
+
+### The panel in the cockpit — *read*, and *seen*
+
+**Each frame while open** (`0x10073750`):
+1. It picks the variant by the level's view state `+0x710`.
+   - 1, 3, 4 and 6 are the cockpit's
+     ([25-sensors.md](25-sensors.md#how-the-game-colours-what-it-marks--read-and-measured)).
+     They take the panel at `+0x1bc` (`0x100737c0`).
+   - Any other state takes the commander's (`0x10073830`).
+2. It draws the marks (`0x10074220`).
+
+**The panel** (`0x100748a0`), on (x₀, y₀, x₁, y₁) = (374, 0, 640, 266):
+
+1. **The frame**, `0x1009abf0` (the message box's without its fill). With
+   `ui/compaund.cfg`'s 8 × 8 corners and 47 × 5 edges, every piece white:
+
+   | piece | from | to |
+   |---|---|---|
+   | `frame_corner_1` | (x₀, y₀) | (x₀ + 8, y₀ + 8) |
+   | `frame_corner_2` | (x₁ − 8, y₀) | (x₁, y₀ + 8) |
+   | `frame_corner_3` | (x₁ − 8, y₁ − 8) | (x₁, y₁) |
+   | `frame_corner_4` | (x₀, y₁ − 8) | (x₀ + 8, y₁) |
+   | `frame_edge_h`, top | (x₀ + 8, y₀) | (x₁ − 8 + 1, y₀ + 5) |
+   | `frame_edge_h`, bottom, flipped | (x₀ + 8, y₁) | (x₁ − 8 + 1, y₁ − 5) |
+   | `frame_edge_v`, left, mirrored | (x₀ + 5, y₀ + 8) | (x₀, y₁ − 8 + 1) |
+   | `frame_edge_v`, right | (x₁ − 5, y₀ + 8) | (x₁, y₁ − 8 + 1) |
+
+   Each row gives the two corners the sprite draw is handed, in its order. A
+   "to" left of or above its "from" mirrors the piece that way. The 8s and 5s
+   are each sprite's own width and height (`+0x84`, `+0x88`): an edge is as
+   thick as its height, `frame_edge_v` included.
+2. **The minimap**, on (x₀ + 5, y₀ + 5)–(x₁ − 5, y₁ − 5), that is (379, 5)–(635,
+   261): one texel a unit.
+   - Its colour is the alpha over `#37ff37`, (alpha << 24) | `0x37ff37`
+     (`0x10074940`), with blend 1.
+   - The grey image is tinted green and at 128 lets half the view through.
+3. **The alpha's label**, while `+0x262` is set (`0x10074640`). See below.
+4. **`map_compass_icon`**, white: (x₁ − 5 − 21 − 1, y₁ − 5 − 42 − 1)–(x₁ − 5 −
+   1, y₁ − 5 − 1), that is (613, 218)–(634, 260). Its art is a blue triangle
+   pointing up over a green ring over a red one pointing down: north up and
+   south down, as on the radar.
+
+**The alpha's label** (`0x10074640`), in `GAME_FONT` (the game's `+0x10`):
+- **The text.** alpha × 100 ÷ 255, rounded down to a multiple of 5, then `%`.
+- **The place.** x = x₀ + 5 + 6. The top is y₁ − 5 − 6 − (the font's height +
+  1) ÷ sy, rounded.
+- **The box behind it**, filled `0xff007300`: from 3 left of and 3 above the
+  text, to 2 + its width ÷ sx right of x and 4 + its height ÷ sy below its top.
+- **The text colour** is `#37ff37`.
+- **It hides** once 1.0 s has passed since the alpha changed (`+0x25c`).
+
+**Where a point goes** (`0x100741a0`). The world (x, y), rounded to whole
+units, goes to (x₀ + 5 + round(256 x ÷ L), y₁ − 5 − round(256 y ÷ L)).
+- *L* is the float at `+8` of the level's `+0x718` record. The map-edge test
+  compares positions with the same float (`0x10035eeb`), so it is the map's
+  side (*derived*).
+- **The whole map, north up.** There is no zoom or turning.
+- On Tut_1, *L* is its terrain's side, 1746.59 (*derived*: the minimaps cover
+  their terrain's full extent,
+  [03-terrain.md](03-terrain.md#the-strongest-check-the-games-own-art)).
+- The inverse (`0x10074110`) serves a click on the map
+  (`0x10073fd0`, `0x1008dbd8`).
+
+**The marks** (`0x10074220`), in this order:
+
+1. **Every entry of the level's `+0x700` list** (`0x10081a70`): a 3 × 3 filled
+   square, (x − 1, y − 1)–(x + 2, y + 2), in `0xff646400`. The entry's
+   (x, y) is at `+0`, `+4`, and it must answer non-zero at `+0xc`. Ore
+   deposits, by the colour (*guess*); Mission 01 has none.
+2. **Every building** (`+0x71c`, `0x100347f0`): an icon by its type, drawn 20 ×
+   20 about its place, (x − 10, y − 10)–(x + 10, y + 10).
+   - **The colour** is the clan rule's, or white when the player's own
+     building is selected (`+0x80`).
+   - **The icons** are 24 × 24 cells of the `icons` page (`0x10064f10`; type to
+     index `0x1009f4c0`):
+
+     | type (`varset.var`) | icon cell |
+     |---|---|
+     | `BUILDING_GENERATOR` `0x80000002` | (0, 24) |
+     | `BUILDING_MINE` `0x80000004` | (24, 24) |
+     | `BUILDING_STORAGE` `0x80000008` | (48, 0) |
+     | `BUILDING_PLANT` `0x80000010` | (72, 24) |
+     | `BUILDING_BUNKER_SMALL`, `_MEDIUM`, `_LARGE` | (96, 24) |
+     | `BUILDING_HANGAR` `0x80000040` | (120, 24) |
+     | `BUILDING_INSTITUTE` `0x80000400` | (48, 24) |
+     | `BUILDING_TOWER_MEDIUM`, `_LARGE` | (168, 24) |
+     | `BUILDING_MAINTELEPORT` `0x80000200` | (216, 24) |
+     | anything else, the bridge and the ruin included | no mark |
+
+3. **Every unit** (`+0x720`, `0x10077690`), in screen pixels (GUI slot 0 set to
+   0): its map point (x, y) goes to (round(x · sx), round(y · sy)).
+   - **A flyer** (the `0x207` test, as on the radar) is a cross in the clan
+     rule's colour. Its arms are 4 · sx wide and 4 · sy tall, each rounded and
+     then made even.
+   - **Any other unit** is a filled square 3 · sx by 3 · sy, rounded, from
+     half its size left of and above the point.
+   - **A selected unit** (`+0x80`):
+     - a white outline, from 2 px left of and above the mark to 2 px (the
+       cross) or 1 px (the square) beyond it;
+     - a white line from the mark's centre, 1.8 × its size along the record's
+       (`+0xd8`, −`+0xdc`);
+     - its route, lines in `0xff64c864` with 3 × 3 squares in `0xffc8c864` at
+       the points, starting from the unit.
+   - **The hero** (`Type` `0x1020000`), when it is not a flyer, gets the
+     outline and the line even when not selected, then in green `0xff00ff00`.
+4. **In view states 2 and 4 only**, the camera, in yellow `0xffffff00`: a
+   square (x ± 2, y ± 2) with its two diagonals, and a tick from 2 to 7 units
+   out along its view.
+
+**Which get a mark.** The unit or building must be of the player's clan, or of
+a clan in the player clan record's `+0x54` list (`0x1007e660`,
+[25-sensors.md](25-sensors.md#how-the-game-colours-what-it-marks--read-and-measured)).
+An exception runs when the game's `+0xea` byte is set and `0x1005a850`
+answers; that was not read. Also skipped:
+- an owner word of `0xfffe`;
+- a unit whose `+0x3c` object answers 0 at slot 3;
+- a hostile clan's unit whose first order is `0x13`, `ORDER_ROBOT_SHUTDOWN`.
+
+*Seen*, the recording at 118.5 s, on 960 × 720:
+- **The frame** is dark from x 561 to 566, and the green starts at 568 (374 to
+  377 and 379 on the layout). The right edge is dark from 954 to 958, the top
+  from 0 to 5, the bottom from 394 to 397.
+- **The compass.** Its blue triangle lies in (620–627, 224–231) and its red in
+  (620–626, 248–254), inside the icon's (613, 218)–(634, 260).
+- **One mark** at (453, 192): a light-blue square in a green outline with a
+  short tick. That is the hero, the one unit of the player's clan; Mission 01's
+  bridges take no icon.
+- **The green over the sky** reads (126, 224, 141). Half of `#37ff37` over a
+  near-white texel, plus half the sky (192, 192, 224), gives (122, 216, 138),
+  blended in display space as the HUD's art is (*derived*).
+
+### Not established
+
+- What the level's `+0x700` list holds, and the player clan record's `+0x54`
+  list ([25-sensors.md](25-sensors.md#not-established)).
+- That `+0xd8` and `+0xdc` are the unit's heading (*guess*, from the line's
+  use).
+- The commander's variant (`0x10073830`): its title bar at (374, 43), its exit
+  icon and the selected unit's line at y 330, beyond their places.
+- The blinking square of game mode 8 (`0x10074430`), and the game's `+0xea`
+  byte.
+- The map's other openers and closers.

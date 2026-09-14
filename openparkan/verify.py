@@ -13861,6 +13861,287 @@ def check_hud_radar(check, game: Path) -> None:
           f"{sorted({hex(d[4]) for d in rdraws})}; a green dot 24 x the camera's offsets: {dot}")
 
 
+#: The objectives screen's strings (``iron3d.dll:0x1006a210``, ``0x1006af90``).
+OBJECTIVE_STRINGS = {
+    3062: "Primary objectives", 3061: "Additional objectives", 1017: "Press %s to close",
+    1015: "in progress", 1014: "complete", 1027: "failed", 6247: "Multiplayer statistics",
+}
+#: An objective's state word and its colour (``0x1006af90``): the string pushed, then the
+#: colour written.
+OBJECTIVE_STATES = ((1015, 0xFF787878), (1014, 0xFFEBEBEB), (1027, 0xFFFF6464))
+#: The satellite map's rects as ``0x10072f90`` builds them: the cockpit's, then the
+#: commander's outer and inner.
+MAP_RECTS = ((374, 0, 640, 266), (374, 43, 640, 350), (374, 63, 640, 329))
+#: The map's building icons: the ``varset.var`` type each ``0x1009f4c0`` gives an index,
+#: and that index's 24 x 24 cell of the ``icons`` page (``0x10064f10``).
+MAP_ICONS = {
+    "BUILDING_GENERATOR": (0, 24), "BUILDING_MINE": (24, 24), "BUILDING_STORAGE": (48, 0),
+    "BUILDING_PLANT": (72, 24), "BUILDING_BUNKER_SMALL": (96, 24),
+    "BUILDING_BUNKER_MEDIUM": (96, 24), "BUILDING_BUNKER_LARGE": (96, 24),
+    "BUILDING_HANGAR": (120, 24), "BUILDING_INSTITUTE": (48, 24),
+    "BUILDING_TOWER_MEDIUM": (168, 24), "BUILDING_TOWER_LARGE": (168, 24),
+    "BUILDING_MAINTELEPORT": (216, 24), "BUILDING_BRIDGE": None, "BUILDING_RUINE": None,
+}
+
+
+def _compare_tree(code: bytes, value: int) -> int | None:
+    """What a compiled ``switch`` of ``cmp ecx, imm32`` / ``je`` / ``jg`` / ``jne`` returns in
+    ``eax`` for ``ecx = value``: ``mov eax, imm32``, ``xor eax, eax`` and ``or eax, -1``
+    before a ``ret``.  None on any other instruction."""
+    pc, signed = 0, value - (1 << 32) if value & 0x80000000 else value
+    last, eax = 0, None
+    for _ in range(64):
+        op = code[pc]
+        if code[pc:pc + 2] == b"\x81\xf9":
+            imm = struct.unpack_from("<i", code, pc + 2)[0]
+            last = (signed > imm) - (signed < imm)
+            pc += 6
+        elif op in (0x74, 0x75, 0x7F):
+            taken = {0x74: last == 0, 0x75: last != 0, 0x7F: last > 0}[op]
+            pc += 2 + (struct.unpack_from("<b", code, pc + 1)[0] if taken else 0)
+        elif op == 0xB8:
+            eax = struct.unpack_from("<I", code, pc + 1)[0]
+            pc += 5
+        elif code[pc:pc + 2] in (b"\x33\xc0", b"\x31\xc0"):
+            eax, pc = 0, pc + 2
+        elif code[pc:pc + 3] == b"\x83\xc8\xff":
+            eax, pc = 0xFFFFFFFF, pc + 3
+        elif op == 0xC3:
+            return eax
+        else:
+            return None
+    return None
+
+
+def check_hud_screens(check, game: Path) -> None:
+    """The objectives screen (F12) and the satellite map (M) over the cockpit HUD."""
+    path = game / "iron3d.dll"
+    if not path.exists():
+        return
+    iron = path.read_bytes()
+    at = _image_at(iron)
+    strings = resources.strings(iron)
+    art = _hud_art(game)
+    keys = {b.command: b.chord for b in controls.bindings(game / "ui_other.man")}
+
+    def u32(va: int) -> int:
+        return struct.unpack("<I", at(va, 4))[0]
+
+    def f32(va: int) -> float:
+        return struct.unpack("<f", at(va, 4))[0]
+
+    # The objectives screen's words: built once by 0x1006a210, the state words by 0x1006af90.
+    ctor = at(0x1006A210, 0x330)
+    built = [k for k in (1017, 3062, 3061, 6247) if b"\xba" + struct.pack("<I", k) in ctor]
+    states = at(0x1006AF90, 0x198)
+    coloured = []
+    for sid, colour in OBJECTIVE_STATES:
+        i = states.find(b"\x68" + struct.pack("<I", sid))
+        j = states.find(b"\xc7\x00" + struct.pack("<I", colour), i)
+        coloured.append(i >= 0 and 0 < j - i < 0x40)
+    fmt = b"\x68\x84\x4d\x10\x10" in states and at(0x10104D84, 8) == b"%s : %s\0"
+    words = {k: strings.get(k) for k in OBJECTIVE_STRINGS}
+    check("iron3d.dll: the objectives screen's header, footer and state words",
+          built == [1017, 3062, 3061, 6247] and all(coloured) and fmt
+          and b"\x68\xdb\x02\x00\x00" in ctor and words == OBJECTIVE_STRINGS
+          and controls.CMD_GAME.get("CMD_JAMES_MISSION_OBJ") == 731
+          and keys.get("CMD_JAMES_MISSION_OBJ") == "SCAN_F12",
+          f"0x1006a210 loads {[words.get(k) for k in built]} and the key of 731 "
+          f"({keys.get('CMD_JAMES_MISSION_OBJ')}); 0x1006af90 formats '%s : %s' with "
+          + ", ".join(f"{words.get(s)!r} {c:#x}" for (s, c), ok in zip(OBJECTIVE_STATES, coloured,
+                                                                        strict=True) if ok))
+
+    # The layout: the dim, the header at 80, lines from 110 by 20, the bonus list at 260 and
+    # 290, the footer at 450, all centred on 320 in MENU_FONT (the game's +0x14).
+    draw = at(0x1006A9D0, 0x240)
+    lines = at(0x1006AC10, 0x380)
+    dim = b"\x68\xe0\x01\x00\x00\x68\x80\x02\x00\x00\x6a\x00\x6a\x00" in draw \
+        and b"\x83\xe1\x14\x83\xc1\x3c\x69\xc9\xff\x00\x00\x00" in draw
+    # The footer's `push -1` and `push 0x1c2` have an `fmul` between them.
+    places = all(p in draw for p in (
+        b"\x68\x00\xff\x00\xff\x6a\x50", b"\xba\x40\x01\x00\x00", b"\x8b\x70\x14")) \
+        and re.search(rb"\x6a\xff.{0,8}\x68\xc2\x01\x00\x00", draw, re.S) is not None \
+        and all(p in lines for p in (
+            b"\xc7\x44\x24\x18\x6e\x00\x00\x00", b"\x68\x04\x01\x00\x00",
+            b"\xc7\x44\x24\x18\x22\x01\x00\x00", b"\x68\x00\xff\x00\xff", b"\x8b\x70\x14")) \
+        and lines.count(b"\x83\xc7\x14") == 2
+    check("iron3d.dll: the objectives screen over a 60% dim, header y 80, lines 110 + 20i",
+          dim and places,
+          f"0x1006a9d0 fills (0, 0)-(640, 480) at (60 + 20 in CState modes 3-5)% black {dim}; "
+          f"green header at y 80, white footer at 450, lines from 110 by 20, bonus header "
+          f"260 and lines 290, centred on 320 in the game's +0x14 font: {places}")
+
+    # When it opens and closes: armed at mission start, closed 7 s after its first draw; F12
+    # toggles it and disarms the timer on closing; Esc closes it; while up, the screens' draw
+    # skips the HUD, the map and the message box.
+    start = at(0x1005E117, 0x4A)
+    armed = all(p in start for p in (
+        b"\x38\x9e\xe5\x00\x00\x00", b"\x80\xbd\x54\x01\x00\x00\x01",
+        b"\xc6\x80\x90\x05\x00\x00\x01", b"\xc6\x80\x91\x05\x00\x00\x01"))
+    timer = b"\xd8\x1d\xa8\x63\x0e\x10" in draw and f32(0x100E63A8) == 7.0 \
+        and b"\xc6\x83\x91\x05\x00\x00\x00" in draw
+    table = 0x100726DC
+    f12 = u32(table + 4)
+    toggle = at(f12, 0x80)
+    toggles = f12 == 0x1007210E and b"\x88\x85\x92\x05\x00\x00" in toggle \
+        and b"\x88\x85\x90\x05\x00\x00" in toggle and b"\x83\x3a\x07" in toggle
+    esc = at(0x10070E85, 0x40)
+    escapes = b"\x8a\x81\x92\x05\x00\x00" in esc and b"\x88\x87\x92\x05\x00\x00" in esc
+    order = [t for _, t in _calls(at, 0x1008D37F, 0x1008D5AB - 0x1008D37F)
+             if t in (0x10043B20, 0x10073750, 0x1007F4F0, 0x1006A9D0)]
+    hides = order[:4] == [0x10043B20, 0x10073750, 0x1007F4F0, 0x1006A9D0] \
+        and at(0x1008D3AC, 6) == b"\x8a\x81\x92\x05\x00\x00" \
+        and at(0x1008D3F6, 6) == b"\x0f\x85\x9f\x01\x00\x00"
+    check("iron3d.dll: it opens with a new mission for 7 s; F12 and Esc; it hides the HUD",
+          armed and timer and toggles and escapes and hides,
+          f"0x1005e117 sets +0x592, +0x590 and +0x591 unless +0xe5, if +0x154: {armed}; "
+          f"0x1006a9d0 stamps its first draw and closes past {f32(0x100E63A8)} s: {timer}; "
+          f"731 at {f12:#x} toggles +0x592, clearing +0x590 on closing, not in CState mode 7: "
+          f"{toggles}; Esc closes it {escapes}; 0x1008d37f draws {[hex(t) for t in order]} "
+          f"and jumps to the last while +0x592 is set: {hides}")
+
+    # The satellite map: its rects, its alpha, its art.
+    mctor = at(0x10072F90, 0x3B0)
+    rects = []
+    for x0, y0, x1, y1 in MAP_RECTS:
+        # push y1, x1, y0 (ebx when 0), x0 -- a `lea` may sit before the last.
+        y0push = b"\x53" if y0 == 0 else b"\x6a" + bytes([y0])
+        rects.append(re.search(re.escape(b"\x68" + struct.pack("<I", y1) + b"\x68"
+                                         + struct.pack("<I", x1) + y0push)
+                               + rb".{0,8}" + re.escape(b"\x68" + struct.pack("<I", x0)),
+                               mctor, re.S) is not None)
+    alpha = b"\xc7\x85\x90\x00\x00\x00\x80\x00\x00\x00" in mctor \
+        and b"\x83\xfe\x1e" in mctor and b"\x81\xfe\xff\x00\x00\x00" in mctor \
+        and b"\x68\xec\x4e\x10\x10" in mctor and at(0x10104EEC, 10) == b"MAP_ALPHA\0"
+    ini = settings.sections(game / "Iron_3D.ini") if (game / "Iron_3D.ini").exists() else {}
+    shipped = ini.get("CS", {}).get("MAP_ALPHA")
+    loader = at(0x10073550, 0x200)
+    loads = b"\x53\x68\x00\x00\x80\x43\x68\x00\x00\x80\x43\x53\x53\x68\x00\x00\x80\x43\x57" \
+        in loader and all(b"\x68" + struct.pack("<I", va) in loader
+                          for va in (0x10104C98, 0x10104F00, 0x10104EF8)) \
+        and [at(va, 17).split(b"\0")[0] for va in (0x10104C98, 0x10104F00, 0x10104EF8)] \
+        == [b"exit_icon", b"map_compass_icon", b"minimap"] \
+        and b"\xba\xd2\x13\x00\x00" in loader and strings.get(5074) == "Satellite map"
+    hq = {k.lower(): {kk.lower(): vv for kk, vv in v.items()}
+          for k, v in resources.load_cfg(game / "ui" / "hq.cfg").items()}
+    pieces = {}
+    for name in ("map_compass_icon", "exit_icon"):
+        p = hq.get(name, {})
+        rect = tuple(int(p.get(k, -1)) for k in ("offset_x", "offset_y", "width", "height"))
+        pieces[name] = (p.get("texture"), rect, art(p.get("texture", ""), *rect))
+    mini = NResArchive.open(game / "ui" / "minimap.lib")
+    sizes = Counter()
+    for e in mini:
+        tex = texm.decode(mini.read(e))
+        sizes[(tex.width, tex.height)] += 1
+    check("iron3d.dll: the satellite map at (374, 0)-(640, 266), a 256 x 256 minimap, alpha 128",
+          all(rects) and alpha and shipped == "128" and loads
+          and pieces["map_compass_icon"][:2] == ("page6", (132, 106, 21, 42))
+          and pieces["exit_icon"][:2] == ("ui_menu", (241, 70, 13, 13))
+          and all(ok for *_, (_, ok) in pieces.values()) and set(sizes) == {(256, 256)},
+          f"0x10072f90 builds {[r for r, ok in zip(MAP_RECTS, rects, strict=True) if ok]}; "
+          f"MAP_ALPHA 128 by default, held to 30-255: {alpha} (Iron_3D.ini {shipped}); "
+          f"0x10073550 cuts the minimap (0, 0, 256, 256) and loads exit_icon, map_compass_icon, "
+          f"5074: {loads}; hq.cfg {pieces}; ui/minimap.lib {dict(sizes)}")
+
+    # Opening it, and its alpha: M toggles; ] and [ step 12, only while open, and show a label.
+    upper = 0x100726F8
+    m_case, inc_case, dec_case = (u32(upper + 4 * i) for i in (1, 13, 14))
+    toggled = {t for _, t in _calls(at, m_case, 0x21)} == {0x10074100, 0x100740F0}
+    stepped = [t for _, t in _calls(at, inc_case, 0x14)] == [0x10074550] \
+        and [t for _, t in _calls(at, dec_case, 0x14)] == [0x100745B0]
+    inc, dec = at(0x10074550, 0x50), at(0x100745B0, 0x50)
+    steps = all(b"\x83\xf8\x1e" in f and b"\x3d\xff\x00\x00\x00" in f
+                and b"\xc6\x86\x62\x02\x00\x00\x01" in f for f in (inc, dec)) \
+        and b"\x83\xc2\x0c" in inc and b"\x83\xc2\xf4" in dec
+    label = at(0x10074640, 0x25D)
+    labelled = all(p in label for p in (
+        b"\x68\x00\x73\x00\xff", b"\x68\x37\xff\x37\xff", b"\x8b\x70\x10", b"\x6b\xd2\x64",
+        b"\xbf\x05\x00\x00\x00")) and at(0x10104D94, 2) == b"%\0" \
+        and 1.0 in _floats_read(at, 0x10074640, 0x25D)
+    codes = {c: controls.CMD_GAME.get(c) for c in
+             ("CMD_JAMES_SATELLITE_MAP", "CMD_INC_MAP_ALPHA", "CMD_DEC_MAP_ALPHA")}
+    check("iron3d.dll: M opens the map; ] and [ step its alpha by 12 and label it for 1 s",
+          toggled and stepped and steps and labelled
+          and codes == {"CMD_JAMES_SATELLITE_MAP": 739, "CMD_INC_MAP_ALPHA": 751,
+                        "CMD_DEC_MAP_ALPHA": 752}
+          and [keys.get(c) for c in codes] == ["SCAN_M", "SCAN_RBRACKET", "SCAN_LBRACKET"],
+          f"739 at {m_case:#x} opens or closes {toggled}; 751 at {inc_case:#x} and 752 at "
+          f"{dec_case:#x} call +12 and -12 {stepped}, held to 30-255 {steps}; the label, "
+          f"alpha x 100 / 255 down to a 5, '%' in GAME_FONT #37ff37 on 0xff007300, 1 s: "
+          f"{labelled}; keys {[keys.get(c) for c in codes]}")
+
+    # The panel: by view state, the frame, the minimap tinted #37ff37 at the alpha, the compass;
+    # a world point at 256 / side; the frame's pieces in order.
+    variant = at(0x10073750, 0x70)
+    by_state = all(b"\x83\xf8" + bytes([s]) in variant for s in (1, 3, 6, 4)) \
+        and [t for _, t in _calls(at, 0x10073750, 0x70)] == [0x10073830, 0x100737C0, 0x10074220]
+    panel_calls = [t for _, t in _calls(at, 0x100748A0, 0x117)]
+    panel = at(0x100748A0, 0x117)
+    drawn = panel_calls == [0x10025560, 0x10025590, 0x1009ABF0, 0x1008F970, 0x10074640,
+                            0x1008F970] \
+        and b"\xc1\xe5\x18\x81\xcd\x37\xff\x37\x00" in panel \
+        and b"\xba\x05\x00\x00\x00" in panel and b"\xbb\xfb\xff\xff\xff" in panel
+    world = at(0x100741A0, 0x80)
+    placed = _floats_read(at, 0x100741A0, 0x80).count(256.0) == 2 \
+        and b"\x8d\x54\x11\x05" in world and b"\x83\xea\x05" in world
+    frame = at(0x1009ABF0, 0x3B0)
+    kinds = [frame.find(b"\x6a" + bytes([v]) + b"\x6a" + bytes([k]))
+             for k, v in ((9, 0), (9, 1), (9, 2), (9, 3), (10, 1), (10, 0))]
+    framed = all(i >= 0 for i in kinds) and kinds == sorted(kinds) \
+        and sum(t == 0x1008F970 for _, t in _calls(at, 0x1009ABF0, 0x3B0)) == 8
+    cc = resources.load_cfg(game / "ui" / "compaund.cfg")
+    shapes = [(int(cc[n]["width"]), int(cc[n]["height"]), int(cc[n]["rotate"]))
+              for n in ("ccres_frame_corner_1", "ccres_frame_corner_2", "ccres_frame_corner_3",
+                        "ccres_frame_corner_4", "ccres_frame_edge_h", "ccres_frame_edge_v")]
+    check("iron3d.dll: the cockpit's map panel -- frame, minimap from 5 in, compass, places",
+          by_state and drawn and placed and framed
+          and shapes == [(8, 8, 0), (8, 8, 90), (8, 8, 180), (8, 8, 270), (47, 5, 0), (47, 5, 90)],
+          f"0x10073750 takes the panel in view states 1, 3, 4 and 6: {by_state}; 0x100748a0 "
+          f"frames the rect, draws the minimap from 5 in at (alpha << 24) | 0x37ff37 and the "
+          f"compass in the corner: {drawn}; 0x100741a0 puts a point at 256 / side from the "
+          f"inner corner: {placed}; 0x1009abf0 loads corners 1-4, edge_h, edge_v and draws 8 "
+          f"pieces: {framed}; compaund.cfg's frame pieces {shapes}")
+
+    # The marks: units, buildings by type, the +0x700 list, the commander's camera.
+    units_fn = at(0x10077690, 0x6E5)
+    unit_floats = _floats_read(at, 0x10077690, 0x6E5)
+    marked = all(p in units_fn for p in (
+        b"\x68\x64\xc8\x64\xff", b"\x68\x64\xc8\xc8\xff", b"\x81\x7d\x2c\x00\x00\x02\x01",
+        b"\x68\x07\x02\x00\x00", b"\x25\xff\x00\xff\x00\x05\x00\xff\x00\xff")) \
+        and {4.0, 3.0} <= set(unit_floats) and any(math.isclose(f, 1.8, rel_tol=1e-6)
+                                                   for f in unit_floats)
+    build_fn = at(0x100347F0, 0x110)
+    icon_draw = all(p in build_fn for p in (
+        b"\x8d\x50\x0a", b"\x83\xc1\xf6", b"\x69\xc9\x8c\x00\x00\x00\x81\xc1\x60\xb6\x10\x10")) \
+        and {t for _, t in _calls(at, 0x100347F0, 0x110)} >= {0x1009F4C0, 0x100741A0, 0x1008F970}
+    cells = {}
+    for m in re.finditer(rb"((?:\x53|\x68.{4}){5})\x68\x00\x00\x80\x43\x56\xb9(.{4})\xe8",
+                         at(0x10064F80, 0x280), re.S):
+        values = _push_run(m.group(1), True)
+        slot = struct.unpack("<I", m.group(2))[0] - 0x1010B660
+        if values and slot >= 0 and slot % 0x8C == 0:
+            _, h, w, y, x = values
+            cells[slot // 0x8C] = (round(x), round(y), round(w), round(h))
+    types = {v.name: int(v.default, 0) for v in behaviour.variables(game)
+             if v.name in MAP_ICONS}
+    lookup = at(0x1009F4C0, 0xA0)
+    icons = {}
+    for name, value in types.items():
+        index = _compare_tree(lookup, value)
+        icons[name] = None if index in (None, 0xFFFFFFFF) else cells.get(index, ("?",))[:2]
+    inked = [art("icons", x, y, 24, 24)[1] for x, y in {c for c in MAP_ICONS.values() if c}]
+    extras = b"\x68\x00\x64\x64\xff" in at(0x10081A70, 0xC0) \
+        and at(0x10074220, 0x210).count(b"\x68\x00\xff\xff\xff") == 4 \
+        and _floats_read(at, 0x10074220, 0x210).count(7.0) == 2
+    check("iron3d.dll: the map's marks -- units in screen pixels, buildings by type from icons",
+          marked and icon_draw and icons == MAP_ICONS and all(inked) and extras,
+          f"0x10077690: a flyer's cross 4, a square 3, a heading 1.8, the route in 0xff64c864 "
+          f"and 0xffc8c864, the hero green: {marked}; 0x100347f0 draws a 20 x 20 icon: "
+          f"{icon_draw}; icons by type {icons}, inked {sum(inked)}/{len(inked)}; the +0x700 "
+          f"list's 0xff646400 squares and the yellow camera with its 7-unit tick: {extras}")
+
+
 def check_settings(check, game: Path) -> None:
     """The engine's own configuration files, and which module owns each."""
     registry_path = game / settings.COMPONENTS_FILE
@@ -13991,6 +14272,7 @@ def run(game: Path) -> int:
         check_vocabulary, check_resources, check_briefing, check_progression, check_outcome,
         check_hud_top,
         check_hud_radar,
+        check_hud_screens,
         check_settings,
         check_research_streams, check_atmosphere_events,
         check_varset_types, check_profiles, check_walker,

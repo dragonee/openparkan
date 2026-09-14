@@ -19703,3 +19703,347 @@ kind = "site"
 name = "radar constructor: builds the base item first, so a radar keeps the item update that turns its dish"
 read = true
 doc = "docs/25-sensors.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1008ce90"
+kind = "function"
+name = "interface screens object ctor: +4 HUD, +0x10 objectives screen, +0x14 satellite map, +0x1c help, +0x24 pause byte"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1008d200"
+kind = "function"
+name = "screens draw: briefing in level state 5; by CState mode, HUD, map, message box, +0x30 overlay, objectives; only the objectives while +0x592"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1008d37f"
+kind = "site"
+name = "screens draw, CState modes 0-2 and 6: HUD 0x10043b20 unless objectives up, map 0x10073750, box 0x1007f4f0, objectives 0x1006a9d0"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1008d5d0"
+kind = "function"
+name = "screens load: the satellite map's 0x10073550 and +0x18's 0x10082550"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1006a210"
+kind = "function"
+name = "objectives screen ctor: 1017 with CMD 731's key, 3062, 3061; network game 6247 and objpanel icons"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1006a660"
+kind = "function"
+name = "objectives list load: primary_objectives exempt 0 and bonus_objectives exempt 1, when mission.cfg has both; closes the screen"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1006a9d0"
+kind = "function"
+name = "objectives screen draw: 0x99/0xcc black over 640x480, header y 80 green, footer y 450 white, centred on 320; closes 7 s after first draw"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1006ac10"
+kind = "function"
+name = "objectives lines: primary from y 110 by 20, bonus header y 260 and lines from 290, centred, MENU_FONT"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1006af90"
+kind = "function"
+name = "an objective's line: '%s : %s' with 1014 #ebebeb (1), 1027 #ff6464 (-1), 1015 #787878 (else)"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1005e117"
+kind = "site"
+name = "mission load: opens the objectives screen and arms its 7 s close (+0x592/+0x590/+0x591) if block +0x154 and not game +0xe5"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1007210e"
+kind = "site"
+name = "CMD 731 CMD_JAMES_MISSION_OBJ: toggles +0x592, clears +0x590 on closing; not in CState 7, help up or paused"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10070e85"
+kind = "site"
+name = "Esc: closes the objectives screen when up (CState mode not 7)"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10072553"
+kind = "site"
+name = "CMD 740 the wingman menu refused while the objectives screen is up"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10060c73"
+kind = "site"
+name = "interface pass: the tooltip timer 0x1009bc20 skipped while the objectives screen is up"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1008d690"
+kind = "function"
+name = "mouse handler over the interface: returns at once while the objectives screen or help is up (the rest not followed)"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1009bc20"
+kind = "function"
+name = "tooltip timer: a still mouse for 250 ms shows the hover text"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10044190"
+kind = "function"
+name = "CState deque iterator: advance by n (its mode is the front record's first dword)"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10071aa0"
+kind = "function"
+name = "CState deque iterator: advanced copy by n"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10072f90"
+kind = "function"
+name = "satellite map ctor: rects (374,0)-(640,266) cockpit, (374,63)-(640,329) in (374,43)-(640,350); MAP_ALPHA 128, held 30-255"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10073360"
+kind = "function"
+name = "satellite map dtor: writes MAP_ALPHA back to iron_3d.ini [CS]"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10073550"
+kind = "function"
+name = "satellite map load: the minimap resource cut (0,0,256,256), exit_icon and map_compass_icon from the +0xac skin, 5074"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10073750"
+kind = "function"
+name = "satellite map draw while +0x261: the panel in view states 1, 3, 4, 6, else the commander's; then the marks"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100737c0"
+kind = "function"
+name = "satellite map: the cockpit panel on the +0x1bc rect"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10073830"
+kind = "function"
+name = "satellite map: the commander's variant, a 'Satellite map' title bar at (374, 43), exit icon, a selected-unit line at y 330 (places only)"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100748a0"
+kind = "function"
+name = "satellite map panel: frame 0x1009abf0, minimap from 5 in at (alpha<<24)|0x37ff37, alpha label, map_compass_icon at the inner bottom right"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10074640"
+kind = "function"
+name = "satellite map alpha label: alpha x 100 / 255 down to a 5, '%', GAME_FONT #37ff37 on 0xff007300, for 1 s"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10074550"
+kind = "function"
+name = "satellite map alpha +12, held 30-255; shows the label"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100745b0"
+kind = "function"
+name = "satellite map alpha -12, held 30-255; shows the label"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10074610"
+kind = "function"
+name = "satellite map: set +0x262 and stamp the time when given 1"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100724dd"
+kind = "site"
+name = "CMD 739 CMD_JAMES_SATELLITE_MAP: close when open, else open"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10072657"
+kind = "site"
+name = "CMD 751 CMD_INC_MAP_ALPHA: +12 while the map is open"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1007266b"
+kind = "site"
+name = "CMD 752 CMD_DEC_MAP_ALPHA: -12 while the map is open"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100741a0"
+kind = "function"
+name = "satellite map: world (x, y) to (x0 + 5 + round(256x/L), y1 - 5 - round(256y/L)), L the land record's +8"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10074110"
+kind = "function"
+name = "satellite map: map point back to world x, y and the ground height"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10073fd0"
+kind = "function"
+name = "satellite map: is the mouse inside the panel's rect"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10074220"
+kind = "function"
+name = "satellite map marks: the +0x700 list, buildings, units; in view states 2 and 4 the camera in yellow"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10081a70"
+kind = "function"
+name = "satellite map: the level +0x700 list's entries as 3x3 squares in 0xff646400"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10074430"
+kind = "function"
+name = "satellite map, game mode 8: a square blinking 1-6 px wide every 0.1 s (not followed)"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1009f4c0"
+kind = "function"
+name = "building type to map icon: generator 0, mine 1, storage 2, plant 3, bunkers 4, hangar 5, institute 7, towers 8, teleport 9, else -1"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10064f10"
+kind = "function"
+name = "icons page: 24x24 cells for the map's building icons into 0x1010b660 + i*0x8c, and others"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100560b0"
+kind = "function"
+name = "rect ctor (x0, y0, x1, y1) into +8, +0xc, +0x14, +0x18"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100749e0"
+kind = "function"
+name = "satellite map rect pair: +4 the first rect, +0x20 the second"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10035eeb"
+kind = "site"
+name = "the land record's +8, the map's side, against a position near the map edge"
+read = true
+doc = "docs/35-hud.md"

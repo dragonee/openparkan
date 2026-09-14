@@ -627,11 +627,10 @@ first two take the rule's colour.
   component's scan in that form. ~~The cockpit radar~~ is answered in
   [35-hud.md](35-hud.md#the-radar--read-and-seen): it draws the driven unit's
   target list about the camera's heading, and its `RADAR` string
-  (`0x1004011d`) is a sound's name, not a label. Still open: the map,
-  `0x10073550`, which loads `minimap` and `map_compass_icon`, marks units and
-  buildings in the same colours
-  ([How the game colours what it marks](#how-the-game-colours-what-it-marks--read-and-measured));
-  the rest of it is not read.
+  (`0x1004011d`) is a sound's name, not a label. ~~The map~~ is answered in
+  [35-hud.md](35-hud.md#the-satellite-map): the minimap tinted green at the
+  top right, with the player's own units and buildings marked in the rule's
+  colours.
 - ~~What asks an AI machine's device manager to switch camouflage *on*.~~
   Answered: the unit takt's engagement check
   ([When the AI wears it](#the-detection-shield-hides-all-three-and-camouflage-hides-them-again--read-and-measured)).
