@@ -12,7 +12,7 @@ use parkan_formats::control::{
 };
 use parkan_formats::controls::{
     CMD_ENTER_STATE, CMD_JAMES_AIM_TARGET, CMD_JAMES_SELECT_ENEMY, CMD_JAMES_SELECT_FRIEND,
-    CMD_JAMES_SELECT_TARGET,
+    CMD_JAMES_SELECT_TARGET, CMD_JAMES_WINGMAN_MENU,
 };
 use parkan_formats::landmesh::FLAGS_LIQUID_BED_BIT;
 use parkan_formats::materials::Library;
@@ -22,6 +22,7 @@ use parkan_sim::combat::{Event, Part, Round};
 use parkan_sim::effects::{Cue, Frame, Sprite};
 use parkan_sim::ground::Ground;
 use parkan_sim::hit::segment_mesh;
+use parkan_sim::orders::{self, ACKNOWLEDGEMENTS, Digit, Picked, Selector, VoicePick};
 use parkan_sim::solid::{self, NO_CONTACT, Solid};
 use parkan_sim::targeting::{Contact, TargetList};
 
@@ -70,6 +71,17 @@ pub struct View {
     pub eye: Vec3,
     pub look: Vec3,
     pub view_proj: Mat4,
+    /// Shift held, which the wingman selector reads.
+    pub shift: bool,
+}
+
+/// What the wingman panel shows: each wingman's number, name and whether it is chosen;
+/// whether the player is picking; and the order menu's rows with whether each is enabled.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Panel {
+    pub wingmen: Vec<(usize, String, bool)>,
+    pub picking: bool,
+    pub rows: Vec<(String, bool)>,
 }
 
 /// Where a sphere is on screen under `view_proj`, in NDC, when it lies inside the six
@@ -130,6 +142,10 @@ pub struct Play {
     pub progression: Option<Progression>,
     /// Every unit but the hero that is a robot, with the target it is in the battle.
     pub robots: Vec<(usize, Robot)>,
+    /// Each target's name, for the wingman panel.
+    pub names: Vec<String>,
+    pub selector: Selector,
+    voice_pick: VoicePick,
     /// What the game says, not yet shown or played.
     pub says: Vec<Say>,
 }
@@ -269,6 +285,15 @@ impl Play {
                 robots.push((t, robot));
             }
         }
+        let names: Vec<String> = battle
+            .objects
+            .iter()
+            .map(|&o| {
+                let object = &mission.objects[o];
+                let stem = object.path.rsplit(['\\', '/']).next().unwrap_or(&object.path);
+                if object.name.is_empty() { stem.to_owned() } else { object.name.clone() }
+            })
+            .collect();
         let mut play = Play {
             hero,
             ground,
@@ -287,6 +312,9 @@ impl Play {
             targets: TargetList::default(),
             progression: None,
             says: Vec::new(),
+            names,
+            selector: Selector::default(),
+            voice_pick: VoicePick::default(),
             robots,
         };
         for i in 0..play.turret_effects.len() {
@@ -428,12 +456,111 @@ impl Play {
                 self.enter();
                 false
             }
+            CMD_JAMES_WINGMAN_MENU => {
+                let wingmen = self.wingmen().len();
+                self.selector.tilde(view.shift, wingmen);
+                false
+            }
             _ => return false,
         };
         if changed {
             self.target_changed();
         }
         true
+    }
+
+    /// The wingmen (`iron3d.dll:0x10091f20`): the robots of the player's clan on the hero's
+    /// radar, in the radar's order, as indices into `robots`.
+    pub fn wingmen(&self) -> Vec<usize> {
+        self.targets
+            .listed
+            .iter()
+            .filter(|&&t| self.units.get(t).is_some_and(|u| u.clan == Some(self.player_clan)))
+            .filter_map(|&t| self.robots.iter().position(|(rt, _)| *rt == t))
+            .filter(|&r| self.battle.combat.targets.get(self.robots[r].0).is_some_and(|t| t.alive))
+            .collect()
+    }
+
+    /// The hero's current target as the wingman menu's rows test it.
+    fn picked(&self) -> Option<Picked> {
+        let t = self.targets.current?;
+        let u = self.units.get(t)?;
+        Some(Picked {
+            logic_id: u.logical_id,
+            building: u.kind == KIND_BUILDING,
+            type_word: u.type_word,
+            own_clan: u.clan == Some(self.player_clan),
+        })
+    }
+
+    /// A digit key while the selector is open (`iron3d.dll:0x100710fa`); whether it was taken.
+    /// Ordering, digit n gives row n to the chosen wingmen, closes the menu and the last one
+    /// acknowledges (`0x1006df80`, `0x10079230`, `0x1008e840`).
+    ///
+    /// STAND-IN: docs/31-packages.md#the-wingman-menu-from-first-person--read-and-measured --
+    /// whether a digit the selector takes also reaches the input table that toggles the
+    /// hero's guns is not read: it does not.
+    pub fn wingman_digit(&mut self, n: usize) -> bool {
+        let wingmen = self.wingmen();
+        let chosen: Vec<usize> =
+            self.selector.chosen.iter().filter_map(|&i| wingmen.get(i).copied()).collect();
+        match self.selector.digit(n, wingmen.len()) {
+            Digit::Passed => false,
+            Digit::Taken => true,
+            Digit::Row(row) => {
+                let capturers = chosen.iter().all(|&r| matches!(self.robots[r].1.size_class, 1 | 2));
+                let target = self.picked();
+                if !chosen.is_empty()
+                    && orders::enabled(row, target, capturers)
+                    && let Some(order) = orders::order_for(row, self.hero_id, target)
+                {
+                    for &r in &chosen {
+                        self.robots[r].1.order = Some(order);
+                    }
+                    self.selector.close();
+                    let class = chosen.last().map_or(0, |&r| self.robots[r].1.size_class);
+                    let name = format!(
+                        "{}{}",
+                        ACKNOWLEDGEMENTS[self.voice_pick.pick()],
+                        orders::voice_suffix(class)
+                    );
+                    self.say_sound(&name, true);
+                }
+                true
+            }
+        }
+    }
+
+    /// What the wingman panel shows now, while the selector is open (`0x100432f0`,
+    /// `0x1007aaa0`).
+    pub fn panel(&self) -> Option<Panel> {
+        if self.selector.state == orders::State::Off {
+            return None;
+        }
+        let wingmen = self.wingmen();
+        let lines = wingmen
+            .iter()
+            .enumerate()
+            .take(16)
+            .map(|(i, &r)| (i + 1, self.names[self.robots[r].0].clone(), self.selector.chosen.contains(&i)))
+            .collect();
+        let rows = if self.selector.state == orders::State::Ordering {
+            let chosen: Vec<usize> =
+                self.selector.chosen.iter().filter_map(|&i| wingmen.get(i).copied()).collect();
+            let capturers = chosen.iter().all(|&r| matches!(self.robots[r].1.size_class, 1 | 2));
+            let strings = self.progression.as_ref().map(|p| &p.strings);
+            orders::ROWS
+                .iter()
+                .enumerate()
+                .map(|(i, row)| {
+                    let text = strings.and_then(|s| s.get(&row.string)).cloned().unwrap_or_default();
+                    (text, orders::enabled(i, self.picked(), capturers))
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+        Some(Panel { wingmen: lines, picking: self.selector.state == orders::State::Picking, rows })
     }
 
     /// `CMD_ENTER_STATE` (`iron3d.dll:0x10071f08`, docs/27): the hero's target, a unit

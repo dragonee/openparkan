@@ -59,6 +59,10 @@ pub struct Robot {
     pub parts: Vec<RobotPart>,
     pub chassis_part: usize,
     pub turret_part: usize,
+    /// The size class its chassis's name gives (docs/31): t 1, l and h 2, m 3, b 4, else 0.
+    pub size_class: u8,
+    /// The order it was last given, which its behaviour carries out.
+    pub order: Option<parkan_sim::orders::Order>,
     pub walker: Walker,
     pub rig: Rig,
     pub chassis: Rc<LoadedMesh>,
@@ -211,8 +215,18 @@ impl Robot {
         let centre =
             if weight > 0.0 { spheres.iter().map(|s| s.0 * s.1).sum::<Vec3>() / weight } else { Vec3::ZERO };
         let collision = (centre, spheres.iter().map(|s| s.0.distance(centre) + s.1).fold(0.0, f32::max));
+        // `R_H_02`: the letter after `R_` (`Behavior.dll:0x1000cee0`).
+        let size_class = match chassis_part.record.as_bytes().get(2).map(u8::to_ascii_lowercase) {
+            Some(b't') => 1,
+            Some(b'l' | b'h') => 2,
+            Some(b'm') => 3,
+            Some(b'b') => 4,
+            _ => 0,
+        };
         Ok(Some(Robot {
             object,
+            size_class,
+            order: None,
             parts: robot_parts,
             chassis_part: chassis_index,
             turret_part: turret_index,

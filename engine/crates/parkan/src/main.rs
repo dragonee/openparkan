@@ -380,7 +380,20 @@ impl App {
     /// game's command its chord binds (`ui_other.man`).
     fn scan(&mut self, scan: &'static str, pressed: bool) {
         let Some(play) = self.play.as_mut() else { return };
-        play.hero.key(scan, pressed);
+        // While the wingman selector is open a digit is its (`iron3d.dll:0x100710fa`).
+        let digit = scan
+            .strip_prefix("SCAN_W_")
+            .and_then(|d| d.parse::<usize>().ok())
+            .filter(|d| (1..=9).contains(d));
+        let selecting = play.selector.state != parkan_sim::orders::State::Off;
+        match digit {
+            Some(n) if selecting => {
+                if pressed {
+                    play.wingman_digit(n);
+                }
+            }
+            _ => play.hero.key(scan, pressed),
+        }
         if !pressed {
             self.scans.remove(scan);
             return;
@@ -400,6 +413,7 @@ impl App {
             eye: eye.position,
             look: eye.forward,
             view_proj: camera::first_person(&eye, aspect),
+            shift: self.scans.contains("SCAN_LSHIFT") || self.scans.contains("SCAN_RSHIFT"),
         };
         let command = command.to_owned();
         play.command(&command, &view);
@@ -511,11 +525,14 @@ impl App {
                 let eye = play.hero.eye();
                 let view_proj = camera::first_person(&eye, aspect);
                 r.renderer.set_hud(&r.gpu.device, &r.gpu.queue, &scene::hud(play, aspect, view_proj));
-                let runs = self.subtitles.runs(
+                let mut runs = self.subtitles.runs(
                     play.hero.time_ms / 1000.0,
                     r.config.width as f32,
                     r.config.height as f32,
                 );
+                if let Some(panel) = play.panel() {
+                    runs.extend(scene::panel_runs(&panel));
+                }
                 r.renderer.set_text(&r.gpu.device, &r.gpu.queue, &runs);
                 scene::sync(
                     &mut r.renderer,

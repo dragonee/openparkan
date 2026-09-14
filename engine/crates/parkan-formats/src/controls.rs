@@ -192,6 +192,7 @@ pub const CMD_JAMES_SELECT_TARGET: &str = "CMD_JAMES_SELECT_TARGET";
 pub const CMD_JAMES_SELECT_ENEMY: &str = "CMD_JAMES_SELECT_ENEMY";
 pub const CMD_JAMES_SELECT_FRIEND: &str = "CMD_JAMES_SELECT_FRIEND";
 pub const CMD_JAMES_AIM_TARGET: &str = "CMD_JAMES_AIM_TARGET";
+pub const CMD_JAMES_WINGMAN_MENU: &str = "CMD_JAMES_WINGMAN_MENU";
 
 /// One line of a `.man`: a command, and the key chord that runs it.
 #[derive(Clone, Debug, PartialEq, Eq)]

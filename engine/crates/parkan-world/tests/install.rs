@@ -664,3 +664,56 @@ fn a_stone_stops_the_hero_and_a_tree_turns_it_aside() {
     assert!(end.y > tree.y + 40.0, "past the tree: {end}");
     assert!((end.x - tree.x).abs() > 1.0, "turned aside by its trunk: {end}");
 }
+
+#[test]
+#[ignore = "needs the game install"]
+fn captured_warbots_answer_the_wingman_menu_with_the_order_its_row_gives() {
+    use parkan_sim::orders::{FOLLOW, STAYGROUND, State, Target};
+    use parkan_world::play::View;
+
+    let (mut play, m) = mission_01_play();
+    let tick = 1000.0 / 60.0;
+    let target_of = |path: &str| {
+        let object = m.objects.iter().position(|o| o.path.to_ascii_lowercase().ends_with(path)).unwrap();
+        play.battle.objects.iter().position(|&o| o == object).unwrap()
+    };
+    let (mf1, helic) = (target_of("tut1_mf1.dat"), target_of("helic.dat"));
+    for bot in [mf1, helic] {
+        stand_facing(&mut play, bot, 12.0, 3.5);
+        play.tick(tick, [0.0; 2]);
+        while play.targets.current != Some(bot) {
+            play.targets.select_next();
+        }
+        assert!(play.enter());
+    }
+    // A radar takt later both are the player's, and on its radar: wingmen.
+    for _ in 0..60 {
+        play.tick(tick, [0.0; 2]);
+    }
+    assert_eq!(play.wingmen().len(), 2);
+    let eye = play.hero.eye();
+    let view = |shift| View { eye: eye.position, look: eye.forward, view_proj: glam::Mat4::IDENTITY, shift };
+
+    // The tilde chooses both and opens the menu; 2 is Follow me.
+    play.command("CMD_JAMES_WINGMAN_MENU", &view(false));
+    let panel = play.panel().expect("the panel is open");
+    assert_eq!(panel.wingmen.len(), 2);
+    assert_eq!(panel.rows.iter().map(|r| r.0.as_str()).collect::<Vec<_>>()[..2], ["Standby", "Follow me"]);
+    play.says.clear();
+    assert!(play.wingman_digit(2));
+    assert_eq!(play.selector.state, State::Off);
+    for (_, robot) in play.robots.iter().filter(|(t, _)| [mf1, helic].contains(t)) {
+        let order = robot.order.expect("an order");
+        assert_eq!((order.code, order.parameter, order.target), (FOLLOW, 50, Target::LogicId(play.hero_id)));
+    }
+    assert!(!play.says.is_empty(), "the last one acknowledges");
+
+    // Shift picks: only the second wingman, then Standby.
+    play.command("CMD_JAMES_WINGMAN_MENU", &view(true));
+    assert!(play.wingman_digit(2));
+    play.command("CMD_JAMES_WINGMAN_MENU", &view(false));
+    assert!(play.wingman_digit(1));
+    let orders: Vec<i32> = play.robots.iter().filter_map(|(_, r)| r.order.map(|o| o.code)).collect();
+    assert_eq!(orders.iter().filter(|&&c| c == STAYGROUND).count(), 1);
+    assert_eq!(orders.iter().filter(|&&c| c == FOLLOW).count(), 1);
+}
