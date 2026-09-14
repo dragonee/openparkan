@@ -335,11 +335,133 @@ What follows for sensors: a clan's units put only the machines of clans at 0
 in their hostile lists and only those at 2 in their friendly ones — a neutral
 clan's machine is in neither, and an allied clan's is friendly.
 
+## The player's target — *read*, and *measured*
+
+`iron3d.dll` gives every unit record a **target list** (`+0x38`, made by
+`0x100909b0` at `0x1007e570`). The player's target is the current target of the
+list on the unit the player drives:
+
+| offset | what |
+|---|---|
+| +0 | the unit's record |
+| +4 | **the current target**, a record, or none |
+| +8 | the listed contacts, 8 bytes each: an object id and its owner word |
+| +0x14 | the listed records of the unit's own clan |
+| +0x20 | a byte: the last rebuild listed a hostile contact |
+
+**What is listed** (`0x10091b90`):
+
+- **The source.** The list is rebuilt from the unit's radar contacts each time
+  its record's takt (`0x10075680`) runs the list's takt (`0x10090bb0`, called at
+  `0x1007572d`). Life-system slot 9 (`Control.dll:0x1000ef50`) runs the radar
+  query ([above](#a-scan-is-a-sphere-a-falloff-and-three-tests--read)) and
+  pairs each id with its owner word.
+- **Left out** (`0x10091c80`): a `ROBOT_HERO` (`0x1020000`) of the player's
+  clan (game `+0xad0`), and any `BUILDING_BRIDGE` (`0x80001000`) or
+  `BUILDING_RUINE` (`0x80002000`).
+- **Also left out:** a hostile unit whose first order is `0x13`, the value
+  `varset.var` names `ORDER_ROBOT_SHUTDOWN` (`0x10077410`, `0x10091d15`). A
+  building is never left out this way.
+- **Hostile** here means the clan's relation word is 0, from a clan other than
+  the unit's own whose type is not 0 (`0x10039440`, `0x100394b0`;
+  [below](#clan-relations-the-files-words-straight-through--read-and-measured)).
+- **A friend** is only a unit of the unit's own clan (`0x10091070` compares
+  owner words). An allied clan's unit is not one.
+- **The enemy voice.** When a rebuild lists a hostile contact after one that
+  listed none, the driven unit plays `VOICE_ENEMY_DETECTED` (`0x10091ea6`).
+
+**Each takt, on the unit the player drives** (the record at game `+0xaec` in
+view states 1 and 3, `+0xaf0` in state 6):
+
+1. **The target is dropped** (`0x10090c28`–`0x10090cb9`) in three cases:
+   - its object has left the world tree (no parent);
+   - its owner word is `0xfffe`;
+   - it is farther across the ground (x and y) than the unit's **sensor range**.
+
+   The sensor range is life-system property `0x50`, the number the stat panel
+   prints after "Sensor range:" (string 5073). A machine's control system
+   answers it with the radar's value 3 (`Control.dll:0x1000e7fc`, through the
+   device getter's id 8, `0x1002b6ec`). The base class has no case for it
+   (`0x1000dcc0`). A unit without a radar gets 1 m.
+2. **An empty list leaves no target** (`0x10090cc4`).
+3. **With no target, one is picked:**
+   - the nearest hostile across the ground (`0x10090e30`);
+   - failing that, the nearest unit of its own clan (`0x10091070`);
+   - failing that, the nearest listed object that has a record (`0x10090d13`).
+
+So **the player has a target whenever anything is on its radar** (*derived*).
+
+**The keys** (`iron3d.dll`'s command handler `0x10071cd0`, cases `0x10072187`,
+`0x100721c2`, `0x100721fd` and `0x100723ed`; the bindings are *measured*):
+
+| command | key | what it does |
+|---|---|---|
+| `CMD_JAMES_SELECT_TARGET` 732, "Target selection" | Tab | the listed entry after the target, wrapping; the first when the target is not listed (`0x10090dc0`) |
+| `CMD_JAMES_SELECT_ENEMY` 733, "Select nearest enemy" | E | with a hostile target, the next hostile in list order, wrapping; otherwise the nearest hostile across the ground (`0x10090e30`) |
+| `CMD_JAMES_SELECT_FRIEND` 734, "Select nearest friend" | T (F in `ui_other_d.man`) | the same over the unit's own clan (`0x10091070`) |
+| `CMD_JAMES_AIM_TARGET` 750, "Aim target" | right mouse button | a pick along the middle of the view (`0x100911f0`) |
+
+A pick that finds nothing leaves the target as it was, except the right button,
+which clears it.
+
+**The right button** (`0x100911f0`):
+
+- **The ray** runs from the camera through the middle of its view, the mean of
+  its four corner points (`0x100912d7`). It starts at the unit's `+0x98` along
+  that line and ends at the sensor range. When the range does not reach past
+  the start, nothing happens (`0x100914e2`).
+- **The candidates** are the listed objects, less the current target, whose
+  bounding spheres lie inside the camera's six frustum planes (`0x10091610`).
+- **First choice** (`0x10091780`): the candidate nearest the ray's start that
+  meets three conditions:
+  - the ray passes through its sphere, taken at 0.4 of its radius for a
+    building (kind 3) and 0.6 for anything else;
+  - its centre lies ahead, within the ray's length;
+  - its centre is farther from the unit than that radius plus the unit's
+    `+0x94`.
+- **Otherwise** the candidate whose centre projects nearest the middle of the
+  screen (`0x100919a0`).
+- **The result becomes the target**, or none. The current target is never a
+  candidate, so pressing again picks the next object along the line
+  (*derived*).
+
+**Setting a target** (`0x10090a70`) plays `TARGET_SELECTED`, `i_trg_sel.wav`,
+when it changes on the driven unit's list. It then hands the target to the
+unit's guided guns
+([29-weapons.md](29-weapons.md#the-players-target-reaches-the-turret--read)).
+When an object leaves the game, every list aimed at it is set to none
+(`0x1007d610`, `0x1007d690`).
+
+**A vacant vehicle selects itself** (`0x100757ad`–`0x100758a9`):
+
+- **When.** A unit of a type-3 clan does this once in its life (`+0x134`):
+  when the player's hero comes within the hero's sensor range across the
+  ground, unless the view is in state 5.
+- **What happens.** The unit becomes the hero's target. The game shows string
+  3040, "Vacant vehicle detected...", and plays `VOICE_UNIT_DETECTED`,
+  `vc_u_det.wav`.
+- **Why it matters.** Enter captures that target
+  ([27-ownership.md](27-ownership.md#a-neutral-unit-is-taken-by-the-hero--read-and-measured)).
+
+*Measured*:
+
+- The four commands are bound to Tab, E, T and the right button in
+  `ui_other.man` and `addition.man`; `ui_other_d.man` puts the friend on F.
+- The three sounds are named in `ui/game_resources.cfg`.
+- The constants are `varset.var`'s.
+- **On Mission 01** only `Enm` is hostile to `Plr`, and its one unit is
+  `tut1_e1`. E finds nothing else. The target dummies (`Trgt`) are neutral to
+  the player. Tab, the right button or the nearest-listed rule picks them.
+
 ## Not established
 
 - ~~How the mission file's 0/1 relation words become the runtime's 0 and 2.~~
   Answered: the file holds 0, 1 and 2, and they pass straight through
   ([Clan relations](#clan-relations-the-files-words-straight-through--read-and-measured)).
+- How the HUD marks the player's target, and what plays `TARGET_READY` and
+  `TARGET_ZOOM` (`iron3d.dll:0x1009d15b`, `0x1009d0bc`). What the unit
+  record's `+0x94` and `+0x98` are, the right button's margin and its ray's
+  start.
 - What the player's map and radar display show. `IArealMap`'s side of the
   radar report is answered ([above](#what-the-ai-does-with-it--read)), but
   `iron3d.dll`'s drawing was not read. One negative, as a search:

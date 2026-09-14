@@ -276,7 +276,10 @@ Capturing a bot is not done at a pod. It is the hero's **Enter** —
    ([29-weapons.md](29-weapons.md#who-may-drive-a-units-guns--read)). The
    flag is also written where the hero's body is shown and hidden
    (`0x1006792a`, `0x1006788a`) and in four more places not read.
-2. **The target must be a unit within 20.** It is the hero's current target.
+2. **The target must be a unit within 20.** It is the hero's current target
+   ([25-sensors.md](25-sensors.md#the-players-target--read-and-measured)). A
+   neutral unit makes itself that target the first time the hero comes within
+   its sensor range ("Vacant vehicle detected...").
    Its `Type` must have no bit outside `0x103e000` (`0x10071fad`): transport,
    builder, warrior, HQ or hero. It must be within 20 of the hero across the
    ground (`0x10071fe7`).

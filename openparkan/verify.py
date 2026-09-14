@@ -7765,6 +7765,130 @@ def check_firing(check, game: Path) -> None:
           f"{[tuple(round(v, 2) for v in w) for w in sorted(sound_windows)]} of its arm")
 
 
+#: The game commands that pick the player's target, their Command.dsc sentence,
+#: and the key ui_other.man binds (iron3d.dll's command handler, 0x10071cd0).
+TARGET_PICKS = {
+    "CMD_JAMES_SELECT_TARGET": ("Target selection", "SCAN_TAB"),
+    "CMD_JAMES_SELECT_ENEMY": ("Select nearest enemy", "SCAN_E"),
+    "CMD_JAMES_SELECT_FRIEND": ("Select nearest friend", "SCAN_T"),
+    "CMD_JAMES_AIM_TARGET": ("Aim target", "SCAN_RMOUSE"),
+}
+
+
+def check_targeting(check, game: Path) -> None:
+    """The player's target: the keys that pick it, and the gate a guided gun keeps."""
+    labels = controls.commands(game)
+
+    def picks(name: str) -> dict[str, str]:
+        path = game / name
+        return ({b.command: b.chord for b in controls.bindings(path) if b.command in TARGET_PICKS}
+                if path.exists() else {})
+
+    shipped = {name: picks(name) for name in ("ui_other.man", "addition.man")}
+    default = picks("ui_other_d.man")
+    want = {c: key for c, (_, key) in TARGET_PICKS.items()}
+    check("ui_other.man: Tab, E, T and the right button pick the player's target",
+          all(keys == want for keys in shipped.values())
+          and default == {**want, "CMD_JAMES_SELECT_FRIEND": "SCAN_F"}
+          and all(labels.get(c) == text for c, (text, _) in TARGET_PICKS.items())
+          and [controls.CMD.get(c) for c in TARGET_PICKS] == [732, 733, 734, 750],
+          f"{ {c[10:]: (controls.CMD.get(c), labels.get(c), k) for c, k in want.items()} }; "
+          f"ui_other_d.man puts the friend on {default.get('CMD_JAMES_SELECT_FRIEND')}.  "
+          f"iron3d.dll's handler sends 732-734 to 0x10090dc0, 0x10090e30, 0x10091070 and "
+          f"750 to 0x100911f0 on the driven unit's target list")
+
+    roles = {d.role: d.bindings for d in resources.descriptors(game / "ui" / "game_resources.cfg")}
+    iron = resources.strings((game / "iron3d.dll").read_bytes())
+    sounds = (roles.get("sounds", {}).get("TARGET_SELECTED"),
+              roles.get("voices", {}).get("VOICE_UNIT_DETECTED"),
+              roles.get("voices", {}).get("VOICE_ENEMY_DETECTED"))
+    check("game_resources.cfg: a new target, a vacant vehicle and an enemy each have a sound",
+          sounds == ("i_trg_sel.wav", "vc_u_det.wav", "vr_eu_det.wav")
+          and iron.get(3040) == "Vacant vehicle detected..."
+          and iron.get(5073) == "Sensor range:",
+          f"TARGET_SELECTED, VOICE_UNIT_DETECTED, VOICE_ENEMY_DETECTED = {sounds} "
+          f"(iron3d.dll:0x10090aec, 0x10075882, 0x10091ea6); string 3040 "
+          f"{iron.get(3040)!r} with the vacant vehicle (0x10075832), and 5073 "
+          f"{iron.get(5073)!r} beside property 0x50, the range a target is kept within")
+
+    consts = {v.name: int(v.default, 0) for v in behaviour.variables(game)
+              if v.name in ("ROBOT_HERO", "BUILDING_BRIDGE", "BUILDING_RUINE",
+                            "ORDER_ROBOT_SHUTDOWN")}
+    check("varset.var: the list leaves out heroes, bridges, ruins and shut-down enemies",
+          consts == {"ROBOT_HERO": 0x1020000, "BUILDING_BRIDGE": 0x80001000,
+                     "BUILDING_RUINE": 0x80002000, "ORDER_ROBOT_SHUTDOWN": 0x13},
+          f"{ {k: hex(v) for k, v in sorted(consts.items())} }: the types "
+          f"iron3d.dll:0x10091c80 compares and the first order 0x10077410 tests")
+
+    names = frozenset(p.name.lower() for p in all_archives(game))
+    turret_states: Counter[int | None] = Counter()
+    gun_tails: Counter[bool] = Counter()
+    for path in all_archives(game):
+        archive = NResArchive.open(path)
+        for entry in archive:
+            if not entry.tag.upper().startswith("CTL"):
+                continue
+            try:
+                c = control.parse(archive.read(entry), names)
+            except control.ControlFormatError:
+                continue
+            for p in c.components:
+                if p.type_id == control.TURRET_TYPE:
+                    turret_states[p.state] += 1
+                elif p.type_id in (control.GUN_TYPE, control.BUILDER_TYPE):
+                    gun_tails[not any(p.values[8:11])] += 1
+    check(".ctl: a turret keeps its class's state, and no gun files values 8-10",
+          list(turret_states) == [None] and list(gun_tails) == [True],
+          f"record +0x18 on {sum(turret_states.values())} turrets: {dict(turret_states)}, so "
+          f"every turret starts in 0x200, CIS_MANUALCONTROL (Control.dll:0x10027103), where "
+          f"its relink hands an unguided gun no target (0x10028164); values 8-10 are zero on "
+          f"{gun_tails[True]} of {sum(gun_tails.values())} guns, and the gun fills them from "
+          f"its round (0x100297e0-0x10029907)")
+
+    arm = weapons.Armoury(game)
+    rounds = NResArchive.open(game / "weapon.rlb")
+    loaded = [arm.round(e.name[:-4]) for e in rounds if e.name.lower().endswith(".ctl")]
+    loaded = [r for r in loaded if r is not None]
+    guided = [r for r in loaded if r.guided]
+    untargeted = sorted(r.member.lower() for r in guided if r.lock_ms <= 0)
+    turrets = NResArchive.open(game / "turrets.rlb")
+    tur = control.parse(turrets.read_name("o_tur_ht_02.ctl"), names)
+    hero = [(p.resource.member.lower(), weapons.target_gate(arm.round(p.resource.member)))
+            for p in tur.components if p.type_id == control.GUN_TYPE]
+    shown = [(m, round(g.range), round(g.cone_cos, 4), round(g.lock_s, 2)) for m, g in hero]
+    check("o_tur_ht_02: the plasma rifle and the missiles need a target, held for a lock",
+          shown == [("bb_h_01", 500, -1.0, -1.0), ("bp_h_01", 150, 0.9689, 0.25),
+                    ("bl_h_01", 1000, -1.0, -1.0), ("bm_h_01", 350, 0.66, 4.0)]
+          and all(r.range > 0 for r in loaded)
+          and len(untargeted) == 3,
+          f"(round, value 8 m, value 10, value 9 s) = {shown}: a guided gun fires at a target "
+          f"within value 8 and whose cosine off the barrel beats value 10, once value 9 has "
+          f"counted down (Control.dll:0x10029d3a-0x10029f45).  All {len(loaded)} rounds have "
+          f"a range; {len(guided) - len(untargeted)} of {len(guided)} seekers carry a "
+          f"lock, and the guns of {untargeted} fire untargeted")
+
+    first = next((d for d in gamedir.missions(game)
+                  if d.as_posix().endswith("CAMPAIGN.00/Mission.01")), None)
+    if first is None:
+        return
+    tut = mission.load(first / "data.tma")
+    words = tut.relations()
+    clan_names = [c.name for c in tut.clans]
+    player = clan_names.index("Plr") if "Plr" in clan_names else 0
+    hostile = [clan_names[j] for j, w in enumerate(words[player])
+               if j != player and w == mission.RELATION_HOSTILE]
+    by_clan: dict[str, list[str]] = defaultdict(list)
+    for o in tut.objects:
+        if o.kind == mission.KIND_UNIT and 0 <= o.clan_index < len(clan_names):
+            by_clan[clan_names[o.clan_index]].append(o.path.split("\\")[-1].lower())
+    check("Mission 01: E finds only Enm's walker; the dummies are neutral",
+          hostile == ["Enm"] and by_clan["Enm"] == ["tut1_e1.dat"]
+          and words[player][clan_names.index("Trgt")] == mission.RELATION_NEUTRAL,
+          f"clans hostile to Plr: {hostile}, whose units are {by_clan['Enm']}; Trgt's "
+          f"{sorted(set(by_clan['Trgt']))} are neutral to Plr, so Tab, the right button or the "
+          f"nearest-listed rule picks them (iron3d.dll:0x10090d13), never E")
+
+
 def _turret_role(text: tuple[str, ...]) -> int:
     first = text[0].lower() if text else ""
     return {"warbot": objects.TYPE_WARRIOR, "cargobot": objects.TYPE_TRANSPORT,
@@ -11696,7 +11820,7 @@ def run(game: Path) -> int:
         check_motion, check_playback, check_ground, check_sensors, check_hit_test,
         check_combat, check_ownership,
         check_capture, check_repair, check_chassis, check_weapons, check_firing,
-        check_turrets, check_packages, check_builder,
+        check_targeting, check_turrets, check_packages, check_builder,
         check_units, check_loading, check_search, check_construction,
         check_controls, check_player_input, check_turret_channels,
         check_behaviour, check_research, check_descriptions, check_saves,

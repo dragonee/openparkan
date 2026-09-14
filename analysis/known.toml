@@ -13524,14 +13524,6 @@ read = true
 
 [[entry]]
 module = "Control.dll"
-at = "0x10029edd"
-kind = "site"
-name = "gun fire with value 8 > 0: barrel more than value 10 off its target -> state 8"
-doc = "docs/29-weapons.md"
-read = true
-
-[[entry]]
-module = "Control.dll"
 at = "0x10029f2c"
 kind = "site"
 name = "gun fire with value 9 > 0: counts a delay (+0x170, seconds) down before firing"
@@ -15325,3 +15317,451 @@ kind = "site"
 name = "a call through a +0x50 pointer's slot 9; not followed, may not be a SuperAI"
 read = false
 doc = "docs/34-progression.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x10029edd"
+kind = "site"
+name = "gun fire with value 8 > 0: the barrel's direction dotted with the line to the target not above value 10, a cosine -> state 8"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100726f8"
+kind = "table"
+name = "command handler jump table for 738..754; 750 CMD_JAMES_AIM_TARGET -> 0x100723ed"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10072187"
+kind = "site"
+name = "command 732 CMD_JAMES_SELECT_TARGET: the driven unit's target list (+0x38) steps (0x10090dc0), view 1/3 on +0xaec, 6 on +0xaf0"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100721c2"
+kind = "site"
+name = "command 733 CMD_JAMES_SELECT_ENEMY: the driven unit's list picks a hostile (0x10090e30)"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100721fd"
+kind = "site"
+name = "command 734 CMD_JAMES_SELECT_FRIEND: the driven unit's list picks its own clan (0x10091070)"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100723ed"
+kind = "site"
+name = "command 750 CMD_JAMES_AIM_TARGET: the driven unit's list picks along the view (0x100911f0)"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100909b0"
+kind = "function"
+name = "target list constructor: +0 the unit record, +4 target, +8 contacts (id, owner), +0x14 own-clan records, +0x20 enemy-seen byte"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1007e570"
+kind = "site"
+name = "unit record build: its target list at +0x38"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10090a70"
+kind = "function"
+name = "target list set target: TARGET_SELECTED when it changes on the driven unit, then hands it to the turrets (0x10091a80)"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10090bb0"
+kind = "function"
+name = "target list takt: rebuild from radar contacts; on the driven unit drop a gone, 0xfffe or out-of-sensor-range target, then pick nearest hostile, own clan, any"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10090c28"
+kind = "site"
+name = "target list takt: the target is dropped when its object has no parent, its owner is 0xfffe, or its 2D distance exceeds property 0x50 (1.0 when unanswered)"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10090d13"
+kind = "site"
+name = "target list takt: with no hostile and no own-clan unit, the nearest listed object that has a record"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10090dc0"
+kind = "function"
+name = "select target: the listed entry after the current target, wrapping; the first when it is not listed"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10090e30"
+kind = "function"
+name = "select enemy: next hostile after a hostile target in list order, else the nearest hostile across the ground (clan != own, type != 0, relation 0)"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10091070"
+kind = "function"
+name = "select friend: next own-clan entry after an own-clan target, else the nearest own-clan unit across the ground"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100911f0"
+kind = "function"
+name = "aim target: camera ray through the view's middle from unit +0x98 to the sensor range; sphere hit, else nearest to screen centre; result or none becomes the target"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100912d7"
+kind = "site"
+name = "aim target: the mean of the camera's four corner points (x 0.25), the view's middle"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100914e2"
+kind = "site"
+name = "aim target: nothing when the sensor range does not reach past the ray's start"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10091610"
+kind = "function"
+name = "aim target candidates: listed objects other than the target whose bounding sphere is inside the camera's six frustum planes"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10091780"
+kind = "function"
+name = "aim target ray pick: nearest sphere the segment crosses, radius x 0.4 for kind 3 and 0.6 otherwise; centre ahead, within length, beyond radius + unit +0x94"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100919a0"
+kind = "function"
+name = "aim target fallback: the candidate whose projected centre is nearest the screen's middle"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10091a80"
+kind = "function"
+name = "hand the target to the turrets: per weapon entry (+0x68, 36 bytes) whose turret (+8) may take input, interface 0x202 slot 13 (turret, target id, 0)"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10091b13"
+kind = "site"
+name = "target hand-over: interface 0x202 slot 13 with the target object's id and part 0"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10091b90"
+kind = "function"
+name = "target list rebuild from the contacts: skip a player's-clan ROBOT_HERO, bridges, ruins and shut-down hostile units; VOICE_ENEMY_DETECTED on the first hostile"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10091c80"
+kind = "site"
+name = "target list rebuild: type 0x1020000 of the player's clan (+0xad0), 0x80001000 and 0x80002000 are not listed"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10091d15"
+kind = "site"
+name = "target list rebuild: a hostile non-building whose first order is 0x13 is not listed"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10091ea6"
+kind = "site"
+name = "target list rebuild: VOICE_ENEMY_DETECTED when a hostile is listed after none (+0x20)"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10039440"
+kind = "function"
+name = "clan record: 1 when its SuperAI's relation word towards the given clan is 0, hostile"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100394b0"
+kind = "function"
+name = "clan record: 1 when its type (+0xc) is 0, nature"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10077410"
+kind = "function"
+name = "unit record: 1 when its first order (interface 0x10 slots 4, 5) is 0x13, ORDER_ROBOT_SHUTDOWN"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10077450"
+kind = "function"
+name = "object id -> the game's record for it (0x10072d10, then 0x100728a0), or none"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10075680"
+kind = "function"
+name = "unit record takt: takes the vacant-vehicle target and runs the target list's takt"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1007572d"
+kind = "site"
+name = "unit record takt: the target list's takt (0x10090bb0)"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1007582d"
+kind = "site"
+name = "vacant vehicle: a type-3 clan's unit, once (+0x134), within the hero's sensor range becomes the hero's target; string 3040 and VOICE_UNIT_DETECTED"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1007d610"
+kind = "function"
+name = "an object leaving: every target list aimed at it is set to none"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1009fe50"
+kind = "function"
+name = "unit weapon entry (36 bytes): +4 the gun's component index, +8 the turret before it"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100759d3"
+kind = "site"
+name = "weapon entries: a class-1 component's index is kept as the turret of the guns after it"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1009d0bc"
+kind = "site"
+name = "HUD: TARGET_ZOOM sound; what triggers it not read"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1009d15b"
+kind = "site"
+name = "HUD: TARGET_READY sound; what triggers it not read"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000ef50"
+kind = "function"
+name = "ILifeSystem slot 9: the radar contacts (device slot 10) with each contact's owner word (low 16 bits) alongside"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000e6c0"
+kind = "function"
+name = "machine control system property get: 0x26, 0x36, 0x50, 0xa2, 0xa3, 0xa9, 0xb1-0xb3, then the base getter 0x1000dcc0"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000e7fc"
+kind = "site"
+name = "machine property 0x50, the sensor range: the device getter's id 8, the radar's value 3; fails with no radar"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10031af0"
+kind = "function"
+name = "machine ILifeSystem slot 5 thunk: this - 4, then 0x1000e6c0"
+doc = "docs/25-sensors.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x100314c5"
+kind = "site"
+name = "machine control system constructor: vtables 0x1003d298, 0x1003d254 (ILifeSystem), 0x1003d1fc (0x202), 0x1003d1b4 (devices)"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002edf0"
+kind = "function"
+name = "interface 0x202 slot 13: its (id, part) pair to the device interface's slot 16, SetTarget; the index argument unused"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10028164"
+kind = "site"
+name = "turret relink: a gun with value 9 below 0 on a turret in state 0x200 gets no target (0, -2)"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10027103"
+kind = "site"
+name = "turret constructor: state word +0x50 = 0x200, CIS_MANUALCONTROL"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002a160"
+kind = "function"
+name = "gun lock restart: state 2, +0x17c = 0, the lock +0x170 = value 9"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x100297e0"
+kind = "site"
+name = "gun round link: value 8 = the round's range (frame +108) when positive"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10029896"
+kind = "site"
+name = "gun round link: value 8 = min(value 8, the seeker's reach, device get 10)"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x100298bc"
+kind = "site"
+name = "gun round link: value 10 = cos(the seeker's value 0, device get 11), else -1"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x100298f1"
+kind = "site"
+name = "gun round link: the lock +0x170 = the seeker's value 2 (device get 12) x 0.001 s, else -1; value 9 takes it (0x10029907)"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10029d3a"
+kind = "site"
+name = "gun fire gate starts: values 8 and 9; no gate while value 8 <= 0"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10029e28"
+kind = "site"
+name = "gun fire gate: the target's squared distance from the unit against value 8 squared"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10029f60"
+kind = "site"
+name = "gun fire gate: no target with value 9 > 0 -> state 2, no shot"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10029fbb"
+kind = "site"
+name = "gun stroke start: state 3 and the lock back to value 9"
+doc = "docs/29-weapons.md"
+read = true

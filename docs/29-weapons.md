@@ -184,11 +184,12 @@ stroke or starts one. It starts one only if all of these hold:
   ([below](#a-gun-is-ready-once-its-arm-is-out--read-and-measured));
 - its state word is non-zero.
 
-Values 8–10 add target gates: no shot at a target farther than value 8
-(`0x10029e37`) or further off the barrel than the angle value 10
-(`0x10029edd`), and a value-9 delay in seconds counted down first
-(`0x10029f2c`). They are zero on every
-shipped gun, so no gate applies.
+Values 8–10 add a target gate: no shot at a target farther than value 8
+(`0x10029e37`) or further off the barrel than value 10 allows (`0x10029edd`),
+and a value-9 lock in seconds counted down first (`0x10029f2c`). The files
+leave them zero, but **the gun fills them from its round**, so every gun has
+a range gate and every guided gun a lock
+([A guided gun waits for a lock](#a-guided-gun-waits-for-a-lock--read-and-measured)).
 
 **A barrel stroke has four steps** (`0x1002a190`):
 
@@ -332,15 +333,14 @@ A gun's target (`+0x108`) is its turret's (`0x10028130`). The turret's target
 is set through the unit's interface `0x204` slot 16, which also sets the
 unit's own seeker.
 
-**Only the AI sets it** (*read*):
+**The AI and the player's target list set it** (*read*):
 
 - **One writer.** The turret's target is written by its set-target method
   (`0x100280d0`), and only the stream restore writes it besides.
-- **One way in.** That method is reached only through interface `0x204` slot 16
-  (`0x1002cb00`).
-- **Every caller was enumerated.** Each call at that slot's offset with a
-  target argument was listed in every module. Five are in `Behavior.dll`'s
-  fight code:
+- **One way in.** That method is reached only through the device interface's
+  slot 16, `SetTarget` (`0x1002cb00`), which sets the unit's seeker too.
+- **The AI's calls.** Each call at that slot's offset with a target argument
+  was listed in every module. Five are in `Behavior.dll`'s fight code:
   - `0x10024b1b` and `0x10024f8f` aim, in the fight module's takt;
   - `0x10025107` clears the target with (0, 0) when the module is reset
     (`0x10025070`, from the mode set once flag `0x20` is on, and from
@@ -350,22 +350,115 @@ unit's own seeker.
     fight takt calls. Neither was read further.
 - **The sixth caller** is the gun handing its target to its round
   (`0x1002a514`).
-- **Nothing else.** `iron3d.dll`, `World3D.dll`'s manual controller and
-  `Wizard.dll` never call it.
 - **The fight module runs only while `MBehaviour` flag `0x40` is set**
   (`Behavior.dll:0x100050c5`). Taking the hero over clears it
   ([above](#who-may-drive-a-units-guns--read)).
+- **The player's target comes in sideways.** `iron3d.dll` never calls slot 16,
+  which is why the search above missed it: it calls **interface `0x202` slot
+  13** (`Control.dll:0x1002edf0`), which passes its (id, part) pair straight to
+  the device interface's slot 16 and ignores its own index argument. A machine's
+  control system installs that same method (vtable `0x1003d1fc`, constructor
+  `0x100314c5`). The next section follows it.
 
-So in first-person play the hero's turret keeps whatever target its AI last set,
-or none. With no target a seeker gives no heading
-([Guided rounds](#guided-rounds-differ-in-how-hard-they-steer--read-and-measured)),
-so the plasma bolt and the missile fly straight (*derived*).
+This page once concluded from the search that nothing sets the hero's turret
+target in first-person play, so its guided rounds fly straight. That was
+wrong: the player always has a target while anything is on its radar
+([25-sensors.md](25-sensors.md#the-players-target--read-and-measured)).
+
+### The player's target reaches the turret — *read*
+
+Whenever the player's target list sets a target (`iron3d.dll:0x10090b6a`,
+`0x100915d8`), and when a unit changes hands (`0x10060679`, `0x100606b2`,
+`0x100606eb`), `0x10091a80` hands it to the unit's turrets:
+
+- **The unit record's weapon entries** (`+0x68`, 36 bytes each, built by
+  `0x1009fe50` from `0x10075b25`) keep a gun's component index at `+4` and, at
+  `+8`, the index of the turret listed before it (`0x100759d3`).
+- **For each entry whose turret may take input** (bit 0 of the manual
+  controller's slot 6, `0x10091aff`), it calls interface `0x202` slot 13 with
+  the target's object id and part 0 (`0x10091b13`). So the turret gets
+  `SetTarget` (`0x1002cb00`, `0x100280d0`), and the unit's seeker gets the same
+  pair.
+- **The turret relinks its guns** (`0x10028130`): each gun takes the target
+  (`+0x108`) — **except an unguided gun on a turret whose state word is
+  `0x200`**, `CIS_MANUALCONTROL`, which gets none (`0x10028164`; value 9 below
+  zero marks it unguided, below). Every turret is built in `0x200`
+  (`0x10027103`) and no turret record sets another (*measured*), and nothing
+  on the player's side changes it. So on a player's unit **only the guided
+  guns receive the target** (*derived*).
+- **A relink restarts each gun's lock** (`0x1002a160`): state 2, the lock back to
+  value 9.
 
 **Lead is the AI's too** (*read*). Property `0x54` on a turret is its lead speed
 `+0xa8` (`Control.dll:0x1002ea10`). The fight module copies a gun's round speed
 into it (`Behavior.dll:0x10024ba2`), and a turret in `CIS_POINTTRACE` aims at
 the point where a target moving at its velocity (property `0x27`) meets a round
 at that speed (`Control.dll:0x10028640`). Nothing sets it for the player.
+
+### A guided gun waits for a lock — *read*, and *measured*
+
+**The gun fills values 8–10 from its round** when it links it, in the code that
+also keeps the round's speed and gravity (`0x100297ef`):
+
+- **Value 8, a range.** The round's range, its frame's `+108`, when that is
+  positive (`0x100297e0`). With a seeker, the smaller of that and the seeker's
+  reach, value 1 (`0x10029896`).
+- **Value 10, a cone.** The cosine of the seeker's value 0 (`0x100298bc`), or −1
+  with no seeker (`0x100298d5`).
+- **Value 9, a lock.** The seeker's value 2 × 0.001, in seconds (`0x100298f1`),
+  or −1 with no seeker (`0x10029907`). The gun's lock (`+0x170`) starts there.
+
+**The gate** runs each time the gun would start a stroke, once its rounds,
+capacitor and ready byte have passed
+([The gun's takt](#the-guns-takt-a-stroke-then-the-interval)), and only while
+value 8 is positive (`0x10029d3a`):
+
+1. **No target.** With value 9 positive the gun reports state 2 and does not
+   fire (`0x10029f60`). With value 9 at or below zero it fires as if there were
+   no gate.
+2. **Too far.** When the target's point (its part's where it names one,
+   `0x1002a8c0`) is farther from the unit's position than value 8
+   (`0x10029e28`, squared): state 7, no shot, and the lock goes back to value 9.
+3. **Off the barrel.** With value 10 positive, the barrel point's direction and
+   the line from the unit to the target are normalised. A dot product no greater
+   than value 10 gives state 8, no shot, and the lock back to value 9
+   (`0x10029edd`). Otherwise the state is 1.
+4. **The lock.** While value 9 and the lock are both positive, a gun in state 1
+   takes the time since its last wake × 0.001 off the lock and does not fire
+   yet (`0x10029f2c`). In any other state it does not fire either.
+5. **The shot.** Past the gate the gun fires when its state word asks, and
+   starting the stroke puts the lock back to value 9 (`0x10029fbb`).
+
+So the lock counts down whether or not the button is held: it needs a ready
+gun and a target in range and inside the cone. It counts only at the gun's
+wakes, and a stroke's wakes continue the stroke before the gate
+(`0x10029cb6`), so it does not count during a stroke (*derived*).
+
+*Measured*, on the hero turret `o_tur_ht_02`:
+
+| gun | round | range, m | seeker: cone rad, reach m, value 2 ms | value 8, m | value 10 | value 9, s |
+|---|---|---:|---|---:|---:|---:|
+| 1, cannon | `bb_h_01` | 500 | none | 500 | −1 | −1 |
+| 2, plasma rifle | `bp_h_01` | 150 | 0.25, 500, 250 | 150 | 0.9689 | 0.25 |
+| 3, laser | `bl_h_01` | 1,000 | none | 1,000 | −1 | −1 |
+| 4, missiles | `bm_h_01` | 350 | 0.85, 500, 4,000 | 350 | 0.6600 | 4 |
+
+So for the hero (*derived*):
+
+- **The plasma rifle and the missiles do not fire without a target.** Nor do
+  they fire at one more than 150 m or 350 m away, or more than 0.25 rad or
+  0.85 rad off the barrel. The target is the player's
+  ([25-sensors.md](25-sensors.md#the-players-target--read-and-measured)).
+- **They need the target held**: 0.25 s before each plasma bolt and 4 s before
+  each missile. The missile's lock outlasts its 1,250 ms interval, so a
+  launcher held on a target fires about 4 s after each stroke ends.
+- **The cannon and the laser never meet the gate.** Their relink gives them no
+  target ([above](#the-players-target-reaches-the-turret--read)), and an
+  unguided gun with no target fires.
+
+*Measured* over the 66 rounds in `weapon.rlb`: every one has a range, so every
+gun that loads one keeps a range gate. 17 of the 20 seekers carry a lock.
+The guns of `ba_b_04`, `ba_b_05` and `ba_m_04` (value 2 of 0) fire untargeted.
 
 ### How a round ends — *read*, and *measured*
 
@@ -561,7 +654,7 @@ turns a machine ([24-motion.md](24-motion.md)) — which clamps the command
 (`0x1000cde5`). So how well a guided round follows a target is two numbers:
 how wide it looks, and how fast it can turn.
 
-| round | cone, rad | follows within, m | turns, rad/s | seeker value 2 |
+| round | cone, rad | follows within, m | turns, rad/s | lock, ms (value 2) |
 |---|---:|---:|---:|---:|
 | missiles, tiny to large (`bm_t/l/m/b_01`) | 0.80–0.95 | 500 | 1.2–1.6 | 3,000–5,000 |
 | huge missile (`fm_h_01`) | 1.57 | 700 | 1.3–1.4 | 3,500 |
@@ -585,11 +678,13 @@ winged SSMs look wide but turn slowly.
   `0x1000cd7d`) and clamped to the turn rate. A round asks to swing onto its
   target within one tick, and the turn rate is what slows it.
 
-**Value 2 is read by nothing found.** The seeker's own methods read value 0
-(`0x100247a0`) and value 1 (`0x100248d6`). No request for value `0x302` in
-the install is aimed at a seeker. The same scan finds the radar's
-(`0x10024721`), the detect shield's (`0x1002bf67`) and the deflector's
-(`0x1002bfbb`).
+**Value 2 is the gun's lock**, in ms. The seeker's own methods read value 0
+(`0x100247a0`) and value 1 (`0x100248d6`), and no request for value `0x302`
+is aimed at a seeker. That scan once made this page call value 2 unread.
+But the gun asks the round's device getter for ids 10, 11 and 12 when it loads
+the round, and those are the seeker's values 1, 0 and 2 (`0x1002b738`,
+`0x1002b75e`, `0x1002b784`). Value 2 becomes the gun's value 9
+([A guided gun waits for a lock](#a-guided-gun-waits-for-a-lock--read-and-measured)).
 
 A seeker's target is the gun's target, handed to the round as it leaves
 ([The round's start](#the-rounds-start)). A turret's gun has its turret's
@@ -719,11 +814,10 @@ The enemy variants and the huge guns:
 
 ## Not established
 
-- Whether a target the hero's AI set before the player took over survives into
-  first-person play. Nothing clears it on takeover. Whether the fight module
-  ever runs for the hero before then was not followed: `iron3d.dll:0x100a3cd2`
-  sends all of a player's objects message 7 with 0, but when it runs is not
-  read.
+- ~~Whether a target the hero's AI set before the player took over survives
+  into first-person play.~~ Moot: the player's target list sets the turret's
+  target whenever the player's target changes
+  ([The player's target reaches the turret](#the-players-target-reaches-the-turret--read)).
 - Whether the landscape is one of the objects IWorld slot 7 walks, so that the
   sight ray converges on the ground and not only on objects.
 - The vector a falling round's mount solves for when its turret has no target
@@ -736,4 +830,9 @@ The enemy variants and the huge guns:
   turret's guns lends its round speed as the lead (the turret record's `+0x1c`),
   what tasks 2, 3 and 5 and `MBehaviour+0x614` are, and the target id's nibble
   3 that frees the winged SSMs.
-- A seeker's value 2: read by nothing found.
+- ~~A seeker's value 2: read by nothing found.~~ Answered: it is the gun's lock
+  ([A guided gun waits for a lock](#a-guided-gun-waits-for-a-lock--read-and-measured)).
+- What an AI turret's state word is while it fights. Its relink withholds the
+  target from unguided guns only in `0x200`, so whether an AI unit's cannon
+  keeps a range gate depends on the state `Behavior.dll` sends (`0x200` or
+  `0x400`, [32-builder.md](32-builder.md)); not followed.

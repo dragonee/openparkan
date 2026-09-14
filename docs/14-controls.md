@@ -42,6 +42,13 @@ of keys. The `_d` file is the default and the other is what the player is
 using — `CMD_JAMES_SELECT_FRIEND` sits on `SCAN_F` by default and on `SCAN_T`
 as shipped.
 
+Four of `iron3d.dll`'s commands pick the player's target (*measured*): Tab
+for `CMD_JAMES_SELECT_TARGET` (732), E for `_SELECT_ENEMY` (733), T or F for
+`_SELECT_FRIEND` (734), and the right mouse button for `CMD_JAMES_AIM_TARGET`
+(750). Shift with the right button is `CMD_CAMERA_CENTER` instead. What
+each does is in
+[25-sensors.md](25-sensors.md#the-players-target--read-and-measured).
+
 ## The table
 
 A `.tbl` row is eleven fields and then a trailing text:

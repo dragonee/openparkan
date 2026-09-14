@@ -68,3 +68,35 @@ def test_a_shot_is_the_barrel_stroke_and_then_the_interval():
     assert cannon.shots_per_second == 1000.0
     laser = gun(interval_ms=200.0, stroke_ms=(250.0,))
     assert laser.fire_rate == pytest.approx(1000.0 / 450.0)
+
+
+def test_a_guided_gun_takes_its_gate_from_the_round_and_its_seeker():
+    missile = weapons.Round("bm_h_01", speed=70.0, range=350.0, damage=200.0, kind=3,
+                            blast=10.0, guided=True, cone=0.85, reach=500.0, lock_ms=4000.0)
+    gate = weapons.target_gate(missile)
+    assert gate.range == 350.0
+    assert gate.cone_cos == pytest.approx(math.cos(0.85))
+    assert gate.lock_s == pytest.approx(4.0)
+    assert gate.needs_target
+    assert weapons.gate_state(gate, None, 1.0) == weapons.GATE_NO_TARGET
+    assert weapons.gate_state(gate, 351.0, 1.0) == weapons.GATE_OUT_OF_RANGE
+    assert weapons.gate_state(gate, 100.0, math.cos(0.9)) == weapons.GATE_OFF_BARREL
+    assert weapons.gate_state(gate, 100.0, math.cos(0.5)) is None
+
+
+def test_an_unguided_gun_fires_without_a_target_but_not_past_its_range():
+    shell = weapons.Round("bb_h_01", speed=350.0, range=500.0, damage=100.0, kind=2,
+                          blast=None, guided=False)
+    gate = weapons.target_gate(shell)
+    assert (gate.range, gate.cone_cos, gate.lock_s) == (500.0, -1.0, -1.0)
+    assert not gate.needs_target
+    assert weapons.gate_state(gate, None, 0.0) is None
+    assert weapons.gate_state(gate, 499.0, -0.9) is None
+    assert weapons.gate_state(gate, 501.0, 1.0) == weapons.GATE_OUT_OF_RANGE
+
+
+def test_a_seeker_reaching_less_than_the_round_cuts_the_range():
+    bolt = weapons.Round("bp_x", speed=150.0, range=600.0, damage=1.0, kind=2, blast=None,
+                         guided=True, cone=0.5, reach=400.0, lock_ms=250.0)
+    assert weapons.target_gate(bolt).range == 400.0
+    assert weapons.target_gate(None) == weapons.TargetGate(0.0, -1.0, -1.0)

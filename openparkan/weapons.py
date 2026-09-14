@@ -51,6 +51,9 @@ class Round:
     turn_rate: float = 0.0
     #: The controller's mode (+104): 3 on the four flame rounds, which fall.
     mode: int = 0
+    #: The seeker's value 2, in ms: how long its gun holds a target before a
+    #: shot (``Control.dll:0x100298f1``); zero on an unguided round.
+    lock_ms: float = 0.0
 
     @property
     def lobbed(self) -> bool:
@@ -197,6 +200,7 @@ class Armoury:
             reach=seeker.values[1] if seeker else 0.0,
             turn_rate=max(parsed.triples[control.TRIPLE_TURN]),
             mode=parsed.mode,
+            lock_ms=seeker.values[2] if seeker else 0.0,
         )
 
     def gun(self, part: str) -> Gun | None:
@@ -235,6 +239,62 @@ class Armoury:
         return Clip(part=part, family=part.lower()[:7],
                     rounds=int(one.values[control.GUN_MAGAZINE]),
                     mass=one.mass, round=one.resource.member)
+
+
+#: What a gun reports when its target gate holds a shot back (``+0x11c``):
+#: no target, the target out of range, the target off the barrel.
+GATE_NO_TARGET = 2
+GATE_OUT_OF_RANGE = 7
+GATE_OFF_BARREL = 8
+
+
+@dataclass(frozen=True)
+class TargetGate:
+    """A gun's values 8, 10 and 9, as it fills them from the round it loads.
+
+    The file's values are zero on every gun; the gun overwrites them
+    (``Control.dll:0x100297e0``-``0x10029907``): the round's range, cut to its
+    seeker's reach; the cosine of the seeker's cone, else -1; the seeker's
+    value 2 in seconds, else -1.
+    """
+
+    range: float
+    cone_cos: float
+    lock_s: float
+
+    @property
+    def needs_target(self) -> bool:
+        """Whether the gun holds its fire until it has a target."""
+        return self.range > 0.0 and self.lock_s > 0.0
+
+
+def target_gate(shot: Round | None) -> TargetGate:
+    """The gate a gun loading ``shot`` sets up."""
+    if shot is None:
+        return TargetGate(0.0, -1.0, -1.0)
+    reach = shot.range if shot.range > 0.0 else 0.0
+    if not shot.guided:
+        return TargetGate(reach, -1.0, -1.0)
+    return TargetGate(min(reach, shot.reach), math.cos(shot.cone), shot.lock_ms * 0.001)
+
+
+def gate_state(gate: TargetGate, distance: float | None, off_barrel_cos: float) -> int | None:
+    """Why the gate holds a shot back, ``GATE_*``, or None when it lets one through.
+
+    ``distance`` is from the unit to its target, None with no target;
+    ``off_barrel_cos`` the cosine between the barrel point's direction and the
+    line to the target (``Control.dll:0x10029d3a``-``0x10029edd``).  A gate that
+    lets a shot through may still be counting its lock down.
+    """
+    if gate.range <= 0.0:
+        return None
+    if distance is None:
+        return GATE_NO_TARGET if gate.lock_s > 0.0 else None
+    if distance > gate.range:
+        return GATE_OUT_OF_RANGE
+    if gate.cone_cos > 0.0 and off_barrel_cos <= gate.cone_cos:
+        return GATE_OFF_BARREL
+    return None
 
 
 def mount_aim(initial: float, pitch: float, arm: float) -> tuple[float, bool]:
