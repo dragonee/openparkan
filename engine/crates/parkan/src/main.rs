@@ -6,7 +6,7 @@
 //! parkan [--game DIR] [--mission MISSIONS/…] [--fly]
 //!        [--screenshot OUT.png] [--size WxH] [--top-down] [--look X,Y,Z,TX,TY,TZ]
 //!        [--headless] [--ticks N] [--hold SCAN_W,SCAN_A] [--mouse DX,DY] [--trace] [--sway]
-//!        [--capture-idle] [--stretch-hud] [--outcome won|lost] [--text "…"] [--face NAME,DISTANCE] [--at X,Y,YAW] [--pod NAME]
+//!        [--capture-idle] [--stretch-hud] [--outcome won|lost] [--text "…"] [--face NAME,DISTANCE] [--at X,Y,YAW] [--pod NAME] [--designer] [--design PART,…]
 //!        [--skip-briefing] [--briefing-at SECONDS] [--objectives] [--map]
 //! ```
 //!
@@ -101,6 +101,10 @@ struct Args {
     at: Option<[f32; 3]>,
     /// `--pod NAME`: the hero starts on the control pod of the building whose path ends in NAME.
     pod: Option<String>,
+    /// `--designer`: a screenshot with the warbot designer open on the first factory, and
+    /// `--design PART,…` the parts fitted to it in turn.
+    designer: bool,
+    design: Vec<String>,
     /// `--skip-briefing`: the mission starts in the cockpit, as Esc in its briefing would.
     skip_briefing: bool,
     /// `--briefing-at SECONDS`: a screenshot of the briefing that far in.
@@ -132,6 +136,8 @@ fn args() -> Result<Args> {
         face: None,
         at: None,
         pod: None,
+        designer: false,
+        design: Vec::new(),
         skip_briefing: false,
         briefing_at: None,
         objectives: false,
@@ -170,6 +176,8 @@ fn args() -> Result<Args> {
                 out.at = Some(v.try_into().map_err(|_| anyhow::anyhow!("--at takes X,Y,YAW"))?);
             }
             "--pod" => out.pod = Some(value()?.to_ascii_lowercase()),
+            "--designer" => out.designer = true,
+            "--design" => out.design = value()?.split(',').map(str::to_owned).collect(),
             "--ticks" => out.ticks = value()?.parse()?,
             "--hold" => out.hold = value()?.split(',').map(str::to_owned).collect(),
             "--mouse" => {
@@ -408,6 +416,30 @@ fn screenshot(loaded: &scene::Loaded, game: &Path, args: &Args, out: &Path) -> R
                     hud.cockpit.objectives.open_at_start();
                 }
                 hud.cockpit.map.open = args.map;
+                if (args.designer || !args.design.is_empty())
+                    && let Some(t) = p.factories.first().map(|f| f.target)
+                {
+                    if p.mode() == parkan_world::play::Mode::OnFoot {
+                        p.modes.push(parkan_world::play::Mode::Factory(t));
+                    }
+                    let cockpit = &mut hud.cockpit;
+                    match cockpit.designer.open(p, t, &cockpit.strings) {
+                        Ok(()) => {
+                            for part in &args.design {
+                                // `accept` clicks the accept button.
+                                if part == "accept" {
+                                    cockpit.designer.click(p, [213.0, 462.0], &cockpit.strings);
+                                    continue;
+                                }
+                                let Some(s) = cockpit.designer.session.as_mut() else { break };
+                                if !s.fit_part(part, &mut p.assembly, &cockpit.strings) {
+                                    eprintln!("--design: {part} does not fit");
+                                }
+                            }
+                        }
+                        Err(e) => eprintln!("--designer: {e:#}"),
+                    }
+                }
                 // What the game said during the rehearsal: the newest line is in the box.
                 let now = p.hero.time_ms;
                 for say in std::mem::take(&mut p.says) {
@@ -754,6 +786,13 @@ impl App {
         if self.grabbed && self.play.as_ref().is_some_and(|p| p.mode() != parkan_world::play::Mode::OnFoot) {
             self.grab(false);
         }
+        // The designer goes with the factory screen it was opened from.
+        if let (Some(play), Some(hud)) = (self.play.as_ref(), self.hud.as_mut())
+            && !matches!(play.mode(), parkan_world::play::Mode::Factory(_))
+            && hud.cockpit.designer.is_open()
+        {
+            hud.cockpit.designer.close();
+        }
         // The input update runs once a rendered frame.
         if let Some(play) = self.play.as_mut() {
             play.hero.update_input();
@@ -968,6 +1007,15 @@ impl ApplicationHandler for App {
                     }
                     return;
                 }
+                // Esc closes the warbot designer first (`0x10055e80`).
+                if code == KeyCode::Escape
+                    && event.state == ElementState::Pressed
+                    && let Some(hud) = self.hud.as_mut()
+                    && hud.cockpit.designer.is_open()
+                {
+                    hud.cockpit.designer.close();
+                    return;
+                }
                 // `CMD_ROLLBACK_STATE` (735, Esc): a building's screen gives the hero back (docs/36).
                 if code == KeyCode::Escape
                     && event.state == ElementState::Pressed
@@ -1033,8 +1081,25 @@ impl ApplicationHandler for App {
                     {
                         let space = hud_space(r.config.width, r.config.height, &self.args);
                         let at = space.layout(self.cursor, parkan_world::hud::Pin::TOP_LEFT);
-                        if let Some(click) = parkan_world::cockpit::factory::click(play, t, at) {
-                            play.factory_click(t, click);
+                        use parkan_world::cockpit::{designer, factory};
+                        match self.hud.as_mut().map(|h| &mut h.cockpit) {
+                            // The designer, while it is up, takes the click (`0x10055ff0`).
+                            Some(cockpit) if cockpit.designer.is_open() => {
+                                let at = designer::layout_point(space, self.cursor);
+                                cockpit.designer.click(play, at, &cockpit.strings);
+                            }
+                            cockpit => {
+                                if let Some(click) = factory::click(play, t, at) {
+                                    match (click, cockpit) {
+                                        (factory::Click::Constructor, Some(cockpit)) => {
+                                            if let Err(e) = cockpit.designer.open(play, t, &cockpit.strings) {
+                                                eprintln!("cannot open the designer: {e:#}");
+                                            }
+                                        }
+                                        _ => play.factory_click(t, click),
+                                    }
+                                }
+                            }
                         }
                     }
                     return;

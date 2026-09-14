@@ -291,6 +291,9 @@ pub struct Hud {
     pub menu: parkan_world::text::GameFont,
     /// `--stretch-hud`: the layout stretches to the screen as the game's does.
     pub stretch: bool,
+    /// The textures the previews' models draw with, and what the previews show now.
+    pub preview_store: Option<TextureStore>,
+    pub preview_keys: Vec<parkan_world::cockpit::designer::PreviewKey>,
 }
 
 /// The cockpit for `play` in `mission_dir`: the interface's pages and the mission's minimap
@@ -317,6 +320,8 @@ pub fn hud(
         font: GameFont::ui(game, "GAME_FONT")?,
         menu: GameFont::ui(game, "MENU_FONT")?,
         stretch,
+        preview_store: None,
+        preview_keys: Vec::new(),
     })
 }
 
@@ -328,7 +333,7 @@ pub fn draw_hud(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     hud: &mut Hud,
-    play: &Play,
+    play: &mut Play,
     view: &OwnView,
     (width, height): (u32, u32),
     view_proj: glam::Mat4,
@@ -368,11 +373,79 @@ pub fn draw_hud(
                 lighting,
                 instances,
                 paints: Some(paints),
+                previews: false,
             }
         })
         .collect();
+    let mut views: Vec<parkan_render::ModelView> = views;
+    views.extend(previews(renderer, device, queue, hud, play, &drawn.previews));
     renderer.set_views(device, views);
     (drawn.voices, drawn.sounds)
+}
+
+/// The designer's and the factory screen's model views: each shown model built once while
+/// it stays on screen, into objects of their own, lit from the two sides the constructor
+/// lights them from (docs/37, "The previews").
+fn previews(
+    renderer: &mut parkan_render::Renderer,
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    hud: &mut Hud,
+    play: &mut Play,
+    shown: &[parkan_world::cockpit::designer::Preview],
+) -> Vec<parkan_render::ModelView> {
+    let keys: Vec<_> = shown.iter().map(|p| p.key.clone()).collect();
+    if keys != hud.preview_keys {
+        hud.preview_keys = keys.clone();
+        if hud.preview_store.is_none() {
+            hud.preview_store =
+                TextureStore::open(&play.assembly.game).map_err(|e| eprintln!("no previews: {e:#}")).ok();
+        }
+        let Some(store) = hud.preview_store.as_mut() else { return Vec::new() };
+        let mut objects = Objects { models: Vec::new(), instances: Vec::new(), placed: Vec::new() };
+        for key in &keys {
+            let model = models::build_model(&mut play.assembly, store, key.kind, &key.path)
+                .map_err(|e| eprintln!("no preview of {}: {e:#}", key.path))
+                .ok()
+                .flatten()
+                .unwrap_or_default();
+            objects.models.push(model);
+            objects.instances.push(models::Instance {
+                model: objects.models.len() - 1,
+                position: [0.0; 3],
+                rotation: 0.0,
+                scale: 1.0,
+                hidden: false,
+            });
+            objects.placed.push(usize::MAX);
+        }
+        renderer.set_previews(device, queue, &store.textures, &objects);
+    }
+    shown
+        .iter()
+        .enumerate()
+        .map(|(i, p)| {
+            renderer.set_preview_instance(queue, i, p.model, true);
+            // STAND-IN: docs/37-designer.md#the-previews--read-and-seen -- the two lights'
+            // colours and the view's scene colour are not read: grey 0.4 and 0.15.
+            let light = |direction| parkan_render::frame::Light { direction, colour: [0.4, 0.4, 0.4] };
+            parkan_render::ModelView {
+                viewport: p.viewport,
+                view_proj: p.view_proj,
+                lighting: parkan_render::frame::Lighting {
+                    lights: [light(p.lights[0]), light(p.lights[1])],
+                    scene_colour: [0.15, 0.15, 0.15],
+                    fog_start: f32::MAX,
+                    fog_end: f32::MAX,
+                    eye: glam::Vec3::ZERO,
+                    ..Default::default()
+                },
+                instances: vec![i],
+                paints: None,
+                previews: true,
+            }
+        })
+        .collect()
 }
 
 /// The instances that draw `unit` (a battle target, or the hero with none) as its nodes stand

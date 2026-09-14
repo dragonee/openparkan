@@ -3,6 +3,7 @@
 //! corners. Each frame gives the HUD's art as painter batches, its `GAME_FONT` text, and the
 //! views of units its panels hold. See `docs/35-hud.md`.
 
+pub mod designer;
 pub mod factory;
 pub mod map;
 pub mod messages;
@@ -81,6 +82,8 @@ pub struct Drawn {
     pub text: Vec<TextRun>,
     pub menu_text: Vec<TextRun>,
     pub views: Vec<panels::UnitView>,
+    /// The designer's and the factory screen's model views.
+    pub previews: Vec<designer::Preview>,
     /// The names of `ui/game_resources.cfg`'s voices to queue, and of its sounds to play now.
     pub voices: Vec<&'static str>,
     pub sounds: Vec<&'static str>,
@@ -102,6 +105,7 @@ pub struct Cockpit {
     pub objectives: objectives::Screen,
     pub map: map::SatelliteMap,
     pub factory: factory::Screen,
+    pub designer: designer::Screen,
 }
 
 impl Cockpit {
@@ -120,6 +124,7 @@ impl Cockpit {
             ring_since_ms: 0.0,
             objectives: objectives::Screen::default(),
             factory: factory::Screen::default(),
+            designer: designer::Screen::default(),
             map: map::SatelliteMap::new(
                 crate::settings::value(game, "CS", "MAP_ALPHA").and_then(|v| v.parse().ok()),
             ),
@@ -151,13 +156,25 @@ impl Cockpit {
         // A building's screen in place of the HUD, with the satellite map and the message box
         // (`0x1008d444`).
         if let crate::play::Mode::Factory(t) = play.mode() {
-            factory::draw(self, &mut ink, play, t, now_ms);
+            // The warbot designer, while it is up, is drawn and nothing else (`0x1008d444`).
+            if self.designer.is_open() {
+                let previews = designer::draw(self, &mut ink, play, now_ms);
+                return Drawn {
+                    batches: ink.painter.batches,
+                    text: ink.text,
+                    menu_text: ink.menu_runs,
+                    previews,
+                    ..Drawn::default()
+                };
+            }
+            let previews = factory::draw(self, &mut ink, play, t, now_ms);
             ink.painter.pin = Pin::TOP_RIGHT;
             map::draw(self, &mut ink, play, now_ms);
             return Drawn {
                 batches: ink.painter.batches,
                 text: ink.text,
                 menu_text: ink.menu_runs,
+                previews,
                 ..Drawn::default()
             };
         }
@@ -179,6 +196,7 @@ impl Cockpit {
             text: ink.text,
             menu_text: ink.menu_runs,
             views,
+            previews: Vec::new(),
             voices,
             sounds,
         }

@@ -63,6 +63,9 @@ pub struct ModelView {
     pub lighting: frame::Lighting,
     pub instances: Vec<usize>,
     pub paints: Option<Vec<[f32; 3]>>,
+    /// Drawn from the previews' own objects ([`Renderer::set_previews`]) rather than the
+    /// world's.
+    pub previews: bool,
 }
 
 /// A device and its queue.
@@ -112,6 +115,9 @@ pub struct Renderer {
     terrain: Option<TerrainRenderer>,
     objects: Option<ModelRenderer>,
     bank: Option<GpuTextures>,
+    /// Models shown only in views, apart from the world: the designer's previews.
+    previews: Option<ModelRenderer>,
+    preview_bank: Option<GpuTextures>,
     lighting: frame::Lighting,
     dome: Option<(dome::DomeRenderer, Vec<[f32; 3]>)>,
     hud: Option<hud::HudRenderer>,
@@ -203,6 +209,8 @@ impl Renderer {
             terrain: None,
             objects: None,
             bank: None,
+            previews: None,
+            preview_bank: None,
             lighting: frame::Lighting::default(),
             dome: None,
             hud: None,
@@ -389,15 +397,44 @@ impl Renderer {
         }
     }
 
-    /// This frame's views of placed objects, drawn in order.
-    pub fn set_views(&mut self, device: &wgpu::Device, views: Vec<ModelView>) {
-        let Some(objects) = &self.objects else { return };
-        let mut frames: Vec<models::ViewFrame> = self.views.drain(..).map(|(_, f)| f).collect();
-        frames.truncate(views.len());
-        while frames.len() < views.len() {
-            frames.push(objects.view_frame(device));
+    /// Objects drawn only in views, with textures of their own: the designer's previews.
+    pub fn set_previews(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        textures: &[parkan_world::textures::Texture],
+        objects: &parkan_world::models::Objects,
+    ) {
+        let bank = GpuTextures::new(device, queue, textures);
+        self.previews = Some(ModelRenderer::new(device, self.format, objects, &bank));
+        self.preview_bank = Some(bank);
+        // Frames made for the old previews' layout are not kept.
+        self.views.retain(|(v, _)| !v.previews);
+    }
+
+    /// Move a preview's instance to `matrix`, or hide it.
+    pub fn set_preview_instance(&mut self, queue: &wgpu::Queue, index: usize, matrix: Mat4, visible: bool) {
+        if let Some(previews) = self.previews.as_mut() {
+            previews.set_instance(queue, index, matrix, visible);
         }
-        self.views = views.into_iter().zip(frames).collect();
+    }
+
+    /// This frame's views of placed objects, or of the previews, drawn in order.
+    pub fn set_views(&mut self, device: &wgpu::Device, views: Vec<ModelView>) {
+        let mut world: Vec<models::ViewFrame> = Vec::new();
+        let mut previews: Vec<models::ViewFrame> = Vec::new();
+        for (v, f) in self.views.drain(..) {
+            if v.previews { previews.push(f) } else { world.push(f) }
+        }
+        let mut out = Vec::new();
+        for view in views {
+            let (pool, renderer) =
+                if view.previews { (&mut previews, &self.previews) } else { (&mut world, &self.objects) };
+            let Some(renderer) = renderer else { continue };
+            let frame = pool.pop().unwrap_or_else(|| renderer.view_frame(device));
+            out.push((view, frame));
+        }
+        self.views = out;
     }
 
     /// Put a placed object's instance at `matrix` for the views without showing or hiding it
@@ -461,16 +498,21 @@ impl Renderer {
         }
         if let Some(objects) = &self.objects {
             objects.prepare(queue, view_proj, &self.lighting);
-            for (view, frame) in &self.views {
-                let mut uniform = frame::FrameUniform::new(view.view_proj, &view.lighting);
-                if let Some(paints) = &view.paints {
-                    uniform.paint = [1.0, 0.0, 0.0, 0.0];
-                    for (&i, &[r, g, b]) in view.instances.iter().zip(paints) {
-                        objects.paint_instance(queue, i, [r, g, b, 1.0]);
-                    }
+        }
+        if let Some(previews) = &self.previews {
+            previews.prepare(queue, view_proj, &self.lighting);
+        }
+        for (view, frame) in &self.views {
+            let renderer = if view.previews { &self.previews } else { &self.objects };
+            let Some(objects) = renderer else { continue };
+            let mut uniform = frame::FrameUniform::new(view.view_proj, &view.lighting);
+            if let Some(paints) = &view.paints {
+                uniform.paint = [1.0, 0.0, 0.0, 0.0];
+                for (&i, &[r, g, b]) in view.instances.iter().zip(paints) {
+                    objects.paint_instance(queue, i, [r, g, b, 1.0]);
                 }
-                objects.prepare_view(queue, frame, &uniform);
             }
+            objects.prepare_view(queue, frame, &uniform);
         }
         for text in self.more_text.iter().flatten() {
             text.resize(queue, (width, height));
@@ -571,8 +613,10 @@ impl Renderer {
             let mut pass = pass_over(&mut encoder, display, depth, "hud under", wgpu::LoadOp::Load);
             ui.draw(&mut pass, false);
         }
-        if let Some(objects) = &self.objects {
+        {
             for (view, frame) in &self.views {
+                let renderer = if view.previews { &self.previews } else { &self.objects };
+                let Some(objects) = renderer else { continue };
                 let [x, y, w, h] = view.viewport;
                 let (x0, y0) = (x.max(0.0), y.max(0.0));
                 let (x1, y1) = ((x + w).min(width as f32), (y + h).min(height as f32));

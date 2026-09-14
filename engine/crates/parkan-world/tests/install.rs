@@ -1548,6 +1548,8 @@ fn mission_02s_factory_builds_a_free_warbot_in_a_minute_which_escapes_and_comple
         chassis_size: 4,
         ore: 411.0,
         power: 226.5,
+        lines: Vec::new(),
+        sphere: None,
     };
     let t = play.factories[f].target;
     play.units[t].clan = Some(play.player_clan);

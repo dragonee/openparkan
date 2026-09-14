@@ -33,6 +33,10 @@ pub struct Project {
     pub chassis_size: u8,
     pub ore: f32,
     pub power: f32,
+    /// The unit box's five lines as the designer rated it, and the design's sphere for its
+    /// preview; empty and none for a design the designer did not make.
+    pub lines: Vec<String>,
+    pub sphere: Option<([f32; 3], f32)>,
 }
 
 /// A build in progress.

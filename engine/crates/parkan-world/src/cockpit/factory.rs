@@ -111,8 +111,15 @@ pub fn targets(play: &Play) -> [i32; 2] {
 
 /// The screen for the factory that is target `target` (`0x100836f0` with the column left
 /// out), and the message box where mode 5 puts it.
-pub fn draw(cockpit: &mut Cockpit, ink: &mut Ink, play: &Play, target: usize, now_ms: f64) {
-    let Some(f) = play.factories.iter().find(|f| f.target == target) else { return };
+pub fn draw(
+    cockpit: &mut Cockpit,
+    ink: &mut Ink,
+    play: &Play,
+    target: usize,
+    now_ms: f64,
+) -> Vec<super::designer::Preview> {
+    let mut previews = Vec::new();
+    let Some(f) = play.factories.iter().find(|f| f.target == target) else { return previews };
     // The displayed values step toward their targets while the panel is drawn.
     let goal = targets(play);
     let mut screen = std::mem::take(&mut cockpit.factory);
@@ -202,7 +209,48 @@ pub fn draw(cockpit: &mut Cockpit, ink: &mut Ink, play: &Play, target: usize, no
             ink.text(&a, [71.0, 31.0], NO_PROJECT_COLOUR);
             ink.text(&b, [71.0, 31.0 + step], NO_PROJECT_COLOUR);
         }
-        Some(project) => ink.text(&project.name, [61.0, 31.0], NAME_COLOUR),
+        Some(project) => {
+            // The name, the designer's unit lines from the same pen (`0x1006fc00`), and the
+            // unit turning in a 115 × 115 preview at (236, 22) (`0x1009e1b0`).
+            ink.text(&project.name, [61.0, 31.0], NAME_COLOUR);
+            let height = ink.font.line_height;
+            let (first, line_step) = ((height + 3.0).round(), (height + 2.0).round());
+            for (i, (label, line)) in crate::designs::BOX_LABELS.iter().zip(&project.lines).enumerate() {
+                let y = 31.0 + first + line_step * i as f32;
+                let label = cockpit.string(*label).to_owned();
+                ink.text(&label, [61.0, y], super::designer::GREEN);
+                let (value, unit) = line.rsplit_once(' ').unwrap_or((line.as_str(), ""));
+                // An accepted design always has spare payload: no line is red.
+                let w = ink.font.advance(value);
+                ink.text(value, [193.0 - w, y], super::designer::FIGURE);
+                ink.text(unit, [196.0, y], super::designer::GREEN);
+            }
+            if let Some((centre, radius)) = project.sphere {
+                let rect = [236.0, 22.0, 115.0, 115.0];
+                let space = ink.painter.space;
+                let [px, py] = space.pixel([rect[0], rect[1]], Pin::TOP_LEFT);
+                let [sx, sy] = space.scales();
+                let viewport = [px, py, rect[2] * sx, rect[3] * sy];
+                let angle =
+                    (now_ms as f32 * super::designer::PREVIEW_TURN_RATE).rem_euclid(std::f32::consts::TAU);
+                let (view_proj, model) =
+                    super::designer::preview_camera(glam::Vec3::from_array(centre), radius, angle, viewport);
+                previews.push(super::designer::Preview {
+                    key: super::designer::PreviewKey {
+                        kind: parkan_formats::mission::KIND_UNIT,
+                        path: project.path.clone(),
+                        version: 0,
+                    },
+                    viewport,
+                    view_proj,
+                    model,
+                    lights: [
+                        glam::Vec3::new(-1.0, 0.0, -1.0).normalize(),
+                        glam::Vec3::new(1.0, 0.0, -1.0).normalize(),
+                    ],
+                });
+            }
+        }
     }
     let skin = &cockpit.skin;
     let put = |ink: &mut Ink, name: &str, rect: [f32; 4], colour: u32| {
@@ -260,4 +308,5 @@ pub fn draw(cockpit: &mut Cockpit, ink: &mut Ink, play: &Play, target: usize, no
     ink.painter.pin = Pin::BOTTOM_RIGHT;
     let [left, top, width] = MESSAGES_AT;
     messages::draw_at(cockpit, ink, now_ms, left, top, width);
+    previews
 }
