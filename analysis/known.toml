@@ -23466,3 +23466,155 @@ kind = "site"
 name = "material load: a name not found falls back to DEFAULT"
 read = true
 doc = "docs/24-motion.md"
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x1000d668"
+kind = "site"
+name = "push-out gather: the face source's slot 5 with (2, 3) gives the triangle record whose first word is the face's triangle word"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x1000d71f"
+kind = "site"
+name = "push-out gather: the face source's slot 3, whose first word is the face's batch word"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x1000d724"
+kind = "site"
+name = "push-out gather: the batch word stored at the face record's +0x40"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x1000d738"
+kind = "site"
+name = "push-out gather: the triangle word stored at the face record's +0x44"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x1000d75d"
+kind = "site"
+name = "push-out gather: the face record copied as 18 words, 72 bytes"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000ca08"
+kind = "site"
+name = "machine GMSG 0x1b: the parent's slot-11 type compared with 3; a building's push with z <= 0 is taken whole"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000ca8b"
+kind = "site"
+name = "machine GMSG 0x1b: the flattening's scale cap, 4.0"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1003b18c"
+kind = "datum"
+name = "float 0.0, the push's z is compared with it"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x10013f60"
+kind = "function"
+name = "face filter constructor: six words, ret 0x18"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1003c1ac"
+kind = "datum"
+name = "mask globals 2, 4, 8, 0x10 ... 0x400, one bit each"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001db14"
+kind = "site"
+name = "pair face query: the filter's first word, five mask globals ORed, 0x41e"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001db67"
+kind = "site"
+name = "pair face query: the call to the filter constructor"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001db2b"
+kind = "site"
+name = "pair face query: 2 when the mover's collision flags lack 8, the push-out's triangle exclusion"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001dbce"
+kind = "site"
+name = "pair face query: the push-out filter's excluded triangles, 4 and the 2 unless the mover carries 8"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001dbd1"
+kind = "site"
+name = "pair face query: that mask stored at the third filter's +0x1c"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001dd29"
+kind = "site"
+name = "pair face query: edi restored after the segment query, the frame 4 shallower"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001dfdb"
+kind = "site"
+name = "pair face query: the third filter passed as the push-out's fourth argument"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x1000d592"
+kind = "site"
+name = "push-out: ret 0x14, five arguments (this, sphere, filter, filter, push)"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x1000db93"
+kind = "site"
+name = "push-out: the fourth argument, the filter every gathered face is tested against"
+read = true
+doc = "docs/24-motion.md"

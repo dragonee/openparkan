@@ -8181,6 +8181,218 @@ def check_building_ground(check, game: Path) -> None:
           f"(length, lowest floor on the way)")
 
 
+#: The Large Factory's walk from its west side exit to its pod, as hall-way vertices.
+FACTORY_POD_ROUTE = [67, 66, 65, 58, 59, 37, 36, 6, 7, 25, 35, 28, 31]
+
+
+def _slope_under(faces, x: float, y: float, z: float) -> tuple[float, float, int] | None:
+    """Of ``faces`` (a, b, c, triangle flags), the walkable one under (x, y) whose height is
+    nearest a floor 1.4 below a hall-way vertex at z, within 3.5 under and 2.5 over: its
+    height, its slope in degrees and its flags."""
+    best = None
+    want = z - 1.4
+    for a, b, c, flags in faces:
+        u = (b[0] - a[0], b[1] - a[1], b[2] - a[2])
+        v = (c[0] - a[0], c[1] - a[1], c[2] - a[2])
+        n = (u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0])
+        length = math.sqrt(sum(k * k for k in n)) or 1.0
+        nz = n[2] / length
+        d = (b[1] - c[1]) * (a[0] - c[0]) + (c[0] - b[0]) * (a[1] - c[1])
+        if nz <= 0.173648 or abs(d) < 1e-9:
+            continue
+        w1 = ((b[1] - c[1]) * (x - c[0]) + (c[0] - b[0]) * (y - c[1])) / d
+        w2 = ((c[1] - a[1]) * (x - c[0]) + (a[0] - c[0]) * (y - c[1])) / d
+        if min(w1, w2, 1 - w1 - w2) < -1e-6:
+            continue
+        h = w1 * a[2] + w2 * b[2] + (1 - w1 - w2) * c[2]
+        if -3.5 < h - want < 2.5 and (best is None or abs(h - want) < abs(best[0] - want)):
+            best = (h, math.degrees(math.acos(min(1.0, nz))), flags)
+    return best
+
+
+def check_building_route(check, game: Path) -> None:
+    """The walk to the Large Factory's pod: the hall way's route in by the west side door, the
+    ramps under it, the portal quads between its rooms, and what the push-out's record and
+    the machine's push handler read."""
+    import heapq
+
+    fortif_path = game / "fortif.rlb"
+    ani_path, ctl_path = game / "AniMesh.dll", game / "Control.dll"
+    if not (fortif_path.exists() and ani_path.exists() and ctl_path.exists()):
+        return
+    fortif = NResArchive.open(fortif_path)
+    blob = fortif.read_name("fr_b_plant.msh")
+    wear = objmesh.parse_wear(fortif.read_name("fr_b_plant.wea"))
+    plant = objmesh.parse(blob, "fr_b_plant.msh", wear.materials)
+    graph = objmesh.read_path_graph(NResArchive(blob, "fr_b_plant.msh"))
+    pos = [objmesh.apply(plant.world_pose(n.b), n.position) for n in graph.nodes]
+    links = defaultdict(set)
+    for link in graph.links:
+        links[link.start].add(link.end)
+        links[link.end].add(link.start)
+
+    def shortest(start: int, goal: int):
+        best, back, queue = {start: 0.0}, {}, [(0.0, start)]
+        while queue:
+            d, v = heapq.heappop(queue)
+            if v == goal:
+                path = [v]
+                while path[-1] in back:
+                    path.append(back[path[-1]])
+                return d, path[::-1]
+            if d > best[v]:
+                continue
+            for w in links[v]:
+                nd = d + math.dist(pos[v], pos[w])
+                if nd < best.get(w, math.inf):
+                    best[w], back[w] = nd, v
+                    heapq.heappush(queue, (nd, w))
+        return None
+
+    # 1. The hall way: the pod is reached from the exits of the building's sides, never from
+    #    the front's forecourt and hall.
+    pod = next(i for i, n in enumerate(graph.nodes) if n.a & 0x40)
+    exits = [i for i, n in enumerate(graph.nodes) if n.a & 1 and not n.a & 0x10000000]
+    ways = {e: shortest(e, pod) for e in exits}
+    front = [i for i, n in enumerate(graph.nodes) if n.b in (1, 4)]
+    west = ways.get(67)
+    nodes = [plant.nodes[graph.nodes[v].b].name[:3] for v in FACTORY_POD_ROUTE]
+    check("fortif.rlb: the Large Factory's hall way reaches its pod from the west side exit",
+          pod == 31 and exits == [67, 68, 69] and west is not None
+          and west[1] == FACTORY_POD_ROUTE and 115.0 < west[0] < 116.0
+          and not any(shortest(f, pod) for f in front)
+          and nodes == ["o03", "o03", "o03", "i10", "i10", "i12", "i12", "i13", "i13", "i13",
+                        "i13", "i15", "i15"],
+          f"pod vertex {pod}, side exits {exits}; shortest ways to the pod "
+          f"{ {e: (round(w[0], 1), w[1]) for e, w in ways.items() if w} }; the front group "
+          f"{front} reaches it: {any(shortest(f, pod) for f in front)}; the west way's nodes "
+          f"{nodes}")
+
+    # 2. Under that way every walkable face is a ramp of at most 30 degrees, flagged 2.
+    posed = plant.posed_positions()
+    faces = []
+    for node in plant.nodes:
+        slot = node.hit_slot()
+        if slot is None or slot >= len(plant.slots):
+            continue
+        s = plant.slots[slot]
+        for t in range(s.first_triangle, s.first_triangle + s.triangle_count):
+            faces.append((*(posed[v] for v in plant.triangles[t]), plant.face_flags[t]))
+    slopes, flags = Counter(), Counter()
+    floors = []
+    for a, b in zip(FACTORY_POD_ROUTE, FACTORY_POD_ROUTE[1:], strict=False):
+        pa, pb = pos[a], pos[b]
+        steps = max(1, int(math.dist(pa[:2], pb[:2]) / 0.5))
+        for k in range(steps + 1):
+            t = k / steps
+            under = _slope_under(faces, *(pa[i] + (pb[i] - pa[i]) * t for i in range(3)))
+            if under:
+                slopes[round(under[1])] += 1
+                floors.append(under[0])
+                flags[under[2]] += 1
+    check("fortif.rlb: the way to the Large Factory's pod runs on ramps of at most 30 degrees",
+          sorted(slopes) == [0, 5, 8, 21, 28, 30] and max(slopes) == 30
+          and -14.4 < min(floors) < -14.2 and 0.9 < max(floors) < 1.0
+          and flags == Counter({2: 191}),
+          f"slopes of the walkable faces under the way, half-metre samples: "
+          f"{sorted(slopes.items())}; floors {min(floors):.2f} to {max(floors):.2f}; their "
+          f"triangle flags {dict(flags)}")
+
+    # 3. Portal quads: see-through faces with no triangle flag stand in the passages between
+    #    a building's rooms, the pod room's among them.
+    lib = materials.MaterialLibrary(game / "Material.lib")
+    portals = defaultdict(list)
+    posed = plant.posed_positions()
+    for batch in plant.batches:
+        name = wear.materials[batch.material].upper()
+        if name not in ("PORTAL_001", "PORTAL_004"):
+            continue
+        first, count = batch.triangles
+        for t in range(first, first + count):
+            node = plant.node_of_triangle(t)
+            if node is None:
+                continue
+            ys = [posed[v][1] for v in plant.triangles[t]]
+            portals[(name, plant.nodes[node].name[:3])].append((round(sum(ys) / 3, 1),
+                                                               plant.face_flags[t]))
+    pod_room = sorted(portals.get(("PORTAL_001", "i13"), []))
+    see_through = defaultdict(Counter)
+    for entry in fortif.entries:
+        if entry.tag != "MESH":
+            continue
+        stem = entry.name.rsplit(".", 1)[0]
+        try:
+            skin = objmesh.parse_wear(fortif.read_name(stem + ".wea"))
+        except KeyError:
+            continue
+        mesh = objmesh.parse(fortif.read(entry), entry.name, skin.materials)
+        level0 = set()
+        for node in mesh.nodes:
+            slot = node.hit_slot()
+            if slot is not None and slot < len(mesh.slots):
+                s = mesh.slots[slot]
+                level0.update(range(s.first_triangle, s.first_triangle + s.triangle_count))
+        for batch in mesh.batches:
+            name = skin.materials[batch.material] if batch.material < len(skin.materials) else ""
+            material = lib.get(name)
+            if material is None or material.blend_index != 1:
+                continue
+            first, count = batch.triangles
+            for t in range(first, first + count):
+                if t in level0:
+                    see_through[name.upper()][mesh.face_flags[t]] += 1
+    unflagged = {n: c[0] for n, c in see_through.items() if c[0]}
+    families = Counter("NE_S*" if n.startswith("NE_S") else n for n in unflagged
+                       for _ in range(unflagged[n]))
+    flagged = all(set(c) <= {0, 2, 4, 32} for c in see_through.values())
+    check("fortif.rlb: the unflagged see-through faces are the doorway and portal quads",
+          pod_room == [(-34.1, 0)] * 4
+          and families == Counter({"DEFAULT": 1240, "PORTAL_001": 140, "PORTAL_004": 112,
+                                   "NE_S*": 121})
+          and flagged,
+          f"fr_b_plant's PORTAL_001 quads between i13 and i15 (y, triangle flags): {pod_room}; "
+          f"level-0 faces of a flags-4 material with triangle flags 0, across fortif.rlb: "
+          f"{dict(families)}; every see-through face's flags within 0, 2, 4, 32: {flagged}")
+
+    # 4. What the push-out keeps of a face, and what the machine does with the push.
+    ani = _image_at(ani_path.read_bytes())
+    ctl = _image_at(ctl_path.read_bytes())
+    record = (ani(0x1000D668, 3) == b"\xff\x50\x14"
+              and ani(0x1000D71F, 3) == b"\xff\x50\x0c"
+              and ani(0x1000D724, 7) == bytes.fromhex("898c24a0000000")
+              and ani(0x1000D738, 7) == bytes.fromhex("899424a4000000")
+              and ani(0x1000D75D, 5) == bytes.fromhex("b912000000"))
+    masks = [struct.unpack("<I", ctl(0x1003C1AC + 4 * k, 4))[0] for k in range(10)]
+    # The pair's filter: six words, its first the five masks at 0x1003c1ac, b0, b4, b8 and d0
+    # ORed (0x1001db14-0x1001db5b), its last the excluded batch word (0x1001db48).
+    constructor = (ctl(0x10013F6A, 2) == b"\x89\x08" and ctl(0x10013F88, 3) == b"\x89\x50\x14"
+                   and ctl(0x10013F8B, 3) == b"\xc2\x18\x00"
+                   and ctl(0x1001DB14, 6) == bytes.fromhex("8b15d0c10310")
+                   and ctl(0x1001DB67, 1) == b"\xe8")
+    parent = (ctl(0x1000CA08, 3) == b"\x83\xf8\x03"
+              and struct.unpack("<f", ctl(0x1003B18C, 4))[0] == 0.0
+              and ctl(0x1000CA8B, 8) == bytes.fromhex("c744241400008040"))
+    # The pair's third filter (at [esp+0xd4] once edi is saved) takes triangle mask 4, and 2
+    # unless the mover's collision flags carry 8; the push-out gets it as its fourth argument
+    # (after one push, [esp+0xd4] is that local less the saved edi popped at 0x1001dd29) and
+    # tests every gathered face against it.
+    floors = (ctl(0x1001DB2B, 3) == b"\xc1\xe8\x02" and ctl(0x1001DB2E, 3) == b"\x83\xe0\x02"
+              and ctl(0x1001DBCE, 3) == b"\x83\xce\x04"
+              and ctl(0x1001DBD1, 7) == bytes.fromhex("89b424f0000000")
+              and ctl(0x1001DD29, 1) == b"\x5f"
+              and ctl(0x1001DFDB, 7) == bytes.fromhex("8d9424d4000000")
+              and ani(0x1000D592, 3) == b"\xc2\x14\x00"
+              and ani(0x1000DB93, 7) == bytes.fromhex("8bb424d8010000"))
+    check("AniMesh.dll/Control.dll: a gathered face's words, the filter's masks, the push rule",
+          record and constructor and parent and floors
+          and masks[:10] == [2, 4, 8, 0x10, 0x20, 0x40, 0x80, 0x100, 0x200, 0x400],
+          f"record +0x40 from the face source's slot 3 and +0x44 from the first word of its slot "
+          f"5's triangle, 72 bytes: {record}; mask globals 0x1003c1ac.. {[hex(m) for m in masks]}; "
+          f"filter of six words: {constructor}; parent type 3, push z against 0.0, cap 4.0: "
+          f"{parent}; the push-out's filter drops triangles flagged 2 unless the mover carries 8: "
+          f"{floors}")
+
+
 def _phase_record(ngi_at, index: int) -> tuple[int, dict]:
     """Record ``index`` of ``Ngi32.dll``'s render phase table (``0x10036a30``, 44 bytes
     each): its phase and its triples as {(stage, state): value}, render states under
@@ -16470,6 +16682,7 @@ def run(game: Path) -> int:
         check_collision, check_lake_and_buoys,
         check_combat, check_ownership,
         check_capture, check_building_entry, check_building_lighting, check_building_ground,
+        check_building_route,
         check_repair,
         check_chassis, check_weapons,
         check_firing,

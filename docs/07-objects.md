@@ -830,8 +830,13 @@ which is what an exporter's uncleared buffer looks like (*guess*).
 
 A round passes through faces flagged 4 or 32 and strikes 2 and 16 — *read*,
 `Control.dll:0x1001d9fa` ([26-damage.md](26-damage.md#the-hit-test--read-and-measured)).
-What reads 2 and 16 is not established: the mesh visitor takes a required and
-an excluded triangle mask from its caller (`AniMesh.dll:0x10008120`), and
+The collision push-out drops faces flagged 2 unless the mover's collision flags
+carry 8, and its door test takes 16 — *read*,
+`Control.dll:0x1001dbce`, `AniMesh.dll:0x1000dbba`
+([24-motion.md](24-motion.md#collision-between-objects--read)). So a floor does
+not push a walker standing on it. What else reads 2 and 16 is not
+established: the mesh visitor takes a required and an excluded triangle mask
+from its caller (`AniMesh.dll:0x10008120`), and
 `CBuilding::GetFirstIntersectedFace` forwards whatever filter it is given, so
 the answer is in whoever queries a building's faces.
 

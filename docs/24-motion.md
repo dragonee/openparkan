@@ -948,8 +948,13 @@ starts at 0:
      another gathered face is dropped: the segment from the centre to the
      centroid meets that face inside its triangle, edges included
      (`0x1000d7a5`–`0x1000dac0`).
-   - **Filter.** What is left is filtered by batch and triangle flags, as in
-     step 1.
+   - **Filter.** What is left is filtered by batch and triangle flags. The
+     batches go as in step 1. The triangles go by a third filter of the pair's:
+     flagged 4, and **flagged 2 unless B's collision flags carry 8**
+     (`Control.dll:0x1001db2b`, `0x1001dbce`). The pair passes that filter as the
+     push-out's fourth argument (`0x1001dfdb`), and the push-out tests every face
+     against it (`AniMesh.dll:0x1000db93`). The step-1 filter goes in as the
+     third argument, and where the push-out uses it is not traced.
    - **Accumulate**, nearest first (`0x1000dd7d`–`0x1000def8`). Take a face
      with unit direction d and depth p = r − distance, and let s = P·d. If
      s < p, take d′ = d − (d·P)P ÷ |P|², the part of d square to the push so
@@ -1061,9 +1066,11 @@ entry (`Control.dll:0x1001f600`–`0x1001f616`). In the world's pass:
   (`0x1001c2b4`).
 
 So **a building's walls and floors push every unit on it or near it**, the one
-it stands on included. A walker standing on a building takes a push that points
-down whole ([above](#collision-between-objects--read), message `0x1b`), and a
-bridge's deck pushes the hero crossing it.
+it stands on included. The exception is a floor flagged 2, which pushes only a
+mover whose collision flags carry 8
+([above](#collision-between-objects--read)). A walker standing on a building
+takes a push that points down whole (message `0x1b`). A bridge's deck pushes
+the hero crossing it, except where its faces are flagged 2.
 
 **Doors** (*read*). `CBuilding` files each class-12 item as a door, with the
 nodes its channels play (`Terrain.dll:0x100583a2`–`0x100584e8`). A door has a
@@ -1115,7 +1122,7 @@ model space with z up from the placement):
 
 | | Large Factory, `fr_b_plant` (`lplant01.dat`) | Outpost, `fr_l_angar` (`shang01.dat`) |
 |---|---|---|
-| way in | door `i05` (node 3) across x −11…11 at y 87.5–89.2, z 0–15.4, behind a forecourt floor at z 0 from y 87.4 to 108.5 | no door: ramps from z 0 to 1.9 at both ends of its hall |
+| way in | to the pod: the west side door `i21` (node 16) at x −26, up an 8° ramp to 0.96 ([below](#the-way-to-the-pod--measured-and-seen)); the front door `i05` (node 3) across x −11…11 at y 87.5–89.2, z 0–15.4, behind a forecourt floor at z 0 from y 87.4 to 108.5, into the entrance hall | no door: ramps from z 0 to 1.9 at both ends of its hall |
 | doors | 3, on nodes 3, 16 and 14 (the entrance and two side doors at x ±26), rate 0.4: open in 2.5 s | none |
 | floors | entrance hall `i01` at 0; the pod room at −12.4 | hall at 1.9; under the pod 0.48 |
 | pod | node 25 (`i17`), radius 4.77, centre (0.06, −48.66, −9.67): zone 3.82 across | node 2 (`o03`), radius 6.37, centre (19.40, 8.79, 4.79): zone 5.10 across |
@@ -1123,11 +1130,14 @@ model space with z up from the placement):
 | lightmap | on 100 of its 438 batches | none |
 
 Mission 02 places the Large Factory 0.08 above the ground under it, so a unit
-walking up to the door is the building's from the forecourt on.
+walking up to a door is the building's from the forecourt, or the floor before
+a side door, on.
 
-**Against the recording** (*seen*, 30 fps). The hero crosses the forecourt at
-92–94 s, is in the dark entrance at 94.5 s and under the hall's lamps at
-96.0 s. It stands on the pod from 102 s at the latest, and at 106.3 s the
+**Against the recording** (*seen*, 30 fps). The hero comes up to a side door,
+the factory's west one ([below](#the-way-to-the-pod--measured-and-seen)), not
+the forecourt, at 92–94 s. It is in the dark doorway at
+94.5 s and under the cross corridor's lamps at 96.5 s. It stands on the pod from
+102 s at the latest, and at 106.3 s the
 factory screen and "Building is captured" appear in the same frame. The
 autocannon's count drops from 500 to 499 at 94.5 s, as the hero reaches the
 door. A door that opens for the hero needs no shot, and the recording does not
@@ -1178,7 +1188,10 @@ through the floor, and can hold a walker up on ground that is not there.
 (`+0x10`, `0x1001db1e`):
 - It excludes batches flagged `8` always, and `0x200` unless the mover's flags
   carry 4 (`0x1001db25`–`0x1001db48`, into the filter's `+0x14`).
-- It excludes triangles flagged 4 (`0x1001dbad`).
+- For the segment, it excludes triangles flagged 4 (`0x1001dbad`).
+- For the push-out, it excludes triangles flagged 4, and flagged **2** unless
+  the mover's flags carry 8 (`0x1001db2b`, `0x1001dbce`–`0x1001dbd1`, into a
+  third filter's `+0x1c`, passed at `0x1001dfdb`).
 
 `AniMesh.dll`'s push-out tests each gathered face against the filter: its
 batch word at `+0x40` against required and excluded masks `+0x10`/`+0x14`, and
@@ -1222,36 +1235,172 @@ Raw, the same vertices sit tens of metres off.
 
 **The Large Factory's hall way is three groups with no link between them**
 (*measured*): the forecourt and entrance, 9 vertices on nodes 1 and 4; the
-interior with the pod, 62 vertices; and the rear, 13. So the graph does not
-route a walk from the door to the pod. What joins its groups is not read.
+interior with the pod, 62 vertices; and the rear, 13. The front group never
+reaches the pod. The interior group does, from its three side exits (flag 1):
+vertex 67 on the west at z 2.3, 68 above it at 9.4, and 69 on the east. Along
+the links their ways to the pod are 115.5, 161.4 and 170.3 m. What joins the
+three groups is not read.
 
-**The way down to the pod is stairs** (*measured*). A flood over the building's
-walkable level-0 faces on a half-metre grid, from the forecourt at 0, reaches
-the pod floor only when a step may rise more than 0.3 m. With steps of up to
-0.6 m it gets there in about 240 m, the lowest floor on the way near −14. One
-such way runs:
-- along the left corridor at 0 to 1.1;
-- up a flight to a gallery at 7.1;
-- down two flights of about 30° to −5.6;
-- down a third to about −14;
-- up onto the pod's floor at −12.4.
+From the front there is a way on the faces alone (*measured*). A flood over
+the walkable level-0 faces on a half-metre grid, from the forecourt at 0,
+reaches the pod floor only when a step may rise more than 0.3 m. With steps of
+up to 0.6 m it gets there in about 240 m, over a gallery at 7.1. The recording
+does not take it.
 
-Treads rise up to 0.56 between half-metre samples, and the steepest walkable
-face on the way stands at 67°. The recording takes the hero from the door to
-the pod in about 8 s (94.5 to 102 s). That fits a shorter way than the flood's,
-or a faster walk; which way it took is not established.
+#### The way to the pod — *measured*, and *seen*
 
-**How a walker climbs them** is not established. The lift puts the feet on the
-highest contact face under them whatever its height
-([Holding the body on the ground](#holding-the-body-on-the-ground--read-and-measured)),
-so steps are not what stops a walker. The push-out is: a stair face within r of
-the body sphere's centre pushes it along the face's normal. With state bit 4
-that push is made horizontal and lengthened, down the slope, and only a push
-pointing down on a unit whose parent is a building is taken whole
-([Collision between objects](#collision-between-objects--read)). Nothing read
-exempts a building's floors from that push. Triangle flag 2 marks exactly the
-walk-through floors ([07-objects.md](07-objects.md#stream-7-is-the-per-face-record)),
-and what reads it is not established.
+**The hero goes in by the west side door.** The hall way's shortest way from
+the west exit runs through the side door `i21` (node 16) and down to the pod.
+Its vertices stand about 1.4 above the floor, and the floor under each is the
+walkable level-0 face nearest that height.
+- *Model* is model space, z up from the placement.
+- *World* is Tut_2's, from the placement (392.42, 788.73, 151.75) turned by
+  −0.0246 rad.
+- *Along* is the distance along the links.
+
+| vertex | node | model (x, y, z) | floor under it | world (x, y, z) | along |
+|---|---|---|---|---|---:|
+| 67, the exit | `o03` | (−55.08, −0.04, 2.30) | none: the landscape | (337.36, 790.04, 154.05) | 0 |
+| 66 | `o03` | (−39.66, −0.04, 2.30) | none: the landscape | (352.77, 789.66, 154.05) | 15.4 |
+| 65 | `o03` | (−28.68, −0.04, 2.96) | 0.70, 8° | (363.75, 789.39, 154.71) | 26.4 |
+| 58 | `i10` | (−22.56, −0.04, 2.96) | 0.96, flat | (369.87, 789.24, 154.71) | 32.5 |
+| 59 | `i10` | (−22.20, 4.40, 2.96) | 0.96, flat | (370.33, 793.67, 154.71) | 37.0 |
+| 37 | `i12` | (−16.86, 4.56, 2.90) | 0.71, 30° | (375.68, 793.70, 154.65) | 42.3 |
+| 36 | `i12` | (−6.18, 4.56, −3.58) | −5.52, 30° | (386.35, 793.44, 148.17) | 54.8 |
+| 6 | `i13` | (0.00, 4.26, −3.58) | −5.76, flat | (392.52, 792.99, 148.17) | 61.0 |
+| 7 | `i13` | (0.00, −4.80, −3.58) | −5.76, flat | (392.30, 783.93, 148.17) | 70.1 |
+| 25 | `i13` | (0.02, −10.26, −3.58) | −5.76, flat | (392.19, 778.47, 148.17) | 75.5 |
+| 35 | `i13` | (0.02, −32.88, −12.04) | −13.85, 21° | (391.63, 755.86, 139.71) | 99.7 |
+| 28 | `i15` | (0.02, −39.24, −12.04) | −14.02, 5° | (391.47, 749.50, 139.71) | 106.0 |
+| 31, the pod | `i15` | (0.02, −48.66, −11.02) | −12.40, flat | (391.24, 740.08, 140.73) | 115.5 |
+
+Between the vertices, on half-metre samples:
+1. **66 → 58.** A floor at 0 and an 8° ramp up to 0.70 on the outer shell
+   `o03`. Then the side door `i21` at x −26 and the cross corridor `i10` at 0.96.
+   The doorway's `DEFAULT` quads stand at x −26.9 on `o03` and −25.0 on `i20`.
+2. **59 → 36.** The stairs `i12`. Their collision faces are a smooth 30° ramp,
+   with 64° side pieces, down to −5.52.
+3. **6 → 25.** The corridor `i13` at −5.76.
+4. **25 → 35.** A 21° ramp, 24 m long, down to −13.85.
+5. **35 → 28.** The pod room `i15`, at 5°, between −13.85 and −14.32.
+6. **28 → 31.** A 28° rise of 1.6 onto the pod's floor at −12.4, over the pod
+   `i16`/`i17`.
+
+All 191 samples lie on faces flagged 2, and the slopes are 0, 5, 8, 21, 28 and
+30°. The floor runs from −14.32 to 0.96 and never changes by more than 0.30
+between neighbouring samples. So the way has no step, only ramps.
+
+*Seen*, against the recording:
+
+| time | where the hero is |
+|---|---|
+| 94.5 s | the dark doorway |
+| 96.5 s | the cross corridor's green lamps |
+| 98.0 s | `i13`'s arches |
+| 99.0 s | `i13`'s ramp, sloping down |
+| 100.5 s | the pod room |
+| by 102 s | on the pod |
+
+*Derived*: 89 m from the door to the pod in about 7.5 s is 12 m/s on average,
+with the door's opening on the way. The recording draws the interior lavender
+and white where openparkan's engine draws it red; that is not looked at here.
+
+**Portal quads stand between the rooms** (*measured*). The passages between
+the interior's rooms hold pairs of see-through quads with triangle flags 0, like
+the doorways. They are `Material.lib` flags-4 materials: `DEFAULT`,
+`PORTAL_001` and `PORTAL_004`.
+- On the way, four `PORTAL_001` triangles on `i13` cross the ramp's foot at
+  y −34.1, before the pod room.
+- Across `fortif.rlb`'s level-0 faces, the see-through faces with no flag are
+  `DEFAULT` 1240, `PORTAL_001` 140, `PORTAL_004` 112 and the `NE_S…` family 121.
+  What the `NE_S…` ones are was not looked at.
+- Every see-through face's flags lie within 0, 2, 4 and 32.
+
+*Measured on openparkan's engine*, the hero walking the table's waypoints:
+- It waits 2.3 s at the side door for the door to open.
+- Its stand-ins pass `DEFAULT` and let walkable faces not push. With those, it
+  walks down the stairs and the ramp and stops at `PORTAL_001`.
+- Passing `PORTAL_*` too, it reaches the pod, and the capture fires 4.4 s after
+  it arrives.
+- With the read rule in place of the walkable stand-in (faces flagged 2 and 4
+  pass, the rest push), and `DEFAULT` and `PORTAL_*` passing, it walks the whole
+  way, the stairs' side pieces included. It takes 7.8 s from vertex 65, before
+  the door, to the pod (each vertex counted within 2.5), against the recording's
+  7.5 s.
+
+**What a gathered face carries** (*read*). The push-out copies each gathered
+face into a 72-byte record (18 words, `AniMesh.dll:0x1000d75d`):
+- its batch word `+0x40` is the first word of what the face source's slot 3
+  returns (`0x1000d71f`, stored at `0x1000d724`);
+- its triangle word `+0x44` is the first word of the triangle record that the
+  source's slot 5 returns for (2, 3) (`0x1000d668`, stored at `0x1000d738`).
+
+No instruction in `AniMesh.dll` writes 8, `0x200` or `0x2000` into a `+0x40`.
+So where a face's batch word is set is not traced.
+
+The pair's query builds its filter with a constructor of six words
+(`Control.dll:0x10013f60`). Its first word is the OR of five of the mask
+globals at `0x1003c1ac` (2, 4, 8, `0x10`, `0x400`): `0x41e` (`0x1001db14`).
+What that word selects is not read.
+
+**How the machine takes a building's push** (*read*, `0x1000c990`). With state
+bit 4:
+- The push is taken whole when the machine's parent answers 3 in slot 11 (a
+  building) and the push's z is 0 or less (`0x1000ca08`, against the 0.0 at
+  `0x1003b18c`).
+- Otherwise its z is dropped, and x and y are scaled by |P| ÷ |P_xy|, at most
+  4.0 (`0x1000ca8b`). A push with no x or y part moves nothing.
+
+So a ceiling's push, downward, is taken whole. A flat floor's push, straight up,
+moves nothing, and a sloped floor's becomes a push down the slope.
+
+**The floors do not push a walker: flag 2 is the exemption** (*read*,
+[Collision between objects](#collision-between-objects--read)). The push-out's
+filter drops triangles flagged 2 unless the mover's collision flags carry 8.
+Every floor on the way to the pod carries 2, so none of them pushes a mover
+without 8. The walls, the stairs' 64° side pieces and the portal quads carry no
+2, and they still push.
+
+Without that rule the ramps would push the hero back (*derived*). The sphere is
+the agent's joined sphere
+([26-damage.md](26-damage.md), `AniMesh.dll:0x10009510`): r 2.18 for the hero.
+Its centre stands about h = 1.37 above the feet (*measured* on openparkan's
+engine, which poses the same parts). A floor at slope θ lies h cos θ from the
+centre, less than r, so it is always in reach. Its push has depth p = r − h cos θ, a
+horizontal part p sin θ, and after the rule the lesser of p and 4 p sin θ:
+
+| floor on the way | depth p | horizontal part | pushed down the slope |
+|---|---:|---:|---:|
+| flat | 0.81 | 0 | 0 |
+| 5°, the pod room | 0.82 | 0.07 | 0.28 |
+| 8°, the side ramp | 0.82 | 0.11 | 0.46 |
+| 21°, `i13`'s ramp | 0.90 | 0.32 | 0.90 |
+| 28°, onto the pod | 0.97 | 0.46 | 0.97 |
+| 30°, the stairs | 0.99 | 0.50 | 0.99 |
+
+*Measured on openparkan's engine*, walking the way:
+- with r 2.18 the largest horizontal part is 0.32, on `i13`'s ramp, as the
+  table has it;
+- with the ground search's own sphere, r 1.15, no walkable face comes in reach
+  anywhere on the way.
+
+Such a push would land each time the pass runs, and shove the hero down every
+ramp, and back against every one on the way out. The recording shows the hero
+walk in at about 12 m/s and out again from 158 to 166.5 s. So the hero's
+collision flags lack 8 (*derived*). Who sets a collision object's flags, and
+which movers carry 8, is not traced. Triangle flag 2 marks exactly the
+walk-through floors ([07-objects.md](07-objects.md#stream-7-is-the-per-face-record)).
+
+**Steps and lift** (*read*,
+[Finding the ground](#finding-the-ground--read) and
+[Holding the body on the ground](#holding-the-body-on-the-ground--read-and-measured)).
+- A contact takes the nearest walkable face below it, or one less than r₂ above
+  the centre.
+- The lift is the largest rise over the flag-1 contacts, whatever its height.
+- No step limit is read.
+
+On this way the floor never rises more than 0.30 between half-metre samples, so
+neither limit comes into play.
 
 **For an engine**, walking into a building:
 
@@ -1260,14 +1409,27 @@ and what reads it is not established.
    building's faces are the only ground and the only thing drawn.
 2. Find the ground inside by the walk-face query over the building's level-0
    faces (normal z above cos 80°): the nearest below the centre, or one less
-   than r₂ above it.
+   than r₂ above it. Lift the body onto it.
 3. Collide against the building's faces, the one stood on included, except:
    - triangles flagged 4;
    - door faces (flag `0x10`) while their door is open;
-   - STAND-IN, from the recording: the `DEFAULT` doorway quads.
-4. STAND-IN until the stair question is read: a building's walkable faces do
-   not push a walker. Then its stairs are climbed by the lift alone.
-5. Draw `DEFAULT` as its material says: black.
+   - STAND-IN, from the recording and the probe: see-through faces with
+     triangle flags 0, the `DEFAULT`, `PORTAL_001` and `PORTAL_004` quads.
+4. In the push-out, drop faces flagged 2 unless the mover's collision flags
+   carry 8. STAND-IN until those flags are traced: no walker carries 8. The
+   floors and ramps are then climbed by the lift alone. The stairs' 64° side
+   pieces carry no 2 and still push, and the hero still walks the stairs
+   (*measured* on openparkan's engine).
+5. Take the push as the machine does: with state bit 4, whole when the parent
+   is a building and z ≤ 0; otherwise flattened, lengthened to |P| and at
+   most ×4.
+6. The way to the Large Factory's pod is the hall way's from the nearest side
+   exit: for the west one, vertices 67, 66, 65, 58, 59, 37, 36, 6, 7, 25, 35, 28
+   and 31, in the world as the table gives them. The side door opens as the
+   walker nears it (step 2 of
+   [Walking into a building](#walking-into-a-building--read-and-measured)),
+   and takes 2.5 s to open at rate 0.4.
+7. Draw `DEFAULT` as its material says: black.
 
 ### What a buoy does to a walker — *read*, *measured*, and not established
 
@@ -1627,14 +1789,22 @@ points are given is not traced. `Movement_FlyHeight` is 40 and
   (`Terrain.dll:0x1005a27f`), the node whose box bounds a pod's zone in height
   (`0x10058607`). ~~How a lightmap combines with a batch's lit colour~~ —
   **read**: [07-objects.md](07-objects.md#how-a-lightmapped-batch-is-drawn--read-and-measured).
-- How a walker climbs a building's ramp while the ramp's own faces push its
-  sphere back. The way into the Large Factory is stairs, which the lift alone
-  would climb, and nothing read exempts their faces from the push
-  ([The ground inside a building](#the-ground-inside-a-building--read-in-part-and-measured)).
-- Where a gathered face's batch word (`+0x40`, the `8` and `0x200` the collision
-  query excludes) comes from, and so whether the `DEFAULT` doorway quads carry
-  it; what joins the Large Factory's three hall-way groups; and what reads
-  triangle flag 2.
+- ~~How a walker climbs a building's ramp while the ramp's faces push its
+  sphere back; which way the hero takes to the Large Factory's pod~~ —
+  **read** and **measured**. The push-out drops triangles flagged 2 unless the
+  mover's collision flags carry 8, and every floor on the way carries 2. The way
+  runs in by the west side door, down 30° stairs and a 21° ramp
+  ([The way to the pod](#the-way-to-the-pod--measured-and-seen)). Still open:
+  who sets a collision object's flags (`+0x10`), and which movers carry 8 and 4.
+  That the hero lacks 8 is *derived* from the recording.
+- Where a gathered face's batch word comes from. It is the first word of what
+  the face source's slot 3 returns (`AniMesh.dll:0x1000d71f`), and the 8 and
+  `0x200` the collision query excludes are not written by `AniMesh.dll`. Also
+  open: whether the `DEFAULT` and `PORTAL_*` quads carry that word, what the
+  filter's first word `0x41e` selects, where the push-out uses its third
+  argument (the step-1 filter), and what else reads triangle flag 2.
+- What joins the Large Factory's three hall-way groups; the front group never
+  reaches the pod.
 - Which `Land.msh` faces carry the world face bit `0x8` and class bit 8 that
   the ground search excludes; the landscape converts them to its own mask at
   `Terrain.dll:0x10022da0` (world `0x8` → `0x20`, `0x200` → `0x20000`,
