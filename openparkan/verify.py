@@ -18,6 +18,7 @@ from pathlib import Path
 
 from . import (
     arealmap,
+    assembly,
     behaviour,
     briefing,
     control,
@@ -6633,6 +6634,172 @@ def check_hit_test(check, game: Path) -> None:
           f"of radius {min(positive):.3g}-{max(positive):.3g}; the hero's: {hero_radii}")
 
 
+#: Mission 01, the two halves of its bridge, and what the ground contact takes as ground.
+MISSION_01_DATA = "MISSIONS/CAMPAIGN/CAMPAIGN.00/Mission.01/data.tma"
+BRIDGE_HALVES = (23, 24)
+WALKABLE_Z = 0.173648
+
+
+def _world_faces(asm, obj):
+    """An object's level-0 triangles in the world: (corners, face normal, flags)."""
+    half = obj.rotation / 2.0
+    place = (tuple(obj.position), (math.cos(half), 0.0, 0.0, math.sin(half)))
+    out = []
+    for part in asm.parts(obj.kind, obj.path):
+        mesh = asm.mesh(part.ref)
+        if mesh is None:
+            continue
+        for n, node in enumerate(mesh.nodes):
+            s = node.hit_slot(0)
+            if s is None:
+                continue
+            pose = objmesh.compose(place, objmesh.compose(part.pose, mesh.world_pose(n)))
+            turn = ((0.0, 0.0, 0.0), pose[1])
+            slot = mesh.slots[s]
+            for f in range(slot.first_triangle, slot.first_triangle + slot.triangle_count):
+                out.append(([objmesh.apply(pose, mesh.positions[i]) for i in mesh.triangles[f]],
+                            objmesh.apply(turn, mesh.face_normal[f]), mesh.face_flags[f]))
+    return out
+
+
+def _deck_z(faces, x, y):
+    """The highest walkable face holding (x, y), or None."""
+    best = None
+    for (a, b, c), normal, _ in faces:
+        if normal[2] <= WALKABLE_Z:
+            continue
+        d = (b[0] - a[0]) * (c[1] - a[1]) - (c[0] - a[0]) * (b[1] - a[1])
+        if abs(d) < 1e-9:
+            continue
+        u = ((b[0] - x) * (c[1] - y) - (c[0] - x) * (b[1] - y)) / d
+        v = ((c[0] - x) * (a[1] - y) - (a[0] - x) * (c[1] - y)) / d
+        if min(u, v, 1 - u - v) >= -1e-6:
+            z = u * a[2] + v * b[2] + (1 - u - v) * c[2]
+            best = z if best is None else max(best, z)
+    return best
+
+
+def _land_z(land, x, y):
+    """Land.msh under (x, y): the highest dry face and the highest water face."""
+    if getattr(land, "_grid", None) is None:
+        land._build_index()
+    (sx, sy), (ox, oy) = land._grid_step, land._grid_origin
+    dry = wet = None
+    for fi in land._grid.get((int((x - ox) / sx), int((y - oy) / sy)), ()):
+        a, b, c = (land.positions[i] for i in land.faces[fi])
+        den = (b[1] - c[1]) * (a[0] - c[0]) + (c[0] - b[0]) * (a[1] - c[1])
+        if abs(den) < 1e-12:
+            continue
+        l1 = ((b[1] - c[1]) * (x - c[0]) + (c[0] - b[0]) * (y - c[1])) / den
+        l2 = ((c[1] - a[1]) * (x - c[0]) + (a[0] - c[0]) * (y - c[1])) / den
+        if min(l1, l2, 1 - l1 - l2) < -1e-6:
+            continue
+        z = l1 * a[2] + l2 * b[2] + (1 - l1 - l2) * c[2]
+        if land.is_water(fi):
+            wet = z if wet is None else max(wet, z)
+        else:
+            dry = z if dry is None else max(dry, z)
+    return dry, wet
+
+
+def check_collision(check, game: Path) -> None:
+    """Collision and the ground on Mission 01: the bridge's deck, obstacles' spheres and flags."""
+    m = mission.load(game / MISSION_01_DATA)
+    land = landmesh.load(game / "DATA/MAPS/Tut_1/Land.msh")
+    asm = assembly.Assembly(game)
+
+    profiles = {}
+    for i in BRIDGE_HALVES:
+        obj = m.objects[i]
+        faces = _world_faces(asm, obj)
+        ang = obj.rotation + math.pi / 2
+        rows = []
+        for t in range(-44, 80, 4):
+            x, y = obj.position[0] + math.cos(ang) * t, obj.position[1] + math.sin(ang) * t
+            rows.append((t, _deck_z(faces, x, y), *_land_z(land, x, y), y))
+        profiles[i] = (obj, faces, rows)
+    ok_halves, notes = True, []
+    for i, (obj, faces, rows) in profiles.items():
+        on = [r for r in rows if r[1] is not None]
+        first, origin = on[0], next(r for r in rows if r[0] == 0)
+        top = [r for r in rows if r[0] >= 24]
+        walk = sum(normal[2] > WALKABLE_Z for _, normal, _ in faces)
+        dry_min = min(r[2] for r in rows if r[2] is not None)
+        waters = {round(r[3], 2) for r in rows if r[3] is not None}
+        ok_halves &= (obj.path.lower().endswith("m_bridge.dat")
+                      and obj.properties["Type"].value & 0xFFFFFFFF == 0x80001000
+                      and len(faces) == 230 and walk == 130
+                      and first[0] == -36 and abs(first[1] - 0.32) < 0.01 and first[2] == 0.0
+                      and abs(origin[1] - 9.39) < 0.01
+                      and all(abs(r[1] - 11.52) < 0.01 for r in top)
+                      and dry_min < -19 and waters == {-1.73})
+        notes.append(f"object {i}: deck from {first[1]:.2f} over dry {first[2]:.2f} "
+                     f"at t {first[0]}, "
+                     f"{origin[1]:.2f} at the origin, {top[0][1]:.2f} from t 24; "
+                     f"{walk} of {len(faces)} faces walkable; bed down to {dry_min:.2f}, "
+                     f"water {waters}")
+    meet = [profiles[i][2][-1] for i in BRIDGE_HALVES]
+    samples = [r for _, _, rows in profiles.values() for r in rows]
+    wet = [r for r in samples if r[3] is not None]
+    bed = min(r[2] for r in samples if r[2] is not None)
+    check("Mission 01: the bridge's deck meets the bank and the halves meet level",
+          ok_halves and all(abs(r[1] - 11.52) < 0.01 for r in meet)
+          and abs(meet[0][4] - meet[1][4]) < 5 and abs(bed + 28.72) < 0.05
+          and wet and all(r[2] < r[3] for r in wet),
+          "; ".join(notes) + f"; the halves' ends at y {meet[0][4]:.1f} and {meet[1][4]:.1f}, "
+          f"both 11.52; the bed's lowest {bed:.2f}; control: on all {len(wet)} samples over "
+          f"water the landscape's dry face lies below it, so only the deck crosses")
+
+    flags, radii, triangles = {}, {}, {}
+    for obj in m.objects:
+        spheres, count = [], 0
+        for part in asm.parts(obj.kind, obj.path):
+            mesh = asm.mesh(part.ref)
+            if mesh is None:
+                continue
+            per = Counter()
+            for node in mesh.nodes:
+                s = node.hit_slot(0)
+                if s is None:
+                    continue
+                slot = mesh.slots[s]
+                count += slot.triangle_count
+                end = slot.first_triangle + slot.triangle_count
+                per.update(mesh.face_flags[slot.first_triangle:end])
+            flags[mesh.name] = dict(sorted(per.items()))
+            if mesh.volume:
+                spheres.append((objmesh.apply(part.pose, mesh.volume.centre), mesh.volume.radius))
+        if not spheres:
+            continue
+        weight = sum(r for _, r in spheres)
+        centre = tuple(sum(c[k] * r for c, r in spheres) / weight for k in range(3))
+        radius = max(math.dist(c, centre) + r for c, r in spheres) * obj.placed_scale
+        stem = obj.path.split("\\")[-1].lower()
+        radii.setdefault(stem, set()).add(round(radius, 2))
+        triangles[stem] = count
+    flagged = {k: v for k, v in flags.items() if set(v) != {0}}
+    check("Mission 01: only the big tree's leaves and the bridge carry level-0 face flags",
+          flagged == {"s_tree_0_04.msh": {0: 212, 4: 192},
+                      "fr_m_brige.msh": {0: 196, 2: 16, 4: 18}},
+          f"{flagged}; every other level-0 triangle of the mission's {len(flags)} meshes is 0, "
+          f"so a leaf, flagged 4, is the only face a walker's segment passes "
+          f"(Control.dll:0x1001db5f)")
+    hero = radii.get("tut1_p.dat")
+    others = [r for k, v in radii.items() if k != "tut1_p.dat" for r in v]
+    want = {"tut1_p.dat": {2.18}, "l_targ.dat": {5.22}, "m_targ.dat": {15.45},
+            "tut1_e1.dat": {2.72}, "helic.dat": {2.45}, "tut1_mf1.dat": {5.98},
+            "s_tree_29": {3.43}, "m_bridge.dat": {61.92}}
+    check("Mission 01: the hero's collision sphere is the smallest, so it is always the mover",
+          all(radii.get(k) == v for k, v in want.items()) and hero and min(others) > max(hero)
+          and triangles.get("tut1_p.dat") == 688
+          and {r for k in ("s_stone_05", "s_stone_06", "s_stone_07", "s_stone_10")
+               for r in radii[k]}
+          >= {41.17, 78.89},
+          f"radii {dict(sorted((k, sorted(v)) for k, v in radii.items()))}; the parts' header "
+          f"spheres joined as AniMesh.dll:0x10009510 joins them, times the placement's scale; "
+          f"the larger sphere is the obstacle (Control.dll:0x1001d647)")
+
+
 def check_combat(check, game: Path) -> None:
     """Damage, shields, armour and repair, against the shipped data."""
     names = frozenset(p.name.lower() for p in all_archives(game))
@@ -11972,6 +12139,7 @@ def run(game: Path) -> int:
         check_rsli,
         check_control, check_efficiency,
         check_motion, check_playback, check_ground, check_sensors, check_hit_test,
+        check_collision,
         check_combat, check_ownership,
         check_capture, check_repair, check_chassis, check_weapons, check_firing,
         check_targeting, check_turrets, check_packages, check_builder,

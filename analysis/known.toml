@@ -10900,14 +10900,6 @@ read = true
 
 [[entry]]
 module = "AniMesh.dll"
-at = "0x1000d410"
-kind = "function"
-name = "interface 0x25 slot 3: sphere push-out against the nodes' level 0 of the current variant (the method not read)"
-doc = "docs/24-motion.md"
-read = false
-
-[[entry]]
-module = "AniMesh.dll"
 at = "0x1000d645"
 kind = "site"
 name = "sphere push-out: node slot record for variant -1 (current), level 0"
@@ -15965,3 +15957,251 @@ kind = "site"
 name = "world init: stores the host's callback at 0x1013b59c"
 read = true
 doc = "docs/29-weapons.md"
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x1000d410"
+kind = "function"
+name = "interface 0x25 slot 3: sphere push-out; faces gathered by closest point, hidden ones dropped, P accumulated over depths nearest first, |P| held to 4r"
+doc = "docs/24-motion.md"
+read = false
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001c185"
+kind = "site"
+name = "collision pass: the context entry of kind 1, the landscape: a round against the ground, any other mover against the map box"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001c15a"
+kind = "site"
+name = "collision pass: an entry flagged 1, or whose radius is below 0, is skipped"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001c1e9"
+kind = "site"
+name = "collision pass: a pair goes on only when one side has a contact record"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001c077"
+kind = "site"
+name = "collision pass: every contact record's flags and push are zeroed first"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001db07"
+kind = "site"
+name = "unit pair: an obstacle that does not answer interface 0x25 ends the pair"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001dcb2"
+kind = "site"
+name = "unit pair: the mover's end moved by its push so far less the obstacle's"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001dbad"
+kind = "site"
+name = "unit pair: the face query's triangle mask is 4 (a round's is 0x24)"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001dbeb"
+kind = "site"
+name = "unit pair: the small-face query takes only batches flagged 8"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001df8f"
+kind = "site"
+name = "unit pair: a mover flagged 0x1000000 pushes out with a radius of at most 7.5"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001fe10"
+kind = "function"
+name = "collision object slot 7: set flag 1, which the pass skips"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001fe00"
+kind = "function"
+name = "collision object slot 6: clear flag 1"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001f638"
+kind = "table"
+name = "collision object message jump table: 1 start, 4 attach interfaces, 21 re-register or leave, 0x1c end"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001f585"
+kind = "site"
+name = "collision object message 21, sub-code 6: leave the manager, join the first ancestor answering 0x203"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10003382"
+kind = "site"
+name = "agent build: every agent gets a collision object (0x28) once the world has a collision manager"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10020980"
+kind = "datum"
+name = "sphere push-out visitor vtable: node test 0x1000dfe0, triangle 0x1000e0c0"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x1000dfe0"
+kind = "function"
+name = "push-out visitor node test: the node's level-0 slot sphere against the query sphere"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x1000e0c0"
+kind = "function"
+name = "push-out visitor triangle: 0x1000e900 against the sphere; a direction and distance into the world, kept sorted by distance"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x1000d7a5"
+kind = "site"
+name = "sphere push-out: a face whose centroid another gathered face hides from the centre is dropped"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x1000dd7d"
+kind = "site"
+name = "sphere push-out: s = P.d against the depth r - distance; P += d' (p - s) / (d'.d), d' square to P"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x1000df50"
+kind = "site"
+name = "sphere push-out: |P| held to 4 x the radius"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10020970"
+kind = "datum"
+name = "4.0, the sphere push-out's clamp on |P| over r"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10020954"
+kind = "datum"
+name = "walk-face visitor vtable (slot 2): node test 0x1000ce90, triangle 0x1000cfa0"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x1000ce90"
+kind = "function"
+name = "walk-face visitor node test: the point within the slot sphere's radius x scale plus the margin, in x and y"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x1000cfa0"
+kind = "function"
+name = "walk-face visitor triangle: normal z at least 0.173648, within the margin in x and y, above or below by bits 4/8, nearest gap"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x1000d220"
+kind = "function"
+name = "point against a triangle in x and y: inside, the plane's height and 0; outside, the first edge it lies beyond"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x1002096c"
+kind = "datum"
+name = "0.173648, cos 80 degrees, the walk-face normal limit"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10015ca0"
+kind = "function"
+name = "slot-7 walk-face visitor triangle: the point inside the triangle projected along the query axis, no margin"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10026314"
+kind = "site"
+name = "PlaceObjectOnWorldFace: the face's object adds the placed object at the face's part, its world matrix kept"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1000a533"
+kind = "site"
+name = "MBehaviour variable 0x201: the size class at +0x960"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10005e8f"
+kind = "site"
+name = "MBehaviour init: +0x960 = the size class (vtable +0xd8, 0x1000cee0)"
+read = true
+doc = "docs/24-motion.md"

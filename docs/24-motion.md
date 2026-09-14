@@ -678,6 +678,35 @@ and that group picks the step by surface
    (`0x10013fe0`) visit **level 0 of the current variant** (`0x10007edb`); a
    `CBuilding` hands slot 7 to its mesh (`Terrain.dll:0x10056c70`). The ground search's filter excludes
    world face bits `0x200` (the liquid surface) and `0x8` (`0x1001a687`).
+
+   **Buildings are ground; scenery and units are not** (*read*). The type the
+   filter tests is `IGameObject` slot 11. The collision pass reads the same
+   number as the landscape's collision kind 1 (`Control.dll:0x1001c185`).
+   `CBuilding` answers 3 (`Terrain.dll:0x10057da0`), and so does a building's
+   own agent, which takes its parent's kind. The agent build reads a parent's
+   kind through this same slot (`AniMesh.dll:0x10003174`). An agent's kind
+   comes from its tag: 4 for a unit, 10 for a `STAT` tree or stone
+   (`0x1000317f`). That its own slot 11 hands out that kind is *derived*. So the
+   walk-face query asks the landscape and every building, the bridges among
+   them, and never a tree, a stone or another unit (*derived*).
+
+   **How an object's faces answer** (*read*):
+   - **Interface `0x25` slot 2** (`AniMesh.dll:0x1000ccb0`) visits a node when
+     the query point, in x and y, lies within its level-0 slot sphere's radius
+     (times the largest scale) plus the 0.5 (`0x1000ce90`). For each of that
+     slot's triangles, in the world (`0x1000cfa0`), it rejects a face whose
+     normal z is below 0.173648, cos 80° (`0x1000d0ef`, `0x1002096c`). The
+     point is then tested against the triangle in x and y (`0x1000d220`).
+     Inside, the height is the plane's at the point. Outside, it is measured
+     against the first edge it lies beyond: the nearer end's height past an end,
+     otherwise the height along the edge, with the squared distance to it. A
+     face farther than 0.5 is rejected (`0x1000d145`). Direction bit 8 rejects a
+     face above the point, bit 4 one below (`0x1000d161`–`0x1000d18f`). The
+     nearest remaining face by squared height gap wins.
+   - **Interface `0x18` slot 7** (`0x10013fe0`) does the same with no margin.
+     The point must lie inside the triangle, projected along the query's axis
+     (`0x10015ca0`). It returns its last answer again when asked the same
+     question twice.
    **A face steeper than 80° is ground for a tick at most** — 323 of the
    173827 level-0 terrain faces across the maps (*measured*): only fallback 3
    takes one, and the next tick's walk gives it up at its first step.
@@ -709,6 +738,20 @@ and that group picks the step by surface
 7. **Placement.** Unless state bit `0x8000000` is set, the object is placed on
    its held face through `IWorld` slot 11, `PlaceObjectOnWorldFace`
    (`0x1001b4c3`).
+   - **It becomes a child of what it stands on** (*read*,
+     `Terrain.dll:0x10025fc0`). The face record names an object and a part. If
+     the machine already hangs on that object and part, nothing happens.
+     Otherwise the machine's world matrix is kept (`0x100262c8`), its parent
+     removes it (slot 5, `0x100262ee`), the face's object adds it at the face's
+     part (slot 4, `0x10026314`), and the world matrix is put back
+     (`0x1002632c`). On a bridge's deck the hero is the bridge's child; back on
+     the landscape, the landscape's.
+   - **Its collision object moves with it** (*read* in part). A collision
+     object takes message 21 (`Control.dll:0x1001f548`, table
+     `0x1001f638`). With sub-code 6 it leaves its manager and joins the first
+     ancestor that answers `0x203` (`0x1001f585`, `0x1001fe40`); with 7 it only
+     leaves. That the reparenting sends message 21 is a *guess*. The code that
+     sends it was not found.
 
 ### Holding the body on the ground — *read*, and *measured*
 
@@ -739,37 +782,122 @@ with legs, wheels or tracks falls under gravity 10, and every flyer holds its
 height. A mode-0 or mode-2 machine falls exactly when its state has contact
 points.
 
+### Standing on a bridge — *read*, and *measured*
+
+A bridge is a building (`Type` `0x80001000`), so its level-0 faces answer
+the ground search as the landscape's do
+([Finding the ground](#finding-the-ground--read)). A machine walks onto the
+deck when the deck face is the nearest walkable face under its sphere, or a
+walkable face above the centre by less than r₂. From then on the hero is the
+bridge's child, until a landscape face is nearer again.
+
+*Measured* on Mission 01. Its two `m_bridge.dat` halves (objects 23 and 24,
+mesh `fr_m_brige`) are placed turned π apart. Each has 230 level-0 faces, 130
+of them with a world normal z above 0.173648:
+
+| along a half, from its land end | deck z | ground |
+|---|---:|---|
+| the end, 36 m out from the half's origin | 0.32 | dry bank at 0.00 |
+| the half's origin | 9.39 | dry bank at 0.00 |
+| 24 m past the origin, and on to where the halves meet | 11.52 | falls away to a dry bed 28.7 below the bank, under water at −1.73 |
+
+- **The deck meets the bank.** It starts 0.32 above the dry ground and climbs
+  11.2 over 56 m, a slope near 11°, well inside the 80° limit.
+- **The halves meet level.** Object 23's deck and object 24's both stand at
+  11.52 where they meet, near y 683.
+- **Without the deck there is no crossing.** The only ground between the banks
+  is the water at −1.73 over a bed that falls to −28.7.
+
 ### Collision between objects — *read*
 
-The collision pass (`0x1001c040`; [26-damage.md](26-damage.md#the-hit-test--read-and-measured))
-takes every pair once, and goes further only when one side has a contact
-record and the two swept spheres touch (`0x1001e9f0`). A pair with a handler
-of its own (`+0x40` slot 7) goes to it; a pair with no round goes to
-`0x1001daf0` with the **larger sphere as the obstacle A and the smaller as the
-mover B** (`0x1001d647`). B's move is its sphere's start and end plus the
-relative displacement of the two contact records. A push P starts at 0:
+**Who is in the pass** (*read*):
+- **Every agent has a collision object.** The agent build makes one whatever
+  its kind, once the world has a collision manager (`AniMesh.dll:0x10003382`).
+  A tree, a stone, a building's agent and a unit alike.
+- **Where it registers.** It joins the manager of the first ancestor above its
+  owner that answers `0x203` (`Control.dll:0x1001fe40`), which for a placed
+  object is the world's. A building's agent makes a manager of its own
+  ([26-damage.md](26-damage.md)), so objects placed inside or on a building
+  join that one instead.
+- **Who has a contact record.** Only rounds and units do, and a unit's is what
+  moves it.
+- **What the pass skips.** It passes over an entry whose flags carry 1
+  (collision object slot 7 sets it, `0x1001fe10`; slot 6 clears it, callers not
+  traced), and one whose radius is still below 0 (`0x1001c15a`).
+- **Which pairs go on.** It takes every pair j < i once. A pair goes on only
+  when one side has a contact record (`0x1001c1e9`) and the swept spheres touch
+  within the frame (`0x1001e9f0`). A unit against a tree, a stone, a building or
+  another unit qualifies; two pieces of scenery never do.
+- **Handlers.** A pair with a handler of its own (`+0x40` slot 7) goes to it.
+  A pair with no round goes to `0x1001daf0`, with **the larger sphere as the
+  obstacle A and the smaller as the mover B** (`0x1001d647`). A must answer
+  interface `0x25`, or the pair ends (`0x1001db07`).
+- **The landscape** is the manager's context entry, kind 1. A unit meets it
+  only through the map box ([below](#the-map-edge--read)); the ground search
+  holds it up.
 
-1. **Faces stop B.** B's segment runs through A's geometry (interface `0x18`
-   slot 6, the level-0 triangles of an `AniMesh` object). A face B moves into
-   — the move against the face normal — sets B's end back to its start and
-   P to start − end (`0x1001dd42`).
-2. **Small faces stop large movers.** A second segment query with another
-   filter, on a B that answers interface `0x10`, stops B the same way when the
-   face's shortest edge, squared, is under 235 and B's class (the first
-   dword message `0x201` returns) is 4 or more, or under 160 and the class 3
-   or more (`0x1001deb7`, `0x1001deea`).
-3. **A's shape pushes B out.** B's sphere at its end, the radius held to 7.5
-   on objects with flag `0x1000000`, goes to A's interface `0x25` slot 3, and
-   the push it returns is added to P (`0x1001e007`). On an `AniMesh` object
-   that slot (`AniMesh.dll:0x1000d410`) walks the nodes' **level 0 of the
-   current variant** too (`0x1000d645`); how it turns them into a push is not
-   read.
+**B's move.** B's segment runs from its sphere's start to its end, with its
+end moved by B's accumulated push this pass less A's (`0x1001dcb2`). Every
+contact record's push is zeroed as the pass starts (`0x1001c077`). A push P
+starts at 0:
 
-P under 1e-6 in squared length is no contact. Otherwise P is shared by
-**mass squared**, the owner's property 0x7c copied to the collision object
-on message `0x1c` (`0x10020038`): B moves by P × m_A² ÷ (m_A² + m_B²) and A by
-−P × m_B² ÷ (m_A² + m_B²); a side with no contact record does not move and
-the other takes all of P (`0x1001e05f`). Each moved record gains flag 8.
+1. **Faces stop B.** B's segment runs through A's level-0 faces (interface
+   `0x18` slot 6). Triangles flagged 4 are passed, and so are batches flagged 8
+   and, unless B's collision flags carry 4, batches flagged `0x200`. The filter
+   has the round query's shape with triangle mask 4 in place of `0x24`
+   (`0x1001db5f`–`0x1001dbb8`). If B's move runs against the struck face's
+   normal, B's end goes back to its start and P becomes start − end
+   (`0x1001dd42`).
+2. **Small faces stop large movers.** A second query takes only batches flagged
+   8 (`0x1001dbeb`). When the face it strikes has a shortest edge whose square
+   is under 235 and B's class is 4 or more, or under 160 and B's class is 3 or
+   more, B's end goes back to its start the same way (`0x1001deb7`,
+   `0x1001deea`). The class is the first dword of message `0x201` through B's
+   interface `0x10` slot 26. `MBehaviour` answers variable `0x201` with its
+   size class (`Behavior.dll:0x1000a533`, set at `0x10005e8f` from
+   `0x1000cee0`): `t` 1, `l` and `h` 2, `m` 3, `b` 4. That this is the value the
+   pass reads is a *guess*. If so, the hero, class 2, is never stopped this way.
+3. **A's shape pushes B out** (`AniMesh.dll:0x1000d410`, *read*). B's sphere
+   at its end goes to A's interface `0x25` slot 3, its radius held to 7.5 when
+   B's flags carry `0x1000000` (`0x1001df8f`). The push it returns is added to P
+   (`0x1001e007`):
+   - **Gather.** The pose walk runs. Every node whose level-0 slot sphere
+     overlaps B's sphere is visited (`0x1000dfe0`). Each triangle that
+     `0x1000e900` accepts, given the triangle, its plane and the sphere, gives a
+     direction to B's centre and a distance, turned into the world
+     (`0x1000e0c0`). The faces are kept sorted by distance. That the direction
+     runs from the triangle's closest point, and that the test is the distance
+     against r, is *derived* from how the next step uses them;
+     `0x1000e900` itself was not read.
+   - **Hidden faces go.** A face whose centroid is hidden from B's centre by
+     another gathered face is dropped: the segment from the centre to the
+     centroid meets that face inside its triangle, edges included
+     (`0x1000d7a5`–`0x1000dac0`).
+   - **Filter.** What is left is filtered by batch and triangle flags, as in
+     step 1.
+   - **Accumulate**, nearest first (`0x1000dd7d`–`0x1000def8`). Take a face
+     with unit direction d and depth p = r − distance, and let s = P·d. If
+     s < p, take d′ = d − (d·P)P ÷ |P|², the part of d square to the push so
+     far (d′ = d while |P|² ≤ 1e-4). Then P += d′ × (p − s) ÷ (d′·d), or
+     P += normalised d′ × (p − s) when |d′·d| ≤ 0.002. So P meets each face's
+     depth without undoing the faces before it.
+   - **Clamp.** P is held to 4r (`0x1000df50`, `0x10020970`).
+
+**Sharing the push.** P under 1e-6 in squared length is no contact. Otherwise P
+is shared by **mass squared**, the owner's property 0x7c copied to the
+collision object on message `0x1c` (`0x10020038`). B moves by
+P × m_A² ÷ (m_A² + m_B²) and A by −P × m_B² ÷ (m_A² + m_B²). A side with no
+contact record does not move, and the other takes all of P (`0x1001e05f`). So
+a unit meeting a tree, a stone or a building takes the whole push. Each moved
+record gains flag 8.
+
+**When it happens** (*read*,
+[26-damage.md](26-damage.md#the-hit-test--read-and-measured)). The world's frame
+sends every object message 1, and the control system's tick moves the machine.
+Then the pass runs, then message `0x1c`, and then each record with flags set
+gets message `0x1b`. So the push lands after this frame's move and ground
+contact, and the next frame starts from it. That the ground contact runs inside
+that tick is *derived*.
 
 **The machine takes the push** on message `0x1b` (`0x1000c990`, slot 23),
 for record flags 8 or `0x10`, by moving its position — the velocity is
@@ -786,6 +914,31 @@ no collision costs speed or life. Every geometry step reads level 0: no `.bas`
 polygon, areal or fifth slot (the first-person view's geometry, once read as
 collision hulls; see [07-objects.md](07-objects.md#the-fifth-slot-is-what-the-units-own-view-draws))
 takes part in this pass.
+
+**A straight-up push goes nowhere** (*derived*). A walker pressed up by a floor
+under it has almost no x and y to keep, so even ×4 moves it next to nothing.
+On a slope, though, the push keeps a sideways part. A machine standing on a
+building is the building's child
+([Finding the ground](#finding-the-ground--read), step 7), so whether a bridge's
+own faces push a hero who stands on its deck depends on which manager the hero
+has joined. That is not settled.
+
+*Measured*, the spheres on Mission 01 (the parts' header spheres joined as
+`0x10009510` joins them, times the placement's scale):
+
+| object | collision radius | level-0 triangles | flagged |
+|---|---:|---:|---|
+| the hero, `tut1_p` | 2.18 | 688 | none |
+| `l_targ` / `M_targ` dummies | 5.22 / 15.45 | 104 / 174 | none |
+| `tut1_e1`, `helic`, `tut1_mf1` | 2.72, 2.45, 5.98 | 756, 812, 1054 | none |
+| `s_tree_29` | 3.43 | 178 | none |
+| `s_tree_04`, scaled | 43.5–65.2 | 404 | 192 flagged 4, its leaves |
+| `s_stone_05`–`_10`, scaled | 41.2–78.9 | 52–86 | none |
+| `m_bridge` | 61.9 | 230 | 16 flagged 2, 18 flagged 4 |
+
+The hero is the smaller sphere against every one of them, so it is always the
+mover. Its sphere is pushed out of their triangles, and its segment is
+stopped by their faces. A leaf never stops it.
 
 ### The map edge — *read*
 
@@ -955,20 +1108,25 @@ asks for the live top speed (IControl 145) and compares it with 1
 
 ## Not established
 
-- How interface `0x25` slot 3 turns an object's level-0 triangles into a
-  push (`AniMesh.dll:0x1000d410`, 3017 bytes;
-  [Collision between objects](#collision-between-objects--read)), and what
-  slot 2 does with its 0.5. `AniMesh` objects answer `0x25` (found by
-  enumerating range dispatches that span `0x18` and `0x25`, since no `cmp`
-  names it); whether any `Terrain.dll` class does is not checked.
-- Which scene nodes are types 1 and 3, the only ones the walk-face query asks
-  (the node's slot 11, `0x10026bbb`; the landscape is one of them); what a
-  machine's parent of type 3 is; what class message `0x201` returns. So which
-  bridges and buildings are ground is read only as far as "their level-0
-  faces, if they are of those types". A search for vtables whose twelfth
-  entry is `mov eax, K; ret` found none in `Terrain.dll`, `AniMesh.dll`,
-  `World3D.dll` or `Control.dll` — a negative with no positive control, so
-  not evidence that the types are computed.
+- ~~How interface `0x25` slot 3 turns an object's level-0 triangles into a
+  push, and what slot 2 does with its 0.5~~ — **read**: the push accumulates
+  over the unhidden faces within the sphere, nearest first, and is held to 4r;
+  the 0.5 is how far off a triangle, in x and y, a point may still find it
+  ([Collision between objects](#collision-between-objects--read),
+  [Finding the ground](#finding-the-ground--read)). What `0x1000e900` tests
+  exactly is not read, and whether any `Terrain.dll` class answers `0x25` is
+  not checked.
+- ~~Which scene nodes are types 1 and 3~~ — **read** for buildings: a
+  `CBuilding`'s slot 11 is 3, so a bridge is ground. That a unit's and a tree's
+  slot 11 give their collision kinds 4 and 10, so they are not ground, is
+  *derived*. Still open: what class message
+  `0x201` returns through a mover's interface `0x10` (the size class is a
+  *guess*), the masses property `0x7c` gives a unit and a static object, and
+  who sets a collision entry's skip flag 1.
+- Whether `PlaceObjectOnWorldFace`'s reparenting sends a collision object its
+  message 21, so that a machine on a building's deck leaves the world's
+  collision manager for the building's; and so whether a bridge's own faces
+  ever push a hero standing on it.
 - Which `Land.msh` faces carry the world face bit `0x8` and class bit 8 that
   the ground search excludes; the landscape converts them to its own mask at
   `Terrain.dll:0x10022da0` (world `0x8` → `0x20`, `0x200` → `0x20000`,
