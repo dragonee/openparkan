@@ -123,9 +123,10 @@ resolved to its pool constant or the literal its handler last wrote to it:
 
 ## When the Mission handler runs — *read*
 
-`iron3d.dll`'s game frame (`0x1005ed85`) does two things, unless a byte at
-`+0xe8` is set, the frame's state word is 3, or the game's state word `+0x710`
-is 5:
+`iron3d.dll`'s game frame (`0x1005ed85`) does two things, unless the game is
+paused (its byte `+0xe8`), the game's state word `+8` is 3
+([After the outcome](#after-the-outcome--read-and-measured)), or the level's
+state word `+0x710` is 5:
 
 1. It calls SuperAI slot 9 for **the local player's clan only** (the clan
    record at `+0xad0`).
@@ -231,10 +232,11 @@ its position in that combined list.
   itself `SYSTEM_MESSAGE` with `MISSION_COMPLETE`.
 - **`MISSION_COMPLETE`** (`0x10060d9f`):
   - voices `VOICE_MISSION_COMPLETE` (`vc_mis_cpl.wav`);
-  - records the outcome, setting the word at `+8` to 0 and a byte at
-    `+0x157` to 1.
+  - records the outcome, setting the game's state word `+8` to 0 and the won
+    flag, the parameter block's `+0x157`, to 1.
 - **`MISSION_FAILED`** voices `VOICE_MISSION_FAIL` and records the other
-  outcome.
+  outcome: state word 1, won flag 0.
+- What follows either is [After the outcome](#after-the-outcome--read-and-measured).
 - **`OBJECTIVE_FAILED`** fetches string 5041, *"Objective has failed"* (not
   followed further).
 
@@ -295,6 +297,168 @@ island", "Capture the neutral warbots", "Destroy the enemy warbot".
      objective;
   3. then the messages the handler asks for next.
 
+## After the outcome — *read*, and *measured*
+
+A won or lost mission does not stop. The HUD gives way to a panel that names
+the outcome, the world plays on under it, and the mission ends only when the
+player presses Esc. The menus then come back, and a win is written to
+`dispatcher.ini`.
+
+**The game's state word** is `+8` of the game object (`getIGame`,
+`iron3d.dll:0x1005b580`, the object at `0x1010b5f8`):
+
+| value | written by | means |
+|---:|---|---|
+| 5 | the constructor (`0x1005c330`) | not started |
+| 4 | the loop, as it starts (`0x1005e680`) | playing |
+| 0 | `MISSION_COMPLETE` (`0x10060dd3`); the game's own complete, `0x10061970` | won |
+| 1 | `MISSION_FAILED` (`0x10060e31`); the game's own fail, `0x100618a0` | lost |
+| 2 | case 3 of the game's message callback (`0x1005fafc`) | the session lost (string 6225, *derived*) |
+| 3 | the exit (`0x10061a30`) | leaving |
+
+- **A repeated outcome.** A second `MISSION_COMPLETE` does nothing: the handler
+  tests the word against 0 (`0x10060d8c`). `MISSION_FAILED` tests it only against 1
+  (`0x10060de9`), so a failure after a win replaces it (*derived*).
+- **The won flag** is `+0x157` of the parameter block the executable hands the
+  game (`Run` keeps the block's address at `+4`, `0x1005c680`).
+
+**Play goes on.** The loop (`0x1005e680`) runs until the state word is 3
+(`0x1005ef9a`) and tests no other value. The units, the scripts' `Mission`
+handler ([When the Mission handler runs](#when-the-mission-handler-runs--read))
+and the voices carry on under the panel. No timer ends a mission.
+
+**The panel** (`0x1009f8b0`). The interface pass (`0x100608f0`) draws the HUD
+while the state word is 4, and the panel otherwise (`0x10060bae`). It does so on
+every second call; a byte at `0x1010b618` flips each call, and the calls between
+draw only what the debug keys add. How often the pass is called was not read. The
+panel switches on the word for a title and up to four lines:
+
+| state | title | its colour | lines |
+|---:|---|---|---|
+| 0 | 1012 *"MISSION COMPLETE !"* | green `#64ff64` | 5082 *"Press 'Esc' to continue"* |
+| 1 | 1013 *"MISSION FAILED..."* | red `#ff6464` | 5082; 3075 *"Press 'R' to restart mission"*; 3076 *"Press 'L' to load saved game"* |
+| 2 | 6225 *"Multiplayer session lost"* | green | 5082 |
+| 3 | 5083 *"Exiting..."* | green | — |
+
+- **The lines are grey**, `#f0f0f0`.
+- **In a network game** (the game's `+0xe4`, parameter mode 2, *derived* from what
+  it drops) lines 3075 and 3076 are cleared. On the session's server (`+0xe7`) a
+  fourth line is added in red, 3077 *"WARNING! YOU`RE THE SERVER. IF YOU KILL THE
+  GAME YOU'LL KILL OTHER PLAYERS."*, and the lines are spaced 15 wider.
+- **Fonts.** The title is in `MENU_FONT` (the game's `+0x14`, set at `0x1005f9df`)
+  and the lines in `GAME_FONT` (`+0x10`, `0x1005f9a0`). Each name resolves through
+  `ui/menu_resources.cfg`'s font substitutes for the screen size to an entry of
+  `ui/font.lib`.
+- **Layout**, on the 640 × 480 screen the 2D calls take:
+  - every text is centred on x 320;
+  - the title sits at y 50;
+  - the lines start at y 75, one font height + 2 apart, and an empty line takes
+    no room;
+  - a font's height and a text's width reach that screen through two scale
+    queries of the display object (`0x100cd048` slots `0x10` and `0x14`), not read.
+- **The box** is black at alpha `0x99`, 60%.
+  - It runs from (x₀, 35) to (640 − x₀, the last line's y + 15). x₀ is the
+    leftmost text's x less 30, and never below 0.
+  - That these are two corners is *derived* from the box being symmetric.
+  - In state 3 the box is the whole screen, (0, 0) to (640, 480).
+
+**Leaving.** The game view's character handler (`0x10070db0`) takes Esc, `0x1b`:
+
+- **A pause is lifted first.** If the interface's pause byte is set,
+  `0x1008d850` clears it, and `0x1005f620` clears the game's `+0xe8` and calls
+  `World3D`'s `ResumeGameTime`.
+- **Once the outcome is recorded,** that is with the state word not 4, the game
+  exits with code 1 (`0x10070e2c`).
+- **In parameter mode 3,** Esc always exits (`0x10070e11`).
+- **While playing,** Esc goes on to its other uses. It skips a briefing
+  (`0x10070e75`); the rest were not followed.
+
+After a failure or a lost session, `0x100711f0` takes R and L. It works only
+while the state word is 1 or 2, and not in a network game:
+
+| characters | exit code |
+|---|---:|
+| `R`, `r`, `К`, `к` | 2 |
+| `L`, `l`, `Д`, `д` | 3 |
+
+The Cyrillic four are windows-1251 `0xca`, `0xea`, `0xc4` and `0xe4`: the letters
+on the same two keys of a Russian layout (*derived*). A win has no R or L.
+
+**The exit** (`0x10061a30`) writes its code to the block's `+0x14c` and sets the
+state word to 3. The loop ends and `Run` returns 2 (`0x1005efae`).
+
+**The executable** (`iron_3d.exe:0x401190`) alternates the two DLL objects it
+binds by name (`createShell`, `getIShell`, `createGame`, `getIGame` and their
+deletes). The shell runs until the player starts a mission, and the game runs
+that mission. Then, by the exit code:
+
+- **2:** the game runs again at once with the same parameters, a restart;
+- **4:** a load from inside the game (`iron3d.dll:0x100a52d4`, once a file under
+  `/save/` is found). The block is reset to mode 1, with `+0x148` 6, `+0x154`
+  clear and no mission path, and the game runs again;
+- **any other code:** the game is deleted and the shell created afresh, and the
+  shell is handed `Run`'s 2 (`0x4012f0`).
+
+The block (`iron_3d.exe:0x406550`) starts as mode 0, `+0x148` −1, `+0x14c` 1,
+`+0x150` 2, `+0x154` and `+0x155` 1, and `+0x157` 0 (`0x401000`).
+
+**The shell** (`iron3d.dll:0x10007960`, `IShell` slot 0):
+
+- **It records a win.** Handed 2 with the won flag set (read at `0x10007c2f`), it
+  writes `[COMPLETE]` *key* `= 1` to `MISSIONS/dispatcher.ini` (`0x10022be0`,
+  through `WritePrivateProfileStringA`).
+  - The key is the mission's path, with every character that the CRT's class
+    test (`0x100b4a86`) refuses turned into `_` (`0x10022ce0`).
+  - [22-settings.md](22-settings.md#iron_3dini-and-dispatcherini--the-players-not-the-games)
+    reads the file.
+- **It opens by its start switch** (`0x10008b74`). After a game, case 2
+  (`0x10009980`) opens the main menu, screen 10, and then:
+  - **code 1 in mode 1 or 4:** a mission path holding `campaign` or `CAMPAIGN`
+    goes to the campaign branch (`0x10009c10`), and one holding `single` or
+    `SINGLE` to the single-mission branch (`0x10009f40`);
+  - **code 3 in mode 1, or with the block's `+0x154` clear:** the load-game
+    screen, 21 (`0x10012ce0`, `"load_game"`, `"save/"`);
+  - **any other code:** the main menu stays.
+
+**A briefing-only mission** (`0x1005ea08`). The briefing plays while the
+level's state word `+0x710` (the game's `+0x1c`) is 5. When it ends, or Esc skips it (`0x10070e75`),
+the loop reads `mission.cfg`'s `only_briefing` from its `mission` object. If
+that is true, the mission is won and exits with code 1 at once.
+
+*Measured*: `only_briefing` is true on `CAMPAIGN.01/Mission.01` and
+`CAMPAIGN.05/Mission.02`, false on 25 missions, and absent from `Multi.02` and
+`Multi.06`.
+
+**The hero's loss fails the mission** (`0x100751a0`). That function runs as a
+unit's record goes: game message 2, for an id whose class nibble is 3, reaches it
+through `0x1007d4e0`. That it is a loss is *derived* from the voices it plays.
+
+- **It speaks first.** A unit of the player's clan plays `VOICE_UNIT_LOST`.
+  Another clan's plays `VOICE_ENEMY_DESTROY` when that clan's record has `+0x730`
+  set.
+- **The hero's loss fails the mission.** When the unit is the player's clan's hero
+  (`Type` `0x1020000`), driven or not, the view is put on it (`0x100a4e50`) and the
+  game fails (`0x10075619`). The panel then reads *"MISSION FAILED..."*.
+- **It does nothing** once the state word is 3.
+- **In mode 3,** the loss of the driven unit is handled elsewhere.
+- **A driven bot's loss** goes to `0x10062ff0`, which was not followed.
+- **In a network game,** losing another clan's hero while at most one hero is left
+  wins the mission (`0x10075381`; `0x10072cb0` counts `Type` `0x1020000`,
+  *derived*).
+
+**For an engine**, on Mission 01:
+1. **On `MISSION_COMPLETE`,** keep simulating. Draw the panel in place of the
+   HUD:
+   - a 60% black box;
+   - *"MISSION COMPLETE !"* in green `MENU_FONT` at (320, 50);
+   - *"Press 'Esc' to continue"* in grey `GAME_FONT` at (320, 75), both centred
+     on a 640 × 480 layout.
+2. **On Esc,** end the mission, mark `missions_campaign_campaign_00_mission_01_`
+   complete, and return to the menus.
+3. **On a failure** (the hero lost, or a script's `MISSION_FAILED`), show the red
+   title and the R and L lines. R restarts the mission with the same parameters;
+   L goes to the load-game screen.
+
 ## Capturing a neutral warbot, for an engine — *read*
 
 The capture is [27-ownership.md](27-ownership.md#a-neutral-unit-is-taken-by-the-hero--read-and-measured)'s,
@@ -334,13 +498,23 @@ in this order:
 - Where a message's text is drawn and for how long.
 - What `info_system` changes on screen: it makes a history entry kind 4
   rather than 3.
-- What the game shows after `MISSION_COMPLETE`, and what leads to the next
-  mission.
+- ~~What the game shows after `MISSION_COMPLETE`.~~ A panel in place of the HUD,
+  until Esc exits to the menus, which record the win
+  ([After the outcome](#after-the-outcome--read-and-measured)). Still open:
+  - what the shell's campaign branch (`0x10009c10`) and single-mission branch
+    (`0x10009f40`) show, and so what leads to the next mission;
+  - which parameter modes 3 and 4 are;
+  - the display's two scale queries that place the panel's text;
+  - who sends the game message 3 that sets the state word to 2.
 - Whether the hero keeps reporting its route while it sits inside a boarded
   bot. The route tests name the hero's id, not the bot's.
 - What the behaviour does with the message 6 it sends itself for each tactical
   areal it is in.
 - The ambient variations' schedule.
-- A failure on the hero's death. `CLAN_HERO_KILLED` does nothing in this build
-  ([21-briefing.md](21-briefing.md#messagescfg--the-in-mission-dialogue)), and
-  Mission 01's script never fails.
+- ~~A failure on the hero's death.~~ The game fails the mission itself when the
+  player's clan's hero is lost (`iron3d.dll:0x10075619`,
+  [After the outcome](#after-the-outcome--read-and-measured)), though
+  `CLAN_HERO_KILLED` does nothing in this build
+  ([21-briefing.md](21-briefing.md#messagescfg--the-in-mission-dialogue)) and
+  Mission 01's script never fails. What a driven bot's loss does
+  (`0x10062ff0`) is not followed.

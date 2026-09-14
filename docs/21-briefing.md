@@ -88,7 +88,9 @@ the list from a per-frame update (`0x1002f480`) that alternates two phases: a
   the destination becomes the current stop (`0x1002f0d0`). The last
   waypoint's edge has nowhere to go: the camera holds for its `EdgeTime` and
   the briefing ends. The reading this document used to give, travel *into* a
-  waypoint, was the wrong way round.
+  waypoint, was the wrong way round. Esc skips the rest (`iron3d.dll:0x10070e75`),
+  and a mission whose `mission.cfg` says `only_briefing` is won the moment its
+  briefing ends ([34-progression.md](34-progression.md#after-the-outcome--read-and-measured)).
 - **`linear`** interpolates eye and look-at over `EdgeTime`; **`spline`**
   builds a curve for each (`0x10030a10`) whose end tangent depends on the
   destination — still moving along the edge into a `continuous` stop whose

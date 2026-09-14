@@ -18198,3 +18198,299 @@ kind = "function"
 name = "DeleteGameObject"
 read = true
 doc = "docs/26-damage.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1005c330"
+kind = "function"
+name = "game object constructor: vtable 0x100e616c, state word +8 = 5"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1005c680"
+kind = "function"
+name = "IGame slot 0, Run(hInstance, params): params +0x14c = 1, block kept at +4, init, the loop, returns its result"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1005e680"
+kind = "function"
+name = "game loop: state word 4 at start, runs until it is 3 (0x1005ef9a), returns 2 (0x1005efae)"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1005ea08"
+kind = "site"
+name = "briefing over (level +0x710 5, player +0x1a4) and mission.cfg only_briefing: won flag 1, exit code 1, state word 3"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10061a30"
+kind = "function"
+name = "game exit(code): params +0x14c = code, state word 3"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100618a0"
+kind = "function"
+name = "game fail: unless state word is 1, VOICE_MISSION_FAIL, state word 1, won flag 0"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10061970"
+kind = "function"
+name = "game complete: unless state word is 0, VOICE_MISSION_COMPLETE, state word 0, won flag 1"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10060dd3"
+kind = "site"
+name = "MISSION_COMPLETE: state word 0 (a repeat skipped at 0x10060d8c), won flag +0x157 = 1"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10060e31"
+kind = "site"
+name = "MISSION_FAILED: state word 1 (skipped only when already 1, 0x10060de9), won flag 0"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1009f8b0"
+kind = "function"
+name = "outcome panel: by state word, title 1012/1013/6225/5083 green or red, lines 5082 3075 3076 (3077) grey, box 0x99000000, centred on x 320, title y 50, lines from y 75"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10060bae"
+kind = "site"
+name = "interface pass: the outcome panel once the state word is not 4 (the HUD while it is)"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1005fafc"
+kind = "site"
+name = "game message callback case 3: state word 2 unless 2 or 3"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10070e2c"
+kind = "site"
+name = "game view character handler, Esc: once the state word is not 4, exit with code 1"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100711f0"
+kind = "function"
+name = "after a failure or lost session, not in a network game: R r К к exit code 2, L l Д д exit code 3"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1008d850"
+kind = "function"
+name = "Esc with the interface's pause byte set: clear it, game pause off (0x1005f620)"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1005f620"
+kind = "function"
+name = "game pause(on): +0xe8, World3D PauseGameTime / ResumeGameTime; nothing in a network game"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1005f9a0"
+kind = "site"
+name = "game +0x10 = GAME_FONT (+0x14 MENU_FONT at 0x1005f9df, +0x18 TOOL_FONT)"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100751a0"
+kind = "function"
+name = "a unit record goes: VOICE_UNIT_LOST / VOICE_ENEMY_DESTROY; the player's clan's hero (Type 0x1020000) fails the mission"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10075619"
+kind = "site"
+name = "the player's hero lost: view put on it (0x100a4e50), game fail"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10007960"
+kind = "function"
+name = "IShell slot 0, Init(hInstance, ?, game result, params): result 2 with the won flag writes dispatcher COMPLETE; start switch at 0x10008b74"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10007c2f"
+kind = "site"
+name = "shell init: the won flag, params +0x157, read after a game"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10022be0"
+kind = "function"
+name = "dispatcher: WritePrivateProfileStringA [COMPLETE] mission key = 1 or 0, missions/dispatcher.ini"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10022ce0"
+kind = "function"
+name = "dispatcher key: the mission path, each character the CRT class test (0x100b4a86) refuses made '_'"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10009980"
+kind = "function"
+name = "shell start after a game: main menu; exit code 1 in mode 1 or 4 by mission path to the campaign (0x10009c10) or single (0x10009f40) branch; code 3 in mode 1 or +0x154 clear to the load-game screen 21"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10012ce0"
+kind = "function"
+name = "shell screen 21 constructor: load_game, save/"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100a52d4"
+kind = "site"
+name = "in-game load: a file under /save/ found, exit with code 4"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "iron_3d.exe"
+at = "0x401190"
+kind = "function"
+name = "WinMain: shell, then game; exit code 2 reruns the game, 4 resets the block to mode 1 and reruns, any other back to the shell with 2"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "iron_3d.exe"
+at = "0x401000"
+kind = "function"
+name = "parameter block defaults: mode 0, +0x148 -1, +0x14c 1, +0x150 2, +0x154 +0x155 1, +0x157 0"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "iron_3d.exe"
+at = "0x406550"
+kind = "datum"
+name = "the parameter block handed to the shell and the game: +0 mode, +4 mission path, +0x14c exit code, +0x157 won flag"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100608f0"
+kind = "site"
+name = "interface pass (a pushed callback, render states 0x1c 7 0xe 0x17 8): the HUD while the game's state word is 4, else the outcome panel"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10070e11"
+kind = "site"
+name = "Esc in parameter mode 3 (game +0xe5): exit with code 1"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10070e75"
+kind = "site"
+name = "Esc during the briefing (level +0x710 5): the briefing player's +0x1a4 = 1, over"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1005ef9a"
+kind = "site"
+name = "game loop's only exit test: state word 3"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10008b74"
+kind = "site"
+name = "shell start switch on the game result: 0 first start, 1, 2 after a game (0x10009980), 3"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1007d4e0"
+kind = "function"
+name = "a unit record dropped from its list, from game message 2 (class nibble 3): calls 0x100751a0"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10075381"
+kind = "site"
+name = "network game: another clan's hero lost with at most one hero left (0x10072cb0) completes the mission"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "iron_3d.exe"
+at = "0x4012f0"
+kind = "site"
+name = "WinMain: the game's result kept for the next shell; +0x14c 2 or 4 runs the game again"
+read = true
+doc = "docs/34-progression.md"

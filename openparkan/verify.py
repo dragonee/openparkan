@@ -12633,6 +12633,93 @@ def check_progression(check, game: Path) -> None:
           + f"; ui/game_resources.cfg voices {endings}")
 
 
+#: The outcome panel's words, by the game's state word: its title, then its lines
+#: (``iron3d.dll:0x1009f8b0``).
+OUTCOME_STRINGS = {
+    1012: "MISSION COMPLETE !",
+    1013: "MISSION FAILED...",
+    5082: "Press 'Esc' to continue",
+    5083: "Exiting...",
+    3075: "Press 'R' to restart mission",
+    3076: "Press 'L' to load saved game",
+    3077: "WARNING! YOU`RE THE SERVER. IF YOU KILL THE GAME YOU'LL KILL OTHER PLAYERS.",
+    6225: "Multiplayer session lost",
+}
+
+#: The panel's colours, ARGB: the lines, the title of a win, of a failure, and the box.
+OUTCOME_GREY, OUTCOME_GREEN, OUTCOME_RED, OUTCOME_BOX = (
+    0xFFF0F0F0, 0xFF64FF64, 0xFFFF6464, 0x99000000)
+
+#: The missions whose ``mission.cfg`` makes them a briefing alone.
+ONLY_BRIEFING = ("CAMPAIGN/CAMPAIGN.01/Mission.01", "CAMPAIGN/CAMPAIGN.05/Mission.02")
+
+
+def check_outcome(check, game: Path) -> None:
+    """What follows a mission's outcome: its panel, the keys that leave it, briefings alone."""
+    path = game / "iron3d.dll"
+    if not path.exists():
+        return
+    iron = path.read_bytes()
+    strings = resources.strings(iron)
+    words = {k: strings.get(k) for k in OUTCOME_STRINGS}
+
+    # The panel: the lines' grey loaded into ecx, then within the function the green
+    # and red titles, the box's alpha, and a push of each string id it can show.
+    grey = iron.find(b"\xb9" + struct.pack("<I", OUTCOME_GREY))
+    body = iron[grey:grey + 0x400] if grey >= 0 else b""
+    colours = [b"\xc7\x44\x24\x3c" + struct.pack("<I", c) for c in (OUTCOME_GREEN, OUTCOME_RED)]
+    pushes = {k: body.find(b"\x68" + struct.pack("<I", k)) for k in OUTCOME_STRINGS}
+    check("iron3d.dll: the outcome panel's words and colours",
+          words == OUTCOME_STRINGS and grey >= 0
+          and iron.count(b"\xb9" + struct.pack("<I", OUTCOME_GREY)) == 1
+          and all(c in body for c in colours)
+          and b"\x68" + struct.pack("<I", OUTCOME_BOX) in body
+          and all(at >= 0 for at in pushes.values()),
+          "; ".join(f"{k} {v!r}" for k, v in words.items())
+          + f"; grey #{OUTCOME_GREY & 0xFFFFFF:06x} lines, green #{OUTCOME_GREEN & 0xFFFFFF:06x} "
+          f"and red #{OUTCOME_RED & 0xFFFFFF:06x} titles, a box of alpha "
+          f"{OUTCOME_BOX >> 24:#x}, each string pushed in "
+          f"{sum(at >= 0 for at in pushes.values())}/{len(pushes)} of the panel's first 1024 bytes")
+
+    # After a failure: `lea eax, [edi-0x4c]; cmp eax, 0x9e; ja; xor edx, edx; mov dl,
+    # [eax + index]; jmp [edx*4 + cases]`, each case pushing an exit code.
+    sections, _ = resources._sections(iron)
+    lfanew = struct.unpack_from("<I", iron, 0x3C)[0]
+    base = struct.unpack_from("<I", iron, lfanew + 24 + 28)[0]
+    at = iron.find(b"\x8d\x47\xb4\x3d\x9e\x00\x00\x00\x77")
+    by_code: dict[object, list[str]] = defaultdict(list)
+    if at >= 0 and iron[at + 10:at + 14] == b"\x33\xd2\x8a\x90" \
+            and iron[at + 18:at + 21] == b"\xff\x24\x95":
+        index = struct.unpack_from("<I", iron, at + 14)[0]
+        cases = struct.unpack_from("<I", iron, at + 21)[0]
+        off = resources._offset(sections, index - base)
+        for n, case in enumerate(iron[off:off + 0x9F]):
+            target = struct.unpack_from(
+                "<I", iron, resources._offset(sections, cases + 4 * case - base))[0]
+            code = iron[resources._offset(sections, target - base):][:2]
+            key = code[1] if code[0] == 0x6A else "other"
+            by_code[key].append(bytes([0x4C + n]).decode("cp1251", "replace"))
+    check("iron3d.dll: after a failure R restarts and L loads, on either keyboard layout",
+          sorted(by_code.get(2, [])) == sorted("RrКк")
+          and sorted(by_code.get(3, [])) == sorted("LlДд")
+          and len(by_code.get("other", [])) == 0x9F - 8,
+          f"exit code 2 for {''.join(by_code.get(2, []))}, 3 for {''.join(by_code.get(3, []))}, "
+          f"{len(by_code.get('other', []))} other characters to the next handler")
+
+    flagged = {}
+    for d in gamedir.missions(game):
+        cfg = d / "mission.cfg"
+        found = mission.load_cfg(cfg) if cfg.exists() else {}
+        value = found.get("mission", {}).get("only_briefing")
+        flagged[d.relative_to(game / "MISSIONS").as_posix()] = value
+    true = tuple(sorted(k for k, v in flagged.items() if v == "true"))
+    absent = sorted(k for k, v in flagged.items() if v is None)
+    check("missions: two campaign missions are a briefing alone",
+          true == ONLY_BRIEFING and all(v in ("true", "false", None) for v in flagged.values()),
+          f"only_briefing true on {', '.join(true)}; false on "
+          f"{sum(v == 'false' for v in flagged.values())}; absent from {', '.join(absent)}")
+
+
 def check_settings(check, game: Path) -> None:
     """The engine's own configuration files, and which module owns each."""
     registry_path = game / settings.COMPONENTS_FILE
@@ -12758,7 +12845,7 @@ def run(game: Path) -> int:
         check_units, check_loading, check_search, check_construction,
         check_controls, check_player_input, check_turret_channels,
         check_behaviour, check_research, check_descriptions, check_saves,
-        check_vocabulary, check_resources, check_briefing, check_progression,
+        check_vocabulary, check_resources, check_briefing, check_progression, check_outcome,
         check_settings,
         check_research_streams, check_atmosphere_events,
         check_varset_types, check_profiles, check_walker,

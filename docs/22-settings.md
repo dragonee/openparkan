@@ -184,7 +184,9 @@ The ratio scales enemy warriors' hit points, shields and gun damage
 ([26-damage.md](26-damage.md#the-difficulty-ratio--read-and-measured)).
 
 `dispatcher.ini` is one `[COMPLETE]` section with one key per mission
-finished, value 1. **The key is the mission's own directory path**, every
+finished, value 1. The shell writes it when a won mission hands control back
+([34-progression.md](34-progression.md#after-the-outcome--read-and-measured)).
+**The key is the mission's own directory path**, every
 separator and dot flattened to an underscore, lowercased, trailing separator
 kept:
 
