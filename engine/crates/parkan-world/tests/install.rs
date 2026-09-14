@@ -507,6 +507,8 @@ fn the_plasma_rifle_holds_its_fire_without_a_target_and_its_bolt_follows_one() {
     }
     let selected: Vec<bool> = play.hero.guns.iter().map(|g| g.selected).collect();
     assert_eq!(selected, vec![false, true, false, false]);
+    // The fitted Small sensor module, not the turret's own radar slot (docs/25).
+    assert_eq!((play.hero.radar.range, play.hero.radar.period_ms), (300.0, 750.0));
     assert!(play.hero.guns[1].gate.guided());
     play.hero.key("SCAN_LMOUSE", true);
     for _ in 0..180 {

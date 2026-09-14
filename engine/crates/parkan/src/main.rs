@@ -156,8 +156,16 @@ fn rehearse(play: &mut scene::Play, args: &Args) {
                 kills.push(play.battle.objects[target]);
             }
         }
-        if args.headless && (tick + 1) % 60 == 0 {
-            report(play);
+        if args.headless {
+            // With no window, what the game says is printed.
+            for say in std::mem::take(&mut play.says) {
+                if let parkan_world::progress::Say::Text(text) = say {
+                    println!("  says: {text}");
+                }
+            }
+            if (tick + 1) % 60 == 0 {
+                report(play);
+            }
         }
     }
     if args.headless && !kills.is_empty() {
@@ -170,7 +178,7 @@ fn report(play: &scene::Play) {
     let b = &h.walker.body;
     let eye = h.eye();
     println!(
-        "t {:6.2} s  at ({:.2}, {:.2}, {:.2})  speed {:5.2} m/s  heading {:+.3}  state {:3}  look ({:+.3}, {:+.3}, {:+.3})  rounds {}  targets alive {}",
+        "t {:6.2} s  at ({:.2}, {:.2}, {:.2})  speed {:5.2} m/s  heading {:+.3}  state {:3}  look ({:+.3}, {:+.3}, {:+.3})  rounds {}  targets alive {}  target {:?}  objectives {:?}",
         h.time_ms / 1000.0,
         b.position.x,
         b.position.y,
@@ -188,6 +196,8 @@ fn report(play: &scene::Play) {
             .iter()
             .filter(|t| t.alive && t.parts.iter().any(|p| p.life.is_some()))
             .count(),
+        play.targets.current.map(|t| play.battle.objects[t]),
+        play.progression.as_ref().map(|p| p.progress.objectives.iter().map(|o| o.state).collect::<Vec<_>>()),
     );
 }
 
@@ -259,7 +269,22 @@ fn screenshot(loaded: &scene::Loaded, game: &Path, args: &Args, out: &Path) -> R
         if let Some(v) = &view {
             scene::place_own_view(&mut renderer, &gpu.queue, v, p);
         }
-        renderer.set_hud(&gpu.device, &gpu.queue, &scene::hud(p, aspect));
+        renderer.set_hud(&gpu.device, &gpu.queue, &scene::hud(p, aspect, view_proj));
+    }
+    // What the game said during the rehearsal, as the window shows it.
+    let mut subtitles = scene::Subtitles::new(parkan_world::text::GameFont::open(game).ok());
+    if let Some(p) = play.as_mut() {
+        let now = p.hero.time_ms / 1000.0;
+        for say in std::mem::take(&mut p.says) {
+            if let parkan_world::progress::Say::Text(text) = say {
+                subtitles.push(text, now);
+            }
+        }
+        let runs = subtitles.runs(now, width as f32, height as f32);
+        if !runs.is_empty() && args.text.is_none() {
+            renderer.set_font(&gpu.device, &gpu.queue, parkan_world::text::GameFont::open(game)?);
+            renderer.set_text(&gpu.device, &gpu.queue, &runs);
+        }
     }
     if let Some(text) = &args.text {
         use parkan_world::text::{Align, GameFont, TextRun};
@@ -311,6 +336,11 @@ struct App {
     owed: f64,
     audio: Option<audio::Audio>,
     started: Instant,
+    game: PathBuf,
+    /// The game's own key chords, and the scan names held down.
+    bindings: Vec<parkan_formats::controls::Binding>,
+    scans: HashSet<&'static str>,
+    subtitles: scene::Subtitles,
 }
 
 impl App {
@@ -338,8 +368,41 @@ impl App {
         if w.atmosphere.is_some() {
             renderer.set_dome(&gpu.device, &parkan_sim::sky::dome(), &parkan_sim::sky::dome_indices());
         }
+        match parkan_world::text::GameFont::open(&self.game) {
+            Ok(font) => renderer.set_font(&gpu.device, &gpu.queue, font),
+            Err(e) => eprintln!("no game font: {e:#}"),
+        }
         self.running = Some(Running { window, surface, config, gpu, renderer });
         Ok(())
+    }
+
+    /// A key or button went down or up: the hero's table takes it, and a press runs the
+    /// game's command its chord binds (`ui_other.man`).
+    fn scan(&mut self, scan: &'static str, pressed: bool) {
+        let Some(play) = self.play.as_mut() else { return };
+        play.hero.key(scan, pressed);
+        if !pressed {
+            self.scans.remove(scan);
+            return;
+        }
+        self.scans.insert(scan);
+        let Some(command) =
+            parkan_formats::controls::command_for(&self.bindings, scan, |m| self.scans.contains(m))
+        else {
+            return;
+        };
+        let aspect = self
+            .running
+            .as_ref()
+            .map_or(16.0 / 9.0, |r| r.config.width as f32 / r.config.height.max(1) as f32);
+        let eye = play.hero.eye();
+        let view = parkan_world::play::View {
+            eye: eye.position,
+            look: eye.forward,
+            view_proj: camera::first_person(&eye, aspect),
+        };
+        let command = command.to_owned();
+        play.command(&command, &view);
     }
 
     fn grab(&mut self, on: bool) {
@@ -395,6 +458,31 @@ impl App {
                 audio.play(&cue, eye.position, right);
             }
         }
+        // What the game says: its text on screen, its voices queued, its sounds at once.
+        if let Some(play) = self.play.as_mut() {
+            let now = play.hero.time_ms / 1000.0;
+            for say in std::mem::take(&mut play.says) {
+                match say {
+                    parkan_world::progress::Say::Text(text) => {
+                        println!("{text}");
+                        self.subtitles.push(text, now);
+                    }
+                    parkan_world::progress::Say::Voice(s) => {
+                        if let Some(a) = self.audio.as_mut() {
+                            a.queue(&s);
+                        }
+                    }
+                    parkan_world::progress::Say::Sound(s) => {
+                        if let Some(a) = self.audio.as_mut() {
+                            a.play_now(&s);
+                        }
+                    }
+                }
+            }
+        }
+        if let Some(a) = self.audio.as_mut() {
+            a.update();
+        }
         let Some(r) = self.running.as_mut() else { return };
         let frame = match r.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(frame) | wgpu::CurrentSurfaceTexture::Suboptimal(frame) => {
@@ -422,7 +510,13 @@ impl App {
             Some(play) => {
                 let eye = play.hero.eye();
                 let view_proj = camera::first_person(&eye, aspect);
-                r.renderer.set_hud(&r.gpu.device, &r.gpu.queue, &scene::hud(play, aspect));
+                r.renderer.set_hud(&r.gpu.device, &r.gpu.queue, &scene::hud(play, aspect, view_proj));
+                let runs = self.subtitles.runs(
+                    play.hero.time_ms / 1000.0,
+                    r.config.width as f32,
+                    r.config.height as f32,
+                );
+                r.renderer.set_text(&r.gpu.device, &r.gpu.queue, &runs);
                 scene::sync(
                     &mut r.renderer,
                     &r.gpu.device,
@@ -476,11 +570,11 @@ impl ApplicationHandler for App {
                     return;
                 }
                 let pressed = event.state == ElementState::Pressed;
-                if let Some(play) = self.play.as_mut() {
+                if self.play.is_some() {
                     if let Some(scan) = scene::scan_name(code)
                         && !event.repeat
                     {
-                        play.hero.key(scan, pressed);
+                        self.scan(scan, pressed);
                     }
                 } else if pressed {
                     self.held.insert(code);
@@ -494,9 +588,9 @@ impl ApplicationHandler for App {
                     self.grab(true);
                     return;
                 }
-                if let Some(play) = self.play.as_mut() {
+                if self.play.is_some() {
                     if let Some(scan) = scene::button_name(button) {
-                        play.hero.key(scan, pressed);
+                        self.scan(scan, pressed);
                     }
                 } else if button == MouseButton::Right {
                     self.looking = pressed;
@@ -565,7 +659,13 @@ fn main() -> Result<()> {
     let event_loop = EventLoop::new()?;
     event_loop.set_control_flow(ControlFlow::Poll);
     let camera = start_camera(&loaded);
-    let audio = if play.is_some() { audio::Audio::open(&game) } else { None };
+    let mut audio = if play.is_some() { audio::Audio::open(&game) } else { None };
+    if let Some(a) = audio.as_mut()
+        && let Ok(ambient) = parkan_world::resources::ambient(&game, &loaded.dir)
+        && let Some(theme) = ambient.theme
+    {
+        a.theme(&theme);
+    }
     let mut app = App {
         loaded,
         world,
@@ -583,6 +683,10 @@ fn main() -> Result<()> {
         owed: 0.0,
         audio,
         started: Instant::now(),
+        game: game.clone(),
+        bindings: scene::bindings(&game),
+        scans: HashSet::new(),
+        subtitles: scene::Subtitles::new(parkan_world::text::GameFont::open(&game).ok()),
     };
     event_loop.run_app(&mut app)?;
     Ok(())

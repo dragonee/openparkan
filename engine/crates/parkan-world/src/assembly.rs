@@ -76,6 +76,15 @@ impl Assembly {
     }
 
     /// The visible parts of an object placed with this kind and path.
+    /// Every component record a unit's `.dat` names, internal parts included, in order.
+    pub fn records(&self, path: &str) -> Vec<String> {
+        let Some(file) = gamedir::resolve(&self.game, path) else { return Vec::new() };
+        let Ok(data) = std::fs::read(&file) else { return Vec::new() };
+        objects::parse_unit(&data, path)
+            .map(|unit| unit.components.iter().map(|c| c.reference.member.clone()).collect())
+            .unwrap_or_default()
+    }
+
     pub fn parts(&mut self, kind: u32, path: &str) -> Vec<Part> {
         if matches!(kind, mission::KIND_VEGETATION | mission::KIND_ROCK) {
             let reference = self.library.record_mesh(self.library.get(path), 0);

@@ -177,10 +177,10 @@ impl Hero {
         // Only one radar counts: a fitted radar part takes over the turret's radar slot
         // (docs/25-sensors.md, "A scan is a sphere, a falloff and three tests").
         let mut radar = None;
-        for part in &parts {
-            let Some(c) = controller(assembly, &part.record)? else { continue };
+        for record in assembly.records(&placed.path) {
+            let Some(c) = controller(assembly, &record).ok().flatten() else { continue };
             if let Some(r) = c.components.iter().find(|k| k.type_id == RADAR_TYPE)
-                && (radar.is_none() || part.record != turret_part.record)
+                && (radar.is_none() || !record.eq_ignore_ascii_case(&turret_part.record))
             {
                 radar = Some(Radar::new(r.values[RADAR_RANGE], r.values[RADAR_PERIOD]));
             }

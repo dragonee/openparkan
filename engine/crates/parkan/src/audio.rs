@@ -1,20 +1,28 @@
-//! Sound: the effects' cues played from `sounds.lib` through kira.
+//! Sound: the effects' cues played from `sounds.lib` through kira, the voices the game
+//! queues, and a mission's ambient theme.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::io::Cursor;
 use std::path::Path;
 
 use glam::Vec3;
-use kira::sound::static_sound::StaticSoundData;
+use kira::sound::PlaybackState;
+use kira::sound::static_sound::{StaticSoundData, StaticSoundHandle};
 use kira::{AudioManager, AudioManagerSettings, Decibels, DefaultBackend, Panning};
 use parkan_formats::gamedir;
 use parkan_formats::nres::Archive;
 use parkan_sim::effects::Cue;
+use parkan_world::resources::Sound;
 
 pub struct Audio {
     manager: AudioManager<DefaultBackend>,
     archive: Archive,
     sounds: HashMap<String, Option<StaticSoundData>>,
+    /// Sounds from any archive, by library and member.
+    named: HashMap<(std::path::PathBuf, String), Option<StaticSoundData>>,
+    /// The voice queue (`ISoundServer` slot 4): what waits, and what plays.
+    voices: VecDeque<StaticSoundData>,
+    voice: Option<StaticSoundHandle>,
 }
 
 /// How loud a cue is heard `distance` away: whole within `near`, nothing past `far`.
@@ -36,7 +44,14 @@ impl Audio {
     pub fn open(game: &Path) -> Option<Audio> {
         let archive = gamedir::resolve(game, "sounds.lib").and_then(|p| Archive::open(&p).ok())?;
         match AudioManager::<DefaultBackend>::new(AudioManagerSettings::default()) {
-            Ok(manager) => Some(Audio { manager, archive, sounds: HashMap::new() }),
+            Ok(manager) => Some(Audio {
+                manager,
+                archive,
+                sounds: HashMap::new(),
+                named: HashMap::new(),
+                voices: VecDeque::new(),
+                voice: None,
+            }),
             Err(e) => {
                 eprintln!("no sound: {e}");
                 None
@@ -58,6 +73,53 @@ impl Audio {
             .and_then(|bytes| StaticSoundData::from_cursor(Cursor::new(bytes.to_vec())).ok());
         self.sounds.insert(key, loaded.clone());
         loaded
+    }
+
+    fn named(&mut self, sound: &Sound) -> Option<StaticSoundData> {
+        let key = (sound.library.clone(), sound.member.to_ascii_lowercase());
+        if let Some(found) = self.named.get(&key) {
+            return found.clone();
+        }
+        let loaded =
+            sound.read().ok().and_then(|bytes| StaticSoundData::from_cursor(Cursor::new(bytes)).ok());
+        self.named.insert(key, loaded.clone());
+        loaded
+    }
+
+    /// A voice, queued behind the ones playing: it starts at once only when none waits
+    /// (`services.dll:0x10011ab0`), and each starts once the one before it has stopped
+    /// (`0x100119e0`).
+    pub fn queue(&mut self, sound: &Sound) {
+        if let Some(data) = self.named(sound) {
+            self.voices.push_back(data);
+            self.update();
+        }
+    }
+
+    /// A sound played at once, past the queue (`0x10011bb0`).
+    pub fn play_now(&mut self, sound: &Sound) {
+        if let Some(data) = self.named(sound) {
+            let _ = self.manager.play(data);
+        }
+    }
+
+    /// A mission's theme, from its load on.
+    ///
+    /// STAND-IN: docs/34-progression.md#ambient-sound--read-in-part -- whether a type-5
+    /// descriptor makes its sound loop is not read, nor when the variations play: the theme
+    /// loops, and the variations are not played.
+    pub fn theme(&mut self, sound: &Sound) {
+        if let Some(data) = self.named(sound) {
+            let _ = self.manager.play(data.loop_region(..));
+        }
+    }
+
+    /// Start the next queued voice once the one playing has stopped.
+    pub fn update(&mut self) {
+        let done = self.voice.as_ref().is_none_or(|h| h.state() == PlaybackState::Stopped);
+        if done && let Some(next) = self.voices.pop_front() {
+            self.voice = self.manager.play(next).ok();
+        }
     }
 
     /// Play `cue` as heard at `eye`, whose right is `right`.

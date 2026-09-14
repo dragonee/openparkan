@@ -104,13 +104,77 @@ pub fn lighting(
     Some((lighting, sky.dome_colours(fog).into_iter().map(linear).collect()))
 }
 
-/// The mission's play, with the hero's view held steady against its gait unless `sway`.
+/// The mission's play, with the hero's view held steady against its gait unless `sway`,
+/// and its progression when its script and messages load.
 pub fn play(game: &Path, loaded: &Loaded, sway: bool) -> Result<Option<Play>> {
     let mut play = Play::load(game, &loaded.mission)?;
     if let Some(p) = play.as_mut() {
         p.hero.steady = !sway;
+        if let Err(e) = p.load_progression(game, &loaded.dir, &loaded.mission) {
+            eprintln!("no mission progression: {e:#}");
+        }
     }
     Ok(play)
+}
+
+/// The game's own key chords (`ui_other.man`), or none when the file does not load.
+pub fn bindings(game: &Path) -> Vec<parkan_formats::controls::Binding> {
+    use parkan_formats::controls;
+    gamedir::resolve(game, controls::GAME_BINDINGS)
+        .and_then(|p| std::fs::read(&p).ok().map(|b| (b, p)))
+        .and_then(|(b, p)| controls::bindings(&b, &p.display().to_string()).ok())
+        .unwrap_or_default()
+}
+
+/// The lines of the message history on screen, each with when it goes.
+///
+/// STAND-IN: docs/34-progression.md#not-established -- where the game draws a message's
+/// text and for how long is not read: each line shows for 8 s, the newest four stacked
+/// up from just above the guns, wrapped to 70% of the screen.
+#[derive(Default)]
+pub struct Subtitles {
+    lines: std::collections::VecDeque<(String, f64)>,
+    /// The font the lines wrap by.
+    font: Option<parkan_world::text::GameFont>,
+}
+
+impl Subtitles {
+    pub const SECONDS: f64 = 8.0;
+    pub const SHOWN: usize = 4;
+    /// Where the lowest line ends, in NDC, and the gap between lines, in font pixels.
+    pub const BOTTOM: f32 = -0.78;
+    pub const GAP: f32 = 6.0;
+
+    pub fn new(font: Option<parkan_world::text::GameFont>) -> Self {
+        Self { lines: Default::default(), font }
+    }
+
+    pub fn push(&mut self, text: String, now_s: f64) {
+        self.lines.push_back((text, now_s + Self::SECONDS));
+    }
+
+    /// The text to draw at `now_s` on a screen `width` × `height` pixels.
+    pub fn runs(&mut self, now_s: f64, width: f32, height: f32) -> Vec<parkan_world::text::TextRun> {
+        use parkan_world::text::{Align, TextRun};
+        self.lines.retain(|(_, until)| *until > now_s);
+        let Some(font) = self.font.as_ref() else { return Vec::new() };
+        let pixel = 2.0 / height.max(1.0);
+        let mut bottom = Self::BOTTOM;
+        let mut out = Vec::new();
+        for (text, _) in self.lines.iter().rev().take(Self::SHOWN) {
+            let run = TextRun {
+                align: Align::Centre,
+                wrap: Some(width * 0.7),
+                colour: [1.0, 0.95, 0.7, 1.0],
+                ..TextRun::new(text.as_str(), [0.0, 0.0])
+            };
+            let rows = font.lines(&run).len() as f32;
+            let top = bottom + rows * font.line_height * run.scale * pixel;
+            out.push(TextRun { anchor: [0.0, top], ..run });
+            bottom = top + Self::GAP * pixel;
+        }
+        out
+    }
 }
 
 /// The HUD: a crosshair at the screen's centre, where the sight looks, and a slot for
@@ -118,9 +182,37 @@ pub fn play(game: &Path, loaded: &Loaded, sway: bool) -> Result<Option<Play>> {
 ///
 /// STAND-IN: docs/30-turrets.md#not-established -- how the game's HUD draws the aim
 /// point and the guns is not read.
-pub fn hud(play: &Play, aspect: f32) -> Vec<parkan_render::hud::Rect> {
+///
+/// STAND-IN: docs/25-sensors.md#the-players-target--read-and-measured -- how the HUD marks
+/// the player's target is not read: four corners around its bounding sphere on screen,
+/// red for a hostile, green for a friend, amber otherwise.
+pub fn hud(play: &Play, aspect: f32, view_proj: glam::Mat4) -> Vec<parkan_render::hud::Rect> {
     use parkan_render::hud::Rect;
     let mut out = Vec::new();
+    if let Some(t) = play.targets.current
+        && let Some(c) = play.contacts().get(t).copied()
+        && let Some([x, y]) = parkan_world::play::on_screen(view_proj, c.centre, c.radius)
+    {
+        let edge = view_proj * (c.centre + Vec3::Z * c.radius).extend(1.0);
+        let half_h = if edge.w > 1e-6 { (edge.y / edge.w - y).abs().clamp(0.02, 0.8) } else { 0.02 };
+        let half_w = half_h / aspect.max(0.1);
+        let colour = if c.hostile {
+            [1.0, 0.2, 0.15, 0.9]
+        } else if c.friend {
+            [0.3, 1.0, 0.3, 0.9]
+        } else {
+            [1.0, 0.75, 0.2, 0.9]
+        };
+        let (lw, lh) = (half_w * 0.35, half_h * 0.35);
+        let (tw, th) = (0.003 / aspect.max(0.1), 0.003);
+        for (sx, sy) in [(-1.0, -1.0), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)] {
+            let (cx, cy) = (x + sx * half_w, y + sy * half_h);
+            let horizontal = [cx.min(cx - sx * lw), cx.max(cx - sx * lw)];
+            let vertical = [cy.min(cy - sy * lh), cy.max(cy - sy * lh)];
+            out.push(Rect { min: [horizontal[0], cy - th], max: [horizontal[1], cy + th], colour });
+            out.push(Rect { min: [cx - tw, vertical[0]], max: [cx + tw, vertical[1]], colour });
+        }
+    }
     let (w, h) = (0.02 / aspect.max(0.1), 0.02);
     let (tw, th) = (0.002 / aspect.max(0.1), 0.002);
     let white = [1.0, 1.0, 1.0, 0.8];
@@ -327,6 +419,8 @@ pub fn scan_name(code: winit::keyboard::KeyCode) -> Option<&'static str> {
     }
     Some(match code {
         K::ShiftLeft => "SCAN_LSHIFT",
+        K::Tab => "SCAN_TAB",
+        K::Enter => "SCAN_W_ENTER",
         K::ShiftRight => "SCAN_RSHIFT",
         K::NumpadMultiply => "SCAN_G_ASTERISK",
         K::NumpadAdd => "SCAN_G_PLUS",

@@ -94,6 +94,29 @@ through kira, as their effect time passes their trigger. A HUD shows a
 crosshair and the guns: which are selected, their magazines and capacitors.
 
 Not yet: lightmaps (no Mission 01 mesh has one) and levels of detail beyond 0.
+
+**M6.** The mission moves on, and the hero picks its targets.
+
+- The player clan's `.scr` runs: `Init` once, `Mission` every 2 s, answering
+  its route tests, robot counts and message and objective calls. Routes are
+  trigger areas that units report into on their takt. Messages voice once
+  through a queue from `voices.lib` and show their text; objectives complete
+  with the game's own string and voice, and the last primary one wins the
+  mission. The mission's theme loops.
+- The hero's target list keeps its fitted radar's contacts, drops a dead or
+  distant target and picks the nearest hostile, friend or listed object. Tab,
+  E, T and the right button pick as `ui_other.man` binds them, and a neutral
+  unit makes itself the target once in sensor range. The HUD marks the target.
+- A new target reaches the guided guns only. The plasma rifle and the
+  missiles hold their fire without a target, out of range or off the barrel,
+  count their lock down, and their rounds' seekers steer onto it. Enter
+  captures a neutral unit within 20.
+- The view holds the heading the hero runs along (`--sway` for the game's).
+
+On Mission 01 the hero is greeted in route 0, destroying the five targets
+completes the first objective and capturing both neutral warbots the second.
+Not yet: boarding a captured bot, the AI, and the ambient variations.
+
 This directory also holds what the rest will follow:
 
 - **`docs/`** is the source of truth. Every behaviour the engine implements is
@@ -130,8 +153,11 @@ repository.
 
 In the cockpit the hero's own `hero.tbl` drives it. W and S walk, A and D
 strafe, the mouse turns the hull and tilts the turret, and Shift with the
-mouse looks around. A click grabs the mouse; Escape lets it go, and quits once
-it is free. `--ticks N`, `--hold` (scan names) and `--mouse DX,DY` (counts a
+mouse looks around; 1 to 4 select guns and the left button fires. The game's
+own chords from `ui_other.man` pick targets: Tab the next listed, E the next
+or nearest enemy, T a friend, the right button what the view points at; Enter
+captures a neutral unit within 20 m. A click grabs the mouse; Escape lets it
+go, and quits once it is free. `--ticks N`, `--hold` (scan names) and `--mouse DX,DY` (counts a
 tick) play the hero at 60 ticks a second before a screenshot, or with
 `--headless` print where it got to. In the window `--hold` keeps its keys down,
 `--mouse` adds its counts every tick and `--trace` prints where the hero is
@@ -247,6 +273,9 @@ engine pass replaces each with what was read and removes its row.
 | M6 | Whether scenery is among a radar's contacts | a target needs a unit record: trees and rocks are never listed | [25](../docs/25-sensors.md#the-players-target--read-and-measured) |
 | M6 | The unit record's `+0x98` and `+0x94`: where the right button's ray starts, and the margin its pick keeps from the unit | both 0 | [25](../docs/25-sensors.md#the-players-target--read-and-measured) |
 | M6 | Boarding a captured bot is read, but the engine drives only the hero | the captured unit joins the player's clan and stays where it stands; Enter on the player's own unit does nothing | [27](../docs/27-ownership.md#a-neutral-unit-is-taken-by-the-hero--read-and-measured) |
+| M6 | How the HUD marks the player's target | four corners around its bounding sphere on screen: red for a hostile, green for a friend, amber otherwise | [25](../docs/25-sensors.md#the-players-target--read-and-measured) |
+| M6 | Where the game draws a message's text and for how long | each line 8 s, the newest four stacked above the guns, wrapped to 70% of the screen | [34](../docs/34-progression.md#not-established) |
+| M6 | Whether a type-5 descriptor loops its sound, and when the ambient variations play | the theme loops from the mission's load; the variations are not played | [34](../docs/34-progression.md#ambient-sound--read-in-part) |
 
 ## Departures
 
