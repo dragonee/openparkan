@@ -453,15 +453,127 @@ When an object leaves the game, every list aimed at it is set to none
   `tut1_e1`. E finds nothing else. The target dummies (`Trgt`) are neutral to
   the player. Tab, the right button or the nearest-listed rule picks them.
 
+## How the game colours what it marks — *read*, and *measured*
+
+**One rule gives every mark its colour** (`iron3d.dll:0x10065440`, *read*). It
+takes the viewing clan and the marked object's clan and returns a Direct3D
+colour, `0xAARRGGBB`. Every one of its six callers passes the player's clan
+(game `+0xad0`) as the viewer. The tests run in this order, and the first that
+holds decides:
+
+| the marked object's clan | colour | r, g, b |
+|---|---|---|
+| the viewer's own | `0xff8080ff`, light blue | 128, 128, 255 |
+| type 0, nature (`0x100394b0`) | `0xffffff00`, yellow | 255, 255, 0 |
+| type 3, neutral (`0x100394a0`) | `0xffa0a0a0`, grey | 160, 160, 160 |
+| its word towards the viewer is 1, neutral (`0x10039460`) | `0xffff00ff`, magenta | 255, 0, 255 |
+| its word is 2, allied (`0x10039480`) | `0xff00ffff`, cyan | 0, 255, 255 |
+| its word is 0, hostile (`0x10039440`) | `0xffff0000`, red | 255, 0, 0 |
+| any other word | `0xffffff00`, yellow | 255, 255, 0 |
+
+- **The type comes first.** A neutral clan is grey whatever its words, and a
+  nature clan yellow.
+- **The word is the marked clan's.** The tests ask the object's clan record's
+  SuperAI (slot 8) for its word towards the viewer. After loading, every pair
+  of clans holds the same word both ways
+  ([Clan relations](#clan-relations-the-files-words-straight-through--read-and-measured)),
+  so the direction does not change a shipped mission's colours.
+
+**On Mission 01** (*measured*), as the player (`Plr`) sees them:
+
+- the five target dummies (`Trgt`, type 2, word 1) are **magenta**;
+- `tut1_e1` (`Enm`, type 2, word 0) is **red**;
+- `helic` and `tut1_mf1` (`Ntrl`, type 3) are **grey**;
+- the hero and the bridge (`Plr`), and the two bots once captured, are
+  **light blue**.
+
+**Where the rule is used** (*read*: its six callers):
+
+- **The cockpit radar** (`0x1003fb90`, one of the HUD widgets `0x10043b20`
+  draws). Each entry of the driven unit's target list is placed at its bearing
+  and distance, as a small mark in the colour of its owner word's clan
+  (`0x100402bd`). The current target's mark also gets an outline in the same
+  colour (`0x100403d4`, `0x100404d1`). Which of a square and a cross a mark is
+  was not transcribed (`0x10075f70`).
+- **The target panel** (`0x10040f30`). The widget `0x10040940` hands it the
+  driven unit's current target, list `+4`.
+  - **Where.** A 150 × 174 panel at the bottom left of the HUD's 640 × 480,
+    (0, 306) to (150, 480). It shows the target through a camera in
+    (9, 314)–(137, 443).
+  - **The frame.** The target is framed by a square outline in its colour
+    (`0x100415a8`). Over the first second after the panel's clock (`+0x2c4`)
+    restarts, the frame eases in from the middle of the screen, (320, 240).
+    After that it is a square of half-side 200 × a scale held to 0.05–1.1,
+    about the target's projection. The scale's inputs were not transcribed.
+  - **The sister widget** (`0x10040a40`) shows the driven unit itself, with no
+    frame, in the panel at the bottom right, (490, 306)–(640, 480).
+- **The unit marker** (`0x10077d80` for units, over every unit record by
+  `0x1007d5e0`; `0x10034900` for buildings). In the rule's colour
+  (`0x10077e71`) it draws:
+  - **Brackets.** page9's bracket, the 14 × 28 at (55, 0) of `ui/ui.lib`'s
+    `ui_tex9.tex`, cut by the HUD's loader `0x100433a0`. One stands to the left
+    of the unit's projected centre and one, mirrored, to its right, 28 tall
+    about the centre. The gap either side is 44 × a figure the record answers
+    for the camera distance (`0x1007dff0`, its slot 5, not read).
+  - **Signs**, for a clan of type 1 or 2: a sprite the clan record's `+0x14`
+    indexes, and a class icon by `Type` (transport `0x1002000`, builder
+    `0x1004000`, anything else).
+  - **Bars** below: page9's 27 × 16 bar frame tinted blue, then a green
+    (30, 180, 80) and an orange (255, 130, 50) bar. A unit of the player's
+    clan is also named in green.
+
+  **Only two units get one.**
+  - A unit **selected** in the commander's view: its record's `+0x80` is 1.
+  - The unit under the **mouse cursor**, the cursor object at game `+0x24`,
+    which `0x1008da40` fills. In view states 1, 3, 4 and 6, the cockpit's, the
+    cursor picks nothing (`0x1008daa4`–`0x1008dac8`).
+
+  It skips the player's own hero. It also skips a unit neither of the player's
+  clan nor in the list at the player clan record's `+0x54` (`0x1007e660`,
+  `0x10039370`).
+- **The map** (`0x10077690` for units, `0x100347f0` for buildings): each mark
+  in the rule's colour. A selected unit is outlined in white, and a hero in
+  green.
+
+**In the cockpit the target is not bracketed in the world** (*read*, as a
+search). The screen projection (`0x100cd1a0`) is reached from:
+
+- the target panel (`0x100414b1`);
+- the unit marker (`0x1007e03f`);
+- the right button's pick (`0x10091a20`);
+- a commander's screen (`0x1004f75b`);
+- the guided lock (`0x1009ce77`).
+
+Its four other calls come from two functions beside it (`0x100cd260`,
+`0x100cd2a0`) that no call reaches and no dword in the image points at.
+
+**The guided lock** (`0x1009cd30`, run for each weapon slot) draws four 9 × 9
+corners. They close from the HUD's (30, 30)–(630, 450) onto the target as the
+lock counts. Their colour is green, (20, 205 + 50 × the lock's share, 20). It
+plays `TARGET_ZOOM` and `TARGET_READY` (`0x1009d0bc`, `0x1009d15b`).
+
+So **a first-person target shows three ways**: as its radar mark's outline, as
+the target panel's frame, and, for a guided gun, as the lock's corners. The
+first two take the rule's colour.
+
 ## Not established
 
 - ~~How the mission file's 0/1 relation words become the runtime's 0 and 2.~~
   Answered: the file holds 0, 1 and 2, and they pass straight through
   ([Clan relations](#clan-relations-the-files-words-straight-through--read-and-measured)).
-- How the HUD marks the player's target, and what plays `TARGET_READY` and
-  `TARGET_ZOOM` (`iron3d.dll:0x1009d15b`, `0x1009d0bc`). What the unit
-  record's `+0x94` and `+0x98` are, the right button's margin and its ray's
-  start.
+- ~~How the HUD marks the player's target, and what plays `TARGET_READY` and
+  `TARGET_ZOOM`.~~ Answered: the cockpit radar outlines its mark and the target
+  panel frames it, in one colour rule by clan; the guided lock's corners play
+  both sounds
+  ([How the game colours what it marks](#how-the-game-colours-what-it-marks--read-and-measured)).
+  Still open there:
+  - the radar mark's shape (`0x10075f70`);
+  - the target panel frame's scale;
+  - the unit marker's gap (the record's slot 5);
+  - what fills the clan record's list at `+0x54`, which decides which other
+    clans' units get a marker.
+- What the unit record's `+0x94` and `+0x98` are: the right button's margin
+  and its ray's start.
 - What the player's map and radar display show. `IArealMap`'s side of the
   radar report is answered ([above](#what-the-ai-does-with-it--read)), but
   `iron3d.dll`'s drawing was not read. One negative, as a search:
@@ -472,7 +584,11 @@ When an object leaves the game, every list aimed at it is set to none
   component's scan in that form. Handles: the cockpit HUD draw
   `iron3d.dll:0x1003fb90`, which draws rings of radius 56 and 68 about a centre
   and prints the `RADAR` label (`0x1004011d`), and `0x10073550`, which loads
-  `minimap` and `map_compass_icon`.
+  `minimap` and `map_compass_icon`. Narrowed: that radar draws the driven
+  unit's target list, each entry in its clan's colour, and the map marks units
+  and buildings in the same colours
+  ([How the game colours what it marks](#how-the-game-colours-what-it-marks--read-and-measured));
+  the rest of both is not read.
 - ~~What asks an AI machine's device manager to switch camouflage *on*.~~
   Answered: the unit takt's engagement check
   ([When the AI wears it](#the-detection-shield-hides-all-three-and-camouflage-hides-them-again--read-and-measured)).

@@ -8393,6 +8393,130 @@ def check_targeting(check, game: Path) -> None:
           f"nearest-listed rule picks them (iron3d.dll:0x10090d13), never E")
 
 
+#: The clan-record tests ``iron3d.dll``'s marker colour calls, by their bodies
+#: (``0x10039440``-``0x100394ba``): its type, or its SuperAI's word (slot 8) towards a clan.
+_WORD_TEST = "8b5424048b41508b085250ff5120"
+_CLAN_TESTS = {
+    "type 0": bytes.fromhex("8b510c33c085d20f94c0c3"),
+    "type 3": bytes.fromhex("8b510c33c083fa030f94c0c3"),
+    "word 1": bytes.fromhex(_WORD_TEST + "48f7d81bc040c20400"),
+    "word 2": bytes.fromhex(_WORD_TEST + "83e802f7d81bc040c20400"),
+    "word 0": bytes.fromhex(_WORD_TEST + "f7d81bc040c20400"),
+}
+
+
+def _marker_rule(iron: bytes) -> list[tuple[str, int]] | None:
+    """``iron3d.dll:0x10065440`` read off its bytes: the colour for the viewer's own clan,
+    then each clan test it calls in order with the colour it returns when the test holds,
+    and last the colour when none does.
+
+    The function begins ``imul edx, edx, 0x68; cmp ecx, edi; lea esi, [edx+eax+0x724];
+    jne; pop edi; mov eax, own``.  Each test after is ``[push edi] mov ecx, esi; call
+    test; test al, al; je; pop edi; mov eax, colour; pop esi; ret 8``, and the last folds
+    its answer into ``neg al; ... sbb eax, eax; and eax, a; add eax, b``.
+    """
+    anchor = iron.find(bytes.fromhex("6bd2683bcf8db40224070000750a5fb8"))
+    if anchor < 0:
+        return None
+    sections, _ = resources._sections(iron)
+
+    def test_at(call: int) -> str | None:
+        rva = next((v + call - raw for v, size, raw in sections if raw <= call < raw + size), None)
+        if rva is None:
+            return None
+        target = rva + 5 + struct.unpack_from("<i", iron, call + 1)[0]
+        body = iron[resources._offset(sections, target):][:32]
+        return next((name for name, want in _CLAN_TESTS.items() if body.startswith(want)), None)
+
+    rule = [("own", struct.unpack_from("<I", iron, anchor + 16)[0])]
+    at = anchor + 24  # past `mov eax, own; pop esi; ret 8`
+    for _ in range(8):
+        if iron[at] == 0x57:  # push edi: the word tests take the viewer's clan
+            at += 1
+        if iron[at:at + 3] != b"\x8b\xce\xe8":
+            return None
+        name = test_at(at + 2) or "?"
+        tail = iron[at + 7:at + 7 + 16]
+        if tail[:6] == bytes.fromhex("84c0740a5fb8"):
+            rule.append((name, struct.unpack_from("<I", tail, 6)[0]))
+            at += 7 + 14
+        elif tail[:7] == bytes.fromhex("f6d85f5e1bc025") and tail[11] == 0x05:
+            held = struct.unpack_from("<I", tail, 7)[0]
+            other = struct.unpack_from("<I", tail, 12)[0]
+            return [*rule, (name, (held + other) & 0xFFFFFFFF), ("otherwise", other)]
+        else:
+            return None
+    return None
+
+
+def check_target_marks(check, game: Path) -> None:
+    """How the game colours what it marks: the rule, and what it gives Mission 01."""
+    iron = (game / "iron3d.dll").read_bytes()
+    rule = _marker_rule(iron)
+
+    def rgb(argb: int) -> tuple[int, int, int]:
+        return ((argb >> 16) & 0xFF, (argb >> 8) & 0xFF, argb & 0xFF)
+
+    want = [("own", mission.MARKER_OWN), ("type 0", mission.MARKER_NATURE),
+            ("type 3", mission.MARKER_NEUTRAL_CLAN),
+            ("word 1", mission.MARKER_BY_RELATION[mission.RELATION_NEUTRAL]),
+            ("word 2", mission.MARKER_BY_RELATION[mission.RELATION_ALLIED]),
+            ("word 0", mission.MARKER_BY_RELATION[mission.RELATION_HOSTILE]),
+            ("otherwise", mission.MARKER_OTHER)]
+    got = [(name, rgb(c)) for name, c in rule] if rule else None
+    check("iron3d.dll: a mark is light blue for its own clan, then by type, then by relation",
+          got == want and all(c >> 24 == 0xFF for _, c in rule or []),
+          f"0x10065440 in order: {got}; the tests are the clan record's type (+0xc) "
+          f"and its SuperAI's word towards the viewer's clan")
+
+    first = next((d for d in gamedir.missions(game)
+                  if d.as_posix().endswith("CAMPAIGN.00/Mission.01")), None)
+    if first is None:
+        return
+    tut = mission.load(first / "data.tma")
+    names = [c.name for c in tut.clans]
+    if "Plr" not in names:
+        return
+    player = names.index("Plr")
+    colours = {c.name: tut.marker_colour(player, i) for i, c in enumerate(tut.clans)}
+    by_clan: dict[str, list[str]] = defaultdict(list)
+    for o in tut.objects:
+        if o.kind in (mission.KIND_UNIT, mission.KIND_BUILDING) and 0 <= o.clan_index < len(names):
+            by_clan[names[o.clan_index]].append(o.path.split("\\")[-1].lower())
+    check("Mission 01: the dummies are marked magenta, tut1_e1 red, the neutral bots grey",
+          colours == {"Plr": (128, 128, 255), "Trgt": (255, 0, 255), "Enm": (255, 0, 0),
+                      "Ntrl": (160, 160, 160)}
+          and sorted(set(by_clan["Trgt"])) == ["l_targ.dat", "m_targ.dat"]
+          and by_clan["Enm"] == ["tut1_e1.dat"]
+          and sorted(by_clan["Ntrl"]) == ["helic.dat", "tut1_mf1.dat"],
+          "as Plr sees them: " + "; ".join(
+              f"{n} (type {tut.clans[i].type}) {colours[n]} on {sorted(set(by_clan[n]))}"
+              for i, n in enumerate(names)))
+
+    roles = {d.role: d.bindings for d in resources.descriptors(game / "ui" / "game_resources.cfg")}
+    page = roles.get("textures", {}).get("page9")
+    ui = NResArchive.open(game / "ui" / "ui.lib")
+    entries = list(ui)
+    sprite = None
+    if page is not None and 0 <= int(page) < len(entries):
+        tex = texm.decode(ui.read(entries[int(page)]))
+        alpha = [[tex.rgba[(y * tex.width + x) * 4 + 3] > 128 for x in range(55, 69)]
+                 for y in range(28)]
+        sprite = (entries[int(page)].name, tex.width, sum(map(sum, alpha)),
+                  any(alpha[0]) or any(alpha[-1]))
+    # The HUD's sprite 1: `push 0; push 28.0; push 14.0; push 0; push 55.0; push 256.0`
+    # after page9's handle, at 0x10043500.
+    loaded = iron.find(bytes.fromhex("5568 0000e041 68 00006041 55 68 00005c42 68 00008043"
+                                     .replace(" ", "")))
+    check("ui.lib: the mark's bracket is page9's 14 by 28 at (55, 0)",
+          loaded >= 0 and sprite is not None and sprite[:2] == ("ui_tex9.tex", 256)
+          and sprite[2] > 100 and not sprite[3],
+          f"iron3d.dll:0x100433a0 cuts sprite 1 at (55, 0) 14 x 28 from page9 "
+          f"(game_resources.cfg entry {page}): {sprite and sprite[0]} {sprite and sprite[1]} "
+          f"wide, {sprite and sprite[2]} opaque pixels, none on its top or bottom row; "
+          f"0x10077d80 draws it left of a unit and mirrored right, tinted by the rule")
+
+
 #: The attack task's named constants (``Behavior.dll:0x100165f0``-``0x100166d7``).
 ATTACK_CONSTANTS = (
     "Attack_MinFightDistance", "Attack_DelFightDistance", "Attack_LeftRightRange",
@@ -12516,7 +12640,8 @@ def run(game: Path) -> int:
         check_collision, check_lake_and_buoys,
         check_combat, check_ownership,
         check_capture, check_repair, check_chassis, check_weapons, check_firing,
-        check_targeting, check_ai_fight, check_turrets, check_packages, check_wingman,
+        check_targeting, check_target_marks, check_ai_fight, check_turrets, check_packages,
+        check_wingman,
         check_builder,
         check_units, check_loading, check_search, check_construction,
         check_controls, check_player_input, check_turret_channels,

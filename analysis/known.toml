@@ -17414,3 +17414,283 @@ kind = "function"
 name = "push-out triangle test: plane distance 0..r, the centre projected; outside an edge, the edge or corner closest point"
 read = true
 doc = "docs/24-motion.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10065440"
+kind = "function"
+name = "mark colour for (viewer clan, object clan): own 0xff8080ff; type 0 0xffffff00; type 3 0xffa0a0a0; word 1 0xffff00ff; word 2 0xff00ffff; word 0 0xffff0000; else 0xffffff00"
+read = true
+doc = "docs/25-sensors.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10039460"
+kind = "function"
+name = "clan record: 1 when its SuperAI's relation word towards the given clan is 1, neutral"
+read = true
+doc = "docs/25-sensors.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10039480"
+kind = "function"
+name = "clan record: 1 when its SuperAI's relation word towards the given clan is 2, allied"
+read = true
+doc = "docs/25-sensors.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10039370"
+kind = "function"
+name = "clan record: 1 when its id list (+0x54..+0x58) holds the given id"
+read = true
+doc = "docs/25-sensors.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1003fb90"
+kind = "function"
+name = "cockpit radar widget: the driven unit's target list entries by bearing and distance, in the mark colour; the current target outlined"
+read = true
+doc = "docs/25-sensors.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100402bd"
+kind = "site"
+name = "cockpit radar: mark colour for the entry's owner word clan"
+read = true
+doc = "docs/25-sensors.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100403d4"
+kind = "site"
+name = "cockpit radar: the current target (list +4) gets an outline in its colour"
+read = true
+doc = "docs/25-sensors.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100404d1"
+kind = "site"
+name = "cockpit radar: the current target's outline, second mark shape"
+read = true
+doc = "docs/25-sensors.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10075f70"
+kind = "function"
+name = "unit record test choosing the radar mark's shape (not read)"
+read = false
+doc = "docs/25-sensors.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10043b20"
+kind = "function"
+name = "cockpit HUD: draws its widgets for the driven unit"
+read = true
+doc = "docs/25-sensors.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10040f30"
+kind = "function"
+name = "target panel: a unit seen through a camera in a bottom panel, framed in its mark colour"
+read = true
+doc = "docs/25-sensors.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100415a8"
+kind = "site"
+name = "target panel: the frame's mark colour"
+read = true
+doc = "docs/25-sensors.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100414b1"
+kind = "site"
+name = "target panel: the target projected to the screen (0x100cd1a0)"
+read = true
+doc = "docs/25-sensors.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10040940"
+kind = "function"
+name = "HUD widget: the target panel on the driven unit's current target (list +4), left panel"
+read = true
+doc = "docs/25-sensors.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10040a40"
+kind = "function"
+name = "HUD widget: the target panel on the driven unit itself, right panel, unframed"
+read = true
+doc = "docs/25-sensors.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10077d80"
+kind = "function"
+name = "unit marker: page9 brackets either side of the projected unit in its mark colour, clan sign, class icon, bars, own name"
+read = true
+doc = "docs/25-sensors.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10077e71"
+kind = "site"
+name = "unit marker: the mark colour for the record's clan (+0x24)"
+read = true
+doc = "docs/25-sensors.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1007d5e0"
+kind = "function"
+name = "unit list walk: the unit marker for each record, with record +0x80 == 1 (selected)"
+read = true
+doc = "docs/25-sensors.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10034900"
+kind = "function"
+name = "building marker: the brackets and signs for a building record"
+read = true
+doc = "docs/25-sensors.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100433a0"
+kind = "function"
+name = "HUD resources: sprite 0 page9 (0,0) 27x16, sprite 1 page9 (55,0) 14x28"
+read = true
+doc = "docs/25-sensors.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1007dff0"
+kind = "function"
+name = "unit record: its screen centre (640x480) and a size from its slot 5 on the camera distance"
+read = true
+doc = "docs/25-sensors.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1007e660"
+kind = "function"
+name = "unit record: 1 when of the given clan or in that clan record's id list"
+read = true
+doc = "docs/25-sensors.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1008da40"
+kind = "function"
+name = "mouse cursor pick: clears the cursor's record (+0) and +0x1c; picks nothing in view states 1, 3, 4, 6"
+read = true
+doc = "docs/25-sensors.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1008daa4"
+kind = "site"
+name = "cursor pick: view state 1, 3, 6 or 4 returns with no record"
+read = true
+doc = "docs/25-sensors.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1008dac8"
+kind = "site"
+name = "cursor pick: view state 4 returns with no record"
+read = true
+doc = "docs/25-sensors.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10077690"
+kind = "function"
+name = "map: a unit's mark in its mark colour, outlined white when selected and green for a hero"
+read = true
+doc = "docs/25-sensors.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100347f0"
+kind = "function"
+name = "map: a building's mark in its mark colour"
+read = true
+doc = "docs/25-sensors.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100cd1a0"
+kind = "function"
+name = "camera: a world point to the screen, 0 outside the view"
+read = true
+doc = "docs/25-sensors.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1007e03f"
+kind = "site"
+name = "unit record screen centre: the projection"
+read = true
+doc = "docs/25-sensors.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1004f75b"
+kind = "site"
+name = "a commander's screen: the projection"
+read = false
+doc = "docs/25-sensors.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100cd260"
+kind = "function"
+name = "projection wrapper: no caller, no pointer found"
+read = false
+doc = "docs/25-sensors.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100cd2a0"
+kind = "function"
+name = "projection wrapper: no caller, no pointer found"
+read = false
+doc = "docs/25-sensors.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1009cd30"
+kind = "function"
+name = "weapon slot HUD: the guided lock's four closing corners in green, TARGET_ZOOM and TARGET_READY, empty and destroyed voices"
+read = true
+doc = "docs/25-sensors.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1009ce77"
+kind = "site"
+name = "guided lock: the target projected"
+read = true
+doc = "docs/25-sensors.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10091a20"
+kind = "site"
+name = "right button pick: a candidate's centre projected"
+read = true
+doc = "docs/25-sensors.md"

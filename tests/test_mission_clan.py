@@ -47,3 +47,21 @@ def test_a_neutral_clan_is_neutral_both_ways_and_an_unnamed_clan_is_hostile():
     assert matrix[0][1] == matrix[1][0] == mission.RELATION_NEUTRAL
     assert matrix[1][1] == mission.RELATION_ALLIED
     assert matrix[0][2] == mission.RELATION_HOSTILE
+
+
+def test_a_marker_is_light_blue_for_its_own_clan_grey_neutral_and_by_relation_otherwise():
+    player = mission.Clan("Plr", mission.CLAN_PLAYER, (0.0, 0.0), "", "",
+                          relations={"Plr": 1, "Trgt": 1, "Enm": 0, "Ally": 2})
+    dummies = mission.Clan("Trgt", mission.CLAN_ENEMY, (0.0, 0.0), "", "",
+                           relations={"Plr": 1})
+    enemy = mission.Clan("Enm", mission.CLAN_ENEMY, (0.0, 0.0), "", "",
+                         relations={"Plr": 0})
+    neutral = mission.Clan("Ntrl", mission.CLAN_NEUTRAL, (0.0, 0.0), "", "")
+    animals = mission.Clan("Anml", mission.CLAN_NATURE, (0.0, 0.0), "", "",
+                           relations={"Plr": 0})
+    ally = mission.Clan("Ally", mission.CLAN_ENEMY, (0.0, 0.0), "", "",
+                        relations={"Plr": 2})
+    m = _mission([player, dummies, enemy, neutral, animals, ally])
+    assert [m.marker_colour(0, c) for c in range(6)] == [
+        (128, 128, 255), (255, 0, 255), (255, 0, 0), (160, 160, 160), (255, 255, 0),
+        (0, 255, 255)]

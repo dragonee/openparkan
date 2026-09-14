@@ -239,6 +239,20 @@ RELATION_HOSTILE = 0
 RELATION_NEUTRAL = 1
 RELATION_ALLIED = 2
 
+#: The colours ``iron3d.dll:0x10065440`` marks an object with, as (r, g, b), for the
+#: player's clan looking at the object's clan: its own clan; a nature or a neutral
+#: clan, by type; then by the object's clan's relation word towards the player's,
+#: and any other word.  See ``Mission.marker_colour``.
+MARKER_OWN = (128, 128, 255)
+MARKER_NATURE = (255, 255, 0)
+MARKER_NEUTRAL_CLAN = (160, 160, 160)
+MARKER_BY_RELATION = {
+    RELATION_NEUTRAL: (255, 0, 255),
+    RELATION_ALLIED: (0, 255, 255),
+    RELATION_HOSTILE: (255, 0, 0),
+}
+MARKER_OTHER = (255, 255, 0)
+
 
 @dataclass
 class Clan:
@@ -531,6 +545,23 @@ class Mission:
                 elif self.clans[j].type == CLAN_NEUTRAL:
                     matrix[i][j] = RELATION_NEUTRAL
         return matrix
+
+    def marker_colour(self, viewer: int, other: int) -> tuple[int, int, int]:
+        """The colour clan *viewer* sees clan *other*'s objects marked in, by file order.
+
+        ``iron3d.dll:0x10065440``, in order: the viewer's own clan; a clan of type
+        0, nature (``0x100394b0``); a clan of type 3, neutral (``0x100394a0``); then
+        *other*'s relation word towards *viewer* -- 1, 2 or 0 (``0x10039460``,
+        ``0x10039480``, ``0x10039440``) -- and any other word last.
+        """
+        if other == viewer:
+            return MARKER_OWN
+        kind = self.clans[other].type
+        if kind == CLAN_NATURE:
+            return MARKER_NATURE
+        if kind == CLAN_NEUTRAL:
+            return MARKER_NEUTRAL_CLAN
+        return MARKER_BY_RELATION.get(self.relations()[other][viewer], MARKER_OTHER)
 
 
 def _read_clan(r: _Reader) -> Clan:
