@@ -7727,6 +7727,182 @@ def check_capture(check, game: Path) -> None:
           f"could change it")
 
 
+#: How long an open door stays open with nobody near it, and the share of the pod's
+#: radius its zone reaches across the ground (``Terrain.dll:0x10057653``, ``0x1009b6b4``).
+DOOR_OPEN_MS = 5000
+POD_ZONE_SHARE = 0.8
+
+
+def _posed_level0(mesh: objmesh.ObjectMesh):
+    """Each node's level-0 triangles at rest, in model space: node -> [(a, b, c)]."""
+    pos = mesh.posed_positions()
+    out: dict[int, list] = {}
+    for i, node in enumerate(mesh.nodes):
+        slot = node.hit_slot()
+        if slot is None or slot >= len(mesh.slots):
+            continue
+        s = mesh.slots[slot]
+        out[i] = [tuple(pos[v] for v in mesh.triangles[t])
+                  for t in range(s.first_triangle, s.first_triangle + s.triangle_count)]
+    return out
+
+
+def _walkable_heights(tris, x: float, y: float) -> list[float]:
+    """The heights of the walkable faces (normal z above cos 80 deg) over (x, y)."""
+    out = []
+    for a, b, c in tris:
+        u = (b[0] - a[0], b[1] - a[1], b[2] - a[2])
+        v = (c[0] - a[0], c[1] - a[1], c[2] - a[2])
+        n = (u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0])
+        length = math.sqrt(sum(k * k for k in n)) or 1.0
+        if n[2] / length <= 0.173648:
+            continue
+        d = (b[1] - c[1]) * (a[0] - c[0]) + (c[0] - b[0]) * (a[1] - c[1])
+        if abs(d) < 1e-9:
+            continue
+        w1 = ((b[1] - c[1]) * (x - c[0]) + (c[0] - b[0]) * (y - c[1])) / d
+        w2 = ((c[1] - a[1]) * (x - c[0]) + (a[0] - c[0]) * (y - c[1])) / d
+        w3 = 1 - w1 - w2
+        if min(w1, w2, w3) >= -1e-6:
+            out.append(w1 * a[2] + w2 * b[2] + w3 * c[2])
+    return out
+
+
+def check_building_entry(check, game: Path) -> None:
+    """Walking into a building: its own collision pass, its doors, its pod, the capture."""
+    paths = {name: game / name for name in
+             ("Terrain.dll", "Control.dll", "AniMesh.dll", "iron3d.dll")}
+    if not all(p.exists() for p in paths.values()):
+        return
+    t_at, c_at, a_at, i_at = (_image_at(paths[n].read_bytes()) for n in
+                              ("Terrain.dll", "Control.dll", "AniMesh.dll", "iron3d.dll"))
+
+    def dword(at, va: int) -> int:
+        return struct.unpack("<I", at(va, 4))[0]
+
+    # 1. A unit on a building joins the building's own collision manager, and the
+    # world's pass runs that manager as the building entry's pair handler.
+    manager = [dword(c_at, 0x1003C178 + 4 * k) for k in range(8)]
+    agent_slot20 = dword(a_at, 0x100201D4 + 4 * 20)
+    add_child = a_at(0x10017668, 10)
+    joins = (c_at(0x1001F600, 5) == b"\xba\x03\x02\x00\x00"
+             and c_at(0x1001F616, 3) == b"\xff\x51\x10")
+    nested = c_at(0x1001C2D3, 3) == b"\xff\x52\x0c" and c_at(0x1001C22F, 3) == b"\xff\x51\x1c"
+    table = a_at(0x100035E9, 12) == bytes.fromhex("8b8d6c010000898d24030000")
+    check("Control.dll: a building's own collision pass runs inside the world's",
+          manager[3] == 0x1001C040 and manager[7] == 0x1001C500 and agent_slot20 == 0x10001BA0
+          and add_child[:2] == b"\x6a\x06" and joins and nested and table,
+          f"a child added to an object hears event 6 (AniMesh.dll:0x10017668), which the "
+          f"agent (IGameObject slot 20 = {agent_slot20:#x}) sends its collision object as "
+          f"message 21; it re-registers with the first ancestor answering 0x203, and a "
+          f"building agent answers with the manager it built (+0x16c into its table's "
+          f"+0x324). Its own collision object makes that manager its pair handler and "
+          f"context (0x1001f600). The world pass hands a mover touching the building to the "
+          f"handler's slot 7 ({manager[7]:#x}, a visitor) and then runs its slot 3 "
+          f"({manager[3]:#x}, the pass) with the frame's time (0x1001c2d3)")
+
+    # 2. Doors open for a child of the building that comes near, and stay open while
+    # one is near; with nobody near they close 5 s after opening.
+    ibuilding = {k: dword(t_at, 0x1009B52C + 4 * k) for k in (4, 14, 17)}
+    notify = dword(t_at, 0x1009B59C + 4 * 20)
+    hold = t_at(0x1005A5A0, 8) == bytes.fromhex("c744116401000000")
+    delay = struct.unpack("<I", t_at(0x10057654, 4))[0]
+    share = struct.unpack("<f", t_at(0x1009B6B4, 4))[0]
+    push_skip = (a_at(0x1000DD1F, 5) == b"\xba\x17\x00\x00\x00"
+                 and a_at(0x1000DD3F, 3) == b"\xff\x50\x44")
+    check("Terrain.dll: a door opens for a nearby child and closes 5 s after, alone",
+          ibuilding == {4: 0x1005B270, 14: 0x1005B5D0, 17: 0x1005B620} and notify == 0x10059F40
+          and hold and delay == DOOR_OPEN_MS and math.isclose(share, POD_ZONE_SHARE, rel_tol=1e-6)
+          and push_skip,
+          f"CBuilding's object notification (slot 20 = {notify:#x}) opens a door and holds "
+          f"it (+0x64 = 1) when a moving child's centre comes within its radius plus a "
+          f"door part's capsule (0x1005a5a0); the tick closes an open door {delay} ms after "
+          f"it opened while nothing holds it; IBuilding slot 14 opens one by item "
+          f"({ibuilding[14]:#x}) and slot 17 says it is open ({ibuilding[17]:#x}), which "
+          f"the push-out asks before a door's faces push (AniMesh.dll:0x1000dd1f); the pod's "
+          f"zone is {share:g} of its part's radius")
+
+    # 3. The capture announces, then opens the building for the player in the same call.
+    strings = resources.strings(paths["iron3d.dll"].read_bytes())
+    last = [target for site, target in _calls(i_at, 0x100A4E1E, 0x1C)]
+    voices = [i_at(va, 24).split(b"\0")[0].decode() for va in (0x10105B74, 0x10105B8C, 0x10105BA0)]
+    jump = [dword(i_at, 0x100627D8 + 4 * k) for k in range(3)]
+    index = i_at(0x100627E4, 0x3F)
+    opens = {0x80000002 + i: jump[b] for i, b in enumerate(index)
+             if (0x80000002 + i) in (0x80000002, 0x80000004, 0x80000008, 0x80000010,
+                                     0x80000020, 0x80000040)}
+    types = {objects.load_unit(f).kind & 0xFFFFFFFF for f in game.glob("UNITS/BUILDS/**/*.dat")}
+    check("iron3d.dll: a captured building is announced, then opened for its taker",
+          last == [0x10062630] and strings.get(5039) == "Building is captured"
+          and voices == ["VOICE_NBUILD_CAPTURE", "VOICE_BUILD_CAPTURE", "VOICE_EBUILD_CAPTURE"]
+          and opens == {0x80000002: 0x10062732, 0x80000004: 0x10062732, 0x80000008: 0x10062732,
+                        0x80000040: 0x10062732, 0x80000010: 0x1006270F, 0x80000020: 0x100627CB}
+          and 0x80000020 not in types and {0x80000010, 0x80000040} <= types,
+          f"the ownership change (0x100a48a0) says string 5039 {strings.get(5039)!r} with "
+          f"{voices[0]} from a neutral or ally, and always ends calling 0x10062630 with the "
+          f"building and its taker; that opens a plant (0x80000010) at page 5 and selects a "
+          f"generator, mine, storage or Outpost (0x10062732); 0x80000020, the branch that "
+          f"does nothing, is no shipped building's Type")
+
+    # 4. The Large Factory and the Outpost, measured.
+    names = frozenset(p.name.lower() for p in all_archives(game))
+    fortif = NResArchive.open(game / "fortif.rlb")
+    entries = {e.name.lower(): e for e in fortif}
+
+    def load(stem):
+        mesh = objmesh.parse(fortif.read(entries[stem + ".msh"]), stem + ".msh")
+        ctl = control.parse(fortif.read(entries[stem + ".ctl"]), names)
+        return mesh, ctl
+
+    plant, plant_ctl = load("fr_b_plant")
+    angar, angar_ctl = load("fr_l_angar")
+    doors = [(p.node, min(plant_ctl.channels[k].rate for k in p.entries))
+             for p in plant_ctl.components if p.type_id == control.DOOR_TYPE]
+    plant_tris = _posed_level0(plant)
+    door = [p for tri in plant_tris[3] for p in tri]
+    door_box = [(min(p[k] for p in door), max(p[k] for p in door)) for k in range(3)]
+    forecourt = _walkable_heights(plant_tris[1], 0.0, 98.0)
+
+    def pod(mesh, ctl):
+        part = next(p for p in ctl.components if p.type_id == control.COMPUTER_TYPE)
+        s = mesh.slots[mesh.nodes[part.node].hit_slot()]
+        centre = objmesh.apply(mesh.world_pose(part.node), s.sphere[:3])
+        return part.node, centre, s.sphere[3]
+
+    p_node, p_centre, p_radius = pod(plant, plant_ctl)
+    o_node, o_centre, o_radius = pod(angar, angar_ctl)
+    plant_floor = _walkable_heights([t for ts in plant_tris.values() for t in ts], *p_centre[:2])
+    outpost_floor = _walkable_heights([t for ts in _posed_level0(angar).values() for t in ts],
+                                      *o_centre[:2])
+    tut2 = mission.load(game / "MISSIONS/CAMPAIGN/CAMPAIGN.00/Mission.02/data.tma")
+    placed = next(o for o in tut2.objects if "lplant01" in o.path.lower())
+    land = landmesh.load(game / "DATA/MAPS/Tut_2/land.msh")
+    lift = placed.position[2] - land.height_at(*placed.position[:2])
+    lit = sum(1 for b in plant.batches if b.is_lit)
+    check("fortif.rlb: the Large Factory's door, forecourt and pod; the Outpost's pod",
+          sorted(n for n, _ in doors) == [3, 14, 16]
+          and all(math.isclose(r, 0.4, abs_tol=1e-6) for _, r in doors)
+          and abs(door_box[0][0] + 11.0) < 0.1 and abs(door_box[1][0] - 87.5) < 0.1
+          and abs(door_box[2][1] - 15.4) < 0.1 and forecourt and max(forecourt) < 0.01
+          and p_node == 25 and abs(p_radius - 4.77) < 0.01 and abs(p_centre[2] + 9.67) < 0.05
+          and plant_floor and abs(min(plant_floor) + 12.4) < 0.05
+          and o_node == 2 and abs(o_radius - 6.37) < 0.01 and abs(o_centre[2] - 4.79) < 0.05
+          and outpost_floor and abs(min(outpost_floor) - 0.48) < 0.05
+          and not any(p.type_id == control.DOOR_TYPE for p in angar_ctl.components)
+          and 0.0 < lift < 0.1 and lit == 100 and not any(b.is_lit for b in angar.batches),
+          f"fr_b_plant: doors (node, rate) {[(n, round(r, 3)) for n, r in doors]}, so each "
+          f"opens in "
+          f"{1 / doors[0][1]:g} s; the entrance door (i05) spans x "
+          f"{door_box[0][0]:.1f}..{door_box[0][1]:.1f}, y {door_box[1][0]:.1f}.."
+          f"{door_box[1][1]:.1f}, z {door_box[2][0]:.1f}..{door_box[2][1]:.1f}, with the "
+          f"forecourt floor at z {max(forecourt):.2f} before it, and Mission 02 places the "
+          f"building {lift:.2f} above the ground; its pod is node {p_node}, radius "
+          f"{p_radius:.2f}, centre z {p_centre[2]:.2f} over a floor at {min(plant_floor):.2f}, "
+          f"and {lit} batches take its lightmap. fr_l_angar: no door; pod node {o_node}, "
+          f"radius {o_radius:.2f}, centre z {o_centre[2]:.2f} over a floor at "
+          f"{min(outpost_floor):.2f}; no lightmap")
+
+
 #: The difficulty profiles in ``behpsp.res``.
 DIFFICULTY_PROFILES = ("diff_strong.var", "diff_normal.var", "diff_weak.var",
                        "diff_slow.var", "diff_stupid.var")
@@ -14963,7 +15139,8 @@ def run(game: Path) -> int:
         check_motion, check_playback, check_ground, check_sensors, check_hit_test,
         check_collision, check_lake_and_buoys,
         check_combat, check_ownership,
-        check_capture, check_repair, check_chassis, check_weapons, check_firing,
+        check_capture, check_building_entry, check_repair, check_chassis, check_weapons,
+        check_firing,
         check_moving_parts,
         check_targeting, check_target_marks, check_ai_fight, check_turrets, check_packages,
         check_target_panel,

@@ -20872,3 +20872,283 @@ kind = "site"
 name = "a clan migration timer's random word, 1875 (x 64 ms)"
 read = true
 doc = "docs/31-packages.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x100569f0"
+kind = "function"
+name = "CBuilding slot 4: add a child, passed to its agent (+0x30)"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10056a20"
+kind = "function"
+name = "CBuilding slot 5: remove a child, passed to its agent (+0x30)"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10057cf6"
+kind = "site"
+name = "CBuilding inner QueryInterface: an id above 0x18 goes to the agent's (+0x2c), 0x203 among them"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x100584e8"
+kind = "site"
+name = "item filing: each node the door's or computer's item plays appended to its record as {object, node}"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1005a27f"
+kind = "site"
+name = "door hold test: a door part's capsule (two points, a radius) from the building's mesh, slot 5 query 2"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1005a5a0"
+kind = "site"
+name = "door hold: a moving child within its radius plus the capsule's opens the door and holds it (+0x64 = 1, +0x68 its id)"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1005b480"
+kind = "function"
+name = "door i open: from shut (0) or closing (2), switch the item on (1), state 3"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10057653"
+kind = "site"
+name = "door tick: an open, unheld, unlocked door closes 0x1388 ms after it opened"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1009b6b4"
+kind = "datum"
+name = "0.8: the pod zone's share of its part's radius across the ground"
+read = true
+doc = "docs/27-ownership.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10058607"
+kind = "site"
+name = "computer 0's height box: the node the mesh (+0x24 slot 29) gives for its first node, into +0x48"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10017670"
+kind = "site"
+name = "add child: event 2 to the parent, then event 6 to the child (IGameObject slot 20)"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10017716"
+kind = "site"
+name = "remove child: event 3 to the parent, then event 7 to the child"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10017be1"
+kind = "site"
+name = "set matrix: event 9 to itself, event 1 to the parent (a child moved), 5 to its children"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10001ba0"
+kind = "function"
+name = "agent IGameObject slot 20: an event as message 21 {code, param} to its mesh (+0x140), control system (+0x158), collision object (+0x170)"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10003538"
+kind = "site"
+name = "agent build, kind 3: CreateCollManager, its interface 0x203 kept at +0x16c"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x100035ef"
+kind = "site"
+name = "agent build: the collision manager into the interface table's 0x203 entry (+0x324)"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10012407"
+kind = "site"
+name = "node record init: the runtime flags word +0x14 starts clear"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x1000dd13"
+kind = "site"
+name = "push-out: a face on a class-12 item's node (property 0x200) asks IBuilding slot 17 whether the door is open"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x1000dd46"
+kind = "site"
+name = "push-out: an open door's face gets depth 0 and pushes nothing"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001f600"
+kind = "site"
+name = "collision object message 4: its owner's own manager (0x203) kept at +0x60, the entry's pair handler"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001f616"
+kind = "site"
+name = "collision object message 4: that manager's slot 4 makes this entry its context"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001c22f"
+kind = "site"
+name = "collision pass pair: an entry with a pair handler hands the other entry to the handler's slot 7"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001c500"
+kind = "function"
+name = "collision manager slot 7: list an entry as a visitor (+0x30, count +0x34)"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001c2d3"
+kind = "site"
+name = "collision pass: after the pairs, each entry's pair handler runs its own pass (slot 3) with the time"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001c1b2"
+kind = "site"
+name = "collision pass: a context not of kind 1 (a building) meets every member and visitor through the ordinary pair"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001c2b4"
+kind = "site"
+name = "collision pass end: the visitor list emptied"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000ec7e"
+kind = "site"
+name = "hit on a building: a hit struck on a class-12 item's node opens that door (IBuilding slot 14)"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "ArealMap.dll"
+at = "0x1000b170"
+kind = "function"
+name = "MHallWay slot 16: open the doors listed on a link (four item ids at +0x28, class 12)"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100626dd"
+kind = "site"
+name = "open for the player: command 740 (CMD_JAMES_WINGMAN_MENU) when an interface flag is set"
+read = true
+doc = "docs/27-ownership.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10062708"
+kind = "site"
+name = "open for the player by Type: plant page 5; generator, mine, storage, Outpost select; 0x80000020 nothing"
+read = true
+doc = "docs/27-ownership.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1007d0a0"
+kind = "function"
+name = "select a building for the player: VOICE_SELECTED unless selected, into the selection list"
+read = true
+doc = "docs/27-ownership.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100a5660"
+kind = "function"
+name = "the interface's current building (+0xaec), view state recomputed (0x100a1c30)"
+read = true
+doc = "docs/27-ownership.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100a4e2d"
+kind = "site"
+name = "ownership change: always ends opening the building for its taker (0x10062630)"
+read = true
+doc = "docs/27-ownership.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100a5671"
+kind = "site"
+name = "current building set: the game view state (+0) from 0x100a1c30's return"
+read = true
+doc = "docs/27-ownership.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10062732"
+kind = "site"
+name = "open for the player: a generator, mine, storage or Outpost is selected (0x1007d0a0) and made current (0x100a5660)"
+read = true
+doc = "docs/27-ownership.md"

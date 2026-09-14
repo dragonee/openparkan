@@ -166,8 +166,11 @@ of `IBuilding` (`0x1005b250`) is where `iron3d.dll` stores its callback
   controllers with a class-13 part are exactly the 21 buildings whose hall way
   has a pod. Doors are no substitute: the large ruin has four and no pod.
 - **Who counts as inside.** The building keeps the position of every object
-  its ground plan reports inside it, provided the object has a mesh and a life
-  system (`0x10059f40`). On each tick (`CBuilding::SendMsg`, `0x10057550`) it
+  standing on it — its children, as each is added and every time it moves —
+  and forgets one that leaves, provided the object has a mesh and a life
+  system (`0x10059f40`; the same notification opens the doors,
+  [24-motion.md](24-motion.md#walking-into-a-building--read-and-measured)).
+  On each tick (`CBuilding::SendMsg`, `0x10057550`) it
   looks for one standing in the **first** computer's zone: within 0.8 of that
   part's bounding radius across the ground, and within its box in height
   (`0x10059d80`). The test reads only the position: no clan, size, order or
@@ -237,11 +240,33 @@ of `IBuilding` (`0x1005b250`) is where `iron3d.dll` stores its callback
         `0x100a5660` instead.
     - What each state shows was not read. That state 5 is the plant's or
       institute's own screen is a *guess* from the pages.
+    - Before switching, it sends command 740, `CMD_JAMES_WINGMAN_MENU`, through
+      the command handler when an interface object's flag is set
+      (`0x100626dd`) — which reads as closing the wingman menu when it is up
+      (*guess*). By `Type`
+      (`0x10062708`): `0x80000010`, the plant, goes to state 5 and page 5;
+      `0x80000002`, `0x80000004`, `0x80000008` and `0x80000040` — generator,
+      mine, storage and Outpost — go to `0x10062732`; `0x80000020`, which no
+      shipped building carries, does nothing (*measured*).
+    - **A generator, mine, storage or Outpost opens no screen** (*read*).
+      `0x1007d0a0` puts the building into the player's selection, saying
+      `VOICE_SELECTED` if it was not selected, and `0x100a5660` makes it the
+      interface's current building (game `+0xaec`) and recomputes the view
+      state (`0x100a1c30`).
   - **Any other clan, single player** (`0x10061192`): the building's record
     changes owner and calls `MBehaviour::Capture` with the newcomer's clan
     (`0x10032fd0`), then the voice below plays. **There is no check of
     alliance, damage, power or defenders.** An ally's building is taken the
     same way, which is when the player hears `VOICE_NBUILD_CAPTURE`.
+  - **The taker then has the building opened at once** (*read*). The
+    ownership change (`0x100a48a0`) shows string 5039, *"Building is
+    captured"*, as a System line (`0x1007eb60`), plays the voice, and always
+    ends calling the opening above with the building and its taker
+    (`0x100a4e2d`). So the pod's one firing both takes a building and, for the
+    player's own unit, opens it: a hero that takes a plant sees the plant's
+    screen with the message. The recording of *The Constructor* shows both in
+    the same frame, 106.3 s in
+    ([24-motion.md](24-motion.md#walking-into-a-building--read-and-measured)).
   - **Network games:** only the machine that owns the building (*guess*, from
     the check against `+0xad4`) does the capture, then broadcasts it:
     `IQueue::ChangeOwner` (`World3D.dll:0x10004f50`) sends message
@@ -346,9 +371,11 @@ generators between the players. `Multi.05`'s `Ntrl` is the exception: type 2.
 ## Not established
 
 - What the game view's states 1, 3, 4, 5 and 6 show (`iron3d.dll:0x10062bc0`),
-  beyond state 1 being the one boarding a bot enters; what
-  `0x1007d0a0` and `0x100a5660` open for a generator, mine, storage or
-  Outpost; and what `0x10033e40` refuses on a tower.
+  beyond state 1 being the one boarding a bot enters; and what `0x10033e40`
+  refuses on a tower. ~~What `0x1007d0a0` and `0x100a5660` open for a
+  generator, mine, storage or Outpost~~ — **read**: no screen; they select the
+  building and make it the interface's current one
+  ([Capture](#capture--read)).
 - The hero's target field (record `+0x38`, `+4`) and what sets it.
 - The other four writers of a unit record's `+0xa2` (`0x1005e7e8`,
   `0x10074dbf`, `0x1007e2ad`, `0x100a2a73`).

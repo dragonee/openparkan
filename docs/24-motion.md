@@ -994,9 +994,10 @@ takes part in this pass.
 under it has almost no x and y to keep, so even ×4 moves it next to nothing.
 On a slope, though, the push keeps a sideways part. A machine standing on a
 building is the building's child
-([Finding the ground](#finding-the-ground--read), step 7), so whether a bridge's
-own faces push a hero who stands on its deck depends on which manager the hero
-has joined. That is not settled.
+([Finding the ground](#finding-the-ground--read), step 7), and its collision
+object is then in the building's own manager, whose pass the world's runs: the
+building's faces push it too
+([Walking into a building](#walking-into-a-building--read-and-measured)).
 
 *Measured*, the spheres on Mission 01 (the parts' header spheres joined as
 `0x10009510` joins them, times the placement's scale):
@@ -1014,6 +1015,146 @@ has joined. That is not settled.
 The hero is the smaller sphere against every one of them, so it is always the
 mover. Its sphere is pushed out of their triangles, and its segment is
 stopped by their faces. A leaf never stops it.
+
+### Walking into a building — *read*, and *measured*
+
+Nothing enters a building by command. A unit walks in: the building's faces
+are its floors and its walls, and its doors open for whoever stands on the
+building near them. The capture that follows is
+[27-ownership.md](27-ownership.md#capture--read)'s.
+
+**A unit standing on a building is in the building's own collision manager**
+(*read*):
+
+1. Standing on a building's face makes the unit the building's child
+   ([Finding the ground](#finding-the-ground--read), step 7). `CBuilding`
+   passes adding and removing a child to its agent (`Terrain.dll:0x100569f0`,
+   `0x10056a20`).
+2. Adding a child tells the parent (event 2) and then the child (event 6,
+   `AniMesh.dll:0x10017670`); removing one tells the parent 3 and the child 7
+   (`0x10017716`). An agent passes each event on as message 21 to its mesh,
+   its control system and its collision object (`IGameObject` slot 20,
+   `0x10001ba0`).
+3. On 6 the collision object leaves its manager and joins the first ancestor
+   that answers `0x203`; on 7 it only leaves (`Control.dll:0x1001f585`). Its
+   next landscape face adds it back to the landscape's.
+4. A building's agent answers `0x203`. Its build makes the building a
+   collision manager of its own (`AniMesh.dll:0x10003538`) and files it in the
+   agent's interface table (`0x100035ef`), and `CBuilding` passes the request to
+   the agent (`Terrain.dll:0x10057cf6`).
+
+**The world's pass runs the building's** (*read*). When the building's own
+collision object attaches its interfaces, it asks its owner for `0x203`, keeps
+the manager as its entry's pair handler and makes itself that manager's context
+entry (`Control.dll:0x1001f600`–`0x1001f616`). In the world's pass:
+
+- a pair of the building's entry and a mover goes to the handler's slot 7
+  (`0x1001c22f`), which only lists the mover as a visitor (`0x1001c500`);
+- after the pairs, each entry with a handler has the handler's slot 3 run with
+  the frame's time (`0x1001c2d3`): the building's own pass (`0x1001c040`),
+  over its members and its visitors. Its context is the building, not the
+  landscape, so every one of them goes to the ordinary pair against it
+  (`0x1001c1b2`, `0x1001d630`). The building is the larger sphere, the
+  obstacle, and its level-0 faces push the unit out
+  ([above](#collision-between-objects--read)). Members and visitors are paired
+  with each other the same way, and the visitors are forgotten at the end
+  (`0x1001c2b4`).
+
+So **a building's walls and floors push every unit on it or near it**, the one
+it stands on included. A walker standing on a building takes a push that points
+down whole ([above](#collision-between-objects--read), message `0x1b`), and a
+bridge's deck pushes the hero crossing it.
+
+**Doors** (*read*). `CBuilding` files each class-12 item as a door, with the
+nodes its channels play (`Terrain.dll:0x100583a2`–`0x100584e8`). A door has a
+state, the time it opened, a lock flag and value, and a hold.
+
+- **It opens for a child that comes near.** A child that moves tells its
+  parent (event 1: an object setting its matrix tells its parent,
+  `AniMesh.dll:0x10017be1`). The building's notification (`CBuilding` slot 20,
+  `0x10059f40`) first drops every door's hold. Then, for each door part, it
+  takes the part's capsule from the building's mesh — two points and a radius
+  (`0x1005a27f`) — and measures the child's bounding-sphere centre to the
+  capsule's segment. Within the child's radius plus the capsule's, the door
+  opens (`0x1005b480`) and that child holds it (`0x1005a5a0`). A door locked
+  shut (the lock flag with value 1) is passed over. A child that leaves
+  (event 3) drops the holds it made.
+- **Its states** (`CBuilding::SendMsg`, `0x10057550`). Opening switches the
+  item on. Once the item stops, the door is open and the time is kept; the
+  building sees it stop when the state word clears, at 0.9 ÷ rate
+  ([27-ownership.md](27-ownership.md#capture--read)). An open door that nothing
+  holds and nothing locks open closes 5000 ms after it opened: the item is
+  switched off, and the door is shut once it stops.
+- **An open door lets units through.** The push-out asks the building, for a
+  face on a door's node, whether that door is open (`IBuilding` slot 17,
+  `0x1005b620`), and drops the face when it is
+  (`AniMesh.dll:0x1000dd13`–`0x1000dd46`). A shut, opening or closing door
+  pushes like a wall, from wherever its channel has moved its node.
+- **Two more openers:** a hit struck on a door's node opens it
+  (`Control.dll:0x1000ec7e`), and a hall-way link opens the doors listed on it
+  (`ArealMap.dll:0x1000b170`), which is how a unit routed through a building
+  gets through.
+
+*Derived*: only the building's children are tested, so a door does not open for
+a unit on the landscape outside it. It opens for a walker that stands on the
+building's own floor near it, and a closed door it meets pushes it.
+
+**What is drawn inside** (*read*, in part). Nothing is hidden by where the
+camera is: the node flag the draw skips starts clear (`AniMesh.dll:0x10012407`)
+and only a destroyed node sets it
+([26-damage.md](26-damage.md#a-hit-from-the-round-to-the-node--read)). The
+interior's coloured lamps are the building's lightmap on its lit batches
+([07-objects.md](07-objects.md#baked-lighting)). How the lightmap combines with
+the lit colour is not established.
+
+**The Large Factory and the Outpost of *The Constructor*** (*measured*, in
+model space with z up from the placement):
+
+| | Large Factory, `fr_b_plant` (`lplant01.dat`) | Outpost, `fr_l_angar` (`shang01.dat`) |
+|---|---|---|
+| way in | door `i05` (node 3) across x −11…11 at y 87.5–89.2, z 0–15.4, behind a forecourt floor at z 0 from y 87.4 to 108.5 | no door: ramps from z 0 to 1.9 at both ends of its hall |
+| doors | 3, on nodes 3, 16 and 14 (the entrance and two side doors at x ±26), rate 0.4: open in 2.5 s | none |
+| floors | entrance hall `i01` at 0; the pod room at −12.4 | hall at 1.9; under the pod 0.48 |
+| pod | node 25 (`i17`), radius 4.77, centre (0.06, −48.66, −9.67): zone 3.82 across | node 2 (`o03`), radius 6.37, centre (19.40, 8.79, 4.79): zone 5.10 across |
+| capture fires | 4.5 s after the pod starts opening | 3 s |
+| lightmap | on 100 of its 438 batches | none |
+
+Mission 02 places the Large Factory 0.08 above the ground under it, so a unit
+walking up to the door is the building's from the forecourt on.
+
+**Against the recording** (*seen*, 30 fps). The hero crosses the forecourt at
+92–94 s, is in the dark entrance at 94.5 s and under the hall's lamps at
+96.0 s. It stands on the pod from 102 s at the latest, and at 106.3 s the
+factory screen and "Building is captured" appear in the same frame. The
+autocannon's count drops from 500 to 499 at 94.5 s, as the hero reaches the
+door. A door that opens for the hero needs no shot, and the recording does not
+show which opened it. Walking out, from 158 s to 166.5 s, the hero fires
+nothing. Inside the Outpost, at 334–338 s, it is captured the same way.
+
+**For an engine** — *derived*, in this order each frame:
+
+1. A unit whose nearest walkable face is a building's is that building's
+   child. The building keeps its children and their bounding-sphere centres.
+2. For each child that moved: drop every door's hold. For each door not locked
+   shut, for each of its nodes, if the child's centre is within
+   (child radius + part radius) of the part's axis, open the door (switch its
+   item on, unless already open or opening) and hold it. Until the mesh's
+   capsule is read, a part's level-0 slot bounds stand in.
+3. Tick every door: opening → open when its item stops (the time kept);
+   open → closing when unheld, not locked open, and 5 s past opening; closing
+   → shut when the item stops. A door's item steps like any other
+   ([28-chassis.md](28-chassis.md)).
+4. Collide: a building's faces push every unit on it or touching its sphere,
+   the faces of a door that is open excepted; units on the same building push
+   each other.
+5. Tick the pod ([27-ownership.md](27-ownership.md#capture--read)): a child in
+   the first computer's zone switches it on; when it has opened, and that child
+   is still there, the capture callback runs once. For another clan it takes the
+   building, shows string 5039 "Building is captured" as a System line with its
+   voice, and at once opens the building for the player (a plant's page 5); for
+   the player's own clan it only opens it.
+6. Leaving is walking out: a door ahead opens as the unit nears it, and once a
+   landscape face is nearer the unit is the landscape's again.
 
 ### What a buoy does to a walker — *read*, *measured*, and not established
 
@@ -1363,10 +1504,17 @@ points are given is not traced. `Movement_FlyHeight` is 40 and
   the ground damage — on every tick
   ([Water and lava beds kill](#water-and-lava-beds-kill--read-and-measured)).
   Whether a flying machine runs the ground contact at all.
-- Whether `PlaceObjectOnWorldFace`'s reparenting sends a collision object its
+- ~~Whether `PlaceObjectOnWorldFace`'s reparenting sends a collision object its
   message 21, so that a machine on a building's deck leaves the world's
   collision manager for the building's; and so whether a bridge's own faces
-  ever push a hero standing on it.
+  ever push a hero standing on it~~ — **read**: it does, and the world's pass
+  runs the building's, so they do
+  ([Walking into a building](#walking-into-a-building--read-and-measured)).
+- How the building's mesh builds the capsule a door part is tested against
+  (`Terrain.dll:0x1005a27f`), the node whose box bounds a pod's zone in height
+  (`0x10058607`), and how a lightmap combines with a batch's lit colour.
+- How a walker climbs a building's ramp while the ramp's own faces push its
+  sphere back.
 - Which `Land.msh` faces carry the world face bit `0x8` and class bit 8 that
   the ground search excludes; the landscape converts them to its own mask at
   `Terrain.dll:0x10022da0` (world `0x8` → `0x20`, `0x200` → `0x20000`,
