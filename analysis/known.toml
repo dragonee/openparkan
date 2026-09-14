@@ -8246,7 +8246,7 @@ read = true
 module = "Control.dll"
 at = "0x1000cfd0"
 kind = "site"
-name = "a round's distance from its origin held to .ctl +108 (its range)"
+name = "a round's move cut to its remaining range +0x4c8 (.ctl +108) when longer: the range is the path flown, tick by tick, not the distance from its origin"
 doc = "docs/29-weapons.md"
 read = true
 
@@ -14833,7 +14833,7 @@ read = true
 module = "AniMesh.dll"
 at = "0x10008c8f"
 kind = "site"
-name = "pose walk: with the scale flag set, the root's axes are multiplied by the scale triple"
+name = "pose walk, the root: with the scale flag set its translation column (elements 3, 7, 11) is multiplied by the scale triple, then cleared at 0x10008d88"
 doc = "docs/07-objects.md"
 read = true
 
@@ -14868,4 +14868,77 @@ at = "0x10008f57"
 kind = "site"
 name = "controller load: the state graph's costs are scaled (0x10001790) once the states are copied"
 doc = "docs/24-motion.md"
+read = true
+
+# --- the root's travel, the eye's sway and a round's range (docs/07, docs/30, docs/29) ---
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10008d88"
+kind = "site"
+name = "pose walk: the root node (parent -1) has its translation column, matrix elements 3, 7 and 11, zeroed before it is copied to its model matrix +0x60; its rotation is kept"
+doc = "docs/07-objects.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10008f8a"
+kind = "site"
+name = "pose walk, a node below the root: with the scale flag set its translation column is multiplied by the scale triple"
+doc = "docs/04-missions.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10009002"
+kind = "site"
+name = "pose walk: a node's model matrix +0x60 = its parent's +0x60 times its own +0xa0 (g_FastProc +0x70)"
+doc = "docs/07-objects.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x100090a2"
+kind = "site"
+name = "pose walk: the root's world matrix +0x20 = the object's placement +0x164 times its model matrix +0x60"
+doc = "docs/07-objects.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x1000b600"
+kind = "function"
+name = "a 4x4's column i as a triple: elements i, 4 + i, 8 + i; column 3 is the translation"
+doc = "docs/07-objects.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x1000b8e0"
+kind = "function"
+name = "set a 4x4's column edx from a triple; 0x10012560 stores a key's translation in column 3"
+doc = "docs/07-objects.md"
+read = true
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10005320"
+kind = "function"
+name = "IAnimation slot 4: a node's matrix -- mode 1 the identity; else the pose walk, then mode 0 the model matrix +0x60, mode 2 the world matrix +0x20"
+doc = "docs/07-objects.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000cfc6"
+kind = "site"
+name = "round tick: the length moved this tick, from the tick's starting position to the current one (g_FastProc +0x98), against the remaining range +0x4c8"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000d070"
+kind = "site"
+name = "round tick: the length moved comes off the remaining range +0x4c8, whether or not the move was cut"
+doc = "docs/29-weapons.md"
 read = true

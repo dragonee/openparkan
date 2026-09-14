@@ -387,6 +387,49 @@ hit effect (action 10). The hero's missile explodes at range with
 `bm_h_01r.exp`, 200 in 10 m. Its hit `.exp` is 170 in 7 m. The other three
 hero rounds hit directly (*measured*).
 
+**A range is the path flown** (*read*). Each tick the round's remaining range
+(`+0x4c8`, from `.ctl` +108) is compared with the length it moved that tick,
+the distance from where it began the tick to where it is now (`0x1000cfc6`):
+
+- **A longer move** is cut to what remains, and `+0x664` is set
+  (`0x1000cfd0`–`0x1000d069`), so block entry 4 runs next.
+- **Either way** the length comes off the remaining range (`0x1000d070`).
+- **A guided round that turns** spends its range along its curve, not as
+  distance from the muzzle (*derived*).
+
+**Nothing else changes over the flight.** A round hits for its `.ndp` hit
+points plus its `.exp` damage, times the level ratio
+([26-damage.md](26-damage.md#a-hit-from-the-round-to-the-node--read)), and no
+term in that is distance. So a round hits as hard at the end of its range as
+at the muzzle, and not at all beyond it (*derived*).
+
+**The hero's four rounds** (*measured*):
+
+| gun | round | m/s | range, m | at range | what it plays |
+|---|---|---:|---:|---|---|
+| cannon | `bb_h_01` | 350 | 500 | `bb_h_01_end.exp`, kind 2, 1 | `bb_h_01_end` |
+| plasma rifle | `bp_h_01` | 150 | 150 | `bp_h_01_end.exp`, kind 2, 1 | `pls_h_end` |
+| red laser | `bl_h_01` | 10,000 | 1,000 | `bl_h_01_end.exp`, kind 2, 1 | `bl_h_01_end` |
+| missile | `bm_h_01` | 70 | 350 | `bm_h_01r.exp`, kind 3, 200 in 10 m | `exp_m_mis` |
+
+- **The three puffs are one effect**: 1.5 s of two type-7 smoke bursts
+  (`smoke_g`, `smoke_g_add`, bit 8 set) and two type-4 `glow_eng` sprites,
+  under the `Smoke` settings switch
+  ([11-effects.md](11-effects.md#which-effects-run-the-settings-switch--read-and-measured)).
+- **The missile's is a blast**: 3 s of `expl5`, `fire_smoke_w`, a light and
+  `hit_mis_metal.wav`, under `Explode`.
+- **Where and how big.** All four `.exp` carry placement 0. Action 27 plays
+  them through node 0's damage stage, so each goes off at the round's
+  bounding-sphere centre along its second axis, scaled by the `.exp` radius.
+  That axis is the flight direction, since a round is created facing it
+  (*derived*)
+  ([11-effects.md](11-effects.md#what-an-explosion-plays--read-and-measured)).
+- **A puff strikes nothing** (*derived*). A kind-2 hit takes its node from
+  the round's contact record, and a round that ran out of range has none.
+- **A round that leaves the map box first** is removed with no puff. That
+  includes the box's doubled top, which is 2 × the land's highest point
+  ([26-damage.md](26-damage.md#the-hit-test--read-and-measured)).
+
 ### What a shot plays — *read*, and *measured*
 
 - **Guns with a shot group.** 34 guns name a section-5 group at record +0xc.

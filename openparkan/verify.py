@@ -5438,6 +5438,47 @@ def check_playback(check, game: Path) -> None:
           f"stride / speed (Control.dll:0x100057b3), so a walk cycle at 5 m/s takes "
           f"{walk / 5:.2f} s and a run cycle at 14 m/s {run / 14:.3f} s")
 
+    def turn(frame: float) -> tuple[float, float, float]:
+        q = body.pose_at(0, frame)[1]
+        ahead = objmesh.quaternion_rotate(q, (0.0, 1.0, 0.0))
+        up = objmesh.quaternion_rotate(q, (0.0, 0.0, 1.0))
+        return math.atan2(-ahead[0], ahead[1]), abs(ahead[2]), abs(up[0])
+
+    sway = {}
+    for gait, first, last in (("walk", 5, 13), ("run", 18, 34)):
+        frames = [first + (last - first) * i / 240 for i in range(241)]
+        turns = [turn(f) for f in frames]
+        yaws = [y for y, _, _ in turns]
+        travel = [body.pose_at(0, f)[0] for f in frames]
+        sway[gait] = (max(abs(y) for y in yaws), statistics.fmean(yaws),
+                      max(max(p, r) for _, p, r in turns),
+                      max(t[1] for t in travel) - min(t[1] for t in travel),
+                      max(abs(t[0]) for t in travel))
+    ten = math.radians(10)
+    peaks = (turn(22)[0], turn(30)[0])
+    hero_unit = objects.load_unit(game / "UNITS" / "UNITS" / "HERO" / "tut1_p.dat")
+    parents = hero_unit.parents()
+    socket = next((c.attach_node for i, c in enumerate(hero_unit.components)
+                   if parents[i] == 0 and c.is_external), -1)
+    carried = (0 <= socket < len(body.nodes) and body.nodes[socket].name == "Base_TL"
+               and body.nodes[socket].parent == 0)
+    check("r_h_02: the body node yaws 10° each way a cycle, and carries the turret",
+          all(abs(a - ten) < 1e-3 and abs(m) < 1e-3 and tilt < 1e-4
+              for a, m, tilt, _, _ in sway.values())
+          and abs(peaks[0] + ten) < 1e-3 and abs(peaks[1] - ten) < 1e-3
+          and sway["run"][3] > 5.5 and 0.12 < sway["run"][4] < 0.14 and carried,
+          f"node 0 (B_Dn) turns about z at most {math.degrees(sway['walk'][0]):.2f}° "
+          f"over walk frames 5-13 and {math.degrees(sway['run'][0]):.2f}° over run "
+          f"frames 18-34, {math.degrees(peaks[0]):+.1f}° at 22 and "
+          f"{math.degrees(peaks[1]):+.1f}° at 30, mean {sway['run'][1]:+.4f} rad, "
+          f"tilting {max(s[2] for s in sway.values()):.1e}; tut1_p's turret hangs on "
+          f"node {socket}, Base_TL, a child of node 0.  The pose walk clears only the "
+          f"root's translation (AniMesh.dll:0x10008d88) and the camera's points take "
+          f"the node's model matrix (IAnimation slot 4 through Control.dll:0x1001b4f0), "
+          f"so the eye swings 10° each way once a run cycle, {run / 14:.3f} s at 14 "
+          f"m/s, while the root's {sway['run'][3]:.2f} of run travel and "
+          f"±{sway['run'][4]:.2f} of side sway never reach the picture")
+
     joined = backwards = edges = anchors = states = 0
     fixed: Counter[str] = Counter()
     for path in all_archives(game):
@@ -5920,6 +5961,40 @@ def check_actions(check, game: Path) -> None:
           and flight["bl_h_01.ctl"] == ["hero_laser_bullet"],
           f"{bound}; action 14 times effect ids {points} from those control points; "
           f"the rounds fly with {flight}")
+
+    weapon = NResArchive.open(game / "weapon.rlb")
+    library = effects.EffectLibrary(game / "effects.rlb")
+    ends = {}
+    for name in ("bb_h_01", "bp_h_01", "bl_h_01", "bm_h_01"):
+        c = rounds[f"{name}.ctl"]
+        end = next(r for r in c.group(control.ENTRY_RANGE) if r.action == control.ACT_EXPLODE_NODE)
+        blast = effects.parse_explosion(weapon.read_name(end.resource.member), end.resource.member)
+        played = library.get(blast.effect.member) if blast.effect else None
+        ends[name] = (c.triples[control.TRIPLE_TOP_SPEED][1], c.bounds[0],
+                      end.resource.member.lower(), blast.kind, blast.damage, blast.radius,
+                      blast.placement, played)
+    puffs = [ends[n][7] for n in ("bb_h_01", "bp_h_01", "bl_h_01")]
+    missile = ends["bm_h_01"][7]
+    check("the hero's rounds: 500, 150, 1000 and 350 m, then a puff or a blast",
+          [e[:2] for e in ends.values()] == [(350, 500), (150, 150), (10000, 1000), (70, 350)]
+          and [e[2] for e in ends.values()] == ["bb_h_01_end.exp", "bp_h_01_end.exp",
+                                                 "bl_h_01_end.exp", "bm_h_01r.exp"]
+          and all(e[3:7] == (effects.HIT_DIRECT, 1.0, 1.0, 0) for e in list(ends.values())[:3])
+          and ends["bm_h_01"][3:7] == (effects.HIT_AREA, 200.0, 10.0, 0)
+          and all(p is not None and p.duration == 1.5 and p.setting == "Smoke"
+                  and [m.kind for m in p.emitters] == [7, 7, 4, 4]
+                  and p.materials == ["smoke_g", "smoke_g_add", "glow_eng", "glow_eng"]
+                  for p in puffs)
+          and missile is not None and missile.duration == 3.0 and missile.sounds,
+          "cannon, plasma, laser, missile: " + "; ".join(
+              f"{n} {e[0]:g} m/s for {e[1]:g} m, then {e[2]} (kind {e[3]}, {e[4]:g} in "
+              f"{e[5]:g} m) playing {e[7].name if e[7] else None}"
+              for n, e in ends.items())
+          + f".  The three direct rounds' puffs are {puffs[0].duration:g} s of "
+          f"{', '.join(puffs[0].materials)} under the {puffs[0].setting} switch.  A range "
+          f"is the path flown: each tick the length moved comes off +0x4c8 "
+          f"(Control.dll:0x1000cfc6, 0x1000d070) and a longer move is cut to what is "
+          f"left; the hit's damage has no distance in it")
 
     lib = materials.MaterialLibrary(game / "Material.lib")
     by_surface: dict[int, list[str]] = defaultdict(list)

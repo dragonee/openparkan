@@ -313,6 +313,32 @@ hero turret the four channels animate `CP_m1o1`, `Turn_m1o1` (49–53),
   - The camera component's own node is the eye's on only 7 of 58 turrets, so
     the point is what places it.
 
+**The eye swings with the gait** (*read*, and *measured*):
+
+- **What the points ride on** (*read*). The camera asks `0x1001b4f0` for both
+  points in mode 0 (`0x10023603`, `0x10023618`), which takes the point's node's
+  model matrix from IAnimation slot 4. That matrix carries every node above it,
+  the root's rotation included. The pose walk clears only the root's
+  translation ([07-objects.md](07-objects.md#how-the-engine-plays-it--read)).
+  Each update builds the frame from the two points afresh, with no filter.
+- **What the hero's turret hangs on** (*measured*). `tut1_p`'s turret hangs on
+  node 9, `Base_TL`, a child of the body node `B_Dn` (node 0), at
+  (0, 0.028, −0.077).
+- **How the body node turns** (*measured*).
+  - `R_H_02`'s node 0 yaws in 2.5° steps a frame, out to 10° each way and
+    back, once over each cycle: run frames 18–34 (−10° at 22, +10° at 30) and
+    walk frames 5–13.
+  - It never pitches or rolls, and its mean over a cycle is 0.
+  - Its 5.59 of run travel and ±0.13 of side sway are the translation the walk
+    clears.
+- **Nothing takes the turn out** (*read*). The hero's yaw channel is never
+  sent a value. The turret-led drive answers the hull's turn, not the body
+  node's.
+- **So the view swings 10° each way** (*derived*): once a run cycle, 0.405 s at
+  14 m/s, and once a walk cycle. The sight's `TurretCenter` and `TargetDirect`
+  and the barrels' points sit on the same turret, so the shots swing with the
+  view. The eye neither lunges forward nor slides sideways.
+
 **Free look** (`0x10023788`, *read*; rows *measured*):
 
 - **Mode.** In mode `0x200`, the constructor's, the camera turns its view by

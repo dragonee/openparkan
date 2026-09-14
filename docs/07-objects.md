@@ -629,7 +629,9 @@ other, and **only the body's key translates** — every limb bone's translation
 is the same in all 124 frames, which is what a jointed skeleton looks like.
 Nine of the 34 rigs move their root more than a unit; `R_H_02`'s lunges 5.7
 forward and comes back to zero, so the loop closes. A few of the creatures'
-do not, and those snap at the wrap.
+do not. None of that travel is drawn: the engine clears a root's translation
+([below](#how-the-engine-plays-it--read)), and the controller moves the body
+by the same distance instead.
 
 #### How the engine plays it — *read*
 
@@ -648,6 +650,28 @@ A controller hands the mesh **two frames and a weight**:
 - **The weight** w (`0x10012560`): frame A alone at w = 0 or when B is
   negative, frame B alone at w = 1 or when A is negative, and a slerp and lerp
   between the two otherwise, the short way round.
+
+**The root turns but does not travel** (*read*). The pose walk
+(`0x10008b30`) poses each node into a 4×4 whose column 3 is the translation:
+`0x10012560` stores the key's translation there (`0x1000b8e0`, column 3), and
+`0x1000b600` reads a column back the same way, as elements 3, 7 and 11.
+
+- **The root.** For the first node, when it has no parent, the walk zeroes
+  elements 3, 7 and 11 (`0x10008d88`) before it copies the matrix to the
+  node's model matrix at `+0x60`. The rotation stays.
+- **Every other node.** Its model matrix is its parent's times its own
+  (`0x10009002`).
+- **The world.** A node's world matrix at `+0x20` is the object's placement
+  (`+0x164`) times its model matrix (`0x100090a2`).
+- **Handing it out.** IAnimation slot 4 (`0x10005320`) runs the walk, then
+  hands out the model matrix for mode 0, the world matrix for mode 2 and the
+  identity for mode 1.
+
+So a machine's body node sways in the picture but never carries it forward:
+its travel is the stride the controller moves the body by
+([24-motion.md](24-motion.md#playing-a-state--read-and-measured)). Everything
+hung below the root turns with it, a mounted turret and its camera included
+([30-turrets.md](30-turrets.md#aiming-and-the-camera--read-and-measured)).
 
 **A node can have its own segment.**
 

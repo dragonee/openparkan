@@ -99,6 +99,9 @@ tick (`0x1000bcf0`, loop at `0x1000c2a5`):
   into the world (`0x10015990`).
 - The attitude and velocity integrators run once a step, with dt the step.
 - Between steps the drawn body is interpolated by the phase s (`0x10015a50`).
+- The picture adds no second copy of the stride: the pose walk clears the
+  root node's translation and keeps its rotation (`AniMesh.dll:0x10008d88`,
+  [07-objects.md](07-objects.md#how-the-engine-plays-it--read)).
 
 **The step velocity is a report, not a state.** The move writes the velocity
 it used into `+0x200` (body `+0x4c`): a velocity-driven state the integrated

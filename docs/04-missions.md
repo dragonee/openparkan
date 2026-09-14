@@ -220,7 +220,9 @@ the two animals' scale is never applied.
 `SetScale` scales **the object**, not only its drawing:
 
 - every node's matrices are recomposed with the scale;
-- the pose walk multiplies the root's axes by it (`0x10008c8f`);
+- the pose walk multiplies each node's translation column by it (`0x10008c8f`
+  on the root, `0x10008f8a` on the rest), though the root's is then cleared
+  (`0x10008d88`, [07-objects.md](07-objects.md#how-the-engine-plays-it--read));
 - both bounding boxes, the bounding sphere and the cylinder are scaled;
 - the node area and volume getters scale by two and three of the factors.
 
