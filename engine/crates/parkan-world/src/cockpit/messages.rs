@@ -110,13 +110,10 @@ pub fn draw(cockpit: &mut Cockpit, ink: &mut Ink, now_ms: f64) {
     }
 }
 
-/// The frame (`0x1009afa0`, `0x1009abf0`): four corners, and the edges stretched between them.
-///
-/// STAND-IN: docs/35-hud.md#the-message-box--read-and-measured -- only the top left corner's
-/// placement is transcribed: each corner piece goes where its quarter turn clockwise
-/// carries the top left's art, the top edge and the turned right edge take their pieces as
-/// they are, and the bottom and left mirror them.
-fn frame(cockpit: &Cockpit, ink: &mut Ink, [x0, y0, x1, y1]: [f32; 4]) {
+/// The frame (`0x1009afa0`, `0x1009abf0`): four corners, and the edges stretched between them,
+/// each as thick as its piece is tall, the bottom edge flipped and the left mirrored
+/// (docs/35-hud.md, "The panel in the cockpit").
+pub fn frame(cockpit: &Cockpit, ink: &mut Ink, [x0, y0, x1, y1]: [f32; 4]) {
     let get = |name: &str| cockpit.skin.get(name);
     let white = [1.0; 4];
     for (name, rect) in [
@@ -130,11 +127,11 @@ fn frame(cockpit: &Cockpit, ink: &mut Ink, [x0, y0, x1, y1]: [f32; 4]) {
         }
     }
     if let Some(h) = get("ccres_frame_edge_h") {
-        ink.painter.piece(h, [x0 + CORNER, y0, x1 - CORNER, y0 + EDGE], white);
-        ink.painter.piece(h, [x0 + CORNER, y1, x1 - CORNER, y1 - EDGE], white);
+        ink.painter.piece(h, [x0 + CORNER, y0, x1 - CORNER + 1.0, y0 + EDGE], white);
+        ink.painter.piece(h, [x0 + CORNER, y1, x1 - CORNER + 1.0, y1 - EDGE], white);
     }
     if let Some(v) = get("ccres_frame_edge_v") {
-        ink.painter.piece(v, [x1 - EDGE, y0 + CORNER, x1, y1 - CORNER], white);
-        ink.painter.piece(v, [x0 + EDGE, y0 + CORNER, x0, y1 - CORNER], white);
+        ink.painter.piece(v, [x0 + EDGE, y0 + CORNER, x0, y1 - CORNER + 1.0], white);
+        ink.painter.piece(v, [x1 - EDGE, y0 + CORNER, x1, y1 - CORNER + 1.0], white);
     }
 }

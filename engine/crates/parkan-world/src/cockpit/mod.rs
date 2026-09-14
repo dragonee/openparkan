@@ -3,7 +3,9 @@
 //! corners. Each frame gives the HUD's art as painter batches, its `GAME_FONT` text, and the
 //! views of units its panels hold. See `docs/35-hud.md`.
 
+pub mod map;
 pub mod messages;
+pub mod objectives;
 pub mod panels;
 pub mod radar;
 pub mod weapons;
@@ -26,11 +28,14 @@ pub fn argb(c: u32) -> [f32; 4] {
 
 pub const WHITE: u32 = 0xffff_ffff;
 
-/// What a widget draws into: the painter, and the text in `GAME_FONT` it lays out.
+/// What a widget draws into: the painter, and the text it lays out in `GAME_FONT` and in
+/// `MENU_FONT`.
 pub struct Ink<'a> {
     pub painter: Painter,
     pub text: Vec<TextRun>,
     pub font: &'a GameFont,
+    pub menu_runs: Vec<TextRun>,
+    pub menu: &'a GameFont,
 }
 
 impl Ink<'_> {
@@ -38,6 +43,16 @@ impl Ink<'_> {
     pub fn text(&mut self, text: &str, at: [f32; 2], colour: u32) {
         let space = self.painter.space;
         self.text.push(TextRun {
+            colour: argb(colour),
+            scale: space.scale(),
+            ..TextRun::new(text, space.ndc(at, self.painter.pin))
+        });
+    }
+
+    /// `text` in `MENU_FONT` with its top left at the layout's `at`, under the painter's pin.
+    pub fn menu_text(&mut self, text: &str, at: [f32; 2], colour: u32) {
+        let space = self.painter.space;
+        self.menu_runs.push(TextRun {
             colour: argb(colour),
             scale: space.scale(),
             ..TextRun::new(text, space.ndc(at, self.painter.pin))
@@ -61,8 +76,9 @@ impl Ink<'_> {
 #[derive(Clone, Debug, Default)]
 pub struct Drawn {
     pub batches: Vec<Batch>,
-    /// In `GAME_FONT`.
+    /// In `GAME_FONT`, and in `MENU_FONT`.
     pub text: Vec<TextRun>,
+    pub menu_text: Vec<TextRun>,
     pub views: Vec<panels::UnitView>,
     /// The names of `ui/game_resources.cfg`'s voices to queue, and of its sounds to play now.
     pub voices: Vec<&'static str>,
@@ -82,6 +98,8 @@ pub struct Cockpit {
     pub water_level: f32,
     /// When the radar's sweep ring last started.
     pub ring_since_ms: f64,
+    pub objectives: objectives::Screen,
+    pub map: map::SatelliteMap,
 }
 
 impl Cockpit {
@@ -98,6 +116,10 @@ impl Cockpit {
             pages: pages.names.iter().map(|(k, &v)| (k.clone(), v as u16)).collect(),
             water_level: play.ground.water_level(),
             ring_since_ms: 0.0,
+            objectives: objectives::Screen::default(),
+            map: map::SatelliteMap::new(
+                crate::settings::value(game, "CS", "MAP_ALPHA").and_then(|v| v.parse().ok()),
+            ),
         })
     }
 
@@ -105,20 +127,44 @@ impl Cockpit {
         self.strings.get(&id).map_or("", String::as_str)
     }
 
-    /// The HUD for `play` on `space` at its hero's clock, `view_proj` its main camera.
-    pub fn draw(&mut self, play: &Play, space: Space, font: &GameFont, view_proj: Mat4) -> Drawn {
+    /// The HUD for `play` on `space` at its hero's clock, `view_proj` its main camera, laid
+    /// out in `font` (`GAME_FONT`) and `menu` (`MENU_FONT`). While the objectives screen is up
+    /// it alone is drawn (`0x1008d3ac`); otherwise the widgets, the satellite map over them,
+    /// and the message box.
+    pub fn draw(
+        &mut self,
+        play: &Play,
+        space: Space,
+        font: &GameFont,
+        menu: &GameFont,
+        view_proj: Mat4,
+    ) -> Drawn {
         let now_ms = play.hero.time_ms;
-        let mut ink = Ink { painter: Painter::new(space), text: Vec::new(), font };
+        let mut ink =
+            Ink { painter: Painter::new(space), text: Vec::new(), font, menu_runs: Vec::new(), menu };
+        if objectives::draw(self, &mut ink, play, now_ms) {
+            return Drawn { batches: ink.painter.batches, menu_text: ink.menu_runs, ..Drawn::default() };
+        }
         let mut voices = Vec::new();
         let water_level = self.water_level;
         let sounds = radar::draw(self, &mut ink, play, water_level);
         let views = panels::draw(self, &mut ink, play, view_proj, now_ms);
         ink.painter.pin = Pin::TOP_RIGHT;
-        voices.extend(weapons::draw(self, &mut ink, play));
+        if !self.map.open {
+            voices.extend(weapons::draw(self, &mut ink, play));
+        }
         radar::reticle(self, &mut ink);
+        map::draw(self, &mut ink, play, now_ms);
         ink.painter.pin = Pin::TOP;
         messages::draw(self, &mut ink, now_ms);
         voices.extend(self.panels.voices(play, now_ms));
-        Drawn { batches: ink.painter.batches, text: ink.text, views, voices, sounds }
+        Drawn {
+            batches: ink.painter.batches,
+            text: ink.text,
+            menu_text: ink.menu_runs,
+            views,
+            voices,
+            sounds,
+        }
     }
 }

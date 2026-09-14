@@ -196,6 +196,30 @@ the interface's pages and `ui/compaund.cfg` and `ui/hq.cfg`'s pieces.
 - The HUD's art, text and outcome panel blend in display space, as the game's
   16-bit surfaces did: a weapon bar reads the recording's (74, 146, 92).
 
+**M10.** The mission opens as the game's does, and the rest of its screens.
+
+- A campaign mission's briefing plays first: the camera flies `briefing.cfg`'s
+  waypoints (linear, the cubic Hermite spline with its read tangents, jump
+  cuts at black and level orbits), 1.04 rad across and never rolling, while
+  each stop's voice plays at once. Over the fade, two black bars leave 75 to
+  405 of the 640 × 480 screen, with the mission's title from `descr` and the
+  wrapped subtitle. Every object but the hero is paused and the clan scripts
+  wait; the sky's clock runs. When the path ends, or Esc skips it, the theme
+  starts and the cockpit takes over. On Mission 01 its subtitles change within
+  0.35 s of a recording's, and its shots frame what the recording's frame.
+- The objectives screen opens as the cockpit first shows and closes 7 s after:
+  "Primary objectives" and each objective with its state, centred in the menu
+  font over a 60% dim, in place of the HUD. F12 opens and closes it, Esc closes
+  it, and the wingman menu waits while it is up.
+- M opens the satellite map at the top right in the weapons list's place: the
+  mission's minimap tinted `#37ff37` at `MAP_ALPHA`, its frame, the compass and
+  the hero's mark; ] and [ make it more or less opaque by 12, with its label for
+  a second. The message box's frame now places its pieces as read.
+- The parts that move by themselves: each generic device and radar steps its
+  channels as `Control.dll`'s item does, so the T-2's rotors turn 7.3 times a
+  second, every robot turret's dish once in two seconds, and the M-2f's wings
+  and engines swing out above half its top speed.
+
 This directory also holds what the rest will follow:
 
 - **`docs/`** is the source of truth. Every behaviour the engine implements is
@@ -250,6 +274,13 @@ stretches it as the game's does. `--face NAME,DISTANCE` stands the hero that far
 from the mission object whose path ends in NAME, facing it, before `--ticks`
 play. With `--fly`, W/A/S/D and Q/E fly, holding
 the right mouse button turns and Shift flies faster.
+
+A campaign mission opens on its briefing, and Esc skips it; `--skip-briefing`
+starts in the cockpit, and `--screenshot b.png --briefing-at 36.8` draws the
+briefing that many seconds in. The objectives screen then shows for 7 s; F12
+opens and closes it. M opens the satellite map, and ] and [ change its
+opacity. A screenshot draws the cockpit without either, unless `--objectives`
+or `--map` is given.
 
 ## Checks
 
@@ -379,7 +410,6 @@ engine pass replaces each with what was read and removes its row.
 | M8 | How the turret turns a traced point into its targets (`0x10028bb0`), its aim stage, and the gun's report codes | each channel moves on by the angle the sight is off, at the rate a small nudge turns it; θ is 0 once both channels reach their targets and π before; a guided gun's θ is its lock left × π | [29](../docs/29-weapons.md#how-the-ai-fires--read) |
 | M9 | Where a gun's takt stores its report codes 0 and 3–6, which the weapons list's lamp reads | the code from the gun's state now: 5 no rounds, 6 short of charge, 7 not ready, 3 stroking, 4 waiting its interval; then the gate's 2, 7 or 8; 1 locking; 0 ready | [29](../docs/29-weapons.md#the-guns-takt-a-stroke-then-the-interval) |
 | M9 | The charge level of a gun with no capacity, which only a shot sets | its bar shows full | [29](../docs/29-weapons.md#a-gun-is-a-capacitor-a-magazine-and-a-clock--read) |
-| M9 | Where the message box's frame puts its corners 2–4 and its right and bottom edges | each corner where its quarter turn clockwise carries the top left's art; the top and turned right edges as they are, the bottom and left mirrored | [35](../docs/35-hud.md#the-message-box--read-and-measured) |
 | M9 | Which caller hands a unit's name its class word, and which robots are *"Tiny Tower"* | each class letter its own word (W *Warrior*, T *Transport*, B *Builder*, C *Comm. Center*); no robot is a Tiny Tower | [35](../docs/35-hud.md#name-and-status--read-and-seen) |
 | M9 | The component value `0x400` the *"Dangerous!"* line asks for | no unit is called dangerous | [35](../docs/35-hud.md#name-and-status--read-and-seen) |
 | M9 | A panel's battery arc and shield sectors: batteries and shields are not simulated | a unit with a battery reads full and one without empty, so the low battery voice never plays; every sector of a unit with a fight shield and a deflector reads full | [23](../docs/23-economy.md#bots-spend-power-through-the-same-code-priced-by-part--read-and-measured) |
@@ -390,6 +420,10 @@ engine pass replaces each with what was read and removes its row.
 | M9 | What the camera view's property 0, which places the reticle's dot, is | the dot stays at the middle | [35](../docs/35-hud.md#the-reticle--read) |
 | M9 | The stage sets a sprite may pick, and how the 2D layer samples | every sprite the default; pages sampled nearest | [35](../docs/35-hud.md#how-the-radar-draws--read) |
 | M10 | When a generic device's or a radar's channels are played between its steps: only while one of two countdowns `IControl` slot 8 sets runs, and no caller is found | every tick, so a rotor and a dish turn smoothly | [28](../docs/28-chassis.md#what-a-devices-value-turns--read-and-measured) |
+| M10 | Which keys act while a briefing plays, besides Esc | none reaches the hero or the game's commands | [21](../docs/21-briefing.md#not-established) |
+| M10 | The default `SUBTITLES` is read with | subtitles show when the key is absent (the install sets 1) | [21](../docs/21-briefing.md#when-it-runs--read) |
+| M10 | That a unit record's `+0xd8` and `+0xdc`, which the satellite map's heading line runs along, are its heading | the line runs along the hero's facing | [35](../docs/35-hud.md#not-established-4) |
+| M10 | Which clans' units the map marks besides the player's: the player clan record's `+0x54` list | the player's own units only | [25](../docs/25-sensors.md#not-established) |
 | M10 | What a device's byte 0 of 1 adds from the machine's list at `+0xc4` | nothing: its channels hold their initial values (no Mission 01 unit has one) | [28](../docs/28-chassis.md#not-established) |
 | M8 | A gun fitted as a part of its own: its ready byte and its barrels' recoil | ready; its recoil is not played | [29](../docs/29-weapons.md#a-gun-is-ready-once-its-arm-is-out--read-and-measured) |
 | M8 | Which difficulty profile a wingman holds: `Speed_MaximumFactor` | 1, as four of the five profiles set it | [26](../docs/26-damage.md#the-difficulty-ratio--read-and-measured) |

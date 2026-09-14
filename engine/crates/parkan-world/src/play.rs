@@ -192,6 +192,9 @@ pub struct Play {
     pub deleted: Vec<bool>,
     /// What the game says, not yet shown or played.
     pub says: Vec<Say>,
+    /// While a briefing plays, every object but the hero is paused (property `0x20a`) and
+    /// the clan scripts wait (docs/21-briefing.md, "The world meanwhile").
+    pub paused: bool,
 }
 
 /// A round about to leave a barrel.
@@ -433,6 +436,7 @@ impl Play {
             targets: TargetList::default(),
             progression: None,
             says: Vec::new(),
+            paused: false,
             names,
             selector: Selector::default(),
             voice_pick: VoicePick::default(),
@@ -902,8 +906,11 @@ impl Play {
                 p.progress.destroyed(self.units[*target].logical_id);
             }
         }
-        // A won or lost mission plays on under its panel (docs/34, "After the outcome").
-        self.progress();
+        // A won or lost mission plays on under its panel (docs/34, "After the outcome"). No
+        // `Mission` handler or clan takt runs in the briefing's state 5.
+        if !self.paused {
+            self.progress();
+        }
         events
     }
 
@@ -1170,7 +1177,7 @@ impl Play {
             if !self.battle.combat.targets.get(t).is_some_and(|target| target.alive) {
                 continue;
             }
-            if self.units[t].clan == Some(self.player_clan) {
+            if !self.paused && self.units[t].clan == Some(self.player_clan) {
                 self.behave(r, dt_ms, &seen);
             }
             let (t, robot) = &mut self.robots[r];

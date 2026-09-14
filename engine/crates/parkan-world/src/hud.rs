@@ -21,6 +21,9 @@ pub struct Page {
     pub rgba: Vec<u8>,
 }
 
+/// The name the mission's minimap is kept under among the pages.
+pub const MINIMAP: &str = "minimap";
+
 /// The pages of the `textures` resource, by their resource index.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Pages {
@@ -59,6 +62,30 @@ impl Pages {
             }
         }
         Ok(out)
+    }
+
+    /// Add the mission's minimap, the texture `mission.cfg`'s `minimap` resource names
+    /// (`iron3d.dll:0x100736e7`), as the page [`MINIMAP`] names; whether it loaded.
+    pub fn add_minimap(&mut self, game: &Path, mission_dir: &Path) -> Result<bool> {
+        let Some(cfg) = parkan_formats::gamedir::resolve(mission_dir, "mission.cfg") else {
+            return Ok(false);
+        };
+        let descriptors = parkan_formats::resources::descriptors(&read_cfg(&cfg)?);
+        let Some(d) = descriptors.iter().find(|d| d.role == MINIMAP) else { return Ok(false) };
+        let (Some(member), Some(path)) = (d.get(MINIMAP), locate(game, &d.library)) else { return Ok(false) };
+        let archive = parkan_formats::nres::Archive::open(&path)?;
+        let Some(entry) = archive.entries.iter().find(|e| e.name.eq_ignore_ascii_case(member)) else {
+            return Ok(false);
+        };
+        let texture = parkan_formats::texm::decode(archive.read(entry)?, &entry.name, None)?;
+        self.names.insert(MINIMAP.to_owned(), self.pages.len());
+        self.pages.push(Page {
+            name: entry.name.clone(),
+            width: texture.width,
+            height: texture.height,
+            rgba: texture.levels.into_iter().next().unwrap_or_default(),
+        });
+        Ok(true)
     }
 
     /// The page a resource name draws from.

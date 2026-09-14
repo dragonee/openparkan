@@ -249,33 +249,72 @@ pub fn draw_outcome(
     true
 }
 
-/// The font slot the cockpit's text is drawn in.
-pub const HUD_TEXT_SLOT: usize = 2;
+/// Draw the briefing's screen over the flythrough (docs/21-briefing.md, "The screen"): the
+/// fade and the bars, the title in `MENU_FONT` and the subtitle in `GAME_FONT`.
+pub fn draw_briefing(
+    renderer: &mut parkan_render::Renderer,
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    briefing: &parkan_world::briefing::Briefing,
+    screen: parkan_world::hud::Space,
+) {
+    let Some(laid) = renderer.font_slot(PANEL_LINES_SLOT).map(|game| briefing.screen(screen, game)) else {
+        return;
+    };
+    let rects: Vec<parkan_render::hud::Rect> = laid
+        .fills
+        .iter()
+        .map(|f| parkan_render::hud::Rect { min: f.min, max: f.max, colour: f.colour })
+        .collect();
+    renderer.set_hud(device, queue, &rects);
+    renderer.set_text_slot(device, queue, PANEL_TITLE_SLOT, &laid.title);
+    renderer.set_text_slot(device, queue, PANEL_LINES_SLOT, &laid.lines);
+}
 
-/// The cockpit HUD (docs/35-hud.md): its state, and `GAME_FONT` to lay its text out in.
+/// Take the briefing's screen away.
+pub fn clear_briefing(renderer: &mut parkan_render::Renderer, device: &wgpu::Device, queue: &wgpu::Queue) {
+    renderer.set_hud(device, queue, &[]);
+    renderer.set_text_slot(device, queue, PANEL_TITLE_SLOT, &[]);
+    renderer.set_text_slot(device, queue, PANEL_LINES_SLOT, &[]);
+}
+
+/// The font slots the cockpit's text is drawn in: `GAME_FONT`'s, and `MENU_FONT`'s over it.
+pub const HUD_TEXT_SLOT: usize = 2;
+pub const HUD_MENU_SLOT: usize = 3;
+
+/// The cockpit HUD (docs/35-hud.md): its state, and `GAME_FONT` and `MENU_FONT` to lay its text
+/// out in.
 pub struct Hud {
     pub cockpit: parkan_world::cockpit::Cockpit,
     pub font: parkan_world::text::GameFont,
+    pub menu: parkan_world::text::GameFont,
     /// `--stretch-hud`: the layout stretches to the screen as the game's does.
     pub stretch: bool,
 }
 
-/// The cockpit for `play`: the interface's pages into `renderer`, `GAME_FONT` into its slot.
+/// The cockpit for `play` in `mission_dir`: the interface's pages and the mission's minimap
+/// into `renderer`, `GAME_FONT` and `MENU_FONT` into their slots.
 pub fn hud(
     renderer: &mut parkan_render::Renderer,
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     game: &Path,
+    mission_dir: &Path,
     play: &Play,
     stretch: bool,
 ) -> Result<Hud> {
     use parkan_world::text::GameFont;
-    let pages = parkan_world::hud::Pages::open(game)?;
+    let mut pages = parkan_world::hud::Pages::open(game)?;
+    if let Err(e) = pages.add_minimap(game, mission_dir) {
+        eprintln!("no minimap: {e:#}");
+    }
     renderer.set_ui_pages(device, queue, &pages.pages);
     renderer.set_font_slot(device, queue, HUD_TEXT_SLOT, GameFont::ui(game, "GAME_FONT")?);
+    renderer.set_font_slot(device, queue, HUD_MENU_SLOT, GameFont::ui(game, "MENU_FONT")?);
     Ok(Hud {
         cockpit: parkan_world::cockpit::Cockpit::open(game, &pages, play)?,
         font: GameFont::ui(game, "GAME_FONT")?,
+        menu: GameFont::ui(game, "MENU_FONT")?,
         stretch,
     })
 }
@@ -298,6 +337,7 @@ pub fn draw_hud(
     if !shown {
         renderer.set_ui(device, queue, (width, height), &[]);
         renderer.set_text_slot(device, queue, HUD_TEXT_SLOT, &[]);
+        renderer.set_text_slot(device, queue, HUD_MENU_SLOT, &[]);
         renderer.set_views(device, Vec::new());
         return (Vec::new(), Vec::new());
     }
@@ -305,9 +345,10 @@ pub fn draw_hud(
         stretch: hud.stretch,
         ..parkan_world::hud::Space::new(width as f32, height as f32)
     };
-    let drawn = hud.cockpit.draw(play, space, &hud.font, view_proj);
+    let drawn = hud.cockpit.draw(play, space, &hud.font, &hud.menu, view_proj);
     renderer.set_ui(device, queue, (width, height), &drawn.batches);
     renderer.set_text_slot(device, queue, HUD_TEXT_SLOT, &drawn.text);
+    renderer.set_text_slot(device, queue, HUD_MENU_SLOT, &drawn.menu_text);
     let views = drawn
         .views
         .iter()
@@ -566,12 +607,15 @@ pub fn own_view(objects: &mut Objects, store: &mut TextureStore, play: &Play) ->
 }
 
 /// Put each node of the hero's own view where the hero's pose has it this frame: the
-/// chassis playing its frames, the turret its channels, as the eye is placed.
+/// chassis playing its frames, the turret its channels, as the eye is placed. From
+/// `outside`, as a briefing's camera sees it, the hero is drawn whole instead: each node's
+/// level-0 slot of the variant its stage draws.
 pub fn place_own_view(
     renderer: &mut parkan_render::Renderer,
     queue: &wgpu::Queue,
     view: &OwnView,
     play: &Play,
+    outside: bool,
 ) {
     use glam::{Mat4, Quat};
     let hero = &play.hero;
@@ -580,6 +624,23 @@ pub fn place_own_view(
     let unit = Mat4::from_translation(position) * Mat4::from_quat(Quat::from_rotation_z(yaw));
     let mount = hero.mount();
     for &(instance, part, node) in &view.nodes {
+        let pose = match part {
+            Mount::Chassis => hero.chassis_pose(node),
+            Mount::Turret => hero.turret_node(&mount, node),
+        };
+        renderer.set_instance(queue, instance, unit * models::pose_matrix(&pose), !outside);
+    }
+    for &(instance, part, node, variant) in &view.outside {
+        let index = match part {
+            Mount::Chassis => hero.chassis_part,
+            Mount::Turret => hero.turret_part,
+        };
+        let life = hero.lives.get(index).and_then(Option::as_ref).and_then(|l| l.nodes.get(node));
+        let shown = outside && life.map_or(variant == 0, |l| !l.hidden() && l.block() == variant);
+        if !shown {
+            renderer.set_instance(queue, instance, Mat4::IDENTITY, false);
+            continue;
+        }
         let pose = match part {
             Mount::Chassis => hero.chassis_pose(node),
             Mount::Turret => hero.turret_node(&mount, node),

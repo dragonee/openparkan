@@ -6,6 +6,7 @@
 //! section, and `engine/README.md` lists it.
 
 pub mod behaviour;
+pub mod briefing;
 pub mod combat;
 pub mod damage;
 pub mod device;

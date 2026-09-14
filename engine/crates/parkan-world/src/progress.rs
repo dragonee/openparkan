@@ -88,6 +88,8 @@ pub struct Progression {
     pub strings: BTreeMap<u32, String>,
     /// Function-table slots the script called that the engine does not answer.
     pub unanswered: BTreeSet<i32>,
+    /// Each objective's text as `mission.cfg` writes it, in script order.
+    pub objective_texts: Vec<String>,
 }
 
 /// The engine below the SuperAI, as the script's calls reach it.
@@ -157,7 +159,8 @@ impl Progression {
     pub fn load(game: &Path, mission_dir: &Path, mission: &Mission, hero: usize) -> Result<Self> {
         let clan = mission.objects.get(hero).and_then(mission::Object::clan_id).unwrap_or(0);
         let record = usize::try_from(clan).ok().and_then(|c| mission.clans.get(c));
-        let exempt: Vec<bool> = resources::objectives(mission_dir)?.iter().map(|o| o.exempt).collect();
+        let objectives = resources::objectives(mission_dir)?;
+        let exempt: Vec<bool> = objectives.iter().map(|o| o.exempt).collect();
         let messages = Messages::load(game, mission_dir)?;
         let mut progress = Progress::new(&mission.routes, &exempt, messages.0.iter().map(|m| m.index));
         for o in mission.objects.iter().filter(|o| o.kind == mission::KIND_UNIT && o.logical_id >= 0) {
@@ -183,6 +186,7 @@ impl Progression {
             sounds: Sounds::open(game, mission_dir)?,
             strings: resources::game_strings(game).unwrap_or_default(),
             unanswered: BTreeSet::new(),
+            objective_texts: objectives.into_iter().map(|o| o.text).collect(),
         };
         me.run("Init");
         Ok(me)

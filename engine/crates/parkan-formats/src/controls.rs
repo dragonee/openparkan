@@ -203,6 +203,10 @@ pub const CMD_JAMES_AIM_TARGET: &str = "CMD_JAMES_AIM_TARGET";
 pub const CMD_JAMES_WINGMAN_MENU: &str = "CMD_JAMES_WINGMAN_MENU";
 pub const CMD_JAMES_AUTO_DRIVER: &str = "CMD_JAMES_AUTO_DRIVER";
 pub const CMD_PAGER: &str = "CMD_PAGER";
+pub const CMD_JAMES_MISSION_OBJ: &str = "CMD_JAMES_MISSION_OBJ";
+pub const CMD_JAMES_SATELLITE_MAP: &str = "CMD_JAMES_SATELLITE_MAP";
+pub const CMD_INC_MAP_ALPHA: &str = "CMD_INC_MAP_ALPHA";
+pub const CMD_DEC_MAP_ALPHA: &str = "CMD_DEC_MAP_ALPHA";
 
 /// One line of a `.man`: a command, and the key chord that runs it.
 #[derive(Clone, Debug, PartialEq, Eq)]

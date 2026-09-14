@@ -1,5 +1,6 @@
 pub mod assembly;
 pub mod battle;
+pub mod briefing;
 pub mod cockpit;
 pub mod dump;
 pub mod fx;

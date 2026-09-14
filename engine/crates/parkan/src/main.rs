@@ -7,6 +7,7 @@
 //!        [--screenshot OUT.png] [--size WxH] [--top-down] [--look X,Y,Z,TX,TY,TZ]
 //!        [--headless] [--ticks N] [--hold SCAN_W,SCAN_A] [--mouse DX,DY] [--trace] [--sway]
 //!        [--capture-idle] [--stretch-hud] [--outcome won|lost] [--text "…"] [--face NAME,DISTANCE]
+//!        [--skip-briefing] [--briefing-at SECONDS] [--objectives] [--map]
 //! ```
 //!
 //! In the cockpit the hero's own input table drives it: W/S walk, A/D strafe,
@@ -37,6 +38,15 @@
 //!
 //! Once a mission is won or lost its panel takes the HUD's place and play goes on under
 //! it: Esc leaves, and after a loss R restarts the mission.
+//!
+//! A campaign mission opens on its briefing: the camera flies its waypoints over the paused
+//! world while its voices speak and its subtitles run, until the path ends or Esc skips it.
+//! `--skip-briefing` starts in the cockpit at once, and `--briefing-at SECONDS` draws a
+//! `--screenshot` of the briefing that far in.
+//!
+//! The objectives screen opens as the cockpit first shows and closes 7 s later; F12 opens and
+//! closes it, and Esc closes it. M opens the satellite map, and ] and [ make it more or less
+//! opaque. A `--screenshot` draws the cockpit with neither, unless `--objectives` or `--map`.
 
 mod audio;
 mod camera;
@@ -87,6 +97,13 @@ struct Args {
     text: Option<String>,
     /// `--face NAME,DISTANCE`: the hero starts that far from that object, facing it.
     face: Option<(String, f32)>,
+    /// `--skip-briefing`: the mission starts in the cockpit, as Esc in its briefing would.
+    skip_briefing: bool,
+    /// `--briefing-at SECONDS`: a screenshot of the briefing that far in.
+    briefing_at: Option<f64>,
+    /// `--objectives`, `--map`: a screenshot with the objectives screen up, or the map open.
+    objectives: bool,
+    map: bool,
     ticks: u32,
     hold: Vec<String>,
     mouse: [f32; 2],
@@ -109,6 +126,10 @@ fn args() -> Result<Args> {
         outcome: None,
         text: None,
         face: None,
+        skip_briefing: false,
+        briefing_at: None,
+        objectives: false,
+        map: false,
         ticks: 0,
         hold: Vec::new(),
         mouse: [0.0; 2],
@@ -129,6 +150,10 @@ fn args() -> Result<Args> {
             "--stretch-hud" => out.stretch_hud = true,
             "--outcome" => out.outcome = Some(value()? == "won"),
             "--text" => out.text = Some(value()?),
+            "--skip-briefing" => out.skip_briefing = true,
+            "--objectives" => out.objectives = true,
+            "--map" => out.map = true,
+            "--briefing-at" => out.briefing_at = Some(value()?.parse()?),
             "--face" => {
                 let v = value()?;
                 let (name, distance) = v.split_once(',').context("--face is NAME,DISTANCE")?;
@@ -261,10 +286,25 @@ fn screenshot(loaded: &scene::Loaded, game: &Path, args: &Args, out: &Path) -> R
     let mut world = scene::world(game, loaded)?;
     let mut play = if args.fly || args.top_down { None } else { scene::play(game, loaded, args)? };
     let mut view = None;
+    let mut briefing = None;
     if let Some(p) = play.as_mut() {
         view = Some(scene::own_view(&mut world.objects, &mut world.store, p)?);
         p.draw_rounds(&mut world.store, &mut world.objects)?;
-        rehearse(p, loaded, args);
+        if let Some(at) = args.briefing_at {
+            // The briefing played to `at` a frame a tick, the world paused under it.
+            let mut b = parkan_world::briefing::Briefing::open(game, &loaded.dir)?
+                .context("--briefing-at: the mission has no briefing")?;
+            p.paused = true;
+            let mut t = 0.0;
+            while t <= at && !b.finished() {
+                b.frame(t);
+                p.tick(TICK_MS, [0.0; 2]);
+                t += TICK_MS / 1000.0;
+            }
+            briefing = Some(b);
+        } else {
+            rehearse(p, loaded, args);
+        }
         if let (Some(outcome), Some(progression)) = (args.outcome, p.progression.as_mut()) {
             progression.progress.outcome = Some(outcome);
         }
@@ -293,6 +333,8 @@ fn screenshot(loaded: &scene::Loaded, game: &Path, args: &Args, out: &Path) -> R
             aspect,
             camera::NEAR,
         ) * glam::Mat4::look_at_rh(eye, target, Vec3::Z)
+    } else if let Some(b) = &briefing {
+        camera::first_person(&b.eye(), aspect)
     } else if let Some(p) = &play {
         camera::first_person(&p.hero.eye(), aspect)
     } else {
@@ -309,7 +351,7 @@ fn screenshot(loaded: &scene::Loaded, game: &Path, args: &Args, out: &Path) -> R
             )
         }
         (Some(p), None) => {
-            let e = p.hero.eye();
+            let e = briefing.as_ref().map_or_else(|| p.hero.eye(), |b| b.eye());
             (e.position, e.forward, p.hero.time_ms / 1000.0)
         }
         (None, None) => {
@@ -324,13 +366,20 @@ fn screenshot(loaded: &scene::Loaded, game: &Path, args: &Args, out: &Path) -> R
     if let Some(p) = play.as_mut() {
         scene::sync(&mut renderer, &gpu.device, &gpu.queue, p, &world.objects, view_proj, eye);
         if let Some(v) = &view {
-            scene::place_own_view(&mut renderer, &gpu.queue, v, p);
+            scene::place_own_view(&mut renderer, &gpu.queue, v, p, briefing.is_some());
         }
         scene::panel_fonts(&mut renderer, &gpu.device, &gpu.queue, game);
         let outcome =
             scene::draw_outcome(&mut renderer, &gpu.device, &gpu.queue, p, hud_space(width, height, args));
-        match scene::hud(&mut renderer, &gpu.device, &gpu.queue, game, p, args.stretch_hud) {
+        if let Some(b) = &briefing {
+            scene::draw_briefing(&mut renderer, &gpu.device, &gpu.queue, b, hud_space(width, height, args));
+        }
+        match scene::hud(&mut renderer, &gpu.device, &gpu.queue, game, &loaded.dir, p, args.stretch_hud) {
             Ok(mut hud) => {
+                if args.objectives {
+                    hud.cockpit.objectives.open_at_start();
+                }
+                hud.cockpit.map.open = args.map;
                 // What the game said during the rehearsal: the newest line is in the box.
                 let now = p.hero.time_ms;
                 for say in std::mem::take(&mut p.says) {
@@ -350,7 +399,7 @@ fn screenshot(loaded: &scene::Loaded, game: &Path, args: &Args, out: &Path) -> R
                         (width, height),
                         view_proj,
                         lighting,
-                        !outcome,
+                        !outcome && briefing.is_none(),
                     );
                 }
             }
@@ -415,6 +464,39 @@ struct App {
     hud: Option<scene::Hud>,
     /// What the window was opened with, for a restart.
     args: Args,
+    /// The mission's briefing while it plays, and when its first frame was drawn.
+    briefing: Option<parkan_world::briefing::Briefing>,
+    briefing_clock: Option<Instant>,
+}
+
+/// The mission's briefing, unless `--skip-briefing` or `--fly`; a play has its world paused
+/// while one runs.
+fn open_briefing(
+    game: &Path,
+    loaded: &scene::Loaded,
+    args: &Args,
+    play: Option<&mut scene::Play>,
+) -> Option<parkan_world::briefing::Briefing> {
+    let play = play?;
+    if args.skip_briefing {
+        return None;
+    }
+    let briefing = parkan_world::briefing::Briefing::open(game, &loaded.dir)
+        .map_err(|e| eprintln!("no briefing: {e:#}"))
+        .ok()
+        .flatten()?;
+    play.paused = true;
+    Some(briefing)
+}
+
+/// The mission's theme, looping (docs/34, "Ambient sound").
+fn theme(audio: &mut Option<audio::Audio>, game: &Path, loaded: &scene::Loaded) {
+    if let Some(a) = audio.as_mut()
+        && let Ok(ambient) = parkan_world::resources::ambient(game, &loaded.dir)
+        && let Some(theme) = ambient.theme
+    {
+        a.theme(&theme);
+    }
 }
 
 impl App {
@@ -450,8 +532,20 @@ impl App {
         }
         scene::panel_fonts(&mut renderer, &gpu.device, &gpu.queue, &self.game);
         if let Some(p) = self.play.as_ref() {
-            match scene::hud(&mut renderer, &gpu.device, &gpu.queue, &self.game, p, self.args.stretch_hud) {
-                Ok(hud) => self.hud = Some(hud),
+            match scene::hud(
+                &mut renderer,
+                &gpu.device,
+                &gpu.queue,
+                &self.game,
+                &self.loaded.dir,
+                p,
+                self.args.stretch_hud,
+            ) {
+                Ok(mut hud) => {
+                    // A mission started fresh opens its objectives screen (`0x1005e117`).
+                    hud.cockpit.objectives.open_at_start();
+                    self.hud = Some(hud);
+                }
                 Err(e) => eprintln!("no cockpit HUD: {e:#}"),
             }
         }
@@ -471,16 +565,22 @@ impl App {
             let (d, q) = (&r.gpu.device, &r.gpu.queue);
             r.renderer.set_world(d, q, &world.store.textures, Some(&world.terrain), Some(&world.objects));
             r.renderer.set_sprite_looks(d, &scene::sprite_looks(&play));
-            self.hud = scene::hud(&mut r.renderer, d, q, &self.game, &play, self.args.stretch_hud)
-                .map_err(|e| eprintln!("no cockpit HUD: {e:#}"))
-                .ok();
+            self.hud =
+                scene::hud(&mut r.renderer, d, q, &self.game, &self.loaded.dir, &play, self.args.stretch_hud)
+                    .map_err(|e| eprintln!("no cockpit HUD: {e:#}"))
+                    .ok();
+            if let Some(hud) = self.hud.as_mut() {
+                hud.cockpit.objectives.open_at_start();
+            }
         }
         self.audio = audio::Audio::open(&self.game);
-        if let Some(a) = self.audio.as_mut()
-            && let Ok(ambient) = parkan_world::resources::ambient(&self.game, &self.loaded.dir)
-            && let Some(theme) = ambient.theme
-        {
-            a.theme(&theme);
+        if let Some(r) = self.running.as_mut() {
+            scene::clear_briefing(&mut r.renderer, &r.gpu.device, &r.gpu.queue);
+        }
+        self.briefing = open_briefing(&self.game, &self.loaded, &self.args, Some(&mut play));
+        self.briefing_clock = None;
+        if self.briefing.is_none() {
+            theme(&mut self.audio, &self.game, &self.loaded);
         }
         self.world = world;
         self.play = Some(play);
@@ -493,6 +593,11 @@ impl App {
     /// A key or button went down or up: the hero's table takes it, and a press runs the
     /// game's command its chord binds (`ui_other.man`).
     fn scan(&mut self, scan: &'static str, pressed: bool) {
+        // STAND-IN: docs/21-briefing.md#not-established -- which keys act while a briefing
+        // plays is not read beyond Esc: none reaches the hero or the game's commands.
+        if self.briefing.is_some() {
+            return;
+        }
         let Some(play) = self.play.as_mut() else { return };
         // While the wingman selector is open a digit is its (`iron3d.dll:0x100710fa`).
         let digit = scan
@@ -530,13 +635,41 @@ impl App {
             shift: self.scans.contains("SCAN_LSHIFT") || self.scans.contains("SCAN_RSHIFT"),
         };
         let command = command.to_owned();
-        if command == parkan_formats::controls::CMD_PAGER {
+        {
+            use parkan_formats::controls::*;
             if let Some(hud) = self.hud.as_mut() {
-                hud.cockpit.messages.pager();
+                let now = play.hero.time_ms;
+                let screens = &mut hud.cockpit;
+                match command.as_str() {
+                    CMD_PAGER => screens.messages.pager(),
+                    CMD_JAMES_MISSION_OBJ => screens.objectives.toggle(),
+                    CMD_JAMES_SATELLITE_MAP => screens.map.toggle(),
+                    CMD_INC_MAP_ALPHA => screens.map.step_alpha(true, now),
+                    CMD_DEC_MAP_ALPHA => screens.map.step_alpha(false, now),
+                    // `0x1007255b`: no wingman menu while the objectives are up.
+                    CMD_JAMES_WINGMAN_MENU if screens.objectives.up => {}
+                    _ => {
+                        play.command(&command, &view);
+                    }
+                }
+                return;
             }
-            return;
         }
         play.command(&command, &view);
+    }
+
+    /// The briefing is over, run out or skipped (`iron3d.dll:0x1005e7a4`): the objects go on,
+    /// the theme starts, and the cockpit takes the view.
+    fn end_briefing(&mut self) {
+        self.briefing = None;
+        self.briefing_clock = None;
+        if let Some(play) = self.play.as_mut() {
+            play.paused = false;
+        }
+        if let Some(r) = self.running.as_mut() {
+            scene::clear_briefing(&mut r.renderer, &r.gpu.device, &r.gpu.queue);
+        }
+        theme(&mut self.audio, &self.game, &self.loaded);
     }
 
     fn grab(&mut self, on: bool) {
@@ -584,6 +717,18 @@ impl App {
             play.hero.update_input();
         }
         self.step();
+        // The briefing's clock starts on its first drawn frame; its voices play at once.
+        if let Some(b) = self.briefing.as_mut() {
+            let clock = *self.briefing_clock.get_or_insert_with(Instant::now);
+            for voice in b.frame(clock.elapsed().as_secs_f64()) {
+                if let Some(a) = self.audio.as_mut() {
+                    a.play_now(&voice);
+                }
+            }
+            if b.finished() {
+                self.end_briefing();
+            }
+        }
         // The sounds the ticks started play now, whether or not a frame can be drawn.
         if let (Some(play), Some(audio)) = (self.play.as_mut(), self.audio.as_mut()) {
             let eye = play.hero.eye();
@@ -637,7 +782,7 @@ impl App {
         let aspect = r.config.width as f32 / r.config.height.max(1) as f32;
         let (eye, forward, seconds) = match &self.play {
             Some(p) => {
-                let e = p.hero.eye();
+                let e = self.briefing.as_ref().map_or_else(|| p.hero.eye(), |b| b.eye());
                 (e.position, e.forward, p.hero.time_ms / 1000.0)
             }
             None => (self.camera.position, self.camera.forward(), self.started.elapsed().as_secs_f64()),
@@ -649,7 +794,8 @@ impl App {
         let lighting = scene::lighting(&self.world, seconds, eye, forward).map(|l| l.0);
         let view_proj = match self.play.as_mut() {
             Some(play) => {
-                let eye = play.hero.eye();
+                let briefing = self.briefing.as_ref();
+                let eye = briefing.map_or_else(|| play.hero.eye(), |b| b.eye());
                 let view_proj = camera::first_person(&eye, aspect);
                 let mut runs = Vec::new();
                 if let Some(panel) = play.panel() {
@@ -657,7 +803,10 @@ impl App {
                 }
                 let screen = hud_space(r.config.width, r.config.height, &self.args);
                 let outcome = scene::draw_outcome(&mut r.renderer, &r.gpu.device, &r.gpu.queue, play, screen);
-                if outcome {
+                if let Some(b) = briefing {
+                    scene::draw_briefing(&mut r.renderer, &r.gpu.device, &r.gpu.queue, b, screen);
+                }
+                if outcome || briefing.is_some() {
                     runs.clear();
                 }
                 r.renderer.set_text(&r.gpu.device, &r.gpu.queue, &runs);
@@ -671,7 +820,7 @@ impl App {
                     eye.position,
                 );
                 if let Some(v) = &self.view {
-                    scene::place_own_view(&mut r.renderer, &r.gpu.queue, v, play);
+                    scene::place_own_view(&mut r.renderer, &r.gpu.queue, v, play, briefing.is_some());
                     if let Some(hud) = self.hud.as_mut() {
                         let (voices, sounds) = scene::draw_hud(
                             &mut r.renderer,
@@ -683,7 +832,7 @@ impl App {
                             (r.config.width, r.config.height),
                             view_proj,
                             lighting,
-                            !outcome,
+                            !outcome && briefing.is_none(),
                         );
                         if let (Some(audio), Some(progression)) =
                             (self.audio.as_mut(), play.progression.as_ref())
@@ -738,13 +887,25 @@ impl ApplicationHandler for App {
                 let PhysicalKey::Code(code) = event.physical_key else { return };
                 let outcome =
                     self.play.as_ref().and_then(|p| p.progression.as_ref()).and_then(|p| p.progress.outcome);
+                // `0x10070e75`: Esc in a briefing skips the rest of it.
+                if code == KeyCode::Escape && event.state == ElementState::Pressed && self.briefing.is_some()
+                {
+                    if let Some(b) = self.briefing.as_mut() {
+                        b.flythrough.skip();
+                    }
+                    return;
+                }
                 if code == KeyCode::Escape && event.state == ElementState::Pressed {
                     // `iron3d.dll:0x10070e2c`: once the outcome is recorded Esc leaves the mission.
                     //
                     // STAND-IN: docs/34-progression.md#after-the-outcome--read-and-measured -- the
                     // shell's menus are not built: leaving closes the window, and a win is not
                     // written to `MISSIONS/dispatcher.ini`.
-                    if self.grabbed && outcome.is_none() {
+                    let objectives = self.hud.as_mut().map(|h| &mut h.cockpit.objectives).filter(|o| o.up);
+                    if let (Some(o), None) = (objectives, outcome) {
+                        // `0x10070e85`: Esc closes the objectives screen.
+                        o.close();
+                    } else if self.grabbed && outcome.is_none() {
                         self.grab(false)
                     } else {
                         event_loop.exit()
@@ -774,6 +935,9 @@ impl ApplicationHandler for App {
             }
             WindowEvent::MouseInput { state, button, .. } => {
                 let pressed = state == ElementState::Pressed;
+                if self.briefing.is_some() {
+                    return;
+                }
                 if self.play.is_some() && pressed && !self.grabbed {
                     self.grab(true);
                     return;
@@ -794,7 +958,7 @@ impl ApplicationHandler for App {
     fn device_event(&mut self, _event_loop: &ActiveEventLoop, _id: DeviceId, event: DeviceEvent) {
         let DeviceEvent::MouseMotion { delta: (dx, dy) } = event else { return };
         if self.play.is_some() {
-            if self.grabbed {
+            if self.grabbed && self.briefing.is_none() {
                 self.counts[0] += dx as f32;
                 self.counts[1] += dy as f32;
             }
@@ -850,11 +1014,10 @@ fn main() -> Result<()> {
     event_loop.set_control_flow(ControlFlow::Poll);
     let camera = start_camera(&loaded);
     let mut audio = if play.is_some() { audio::Audio::open(&game) } else { None };
-    if let Some(a) = audio.as_mut()
-        && let Ok(ambient) = parkan_world::resources::ambient(&game, &loaded.dir)
-        && let Some(theme) = ambient.theme
-    {
-        a.theme(&theme);
+    // The theme waits for the briefing's end (`0x10030f10`).
+    let briefing = open_briefing(&game, &loaded, &args, play.as_mut());
+    if briefing.is_none() {
+        theme(&mut audio, &game, &loaded);
     }
     let mut app = App {
         loaded,
@@ -878,6 +1041,8 @@ fn main() -> Result<()> {
         scans: HashSet::new(),
         hud: None,
         args: args.clone(),
+        briefing,
+        briefing_clock: None,
     };
     event_loop.run_app(&mut app)?;
     Ok(())
