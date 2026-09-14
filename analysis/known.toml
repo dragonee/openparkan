@@ -22296,3 +22296,787 @@ kind = "function"
 name = "IHallWay slot 5: a vertex's world position through its joint node"
 read = true
 doc = "docs/36-factory.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10055910"
+kind = "function"
+name = "designer holder constructor: 0x30 bytes, vtable 0x100e5f98, the designer (0x1004d300) at +0x08, three scan bands at +0x0c-+0x14"
+read = true
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10055c70"
+kind = "function"
+name = "designer open: refused while +0x28 is set; stores record +0x3c, kind, fifth argument; +0x2c = 1; unit flags 9; cursor; lays out 0x1004dff0 with the string"
+read = true
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10055dc0"
+kind = "function"
+name = "designer draw: black 640x480, both panels' frames and part boxes, both panels' lists, the project column 0x1004ec50, the three scan bands"
+read = true
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10055e80"
+kind = "function"
+name = "designer key: Esc closes the load list, else the name field, else the designer; only while the game's +0x08 is 4"
+read = true
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10055fa0"
+kind = "function"
+name = "designer char: in the name field, isprint characters, backspace and Enter to the edit box 0x100458f0"
+read = true
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10055ff0"
+kind = "function"
+name = "designer mouse button: the designer's buttons 0x100504d0, then the source panel, then the destination panel"
+read = true
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100e5f98"
+kind = "datum"
+name = "designer holder vtable: key 0x10055e80, key up, char 0x10055fa0, -, button 0x10055ff0, ..."
+read = true
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1004d300"
+kind = "function"
+name = "designer constructor, 0xbca4 bytes: five buttons at +0x08/+0x280/+0x4f8/+0x770/+0x9e8, name field +0x1444, panels +0xbc9c source (vtable 0x100e5f4c) and +0xbca0 destination (0x100e5f60)"
+read = true
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1004dff0"
+kind = "function"
+name = "designer layout: project view (185,0)-(455,300), box (185,300)-(455,480), every piece, the five buttons and tooltips 6222 1554-1557, recent projects at (200+30k, 270); builds both panels with the string"
+read = true
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1004e39f"
+kind = "site"
+name = "designer layout: the view's and box's right edge 455 into +0xad8c and +0xad9c"
+read = true
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1004e3e0"
+kind = "site"
+name = "designer layout: the box's bottom 480 into +0xada0"
+read = true
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1004ec50"
+kind = "function"
+name = "designer project column draw: view and box frames, prompt 1107/1114/3054/3055/6242, hint 3044/3045/3048, numbers 0x1006fc00 at (220,330), callout, circuit, name field 3056, load list, buttons"
+read = true
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1004f3ed"
+kind = "site"
+name = "designer draw: the callout for the destination's selected turret, weapon or ammo row, lines to (427, row+10) in 0xff00ff00 and a 30x30 square"
+read = true
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1004f8b0"
+kind = "site"
+name = "designer draw: end of the callout"
+read = true
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10050185"
+kind = "site"
+name = "designer draw: the circuit page3 (172,140,64,64) tiled 4x3 over the view in 0xff00gg00, gg = 150 + 200 t"
+read = true
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10050436"
+kind = "site"
+name = "designer draw: the recent projects' icons in 0xff80ff80 when opened with 'r' and +0xb8e0 > 0"
+read = true
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100504d0"
+kind = "function"
+name = "designer mouse: name field, load list rows and scroll, recent projects, then the five buttons (a click toggles one on)"
+read = true
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100506d0"
+kind = "function"
+name = "designer takt: mirror selected tabs, the double-clicked picked part (add from source, remove from destination), save/load/clear/exit/accept buttons"
+read = true
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100506ef"
+kind = "site"
+name = "designer takt: a source tab turned on selects the destination's same tab, and back"
+read = true
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1005093e"
+kind = "site"
+name = "designer takt: the picked record 0x1010a1b0 with +0xb8 set, from the source (+0xc0 0) by destination tab"
+read = true
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10050c28"
+kind = "site"
+name = "designer takt: Enter left the name field: write units/<name>.dat through 0x100544b0"
+read = true
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10050c86"
+kind = "site"
+name = "designer takt: the load list's rows (+0x176c, four shown from +0xad6c), outline"
+read = true
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1005107c"
+kind = "site"
+name = "designer takt: the save button: opens the name field (270,410)-(370,430), 16 characters"
+read = true
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100511b3"
+kind = "site"
+name = "designer takt: load lists units/ .dat files, leaving out bld_unit_"
+read = true
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100511f5"
+kind = "site"
+name = "designer takt: ... view_unit_ and temp_unit"
+read = true
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100513c5"
+kind = "site"
+name = "designer takt: the clear button: delete the project, lay out again with the kind's prefix"
+read = true
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10051410"
+kind = "site"
+name = "designer takt: the kind +0x28 picks the prefix r_ (1), fr_ (2), a_ (3)"
+read = true
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10051436"
+kind = "site"
+name = "designer takt: the exit button: clear both panels, delete the project, close"
+read = true
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1005144c"
+kind = "site"
+name = "designer takt: the accept button: Type into +0x04; kind 1 writes \\units\\temp_unit.dat (flag 1) and tells the factory 0x100982a0, else 2111; close"
+read = true
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100514e7"
+kind = "site"
+name = "designer takt: accept, toggled off and acting"
+read = true
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100518ae"
+kind = "site"
+name = "designer takt: a recent project clicked: select it, rebuild panels, load it with 0x10055190"
+read = true
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100519e0"
+kind = "function"
+name = "designer add a part: no project -> chassis 0x10051bb0; else by the part's kind through the table at 0x10051b88 (1 turret 0x10052570, 3 weapon 0x10052fb0, ...)"
+read = true
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10051b88"
+kind = "table"
+name = "designer add-part jump table, part kinds 1-7"
+read = true
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10051bb0"
+kind = "function"
+name = "designer add chassis: builds the project and its model view (195,10) 250x290; enables tabs (outline)"
+read = false
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10051c85"
+kind = "site"
+name = "designer add chassis: the project's model view on (195,10) sized 250x290"
+read = true
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10051f4f"
+kind = "site"
+name = "designer add chassis: enables Turrets (+0xced8 +0x20) in both panels"
+read = true
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10052478"
+kind = "site"
+name = "designer add chassis: enables Internal systems (+0x26c20 +0x20) in both panels"
+read = true
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10052491"
+kind = "site"
+name = "designer add chassis: the test ([esp+0x10]) that gates enabling Armour"
+read = true
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100524ae"
+kind = "site"
+name = "designer add chassis: enables Armour (+0x19d7c +0x20) in the destination"
+read = true
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10052570"
+kind = "function"
+name = "designer add turret: sets +0xad7f (accept possible), enables Weapons and Internal systems (outline)"
+read = false
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100525a4"
+kind = "site"
+name = "designer add turret: +0xad7f = 1, which accept requires"
+read = true
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10052929"
+kind = "site"
+name = "designer add turret: enables Weapons (+0x33ac4 +0x20)"
+read = true
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10052c24"
+kind = "site"
+name = "designer add turret: enables Internal systems"
+read = true
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10052fb0"
+kind = "function"
+name = "designer add weapon: enables Ammo (outline)"
+read = false
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10053407"
+kind = "site"
+name = "designer add weapon: enables Ammo (+0x40968 +0x20)"
+read = true
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10053a50"
+kind = "function"
+name = "designer remove a part (called with the picked item for chassis, turret, weapon)"
+read = false
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10055190"
+kind = "function"
+name = "designer load a recent project (not read)"
+read = false
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10049820"
+kind = "function"
+name = "designer panel base constructor, 0x4e4fc bytes: six tabs of 0xcea4 at +0x34, +0xced8, +0x19d7c, +0x26c20, +0x33ac4, +0x40968"
+read = true
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100e5f4c"
+kind = "datum"
+name = "designer source panel vtable: 0x1004d9e0, build 0x1004ac40, draw 0x1004bb00, takt 0x1004bb90, 0x1004bea0"
+read = true
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100e5f60"
+kind = "datum"
+name = "designer destination panel vtable: 0x1004d9c0, build 0x1004bf70, draw 0x1004ccb0, takt 0x1004cd00, 0x1004d280"
+read = true
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1004ac40"
+kind = "function"
+name = "designer source panel build: six tabs (icons, frames page4 (0|27|54,106,26,37), tooltips 6216-6221, colours), title 3049, rows, rectangles x 0-183, preview 236-396, box 396-480, pieces"
+read = true
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1004b022"
+kind = "site"
+name = "designer source panel build: Armour tab disabled (+0x20 = 0); the other optional tabs follow"
+read = true
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1004bf70"
+kind = "function"
+name = "designer destination panel build: as the source, 457 to the right, title 3050, one empty chassis row"
+read = true
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1004bb00"
+kind = "function"
+name = "designer source panel draw: each tab's list 0x10047d20; the scroll bar past 6 rows; drops the preview with no rows"
+read = true
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1004ccb0"
+kind = "function"
+name = "designer destination panel draw (not read)"
+read = false
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1004bb90"
+kind = "function"
+name = "designer source panel takt: scroll up/down move the first shown row; a newly selected row gets a model view (X0+12,244) 160x151 keeping the old angle"
+read = true
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1004bc19"
+kind = "site"
+name = "designer source panel takt: the scroll buttons +0x4d980 and +0x4dbf8 step +0xce90"
+read = true
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1004bcca"
+kind = "site"
+name = "designer source panel takt: the old model view's angle (+8) kept for the new one"
+read = true
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1004cd00"
+kind = "function"
+name = "designer destination panel takt, with the page builder 0x10048220 (not read)"
+read = false
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1004a480"
+kind = "function"
+name = "designer panel clear, called by exit (not read)"
+read = false
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10049ef0"
+kind = "function"
+name = "designer panel frame: list ground (X0+11,61)-(X1-11,228) 0x3c329632, header page4 (0,44,183,61), separator, preview ground and grid 0xff006400, part box pieces, part rows 0x1006f890 or 5081 red, circuit 2x2"
+read = true
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10049b80"
+kind = "function"
+name = "designer panel mouse: a click in the preview sets +0x4e4f8 and plays BUTTON_CLICK; tabs 0x10047f10; scroll buttons; the header swallows"
+read = true
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10049cd6"
+kind = "site"
+name = "designer panel mouse: +0x4e4f8 = 1, the click fell in the preview (X0+8,244)-(X1-8,396)"
+read = true
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10049e50"
+kind = "function"
+name = "designer panel select tab: every selected tab off, this one on, if enabled"
+read = true
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10047d20"
+kind = "function"
+name = "designer tab list draw: frame and icon; title (x+10,6) yellow or 1115 at (10,6) 0xff009600; rows (x,65+23k)-(x+180,86+23k), six from +0xce90"
+read = true
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10047af0"
+kind = "function"
+name = "designer tab frame draw: sprite 0 disabled, 1 selected, 1/2 blinking every 0.1 s under the cursor"
+read = true
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10047c10"
+kind = "function"
+name = "designer tab icon draw: off/selected/normal colour, specular 20-100 under the cursor, tooltip"
+read = true
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10047f10"
+kind = "function"
+name = "designer tab mouse: selected tab -> rows: select, or a second click within 0.2 s (or a preview click) sets the picked record 0x1010a1b0 +0xb8"
+read = true
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10046b10"
+kind = "function"
+name = "designer row draw: bar page4 (0,22,180,21), lamp (x,y)-(x+17,y+21) 0xffc8ffc8 (0 off, 1 selected, 1/2 blinking), text (x+10,y+7) with a colour set to the font's slot 2"
+read = true
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100468a0"
+kind = "function"
+name = "designer row init: page4 bar and page1 lamps (178,141), (195,141), (117,80) 17x21"
+read = true
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10047210"
+kind = "function"
+name = "designer scroll bar build: bar page4 (0,0,130,21), up (X0+147..162) and down (X0+162..180) on y 203-224, arrows icons (154,0|11,11,11)"
+read = true
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10047660"
+kind = "function"
+name = "designer scroll bar draw: bar (X0+5,203)-(X0+147,224), lamp, the two buttons in 0xff9b9bff"
+read = true
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10035700"
+kind = "function"
+name = "control toggle: +0xb8 flips, +0xb9 = 1 (changed), BUTTON_CLICK through the sound server when turned on"
+read = true
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10035920"
+kind = "function"
+name = "control click: enabled and the cursor in the icon rectangle -> toggle, answer 1"
+read = true
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10035a60"
+kind = "function"
+name = "control icon draw: tooltip and flickering specular under the cursor; disabled at half colour, selected white; optional blue outline"
+read = true
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10045aa0"
+kind = "function"
+name = "button draw: frame sprite 0 disabled, 1 selected, 1/2 blinking 0.1 s under the cursor, then the icon"
+read = true
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100458f0"
+kind = "function"
+name = "edit box key: backspace drops the last character, Enter clears +0x14 (done), others appended"
+read = true
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1006fc00"
+kind = "function"
+name = "design numbers box: name yellow, 5069-5073 rows in green, values right-aligned to x+132 in 0xffb4b4ff or red, units at x+135"
+read = true
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1006f890"
+kind = "function"
+name = "a part's stat rows from the research templates, at (X0+15,415), 135 wide (outline)"
+read = false
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1008d444"
+kind = "site"
+name = "screens draw, CState mode 5: the designer (0x10055dc0) while the holder's +0x2c is set"
+read = true
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1008d51c"
+kind = "site"
+name = "screens draw, CState modes 3 and 4: cursor shown, the designer while open"
+read = true
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10098040"
+kind = "function"
+name = "factory screen click: the constructor button's rectangle (+0x818-+0x828) opens the designer"
+read = true
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1009810a"
+kind = "site"
+name = "factory screen: open the designer (0x10055c70) with record +0x3c, kind 1, \"r\", 0, record +0x30"
+read = true
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100982a0"
+kind = "function"
+name = "factory screen: take the accepted design / pick a project (not read)"
+read = false
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1009bbc0"
+kind = "function"
+name = "tooltip manager: the slot a hovered control's tooltip goes to (not read)"
+read = false
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1009df90"
+kind = "function"
+name = "model view constructor, 0xc8 bytes: rectangle, loads the part from objects.rlb as agent kind 3 ('f'/'F') or 4, sets up the camera 0x1009e7e0"
+read = true
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1009e058"
+kind = "site"
+name = "model view: a name beginning 'f' or 'F' loads as kind 3"
+read = true
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1009e7e0"
+kind = "function"
+name = "model view camera: K r from the sphere's centre, field 2 pi/6, or s4 + r / 50000 - r with 2 asin(r/d); created with 300, 0.5; pitch -0.5; turn rate 0.00075 rad/ms"
+read = true
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1009ec61"
+kind = "site"
+name = "model view camera: created through 0x100367b0 with 300 and 0.5"
+read = true
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1009ee30"
+kind = "function"
+name = "model view draw: viewport, angle += rate x ms, quaternion from ngiGetSinCos(angle/2) about z, two lights (-1,0,-1) and (1,0,-1), z LESSEQUAL, flags 0x5f0"
+read = true
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1009ef1c"
+kind = "site"
+name = "model view draw: (now - last) x rate added to the angle"
+read = true
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1009dc10"
+kind = "function"
+name = "static initialiser: 1/sin(pi/6) into 0x1010c488"
+read = true
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1009f300"
+kind = "function"
+name = "static initialiser: the model view's turn axis (0,0,1) at 0x1010c468"
+read = true
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1009f560"
+kind = "function"
+name = "scan band constructor: page5 strips (0,202|219|236,163,16), rectangle, band h x 5/57, delay"
+read = true
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1009f6f0"
+kind = "site"
+name = "scan band: the band's height, the rectangle's height x 0.0877193 (5/57)"
+read = true
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1009f710"
+kind = "function"
+name = "scan band takt: the cycle restarts every 4 s"
+read = true
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1009f750"
+kind = "function"
+name = "scan band draw: during [delay, delay+1] s a strip sweeps down, 0xff009b00, specular (2g/3, g, 2g/3)"
+read = true
+doc = "docs/37-designer.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1010a1b0"
+kind = "datum"
+name = "the designer's picked record (0x330, 0x10046610): name, side +0xc0, item +0xf0, time +0xbc, double click +0xb8"
+read = true
+doc = "docs/37-designer.md"

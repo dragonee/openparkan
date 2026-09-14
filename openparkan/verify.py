@@ -15456,6 +15456,314 @@ def check_factory_screen(check, game: Path) -> None:
           f"{chassis} design")
 
 
+#: The warbot designer's fixed texts, docs/37-designer.md, and the function that loads each.
+DESIGNER_STRINGS = {
+    1107: ("SELECT CHASSIS", 0x1004EC50), 1114: ("SELECT BASE CONSTRUCTION", 0x1004EC50),
+    1115: ("NO ITEMS AVAILABLE", 0x10047D20), 1554: ("Clear project", 0x1004DFF0),
+    1555: ("Save project to file", 0x1004DFF0), 1556: ("Load project from file", 0x1004DFF0),
+    1557: ("Leave bot constructor", 0x1004DFF0), 1558: ("Recent projects", 0x1004DFF0),
+    2111: ("Cannot build warbot!", 0x100506D0),
+    3044: ("Use the mouse to click on the item", 0x1004EC50),
+    3045: ("in the source panel", 0x1004EC50),
+    3048: ("to add the item to the project...", 0x1004EC50),
+    3049: ("Source panel", 0x1004AC40), 3050: ("Destination panel", 0x1004BF70),
+    3054: ("SELECT TURRET", 0x1004EC50), 3055: ("SELECT WEAPON", 0x1004EC50),
+    3056: ("Type the name of the designed warbot...", 0x1004EC50),
+    5069: ("Weight: ", 0x1006FC00), 5070: ("Max. speed: ", 0x1006FC00),
+    5071: ("Defence: ", 0x1006FC00), 5072: ("Offence: ", 0x1006FC00),
+    5073: ("Sensor range:", 0x1006FC00), 5081: ("No data available", 0x10049EF0),
+    6216: ("Chassis", 0x1004AC40), 6217: ("Armour (optional)", 0x1004AC40),
+    6218: ("Turrets", 0x1004AC40), 6219: ("Weapons", 0x1004AC40),
+    6220: ("Ammo (optional)", 0x1004AC40), 6221: ("Internal systems (optional)", 0x1004AC40),
+    6222: ("Accept to production", 0x1004DFF0),
+    6242: ("TUNE UP OR ACCEPT TO PRODUCTION", 0x1004EC50),
+}
+
+#: The source panel's six tabs in the order its builder makes them: the icon (u, v) on
+#: `icons`, its place (x, y), and the frame rectangle; the destination's are 457 to the right.
+DESIGNER_TABS = (
+    ("Chassis", (48, 72), (9, 25), (8, 16, 35, 53)),
+    ("Armour", (193, 97), (102, 25), (101, 16, 128, 53)),
+    ("Turrets", (72, 72), (36, 25), (35, 16, 61, 53)),
+    ("Internal systems", (120, 72), (129, 25), (128, 16, 154, 53)),
+    ("Weapons", (96, 72), (62, 25), (61, 16, 87, 53)),
+    ("Ammo", (206, 192), (155, 25), (154, 16, 180, 53)),
+)
+
+#: Every sprite cut the designer's builders make, by page: (x, y, w, h).
+DESIGNER_CUTS = {
+    "page4": [(0, 106, 26, 37), (27, 106, 26, 37), (54, 106, 26, 37), (0, 44, 183, 61),
+              (121, 144, 14, 16), (136, 145, 12, 14), (150, 144, 14, 16), (0, 144, 20, 84),
+              (21, 145, 31, 83), (54, 144, 20, 84), (0, 22, 180, 21), (0, 0, 130, 21),
+              (131, 0, 14, 11), (146, 0, 8, 10), (155, 0, 14, 11), (75, 169, 8, 43),
+              (154, 169, 5, 43), (75, 213, 67, 43), (182, 213, 9, 43), (234, 137, 9, 119),
+              (74, 144, 19, 16), (96, 145, 8, 13), (105, 144, 15, 15), (84, 169, 35, 43),
+              (159, 169, 35, 43), (184, 44, 35, 43), (119, 169, 35, 43), (194, 169, 35, 43),
+              (219, 44, 35, 43), (141, 213, 41, 43), (192, 213, 41, 43), (195, 88, 41, 43)],
+    "page3": [(172, 140, 64, 64), (41, 140, 32, 115), (74, 140, 64, 115), (139, 140, 32, 115)],
+    "page7": [(128, 128, 128, 128), (0, 128, 128, 128)],
+    "page1": [(178, 141, 17, 21), (195, 141, 17, 21), (117, 80, 17, 21), (216, 78, 15, 21),
+              (216, 99, 15, 21), (216, 120, 15, 21), (231, 78, 18, 21), (231, 99, 18, 21),
+              (231, 120, 18, 21)],
+    "page5": [(0, 202, 163, 16), (0, 219, 163, 16), (0, 236, 163, 16)],
+}
+
+#: The five buttons: the icon's page and cut, its y, and the frame's x offset and width from
+#: the box's left edge 185 (`0x1004dff0`).
+DESIGNER_BUTTONS = (
+    ("accept", "page1", (176, 231), 9, 35), ("clear", "page1", (200, 231), 44, 35),
+    ("save", "page1", (152, 231), 84, 35), ("load", "page1", (128, 231), 119, 35),
+    ("exit", "icons", (192, 72), 220, 41),
+)
+
+
+def _cuts_made(at, start: int, size: int) -> list[tuple[int, int, int, int]]:
+    """The (x, y, w, h) of every sprite cut in a function whose five value pushes are plain:
+    `push reg` (zero in these builders), `push imm8` or `push float32`, then `push 256.0`."""
+    out = []
+    for m in re.finditer(rb"((?:\x6a.|\x68.{4}|[\x50-\x57]){5})\x68\x00\x00\x80\x43",
+                         at(start, size), re.S):
+        run, pos, values = m.group(1), 0, []
+        while pos < len(run):
+            if 0x50 <= run[pos] <= 0x57:
+                values.append(0.0)
+                pos += 1
+            elif run[pos] == 0x6A:
+                values.append(float(struct.unpack_from("<b", run, pos + 1)[0]))
+                pos += 2
+            else:
+                values.append(struct.unpack_from("<f", run, pos + 1)[0])
+                pos += 5
+        _, h, w, y, x = values
+        out.append((round(x), round(y), round(w), round(h)))
+    return out
+
+
+def _skip_filler(body: bytes, pos: int) -> int:
+    """The length of one of the few non-push instructions an icon set-up interleaves with its
+    pushes (`lea`/`mov` through a register, `add reg`, `mov [reg+d32], imm32`), or 0."""
+    op, modrm = body[pos], body[pos + 1] if pos + 1 < len(body) else 0
+    mod, rm = modrm >> 6, modrm & 7
+    if op in (0x89, 0x8B, 0x8D):
+        if mod == 3:
+            return 2
+        sib = 1 if rm == 4 else 0
+        return 2 + sib + (1 if mod == 1 else 4 if mod == 2 else 4 if rm == 5 else 0)
+    if op == 0x83 and mod == 3:
+        return 3
+    if op == 0x05:
+        return 5
+    if op == 0x81 and mod == 3:
+        return 6
+    if op == 0xC7 and mod == 2:
+        return 10 + (1 if rm == 4 else 0)
+    return 0
+
+
+def _icon_setups(at, start: int, size: int) -> list[tuple]:
+    """Every control icon set up through `0x100359b0` in a function: (u, v, x, y, w, h), a
+    value pushed from a register being None. Each starts with its last argument, the float
+    `0x3927c5ac`, and ends at `push 256`."""
+    body = at(start, size)
+    out = []
+    for m in re.finditer(rb"\x68\xac\xc5\x27\x39", body):
+        pos, values = m.end(), []
+        while pos < len(body) and body[pos:pos + 5] != b"\x68\x00\x01\x00\x00":
+            op = body[pos]
+            if op == 0x6A:
+                values.append(struct.unpack_from("<b", body, pos + 1)[0])
+                pos += 2
+            elif op == 0x68:
+                values.append(struct.unpack_from("<i", body, pos + 1)[0])
+                pos += 5
+            elif 0x50 <= op <= 0x57:
+                values.append(None)
+                pos += 1
+            elif _skip_filler(body, pos):
+                pos += _skip_filler(body, pos)
+            else:
+                values = []
+                break
+        if len(values) == 8:
+            _, _, h, w, y, x, v, u = values
+            out.append((u, v, x, y, w, h))
+    return out
+
+
+def check_designer_screen(check, game: Path) -> None:
+    """The warbot designer as a screen: its texts, layout, controls, previews and bands."""
+    path = game / "iron3d.dll"
+    if not path.exists():
+        return
+    iron = path.read_bytes()
+    at = _image_at(iron)
+    strings = resources.strings(iron)
+    art = _hud_art(game)
+
+    def u32(va: int) -> int:
+        return struct.unpack("<I", at(va, 4))[0]
+
+    def f32(va: int) -> float:
+        return struct.unpack("<f", at(va, 4))[0]
+
+    # The texts, each loaded by the routine docs/37 names: pushed, or into edx.
+    sizes = {0x1004EC50: 6268, 0x10047D20: 493, 0x1004DFF0: 3165, 0x100506D0: 4835,
+             0x1004AC40: 3764, 0x1004BF70: 3391, 0x1006FC00: 2813, 0x10049EF0: 1420}
+    wrong = {k: strings.get(k) for k, (text, _) in DESIGNER_STRINGS.items()
+             if strings.get(k) != text}
+    unloaded = [k for k, (_, fn) in DESIGNER_STRINGS.items()
+                if not any(op + struct.pack("<I", k) in at(fn, sizes[fn])
+                           for op in (b"\x68", b"\xba"))]
+    check("iron3d.dll: the designer's fixed texts and who loads them",
+          not wrong and not unloaded,
+          f"{len(DESIGNER_STRINGS)} string ids as docs/37 gives them; wrong {wrong}; "
+          f"not loaded where named {unloaded}")
+
+    # The holder: the screens' +0x08 is 0x10055910 (0x30 bytes); modes 3-5 draw it through
+    # 0x10055dc0; the factory's constructor button opens it with kind 1 and "r".
+    ctor = at(0x1008CF10, 0x40)
+    holder = b"\x6a\x30" in ctor and (0x1008CF33, 0x10055910) in _calls(at, 0x1008CF10, 0x40) \
+        and b"\x89\x45\x08" in ctor
+    drawn = _calls(at, 0x1008D47F, 6)[:1] == [(0x1008D47F, 0x10055DC0)] \
+        and _calls(at, 0x1008D554, 6)[:1] == [(0x1008D554, 0x10055DC0)]
+    opener = _calls(at, 0x1009810A, 6)[:1] == [(0x1009810A, 0x10055C70)] \
+        and at(0x10098102, 2) == b"\x6a\x01" and at(0x10104D2C, 2) == b"r\0"
+    table = [u32(0x100E5F98 + 4 * i) for i in range(5)]
+    opens = b"\xc6\x46\x2c\x01" in at(0x10055C70, 0x86) \
+        and (0x10055CED, 0x1004DFF0) in _calls(at, 0x10055C70, 0x86)
+    check("iron3d.dll: the designer holder, drawn in CState modes 3-5, opened by the factory",
+          holder and drawn and opener and opens
+          and table == [0x10055E80, 0x10056070, 0x10055FA0, 0x10065CF0, 0x10055FF0],
+          f"screens +0x08 = new(0x30) at 0x10055910: {holder}; 0x1008d47f and 0x1008d554 draw "
+          f"0x10055dc0: {drawn}; 0x1009810a opens with kind 1 and \"r\": {opener}; open sets "
+          f"+0x2c and lays out 0x1004dff0: {opens}; vtable 0x100e5f98 key, key up, char, -, "
+          f"button {[hex(t) for t in table]}")
+
+    # The panels: the source's six tabs and the destination's 457 to the right, their icons,
+    # frames and colours; the source's rectangles x 0-183, preview 236-396, box 396-480.
+    src_icons = _icon_setups(at, 0x1004AC40, 3764)
+    dst_icons = _icon_setups(at, 0x1004BF70, 3391)
+    rect = re.compile(rb"\xc7[\x80-\x87]\xbc\x00\x00\x00(.{4})\xc7[\x80-\x87]\xc0\x00\x00\x00(.{4})"
+                      rb"\xc7[\x80-\x87]\xc4\x00\x00\x00(.{4})\xc7[\x80-\x87]\xc8\x00\x00\x00(.{4})",
+                      re.S)
+
+    def frames(start: int, size: int) -> list[tuple[int, ...]]:
+        return [tuple(struct.unpack("<i", g)[0] for g in m.groups())
+                for m in rect.finditer(at(start, size))]
+
+    want_src = [(u, v, x, y, 24, 24) for _, (u, v), (x, y), _ in DESIGNER_TABS]
+    want_dst = [(u, v, x + 457, y + (1 if name == "Armour" else 0), 24, 24)
+                for name, (u, v), (x, y), _ in DESIGNER_TABS]
+    tabs = src_icons == want_src and dst_icons == want_dst \
+        and frames(0x1004AC40, 3764) == [f for *_, f in DESIGNER_TABS] \
+        and frames(0x1004BF70, 3391) == [(a + 457, b, c + 457, d)
+                                         for *_, (a, b, c, d) in DESIGNER_TABS]
+    colours = [struct.unpack("<I", m.group(2))[0] for m in re.finditer(
+        rb"\xc7[\x80-\x87](.{4})(\x64\x40\x40\xff|\xe6\x96\x96\xff|\xff\xdc\xdc\xff|"
+        rb"\x4b\x4b\x40\xff|\xc8\xc8\x78\xff|\xe6\xe6\xd2\xff)", at(0x1004AC40, 3764), re.S)]
+    blue, teal = [0xFF404064, 0xFF9696E6, 0xFFDCDCFF], [0xFF404B4B, 0xFF78C8C8, 0xFFD2E6E6]
+    alternate = colours == (blue + teal) * 3
+    ends = all(p in at(0x1004B914, 0x40) for p in (
+        b"\xb9\xb7\x00\x00\x00", b"\xba\x8c\x01\x00\x00",
+        b"\xc7\x46\x18\xec\x00\x00\x00", b"\xc7\x46\x30\xe0\x01\x00\x00")) \
+        and all(p in at(0x1004C9D6, 0x48) for p in (
+            b"\xb9\xc9\x01\x00\x00", b"\xba\x80\x02\x00\x00",
+            b"\xc7\x45\x18\xec\x00\x00\x00", b"\xc7\x45\x30\xe0\x01\x00\x00"))
+    inked = [art("icons", u, v, 24, 24)[1] for _, (u, v), _, _ in DESIGNER_TABS]
+    check("iron3d.dll: the designer's panels -- six tabs each, 457 apart, their icons and colours",
+          tabs and alternate and ends and all(inked),
+          f"icons (u, v, x, y) {[i[:4] for i in src_icons]} and the destination's; frames as "
+          f"docs/37 lists: {tabs}; icon colours blue, teal alternating: {alternate}; panel "
+          f"rectangles x 0-183 / 457-640, preview 236-396, box 396-480: {ends}; icons inked "
+          f"{sum(inked)}/{len(inked)}")
+
+    # The rows: six from y 65, 23 apart, 180 wide at the panel's x; the title at (x + 10, 6)
+    # in yellow, NO ITEMS AVAILABLE at (10, 6) in 0xff009600.
+    rows = at(0x10047D3A, 0x1D0)
+    listed = all(p in rows for p in (
+        b"\x81\xe5\xc9\x01\x00\x00", b"\x68\x00\xff\xff\xff\x6a\x06\x8d\x4d\x0a",
+        b"\x68\x00\x96\x00\xff\x6a\x06\x6a\x0a", b"\x8d\x41\x06",
+        b"\x6b\xc0\x17\x8d\x48\x56", b"\x8d\x8d\xb4\x00\x00\x00\x83\xc0\x41"))
+    lamps = b"\x68\xc8\xff\xc8\xff" in at(0x10046B10, 0x244)
+    check("iron3d.dll: a tab's rows -- 6 shown from y 65, 23 apart, 180 x 21; the title at 10, 6",
+          listed and lamps,
+          f"0x10047d20: x 0 or 457, rows (x, 65 + 23k)-(x + 180, 86 + 23k) from the first shown "
+          f"to 6 more, title yellow at (x + 10, 6), 1115 green at (10, 6): {listed}; lamp in "
+          f"0xffc8ffc8: {lamps}")
+
+    # The pieces: every cut the builders make is one docs/37 lists, and holds art.
+    made = set()
+    for start, size in ((0x1004AC40, 3764), (0x1004BF70, 3391), (0x1004DFF0, 3165),
+                        (0x100468A0, 612), (0x10047210, 1091), (0x1009F560, 428)):
+        made.update(_cuts_made(at, start, size))
+    listed_cuts = {c for cuts in DESIGNER_CUTS.values() for c in cuts}
+    missing = sorted(listed_cuts - made)
+    blank = [(page, c) for page, cuts in DESIGNER_CUTS.items() for c in cuts
+             if not art(page, *c)[1]]
+    check("iron3d.dll: the designer's sprite pieces, each on its page with art",
+          not missing and not blank and made <= listed_cuts,
+          f"{len(listed_cuts)} pieces; not made by the builders {missing}; made but not listed "
+          f"{sorted(made - listed_cuts)}; blank {blank}")
+
+    # The project's view (185, 0)-(455, 300) and box (185, 300)-(455, 480), and the five
+    # buttons on y 437-480.
+    lay = at(0x1004E363, 0x860)
+    rects = b"\xb9\xc7\x01\x00\x00\xba\xb9\x00\x00\x00\xb8\x2c\x01\x00\x00" in lay \
+        and b"\xbf\xe0\x01\x00\x00" in lay and b"\xc7\x85\x88\xad\x00\x00\x00\x00\x00\x00" in lay
+    buttons = _icon_setups(at, 0x1004DFF0, 3165)
+    placed = [(u, v) for u, v, *_ in buttons[:5]] == [b[2] for b in DESIGNER_BUTTONS] \
+        and all(y == 450 for _, _, _, y, _, _ in buttons[:5]) \
+        and buttons[5][:4] == (216, 96, None, 270) and lay.count(b"\xb5\x01\x00\x00") == 5 \
+        and all(p in lay for p in (b"\x83\xc0\x09", b"\x83\xc0\x2c", b"\x83\xc0\x54",
+                                   b"\x83\xc0\x77", b"\x05\xdc\x00\x00\x00", b"\x83\xc0\x29"))
+    icons_inked = [art(page, u, v, 24, 24)[1] for _, page, (u, v), _, _ in DESIGNER_BUTTONS]
+    gate = at(0x100525A4, 7) == b"\xc6\x86\x7f\xad\x00\x00\x01"
+    check("iron3d.dll: the project's view and box, and its five buttons on y 437-480",
+          rects and placed and all(icons_inked) and gate,
+          f"view (185, 0)-(455, 300), box (185, 300)-(455, 480): {rects}; icons "
+          f"{[(b[0], b[2]) for b in DESIGNER_BUTTONS]} at y 450, frames at 185 + 9, 44, 84, 119, "
+          f"220, recent projects at y 270: {placed}; inked {sum(icons_inked)}/5; accept armed "
+          f"by the turret (0x100525a4): {gate}")
+
+    # Enabling: the chassis turns on Turrets and Internal systems (and Armour on a test), the
+    # turret Weapons, the weapon Ammo -- in both panels.
+    enables = all(at(va, len(pat)) == pat for va, pat in (
+        (0x10051F4A, b"\x05\xd8\xce\x00\x00\xc6\x40\x20\x01"),
+        (0x10052473, b"\x05\x20\x6c\x02\x00\xc6\x40\x20\x01"),
+        (0x100524A8, b"\x81\xc5\x7c\x9d\x01\x00\xc6\x45\x20\x01"),
+        (0x10052924, b"\x05\xc4\x3a\x03\x00\xc6\x40\x20\x01"),
+        (0x10053402, b"\x05\x68\x09\x04\x00\xc6\x40\x20\x01")))
+    timers = [round(f32(va), 6) for va in (0x100E5C70, 0x100E5C68, 0x100E5F48)] \
+        == [0.1, 0.2, 0.25] \
+        and b"\xd8\x1d\x70\x5c\x0e\x10" in at(0x10047AF0, 0x120) \
+        and b"\xd8\x1d\x70\x5c\x0e\x10" in at(0x10046B10, 0x80) \
+        and b"\xd8\x1d\x68\x5c\x0e\x10" in at(0x10047F10, 0x140) \
+        and b"\xd8\x1d\x48\x5f\x0e\x10" in at(0x10049EF0, 0xC0)
+    check("iron3d.dll: designer tabs switch on with the parts; blink 0.1 s, double click 0.2 s",
+          enables and timers,
+          f"chassis enables Turrets, Internal systems, Armour; turret Weapons; weapon Ammo: "
+          f"{enables}; the lamps' 0.1 s, the double click's 0.2 s, the circuit's 0.25 s: {timers}")
+
+    # The previews and the bands.
+    view = at(0x1009ED90, 7) == b"\xc7\x46\x0c\xa6\x9b\x44\x3a" \
+        and abs(f32(0x100E6978) - math.pi / 6) < 1e-6 \
+        and struct.unpack("<d", at(0x100E6980, 8))[0] == -0.5 and f32(0x100E6988) == 50000.0 \
+        and at(0x1009DC10, 18) == bytes.fromhex("d905cc590e10 d8358cc41010 d91d88c41010") \
+        and at(0x1009EC18, 10) == b"\x68\x00\x00\x00\x3f\x68\x00\x00\x96\x43"
+    ctor_rects = at(0x10055A46, 0x70)
+    bands = b"\xd8\x1d\x20\x5d\x0e\x10" in at(0x1009F710, 0x37) and f32(0x100E5D20) == 4.0 \
+        and abs(f32(0x100E698C) - 5 / 57) < 1e-6 \
+        and all(b"\xc7\x44\x24" + bytes([disp]) + struct.pack("<I", value) in ctor_rects
+                for disp, value in ((0x38, 10), (0x44, 304), (0x34, 185), (0x40, 455),
+                                    (0x5C, 182), (0x6C, 458), (0x78, 639))) \
+        and b"\xb9\xf1\x00\x00\x00" in ctor_rects and b"\xb8\x8c\x01\x00\x00" in ctor_rects
+    check("iron3d.dll: the designer's previews turn at 0.75 rad/s; three scan bands every 4 s",
+          view and bands,
+          f"model view: 0.00075 rad a ms, pitch -0.5, K = 1/sin(pi/6), field 2 x pi/6, 50000, "
+          f"300 and 0.5: {view}; bands over (185, 10)-(455, 304), (1, 241)-(182, 396), "
+          f"(458, 241)-(639, 396), 4 s, h x 5/57: {bands}")
+
+
 def check_settings(check, game: Path) -> None:
     """The engine's own configuration files, and which module owns each."""
     registry_path = game / settings.COMPONENTS_FILE
@@ -15732,6 +16040,7 @@ def run(game: Path) -> int:
         check_hud_radar,
         check_hud_screens,
         check_factory_screen,
+        check_designer_screen,
         check_settings,
         check_research_streams, check_atmosphere_events,
         check_varset_types, check_profiles, check_walker,

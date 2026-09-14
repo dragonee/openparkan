@@ -95,6 +95,9 @@ page item's name at `+0xc4`) works like this:
   `r_b` as a four-way grade rises (`0x10048b38`).
 - **Guns.** `e_gun_` is built the same way (`0x10048311`).
 
+The screen those pages fill, with its two panels of six tabs, the project in
+the middle and its buttons, is [37-designer.md](37-designer.md).
+
 So the size letter and the slot label are kept by what the editor offers,
 not by what the engine accepts. ~~Where each page item's name comes from is not
 traced.~~ Answered in [38-designs.md](38-designs.md): the turret and gun pages
