@@ -3,8 +3,9 @@
 //! after the HUD.
 //!
 //! STAND-IN: docs/12-rsli.md#what-is-inside -- how the game draws its font is not
-//! read: the 8-bit renderer's blend table is not used. A glyph's coverage is the
-//! atlas's brightness, sampled nearest, tinted by the run's colour and alpha-blended.
+//! read: the 8-bit renderer's blend table is not used. The atlas, sampled nearest, is
+//! keyed on black and multiplied by the run's colour, both in display space; the recording
+//! of Mission 01's win shows the interface font's grey shadow pixels dark, not light.
 
 use bytemuck::{Pod, Zeroable};
 use parkan_world::text::{GameFont, TextRun};

@@ -164,6 +164,97 @@ pub fn panel_runs(panel: &parkan_world::play::Panel) -> Vec<parkan_world::text::
     out
 }
 
+/// The outcome panel's font slots: its title's `MENU_FONT` and its lines' `GAME_FONT`.
+pub const PANEL_TITLE_SLOT: usize = 0;
+pub const PANEL_LINES_SLOT: usize = 1;
+
+/// The outcome panel on a `width` × `height` screen (`iron3d.dll:0x1009f8b0`, docs/34, "After
+/// the outcome"), in place of the HUD: a black box at 60% and, centred on x 320 of a 640 ×
+/// 480 layout, the title in `menu` at y 50, green won and red lost, and the lines in `game`,
+/// grey, from y 75 one font height + 2 apart. The box runs from (x₀, 35) to (640 − x₀, the
+/// pen after the last line + 15), x₀ being the leftmost text's x less 30. Returns the box,
+/// the title's run and the lines' runs.
+///
+/// STAND-IN: docs/34-progression.md#after-the-outcome--read-and-measured -- the two display
+/// scale queries a font's height and a text's width pass through are not read: the layout
+/// and its fonts scale by the screen's height over 480, the 640-wide layout centred across
+/// the screen. On the recording of Mission 01's win the box runs 225 to 415 by 35 to about 98.
+pub fn outcome_panel(
+    panel: &parkan_world::progress::OutcomePanel,
+    menu: &parkan_world::text::GameFont,
+    game: &parkan_world::text::GameFont,
+    (width, height): (f32, f32),
+) -> (Vec<parkan_render::hud::Rect>, Vec<parkan_world::text::TextRun>, Vec<parkan_world::text::TextRun>) {
+    use parkan_world::text::{Align, TextRun};
+    let s = height / 480.0;
+    let at = |x: f32, y: f32| [(x - 320.0) * s / (width / 2.0), 1.0 - y * s / (height / 2.0)];
+    let rgb = |r: u8, g: u8, b: u8| [r, g, b].map(|c| f32::from(c) / 255.0);
+    let [tr, tg, tb] = if panel.won { rgb(0x64, 0xff, 0x64) } else { rgb(0xff, 0x64, 0x64) };
+    let [lr, lg, lb] = rgb(0xf0, 0xf0, 0xf0);
+    let run = |text: &str, y: f32, colour: [f32; 4]| TextRun {
+        colour,
+        scale: s,
+        align: Align::Centre,
+        ..TextRun::new(text, at(320.0, y))
+    };
+    let title = run(&panel.title, 50.0, [tr, tg, tb, 1.0]);
+    let mut left = 320.0 - menu.advance(&panel.title) / 2.0;
+    let mut y = 75.0;
+    let mut lines = Vec::new();
+    for line in panel.lines.iter().filter(|l| !l.is_empty()) {
+        lines.push(run(line, y, [lr, lg, lb, 1.0]));
+        left = left.min(320.0 - game.advance(line) / 2.0);
+        y += game.line_height + 2.0;
+    }
+    let x0 = (left - 30.0).max(0.0);
+    let [x_min, y_max] = at(x0, 35.0);
+    let [x_max, y_min] = at(640.0 - x0, y + 15.0);
+    let bx =
+        parkan_render::hud::Rect { min: [x_min, y_min], max: [x_max, y_max], colour: [0.0, 0.0, 0.0, 0.6] };
+    (vec![bx], vec![title], lines)
+}
+
+/// Load the outcome panel's two fonts into their slots, or say why not.
+pub fn panel_fonts(
+    renderer: &mut parkan_render::Renderer,
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    game: &Path,
+) {
+    use parkan_world::text::GameFont;
+    for (slot, name) in [(PANEL_TITLE_SLOT, "MENU_FONT"), (PANEL_LINES_SLOT, "GAME_FONT")] {
+        match GameFont::ui(game, name) {
+            Ok(font) => renderer.set_font_slot(device, queue, slot, font),
+            Err(e) => eprintln!("no {name}: {e:#}"),
+        }
+    }
+}
+
+/// Draw the outcome panel in the HUD's place once `play`'s outcome is recorded, or clear its
+/// text; whether it is drawn.
+pub fn draw_outcome(
+    renderer: &mut parkan_render::Renderer,
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    play: &Play,
+    screen: (f32, f32),
+) -> bool {
+    let panel = play.progression.as_ref().and_then(|p| p.panel());
+    let laid = match (&panel, renderer.font_slot(PANEL_TITLE_SLOT), renderer.font_slot(PANEL_LINES_SLOT)) {
+        (Some(panel), Some(menu), Some(game)) => Some(outcome_panel(panel, menu, game, screen)),
+        _ => None,
+    };
+    let Some((rects, title, lines)) = laid else {
+        renderer.set_text_slot(device, queue, PANEL_TITLE_SLOT, &[]);
+        renderer.set_text_slot(device, queue, PANEL_LINES_SLOT, &[]);
+        return false;
+    };
+    renderer.set_hud(device, queue, &rects);
+    renderer.set_text_slot(device, queue, PANEL_TITLE_SLOT, &title);
+    renderer.set_text_slot(device, queue, PANEL_LINES_SLOT, &lines);
+    true
+}
+
 /// The lines of the message history on screen, each with when it goes.
 ///
 /// STAND-IN: docs/34-progression.md#not-established -- where the game draws a message's

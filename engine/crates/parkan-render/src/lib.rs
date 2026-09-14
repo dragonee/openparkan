@@ -99,6 +99,8 @@ pub struct Renderer {
     dome: Option<(dome::DomeRenderer, Vec<[f32; 3]>)>,
     hud: Option<hud::HudRenderer>,
     text: Option<text::TextRenderer>,
+    /// Text in other fonts, drawn after `text` in slot order.
+    more_text: Vec<Option<text::TextRenderer>>,
     sprites: Option<sprites::SpriteRenderer>,
 }
 
@@ -183,6 +185,7 @@ impl Renderer {
             dome: None,
             hud: None,
             text: None,
+            more_text: Vec::new(),
             sprites: None,
         }
     }
@@ -279,6 +282,39 @@ impl Renderer {
         }
     }
 
+    /// Draw slot `slot`'s text in `font` from now on; a slot's text draws after the main
+    /// text and every lower slot's.
+    pub fn set_font_slot(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        slot: usize,
+        font: parkan_world::text::GameFont,
+    ) {
+        if self.more_text.len() <= slot {
+            self.more_text.resize_with(slot + 1, || None);
+        }
+        self.more_text[slot] = Some(text::TextRenderer::new(device, queue, self.format, font));
+    }
+
+    /// This frame's text in slot `slot`'s font.
+    pub fn set_text_slot(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        slot: usize,
+        runs: &[parkan_world::text::TextRun],
+    ) {
+        if let Some(Some(t)) = self.more_text.get_mut(slot) {
+            t.prepare(device, queue, runs);
+        }
+    }
+
+    /// Slot `slot`'s font, once [`Renderer::set_font_slot`] has given one.
+    pub fn font_slot(&self, slot: usize) -> Option<&parkan_world::text::GameFont> {
+        self.more_text.get(slot).and_then(Option::as_ref).map(text::TextRenderer::font)
+    }
+
     /// The font text is drawn in, once [`Renderer::set_font`] has given one.
     pub fn font(&self) -> Option<&parkan_world::text::GameFont> {
         self.text.as_ref().map(text::TextRenderer::font)
@@ -336,6 +372,9 @@ impl Renderer {
         if let Some(objects) = &self.objects {
             objects.prepare(queue, view_proj, &self.lighting);
         }
+        for text in self.more_text.iter().flatten() {
+            text.resize(queue, (width, height));
+        }
         if let Some(text) = &self.text {
             text.resize(queue, (width, height));
         }
@@ -386,6 +425,9 @@ impl Renderer {
                 hud.draw(&mut pass);
             }
             if let Some(text) = &self.text {
+                text.draw(&mut pass);
+            }
+            for text in self.more_text.iter().flatten() {
                 text.draw(&mut pass);
             }
             pass.set_bind_group(0, &self.bind_group, &[]);

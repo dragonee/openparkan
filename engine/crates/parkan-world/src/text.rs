@@ -14,6 +14,8 @@ use parkan_formats::{gamedir, rsli};
 
 /// The font archive, at the install's root.
 pub const FONT_ARCHIVE: &str = "gamefont.rlb";
+/// Where the interface names its fonts.
+pub const UI_RESOURCES: &str = "ui/menu_resources.cfg";
 
 /// The font and its atlas, decoded through the palette.
 #[derive(Clone, Debug, PartialEq)]
@@ -82,14 +84,15 @@ pub fn glyph_index(c: char) -> u8 {
     }
 }
 
-/// How far a glyph moves the pen, in font pixels.
+/// How far a glyph moves the pen, in font pixels: its advance.
 ///
 /// STAND-IN: docs/12-rsli.md#what-is-inside -- how the game spaces its glyphs is not
-/// read. A drawn record's span is its advance + 1, its ink and one blank column, and
-/// moving the pen by the advance alone lays one glyph's ink against the next (`l` has
-/// an advance of 1). The pen moves by the advance + 1, the span, on every record.
+/// read; *measured* on a recording of Mission 01's win for the interface's `mf_640.tft`:
+/// each glyph of "MISSION COMPLETE !" starts its record's advance after the one before,
+/// the space's 6 included (M to I 10.6 for 10, I to S 3.4 for 3, N to C 14.7 for 8 + 6).
+/// The game font is taken to space the same way.
 fn step(g: &Glyph) -> f32 {
-    (g.advance + 1) as f32
+    g.advance as f32
 }
 
 impl GameFont {
@@ -100,6 +103,36 @@ impl GameFont {
         let tft = font::parse_font(&archive.read_name("ARIALTEX.TFT")?, "ARIALTEX.TFT")?;
         let palette = font::parse_palette(&archive.read_name("PAL.PAL")?, "PAL.PAL")?;
         let atlas = tft.decode_atlas(&palette, "ARIALTEX.TFT")?;
+        Ok(GameFont::new(tft.glyphs.clone(), &tft.rows(), atlas.levels[0].clone(), atlas.width, atlas.height))
+    }
+
+    /// The font `name` (`MENU_FONT`, `GAME_FONT`, …) names for a 640 × 480 screen: through
+    /// `ui/menu_resources.cfg`'s font substitute to its `fonts` resource index, an entry of
+    /// `ui/font.lib`, a `Tfnt` whose atlas carries its own pixels (docs/34, "After the
+    /// outcome").
+    pub fn ui(game: &Path, name: &str) -> Result<GameFont> {
+        let cfg = gamedir::resolve(game, UI_RESOURCES).with_context(|| format!("no {UI_RESOURCES}"))?;
+        let blocks = crate::resources::read_cfg(&cfg)?;
+        let unquote = |v: &str| v.trim().trim_matches('"').to_owned();
+        let substitute = blocks
+            .0
+            .iter()
+            .find(|b| {
+                b.get("desc").map(unquote).as_deref() == Some("font-substitute")
+                    && b.get("dimension_x").map(unquote).as_deref() == Some("640")
+                    && b.get("dimension_y").map(unquote).as_deref() == Some("480")
+            })
+            .and_then(|b| b.get(name).map(unquote))
+            .with_context(|| format!("no 640x480 substitute for {name}"))?;
+        let fonts = blocks.get("fonts").context("no fonts resource")?;
+        let index: usize =
+            fonts.get(&substitute).map(unquote).with_context(|| format!("no font {substitute}"))?.parse()?;
+        let library = fonts.get("library").map(unquote).context("the fonts name no library")?;
+        let path = crate::resources::locate(game, &library).with_context(|| format!("no {library}"))?;
+        let archive = parkan_formats::nres::Archive::open(&path)?;
+        let entry = archive.entries.get(index).with_context(|| format!("no font {index} in {library}"))?;
+        let tft = font::parse_font(archive.read(entry)?, &entry.name)?;
+        let atlas = parkan_formats::texm::decode(&tft.atlas, &entry.name, None)?;
         Ok(GameFont::new(tft.glyphs.clone(), &tft.rows(), atlas.levels[0].clone(), atlas.width, atlas.height))
     }
 
@@ -202,10 +235,10 @@ mod tests {
         let placed = f.layout(&TextRun::new("A B", [0.0, 0.0]));
         assert_eq!(placed.len(), 2, "the space draws nothing");
         assert_eq!(placed[0].at, [0.0, 0.0]);
-        assert_eq!(placed[1].at, [17.0, 0.0], "8 for A, 9 for the space: each advance + 1");
+        assert_eq!(placed[1].at, [15.0, 0.0], "7 for A, 8 for the space: each its advance");
         assert_eq!(placed[1].size, [8.0, 16.0]);
         assert_eq!(placed[1].uv, [0.125, 0.25, 0.25, 0.5]);
-        assert_eq!(f.width(&TextRun::new("A B", [0.0, 0.0])), 25.0);
+        assert_eq!(f.width(&TextRun::new("A B", [0.0, 0.0])), 22.0);
     }
 
     #[test]
@@ -217,11 +250,11 @@ mod tests {
             scale: 2.0,
             ..TextRun::new("AB AB AB", [0.0; 2])
         };
-        // At scale 2 the limit is 15 font pixels: "AB" is 16 and stands alone, "AB AB" is 41.
+        // At scale 2 the limit is 15 font pixels: "AB" is 14 and fits, "AB AB" is 36 and does not.
         assert_eq!(f.lines(&run), vec!["AB", "AB", "AB"]);
         let placed = f.layout(&run);
         assert_eq!(placed.len(), 6);
-        assert_eq!(placed[0].at, [-16.0, 0.0], "a 32-pixel line centred");
+        assert_eq!(placed[0].at, [-14.0, 0.0], "a 28-pixel line centred");
         assert_eq!(placed[2].at[1], 32.0, "the second line one line height down, scaled");
         assert_eq!(f.lines(&TextRun::new("A\nB", [0.0; 2])), vec!["A", "B"]);
     }

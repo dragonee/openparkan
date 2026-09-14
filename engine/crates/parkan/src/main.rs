@@ -6,7 +6,7 @@
 //! parkan [--game DIR] [--mission MISSIONS/…] [--fly]
 //!        [--screenshot OUT.png] [--size WxH] [--top-down] [--look X,Y,Z,TX,TY,TZ]
 //!        [--headless] [--ticks N] [--hold SCAN_W,SCAN_A] [--mouse DX,DY] [--trace] [--sway]
-//!        [--capture-idle] [--no-bracket] [--text "…"]
+//!        [--capture-idle] [--no-bracket] [--outcome won|lost] [--text "…"]
 //! ```
 //!
 //! In the cockpit the hero's own input table drives it: W/S walk, A/D strafe,
@@ -29,7 +29,11 @@
 //! The target is bracketed in the colour the game marks its clan in; `--no-bracket`
 //! draws no bracket, as the game's cockpit draws none.
 //!
-//! `--text` draws a string in the game font near the top of a `--screenshot`.
+//! `--text` draws a string in the game font near the top of a `--screenshot`, and
+//! `--outcome won|lost` draws a screenshot's mission as won or lost.
+//!
+//! Once a mission is won or lost its panel takes the HUD's place and play goes on under
+//! it: Esc leaves, and after a loss R restarts the mission.
 
 mod audio;
 mod camera;
@@ -55,6 +59,7 @@ use winit::window::{CursorGrabMode, Window, WindowId};
 /// The simulation runs at a fixed 60 ticks a second.
 const TICK_MS: f64 = 1000.0 / 60.0;
 
+#[derive(Clone)]
 struct Args {
     game: Option<PathBuf>,
     mission: String,
@@ -73,6 +78,8 @@ struct Args {
     capture_idle: bool,
     /// `--no-bracket`: the target is not bracketed in the world, as the game's cockpit.
     no_bracket: bool,
+    /// `--outcome won|lost`: a screenshot's mission is taken to have that outcome.
+    outcome: Option<bool>,
     /// `--text`: a string a screenshot draws in the game font.
     text: Option<String>,
     ticks: u32,
@@ -94,6 +101,7 @@ fn args() -> Result<Args> {
         sway: false,
         capture_idle: false,
         no_bracket: false,
+        outcome: None,
         text: None,
         ticks: 0,
         hold: Vec::new(),
@@ -113,6 +121,7 @@ fn args() -> Result<Args> {
             "--sway" => out.sway = true,
             "--capture-idle" => out.capture_idle = true,
             "--no-bracket" => out.no_bracket = true,
+            "--outcome" => out.outcome = Some(value()? == "won"),
             "--text" => out.text = Some(value()?),
             "--ticks" => out.ticks = value()?.parse()?,
             "--hold" => out.hold = value()?.split(',').map(str::to_owned).collect(),
@@ -224,6 +233,9 @@ fn screenshot(loaded: &scene::Loaded, game: &Path, args: &Args, out: &Path) -> R
         view = Some(scene::own_view(&mut world.objects, &mut world.store, p)?);
         p.draw_rounds(&mut world.store, &mut world.objects)?;
         rehearse(p, args);
+        if let (Some(outcome), Some(progression)) = (args.outcome, p.progression.as_mut()) {
+            progression.progress.outcome = Some(outcome);
+        }
     }
     let mut renderer = Renderer::new(&gpu.device, parkan_render::CAPTURE_FORMAT);
     renderer.set_world(
@@ -283,6 +295,12 @@ fn screenshot(loaded: &scene::Loaded, game: &Path, args: &Args, out: &Path) -> R
             scene::place_own_view(&mut renderer, &gpu.queue, v, p);
         }
         renderer.set_hud(&gpu.device, &gpu.queue, &scene::hud(p, aspect, view_proj));
+        scene::panel_fonts(&mut renderer, &gpu.device, &gpu.queue, game);
+        if scene::draw_outcome(&mut renderer, &gpu.device, &gpu.queue, p, (width as f32, height as f32)) {
+            renderer.set_font(&gpu.device, &gpu.queue, parkan_world::text::GameFont::open(game)?);
+            renderer.set_text(&gpu.device, &gpu.queue, &[]);
+            play.as_mut().expect("in play").says.clear();
+        }
     }
     // What the game said during the rehearsal, as the window shows it.
     let mut subtitles = scene::Subtitles::new(parkan_world::text::GameFont::open(game).ok());
@@ -354,6 +372,8 @@ struct App {
     bindings: Vec<parkan_formats::controls::Binding>,
     scans: HashSet<&'static str>,
     subtitles: scene::Subtitles,
+    /// What the window was opened with, for a restart.
+    args: Args,
 }
 
 impl App {
@@ -385,7 +405,37 @@ impl App {
             Ok(font) => renderer.set_font(&gpu.device, &gpu.queue, font),
             Err(e) => eprintln!("no game font: {e:#}"),
         }
+        scene::panel_fonts(&mut renderer, &gpu.device, &gpu.queue, &self.game);
         self.running = Some(Running { window, surface, config, gpu, renderer });
+        Ok(())
+    }
+
+    /// The mission again from its start, as the executable runs the game again with the same
+    /// parameters on exit code 2 (docs/34, "After the outcome").
+    fn restart(&mut self) -> Result<()> {
+        let mut world = scene::world(&self.game, &self.loaded)?;
+        let mut play =
+            scene::play(&self.game, &self.loaded, &self.args)?.context("the mission has no hero")?;
+        let view = scene::own_view(&mut world.objects, &mut world.store, &play)?;
+        play.draw_rounds(&mut world.store, &mut world.objects)?;
+        if let Some(r) = self.running.as_mut() {
+            let (d, q) = (&r.gpu.device, &r.gpu.queue);
+            r.renderer.set_world(d, q, &world.store.textures, Some(&world.terrain), Some(&world.objects));
+            r.renderer.set_sprite_looks(d, &scene::sprite_looks(&play));
+        }
+        self.audio = audio::Audio::open(&self.game);
+        if let Some(a) = self.audio.as_mut()
+            && let Ok(ambient) = parkan_world::resources::ambient(&self.game, &self.loaded.dir)
+            && let Some(theme) = ambient.theme
+        {
+            a.theme(&theme);
+        }
+        self.world = world;
+        self.play = Some(play);
+        self.view = Some(view);
+        self.subtitles = scene::Subtitles::new(parkan_world::text::GameFont::open(&self.game).ok());
+        self.scans.clear();
+        self.owed = 0.0;
         Ok(())
     }
 
@@ -546,6 +596,10 @@ impl App {
                 if let Some(panel) = play.panel() {
                     runs.extend(scene::panel_runs(&panel));
                 }
+                let screen = (r.config.width as f32, r.config.height as f32);
+                if scene::draw_outcome(&mut r.renderer, &r.gpu.device, &r.gpu.queue, play, screen) {
+                    runs.clear();
+                }
                 r.renderer.set_text(&r.gpu.device, &r.gpu.queue, &runs);
                 scene::sync(
                     &mut r.renderer,
@@ -591,11 +645,26 @@ impl ApplicationHandler for App {
             WindowEvent::Focused(false) => self.grab(false),
             WindowEvent::KeyboardInput { event, .. } => {
                 let PhysicalKey::Code(code) = event.physical_key else { return };
+                let outcome =
+                    self.play.as_ref().and_then(|p| p.progression.as_ref()).and_then(|p| p.progress.outcome);
                 if code == KeyCode::Escape && event.state == ElementState::Pressed {
-                    if self.grabbed {
+                    // `iron3d.dll:0x10070e2c`: once the outcome is recorded Esc leaves the mission.
+                    //
+                    // STAND-IN: docs/34-progression.md#after-the-outcome--read-and-measured -- the
+                    // shell's menus are not built: leaving closes the window, and a win is not
+                    // written to `MISSIONS/dispatcher.ini`.
+                    if self.grabbed && outcome.is_none() {
                         self.grab(false)
                     } else {
                         event_loop.exit()
+                    }
+                    return;
+                }
+                // `0x100711f0`: after a loss R restarts the mission. L would open the
+                // load-game screen, which the engine does not have.
+                if code == KeyCode::KeyR && event.state == ElementState::Pressed && outcome == Some(false) {
+                    if let Err(e) = self.restart() {
+                        eprintln!("cannot restart the mission: {e:#}");
                     }
                     return;
                 }
@@ -717,6 +786,7 @@ fn main() -> Result<()> {
         bindings: scene::bindings(&game),
         scans: HashSet::new(),
         subtitles: scene::Subtitles::new(parkan_world::text::GameFont::open(&game).ok()),
+        args: args.clone(),
     };
     event_loop.run_app(&mut app)?;
     Ok(())

@@ -796,8 +796,12 @@ fn a_lake_bed_kills_the_hero_and_a_warbot_within_a_second() {
     assert!(hero_died.is_some_and(|s| (0.2..=1.15).contains(&s)), "the hero dies in the lake: {hero_died:?}");
     assert!(bot_died.is_some_and(|s| s <= 1.15), "and the warbot: {bot_died:?}");
     assert!(!play.battle.combat.targets[bot].alive && lives(&play) == 0.0);
-    let failed = play.progression.as_ref().unwrap().strings[&STRING_MISSION_FAILED].clone();
-    assert!(play.says.contains(&Say::Text(failed)), "{:?}", play.says);
+    // The hero's loss fails the mission: its panel's red title over Esc, R and L (docs/34).
+    let panel = play.progression.as_ref().unwrap().panel().expect("an outcome");
+    let strings = &play.progression.as_ref().unwrap().strings;
+    assert_eq!((panel.won, &panel.title), (false, &strings[&STRING_MISSION_FAILED]));
+    assert_eq!(panel.lines.len(), 3);
+    assert!(play.says.iter().any(|s| matches!(s, Say::Voice(_))), "VOICE_MISSION_FAIL: {:?}", play.says);
 
     let at = play.hero.walker.body.position;
     for _ in 0..60 {
@@ -1041,4 +1045,22 @@ fn a_dummys_part_is_damaged_at_half_knocked_off_at_nothing_and_its_base_takes_th
         play.tick(tick, [0.0; 2]);
     }
     assert!(play.deleted[t] && play.killed.contains(&1));
+}
+
+#[test]
+#[ignore = "needs the game install"]
+fn the_outcome_panels_fonts_are_the_640_by_480_menu_and_game_fonts_of_font_lib() {
+    use parkan_world::text::GameFont;
+    let game = gamedir::find(None).expect("a Parkan install: set PARKAN_DIR");
+    // `ui/menu_resources.cfg`: MENU_FONT_640x480 = 8, mf_640.tft; GAME_FONT_640x480 = 6.
+    let menu = GameFont::ui(&game, "MENU_FONT").unwrap();
+    let text = GameFont::ui(&game, "GAME_FONT").unwrap();
+    assert_eq!((menu.width, text.width), (256, 128));
+    // The recording of Mission 01's win shows the title 13 pixels a line on 640 x 480.
+    assert!((menu.line_height - 13.0).abs() < 0.5, "{}", menu.line_height);
+    assert!((text.line_height - 8.0).abs() < 0.5, "{}", text.line_height);
+    // Its glyphs of "MISSION COMPLETE !" start their advances apart: 125 in all, the
+    // recording's ink running 128 from the first to the end of the "!".
+    assert_eq!(menu.advance("MISSION COMPLETE !"), 125.0);
+    assert!(menu.advance("MISSION COMPLETE !") > text.advance("MISSION COMPLETE !"));
 }

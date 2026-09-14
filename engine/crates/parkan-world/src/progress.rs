@@ -21,6 +21,10 @@ pub const STRING_VACANT_VEHICLE: u32 = 3040;
 pub const STRING_OBJECTIVE_COMPLETE: u32 = 5040;
 pub const STRING_OBJECTIVE_FAILED: u32 = 5041;
 pub const STRING_IN_HISTORY: u32 = 6170;
+/// The outcome panel's lines (docs/34, "After the outcome").
+pub const STRING_PRESS_ESC: u32 = 5082;
+pub const STRING_PRESS_R: u32 = 3075;
+pub const STRING_PRESS_L: u32 = 3076;
 /// The sounds `ui/game_resources.cfg` binds for them.
 pub const VOICE_OBJ_COMPLETE: &str = "VOICE_OBJ_COMPLETE";
 pub const VOICE_MISSION_COMPLETE: &str = "VOICE_MISSION_COMPLETE";
@@ -36,6 +40,14 @@ pub enum Say {
     Text(String),
     Voice(Sound),
     Sound(Sound),
+}
+
+/// What the outcome panel shows.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OutcomePanel {
+    pub won: bool,
+    pub title: String,
+    pub lines: Vec<String>,
 }
 
 pub struct Progression {
@@ -173,6 +185,24 @@ impl Progression {
         if self.progress.mission_due(now_ms) { self.run("Mission") } else { Vec::new() }
     }
 
+    /// The panel that gives way to the HUD once the outcome is recorded (`iron3d.dll:0x1009f8b0`,
+    /// docs/34, "After the outcome"): a won mission's title, string 1012, over 5082 "Press
+    /// 'Esc' to continue"; a lost one's, 1013, over 5082, 3075 and 3076, the restart and the
+    /// load. The title is green when won and red when lost.
+    pub fn panel(&self) -> Option<OutcomePanel> {
+        let won = self.progress.outcome?;
+        let text = |id: u32| self.strings.get(&id).cloned().unwrap_or_default();
+        let (title, lines) = if won {
+            (text(STRING_MISSION_COMPLETE), vec![text(STRING_PRESS_ESC)])
+        } else {
+            (
+                text(STRING_MISSION_FAILED),
+                vec![text(STRING_PRESS_ESC), text(STRING_PRESS_R), text(STRING_PRESS_L)],
+            )
+        };
+        Some(OutcomePanel { won, title, lines })
+    }
+
     fn string(&self, id: u32) -> Option<Say> {
         self.strings.get(&id).map(|s| Say::Text(s.clone()))
     }
@@ -185,10 +215,10 @@ impl Progression {
     /// What the game says for `notice` (docs/34, "Messages", "Objectives and the end of a
     /// mission").
     ///
-    /// STAND-IN: docs/34-progression.md#not-established -- what the game shows after
-    /// `MISSION_COMPLETE` is not read; the engine says string 1012, "MISSION COMPLETE !"
-    /// (1013 on a failure). A repeated message says string 6170 alone: string 6223's key is
-    /// not filled in.
+    /// The outcome's title is the panel's, not a message ([`Progression::panel`]).
+    ///
+    /// STAND-IN: docs/34-progression.md#not-established -- a repeated message says string
+    /// 6170 alone: string 6223's key is not filled in.
     pub fn say(&self, notice: &Notice) -> Vec<Say> {
         let mut out = Vec::new();
         match *notice {
@@ -204,14 +234,8 @@ impl Progression {
                 out.extend(self.sound(VOICE_OBJ_COMPLETE).map(Say::Voice));
             }
             Notice::ObjectiveFailed { .. } => out.extend(self.string(STRING_OBJECTIVE_FAILED)),
-            Notice::MissionComplete => {
-                out.extend(self.sound(VOICE_MISSION_COMPLETE).map(Say::Voice));
-                out.extend(self.string(STRING_MISSION_COMPLETE));
-            }
-            Notice::MissionFailed => {
-                out.extend(self.sound(VOICE_MISSION_FAIL).map(Say::Voice));
-                out.extend(self.string(STRING_MISSION_FAILED));
-            }
+            Notice::MissionComplete => out.extend(self.sound(VOICE_MISSION_COMPLETE).map(Say::Voice)),
+            Notice::MissionFailed => out.extend(self.sound(VOICE_MISSION_FAIL).map(Say::Voice)),
         }
         out
     }

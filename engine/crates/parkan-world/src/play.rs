@@ -855,11 +855,8 @@ impl Play {
                 p.progress.destroyed(self.units[*target].logical_id);
             }
         }
-        // STAND-IN: docs/34-progression.md#not-established -- what follows the hero's death
-        // is not established: the mission fails, and its progression stops.
-        if !self.hero.dead() {
-            self.progress();
-        }
+        // A won or lost mission plays on under its panel (docs/34, "After the outcome").
+        self.progress();
         events
     }
 
@@ -1042,9 +1039,11 @@ impl Play {
                 self.node_blast(&exp, &node, slot.sphere, 1.0, now);
             }
         }
+        // `iron3d.dll:0x10075619`: the loss of the player's clan's hero fails the mission.
         if self.hero.dead()
             && let Some(p) = self.progression.as_mut()
         {
+            p.progress.outcome = Some(false);
             let says = p.say(&Notice::MissionFailed);
             self.says.extend(says);
         }

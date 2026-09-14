@@ -164,6 +164,12 @@ Not yet: boarding a captured bot, and the ambient variations.
   every 250 ms or so a unit's nodes each lose the same share of their life.
   On Mission 01's lake the hero dies 0.6 s in; it stops where it died, and the
   mission fails.
+- Once a mission is won or lost, play goes on under the outcome panel in the
+  HUD's place: a 60% black box with "MISSION COMPLETE !" in the interface's
+  menu font, green, over "Press 'Esc' to continue" in its game font, laid out
+  on 640 × 480 as read and as a recording of Mission 01's win shows it; a loss
+  is red, and adds R to restart and L to load. Esc then leaves, and R restarts
+  the mission.
 
 This directory also holds what the rest will follow:
 
@@ -287,8 +293,8 @@ a row here. A row leaves this table when research closes it.
 | M5 | How a sound falls off between its near and far distances, and how it is panned | linear in distance; panned by its direction against the eye's right | [11](../docs/11-effects.md#emitter-types--read-and-measured) |
 | M5 | How the game turns a string's characters into the font's glyph indices | ASCII as its own index; Cyrillic by code page 866, where the font draws it (А–Я at 0x80, а–п at 0xA0, р–я at 0xE0); anything else draws `?` | [12](../docs/12-rsli.md#what-is-inside) |
 | M5 | How tall a glyph is drawn and how far apart lines are: a record has no bottom edge | the atlas's row pitch, 18 pixels, for both | [12](../docs/12-rsli.md#what-is-inside) |
-| M5 | How far the pen moves after a glyph: a record's advance is one less than its span, so `l` advances 1 | the advance + 1, the span, on every record; a space, a placeholder, moves 9 | [12](../docs/12-rsli.md#what-is-inside) |
-| M5 | How the game draws its font: its 8-bit blend table and the text's colour | the atlas's brightness as coverage, sampled nearest, tinted by the run's colour and alpha-blended over everything after the HUD | [12](../docs/12-rsli.md#what-is-inside) |
+| M5 | How far the pen moves after a glyph | its advance: a recording of Mission 01's win measures it on the interface's menu font (each glyph of "MISSION COMPLETE !" starts its advance after the last, the space's 6 included), and the game font is taken to space the same way | [12](../docs/12-rsli.md#what-is-inside) |
+| M5 | How the game draws its font: its 8-bit blend table and the text's colour | the atlas, sampled nearest, keyed on black and multiplied by the run's colour in display space, over everything after the HUD (a recording shows the interface font's grey shadow dark) | [12](../docs/12-rsli.md#what-is-inside) |
 | M6 | How the loader turns a `varset.var` default into a value | an integer type reads hex after `0x`, a decimal, or a float truncated; a float reads its decimal; anything else is 0 (every shipped default reads either way) | [15](../docs/15-behaviour.md#the-vocabulary-varsetvar) |
 | M6 | The formula parser and evaluator, beyond the operator table's priorities | parse by those priorities, left to right among equals, in doubles; `!` is 1 for 0, `&` and `\|` are logical, `N` holds to 0..1, `S` is the sign, `B` is 1 for non-zero, `A` the absolute value; an unknown name is refused (the shipped formulas use numbers, variables, `+ - *` and brackets) | [15](../docs/15-behaviour.md#a-statement) |
 | M6 | What a node naming a variable, operand, formula or handler that does not exist reads | the node does nothing; a switch to no handler ends the run; a run stops after a million nodes | [15](../docs/15-behaviour.md#how-a-handler-runs) |
@@ -316,7 +322,7 @@ engine pass replaces each with what was read and removes its row.
 | M6 | The three signatures a radar weighs against its sensitivities | every live object within the radar's range is detected | [25](../docs/25-sensors.md#a-scan-is-a-sphere-a-falloff-and-three-tests--read) |
 | M6 | Whether a guided round's velocity turns with it | it is kept in the round's frame, as a machine's is, and turns with it | [29](../docs/29-weapons.md#guided-rounds-differ-in-how-hard-they-steer--read-and-measured) |
 | M6 | What the script functions other than 19, 30, 31 and 32 do in play | a player script's other calls do nothing and answer 0; Mission 01's script calls none | [15](../docs/15-behaviour.md#what-the-functions-do) |
-| M6 | What the game shows after `MISSION_COMPLETE`, and string 6223's key | string 1012, "MISSION COMPLETE !" (1013 on a failure); a repeated message says string 6170 alone | [34](../docs/34-progression.md#not-established) |
+| M6 | String 6223's key | a repeated message says string 6170 alone | [34](../docs/34-progression.md#not-established) |
 | M6 | Whether scenery is among a radar's contacts | a target needs a unit record: trees and rocks are never listed | [25](../docs/25-sensors.md#the-players-target--read-and-measured) |
 | M6 | The unit record's `+0x98` and `+0x94`: where the right button's ray starts, and the margin its pick keeps from the unit | both 0 | [25](../docs/25-sensors.md#the-players-target--read-and-measured) |
 | M6 | Boarding a captured bot is read, but the engine drives only the hero | the captured unit joins the player's clan and stays where it stands; Enter on the player's own unit does nothing | [27](../docs/27-ownership.md#a-neutral-unit-is-taken-by-the-hero--read-and-measured) |
@@ -333,7 +339,8 @@ engine pass replaces each with what was read and removes its row.
 | M8 | What a unit record's `+0x30` is, which picks capturers and the acknowledgement voices | the size class of the chassis's name: t 1, l and h 2, m 3, b 4 | [31](../docs/31-packages.md#the-wingman-menu-from-first-person--read-and-measured) |
 | M8 | The acknowledgement's xorshift: its shifts and seed | 7, 9, 8 from 0xACE1, never repeating the last voice | [31](../docs/31-packages.md#the-wingman-menu-from-first-person--read-and-measured) |
 | M8 | The game's random source for a life update's spread | a 16-bit xorshift (7, 9, 8), seeded apart per unit | [24](../docs/24-motion.md#water-and-lava-beds-kill--read-and-measured) |
-| M8 | What follows the hero's death | the hero stops where it died, the mission fails with its voice and string 1013, and the progression stops | [34](../docs/34-progression.md#not-established) |
+| M8 | The two display scale queries a font's height and a text's width pass through to the 640 × 480 layout | the layout and its fonts scale by the screen's height over 480, the 640-wide layout centred across the screen; on the recording of Mission 01's win the title's glyphs step about 3% wider than their advances | [34](../docs/34-progression.md#after-the-outcome--read-and-measured) |
+| M8 | The shell's menus after a mission, the load-game screen, and `MISSIONS/dispatcher.ini` | Esc after the outcome closes the window, L does nothing, and a win is not written to the install | [34](../docs/34-progression.md#after-the-outcome--read-and-measured) |
 | M8 | A material's start stamp, from which its track is played, and the random a mode-3 track jumps by | the world clock's 0 for every material; a hash of the clock | [07](../docs/07-objects.md#how-a-material-reaches-the-device--read-and-measured) |
 | M8 | The areal search, the local path and its obstacle contours; the Wizard's heading curve | the straight line to the place, cut into at least three points a second or more apart at the walk's velocity, ending in the read stop; the heading is the curve's velocity's direction | [24](../docs/24-motion.md#not-established) |
 | M8 | How a velocity the Wizard writes combines with the velocity integrator, and whether its spin is a rate or a fraction | a driven machine takes the written velocity as its own and turns toward the heading at up to its live yaw rate | [24](../docs/24-motion.md#not-established) |
