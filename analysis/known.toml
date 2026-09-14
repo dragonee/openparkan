@@ -16541,3 +16541,196 @@ kind = "site"
 name = "MBehaviour init: +0x960 = the size class (vtable +0xd8, 0x1000cee0)"
 read = true
 doc = "docs/24-motion.md"
+
+# --- how the AI drives a machine: the walker and the wizard, ../docs/24-motion.md ---
+[[entry]]
+module = "Wizard.dll"
+at = "0x10001d50"
+kind = "function"
+name = "wizard takt: dt from IControl property 101, live block from 0x12, matrix; while +0x1f7 follow the points"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Wizard.dll"
+at = "0x10002c80"
+kind = "function"
+name = "wizard segment: drop due points, cubic from position and last velocity to the next point's; empty holds at 0x3331"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Wizard.dll"
+at = "0x10002f2d"
+kind = "site"
+name = "no point left: flags |= 0x3331 (all axes zero), next segment 1000 ms on"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Wizard.dll"
+at = "0x100031a0"
+kind = "function"
+name = "wizard sample: cubic position at t, velocity at t + dt/2 (+0x180), heading at t + dt (+0x18c)"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Wizard.dll"
+at = "0x100034c0"
+kind = "function"
+name = "wizard yaw: signed angle from the machine's axis to the heading / (dt x live turn rate), held to +-1"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Wizard.dll"
+at = "0x10003750"
+kind = "function"
+name = "wizard writes: machine-frame velocity through per-axis flag nibbles to IControl slot 5, (0,0,yaw) to slot 4, while +0x1f8"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Wizard.dll"
+at = "0x10001e10"
+kind = "function"
+name = "wizard 0x201 slot 17: append a 0x2c-byte movement point (position, velocity, heading, ms, flags)"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Wizard.dll"
+at = "0x10001e70"
+kind = "function"
+name = "wizard 0x201 slot 18: clear the movement points"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Wizard.dll"
+at = "0x10002b00"
+kind = "function"
+name = "wizard: set the write-enable byte +0x1f8"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Wizard.dll"
+at = "0x10003c25"
+kind = "site"
+name = "+0x1f7 follow points unless the unit word gives the player the unit (mode 1 and word 0, or word 3)"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10004440"
+kind = "function"
+name = "IControl slot 4: spin (+0x1d4) = v, clears the pending-turn byte +0x35d"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1003fbf0"
+kind = "function"
+name = "MWalker global path: same map object and areal need none; else 0x303 slot 14 areal list into +0xe8; 'Cannot Generate GlobalPath'"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1003daab"
+kind = "site"
+name = "walker point flags |= 0x3030 unless CanFly and not WalkChassis"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1003c540"
+kind = "function"
+name = "MWalker clear: empty the global, local and trajectory queues, set +0xb4"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10031ca0"
+kind = "function"
+name = "stay ground takt: fire control, clear the walker"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10031bd0"
+kind = "function"
+name = "stay ground start: fire control, +0x21c = 0, clear the walker"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1002adab"
+kind = "site"
+name = "follow radius: the parameter only when 20 < p < 30, else 20"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1002ae20"
+kind = "function"
+name = "follow takt: leader by LID and clan; past radius+20 or dz past radius+10, random spot +-radius, z+5, full speed, 77 tries"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1002b067"
+kind = "site"
+name = "follow: at most 77 random spots tried through SetTarget"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "ArealMap.dll"
+at = "0x1000aab0"
+kind = "function"
+name = "MHallWay QueryInterface: answers 0 and 0x303 (the path graph)"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "ArealMap.dll"
+at = "0x10017265"
+kind = "site"
+name = "MGraph::FormPath: 'Infinite cycle detected' guard on the back-walk"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1003d7f0"
+kind = "function"
+name = "MWalker stop point: last point + 0.5 x velocity, velocity 0, 1000 ms on, flags 0x3031 or 1, wizard slot 19"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1003d960"
+kind = "function"
+name = "MWalker hand-over: trajectory records past the wizard's count into slot 17; panic past 300"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Wizard.dll"
+at = "0x10003c12"
+kind = "site"
+name = "unit handed to the player: the wizard's movement points emptied"
+doc = "docs/24-motion.md"
+read = true

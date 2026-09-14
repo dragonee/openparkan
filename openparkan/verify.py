@@ -12190,6 +12190,40 @@ def check_settings(check, game: Path) -> None:
           f"value {settings.DONE} -- this install's progress, not the format")
 
 
+def check_walker(check, game: Path) -> None:
+    """The movement points a walker hands the wizard, as the chassis profiles decide them."""
+    held = profiles.load(game)
+    # Behavior.dll:0x1003daab -- a point keeps its side and vertical velocity
+    # only when the profile's CanFly is set and WalkChassis is not
+    free = {var: bool(v["CanFly"].value) and not v["WalkChassis"].value
+            for var, v in held.items() if var.startswith("chas_") and "CanFly" in v}
+    kinds = {var: held[var]["ChassisType"].value for var in free}
+    check("behpsp.res: only chas_fly keeps a point's side and vertical speed",
+          free and [v for v, f in free.items() if f] == ["chas_fly.var"]
+          and kinds["chas_fly.var"] == 1,
+          f"CanFly and not WalkChassis on {sorted(v for v, f in free.items() if f)} of "
+          f"{len(free)} chassis profiles; the rest get flags 0x3030, x and z held to 0")
+
+    shop = units.Workshop(game)
+    battle = game / "UNITS" / "UNITS" / "BATTLE"
+    seen = {}
+    for name in ("helic.dat", "tut1_mf1.dat", "tut1_e1.dat"):
+        unit = objects.load_unit(battle / name)
+        member = unit.components[0].ref.member.lower()
+        record = shop.library.get(member)
+        parsed = shop.armoury.controller(member)
+        top = parsed.triples[control.TRIPLE_TOP_SPEED]
+        turn = parsed.triples[control.TRIPLE_TURN]
+        seen[name] = (member, record.profile, parsed.mode,
+                      tuple(round(x, 1) for x in top), round(turn[2], 2))
+    check("Mission 01: helic and tut1_mf1 fly, tut1_e1 walks",
+          seen == {"helic.dat": ("r_t_02", "chas_fly.var", 0, (20.0, 33.3, 35.0), 4.0),
+                   "tut1_mf1.dat": ("r_m_02", "chas_fly.var", 0, (4.0, 34.7, 20.0), 3.8),
+                   "tut1_e1.dat": ("r_t_01", "chas_wlk.var", 0, (10.0, 26.4, 1.0), 3.5)},
+          f"{seen}: root chassis, profile, controller mode, top speed x/y/z m/s "
+          f"(triple 3) and yaw turn rate (triple 4 z)")
+
+
 def run(game: Path) -> int:
     """Run every check against ``game``.  Returns a process exit code."""
     results: list[tuple[str, bool, str]] = []
@@ -12219,7 +12253,7 @@ def run(game: Path) -> int:
         check_vocabulary, check_resources, check_briefing, check_progression,
         check_settings,
         check_research_streams, check_atmosphere_events,
-        check_varset_types, check_profiles,
+        check_varset_types, check_profiles, check_walker,
     )
     for fn in checks:
         fn(check, game)

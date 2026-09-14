@@ -267,9 +267,19 @@ readers were not traced, that is marked.
   the behaviour pull it off station. That fits the tip's "fixed firing point":
   **the guns still aim and fire through the unit's own fire control**, which the
   task sets to pick its own targets ([The fire control](#the-fire-control--read)).
+  **It moves nothing.** Its start and every takt clear the walker
+  (`0x10031bd0`, `0x10031ca0` → `0x1003c540`), emptying its three queues and
+  giving the wizard no new points
+  ([24-motion.md](24-motion.md#how-the-ai-drives-a-machine--read-and-measured)).
 - **Route — go.** It walks to the place at `Go_SpeedPercent` 1.0 of the unit's
   speed and ends when it stops there ("We are staying... task over",
-  `0x1002b670`), or fails if the place is unreachable. The go task will not be
+  `0x1002b670`), or fails if the place is unreachable. It acts only when the
+  walker is idle. Within 30 of the place it is over; 1.5 counts as arrival
+  when the order names an object. Otherwise it calls `SetTarget` again.
+  "Unreachable" is that call's refusal: out of the map, no areal map, or no
+  global path
+  ([24-motion.md](24-motion.md#how-the-ai-drives-a-machine--read-and-measured)).
+  The go task will not be
   interrupted by reasons 0–2 or 5, only 3 and 4 (`0x1002b390`).
   **Route does not chain waypoints** (*read*, as a search). The dispatcher's
   case for Route (`iron3d.dll:0x10079230`) first empties the unit record's list
@@ -378,8 +388,22 @@ readers were not traced, that is marked.
   until life, charge and ammunition are at 98%
   ([27-ownership.md](27-ownership.md)). `ORDER_ROBOT_REPARE` builds the same
   task.
-- **Follow me — follow.** It keeps within a radius taken from the order's
-  parameter: the menu passes 50 (`0x1002ad80`, "FollowRadius").
+- **Follow me — follow.** It keeps near the logic id it is given, within a
+  radius taken from the order's parameter (`0x1002ad80`, "FollowRadius").
+  - **The radius is 20 unless the parameter lies strictly between 20 and 30**
+    (`0x1002adab`). So the menu's 50 gives 20 — *read*.
+  - **Each takt** (`0x1002ae20`) finds the leader through the system areal map.
+    The task fails once the leader is gone or on another clan. It measures when
+    the walker is idle or its check timer (`+0x60`) fires.
+  - **It picks a new place** when the leader is more than radius + 20 away,
+    or more than radius + 10 above or below (`0x1002aed7`). It does the same
+    when close but `MBehaviour` `+0x140` is not −1 (a field not identified).
+  - **Picking is gated** by a second timer (`+0x68`). It tries up to 77 random
+    spots in the square ±radius about the leader, at the leader's height + 5
+    (`0x1002b067`). It hands the first that `SetTarget` accepts over at the
+    unit's full speed (`+0x5fc`, no percentage), the same near or far.
+  - **When the leader stops**, the follower walks out its last trajectory to
+    that spot and stays there. Neither timer's period was read.
 - **Attack.** `M_Task_Attack` on a logic id. It cancels when the unit has no
   weapon, takes the nearest target when given none (`0x10026fd0`), and ends
   when the target is dead ("mission accomplished", `0x10027250`). By its

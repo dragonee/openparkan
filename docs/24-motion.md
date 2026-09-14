@@ -1106,7 +1106,114 @@ asks for the live top speed (IControl 145) and compares it with 1
   Small Tower and the two targets, and 0 on every wheeled, tracked and flying
   chassis. That is under the 2 m/s floor either way — *measured*.
 
+## How the AI drives a machine — *read*, and *measured*
+
+The AI presses no keys. A task gives `MWalker` (`MBehaviour` `+0xb8`) a place
+and a speed. The walker plans and cuts the plan into timed **movement points**.
+It hands them to the unit's interface `0x201`: the `Wizard.dll` object that
+also decides who drives ([29-weapons.md](29-weapons.md)). The Wizard follows
+the points and writes the machine's velocity and spin.
+
+**The walker** (`Behavior.dll`):
+
+- **The global path** (`0x1003fbf0`). Two places on the same map object
+  (place `+0x1c`) and in the same areal (`+0x20`) need no path. Otherwise the
+  clan areal map's slot 7 names the map object, and that object's interface
+  `0x303` slot 14 returns the areals from start to goal. Each areal after the
+  first goes into the global queue `+0xe8`. A count of 0 or less fails
+  quietly. Places on different map objects log "Cannot Generate GlobalPath".
+  The local queue `+0xfc` and the trajectory `+0x110` (records of `0x48`
+  bytes) are built from it.
+- **The search** is `ArealMap.dll`'s `MGraph`, not read. `MHallWay` answers
+  `0x303` (`ArealMap.dll:0x1000aab0`), and `FormPath` walks back through a
+  chain it guards against cycles (`0x10017265`).
+- **Each takt** (`0x1003d280`) looks up the unit's areal ("is out of
+  ArealMap" when there is none). It grows the trajectory to at least
+  `PathFind_MinPointInTrajectory`, 3 points, in at most six tries.
+- **The hand-over** (`0x1003d960`) sends the Wizard every record past the
+  Wizard's own count, through slot 17. It panics past 300. A point holds a
+  position, a velocity, a heading, a time in ms and flags. Bit 0 comes from
+  the record's byte `+0x44`. **`0x3030` is added unless the chassis profile
+  has `CanFly` and not `WalkChassis`** (`0x1003daab`).
+- **A stop** (`0x1003d7f0`) goes through slot 19. It is the last point's
+  position plus 0.5 × its velocity, at velocity 0, 1000 ms later, with flags
+  `0x3031` or 1. From v to 0 over a second covering 0.5 v is an even
+  deceleration, so the easing is in the points — *derived*.
+- **A clear** (`0x1003c540`) empties the three queues and sets `+0xb4`.
+
+**The point flags** apply to the velocity in the machine's frame, one nibble
+per axis: x at bit 4, y at bit 8, z at bit 12 (`Wizard.dll:0x10003750`).
+
+| nibble | the axis |
+|---:|---|
+| 1 | never negative |
+| 2 | never positive |
+| 3 | 0 |
+| 5, 6 | + or − the live top speed on that axis |
+
+So `0x3030` leaves only forward and back: a walker, wheel or track neither
+side-slips nor climbs by its points. `0x3331` zeroes all three axes.
+
+**The Wizard's takt** (`Wizard.dll:0x10001d50`):
+
+1. **Inputs.** dt is IControl property 101 (ms) × 0.001. The live parameter
+   block comes from property `0x12`, and the matrix from `IGameObject` slot 8.
+2. **Who drives.** It follows only while `+0x1f7` is set. That is off when
+   the unit's own group word `+0x200` gives it to the player: mode 1 with
+   word 0, or word 3 (`0x10003c25`). With mode 1 and word 0 the refresh also
+   empties the Wizard's points (`0x10003c12`).
+3. **A new segment** (`0x10002c80`) starts when the last one is due. It drops
+   the points whose time has passed. It fits a cubic from the machine's
+   position and the last velocity to the next point's position and velocity,
+   over the time between (the 3 and 2 at `0x100030cc`, `0x1000310d`). With no
+   point left it heads for the stop point if there is one. Otherwise it holds:
+   velocity 0 and flags `0x3331`, 1000 ms at a time (`0x10002f2d`).
+4. **Sampling** (`0x100031a0`) takes the curve's velocity at t + dt/2 and its
+   heading at t + dt. With flag bit 0 the heading is a straight blend.
+5. **The writes** (`0x10003750`), only while `+0x1f8` is set (1 from the
+   constructor; `0x10002b00` sets it):
+   - **velocity**: the sampled velocity in the machine's frame, through the
+     flags, into IControl slot 5, `SetTangSpeed` (`+0x1c8`,
+     `Control.dll:0x100044a0`);
+   - **spin**: (0, 0, s) into slot 4 (`+0x1d4`, `0x10004440`). s is the
+     signed yaw angle from the machine's forward axis to the heading, ÷ (dt ×
+     the live yaw turn rate), held to ±1 (`0x100034c0`).
+
+   It never writes the command `+0x1bc`, the pending turn `+0x1e0` or the
+   strafe angle.
+
+**Flying** — *measured*, then *derived*. `CanFly` without `WalkChassis` is on
+`chas_fly.var` alone, of the six chassis profiles. So only a flyer's points
+keep x and z, and only a flyer strafes and climbs along its path. Mission 01's
+two neutral warriors both fly:
+
+| unit | chassis | top speed x, y, z (m/s) | yaw rate |
+|---|---|---|---:|
+| `helic.dat` | `r_t_02` Tiny Helicopter, `chas_fly` | 20, 33.3, 35 | 4.0 |
+| `tut1_mf1.dat` | `r_m_02` Medium Flying, `chas_fly` | 4, 34.7, 20 | 3.8 |
+| `tut1_e1.dat` | `r_t_01` Tiny Spider, `chas_wlk` | 10, 26.4, 1 | 3.5 |
+
+All three controllers are mode 0, with no gravity term
+([Gravity](#gravity--read-and-measured)). Moving a flyer to a point needs
+nothing more than a walker does: timed points with flags 0 or 1, the cubic's
+velocity in the machine's frame each tick, and the yaw spin. The height its
+points are given is not traced. `Movement_FlyHeight` is 40 and
+`FlyNearLandHeight` 15, by name only.
+
 ## Not established
+
+- How the velocity integrator's pull toward *command × top speed*, with the
+  command left at 0, combines with a velocity the Wizard writes every frame;
+  and whether the Wizard's spin, held to ±1, is a rate or a fraction (a key
+  sends +0.7). A stand-in takes the written velocity as the machine's own, and
+  s × the live yaw rate as its turn.
+- The areal search (`MGraph`: algorithm, costs, and what the land answers for
+  `0x303`), the local path and its obstacle contours, the Wizard's heading
+  curve (`0x10003d80`), and who reads `Movement_FlyHeight`. A stand-in
+  searches the areal adjacency of [08-arealmap.md](08-arealmap.md) by A*, with
+  straight lines between edge midpoints.
+- Whether the walker's clear (`0x1003c540`) also empties the points the Wizard
+  already holds. `ClearWizardPath` is logged at `0x10040e3b`.
 
 - ~~How interface `0x25` slot 3 turns an object's level-0 triangles into a
   push, and what slot 2 does with its 0.5~~ — **read**: the push accumulates
