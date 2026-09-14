@@ -6,7 +6,7 @@
 //! parkan [--game DIR] [--mission MISSIONS/…] [--fly]
 //!        [--screenshot OUT.png] [--size WxH] [--top-down] [--look X,Y,Z,TX,TY,TZ]
 //!        [--headless] [--ticks N] [--hold SCAN_W,SCAN_A] [--mouse DX,DY] [--trace] [--sway]
-//!        [--capture-idle] [--stretch-hud] [--outcome won|lost] [--text "…"] [--face NAME,DISTANCE]
+//!        [--capture-idle] [--stretch-hud] [--outcome won|lost] [--text "…"] [--face NAME,DISTANCE] [--at X,Y,YAW]
 //!        [--skip-briefing] [--briefing-at SECONDS] [--objectives] [--map]
 //! ```
 //!
@@ -97,6 +97,8 @@ struct Args {
     text: Option<String>,
     /// `--face NAME,DISTANCE`: the hero starts that far from that object, facing it.
     face: Option<(String, f32)>,
+    /// `--at X,Y,YAW`: the hero starts on the ground at X,Y, turned to YAW.
+    at: Option<[f32; 3]>,
     /// `--skip-briefing`: the mission starts in the cockpit, as Esc in its briefing would.
     skip_briefing: bool,
     /// `--briefing-at SECONDS`: a screenshot of the briefing that far in.
@@ -126,6 +128,7 @@ fn args() -> Result<Args> {
         outcome: None,
         text: None,
         face: None,
+        at: None,
         skip_briefing: false,
         briefing_at: None,
         objectives: false,
@@ -158,6 +161,10 @@ fn args() -> Result<Args> {
                 let v = value()?;
                 let (name, distance) = v.split_once(',').context("--face is NAME,DISTANCE")?;
                 out.face = Some((name.to_ascii_lowercase(), distance.parse()?));
+            }
+            "--at" => {
+                let v: Vec<f32> = value()?.split(',').map(str::parse).collect::<Result<_, _>>()?;
+                out.at = Some(v.try_into().map_err(|_| anyhow::anyhow!("--at takes X,Y,YAW"))?);
             }
             "--ticks" => out.ticks = value()?.parse()?,
             "--hold" => out.hold = value()?.split(',').map(str::to_owned).collect(),
@@ -222,6 +229,11 @@ fn rehearse(play: &mut scene::Play, loaded: &scene::Loaded, args: &Args) {
             Some(t) if play.stand_facing(t, *distance, 0.0) => {}
             _ => eprintln!("--face: no place {distance} from an object {name}"),
         }
+    }
+    if let Some([x, y, yaw]) = args.at
+        && !play.stand_at(x, y, yaw)
+    {
+        eprintln!("--at: no ground at {x}, {y}");
     }
     for key in &args.hold {
         play.hero.key(key, true);

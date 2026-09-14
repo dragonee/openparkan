@@ -41,6 +41,7 @@ use parkan_sim::wizard::{GROUND_POINT, straight_walk, walk_speed};
 
 use crate::assembly::Assembly;
 use crate::battle::Battle;
+use crate::buildings::{Building, Child, Fired, Standing};
 use crate::fx::{Fx, Owner};
 use crate::hero::Hero;
 use crate::models::Objects;
@@ -83,6 +84,26 @@ pub const FLY_NEAR_LAND: f32 = 15.0;
 pub const SPEED_MAXIMUM_FACTOR: f32 = 1.0;
 /// A turret channel this close to its target counts as settled.
 pub const AIM_SETTLED: f32 = 0.005;
+/// A plant's `Type`: its pod opens the factory screen for the player (docs/27, "Capture").
+pub const BUILDING_PLANT: u32 = 0x8000_0010;
+/// The System line an ownership change shows (`iron3d.dll:0x100a48a0`).
+pub const STRING_BUILDING_CAPTURED: u32 = 5039;
+/// What the player hears when a building changes hands: taken from a neutral or an ally,
+/// taken from an enemy, and lost (`iron3d.dll:0x100a48a0`, docs/27).
+pub const VOICE_NBUILD_CAPTURE: &str = "VOICE_NBUILD_CAPTURE";
+pub const VOICE_EBUILD_CAPTURE: &str = "VOICE_EBUILD_CAPTURE";
+pub const VOICE_BUILD_CAPTURE: &str = "VOICE_BUILD_CAPTURE";
+pub const VOICE_SELECTED: &str = "VOICE_SELECTED";
+
+/// A view mode on the interface's stack (docs/39-boarding.md, "The game view keeps a stack
+/// of modes"): the hero on foot, or a building's screen.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Mode {
+    /// Mode 0.
+    OnFoot,
+    /// Mode 5 with the building that is target `t`: the factory screen (docs/36).
+    Factory(usize),
+}
 
 /// What a target is beside what a round strikes: its clan, its `Type` word, its logical id.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -195,6 +216,12 @@ pub struct Play {
     /// While a briefing plays, every object but the hero is paused (property `0x20a`) and
     /// the clan scripts wait (docs/21-briefing.md, "The world meanwhile").
     pub paused: bool,
+    /// The buildings with doors or a control pod.
+    pub buildings: Vec<Building>,
+    /// The interface's mode stack, its front last.
+    pub modes: Vec<Mode>,
+    /// The buildings the player has selected, by target.
+    pub selected: Vec<usize>,
 }
 
 /// A round about to leave a barrel.
@@ -416,6 +443,9 @@ impl Play {
             })
             .collect();
         let target_count = battle.combat.targets.len();
+        let buildings: Vec<Building> = (0..target_count)
+            .filter_map(|t| Building::load(&mut assembly, mission, battle.objects[t], t))
+            .collect();
         let mut play = Play {
             hero,
             ground,
@@ -445,6 +475,9 @@ impl Play {
             deaths: Vec::new(),
             deleted: vec![false; target_count],
             robots,
+            buildings,
+            modes: vec![Mode::OnFoot],
+            selected: Vec::new(),
         };
         for i in 0..play.turret_effects.len() {
             let e = play.turret_effects[i].clone();
@@ -480,13 +513,25 @@ impl Play {
             return false;
         };
         let facing = (at_target - at).with_z(0.0).normalize();
+        self.place_hero(Vec3::new(at.x, at.y, at_target.z + 20.0), (-facing.x).atan2(facing.y));
+        true
+    }
+
+    /// Stand the hero on the highest ground or building floor at (x, y), turned to `yaw`.
+    /// False where there is none.
+    pub fn stand_at(&mut self, x: f32, y: f32, yaw: f32) -> bool {
+        let Some(hit) = self.ground.below(x, y, 10_000.0) else { return false };
+        self.place_hero(Vec3::new(x, y, hit.point.z + 2.0), yaw);
+        true
+    }
+
+    fn place_hero(&mut self, at: Vec3, yaw: f32) {
         let w = &mut self.hero.walker;
-        w.body.position = Vec3::new(at.x, at.y, at_target.z + 20.0);
-        w.body.yaw = (-facing.x).atan2(facing.y);
+        w.body.position = at;
+        w.body.yaw = yaw;
         w.follow_ground(&self.ground);
         w.from = (w.body.position, w.body.yaw);
         w.from_heading = w.body.yaw;
-        true
     }
 
     /// Whether clan `other` is hostile to the player's: another clan, not nature's, toward
@@ -840,6 +885,9 @@ impl Play {
             shots
         };
         let now = self.hero.time_ms;
+        if !self.paused {
+            self.tick_buildings(now);
+        }
         let mut events = self.ground_damage(now);
         let launches = launches(&self.hero.robot, None, &shots, &self.battle, &self.ground);
         self.launch(launches, now);
@@ -1017,8 +1065,136 @@ impl Play {
                 let name = wears.get(part)?.get(usize::from(material & 0xFF))?;
                 materials.get(name).map(|m| (m.surface, m.damage_rate))
             });
+        let mut solid = solid;
+        if let Some(b) = self.buildings.iter().find(|b| b.target == t) {
+            for node in solid.nodes.iter_mut().filter(|n| n.part == b.part) {
+                node.open = b.open_door_node(node.node);
+            }
+        }
         if let Some(s) = self.ground.solids.get_mut(t) {
             *s = Solid { present: s.present, ..solid };
+        }
+    }
+
+    /// The mode at the front of the interface's stack.
+    pub fn mode(&self) -> Mode {
+        self.modes.last().copied().unwrap_or(Mode::OnFoot)
+    }
+
+    /// Roll the stack back one mode (`0x10062ff0`): a building's screen gives the hero back
+    /// to the player. The bottom mode stays.
+    pub fn roll_back(&mut self) -> bool {
+        if self.modes.len() <= 1 {
+            return false;
+        }
+        self.modes.pop();
+        true
+    }
+
+    /// Every building's doors and pod for this tick, with the units standing on it (a unit
+    /// whose ground is the building's face is its child, docs/24): a door or pod that moved
+    /// poses its nodes and rebuilds its faces, and a pod that fires runs the capture.
+    fn tick_buildings(&mut self, now: f64) {
+        let mut children: Vec<(usize, Standing)> = Vec::new();
+        if !self.hero.dead()
+            && let Some((s, _)) = self.hero.walker.ground.and_then(|h| h.solid)
+        {
+            children.push((
+                s,
+                Standing {
+                    child: Child::Hero,
+                    position: self.hero.walker.body.position,
+                    centre: self.hero.collision_centre(),
+                    radius: self.hero.collision.1,
+                },
+            ));
+        }
+        for (t, robot) in &self.robots {
+            if let Some((s, _)) = robot.walker.ground.and_then(|h| h.solid)
+                && self.battle.combat.targets.get(*t).is_some_and(|x| x.alive)
+            {
+                children.push((
+                    s,
+                    Standing {
+                        child: Child::Robot(*t),
+                        position: robot.walker.body.position,
+                        centre: robot.collision_centre(),
+                        radius: robot.collision.1,
+                    },
+                ));
+            }
+        }
+        let mut moved = Vec::new();
+        let mut fired = Vec::new();
+        for b in &mut self.buildings {
+            let standing: Vec<Standing> =
+                children.iter().filter(|(s, _)| *s == b.target).map(|(_, c)| *c).collect();
+            let Some(part) =
+                self.battle.combat.targets.get_mut(b.target).and_then(|t| t.parts.get_mut(b.part))
+            else {
+                continue;
+            };
+            let phases: Vec<_> = b.doors.iter().map(|d| d.phase).collect();
+            let (changed, fire) = b.tick(now, part, &standing);
+            if changed {
+                b.pose(part);
+            }
+            if changed || b.doors.iter().map(|d| d.phase).ne(phases) {
+                moved.push(b.target);
+            }
+            fired.extend(fire);
+        }
+        for t in moved {
+            self.rebuild_solid(t);
+        }
+        for f in fired {
+            self.pod_fired(f);
+        }
+    }
+
+    /// A pod's firing (`iron3d.dll:0x10061050`): a building of another clan changes owner,
+    /// with string 5039 and its voice (`0x100a48a0`); then, for the player's own unit, the
+    /// building opens (`0x10062630`): a plant's screen, or any other building selected.
+    fn pod_fired(&mut self, fired: Fired) {
+        let t = fired.target;
+        let taker = match fired.child {
+            Child::Hero => Some(self.player_clan),
+            Child::Robot(r) => self.units.get(r).and_then(|u| u.clan),
+        };
+        let Some(taker) = taker else { return };
+        let owner = self.units[t].clan;
+        if owner != Some(taker) {
+            self.units[t].clan = Some(taker);
+            if let Some(p) = self.progression.as_mut() {
+                p.progress.captured(self.units[t].logical_id, taker);
+            }
+            if let Some(p) = self.progression.as_ref() {
+                if let Some(text) = p.strings.get(&STRING_BUILDING_CAPTURED) {
+                    self.says.push(Say::Text(crate::progress::Sender::System, text.clone()));
+                }
+                let voice = if taker == self.player_clan {
+                    if self.hostile(owner) { VOICE_EBUILD_CAPTURE } else { VOICE_NBUILD_CAPTURE }
+                } else if owner == Some(self.player_clan) {
+                    VOICE_BUILD_CAPTURE
+                } else {
+                    ""
+                };
+                self.says.extend(p.sound(voice).map(Say::Voice));
+            }
+        }
+        // The opening acts only for the player's own unit (`0x10062630`).
+        if fired.child != Child::Hero || taker != self.player_clan {
+            return;
+        }
+        if !self.selected.contains(&t) {
+            self.selected.push(t);
+            if let Some(v) = self.progression.as_ref().and_then(|p| p.sound(VOICE_SELECTED)) {
+                self.says.push(Say::Voice(v));
+            }
+        }
+        if self.units[t].type_word == BUILDING_PLANT {
+            self.hero.release_keys();
+            self.modes.push(Mode::Factory(t));
         }
     }
 
@@ -1357,23 +1533,24 @@ impl Play {
     /// move and ground contact: against every placed object whose sphere its swept sphere
     /// meets, the hero the mover and taking the whole push.
     ///
+    /// A building's faces push every unit on it or near it, the one it stands on included,
+    /// through the building's own pass (docs/24, "Walking into a building"), and an open
+    /// door's faces let it by.
+    ///
     /// STAND-IN: docs/24-motion.md#collision-between-objects--read -- the pass is read for
     /// every pair with a contact record; the engine moves only the hero, so the hero is
-    /// always the mover and nothing else is pushed, and a machine standing on a building is
-    /// taken to have left the pass for the building's own, so the deck it stands on does
-    /// not push it.
+    /// always the mover and nothing else is pushed.
     fn collide(&mut self, from: Vec3) {
         let to = self.hero.collision_centre();
         let radius = self.hero.collision.1;
-        let standing_on = self.hero.walker.ground.and_then(|h| h.solid).map(|(s, _)| s);
         for (i, target) in self.battle.combat.targets.iter().enumerate() {
             if let Some(s) = self.ground.solids.get_mut(i) {
                 s.present = target.alive;
             }
         }
         let mut total = Vec3::ZERO;
-        for (i, obstacle) in self.ground.solids.iter().enumerate() {
-            if !obstacle.present || Some(i) == standing_on {
+        for obstacle in &self.ground.solids {
+            if !obstacle.present {
                 continue;
             }
             let end = to + total;

@@ -105,6 +105,18 @@ impl Item {
         }
     }
 
+    /// Switch the item on, to open, or off, to close: the switch word's low bits 1 or 2, with
+    /// no end mode, so the progress holds at its end and the word clears (`0x10020a28`,
+    /// docs/28, "What a device's value turns"). A door and a control pod stop this way.
+    pub fn switch(&mut self, on: bool) {
+        self.state = if on { OPENING } else { CLOSING };
+    }
+
+    /// Whether the switch word has cleared: the item has stopped at an end.
+    pub fn stopped(&self) -> bool {
+        self.state == 0
+    }
+
     /// Bytes 1 and 2's sources, weighted: 1 and 0 where a byte picks nothing.
     pub fn rate(&self, motion: &Motion) -> f32 {
         let first = motion.source(self.flags >> 8 & 0xFF, 1.0);
@@ -314,6 +326,35 @@ mod tests {
         }
         // It notices within an idle step and swings over one second at a rate of 1.
         assert!((990.0..1150.0).contains(&(t - 200.0)), "swung by {t}");
+    }
+
+    #[test]
+    fn a_switched_item_opens_in_steps_and_stops_at_its_end() {
+        // A pod at rate 1 with a channel at 0.2: three steps of 0.45, 0.9, 1, each 2250 ms
+        // long but the last, and the word clears as the third step starts (docs/27).
+        let mut item = Item::new(0, &record(0, vec![0]), &[channel(0.2, 0, 0.0)]);
+        item.state = 0;
+        let motion = Motion::default();
+        item.tick(0.0, &motion, true);
+        item.switch(true);
+        let mut t = 0.0;
+        while !item.stopped() && t < 10_000.0 {
+            t += 1000.0 / 60.0;
+            item.tick(t, &motion, true);
+        }
+        // The idle step runs out at 100 ms, then two steps of 2250 ms.
+        assert!((4500.0..4700.0).contains(&t), "stopped at {t}");
+        while t < 6000.0 {
+            t += 1000.0 / 60.0;
+            item.tick(t, &motion, true);
+        }
+        assert_eq!(item.now[0], 1.0);
+        item.switch(false);
+        while t < 12_000.0 {
+            t += 1000.0 / 60.0;
+            item.tick(t, &motion, true);
+        }
+        assert!(item.stopped() && item.now[0] == 0.0);
     }
 
     #[test]

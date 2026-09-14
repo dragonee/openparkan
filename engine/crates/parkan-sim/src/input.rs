@@ -98,6 +98,8 @@ pub struct Pilot {
     pub selects: Vec<i32>,
     /// The switches the table's state rows turn, which the HUD's indicators show.
     pub switches: Switches,
+    /// The keys down, in the order they went down.
+    held: Vec<String>,
 }
 
 /// A unit's switched systems, as the input table's `MCMD_STATE` rows leave them.
@@ -161,6 +163,15 @@ impl Pilot {
             fire: false,
             selects: Vec::new(),
             switches: Switches::default(),
+            held: Vec::new(),
+        }
+    }
+
+    /// Every key still down comes up, as `stdClearKeyboard` leaves the keyboard when the
+    /// player's view changes hands (docs/39-boarding.md, "Boarding").
+    pub fn release_all(&mut self, hands: &mut Hands) {
+        for key in std::mem::take(&mut self.held).into_iter().rev() {
+            self.key(&key, false, hands);
         }
     }
 
@@ -198,6 +209,10 @@ impl Pilot {
     /// goes down or comes up.
     pub fn key(&mut self, key: &str, pressed: bool, hands: &mut Hands) {
         let rows = self.matching(key, pressed);
+        self.held.retain(|k| k != key);
+        if pressed {
+            self.held.push(key.to_owned());
+        }
         if key == SHIFT {
             self.shift = pressed;
         }

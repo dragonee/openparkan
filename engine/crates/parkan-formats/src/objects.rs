@@ -98,6 +98,20 @@ impl Library {
             .filter(|s| s.is_set() && s.suffix().is_empty())
             .find_map(|s| self.record_mesh(self.get(&s.member), depth + 1))
     }
+
+    /// A record's slot with `suffix`, following a FORT's mesh-less slots the same way: a
+    /// building's record names the record that carries its `.ctl`.
+    pub fn record_slot(&self, record: Option<&Record>, suffix: &str, depth: usize) -> Option<ResourceRef> {
+        let record = record.filter(|_| depth <= 3)?;
+        if let Some(slot) = record.slot_with_suffix(suffix) {
+            return Some(slot.clone());
+        }
+        record
+            .slots
+            .iter()
+            .filter(|s| s.is_set() && s.suffix().is_empty())
+            .find_map(|s| self.record_slot(self.get(&s.member), suffix, depth + 1))
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]

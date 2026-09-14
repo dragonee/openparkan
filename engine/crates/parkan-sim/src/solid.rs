@@ -41,6 +41,12 @@ pub struct SolidNode {
     pub centre: Vec3,
     pub radius: f32,
     pub faces: std::ops::Range<usize>,
+    /// The part and the mesh node it is.
+    pub part: usize,
+    pub node: usize,
+    /// An open door's node, whose faces let a mover through (`IBuilding` slot 17,
+    /// `AniMesh.dll:0x1000dd13`).
+    pub open: bool,
 }
 
 /// A placed object's faces.
@@ -113,6 +119,9 @@ impl Solid {
                     centre: place([cx, cy, cz]),
                     radius: r * part.scale,
                     faces: start..faces.len(),
+                    part: p,
+                    node: i,
+                    open: false,
                 });
             }
         }
@@ -252,7 +261,8 @@ pub fn push(start: Vec3, end: Vec3, radius: f32, obstacle: &Solid) -> Vec3 {
     let mut total = Vec3::ZERO;
     let move_ = end - start;
     if move_.length_squared() > 0.0 {
-        for face in obstacle.faces.iter().filter(|f| !passes(f, obstacle)) {
+        let shut = obstacle.nodes.iter().filter(|n| !n.open).flat_map(|n| n.faces.clone());
+        for face in shut.map(|f| &obstacle.faces[f]).filter(|f| !passes(f, obstacle)) {
             if move_.dot(face.normal) < 0.0
                 && let Some(q) = crate::hit::plane_crossing(start, end, face.normal, face.a)
                 && inside(q, face.a, face.b, face.c)
@@ -266,7 +276,7 @@ pub fn push(start: Vec3, end: Vec3, radius: f32, obstacle: &Solid) -> Vec3 {
 
     // Gather the faces within the sphere at its end.
     let mut near: Vec<(f32, Vec3, usize)> = Vec::new();
-    for node in &obstacle.nodes {
+    for node in obstacle.nodes.iter().filter(|n| !n.open) {
         if node.centre.distance(end) > node.radius + radius {
             continue;
         }
@@ -348,7 +358,14 @@ mod tests {
             ground: true,
             present: true,
             faces: vec![face(a, b, c), face(a, c, d)],
-            nodes: vec![SolidNode { centre: Vec3::new(5.0, 5.0, z), radius: 7.1, faces: 0..2 }],
+            nodes: vec![SolidNode {
+                centre: Vec3::new(5.0, 5.0, z),
+                radius: 7.1,
+                faces: 0..2,
+                part: 0,
+                node: 0,
+                open: false,
+            }],
         }
     }
 
@@ -388,7 +405,14 @@ mod tests {
             ground: false,
             present: true,
             faces: vec![face(a, c, b), face(a, d, c)],
-            nodes: vec![SolidNode { centre: Vec3::ZERO, radius: 14.2, faces: 0..2 }],
+            nodes: vec![SolidNode {
+                centre: Vec3::ZERO,
+                radius: 14.2,
+                faces: 0..2,
+                part: 0,
+                node: 0,
+                open: false,
+            }],
         };
         // Standing 1.5 in front of it with a radius of 2: pushed back by 0.5.
         let p = push(Vec3::new(-1.5, 0.0, 0.0), Vec3::new(-1.5, 0.0, 0.0), 2.0, &wall);

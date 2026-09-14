@@ -97,6 +97,12 @@ impl Hero {
         pilot.key(scan, pressed, &mut hands);
     }
 
+    /// Every key still down comes up.
+    pub fn release_keys(&mut self) {
+        let (pilot, mut hands) = self.hands();
+        pilot.release_all(&mut hands);
+    }
+
     /// The input update at the current game time: the rows held down run again.
     pub fn update_input(&mut self) {
         let now = self.robot.time_ms;

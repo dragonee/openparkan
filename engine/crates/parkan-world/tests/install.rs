@@ -1435,3 +1435,93 @@ fn mission_02s_script_greets_the_hero_and_leaves_its_captures_open_until_they_ar
     assert!(p.progress.played[&7] && p.progress.played[&11]);
     assert_eq!(p.progress.objectives.iter().map(|o| o.state).collect::<Vec<_>>(), vec![1, 0, 0, 0]);
 }
+
+#[test]
+#[ignore = "needs the game install"]
+fn mission_02s_factory_pod_captures_the_factory_and_opens_its_screen() {
+    use parkan_world::play::Mode;
+    use parkan_world::progress::{Say, Sender};
+
+    let (mut play, _) = mission_02_play();
+    // The pod, node 25 of fr_b_plant, over the pod room's floor 12.4 below the entrance
+    // (docs/24, "Walking into a building").
+    let w = &mut play.hero.walker;
+    w.body.position = glam::Vec3::new(391.28, 740.08, 146.0);
+    w.follow_ground(&play.ground);
+    w.from = (w.body.position, w.body.yaw);
+    let factory = play.buildings.iter().position(|b| b.doors.len() == 3).unwrap();
+    let t = play.buildings[factory].target;
+    let (mut tick, mut says) = (0, Vec::new());
+    while play.mode() == Mode::OnFoot && tick < 600 {
+        play.hero.update_input();
+        play.tick(1000.0 / 60.0, [0.0; 2]);
+        says.append(&mut play.says);
+        tick += 1;
+    }
+    eprintln!(
+        "hero at {:?} on {:?}",
+        play.hero.walker.body.position,
+        play.hero.walker.ground.and_then(|h| h.solid)
+    );
+    // It opens in 4.5 s at a rate of 0.2, and fires then (docs/27's table).
+    let seconds = tick as f32 / 60.0;
+    assert!((4.4..4.8).contains(&seconds), "the pod fired at {seconds} s");
+    assert_eq!(play.mode(), Mode::Factory(t));
+    assert_eq!(play.units[t].clan, Some(play.player_clan));
+    assert!(
+        says.iter().any(|s| matches!(s, Say::Text(Sender::System, text) if text == "Building is captured")),
+        "{says:?}"
+    );
+    let p = play.progression.as_mut().unwrap();
+    assert_eq!(p.progress.owner(0x8000_0001_u32 as i32), 0);
+}
+
+#[test]
+#[ignore = "needs the game install"]
+fn mission_02s_factory_door_opens_for_the_hero_on_its_forecourt_and_shuts_after_it_leaves() {
+    use parkan_world::buildings::Phase;
+
+    let (mut play, _) = mission_02_play();
+    assert!(play.stand_at(395.8, 915.0, 3.117), "north of the entrance, facing it");
+    let b = play.buildings.iter().position(|b| b.doors.len() == 3).expect("fr_b_plant's three doors");
+    let t = play.buildings[b].target;
+    let node = play.buildings[b].doors[0].nodes[0];
+    let z0 = play.battle.combat.targets[t].parts[play.buildings[b].part].nodes[node].translation[2];
+    play.hero.key("SCAN_W", true);
+    let (mut held_at, mut open_at) = (None, None);
+    for tick in 0..400 {
+        play.hero.update_input();
+        play.tick(1000.0 / 60.0, [0.0; 2]);
+        let d = &play.buildings[b].doors[0];
+        if d.held && held_at.is_none() {
+            held_at = Some(tick);
+            assert_eq!(
+                play.hero.walker.ground.and_then(|h| h.solid).map(|s| s.0),
+                Some(t),
+                "on the forecourt"
+            );
+        }
+        if d.phase == Phase::Open && open_at.is_none() {
+            open_at = Some(tick);
+        }
+    }
+    // A rate of 0.4 opens in 2.5 s, its word clearing at 0.9 / 0.4 = 2.25 s after the first
+    // step starts, which waits up to 100 ms.
+    let (held, open) = (held_at.expect("the hero holds the door"), open_at.expect("the door opens"));
+    let seconds = (open - held) as f32 / 60.0;
+    assert!((2.2..2.45).contains(&seconds), "open {seconds} s after it was held");
+    let z1 = play.battle.combat.targets[t].parts[play.buildings[b].part].nodes[node].translation[2];
+    assert!(z0 - z1 > 10.0, "the entrance door sinks: {z0} to {z1}");
+    // Walked back out, it closes 5 s after it opened.
+    play.hero.key("SCAN_W", false);
+    assert!(play.stand_at(395.8, 940.0, 0.0));
+    let mut shut_at = None;
+    for tick in 0..900 {
+        play.hero.update_input();
+        play.tick(1000.0 / 60.0, [0.0; 2]);
+        if play.buildings[b].doors[0].phase == Phase::Shut && shut_at.is_none() {
+            shut_at = Some(tick);
+        }
+    }
+    assert!(shut_at.is_some(), "the door shuts once free");
+}
