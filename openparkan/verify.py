@@ -8629,6 +8629,268 @@ def check_target_marks(check, game: Path) -> None:
           f"0x10077d80 draws it left of a unit and mirrored right, tinted by the rule")
 
 
+#: The target panel's named sprites in ``ui/hq.cfg``: page, x, y, width, height.
+TARGET_PANEL_SPRITES = {
+    "targeter_back": ("ui_menu3", 0, 82, 150, 174),
+    "targeter_range": ("ui_menu3", 0, 51, 39, 16),
+    "targeter_life": ("ui_menu", 49, 94, 15, 15),
+    "targeter_energy": ("ui_menu", 113, 126, 15, 15),
+    "left_shld": ("ui_menu3", 192, 82, 26, 79),
+    "frwd_shld": ("ui_menu3", 185, 59, 61, 19),
+    "back_shld": ("ui_menu3", 151, 194, 89, 29),
+    "top_shld": ("ui_menu3", 115, 59, 69, 19),
+    "bott_shld": ("ui_menu3", 150, 224, 105, 31),
+}
+
+#: Where ``iron3d.dll`` draws them on the 640 x 480 HUD: for each call of the quad draw
+#: ``0x1008f970`` walked from the address given, the sprite's offset in its widget, the
+#: target panel's (x0, y0, x1, y1), the own panel's -- x0 > x1 is a mirrored sprite -- and
+#: the colour, a constant or the register holding it.
+TARGET_PANEL_QUADS = {
+    "frame": (0x10040FA2, [(0x90, (0, 306, 150, 480), (640, 306, 490, 480), -1),
+                           (0x11C, (129, 411, 144, 426), (496, 411, 511, 426), -1),
+                           (0x1A8, (5, 411, 20, 426), (620, 411, 635, 426), -1)]),
+    # left_shld twice, then frwd, back, top and bott: sectors 2, 3, 0, 1, 4, 5
+    "shields": (0x10042B3D, [(4, (16, 334, 42, 413), (507, 334, 533, 413), "eax"),
+                             (4, (133, 334, 107, 413), (624, 334, 598, 413), "ebp"),
+                             (0x90, (44, 321, 105, 340), (535, 321, 596, 340), "edi"),
+                             (0x11C, (30, 409, 119, 438), (521, 409, 610, 438), "ebx"),
+                             # the last two load the same stack slots into other registers
+                             (0x1A8, (40, 308, 109, 327), (531, 308, 600, 327), ("ecx", "eax")),
+                             (0x234, (22, 420, 127, 451), (513, 420, 618, 451), ("edx", "ecx"))]),
+}
+
+#: The panel's floats in ``iron3d.dll``'s data, by address.
+TARGET_PANEL_FLOATS = {
+    0x100E5E6C: 9.0, 0x100E5E68: 315.0, 0x100E5E64: 137.0, 0x100E5E60: 443.0,
+    0x100E5E5C: 503.0, 0x100E5E58: 631.0,
+    0x100E5E78: 138.0, 0x100E5E74: 31.0, 0x100E5E70: 112.0,
+    0x100E5DB8: math.pi / 6, 0x100E5D10: 1.25,
+    0x100E5E4C: 0.025, 0x100E5E48: 1.1, 0x100E5CF0: 200.0,
+    0x100E5C68: 0.2, 0x100E4BC4: 20.0, 0x100E59C8: 255.0,
+}
+
+#: The panel's colours: the life and energy arcs, the name, "Dangerous!", the distance.
+TARGET_PANEL_COLOURS = {"life": 0xFF19FFAF, "energy": 0xFFFFB450, "name": 0xFFC8C8C8,
+                        "danger": 0xFFC80000, "range": 0xFF00FF00}
+
+#: The strings the panel prints: the distance's unit, the warning, the first status, and
+#: the words a unit's name is made of.
+TARGET_PANEL_STRINGS = {6178: "m", 6255: "Dangerous!", 6180: "no order", 6230: "Human",
+                        6253: "Animal", 6076: "Tiny Tower", 6200: "Transport", 6201: "Builder",
+                        6202: "Warrior", 6203: "Comm. Center", 6204: "Human", 6205: "Unknown"}
+
+#: The names Mission 01's bots carry in the recording's target panel, less the count.
+MISSION_01_PANEL_NAMES = {"tut1_mf1.dat": "MFW", "helic.dat": "TFW", "tut1_e1.dat": "TSW",
+                          "l_targ.dat": "SSW", "m_targ.dat": "SSW"}
+
+
+def _image_base(image: bytes) -> int:
+    lfanew = struct.unpack_from("<I", image, 0x3C)[0]
+    return struct.unpack_from("<I", image, lfanew + 24 + 28)[0]
+
+
+def _va(image: bytes, va: int) -> int:
+    """A virtual address's offset in its PE file."""
+    sections, _ = resources._sections(image)
+    return resources._offset(sections, va - _image_base(image))
+
+
+def _quad_calls(image: bytes, start: int, count: int, follow: bool) -> list[tuple]:
+    """Walk ``count`` calls from ``start``: each one's target, the offset loaded into ecx,
+    and its pushed arguments in call order (constants, or the names of pushed registers).
+
+    Only what the panels' sequences hold is decoded -- pushes, ``lea ecx``, register moves,
+    tests, a ``jne`` (taken when ``follow``) and a ``jmp``; anything else ends the walk.
+    """
+    registers = ("eax", "ecx", "edx", "ebx", "esp", "ebp", "esi", "edi")
+    sections, _ = resources._sections(image)
+    base = _image_base(image)
+    out: list[tuple] = []
+    at = _va(image, start)
+    pushes: list[object] = []
+    loaded = None
+    while len(out) < count:
+        op = image[at]
+        if op == 0x6A:
+            pushes.append(struct.unpack_from("<b", image, at + 1)[0])
+            at += 2
+        elif op == 0x68:
+            pushes.append(struct.unpack_from("<i", image, at + 1)[0])
+            at += 5
+        elif 0x50 <= op <= 0x57:
+            pushes.append(registers[op - 0x50])
+            at += 1
+        elif image[at:at + 2] in (b"\x8d\x8e", b"\x8d\x8a"):
+            loaded = struct.unpack_from("<i", image, at + 2)[0]
+            at += 6
+        elif image[at:at + 2] in (b"\x8d\x4e", b"\x8d\x4a"):
+            loaded = image[at + 2]
+            at += 3
+        elif image[at:at + 3] in (b"\x8b\x4c\x24", b"\x8b\x54\x24", b"\x8b\x44\x24",
+                                  b"\x89\x4c\x24"):
+            at += 4
+        elif image[at:at + 2] in (b"\x8b\xce", b"\x85\xc9", b"\x85\xc0"):
+            at += 2
+        elif image[at:at + 2] == b"\x0f\x85":
+            at += 6 + (struct.unpack_from("<i", image, at + 2)[0] if follow else 0)
+        elif op == 0xE9:
+            at += 5 + struct.unpack_from("<i", image, at + 1)[0]
+        elif op == 0xE8:
+            rva = next(v + at - raw for v, size, raw in sections if raw <= at < raw + size)
+            target = base + rva + 5 + struct.unpack_from("<i", image, at + 1)[0]
+            out.append((target, loaded, tuple(reversed(pushes))))
+            pushes, loaded = [], None
+            at += 5
+        else:
+            break
+    return out
+
+
+def check_target_panel(check, game: Path) -> None:
+    """The target panel and the player's own unit: sprites, places, figures, words."""
+    path = game / "iron3d.dll"
+    cfg = game / "ui" / "hq.cfg"
+    if not path.exists() or not cfg.exists():
+        return
+    iron = path.read_bytes()
+
+    # The sprites: hq.cfg's rects, named in iron3d.dll, on art that is there.
+    blocks = {name: {k.lower(): v for k, v in props.items()}
+              for name, props in mission.load_cfg(cfg).items()}
+    rects = {name: (b.get("texture"), *(int(b.get(k, -1)) for k in
+                                        ("offset_x", "offset_y", "width", "height")))
+             for name, b in blocks.items() if name in TARGET_PANEL_SPRITES}
+    roles = {d.role: d.bindings for d in resources.descriptors(game / "ui" / "game_resources.cfg")}
+    pages = roles.get("textures", {})
+    ui = NResArchive.open(game / "ui" / "ui.lib")
+    entries = list(ui)
+    cover: dict[str, tuple[str, float]] = {}
+    for name, (page, x, y, w, h) in TARGET_PANEL_SPRITES.items():
+        index = pages.get(page)
+        if index is None or not 0 <= int(index) < len(entries):
+            continue
+        tex = texm.decode(ui.read(entries[int(index)]))
+        opaque = sum(tex.rgba[(yy * tex.width + xx) * 4 + 3] > 16
+                     for yy in range(y, y + h) for xx in range(x, x + w))
+        cover[name] = (entries[int(index)].name, opaque / (w * h))
+    named = all(name.encode() + b"\0" in iron for name in TARGET_PANEL_SPRITES)
+    check("ui/hq.cfg: the target panel's nine sprites, on ui_menu3 and ui_menu",
+          rects == TARGET_PANEL_SPRITES and named and b"ui/hq.cfg\0" in iron
+          and len(cover) == len(TARGET_PANEL_SPRITES)
+          and {page for page, _ in cover.values()} == {"ui_menu3.tex", "ui_menu1.tex"}
+          and all(share > 0.2 for _, share in cover.values()),
+          "; ".join(f"{n} {r[0]} ({r[1]}, {r[2]}) {r[3]}x{r[4]} "
+                    f"{cover.get(n, ('?', 0.0))[1]:.0%} opaque" for n, r in rects.items())
+          + f"; iron3d.dll names all nine: {named}, loaded by 0x1008f450 from ui/hq.cfg")
+
+    # Where they go: the pushes before each quad draw.
+    got, want = {}, {}
+    for group, (start, calls) in TARGET_PANEL_QUADS.items():
+        for side, follow in (("target", False), ("own", True)):
+            got[(group, side)] = [(t, loaded, args[:5]) for t, loaded, args
+                                  in _quad_calls(iron, start, len(calls), follow)]
+            pick = side == "own"
+            want[(group, side)] = [
+                (0x1008F970, loaded, (*(own if pick else rect),
+                                      colour[pick] if isinstance(colour, tuple) else colour))
+                for loaded, rect, own, colour in calls]
+    check("iron3d.dll: where the panels' frame, icons and six sectors are drawn",
+          got == want,
+          "; ".join(f"{g} {s}: " + ", ".join(f"{a[:4]}" for _, _, a in got[(g, s)])
+                    for g, s in got)
+          + "; the target panel at x 0-150, the own panel mirrored at 490-640, y 306-480")
+
+    # The arcs, the range box and the texts' colours and places.
+    body = iron[_va(iron, 0x10041EA0):_va(iron, 0x100426FB)]
+    arcs = [body.find(b"\x68" + struct.pack("<I", TARGET_PANEL_COLOURS[k])
+                      + b"\x68\x98\x01\x00\x00") for k in ("life", "energy")]
+    cut = (b"\x68\x00\x00\x20\x42" in body and b"\x68\x00\x00\x17\x43" in body
+           and body.count(b"\x6b\xc9\x5e") == 2 and b"\x8d\x57\x52" in body)
+    box = _quad_calls(iron, 0x10042546, 1, False)
+    texts = (all(b"\x68" + struct.pack("<I", TARGET_PANEL_COLOURS[k]) in body
+                 for k in ("name", "range"))
+             and b"\xc7\x44\x24\x14" + struct.pack("<I", TARGET_PANEL_COLOURS["danger"]) in body)
+    check("iron3d.dll: the life and energy arcs, the name and the distance",
+          all(a >= 0 for a in arcs) and cut and texts
+          and box == [(0x1008F970, 4, (108, 440, 147, 456, -1, -0x1000000, 1, 0))]
+          and b"\x68\xbc\x01\x00\x00" in body and b"\x68\x6f\x18\x00\x00" in body,
+          f"life {TARGET_PANEL_COLOURS['life']:#x} and energy {TARGET_PANEL_COLOURS['energy']:#x} "
+          f"arcs down to y 408, cut 40 wide from ui_menu3 at (151, 82 + 94 x (100 - pct) / 100); "
+          f"the range box {box and box[0][2][:4]}; the name grey, 'Dangerous!' (6255) red, the "
+          f"distance green at y 444")
+
+    floats = {va: struct.unpack_from("<f", iron, _va(iron, va))[0] for va in TARGET_PANEL_FLOATS}
+    check("iron3d.dll: the panel's figures -- view, centring, camera, frame, voices",
+          all(math.isclose(floats[va], v, rel_tol=1e-6) for va, v in TARGET_PANEL_FLOATS.items())
+          and b"\x68\x9a\x99\x99\x3f\x68\x00\x00\x00\x3f\x68\x00\x00\x96\x43" in iron
+          and b"\x68\xf0\x07\x00\x00" in iron[_va(iron, 0x10041DC0):_va(iron, 0x10041DE0)],
+          f"view (9, 315)-(137, 443), own (503, 315)-(631, 443); the name centred in 138 from "
+          f"x 4 or 498, the distance in 31 from 112; half-angle {floats[0x100E5DB8]:.4f} rad, "
+          f"field x {floats[0x100E5D10]}; frame scale below {floats[0x100E5E4C]} made 0.1, "
+          f"held to {floats[0x100E5E48]}, x {floats[0x100E5CF0]}; low below "
+          f"{floats[0x100E5C68]} and 20 life, every {floats[0x100E4BC4]} s; sectors x "
+          f"{floats[0x100E59C8]}; the camera made with 300, 0.5, 1.2; the model drawn with 0x7f0")
+
+    strings = resources.strings(iron)
+    words = {k: strings.get(k) for k in TARGET_PANEL_STRINGS}
+    letters = iron[_va(iron, 0x100762FD):_va(iron, 0x100763BB)]
+    stored = [(0x10, 0x54), (0x10, 0x4D), (0x10, 0x4C), (0x11, 0x46), (0x11, 0x54), (0x11, 0x41),
+              (0x11, 0x55), (0x12, 0x42), (0x12, 0x54), (0x12, 0x48), (0x12, 0x43)]
+    size_letter = {1: "T", 2: "S", 3: "M", 4: "L"}
+    chassis_letter = {"flying": "F", "walking": "S", "wheeled": "W", "tracked": "T"}
+    prefixes = {}
+    first = game / MISSION_01_DATA
+    if first.exists():
+        shop = units.Workshop(game)
+        for o in mission.load(first).objects:
+            leaf = o.path.split("\\")[-1].lower()
+            if o.kind != mission.KIND_UNIT or leaf not in MISSION_01_PANEL_NAMES:
+                continue
+            found = [f for f in game.glob("UNITS/UNITS/**/*.dat") if f.name.lower() == leaf]
+            unit = shop.describe(found[0]) if found else None
+            if unit and unit.chassis:
+                prefixes[leaf] = (size_letter.get(unit.size_class, "?")
+                                  + chassis_letter.get(unit.chassis.locomotion, "?")
+                                  + ("W" if unit.role == "warrior" else "?"))
+    check("iron3d.dll: a unit's name is three letters, a count and a class word",
+          words == TARGET_PANEL_STRINGS and b"%s-%d %s\0" in iron
+          and b"\xb2\x53" in letters and b"\xb3\x57" in letters
+          and all(b"\xc6\x44\x24" + bytes(pair) in letters for pair in stored)
+          and prefixes == MISSION_01_PANEL_NAMES,
+          "; ".join(f"{k} {v!r}" for k, v in words.items())
+          + "; '%s-%d %s' (0x10075e63): size T S M L by property 0x201, chassis F S W T A U by "
+          f"0x207, class B T W C H by Type (0x10076270); Mission 01 by size class, locomotion "
+          f"and role: {prefixes}, as the recording names them")
+
+    # What the arcs and the model read, in Control.dll and AniMesh.dll.
+    control = (game / "Control.dll").read_bytes()
+
+    def case(pid: int) -> bytes:
+        index = control[_va(control, 0x1000E5E8) + pid - 1]
+        target = struct.unpack_from("<I", control, _va(control, 0x1000E554) + 4 * index)[0]
+        return control[_va(control, target):_va(control, target) + 40]
+
+    life, energy, sectors = case(0x31), case(0x73), case(0x79)
+    ani = (game / "AniMesh.dll").read_bytes()
+    ramp = ani[_va(ani, 0x10006B7A):_va(ani, 0x10006BA6)]
+    draw = ani[_va(ani, 0x10014C0A):_va(ani, 0x10014F40)]
+    check("Control.dll, AniMesh.dll: the arcs read life, battery and sectors; nodes by life",
+          b"\x8d\x88\x88\x05\x00\x00" in life and b"\xd9\x80\x90\x05\x00\x00" in life
+          and b"\xd8\xb0\x8c\x05\x00\x00" in life
+          and b"\x8b\x49\x38" in energy and b"\xba\x01\x00\x00\x00" in energy
+          and b"\xff\x50\x10" in energy
+          and b"\xc7\x01\x90\x33\x04\x10" in sectors and b"\xff\x50\x2c" in sectors
+          and ramp == bytes.fromhex("c74424100000003f8b4c24108bd8c744241c0000803f8b7c241c"
+                                    "c7442410000000bf890bc74424140000003f")
+          and draw.startswith(b"\x25\x00\x02\x00\x00")
+          and b"\xd9\x87\x24\x01\x00\x00" in draw and b"\xd8\x8e\x28\x02\x00\x00" in draw
+          and b"\xd8\x86\x18\x02\x00\x00" in draw,
+          "property 0x31 is +0x590 / +0x58c; 0x73 the device getter's id 1, the batteries' "
+          "fill; 0x79 device manager slot 11 into 0x10043390, the six sectors; a mesh drawn "
+          "with 0x200 gives each node (0.5, 0, 0, 1) + its life x (-0.5, 0.5, 0, 0)")
+
+
 #: The attack task's named constants (``Behavior.dll:0x100165f0``-``0x100166d7``).
 ATTACK_CONSTANTS = (
     "Attack_MinFightDistance", "Attack_DelFightDistance", "Attack_LeftRightRange",
@@ -13142,6 +13404,7 @@ def run(game: Path) -> int:
         check_combat, check_ownership,
         check_capture, check_repair, check_chassis, check_weapons, check_firing,
         check_targeting, check_target_marks, check_ai_fight, check_turrets, check_packages,
+        check_target_panel,
         check_wingman,
         check_builder,
         check_units, check_loading, check_search, check_construction,

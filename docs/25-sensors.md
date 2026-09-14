@@ -499,12 +499,14 @@ holds decides:
   driven unit's current target, list `+4`.
   - **Where.** A 150 × 174 panel at the bottom left of the HUD's 640 × 480,
     (0, 306) to (150, 480). It shows the target through a camera in
-    (9, 314)–(137, 443).
+    (9, 315)–(137, 443).
   - **The frame.** The target is framed by a square outline in its colour
     (`0x100415a8`). Over the first second after the panel's clock (`+0x2c4`)
     restarts, the frame eases in from the middle of the screen, (320, 240).
-    After that it is a square of half-side 200 × a scale held to 0.05–1.1,
-    about the target's projection. The scale's inputs were not transcribed.
+    After that it is a square of half-side 200 × a scale about the target's
+    projection; a scale below 0.025 is made 0.1, one above 1.1 held to 1.1.
+    The whole panel, the frame's scale included, is read in
+    [35-hud.md](35-hud.md#the-target-panel-and-the-players-own-unit).
   - **The sister widget** (`0x10040a40`) shows the driven unit itself, with no
     frame, in the panel at the bottom right, (490, 306)–(640, 480).
 - **The unit marker** (`0x10077d80` for units, over every unit record by

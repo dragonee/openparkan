@@ -296,4 +296,371 @@ To be written.
 
 ## The target panel and the player's own unit
 
-To be written.
+Two 150 × 174 panels stand in the bottom corners. The left one shows the
+driven unit's current target, the right one the driven unit itself. Both show:
+
+- the unit seen through a camera, each part coloured by its life;
+- six shield sectors around it;
+- two arcs, its life and its batteries;
+- its name.
+
+The target panel also frames the target in the world and prints its distance.
+One routine draws both.
+
+What a recording of Mission 01 shows (960 × 720, 1.5 × the HUD's 640 × 480) is
+marked *seen*: looked at, not re-derived by `verify`.
+
+### Two widgets, one routine — *read*
+
+The HUD builder (`iron3d.dll:0x100433a0`) makes the two widgets at its `+0x1c`
+and `+0x20`, with ids 1 and 2. Each holds a panel object at `+0xc` built by
+`0x10040a60`.
+
+**The widgets call the routine `0x10040f30`** with the driven unit's record, a
+record to show, and a flag:
+- The left widget (`0x10040940`) passes the current target of the unit's list,
+  list `+4` ([25-sensors.md](25-sensors.md#the-players-target--read-and-measured)),
+  with flag 0.
+- The right widget (`0x10040a40`) passes the unit itself, with flag 1.
+
+**The panel object's constructor** (`0x10040a60`) sets up:
+
+| field | what |
+|---|---|
+| `+4` | the sprite `targeter_range` |
+| `+0x90` | the sprite `targeter_back` |
+| `+0x11c` | the sprite `targeter_life` |
+| `+0x1a8` | the sprite `targeter_energy` |
+| `+0x2c0` | the page `ui_menu3`, which the arcs are cut from |
+| `+0x2c4` | the frame's clock |
+| `+0x2c8` | the shield sectors' object (`0x10042700`) |
+| `+0x2cc` | the panel's camera (`0x10036440`) |
+| `+0x2d0` | string 6178, *"m"* |
+| `+0x2dc`, `+0x2e0` | the low-battery and low-life voice timers |
+
+**How a sprite is loaded and drawn.**
+- **A sprite is named** in `ui/hq.cfg`, which the game loads into its `+0xac`
+  (`0x1005f720`).
+- **Loading** (`0x1008f450`) reads the sprite's `texture`, `offset_x`,
+  `offset_y`, `width`, `height` and `rotate`.
+  - The code asks for the keys in lower case, and the panel's blocks spell them
+    in upper case, so the lookup ignores case (*derived*).
+  - A `rotate` of 90, 180 or 270 turns the corners by one, two or three steps.
+- **Cutting** (`0x1008f830`) takes the rectangle from (x + 0.5)/256 to
+  (x + w)/256, and likewise in v. The 256 is the page size, handed in.
+- **Drawing** (`0x1008f970`) takes (x₀, y₀, x₁, y₁, colour, specular, a, b)
+  on the 640 × 480 HUD.
+  - The corners are scaled by the display's two scale queries (`getDisplay`
+    slots 4 and 5), 1.5 each on the recording.
+  - The texture is tinted by the colour.
+  - Every call here passes a = 1, which draws blend mode 4, over and
+    alpha-tested
+    ([07-objects.md](07-objects.md#how-a-material-reaches-the-device--read-and-measured)),
+    with specular black.
+  - **x₀ > x₁ mirrors the sprite.**
+
+### The sprites — *measured*
+
+All nine sprites are `ui/hq.cfg` objects. `ui_menu3` is `ui.lib`'s
+`ui_menu3.tex`, and `ui_menu` its `ui_menu1.tex`. `verify` finds each rectangle
+on drawn art (28–89% opaque).
+
+| sprite | page | x, y | w × h | what it is |
+|---|---|---|---|---|
+| `targeter_back` | `ui_menu3` | 0, 82 | 150 × 174 | the panel: the green dial, two lamp sockets, the name box |
+| `targeter_range` | `ui_menu3` | 0, 51 | 39 × 16 | the black box the distance is printed in |
+| `targeter_life` | `ui_menu` | 49, 94 | 15 × 15 | the icon labelling the life arc |
+| `targeter_energy` | `ui_menu` | 113, 126 | 15 × 15 | the icon labelling the energy arc |
+| `left_shld` | `ui_menu3` | 192, 82 | 26 × 79 | a side sector, grey |
+| `frwd_shld` | `ui_menu3` | 185, 59 | 61 × 19 | the inner top sector |
+| `back_shld` | `ui_menu3` | 151, 194 | 89 × 29 | the inner bottom sector |
+| `top_shld` | `ui_menu3` | 115, 59 | 69 × 19 | the outer top sector |
+| `bott_shld` | `ui_menu3` | 150, 224 | 105 × 31 | the outer bottom sector |
+| the arc (cut in code) | `ui_menu3` | 151, 82 | 40 × 94 | a hatched arc, grey, the life and energy bars |
+
+The sector sprites and the arc are grey: the draw tints them.
+
+### What is drawn, in order — *read*, and *measured*
+
+Rectangles are (x₀, y₀)–(x₁, y₁) on the 640 × 480 HUD. The own panel's sits
+490 to the right, mirrored where marked.
+
+| # | what | target panel | own panel | colour |
+|---|---|---|---|---|
+| 1 | `targeter_back` | (0, 306)–(150, 480) | (640, 306)–(490, 480), mirrored | white |
+| 2 | `targeter_life` | (129, 411)–(144, 426) | (496, 411)–(511, 426) | white |
+| 3 | `targeter_energy` | (5, 411)–(20, 426) | (620, 411)–(635, 426) | white |
+| 4 | the six sectors | [below](#shields-six-sectors--read) | | by fill |
+| 5 | the frame in the world | [below](#the-frame-around-the-target-in-the-world--read) | — | the mark colour |
+| 6 | the unit | the view (9, 315)–(137, 443) | (503, 315)–(631, 443) | by part |
+| 7 | the life arc | (149, 314 + t)–(109, 408), mirrored | (491, 314 + t)–(531, 408) | `#19ffaf` |
+| 8 | the energy arc | (0, 314 + t)–(40, 408) | (640, 314 + t)–(600, 408), mirrored | `#ffb450` |
+| 9 | the name and its status | centred in x 4–142, y 460 and 469 | centred in x 498–636 | grey, or red |
+| 10 | `targeter_range` and the distance | (108, 440)–(147, 456); the text at y 444 | — | green |
+
+**Where the drawing stops.**
+- Rows 1–3 are drawn every frame.
+- **With no target**, or when either record has no object (`+0x3c`), the
+  routine returns there (`0x10041177`). *Seen*: from 110 s to 140 s the left
+  panel holds only its dial, two icons and an empty name box.
+- **When the unit is too big for the view** the routine also returns before
+  rows 7–10 (`0x10041902`). The test is: twice the shown object's radius is
+  more than the span between the two figures `GetShade()`'s slot 12 hands back,
+  its `+4` and `+8`.
+
+The icons mark which arc is which. Life is by the icon at the panel's inner
+edge, energy by the one at its outer edge. The own panel mirrors both, so on
+each panel the energy arc runs down the screen's outer side (*read*; *seen*).
+
+### Total health: the teal arc — *read*
+
+**The value** is the life percentage (`0x1007e980`), the nearest whole number to
+100 × the object's property `0x31`.
+- Property `0x31` is the control system's current total life over its total at
+  load (`Control.dll:0x1000df55`: `+0x590 ÷ +0x58c`). The load sets both to the
+  nodes' summed life (`0x1000fa70`).
+- So the arc is the unit's life over its full life, all nodes together
+  ([26-damage.md](26-damage.md#hit-points--read-and-measured)).
+
+**How it is drawn** (`0x10041ea0`):
+- The percentage p is held to 0–100.
+- t = 94 × (100 − p) ÷ 100, in integers.
+- The arc sprite is cut again each frame, from (151, 82 + t), 40 × (94 − t).
+  It is drawn from y 314 + t down to 408, so it empties from the top.
+- The tint is `0xff19ffaf`.
+
+### Battery: the orange arc — *read*
+
+**The value** is the object's property `0x73` (`Control.dll:0x1000e3d1`). That
+is the device getter's id 1 on the control system's `+0x38`: the batteries'
+fill ([14-controls.md](14-controls.md#the-join-with-the-controller--read)).
+- The fill is the sum of every battery's charge (value `0x200`) over the sum of
+  their capacities (value 0) (`0x1002b42b`).
+- It is 1 if any capacity is negative.
+- **With no capacity the query fails**, and the property hands back 0
+  (`0x1000dff8`), so a unit with no battery shows **an empty arc** (*derived*).
+
+It is drawn as the life arc is, from 100 × the fill, tinted `0xffffb450`.
+
+### Shields: six sectors — *read*
+
+**The value** is the object's life-system property `0x79` (`0x10042a00`,
+through `QueryInterface 0x16`).
+- It is the device manager's slot 11 (`Control.dll:0x1002c430`), which writes
+  six floats into a static buffer (`0x10043390`).
+- It needs a fight shield and a deflector. **Without both it fails and no
+  sector is drawn.**
+- Sector *i*'s float is its fill (the fight shield's `+0x98 + 4i`) × the
+  deflector's level (`+0x4c`) × a figure the deflector's owner answers for its
+  node, slot 3 with 1. Taking that figure for the node's condition makes the
+  float the share of docs/26's effective strength that the sector keeps
+  (*derived*,
+  [26-damage.md](26-damage.md#shields-a-generator-a-deflector-six-sectors--read-and-measured)).
+
+**Each sector's colour runs from red to green.** With v = int(255 × fill), the
+colour is `0xff000000 | (255 − v) << 16 | v << 8`: red at 0, green when full.
+
+| sector | side | sprite | target panel | own panel |
+|---|---|---|---|---|
+| 0 | front | `frwd_shld` | (44, 321)–(105, 340) | (535, 321)–(596, 340) |
+| 1 | back | `back_shld` | (30, 409)–(119, 438) | (521, 409)–(610, 438) |
+| 2 | left | `left_shld` | (16, 334)–(42, 413) | (507, 334)–(533, 413) |
+| 3 | right | `left_shld`, mirrored | (133, 334)–(107, 413) | (624, 334)–(598, 413) |
+| 4 | top | `top_shld` | (40, 308)–(109, 327) | (531, 308)–(600, 327) |
+| 5 | bottom | `bott_shld` | (22, 420)–(127, 451) | (513, 420)–(618, 451) |
+
+- **The own panel is not mirrored:** its sectors are the target's moved 491
+  right.
+- **The sectors are the unit's own sides.** The target panel draws them the same
+  way whichever way the target faces the camera.
+
+*Seen*: full sectors are bright green rings on both panels. At about 250 s the
+enemy's top and bottom rings turn red while the four others stay green.
+
+### The unit in the middle — *read*, and *seen*
+
+**Where it is drawn.** The view is (9, 315)–(137, 443) on the target panel and
+(503, 315)–(631, 443) on the own, each corner scaled like the sprites
+(`0x10041036`, `0x10041107`).
+
+**The camera** is a World3D object of kind 5, made once by
+`AddNewObjectToGame` (`0x100367b0`). It is given 300, 0.5 and 1.2, kept at
+`+0x88`, `+0x84` and `+0x8c` of the block its slot 6 takes: far, near and
+field of view (*guess*). Each frame (`0x100418a3`–`0x10041cc0`):
+
+1. **What it looks at.**
+   - *c*, *r* are the centre and radius of the sphere the shown object's
+     interface `0x20` answers (slot 3).
+   - **The view direction *d*:**
+     - On the target panel, the normalised line from the driven unit's sphere
+       centre to the target's. A building never looks up: a rising *d* has its
+       z zeroed and is normalised again.
+     - On the own panel, the unit's own forward axis, its matrix's y column.
+       So the own view shows the unit from behind.
+2. **Distance and field.**
+   - K = 1 ÷ sin 30° = 2 (`0x10040f00`).
+   - Normally the camera stands **2r from the centre** and the field is
+     **1.25 × 60° = 75°**, so the sphere fills four fifths of the view.
+   - If (K − 1)·r falls short of the shade's `+4`, the distance is `+4` + r.
+   - If (K + 1)·r passes its `+8`, the distance is `+8` − r.
+   - Either way the field is then 1.25 × 2·asin(r ÷ distance).
+3. **The eye** is *c* − *d* × distance. The frame's axes are *d*, *s* =
+   **Z** × *d* and *d* × *s*, so z is up. A vertical *d* takes fixed axes.
+4. **Drawing.**
+   - The view's rectangle goes to the camera (`0x10036d20`) and the device.
+   - Stage 0's texture is unset and blend mode 0 set.
+   - The z test is on with writes, `D3DRS_ZFUNC` `LESSEQUAL`, for the draw and
+     restored after.
+   - The shown object's mesh is drawn through interface `0x18` slot 11 with
+     **flags `0x7f0`** (`0x10041dd1`). The main camera is made current again
+     after.
+   - No clear of the view was found. *Seen*: the dial shows through around the
+     model.
+
+**Each part is coloured by its life** (`AniMesh.dll:0x10014b30`). Draw flag
+`0x200`, one of the seven bits of `0x7f0`, does four things:
+- It draws at the level held in `AniMesh.dll:0x100225e8`, 1 in the image.
+- It puts the camera in mode 2 (slot 8) for the draw.
+- Before each node's batches, it hands the camera (slot 30) the colour
+  **(0.5, 0, 0, 1) + life × (−0.5, 0.5, 0, 0)**. Life is the node's life over
+  its maximum (node `+0x124`), and the two quads are the mesh's `+0x21c` and
+  `+0x22c`, set by its constructor (`0x10006b7a`).
+- Afterwards it restores the camera's colour and mode.
+
+So an intact part is green (0, 0.5, 0) and a destroyed one red (0.5, 0, 0). How
+the camera applies the colour in mode 2 was not read.
+
+*Seen*:
+- **Colours.** An intact dummy is a flat (39, 162, 41); a damaged part of it at
+  146 s is (140, 59, 38); a destroyed part goes brownish.
+- **Shading.** Bots show light-green shading, the dummy none.
+- **Level.** The models are coarse.
+
+### Name and status — *read*, and *seen*
+
+**Both lines print in `GAME_FONT`** (the game's `+0x10`), each centred in 138
+from x 4 on the target panel or 498 on the own:
+x = int((138 − width ÷ scale) × 0.5 + x₀).
+
+**Line one, at y 460, is the unit's name** in grey `0xffc8c8c8`. The name is
+the string the unit's behaviour holds (`IBehaviour` slot 41,
+`Behavior.dll:0x1000cb50`, `+0xb04`). `iron3d.dll` names each unit through a
+slot of its record (`0x10075d50`):
+
+| the record's Type | name |
+|---|---|
+| `ROBOT_HERO` `0x1020000` | 6230 *"Human"* |
+| `0x20000000`, an animal | 6253 *"Animal"* |
+| a robot (`0x1000000` set) whose record's `+0x64` answers its query 2 with 0 or less | 6076 *"Tiny Tower"* |
+| anything else | `"%s-%d %s"` |
+
+In `"%s-%d %s"`:
+- **The three letters** (`0x10076270`):
+  - size, from object property `0x201`: T 1, S 2, M 3, L 4;
+  - chassis, from `0x207`: F 1, S 2, W 3, T 4, A 5, U 6;
+  - class, from Type: B builder, T transport, W warrior, C HQ, H hero;
+  - `?` for anything else.
+- **The number** is one more than a count the unit's clan keeps (its clan entry
+  `+0x734`), raised as each of its units is named.
+- **The class word** is handed in. It is one of 6200–6205 *"Transport"*,
+  *"Builder"*, *"Warrior"*, *"Comm. Center"*, *"Human"*, *"Unknown"*; which
+  caller passes which was not followed.
+
+Mission 01 fits both properties:
+- property `0x201` is the unit's size class (`units.Unit.size_class`);
+- property `0x207` is its chassis profile's `ChassisType`: 1 flying, 2 walking,
+  3 wheeled, 4 tracked.
+
+That gives (*measured*, against what the recording prints):
+- `tut1_mf1` MFW, `helic` TFW, `tut1_e1` TSW, the dummies SSW;
+- *seen*: **MFW-1**, **TFW-2** (the Ntrl clan's two, in file order), **TSW-1**,
+  **SSW-1**.
+
+**Line two, at y 469**, is left empty for the hero (Type, record `+0x2c`) and
+for a building (its object's slot 11 answering 3). Otherwise:
+- **A unit of the player's clan** (record `+0x24`) gets `"[status]"` in the same
+  grey. The status is the head order's string from 6180–6197
+  ([31-packages.md](31-packages.md#the-orders--measured)), and *"no order"*
+  with none. *Seen*: *"[no order]"*, *"[following]"*, *"[searching]"* under
+  MFW-1 once captured.
+- **Any other unit** with a component whose value `0x400` is above 0 and whose
+  value 6 is at least 10,000 gets 6255 *"Dangerous!"* in red `0xffc80000`
+  (`0x100766f0`). Value 6 is a gun's round damage; heavy rounds are 10,000 or
+  more
+  ([29-weapons.md](29-weapons.md)).
+
+### Distance — *read*
+
+**The value** is the straight-line distance in 3D, from the driven unit's sphere
+centre (interface `0x18` slot 9) to the target's (a building's through
+interface `0x20`) (`0x10041475`).
+- The own panel passes 0.
+- **Only a distance above 0 is shown.**
+
+**How it is drawn.**
+- `targeter_range` goes at (108, 440)–(147, 456).
+- The text is the distance as a whole number, a space, and string 6178 *"m"*.
+  It is in `GAME_FONT` and green `0xff00ff00`, centred in 31 from x 112, at
+  y 444.
+- *Seen*: *"55 m"*, *"0 m"* at a few metres.
+
+### The frame around the target in the world — *read*
+
+This refines
+[25-sensors.md](25-sensors.md#how-the-game-colours-what-it-marks--read-and-measured).
+It is drawn on the target panel only (`0x10041497`–`0x100416f9`).
+
+**Where it is.**
+- The target point is projected through the main camera (`0x100cd1a0`), and
+  its (x, y) is divided by the display scale.
+- **When the projection fails** the frame's clock restarts (`+0x2c4` = now).
+- **A target whose owner word reads `0xfffe`** gets no frame.
+
+**How big it is.** The scale is s = (record `+0x10` ÷ `+0x14`) ÷ distance ×
+radius:
+- × 2 for an object of kind 4, × ⅔ otherwise;
+- **s below 0.025 is made 0.1**, and s above 1.1 is held to 1.1;
+- the radius is the target's interface `0x20` sphere's, or 0 without one.
+
+**How it is drawn** in the rule's colour, through `getGUIServer` slot 3:
+- **Steady:** a square of half-side 200·s about the projection.
+- **For its first second** after the clock restarts it eases, with e = 1 −
+  elapsed:
+  - the centre is the projection moved (320 − x, 240 − y) × e toward the
+    screen's middle;
+  - the half-side is 200 × (s + (1.1 − s) × e).
+
+  So it closes from a 440-pixel square at (320, 240).
+
+### Voices — *read*
+
+On the own panel only (flag 1), each voice at most once every 20 s by its
+timer:
+- **Life under 20%** plays `VOICE_LIFE_LOW`, `vc_014.wav`.
+- **A battery fill under 0.2** plays `VOICE_BATT_LOW`, `vc_004.wav`.
+
+### Mission 01 — *measured*, and *seen*
+
+| unit | battery | fight shield and deflector | the panel shows |
+|---|---|---|---|
+| `tut1_p`, the hero | 4,080 | small, 90% | both arcs, six sectors; *"Human"* |
+| `tut1_mf1`, `helic`, `tut1_e1` | 12,000, 3,720, 3,720 | medium, tiny, tiny | both arcs, six sectors |
+| `l_targ`, `M_targ`, the dummies | none | none | the life arc only, no sectors |
+
+*Seen*: the dummy at 141–148 s has only its teal arc, turns partly red as it is
+hit, and prints *"SSW-1 Warrior"* above a falling distance.
+
+### Not established
+
+- How the camera draws a mesh in mode 2 with the colour slot 30 hands it: a
+  flat or a lit tint, and why the recording's green is brighter than
+  (0, 128, 0).
+- The panel camera's three figures (300, 0.5, 1.2) as far, near and field; and
+  what `GetShade()` slot 12's `+4` and `+8` are.
+- The driven unit record's `+0x10` and `+0x14` in the frame's scale.
+- What interface `0x20`'s sphere is, beside interface `0x18`'s bounding sphere.
+- Which caller hands the name its class word, and who writes the panel level at
+  `AniMesh.dll:0x100225e8`.
+- The component value `0x400` in the *"Dangerous!"* test.
+- The other six bits of draw flags `0x7f0`.
+- Whether the view's begin (interface `0x12` slot 3) clears depth.

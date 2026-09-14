@@ -18886,3 +18886,267 @@ kind = "function"
 name = "getGUIServer"
 read = true
 doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10040a60"
+kind = "function"
+name = "target and own panel constructor: hq.cfg sprites targeter_range +4, targeter_back +0x90, targeter_life +0x11c, targeter_energy +0x1a8; page ui_menu3 +0x2c0; shield sectors 0x10042700 at +0x2c8; camera at +0x2cc (300, 0.5, 1.2); string 6178 at +0x2d0"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10040fa2"
+kind = "site"
+name = "panel: the back, life and energy icons at (0,306)-(150,480), (129,411), (5,411); the own panel's at 640-490 mirrored, 496, 620"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10041177"
+kind = "site"
+name = "panel: no target or no object (+0x3c) returns after the back and the two icons"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100414be"
+kind = "site"
+name = "target frame scale: record +0x10 / +0x14 / distance x radius, x2 for kind 4 else x2/3; below 0.025 made 0.1, held to 1.1"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100418a3"
+kind = "site"
+name = "panel camera: sphere of interface 0x20; distance 2r (K = 1/sin 30), field 1.25 x 2 asin(r/d); eye c - d x distance, z up"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10041dd1"
+kind = "site"
+name = "panel: the shown mesh drawn through interface 0x18 slot 11 on the panel camera with flags 0x7f0, z test LESSEQUAL"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10041ea0"
+kind = "function"
+name = "panel arcs and text: life arc (property 0x31) tinted 0xff19ffaf, energy arc (0x73) 0xffffb450, cut from ui_menu3 (151, 82+t); name and status centred in 138, y 460/469; range box and distance at y 444; VOICE_LIFE_LOW / VOICE_BATT_LOW every 20 s on the own panel"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10042700"
+kind = "function"
+name = "shield sectors object constructor: left_shld, frwd_shld, back_shld, top_shld, bott_shld from ui/hq.cfg"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10042a00"
+kind = "function"
+name = "shield sectors draw: life-system property 0x79's six fills, colour (255-v, v, 0) with v = 255 x fill; target panel or own +491"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10040f00"
+kind = "function"
+name = "static initialiser: sin(pi/6) into 0x1010a18c"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10040f10"
+kind = "function"
+name = "static initialiser: 1 / sin(pi/6) = 2 into 0x1010a188, the panel camera's K"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1007e980"
+kind = "function"
+name = "a record's life percentage: property 0x31 x 100, rounded"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100766f0"
+kind = "function"
+name = "'Dangerous!' test: a component (record +0x64) with value 0x400 above 0 and value 6, round damage, of 10000 or more"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10075d50"
+kind = "function"
+name = "name a unit: 6230 Human for ROBOT_HERO, 6253 Animal, 6076 Tiny Tower, else '%s-%d %s' with the clan's count; handed to IBehaviour slot 42"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10076270"
+kind = "function"
+name = "name letters: size by property 0x201 (T S M L), chassis by 0x207 (F S W T A U), class by Type (B T W C H), else '?'"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1008f450"
+kind = "function"
+name = "named sprite from a cfg: texture, offset_x, offset_y, width, height, rotate (90/180/270 -> 1/2/3), then the cut"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1008f830"
+kind = "function"
+name = "sprite cut: UVs (x+0.5)/size to (x+w)/size, likewise v; rotate turns the corners"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1008f970"
+kind = "function"
+name = "sprite quad draw at (x0,y0)-(x1,y1) on 640x480 times the display's scales; diffuse, specular; blend mode 4 when its seventh argument is set"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10036440"
+kind = "function"
+name = "panel camera object constructor: fields zeroed, vtable 0x100e5ce8"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100367b0"
+kind = "function"
+name = "panel camera create: AddNewObjectToGame kind 5, its slot 6 block given 0.5, 300 and the field"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1005f720"
+kind = "site"
+name = "game +0xac loads ui/hq.cfg, the named sprites"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100e5e58"
+kind = "datum"
+name = "target panel floats: own view x 631 and 503, the view 443, 137, 315, 9; then 112, 31, 138 centring"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10104f5c"
+kind = "datum"
+name = "'%s-%d %s', a unit's name"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000df55"
+kind = "site"
+name = "property 0x31: +0x590 / +0x58c into +0x588, the life fraction"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000e3d1"
+kind = "site"
+name = "property 0x73: the device getter's id 1 on +0x38, the batteries' fill"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000e48d"
+kind = "site"
+name = "property 0x79: device manager slot 11 into the static 0x10043390, six floats"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002c430"
+kind = "function"
+name = "IDeviceManager slot 11: six sector fills (+0x98) x the deflector's level (+0x4c) x its node figure; false without a fight shield and a deflector"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000fa70"
+kind = "site"
+name = "load: +0x58c = +0x590 = the nodes' summed life"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10006b7a"
+kind = "site"
+name = "mesh constructor: the life colour's base (0.5, 0, 0, 1) at +0x21c and step (-0.5, 0.5, 0, 0) at +0x22c"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10014c0a"
+kind = "site"
+name = "draw flag 0x200: level from 0x100225e8, camera mode 2 (slot 8), each node's colour base + life (+0x124) x step to camera slot 30"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x100225e8"
+kind = "datum"
+name = "the level a flag-0x200 draw takes, 1 in the image"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1000cb50"
+kind = "function"
+name = "IBehaviour slot 41: the unit's name at +0xb04, empty when unset"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1000cb10"
+kind = "function"
+name = "IBehaviour slot 42: set the name when it is empty; +0xa74 = 1"
+read = true
+doc = "docs/35-hud.md"
