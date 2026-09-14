@@ -43,6 +43,7 @@ use parkan_sim::wizard::{GROUND_POINT, straight_walk, walk_speed};
 
 use crate::assembly::Assembly;
 use crate::battle::Battle;
+use crate::building_fx::BuildingEffects;
 use crate::buildings::{Building, Child, Fired, Standing};
 use crate::factory::{Factory, Project, VOICE_UNIT_READY};
 use crate::fx::{Fx, Owner};
@@ -255,6 +256,8 @@ pub struct Play {
     pub spawned: usize,
     /// Units made since the drawing last caught up, by target.
     pub added: Vec<usize>,
+    /// Every building's load-group effects, and the value each door-driven one last showed.
+    pub building_effects: Vec<(BuildingEffects, Vec<f32>)>,
 }
 
 /// A round about to leave a barrel.
@@ -486,6 +489,13 @@ impl Play {
         let factories: Vec<Factory> = (0..target_count)
             .filter_map(|t| Factory::load(&mut assembly, mission, battle.objects[t], t))
             .collect();
+        let building_effects: Vec<(BuildingEffects, Vec<f32>)> = (0..target_count)
+            .filter_map(|t| BuildingEffects::load(&mut assembly, mission, battle.objects[t], t))
+            .map(|b| {
+                let n = b.effects.len();
+                (b, vec![0.0; n])
+            })
+            .collect();
         let mut play = Play {
             hero,
             ground,
@@ -522,6 +532,7 @@ impl Play {
             ratio,
             spawned: 0,
             added: Vec::new(),
+            building_effects,
         };
         for i in 0..play.turret_effects.len() {
             let e = play.turret_effects[i].clone();
@@ -532,7 +543,62 @@ impl Play {
             let (at, y) = play.hero.chassis_point(e.node);
             play.fx.start(Owner::Chassis(e.id), &e.name, Frame::along(at, y, 1.0), 1.0, 0.0, None);
         }
+        play.start_building_effects();
         Ok(Some(play))
+    }
+
+    /// Every building's load group as it is placed (docs/13, "A building's load group"): its
+    /// action-3 and action-4 effects on its nodes and control points, each in its own time
+    /// mode, then action 10's starts by id. Action 5's, the construction sphere, is left to
+    /// construction.
+    fn start_building_effects(&mut self) {
+        for (b, _) in &self.building_effects {
+            let Some(part) = self.battle.combat.targets.get(b.target).and_then(|t| t.parts.get(b.part))
+            else {
+                continue;
+            };
+            for e in &b.effects {
+                if let Some(frame) = b.frame(part, e.on) {
+                    self.fx.start(Owner::Building(b.target, e.id), &e.name, frame, 1.0, 0.0, None);
+                }
+            }
+            for &(id, mode) in &b.starts {
+                self.fx.restart(Owner::Building(b.target, id), 0.0, Some(mode));
+            }
+        }
+    }
+
+    /// A building's load-group effects follow the nodes they hang on, and an effect on a door's
+    /// node reads the door's channel value, as time modes 4, 16 and 17 read a node's animation
+    /// value (docs/11, "Effect time t").
+    fn follow_building_effects(&mut self) {
+        for (b, last) in &mut self.building_effects {
+            let Some(part) = self.battle.combat.targets.get(b.target).and_then(|t| t.parts.get(b.part))
+            else {
+                continue;
+            };
+            let doors = self.buildings.iter().find(|d| d.target == b.target);
+            for (k, e) in b.effects.iter().enumerate() {
+                let Some(frame) = b.frame(part, e.on) else { continue };
+                let value = match e.on {
+                    crate::building_fx::On::Node(node) => doors.and_then(|d| {
+                        d.doors
+                            .iter()
+                            .flat_map(|door| door.item.channels.iter().zip(&door.item.now))
+                            .find(|(c, _)| c.node == node as i32)
+                            .map(|(_, &v)| v.clamp(0.0, 1.0))
+                    }),
+                    crate::building_fx::On::Points(_) => None,
+                };
+                for instance in self.fx.owned(Owner::Building(b.target, e.id)) {
+                    instance.frame = frame;
+                    if let Some(v) = value {
+                        last[k] = crate::building_fx::monotone(instance.mode, last[k], v);
+                        instance.value = last[k];
+                    }
+                }
+            }
+        }
     }
 
     /// Load the mission's progression from `mission_dir`: its player clan's script, its
@@ -985,6 +1051,7 @@ impl Play {
                 instance.value = value.unwrap_or(0.0);
             }
         }
+        self.follow_building_effects();
         // Flight effects follow their rounds, and go with them. Time modes 5–15 read the
         // round's speed over its top speed: the plasma bolt's and the missile's trails.
         let rounds: Vec<Round> = self.battle.combat.rounds.clone();

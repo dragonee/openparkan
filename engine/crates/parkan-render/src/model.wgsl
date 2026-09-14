@@ -52,6 +52,8 @@ struct Look {
     fog: vec4<f32>,
     // The cell's rectangle: u0, v0, du, dv.
     cell: vec4<f32>,
+    // x 1: a lit batch, its lightmap in place of the scene's lights.
+    lit: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> frame: Frame;
@@ -59,11 +61,14 @@ struct Look {
 @group(2) @binding(0) var<uniform> look: Look;
 @group(2) @binding(1) var skin: texture_2d<f32>;
 @group(2) @binding(2) var skin_sampler: sampler;
+// A lit batch's lightmap page; white otherwise.
+@group(2) @binding(3) var lightmap: texture_2d<f32>;
 
 struct VertexIn {
     @location(0) position: vec3<f32>,
     @location(1) normal: vec3<f32>,
     @location(2) uv: vec2<f32>,
+    @location(3) lightmap: vec2<f32>,
 };
 
 struct VertexOut {
@@ -72,6 +77,7 @@ struct VertexOut {
     @location(1) uv: vec2<f32>,
     @location(2) world: vec3<f32>,
     @location(3) paint: vec4<f32>,
+    @location(4) lightmap: vec2<f32>,
 };
 
 @vertex
@@ -83,6 +89,7 @@ fn vs_main(v: VertexIn) -> VertexOut {
     // The model matrix is a rotation and a uniform scale.
     out.normal = (instance.model * vec4<f32>(v.normal, 0.0)).xyz;
     out.uv = v.uv;
+    out.lightmap = v.lightmap;
     out.paint = instance.paint;
     return out;
 }
@@ -102,6 +109,16 @@ fn fs_main(v: VertexOut) -> @location(0) vec4<f32> {
     }
     // The cell rewrites the coordinates in place: u0 + u × du, v0 + v × dv.
     let texel = textureSample(skin, skin_sampler, look.cell.xy + v.uv * look.cell.zw);
+    let baked = textureSample(lightmap, skin_sampler, v.lightmap);
+    if look.lit.x > 0.5 {
+        // A lit batch (docs/07, "How a lightmapped batch is drawn"): the material's diffuse
+        // becomes its self-light and its diffuse 0, so no light reaches it; the emissive is
+        // the scene colour plus that diffuse, held to 1, and the texture and the lightmap
+        // modulate it. Its alpha is the material's ambient alpha alone.
+        let emissive = min(vec3<f32>(1.0), frame.scene_colour.rgb + look.diffuse.rgb);
+        let colour = texel.rgb * baked.rgb * linear(emissive);
+        return vec4<f32>(fogged(colour, v.world, look.fog), look.diffuse.a);
+    }
     let n = normalize(v.normal);
     let a = max(dot(n, -frame.light_direction.xyz), 0.0);
     let b = max(dot(n, -frame.second_direction.xyz), 0.0);

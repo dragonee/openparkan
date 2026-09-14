@@ -14,6 +14,8 @@ use parkan_formats::mesh::{Mesh, NO_SLOT, Node, SLOTS_PER_VARIANT};
 use parkan_formats::mission::Mission;
 use parkan_formats::pose::{Pose, rotate};
 
+use parkan_formats::wea::Wear;
+
 use crate::assembly::{Assembly, LoadedMesh};
 use crate::textures::{Look, TextureStore};
 
@@ -21,11 +23,17 @@ use crate::textures::{Look, TextureStore};
 /// (`AniMesh.dll:0x10014be5`).
 pub const VIEW_LEVEL: usize = 4;
 
+/// A batch's material word's high byte that marks it unlit: any other value indexes its
+/// wear's `LIGHTMAPS` list (docs/07, "The batch material's high byte marks the lit batches").
+pub const NO_LIGHTMAP: u16 = 0xFF;
+
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Vertex {
     pub position: [f32; 3],
     pub normal: [f32; 3],
     pub uv: [f32; 2],
+    /// Stream 18's lightmap coordinates, over 1024; 0 where the mesh has none.
+    pub lightmap: [f32; 2],
 }
 
 /// Triangles of one model drawn with one material, as a range of `Model::indices`.
@@ -34,6 +42,24 @@ pub struct Group {
     pub start: u32,
     pub count: u32,
     pub look: Look,
+    /// A lit batch's lightmap page, by index into the store's textures.
+    pub lightmap: Option<usize>,
+}
+
+/// What a model's batches resolve through: a material's look, and a lightmap page.
+pub trait Skins {
+    fn look(&mut self, material: &str) -> Result<Look>;
+    fn lightmap(&mut self, page: &str) -> Result<Option<usize>>;
+}
+
+impl Skins for TextureStore {
+    fn look(&mut self, material: &str) -> Result<Look> {
+        TextureStore::look(self, material)
+    }
+
+    fn lightmap(&mut self, page: &str) -> Result<Option<usize>> {
+        TextureStore::lightmap(self, page)
+    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -51,21 +77,30 @@ impl Model {
     }
 
     /// Append a slot's batches, each in its wear's material, placing every vertex it
-    /// reaches with `place`.
+    /// reaches with `place`. A batch whose material word's high byte is not `0xFF` takes the
+    /// wear's lightmap it indexes, when the mesh carries stream 18 (docs/07, "How a
+    /// lightmapped batch is drawn").
     fn push_slot(
         &mut self,
         mesh: &Mesh,
-        materials: &[String],
+        wear: &Wear,
         slot: u16,
-        look: &mut impl FnMut(&str) -> Result<Look>,
+        skins: &mut impl Skins,
         place: impl Fn(usize) -> Vertex,
     ) -> Result<()> {
         let Some(slot) = mesh.slots.get(usize::from(slot)) else { return Ok(()) };
         let batches =
             usize::from(slot.first_batch)..usize::from(slot.first_batch) + usize::from(slot.batch_count);
         for batch in batches.filter_map(|b| mesh.batches.get(b)) {
-            let name = materials.get(usize::from(batch.material)).cloned().unwrap_or_default();
-            let look = look(&name)?;
+            let name = wear.materials.get(usize::from(batch.material)).cloned().unwrap_or_default();
+            let look = skins.look(&name)?;
+            let page = (batch.flag != NO_LIGHTMAP && !mesh.lightmap_uv.is_empty())
+                .then(|| wear.lightmaps.get(usize::from(batch.flag)))
+                .flatten();
+            let lightmap = match page {
+                Some(page) => skins.lightmap(page)?,
+                None => None,
+            };
             let start = self.indices.len() as u32;
             let mut remap: HashMap<u16, u32> = HashMap::new();
             let (first, count) = batch.triangles();
@@ -80,7 +115,7 @@ impl Model {
             }
             let count = self.indices.len() as u32 - start;
             if count > 0 {
-                self.groups.push(Group { start, count, look });
+                self.groups.push(Group { start, count, look, lightmap });
             }
         }
         Ok(())
@@ -117,7 +152,6 @@ pub fn build_model(
 ) -> Result<Option<Model>> {
     let parts = assembly.parts(kind, path);
     let mut model = Model { name: path.to_owned(), ..Default::default() };
-    let mut look = |name: &str| store.look(name);
     for part in &parts {
         let Some(loaded) = assembly.mesh(&part.reference) else { continue };
         let m = &loaded.mesh;
@@ -126,7 +160,7 @@ pub fn build_model(
         let rotations: Vec<[f64; 4]> = (0..m.nodes.len()).map(|i| m.world_pose(i).rotation).collect();
         for node in m.nodes.iter().filter(|n| !n.is_collision()) {
             let Some(slot) = node.slot_for_lod(0, 0) else { continue };
-            model.push_slot(m, &loaded.wear.materials, slot, &mut look, |vi| {
+            model.push_slot(m, &loaded.wear, slot, store, |vi| {
                 let local = posed.get(vi).copied().unwrap_or_default();
                 let normal = m.normals.get(vi).copied().unwrap_or([0.0, 0.0, 1.0]);
                 let normal = match owner.get(vi) {
@@ -138,6 +172,7 @@ pub fn build_model(
                     position: part.pose.apply(local).map(|c| c as f32),
                     normal: rotate(part.pose.rotation, normal).map(|c| c as f32),
                     uv: uv.map(|c| c as f32),
+                    lightmap: lightmap_uv(m, vi),
                 }
             })?;
         }
@@ -158,16 +193,12 @@ pub fn build_view_node(
     loaded: &LoadedMesh,
     node: usize,
     variant: usize,
-    mut look: impl FnMut(&str) -> Result<Look>,
+    skins: &mut impl Skins,
 ) -> Result<Option<Model>> {
     let m = &loaded.mesh;
     let Some(slot) = m.nodes.get(node).and_then(|n| view_slot(n, variant)) else { return Ok(None) };
     let mut model = Model { name: format!("{} view {node}", m.name), ..Default::default() };
-    model.push_slot(m, &loaded.wear.materials, slot, &mut look, |vi| Vertex {
-        position: m.positions.get(vi).copied().unwrap_or_default(),
-        normal: m.normals.get(vi).copied().unwrap_or([0.0, 0.0, 1.0]).map(|c| c as f32),
-        uv: m.uv.get(vi).copied().unwrap_or_default().map(|c| c as f32),
-    })?;
+    model.push_slot(m, &loaded.wear, slot, skins, |vi| node_vertex(m, vi))?;
     Ok((!model.indices.is_empty()).then_some(model))
 }
 
@@ -178,18 +209,29 @@ pub fn build_node(
     loaded: &LoadedMesh,
     node: usize,
     variant: usize,
-    mut look: impl FnMut(&str) -> Result<Look>,
+    skins: &mut impl Skins,
 ) -> Result<Option<Model>> {
     let m = &loaded.mesh;
     let Some(n) = m.nodes.get(node).filter(|n| !n.is_collision()) else { return Ok(None) };
     let Some(slot) = n.slot_for_lod(0, variant) else { return Ok(None) };
     let mut model = Model { name: format!("{} node {node} variant {variant}", m.name), ..Default::default() };
-    model.push_slot(m, &loaded.wear.materials, slot, &mut look, |vi| Vertex {
+    model.push_slot(m, &loaded.wear, slot, skins, |vi| node_vertex(m, vi))?;
+    Ok((!model.indices.is_empty()).then_some(model))
+}
+
+/// Vertex `vi` in its node's own frame.
+fn node_vertex(m: &Mesh, vi: usize) -> Vertex {
+    Vertex {
         position: m.positions.get(vi).copied().unwrap_or_default(),
         normal: m.normals.get(vi).copied().unwrap_or([0.0, 0.0, 1.0]).map(|c| c as f32),
         uv: m.uv.get(vi).copied().unwrap_or_default().map(|c| c as f32),
-    })?;
-    Ok((!model.indices.is_empty()).then_some(model))
+        lightmap: lightmap_uv(m, vi),
+    }
+}
+
+/// Vertex `vi`'s stream-18 coordinates, or 0 where the mesh has none.
+fn lightmap_uv(m: &Mesh, vi: usize) -> [f32; 2] {
+    m.lightmap_uv.get(vi).copied().unwrap_or_default().map(|c| c as f32)
 }
 
 /// A pose as the matrix that places a point in its frame.
@@ -321,8 +363,17 @@ mod tests {
         }
     }
 
-    fn look(name: &str) -> Result<Look> {
-        Ok(Look { material: name.to_owned(), blend_mode: 0, still: Phase::PLAIN, animation: None })
+    /// Every material plain, and every lightmap page texture 7.
+    struct Fake;
+
+    impl Skins for Fake {
+        fn look(&mut self, name: &str) -> Result<Look> {
+            Ok(Look { material: name.to_owned(), blend_mode: 0, still: Phase::PLAIN, animation: None })
+        }
+
+        fn lightmap(&mut self, _page: &str) -> Result<Option<usize>> {
+            Ok(Some(7))
+        }
     }
 
     #[test]
@@ -331,8 +382,8 @@ mod tests {
         assert_eq!(view_slot(&loaded.mesh.nodes[0], 0), None, "level 0 does not stand in");
         assert_eq!(view_slot(&loaded.mesh.nodes[1], 0), Some(1));
         assert_eq!(view_slot(&loaded.mesh.nodes[1], 1), None, "the variant's own block");
-        assert!(build_view_node(&loaded, 0, 0, look).unwrap().is_none());
-        let cockpit = build_view_node(&loaded, 1, 0, look).unwrap().expect("the cockpit");
+        assert!(build_view_node(&loaded, 0, 0, &mut Fake).unwrap().is_none());
+        let cockpit = build_view_node(&loaded, 1, 0, &mut Fake).unwrap().expect("the cockpit");
         assert_eq!(cockpit.groups.len(), 1);
         assert_eq!(cockpit.groups[0].look.material, "GLASS");
         // In the node's own frame: its pose is left to the instance.

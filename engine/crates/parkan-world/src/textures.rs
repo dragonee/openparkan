@@ -143,10 +143,17 @@ impl Look {
 pub struct TextureStore {
     materials: Library,
     archive: Archive,
+    /// `lightmap.lib`, the buildings' lightmap pages, when the install has one.
+    lightmaps: Option<Archive>,
     pub textures: Vec<Texture>,
     by_name: BTreeMap<String, Option<usize>>,
+    lightmap_by_name: BTreeMap<String, Option<usize>>,
     looks: BTreeMap<String, Look>,
 }
+
+/// The library a wear's `LIGHTMAPS` pages are loaded from (`World3D.dll:0x10003f24`, docs/07,
+/// "How a lightmapped batch is drawn").
+pub const LIGHTMAP_LIBRARY: &str = "lightmap.lib";
 
 fn key(name: &str) -> String {
     name.split('.').next().unwrap_or(name).to_ascii_uppercase()
@@ -156,13 +163,42 @@ impl TextureStore {
     pub fn open(game: &Path) -> Result<Self> {
         let materials = Library::open(&gamedir::resolve(game, "Material.lib").context("no Material.lib")?)?;
         let archive = Archive::open(&gamedir::resolve(game, "Textures.lib").context("no Textures.lib")?)?;
+        let lightmaps = gamedir::resolve(game, LIGHTMAP_LIBRARY).and_then(|p| Archive::open(&p).ok());
         Ok(Self {
             materials,
             archive,
+            lightmaps,
             textures: Vec::new(),
             by_name: BTreeMap::new(),
+            lightmap_by_name: BTreeMap::new(),
             looks: BTreeMap::new(),
         })
+    }
+
+    /// A lightmap page from `lightmap.lib` by name, decoded once like any texture.
+    pub fn lightmap(&mut self, name: &str) -> Result<Option<usize>> {
+        let k = key(name);
+        if let Some(&found) = self.lightmap_by_name.get(&k) {
+            return Ok(found);
+        }
+        let Some(archive) = self.lightmaps.as_ref() else { return Ok(None) };
+        let entry = archive.entries.iter().find(|e| e.tag() == "Texm" && key(&e.name) == k);
+        let index = match entry {
+            Some(e) => {
+                let t = texm::decode(archive.read(e)?, &e.name, None)?;
+                self.textures.push(Texture {
+                    name: e.name.clone(),
+                    width: t.width,
+                    height: t.height,
+                    levels: t.levels,
+                    pages: t.pages,
+                });
+                Some(self.textures.len() - 1)
+            }
+            None => None,
+        };
+        self.lightmap_by_name.insert(k, index);
+        Ok(index)
     }
 
     /// A texture from `Textures.lib` by name, decoded once.

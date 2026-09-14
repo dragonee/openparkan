@@ -522,7 +522,11 @@ pub fn sprite_looks(play: &Play) -> Vec<parkan_render::sprites::SpriteLook> {
     play.fx
         .looks
         .iter()
-        .map(|l| parkan_render::sprites::SpriteLook { texture: l.texture, blend_mode: l.blend_mode })
+        .map(|l| parkan_render::sprites::SpriteLook {
+            texture: l.texture,
+            blend_mode: l.blend_mode,
+            cell: l.cell,
+        })
         .collect()
 }
 
@@ -607,7 +611,7 @@ pub fn own_view(objects: &mut Objects, store: &mut TextureStore, play: &Play) ->
     let mut nodes = Vec::new();
     for (mount, loaded) in [(Mount::Chassis, &play.hero.chassis), (Mount::Turret, &play.hero.turret)] {
         for node in 0..loaded.mesh.nodes.len() {
-            let Some(model) = models::build_view_node(loaded, node, 0, |name| store.look(name))? else {
+            let Some(model) = models::build_view_node(loaded, node, 0, &mut *store)? else {
                 continue;
             };
             objects.models.push(model);
@@ -631,7 +635,7 @@ pub fn own_view(objects: &mut Objects, store: &mut TextureStore, play: &Play) ->
         for node in 0..loaded.mesh.nodes.len() {
             let stages = life.and_then(|l| l.nodes.get(node)).map_or(1, |l| l.stages);
             for variant in 0..usize::from(stages) {
-                let Some(model) = models::build_node(loaded, node, variant, |name| store.look(name))? else {
+                let Some(model) = models::build_node(loaded, node, variant, &mut *store)? else {
                     continue;
                 };
                 objects.models.push(model);
@@ -659,8 +663,7 @@ pub fn own_view(objects: &mut Objects, store: &mut TextureStore, play: &Play) ->
             for node in 0..part.mesh.nodes.len() {
                 let stages = part.life.as_ref().and_then(|l| l.nodes.get(node)).map_or(1, |l| l.stages);
                 for variant in 0..usize::from(stages) {
-                    let Some(model) = models::build_node(loaded, node, variant, |name| store.look(name))?
-                    else {
+                    let Some(model) = models::build_node(loaded, node, variant, &mut *store)? else {
                         continue;
                     };
                     objects.models.push(model);
@@ -696,8 +699,7 @@ pub fn add_targets(
             for node in 0..part.mesh.nodes.len() {
                 let stages = part.life.as_ref().and_then(|l| l.nodes.get(node)).map_or(1, |l| l.stages);
                 for variant in 0..usize::from(stages) {
-                    let Some(model) = models::build_node(loaded, node, variant, |name| store.look(name))?
-                    else {
+                    let Some(model) = models::build_node(loaded, node, variant, &mut *store)? else {
                         continue;
                     };
                     objects.models.push(model);

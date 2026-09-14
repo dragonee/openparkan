@@ -29,13 +29,18 @@ pub enum Owner {
     Turret(i32),
     /// One of the hero chassis's load-group effects on a node, by its record's id.
     Chassis(i32),
+    /// One of a building's load-group effects: the building's target, and its record's id.
+    Building(usize, i32),
 }
 
-/// A material's look for sprites: its texture and blend mode.
+/// A material's look for sprites: its texture, the cell of it the entry takes, and its blend
+/// mode.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Look {
     pub texture: Option<usize>,
     pub blend_mode: u8,
+    /// `(u0, v0, du, dv)`: a sprite's corner (u, v) samples `u0 + u × du`, `v0 + v × dv`.
+    pub cell: [f32; 4],
 }
 
 pub struct Fx {
@@ -172,7 +177,15 @@ impl Fx {
                 continue;
             }
             let look = store.look(&m)?;
-            self.looks.push(Look { texture: look.still.texture, blend_mode: look.blend_mode });
+            // STAND-IN: docs/07-objects.md#how-a-material-reaches-the-device--read-and-measured
+            // -- that an effect sprite takes its material entry's cell as a mesh batch does
+            // is not read for the effect draw; its first key's cell is taken, and the keys are
+            // not played.
+            self.looks.push(Look {
+                texture: look.still.texture,
+                blend_mode: look.blend_mode,
+                cell: look.still.cell,
+            });
             self.look_of.insert(key(&m), self.looks.len() - 1);
         }
         Ok(())

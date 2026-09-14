@@ -23,6 +23,7 @@ struct GpuVertex {
     position: [f32; 3],
     normal: [f32; 3],
     uv: [f32; 2],
+    lightmap: [f32; 2],
 }
 
 #[repr(C)]
@@ -32,13 +33,17 @@ struct LookUniform {
     emissive: [f32; 4],
     fog: [f32; 4],
     cell: [f32; 4],
+    /// x 1: a lit batch, which its lightmap shades in place of the scene's lights.
+    lit: [f32; 4],
 }
 
 impl LookUniform {
     /// A phase as the device material takes it (docs/07, "How a material reaches the
     /// device"): diffuse with the ambient alpha, the ambient colour as the emissive the
-    /// scene colour is added to, and the cell's rectangle.
-    fn new(phase: &Phase, blend_mode: u8) -> Self {
+    /// scene colour is added to, and the cell's rectangle. A lit batch keeps its diffuse,
+    /// which the shader moves into the emissive (docs/07, "How a lightmapped batch is
+    /// drawn").
+    fn new(phase: &Phase, blend_mode: u8, lit: bool) -> Self {
         let [dr, dg, db] = phase.diffuse;
         let [ar, ag, ab] = phase.ambient;
         Self {
@@ -46,6 +51,7 @@ impl LookUniform {
             emissive: [ar, ag, ab, 1.0],
             fog: crate::frame::fog_override(blend_mode),
             cell: phase.cell,
+            lit: [f32::from(u8::from(lit)), 0.0, 0.0, 0.0],
         }
     }
 }
@@ -78,6 +84,7 @@ struct DrawGroup {
     start: u32,
     count: u32,
     mode: u8,
+    lit: bool,
     look: wgpu::Buffer,
     /// A bind group for each texture the material's phases draw, and the one drawn now.
     bind_groups: Vec<(Option<usize>, wgpu::BindGroup)>,
@@ -172,6 +179,16 @@ impl ModelRenderer {
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                     count: None,
                 },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
             ],
         });
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -193,7 +210,9 @@ impl ModelRenderer {
                         buffers: &[Some(wgpu::VertexBufferLayout {
                             array_stride: std::mem::size_of::<GpuVertex>() as u64,
                             step_mode: wgpu::VertexStepMode::Vertex,
-                            attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32x2],
+                            attributes: &wgpu::vertex_attr_array![
+                                0 => Float32x3, 1 => Float32x3, 2 => Float32x2, 3 => Float32x2
+                            ],
                         })],
                     },
                     primitive: wgpu::PrimitiveState {
@@ -252,14 +271,23 @@ impl ModelRenderer {
                 let vertices: Vec<GpuVertex> = m
                     .vertices
                     .iter()
-                    .map(|v| GpuVertex { position: v.position, normal: v.normal, uv: v.uv })
+                    .map(|v| GpuVertex {
+                        position: v.position,
+                        normal: v.normal,
+                        uv: v.uv,
+                        lightmap: v.lightmap,
+                    })
                     .collect();
                 let groups = m
                     .groups
                     .iter()
                     .map(|g| {
+                        // A lit batch draws opaque, with no alpha test (docs/07, "How a
+                        // lightmapped batch is drawn").
+                        let lit = g.lightmap.is_some();
+                        let mode = if lit { 0 } else { g.look.blend_mode };
                         // Display space: the shader forms the lit colour from them, then decodes it.
-                        let uniform = LookUniform::new(&g.look.still, g.look.blend_mode);
+                        let uniform = LookUniform::new(&g.look.still, mode, lit);
                         let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                             label: Some(&g.look.material),
                             contents: bytemuck::bytes_of(&uniform),
@@ -287,6 +315,12 @@ impl ModelRenderer {
                                         binding: 2,
                                         resource: wgpu::BindingResource::Sampler(&textures.sampler),
                                     },
+                                    wgpu::BindGroupEntry {
+                                        binding: 3,
+                                        resource: wgpu::BindingResource::TextureView(
+                                            textures.view(g.lightmap),
+                                        ),
+                                    },
                                 ],
                             });
                             bind_groups.push((phase.texture, bind_group));
@@ -294,7 +328,8 @@ impl ModelRenderer {
                         DrawGroup {
                             start: g.start,
                             count: g.count,
-                            mode: g.look.blend_mode,
+                            mode,
+                            lit,
                             look: buffer,
                             bind_groups,
                             current: Cell::new(0),
@@ -395,7 +430,7 @@ impl ModelRenderer {
         for g in self.models.iter().flat_map(|m| &m.groups) {
             let Some(animation) = &g.animation else { continue };
             let phase = animation.at(lighting.clock_ms);
-            queue.write_buffer(&g.look, 0, bytemuck::bytes_of(&LookUniform::new(&phase, g.mode)));
+            queue.write_buffer(&g.look, 0, bytemuck::bytes_of(&LookUniform::new(&phase, g.mode, g.lit)));
             g.current.set(g.bind_groups.iter().position(|(t, _)| *t == phase.texture).unwrap_or(0));
         }
     }

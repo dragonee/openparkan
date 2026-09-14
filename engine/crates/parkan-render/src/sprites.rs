@@ -56,6 +56,8 @@ pub fn billboard(centre: Vec3, along: Vec3, width: f32, eye: Vec3) -> [Vec3; 4] 
 pub struct SpriteLook {
     pub texture: Option<usize>,
     pub blend_mode: u8,
+    /// The texture's cell a quad spans: `(u0, v0, du, dv)`.
+    pub cell: [f32; 4],
 }
 
 fn blend(mode: u8) -> wgpu::BlendState {
@@ -81,7 +83,7 @@ pub struct SpriteRenderer {
     camera: wgpu::Buffer,
     camera_group: wgpu::BindGroup,
     pipelines: Vec<wgpu::RenderPipeline>,
-    looks: Vec<(u8, wgpu::BindGroup)>,
+    looks: Vec<(u8, wgpu::BindGroup, [f32; 4])>,
     vertices: Option<wgpu::Buffer>,
     capacity: usize,
     /// This frame's draws: pipeline, look, first vertex, vertex count.
@@ -228,7 +230,7 @@ impl SpriteRenderer {
                         wgpu::BindGroupEntry { binding: 2, resource: toward.as_entire_binding() },
                     ],
                 });
-                (l.blend_mode.min(5), group)
+                (l.blend_mode.min(5), group, l.cell)
             })
             .collect();
         Self { camera, camera_group, pipelines, looks, vertices: None, capacity: 0, draws: Vec::new() }
@@ -255,7 +257,9 @@ impl SpriteRenderer {
         let mut vertices = Vec::with_capacity(sorted.len() * 6);
         self.draws.clear();
         for q in sorted {
-            let uv = [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]];
+            let [u0, v0, du, dv] = self.looks[q.look].2;
+            let uv =
+                [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]].map(|[u, v]| [u0 + u * du, v0 + v * dv]);
             let v = |i: usize| GpuVertex { position: q.corners[i].to_array(), uv: uv[i], alpha: q.alpha };
             let start = vertices.len() as u32;
             vertices.extend([v(0), v(1), v(2), v(0), v(2), v(3)]);

@@ -1604,3 +1604,115 @@ fn mission_02s_large_factory_cuts_the_ground_from_under_it_and_lets_the_hero_thr
     assert!(at.y < 860.0, "in the hall, past the door at 877: {at}");
     assert_eq!(play.hero.walker.ground.and_then(|h| h.solid).map(|s| s.0), Some(0));
 }
+
+#[test]
+#[ignore = "needs the game install"]
+fn mission_02s_large_factory_runs_its_load_group_smoke_screens_and_lamps_on_their_points() {
+    use parkan_world::building_fx::On;
+    use parkan_world::fx::Owner;
+
+    let (play, _) = mission_02_play();
+    let t = play.factories.first().expect("the Large Factory").target;
+    let (b, _) = play.building_effects.iter().find(|(b, _)| b.target == t).expect("its load group");
+    let named = |prefix: &str| b.effects.iter().filter(|e| e.name.starts_with(prefix)).count();
+    assert_eq!(
+        (named("smoke_fr_02"), named("f_pict_"), named("f_recharge_r"), named("door_")),
+        (3, 22, 2, 6),
+        "docs/13, \"A building's load group\""
+    );
+    let lamps = named("f_signlight") + named("f_smalllight") + named("f_blinklight");
+    assert_eq!(lamps, 17);
+    // The smokes hang on the chimneys' points 122–130, the screens on 0–21.
+    let smoke: Vec<On> = b.effects.iter().filter(|e| e.name == "smoke_fr_02").map(|e| e.on).collect();
+    assert_eq!(
+        smoke,
+        vec![On::Points([122, 123, 124]), On::Points([125, 126, 127]), On::Points([128, 129, 130])]
+    );
+    // Every one of them is running, placed on the building.
+    let part = &play.battle.combat.targets[t].parts[b.part];
+    let centre = play.battle.combat.targets[t].position;
+    for e in &b.effects {
+        let frame = b.frame(part, e.on).expect("its points resolve");
+        assert!(frame.origin.distance(centre) < 150.0, "{} at {}", e.name, frame.origin);
+        let running = play.fx.instances.iter().filter(|(o, _)| *o == Owner::Building(t, e.id)).count();
+        assert_eq!(running, 1, "{} is started once", e.name);
+    }
+    // The chimneys stand above the building's roof.
+    let smoke_at = b.frame(part, smoke[0]).unwrap().origin;
+    assert!(smoke_at.z > centre.z + 40.0, "a chimney's smoke at {smoke_at}");
+}
+
+#[test]
+#[ignore = "needs the game install"]
+fn mission_01s_bridges_start_their_signal_lights() {
+    use parkan_world::fx::Owner;
+
+    let (play, m) = mission_01_play();
+    let bridges: Vec<_> = play
+        .building_effects
+        .iter()
+        .filter(|(b, _)| {
+            m.objects[play.battle.objects[b.target]].path.to_ascii_lowercase().contains("bridge")
+        })
+        .collect();
+    // Both `m_bridge.dat` placements run `fr_m_brige.ctl`'s load group: two green and two red
+    // signal lights and a small red light (its sphere effects are construction's).
+    assert_eq!(bridges.len(), 2, "Mission 01's bridges have load groups");
+    for (b, _) in bridges {
+        let names: Vec<&str> = b.effects.iter().map(|e| e.name.as_str()).collect();
+        assert_eq!(
+            names,
+            ["f_signlight_g", "f_signlight_g", "f_signlight_r", "f_signlight_r", "f_smalllight_r"]
+        );
+        for e in &b.effects {
+            assert!(play.fx.instances.iter().any(|(o, _)| *o == Owner::Building(b.target, e.id)));
+        }
+    }
+}
+
+#[test]
+#[ignore = "needs the game install"]
+fn mission_02s_large_factorys_lit_batches_take_its_256_lightmap_page() {
+    use parkan_formats::mission;
+    use parkan_world::assembly::Assembly;
+    use parkan_world::textures::TextureStore;
+
+    let game = gamedir::find(None).expect("a Parkan install: set PARKAN_DIR");
+    let mut assembly = Assembly::new(&game).unwrap();
+    let mut store = TextureStore::open(&game).unwrap();
+    let model = parkan_world::models::build_model(
+        &mut assembly,
+        &mut store,
+        mission::KIND_BUILDING,
+        "UNITS\\BUILDS\\PLANT\\lplant01.dat",
+    )
+    .unwrap()
+    .expect("the Large Factory");
+    let lit: Vec<_> = model.groups.iter().filter(|g| g.lightmap.is_some()).collect();
+    assert!(!lit.is_empty(), "its lit batches");
+    let pages: std::collections::BTreeSet<usize> = lit.iter().filter_map(|g| g.lightmap).collect();
+    assert_eq!(pages.len(), 1, "one page for the whole building");
+    let page = &store.textures[*pages.first().unwrap()];
+    assert_eq!(
+        (page.name.to_ascii_lowercase().as_str(), page.width, page.height),
+        ("fr_b_plant_00.0", 256, 256)
+    );
+    // Stream 18's coordinates reach the lit batches' vertices, inside the page.
+    let reached: Vec<[f32; 2]> = lit
+        .iter()
+        .flat_map(|g| model.indices[g.start as usize..(g.start + g.count) as usize].iter())
+        .map(|&i| model.vertices[i as usize].lightmap)
+        .collect();
+    assert!(reached.iter().all(|uv| (0.0..=1.0).contains(&uv[0]) && (0.0..=1.0).contains(&uv[1])));
+    assert!(reached.iter().any(|uv| uv[0] > 0.0 || uv[1] > 0.0));
+    // A unit's batches stay unlit.
+    let hero = parkan_world::models::build_model(
+        &mut assembly,
+        &mut store,
+        mission::KIND_UNIT,
+        "UNITS\\UNITS\\HERO\\tut2_p.dat",
+    )
+    .unwrap()
+    .expect("the hero");
+    assert!(hero.groups.iter().all(|g| g.lightmap.is_none()));
+}

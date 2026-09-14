@@ -1,6 +1,7 @@
 pub mod assembly;
 pub mod battle;
 pub mod briefing;
+pub mod building_fx;
 pub mod buildings;
 pub mod cockpit;
 pub mod designs;
