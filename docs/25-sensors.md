@@ -87,6 +87,45 @@ All 372 turreted robots fill that slot (*measured*), so on every shipped robot t
 sensitivities are 0.05, 0.7 and 25 and the range 250–700; the turret slot's 0.5/0.5/0.5
 at 500 or 800 is never used.
 
+## The dish turns while the radar runs — *read*, and *measured*
+
+**The radar is an item, and its update turns the dish.** The class-8
+constructor (`Control.dll:0x10024310`) builds the base item (`0x10020800`) and
+keeps its update, slot 11 `0x10020900`, in the radar's vtable `0x1003c800`. So
+a radar steps its channels exactly as a class-3 device does
+([28-chassis.md](28-chassis.md#what-a-devices-value-turns--read-and-measured)):
+with its flags word 0 and weights 1 and 1, its rate is 1, and in its starting
+switch word 5 its progress goes round by 0.45 a step, wrapping. The channel
+runs from each value to the next over 450 ÷ the channel's rate ms, so **the
+dish turns at the channel's rate in turns a second** (*derived*).
+
+**What the dish is** — *measured*:
+
+- **Every radar record keeps the item's defaults**: all 76 carry flags 0,
+  weights 1 and 1, a state of −1 (so 5) and no switch groups. A fitted radar
+  part re-parsed into the slot changes none of that; the slot's entries stay
+  ([28-chassis.md](28-chassis.md#a-fitted-part-takes-over-its-slot--read-and-measured)).
+- **60 channels on 58 radar records name a dish**: on 54 of the 55 robot
+  turrets, all but the hero's, on the three bunker and tower radars and on
+  `r_l_06`; the radar parts and the animals have none. Each wraps, spans 2π and
+  plays four frames a quarter turn apart about its node's z — `TTrad_m1o1`,
+  `TMrad_m1o1`, `LTrad_m1o1`, `BTrad_m1o1`, `BTHQ_m1o1`, `Radar_m1o1` — so one
+  unit of value is one turn.
+- **Rates**: 0.5 on 56 of them. The two large turrets `e_tur_bb_12` and
+  `e_tur_bt_12` carry two dishes, `Radar_m1o1` at 0.3 and `RadD_m1o1` at 1.3.
+  So a robot's dish turns **once every two seconds**.
+- **The hero's turret** (`e_tur_ht_02`) has a radar slot with no entries: there
+  is no dish to turn.
+
+**What stops it** (*read*): the update does nothing while the switch word
+(`+0x50`) is 0 or while the radar's node is destroyed (slot 2, `0x10021820`) —
+the same two tests the scan makes — and the dish then holds where its last
+step ended. It does not scan to turn and does not turn to scan: the update
+never calls the scan (`0x10024390`) and the scan never reads the progress.
+Nor does it read the radar's power, its level or its condition. On Mission 01
+the neutral T-2 and M-2f and the enemy Tiny Spider each turn one dish at 0.5
+([28-chassis.md](28-chassis.md#what-moves-by-itself-on-mission-01--measured)).
+
 ## What a target gives away — *read*
 
 The three signatures are properties `0x45`, `0x43` and `0x44` of the target's

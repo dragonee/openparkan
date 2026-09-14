@@ -8059,6 +8059,198 @@ def check_chassis(check, game: Path) -> None:
           f"assembly, mission or binary")
 
 
+#: ``Control.dll``'s item: the base component's vtable, the radar's, their shared
+#: update, and where the constructor, the step and the step length keep their numbers.
+ITEM_VTABLE = 0x1003C448
+RADAR_VTABLE = 0x1003C800
+ITEM_UPDATE = 0x10020900
+ITEM_CONSTRUCTOR = 0x10020800
+RADAR_CONSTRUCTOR = 0x10024310
+ITEM_STATE_SITE = 0x10020832    # mov dword ptr [esi+0x50], 5
+ITEM_STEP_AT = 0x1003C488       # 0.45, at 0x10020a3a and 0x10020a48
+ITEM_IDLE_AT = 0x1003B934       # 100.0, at 0x10020d72
+STEP_MS_AT = 0x1003C504         # 1000.0, at 0x1002216d
+#: The nodes of Mission 01's placed objects that move without a state, by assembly:
+#: the class-3 and radar channels that play more than one frame.
+MISSION_01_MOVING = {
+    "helic.dat": {"Tup_m1o1", "Tdn_m1o1", "TTrad_m1o1"},
+    "tut1_mf1.dat": {"engnL_m1o1", "engnR_m1o1", "LTwng_m1o1", "LBwng_m1o1",
+                     "RTwng_m1o1", "RBwng_m1o1", "TMrad_m1o1"},
+    "tut1_e1.dat": {"TTrad_m1o1"},
+    "tut1_p.dat": set(), "l_targ.dat": set(), "m_targ.dat": set(), "m_bridge.dat": set(),
+}
+
+
+def _turns(item: control.Item, seconds: float, fps: float, sources=None) -> float:
+    """How many turns an item's first channel makes a second, stepped at ``fps``."""
+    total, last, t = 0.0, None, 0.0
+    while t <= seconds * 1000.0:
+        item.tick(t, sources)
+        if last is not None:
+            gap = item.now[0] - last
+            total += gap - round(gap)
+        last, t = item.now[0], t + 1000.0 / fps
+    return total / seconds
+
+
+def check_moving_parts(check, game: Path) -> None:
+    """Rotors, dishes and wings: the item update that turns them, and what it turns."""
+    path = game / "Control.dll"
+    if path.exists():
+        at = _image_at(path.read_bytes())
+
+        def slots(va: int) -> tuple[int, ...]:
+            return struct.unpack("<16I", at(va, 64))
+
+        item, radar = slots(ITEM_VTABLE), slots(RADAR_VTABLE)
+        calls = [t for _, t in _calls(at, RADAR_CONSTRUCTOR, 16)]
+        numbers = (struct.unpack("<f", at(ITEM_STEP_AT, 4))[0],
+                   struct.unpack("<f", at(ITEM_IDLE_AT, 4))[0],
+                   struct.unpack("<f", at(STEP_MS_AT, 4))[0])
+        check("Control.dll: a radar is an item and keeps the item's update",
+              item[11] == radar[11] == ITEM_UPDATE and item[1:] == radar[1:]
+              and item[0] != radar[0] and calls[:1] == [ITEM_CONSTRUCTOR]
+              and at(ITEM_STATE_SITE, 7) == bytes.fromhex("c7465005000000")
+              and abs(numbers[0] - control.ITEM_STEP) < 1e-6
+              and numbers[1:] == (control.ITEM_IDLE_MS, 1000.0),
+              f"vtables {ITEM_VTABLE:#x} and {RADAR_VTABLE:#x} share slots 1-15 (update "
+              f"{item[11]:#x}) and differ in slot 0; the radar's constructor calls "
+              f"{calls[0]:#x} first; the item starts in state 5; the step is "
+              f"{numbers[0]:.2f}, an idle step {numbers[1]:g} ms, lengths in "
+              f"{numbers[2]:g}ths of a second")
+
+    # every class-3 and radar record keeps the item's defaults
+    records = []
+    for archive_path in all_archives(game):
+        archive = NResArchive.open(archive_path)
+        for entry in archive:
+            if not entry.tag.upper().startswith("CTL"):
+                continue
+            blob = archive.read(entry)
+            try:
+                parsed = control.parse(blob)
+            except control.ControlFormatError:
+                continue
+            for p in parsed.components:
+                if p.type_id in (control.SIMPLE_TYPE, control.RADAR_TYPE):
+                    groups = struct.unpack_from("<2i", blob, p.offset + control.ITEM_ON_GROUP_AT)
+                    records.append((archive_path.name.lower(), entry.name.lower(), p, groups,
+                                    parsed.channels))
+    radars = [r for r in records if r[2].type_id == control.RADAR_TYPE]
+    simple = [r for r in records if r[2].type_id == control.SIMPLE_TYPE]
+    defaults = all(p.state is None and groups == (-1, -1) for _, _, p, groups, _ in records)
+    plain = all(p.flags == 0 and p.weights == (1.0, 1.0) for _, _, p, _, _ in radars)
+    check(".ctl: every class-3 and radar record keeps the item's starting word 5",
+          records and defaults and plain and len(radars) == 76 and len(simple) == 72,
+          f"{len(simple)} class-3 and {len(radars)} radar records: state -1 and no switch "
+          f"groups at +0x10/+0x14 on all; every radar's flags 0 and weights 1 and 1, so a "
+          f"rate of 1")
+
+    # a radar's entries are its dish: a wrapping 2 pi channel of four quarter turns
+    library = objects.ObjectLibrary(game / "objects.rlb")
+    meshes: dict[tuple[str, str], tuple[str, str]] = {}
+    for record in library.records.values():
+        ctl, msh = record.slot_with_suffix("ctl"), record.mesh
+        if ctl and msh:
+            meshes.setdefault((ctl.library.lower(), ctl.member.lower()), (msh.library, msh.member))
+    parts = assembly.Assembly(game)
+    dishes = quarter = 0
+    rates: Counter[float] = Counter()
+    holders = set()
+    for lib, name, p, _, channels in radars:
+        for e in p.entries:
+            ch = channels[e]
+            dishes += 1
+            holders.add((lib, name))
+            rates[round(ch.rate, 2)] += 1
+            ref = meshes.get((lib, name))
+            model = parts.mesh(objects.ResourceRef(*ref)) if ref else None
+            if model is None or not (ch.flags & control.CHANNEL_WRAP and ch.last - ch.first == 4
+                                     and abs(ch.span - 6.28) < 1e-3):
+                continue
+            yaws = [math.degrees(2 * math.atan2(model.pose_at(ch.node, float(f))[1][3],
+                                                model.pose_at(ch.node, float(f))[1][0]))
+                    for f in range(int(ch.first), int(ch.last) + 1)]
+            steps = [(b - a + 180) % 360 - 180 for a, b in zip(yaws, yaws[1:], strict=False)]
+            quarter += len({round(s) for s in steps} - {89, -89}) == 1 and all(
+                abs(abs(s) - 90) < 1.5 for s in steps)
+    hero = next(r for r in radars if r[1] == HERO_TURRET + ".ctl")
+    check(".ctl: a radar's channel is its dish, one turn a unit of value",
+          dishes == quarter == 60 and len(holders) == 58 and not hero[2].entries
+          and rates == Counter({0.5: 56, 0.3: 2, 1.3: 2}),
+          f"{dishes} channels on {len(holders)} radar records wrap, span 2 pi and play four "
+          f"frames a quarter turn apart about the node's z on {quarter}; rates {dict(rates)}; "
+          f"the hero's turret's radar slot has {len(hero[2].entries)} entries")
+
+    # stepped as read: the rotors, the dishes and the M-2f's switches
+    bases = NResArchive.open(game / "bases.rlb")
+    turrets = NResArchive.open(game / "turrets.rlb")
+    t2 = control.parse(bases.read_name("r_t_02.ctl"))
+    rotors = [_turns(control.Item(p, t2.channels), 10.0, 60.0)
+              for p in t2.components if p.type_id == control.SIMPLE_TYPE]
+    dishes_spin = []
+    for name in ("o_tur_tb_01.ctl", "o_tur_mb_01.ctl", "o_tur_tt_01.ctl"):
+        c = control.parse(turrets.read_name(name))
+        dishes_spin += [_turns(control.Item(p, c.channels), 10.0, 60.0)
+                        for p in c.components if p.type_id == control.RADAR_TYPE and p.entries]
+    m2 = control.parse(bases.read_name("r_m_02.ctl"))
+    devices = [p for p in m2.components if p.type_id == control.SIMPLE_TYPE]
+    wings = control.Item(devices[3], m2.channels)
+    engine = control.Item(devices[0], m2.channels)
+    frames = []
+    for t in range(0, 8001, 50):
+        speed = {12: 0.6 if t >= 1000 else 0.0}
+        wings.tick(float(t), speed)
+        engine.tick(float(t), speed)
+        frames.append((t, wings.frame(0), engine.frame(0)))
+    rest = all(w == 2.0 and e == 2.0 for t, w, e in frames if t <= 1000)
+    swept = min(t for t, w, _ in frames if w == 1.0)
+    out = min(t for t, _, e in frames if e == 1.0)
+    top = m2.triples[2][1] * 3.6
+    check("Control.dll item, stepped: a T-2 rotor turns 7.3 times a second, a dish 0.5",
+          [round(r, 3) for r in rotors] == [7.3, 7.3]
+          and [round(d, 3) for d in dishes_spin] == [0.5, 0.5, 0.5]
+          and rest and 2000 <= swept <= 2150 and 6000 <= out <= 6150 and round(top) == 125,
+          f"r_t_02's two constant devices {', '.join(f'{r:.3f}' for r in rotors)} turns a "
+          f"second; the tiny and medium turrets' dishes "
+          f"{', '.join(f'{d:.3f}' for d in dishes_spin)}; the M-2f's wings and side engines "
+          f"hold frame 2 at rest and, from 0.6 of its {top:.0f} km/h top forward speed at "
+          f"1 s, reach frame 1 by {swept} and {out} ms")
+
+    # Mission 01: what moves without a state
+    d01 = game / MISSION_01
+    if not (d01 / "data.tma").exists():
+        return
+    m01 = mission.load(d01 / "data.tma")
+    moving: dict[str, set[str]] = {}
+    for o in m01.objects:
+        if o.kind not in (mission.KIND_UNIT, mission.KIND_BUILDING):
+            continue
+        f = parts.unit_file(o.path)
+        if f is None:
+            continue
+        unit = objects.load_unit(f)
+        names: set[str] = set()
+        for comp in unit.components:
+            record = parts.library.get(comp.ref.member)
+            ctl = record and record.slot_with_suffix("ctl")
+            if not ctl or record.tag == "INTO":
+                continue
+            c = control.parse(parts.archive(ctl.library).read_name(ctl.member))
+            model = parts.mesh(record.mesh) if record.mesh else None
+            for p in c.components:
+                if p.type_id not in (control.SIMPLE_TYPE, control.RADAR_TYPE):
+                    continue
+                for e in p.entries:
+                    ch = c.channels[e]
+                    if model and ch.last != ch.first:
+                        names.add(model.nodes[ch.node].name)
+        moving[f.name.lower()] = names
+    check("Mission 01: what moves by itself is two rotors, a flyer's wings and three dishes",
+          moving == MISSION_01_MOVING,
+          "; ".join(f"{k}: {', '.join(sorted(v)) or 'none'}" for k, v in sorted(moving.items())))
+
+
 #: The catalogue sub-kinds that fire on energy alone.
 ENERGY_WEAPONS = ("LAS", "TAS")
 #: A clip's marks, in order.
@@ -13788,6 +13980,7 @@ def run(game: Path) -> int:
         check_collision, check_lake_and_buoys,
         check_combat, check_ownership,
         check_capture, check_repair, check_chassis, check_weapons, check_firing,
+        check_moving_parts,
         check_targeting, check_target_marks, check_ai_fight, check_turrets, check_packages,
         check_target_panel,
         check_wingman,

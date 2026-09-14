@@ -118,7 +118,7 @@ assembly uses it.
 
 Class 3 is `CICLS_SIMPLE`. The factory builds it, like every class without a
 case of its own, as the plain 0xa4-byte device (`Control.dll:0x10020800`,
-vtable `0x1003c448`). Each tick (slot 11, `0x10020900`) it moves the section-2
+vtable `0x1003c448`). Each step (slot 11, `0x10020900`) it moves the section-2
 channels its entries name by a mix of the machine's motion:
 
 - **What the flags word picks.** Its bytes 1 and 2 each pick a source
@@ -133,9 +133,10 @@ channels its entries name by a mix of the machine's motion:
   | 14 | the speed ÷ the top speed, as lengths |
 
 - **How they combine.** The two are weighted by the floats at record `+0x24`
-  and `+0x28` and added to the device's value each tick. A byte below 2 picks
-  nothing: byte 1 then stands for 1 and byte 2 for 0, so a record with both at
-  0 advances at a constant rate.
+  and `+0x28` into the device's **rate**, which scales how far each step moves
+  it ([below](#what-a-devices-value-turns--read-and-measured)). A byte below 2
+  picks nothing: byte 1 then stands for 1 and byte 2 for 0, so a record with
+  both at 0 advances at a constant rate.
 - **Byte 0.** When it is set, byte 0's source is written straight into the
   value instead, and a byte 0 of 1 holds the value where it is.
 
@@ -148,10 +149,145 @@ flyers' records, whose first value is 0.5.
 | `0x01070C00` / `0x02040C00` | 1 and 0.5 | the drive wheels and tracks of all six wheeled and tracked chassis, left and right | forward speed ∓ half the turn: skid steering |
 | `0x00000004` | — | two wheels of the Small Wheel Chs and four of the Medium | set to the turn rate: steering |
 | `0x00000001` | — | the other wheels, and the upper track rollers | held |
-| `0x8000000C`, `0x8100000C`, `0x8200000C` | — | engines and wings of four flyers | set to forward speed ÷ top: they tilt |
+| `0x8000000C`, `0x8100000C`, `0x8200000C` | — | engines and wings of four flyers | a switch on forward speed ÷ top: they tilt |
 | `0` | 1 | the T-2's two rotors, and the building's | a constant: they spin all the time |
 
 So the unlabelled records are animation, not slots.
+
+### What a device's value turns — *read*, and *measured*
+
+**The device is an item, stepped.** Class 3 is built as the base item, the
+same object a door, a control pod or the hero's arm is
+([29-weapons.md](29-weapons.md#the-button-reaches-the-selected-guns),
+[27-ownership.md](27-ownership.md#capture--read)), and the radar's constructor
+(`0x10024310`) calls it too and keeps its update: the radar's vtable
+`0x1003c800` differs from the item's `0x1003c448` only in slot 0. The update
+does not run every tick. Each machine tick (`0x1000bcf0`) hands the game
+time to the **time driver** (`0x1002d260`, called at `0x1000c745`), and the
+driver, for each device whose last step has ended, plays its channels to that
+time, starts the next step at the old step's end, and runs the **update**
+(slot 11, `0x10020900`). Several steps run in one tick if the tick is long.
+
+**The update** keeps a progress (`+0x94`, 0 at construction) and a switch word
+(`+0x50`):
+
+- **When it does nothing.** The word is 0, or the device's node is destroyed
+  (slot 2, `0x10021820`, 1 at a life of 0). The first step it runs, and the
+  first it skips after running, each run a section-5 group from the record's
+  `+0x10` and `+0x14` (`0x1002095a`, `0x10020931`, `0x100221e0`); every one
+  of the 72 class-3 and 76 radar records has −1 in both. A rate below 1e-9
+  (`0x1003b380`) also does nothing.
+- **The word.** The constructor sets it to **5** (`0x10020832`) and the parser
+  replaces it with the record's `+0x18` unless that is −1 (`0x10021d86`).
+  *Measured*: all 72 class-3 records and all 76 radar records hold −1, so
+  every one runs in 5.
+- **Byte 0 clear.** The progress moves by **0.45 × rate** (`0x1003c488`) while
+  the word's low bits are 1, back by it while they are 2 (`0x10020a28`). Then
+  the word's bits `0xc` pick what an end does: **4 wraps** the progress once
+  into 0–1; **8 bounces**, holding it at the end and swapping the low bits; any
+  other value holds it and clears the word, which is how an arm or a door
+  stops. So a word of 5 is open and wrapping: the progress goes round for
+  ever.
+- **Byte 0 set.** The progress is the source byte 0 picks, outright
+  (`0x100209ea`).
+- **What each channel is sent** (`0x10020bc1`), by byte 0:
+  - **0** — the progress;
+  - **2 and up** — the progress ÷ the channel's span, plus its initial value;
+    or, with the flags word's top bit set, **a switch: 0 below the channel's
+    initial value and 1 from it** (`0x10020bf0`);
+  - **1** — the channel's initial value plus a float found in the machine's
+    list at `+0xc4` by the channel's `+8` (`0x10020c25`), over its span; that
+    list is not read.
+
+  The value is held to 0–1 (the link's wrap byte, `+0x10`, is left 0 by the
+  parser, `0x10021e49`), and the channel runs from where it is now to it.
+- **How long the step lasts** (`0x10022120`): the longest over the channels of
+  1000 × |to − from| ÷ (|rate| × the channel's rate) ms, the short way round
+  on a channel flagged 1 (a gap over a half counts as one minus the gap); **100 ms**
+  if that is under a millisecond (`0x10020d72`). The driver keeps
+  1 ÷ the length (`0x100221b0`).
+
+**Playing the step** (`0x10021a30`): at time t the phase is s = (t − start) ÷
+length, or 1 once t reaches the end; each channel's value is from + s × (to −
+from), the short way round and wrapped once into 0–1 on a wrapping channel,
+held to 0–1 otherwise. It is then offered to the node as every channel's is: a
+wrap or a hold by the channel's flag 1, 1 − v by flag 2, and the node plays
+first + v × (last − first) on its own segment
+([07-objects.md](07-objects.md#how-the-engine-plays-it--read),
+[30-turrets.md](30-turrets.md#aiming-and-the-camera--read-and-measured)). The
+item's slot 12, which a turret uses for its strafe offset, is 0.0 here
+(`0x10021810`).
+
+**So the speed is the rate times the channel's rate** (*derived*). With byte 0
+clear, a step of 0.45 × rate lasts 450 ÷ the channel's rate ms, whatever the
+rate: the value
+moves at |rate| × the channel's rate a second, linearly within each step. A
+wrapping value a step moves by more than a half would play backwards, since a
+step goes the short way round; that needs a rate above 1.11, which no constant
+device has.
+
+**When the picture moves between steps** — *read*, and not established.
+Channels are played at the start of each step (`0x1002d29e`), where the phase
+is 1 and the value is the finished step's end. They are also played every
+machine tick, through `0x1002dc50` at `0x1000c275`, but only while one of two
+countdowns on the control system, `+0xd0` and `+0xd4`, is above zero; each
+tick takes one off (`0x1000c843`, `0x1000c854`). `IControl` slot 8
+(`0x10004710`) sets `+0xd4` to 100 for an argument of 0 and `+0xd0` for 1, and
+the driver plays a device again after a step while `+0xd4` is set
+(`0x1002d2f4`). Which caller sets them was not found: a search of every
+module for a slot-8 call shaped `push 0 or 1; push object` turned up none that
+could be shown to be on an `IControl`. Slot 8's place in `Terrain.dll`'s stub
+table would make it `SetControlCalculationMode` (a *guess*, counting from
+slot 5 = `SetTangSpeed`, `0x100044a0`). Without a countdown a T-2's rotor would
+be drawn only at each step's end, 162° apart; with one, it turns smoothly.
+
+**What turns, and how fast** — *measured*, then *derived* from the read
+update:
+
+| device | record | channel: node, frames | channel rate, span, flags | turns |
+|---|---|---|---|---|
+| T-2 rotor, top | `r_t_02` class 3, flags 0, gains 1 and 1 | `Tup_m1o1`, 2–6, −90° about z a frame | 7.3, 2π, wrap | **7.3 turns a second** |
+| T-2 rotor, bottom | the same | `Tdn_m1o1`, 2–6, +90° a frame | 7.3, 2π, wrap | **7.3 turns a second**, the other way |
+| MTP building | `fr_m_mtp` class 3, flags 0 | node 11, 0–4, −90° a frame | 0.4, 2π, wrap | 0.4 turns a second |
+| a robot turret's radar dish | the turret's class-8 slot, flags 0, gains 1 and 1 | `TTrad`, `TMrad`, `LTrad`, `BTrad`, …, four frames of −90° or +90° | 0.5, 2π, wrap | **0.5 turns a second** ([25-sensors.md](25-sensors.md#the-dish-turns-while-the-radar-runs--read-and-measured)) |
+| M-2f engines, left and right | `r_m_02` class 3, `0x8100000C` / `0x8200000C` | `engnL`, `engnR`, 1–2: x out by 0.3 at 1, in by 0.2 at 2 | 0.2, span 1, initial 0.5, invert | a switch at half the top forward speed, 5 s to swing |
+| M-2f tail engine | `0x8000000C` | `engnT`, 0–0 | 0.2, initial 0 | nothing to play |
+| M-2f wings | `0x8000000C`, four channels | `LTwng`, `RTwng` 30° and `LBwng`, `RBwng` 50° about y at frame 1, flat at 2 | 1, span 1, initial 0.5, invert | a switch at half the top forward speed, 1 s to swing |
+
+Byte 0 of 12 is the velocity's y (`+0x1c8`, the machine's own frame) ÷ the
+frame's third triple's y, the authored top forward speed (`0x1002104c`). With
+the invert flag, a switch at 0 plays the last frame and at 1 the first. So an
+M-2f hovering or slower than half its top speed holds its wings flat and its
+side engines in; from half its top speed they sweep and swing out over one and
+five seconds (*derived*). A switch re-reads the speed every 100 ms while it
+holds, and not until a swing has finished once it moves.
+
+`openparkan.control.Item` is this update, driver and playback, and `openparkan
+verify` steps it over the shipped records.
+
+### What moves by itself on Mission 01 — *measured*
+
+Over every unit and building `data.tma` places (the hero `tut1_p`, the enemy
+`tut1_e1`, the neutral `helic` and `tut1_mf1`, three `l_targ`, two `M_targ` and
+two `m_bridge`), the parts that move without a controller state are these
+devices and nothing else:
+
+| unit | chassis | turret | what moves |
+|---|---|---|---|
+| `helic`, neutral | T-2 (`r_t_02`): its two rotors, 7.3 turns a second each, opposite ways | `e_tur_tb_01`: its dish `TTrad_m1o1`, 0.5 turns a second | three |
+| `tut1_mf1`, neutral | M-2f (`r_m_02`): side engines and four wings, switched at half its 125 km/h | `e_tur_mb_01`: its dish `TMrad_m1o1`, 0.5 turns a second | seven channels |
+| `tut1_e1`, enemy | Tiny Spider (`r_t_01`): none | `e_tur_tt_01`: its dish `TTrad_m1o1`, 0.5 turns a second | one |
+| `tut1_p`, the hero | `r_h_02`: none | `e_tur_ht_02`: a radar slot with no channel, so no dish | none |
+| `l_targ`, `M_targ` | `r_h_01`, `r_h_03`: one state, one frame, no channels | — | none |
+| `m_bridge` | a `FORT` with no controller; its parts are internal | — | none |
+
+The rest of the map is still as well: the flyers' one state plays frames 0 and
+1 with no node moving between them, and each tree and stone's controller has
+one state whose frames move no node either. The turret's aim, the guns'
+barrels and the hero's arms move too, but only when something drives them
+([30-turrets.md](30-turrets.md#aiming-and-the-camera--read-and-measured),
+[29-weapons.md](29-weapons.md#a-gun-is-ready-once-its-arm-is-out--read-and-measured)).
+A walker's legs are its states ([24-motion.md](24-motion.md#playing-a-state--read-and-measured)).
 
 ## A fitted part takes over its slot — *read*, and *measured*
 
@@ -425,3 +561,16 @@ is not a category but three state bits, which the loaded tree reads and writes
 - ~~Research-tree category 0~~ — answered: none of the three state bits, out
   of the tree ([above](#what-a-chassis-costs-and-who-builds-it--measured)).
   Open: what reads slot 26 to allow a build.
+- ~~How a device's value becomes a pose, and what turns a radar~~ — answered:
+  a stepped item whose channels play their nodes' frames, and the radar is one
+  ([What a device's value turns](#what-a-devices-value-turns--read-and-measured)).
+  Open:
+  - **who sets the two countdowns** (`+0xd0`, `+0xd4`, through `IControl`
+    slot 8) under which a device's channels are played every tick rather than
+    only as each step starts — so whether a rotor seen in play turns smoothly
+    or in 162° jumps is not read;
+  - **what a byte 0 of 1 adds**: the float `0x10020c25` finds in the machine's
+    list at `+0xc4` (count `+0x38c`, 0x5c-byte entries keyed at `+0x24`), over
+    the channel's span, which the held wheels and rollers play;
+  - what a control system of agent kind 10 is: its tick skips the states and
+    the devices both (`0x1000c294`).

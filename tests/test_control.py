@@ -457,3 +457,77 @@ def test_a_tie_between_sectors_goes_to_the_earlier_one():
     assert control.shield_sector((1.0, 0.0, 1.0)) == control.SECTOR_RIGHT
     assert all(control.shield_sector(axis) == i
                for i, axis in enumerate(control.SECTOR_AXES))
+
+
+def _item(flags=0, weights=(1.0, 1.0), state=None,
+          channels=((0.0, 0.5, 6.28, control.CHANNEL_WRAP),)):
+    chans = tuple(control.Channel(node=i, first=0.0, last=4.0, initial=initial, origin=-1, point=-1,
+                                  rate=rate, span=span, flags=f)
+                  for i, (initial, rate, span, f) in enumerate(channels))
+    comp = control.Component(type_id=control.SIMPLE_TYPE, resource=control.ResourceRef("", ""),
+                             index=state, entries=tuple(range(len(chans))), label="", offset=0,
+                             size=0, flags=flags, weights=weights)
+    return control.Item(comp, chans)
+
+
+def test_a_constant_item_turns_at_its_channel_s_rate_and_wraps():
+    item = _item()
+    assert item.state == control.ITEM_DEFAULT_STATE
+    item.tick(0.0)
+    assert (item.start, item.end) == (0.0, 900.0)  # 0.45 at 0.5 a second
+    item.tick(450.0)
+    assert abs(item.now[0] - 0.225) < 1e-9
+    for t in range(450, 2001, 50):
+        item.tick(float(t))
+    # at 2 s, a turn: steps of 0.45 every 900 ms, the third wrapping 1.35 to 0.35
+    assert abs(item.now[0] - 1.0) < 1e-6 and item.progress == pytest.approx(0.35)
+    item.tick(2450.0)
+    assert abs(item.now[0] - 0.225) < 1e-6
+
+
+def test_a_wrapping_step_goes_the_short_way_round():
+    item = _item()
+    item.origin, item.target = [0.9], [0.35]
+    item.start, item.end, item.inverse, item.started = 0.0, 100.0, 0.01, True
+    item.play(50.0)
+    assert abs(item.now[0] - 0.125) < 1e-9
+
+
+def test_a_threshold_item_switches_at_the_channel_s_initial_value():
+    item = _item(flags=control.ITEM_THRESHOLD | 12,
+                 channels=((0.5, 1.0, 1.0, control.CHANNEL_INVERT),))
+    item.tick(0.0, {12: 0.4})
+    assert item.target == [0.0] and item.end == control.ITEM_IDLE_MS
+    item.tick(100.0, {12: 0.5})  # not past the idle step's end yet
+    assert item.target == [0.0]
+    item.tick(101.0, {12: 0.5})
+    assert item.target == [1.0] and (item.start, item.end) == (100.0, 1100.0)
+    item.tick(600.0, {12: 0.5})
+    assert abs(item.now[0] - 0.5) < 1e-9
+    # inverted: value 1 plays the first frame
+    item.tick(1100.0, {12: 0.5})
+    assert item.frame(0) == 0.0
+
+
+def test_an_item_stops_at_its_end_and_clears_its_word_unless_it_wraps_or_bounces():
+    once = _item(state=control.ITEM_OPENING, channels=((0.0, 10.0, 1.0, 0),))
+    bounce = _item(state=control.ITEM_OPENING | control.ITEM_BOUNCE,
+                   channels=((0.0, 10.0, 1.0, 0),))
+    seen = []
+    for t in range(0, 1001, 10):
+        once.tick(float(t))
+        bounce.tick(float(t))
+        seen.append((bounce.progress, bounce.state & 3))
+    assert once.state == 0 and once.progress == 1.0
+    # 0, 0.45, 0.9, held at 1 and turned round, then back down
+    turned = seen.index((1.0, control.ITEM_CLOSING))
+    assert bounce.state != 0 and any(p < 1.0 for p, _ in seen[turned:])
+
+
+def test_a_destroyed_or_switched_off_item_holds_its_channels():
+    item = _item()
+    item.tick(0.0)
+    item.tick(1000.0, alive=False)
+    held = item.now[0]
+    item.tick(3000.0, alive=False)
+    assert item.now[0] == held

@@ -19510,3 +19510,196 @@ kind = "function"
 name = "render slot 30: a texture and a stage set chosen by edx (not read)"
 read = true
 doc = "docs/35-hud.md"
+
+# --- the item update that turns rotors, dishes and wings, ../docs/28-chassis.md ---
+[[entry]]
+module = "Control.dll"
+at = "0x10020832"
+kind = "site"
+name = "item constructor: switch word +0x50 = 5, open and wrapping"
+read = true
+doc = "docs/28-chassis.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002095a"
+kind = "site"
+name = "item update: the first step it runs runs the record's +0x10 section-5 group and sets +0x99"
+read = true
+doc = "docs/28-chassis.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x100209ea"
+kind = "site"
+name = "item update: a non-zero flags byte 0 writes its source into the progress outright"
+read = true
+doc = "docs/28-chassis.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x10020ae4"
+kind = "site"
+name = "item update: word bits 0xc = 8 bounce -- hold the progress at the end and swap the low bits 1 and 2"
+read = true
+doc = "docs/28-chassis.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x10020b63"
+kind = "site"
+name = "item update: word bits 0xc = 4 wrap the progress once into 0..1"
+read = true
+doc = "docs/28-chassis.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x10020bf0"
+kind = "site"
+name = "item update: flags bit 31 makes a byte-0 channel a switch -- progress/span below the channel's initial value 0, else 1"
+read = true
+doc = "docs/28-chassis.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x10020c25"
+kind = "site"
+name = "item update: byte 0 of 1 -- the channel's initial value plus a float from the machine's list +0xc4 (keyed +0x24, value +0x54) over the span; list not read"
+read = true
+doc = "docs/28-chassis.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x100208b0"
+kind = "function"
+name = "item slot 10: +0xa0 = the step's phase (t - start) x 1/length, at most 1"
+read = true
+doc = "docs/28-chassis.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x10021810"
+kind = "function"
+name = "item slot 12: 0.0 -- the offset the first channel adds, which a turret overrides with its strafe"
+read = true
+doc = "docs/28-chassis.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002dc50"
+kind = "function"
+name = "control system: play every device's channels at t (0x10021a30), then its slot 10"
+read = true
+doc = "docs/28-chassis.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000c275"
+kind = "site"
+name = "machine tick: plays every device each tick (0x1002dc50) only while countdown +0xd0 or +0xd4 is non-zero"
+read = true
+doc = "docs/28-chassis.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000c294"
+kind = "site"
+name = "machine tick: agent kind 10 skips the state loop and the time driver"
+read = true
+doc = "docs/28-chassis.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000c745"
+kind = "site"
+name = "machine tick: the component time driver 0x1002d260 at game time +0xe4"
+read = true
+doc = "docs/28-chassis.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000c854"
+kind = "site"
+name = "machine tick: counts +0xd0 down"
+read = true
+doc = "docs/28-chassis.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x10004710"
+kind = "function"
+name = "IControl slot 8 (by the stub table's order SetControlCalculationMode, a guess): 0 sets countdown +0xd4 to 100, 1 sets +0xd0, 3/4 stop the body and set +0xe0, 5/6 call +0x34's slots 3/4"
+read = true
+doc = "docs/28-chassis.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002d29e"
+kind = "site"
+name = "time driver: plays a device at t before starting its next step, so a finished step's end value"
+read = true
+doc = "docs/28-chassis.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002d2f4"
+kind = "site"
+name = "time driver: plays a device again after a step while countdown +0xd4 is set, then calls its slot 10"
+read = true
+doc = "docs/28-chassis.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002104c"
+kind = "site"
+name = "device source kind 3: machine velocity +0x1c8[axis] / the frame's third triple (+0x18)[axis], the authored top speed"
+read = true
+doc = "docs/28-chassis.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x10021e49"
+kind = "site"
+name = "component parser: a channel link starts at -1, -1, -1 with its wrap byte +0x10 clear"
+read = true
+doc = "docs/28-chassis.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1003c488"
+kind = "datum"
+name = "float 0.45: an item's progress step"
+read = true
+doc = "docs/28-chassis.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1003b934"
+kind = "datum"
+name = "float 100.0: an idle item step's ms"
+read = true
+doc = "docs/28-chassis.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1003c504"
+kind = "datum"
+name = "float 1000.0: step lengths in ms"
+read = true
+doc = "docs/28-chassis.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1003b380"
+kind = "datum"
+name = "float 1e-9: the least item rate that moves"
+read = true
+doc = "docs/28-chassis.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x10024313"
+kind = "site"
+name = "radar constructor: builds the base item first, so a radar keeps the item update that turns its dish"
+read = true
+doc = "docs/25-sensors.md"

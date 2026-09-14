@@ -399,7 +399,7 @@ ever non-zero):
 | 9 fight shield, 15 repair, 21 deflector, 27 armour | 0–2, 0–1, 0–5, 0–2 | [26-damage.md](26-damage.md) |
 | 17 seeker | 0–2 | 0–1 in [29-weapons.md](29-weapons.md); 2 reaches `IDeviceManager` id 12 |
 | 19 battery, 26 efficiency | 0 | [23-economy.md](23-economy.md) |
-| 3 generic device | 0 (0.5 on 8 flyer records) | not read |
+| 3 generic device | 0 (0.5 on 8 flyer records) | not read; its update (`0x10020900`) never takes a value ([28-chassis.md](28-chassis.md#what-a-devices-value-turns--read-and-measured)) |
 | 24 the hero's arms | 1 and 4 | not read |
 | 1, 12, 13, 25, 29 | none | — |
 

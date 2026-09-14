@@ -264,6 +264,157 @@ def shake_ring(offset: tuple[float, float, float], seconds: float) -> tuple[floa
     return (offset[0] * k, offset[1] * k, offset[2] * k)
 
 
+#: The item every generic device and every radar is (``Control.dll:0x10020800``,
+#: the radar's constructor ``0x10024310`` calls it and keeps its update).  Its
+#: switch word starts at ``ITEM_DEFAULT_STATE``, open and wrapping, and the
+#: record's ``+0x18`` replaces it unless -1.  Each step moves its progress by
+#: ``ITEM_STEP`` times its rate while the word's low bits say open (1) or close
+#: (2); ``ITEM_WRAP`` wraps the progress, ``ITEM_BOUNCE`` turns it round at an
+#: end, and any other mode stops there and clears the word (``0x10020900``).
+ITEM_DEFAULT_STATE = 5          # 0x1002080a..0x10020832
+ITEM_STEP = 0.45                # 0x1003c488
+ITEM_OPENING = 1
+ITEM_CLOSING = 2
+ITEM_WRAP = 4
+ITEM_BOUNCE = 8
+#: A step that moves nothing lasts this long (``0x10020d72``).
+ITEM_IDLE_MS = 100.0
+#: A rate this small does nothing (``0x1003b380``).
+ITEM_MIN_RATE = 1e-9
+#: The flags word's top bit makes a set-outright channel a switch: 0 below its
+#: initial value, 1 from it (``0x10020bf0``).
+ITEM_THRESHOLD = 0x80000000
+#: The section-5 groups an item runs once when it starts running and once when it
+#: stops (``0x1002095a``, ``0x10020931`` into ``0x100221e0``); -1 for none.
+ITEM_ON_GROUP_AT = 0x10
+ITEM_OFF_GROUP_AT = 0x14
+
+
+def item_input(selector: int, sources: dict[int, float], default: float) -> float:
+    """A generic device's input by selector byte (``0x10020d90``): the quantity a
+    ``SIMPLE_SOURCES`` selector names, from ``sources``, or ``default`` for any
+    other byte."""
+    if selector in SIMPLE_SOURCES:
+        return sources.get(selector, 0.0)
+    return default
+
+
+class Item:
+    """A generic device or a radar stepping the channels it drives.
+
+    ``Control.dll``'s time driver (``0x1002d260``) starts an item's next step
+    once game time passes the last one's end, chaining each from the last end;
+    the update (``0x10020900``) sets where every channel is headed and how long
+    it takes; ``0x10021a30`` plays each channel across the step, linearly, the
+    short way round where it wraps.  Times are ms.
+    """
+
+    def __init__(self, component: Component, channels: tuple[Channel, ...],
+                 gains: tuple[float, float] | None = None):
+        self.flags = component.flags
+        self.gains = component.weights if gains is None else gains
+        self.channels = tuple(channels[e] for e in component.entries)
+        self.state = ITEM_DEFAULT_STATE if component.state is None else component.state
+        self.progress = 0.0
+        self.start = self.end = 0.0
+        self.inverse = 1.0
+        self.started = False
+        #: Per channel: its value now, and where the step runs from and to.  The
+        #: parser leaves all three at -1 (``0x10021e35``).
+        self.now = [-1.0] * len(self.channels)
+        self.origin = [-1.0] * len(self.channels)
+        self.target = [-1.0] * len(self.channels)
+
+    def rate(self, sources: dict[int, float]) -> float:
+        """Bytes 1 and 2's inputs, weighted: 1 and 0 where a byte picks nothing."""
+        first = item_input(self.flags >> 8 & 0xFF, sources, 1.0)
+        second = item_input(self.flags >> 16 & 0xFF, sources, 0.0)
+        return first * self.gains[0] + second * self.gains[1]
+
+    def update(self, sources: dict[int, float], alive: bool = True) -> None:
+        """One step (``0x10020900``), started at ``self.start``."""
+        if self.state == 0 or not alive:
+            return
+        if not self.channels:
+            self.end = max(self.end, self.start + ITEM_IDLE_MS)
+            return
+        rate = self.rate(sources)
+        if abs(rate) < ITEM_MIN_RATE:
+            return
+        selector = self.flags & 0xFF
+        if selector:
+            self.progress = item_input(selector, sources, self.progress)
+        else:
+            if self.state & 3 == ITEM_OPENING:
+                self.progress += rate * ITEM_STEP
+            elif self.state & 3 == ITEM_CLOSING:
+                self.progress -= rate * ITEM_STEP
+            mode = self.state & 0xC
+            if mode == ITEM_WRAP:
+                if self.progress < 0.0:
+                    self.progress += 1.0
+                elif self.progress > 1.0:
+                    self.progress -= 1.0
+            elif not 0.0 <= self.progress <= 1.0:
+                self.progress = min(1.0, max(0.0, self.progress))
+                if mode == ITEM_BOUNCE:
+                    self.state = (self.state & ~1) | 2 if self.state & 1 else (self.state & ~2) | 1
+                else:
+                    self.state = 0
+        for i, ch in enumerate(self.channels):
+            if selector == 0:
+                value = self.progress
+            elif selector == 1:
+                # What 0x10020c25 adds from the machine's contact list is not read.
+                value = ch.initial
+            else:
+                value = self.progress / ch.span
+                if self.flags & ITEM_THRESHOLD:
+                    value = 0.0 if value < ch.initial else 1.0
+                else:
+                    value += ch.initial
+            self.origin[i] = self.now[i]
+            self.target[i] = min(1.0, max(0.0, value))
+            gap = abs(self.target[i] - self.origin[i])
+            if ch.flags & CHANNEL_WRAP and gap > 0.5:
+                gap = 1.0 - gap
+            if ch.rate > 0:
+                self.end = max(self.end, self.start + 1000.0 * gap / (abs(rate) * ch.rate))
+        if self.end - self.start < 1.0:
+            self.end = self.start + ITEM_IDLE_MS
+
+    def play(self, t: float) -> None:
+        """Each channel's value at ``t`` across the step (``0x10021a30``)."""
+        s = 1.0 if t >= self.end else (t - self.start) * self.inverse
+        for i, ch in enumerate(self.channels):
+            gap = self.target[i] - self.origin[i]
+            if ch.flags & CHANNEL_WRAP:
+                if abs(gap) >= 0.5:
+                    gap -= math.copysign(1.0, gap)
+                value = self.origin[i] + s * gap
+                value = value - 1.0 if value > 1.0 else value + 1.0 if value < 0.0 else value
+            else:
+                value = min(1.0, max(0.0, self.origin[i] + s * gap))
+            self.now[i] = value
+
+    def tick(self, t: float, sources: dict[int, float] | None = None, alive: bool = True) -> None:
+        """The time driver at ``t``: every step due, then the channels played at ``t``."""
+        sources = sources or {}
+        while not self.started or t > self.end:
+            self.play(t)
+            if not self.started or self.end == self.start:
+                self.end = t
+            self.start = self.end
+            self.update(sources, alive)
+            self.started = True
+            self.inverse = 1.0 / (self.end - self.start) if self.end > self.start else 1.0
+        self.play(t)
+
+    def frame(self, index: int) -> float:
+        """The frame channel ``index``'s node plays now."""
+        return self.channels[index].frame(self.now[index])
+
+
 #: ``CICLS_DOOR`` and ``CICLS_COMPUTER``.  ``Terrain.dll``'s building files
 #: its controller's items by these (``0x100583a2``), and runs its first
 #: computer as the control pod (``0x10057550``).
