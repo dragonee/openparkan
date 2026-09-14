@@ -14,7 +14,7 @@ use std::rc::Rc;
 use glam::Vec3;
 use parkan_formats::fxid::{
     EMITTER_FLAG, EMITTER_LIGHT, EMITTER_SOUND, Effect, Emitter, FX_DELETE_AT_END, FX_PING_PONG,
-    FX_TIMES_LINEAR, TIME_LOOP, TIME_ONCE, TIME_REVERSE,
+    FX_START_OFF, FX_TIMES_LINEAR, TIME_LOOP, TIME_ONCE, TIME_REVERSE,
 };
 
 /// Header flag 0x400: draw nothing while the tested point is hidden (`Effect.dll:0x10008016`).
@@ -130,6 +130,9 @@ pub struct Instance {
     seed: u32,
     /// The caller's number for the instance, which its sounds' keys carry.
     pub id: u64,
+    /// Switched on (actions 18 and 19); header flag 0x40 starts it off. An instance
+    /// switched off neither updates, draws nor sounds (docs/11, "Starting, ending, switching").
+    pub on: bool,
     /// The sound emitters' previous time (`+0x9c`), 0 at load, and the loops playing.
     heard_t: f32,
     looping: Vec<usize>,
@@ -191,6 +194,7 @@ impl Instance {
         seed: u32,
     ) -> Self {
         let scale = size * effect.header.scale[0];
+        let on = effect.header.flags & FX_START_OFF == 0;
         let end_ms = now_ms + f64::from(effect.header.duration) * 1000.0;
         let mode = mode.unwrap_or(effect.header.mode);
         let streams = (effect.emitters.iter().enumerate())
@@ -209,6 +213,7 @@ impl Instance {
             start_point: frame.origin,
             seed,
             id: 0,
+            on,
             heard_t: 0.0,
             looping: Vec::new(),
             streams,
@@ -279,6 +284,9 @@ impl Instance {
     /// STAND-IN: docs/11-effects.md#bolts-streams-and-fades--read-and-measured -- when a
     /// stream's first particle leaves is not read: on its first update inside the window.
     pub fn update(&mut self, now_ms: f64) {
+        if !self.on {
+            return;
+        }
         let t = self.t(now_ms);
         let seconds = self.seconds(now_ms);
         let origin = self.frame.origin;
@@ -321,6 +329,9 @@ impl Instance {
     /// taken *t* becomes the previous time. A loop plays while low +8 ≤ *t* ≤ high +12 and
     /// stops outside (`0x10012fca`, `0x10013008`).
     pub fn cues(&mut self, now_ms: f64) -> Vec<Cue> {
+        if !self.on {
+            return Vec::new();
+        }
         let t = self.t(now_ms);
         let taken = if t == 1.0 { 0.0 } else { t };
         let before = self.heard_t;
@@ -376,7 +387,7 @@ impl Instance {
     /// nothing (`0x10008016`); while it is in view an emitter with bit 8 draws over the
     /// scene (`0x10009930`).
     pub fn sprites(&self, now_ms: f64, in_view: bool, out: &mut Vec<Sprite>) {
-        if self.effect.header.flags & FX_HIDE_OCCLUDED != 0 && !in_view {
+        if !self.on || (self.effect.header.flags & FX_HIDE_OCCLUDED != 0 && !in_view) {
             return;
         }
         let t = self.t(now_ms);
@@ -684,6 +695,23 @@ mod tests {
         assert!(fx.cues(30.0).is_empty());
         fx.value = 0.5;
         assert_eq!(fx.cues(40.0).len(), 1, "the next stroke");
+    }
+
+    #[test]
+    fn an_effect_flagged_to_start_off_neither_draws_nor_sounds_until_switched_on() {
+        let burst = block(7, 208, &[(20, 0.0), (24, 1.0), (8, 1.0), (12, 0.2), (16, 2.0), (28, 1.0)], "fire");
+        let smoke = with_word(with_word(burst, 36, 3), 40, 5);
+        let chime = block(2, 148, &[(8, 0.1), (12, 1.0), (64, 1.0), (68, 10.0)], "chime.wav");
+        let mut e = effect(TIME_MANUAL, 0.0, 0, vec![smoke, chime]);
+        Rc::get_mut(&mut e).unwrap().header.flags |= FX_START_OFF;
+        let mut fx = Instance::new(e, Frame::along(Vec3::ZERO, Vec3::X, 1.0), 1.0, 0.0, None, 1);
+        fx.value = 0.5;
+        let mut out = Vec::new();
+        fx.sprites(0.0, true, &mut out);
+        assert!(!fx.on && out.is_empty() && fx.cues(0.0).is_empty());
+        fx.on = true;
+        fx.sprites(10.0, true, &mut out);
+        assert!(!out.is_empty() && fx.cues(10.0).len() == 1);
     }
 
     #[test]
