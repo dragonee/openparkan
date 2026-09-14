@@ -3324,22 +3324,6 @@ read = false
 
 [[entry]]
 module = "Behavior.dll"
-at = "0x10027250"
-kind = "function"
-name = "M_Task_Attack::OnBehaviourTakt"
-doc = "the binary's own assertion text"
-read = false
-
-[[entry]]
-module = "Behavior.dll"
-at = "0x10027580"
-kind = "function"
-name = "M_Task_Attack::MakeGoCommand"
-doc = "the binary's own assertion text"
-read = false
-
-[[entry]]
-module = "Behavior.dll"
 at = "0x1002a4f0"
 kind = "function"
 name = "M_Task_Construct::OnBehaviourTakt"
@@ -8611,14 +8595,6 @@ module = "Behavior.dll"
 at = "0x1002dd90"
 kind = "function"
 name = "patrol: picks the next trajectory point"
-doc = "docs/31-packages.md"
-read = true
-
-[[entry]]
-module = "Behavior.dll"
-at = "0x10026fd0"
-kind = "function"
-name = "M_Task_Attack::StartTask: no weapon cancels; no target takes the nearest"
 doc = "docs/31-packages.md"
 read = true
 
@@ -14422,25 +14398,9 @@ read = true
 
 [[entry]]
 module = "Behavior.dll"
-at = "0x10024ebb"
-kind = "site"
-name = "fight module: fire threshold 0.85 on a building or +0x614 >= 0.5, else 0.45"
-doc = "docs/29-weapons.md"
-read = true
-
-[[entry]]
-module = "Behavior.dll"
 at = "0x10024fa2"
 kind = "site"
 name = "fight module: CIS_SINGLEFIGHT 0x200 to the gun"
-doc = "docs/29-weapons.md"
-read = true
-
-[[entry]]
-module = "Behavior.dll"
-at = "0x10024e58"
-kind = "site"
-name = "fight module: tasks 2, 3 and 5 fire on the timer whatever the score"
 doc = "docs/29-weapons.md"
 read = true
 
@@ -16902,3 +16862,387 @@ kind = "site"
 name = "triangle query flag 8: stream 5 UVs x 1/1024"
 read = true
 doc = "docs/07-objects.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10027250"
+kind = "function"
+name = "M_Task_Attack::OnBehaviourTakt: target gone ends; fire control {2,-1} nearing, {1,+0x60} fighting; unstuck after 10 s; re-pick on slot 17"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10027580"
+kind = "function"
+name = "M_Task_Attack::MakeGoCommand: building ring r-20..r-5 (77 tries); unit band 50..100; under Attack_MaxFireDistance fight at 0.7+0.3 speed, else near at Go_SpeedPercent"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10026fd0"
+kind = "function"
+name = "M_Task_Attack::StartTask: no weapon cancels; timers +0x68 (2x Fighting 4, 4) and +0x70 (2x Nearing 4, 4), 10/0 under DeterminMode, 5/5 and 4/4 for an animal; no target takes the nearest"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10024ebb"
+kind = "site"
+name = "fight module: fire threshold 0.45 for a flyer (chassis CanFly); otherwise 0.85 on a building or +0x614 >= 0.5, else 0.45"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10024e58"
+kind = "site"
+name = "fight module: go, attack and search tasks (slot 0 = 2, 3, 5) with an order id: factors 0.5, bar 0, fire on the timer whatever the aim"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10027f80"
+kind = "function"
+name = "M_Task_Attack goal point: target - direction x (low + rand x span) + perpendicular x (2 rand - 1) x side; the target itself while following (+0x5c); an animal straight on 30%"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10028310"
+kind = "function"
+name = "M_Task_Attack slot 17: timer +0x70 due while nearing (+0x64), else +0x68"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1004c500"
+kind = "function"
+name = "randomised timer restart: next = now + w4 x 64 + rand8 x w6 x 64 / 256"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1001cc50"
+kind = "function"
+name = "attack fight band from the gun records: 0.05 and 0.1 of a range"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x100165f0"
+kind = "site"
+name = "constants binder: Attack_MinFightDistance, first of the twelve Attack_* names"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1002760e"
+kind = "site"
+name = "MakeGoCommand: Attack_MinFightDistance read, overwritten in both branches"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10027620"
+kind = "site"
+name = "MakeGoCommand: + Attack_DelFightDistance, overwritten in both branches"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10027783"
+kind = "site"
+name = "MakeGoCommand, building: a ring point taken; +0x64 and +0x78 cleared, timer +0x70 restarted"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x100277be"
+kind = "site"
+name = "MakeGoCommand, unit: the band's low end below 50 makes it 50..100"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x100277cf"
+kind = "site"
+name = "MakeGoCommand, unit: the band's high end above 100 makes it 50..100"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10027897"
+kind = "site"
+name = "MakeGoCommand: distance to the point against Attack_MaxFireDistance picks fighting or nearing"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10027a1f"
+kind = "site"
+name = "MakeGoCommand: MWalker::SetTarget to follow an object at the speed, -1 and 5"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10027ee1"
+kind = "site"
+name = "MakeGoCommand: the walk refused, both timers left to run out"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10027346"
+kind = "site"
+name = "attack takt unstuck: now and behaviour +0xb4 both over 10 s past +0x78"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x100281e9"
+kind = "site"
+name = "attack goal point: an animal takes the target itself when rand < 0.3"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1002e800"
+kind = "function"
+name = "M_Task_Reload start: 0x10023b60 finds no building -> 'No Where to reX...' fail; a flyer tries slot 15 first"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1002e8c2"
+kind = "site"
+name = "M_Task_Reload start: 'No Where to reX(for flyeing)...' after the flyer's second pick"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10035710"
+kind = "function"
+name = "go task slot 0: returns 2, its order number"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10035950"
+kind = "function"
+name = "M_Task_Attack slot 0: returns 3, its order number"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x100359e0"
+kind = "function"
+name = "search task slot 0: returns 5, its order number"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1002411c"
+kind = "site"
+name = "fight module: the target radius R defaults to 5"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10024377"
+kind = "site"
+name = "fight module: d, the unit's distance to the target"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10024452"
+kind = "site"
+name = "fight module: the target's variable 0x206 re-read after a recompute when it is 0"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10024981"
+kind = "site"
+name = "fight module: no blocker on the line (0x10025c60), the fire flag set"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10024c51"
+kind = "site"
+name = "fight module: turret state 0x400 (CIS_POINTTRACE) on every aiming pass"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10024c92"
+kind = "site"
+name = "fight module: turret aim word from interface 0x202 slot 10"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10024cea"
+kind = "site"
+name = "fight module: turret factor 1 - theta x d / R"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10024d54"
+kind = "site"
+name = "fight module: gun report word from interface 0x202 slot 10"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10024d9e"
+kind = "site"
+name = "fight module: a firing animal's gun factor is 1"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10024db4"
+kind = "site"
+name = "fight module: gun factor 1 - theta x d / R"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10024e7a"
+kind = "site"
+name = "fight module: threshold choice, flyer 0.45"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10024f3f"
+kind = "site"
+name = "fight module: an animal fires when the aim dot is above 0.85"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1000a79b"
+kind = "site"
+name = "MBehaviour variable getter: 0x206 answers +0x688"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1000648c"
+kind = "site"
+name = "MBehaviour +0x688 = |sphere centre - origin| + sphere radius"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1000cbe3"
+kind = "site"
+name = "MBehaviour +0x688 = |sphere centre - origin| + sphere radius (second store)"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002eaa0"
+kind = "function"
+name = "interface 0x202 slot 10: property 0xf00 out; returns turret +0xec, gun/builder +0x11c, door/class 11 +0x9c, else 0"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002c142"
+kind = "site"
+name = "property 0xf00 getter: a turret's value from 0x10028bb0"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10029c1c"
+kind = "site"
+name = "gun: +0x17c = 1 - lock left / value 9"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002811c"
+kind = "site"
+name = "turret given a target: aim stage +0xec = 3, +0xf0 = 0"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002864d"
+kind = "site"
+name = "turret aim stage +0xec = 2"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10028730"
+kind = "site"
+name = "turret aim stage +0xec = 1"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10027aee"
+kind = "site"
+name = "turret aim reaches 1: stage +0xec = 0"
+doc = "docs/29-weapons.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x100295ba"
+kind = "site"
+name = "gun report +0x11c = 2"
+doc = "docs/29-weapons.md"
+read = true

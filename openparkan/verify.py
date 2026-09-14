@@ -8341,6 +8341,92 @@ def check_targeting(check, game: Path) -> None:
           f"nearest-listed rule picks them (iron3d.dll:0x10090d13), never E")
 
 
+#: The attack task's named constants (``Behavior.dll:0x100165f0``-``0x100166d7``).
+ATTACK_CONSTANTS = (
+    "Attack_MinFightDistance", "Attack_DelFightDistance", "Attack_LeftRightRange",
+    "Attack_MaxFireDistance", "Attack_MinAttackSpeedPercent",
+    "Attack_DelAttackSpeedPercent", "Attack_MinNearingSpeedPercent",
+    "Attack_DelNearingSpeedPercent", "Attack_Nearing_ChangeTrajectoryMinDelay",
+    "Attack_Nearing_ChangeTrajectoryRandomDelay",
+    "Attack_Fighting_ChangeTrajectoryMinDelay",
+    "Attack_Fighting_ChangeTrajectoryRandomDelay",
+)
+
+
+def check_ai_fight(check, game: Path) -> None:
+    """The attack's constants are compiled in; what Mission 01 leaves the AI to do."""
+    probes = [n.encode() for n in ATTACK_CONSTANTS]
+    naming: dict[str, set[str]] = defaultdict(set)
+    files = 0
+    for path in sorted(p for p in game.rglob("*") if p.is_file()):
+        files += 1
+        data = path.read_bytes()
+        for probe in probes:
+            if probe in data:
+                naming[probe.decode()].add(path.name)
+    where = {frozenset(v) for v in naming.values()}
+    check("install: only Behavior.dll names the attack task's constants",
+          len(naming) == len(ATTACK_CONSTANTS) and where == {frozenset({"Behavior.dll"})},
+          f"{len(naming)} of {len(ATTACK_CONSTANTS)} Attack_* names occur, in "
+          f"{sorted(set().union(*naming.values()))} of {files} files, so the compiled "
+          f"defaults (0x10016250) hold: band 30+20, side 80, fire 200, speeds 0.7+0.3 and "
+          f"0.8+0.2, re-pick 4+4 s")
+
+    first = game / MISSION_01_DATA
+    if not first.exists():
+        return
+    m = mission.load(first)
+    clans = m.clans
+    lib = objects.ObjectLibrary(game / "objects.rlb")
+    held = profiles.load(game)
+    units: dict[str, list[str]] = defaultdict(list)
+    bots = {}
+    buildings = []
+    for o in m.objects:
+        if not 0 <= o.clan_index < len(clans):
+            continue
+        clan = clans[o.clan_index]
+        leaf = o.path.split("\\")[-1].lower()
+        if o.kind == mission.KIND_BUILDING:
+            buildings.append((clan.name, leaf))
+            continue
+        if o.kind != mission.KIND_UNIT:
+            continue
+        units[clan.name].append(leaf)
+        found = [f for f in game.glob("UNITS/UNITS/**/*.dat") if f.name.lower() == leaf]
+        if not found or clan.type != mission.CLAN_NEUTRAL:
+            continue
+        root = objects.load_unit(found[0]).components[0].ref.member.lower()
+        record = lib.get(root)
+        kind = (profiles.CHASSIS_TYPE[held[record.profile]["ChassisType"].value]
+                if record is not None and record.profile in held else None)
+        bots[leaf] = (root, kind, profiles.CHASSIS_SIZE[root[2]])
+    capturers = sorted(n for n, (_, _, size) in bots.items() if size <= CAPTURE_SIZE)
+    check("Mission 01: the two neutral bots fly; only helic is small enough to capture",
+          bots == {"tut1_mf1.dat": ("r_m_02", "flying", 3),
+                   "helic.dat": ("r_t_02", "flying", 1)}
+          and capturers == ["helic.dat"],
+          f"(chassis, locomotion, size class) {bots}; a capture needs class <= "
+          f"{CAPTURE_SIZE} (Behavior.dll:0x100301a9); a Refit with no dock logs "
+          f"'No Where to reX(for flyeing)' for both (0x1002e8c2)")
+
+    places = _building_places(game)
+    roots = {}
+    for _, leaf in buildings:
+        found = [f for f in game.glob("UNITS/BUILDS/**/*.dat") if f.name.lower() == leaf]
+        if found:
+            roots[leaf] = objects.load_unit(found[0]).components[0].ref.member.lower()
+    marked = sum(1 for r in roots.values() if r in places
+                 for a in places[r][1]
+                 if a & (objmesh.PLACE_POD | objmesh.PLACE_DOCK))
+    check("Mission 01: the only buildings are the player's bridge halves, with no pod or dock",
+          buildings == [("Plr", "m_bridge.dat")] * 2 and roots == {"m_bridge.dat": "fr_m_brige"}
+          and marked == 0,
+          f"buildings {buildings} on {roots}; pod or dock places: {marked} "
+          f"({'no hall-way graph' if 'fr_m_brige' not in places else 'graph read'}); "
+          f"Search and capture skips bridges (0x10030859), so it roams and a Refit fails")
+
+
 def _turret_role(text: tuple[str, ...]) -> int:
     first = text[0].lower() if text else ""
     return {"warbot": objects.TYPE_WARRIOR, "cargobot": objects.TYPE_TRANSPORT,
@@ -12378,7 +12464,7 @@ def run(game: Path) -> int:
         check_collision,
         check_combat, check_ownership,
         check_capture, check_repair, check_chassis, check_weapons, check_firing,
-        check_targeting, check_turrets, check_packages, check_wingman, check_builder,
+        check_targeting, check_ai_fight, check_turrets, check_packages, check_wingman, check_builder,
         check_units, check_loading, check_search, check_construction,
         check_controls, check_player_input, check_turret_channels,
         check_behaviour, check_research, check_descriptions, check_saves,

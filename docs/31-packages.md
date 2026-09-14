@@ -387,7 +387,11 @@ readers were not traced, that is marked.
 - **Refit — reload.** `M_Task_Reload` walks to a ground-level dock and waits
   until life, charge and ammunition are at 98%
   ([27-ownership.md](27-ownership.md)). `ORDER_ROBOT_REPARE` builds the same
-  task.
+  task. **With no dock it fails at once** (`0x1002e800`). The start asks
+  `0x10023b60` (not read) for a building. When the answer is −1, a walking unit
+  logs "No Where to reX..." and the task fails. A flying unit first tries a
+  second pick from where it is (task slot 15). If that is also −1, it logs
+  "No Where to reX(for flyeing)..." and fails.
 - **Follow me — follow.** It keeps near the logic id it is given, within a
   radius taken from the order's parameter (`0x1002ad80`, "FollowRadius").
   - **The radius is 20 unless the parameter lies strictly between 20 and 30**
@@ -406,12 +410,12 @@ readers were not traced, that is marked.
     that spot and stays there. Neither timer's period was read.
 - **Attack.** `M_Task_Attack` on a logic id. It cancels when the unit has no
   weapon, takes the nearest target when given none (`0x10026fd0`), and ends
-  when the target is dead ("mission accomplished", `0x10027250`). By its
-  constants' names (readers not traced):
-  - it holds a fight distance of 30 + up to 20, strafes 80 left or right, and
-    fires from at most 200;
-  - it closes at 0.8 + up to 0.2 of its speed and fights at 0.7 + up to 0.3;
-  - it changes course every 4 + up to 4 s.
+  when the target is dead ("mission accomplished", `0x10027250`). In between it
+  picks a point 50–100 short of the target and up to 80 to either side, walks
+  there, and picks again on a timer. Within 200 it walks at 0.7–1.0 of its
+  speed, re-picking every 8–16 s; beyond 200 it closes at full speed, re-picking
+  every 8–16 s as well. [The attack, tick by tick](#the-attack-tick-by-tick--read)
+  has the details, and which of its named constants are dead.
 - **Search minerals — search by type `0x10001000`.** The minerals mode picks
   **the nearest mineral lode not yet found** (a lode's `+0xc` is 0,
   `0x1003075d`), from the whole map's list, not from what the clan has seen. It
@@ -781,7 +785,125 @@ The fire control, run from the behaviour's takt with the unit's position
 task's interrupt priority says. Standby asks for mode 2 as well, and a shut-down
 unit or a migrating animal asks for none. The takt does nothing while the
 behaviour's variable `0x208` is set. It sends the guns their fight state in the
-same function (`0x10024f99`), under aiming conditions not read here.
+same function (`0x10024f99`), once a gun's score clears the bar
+([29-weapons.md](29-weapons.md#how-the-ai-fires--read)).
+
+## The attack, tick by tick — *read*
+
+`M_Task_Attack` (vtable `0x10059d78`) holds its target's logic id at `+0x58`
+and the id it last handed the fire control at `+0x60`. It keeps two
+randomised timers: `+0x68` while **fighting** and `+0x70` while **nearing**. The
+flag `+0x64` says which phase it is in. Movement is the walker's
+(`MWalker::SetTarget`, `0x1003bad0`, and the walk helper `0x10001960`). Here it
+is only "walk to P at speed S".
+
+**Start** (`0x10026fd0`):
+
+- **No weapon:** it cancels ("CANCEL IRQ: Task_Attack: weapon absent") when the
+  unit's device interface `0x204` has no property 5, or has it at 0. The test is
+  skipped when the task's `+0x54` is 1 (not traced).
+- **Timers**, in seconds, as (fixed, random):
+
+  | unit | fighting `+0x68` | nearing `+0x70` |
+  |---|---|---|
+  | any, with `Behavior.ini`'s `DeterminMode` set | 10, 0 | 10, 0 |
+  | an animal (type `0x20000000`) | 5, 5 | `Attack_Nearing_ChangeTrajectory` Min, Random: 4, 4 |
+  | any other | 2 × `Attack_Fighting_…`: 8, 8 | 2 × `Attack_Nearing_…`: 8, 8 |
+
+- **No target:** it takes the nearest (`0x10001120`) into `+0x58` and `+0x60`;
+  still none, and the task cancels.
+
+**Each tick** (`0x10027250`):
+
+1. **Target gone:** if the target's position cannot be had, or is exactly
+   (0, 0, 0), it logs "Target .. is dead... mission accomplished" and ends.
+2. **Fire control:** while nearing it asks for {2, −1, 0.5}, the nearest
+   hostile contact. Otherwise it asks for {1, `+0x60`, 0.5}, its own target
+   ([The fire control](#the-fire-control--read)).
+3. **Unstuck:** this runs only while fighting and not following the target
+   (`+0x5c` clear). It needs `+0x78`, the time fighting began, to be set, and
+   two times more than 10 s past it: now, and a time the behaviour keeps at
+   `+0xb4` (`0x10027346`, not traced). It then tries up to 25 random points
+   within ±27.5 of the target in x and y, at `0x10015400` × `Go_SpeedPercent`,
+   restarts both timers and sets `+0x78` to now.
+4. **Re-pick:** the task's slot 17 asks whether its timer has run out. If it
+   has, slot 15, `MakeGoCommand`, re-picks. For a unit target it also
+   re-picks whenever the walker's `0x1003ddc0` test holds while its
+   `0x1003ddb0` answer is below 2. For a building target (id bit 31) it
+   re-picks when the walker is idle (`0x1003dd80`) and the unit is within 5 of
+   the point at behaviour `+0x170`. Those walker calls are the walker
+   research's to name.
+
+**Making a move** (`MakeGoCommand`, `0x10027580`):
+
+- **A building target:** it asks the target's `IMesh2` for its sphere of
+  radius *r* ("Behaviour panic: Target object does not support IMesh2"
+  otherwise). It tries up to 77 random points between *r* − 20 and *r* − 5
+  from the centre, at the unit's speed (`+0x5fc`). On the first it may walk
+  to, it clears `+0x64` and `+0x78` and restarts timer `+0x70`
+  (`0x10027783`). After 77 refusals the move fails.
+- **A unit target:** the fight band comes from `0x1001cc50` (0.05 and 0.1 of a
+  range it takes from the gun records). **Unless the band lies within 50..100,
+  it becomes 50..100** (`0x100277be`, `0x100277cf`). The low end could be 50
+  only with a range of exactly 1,000, so **the band is 50..100 whatever the
+  guns** (*derived*).
+- **The point** (`0x10027f80`) is the target's position, less the unit-to-target
+  direction × (50 + up to 50), plus the perpendicular × (−1..1) ×
+  `Attack_LeftRightRange` (80). An animal goes straight at the target on 30%
+  of picks (`0x100281e9`). While the task follows its target (`+0x5c`), the
+  point is the target's position itself.
+- **The speed**, by the unit's distance to that point against
+  `Attack_MaxFireDistance` (200, `0x10027897`):
+
+  | distance | phase | speed | timer restarted |
+  |---|---|---|---|
+  | under 200 | fighting | the unit's speed × (`Attack_MinAttackSpeedPercent` 0.7 + up to `Attack_DelAttackSpeedPercent` 0.3) | `+0x68`; entering it stamps `+0x78` |
+  | 200 or more | nearing | `0x10015400` × `Go_SpeedPercent` (1.0) | `+0x70` |
+
+  The walker then caps either speed at the unit's top speed ×
+  `Speed_MaximumFactor` ([How a walk's speed is held](#how-a-walks-speed-is-held--read)).
+- **The walk.** `0x10028330` (not read) may give an object id. If it does, the
+  task sets `+0x5c` and asks the walker to follow that object at the speed,
+  with −1 and 5 (`0x10027a1f`). Then, unless the unit is an animal, it asks
+  the fire control for mode 1 on the target. If the walker refuses, the task
+  tries a random corner of the object's contour (variable `0x203`), and
+  cancels ("contour unreacheble") when that is refused too. If there is no
+  object id, the task clears `+0x5c`, asks for mode 1, and walks to the point
+  (`0x10001960`). If that walk is refused, it lets both timers run out so the
+  next tick re-picks (`0x10027ee1`).
+
+**Named constants the attack never uses** (*derived* from the reads above):
+
+- `Attack_MinFightDistance` (30) and `Attack_DelFightDistance` (20) are read
+  (`0x1002760e`, `0x10027620`), but both branches overwrite the band before it
+  is used.
+- `Attack_MinNearingSpeedPercent` (0.8) and `Attack_DelNearingSpeedPercent`
+  (0.2) are not read by any of the attack task's functions above. Nearing is at
+  `Go_SpeedPercent`.
+
+So **an AI attacker never holds still**. Within 200 it circles a point 50–100
+short of its target and up to 80 aside, at 70–100% speed, picking a fresh
+point every 8–16 s. The fire control shoots whenever the aim settles
+([29-weapons.md](29-weapons.md#how-the-ai-fires--read)).
+
+## What Mission 01 gives the AI — *measured*
+
+- **The wingmen the hero can take.** The neutral clan `Ntrl` owns two bots:
+  - `tut1_mf1.dat`, on `r_m_02`, a flying chassis of size class 3. It is
+    **too big to capture**: Search and capture refuses it (`0x100301a9`).
+  - `helic.dat`, on `r_t_02`, flying, size class 1. It **may capture**.
+
+  The hostile `tut1_e1.dat` is `r_t_01`, walking, class 1.
+- **Nothing to capture or dock at.** The mission's only buildings are the
+  player's two halves of `m_bridge.dat`, and they have no pod and no dock.
+  A capture skips bridges anyway (`0x10030859`). *Derived* from that:
+  - Search and capture finds nothing and roams.
+  - Capture building has no target.
+  - A Refit fails at its start with "No Where to reX(for flyeing)...", since
+    both wingmen fly.
+  - Seek and destroy can pick only `tut1_e1`, the one unit of a clan hostile
+    to the player (the other units are the neutral `Trgt` dummies), once the
+    clan's areal map holds it within 3,000.
 
 ## How a walk's speed is held — *read*
 
@@ -863,6 +985,18 @@ captures by logic id 34 times.
 - ~~Who calls the behaviour's mode setter.~~ `Wizard.dll`, from the player's
   taking and letting go of a bot ([The escape](#the-escape--read)).
 - ~~What a building's variable `0x205` holds.~~ The sphere's phase code.
+- ~~What the attack task does each tick, and which of its constants it
+  reads.~~ [The attack, tick by tick](#the-attack-tick-by-tick--read). The
+  fight distance and nearing speed constants are dead.
+- ~~What a Refit does with no dock.~~ It fails at its start.
+- What `0x10028330` returns to `MakeGoCommand` and the goal point: an object
+  id the walker follows. Which object it is (the target, or something between)
+  was not read.
+- The attack's other unread pieces:
+  - the time at behaviour `+0xb4` that the unstuck test compares;
+  - the task's `+0x54`, which skips the weapon test;
+  - what `0x10023b60` picks as a Refit's dock, and from which clan's
+    buildings.
 - What a fire-control request's third value, 0.5, does, and what sets `+0x5c`
   and `+0x60` to lock a unit's fire mode.
 - Who sends `MBehaviour` messages `0x19` and `0x1a`, the explosions that start a

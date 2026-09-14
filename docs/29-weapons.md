@@ -732,19 +732,69 @@ units only, or weighted by the areal figure (`0x100240ae`).
 - **Distance** (`0x1001b9f0`). The score rises from 0 to 1 over the first 5 m,
   holds 1 out to (*v* + 1) ÷ 2, and falls to 0 at 2 (*v* + 1). It is then
   multiplied by 1 − height ÷ *v*.
-- **Aim.** It is multiplied by two more factors from the turret's and the gun's
-  aim errors (interface `0x202` slot 10, `0x10024c92` and `0x10024d54`).
-- **Threshold.** The gun fires **one shot** (`CIS_SINGLEFIGHT`, `0x200`,
-  `0x10024fa2`) when the product clears 0.45, or 0.85 on a building and in
-  some other states (`0x10024ebb`).
+- **Aim.** It is multiplied by two more factors, one for the turret and one for
+  the gun, each `1 − θ × d ÷ R` (`0x10024cea`, `0x10024db4`):
+  - *d* is the distance from the unit to the target (`0x10024377`).
+  - *R* is the target's **outer radius**: its variable `0x206`, which
+    `MBehaviour` answers from `+0x688` (`0x1000a79b`). That is the distance from
+    the target's origin to the centre of the sphere its mesh interface gives, plus
+    the sphere's radius (`0x1000648c`, `0x1000cbe3`). With no target *R* is 5
+    (`0x1002411c`). A target reporting 0 is asked to recompute and read again
+    (`0x10024452`).
+  - *θ* comes from interface `0x202` slot 10 (`Control.dll:0x1002eaa0`, called
+    at `0x10024c92` for the turret and `0x10024d54` for the gun). The slot
+    writes the component's property `0xf00` and returns a word by class:
+
+    | class | word returned | property `0xf00` |
+    |---|---|---|
+    | turret (1) | `+0xec`, its aim stage | computed by `0x10028bb0` (`0x1002c142`) |
+    | gun (2), builder (30) | `+0x11c`, its report | `+0x17c`, 1 − lock left ÷ value 9 (`0x10029c1c`) |
+    | door (12), class 11 | `+0x9c` | |
+    | any other | 0 | |
+
+    The turret's stage is set to 3 when it is given a target (`0x1002811c`), 2
+    at `0x1002864d`, 1 at `0x10028730`, and 0 when its aim reaches 1
+    (`0x10027aee`). The gun's takt stores report codes 2 to 8 at other points
+    (`0x100295ba`–`0x1002a167`); their meanings were not listed here. The
+    module turns the word into *θ*: 0 gives 0; 1 gives (1 − property) × π;
+    anything else gives π. When the firing unit is an animal, the gun's factor
+    is 1 (`0x10024d9e`).
+- **Threshold** (`0x10024e7a`–`0x10024ec5`):
+  - 0.45 for a unit whose chassis profile can fly (`0x10014670`, `+0xc`);
+  - otherwise 0.85 when `MBehaviour+0x614` is at least 0.5 or the unit is a
+    building, and 0.45 when not.
+
+  Past the bar, the gun fires **one shot** (`CIS_SINGLEFIGHT`, `0x200`,
+  `0x10024fa2`). Before that it must have both factors above 0, a clear line
+  (`0x10025c60`, `0x10024981`) and its timer run out. An animal instead needs
+  the dot product at `0x10024330` above 0.85 (`0x10024f3f`).
 - **Its own timer.** The shot also waits for the gun's randomised timer: 30 ÷
   magazine s plus up to as much again when the magazine holds more than 2,
   otherwise 0.5 s plus up to 1.5. Both are divided by the difficulty profile's
   value (`0x1001b5ec`, `0x1001b650`).
-- **During tasks 2, 3 and 5** every gun fires on its timer whatever its score
-  (`0x10024e58`).
+- **During the go, attack and search tasks** every gun fires on its timer,
+  line permitting, whatever its aim (`0x10024e58`). All three factors are
+  forced to 0.5 and the bar to 0. The task numbers 2, 3 and 5 are what these
+  tasks' slot 0 returns: go `0x10035710`, attack `0x10035950`, search
+  `0x100359e0`. This holds only while the record `0x10014bd0` fills has an id
+  at `+0x30`, which was not traced.
 
 So a unit fires every gun whose score clears the bar, each on its own timer.
+
+*Derived* from the aim factors: once *d* is more than *R* ÷ π, *θ* = π
+drives a factor below 0. For a hero-sized target (*R* about 2) that is 0.7 m.
+So **outside the go, attack and search tasks, an AI gun fires only when
+both of these hold**:
+
+- its turret has settled (stage 0), or has almost finished aiming;
+- the gun's report is 0, or 1 with its property at 1 (for a guided gun, its
+  lock has run out).
+
+A turret still turning at 100 m to a hero needs its aim more than 99.3% of the
+way there. Every aiming pass sets the turret to `0x400` (`0x10024c51`), so an
+AI turret is out of the `0x200` in which its relink withholds a target
+(`Control.dll:0x10028164`). **An AI unit's unguided guns therefore get the
+target, and keep their range gate.**
 
 *Derived*, from the distance score alone: a laser or taser (10,000 m/s)
 scores fully out to 5,000 m, a 350 m/s cannon to 175 m, and a 70 m/s missile
@@ -840,16 +890,22 @@ The enemy variants and the huge guns:
 - `e_gun_bl_03` and `e_gun_tl_02` carry a follower and no gun. The turret's takt
   reads the paired gun without a check, so either they are never fitted or the
   follower pairs with a later part's gun; not traced.
-- The fight module's two aim factors (interface `0x202` slot 10), which of a
-  turret's guns lends its round speed as the lead (the turret record's `+0x1c`),
-  what tasks 2, 3 and 5 and `MBehaviour+0x614` are, and the target id's nibble
-  3 that frees the winged SSMs.
+- ~~The fight module's two aim factors (interface `0x202` slot 10), and what
+  tasks 2, 3 and 5 are.~~ Answered: `1 − θ × d ÷ R` from the turret's aim stage
+  and the gun's report; the tasks are go, attack and search
+  ([How the AI fires](#how-the-ai-fires--read)).
+- Which of a turret's guns lends its round speed as the lead (the turret
+  record's `+0x1c`), what `MBehaviour+0x614` measures against the 0.5 of the
+  threshold, and the target id's nibble 3 that frees the winged SSMs.
+- The order record whose `+0x30` id lets the go, attack and search tasks fire
+  without aim (`0x10014bd0`); whether a self-given attack carries one; and
+  the height term in the distance score.
 - ~~A seeker's value 2: read by nothing found.~~ Answered: it is the gun's lock
   ([A guided gun waits for a lock](#a-guided-gun-waits-for-a-lock--read-and-measured)).
-- What an AI turret's state word is while it fights. Its relink withholds the
-  target from unguided guns only in `0x200`, so whether an AI unit's cannon
-  keeps a range gate depends on the state `Behavior.dll` sends (`0x200` or
-  `0x400`, [32-builder.md](32-builder.md)); not followed.
+- ~~What an AI turret's state word is while it fights.~~ `0x400`, set on every
+  aiming pass, so its unguided guns keep the target and the range gate
+  ([How the AI fires](#how-the-ai-fires--read)). Whether the relink runs
+  between that set and the gun's shot was not followed.
 - What the host does with the (0, `0xe`) call `World3D.dll` makes when a gun
   is selected (`0x10010805`), and whether an arm's channel meets exactly 1 in
   the arm's own channel update, which the arm sounds depend on (the turret

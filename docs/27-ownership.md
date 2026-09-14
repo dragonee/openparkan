@@ -111,7 +111,10 @@ The orders `ORDER_ROBOT_RELOAD` (8) and `ORDER_ROBOT_REPARE` (9) of
 `varset.var` make the same task, `M_Task_Reload` (vtable `0x10059be0`, built by
 `MTaskStack::CreateTaskFromOrder`). It walks to a place with any bit of
 `0x620` (`0x1002ea87`), waits there until life, charge and ammunition are all
-at 98% (`0x1002ed3b`), and leaves.
+at 98% (`0x1002ed3b`), and leaves. **With no dock to go to, it fails at its
+start** (`0x1002e800`: "No Where to reX...", or "(for flyeing)" for a flyer
+after a second try). The unit is not left waiting
+([31-packages.md](31-packages.md)).
 
 **It only picks a ground-level dock.** `MakeInsideDest` (`0x10001270`) asks for
 the ground-level bit on every place except the pod (`0x10001357`). So a bot
