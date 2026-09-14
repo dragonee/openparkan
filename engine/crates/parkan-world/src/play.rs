@@ -22,6 +22,7 @@ use parkan_sim::combat::{Event, Part, Round};
 use parkan_sim::effects::{Cue, Frame, Sprite};
 use parkan_sim::ground::Ground;
 use parkan_sim::hit::segment_mesh;
+use parkan_sim::solid::{self, NO_CONTACT, Solid};
 use parkan_sim::targeting::{Contact, TargetList};
 
 use crate::assembly::Assembly;
@@ -237,11 +238,29 @@ impl Play {
                 }
             })
             .collect();
+        // Every target's faces, for the ground a building gives and the collision pass.
+        let mut ground = Ground::new(land);
+        let materials_for = |t: usize, part: usize, material: u16| {
+            let name = battle.wears.get(t)?.get(part)?.get(usize::from(material & 0xFF))?;
+            materials.get(name).map(|m| m.surface)
+        };
+        ground.solids = battle
+            .combat
+            .targets
+            .iter()
+            .enumerate()
+            .map(|(t, target)| {
+                let building = mission.objects[battle.objects[t]].kind == KIND_BUILDING;
+                Solid::from_parts(&target.parts, target.centre, target.radius, building, |part, material| {
+                    materials_for(t, part, material)
+                })
+            })
+            .collect();
         let player_clan = mission.objects[hero.object].clan_id().unwrap_or(0);
         let hero_id = mission.objects[hero.object].logical_id;
         let mut play = Play {
             hero,
-            ground: Ground::new(land),
+            ground,
             battle,
             assembly,
             fx,
@@ -470,7 +489,9 @@ impl Play {
     /// battle's frame, then the effects.
     pub fn tick(&mut self, dt_ms: f64, mouse: [f32; 2]) -> Vec<Event> {
         self.update_targets();
+        let from = self.hero.collision_centre();
         let shots = self.hero.tick(dt_ms, mouse, &self.ground);
+        self.collide(from);
         self.footsteps();
         let now = self.hero.time_ms;
         for (g, shot) in shots {
@@ -550,13 +571,62 @@ impl Play {
     fn ground_conditions(&self) -> [bool; CONDITIONS] {
         let mut out = [false; CONDITIONS];
         if let Some(hit) = self.hero.walker.ground {
-            if let Some(s) = self.surface(hit.face).map(usize::from).filter(|&s| s <= 10) {
+            let surface = match (hit.face, hit.solid) {
+                (Some(f), _) => self.surface(f),
+                (None, Some((s, f))) => self.ground.solids[s].faces[f].surface,
+                _ => None,
+            };
+            if let Some(s) = surface.map(usize::from).filter(|&s| s <= 10) {
                 out[s] = true;
             }
-            out[COND_BED] =
-                self.ground.land.faces.get(hit.face).is_some_and(|f| f.flags & FLAGS_LIQUID_BED_BIT != 0);
+            out[COND_BED] = hit
+                .face
+                .and_then(|f| self.ground.land.faces.get(f))
+                .is_some_and(|f| f.flags & FLAGS_LIQUID_BED_BIT != 0);
         }
         out
+    }
+
+    /// The collision pass for the hero (docs/24, "Collision between objects"), after its
+    /// move and ground contact: against every placed object whose sphere its swept sphere
+    /// meets, the hero the mover and taking the whole push.
+    ///
+    /// STAND-IN: docs/24-motion.md#collision-between-objects--read -- the pass is read for
+    /// every pair with a contact record; the engine moves only the hero, so the hero is
+    /// always the mover and nothing else is pushed, and a machine standing on a building is
+    /// taken to have left the pass for the building's own, so the deck it stands on does
+    /// not push it.
+    fn collide(&mut self, from: Vec3) {
+        let to = self.hero.collision_centre();
+        let radius = self.hero.collision.1;
+        let standing_on = self.hero.walker.ground.and_then(|h| h.solid).map(|(s, _)| s);
+        for (i, target) in self.battle.combat.targets.iter().enumerate() {
+            if let Some(s) = self.ground.solids.get_mut(i) {
+                s.present = target.alive;
+            }
+        }
+        let mut total = Vec3::ZERO;
+        for (i, obstacle) in self.ground.solids.iter().enumerate() {
+            if !obstacle.present || Some(i) == standing_on {
+                continue;
+            }
+            let end = to + total;
+            let swept = (from, end);
+            if parkan_sim::hit::swept_spheres(
+                swept,
+                radius,
+                (obstacle.centre, obstacle.centre),
+                obstacle.radius,
+            )
+            .is_none()
+            {
+                continue;
+            }
+            total += solid::push(from, end, radius, obstacle);
+        }
+        if total.length_squared() >= NO_CONTACT {
+            self.hero.walker.take_push(total);
+        }
     }
 
     /// The chassis's node effects follow their nodes, and each foot that landed runs its

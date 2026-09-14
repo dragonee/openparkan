@@ -7,6 +7,8 @@
 use glam::Vec3;
 use parkan_formats::landmesh::LandMesh;
 
+use crate::solid::Solid;
+
 /// cos 80°: a steeper face is never ground (`Control.dll:0x1001a6fd`).
 pub const WALKABLE_NORMAL_Z: f32 = 0.173648;
 /// The body sphere's radius is held to this unless it is at least `LARGE_BODY`
@@ -21,10 +23,13 @@ pub fn contact_radius(sphere_radius: f32) -> f32 {
     if sphere_radius < LARGE_BODY { sphere_radius.min(BODY_RADIUS_HOLD) } else { sphere_radius }
 }
 
-/// A face found under a point.
+/// A face found under a point: a landscape face, or a face of a building's solid.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Hit {
-    pub face: usize,
+    /// The landscape face.
+    pub face: Option<usize>,
+    /// The solid and its face.
+    pub solid: Option<(usize, usize)>,
     /// The face plane at the query's xy.
     pub point: Vec3,
     /// The face's own normal, as the file stores it.
@@ -39,6 +44,8 @@ impl Hit {
 
 pub struct Ground {
     pub land: LandMesh,
+    /// Placed objects' faces, by the caller's numbering; a building's are ground.
+    pub solids: Vec<Solid>,
     lo: [f32; 2],
     size: [usize; 2],
     cells: Vec<Vec<u32>>,
@@ -73,7 +80,7 @@ impl Ground {
                 }
             }
         }
-        Self { land, lo, size, cells, world: (lo3, hi3) }
+        Self { land, solids: Vec::new(), lo, size, cells, world: (lo3, hi3) }
     }
 
     /// The map's extent in x and y.
@@ -165,13 +172,16 @@ impl Ground {
         })
     }
 
-    /// The highest ground face at `(x, y)` whose plane there is not above `top`.
+    /// The highest ground face at `(x, y)` whose plane there is not above `top`, a
+    /// building's deck included.
     pub fn below(&self, x: f32, y: f32, top: f32) -> Option<Hit> {
-        let mut best: Option<Hit> = None;
+        let mut best: Option<Hit> =
+            self.solid_faces(Vec3::new(x, y, top), false).max_by(|a, b| a.point.z.total_cmp(&b.point.z));
         for (f, z) in self.holding(x, y) {
             if z <= top && best.is_none_or(|h| z > h.point.z) {
                 best = Some(Hit {
-                    face: f,
+                    face: Some(f),
+                    solid: None,
                     point: Vec3::new(x, y, z),
                     normal: Vec3::from_array(self.land.faces[f].normal),
                 });
@@ -180,21 +190,43 @@ impl Ground {
         best
     }
 
-    /// The walk-face query (`IWorld` slot 10, `Terrain.dll:0x10026b20`) on the landscape:
-    /// the first face whose triangle holds `p`'s xy and whose plane lies at or above `p`
-    /// (register 6) or at or below it (register 10). The hit is `p` dropped vertically
-    /// onto the plane through the face's first vertex (`Control.dll:0x1001bfc0`).
+    /// The walk-face query (`IWorld` slot 10, `Terrain.dll:0x10026b20`): the landscape's
+    /// first face whose triangle holds `p`'s xy and whose plane lies at or above `p`
+    /// (register 6) or at or below it (register 10), dropped vertically onto the plane
+    /// through the face's first vertex (`Control.dll:0x1001bfc0`), and every building's
+    /// answer; the smallest gap wins.
     pub fn query(&self, p: Vec3, up: bool) -> Option<Hit> {
-        self.holding(p.x, p.y).find_map(|(f, _)| {
-            let face = &self.land.faces[f];
-            let normal = Vec3::from_array(face.normal);
-            if normal.z.abs() < 1e-6 {
+        self.holding(p.x, p.y)
+            .find_map(|(f, _)| {
+                let face = &self.land.faces[f];
+                let normal = Vec3::from_array(face.normal);
+                if normal.z.abs() < 1e-6 {
+                    return None;
+                }
+                let v = Vec3::from_array(self.land.positions[usize::from(face.vertices[0])]);
+                let z = v.z - (normal.x * (p.x - v.x) + normal.y * (p.y - v.y)) / normal.z;
+                let right_way = if up { z >= p.z } else { z <= p.z };
+                right_way.then_some(Hit { face: Some(f), solid: None, point: Vec3::new(p.x, p.y, z), normal })
+            })
+            .into_iter()
+            .chain(self.solid_faces(p, up))
+            .min_by(|a, b| (a.point.z - p.z).abs().total_cmp(&(b.point.z - p.z).abs()))
+    }
+
+    /// The faces the buildings answer the walk-face query with: each present ground
+    /// solid's nearest (docs/24, "Buildings are ground").
+    fn solid_faces(&self, p: Vec3, up: bool) -> impl Iterator<Item = Hit> + '_ {
+        self.solids.iter().enumerate().filter(|(_, s)| s.ground && s.present).filter_map(move |(i, s)| {
+            if s.centre.truncate().distance(p.truncate()) > s.radius + crate::solid::WALK_MARGIN {
                 return None;
             }
-            let v = Vec3::from_array(self.land.positions[usize::from(face.vertices[0])]);
-            let z = v.z - (normal.x * (p.x - v.x) + normal.y * (p.y - v.y)) / normal.z;
-            let right_way = if up { z >= p.z } else { z <= p.z };
-            right_way.then_some(Hit { face: f, point: Vec3::new(p.x, p.y, z), normal })
+            let (f, z) = s.walk_face(p, up)?;
+            Some(Hit {
+                face: None,
+                solid: Some((i, f)),
+                point: Vec3::new(p.x, p.y, z),
+                normal: s.faces[f].normal,
+            })
         })
     }
 
@@ -205,10 +237,6 @@ impl Ground {
     /// STAND-IN: docs/24-motion.md#finding-the-ground--read -- the walk from the face
     /// held last tick (`FindWorldFace`) is read but not modelled: the face is searched
     /// fresh each step.
-    ///
-    /// STAND-IN: docs/24-motion.md#not-established -- which scene objects the walk-face
-    /// query visits (types 1 and 3) is not read; the landscape alone is ground, and
-    /// bridges and buildings are not.
     pub fn search(&self, p: Vec3, r2: f32) -> Option<Hit> {
         let up = self.query(p, true);
         if let Some(h) = up

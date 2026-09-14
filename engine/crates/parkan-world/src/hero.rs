@@ -73,6 +73,8 @@ pub struct Hero {
     pub rounds: Vec<Option<usize>>,
     /// The unit's one radar: its fitted radar part's, else its turret's (docs/25).
     pub radar: Radar,
+    /// The collision sphere in the unit's frame: its centre and radius.
+    pub collision: (Vec3, f32),
     /// Where the guns' target stands, for their gates; the caller sets it each tick.
     pub target_point: Option<Vec3>,
     fire_held: bool,
@@ -186,6 +188,26 @@ impl Hero {
             }
         }
         let radar = radar.unwrap_or_else(|| Radar::new(NO_RADAR_RANGE, NO_RADAR_PERIOD_MS));
+
+        // The agent's sphere from its parts' header spheres (`AniMesh.dll:0x10009510`,
+        // docs/26): their centres weighted by their radii, and a radius reaching the
+        // farthest part's sphere. The turret's is carried by its mount at rest.
+        let rest_mount = chassis
+            .mesh
+            .world_pose(usize::try_from(turret_part.node).unwrap_or(0))
+            .compose(&turret_mesh.mesh.root_pose().invert());
+        let f = |v: [f64; 3]| Vec3::new(v[0] as f32, v[1] as f32, v[2] as f32);
+        let spheres: Vec<(Vec3, f32)> = [
+            chassis.mesh.sphere.map(|(c, r)| (Vec3::from_array(c), r)),
+            turret_mesh.mesh.sphere.map(|(c, r)| (f(rest_mount.apply(c.map(f64::from))), r)),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+        let weight: f32 = spheres.iter().map(|s| s.1).sum();
+        let centre =
+            if weight > 0.0 { spheres.iter().map(|s| s.0 * s.1).sum::<Vec3>() / weight } else { Vec3::ZERO };
+        let collision = (centre, spheres.iter().map(|s| s.0.distance(centre) + s.1).fold(0.0, f32::max));
         Ok(Some(Hero {
             object,
             walker,
@@ -201,6 +223,7 @@ impl Hero {
             guns: Vec::new(),
             rounds: Vec::new(),
             radar,
+            collision,
             target_point: None,
             fire_held: false,
             steady: false,
@@ -407,6 +430,11 @@ impl Hero {
             let pose = chassis.walk_pose(n, a, b, w);
             if n == 0 && self.steady { without_yaw(&pose, &chassis.local_pose(0)) } else { pose }
         })
+    }
+
+    /// The collision sphere's centre in the world.
+    pub fn collision_centre(&self) -> Vec3 {
+        self.walker.body.position + self.walker.body.to_world(self.collision.0)
     }
 
     /// A chassis node in the world: where it is and its second axis.

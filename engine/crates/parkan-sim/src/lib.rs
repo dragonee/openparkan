@@ -17,5 +17,6 @@ pub mod motion;
 pub mod progression;
 pub mod script;
 pub mod sky;
+pub mod solid;
 pub mod targeting;
 pub mod turret;

@@ -463,22 +463,27 @@ impl Walker {
     }
 
     /// `0x1001e650`, once a tick: the map edge's push on the body sphere, taken as a
-    /// machine takes a push (`0x1000c990`), horizontally in a state with bit `0x4`.
-    ///
-    /// STAND-IN: docs/24-motion.md#collision-between-objects--read -- how interface
-    /// `0x25` slot 3 turns an object's level-0 triangles into a push is not read, and the
-    /// rest of the pair response is not modelled: no collision between objects, so units
-    /// walk through each other and through buildings.
+    /// machine takes a push.
     pub fn keep_inside(&mut self, ground: &Ground) {
         let (lo, hi) = ground.world_box();
         let centre = self.body.position + self.body.to_world(self.centre);
-        let push = motion::edge_push(centre, self.sphere_radius, lo, hi);
+        self.take_push(motion::edge_push(centre, self.sphere_radius, lo, hi));
+    }
+
+    /// Message `0x1b` (`0x1000c990`): a push moves the position, the velocity kept; in a
+    /// state with bit `0x4` it is made horizontal, its length kept up to ×4.
+    pub fn take_push(&mut self, push: Vec3) {
         let flat = self
             .controller
             .states
             .get(self.machine.current)
             .is_some_and(|s| s.mode & STATE_GROUND_CONTACTS != 0);
         self.body.position += if flat { motion::horizontal(push) } else { push };
+    }
+
+    /// The body sphere's centre in the world.
+    pub fn sphere_centre(&self) -> Vec3 {
+        self.body.position + self.body.to_world(self.centre)
     }
 
     /// Stand the body on the ground at once, as a mission places a unit: its lowest

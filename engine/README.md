@@ -203,8 +203,6 @@ a row here. A row leaves this table when research closes it.
 | M1 | The sky's textures: stars, clouds, the sun and moon sprites, the lens flare | not drawn | [10](../docs/10-sky.md#the-dome-the-fog-and-the-scene-colour--read-and-measured) |
 | M1 | The files' colours in a renderer that decodes textures to linear | sky, fog and dome colours and texture tints decoded from sRGB to linear; the lit colour (scene colour, material emissive and diffuse, both lights) formed from the files' values, held to 1, then decoded, so blends match the game's display-space ones | [10](../docs/10-sky.md#the-dome-the-fog-and-the-scene-colour--read-and-measured) |
 | M3 | What the draw layers 10 and 9 a fifth slot is filed under do (`Terrain.dll:0x1004553b`), and `CShade` slot 15 | the fifth slots draw with the scene, depth-tested, lit and fogged like any model | [07](../docs/07-objects.md#the-fifth-slot-is-what-the-units-own-view-draws) |
-| M3 | How an object's interface `0x25` slot 3 turns its level-0 triangles into a push on a sphere; the rest of the pair response is read | none yet: units walk through each other and through buildings; to come, push the sphere out along the nearest triangle's normal by its penetration | [24](../docs/24-motion.md#collision-between-objects--read) |
-| M3 | Which scene objects the walk-face query visits (types 1 and 3), so which bridges and buildings are ground | the landscape alone is ground: bridges and buildings are not | [24](../docs/24-motion.md#not-established) |
 | M3 | When the ground contact runs and with what dt, the frames its contact points are placed at, the second sphere's radius r₂, and what lifts a sphere with no face under it | after every state step, with the step as dt; contacts on the step's last frames; r₂ = r; no lift | [24](../docs/24-motion.md#holding-the-body-on-the-ground--read-and-measured) |
 | M3 | A state's use count `+0x94` | unlimited | [24](../docs/24-motion.md#section-1-is-the-animation-state-graph--read-and-measured) |
 | M3 | The state a machine starts in | state 0 | [24](../docs/24-motion.md#playing-a-state--read-and-measured) |
@@ -279,6 +277,9 @@ engine pass replaces each with what was read and removes its row.
 | M7 | Which pose the live contact record's height comes from when the loader decides which states plant a foot | the rest pose | [13](../docs/13-control.md#a-footstep-end-to-end--read-and-measured) |
 | M7 | A contact's node life, which decides whether a foot can land | every contact is intact | [13](../docs/13-control.md#section-1s-conditions-are-contacts--read-and-measured) |
 | M7 | How a playing sound's position, near, far and volume become gain | a sound keeps the linear gain and pan it started with, a loop included | [11](../docs/11-effects.md#type-2-is-a-sound--read-and-measured) |
+| M7 | What `0x1000e900` accepts past its first edge test, and the class the small-face stop reads | a face whose plane has the centre in front within the radius, measured to the triangle's nearest point; the hero's class is its size class, 2, so small faces never stop it | [24](../docs/24-motion.md#collision-between-objects--read) |
+| M7 | The batch flags 8 and 0x200 a collision's face query passes: a mesh's batch record carries no such word | no batch passes | [24](../docs/24-motion.md#collision-between-objects--read) |
+| M7 | Which collision manager a machine standing on a building joins, and so whether the building's faces push it; how a machine gets onto a ramp whose faces push its sphere back | the hero is always the mover and nothing else is pushed; the building it stands on does not push it, and a building's walkable faces never push | [24](../docs/24-motion.md#standing-on-a-bridge--read-and-measured) |
 
 ## Departures
 

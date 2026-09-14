@@ -611,3 +611,56 @@ fn the_hero_sounds_its_steps_as_it_runs_and_its_arm_as_a_gun_is_put_away() {
     // walk and transition states.
     assert!(steps >= 6, "{steps} steps in 2 s: {:?}", play.cues.iter().map(|c| &c.sound).collect::<Vec<_>>());
 }
+
+/// Walk the hero from `from` facing `yaw` for `seconds`, holding W; where it stood each tick.
+fn walk(play: &mut parkan_world::play::Play, from: glam::Vec3, yaw: f32, seconds: usize) -> Vec<glam::Vec3> {
+    let w = &mut play.hero.walker;
+    w.body.position = from;
+    w.body.yaw = yaw;
+    w.follow_ground(&play.ground);
+    w.from = (w.body.position, w.body.yaw);
+    w.from_heading = w.body.yaw;
+    play.hero.key("SCAN_W", true);
+    let mut out = Vec::new();
+    for _ in 0..(60 * seconds) {
+        play.hero.update_input();
+        play.tick(1000.0 / 60.0, [0.0; 2]);
+        out.push(play.hero.walker.body.position);
+    }
+    play.hero.key("SCAN_W", false);
+    out
+}
+
+#[test]
+#[ignore = "needs the game install"]
+fn the_hero_crosses_mission_01s_bridge_on_its_deck() {
+    use glam::Vec3;
+    let (mut play, _) = mission_01_play();
+    // From the south bank, north along the bridge (docs/24, "Standing on a bridge").
+    let path = walk(&mut play, Vec3::new(790.5, 540.0, 40.0), 0.0, 22);
+    let over_gorge: Vec<&Vec3> = path.iter().filter(|p| (620.0..760.0).contains(&p.y)).collect();
+    assert!(!over_gorge.is_empty(), "it reaches the gorge");
+    let lowest = over_gorge.iter().map(|p| p.z).fold(f32::MAX, f32::min);
+    assert!(lowest > 10.0, "on the deck the whole way over the gorge, not below {lowest}");
+    assert!(path.last().unwrap().y > 800.0, "and off the far end: {}", path.last().unwrap());
+}
+
+#[test]
+#[ignore = "needs the game install"]
+fn a_stone_stops_the_hero_and_a_tree_turns_it_aside() {
+    use glam::Vec3;
+    let (mut play, m) = mission_01_play();
+    // Object 2, s_stone_07 scaled, and object 12, s_tree_04 (docs/24, "Collision between objects").
+    let stone = Vec3::from_array(m.objects[2].position) + Vec3::new(60.0, 0.0, 0.0);
+    let path = walk(&mut play, stone + Vec3::new(0.0, -120.0, 40.0), 0.0, 15);
+    let end = *path.last().unwrap();
+    assert!(end.y < stone.y - 80.0, "held off the stone's face, not through it: {end}");
+    let moved = path[path.len() - 60].distance(end);
+    assert!(moved < 0.5, "and stopped there, {moved} in the last second");
+
+    let tree = Vec3::from_array(m.objects[12].position);
+    let path = walk(&mut play, tree + Vec3::new(0.0, -120.0, 40.0), 0.0, 15);
+    let end = *path.last().unwrap();
+    assert!(end.y > tree.y + 40.0, "past the tree: {end}");
+    assert!((end.x - tree.x).abs() > 1.0, "turned aside by its trunk: {end}");
+}
