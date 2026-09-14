@@ -9817,7 +9817,7 @@ read = true
 module = "iron3d.dll"
 at = "0x1006db40"
 kind = "function"
-name = "wingman selector: off (0) and on (2), gathering friendly units"
+name = "wingman selector, the tilde: off (0), picking (1, Shift), ordering (2, all chosen)"
 doc = "docs/31-packages.md"
 read = true
 
@@ -9834,6 +9834,342 @@ module = "iron3d.dll"
 at = "0x1007a8e0"
 kind = "function"
 name = "order menu open: the wingman flag at +4, then the builder (0x1007aaa0)"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10070db0"
+kind = "function"
+name = "character key handler: a switch on the character through a 127-byte index; digits reach the wingman selector in view states 1 and 3"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10071168"
+kind = "table"
+name = "character key handler's index: '1'-'9' one case, 0x13, 0x1b and 0x91 their own, the rest the default"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100710fa"
+kind = "site"
+name = "character key handler, digits: selector state 1 toggles wingman n-1 (0x1006dd00), state 2 gives row n (0x1006df80); the key is taken"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1006dc40"
+kind = "function"
+name = "wingman selector: choose every wingman (tilde without Shift)"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1006dd00"
+kind = "function"
+name = "wingman selector: toggle wingman i in the choice; past the list does nothing"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1006df50"
+kind = "function"
+name = "wingman selector: is this record chosen"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1006ddb0"
+kind = "function"
+name = "wingman selector: the wingman count (the driven unit's target list, own clan)"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1006ddc0"
+kind = "function"
+name = "wingman selector: wingman i"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1006ddd0"
+kind = "function"
+name = "wingman selector: the chosen records into a list, for the panel"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1006de90"
+kind = "function"
+name = "wingman selector: the chosen records into a list, for the order menu builder"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1006df80"
+kind = "function"
+name = "wingman selector: give row n of the menu at once, on the driven unit's current target; then close"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1006e1e2"
+kind = "site"
+name = "wingman order rows: the switch over rows 1-7 (table 0x1006e350)"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1006e350"
+kind = "table"
+name = "wingman order rows' jump table"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1006e2a9"
+kind = "site"
+name = "wingman order given: panel closed, state 0, choice emptied"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10091f20"
+kind = "function"
+name = "target list: the count of own-clan records (+0x14)"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10091f30"
+kind = "function"
+name = "target list: own-clan record i (+0x14)"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10091de4"
+kind = "site"
+name = "target list rebuild: a contact whose owner is the unit's joins the own-clan records"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100432f0"
+kind = "function"
+name = "first-person panel: the wingman list, 16 line widgets 19 apart, chosen ones highlighted"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1009d970"
+kind = "function"
+name = "first-person panel line widget: set number, record and chosen flag"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1007a8d0"
+kind = "function"
+name = "order menu: is row n enabled"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1007ab59"
+kind = "site"
+name = "order menu builder: no chosen wingman left closes the selector"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1007acb4"
+kind = "site"
+name = "order menu builder: row tests, a target not of the player's clan, a building for pick mode 2, capturers +0x30 of 1 or 2"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10078b60"
+kind = "function"
+name = "order dispatch for the chosen units with no target list (kind, logic id, parameter)"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10078820"
+kind = "function"
+name = "order dispatch for the chosen units on a list of target units"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100789c0"
+kind = "function"
+name = "order dispatch for the chosen units on a list of target buildings"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1007968c"
+kind = "table"
+name = "order dispatcher's case table"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100796c4"
+kind = "table"
+name = "order dispatcher's kind index, kinds 1-32"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100792ab"
+kind = "site"
+name = "order dispatcher kind 1: STAYGROUND, not defined"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10079381"
+kind = "site"
+name = "order dispatcher kind 3: SEARCH by type 0x8017365e"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100793d7"
+kind = "site"
+name = "order dispatcher kind 4: SEARCH, not defined, -1"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10079429"
+kind = "site"
+name = "order dispatcher kind 5: ATTACK by logic id"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10079435"
+kind = "site"
+name = "order dispatcher kind 6: SEARCH on a building's logic id"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100794aa"
+kind = "site"
+name = "order dispatcher kind 8: RELOAD, not defined"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10079506"
+kind = "site"
+name = "order dispatcher kind 10: FOLLOW, parameter 50, by logic id"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10079604"
+kind = "site"
+name = "order dispatcher: the acknowledgement from the last unit's record +0x30, played through 0x10061ac0"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1007d000"
+kind = "function"
+name = "order packet: construct, 316 bytes zeroed, target kind 0x204, +0x124 -1, +0x138 1.0"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1007bb48"
+kind = "table"
+name = "HQ command executor's case table, commands 0-23"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1008e840"
+kind = "function"
+name = "acknowledgement voice: set from record +0x30 (1-2 _S, 4-5 _B, else plain), then pick"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1008e884"
+kind = "table"
+name = "acknowledgement voice set table, +0x30 of 1 to 5"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1008e690"
+kind = "function"
+name = "voice set pick: 16-bit shift register, never the last index"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1008e650"
+kind = "function"
+name = "voice set: register a voice in a set"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1005d3ca"
+kind = "site"
+name = "acknowledgement voices registered: VOICE_ACKNOWLEDGE_S first of 15, to 0x1005d999"
 doc = "docs/31-packages.md"
 read = true
 

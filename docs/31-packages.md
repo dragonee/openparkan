@@ -126,6 +126,123 @@ on; a Shift key changes how. While it is on, the first-person panel
 selector's units instead of the HQ table. *C01 Mission 3*'s tip, which names
 "Stand By" and "Follow Me" as commands to the player's wingman, agrees.
 
+### The wingman menu from first person — *read*, and *measured*
+
+**Opening it** (`iron3d.dll:0x100724fe`, *read*). The tilde's command runs the
+selector only when the key event is not a release (type 7), the view is in state
+1 or 3, the driven unit's record (game `+0xaec`) has `+0xa2` set, and the view
+has a selector (`+0x40`).
+
+**Who can be a wingman** (*read*). The selector counts and reads the driven
+unit's target list through `0x10091f20` and `0x10091f30`: the list's `+0x14`,
+the records it keeps of the unit's **own clan**
+([25-sensors.md](25-sensors.md#the-players-target--read-and-measured)). The
+rebuild adds a listed contact there when its owner word is the driven unit's
+and a record answers for its id (`0x10091de4`). So a wingman is **a unit of the
+player's clan on the driven unit's radar**, in the radar's order. The hero
+itself is never listed. With no such unit the tilde does nothing.
+
+**The selector's three states** (`0x1006db40`, *read*). The selector keeps a
+state at `+8` and the chosen units as a list of their records' `+0x28` at `+0xc`.
+The tilde does this:
+
+| state | tilde | then |
+|---|---|---|
+| 0, off, Shift up | every wingman is chosen (`0x1006dc40`) and the panel opens | 2 |
+| 0, off, Shift held (DIK `0x2a` or `0x36`) | the choice is emptied and the panel opens | 1 |
+| 1, picking | with at least one chosen, the order menu follows; with none, the panel closes | 2, or 0 |
+| 2, ordering | the choice is emptied and the panel closes | 0 |
+
+The panel opens and closes through the view's `+0x50` object, slot 8 and slot 7
+(not followed).
+
+**Keys** (`0x10070db0`, *read*; the case table *measured*). A character handler
+switches on the character through a 127-byte index at `0x10071168`. `'1'`–`'9'`
+share one case (`0x100710fa`). In view states 1 and 3 that case goes to the
+selector:
+
+- **Picking (state 1):** digit *n* toggles wingman *n* in the choice
+  (`0x1006dd00` with *n* − 1). A number past the list does nothing.
+- **Ordering (state 2):** digit *n* gives row *n* of the menu (`0x1006df80`).
+- Either way the key is taken. In state 0 a digit falls through to the rest of
+  the handler.
+
+Escape (`0x1b`) goes elsewhere: only the tilde, or an order, closes the menu.
+
+**The list the panel draws** (`0x100431a0`, `0x100432f0`, *read*). Every frame
+the panel resets 16 line widgets and fills one per wingman, in list order:
+the number *i* + 1, the record, and whether it is chosen (`0x1006df50`). A line
+draws the number and two labels made from the record (`0x10077120`, not
+followed). A chosen line is drawn highlighted; an unchosen one is grey, or
+dimmed by half while picking. The lines stand 19 apart.
+
+**The menu** (*read*). In state 2 the panel places the order menu at (200, 200)
+(`0x1007b1a0`) and builds it for the chosen records with the wingman flag
+(`0x1007a8e0`). The builder (`0x1007aaa0`) makes one line per row of the second
+table, 19 high from y 50 at x 220 (`0x100670d0` with 0xdc, y, 0x17c, y + 19). It
+closes the selector if no chosen unit is left (`0x1007ab59`, `0x1007ada1`). A
+row is **enabled** when both of these tests pass (`0x1007acb4`–`0x1007ad7e`):
+
+- **The target.** A row that needs one (Attack, Capture building) needs the
+  driven unit's current target. The target must not be of the player's clan
+  (its record's `+0x24` against game `+0xad0`). A row with pick mode 2 (Capture
+  building) needs that target to be a building (object type 3).
+- **The capturers.** Search and capture and Capture building need every chosen
+  record's `+0x30` to be 1 or 2. Capture building also refuses a building of type
+  `0x80000200`.
+
+**No pick mode is entered from first person** (*read*). Row *n* is given at once
+(`0x1006df80`): the row must be enabled (`0x1007a8d0`). The target is **the
+driven unit's current target**, sorted into a unit or a building by its object
+type. After the order the panel closes, the state goes to 0 and the choice is
+emptied (`0x1006e2a9`).
+
+**The orders** (*read*). Each row calls the order dispatcher (`0x10079230`) for
+the chosen units with a kind of its own, directly (`0x10078b60`, `0x10078820`,
+`0x100789c0`). The dispatcher builds a 316-byte order packet per unit
+(`0x1007d000`) and hands it to the unit record's `+0x44` object, slot 3, with
+insert mode 3, `INSERT_ORDER_REPLACE`. The packet's fields are the ones script
+function 15 sets ([15-behaviour.md](15-behaviour.md#what-the-functions-do)):
+
+| offset | field | default |
+|---|---|---|
+| +0 | the order | 0 |
+| +4 | its parameter | 0 |
+| +0xc | the target kind | `0x204`, `TARGET_NOT_DEFINED` |
+| +0x10 | the target: a logic id, a type mask, or −1 | 0 |
+| +0x12c | a place, x, y, z | 0 |
+| +0x138 | a float | 1.0 |
+
+| row | key | kind | order | parameter | target (kind, value) | when |
+|---|---|---:|---|---:|---|---|
+| Standby | 1 | 1 | `STAYGROUND` 0x15 | 0 | not defined | — |
+| Follow me | 2 | 10 | `FOLLOW` 0x16 | 50 | by logic id: the driven unit's (record `+0x34`) | — |
+| Search and capture | 3 | 3 | `SEARCH` 5 | 0 | by type, `0x8017365e` | every chosen `+0x30` is 1 or 2 |
+| Seek and destroy | 4 | 4 | `SEARCH` 5 | 0 | not defined, −1 | — |
+| Attack | 5 | 5 | `ATTACK` 3 | 0 | by logic id: the target unit's, else the target building's (`0x10078ce0`) | a target |
+| Capture building | 6 | 6 | `SEARCH` 5 | 0 | by logic id: the target building's | a building target, capturers as above |
+| Refit | 7 | 8 | `RELOAD` 8 | 0 | not defined | — |
+
+The dispatcher's cases for these kinds are `0x100792ab`, `0x10079506`, `0x10079381`,
+`0x100793d7`, `0x10079429`, `0x10079435` and `0x100794aa`, in row order.
+Follow me is the only row the HQ executor (`0x1007b740`) has no case for: it is
+the wingman's alone.
+
+**The acknowledgement** (*read*, and *measured*). After giving the orders the
+dispatcher takes the **last** chosen unit's record `+0x30`, picks a voice
+(`0x1008e840`), and plays it through `0x10061ac0` with no speaker, so it queues
+([34-progression.md](34-progression.md#messages--read-and-measured)). There are
+three sets (registered `0x1005d3ca`–`0x1005d999`):
+
+- `+0x30` of 1 or 2 takes the `_S` voices;
+- 4 or 5 takes the `_B` voices;
+- anything else takes the plain ones.
+
+Each set has five voices, `VOICE_ACKNOWLEDGE`, `VOICE_AFFIRMATIVE`,
+`VOICE_YES_SIR`, `VOICE_OK` and `VOICE_EXECUTE`. The pick is a 16-bit xorshift
+that never repeats the last index (`0x1008e690`). All 15 are bound in
+`ui/game_resources.cfg` to `voices.lib` (*measured*).
+
 **Build and upgrade rows also need an intact beam** (*read*): the row test
 (`0x1007bbb0`) refuses them while `0x10076da0` finds the builder dead, without a
 type-30 component, or with that component's value `0x52` at 0 or below.
@@ -726,3 +843,17 @@ captures by logic id 34 times.
   and `+0x60` to lock a unit's fire mode.
 - Who sends `MBehaviour` messages `0x19` and `0x1a`, the explosions that start a
   retaliation.
+- What a unit record's `+0x30` is. The wingman menu lets only 1 or 2 capture, the
+  same records speak `_S` voices, 4 and 5 speak `_B`, and boarding wants 4
+  ([27-ownership.md](27-ownership.md#a-neutral-unit-is-taken-by-the-hero--read-and-measured)).
+- The two labels a wingman line draws beside its number (`iron3d.dll:0x10077120`),
+  and what the view's `+0x50` object does on slots 7 and 8 as the panel opens and
+  closes.
+- Whether the wingman menu's lines take mouse clicks, as the HQ menu's do; string
+  3044, "Use the mouse to click on the item", is not tied to either.
+- Whether a digit that picks a wingman or an order also reaches `World3D.dll`'s
+  input table, which toggles the hero's guns on the same keys. The character
+  handler takes the key, but the table reads DirectInput separately.
+- What the order packet's `+0x110`, `+0x120`, `+0x124` and `+0x138` (1.0) mean,
+  and how the unit record's `+0x44` object inserts an order into the behaviour's
+  list; the call reaches `Behavior.dll` through an interface not traced here.

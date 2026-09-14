@@ -8841,6 +8841,76 @@ def _status_switch(image: bytes) -> dict[int, int] | None:
     return out
 
 
+#: The wingman menu's acknowledgement voices: five, in a plain, an ``_S`` and a
+#: ``_B`` set, picked by the last ordered unit's record ``+0x30``.
+ACKNOWLEDGE_VOICES = ("VOICE_ACKNOWLEDGE", "VOICE_AFFIRMATIVE", "VOICE_YES_SIR", "VOICE_OK",
+                      "VOICE_EXECUTE")
+
+
+def check_wingman(check, game: Path) -> None:
+    """The wingman menu from first person: the orders' numbers, the digit keys, the voices."""
+    names = ("ORDER_ROBOT_STAYGROUND", "ORDER_ROBOT_FOLLOW", "ORDER_ROBOT_SEARCH",
+             "ORDER_ROBOT_ATTACK", "ORDER_ROBOT_RELOAD", "TARGET_BY_LOGIC_ID", "TARGET_BY_TYPE",
+             "TARGET_NOT_DEFINED", "INSERT_ORDER_REPLACE")
+    consts = {v.name: int(v.default, 0) for v in behaviour.variables(game) if v.name in names}
+    check("varset.var: the wingman rows' orders, target kinds and the replacing insert",
+          consts == {"ORDER_ROBOT_STAYGROUND": packages.STAYGROUND,
+                     "ORDER_ROBOT_FOLLOW": packages.FOLLOW,
+                     "ORDER_ROBOT_SEARCH": packages.SEARCH,
+                     "ORDER_ROBOT_ATTACK": packages.ATTACK,
+                     "ORDER_ROBOT_RELOAD": packages.RELOAD,
+                     "TARGET_BY_LOGIC_ID": packages.TARGET_BY_LOGIC_ID,
+                     "TARGET_BY_TYPE": packages.TARGET_BY_TYPE,
+                     "TARGET_NOT_DEFINED": packages.TARGET_NOT_DEFINED,
+                     "INSERT_ORDER_REPLACE": 3},
+          f"{ {k: hex(v) for k, v in consts.items()} }: what the dispatcher "
+          f"(iron3d.dll:0x10079230) writes for Standby, Follow me, the searches, Attack and "
+          f"Refit, each given with insert mode 3")
+
+    # The character handler: `lea eax, [ebp-0x13]; cmp eax, 0x7e; ...; mov dl,
+    # [eax + index]; jmp [edx*4 + cases]`.  Group the 127 characters by case.
+    iron = (game / "iron3d.dll").read_bytes()
+    sections, _ = resources._sections(iron)
+    lfanew = struct.unpack_from("<I", iron, 0x3C)[0]
+    base = struct.unpack_from("<I", iron, lfanew + 24 + 28)[0]
+    at = iron.find(b"\x8d\x45\xed\x83\xf8\x7e")
+    by_case: dict[int, list[int]] = defaultdict(list)
+    if at >= 0 and iron[at + 16:at + 20] == b"\x33\xd2\x8a\x90" \
+            and iron[at + 24:at + 27] == b"\xff\x24\x95":
+        index = struct.unpack_from("<I", iron, at + 20)[0]
+        cases = struct.unpack_from("<I", iron, at + 27)[0]
+        default = at + 16 + struct.unpack_from("<i", iron, at + 12)[0]  # ja's file offset
+        off = resources._offset(sections, index - base)
+        for n, case in enumerate(iron[off:off + 127]):
+            target = struct.unpack_from(
+                "<I", iron, resources._offset(sections, cases + 4 * case - base))[0]
+            by_case["default" if resources._offset(sections, target - base) == default
+                    else target].append(0x13 + n)
+    groups = sorted((chars for key, chars in by_case.items() if key != "default"), key=len)
+    digits = list(range(ord("1"), ord("9") + 1))
+    check("iron3d.dll: the character handler gives '1'-'9' one case, the wingman selector's",
+          groups == [[0x13], [0x1B], [0x91], digits] and len(by_case.get("default", [])) == 115,
+          f"of the 127 characters from 0x13 its index table sends '1'-'9' to one case, "
+          f"0x13, 0x1b and 0x91 to one each, and {len(by_case.get('default', []))} to the "
+          f"default; the digit case (0x100710fa) calls the selector's pick (0x1006dd00) or "
+          f"its order (0x1006df80)")
+
+    found = resources.descriptors(game / "ui" / "game_resources.cfg")
+    voices = next((d for d in found if d.role == "voices"), None)
+    library = resources.locate(game, voices.library) if voices else None
+    held = {e.name.lower() for e in NResArchive.open(library)} if library else set()
+    sets = {suffix: [voices.bindings.get(v + suffix) if voices else None
+                     for v in ACKNOWLEDGE_VOICES] for suffix in ("", "_S", "_B")}
+    files = [f for bound in sets.values() for f in bound]
+    check("game_resources.cfg: three sets of five acknowledgement voices, all in voices.lib",
+          all(files) and len(set(files)) == 15 and all(f.lower() in held for f in files)
+          and all(f.endswith("_s.wav") for f in sets["_S"])
+          and all(f.endswith("_b.wav") for f in sets["_B"]),
+          "; ".join(f"{s or 'plain'}: {', '.join(map(str, b))}" for s, b in sets.items())
+          + f"; {sum(1 for f in files if f and f.lower() in held)} of 15 in "
+          f"{voices.library if voices else None}")
+
+
 def check_builder(check, game: Path) -> None:
     """The builder and the transport: who they are, what they carry, where they go."""
     names = frozenset(p.name.lower() for p in game.glob("*.rlb"))
@@ -12142,7 +12212,7 @@ def run(game: Path) -> int:
         check_collision,
         check_combat, check_ownership,
         check_capture, check_repair, check_chassis, check_weapons, check_firing,
-        check_targeting, check_turrets, check_packages, check_builder,
+        check_targeting, check_turrets, check_packages, check_wingman, check_builder,
         check_units, check_loading, check_search, check_construction,
         check_controls, check_player_input, check_turret_channels,
         check_behaviour, check_research, check_descriptions, check_saves,
