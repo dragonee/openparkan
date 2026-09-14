@@ -18494,3 +18494,395 @@ kind = "site"
 name = "WinMain: the game's result kept for the next shell; +0x14c 2 or 4 runs the game again"
 read = true
 doc = "docs/34-progression.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1009c9f0"
+kind = "function"
+name = "weapons list widget (0x5a0): page6 bar pieces and page9's four 9x9 lock corners"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1003ec30"
+kind = "function"
+name = "HUD widget holder (id 6) deleting destructor: deletes the weapons list"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1003ecb0"
+kind = "function"
+name = "weapons list draw: one row a gun of the unit, x 640, y 19 apart; rows skipped while the satellite map is open; text grey while the wingman selector is on"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1003eb30"
+kind = "function"
+name = "wingman panel widget (id 10, 0x314): sixteen 0x30-byte line widgets"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10042d10"
+kind = "function"
+name = "reticle widget (0x1b0): page9 circle (77,0) 64x64, arc (54,28) 23x23, ruler (168,0) 82x15, #37ff37"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1007a4c0"
+kind = "function"
+name = "order menu list (0x194): scroll_up_icon and scroll_down_icon"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1009b6a0"
+kind = "function"
+name = "compound-control widget base: rect at +0xc..+0x1c, visible +0x20 and enabled +0x21 set"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1009b700"
+kind = "function"
+name = "compound-control widget: set enabled (+0x21)"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100989b0"
+kind = "site"
+name = "compound-control skin loader: ui/compaund.cfg, 37 names into 39 slots of 0x8c; a function start the ledger's boundaries miss, after 0x10098850's jump table"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10098850"
+kind = "function"
+name = "compound-control skin lookup: (kind, variant) -> slot"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1009b470"
+kind = "function"
+name = "compound-control skin: the singleton at 0x1010c3e0, made and loaded on first use"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100999b0"
+kind = "function"
+name = "compound-control pen: set the direction of an id (1 right to left)"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10099a30"
+kind = "function"
+name = "compound-control pen: kind 0 piece (ending_stub / ending_text)"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10099b60"
+kind = "function"
+name = "compound-control pen: kind 2 piece (lamp_text_ending)"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10099c90"
+kind = "function"
+name = "compound-control pen: kind 3 piece (separator)"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10099d80"
+kind = "function"
+name = "compound-control pen: kind 5 piece (ray_emitter)"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10099e70"
+kind = "function"
+name = "compound-control pen: kind 7 piece (ray_ending)"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10099f60"
+kind = "function"
+name = "compound-control pen: text box, body_text stretched to a width (0: 1.1 x the text), GAME_FONT centred"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1009a380"
+kind = "function"
+name = "compound-control pen: bar, ray_body stretched, a right-anchored fill of a percentage (red <20, olive <80, green), centred text"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1009a8f0"
+kind = "function"
+name = "compound-control pen: kind 8 lamp by state (0 red, 1 yellow1, 2 yellow2, 3 green, 4 black)"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1009afa0"
+kind = "function"
+name = "compound-control frame: corners and edges about a rect, the inside filled from 5 in in a colour"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1009abf0"
+kind = "function"
+name = "compound-control frame: frame_corner_1-4 at the corners, frame_edge_h and _v between"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1008f830"
+kind = "function"
+name = "2D sprite cut: (page, page size, x, y, w, h, quarter turns), UVs half a texel in"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1008f970"
+kind = "function"
+name = "2D sprite draw: quad (x0, y0)-(x1, y1) on the 640x480 screen times the display's two scales; x1 < x0 mirrors"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100a0200"
+kind = "function"
+name = "unit weapon list: entry i (36 bytes)"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100a0210"
+kind = "function"
+name = "unit weapon list: set the current index (+0x10) when in range"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1007e3c0"
+kind = "function"
+name = "unit record binds its object: interfaces 0xa +0x5c, 0x10 +0x44, 0x18 +0x58, 0x19 +0x50, 0x201 +0x54, 0x202 +0x60, 0x204 +0x64"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1006dab0"
+kind = "function"
+name = "wingman selector constructor (vtable 0x100e6440): state +8 0, the chosen list at +0xc"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100740f0"
+kind = "function"
+name = "satellite map: open (+0x261 = 1)"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10074100"
+kind = "function"
+name = "satellite map: close (+0x261, +0x262 = 0)"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1007f750"
+kind = "function"
+name = "message box constructor: the record, its header by kind (1 from: %s, 2 System, 3 Training assistant, 4 Information assistant), made time, wide flag"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1007f9b0"
+kind = "site"
+name = "message box deleting destructor (vtable 0x100e6564); a function start the ledger's boundaries miss"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1007f9d0"
+kind = "function"
+name = "message box destructor"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1007fad0"
+kind = "function"
+name = "message box layout: GAME_FONT wrap to width - 10, at most six lines, the sixth to 0.95 of it with '...', footer 6208 with CMD_HELP's key"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1007fe80"
+kind = "function"
+name = "message box draw: x 230 y 0 w 182 (374, 352, 266 wide), frame filled 0x80008000, header white at +8 +9, lines #dcdcdc"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1007f3d0"
+kind = "function"
+name = "message history: clear, and delete the box"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1007f4f0"
+kind = "function"
+name = "message box takt: deleted 20 s after it was made, else drawn while shown"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1007f550"
+kind = "function"
+name = "message box: delete"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1007f580"
+kind = "function"
+name = "message box: made from the newest message in the history, and shown"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1007f720"
+kind = "function"
+name = "message box: hide (CMD_PAGER)"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1007f730"
+kind = "function"
+name = "message box: show again while it lives (CMD_PAGER)"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1007ed50"
+kind = "function"
+name = "a message arrives: kinds 1-4 into the history and the box; others to GetQueue slot 20"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1007eb60"
+kind = "function"
+name = "a system message (kind 2) from a string, into the history and the box"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "World3D.dll"
+at = "0x1000f000"
+kind = "function"
+name = "manual controller slot 6: a component's bits, 1 input (+0x58), 2 fire (+0x59), 4 selected (+0x5a)"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "services.dll"
+at = "0x10005870"
+kind = "function"
+name = "ITimer slot 2: now, in ms"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "services.dll"
+at = "0x10005890"
+kind = "function"
+name = "ITimer slot 3: seconds since a ms stamp"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "services.dll"
+at = "0x10004290"
+kind = "function"
+name = "getTimer"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "services.dll"
+at = "0x10004270"
+kind = "function"
+name = "getDisplay"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "services.dll"
+at = "0x10004260"
+kind = "function"
+name = "getGUIServer"
+read = true
+doc = "docs/35-hud.md"

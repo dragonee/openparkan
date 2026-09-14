@@ -12720,6 +12720,308 @@ def check_outcome(check, game: Path) -> None:
           f"{sum(v == 'false' for v in flagged.values())}; absent from {', '.join(absent)}")
 
 
+#: ``ui/compaund.cfg``'s pieces as ``iron3d.dll:0x100989b0`` files them, by slot (the
+#: offset into the skin over 0x8c).  Slot 13 is never filled; the radio buttons are never
+#: read, and two long buttons are read twice.
+HUD_SKIN = {
+    0: "ccres_red_lamp", 1: "ccres_yellow1_lamp", 2: "ccres_yellow2_lamp",
+    3: "ccres_green_lamp", 4: "ccres_black_lamp", 5: "ccres_ray_emitter_off",
+    6: "ccres_ray_emitter_normal", 7: "ccres_ray_emitter_pressed", 8: "ccres_ray_ending",
+    9: "ccres_ray_body", 10: "ccres_exit_button_off", 11: "ccres_exit_button_normal",
+    12: "ccres_exit_button_pressed", 14: "ccres_short_button_off",
+    15: "ccres_short_button_normal", 16: "ccres_short_button_pressed",
+    17: "ccres_long_button_off", 18: "ccres_long_button_normal",
+    19: "ccres_long_button_pressed", 20: "ccres_body_stub", 21: "ccres_body_text",
+    22: "ccres_long_button_off", 23: "ccres_long_button_normal", 24: "ccres_ending_stub",
+    25: "ccres_ending_text", 26: "ccres_lamp_stub_ending_off",
+    27: "ccres_lamp_stub_ending_normal", 28: "ccres_lamp_stub_ending_pressed",
+    29: "ccres_lamp_text_ending_off", 30: "ccres_lamp_text_ending_normal",
+    31: "ccres_lamp_text_ending_pressed", 32: "ccres_separator_left_text",
+    33: "ccres_separator_double_text", 34: "ccres_frame_corner_1", 35: "ccres_frame_corner_2",
+    36: "ccres_frame_corner_3", 37: "ccres_frame_corner_4", 38: "ccres_frame_edge_v",
+    39: "ccres_frame_edge_h",
+}
+
+#: The skin's lookup (``iron3d.dll:0x10098850``): kind -> (its first slot, whether the
+#: variant is added to it).  Any other kind gets slot 24.
+HUD_SKIN_KINDS = {
+    0: (24, True), 1: (26, True), 2: (29, True), 3: (32, True), 4: (20, True), 5: (5, True),
+    6: (9, False), 7: (8, False), 8: (0, True), 9: (34, True), 10: (38, True),
+    11: (10, True), 12: (14, True), 13: (17, True), 14: (22, True), 15: (40, False),
+}
+
+#: A weapon row's pen primitives, right to left from x 640 (``iron3d.dll:0x1009d4a1``):
+#: each primitive's address, the skin kind it draws, and the width or variant its call is
+#: given (None: a register holding 0).
+WEAPON_ROW = (
+    (0x10099A30, 0, 1),     # ccres_ending_text
+    (0x10099F60, 4, 12),    # the key box, body_text
+    (0x1009A8F0, 8, None),  # the lamp, by state
+    (0x10099F60, 4, 24),    # the rounds box
+    (0x10099C90, 3, None),  # ccres_separator_left_text
+    (0x10099D80, 5, None),  # ccres_ray_emitter_off
+    (0x1009A380, 6, 120),   # the name bar, ray_body
+    (0x10099E70, 7, None),  # ccres_ray_ending
+)
+
+#: The lamp a selected gun shows for each of its report words (``iron3d.dll:0x1009d8cc``):
+#: kind 8's variant (0 red, 1 yellow1, 2 yellow2, 3 green) and whether the name becomes
+#: string 6250.
+WEAPON_LAMPS = {0: (3, False), 1: (2, False), 2: (2, True), 3: (2, False), 4: (1, False),
+                5: (0, False), 6: (1, False), 7: (2, True), 8: (2, True)}
+
+#: The strings the weapons list and the message box show, by id.
+HUD_TOP_STRINGS = {
+    3071: "AUTOCANNON 25mm", 3072: "PLASMA RIFLE LS", 3073: "BATTLE LASER ER",
+    3074: "AWB MISSILE", 5094: "INF", 6250: "OUT OF RANGE", 6171: "from: %s",
+    1541: "from: System", 3057: "from: Training assistant",
+    6214: "from: Information assistant", 6208: "Press %s to see more",
+}
+
+#: The message box's header by message kind (``iron3d.dll:0x1007f750``).
+MESSAGE_HEADERS = {1: 6171, 2: 1541, 3: 3057, 4: 6214}
+
+
+def _image_at(image: bytes):
+    """A reader of ``image``'s bytes by virtual address, and the image base."""
+    sections, _ = resources._sections(image)
+    lfanew = struct.unpack_from("<I", image, 0x3C)[0]
+    base = struct.unpack_from("<I", image, lfanew + 24 + 28)[0]
+
+    def at(va: int, n: int) -> bytes:
+        off = resources._offset(sections, va - base)
+        return image[off:off + n]
+
+    return at
+
+
+def _calls(at, start: int, size: int) -> list[tuple[int, int]]:
+    """Every ``call rel32`` in ``size`` bytes from ``start``: (its address, its target).
+    A byte scan, so a stray 0xe8 inside another instruction can add a false one."""
+    body = at(start, size)
+    return [(start + i, (start + i + 5 + struct.unpack_from("<i", body, i + 1)[0]) & 0xFFFFFFFF)
+            for i in range(len(body) - 5) if body[i] == 0xE8]
+
+
+def _pushed_before(at, call: int, back: int = 8) -> int | None:
+    """The last ``push imm8`` in the ``back`` bytes before ``call``."""
+    body = at(call - back, back)
+    found = [body[i + 1] for i in range(len(body) - 1) if body[i] == 0x6A]
+    return found[-1] if found else None
+
+
+def check_hud_top(check, game: Path) -> None:
+    """The cockpit HUD's weapons list and message box: the skin, the row, the box."""
+    path = game / "iron3d.dll"
+    if not path.exists():
+        return
+    iron = path.read_bytes()
+    at = _image_at(iron)
+    strings = resources.strings(iron)
+
+    # The skin: `compaund.cfg`'s pieces on ui_menu, every one on its page and holding art.
+    cfg = resources.load_cfg(game / "ui" / "compaund.cfg")
+    roles = {d.role: d.bindings for d in resources.descriptors(game / "ui" / "game_resources.cfg")}
+    pages = roles.get("textures", {})
+    ui = NResArchive.open(game / "ui" / "ui.lib")
+    entries = list(ui)
+    decoded: dict[int, object] = {}
+    placed = []
+    for name, p in cfg.items():
+        index = int(pages.get(p.get("texture", ""), -1))
+        if not 0 <= index < len(entries):
+            placed.append((name, None, False))
+            continue
+        if index not in decoded:
+            decoded[index] = texm.decode(ui.read(entries[index]))
+        tex = decoded[index]
+        x, y, w, h = (int(p[k]) for k in ("offset_x", "offset_y", "width", "height"))
+        inside = x >= 0 and y >= 0 and x + w <= tex.width and y + h <= tex.height
+        inked = inside and sum(tex.rgba[(yy * tex.width + xx) * 4 + 3] > 0
+                               for yy in range(y, y + h) for xx in range(x, x + w)) >= w * h / 4
+        placed.append((name, entries[index].name, inked))
+    on_pages = {page for _, page, _ in placed}
+    check("ui/compaund.cfg: 39 compound-control pieces, all holding art on ui_menu1",
+          len(placed) == 39 and on_pages == {"ui_menu1.tex"} and all(ok for *_, ok in placed),
+          f"{len(placed)} pieces on {sorted(map(str, on_pages))} ('ui_menu' is "
+          f"game_resources.cfg's entry {pages.get('ui_menu')}); "
+          f"{sum(ok for *_, ok in placed)} lie inside the page with alpha on a quarter of "
+          f"their pixels or more")
+
+    # The loader: each `push name` then `lea ecx, [esi + slot * 0x8c]` (or `mov ecx, esi`)
+    # before its call to the piece loader 0x1008f450.
+    loader_start, loader_size = 0x100989B0, 0xFB4
+    body = at(loader_start, loader_size)
+    loads = {c: t for c, t in _calls(at, loader_start, loader_size)}
+    slots: dict[int, str] = {}
+    for i in range(len(body) - 5):
+        if body[i] != 0x68:
+            continue
+        va = struct.unpack_from("<I", body, i + 1)[0]
+        try:
+            text = at(va, 40).split(b"\0")[0]
+        except resources.ResourceFormatError:
+            continue
+        if not text.startswith(b"ccres_"):
+            continue
+        call = next((c for c in sorted(loads) if c > loader_start + i
+                     and loads[c] == 0x1008F450), None)
+        if call is None:
+            continue
+        span = at(loader_start + i, call - loader_start - i)
+        lea = span.find(b"\x8d\x8e")
+        if lea >= 0:
+            slot, rest = divmod(struct.unpack_from("<I", span, lea + 2)[0], 0x8C)
+        elif b"\x8b\xce" in span:
+            slot, rest = 0, 0
+        else:
+            continue
+        if rest == 0:
+            slots[slot] = text.decode()
+    named = set(HUD_SKIN.values())
+    check("iron3d.dll: the skin loader files 37 of compaund.cfg's pieces in 39 slots",
+          slots == HUD_SKIN and named <= set(cfg) and len(named) == 37
+          and set(cfg) - named == {"ccres_radio_button_off", "ccres_radio_button_on"},
+          f"0x100989b0 fills slots {min(slots, default=None)}-{max(slots, default=None)} "
+          f"less {sorted(set(range(40)) - set(slots))}; {len(named)} distinct names, "
+          f"never {sorted(set(cfg) - named)}; the long buttons' off and normal twice")
+
+    # The lookup: `cmp eax, 0xf; ja; jmp [eax*4 + table]`, each case a slot base.
+    head = at(0x10098850, 16)
+    kinds: dict[int, tuple[int, bool]] = {}
+    if head[:7] == b"\x8b\x44\x24\x04\x83\xf8\x0f" and head[13:16] == b"\xff\x24\x85":
+        table = struct.unpack_from("<I", at(0x10098850 + 16, 4))[0]
+        for kind in range(16):
+            case = at(struct.unpack_from("<I", at(table + 4 * kind, 4))[0], 16)
+            if case[:2] == b"\x8d\x81":
+                kinds[kind] = (struct.unpack_from("<I", case, 2)[0] // 0x8C, False)
+            elif case[:4] in (b"\x8b\x44\x24\x08", b"\x8b\x54\x24\x08"):
+                if case[4:6] == b"\x69\xc0":
+                    kinds[kind] = (0, True)
+                elif case[4:6] in (b"\x83\xc0", b"\x8d\x42"):
+                    kinds[kind] = (case[6], True)
+    check("iron3d.dll: the skin's lookup turns a kind and a variant into a slot",
+          kinds == HUD_SKIN_KINDS,
+          "0x10098850: " + ", ".join(
+              f"{k} {HUD_SKIN.get(s, s) if not v else f'{s}+v'}" for k, (s, v) in kinds.items()))
+
+    # The weapon row: the primitives' order and widths, and the kind each one draws.
+    row_calls = [(c, t) for c, t in _calls(at, 0x1009D4A1, 0x1009D5B6 - 0x1009D4A1)
+                 if t in {p for p, _, _ in WEAPON_ROW}]
+    got_row = []
+    every = [c for c, _ in _calls(at, 0x1009D4A1, 0x1009D5B6 - 0x1009D4A1)]
+    for call, target in row_calls:
+        previous = max((c for c in every if c < call), default=call - 24)
+        prim = next((c, t2) for c, t2 in _calls(at, target, 0x140)
+                    if t2 in (0x10098850, 0x1009B470))
+        kind = _pushed_before(at, prim[0])
+        if kind is None and at(prim[0] - 1, 1) == b"\x56":  # push esi, cleared on entry
+            kind = 0
+        got_row.append((target, kind, _pushed_before(at, call, min(24, call - previous - 5))))
+    matches = len(got_row) == len(WEAPON_ROW) and all(
+        (t, k, v) == (pt, pk, pv)
+        for (t, k, v), (pt, pk, pv) in zip(got_row, WEAPON_ROW, strict=False))
+    holder = at(0x1003ECB0, 0xA9)
+    row = at(0x1009CD30, 0xB9A)
+    check("iron3d.dll: a weapon row is eight pieces right to left from x 640, rows 19 apart",
+          matches and b"\x68\x80\x02\x00\x00" in holder
+          and b"\x83\xc3\x13" in holder and b"\xc7\x44\x24\x20\x80\x02\x00\x00" in row,
+          "0x1009cd30's pen: " + "; ".join(
+              f"{t:#x} kind {k} given {v}" for t, k, v in got_row)
+          + "; the holder 0x1003ecb0 steps y by 0x13 a gun")
+
+    # The lamps: `jmp [eax*4 + 0x1009d8cc]` over the report word, each case a state.
+    jump = row.find(b"\xff\x24\x85")
+    lamps: dict[int, tuple[int, bool]] = {}
+    if jump >= 0:
+        table = struct.unpack_from("<I", row, jump + 3)[0]
+        for report in range(9):
+            case_va = struct.unpack_from("<I", at(table + 4 * report, 4))[0]
+            case = at(case_va, 0x40)
+            mov = case.find(b"\xc7\x44\x24\x18")
+            if 0 <= mov < 12:
+                # `mov [esp+0x18], state`, and on the out-of-range cases `mov [esp+0x38],
+                # 0xffff5c5c` next, before the push of 6250.
+                state = struct.unpack_from("<I", case, mov + 4)[0]
+                red = case[mov + 8:mov + 16] == b"\xc7\x44\x24\x38\x5c\x5c\xff\xff" \
+                    and b"\x68\x6a\x18\x00\x00" in case[mov + 16:mov + 32]
+            else:  # `mov [esp+0x18], ebx`, zero
+                state = 0 if case.find(b"\x89\x5c\x24\x18") in range(12) else None
+                red = False
+            lamps[report] = (state, red)
+    black = b"\xc7\x44\x24\x18\x04\x00\x00\x00" in row
+    check("iron3d.dll: a selected gun's lamp by its report word, OUT OF RANGE on 2, 7 and 8",
+          lamps == WEAPON_LAMPS and black,
+          "0x1009d8cc: " + ", ".join(
+              f"{r} {['red', 'yellow1', 'yellow2', 'green', 'black'][s] if s is not None else s}"
+              f"{' +6250' if o else ''}" for r, (s, o) in lamps.items())
+          + f"; an unselected gun's lamp black (state 4): {black}")
+
+    # The bar: three fill colours at 20 and 80 per cent, in either direction.
+    bar = at(0x1009A380, 0x420)
+    colours = [c for c in (0x80800000, 0x80808000, 0x80008000)
+               if b"\xb9" + struct.pack("<I", c) in bar and b"\xbe" + struct.pack("<I", c) in bar]
+    names_pushed = at(0x10074AF0, 0x1C0)
+    hero_names = [k for k in (3071, 3072, 3073, 3074)
+                  if b"\xba" + struct.pack("<I", k) in names_pushed]
+    words = {k: strings.get(k) for k in HUD_TOP_STRINGS}
+    check("iron3d.dll: the row's words, and a charge bar red under 20%, olive under 80%",
+          len(colours) == 3 and bar.count(b"\x83\xf8\x14") == 4 and bar.count(b"\x83\xf8\x50") == 2
+          and hero_names == [3071, 3072, 3073, 3074] and b"\x68\xe6\x13\x00\x00" in row
+          and b"\x68\x6a\x18\x00\x00" in row and b"\x83\xfe\xff" in row
+          and words == HUD_TOP_STRINGS,
+          f"0x1009a380 fills in {[hex(c) for c in colours]}; the hero's guns named "
+          f"{[words.get(k) for k in hero_names]} at 0x10074af0; 5094 {words.get(5094)!r} for "
+          f"a magazine of -1, 6250 {words.get(6250)!r}")
+
+    # The message box: its headers, its place and size, its colours, its life.
+    ctor = at(0x1007F750, 0x250)
+    jump = ctor.find(b"\xff\x24\x85")
+    headers: dict[int, int | None] = {}
+    if jump >= 0:
+        table = struct.unpack_from("<I", ctor, jump + 3)[0]
+        for kind in (1, 2, 3, 4):
+            case = at(struct.unpack_from("<I", at(table + 4 * (kind - 1), 4))[0], 0x20)
+            push = re.search(rb"\x68(..)\x00\x00", case, re.S)
+            headers[kind] = struct.unpack_from("<H", push.group(1))[0] if push else None
+    draw = at(0x1007FE80, 0x366)
+    wrap = at(0x1007FAD0, 0x3A8)
+    tick = at(0x1007F4F0, 0x4A)
+    life_at = tick.find(b"\xd8\x1d")
+    life = struct.unpack_from("<f", at(struct.unpack_from("<I", tick, life_at + 2)[0], 4))[0] \
+        if life_at >= 0 else None
+    geometry = all(p in draw for p in (
+        b"\x81\xe2\x90\x00\x00\x00\x81\xc2\xe6\x00\x00\x00",  # x 230, or 374
+        b"\x81\xe1\x60\x01\x00\x00",                          # y 0, or 352
+        b"\x83\xe0\x54\x05\xb6\x00\x00\x00",                  # width 182, or 266
+        b"\x8d\x44\x10\x10",                                  # the height's + 16
+        b"\xb9\x00\x80\x00\x80",                              # the fill, 0x80008000
+        b"\x68\xdc\xdc\xdc\xff",                              # the lines' #dcdcdc
+        b"\x83\xc7\x08", b"\x83\xc6\x09"))                    # the text at +8, +9
+    text = all(p in wrap for p in (
+        b"\x8d\x47\xf6",           # wrapped to the width less 10
+        b"\x83\xfb\x06", b"\x6a\x06",  # at most six lines
+        b"\x68\xed\x02\x00\x00",   # the key bound to CMD_HELP, 749
+        b"\x68\x40\x18\x00\x00"))  # 6208, the footer
+    keys = {b.command: b.chord for b in controls.bindings(game / "addition.man")}
+    check("iron3d.dll: the message box's headers, place, lines and 20 seconds",
+          headers == MESSAGE_HEADERS and geometry and text and life == 20.0
+          and keys.get("CMD_PAGER") == "SCAN_F2" and keys.get("CMD_HELP") == "SCAN_F1",
+          f"kinds {', '.join(f'{k}: {strings.get(v) if v else v!r}' for k, v in headers.items())}; "
+          f"0x1007fe80 places it at x 230 y 0 w 182 (x 374 y 352 w 266 wide) filled 0x80008000 "
+          f"{geometry}; 0x1007fad0 wraps at w - 10 to six lines {text}; 0x1007f4f0 keeps it "
+          f"{life} s; CMD_PAGER on {keys.get('CMD_PAGER')}, CMD_HELP on {keys.get('CMD_HELP')}")
+
+    voices = next((d for d in resources.descriptors(game / "ui" / "game_resources.cfg")
+                   if d.role == "voices"), None)
+    wanted = ("VOICE_WEAPON_DESTR", "VOICE_WEAP_AMMO_OUT", "VOICE_WEAP_ENERGY_OUT")
+    bound = {v: voices.bindings.get(v) if voices else None for v in wanted}
+    named_in = [v for v in wanted if v.encode() + b"\0" in iron]
+    check("game_resources.cfg: the three weapon voices the row plays",
+          all(bound.values()) and named_in == list(wanted),
+          f"{bound}; each name a string in iron3d.dll: {len(named_in)}/3")
+
+
 def check_settings(check, game: Path) -> None:
     """The engine's own configuration files, and which module owns each."""
     registry_path = game / settings.COMPONENTS_FILE
@@ -12846,6 +13148,7 @@ def run(game: Path) -> int:
         check_controls, check_player_input, check_turret_channels,
         check_behaviour, check_research, check_descriptions, check_saves,
         check_vocabulary, check_resources, check_briefing, check_progression, check_outcome,
+        check_hud_top,
         check_settings,
         check_research_streams, check_atmosphere_events,
         check_varset_types, check_profiles, check_walker,
