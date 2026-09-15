@@ -283,6 +283,10 @@ the own panel's unit while aboard.
   the pod node's sphere across the ground, and between the heights of the pod
   node's parent's level-0 box. Every pod of Mission 03 fires for a hero on its
   floor, the Small Generator's too.
+- A hit naming a building's node opens the last door filed on that node, whoever
+  fired; an area hit carries the node to every building it reaches. Nothing holds
+  the door, so it shuts 5 s after opening unless a unit stands near it. A laser
+  round on the Small Bunker's door opens it in 3.6 s.
 
 This directory also holds what the rest will follow:
 

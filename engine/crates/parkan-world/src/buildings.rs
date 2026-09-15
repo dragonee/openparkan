@@ -8,7 +8,7 @@ use glam::Vec3;
 use parkan_formats::control::Controller;
 use parkan_formats::mission::{self, Mission};
 use parkan_formats::pose::Pose;
-use parkan_sim::combat::Part;
+use parkan_sim::combat::{Part, Target};
 use parkan_sim::device::{Item, Motion};
 
 use crate::assembly::Assembly;
@@ -344,6 +344,26 @@ impl Building {
         fired
     }
 
+    /// A hit naming node `node` (`Control.dll:0x1000ebc0`): the components are walked from the
+    /// last to the first, and the first door whose node it is opens through `IBuilding` slot
+    /// 14 (`Terrain.dll:0x1005b480`) if it is shut or closing; an opening or open door is left
+    /// as it is. Nothing holds it: it closes 5 s after it has opened unless a child near it
+    /// holds it. Returns whether it started opening.
+    pub fn shot(&mut self, node: usize) -> bool {
+        let components = &self.controller.components;
+        let door = self.doors.iter_mut().rev().find(|d| {
+            components.get(d.item.component).and_then(|c| usize::try_from(c.node).ok()) == Some(node)
+        });
+        match door {
+            Some(d) if matches!(d.phase, Phase::Shut | Phase::Closing) => {
+                d.item.switch(true);
+                d.phase = Phase::Opening;
+                true
+            }
+            _ => false,
+        }
+    }
+
     fn channel_values(&self) -> Vec<f32> {
         let doors = self.doors.iter().flat_map(|d| d.item.now.iter().copied());
         doors.chain(self.pod.iter().flat_map(|p| p.item.now.iter().copied())).collect()
@@ -353,4 +373,32 @@ impl Building {
     pub fn controller(&self) -> &Controller {
         &self.controller
     }
+}
+
+/// A round struck part `part`'s node `node` of target `struck` at `point` (docs/24, "A shot
+/// opens a door"). The hit opens the struck building's door on that node before its kind is
+/// looked at, whoever fired. An area hit, whose radius is `reach`, carries the same node to
+/// every building whose sphere it reaches, and only the number is compared. Returns the
+/// targets whose door started opening.
+pub fn open_shot_doors(
+    buildings: &mut [Building],
+    targets: &[Target],
+    (struck, part, node): (usize, usize, usize),
+    point: Vec3,
+    reach: Option<f32>,
+) -> Vec<usize> {
+    let mut opened = Vec::new();
+    for b in buildings.iter_mut() {
+        let hit = if b.target == struck {
+            b.part == part
+        } else {
+            reach.is_some_and(|r| {
+                targets.get(b.target).is_some_and(|t| t.alive && (t.centre - point).length() < t.radius + r)
+            })
+        };
+        if hit && b.shot(node) {
+            opened.push(b.target);
+        }
+    }
+    opened
 }

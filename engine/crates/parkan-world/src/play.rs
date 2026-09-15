@@ -1069,6 +1069,20 @@ impl Play {
         for e in &events {
             self.effects_for(e, now);
             match *e {
+                // A hit naming a building's node opens its door there (docs/24, "A shot opens a
+                // door").
+                Event::Struck { round, target: Some(t), part, node: Some(n), point } => {
+                    let reach = self.battle.combat.kinds.get(round.kind).and_then(|k| k.hit.as_ref());
+                    let reach = reach.filter(|x| x.kind == parkan_formats::exp::HIT_AREA).map(|x| x.radius);
+                    let targets = &self.battle.combat.targets;
+                    crate::buildings::open_shot_doors(
+                        &mut self.buildings,
+                        targets,
+                        (t, part, n),
+                        point,
+                        reach,
+                    );
+                }
                 Event::KnockedOff { target, part, node } => self.knock_off(target, part, node, now),
                 Event::Staged { target, .. } | Event::Hidden { target, .. } => self.rebuild_solid(target),
                 Event::Killed { target } => {

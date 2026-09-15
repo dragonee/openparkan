@@ -2061,3 +2061,71 @@ fn mission_03s_hero_on_the_generators_pod_captures_it_and_completes_the_first_ob
     assert_eq!(p.progress.owner(0x8000_0007_u32 as i32), 0);
     assert_eq!(p.progress.objectives[0].state, 1, "Find and capture the Power Generator");
 }
+
+#[test]
+#[ignore = "needs the game install"]
+fn a_laser_round_on_mission_03s_bunker_door_opens_it_and_it_shuts_again_once_free() {
+    use glam::Vec3;
+    use parkan_sim::combat::Event;
+    use parkan_world::buildings::Phase;
+
+    let (mut play, m) = mission_03_play();
+    let t = object_target(&play, &m, "sbunk01.dat");
+    let b = play.buildings.iter().position(|b| b.target == t).unwrap();
+    // One door, `i03`, on node 9 at a rate of 0.25 (docs/24, "A shot opens a door").
+    assert_eq!(play.buildings[b].doors.len(), 1);
+    assert_eq!(play.buildings[b].doors[0].nodes, vec![9]);
+    let part = &play.battle.combat.targets[t].parts[play.buildings[b].part];
+    let slot = &part.mesh.slots[usize::from(part.mesh.nodes[9].slot_index[0])];
+    let [cx, cy, cz, _] = slot.sphere;
+    let c = part.nodes[9].apply([cx, cy, cz].map(|v| f64::from(v * part.scale)));
+    let door = Vec3::new(c[0] as f32, c[1] as f32, c[2] as f32);
+    let z0 = part.nodes[9].translation[2];
+    // A muzzle 15 m from the door's middle, the hero far away: the first heading whose line to
+    // the door meets the door before anything else.
+    let muzzle = (0..32)
+        .map(|k| k as f32 * std::f32::consts::TAU / 32.0)
+        .flat_map(|a| [0.0, 2.0, 4.0].map(|dz| door + Vec3::new(a.cos(), a.sin(), 0.0) * 15.0 + Vec3::Z * dz))
+        .find(|&p| {
+            play.battle
+                .combat
+                .first_hit(&play.ground, None, p, door, 0.0)
+                .is_some_and(|(s, x, _)| x == Some(t) && s.node == Some(9))
+        })
+        .expect("a line to the door");
+    let direction = (door - muzzle).normalize();
+    let laser = play.hero.robot.rounds[2].expect("the battle laser's round");
+    play.battle.combat.fire(laser, None, muzzle, direction, Vec3::ZERO, 1.0, None).unwrap();
+    let (mut struck_at, mut open_at, mut shut_at) = (None, None, None);
+    for tick in 0..(60 * 20) {
+        for e in play.tick(1000.0 / 60.0, [0.0; 2]) {
+            if matches!(e, Event::Struck { target: Some(x), node: Some(9), .. } if x == t) {
+                struck_at.get_or_insert(tick);
+            }
+        }
+        let d = &play.buildings[b].doors[0];
+        assert!(!d.held, "nothing holds the door");
+        match d.phase {
+            Phase::Open => {
+                open_at.get_or_insert(tick);
+            }
+            Phase::Shut if open_at.is_some() => {
+                shut_at.get_or_insert(tick);
+            }
+            _ => {}
+        }
+        if open_at == Some(tick) {
+            let z1 = play.battle.combat.targets[t].parts[play.buildings[b].part].nodes[9].translation[2];
+            assert!(z0 - z1 > 5.0, "the door lowers its 5.76 m: {z0} to {z1}");
+        }
+    }
+    let struck = struck_at.expect("the round strikes the door");
+    let open = open_at.expect("the door opens");
+    // A rate of 0.25: the building sees it open 3.6 s after the first step, which waits up
+    // to 100 ms.
+    let seconds = (open - struck) as f32 / 60.0;
+    assert!((3.55..3.8).contains(&seconds), "open {seconds} s after the hit");
+    let shut = shut_at.expect("the door shuts once free");
+    let closed = (shut - open) as f32 / 60.0;
+    assert!((5.0..10.0).contains(&closed), "shut {closed} s after it opened");
+}
