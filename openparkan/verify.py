@@ -16659,6 +16659,65 @@ def check_boarding(check, game: Path) -> None:
           f"stdClearKeyboard drops 0x100-0x108; 6211 {strings.get(6211)!r}")
 
 
+def check_focus(check, game: Path) -> None:
+    """Leaving the window lets every key up: WM_ACTIVATEAPP to stdSetApplicationState."""
+    paths = [game / name for name in ("iron3d.dll", "World3D.dll", "iron_3d.exe")]
+    if not all(p.exists() for p in paths):
+        return
+    images = [p.read_bytes() for p in paths]
+    iron, world, exe = (_image_at(image) for image in images)
+
+    def u32(at, va: int) -> int:
+        return struct.unpack("<I", at(va, 4))[0]
+
+    def called(at, site: int) -> int | None:
+        if at(site, 1) != b"\xe8":
+            return None
+        return (site + 5 + struct.unpack("<i", at(site + 1, 4))[0]) & 0xFFFFFFFF
+
+    def ptr(va: int) -> bytes:
+        return struct.pack("<I", va)
+
+    # The window procedure's switch on message - 1, and the handler its 0x1c case calls.
+    case = u32(iron, 0x100A0D08 + 4 * iron(0x100A0D1C + 0x1C - 1, 1)[0])
+    handler = case == 0x100A0C3A and called(iron, 0x100A0C47) == 0x100A0D60
+    # No shell, a game, then the active flag (edi, wParam) to the import by name.
+    iat = u32(iron, 0x100CD188)
+    imported = iron(_image_base(images[0]) + u32(iron, iat) + 2, 23)
+    hands = (iron(0x100A0D64, 2) == b"\x8b\xfa"
+             and called(iron, 0x100A0DE0) == 0x100074A0 and iron(0x100A0DE7, 1) == b"\x74"
+             and called(iron, 0x100A0E16) == 0x1005B580 and iron(0x100A0E1F, 1) == b"\x57"
+             and called(iron, 0x100A0E20) == 0x100CD186 and iron(0x100CD186, 2) == b"\xff\x25"
+             and imported == b"stdSetApplicationState\0")
+    shell = (iron(0x100074A0, 6) == b"\xa1" + ptr(0x1010B5FC) + b"\xc3"
+             and iron(0x1005B621, 10) == b"\xc7\x05" + ptr(0x1010B5FC) + bytes(4)
+             and exe(0x4010BF, 5) == b"\x68" + ptr(0x40609C)
+             and exe(0x40609C, 12) == b"deleteShell\0"
+             and exe(0x4010D8, 5) == b"\xa3" + ptr(0x4066B4)
+             and exe(0x4010E9, 5) == b"\x68" + ptr(0x406084)
+             and exe(0x406084, 11) == b"createGame\0"
+             and exe(0x4010FD, 5) == b"\xa3" + ptr(0x4066BC)
+             and exe(0x40128F, 6) == b"\xff\x15" + ptr(0x4066B4)
+             and exe(0x40129E, 6) == b"\xff\x15" + ptr(0x4066BC))
+    # stdSetApplicationState: only a change acts; every held byte cleared and queued with a
+    # pressed word of 0 (ebx), below 700; the key handler's pressed word is its held byte.
+    walk = world(0x10014688, 0x48)
+    releases = (world(0x100145FF, 8) == b"\x3b\xc6\x0f\x84\x08\x01\x00\x00"
+                and world(0x10014621, 3) == b"\xff\x50\x1c"
+                and world(0x10014629, 3) == b"\xff\x51\x20"
+                and walk.startswith(b"\x38\x98" + ptr(0x1002A490))
+                and b"\x89\x59\xfc" in walk and b"\x88\x98" + ptr(0x1002A490) in walk
+                and walk.endswith(b"\x3d\xbc\x02\x00\x00")
+                and world(0x1001111B, 6) == b"\x88\x99" + ptr(0x1002A490)
+                and world(0x10011125, 6) == b"\x89\x98" + ptr(0x1013D5A8))
+    name = imported.rstrip(b"\0").decode(errors="replace")
+    check("iron3d.dll, World3D.dll: leaving the window queues every held key up",
+          handler and hands and shell and releases,
+          f"WM_ACTIVATEAPP -> {case:#x} -> 0x100a0d60; with no shell and a game "
+          f"{name}(active); WinMain calls deleteShell "
+          f"before createGame; each held byte of 0x1002a490 below 700 cleared and queued pressed 0")
+
+
 def run(game: Path) -> int:
     """Run every check against ``game``.  Returns a process exit code."""
     results: list[tuple[str, bool, str]] = []
@@ -16694,7 +16753,7 @@ def run(game: Path) -> int:
         check_builder,
         check_designs,
         check_units, check_loading, check_search, check_construction,
-        check_controls, check_player_input, check_turret_channels,
+        check_controls, check_player_input, check_focus, check_turret_channels,
         check_behaviour, check_research, check_descriptions, check_saves,
         check_vocabulary, check_resources, check_briefing, check_briefing_screen,
         check_progression, check_mission_02, check_outcome,

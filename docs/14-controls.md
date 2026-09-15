@@ -434,6 +434,43 @@ positive control, so it proves nothing.
 - **The table is the chassis's.** The hero chassis record `r_h_02` names
   `hero.tbl`; `r_l_06` names `m2.tbl`.
 
+### Leaving the window lets every key up — *read*
+
+A key that goes down in the game and comes up while another program has the
+keyboard sends the game no key-up. The game does not wait for one: switched
+away from, it lets go of everything held.
+
+- **The message.** The window procedure (`iron3d.dll:0x100a0bf0`) sends
+  `WM_ACTIVATEAPP` (0x1c) through its jump table to `0x100a0d60`. With no
+  shell (`getIShell`, `0x100074a0`) and a game (`getIGame`, `0x1005b580`),
+  that hands the message's active flag to `World3D.dll`'s
+  `stdSetApplicationState` (`0x100a0e1f`, through the import thunk
+  `0x100cd186`). A mission always has no shell: `iron_3d.exe`'s WinMain
+  deletes it (`0x40128f`, `deleteShell` clearing `0x1010b5fc` at
+  `iron3d.dll:0x1005b621`) before it creates the game.
+- **Only a change acts** (`World3D.dll:0x100145f0`). An unchanged state
+  returns at once. A changed one is stored at `0x10023500`, and the DirectInput
+  device `stdInitDIMouse` reads (`0x10795138`) is acquired or unacquired
+  (`0x10014621`, `0x10014629`).
+- **Every held key is queued up** (`0x10014688`–`0x100146d0`). Each code below
+  700 whose held byte (`0x1002a490` + code) is set has the byte cleared and
+  gets an event with a pressed word of 0. It is the same three words the key
+  handler queues (`0x1001111b`–`0x10011133`): the pressed word, set from the
+  held byte, then the code, then a kind (1 for codes 0x1fe–0x203, 2 for
+  0x204–0x28a, otherwise 0).
+- **What it does to the hero** (*derived*). The input update takes each such
+  event as a key coming up (`0x1000f5a4`, above), so each held key's release
+  rows run:
+  - the walk stops;
+  - the fire button's release turns the selected guns off;
+  - Shift's two release rows set the camera's free look back to 0.5, so the
+    view centres on the sight again
+    ([30-turrets.md](30-turrets.md#aiming-and-the-camera--read-and-measured)).
+
+On macOS, Cmd-Shift-4 hands the keyboard to the screenshot tool while Shift is
+down, so Shift's key-up goes there. A window that did not let go would keep
+the free look on: the mouse would turn the view while the guns stayed put.
+
 ## `BuildDat.lst`
 
 Not input, but the same kind of file and read here for it: the schemes the

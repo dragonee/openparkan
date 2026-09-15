@@ -23618,3 +23618,75 @@ kind = "site"
 name = "push-out: the fourth argument, the filter every gathered face is tested against"
 read = true
 doc = "docs/24-motion.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100a0bf0"
+kind = "function"
+name = "window procedure: WM_ACTIVATEAPP (0x1c) through the jump table (0x100a0d1c, 0x100a0d08) to 0x100a0d60"
+read = true
+doc = "docs/14-controls.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100a0d60"
+kind = "function"
+name = "WM_ACTIVATEAPP handler: with no shell and a game, stdSetApplicationState(wParam)"
+read = true
+doc = "docs/14-controls.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100a0e1f"
+kind = "site"
+name = "push the active flag, call stdSetApplicationState through thunk 0x100cd186"
+read = true
+doc = "docs/14-controls.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100074a0"
+kind = "function"
+name = "getIShell: returns [0x1010b5fc]"
+read = true
+doc = "docs/14-controls.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1005b610"
+kind = "function"
+name = "deleteShell: releases the shell (slot 4 with 1) and clears [0x1010b5fc]"
+read = true
+doc = "docs/14-controls.md"
+
+[[entry]]
+module = "iron_3d.exe"
+at = "0x40128f"
+kind = "site"
+name = "WinMain: deleteShell after the shell's run, before createGame"
+read = true
+doc = "docs/14-controls.md"
+
+[[entry]]
+module = "World3D.dll"
+at = "0x100145f0"
+kind = "function"
+name = "stdSetApplicationState: on a change, Acquire/Unacquire [0x10795138] and every held key byte (0x1002a490) cleared and queued with pressed 0"
+read = true
+doc = "docs/14-controls.md"
+
+[[entry]]
+module = "World3D.dll"
+at = "0x10014688"
+kind = "site"
+name = "stdSetApplicationState: the walk of codes below 700 queuing {0, code, kind 1 at 0x1fe-0x203, 2 at 0x204-0x28a}"
+read = true
+doc = "docs/14-controls.md"
+
+[[entry]]
+module = "World3D.dll"
+at = "0x1001111b"
+kind = "site"
+name = "key handler: held byte and the queued event's pressed word from one register, then code and kind"
+read = true
+doc = "docs/14-controls.md"
