@@ -47,6 +47,8 @@ pub const KILL_STEP_MS: f64 = 250.0;
 pub const SIGN: i32 = 9002;
 pub const RAY: i32 = 9001;
 pub const DOME: i32 = 9100;
+/// The time mode the sphere's effects run in: looping.
+pub const SPHERE_TIME_MODE: u32 = 2;
 /// The construction sphere's action, filed in a building's load group.
 pub const ACT_SPHERE_EFFECT: i32 = 5;
 /// The takt after a builder arrives: `now − +0x128 ≥ 1000 ms`, `+0x128` only ever zero
@@ -526,7 +528,11 @@ impl Play {
     /// STAND-IN: docs/32-builder.md#the-construction-sphere--read-and-measured -- the
     /// controller's path between the states the codes open is not read, nor where an action-5
     /// effect is placed: code 1 starts the sign, code 2 the dome and the ray and stops the
-    /// sign, code 0 stops the ray, each effect at the sphere's centre at its own size.
+    /// sign, code 0 stops the ray, each effect at the sphere's centre sized by its radius.
+    ///
+    /// STAND-IN: docs/11-effects.md#how-an-effect-runs--read -- the three effects' records give
+    /// time mode 0, a value set from outside (slot `0x1c`), and what sets it is not read: they
+    /// loop on their own durations (mode 2) while their phase runs.
     fn start_phase(&mut self, s: usize, now: f64, first: bool) {
         let sphere = self.construction.spheres[s].clone();
         let Some(phase) = NEW_BUILDING.get(sphere.phase) else { return };
@@ -534,7 +540,14 @@ impl Play {
         let start = |play: &mut Play, id: i32| {
             if let Some((_, name)) = sphere.effects.iter().find(|(i, _)| *i == id) {
                 play.fx.remove(Owner::Building(sphere.target, id));
-                play.fx.start(Owner::Building(sphere.target, id), name, frame, 1.0, now, None);
+                play.fx.start(
+                    Owner::Building(sphere.target, id),
+                    name,
+                    frame,
+                    sphere.radius,
+                    now,
+                    Some(SPHERE_TIME_MODE),
+                );
             }
         };
         match phase.code {

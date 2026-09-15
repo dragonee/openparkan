@@ -125,6 +125,9 @@ struct Args {
     ghost: Option<[f32; 2]>,
     /// `--camera-yaw RAD`: command mode's camera turned to that yaw for a screenshot.
     camera_yaw: Option<f32>,
+    /// `--build X,Y`: the first builder of the player's clan is ordered to build a mine at X,Y
+    /// before `--ticks` play.
+    build: Option<[f32; 2]>,
     ticks: u32,
     hold: Vec<String>,
     mouse: [f32; 2],
@@ -159,6 +162,7 @@ fn args() -> Result<Args> {
         page: None,
         ghost: None,
         camera_yaw: None,
+        build: None,
         ticks: 0,
         hold: Vec::new(),
         mouse: [0.0; 2],
@@ -184,6 +188,10 @@ fn args() -> Result<Args> {
             "--map" => out.map = true,
             "--page" => out.page = Some(value()?.parse()?),
             "--camera-yaw" => out.camera_yaw = Some(value()?.parse()?),
+            "--build" => {
+                let v: Vec<f32> = value()?.split(',').map(str::parse).collect::<Result<_, _>>()?;
+                out.build = v.get(..2).map(|v| [v[0], v[1]]);
+            }
             "--ghost" => {
                 let v: Vec<f32> = value()?.split(',').map(str::parse).collect::<Result<_, _>>()?;
                 out.ghost = v.get(..2).map(|v| [v[0], v[1]]);
@@ -309,6 +317,14 @@ fn rehearse(play: &mut scene::Play, loaded: &scene::Loaded, args: &Args) {
                 }
             }
             None => eprintln!("--drive: {path} is not a robot"),
+        }
+    }
+    if let Some([x, y]) = args.build {
+        let builder = play.own_units_within(parkan_world::selection::BUILDERS).first().copied();
+        let z = play.ground.below(x, y, 1.0e5).map_or(0.0, |h| h.point.z);
+        let mine = parkan_sim::hq::BUILD_TYPES[0];
+        if !builder.is_some_and(|b| play.order_build(b, mine, Vec3::new(x, y, z), 0.0)) {
+            eprintln!("--build: no builder can build a mine at {x}, {y}");
         }
     }
     for key in &args.hold {
