@@ -6,7 +6,7 @@
 //! parkan [--game DIR] [--mission MISSIONS/…] [--fly]
 //!        [--screenshot OUT.png] [--size WxH] [--top-down] [--look X,Y,Z,TX,TY,TZ]
 //!        [--headless] [--ticks N] [--hold SCAN_W,SCAN_A] [--mouse DX,DY] [--trace] [--sway]
-//!        [--capture-idle] [--stretch-hud] [--outcome won|lost] [--text "…"] [--face NAME,DISTANCE] [--at X,Y,YAW] [--pod NAME] [--drive PATH] [--designer] [--design PART,…]
+//!        [--capture-idle] [--stretch-hud] [--outcome won|lost] [--text "…"] [--face NAME,DISTANCE] [--at X,Y,YAW] [--pod NAME] [--drive PATH] [--hq] [--designer] [--design PART,…]
 //!        [--skip-briefing] [--briefing-at SECONDS] [--objectives] [--map]
 //! ```
 //!
@@ -108,6 +108,9 @@ struct Args {
     pod: Option<String>,
     /// `--drive PATH`: a unit of that design is made beside the hero, and the hero boards it.
     drive: Option<String>,
+    /// `--hq`: the hero takes and boards the mission's first HQ unit with Enter from 12 m, and
+    /// Enter again opens its command view, before `--ticks` play.
+    hq: bool,
     /// `--designer`: a screenshot with the warbot designer open on the first factory, and
     /// `--design PART,…` the parts fitted to it in turn.
     designer: bool,
@@ -153,6 +156,7 @@ fn args() -> Result<Args> {
         at: None,
         pod: None,
         drive: None,
+        hq: false,
         designer: false,
         design: Vec::new(),
         skip_briefing: false,
@@ -208,6 +212,7 @@ fn args() -> Result<Args> {
             }
             "--pod" => out.pod = Some(value()?.to_ascii_lowercase()),
             "--drive" => out.drive = Some(value()?),
+            "--hq" => out.hq = true,
             "--designer" => out.designer = true,
             "--design" => out.design = value()?.split(',').map(str::to_owned).collect(),
             "--ticks" => out.ticks = value()?.parse()?,
@@ -319,6 +324,9 @@ fn rehearse(play: &mut scene::Play, loaded: &scene::Loaded, args: &Args) {
             None => eprintln!("--drive: {path} is not a robot"),
         }
     }
+    if args.hq && !take_hq(play) {
+        eprintln!("--hq: no HQ unit the hero can take and board");
+    }
     if let Some([x, y]) = args.build {
         let builder = play.own_units_within(parkan_world::selection::BUILDERS).first().copied();
         let z = play.ground.below(x, y, 1.0e5).map_or(0.0, |h| h.point.z);
@@ -356,6 +364,33 @@ fn rehearse(play: &mut scene::Play, loaded: &scene::Loaded, args: &Args) {
     if args.headless && !kills.is_empty() {
         println!("killed mission objects {kills:?}");
     }
+}
+
+/// `--hq`: the hero stands 12 m from the first HQ unit, targets it and presses Enter, which
+/// takes and boards it, then Enter again for its command view (docs/40, mode 3).
+fn take_hq(play: &mut scene::Play) -> bool {
+    let Some(hq) = (0..play.units.len()).find(|&t| play.is_hq(t)) else { return false };
+    if !play.stand_facing(hq, 12.0, 0.0) {
+        return false;
+    }
+    play.tick(TICK_MS, [0.0; 2]);
+    for _ in 0..=play.targets.listed.len() {
+        if play.targets.current == Some(hq) {
+            break;
+        }
+        play.targets.select_next();
+    }
+    for _ in 0..2 {
+        let eye = play.eye();
+        let view = parkan_world::play::View {
+            eye: eye.position,
+            look: eye.forward,
+            view_proj: glam::Mat4::IDENTITY,
+            shift: false,
+        };
+        play.command(parkan_formats::controls::CMD_ENTER_STATE, &view);
+    }
+    play.mode() == parkan_world::play::Mode::HqCommand(hq)
 }
 
 fn report(play: &scene::Play) {
@@ -774,7 +809,7 @@ impl App {
             .and_then(|d| d.parse::<usize>().ok())
             .filter(|d| (1..=9).contains(d));
         // Command mode's keys act on the way down and up (`0x10071cd0`, `0x10072740`).
-        if matches!(play.mode(), parkan_world::play::Mode::Command(_))
+        if play.mode().commands()
             && let Some(command) =
                 parkan_formats::controls::command_for(&self.bindings, scan, |m| self.scans.contains(m))
             && play.command_key(command, pressed)
@@ -1012,8 +1047,7 @@ impl App {
     fn command_cursor(&mut self) {
         // Over the warbot designer the system's cursor shows, as on the factory screen.
         let designer = self.hud.as_ref().is_some_and(|h| h.cockpit.designer.is_open());
-        let command = !designer
-            && self.play.as_ref().is_some_and(|p| matches!(p.mode(), parkan_world::play::Mode::Command(_)));
+        let command = !designer && self.play.as_ref().is_some_and(|p| p.mode().commands());
         if let Some(r) = self.running.as_ref()
             && command != self.cursor_hidden
         {
@@ -1379,13 +1413,13 @@ impl ApplicationHandler for App {
                 // `0x1007104b`), an open satellite map closing, then a page turning to 0.
                 //
                 // STAND-IN: docs/40-command-mode.md#not-established -- whether the character
-                // handler sees Esc before its binding leaves command mode is not read: the map
-                // and the page are peeled back first.
+                // handler sees Esc before its binding leaves command mode is not traced: the map
+                // and the page are peeled back first, as Mission 04's recording shows.
                 if code == KeyCode::Escape
                     && event.state == ElementState::Pressed
                     && outcome.is_none()
                     && let (Some(play), Some(hud)) = (self.play.as_ref(), self.hud.as_mut())
-                    && matches!(play.mode(), parkan_world::play::Mode::Command(_))
+                    && play.mode().commands()
                 {
                     // Esc puts a placement away too (`0x10070ed1`).
                     if play.commander.ghost.is_some()
@@ -1530,11 +1564,7 @@ impl ApplicationHandler for App {
                 // Command mode keeps the cursor free. A press goes to the ghost while one is up,
                 // else to the commander panel first (`0x1008d690`), then the world; a band is let
                 // go on the way up; the right button undoes what is open (docs/42).
-                if self
-                    .play
-                    .as_ref()
-                    .is_some_and(|p| matches!(p.mode(), parkan_world::play::Mode::Command(_)))
-                {
+                if self.play.as_ref().is_some_and(|p| p.mode().commands()) {
                     self.command_mouse(button, pressed);
                     return;
                 }

@@ -165,7 +165,7 @@ impl Cockpit {
     /// What the screens keep current every frame before they draw (`0x1008d5f0`): in command
     /// mode the column's update and the units the unit box shows rated.
     pub fn update(&mut self, play: &mut Play, now_ms: f64) {
-        let command = matches!(play.mode(), crate::play::Mode::Command(_));
+        let command = play.mode().commands();
         // Entering command mode turns the panel to page 0 (`0x10063ca0`).
         if command && !self.commander.entered {
             self.commander.page = 0;
@@ -221,7 +221,7 @@ impl Cockpit {
                 ..Drawn::default()
             };
         }
-        if let crate::play::Mode::Command(_) = play.mode() {
+        if play.mode().commands() {
             if self.designer.is_open() {
                 let previews = designer::draw(self, &mut ink, play, now_ms);
                 return Drawn {

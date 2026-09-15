@@ -379,6 +379,28 @@ Large Factory builds four *SSW-X* in batch, and they beat the patrol: the missio
 yet: Explode!, tooltips, the chat and game menu buttons, the commander's map marks by type,
 and the designer's save and load.
 
+**M13.** Mission 04, *Teleport*: a mobile command centre.
+
+- Enter on a neutral unit within 20 m captures it and, where the hero can board it (size
+  class 4, its turret alive), boards it at once. Mission 04's *LWC-1 Comm. Center* is taken
+  and driven with one Enter from its landing point, and its capture completes the first
+  objective through `tut4_pl2` with T04_I02 and T04_H01.
+- Enter aboard an HQ unit (its turret's flag `0x8000000`), or in telepresence aboard one,
+  opens the HQ's command view (mode 3); Enter aboard any other bot does nothing. The HQ is
+  let go to its AI with its order and stays selected, the hero stays aboard, and the view is
+  command mode's: the panel, the map, the picks, the orders, the HQ ordered from its own page.
+  The camera is placed on the HQ facing north and rides with it: a metre a frame it pulls back
+  along its look to 8 × the chassis's sphere (61 m on this HQ), each axis snapping onto that
+  point within 3 m across and 2 m up and otherwise driven toward it at 125 m/s along the
+  world's axes, at least 2.5 over what is below and within the 36–236 band. The arrows and
+  PageUp/PageDown do nothing; the cursor at an edge swings the camera round the HQ; Z zooms.
+- Esc closes the map, then turns the page back, then returns to the HQ's cockpit with the HQ
+  taken at auto-driver level 0; Esc again puts the hero down beside it. Telepresence from
+  mode 3 comes back to it with the camera placed on the HQ and pulled out again. A unit box of
+  the HQ type shows Strategic control, which opens that HQ's view from a bunker's or another
+  HQ's. The hero button rolls the stack back a mode at a time to the hero on foot. A lost
+  driven bot rolls the stack back in modes 1 and 2.
+
 This directory also holds what the rest will follow:
 
 - **`docs/`** is the source of truth. Every behaviour the engine implements is
@@ -461,6 +483,12 @@ button undoes, and Esc peels back the map and the page before leaving. `--page N
 `--camera-yaw RAD` and `--ghost X,Y` draw command mode's screenshots after `--pod sbunk01.dat
 --ticks 400` on Mission 03, and `--build X,Y` orders the first builder to build a mine there
 before `--ticks` play.
+
+On Mission 04 Enter by the HQ takes and boards it, and Enter aboard opens its command view,
+whose camera rides with the HQ: the cursor at an edge swings it round, Z zooms, and the arrows
+do nothing. Esc steps back to the HQ's cockpit, and again to the hero on foot. `--hq` takes
+and boards the mission's first HQ and opens its view before `--ticks` play (`--mission
+MISSIONS/CAMPAIGN/CAMPAIGN.00/Mission.04 --skip-briefing --hq --ticks 120 --page 1`).
 
 Standing on a building's control pod captures it; `--pod NAME` starts the hero
 on the pod of the building whose path ends in NAME (`--pod lplant01.dat` on
@@ -547,7 +575,7 @@ a row here. A row leaves this table when research closes it.
 | M5 | How the game draws its font: its 8-bit blend table and the text's colour | the atlas, sampled nearest, keyed on black and multiplied by the run's colour in display space, over everything after the HUD (a recording shows the interface font's grey shadow dark) | [12](../docs/12-rsli.md#what-is-inside) |
 | M6 | How the loader turns a `varset.var` default into a value | an integer type reads hex after `0x`, a decimal, or a float truncated; a float reads its decimal; anything else is 0 (every shipped default reads either way) | [15](../docs/15-behaviour.md#the-vocabulary-varsetvar) |
 | M6 | The formula parser and evaluator, beyond the operator table's priorities | parse by those priorities, left to right among equals, in doubles; `!` is 1 for 0, `&` and `\|` are logical, `N` holds to 0..1, `S` is the sign, `B` is 1 for non-zero, `A` the absolute value; an unknown name is refused (the shipped formulas use numbers, variables, `+ - *` and brackets) | [15](../docs/15-behaviour.md#a-statement) |
-| M12 | Whether the character handler sees Esc before its binding leaves command mode | an open satellite map closes first, then a page other than 0 turns to 0, then Esc leaves | [40](../docs/40-command-mode.md#not-established) |
+| M12 | Whether the character handler sees Esc before its binding leaves command mode: the path the key takes is not traced | an open satellite map closes first, then a page other than 0 turns to 0, then Esc leaves, as Mission 04's recording shows one Esc at a time | [40](../docs/40-command-mode.md#not-established) |
 | M12 | What `0x10034230` accepts for an Upgrade row | no Upgrade row is offered | [41](../docs/41-commander.md#not-established) |
 | M12 | A builder's beam's life, which the Build rows need intact | a live builder can build | [32](../docs/32-builder.md#building-a-building--read) |
 | M12 | A unit's property `0x207` and a building's record `+0x30`, which pick and tint the panel's icons; the width of the piece a row's icons stand in | a unit's second icon is the cell for 1; a building's icon red (2), as the recording shows; each icon piece 19.5 wide on a unit row and 20 on a building row | [41](../docs/41-commander.md#not-established) |
@@ -558,7 +586,12 @@ a row here. A row leaves this table when research closes it.
 | M12 | Which objects the world's classes 3 and 4 are, and the object pick's order and nearest-hit rule | a unit within 0.7 of its radius and a building within all of it, a sphere holding the eye passed over; the nearest centre along the ray wins | [42](../docs/42-selection.md#not-established) |
 | M12 | Whether the display's slot 12 answers, so the system's cursor is used | the software cursor's four phases from `new_ui1` are drawn and the system's hidden | [42](../docs/42-selection.md#the-cursor-shows-a-state--read-and-measured) |
 | M12 | A marker's gap figure (the record's slot 5), its bar frame on page9, the clan's sign, and where its name, icon and bars stand | the gap is the unit's projected radius held to 4–44; the name over the left bracket, the class icon right of the right one, a blue box under the left one holding the life bar over a full battery bar | [25](../docs/25-sensors.md#how-the-game-colours-what-it-marks--read-and-measured) |
-| M12 | What telepresence's auto-driver levels 1 and 2 give the AI, and what mode 2 does when its unit dies | the player drives the unit whole at every level; a lost unit goes back to the command view | [40](../docs/40-command-mode.md#not-established) |
+| M12 | What telepresence's auto-driver levels 1 and 2 give the AI | the player drives the unit whole at every level | [40](../docs/40-command-mode.md#telepresence-mode-2--read) |
+| M13 | Which bound an HQ record's `+0x98` is, whose 8 × sets how far its command camera rides behind it | the chassis mesh's authored sphere's radius (8 × 7.653 = 61.2 m on Mission 04's HQ, which the recording favours), else the unit's whole bound | [40](../docs/40-command-mode.md#not-established) |
+| M13 | What the game does when an HQ is lost in its own command view: nothing read rolls mode 3 back | the view rolls back to the HQ's cockpit, and the lost bot puts the hero out at (x − 1, y − 1) | [40](../docs/40-command-mode.md#not-established) |
+| M13 | How the stack reads after Enter in telepresence aboard an HQ | the telepresence ends and mode 3 takes its place over the command view it came from | [40](../docs/40-command-mode.md#an-hqs-command-mode-mode-3--read-and-seen) |
+| M13 | Whether the AI's aiming reaches the turret lock's lead (body `+0x38`) through the component setter, as the player's does | the lead starts from the turret's yaw target when the player takes the unit over | [30](../docs/30-turrets.md#the-hull-follows-the-turret--read-and-measured) |
+| M13 | The spin a unit let go keeps until the Wizard writes one | none: letting a unit go clears its spin | [30](../docs/30-turrets.md#the-hull-follows-the-turret--read-and-measured) |
 | M6 | What a node naming a variable, operand, formula or handler that does not exist reads | the node does nothing; a switch to no handler ends the run; a run stops after a million nodes | [15](../docs/15-behaviour.md#how-a-handler-runs) |
 | M12 | Function 15's answer: whether the unit takes the order (1) or refuses it (0) | an id some unit or building answers gives 1, and the unit is handed the order after the handler's run | [34](../docs/34-progression.md#what-the-scripts-ask--read-and-measured-1) |
 | M12 | A building's contour (property `0x203`), whose vertices a patrol of the building walks | eight points on the building's sphere, pushed out by 30 | [31](../docs/31-packages.md#the-patrol-tick-by-tick--read) |
@@ -653,8 +686,6 @@ engine pass replaces each with what was read and removes its row.
 | M11 | Where a gathered face's batch word, whose 8 and 0x200 the collision query passes, comes from | the faces of the `DEFAULT`, `PORTAL_001` and `PORTAL_004` materials, a building's black doorway and portal quads, let a mover through, as a recording shows | [24](../docs/24-motion.md#the-ground-inside-a-building--read-in-part-and-measured) |
 | M11 | Whether the slope brake reads a building's stair faces | on a building's faces the slope brake is left out | [24](../docs/24-motion.md#the-ground-inside-a-building--read-in-part-and-measured) |
 | M11 | Which of a turret's nodes the boarding test's property `0x52` reads the life of | the turret part's node 0 | [39](../docs/39-boarding.md#boarding--read) |
-| M13 | Whether the AI's aiming reaches the turret lock's lead (body `+0x38`) through the component setter, as the player's does | the lead starts from the turret's yaw target when the player takes the unit over | [30](../docs/30-turrets.md#the-hull-follows-the-turret--read-and-measured) |
-| M13 | The spin a unit let go keeps until the Wizard writes one | none: letting a unit go clears its spin | [30](../docs/30-turrets.md#the-hull-follows-the-turret--read-and-measured) |
 | M11 | The heading the hero is given on leaving a bot, read as (F.x, −F.y) under an assumed matrix layout | the hero faces the bot | [39](../docs/39-boarding.md#not-established) |
 | M11 | The name a bot's gun takes in the weapons list (`0x1008a470`, not followed) | the gun part's code in the player clan's research tree, or NONAME | [35](../docs/35-hud.md#the-weapons-list--read-and-measured) |
 | M11 | That the factory record's `+0x30`, the grade the constructor's chassis page is taken over, is the building's size class | the designer is given the factory's size class | [38](../docs/38-designs.md#not-established) |

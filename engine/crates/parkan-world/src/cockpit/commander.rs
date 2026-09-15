@@ -119,6 +119,8 @@ pub const UNIT_NAME: [f32; 2] = [101.0, 30.0];
 pub const UNIT_LINES: [f32; 2] = [122.0, 27.0];
 pub const DRIVE_BUTTONS: [[f32; 2]; 3] = [[60.0, 88.0], [84.0, 88.0], [108.0, 88.0]];
 pub const STRATEGIC_BUTTON: [f32; 2] = [138.0, 88.0];
+/// The `Type` whose unit box shows Strategic control (`0x10085b5e`).
+pub const HQ_TYPE: u32 = 0x0101_0000;
 pub const EXPLODE_BUTTON: [f32; 4] = [324.0, 88.0, 356.0, 109.0];
 /// The rows: 20 apart from (51, 118) under the unit box, from (51, 171) under the factory
 /// panel, from (51, 20) on the other building pages.
@@ -347,8 +349,9 @@ impl Panel {
                     continue;
                 }
                 match control {
+                    // Back to the hero, a mode at a time (`0x10062ce0` with 0).
                     Control::Hero => {
-                        play.roll_back();
+                        play.roll_back_to_foot();
                         self.page = 0;
                     }
                     Control::Page(p) if p == self.page => self.page = 0,
@@ -422,6 +425,13 @@ impl Panel {
                     self.page = 0;
                     return Click::Taken;
                 }
+            }
+            // Strategic control on an HQ (`0x100847d5`): its command view, page 0.
+            let [x, y] = STRATEGIC_BUTTON;
+            if play.units[t].type_word == HQ_TYPE && inside([x + 1.0, y + 1.0, x + 20.0, y + 20.0], at) {
+                play.enter_hq_command(t);
+                self.page = 0;
+                return Click::Taken;
             }
         }
         let top = UNIT_ROWS_TOP + ROW_STEP * list.len() as f32;
@@ -779,6 +789,20 @@ fn unit_box(cockpit: &mut Cockpit, ink: &mut Ink, play: &Play, t: usize) {
     ]) {
         put(cockpit, ink, "short_button_frame_off", [at[0], at[1], at[0] + 21.0, at[1] + 21.0], WHITE);
         put(cockpit, ink, name, [at[0] + 3.0, at[1] + 3.0, at[0] + 18.0, at[1] + 18.0], lit);
+    }
+    // Strategic control, for a unit of the HQ type, lit when its turret makes it an HQ
+    // (`0x10085b5e`).
+    if play.units.get(t).is_some_and(|u| u.type_word == HQ_TYPE) {
+        let at = STRATEGIC_BUTTON;
+        let lit = if play.is_hq(t) { WHITE } else { GREY };
+        put(cockpit, ink, "short_button_frame_off", [at[0], at[1], at[0] + 21.0, at[1] + 21.0], WHITE);
+        put(
+            cockpit,
+            ink,
+            "buildscreen_direct_icon",
+            [at[0] + 3.0, at[1] + 3.0, at[0] + 18.0, at[1] + 18.0],
+            lit,
+        );
     }
     let [ex0, ey0, ex1, ey1] = EXPLODE_BUTTON;
     put(cockpit, ink, "long_button_frame_off", [ex0, ey0, ex1, ey1], WHITE);

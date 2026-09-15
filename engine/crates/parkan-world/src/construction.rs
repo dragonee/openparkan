@@ -637,9 +637,7 @@ impl Play {
         for t in inside {
             events.extend(self.battle.combat.ground_loss(t, f32::MAX / 4.0));
         }
-        if !self.hero.dead()
-            && self.driving.is_none()
-            && self.hero.walker.body.position.distance(centre) <= radius
+        if !self.hero.dead() && !self.hero_away() && self.hero.walker.body.position.distance(centre) <= radius
         {
             let mut lives: Vec<&mut parkan_sim::damage::Life> =
                 self.hero.lives.iter_mut().flatten().collect();

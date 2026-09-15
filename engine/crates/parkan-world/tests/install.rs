@@ -3032,3 +3032,168 @@ fn a_driven_flyers_hull_comes_round_under_its_turret_while_the_lock_holds_and_it
     let robot = &play.robots.iter().find(|(rt, _)| *rt == t).unwrap().1;
     assert!(!robot.walker.body.turret_lock && robot.walker.body.spin_set == [0.0; 3]);
 }
+
+fn mission_04_play() -> (parkan_world::play::Play, parkan_formats::mission::Mission) {
+    use parkan_formats::mission;
+    use parkan_world::play::Play;
+
+    let game = gamedir::find(None).expect("a Parkan install: set PARKAN_DIR");
+    let dir = gamedir::resolve(&game, gamedir::MISSION_04).unwrap();
+    let m = mission::parse(&std::fs::read(dir.join("data.tma")).unwrap(), "Mission.04").unwrap();
+    let mut play = Play::load(&game, &m).unwrap().expect("Mission 04 has a hero");
+    play.load_progression(&game, &dir, &m).unwrap();
+    (play, m)
+}
+
+/// Enter, `CMD_ENTER_STATE`, from the view the player has.
+fn press_enter(play: &mut parkan_world::play::Play) {
+    let eye = play.eye();
+    let view = parkan_world::play::View {
+        eye: eye.position,
+        look: eye.forward,
+        view_proj: glam::Mat4::IDENTITY,
+        shift: false,
+    };
+    play.command(parkan_formats::controls::CMD_ENTER_STATE, &view);
+}
+
+/// Mission 04 with its HQ targeted from 12 m and Enter pressed.
+fn mission_04_aboard_the_hq() -> (parkan_world::play::Play, parkan_formats::mission::Mission, usize) {
+    let (mut play, m) = mission_04_play();
+    let hq = object_target(&play, &m, "tut4_hq.dat");
+    stand_facing(&mut play, hq, 12.0, 0.0);
+    play.tick(1000.0 / 60.0, [0.0; 2]);
+    for _ in 0..=play.targets.listed.len() {
+        if play.targets.current == Some(hq) {
+            break;
+        }
+        play.targets.select_next();
+    }
+    assert_eq!(play.targets.current, Some(hq), "the HQ is on the hero's list");
+    press_enter(&mut play);
+    (play, m, hq)
+}
+
+/// A frame of command mode's camera and a tick of play, `n` times.
+fn command_frames(
+    play: &mut parkan_world::play::Play,
+    n: usize,
+    mut each: impl FnMut(&parkan_world::play::Play),
+) {
+    for _ in 0..n {
+        play.update_input();
+        play.command_frame(play.hero.time_ms / 1000.0, parkan_world::command::Edges::default());
+        play.tick(1000.0 / 60.0, [0.0; 2]);
+        each(play);
+    }
+}
+
+#[test]
+#[ignore = "needs the game install"]
+fn one_enter_takes_and_boards_mission_04s_hq_and_its_capture_completes_the_first_objective() {
+    use parkan_world::play::Mode;
+
+    let (mut play, m, hq) = mission_04_aboard_the_hq();
+    let heli = object_target(&play, &m, "tut4_f1.dat");
+    assert!(play.is_hq(hq) && !play.is_hq(heli), "the HQ's turret carries 0x8000000");
+    assert_eq!(play.units[hq].clan, Some(play.player_clan), "captured");
+    assert_eq!(play.mode(), Mode::Driving(hq), "and boarded");
+    assert_eq!(play.aboard(), Some(hq));
+    assert!(play.driving.as_ref().is_some_and(|d| d.target == hq && !d.telepresence));
+    play_for(&mut play, 3.0, |_| {});
+    let p = play.progression.as_ref().unwrap();
+    assert_eq!(p.progress.objectives[0].state, 1, "fn52(1) answers the player's clan");
+    assert!(p.progress.played[&10] && p.progress.played[&15], "T04_I02 and T04_H01");
+}
+
+#[test]
+#[ignore = "needs the game install"]
+fn enter_aboard_mission_04s_hq_opens_its_command_view_whose_camera_rides_with_it_and_esc_steps_back_out() {
+    use parkan_sim::orders::{Order, Target};
+    use parkan_world::command::{REACH_TIMES, SNAP_ACROSS};
+    use parkan_world::play::Mode;
+
+    let (mut play, m, hq) = mission_04_aboard_the_hq();
+    let heli = object_target(&play, &m, "tut4_f1.dat");
+    play_for(&mut play, 1.0, |_| {});
+    press_enter(&mut play);
+    assert_eq!(play.mode(), Mode::HqCommand(hq), "Enter aboard an HQ pushes mode 3");
+    assert!(play.driving.is_none(), "the HQ is let go to its AI");
+    assert!(play.hero_away() && play.aboard() == Some(hq), "the hero stays aboard");
+    assert_eq!(play.selected_units(), vec![hq]);
+    let at = play.battle.combat.targets[hq].position;
+    assert_eq!((play.command.position, play.command.distance), (at, 0.0), "placed on the HQ");
+    press_enter(&mut play);
+    assert_eq!(play.mode(), Mode::HqCommand(hq), "Enter does nothing in mode 3");
+
+    // The camera backs off a metre a frame to 8 r, 61.2 m on this HQ's chassis sphere, and sits
+    // d back along its look.
+    let reach = play.ride_reach(hq).unwrap();
+    assert!((reach - REACH_TIMES * 7.653).abs() < 0.01, "{reach}");
+    command_frames(&mut play, 30, |_| {});
+    assert_eq!(play.command.distance, 30.0);
+    command_frames(&mut play, (reach as usize) + 10, |_| {});
+    let d = play.command.distance;
+    assert!(d > reach && d <= reach + 1.0, "{d} against {reach}");
+    let at = play.battle.combat.targets[hq].position;
+    let back = d * play.command.tilt.sin();
+    let across = (play.command.position - at).truncate();
+    assert!((across.length() - back).abs() <= SNAP_ACROSS, "{} from the HQ against {back}", across.length());
+
+    // Route: the HQ drives off, and the camera goes with it.
+    let goal = at + glam::Vec3::new(0.0, 120.0, 0.0);
+    play.dispatch(Order { code: parkan_sim::hq::GO, parameter: 0, target: Target::Place(goal.to_array()) });
+    let mut worst: f32 = 0.0;
+    command_frames(&mut play, 600, |p| {
+        let at = p.battle.combat.targets[hq].position;
+        let across = (p.command.position - at).truncate().length();
+        worst = worst.max((across - p.command.distance * p.command.tilt.sin()).abs());
+    });
+    let moved = (play.battle.combat.targets[hq].position - at).truncate().length();
+    assert!(moved > 30.0, "the HQ drove {moved} m");
+    assert!(worst < 3.0 * SNAP_ACROSS, "the camera kept to the HQ within {worst}");
+
+    // Telepresence into the helicopter, and Esc back to the HQ's view, pulled out afresh.
+    assert!(play.telepresence(heli, 0));
+    assert_eq!(play.mode(), Mode::Driving(heli));
+    assert_eq!(play.aboard(), Some(hq), "the hero is still aboard the HQ");
+    command_frames(&mut play, 30, |_| {});
+    assert!(play.roll_back());
+    assert_eq!(play.mode(), Mode::HqCommand(hq));
+    let at = play.battle.combat.targets[hq].position;
+    assert_eq!((play.command.position, play.command.distance), (at, 0.0), "2 -> 3 re-places the camera");
+    command_frames(&mut play, 10, |_| {});
+
+    // Esc: the HQ's cockpit, taken at level 0; Esc again: the hero on foot beside it.
+    assert!(play.roll_back());
+    assert_eq!(play.mode(), Mode::Driving(hq));
+    assert!(play.driving.as_ref().is_some_and(|d| d.target == hq && !d.telepresence));
+    assert_eq!((play.auto_driver, play.selected_units()), (0, vec![hq]));
+    assert!(play.command.follows.is_none());
+    command_frames(&mut play, 10, |_| {});
+    assert!(play.roll_back());
+    assert_eq!(play.mode(), Mode::OnFoot);
+    assert!(!play.hero_away());
+    let hero = play.hero.walker.body.position;
+    let at = play.battle.combat.targets[hq].position;
+    assert!((hero - at).truncate().length() < 25.0, "put down beside the HQ");
+}
+
+#[test]
+#[ignore = "needs the game install"]
+fn the_hero_button_rolls_mission_04s_hq_view_back_to_foot_and_a_lost_hq_puts_the_hero_out() {
+    use parkan_world::play::Mode;
+
+    let (mut play, _, hq) = mission_04_aboard_the_hq();
+    press_enter(&mut play);
+    assert_eq!(play.mode(), Mode::HqCommand(hq));
+    play.roll_back_to_foot();
+    assert_eq!(play.modes, vec![Mode::OnFoot], "through the HQ's cockpit to the hero on foot");
+
+    let (mut play, _, hq) = mission_04_aboard_the_hq();
+    press_enter(&mut play);
+    play.battle.combat.targets[hq].alive = false;
+    command_frames(&mut play, 2, |_| {});
+    assert_eq!(play.mode(), Mode::OnFoot, "rolled back and put out");
+    assert!(!play.hero_away());
+}

@@ -113,6 +113,9 @@ pub const BATTERY_CAPACITY: usize = 0;
 /// The deflector, which decides how much of each shield sector stops (docs/26-damage.md).
 pub const DEFLECTOR_TYPE: i32 = 21;
 pub const MOUNT_UPRIGHT: u32 = 0x0400_0000;
+/// A turret's flag that makes its unit an HQ, which `IsHQ` asks (`iron3d.dll:0x10076f50`,
+/// docs/30-turrets.md, "An HQ unit in play").
+pub const TURRET_HQ: u32 = 0x0800_0000;
 
 fn f32_at(b: &[u8], at: usize) -> f32 {
     f32::from_le_bytes(b[at..at + 4].try_into().expect("4 bytes"))

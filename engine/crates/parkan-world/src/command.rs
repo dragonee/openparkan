@@ -1,8 +1,9 @@
 //! Command mode's camera: the free camera a bunker's pod gives the player over the base
 //! (`iron3d.dll:0x10036d60`–`0x10037dd0`). Keys move it at a speed that ramps up and dies
 //! away, the cursor at an edge of the screen turns and tilts it, and it is held 36 to 236
-//! over what is below and within 200 of its bunker on each axis. See
-//! `docs/40-command-mode.md`, "The camera".
+//! over what is below and within 200 of its bunker on each axis. Over an HQ unit (mode 3) it
+//! rides with the unit instead (`0x10037e00`, `0x100380e0`). See `docs/40-command-mode.md`,
+//! "The camera" and "An HQ's command mode: mode 3".
 
 use glam::Vec3;
 
@@ -32,6 +33,18 @@ pub const HOLD: f32 = 200.0;
 /// The zoomed field of view, and how far the field steps toward it or back each update.
 pub const ZOOMED_FIELD: f32 = 0.2;
 pub const ZOOM_STEP: f32 = 0.1;
+/// Following a unit, an axis within this of its target is set to it (`0x100e5c14`,
+/// `0x100e5c0c`): x and y, then z.
+pub const SNAP_ACROSS: f32 = 3.0;
+pub const SNAP_UP: f32 = 2.0;
+/// Following a unit, the camera is kept this far over the highest surface below it
+/// (`0x100e5d04`).
+pub const FOLLOW_ABOVE: f32 = 2.5;
+/// The follow distance steps by 1 an update toward the unit's reach, and is at most this
+/// (`0x100382e2`).
+pub const FOLLOW_MOST: f32 = 200.0;
+/// The unit's reach is this many times its record's `+0x98` (`0x100e5d00`).
+pub const REACH_TIMES: f32 = 8.0;
 
 /// The six keys `CMD_JAMES_HQ_MOVE_*` hold (`+0x8c`–`+0x91`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -64,6 +77,14 @@ impl Edges {
             bottom: bottom_right[1] >= crate::hud::LAYOUT[1] - EDGE,
         }
     }
+}
+
+/// The unit the camera follows (`+0x44`): where it stands, and the distance past which the
+/// follow distance stops growing, 8 × its record's `+0x98`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Follow {
+    pub at: Vec3,
+    pub reach: f32,
 }
 
 /// One of the camera's five rates: sideways, forward, up, yaw and tilt.
@@ -109,6 +130,10 @@ pub struct Camera {
     pub zoomed: bool,
     /// The bunker it is held around (`+0x48`), by its position.
     pub held: Option<Vec3>,
+    /// The unit it follows (`+0x44`), as the caller last placed it.
+    pub follows: Option<Follow>,
+    /// How far back along the look it follows from (`+0x38`).
+    pub distance: f32,
     keys: [bool; 6],
     edges: Edges,
     rates: [Rate; 5],
@@ -125,6 +150,8 @@ impl Default for Camera {
             field: FIELD,
             zoomed: false,
             held: None,
+            follows: None,
+            distance: 30.0,
             keys: [false; 6],
             edges: Edges::default(),
             rates: [Rate::default(); 5],
@@ -156,9 +183,29 @@ impl Camera {
         self.clear_motion();
     }
 
-    /// Let go of the bunker (`0x10037dd0`).
+    /// Mode 1 → 3 and 2 → 3 (`0x10063a20`, `0x10063bf0`): placed on the unit at `follow.at`
+    /// facing north, tilt and zoom kept, and following it from distance 0 with no bunker held
+    /// (`0x10037d70`).
+    pub fn ride(&mut self, follow: Follow) {
+        self.held = None;
+        self.clear_motion();
+        self.follows = Some(follow);
+        self.distance = 0.0;
+        self.position = follow.at;
+        self.yaw = std::f32::consts::FRAC_PI_2;
+    }
+
+    /// Where the unit it follows stands now.
+    pub fn follow_to(&mut self, at: Vec3) {
+        if let Some(f) = self.follows.as_mut() {
+            f.at = at;
+        }
+    }
+
+    /// Let go of the bunker, or of the unit it followed (`0x10037dd0`).
     pub fn leave(&mut self) {
         self.held = None;
+        self.follows = None;
         self.clear_motion();
     }
 
@@ -193,6 +240,12 @@ impl Camera {
     /// edges from the cursor, the velocities from the keys, then the move, the turn and the
     /// clamps. `top` is the highest landscape or building surface at a place, and `side`
     /// the map's side.
+    ///
+    /// While it follows a unit its own move comes first (`0x10037e00`, `0x100380e0`): the
+    /// keys pressed toward the point d back along the look from the unit, the position moved
+    /// along the world's axes and the yaw turned, and the distance stepped. The ordinary move
+    /// that follows then finds no time passed for the position and the yaw, and still tilts
+    /// and holds the height.
     pub fn update(&mut self, now: f64, edges: Edges, side: f32, top: impl Fn(f32, f32) -> Option<f32>) {
         let dt = self.moved.map_or(0.0, |m| (now - m).max(0.0));
         self.moved = Some(now);
@@ -217,6 +270,15 @@ impl Camera {
         } else if self.field > goal {
             self.field = (self.field - ZOOM_STEP).max(goal);
         }
+        // The follow's move stamps the position's and the yaw's axes, so the ordinary move
+        // after it has no time for them.
+        let moves = match self.follows {
+            Some(follow) => {
+                self.follow(follow, now, dt as f32, side, &top);
+                0.0
+            }
+            None => dt as f32,
+        };
         self.edges = edges;
         let k = |m: Move| self.keys[m as usize];
         // Left wins over right, forward over backward and up over down.
@@ -230,7 +292,7 @@ impl Camera {
         self.rates[UP].update(SPEED / 2.0, now, dt);
 
         // The move (`0x100375b0`).
-        let dt = dt as f32;
+        let (dt, tilt_dt) = (moves, dt as f32);
         let (s, c) = self.yaw.sin_cos();
         let (side_v, forward_v) = (self.rates[SIDEWAYS].value, self.rates[FORWARD].value);
         let x = self.position.x + dt * (side_v * s + forward_v * c);
@@ -245,7 +307,7 @@ impl Camera {
         }
         self.position.z += dt * self.rates[UP].value;
         self.yaw += dt * self.rates[YAW].value;
-        let tilt = self.tilt + dt * self.rates[TILT].value;
+        let tilt = self.tilt + tilt_dt * self.rates[TILT].value;
         if tilt > 0.0 && tilt < std::f32::consts::FRAC_PI_2 {
             self.tilt = tilt;
         }
@@ -260,6 +322,72 @@ impl Camera {
                     *p = centre - HOLD;
                 }
             }
+        }
+    }
+
+    /// The follow's two steps (`0x10037e00`, `0x100380e0`). The target is d back along the
+    /// look from the unit: (X − d sin τ cos θ, Y − d sin τ sin θ, Z + d cos τ). An axis within
+    /// 3 m across or 2 m up is set to it, its velocity cleared and its keys let up; any other
+    /// has the key toward it pressed. The keys' velocities then move x, y and z along the
+    /// world's axes, each new x or y taken only inside tan(½ field) × z of the map's edges,
+    /// the yaw turns, and z is kept 2.5 over the highest surface below. Last the distance
+    /// steps: down by 1 past the reach, up by 1 below 200.
+    fn follow(
+        &mut self,
+        follow: Follow,
+        now: f64,
+        dt: f32,
+        side: f32,
+        top: &impl Fn(f32, f32) -> Option<f32>,
+    ) {
+        let (st, ct) = self.tilt.sin_cos();
+        let (sy, cy) = self.yaw.sin_cos();
+        let d = self.distance;
+        let target = Vec3::new(follow.at.x - d * st * cy, follow.at.y - d * st * sy, follow.at.z + d * ct);
+        let axes = [
+            (0, SNAP_ACROSS, SIDEWAYS, Move::Right, Move::Left),
+            (1, SNAP_ACROSS, FORWARD, Move::Forward, Move::Backward),
+            (2, SNAP_UP, UP, Move::Up, Move::Down),
+        ];
+        for (axis, snap, rate, plus, minus) in axes {
+            let off = target[axis] - self.position[axis];
+            if off.abs() <= snap {
+                self.position[axis] = target[axis];
+                self.rates[rate].value = 0.0;
+                self.keys[plus as usize] = false;
+                self.keys[minus as usize] = false;
+            } else {
+                self.keys[plus as usize] = off > 0.0;
+                self.keys[minus as usize] = off < 0.0;
+            }
+        }
+        let k = |m: Move| self.keys[m as usize];
+        let pair = |plus: bool, minus: bool| i8::from(plus) - i8::from(minus && !plus);
+        self.rates[SIDEWAYS].push(pair(k(Move::Right), k(Move::Left)), now);
+        self.rates[FORWARD].push(pair(k(Move::Forward), k(Move::Backward)), now);
+        self.rates[UP].push(pair(k(Move::Up), k(Move::Down)), now);
+        self.rates[SIDEWAYS].update(SPEED, now, f64::from(dt));
+        self.rates[FORWARD].update(SPEED, now, f64::from(dt));
+        self.rates[UP].update(SPEED / 2.0, now, f64::from(dt));
+
+        let margin = (self.field / 2.0).tan() * self.position.z;
+        for (axis, rate) in [(0, SIDEWAYS), (1, FORWARD)] {
+            let v = self.rates[rate].value;
+            let next = self.position[axis] + dt * v;
+            if (v < 0.0 && next > margin) || (v > 0.0 && next < side - margin) {
+                self.position[axis] = next;
+            }
+        }
+        self.position.z += dt * self.rates[UP].value;
+        self.yaw += dt * self.rates[YAW].value;
+        if let Some(h) = top(self.position.x, self.position.y) {
+            self.position.z = self.position.z.max(h + FOLLOW_ABOVE);
+        }
+        if self.distance > follow.reach {
+            self.distance -= 1.0;
+        }
+        if self.distance < FOLLOW_MOST {
+            self.distance += 1.0;
         }
     }
 
@@ -384,6 +512,69 @@ mod tests {
         let left = Edges { left: true, ..Edges::default() };
         run(&mut c, 0.0, 1.0, left);
         assert!(c.yaw > std::f32::consts::FRAC_PI_2 + 0.5, "{}", c.yaw);
+    }
+
+    #[test]
+    fn riding_a_unit_pulls_back_a_metre_an_update_to_its_reach_and_moves_with_it() {
+        let mut c = Camera::default();
+        let mut at = Vec3::new(1000.0, 800.0, 50.0);
+        c.ride(Follow { at, reach: 61.2 });
+        assert_eq!((c.position, c.distance), (at, 0.0));
+        let ground = |_: f32, _: f32| Some(50.0);
+        let mut t = 0.0;
+        for _ in 0..30 {
+            t += 1.0 / 60.0;
+            c.update(t, Edges::default(), SIDE, ground);
+        }
+        assert_eq!(c.distance, 30.0, "1 an update, not a second");
+        for _ in 0..60 {
+            t += 1.0 / 60.0;
+            c.update(t, Edges::default(), SIDE, ground);
+        }
+        assert_eq!(c.distance, 62.0, "it stops once past the reach");
+        // Facing north with tilt 1: d back is south of the unit and above it; the band keeps
+        // it 36 over the ground.
+        let back = c.distance * c.tilt.sin();
+        assert!((c.position.x - 1000.0).abs() < 1e-3 && (c.position.y - (800.0 - back)).abs() < 1e-3);
+        assert!(
+            (c.position.z - (50.0 + (c.distance * c.tilt.cos()).max(36.0))).abs() < 2.0,
+            "{}",
+            c.position
+        );
+        // The unit drives north at 26 m/s: the camera keeps within a snap of the target.
+        for _ in 0..120 {
+            t += 1.0 / 60.0;
+            at.y += 26.0 / 60.0;
+            c.follow_to(at);
+            c.update(t, Edges::default(), SIDE, ground);
+        }
+        assert!((c.position.y - (at.y - back)).abs() <= SNAP_ACROSS, "{} {}", c.position.y, at.y);
+        assert_eq!(c.held, None);
+    }
+
+    #[test]
+    fn riding_overrides_the_keys_and_an_edge_swings_the_camera_round_the_unit() {
+        let mut c = Camera::default();
+        let at = Vec3::new(1000.0, 800.0, 50.0);
+        c.ride(Follow { at, reach: 40.0 });
+        let flat = |_: f32, _: f32| Some(50.0);
+        let mut t = 0.0;
+        for _ in 0..60 {
+            t += 1.0 / 60.0;
+            c.update(t, Edges::default(), SIDE, flat);
+        }
+        c.key(Move::Forward, true);
+        let left = Edges { left: true, ..Edges::default() };
+        for _ in 0..60 {
+            t += 1.0 / 60.0;
+            c.update(t, left, SIDE, flat);
+        }
+        let across = Vec3::new(c.position.x - at.x, c.position.y - at.y, 0.0).length();
+        let back = c.distance * c.tilt.sin();
+        assert!((across - back).abs() <= SNAP_ACROSS * 1.5, "circles at d: {across} vs {back}");
+        assert!(c.yaw > std::f32::consts::FRAC_PI_2 + 0.5, "{}", c.yaw);
+        c.leave();
+        assert_eq!(c.follows, None);
     }
 
     #[test]

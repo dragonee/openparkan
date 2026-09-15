@@ -13,7 +13,7 @@ use std::f32::consts::{PI, TAU};
 use glam::{Quat, Vec3};
 use parkan_formats::control::{
     ARM_TYPE, CAMERA_TYPE, CHANNEL_FOLLOWS, CHANNEL_TURRET, CHANNEL_UNDRIVEN, CHANNEL_WRAP, Channel,
-    Controller, GUN_TYPE, MOUNT_UPRIGHT, TURRET_TYPE,
+    Controller, GUN_TYPE, MOUNT_UPRIGHT, TURRET_HQ, TURRET_TYPE,
 };
 
 use crate::guns::Gun;
@@ -266,6 +266,8 @@ pub struct Rig {
     pub camera_values: [f32; 16],
     /// An upright turret (`0x4000000`) stores its target as 1 − v (`0x100271c7`).
     pub upright: bool,
+    /// An HQ's turret (`0x8000000`), which opens its unit's command view (docs/40).
+    pub hq: bool,
     /// The turret's stored target triple (`+0x9c`): x yaw, y pitch.
     pub aim: [f32; 3],
     /// The camera's free-look triple (`+0x94`), 0.5 looking ahead.
@@ -294,6 +296,7 @@ impl Rig {
         };
         let (yaw, pitch) = (entry(0), entry(1));
         let upright = turret.is_some_and(|t| t.flags & MOUNT_UPRIGHT != 0);
+        let hq = turret.is_some_and(|t| t.flags & TURRET_HQ != 0);
         let stored =
             |ch: Option<usize>| ch.map_or(0.5, |c| if upright { 1.0 - values[c] } else { values[c] });
         let arms: Vec<Arm> = controller
@@ -320,6 +323,7 @@ impl Rig {
                 .filter(|&e| e < channels.len()),
             camera_values: camera.map_or([0.0; 16], |c| c.values),
             upright,
+            hq,
             mounts: mounts(controller, &arms),
             arms,
             center_up: 1.0,

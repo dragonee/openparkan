@@ -11,6 +11,7 @@ pub const MARKERS: [&str; 3] = ["Textures.lib", "MISSIONS", "DATA"];
 pub const MISSION_01: &str = "MISSIONS/CAMPAIGN/CAMPAIGN.00/Mission.01";
 pub const MISSION_02: &str = "MISSIONS/CAMPAIGN/CAMPAIGN.00/Mission.02";
 pub const MISSION_03: &str = "MISSIONS/CAMPAIGN/CAMPAIGN.00/Mission.03";
+pub const MISSION_04: &str = "MISSIONS/CAMPAIGN/CAMPAIGN.00/Mission.04";
 
 pub fn looks_like_install(path: &Path) -> bool {
     MARKERS.iter().all(|m| path.join(m).exists())

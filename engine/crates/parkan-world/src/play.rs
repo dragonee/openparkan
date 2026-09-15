@@ -119,8 +119,12 @@ pub const CLASS_ANIMAL: u32 = 0x2000_0000;
 pub enum Mode {
     /// Mode 0.
     OnFoot,
-    /// Mode 1 with the robot that is target `t`: the player drives it (docs/39).
+    /// Mode 1 with the robot that is target `t`: the player drives it (docs/39); mode 2,
+    /// telepresence, when the [`Driving`] says so (docs/40).
     Driving(usize),
+    /// Mode 3 with the HQ unit that is target `t`: command mode, the camera riding with the
+    /// unit (docs/40, "An HQ's command mode: mode 3").
+    HqCommand(usize),
     /// Mode 4 with the bunker that is target `t`: command mode, the camera over the base
     /// (docs/40).
     Command(usize),
@@ -132,7 +136,13 @@ impl Mode {
     /// A mode whose screens show the cursor, the world going on behind them: command mode
     /// and a building's screen (docs/40, docs/36).
     pub fn shows_cursor(self) -> bool {
-        matches!(self, Mode::Command(_) | Mode::Factory(_))
+        matches!(self, Mode::HqCommand(_) | Mode::Command(_) | Mode::Factory(_))
+    }
+
+    /// A command view, an HQ's (mode 3) or a bunker's (mode 4): they share their screens,
+    /// their panel and their input (`0x1008d51c`, docs/40).
+    pub fn commands(self) -> bool {
+        matches!(self, Mode::HqCommand(_) | Mode::Command(_))
     }
 }
 
@@ -944,7 +954,7 @@ impl Play {
     /// target (`iron3d.dll:0x100757ad`).
     fn update_targets(&mut self) {
         let mut world = self.contacts();
-        let driven = self.driving.as_ref().map(|d| d.target);
+        let driven = self.driven_target();
         if let Some(c) = driven.and_then(|t| world.get_mut(t)) {
             // The driven bot is not its own contact.
             c.alive = false;
@@ -1207,10 +1217,17 @@ impl Play {
     pub fn tick(&mut self, dt_ms: f64, mouse: [f32; 2]) -> Vec<Event> {
         self.update_targets();
         self.tick_robots(dt_ms, mouse);
-        // A driven bot that is lost puts the hero out at once (`0x10062ff0`).
-        //
-        // STAND-IN: docs/40-command-mode.md#not-established -- what mode 2 does when its unit
-        // dies is not read: telepresence goes back to the command view.
+        // STAND-IN: docs/40-command-mode.md#not-established -- nothing read pops mode 3 when its HQ is
+        // lost: the view rolls back to the HQ's cockpit, which the lost bot then puts the hero
+        // out of, as below.
+        if let Mode::HqCommand(h) = self.mode()
+            && !self.battle.combat.targets.get(h).is_some_and(|x| x.alive)
+        {
+            self.roll_back();
+        }
+        // A driven bot that is lost rolls the stack back at once, in mode 1 or 2 (the unit
+        // record's removal, `0x100751a0`, table `0x1007563c`): the hero is put out of a
+        // boarded bot, and telepresence goes back to its command view.
         if let Some(d) = self.driving.as_ref()
             && !self.battle.combat.targets.get(d.target).is_some_and(|x| x.alive)
         {
@@ -1220,7 +1237,7 @@ impl Play {
                 self.leave();
             }
         }
-        let shots = if self.hero.dead() || self.driving.is_some() {
+        let shots = if self.hero.dead() || self.hero_away() {
             self.hero.time_ms += dt_ms;
             Vec::new()
         } else {
@@ -1460,17 +1477,169 @@ impl Play {
                 return self.end_telepresence();
             }
             Mode::Driving(_) => return self.leave(),
+            // Mode 3 → 1 (`0x10063ad0`): the HQ selected and taken back at auto-driver level 0
+            // with the camera let go; or 3 → 4 and 3 → 3, back to the command view below.
+            Mode::HqCommand(t) => {
+                self.modes.pop();
+                self.command.leave();
+                self.command.release();
+                match self.mode() {
+                    Mode::Driving(below) if below == t => {
+                        self.select_unit_alone(t);
+                        self.auto_driver = 0;
+                        self.take(t, false, true);
+                    }
+                    Mode::Command(b) => {
+                        self.select_building(b);
+                        let at = self.battle.combat.targets.get(b).map_or(Vec3::ZERO, |x| x.position);
+                        self.command.enter(at);
+                    }
+                    Mode::HqCommand(h) => {
+                        self.select_unit_alone(h);
+                        self.ride(h);
+                    }
+                    _ => {}
+                }
+                return true;
+            }
             // Mode 4 → 0 (`0x10063d60`): the hero is taken back where it stands, the selection
-            // cleared, and the camera let go of its bunker.
+            // cleared, and the camera let go of its bunker; or 4 → 3, back to an HQ's view
+            // (`0x100647e0`).
             Mode::Command(_) => {
                 self.selected.clear();
                 self.command.leave();
                 self.command.release();
                 self.hero.release_keys();
+                self.modes.pop();
+                if let Mode::HqCommand(h) = self.mode() {
+                    self.select_unit_alone(h);
+                    self.ride(h);
+                }
+                return true;
             }
             _ => {}
         }
         self.modes.pop();
+        true
+    }
+
+    /// The hero button (`0x10062ce0` with 0): the stack rolled back to mode 0 a mode at a
+    /// time, so from an HQ's view through its cockpit to the hero put down beside it. A step
+    /// that is refused, as leaving a bot over a risk area is, stops it there.
+    pub fn roll_back_to_foot(&mut self) {
+        while self.modes.len() > 1 {
+            let depth = self.modes.len();
+            if !self.roll_back() || self.modes.len() >= depth {
+                break;
+            }
+        }
+    }
+
+    /// Whether target `t` is an HQ unit: a robot whose turret carries the HQ flag (`IsHQ`,
+    /// `0x10076f50`, docs/30).
+    pub fn is_hq(&self, t: usize) -> bool {
+        self.robots.iter().any(|(rt, r)| *rt == t && r.rig.hq)
+    }
+
+    /// The unit the hero rides in: the bot boarded from on foot, mode 1 at the bottom of the
+    /// stack, whatever command view or telepresence stands on it.
+    pub fn aboard(&self) -> Option<usize> {
+        match self.modes[..] {
+            [Mode::OnFoot, Mode::Driving(t), ..] => Some(t),
+            _ => None,
+        }
+    }
+
+    /// Whether the hero is out of the world: aboard a bot, or driving one from afar.
+    pub fn hero_away(&self) -> bool {
+        self.driving.is_some() || self.aboard().is_some()
+    }
+
+    /// The view's own unit (`+0xaec`): the one the player drives, else the one the hero rides
+    /// in, whose place and radar the target list takes.
+    pub fn driven_target(&self) -> Option<usize> {
+        self.driving.as_ref().map(|d| d.target).or_else(|| self.aboard())
+    }
+
+    /// Mode 3 with HQ unit `t` pushed: from its cockpit (1 → 3, `0x10063a20`), from
+    /// telepresence aboard it (2 → 3), from a bunker's view (4 → 3, `0x100647e0`) or from
+    /// another HQ's (3 → 3, `0x10064900`). The HQ is let go to its AI with its order and
+    /// selected, and the camera is placed on it facing north and rides with it. A unit that is
+    /// not an HQ is refused (`0x10062c2e`); an HQ already on the stack is rolled back to.
+    ///
+    /// STAND-IN: docs/40-command-mode.md#an-hqs-command-mode-mode-3--read-and-seen -- how the
+    /// stack reads after Enter in telepresence aboard an HQ is not followed: the telepresence
+    /// is ended and mode 3 takes its place, over the command view it came from.
+    pub fn enter_hq_command(&mut self, t: usize) -> bool {
+        if !self.is_hq(t) || !self.battle.combat.targets.get(t).is_some_and(|x| x.alive) {
+            return false;
+        }
+        if let Some(at) = self.modes.iter().position(|m| *m == Mode::HqCommand(t)) {
+            self.modes.truncate(at + 1);
+            return true;
+        }
+        match self.mode() {
+            Mode::Driving(d) if d == t => {
+                if self.driving.as_ref().is_some_and(|x| x.telepresence) {
+                    self.modes.pop();
+                }
+                self.let_go();
+            }
+            Mode::Command(_) | Mode::HqCommand(_) => {}
+            _ => return false,
+        }
+        self.select_unit_alone(t);
+        self.ride(t);
+        self.modes.push(Mode::HqCommand(t));
+        true
+    }
+
+    /// The command camera placed on unit `t` and riding with it from distance 0.
+    fn ride(&mut self, t: usize) {
+        let (Some(target), Some(reach)) = (self.battle.combat.targets.get(t), self.ride_reach(t)) else {
+            return;
+        };
+        self.command.ride(crate::command::Follow { at: target.position, reach });
+    }
+
+    /// How far back the command camera settles from HQ unit `t`: 8 × its record's `+0x98`.
+    ///
+    /// STAND-IN: docs/40-command-mode.md#not-established -- which bound `+0x98` is was not
+    /// traced: the chassis mesh's authored sphere's radius, which on Mission 04's HQ gives the
+    /// 61 m the recording favours, else the unit's whole bound.
+    pub fn ride_reach(&self, t: usize) -> Option<f32> {
+        let whole = self.battle.combat.targets.get(t)?.radius;
+        let chassis = self.robots.iter().find(|(rt, _)| *rt == t).and_then(|(_, r)| {
+            r.parts.get(r.chassis_part).and_then(|p| p.mesh.mesh.sphere).map(|(_, radius)| radius)
+        });
+        Some(crate::command::REACH_TIMES * chassis.unwrap_or(whole))
+    }
+
+    /// The driven unit let go (`0x10074ff0` with 0), back to its AI: its held keys dropped and
+    /// its command cleared.
+    fn let_go(&mut self) {
+        if let Some(mut d) = self.driving.take()
+            && let Some((_, robot)) = self.robots.iter_mut().find(|(rt, _)| *rt == d.target)
+        {
+            crate::hero::drive_input(robot, &mut d.pilot, true);
+            robot.walker.body.command = [0.0; 3];
+            let_go(robot);
+        }
+    }
+
+    /// Unit `t` taken by the player (`0x10074ff0` with 1): driven by its own input table's
+    /// pilot with every held key let go and its walk cleared, its turret lock set when `lock`
+    /// (auto-driver level 0). Pushes no mode.
+    fn take(&mut self, t: usize, telepresence: bool, lock: bool) -> bool {
+        let Some(r) = self.robots.iter().position(|(rt, _)| *rt == t) else { return false };
+        let chassis = self.robots[r].1.parts[self.robots[r].1.chassis_part].record.clone();
+        let Ok(pilot) = crate::hero::Hero::pilot_for(&mut self.assembly, &chassis) else { return false };
+        self.hero.release_keys();
+        let robot = &mut self.robots[r].1;
+        robot.wizard.clear();
+        robot.walker.drive = None;
+        take_over(robot, lock);
+        self.driving = Some(Driving { target: t, pilot, fire_held: false, telepresence });
         true
     }
 
@@ -1496,7 +1665,7 @@ impl Play {
     pub fn command_key(&mut self, command: &str, down: bool) -> bool {
         use crate::command::Move;
         use parkan_formats::controls::*;
-        if !matches!(self.mode(), Mode::Command(_)) {
+        if !self.mode().commands() {
             return false;
         }
         let key = match command {
@@ -1525,10 +1694,17 @@ impl Play {
     }
 
     /// Command mode's camera this frame, at `now` real seconds with the cursor against
-    /// `edges` (docs/40, "The camera"): held over the highest landscape or building surface.
+    /// `edges` (docs/40, "The camera"): held over the highest landscape or building surface,
+    /// and in an HQ's view riding with the HQ where it now stands.
     pub fn command_frame(&mut self, now: f64, edges: crate::command::Edges) {
-        if !matches!(self.mode(), Mode::Command(_)) {
-            return;
+        match self.mode() {
+            Mode::HqCommand(t) => {
+                if let Some(at) = self.battle.combat.targets.get(t).map(|x| x.position) {
+                    self.command.follow_to(at);
+                }
+            }
+            Mode::Command(_) => {}
+            _ => return,
         }
         let (_, hi) = self.ground.bounds();
         let ground = &self.ground;
@@ -1536,17 +1712,16 @@ impl Play {
             .update(now, edges, hi[0].min(hi[1]), |x, y| ground.below(x, y, 1.0e5).map(|h| h.point.z));
     }
 
-    /// The unit the player drives: the boarded bot, or the hero.
+    /// The view's own unit: the bot the player drives or the hero rides in, or the hero.
     pub fn driven(&self) -> &Robot {
-        self.driving
-            .as_ref()
-            .and_then(|d| self.robots.iter().find(|(t, _)| *t == d.target))
+        self.driven_target()
+            .and_then(|d| self.robots.iter().find(|(t, _)| *t == d))
             .map_or(&self.hero.robot, |(_, r)| r)
     }
 
     /// The eye the world is drawn from: command mode's camera, or the driven unit's.
     pub fn eye(&self) -> crate::robot::Eye {
-        if let Mode::Command(_) = self.mode() {
+        if self.mode().commands() {
             return self.command.eye();
         }
         self.driven().eye().unwrap_or_else(|| self.hero.eye())
@@ -1616,19 +1791,10 @@ impl Play {
     /// `VOICE_SELECTED_B`, the player takes it at auto-driver level 0 with every held key let
     /// go, and a flyer taken over asks for the mission's message 100.
     pub fn board(&mut self, t: usize) -> bool {
-        if !self.boardable(t) {
+        if !self.boardable(t) || !self.take(t, false, true) {
             return false;
         }
-        let Some(r) = self.robots.iter().position(|(rt, _)| *rt == t) else { return false };
-        let chassis = self.robots[r].1.parts[self.robots[r].1.chassis_part].record.clone();
-        let Ok(pilot) = crate::hero::Hero::pilot_for(&mut self.assembly, &chassis) else { return false };
-        self.hero.release_keys();
-        let robot = &mut self.robots[r].1;
-        robot.wizard.clear();
-        robot.walker.drive = None;
-        take_over(robot, true);
-        let flyer = robot.flyer;
-        self.driving = Some(Driving { target: t, pilot, fire_held: false, telepresence: false });
+        let flyer = self.robots.iter().any(|(rt, r)| *rt == t && r.flyer);
         self.modes.push(Mode::Driving(t));
         self.say_sound(VOICE_SELECTED_B, true);
         if flyer && let Some(p) = self.progression.as_mut() {
@@ -1649,21 +1815,12 @@ impl Play {
     /// STAND-IN: docs/40-command-mode.md#telepresence-mode-2--read -- the auto-driver levels'
     /// overrides are not modelled: the player drives the unit whole at every level.
     pub fn telepresence(&mut self, t: usize, level: u8) -> bool {
-        if !matches!(self.mode(), Mode::Command(_)) || !self.can_take(t) {
+        if !self.mode().commands() || !self.can_take(t) || !self.take(t, true, level == 0) {
             return false;
         }
-        let Some(r) = self.robots.iter().position(|(rt, _)| *rt == t) else { return false };
-        let chassis = self.robots[r].1.parts[self.robots[r].1.chassis_part].record.clone();
-        let Ok(pilot) = crate::hero::Hero::pilot_for(&mut self.assembly, &chassis) else { return false };
         self.select_unit_alone(t);
-        self.hero.release_keys();
-        let robot = &mut self.robots[r].1;
-        robot.wizard.clear();
-        robot.walker.drive = None;
-        take_over(robot, level == 0);
         self.auto_driver = level.min(2);
         self.command.leave();
-        self.driving = Some(Driving { target: t, pilot, fire_held: false, telepresence: true });
         self.modes.push(Mode::Driving(t));
         true
     }
@@ -1683,20 +1840,21 @@ impl Play {
     }
 
     /// Mode 2 → 4 (`0x10063f30`): the unit let go, the selection cleared, and the camera held
-    /// around its bunker again where the player left it.
+    /// around its bunker again where the player left it; or 2 → 3 (`0x10063bf0`), the camera
+    /// placed on the HQ again and pulled back out from it.
     fn end_telepresence(&mut self) -> bool {
-        if let Some(mut d) = self.driving.take()
-            && let Some((_, robot)) = self.robots.iter_mut().find(|(rt, _)| *rt == d.target)
-        {
-            crate::hero::drive_input(robot, &mut d.pilot, true);
-            robot.walker.body.command = [0.0; 3];
-            let_go(robot);
+        self.let_go();
+        if matches!(self.mode(), Mode::Driving(_)) {
+            self.modes.pop();
         }
-        self.modes.retain(|m| !matches!(m, Mode::Driving(_)));
         self.clear_selection();
-        if let Some(Mode::Command(b)) = self.modes.last().copied() {
-            let at = self.battle.combat.targets.get(b).map_or(Vec3::ZERO, |x| x.position);
-            self.command.hold(at);
+        match self.mode() {
+            Mode::Command(b) => {
+                let at = self.battle.combat.targets.get(b).map_or(Vec3::ZERO, |x| x.position);
+                self.command.hold(at);
+            }
+            Mode::HqCommand(h) => self.ride(h),
+            _ => {}
         }
         true
     }
@@ -1743,28 +1901,29 @@ impl Play {
         // STAND-IN: docs/39-boarding.md#not-established -- the heading is read as (F.x, −F.y)
         // under an assumed matrix layout; the hero is turned to face the bot.
         let yaw = (-toward.x).atan2(toward.y);
-        if let Some(mut d) = self.driving.take()
-            && let Some((_, robot)) = self.robots.iter_mut().find(|(rt, _)| *rt == d.target)
-        {
-            crate::hero::drive_input(robot, &mut d.pilot, true);
-            robot.walker.body.command = [0.0; 3];
-            let_go(robot);
+        self.let_go();
+        if let Some(at) = self.modes.iter().rposition(|m| *m == Mode::Driving(t)) {
+            self.modes.truncate(at);
         }
-        self.modes.retain(|m| !matches!(m, Mode::Driving(_)));
         self.hero.walker.body.velocity = [0.0; 3];
         self.place_hero(Vec3::new(place.x, place.y, top + LEAVE_DROP), yaw);
         self.hero.release_keys();
         true
     }
 
-    /// Enter (`CMD_ENTER_STATE`): a neutral unit is captured, and one of the player's own
-    /// that can be boarded is boarded.
+    /// Enter (`CMD_ENTER_STATE`, `0x10071f08`). On foot, a neutral unit is captured and then,
+    /// as one of the player's own is, boarded if the hero can board it (`0x100720e8`). Aboard
+    /// an HQ, or in telepresence aboard one, it opens the HQ's command view (`0x100720f2`,
+    /// `0x10071f43`); aboard any other bot it does nothing.
     fn enter_or_board(&mut self) -> bool {
-        if self.enter() {
-            return true;
+        match self.mode() {
+            Mode::OnFoot => {}
+            Mode::Driving(t) => return self.enter_hq_command(t),
+            _ => return false,
         }
-        let Some(t) = self.targets.current else { return false };
-        self.board(t)
+        let captured = self.enter();
+        let Some(t) = self.targets.current else { return captured };
+        self.board(t) || captured
     }
 
     /// Every building's doors and pod for this tick, with the units standing on it (a unit
@@ -2189,7 +2348,7 @@ impl Play {
                 (Some(i), s, u.clan)
             })
             .collect();
-        if !self.hero.dead() && self.driving.is_none() {
+        if !self.hero.dead() && !self.hero_away() {
             let hero = Seen {
                 id: self.hero_id,
                 position: self.hero.walker.body.position,

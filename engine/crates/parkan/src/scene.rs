@@ -766,9 +766,12 @@ pub fn place_own_view(
 ) {
     use glam::{Mat4, Quat};
     // Aboard a bot the hero is out of the world, and the bot's cockpit is drawn in place of
-    // its hull (docs/39, "Boarding").
+    // its hull (docs/39, "Boarding"). In an HQ's command view the hero stays aboard, and the
+    // HQ, driven by its AI, is drawn whole.
     let driven = play.driving.as_ref().map(|d| d.target);
-    let outside = outside && driven.is_none();
+    let away = play.hero_away();
+    let first_person = !outside && !away;
+    let outside = outside && !away;
     let hero = &play.hero;
     let t = hero.time_ms;
     let (position, yaw) = hero.walker.drawn(t);
@@ -779,12 +782,7 @@ pub fn place_own_view(
             Mount::Chassis => hero.chassis_pose(node),
             Mount::Turret => hero.turret_node(&mount, node),
         };
-        renderer.set_instance(
-            queue,
-            instance,
-            unit * models::pose_matrix(&pose),
-            !outside && driven.is_none(),
-        );
+        renderer.set_instance(queue, instance, unit * models::pose_matrix(&pose), first_person);
     }
     for &(instance, t, p, node) in &view.cockpits {
         let placed = (Some(t) == driven)

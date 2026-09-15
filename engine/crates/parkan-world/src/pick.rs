@@ -7,7 +7,7 @@ use parkan_formats::mission::{KIND_BUILDING, KIND_UNIT};
 use parkan_sim::hq;
 use parkan_sim::orders::{self, Order, Target};
 
-use crate::play::{Mode, Play};
+use crate::play::Play;
 use crate::selection::{BATTLE_UNITS, BUILDERS, BUNKERS, TRANSPORTS};
 
 /// `CState`'s pick modes (`0x1010c388`, named by the log switch at `0x1005a5cc`).
@@ -462,9 +462,7 @@ impl Play {
             }
             _ => {}
         }
-        if let Mode::Command(_) = self.mode()
-            && !self.selected_units().is_empty()
-        {
+        if self.mode().commands() && !self.selected_units().is_empty() {
             self.commander.units.clear();
             return RightClick { page_zero: (1..=3).contains(&page), close_map: false };
         }
