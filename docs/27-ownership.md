@@ -141,9 +141,15 @@ building of the capturer's own clan, and on a main teleport (`0x10030252`).
 `MakeInsideDest` refuses it again for anything bigger: "TypedSizes
 missmached".
 
-**The capturer walks to the pod** (`0x1003094f`). When the building's clan is
-its own the task logs "Building [..] captured" (`0x10030474`); what follows
-depends on the order ([31-packages.md](31-packages.md#the-escape--read)):
+**The capturer walks to the pod** (`0x1003094f`): the goal is the hall-way
+vertex with bit `0x40`, carried into the world through its node. A capturer that
+can fly first lands at the nearest corner of the building's `.bas` outer ring
+that stands on a walkable areal. Its flying state still places it on the faces
+under it, so over the pod's floor it is the building's child like a walker
+([31-packages.md](31-packages.md#the-capture-tick-by-tick--read-measured-and-seen)).
+When the building's clan is its own the task logs "Building [..] captured"
+(`0x10030474`); what follows depends on the order
+([31-packages.md](31-packages.md#the-escape--read)):
 
 - **Capture building**, or a script's capture by logic id, **ends**, and the
   unit — idle, standing in the building — is given an **escape** by its own takt
@@ -261,7 +267,7 @@ of `IBuilding` (`0x1005b250`) is where `iron3d.dll` stores its callback
     changes owner and calls `MBehaviour::Capture` with the newcomer's clan
     (`0x10032fd0`), then the voice below plays. **There is no check of
     alliance, damage, power or defenders.** An ally's building is taken the
-    same way, which is when the player hears `VOICE_NBUILD_CAPTURE`.
+    same way ([below](#capture--read) for the voice it plays).
   - **The taker then has the building opened at once** (*read*). The
     ownership change (`0x100a48a0`) shows string 5039, *"Building is
     captured"*, as a System line (`0x1007eb60`), plays the voice, and always
@@ -287,10 +293,30 @@ building's task list is dropped, it leaves its old clan's power distributor,
 takes the new clan, and joins the new clan's distributor and SuperAI. The
 clan's minds do not come into it — buildings hold none.
 
-**What the player hears** (`iron3d.dll:0x100a48a0`): `VOICE_NBUILD_CAPTURE`
-when the player takes a building from a neutral or an ally,
-`VOICE_EBUILD_CAPTURE` from an enemy, and `VOICE_BUILD_CAPTURE` when the
-player loses one. The cursor over a building a selected capturer can take is
+**What the player hears** (`iron3d.dll:0x100a48a0`, *read*). The routine
+first compares the taker's clan with the player's (`0x100a4950`).
+
+- **The player's clan gains the building.** 5039 shows as a System line, and
+  the voice goes by the old clan:
+
+  | the old clan | voice |
+  |---|---|
+  | a neutral type, 3 (`0x100394a0`) | `VOICE_NBUILD_CAPTURE` |
+  | its word towards the taker is 1 (`0x10039460`) | `VOICE_NBUILD_CAPTURE` |
+  | its word is 0, hostile (`0x10039440`) | `VOICE_EBUILD_CAPTURE` |
+  | any other word, 2 allied among them | `VOICE_BUILD_CAPTURE` |
+
+  The taker need not be the hero. An AI unit of the player's clan gets the
+  same line and voice: *Teleport*'s helicopter is announced at 175.5 s
+  ([31-packages.md](31-packages.md#the-capture-tick-by-tick--read-measured-and-seen)).
+- **The player's clan loses the building** (`0x100a4c40`):
+  `VOICE_BUILD_CAPTURE` plays, and no System line shows.
+
+These are the words of [25-sensors.md](25-sensors.md#how-the-game-colours-what-it-marks--read-and-measured),
+where 1 is neutral and 2 allied. So an ally's building does not give the
+neutral's voice.
+
+The cursor over a building a selected capturer can take is
 `CAPTURE`, `ui/capture.ani` (`ui/cursor.cfg`, *measured*).
 
 ### The zone's height is the pod node's parent's box — *read*, and *measured*

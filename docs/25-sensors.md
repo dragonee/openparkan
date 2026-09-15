@@ -572,7 +572,10 @@ holds decides:
 
   It skips the player's own hero. It also skips a unit neither of the player's
   clan nor in the list at the player clan record's `+0x54` (`0x1007e660`,
-  `0x10039370`).
+  `0x10039370`). That list holds the ids on the player's units' contact lists,
+  emptied on every pass of the game's run loop and refilled by each unit's
+  target-list takt, so it is what the clan's radars see now
+  ([35-hud.md](35-hud.md#the-panel-in-the-cockpit--read-and-seen)).
 - **The map** (`0x10077690` for units, `0x100347f0` for buildings): each mark
   in the rule's colour. A selected unit is outlined in white, and a hero in
   green.
@@ -613,8 +616,10 @@ first two take the rule's colour.
     [35-hud.md](35-hud.md#the-radar--read-and-seen);
   - ~~the target panel frame's scale~~, answered in [35-hud.md](35-hud.md);
   - the unit marker's gap (the record's slot 5);
-  - what fills the clan record's list at `+0x54`, which decides which other
-    clans' units get a marker.
+  - ~~what fills the clan record's list at `+0x54`, which decides which other
+    clans' units get a marker~~ — **read**: the clan's units' radar contacts,
+    rebuilt on each pass of the run loop
+    ([35-hud.md](35-hud.md#the-panel-in-the-cockpit--read-and-seen)).
 - What the unit record's `+0x94` and `+0x98` are: the right button's margin
   and its ray's start.
 - What the player's map and radar display show. `IArealMap`'s side of the

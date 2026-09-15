@@ -323,7 +323,9 @@ readers were not traced, that is marked.
 
   It walks to the building's pod at the unit's speed × `Go_SpeedPercent`
   (`0x1003094c`). A **flying** capturer first lands at the nearest walkable
-  corner of the building's ground contour, then walks to the pod. If the walk to
+  corner of the building's ground contour, then walks to the pod: the contour
+  is the `.bas` outer ring, and a corner is walkable on an areal whose first
+  flag word is set ([The capture, tick by tick](#the-capture-tick-by-tick--read-measured-and-seen)). If the walk to
   the pod is refused — a ruin has no pod — the plan falls through to roaming,
   and the next plan picks the same building again, so a capturer can hang about
   a ruin (*derived*). When the
@@ -333,6 +335,9 @@ readers were not traced, that is marked.
   walks out of the building towards its next target (below).
   - **Rescan:** every 3 s plus up to 3 s, against 15 plus up to 15 s in the other
     modes (`0x100301b2`, `0x1003011b`); a plan also runs whenever the unit stops.
+    The timer is only looked at while no building is picked: with one picked
+    and still another clan's, the takt goes straight to the walker
+    (`0x10030352`).
   - **No fighting on the way:** its interrupt priority is 0 for engagements
     (reasons 0–2 and 5), and for a refit unless its life is at most 0.2 or its
     charge at most 0.3 (`0x10030000`).
@@ -543,6 +548,232 @@ now gives the second through the wizard and the mode setter. It gives the first
 only where the capture task ends: after Capture building or a script's capture,
 not after the menu's Search and capture, which replans at `0x100304b9`. What
 gives a Search and capture unit its escape, if anything does, is *unknown*.
+
+## The capture, tick by tick — *read*, *measured* and *seen*
+
+What a small warbot does between its order and the building turning, as the
+search task (vtable `0x10059cf8`) runs it. *Teleport*, the fourth training
+mission, is the example: the player's Tiny Helicopter `tut4_f1` (`R_T_02`,
+size `t`) takes the neutral Large Factory `lplant01` and Research Center
+`einst01` from command mode.
+
+### The orders that start it — *read*
+
+- **A click on the building.** With every selected unit of size class 1 or 2,
+  a left click on a building of another clan is pick kind 4. The cursor over it
+  is `CAPTURE`. With no pick pending, the click is the dispatcher's case 6:
+  `SEARCH`, target `0x201` with the building's logic id, parameter
+  `0x8017365e` ([42-selection.md](42-selection.md#a-left-click-in-the-world--read)).
+- **Search and capture** from the HQ menu is case 3: `SEARCH`, target `0x203`,
+  parameter `0x8017365e`. The row is offered when the first selected unit's
+  `+0x30` is 1 or 2 ([41-commander.md](41-commander.md#which-rows-it-offers)).
+- **A script's** `ORDER_ROBOT_CAPTURE` builds the same task
+  ([The orders](#the-orders--measured)).
+
+Both menu paths read *searching* on the status line, since the head order is 5.
+
+### Setting the target (slot 3, `0x10030110`) — *read*
+
+It clears the four mode words: `+0x58` minerals, `+0x5c` capture, `+0x60` one
+building, `+0x64` enemies. It sets the rescan timer `+0x74` to 15 s plus up to
+15 s. Then it switches on the target's kind:
+
+| target | what must hold | what it sets |
+|---|---|---|
+| `0x201`, a logic id | the id has the top bit, a building's; the unit's variable `0x201`, its size class, is at most 2; the system areal map (behaviour `+0x48`, slot 21) knows the id; the building's clan is not the unit's; its Type is not `0x80000200` | `+0x5c`, `+0x6c` the id, `+0x60` |
+| `0x203`, by type, a mask with `0x10000000` | — | `+0x58` |
+| `0x203`, a mask with the top bit | size class at most 2 | `+0x5c`, and the timer to 3 s plus up to 3 s |
+| `0x204` | — | `+0x64` |
+
+Anything else, or a failed test, refuses the order. The mask is not kept: the
+capture plan pushes its own `0x8017365e` (`0x10030806`).
+
+**The start** (slot 6, `0x10030280`) asks the fire control for mode 2 and sets
+the **landing flag** `+0x7c`. The flag is 0 when the chassis profile has
+`CanFly` (`0x10014670`, `+0xc`) and 1 otherwise. Then it plans.
+
+### The plan (slot 15, `0x100306f0`) — *read*
+
+1. **The building.** A search by type picks the nearest known building
+   ([What each package does](#what-each-package-does--read)) into `+0x6c`. A
+   single building keeps the one it was given.
+2. **With a building, for a unit that cannot fly or whose landing flag is
+   set** (`0x1003091b`), it walks in: `0x10001ab0` with the id, the place
+   flag `0x40` and the unit's speed (`+0x5fc`) × `Go_SpeedPercent`.
+   `MakeInsideDest` (`0x10001270`) makes the goal:
+   - the building, by the clan areal map's slot 7, must be finished (its
+     variable `0x202` not above 0, else *"Making Go Inside Non-complete
+     Building"*);
+   - the unit's size class must be at most 2 (*"TypedSizes missmached"*);
+   - the building's hall way (interface `0x303`) must hold a vertex with bit
+     `0x40`, the pod (slot 13, `GetBestVertexOfType`, `ArealMap.dll:0x1000a7e0`).
+
+   The goal is that vertex's position carried into the world through its
+   node (slot 5, `0x1000a760`). The walker is given the goal with −1 and 5
+   (`MWalker::SetTarget`). If it accepts, the plan sets the landing flag and
+   ends.
+3. **For a flyer with the landing flag clear, or a flyer whose walk in was
+   refused** (`0x1003096a`), it clears the flag and lands first:
+   - of the building's **contour**, variable `0x203` (below), it takes the
+     vertex nearest the unit across the ground (`0x10020f70`);
+   - it counts only a vertex on an areal whose record's `+0x20` word is not 0.
+     The areal is the system areal map's slot 7 at the point, and the record
+     its slot 6. This is the same first flag word that a non-flyer's valid
+     place needs ([42-selection.md](42-selection.md#a-valid-place--read-and-measured));
+   - it goes there (`0x10001960`) at the same speed, with −1 and 5.
+4. **Otherwise** the plan falls through to the retreat and to roaming
+   ([Where a search looks](#where-a-search-looks--read-and-measured)).
+
+**The contour** (`0x1000a611`, variable `0x203` of the building's behaviour) is:
+- **a standing building's** (`+0x968` = 1): `IBasement` slot 3, the `.bas`
+  **outer ring** placed in the world ([03-terrain.md](03-terrain.md)). It must
+  be one ring: *"Behaviour panic: Building has %d contours"*. Interface `0x11`
+  is `IBasement` (`Terrain.dll:0x10057cb9`, `CBuilding` + 4).
+- **while its construction sphere runs** (`+0x968` = 2, which the sphere task
+  writes at `0x10031342` and `0x10031746`, and back to 1 after): eight points,
+  at angles 0, π/4, …, on a circle about the sphere that `IBuilding` slot 15
+  gives. The radius is that sphere's ÷ cos(π/8) + 20. Only x and y are written.
+- **nothing** for any other object.
+
+### Each tick (slot 7, `0x10030300`) — *read*
+
+1. **The building's clan.** With a building picked, it looks the building up
+   by id in the system areal map. If the building is gone or has become the
+   unit's clan's, a single building **ends the task** (`0x10030362`, returning
+   0) and a search by type plans again. If it is still another clan's, it goes
+   straight to step 3: no timed rescan.
+2. **With nothing picked**, the rescan timer plans again when it fires.
+3. **The walker busy**: *"We are moving..."*, and the task goes on.
+4. **The walker idle, the landing flag clear** — a flyer at its corner: it
+   sets the flag and plans (`0x10030412`). The next plan walks it in.
+5. **The walker idle, the flag set**: if the building (clan areal map, slot 7)
+   is now the unit's clan's, it logs *"Building [..] captured"*. A single
+   building ends. A search by type forgets the building, resets the landing
+   flag from `CanFly` and plans the next one. If the building is not yet the
+   unit's clan's, it plans again.
+
+   So a unit waiting on the pod for it to open plans again each tick, and each
+   plan hands the walker the pod again.
+
+### What fires it, and what follows — *read*, and *derived*
+
+- **The pod.** The building's computer fires when the unit's bounding-sphere
+  centre stands in its zone
+  ([27-ownership.md](27-ownership.md#capture--read)).
+- **A flyer is in the zone too.** The one state of `r_t_02`, `r_l_02` and
+  `r_b_02` (mode `0x150c1`, *measured*) lacks `0x8000000`. So the ground
+  contact places a flyer on the face under it, and makes it that face's
+  object's child, as it does a walker
+  ([24-motion.md](24-motion.md#finding-the-ground--read), step 7). That a
+  flyer over the pod's floor is a building child the zone test sees is
+  *derived*.
+- **The capture.** The callback changes the owner. When the player's clan
+  gains the building, the callback shows 5039 and plays the voice
+  ([27-ownership.md](27-ownership.md#capture--read)). This happens for an AI
+  unit of the player's clan as for the hero.
+- **A single building ends the task.** The unit, idle on the building, gets
+  the unit takt's escape: no target, replacing ([The escape](#the-escape--read)).
+  The escape's start (`0x1002ba50`) never asks the chassis profile. A flyer's
+  points must lie on usable areals, as a walker's do.
+- **A search by type goes on.** It plans the next building from the pod,
+  gets no escape, and roams once nothing is left.
+
+### Mission 04 — *measured*
+
+With the helicopter at its start (477.9, 530.6), on areal 355, whose flag word
+is 0:
+
+| building | across the ground | picked? |
+|---|---:|---|
+| Large Factory `lplant01` (`fr_b_plant`), neutral | 549.1 | **first** |
+| Research Center `einst01` (`fr_e_inst`), neutral | 591.3 | second |
+| main teleport `mtp_m_n1`, neutral | 998.6 | never: the plan skips it |
+| generator `gener01` | 122.0 | never: the player's |
+
+**The factory.**
+- Its outer ring, placed at rotation −0.616, has 13 vertices, all on areals
+  whose word is 1.
+- The nearest to the start is vertex 9 at (734.3, 892.0), 443.1 away. Vertex 8,
+  at 445.1, is next.
+- Its pod is hall-way vertex 31, at (750.02, 950.70, 41.5).
+- Three of its nine exits reach the pod along the hall way: 67 at
+  (733.1, 1022.2) by 115.5, 68 by 161.4, and 69 by 170.3.
+
+**The research centre**, planned from the factory's pod:
+- Its ring has 8 vertices, all on areals whose word is 1.
+- The nearest is vertex 7 at (897.4, 922.7), 150.0 away.
+- Its pod is vertex 0, at (950.71, 869.39, 65.65).
+- Its three exits all reach the pod: 19 by 92.3, 21 by 108.9, and 23 by 108.8.
+  Exit 23, at (877.1, 920.9), is 20.4 from vertex 7.
+- Route 2 of the mission holds the research centre and vertex 7. Its script
+  shows `T04_H02` once the helicopter (id 3) or the hero (id 2) is reported
+  inside it (function 32, [15-behaviour.md](15-behaviour.md)).
+
+### Against the recording — *seen*
+
+The recording of *Teleport*, 960 × 720. Its map positions are read at one
+layout unit of the commander's map, 6.6 m on `Tut_4` (side 1697), and are good
+to about ±13 m.
+
+- **84–86 s, the Battle units page.**
+  - The HQ, *LWC-1 Comm. Center*, is offered Standby, Route, Seek and destroy,
+    Guard and Refit.
+  - The *TFW-2 Warrior* is offered the same, plus Search and capture.
+  - At 86 s, after a click on that row, the helicopter's line reads
+    *searching*.
+  - The HQ reads *standing* at 89 s and *patrolling* at 96 s.
+- **The flight** (the helicopter's mark on the commander's map).
+  - It passes (638, 729) at 112 s, (683, 800) at 120 s and (736, 888) at 128 s.
+  - At 136 s it is at (722, 888), the factory's vertex 9.
+  - It passes (692, 986) at 144 s and (727, 1025) at 152 s, by exit 67.
+  - At 156 s it is at (758, 994), inside.
+  - It averaged about 10 m/s to the corner.
+- **175.5 s, the factory turns.**
+  - The message box reads *"from: System / Building is captured"*.
+  - At 176.0 s, `T04_I03` follows.
+  - Between 175.0 and 175.5 s the factory's map icon turns from grey to light
+    blue.
+- **The research centre.**
+  - At 237 s, `T04_H02` shows: route 2.
+  - At 256 s, *"Building is captured"*, then `T04_I04` at 258 s.
+- **After the last capture**, the helicopter's cross is at (959, 995) at
+  282 s and (787, 926) at 302 s. It then holds at about (715, 847) from 362 s to
+  402 s.
+
+So the plan's order (factory, then research centre) and the landing corner
+agree with the recording.
+
+### For an engine
+
+1. **Orders.**
+   - A click on another clan's building, with only small units selected: a
+     search on that building.
+   - Search and capture: a search by type.
+2. **A flyer lands first.** Take the building's `.bas` outer ring in the world.
+   Keep the vertices on areals whose first flag word is set. Fly to the one
+   nearest across the ground.
+3. **Then walk in.** Once there, or at once for a walker, go to the pod vertex
+   (hall-way bit `0x40`) at speed × `Go_SpeedPercent`. The hero's ways
+   ([24-motion.md](24-motion.md#walking-into-a-building--read-and-measured))
+   are a stand-in for the path the walker plans.
+4. **The capture.** The building fires as for the hero: change the clan, and
+   show 5039 and play the voice when the player's clan gains it.
+5. **After.** A single building ends and the unit escapes. A search by type
+   takes the next building from where it stands, and roams once none is left.
+
+### Not established
+
+- How the walker's path joins the hall way (`MGraph`), and so which exit a
+  capturer takes. The hall way's shortest way from the nearest exit is a
+  stand-in.
+- How high a flyer's points are put, and so whether it touches down at its
+  corner or hovers there (`Movement_FlyHeight` 40 and `FlyNearLandHeight` 15,
+  by name only).
+- Why the helicopter covered its first 443 m at about 10 m/s, a third of its
+  33.3 m/s forward top speed.
+- What held it at (715, 847) from 362 s: a roaming search plans again whenever
+  its walker stops.
+- `IBuilding` slot 15's sphere, which the octagon contour is drawn about.
 
 ## Where a search looks — *read*, and *measured*
 

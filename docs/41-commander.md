@@ -399,6 +399,22 @@ researches it is in the tree and researched, the constructor's rule of
 - *seen* at 190 s, with the builder *[building]*, the same menu without Build
   Mine: condition 4.
 
+**Mission 04** (*seen*, the recording of *Teleport*, 84–96 s, the Battle units
+page):
+- **The rows.** The HQ, *LWC-1 Comm. Center*, is offered Standby, Route, Seek
+  and destroy, Guard and Refit. The helicopter, *TFW-2 Warrior*, is offered the
+  same with Search and capture after Route: the row test's size class, 4 against
+  1.
+- **The unit box.** The HQ's box shows a fourth, ▶ button beside A, B and C,
+  which the helicopter's does not.
+- **The orders.** A click on the helicopter's Search and capture turns its line
+  to *[searching]* at 86 s. The HQ's Standby turns its line to *[standing]* at
+  89 s, and its Guard to *[patrolling]* at 96 s. What follows the search is
+  [31-packages.md](31-packages.md#the-capture-tick-by-tick--read-measured-and-seen)'s.
+- **The map.** The commander's map beside the page marks the other clans'
+  buildings by their icons only while one of the player's units has them on
+  radar ([35-hud.md](35-hud.md#the-panel-in-the-cockpit--read-and-seen)).
+
 ## The building pages, 5 to 8 — *read*, and *seen*
 
 **The rows** (`0x10085340`, *mask*) are the clan's buildings within the mask
@@ -685,6 +701,14 @@ Mission 04, on the Enhanced Research Center's pod
       unsphered centre with the fewest orders.
     - **Every frame**, report each queued item now researched: abort its order,
       post *"Research complete... (name)"* and play `VOICE_RSRCH_COMPLETE`.
+12. **The commander's map** (374, 63)–(640, 329) marks buildings with their
+    `icons` cells, 20 × 20 about their place.
+    - **Colour.** The clan rule's colour, white for a selected building of
+      the player's.
+    - **Which.** The player's own, and others' only while one of the player's
+      units has them among its radar contacts.
+    - **The rest.** Units as crosses and squares, and the camera
+      ([35-hud.md](35-hud.md#the-panel-in-the-cockpit--read-and-seen)).
 
 ## Not established
 

@@ -9009,6 +9009,264 @@ def check_mission_03_ways(check, game: Path) -> None:
           f"triangle flags, tilt from level): {sorted(near)}")
 
 
+def check_unit_capture(check, game: Path) -> None:
+    """A small warbot's capture (docs/31, "The capture, tick by tick"): the search task's
+    target, a flyer's landing at a contour corner, the walk to the pod, the capture's voices,
+    and which other clans' objects the maps mark (docs/35)."""
+    paths = {n: game / n for n in ("Behavior.dll", "Terrain.dll", "ArealMap.dll", "iron3d.dll")}
+    if not all(p.exists() for p in paths.values()):
+        return
+    b_at = _image_at(paths["Behavior.dll"].read_bytes())
+    t_at = _image_at(paths["Terrain.dll"].read_bytes())
+    a_at = _image_at(paths["ArealMap.dll"].read_bytes())
+    i_at = _image_at(paths["iron3d.dll"].read_bytes())
+
+    def dword(at, va: int) -> int:
+        return struct.unpack("<I", at(va, 4))[0]
+
+    def hexes(at, *pairs) -> bool:
+        return all(at(va, len(bytes.fromhex(h))) == bytes.fromhex(h) for va, h in pairs)
+
+    def cstring(at, va: int) -> str:
+        return at(va, 64).split(b"\0")[0].decode("latin-1")
+
+    # 1. SetTarget: a logic id with the top bit, size class <= 2, another clan's, not a main
+    # teleport; by type 0x10000000 minerals or the top bit capture; 0x204 enemies.
+    target = hexes(
+        b_at,
+        (0x1003011B, "68000070416800007041"),
+        (0x1003013E, "2d010200000f849000000083e802741648"),
+        (0x10030164, "8b41048bc881e10000001081f900000010750fb8010000005f8946585e5d5bc2080025000000"
+                     "803d00000080"),
+        (0x100301A0, "680102000050ff52688338020f8fb9000000"),
+        (0x100301B2, "680000404068000040408bcfc7465c01000000"),
+        (0x1003024C, "8b1757ff52383d000200807412b801000000896e6c894660"))
+    start = hexes(b_at, (0x100302BD, "e8ae43feff8b480c85c974188b4424188b16508bcec6467c00ff523c"
+                                     "5f5e83c40cc204008b4424188b16508bcec6467c01"))
+    check("Behavior.dll: the capture's target -- a foreign building by id, or by type",
+          target and start,
+          "SetTarget (0x10030110) clears +0x58..+0x64 and times rescans at 15 + 15 s; 0x201: "
+          "a top-bit id, variable 0x201 <= 2, not the unit's clan, Type not 0x80000200, keeps "
+          "+0x6c and sets +0x60; 0x203: 0x10000000 minerals (+0x58), the top bit capture "
+          "(+0x5c, 3 + 3 s); 0x204 enemies (+0x64); the start sets +0x7c to !CanFly")
+
+    # 2. The plan: a walker or a landed flyer walks in to place flag 0x40; a flyer first lands
+    # at the nearest contour vertex on an areal whose record's +0x20 word is set.
+    walk_in = hexes(b_at, (0x1003090E, "8d7d048bcfe8583dfeff39700c74078a457c84c074468bcfe8053dfe"
+                                       "ff8b90fc0500008bcf89542420e8243dfeffd9442420d848348b456c"
+                                       "518bcdd91c246a4050e85c11fdff85c07412b801"))
+    land = hexes(
+        b_at,
+        (0x1003096A, "837d6cff0f84770100008d75048bcee8f23cfeff8b480c85c90f8460010000"),
+        (0x1003098B, "c6457c00"),
+        (0x100309C6, "8b08680302000050ff51688b088b4004"),
+        (0x10030A3D, "52508b08ff511c8bce8bf8e8e33bfeff8b404857508b08ff511885c0743d8b108b422085c0"
+                     "7434"),
+        (0x10030AD3, "518b4c241ce8830efdff"))
+    inside = hexes(b_at, (0x100013C5, "8b038d4c241051ba030300008bcbff10"),
+                   (0x100013F7, "8b54242856528b086aff50ff51348bf083feff74"),
+                   (0x10001414, "52568b0850ff5114"))
+    hall = (hexes(a_at, (0x10009749, "c70020940310c7400418940310"))
+            and [dword(a_at, 0x10039420 + 4 * k) for k in (3, 5, 13)]
+            == [0x1000A6B0, 0x1000A760, 0x1000A7E0])
+    check("Behavior.dll: a capturer walks in to the pod; a flyer lands at a contour corner first",
+          walk_in and land and inside and hall,
+          "the plan (0x100306f0) walks a non-flyer, or a flyer with +0x7c set, in (0x10001ab0, "
+          "flag 0x40, speed x Go_SpeedPercent): MakeInsideDest asks the building's 0x303 "
+          "(MHallWay, vtable 0x10039420) slot 13 GetBestVertexOfType and slot 5 the vertex's "
+          "world point; a flyer otherwise clears +0x7c and goes (0x10001960) to the nearest "
+          "vertex of variable 0x203 on a system areal (slot 7 at the point, slot 6's record) "
+          "whose +0x20 word is set")
+
+    # 3. The takt: an idle flyer at its corner sets +0x7c and plans; 'Building [..] captured'
+    # ends a single building; a picked foreign building skips the rescan timer.
+    takt = hexes(b_at, (0x10030348, "8b16568be8ff52443bc50f858c0000008b436085"),
+                 (0x1003040D, "8b03578bcbc6437c01ff503c"),
+                 (0x10030474, "68a4210610"), (0x100304A4, "8b436085c0740c5f5e5d33c0")) \
+        and cstring(b_at, 0x100621A4) == "] captured"
+    # The contour: IBasement's one outer ring, or an octagon while the sphere runs.
+    contour = (dword(b_at, 0x1000AA14 + 4) == 0x1000A611
+               and hexes(b_at, (0x1000A62B, "ba110000008b01ff1085c00f84280100008b4424048d542408528d"
+                                            "5424208b08526a0250ff510c"),
+                         (0x1000A6B1, "ba170000008b01ff10"), (0x1000A6ED, "6a0250ff513c"),
+                         (0x1000A719, "83f908"),
+                         (0x10031342, "c7806809000002000000"), (0x10031746, "c7806809000002000000"),
+                         (0x10031646, "c7806809000001000000"))
+               and cstring(b_at, 0x1005E7F4) == "Behaviour panic: Building has %d contours"
+               # pi/8 and pi/4 written to seven places, stored as a double and a float.
+               and math.isclose(struct.unpack("<d", b_at(0x10059610, 8))[0], math.pi / 8,
+                                rel_tol=1e-5)
+               and struct.unpack("<f", b_at(0x1005960C, 4))[0] == 20.0
+               and math.isclose(struct.unpack("<f", b_at(0x100595DC, 4))[0], math.pi / 4,
+                                rel_tol=1e-5))
+    basement = (t_at(0x10057D2B + 0x11, 1) == b"\x02" and dword(t_at, 0x10057D13 + 8) == 0x10057CB9
+                and t_at(0x10057CC3, 6) == bytes.fromhex("8b55fc83ea04")
+                and dword(t_at, 0x1009B57C + 4 * 3) == 0x10057DB0)
+    escape_asks = {target for _, target in _calls(b_at, 0x1002BA50, 0x580)}
+    check("Behavior.dll: the takt lands a flyer and ends at the capture; the contour is the ring",
+          takt and contour and basement and 0x10014670 not in escape_asks,
+          "0x10030300: a foreign picked building goes straight to the walker; idle with +0x7c "
+          "clear sets it and plans (0x10030412); ']: captured' then a single building returns "
+          "0 (0x100304a4); variable 0x203 (0x1000a611): +0x968 = 1, interface 0x11 "
+          "(IBasement, CBuilding + 4) slot 3 with one ring, else 2 (the sphere task's) eight "
+          "points at pi/4 about IBuilding slot 15's sphere, r / cos(pi/8) + 20; the escape's "
+          "start (0x1002ba50) never asks the chassis profile")
+
+    # 4. The voices: the taker's clan against the player's; losing one has no System line.
+    change = {t for _, t in _calls(i_at, 0x100A4956, 0x2A0)}
+    lose = {t for _, t in _calls(i_at, 0x100A4C3C, 0x78)}
+    voices = hexes(i_at, (0x100A4947, "8b5424148b7a243bfd0f85e6020000"),
+                   (0x100A4C3C, "8b4c245439690c0f85d5")) \
+        and [t for _, t in _calls(i_at, 0x100A4956, 0x30)] == [0x100394A0, 0x10039460, 0x10039440]
+    check("iron3d.dll: a building the player's clan gains is announced; one it loses only voiced",
+          voices and 0x1007EB60 in change and 0x1007EB60 not in lose and 0x10061AC0 in lose,
+          "0x100a48a0: the taker's record clan (+0x24) is the player's: 5039 as a System line, "
+          "VOICE_NBUILD_CAPTURE for an old clan of type 3 or word 1, EBUILD for word 0, "
+          "BUILD for any other; the old clan (+0xc) the player's: VOICE_BUILD_CAPTURE alone")
+
+    # 5. Which other clans' objects the maps mark: the ids on the clan's units' contact lists,
+    # emptied each pass of the run loop.
+    known = hexes(
+        i_at,
+        (0x1007E66B, "8b4424083946247506b0015ec204008b76286bc068568d8c0824070000e8e3acfbff"),
+        (0x10039370, "8b51588b41543bc274118b4c24048bff3908740783c0043bc275f5"),
+        (0x100393B4, "8d73548b4b588b063bc1"),
+        (0x10090BFB, "3b88f00a0000740c3b88ec0a00000f857e010000"),
+        (0x10090D8D, "8b0e8b7924e8e9a7fcff6bff688b501c83c608568d8c3a24070000e8f385faff"),
+        (0x10039410, "8b41588b5154568bf02bf0c1fe0285f67e0f578b38893a83c00483c2044e75f35f895158"),
+        (0x1005E707, "8b450883f803"),
+        (0x1005E772, "8bb9cc0a00003bfb7e1933f68bff8b551c8d8c1624070000e881acfdff83c6684f"),
+        (0x1005EF9E, "0f856ff7ffff"),
+        (0x1007E517, "8b4e3c8b01ff5024894628"))
+    check("iron3d.dll: the maps mark another clan's object only while the clan's radars hold it",
+          known,
+          "0x1007e660: the owner (+0x24) is the clan, or the record's id (+0x28, IGameObject "
+          "slot 9) is in the clan record's +0x54 list; every unit record's target-list takt "
+          "(driven or not, 0x10090c09) appends its contacts to its clan's list (0x10090da8 -> "
+          "0x100393a0, once each); the run loop (until state 3, back-edge 0x1005ef9e) empties "
+          "every clan's list each pass (0x1005e78a -> 0x10039410)")
+
+
+def check_mission_04_capture(check, game: Path) -> None:
+    """Mission 04's helicopter and the two buildings it takes: which it picks, where it lands,
+    the pods and the ways in (docs/31, "The capture, tick by tick")."""
+    import heapq
+
+    tma = game / "MISSIONS" / "CAMPAIGN" / "CAMPAIGN.00" / "Mission.04" / "data.tma"
+    land = game / "DATA" / "MAPS" / "Tut_4" / "Land.map"
+    if not (tma.exists() and land.exists() and (game / "fortif.rlb").exists()):
+        return
+    tut4 = mission.load(tma)
+    amap = arealmap.load(land)
+    fortif = NResArchive.open(game / "fortif.rlb")
+
+    def inside(poly, x, y) -> bool:
+        hit = False
+        for i in range(len(poly)):
+            (x1, y1), (x2, y2) = poly[i][:2], poly[(i + 1) % len(poly)][:2]
+            if (y1 > y) != (y2 > y) and x < x1 + (y - y1) * (x2 - x1) / (y2 - y1):
+                hit = not hit
+        return hit
+
+    def word(x, y):
+        found = [amap.areals[i].flags[0] for i in amap.areals_at(x, y)
+                 if inside(amap.areals[i].vertices, x, y)]
+        return found[0] if len(found) == 1 else None
+
+    def placed(name):
+        return next(o for o in tut4.objects if name in o.path.lower())
+
+    heli = placed("tut4_f1")
+    hx, hy = heli.position[:2]
+    by_type = {mission.KIND_BUILDING: {}}
+    for o in tut4.objects:
+        if o.kind == mission.KIND_BUILDING:
+            by_type[o.kind][o.path.split("\\")[-1].lower()] = (
+                round(math.dist(o.position[:2], (hx, hy)), 1), o.clan_index)
+    player = heli.clan_index
+    pickable = {n: d for n, (d, clan) in by_type[mission.KIND_BUILDING].items()
+                if clan != player and not n.startswith("mtp_")}
+    first = min(pickable, key=pickable.get)
+
+    def building(stem, obj):
+        (px, py, pz), r = obj.position, obj.rotation
+
+        def world(p):
+            return (px + p[0] * math.cos(r) - p[1] * math.sin(r),
+                    py + p[0] * math.sin(r) + p[1] * math.cos(r), pz + p[2])
+
+        blob = fortif.read_name(stem + ".msh")
+        model = objmesh.parse(blob, stem)
+        graph = objmesh.read_path_graph(NResArchive(blob, stem))
+        pos = [world(objmesh.apply(model.world_pose(n.b), n.position)) for n in graph.nodes]
+        links = defaultdict(set)
+        for link in graph.links:
+            links[link.start].add(link.end)
+            links[link.end].add(link.start)
+        pod = next(i for i, n in enumerate(graph.nodes) if n.a & objmesh.PLACE_POD)
+        best, queue = {pod: 0.0}, [(0.0, pod)]
+        while queue:
+            d, v = heapq.heappop(queue)
+            if d > best[v]:
+                continue
+            for w in links[v]:
+                nd = d + math.dist(pos[v], pos[w])
+                if nd < best.get(w, math.inf):
+                    best[w] = nd
+                    heapq.heappush(queue, (nd, w))
+        exits = {i: round(best[i], 1) for i, n in enumerate(graph.nodes) if n.a & 1 and i in best}
+        _, outer = objects.parse_base(fortif.read_name(stem + ".bas"), stem)
+        ring = [world(p) for p in outer.points[:-1]]
+        return dict(pod=pod, pod_at=tuple(round(c, 2) for c in pos[pod]), exits=exits,
+                    ring=ring, words={word(*v[:2]) for v in ring}, pos=pos,
+                    all_exits=sum(1 for n in graph.nodes if n.a & 1))
+
+    plant = building("fr_b_plant", placed("lplant01"))
+    inst = building("fr_e_inst", placed("einst01"))
+
+    def nearest(ring, x, y):
+        k = min(range(len(ring)), key=lambda k: math.dist(ring[k][:2], (x, y)))
+        return k, tuple(round(c, 1) for c in ring[k][:2]), round(math.dist(ring[k][:2], (x, y)), 1)
+
+    corner = nearest(plant["ring"], hx, hy)
+    second = nearest(inst["ring"], *plant["pos"][plant["pod"]][:2])
+    route2 = next(r for r in tut4.routes if r.id == 2)
+    in_route = (inside(route2.points, *placed("einst01").position[:2])
+                and inside(route2.points, *second[1]))
+    check("Mission 04: the helicopter takes the factory first and lands at its ring's vertex 9",
+          word(hx, hy) == 0 and pickable == {"lplant01.dat": 549.1, "einst01.dat": 591.3}
+          and first == "lplant01.dat" and by_type[mission.KIND_BUILDING]["mtp_m_n1.dat"][0] == 998.6
+          and len(plant["ring"]) == 13 and plant["words"] == {1}
+          and corner == (9, (734.3, 892.0), 443.1)
+          and (plant["pod"], plant["pod_at"][:2]) == (31, (750.02, 950.7))
+          and plant["exits"] == {67: 115.5, 68: 161.4, 69: 170.3} and plant["all_exits"] == 9,
+          f"tut4_f1 at ({hx:.1f}, {hy:.1f}), areal word {word(hx, hy)}; foreign buildings the "
+          f"plan may pick, across the ground: {pickable} (the main teleport, "
+          f"{by_type[mission.KIND_BUILDING]['mtp_m_n1.dat'][0]}, skipped); fr_b_plant's outer "
+          f"ring: {len(plant['ring'])} vertices on areal words {plant['words']}, nearest "
+          f"{corner}; pod vertex {plant['pod']} at {plant['pod_at']}; exits reaching it by the "
+          f"hall way {plant['exits']} of {plant['all_exits']}")
+    check("Mission 04: from the factory's pod the research centre, by its ring's vertex 7",
+          len(inst["ring"]) == 8 and inst["words"] == {1} and second == (7, (897.4, 922.7), 150.0)
+          and (inst["pod"], inst["pod_at"][:2]) == (0, (950.71, 869.39))
+          and inst["exits"] == {19: 92.3, 21: 108.9, 23: 108.8} and in_route,
+          f"fr_e_inst's outer ring: {len(inst['ring'])} vertices on areal words "
+          f"{inst['words']}, nearest the factory's pod {second}; pod vertex {inst['pod']} at "
+          f"{inst['pod_at']}; exits {inst['exits']}; route 2 holds the centre and that vertex: "
+          f"{in_route}")
+
+    names = frozenset(p.name.lower() for p in all_archives(game))
+    bases = NResArchive.open(game / "bases.rlb")
+    flyers = {}
+    for stem in ("r_t_02", "r_l_02", "r_b_02"):
+        ctl = control.parse(bases.read_name(stem + ".ctl"), names)
+        flyers[stem] = sorted({s.mode for s in ctl.states})
+    check("bases.rlb: a flyer's one state leaves 0x8000000 clear, so it is placed on faces",
+          all(modes == [0x150C1] for modes in flyers.values()),
+          f"state modes {({k: [hex(m) for m in v] for k, v in flyers.items()})}; bit 0x8000000 "
+          f"would skip PlaceObjectOnWorldFace (docs/24, Finding the ground, step 7)")
+
+
 def _phase_record(ngi_at, index: int) -> tuple[int, dict]:
     """Record ``index`` of ``Ngi32.dll``'s render phase table (``0x10036a30``, 44 bytes
     each): its phase and its triples as {(stage, state): value}, render states under
@@ -19435,6 +19693,7 @@ def run(game: Path) -> int:
         check_building_lighting,
         check_building_ground,
         check_building_route, check_mission_03_ways,
+        check_unit_capture, check_mission_04_capture,
         check_repair,
         check_chassis, check_weapons,
         check_firing,

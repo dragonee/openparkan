@@ -1216,18 +1216,21 @@ units, goes to (x₀ + 5 + round(256 x ÷ L), y₁ − 5 − round(256 y ÷ L)).
    - **The icons** are 24 × 24 cells of the `icons` page (`0x10064f10`; type to
      index `0x1009f4c0`):
 
-     | type (`varset.var`) | icon cell |
-     |---|---|
-     | `BUILDING_GENERATOR` `0x80000002` | (0, 24) |
-     | `BUILDING_MINE` `0x80000004` | (24, 24) |
-     | `BUILDING_STORAGE` `0x80000008` | (48, 0) |
-     | `BUILDING_PLANT` `0x80000010` | (72, 24) |
-     | `BUILDING_BUNKER_SMALL`, `_MEDIUM`, `_LARGE` | (96, 24) |
-     | `BUILDING_HANGAR` `0x80000040` | (120, 24) |
-     | `BUILDING_INSTITUTE` `0x80000400` | (48, 24) |
-     | `BUILDING_TOWER_MEDIUM`, `_LARGE` | (168, 24) |
-     | `BUILDING_MAINTELEPORT` `0x80000200` | (216, 24) |
-     | anything else, the bridge and the ruin included | no mark |
+     | type (`varset.var`) | icon cell | the picture (*seen*, `ui/ui.lib`'s `icons.tex`) |
+     |---|---|---|
+     | `BUILDING_GENERATOR` `0x80000002` | (0, 24) | a capacitor with a plus |
+     | `BUILDING_MINE` `0x80000004` | (24, 24) | a shovel and a pick, crossed |
+     | `BUILDING_STORAGE` `0x80000008` | (48, 0) | stacked crates |
+     | `BUILDING_PLANT` `0x80000010` | (72, 24) | two gears |
+     | `BUILDING_BUNKER_SMALL`, `_MEDIUM`, `_LARGE` | (96, 24) | a flag |
+     | `BUILDING_HANGAR` `0x80000040` | (120, 24) | a wrench |
+     | `BUILDING_INSTITUTE` `0x80000400` | (48, 24) | a pair of compasses |
+     | `BUILDING_TOWER_MEDIUM`, `_LARGE` | (168, 24) | a tower |
+     | `BUILDING_MAINTELEPORT` `0x80000200` | (216, 24) | an arrow up over bars |
+     | anything else, the bridge and the ruin included | no mark | |
+
+     The cells are white art; the colour tints them. They are drawn with
+     `0xff000000` as the specular and blend 1 (`0x100348ca`).
 
 3. **Every unit** (`+0x720`, `0x10077690`), in screen pixels (GUI slot 0 set to
    0): its map point (x, y) goes to (round(x · sx), round(y · sy)).
@@ -1249,9 +1252,28 @@ units, goes to (x₀ + 5 + round(256 x ÷ L), y₁ − 5 − round(256 y ÷ L)).
    square (x ± 2, y ± 2) with its two diagonals, and a tick from 2 to 7 units
    out along its view.
 
-**Which get a mark.** The unit or building must be of the player's clan, or of
-a clan in the player clan record's `+0x54` list (`0x1007e660`,
-[25-sensors.md](25-sensors.md#how-the-game-colours-what-it-marks--read-and-measured)).
+**Which get a mark.** The unit or building must be the player's clan's, or
+**on a contact list of one of the player's units this frame** (`0x1007e660`,
+*read*):
+
+- **The test.** It passes at once when the record's owner (`+0x24`) is the
+  player's clan. Otherwise it looks for the record's object id (`+0x28`, taken
+  from `IGameObject` slot 9 as the record binds, `0x1007e51f`) in the player
+  clan record's id list, `+0x54`–`+0x58` (`0x10039370`).
+- **Who fills the list.** Every unit record's takt runs its target list's takt
+  ([25-sensors.md](25-sensors.md#the-players-target--read-and-measured)).
+  That rebuilds the list from the unit's radar contacts. Then, for every unit
+  and not only the driven one (`0x10090c09`), it appends each listed id that
+  is not yet there to the list of **the unit's own clan** (`0x10090da8` →
+  `0x100393a0`).
+- **Who empties it.** The game's run loop, which pumps the window messages
+  and runs until its state is 3 (back-edge `0x1005ef9e`), empties every clan's
+  list on each pass (`0x1005e780` → `0x10039410`).
+- **So** another clan's building shows while a unit of the player's clan has
+  it in radar range, and goes when none does (*derived*). That the refill runs
+  between the emptying and the draw is *derived* from the recording, which
+  shows other clans' buildings.
+
 An exception runs when the game's `+0xea` byte is set and `0x1005a850`
 answers; that was not read. Also skipped:
 - an owner word of `0xfffe`;
@@ -1271,10 +1293,32 @@ answers; that was not read. Also skipped:
   near-white texel, plus half the sky (192, 192, 224), gives (122, 216, 138),
   blended in display space as the HUD's art is (*derived*).
 
+*Seen*, the recording of *Teleport* (Mission 04, `Tut_4`, L = 1697), on both
+variants:
+
+- **At 84 s**, in the commander's map, the only marks are at the player's
+  start, in light blue: the generator's capacitor, the HQ's square (outlined
+  in white, being selected) and the helicopter's small cross, with the yellow
+  camera. There is nothing yet at the
+  neutral factory (778, 990) or research centre (960, 874).
+- **As the helicopter nears them**, their icons appear in grey (160, 160,
+  160), the neutral clan's colour: the factory's gears from 120 s and the
+  research centre's compasses from 128 s. Each lies within about 10 m of its
+  building's place.
+- **At 144 s the research centre's icon is gone**, with the helicopter about
+  270 m from it, beyond its 250 m radar. At 136 s it had been about 240 m away.
+- **The factory's icon turns light blue** between 175.0 and 175.5 s, as
+  *"Building is captured"* shows.
+- **In the cockpit's map at 362 s** it is white, while the player has the
+  factory selected at its screen.
+- **The teleport's arrow** appears in grey at 382 s, once the walking hero has
+  come near.
+
 ### Not established
 
-- What the level's `+0x700` list holds, and the player clan record's `+0x54`
-  list ([25-sensors.md](25-sensors.md#not-established)).
+- What the level's `+0x700` list holds. ~~The player clan record's `+0x54`
+  list~~ — **read**: the ids on its units' contact lists this frame
+  ([The panel in the cockpit](#the-panel-in-the-cockpit--read-and-seen)).
 - That `+0xd8` and `+0xdc` are the unit's heading (*guess*, from the line's
   use).
 - The commander's variant (`0x10073830`): its title bar at (374, 43), its exit

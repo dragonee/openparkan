@@ -27717,3 +27717,91 @@ kind = "site"
 name = "level setup: the player clan's research tree becomes 0x1010c380"
 read = true
 doc = "docs/16-research.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1000a611"
+kind = "site"
+name = "MBehaviour variable 0x203, a building's contour: IBasement slot 3's one outer ring (+0x968 = 1), or eight points about IBuilding slot 15's sphere while the sphere runs (2)"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1003096a"
+kind = "site"
+name = "search task plan: a flyer not yet landed goes to the nearest contour vertex on an areal whose record's +0x20 word is set"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10030412"
+kind = "site"
+name = "search task takt: the walker idle with the landing flag +0x7c clear sets it and plans, which walks the unit in"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100393a0"
+kind = "function"
+name = "clan record: append each id of a contact list to its id list (+0x54), once each"
+doc = "docs/35-hud.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10039410"
+kind = "function"
+name = "clan record: empty its id list (+0x54)"
+doc = "docs/35-hud.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10090da8"
+kind = "site"
+name = "target list takt: every unit record's listed contacts join its own clan's id list"
+doc = "docs/35-hud.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1005e78a"
+kind = "site"
+name = "game run loop: every clan's id list emptied on each pass"
+doc = "docs/35-hud.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1007e51f"
+kind = "site"
+name = "record binding: +0x28 the object's id, IGameObject slot 9"
+doc = "docs/35-hud.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100a4c40"
+kind = "site"
+name = "owner change: the player's clan losing a building plays VOICE_BUILD_CAPTURE with no System line"
+doc = "docs/27-ownership.md"
+read = true
+
+[[entry]]
+module = "ArealMap.dll"
+at = "0x10039420"
+kind = "datum"
+name = "MHallWay vtable: 3 vertex count, 5 a vertex's world position, 13 GetBestVertexOfType"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10057cb9"
+kind = "site"
+name = "CBuilding interface request: 0x11 answers IBasement (this - 4)"
+doc = "docs/31-packages.md"
+read = true
