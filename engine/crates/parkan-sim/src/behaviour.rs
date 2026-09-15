@@ -83,6 +83,23 @@ pub const PATROL_HELP_SCALE: f32 = 1.3;
 pub const PATROL_HELP_LIMIT: f32 = 78.0;
 /// A unit guard scores a contact by its distance from the unit × this (`0x10059968`).
 pub const PATROL_UNIT_SHARE: f32 = 0.7;
+/// The go task's `Go_SpeedPercent`, and how near its place it is over (`0x1002b670`).
+pub const GO_SPEED: f32 = 1.0;
+pub const GO_ARRIVED: f32 = 30.0;
+/// `Build_SpeedPercent` and `Transport_SpeedPercent` (`Behavior.dll:0x10016250`).
+pub const BUILD_SPEED: f32 = 1.0;
+pub const TRANSPORT_SPEED: f32 = 1.0;
+
+/// Where a build task stands (`+0x5c`, `0x10028b80`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BuildState {
+    /// Given, not yet walking.
+    Start,
+    /// 3, GoToBuild: walking to the site.
+    Going,
+    /// 4, Wait: at the site; the building is made on the takt after.
+    Arrived,
+}
 
 /// What the behaviour sees of another object.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -223,6 +240,27 @@ pub enum Task {
     Leave {
         goal: Option<Vec3>,
     },
+    /// Route (order 2, vtable `0x10059e74`): to a place at `Go_SpeedPercent`, over within 30
+    /// of it once the walker stops; interrupted only by reasons 3 and 4 (`0x1002b390`).
+    Go {
+        goal: Vec3,
+        walking: bool,
+    },
+    /// Build (order 7, `M_Task_Build`, vtable `0x10059c60`): to the site's origin, where the
+    /// play makes the building of `type_word` at the placement `site` (x, y, z, turn).
+    Build {
+        type_word: u32,
+        site: [f32; 4],
+        state: BuildState,
+    },
+    /// Transport minerals (order 6, `M_Task_Transport`, vtable `0x10059ca8`): the play picks
+    /// the mine and the storage and hands the task each place to walk to; the task tells it
+    /// when it has arrived (docs/32, "Transporting ore").
+    Transport {
+        goal: Option<Vec3>,
+        going: bool,
+        arrived: bool,
+    },
 }
 
 impl Task {
@@ -288,6 +326,20 @@ impl Task {
             (orders::ATTACK, Target::LogicId(id)) => {
                 Task::Attack { target: Some(id), fighting: false, next_ms: 0.0, limit: None }
             }
+            (orders::GO, Target::Place(at)) => Task::Go { goal: Vec3::from_array(at), walking: false },
+            (orders::GO, _) => return None,
+            // A `0x202` place becomes an unturned placement at it (`SetTarget`, `0x100285f0`).
+            (orders::BUILD, Target::Placement(site)) => {
+                Task::Build { type_word: order.parameter as u32, site, state: BuildState::Start }
+            }
+            (orders::BUILD, Target::Place([x, y, z])) => Task::Build {
+                type_word: order.parameter as u32,
+                site: [x, y, z, 0.0],
+                state: BuildState::Start,
+            },
+            (orders::BUILD, _) => return None,
+            // The transport ignores its target (`0x10031f70`).
+            (orders::TRANSPORT, _) => Task::Transport { goal: None, going: false, arrived: false },
             _ => Task::Stop,
         })
     }
@@ -673,6 +725,47 @@ impl Behaviour {
                 let _ = goal;
                 Some(Takt { walk: Walk::Keep, target: None, fire_freely: false })
             }
+            Task::Go { goal, walking } => {
+                self.fire = FireMode::Nearest;
+                let mut walk = Walk::Keep;
+                if !walking {
+                    walk = Walk::To(goal, GO_SPEED);
+                } else if senses.walker_idle {
+                    // STAND-IN: docs/31-packages.md#what-each-package-does--read -- whether the
+                    // go task's 30 is measured in three dimensions is not read: across the
+                    // ground, as a script's place carries no height.
+                    if at.truncate().distance(goal.truncate()) <= GO_ARRIVED {
+                        return None;
+                    }
+                    walk = Walk::To(goal, GO_SPEED);
+                }
+                *self.tasks.last_mut()? = Task::Go { goal, walking: true };
+                Some(Takt { walk, target: self.fire_target(senses), fire_freely: true })
+            }
+            Task::Build { type_word, site, state } => {
+                self.fire = FireMode::Nearest;
+                let (walk, state) = match state {
+                    BuildState::Start => {
+                        (Walk::To(Vec3::new(site[0], site[1], site[2]), BUILD_SPEED), BuildState::Going)
+                    }
+                    BuildState::Going if senses.walker_idle => (Walk::Clear, BuildState::Arrived),
+                    BuildState::Going => (Walk::Keep, BuildState::Going),
+                    BuildState::Arrived => (Walk::Clear, BuildState::Arrived),
+                };
+                *self.tasks.last_mut()? = Task::Build { type_word, site, state };
+                Some(Takt { walk, target: self.fire_target(senses), fire_freely: false })
+            }
+            Task::Transport { goal, going, arrived } => {
+                self.fire = FireMode::Nearest;
+                let (walk, going, arrived) = match goal {
+                    Some(g) if !going && !arrived => (Walk::To(g, TRANSPORT_SPEED), true, false),
+                    Some(_) if going && senses.walker_idle => (Walk::Clear, false, true),
+                    Some(_) if going => (Walk::Keep, true, false),
+                    _ => (Walk::Clear, false, arrived),
+                };
+                *self.tasks.last_mut()? = Task::Transport { goal, going, arrived };
+                Some(Takt { walk, target: self.fire_target(senses), fire_freely: false })
+            }
             Task::Attack { target, fighting, next_ms, limit } => {
                 if !senses.has_weapon {
                     return None;
@@ -955,6 +1048,61 @@ mod tests {
         refit.order(&Order { code: orders::RELOAD, parameter: 0, target: Target::NotDefined });
         refit.takt(&senses(&[], 0.0, Vec3::ZERO, true));
         assert_eq!(refit.task(), Task::Stop);
+    }
+
+    #[test]
+    fn a_go_walks_to_its_place_and_is_over_within_30_once_the_walker_stops() {
+        let order = Order { code: orders::GO, parameter: 0, target: Target::Place([500.0, 0.0, 0.0]) };
+        let mut b = Behaviour::new(2);
+        assert!(b.insert_order(&order, orders::INSERT_REPLACE));
+        let t = b.takt(&senses(&[], 0.0, Vec3::ZERO, true));
+        assert_eq!((t.walk, t.fire_freely), (Walk::To(Vec3::new(500.0, 0.0, 0.0), 1.0), true));
+        assert_eq!(b.takt(&senses(&[], 100.0, Vec3::new(100.0, 0.0, 0.0), false)).walk, Walk::Keep);
+        // Stopped short, it sets off again; stopped within 30, it is over.
+        assert!(matches!(b.takt(&senses(&[], 200.0, Vec3::new(400.0, 0.0, 0.0), true)).walk, Walk::To(..)));
+        b.takt(&senses(&[], 300.0, Vec3::new(475.0, 0.0, 9.0), true));
+        assert_eq!(b.task(), Task::Stop);
+        // An enemy in reach does not pull it off its way.
+        let enemy = Seen { hostile: true, ..unit(9, 50.0, 0.0) };
+        let mut c = Behaviour::new(2);
+        c.order(&order);
+        c.takt(&senses(&[enemy], 0.0, Vec3::ZERO, true));
+        assert!(matches!(c.task(), Task::Go { .. }));
+    }
+
+    #[test]
+    fn a_build_walks_to_its_site_and_waits_there_for_the_play() {
+        let order = Order {
+            code: orders::BUILD,
+            parameter: 0x8000_0004_u32 as i32,
+            target: Target::Placement([1026.0, 942.0, 81.0, 0.5]),
+        };
+        let mut b = Behaviour::new(2);
+        b.order(&order);
+        let t = b.takt(&senses(&[], 0.0, Vec3::ZERO, true));
+        assert_eq!(t.walk, Walk::To(Vec3::new(1026.0, 942.0, 81.0), 1.0));
+        b.takt(&senses(&[], 100.0, Vec3::ZERO, false));
+        assert!(matches!(b.task(), Task::Build { state: BuildState::Going, .. }));
+        b.takt(&senses(&[], 200.0, Vec3::ZERO, true));
+        assert_eq!(
+            b.task(),
+            Task::Build {
+                type_word: 0x8000_0004,
+                site: [1026.0, 942.0, 81.0, 0.5],
+                state: BuildState::Arrived
+            }
+        );
+    }
+
+    #[test]
+    fn a_transport_walks_where_the_play_sends_it_and_says_when_it_is_there() {
+        let mut b = Behaviour::new(2);
+        b.order(&Order { code: orders::TRANSPORT, parameter: -1, target: Target::NotDefined });
+        assert_eq!(b.takt(&senses(&[], 0.0, Vec3::ZERO, true)).walk, Walk::Clear);
+        *b.tasks.last_mut().unwrap() = Task::Transport { goal: Some(Vec3::X), going: false, arrived: false };
+        assert_eq!(b.takt(&senses(&[], 10.0, Vec3::ZERO, true)).walk, Walk::To(Vec3::X, 1.0));
+        b.takt(&senses(&[], 20.0, Vec3::X, true));
+        assert_eq!(b.task(), Task::Transport { goal: Some(Vec3::X), going: false, arrived: true });
     }
 
     #[test]

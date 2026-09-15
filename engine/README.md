@@ -311,6 +311,16 @@ the own panel's unit while aboard.
   builder is offered Build Mine alone of the Build rows. The commander's satellite map
   stands under its title bar and marks the camera in yellow; the message box moves to
   the bottom right.
+- A build order walks its builder to the site at full speed. On arrival the scheme's first
+  building appears for the builder's clan, on its clan's list at once (function 34
+  counts it), the builder pays its ore, going below 0, and is left with no order; the
+  building runs its 41 s construction sphere: the sign for 5 s, 30 s sending everyone
+  out, then the dome and the ray with a kill inside every 250 ms, and the ray stopped a
+  second before it is done. A site is tested as `IsPlacementValid` reads it: inside
+  the map, clear of the other buildings' spheres, no basement face steeper than acos 0.88
+  with a builder, and a mine on a found lode within 20. On Mission 03 `tut3_b` puts the
+  Small Mine on the lode for 540, left owing 340, and objective 3 completes. A Route's go
+  task walks to its place and is over within 30.
 
 - The cursor picks as docs/42 reads it, in the world through the command camera and on the
   open satellite map: a click selects one of the player's units or buildings (turning an
@@ -333,8 +343,7 @@ the own panel's unit while aboard.
   its own cockpit and table while the hero stays in the bunker; Esc goes back to the command
   view with the camera where it was left.
 
-Not yet: the builder's building, the economy, Explode!, tooltips, and the chat and game menu
-buttons.
+Not yet: Explode!, tooltips, and the chat and game menu buttons.
 
 This directory also holds what the rest will follow:
 
@@ -494,7 +503,6 @@ a row here. A row leaves this table when research closes it.
 | M6 | How the loader turns a `varset.var` default into a value | an integer type reads hex after `0x`, a decimal, or a float truncated; a float reads its decimal; anything else is 0 (every shipped default reads either way) | [15](../docs/15-behaviour.md#the-vocabulary-varsetvar) |
 | M6 | The formula parser and evaluator, beyond the operator table's priorities | parse by those priorities, left to right among equals, in doubles; `!` is 1 for 0, `&` and `\|` are logical, `N` holds to 0..1, `S` is the sign, `B` is 1 for non-zero, `A` the absolute value; an unknown name is refused (the shipped formulas use numbers, variables, `+ - *` and brackets) | [15](../docs/15-behaviour.md#a-statement) |
 | M12 | Whether the character handler sees Esc before its binding leaves command mode | an open satellite map closes first, then a page other than 0 turns to 0, then Esc leaves | [40](../docs/40-command-mode.md#not-established) |
-| M12 | A building's property `0x20c`, its construction sphere running | no building builds itself: every building is complete for the column and the pages | [41](../docs/41-commander.md#what-enables-a-button-and-what-lights-it) |
 | M12 | What `0x10034230` accepts for an Upgrade row | no Upgrade row is offered | [41](../docs/41-commander.md#not-established) |
 | M12 | A builder's beam's life, which the Build rows need intact | a live builder can build | [32](../docs/32-builder.md#building-a-building--read) |
 | M12 | A unit's property `0x207` and a building's record `+0x30`, which pick and tint the panel's icons; the width of the piece a row's icons stand in | a unit's second icon is the cell for 1; a building's icon red (2), as the recording shows; each icon piece 19.5 wide on a unit row and 20 on a building row | [41](../docs/41-commander.md#not-established) |
@@ -504,8 +512,6 @@ a row here. A row leaves this table when research closes it.
 | M12 | An areal's first flag word, which decides where a walker may be sent | the engine keeps no areals: a place is valid where there is ground above any water, and always for flyers | [42](../docs/42-selection.md#a-valid-place--read-and-measured) |
 | M12 | Which objects the world's classes 3 and 4 are, and the object pick's order and nearest-hit rule | a unit within 0.7 of its radius and a building within all of it, a sphere holding the eye passed over; the nearest centre along the ray wins | [42](../docs/42-selection.md#not-established) |
 | M12 | Whether the display's slot 12 answers, so the system's cursor is used | the software cursor's four phases from `new_ui1` are drawn and the system's hidden | [42](../docs/42-selection.md#the-cursor-shows-a-state--read-and-measured) |
-| M12 | `IsPlacementValid`'s path, sphere, overlap, areal and slope tests | not modelled: a site is good where a selection may be sent, with a found lode within 20 for a mine | [32](../docs/32-builder.md#placing-a-building--read-measured-and-seen) |
-| M12 | The build task (order 7) | not modelled: the order is given and the builder, with no task for it, stops | [32](../docs/32-builder.md#building-a-building-tick-by-tick--read-and-seen) |
 | M12 | A marker's gap figure (the record's slot 5), its bar frame on page9, the clan's sign, and where its name, icon and bars stand | the gap is the unit's projected radius held to 4–44; the name over the left bracket, the class icon right of the right one, a blue box under the left one holding the life bar over a full battery bar | [25](../docs/25-sensors.md#how-the-game-colours-what-it-marks--read-and-measured) |
 | M12 | What telepresence's auto-driver levels 1 and 2 give the AI, and what mode 2 does when its unit dies | the player drives the unit whole at every level; a lost unit goes back to the command view | [40](../docs/40-command-mode.md#not-established) |
 | M6 | What a node naming a variable, operand, formula or handler that does not exist reads | the node does nothing; a switch to no handler ends the run; a run stops after a million nodes | [15](../docs/15-behaviour.md#how-a-handler-runs) |
@@ -514,6 +520,10 @@ a row here. A row leaves this table when research closes it.
 | M12 | Which areals a walker's patrol points must lie on | none: a walker's point needs no usable areal, as a flyer's does not | [31](../docs/31-packages.md#where-a-search-looks--read-and-measured) |
 | M12 | An animal's migration over its clan's pastures, its default order | not modelled: an animal stands and asks its fire control for nothing | [31](../docs/31-packages.md#migrate-an-animals-pasture--read-and-measured) |
 | M12 | Which of the fight module's bars a building's guns clear | the walker's, 0.85 | [29](../docs/29-weapons.md#how-the-ai-fires--read) |
+| M12 | `IsPlacementValid`'s path search from the builder and its hall-way vertices' areal test; how the basement is triangulated between its rings | every site has a path and usable areals; each corner of either ring, against the nearest corner of the other, stands for a face falling along that line | [32](../docs/32-builder.md#the-test-isplacementvalid--read) |
+| M12 | Which state each construction-sphere code opens, where an action-5 effect is placed, and which classes the sphere's kill takes | code 1 starts the sign; code 2 the dome and the ray and stops the sign; code 0 stops the ray; each at the sphere's centre at its own size; the kill takes every live robot and the hero inside the sphere | [32](../docs/32-builder.md#the-construction-sphere--read-and-measured) |
+| M12 | Whether the go task's 30 about its place is measured in three dimensions | across the ground | [31](../docs/31-packages.md#what-each-package-does--read) |
+| M12 | How a building made in play is drawn, and whether the landscape's drawing is cut under it | node by node from level 0 without a lightmap; the ground queries are cut under it, the landscape's drawing is not | [03](../docs/03-terrain.md#for-an-engine) |
 
 ### Read since the stand-in was written
 

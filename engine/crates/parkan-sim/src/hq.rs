@@ -10,9 +10,7 @@ pub const EVERY_ROBOT: u32 = 0x0103_e000;
 pub const TRANSPORTS: u32 = 0x0100_2000;
 pub const BUILDERS: u32 = 0x0100_4000;
 /// `ORDER_ROBOT_GO`, `_TRANSPORT` and `_BUILD` (docs/31, "The orders").
-pub const GO: i32 = 2;
-pub const TRANSPORT: i32 = 6;
-pub const BUILD: i32 = 7;
+pub use crate::orders::{BUILD, GO, TRANSPORT};
 /// Search minerals' type (`0x10001000`).
 pub const MINERALS: u32 = 0x1000_1000;
 

@@ -3,10 +3,20 @@
 //! person".
 
 /// Order codes (`varset.var`'s `ORDER_*`, the packet's `+0`).
+/// `ORDER_ROBOT_GO`, the route (docs/31, "What each package does").
+pub const GO: i32 = 2;
 pub const ATTACK: i32 = 3;
 pub const PATROL: i32 = 4;
 pub const SEARCH: i32 = 5;
+/// `ORDER_ROBOT_TRANSPORT` and `ORDER_ROBOT_BUILD` (docs/32, "Transporting ore" and "Building
+/// a building").
+pub const TRANSPORT: i32 = 6;
+pub const BUILD: i32 = 7;
 pub const RELOAD: i32 = 8;
+/// `ORDER_BUILDING_MINE`, which every mine is given as it joins (docs/23, "A mine digs to 500").
+pub const MINE: i32 = 10;
+/// The hidden construction sphere a new building runs (docs/32, "The construction sphere").
+pub const SHOW_UPGRADE: i32 = 18;
 /// `ORDER_ROBOT_LEAVE`, the escape (docs/31, "The escape").
 pub const LEAVE: i32 = 20;
 /// `ORDER_ROBOT_SHUTDOWN` (docs/31, "Which objects run a behaviour").
@@ -25,6 +35,8 @@ pub const TARGET_BY_LOGIC_ID: u32 = 0x201;
 pub const TARGET_BY_PLACE: u32 = 0x202;
 pub const TARGET_BY_TYPE: u32 = 0x203;
 pub const TARGET_NOT_DEFINED: u32 = 0x204;
+/// A full placement matrix, as a placement's build order names its site (docs/32).
+pub const TARGET_BY_MATRIX: u32 = 0x206;
 /// Where an order goes in the unit's list (`varset.var`'s `INSERT_ORDER_*`).
 pub const INSERT_TO_END: u32 = 1;
 pub const INSERT_TO_START: u32 = 2;
@@ -42,6 +54,9 @@ pub enum Target {
     /// `TARGET_BY_PLACE`: x, y and z. A script's two words give x and y, and z stays 0
     /// (docs/31, "Mission 03's last battle").
     Place([f32; 3]),
+    /// `TARGET_BY_MATRIX` (0x206): a placement turned about z, its origin x, y, z and the
+    /// turn.
+    Placement([f32; 4]),
 }
 
 /// One order packet (`iron3d.dll:0x1007d000`), given with `INSERT_ORDER_REPLACE`.

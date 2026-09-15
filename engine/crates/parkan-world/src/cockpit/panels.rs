@@ -459,6 +459,9 @@ pub fn status_order(play: &Play, t: usize) -> i32 {
         Task::Reload => 8,
         Task::Attack { .. } => 3,
         Task::Leave { .. } => 20,
+        Task::Go { .. } => 2,
+        Task::Build { .. } => 7,
+        Task::Transport { .. } => 6,
     }
 }
 

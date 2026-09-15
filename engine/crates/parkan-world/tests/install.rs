@@ -2483,3 +2483,66 @@ fn telepresence_takes_a_warbot_from_command_mode_and_esc_returns_to_the_camera_w
     assert!((play.hero.walker.body.position - hero).length() < 1e-3, "the hero stayed in the bunker");
     assert!(play.selected_units().is_empty());
 }
+
+#[test]
+#[ignore = "needs the game install"]
+fn mission_03s_builder_puts_a_mine_on_the_lode_that_counts_at_once_and_runs_its_41_second_sphere() {
+    use parkan_sim::behaviour::Task;
+    use parkan_world::construction::BUILDING_MINE;
+    use parkan_world::progress::Say;
+
+    let (mut play, m) = mission_03_play();
+    let builder = object_target(&play, &m, "tut3_b.dat");
+    let plant = object_target(&play, &m, "lplant01.dat");
+    // The lode (docs/32, "Mission 03's mine").
+    let lode = glam::Vec3::new(1026.1, 942.7, 0.0);
+    let at = lode.with_z(play.ground.below(lode.x, lode.y, 1.0e5).unwrap().point.z);
+    assert_eq!(play.placement_model(BUILDING_MINE).as_deref(), Some("UNITS\\BUILDS\\MINE\\smine01.dat"));
+    assert!(play.placement_valid(Some(builder), BUILDING_MINE, at, 0.0), "on the lode");
+    assert!(!play.placement_valid(Some(builder), BUILDING_MINE, at + glam::Vec3::X * 100.0, 0.0), "no lode");
+    let factory = play.battle.combat.targets[plant].position;
+    assert!(!play.placement_valid(Some(builder), 0x8000_0008, factory, 0.0), "over the Large Factory");
+    assert!(play.placement_valid(Some(builder), 0x8000_0008, at, 0.0), "a storage needs no lode");
+    // The mine costs 540 by `tut3_pl.trf`, and tut3_b holds 200.
+    assert_eq!(play.building_ore(BUILDING_MINE), Some(540.0));
+    assert_eq!(play.economy.held(builder), 200.0);
+    assert!(play.order_build(builder, BUILDING_MINE, at, 0.3));
+
+    let targets = play.battle.combat.targets.len();
+    let mut made = None;
+    let mut seconds = 0.0;
+    let mut says = Vec::new();
+    while made.is_none() && seconds < 60.0 {
+        play_for(&mut play, 0.5, |_| {});
+        seconds += 0.5;
+        says.append(&mut play.says);
+        if play.battle.combat.targets.len() > targets {
+            made = Some(targets);
+        }
+    }
+    let mine = made.expect("the builder puts the mine up within a minute");
+    let near = play.robots.iter().find(|(t, _)| *t == builder).unwrap().1.walker.body.position;
+    assert!(near.truncate().distance(at.truncate()) < 30.0, "the builder stands on the site: {near}");
+    assert_eq!(play.units[mine].type_word, BUILDING_MINE);
+    assert_eq!(play.units[mine].clan, Some(play.player_clan));
+    assert_eq!(play.economy.held(builder), -340.0, "it goes into debt");
+    // Function 34 counts it from the moment it exists (docs/34).
+    let p = play.progression.as_ref().unwrap();
+    assert_eq!(p.progress.count_type(play.player_clan, BUILDING_MINE), 1);
+    assert!(play.building_itself(mine));
+    // The sphere sends the builder out once its sign's 5 s are up.
+    play_for(&mut play, 6.0, |_| {});
+    let task = play.robots.iter().find(|(t, _)| *t == builder).unwrap().1.behaviour.task();
+    assert!(matches!(task, Task::Leave { .. } | Task::Stop), "{task:?}");
+    // Objective 3 completes on the Mission handler's next run, with its messages.
+    play_for(&mut play, 3.0, |p| says.append(&mut p.says));
+    let p = play.progression.as_ref().unwrap();
+    assert_eq!(p.progress.objectives[2].state, 1, "Prospect for mineral deposits and build a Mine");
+    assert!(says.iter().any(|s| matches!(s, Say::Text(_, t) if t.contains("Excellent"))), "{says:?}");
+    // 41 s in all.
+    play_for(&mut play, 30.0, |_| {});
+    assert!(play.building_itself(mine), "still building itself at 39 s");
+    play_for(&mut play, 3.0, |_| {});
+    assert!(!play.building_itself(mine), "done by 42 s");
+    assert!(play.battle.combat.targets[mine].alive);
+}

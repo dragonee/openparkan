@@ -314,6 +314,10 @@ pub struct Play {
     pub command: crate::command::Camera,
     /// The commander's selection, lodes and build marks (docs/41).
     pub commander: crate::selection::Commander,
+    /// The schemes, sites and construction spheres (docs/32).
+    pub construction: crate::construction::Construction,
+    /// Ore and power (docs/23).
+    pub economy: crate::economy::Economy,
 }
 
 /// A round about to leave a barrel.
@@ -709,6 +713,8 @@ impl Play {
             driving: None,
             command: crate::command::Camera::default(),
             commander: crate::selection::Commander::new(mission, &battle_objects),
+            construction: crate::construction::Construction::new(mission, &battle_objects),
+            economy: crate::economy::Economy::new(mission, &battle_objects),
         };
         for i in 0..play.turret_effects.len() {
             let e = play.turret_effects[i].clone();
@@ -1229,6 +1235,9 @@ impl Play {
             self.tick_factories(dt_ms);
         }
         let mut events = self.ground_damage(now);
+        if !self.paused {
+            events.extend(self.tick_construction(now));
+        }
         let launches = launches(&self.hero.robot, None, &shots, &self.battle, &self.ground);
         self.launch(launches, now);
         events.extend(self.battle.combat.tick((dt_ms / 1000.0) as f32, &self.ground));
@@ -1407,7 +1416,7 @@ impl Play {
 
     /// A placed object's faces again, once its nodes' blocks or visibility changed; a robot's
     /// are rebuilt every tick.
-    fn rebuild_solid(&mut self, t: usize) {
+    pub(crate) fn rebuild_solid(&mut self, t: usize) {
         if self.robots.iter().any(|(rt, _)| *rt == t) {
             return;
         }

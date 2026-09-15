@@ -57,8 +57,6 @@ pub struct Ghost {
 
 /// `,` and `.` turn the ghost by this much a press (`0x100725b2`, `0x100e50a4`).
 pub const GHOST_TURN: f32 = 0.05;
-/// A mine's site needs a found lode strictly within this across the ground (`0x10072f07`).
-pub const LODE_REACH: f32 = 20.0;
 /// The ghost's colours: good and bad (`0x10058239`).
 pub const GHOST_GOOD: u32 = 0xff00_ff00;
 pub const GHOST_BAD: u32 = 0xffff_0000;
@@ -489,7 +487,7 @@ impl Play {
             return;
         };
         if self.commander.ghost.as_ref().is_none_or(|g| g.type_word != type_word) {
-            let Some(path) = self.first_building(type_word) else { return };
+            let Some(path) = self.placement_model(type_word) else { return };
             self.commander.ghost =
                 Some(Ghost { type_word, path, at: Vec3::ZERO, yaw: 0.0, valid: false, placed: false });
         }
@@ -515,28 +513,13 @@ impl Play {
             }
             return;
         };
-        let valid = self.site_good(Some(unit), type_word, at);
+        let yaw = self.commander.ghost.as_ref().map_or(0.0, |g| g.yaw);
+        let valid = self.placement_valid(Some(unit), type_word, at, yaw);
         if let Some(g) = self.commander.ghost.as_mut() {
             g.at = at;
             g.placed = true;
             g.valid = valid;
         }
-    }
-
-    /// Whether a building of `type_word` may stand at `at` (`IsPlacementValid` and, for a
-    /// mine, a found lode within 20 across the ground).
-    ///
-    /// STAND-IN: docs/32-builder.md#placing-a-building--read-measured-and-seen -- `IsPlacementValid`'s tests
-    /// (the path, the site's sphere, the other buildings, the areals, the basement's slope) are
-    /// not modelled here: a site is good where a selection may be sent.
-    pub fn site_good(&self, _builder: Option<usize>, type_word: u32, at: Vec3) -> bool {
-        let lode = type_word != hq::BUILD_TYPES[0]
-            || self
-                .commander
-                .lodes
-                .iter()
-                .any(|l| l.found && l.position.truncate().distance(at.truncate()) < LODE_REACH);
-        lode && self.valid_place(at)
     }
 
     /// `CMD_JAMES_BASE_ROTLEFT` / `_ROTRIGHT` in a place mode (`0x100725b2`).
