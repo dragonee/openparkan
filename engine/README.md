@@ -570,6 +570,11 @@ presses a hero standing at it down), and which of Mission 04's units holds no mi
   distance. A one-shot farther than its far distance is not played, and stops once it gets
   there; a loop plays on. Every update hands a playing sound its emitter's place again, so its
   gain and pan follow the emitter and the eye.
+- A neutral unit Enter captures and the hero does not board answers as an ordered one does
+  (docs/27, "A neutral unit is taken by the hero"): its size class picks `_S`, `_B` or the
+  plain set of acknowledgements, never the voice given last, queued behind the voices before
+  it. On Mission 01 `tut1_mf1` answers plainly and `helic` in the `_S` voice, as the
+  recording's pair does; Mission 04's HQ, boarded at once, says nothing.
 
 This directory also holds what the rest will follow:
 

@@ -1222,6 +1222,12 @@ impl Play {
         if let Some(p) = self.progression.as_mut() {
             p.progress.captured(u.logical_id, self.player_clan);
         }
+        // A unit the hero does not then board answers with its acknowledgement (`0x10072054`).
+        if !self.boardable(t)
+            && let Some(class) = self.robots.iter().find(|(rt, _)| *rt == t).map(|(_, r)| r.size_class)
+        {
+            self.acknowledge(class);
+        }
         // DEPARTURE: docs/27-ownership.md#a-neutral-unit-is-taken-by-the-hero--read-and-measured
         // -- the game's capture changes only the unit's clan, SuperAI and areal map and gives
         // it no order, so it engages a hostile within 500 on its own; with

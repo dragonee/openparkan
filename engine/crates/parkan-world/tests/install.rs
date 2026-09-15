@@ -817,8 +817,26 @@ fn a_neutral_warbot_makes_itself_the_target_and_enter_captures_both_for_the_seco
             play.targets.select_next();
         }
         assert_eq!(play.targets.current, Some(bot));
+        play.says.retain(|s| !matches!(s, Say::Voice(_)));
         assert!(play.enter(), "Enter captures {name}");
         assert_eq!(play.units[bot].clan, Some(play.player_clan));
+        // docs/27: a unit not boarded answers, tut1_mf1 (class 3) plainly and helic (1) in _S.
+        let voices: Vec<String> = play
+            .says
+            .iter()
+            .filter_map(|s| match s {
+                Say::Voice(v) => Some(v.member.to_ascii_lowercase()),
+                _ => None,
+            })
+            .collect();
+        let suffix = if bot == helic { "_s.wav" } else { ".wav" };
+        assert!(
+            voices.len() == 1
+                && voices[0].starts_with("vr_")
+                && voices[0].ends_with(suffix)
+                && (bot == helic || !voices[0].ends_with("_s.wav")),
+            "{name} acknowledges: {voices:?}"
+        );
     }
     assert!(play.says.contains(&Say::Text(Sender::System, vacant)));
     for _ in 0..130 {
