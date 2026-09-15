@@ -66,6 +66,8 @@ pub struct ModelView {
     /// Drawn from the previews' own objects ([`Renderer::set_previews`]) rather than the
     /// world's.
     pub previews: bool,
+    /// Drawn over the world but under the HUD, as a building being placed is.
+    pub under_hud: bool,
 }
 
 /// A device and its queue.
@@ -609,26 +611,12 @@ impl Renderer {
             }
         }
         let depth = &self.depth.as_ref().expect("made above").0;
+        self.draw_views(&mut encoder, target, depth, (width, height), true);
         if let Some(ui) = &self.ui {
             let mut pass = pass_over(&mut encoder, display, depth, "hud under", wgpu::LoadOp::Load);
             ui.draw(&mut pass, false);
         }
-        {
-            for (view, frame) in &self.views {
-                let renderer = if view.previews { &self.previews } else { &self.objects };
-                let Some(objects) = renderer else { continue };
-                let [x, y, w, h] = view.viewport;
-                let (x0, y0) = (x.max(0.0), y.max(0.0));
-                let (x1, y1) = ((x + w).min(width as f32), (y + h).min(height as f32));
-                if x1 - x0 < 1.0 || y1 - y0 < 1.0 {
-                    continue;
-                }
-                let mut pass = pass_over(&mut encoder, target, depth, "view", wgpu::LoadOp::Clear(0.0));
-                pass.set_viewport(x, y, w, h, 0.0, 1.0);
-                pass.set_scissor_rect(x0 as u32, y0 as u32, (x1 - x0) as u32, (y1 - y0) as u32);
-                objects.draw_view(&mut pass, frame, &view.instances, view.paints.is_some());
-            }
-        }
+        self.draw_views(&mut encoder, target, depth, (width, height), false);
         {
             let mut pass = pass_over(&mut encoder, display, depth, "overlay", wgpu::LoadOp::Load);
             if let Some(ui) = &self.ui {
@@ -649,6 +637,34 @@ impl Renderer {
 }
 
 /// A pass that draws over what `target` and `depth` hold, clearing or keeping the depth.
+impl Renderer {
+    /// The model views drawn under the HUD (`under`) or over it, each in its viewport over a
+    /// cleared depth.
+    fn draw_views(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        target: &wgpu::TextureView,
+        depth: &wgpu::TextureView,
+        (width, height): (u32, u32),
+        under: bool,
+    ) {
+        for (view, frame) in self.views.iter().filter(|(v, _)| v.under_hud == under) {
+            let renderer = if view.previews { &self.previews } else { &self.objects };
+            let Some(objects) = renderer else { continue };
+            let [x, y, w, h] = view.viewport;
+            let (x0, y0) = (x.max(0.0), y.max(0.0));
+            let (x1, y1) = ((x + w).min(width as f32), (y + h).min(height as f32));
+            if x1 - x0 < 1.0 || y1 - y0 < 1.0 {
+                continue;
+            }
+            let mut pass = pass_over(encoder, target, depth, "view", wgpu::LoadOp::Clear(0.0));
+            pass.set_viewport(x, y, w, h, 0.0, 1.0);
+            pass.set_scissor_rect(x0 as u32, y0 as u32, (x1 - x0) as u32, (y1 - y0) as u32);
+            objects.draw_view(&mut pass, frame, &view.instances, view.paints.is_some());
+        }
+    }
+}
+
 fn pass_over<'e>(
     encoder: &'e mut wgpu::CommandEncoder,
     target: &wgpu::TextureView,

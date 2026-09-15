@@ -375,6 +375,7 @@ pub fn draw_hud(
                 instances,
                 paints: Some(paints),
                 previews: false,
+                under_hud: false,
             }
         })
         .collect();
@@ -444,6 +445,8 @@ fn previews(
                 instances: vec![i],
                 paints: p.paint.map(|c| vec![c]),
                 previews: true,
+                // A building being placed shows over the world and under the HUD (docs/32).
+                under_hud: p.paint.is_some(),
             }
         })
         .collect()

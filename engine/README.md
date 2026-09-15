@@ -334,7 +334,7 @@ the own panel's unit while aboard.
   view with the camera where it was left.
 
 Not yet: the builder's building, the economy, Explode!, tooltips, and the chat and game menu
-buttons. The ghost draws over the HUD.
+buttons.
 
 This directory also holds what the rest will follow:
 
