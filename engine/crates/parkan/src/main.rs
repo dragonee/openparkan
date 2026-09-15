@@ -138,6 +138,10 @@ struct Args {
     /// `--capture`: every unit of the player's clan that may capture is given Search and
     /// capture before `--ticks` play.
     capture: bool,
+    /// `--wingmen`: the hero takes every neutral warbot with Enter from 12 m, one after the
+    /// other, before `--ticks` play; `--tilde` then presses the tilde once `--ticks` have played.
+    wingmen: bool,
+    tilde: bool,
     ticks: u32,
     hold: Vec<String>,
     mouse: [f32; 2],
@@ -176,6 +180,8 @@ fn args() -> Result<Args> {
         camera_yaw: None,
         build: None,
         capture: false,
+        wingmen: false,
+        tilde: false,
         ticks: 0,
         hold: Vec::new(),
         mouse: [0.0; 2],
@@ -202,6 +208,8 @@ fn args() -> Result<Args> {
             "--page" => out.page = Some(value()?.parse()?),
             "--camera-yaw" => out.camera_yaw = Some(value()?.parse()?),
             "--capture" => out.capture = true,
+            "--wingmen" => out.wingmen = true,
+            "--tilde" => out.tilde = true,
             "--build" => {
                 let v: Vec<f32> = value()?.split(',').map(str::parse).collect::<Result<_, _>>()?;
                 out.build = v.get(..2).map(|v| [v[0], v[1]]);
@@ -361,6 +369,9 @@ fn rehearse(play: &mut scene::Play, loaded: &scene::Loaded, args: &Args) {
             eprintln!("--build: no builder can build a mine at {x}, {y}");
         }
     }
+    if args.wingmen && !take_neutrals(play) {
+        eprintln!("--wingmen: no neutral warbot the hero can take");
+    }
     if args.capture {
         let capturers: Vec<usize> = play
             .own_units_within(parkan_world::selection::BATTLE_UNITS | parkan_world::selection::BUILDERS)
@@ -402,6 +413,42 @@ fn rehearse(play: &mut scene::Play, loaded: &scene::Loaded, args: &Args) {
     if args.headless && !kills.is_empty() {
         println!("killed mission objects {kills:?}");
     }
+    if args.tilde {
+        let eye = play.eye();
+        let view = parkan_world::play::View {
+            eye: eye.position,
+            look: eye.forward,
+            view_proj: glam::Mat4::IDENTITY,
+            shift: false,
+        };
+        play.command(parkan_formats::controls::CMD_JAMES_WINGMAN_MENU, &view);
+    }
+}
+
+/// `--wingmen`: the hero stands 12 m from each neutral warbot in turn, targets it and presses
+/// Enter, which captures it (docs/27); whether any was taken.
+fn take_neutrals(play: &mut scene::Play) -> bool {
+    let neutral: Vec<usize> = play
+        .robots
+        .iter()
+        .map(|(t, _)| *t)
+        .filter(|&t| play.units.get(t).is_some_and(|u| u.clan.is_some() && !play.thinks(u.clan)))
+        .collect();
+    let mut taken = false;
+    for bot in neutral {
+        if !play.stand_facing(bot, 12.0, 3.5) {
+            continue;
+        }
+        play.tick(TICK_MS, [0.0; 2]);
+        for _ in 0..=play.targets.listed.len() {
+            if play.targets.current == Some(bot) {
+                break;
+            }
+            play.targets.select_next();
+        }
+        taken |= play.targets.current == Some(bot) && play.enter();
+    }
+    taken
 }
 
 /// `--hq`: the hero stands 12 m from the first HQ unit, targets it and presses Enter, which
@@ -1285,19 +1332,11 @@ impl App {
                 let briefing = self.briefing.as_ref();
                 let eye = briefing.map_or_else(|| play.eye(), |b| b.eye());
                 let view_proj = camera::first_person(&eye, aspect);
-                let mut runs = Vec::new();
-                if let Some(panel) = play.panel() {
-                    runs.extend(scene::panel_runs(&panel));
-                }
                 let screen = hud_space(r.config.width, r.config.height, &self.args);
                 let outcome = scene::draw_outcome(&mut r.renderer, &r.gpu.device, &r.gpu.queue, play, screen);
                 if let Some(b) = briefing {
                     scene::draw_briefing(&mut r.renderer, &r.gpu.device, &r.gpu.queue, b, screen);
                 }
-                if outcome || briefing.is_some() {
-                    runs.clear();
-                }
-                r.renderer.set_text(&r.gpu.device, &r.gpu.queue, &runs);
                 scene::sync(
                     &mut r.renderer,
                     &r.gpu.device,

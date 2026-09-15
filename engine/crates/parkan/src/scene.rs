@@ -130,39 +130,6 @@ pub fn bindings(game: &Path) -> Vec<parkan_formats::controls::Binding> {
         .unwrap_or_default()
 }
 
-/// The wingman panel as text: each wingman's number and name, a chosen one bright and
-/// the rest grey, dimmed while picking; and the order menu's rows, numbered, disabled
-/// ones grey (docs/31, "The wingman menu from first person").
-///
-/// STAND-IN: docs/31-packages.md#the-wingman-menu-from-first-person--read-and-measured --
-/// the two labels a wingman line draws beside its number, and where the panel stands on
-/// the screen, are not read: the unit's name; the wingmen down the left 19 apart from
-/// (20, 100) and the menu's rows 19 apart from (220, 250), on a 640 by 480 screen.
-pub fn panel_runs(panel: &parkan_world::play::Panel) -> Vec<parkan_world::text::TextRun> {
-    use parkan_world::text::TextRun;
-    let at = |x: f32, y: f32| [x / 320.0 - 1.0, 1.0 - y / 240.0];
-    let mut out = Vec::new();
-    for (i, (number, name, chosen)) in panel.wingmen.iter().enumerate() {
-        let colour = match (chosen, panel.picking) {
-            (true, _) => [1.0, 0.9, 0.3, 1.0],
-            (false, true) => [0.5, 0.5, 0.5, 0.5],
-            (false, false) => [0.6, 0.6, 0.6, 1.0],
-        };
-        out.push(TextRun {
-            colour,
-            ..TextRun::new(format!("{number} {name}"), at(20.0, 100.0 + 19.0 * i as f32))
-        });
-    }
-    for (i, (text, enabled)) in panel.rows.iter().enumerate() {
-        let colour = if *enabled { [1.0, 1.0, 1.0, 1.0] } else { [0.45, 0.45, 0.45, 1.0] };
-        out.push(TextRun {
-            colour,
-            ..TextRun::new(format!("{} {text}", i + 1), at(220.0, 250.0 + 19.0 * i as f32))
-        });
-    }
-    out
-}
-
 /// The outcome panel's font slots: its title's `MENU_FONT` and its lines' `GAME_FONT`.
 pub const PANEL_TITLE_SLOT: usize = 0;
 pub const PANEL_LINES_SLOT: usize = 1;

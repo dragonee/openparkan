@@ -14,6 +14,7 @@ pub mod panels;
 pub mod radar;
 pub mod research;
 pub mod weapons;
+pub mod wingmen;
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -266,6 +267,7 @@ impl Cockpit {
             voices.extend(weapons::draw(self, &mut ink, play));
         }
         radar::reticle(self, &mut ink);
+        wingmen::draw(self, &mut ink, play);
         map::draw(self, &mut ink, play, now_ms);
         ink.painter.pin = Pin::TOP;
         messages::draw(self, &mut ink, now_ms);

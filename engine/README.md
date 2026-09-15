@@ -502,6 +502,17 @@ presses a hero standing at it down), and which of Mission 04's units holds no mi
   corners' green runs from 205 to 255 with it. `TARGET_ZOOM` beeps past 0.35 s since the last
   beep while locking, and `TARGET_READY` past 0.2 s once locked. The locks draw while the
   satellite map is open too. On Mission 01 the missiles, 60 m off a dummy, lock in 4 s.
+- The wingman panel as the game draws it (docs/31, "The wingman menu from first person"),
+  in place of lines of text. Whenever the driven unit has a wingman, with the selector off
+  too, a line per wingman stands at (0, 19 i) out of the compound-control pieces: its number
+  in a box, a lamp, the unit's two icons in 19-square pieces, and its name, not its path, over
+  its life in a 135 bar. A chosen line's lamp is green and its emitter lit; while picking, an
+  unchosen line's lamp is yellow; otherwise it is black with its icons' tint halved; unchosen
+  names are grey. While ordering, the menu's rows stand 19 apart from (220, 50), each its key
+  in a box and its order in a 150 bar, grey when disabled, with no *Orders* strip. On Mission
+  01, with both warbots captured, the tilde draws the two lines and the seven rows where the
+  recording's stand at 208 s and 228.7 s. The commander's unit rows' icon pieces are 19 wide,
+  as read.
 
 This directory also holds what the rest will follow:
 
@@ -549,7 +560,9 @@ closes its lock's corners on the target and beeps as it locks (`--face l_targ.da
 SCAN_W_4 --ticks 150` draws the missiles half locked). The game's
 own chords from `ui_other.man` pick targets: Tab the next listed, E the next
 or nearest enemy, T a friend, the right button what the view points at; Enter
-captures a neutral unit within 20 m. A click grabs the mouse; Escape lets it
+captures a neutral unit within 20 m, and the tilde opens the wingman menu over the lines the
+wingmen show at the top left (`--wingmen --ticks 90 --tilde` takes both of Mission 01's warbots
+and draws the menu). A click grabs the mouse; Escape lets it
 go, and quits once it is free. `--ticks N`, `--hold` (scan names) and `--mouse DX,DY` (counts a
 tick) play the hero at 60 ticks a second before a screenshot, or with
 `--headless` print where it got to. In the window `--hold` keeps its keys down,
@@ -699,7 +712,7 @@ a row here. A row leaves this table when research closes it.
 | M12 | Whether the character handler sees Esc before its binding leaves command mode: the path the key takes is not traced | an open satellite map closes first, then a page other than 0 turns to 0, then Esc leaves, as Mission 04's recording shows one Esc at a time | [40](../docs/40-command-mode.md#not-established) |
 | M12 | What `0x10034230` accepts for an Upgrade row | no Upgrade row is offered | [41](../docs/41-commander.md#not-established) |
 | M12 | A builder's beam's life, which the Build rows need intact | a live builder can build | [32](../docs/32-builder.md#building-a-building--read) |
-| M12 | A unit's property `0x207` and a building's record `+0x30`, which pick and tint the panel's icons; the width of the piece a row's icons stand in | a unit's second icon is the cell for 1; a building's icon red (2), as the recording shows; each icon piece 19.5 wide on a unit row and 20 on a building row | [41](../docs/41-commander.md#not-established) |
+| M12 | A unit's property `0x207` and a building's record `+0x30`, which pick and tint the panel's icons; the width of the piece a building row's icon stands in | a unit's second icon is the cell for 1; a building's icon red (2), as the recording shows; the building row's icon piece 20 wide | [41](../docs/41-commander.md#not-established) |
 | M12 | The chat overlay and the game menu's screen (mode 7) | not built: their buttons are taken and do nothing | [41](../docs/41-commander.md#what-a-click-on-the-column-does) |
 | M12 | The routine that names a building | strings 6031–6098 by Type, by the size letter of its root record (`fr_l_` small, `fr_m_` medium, `fr_b_` large) and a bunker's by its Type | [35](../docs/35-hud.md#name-and-status--read-and-seen) |
 | M12 | The commander's satellite map's title bar and exit icon, beyond their place | a page header's pieces 20 tall at (374, 43), the title 5074 centred | [35](../docs/35-hud.md#not-established-4) |
@@ -779,7 +792,6 @@ engine pass replaces each with what was read and removes its row.
 | M7 | The batch flags 8 and 0x200 a collision's face query passes, and the batch word's 2 that makes a hider hide both ways: a mesh's batch record carries no such word | no batch passes, and every hider hides from its front only | [24](../docs/24-motion.md#collision-between-objects--read) |
 | M7 | Which pairs the collision pass moves besides the hero's | the hero is always the mover and nothing else is pushed | [24](../docs/24-motion.md#collision-between-objects--read) |
 | M11 | Who sets a collision object's flags, so which movers carry 8 and keep the floors (triangle flag 2) in their push-out | no mover carries 8: every floor lets a mover by | [24](../docs/24-motion.md#not-established) |
-| M8 | The two labels a wingman line draws beside its number, and where the panel and the order menu stand on screen | the unit's name; wingmen down the left 19 apart from (20, 100), rows 19 apart from (220, 250), on a 640 by 480 screen | [31](../docs/31-packages.md#the-wingman-menu-from-first-person--read-and-measured) |
 | M8 | Whether a digit the wingman selector takes also reaches the input table that toggles the hero's guns | it does not | [31](../docs/31-packages.md#the-wingman-menu-from-first-person--read-and-measured) |
 | M8 | What a unit record's `+0x30` is, which picks capturers and the acknowledgement voices | the size class of the chassis's name: t 1, l and h 2, m 3, b 4 | [31](../docs/31-packages.md#the-wingman-menu-from-first-person--read-and-measured) |
 | M8 | The acknowledgement's xorshift: its shifts and seed | 7, 9, 8 from 0xACE1, never repeating the last voice | [31](../docs/31-packages.md#the-wingman-menu-from-first-person--read-and-measured) |

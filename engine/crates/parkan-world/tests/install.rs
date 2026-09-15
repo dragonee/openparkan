@@ -839,7 +839,11 @@ fn captured_warbots_answer_the_wingman_menu_with_the_order_its_row_gives() {
     play.command("CMD_JAMES_WINGMAN_MENU", &view(false));
     let panel = play.panel().expect("the panel is open");
     assert_eq!(panel.wingmen.len(), 2);
-    assert_eq!(panel.rows.iter().map(|r| r.0.as_str()).collect::<Vec<_>>()[..2], ["Standby", "Follow me"]);
+    let strings = &play.progression.as_ref().unwrap().strings;
+    assert_eq!(
+        panel.rows.iter().map(|r| strings[&r.0].as_str()).collect::<Vec<_>>()[..2],
+        ["Standby", "Follow me"]
+    );
     play.says.clear();
     assert!(play.wingman_digit(2));
     assert_eq!(play.selector.state, State::Off);
@@ -857,6 +861,69 @@ fn captured_warbots_answer_the_wingman_menu_with_the_order_its_row_gives() {
     let orders: Vec<i32> = play.robots.iter().filter_map(|(_, r)| r.order.map(|o| o.code)).collect();
     assert_eq!(orders.iter().filter(|&&c| c == STAYGROUND).count(), 1);
     assert_eq!(orders.iter().filter(|&&c| c == FOLLOW).count(), 1);
+}
+
+#[test]
+#[ignore = "needs the game install"]
+fn the_wingman_panel_draws_a_line_per_wingman_by_name_and_the_menus_rows_under_the_tilde() {
+    use glam::Mat4;
+    use parkan_world::cockpit::Cockpit;
+    use parkan_world::hud::{Pages, Space};
+    use parkan_world::play::View;
+    use parkan_world::text::GameFont;
+
+    let game = gamedir::find(None).expect("a Parkan install: set PARKAN_DIR");
+    let (mut play, [mf1, helic, _]) = mission_01_wingmen();
+    let pages = Pages::open(&game).unwrap();
+    let mut cockpit = Cockpit::open(&game, &pages, &play).unwrap();
+    let (font, menu) = (GameFont::ui(&game, "GAME_FONT").unwrap(), GameFont::ui(&game, "MENU_FONT").unwrap());
+    let space = Space::new(640.0, 480.0);
+    let texts = |cockpit: &mut Cockpit, play: &parkan_world::play::Play| {
+        let drawn = cockpit.draw(play, space, &font, &menu, Mat4::IDENTITY);
+        drawn.text.iter().map(|r| (r.text.clone(), r.colour)).collect::<Vec<_>>()
+    };
+
+    // With the selector off the lines show, named as the panels name them, never by path.
+    let panel = play.panel().expect("two wingmen");
+    assert_eq!(panel.wingmen.iter().map(|w| (w.0, w.2)).collect::<Vec<_>>(), [(1, false), (2, false)]);
+    assert!(panel.rows.is_empty());
+    let off = texts(&mut cockpit, &play);
+    let names: Vec<String> = panel.wingmen.iter().map(|w| cockpit.panels.names[w.1].clone()).collect();
+    let mut sorted = names.clone();
+    sorted.sort();
+    assert_eq!(sorted, ["MFW-1 Warrior", "TFW-2 Warrior"]);
+    let grey = [128.0 / 255.0, 128.0 / 255.0, 128.0 / 255.0, 1.0];
+    for name in &names {
+        // The panel's line is drawn after the target panel, which may name the same unit.
+        let run = off.iter().rev().find(|(t, _)| t == name).expect("the name drawn");
+        assert!(run.1.iter().zip(grey).all(|(a, b)| (a - b).abs() < 1e-3), "{name} grey: {:?}", run.1);
+    }
+    assert!(!off.iter().any(|(t, _)| t.contains("tut1") || t.contains("helic")), "{off:?}");
+    assert!([mf1, helic].iter().all(|t| panel.wingmen.iter().any(|w| w.1 == *t)));
+
+    // The tilde: both chosen, white, and the seven rows by the game's strings.
+    let eye = play.hero.eye();
+    let view = View { eye: eye.position, look: eye.forward, view_proj: Mat4::IDENTITY, shift: false };
+    play.command("CMD_JAMES_WINGMAN_MENU", &view);
+    let open = texts(&mut cockpit, &play);
+    for name in &names {
+        let run = open.iter().rev().find(|(t, _)| t == name).unwrap();
+        assert_eq!(run.1, [1.0; 4], "{name} chosen, white");
+    }
+    for row in [
+        "Standby",
+        "Follow me",
+        "Search and capture",
+        "Seek and destroy",
+        "Attack",
+        "Capture building",
+        "Refit",
+    ] {
+        assert!(open.iter().any(|(t, _)| t == row), "{row} in {open:?}");
+    }
+    // A warbot of size 3 among the chosen: Search and capture is disabled, grey.
+    let search = open.iter().find(|(t, _)| t == "Search and capture").unwrap();
+    assert!(search.1.iter().zip(grey).all(|(a, b)| (a - b).abs() < 1e-3));
 }
 
 /// Stand a machine at `at`'s xy on the ground below it.

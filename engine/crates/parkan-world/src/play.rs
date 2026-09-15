@@ -213,13 +213,14 @@ pub struct View {
     pub shift: bool,
 }
 
-/// What the wingman panel shows: each wingman's number, name and whether it is chosen;
-/// whether the player is picking; and the order menu's rows with whether each is enabled.
+/// What the wingman panel shows: each wingman's number, its target index and whether it is
+/// chosen; whether the player is picking; and, while ordering, the order menu's rows, each
+/// its string and whether it is enabled.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Panel {
-    pub wingmen: Vec<(usize, String, bool)>,
+    pub wingmen: Vec<(usize, usize, bool)>,
     pub picking: bool,
-    pub rows: Vec<(String, bool)>,
+    pub rows: Vec<(u32, bool)>,
 }
 
 /// Where a sphere is on screen under `view_proj`, in NDC, when it lies inside the six
@@ -1133,31 +1134,27 @@ impl Play {
         }
     }
 
-    /// What the wingman panel shows now, while the selector is open (`0x100432f0`,
-    /// `0x1007aaa0`).
+    /// What the wingman panel shows now (`0x100432f0`, `0x1007aaa0`): a line for every
+    /// wingman, with the selector off too, and none without one.
     pub fn panel(&self) -> Option<Panel> {
-        if self.selector.state == orders::State::Off {
+        let wingmen = self.wingmen();
+        if wingmen.is_empty() {
             return None;
         }
-        let wingmen = self.wingmen();
         let lines = wingmen
             .iter()
             .enumerate()
             .take(16)
-            .map(|(i, &r)| (i + 1, self.names[self.robots[r].0].clone(), self.selector.chosen.contains(&i)))
+            .map(|(i, &r)| (i + 1, self.robots[r].0, self.selector.chosen.contains(&i)))
             .collect();
         let rows = if self.selector.state == orders::State::Ordering {
             let chosen: Vec<usize> =
                 self.selector.chosen.iter().filter_map(|&i| wingmen.get(i).copied()).collect();
             let capturers = chosen.iter().all(|&r| matches!(self.robots[r].1.size_class, 1 | 2));
-            let strings = self.progression.as_ref().map(|p| &p.strings);
             orders::ROWS
                 .iter()
                 .enumerate()
-                .map(|(i, row)| {
-                    let text = strings.and_then(|s| s.get(&row.string)).cloned().unwrap_or_default();
-                    (text, orders::enabled(i, self.picked(), capturers))
-                })
+                .map(|(i, row)| (row.string, orders::enabled(i, self.picked(), capturers)))
                 .collect()
         } else {
             Vec::new()

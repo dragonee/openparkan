@@ -506,8 +506,9 @@ impl Panel {
 /// buttons start at x 86.
 pub const BUILDING_BUTTONS_X: f32 = 86.0;
 pub const BUILDING_BUTTON: f32 = 35.0;
-/// A unit row's icon pieces, each this wide (the same stand-in).
-pub const ICON_PIECE: f32 = 19.5;
+/// A unit row's icon pieces (`0x1009a7a0`): each a `body_text` square as wide as the piece is
+/// high, 19, its icon inset by 2 (docs/31, "The wingman menu from first person").
+pub const ICON_PIECE: f32 = 19.0;
 
 /// The panel in command mode, after the world: the resource rows, the column and the page, the
 /// commander's map and the message box (`0x1008d51c`).
@@ -605,14 +606,14 @@ fn band_and_cursor(cockpit: &Cockpit, ink: &mut Ink, now_ms: f64) {
     );
 }
 
-fn put(cockpit: &Cockpit, ink: &mut Ink, name: &str, rect: [f32; 4], colour: u32) {
+pub(super) fn put(cockpit: &Cockpit, ink: &mut Ink, name: &str, rect: [f32; 4], colour: u32) {
     if let Some(p) = cockpit.skin.get(name) {
         ink.painter.piece(p, rect, argb(colour));
     }
 }
 
 /// A 15 × 15 icon of `ui_menu` at its cell.
-fn icon(cockpit: &Cockpit, ink: &mut Ink, cell: [f32; 2], at: [f32; 2], colour: u32) {
+pub(super) fn icon(cockpit: &Cockpit, ink: &mut Ink, cell: [f32; 2], at: [f32; 2], colour: u32) {
     if let Some(&page) = cockpit.pages.get("ui_menu") {
         ink.painter.sprite(Blend::Alpha, page, [cell[0], cell[1], 15.0, 15.0], at, argb(colour));
     }
@@ -657,7 +658,7 @@ fn column(cockpit: &Cockpit, ink: &mut Ink, now_ms: f64) {
 ///
 /// STAND-IN: docs/41-commander.md#not-established -- a unit's property `0x207` is not read:
 /// its second icon is the cell for 1.
-fn unit_icons(play: &Play, t: usize) -> ([[f32; 2]; 2], u32) {
+pub(super) fn unit_icons(play: &Play, t: usize) -> ([[f32; 2]; 2], u32) {
     let type_word = play.units[t].type_word;
     let first = if hq::within(type_word, BUILDERS) {
         [65.0, 110.0]
@@ -826,7 +827,7 @@ fn unit_box(cockpit: &mut Cockpit, ink: &mut Ink, play: &Play, t: usize) {
 }
 
 /// A row's bar over its unit's or building's life (`0x1009a380`, `0x1007e980`).
-fn life_bar(cockpit: &Cockpit, ink: &mut Ink, play: &Play, t: usize, [x0, y, x1]: [f32; 3]) {
+pub(super) fn life_bar(cockpit: &Cockpit, ink: &mut Ink, play: &Play, t: usize, [x0, y, x1]: [f32; 3]) {
     put(cockpit, ink, "ccres_ray_body", [x0, y, x1, y + ROW_HEIGHT], WHITE);
     let share = play
         .battle
