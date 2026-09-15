@@ -537,6 +537,17 @@ hold.
   [07-objects.md](07-objects.md#how-a-material-reaches-the-device--read-and-measured).
 - *Seen*: the hero's laser is red and pink, while its `LASER.0` is grey and only
   its materials' ambient is red.
+- **A blend adds to what the surface holds** (*derived*). Direct3D's fixed-function
+  blend states work on the render target's stored values, with no conversion
+  from display space. The game draws to a 16-bit surface
+  ([05-engine.md](05-engine.md)), so an additive sprite adds its colour times its
+  alpha to the display-space pixel. Over Mission 01's lavender sky that saturates
+  red wherever the laser's texture alpha is above about a third. *Seen*: the
+  recording's beam is a broad pink band, and yellow `NE_Laser_Y` makes its core
+  white, not yellow.
+- *Seen*, not explained: near the camera the recording's beam looks broader than a
+  0.4 m strip whose alpha peaks in the middle quarter. A bolt's widths +24/+28
+  remain a *guess*.
 
 ## Which effects run: the settings switch — *read*, and *measured*
 
