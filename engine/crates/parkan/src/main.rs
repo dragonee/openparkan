@@ -779,6 +779,17 @@ impl App {
         theme(&mut self.audio, &self.game, &self.loaded);
     }
 
+    /// Every key and button held comes up: the unit the player drives lets them go, and no
+    /// chord or fly key stays down.
+    fn release_keys(&mut self) {
+        self.scans.clear();
+        self.held.clear();
+        self.looking = false;
+        if let Some(play) = self.play.as_mut() {
+            play.release_keys();
+        }
+    }
+
     fn grab(&mut self, on: bool) {
         let Some(r) = self.running.as_ref() else { return };
         let mode = if on { CursorGrabMode::Locked } else { CursorGrabMode::None };
@@ -1036,7 +1047,14 @@ impl ApplicationHandler for App {
                     r.surface.configure(&r.gpu.device, &r.config);
                 }
             }
-            WindowEvent::Focused(false) => self.grab(false),
+            // `WM_ACTIVATEAPP` (`iron3d.dll:0x100a0e20`): leaving the window lets every key and
+            // button up (docs/14, "Leaving the window lets every key up"). A key-up sent while
+            // another window has the keyboard never arrives: Cmd-Shift-4's screenshot takes it
+            // with Shift down, which would keep Shift's free look on.
+            WindowEvent::Focused(false) => {
+                self.grab(false);
+                self.release_keys();
+            }
             WindowEvent::KeyboardInput { event, .. } => {
                 let PhysicalKey::Code(code) = event.physical_key else { return };
                 let outcome =

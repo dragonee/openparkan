@@ -313,7 +313,9 @@ repository.
 
 In the cockpit the hero's own `hero.tbl` drives it. W and S walk, A and D
 strafe, the mouse turns the hull and tilts the turret, and Shift with the
-mouse looks around; 1 to 4 select guns and the left button fires. The game's
+mouse looks around while the guns hold their aim. Letting Shift go, or leaving
+the window, which lets every key up as the game does, centres the view again.
+1 to 4 select guns and the left button fires. The game's
 own chords from `ui_other.man` pick targets: Tab the next listed, E the next
 or nearest enemy, T a friend, the right button what the view points at; Enter
 captures a neutral unit within 20 m. A click grabs the mouse; Escape lets it

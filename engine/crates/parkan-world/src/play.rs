@@ -1293,6 +1293,20 @@ impl Play {
         }
     }
 
+    /// Every key and button held on the unit the player drives comes up, as the game lets
+    /// them go when its window is left (`stdSetApplicationState`, docs/14, "Leaving the
+    /// window lets every key up").
+    pub fn release_keys(&mut self) {
+        match self.driving.as_mut() {
+            Some(d) => {
+                if let Some((_, robot)) = self.robots.iter_mut().find(|(t, _)| *t == d.target) {
+                    crate::hero::drive_input(robot, &mut d.pilot, true);
+                }
+            }
+            None => self.hero.release_keys(),
+        }
+    }
+
     /// The input update of the unit the player drives.
     pub fn update_input(&mut self) {
         match self.driving.as_mut() {

@@ -1809,6 +1809,61 @@ fn mission_02s_hero_boards_its_warbot_flies_it_and_gets_out_where_it_may_land() 
 
 #[test]
 #[ignore = "needs the game install"]
+fn leaving_the_window_lets_shift_up_and_the_free_look_centres_on_foot_and_aboard() {
+    use parkan_world::factory::Project;
+
+    let (mut play, _) = mission_02_play();
+    let tick = |play: &mut parkan_world::play::Play, counts: [f32; 2], n: usize| {
+        for _ in 0..n {
+            play.update_input();
+            play.tick(1000.0 / 60.0, counts);
+        }
+    };
+    tick(&mut play, [0.0; 2], 30);
+    // Shift + the mouse turns the camera's free look alone: the sight stays (docs/30).
+    let sight = play.hero.sight().expect("the hero's sight").1;
+    play.key("SCAN_LSHIFT", true);
+    tick(&mut play, [40.0, 30.0], 20);
+    tick(&mut play, [0.0; 2], 10);
+    let look = play.hero.rig.look;
+    assert!((look[0] - 0.5).abs() > 0.05 && (look[1] - 0.5).abs() > 0.05, "free look {look:?}");
+    assert!(play.hero.sight().unwrap().1.dot(sight) > 0.9999, "the guns stay put");
+    assert!(play.eye().forward.dot(sight) < 0.95, "the eye turns away from the sight");
+    // The window left with Shift down: its key-up never arrives, and every key comes up
+    // (`stdSetApplicationState`, docs/14): Shift's release rows centre the free look.
+    play.release_keys();
+    assert_eq!(&play.hero.rig.look[..2], &[0.5, 0.5]);
+    tick(&mut play, [40.0, 0.0], 10);
+    assert_eq!(&play.hero.rig.look[..2], &[0.5, 0.5], "the mouse no longer moves the camera");
+
+    // Aboard, the same for the bot's own table.
+    let project = Project {
+        path: "UNITS\\bld_unit_-2147483647.dat".into(),
+        name: "LFW-2 Warrior".into(),
+        type_word: 0x0100_8000,
+        chassis_size: 4,
+        ore: 0.0,
+        power: 0.0,
+        lines: Vec::new(),
+        sphere: None,
+    };
+    let hero_at = play.hero.walker.body.position;
+    let t = play.spawn(&project, play.player_clan, hero_at + glam::Vec3::new(8.0, 0.0, 1.0), 0.0).unwrap();
+    tick(&mut play, [0.0; 2], 30);
+    assert!(play.board(t));
+    play.key("SCAN_LSHIFT", true);
+    play.key("SCAN_LMOUSE", true);
+    tick(&mut play, [40.0, 30.0], 20);
+    assert_ne!(&play.driven().rig.look[..2], &[0.5, 0.5]);
+    assert!(play.driven().guns.iter().any(|g| g.state == parkan_sim::guns::CONTINUE_FIGHT));
+    play.release_keys();
+    assert_eq!(&play.driven().rig.look[..2], &[0.5, 0.5]);
+    tick(&mut play, [0.0; 2], 1);
+    assert!(play.driven().guns.iter().all(|g| g.state == parkan_sim::guns::STATE_OFF), "the guns stop");
+}
+
+#[test]
+#[ignore = "needs the game install"]
 fn mission_02_is_won_by_the_factory_the_warbot_it_builds_and_the_outpost_on_the_island() {
     use parkan_world::factory::Project;
     use parkan_world::play::Mode;
