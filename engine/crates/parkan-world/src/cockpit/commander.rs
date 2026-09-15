@@ -1,0 +1,777 @@
+//! The commander panel of command mode (`CState` mode 4): the resource rows, the icon column
+//! down the left with its lock, the page a column button opens — the battle units, builders
+//! and transports with their unit box, rows and order menu; the factory; the towers, bunkers
+//! and other buildings — the commander's satellite map and the message box. See
+//! `docs/41-commander.md` and `docs/40-command-mode.md`, "What command mode draws".
+
+use parkan_sim::hq;
+
+use super::panels::{life_share, order_status};
+use super::weapons::fill_colour;
+use super::{Cockpit, Ink, WHITE, argb, factory, map, messages};
+use crate::hud::{Blend, Pin};
+use crate::play::Play;
+use crate::selection::{
+    BATTLE_UNITS, BUILDERS, BUNKERS, FACTORY, OTHER_BUILDINGS, RESEARCH_CENTRE, TOWERS, TRANSPORTS,
+};
+
+/// A column button's widget, its icon's inset and size (`0x1009c030`, `0x1009bec0`).
+pub const BUTTON: [f32; 2] = [46.0, 29.0];
+pub const ICON_INSET: [f32; 2] = [16.0, 3.0];
+pub const ICON: f32 = 23.0;
+/// The lock's widget and its icon's inset and size.
+pub const LOCK: [f32; 2] = [46.0, 24.0];
+pub const LOCK_ICON_INSET: [f32; 2] = [18.0, 7.0];
+pub const LOCK_ICON: f32 = 13.0;
+pub const LOCK_OPEN_Y: f32 = 457.0;
+pub const LOCK_SHUT_Y: f32 = 12.0;
+/// The column's items slide one a step, every 0.05 s, over 16 steps (`0x10083e1d`).
+pub const SLIDE_STEPS: u8 = 16;
+pub const SLIDE_MS: f64 = 50.0;
+/// A hovered enabled button flips between its looks every 0.1 s (`0x1009bf61`).
+pub const HOVER_FLIP_MS: f64 = 100.0;
+/// A button's icon colour: disabled, enabled, on.
+pub const ICON_COLOURS: [u32; 3] = [0xff64_6464, 0xff80_ff80, WHITE];
+
+/// What a column button does.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Control {
+    /// Strategic control off: back to the hero.
+    Hero,
+    Page(u8),
+    Chat,
+    Map,
+    GameMenu,
+}
+
+/// One item of the column: a button, or a separator (`objpanel_separator`, 46 × 24).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Item {
+    Button { y: f32, icon: &'static str, tooltip: u32, control: Control },
+    Separator { y: f32 },
+}
+
+/// The column's items under its head, in the order the slide draws them (`0x10082550`).
+pub const COLUMN: [Item; 16] = [
+    Item::Button { y: 12.0, icon: "objpanel_icon_hero", tooltip: 1612, control: Control::Hero },
+    Item::Separator { y: 41.0 },
+    Item::Button { y: 65.0, icon: "objpanel_icon_warbots", tooltip: 1600, control: Control::Page(1) },
+    Item::Button { y: 94.0, icon: "objpanel_icon_builder", tooltip: 1602, control: Control::Page(3) },
+    Item::Button { y: 123.0, icon: "objpanel_icon_cargo", tooltip: 1601, control: Control::Page(2) },
+    Item::Separator { y: 152.0 },
+    Item::Button { y: 176.0, icon: "objpanel_icon_restree", tooltip: 5080, control: Control::Page(4) },
+    Item::Separator { y: 205.0 },
+    Item::Button { y: 229.0, icon: "objpanel_icon_factory", tooltip: 1607, control: Control::Page(5) },
+    Item::Button { y: 258.0, icon: "objpanel_icon_tower", tooltip: 1614, control: Control::Page(6) },
+    Item::Button { y: 287.0, icon: "objpanel_icon_bunker", tooltip: 1608, control: Control::Page(7) },
+    Item::Button { y: 316.0, icon: "objpanel_icon_build", tooltip: 1610, control: Control::Page(8) },
+    Item::Separator { y: 345.0 },
+    Item::Button { y: 369.0, icon: "objpanel_icon_chat", tooltip: 5038, control: Control::Chat },
+    Item::Button { y: 399.0, icon: "objpanel_icon_map", tooltip: 1501, control: Control::Map },
+    Item::Button { y: 428.0, icon: "objpanel_icon_system", tooltip: 1302, control: Control::GameMenu },
+];
+
+/// Each page's header title (`0x10083a20`, table `0x10083c00`), and 6205 for any other.
+pub fn title(page: u8) -> u32 {
+    match page {
+        1 => 1600,
+        2 => 1601,
+        3 => 1602,
+        4 => 5080,
+        5 => 1607,
+        6 => 1614,
+        7 => 1608,
+        8 => 1610,
+        _ => 6205,
+    }
+}
+
+/// The unit Types a unit page lists, and the building Types a building page lists.
+pub fn page_units(page: u8) -> Option<u32> {
+    match page {
+        1 => Some(BATTLE_UNITS),
+        2 => Some(TRANSPORTS),
+        3 => Some(BUILDERS),
+        _ => None,
+    }
+}
+
+pub fn page_buildings(page: u8) -> Option<u32> {
+    match page {
+        5 => Some(FACTORY),
+        6 => Some(TOWERS),
+        7 => Some(BUNKERS),
+        8 => Some(OTHER_BUILDINGS),
+        _ => None,
+    }
+}
+
+/// The unit box (`0x10085530`), its fill, and what it says with no unit or several.
+pub const UNIT_BOX: [f32; 4] = [51.0, 20.0, 369.0, 117.0];
+pub const STRING_NO_BOTS: u32 = 5076;
+pub const STRING_BOTS_SELECTED: u32 = 5077;
+pub const GREEN: u32 = 0xff00_ff00;
+pub const YELLOW: u32 = 0xffff_ff00;
+pub const GREY: u32 = 0xff80_8080;
+/// The unit box's two icons, its name, its lines' pen, and its buttons (`0x10085890`).
+pub const UNIT_ICONS: [[f32; 2]; 2] = [[60.0, 27.0], [77.0, 27.0]];
+pub const UNIT_NAME: [f32; 2] = [101.0, 30.0];
+pub const UNIT_LINES: [f32; 2] = [122.0, 27.0];
+pub const DRIVE_BUTTONS: [[f32; 2]; 3] = [[60.0, 88.0], [84.0, 88.0], [108.0, 88.0]];
+pub const STRATEGIC_BUTTON: [f32; 2] = [138.0, 88.0];
+pub const EXPLODE_BUTTON: [f32; 4] = [324.0, 88.0, 356.0, 109.0];
+/// The rows: 20 apart from (51, 118) under the unit box, from (51, 171) under the factory
+/// panel, from (51, 20) on the other building pages.
+pub const ROW_STEP: f32 = 20.0;
+pub const ROW_HEIGHT: f32 = 19.0;
+pub const UNIT_ROWS_TOP: f32 = 118.0;
+pub const FACTORY_ROWS_TOP: f32 = 171.0;
+pub const BUILDING_ROWS_TOP: f32 = 20.0;
+pub const ROWS_LEFT: f32 = 51.0;
+/// A unit row's bar (`0x10095b80`) and a building row's end (`0x100961f0`).
+pub const UNIT_BAR: f32 = 248.0;
+pub const BUILDING_BAR_END: f32 = 354.0;
+/// The order menu: its x, its strip's text box, its rows' width and bar, how far down its
+/// rows may reach and how tall one counts (`0x1007b1a0`, `0x1007b1e0`, `0x1007b0bf`).
+pub const MENU_X: f32 = 100.0;
+pub const MENU_TEXT: f32 = 158.0;
+pub const MENU_ROW: f32 = 269.0;
+pub const MENU_BAR: f32 = 247.0;
+pub const MENU_BOTTOM: f32 = 454.0;
+pub const MENU_ROW_COUNT_STEP: f32 = 21.0;
+pub const STRING_ORDERS: u32 = 5084;
+/// A pressed row fills its bar for a second; the menu rebuilds every 2 s (`0x1009c89a`,
+/// `0x1007b4a0`).
+pub const PRESSED_MS: f64 = 1000.0;
+pub const REBUILD_MS: f64 = 2000.0;
+/// The resource rows swallow a click (`0x1008d690`).
+pub const RESOURCE_ROWS: [f32; 4] = [374.0, 0.0, 640.0, 42.0];
+/// The commander's satellite map and its title bar (docs/35, "The object").
+pub const MAP_PANEL: [f32; 4] = [374.0, 63.0, 640.0, 329.0];
+pub const MAP_TITLE_Y: f32 = 43.0;
+pub const STRING_SATELLITE_MAP: u32 = 5074;
+/// The sounds a click plays (`ui/game_resources.cfg`).
+pub const BUTTON_CLICK: &str = "BUTTON_CLICK";
+pub const BAR_OPEN: &str = "BAR_OPEN";
+
+/// What the panel keeps from frame to frame.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Panel {
+    pub page: u8,
+    /// How far the column has slid out, 0 shut to 16 open, and which way it moves.
+    pub steps: u8,
+    pub sliding: i8,
+    pub slid_ms: f64,
+    /// Each column button's look this frame: enabled, and on.
+    pub enabled: [bool; 16],
+    pub on: [bool; 16],
+    /// The order menu's rows, when they were built, and the row pressed and when.
+    pub menu: Vec<u8>,
+    pub menu_ms: Option<f64>,
+    pub pressed: Option<(u8, f64)>,
+    /// Where the cursor is on the layout pinned to the top left, while over the window.
+    pub cursor: Option<[f32; 2]>,
+    /// Command mode was up at the last update.
+    pub entered: bool,
+}
+
+impl Default for Panel {
+    fn default() -> Self {
+        Panel {
+            page: 0,
+            steps: SLIDE_STEPS,
+            sliding: 0,
+            slid_ms: 0.0,
+            enabled: [false; 16],
+            on: [false; 16],
+            menu: Vec::new(),
+            menu_ms: None,
+            pressed: None,
+            cursor: None,
+            entered: false,
+        }
+    }
+}
+
+/// What a click on the panel asks the play for.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Click {
+    /// Taken by the panel, nothing more to do.
+    Taken,
+    /// Not the panel's: the world's.
+    World,
+    /// An order row that opens a pick: Route, Guard, a Build.
+    Pick(hq::Act),
+    /// A control of the factory panel on page 5.
+    Factory(usize, factory::Click),
+}
+
+fn inside([x0, y0, x1, y1]: [f32; 4], [x, y]: [f32; 2]) -> bool {
+    (x0..=x1).contains(&x) && (y0..=y1).contains(&y)
+}
+
+fn button_rect(y: f32) -> [f32; 4] {
+    [0.0, y, BUTTON[0], y + BUTTON[1]]
+}
+
+fn lock_rect(steps: u8) -> [f32; 4] {
+    let y = if steps == 0 { LOCK_SHUT_Y } else { LOCK_OPEN_Y };
+    [0.0, y, LOCK[0], y + LOCK[1]]
+}
+
+/// The buildings of `mask` a page shows.
+fn buildings_of(play: &Play, mask: u32) -> Vec<usize> {
+    play.own_buildings_within(mask)
+        .into_iter()
+        .filter(|&t| mask != FACTORY && mask != RESEARCH_CENTRE || play.units[t].type_word == mask)
+        .collect()
+}
+
+impl Panel {
+    /// Turn to page `page` (`0x10084d80`), selecting for it (`0x10084e60`).
+    pub fn turn(&mut self, play: &mut Play, page: u8, now_ms: f64) {
+        self.page = page;
+        if let Some(mask) = page_units(page) {
+            let selected = play.selected_units();
+            let keep = selected.len() == 1 && hq::within(play.units[selected[0]].type_word, mask);
+            if !keep && let Some(&first) = play.own_units_within(mask).first() {
+                play.select_unit_alone(first);
+            }
+            self.rebuild(play, now_ms);
+        } else if let Some(mask) = page_buildings(page) {
+            let keep = play.selected.len() == 1 && hq::within(play.units[play.selected[0]].type_word, mask);
+            if !keep && let Some(&first) = buildings_of(play, mask).first() {
+                play.select_building(first);
+            }
+        }
+    }
+
+    /// The order menu opens again for the selection (`0x1007a8e0`, `0x1007aaa0`).
+    pub fn rebuild(&mut self, play: &mut Play, now_ms: f64) {
+        self.menu = play.hq_rows();
+        self.menu_ms = Some(now_ms);
+    }
+
+    /// The column's update every frame in command mode (`0x10083c60`): the buttons' looks,
+    /// the slide, the lock under a resting mouse, and the page kept current (`0x10084045`).
+    pub fn update(&mut self, play: &mut Play, now_ms: f64) {
+        let units = |mask| !play.own_units_within(mask).is_empty();
+        let buildings = |mask: u32| !buildings_of(play, mask).is_empty();
+        for (i, item) in COLUMN.iter().enumerate() {
+            let Item::Button { control, .. } = *item else { continue };
+            self.enabled[i] = match control {
+                Control::Hero | Control::Map | Control::GameMenu => true,
+                Control::Chat => false,
+                Control::Page(p @ 1..=3) => units(page_units(p).unwrap_or(0)),
+                Control::Page(4) => buildings(RESEARCH_CENTRE),
+                Control::Page(p) => page_buildings(p).is_some_and(buildings),
+            };
+            self.on[i] = matches!(control, Control::Page(p) if p == self.page);
+        }
+        // The slide steps once every 0.05 s.
+        if self.sliding != 0 {
+            while now_ms - self.slid_ms >= SLIDE_MS {
+                self.slid_ms += SLIDE_MS;
+                let steps = self.steps as i8 + self.sliding;
+                self.steps = steps.clamp(0, SLIDE_STEPS as i8) as u8;
+                if self.steps == 0 || self.steps == SLIDE_STEPS {
+                    self.sliding = 0;
+                    break;
+                }
+            }
+        } else if self.steps == 0 && self.cursor.is_some_and(|c| inside(lock_rect(0), c)) {
+            // The mouse merely resting on the shut lock slides the column out (`0x10083d41`).
+            self.slide(1, now_ms, play);
+        }
+        // The page kept current.
+        if let Some(mask) = page_units(self.page) {
+            let list = play.own_units_within(mask);
+            if list.is_empty() {
+                self.page = 0;
+            } else if !play.selected_units().iter().any(|t| list.contains(t)) {
+                play.select_unit_alone(list[0]);
+                self.rebuild(play, now_ms);
+            } else if self.pressed.is_none_or(|(_, at)| now_ms - at >= PRESSED_MS)
+                && self.menu_ms.is_none_or(|at| now_ms - at >= REBUILD_MS)
+            {
+                self.rebuild(play, now_ms);
+            }
+        } else if (4..=8).contains(&self.page) {
+            let index = COLUMN
+                .iter()
+                .position(|i| matches!(i, Item::Button { control: Control::Page(p), .. } if *p == self.page));
+            if index.is_some_and(|i| !self.enabled[i]) {
+                self.page = 0;
+            }
+        }
+    }
+
+    fn slide(&mut self, way: i8, now_ms: f64, play: &mut Play) {
+        self.sliding = way;
+        self.slid_ms = now_ms;
+        play.ui_sound(BAR_OPEN);
+    }
+
+    /// A left click at `left` on the layout pinned to the top left and `right` pinned to the
+    /// top right (`0x1008d690`, `0x100841a0`).
+    pub fn click(
+        &mut self,
+        play: &mut Play,
+        map: &mut map::SatelliteMap,
+        left: [f32; 2],
+        right: [f32; 2],
+        now_ms: f64,
+    ) -> Click {
+        if inside(RESOURCE_ROWS, right) {
+            return Click::Taken;
+        }
+        // The lock.
+        if self.sliding == 0 && self.steps == SLIDE_STEPS && inside(lock_rect(self.steps), left) {
+            self.slide(-1, now_ms, play);
+            return Click::Taken;
+        }
+        // The column's buttons, while it is out.
+        if self.steps == SLIDE_STEPS {
+            for (i, item) in COLUMN.iter().enumerate() {
+                let Item::Button { y, control, .. } = *item else { continue };
+                if !self.enabled[i] || !inside(button_rect(y), left) {
+                    continue;
+                }
+                match control {
+                    Control::Hero => {
+                        play.roll_back();
+                        self.page = 0;
+                    }
+                    Control::Page(p) if p == self.page => self.page = 0,
+                    Control::Page(p) => self.turn(play, p, now_ms),
+                    Control::Map => map.toggle(),
+                    // STAND-IN: docs/41-commander.md#what-a-click-on-the-column-does -- the chat
+                    // overlay and the game menu's screen (mode 7) are not built: a click on
+                    // either is taken and does nothing.
+                    Control::Chat | Control::GameMenu => {}
+                }
+                return Click::Taken;
+            }
+        }
+        if self.page == 0 || self.steps != SLIDE_STEPS {
+            return Click::World;
+        }
+        // The header's exit.
+        if inside(factory::EXIT, left) {
+            self.page = 0;
+            return Click::Taken;
+        }
+        if let Some(mask) = page_units(self.page) {
+            return self.click_unit_page(play, mask, left, now_ms);
+        }
+        if let Some(mask) = page_buildings(self.page) {
+            let top = if self.page == 5 { FACTORY_ROWS_TOP } else { BUILDING_ROWS_TOP };
+            if self.page == 5
+                && let Some(&factory) = play.selected.first().filter(|&&t| play.units[t].type_word == FACTORY)
+                && let Some(c) = factory::click(play, factory, left)
+            {
+                return Click::Factory(factory, c);
+            }
+            let rows = buildings_of(play, mask);
+            for (i, &t) in rows.iter().enumerate() {
+                let y = top + ROW_STEP * i as f32;
+                if !inside([ROWS_LEFT, y, 369.0, y + ROW_HEIGHT], left) {
+                    continue;
+                }
+                play.select_building(t);
+                if play.units[t].type_word == FACTORY {
+                    self.page = 5;
+                }
+                // Strategic control, on a bunker's row (`0x100862d6`).
+                let strategic = [BUILDING_BUTTONS_X, y, BUILDING_BUTTONS_X + BUILDING_BUTTON, y + ROW_HEIGHT];
+                if hq::within(play.units[t].type_word, BUNKERS) && inside(strategic, left) {
+                    play.enter_command(t);
+                }
+                return Click::Taken;
+            }
+        }
+        Click::World
+    }
+
+    fn click_unit_page(&mut self, play: &mut Play, mask: u32, at: [f32; 2], now_ms: f64) -> Click {
+        let list = play.own_units_within(mask);
+        for (i, &t) in list.iter().enumerate() {
+            let y = UNIT_ROWS_TOP + ROW_STEP * i as f32;
+            if inside([ROWS_LEFT, y, 369.0, y + ROW_HEIGHT], at) {
+                play.select_unit_alone(t);
+                self.rebuild(play, now_ms);
+                return Click::Taken;
+            }
+        }
+        let top = UNIT_ROWS_TOP + ROW_STEP * list.len() as f32;
+        for (j, &command) in self.visible_rows(top).iter().enumerate() {
+            let y = top + ROW_STEP * (j + 1) as f32;
+            if !inside([MENU_X, y, MENU_X + MENU_ROW, y + ROW_HEIGHT], at) {
+                continue;
+            }
+            self.pressed = Some((command, now_ms));
+            play.ui_sound(BUTTON_CLICK);
+            return match play.hq_command(command) {
+                Some(hq::Act::Order(_)) | None => Click::Taken,
+                Some(act) => Click::Pick(act),
+            };
+        }
+        if inside(UNIT_BOX, at) { Click::Taken } else { Click::World }
+    }
+
+    /// The order rows that fit above 454 with the menu at `top` (`0x1007b1a0`).
+    fn visible_rows(&self, top: f32) -> &[u8] {
+        let fit = ((MENU_BOTTOM - top) / MENU_ROW_COUNT_STEP).max(0.0) as usize;
+        &self.menu[..self.menu.len().min(fit)]
+    }
+}
+
+/// A building row's buttons: at this x, each this wide.
+///
+/// STAND-IN: docs/41-commander.md#the-building-pages-5-to-8--read-and-seen -- the width of
+/// the piece a row's icon stands in is not read: 20, as the recording's rows measure, so the
+/// buttons start at x 86.
+pub const BUILDING_BUTTONS_X: f32 = 86.0;
+pub const BUILDING_BUTTON: f32 = 35.0;
+/// A unit row's icon pieces, each this wide (the same stand-in).
+pub const ICON_PIECE: f32 = 19.5;
+
+/// The panel in command mode, after the world: the resource rows, the column and the page, the
+/// commander's map and the message box (`0x1008d51c`).
+pub fn draw(cockpit: &mut Cockpit, ink: &mut Ink, play: &Play, now_ms: f64) -> Vec<super::designer::Preview> {
+    let mut previews = Vec::new();
+    factory::resource_rows(cockpit, ink, play, now_ms);
+    ink.painter.pin = Pin::TOP_LEFT;
+    column(cockpit, ink, now_ms);
+    let page = cockpit.commander.page;
+    if page != 0 && cockpit.commander.steps == SLIDE_STEPS {
+        factory::header(cockpit, ink, title(page));
+        if let Some(mask) = page_units(page) {
+            unit_page(cockpit, ink, play, mask, now_ms);
+        } else if let Some(mask) = page_buildings(page) {
+            let top = if page == 5 { FACTORY_ROWS_TOP } else { BUILDING_ROWS_TOP };
+            // Page 5 draws the selected factory's panel above its rows.
+            if page == 5
+                && let Some(&t) = play.selected.first().filter(|&&t| play.units[t].type_word == FACTORY)
+            {
+                previews = factory::panel(cockpit, ink, play, t, now_ms);
+                ink.painter.pin = Pin::TOP_LEFT;
+            }
+            building_rows(cockpit, ink, play, mask, top);
+        }
+    }
+    map::draw_in(cockpit, ink, play, now_ms, MAP_PANEL, true);
+    ink.painter.pin = Pin::BOTTOM_RIGHT;
+    let [left, top, width] = factory::MESSAGES_AT;
+    messages::draw_at(cockpit, ink, now_ms, left, top, width);
+    previews
+}
+
+fn put(cockpit: &Cockpit, ink: &mut Ink, name: &str, rect: [f32; 4], colour: u32) {
+    if let Some(p) = cockpit.skin.get(name) {
+        ink.painter.piece(p, rect, argb(colour));
+    }
+}
+
+/// A 15 × 15 icon of `ui_menu` at its cell.
+fn icon(cockpit: &Cockpit, ink: &mut Ink, cell: [f32; 2], at: [f32; 2], colour: u32) {
+    if let Some(&page) = cockpit.pages.get("ui_menu") {
+        ink.painter.sprite(Blend::Alpha, page, [cell[0], cell[1], 15.0, 15.0], at, argb(colour));
+    }
+}
+
+fn column(cockpit: &Cockpit, ink: &mut Ink, now_ms: f64) {
+    let panel = &cockpit.commander;
+    put(cockpit, ink, "objpanel_head", [0.0, 0.0, 46.0, 12.0], WHITE);
+    let flip = ((now_ms / HOVER_FLIP_MS).floor() as i64) % 2 == 1;
+    for (i, item) in COLUMN.iter().enumerate().take(usize::from(panel.steps)) {
+        match *item {
+            Item::Separator { y } => put(cockpit, ink, "objpanel_separator", [0.0, y, 46.0, y + 24.0], WHITE),
+            Item::Button { y, icon, .. } => {
+                let mut state = if !panel.enabled[i] {
+                    0
+                } else if panel.on[i] {
+                    2
+                } else {
+                    1
+                };
+                if panel.enabled[i] && flip && panel.cursor.is_some_and(|c| inside(button_rect(y), c)) {
+                    state = if state == 2 { 1 } else { 2 };
+                }
+                let frame = ["objpanel_button1", "objpanel_button2", "objpanel_button3"][state];
+                put(cockpit, ink, frame, button_rect(y), WHITE);
+                let [ix, iy] = [ICON_INSET[0], y + ICON_INSET[1]];
+                put(cockpit, ink, icon, [ix, iy, ix + ICON, iy + ICON], ICON_COLOURS[state]);
+            }
+        }
+    }
+    // The lock, hidden while the column slides.
+    if panel.sliding == 0 {
+        let [x0, y0, x1, y1] = lock_rect(panel.steps);
+        put(cockpit, ink, "objpanel_lock2", [x0, y0, x1, y1], WHITE);
+        let [ix, iy] = [x0 + LOCK_ICON_INSET[0], y0 + LOCK_ICON_INSET[1]];
+        put(cockpit, ink, "objpanel_lock_icon", [ix, iy, ix + LOCK_ICON, iy + LOCK_ICON], ICON_COLOURS[1]);
+    }
+}
+
+/// A unit's two icons' cells (`0x10077120`): by its Type, and by its property `0x207`; and
+/// their tint by its record `+0x30`.
+///
+/// STAND-IN: docs/41-commander.md#not-established -- a unit's property `0x207` is not read:
+/// its second icon is the cell for 1.
+fn unit_icons(play: &Play, t: usize) -> ([[f32; 2]; 2], u32) {
+    let type_word = play.units[t].type_word;
+    let first = if hq::within(type_word, BUILDERS) {
+        [65.0, 110.0]
+    } else if hq::within(type_word, TRANSPORTS) {
+        [81.0, 110.0]
+    } else {
+        [49.0, 110.0]
+    };
+    let tint = match play.record_class(t) {
+        1 => 0xffff_e7ff,
+        2 => 0xffff_8080,
+        3 => 0xff80_ff80,
+        _ => 0xff80_80ff,
+    };
+    ([first, [97.0, 94.0]], tint)
+}
+
+/// A unit's name and status, `"%s [%s]"` (docs/31, "The orders").
+fn name_status(cockpit: &Cockpit, play: &Play, t: usize) -> String {
+    let name = cockpit.panels.names.get(t).cloned().unwrap_or_default();
+    format!("{name} [{}]", cockpit.string(order_status(super::panels::status_order(play, t))))
+}
+
+fn unit_page(cockpit: &mut Cockpit, ink: &mut Ink, play: &Play, mask: u32, now_ms: f64) {
+    let [x0, y0, x1, y1] = UNIT_BOX;
+    ink.painter.fill(
+        Blend::Alpha,
+        [x0 + 5.0, y0 + 5.0, x1 - x0 - 10.0, y1 - y0 - 10.0],
+        argb(factory::BOX_FILL),
+    );
+    messages::frame(cockpit, ink, UNIT_BOX);
+    let selected = play.selected_units();
+    match selected[..] {
+        [] => {
+            let text = cockpit.string(STRING_NO_BOTS).to_owned();
+            ink.text(&text, UNIT_NAME, GREEN);
+        }
+        [t] => unit_box(cockpit, ink, play, t),
+        _ => {
+            let text = cockpit.string(STRING_BOTS_SELECTED).replace("%d", &selected.len().to_string());
+            ink.text(&text, UNIT_NAME, GREEN);
+        }
+    }
+    let list = play.own_units_within(mask);
+    let text_down = ((ROW_HEIGHT - ink.font.line_height.round()) / 2.0).floor();
+    for (i, &t) in list.iter().enumerate() {
+        let y = UNIT_ROWS_TOP + ROW_STEP * i as f32;
+        let lit = selected.contains(&t);
+        let look = if lit { "normal" } else { "off" };
+        let mut pen = ROWS_LEFT;
+        put(
+            cockpit,
+            ink,
+            &format!("ccres_lamp_text_ending_{look}"),
+            [pen, y, pen + 10.0, y + ROW_HEIGHT],
+            WHITE,
+        );
+        pen += 10.0;
+        let (cells, tint) = unit_icons(play, t);
+        for cell in cells {
+            put(cockpit, ink, "ccres_body_text", [pen, y, pen + ICON_PIECE, y + ROW_HEIGHT], WHITE);
+            icon(cockpit, ink, cell, [(pen + 2.0).round(), y + 2.0], tint);
+            pen += ICON_PIECE;
+        }
+        put(cockpit, ink, "ccres_separator_left_text", [pen, y, pen + 5.0, y + ROW_HEIGHT], WHITE);
+        pen += 5.0;
+        put(cockpit, ink, &format!("ccres_ray_emitter_{look}"), [pen, y, pen + 10.0, y + ROW_HEIGHT], WHITE);
+        pen += 10.0;
+        life_bar(cockpit, ink, play, t, [pen, y, pen + UNIT_BAR]);
+        let text = name_status(cockpit, play, t);
+        ink.centred(&text, pen, UNIT_BAR, y + text_down, if lit { WHITE } else { GREY });
+        pen += UNIT_BAR;
+        put(cockpit, ink, "ccres_ray_ending", [pen, y, pen + 6.0, y + ROW_HEIGHT], WHITE);
+    }
+    // The order menu under the list.
+    let top = UNIT_ROWS_TOP + ROW_STEP * list.len() as f32;
+    let mut pen = MENU_X;
+    put(cockpit, ink, "ccres_ending_text", [pen, top, pen + 5.0, top + ROW_HEIGHT], WHITE);
+    pen += 5.0;
+    put(cockpit, ink, "ccres_body_text", [pen, top, pen + MENU_TEXT, top + ROW_HEIGHT], WHITE);
+    let orders = cockpit.string(STRING_ORDERS).to_owned();
+    ink.centred(&orders, pen, MENU_TEXT, top + text_down, WHITE);
+    pen += MENU_TEXT;
+    for arrow in ["scroll_up_icon", "scroll_down_icon"] {
+        put(cockpit, ink, "ccres_long_button_normal", [pen, top, pen + 50.0, top + ROW_HEIGHT], WHITE);
+        put(cockpit, ink, arrow, [pen + 10.0, top + 2.0, pen + 40.0, top + 17.0], factory::ICON_VARIANTS[1]);
+        pen += 50.0;
+    }
+    put(cockpit, ink, "ccres_ending_text", [pen + 5.0, top, pen, top + ROW_HEIGHT], WHITE);
+    let panel = &cockpit.commander;
+    let rows: Vec<u8> = panel.visible_rows(top).to_vec();
+    let pressed = panel.pressed.filter(|(_, at)| now_ms - at < PRESSED_MS).map(|(c, _)| c);
+    for (j, command) in rows.into_iter().enumerate() {
+        let y = top + ROW_STEP * (j + 1) as f32;
+        let mut pen = MENU_X;
+        put(cockpit, ink, "ccres_ending_text", [pen, y, pen + 5.0, y + ROW_HEIGHT], WHITE);
+        pen += 5.0;
+        put(cockpit, ink, "ccres_ray_emitter_normal", [pen, y, pen + 10.0, y + ROW_HEIGHT], WHITE);
+        pen += 10.0;
+        put(cockpit, ink, "ccres_ray_body", [pen, y, pen + MENU_BAR, y + ROW_HEIGHT], WHITE);
+        if pressed == Some(command) {
+            ink.painter.fill(
+                Blend::Alpha,
+                [pen, y + 3.0, MENU_BAR - 2.0, ROW_HEIGHT - 6.0],
+                argb(fill_colour(100)),
+            );
+        }
+        let text = hq::row(command).map(|r| cockpit.string(r.string).to_owned()).unwrap_or_default();
+        ink.centred(&text, pen, MENU_BAR, y + text_down, WHITE);
+        pen += MENU_BAR;
+        put(cockpit, ink, "ccres_ray_ending", [pen, y, pen + 6.0, y + ROW_HEIGHT], WHITE);
+    }
+}
+
+/// One selected unit in the box (`0x10085890`).
+fn unit_box(cockpit: &mut Cockpit, ink: &mut Ink, play: &Play, t: usize) {
+    let (cells, tint) = unit_icons(play, t);
+    for (cell, at) in cells.into_iter().zip(UNIT_ICONS) {
+        icon(cockpit, ink, cell, at, tint);
+    }
+    let text = name_status(cockpit, play, t);
+    ink.text(&text, UNIT_NAME, YELLOW);
+    if let Some(lines) = play.unit_lines(t) {
+        let height = ink.font.line_height;
+        let (first, step) = ((height + 3.0).round(), (height + 2.0).round());
+        let [x, y0] = UNIT_LINES;
+        for (i, (label, line)) in crate::designs::BOX_LABELS.iter().zip(lines.iter()).enumerate() {
+            let y = y0 + first + step * i as f32;
+            let label = cockpit.string(*label).to_owned();
+            ink.text(&label, [x, y], super::designer::GREEN);
+            let (value, unit) = line.rsplit_once(' ').unwrap_or((line.as_str(), ""));
+            let w = ink.font.advance(value);
+            ink.text(value, [x + 132.0 - w, y], super::designer::FIGURE);
+            ink.text(unit, [x + 135.0, y], super::designer::GREEN);
+        }
+    }
+    // The buttons along the bottom: telepresence at levels 0 to 2, strategic control for an HQ,
+    // and Explode!.
+    let boardable = play.robots.iter().any(|(rt, r)| *rt == t && r.size_class == crate::play::BOARDABLE_SIZE);
+    let lit = if boardable { WHITE } else { GREY };
+    for (at, name) in DRIVE_BUTTONS.iter().zip([
+        "buildscreen_hq_icon",
+        "botscreen_autogunner_icon",
+        "botscreen_autodriver_icon",
+    ]) {
+        put(cockpit, ink, "short_button_frame_off", [at[0], at[1], at[0] + 21.0, at[1] + 21.0], WHITE);
+        put(cockpit, ink, name, [at[0] + 3.0, at[1] + 3.0, at[0] + 18.0, at[1] + 18.0], lit);
+    }
+    let [ex0, ey0, ex1, ey1] = EXPLODE_BUTTON;
+    put(cockpit, ink, "long_button_frame_off", [ex0, ey0, ex1, ey1], WHITE);
+    put(cockpit, ink, "self_destruction_icon", [ex0 + 2.0, ey0 + 2.0, ex0 + 32.0, ey0 + 17.0], WHITE);
+}
+
+/// A row's bar over its unit's or building's life (`0x1009a380`, `0x1007e980`).
+fn life_bar(cockpit: &Cockpit, ink: &mut Ink, play: &Play, t: usize, [x0, y, x1]: [f32; 3]) {
+    put(cockpit, ink, "ccres_ray_body", [x0, y, x1, y + ROW_HEIGHT], WHITE);
+    let share = play
+        .battle
+        .combat
+        .targets
+        .get(t)
+        .map_or(0.0, |target| life_share(target.parts.iter().filter_map(|p| p.life.as_ref())));
+    let percent = (share * 100.0).round() as i32;
+    if percent > 0 {
+        let w = (x1 - x0) * percent.min(100) as f32 / 100.0;
+        ink.painter.fill(Blend::Alpha, [x0, y + 3.0, w - 2.0, ROW_HEIGHT - 6.0], argb(fill_colour(percent)));
+    }
+}
+
+/// A building's icon cell (`0x100344e0`) and its tint by its record `+0x30`.
+fn building_icon(type_word: u32) -> [f32; 2] {
+    match type_word {
+        0x8000_0008 => [81.0, 110.0],
+        0x8000_0004 => [129.0, 126.0],
+        0x8000_0002 => [113.0, 126.0],
+        0x8000_0010 => [129.0, 94.0],
+        0x8000_0040 => [97.0, 126.0],
+        0x8000_0400 => [49.0, 126.0],
+        t if hq::within(t, BUNKERS) => [65.0, 126.0],
+        _ => [81.0, 126.0],
+    }
+}
+
+fn building_rows(cockpit: &mut Cockpit, ink: &mut Ink, play: &Play, mask: u32, top: f32) {
+    let text_down = ((ROW_HEIGHT - ink.font.line_height.round()) / 2.0).floor();
+    for (i, t) in buildings_of(play, mask).into_iter().enumerate() {
+        let y = top + ROW_STEP * i as f32;
+        let lit = play.selected.contains(&t);
+        let look = if lit { "normal" } else { "off" };
+        let type_word = play.units[t].type_word;
+        let mut pen = ROWS_LEFT;
+        put(
+            cockpit,
+            ink,
+            &format!("ccres_lamp_text_ending_{look}"),
+            [pen, y, pen + 10.0, y + ROW_HEIGHT],
+            WHITE,
+        );
+        pen += 10.0;
+        put(cockpit, ink, "ccres_body_text", [pen, y, pen + 20.0, y + ROW_HEIGHT], WHITE);
+        // STAND-IN: docs/41-commander.md#not-established -- a building's record `+0x30` is
+        // not read: 2, red, as the recording's rows show.
+        icon(cockpit, ink, building_icon(type_word), [pen + 2.0, y + 2.0], 0xffff_0000);
+        pen += 20.0;
+        put(cockpit, ink, "ccres_separator_left_text", [pen, y, pen + 5.0, y + ROW_HEIGHT], WHITE);
+        pen += 5.0;
+        let bunker = hq::within(type_word, BUNKERS);
+        if bunker {
+            put(
+                cockpit,
+                ink,
+                "ccres_short_button_normal",
+                [pen, y, pen + BUILDING_BUTTON, y + ROW_HEIGHT],
+                WHITE,
+            );
+            put(
+                cockpit,
+                ink,
+                "buildscreen_direct_icon",
+                [pen + 10.0, y + 2.0, pen + 25.0, y + 17.0],
+                factory::ICON_VARIANTS[1],
+            );
+            pen += BUILDING_BUTTON;
+        }
+        if bunker || hq::within(type_word, TOWERS) {
+            put(
+                cockpit,
+                ink,
+                "ccres_short_button_normal",
+                [pen, y, pen + BUILDING_BUTTON, y + ROW_HEIGHT],
+                WHITE,
+            );
+            put(
+                cockpit,
+                ink,
+                "buildscreen_hq_icon",
+                [pen + 10.0, y + 2.0, pen + 25.0, y + 17.0],
+                factory::ICON_VARIANTS[1],
+            );
+            pen += BUILDING_BUTTON;
+        }
+        put(cockpit, ink, &format!("ccres_ray_emitter_{look}"), [pen, y, pen + 10.0, y + ROW_HEIGHT], WHITE);
+        pen += 10.0;
+        life_bar(cockpit, ink, play, t, [pen, y, BUILDING_BAR_END]);
+        let name = play.building_name(t, &cockpit.strings);
+        ink.centred(&name, pen, BUILDING_BAR_END - pen, y + text_down, if lit { WHITE } else { GREY });
+        put(
+            cockpit,
+            ink,
+            "ccres_ray_ending",
+            [BUILDING_BAR_END, y, BUILDING_BAR_END + 6.0, y + ROW_HEIGHT],
+            WHITE,
+        );
+    }
+}

@@ -104,6 +104,11 @@ impl Assembly {
         loaded
     }
 
+    /// A unit's `.dat` read, the registered one or the file.
+    pub fn unit(&self, path: &str) -> Option<objects::Unit> {
+        objects::parse_unit(&self.unit_bytes(path)?, path).ok()
+    }
+
     /// The visible parts of an object placed with this kind and path.
     /// Every component record a unit's `.dat` names, internal parts included, in order.
     pub fn records(&self, path: &str) -> Vec<String> {

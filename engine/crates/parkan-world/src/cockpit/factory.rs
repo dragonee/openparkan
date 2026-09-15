@@ -109,17 +109,9 @@ pub fn targets(play: &Play) -> [i32; 2] {
     [0, energy]
 }
 
-/// The screen for the factory that is target `target` (`0x100836f0` with the column left
-/// out), and the message box where mode 5 puts it.
-pub fn draw(
-    cockpit: &mut Cockpit,
-    ink: &mut Ink,
-    play: &Play,
-    target: usize,
-    now_ms: f64,
-) -> Vec<super::designer::Preview> {
-    let mut previews = Vec::new();
-    let Some(f) = play.factories.iter().find(|f| f.target == target) else { return previews };
+/// The Ore and Energy rows, right to left from x 640 (`0x1006d510`), their shown values
+/// stepping toward their targets while drawn.
+pub fn resource_rows(cockpit: &mut Cockpit, ink: &mut Ink, play: &Play, now_ms: f64) {
     // The displayed values step toward their targets while the panel is drawn.
     let goal = targets(play);
     let mut screen = std::mem::take(&mut cockpit.factory);
@@ -180,6 +172,12 @@ pub fn draw(
         piece(ink, &mut pen, "ccres_ray_ending", 6.0);
     }
 
+    cockpit.factory = screen;
+}
+
+/// The page header from (51, 0) (`0x10083aa8`): its title `title` and the exit button.
+pub fn header(cockpit: &mut Cockpit, ink: &mut Ink, title: u32) {
+    let text_down = ((ROW_HEIGHT - ink.font.line_height.round()) / 2.0).floor();
     // The page header from (51, 0) (`0x10083aa8`).
     ink.painter.pin = Pin::TOP_LEFT;
     let skin = &cockpit.skin;
@@ -190,11 +188,45 @@ pub fn draw(
     };
     put(ink, "ccres_ending_text", [51.0, 0.0, 56.0, ROW_HEIGHT], WHITE);
     put(ink, "ccres_body_text", [56.0, 0.0, 334.0, ROW_HEIGHT], WHITE);
-    let title = cockpit.string(STRING_FACTORY).to_owned();
+    let title = cockpit.string(title).to_owned();
     ink.centred(&title, 56.0, 278.0, text_down, WHITE);
     put(ink, "ccres_exit_button_pressed", [EXIT[0], 0.0, EXIT[2], ROW_HEIGHT], WHITE);
     put(ink, "exit_icon", [EXIT[0] + 15.0, 3.0, EXIT[0] + 28.0, 16.0], ICON_VARIANTS[2]);
+}
 
+/// The screen for the factory that is target `target` (`0x100836f0` with the column left
+/// out), and the message box where mode 5 puts it.
+pub fn draw(
+    cockpit: &mut Cockpit,
+    ink: &mut Ink,
+    play: &Play,
+    target: usize,
+    now_ms: f64,
+) -> Vec<super::designer::Preview> {
+    resource_rows(cockpit, ink, play, now_ms);
+    header(cockpit, ink, STRING_FACTORY);
+    let previews = panel(cockpit, ink, play, target, now_ms);
+    // The message box moves to (374, 352), 266 wide.
+    ink.painter.pin = Pin::BOTTOM_RIGHT;
+    let [left, top, width] = MESSAGES_AT;
+    messages::draw_at(cockpit, ink, now_ms, left, top, width);
+    previews
+}
+
+/// The factory panel for the factory that is target `target` (`0x10097490`): its box with the
+/// project, its icons, and the production row.
+pub fn panel(
+    cockpit: &mut Cockpit,
+    ink: &mut Ink,
+    play: &Play,
+    target: usize,
+    now_ms: f64,
+) -> Vec<super::designer::Preview> {
+    let mut previews = Vec::new();
+    let Some(f) = play.factories.iter().find(|f| f.target == target) else { return previews };
+    ink.painter.pin = Pin::TOP_LEFT;
+    let blink_on = (now_ms / BLINK_MS).floor() as i64 % 2 == 0;
+    let text_down = ((ROW_HEIGHT - ink.font.line_height.round()) / 2.0).floor();
     // The panel's box, framed and filled (`0x100975f0`).
     let [x0, y0, x1, y1] = BOX;
     ink.painter.fill(Blend::Alpha, [x0 + 5.0, y0 + 5.0, x1 - x0 - 10.0, y1 - y0 - 10.0], argb(BOX_FILL));
@@ -302,11 +334,5 @@ pub fn draw(
         put(ink, icon, [rect[0] + 10.0, y + 2.0, rect[0] + 40.0, y + 17.0], ICON_VARIANTS[variant]);
     }
     put(ink, "ccres_ending_stub", [368.0, y, 362.0, y + ROW_HEIGHT], WHITE);
-    cockpit.factory = screen;
-
-    // The message box moves to (374, 352), 266 wide.
-    ink.painter.pin = Pin::BOTTOM_RIGHT;
-    let [left, top, width] = MESSAGES_AT;
-    messages::draw_at(cockpit, ink, now_ms, left, top, width);
     previews
 }

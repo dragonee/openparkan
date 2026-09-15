@@ -15,6 +15,7 @@ pub mod effects;
 pub mod ground;
 pub mod guns;
 pub mod hit;
+pub mod hq;
 pub mod input;
 pub mod machine;
 pub mod motion;

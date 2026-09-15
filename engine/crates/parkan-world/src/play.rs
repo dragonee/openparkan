@@ -92,6 +92,8 @@ pub const AIM_SETTLED: f32 = 0.005;
 pub const BUILDING_PLANT: u32 = 0x8000_0010;
 /// A generator's `Type` (docs/27, "Capture").
 pub const BUILDING_GENERATOR: u32 = 0x8000_0002;
+/// The three bunkers' `Type`s, whose pods open command mode (`iron3d.dll:0x10062779`).
+pub const BUILDING_BUNKERS: [u32; 3] = [0x8001_0000, 0x8002_0000, 0x8004_0000];
 /// The System line an ownership change shows (`iron3d.dll:0x100a48a0`).
 pub const STRING_BUILDING_CAPTURED: u32 = 5039;
 /// What the player hears when a building changes hands: taken from a neutral or an ally,
@@ -116,8 +118,19 @@ pub enum Mode {
     OnFoot,
     /// Mode 1 with the robot that is target `t`: the player drives it (docs/39).
     Driving(usize),
+    /// Mode 4 with the bunker that is target `t`: command mode, the camera over the base
+    /// (docs/40).
+    Command(usize),
     /// Mode 5 with the building that is target `t`: the factory screen (docs/36).
     Factory(usize),
+}
+
+impl Mode {
+    /// A mode whose screens show the cursor, the world going on behind them: command mode
+    /// and a building's screen (docs/40, docs/36).
+    pub fn shows_cursor(self) -> bool {
+        matches!(self, Mode::Command(_) | Mode::Factory(_))
+    }
 }
 
 /// The bot the player has boarded, and the pilot its own input table drives it with.
@@ -286,6 +299,10 @@ pub struct Play {
     pub building_effects: Vec<(BuildingEffects, Vec<f32>)>,
     /// The bot the player drives, while the hero is aboard it.
     pub driving: Option<Driving>,
+    /// Command mode's camera, kept between visits (docs/40).
+    pub command: crate::command::Camera,
+    /// The commander's selection, lodes and build marks (docs/41).
+    pub commander: crate::selection::Commander,
 }
 
 /// A round about to leave a barrel.
@@ -529,6 +546,7 @@ impl Play {
                 (b, vec![0.0; n])
             })
             .collect();
+        let battle_objects = battle.objects.clone();
         let mut play = Play {
             hero,
             ground,
@@ -567,6 +585,8 @@ impl Play {
             added: Vec::new(),
             building_effects,
             driving: None,
+            command: crate::command::Camera::default(),
+            commander: crate::selection::Commander::new(mission, &battle_objects),
         };
         for i in 0..play.turret_effects.len() {
             let e = play.turret_effects[i].clone();
@@ -1276,11 +1296,76 @@ impl Play {
         if self.modes.len() <= 1 {
             return false;
         }
-        if let Mode::Driving(_) = self.mode() {
-            return self.leave();
+        match self.mode() {
+            Mode::Driving(_) => return self.leave(),
+            // Mode 4 → 0 (`0x10063d60`): the hero is taken back where it stands, the selection
+            // cleared, and the camera let go of its bunker.
+            Mode::Command(_) => {
+                self.selected.clear();
+                self.command.leave();
+                self.command.release();
+                self.hero.release_keys();
+            }
+            _ => {}
         }
         self.modes.pop();
         true
+    }
+
+    /// Mode 0 → 4 with the bunker that is target `t` (`0x10063ca0`): the bunker selected, the
+    /// hero let go where it stands, the keys cleared, and the camera held around the bunker
+    /// and placed over it facing north. A bunker already on the stack is rolled back to
+    /// rather than pushed again (`0x10062a40`).
+    pub fn enter_command(&mut self, t: usize) {
+        if let Some(at) = self.modes.iter().position(|m| *m == Mode::Command(t)) {
+            self.modes.truncate(at + 1);
+            return;
+        }
+        self.hero.release_keys();
+        self.selected.clear();
+        self.selected.push(t);
+        let at = self.battle.combat.targets.get(t).map_or(Vec3::ZERO, |x| x.position);
+        self.command.enter(at);
+        self.modes.push(Mode::Command(t));
+    }
+
+    /// A game command's key going down or up in command mode (`0x10071cd0`, `0x10072740`):
+    /// the camera's moves and zoom. True when the command is command mode's.
+    pub fn command_key(&mut self, command: &str, down: bool) -> bool {
+        use crate::command::Move;
+        use parkan_formats::controls::*;
+        if !matches!(self.mode(), Mode::Command(_)) {
+            return false;
+        }
+        let key = match command {
+            CMD_JAMES_HQ_MOVE_LEFT => Move::Left,
+            CMD_JAMES_HQ_MOVE_RIGHT => Move::Right,
+            CMD_JAMES_HQ_MOVE_FORWARD => Move::Forward,
+            CMD_JAMES_HQ_MOVE_BACKWARD => Move::Backward,
+            CMD_JAMES_HQ_MOVE_UP => Move::Up,
+            CMD_JAMES_HQ_MOVE_DOWN => Move::Down,
+            CMD_JAMES_ZOOM_MODE => {
+                if down {
+                    self.command.toggle_zoom();
+                }
+                return true;
+            }
+            _ => return false,
+        };
+        self.command.key(key, down);
+        true
+    }
+
+    /// Command mode's camera this frame, at `now` real seconds with the cursor against
+    /// `edges` (docs/40, "The camera"): held over the highest landscape or building surface.
+    pub fn command_frame(&mut self, now: f64, edges: crate::command::Edges) {
+        if !matches!(self.mode(), Mode::Command(_)) {
+            return;
+        }
+        let (_, hi) = self.ground.bounds();
+        let ground = &self.ground;
+        self.command
+            .update(now, edges, hi[0].min(hi[1]), |x, y| ground.below(x, y, 1.0e5).map(|h| h.point.z));
     }
 
     /// The unit the player drives: the boarded bot, or the hero.
@@ -1291,8 +1376,11 @@ impl Play {
             .map_or(&self.hero.robot, |(_, r)| r)
     }
 
-    /// The first-person eye: the driven unit's camera.
+    /// The eye the world is drawn from: command mode's camera, or the driven unit's.
     pub fn eye(&self) -> crate::robot::Eye {
+        if let Mode::Command(_) = self.mode() {
+            return self.command.eye();
+        }
         self.driven().eye().unwrap_or_else(|| self.hero.eye())
     }
 
@@ -1554,6 +1642,8 @@ impl Play {
         if self.units[t].type_word == BUILDING_PLANT {
             self.hero.release_keys();
             self.modes.push(Mode::Factory(t));
+        } else if BUILDING_BUNKERS.contains(&self.units[t].type_word) {
+            self.enter_command(t);
         }
     }
 
@@ -1709,6 +1799,7 @@ impl Play {
             announced: false,
             designation,
         });
+        self.commander.paths.push(placed.path.clone());
         // A built bot is numbered by its clan: one more than the units the clan had named,
         // the hero among them (`0x10075d50`, docs/38, "The name"); the count here holds the
         // new unit already.

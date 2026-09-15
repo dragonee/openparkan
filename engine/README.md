@@ -291,6 +291,29 @@ the own panel's unit while aboard.
   factory's recent projects at the start, rated, named and priced from the player
   clan's research tree, the last named first: Mission 03's Large Factory offers
   *SWW-X Warrior* and *SSW-X Warrior*.
+- Taking a bunker from its pod opens command mode (mode 4): the hero is let go where
+  it stands, the bunker selected, and the camera placed over the bunker facing north,
+  32.7° down, with a field of 1.04 rad. The arrows move it at up to 125 m/s after a
+  half-second ramp, PageUp and PageDown climb and sink at half that, and the cursor
+  within 6 of a screen edge turns or tilts it at 1.5 rad/s; it coasts to a stop, its
+  height is held 36 to 236 over what is below, and each of x and y within 200 of the
+  bunker. Z zooms. The world goes on meanwhile. Esc closes an open map, then turns the
+  page back, then leaves: the hero is taken back in the pod.
+- The commander panel draws in the cockpit HUD's place, as docs/41 reads it: the Ore
+  and Energy rows, the icon column with its lock, its buttons enabled by what the clan
+  holds, and the page a button opens. A unit page (battle units, transports, builders)
+  shows the selected unit's box (icons, name and status, its rated lines, the drive and
+  Explode! buttons), a row a unit with its life, and the order menu the selection is
+  offered; a row click selects that unit alone. Standby, Search and capture, Seek and
+  destroy, Refit and Transport minerals give their orders at once. The factory page
+  draws the selected factory's panel over its rows, and the other building pages a row
+  a building, Strategic control moving command mode to a bunker. On Mission 03 the
+  builder is offered Build Mine alone of the Build rows. The commander's satellite map
+  stands under its title bar and marks the camera in yellow; the message box moves to
+  the bottom right.
+
+Not yet: picking in the world and on the map (Route, Guard, the Build rows' placement),
+telepresence, Explode!, tooltips, and the chat and game menu buttons.
 
 This directory also holds what the rest will follow:
 
@@ -449,6 +472,14 @@ a row here. A row leaves this table when research closes it.
 | M5 | How the game draws its font: its 8-bit blend table and the text's colour | the atlas, sampled nearest, keyed on black and multiplied by the run's colour in display space, over everything after the HUD (a recording shows the interface font's grey shadow dark) | [12](../docs/12-rsli.md#what-is-inside) |
 | M6 | How the loader turns a `varset.var` default into a value | an integer type reads hex after `0x`, a decimal, or a float truncated; a float reads its decimal; anything else is 0 (every shipped default reads either way) | [15](../docs/15-behaviour.md#the-vocabulary-varsetvar) |
 | M6 | The formula parser and evaluator, beyond the operator table's priorities | parse by those priorities, left to right among equals, in doubles; `!` is 1 for 0, `&` and `\|` are logical, `N` holds to 0..1, `S` is the sign, `B` is 1 for non-zero, `A` the absolute value; an unknown name is refused (the shipped formulas use numbers, variables, `+ - *` and brackets) | [15](../docs/15-behaviour.md#a-statement) |
+| M12 | Whether the character handler sees Esc before its binding leaves command mode | an open satellite map closes first, then a page other than 0 turns to 0, then Esc leaves | [40](../docs/40-command-mode.md#not-established) |
+| M12 | A building's property `0x20c`, its construction sphere running | no building builds itself: every building is complete for the column and the pages | [41](../docs/41-commander.md#what-enables-a-button-and-what-lights-it) |
+| M12 | What `0x10034230` accepts for an Upgrade row | no Upgrade row is offered | [41](../docs/41-commander.md#not-established) |
+| M12 | A builder's beam's life, which the Build rows need intact | a live builder can build | [32](../docs/32-builder.md#building-a-building--read) |
+| M12 | A unit's property `0x207` and a building's record `+0x30`, which pick and tint the panel's icons; the width of the piece a row's icons stand in | a unit's second icon is the cell for 1; a building's icon red (2), as the recording shows; each icon piece 19.5 wide on a unit row and 20 on a building row | [41](../docs/41-commander.md#not-established) |
+| M12 | The chat overlay and the game menu's screen (mode 7) | not built: their buttons are taken and do nothing | [41](../docs/41-commander.md#what-a-click-on-the-column-does) |
+| M12 | The routine that names a building | strings 6031–6098 by Type, by the size letter of its root record (`fr_l_` small, `fr_m_` medium, `fr_b_` large) and a bunker's by its Type | [35](../docs/35-hud.md#name-and-status--read-and-seen) |
+| M12 | The commander's satellite map's title bar and exit icon, beyond their place | a page header's pieces 20 tall at (374, 43), the title 5074 centred | [35](../docs/35-hud.md#not-established-4) |
 | M6 | What a node naming a variable, operand, formula or handler that does not exist reads | the node does nothing; a switch to no handler ends the run; a run stops after a million nodes | [15](../docs/15-behaviour.md#how-a-handler-runs) |
 
 ### Read since the stand-in was written

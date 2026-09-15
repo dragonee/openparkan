@@ -160,6 +160,7 @@ pub fn name(
 /// The status string of an order (docs/31-packages.md, "The orders"), by its number.
 pub fn order_status(order: i32) -> u32 {
     match order {
+        0 => STRING_NO_ORDER,
         1 => 6181,
         2 => 6184,
         3 => 6188,
@@ -440,19 +441,23 @@ fn panel(
 /// STAND-IN: docs/31-packages.md#the-orders--measured -- the engine keeps the task an order
 /// built rather than the order queue: the running task names the order.
 fn status(play: &Play, t: usize) -> u32 {
+    order_status(status_order(play, t))
+}
+
+/// The order a unit's status line names: its running task's (0 for none).
+pub fn status_order(play: &Play, t: usize) -> i32 {
     let Some((_, robot)) = play.robots.iter().find(|(target, _)| *target == t) else {
-        return STRING_NO_ORDER;
+        return 0;
     };
-    let order = match robot.behaviour.task() {
-        Task::Stop => return STRING_NO_ORDER,
+    match robot.behaviour.task() {
+        Task::Stop => 0,
         Task::StayGround => 21,
         Task::Follow { .. } => 22,
         Task::Search { .. } => robot.order.map_or(5, |o| if o.code == 17 { 17 } else { 5 }),
         Task::Reload => 8,
         Task::Attack { .. } => 3,
         Task::Leave { .. } => 20,
-    };
-    order_status(order)
+    }
 }
 
 /// The frame about the target in the world (`0x10041497`–`0x100416f9`): a square outline in its

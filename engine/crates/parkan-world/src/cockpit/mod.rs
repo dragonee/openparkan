@@ -3,6 +3,7 @@
 //! corners. Each frame gives the HUD's art as painter batches, its `GAME_FONT` text, and the
 //! views of units its panels hold. See `docs/35-hud.md`.
 
+pub mod commander;
 pub mod designer;
 pub mod factory;
 pub mod map;
@@ -106,6 +107,8 @@ pub struct Cockpit {
     pub map: map::SatelliteMap,
     pub factory: factory::Screen,
     pub designer: designer::Screen,
+    /// The commander panel of command mode.
+    pub commander: commander::Panel,
     /// Each part's code in the player clan's research tree, by lower-case record name.
     pub gun_codes: BTreeMap<String, String>,
 }
@@ -146,6 +149,7 @@ impl Cockpit {
             objectives: objectives::Screen::default(),
             factory: factory::Screen::default(),
             designer: designer::Screen::default(),
+            commander: commander::Panel::default(),
             gun_codes: gun_codes(game, play),
             map: map::SatelliteMap::new(
                 crate::settings::value(game, "CS", "MAP_ALPHA").and_then(|v| v.parse().ok()),
@@ -155,6 +159,22 @@ impl Cockpit {
 
     pub fn string(&self, id: u32) -> &str {
         self.strings.get(&id).map_or("", String::as_str)
+    }
+
+    /// What the screens keep current every frame before they draw (`0x1008d5f0`): in command
+    /// mode the column's update and the units the unit box shows rated.
+    pub fn update(&mut self, play: &mut Play, now_ms: f64) {
+        let command = matches!(play.mode(), crate::play::Mode::Command(_));
+        // Entering command mode turns the panel to page 0 (`0x10063ca0`).
+        if command && !self.commander.entered {
+            self.commander.page = 0;
+        }
+        self.commander.entered = command;
+        if command {
+            self.commander.update(play, now_ms);
+            let shown = play.selected_units();
+            play.rate_units(&shown);
+        }
     }
 
     /// The HUD for `play` on `space` at its hero's clock, `view_proj` its main camera, laid
@@ -192,6 +212,26 @@ impl Cockpit {
             let previews = factory::draw(self, &mut ink, play, t, now_ms);
             ink.painter.pin = Pin::TOP_RIGHT;
             map::draw(self, &mut ink, play, now_ms);
+            return Drawn {
+                batches: ink.painter.batches,
+                text: ink.text,
+                menu_text: ink.menu_runs,
+                previews,
+                ..Drawn::default()
+            };
+        }
+        if let crate::play::Mode::Command(_) = play.mode() {
+            if self.designer.is_open() {
+                let previews = designer::draw(self, &mut ink, play, now_ms);
+                return Drawn {
+                    batches: ink.painter.batches,
+                    text: ink.text,
+                    menu_text: ink.menu_runs,
+                    previews,
+                    ..Drawn::default()
+                };
+            }
+            let previews = commander::draw(self, &mut ink, play, now_ms);
             return Drawn {
                 batches: ink.painter.batches,
                 text: ink.text,

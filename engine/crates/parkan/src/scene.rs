@@ -121,7 +121,7 @@ pub fn play(game: &Path, loaded: &Loaded, args: &crate::Args) -> Result<Option<P
     Ok(play)
 }
 
-/// The game's own key chords (`ui_other.man`), or none when the file does not load.
+/// The game's own key chords (`addition.man`), or none when the file does not load.
 pub fn bindings(game: &Path) -> Vec<parkan_formats::controls::Binding> {
     use parkan_formats::controls;
     gamedir::resolve(game, controls::GAME_BINDINGS)
@@ -351,6 +351,7 @@ pub fn draw_hud(
         stretch: hud.stretch,
         ..parkan_world::hud::Space::new(width as f32, height as f32)
     };
+    hud.cockpit.update(play, play.hero.time_ms);
     let drawn = hud.cockpit.draw(play, space, &hud.font, &hud.menu, view_proj);
     renderer.set_ui(device, queue, (width, height), &drawn.batches);
     renderer.set_text_slot(device, queue, HUD_TEXT_SLOT, &drawn.text);
@@ -890,6 +891,19 @@ pub fn scan_name(code: winit::keyboard::KeyCode) -> Option<&'static str> {
         K::NumpadDivide => "SCAN_G_SLASH",
         K::F1 => "SCAN_F1",
         K::F2 => "SCAN_F2",
+        K::F3 => "SCAN_F3",
+        K::F12 => "SCAN_F12",
+        K::BracketLeft => "SCAN_LBRACKET",
+        K::BracketRight => "SCAN_RBRACKET",
+        K::Comma => "SCAN_COMMA",
+        K::Period => "SCAN_DOT",
+        // The arrows and PageUp and PageDown by the keypad are the `SCAN_G_` keys.
+        K::ArrowUp => "SCAN_G_UP",
+        K::ArrowDown => "SCAN_G_DOWN",
+        K::ArrowLeft => "SCAN_G_LEFT",
+        K::ArrowRight => "SCAN_G_RIGHT",
+        K::PageUp => "SCAN_G_PGUP",
+        K::PageDown => "SCAN_G_PGDN",
         _ => return None,
     })
 }

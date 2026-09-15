@@ -2165,3 +2165,95 @@ fn a_laser_round_on_mission_03s_bunker_door_opens_it_and_it_shuts_again_once_fre
     let closed = (shut - open) as f32 / 60.0;
     assert!((5.0..10.0).contains(&closed), "shut {closed} s after it opened");
 }
+
+#[test]
+#[ignore = "needs the game install"]
+fn taking_mission_03s_bunker_opens_command_mode_whose_camera_moves_about_it_and_esc_leaves() {
+    use parkan_world::command::{Edges, HOLD};
+    use parkan_world::play::Mode;
+
+    let (mut play, m) = mission_03_play();
+    let t = object_target(&play, &m, "sbunk01.dat");
+    assert!(play.stand_on_pod(t));
+    for _ in 0..(60 * 6) {
+        play.update_input();
+        play.tick(1000.0 / 60.0, [0.0; 2]);
+    }
+    assert_eq!(play.mode(), Mode::Command(t), "the capture's own firing opens command mode");
+    assert_eq!(play.selected, vec![t]);
+    let at = play.battle.combat.targets[t].position;
+    // Placed over the bunker facing north, 32.7° down, and held 36 to 236 over its roof.
+    let mut now = 0.0;
+    play.command_frame(now, Edges::default());
+    let eye = play.eye();
+    assert!((eye.position.truncate() - at.truncate()).length() < 1e-3, "{:?}", eye.position);
+    assert!(eye.forward.x.abs() < 1e-5 && eye.forward.y > 0.0, "{:?}", eye.forward);
+    let roof = play.ground.below(at.x, at.y, 1.0e5).unwrap().point.z;
+    assert!(
+        eye.position.z >= roof + 36.0 - 1e-3 && eye.position.z <= roof + 236.0,
+        "{} over {roof}",
+        eye.position.z
+    );
+    // The keypad's up arrow runs it north; the box stops it 200 out.
+    assert!(play.command_key("CMD_JAMES_HQ_MOVE_FORWARD", true));
+    for _ in 0..(60 * 4) {
+        now += 1.0 / 60.0;
+        play.command_frame(now, Edges::default());
+    }
+    assert!((play.eye().position.y - (at.y + HOLD)).abs() < 1e-3, "{:?}", play.eye().position);
+    // The world goes on meanwhile, and Esc takes the hero back where it stands.
+    let hero = play.hero.walker.body.position;
+    assert!(play.roll_back());
+    assert_eq!(play.mode(), Mode::OnFoot);
+    assert!(play.selected.is_empty());
+    assert!((play.hero.walker.body.position - hero).length() < 1e-3);
+}
+
+#[test]
+#[ignore = "needs the game install"]
+fn mission_03s_builders_page_selects_the_builder_and_offers_build_mine_and_standby_stands_it_by() {
+    use parkan_world::cockpit::commander::Panel;
+    use parkan_world::play::Mode;
+
+    let (mut play, m) = mission_03_play();
+    let bunker = object_target(&play, &m, "sbunk01.dat");
+    let builder = object_target(&play, &m, "tut3_b.dat");
+    let transport = object_target(&play, &m, "tut3_t.dat");
+    // As the bunker's capture leaves it.
+    play.units[bunker].clan = Some(play.player_clan);
+    play.enter_command(bunker);
+    assert_eq!(play.mode(), Mode::Command(bunker));
+    let mut panel = Panel::default();
+    panel.update(&mut play, 0.0);
+    // Builders and transports are enabled, battle units and the research centre not
+    // (docs/41, "What enables a button").
+    let enabled = |p: &Panel, page: u8| {
+        parkan_world::cockpit::commander::COLUMN.iter().zip(p.enabled).any(|(item, on)| {
+            on && matches!(item, parkan_world::cockpit::commander::Item::Button { control: parkan_world::cockpit::commander::Control::Page(n), .. } if *n == page)
+        })
+    };
+    assert!(enabled(&panel, 3) && enabled(&panel, 2) && enabled(&panel, 5) && enabled(&panel, 7));
+    assert!(!enabled(&panel, 1) && !enabled(&panel, 4) && !enabled(&panel, 6));
+    panel.turn(&mut play, 3, 0.0);
+    assert_eq!(play.selected_units(), vec![builder]);
+    // Standby, Route, Search and capture, Seek and destroy, Guard, Refit, Build Mine.
+    assert_eq!(panel.menu, vec![0, 1, 2, 3, 6, 7, 10]);
+    panel.turn(&mut play, 2, 0.0);
+    assert_eq!(play.selected_units(), vec![transport]);
+    assert!(panel.menu.contains(&8) && !panel.menu.contains(&10), "{:?}", panel.menu);
+    // A row with no pick gives its order at once.
+    assert_eq!(
+        play.hq_command(0),
+        Some(parkan_sim::hq::Act::Order(parkan_sim::orders::Order {
+            code: parkan_sim::orders::STAYGROUND,
+            parameter: 0,
+            target: parkan_sim::orders::Target::NotDefined,
+        }))
+    );
+    let robot = &play.robots.iter().find(|(t, _)| *t == transport).unwrap().1;
+    assert_eq!(robot.behaviour.task(), parkan_sim::behaviour::Task::StayGround);
+    // Its box's lines, rated from its design.
+    play.rate_units(&[builder]);
+    let lines = play.unit_lines(builder).expect("the builder rates");
+    assert_eq!(lines[4], "250 m", "{lines:?}");
+}

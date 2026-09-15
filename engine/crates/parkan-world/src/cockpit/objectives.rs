@@ -14,7 +14,7 @@ pub const STRING_CLOSE: u32 = 1017;
 pub const STRING_COMPLETE: u32 = 1014;
 pub const STRING_IN_PROGRESS: u32 = 1015;
 pub const STRING_FAILED: u32 = 1027;
-/// The key `ui_other.man` binds to `CMD_JAMES_MISSION_OBJ` (731).
+/// The key `addition.man` binds to `CMD_JAMES_MISSION_OBJ` (731).
 pub const CLOSE_KEY: &str = "F12";
 /// The dim over the whole screen, black at 60% (`0x1006a9d0`).
 pub const DIM: u32 = 0x9900_0000;

@@ -84,15 +84,49 @@ pub fn map_point(world: Vec3, side: f32) -> [f32; 2] {
     [PANEL[0] + INSET + (SIDE * x / side).round(), PANEL[3] - INSET - (SIDE * y / side).round()]
 }
 
-/// The map, while it is open.
+/// The map, while it is open, in the cockpit's panel.
 pub fn draw(cockpit: &mut Cockpit, ink: &mut Ink, play: &Play, now_ms: f64) {
+    draw_in(cockpit, ink, play, now_ms, PANEL, false);
+}
+
+/// The map in `panel`: the cockpit's, or with `commander` the commander's, under its title
+/// bar and with the camera marked in yellow (`0x10073830`, docs/35, "The satellite map").
+///
+/// STAND-IN: docs/35-hud.md#not-established-4 -- the commander's title bar is read only as a
+/// place, (374, 43): drawn as a page header, the title 5074 over `ccres_body_text` and the
+/// exit button, 20 tall.
+pub fn draw_in(
+    cockpit: &mut Cockpit,
+    ink: &mut Ink,
+    play: &Play,
+    now_ms: f64,
+    panel: [f32; 4],
+    commander: bool,
+) {
     let map = &cockpit.map;
     if !map.open {
         return;
     }
     ink.painter.pin = Pin::TOP_RIGHT;
-    let [x0, y0, x1, y1] = PANEL;
-    messages::frame(cockpit, ink, PANEL);
+    let [x0, y0, x1, y1] = panel;
+    let shift = [x0 - PANEL[0], y0 - PANEL[1]];
+    let at = |p: [f32; 2]| [p[0] + shift[0], p[1] + shift[1]];
+    if commander {
+        let top = y0 - 20.0;
+        let put = |ink: &mut Ink, name: &str, rect: [f32; 4]| {
+            if let Some(p) = cockpit.skin.get(name) {
+                ink.painter.piece(p, rect, [1.0; 4]);
+            }
+        };
+        put(ink, "ccres_ending_text", [x0, top, x0 + 5.0, top + 19.0]);
+        put(ink, "ccres_body_text", [x0 + 5.0, top, x1 - 35.0, top + 19.0]);
+        put(ink, "ccres_exit_button_pressed", [x1 - 35.0, top, x1, top + 19.0]);
+        put(ink, "exit_icon", [x1 - 20.0, top + 3.0, x1 - 7.0, top + 16.0]);
+        let title = cockpit.string(5074).to_owned();
+        let down = ((19.0 - ink.font.line_height.round()) / 2.0).floor();
+        ink.centred(&title, x0 + 5.0, x1 - 40.0 - x0, top + down, super::WHITE);
+    }
+    messages::frame(cockpit, ink, panel);
     let map = &cockpit.map;
     if let Some(&page) = cockpit.pages.get(MINIMAP) {
         let colour = argb((map.alpha as u32) << 24 | TINT);
@@ -134,7 +168,7 @@ pub fn draw(cockpit: &mut Cockpit, ink: &mut Ink, play: &Play, now_ms: f64) {
         let colour = play.mark_colour(u.clan).map(|v| f32::from(v) / 255.0);
         unit_mark(
             ink,
-            map_point(target.position, side),
+            at(map_point(target.position, side)),
             flyer,
             [colour[0], colour[1], colour[2], 1.0],
             None,
@@ -148,13 +182,35 @@ pub fn draw(cockpit: &mut Cockpit, ink: &mut Ink, play: &Play, now_ms: f64) {
     let yaw = hero.walker.body.yaw;
     unit_mark(
         ink,
-        map_point(hero.walker.body.position, side),
+        at(map_point(hero.walker.body.position, side)),
         false,
         [colour[0], colour[1], colour[2], 1.0],
         Some([-yaw.sin(), -yaw.cos()]),
         [sx, sy],
         px,
     );
+    // The command camera, in view states 2 and 4: a square with its diagonals, and a tick from
+    // 2 to 7 out along its view.
+    if commander {
+        let yellow = argb(0xffff_ff00);
+        let c = at(map_point(play.command.position, side));
+        let (s2, s7) = (2.0, 7.0);
+        let corners =
+            [[c[0] - s2, c[1] - s2], [c[0] + s2, c[1] - s2], [c[0] + s2, c[1] + s2], [c[0] - s2, c[1] + s2]];
+        for i in 0..4 {
+            ink.painter.line(Blend::Alpha, corners[i], corners[(i + 1) % 4], px, yellow);
+        }
+        ink.painter.line(Blend::Alpha, corners[0], corners[2], px, yellow);
+        ink.painter.line(Blend::Alpha, corners[1], corners[3], px, yellow);
+        let (dx, dy) = (play.command.yaw.cos(), -play.command.yaw.sin());
+        ink.painter.line(
+            Blend::Alpha,
+            [c[0] + dx * s2, c[1] + dy * s2],
+            [c[0] + dx * s7, c[1] + dy * s7],
+            px,
+            yellow,
+        );
+    }
 }
 
 /// A unit's mark at `at`: a cross for a flyer, else a square, in screen pixels about the

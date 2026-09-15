@@ -193,8 +193,9 @@ pub fn load(path: &Path) -> Result<Vec<Action>, FormatError> {
     parse(&std::fs::read(path)?, &path.display().to_string())
 }
 
-/// The key bindings `iron3d.dll` reads for the game itself (docs/14-controls.md).
-pub const GAME_BINDINGS: &str = "ui_other.man";
+/// The key bindings `iron3d.dll` looks the game's commands up in during play: group 3 of the
+/// four it loads, `addition.man` (docs/40-command-mode.md, "Input").
+pub const GAME_BINDINGS: &str = "addition.man";
 /// `iron3d.dll`'s commands the player's target and the hero's Enter answer to
 /// (`openparkan/controls.py`'s `CMD_GAME`).
 pub const CMD_ENTER_STATE: &str = "CMD_ENTER_STATE";
@@ -209,6 +210,17 @@ pub const CMD_JAMES_MISSION_OBJ: &str = "CMD_JAMES_MISSION_OBJ";
 pub const CMD_JAMES_SATELLITE_MAP: &str = "CMD_JAMES_SATELLITE_MAP";
 pub const CMD_INC_MAP_ALPHA: &str = "CMD_INC_MAP_ALPHA";
 pub const CMD_DEC_MAP_ALPHA: &str = "CMD_DEC_MAP_ALPHA";
+/// Command mode's camera moves and its zoom (docs/40, "Keys set velocities").
+pub const CMD_JAMES_HQ_MOVE_LEFT: &str = "CMD_JAMES_HQ_MOVE_LEFT";
+pub const CMD_JAMES_HQ_MOVE_RIGHT: &str = "CMD_JAMES_HQ_MOVE_RIGHT";
+pub const CMD_JAMES_HQ_MOVE_FORWARD: &str = "CMD_JAMES_HQ_MOVE_FORWARD";
+pub const CMD_JAMES_HQ_MOVE_BACKWARD: &str = "CMD_JAMES_HQ_MOVE_BACKWARD";
+pub const CMD_JAMES_HQ_MOVE_UP: &str = "CMD_JAMES_HQ_MOVE_UP";
+pub const CMD_JAMES_HQ_MOVE_DOWN: &str = "CMD_JAMES_HQ_MOVE_DOWN";
+pub const CMD_JAMES_ZOOM_MODE: &str = "CMD_JAMES_ZOOM_MODE";
+/// Turn a building being placed (docs/32, "Placing a building").
+pub const CMD_JAMES_BASE_ROTLEFT: &str = "CMD_JAMES_BASE_ROTLEFT";
+pub const CMD_JAMES_BASE_ROTRIGHT: &str = "CMD_JAMES_BASE_ROTRIGHT";
 
 /// One line of a `.man`: a command, and the key chord that runs it.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -217,6 +229,79 @@ pub struct Binding {
     /// A held key, or `SCAN_NULL`.
     pub modifier: String,
     pub key: String,
+}
+
+/// `BuildDat.lst`: the schemes a builder builds by, each a building Type's upgrade ladder
+/// (docs/14-controls.md, "`BuildDat.lst`").
+pub const BUILD_SCHEMES: &str = "BuildDat.lst";
+
+/// One scheme: its name and its `.dat` paths, the first the one a builder builds.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BuildScheme {
+    pub name: String,
+    pub members: Vec<String>,
+}
+
+impl BuildScheme {
+    /// The building Type the scheme builds, as `ArealMap.dll:0x1001ce90` registers its name.
+    pub fn type_word(&self) -> Option<u32> {
+        Some(match self.name.as_str() {
+            "Bunker_Small" => 0x8001_0000,
+            "Bunker_Medium" => 0x8002_0000,
+            "Bunker_Large" => 0x8004_0000,
+            "Generator" => 0x8000_0002,
+            "Mine" => 0x8000_0004,
+            "Storage" => 0x8000_0008,
+            "Plant" => 0x8000_0010,
+            "Hangar" => 0x8000_0040,
+            "MainTeleport" => 0x8000_0200,
+            "Institute" => 0x8000_0400,
+            "Tower_Medium" => 0x8010_0000,
+            "Tower_Large" => 0x8020_0000,
+            _ => return None,
+        })
+    }
+}
+
+/// Parse `BuildDat.lst`: a name and a count, then that many quoted paths; `//` comments.
+pub fn build_schemes(data: &[u8], source: &str) -> Result<Vec<BuildScheme>, FormatError> {
+    let text = latin1(data).replace("\r\n", "\n");
+    let mut out: Vec<BuildScheme> = Vec::new();
+    let mut want = 0usize;
+    let close = |out: &Vec<BuildScheme>, want: usize, number: usize| -> Result<(), FormatError> {
+        match out.last() {
+            Some(s) if s.members.len() != want => Err(FormatError::invalid(
+                source,
+                format!("line {number}: {} declared {want}, got {}", s.name, s.members.len()),
+            )),
+            _ => Ok(()),
+        }
+    };
+    for (number, line) in text.split('\n').enumerate() {
+        let line = line.split("//").next().unwrap_or("").trim();
+        if line.is_empty() {
+            continue;
+        }
+        if line.starts_with('"') {
+            let Some(scheme) = out.last_mut() else {
+                return Err(FormatError::invalid(
+                    source,
+                    format!("line {}: a path before any scheme", number + 1),
+                ));
+            };
+            scheme.members.push(line.trim_matches('"').to_owned());
+            continue;
+        }
+        close(&out, want, number + 1)?;
+        let (name, count) = line.rsplit_once(' ').unwrap_or((line, ""));
+        want = count
+            .trim()
+            .parse()
+            .map_err(|_| FormatError::invalid(source, format!("line {}: no count", number + 1)))?;
+        out.push(BuildScheme { name: name.trim().to_owned(), members: Vec::new() });
+    }
+    close(&out, want, text.split('\n').count())?;
+    Ok(out)
 }
 
 /// Parse a `.man`'s text: every line that is not blank is three fields.
@@ -256,6 +341,16 @@ pub fn command_for<'a>(bindings: &'a [Binding], key: &str, held: impl Fn(&str) -
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn build_schemes_are_a_name_a_count_and_the_paths() {
+        let text = b"//There must be 11 schemes\r\n\r\nMine 2\r\n  \"UNITS\\BUILDS\\MINE\\smine01.dat\"\r\n  \"UNITS\\BUILDS\\MINE\\mmine01.dat\"\r\nPlant 1\r\n  \"p.dat\"\r\n";
+        let schemes = build_schemes(text, "BuildDat.lst").unwrap();
+        assert_eq!(schemes.len(), 2);
+        assert_eq!(schemes[0].members[0], "UNITS\\BUILDS\\MINE\\smine01.dat");
+        assert_eq!((schemes[0].type_word(), schemes[1].type_word()), (Some(0x8000_0004), Some(0x8000_0010)));
+        assert!(build_schemes(b"Mine 2\n\"a.dat\"\n", "x").is_err());
+    }
 
     #[test]
     fn a_binding_line_is_three_fields_and_a_held_modifier_wins() {

@@ -119,6 +119,8 @@ struct Args {
     /// `--objectives`, `--map`: a screenshot with the objectives screen up, or the map open.
     objectives: bool,
     map: bool,
+    /// `--page N`: a screenshot in command mode with the commander panel on page N.
+    page: Option<u8>,
     ticks: u32,
     hold: Vec<String>,
     mouse: [f32; 2],
@@ -150,6 +152,7 @@ fn args() -> Result<Args> {
         briefing_at: None,
         objectives: false,
         map: false,
+        page: None,
         ticks: 0,
         hold: Vec::new(),
         mouse: [0.0; 2],
@@ -173,6 +176,7 @@ fn args() -> Result<Args> {
             "--skip-briefing" => out.skip_briefing = true,
             "--objectives" => out.objectives = true,
             "--map" => out.map = true,
+            "--page" => out.page = Some(value()?.parse()?),
             "--briefing-at" => out.briefing_at = Some(value()?.parse()?),
             "--face" => {
                 let v = value()?;
@@ -301,8 +305,10 @@ fn rehearse(play: &mut scene::Play, loaded: &scene::Loaded, args: &Args) {
     }
     let mut kills = Vec::new();
     for tick in 0..args.ticks {
-        // Nothing is rendered here: the input update runs once a tick.
+        // Nothing is rendered here: the input update runs once a tick, and command mode's
+        // camera once a tick on the hero's clock.
         play.update_input();
+        play.command_frame(play.hero.time_ms / 1000.0, parkan_world::command::Edges::default());
         for e in play.tick(TICK_MS, args.mouse) {
             if let parkan_sim::combat::Event::Killed { target } = e {
                 kills.push(play.battle.objects[target]);
@@ -445,7 +451,8 @@ fn screenshot(loaded: &scene::Loaded, game: &Path, args: &Args, out: &Path) -> R
     if let Some(p) = play.as_mut() {
         scene::sync(&mut renderer, &gpu.device, &gpu.queue, p, &world.objects, view_proj, eye);
         if let Some(v) = &view {
-            scene::place_own_view(&mut renderer, &gpu.queue, v, p, briefing.is_some());
+            let outside = briefing.is_some() || p.mode().shows_cursor();
+            scene::place_own_view(&mut renderer, &gpu.queue, v, p, outside);
         }
         scene::panel_fonts(&mut renderer, &gpu.device, &gpu.queue, game);
         let outcome =
@@ -459,6 +466,10 @@ fn screenshot(loaded: &scene::Loaded, game: &Path, args: &Args, out: &Path) -> R
                     hud.cockpit.objectives.open_at_start();
                 }
                 hud.cockpit.map.open = args.map;
+                if let Some(page) = args.page {
+                    hud.cockpit.update(p, p.hero.time_ms);
+                    hud.cockpit.commander.turn(p, page, p.hero.time_ms);
+                }
                 if (args.designer || !args.design.is_empty())
                     && let Some(t) = p.factories.first().map(|f| f.target)
                 {
@@ -570,8 +581,9 @@ struct App {
     /// The mission's briefing while it plays, and when its first frame was drawn.
     briefing: Option<parkan_world::briefing::Briefing>,
     briefing_clock: Option<Instant>,
-    /// Where the cursor is in the window, in pixels.
+    /// Where the cursor is in the window, in pixels, and whether it is over the window.
     cursor: [f32; 2],
+    cursor_in: bool,
     /// Cmd is down: the keys pressed now are a system shortcut's.
     shortcut: bool,
 }
@@ -716,6 +728,19 @@ impl App {
             .strip_prefix("SCAN_W_")
             .and_then(|d| d.parse::<usize>().ok())
             .filter(|d| (1..=9).contains(d));
+        // Command mode's keys act on the way down and up (`0x10071cd0`, `0x10072740`).
+        if matches!(play.mode(), parkan_world::play::Mode::Command(_))
+            && let Some(command) =
+                parkan_formats::controls::command_for(&self.bindings, scan, |m| self.scans.contains(m))
+            && play.command_key(command, pressed)
+        {
+            if pressed {
+                self.scans.insert(scan);
+            } else {
+                self.scans.remove(scan);
+            }
+            return;
+        }
         let selecting = play.selector.state != parkan_sim::orders::State::Off;
         match digit {
             Some(n) if selecting => {
@@ -841,10 +866,21 @@ impl App {
         //
         // STAND-IN: docs/36-factory.md#not-established -- how the cursor is shown in mode 5
         // is not followed: the system's cursor, the grab let go.
-        if self.grabbed
-            && self.play.as_ref().is_some_and(|p| matches!(p.mode(), parkan_world::play::Mode::Factory(_)))
-        {
+        if self.grabbed && self.play.as_ref().is_some_and(|p| p.mode().shows_cursor()) {
             self.grab(false);
+        }
+        // Command mode's camera runs each frame in real seconds, turned by the cursor at an
+        // edge of the screen (docs/40, "The cursor at an edge turns and tilts it").
+        if let (Some(play), Some(r)) = (self.play.as_mut(), self.running.as_ref()) {
+            let space = hud_space(r.config.width, r.config.height, &self.args);
+            let edges = match self.cursor_in {
+                true => parkan_world::command::Edges::of(
+                    space.layout(self.cursor, parkan_world::hud::Pin::TOP_LEFT),
+                    space.layout(self.cursor, parkan_world::hud::Pin::BOTTOM_RIGHT),
+                ),
+                false => parkan_world::command::Edges::default(),
+            };
+            play.command_frame(self.started.elapsed().as_secs_f64(), edges);
         }
         // The designer goes with the factory screen it was opened from.
         if let (Some(play), Some(hud)) = (self.play.as_ref(), self.hud.as_mut())
@@ -992,7 +1028,8 @@ impl App {
                     eye.position,
                 );
                 if let Some(v) = &self.view {
-                    scene::place_own_view(&mut r.renderer, &r.gpu.queue, v, play, briefing.is_some());
+                    let outside = briefing.is_some() || play.mode().shows_cursor();
+                    scene::place_own_view(&mut r.renderer, &r.gpu.queue, v, play, outside);
                     if let Some(hud) = self.hud.as_mut() {
                         let (voices, sounds) = scene::draw_hud(
                             &mut r.renderer,
@@ -1130,6 +1167,28 @@ impl ApplicationHandler for App {
                     hud.cockpit.designer.close();
                     return;
                 }
+                // Esc in command mode: the character handler's cases first (`0x10071027`,
+                // `0x1007104b`), an open satellite map closing, then a page turning to 0.
+                //
+                // STAND-IN: docs/40-command-mode.md#not-established -- whether the character
+                // handler sees Esc before its binding leaves command mode is not read: the map
+                // and the page are peeled back first.
+                if code == KeyCode::Escape
+                    && event.state == ElementState::Pressed
+                    && outcome.is_none()
+                    && let (Some(play), Some(hud)) = (self.play.as_ref(), self.hud.as_mut())
+                    && matches!(play.mode(), parkan_world::play::Mode::Command(_))
+                {
+                    let cockpit = &mut hud.cockpit;
+                    if cockpit.map.open {
+                        cockpit.map.toggle();
+                        return;
+                    }
+                    if cockpit.commander.page != 0 {
+                        cockpit.commander.page = 0;
+                        return;
+                    }
+                }
                 // `CMD_ROLLBACK_STATE` (735, Esc): a building's screen gives the hero back (docs/36).
                 if code == KeyCode::Escape
                     && event.state == ElementState::Pressed
@@ -1180,7 +1239,22 @@ impl ApplicationHandler for App {
             }
             WindowEvent::CursorMoved { position, .. } => {
                 self.cursor = [position.x as f32, position.y as f32];
+                self.cursor_in = true;
+                if let (Some(r), Some(hud)) = (self.running.as_ref(), self.hud.as_mut()) {
+                    let space = hud_space(r.config.width, r.config.height, &self.args);
+                    hud.cockpit.commander.cursor =
+                        Some(space.layout(self.cursor, parkan_world::hud::Pin::TOP_LEFT));
+                }
             }
+            // The game's cursor cannot leave its full screen; a window's can, and away from
+            // the window it is against no edge.
+            WindowEvent::CursorLeft { .. } => {
+                self.cursor_in = false;
+                if let Some(hud) = self.hud.as_mut() {
+                    hud.cockpit.commander.cursor = None;
+                }
+            }
+            WindowEvent::CursorEntered { .. } => self.cursor_in = true,
             WindowEvent::MouseInput { state, button, .. } => {
                 let pressed = state == ElementState::Pressed;
                 if self.briefing.is_some() {
@@ -1214,6 +1288,36 @@ impl ApplicationHandler for App {
                                     }
                                 }
                             }
+                        }
+                    }
+                    return;
+                }
+                // Command mode keeps the cursor free, and a press goes to the commander panel
+                // first (`0x1008d690`), then the world.
+                if let Some(play) = self.play.as_mut()
+                    && matches!(play.mode(), parkan_world::play::Mode::Command(_))
+                {
+                    if pressed
+                        && button == MouseButton::Left
+                        && let (Some(r), Some(hud)) = (self.running.as_ref(), self.hud.as_mut())
+                    {
+                        use parkan_world::cockpit::commander::Click;
+                        use parkan_world::hud::Pin;
+                        let space = hud_space(r.config.width, r.config.height, &self.args);
+                        let (left, right) = (
+                            space.layout(self.cursor, Pin::TOP_LEFT),
+                            space.layout(self.cursor, Pin::TOP_RIGHT),
+                        );
+                        let now = play.hero.time_ms;
+                        let cockpit = &mut hud.cockpit;
+                        match cockpit.commander.click(play, &mut cockpit.map, left, right, now) {
+                            Click::Factory(t, parkan_world::cockpit::factory::Click::Constructor) => {
+                                if let Err(e) = cockpit.designer.open(play, t, &cockpit.strings) {
+                                    eprintln!("cannot open the designer: {e:#}");
+                                }
+                            }
+                            Click::Factory(t, click) => play.factory_click(t, click),
+                            Click::Taken | Click::World | Click::Pick(_) => {}
                         }
                     }
                     return;
@@ -1310,6 +1414,7 @@ fn main() -> Result<()> {
         looking: false,
         grabbed: false,
         cursor: [0.0; 2],
+        cursor_in: false,
         shortcut: false,
         counts: [0.0; 2],
         mouse: args.mouse,
