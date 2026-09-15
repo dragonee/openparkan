@@ -329,8 +329,12 @@ the own panel's unit while aboard.
   rule's colour, the player's named in green, with their class icon and bars. Each lode's
   plume, `env_mineral`, shows on the ground under it until a building stands within 80.
 
-Not yet: the builder's building, the economy, telepresence, Explode!, tooltips, and the chat
-and game menu buttons. The ghost draws over the HUD.
+- Telepresence: a unit page's three drive buttons take the selected unit over (mode 2) with
+  its own cockpit and table while the hero stays in the bunker; Esc goes back to the command
+  view with the camera where it was left.
+
+Not yet: the builder's building, the economy, Explode!, tooltips, and the chat and game menu
+buttons. The ghost draws over the HUD.
 
 This directory also holds what the rest will follow:
 
@@ -503,6 +507,7 @@ a row here. A row leaves this table when research closes it.
 | M12 | `IsPlacementValid`'s path, sphere, overlap, areal and slope tests | not modelled: a site is good where a selection may be sent, with a found lode within 20 for a mine | [32](../docs/32-builder.md#placing-a-building--read-measured-and-seen) |
 | M12 | The build task (order 7) | not modelled: the order is given and the builder, with no task for it, stops | [32](../docs/32-builder.md#building-a-building-tick-by-tick--read-and-seen) |
 | M12 | A marker's gap figure (the record's slot 5), its bar frame on page9, the clan's sign, and where its name, icon and bars stand | the gap is the unit's projected radius held to 4–44; the name over the left bracket, the class icon right of the right one, a blue box under the left one holding the life bar over a full battery bar | [25](../docs/25-sensors.md#how-the-game-colours-what-it-marks--read-and-measured) |
+| M12 | What telepresence's auto-driver levels 1 and 2 give the AI, and what mode 2 does when its unit dies | the player drives the unit whole at every level; a lost unit goes back to the command view | [40](../docs/40-command-mode.md#not-established) |
 | M6 | What a node naming a variable, operand, formula or handler that does not exist reads | the node does nothing; a switch to no handler ends the run; a run stops after a million nodes | [15](../docs/15-behaviour.md#how-a-handler-runs) |
 | M12 | Function 15's answer: whether the unit takes the order (1) or refuses it (0) | an id some unit or building answers gives 1, and the unit is handed the order after the handler's run | [34](../docs/34-progression.md#what-the-scripts-ask--read-and-measured-1) |
 | M12 | A building's contour (property `0x203`), whose vertices a patrol of the building walks | eight points on the building's sphere, pushed out by 30 | [31](../docs/31-packages.md#the-patrol-tick-by-tick--read) |

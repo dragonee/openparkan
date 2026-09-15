@@ -2452,3 +2452,34 @@ fn in_command_mode_a_click_selects_the_builder_sends_it_and_build_mine_places_a_
     );
     assert_eq!(play.selected_units(), vec![builder]);
 }
+
+#[test]
+#[ignore = "needs the game install"]
+fn telepresence_takes_a_warbot_from_command_mode_and_esc_returns_to_the_camera_where_it_was() {
+    use parkan_world::play::Mode;
+
+    let (mut play, m) = mission_03_play();
+    let bunker = object_target(&play, &m, "sbunk01.dat");
+    play.units[bunker].clan = Some(play.player_clan);
+    play.enter_command(bunker);
+    // A prebuilt warbot beside the bunker, the player's.
+    let project = play.factories[0].projects[0].clone();
+    let at = play.battle.combat.targets[bunker].position + glam::Vec3::new(40.0, 0.0, 0.0);
+    let bot = play.spawn(&project, play.player_clan, at, 0.0).expect("the prebuilt design is a robot");
+    play.tick(1000.0 / 60.0, [0.0; 2]);
+    play.command.position.x += 50.0;
+    let camera = play.command.position;
+    assert!(play.can_take(bot), "any size can be taken over");
+    assert!(play.telepresence(bot, 0));
+    assert_eq!(play.mode(), Mode::Driving(bot));
+    assert!(play.driving.as_ref().is_some_and(|d| d.telepresence));
+    let hero = play.hero.walker.body.position;
+    for _ in 0..60 {
+        play.tick(1000.0 / 60.0, [0.0; 2]);
+    }
+    assert!(play.roll_back());
+    assert_eq!(play.mode(), Mode::Command(bunker));
+    assert_eq!(play.command.position, camera, "the camera is where the player left it");
+    assert!((play.hero.walker.body.position - hero).length() < 1e-3, "the hero stayed in the bunker");
+    assert!(play.selected_units().is_empty());
+}

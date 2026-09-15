@@ -141,8 +141,13 @@ pub struct Driving {
     pub target: usize,
     pub pilot: parkan_sim::input::Pilot,
     fire_held: bool,
+    /// Taken from command mode (mode 2, telepresence): the hero stays where it stood, and
+    /// leaving goes back to the command view.
+    pub telepresence: bool,
 }
 
+/// `ORDER_ROBOT_UPGRADE`, which keeps a unit from being taken over (docs/40).
+pub const ORDER_UPGRADE: i32 = 24;
 /// A unit the hero boards: size class 4, a `b` chassis (docs/39, "Boarding").
 pub const BOARDABLE_SIZE: u8 = 4;
 /// Leaving tries eight places about the bot, π/4 apart from +x (`iron3d.dll:0x100633ce`); a
@@ -1196,10 +1201,17 @@ impl Play {
         self.update_targets();
         self.tick_robots(dt_ms, mouse);
         // A driven bot that is lost puts the hero out at once (`0x10062ff0`).
+        //
+        // STAND-IN: docs/40-command-mode.md#not-established -- what mode 2 does when its unit
+        // dies is not read: telepresence goes back to the command view.
         if let Some(d) = self.driving.as_ref()
             && !self.battle.combat.targets.get(d.target).is_some_and(|x| x.alive)
         {
-            self.leave();
+            if d.telepresence {
+                self.roll_back();
+            } else {
+                self.leave();
+            }
         }
         let shots = if self.hero.dead() || self.driving.is_some() {
             self.hero.time_ms += dt_ms;
@@ -1433,6 +1445,9 @@ impl Play {
             return false;
         }
         match self.mode() {
+            Mode::Driving(_) if self.driving.as_ref().is_some_and(|d| d.telepresence) => {
+                return self.end_telepresence();
+            }
             Mode::Driving(_) => return self.leave(),
             // Mode 4 → 0 (`0x10063d60`): the hero is taken back where it stands, the selection
             // cleared, and the camera let go of its bunker.
@@ -1601,7 +1616,7 @@ impl Play {
         robot.wizard.clear();
         robot.walker.drive = None;
         let flyer = robot.flyer;
-        self.driving = Some(Driving { target: t, pilot, fire_held: false });
+        self.driving = Some(Driving { target: t, pilot, fire_held: false, telepresence: false });
         self.modes.push(Mode::Driving(t));
         self.say_sound(VOICE_SELECTED_B, true);
         if flyer && let Some(p) = self.progression.as_mut() {
@@ -1610,6 +1625,64 @@ impl Play {
                 let says = p.say(n);
                 self.says.extend(says);
             }
+        }
+        true
+    }
+
+    /// Telepresence (mode 4 → 2, `0x10063e90`): from command mode the player takes unit `t` at
+    /// auto-driver level `level`: the selection is the unit alone, the unit taken with every
+    /// held key let go, the camera let go of its bunker, and the unit's view drawn. A unit that
+    /// is not the player's, cannot be boarded, or is upgrading is refused (`0x10076d30`).
+    ///
+    /// STAND-IN: docs/40-command-mode.md#telepresence-mode-2--read -- the auto-driver levels'
+    /// overrides are not modelled: the player drives the unit whole at every level.
+    pub fn telepresence(&mut self, t: usize, level: u8) -> bool {
+        if !matches!(self.mode(), Mode::Command(_)) || !self.can_take(t) {
+            return false;
+        }
+        let Some(r) = self.robots.iter().position(|(rt, _)| *rt == t) else { return false };
+        let chassis = self.robots[r].1.parts[self.robots[r].1.chassis_part].record.clone();
+        let Ok(pilot) = crate::hero::Hero::pilot_for(&mut self.assembly, &chassis) else { return false };
+        self.select_unit_alone(t);
+        self.hero.release_keys();
+        let robot = &mut self.robots[r].1;
+        robot.wizard.clear();
+        robot.walker.drive = None;
+        self.auto_driver = level.min(2);
+        self.command.leave();
+        self.driving = Some(Driving { target: t, pilot, fire_held: false, telepresence: true });
+        self.modes.push(Mode::Driving(t));
+        true
+    }
+
+    /// Whether unit `t` can be taken over from command mode (`0x10076d30`, docs/39): the
+    /// player's live unit with a turret whose node lives, not upgrading. Unlike boarding, any
+    /// size will do.
+    pub fn can_take(&self, t: usize) -> bool {
+        let Some(u) = self.units.get(t) else { return false };
+        let Some((_, robot)) = self.robots.iter().find(|(rt, _)| *rt == t) else { return false };
+        let Some(target) = self.battle.combat.targets.get(t) else { return false };
+        u.kind == KIND_UNIT
+            && u.clan == Some(self.player_clan)
+            && target.alive
+            && node_alive(target.parts.get(robot.turret_part).and_then(|p| p.life.as_ref()), 0)
+            && robot.order.is_none_or(|o| o.code != ORDER_UPGRADE)
+    }
+
+    /// Mode 2 → 4 (`0x10063f30`): the unit let go, the selection cleared, and the camera held
+    /// around its bunker again where the player left it.
+    fn end_telepresence(&mut self) -> bool {
+        if let Some(mut d) = self.driving.take()
+            && let Some((_, robot)) = self.robots.iter_mut().find(|(rt, _)| *rt == d.target)
+        {
+            crate::hero::drive_input(robot, &mut d.pilot, true);
+            robot.walker.body.command = [0.0; 3];
+        }
+        self.modes.retain(|m| !matches!(m, Mode::Driving(_)));
+        self.clear_selection();
+        if let Some(Mode::Command(b)) = self.modes.last().copied() {
+            let at = self.battle.combat.targets.get(b).map_or(Vec3::ZERO, |x| x.position);
+            self.command.hold(at);
         }
         true
     }

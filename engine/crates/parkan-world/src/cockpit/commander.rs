@@ -412,6 +412,18 @@ impl Panel {
                 return Click::Taken;
             }
         }
+        // The unit box's drive buttons, their icons grown by 2 (`0x1008470d`): telepresence at
+        // levels 0, 1 and 2.
+        if let [t] = play.selected_units()[..] {
+            for (level, corner) in DRIVE_BUTTONS.iter().enumerate() {
+                let rect = [corner[0] + 1.0, corner[1] + 1.0, corner[0] + 20.0, corner[1] + 20.0];
+                if inside(rect, at) {
+                    play.telepresence(t, level as u8);
+                    self.page = 0;
+                    return Click::Taken;
+                }
+            }
+        }
         let top = UNIT_ROWS_TOP + ROW_STEP * list.len() as f32;
         for (j, &command) in self.visible_rows(top).iter().enumerate() {
             let y = top + ROW_STEP * (j + 1) as f32;
@@ -758,7 +770,7 @@ fn unit_box(cockpit: &mut Cockpit, ink: &mut Ink, play: &Play, t: usize) {
     }
     // The buttons along the bottom: telepresence at levels 0 to 2, strategic control for an HQ,
     // and Explode!.
-    let boardable = play.robots.iter().any(|(rt, r)| *rt == t && r.size_class == crate::play::BOARDABLE_SIZE);
+    let boardable = play.can_take(t);
     let lit = if boardable { WHITE } else { GREY };
     for (at, name) in DRIVE_BUTTONS.iter().zip([
         "buildscreen_hq_icon",
