@@ -485,6 +485,16 @@ goes through, 318 s in. Not yet: tooltips, the research box's clip, the maps' ro
 selected outline, the ground contact once a frame (the Small Bunker's sinking door still
 presses a hero standing at it down), and which of Mission 04's units holds no mind.
 
+**M14.** Feedback on Mission 01.
+
+- Backing up mirrors the strafe angle, as `World3D.dll`'s handlers read (docs/24, "From input
+  to motion"): a strafe key going down while walking turns the hull ½ × π/2 with the sign of
+  the way it walks, so S with A goes back and to the left, 225° clockwise from the heading, and
+  S with D back and to the right, 135°, whichever went down first. A walk key under a strafe
+  key works the angle out again, W or S let go under one leaves the strafe going at full speed,
+  and a walk key let go while the other is held walks the other way. A key row without a ramp
+  runs once as its key goes down or comes up, as read (docs/14, "A row that stays down").
+
 This directory also holds what the rest will follow:
 
 - **`docs/`** is the source of truth. Every behaviour the engine implements is
@@ -648,7 +658,6 @@ a row here. A row leaves this table when research closes it.
 | M3 | What vector a state with righting bits `0x30` stands the hull toward (control `+0x348`, no writer found) | none yet: the hull neither leans nor rights; to come, the ground contact's face normal, and world up for bits `0xC0` as read | [24](../docs/24-motion.md#the-hull-leans-and-rights-itself--read-and-measured) |
 | M3 | Which way across a slope the mode-2 brake acts | uphill, against the averaged ground normal of the last landing | [24](../docs/24-motion.md#ground-and-slope--read) |
 | M3 | How often `World3D.dll`'s input update runs, which paces the keypad cruise ramp | once a rendered frame, and once a 60 Hz tick where nothing is rendered | [24](../docs/24-motion.md#not-established) |
-| M3 | What the walk, strafe and weapon handlers do when an active row runs again each input update while held | only ramp rows run again; any other row runs once, as its key goes down or comes up | [14](../docs/14-controls.md#a-row-that-stays-down--read) |
 | M3 | A chord with no row of its own, such as Shift+W | the plain row | [14](../docs/14-controls.md#the-table) |
 | M3 | How the camera builds its look-only frame when its up is parallel to the look (`0x10023769`) | any frame about the look; no shipped camera's pitch reaches it | [30](../docs/30-turrets.md#aiming-and-the-camera--read-and-measured) |
 | M4 | Whether a target the hero's AI set before the player took over survives | none: nothing sets it while the player drives, so the plasma bolt and the missile fly straight | [29](../docs/29-weapons.md#not-established) |

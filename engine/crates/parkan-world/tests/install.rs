@@ -403,6 +403,58 @@ fn a_strafe_turns_the_hull_while_the_turret_holds_the_sight() {
 
 #[test]
 #[ignore = "needs the game install"]
+fn backing_up_under_a_strafe_goes_back_to_the_strafes_side_while_the_sight_holds() {
+    use parkan_formats::{landmesh, mission};
+    use parkan_sim::ground::Ground;
+    use parkan_world::{assembly::Assembly, hero::Hero};
+
+    let game = gamedir::find(None).expect("a Parkan install: set PARKAN_DIR");
+    let dir = gamedir::resolve(&game, gamedir::MISSION_01).unwrap();
+    let m = mission::parse(&std::fs::read(dir.join("data.tma")).unwrap(), "Mission.01").unwrap();
+    let land = landmesh::load(&gamedir::resolve(&game, "DATA/MAPS/Tut_1/Land.msh").unwrap()).unwrap();
+    let ground = Ground::new(land);
+    let wrap = |a: f32| (a + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI;
+    let sight_heading = |hero: &Hero| {
+        let (_, sight) = hero.sight().expect("the hero's turret has a sight");
+        (-sight.x).atan2(sight.y)
+    };
+    // Where the hero goes with S and then a strafe key held, in degrees clockwise from where
+    // its sight looked before (docs/24, "From input to motion"): the heading of its move over
+    // the second and third seconds, the sight's drift from the start the most it got to.
+    let walk = |strafe: &str| {
+        let mut assembly = Assembly::new(&game).unwrap();
+        let mut hero = Hero::load(&mut assembly, &m).unwrap().expect("Mission 01 has a hero");
+        let tick = 1000.0 / 60.0;
+        hero.tick(tick, [0.0; 2], &ground);
+        let ahead = sight_heading(&hero);
+        hero.key("SCAN_S", true);
+        hero.key(strafe, true);
+        let (mut from, mut drift) = (hero.walker.drawn(hero.time_ms).0, 0.0_f32);
+        for t in 0..180 {
+            hero.tick(tick, [0.0; 2], &ground);
+            if t == 59 {
+                from = hero.walker.drawn(hero.time_ms).0;
+            }
+            if t >= 60 {
+                drift = drift.max(wrap(sight_heading(&hero) - ahead).abs());
+            }
+        }
+        let moved = hero.walker.drawn(hero.time_ms).0 - from;
+        let clockwise = -wrap((-moved.x).atan2(moved.y) - ahead).to_degrees();
+        (clockwise.rem_euclid(360.0), moved.truncate().length(), drift)
+    };
+    let (left, left_moved, left_drift) = walk("SCAN_A");
+    let (right, right_moved, right_drift) = walk("SCAN_D");
+    assert!((left - 225.0).abs() < 12.0 && left_moved > 5.0, "S and A went {left} degrees, {left_moved} m");
+    assert!(
+        (right - 135.0).abs() < 12.0 && right_moved > 5.0,
+        "S and D went {right} degrees, {right_moved} m"
+    );
+    assert!(left_drift < 0.2 && right_drift < 0.2, "the sight drifted {left_drift} and {right_drift} rad");
+}
+
+#[test]
+#[ignore = "needs the game install"]
 fn the_heros_eye_swings_with_the_run_but_never_lunges_and_holds_steady_when_asked() {
     use parkan_formats::{landmesh, mission};
     use parkan_sim::ground::Ground;

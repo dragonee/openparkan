@@ -5,7 +5,7 @@
 //! Keys and mouse axes arrive as the table's scan names (`SCAN_W`,
 //! `SCAN_MOUSE_X`); the caller maps its platform's keys onto them.
 
-use std::f32::consts::{FRAC_PI_2, FRAC_PI_4};
+use std::f32::consts::FRAC_PI_2;
 
 use parkan_formats::controls::{
     self, Action, CICLS_CAMERA, CICLS_DETECTSHIELD, CICLS_REPAIRSYS, CICLS_TURRET, CIS_INV, CIS_OFF, CIS_ON,
@@ -27,9 +27,14 @@ pub const Y_GAIN: f32 = 1.2;
 pub const COUNT_SCALE: f32 = 0.006;
 /// `Iron_3D.ini`'s `MOUSE_SENS` is a percentage.
 pub const SENSITIVITY_SCALE: f32 = 0.01;
-/// The strafe angle, or half of it while already walking (`0x1079523c`, `0x10795240`).
+/// The strafe angle from standing (`World3D.dll:0x10020b60`); walking takes half of it, with
+/// the sign of the way the unit walks.
 pub const STRAFE: f32 = FRAC_PI_2;
-pub const STRAFE_WALKING: f32 = FRAC_PI_4;
+/// A walk row walks when its magnitude is at least this (`0x10020b68`).
+pub const WALKING: f32 = 1e-4;
+/// A command's y within this of 0 counts as standing to a strafe key (`0x10020b5c`,
+/// `0x10020250`).
+pub const STILL: f32 = 0.001;
 
 /// The mouse's signs. The game's are +1 on both (`MOUSE_REV_Y` clear), and its attitude
 /// integrator turns the hull by −(z − 0.5) × 2π (`Control.dll:0x10014858`); here the
@@ -87,9 +92,11 @@ pub struct Pilot {
     pub invert: [f32; 2],
     filter: MouseFilter,
     shift: bool,
-    /// What the walking handler last set the command's y to.
-    walk: f32,
-    /// The strafe keys held: left, right.
+    /// The walk keys held: W, S (the input context's `+0x20`, `+0x24`).
+    walks: [bool; 2],
+    /// Whether the last walk row to run walks (`0x10795244`).
+    walking: bool,
+    /// The strafe keys held: left, right (`0x1079523c`, `0x10795240`).
     strafing: [bool; 2],
     /// The ramp rows active, each with the game time it became so (row `+0x80`,
     /// `+0x84`).
@@ -160,7 +167,8 @@ impl Pilot {
             invert: INVERT,
             filter: MouseFilter::default(),
             shift: false,
-            walk: 0.0,
+            walks: [false; 2],
+            walking: false,
             strafing: [false; 2],
             active: Vec::new(),
             clock_ms: 0.0,
@@ -204,13 +212,9 @@ impl Pilot {
     ///
     /// A row with a ramp time is not run by the event: the event makes the key's
     /// matching row active, stamped with the game clock, and clears its other row
-    /// (`World3D.dll:0x1000f5a4`), and the input update runs it.
-    ///
-    /// STAND-IN: docs/14-controls.md#a-row-that-stays-down--read -- every active row is
-    /// read to run again on each input update, but what the walk, strafe and weapon
-    /// handlers do when run again while their key is held is not (a select row run again
-    /// would toggle its gun each update); a row without a ramp time runs once, as its key
-    /// goes down or comes up.
+    /// (`World3D.dll:0x1000f5a4`), and the input update runs it. A row without one runs
+    /// once, as its key goes down or comes up: the handler clears it after its run
+    /// (`0x100109e7`, docs/14-controls.md, "A row that stays down").
     pub fn key(&mut self, key: &str, pressed: bool, hands: &mut Hands) {
         let rows = self.matching(key, pressed);
         self.held.retain(|k| k != key);
@@ -245,9 +249,9 @@ impl Pilot {
             let reach = row.ramp * (held / row.ramp_time as f32).min(1.0);
             let arrived = match row.code() {
                 MCMD_WALK_F | MCMD_WALK_B | MCMD_FORWARD => {
-                    self.walk = approach(hands.body.command[1], row.value, reach);
-                    hands.body.command[1] = self.walk;
-                    self.walk == row.value
+                    let value = approach(hands.body.command[1], row.value, reach);
+                    self.walk(&row, value, hands.body);
+                    value == row.value
                 }
                 _ => true,
             };
@@ -279,10 +283,7 @@ impl Pilot {
     /// `0x1000fb40`: a row's call. An axis row adds `amount`; any other row sets.
     fn apply(&mut self, row: &Action, amount: Option<f32>, hands: &mut Hands) {
         match row.code() {
-            MCMD_WALK_F | MCMD_WALK_B | MCMD_FORWARD => {
-                self.walk = row.value;
-                hands.body.command[1] = row.value;
-            }
+            MCMD_WALK_F | MCMD_WALK_B | MCMD_FORWARD => self.walk(row, row.value, hands.body),
             code @ (MCMD_LEFT | MCMD_RIGHT) => self.strafe(code == MCMD_LEFT, row.pressed, hands.body),
             // `World3D.dll:0x1001059b`: the command's z, which a flyer climbs and sinks by
             // (docs/39-boarding.md, "Driving").
@@ -337,26 +338,72 @@ impl Pilot {
         }
     }
 
-    /// `MCMD_LEFT` or `MCMD_RIGHT` going down or up: `SetTangAccel` and
-    /// `SetStrafeAngle` (docs/24-motion.md, "From input to motion"). Going down sets the
-    /// command's y to ±1 with the sign of the current direction, and the angle to +π/2
-    /// left or −π/2 right, ±π/4 while already walking; the angle is set as the key goes
-    /// down and not worked out again. Coming up returns the angle to 0, and the command
-    /// to 0 if nothing else is held.
+    /// The handler `MCMD_WALK_F`, `MCMD_WALK_B` and `MCMD_FORWARD` share (`World3D.dll:0x100101b2`;
+    /// docs/24-motion.md, "From input to motion"). `value` is what the axis function gives
+    /// the row: its magnitude, or a ramp's step.
+    ///
+    /// A walk key coming up while the other is held walks the other way and does nothing
+    /// more. Otherwise the row walks when its magnitude is not 0, and with no strafe key held
+    /// the command's y takes `value`. Under a strafe key the strafe is worked out again: a
+    /// walk takes y to the sign of its magnitude and the angle to ±π/4 by it, and a stop
+    /// leaves y be and turns the angle to ±π/2 by y's sign, so the strafe goes on.
+    fn walk(&mut self, row: &Action, value: f32, body: &mut Body) {
+        let code = row.code();
+        if code == MCMD_WALK_F || code == MCMD_WALK_B {
+            let key = usize::from(code == MCMD_WALK_B);
+            self.walks[key] = row.pressed;
+            if !row.pressed && self.walks[1 - key] {
+                body.command[1] = if code == MCMD_WALK_F { -1.0 } else { 1.0 };
+                return;
+            }
+        }
+        self.walking = row.value.abs() >= WALKING;
+        if self.strafing == [false; 2] {
+            body.command[1] = value;
+            return;
+        }
+        let angle = if self.walking {
+            body.command[1] = sign(row.value);
+            body.command[1] * STRAFE * 0.5
+        } else {
+            sign(body.command[1]) * STRAFE
+        };
+        body.strafe = if self.strafing[1] { -angle } else { angle };
+    }
+
+    /// `MCMD_LEFT` (`0x10010350`) or `MCMD_RIGHT` (`0x10010457`) going down or up:
+    /// `SetTangAccel` and `SetStrafeAngle` (docs/24-motion.md, "From input to motion").
+    ///
+    /// Going down sets the command's y to ±1 by the sign of the y it finds, and the angle to
+    /// f × π/2 left or −f × π/2 right: f is 1 standing, and while walking ½ with y's sign, so
+    /// backing up mirrors it and S with A walks back and to the left. Coming up turns the
+    /// angle to the other strafe key's, or 0, and the command to 0 when nothing else moves.
     fn strafe(&mut self, left: bool, pressed: bool, body: &mut Body) {
+        let y = body.command[1];
+        let share = match self.walking {
+            true if y < -STILL => -0.5,
+            true if y > STILL => 0.5,
+            _ => 1.0,
+        };
+        let angle = |left: bool| if left { share * STRAFE } else { -share * STRAFE };
         let side = usize::from(!left);
+        let other = self.strafing[1 - side];
         self.strafing[side] = pressed;
         if pressed {
-            body.command[1] = if body.command[1] < 0.0 { -1.0 } else { 1.0 };
-            let angle = if self.walk != 0.0 { STRAFE_WALKING } else { STRAFE };
-            body.strafe = if left { angle } else { -angle };
+            body.command[1] = sign(y);
+            body.strafe = angle(left);
         } else {
-            body.strafe = 0.0;
-            if self.walk == 0.0 && !self.strafing[1 - side] {
+            body.strafe = if other { angle(!left) } else { 0.0 };
+            if !other && !self.walking {
                 body.command[1] = 0.0;
             }
         }
     }
+}
+
+/// ±1 by a value's sign, 0 counting as positive, as the handlers' `fcomp` with 0 reads it.
+fn sign(v: f32) -> f32 {
+    if v >= 0.0 { 1.0 } else { -1.0 }
 }
 
 #[cfg(test)]
@@ -428,6 +475,7 @@ KEY   SCAN_NULL SCAN_W_3 1 CICLS_MULTIGUN MCMD_SELECT 0.0 3 0 0.0 0
 
     #[test]
     fn walking_and_strafing_set_the_command_and_the_angle_as_each_key_goes_down() {
+        use std::f32::consts::FRAC_PI_4;
         let mut pilot = Pilot::new(hero_table(), 100.0);
         let mut r = rig();
         pilot.key("SCAN_W", true, &mut r.hands());
@@ -437,8 +485,8 @@ KEY   SCAN_NULL SCAN_W_3 1 CICLS_MULTIGUN MCMD_SELECT 0.0 3 0 0.0 0
         pilot.key("SCAN_W", false, &mut r.hands());
         assert_eq!(
             (r.body.command[1], r.body.strafe),
-            (0.0, FRAC_PI_4),
-            "W's release sends 0; A's angle stays"
+            (1.0, FRAC_PI_2),
+            "W's release under A leaves y be and turns A's angle to a half: the strafe goes on"
         );
         pilot.key("SCAN_A", false, &mut r.hands());
         assert_eq!((r.body.command[1], r.body.strafe), (0.0, 0.0));
@@ -446,7 +494,7 @@ KEY   SCAN_NULL SCAN_W_3 1 CICLS_MULTIGUN MCMD_SELECT 0.0 3 0 0.0 0
         pilot.key("SCAN_D", true, &mut r.hands());
         assert_eq!((r.body.command[1], r.body.strafe), (1.0, -FRAC_PI_2), "a half from standing");
         pilot.key("SCAN_W", true, &mut r.hands());
-        assert_eq!(r.body.strafe, -FRAC_PI_2, "not worked out again from what is held");
+        assert_eq!(r.body.strafe, -FRAC_PI_4, "a walk key under a strafe works it out again");
         pilot.key("SCAN_W", false, &mut r.hands());
         pilot.key("SCAN_D", false, &mut r.hands());
         assert_eq!((r.body.command[1], r.body.strafe), (0.0, 0.0));
@@ -454,9 +502,58 @@ KEY   SCAN_NULL SCAN_W_3 1 CICLS_MULTIGUN MCMD_SELECT 0.0 3 0 0.0 0
         pilot.key("SCAN_S", true, &mut r.hands());
         assert_eq!(r.body.command[1], -1.0);
         pilot.key("SCAN_A", true, &mut r.hands());
-        assert_eq!((r.body.command[1], r.body.strafe), (-1.0, FRAC_PI_4), "backing up: not mirrored");
+        assert_eq!((r.body.command[1], r.body.strafe), (-1.0, -FRAC_PI_4), "backing up mirrors it");
         pilot.key("SCAN_A", false, &mut r.hands());
         assert_eq!((r.body.command[1], r.body.strafe), (-1.0, 0.0), "S is still held");
+        pilot.key("SCAN_D", true, &mut r.hands());
+        assert_eq!((r.body.command[1], r.body.strafe), (-1.0, FRAC_PI_4), "back and to the right");
+        pilot.key("SCAN_S", false, &mut r.hands());
+        assert_eq!(
+            (r.body.command[1], r.body.strafe),
+            (-1.0, FRAC_PI_2),
+            "S's release under D: backwards on a hull turned left, still to the right"
+        );
+        pilot.key("SCAN_D", false, &mut r.hands());
+        assert_eq!((r.body.command[1], r.body.strafe), (0.0, 0.0));
+    }
+
+    /// Where a unit goes, in degrees clockwise from its heading: the hull turned by the strafe
+    /// angle (+ left), walked along y.
+    fn goes(body: &Body) -> f32 {
+        let along = body.strafe + if body.command[1] > 0.0 { 0.0 } else { std::f32::consts::PI };
+        (-along.to_degrees()).rem_euclid(360.0).round()
+    }
+
+    #[test]
+    fn a_strafe_backing_up_goes_back_to_its_side_whichever_key_went_down_first() {
+        let press = |keys: &[(&str, bool)]| {
+            let mut pilot = Pilot::new(hero_table(), 100.0);
+            let mut r = rig();
+            for &(k, down) in keys {
+                pilot.key(k, down, &mut r.hands());
+            }
+            goes(&r.body)
+        };
+        assert_eq!(press(&[("SCAN_S", true), ("SCAN_A", true)]), 225.0);
+        assert_eq!(press(&[("SCAN_A", true), ("SCAN_S", true)]), 225.0);
+        assert_eq!(press(&[("SCAN_S", true), ("SCAN_D", true)]), 135.0);
+        assert_eq!(press(&[("SCAN_D", true), ("SCAN_S", true)]), 135.0);
+        assert_eq!(press(&[("SCAN_W", true), ("SCAN_A", true)]), 315.0);
+        assert_eq!(press(&[("SCAN_A", true)]), 270.0);
+        assert_eq!(press(&[("SCAN_S", true), ("SCAN_A", true), ("SCAN_S", false)]), 270.0);
+    }
+
+    #[test]
+    fn a_walk_key_let_go_under_the_other_walks_the_other_way() {
+        let mut pilot = Pilot::new(hero_table(), 100.0);
+        let mut r = rig();
+        pilot.key("SCAN_S", true, &mut r.hands());
+        pilot.key("SCAN_W", true, &mut r.hands());
+        assert_eq!(r.body.command[1], 1.0, "the last key down walks");
+        pilot.key("SCAN_W", false, &mut r.hands());
+        assert_eq!(r.body.command[1], -1.0, "S is still held");
+        pilot.key("SCAN_S", false, &mut r.hands());
+        assert_eq!(r.body.command[1], 0.0);
     }
 
     #[test]
