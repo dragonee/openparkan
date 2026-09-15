@@ -503,7 +503,6 @@ impl Play {
         if let Some(p) = self.progression.as_mut() {
             p.progress.place_building(logical_id, clan, type_word);
         }
-        self.economy.join_building(t);
         // The sphere, round the outer contour, 15 wider on a mine.
         let (centre, radius) = self.building_sphere(t).unwrap_or((at, self.battle.combat.targets[t].radius));
         let radius = radius + if type_word == BUILDING_MINE { MINE_SPHERE_EXTRA } else { 0.0 };
@@ -580,6 +579,12 @@ impl Play {
                     let done = self.construction.spheres.remove(s);
                     for id in [SIGN, RAY, DOME] {
                         self.fx.remove(Owner::Building(done.target, id));
+                    }
+                    // A mine's order 10, queued behind the sphere, digs now (docs/23).
+                    if let Some(site) = self.economy.site_mut(done.target)
+                        && site.mine.is_some()
+                    {
+                        site.digging = true;
                     }
                     continue;
                 }

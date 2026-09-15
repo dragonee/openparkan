@@ -76,28 +76,43 @@ impl Construct {
         Self { seconds, ore_cost, power_cost, time: 0.0, ore: 0.0, power: 0.0, free }
     }
 
+    /// The ore it asks for this takt (`0x1002a4f0`): `(cost − collected) × k × KPD × 0.2 + 0.07`,
+    /// k being 0.2 below 20% collected, the share collected to 80%, and 3 above; nothing once
+    /// all is in.
+    pub fn request(&self, kpd: f32) -> f32 {
+        if self.ore >= self.ore_cost {
+            return 0.0;
+        }
+        let f = self.ore / self.ore_cost;
+        let k = if f < 0.2 {
+            0.2
+        } else if f <= 0.8 {
+            f
+        } else {
+            3.0
+        };
+        (self.ore_cost - self.ore) * k * kpd * 0.2 + 0.07
+    }
+
+    /// Whether its power is still to collect, while it draws `Use_Power` (`0x1002a308`,
+    /// `0x1002a722`).
+    pub fn drawing_power(&self) -> bool {
+        self.power < self.power_cost
+    }
+
     /// One takt of `dt` seconds with the efficiency `kpd` and a power use of `use_power` a
-    /// second: time accrues as `dt`, power as KPD × use × dt, and ore by the request
-    /// (`Behavior.dll:0x1002a4f0`), each held to its cost.
-    ///
-    /// STAND-IN: docs/23-economy.md#construction--read -- the engine keeps no clan stores or
-    /// power distribution: the ore a build requests is granted in full, and the power is
-    /// taken as available.
-    pub fn takt(&mut self, dt: f32, kpd: f32, use_power: f32) {
+    /// second: time accrues as `dt` and power as KPD × use × dt, each held to its cost; the
+    /// ore it takes is as much of its request as `held` holds, and `held` is left empty
+    /// (`0x10015540`, `0x1002a604`). Returns the request, which is what the factory asks the
+    /// next distribution step for.
+    pub fn takt(&mut self, dt: f32, kpd: f32, use_power: f32, held: &mut f32) -> f32 {
         self.time = (self.time + dt).min(self.seconds);
         self.power = (self.power + kpd * use_power * dt).min(self.power_cost);
-        if self.ore_cost > 0.0 {
-            let f = self.ore / self.ore_cost;
-            let k = if f < 0.2 {
-                0.2
-            } else if f <= 0.8 {
-                f
-            } else {
-                3.0
-            };
-            let request = (self.ore_cost - self.ore) * k * kpd * 0.2 + 0.07;
-            self.ore = (self.ore + request).min(self.ore_cost);
-        }
+        let request = self.request(kpd);
+        let take = held.max(0.0).min(request);
+        self.ore = (self.ore + take).min(self.ore_cost);
+        *held = 0.0;
+        self.request(kpd)
     }
 
     /// The progress, min(time, ore, power) as fractions, held to 1.
@@ -125,11 +140,35 @@ mod tests {
         assert_eq!((c.seconds, c.ore_cost, c.power_cost), (60.0, 0.0, 1.0));
         let mut t: f32 = 0.0;
         while !c.done() && t < 120.0 {
-            c.takt(1.0 / 60.0, 1.0, 1.0);
+            c.takt(1.0 / 60.0, 1.0, 1.0, &mut 0.0);
             t += 1.0 / 60.0;
         }
         assert!((t - 60.0).abs() < 0.05, "done at {t}");
         assert_eq!(c.progress(), 1.0);
+    }
+
+    #[test]
+    fn a_paid_bot_takes_only_the_ore_that_arrives_and_asks_again_for_the_rest() {
+        // SSW-X in the Large Factory: 125.6 ore over efficiency 5, 72.7 power at 5 × 4 a second.
+        let mut c = Construct::new(4, 2, false, 125.6 / 5.0, 72.7);
+        let mut held = 0.0;
+        let first = c.takt(0.25, 5.0, 4.0, &mut held);
+        assert!((first - (25.12 * 0.2 * 5.0 * 0.2 + 0.07)).abs() < 1e-4, "{first}");
+        assert_eq!(c.ore, 0.0, "nothing arrived");
+        held = 0.22;
+        c.takt(0.25, 5.0, 4.0, &mut held);
+        assert!((c.ore - 0.22).abs() < 1e-6 && held == 0.0);
+        // Power is in by 3.6 s; the time by 5; the ore at a second each second it arrives.
+        let mut t: f32 = 0.5;
+        while !c.done() && t < 60.0 {
+            let mut arrived = 0.25;
+            c.takt(0.25, 5.0, 4.0, &mut arrived);
+            t += 0.25;
+            if t > 3.7 {
+                assert!(!c.drawing_power());
+            }
+        }
+        assert!((t - 25.5).abs() < 0.6, "done at {t}");
     }
 
     #[test]

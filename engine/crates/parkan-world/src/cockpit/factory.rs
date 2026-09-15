@@ -95,18 +95,10 @@ pub fn click(play: &Play, target: usize, at: [f32; 2]) -> Option<Click> {
     })
 }
 
-/// The resource rows' targets, whole percentages (docs/23, "What the HUD shows").
-///
-/// STAND-IN: docs/23-economy.md#what-the-hud-shows--read -- the engine keeps no clan stores
-/// or power distribution: Ore is 0, as held ore is with no mine or storage, and Energy is the
-/// player's generators' share of the map's generators, as the formula gives with nothing
-/// demanded.
+/// The resource rows' targets, whole percentages: the player clan's held ore over 4,500 and
+/// its net power over the map's (docs/23, "What the HUD shows").
 pub fn targets(play: &Play) -> [i32; 2] {
-    let generators = play.units.iter().filter(|u| u.type_word == crate::play::BUILDING_GENERATOR);
-    let (mine, all) =
-        generators.fold((0, 0), |(m, a), u| (m + usize::from(u.clan == Some(play.player_clan)), a + 1));
-    let energy = if all > 0 { (100.0 * mine as f32 / all as f32).round() as i32 } else { 0 };
-    [0, energy]
+    play.resource_rows(play.player_clan)
 }
 
 /// The Ore and Energy rows, right to left from x 640 (`0x1006d510`), their shown values

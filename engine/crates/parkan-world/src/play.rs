@@ -726,6 +726,7 @@ impl Play {
             play.fx.start(Owner::Chassis(e.id), &e.name, Frame::along(at, y, 1.0), 1.0, 0.0, None);
         }
         play.start_building_effects();
+        play.join_sites();
         Ok(Some(play))
     }
 
@@ -1232,6 +1233,7 @@ impl Play {
         let now = self.hero.time_ms;
         if !self.paused {
             self.tick_buildings(now);
+            self.tick_economy(now, (dt_ms / 1000.0) as f32);
             self.tick_factories(dt_ms);
         }
         let mut events = self.ground_damage(now);
@@ -1924,7 +1926,19 @@ impl Play {
     /// vertex, of the factory's clan, and is given the escape (docs/36, "Production").
     fn tick_factories(&mut self, dt_ms: f64) {
         for f in 0..self.factories.len() {
-            let Some(project) = self.factories[f].takt((dt_ms / 1000.0) as f32) else { continue };
+            // The build takes what the distribution brought, and asks the next step for its
+            // request (docs/23, "Ore reaches the factory"); it draws `Use_Power` while its
+            // power is still to collect.
+            let t = self.factories[f].target;
+            let mut held = self.economy.held(t);
+            let project = self.factories[f].takt((dt_ms / 1000.0) as f32, &mut held);
+            let request = self.factories[f].build.as_ref().map_or(0.0, |b| b.request);
+            self.economy.ore.insert(t, (held, request));
+            let drawing = self.factories[f].drawing_power();
+            if let Some(site) = self.economy.site_mut(t) {
+                site.usage = if drawing { site.use_power } else { 0.0 };
+            }
+            let Some(project) = project else { continue };
             let factory = &self.factories[f];
             let t = factory.target;
             let clan = self.units[t].clan.unwrap_or(self.player_clan);

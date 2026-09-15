@@ -11,6 +11,7 @@ pub mod combat;
 pub mod construct;
 pub mod damage;
 pub mod device;
+pub mod economy;
 pub mod effects;
 pub mod ground;
 pub mod guns;

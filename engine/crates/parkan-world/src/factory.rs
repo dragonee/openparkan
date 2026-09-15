@@ -26,12 +26,6 @@ pub const FREE_BOT_NUM: &str = "FreeBotNum";
 /// `VOICE_UNIT_READY`, queued for the player's clan when its factory makes a bot
 /// (`iron3d.dll:0x10033490`).
 pub const VOICE_UNIT_READY: &str = "VOICE_UNIT_READY";
-/// A factory's efficiency and a build's power use.
-///
-/// STAND-IN: docs/23-economy.md#efficiency-is-a-buildings-size -- the engine keeps no power
-/// distribution: a factory works at efficiency 1 and draws its build's power at 1 a second.
-pub const KPD: f32 = 1.0;
-pub const USE_POWER: f32 = 1.0;
 
 /// A design the factory can build: its `.dat` under the path it is registered at, its name,
 /// Type and chassis size, and its price.
@@ -54,6 +48,8 @@ pub struct Project {
 pub struct Build {
     pub project: Project,
     pub construct: Construct,
+    /// The ore its last takt asked for: the factory's ore property's most until the next.
+    pub request: f32,
 }
 
 /// One factory of the player's clan list.
@@ -71,6 +67,11 @@ pub struct Factory {
     pub selected: Option<usize>,
     pub build: Option<Build>,
     pub batch: bool,
+    /// Its class-26 efficiency and the level its batteries serve it at, whose product is its
+    /// KPD, and its profile's `Use_Power` (docs/23, "Efficiency is a building's size").
+    pub efficiency: f32,
+    pub level: f32,
+    pub use_power: f32,
 }
 
 fn number(v: Value) -> i64 {
@@ -106,6 +107,9 @@ impl Factory {
             selected: None,
             build: None,
             batch: false,
+            efficiency: 1.0,
+            level: 1.0,
+            use_power: 0.0,
         })
     }
 
@@ -142,9 +146,11 @@ impl Factory {
         if !self.idle() || free_minds == 0 || !construct::builds(self.size, project.chassis_size) {
             return false;
         }
+        // A factory's ore cost is divided by its KPD as a build starts (`0x1002a2a7`).
+        let ore = project.ore / self.kpd().max(f32::EPSILON);
         let construct =
-            Construct::new(self.size, project.chassis_size, self.free_bots > 0, project.ore, project.power);
-        self.build = Some(Build { project, construct });
+            Construct::new(self.size, project.chassis_size, self.free_bots > 0, ore, project.power);
+        self.build = Some(Build { project, construct, request: 0.0 });
         self.batch = batch;
         true
     }
@@ -168,12 +174,23 @@ impl Factory {
         self.build.as_ref().map_or(0.0, |b| b.construct.progress())
     }
 
-    /// One takt of `dt` seconds; the project that completed, which the factory spends a free
-    /// bot on (`0x1002a7f9`). In batch the same design starts again while a mind is free
-    /// (`0x100874b0`).
-    pub fn takt(&mut self, dt: f32) -> Option<Project> {
+    /// The factory's efficiency now: KPD.
+    pub fn kpd(&self) -> f32 {
+        self.efficiency * self.level
+    }
+
+    /// Whether its build is collecting power, and so draws `Use_Power`.
+    pub fn drawing_power(&self) -> bool {
+        self.build.as_ref().is_some_and(|b| b.construct.drawing_power())
+    }
+
+    /// One takt of `dt` seconds with `held` the ore the distribution brought: the project that
+    /// completed, which the factory spends a free bot on (`0x1002a7f9`). In batch the same
+    /// design starts again while a mind is free (`0x100874b0`).
+    pub fn takt(&mut self, dt: f32, held: &mut f32) -> Option<Project> {
+        let (kpd, use_power) = (self.kpd(), self.use_power);
         let build = self.build.as_mut()?;
-        build.construct.takt(dt, KPD, USE_POWER);
+        build.request = build.construct.takt(dt, kpd, use_power, held);
         if !build.construct.done() {
             return None;
         }
@@ -287,6 +304,9 @@ mod tests {
             selected: None,
             build: None,
             batch: false,
+            efficiency: 1.0,
+            level: 1.0,
+            use_power: 0.0,
         }
     }
 

@@ -2546,3 +2546,56 @@ fn mission_03s_builder_puts_a_mine_on_the_lode_that_counts_at_once_and_runs_its_
     assert!(!play.building_itself(mine), "done by 42 s");
     assert!(play.battle.combat.targets[mine].alive);
 }
+
+#[test]
+#[ignore = "needs the game install"]
+fn mission_03s_large_factory_waits_on_ore_and_builds_an_ssw_x_in_25_seconds_once_the_mine_digs() {
+    use parkan_world::construction::BUILDING_MINE;
+
+    let (mut play, m) = mission_03_play();
+    let player = play.player_clan;
+    // The generator and the bunker taken, as the hero takes them: 10.07 power a second.
+    for name in ["gener01.dat", "sbunk01.dat"] {
+        let t = object_target(&play, &m, name);
+        play.units[t].clan = Some(player);
+    }
+    let plant = object_target(&play, &m, "lplant01.dat");
+    let f = play.factories.iter().position(|f| f.target == plant).unwrap();
+    assert_eq!((play.factories[f].efficiency, play.factories[f].use_power), (5.0, 4.0));
+    let ssw = play.factories[f].projects.iter().position(|p| p.name.starts_with("SSW-X")).unwrap();
+    play.factories[f].selected = Some(ssw);
+    let free = play.free_minds(player);
+    assert!(play.factories[f].start(false, free));
+    let cost = play.factories[f].build.as_ref().unwrap().construct.ore_cost;
+    assert!((cost - 125.6 / 5.0).abs() < 0.1, "the price over the factory's efficiency: {cost}");
+
+    // With no ore anywhere it collects its power in 3.6 s and its time, and waits.
+    play_for(&mut play, 12.0, |_| {});
+    let c = play.factories[f].build.as_ref().expect("still building").construct;
+    assert!(c.power >= c.power_cost && c.time >= c.seconds && c.ore == 0.0, "{c:?}");
+    assert_eq!(play.resource_rows(player)[0], 0);
+
+    // A mine on the lode: its 41 s sphere, then it digs at 50 a second to 500, 11%.
+    let lode = glam::Vec3::new(1026.1, 942.7, 0.0);
+    let at = lode.with_z(play.ground.below(lode.x, lode.y, 1.0e5).unwrap().point.z);
+    let now = play.hero.time_ms;
+    let mine = play.create_building(player, BUILDING_MINE, at, 0.0, now).expect("the mine stands");
+    play_for(&mut play, 41.5, |_| {});
+    assert!(!play.building_itself(mine));
+    let mut seconds: f32 = 0.0;
+    let mut energies = Vec::new();
+    while play.factories[f].build.is_some() && seconds < 60.0 {
+        play_for(&mut play, 0.25, |_| {});
+        seconds += 0.25;
+        if (10.0..15.0).contains(&seconds) {
+            energies.push(play.resource_rows(player)[1]);
+            let ore = play.resource_rows(player)[0];
+            assert!((10..=12).contains(&ore), "a mine of 500 reads 11%: {ore}");
+        }
+    }
+    // (10.07 − 1.03) ÷ 10.07 with the mine at work, the target sampled across its steps.
+    let energy = energies.iter().sum::<i32>() as f32 / energies.len() as f32;
+    assert!((85.0..=95.0).contains(&energy), "the mine at work draws 1: {energy} of {energies:?}");
+    // 25.1 s with the mine alone (docs/23, "A warbot from the Large Factory").
+    assert!((seconds - 25.1).abs() < 2.0, "the bot is done {seconds} s after the mine digs");
+}

@@ -321,6 +321,19 @@ the own panel's unit while aboard.
   with a builder, and a mine on a found lode within 20. On Mission 03 `tut3_b` puts the
   Small Mine on the lode for 540, left owing 340, and objective 3 completes. A Route's go
   task walks to its place and is over within 30.
+- Ore and power move as docs/23 reads them. Every building has its profile's figures, its
+  class-26 efficiency and its batteries: its efficiency draws 0.01 and its task's usage a
+  second from them every 250 ms or so, and KPD is the efficiency times the share they
+  serve. Every 192–255 ms each clan's generators (the bunkers too) top every other
+  building's batteries up by the same share of what they lack, and its mines and storages
+  give ore, each `min(held, dt × KPD × 1)`, to every building that asks, by the same share
+  of what it asks. A mine digs 50 × KPD a second into a total of at most 500 written over
+  what it holds, drawing 1 a second; a factory's build takes of its request what arrived,
+  asks again, and draws `Use_Power` until its power is in, its ore cost divided by its KPD.
+  The Ore row reads the clan's mines and storages over 4,500, the Energy row its power out
+  less its batteries' lack over every clan's. On Mission 03, with the generator and the
+  bunker taken, the Large Factory waits on ore and builds an *SSW-X* 25 s after the mine
+  starts digging, the rows reading 11% and about 90%.
 
 - The cursor picks as docs/42 reads it, in the world through the command camera and on the
   open satellite map: a click selects one of the player's units or buildings (turning an
@@ -523,6 +536,10 @@ a row here. A row leaves this table when research closes it.
 | M12 | `IsPlacementValid`'s path search from the builder and its hall-way vertices' areal test; how the basement is triangulated between its rings | every site has a path and usable areals; each corner of either ring, against the nearest corner of the other, stands for a face falling along that line | [32](../docs/32-builder.md#the-test-isplacementvalid--read) |
 | M12 | Which state each construction-sphere code opens, where an action-5 effect is placed, and which classes the sphere's kill takes | code 1 starts the sign; code 2 the dome and the ray and stops the sign; code 0 stops the ray; each at the sphere's centre at its own size; the kill takes every live robot and the hero inside the sphere | [32](../docs/32-builder.md#the-construction-sphere--read-and-measured) |
 | M12 | Whether the go task's 30 about its place is measured in three dimensions | across the ground | [31](../docs/31-packages.md#what-each-package-does--read) |
+| M12 | Which controllers a building's control system gathers its batteries and efficiency from | its root record's: the 19.5 to 20 held and 50 to 52 a second put out that docs/23 measures, not the internal parts' (`i_pws_*`) | [23](../docs/23-economy.md#a-power-shortage-lowers-efficiency-once-the-batteries-run-down--read-and-measured) |
+| M12 | The random sources of the distribution step's timer (`0..63` ms) and the power tick's jitter (a shift register) | a 32-bit xorshift | [23](../docs/23-economy.md#how-often-and-where-it-settles--read-with-a-derived-settle-point) |
+| M12 | When a built mine's order 10 starts: derived to wait behind its construction sphere, while its draw is seen from the moment it appears | it draws its `Use_Power` from its making and digs from the sphere's end | [23](../docs/23-economy.md#a-mine-digs-to-500-and-then-a-draw-does-not-empty-it--read) |
+| M12 | The ore a mine's loading place or a storage's unloading place moves by itself (`0x10019482`, `0x100195b8`): its direction, property `0x208`, the tick's divisor | left out, as docs/23's model leaves it | [23](../docs/23-economy.md#not-established) |
 | M12 | How a building made in play is drawn, and whether the landscape's drawing is cut under it | node by node from level 0 without a lightmap; the ground queries are cut under it, the landscape's drawing is not | [03](../docs/03-terrain.md#for-an-engine) |
 
 ### Read since the stand-in was written
@@ -596,8 +613,6 @@ engine pass replaces each with what was read and removes its row.
 | M10 | What a device's byte 0 of 1 adds from the machine's list at `+0xc4` | nothing: its channels hold their initial values (no Mission 01 unit has one) | [28](../docs/28-chassis.md#not-established) |
 | M11 | What `CBuilding` does to a door's or a computer's switch word as it files the item (the records leave the constructor's 5, which wraps for ever) | a door and a pod start shut, word 0 and progress 0 | [24](../docs/24-motion.md#walking-into-a-building--read-and-measured) |
 | M11 | The capsule a door's part is measured against (`Terrain.dll:0x1005a27f`) | the door node's level-0 slot sphere; the holds are worked out from every child each tick rather than on each child's move | [24](../docs/24-motion.md#walking-into-a-building--read-and-measured) |
-| M11 | A clan's ore stores and power distribution, which a build draws on | a build's ore request is granted in full and its power taken as available, at efficiency 1 and a use of 1 a second | [23](../docs/23-economy.md#construction--read) |
-| M11 | What the factory screen's Ore and Energy rows hold with no economy modelled | Ore 0, as with no mine or storage; Energy the player's generators' share of the map's | [23](../docs/23-economy.md#what-the-hud-shows--read) |
 | M11 | The fill colour the resource rows hand their bar | the weapons list's: red under 20%, olive under 80%, green above | [36](../docs/36-factory.md#the-resource-rows) |
 | M11 | How the cursor is shown in view mode 5 | the system's cursor, with the grab let go | [36](../docs/36-factory.md#not-established) |
 | M11 | Which areals the escape's random points must be on | the first point tried within 150 of the unit, inside the map by 100 | [31](../docs/31-packages.md#the-escape--read) |
