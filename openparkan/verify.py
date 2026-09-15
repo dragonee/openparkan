@@ -2915,6 +2915,76 @@ def check_render_state(check, game: Path) -> None:
           f"({2 ** 4} dome segments) at 0x1005fa80")
 
 
+def check_blend_depth(check, game: Path) -> None:
+    """What a blended batch writes: the alpha test's reference and the item's depth states."""
+    paths = {n: game / n for n in ("Ngi32.dll", "Terrain.dll", "Effect.dll")}
+    if not all(p.exists() for p in paths.values()):
+        return
+    n_at, t_at, e_at = (_image_at(p.read_bytes()) for p in paths.values())
+    # The six mode records set SRCBLEND, DESTBLEND, ALPHAFUNC, ALPHATESTENABLE, ALPHABLENDENABLE.
+    records = [struct.unpack_from("<10I", n_at(0x100346E0 + 40 * i, 40)) for i in range(6)]
+    states = {tuple(r[0::2]) for r in records}
+    reset = (n_at(0x10006BE4, 5) == bytes.fromhex("bb01000000")
+             and n_at(0x10006C1C, 16) == bytes.fromhex("899f7c010000c7878001000007000000")
+             and n_at(0x10006BF4, 6) == bytes.fromhex("899f38010000")
+             and n_at(0x10006C52, 8) == bytes.fromhex("8a84378c03000084"))
+    built = (n_at(0x10005E45, 5) == bytes.fromhex("bb01000000")
+             and n_at(0x100060DE, 6) == bytes.fromhex("899d54010000"))
+    item = t_at(0x10045B1E, 76) == bytes.fromhex(
+        "8b45ecc6802c010000018b4decc6812d01000001837df00575148b55ecc6822c010000018b45ecc6802d01"
+        "0000008b4d2083e10285c974148b55ecc6822c010000008b45ecc6802d01000000")
+    applied = t_at(0x100302E1, 58) == bytes.fromhex(
+        "8b8de4fdffff33d28a912c010000526a078b45088b088b550852ff510c8b85e4fdffff33c98a882d0100"
+        "00516a0e8b55088b028b4d0851ff500c")
+    layer5 = (t_at(0x1004555E, 12) == bytes.fromhex("8b95ecfeffffd94220d81d68")
+              and struct.unpack("<f", t_at(0x1009A168, 4))[0] == 1.0
+              and t_at(0x100455AE, 10) == bytes.fromhex("f7da1bd283e2058955f0"))
+    lists = (t_at(0x10032F3C, 6) == bytes.fromhex("837d08007522")
+             and t_at(0x10032F6B, 3) == bytes.fromhex("8b511c"))
+    pass_gate = e_at(0x10007D3A, 13) == bytes.fromhex("3bf7750f8b45048b4810f6c508")
+    lib = materials.MaterialLibrary(game / "Material.lib")
+    translucent = sorted(n for n, m in lib.materials.items()
+                         if any(e.ambient_alpha < 1.0 for e in m.entries))
+    foliage = {n: (lib.materials[n].blend, [e.ambient_alpha for e in lib.materials[n].entries])
+               for n in ("FTREE1", "HTREE1", "GRASS", "ELKA", "TF2") if n in lib.materials}
+    textures = NResArchive.open(game / "Textures.lib")
+    palm = texm.decode(textures.read(next(e for e in textures if e.name.upper() == "TF2.0")))
+    alphas = Counter(palm.rgba[3::4])
+    check("Ngi32.dll: a blended draw drops alpha 0 alone, and writes depth",
+          states == {(0x13, 0x14, 0x19, 0xF, 0x1B)} and reset and built and item and applied
+          and layer5 and lists and pass_gate
+          and translucent == ["FIRESTORM"]
+          and all(b == materials.BLEND_ALPHA and a == [1.0] for b, a in foliage.values())
+          and len(foliage) == 5 and alphas[0] == 30413 and alphas[255] == 21113,
+          f"the mode records set states {sorted(states)} and never ALPHAREF or the depth "
+          f"states; the reset (0x10006be0) caches ALPHAREF 1 and ALPHAFUNC 7 and pushes them, "
+          f"the constructor ZWRITEENABLE 1 (0x100060de); CShade's item takes ZENABLE/ZWRITEENABLE "
+          f"1/1, 1/0 in layer 5, 0/0 for mode 2 (Terrain.dll:0x10045b1e), handed to states 7 and "
+          f"0xe at 0x100302e1; layer 5 is an ambient alpha below 1.0 (0x1004555e), a see-through "
+          f"item goes to the queue's second list (0x10032f3c); an instance draw with pass 0 skips "
+          f"flag 0x800 (Effect.dll:0x10007d3a).  Measured: ambient alpha below 1 on "
+          f"{translucent}; the foliage {foliage} blends at flags 4 with 1.0, so it writes depth; "
+          f"TF2 alpha 0 on {alphas[0]} and 255 on {alphas[255]} texels")
+
+    library = effects.EffectLibrary(game / "effects.rlb")
+    hidden = [fx for fx in library if fx.flags & 0x400]
+    plain = [fx for fx in hidden if not any(e.flagged for e in fx.emitters)]
+    beacons = [fx for fx in plain if fx.flags in (0xD00, 0xD20)]
+    sign = library.get("f_signlight_g")
+    glow = sign and [(e.kind, e.resource.member.upper()) for e in sign.emitters]
+    manager = (e_at(0x10003B9A, 10) == bytes.fromhex("c780a800000008000000")
+               and e_at(0x10003F35, 2) == b"\x0c\x01" and e_at(0x10003F4D, 2) == b"\x24\xfe"
+               and e_at(0x10004061, 4) == bytes.fromhex("3bc7750d")
+               and e_at(0x10004065, 7) == bytes.fromhex("f686a800000002"))
+    check("effects.rlb: a beacon light draws depth-tested, only in a pass",
+          len(hidden) == 114 and len(plain) == 112 and len(beacons) == 110 and manager
+          and glow == [(3, "LAMP"), (3, "BALL_G"), (9, "LASER_G_HIT"), (4, "GLOW_G"), (1, "")],
+          f"header flag 0x400 on {len(hidden)} effects, {len(plain)} with no bit-8 emitter, "
+          f"{len(beacons)} of them 0xd00 or 0xd20; f_signlight_g is {glow}.  The manager starts "
+          f"with flags 8, message 23 sets bit 0 and 24 clears it, and its draw returns for a pass "
+          f"argument of 0 unless flag 2 is set (Effect.dll:0x10004061)")
+
+
 def check_minimap_agreement(check, game: Path) -> None:
     """The strongest check available: our terrain vs the art the game ships."""
     pairs = [("SC_3", "sc3.tex"), ("Tut_1", "tut1.tex"), ("ILKON", "ilkon.tex"), ("K1F", "k1f.tex")]
@@ -20515,7 +20585,7 @@ def run(game: Path) -> int:
         check_nres, check_texm, check_terrain, check_uv,
         check_water, check_water_reflection, check_layers, check_materials, check_material_draw,
         check_sky,
-        check_render_state, check_minimap_agreement, check_arealmap,
+        check_render_state, check_blend_depth, check_minimap_agreement, check_arealmap,
         check_grid, check_missions, check_scale, check_objects, check_poses, check_lod,
         check_damage, check_node_stages,
         check_effects, check_effect_timing, check_sounds, check_actions, check_footprints,

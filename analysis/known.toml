@@ -28525,3 +28525,107 @@ kind = "site"
 name = "a removed unit record that is the driven one, in view state 3: the outer camera off"
 doc = "docs/30-turrets.md"
 read = true
+
+[[entry]]
+module = "Ngi32.dll"
+at = "0x10008680"
+kind = "function"
+name = "set a blend mode: its record's five render states (SRCBLEND, DESTBLEND, ALPHAFUNC, ALPHATESTENABLE, ALPHABLENDENABLE) through the state cache at +0x11c; no depth state, no ALPHAREF"
+read = true
+doc = "docs/07-objects.md"
+
+[[entry]]
+module = "Ngi32.dll"
+at = "0x10006be0"
+kind = "function"
+name = "device state reset: ZENABLE 1, ALPHATESTENABLE 1, SRCBLEND ONE, DESTBLEND ZERO, culling off, ALPHAREF 1, ALPHAFUNC GREATEREQUAL, blending off into the cache, then every state 1..0x9b that differs pushed to the device"
+read = true
+doc = "docs/07-objects.md"
+
+[[entry]]
+module = "Ngi32.dll"
+at = "0x100060de"
+kind = "site"
+name = "renderer constructor: the state cache's ZWRITEENABLE (+0x154) set to 1"
+read = true
+doc = "docs/07-objects.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1004552a"
+kind = "site"
+name = "CShade mesh draw: the layer -- mode bit 1 layer 9, bit 2 layer 10, else see-through (ambient alpha below 1.0, batch word 8 or 0x100) layer 5 or 0"
+read = true
+doc = "docs/07-objects.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10045b1e"
+kind = "site"
+name = "CShade mesh draw: the item's ZENABLE +0x12c and ZWRITEENABLE +0x12d -- 1/1, 1/0 in layer 5, 0/0 for mode bit 2"
+read = true
+doc = "docs/07-objects.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x100302e1"
+kind = "site"
+name = "primitive render: the item's +0x12c and +0x12d to render states 7 (ZENABLE) and 0xe (ZWRITEENABLE)"
+read = true
+doc = "docs/07-objects.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10032f10"
+kind = "function"
+name = "render queue slot 2, add an item: see-through to the second list's layer (+0x1c), else the first's (+0x14)"
+read = true
+doc = "docs/07-objects.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10032c60"
+kind = "function"
+name = "render queue slot 1: render and clear every layer of the first list (pass 0) or the second"
+read = true
+doc = "docs/07-objects.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10032ae0"
+kind = "function"
+name = "render queue slot 0: create the two lists of layers from 24-byte descriptors through CreatePrimLayer"
+read = true
+doc = "docs/07-objects.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10031760"
+kind = "function"
+name = "CreatePrimLayer: a layer by sort type 0..5 (vtables 0x1009acfc, 0x1009ad5c, 0x1009ad8c, 0x1009ad2c, -, 0x1009accc); type 3 is CCamDistSortLayerVB"
+read = true
+doc = "docs/07-objects.md"
+
+[[entry]]
+module = "Effect.dll"
+at = "0x10007d3a"
+kind = "site"
+name = "instance draw: a pass argument of 0 skips an effect with header flag 0x800"
+read = true
+doc = "docs/11-effects.md"
+
+[[entry]]
+module = "Effect.dll"
+at = "0x10004050"
+kind = "function"
+name = "effect manager slot 3, draw: returns for a pass argument of 0 unless the manager's flag 2 is set, then draws every instance"
+read = true
+doc = "docs/11-effects.md"
+
+[[entry]]
+module = "Effect.dll"
+at = "0x10003f2e"
+kind = "site"
+name = "effect manager message 23: set flag bit 0 (message 24 at 0x10003f46 clears it)"
+read = true
+doc = "docs/11-effects.md"

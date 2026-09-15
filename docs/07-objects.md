@@ -999,6 +999,48 @@ triple.
 This is the field a renderer needs; the record's own class byte at +4, below,
 is not.
 
+### What a blended batch writes, and the alpha test's reference — *read*
+
+The six mode records set five states each, `SRCBLEND`, `DESTBLEND`,
+`ALPHAFUNC`, `ALPHATESTENABLE` and `ALPHABLENDENABLE` (render states `0x13`,
+`0x14`, `0x19`, `0xf`, `0x1b`), through `Ngi32.dll`'s cached setter
+(`0x10008680`, the cache at `+0x11c + state × 4`). None of them touches the
+depth states or the reference, so those come from elsewhere:
+
+- **The reference is 1.** `Ngi32.dll`'s device reset (`0x10006be0`) writes
+  `ALPHAREF` (`+0x17c`) 1, `ALPHAFUNC` 7 (`GREATEREQUAL`), `ZENABLE` 1 and
+  culling off into the cache, then pushes every state that differs to the
+  device (`0x10006c52`). Its constructor set `ZWRITEENABLE` (`+0x154`) 1 as
+  well (`0x100060de`, `ebx` 1 from `0x10005e45`). No mode record changes
+  `ALPHAREF`, so **a blended draw drops exactly the texels whose alpha is 0**
+  and keeps every other.
+- **The depth states belong to the draw item.** `CShade`'s mesh draw gives each
+  batch's item `ZENABLE` at `+0x12c` and `ZWRITEENABLE` at `+0x12d`
+  (`Terrain.dll:0x10045b1e`): 1 and 1; 1 and **0** when the item is filed under
+  layer 5; and 0 and 0 under the cockpit's mode 2. The primitive's render
+  (`0x100302e1`) hands the two bytes to render states 7 and `0xe` before it
+  draws, and a layer's render puts back the values it saved (`0x1003dc59`).
+- **Layer 5 is translucency, not the blend mode.** A batch is filed
+  see-through (`0x1004552a`) when its phase's ambient alpha is below 1.0
+  (`0x10045567`), or its batch word carries 8 or `0x100`; the blend mode does
+  not enter. A see-through item goes to layer 5 of the queue's second list
+  (`0x10032f3c`, `+0x1c`), everything else to its layer of the first (`+0x14`),
+  and the queue renders one list per call (`0x10032c60`).
+
+*Measured*: the ambient alpha is below 1.0 on one material of 905, `FIRESTORM`
+(its fade-in), and every foliage material — `FTREE1`, `HTREE1`, `GRASS`,
+`ELKA`, `TF2` — carries 1.0. So **a tree's leaves are an ordinary item: they
+blend `SRCALPHA/INVSRCALPHA`, drop their alpha-0 texels and write depth**, and a
+leaf drawn first hides the leaves behind it where its texels are not clear.
+`TF2`, the palm's texture, has an alpha of 0 on 30,413 of its 65,536 texels and
+255 on 21,113; `FTREE1` and `HTREE1` are 4-bit, 0 on 38% and 50%.
+
+Not established: where a batch word's 8 and `0x100` come from (the same
+unwritten word the push-out reads, [24-motion.md](24-motion.md#not-established)),
+which sort type each of the queue's layers is created with (`CreatePrimLayer`,
+`0x10031760`, takes 0 to 5, and type 3 is `CCamDistSortLayerVB`, whose render is
+`0x1003e1d0`), and so whether a layer's items are drawn in distance order.
+
 ### The class byte is the ground's surface id
 
 The record's byte 4 sorts the library into eleven groups — the ground in 0 to

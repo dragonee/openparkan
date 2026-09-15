@@ -608,6 +608,33 @@ it off their origin. An impact is aimed along the struck face's vector
 (placement 7, below); if that vector becomes the effect's x axis, (1, 0, 0)
 keeps the test point clear of the face the effect sits on — a *guess*.
 
+### A beacon light's glow — *read* in part, and *measured*
+
+The lamps buildings and robots carry are the other side of the test. *Measured*:
+header flag 0x400 is on 114 effects, and **112 of them have no bit-8 emitter**;
+110 of those carry `0xd00` or `0xd20` (0x800, 0x400, 0x100, and ping-pong on the
+blinkers), the `f_*light*`, `rb_*`, `rl_*` and `rm_*` beacons. `f_signlight_g`,
+two of which each of Mission 01's bridges starts, is the lamp's ring (`LAMP`,
+`S15`, 1 wide), a ball (0.65), a spark (0.4), a **glow 9 across** (`GLOW_G`,
+additive) and a light. Only `B_Sphere_Sign` and `f_build_sign` pair 0x400 with
+bit 8.
+
+So by what is read a beacon's sprites never take effect draw flag 1: while its
+point is hidden it draws nothing, and while it is in view its sprites go through
+the renderer depth-tested like any other. Two more gates stand in front of it
+(*read*): the instance's draw skips a 0x800 effect when its pass argument is 0
+(`0x10007d3a`), and the manager's draw returns at once for a pass argument of 0
+unless its flag 2 is set (`0x10004061`). The manager starts with flags 8
+(`0x10003b9a`); message 23 sets its bit 0 and message 24 clears it
+(`0x10003f2e`, `0x10003f46`), which holds a 0x100 effect's *t* at 0.
+
+*Seen*: drawn depth-tested in the scene pass, as the engine drew it, the 9 m glow
+on the bridge's pylon top is cut by the pylon's own faces and shows only through
+the gaps between them; a player's report on Mission 01 calls that wrong.
+
+Not established: which call passes the pass argument, and so in which pass, and
+with which depth state, the beacons draw; what sends messages 23 and 24.
+
 ## What an explosion plays — *read*, and *measured*
 
 A node's damage stage plays its `.exp` (`Control.dll:0x10011220`):
