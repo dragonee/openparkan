@@ -325,8 +325,12 @@ the own panel's unit while aboard.
   press by `,` and `.`; a click on a good site orders the builder, and the right button or
   Esc puts it away with *"Building was cancelled by user"*.
 
-Not yet: the builder's building, the economy, telepresence, Explode!, tooltips, the markers
-over selected units, and the chat and game menu buttons. The ghost draws over the HUD.
+- The selected units and the unit under the cursor are bracketed in the world in the marking
+  rule's colour, the player's named in green, with their class icon and bars. Each lode's
+  plume, `env_mineral`, shows on the ground under it until a building stands within 80.
+
+Not yet: the builder's building, the economy, telepresence, Explode!, tooltips, and the chat
+and game menu buttons. The ghost draws over the HUD.
 
 This directory also holds what the rest will follow:
 
@@ -498,6 +502,7 @@ a row here. A row leaves this table when research closes it.
 | M12 | Whether the display's slot 12 answers, so the system's cursor is used | the software cursor's four phases from `new_ui1` are drawn and the system's hidden | [42](../docs/42-selection.md#the-cursor-shows-a-state--read-and-measured) |
 | M12 | `IsPlacementValid`'s path, sphere, overlap, areal and slope tests | not modelled: a site is good where a selection may be sent, with a found lode within 20 for a mine | [32](../docs/32-builder.md#placing-a-building--read-measured-and-seen) |
 | M12 | The build task (order 7) | not modelled: the order is given and the builder, with no task for it, stops | [32](../docs/32-builder.md#building-a-building-tick-by-tick--read-and-seen) |
+| M12 | A marker's gap figure (the record's slot 5), its bar frame on page9, the clan's sign, and where its name, icon and bars stand | the gap is the unit's projected radius held to 4–44; the name over the left bracket, the class icon right of the right one, a blue box under the left one holding the life bar over a full battery bar | [25](../docs/25-sensors.md#how-the-game-colours-what-it-marks--read-and-measured) |
 | M6 | What a node naming a variable, operand, formula or handler that does not exist reads | the node does nothing; a switch to no handler ends the run; a run stops after a million nodes | [15](../docs/15-behaviour.md#how-a-handler-runs) |
 | M12 | Function 15's answer: whether the unit takes the order (1) or refuses it (0) | an id some unit or building answers gives 1, and the unit is handed the order after the handler's run | [34](../docs/34-progression.md#what-the-scripts-ask--read-and-measured-1) |
 | M12 | A building's contour (property `0x203`), whose vertices a patrol of the building walks | eight points on the building's sphere, pushed out by 30 | [31](../docs/31-packages.md#the-patrol-tick-by-tick--read) |

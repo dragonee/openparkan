@@ -123,6 +123,8 @@ struct Args {
     page: Option<u8>,
     /// `--ghost X,Y`: a screenshot in command mode with the first builder placing a mine at X,Y.
     ghost: Option<[f32; 2]>,
+    /// `--camera-yaw RAD`: command mode's camera turned to that yaw for a screenshot.
+    camera_yaw: Option<f32>,
     ticks: u32,
     hold: Vec<String>,
     mouse: [f32; 2],
@@ -156,6 +158,7 @@ fn args() -> Result<Args> {
         map: false,
         page: None,
         ghost: None,
+        camera_yaw: None,
         ticks: 0,
         hold: Vec::new(),
         mouse: [0.0; 2],
@@ -180,6 +183,7 @@ fn args() -> Result<Args> {
             "--objectives" => out.objectives = true,
             "--map" => out.map = true,
             "--page" => out.page = Some(value()?.parse()?),
+            "--camera-yaw" => out.camera_yaw = Some(value()?.parse()?),
             "--ghost" => {
                 let v: Vec<f32> = value()?.split(',').map(str::parse).collect::<Result<_, _>>()?;
                 out.ghost = v.get(..2).map(|v| [v[0], v[1]]);
@@ -390,6 +394,9 @@ fn screenshot(loaded: &scene::Loaded, game: &Path, args: &Args, out: &Path) -> R
             briefing = Some(b);
         } else {
             rehearse(p, loaded, args);
+            if let Some(yaw) = args.camera_yaw {
+                p.command.yaw = yaw;
+            }
         }
         if let (Some(outcome), Some(progression)) = (args.outcome, p.progression.as_mut()) {
             progression.progress.outcome = Some(outcome);
@@ -994,12 +1001,14 @@ impl App {
         let (Some(play), Some(hud)) = (self.play.as_mut(), self.hud.as_mut()) else { return };
         play.update_ghost(aim);
         let panel = &mut hud.cockpit.commander;
+        let pick = play.pick(aim);
+        panel.hovered = pick.object;
         panel.cursor_state = if play.commander.ghost.is_some() {
             8
         } else if panel.band.is_some() {
             7
         } else {
-            parkan_world::pick::cursor_state(play.pick(aim).kind)
+            parkan_world::pick::cursor_state(pick.kind)
         };
     }
 

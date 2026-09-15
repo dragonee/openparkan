@@ -22,6 +22,9 @@ pub const FACTORY: u32 = 0x8000_0010;
 pub const TOWERS: u32 = 0x8030_0000;
 pub const BUNKERS: u32 = 0x8007_0000;
 pub const OTHER_BUILDINGS: u32 = 0x8000_044e;
+/// A lode's plume, and how near a building hides it.
+pub const LODE_PLUME: &str = "env_mineral";
+pub const LODE_PLUME_REACH: f32 = 80.0;
 
 /// A mineral lode (`data.tma`'s trailer record, docs/31, "Mineral lodes").
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -350,6 +353,30 @@ impl Play {
             _ => return String::new(),
         };
         strings.get(&id).cloned().unwrap_or_default()
+    }
+
+    /// Each lode's plume, `effects.rlb`'s `env_mineral` on the ground under it, shows while no
+    /// building of any clan stands strictly within 80 of it (`iron3d.dll:0x10081c10`,
+    /// `0x10081cd1`; docs/32, "The plume").
+    pub fn lode_plumes(&mut self, now_ms: f64) {
+        for i in 0..self.commander.lodes.len() {
+            let lode = self.commander.lodes[i].position;
+            let covered = (0..self.units.len()).any(|t| {
+                self.units[t].kind == KIND_BUILDING
+                    && self.battle.combat.targets.get(t).is_some_and(|x| x.alive)
+                    && self.battle.combat.targets[t].position.truncate().distance(lode.truncate())
+                        < LODE_PLUME_REACH
+            });
+            let owner = crate::fx::Owner::Lode(i);
+            let shown = self.fx.owned(owner).next().is_some();
+            if covered && shown {
+                self.fx.retain(|o, _| *o != owner);
+            } else if !covered && !shown {
+                let z = self.ground.below(lode.x, lode.y, 1.0e5).map_or(lode.z, |h| h.point.z);
+                let frame = parkan_sim::effects::Frame::along(Vec3::new(lode.x, lode.y, z), Vec3::X, 1.0);
+                self.fx.start(owner, LODE_PLUME, frame, 1.0, now_ms, None);
+            }
+        }
     }
 
     /// The building the commander is over, while in command mode.

@@ -31,6 +31,8 @@ pub enum Owner {
     Chassis(i32),
     /// One of a building's load-group effects: the building's target, and its record's id.
     Building(usize, i32),
+    /// A mineral lode's plume, by the lode's index.
+    Lode(usize),
 }
 
 /// A material's look for sprites: its texture, the cell of it the entry takes, and its blend

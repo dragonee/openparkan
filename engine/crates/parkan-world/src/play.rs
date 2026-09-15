@@ -1287,6 +1287,7 @@ impl Play {
             Owner::Round(id) => rounds.iter().any(|r| r.id == *id),
             _ => true,
         });
+        self.lode_plumes(now);
         let cues = self.fx.cues(now);
         self.cues.extend(cues);
         self.fx.tick(now);

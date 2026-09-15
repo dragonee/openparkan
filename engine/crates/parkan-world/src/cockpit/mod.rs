@@ -7,6 +7,7 @@ pub mod commander;
 pub mod designer;
 pub mod factory;
 pub mod map;
+pub mod markers;
 pub mod messages;
 pub mod objectives;
 pub mod panels;

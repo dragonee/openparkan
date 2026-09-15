@@ -177,6 +177,8 @@ pub struct Panel {
     /// pinned to the top left while one is up.
     pub cursor_state: u8,
     pub band: Option<[[f32; 2]; 2]>,
+    /// The unit or building under the cursor, which gets a marker.
+    pub hovered: Option<usize>,
 }
 
 impl Default for Panel {
@@ -195,6 +197,7 @@ impl Default for Panel {
             entered: false,
             cursor_state: 1,
             band: None,
+            hovered: None,
         }
     }
 }
@@ -497,6 +500,8 @@ pub fn draw(
             paint: Some([c[0], c[1], c[2]]),
         });
     }
+    // The markers over the selected units and the one under the cursor (`0x1007d5e0`).
+    super::markers::draw(cockpit, ink, play, view_proj, cockpit.commander.hovered);
     factory::resource_rows(cockpit, ink, play, now_ms);
     // While the ghost is up (cursor state 8) only the resource rows draw (`0x1008d326`).
     let placing = cockpit.commander.cursor_state == 8;
