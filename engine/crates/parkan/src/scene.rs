@@ -892,6 +892,7 @@ pub fn scan_name(code: winit::keyboard::KeyCode) -> Option<&'static str> {
         K::NumpadAdd => "SCAN_G_PLUS",
         K::NumpadSubtract => "SCAN_G_SUB",
         K::NumpadDivide => "SCAN_G_SLASH",
+        K::Numpad5 => "SCAN_G_5",
         K::F1 => "SCAN_F1",
         K::F2 => "SCAN_F2",
         K::F3 => "SCAN_F3",

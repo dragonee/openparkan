@@ -467,7 +467,10 @@ on the pod of the building whose path ends in NAME (`--pod lplant01.dat` on
 Mission 02), and `--at X,Y,YAW` anywhere on the ground. Enter boards a large bot
 of the player's clan the hero has targeted within 20 m, and Esc gets out;
 `--drive PATH` makes a unit of that design beside the hero and boards it
-(`--drive 'UNITS\bld_unit_-2147483647.dat'`).
+(`--drive 'UNITS\bld_unit_-2147483647.dat'`). Aboard a bot, or taking one over
+from command mode, the mouse turns its turret and the hull comes round under it at
+up to 0.7 of its yaw rate; keypad 5 switches the turret lock off and on, and with it
+off `,` and `.` spin the hull. R and F climb and sink a flyer, and nothing else does.
 
 ## Checks
 
@@ -582,8 +585,8 @@ engine pass replaces each with what was read and removes its row.
 | M3 | a state's contacts are parsed, but their `0x100`/`0x200` conditions are taken as met (node life is not modelled) | `0x100` makes a state need its contact point's node intact and `0x200` destroyed, a walker's limping states | [24](../docs/24-motion.md#section-1-is-the-animation-state-graph--read-and-measured) |
 | M3 | the ground face is found fresh each step, by an up and a down pass over its cell | the walk starts in the held face and crosses at most 24 faces toward the centre, stopping on one too steep | [24](../docs/24-motion.md#finding-the-ground--read) |
 | M3 | D is the largest span of the velocity box's switched-on axes | the largest difference between an axis's absolute max and absolute min, over all three velocity axes; D = 0 leaves the weight at 1 (no shipped state's weight changes) | [24](../docs/24-motion.md#playing-a-state--read-and-measured) |
-| M3 | the invert constants (−1, +1) with an integrator that does not negate, and free look's yaw negated to undo the mirrored X | the game's mouse X invert is +1 and its integrator negates; on screen the two agree: mouse right turns right, mouse down lowers the sight, and Shift free look's vertical runs opposite | [14](../docs/14-controls.md#from-a-row-to-a-command--read-and-measured) |
-| M3 | no spare payload is computed: r = 1 | the chassis is part id 0's nodes, the root object's (the hero's r is about 1 anyway) | [24](../docs/24-motion.md#load--read-and-measured) |
+| M3 | the invert constants (−1, +1) with an integrator that does not negate, and free look's yaw negated to undo the mirrored X; a turret's X row takes +1 | the game's mouse X invert is +1 and its integrator negates; on screen the two agree: mouse right turns right, mouse down lowers the sight, and Shift free look's vertical runs opposite | [14](../docs/14-controls.md#from-a-row-to-a-command--read-and-measured) |
+| M3 | no spare payload is computed: r = 1, and E is the chassis's own engine slot | the chassis is part id 0's nodes, the root object's (the hero's r is about 1 anyway); a hull that follows its turret takes 0.7 of the live yaw rate, so it comes round about three times as fast as the game's on shipped designs (8.4 × 0.7 = 5.9 rad/s on the L-2f against 1.89) | [24](../docs/24-motion.md#load--read-and-measured), [30](../docs/30-turrets.md#the-hull-follows-the-turret--read-and-measured) |
 | M3 | only the turn about z is applied | triple 6 is the most the body leans on each axis, from the sources a state's `+0x08` picks; triple 5 is the share of the tilt taken back each step, toward world up (bits `0xC0`) or a vector (`0x30`); no hero state leans | [24](../docs/24-motion.md#the-hull-leans-and-rights-itself--read-and-measured) |
 | M4 | every effect instance updates on every tick | the manager updates an instance once 100 ms have passed since its last update | [11](../docs/11-effects.md#how-an-effect-runs--read) |
 | M6 | The clock unit of the object takt that times a unit's route reports, its rand8, and when a unit's first takt runs | game milliseconds; the engine's own generator; one timer after the unit joins | [34](../docs/34-progression.md#who-stands-in-a-route--read) |
@@ -650,6 +653,8 @@ engine pass replaces each with what was read and removes its row.
 | M11 | Where a gathered face's batch word, whose 8 and 0x200 the collision query passes, comes from | the faces of the `DEFAULT`, `PORTAL_001` and `PORTAL_004` materials, a building's black doorway and portal quads, let a mover through, as a recording shows | [24](../docs/24-motion.md#the-ground-inside-a-building--read-in-part-and-measured) |
 | M11 | Whether the slope brake reads a building's stair faces | on a building's faces the slope brake is left out | [24](../docs/24-motion.md#the-ground-inside-a-building--read-in-part-and-measured) |
 | M11 | Which of a turret's nodes the boarding test's property `0x52` reads the life of | the turret part's node 0 | [39](../docs/39-boarding.md#boarding--read) |
+| M13 | Whether the AI's aiming reaches the turret lock's lead (body `+0x38`) through the component setter, as the player's does | the lead starts from the turret's yaw target when the player takes the unit over | [30](../docs/30-turrets.md#the-hull-follows-the-turret--read-and-measured) |
+| M13 | The spin a unit let go keeps until the Wizard writes one | none: letting a unit go clears its spin | [30](../docs/30-turrets.md#the-hull-follows-the-turret--read-and-measured) |
 | M11 | The heading the hero is given on leaving a bot, read as (F.x, −F.y) under an assumed matrix layout | the hero faces the bot | [39](../docs/39-boarding.md#not-established) |
 | M11 | The name a bot's gun takes in the weapons list (`0x1008a470`, not followed) | the gun part's code in the player clan's research tree, or NONAME | [35](../docs/35-hud.md#the-weapons-list--read-and-measured) |
 | M11 | That the factory record's `+0x30`, the grade the constructor's chassis page is taken over, is the building's size class | the designer is given the factory's size class | [38](../docs/38-designs.md#not-established) |

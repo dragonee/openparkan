@@ -365,7 +365,12 @@ impl Walker {
                 [0.0, 0.0, wrap_angle(heading - self.body.yaw).clamp(-most, most)]
             }
             None if self.drive.is_some() => [0.0; 3],
-            None => motion::integrate_turn(&mut self.body.pending, &self.limits, step),
+            // `0x100147ff`: a normalised turn pending is paid out; without one the spin turns
+            // the hull, and the turret lock sets it (docs/30, "The hull follows the turret").
+            None if self.body.turn_pending => {
+                motion::integrate_turn(&mut self.body.pending, &self.limits, step)
+            }
+            None => motion::integrate_spin(&mut self.body, &self.limits, step),
         };
         // `0x10014cf0`: the change in strafe angle is added to the step's turn after the
         // turn-rate clamp, so the hull swings by the whole change in one step.
@@ -693,6 +698,7 @@ mod tests {
         let g = field();
         let mut w = walker(Vec3::new(500.0, 500.0, 2.0), 0.0);
         w.body.pending[2] = 0.75;
+        w.body.turn_pending = true;
         w.advance(500.0, &g);
         assert!((w.body.yaw - FRAC_PI_2).abs() < 1e-4, "{}", w.body.yaw);
         assert!((w.body.pending[2] - 0.5).abs() < 1e-6);
@@ -704,6 +710,7 @@ mod tests {
         let mut w = walker(Vec3::new(500.0, 500.0, 2.0), 0.0);
         w.limits.turn = [0.1; 3];
         w.body.pending[2] = 0.75;
+        w.body.turn_pending = true;
         w.body.strafe = FRAC_PI_2;
         w.advance(0.0, &g);
         // One 50 ms step: the pending quarter turn pays out 0.005, the strafe all of it.

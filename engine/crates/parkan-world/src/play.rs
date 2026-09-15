@@ -1626,6 +1626,7 @@ impl Play {
         let robot = &mut self.robots[r].1;
         robot.wizard.clear();
         robot.walker.drive = None;
+        take_over(robot, true);
         let flyer = robot.flyer;
         self.driving = Some(Driving { target: t, pilot, fire_held: false, telepresence: false });
         self.modes.push(Mode::Driving(t));
@@ -1659,6 +1660,7 @@ impl Play {
         let robot = &mut self.robots[r].1;
         robot.wizard.clear();
         robot.walker.drive = None;
+        take_over(robot, level == 0);
         self.auto_driver = level.min(2);
         self.command.leave();
         self.driving = Some(Driving { target: t, pilot, fire_held: false, telepresence: true });
@@ -1688,6 +1690,7 @@ impl Play {
         {
             crate::hero::drive_input(robot, &mut d.pilot, true);
             robot.walker.body.command = [0.0; 3];
+            let_go(robot);
         }
         self.modes.retain(|m| !matches!(m, Mode::Driving(_)));
         self.clear_selection();
@@ -1745,6 +1748,7 @@ impl Play {
         {
             crate::hero::drive_input(robot, &mut d.pilot, true);
             robot.walker.body.command = [0.0; 3];
+            let_go(robot);
         }
         self.modes.retain(|m| !matches!(m, Mode::Driving(_)));
         self.hero.walker.body.velocity = [0.0; 3];
@@ -2607,6 +2611,31 @@ impl Play {
 /// damage always does.
 pub fn node_alive(life: Option<&parkan_sim::damage::Life>, node: usize) -> bool {
     life.and_then(|l| l.nodes.get(node)).is_none_or(|l| !l.destroyed)
+}
+
+/// A unit handed to the player (`iron3d.dll:0x10074ff0`): its turret lock, property 179, is
+/// set at auto-driver level 0 (`0x100750fd`) and clear otherwise (docs/30, "The hull follows
+/// the turret").
+///
+/// STAND-IN: docs/30-turrets.md#the-hull-follows-the-turret--read-and-measured -- the game's
+/// lead takes every change to the turret's yaw target from the unit's start; whether the AI's
+/// aiming reaches it through the same setter is not read. Here the lead starts from the
+/// turret's target at the takeover, as if it had.
+fn take_over(robot: &mut Robot, lock: bool) {
+    let body = &mut robot.walker.body;
+    body.turret_lock = lock;
+    body.lead = robot.rig.aim[0];
+    body.lead_step = 0.0;
+}
+
+/// A unit let go (control message 7 with 0, `Control.dll:0x10031a38`): the turret lock is off.
+///
+/// STAND-IN: docs/30-turrets.md#the-hull-follows-the-turret--read-and-measured -- the AI's
+/// Wizard writes the spin once it drives again; a unit it does not drive keeps no spin.
+fn let_go(robot: &mut Robot) {
+    let body = &mut robot.walker.body;
+    body.turret_lock = false;
+    body.spin_set = [0.0; 3];
 }
 
 #[cfg(test)]

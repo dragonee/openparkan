@@ -2881,3 +2881,154 @@ fn mission_03_is_won_by_the_generator_the_bunker_a_mine_four_warbots_and_the_pat
     let robots = play.own_units_within(parkan_world::selection::BATTLE_UNITS).len();
     assert_eq!(outcome, Some(true), "objectives {done:?}, {robots} battle units");
 }
+
+#[test]
+#[ignore = "needs the game install"]
+fn a_driven_flyers_hull_comes_round_under_its_turret_while_the_lock_holds_and_its_pitch_never_climbs() {
+    use parkan_world::factory::Project;
+    use std::f32::consts::{PI, TAU};
+
+    const TICK: f64 = 1000.0 / 60.0;
+    let wrap = |a: f32| (a + PI).rem_euclid(TAU) - PI;
+    let heading = |f: glam::Vec3| (-f.x).atan2(f.y);
+
+    let (mut play, _) = mission_02_play();
+    let project = Project {
+        path: "UNITS\\bld_unit_-2147483647.dat".to_owned(),
+        name: "LFW-2 Warrior".into(),
+        type_word: 0x0100_8000,
+        chassis_size: 4,
+        ore: 0.0,
+        power: 0.0,
+        lines: Vec::new(),
+        sphere: None,
+    };
+    let hero_at = play.hero.walker.body.position;
+    let t = play
+        .spawn(&project, play.player_clan, hero_at + glam::Vec3::new(8.0, 0.0, 1.0), 0.0)
+        .expect("the L-2f");
+    for _ in 0..30 {
+        play.tick(TICK, [0.0; 2]);
+    }
+    assert!(!play.robots.iter().find(|(rt, _)| *rt == t).unwrap().1.walker.body.turret_lock);
+    assert!(play.board(t));
+    // Taken at auto-driver level 0, the bot's turret lock is on; the hero never has one.
+    assert!(play.driven().walker.body.turret_lock && !play.hero.walker.body.turret_lock);
+    play.key("SCAN_R", true);
+    for _ in 0..(2 * 60) {
+        play.update_input();
+        play.tick(TICK, [0.0; 2]);
+    }
+    play.key("SCAN_R", false);
+    for _ in 0..60 {
+        play.update_input();
+        play.tick(TICK, [0.0; 2]);
+    }
+
+    // Mouse Y tilts the sight down and back up, and the height holds.
+    let z0 = play.driven().walker.body.position.z;
+    let look0 = play.eye().forward.z;
+    for (counts, ticks) in [(6.0, 60), (-6.0, 60)] {
+        let mut lowest = f32::MAX;
+        for _ in 0..ticks {
+            play.update_input();
+            play.tick(TICK, [0.0, counts]);
+            lowest = lowest.min(play.eye().forward.z);
+            let z = play.driven().walker.body.position.z;
+            assert!((z - z0).abs() < 1e-3, "pitch moved the flyer from {z0} to {z}");
+        }
+        if counts > 0.0 {
+            assert!(lowest < look0 - 0.5, "the sight tilted down: {look0} to {lowest}");
+        }
+    }
+
+    // Mouse X right: the turret turns right at once, and the hull comes round under it,
+    // each step turning no more than 0.7 of the live yaw rate over the step, while the turret
+    // holds the heading it was given.
+    let rate = play.driven().walker.limits.turn[2];
+    let yaw0 = play.driven().walker.body.yaw;
+    for _ in 0..3 {
+        play.update_input();
+        play.tick(TICK, [180.0, 0.0]);
+    }
+    let body = play.driven().walker.body;
+    let aimed = wrap(body.yaw - (body.lead - 0.5) * TAU);
+    assert!(wrap(aimed - yaw0) < -2.0, "a right turn of more than two radians: {yaw0} to {aimed}");
+    let mut before = body.yaw;
+    let mut bounded = 0;
+    let mut at_bound = 0;
+    for _ in 0..(3 * 60) {
+        play.update_input();
+        play.tick(TICK, [0.0; 2]);
+        let w = &play.driven().walker;
+        let step = wrap(w.body.yaw - before);
+        before = w.body.yaw;
+        assert!(step <= 1e-6, "the hull only turns right: {step}");
+        if step != 0.0 {
+            let most = 0.7 * rate * (w.machine.step_ms / 1000.0) as f32;
+            assert!(-step <= most + 1e-4, "a step of {step} against {most}");
+            bounded += 1;
+            at_bound += usize::from(-step > most - 1e-4);
+        }
+        // Whatever the hull has done, the heading the turret was given holds.
+        let heading_now = wrap(w.body.yaw - (w.body.lead - 0.5) * TAU);
+        assert!(wrap(heading_now - aimed).abs() < 1e-3, "the turret's heading moved to {heading_now}");
+    }
+    // A gap of more than two radians takes two 250 ms steps, the first at the bound.
+    assert!(at_bound >= 1 && bounded >= 2, "{at_bound} of {bounded} turning steps at the bound");
+    let body = play.driven().walker.body;
+    assert!((body.lead - 0.5).abs() < 1e-3, "the gap closed: {}", body.lead);
+    assert!(wrap(body.yaw - aimed).abs() < 0.02, "the hull faces where the turret was aimed");
+    let eye = play.eye();
+    assert!(wrap(heading(eye.forward) - aimed).abs() < 0.05, "and the sight still looks there");
+    // W now flies that way, and looking down on the way never takes it down.
+    let a = play.driven().walker.body.position;
+    play.key("SCAN_W", true);
+    for _ in 0..60 {
+        play.update_input();
+        play.tick(TICK, [0.0, 3.0]);
+    }
+    play.key("SCAN_W", false);
+    let b = play.driven().walker.body.position;
+    assert!(wrap(heading(b - a) - aimed).abs() < 0.05, "flew along {} for {aimed}", heading(b - a));
+    assert!(b.z >= a.z - 1e-3, "never down with the sight: {} to {}", a.z, b.z);
+
+    // Keypad 5 lets the turret turn alone, and the spin key turns the hull at 0.7 of the rate.
+    play.key("SCAN_G_5", true);
+    assert!(!play.driven().walker.body.turret_lock);
+    let yaw1 = play.driven().walker.body.yaw;
+    for _ in 0..20 {
+        play.update_input();
+        play.tick(TICK, [12.0, 0.0]);
+    }
+    for _ in 0..60 {
+        play.update_input();
+        play.tick(TICK, [0.0; 2]);
+    }
+    assert!(wrap(play.driven().walker.body.yaw - yaw1).abs() < 1e-5, "unlocked, the hull stays");
+    play.key("SCAN_COMMA", true);
+    for _ in 0..30 {
+        play.update_input();
+        play.tick(TICK, [0.0; 2]);
+    }
+    play.key("SCAN_COMMA", false);
+    let spun = wrap(play.driven().walker.body.yaw - yaw1);
+    assert!(spun > 0.25 * rate && spun <= 0.7 * rate * 0.5 + 0.1, "a left spin of {spun} in 0.5 s");
+    // Locked again, the hull swings round to the turret it left behind.
+    play.key("SCAN_G_5", true);
+    for _ in 0..(4 * 60) {
+        play.update_input();
+        play.tick(TICK, [0.0; 2]);
+    }
+    assert!((play.driven().walker.body.lead - 0.5).abs() < 1e-3);
+    // Getting out lets the lock go.
+    play.key("SCAN_F", true);
+    for _ in 0..(8 * 60) {
+        play.update_input();
+        play.tick(TICK, [0.0; 2]);
+    }
+    play.key("SCAN_F", false);
+    assert!(play.roll_back());
+    let robot = &play.robots.iter().find(|(rt, _)| *rt == t).unwrap().1;
+    assert!(!robot.walker.body.turret_lock && robot.walker.body.spin_set == [0.0; 3]);
+}

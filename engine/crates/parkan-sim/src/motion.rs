@@ -17,6 +17,9 @@ pub const SLOPE_MODE: i32 = 2;
 pub const SLOPE_BRAKE: f32 = 1.5;
 /// A pending triple at rest: nothing left to turn.
 pub const NO_TURN: f32 = 0.5;
+/// The most of the live turn rate a hull turns toward its turret at, the bounds of the spin
+/// the turret lock sets (`Control.dll:0x1003bdd0`, `0x1003bdd4`).
+pub const LEAD_SPIN: f32 = 0.7;
 /// The world's gravity, `CWorld` `+0xc` (`Terrain.dll:0x10024c1a`); nothing changes it.
 pub const GRAVITY: f32 = 10.0;
 /// The map edge (`Control.dll:0x1001e7ba`): the band inside an inset side that pushes
@@ -109,6 +112,40 @@ pub fn integrate_turn(pending: &mut [f32; 3], limits: &Limits, dt: f32) -> [f32;
     step
 }
 
+/// A step with no normalised turn pending (`0x10014a54`–`0x10014bff`, docs/30-turrets.md, "The
+/// hull follows the turret"). The pending triple goes back to rest. With the turret lock on,
+/// the spin's z becomes clamp(−(lead − 0.5) × 2π ÷ (live turn z × dt), ±0.7), replacing what
+/// the spin setter wrote. The hull turns by spin × live turn × dt, and with the lock the lead
+/// pays that turn out, wrapping, and keeps it as the step. Returns the radians turned.
+///
+/// The body has a yaw alone (see [`Body`]), so only the turn about z is taken; every state
+/// the righting bits `0x40`/`0x80` mark zeroes the spin about x and y (`0x10014af9`). The
+/// running gear is whole, so no veer is added.
+pub fn integrate_spin(body: &mut Body, limits: &Limits, dt: f32) -> [f32; 3] {
+    body.pending = [NO_TURN; 3];
+    let most = limits.turn[2].abs() * dt;
+    if body.turret_lock {
+        let wanted = -(body.lead - NO_TURN) * TAU;
+        body.spin_set[2] = if most > 0.0 { (wanted / most).clamp(-LEAD_SPIN, LEAD_SPIN) } else { 0.0 };
+    }
+    // `0x10014c02`: each axis's turn is held to the live rate × dt.
+    let turn = (body.spin_set[2] * most).clamp(-most, most);
+    if body.turret_lock {
+        body.lead_step = turn / TAU;
+        let v = body.lead + body.lead_step;
+        body.lead = v - v.floor();
+    }
+    [0.0, 0.0, turn]
+}
+
+/// The turret's yaw target the control takt writes while the lock holds (`0x10005b13`): the
+/// lead less the part of the step's turn not yet taken, `lead − (1 − s) × step`, with `s` the
+/// step's phase. So the turret holds its heading while the hull comes round under it.
+pub fn led_aim(body: &Body, s: f32) -> f32 {
+    let v = body.lead - (1.0 - s) * body.lead_step;
+    v - v.floor()
+}
+
 /// The fall a body tries this step (`Control.dll:0x10015d91`): `(v − g dt ÷ 2) dt`,
 /// with `v` its fall speed.
 pub fn fall(fall_speed: f32, dt: f32) -> f32 {
@@ -180,6 +217,21 @@ pub struct Body {
     pub command: [f32; 3],
     /// The turn not yet made (`+0x1e0`), 0.5 at rest.
     pub pending: [f32; 3],
+    /// Whether a normalised turn is pending (machine `+0x35d`): `SetNormAngle` sets it and
+    /// the spin setter clears it. With it clear the pending triple is not paid out.
+    pub turn_pending: bool,
+    /// The spin the spin setter wrote (`IControl` slot 4, `+0x1d4`): a fraction of the live
+    /// turn rate on each axis. `,` and `.` send ±0.7 about z.
+    pub spin_set: [f32; 3],
+    /// The turret lock (machine `+0x65c`, property 179): while it is on, and no normalised
+    /// turn is pending, the hull comes round under the turret.
+    pub turret_lock: bool,
+    /// The turret's lead over the hull (body `+0x38`), in turns, 0.5 when it faces the hull's
+    /// way: every change to the turret's yaw target is added in, and the hull's turns toward
+    /// it are paid out of it.
+    pub lead: f32,
+    /// The hull's last step toward the turret, in turns (body `+0x3c`).
+    pub lead_step: f32,
     /// The strafe angle asked for (`+0x1f4`).
     pub strafe: f32,
     /// The strafe angle the attitude integrator last took up (body `+0x17c`), and the
@@ -202,6 +254,11 @@ impl Body {
             spin: [0.0; 3],
             command: [0.0; 3],
             pending: [NO_TURN; 3],
+            turn_pending: false,
+            spin_set: [0.0; 3],
+            turret_lock: false,
+            lead: NO_TURN,
+            lead_step: 0.0,
             strafe: 0.0,
             strafe_previous: 0.0,
             strafe_change: 0.0,
@@ -319,6 +376,52 @@ pub(crate) mod tests {
         let mut rest = [0.5; 3];
         assert_eq!(integrate_turn(&mut rest, &live, 0.05), [0.0; 3]);
         assert_eq!(rest, [0.5; 3]);
+    }
+
+    #[test]
+    fn a_locked_hull_comes_round_under_its_turret_at_most_at_0_7_of_the_turn_rate() {
+        let live = Limits { acceleration: [0.0; 3], top_speed: [0.0; 3], turn: [1.0, 1.0, 4.0] };
+        let mut body = Body::new(Vec3::ZERO, 0.0);
+        body.turret_lock = true;
+        // The turret turned a quarter to the right: 0.25 turns past the hull.
+        body.lead = 0.75;
+        let dt = 0.05;
+        let turned = integrate_spin(&mut body, &live, dt);
+        // −π/2 wanted against 0.2 a step: the spin is held to −0.7, a right turn of 0.14 rad.
+        assert!((body.spin_set[2] + LEAD_SPIN).abs() < 1e-6, "{}", body.spin_set[2]);
+        assert!((turned[2] + 0.7 * 4.0 * dt).abs() < 1e-6, "{turned:?}");
+        assert!((body.lead - (0.75 - 0.14 / TAU)).abs() < 1e-6, "the lead pays it out: {}", body.lead);
+        // The heading the turret looks along, the hull's yaw less the lead, has not moved.
+        assert!((turned[2] - (body.lead - NO_TURN) * TAU + std::f32::consts::FRAC_PI_2).abs() < 1e-5);
+        // Half-way through the step the turret's target has taken back half the step.
+        assert!((led_aim(&body, 0.5) - (body.lead + 0.07 / TAU)).abs() < 1e-6);
+        assert!((led_aim(&body, 1.0) - body.lead).abs() < 1e-6);
+        // Steps close the gap and then hold: π/2 at 2.8 rad/s takes 12 steps.
+        let mut yaw = turned[2];
+        let mut steps = 1;
+        while (body.lead - NO_TURN).abs() > 1e-6 {
+            yaw += integrate_spin(&mut body, &live, dt)[2];
+            steps += 1;
+            assert!(steps < 50);
+        }
+        assert_eq!(steps, 12);
+        assert!((yaw + std::f32::consts::FRAC_PI_2).abs() < 1e-4, "{yaw}");
+        assert_eq!(integrate_spin(&mut body, &live, dt), [0.0; 3], "and it rests there");
+        // The world heading the turret looks along, hull plus lead, never moved.
+        assert!((yaw - (body.lead - NO_TURN) * TAU + std::f32::consts::FRAC_PI_2).abs() < 1e-4);
+    }
+
+    #[test]
+    fn without_the_lock_the_spin_setters_fraction_turns_the_hull_and_the_pending_triple_rests() {
+        let live = Limits { acceleration: [0.0; 3], top_speed: [0.0; 3], turn: [1.0, 1.0, 4.0] };
+        let mut body = Body::new(Vec3::ZERO, 0.0);
+        body.pending = [0.5, 0.5, 0.75];
+        body.lead = 0.75;
+        body.spin_set[2] = 0.7;
+        let turned = integrate_spin(&mut body, &live, 0.1);
+        assert!((turned[2] - 0.28).abs() < 1e-6, "0.7 x 4 rad/s x 0.1 s: {turned:?}");
+        assert_eq!(body.pending, [NO_TURN; 3]);
+        assert_eq!(body.lead, 0.75, "the lead is not paid out without the lock");
     }
 
     #[test]

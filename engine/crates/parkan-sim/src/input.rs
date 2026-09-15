@@ -36,6 +36,10 @@ pub const STRAFE_WALKING: f32 = FRAC_PI_4;
 /// integrator does not negate, so mouse X's sign carries that negation instead. On
 /// screen the two agree, as docs/30-turrets.md derives: the mouse moved right turns the
 /// hull right, and moved down lowers the sight.
+///
+/// The negation is the hull's alone: a turret's stored yaw takes the game's sign, which its
+/// channel's mounting and invert flag turn to the right on screen, and the turret lock's
+/// integrator reads it as the game's does (docs/30, "The hull follows the turret").
 pub const INVERT: [f32; 2] = [-1.0, 1.0];
 
 /// The mouse filter's memory.
@@ -261,7 +265,12 @@ impl Pilot {
                 continue;
             }
             for row in &self.matching(key, true) {
-                let amount = axis_delta(m[axis], self.invert[axis], row.value);
+                let invert = if axis == 0 && row.class_id() == CICLS_TURRET {
+                    -self.invert[axis]
+                } else {
+                    self.invert[axis]
+                };
+                let amount = axis_delta(m[axis], invert, row.value);
                 self.apply(row, Some(amount), hands);
             }
         }
@@ -278,14 +287,29 @@ impl Pilot {
             // `World3D.dll:0x1001059b`: the command's z, which a flyer climbs and sinks by
             // (docs/39-boarding.md, "Driving").
             controls::MCMD_UP | controls::MCMD_DOWN => hands.body.command[2] = row.value,
+            // `World3D.dll:0x1000fe77` → `IControl` slot 4: the spin's z, a fraction of the live
+            // turn rate, and no normalised turn pending (`Control.dll:0x10004491`).
+            controls::MCMD_ROTATE_Z => {
+                hands.body.spin_set[2] = row.value;
+                hands.body.turn_pending = false;
+            }
+            // `0x1000fcbf`: the key going down switches the turret lock, property 179.
+            controls::MCMD_LOCK if row.class_id() == CICLS_TURRET && row.pressed => {
+                hands.body.turret_lock = !hands.body.turret_lock;
+            }
             code @ (MCMD_ANGLE_X | MCMD_ANGLE_Y | MCMD_ANGLE_Z) => {
                 let component = match code {
                     MCMD_ANGLE_X => 0,
                     MCMD_ANGLE_Y => 1,
                     _ => 2,
                 };
-                let triple = match row.class_id() {
-                    UNKNOWN_CLASS => &mut hands.body.pending,
+                let class = row.class_id();
+                let triple = match class {
+                    // `SetNormAngle` (`0x10004500`) sets the pending flag.
+                    UNKNOWN_CLASS => {
+                        hands.body.turn_pending = true;
+                        &mut hands.body.pending
+                    }
                     CICLS_TURRET => &mut *hands.turret,
                     CICLS_CAMERA => &mut *hands.camera,
                     _ => return,
@@ -294,7 +318,13 @@ impl Pilot {
                     Some(add) => triple[component] + add,
                     None => row.value,
                 };
-                triple[component] = if row.wraps() { v - v.floor() } else { v.clamp(0.0, 1.0) };
+                let v = if row.wraps() { v - v.floor() } else { v.clamp(0.0, 1.0) };
+                // `0x1002ec23`: a change to the turret's yaw is added into the lead, wrapping.
+                if class == CICLS_TURRET && component == 0 {
+                    let lead = hands.body.lead + (v - triple[0]);
+                    hands.body.lead = lead - lead.floor();
+                }
+                triple[component] = v;
             }
             controls::MCMD_STATE if row.class_id() == controls::CICLS_MULTIGUN => {
                 self.fire = row.pressed && row.bits() != 0;
@@ -478,5 +508,48 @@ KEY   SCAN_NULL SCAN_W_3 1 CICLS_MULTIGUN MCMD_SELECT 0.0 3 0 0.0 0
         assert!(!pilot.fire);
         pilot.key("SCAN_W_3", true, &mut r.hands());
         assert_eq!(pilot.selects, vec![3]);
+    }
+
+    fn machine_table() -> Vec<Action> {
+        let text = b"KEY   SCAN_NULL SCAN_COMMA 1 CICLS_UNKNOWN MCMD_ROTATE_Z  0.7 0 0 0.0 0
+KEY   SCAN_NULL SCAN_COMMA 0 CICLS_UNKNOWN MCMD_ROTATE_Z  0.0 0 0 0.0 0
+MOUSE SCAN_NULL SCAN_MOUSE_X 1 CICLS_TURRET MCMD_ANGLE_X 0.15 1 MAN_WRAP 0.0 0
+MOUSE SCAN_NULL SCAN_MOUSE_Y 1 CICLS_TURRET MCMD_ANGLE_Y 0.25 1 MAN_NOTWRAP 0.0 0
+KEY   SCAN_NULL SCAN_G_5 1 CICLS_TURRET MCMD_LOCK 0.5 1 MAN_NOTWRAP 0.0 0
+KEY   SCAN_NULL SCAN_R 1 CICLS_UNKNOWN MCMD_UP  1.0 0 0 0.0 0
+";
+        controls::parse(text, "m2.tbl").unwrap()
+    }
+
+    #[test]
+    fn a_machines_mouse_x_turns_its_turret_the_games_way_and_into_the_lead_and_y_never_climbs() {
+        let mut pilot = Pilot::new(machine_table(), 100.0);
+        let mut r = rig();
+        pilot.mouse([10.0, 10.0], &mut r.hands());
+        // 10 counts right: 9.5 × 0.006 × 0.15 added to the turret's stored yaw, the game's sign,
+        // and the same change into the lead; mouse Y tilts the turret and nothing else.
+        assert!((r.turret[0] - (0.5 + 0.00855)).abs() < 1e-6, "{}", r.turret[0]);
+        assert!((r.body.lead - (0.5 + 0.00855)).abs() < 1e-6, "{}", r.body.lead);
+        assert!((r.turret[1] - (0.7273 + 0.0171)).abs() < 1e-5, "{}", r.turret[1]);
+        assert_eq!(r.body.command, [0.0; 3], "the pitch asks for no climb");
+        assert!(!r.body.turn_pending, "no normalised turn: the turret leads");
+        // Across the wrap the lead wraps with it.
+        r.turret[0] = 0.999;
+        r.body.lead = 0.999;
+        pilot.mouse([0.0, 0.0], &mut r.hands());
+        pilot.mouse([10.0, 0.0], &mut r.hands());
+        assert!((r.body.lead - (0.999 + 0.00855 - 1.0)).abs() < 1e-5, "{}", r.body.lead);
+        // Keypad 5 switches the lock; the spin key sets a fraction and clears a pending turn.
+        pilot.key("SCAN_G_5", true, &mut r.hands());
+        assert!(r.body.turret_lock);
+        pilot.key("SCAN_G_5", true, &mut r.hands());
+        assert!(!r.body.turret_lock);
+        r.body.turn_pending = true;
+        pilot.key("SCAN_COMMA", true, &mut r.hands());
+        assert_eq!((r.body.spin_set[2], r.body.turn_pending), (0.7, false));
+        pilot.key("SCAN_COMMA", false, &mut r.hands());
+        assert_eq!(r.body.spin_set[2], 0.0);
+        pilot.key("SCAN_R", true, &mut r.hands());
+        assert_eq!(r.body.command[2], 1.0, "only R climbs");
     }
 }

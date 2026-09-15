@@ -490,6 +490,12 @@ impl Robot {
         self.time_ms += dt_ms;
         self.walk(ground);
         self.rig.strafe = self.walker.strafe_offset(self.time_ms);
+        // `Control.dll:0x10005b13`: while the turret lock holds, the control takt aims the
+        // turret from the lead, so it keeps its heading as the hull comes round under it.
+        let body = &self.walker.body;
+        if body.turret_lock && !body.turn_pending {
+            self.rig.aim[0] = parkan_sim::motion::led_aim(body, self.walker.phase(self.time_ms));
+        }
     }
 
     /// The second half of a tick: the turret's takt (its channels, the arms, and each
