@@ -892,6 +892,14 @@ impl App {
         let (Some(play), Some(hud)) = (self.play.as_mut(), self.hud.as_mut()) else { return };
         let now = play.hero.time_ms;
         let cockpit = &mut hud.cockpit;
+        // The warbot designer, while it is up, takes the click (`0x10055ff0`).
+        if cockpit.designer.is_open() {
+            if pressed && button == MouseButton::Left {
+                let at = parkan_world::cockpit::designer::layout_point(space, cursor);
+                cockpit.designer.click(play, at, &cockpit.strings);
+            }
+            return;
+        }
         match (button, pressed) {
             (MouseButton::Left, true) => {
                 self.left_down = Some((Instant::now(), cursor));
@@ -1002,8 +1010,10 @@ impl App {
     /// The commander's cursor this frame: the ghost follows it, and the pick under it picks
     /// the cursor's state (`0x10058710`).
     fn command_cursor(&mut self) {
-        let command =
-            self.play.as_ref().is_some_and(|p| matches!(p.mode(), parkan_world::play::Mode::Command(_)));
+        // Over the warbot designer the system's cursor shows, as on the factory screen.
+        let designer = self.hud.as_ref().is_some_and(|h| h.cockpit.designer.is_open());
+        let command = !designer
+            && self.play.as_ref().is_some_and(|p| matches!(p.mode(), parkan_world::play::Mode::Command(_)));
         if let Some(r) = self.running.as_ref()
             && command != self.cursor_hidden
         {
@@ -1069,7 +1079,8 @@ impl App {
         // edge of the screen (docs/40, "The cursor at an edge turns and tilts it").
         if let (Some(play), Some(r)) = (self.play.as_mut(), self.running.as_ref()) {
             let space = hud_space(r.config.width, r.config.height, &self.args);
-            let edges = match self.cursor_in {
+            let designer = self.hud.as_ref().is_some_and(|h| h.cockpit.designer.is_open());
+            let edges = match self.cursor_in && !designer {
                 true => parkan_world::command::Edges::of(
                     space.layout(self.cursor, parkan_world::hud::Pin::TOP_LEFT),
                     space.layout(self.cursor, parkan_world::hud::Pin::BOTTOM_RIGHT),
@@ -1079,9 +1090,9 @@ impl App {
             play.command_frame(self.started.elapsed().as_secs_f64(), edges);
         }
         self.command_cursor();
-        // The designer goes with the factory screen it was opened from.
+        // The designer goes with the factory screen or command mode it was opened from.
         if let (Some(play), Some(hud)) = (self.play.as_ref(), self.hud.as_mut())
-            && !matches!(play.mode(), parkan_world::play::Mode::Factory(_))
+            && !play.mode().shows_cursor()
             && hud.cockpit.designer.is_open()
         {
             hud.cockpit.designer.close();

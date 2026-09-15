@@ -277,7 +277,7 @@ pod (the recording's hero takes the west side door); the chimney smoke is orange
 where the recording's is black; the designer's save and load;
 the own panel's unit while aboard.
 
-**M12.** Mission 03, *The Field Base*.
+**M12.** Mission 03, *The Field Base*: a base commanded from a bunker.
 
 - A pod's zone is measured as read: a child's bounding-sphere centre within 0.8 of
   the pod node's sphere across the ground, and between the heights of the pod
@@ -291,6 +291,14 @@ the own panel's unit while aboard.
   factory's recent projects at the start, rated, named and priced from the player
   clan's research tree, the last named first: Mission 03's Large Factory offers
   *SWW-X Warrior* and *SSW-X Warrior*.
+- Every clan that is not neutral thinks, the enemy's too: an idle unit engages the best
+  hostile within 500 and chases it no further than 1,000 from where it stood; a shut-down
+  unit neither moves nor fires; a patrol walks a loop of points about its place, building or
+  unit, fights inside its radius and drops an attack that strays past its limit. A building
+  with guns aims and fires at units, never moving, once its clan is not neutral. The clans'
+  scripts run their `Init`, function 15 orders any clan's unit by its logical id and function
+  34 counts a clan's units and buildings of one type, so Mission 03's enemy waits shut down
+  until the player's fourth warbot, then patrols to the base.
 - Taking a bunker from its pod opens command mode (mode 4): the hero is let go where
   it stands, the bunker selected, and the camera placed over the bunker facing north,
   32.7° down, with a field of 1.04 rad. The arrows move it at up to 125 m/s after a
@@ -341,7 +349,6 @@ the own panel's unit while aboard.
   until there is more than 0.5, and goes round again; with no mine or storage the task
   ends. On Mission 03 it carries 2,000 from the new mine to the Small Warehouse, and the
   Ore row reads 56%.
-
 - The cursor picks as docs/42 reads it, in the world through the command camera and on the
   open satellite map: a click selects one of the player's units or buildings (turning an
   open page to its kind), sends the selection to open ground (a Go), attacks another clan's
@@ -354,11 +361,9 @@ the own panel's unit while aboard.
   good site and red on a bad one (a mine needs a found lode within 20), turned 0.05 rad a
   press by `,` and `.`; a click on a good site orders the builder, and the right button or
   Esc puts it away with *"Building was cancelled by user"*.
-
 - The selected units and the unit under the cursor are bracketed in the world in the marking
   rule's colour, the player's named in green, with their class icon and bars. Each lode's
   plume, `env_mineral`, shows on the ground under it until a building stands within 80.
-
 - Telepresence: a unit page's three drive buttons take the selected unit over (mode 2) with
   its own cockpit and table while the hero stays in the bunker; Esc goes back to the command
   view with the camera where it was left.
@@ -368,7 +373,11 @@ the own panel's unit while aboard.
   and down the Small Bunker's sunk ramp, through its door, to the pod, which opens command
   mode 14.6 s after the ramp's top, as the recording takes 8.5 and 14.2 s.
 
-Not yet: Explode!, tooltips, and the chat and game menu buttons.
+On Mission 03 the hero takes the Small Generator and the Small Bunker from their pods, the
+builder puts the Small Mine on the lode from command mode, the transport carries its ore, the
+Large Factory builds four *SSW-X* in batch, and they beat the patrol: the mission is won. Not
+yet: Explode!, tooltips, the chat and game menu buttons, the commander's map marks by type,
+and the designer's save and load.
 
 This directory also holds what the rest will follow:
 
@@ -444,6 +453,14 @@ slots, accept hands the design to the factory, and exit or Esc closes it.
 `--designer` draws a screenshot with the designer open on the first factory,
 and `--design PART,…` fits those parts to it in turn; `accept` among them
 clicks accept, leaving the factory screen with the project.
+
+Taking a bunker's pod opens command mode: the arrows and PageUp/PageDown move the camera,
+the cursor at a screen edge turns it, Z zooms; the icon column opens the unit and building
+pages, a click selects and orders in the world or on the map (M), a drag bands units, the right
+button undoes, and Esc peels back the map and the page before leaving. `--page N`,
+`--camera-yaw RAD` and `--ghost X,Y` draw command mode's screenshots after `--pod sbunk01.dat
+--ticks 400` on Mission 03, and `--build X,Y` orders the first builder to build a mine there
+before `--ticks` play.
 
 Standing on a building's control pod captures it; `--pod NAME` starts the hero
 on the pod of the building whose path ends in NAME (`--pod lplant01.dat` on
