@@ -251,11 +251,15 @@ pub fn draw(
     views
 }
 
-/// The hero's sphere in the world: its agent sphere carried by its body.
+/// The driven unit's sphere in the world as its object stands this frame (interface `0x20`
+/// slot 3 answers from the object's matrix, which the machine places between its step's two
+/// poses, `Control.dll:0x10015a50`): its agent sphere carried by the drawn placement, not by
+/// the step's end, which jumps a stride at a time.
 fn hero_sphere(play: &Play) -> (Vec3, f32) {
-    let body = &play.driven().walker.body;
-    let (centre, radius) = play.driven().collision;
-    (body.position + Quat::from_rotation_z(body.heading()) * centre, radius)
+    let unit = play.driven();
+    let (position, yaw) = unit.walker.drawn(unit.time_ms);
+    let (centre, radius) = unit.collision;
+    (position + Quat::from_rotation_z(yaw) * centre, radius)
 }
 
 /// A panel for `side` (`0x10040f30`).
@@ -357,7 +361,9 @@ fn panel(
     let [px0, py0] = space.pixel([rect[0], rect[1]], pin);
     let [px1, py1] = space.pixel([rect[2], rect[3]], pin);
     let direction = if own {
-        let h = play.driven().walker.body.heading();
+        // The object's y column, as it is drawn.
+        let unit = play.driven();
+        let h = unit.walker.drawn(unit.time_ms).1;
         Vec3::new(-h.sin(), h.cos(), 0.0)
     } else {
         let mut d = (centre - hero_centre).normalize_or(Vec3::Y);

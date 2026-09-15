@@ -4253,3 +4253,51 @@ fn mission_04_is_won_by_the_hq_the_helicopters_captures_research_a_large_flyer_a
     assert_eq!(objectives(&play), [1, 1, 1, 1, 1, 0]);
     eprintln!("won {:.1} s in", seconds(&play));
 }
+
+#[test]
+#[ignore = "needs the game install"]
+fn mission_01s_own_panel_keeps_the_running_hero_steady_in_its_view() {
+    use glam::{Mat4, Quat, Vec3};
+    use parkan_world::cockpit::Cockpit;
+    use parkan_world::hud::{Pages, Space};
+    use parkan_world::text::GameFont;
+
+    // docs/35-hud.md, "The unit in the middle": the view's camera stands off the object as it is
+    // drawn, so the hero running holds still in it. Placed by each step's end, the camera jumps a
+    // stride at a time.
+    let game = gamedir::find(None).expect("a Parkan install: set PARKAN_DIR");
+    let (mut play, _) = mission_01_play();
+    let pages = Pages::open(&game).unwrap();
+    let mut cockpit = Cockpit::open(&game, &pages, &play).unwrap();
+    let font = GameFont::ui(&game, "GAME_FONT").unwrap();
+    let menu = GameFont::ui(&game, "MENU_FONT").unwrap();
+    play.hero.key("SCAN_W", true);
+    let (mut drawn_step, mut stepped_step) = (0.0_f32, 0.0_f32);
+    let (mut last_drawn, mut last_stepped): (Option<Vec3>, Option<Vec3>) = (None, None);
+    for tick in 0..180 {
+        play.update_input();
+        play.tick(1000.0 / 60.0, [0.0; 2]);
+        if tick < 60 {
+            continue;
+        }
+        let hero = &play.hero;
+        let (position, yaw) = hero.walker.drawn(hero.time_ms);
+        let eye = hero.eye();
+        let view_proj = Mat4::perspective_infinite_reverse_rh(1.0, 4.0 / 3.0, 0.5)
+            * Mat4::look_to_rh(eye.position, eye.forward, Vec3::Z);
+        let frame = cockpit.draw(&play, Space::new(640.0, 480.0), &font, &menu, view_proj);
+        let own = frame.views.iter().find(|v| v.unit.is_none()).expect("the own panel's view");
+        // The camera against the hero as drawn, in the hero's frame.
+        let offset = Quat::from_rotation_z(-yaw) * (own.eye - position);
+        let body = &hero.walker.body;
+        let stepped = Quat::from_rotation_z(-yaw) * (body.position - position);
+        if let (Some(a), Some(b)) = (last_drawn, last_stepped) {
+            drawn_step = drawn_step.max(offset.distance(a));
+            stepped_step = stepped_step.max(stepped.distance(b));
+        }
+        (last_drawn, last_stepped) = (Some(offset), Some(stepped));
+    }
+    eprintln!("camera against the drawn hero {drawn_step} m a tick at most; the step's end {stepped_step} m");
+    assert!(stepped_step > 0.2, "the step's end jumps {stepped_step} m in a tick");
+    assert!(drawn_step < 0.05, "the camera moves {drawn_step} m against the drawn hero in a tick");
+}

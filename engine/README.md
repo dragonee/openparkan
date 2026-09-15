@@ -532,6 +532,11 @@ presses a hero standing at it down), and which of Mission 04's units holds no mi
 - `--press N` and `--release N` put the `--hold` keys down and let them up after N of the
   `--ticks`: `--skip-briefing --face l_targ.dat,60 --hold SCAN_LMOUSE --press 3900 --release 3904
   --ticks 3920 --screenshot beam.png` draws one shot's beam under the sky of 65 s in.
+- The bottom panels' views stand off the unit as it is drawn this frame, its placement between
+  its state step's two poses, not where the step will end (docs/35, "The unit in the middle"):
+  the hero running holds still in its own panel, its legs moving, where the camera had jumped
+  up to 0.26 m a tick with each stride, and the target panel looks along the line between the
+  two as they are drawn.
 
 This directory also holds what the rest will follow:
 
