@@ -740,11 +740,20 @@ and that group picks the step by surface
    and a four-float answer. That is the signature of the slot that hands out
    the agent's joined sphere in world space (`AniMesh.dll:0x10014580`), the
    chassis's and every hung part's header spheres together
-   ([26-damage.md](26-damage.md)). So a flyer with a hung turret rides the
-   bottom of the turret's sphere, not the chassis's. On Mission 04's
-   helicopter that is 2.20 about a centre 0.55 below the origin, where the
-   chassis's own is 1.65 about the origin (*measured* on openparkan's engine,
-   which joins the same two spheres).
+   ([26-damage.md](26-damage.md)). So a flyer with a hung turret and guns
+   rides on the whole assembly's sphere, not the chassis's.
+   - **Mission 04's helicopter:** 2.45 about a centre 0.80 below the origin,
+     Mission 01's `helic` figure. The chassis's own sphere is 1.65 about the
+     origin.
+   - **The L-2f:** 12.26 about a centre 2.75 below, held to 7.5 for the
+     contact. Resting on flat ground its origin stands 10.25 over it, and 7.64
+     on the chassis's own sphere (*measured*, the parts' header spheres joined
+     as `0x10009510` joins them).
+   - **The recording agrees** (*seen*). Mission 02's warbot, resting on the
+     island by the Outpost, reads altitude 11 over Tut_2's water at z 150.
+     That is the joined sphere's 10.25 over the island's 150–151.67; the
+     chassis's sphere would read 8 to 9
+     ([39-boarding.md](39-boarding.md#against-the-recording--seen)).
    A second sphere, from the object's other interface (`+0x28`, `0x1001a518`),
    gives a radius r₂ that is held to 7.5 only on objects with flag
    `0x1000000`; it bounds the first search pass below.
@@ -943,10 +952,11 @@ does not ride the pitch.
 - **No other path.** The only mouse-Y row in `m2.tbl` is the turret's
   `ANGLE_Y` (*measured*).
 - **The ground does move a low flyer.** Mission 04's helicopter, boarded
-  where it stands, holds 3 m over the valley floor. Held on W for 3 s toward
-  the slopes, it rides up them at the sphere's bottom and ends 23 m higher
-  above the water, and it keeps that height where the ground falls away. The
-  run is the same with the sight pitched down or up.
+  where it stands, holds 3.2 m over the valley floor. Held on W for 12 s
+  toward the west slope, it rides 57 m up at its sphere's bottom, its eye
+  1.2 m or more over the ground (0.4 m under it on the chassis's own sphere).
+  It keeps that height where the ground falls away. The run is the same with
+  the sight pitched down or up.
 - **So** a player skimming the ground sees the altitude figure climb as the
   terrain rises, and never fall back without F (*derived*).
 

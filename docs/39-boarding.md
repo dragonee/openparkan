@@ -303,9 +303,19 @@ and hidden.
 | 249.3 → 249.4 | a hard cut into the bot's cockpit, blue and yellow frame; weapons LAL365, LAL365, LFT; the right panel shows the bot; the box turns to *"Manual control of warbots…"* from the Information assistant (message 100); the wingman line is gone |
 | 255–322 | flying to the island, firing, setting down by the Outpost |
 | 311.6 | a box about large warbots, which expires at 331.6 |
+| 328 → 331.5 | setting down by the Outpost: the altitude figure falls 21, then 11 at 330 s, and holds 11 at 331.5 s while the speed figure falls from 24 to 6 |
 | 331.7 → 331.8 | a hard cut to the hero standing beside the bot, looking at it; the hero's weapons return, and the wingman line with the bot |
 
 Neither cut fades or moves the camera between the two views.
+
+**The altitude it was left at** (*derived*). The figure is the record's
+`+0xc` over the water at z 150, and the height test above reads the same
+field. Resting on the joined sphere
+([24-motion.md](24-motion.md#finding-the-ground--read)), the L-2f reads 11 or
+12 on the island's ground, 150–151.67. Getting out passes only where it reads
+11: a place 14.4 m out must lie less than 10 below it. On the chassis's own
+sphere it would read 8 or 9, and any place would pass. So the recording's 11,
+and the hero getting out, fit the joined sphere.
 
 ## For an engine
 

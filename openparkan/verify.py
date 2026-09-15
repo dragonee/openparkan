@@ -18690,6 +18690,40 @@ def check_live_limits(check, game: Path) -> None:
           close, f"(E, r, live top m/s, live yaw rad/s): {seen}")
 
 
+#: docs/24's joined spheres the ground contact takes: path -> (radius, centre z below the origin).
+JOINED_SPHERES = {"UNITS\\UNITS\\BATTLE\\tut4_f1.dat": (2.4456, -0.796),
+                  "UNITS\\bld_unit_-2147483647.dat": (12.2565, -2.7534)}
+#: The ground contact holds a radius under 20 to 7.5 (Control.dll:0x1001a48e).
+CONTACT_RADIUS_HOLD = (20.0, 7.5)
+
+
+def check_joined_sphere(check, game: Path) -> None:
+    """The ground contact's sphere is the agent's joined one: where a flyer rests over ground."""
+    asm = assembly.Assembly(game)
+    seen = {}
+    for path in JOINED_SPHERES:
+        spheres = []
+        for part in asm.parts(mission.KIND_UNIT, path):
+            mesh = asm.mesh(part.ref)
+            if mesh is not None and mesh.volume:
+                spheres.append((objmesh.apply(part.pose, mesh.volume.centre), mesh.volume.radius))
+        weight = sum(r for _, r in spheres)
+        centre = tuple(sum(c[k] * r for c, r in spheres) / weight for k in range(3))
+        radius = max(math.dist(c, centre) + r for c, r in spheres)
+        held = radius if radius >= CONTACT_RADIUS_HOLD[0] else min(radius, CONTACT_RADIUS_HOLD[1])
+        rest = round(held - centre[2], 2)
+        seen[path] = (round(radius, 4), round(centre[2], 4), len(spheres), rest)
+    heli, l2f = (seen[p] for p in JOINED_SPHERES)
+    check("UNITS: a flyer rests on its joined sphere, the L-2f's origin 10.25 over flat ground",
+          all(abs(seen[p][0] - r) < 1e-3 and abs(seen[p][1] - z) < 1e-3
+              for p, (r, z) in JOINED_SPHERES.items())
+          and heli[2] == 4 and l2f[2] == 6 and l2f[3] == 10.25,
+          f"(radius, centre z, parts, origin over the ground at rest): tut4_f1 {heli}, "
+          f"L-2f {l2f}; "
+          f"Tut_2's island 150-151.67 under water at 150 puts the L-2f's altitude at 10-12, "
+          f"the recording's 11")
+
+
 def check_focus(check, game: Path) -> None:
     """Leaving the window lets every key up: WM_ACTIVATEAPP to stdSetApplicationState."""
     paths = [game / name for name in ("iron3d.dll", "World3D.dll", "iron_3d.exe")]
@@ -19984,7 +20018,7 @@ def run(game: Path) -> int:
         check_packages,
         check_target_panel,
         check_wingman,
-        check_boarding, check_hull_follow, check_live_limits,
+        check_boarding, check_hull_follow, check_live_limits, check_joined_sphere,
         check_builder, check_placement,
         check_designs,
         check_units, check_loading, check_search, check_construction,
