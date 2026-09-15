@@ -467,10 +467,6 @@ away from, it lets go of everything held.
     view centres on the sight again
     ([30-turrets.md](30-turrets.md#aiming-and-the-camera--read-and-measured)).
 
-On macOS, Cmd-Shift-4 hands the keyboard to the screenshot tool while Shift is
-down, so Shift's key-up goes there. A window that did not let go would keep
-the free look on: the mouse would turn the view while the guns stayed put.
-
 ## `BuildDat.lst`
 
 Not input, but the same kind of file and read here for it: the schemes the
