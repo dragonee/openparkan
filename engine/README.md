@@ -556,6 +556,10 @@ presses a hero standing at it down), and which of Mission 04's units holds no mi
   `GREATEREQUAL` does, and writes depth; only a batch whose ambient alpha is below 1 is
   translucent, drawn after the rest without writing depth. A palm's nearer leaves now hide
   the leaves behind them.
+- A beacon light, an effect with header flag 0x400 (docs/11, "A beacon light's glow"), draws
+  nothing while its tested point is hidden and, while it is in view, draws every sprite over
+  the scene as bit 8 does, so the glow on the bridge's pylons is no longer cut by the faces
+  it hangs on.
 
 This directory also holds what the rest will follow:
 
@@ -812,6 +816,7 @@ a row here. A row leaves this table when research closes it.
 | M14 | Which objects and faces the outer camera's line through the world meets (mask `0x41a`, `0x208`), and the vector at `+8` of the world's answer 0.75 of which is added to the point met | the ground and every live target but the unit looked at, passing what a round passes; the camera stands 0.75 back toward the eye | [30](../docs/30-turrets.md#not-established) |
 | M14 | Which box the unit record's `+0x98`, the outer camera's r, is the half-diagonal of | the chassis mesh's authored box (1.47 m on Mission 01's hero, which its recording favours), else the unit's collision radius; an HQ's command camera keeps its M13 stand-in | [40](../docs/40-command-mode.md#not-established) |
 | M14 | Where a batch word's 8 and `0x100`, which file a batch translucent, come from; which sort type each of the render queue's layers has | no batch word makes a batch translucent, and a look is translucent when any of its phases has an ambient alpha below 1, decided once; groups draw mode by mode in their list, unsorted | [07](../docs/07-objects.md#what-a-blended-batch-writes-and-the-alpha-tests-reference--read) |
+| M14 | With which depth state the beacon lights (flags 0x400 and 0x800, no bit-8 emitter) draw in the pass flag 0x800 waits for: by the read path their 9 m glow is depth-tested and cut by the faces it hangs on | every sprite of a flag-0x400 effect draws over the scene while its tested point is in view, as a bit-8 emitter's does | [11](../docs/11-effects.md#a-beacon-lights-glow--read-in-part-and-measured) |
 
 ### Read since the stand-in was written
 

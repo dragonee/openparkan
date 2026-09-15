@@ -94,7 +94,7 @@ pub struct Sprite {
     /// and fades").
     pub alpha: f32,
     /// Drawn with the depth test off: an emitter with bit 8 whose effect's tested point
-    /// is in view (`Effect.dll:0x10009930`, `Terrain.dll:0x100282c6`).
+    /// is in view (`Effect.dll:0x10009930`, `Terrain.dll:0x100282c6`), or a beacon's.
     pub overlay: bool,
     /// The texture's u runs along the quad's long side and v across it, as a bolt's sprites
     /// take theirs (`Effect.dll:0x10009b90`); otherwise u runs across.
@@ -395,8 +395,8 @@ impl Instance {
 
     /// What the instance draws at `now_ms`; `in_view` is whether its tested point
     /// (`test_point`) is in view from the camera. While it is hidden flag 0x400 draws
-    /// nothing (`0x10008016`); while it is in view an emitter with bit 8 draws over the
-    /// scene (`0x10009930`).
+    /// nothing (`0x10008016`); while it is in view an emitter with bit 8, and every emitter
+    /// of a flag-0x400 beacon, draws over the scene (`0x10009930`).
     pub fn sprites(&self, now_ms: f64, in_view: bool, out: &mut Vec<Sprite>) {
         if !self.on || (self.effect.header.flags & FX_HIDE_OCCLUDED != 0 && !in_view) {
             return;
@@ -419,7 +419,13 @@ impl Instance {
                 8 => self.stream(i, e, seconds, out),
                 _ => {}
             }
-            let overlay = in_view && e.word & EMITTER_FLAG != 0;
+            // STAND-IN: docs/11-effects.md#a-beacon-lights-glow--read-in-part-and-measured --
+            // which pass draws a 0x800 beacon, and with which depth state, is not read; by the
+            // read path its glow is depth-tested and cut by the faces it hangs on. Here a flag-
+            // 0x400 effect, which draws nothing while its point is hidden, draws over the scene
+            // while it is in view, as bit 8 does.
+            let beacon = self.effect.header.flags & FX_HIDE_OCCLUDED != 0;
+            let overlay = in_view && (e.word & EMITTER_FLAG != 0 || beacon);
             for s in &mut out[first..] {
                 s.overlay = overlay;
             }
@@ -926,7 +932,7 @@ mod tests {
     }
 
     #[test]
-    fn flag_0x400_draws_nothing_while_the_tested_point_is_hidden() {
+    fn flag_0x400_draws_nothing_while_its_point_is_hidden_and_over_the_scene_while_in_view() {
         let glow = block(3, 200, &[(32, 0.0), (36, 1.0), (20, 1.0), (24, 1.0), (100, 1.0)], "B");
         let frame = Frame::along(Vec3::ZERO, Vec3::X, 1.0);
         let fx =
@@ -937,7 +943,7 @@ mod tests {
         assert!(out.is_empty());
         fx.sprites(0.0, true, &mut out);
         assert_eq!(out.len(), 1);
-        assert!(!out[0].overlay, "no bit 8 on the emitter");
+        assert!(out[0].overlay, "a beacon's glow draws over the faces it hangs on while in view");
     }
 
     #[test]

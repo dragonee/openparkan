@@ -1948,6 +1948,24 @@ fn mission_01s_bridges_start_their_signal_lights() {
             assert!(play.fx.instances.iter().any(|(o, _)| *o == Owner::Building(b.target, e.id)));
         }
     }
+    // A pylon's lamp seen from beside it draws over the pylon's faces, not cut by them (the
+    // beacon stand-in, docs/11, "A beacon light's glow"); from under the deck it is hidden.
+    let mut play = play;
+    let game = gamedir::find(None).unwrap();
+    play.fx.resolve_looks(&mut TextureStore::open(&game).unwrap()).unwrap();
+    for _ in 0..60 {
+        play.tick(1000.0 / 60.0, [0.0, 0.0]);
+    }
+    let lamp = glam::Vec3::new(775.4, 590.4, 24.3);
+    let near = |eye: glam::Vec3| {
+        play.sprites(eye)
+            .into_iter()
+            .filter(|(_, s)| s.material.eq_ignore_ascii_case("lamp") && s.centre.distance(lamp) < 1.0)
+            .map(|(_, s)| s.overlay)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(near(glam::Vec3::new(766.0, 583.0, 21.0)), [true], "in view, over the scene");
+    assert!(near(glam::Vec3::new(790.0, 600.0, 5.0)).is_empty(), "hidden under the bridge");
 }
 
 #[test]
