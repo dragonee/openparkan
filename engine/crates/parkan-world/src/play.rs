@@ -1043,6 +1043,13 @@ impl Play {
         })
     }
 
+    /// An ordered unit of size class `class` acknowledges, never with the voice it gave last
+    /// (`0x1008e840`, docs/31, "The wingman menu from first person").
+    pub fn acknowledge(&mut self, class: u8) {
+        let name = format!("{}{}", ACKNOWLEDGEMENTS[self.voice_pick.pick()], orders::voice_suffix(class));
+        self.say_sound(&name, true);
+    }
+
     /// A digit key while the selector is open (`iron3d.dll:0x100710fa`); whether it was taken.
     /// Ordering, digit n gives row n to the chosen wingmen, closes the menu and the last one
     /// acknowledges (`0x1006df80`, `0x10079230`, `0x1008e840`).
@@ -1070,12 +1077,7 @@ impl Play {
                     }
                     self.selector.close();
                     let class = chosen.last().map_or(0, |&r| self.robots[r].1.size_class);
-                    let name = format!(
-                        "{}{}",
-                        ACKNOWLEDGEMENTS[self.voice_pick.pick()],
-                        orders::voice_suffix(class)
-                    );
-                    self.say_sound(&name, true);
+                    self.acknowledge(class);
                 }
                 true
             }
@@ -1480,6 +1482,12 @@ impl Play {
             CMD_JAMES_ZOOM_MODE => {
                 if down {
                     self.command.toggle_zoom();
+                }
+                return true;
+            }
+            CMD_JAMES_BASE_ROTLEFT | CMD_JAMES_BASE_ROTRIGHT => {
+                if down {
+                    self.turn_ghost(command == CMD_JAMES_BASE_ROTLEFT);
                 }
                 return true;
             }

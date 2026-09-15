@@ -173,6 +173,10 @@ pub struct Panel {
     pub cursor: Option<[f32; 2]>,
     /// Command mode was up at the last update.
     pub entered: bool,
+    /// The cursor's state this frame (`0x10104148`), and the band's corners on the layout
+    /// pinned to the top left while one is up.
+    pub cursor_state: u8,
+    pub band: Option<[[f32; 2]; 2]>,
 }
 
 impl Default for Panel {
@@ -189,6 +193,8 @@ impl Default for Panel {
             pressed: None,
             cursor: None,
             entered: false,
+            cursor_state: 1,
+            band: None,
         }
     }
 }
@@ -419,6 +425,34 @@ impl Panel {
         if inside(UNIT_BOX, at) { Click::Taken } else { Click::World }
     }
 
+    /// Whether the panel answers for the cursor at `left` and `right` (`0x10084b80`), so the
+    /// world takes no pick there: the resource rows, the column, the page's box and rows.
+    pub fn hit(&self, play: &Play, map_open: bool, left: [f32; 2], right: [f32; 2]) -> bool {
+        if inside(RESOURCE_ROWS, right)
+            || (map_open && inside([374.0, MAP_TITLE_Y, 640.0, MAP_PANEL[1]], right))
+        {
+            return true;
+        }
+        if inside(lock_rect(self.steps), left)
+            || (self.steps > 0 && inside([0.0, 0.0, BUTTON[0], 481.0], left))
+        {
+            return true;
+        }
+        if self.page == 0 || self.steps != SLIDE_STEPS {
+            return false;
+        }
+        let bottom = if let Some(mask) = page_units(self.page) {
+            let top = UNIT_ROWS_TOP + ROW_STEP * play.own_units_within(mask).len() as f32;
+            top + ROW_STEP * (self.visible_rows(top).len() + 1) as f32
+        } else if let Some(mask) = page_buildings(self.page) {
+            let top = if self.page == 5 { FACTORY_ROWS_TOP } else { BUILDING_ROWS_TOP };
+            top + ROW_STEP * buildings_of(play, mask).len() as f32
+        } else {
+            UNIT_BOX[3]
+        };
+        inside([ROWS_LEFT, 0.0, 369.0, bottom], left)
+    }
+
     /// The order rows that fit above 454 with the menu at `top` (`0x1007b1a0`).
     fn visible_rows(&self, top: f32) -> &[u8] {
         let fit = ((MENU_BOTTOM - top) / MENU_ROW_COUNT_STEP).max(0.0) as usize;
@@ -438,13 +472,40 @@ pub const ICON_PIECE: f32 = 19.5;
 
 /// The panel in command mode, after the world: the resource rows, the column and the page, the
 /// commander's map and the message box (`0x1008d51c`).
-pub fn draw(cockpit: &mut Cockpit, ink: &mut Ink, play: &Play, now_ms: f64) -> Vec<super::designer::Preview> {
+pub fn draw(
+    cockpit: &mut Cockpit,
+    ink: &mut Ink,
+    play: &Play,
+    now_ms: f64,
+    view_proj: glam::Mat4,
+) -> Vec<super::designer::Preview> {
     let mut previews = Vec::new();
+    // The building ghost, drawn flat over the world in its colour (docs/32).
+    if let Some(g) = play.commander.ghost.as_ref().filter(|g| g.placed) {
+        let c = argb(if g.valid { crate::pick::GHOST_GOOD } else { crate::pick::GHOST_BAD });
+        let space = ink.painter.space;
+        previews.push(super::designer::Preview {
+            key: super::designer::PreviewKey {
+                kind: parkan_formats::mission::KIND_BUILDING,
+                path: g.path.clone(),
+                version: 0,
+            },
+            viewport: [0.0, 0.0, space.width, space.height],
+            view_proj,
+            model: glam::Mat4::from_translation(g.at) * glam::Mat4::from_rotation_z(g.yaw),
+            lights: [glam::Vec3::NEG_Z; 2],
+            paint: Some([c[0], c[1], c[2]]),
+        });
+    }
     factory::resource_rows(cockpit, ink, play, now_ms);
+    // While the ghost is up (cursor state 8) only the resource rows draw (`0x1008d326`).
+    let placing = cockpit.commander.cursor_state == 8;
     ink.painter.pin = Pin::TOP_LEFT;
-    column(cockpit, ink, now_ms);
+    if !placing {
+        column(cockpit, ink, now_ms);
+    }
     let page = cockpit.commander.page;
-    if page != 0 && cockpit.commander.steps == SLIDE_STEPS {
+    if !placing && page != 0 && cockpit.commander.steps == SLIDE_STEPS {
         factory::header(cockpit, ink, title(page));
         if let Some(mask) = page_units(page) {
             unit_page(cockpit, ink, play, mask, now_ms);
@@ -464,7 +525,41 @@ pub fn draw(cockpit: &mut Cockpit, ink: &mut Ink, play: &Play, now_ms: f64) -> V
     ink.painter.pin = Pin::BOTTOM_RIGHT;
     let [left, top, width] = factory::MESSAGES_AT;
     messages::draw_at(cockpit, ink, now_ms, left, top, width);
+    ink.painter.pin = Pin::TOP_LEFT;
+    band_and_cursor(cockpit, ink, now_ms);
     previews
+}
+
+/// The band in state 7, and the software cursor of the state (`0x100585b0`, `0x10057060`):
+/// four 16 × 16 phases of `new_ui1` stepping every 150 ms, its extent the hot spot.
+///
+/// STAND-IN: docs/42-selection.md#the-cursor-shows-a-state--read-and-measured -- whether the
+/// display's slot 12 answers, which picks the system's cursor, is not read: the software
+/// cursor is drawn, the system's hidden.
+fn band_and_cursor(cockpit: &Cockpit, ink: &mut Ink, now_ms: f64) {
+    let panel = &cockpit.commander;
+    if let Some([[x0, y0], [x1, y1]]) = panel.band {
+        let colour = argb(crate::pick::BAND_COLOUR);
+        let w = 1.0 / ink.painter.space.scale();
+        for (a, b) in [([x0, y0], [x1, y0]), ([x1, y0], [x1, y1]), ([x1, y1], [x0, y1]), ([x0, y1], [x0, y0])]
+        {
+            ink.painter.line(Blend::Alpha, a, b, w, colour);
+        }
+    }
+    let (Some(at), Some((offset, hot)), Some(&page)) =
+        (panel.cursor, crate::pick::cursor_object(panel.cursor_state), cockpit.pages.get("new_ui1"))
+    else {
+        return;
+    };
+    let side = crate::pick::CURSOR_SIDE;
+    let phase = ((now_ms / crate::pick::CURSOR_PHASE_MS).floor() as i64).rem_euclid(4) as f32;
+    ink.painter.sprite(
+        Blend::Alpha,
+        page,
+        [offset[0] + side * phase, offset[1], side, side],
+        [at[0] - hot[0], at[1] - hot[1]],
+        [1.0; 4],
+    );
 }
 
 fn put(cockpit: &Cockpit, ink: &mut Ink, name: &str, rect: [f32; 4], colour: u32) {

@@ -231,7 +231,7 @@ impl Cockpit {
                     ..Drawn::default()
                 };
             }
-            let previews = commander::draw(self, &mut ink, play, now_ms);
+            let previews = commander::draw(self, &mut ink, play, now_ms, view_proj);
             return Drawn {
                 batches: ink.painter.batches,
                 text: ink.text,

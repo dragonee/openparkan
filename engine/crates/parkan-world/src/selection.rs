@@ -45,6 +45,12 @@ pub struct Commander {
     pub owned_marks: [bool; 7],
     /// Each target's `.dat`, as placed.
     pub paths: Vec<String>,
+    /// The pick mode, and the pick an order row left open (docs/42).
+    pub pick_mode: crate::pick::PickMode,
+    pub pending: Option<crate::pick::Pending>,
+    /// The building a Build row places, and whether its ray has missed once.
+    pub ghost: Option<crate::pick::Ghost>,
+    pub missed: bool,
     /// Each unit's box lines once rated, by target.
     pub lines: std::collections::HashMap<usize, Option<[String; 5]>>,
 }
@@ -131,6 +137,11 @@ impl Play {
         }
     }
 
+    /// `VOICE_SELECTED`, said once.
+    pub fn ui_voice_selected(&mut self) {
+        self.voice(VOICE_SELECTED);
+    }
+
     fn voice(&mut self, name: &str) {
         if let Some(v) = self.progression.as_ref().and_then(|p| p.sound(name)) {
             self.says.push(crate::progress::Say::Voice(v));
@@ -145,6 +156,46 @@ impl Play {
         if !was {
             self.voice(VOICE_SELECTED);
         }
+    }
+
+    /// Whether building `t` is building itself: its construction sphere running (property
+    /// `0x20c`, docs/32, "The construction sphere").
+    ///
+    /// STAND-IN: docs/41-commander.md#what-enables-a-button-and-what-lights-it -- the
+    /// construction sphere is not modelled: no building builds itself.
+    pub fn building_itself(&self, _t: usize) -> bool {
+        false
+    }
+
+    /// The first `.dat` of the scheme that builds `type_word` (`BuildDat.lst`, docs/32).
+    pub fn first_building(&self, type_word: u32) -> Option<String> {
+        let game = &self.assembly.game;
+        let file = parkan_formats::gamedir::resolve(game, parkan_formats::controls::BUILD_SCHEMES)?;
+        let schemes = parkan_formats::controls::build_schemes(
+            &std::fs::read(file).ok()?,
+            parkan_formats::controls::BUILD_SCHEMES,
+        )
+        .ok()?;
+        schemes.into_iter().find(|s| s.type_word() == Some(type_word))?.members.into_iter().next()
+    }
+
+    /// Order `builder` to build a building of `type_word` at `at`, turned `yaw`
+    /// (`ORDER_ROBOT_BUILD`, target `0x206` the model's matrix, replacing; docs/32).
+    ///
+    /// STAND-IN: docs/32-builder.md#building-a-building-tick-by-tick--read-and-seen -- the build task is
+    /// not modelled yet: the order is given and the builder, finding no task for it, stops.
+    pub fn order_build(&mut self, builder: usize, type_word: u32, at: Vec3, _yaw: f32) -> bool {
+        let order = parkan_sim::orders::Order {
+            code: hq::BUILD,
+            parameter: type_word as i32,
+            target: parkan_sim::orders::Target::Place(at.to_array()),
+        };
+        let Some((_, robot)) = self.robots.iter_mut().find(|(t, _)| *t == builder) else { return false };
+        robot.order = Some(order);
+        robot.behaviour.order(&order);
+        let class = robot.size_class;
+        self.acknowledge(class);
+        true
     }
 
     /// Nothing selected (`0x1007d270`).

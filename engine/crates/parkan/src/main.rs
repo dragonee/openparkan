@@ -121,6 +121,8 @@ struct Args {
     map: bool,
     /// `--page N`: a screenshot in command mode with the commander panel on page N.
     page: Option<u8>,
+    /// `--ghost X,Y`: a screenshot in command mode with the first builder placing a mine at X,Y.
+    ghost: Option<[f32; 2]>,
     ticks: u32,
     hold: Vec<String>,
     mouse: [f32; 2],
@@ -153,6 +155,7 @@ fn args() -> Result<Args> {
         objectives: false,
         map: false,
         page: None,
+        ghost: None,
         ticks: 0,
         hold: Vec::new(),
         mouse: [0.0; 2],
@@ -177,6 +180,10 @@ fn args() -> Result<Args> {
             "--objectives" => out.objectives = true,
             "--map" => out.map = true,
             "--page" => out.page = Some(value()?.parse()?),
+            "--ghost" => {
+                let v: Vec<f32> = value()?.split(',').map(str::parse).collect::<Result<_, _>>()?;
+                out.ghost = v.get(..2).map(|v| [v[0], v[1]]);
+            }
             "--briefing-at" => out.briefing_at = Some(value()?.parse()?),
             "--face" => {
                 let v = value()?;
@@ -470,6 +477,17 @@ fn screenshot(loaded: &scene::Loaded, game: &Path, args: &Args, out: &Path) -> R
                     hud.cockpit.update(p, p.hero.time_ms);
                     hud.cockpit.commander.turn(p, page, p.hero.time_ms);
                 }
+                if let Some([x, y]) = args.ghost
+                    && let Some(&builder) = p.own_units_within(parkan_world::selection::BUILDERS).first()
+                {
+                    p.select_unit_alone(builder);
+                    p.open_pick(parkan_sim::hq::Act::Build(parkan_sim::hq::BUILD_TYPES[0]));
+                    let z = p.ground.below(x, y, 1.0e5).map_or(0.0, |h| h.point.z);
+                    let eye = p.eye().position;
+                    let direction = (Vec3::new(x, y, z) - eye).normalize();
+                    p.update_ghost(parkan_world::pick::Aim::Ray { eye, direction });
+                    hud.cockpit.commander.cursor_state = 8;
+                }
                 if (args.designer || !args.design.is_empty())
                     && let Some(t) = p.factories.first().map(|f| f.target)
                 {
@@ -586,6 +604,10 @@ struct App {
     cursor_in: bool,
     /// Cmd is down: the keys pressed now are a system shortcut's.
     shortcut: bool,
+    /// In command mode: when the left button went down and where, for a band, and whether the
+    /// system's cursor is hidden for the software one.
+    left_down: Option<(Instant, [f32; 2])>,
+    cursor_hidden: bool,
 }
 
 /// The mission's briefing, unless `--skip-briefing` or `--fly`; a play has its world paused
@@ -832,6 +854,155 @@ impl App {
         self.grabbed = on && ok.is_ok();
     }
 
+    /// A mouse button in command mode (docs/42, "The mouse's way in").
+    fn command_mouse(&mut self, button: MouseButton, pressed: bool) {
+        use parkan_world::cockpit::commander::{Click, MAP_PANEL};
+        use parkan_world::hud::Pin;
+        use parkan_world::pick::{BAND_LEAST_PIXELS, BandSpace};
+        let aim = self.command_aim();
+        let Some(r) = self.running.as_ref() else { return };
+        let space = hud_space(r.config.width, r.config.height, &self.args);
+        let (w, h) = (r.config.width as f32, r.config.height as f32);
+        let (left, right) =
+            (space.layout(self.cursor, Pin::TOP_LEFT), space.layout(self.cursor, Pin::TOP_RIGHT));
+        let cursor = self.cursor;
+        let (Some(play), Some(hud)) = (self.play.as_mut(), self.hud.as_mut()) else { return };
+        let now = play.hero.time_ms;
+        let cockpit = &mut hud.cockpit;
+        match (button, pressed) {
+            (MouseButton::Left, true) => {
+                self.left_down = Some((Instant::now(), cursor));
+                if play.commander.ghost.is_some() {
+                    play.commit_placement();
+                    return;
+                }
+                let pick = play.pick(aim);
+                match cockpit.commander.click(play, &mut cockpit.map, left, right, now) {
+                    Click::Factory(t, parkan_world::cockpit::factory::Click::Constructor) => {
+                        if let Err(e) = cockpit.designer.open(play, t, &cockpit.strings) {
+                            eprintln!("cannot open the designer: {e:#}");
+                        }
+                    }
+                    Click::Factory(t, click) => play.factory_click(t, click),
+                    Click::Pick(act) => {
+                        if play.open_pick(act) && !cockpit.map.open {
+                            cockpit.map.toggle();
+                        }
+                    }
+                    Click::Taken => {}
+                    Click::World => {
+                        if let Some((page, always)) = play.click_world(pick)
+                            && (always || cockpit.commander.page != 0)
+                        {
+                            cockpit.commander.turn(play, page, now);
+                        }
+                    }
+                }
+            }
+            (MouseButton::Left, false) => {
+                let Some((_, anchor)) = self.left_down.take() else { return };
+                if cockpit.commander.band.take().is_none() {
+                    return;
+                }
+                let (dx, dy) = ((cursor[0] - anchor[0]).abs(), (cursor[1] - anchor[1]).abs());
+                if dx < BAND_LEAST_PIXELS || dy < BAND_LEAST_PIXELS {
+                    return;
+                }
+                let [x0, y0, x1, y1] = MAP_PANEL;
+                let on_map = |p: [f32; 2]| space.layout(p, Pin::TOP_RIGHT);
+                let a = on_map(anchor);
+                if cockpit.map.open && (x0..=x1).contains(&a[0]) && (y0..=y1).contains(&a[1]) {
+                    let l = play.ground.world_box().1.truncate().max_element();
+                    let world = |p: [f32; 2]| {
+                        let q = on_map(p);
+                        [(q[0] - (x0 + 5.0)) * l / 256.0, ((y1 - 5.0) - q[1]) * l / 256.0]
+                    };
+                    play.band_select([world(anchor), world(cursor)], BandSpace::Map);
+                } else {
+                    let eye = play.eye();
+                    let view_proj = camera::first_person(&eye, w / h.max(1.0));
+                    play.band_select([anchor, cursor], BandSpace::World(view_proj, [w, h]));
+                }
+                cockpit.commander.page = 0;
+            }
+            (MouseButton::Right, true) => {
+                if cockpit.commander.band.take().is_some() {
+                    self.left_down = None;
+                    return;
+                }
+                let undo = play.right_click(cockpit.commander.page, cockpit.map.open);
+                if undo.page_zero {
+                    cockpit.commander.page = 0;
+                }
+                if undo.close_map {
+                    cockpit.map.toggle();
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Where the cursor points in command mode (docs/42, "The pick under the cursor"): nothing
+    /// over the panel, a world place over the open satellite map, else the command camera's
+    /// ray.
+    fn command_aim(&self) -> parkan_world::pick::Aim {
+        use parkan_world::cockpit::commander::MAP_PANEL;
+        use parkan_world::hud::Pin;
+        use parkan_world::pick::Aim;
+        let (Some(play), Some(r), Some(hud)) = (self.play.as_ref(), self.running.as_ref(), self.hud.as_ref())
+        else {
+            return Aim::Nothing;
+        };
+        if !self.cursor_in {
+            return Aim::Nothing;
+        }
+        let space = hud_space(r.config.width, r.config.height, &self.args);
+        let (left, right) =
+            (space.layout(self.cursor, Pin::TOP_LEFT), space.layout(self.cursor, Pin::TOP_RIGHT));
+        let cockpit = &hud.cockpit;
+        if play.commander.ghost.is_none() && cockpit.commander.hit(play, cockpit.map.open, left, right) {
+            return Aim::Nothing;
+        }
+        if cockpit.map.open && play.commander.ghost.is_none() {
+            let [x0, y0, x1, y1] = MAP_PANEL;
+            if (x0..=x1).contains(&right[0]) && (y0..=y1).contains(&right[1]) {
+                let l = play.ground.world_box().1.truncate().max_element();
+                let (u, v) = (right[0] - (x0 + 5.0), (y1 - 5.0) - right[1]);
+                return Aim::Map([u * l / 256.0, v * l / 256.0]);
+            }
+        }
+        let (w, h) = (r.config.width as f32, r.config.height as f32);
+        let eye = play.eye();
+        parkan_world::pick::ray(camera::first_person(&eye, w / h.max(1.0)), eye.position, self.cursor, [w, h])
+    }
+
+    /// The commander's cursor this frame: the ghost follows it, and the pick under it picks
+    /// the cursor's state (`0x10058710`).
+    fn command_cursor(&mut self) {
+        let command =
+            self.play.as_ref().is_some_and(|p| matches!(p.mode(), parkan_world::play::Mode::Command(_)));
+        if let Some(r) = self.running.as_ref()
+            && command != self.cursor_hidden
+        {
+            r.window.set_cursor_visible(!command);
+            self.cursor_hidden = command;
+        }
+        if !command {
+            return;
+        }
+        let aim = self.command_aim();
+        let (Some(play), Some(hud)) = (self.play.as_mut(), self.hud.as_mut()) else { return };
+        play.update_ghost(aim);
+        let panel = &mut hud.cockpit.commander;
+        panel.cursor_state = if play.commander.ghost.is_some() {
+            8
+        } else if panel.band.is_some() {
+            7
+        } else {
+            parkan_world::pick::cursor_state(play.pick(aim).kind)
+        };
+    }
+
     fn step(&mut self) {
         let elapsed = self.last.elapsed().as_secs_f64() * 1000.0;
         self.last = Instant::now();
@@ -882,6 +1053,7 @@ impl App {
             };
             play.command_frame(self.started.elapsed().as_secs_f64(), edges);
         }
+        self.command_cursor();
         // The designer goes with the factory screen it was opened from.
         if let (Some(play), Some(hud)) = (self.play.as_ref(), self.hud.as_mut())
             && !matches!(play.mode(), parkan_world::play::Mode::Factory(_))
@@ -1179,6 +1351,19 @@ impl ApplicationHandler for App {
                     && let (Some(play), Some(hud)) = (self.play.as_ref(), self.hud.as_mut())
                     && matches!(play.mode(), parkan_world::play::Mode::Command(_))
                 {
+                    // Esc puts a placement away too (`0x10070ed1`).
+                    if play.commander.ghost.is_some()
+                        || play
+                            .commander
+                            .pending
+                            .as_ref()
+                            .is_some_and(|p| matches!(p.kind, parkan_world::pick::PendingKind::Build(_)))
+                    {
+                        if let Some(play) = self.play.as_mut() {
+                            play.cancel_placement();
+                        }
+                        return;
+                    }
                     let cockpit = &mut hud.cockpit;
                     if cockpit.map.open {
                         cockpit.map.toggle();
@@ -1242,8 +1427,22 @@ impl ApplicationHandler for App {
                 self.cursor_in = true;
                 if let (Some(r), Some(hud)) = (self.running.as_ref(), self.hud.as_mut()) {
                     let space = hud_space(r.config.width, r.config.height, &self.args);
-                    hud.cockpit.commander.cursor =
-                        Some(space.layout(self.cursor, parkan_world::hud::Pin::TOP_LEFT));
+                    let at = space.layout(self.cursor, parkan_world::hud::Pin::TOP_LEFT);
+                    let panel = &mut hud.cockpit.commander;
+                    panel.cursor = Some(at);
+                    // A drag held 0.35 s becomes a band, outside a route and a placement
+                    // (`0x10071410`).
+                    let route = self.play.as_ref().is_some_and(|p| {
+                        p.commander.ghost.is_some()
+                            || p.commander.pick_mode == parkan_world::pick::PickMode::Route
+                    });
+                    if let Some((since, anchor)) = self.left_down
+                        && !route
+                        && (panel.band.is_some()
+                            || since.elapsed().as_secs_f64() > parkan_world::pick::BAND_HOLD_S)
+                    {
+                        panel.band = Some([space.layout(anchor, parkan_world::hud::Pin::TOP_LEFT), at]);
+                    }
                 }
             }
             // The game's cursor cannot leave its full screen; a window's can, and away from
@@ -1292,34 +1491,15 @@ impl ApplicationHandler for App {
                     }
                     return;
                 }
-                // Command mode keeps the cursor free, and a press goes to the commander panel
-                // first (`0x1008d690`), then the world.
-                if let Some(play) = self.play.as_mut()
-                    && matches!(play.mode(), parkan_world::play::Mode::Command(_))
+                // Command mode keeps the cursor free. A press goes to the ghost while one is up,
+                // else to the commander panel first (`0x1008d690`), then the world; a band is let
+                // go on the way up; the right button undoes what is open (docs/42).
+                if self
+                    .play
+                    .as_ref()
+                    .is_some_and(|p| matches!(p.mode(), parkan_world::play::Mode::Command(_)))
                 {
-                    if pressed
-                        && button == MouseButton::Left
-                        && let (Some(r), Some(hud)) = (self.running.as_ref(), self.hud.as_mut())
-                    {
-                        use parkan_world::cockpit::commander::Click;
-                        use parkan_world::hud::Pin;
-                        let space = hud_space(r.config.width, r.config.height, &self.args);
-                        let (left, right) = (
-                            space.layout(self.cursor, Pin::TOP_LEFT),
-                            space.layout(self.cursor, Pin::TOP_RIGHT),
-                        );
-                        let now = play.hero.time_ms;
-                        let cockpit = &mut hud.cockpit;
-                        match cockpit.commander.click(play, &mut cockpit.map, left, right, now) {
-                            Click::Factory(t, parkan_world::cockpit::factory::Click::Constructor) => {
-                                if let Err(e) = cockpit.designer.open(play, t, &cockpit.strings) {
-                                    eprintln!("cannot open the designer: {e:#}");
-                                }
-                            }
-                            Click::Factory(t, click) => play.factory_click(t, click),
-                            Click::Taken | Click::World | Click::Pick(_) => {}
-                        }
-                    }
+                    self.command_mouse(button, pressed);
                     return;
                 }
                 if self.play.is_some() && pressed && !self.grabbed {
@@ -1416,6 +1596,8 @@ fn main() -> Result<()> {
         cursor: [0.0; 2],
         cursor_in: false,
         shortcut: false,
+        left_down: None,
+        cursor_hidden: false,
         counts: [0.0; 2],
         mouse: args.mouse,
         trace: args.trace,

@@ -1,0 +1,675 @@
+//! Selecting and ordering with the cursor in command mode: the pick under the cursor and the
+//! cursor it shows, a left click in the world or on the satellite map, the band, the right
+//! button, and the picks an order row leaves open. See `docs/42-selection.md`.
+
+use glam::{Mat4, Vec3};
+use parkan_formats::mission::{KIND_BUILDING, KIND_UNIT};
+use parkan_sim::hq;
+use parkan_sim::orders::{self, Order, Target};
+
+use crate::play::{Mode, Play};
+use crate::selection::{BATTLE_UNITS, BUILDERS, BUNKERS, TRANSPORTS};
+
+/// `CState`'s pick modes (`0x1010c388`, named by the log switch at `0x1005a5cc`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum PickMode {
+    #[default]
+    Free,
+    AttackTarget,
+    Building,
+    Guard,
+    /// Placing a building other than a mine, and a mine.
+    PlaceFb,
+    Route,
+    PlaceFm,
+}
+
+/// What an order row left open on the first selected unit (`+0xa8`–`+0xc0`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Pending {
+    pub unit: usize,
+    pub kind: PendingKind,
+    /// The unit's point list: a route's places.
+    pub points: Vec<Vec3>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum PendingKind {
+    Route,
+    Guard,
+    /// A building of this Type to place.
+    Build(u32),
+}
+
+/// The building a Build row places, following the cursor (docs/32, "Placing a building").
+#[derive(Clone, Debug, PartialEq)]
+pub struct Ghost {
+    pub type_word: u32,
+    /// The scheme's first `.dat`, drawn flat.
+    pub path: String,
+    pub at: Vec3,
+    pub yaw: f32,
+    /// Green when the site is good, red when not.
+    pub valid: bool,
+    /// Whether it has been placed on the world yet.
+    pub placed: bool,
+}
+
+/// `,` and `.` turn the ghost by this much a press (`0x100725b2`, `0x100e50a4`).
+pub const GHOST_TURN: f32 = 0.05;
+/// A mine's site needs a found lode strictly within this across the ground (`0x10072f07`).
+pub const LODE_REACH: f32 = 20.0;
+/// The ghost's colours: good and bad (`0x10058239`).
+pub const GHOST_GOOD: u32 = 0xff00_ff00;
+pub const GHOST_BAD: u32 = 0xffff_0000;
+/// What a ray missing the world says, the first time (docs/32).
+pub const VOICE_POINT_LAND: &str = "VOICE_POINT_LAND";
+
+/// Where the cursor points: a ray from the command camera, a world place on the open
+/// satellite map, or nothing the world takes (the panel, the resource rows).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Aim {
+    Ray { eye: Vec3, direction: Vec3 },
+    Map([f32; 2]),
+    Nothing,
+}
+
+/// The pick under the cursor (`0x1008da40`): its kind, the object and the world place.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Pick {
+    pub kind: u8,
+    pub object: Option<usize>,
+    pub point: Option<Vec3>,
+}
+
+/// A unit's pick on the map reaches this far, a building's this far (`0x10072b70`,
+/// `0x100728e0`); a ray takes a unit within this share of its radius, a building within all
+/// of it (`0x100361a0`).
+pub const MAP_UNIT_REACH: f32 = 40.0;
+pub const MAP_BUILDING_REACH: f32 = 80.0;
+pub const RAY_UNIT_SHARE: f32 = 0.7;
+/// The ray's world place is kept this share of the map's side inside it (`0x10035eee`).
+pub const MAP_MARGIN_SHARE: f32 = 0.001;
+/// A drag becomes a band once the button has been held this long, and a band selects only
+/// when this many window pixels across and down (`0x100714ad`, `0x10071659`).
+pub const BAND_HOLD_S: f64 = 0.35;
+pub const BAND_LEAST_PIXELS: f32 = 10.0;
+/// The band's colour, opaque (`0xff19b419`).
+pub const BAND_COLOUR: u32 = 0xff19_b419;
+/// What a placement cancelled says (`0x1008fe08`).
+pub const STRING_BUILDING_CANCELLED: u32 = 6207;
+
+/// The buildings a unit's capture pick refuses: a main teleport, a bridge, a ruin.
+const UNTAKEABLE: [u32; 3] = [0x8000_0200, 0x8000_1000, 0x8000_2000];
+
+/// The cursor state a pick's kind shows (`0x10058740`, table `0x100587b4`): 1 `ARROW`,
+/// 2 `PICK`, 3 `PLACE`, 4 `TARGET`, 5 `GUARD`, 6 `CAPTURE`, 9 `WRONG_PLACE`.
+pub fn cursor_state(kind: u8) -> u8 {
+    match kind {
+        1 | 12 => 3,
+        2 => 9,
+        3 => 4,
+        4 => 6,
+        5..=7 => 2,
+        8..=10 => 5,
+        _ => 1,
+    }
+}
+
+/// The `ui/cursor.cfg` object a cursor state draws: its sprite strip's offset on `new_ui1` and
+/// its hot spot (docs/42, "The files").
+pub fn cursor_object(state: u8) -> Option<([f32; 2], [f32; 2])> {
+    Some(match state {
+        1 | 7 => ([0.0, 0.0], [0.0, 0.0]),
+        2 => ([0.0, 16.0], [8.0, 8.0]),
+        3 => ([192.0, 16.0], [8.0, 8.0]),
+        4 => ([0.0, 32.0], [8.0, 8.0]),
+        5 => ([128.0, 0.0], [8.0, 8.0]),
+        6 => ([64.0, 0.0], [8.0, 8.0]),
+        9 => ([64.0, 32.0], [8.0, 8.0]),
+        10 => ([128.0, 32.0], [8.0, 8.0]),
+        _ => return None,
+    })
+}
+
+/// A cursor sprite's side and its four phases' step, ms.
+pub const CURSOR_SIDE: f32 = 16.0;
+pub const CURSOR_PHASE_MS: f64 = 150.0;
+
+/// The world ray under a point of the window through `view_proj`, as `0x10035e40` casts it.
+pub fn ray(view_proj: Mat4, eye: Vec3, cursor: [f32; 2], size: [f32; 2]) -> Aim {
+    let ndc = [2.0 * cursor[0] / size[0].max(1.0) - 1.0, 1.0 - 2.0 * cursor[1] / size[1].max(1.0)];
+    let far = view_proj.inverse().project_point3(Vec3::new(ndc[0], ndc[1], 0.5));
+    let direction = (far - eye).normalize_or_zero();
+    if direction == Vec3::ZERO { Aim::Nothing } else { Aim::Ray { eye, direction } }
+}
+
+/// The map's side, which the satellite map's texels scale to.
+fn side(play: &Play) -> f32 {
+    play.ground.world_box().1.truncate().max_element()
+}
+
+impl Play {
+    /// The kind the selection is (`0x1010c384`): 0 none, 1 units, 2 a building.
+    pub fn selection_kind(&self) -> u8 {
+        if !self.selected_units().is_empty() {
+            1
+        } else if !self.selected.is_empty() {
+            2
+        } else {
+            0
+        }
+    }
+
+    /// Whether a selection may be sent to `point` (`0x10076770`).
+    ///
+    /// STAND-IN: docs/42-selection.md#a-valid-place--read-and-measured -- the engine keeps no
+    /// areals, so an areal's first flag word is not tested: a place is valid where there is
+    /// ground above any water, and always for a selection of flyers.
+    pub fn valid_place(&self, point: Vec3) -> bool {
+        if self.selected_units().iter().all(|&t| self.units[t].designation.chassis_type == 1) {
+            return true;
+        }
+        let Some(ground) = self.ground.below(point.x, point.y, point.z + 1.0) else { return false };
+        self.ground.water(point.x, point.y, ground.point.z).is_none_or(|w| w <= ground.point.z)
+    }
+
+    /// The pick for `aim` (`0x1008da40`).
+    pub fn pick(&self, aim: Aim) -> Pick {
+        let mode = self.commander.pick_mode;
+        if matches!(mode, PickMode::PlaceFb | PickMode::PlaceFm) {
+            return Pick { kind: 13, ..Pick::default() };
+        }
+        let (point, object) = match aim {
+            Aim::Nothing => return Pick::default(),
+            Aim::Map(xy) => self.map_pick(xy),
+            Aim::Ray { eye, direction } => self.ray_pick(eye, direction),
+        };
+        let mut pick = Pick { kind: 0, object, point };
+        // A building building itself is dropped, and the hero never takes orders.
+        if object.is_some_and(|t| self.units[t].kind == KIND_BUILDING && self.building_itself(t)) {
+            pick.object = None;
+            pick.kind = 2;
+            return pick;
+        }
+        let selected = self.selected_units();
+        if selected.first().is_some_and(|&t| self.units[t].logical_id == self.hero_id) {
+            pick.kind = 2;
+            return pick;
+        }
+        let valid = point.is_some_and(|p| self.valid_place(p));
+        if mode == PickMode::Route {
+            pick.kind = if valid { 12 } else { 2 };
+            return pick;
+        }
+        let own = |t: usize| self.units[t].clan == Some(self.player_clan);
+        let is_building = |t: usize| self.units[t].kind == KIND_BUILDING;
+        pick.kind = match self.selection_kind() {
+            0 => match object {
+                Some(t) if own(t) => 7,
+                _ => 0,
+            },
+            2 => match object {
+                Some(t) if own(t) && !is_building(t) => 7,
+                Some(t) if self.selected.first() == Some(&t) => 17,
+                Some(t) if own(t) => 7,
+                _ => 0,
+            },
+            _ => match mode {
+                PickMode::AttackTarget => {
+                    if object.is_some() {
+                        16
+                    } else {
+                        0
+                    }
+                }
+                PickMode::Building => match object {
+                    Some(t)
+                        if is_building(t) && !own(t) && !UNTAKEABLE.contains(&self.units[t].type_word) =>
+                    {
+                        4
+                    }
+                    _ => 0,
+                },
+                PickMode::Guard => match object {
+                    Some(_) => 9,
+                    None if valid => 8,
+                    None => 0,
+                },
+                _ => match object {
+                    Some(t) if own(t) && !is_building(t) && selected == [t] => 17,
+                    Some(t) if own(t) && !is_building(t) => 7,
+                    Some(t) if !is_building(t) => 3,
+                    Some(t) if own(t) => 10,
+                    Some(_) if selected.iter().all(|&u| matches!(self.record_class(u), 1 | 2)) => 4,
+                    Some(_) => 3,
+                    None if valid => 1,
+                    None => 0,
+                },
+            },
+        };
+        pick
+    }
+
+    /// On the open satellite map: the place, and the first live unit within 40 of it in the
+    /// level's order, or else the first building within 80 (`0x10072b70`, `0x100728e0`).
+    ///
+    /// STAND-IN: docs/25-sensors.md#not-established -- the clans the player clan record's
+    /// `+0x54` lists are not read: only the player's own units and buildings are picked.
+    fn map_pick(&self, [x, y]: [f32; 2]) -> (Option<Vec3>, Option<usize>) {
+        let z = self.ground.below(x, y, 1.0e5).map_or(0.0, |h| h.point.z);
+        let point = Vec3::new(x, y, z);
+        let near = |kind: u32, reach: f32| {
+            (0..self.units.len()).find(|&t| {
+                self.units[t].kind == kind
+                    && self.units[t].clan == Some(self.player_clan)
+                    && self.units[t].logical_id != self.hero_id
+                    && self.battle.combat.targets.get(t).is_some_and(|x| x.alive)
+                    && self.battle.combat.targets[t].position.truncate().distance(point.truncate()) <= reach
+            })
+        };
+        (Some(point), near(KIND_UNIT, MAP_UNIT_REACH).or_else(|| near(KIND_BUILDING, MAP_BUILDING_REACH)))
+    }
+
+    /// In the world: where the ray first meets the ground or an object, kept inside the map,
+    /// and the object whose bounding sphere the ray passes (`0x10035e40`, `0x100360f0`).
+    ///
+    /// STAND-IN: docs/42-selection.md#not-established -- which objects the world's classes 3
+    /// and 4 are, and the pick's order and nearest-hit rule, are not read: a unit is taken
+    /// within 0.7 of its radius and a building within all of it, a sphere holding the eye is
+    /// passed over, and of the rest the one whose centre is nearest along the ray wins.
+    fn ray_pick(&self, eye: Vec3, direction: Vec3) -> (Option<Vec3>, Option<usize>) {
+        let (lo, hi) = self.ground.world_box();
+        let length = (hi - lo).length() + 200.0;
+        let end = eye + direction * length;
+        let side = side(self);
+        let margin = side * MAP_MARGIN_SHARE;
+        let point =
+            self.battle.combat.first_hit(&self.ground, None, eye, end, 0.0).map(|(s, _, _)| s.point).filter(
+                |p| p.x > lo.x + margin && p.y > lo.y + margin && p.x < hi.x - margin && p.y < hi.y - margin,
+            );
+        let mut best: Option<(f32, usize)> = None;
+        for (t, target) in self.battle.combat.targets.iter().enumerate() {
+            let kind = self.units.get(t).map_or(u32::MAX, |u| u.kind);
+            if !target.alive
+                || !(kind == KIND_UNIT || kind == KIND_BUILDING)
+                || self.units[t].logical_id == self.hero_id
+                || self.deleted.get(t).copied().unwrap_or(false)
+            {
+                continue;
+            }
+            let reach = if kind == KIND_BUILDING { target.radius } else { target.radius * RAY_UNIT_SHARE };
+            let along = (target.centre - eye).dot(direction);
+            if along <= 0.0
+                || target.centre.distance(eye) <= reach
+                || (target.centre - (eye + direction * along)).length() > reach
+            {
+                continue;
+            }
+            if best.is_none_or(|(d, _)| along < d) {
+                best = Some((along, t));
+            }
+        }
+        (point, best.map(|(_, t)| t))
+    }
+
+    /// A left click in the world or on the map (`0x1008fe80`, table `0x10090758`). Returns
+    /// the page the panel turns to: a selected unit's only while a page is open, a clicked
+    /// selection's own always.
+    pub fn click_world(&mut self, pick: Pick) -> Option<(u8, bool)> {
+        let place = pick.point.map(|p| Target::Place([p.x.round(), p.y.round(), p.z]));
+        let target_id = pick.object.map(|t| self.units[t].logical_id);
+        match pick.kind {
+            1 => self.dispatch(Order { code: hq::GO, parameter: 0, target: place? }),
+            3 => self.dispatch(Order {
+                code: orders::ATTACK,
+                parameter: 0,
+                target: Target::LogicId(target_id?),
+            }),
+            4 if self.commander.pick_mode == PickMode::Building => self.commander.pick_mode = PickMode::Free,
+            4 => self.dispatch(Order {
+                code: orders::SEARCH,
+                parameter: orders::CAPTURE_TYPES as i32,
+                target: Target::LogicId(target_id?),
+            }),
+            7 => {
+                let t = pick.object?;
+                if self.units[t].kind == KIND_BUILDING {
+                    self.select_building(t);
+                } else {
+                    self.select_unit_alone(t);
+                    self.commander.pick_mode = PickMode::Free;
+                    return Some((unit_page(self.units[t].type_word), false));
+                }
+            }
+            8..=10 if self.commander.pick_mode == PickMode::Guard => {
+                self.commander.pick_mode = PickMode::Free;
+                let order = match pick.object {
+                    Some(_) => {
+                        Order { code: orders::PATROL, parameter: 0, target: Target::LogicId(target_id?) }
+                    }
+                    None => Order { code: orders::PATROL, parameter: 0, target: place? },
+                };
+                self.give_pending(order);
+            }
+            9 | 10 => self.dispatch(Order {
+                code: orders::PATROL,
+                parameter: 0,
+                target: Target::LogicId(target_id?),
+            }),
+            12 => {
+                let p = pick.point?;
+                if let Some(pending) = self.commander.pending.as_mut() {
+                    pending.points.push(p);
+                }
+            }
+            16 => self.commander.pick_mode = PickMode::Free,
+            17 => {
+                let t = pick.object?;
+                let page = if self.units[t].kind == KIND_BUILDING {
+                    building_page(self.units[t].type_word)
+                } else {
+                    unit_page(self.units[t].type_word)
+                };
+                return Some((page, true));
+            }
+            _ => {}
+        }
+        None
+    }
+
+    /// Give `order` to every selected unit, replacing its queue, and the last acknowledges
+    /// (`0x10079230`, `0x1008e840`).
+    pub fn dispatch(&mut self, order: Order) {
+        let selected = self.selected_units();
+        let mut class = None;
+        for t in &selected {
+            if let Some((_, robot)) = self.robots.iter_mut().find(|(rt, _)| rt == t) {
+                robot.order = Some(order);
+                robot.behaviour.order(&order);
+                class = Some(robot.size_class);
+            }
+        }
+        if let Some(class) = class {
+            self.acknowledge(class);
+        }
+    }
+
+    /// The pending pick's own unit takes `order`, replacing its queue, and acknowledges.
+    fn give_pending(&mut self, order: Order) {
+        let Some(pending) = self.commander.pending.take() else { return };
+        if let Some((_, robot)) = self.robots.iter_mut().find(|(t, _)| *t == pending.unit) {
+            robot.order = Some(order);
+            robot.behaviour.order(&order);
+            let class = robot.size_class;
+            self.acknowledge(class);
+        }
+    }
+
+    /// An order row with a target opens its pick on the first selected unit (`0x1007b740`,
+    /// `0x10079700`). Returns whether the satellite map is to be shown, as a route's is.
+    pub fn open_pick(&mut self, act: hq::Act) -> bool {
+        let Some(&unit) = self.selected_units().first() else { return false };
+        let position = self.battle.combat.targets.get(unit).map_or(Vec3::ZERO, |t| t.position);
+        match act {
+            hq::Act::Route => {
+                self.commander.pick_mode = PickMode::Route;
+                self.commander.pending =
+                    Some(Pending { unit, kind: PendingKind::Route, points: vec![position] });
+                true
+            }
+            hq::Act::Guard => {
+                self.commander.pick_mode = PickMode::Guard;
+                self.commander.pending = Some(Pending { unit, kind: PendingKind::Guard, points: Vec::new() });
+                false
+            }
+            hq::Act::Build(type_word) => {
+                // Pick mode 6 for a mine, 4 for any other building (`0x10079e57`).
+                self.commander.pick_mode =
+                    if type_word == hq::BUILD_TYPES[0] { PickMode::PlaceFm } else { PickMode::PlaceFb };
+                self.commander.pending =
+                    Some(Pending { unit, kind: PendingKind::Build(type_word), points: Vec::new() });
+                false
+            }
+            _ => false,
+        }
+    }
+
+    /// The right button (`0x1008fb00`): the most specific thing open is undone. Returns what
+    /// the panel and the map are to do.
+    pub fn right_click(&mut self, page: u8, map_open: bool) -> RightClick {
+        match self.commander.pick_mode {
+            PickMode::Route => {
+                // The route is finished and given: a GO a point, the first replacing.
+                self.commander.pick_mode = PickMode::Free;
+                if let Some(pending) = self.commander.pending.take()
+                    && let Some((_, robot)) = self.robots.iter_mut().find(|(t, _)| *t == pending.unit)
+                {
+                    for (i, p) in pending.points.iter().enumerate() {
+                        let order = Order { code: hq::GO, parameter: 0, target: Target::Place(p.to_array()) };
+                        let insert = if i == 0 { orders::INSERT_REPLACE } else { orders::INSERT_TO_END };
+                        robot.behaviour.insert_order(&order, insert);
+                        if i == 0 {
+                            robot.order = Some(order);
+                        }
+                    }
+                    let class = robot.size_class;
+                    self.acknowledge(class);
+                }
+                return RightClick::default();
+            }
+            PickMode::PlaceFb | PickMode::PlaceFm => {
+                self.cancel_placement();
+                return RightClick::default();
+            }
+            _ => {}
+        }
+        if let Mode::Command(_) = self.mode()
+            && !self.selected_units().is_empty()
+        {
+            self.commander.units.clear();
+            return RightClick { page_zero: (1..=3).contains(&page), close_map: false };
+        }
+        if !self.selected.is_empty() {
+            self.selected.clear();
+            return RightClick { page_zero: (4..=8).contains(&page), close_map: false };
+        }
+        if page != 0 {
+            return RightClick { page_zero: true, close_map: false };
+        }
+        RightClick { page_zero: false, close_map: map_open }
+    }
+
+    /// The ghost this frame, the cursor's ray being `aim`: it stands where the ray meets the
+    /// world strictly inside the map, and a miss leaves it where it was.
+    pub fn update_ghost(&mut self, aim: Aim) {
+        let Some(Pending { kind: PendingKind::Build(type_word), unit, .. }) = self.commander.pending.clone()
+        else {
+            self.commander.ghost = None;
+            return;
+        };
+        if self.commander.ghost.as_ref().is_none_or(|g| g.type_word != type_word) {
+            let Some(path) = self.first_building(type_word) else { return };
+            self.commander.ghost =
+                Some(Ghost { type_word, path, at: Vec3::ZERO, yaw: 0.0, valid: false, placed: false });
+        }
+        let hit = match aim {
+            Aim::Ray { eye, direction } => {
+                let (lo, hi) = self.ground.world_box();
+                let end = eye + direction * ((hi - lo).length() + 200.0);
+                self.battle
+                    .combat
+                    .first_hit(&self.ground, None, eye, end, 0.0)
+                    .map(|(s, _, _)| s.point)
+                    .filter(|p| p.x > lo.x && p.y > lo.y && p.x < hi.x && p.y < hi.y)
+            }
+            _ => None,
+        };
+        let Some(at) = hit else {
+            let first_miss = self.commander.ghost.as_ref().is_some_and(|g| !g.placed);
+            if first_miss && !self.commander.missed {
+                self.commander.missed = true;
+                if let Some(v) = self.progression.as_ref().and_then(|p| p.sound(VOICE_POINT_LAND)) {
+                    self.says.push(crate::progress::Say::Voice(v));
+                }
+            }
+            return;
+        };
+        let valid = self.site_good(Some(unit), type_word, at);
+        if let Some(g) = self.commander.ghost.as_mut() {
+            g.at = at;
+            g.placed = true;
+            g.valid = valid;
+        }
+    }
+
+    /// Whether a building of `type_word` may stand at `at` (`IsPlacementValid` and, for a
+    /// mine, a found lode within 20 across the ground).
+    ///
+    /// STAND-IN: docs/32-builder.md#placing-a-building--read-measured-and-seen -- `IsPlacementValid`'s tests
+    /// (the path, the site's sphere, the other buildings, the areals, the basement's slope) are
+    /// not modelled here: a site is good where a selection may be sent.
+    pub fn site_good(&self, _builder: Option<usize>, type_word: u32, at: Vec3) -> bool {
+        let lode = type_word != hq::BUILD_TYPES[0]
+            || self
+                .commander
+                .lodes
+                .iter()
+                .any(|l| l.found && l.position.truncate().distance(at.truncate()) < LODE_REACH);
+        lode && self.valid_place(at)
+    }
+
+    /// `CMD_JAMES_BASE_ROTLEFT` / `_ROTRIGHT` in a place mode (`0x100725b2`).
+    pub fn turn_ghost(&mut self, left: bool) -> bool {
+        if !matches!(self.commander.pick_mode, PickMode::PlaceFb | PickMode::PlaceFm) {
+            return false;
+        }
+        if let Some(g) = self.commander.ghost.as_mut() {
+            g.yaw += if left { GHOST_TURN } else { -GHOST_TURN };
+        }
+        true
+    }
+
+    /// A left click with the ghost up (`0x1008ff2d`): on a good site the builder is ordered to
+    /// build there, and the pick closes; a bad site does nothing.
+    pub fn commit_placement(&mut self) -> bool {
+        let Some(g) = self.commander.ghost.clone().filter(|g| g.placed && g.valid) else { return false };
+        let Some(pending) = self.commander.pending.take() else { return false };
+        self.commander.pick_mode = PickMode::Free;
+        self.commander.ghost = None;
+        self.commander.missed = false;
+        self.order_build(pending.unit, g.type_word, g.at, g.yaw)
+    }
+
+    /// A placement put away (`0x1008fe08`): string 6207 as a System line.
+    pub fn cancel_placement(&mut self) {
+        self.commander.pick_mode = PickMode::Free;
+        self.commander.pending = None;
+        self.commander.ghost = None;
+        self.commander.missed = false;
+        let text = self.progression.as_ref().and_then(|p| p.strings.get(&STRING_BUILDING_CANCELLED).cloned());
+        if let Some(text) = text {
+            self.says.push(crate::progress::Say::Text(crate::progress::Sender::System, text));
+        }
+    }
+
+    /// A band released (`0x10076820`): the selections cleared, then the player's live units
+    /// other than heroes inside it taken — by where each lands on the layout through
+    /// `view_proj` over `size` window pixels, or on the open map by world place — with one
+    /// `VOICE_SELECTED`.
+    pub fn band_select(&mut self, corners: [[f32; 2]; 2], space: BandSpace) {
+        let [x0, x1] = [corners[0][0].min(corners[1][0]), corners[0][0].max(corners[1][0])];
+        let [y0, y1] = [corners[0][1].min(corners[1][1]), corners[0][1].max(corners[1][1])];
+        self.clear_selection();
+        let inside = |[x, y]: [f32; 2]| x >= x0 && x <= x1 && y >= y0 && y <= y1;
+        let taken: Vec<usize> = self
+            .own_units_within(u32::MAX)
+            .into_iter()
+            .filter(|&t| {
+                let at = self.battle.combat.targets[t].position;
+                match space {
+                    BandSpace::World(view_proj, [w, h]) => crate::play::on_screen(view_proj, at, 0.0)
+                        .is_some_and(|[nx, ny]| inside([(nx + 1.0) * 0.5 * w, (1.0 - ny) * 0.5 * h])),
+                    BandSpace::Map => inside([at.x, at.y]),
+                }
+            })
+            .collect();
+        if !taken.is_empty() {
+            self.commander.units = taken;
+            self.ui_voice_selected();
+        }
+    }
+}
+
+/// Where a band's corners are: window pixels for the world through a camera, or world x and y
+/// on the map.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum BandSpace {
+    World(Mat4, [f32; 2]),
+    Map,
+}
+
+/// What the panel does after a right click.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct RightClick {
+    pub page_zero: bool,
+    pub close_map: bool,
+}
+
+/// The unit page a unit's Type opens: builders 3, transports 2, warriors and HQs 1.
+pub fn unit_page(type_word: u32) -> u8 {
+    if hq::within(type_word, BUILDERS) {
+        3
+    } else if hq::within(type_word, TRANSPORTS) {
+        2
+    } else if hq::within(type_word, BATTLE_UNITS) {
+        1
+    } else {
+        0
+    }
+}
+
+/// The building page a building's Type opens: bunkers 7, towers 6, the plant 5, the institute
+/// 4, any other 8.
+pub fn building_page(type_word: u32) -> u8 {
+    match type_word {
+        t if hq::within(t, BUNKERS) => 7,
+        0x8010_0000 | 0x8020_0000 => 6,
+        0x8000_0010 => 5,
+        0x8000_0400 => 4,
+        _ => 8,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn kinds_show_their_cursors() {
+        assert_eq!([0, 1, 2, 3, 4, 7, 9, 12, 13, 17].map(cursor_state), [1, 3, 9, 4, 6, 2, 5, 3, 1, 1]);
+        assert_eq!(cursor_object(3), Some(([192.0, 16.0], [8.0, 8.0])));
+        assert_eq!(cursor_object(8), None);
+    }
+
+    #[test]
+    fn a_unit_opens_its_kinds_page_and_a_building_its_own() {
+        assert_eq!([0x0100_4000, 0x0100_2000, 0x0100_8000, 0x0101_0000].map(unit_page), [3, 2, 1, 1]);
+        assert_eq!(
+            [0x8001_0000, 0x8020_0000, 0x8000_0010, 0x8000_0400, 0x8000_0004].map(building_page),
+            [7, 6, 5, 4, 8]
+        );
+    }
+
+    #[test]
+    fn a_ray_through_the_middle_of_the_window_runs_along_the_look() {
+        let eye = Vec3::new(10.0, 20.0, 30.0);
+        let look = Vec3::new(0.0, 1.0, -0.5).normalize();
+        let view_proj =
+            Mat4::perspective_infinite_reverse_rh(1.0, 1.5, 3.0) * Mat4::look_to_rh(eye, look, Vec3::Z);
+        let Aim::Ray { direction, .. } = ray(view_proj, eye, [300.0, 200.0], [600.0, 400.0]) else {
+            panic!()
+        };
+        assert!((direction - look).length() < 1e-4, "{direction}");
+    }
+}

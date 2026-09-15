@@ -442,7 +442,7 @@ fn previews(
                     ..Default::default()
                 },
                 instances: vec![i],
-                paints: None,
+                paints: p.paint.map(|c| vec![c]),
                 previews: true,
             }
         })

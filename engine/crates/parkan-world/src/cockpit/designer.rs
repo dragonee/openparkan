@@ -290,6 +290,8 @@ pub struct Preview {
     pub view_proj: Mat4,
     pub model: Mat4,
     pub lights: [Vec3; 2],
+    /// Drawn flat in this colour, with no lights: the placement ghost (docs/32).
+    pub paint: Option<[f32; 3]>,
 }
 
 /// The designer open for one factory.
@@ -1149,6 +1151,7 @@ fn draw_session(
             view_proj,
             model,
             lights,
+            paint: None,
         });
     }
     for (side, rect, sphere) in [
@@ -1172,6 +1175,7 @@ fn draw_session(
             view_proj,
             model,
             lights,
+            paint: None,
         });
     }
 

@@ -12,6 +12,7 @@ pub mod fx;
 pub mod hero;
 pub mod hud;
 pub mod models;
+pub mod pick;
 pub mod play;
 pub mod progress;
 pub mod resources;

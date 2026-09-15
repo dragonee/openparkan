@@ -2390,3 +2390,65 @@ fn a_small_bunker_taken_by_the_player_turns_its_flamers_on_an_enemy_at_its_door_
     assert!(fired > 0, "the player's bunker fires at the enemy");
     assert_eq!(play.emplacements[0].1.fire_target, Some(play.robots[flyer].0));
 }
+
+#[test]
+#[ignore = "needs the game install"]
+fn in_command_mode_a_click_selects_the_builder_sends_it_and_build_mine_places_a_ghost_green_at_the_lode() {
+    use parkan_world::pick::{Aim, PickMode, cursor_state};
+
+    let (mut play, m) = mission_03_play();
+    let bunker = object_target(&play, &m, "sbunk01.dat");
+    let builder = object_target(&play, &m, "tut3_b.dat");
+    play.units[bunker].clan = Some(play.player_clan);
+    play.enter_command(bunker);
+    play.command_frame(0.0, parkan_world::command::Edges::default());
+    let eye = play.eye().position;
+    let at = |p: glam::Vec3| Aim::Ray { eye, direction: (p - eye).normalize() };
+    // Nothing selected: the builder is the player's own, kind 7, the PICK cursor.
+    let centre = play.battle.combat.targets[builder].centre;
+    let pick = play.pick(at(centre));
+    assert_eq!((pick.kind, pick.object), (7, Some(builder)));
+    assert_eq!(cursor_state(pick.kind), 2);
+    assert_eq!(play.click_world(pick), Some((3, false)));
+    assert_eq!(play.selected_units(), vec![builder]);
+    // Ground ahead of it, with the builder selected: a Go, the PLACE cursor.
+    let ground = play.battle.combat.targets[builder].position + glam::Vec3::new(30.0, 0.0, 0.0);
+    let pick = play.pick(at(ground));
+    assert_eq!(pick.kind, 1, "{pick:?}");
+    assert_eq!(cursor_state(pick.kind), 3);
+    play.click_world(pick);
+    let robot = &play.robots.iter().find(|(t, _)| *t == builder).unwrap().1;
+    assert_eq!(robot.order.map(|o| o.code), Some(parkan_sim::hq::GO));
+    // Build Mine: pick mode 6, the ghost red away from the lode and green on it.
+    assert!(!play.open_pick(parkan_sim::hq::Act::Build(0x8000_0004)));
+    assert_eq!(play.commander.pick_mode, PickMode::PlaceFm);
+    let lode = play.commander.lodes[0].position;
+    let lode_ground = play.ground.below(lode.x, lode.y, 1.0e5).unwrap().point;
+    play.update_ghost(at(lode_ground + glam::Vec3::new(60.0, 0.0, 0.0)));
+    assert!(!play.commander.ghost.as_ref().unwrap().valid, "no lode within 20");
+    play.update_ghost(at(lode_ground));
+    let ghost = play.commander.ghost.clone().unwrap();
+    assert!(ghost.valid && ghost.path.to_ascii_lowercase().ends_with("smine01.dat"), "{ghost:?}");
+    assert!(play.turn_ghost(true));
+    assert!((play.commander.ghost.as_ref().unwrap().yaw - 0.05).abs() < 1e-6);
+    assert!(play.commit_placement());
+    assert_eq!(play.commander.pick_mode, PickMode::Free);
+    let robot = &play.robots.iter().find(|(t, _)| *t == builder).unwrap().1;
+    assert_eq!(robot.order.map(|o| (o.code, o.parameter as u32)), Some((parkan_sim::hq::BUILD, 0x8000_0004)));
+    // A second placement put away with the right button says so.
+    play.open_pick(parkan_sim::hq::Act::Build(0x8000_0004));
+    play.says.clear();
+    play.right_click(3, false);
+    assert!(play.commander.ghost.is_none() && play.commander.pick_mode == PickMode::Free);
+    assert!(play.says.iter().any(
+        |s| matches!(s, parkan_world::progress::Say::Text(_, t) if t == "Building was cancelled by user")
+    ));
+    // A band over the map about the builder takes it again, alone of the clan's units there.
+    play.clear_selection();
+    let b = play.battle.combat.targets[builder].position;
+    play.band_select(
+        [[b.x - 10.0, b.y - 10.0], [b.x + 10.0, b.y + 10.0]],
+        parkan_world::pick::BandSpace::Map,
+    );
+    assert_eq!(play.selected_units(), vec![builder]);
+}

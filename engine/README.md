@@ -312,8 +312,21 @@ the own panel's unit while aboard.
   stands under its title bar and marks the camera in yellow; the message box moves to
   the bottom right.
 
-Not yet: picking in the world and on the map (Route, Guard, the Build rows' placement),
-telepresence, Explode!, tooltips, and the chat and game menu buttons.
+- The cursor picks as docs/42 reads it, in the world through the command camera and on the
+  open satellite map: a click selects one of the player's units or buildings (turning an
+  open page to its kind), sends the selection to open ground (a Go), attacks another clan's
+  unit, captures or guards a building, and a click on the one selected unit opens its page. A
+  drag held 0.35 s draws a band that selects the player's units inside it. The software
+  cursor shows the pick: `PICK`, `PLACE`, `TARGET`, `GUARD`, `CAPTURE`, `WRONG_PLACE`. Route
+  collects places on the map until the right button gives them as a chain of Go orders; Guard
+  takes the next click. The right button undoes the most specific thing open.
+- A Build row raises the building's full-size ghost under the cursor, drawn flat, green on a
+  good site and red on a bad one (a mine needs a found lode within 20), turned 0.05 rad a
+  press by `,` and `.`; a click on a good site orders the builder, and the right button or
+  Esc puts it away with *"Building was cancelled by user"*.
+
+Not yet: the builder's building, the economy, telepresence, Explode!, tooltips, the markers
+over selected units, and the chat and game menu buttons. The ghost draws over the HUD.
 
 This directory also holds what the rest will follow:
 
@@ -480,6 +493,11 @@ a row here. A row leaves this table when research closes it.
 | M12 | The chat overlay and the game menu's screen (mode 7) | not built: their buttons are taken and do nothing | [41](../docs/41-commander.md#what-a-click-on-the-column-does) |
 | M12 | The routine that names a building | strings 6031–6098 by Type, by the size letter of its root record (`fr_l_` small, `fr_m_` medium, `fr_b_` large) and a bunker's by its Type | [35](../docs/35-hud.md#name-and-status--read-and-seen) |
 | M12 | The commander's satellite map's title bar and exit icon, beyond their place | a page header's pieces 20 tall at (374, 43), the title 5074 centred | [35](../docs/35-hud.md#not-established-4) |
+| M12 | An areal's first flag word, which decides where a walker may be sent | the engine keeps no areals: a place is valid where there is ground above any water, and always for flyers | [42](../docs/42-selection.md#a-valid-place--read-and-measured) |
+| M12 | Which objects the world's classes 3 and 4 are, and the object pick's order and nearest-hit rule | a unit within 0.7 of its radius and a building within all of it, a sphere holding the eye passed over; the nearest centre along the ray wins | [42](../docs/42-selection.md#not-established) |
+| M12 | Whether the display's slot 12 answers, so the system's cursor is used | the software cursor's four phases from `new_ui1` are drawn and the system's hidden | [42](../docs/42-selection.md#the-cursor-shows-a-state--read-and-measured) |
+| M12 | `IsPlacementValid`'s path, sphere, overlap, areal and slope tests | not modelled: a site is good where a selection may be sent, with a found lode within 20 for a mine | [32](../docs/32-builder.md#placing-a-building--read-measured-and-seen) |
+| M12 | The build task (order 7) | not modelled: the order is given and the builder, with no task for it, stops | [32](../docs/32-builder.md#building-a-building-tick-by-tick--read-and-seen) |
 | M6 | What a node naming a variable, operand, formula or handler that does not exist reads | the node does nothing; a switch to no handler ends the run; a run stops after a million nodes | [15](../docs/15-behaviour.md#how-a-handler-runs) |
 | M12 | Function 15's answer: whether the unit takes the order (1) or refuses it (0) | an id some unit or building answers gives 1, and the unit is handed the order after the handler's run | [34](../docs/34-progression.md#what-the-scripts-ask--read-and-measured-1) |
 | M12 | A building's contour (property `0x203`), whose vertices a patrol of the building walks | eight points on the building's sphere, pushed out by 30 | [31](../docs/31-packages.md#the-patrol-tick-by-tick--read) |

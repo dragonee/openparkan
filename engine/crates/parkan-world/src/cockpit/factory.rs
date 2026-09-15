@@ -280,6 +280,7 @@ pub fn panel(
                         glam::Vec3::new(-1.0, 0.0, -1.0).normalize(),
                         glam::Vec3::new(1.0, 0.0, -1.0).normalize(),
                     ],
+                    paint: None,
                 });
             }
         }
