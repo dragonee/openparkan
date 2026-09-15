@@ -614,14 +614,6 @@ doc = "docs/15-behaviour.md"
 
 [[entry]]
 module = "ai.dll"
-at = "0x10009c30"
-kind = "function"
-name = "script function 34: count the clan's units of a type"
-read = true
-doc = "docs/15-behaviour.md"
-
-[[entry]]
-module = "ai.dll"
 at = "0x1000c847"
 kind = "function"
 name = "script function 35: an enemy object with no PBM_BUILDING_CAPTURE raised, generators first; distance out"
@@ -2360,14 +2352,6 @@ module = "iron3d.dll"
 at = "0x100391a5"
 kind = "site"
 name = "the callback pushed into CreateSuperAI"
-read = true
-doc = "docs/21-briefing.md"
-
-[[entry]]
-module = "iron3d.dll"
-at = "0x10058015"
-kind = "site"
-name = "plays message 22 when the game mode flag +0xe6 is set"
 read = true
 doc = "docs/21-briefing.md"
 
@@ -5796,14 +5780,6 @@ at = "0x10001780"
 kind = "function"
 name = "SuperAI takt (slot 3): the distributor step, then message 1 to the clan areal map (+0x3d8)"
 doc = "docs/31-packages.md"
-read = true
-
-[[entry]]
-module = "ai.dll"
-at = "0x10008054"
-kind = "site"
-name = "script fn15 handler entry (slot 15 of the handler table): AddOrder on the unit, result +0x50 = 1 if accepted, else 0"
-doc = "docs/23-economy.md"
 read = true
 
 [[entry]]
@@ -26980,3 +26956,155 @@ kind = "datum"
 name = "the selection's kind: 0 none, 1 units, 2 a building"
 read = true
 doc = "docs/42-selection.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x10009c30"
+kind = "function"
+name = "script function 34: the running SuperAI's list (+0x8c) entries of exactly that type with a logical id; buildings included"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10058015"
+kind = "site"
+name = "plays message 22 when the game mode flag +0xe6 is set, at the end of the building model cursor's start (0x10057f00)"
+read = true
+doc = "docs/21-briefing.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x10008054"
+kind = "site"
+name = "script fn15 handler entry (slot 15 of the handler table): AddOrder on the unit, result +0x50 = 1 if accepted, 0 refused, 5 no unit"
+doc = "docs/23-economy.md"
+read = true
+
+[[entry]]
+module = "ai.dll"
+at = "0x1000835e"
+kind = "site"
+name = "fn15: the unit by logical id through the clan areal map's slot 7, any clan's"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x10008376"
+kind = "site"
+name = "fn15: no object answers the id -- result 5"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x100083ea"
+kind = "site"
+name = "fn15: TARGET_BY_PLACE -- the two words as floats at packet +0x10, +0x14"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x100086d4"
+kind = "site"
+name = "fn15: the unit's slot 3 with the packet and the insert mode; 1 taken, 0 refused"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x10009cbb"
+kind = "site"
+name = "fn34: the entry's type (+8) equal to the argument"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x10001880"
+kind = "function"
+name = "SuperAI slot 4: an object joins the list +0x8c unless listed; event 1 a unit, event 2 a building counted by type"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x10001974"
+kind = "site"
+name = "SuperAI slot 4 event 2: a mine (0x80000004) counted at +0x3e0"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10032ffa"
+kind = "site"
+name = "capture: SuperAI slot 4 event 2 on the new clan's SuperAI with the building"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10057f00"
+kind = "function"
+name = "building model cursor start: the model object created, then message 22 while the game's +0xe6 is set"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10079eda"
+kind = "site"
+name = "command execution: starts the building model cursor (0x10057f00)"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1004dd70"
+kind = "function"
+name = "prebuild: mission.cfg's prebuild model keys, from units/units/prebld, into the designer's recent projects (+0xb674, five)"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10055a29"
+kind = "site"
+name = "designer holder: loads the prebuilt designs when the parameter block's +0x154 is 1"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10104030"
+kind = "datum"
+name = "string: prebuild"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1010401c"
+kind = "datum"
+name = "string: the prebuilt designs' folder, units/units/prebld"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x10009cd2"
+kind = "site"
+name = "fn34: the entry's logical id (+4) not -1"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x10008049"
+kind = "site"
+name = "script function 0: result 1"
+read = true
+doc = "docs/34-progression.md"

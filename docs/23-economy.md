@@ -498,7 +498,8 @@ CPUs" in the game's own interface (`iron3d.dll` string 3067).
 - **What `fn15` answers** — *read*. Its handler (`ai.dll:0x10008054`, the
   table's fifteenth slot) gives the order through the unit's `AddOrder` and
   leaves 1 in the interpreter's result (`+0x50`) when `AddOrder` returns
-  non-zero, 0 when it returns 0 or the unit is not found.
+  non-zero, 0 when it returns 0, and 5 when no object answers the id
+  (`0x10008376`).
 - *Derived*, if `op5` is equality and that result is what `dT3` receives: a
   factory with an empty queue and no free mind refuses at once, the problem
   stays unsolved, and the handler orders again the next time the clan plans

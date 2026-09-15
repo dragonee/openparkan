@@ -15369,6 +15369,258 @@ def check_mission_02(check, game: Path) -> None:
           f"0x100638a7 behind the flyer test on property 0x207")
 
 
+#: Mission 03, the third training mission, whose progression docs/34 walks.
+MISSION_03 = "MISSIONS/CAMPAIGN/CAMPAIGN.00/Mission.03"
+
+#: Function 34, how many units of a type the clan has, and function 15, an order.
+FN_TYPE_COUNT, FN_ORDER = 34, 15
+
+#: What ``tut3_pl2``'s ``Mission`` handler does (docs/34): the call and its first
+#: argument, the relation, what the answer is compared with (a value or a variable's
+#: name), the objectives completed, the messages played and the orders given inside
+#: the block -- each order its unit's id, the order, the target kind, x and y.
+MISSION_03_TESTS = [
+    (FN_IN_ROUTE, 0, "==", 1, [], [10], []),
+    (FN_IN_ROUTE, 1, "==", 1, [], [15], []),
+    (FN_IN_ROUTE, 2, "==", 1, [], [19], []),
+    (FN_IN_ROUTE, 3, "==", 1, [], [18], []),
+    (FN_IN_ROUTE, 4, "==", 1, [], [17], []),
+    (FN_IN_ROUTE, 5, "==", 1, [], [16], []),
+    (FN_IN_ROUTE, 6, "==", 1, [], [23], []),
+    (FN_OWNER, 0x80000007, "==", 0, [0], [11], []),
+    (FN_OWNER, 0x80000007, "==", 0xFFFFFFFF, [], [], []),
+    (FN_OWNER, 0x80000004, "==", 0, [1], [24, 12], []),
+    (FN_OWNER, 0x80000004, "==", 0xFFFFFFFF, [], [], []),
+    (FN_TYPE_COUNT, 0x80000004, "==", 1, [2], [13, 25], []),
+    (FN_COUNT, 0, ">=", "df6", [], [21], []),
+    (FN_COUNT, 0, ">=", "df5", [3], [14],
+     [(3, 4, 0x202, 1124, 783), (4, 4, 0x202, 606, 993), (5, 4, 0x202, 1124, 783)]),
+    (FN_COUNT, 1, "==", 0, [4], [], []),
+]
+
+#: The text each message id of Mission 03's ``messages.cfg`` names: the script's, and
+#: 22, which the game asks for itself.
+MISSION_03_TEXTS = {10: "T03_I01", 15: "T03_H01", 19: "T03_H05", 18: "T03_H04",
+                    17: "T03_H03", 16: "T03_H02", 23: "T03_H061", 11: "T03_I02",
+                    24: "T03_H062", 12: "T03_I03", 13: "T03_I04", 25: "T03_H09",
+                    21: "T03_H07", 14: "T03_I05", 22: "T03_H08"}
+
+#: Mission 03's routes 1 to 6 as docs/34 gives them: x and y extents, rounded.
+MISSION_03_ROUTE_BOXES = {
+    1: (436, 731, 620, 884), 2: (561, 782, 932, 1196), 3: (889, 1138, 868, 1154),
+    4: (1079, 1129, 881, 940), 5: (995, 1079, 788, 877), 6: (1085, 1420, 649, 946),
+}
+
+
+def _handler_blocks(table, handler, formulas: list[str]) -> list[tuple]:
+    """Each block that compares a function's answer, as ``MISSION_03_TESTS`` lists
+    them: the call and its first argument, the relation, the value or variable
+    compared with, and the objectives, messages and orders inside the block."""
+    names = {v.name: i for i, v in enumerate(table)}
+    kinds = {names["OBJECTIVE_COMPLETE"]: 0, names["MESSAGE_INFO"]: 1}
+    tests: list[tuple] = []
+    last = None
+    stack: list[tuple | None] = []
+
+    def value(at: int, var: int) -> int | None:
+        return _handler_value(table, handler.nodes, formulas, at, var)
+
+    for i, node in enumerate(handler.nodes):
+        open_test = next((t for t in reversed(stack) if t is not None), None)
+        if node.calls and node.function in (FN_COUNT, FN_IN_ROUTE, FN_OWNER, FN_TYPE_COUNT):
+            last = (node.function, value(i, node.operands[0]), node.destination)
+        elif node.calls and node.function == 30 and node.operands[0] in kinds:
+            if open_test is not None:
+                open_test[4 + kinds[node.operands[0]]].append(value(i, node.operands[1]))
+        elif node.calls and node.function == FN_ORDER and open_test is not None:
+            ops = node.operands
+            open_test[6].append((value(i, ops[0]), value(i, ops[1]), value(i, ops[8]),
+                                 value(i, ops[9]), value(i, ops[10])))
+        elif node.opens:
+            test = None
+            if last and node.operands[0] == last[2] and node.relation in ("==", ">="):
+                against = value(i, node.operands[1])
+                if against is None:
+                    against = table[node.operands[1]].name
+                test = (last[0], last[1], node.relation, against, [], [], [])
+                tests.append(test)
+            stack.append(test)
+        elif node.closes and stack:
+            stack.pop()
+    return tests
+
+
+def check_mission_03(check, game: Path) -> None:
+    """Mission 03, The Field Base, as its data and scripts drive it (docs/34)."""
+    d03 = game / MISSION_03
+    scripts_dir = game / "MISSIONS" / "SCRIPTS"
+    if not (d03 / "data.tma").exists() or not (scripts_dir / behaviour.VARSET).exists():
+        return
+    table = behaviour.variables(game)
+    m = mission.load(d03 / "data.tma")
+    stems = [c.ai_script.replace("\\", "/").rsplit("/", 1)[-1] for c in m.clans]
+    scripts = [behaviour.read(scripts_dir / f"{s}.scr") for s in stems]
+    called = [sorted({n.function for h in s.handlers for n in h.nodes if n.calls})
+              for s in scripts]
+    formulas = behaviour.formulas(scripts_dir / f"{stems[0]}.scr")
+    handlers = {h.name: h for h in scripts[0].handlers}
+    tests = _handler_blocks(table, handlers["Mission"], formulas)
+    init = handlers["Init"]
+    init_formulas = [formulas[n.formula] for n in init.nodes
+                     if not n.calls and 0 <= n.formula < len(formulas)
+                     and table[n.destination].name in ("df5", "df6")]
+    init_count = [(table[n.destination].name, [table[o].name for o in n.operands])
+                  for n in init.nodes if n.calls and n.function == FN_COUNT]
+    enemy_init = next(h for h in scripts[1].handlers if h.name == "Init")
+    enemy_formulas = behaviour.formulas(scripts_dir / f"{stems[1]}.scr")
+    shutdowns = [(_handler_value(table, enemy_init.nodes, enemy_formulas, i, n.operands[0]),
+                  _handler_value(table, enemy_init.nodes, enemy_formulas, i, n.operands[1]))
+                 for i, n in enumerate(enemy_init.nodes) if n.calls and n.function == FN_ORDER]
+    check("Mission 03: tut3_pl2's tests, and what each one gives",
+          tests == MISSION_03_TESTS
+          and called == [[FN_ORDER, 19, 30, FN_COUNT, FN_IN_ROUTE, FN_TYPE_COUNT, FN_OWNER],
+                         [0, FN_ORDER, 19], [19]]
+          and init_formulas == ["( df5 + 4 )", "( df5 - 3 )"]
+          and init_count == [("df5", ["d0", "CLASS_ROBOT"])]
+          and shutdowns == [(3, 19), (4, 19), (5, 19)],
+          f"{stems} call functions {called}; Init sets df5 = fn31(d0, CLASS_ROBOT), then "
+          f"{init_formulas}; tut3_pl2's Mission handler tests routes 0-6 (messages 10, 15, "
+          f"19, 18, 17, 16, 23), function 52 of CLASS_BUILDING|7 and |4 against 0 "
+          f"(objectives 0 and 1) and ERROR, function 34 of BUILDING_MINE = 1 (objective 2), "
+          f"clan 0's robots >= df6 (message 21) and >= df5 (objective 3, message 14 and "
+          f"three patrol orders to places), clan 1's robots = 0 (objective 4); tut3_en's "
+          f"Init orders ids and orders {shutdowns}")
+
+    by_index = {msg.index: msg for msg in briefing.messages(d03 / briefing.MESSAGES)}
+    texts = {i: by_index[i].text_id for i in MISSION_03_TEXTS if i in by_index}
+    helps = sorted(i for i, msg in by_index.items() if msg.info_system)
+    asked = sorted({v for *_, s, _ in tests for v in s})
+    listed = mission.objectives(d03 / "mission.cfg")
+    prebuild = mission.load_cfg(d03 / "mission.cfg").get("prebuild", {})
+    designs = {k: objects.load_unit(game / "UNITS" / "UNITS" / "PREBLD" / v)
+               for k, v in prebuild.items()}
+    check("Mission 03: its messages, objectives and prebuilt designs",
+          texts == MISSION_03_TEXTS and 20 not in by_index and sorted(by_index)[:10] == list(
+              range(10))
+          and helps == [15, 16, 17, 18, 19, 21, 22, 23, 24, 25]
+          and 22 not in asked and asked == sorted(set(MISSION_03_TEXTS) - {22})
+          and [o.exempt for o in listed] == [False] * 5
+          and sorted(o for *_, obj, _, _ in tests for o in obj) == [0, 1, 2, 3, 4]
+          and prebuild == {"model1": "tut3_p1.dat", "model2": "tut3_p2.dat"}
+          and all(u.kind == 0x1008000 for u in designs.values()),
+          f"ids {asked} name {[texts[i] for i in asked]}; info_system on {helps}; message "
+          f"22 ({texts.get(22)}) is not the script's; {len(listed)} primary objectives, no "
+          f"bonus, and the script completes 0-4; prebuild names {prebuild}, both warriors "
+          f"(Type 0x1008000) under UNITS/UNITS/PREBLD")
+
+    types = [c.type for c in m.clans]
+    by_route = {r.id: r for r in m.routes}
+    units = [o for o in m.objects if o.kind == mission.KIND_UNIT]
+    hero = next(o for o in units if "\\HERO\\" in o.path.upper())
+    x, y, _ = hero.position
+    holding = [i for i, r in sorted(by_route.items()) if r.contains(x, y)]
+    corners = [math.hypot(px - x, py - y) for px, py, _ in by_route[0].points]
+    boxes = {i: (round(min(q[0] for q in r.points)), round(max(q[0] for q in r.points)),
+                 round(min(q[1] for q in r.points)), round(max(q[1] for q in r.points)))
+             for i, r in by_route.items() if i}
+
+    def name(o):
+        return o.path.replace("\\", "/").rsplit("/", 1)[-1]
+
+    inside = {i: sorted(name(o) for o in m.objects if r.contains(*o.position[:2]))
+              for i, r in by_route.items() if i}
+    lodes = m.lodes
+    lode_routes = [i for i, r in by_route.items() if r.contains(*lodes[0].position[:2])]
+    patrols = [(o[0], [i for i, r in by_route.items() if r.contains(o[3], o[4])])
+               for *_, orders in tests for o in orders]
+    robots = Counter(o.clan_id for o in units if (o.type_id or 0) & CLASS_ROBOT)
+    owners = {name(o): o.clan_id for o in m.objects if o.kind != mission.KIND_UNIT}
+    ids = {o.logical_id & 0xFFFFFFFF: name(o) for o in m.objects}
+    minds = [c.minds for c in m.clans]
+    check("Mission 03: the clans, the start, the routes, the lode",
+          types == [mission.CLAN_PLAYER, mission.CLAN_ENEMY, mission.CLAN_NEUTRAL]
+          and minds == [7, 5, 5] and m.relations() == [[2, 0, 1], [0, 2, 1], [1, 1, 2]]
+          and holding == [0] and max(corners) < 9 and boxes == MISSION_03_ROUTE_BOXES
+          and inside == {1: ["sstore01.dat"], 2: ["gener01.dat"], 3: [], 4: ["tut3_b.dat"],
+                         5: ["tut3_t.dat"], 6: ["sbunk01.dat"]}
+          and len(lodes) == 1 and lodes[0].found and lode_routes == [3]
+          and patrols == [(3, [6]), (4, [2]), (5, [6])]
+          and dict(robots) == {0: 3, 1: 3} and minds[0] - robots[0] == 4
+          and owners == {"sbunk01.dat": 2, "lplant01.dat": 0, "sstore01.dat": 0,
+                         "gener01.dat": 2}
+          and ids[0x80000007] == "gener01.dat" and ids[0x80000004] == "sbunk01.dat"
+          and [ids[i] for i in (3, 4, 5)] == ["tut3_f1.dat", "tut3_f2.dat", "tut3_f3.dat"],
+          f"clans {[c.name for c in m.clans]} of types {types}, minds {minds}, relations "
+          f"{m.relations()}; the hero in route {holding}, corners {min(corners):.1f}-"
+          f"{max(corners):.1f} m; routes 1-6 span {boxes} and hold {inside}; one lode at "
+          f"({lodes[0].position[0]:.1f}, {lodes[0].position[1]:.1f}), found, in route "
+          f"{lode_routes}; the patrol places lie in routes {patrols}; robots {dict(robots)}, "
+          f"so the player's minds leave {minds[0] - robots[0]} free; building owners "
+          f"{owners}; CLASS_BUILDING|7 is {ids[0x80000007]}, |4 {ids[0x80000004]}, ids 3-5 "
+          f"Enm's three flyers")
+
+    ai, iron = game / "ai.dll", game / "iron3d.dll"
+    if not (ai.exists() and iron.exists()):
+        return
+    aid = _image_at(ai.read_bytes())
+    at = _image_at(iron.read_bytes())
+
+    # The function table's 72 stores: mov [esi], imm; mov [esi + d8], imm; mov [esi + d32], imm.
+    stores = {}
+    va = 0x1000128A
+    for _ in range(72):
+        head = aid(va, 3)
+        size = 10 if head[1] == 0x86 else 7 if head[1] == 0x46 else 6
+        if head[1] == 0x06:
+            stores[0] = struct.unpack("<I", aid(va + 2, 4))[0]
+        elif head[1] == 0x46:
+            stores[aid(va + 2, 1)[0] // 4] = struct.unpack("<I", aid(va + 3, 4))[0]
+        else:
+            stores[struct.unpack("<I", aid(va + 2, 4))[0] // 4] = struct.unpack(
+                "<I", aid(va + 6, 4))[0]
+        va += size
+    check("ai.dll: function 15 orders any clan's unit, and function 34 counts a type exactly",
+          stores.get(FN_ORDER) == 0x10008054 and stores.get(FN_TYPE_COUNT) == 0x10009C30
+          and stores.get(0) == 0x10008034
+          and aid(0x1000835B, 6) == bytes.fromhex("8b0950ff511c")
+          and aid(0x10008376, 7) == bytes.fromhex("c7425005000000")
+          and aid(0x100083EA, 10) == bytes.fromhex("81bdccfeffff02020000")
+          and aid(0x100084A0, 12) == bytes.fromhex("dfad74feffffd99dd0feffff")
+          and aid(0x100086D4, 3) == b"\xff\x50\x0c"
+          and aid(0x100086F0, 7) == bytes.fromhex("c7405001000000")
+          and aid(0x10009C96, 6) == bytes.fromhex("81c18c000000")
+          and aid(0x10009CB8, 6) == bytes.fromhex("8b50083b55f8")
+          and aid(0x10009CD2, 4) == bytes.fromhex("837804ff")
+          and aid(0x10008049, 7) == bytes.fromhex("c7415001000000")
+          and aid(0x100018EE, 10) == bytes.fromhex("480f840f010000480f85")
+          and aid(0x1000194F, 5) == b"\x3d\x04\x00\x00\x80"
+          and aid(0x10001974, 6) == bytes.fromhex("ff83e0030000"),
+          f"function 15 ({stores.get(FN_ORDER, 0):#x}) finds its unit through the clan areal "
+          f"map's slot 7, any clan's, answers 5 when none does, takes a place's x and y as "
+          f"floats and gives the packet to the unit's slot 3 (1 taken, 0 refused); function "
+          f"34 ({stores.get(FN_TYPE_COUNT, 0):#x}) counts the entries of the running "
+          f"SuperAI's list (+0x8c) whose type equals the argument and whose logical id is "
+          f"set; function 0 only sets 1; SuperAI slot 4's event 2 files a building and "
+          f"counts a mine at +0x3e0")
+
+    strings = {va: at(va, 20).split(b"\0")[0] for va in (0x10104030, 0x1010401C)}
+    check("iron3d.dll: message 22 as a building's model takes the cursor; prebuilt designs",
+          at(0x10058004, 6) == bytes.fromhex("8a88e6000000")
+          and at(0x10058013, 2) == b"\x6a\x16"
+          and _calls(at, 0x10079EDA, 6) == [(0x10079EDA, 0x10057F00)]
+          and strings == {0x10104030: b"prebuild", 0x1010401C: b"units\\units\\prebld\\"}
+          and at(0x1004DDC9, 5) == b"\x68" + struct.pack("<I", 0x10104030)
+          and at(0x1004DF52, 5) == b"\xba" + struct.pack("<I", 0x1010401C)
+          and at(0x1004DF85, 5) == b"\xb9\x05\x00\x00\x00"
+          and at(0x10055A1D, 7) == bytes.fromhex("80b85401000001")
+          and _calls(at, 0x10055A29, 6) == [(0x10055A29, 0x1004DD70)],
+          "the building model's cursor (0x10057f00, started at 0x10079eda) ends asking "
+          "message 22 when the game's byte +0xe6 is set (0x10058013); the designer holder, "
+          "on a fresh mission (the parameter block's +0x154 = 1), loads mission.cfg's "
+          "prebuild models from units\\units\\prebld\\ into its five recent projects "
+          "(0x1004dd70)")
+
+
 #: The outcome panel's words, by the game's state word: its title, then its lines
 #: (``iron3d.dll:0x1009f8b0``).
 OUTCOME_STRINGS = {
@@ -18300,7 +18552,7 @@ def run(game: Path) -> int:
         check_controls, check_player_input, check_focus, check_selection, check_turret_channels,
         check_behaviour, check_research, check_descriptions, check_saves,
         check_vocabulary, check_resources, check_briefing, check_briefing_screen,
-        check_progression, check_mission_02, check_outcome,
+        check_progression, check_mission_02, check_mission_03, check_outcome,
         check_hud_top,
         check_hud_radar,
         check_hud_screens,

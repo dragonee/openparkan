@@ -490,6 +490,231 @@ Three things follow from it.
    training mission (game mode 4 is a *guess*, [21-briefing.md](21-briefing.md#not-established)).
 6. **Win** when objectives 0, 1 and 2 are all complete, whatever objective 3 is.
 
+## Mission 03, *The Field Base*, end to end — *derived*
+
+`CAMPAIGN.00/Mission.03` on Tut_3. The hero captures a generator and a bunker,
+has the builder put up a mine, builds four warbots and destroys the enemy
+patrol that comes for the base. The mechanics it leans on have their own pages:
+- taking a building by its pod
+  ([27-ownership.md](27-ownership.md#capture--read)) and walking in through its
+  doors ([24-motion.md](24-motion.md#walking-into-a-building--read-and-measured));
+- building a building ([32-builder.md](32-builder.md));
+- the factory and the designer (36-factory.md, 37-designer.md);
+- command mode, which the bunker opens, and its commander panel (40, 41).
+
+This section is the mission as its files and its script drive it.
+
+### What the mission places — *measured*
+
+| clan | index | type | minds | script | base |
+|---|---:|---|---:|---|---|
+| `Plr` | 0 | 1, player | 7 | `tut3_pl2` | (521, 978) |
+| `Enm` | 1 | 2, enemy | 5 | `tut3_en` | (1458, 1550) |
+| `Ntrl` | 2 | 3, neutral | 5 | `tut3_nt` | (1075, 900) |
+
+`Plr` and `Enm` are hostile to each other both ways; `Ntrl` is neutral to
+both, and both to it.
+
+| logical id | what | clan | where |
+|---|---|---|---|
+| 1 | the hero, `tut3_p.dat` | `Plr` | (461.2, 694.6) |
+| 6 | the builder, `tut3_b.dat` (SWB-2, a wheeled S-31 with a builder's beam) | `Plr` | (1106.6, 914.4) |
+| 7 | the transport, `tut3_t.dat` (SWT-3, the same chassis) | `Plr` | (1032.5, 836.8) |
+| 3, 4, 5 | the enemy patrol, `tut3_f1`–`f3.dat`: three S-2f flyers: an autocannon, a laser, and two flame throwers | `Enm` | about (1860, 1885), on the plateau at z 250 |
+| `CLASS_BUILDING`\|1 | the Small Warehouse, `sstore01.dat` (`fr_l_store`) | `Plr` | (619.4, 805.3) |
+| `CLASS_BUILDING`\|5 | the Large Factory, `lplant01.dat` | `Plr` | (1192.2, 612.3) |
+| `CLASS_BUILDING`\|7 | the Small Generator, `gener01.dat` (`fr_l_gener`) | `Ntrl` | (651.8, 1051.2) |
+| `CLASS_BUILDING`\|4 | the Small Bunker, `sbunk01.dat` (`fr_l_bunker`) | `Ntrl` | (1260.9, 813.9) |
+
+There is no scenery.
+
+- **One mineral lode**, at (1026.1, 942.7), already marked found. It is 85 m from
+  the builder, where the briefing's "fiery plume" stands.
+- **The player's minds.** The hero, the builder and the transport take three of
+  the seven, so **exactly four bots can be built**
+  ([23-economy.md](23-economy.md#the-bot-limit-is-the-clans-mind-count--read-and-measured)).
+- **The prebuilt designs.** `mission.cfg`'s `prebuild` object names
+  `tut3_p1.dat` and `tut3_p2.dat`. They are warriors (`Type 0x1008000`) in
+  `UNITS\UNITS\PREBLD\`: a walking S-12w with two autocannons, and a wheeled
+  S-31 with two guided missile launchers. On a fresh mission start (the
+  parameter block's `+0x154` is 1,
+  [21-briefing.md](21-briefing.md#when-it-runs--read)),
+  the designer's holder loads each `model` key's file into the list of recent
+  projects (`iron3d.dll:0x10055a29` → `0x1004dd70`; path
+  `units\units\prebld\`, five at most, *read*). The factory screen lists them
+  from the first time it opens
+  ([36-factory.md](36-factory.md#the-factory-panel)).
+
+**Routes** (x and y extents, rounded):
+
+| route | spans | holds |
+|---|---|---|
+| 0 | a square about the hero's start, corners 7.1–8.7 m away | the hero |
+| 1 | x 436–731, y 620–884 | the Small Warehouse |
+| 2 | x 561–782, y 932–1196 | the Small Generator |
+| 3 | x 889–1138, y 868–1154 | the lode |
+| 4 | x 1079–1129, y 881–940 | the builder |
+| 5 | x 995–1079, y 788–877 | the transport |
+| 6 | x 1085–1420, y 649–946 | the Small Bunker |
+
+### What the scripts ask — *read*, and *measured*
+
+**`tut3_pl2`** calls functions 15, 19, 30, 31, 32, 34 and 52. `Init` counts
+the player's robots into `df5`, then sets `df5 = df5 + 4` and `df6 = df5 − 3`.
+The count is 3 (*derived*: the recording plays message 21 with the first bot
+built and objective 3 with the fourth, below). So **`df6` is 4 and `df5` is 7**.
+
+**The route tests** are Mission 01's latch on the hero's id 1. A message plays
+on a run that finds the hero in a route after a run that found it in none.
+
+| run finds | then | message says |
+|---|---|---|
+| the hero in route 0, its start | 10 | `T03_I01` welcome; find the generator, north-north-east |
+| the hero in route 1 | 15 | `T03_H01` the Warehouse |
+| the hero in route 2 | 19 | `T03_H05` the Power Generator |
+| the hero in route 3 | 18 | `T03_H04` lodes |
+| the hero in route 4 | 17 | `T03_H03` the Builder |
+| the hero in route 5 | 16 | `T03_H02` the Transport |
+| the hero in route 6 | 23 | `T03_H061` bunkers, the base's headquarters and command mode |
+
+**The count tests**, each held by its own `df` flag:
+
+| run finds | then | messages say |
+|---|---|---|
+| function 52 of `CLASS_BUILDING`\|7, the generator, = 0 | objective 0, then 11 | `T03_I02` the base has energy; the generator's repair facilities |
+| function 52 of `CLASS_BUILDING`\|4, the bunker, = 0 | objective 1, then 24 and 12 | `T03_H062` the bunker's camera; `T03_I03` order the builder to build a mine |
+| function 34 of `BUILDING_MINE` = 1 | objective 2, then 13 and 25 | `T03_I04` the mine works slowly; `T03_H09` transporting minerals |
+| `Plr` robots ≥ `df6`, 4 | 21 | `T03_H07` controlling warbots in command mode |
+| `Plr` robots ≥ `df5`, 7 | objective 3, then 14, then the patrol's orders | `T03_I05` you'll need your army to defend the base |
+| `Enm` robots = 0 | objective 4 | — |
+
+- **Either building answering `ERROR`** sends `SYSTEM_MESSAGE` with
+  `MISSION_FAILED`. As on Mission 02 it cannot happen in play
+  ([above](#what-the-scripts-ask--read-and-measured)).
+- **Messages 0–9** (`T03_T01`…`T03_T10`) are the briefing's lines. There is no
+  message 20.
+- **Message 22**, `T03_H08`, is about placing a building: the model, `<` and
+  `>` to turn it, red and green. The script never asks for it. `iron3d.dll`
+  asks for it itself, when a build command puts the building's full-size model
+  under the cursor. That starter (`0x10057f00`, called from the command
+  execution at `0x10079eda`) ends by asking for 22 while the game's byte
+  `+0xe6` is set (`0x10058013`), the same gate as Mission 02's message 100.
+- **The objectives** are `mission.cfg`'s five primary ones, with no bonus. The
+  script completes 0 to 4, so the run that completes the fifth wins.
+
+**The patrol's orders** (function 15, all `INSERT_ORDER_REPLACE` and
+`ORDER_ROBOT_PATROL` by place, with the four floats `fSuccess`…`fIndependence`
+at their `varset.var` 0.5):
+
+| id | place | lies in |
+|---|---|---|
+| 3 | (1124, 783) | route 6, 140 m west of the bunker |
+| 4 | (606, 993) | route 2, 74 m from the generator |
+| 5 | (1124, 783) | route 6 |
+
+A patrol of a place picks a new point within 60 of it every 20 to 30 s, and
+fights what it meets
+([31-packages.md](31-packages.md#what-each-package-does--read)). The flyers
+start 1,325 and 1,549 m away.
+
+**Function 15 orders any clan's unit** (`ai.dll:0x10008054`, *read*).
+- **Finding the unit.** It looks the id up through the clan areal map's slot 7,
+  as function 52 does (`0x1000835e`). The object may be anyone's, so the
+  player's script orders the enemy's patrol. With no object it answers 5
+  (`0x10008376`).
+- **The packet.** A `TARGET_BY_PLACE` target's two words become floats, x at the
+  packet's `+0x10` and y at `+0x14` (`0x100083ea`). The four floats go to
+  `+0x12c`.
+- **Giving it.** The unit's slot 3 takes the packet and the insert mode
+  (`0x100086d4`). The answer is 1 when the unit takes it, 0 when it refuses.
+
+**`tut3_en`'s `Init`** calls function 0, a stub that leaves 1
+(`0x10008049`). It then gives ids 3, 4 and 5 `ORDER_ROBOT_SHUTDOWN`,
+replacing. A shut-down unit's fire control asks for no target, and its task
+lets no engagement through
+([31-packages.md](31-packages.md#the-fire-control--read)), so **the patrol waits
+on its plateau until the player's fourth bot sends it**. `tut3_nt` calls only
+function 19.
+
+**Function 34 counts a type exactly** (`ai.dll:0x10009c30`, *read*). It walks
+the running SuperAI's own unit list (`+0x8c`). It counts the entries whose type
+equals the argument and whose logical id is set (`0x10009cbb`, `0x10009cd2`).
+**A building is on that list.** SuperAI slot 4's event 2 (`0x10001880`) files
+it, and also counts it by type, a mine at `+0x3e0` (`0x10001974`). The capture
+sends that event with the new clan (`iron3d.dll:0x10032ffa`); which call sends
+it for a building a builder puts up is not traced. The recording shows the mine
+counted while it is still going up (below). "= 1" is exact, so a second mine
+before the handler's next run would miss the test (*derived*).
+
+### Seen in a recording
+
+Timings come from a 30 fps recording of the mission, played through at
+960 × 720. Each line is the first frame that shows it, sampled every 2 s, or
+more finely where a time is given to a tenth.
+
+| time | what |
+|---|---|
+| 0–81 s | the briefing: 26 waypoints, 81.5 s of camera |
+| 82–88 s | the objectives screen: five objectives, each "in progress" |
+| 90 s | the cockpit, `T03_I01` up (route 0) |
+| 94 s | `T03_H01`, route 1, passing the Small Warehouse |
+| 110 s | `T03_H05`, route 2, at the generator |
+| 116 s | "Building is captured": the generator, from its pod inside |
+| 118 s | objective 0, `T03_I02` |
+| 144 s | `T03_H04`, route 3; the lode's pillar of fire stands beside the transport |
+| 164 s | `T03_H061`, route 6, walking down the bunker's ramp |
+| 166.8 s | the laser strikes the bunker's closed door; its top edge drops from 167.2 s, and the hero is in the corridor by 171.5 s ([24-motion.md](24-motion.md#a-shot-opens-a-door--read-and-seen)) |
+| 178 s | "Building is captured": the bunker; the view is command mode's camera over the bunker's roof, with the icon column and the Energy row |
+| 180 s | objective 1, `T03_I03`; `T03_H062` was asked first and is not seen |
+| 182 s | `T03_H08`, message 22, as Build Mine is chosen on the Builders page; the model is red at 184 s and green at 186 s |
+| 186–192 s | the builder "(building)" |
+| 194 s | the Transports page: Transport minerals |
+| 196 s | objective 2, `T03_H09`; the builder "(no order)"; the Ore row appears |
+| 204–230 s | the builder "(escaping)"; cyan sparks on the ground at the lode, no building standing |
+| 212 s | the warbot designer |
+| 232 s | a blue construction sphere at the lode |
+| 236 s | the Small Mine stands |
+| 240 s | the Factory page with a warrior project |
+| 288 s | `T03_H07`, message 21: the first bot built |
+| 334 s | objective 3, `T03_I05`: the fourth |
+| 396–416 s | the patrol's marks cross the satellite map toward the base |
+| 418–428 s | the fight at the base |
+| 429 s | "MISSION COMPLETE !" over the sky, the command panel gone |
+| 432 s | the campaign menu, *The Field Base* done |
+
+What follows from it:
+
+- **The mine counts from its creation.** The builder reached the lode about
+  190 s: it starts 85 m away and drives at 82 km/h once the order is given at
+  about 185 s. The count took the mine by 196 s, while the building was seen
+  standing only at 236 s. Its construction sphere runs in between
+  ([32-builder.md](32-builder.md#the-construction-sphere--read-and-measured)).
+- **Neither `T03_H03` nor `T03_H02` is seen.** Routes 4 and 5 lie between the
+  lode's route and the bunker's. Whether the hero entered them without passing
+  through none is not measured.
+- **The patrol took about 85 s** from its orders to the fight. Flying straight
+  at 0.8 of 160 km/h covers its 1.3 to 1.5 km in 37 to 44 s. Where the rest went
+  is not measured: its first point may wait for the patrol's timer, and its
+  way down from the plateau is not straight.
+- **The win came within 2 s of the last explosion**, the handler's period.
+
+### For an engine
+
+1. **Place the prebuilt designs** among the factory's recent projects at the
+   start.
+2. **Count robots after the placed units have joined** their clans, so `Init`
+   reads 3, and objective 3 needs the four bots the minds allow.
+3. **Answer function 34** by exact type over the clan's own list, counting a
+   building from the moment it is created.
+4. **Answer function 15 for any clan's unit**. Give `SHUTDOWN` (no fire, no
+   engagement, no move) and `PATROL` of a place.
+5. **Capture the generator and the bunker at their pods**
+   ([27-ownership.md](27-ownership.md#the-zones-height-is-the-pod-nodes-parents-box--read-and-measured)).
+   The bunker's pod opens command mode.
+6. **Ask for message 22** when a build command puts a building's model under the
+   cursor.
+7. **Win** when objectives 0–4 are complete. Fail on the hero's death.
+
 ## After the outcome — *read*, and *measured*
 
 A won or lost mission does not stop. The HUD gives way to a panel that names

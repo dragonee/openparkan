@@ -434,11 +434,11 @@ slot `0xfffe`) is taken by nobody.
 
 | fn | uses | arguments | does |
 |---:|---:|---|---|
-| 15 | 236 | *id*, order, insert, parameter, four floats, target kind, target… | build an order packet and give it to the unit: result 1 taken, 0 refused, **5 no such unit**. The packet is [31-packages.md](31-packages.md)'s |
+| 15 | 236 | *id*, order, insert, parameter, four floats, target kind, target… | build an order packet and give it to the unit: result 1 taken, 0 refused, **5 no such unit**. The unit is found by logical id through the clan areal map's slot 7, as for 52, so **any clan's** unit takes it; a place's two words become the packet's float x and y (`0x10008054`, [34-progression.md](34-progression.md#what-the-scripts-ask--read-and-measured-1)). The packet is [31-packages.md](31-packages.md)'s |
 | 14 | 53 | `UNIT_ANY_UNIT` type · `UNIT_ANY_CAPTURER` · `UNIT_ANY_NEAREST_CAPTURER` target kind, target | pick a unit: one of a type, a capturer, or the capturer that reaches the target soonest by distance over its live top speed (IControl 145, `0x100091b0`) |
 | 13 | 2 | `UNIT_FREE_UNIT`/`_FREE_CAPTURER`/`_ANY_UNIT`, type | pick a free unit of a type, a free capturer, or one free or on a lighter problem |
 | 51 | 39 | *id*, `TRUE`/`FALSE` | reserve a unit from every problem, or free it |
-| 34 | 29 | type | how many units of that type the clan has |
+| 34 | 29 | type | how many entries of the running clan's own SuperAI list (`+0x8c`) have **exactly** that type and a logical id; a building is on the list (`0x10009c30`, [34-progression.md](34-progression.md#what-the-scripts-ask--read-and-measured-1)) |
 | 31 | 48 | *clan*, class mask | how many of clan *clan*'s units have a type sharing a bit with the mask: the entries of that clan's SuperAI unit list (`0x10055398[clan] +0x8c`) whose logical id is set ([34-progression.md](34-progression.md)) |
 | 38 | 13 | *clan*, `FREE_UNITS`/`ALL_UNITS` | the summed strength of that clan's battle units |
 | 11 | 11 | type | 1 when the clan already has as many of the type as its `dMax*` variable allows, or when a per-type counter the brain keeps (`+0x3e0`..`+0x3f8`) is set |

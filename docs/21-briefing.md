@@ -501,8 +501,10 @@ places:
   state ([17-saves.md](17-saves.md)). In `ai.dll` the call is made by the
   handler stored at the interpreter's `+0x78` (`0x1000c266`), which evaluates
   two operands and passes them on.
-- **`iron3d.dll` itself**, in game mode 4: id 22 from the order menu
-  (`0x10058015`) and id 100 from `0x100638a9`.
+- **`iron3d.dll` itself**, in game mode 4: id 22 as a build command puts the
+  building's model under the cursor (`0x10058015`, in `0x10057f00`,
+  [34-progression.md](34-progression.md#what-the-scripts-ask--read-and-measured-1))
+  and id 100 from `0x100638a9`.
 
 **How a message plays** is [34-progression.md](34-progression.md#messages--read-and-measured)'s
 (*read*):
