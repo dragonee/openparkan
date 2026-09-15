@@ -12401,6 +12401,110 @@ read = true
 
 [[entry]]
 module = "Control.dll"
+at = "0x100319ed"
+kind = "site"
+name = "machine message handler, message 7: +0x618 = (argument == 2), then the turret lock +0x65c = kind 4 and argument 1"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000e76c"
+kind = "site"
+name = "property get 179 (0xb3): the turret lock +0x65c, through a static"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10007281"
+kind = "site"
+name = "machine constructor: the turret lock +0x65c cleared"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002ec23"
+kind = "site"
+name = "component setter, turret: the change in the target's x added into object +0x1e4 (body +0x38, the gap) and wrapped"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10014a54"
+kind = "site"
+name = "attitude integrator: no normalised turn pending (+0x1a9 clear), the pending triple back to 0.5"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10014b56"
+kind = "site"
+name = "attitude integrator: the step's turn = (spin + veer) x live turn x dt per axis -- the spin is a fraction of the live rate"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10014726"
+kind = "site"
+name = "velocity to world: turned by the hull's matrix at body +0xf0 through g_FastProc +0x1c"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10016540"
+kind = "function"
+name = "static init: 2pi (pi + pi) into 0x10043988"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10016550"
+kind = "function"
+name = "static init: 1/2pi (1/pi x 0.5) into 0x10043a64"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1003bdd0"
+kind = "datum"
+name = "float 0.7 (and -0.7 at 0x1003bdd4): the turret-led spin's bounds"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100750fd"
+kind = "site"
+name = "takeover: property 179, the turret lock, = 1 unless the unit is the hero or its auto-driver level +0x9c is set"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10074de9"
+kind = "site"
+name = "record binding: the hero's property 179 (turret lock) set to 0"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "World3D.dll"
+at = "0x1000fd49"
+kind = "site"
+name = "MCMD_LOCK on the key going down: property 179 written back negated"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
 at = "0x1002e8db"
 kind = "site"
 name = "interface 0x202 value 117: 1 when the control system's query 13 (the turret carries 0x8000000) is true"
@@ -14520,8 +14624,8 @@ read = true
 module = "World3D.dll"
 at = "0x1000fcbf"
 kind = "site"
-name = "MCMD_LOCK: toggles property 0xb3 through interface 0x16"
-doc = "docs/29-weapons.md"
+name = "MCMD_LOCK: toggles property 0xb3, the turret lock, through interface 0x16"
+doc = "docs/30-turrets.md"
 read = true
 
 [[entry]]

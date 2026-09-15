@@ -155,9 +155,10 @@ F sends `MCMD_DOWN` −1, and each release sends 0. `table_2.man` is
 | W / S | `MCMD_WALK_F` 1 / `MCMD_WALK_B` −1 | the command's y ([24-motion.md](24-motion.md#from-input-to-motion--read-and-measured)) |
 | A / D | `MCMD_LEFT` / `RIGHT` | the strafe |
 | R / F | `MCMD_UP` 1 / `MCMD_DOWN` −1 | **the command's z**: the handler (`World3D.dll:0x1001059b`) writes z into the command triple it read (property `0x20`, `0x1000fbb4`) and hands it to `SetTangAccel` |
-| , / . | `MCMD_ROTATE_Z` ±0.7 | the hull's spin |
-| mouse X | turret `ANGLE_X` 0.15, wrapping | the turret's yaw; the hull follows it ([30-turrets.md](30-turrets.md#aiming-and-the-camera--read-and-measured)) |
-| mouse Y | turret `ANGLE_Y` 0.25, clamped | the pitch |
+| , / . | `MCMD_ROTATE_Z` ±0.7 | the hull's spin, 0.7 × its live yaw rate; replaced every step while the turret lock is on |
+| mouse X | turret `ANGLE_X` 0.15, wrapping | the turret's yaw; the hull follows it ([30-turrets.md](30-turrets.md#the-hull-follows-the-turret--read-and-measured)) |
+| keypad 5 | turret `MCMD_LOCK` 0.5, `TURRET_LOCK` | switches the turret lock, on when the bot is taken: whether the hull follows the turret |
+| mouse Y | turret `ANGLE_Y` 0.25, clamped | the pitch, which never moves a flyer up or down ([24-motion.md](24-motion.md#a-flyers-height--read-and-measured)) |
 | keypad `* + − /` | `MCMD_FORWARD` | the cruise |
 | 0–8, left button, H, G, N | as on the hero | guns, camouflage, repair, infrared |
 

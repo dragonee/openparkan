@@ -855,6 +855,56 @@ with legs, wheels or tracks falls under gravity 10, and every flyer holds its
 height. A mode-0 or mode-2 machine falls exactly when its state has contact
 points.
 
+### A flyer's height — *read*, and *measured*
+
+**Only the command's z climbs or sinks a flyer** (*read*).
+
+- **The key.** R and F set the command's z to 1 and −1, and letting go sets
+  0 ([39-boarding.md](39-boarding.md#driving--read-and-measured)).
+- **The speed.** The velocity integrator moves the vertical velocity toward
+  command z × the live top z by at most the live acceleration z × dt, as it
+  does on every axis
+  ([Speed is a target](#speed-is-a-target-approached-at-a-fixed-acceleration--read)).
+- **The frame.** `0x10014610` holds the velocity to the live top speed. It
+  then turns the velocity by the matrix at body `+0xf0` (`0x10014726`, through
+  `g_FastProc` `+0x1c`): the hull's own attitude, which the spin integrator
+  builds from its quaternion (`+0x58`, `0x10014dfb`–`0x10014e43`).
+- **What the frame leaves out.**
+  - *The turret's pitch.* The turret is a component, and its target goes to
+    its own channels. Of the triple, the component setter passes only the
+    change in x to the body (`0x1002ec23`,
+    [30-turrets.md](30-turrets.md#the-hull-follows-the-turret--read-and-measured)).
+  - *The lean.* It is a rotation of its own (`+0x90`), and only the drawn body
+    takes it ([The hull leans](#the-hull-leans-and-rights-itself--read-and-measured)).
+- **The hull stays level.** Every flyer state sets the righting bits `0xC0`
+  (*measured*, above), which zero the spin about x and y (`0x10014af9`) and
+  right the hull toward world up. So a flyer's velocity frame turns only about
+  z (*derived*): W flies level along the hull, and the height changes only
+  with R and F.
+
+**Nothing holds a height above the ground** (*read*). A flyer's states have no
+contact points, so the ground contact only lifts it out of the ground and
+never pulls it down
+([above](#holding-the-body-on-the-ground--read-and-measured)). Flying into
+rising ground raises it, and it stays up when the ground falls away again
+(*derived*). **The ceiling** is the world's box: a flyer more than 20 above its
+top is pushed back ([The map edge](#the-map-edge--read)).
+
+**The nine flying chassis' climb**, authored (*measured*, `bases.rlb`).
+Acceleration is live, twice the file's; the live top speed can only be lower
+than authored:
+
+| chassis | top vertical m/s | vertical accel m/s² | to full climb |
+|---|---:|---:|---:|
+| Tiny Helicopter T-2 `r_t_02` | 35 | 30 | 1.17 s |
+| Small Flying `r_l_02`, `r_l_06` | 20 | 30 | 0.67 s |
+| Small Flying `r_l_05` | 35 | 50 | 0.70 s |
+| Small Flying `r_l_07` | 15 | 30 | 0.50 s |
+| Medium Flying M-2f `r_m_02` | 20 | 30 | 0.67 s |
+| Large Flying L-2f `r_b_02` | 15 | 20 | 0.75 s |
+| Large Flying `r_b_07` | 15 | 30 | 0.50 s |
+| Large Flying `r_b_08` | 6 | 4 | 1.50 s |
+
 ### Standing on a bridge — *read*, and *measured*
 
 A bridge is a building (`Type` `0x80001000`), so its level-0 faces answer
@@ -1956,10 +2006,13 @@ points are given is not traced. `Movement_FlyHeight` is 40 and
 ## Not established
 
 - How the velocity integrator's pull toward *command × top speed*, with the
-  command left at 0, combines with a velocity the Wizard writes every frame;
-  and whether the Wizard's spin, held to ±1, is a rate or a fraction (a key
-  sends +0.7). A stand-in takes the written velocity as the machine's own, and
-  s × the live yaw rate as its turn.
+  command left at 0, combines with a velocity the Wizard writes every frame.
+  A stand-in takes the written velocity as the machine's own. ~~Whether the
+  Wizard's spin, held to ±1, is a rate or a fraction (a key sends +0.7)~~ —
+  **read** for the spin integrator: the spin triple is a fraction, and a step
+  turns the hull by spin × the live turn rate × dt (`0x10014b56`,
+  [30-turrets.md](30-turrets.md#the-hull-follows-the-turret--read-and-measured)).
+  That the Wizard writes the same triple is not traced.
 - The areal search (`MGraph`: algorithm, costs, and what the land answers for
   `0x303`), the local path and its obstacle contours, the Wizard's heading
   curve (`0x10003d80`), and who reads `Movement_FlyHeight`. A stand-in

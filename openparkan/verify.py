@@ -18039,6 +18039,117 @@ def check_boarding(check, game: Path) -> None:
           f"stdClearKeyboard drops 0x100-0x108; 6211 {strings.get(6211)!r}")
 
 
+#: The units docs/30's follow-rate table is worked for: (path under UNITS/UNITS, the yaw rate
+#: the hull follows at, rad/s).
+HULL_FOLLOW = {"PREBLD/tut2_f1.dat": 1.89, "HQ/tut4_hq.dat": 1.07, "BATTLE/tut4_f1.dat": 1.32}
+#: The share of the live yaw rate a hull turns toward its turret at, and the nine flying chassis'
+#: authored top vertical speed and live vertical acceleration (docs/24, "A flyer's height").
+HULL_FOLLOW_SHARE = 0.7
+FLYER_CLIMB = {"r_t_02": (35.0, 30.0), "r_l_02": (20.0, 30.0), "r_l_05": (35.0, 50.0),
+               "r_l_06": (20.0, 30.0), "r_l_07": (15.0, 30.0), "r_m_02": (20.0, 30.0),
+               "r_b_02": (15.0, 20.0), "r_b_07": (15.0, 30.0), "r_b_08": (6.0, 4.0)}
+
+
+def check_hull_follow(check, game: Path) -> None:
+    """A driven machine's hull follows its turret while its lock is on; a flyer climbs by R/F."""
+    def lock_rows(name: str) -> list[tuple]:
+        return [(r.key, r.pressed, r.target, r.value, r.index, r.note)
+                for r in controls.table(game / name) if r.command == "MCMD_LOCK"]
+
+    lock, flyer, hero = (lock_rows(n) for n in ("m1.tbl", "m2.tbl", "hero.tbl"))
+    check("m1.tbl, m2.tbl: keypad 5 toggles the turret lock (MCMD_LOCK on the turret)",
+          lock == [("SCAN_G_5", True, "CICLS_TURRET", 0.5, 1, "TURRET_LOCK")]
+          and flyer == lock and not hero,
+          f"m1.tbl and m2.tbl: {lock}; hero.tbl: {len(hero)} rows")
+
+    shop = units.Workshop(game)
+    worked = {}
+    for rel in HULL_FOLLOW:
+        dat = game / "UNITS" / "UNITS" / rel
+        unit = objects.load_unit(dat)
+        load = shop.weigh(unit)
+        parsed = shop.armoury.controller(unit.components[0].ref.member.lower())
+        drive = shop.describe(dat).engine[0]
+        r = load.spare / load.payload
+        live = parsed.triples[control.TRIPLE_TURN][2] * drive * (1.5 * r + 0.5)
+        follow = HULL_FOLLOW_SHARE * live
+        worked[rel] = (round(drive, 2), round(r, 3), round(live, 2), round(follow, 2),
+                       round(math.pi / 2 / follow, 2))
+    check("UNITS: a hull follows its turret at 1.89, 1.07, 1.32 rad/s on three units",
+          all(abs(worked[rel][3] - want) < 0.006 for rel, want in HULL_FOLLOW.items()),
+          f"(E, r, live yaw rate, x {HULL_FOLLOW_SHARE}, s for a quarter turn): {worked}")
+
+    bases = NResArchive.open(game / "bases.rlb")
+    lib = objects.ObjectLibrary(game / "objects.rlb")
+    climb = {}
+    for name, record in sorted(lib.records.items()):
+        slots = record.slots
+        if name.startswith("r_") and len(slots) > CHASSIS_TABLE_SLOT \
+                and slots[CHASSIS_TABLE_SLOT].member.lower() == "m2.tbl":
+            parsed = control.parse(bases.read_name(name + ".ctl"))
+            climb[name] = (parsed.triples[control.TRIPLE_TOP_SPEED][2],
+                           2 * parsed.triples[control.TRIPLE_ACCELERATION][2])
+    check("bases.rlb: the nine flyers climb at 6-35 m/s, reached in 0.5-1.5 s",
+          climb == FLYER_CLIMB,
+          f"authored top vertical speed and live vertical acceleration: {climb}")
+
+    paths = [game / name for name in ("Control.dll", "iron3d.dll", "World3D.dll")]
+    if not all(p.exists() for p in paths):
+        return
+    ctl, iron, world = (_image_at(p.read_bytes()) for p in paths)
+
+    def f32(at, va: int) -> float:
+        return struct.unpack("<f", at(va, 4))[0]
+
+    def u32(at, va: int) -> int:
+        return struct.unpack("<I", at(va, 4))[0]
+
+    push_179 = b"\x68\xb3\x00\x00\x00"
+    sites = [
+        # the lock: property 179's setter case and message 7 store +0x65c for agent kind 4
+        (ctl, 0x1000EA6A, b"\x83\x79\x50\x04"),
+        (ctl, 0x1000EA82, b"\x88\x81\x5c\x06\x00\x00"),
+        (ctl, 0x10031A38, b"\x83\x7d\x50\x04"),
+        (ctl, 0x10031A4B, b"\x88\x85\x5c\x06\x00\x00"),
+        # the integrator: no pending turn and the lock, spin z from the gap, bounded +-0.7
+        (ctl, 0x100147FF, b"\x38\x9e\xa9\x01\x00\x00"),
+        (ctl, 0x10014A8E, b"\x38\x9a\x5c\x06\x00\x00"),
+        (ctl, 0x10014A96, b"\xd9\x46\x38"),
+        (ctl, 0x10014A9F, b"\xc7\x44\x24\x70\x33\x33\x33\xbf"),
+        (ctl, 0x10014AA7, b"\xc7\x44\x24\x28\x33\x33\x33\x3f"),
+        (ctl, 0x10014AEF, b"\x89\x46\x28"),
+        # the spin x the live rate x dt; the gap paid out x 1/2pi; the step kept at +0x3c
+        (ctl, 0x10014B5A, b"\xd8\x4c\x24\x18"),
+        (ctl, 0x10014BCD, b"\xd8\x0d\x64\x3a\x04\x10"),
+        (ctl, 0x10014BD7, b"\xd8\x46\x38"),
+        (ctl, 0x10014BFF, b"\xd9\x5e\x3c"),
+        (ctl, 0x10016550, b"\xd9\x05\xb8\xbd\x03\x10"),
+        (ctl, 0x10016556, b"\xd8\x0d\x90\xb1\x03\x10"),
+        # the turret's x change into the gap; the takt re-aims the turret from it
+        (ctl, 0x1002EC2E, b"\xd8\x83\xe4\x01\x00\x00"),
+        (ctl, 0x10005B23, b"\xd8\xae\xec\x01\x00\x00"),
+        # the velocity turned by the hull's matrix at +0xf0
+        (ctl, 0x10014726, b"\x81\xc6\xf0\x00\x00\x00"),
+        # the takeover: 1 unless the hero or an auto-driver level; World3D toggles it
+        (iron, 0x100750D0, b"\x8b\x87\x9c\x00\x00\x00"),
+        (iron, 0x100750DA, b"\x81\x7f\x2c\x00\x00\x02\x01"),
+        (iron, 0x100750FD, push_179), (iron, 0x10074DE9, push_179),
+        (world, 0x1000FD0A, push_179), (world, 0x1000FD2D, b"\x0f\x94\xc0"),
+        (world, 0x1000FD49, push_179),
+    ]
+    low, high = f32(ctl, 0x1003BDD4), f32(ctl, 0x1003BDD0)
+    inverse = f32(ctl, 0x1003BDB8) * f32(ctl, 0x1003B190)
+    # Property 179's case in the setter's byte table, and message 21's in World3D's table.
+    setter = u32(ctl, 0x1000EAD0 + 4 * ctl(0x1000EAE8 + 0xB3 - 0x31, 1)[0]) == 0x1000EA66
+    lock_case = u32(world, 0x100109F8 + 4 * 20) == 0x1000FCBF
+    check("Control.dll: the lock turns the hull by clamp(gap / rate dt, +-0.7) x rate dt",
+          all(at(va, len(code)) == code for at, va, code in sites) and setter and lock_case
+          and abs(low + HULL_FOLLOW_SHARE) < 1e-6 and abs(high - HULL_FOLLOW_SHARE) < 1e-6
+          and abs(inverse - 1 / (2 * math.pi)) < 1e-7,
+          f"{len(sites)} sites; bounds {low:.3f}, {high:.3f}; 1/2pi {inverse:.6f}; "
+          f"property 0xb3 -> 0x1000ea66 {setter}; MCMD_LOCK -> 0x1000fcbf {lock_case}")
+
+
 def check_focus(check, game: Path) -> None:
     """Leaving the window lets every key up: WM_ACTIVATEAPP to stdSetApplicationState."""
     paths = [game / name for name in ("iron3d.dll", "World3D.dll", "iron_3d.exe")]
@@ -19332,7 +19443,7 @@ def run(game: Path) -> int:
         check_packages,
         check_target_panel,
         check_wingman,
-        check_boarding,
+        check_boarding, check_hull_follow,
         check_builder, check_placement,
         check_designs,
         check_units, check_loading, check_search, check_construction,

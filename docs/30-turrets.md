@@ -223,19 +223,10 @@ hero turret the four channels animate `CP_m1o1`, `Turn_m1o1` (49–53),
 - **The strafe offset.** The turret's first entry also carries −(the strafe
   angle, eased across the step) ÷ the yaw span, negated when hung
   ([24-motion.md](24-motion.md#from-input-to-motion--read-and-measured)).
-- **A machine's turret leads its hull.** A change to the turret's yaw is also
-  added into control-system `+0x1ec` (body `+0x38`, `0x1002eb70`). `+0x65c` is
-  set on a unit (agent kind 4) once a value turns it on (`0x1000ea66`,
-  `0x10031a38`). With it set, and no normalised turn pending (`+0x35d`, which
-  `SetNormAngle` sets and the spin setter clears), the attitude integrator
-  (`0x10014a96`):
-  - turns the hull toward the turret: spin z = clamp(−(`+0x38` − 0.5) × 2π
-    ÷ (turn rate × dt), ±0.7);
-  - pays that turn back out of `+0x38`, and keeps the step in turns at `+0x3c`
-    (`+0x1f0`).
-  - The takt then re-aims the turret: yaw = `+0x1ec` − (1 − s) × `+0x1f0`
-    (`0x10005b13`). So the turret holds its heading while the hull comes round
-    under it.
+- **A machine's turret leads its hull.** While the player drives a machine, its
+  hull comes round under a turned turret at up to 0.7 × its live yaw rate, and
+  the turret holds its heading meanwhile. Keypad 5 switches this off and on
+  ([The hull follows the turret](#the-hull-follows-the-turret--read-and-measured)).
 
 **Which way a count turns** (*read* chain, *derived* sign):
 
@@ -374,6 +365,101 @@ hero turret the four channels animate `CP_m1o1`, `Turn_m1o1` (49–53),
   A smaller jolt at any other time does nothing.
 - **The eye moves** by the offset clamped to unit length, times 0.02
   (`0x10023646`, `0x10023677`): 2 cm at most.
+
+## The hull follows the turret — *read*, and *measured*
+
+A driven machine's mouse turns its turret, not its hull: `m1.tbl` and `m2.tbl`
+send mouse X to the turret's `ANGLE_X`
+([39-boarding.md](39-boarding.md#driving--read-and-measured)). The hull then
+comes round under the turret by itself, for as long as the machine's
+**turret lock** is on.
+
+**The lock is a byte at machine `+0x65c`** (*read*).
+
+- **Property 179 (`0xb3`) holds it.** The property setter's case
+  (`Control.dll:0x1000ea66`) stores 1 when the object's agent kind (`+0x50`) is
+  4, a unit, and the value is non-zero, and 0 otherwise. The getter's case
+  (`0x1000e76c`) hands it back.
+- **Control message 7 writes it too** (`0x100319ed`, `0x10031a38`): 1 for a
+  unit given argument 1, the player, and 0 for argument 0, the AI, or 2,
+  frozen ([29-weapons.md](29-weapons.md#who-may-drive-a-units-guns--read)).
+  The constructor clears it (`0x10007281`).
+- **Taking a unit over sets it.** Once `iron3d.dll`'s takeover (`0x10074ff0`)
+  has handed a unit to the player, it sets property 179 (`0x100750fd`). The
+  value is 1 unless the unit is the hero (Type `0x1020000`) or its auto-driver
+  level `+0x9c` is not 0; then it is 0. Binding a record gives the hero 0
+  (`0x10074de9`).
+- **Keypad 5 toggles it.** `m1.tbl` and `m2.tbl` bind `SCAN_G_5` to
+  `MCMD_LOCK` on the turret, labelled `TURRET_LOCK`; `hero.tbl` has no such
+  row (*measured*). `World3D.dll`'s case for message 21 (`0x1000fcbf`) acts as
+  the key goes down. It reads property 179 through interface `0x16` and writes
+  back its negation (`0x1000fd49`).
+- **Nothing else passes 179** (*read*, as a search). Across the modules the
+  immediate appears only in those two places in `iron3d.dll` and those two in
+  `World3D.dll`, plus one unrelated string id (`iron3d.dll:0x10067df0`). None of
+  them is in `Behavior.dll` or `Wizard.dll`.
+- So the lock is on only for a unit the player drives at auto-driver level 0.
+  The hero never has it, and the AI never drives this way.
+
+**The gap** (*read*). The component setter (`0x1002eb70`) adds each change of
+the turret target's x to body `+0x38` (machine `+0x1ec`) and wraps it
+(`0x1002ec23`), whether or not the lock is on. At 0.5 the turret faces the way
+the hull does.
+
+**The hull's step** (*read*). The spin integrator (`0x10014780`) runs once a
+state step. Its dt is the step's length and its rates the live turn triple
+(`+0x1b0` `+0x24`):
+
+- **With no normalised turn pending,** the pending triple goes back to 0.5
+  (`0x10014a54`). The pending flag is body `+0x1a9`, machine `+0x35d`:
+  `SetNormAngle` sets it (`0x10004551`) and the spin setter clears it
+  (`0x10004491`).
+- **With the lock on as well,** the spin's z becomes
+  clamp(−(gap − 0.5) × 2π ÷ (live turn z × dt), −0.7, 0.7) (`0x10014a96`; the
+  bounds are at `0x1003bdd4` and `0x1003bdd0`). It replaces whatever the spin
+  setter wrote.
+- **The spin is a fraction of the live turn rate.** On each axis the step
+  turns the hull by (spin + the running gear's veer) × live turn × dt
+  (`0x10014b56`), plus the righting term.
+- **The gap pays the turn out.** It gains (spin z + veer) × live turn z × dt
+  ÷ 2π and wraps (`0x10014bc3`; the 1/2π is built at `0x10016550`). The step,
+  in turns, goes to body `+0x3c` (`0x10014bff`).
+
+**The turret holds its heading** (*read*). The control takt (`0x100059a0`)
+writes the turret's target x as gap − (1 − s) × step (`0x10005b13`), with s the
+step's phase. As the hull turns under the turret, the turret's aim relative to
+the hull falls back by the same angle, eased across the step. Once the gap is
+closed, it looks ahead.
+
+What follows (*derived*):
+
+- **The rate.** The hull turns toward the turret at up to 0.7 × the live yaw
+  rate, and closes a gap smaller than 0.7 × rate × dt in one step. The
+  per-axis clamp that follows (`0x10014c02`, |turn| ≤ rate × dt) never binds
+  on it.
+- **Every driven unit.** It works the same for walkers, wheels, tracks and
+  flyers: the branch tests only the two bytes, not the chassis.
+- **The spin keys.** With the lock on, `,` and `.` do nothing, since their
+  ±0.7 spin is replaced every step. With the lock off, the turret turns alone,
+  and they spin the hull at 0.7 × the live rate.
+- **The hero.** Its mouse queues a normalised turn instead
+  ([24-motion.md](24-motion.md#from-input-to-motion--read-and-measured)).
+
+**How fast, on shipped units** (*measured* data through the read formulas).
+The live yaw rate is authored × E × (1.5 r + 0.5)
+([24-motion.md](24-motion.md#what-sets-the-live-limits--read)). E is the fitted
+engine's drive, r the spare payload ÷ the payload. The figures are for an
+undamaged unit on ground factor 1:
+
+| unit | chassis | yaw rate authored | E | r | live | hull follows at | a quarter turn |
+|---|---|---:|---:|---:|---:|---:|---:|
+| Mission 02's warbot `tut2_f1.dat` | L-2f `r_b_02` | 4.2 | 0.8 | 0.202 | 2.70 rad/s | 1.89 rad/s | 0.83 s |
+| Mission 04's HQ `tut4_hq.dat` | L-32 `r_b_03` | 2.28 | 1.0 | 0.114 | 1.53 rad/s | 1.07 rad/s | 1.47 s |
+| Mission 04's helicopter `tut4_f1.dat` | T-2 `r_t_02` | 4.0 | 0.8 | 0.059 | 1.89 rad/s | 1.32 rad/s | 1.19 s |
+
+A turret's yaw channel turns at 0.5–0.85 turns a second, 3.1–5.3 rad/s. So the
+turret reaches the new heading first, and the hull comes round under it in
+about a second (*derived*).
 
 ## Gun sockets are the mesh's `Base_*` nodes — *measured*
 
