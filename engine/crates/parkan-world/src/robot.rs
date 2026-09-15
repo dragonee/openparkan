@@ -227,6 +227,8 @@ pub struct Robot {
     pub turret_devices: Vec<Item>,
     /// What sets its live limits.
     pub heft: Heft,
+    /// Its own camera's zoom (docs/30, "The zoom").
+    pub zoom: crate::camera::Zoom,
 }
 
 /// A controller's items that drive channels: its generic devices and its radars.
@@ -503,6 +505,7 @@ impl Robot {
             chassis_devices,
             turret_devices,
             heft,
+            zoom: crate::camera::Zoom::default(),
         }))
     }
 
@@ -875,7 +878,7 @@ impl Robot {
 
     /// The first-person eye (`Control.dll:0x100234c0`): `CameraCenter`'s position plus
     /// the shake, `TargetDirect`'s vector for the look and `CameraCenter`'s own vector
-    /// for the up, turned by free look ([`view`]).
+    /// for the up, turned by free look ([`view`]), with the field its zoom has reached.
     pub fn eye(&self) -> Option<Eye> {
         let (eye_point, look_point) = self.camera.as_ref()?;
         let (position, _) = self.walker.drawn(self.time_ms);
@@ -894,7 +897,7 @@ impl Robot {
             position: position + heading * eye + self.rig.shake.eye(self.time_ms / 1000.0),
             forward,
             up,
-            fov_x: values[2],
+            fov_x: self.zoom.field(values[2]),
             near: values[0],
         })
     }

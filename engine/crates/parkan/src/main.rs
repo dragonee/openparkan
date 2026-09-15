@@ -142,6 +142,9 @@ struct Args {
     /// other, before `--ticks` play; `--tilde` then presses the tilde once `--ticks` have played.
     wingmen: bool,
     tilde: bool,
+    /// `--zoom`: after `--ticks` play, Z is pressed and a quarter of a second plays, so a
+    /// screenshot shows the view zoomed.
+    zoom: bool,
     ticks: u32,
     hold: Vec<String>,
     /// `--press N` and `--release N`: the `--hold` keys go down after N of the `--ticks` (0 when
@@ -186,6 +189,7 @@ fn args() -> Result<Args> {
         capture: false,
         wingmen: false,
         tilde: false,
+        zoom: false,
         ticks: 0,
         hold: Vec::new(),
         press: 0,
@@ -216,6 +220,7 @@ fn args() -> Result<Args> {
             "--capture" => out.capture = true,
             "--wingmen" => out.wingmen = true,
             "--tilde" => out.tilde = true,
+            "--zoom" => out.zoom = true,
             "--build" => {
                 let v: Vec<f32> = value()?.split(',').map(str::parse).collect::<Result<_, _>>()?;
                 out.build = v.get(..2).map(|v| [v[0], v[1]]);
@@ -428,7 +433,8 @@ fn rehearse(play: &mut scene::Play, loaded: &scene::Loaded, args: &Args) {
     if args.headless && !kills.is_empty() {
         println!("killed mission objects {kills:?}");
     }
-    if args.tilde {
+    // A key pressed as the game's key runs it, its move played out.
+    let press = |play: &mut scene::Play, command: &str, ticks: usize| {
         let eye = play.eye();
         let view = parkan_world::play::View {
             eye: eye.position,
@@ -436,7 +442,17 @@ fn rehearse(play: &mut scene::Play, loaded: &scene::Loaded, args: &Args) {
             view_proj: glam::Mat4::IDENTITY,
             shift: false,
         };
-        play.command(parkan_formats::controls::CMD_JAMES_WINGMAN_MENU, &view);
+        play.command(command, &view);
+        for _ in 0..ticks {
+            play.update_input();
+            play.tick(TICK_MS, args.mouse);
+        }
+    };
+    if args.zoom {
+        press(play, parkan_formats::controls::CMD_JAMES_ZOOM_MODE, 15);
+    }
+    if args.tilde {
+        press(play, parkan_formats::controls::CMD_JAMES_WINGMAN_MENU, 0);
     }
 }
 

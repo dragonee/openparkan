@@ -537,6 +537,10 @@ presses a hero standing at it down), and which of Mission 04's units holds no mi
   the hero running holds still in its own panel, its legs moving, where the camera had jumped
   up to 0.26 m a tick with each stride, and the target panel looks along the line between the
   two as they are drawn.
+- Z zooms the driven unit's own view (docs/30, "The zoom"): each update its field steps 0.1
+  toward 0.2, eleven updates from the hero's 1.3, and back when Z is pressed again, which it
+  takes only at an end; every unit of the player's clan keeps its own zoom, and while the view is
+  zoomed the mouse filter's multiplier is 0.5 in place of `MOUSE_SENS` × 0.01.
 
 This directory also holds what the rest will follow:
 
@@ -658,6 +662,10 @@ walking under its arc drops the hero into the chamber below, and walking up the 
 field wins. `--at X,Y,YAW,Z` stands the hero on the highest floor at or below Z: `--mission
 MISSIONS/CAMPAIGN/CAMPAIGN.00/Mission.04 --skip-briefing --at 1172.2,1245.6,-2.434,80
 --outcome won --screenshot won.png` draws the field under the won panel.
+
+Z zooms the view of the unit the player drives to a field of 0.2 in eleven updates and slows
+the mouse to half; Z again widens it back. `--zoom` presses Z after `--ticks` play and a quarter
+of a second more, for a screenshot: `--skip-briefing --face m_targ.dat,150 --ticks 30 --zoom`.
 
 ## Checks
 
@@ -783,6 +791,7 @@ a row here. A row leaves this table when research closes it.
 | M14 | The target point the guided lock projects (the target list's `+4`), and whether `getTimer`, which times its beeps, runs on a clock or on `timeGetTime` | the target's sphere centre, as the target panel's frame takes it; game time | [35](../docs/35-hud.md#the-guided-lock--read) |
 | M14 | How an effect sprite's pre-lit vertices are coloured (draw flags 4, FVF `0x1e2`) | as a batch's emissive: the scene colour plus the material's ambient, held to 1 and decoded, times the texture; the laser draws red as the recording's does | [11](../docs/11-effects.md#not-resolved) |
 | M14 | Which matrix `AniMesh` slot `0x10` hands the effect manager for its argument 2, which carries a beam's muzzle with its shooter | node 0's world pose: the unit's placement and its chassis's node 0 as drawn | [29](../docs/29-weapons.md#not-established) |
+| M14 | How often the game frame runs, which paces a unit's zoom by 0.1 an update | once a 60 Hz tick | [30](../docs/30-turrets.md#not-established) |
 
 ### Read since the stand-in was written
 

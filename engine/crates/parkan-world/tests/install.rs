@@ -4254,6 +4254,54 @@ fn mission_04_is_won_by_the_hq_the_helicopters_captures_research_a_large_flyer_a
     eprintln!("won {:.1} s in", seconds(&play));
 }
 
+/// A game command as its key runs it, from the unit's own view.
+fn press_command(play: &mut parkan_world::play::Play, command: &str) {
+    let eye = play.eye();
+    let view = parkan_world::play::View {
+        eye: eye.position,
+        look: eye.forward,
+        view_proj: glam::Mat4::IDENTITY,
+        shift: false,
+    };
+    play.command(command, &view);
+}
+
+#[test]
+#[ignore = "needs the game install"]
+fn mission_01s_zoom_narrows_the_eye_to_0_2_in_eleven_updates_and_halves_the_mouse() {
+    use parkan_formats::controls::CMD_JAMES_ZOOM_MODE;
+
+    // docs/30-turrets.md, "The zoom": 0.1 an update toward 0.2, the mouse at 0.5 while zoomed.
+    let (mut play, _) = mission_01_play();
+    let tick = |play: &mut parkan_world::play::Play| {
+        play.tick(1000.0 / 60.0, [0.0; 2]);
+    };
+    tick(&mut play);
+    assert!((play.eye().fov_x - 1.3).abs() < 1e-6);
+    assert!((play.hero.pilot.sensitivity - 1.0).abs() < 1e-6, "MOUSE_SENS=100");
+    press_command(&mut play, CMD_JAMES_ZOOM_MODE);
+    let mut fields = Vec::new();
+    for _ in 0..12 {
+        tick(&mut play);
+        fields.push(play.eye().fov_x);
+    }
+    assert!((fields[10] - 0.2).abs() < 1e-5 && (fields[9] - 0.3).abs() < 1e-5, "{fields:?}");
+    assert!((fields[11] - fields[10]).abs() < 1e-6, "it holds at 0.2");
+    assert!((play.hero.pilot.sensitivity - 0.5).abs() < 1e-6);
+    // Mid-way a press is let be; at the end it turns back out.
+    press_command(&mut play, CMD_JAMES_ZOOM_MODE);
+    for _ in 0..3 {
+        tick(&mut play);
+    }
+    press_command(&mut play, CMD_JAMES_ZOOM_MODE);
+    for _ in 0..8 {
+        tick(&mut play);
+    }
+    assert!((play.eye().fov_x - 1.3).abs() < 1e-5, "{}", play.eye().fov_x);
+    tick(&mut play);
+    assert!((play.hero.pilot.sensitivity - 1.0).abs() < 1e-6);
+}
+
 #[test]
 #[ignore = "needs the game install"]
 fn mission_01s_own_panel_keeps_the_running_hero_steady_in_its_view() {

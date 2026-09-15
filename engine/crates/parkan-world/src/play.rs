@@ -12,7 +12,7 @@ use parkan_formats::control::{
 };
 use parkan_formats::controls::{
     CMD_ENTER_STATE, CMD_JAMES_AIM_TARGET, CMD_JAMES_SELECT_ENEMY, CMD_JAMES_SELECT_FRIEND,
-    CMD_JAMES_SELECT_TARGET, CMD_JAMES_WINGMAN_MENU,
+    CMD_JAMES_SELECT_TARGET, CMD_JAMES_WINGMAN_MENU, CMD_JAMES_ZOOM_MODE,
 };
 use parkan_formats::exp::Explosion;
 use parkan_formats::landmesh::FLAGS_LIQUID_BED_BIT;
@@ -330,6 +330,9 @@ pub struct Play {
     pub driving: Option<Driving>,
     /// Command mode's camera, kept between visits (docs/40).
     pub command: crate::command::Camera,
+    /// `Iron_3D.ini`'s `MOUSE_SENS` × 0.01, the mouse filter's multiplier while nothing is
+    /// zoomed.
+    pub mouse_sensitivity: f32,
     /// The commander's selection, lodes and build marks (docs/41).
     pub commander: crate::selection::Commander,
     /// The schemes, sites and construction spheres (docs/32).
@@ -738,6 +741,7 @@ impl Play {
             building_effects,
             driving: None,
             command: crate::command::Camera::default(),
+            mouse_sensitivity: crate::hero::mouse_sensitivity(game) * parkan_sim::input::SENSITIVITY_SCALE,
             commander: crate::selection::Commander::new(mission, &battle_objects),
             construction: crate::construction::Construction::new(mission, &battle_objects),
             economy: crate::economy::Economy::new(mission, &battle_objects),
@@ -1064,6 +1068,15 @@ impl Play {
                 self.auto_driver = (self.auto_driver + 1) % 3;
                 false
             }
+            // The driven unit's own view, view state 1 (`0x10072428`).
+            CMD_JAMES_ZOOM_MODE => {
+                if matches!(self.mode(), Mode::OnFoot | Mode::Driving(_)) {
+                    let robot = self.driven_mut();
+                    let widest = robot.rig.camera_values[2];
+                    robot.zoom.toggle(widest);
+                }
+                false
+            }
             CMD_JAMES_WINGMAN_MENU => {
                 let wingmen = self.wingmen().len();
                 self.selector.tilde(view.shift, wingmen);
@@ -1248,6 +1261,7 @@ impl Play {
     /// One tick: the hero, then every round that left one of its barrels, then the
     /// battle's frame, then the effects.
     pub fn tick(&mut self, dt_ms: f64, mouse: [f32; 2]) -> Vec<Event> {
+        self.sync_sensitivity();
         self.update_targets();
         self.tick_robots(dt_ms, mouse);
         // STAND-IN: docs/40-command-mode.md#not-established -- nothing read pops mode 3 when its HQ is
@@ -1350,6 +1364,7 @@ impl Play {
             }
         }
         self.follow_building_effects();
+        self.tick_views();
         // Flight effects follow their rounds. A round whose flight is over stays where it
         // stopped until its `+92` is up, and its effects go with it. Time modes 5–15 read the
         // round's speed over its top speed: the plasma bolt's and the missile's trails. Every
@@ -1784,12 +1799,47 @@ impl Play {
             .map_or(&self.hero.robot, |(_, r)| r)
     }
 
+    /// The view's own unit, to change.
+    fn driven_mut(&mut self) -> &mut Robot {
+        match self.driven_target().and_then(|d| self.robots.iter().position(|(t, _)| *t == d)) {
+            Some(r) => &mut self.robots[r].1,
+            None => &mut self.hero.robot,
+        }
+    }
+
     /// The eye the world is drawn from: command mode's camera, or the driven unit's.
     pub fn eye(&self) -> crate::robot::Eye {
         if self.mode().commands() {
             return self.command.eye();
         }
         self.driven().eye().unwrap_or_else(|| self.hero.eye())
+    }
+
+    /// A game frame's views (`0x1007d6e0`): the zoom of every unit of the player's clan steps.
+    ///
+    /// STAND-IN: docs/30-turrets.md#not-established -- how often the game frame runs, which
+    /// paces the zoom's steps: once a 60 Hz tick.
+    fn tick_views(&mut self) {
+        let widest = self.hero.rig.camera_values[2];
+        self.hero.zoom.step(widest);
+        let player = Some(self.player_clan);
+        for (t, robot) in &mut self.robots {
+            if self.units.get(*t).is_some_and(|u| u.clan == player) {
+                let widest = robot.rig.camera_values[2];
+                robot.zoom.step(widest);
+            }
+        }
+    }
+
+    /// The mouse filter's multiplier, as `0x100a4fc0` hands it on at each change of view: 0.5
+    /// while the driven unit's own view is zoomed, else `MOUSE_SENS` × 0.01.
+    fn sync_sensitivity(&mut self) {
+        let zoomed = self.driven().zoom.on;
+        let s = if zoomed { crate::camera::ZOOMED_SENSITIVITY } else { self.mouse_sensitivity };
+        match self.driving.as_mut() {
+            Some(d) => d.pilot.sensitivity = s,
+            None => self.hero.pilot.sensitivity = s,
+        }
     }
 
     /// A key or button to the unit the player drives.
