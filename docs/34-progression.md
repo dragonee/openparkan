@@ -251,8 +251,10 @@ would pass the test, but only an `OBJECTIVE_COMPLETE` ever runs it.
     objectives screen lists all six lines (*seen*,
     [below](#mission-04-teleport-end-to-end--derived)).
   - `CAMPAIGN.02/Mission.03`'s `bonus_objectives` names `objective1` twice.
-  A reader that keeps one value per key, as `openparkan.mission.load_cfg` and
-  the engine's `cfg::parse` do, loses a line from each.
+  A reader that keeps one value per key loses a line from each.
+  `openparkan.mission.objectives` and the engine's `cfg::objectives` read
+  every line (`load_cfg_lines`, `Block::lines`); `load_cfg` and a block's
+  `properties` still keep one value per key.
 - **Counting every line, all 92** literal objective values fit their mission's
   primary + bonus list. Counting a key once, 90 fit: `c2m3p`'s
   `OBJECTIVE_COMPLETE 2` and `OBJECTIVE_PROGRESS 2` fall past a list of 2,
@@ -844,7 +846,7 @@ The mission is won by `Hero_Teleported` alone, whatever else is done.
 A reader that keeps one value per key lists five objectives. It puts "6. Get
 to the Teleport…" at index 4. The Teleport's capture would then complete it,
 and with 0–3 already done, the mission would be won at the capture, before the
-hero goes through.
+hero goes through. The readers here keep every line.
 
 **The minds.** `Plr` has 3. The hero and the helicopter take two, if each holds
 one as on Mission 03

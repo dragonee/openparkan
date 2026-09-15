@@ -11,11 +11,15 @@ use crate::cursor::latin1;
 pub const PRIMARY_OBJECTIVES: &str = "primary_objectives";
 pub const BONUS_OBJECTIVES: &str = "bonus_objectives";
 
-/// One `object NAME … end` block: its properties in the order they first appear.
+/// One `object NAME … end` block: its properties in the order they first appear, and every
+/// `key = value` line as the file writes it.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Block {
     pub name: String,
     pub properties: Vec<(String, String)>,
+    /// Every line, a repeated key kept: the objective loader walks a block's property
+    /// records by index and never looks a key up (`iron3d.dll:0x1006a832`).
+    pub lines: Vec<(String, String)>,
 }
 
 impl Block {
@@ -25,6 +29,7 @@ impl Block {
     }
 
     fn set(&mut self, key: String, value: String) {
+        self.lines.push((key.clone(), value.clone()));
         match self.properties.iter_mut().find(|(k, _)| *k == key) {
             Some(slot) => slot.1 = value,
             None => self.properties.push((key, value)),
@@ -82,7 +87,8 @@ fn lines(text: &str) -> Vec<&str> {
 /// Text from a `#` on is a comment. A header is the word `object` on its own:
 /// `objective1 = …` starts with the same six letters and is a property. A repeated
 /// block name adds to the first block of that name, and a repeated key keeps its
-/// place and takes the later value. Values lose surrounding quotes.
+/// place in `properties` and takes the later value; `lines` keeps both. Values lose
+/// surrounding quotes.
 pub fn parse(data: &[u8]) -> Blocks {
     let text = latin1(data);
     let mut blocks: Vec<Block> = Vec::new();
@@ -103,7 +109,7 @@ pub fn parse(data: &[u8]) -> Blocks {
             current = Some(match blocks.iter().position(|b| b.name == name) {
                 Some(at) => at,
                 None => {
-                    blocks.push(Block { name, properties: Vec::new() });
+                    blocks.push(Block { name, ..Block::default() });
                     blocks.len() - 1
                 }
             });
@@ -126,13 +132,14 @@ pub struct Objective {
     pub exempt: bool,
 }
 
-/// The objective list a `mission.cfg` gives, in script order.
+/// The objective list a `mission.cfg` gives, in script order: every line, a repeated key
+/// kept, as Mission 04's `objective4` twice (docs/34-progression.md).
 pub fn objectives(blocks: &Blocks) -> Vec<Objective> {
     let of = |name: &str, exempt: bool| {
         blocks
             .get(name)
             .into_iter()
-            .flat_map(|b| b.properties.iter())
+            .flat_map(|b| b.lines.iter())
             .map(move |(_, text)| Objective { text: text.clone(), exempt })
     };
     of(PRIMARY_OBJECTIVES, false).chain(of(BONUS_OBJECTIVES, true)).collect()
@@ -260,6 +267,7 @@ mod tests {
         object primary_objectives\r\n\
         \x20 objective1  = \"1. Destroy all the targets\"   # a comment\r\n\
         \x20 objective2  = \"2. Capture the neutral warbots\"\r\n\
+        \x20 objective2  = \"2b. Capture them again\"\r\n\
         end\r\n\
         \r\n\
         object bonus_objectives\r\n\
@@ -282,11 +290,13 @@ mod tests {
         let primary = b.get("primary_objectives").unwrap();
         assert_eq!(primary.get("objective1"), Some("1. Destroy all the targets"));
         assert_eq!(primary.properties.len(), 3, "a repeated block adds to the first");
+        assert_eq!(primary.get("objective2"), Some("2b. Capture them again"), "the later value");
+        assert_eq!(primary.lines.len(), 4, "every line kept");
         assert_eq!(b.get("mission").unwrap().properties, vec![("only_briefing".into(), "true".into())]);
     }
 
     #[test]
-    fn objectives_are_primary_then_bonus() {
+    fn objectives_are_primary_then_bonus_every_line_kept() {
         let list = objectives(&parse(CFG.as_bytes()));
         let texts: Vec<(&str, bool)> = list.iter().map(|o| (o.text.as_str(), o.exempt)).collect();
         assert_eq!(
@@ -294,6 +304,7 @@ mod tests {
             [
                 ("1. Destroy all the targets", false),
                 ("2. Capture the neutral warbots", false),
+                ("2b. Capture them again", false),
                 ("3. Destroy the enemy", false),
                 ("Stay alive", true)
             ]

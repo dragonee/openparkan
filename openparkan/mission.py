@@ -684,9 +684,21 @@ def load_cfg(path: str | Path) -> dict[str, dict[str, str]]:
 
     A header is the word ``object`` on its own: ``objective1 = ...`` inside
     ``primary_objectives`` starts with the same six letters and is a property.
+    A repeated key keeps its place and takes the later value; see
+    :func:`load_cfg_lines` for every line.
     """
-    out: dict[str, dict[str, str]] = {}
-    current: dict[str, str] | None = None
+    return {name: dict(lines) for name, lines in load_cfg_lines(path).items()}
+
+
+def load_cfg_lines(path: str | Path) -> dict[str, list[tuple[str, str]]]:
+    """Every ``key = value`` line of each ``object NAME ... end`` block, in file order.
+
+    A repeated key is kept: the objective loader walks a block's property
+    records by index and never looks a key up (``iron3d.dll:0x1006a832``), so
+    Mission 04's ``objective4`` written twice is two objectives.
+    """
+    out: dict[str, list[tuple[str, str]]] = {}
+    current: list[tuple[str, str]] | None = None
     for raw in Path(path).read_bytes().decode("latin-1").splitlines():
         line = raw.split("#", 1)[0].strip()
         if not line:
@@ -696,10 +708,10 @@ def load_cfg(path: str | Path) -> dict[str, dict[str, str]]:
             current = None
         elif words[0].lower() == "object":
             name = words[1].strip() if len(words) > 1 else ""
-            current = out.setdefault(name, {})
+            current = out.setdefault(name, [])
         elif current is not None and "=" in line:
             key, value = line.split("=", 1)
-            current[key.strip()] = value.strip().strip('"')
+            current.append((key.strip(), value.strip().strip('"')))
     return out
 
 
@@ -723,7 +735,8 @@ class Objective:
 
 
 def objectives(path: str | Path) -> list[Objective]:
-    """The objective list ``mission.cfg`` at ``path`` gives, in script order."""
-    blocks = load_cfg(path)
-    return ([Objective(t, False) for t in blocks.get(PRIMARY_OBJECTIVES, {}).values()]
-            + [Objective(t, True) for t in blocks.get(BONUS_OBJECTIVES, {}).values()])
+    """The objective list ``mission.cfg`` at ``path`` gives, in script order: every
+    line, a repeated key kept."""
+    blocks = load_cfg_lines(path)
+    return ([Objective(t, False) for _, t in blocks.get(PRIMARY_OBJECTIVES, [])]
+            + [Objective(t, True) for _, t in blocks.get(BONUS_OBJECTIVES, [])])

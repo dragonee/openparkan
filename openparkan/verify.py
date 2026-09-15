@@ -15568,7 +15568,7 @@ def check_progression(check, game: Path) -> None:
 
     kinds = {names[k] for k in ("OBJECTIVE_COMPLETE", "OBJECTIVE_FAILED",
                                 "OBJECTIVE_PROGRESS")}
-    fits = total = 0
+    fits = fits_one_per_key = total = 0
     misses: set[str] = set()
     m01_values: list[int] = []
     for d, m in loaded:
@@ -15576,6 +15576,9 @@ def check_progression(check, game: Path) -> None:
         if not cfg.exists():
             continue
         size = len(mission.objectives(cfg))
+        blocks = mission.load_cfg(cfg)
+        size_one_per_key = sum(len(blocks.get(b, {})) for b in (mission.PRIMARY_OBJECTIVES,
+                                                                  mission.BONUS_OBJECTIVES))
         for _, script in clan_scripts(m):
             for handler in script.handlers:
                 for i, node in enumerate(handler.nodes):
@@ -15587,19 +15590,21 @@ def check_progression(check, game: Path) -> None:
                         continue
                     total += 1
                     fits += value < size
-                    if value >= size:
+                    fits_one_per_key += value < size_one_per_key
+                    if value >= size_one_per_key:
                         misses.add(script.source.stem)
                     if d == d01:
                         m01_values.append(value)
     listed = mission.objectives(d01 / "mission.cfg")
     c2m3 = mission.objectives(game / "MISSIONS/CAMPAIGN/CAMPAIGN.02/Mission.03/mission.cfg")
     check("progression: a script names an objective by its place in the list",
-          total and fits == total - 2 and misses == {"c2m3p"}
+          total and fits == total and fits_one_per_key == total - 2 and misses == {"c2m3p"}
+          and len(c2m3) == 3
           and len(listed) == 3 and not any(o.exempt for o in listed)
           and sorted(m01_values) == [0, 1, 2],
           f"{fits}/{total} objective values the scripts pass fit their mission's "
-          f"primary + bonus list; the 2 that do not are c2m3p's, past a list of "
-          f"{len(c2m3)}; "
+          f"primary + bonus list, every line kept; one value per key, {fits_one_per_key} "
+          f"fit, the 2 that do not c2m3p's, whose list is {len(c2m3)} lines; "
           f"Mission 01 lists {len(listed)} primary objectives and completes "
           f"{sorted(m01_values)}")
 
@@ -16426,16 +16431,19 @@ def check_mission_04(check, game: Path) -> None:
     by_index = {msg.index: msg for msg in briefing.messages(d04 / briefing.MESSAGES)}
     helps = sorted(k for k, msg in by_index.items() if msg.info_system)
     lines = _cfg_lines(d04 / "mission.cfg", mission.PRIMARY_OBJECTIVES)
-    one_per_key = mission.objectives(d04 / "mission.cfg")
+    listed = [o.text for o in mission.objectives(d04 / "mission.cfg")]
+    one_per_key = list(mission.load_cfg(d04 / "mission.cfg")[mission.PRIMARY_OBJECTIVES].values())
     c2m3 = _cfg_lines(game / "MISSIONS/CAMPAIGN/CAMPAIGN.02/Mission.03/mission.cfg",
                       mission.BONUS_OBJECTIVES)
     completed = sorted(o for *_, obj, _, _ in tests for o in obj)
     check("Mission 04: six objective lines, a repeated key, and five completed",
-          len(lines) == 6 and lines[3].startswith("4. Develop") and len(one_per_key) == 5
-          and one_per_key[3].text.startswith("5.") and completed == [0, 1, 2, 3, 4]
+          len(lines) == 6 and lines[3].startswith("4. Develop") and listed == lines
+          and len(one_per_key) == 5
+          and one_per_key[3].startswith("5.") and completed == [0, 1, 2, 3, 4]
           and len(c2m3) == 2 and sorted(by_index) == list(range(18)) and helps == [15, 16, 17],
-          f"primary_objectives writes {len(lines)} lines, objective4 twice, where a reader "
-          f"keeping one value per key finds {len(one_per_key)}; the script completes "
+          f"primary_objectives writes {len(lines)} lines, objective4 twice, and "
+          f"mission.objectives lists all {len(listed)}, where one value per key finds "
+          f"{len(one_per_key)}; the script completes "
           f"{completed}, so line 5, '{lines[5]}', is never completed; "
           f"CAMPAIGN.02/Mission.03's bonus list writes {len(c2m3)} lines under one key; "
           f"messages 0-17, info_system on {helps}")

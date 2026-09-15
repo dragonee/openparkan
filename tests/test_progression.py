@@ -71,3 +71,17 @@ def test_objectives_are_primary_then_bonus(tmp_path):
         mission.Objective("2. Capture the neutral warbots", False),
         mission.Objective("Keep the bridge", True),
     ]
+
+
+def test_a_repeated_objective_key_is_two_objectives(tmp_path):
+    # Mission 04 writes objective4 twice; the game lists both lines.
+    text = CFG.replace('  objective2  = "2. Capture the neutral warbots"\n',
+                       '  objective2  = "2. Capture the neutral warbots"\n'
+                       '  objective2  = "3. Destroy the enemy"\n')
+    path = write(tmp_path, text)
+    assert [o.text for o in mission.objectives(path)] == [
+        "1. Destroy all the targets", "2. Capture the neutral warbots",
+        "3. Destroy the enemy", "Keep the bridge"]
+    assert mission.load_cfg(path)["primary_objectives"] == {
+        "objective1": "1. Destroy all the targets", "objective2": "3. Destroy the enemy"}
+    assert len(mission.load_cfg_lines(path)["primary_objectives"]) == 3
