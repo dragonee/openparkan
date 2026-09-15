@@ -28783,3 +28783,12 @@ kind = "function"
 name = "CD object slot 3: MCI_PLAY a track to the next, flag 2 looping, its end time at +0x38"
 read = true
 doc = "docs/34-progression.md"
+
+# --- a captured unit's acknowledgement, ../docs/27-ownership.md ----------------
+[[entry]]
+module = "iron3d.dll"
+at = "0x10072054"
+kind = "site"
+name = "Enter on a neutral unit not boarded: its record +0x30 picks an acknowledgement voice (0x1008e840), queued through 0x10061ac0"
+read = true
+doc = "docs/27-ownership.md"

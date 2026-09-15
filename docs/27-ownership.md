@@ -715,6 +715,20 @@ Capturing a bot is not done at a pod. It is the hero's **Enter** —
      word is `0xfffe`), a unit with no class-1 turret, and one whose turret's
      node has no life left (property `0x52`, the component's node life).
    - So **a bot whose turret is shot off cannot be boarded**.
+   - **A captured unit the hero does not board answers** (`0x10072050`–`0x100720b3`):
+     its record's `+0x30` picks a voice as an order's acknowledgement does
+     (`0x1008e840`; `_S` for 1 and 2, `_B` for 4 and 5, plain otherwise, never the
+     voice given last), which goes through `0x10061ac0` with no speaker and so
+     queues ([31-packages.md](31-packages.md#the-wingman-menu-from-first-person--read-and-measured)).
+     It is one of `VOICE_ACKNOWLEDGE`, `VOICE_AFFIRMATIVE`, `VOICE_YES_SIR`,
+     `VOICE_OK` and `VOICE_EXECUTE`, not `VOICE_SELECTED`.
+   - *Measured* in Mission 01's recording, where the hero takes `helic` (`r_t_02`,
+     class 1) and `tut1_mf1` (`r_m_02`, class 3): after the two "unit detected"
+     voices (`vc_u_det.wav`, found at 226.8 s and 228.4 s, correlation 0.70 and
+     0.78), `vr_yes_sir_s.wav` starts at 230.00 s (0.45), `vr_okay.wav` at 230.69 s
+     (0.58) and `vr_yes_sir_s.wav` again at 231.43 s (0.43), each where the one
+     before it ends, before the second objective's voice at 232.1 s. `vr_sel.wav`
+     and its `_S` and `_B` sets are found nowhere above 0.18.
 4. **If not,** Enter only boards a bot of the player's own clan. An enemy's or
    an ally's bot cannot be taken this way.
 

@@ -9140,6 +9140,34 @@ def check_mission_03_ways(check, game: Path) -> None:
           f"triangle flags, tilt from level): {sorted(near)}")
 
 
+def check_capture_voice(check, game: Path) -> None:
+    """A neutral unit the hero's Enter takes and does not board answers with an order's
+    acknowledgement voice (docs/27, "A neutral unit is taken by the hero")."""
+    path = game / "iron3d.dll"
+    if not path.exists():
+        return
+    at = _image_at(path.read_bytes())
+
+    def calls(va: int) -> int:
+        return va + 5 + struct.unpack("<i", at(va + 1, 4))[0]
+
+    picked = (at(0x10072050, 2) == bytes.fromhex("84db")
+              and at(0x10072054, 3) == bytes.fromhex("8b7630")
+              and at(0x10072068, 1) == b"\xe8" and calls(0x10072068) == 0x1008E840
+              and at(0x100720A0, 2) == bytes.fromhex("6a00")
+              and at(0x100720B3, 1) == b"\xe8" and calls(0x100720B3) == 0x10061AC0)
+    cfg = game / "ui" / "game_resources.cfg"
+    found = resources.descriptors(cfg) if cfg.is_file() else []
+    voices = {n: (resources.bound(found, n) or (None, None))[1]
+              for n in ("VOICE_OK", "VOICE_YES_SIR_S", "VOICE_SELECTED")}
+    check("iron3d.dll: a captured unit not boarded picks its acknowledgement by record +0x30 "
+          "and queues it",
+          picked and voices == {"VOICE_OK": "vr_okay.wav", "VOICE_YES_SIR_S": "vr_yes_sir_s.wav",
+                                "VOICE_SELECTED": "vr_sel.wav"},
+          f"0x10072054 reads +0x30 into 0x1008e840, 0x100720b3 plays through 0x10061ac0 with no "
+          f"speaker: {picked}; {voices}")
+
+
 def check_unit_capture(check, game: Path) -> None:
     """A small warbot's capture (docs/31, "The capture, tick by tick"): the search task's
     target, a flyer's landing at a contour corner, the walk to the pod, the capture's voices,
@@ -20660,7 +20688,7 @@ def run(game: Path) -> int:
         check_building_lighting,
         check_building_ground,
         check_building_route, check_mission_03_ways,
-        check_unit_capture, check_mission_04_capture,
+        check_unit_capture, check_capture_voice, check_mission_04_capture,
         check_repair,
         check_chassis, check_weapons,
         check_firing,
