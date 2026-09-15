@@ -214,8 +214,12 @@ Leaving ends in `stdClearKeyboard`, which removes that pending character
   (`0x100634ad`).
 - **Otherwise eight places are tried** at r = the bot's sphere radius + the
   hero's (the records' `+0x94`, the radius of the sphere interface `0x20`
-  answers, filled at `0x1007e5f7`), at angles i × π/4 from +x, i = 0…7
-  (`0x100633ce`): (bot x + r cos, bot y + r sin). The first that passes wins:
+  slot 3 answers to kind 1 and an all-zero request, `0x1007e5f2`–`0x1007e60e`:
+  the object's node sphere,
+  [24-motion.md](24-motion.md#finding-the-ground--read)), at angles i × π/4
+  from +x, i = 0…7 (`0x100633ce`): (bot x + r cos, bot y + r sin). On the L-2f
+  and the hero that is 11.84 + 1.59 = 13.43 (*measured*). The first that
+  passes wins:
   - `IWorld` slot 8's vertical query for **landscape** faces (object class 1,
     mask 2: `Terrain.dll:0x10025ba0`, table `0x1009a5f0`) must find one there;
   - that face must not be a liquid surface (world face flag `0x200`,
@@ -303,19 +307,26 @@ and hidden.
 | 249.3 → 249.4 | a hard cut into the bot's cockpit, blue and yellow frame; weapons LAL365, LAL365, LFT; the right panel shows the bot; the box turns to *"Manual control of warbots…"* from the Information assistant (message 100); the wingman line is gone |
 | 255–322 | flying to the island, firing, setting down by the Outpost |
 | 311.6 | a box about large warbots, which expires at 331.6 |
-| 328 → 331.5 | setting down by the Outpost: the altitude figure falls 21, then 11 at 330 s, and holds 11 at 331.5 s while the speed figure falls from 24 to 6 |
+| 326 → 331.5 | setting down by the Outpost, sampled twice a second: the altitude figure falls 33, 29, 26, 23, 19, 16, 13, then 11 from 329.5 s, and holds 11 to 331.5 s while the speed figure falls from 24 to 6; the target panel reads the Small Outpost 31–33 m off |
 | 331.7 → 331.8 | a hard cut to the hero standing beside the bot, looking at it; the hero's weapons return, and the wingman line with the bot |
+| 332 → 335 | the hero's altitude figure 6, then 3 from 332.5 s as it stands |
 
 Neither cut fades or moves the camera between the two views.
 
 **The altitude it was left at** (*derived*). The figure is the record's
-`+0xc` over the water at z 150, and the height test above reads the same
-field. Resting on the joined sphere
-([24-motion.md](24-motion.md#finding-the-ground--read)), the L-2f reads 11 or
-12 on the island's ground, 150–151.67. Getting out passes only where it reads
-11: a place 14.4 m out must lie less than 10 below it. On the chassis's own
-sphere it would read 8 or 9, and any place would pass. So the recording's 11,
-and the hero getting out, fit the joined sphere.
+`+0xc`, rounded, over the water at z 150, and the height test above reads the
+same field. The descent stops at 11 from about 3.3 a half second, as the
+ground contact's lift stops a sinking flyer, and the target panel puts the
+Outpost 31–33 m off: the bot rests on the island's flat ground at 151.67, which
+runs from the Outpost's walls to its shores. Resting on the agent's sphere's
+radius about the node sphere's centre
+([24-motion.md](24-motion.md#finding-the-ground--read)), the L-2f's origin
+stands 9.67 over it: 161.34, which reads **11**, and every place 13.43 m out on
+the same ground lies 9.67 below, so it passes. The hero comes out standing
+with its origin 1.40 over the ground, 153.07, which reads **3** (*measured* on
+openparkan's engine). On the agent's sphere alone the bot would read 12 there
+and every place about it would be refused; on the chassis's own sphere it
+would read 9.
 
 ## For an engine
 

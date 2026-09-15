@@ -5876,7 +5876,7 @@ read = true
 module = "Control.dll"
 at = "0x1001a487"
 kind = "site"
-name = "ground contact: the body sphere from control +0x24 slot 9 with 2 -- the agent's joined sphere in world space"
+name = "ground contact: r from control +0x24 (interface 0x18) slot 9 with 2 -- the agent's sphere's radius; its centre is not kept"
 doc = "docs/24-motion.md"
 read = true
 [[entry]]
@@ -11158,7 +11158,7 @@ read = true
 module = "Control.dll"
 at = "0x1001a518"
 kind = "site"
-name = "ground contact: second sphere (+0x28 slot 3): centre +0x98, radius r2 held to 7.5 only on objects with flag 0x1000000"
+name = "ground contact: second sphere (+0x28 = interface 0x20 slot 3, the node sphere): centre +0x98, radius r2 held to 7.5 only on objects with flag 0x1000000"
 doc = "docs/24-motion.md"
 read = true
 
@@ -28800,3 +28800,59 @@ kind = "site"
 name = "srand(timeGetTime()): the seed the CD player's rand() picks tracks from"
 read = true
 doc = "docs/34-progression.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x10007922"
+kind = "site"
+name = "control init: interface 0x18 into +0x24, then interface 0x20 into +0x28 (0x10007932)"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001a591"
+kind = "site"
+name = "ground contact: the interface 0x20 answer's centre (esp+0x98..0xa0) copied to +0x98"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x1000f5c8"
+kind = "site"
+name = "interface 0x20 slot 3: an object request equal to the default answers the node sphere +0x124/+0x130; another the agent's sphere (0x1000f62e)"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x1000f694"
+kind = "site"
+name = "interface 0x20 slot 3, a node: its box (slot 4) as a sphere, centre the diagonal's middle, radius half the diagonal"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10009e0a"
+kind = "site"
+name = "node sphere into +0x124/+0x130: every node whose flags pass the masks, its sphere joined as the parts' are"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x1000c7f0"
+kind = "function"
+name = "node flag masks: required 0x1002652c = 0, forbidden 0x10026530 = 1 (interior)"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1007e5f2"
+kind = "site"
+name = "unit record bind: interface 0x20 slot 3 asked with kind 1 and the all-zero request 0x1010c03c -- the node sphere"
+read = true
+doc = "docs/39-boarding.md"

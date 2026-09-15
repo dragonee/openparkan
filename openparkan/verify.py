@@ -19239,38 +19239,133 @@ def check_live_limits(check, game: Path) -> None:
           close, f"(E, r, live top m/s, live yaw rad/s): {seen}")
 
 
-#: docs/24's joined spheres the ground contact takes: path -> (radius, centre z below the origin).
-JOINED_SPHERES = {"UNITS\\UNITS\\BATTLE\\tut4_f1.dat": (2.4456, -0.796),
-                  "UNITS\\bld_unit_-2147483647.dat": (12.2565, -2.7534)}
+#: docs/24's body spheres: path -> (the parts' sphere's radius, the node sphere's centre z, the
+#: node sphere's radius, the origin over flat ground at rest).
+BODY_SPHERES = {"UNITS\\UNITS\\BATTLE\\tut4_f1.dat": (2.4456, -0.5953, 1.859, 3.04),
+                "UNITS\\bld_unit_-2147483647.dat": (12.2565, -2.1682, 11.8352, 9.67)}
 #: The ground contact holds a radius under 20 to 7.5 (Control.dll:0x1001a48e).
 CONTACT_RADIUS_HOLD = (20.0, 7.5)
+#: Tut_2's island by the Outpost, and its water (docs/39, "The altitude it was left at").
+ISLAND_GROUND, TUT2_WATER = 151.67, 150.0
 
 
-def check_joined_sphere(check, game: Path) -> None:
-    """The ground contact's sphere is the agent's joined one: where a flyer rests over ground."""
+def _join_spheres(spheres) -> tuple[tuple[float, ...], float]:
+    """Spheres joined as AniMesh.dll:0x10009510 joins them: centres weighted by radii, and a
+    radius reaching the farthest."""
+    weight = sum(r for _, r in spheres)
+    centre = (tuple(sum(c[k] * r for c, r in spheres) / weight for k in range(3))
+              if weight else (0.0, 0.0, 0.0))
+    return centre, max((math.dist(c, centre) + r for c, r in spheres), default=0.0)
+
+
+def _parts_sphere(asm, parts) -> tuple[tuple[float, ...], float]:
+    """The agent's sphere: its parts' header spheres at their mounts, joined."""
+    spheres = []
+    for part in parts:
+        mesh = asm.mesh(part.ref)
+        if mesh is not None and mesh.volume:
+            spheres.append((objmesh.apply(part.pose, mesh.volume.centre), mesh.volume.radius))
+    return _join_spheres(spheres)
+
+
+def _node_sphere(asm, parts) -> tuple[tuple[float, ...], float]:
+    """The node sphere (AniMesh.dll:0x10009e0a): every exterior node but the model's node 0,
+    its level-0 slot's box through the node's pose as a sphere about the box's diagonal, joined;
+    a node with no level-0 slot a point at its origin."""
+    spheres = []
+    for part in parts:
+        mesh = asm.mesh(part.ref)
+        if mesh is None:
+            continue
+        for n, node in enumerate(mesh.nodes):
+            if n == 0 or node.flags & 1:
+                continue
+            pose = objmesh.compose(part.pose, mesh.world_pose(n))
+            index = node.slot_index[0]
+            if index == objmesh.NO_SLOT or index >= len(mesh.slots):
+                spheres.append((objmesh.apply(pose, (0.0, 0.0, 0.0)), 0.0))
+                continue
+            lo, hi = mesh.slots[index].aabb_min, mesh.slots[index].aabb_max
+            mid = tuple((a + b) / 2 for a, b in zip(lo, hi, strict=True))
+            spheres.append((objmesh.apply(pose, mid), math.dist(lo, hi) / 2))
+    return _join_spheres(spheres)
+
+
+def check_body_sphere(check, game: Path) -> None:
+    """The ground contact holds the body by the agent's sphere's radius about the node sphere's
+    centre: where a flyer rests, and whether the L-2f lets the hero out on flat ground."""
     asm = assembly.Assembly(game)
     seen = {}
-    for path in JOINED_SPHERES:
-        spheres = []
-        for part in asm.parts(mission.KIND_UNIT, path):
-            mesh = asm.mesh(part.ref)
-            if mesh is not None and mesh.volume:
-                spheres.append((objmesh.apply(part.pose, mesh.volume.centre), mesh.volume.radius))
-        weight = sum(r for _, r in spheres)
-        centre = tuple(sum(c[k] * r for c, r in spheres) / weight for k in range(3))
-        radius = max(math.dist(c, centre) + r for c, r in spheres)
+    for path in BODY_SPHERES:
+        parts = asm.parts(mission.KIND_UNIT, path)
+        _, radius = _parts_sphere(asm, parts)
+        centre, node_radius = _node_sphere(asm, parts)
         held = radius if radius >= CONTACT_RADIUS_HOLD[0] else min(radius, CONTACT_RADIUS_HOLD[1])
-        rest = round(held - centre[2], 2)
-        seen[path] = (round(radius, 4), round(centre[2], 4), len(spheres), rest)
-    heli, l2f = (seen[p] for p in JOINED_SPHERES)
-    check("UNITS: a flyer rests on its joined sphere, the L-2f's origin 10.25 over flat ground",
-          all(abs(seen[p][0] - r) < 1e-3 and abs(seen[p][1] - z) < 1e-3
-              for p, (r, z) in JOINED_SPHERES.items())
-          and heli[2] == 4 and l2f[2] == 6 and l2f[3] == 10.25,
-          f"(radius, centre z, parts, origin over the ground at rest): tut4_f1 {heli}, "
-          f"L-2f {l2f}; "
-          f"Tut_2's island 150-151.67 under water at 150 puts the L-2f's altitude at 10-12, "
-          f"the recording's 11")
+        seen[path] = (round(radius, 4), round(centre[2], 4), round(node_radius, 4),
+                      round(held - centre[2], 2))
+    _, hero = _node_sphere(asm, asm.parts(mission.KIND_UNIT, "UNITS\\UNITS\\HERO\\tut1_p.dat"))
+    l2f = seen["UNITS\\bld_unit_-2147483647.dat"]
+    altitude = round(ISLAND_GROUND + l2f[3] - TUT2_WATER)
+    check("UNITS: a flyer rests on the agent's sphere's radius about the node sphere's centre, "
+          "the L-2f's origin 9.67 over flat ground",
+          all(all(abs(a - b) < 2e-3 for a, b in zip(seen[p], want, strict=True))
+              for p, want in BODY_SPHERES.items())
+          and l2f[3] < 10.0 and altitude == 11,
+          f"(agent's radius, node centre z, node radius, origin over the ground at rest): {seen}; "
+          f"on Tut_2's island at {ISLAND_GROUND} the L-2f reads altitude {altitude} over the "
+          f"water, "
+          f"the recording's 11, and every place about it on flat ground lies less than 10 below; "
+          f"the hero's node sphere is {hero:.2f}, so the places stand {l2f[2] + hero:.2f} out")
+
+    paths = [game / name for name in ("Control.dll", "AniMesh.dll", "iron3d.dll")]
+    if not all(p.exists() for p in paths):
+        return
+    ctl, ani, iron = (_image_at(p.read_bytes()) for p in paths)
+    sites = [
+        # the control asks its agent for interface 0x18 into +0x24 and 0x20 into +0x28
+        (ctl, 0x10007922, b"\x8d\x4d\x24"), (ctl, 0x10007926, b"\xba\x18\x00\x00\x00"),
+        (ctl, 0x10007932, b"\x8d\x4d\x28"), (ctl, 0x10007936, b"\xba\x20\x00\x00\x00"),
+        # the ground contact: +0x24 slot 9 answers into esp+0x68, r at +0x74; +0x28 slot 3 into
+        # esp+0x98, whose centre goes to +0x98; the flyer's lift is ground z - centre z against r
+        (ctl, 0x1001A487, b"\xff\x51\x24"), (ctl, 0x1001A48A, b"\xd9\x44\x24\x74"),
+        (ctl, 0x1001A4FB, b"\x8d\x94\x24\x98\x00\x00\x00"), (ctl, 0x1001A518, b"\xff\x50\x0c"),
+        (ctl, 0x1001A591, b"\x8b\x8c\x24\x98\x00\x00\x00"),
+        (ctl, 0x1001A598, b"\x8b\x94\x24\x9c\x00\x00\x00"),
+        (ctl, 0x1001A59F, b"\x8d\x86\x98\x00\x00\x00"), (ctl, 0x1001A5C3, b"\x89\x48\x08"),
+        (ctl, 0x1001B3C3, b"\xd9\x46\x78"), (ctl, 0x1001B3C6, b"\xd8\xa6\xa0\x00\x00\x00"),
+        (ctl, 0x1001B3CC, b"\xd9\x44\x24\x74"),
+        # AniMesh: interface 0x20 is the object at +8; 0x18 slot 9 reads +0x110 from +4, the
+        # parts' sphere at +0x114; 0x20 slot 3 answers a request equal to the default from
+        # +0x11c/+0x128 from +8, the node sphere at +0x124/+0x130, another from the parts' sphere
+        (ani, 0x10006EB4, b"\x8d\x41\xf4"), (ani, 0x10006B46, b"\xc7\x45\x08\x0c\x05\x02\x10"),
+        (ani, 0x10014594, b"\x05\x10\x01\x00\x00"),
+        (ani, 0x1000F5C8, b"\x8b\x8e\x28\x01\x00\x00"),
+        (ani, 0x1000F5CE, b"\x8b\x96\x1c\x01\x00\x00"),
+        (ani, 0x1000F62E, b"\x8b\x8e\x18\x01\x00\x00"),
+        (ani, 0x1000F634, b"\x8b\x96\x0c\x01\x00\x00"),
+        # the node sphere worked out into +0x124 over the nodes whose flags pass masks 0 and 1
+        (ani, 0x10009E0A, b"\x8d\x9d\x24\x01\x00\x00"), (ani, 0x10009F03, b"\xff\x50\x0c"),
+        (ani, 0x1000C7F5, b"\xc7\x05\x2c\x65\x02\x10\x00\x00\x00\x00"),
+        (ani, 0x1000C804, b"\xc7\x05\x30\x65\x02\x10\x01\x00\x00\x00"),
+        # iron3d: the record's +0x88..+0x94 from interface 0x20 slot 3 with 1; leaving sums +0x94
+        (iron, 0x1007E5DF, b"\xba\x20\x00\x00\x00"), (iron, 0x1007E5F2, b"\x68\x3c\xc0\x10\x10"),
+        (iron, 0x1007E5F7, b"\x81\xc6\x88\x00\x00\x00"), (iron, 0x1007E608, b"\x6a\x01"),
+        (iron, 0x10063384, b"\xd9\x86\x94\x00\x00\x00"),
+        (iron, 0x1006338A, b"\xd8\x81\x94\x00\x00\x00"),
+    ]
+    # AniMesh's interface request takes id 0x20 to the case that answers the object's +8, and
+    # that interface's vtable holds 0x1000f3b0 in slot 3.
+    case = ani(0x10006F28 + 0x20, 1)[0]
+    answers = struct.unpack("<I", ani(0x10006F0C + 4 * case, 4))[0] == 0x10006EAD
+    slot3 = struct.unpack("<I", ani(0x1002050C + 12, 4))[0] == 0x1000F3B0
+    check("Control.dll, AniMesh.dll: the contact's centre is the node sphere's, its r the agent's",
+          all(at(va, len(code)) == code for at, va, code in sites) and answers and slot3,
+          "control +0x24 is interface 0x18 and +0x28 interface 0x20 (0x10007922); the contact's r "
+          "is 0x18 slot 9's radius, the parts' sphere at +0x114/+0x120 (0x10014580), and the "
+          "centre it keeps at +0x98 is 0x20 slot 3's (0x1000f3b0), which answers the default "
+          "request from the node sphere at +0x124/+0x130 (0x1000f5c8), worked out over the "
+          "exterior nodes (masks 0 and 1, 0x1000c7f0) at 0x10009e0a; iron3d.dll's leaving reach, "
+          "the records' +0x94, is the same slot's radius (0x1007e5f7)")
 
 
 #: docs/30's outer camera places, in order: (angle, distance back in r).
@@ -20697,7 +20792,7 @@ def run(game: Path) -> int:
         check_packages,
         check_target_panel,
         check_wingman,
-        check_boarding, check_hull_follow, check_live_limits, check_joined_sphere,
+        check_boarding, check_hull_follow, check_live_limits, check_body_sphere,
         check_zoom_and_outer_camera,
         check_builder, check_placement,
         check_designs,

@@ -761,31 +761,51 @@ and that group picks the step by surface
 
 ### Finding the ground — *read*
 
-1. **Body sphere.** The object's bounding sphere gives the centre and radius.
-   A radius under 20 is held to at most 7.5 (`0x1001a48e`); one of 20 or more
-   is kept. The centre goes into `+0x98`.
-   **It is the whole agent's sphere** (*read*, the interface *derived*): the
-   ask (`0x1001a487`) is slot 9 of the interface at control `+0x24`, with 2
-   and a four-float answer. That is the signature of the slot that hands out
-   the agent's joined sphere in world space (`AniMesh.dll:0x10014580`), the
-   chassis's and every hung part's header spheres together
-   ([26-damage.md](26-damage.md)). So a flyer with a hung turret and guns
-   rides on the whole assembly's sphere, not the chassis's.
-   - **Mission 04's helicopter:** 2.45 about a centre 0.80 below the origin,
-     Mission 01's `helic` figure. The chassis's own sphere is 1.65 about the
-     origin.
-   - **The L-2f:** 12.26 about a centre 2.75 below, held to 7.5 for the
-     contact. Resting on flat ground its origin stands 10.25 over it, and 7.64
-     on the chassis's own sphere (*measured*, the parts' header spheres joined
-     as `0x10009510` joins them).
+1. **Body sphere.** Two spheres of the agent give the contact its figures
+   (*read*). The control keeps its agent's interface `0x18` at `+0x24` and
+   interface `0x20` at `+0x28` (`0x10007922`–`0x1000793d`).
+   - **The radius r** is interface `0x18` slot 9's, asked with 2 into a
+     four-float answer (`0x1001a487`): the **agent's sphere**, the chassis's
+     and every hung part's header spheres joined (`AniMesh.dll:0x10014580`
+     reads it from the object's `+0x114`/`+0x120`, which `0x10009510` works
+     out; [26-damage.md](26-damage.md)). A radius under 20 is held to at most
+     7.5 (`0x1001a48e`); one of 20 or more is kept.
+   - **The centre** goes into `+0x98` from the other ask: interface `0x20`
+     slot 3 (`0x1001a518`, `AniMesh.dll:0x1000f3b0`), with 2 and a request
+     record that is all zero (`0x10046328`). Its answer's centre is copied to
+     `+0x98` (`0x1001a591`–`0x1001a5c3`), and its radius is r₂, held to 7.5
+     only on objects with flag `0x1000000`; r₂ bounds the first search pass
+     below.
+   - **What slot 3 answers.** A request equal to the default one (all zero,
+     `0x10026ad0`) with no node gets the object's **node sphere**, `+0x124`
+     and `+0x130`, through the object's matrix (`0x1000f5c8`); any other gets
+     the agent's sphere (`0x1000f62e`).
+   - **The node sphere** (`0x10009e0a`–`0x1000a147`) joins, as the parts'
+     spheres are joined, a sphere for every node of the merged model whose
+     flags pass two masks set once to 0 and 1 (`0x1000c7f0`): every exterior
+     node. A node's sphere is its level-0 slot's box (the current variant,
+     `0x100124d0`) put through the node's matrix, its centre the middle of the
+     box's diagonal and its radius half the diagonal (`0x1000f694`); a node
+     with no level-0 slot is a point at its origin. Node 0 is asked as the whole
+     object while the sums are still empty, so it adds nothing.
+
+   So **the contact holds the body by the agent's sphere's radius about the
+   node sphere's centre** (*read*). An earlier reading took both from the
+   agent's sphere, from the slot 9 ask alone; it put the L-2f's centre 2.75
+   below its origin and left the flat ground of Mission 02's island a
+   "Risk area!".
+   - **Mission 04's helicopter:** r 2.45, about a node centre 0.60 below the
+     origin; resting, its origin stands 3.04 over flat ground (*measured*).
+   - **The L-2f:** the agent's sphere 12.26, held to 7.5, about a node centre
+     2.17 below; resting, its origin stands **9.67** over flat ground. Its node
+     sphere's radius is 11.84 (*measured*, the parts' and nodes' boxes and
+     spheres as the two routines join them).
    - **The recording agrees** (*seen*). Mission 02's warbot, resting on the
-     island by the Outpost, reads altitude 11 over Tut_2's water at z 150.
-     That is the joined sphere's 10.25 over the island's 150–151.67; the
-     chassis's sphere would read 8 to 9
-     ([39-boarding.md](39-boarding.md#against-the-recording--seen)).
-   A second sphere, from the object's other interface (`+0x28`, `0x1001a518`),
-   gives a radius r₂ that is held to 7.5 only on objects with flag
-   `0x1000000`; it bounds the first search pass below.
+     island's flat ground by the Outpost at 151.67, reads altitude 11 over
+     Tut_2's water at z 150 (161.34), and the hero it lets out reads 3
+     ([39-boarding.md](39-boarding.md#against-the-recording--seen)). The
+     agent's sphere alone would read 12 there (161.92) and refuse every place;
+     the chassis's own sphere would read 9.
 2. **Keep the face.** If a face from the last tick is still held (`+0xa4`),
    the engine walks the mesh from the last ground point (`+0x8c`) to the new
    centre (`Terrain.dll` `CWorld::FindWorldFace`, slot 9, called at
