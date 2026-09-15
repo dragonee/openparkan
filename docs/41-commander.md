@@ -300,7 +300,9 @@ at 323–355, all lit.
 Row *i* stands at (51, 118 + 20*i*) (`0x100857fc`), drawn by `0x10095b80` with the
 pen, left to right:
 - `lamp_text_ending`, lit while the unit is selected (its `+0x80` reads 1);
-- the unit's two icons, each in a small icon piece (`0x1009a7a0`);
+- the unit's two icons, each in a small icon piece (`0x1009a7a0`), a `body_text`
+  square as wide as the piece is high, 19, with the icon inset by 2; the pen moves
+  19 for each;
 - a separator and a `ray_emitter`, lit when selected;
 - **a bar 248 wide** (`0x1009a380`) with `"%s [%s]"` centred — white when
   selected, `#808080` otherwise — over a fill of the unit's life percentage
@@ -725,7 +727,12 @@ Mission 04, on the Enhanced Research Center's pod
 - **The research panel's text colours.** The box's name is drawn in `GAME_FONT`'s
   current colour, set by whatever drew before it. It reads white in the
   recording.
-- What the wingman menu's rows look like beside the commander's: the row draw
-  with a number (`0x1009c8e6`) was not followed here ([31-packages.md](31-packages.md#the-wingman-menu-from-first-person--read-and-measured)).
+- ~~What the wingman menu's rows look like beside the commander's.~~ Answered:
+  with a number, the row draw (`0x1009c8e6`) puts `ending_text` and a 12-wide
+  number box before a 150-wide bar
+  ([31-packages.md](31-packages.md#the-wingman-menu-from-first-person--read-and-measured)).
+  Without one, it starts with `ending_stub` (variant 0, `0x1009c8b2`), not
+  `ending_text`. The strip's two ends are `ending_stub` as well (`0x1007b276`,
+  `0x1007b32d`).
 - Whether a click on a disabled order row can happen at all: the commander's
   rows are only the offered ones, and the click tests no row flag.

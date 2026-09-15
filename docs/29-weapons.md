@@ -456,6 +456,25 @@ So for the hero (*derived*):
   target ([above](#the-players-target-reaches-the-turret--read)), and an
   unguided gun with no target fires.
 
+**What the HUD reads of the lock** (*read*, and *measured*). The gun's slot 10
+(`0x10029be0`) keeps a share at `+0x17c`, and the time driver calls it every
+frame (`0x1002d317`):
+
+- in report 1 the share is 1 − lock left ÷ value 9, or 1 with value 9 not
+  positive;
+- in report 4 it is the wait's progress;
+- otherwise it is left alone;
+- it is held to 0..1.
+
+Interface `0x202` slot 10 hands it out as property `0xf00`
+(`0x1002eaa0`). Linking a round copies the 27-word block of the round's frame,
+from its `+20`, into the gun's `+0x9c` (`0x100297a4`). Property `0x64` hands
+that block out (`0x1002e60b`). The HUD reads its `+0x60`, which is the frame's
+`+116`, and draws a lock only for the value 16. *Measured*: `+116` reads 16 on
+exactly the 20 rounds of `weapon.rlb` that carry a class-17 seeker, and on no other
+round. What
+the HUD draws is [35-hud.md](35-hud.md#the-guided-lock--read)'s.
+
 *Measured* over the 66 rounds in `weapon.rlb`: every one has a range, so every
 gun that loads one keeps a range gate. 17 of the 20 seekers carry a lock.
 The guns of `ba_b_04`, `ba_b_05` and `ba_m_04` (value 2 of 0) fire untargeted.

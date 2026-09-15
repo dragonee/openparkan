@@ -593,9 +593,12 @@ Its four other calls come from two functions beside it (`0x100cd260`,
 `0x100cd2a0`) that no call reaches and no dword in the image points at.
 
 **The guided lock** (`0x1009cd30`, run for each weapon slot) draws four 9 × 9
-corners. They close from the HUD's (30, 30)–(630, 450) onto the target as the
-lock counts. Their colour is green, (20, 205 + 50 × the lock's share, 20). It
-plays `TARGET_ZOOM` and `TARGET_READY` (`0x1009d0bc`, `0x1009d15b`).
+corners. As the lock counts they close from the HUD's (30, 30)–(630, 450) onto a
+40-pixel square about the target. Their colour is green, (20, 205 + 50 × the
+lock's share, 20). While locking it plays `TARGET_ZOOM` every 0.35 s, and once
+locked `TARGET_READY` every 0.2 s (`0x1009d0bc`, `0x1009d15b`). Only a gun whose
+round carries a seeker draws one
+([35-hud.md](35-hud.md#the-guided-lock--read)).
 
 So **a first-person target shows three ways**: as its radar mark's outline, as
 the target panel's frame, and, for a guided gun, as the lock's corners. The

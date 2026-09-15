@@ -154,8 +154,9 @@ The tilde does this:
 | 1, picking | with at least one chosen, the order menu follows; with none, the panel closes | 2, or 0 |
 | 2, ordering | the choice is emptied and the panel closes | 0 |
 
-The panel opens and closes through the view's `+0x50` object, slot 8 and slot 7
-(not followed).
+As it opens and closes, the selector calls the view's `+0x50` object, slot 8
+and slot 7 (not followed). **These do not show or hide the lines**: the panel
+draws a line for every wingman whatever the state (below).
 
 **Keys** (`0x10070db0`, *read*; the case table *measured*). A character handler
 switches on the character through a 127-byte index at `0x10071168`. `'1'`–`'9'`
@@ -170,19 +171,76 @@ selector:
 
 Escape (`0x1b`) goes elsewhere: only the tilde, or an order, closes the menu.
 
-**The list the panel draws** (`0x100431a0`, `0x100432f0`, *read*). Every frame
-the panel resets 16 line widgets and fills one per wingman, in list order:
-the number *i* + 1, the record, and whether it is chosen (`0x1006df50`). A line
-draws the number and two labels made from the record (`0x10077120`, not
-followed). A chosen line is drawn highlighted; an unchosen one is grey, or
-dimmed by half while picking. The lines stand 19 apart.
+**The list the panel draws** (`0x100431a0`, `0x100432f0`, *read*). The panel is
+one of the cockpit's widgets and draws every frame unless the top `CState` mode
+is 6, a building's screen.
+
+- Each frame it resets 16 line widgets. It fills one per wingman in list order
+  with the number *i* + 1, the record, and whether that wingman is chosen
+  (`0x1009d970`, `0x1006df50`). It also sets each line's `+0x21` to whether the
+  selector is picking (slot 1, `0x1009b700`).
+- The count is the driven unit's wingmen now (`0x1006ddb0`, `0x10091f20`), not
+  the selector's state.
+- **So the lines show whenever the driven unit has a wingman**, with the selector
+  off too. Line *i* is placed at (0, 19 *i*) and drawn (`0x1004321c`).
+
+**A line** (`0x1009d990`, *read*) is built left to right with the pen
+([35-hud.md](35-hud.md#the-weapons-list--read-and-measured)) from its top left:
+
+| piece | primitive | width | shows |
+|---|---|---:|---|
+| `ending_text` | `0x10099a30`, variant 1 | 5 | |
+| `body_text` | `0x10099f60` | 12 | the number, centred |
+| a lamp | `0x1009a8f0` | 19 | by the line's look, below |
+| the first icon | `0x1009a7a0` | 19 | by the unit's Type |
+| the second icon | `0x1009a7a0` | 19 | by the unit's property `0x207` |
+| `separator_left_text` | `0x10099c90`, variant 0 | 5 | |
+| `ray_emitter` | `0x10099d80` | 10 | by the line's look |
+| `ray_body`, the bar | `0x1009a380` | 135 | the unit's name (its record's `+0x44` object, slot 41), centred over a fill of its life percentage (`0x1007e980`) |
+| `ray_ending` | `0x10099e70` | 6 | |
+
+- **An icon piece** (`0x1009a7a0`) is square. Its side is the `body_text`
+  piece's height, 19. The piece is drawn white and the icon inside it inset by
+  2, 15 × 15, in the icon's tint, and the pen moves 19.
+- **The icons and their tint** are the commander's unit box's (`0x10077120`,
+  [41-commander.md](41-commander.md#the-box)).
+
+| the line | lamp | emitter | icons' tint | text |
+|---|---|---|---|---|
+| chosen | green (3) | `_pressed` (2) | as given | white |
+| not chosen, picking | yellow2 (2) | `_off` (0) | as given | `#808080` |
+| not chosen, otherwise | black (4) | `_off` (0) | halved: (tint >> 1) & `0x7f7f7f`, opaque | `#808080` |
+
+So the line is 230 wide. Its name bar runs from x 89 to 224.
 
 **The menu** (*read*). In state 2 the panel places the order menu at (200, 200)
 (`0x1007b1a0`) and builds it for the chosen records with the wingman flag
 (`0x1007a8e0`). The builder (`0x1007aaa0`) makes one line per row of the second
 table, 19 high from y 50 at x 220 (`0x100670d0` with 0xdc, y, 0x17c, y + 19). It
-closes the selector if no chosen unit is left (`0x1007ab59`, `0x1007ada1`). A
-row is **enabled** when both of these tests pass (`0x1007acb4`–`0x1007ad7e`):
+closes the selector if no chosen unit is left (`0x1007ab59`, `0x1007ada1`).
+
+**The menu's rows** (`0x1007b1e0` with the wingman flag, `0x1009c830`, *read*):
+
+- **No strip.** The flag skips the commander's *Orders* strip (`0x1007b206`).
+- **Each row** is placed where the builder put it and drawn with its number.
+  Left to right from (220, 50 + 19 *n*):
+
+| piece | primitive | width | shows |
+|---|---|---:|---|
+| `ending_text` | `0x10099a30`, variant 1 | 5 | |
+| `body_text` | `0x10099f60` | 12 | the row's key, *n* + 1, centred |
+| `ray_emitter_normal` | `0x10099d80`, variant 1 | 10 | |
+| `ray_body`, the bar | `0x1009a380` | 150 | the order's string, centred, with no fill |
+| `ray_ending` | `0x10099e70` | 6 | |
+
+- **Enabled or not.** The number and the string are white on an enabled row and
+  `#808080` on a disabled one (`0x1009c849`–`0x1009c86d`).
+- **Width.** A row is 183 wide and ends at x 403.
+- **The commander's rows**, which get no number, are drawn differently:
+  `ending_stub` (variant 0), `ray_emitter_normal`, a bar 247 wide that a pressed
+  row fills for a second, and `ray_ending`.
+
+A row is **enabled** when both of these tests pass (`0x1007acb4`–`0x1007ad7e`):
 
 - **The target.** A row that needs one (Attack, Capture building) needs the
   driven unit's current target. The target must not be of the player's clan
@@ -191,6 +249,27 @@ row is **enabled** when both of these tests pass (`0x1007acb4`–`0x1007ad7e`):
 - **The capturers.** Search and capture and Capture building need every chosen
   record's `+0x30` to be 1 or 2. Capture building also refuses a building of type
   `0x80000200`.
+
+**Against the recording of Mission 01** (*seen*, 960 × 720, 1.5 × the layout):
+
+- **Before any capture** (196–203 s) no line is drawn.
+- **From 204 s** a line shows for *TFW-2 Warrior*, and from 205.5 s a second one
+  for *MFW-1 Warrior*.
+- **Unchosen with the selector off**, both lines are what the table reads: black
+  lamps, dim icons, grey names.
+- **At 208 s the menu is open.** Both lines are chosen, with green lamps, lit
+  emitters, full icons and white names. The seven rows *Standby* … *Refit* stand
+  under x 220, 19 apart, their numbers in dark boxes.
+- **By 208.5 s an order has been given.** The menu is gone and the lines are
+  unchosen again. They stay on screen to the recording's end.
+- **Row by row** at the top left: the number box 0–17, the lamp 17–36, the two
+  icons to 74, and the name bar from about 90 to 223.
+- **The icons' tints.** The second line's icons (*TFW-2*, `+0x30` read as 1) are
+  near white. The first line's (*MFW-1*, 3) are green.
+- **Disabled rows.** The menu is open again from 228.7 s to 228.9 s, under the
+  message box. *Search and capture*, *Attack* and *Capture building* are grey:
+  the chosen *MFW-1* is no capturer, and the target, *MFW-1* itself, is of the
+  player's clan. *Seek and destroy* and *Refit* are white.
 
 **No pick mode is entered from first person** (*read*). Row *n* is given at once
 (`0x1006df80`): the row must be enabled (`0x1007a8d0`). The target is **the
@@ -1631,9 +1710,11 @@ captures by logic id 34 times.
 - What a unit record's `+0x30` is. The wingman menu lets only 1 or 2 capture, the
   same records speak `_S` voices, 4 and 5 speak `_B`, and boarding wants 4
   ([27-ownership.md](27-ownership.md#a-neutral-unit-is-taken-by-the-hero--read-and-measured)).
-- The two labels a wingman line draws beside its number (`iron3d.dll:0x10077120`),
-  and what the view's `+0x50` object does on slots 7 and 8 as the panel opens and
-  closes.
+- ~~The two labels a wingman line draws beside its number (`iron3d.dll:0x10077120`).~~
+  Answered: the unit's two icons and its name over its life
+  ([The wingman menu from first person](#the-wingman-menu-from-first-person--read-and-measured)).
+  Still open: what the view's `+0x50` object does on slots 7 and 8 as the selector
+  opens and closes. It does not hide the lines.
 - Whether the wingman menu's lines take mouse clicks, as the HQ menu's do; string
   3044, "Use the mouse to click on the item", is not tied to either.
 - Whether a digit that picks a wingman or an order also reaches `World3D.dll`'s

@@ -10001,7 +10001,7 @@ read = true
 module = "iron3d.dll"
 at = "0x100431a0"
 kind = "function"
-name = "first-person panel: opens the order menu with the wingman flag while the selector is on"
+name = "first-person panel: every frame (not over a building screen) a line per wingman at (0, 19 i); the order menu with the wingman flag while the selector orders"
 doc = "docs/31-packages.md"
 read = true
 
@@ -10153,7 +10153,7 @@ read = true
 module = "iron3d.dll"
 at = "0x100432f0"
 kind = "function"
-name = "first-person panel: the wingman list, 16 line widgets 19 apart, chosen ones highlighted"
+name = "first-person panel: 16 line widgets filled with the wingmen now, each chosen or not, and picking into +0x21"
 doc = "docs/31-packages.md"
 read = true
 
@@ -25153,7 +25153,7 @@ doc = "docs/41-commander.md"
 module = "iron3d.dll"
 at = "0x1009c830"
 kind = "function"
-name = "order row draw: ending, emitter, 247 bar white or grey, full for 1 s after a press"
+name = "order row draw: with a number ending_text, a 12 number box, emitter, a 150 bar; without, ending_stub, emitter, a 247 bar full for 1 s after a press; white or grey"
 read = true
 doc = "docs/41-commander.md"
 
@@ -28149,3 +28149,115 @@ kind = "site"
 name = "machine tick: the milliseconds since the last kept at +0xe8, the ground contact's dt"
 read = true
 doc = "docs/24-motion.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1009d910"
+kind = "site"
+name = "wingman line widget constructor: number -1, no record, not chosen"
+read = true
+doc = "docs/31-packages.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1009d990"
+kind = "function"
+name = "wingman line draw: ending_text, 12 number, lamp, two icon pieces, separator, emitter, a 135 bar of the name over its life, ray_ending; the look by chosen and picking"
+read = true
+doc = "docs/31-packages.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1004321c"
+kind = "site"
+name = "first-person panel: the next wingman line 0x13 lower"
+read = true
+doc = "docs/31-packages.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1007b206"
+kind = "site"
+name = "order menu draw: the Orders strip only without the wingman flag"
+read = true
+doc = "docs/31-packages.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1009c8b2"
+kind = "site"
+name = "order row draw without a number: ending_stub, variant 0"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1009cc50"
+kind = "site"
+name = "weapons list constructor: the lock corner cut four ways from page9, (0, 32) turns 0 and 1, (-1, 31) turns 2 and 3"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1009ce0d"
+kind = "site"
+name = "guided lock: only a gun whose round frame's +116 (the copy's +0x60) reads 0x10"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1009ce84"
+kind = "site"
+name = "guided lock: colour 0xff14GG14, GG = 205 - round(share x -50)"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1009d06e"
+kind = "site"
+name = "guided lock: report 1, TARGET_ZOOM once 0.35 s pass since the stamp"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1009d109"
+kind = "site"
+name = "guided lock: report 0, TARGET_READY once 0.2 s pass since the stamp"
+read = true
+doc = "docs/35-hud.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x10029be0"
+kind = "function"
+name = "gun slot 10: the lock share +0x17c, 1 - lock / value 9 in report 1, the wait's progress in report 4, held to 0..1"
+read = true
+doc = "docs/29-weapons.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x100297a4"
+kind = "site"
+name = "gun link: the round frame's 27-word block copied into +0x9c"
+read = true
+doc = "docs/29-weapons.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002d317"
+kind = "site"
+name = "time driver: each component's slot 10 with the time, every frame"
+read = true
+doc = "docs/29-weapons.md"
+
+[[entry]]
+module = "services.dll"
+at = "0x10005890"
+kind = "function"
+name = "ITimer slot 3: the milliseconds since a stamp x 0.001, from the clock at +4 or timeGetTime"
+read = true
+doc = "docs/35-hud.md"

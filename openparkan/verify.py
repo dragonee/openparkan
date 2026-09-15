@@ -10542,6 +10542,22 @@ def check_targeting(check, game: Path) -> None:
           f"a range; {len(guided) - len(untargeted)} of {len(guided)} seekers carry a "
           f"lock, and the guns of {untargeted} fire untargeted")
 
+    marked: Counter[tuple[int, bool]] = Counter()
+    for e in rounds:
+        if not e.name.lower().endswith(".ctl"):
+            continue
+        try:
+            c = control.parse(rounds.read(e), names)
+        except control.ControlFormatError:
+            continue
+        marked[(c.flags, any(p.type_id == control.SEEKER_TYPE for p in c.components))] += 1
+    check("weapon.rlb: a round's frame +116 reads 16 exactly where it carries a seeker",
+          marked[(16, True)] == len(guided) > 0
+          and sum(n for (f, s), n in marked.items() if (f == 16) != s) == 0,
+          f"(+116, a seeker) over the rounds: {dict(sorted(marked.items()))}; a gun copies "
+          f"the frame's block into +0x9c at link (Control.dll:0x100297a4), and the HUD draws "
+          f"a guided lock only where its +0x60, the frame's +116, is 16 (iron3d.dll:0x1009ce0d)")
+
     first = next((d for d in gamedir.missions(game)
                   if d.as_posix().endswith("CAMPAIGN.00/Mission.01")), None)
     if first is None:
@@ -12006,6 +12022,44 @@ def check_wingman(check, game: Path) -> None:
           "; ".join(f"{s or 'plain'}: {', '.join(map(str, b))}" for s, b in sets.items())
           + f"; {sum(1 for f in files if f and f.lower() in held)} of 15 in "
           f"{voices.library if voices else None}")
+
+    # The panel's lines: a line per wingman every frame, each built with the pen.
+    at = _image_at(iron)
+    pen = {0x10099A30: "ending", 0x10099F60: "text box", 0x1009A8F0: "lamp",
+           0x1009A7A0: "icon", 0x10099C90: "separator", 0x10099D80: "emitter",
+           0x1009A380: "bar", 0x10099E70: "ray_ending"}
+    line = [pen[t] for _, t in _calls(at, 0x1009D990, 0x240) if t in pen]
+    body = at(0x1009D990, 0x240)
+    looks = all(p in body for p in (
+        b"\xc7\x44\x24\x1c\x02\x00\x00\x00\xbf\x03\x00\x00\x00\x83\xcd\xff",  # chosen
+        b"\x8a\x46\x21\x3a\xc3\x74\x07\xbf\x02\x00\x00\x00",                  # picking
+        b"\xd1\xea\x81\xe2\x7f\x7f\x7f\x00\x81\xca\x00\x00\x00\xff\xbf\x04\x00\x00\x00",
+        b"\xbd\x80\x80\x80\xff"))
+    widths = b"\x6a\x0c" in body and b"\x68\x87\x00\x00\x00" in body
+    panel = at(0x100431A0, 0x150)
+    icon = at(0x1009A7A0, 0x145)
+    square = b"\x6a\x01\x6a\x04" in icon and b"\x8b\xb1\x88\x00\x00\x00" in icon
+    check("iron3d.dll: a wingman line, every frame, at (0, 19 i): number, lamp, icons, name",
+          line == ["ending", "text box", "lamp", "icon", "icon", "separator", "emitter", "bar",
+                   "ray_ending"]
+          and looks and widths and square
+          and b"\x83\xc7\x13\x83\xc6\x30\x81\xff\x30\x01\x00\x00" in panel,
+          f"0x1009d990's pen: {line}; a 12 number box and a 135 bar; chosen lamp 3 and emitter "
+          f"2, picking lamp 2, otherwise lamp 4 and the icons' tint halved, unchosen text "
+          f"#808080: {looks}; an icon piece a square of body_text's height (0x1009a7a0): "
+          f"{square}; the panel 0x100431a0 steps each line 0x13")
+
+    # The menu's rows: with a number, no strip and a 150 bar; the commander's, a 247 bar.
+    row = at(0x1009C830, 0x180)
+    menu = at(0x1007B1E0, 0x30)
+    numbered = (row.find(b"\x6a\x01") < row.find(b"\x53\x50\x6a\x0c")
+                < row.find(b"\x68\x96\x00\x00\x00"))
+    check("iron3d.dll: the wingman menu's rows carry their number, and no Orders strip",
+          numbered and b"\x6a\x00" in row[:0x90] and b"\x68\xf7\x00\x00\x00" in row
+          and b"\x81\xc3\x80\x80\x80\xff" in row and b"\x8a\x45\x04\x84\xc0" in menu,
+          f"0x1009c830 with a number: ending_text, a 12 number box, a 150 bar; without one "
+          f"ending_stub and a 247 bar; the text white or #808080 by the row's flag; "
+          f"0x1007b1e0 skips the strip on the wingman flag: {numbered}")
 
 
 def check_builder(check, game: Path) -> None:
@@ -16960,6 +17014,52 @@ def check_hud_top(check, game: Path) -> None:
           f"0x1009a380 fills in {[hex(c) for c in colours]}; the hero's guns named "
           f"{[words.get(k) for k in hero_names]} at 0x10074af0; 5094 {words.get(5094)!r} for "
           f"a magazine of -1, 6250 {words.get(6250)!r}")
+
+    # The guided lock, before the row: its gate, its corners' edges, colour and sounds.
+    lock = at(0x1009CD30, 0x48B)
+    floats = set(_floats_read(at, 0x1009CD30, 0x48B))
+    edges = {-50.0, 50.0, 30.0, 610.0, 630.0, 430.0, 450.0}
+    zoom_at, ready_at = lock.find(b"\xbf\x30\x5b\x10\x10"), lock.find(b"\xbf\x20\x5b\x10\x10")
+    beeps = [at(0x10105B30, 12).split(b"\0")[0], at(0x10105B20, 13).split(b"\0")[0]]
+    gate = all(p in lock for p in (
+        b"\x83\xf8\x01\x74\x08\x3b\xc3",  # the report 1, or 0
+        b"\x83\x7c\x24\x18\x10",          # the round's frame +116 is 16
+        b"\x38\x5f\x20", b"\x39\x5f\x10",  # selected, and rounds left
+        b"\xbe\xcd\x00\x00\x00", b"\x81\xce\x14\x00\x14\xff",  # 0xff14GG14 from 205
+        b"\x83\x07\x04"))                 # the next lock 4 further out
+    cuts = at(0x1009CC50, 0x94)
+    corners = cuts.count(b"\x68\x00\x00\x10\x41\x68\x00\x00\x10\x41") == 4 \
+        and cuts.count(b"\x68\x00\x00\x00\x42") == 2 and cuts.count(b"\x68\x00\x00\xf8\x41") == 2 \
+        and cuts.count(b"\x68\x00\x00\x80\xbf") == 2 \
+        and all(b"\x6a" + bytes([t]) in cuts for t in (1, 2, 3))
+    services = game / "services.dll"
+    per_ms = _floats_read(_image_at(services.read_bytes()), 0x10005890, 0x6B) \
+        if services.exists() else []
+    library = next((d for d in resources.descriptors(game / "ui" / "game_resources.cfg")
+                    if d.bindings.get("TARGET_ZOOM")), None)
+    lengths = {}
+    if library is not None and resources.locate(game, library.library):
+        archive = NResArchive.open(resources.locate(game, library.library))
+        for key in ("TARGET_ZOOM", "TARGET_READY"):
+            member = library.bindings[key]
+            data = archive.read_name(member)
+            rate, bits, channels = (struct.unpack_from("<I", data, 24)[0],
+                                    struct.unpack_from("<H", data, 34)[0],
+                                    struct.unpack_from("<H", data, 22)[0])
+            size = struct.unpack_from("<I", data, data.find(b"data") + 4)[0]
+            lengths[key] = (member, round(1000 * size / (rate * channels * bits // 8)))
+    check("iron3d.dll: the guided lock closes four corners on the target and beeps",
+          gate and edges <= floats and {0.35, 0.2} <= {round(f, 6) for f in floats}
+          and 0 <= zoom_at < ready_at and beeps == [b"TARGET_ZOOM", b"TARGET_READY"]
+          and corners and {round(f, 6) for f in per_ms} == {0.001}
+          and lengths == {"TARGET_ZOOM": ("i_trg_zoom.wav", 35),
+                          "TARGET_READY": ("i_trg_ready.wav", 97)},
+          f"0x1009cd30 draws for a report of 0 or 1, a round marked 16, a target, a selected "
+          f"gun with rounds and a share above 0: edges (x - 50) f + 30, (x - 610) f + 630, "
+          f"(y - 50) f + 30, (y - 430) f + 450 from {sorted(edges & floats)}, green 205 + 50 f; "
+          f"{beeps[0].decode()} past 0.35 s locking and {beeps[1].decode()} past 0.2 s "
+          f"locked, timed by getTimer's slot 3 x {per_ms}; the corner cut from page9 four "
+          f"ways: {corners}; the sounds {lengths}")
 
     # The message box: its headers, its place and size, its colours, its life.
     ctor = at(0x1007F750, 0x250)

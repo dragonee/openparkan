@@ -29,11 +29,11 @@ its id.
 |---|---|---|---|---|
 | `+0x14` | `0x10042d10` | 0x1b0 | 8 | the reticle: page9's circle (77, 0) 64 × 64, corner arc (54, 28) 23 × 23 and ruler (168, 0) 82 × 15, drawn about (320, 240) in `#37ff37` ([below](#the-reticle--read)) |
 | `+0x10` | `0x1003ed60` | 0x610 | 5 | the indicators under the radar ([below](#the-indicators--read-and-seen)) |
-| `+0x0c` | holder, then `0x1009c9f0` | 0x10 + 0x5a0 | 6 | **the weapons list** and the guided lock ([25-sensors.md](25-sensors.md#how-the-game-colours-what-it-marks--read-and-measured)) |
+| `+0x0c` | holder, then `0x1009c9f0` | 0x10 + 0x5a0 | 6 | **the weapons list** and the guided lock ([below](#the-guided-lock--read)) |
 | `+0x18` | `0x1003f340` | 0x3c8 | 0 | the radar (draw `0x1003fb90`, [below](#the-radar--read-and-seen)) |
 | `+0x1c` | `0x10040a60` | 0x2f0 | 1 | the target panel |
 | `+0x20` | `0x10040a60` | 0x2f0 | 2 | the player's own unit |
-| `+0x24` | `0x1003eb30` | 0x314 | 10 | the wingman panel: 16 lines 19 apart ([31-packages.md](31-packages.md#the-wingman-menu-from-first-person--read-and-measured)) |
+| `+0x24` | `0x1003eb30`, its 16 lines by `0x1009d910` | 0x314 | 10 | the wingman panel: a line per wingman 19 apart from (0, 0) ([31-packages.md](31-packages.md#the-wingman-menu-from-first-person--read-and-measured)) |
 | the panel's `+0x310` | `0x1007a4c0` | 0x194 | — | its order menu, a scrolling list with `scroll_up_icon` and `scroll_down_icon` |
 
 The message box is not one of them. It is a single object the game keeps
@@ -212,6 +212,94 @@ re-derived by `verify`):
   ([29-weapons.md](29-weapons.md#the-button-reaches-the-selected-guns)).
 - The laser's fill stops short of the bar's left end.
 
+### The guided lock — *read*
+
+The routine that draws a weapon row (`0x1009cd30`) first draws that gun's
+**lock**. It draws four corners that close on the target while a guided gun
+locks, and it plays the lock's two sounds. The holder (`0x1003ecb0`) calls it
+for every gun of the driven unit, in list order. A counter *k* starts at 0 each
+frame and grows by 4 after each lock drawn. Unlike the row, the lock runs while
+the satellite map is open.
+
+**When it draws.** The lock draws only when all of these hold:
+
+- **The gun's report word** (interface `0x202` slot 10, `+0x11c`) is 0 or 1
+  (`0x1009ce00`): locked and waiting, or locking.
+- **The gun's round is marked 16.** Property `0x64` answers a gun with its
+  `+0x9c` (`Control.dll:0x1002e60b`), which holds the 27 words it copied from its
+  round's frame at link (`0x100297a4`). Its `+0x60` is the frame's `+116`. It
+  must read `0x10` (`0x1009ce0d`). *Measured* over `weapon.rlb`'s 66 rounds:
+  exactly the 20 that carry a seeker read 16 there. Of the others, 36 read 4, 6
+  read 0 and 4 read 12. So only a guided gun draws a lock: the hero's plasma
+  rifle and missiles, not its cannon or laser.
+- **The driven unit has a target** (the record's `+0x38` list, `0x1009ce18`).
+- **The gun is selected** (the entry's `+0x20`) **and has rounds** (`+0x10`
+  above 0 unsigned, so an unlimited −1 passes).
+- **The lock's share *f* is not 0.** It is slot 10's float: the gun's property
+  `0xf00`, `+0x17c` ([29-weapons.md](29-weapons.md#a-guided-gun-waits-for-a-lock--read-and-measured)).
+- **The target's point projects** through the main camera (`0x100cd1a0`). Its
+  (x, y) is divided by the display's two scales, so it lies on the 640 × 480
+  layout.
+
+**Where the corners go.** Each corner is 9 × 9. With *f* from 0 to 1, each edge
+is rounded to the nearest pixel (`fistp`):
+
+| edge | at *f* = 0 | at *f* = 1 | formula |
+|---|---|---|---|
+| left, L | 30 − *k* | x − 20 − *k* | (x − 50) *f* + 30 − *k* |
+| top, T | 30 − *k* | y − 20 − *k* | (y − 50) *f* + 30 − *k* |
+| right, R | 630 + *k* | x + 20 + *k* | (x − 610) *f* + 630 + *k* |
+| bottom, B | 450 + *k* | y + 20 + *k* | (y − 430) *f* + 450 + *k* |
+
+- The corners are drawn in turn (`0x1008f970`, flag 1, specular black): (L, T)–(L
+  + 9, T + 9), (R − 9, T)–(R, T + 9), (R − 9, B − 9)–(R, B) and (L, B − 9)–(L + 9,
+  B).
+- So the corners start at the HUD's (30, 30)–(630, 450). As the lock counts they
+  close on a 40-pixel square about the target. A second locking gun's corners
+  stand 4 further out.
+
+**The art.** The weapons list's constructor (`0x1009c9f0`) cuts one 9 × 9 piece
+of `page9` four ways (`0x1009cc50`–`0x1009ccde`):
+
+| corner | widget | cut from | quarter turns |
+|---|---|---|---:|
+| top left | `+0x36c` | (0, 32) | 0 |
+| top right | `+0x3f8` | (0, 32) | 1 |
+| bottom right | `+0x484` | (−1, 31) | 2 |
+| bottom left | `+0x510` | (−1, 31) | 3 |
+
+**The colour** is `0xff14GG14`, with GG = 205 − round(*f* × −50)
+(`0x1009ce84`–`0x1009cea0`). It runs from (20, 205, 20) as a lock starts to
+(20, 255, 20) when it is done.
+
+**The sounds.** After a lock is drawn, the widget reads the time since its stamp
+`+0x59c`. The stamp is one for all the rows. It uses `getTimer`'s slot 3, which
+gives the milliseconds since the stamp × 0.001 (`services.dll:0x10005890`):
+
+- **Report 1, locking:** past 0.35 s the stamp is renewed and `TARGET_ZOOM`
+  plays (`0x1009d06e`).
+- **Report 0, locked:** past 0.2 s the stamp is renewed and `TARGET_READY` plays
+  (`0x1009d109`).
+- Both go through the sound server's slot 2, as the theme does.
+
+`ui/game_resources.cfg` binds `TARGET_ZOOM` to `i_trg_zoom.wav`, a 35 ms beep,
+and `TARGET_READY` to `i_trg_ready.wav`, 97 ms, both 22,050 Hz mono in
+`sounds.lib` (*measured*). So a locking gun beeps about three times a second,
+and a locked one about five times.
+
+**What the share is** (`Control.dll:0x10029be0`, the gun's slot 10). The time
+driver calls it for each component every frame, after the component's events
+(`0x1002d317`). In report 1 it writes 1 − lock left ÷ value 9, or 1 when value 9
+is not positive. In report 4 it writes the wait's progress. In any other report
+it leaves the share as it was. The result is held to 0..1. So *f* grows from 0
+as a locking gun's lock counts down. A lock that has just refilled reads 0 and
+draws nothing. A gun locked and not asked to fire keeps its last share, just
+short of 1.
+
+*Seen*: the player of the Mission 01 and Mission 03 recordings never fires the
+plasma rifle or the missiles. Their counts stay at 150 and 4 throughout, so no
+recording shows the lock.
+
 ### The message box — *read*, and *measured*
 
 **One box at a time** (the game's pointer `0x1010c07c`, shown byte
@@ -296,6 +384,9 @@ re-derived by `verify`):
   The names at `0x1005a5cc`, once read as its modes, belong to a separate
   global.
 - How a non-hero unit's gun gets its name (`0x1008a470`, `0x1008a4b0`).
+- Whether `getTimer` runs on real time or on a clock. Its slots read the clock
+  object at `+4` when one is set (slot 0 sets it), else `timeGetTime`. So it is
+  not known whether the guided lock's beeps pause with the game.
 - ~~The widget at the HUD's `+0x10` (`0x1003ed60`, id 5).~~ Answered: the
   indicators ([below](#the-indicators--read-and-seen)).
 
