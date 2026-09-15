@@ -334,6 +334,13 @@ the own panel's unit while aboard.
   less its batteries' lack over every clan's. On Mission 03, with the generator and the
   bunker taken, the Large Factory waits on ore and builds an *SSW-X* 25 s after the mine
   starts digging, the rows reading 11% and about 90%.
+- Transport minerals sends a transport between its clan's nearest mine with a free loading
+  place and its nearest storage: it loads 100 a second at the mine's loading place until
+  its 2,000 are aboard (a full mine is full again each takt), walks to the storage's
+  unloading place, unloads 100 a second while there is room, waits beside a full storage
+  until there is more than 0.5, and goes round again; with no mine or storage the task
+  ends. On Mission 03 it carries 2,000 from the new mine to the Small Warehouse, and the
+  Ore row reads 56%.
 
 - The cursor picks as docs/42 reads it, in the world through the command camera and on the
   open satellite map: a click selects one of the player's units or buildings (turning an
@@ -539,6 +546,7 @@ a row here. A row leaves this table when research closes it.
 | M12 | Which controllers a building's control system gathers its batteries and efficiency from | its root record's: the 19.5 to 20 held and 50 to 52 a second put out that docs/23 measures, not the internal parts' (`i_pws_*`) | [23](../docs/23-economy.md#a-power-shortage-lowers-efficiency-once-the-batteries-run-down--read-and-measured) |
 | M12 | The random sources of the distribution step's timer (`0..63` ms) and the power tick's jitter (a shift register) | a 32-bit xorshift | [23](../docs/23-economy.md#how-often-and-where-it-settles--read-with-a-derived-settle-point) |
 | M12 | When a built mine's order 10 starts: derived to wait behind its construction sphere, while its draw is seen from the moment it appears | it draws its `Use_Power` from its making and digs from the sphere's end | [23](../docs/23-economy.md#a-mine-digs-to-500-and-then-a-draw-does-not-empty-it--read) |
+| M12 | Where a transport a full storage turns aside goes: up to 100 random points within 30 of the unloading place, walked at a quarter of its speed | it waits where it stands | [32](../docs/32-builder.md#transporting-ore--read-and-measured) |
 | M12 | The ore a mine's loading place or a storage's unloading place moves by itself (`0x10019482`, `0x100195b8`): its direction, property `0x208`, the tick's divisor | left out, as docs/23's model leaves it | [23](../docs/23-economy.md#not-established) |
 | M12 | How a building made in play is drawn, and whether the landscape's drawing is cut under it | node by node from level 0 without a lightmap; the ground queries are cut under it, the landscape's drawing is not | [03](../docs/03-terrain.md#for-an-engine) |
 

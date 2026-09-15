@@ -15,6 +15,10 @@ pub const PLACE_CREATION: u32 = 0x800;
 pub const PLACE_CREATION_OLD: u32 = 0x80;
 /// The control pod a capturer walks to.
 pub const PLACE_POD: u32 = 0x40;
+/// A mine's loading place and a storage's unloading place, where a transport takes and leaves
+/// ore (docs/32, "Transporting ore").
+pub const PLACE_LOADING: u32 = 0x8;
+pub const PLACE_UNLOADING: u32 = 0x10;
 
 /// A vertex: its point in its joint node's frame, its flag word, and the joint.
 #[derive(Clone, Copy, Debug, PartialEq)]

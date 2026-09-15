@@ -85,6 +85,8 @@ pub struct Economy {
     pub steps: HashMap<i64, (f64, f64)>,
     /// Each clan's power out a second, and its batteries' lack a second, at its last step.
     pub power: HashMap<i64, (f32, f32)>,
+    /// Each transport's round, by target.
+    pub rounds: HashMap<usize, crate::transport::Round>,
     seed: u32,
 }
 
@@ -306,6 +308,7 @@ impl Play {
             }
         }
         self.tick_mines(dt);
+        self.tick_transports(dt);
         let clans: BTreeSet<i64> =
             self.economy.sites.iter().filter_map(|s| self.units.get(s.target).and_then(|u| u.clan)).collect();
         for clan in clans {

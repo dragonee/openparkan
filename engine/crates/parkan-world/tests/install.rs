@@ -2599,3 +2599,63 @@ fn mission_03s_large_factory_waits_on_ore_and_builds_an_ssw_x_in_25_seconds_once
     // 25.1 s with the mine alone (docs/23, "A warbot from the Large Factory").
     assert!((seconds - 25.1).abs() < 2.0, "the bot is done {seconds} s after the mine digs");
 }
+
+#[test]
+#[ignore = "needs the game install"]
+fn mission_03s_transport_carries_2000_ore_from_the_mine_to_the_small_warehouse() {
+    use parkan_sim::behaviour::Task;
+    use parkan_sim::orders::{Order, TRANSPORT, Target};
+    use parkan_world::construction::BUILDING_MINE;
+
+    let (mut play, m) = mission_03_play();
+    let player = play.player_clan;
+    let transport = object_target(&play, &m, "tut3_t.dat");
+    let storage = object_target(&play, &m, "sstore01.dat");
+    assert_eq!((play.economy.held(transport), play.economy.most(transport)), (0.0, 2000.0));
+    // With no mine the task cannot run.
+    let order = Order { code: TRANSPORT, parameter: -1, target: Target::NotDefined };
+    let give = |play: &mut parkan_world::play::Play| {
+        let robot = &mut play.robots.iter_mut().find(|(t, _)| *t == transport).unwrap().1;
+        robot.order = Some(order);
+        robot.behaviour.order(&order);
+    };
+    give(&mut play);
+    play_for(&mut play, 1.0, |_| {});
+    let task = play.robots.iter().find(|(t, _)| *t == transport).unwrap().1.behaviour.task();
+    assert_eq!(task, Task::Stop, "no mine: \"Task Ended\"");
+
+    // A mine on the lode, built and full; it digs on the generator's power.
+    let generator = object_target(&play, &m, "gener01.dat");
+    play.units[generator].clan = Some(player);
+    let lode = glam::Vec3::new(1026.1, 942.7, 0.0);
+    let at = lode.with_z(play.ground.below(lode.x, lode.y, 1.0e5).unwrap().point.z);
+    let now = play.hero.time_ms;
+    play.create_building(player, BUILDING_MINE, at, 0.0, now).expect("the mine stands");
+    play_for(&mut play, 52.0, |_| {});
+    assert_eq!(play.resource_rows(player)[0], 11, "a full mine, 500 of 4,500");
+
+    give(&mut play);
+    let mut loaded_at = None;
+    let mut seconds: f32 = 0.0;
+    while play.economy.held(storage) < 2000.0 && seconds < 180.0 {
+        play_for(&mut play, 0.5, |_| {});
+        seconds += 0.5;
+        if loaded_at.is_none() && play.economy.held(transport) >= 2000.0 {
+            loaded_at = Some(seconds);
+        }
+    }
+    let loaded_at = loaded_at.expect("it fills its 2,000 at the mine, which never runs dry");
+    assert!(
+        play.economy.held(storage) >= 1999.9,
+        "{} in the warehouse after {seconds} s",
+        play.economy.held(storage)
+    );
+    // The unloading's 20 s at 100 a second after the walk from the mine (docs/23).
+    assert!(seconds - loaded_at >= 20.0 + 8.0, "unloaded {} s after loading", seconds - loaded_at);
+    let rows = play.resource_rows(player);
+    assert!((55..=57).contains(&rows[0]), "2,500 of 4,500: {rows:?}");
+    // It goes back for more.
+    play_for(&mut play, 3.0, |_| {});
+    let task = play.robots.iter().find(|(t, _)| *t == transport).unwrap().1.behaviour.task();
+    assert!(matches!(task, Task::Transport { goal: Some(_), .. }), "{task:?}");
+}
