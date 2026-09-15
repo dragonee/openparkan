@@ -315,6 +315,9 @@ In the cockpit the hero's own `hero.tbl` drives it. W and S walk, A and D
 strafe, the mouse turns the hull and tilts the turret, and Shift with the
 mouse looks around while the guns hold their aim. Letting Shift go, or leaving
 the window, which lets every key up as the game does, centres the view again.
+Cmd frees the cursor and lets every key up too, so a macOS shortcut such as
+Cmd-Shift-4, which takes the keyboard without the window losing focus, leaves
+nothing held.
 1 to 4 select guns and the left button fires. The game's
 own chords from `ui_other.man` pick targets: Tab the next listed, E the next
 or nearest enemy, T a friend, the right button what the view points at; Enter

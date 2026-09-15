@@ -20,7 +20,11 @@
 //! holding those keys and moving the mouse by that many counts a tick, before a
 //! `--screenshot` or, with `--headless`, printing where it got to. In the window
 //! `--hold` keeps those keys down and `--mouse` adds its counts every tick, and
-//! `--trace` prints where the hero is every second.
+//! `--trace` prints where the hero is every second, and the window's key, modifier and
+//! focus events.
+//!
+//! Cmd frees the cursor and lets every key up, as leaving the window does, so a system
+//! shortcut such as Cmd-Shift-4 leaves nothing held.
 //!
 //! The hero's view holds the heading it moves along; `--sway` lets it swing with the
 //! gait, ten degrees each way on a run, as the game's does.
@@ -83,7 +87,8 @@ struct Args {
     /// `--look X,Y,Z,TX,TY,TZ`: a screenshot camera at X,Y,Z looking at TX,TY,TZ.
     look: Option<[f32; 6]>,
     headless: bool,
-    /// `--trace`: the window prints where the hero is every second of game time.
+    /// `--trace`: the window prints where the hero is every second of game time, and its key,
+    /// modifier and focus events.
     trace: bool,
     /// `--sway`: the view swings with the hero's gait, as the game's does.
     sway: bool,
@@ -567,6 +572,8 @@ struct App {
     briefing_clock: Option<Instant>,
     /// Where the cursor is in the window, in pixels.
     cursor: [f32; 2],
+    /// Cmd is down: the keys pressed now are a system shortcut's.
+    shortcut: bool,
 }
 
 /// The mission's briefing, unless `--skip-briefing` or `--fly`; a play has its world paused
@@ -1048,15 +1055,62 @@ impl ApplicationHandler for App {
                 }
             }
             // `WM_ACTIVATEAPP` (`iron3d.dll:0x100a0e20`): leaving the window lets every key and
-            // button up (docs/14, "Leaving the window lets every key up"). A key-up sent while
-            // another window has the keyboard never arrives: Cmd-Shift-4's screenshot takes it
-            // with Shift down, which would keep Shift's free look on.
-            WindowEvent::Focused(false) => {
-                self.grab(false);
-                self.release_keys();
+            // button up (docs/14, "Leaving the window lets every key up").
+            WindowEvent::Focused(focused) => {
+                if self.trace {
+                    eprintln!("window: focused {focused}");
+                }
+                if !focused {
+                    self.grab(false);
+                    self.release_keys();
+                }
+                self.shortcut = false;
+            }
+            // winit brings its modifiers up to date from every key, click and mouse movement, so
+            // a Shift let go while the system had the keyboard comes up at the next of them.
+            WindowEvent::ModifiersChanged(modifiers) => {
+                let state = modifiers.state();
+                if self.trace {
+                    eprintln!("window: modifiers {state:?}");
+                }
+                if !state.shift_key() {
+                    for scan in ["SCAN_LSHIFT", "SCAN_RSHIFT"] {
+                        if self.scans.contains(scan) {
+                            self.scan(scan, false);
+                        }
+                    }
+                }
+                if !state.super_key() {
+                    self.shortcut = false;
+                }
             }
             WindowEvent::KeyboardInput { event, .. } => {
                 let PhysicalKey::Code(code) = event.physical_key else { return };
+                if self.trace {
+                    eprintln!(
+                        "window: {code:?} {:?}{}",
+                        event.state,
+                        if event.repeat { " repeat" } else { "" }
+                    );
+                }
+                // Cmd starts a system shortcut, and on macOS the system takes the keyboard and
+                // the mouse without the window losing focus: under Cmd-Shift-4's screenshot the
+                // keys' ups never arrive and a grabbed cursor cannot move. On the game's own
+                // system the shortcut leaves the window, which lets every key up; Cmd going down
+                // does that here, and frees the cursor. The keys pressed with it are the
+                // shortcut's.
+                if matches!(code, KeyCode::SuperLeft | KeyCode::SuperRight) {
+                    let pressed = event.state == ElementState::Pressed;
+                    if pressed && !self.shortcut {
+                        self.grab(false);
+                        self.release_keys();
+                    }
+                    self.shortcut = pressed;
+                    return;
+                }
+                if self.shortcut && event.state == ElementState::Pressed {
+                    return;
+                }
                 let outcome =
                     self.play.as_ref().and_then(|p| p.progression.as_ref()).and_then(|p| p.progress.outcome);
                 // `0x10070e75`: Esc in a briefing skips the rest of it.
@@ -1256,6 +1310,7 @@ fn main() -> Result<()> {
         looking: false,
         grabbed: false,
         cursor: [0.0; 2],
+        shortcut: false,
         counts: [0.0; 2],
         mouse: args.mouse,
         trace: args.trace,
