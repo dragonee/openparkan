@@ -14,6 +14,7 @@ use parkan_formats::control::{
     RADAR_RANGE, RADAR_TYPE, SIMPLE_TYPE, TRIPLE_TOP_SPEED, TURRET_TYPE,
 };
 use parkan_formats::cpt::{self, ControlPoint};
+use parkan_formats::mesh::NO_SLOT;
 use parkan_formats::mission::Mission;
 use parkan_formats::pose::{Pose, multiply, rotate};
 use parkan_sim::behaviour::Behaviour;
@@ -209,6 +210,9 @@ pub struct Robot {
     pub radar: Radar,
     /// The collision sphere in the unit's frame: its centre and radius.
     pub collision: (Vec3, f32),
+    /// The node sphere in the unit's frame ([`node_sphere`]): the centre the ground contact
+    /// holds the body about, and the radius getting out of a bot reaches by.
+    pub bound: (Vec3, f32),
     /// Where the guns' target stands, for their gates; the caller sets it each tick.
     pub target_point: Option<Vec3>,
     /// Whether the turret, and the eye in it, are held steady against the body's gait
@@ -240,6 +244,48 @@ pub fn devices(controller: &Controller) -> Vec<Item> {
         .filter(|(_, k)| matches!(k.type_id, SIMPLE_TYPE | RADAR_TYPE) && !k.entries.is_empty())
         .map(|(i, k)| Item::new(i, k, &controller.channels))
         .collect()
+}
+
+/// Spheres joined as `AniMesh.dll:0x10009510` joins them: the centres weighted by the radii,
+/// and a radius reaching the farthest sphere.
+fn join_spheres(spheres: &[(Vec3, f32)]) -> (Vec3, f32) {
+    let weight: f32 = spheres.iter().map(|s| s.1).sum();
+    let centre =
+        if weight > 0.0 { spheres.iter().map(|s| s.0 * s.1).sum::<Vec3>() / weight } else { Vec3::ZERO };
+    (centre, spheres.iter().map(|s| s.0.distance(centre) + s.1).fold(0.0, f32::max))
+}
+
+/// The agent's node sphere, which interface `0x20` slot 3 hands out by default
+/// (`AniMesh.dll:0x1000f5c8`, worked out at `0x10009e0a`; docs/24, "Finding the ground"): over
+/// the merged model's exterior nodes, each node's level-0 slot box through the node's matrix
+/// as a sphere about the box's diagonal, joined as the parts' spheres are. The chassis's node
+/// 0 answers as the whole object and adds nothing; a node with no level-0 slot is a point at
+/// its origin.
+///
+/// STAND-IN: docs/24-motion.md#finding-the-ground--read -- not read: when `0x10009510` works
+/// the agent's and node spheres out again, and at which pose. Both are worked out once, at rest.
+pub fn node_sphere(assembly: &mut Assembly, parts: &[Part]) -> (Vec3, f32) {
+    let f = |v: [f64; 3]| Vec3::new(v[0] as f32, v[1] as f32, v[2] as f32);
+    let mut spheres = Vec::new();
+    for part in parts {
+        let Some(mesh) = assembly.mesh(&part.reference) else { continue };
+        for (n, node) in mesh.mesh.nodes.iter().enumerate().skip(1) {
+            if node.is_interior() {
+                continue;
+            }
+            let at = part.pose.compose(&mesh.mesh.world_pose(n));
+            let slot = node.slot_index[0];
+            let sphere = match mesh.mesh.slots.get(usize::from(slot)).filter(|_| slot != NO_SLOT) {
+                None => (f(at.translation), 0.0),
+                Some(s) => {
+                    let (lo, hi) = (Vec3::from_array(s.aabb_min), Vec3::from_array(s.aabb_max));
+                    (f(at.apply(((lo + hi) * 0.5).to_array().map(f64::from))), (hi - lo).length() * 0.5)
+                }
+            };
+            spheres.push(sphere);
+        }
+    }
+    join_spheres(&spheres)
 }
 
 fn read_member(assembly: &mut Assembly, library: &str, member: &str) -> Result<Vec<u8>> {
@@ -448,8 +494,9 @@ impl Robot {
         // The agent's sphere from its parts' header spheres (`AniMesh.dll:0x10009510`,
         // docs/26): every part's, the chassis's, the turret's and each gun's, their centres
         // weighted by their radii, and a radius reaching the farthest part's sphere. A part's is
-        // carried by its mount at rest. The ground contact takes the same sphere
-        // (`Control.dll:0x1001a487`, docs/24, "Finding the ground").
+        // carried by its mount at rest. The ground contact holds the body by this sphere's
+        // radius (`Control.dll:0x1001a487`) about the node sphere's centre (`0x1001a518`,
+        // docs/24, "Finding the ground").
         let f = |v: [f64; 3]| Vec3::new(v[0] as f32, v[1] as f32, v[2] as f32);
         let spheres: Vec<(Vec3, f32)> = parts
             .iter()
@@ -458,12 +505,10 @@ impl Robot {
                 Some((f(p.pose.apply(c.map(f64::from))), r))
             })
             .collect();
-        let weight: f32 = spheres.iter().map(|s| s.1).sum();
-        let centre =
-            if weight > 0.0 { spheres.iter().map(|s| s.0 * s.1).sum::<Vec3>() / weight } else { Vec3::ZERO };
-        let collision = (centre, spheres.iter().map(|s| s.0.distance(centre) + s.1).fold(0.0, f32::max));
+        let collision = join_spheres(&spheres);
+        let bound = node_sphere(assembly, &parts);
         if !spheres.is_empty() {
-            walker.set_body_sphere(collision.0, collision.1);
+            walker.set_body_sphere(bound.0, collision.1);
         }
         let size_class = chassis_size(&chassis_part.record);
         let flyer = assembly
@@ -496,6 +541,7 @@ impl Robot {
             rounds: Vec::new(),
             radar,
             collision,
+            bound,
             target_point: None,
             steady: false,
             velocity: Vec3::ZERO,

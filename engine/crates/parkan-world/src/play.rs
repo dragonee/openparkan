@@ -2065,15 +2065,16 @@ impl Play {
     }
 
     /// Leave the boarded bot (`0x10063350`, `0x100638c0`, docs/39, "Leaving"): the first of
-    /// eight places about it with landscape under it that is not water, and for a flyer less
-    /// than 10 below it, takes the hero 8 above the highest surface there, facing the bot.
-    /// With none, "Risk area! Landing impossible." and the player stays aboard.
+    /// eight places about it, both node spheres' radii out, with landscape under it that is not
+    /// water, and for a flyer less than 10 below it, takes the hero 8 above the highest surface
+    /// there, facing the bot. With none, "Risk area! Landing impossible." and the player stays
+    /// aboard.
     pub fn leave(&mut self) -> bool {
         let Some(d) = self.driving.as_ref() else { return false };
         let t = d.target;
         let Some((_, robot)) = self.robots.iter().find(|(rt, _)| *rt == t) else { return false };
         let at = robot.walker.body.position;
-        let r = robot.collision.1 + self.hero.collision.1;
+        let r = robot.bound.1 + self.hero.bound.1;
         let flyer = robot.flyer;
         let alive = self.battle.combat.targets.get(t).is_some_and(|x| x.alive);
         let place = if alive {

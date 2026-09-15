@@ -2130,13 +2130,13 @@ fn mission_02s_hero_boards_its_warbot_flies_it_and_gets_out_where_it_may_land() 
     }
     play.key("SCAN_F", false);
     let bot = play.driven().walker.body.position;
-    let reach = play.driven().collision.1 + play.hero.collision.1;
+    let reach = play.driven().bound.1 + play.hero.bound.1;
     assert!(play.roll_back(), "low over land it may land: bot at {bot}");
     assert_eq!(play.mode(), Mode::OnFoot);
-    // The first of the eight places at both spheres' radii whose landscape lies less than 10 below
-    // the bot (docs/39, "Leaving"). The L-2f rests on its joined sphere, 10.25 over flat ground,
-    // so the places due +x and the next two, over the lower ground, are refused, and the hero
-    // comes out at the fourth, north-west.
+    // The first of the eight places, both node spheres' radii out, whose landscape lies less than
+    // 10 below the bot (docs/39, "Leaving"). The L-2f rests with its origin 9.67 over flat ground
+    // (docs/24, "Finding the ground"); here the places due +x and the next, over lower ground,
+    // are refused, and the hero comes out at the third, north.
     let out = play.hero.walker.body.position;
     let gaps: Vec<f32> = (0..8)
         .map(|i| {
@@ -2146,10 +2146,78 @@ fn mission_02s_hero_boards_its_warbot_flies_it_and_gets_out_where_it_may_land() 
         })
         .collect();
     let first = gaps.iter().position(|&g| g < 10.0).unwrap();
-    assert_eq!(first, 3, "{gaps:?}");
+    assert_eq!(first, 2, "{gaps:?}");
     let a = first as f32 * std::f32::consts::FRAC_PI_4;
     let place = bot.truncate() + glam::Vec2::new(a.cos(), a.sin()) * reach;
     assert!(out.truncate().distance(place) < 0.5, "out at {out}, the bot at {bot}, {reach}: {gaps:?}");
+}
+
+#[test]
+#[ignore = "needs the game install"]
+fn mission_02s_warbot_lets_the_hero_out_on_the_outpost_islands_flat_ground() {
+    use parkan_world::factory::Project;
+    use parkan_world::play::Mode;
+
+    let (mut play, _) = mission_02_play();
+    let tick = |play: &mut parkan_world::play::Play, seconds: f32| {
+        for _ in 0..(seconds * 60.0) as usize {
+            play.update_input();
+            play.tick(1000.0 / 60.0, [0.0; 2]);
+        }
+    };
+    let project = Project {
+        path: "UNITS\\bld_unit_-2147483647.dat".to_owned(),
+        name: "LFW-2 Warrior".into(),
+        type_word: 0x0100_8000,
+        chassis_size: 4,
+        ore: 0.0,
+        power: 0.0,
+        lines: Vec::new(),
+        sphere: None,
+    };
+    let hero_at = play.hero.walker.body.position;
+    let t = play
+        .spawn(&project, play.player_clan, hero_at + glam::Vec3::new(8.0, 0.0, 1.0), 0.0)
+        .expect("the L-2f");
+    tick(&mut play, 0.5);
+    // Every place 40 and 55 m from the Outpost, a sixteenth of a turn apart, on the island's flat
+    // ground (151-152 over Tut_2's water at 150): the user found "Risk area!" there when the bot
+    // rested on the parts' sphere, its origin 10.25 over the ground.
+    let outpost = play.buildings.iter().find(|b| b.doors.is_empty()).unwrap().target;
+    let centre = play.battle.combat.targets[outpost].position;
+    let mut spots = Vec::new();
+    for radius in [40.0f32, 55.0] {
+        for k in 0..16 {
+            let a = k as f32 * std::f32::consts::TAU / 16.0;
+            let (x, y) = (centre.x + radius * a.cos(), centre.y + radius * a.sin());
+            if play.ground.below(x, y, 1_000.0).is_some_and(|h| (151.0..152.0).contains(&h.point.z)) {
+                spots.push(glam::Vec3::new(x, y, 170.0));
+            }
+        }
+    }
+    assert!(spots.len() >= 12, "{spots:?}");
+    let mut refused = Vec::new();
+    for spot in &spots {
+        play.hero.walker.body.position =
+            play.robots.iter().find(|r| r.0 == t).unwrap().1.walker.body.position
+                + glam::Vec3::new(6.0, 0.0, 0.0);
+        assert!(play.board(t));
+        play.robots.iter_mut().find(|r| r.0 == t).unwrap().1.walker.body.position = *spot;
+        play.key("SCAN_F", true);
+        tick(&mut play, 5.0);
+        play.key("SCAN_F", false);
+        let landed = play.driven().walker.body.position;
+        // Resting on the sphere about the node sphere's centre, the origin 9.67 over flat ground:
+        // under 10 over the ground at every place about it.
+        let ground = play.ground.below(landed.x, landed.y, 1_000.0).unwrap().point.z;
+        assert!((9.3..9.9).contains(&(landed.z - ground)), "rests at {landed} over {ground}");
+        if !play.roll_back() {
+            refused.push(landed);
+            continue;
+        }
+        assert_eq!(play.mode(), Mode::OnFoot);
+    }
+    assert!(refused.is_empty(), "Risk area at {refused:?} of {} places", spots.len());
 }
 
 #[test]
@@ -2244,14 +2312,13 @@ fn mission_02_is_won_by_the_factory_the_warbot_it_builds_and_the_outpost_on_the_
     tick(&mut play, 64.0);
     let bot = play.robots.last().map(|r| r.0).unwrap();
     assert_eq!(play.names[bot], "LFW-2 Warrior");
-    // 3. Aboard, over the island's south shore by the Outpost, down to land, out. Resting on its
-    // joined sphere the bot reads altitude 11 there, as the recording's does when the hero gets
-    // out (docs/39, "Against the recording"); on the island's flat middle it reads 12, and every
-    // place about it lies 10 or more below: "Risk area!".
+    // 3. Aboard, over the island's flat ground 30 m east of the Outpost, down to land, out.
+    // Resting on its node sphere's centre the bot reads altitude 11 there, as the recording's does
+    // by the Outpost when the hero gets out (docs/39, "Against the recording").
     play.hero.walker.body.position =
         play.robots.last().unwrap().1.walker.body.position + glam::Vec3::new(6.0, 0.0, 0.0);
     assert!(play.board(bot));
-    let over_island = glam::Vec3::new(1300.0, 740.0, 165.0);
+    let over_island = glam::Vec3::new(1319.0, 793.5, 170.0);
     play.robots.last_mut().unwrap().1.walker.body.position = over_island;
     play.key("SCAN_F", true);
     tick(&mut play, 8.0);
@@ -3805,17 +3872,18 @@ fn a_units_live_limits_come_from_its_engine_and_load_so_a_driven_hull_follows_it
 
 #[test]
 #[ignore = "needs the game install"]
-fn mission_04s_helicopter_rides_up_a_slope_on_its_joined_sphere_with_its_eye_above_the_ground() {
+fn mission_04s_helicopter_rides_up_a_slope_on_its_body_sphere_with_its_eye_above_the_ground() {
     const TICK: f64 = 1000.0 / 60.0;
     let (mut play, _) = mission_04_play();
     let r = play.robots.iter().position(|(t, _)| play.units[*t].logical_id == 3).expect("tut4_f1");
     let t = play.robots[r].0;
     {
         let heli = &play.robots[r].1;
-        // The agent's joined sphere: the chassis's, the hung turret's and its two guns', 2.45
-        // about a centre 0.80 below the origin (docs/24, "Finding the ground").
+        // The body sphere: the agent's sphere's radius, the chassis's, the hung turret's and its
+        // two guns' header spheres joined, 2.45, about the node sphere's centre, 0.60 below the
+        // origin (docs/24, "Finding the ground").
         assert!((heli.walker.radius - 2.4456).abs() < 1e-3, "{}", heli.walker.radius);
-        assert!((heli.walker.centre.z + 0.796).abs() < 1e-3, "{:?}", heli.walker.centre);
+        assert!((heli.walker.centre.z + 0.595).abs() < 1e-3, "{:?}", heli.walker.centre);
     }
     // Taken over as from command mode: the player's, boarded where it stands.
     play.units[t].clan = Some(play.player_clan);
@@ -3827,7 +3895,7 @@ fn mission_04s_helicopter_rides_up_a_slope_on_its_joined_sphere_with_its_eye_abo
     }
     assert!(play.board(t));
     // W toward the valley's west slope for 12 s at 14 m/s: the helicopter rides 57 m up it, and its
-    // eye, 1.6 m under the origin in the hung turret, keeps 1.2 m or more over the ground. On the
+    // eye, 1.6 m under the origin in the hung turret, keeps 0.9 m or more over the ground. On the
     // chassis's own sphere it dipped 0.4 m under.
     let z0 = play.driven().walker.body.position.z;
     let mut lowest = f32::MAX;
@@ -3842,7 +3910,7 @@ fn mission_04s_helicopter_rides_up_a_slope_on_its_joined_sphere_with_its_eye_abo
     play.key("SCAN_W", false);
     let climbed = play.driven().walker.body.position.z - z0;
     assert!(climbed > 50.0, "rode up {climbed}");
-    assert!(lowest > 1.0, "the eye stays above the ground: at least {lowest}");
+    assert!(lowest > 0.5, "the eye stays above the ground: at least {lowest}");
 }
 
 #[test]

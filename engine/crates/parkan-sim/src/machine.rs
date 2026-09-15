@@ -516,8 +516,9 @@ impl Walker {
         self.body.position += if whole { push } else { motion::horizontal(push) };
     }
 
-    /// The object's bounding sphere as the ground contact takes it (`0x1001a487`): its centre in
-    /// the model's frame, and its radius, held to 7.5 under 20 for the contact.
+    /// The body sphere as the ground contact takes it: the centre in the model's frame
+    /// (`0x1001a518`, the agent's node sphere's), and the radius (`0x1001a487`, the agent's
+    /// sphere's), held to 7.5 under 20 for the contact.
     pub fn set_body_sphere(&mut self, centre: Vec3, radius: f32) {
         self.centre = centre;
         self.sphere_radius = radius;

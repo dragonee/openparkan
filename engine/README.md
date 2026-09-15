@@ -471,7 +471,8 @@ recording's took 90 s and 81 s.
 
 - A driven bot's hull comes round under its turret, and a unit's live limits come from its
   fitted engine, its load and its body's life (docs/30, "The hull follows the turret";
-  docs/24, "What sets the live limits"); its ground contact rides its joined sphere.
+  docs/24, "What sets the live limits"); its ground contact holds it by its parts' sphere's
+  radius (M14: about its node sphere's centre).
 - A unit the hero's Enter took holds no mind, so Mission 04's factory has the recording's one
   free mind once the hero, the helicopter and the HQ are the player's.
 
@@ -581,6 +582,14 @@ presses a hero standing at it down), and which of Mission 04's units holds no mi
   stops the CD and plays its `cd_track` looping and starts a random track on the first frame
   after it; 2 s after a track ends another follows, never the one just played and never the
   data track, `rand()` seeded from the clock. `PLAY_CD_MUSIC=0` keeps it silent.
+- A machine's ground contact holds its body by the agent's sphere's radius, the parts' header
+  spheres joined and held to 7.5 under 20, about the **node sphere's** centre (docs/24,
+  "Finding the ground"): every exterior node's level-0 slot box as a sphere about its diagonal,
+  joined the same way. Getting out of a bot tries its places both node spheres' radii out
+  (docs/39, "Leaving"). A landed L-2f's origin stands 9.67 over flat ground, not 10.25, so on
+  Mission 02's island it reads altitude 11 by the Outpost, as the recording's does, and lets
+  the hero out anywhere on the island's flat ground, where M13's model said "Risk area!"; the
+  places stand 13.43 m out, and Mission 04's helicopter rests 3.04 over the ground.
 
 This directory also holds what the rest will follow:
 
@@ -840,6 +849,7 @@ a row here. A row leaves this table when research closes it.
 | M14 | With which depth state the beacon lights (flags 0x400 and 0x800, no bit-8 emitter) draw in the pass flag 0x800 waits for: by the read path their 9 m glow is depth-tested and cut by the faces it hangs on | every sprite of a flag-0x400 effect draws over the scene while its tested point is in view, as a bit-8 emitter's does | [11](../docs/11-effects.md#a-beacon-lights-glow--read-in-part-and-measured) |
 | M14 | What silences the hero's breath in its own view: its effect is read to run, its loop inside its near distance, and the recording has none of it | the hero's own turret effects flagged `0x800` (`hero_breath`; `hero_helm_light` is a light) play no sound | [11](../docs/11-effects.md#how-a-sound-is-heard--read-and-measured) |
 | M14 | How many tracks the install's `winmm.dll` reports for its `MUSIC` files | the highest `TrackNN.ogg` present; a track with no file is not audio | [34](../docs/34-progression.md#music-the-cds-tracks--read-and-measured) |
+| M14 | When `AniMesh.dll` works an agent's sphere and node sphere out again (`0x10009510`), and at which pose | once, at the parts' and nodes' rest poses, as the unit is made | [24](../docs/24-motion.md#finding-the-ground--read) |
 | M14 | How `CD_VOLUME` and `SFX_VOLUME`, each a share of a mixer control, become loudness | the music plays at the sounds' level, as the install's equal settings and Mission 01's recording have it | [34](../docs/34-progression.md#music-the-cds-tracks--read-and-measured) |
 
 ### Read since the stand-in was written
