@@ -445,6 +445,7 @@ On Mission 04 the helicopter ordered Search and capture takes the Large Factory 
 order, landing at its ring's vertex 9 and walking in by exit 67 as the recording's does, and
 the Research Center 42 s after that, their icons turning from grey to light blue; the
 recording's took 90 s and 81 s.
+
 - A repeated `mission.cfg` key is kept in the objective list, as the game's loader walks the
   lines by index: Mission 04 lists six objectives, `objective4` twice, and the sixth, which
   nothing completes, holds the win back from the Teleport's capture.
@@ -468,8 +469,21 @@ recording's took 90 s and 81 s.
 - `--at X,Y,YAW,Z` stands the hero on the highest floor at or below Z, as in the chamber, and
   `--pod` stands the hero on a pod room floor that stands higher over its node than 4.
 
+- A driven bot's hull comes round under its turret, and a unit's live limits come from its
+  fitted engine, its load and its body's life (docs/30, "The hull follows the turret";
+  docs/24, "What sets the live limits"); its ground contact rides its joined sphere.
+- A unit the hero's Enter took holds no mind, so Mission 04's factory has the recording's one
+  free mind once the hero, the helicopter and the HQ are the player's.
+
 On Mission 04 the hero walks up the Teleport's stair and takes it, under its arc drops into
-the chamber, and walks up it to the field: the mission is won.
+the chamber, and walks up it to the field: the mission is won. Played as the briefing means
+it, one Enter takes the HQ and another opens its command view; the helicopter, sent to search
+and capture, takes the Large Factory and the Research Center; the Large Battle Turret is
+researched free in 5 s; the Large Factory builds an L-2f with it in 60 s; routed to the HQ, the
+flyer is boarded and flown up onto the Teleport's plateau; and the hero takes the Teleport and
+goes through, 318 s in. Not yet: tooltips, the research box's clip, the maps' route lines and
+selected outline, the ground contact once a frame (the Small Bunker's sinking door still
+presses a hero standing at it down), and which of Mission 04's units holds no mind.
 
 This directory also holds what the rest will follow:
 
@@ -709,6 +723,7 @@ a row here. A row leaves this table when research closes it.
 | M13 | The places besides a main teleport's: a dock's charge, repair and rearm, and whether a loading or unloading place's cylinder is what a transport's arrival reads | only the in and out places of a main teleport are ticked; a transport keeps its own arrival | [27](../docs/27-ownership.md#the-places--read-and-measured) |
 | M13 | The random source of a place set's and a place's 64 ms share (`0x1004c550`) | a 32-bit xorshift per building | [27](../docs/27-ownership.md#who-stands-in-a-place--read) |
 | M13 | Whether a destroyed generator stays in `World3D.dll`'s queue 3, which the in place's power walk reads | the live generators are asked | [27](../docs/27-ownership.md#teleport-in-0x8000--read) |
+| M13 | Which of Mission 04's hero, helicopter and HQ holds no mind: the recording's factory shows one free of three once all three are the player's, and Mission 02's shows the hero holding one | a unit the hero's Enter took holds none | [34](../docs/34-progression.md#mission-04-teleport-end-to-end--derived) |
 
 ### Read since the stand-in was written
 

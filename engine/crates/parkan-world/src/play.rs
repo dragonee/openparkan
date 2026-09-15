@@ -333,6 +333,8 @@ pub struct Play {
     pub research: crate::research::Research,
     /// The main teleports' places (docs/27, "The main teleport").
     pub places: Vec<crate::places::Places>,
+    /// The units the hero's Enter took, which hold no mind (see [`Play::free_minds`]).
+    pub mindless: Vec<usize>,
 }
 
 /// A round about to leave a barrel.
@@ -732,6 +734,7 @@ impl Play {
             economy: crate::economy::Economy::new(mission, &battle_objects),
             research: crate::research::Research::default(),
             places: Vec::new(),
+            mindless: Vec::new(),
         };
         play.research = crate::research::Research::load(game, mission, &battle_objects, &play.units);
         play.load_places(mission);
@@ -1180,6 +1183,7 @@ impl Play {
             return false;
         }
         self.units[t].clan = Some(self.player_clan);
+        self.mindless.push(t);
         if let Some(p) = self.progression.as_mut() {
             p.progress.captured(u.logical_id, self.player_clan);
         }
@@ -2080,6 +2084,11 @@ impl Play {
     /// Clan `clan`'s minds not held: its mission's count less every live robot of the clan
     /// (the hero among them) and every build its factories are running (docs/23, "The bot
     /// limit is the clan's mind count").
+    ///
+    /// STAND-IN: docs/34-progression.md#mission-04-teleport-end-to-end--derived --
+    /// which of Mission 04's hero, helicopter and HQ holds no mind is not established: the
+    /// recording's factory shows one free of three once all three are the player's, while
+    /// Mission 02's shows the hero holding one. A unit the hero's Enter took holds none.
     pub fn free_minds(&self, clan: i64) -> usize {
         let minds =
             usize::try_from(clan).ok().and_then(|c| self.clans.get(c)).map_or(0, |c| c.minds as usize);
@@ -2087,7 +2096,13 @@ impl Play {
             .units
             .iter()
             .zip(&self.battle.combat.targets)
-            .filter(|(u, target)| u.clan == Some(clan) && u.type_word & CLASS_ROBOT != 0 && target.alive)
+            .enumerate()
+            .filter(|(t, (u, target))| {
+                u.clan == Some(clan)
+                    && u.type_word & CLASS_ROBOT != 0
+                    && target.alive
+                    && !self.mindless.contains(t)
+            })
             .count();
         let hero = usize::from(clan == self.player_clan && !self.hero.dead());
         let building = if clan == self.player_clan {
