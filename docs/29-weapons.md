@@ -1010,6 +1010,12 @@ The enemy variants and the huge guns:
   aiming pass, so its unguided guns keep the target and the range gate
   ([How the AI fires](#how-the-ai-fires--read)). Whether the relink runs
   between that set and the gun's shot was not followed.
+- Which matrix `AniMesh` interface `0xb` slot `0x10` hands the effect manager for
+  its argument 2, with which the manager keeps a beam's muzzle on the shooter's
+  node 0 and carries it back into the world each tick
+  ([A beam outlives its round](#a-beam-outlives-its-round--read-and-measured)).
+  That it is the node's world matrix is *derived* from the point going both ways
+  through it.
 - What the host does with the (0, `0xe`) call `World3D.dll` makes when a gun
   is selected (`0x10010805`), and whether an arm's channel meets exactly 1 in
   the arm's own channel update, which the arm sounds depend on (the turret
