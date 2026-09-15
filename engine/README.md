@@ -509,7 +509,9 @@ On Mission 04 Enter by the HQ takes and boards it, and Enter aboard opens its co
 whose camera rides with the HQ: the cursor at an edge swings it round, Z zooms, and the arrows
 do nothing. Esc steps back to the HQ's cockpit, and again to the hero on foot. `--hq` takes
 and boards the mission's first HQ and opens its view before `--ticks` play (`--mission
-MISSIONS/CAMPAIGN/CAMPAIGN.00/Mission.04 --skip-briefing --hq --ticks 120 --page 1`).
+MISSIONS/CAMPAIGN/CAMPAIGN.00/Mission.04 --skip-briefing --hq --ticks 120 --page 1`), and
+`--take NAME` then takes over the player's unit whose path ends in NAME (`--take tut4_f1.dat
+--hold SCAN_W --ticks 360` flies the helicopter up the valley's west slope).
 
 A research centre's pod opens its research screen once the centre is the player's, as
 command mode's page 4 shows it too: a row's button orders or cancels its research, the
@@ -641,7 +643,6 @@ a row here. A row leaves this table when research closes it.
 | M13 | The colour the research box's name is drawn in (`GAME_FONT`'s, as whatever drew before left it) | white, as the recording reads | [41](../docs/41-commander.md#not-established) |
 | M13 | The research box's clip 5 inside its frame, applied to its preview | the preview's view is not clipped | [41](../docs/41-commander.md#what-it-draws--read) |
 | M13 | What "a node reaching its last damage stage" takes out of the load (`0x10011920`) | a destroyed node's own weight and its armour; the devices on it stay | [24](../docs/24-motion.md#what-sets-the-live-limits--read) |
-| M13 | The ground contact's body sphere, read as the agent's joined sphere (`0x1001a487`) | the chassis mesh's own sphere: Mission 04's helicopter rides at 1.65 over the ground about its origin, not 2.20 about a centre 0.55 lower | [24](../docs/24-motion.md#finding-the-ground--read) |
 
 ### Read since the stand-in was written
 

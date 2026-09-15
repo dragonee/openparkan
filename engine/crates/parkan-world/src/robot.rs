@@ -423,9 +423,6 @@ impl Robot {
         let position = Vec3::from_array(placed.position);
         let chassis_devices = devices(&chassis_ctl);
         let turret_devices = devices(&turret_ctl);
-        // STAND-IN: docs/24-motion.md#finding-the-ground--read -- the ground contact's body
-        // sphere is read to be the agent's joined sphere, the chassis's and its hung parts'; the
-        // chassis mesh's own sphere is kept, so a flyer with a hung turret rides lower.
         let mut walker = Walker::new(chassis_ctl, &chassis.mesh, &feet, position, placed.rotation);
         let heft = Heft::weigh(assembly, &placed.path, &robot_parts, chassis_index);
         if placed.kind != parkan_formats::mission::KIND_BUILDING {
@@ -447,24 +444,25 @@ impl Robot {
         let radar = radar.unwrap_or_else(|| Radar::new(NO_RADAR_RANGE, NO_RADAR_PERIOD_MS));
 
         // The agent's sphere from its parts' header spheres (`AniMesh.dll:0x10009510`,
-        // docs/26): their centres weighted by their radii, and a radius reaching the
-        // farthest part's sphere. The turret's is carried by its mount at rest.
-        let rest_mount = chassis
-            .mesh
-            .world_pose(usize::try_from(turret_part.node).unwrap_or(0))
-            .compose(&turret_mesh.mesh.root_pose().invert());
+        // docs/26): every part's, the chassis's, the turret's and each gun's, their centres
+        // weighted by their radii, and a radius reaching the farthest part's sphere. A part's is
+        // carried by its mount at rest. The ground contact takes the same sphere
+        // (`Control.dll:0x1001a487`, docs/24, "Finding the ground").
         let f = |v: [f64; 3]| Vec3::new(v[0] as f32, v[1] as f32, v[2] as f32);
-        let spheres: Vec<(Vec3, f32)> = [
-            chassis.mesh.sphere.map(|(c, r)| (Vec3::from_array(c), r)),
-            turret_mesh.mesh.sphere.map(|(c, r)| (f(rest_mount.apply(c.map(f64::from))), r)),
-        ]
-        .into_iter()
-        .flatten()
-        .collect();
+        let spheres: Vec<(Vec3, f32)> = parts
+            .iter()
+            .filter_map(|p| {
+                let (c, r) = assembly.mesh(&p.reference)?.mesh.sphere?;
+                Some((f(p.pose.apply(c.map(f64::from))), r))
+            })
+            .collect();
         let weight: f32 = spheres.iter().map(|s| s.1).sum();
         let centre =
             if weight > 0.0 { spheres.iter().map(|s| s.0 * s.1).sum::<Vec3>() / weight } else { Vec3::ZERO };
         let collision = (centre, spheres.iter().map(|s| s.0.distance(centre) + s.1).fold(0.0, f32::max));
+        if !spheres.is_empty() {
+            walker.set_body_sphere(collision.0, collision.1);
+        }
         let size_class = chassis_size(&chassis_part.record);
         let flyer = assembly
             .library

@@ -6,7 +6,7 @@
 //! parkan [--game DIR] [--mission MISSIONS/…] [--fly]
 //!        [--screenshot OUT.png] [--size WxH] [--top-down] [--look X,Y,Z,TX,TY,TZ]
 //!        [--headless] [--ticks N] [--hold SCAN_W,SCAN_A] [--mouse DX,DY] [--trace] [--sway]
-//!        [--capture-idle] [--stretch-hud] [--outcome won|lost] [--text "…"] [--face NAME,DISTANCE] [--at X,Y,YAW] [--pod NAME] [--drive PATH] [--hq] [--designer] [--design PART,…]
+//!        [--capture-idle] [--stretch-hud] [--outcome won|lost] [--text "…"] [--face NAME,DISTANCE] [--at X,Y,YAW] [--pod NAME] [--drive PATH] [--hq] [--take NAME] [--designer] [--design PART,…]
 //!        [--skip-briefing] [--briefing-at SECONDS] [--objectives] [--map]
 //! ```
 //!
@@ -111,6 +111,9 @@ struct Args {
     /// `--hq`: the hero takes and boards the mission's first HQ unit with Enter from 12 m, and
     /// Enter again opens its command view, before `--ticks` play.
     hq: bool,
+    /// `--take NAME`: from the command view `--hq` or `--pod` opens, the player's unit whose path
+    /// ends in NAME is taken over by telepresence, before `--ticks` play.
+    take: Option<String>,
     /// `--designer`: a screenshot with the warbot designer open on the first factory, and
     /// `--design PART,…` the parts fitted to it in turn.
     designer: bool,
@@ -157,6 +160,7 @@ fn args() -> Result<Args> {
         pod: None,
         drive: None,
         hq: false,
+        take: None,
         designer: false,
         design: Vec::new(),
         skip_briefing: false,
@@ -213,6 +217,7 @@ fn args() -> Result<Args> {
             "--pod" => out.pod = Some(value()?.to_ascii_lowercase()),
             "--drive" => out.drive = Some(value()?),
             "--hq" => out.hq = true,
+            "--take" => out.take = Some(value()?.to_ascii_lowercase()),
             "--designer" => out.designer = true,
             "--design" => out.design = value()?.split(',').map(str::to_owned).collect(),
             "--ticks" => out.ticks = value()?.parse()?,
@@ -326,6 +331,18 @@ fn rehearse(play: &mut scene::Play, loaded: &scene::Loaded, args: &Args) {
     }
     if args.hq && !take_hq(play) {
         eprintln!("--hq: no HQ unit the hero can take and board");
+    }
+    if let Some(name) = &args.take {
+        let unit = play.robots.iter().map(|(t, _)| *t).find(|&t| {
+            play.battle
+                .objects
+                .get(t)
+                .and_then(|&o| loaded.mission.objects.get(o))
+                .is_some_and(|o| o.path.to_ascii_lowercase().ends_with(name.as_str()))
+        });
+        if !unit.is_some_and(|t| play.telepresence(t, 0)) {
+            eprintln!("--take: no unit ending in {name} can be taken over from a command view");
+        }
     }
     if let Some([x, y]) = args.build {
         let builder = play.own_units_within(parkan_world::selection::BUILDERS).first().copied();

@@ -516,6 +516,14 @@ impl Walker {
         self.body.position += if whole { push } else { motion::horizontal(push) };
     }
 
+    /// The object's bounding sphere as the ground contact takes it (`0x1001a487`): its centre in
+    /// the model's frame, and its radius, held to 7.5 under 20 for the contact.
+    pub fn set_body_sphere(&mut self, centre: Vec3, radius: f32) {
+        self.centre = centre;
+        self.sphere_radius = radius;
+        self.radius = contact_radius(radius);
+    }
+
     /// The body sphere's centre in the world.
     pub fn sphere_centre(&self) -> Vec3 {
         self.body.position + self.body.to_world(self.centre)
