@@ -2660,6 +2660,44 @@ fn mission_03s_transport_carries_2000_ore_from_the_mine_to_the_small_warehouse()
     assert!(matches!(task, Task::Transport { goal: Some(_), .. }), "{task:?}");
 }
 
+/// Mission 03's Small Generator's hall way from its south exit (vertex 51) to its pod (16), from
+/// (647.73, 987.06) facing north (docs/24, "The ways into Mission 03's Small Generator and Small
+/// Bunker").
+const GENERATOR_ROUTE: [[f32; 2]; 14] = [
+    [648.26, 995.35],
+    [648.55, 999.96],
+    [649.76, 1019.04],
+    [650.12, 1024.73],
+    [650.78, 1035.22],
+    [659.57, 1036.86],
+    [663.95, 1032.77],
+    [668.69, 1029.95],
+    [674.04, 1030.13],
+    [678.53, 1034.81],
+    [678.95, 1041.43],
+    [672.62, 1049.86],
+    [665.26, 1050.32],
+    [659.45, 1050.69],
+];
+
+/// Mission 03's Small Bunker's hall way from its one exit (vertex 43) down the ramp, through the
+/// door and the corridors to the pod (6), from (1198.14, 829.49) facing east.
+const BUNKER_ROUTE: [[f32; 2]; 13] = [
+    [1209.39, 825.78],
+    [1225.93, 822.23],
+    [1243.24, 818.02],
+    [1257.07, 814.87],
+    [1267.09, 812.64],
+    [1265.22, 804.06],
+    [1262.78, 792.13],
+    [1261.52, 786.69],
+    [1265.58, 785.58],
+    [1274.34, 783.54],
+    [1282.90, 781.75],
+    [1286.42, 796.31],
+    [1288.90, 807.37],
+];
+
 /// Walk the hero along `route`, W held and turned toward each point in turn, for at most
 /// `seconds`, W let go at the last point: the tick it reached the first point on the building's
 /// floor (the first whose ground is a building's face), the tick it reached the last point, the
@@ -2704,22 +2742,7 @@ fn walk_route(
 fn mission_03s_hero_walks_into_the_small_generator_from_the_south_and_its_pod_captures_it() {
     // The hall way's shortest way from the south exit (vertex 51) to the pod (16), docs/24,
     // "The ways into Mission 03's Small Generator and Small Bunker".
-    let route = [
-        [648.26, 995.35],
-        [648.55, 999.96],
-        [649.76, 1019.04],
-        [650.12, 1024.73],
-        [650.78, 1035.22],
-        [659.57, 1036.86],
-        [663.95, 1032.77],
-        [668.69, 1029.95],
-        [674.04, 1030.13],
-        [678.53, 1034.81],
-        [678.95, 1041.43],
-        [672.62, 1049.86],
-        [665.26, 1050.32],
-        [659.45, 1050.69],
-    ];
+    let route = GENERATOR_ROUTE;
     let (mut play, m) = mission_03_play();
     let t = object_target(&play, &m, "gener01.dat");
     assert!(play.stand_at(647.73, 987.06, 0.0));
@@ -2756,21 +2779,7 @@ fn mission_03s_hero_walks_down_the_small_bunkers_ramp_to_its_pod_and_command_mod
     // The hall way's way from its one exit (vertex 43) down the ramp, through the door and the
     // corridors to the pod (6), docs/24, "The ways into Mission 03's Small Generator and Small
     // Bunker".
-    let route = [
-        [1209.39, 825.78],
-        [1225.93, 822.23],
-        [1243.24, 818.02],
-        [1257.07, 814.87],
-        [1267.09, 812.64],
-        [1265.22, 804.06],
-        [1262.78, 792.13],
-        [1261.52, 786.69],
-        [1265.58, 785.58],
-        [1274.34, 783.54],
-        [1282.90, 781.75],
-        [1286.42, 796.31],
-        [1288.90, 807.37],
-    ];
+    let route = BUNKER_ROUTE;
     let (mut play, m) = mission_03_play();
     let bunker = object_target(&play, &m, "sbunk01.dat");
     assert!(play.stand_at(1198.14, 829.49, -std::f32::consts::FRAC_PI_2));
@@ -2795,4 +2804,80 @@ fn mission_03s_hero_walks_down_the_small_bunkers_ramp_to_its_pod_and_command_mod
     }
     let p = play.progression.as_ref().unwrap();
     assert_eq!(p.progress.objectives[1].state, 1, "Find and capture the Bunker");
+}
+
+#[test]
+#[ignore = "needs the game install"]
+fn mission_03_is_won_by_the_generator_the_bunker_a_mine_four_warbots_and_the_patrol_beaten() {
+    use parkan_world::cockpit::commander::Panel;
+    use parkan_world::cockpit::factory::Click;
+    use parkan_world::pick::Aim;
+    use parkan_world::play::Mode;
+
+    let (mut play, m) = mission_03_play();
+    let player = play.player_clan;
+    let generator = object_target(&play, &m, "gener01.dat");
+    let bunker = object_target(&play, &m, "sbunk01.dat");
+    let plant = object_target(&play, &m, "lplant01.dat");
+    let objectives = |p: &parkan_world::play::Play| {
+        p.progression.as_ref().unwrap().progress.objectives.iter().map(|o| o.state).collect::<Vec<_>>()
+    };
+
+    // The hero takes the Small Generator from its pod, then walks down the Small Bunker's ramp to
+    // its pod, which opens command mode.
+    assert!(play.stand_at(647.73, 987.06, 0.0));
+    let (_, _, _, taken) =
+        walk_route(&mut play, &GENERATOR_ROUTE, 40, |p| p.units[generator].clan == Some(player));
+    assert!(taken.is_some(), "the generator is taken");
+    assert!(play.stand_at(1198.14, 829.49, -std::f32::consts::FRAC_PI_2));
+    let (_, _, _, opened) = walk_route(&mut play, &BUNKER_ROUTE, 60, |p| p.mode() != Mode::OnFoot);
+    assert!(opened.is_some() && play.mode() == Mode::Command(bunker), "command mode");
+    play_for(&mut play, 2.5, |_| {});
+    assert_eq!(objectives(&play)[..2], [1, 1]);
+
+    // The Builders page offers Build Mine; the ghost goes green on the lode and the builder goes.
+    let mut now = play.hero.time_ms;
+    let mut panel = Panel::default();
+    panel.update(&mut play, now);
+    panel.turn(&mut play, 3, now);
+    assert!(panel.menu.contains(&10), "{:?}", panel.menu);
+    let act = play.hq_command(10).expect("Build Mine");
+    play.open_pick(act);
+    play.command_frame(now / 1000.0, parkan_world::command::Edges::default());
+    let lode = play.commander.lodes[0].position;
+    let site = play.ground.below(lode.x, lode.y, 1.0e5).unwrap().point;
+    let eye = play.eye().position;
+    play.update_ghost(Aim::Ray { eye, direction: (site - eye).normalize() });
+    assert!(play.commander.ghost.as_ref().is_some_and(|g| g.valid), "green on the lode");
+    assert!(play.commit_placement());
+
+    // The transport carries minerals, and the factory builds SSW-X in batch.
+    panel.turn(&mut play, 2, now);
+    assert!(play.hq_command(8).is_some());
+    let f = play.factories.iter().position(|f| f.target == plant).unwrap();
+    let ssw = play.factories[f].projects.iter().position(|p| p.name.starts_with("SSW-X")).unwrap();
+    play.factories[f].selected = Some(ssw);
+    play.factory_click(plant, Click::Batch);
+    assert!(play.factories[f].build.is_some(), "batch production starts");
+
+    // Play on until the mission is won: the mine counts, four bots are built, the patrol comes.
+    let mut done = [None; 5];
+    let mut outcome = None;
+    for second in 0..900 {
+        play_for(&mut play, 1.0, |_| {});
+        now = play.hero.time_ms;
+        panel.update(&mut play, now);
+        for (i, state) in objectives(&play).into_iter().enumerate() {
+            if state == 1 && done[i].is_none() {
+                done[i] = Some(second);
+                eprintln!("objective {} complete {} s after command mode", i + 1, second);
+            }
+        }
+        outcome = play.progression.as_ref().unwrap().progress.outcome;
+        if outcome.is_some() {
+            break;
+        }
+    }
+    let robots = play.own_units_within(parkan_world::selection::BATTLE_UNITS).len();
+    assert_eq!(outcome, Some(true), "objectives {done:?}, {robots} battle units");
 }
