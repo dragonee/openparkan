@@ -3,7 +3,10 @@
 //! One pipeline per blend mode the materials name, as `Ngi32.dll`'s mode table
 //! gives them (`docs/07-objects.md`): 0 draws opaque; 1 `SRCALPHA/ZERO`; 2
 //! `SRCALPHA/ONE`, additive; 3 `ZERO/SRCCOLOR`; 4 `SRCALPHA/INVSRCALPHA`; 5
-//! `DESTCOLOR/SRCCOLOR`. Every mode but 0 also alpha-tests.
+//! `DESTCOLOR/SRCCOLOR`. Every mode but 0 also alpha-tests against 1, so it drops the
+//! fragments whose alpha is 0. Each mode has two pipelines, one for the queue's first list,
+//! which writes depth whatever it blends, and one for the translucent second list, drawn
+//! after it without writing depth (docs/07, "What a blended batch writes").
 
 use std::cell::Cell;
 
@@ -33,7 +36,8 @@ struct LookUniform {
     emissive: [f32; 4],
     fog: [f32; 4],
     cell: [f32; 4],
-    /// x 1: a lit batch, which its lightmap shades in place of the scene's lights.
+    /// x 1: a lit batch, which its lightmap shades in place of the scene's lights; y 1: the
+    /// alpha test, on for every blend mode but 0.
     lit: [f32; 4],
 }
 
@@ -51,7 +55,7 @@ impl LookUniform {
             emissive: [ar, ag, ab, 1.0],
             fog: crate::frame::fog_override(blend_mode),
             cell: phase.cell,
-            lit: [f32::from(u8::from(lit)), 0.0, 0.0, 0.0],
+            lit: [f32::from(u8::from(lit)), f32::from(u8::from(blend_mode != 0)), 0.0, 0.0],
         }
     }
 }
@@ -61,6 +65,12 @@ const INSTANCE_FLOATS: usize = 20;
 
 /// The blend modes a pipeline exists for, opaque first.
 pub const BLEND_MODES: [u8; 6] = [0, 1, 2, 3, 4, 5];
+
+/// The pipelines in draw order: every mode of the queue's first list, then every mode of the
+/// translucent second list (`Terrain.dll:0x10032f10`).
+fn passes() -> impl Iterator<Item = (u8, bool)> {
+    [false, true].into_iter().flat_map(|translucent| BLEND_MODES.map(|mode| (mode, translucent)))
+}
 
 fn blend_state(mode: u8) -> Option<wgpu::BlendState> {
     use wgpu::BlendFactor as F;
@@ -85,6 +95,8 @@ struct DrawGroup {
     count: u32,
     mode: u8,
     lit: bool,
+    /// Filed in the queue's second list: drawn last, writing no depth.
+    translucent: bool,
     look: wgpu::Buffer,
     /// A bind group for each texture the material's phases draw, and the one drawn now.
     bind_groups: Vec<(Option<usize>, wgpu::BindGroup)>,
@@ -113,7 +125,8 @@ pub struct ViewFrame {
 }
 
 pub struct ModelRenderer {
-    pipelines: Vec<(u8, wgpu::RenderPipeline)>,
+    /// Blend mode, translucent, pipeline, in draw order.
+    pipelines: Vec<(u8, bool, wgpu::RenderPipeline)>,
     frame_layout: wgpu::BindGroupLayout,
     frame: wgpu::Buffer,
     frame_bind_group: wgpu::BindGroup,
@@ -196,9 +209,8 @@ impl ModelRenderer {
             bind_group_layouts: &[Some(&frame_layout), Some(&instance_layout), Some(&look_layout)],
             immediate_size: 0,
         });
-        let pipelines = BLEND_MODES
-            .iter()
-            .map(|&mode| {
+        let pipelines = passes()
+            .map(|(mode, translucent)| {
                 let blend = blend_state(mode);
                 let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                     label: Some("model"),
@@ -225,11 +237,9 @@ impl ModelRenderer {
                     },
                     depth_stencil: Some(wgpu::DepthStencilState {
                         format: DEPTH_FORMAT,
-                        // STAND-IN: docs/07-objects.md#how-a-material-draws-is-in-the-archive-directory
-                        // -- whether a blended material writes depth, and the alpha test's
-                        // reference, are not read; blended draws come last and write no
-                        // depth, and nothing is discarded.
-                        depth_write_enabled: Some(blend.is_none()),
+                        // The draw item's ZWRITEENABLE: 1, and 0 in the translucent layer 5
+                        // (`Terrain.dll:0x10045b1e`); the blend mode leaves it alone.
+                        depth_write_enabled: Some(!translucent),
                         depth_compare: Some(wgpu::CompareFunction::Greater),
                         stencil: Default::default(),
                         bias: Default::default(),
@@ -248,7 +258,7 @@ impl ModelRenderer {
                     multiview_mask: None,
                     cache: None,
                 });
-                (mode, pipeline)
+                (mode, translucent, pipeline)
             })
             .collect();
 
@@ -330,6 +340,7 @@ impl ModelRenderer {
                             count: g.count,
                             mode,
                             lit,
+                            translucent: g.look.translucent(),
                             look: buffer,
                             bind_groups,
                             current: Cell::new(0),
@@ -435,7 +446,7 @@ impl ModelRenderer {
         }
     }
 
-    /// Opaque groups of every instance first, then each blended mode in turn.
+    /// Every group of the first list, mode by mode, then the translucent groups.
     pub fn draw(&self, pass: &mut wgpu::RenderPass<'_>) {
         pass.set_bind_group(0, &self.frame_bind_group, &[]);
         self.draw_instances(pass, self.instances.iter().filter(|i| i.visible));
@@ -462,7 +473,7 @@ impl ModelRenderer {
             self.draw_instances(pass, instances);
             return;
         }
-        let Some((_, opaque)) = self.pipelines.first() else { return };
+        let Some((_, _, opaque)) = self.pipelines.first() else { return };
         pass.set_pipeline(opaque);
         for instance in instances {
             let model = &self.models[instance.model];
@@ -481,12 +492,12 @@ impl ModelRenderer {
         pass: &mut wgpu::RenderPass<'_>,
         instances: impl Iterator<Item = &'a GpuInstance> + Clone,
     ) {
-        for (mode, pipeline) in &self.pipelines {
+        for (mode, translucent, pipeline) in &self.pipelines {
             pass.set_pipeline(pipeline);
             for instance in instances.clone() {
                 let model = &self.models[instance.model];
                 let mut bound = false;
-                for g in model.groups.iter().filter(|g| g.mode == *mode) {
+                for g in model.groups.iter().filter(|g| g.mode == *mode && g.translucent == *translucent) {
                     if !bound {
                         pass.set_bind_group(1, &instance.bind_group, &[]);
                         pass.set_vertex_buffer(0, model.vertices.slice(..));

@@ -551,6 +551,11 @@ presses a hero standing at it down), and which of Mission 04's units holds no mi
   line from the eye meets something on is brought in front of it. The unit is drawn whole from
   it, a boarded bot too, with the HUD over; Z does nothing, and any change of mode turns it off.
   On Mission 01 the hero stands in the four views where the recording's put it.
+- A blended batch draws as the game's draw item does (docs/07, "What a blended batch writes"):
+  every blend mode but 0 drops the fragments whose 8-bit alpha is 0, as `ALPHAREF` 1 with
+  `GREATEREQUAL` does, and writes depth; only a batch whose ambient alpha is below 1 is
+  translucent, drawn after the rest without writing depth. A palm's nearer leaves now hide
+  the leaves behind them.
 
 This directory also holds what the rest will follow:
 
@@ -710,7 +715,6 @@ a row here. A row leaves this table when research closes it.
 | milestone | what is unknown | stand-in | see |
 |---|---|---|---|
 | M1 | Whether the water surface is blended over the frame beneath it | opaque: the terrain draws every material opaque, whatever its blend | [03](../docs/03-terrain.md#not-established) |
-| M2 | Whether a blended material writes depth, and the alpha test's reference value | blended groups draw after opaque ones without writing depth; nothing is discarded (reference 0) | [07](../docs/07-objects.md#how-a-material-draws-is-in-the-archive-directory) |
 | M1 | Whether `ForceSWFog` is read outside `Terrain.dll`, which asks Direct3D for linear range vertex fog and never reads it | per-pixel linear range fog on the distance to the eye, from 700 × slot 5 to 700 × slot 6 | [10](../docs/10-sky.md#not-resolved) |
 | M1 | How the 34142-radius dome escapes the far plane and a fog ending by 700, and what lies below its rim | draw the dome first at the camera, depth-tested without writing depth under a projection with no far plane, unfogged but for its rim; clear the frame to the fog colour | [10](../docs/10-sky.md#the-dome) |
 | M1 | Which camera axis the fog's heading angle measures: the compass heading, 0 at +y towards +x, of the camera matrix's first column | the view direction's heading, 0 along +y, turning towards +x, like the dome's segments | [10](../docs/10-sky.md#not-resolved) |
@@ -804,10 +808,10 @@ a row here. A row leaves this table when research closes it.
 | M14 | The target point the guided lock projects (the target list's `+4`), and whether `getTimer`, which times its beeps, runs on a clock or on `timeGetTime` | the target's sphere centre, as the target panel's frame takes it; game time | [35](../docs/35-hud.md#the-guided-lock--read) |
 | M14 | How an effect sprite's pre-lit vertices are coloured (draw flags 4, FVF `0x1e2`) | as a batch's emissive: the scene colour plus the material's ambient, held to 1 and decoded, times the texture; the laser draws red as the recording's does | [11](../docs/11-effects.md#not-resolved) |
 | M14 | Which matrix `AniMesh` slot `0x10` hands the effect manager for its argument 2, which carries a beam's muzzle with its shooter | node 0's world pose: the unit's placement and its chassis's node 0 as drawn | [29](../docs/29-weapons.md#not-established) |
-| M14 | How often the game frame runs, which paces a unit's zoom by 0.1 an update | once a 60 Hz tick | [30](../docs/30-turrets.md#not-established) |
 | M14 | How often the game frame runs, which paces a unit's zoom by 0.1 an update and the outer camera's ease | once a 60 Hz tick | [30](../docs/30-turrets.md#not-established) |
 | M14 | Which objects and faces the outer camera's line through the world meets (mask `0x41a`, `0x208`), and the vector at `+8` of the world's answer 0.75 of which is added to the point met | the ground and every live target but the unit looked at, passing what a round passes; the camera stands 0.75 back toward the eye | [30](../docs/30-turrets.md#not-established) |
 | M14 | Which box the unit record's `+0x98`, the outer camera's r, is the half-diagonal of | the chassis mesh's authored box (1.47 m on Mission 01's hero, which its recording favours), else the unit's collision radius; an HQ's command camera keeps its M13 stand-in | [40](../docs/40-command-mode.md#not-established) |
+| M14 | Where a batch word's 8 and `0x100`, which file a batch translucent, come from; which sort type each of the render queue's layers has | no batch word makes a batch translucent, and a look is translucent when any of its phases has an ambient alpha below 1, decided once; groups draw mode by mode in their list, unsorted | [07](../docs/07-objects.md#what-a-blended-batch-writes-and-the-alpha-tests-reference--read) |
 
 ### Read since the stand-in was written
 

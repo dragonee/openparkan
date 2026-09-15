@@ -138,6 +138,20 @@ impl Look {
     pub fn at(&self, t_ms: f64) -> Phase {
         self.animation.as_ref().map_or(self.still, |a| a.at(t_ms))
     }
+
+    /// Whether `CShade` files a batch in this look translucent: layer 5 of the queue's
+    /// second list, drawn after the first and writing no depth (`Terrain.dll:0x1004552a`,
+    /// `0x10045b1e`). Its phase's ambient alpha is below 1; the blend mode does not enter,
+    /// so a leaf blends and writes depth (docs/07, "What a blended batch writes").
+    ///
+    /// STAND-IN: docs/07-objects.md#what-a-blended-batch-writes-and-the-alpha-tests-reference--read
+    /// -- the game tests the phase it draws each time, and a batch word carrying 8 or 0x100,
+    /// whose writer is not found: here a look is translucent when any of its phases is, and no
+    /// batch word makes one.
+    pub fn translucent(&self) -> bool {
+        self.still.alpha < 1.0
+            || self.animation.as_ref().is_some_and(|a| a.keys.iter().any(|(p, _)| p.alpha < 1.0))
+    }
 }
 
 pub struct TextureStore {
@@ -298,6 +312,23 @@ mod tests {
 
     fn phase(ambient: f32, cell: f32) -> Phase {
         Phase { ambient: [ambient; 3], cell: [cell, 0.0, 0.25, 0.5], ..Phase::PLAIN }
+    }
+
+    #[test]
+    fn a_look_is_translucent_by_its_ambient_alpha_not_its_blend() {
+        let look = |alpha: f32, blend_mode: u8, keys: Option<Vec<f32>>| Look {
+            material: "M".into(),
+            blend_mode,
+            still: Phase { alpha, ..Phase::PLAIN },
+            animation: keys.map(|k| Animation {
+                mode: 0,
+                mask: 0x10,
+                keys: k.into_iter().map(|a| (Phase { alpha: a, ..Phase::PLAIN }, 100.0)).collect(),
+            }),
+        };
+        assert!(!look(1.0, 4, None).translucent(), "a blended leaf writes depth");
+        assert!(look(0.6, 0, None).translucent());
+        assert!(look(1.0, 4, Some(vec![0.0, 1.0])).translucent(), "FIRESTORM's fade-in");
     }
 
     /// The buoy beam's track: entries 0, 1, 2, 1 ending at 50, 100, 150 and 200 ms.

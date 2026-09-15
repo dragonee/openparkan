@@ -91,6 +91,28 @@ fn mission_01s_objects_build_and_stand_on_the_ground() {
 
 #[test]
 #[ignore = "needs the game install"]
+fn mission_01s_leaves_blend_and_write_depth_and_nothing_on_it_is_translucent() {
+    use parkan_formats::mission;
+    use parkan_world::{assembly::Assembly, models};
+
+    let game = gamedir::find(None).expect("a Parkan install: set PARKAN_DIR");
+    let dir = gamedir::resolve(&game, gamedir::MISSION_01).unwrap();
+    let m = mission::parse(&std::fs::read(dir.join("data.tma")).unwrap(), "Mission.01").unwrap();
+    let mut store = TextureStore::open(&game).unwrap();
+    let mut assembly = Assembly::new(&game).unwrap();
+    let objects = models::build(&mut assembly, &mut store, &m).unwrap();
+    // A batch is translucent, drawn last without writing depth, only for an ambient alpha below
+    // 1; the palm's `TF2` leaves blend at mode 4 in the first list, writing depth
+    // (docs/07, "What a blended batch writes").
+    let groups: Vec<_> = objects.models.iter().flat_map(|model| &model.groups).collect();
+    assert!(groups.iter().all(|g| !g.look.translucent()), "no Mission 01 look is translucent");
+    let leaves: Vec<_> = groups.iter().filter(|g| g.look.material.eq_ignore_ascii_case("TF2")).collect();
+    assert!(!leaves.is_empty(), "the palms' leaves");
+    assert!(leaves.iter().all(|g| g.look.blend_mode == 4), "leaves blend SRCALPHA/INVSRCALPHA");
+}
+
+#[test]
+#[ignore = "needs the game install"]
 fn mission_01s_bridge_halves_meet() {
     use parkan_formats::mission;
     use parkan_world::{assembly::Assembly, models};

@@ -52,7 +52,7 @@ struct Look {
     fog: vec4<f32>,
     // The cell's rectangle: u0, v0, du, dv.
     cell: vec4<f32>,
-    // x 1: a lit batch, its lightmap in place of the scene's lights.
+    // x 1: a lit batch, its lightmap in place of the scene's lights; y 1: the alpha test.
     lit: vec4<f32>,
 };
 
@@ -128,5 +128,11 @@ fn fs_main(v: VertexOut) -> @location(0) vec4<f32> {
     // texture's times the material's ambient alpha.
     let lights = frame.light_colour.rgb * a + frame.second_colour.rgb * b;
     let lit = min(vec3<f32>(1.0), look.emissive.rgb + frame.scene_colour.rgb + look.diffuse.rgb * lights);
-    return vec4<f32>(fogged(texel.rgb * linear(lit), v.world, look.fog), texel.a * look.diffuse.a);
+    let alpha = texel.a * look.diffuse.a;
+    // Every blend mode but 0 alpha-tests GREATEREQUAL against ALPHAREF 1 (docs/07, "What a
+    // blended batch writes"): an 8-bit alpha of 0 is dropped, and with it its depth.
+    if look.lit.y > 0.5 && round(alpha * 255.0) < 1.0 {
+        discard;
+    }
+    return vec4<f32>(fogged(texel.rgb * linear(lit), v.world, look.fog), alpha);
 }
