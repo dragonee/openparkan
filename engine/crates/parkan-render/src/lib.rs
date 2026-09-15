@@ -274,7 +274,7 @@ impl Renderer {
     /// The looks effect sprites draw with, by index, from the textures `set_world` uploaded.
     pub fn set_sprite_looks(&mut self, device: &wgpu::Device, looks: &[sprites::SpriteLook]) {
         if let Some(bank) = &self.bank {
-            self.sprites = Some(sprites::SpriteRenderer::new(device, self.format, looks, bank));
+            self.sprites = Some(sprites::SpriteRenderer::new(device, self.display, looks, bank));
         }
     }
 
@@ -598,9 +598,6 @@ impl Renderer {
             if let Some(objects) = &self.objects {
                 objects.draw(&mut pass);
             }
-            if let Some(sprites) = &self.sprites {
-                sprites.draw(&mut pass);
-            }
             pass.set_bind_group(0, &self.bind_group, &[]);
             for (pipeline, geometry) in [(&self.lines, &self.grid), (&self.solid, &self.triangles)] {
                 if let Some((buffer, count)) = geometry {
@@ -611,6 +608,12 @@ impl Renderer {
             }
         }
         let depth = &self.depth.as_ref().expect("made above").0;
+        // The effects over the scene, blending in display space as the game's device blends what
+        // its surface holds.
+        if let Some(sprites) = &self.sprites {
+            let mut pass = pass_over(&mut encoder, display, depth, "effects", wgpu::LoadOp::Load);
+            sprites.draw(&mut pass);
+        }
         self.draw_views(&mut encoder, target, depth, (width, height), true);
         if let Some(ui) = &self.ui {
             let mut pass = pass_over(&mut encoder, display, depth, "hud under", wgpu::LoadOp::Load);

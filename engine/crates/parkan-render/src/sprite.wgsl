@@ -22,11 +22,11 @@ struct Skin {
 @group(1) @binding(1) var skin_sampler: sampler;
 @group(1) @binding(2) var<uniform> look: Skin;
 
-// The files' colours are display space; the target blends linear.
-fn linear(c: vec3<f32>) -> vec3<f32> {
-    let low = c / 12.92;
-    let high = pow((max(c, vec3<f32>(0.0)) + 0.055) / 1.055, vec3<f32>(2.4));
-    return select(high, low, c <= vec3<f32>(0.04045));
+// A linear colour encoded back to display space, where the sprites draw and blend.
+fn display(c: vec3<f32>) -> vec3<f32> {
+    let low = c * 12.92;
+    let high = 1.055 * pow(max(c, vec3<f32>(0.0)), vec3<f32>(1.0 / 2.4)) - 0.055;
+    return select(high, low, c <= vec3<f32>(0.0031308));
 }
 
 struct VertexIn {
@@ -52,16 +52,20 @@ fn vs_main(v: VertexIn) -> VertexOut {
     return out;
 }
 
+// Drawn into the frame read without sRGB decoding, so a sprite blends in display space, as
+// the game's device blends the values its surface holds (docs/11-effects.md, "Bolts, streams
+// and fades"): the texture and the fog colour are encoded back, and the files' colours used as
+// they are.
 @fragment
 fn fs_main(v: VertexOut) -> @location(0) vec4<f32> {
     let texel = textureSample(skin, skin_sampler, v.uv);
     let d = distance(v.world, camera.eye.xyz);
     let keep = clamp((camera.fog.y - d) / max(camera.fog.y - camera.fog.x, 0.001), 0.0, 1.0);
-    let fog = mix(camera.fog_colour.rgb, look.toward.rgb, look.toward.w);
+    let fog = display(mix(camera.fog_colour.rgb, look.toward.rgb, look.toward.w));
     // STAND-IN: docs/11-effects.md#not-resolved -- how an effect sprite's pre-lit vertices are
     // coloured is not traced: as a batch's emissive, the scene colour plus the material's
-    // ambient, held to 1 and decoded, times the texture; its alpha the texture's times the
-    // fade, which stands in for the ambient alpha.
-    let lit = linear(min(vec3<f32>(1.0), camera.scene_colour.rgb + look.ambient.rgb));
-    return vec4<f32>(mix(fog, texel.rgb * lit, keep), texel.a * v.alpha);
+    // ambient, held to 1, times the texture; its alpha the texture's times the fade, which
+    // stands in for the ambient alpha.
+    let lit = min(vec3<f32>(1.0), camera.scene_colour.rgb + look.ambient.rgb);
+    return vec4<f32>(mix(fog, display(texel.rgb) * lit, keep), texel.a * v.alpha);
 }

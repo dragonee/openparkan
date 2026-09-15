@@ -5,7 +5,7 @@
 //! ```text
 //! parkan [--game DIR] [--mission MISSIONS/…] [--fly]
 //!        [--screenshot OUT.png] [--size WxH] [--top-down] [--look X,Y,Z,TX,TY,TZ]
-//!        [--headless] [--ticks N] [--hold SCAN_W,SCAN_A] [--release N] [--mouse DX,DY] [--trace] [--sway]
+//!        [--headless] [--ticks N] [--hold SCAN_W,SCAN_A] [--press N] [--release N] [--mouse DX,DY] [--trace] [--sway]
 //!        [--capture-idle] [--stretch-hud] [--outcome won|lost] [--text "…"] [--face NAME,DISTANCE] [--at X,Y,YAW[,Z]] [--pod NAME] [--drive PATH] [--hq] [--take NAME] [--designer] [--design PART,…]
 //!        [--skip-briefing] [--briefing-at SECONDS] [--objectives] [--map]
 //! ```
@@ -144,7 +144,9 @@ struct Args {
     tilde: bool,
     ticks: u32,
     hold: Vec<String>,
-    /// `--release N`: the `--hold` keys come up after N of the `--ticks`.
+    /// `--press N` and `--release N`: the `--hold` keys go down after N of the `--ticks` (0 when
+    /// not given) and come up after N.
+    press: u32,
     release: Option<u32>,
     mouse: [f32; 2],
 }
@@ -186,6 +188,7 @@ fn args() -> Result<Args> {
         tilde: false,
         ticks: 0,
         hold: Vec::new(),
+        press: 0,
         release: None,
         mouse: [0.0; 2],
     };
@@ -242,6 +245,7 @@ fn args() -> Result<Args> {
             "--design" => out.design = value()?.split(',').map(str::to_owned).collect(),
             "--ticks" => out.ticks = value()?.parse()?,
             "--hold" => out.hold = value()?.split(',').map(str::to_owned).collect(),
+            "--press" => out.press = value()?.parse()?,
             "--release" => out.release = Some(value()?.parse()?),
             "--mouse" => {
                 let v: Vec<f32> = value()?.split(',').map(str::parse).collect::<Result<_, _>>()?;
@@ -388,11 +392,13 @@ fn rehearse(play: &mut scene::Play, loaded: &scene::Loaded, args: &Args) {
         play.commander.units = capturers;
         play.hq_command(2);
     }
-    for key in &args.hold {
-        play.key(key, true);
-    }
     let mut kills = Vec::new();
     for tick in 0..args.ticks {
+        if tick == args.press {
+            for key in &args.hold {
+                play.key(key, true);
+            }
+        }
         if args.release == Some(tick) {
             for key in &args.hold {
                 play.key(key, false);
