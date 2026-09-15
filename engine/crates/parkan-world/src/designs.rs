@@ -304,8 +304,14 @@ pub struct Designer {
     pub grade: usize,
     pub offence_range: (f32, f32),
     pub defence_range: (f32, f32),
-    parts: HashMap<String, PartData>,
+    weigher: Weigher,
     rounds: HashMap<String, Option<Round>>,
+}
+
+/// Puts units together as the engine loads them, their parts' records read once.
+#[derive(Default)]
+pub struct Weigher {
+    parts: HashMap<String, PartData>,
 }
 
 fn read(assembly: &mut Assembly, reference: &objects::ResourceRef) -> Option<Vec<u8>> {
@@ -336,27 +342,13 @@ impl Designer {
             grade,
             offence_range,
             defence_range,
-            parts: HashMap::new(),
+            weigher: Weigher::default(),
             rounds: HashMap::new(),
         }
     }
 
     fn data(&mut self, assembly: &mut Assembly, part: &str) -> &PartData {
-        let key = part.to_ascii_lowercase();
-        if !self.parts.contains_key(&key) {
-            let record = assembly.library.get(&key).cloned();
-            let controller = record
-                .as_ref()
-                .and_then(|r| r.slot_with_suffix("ctl").cloned())
-                .and_then(|slot| read(assembly, &slot).and_then(|b| control::parse(&b, &slot.member).ok()));
-            let labels = record
-                .as_ref()
-                .and_then(|r| r.mesh().cloned())
-                .and_then(|m| read(assembly, &m).and_then(|b| mesh::labels(&b, &m.member).ok()))
-                .unwrap_or_default();
-            self.parts.insert(key.clone(), PartData { record, controller, labels });
-        }
-        &self.parts[&key]
+        self.weigher.data(assembly, part)
     }
 
     /// A part's socket labels, node by node (mesh stream 10).
@@ -660,83 +652,13 @@ impl Designer {
         out
     }
 
-    /// Each node's density, level-0 volume and area, and life, for a part's record.
-    fn node_masses(&mut self, assembly: &mut Assembly, part: &str, root: bool) -> Vec<NodeMass> {
-        let Some(record) = self.data(assembly, part).record.clone() else { return Vec::new() };
-        let Some(mesh_ref) = record.mesh().cloned() else { return Vec::new() };
-        let Some(loaded) = assembly.mesh(&mesh_ref) else { return Vec::new() };
-        let rows = record
-            .slot_with_suffix("ndp")
-            .cloned()
-            .and_then(|slot| read(assembly, &slot).and_then(|b| ndp::parse(&b, &slot.member).ok()))
-            .unwrap_or_default();
-        loaded
-            .mesh
-            .nodes
-            .iter()
-            .zip(rows)
-            .map(|(node, row)| {
-                let slot = loaded.mesh.slots.get(usize::from(node.slot_index[0]));
-                NodeMass {
-                    density: row.density,
-                    volume: slot.map_or(0.0, |s| s.volume),
-                    area: slot.map_or(0.0, |s| s.area),
-                    life: row.durability,
-                    root,
-                }
-            })
-            .collect()
-    }
-
-    /// The design put together as `AniMesh.dll` and `Control.dll` load it: the root brings
-    /// every node and record, a turret or gun its nodes but its node 0 and its records, and an
-    /// internal part or clip replaces the record at its slot (docs/28-chassis.md). None
-    /// without a root controller.
+    /// The design put together as the engine loads it ([`Weigher::assemble`]).
     pub fn assemble(
         &mut self,
         assembly: &mut Assembly,
         components: &[objects::Component],
     ) -> Option<Assembled> {
-        let unit = objects::Unit { kind: 0, components: components.to_vec() };
-        let parents = unit.parents().ok()?;
-        let mut out: Option<Assembled> = None;
-        let mut first_device: HashMap<usize, usize> = HashMap::new();
-        for (i, c) in components.iter().enumerate() {
-            let member = c.reference.member.to_ascii_lowercase();
-            let (tag, controller) = {
-                let data = self.data(assembly, &member);
-                (data.record.as_ref().map(|r| r.tag.clone()), data.controller.clone())
-            };
-            let (Some(tag), Some(controller)) = (tag, controller) else { continue };
-            if i == 0 {
-                out = Some(Assembled {
-                    payload: controller.payload,
-                    top_speed: controller.triples[control::TRIPLE_TOP_SPEED][1],
-                    devices: Vec::new(),
-                    nodes: Vec::new(),
-                });
-            }
-            if out.is_none() {
-                continue;
-            }
-            if i == 0 || tag == EXTERNAL_TAG {
-                let masses = self.node_masses(assembly, &member, i == 0);
-                let a = out.as_mut()?;
-                first_device.insert(i, a.devices.len());
-                a.devices.extend(controller.components.iter().cloned());
-                a.nodes.extend(if i == 0 { masses } else { masses.into_iter().skip(1).collect() });
-            } else if tag == INTERNAL_TAG
-                && let Some(first) = controller.components.first()
-                && let Some(&base) = usize::try_from(parents[i]).ok().and_then(|p| first_device.get(&p))
-            {
-                let a = out.as_mut()?;
-                let slot = base as i64 + i64::from(c.attach_node);
-                if let Some(d) = usize::try_from(slot).ok().and_then(|s| a.devices.get_mut(s)) {
-                    *d = first.clone();
-                }
-            }
-        }
-        out
+        self.weigher.assemble(assembly, components)
     }
 
     /// A round's damage, range and blast: its nodes' hit points and their explosions' damage,
@@ -974,6 +896,8 @@ pub struct Round {
 /// One node's mass and life, as `Control.dll:0x1000fac0` sums them.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct NodeMass {
+    /// Its `.ndp` flags: `0x20` the left running gear, `0x40` the right.
+    pub flags: i32,
     pub density: f32,
     pub volume: f32,
     pub area: f32,
@@ -1020,6 +944,106 @@ impl Assembled {
             value += deflector.values[0] * shield.values[0];
         }
         value
+    }
+}
+
+impl Weigher {
+    fn data(&mut self, assembly: &mut Assembly, part: &str) -> &PartData {
+        let key = part.to_ascii_lowercase();
+        if !self.parts.contains_key(&key) {
+            let record = assembly.library.get(&key).cloned();
+            let controller = record
+                .as_ref()
+                .and_then(|r| r.slot_with_suffix("ctl").cloned())
+                .and_then(|slot| read(assembly, &slot).and_then(|b| control::parse(&b, &slot.member).ok()));
+            let labels = record
+                .as_ref()
+                .and_then(|r| r.mesh().cloned())
+                .and_then(|m| read(assembly, &m).and_then(|b| mesh::labels(&b, &m.member).ok()))
+                .unwrap_or_default();
+            self.parts.insert(key.clone(), PartData { record, controller, labels });
+        }
+        &self.parts[&key]
+    }
+
+    /// Each node's density, level-0 volume and area, and life, for a part's record.
+    pub fn node_masses(&mut self, assembly: &mut Assembly, part: &str, root: bool) -> Vec<NodeMass> {
+        let Some(record) = self.data(assembly, part).record.clone() else { return Vec::new() };
+        let Some(mesh_ref) = record.mesh().cloned() else { return Vec::new() };
+        let Some(loaded) = assembly.mesh(&mesh_ref) else { return Vec::new() };
+        let rows = record
+            .slot_with_suffix("ndp")
+            .cloned()
+            .and_then(|slot| read(assembly, &slot).and_then(|b| ndp::parse(&b, &slot.member).ok()))
+            .unwrap_or_default();
+        loaded
+            .mesh
+            .nodes
+            .iter()
+            .zip(rows)
+            .map(|(node, row)| {
+                let slot = loaded.mesh.slots.get(usize::from(node.slot_index[0]));
+                NodeMass {
+                    flags: row.flags,
+                    density: row.density,
+                    volume: slot.map_or(0.0, |s| s.volume),
+                    area: slot.map_or(0.0, |s| s.area),
+                    life: row.durability,
+                    root,
+                }
+            })
+            .collect()
+    }
+
+    /// The design put together as `AniMesh.dll` and `Control.dll` load it: the root brings
+    /// every node and record, a turret or gun its nodes but its node 0 and its records, and an
+    /// internal part or clip replaces the record at its slot (docs/28-chassis.md). None
+    /// without a root controller.
+    pub fn assemble(
+        &mut self,
+        assembly: &mut Assembly,
+        components: &[objects::Component],
+    ) -> Option<Assembled> {
+        let unit = objects::Unit { kind: 0, components: components.to_vec() };
+        let parents = unit.parents().ok()?;
+        let mut out: Option<Assembled> = None;
+        let mut first_device: HashMap<usize, usize> = HashMap::new();
+        for (i, c) in components.iter().enumerate() {
+            let member = c.reference.member.to_ascii_lowercase();
+            let (tag, controller) = {
+                let data = self.data(assembly, &member);
+                (data.record.as_ref().map(|r| r.tag.clone()), data.controller.clone())
+            };
+            let (Some(tag), Some(controller)) = (tag, controller) else { continue };
+            if i == 0 {
+                out = Some(Assembled {
+                    payload: controller.payload,
+                    top_speed: controller.triples[control::TRIPLE_TOP_SPEED][1],
+                    devices: Vec::new(),
+                    nodes: Vec::new(),
+                });
+            }
+            if out.is_none() {
+                continue;
+            }
+            if i == 0 || tag == EXTERNAL_TAG {
+                let masses = self.node_masses(assembly, &member, i == 0);
+                let a = out.as_mut()?;
+                first_device.insert(i, a.devices.len());
+                a.devices.extend(controller.components.iter().cloned());
+                a.nodes.extend(if i == 0 { masses } else { masses.into_iter().skip(1).collect() });
+            } else if tag == INTERNAL_TAG
+                && let Some(first) = controller.components.first()
+                && let Some(&base) = usize::try_from(parents[i]).ok().and_then(|p| first_device.get(&p))
+            {
+                let a = out.as_mut()?;
+                let slot = base as i64 + i64::from(c.attach_node);
+                if let Some(d) = usize::try_from(slot).ok().and_then(|s| a.devices.get_mut(s)) {
+                    *d = first.clone();
+                }
+            }
+        }
+        out
     }
 }
 

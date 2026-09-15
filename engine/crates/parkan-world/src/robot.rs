@@ -10,8 +10,8 @@ use std::rc::Rc;
 use anyhow::{Context, Result};
 use glam::{Quat, Vec3};
 use parkan_formats::control::{
-    self, CAMERA_TYPE, CHANNEL_UNDRIVEN, Channel, Component, Controller, GUN_TYPE, RADAR_PERIOD, RADAR_RANGE,
-    RADAR_TYPE, SIMPLE_TYPE, TRIPLE_TOP_SPEED, TURRET_TYPE,
+    self, CAMERA_TYPE, CHANNEL_UNDRIVEN, Channel, Component, Controller, ENGINE_TYPE, GUN_TYPE, RADAR_PERIOD,
+    RADAR_RANGE, RADAR_TYPE, SIMPLE_TYPE, TRIPLE_TOP_SPEED, TURRET_TYPE,
 };
 use parkan_formats::cpt::{self, ControlPoint};
 use parkan_formats::mission::Mission;
@@ -22,6 +22,7 @@ use parkan_sim::device::{Item, Motion};
 use parkan_sim::ground::Ground;
 use parkan_sim::guns::{Gun, Shot, Sight, TargetGate};
 use parkan_sim::machine::Walker;
+use parkan_sim::motion::Limits;
 use parkan_sim::targeting::Radar;
 use parkan_sim::turret::{ARM_FOLD, ARM_UNFOLD, Rig, view};
 use parkan_sim::wizard::{Wizard, yaw_along};
@@ -70,6 +71,103 @@ pub struct GunPart {
 /// The profile whose chassis flies: `CanFly` without `WalkChassis` is on it alone of the
 /// six (docs/24, "How the AI drives a machine").
 pub const FLYING_PROFILE: &str = "chas_fly.var";
+
+/// `.ndp` flags marking a node the left and the right running gear (docs/24, "Running gear").
+pub const GEAR_LEFT: i32 = 0x20;
+pub const GEAR_RIGHT: i32 = 0x40;
+/// The ground's speed factor G: 1.0 on every shipped surface (docs/24, *measured*).
+pub const GROUND_FACTOR: f32 = 1.0;
+
+/// One node the machine's weight counts: which part and node, its density × level-0 volume,
+/// its area, its `.ndp` flags, and whether it came with the root.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct HeftNode {
+    pub part: usize,
+    pub node: usize,
+    pub weight: f32,
+    pub area: f32,
+    pub flags: i32,
+    pub root: bool,
+}
+
+/// What sets a machine's live limits (`Control.dll:0x1000fca0`, docs/24, "What sets the live
+/// limits" and "Load"): its engines, its running gear and what it weighs.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Heft {
+    /// The root's authored payload (file +124), kg.
+    pub payload: f32,
+    /// Every merged node: the root's all, another part's all but its node 0 (docs/28).
+    pub nodes: Vec<HeftNode>,
+    /// Armour's weight over area: the fitted armour's value 0.
+    pub per_area: f32,
+    /// Every device's mass (record +0x1c), the fitted parts' in their slots.
+    pub devices: f32,
+    /// Each engine's value 0 and the root node it sits on.
+    pub engines: Vec<(f32, usize)>,
+}
+
+impl Heft {
+    /// What the unit at `path` weighs, with `parts` its external parts in the robot's order and
+    /// `root` the chassis among them.
+    pub fn weigh(assembly: &mut Assembly, path: &str, parts: &[RobotPart], root: usize) -> Heft {
+        let Some(unit) = assembly.unit(path) else { return Heft::default() };
+        let mut weigher = crate::designs::Weigher::default();
+        let Some(assembled) = weigher.assemble(assembly, &unit.components) else { return Heft::default() };
+        let mut nodes = Vec::new();
+        for (p, part) in parts.iter().enumerate() {
+            let masses = weigher.node_masses(assembly, &part.record, p == root);
+            for (n, m) in masses.iter().enumerate().filter(|(n, _)| p == root || *n != 0) {
+                nodes.push(HeftNode {
+                    part: p,
+                    node: n,
+                    weight: m.density * m.volume,
+                    area: m.area,
+                    flags: m.flags,
+                    root: p == root,
+                });
+            }
+        }
+        Heft {
+            payload: assembled.payload,
+            nodes,
+            per_area: assembled.of_type(crate::designs::ARMOUR_TYPE).last().map_or(0.0, |d| d.values[0]),
+            devices: assembled.devices.iter().map(|d| d.mass).sum(),
+            engines: assembled
+                .of_type(ENGINE_TYPE)
+                .map(|d| (d.values[0], usize::try_from(d.node).unwrap_or(0)))
+                .collect(),
+        }
+    }
+
+    /// E and r, with `life(part, node)` a node's life over its maximum and whether it is gone.
+    ///
+    /// E is Σ engines' value 0 × their node's condition, times the mean of the two sides'
+    /// running gear, each side its nodes' mean life, 1 with none (`0x10012a40`). r is the spare
+    /// payload over the payload: payload + the root's body − everything's weight, never below 0
+    /// (`0x1000fc51`), 0 with no payload.
+    ///
+    /// STAND-IN: docs/24-motion.md#what-sets-the-live-limits--read -- a node that "reaches its
+    /// last damage stage" (`0x10011920`) is taken as one destroyed, and what leaves the totals
+    /// with it is its own weight and armour; the devices on it stay.
+    pub fn factors(&self, root: usize, life: impl Fn(usize, usize) -> (f32, bool)) -> (f32, f32) {
+        let side = |mask: i32| {
+            let lives: Vec<f32> =
+                self.nodes.iter().filter(|n| n.flags & mask != 0).map(|n| life(n.part, n.node).0).collect();
+            if lives.is_empty() { 1.0 } else { lives.iter().sum::<f32>() / lives.len() as f32 }
+        };
+        let drive: f32 = self.engines.iter().map(|&(value, node)| value * life(root, node).0).sum();
+        let e = drive * (side(GEAR_LEFT) + side(GEAR_RIGHT)) / 2.0;
+        let (mut total, mut body) = (self.devices, 0.0);
+        for n in self.nodes.iter().filter(|n| !life(n.part, n.node).1) {
+            total += n.weight + self.per_area * n.area;
+            if n.root {
+                body += n.weight;
+            }
+        }
+        let r = if self.payload != 0.0 { (self.payload + body - total).max(0.0) / self.payload } else { 0.0 };
+        (e, r)
+    }
+}
 
 pub struct Robot {
     /// The mission object the robot is.
@@ -127,6 +225,8 @@ pub struct Robot {
     /// (docs/28-chassis.md, "What a device's value turns").
     pub chassis_devices: Vec<Item>,
     pub turret_devices: Vec<Item>,
+    /// What sets its live limits.
+    pub heft: Heft,
 }
 
 /// A controller's items that drive channels: its generic devices and its radars.
@@ -323,7 +423,15 @@ impl Robot {
         let position = Vec3::from_array(placed.position);
         let chassis_devices = devices(&chassis_ctl);
         let turret_devices = devices(&turret_ctl);
-        let walker = Walker::new(chassis_ctl, &chassis.mesh, &feet, position, placed.rotation);
+        // STAND-IN: docs/24-motion.md#finding-the-ground--read -- the ground contact's body
+        // sphere is read to be the agent's joined sphere, the chassis's and its hung parts'; the
+        // chassis mesh's own sphere is kept, so a flyer with a hung turret rides lower.
+        let mut walker = Walker::new(chassis_ctl, &chassis.mesh, &feet, position, placed.rotation);
+        let heft = Heft::weigh(assembly, &placed.path, &robot_parts, chassis_index);
+        if placed.kind != parkan_formats::mission::KIND_BUILDING {
+            let (e, r) = heft.factors(chassis_index, |_, _| (1.0, false));
+            walker.limits = Limits::live(&walker.controller, e, r, GROUND_FACTOR);
+        }
 
         // Only one radar counts: a fitted radar part takes over the turret's radar slot
         // (docs/25-sensors.md, "A scan is a sphere, a falloff and three tests").
@@ -396,7 +504,20 @@ impl Robot {
             ground_damage: GroundDamage::new(0.0, (object as u16).wrapping_mul(40_503)),
             chassis_devices,
             turret_devices,
+            heft,
         }))
+    }
+
+    /// The live limits again (`0x1000fca0`), from each node's life: `life(part, node)` is its
+    /// life over its maximum and whether it is gone. The game recomputes them the tick after a
+    /// node is damaged and when one reaches or leaves its last stage; the same figures come of
+    /// running it every tick.
+    pub fn relimit(&mut self, life: impl Fn(usize, usize) -> (f32, bool)) {
+        if self.heft.payload == 0.0 && self.heft.engines.is_empty() {
+            return;
+        }
+        let (e, r) = self.heft.factors(self.chassis_part, life);
+        self.walker.limits = Limits::live(&self.walker.controller, e, r, GROUND_FACTOR);
     }
 
     /// Fit the turret's guns: each class-2 component, the round its record names
@@ -782,6 +903,55 @@ impl Robot {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn node(part: usize, node: usize, weight: f32, area: f32, flags: i32) -> HeftNode {
+        HeftNode { part, node, weight, area, flags, root: part == 0 }
+    }
+
+    /// A chassis of 1,000 kg body over nodes 0–2, the gear on 1 (left) and 2 (right), a turret
+    /// part whose node 1 weighs 500, armour of 2 kg a unit of area, 1,500 kg of devices, a
+    /// payload of 4,000 and an engine of drive 0.8 on node 0.
+    fn heft() -> Heft {
+        Heft {
+            payload: 4000.0,
+            nodes: vec![
+                node(0, 0, 600.0, 100.0, 0),
+                node(0, 1, 200.0, 50.0, GEAR_LEFT),
+                node(0, 2, 200.0, 50.0, GEAR_RIGHT),
+                node(1, 1, 500.0, 50.0, 0),
+            ],
+            per_area: 2.0,
+            devices: 1500.0,
+            engines: vec![(0.8, 0)],
+        }
+    }
+
+    #[test]
+    fn the_live_factors_are_the_engines_condition_the_gear_and_the_spare_payload() {
+        let h = heft();
+        let (e, r) = h.factors(0, |_, _| (1.0, false));
+        // Total 1,500 + 1,500 of nodes + 2 × 250 of armour = 3,500; spare 4,000 + 1,000 − 3,500.
+        assert!((e - 0.8).abs() < 1e-6, "{e}");
+        assert!((r - 0.375).abs() < 1e-6, "{r}");
+        // The engine's node at half life halves E; the left gear at 0 halves it again.
+        let (e, _) = h.factors(0, |p, n| (if (p, n) == (0, 0) { 0.5 } else { 1.0 }, false));
+        assert!((e - 0.4).abs() < 1e-6, "{e}");
+        let (e, _) = h.factors(0, |p, n| (if (p, n) == (0, 1) { 0.0 } else { 1.0 }, false));
+        assert!((e - 0.4).abs() < 1e-6, "{e}");
+        // The turret's node gone takes its 500 kg and its 100 of armour out: spare 2,100.
+        let (_, r) = h.factors(0, |p, n| (1.0, (p, n) == (1, 1)));
+        assert!((r - 0.525).abs() < 1e-6, "{r}");
+        // A root node gone leaves the spare as it was, but for its armour.
+        let (_, r) = h.factors(0, |p, n| (1.0, (p, n) == (0, 0)));
+        assert!((r - (1700.0 / 4000.0)).abs() < 1e-6, "{r}");
+        // Overloaded, the spare is 0; with no payload, r is 0.
+        let heavy = Heft { devices: 9000.0, ..heft() };
+        assert_eq!(heavy.factors(0, |_, _| (1.0, false)).1, 0.0);
+        assert_eq!(Heft { payload: 0.0, ..heft() }.factors(0, |_, _| (1.0, false)).1, 0.0);
+        // No gear nodes count as both sides whole.
+        let bare = Heft { nodes: vec![node(0, 0, 600.0, 0.0, 0)], ..heft() };
+        assert!((bare.factors(0, |_, _| (1.0, false)).0 - 0.8).abs() < 1e-6);
+    }
 
     fn about(axis: [f64; 3], angle: f64) -> [f64; 4] {
         let s = (angle / 2.0).sin();

@@ -525,6 +525,9 @@ of the player's clan the hero has targeted within 20 m, and Esc gets out;
 from command mode, the mouse turns its turret and the hull comes round under it at
 up to 0.7 of its yaw rate; keypad 5 switches the turret lock off and on, and with it
 off `,` and `.` spin the hull. R and F climb and sink a flyer, and nothing else does.
+Every machine's top speed and turn rate come from its fitted engine, its load and the life
+left in its body, recomputed each tick: Mission 03's transport runs at 24 m/s, and a unit shot
+to half its body's hit points runs at half speed.
 
 ## Checks
 
@@ -637,6 +640,8 @@ a row here. A row leaves this table when research closes it.
 | M13 | How often a building's takt runs | a research centre's every tick | [16](../docs/16-research.md#not-established) |
 | M13 | The colour the research box's name is drawn in (`GAME_FONT`'s, as whatever drew before left it) | white, as the recording reads | [41](../docs/41-commander.md#not-established) |
 | M13 | The research box's clip 5 inside its frame, applied to its preview | the preview's view is not clipped | [41](../docs/41-commander.md#what-it-draws--read) |
+| M13 | What "a node reaching its last damage stage" takes out of the load (`0x10011920`) | a destroyed node's own weight and its armour; the devices on it stay | [24](../docs/24-motion.md#what-sets-the-live-limits--read) |
+| M13 | The ground contact's body sphere, read as the agent's joined sphere (`0x1001a487`) | the chassis mesh's own sphere: Mission 04's helicopter rides at 1.65 over the ground about its origin, not 2.20 about a centre 0.55 lower | [24](../docs/24-motion.md#finding-the-ground--read) |
 
 ### Read since the stand-in was written
 
@@ -649,7 +654,6 @@ engine pass replaces each with what was read and removes its row.
 | M3 | the ground face is found fresh each step, by an up and a down pass over its cell | the walk starts in the held face and crosses at most 24 faces toward the centre, stopping on one too steep | [24](../docs/24-motion.md#finding-the-ground--read) |
 | M3 | D is the largest span of the velocity box's switched-on axes | the largest difference between an axis's absolute max and absolute min, over all three velocity axes; D = 0 leaves the weight at 1 (no shipped state's weight changes) | [24](../docs/24-motion.md#playing-a-state--read-and-measured) |
 | M3 | the invert constants (−1, +1) with an integrator that does not negate, and free look's yaw negated to undo the mirrored X; a turret's X row takes +1 | the game's mouse X invert is +1 and its integrator negates; on screen the two agree: mouse right turns right, mouse down lowers the sight, and Shift free look's vertical runs opposite | [14](../docs/14-controls.md#from-a-row-to-a-command--read-and-measured) |
-| M3 | no spare payload is computed: r = 1, and E is the chassis's own engine slot | the chassis is part id 0's nodes, the root object's (the hero's r is about 1 anyway); a hull that follows its turret takes 0.7 of the live yaw rate, so it comes round about three times as fast as the game's on shipped designs (8.4 × 0.7 = 5.9 rad/s on the L-2f against 1.89) | [24](../docs/24-motion.md#load--read-and-measured), [30](../docs/30-turrets.md#the-hull-follows-the-turret--read-and-measured) |
 | M3 | only the turn about z is applied | triple 6 is the most the body leans on each axis, from the sources a state's `+0x08` picks; triple 5 is the share of the tilt taken back each step, toward world up (bits `0xC0`) or a vector (`0x30`); no hero state leans | [24](../docs/24-motion.md#the-hull-leans-and-rights-itself--read-and-measured) |
 | M4 | every effect instance updates on every tick | the manager updates an instance once 100 ms have passed since its last update | [11](../docs/11-effects.md#how-an-effect-runs--read) |
 | M6 | The clock unit of the object takt that times a unit's route reports, its rand8, and when a unit's first takt runs | game milliseconds; the engine's own generator; one timer after the unit joins | [34](../docs/34-progression.md#who-stands-in-a-route--read) |

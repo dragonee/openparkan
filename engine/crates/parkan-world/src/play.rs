@@ -1248,6 +1248,9 @@ impl Play {
         } else {
             let from = self.hero.collision_centre();
             let shots = self.hero.tick(dt_ms, mouse, &self.ground);
+            let lives = std::mem::take(&mut self.hero.lives);
+            self.hero.relimit(|p, n| node_share(lives.get(p).and_then(Option::as_ref), n));
+            self.hero.lives = lives;
             self.collide(from);
             self.footsteps();
             shots
@@ -2416,6 +2419,7 @@ impl Play {
                 }
             };
             robot.turn_devices(|p, n| node_alive(target.parts.get(p).and_then(|part| part.life.as_ref()), n));
+            robot.relimit(|p, n| node_share(target.parts.get(p).and_then(|part| part.life.as_ref()), n));
             if !shots.is_empty() {
                 fired.push((r, shots));
             }
@@ -2781,6 +2785,16 @@ impl Play {
 /// damage always does.
 pub fn node_alive(life: Option<&parkan_sim::damage::Life>, node: usize) -> bool {
     life.and_then(|l| l.nodes.get(node)).is_none_or(|l| !l.destroyed)
+}
+
+/// A node's condition, its life over its maximum (docs/23, "What a value id is"), and whether
+/// it is destroyed; a part that takes no damage is whole.
+pub fn node_share(life: Option<&parkan_sim::damage::Life>, node: usize) -> (f32, bool) {
+    match life.and_then(|l| l.nodes.get(node)) {
+        Some(l) if l.max > 0.0 => ((l.life / l.max).clamp(0.0, 1.0), l.destroyed),
+        Some(l) => (if l.destroyed { 0.0 } else { 1.0 }, l.destroyed),
+        None => (1.0, false),
+    }
 }
 
 /// A unit handed to the player (`iron3d.dll:0x10074ff0`): its turret lock, property 179, is

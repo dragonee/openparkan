@@ -215,9 +215,9 @@ impl Walker {
         yaw: f32,
     ) -> Self {
         // G is 1.0 on every shipped material (docs/24, measured).
-        // STAND-IN: docs/24-motion.md#load--read-and-measured -- the load is read
-        // (component masses, node density × volume, part 0's nodes given back) but not
-        // weighed here: spare payload is taken as the whole payload, r = 1.
+        // The controller alone knows no fitted engine and no load: its own engine slot and an
+        // empty machine, r = 1. A robot puts its weighed limits in their place
+        // (`parkan_world::robot::Heft`).
         let limits = Limits::live(&controller, motion::engine_drive(&controller), 1.0, 1.0);
         let body = Body::new(position, yaw);
         Self {

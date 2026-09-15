@@ -2861,6 +2861,14 @@ fn mission_03_is_won_by_the_generator_the_bunker_a_mine_four_warbots_and_the_pat
     assert!(play.factories[f].build.is_some(), "batch production starts");
 
     // Play on until the mission is won: the mine counts, four bots are built, the patrol comes.
+    // As the recording's player does (docs/31, "Seen in a recording"), each new warbot is told to
+    // guard the Small Generator once it is out of the factory, by the second patrol's place.
+    let guard = parkan_sim::orders::Order {
+        code: parkan_sim::orders::PATROL,
+        parameter: 0,
+        target: parkan_sim::orders::Target::LogicId(play.units[generator].logical_id),
+    };
+    let mut hunting = false;
     let mut done = [None; 5];
     let mut outcome = None;
     for second in 0..900 {
@@ -2871,6 +2879,32 @@ fn mission_03_is_won_by_the_generator_the_bunker_a_mine_four_warbots_and_the_pat
             if state == 1 && done[i].is_none() {
                 done[i] = Some(second);
                 eprintln!("objective {} complete {} s after command mode", i + 1, second);
+            }
+        }
+        let out: Vec<usize> = play
+            .own_units_within(parkan_world::selection::BATTLE_UNITS)
+            .into_iter()
+            .filter(|t| {
+                play.robots.iter().find(|(rt, _)| rt == t).is_some_and(|(_, r)| {
+                    r.order.is_none_or(|o| o.code == parkan_sim::orders::LEAVE) && r.wizard.idle(now)
+                })
+            })
+            .collect();
+        for t in out {
+            play.select_unit_alone(t);
+            play.dispatch(guard);
+        }
+        // Once a flyer is down, the player sends every warbot to seek and destroy the others.
+        let enemies = play
+            .robots
+            .iter()
+            .filter(|(t, _)| play.units[*t].clan == Some(1) && play.battle.combat.targets[*t].alive)
+            .count();
+        if done[3].is_some() && enemies < 3 && !hunting {
+            hunting = true;
+            for t in play.own_units_within(parkan_world::selection::BATTLE_UNITS) {
+                play.select_unit_alone(t);
+                assert!(play.hq_command(3).is_some(), "Seek and destroy");
             }
         }
         outcome = play.progression.as_ref().unwrap().progress.outcome;
@@ -3326,4 +3360,78 @@ fn mission_04s_research_centre_opens_its_screen_and_researches_the_large_battle_
     assert!(drawn.text.iter().any(|r| r.text == "No item selected"));
     let offered = large_flyer_turrets(&mut play);
     assert!(offered.iter().any(|p| p.eq_ignore_ascii_case("e_tur_bb_01")), "{offered:?}");
+}
+
+#[test]
+#[ignore = "needs the game install"]
+fn a_units_live_limits_come_from_its_engine_and_load_so_a_driven_hull_follows_its_turret_at_the_games_rate() {
+    use parkan_world::factory::Project;
+    use std::f32::consts::{PI, TAU};
+    const TICK: f64 = 1000.0 / 60.0;
+    let wrap = |a: f32| (a + PI).rem_euclid(TAU) - PI;
+
+    // Mission 03's transport runs at 24 m/s, not its chassis's authored 33.3; the hero, its 10,000 t
+    // payload all but spare, keeps 14 less 2 mm/s.
+    let (play, m) = mission_03_play();
+    let transport = object_target(&play, &m, "tut3_t.dat");
+    let robot = &play.robots.iter().find(|(t, _)| *t == transport).unwrap().1;
+    let top = robot.walker.limits.top_speed[1];
+    assert!((top - 23.98).abs() < 0.01, "the transport's live top speed {top}");
+    let hero = play.hero.walker.limits.top_speed[1];
+    assert!((hero - 13.998).abs() < 1e-3, "the hero's {hero}");
+
+    // Aboard, the hull comes round at 0.7 of the live yaw rate: docs/30's worked 1.89, 1.07 and
+    // 1.32 rad/s on Mission 02's warbot, Mission 04's HQ and its helicopter.
+    for (path, want) in [
+        ("UNITS\\UNITS\\PREBLD\\tut2_f1.dat", 1.889),
+        ("UNITS\\UNITS\\HQ\\tut4_hq.dat", 1.071),
+        ("UNITS\\UNITS\\BATTLE\\tut4_f1.dat", 1.320),
+    ] {
+        let (mut play, _) = mission_02_play();
+        let project = Project {
+            path: path.to_owned(),
+            name: String::new(),
+            type_word: 0x0100_8000,
+            chassis_size: 4,
+            ore: 0.0,
+            power: 0.0,
+            lines: Vec::new(),
+            sphere: None,
+        };
+        let at = play.hero.walker.body.position + glam::Vec3::new(12.0, 0.0, 3.0);
+        let t = play.spawn(&project, play.player_clan, at, 0.0).unwrap();
+        for _ in 0..30 {
+            play.tick(TICK, [0.0; 2]);
+        }
+        let r = play.robots.iter().position(|(rt, _)| *rt == t).unwrap();
+        // The helicopter is tiny; boarding it stands in for taking it over from command mode.
+        play.robots[r].1.size_class = 4;
+        assert!(play.board(t), "{path}");
+        for _ in 0..3 {
+            play.update_input();
+            play.tick(TICK, [180.0, 0.0]);
+        }
+        let mut before = play.driven().walker.body.yaw;
+        let mut rates = Vec::new();
+        for _ in 0..60 {
+            play.update_input();
+            play.tick(TICK, [0.0; 2]);
+            let w = &play.driven().walker;
+            let step = wrap(w.body.yaw - before);
+            before = w.body.yaw;
+            if step != 0.0 {
+                rates.push(step.abs() / (w.machine.step_ms as f32 / 1000.0));
+            }
+        }
+        assert!(rates.len() >= 2 && (rates[0] - want).abs() < 0.005, "{path}: {rates:?} against {want}");
+
+        // The engine's node at half its life halves the live yaw rate the tick after.
+        let turn = play.driven().walker.limits.turn[2];
+        let chassis = play.driven().chassis_part;
+        let life = play.battle.combat.targets[t].parts[chassis].life.as_mut().unwrap();
+        life.nodes[0].life = life.nodes[0].max / 2.0;
+        play.tick(TICK, [0.0; 2]);
+        let halved = play.driven().walker.limits.turn[2];
+        assert!((halved - turn / 2.0).abs() < 1e-3, "{path}: {turn} to {halved}");
+    }
 }
