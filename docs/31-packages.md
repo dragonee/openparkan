@@ -1456,9 +1456,12 @@ The player's side:
 ### What follows — *derived*
 
 1. **The patrols.** Each flyer draws a loop of 15–19 points within 60 m of its
-   place on x and y and flies to the first at 0.8 of its speed, about
-   35.6 m/s, so about 37 s to (1124, 783) and 44 s to (606, 993). Every 20–30 s
-   it draws a new loop; it never stops patrolling.
+   place on x and y and flies to the first at 0.8 of its speed. That is its
+   live top speed, 17.8–20.0 m/s once its engine and load are counted
+   ([24-motion.md](24-motion.md#what-shipped-units-get--measured-then-derived)),
+   so 14.3–16.0 m/s and about 90 s to (1124, 783) and 97 s to (606, 993). (This
+   page once took the chassis's authored 44.4 m/s, and 37 s and 44 s.) Every
+   20–30 s it draws a new loop; it never stops patrolling.
 2. **On the way it only shoots.** Its fire control, mode 2 from the patrol's
    start, aims at the nearest hostile unit its radar lists within 500 — within
    its 300 m sensor. It takes up no engagement: nothing scores unless it is

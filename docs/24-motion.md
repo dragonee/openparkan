@@ -295,6 +295,38 @@ What follows from it:
   authored top speed, and turns that much slower — *derived*.
 - **Load halves top speed at most**: a machine carrying its full payload runs
   at half speed on one healthy engine.
+- **The body's damage is the engine's.** An engine's condition is the life
+  left in its model node, over its maximum
+  ([23-economy.md](23-economy.md), "What a value id is"). **Every chassis's
+  engine sits on node 0** (*measured*, 24 of 24 `bases.rlb` robot controllers),
+  and a fitted engine keeps the slot's node
+  ([28-chassis.md](28-chassis.md#a-fitted-part-takes-over-its-slot--read-and-measured)).
+  So a robot whose body is down to half its hit points has half its E: it
+  runs at half speed and turns at half its rate. The hero too, whose built-in
+  engine sits on its body node (*derived*).
+
+### What shipped units get — *measured*, then *derived*
+
+The table puts the tutorial missions' units through the formula: the fitted
+engine's drive, the load of [below](#load--read-and-measured), undamaged, on
+ground factor 1. The top speed is forward, in m/s.
+
+| unit | chassis | E | r | top speed, authored → live | yaw rate, authored → live |
+|---|---|---:|---:|---|---|
+| the hero, every mission | `r_h_02` | 1.0 | 0.9997 | 14.0 → 13.998 | 25.12 → 50.23 |
+| Mission 01's `tut1_e1` | `r_t_01` | 0.7 | 0.188 | 26.39 → 10.97 | 3.5 → 1.92 |
+| Mission 01's `helic` | `r_t_02` | 0.8 | 0.059 | 33.33 → 14.13 | 4.0 → 1.89 |
+| Mission 01's `tut1_mf1` | `r_m_02` | 1.0 | 0.096 | 34.72 → 19.03 | 3.8 → 2.45 |
+| Mission 03's enemy flyers `tut3_f1`, `f2`, `f3` | `r_l_02` | 0.8 | 0.003, 0.127, 0.047 | 44.44 → 17.84, 20.03, 18.62 | 6.5 → 2.63, 3.59, 2.97 |
+| Mission 03's builder `tut3_b` | `r_l_03` | 1.0 | 0.367 | 33.33 → 22.79 | 6.0 → 6.30 |
+| Mission 03's transport `tut3_t` | `r_l_03` | 1.0 | 0.439 | 33.33 → 23.98 | 6.0 → 6.95 |
+| Mission 04's HQ `tut4_hq` | `r_b_03` | 1.0 | 0.114 | 26.39 → 14.70 | 2.28 → 1.53 |
+| Mission 04's helicopter `tut4_f1` | `r_t_02` | 0.8 | 0.059 | 33.33 → 14.13 | 4.0 → 1.89 |
+
+So most warbots run at under half their chassis's "Max speed". The 24 m/s of
+Mission 03's transport is the one [23-economy.md](23-economy.md) times its
+round with. A driven hull follows its turret at 0.7 × the live yaw rate
+([30-turrets.md](30-turrets.md#the-hull-follows-the-turret--read-and-measured)).
 
 ## From input to motion — *read*, and *measured*
 
@@ -703,6 +735,16 @@ and that group picks the step by surface
 1. **Body sphere.** The object's bounding sphere gives the centre and radius.
    A radius under 20 is held to at most 7.5 (`0x1001a48e`); one of 20 or more
    is kept. The centre goes into `+0x98`.
+   **It is the whole agent's sphere** (*read*, the interface *derived*): the
+   ask (`0x1001a487`) is slot 9 of the interface at control `+0x24`, with 2
+   and a four-float answer. That is the signature of the slot that hands out
+   the agent's joined sphere in world space (`AniMesh.dll:0x10014580`), the
+   chassis's and every hung part's header spheres together
+   ([26-damage.md](26-damage.md)). So a flyer with a hung turret rides the
+   bottom of the turret's sphere, not the chassis's. On Mission 04's
+   helicopter that is 2.20 about a centre 0.55 below the origin, where the
+   chassis's own is 1.65 about the origin (*measured* on openparkan's engine,
+   which joins the same two spheres).
    A second sphere, from the object's other interface (`+0x28`, `0x1001a518`),
    gives a radius r₂ that is held to 7.5 only on objects with flag
    `0x1000000`; it bounds the first search pass below.
@@ -889,6 +931,24 @@ never pulls it down
 rising ground raises it, and it stays up when the ground falls away again
 (*derived*). **The ceiling** is the world's box: a flyer more than 20 above its
 top is pushed back ([The map edge](#the-map-edge--read)).
+
+**What a player sees, then** (*measured* on openparkan's engine, which follows
+these reads). Turret pitch reaches nothing that moves the body, and the eye
+does not ride the pitch.
+
+- **The pitch.** Over a full sweep of the pitch channel, the body's height
+  and the eye's height stay within 0.01 m on the L-2f (hung `e_tur_bb_01`),
+  on Mission 04's helicopter (hung `e_tur_tb_01`) and on its HQ (upright
+  `e_tur_bt_04`).
+- **No other path.** The only mouse-Y row in `m2.tbl` is the turret's
+  `ANGLE_Y` (*measured*).
+- **The ground does move a low flyer.** Mission 04's helicopter, boarded
+  where it stands, holds 3 m over the valley floor. Held on W for 3 s toward
+  the slopes, it rides up them at the sphere's bottom and ends 23 m higher
+  above the water, and it keeps that height where the ground falls away. The
+  run is the same with the sight pitched down or up.
+- **So** a player skimming the ground sees the altitude figure climb as the
+  terrain rises, and never fall back without F (*derived*).
 
 **The nine flying chassis' climb**, authored (*measured*, `bases.rlb`).
 Acceleration is live, twice the file's; the live top speed can only be lower

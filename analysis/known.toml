@@ -5855,6 +5855,30 @@ name = "speed limits: engines' value x condition x mean side gear; top x (1+r)/2
 doc = "docs/24-motion.md"
 read = true
 
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000fcd7"
+kind = "site"
+name = "speed limits: over the device list, class 5 (engines) only"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000fce4"
+kind = "site"
+name = "speed limits: each engine's property 0xe00, its value 0x100 -- value 0 x its node's life"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x1001a487"
+kind = "site"
+name = "ground contact: the body sphere from control +0x24 slot 9 with 2 -- the agent's joined sphere in world space"
+doc = "docs/24-motion.md"
+read = true
 [[entry]]
 module = "Control.dll"
 at = "0x1000fd06"

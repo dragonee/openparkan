@@ -18631,6 +18631,57 @@ def check_hull_follow(check, game: Path) -> None:
           f"property 0xb3 -> 0x1000ea66 {setter}; MCMD_LOCK -> 0x1000fcbf {lock_case}")
 
 
+#: docs/24's live limits table: unit under UNITS/UNITS -> (E, r, live forward top speed, live
+#: yaw rate), undamaged on ground factor 1.
+LIVE_LIMITS = {
+    "HERO/tut1_p.dat": (1.0, 0.9997, 13.998, 50.23),
+    "BATTLE/tut1_e1.dat": (0.7, 0.1881, 10.974, 1.92),
+    "BATTLE/helic.dat": (0.8, 0.0595, 14.126, 1.89),
+    "BATTLE/tut1_mf1.dat": (1.0, 0.0961, 19.03, 2.45),
+    "BATTLE/tut3_f1.dat": (0.8, 0.0033, 17.837, 2.63),
+    "BATTLE/tut3_f2.dat": (0.8, 0.1267, 20.031, 3.59),
+    "BATTLE/tut3_f3.dat": (0.8, 0.0473, 18.619, 2.97),
+    "BUILDER/tut3_b.dat": (1.0, 0.3672, 22.786, 6.3),
+    "TRANSPRT/tut3_t.dat": (1.0, 0.4387, 23.979, 6.95),
+    "HQ/tut4_hq.dat": (1.0, 0.1141, 14.7, 1.53),
+    "BATTLE/tut4_f1.dat": (0.8, 0.0595, 14.126, 1.89),
+}
+
+
+def check_live_limits(check, game: Path) -> None:
+    """0x1000fca0 through the shipped units: an engine on node 0, its drive, the spare payload."""
+    bases = NResArchive.open(game / "bases.rlb")
+    lib = objects.ObjectLibrary(game / "objects.rlb")
+    names = {e.name.lower() for e in bases}
+    nodes: Counter[tuple] = Counter()
+    for name in sorted(lib.records):
+        if not name.startswith("r_") or name + ".ctl" not in names:
+            continue
+        parsed = control.parse(bases.read_name(name + ".ctl"))
+        nodes[tuple(c.node for c in parsed.components if c.type_id == control.ENGINE_TYPE)] += 1
+    check("bases.rlb: every robot chassis carries one engine, on node 0",
+          set(nodes) == {(0,)} and nodes[(0,)] == 24,
+          f"engine nodes per controller: {dict(nodes)}")
+
+    shop = units.Workshop(game)
+    seen = {}
+    for rel in LIVE_LIMITS:
+        dat = game / "UNITS" / "UNITS" / rel
+        unit = objects.load_unit(dat)
+        parsed = shop.armoury.controller(unit.components[0].ref.member.lower())
+        load = shop.weigh(unit)
+        drive = shop.describe(dat).engine[0]
+        r = load.spare / load.payload
+        top = parsed.triples[control.TRIPLE_TOP_SPEED][1]
+        turn = parsed.triples[control.TRIPLE_TURN][2]
+        seen[rel] = (round(drive, 2), round(r, 4), round(min(top, top * drive * (1 + r) / 2), 3),
+                     round(turn * drive * (1.5 * r + 0.5), 2))
+    close = all(all(abs(a - b) < 2e-3 for a, b in zip(seen[rel], want, strict=True))
+                for rel, want in LIVE_LIMITS.items())
+    check("UNITS: Mission 03's transport runs at 24 m/s of 33.3, most warbots under half",
+          close, f"(E, r, live top m/s, live yaw rad/s): {seen}")
+
+
 def check_focus(check, game: Path) -> None:
     """Leaving the window lets every key up: WM_ACTIVATEAPP to stdSetApplicationState."""
     paths = [game / name for name in ("iron3d.dll", "World3D.dll", "iron_3d.exe")]
@@ -19925,7 +19976,7 @@ def run(game: Path) -> int:
         check_packages,
         check_target_panel,
         check_wingman,
-        check_boarding, check_hull_follow,
+        check_boarding, check_hull_follow, check_live_limits,
         check_builder, check_placement,
         check_designs,
         check_units, check_loading, check_search, check_construction,
