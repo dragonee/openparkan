@@ -5272,6 +5272,153 @@ def check_efficiency(check, game: Path) -> None:
           f"figures is finite and non-negative")
 
 
+#: Mission 03's placed economy: name -> (Type, clan index, MaximumOre, CurrentOre).
+M03_ECONOMY = {
+    "gener01": (0x80000002, 2, 0.0, 0.0), "sbunk01": (0x80010000, 2, 0.0, 0.0),
+    "sstore01": (0x80000008, 0, 4000.0, 0.0), "lplant01": (0x80000010, 0, 0.0, 0.0),
+    "tut3_t": (0x1002000, 0, 2000.0, 0.0), "tut3_b": (0x1004000, 0, 2000.0, 200.0),
+}
+#: Its prebuilt designs: file -> (ore, power, unit box lines), from tut3_pl.trf.
+M03_PREBUILT = {
+    "tut3_p1.dat": (125.6, 72.7, ["7 / 0 t", "43 kph", "8 %", "18 %", "300 m"]),
+    "tut3_p2.dat": (118.6, 63.7, ["6 / 2 t", "64 kph", "7 %", "8 %", "300 m"]),
+}
+
+
+def check_mission_03_economy(check, game: Path) -> None:
+    """Mission 03's economy: its pieces, its prices, and the code that paces it."""
+    m3 = game / "MISSIONS" / "CAMPAIGN" / "CAMPAIGN.00" / "Mission.03"
+    if not (m3 / "data.tma").exists() or not (game / "Behavior.dll").exists():
+        return
+    placed = mission.load(m3 / "data.tma")
+    by_name = {o.name.lower(): o for o in placed.objects}
+
+    def prop(o, name):
+        p = o.properties.get(name)
+        return p.value if p else None
+
+    objects_ok = all(
+        (o := by_name.get(n)) is not None and prop(o, "Type") & 0xFFFFFFFF == t
+        and prop(o, "ClanID") == clan and prop(o, "MaximumOre") == most
+        and prop(o, "CurrentOre") == now
+        for n, (t, clan, most, now) in M03_ECONOMY.items())
+    free = prop(by_name["lplant01"], "FreeBotNum") if "lplant01" in by_name else None
+    lodes = [(round(v.position[0], 1), round(v.position[1], 1), bool(v.found), v.amount)
+             for v in placed.lodes]
+    minds = {c.name: c.minds for c in placed.clans}
+    held = profiles.load(game)
+    rates = (held["prof_generator.var"][profiles.POWER_OUT].value,
+             held["prof_bunker.var"][profiles.POWER_OUT].value,
+             held["prof_mine.var"][profiles.USE_POWER].value,
+             held["prof_mine.var"][profiles.ORE_OFF].value,
+             held["prof_storage.var"][profiles.ORE_OFF].value,
+             held["prof_plant.var"][profiles.USE_POWER].value)
+    names = frozenset(p.name.lower() for p in all_archives(game))
+    fort = NResArchive.open(game / "fortif.rlb")
+    entries = {e.name.lower(): e for e in fort}
+    efficiency = {}
+    for ctl in ("fr_b_plant.ctl", "fr_l_mine.ctl", "fr_l_store.ctl", "fr_l_gener.ctl"):
+        parsed = control.parse(fort.read(entries[ctl]), names)
+        efficiency[ctl[:-4]] = sum(p.efficiency or 0.0 for p in parsed.components)
+    mine_type = objects.load_unit(game / "UNITS" / "BUILDS" / "MINE" / "smine01.dat").kind
+
+    cfg = mission.load_cfg(m3 / "mission.cfg").get("prebuild", {})
+    shop = units.Workshop(game)
+    catalogue = designs.Catalogue(research.read(game / "MISSIONS" / "SCRIPTS" / "tut3_pl.trf"))
+    designer = designs.Designer(shop, catalogue)
+    priced = {}
+    for name, (ore, power, lines) in M03_PREBUILT.items():
+        tree = designs.Part.from_unit(objects.load_unit(game / "UNITS" / "UNITS" / "PREBLD" / name))
+        got_ore, got_power, researched = designer.price(tree)
+        priced[name] = (abs(got_ore - ore) < 0.01 and abs(got_power - power) < 0.01
+                        and researched and designer.rate(tree).lines() == lines)
+    speeds = [designer.rate(designs.Part.from_unit(objects.load_unit(game / "UNITS" / "UNITS" / d)))
+              .speed for d in ("TRANSPRT/tut3_t.dat", "BUILDER/tut3_b.dat")]
+    cost = 125.6 / efficiency["fr_b_plant"]
+    power_s = 72.7 / (efficiency["fr_b_plant"] * rates[5])
+    check("Mission 03: its economy's pieces, prices and prebuilt projects",
+          objects_ok and free == 0 and minds.get("Plr") == 7
+          and len(lodes) == 1 and lodes[0][:3] == (1026.1, 942.7, True) and lodes[0][3] >= 1e18
+          and rates[0] == 10.0 and abs(rates[1] - 0.07) < 1e-6 and rates[2:] == (1.0, 1.0, 1.0, 4.0)
+          and efficiency == {"fr_b_plant": 5.0, "fr_l_mine": 1.0, "fr_l_store": 1.0,
+                             "fr_l_gener": 1.0}
+          and mine_type & 0xFFFFFFFF == 0x80000004
+          and cfg == {"model1": "tut3_p1.dat", "model2": "tut3_p2.dat"} and all(priced.values())
+          and abs(speeds[0] - 24.0) < 0.05 and round(speeds[1] * control.KMH_PER_MS) == 82,
+          f"generator and bunker neutral, storage 0/4000, factory FreeBotNum {free}, transport "
+          f"0/2000, builder 200/2000 {objects_ok}; Plr {minds.get('Plr')} minds; lode {lodes}; "
+          f"power out 10 and {rates[1]:g}, mine use {rates[2]:g} off-board {rates[3]:g}, "
+          f"storage off-board {rates[4]:g}, plant use {rates[5]:g}; efficiency {efficiency}; "
+          f"prebuild {cfg} priced and boxed {priced}; transport {speeds[0]:.1f} m/s, builder "
+          f"{speeds[1] * control.KMH_PER_MS:.0f} kph -- so an SSW-X costs {cost:.2f} ore, "
+          f"its power is in in {power_s:.2f} s, and at one ore a second a holder it takes "
+          f"{cost:.1f} s with the mine alone and {cost / 2:.1f} s with the storage stocked")
+
+    behaviour = (game / "Behavior.dll").read_bytes()
+    iron = (game / "iron3d.dll").read_bytes()
+    beh, i3 = _image_at(behaviour), _image_at(iron)
+
+    def f32(at, va: int) -> float:
+        return struct.unpack("<f", at(va, 4))[0]
+
+    def target(at, site: int) -> int | None:
+        if at(site, 1) != b"\xe8":
+            return None
+        return (site + 5 + struct.unpack("<i", at(site + 1, 4))[0]) & 0xFFFFFFFF
+
+    # M_Task_Mine's takt: dt x 0.001 x Mine_OrePerSecond (+0x74) x KPD; the running total
+    # (+0x5c) written over the held ore; BAD KPD zeroing it; 250 across the ground.
+    digs = (beh(0x1002D068, 20).hex() == "df6c2410d80d70910510d84874d84c241cd95c24"
+            and abs(f32(beh, 0x10059170) - 0.001) < 1e-9
+            and beh(0x1002D0F9, 16).hex() == "8b4e5c8b105351680001000250ff5248"
+            and beh(0x1002CFF6, 8).hex() == "33db895e5c895e4c"
+            and beh(0x1002CFE7, 6).hex() == "d81d04960510"
+            and abs(f32(beh, 0x10059604) - 0.1) < 1e-7
+            and target(beh, 0x1002CE1F) == 0x10020F70 and f32(beh, 0x10059A90) == 250.0
+            and beh(0x10020F70, 18).hex() == "d94104d901d9c0d8c9d9c2d8cbdec1d9fadd")
+    # The distribution step's offer: dt (+0x68) times id 0x1002; the build's request's
+    # 0.2 and 0.07, and its take through 0x10015540; order 18 to the start.
+    shares = (beh(0x1001A8C6, 16).hex() == "8b0e680210000056ff5168d9442468d8"
+              and beh(0x1002A5C8, 16).hex() == "d84c240cd80de8970510d805749a0510"
+              and abs(f32(beh, 0x100597E8) - 0.2) < 1e-7 and abs(f32(beh, 0x10059A74) - 0.07) < 1e-7
+              and target(beh, 0x1002A5F0) == 0x10015540
+              and beh(0x1001E007, 11).hex() == "c784240c01000012000000"
+              and beh(0x1001E02C, 2) == b"\x6a\x02")
+    # SetPowerUsage is called only by construction, mining and research.
+    sections, _ = resources._sections(behaviour)
+    text_va, text_size, _ = sections[0]
+    base = _image_base(behaviour)
+    usage = sorted(site for site, to in _calls(beh, base + text_va, text_size) if to == 0x10019880)
+    usage_ok = usage == [0x10029928, 0x1002A308, 0x1002A722, 0x1002CF49, 0x1002D17E,
+                         0x1002F437, 0x1002F976, 0x1002FA81]
+    # The profile by Type, and iron3d.dll's order 10 to every mine, replacing.
+    profile = (beh(0x10008B6A, 7).hex() == "8b116810de0510"
+               and beh(0x10008B88, 7).hex() == "8b01682cde0510"
+               and beh(0x10008C07, 5).hex() == "3d00000180")
+    mine_order = (i3(0x10032D73, 7).hex() == "3d040000807451"
+                  and i3(0x10032DE3, 2) == b"\x6a\x03"
+                  and i3(0x10032E42, 16).hex() == "c74424400a000000c744244400010002"
+                  and struct.unpack("<I", i3(0x100E5C58, 4))[0] == 0x10032D30)
+    # prebuild: the slots shift down four moves and slot 0 loads units\units\prebld\ + value.
+    prebuild = (i3(0x1004DDC9, 5) == b"\x68" + struct.pack("<I", 0x10104030)
+                and i3(0x10104030, 9) == b"prebuild\0"
+                and i3(0x1004DF52, 5) == b"\xba" + struct.pack("<I", 0x1010401C)
+                and i3(0x1010401C, 20) == b"units\\units\\prebld\\\0"
+                and i3(0x1004DED7, 5) == b"\xbb\x04\x00\x00\x00"
+                and i3(0x1004DEF4, 3) == b"\x83\xc6\x84"
+                and target(i3, 0x1004DF74) == 0x10056C10)
+    # The resource rows step once more than 0.05 s has passed.
+    step = i3(0x1006DA2F, 6).hex() == "d81da4500e10" and abs(f32(i3, 0x100E50A4) - 0.05) < 1e-8
+    check("Behavior.dll, iron3d.dll: a mine keeps its total, ore at a holder's rate, prebuild",
+          digs and shares and usage_ok and profile and mine_order and prebuild and step,
+          f"0x1002cf60 digs dt x 50 x KPD and writes its running total over the held ore, "
+          f"zeroes both below KPD 0.1, sums lodes within 250 by x and y {digs}; 0x1001a8c6 "
+          f"offers dt x KPD x off-board, 0x1002a4f0 requests x 0.2 + 0.07, order 18 to the start "
+          f"{shares}; SetPowerUsage from {[hex(s) for s in usage]}; profile by Type "
+          f"{profile}; 0x10032d30 gives a mine order 10, replacing {mine_order}; prebuild into "
+          f"slot 0 after a shift {prebuild}; rows step past 0.05 s {step}")
+
+
 #: A payload the game treats as no limit, in kg: 1000 t and 10000 t.
 NO_LIMIT_PAYLOAD = (1_000_000.0, 10_000_000.0)
 
@@ -17277,7 +17424,7 @@ def run(game: Path) -> int:
         check_damage, check_node_stages,
         check_effects, check_effect_timing, check_sounds, check_actions, check_footprints,
         check_rsli,
-        check_control, check_efficiency,
+        check_control, check_efficiency, check_mission_03_economy,
         check_motion, check_playback, check_ground, check_sensors, check_hit_test,
         check_collision, check_lake_and_buoys,
         check_combat, check_ownership,

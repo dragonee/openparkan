@@ -628,7 +628,7 @@ What uses them (*read*):
 - **Search minerals** walks to the nearest lode not found and, within 10, marks
   it found.
 - **A mine** (`M_Task_Mine`'s `SetTarget`, `Behavior.dll:0x1002cd10`) adds up
-  the amounts of every lode within 250 of it as its "ToMine" (`MBehaviour+0x9e8`),
+  the amounts of every lode within 250 of it across the ground (`0x10020f70`, x and y only) as its "ToMine" (`MBehaviour+0x9e8`),
   and marks each found.
 
 *Measured* over the 29 missions:

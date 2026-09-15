@@ -80,10 +80,13 @@ kinda slow, and if your base doesn't have a Warehouse, you'll always have to
 wait to accumulate enough raw materials" — and string 103: without a
 warehouse "your Factory's production … will be limited by the Mine's
 parameters". What a warehouse adds is a second outlet and a 4000 buffer that a
-transport fills from the mine at 100 a second, so the mine never sits full at
-500 and idle. A transport picks the nearest mine with a free loading place and
-the nearest storage, leaves a mine part-loaded once it runs dry, and waits
-beside a full storage ([32-builder.md](32-builder.md#transporting-ore--read-and-measured)).
+transport fills from the mine at 100 a second. A mine that has dug its 500 is
+not emptied by a draw at all: its task writes its running total back over
+what it holds
+([below](#mission-03s-economy-tick-by-tick--derived)). A transport picks the
+nearest mine with a free loading place and the nearest storage, leaves a mine
+part-loaded only while that mine has not yet dug its 500, and waits beside a
+full storage ([32-builder.md](32-builder.md#transporting-ore--read-and-measured)).
 
 **The id table**, read off `MBehaviour`'s variable getter
 (`Behavior.dll:0x1000a490`, vtable slot 26, a switch):
@@ -610,9 +613,298 @@ each clamped to 0..1 and shown as a whole percentage.
   returns `[self + 0x438]` — that same pointer, `0x7c + 0x3bc` — and then
   the distributor's slot 9, `return self + 0x30`, the block the distribution
   step writes.
-- The numbers do not jump: every 0.05 s each displayed value steps by one
-  point toward its target. A bar whose value is 0 flashes on a half-second
-  timer.
+- The numbers do not jump: each displayed value steps by one point toward its
+  target when **more than** 0.05 s has passed since the last step
+  (`iron3d.dll:0x1006da2f`, `fcomp` against the float 0.05 at `0x100e50a4`),
+  tested once a drawn frame. At 60 frames a second three frames make 50 ms,
+  which does not pass, so a step comes every fourth frame: 15 points a second
+  (*derived*). A bar whose value is 0 flashes on a half-second timer.
+  *Seen*, on *The Field Base* as command mode opens: Energy reads 5% at
+  178.5 s, 28% at 180, 50% at 181.5, 74% at 183 and 97% at 184.5, 15 points a
+  second.
+
+## Mission 03's economy, tick by tick — *derived*
+
+*The Field Base* (`CAMPAIGN.00/Mission.03`) is where the game teaches the
+economy. The hero captures a Small Generator and a Small Bunker, a builder puts
+a Small Mine on the lode, a transport carries its ore to the Small Storage, and
+the Large Factory builds warbots from it. This section puts the pieces above
+together into one model and checks it against a 960 × 720 recording of the
+mission. The model predicts every build in the recording to within a second.
+The mission's script and timeline are
+[34-progression.md](34-progression.md)'s; placing and building the mine is
+[32-builder.md](32-builder.md)'s.
+
+### What the mission gives — *measured*
+
+| object | Type | clan | profile (by Type) | efficiency | ore |
+|---|---|---|---|---:|---|
+| `gener01.dat`, Small Generator (`fr_l_gener`) | `0x80000002` | Ntrl | `prof_generator`: power out **10** | 1 | — |
+| `sbunk01.dat`, Small Bunker (`fr_l_bunker`) | `0x80010000`, a generator Type | Ntrl | `prof_bunker`: power out **0.07**, use 1 | 1 | — |
+| `sstore01.dat`, Small Storage (`fr_l_store`) | `0x80000008` | Plr | `prof_storage`: off-board **1**, use 1 | 1 | holds 0 of 4,000 |
+| `lplant01.dat`, Large Factory (`fr_b_plant`) | `0x80000010` | Plr | `prof_plant`: use **4** | **5** | `FreeBotNum` 0 |
+| `smine01.dat`, Small Core mine (`fr_l_mine`), the Mine scheme's first | `0x80000004` | built | `prof_mine`: off-board **1**, use **1** | 1 | 500 |
+| `tut3_t.dat`, transport | `0x1002000` | Plr | | | holds 0 of 2,000 |
+| `tut3_b.dat`, builder | `0x1004000` | Plr | | | holds 200 of 2,000 |
+
+- **The profile is picked by Type** (`Behavior.dll:0x10008a80`): a mine
+  `prof_mine`, a storage `prof_storage`, a plant `prof_plant`, a generator
+  `prof_generator`, and the three bunker Types `prof_bunker`.
+- **The one lode** lies at (1026.1, 942.7). It starts found, and its amount is
+  1e19.
+- **The player clan has 7 minds.**
+- **Nothing is free.** The factory's `FreeBotNum` is 0, so every bot is paid
+  for.
+- **The `prebuild` object** in `mission.cfg` names `tut3_p1.dat` and
+  `tut3_p2.dat` from `UNITS\UNITS\PREBLD`. Both are priced from `tut3_pl.trf`,
+  and every part of each is researched:
+
+  | design | name | unit box | ore | power |
+  |---|---|---|---:|---:|
+  | `tut3_p1.dat` | SSW-X Warrior (`R_L_01`, two `e_gun_lc_01`) | 7 / 0 t, 43 kph, 8 %, 18 %, 300 m | 125.6 | 72.7 |
+  | `tut3_p2.dat` | SWW-X Warrior (`R_L_03`, two `e_gun_ll_05`) | 6 / 2 t, 64 kph, 7 %, 8 %, 300 m | 118.6 | 63.7 |
+
+- **The transport and the builder** are both on `R_L_03`. Their top speeds
+  come out at 24.0 m/s and 22.8 m/s, and the second is the "82 kph" the
+  recording's Builders page shows.
+
+### What `prebuild` does — *read*, and *seen*
+
+`iron3d.dll` reads the mission's `prebuild` object (`0x1004ddc9`) and loads each
+of its values into the warbot designer's recent projects, the five 0x7c-byte
+slots from `+0xb674` that [36-factory.md](36-factory.md#projects--read-and-measured)
+reads. For each value:
+1. the slots shift down by one (`0x1004ded7`, four moves);
+2. slot 0 is cleared;
+3. `units\units\prebld\` and the value are loaded into slot 0
+   (`0x1004df52`, `0x10056c10` at `0x1004df74`);
+4. the filled slots are counted again.
+
+So the last model named is project 0. *Seen*:
+- at 215.5 s the factory page shows *SWW-X Warrior*, `model2`, with two recent
+  projects;
+- at 217 s the player has picked *SSW-X Warrior*, and batch production starts
+  it.
+
+### A mine digs to 500, and then a draw does not empty it — *read*
+
+**The order.** `iron3d.dll` keeps a record per building. Its setup
+(`0x10032d30`, slot 3 of the record's vtable `0x100e5c4c`) gives every mine
+(`0x80000004`) `ORDER_BUILDING_MINE` (10), replacing (`0x10032de3`,
+`0x10032e42`). The same setup files a player's plant for the factory panel and
+a player's institute for the research panel.
+
+**The target** (`M_Task_Mine::SetTarget`, `Behavior.dll:0x1002cd10`):
+- It adds up, as `ToMine`, the amounts of every lode within **250 across the
+  ground** of the mine. The distance is `0x10020f70`, a length of x and y only.
+- It marks each of those lodes found.
+- It refuses the order when the total is 0.
+
+**The start** (slot 6, `0x1002cef0`):
+- it stamps the clock;
+- it sets the progress to 0;
+- it calls `SetPowerUsage(Use_Power)`, so a small mine draws 1 a second from
+  then on.
+
+**Each takt** (`0x1002cf60`), with `dt` the time since the last in seconds:
+1. **Efficiency.** `KPD` is the mine's efficiency, or 1 when its profile uses
+   no power.
+2. **Below 0.1** the task logs `BAD KPD`. It sets its running total, its
+   progress **and the mine's held ore** to 0 (`0x1002cff6`, then the setter
+   at `0x1002d010`).
+3. **Otherwise it digs** `dt × Mine_OrePerSecond × KPD` (`0x1002d06c`).
+   - The dig is capped so that the running total does not pass the ore
+     property's maximum, 500.
+   - The dig is added to the total and taken off `ToMine`.
+   - `ToMine` is written into `MBehaviour+0x9e8`.
+   - **The mine's held ore is set to the running total** (`0x1002d0f9`).
+   - The progress is the total over `ToMine`.
+4. **When `ToMine` less the total is no more than the dig**, it logs
+   "All Ore mined...". The progress goes to 1, `SetPowerUsage(0)` is called and
+   the task ends.
+
+The running total only grows, and every takt writes it over the mine's held
+ore. Once a mine has dug its 500:
+- **A draw is put back on its next takt.** The distribution step lowers the
+  held ore (`0x1001a918`), and so does a transport loading (`0x10032144`).
+  Neither touches the task's total.
+- **A full mine never runs dry**, and a transport loads a mine that holds
+  500 up to its own 2,000 (*derived*).
+- **A lode gives up only the 500 dug**, so none of the shipped lodes,
+  10⁴ to 10²⁰, is ever exhausted in play (*derived*).
+- *Seen*:
+  - both of the recording's transport loads are 2,000 (below);
+  - the Ore bar holds at 11% through the loading, with no dip.
+
+**Which order runs first on a built mine** (*derived*). `CreateObjectFromScheme`
+gives a new building order 18 **to the start** of its queue
+(`Behavior.dll:0x1001e02c`, `push 2`), and an order to the start begins at once.
+The mine's order 10 must already be queued behind it, because:
+- the construction sphere plays out;
+- the mine digs as soon as it ends;
+- the mine draws its 1 a second from the moment it appears.
+
+The recording shows all three: Energy falls from 100% to 89% by 196 s, the mine
+starts digging about 41 s later, and the sphere lasts 41 s.
+
+### Ore reaches the factory at one a second from each holder — *read*
+
+**Each distribution step** (`0x10019e80`, every 192–255 ms, with `dt` in seconds):
+
+- **A mine or a storage offers** `min(held, dt × KPD × Transfer_Ore_OffBoard)`
+  (`0x1001a8c6`). That is **1 a second** on a small mine and on a small storage.
+- **Every other building asks** for its ore property's maximum less what it
+  now holds (`0x1001a1af`), or nothing when that is under 0.01.
+- **The ore is shared out** as the step's two-tier formula above.
+
+**The construction task** keeps the factory's side of it
+(`M_Task_Construct::OnBehaviourTakt`, `0x1002a4f0`). Each takt:
+1. **It works out its request**, `(cost − collected) × k × KPD × 0.2 + 0.07`.
+2. **It takes what arrived.** `0x10015540` moves out of the factory's ore
+   property as much of the request as it holds, and the task adds that to its
+   collected ore.
+3. **It asks again.** The property is set to 0 held, with the request as its
+   maximum (`0x1002a604`), so the factory's want in the next step is exactly
+   the request.
+
+A request is at least 0.07 a takt and, early in a build, about 5. So in Mission
+03 the supply sets the pace (*derived*):
+- **1 ore a second** while only the mine holds ore;
+- **2 ore a second** once the storage has some.
+
+The warehouse doubles the flow as well as buffering it, which is T03_H01's
+*"your Factory's production … will be limited by the Mine's parameters"*.
+
+### A transport's round — *read*, and *seen*
+
+The rules are [32-builder.md](32-builder.md#transporting-ore--read-and-measured)'s.
+With the mine full as above:
+
+| step | time |
+|---|---|
+| loading, 100 a second into 2,000 of room | 20 s |
+| the walk to the storage: the lode and the storage are 429 m apart, the transport's top speed is 24 m/s | at least 18 s |
+| unloading, 100 a second while the storage has room | 20 s |
+| the walk back | at least 18 s |
+
+*Seen*, on the Ore bar (held ore over 4,500):
+- **From 303.5 to 323.5 s** it rises from 11% to 55%, 2.2 points a second:
+  2,000 into the empty storage.
+- **From 395 to 415 s** it rises from 55% to 99%: 2,000 more, filling the
+  storage.
+- **The round** is 91.5 s, 13 s more than the two walks at full speed, the
+  loading and the unloading add up to.
+
+### Power — *read*, and *measured*
+
+- **Supply.** A generator gives `Transfer_Power_Out × dt` to its clan. After
+  both captures that is **10.07 a second**: the generator's 10 and the bunker's
+  0.07. No other clan in the mission has power.
+- **Draw.** A building's efficiency component takes `(0.01 + usage)` a second
+  from its batteries, and the distribution step tops them up again.
+- **Usage is set only by a task at work.** `SetPowerUsage` (`0x10019880`) is
+  called by construction (`0x1002a308` at the start, `0x1002a722` to 0 once the
+  power is in), by mining (`0x1002cf49`, `0x1002d17e`) and by research. So in
+  Mission 03:
+  - an idle building draws 0.01;
+  - the mine draws 1.01 from its order's start;
+  - the factory draws 4.01 while a build collects its power.
+- **What the Energy row shows** is `(available − demanded) / available`
+  ([What the HUD shows](#what-the-hud-shows--read)). With the batteries full,
+  the demand is what they lost since the last step. The bunker is a generator
+  Type and asks for nothing. So the row reads (*derived*):
+  - **over 99%** with nothing at work: the storage, the factory and the mine
+    draw 0.01 each;
+  - **89.8%** with the mine at work, (10.07 − 1.03) ÷ 10.07;
+  - **50.0%** while the factory also collects a build's power,
+    (10.07 − 5.03) ÷ 10.07.
+- *Seen*:
+  - 100% from 184 to 194 s;
+  - 87–92% from 196 s, 88–89% most of the time;
+  - four dips to 47–55%, each lasting 3.3–4 s (below).
+
+### A warbot from the Large Factory — *read*, and *measured*
+
+- **Cost.** A build of *SSW-X Warrior* is priced as 125.6 ore and 72.7 power
+  ([38-designs.md](38-designs.md#the-price--read)). The ore is divided by the
+  Large Factory's efficiency of 5, giving **25.12**. The time budget is 5 s.
+- **Power** comes in at `KPD × Use_Power` = 20 a second, so it is collected
+  in **3.6 s** and then stops.
+- **Ore** sets the pace:
+  - **25.1 s** with the mine alone;
+  - **12.6 s** once the storage holds ore.
+
+### Against the recording — *seen*
+
+The recording is sampled every 2 s on the resource rows and every 5 s on the
+panel. Each build's power collection shows as an Energy dip toward 50%, so the
+dips time the builds. The first build starts when batch is clicked. Each later
+one starts as the bot before it is finished, because batch production gives the
+file again on the frame the factory is idle
+([36-factory.md](36-factory.md#production--read)).
+
+| build | its power drawn (dip) | its bot done | predicted done | the bot seen |
+|---|---|---|---|---|
+| 1 | 217.8–221.4 s | 260.7 s | mine digging from 235.3 s, + 25.1 s = 260.4 s | *SSW-4 Warrior [escaping]* at 261 s |
+| 2 | 260.7–264.4 s | 286.6 s | 285.8 s | *SSW-5* at 291 s |
+| 3 | 286.6–290.2 s | 308.3 s | 16.9 ore from the mine by 303.5 s, the rest at 2 a second: 307.6 s | *SSW-6* at 311 s |
+| 4 | 308.3–311.6 s | 320.7 s | 320.9 s | *SSW-7* at 321 s |
+| 5 | 320.7–324.7 s | — | 333.3 s | *SSW-8* at 341 s; no further dip |
+
+- **The mine**:
+  - the Ore bar reads 3% at 238 s, 5% at 240 s, 7% at 242 s, 9% at 244 s and
+    11% at 246 s: digging at 50 a second, from about 235.3 s;
+  - 41 s of construction sphere before that puts the mine's creation at about
+    194 s, which is when the Energy row drops to 89%;
+  - it stays at 11% (500) from 246 s until the first unload.
+- **Build 1's power** is in by 221.4 s, but the build waits on ore until the
+  mine has dug.
+- **The Ore row** is up from 178.5 s, reading 0% in red with its figure
+  blinking. It stays at 0% until the mine digs: the storage is empty and no
+  mine exists.
+
+### For an engine
+
+Tick the economy on its own timers, per clan:
+
+1. **Buildings.** Each building has its profile by Type, its efficiency (the
+   class-26 value), its held ore and its ore maximum.
+   - A mine's maximum is 500, a storage's 4,000, a transport's and a builder's
+     2,000.
+   - A consumer's maximum is its task's request.
+2. **A mine** is given order 10 as it joins; a built one runs it once its
+   construction sphere ends. While the order runs, the mine:
+   - digs `dt × 50 × KPD` a takt into a running total capped at 500;
+   - sets its held ore to that total;
+   - draws 1 power a second while its order runs;
+   - with `KPD` below 0.1, zeroes both its total and its held ore;
+   - with no lode within 250 across the ground, refuses the order.
+3. **Every 192–255 ms**, per clan:
+   - every mine and storage offers `min(held, dt × KPD × 1)`;
+   - every consumer asks for maximum − held;
+   - both are shared by `min(1, offered / asked)`, and each holder gives its
+     share.
+4. **A build** (paid; `FreeBotNum` 0):
+   - its ore cost is the design's price over the factory's efficiency;
+   - power comes in at `KPD × Use_Power × dt`, 20 a second in the Large Factory,
+     and the draw stops once it is collected;
+   - its ore request each takt is `(cost − collected) × k × KPD × 0.2 + 0.07`;
+   - it takes what arrived since;
+   - it is done when time (5 s), ore and power are all in, and its progress is
+     the smallest of the three.
+5. **A transport**:
+   - loads at 100 a second up to 2,000 (a full mine gives it all);
+   - walks to the storage and unloads at 100 a second while there is room;
+   - walks back, and repeats.
+6. **Energy** = (the player clan's power out − its batteries' losses since the
+   last step) over every clan's power out.
+   - Every building draws 0.01 a second.
+   - A working mine draws 1 more, a factory collecting a build's power 4 more.
+7. **The rows** show ore held in mines and storages over 4,500, and Energy,
+   each stepping one point toward its target every fourth frame at 60 frames
+   a second.
+8. **`prebuild`** pushes each named design into the factory's recent projects,
+   the last named first.
 
 ## Against what the game looked like
 
@@ -654,3 +946,26 @@ construction slows research.
   read: that the result reaches `dT3` and `op5` is equality (the interpreter's
   semantics), and when the SuperAI plans `PBM_ROBOT_NEEDED` again. A build
   refused later, behind another order, is not re-ordered by that handler.
+- **Which of Mission 03's units hold a mind, and what the factory's "Available
+  CPUs" counts** as a build runs.
+  - The player clan has 7 minds and starts with the hero, a builder and a
+    transport.
+  - *Seen*, the figure reads:
+    - 4 at 215.5 s, before any build;
+    - 3 from 218 to 220.5 s, while the first build collects its power;
+    - 4 from 221.5 s;
+    - 3 at 262 s, during the second build's power.
+  - Five warbots are built (*SSW-4* to *SSW-8*), and no sixth build starts.
+- **The ore an ore place moves by itself.** A transport or builder standing in a
+  mine's loading place or a storage's unloading place, with its property `0x208`
+  at 0, also exchanges ore through the building's place tick (`0x10019482`,
+  `0x100195b8`, through `0x100155f0`), at the smaller of the building's and the
+  unit's rate. Not established here:
+  - which way the ore goes;
+  - what `0x208` is;
+  - what the tick's divisor is.
+  The model above leaves it out; beside the task's 100 a second it is at most a
+  few ore a second.
+- **The 13 s a recorded transport round takes** beyond two walks at full speed:
+  its held speed on Tut_3's slopes and the distance between its two places are
+  not measured.

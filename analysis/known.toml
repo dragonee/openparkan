@@ -3588,14 +3588,6 @@ read = true
 
 [[entry]]
 module = "Behavior.dll"
-at = "0x1002cd10"
-kind = "function"
-name = "M_Task_Mine::SetTarget"
-doc = "the binary's own assertion text"
-read = false
-
-[[entry]]
-module = "Behavior.dll"
 at = "0x1002e750"
 kind = "function"
 name = "M_Task_Reload::SetTarget"
@@ -24892,3 +24884,251 @@ kind = "datum"
 name = "the interface's cursor kind; 8 hides the commander panel but its resource rows"
 read = true
 doc = "docs/41-commander.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1002cd10"
+kind = "function"
+name = "M_Task_Mine::SetTarget: ToMine = the amounts of every lode within 250 across the ground, each marked found; refused at 0"
+doc = "docs/23-economy.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1002cef0"
+kind = "function"
+name = "M_Task_Mine slot 6, start: progress 0, clock stamped, SetPowerUsage(Use_Power)"
+read = true
+doc = "docs/23-economy.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1002cff6"
+kind = "site"
+name = "mine takt, BAD KPD: running total (+0x5c) and progress (+0x4c) zeroed"
+read = true
+doc = "docs/23-economy.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1002d010"
+kind = "site"
+name = "mine takt, BAD KPD: the held ore (0x2000100) set to the zeroed total"
+read = true
+doc = "docs/23-economy.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1002d06c"
+kind = "site"
+name = "mine takt: dt x 0.001 x Mine_OrePerSecond (+0x74) x KPD"
+read = true
+doc = "docs/23-economy.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1002d0f9"
+kind = "site"
+name = "mine takt: the running total written over the mine's held ore (slot 18)"
+read = true
+doc = "docs/23-economy.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1001a1af"
+kind = "site"
+name = "distribution step: a consumer's ore want is its property maximum less what it holds"
+read = true
+doc = "docs/23-economy.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1001a8c6"
+kind = "site"
+name = "distribution step: a mine or storage offers min(held, dt x id 0x1002)"
+read = true
+doc = "docs/23-economy.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1001a918"
+kind = "site"
+name = "distribution step: a holder's held ore lowered by what it gave"
+read = true
+doc = "docs/23-economy.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10032144"
+kind = "site"
+name = "transport loading: the mine's held ore lowered by the load"
+read = true
+doc = "docs/23-economy.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1001e02c"
+kind = "site"
+name = "CreateObjectFromScheme: order 18 given to the start of the queue (push 2)"
+read = true
+doc = "docs/23-economy.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10015540"
+kind = "function"
+name = "take ore: min(amount, held) out of an ore property, returned"
+read = true
+doc = "docs/23-economy.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x100155f0"
+kind = "function"
+name = "move ore between two holders: min(amount, the giver's held, the taker's room)"
+read = true
+doc = "docs/23-economy.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1002a604"
+kind = "site"
+name = "construction takt: the factory's ore property set to 0 held, the request as its maximum"
+read = true
+doc = "docs/23-economy.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1002a308"
+kind = "site"
+name = "construction start: SetPowerUsage(Use_Power)"
+read = true
+doc = "docs/23-economy.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1002a722"
+kind = "site"
+name = "construction takt: SetPowerUsage(0) once the power is collected"
+read = true
+doc = "docs/23-economy.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1002cf49"
+kind = "site"
+name = "mine start: SetPowerUsage(Use_Power)"
+read = true
+doc = "docs/23-economy.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1002d17e"
+kind = "site"
+name = "mine takt, all ore mined: SetPowerUsage(0)"
+read = true
+doc = "docs/23-economy.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10019482"
+kind = "site"
+name = "building place tick: a mine's loading place (0x8) and its transports and builders, 'Mined ['"
+read = true
+doc = "docs/23-economy.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x100195b8"
+kind = "site"
+name = "building place tick: a storage's unloading place (0x10), 'Stored ['"
+read = true
+doc = "docs/23-economy.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10032d30"
+kind = "function"
+name = "building record setup (vtable 0x100e5c4c slot 3): a mine gets ORDER_BUILDING_MINE, the player's plant a factory record, its institute a research record"
+read = true
+doc = "docs/23-economy.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100e5c4c"
+kind = "datum"
+name = "vtable of iron3d.dll's building record"
+read = true
+doc = "docs/23-economy.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10032de3"
+kind = "site"
+name = "building record setup: insert mode 3 (replace) for a mine's order"
+read = true
+doc = "docs/23-economy.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10032e42"
+kind = "site"
+name = "building record setup: order 10 with 0x2000100 in the packet"
+read = true
+doc = "docs/23-economy.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1004ddc9"
+kind = "site"
+name = "the mission's prebuild object read"
+read = true
+doc = "docs/23-economy.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1004ded7"
+kind = "site"
+name = "prebuild: the five recent-project slots shift down (four moves)"
+read = true
+doc = "docs/23-economy.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1004df52"
+kind = "site"
+name = "prebuild: the units/units/prebld/ path joined to the value"
+read = true
+doc = "docs/23-economy.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1004df74"
+kind = "site"
+name = "prebuild: the design loaded into recent-project slot 0"
+read = true
+doc = "docs/23-economy.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10056c10"
+kind = "function"
+name = "load a design file into a recent-project slot"
+read = true
+doc = "docs/23-economy.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1006da2f"
+kind = "site"
+name = "resource rows: a step only once more than 0.05 s has passed"
+read = true
+doc = "docs/23-economy.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100e50a4"
+kind = "datum"
+name = "float 0.05, the resource rows' step"
+read = true
+doc = "docs/23-economy.md"

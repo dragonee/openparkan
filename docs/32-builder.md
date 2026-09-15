@@ -368,10 +368,15 @@ laser (`e_gun_lc_03`, `e_gun_mc_20`).
   building has either (*measured*, [27-ownership.md](27-ownership.md)).
 - **Loading** (`0x10032000`): 100 a second (`Transport_OreOnBoardPerSecond`),
   never more than the mine holds or the transport has room for. **Whichever
-  runs out first ends it** — so a transport leaves a mine that has run dry
-  part-loaded. *Derived*: a mine makes 50 a second
-  ([23-economy.md](23-economy.md)) against the transport's 100, so a full mine
-  of 500 empties in ten seconds and the transport leaves with about 1,000.
+  runs out first ends it**. ~~*Derived*: a mine makes 50 a second against the
+  transport's 100, so a full mine of 500 empties in ten seconds and the
+  transport leaves with about 1,000.~~ A mine's task writes its running total
+  back over what the mine holds every takt, so a mine that has dug its 500 is
+  full again after each draw. The transport fills its 2,000, and it is the
+  transport's room that ends the loading
+  ([23-economy.md](23-economy.md#a-mine-digs-to-500-and-then-a-draw-does-not-empty-it--read);
+  *seen*: two loads of 2,000 on *The Field Base*). Only a mine that has not yet
+  dug 500 runs dry.
 - **Unloading**: 100 a second into the storage, never more than it has room
   for. When the storage had less than 0.1 free as the tick began, the
   transport **steps aside** (state 5): it tries up to 100 random points within
@@ -406,5 +411,9 @@ laser (`e_gun_lc_03`, `e_gun_mc_20`).
   the distance.
 - ~~What a transport does after waiting at a full storage.~~ Goes back to the
   mine once the storage has more than 0.5 free.
-- What a mine's "ToMine", the amount of the lodes within 250, does to its
-  output ([31-packages.md](31-packages.md#mineral-lodes--read-and-measured)).
+- ~~What a mine's "ToMine", the amount of the lodes within 250, does to its
+  output ([31-packages.md](31-packages.md#mineral-lodes--read-and-measured)).~~
+  It bounds the digging: the task ends, "All Ore mined...", when what is left
+  is no more than a takt's dig. Only the 500 dug comes off it, so no shipped
+  lode runs out
+  ([23-economy.md](23-economy.md#a-mine-digs-to-500-and-then-a-draw-does-not-empty-it--read)).
