@@ -244,11 +244,20 @@ Bonus objectives never hold the mission back. A mission with no objectives
 would pass the test, but only an `OBJECTIVE_COMPLETE` ever runs it.
 
 *Measured*, over the scripts missions name:
-- 90 of the 92 literal objective values fit their mission's primary + bonus
-  list. The two that do not are `c2m3p`'s `OBJECTIVE_COMPLETE 2` and
-  `OBJECTIVE_PROGRESS 2`, against a list of 2.
-- Nothing bounds the index (`0x1006b440`). What those two calls touch is
-  undefined (*derived*).
+- **A repeated key is still an objective.** The loader walks an objective
+  object's property records by index, 40 bytes each (`0x1006a832`–`0x1006a8ec`),
+  and never looks up a key. Two files repeat one:
+  - Mission 04's `primary_objectives` names `objective4` twice. The game's
+    objectives screen lists all six lines (*seen*,
+    [below](#mission-04-teleport-end-to-end--derived)).
+  - `CAMPAIGN.02/Mission.03`'s `bonus_objectives` names `objective1` twice.
+  A reader that keeps one value per key, as `openparkan.mission.load_cfg` and
+  the engine's `cfg::parse` do, loses a line from each.
+- **Counting every line, all 92** literal objective values fit their mission's
+  primary + bonus list. Counting a key once, 90 fit: `c2m3p`'s
+  `OBJECTIVE_COMPLETE 2` and `OBJECTIVE_PROGRESS 2` fall past a list of 2,
+  where the file has 3.
+- Nothing bounds the index (`0x1006b440`).
 - Mission 01 lists three primary objectives and no bonus, and its script
   completes 0, 1 and 2.
 
@@ -714,6 +723,189 @@ What follows from it:
 6. **Ask for message 22** when a build command puts a building's model under the
    cursor.
 7. **Win** when objectives 0–4 are complete. Fail on the hero's death.
+
+## Mission 04, *Teleport*, end to end — *derived*
+
+`CAMPAIGN.00/Mission.04` on Tut_4, the last training mission. The steps:
+
+1. The hero takes a neutral mobile HQ.
+2. Its command mode sends the helicopter to capture the Large Factory and the
+   Research Center.
+3. The Research Center develops the missing turret, and the Factory builds a
+   large flyer.
+4. The hero takes the Main Teleport and goes through it.
+
+The mechanics have their own pages:
+
+- the hero's capture of a unit
+  ([27-ownership.md](27-ownership.md#a-neutral-unit-is-taken-by-the-hero--read-and-measured));
+- an HQ's command view
+  ([30-turrets.md](30-turrets.md#an-hq-unit-in-play--read),
+  [40-command-mode.md](40-command-mode.md));
+- search and capture
+  ([31-packages.md](31-packages.md#what-each-package-does--read));
+- the teleport
+  ([27-ownership.md](27-ownership.md#the-main-teleport--read-measured-and-seen)).
+
+This section is the mission as its files and its script drive it.
+
+### What the mission places — *measured*
+
+| clan | index | type | minds | script | base |
+|---|---:|---|---:|---|---|
+| `Plr` | 0 | 1, player | 3 | `tut4_pl2` | (817, 1044) |
+| `Ntrl` | 1 | 3, neutral | 5 | `tut4_nt` | (886, 1018) |
+
+`Plr` and `Ntrl` are neutral to each other both ways.
+
+| logical id | what | clan | where |
+|---|---|---|---|
+| 1 | the mobile HQ, `tut4_hq.dat`: a Large Wheel L-32 with the HQ turret HQL1 and two large flame throwers, "LWC-1 Comm. Center" | `Ntrl` | (422.5, 518.2), 65.7 m from the hero |
+| 2 | the hero, `tut4_p.dat` | `Plr` | (483.2, 492.9) |
+| 3 | the helicopter, `tut4_f1.dat`: a T-2 Tiny Helicopter with two tiny lasers, "TFW-2 Warrior" | `Plr` | (477.9, 530.6) |
+| `CLASS_BUILDING`\|1 | the Main Teleport, `mtp_m_n1.dat` (`fr_m_mtp`) | `Ntrl` | (1153.7, 1265.9, 96.3) |
+| `CLASS_BUILDING`\|2 | the Large Factory, `lplant01.dat` | `Ntrl` | (778.1, 990.4) |
+| `CLASS_BUILDING`\|3 | the Research Center, `einst01.dat` | `Ntrl` | (959.6, 873.6) |
+| `CLASS_BUILDING`\|5 | the Small Generator, `gener01.dat` | `Plr` | (449.5, 412.0) |
+
+- **Scenery and lodes.** One tree stands on the map (`s_tree_58`), and there
+  are no lodes.
+- **The only generator** is the player's from the start. So the teleport's
+  power rule, every generator the hero's clan's, holds as soon as the teleport
+  is taken
+  ([27-ownership.md](27-ownership.md#teleport-in-0x8000--read)).
+- **Robots.** The player starts with 2, the hero and the helicopter, against 3
+  minds.
+
+**Routes** (x and y extents, rounded):
+
+| route | spans | holds |
+|---|---|---|
+| 0 | a square about the hero's start, corners 14–16 m away | the hero |
+| 1 | x 846–1341, y 1047–1508 | the Main Teleport |
+| 2 | x 844–1048, y 762–977 | the Research Center |
+
+### What the scripts ask — *read*, and *measured*
+
+**`tut4_pl2`** calls functions 0, 19, 30, 31, 32 and 52; `tut4_nt` calls only
+19.
+
+- **`Init`** clears `df0`–`df4`, `df8` and `df9`, and sets
+  `df5 = fn31(d0, CLASS_ROBOT) + 2`. With the placed units counted first, as on
+  Mission 03, that is 2 + 2 = **4**.
+- **The route tests** are Mission 01's latch: a message plays on a run that
+  finds its unit in a route after a run that found it in none. The hero's
+  three tests share one latch (`dcl0`, `dcl1`); the helicopter's has its own
+  (`df8`, `df9`).
+
+| run finds | then | message says |
+|---|---|---|
+| the hero (id 2) in route 0 | 9 | `T04_I01` welcome to the fourth sector; a mobile command center near here, "a Bunker on wheels" |
+| the hero in route 1 | 17 | `T04_H03` the Planetary Teleport, "enter the force field located under the Teleport's arc" |
+| the hero in route 2 | 16 | `T04_H02` the Field Research Center |
+| the helicopter (id 3) in route 2 | 16 | the same |
+
+**The ownership and count tests**, each held by its own `df` flag:
+
+| run finds | then | messages say |
+|---|---|---|
+| function 52 of id 1, the HQ, = 0 | objective 0, then 10 and 15 | `T04_I02` press Enter to access command mode; `T04_H01` Enter inside the warbot opens command mode, Escape leaves it, and "the mobile command center's camera only moves in sync with the warbot" |
+| function 52 of `CLASS_BUILDING`\|2, the Factory, = 0 | objective 1, then 11 | `T04_I03` the Factory lacks parts; the Research Center develops them |
+| function 52 of `CLASS_BUILDING`\|3, the Research Center, = 0 | objective 2, then 12 | `T04_I04` "a suitable tower is the only thing that you still need"; look for the Teleport meanwhile |
+| function 52 of `CLASS_BUILDING`\|1, the Teleport, = 0 | objective **4**, then 14 | `T04_I06` "dive under the Teleport arc and head on home" |
+| `Plr` robots ≥ `df5`, 4 | objective **3**, then 13 | `T04_I05` "rush this thing over to your plateau" |
+
+- **Any of the four answering `ERROR`** sends `MISSION_FAILED`. As on Missions
+  02 and 03, that cannot happen in play: a destroyed object answers 65534.
+- **`Hero_Teleported`** sends `SYSTEM_MESSAGE` with `MISSION_COMPLETE`. A hero
+  at the teleport's out place raises it
+  ([27-ownership.md](27-ownership.md#teleport-out-0x4000--read)).
+- **Messages 0–8** (`T04_T01`…`T04_T09`) are the briefing's lines, and 15–17 set
+  `info_system`.
+- **Any robot is the fourth** (*derived*). Function 31 counts every Type with
+  `CLASS_ROBOT`, so the large flyer the briefing asks for is not tested for.
+
+**The objectives: six lines, and the script completes five.** `mission.cfg`
+names `objective4` twice. The game keeps both lines
+([Objectives](#objectives-and-the-end-of-a-mission--read-and-measured)):
+
+| index | line | completed by |
+|---:|---|---|
+| 0 | 1. Capture the mobile HQ | the HQ's owner |
+| 1 | 2. Find and capture the big Factory on the plateau | the Factory's owner |
+| 2 | 3. Find and capture the Research Center | its owner |
+| 3 | 4. Develop and build a large flying warbot | the robot count |
+| 4 | 5. Find and capture the Teleport | the Teleport's owner |
+| 5 | 6. Get to the Teleport and leave the training grounds | nothing |
+
+**So the completion test never passes** (*derived*): objective 5 stays open.
+The mission is won by `Hero_Teleported` alone, whatever else is done.
+
+A reader that keeps one value per key lists five objectives. It puts "6. Get
+to the Teleport…" at index 4. The Teleport's capture would then complete it,
+and with 0–3 already done, the mission would be won at the capture, before the
+hero goes through.
+
+**The minds.** `Plr` has 3. The hero and the helicopter take two, if each holds
+one as on Mission 03
+([23-economy.md](23-economy.md#the-bot-limit-is-the-clans-mind-count--read-and-measured)).
+Once the HQ is taken, the recording's factory panel still shows **1 free**
+(*seen*, below), and then 0 when the build starts. So of the hero, the
+helicopter and the HQ, one holds no mind. Which one is not established;
+Mission 03's four free of seven, beside three placed units, points at the HQ
+taken by Enter.
+
+### Seen in a recording
+
+Timings come from a 30 fps recording of the mission, played through at
+960 × 720. Each line is the first frame that shows it, sampled every 1 to
+3 s, or more finely where a time is given to a tenth.
+
+| time | what |
+|---|---|
+| 0–69.3 s | the briefing: 22 waypoints, 68.1 s of camera |
+| 69.4 s | the objectives screen: **six** objectives, each "in progress" |
+| 76.4 s | the cockpit beside the HQ. The hero starts 65.7 m from it, so the recording is cut here |
+| 78.2 s | the HQ's cockpit, "LWC-1 Comm. Center (no order)": captured and boarded |
+| 78.6 s | command mode's camera and the icon column; `T04_H01` |
+| 83 s | the helicopter "(searching)" on the Battle units page |
+| 175 s | "Building is captured": the Factory |
+| 176 s | `T04_I03`, objective 1 |
+| 236 s | `T04_H02`, route 2 |
+| 255 s | "Building is captured": the Research Center |
+| 256 s | `T04_I04`, objective 2 |
+| 272–276 s | the objectives screen: 1–3 complete, 4–6 in progress |
+| about 300–312 s | the Research Center's screen, then "Research complete" |
+| 344–347 s | the Factory's screen with an "LFW-X Warrior", an L-2f flyer with no guns: free minds 1, then 0 and 1% as it starts |
+| 399 s | `T04_H03`, route 1 |
+| 408.6 s | `T04_I05`, objective 3: the fourth robot, 62 s after the build started |
+| 410.4 s | "Building is captured": the Teleport |
+| 411.0 s | `T04_I06`, objective 4 |
+| 416.8 s | the teleport's chamber |
+| 421.4 s | "MISSION COMPLETE !" over the chamber's field, the HUD gone |
+| 428 s | the campaign menu, *Teleport* done |
+
+What follows from it:
+
+- **The recording's player does not fly.** The hero walks from the Research
+  Center to the Teleport. The large flyer is built, but the hero never boards
+  it.
+- **The win follows `Hero_Teleported`**, 4.6 s after the hero reaches the
+  chamber, with objective 5 still open.
+
+### For an engine
+
+1. **Keep a repeated `mission.cfg` key** in the objective lists, so Mission 04
+   has six objectives.
+2. **Count robots after the placed units have joined** their clans, so `Init`
+   reads 2 and objective 3 needs a fourth robot.
+3. **Leave a mind free** for the build after the HQ is taken; the recording
+   shows one.
+4. **Answer function 52** by owner for the HQ, the three buildings and the
+   teleport. **Answer function 32** for the hero and the helicopter.
+5. **Win only on `Hero_Teleported`**: the teleport's out place, reached through
+   its in place once the player holds it
+   ([27-ownership.md](27-ownership.md#for-an-engine)).
 
 ## After the outcome — *read*, and *measured*
 

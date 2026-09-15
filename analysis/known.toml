@@ -3516,14 +3516,6 @@ read = false
 
 [[entry]]
 module = "Behavior.dll"
-at = "0x1000c7d0"
-kind = "function"
-name = "MBehaviour::OnMainTeleportDetectHero"
-doc = "the binary's own assertion text"
-read = false
-
-[[entry]]
-module = "Behavior.dll"
 at = "0x10020be0"
 kind = "function"
 name = "MGraph::FormPath"
@@ -27805,3 +27797,227 @@ kind = "site"
 name = "CBuilding interface request: 0x11 answers IBasement (this - 4)"
 doc = "docs/31-packages.md"
 read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1000c7d0"
+kind = "function"
+name = "MBehaviour::OnMainTeleportDetectHero: slot 46; the teleport's SuperAI slot 18 with the hero's id and event 8"
+doc = "docs/27-ownership.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10018bb1"
+kind = "site"
+name = "place tick: a teleport-in place, flag bit 0x8000 (test ah, ah)"
+read = true
+doc = "docs/27-ownership.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10018d2a"
+kind = "site"
+name = "teleport in: the occupant must be Type 0x1020000, a hero"
+read = true
+doc = "docs/27-ownership.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10018d4d"
+kind = "site"
+name = "teleport in: the occupant's owner against the teleport's"
+read = true
+doc = "docs/27-ownership.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10018dc0"
+kind = "site"
+name = "teleport in: every Type 0x80000002 in queue list 3 must be the hero's clan's"
+read = true
+doc = "docs/27-ownership.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10018df7"
+kind = "site"
+name = "teleport in: the occupant's property 0x208 must be 0"
+read = true
+doc = "docs/27-ownership.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10018e0f"
+kind = "site"
+name = "teleport in: the hall way's vertex with bit 0x10000 (slot 13), the landing"
+read = true
+doc = "docs/27-ownership.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10018e9b"
+kind = "site"
+name = "teleport in: the hero's matrix with the vertex's position written back (interface 6 slot 7)"
+read = true
+doc = "docs/27-ownership.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10018eb9"
+kind = "site"
+name = "teleport in: the place's occupancy timer made due"
+read = true
+doc = "docs/27-ownership.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1001914f"
+kind = "site"
+name = "place tick: a teleport-out place, flag bit 0x4000"
+read = true
+doc = "docs/27-ownership.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10019190"
+kind = "site"
+name = "teleport out: the occupant must be Type 0x1020000"
+read = true
+doc = "docs/27-ownership.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10019234"
+kind = "site"
+name = "teleport out: the building's MBehaviour slot 46 with the hero's id, every tick"
+read = true
+doc = "docs/27-ownership.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x100197dd"
+kind = "site"
+name = "place tick: at an in place the power byte goes to every class-25 part with a node list"
+read = true
+doc = "docs/27-ownership.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x100189a7"
+kind = "site"
+name = "place set: a vertex is a place with a bit of 0xf8 or 0xc600"
+read = true
+doc = "docs/27-ownership.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1001838f"
+kind = "site"
+name = "occupancy: the segment reaches 3 below at a pod or out place, 0.7 x 3 elsewhere"
+read = true
+doc = "docs/27-ownership.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10022c80"
+kind = "function"
+name = "the nearest point of a segment to a point, inside its ends, within a radius"
+read = true
+doc = "docs/27-ownership.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10003749"
+kind = "site"
+name = "MBehaviour constructor: the place set's timer (0.1 s, 0.1 s)"
+read = true
+doc = "docs/27-ownership.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10006266"
+kind = "site"
+name = "MBehaviour mode message 2 sets +0xa64, property 0x208"
+read = true
+doc = "docs/27-ownership.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10008ce8"
+kind = "site"
+name = "ReloadSuperAI: GetSuperAI of the object's owner into +0x4c"
+read = true
+doc = "docs/27-ownership.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1000c877"
+kind = "site"
+name = "OnMainTeleportDetectHero: the event record's first word, 8"
+read = true
+doc = "docs/27-ownership.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10059308"
+kind = "datum"
+name = "MBehaviour vtable slot 46: OnMainTeleportDetectHero"
+read = true
+doc = "docs/27-ownership.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x100020a0"
+kind = "function"
+name = "SuperAI slot 18: an object's event, a building's from Fort_Task_Complete, a unit's from Mech_GeneratorFound"
+read = true
+doc = "docs/27-ownership.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x10001686"
+kind = "site"
+name = "SuperAI constructor: the index of the handler named Fort_Task_Complete into +0x8a4"
+read = true
+doc = "docs/27-ownership.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x1000165f"
+kind = "site"
+name = "SuperAI constructor: the index of the handler named Mech_GeneratorFound into +0x8a0"
+read = true
+doc = "docs/27-ownership.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x10005d70"
+kind = "function"
+name = "an object's event to a handler: nothing while one runs (+0x78); unit events 1/2/3/8 run base+0..3"
+read = true
+doc = "docs/27-ownership.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x10005e1c"
+kind = "site"
+name = "unit event 8: base + 3, Hero_Teleported"
+read = true
+doc = "docs/27-ownership.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100626f2"
+kind = "site"
+name = "building opening: Type less 0x80000002 against 0x3e; a main teleport opens nothing"
+read = true
+doc = "docs/27-ownership.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1006a832"
+kind = "site"
+name = "objectives loader: the object's property records walked by index, 40 bytes each, no key lookup"
+read = true
+doc = "docs/34-progression.md"

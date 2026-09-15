@@ -16248,6 +16248,229 @@ OUTCOME_GREY, OUTCOME_GREEN, OUTCOME_RED, OUTCOME_BOX = (
 ONLY_BRIEFING = ("CAMPAIGN/CAMPAIGN.01/Mission.01", "CAMPAIGN/CAMPAIGN.05/Mission.02")
 
 
+#: Mission 04, the last training mission (docs/34), and its Main Teleport (docs/27).
+MISSION_04 = "MISSIONS/CAMPAIGN/CAMPAIGN.00/Mission.04"
+
+#: What ``tut4_pl2``'s ``Mission`` handler does, as ``MISSION_03_TESTS`` lists it.
+MISSION_04_TESTS = [
+    (FN_IN_ROUTE, 0, "==", 1, [], [9], []),
+    (FN_IN_ROUTE, 1, "==", 1, [], [17], []),
+    (FN_IN_ROUTE, 2, "==", 1, [], [16], []),
+    (FN_IN_ROUTE, 2, "==", 1, [], [16], []),
+    (FN_OWNER, 1, "==", 0, [0], [10, 15], []),
+    (FN_OWNER, 1, "==", 0xFFFFFFFF, [], [], []),
+    (FN_OWNER, 0x80000002, "==", 0, [1], [11], []),
+    (FN_OWNER, 0x80000002, "==", 0xFFFFFFFF, [], [], []),
+    (FN_OWNER, 0x80000003, "==", 0, [2], [12], []),
+    (FN_OWNER, 0x80000003, "==", 0xFFFFFFFF, [], [], []),
+    (FN_OWNER, 0x80000001, "==", 0, [4], [14], []),
+    (FN_OWNER, 0x80000001, "==", 0xFFFFFFFF, [], [], []),
+    (FN_COUNT, 0, ">=", "df5", [3], [13], []),
+]
+
+#: ``fr_m_mtp``'s hall way: each vertex's flag word and links, in vertex order.
+MAIN_TELEPORT_WAY = [
+    (0x4000, [2]), (0, [2, 3]), (0, [0, 1]), (0x10000, [1]), (1, [5]), (0, [4, 6]),
+    (0x8000, [5]), (0x8000, [8]), (0, [7, 9]), (1, [8]), (1, [11]), (0, [10, 12]), (0x40, [11]),
+]
+
+
+def _cfg_lines(path: Path, block: str) -> list[str]:
+    """The property values of one ``.cfg`` object as the file writes them, repeated keys kept."""
+    values, current = [], None
+    for raw in path.read_bytes().decode("latin-1").splitlines():
+        line = raw.split("#", 1)[0].strip()
+        if not line:
+            continue
+        words = line.split(None, 1)
+        if line.lower() == "end":
+            current = None
+        elif words[0].lower() == "object":
+            current = words[1].strip() if len(words) > 1 else ""
+        elif current == block and "=" in line:
+            values.append(line.split("=", 1)[1].strip().strip('"'))
+    return values
+
+
+def check_main_teleport(check, game: Path) -> None:
+    """The Main Teleport: its places, the in and out ticks, and Hero_Teleported (docs/27)."""
+    paths = {n: game / n for n in ("Behavior.dll", "ai.dll", "iron3d.dll", "fortif.rlb")}
+    if not all(p.exists() for p in paths.values()):
+        return
+    b = _image_at(paths["Behavior.dll"].read_bytes())
+    a = _image_at(paths["ai.dll"].read_bytes())
+    i = _image_at(paths["iron3d.dll"].read_bytes())
+
+    def dword(at, va: int) -> int:
+        return struct.unpack("<I", at(va, 4))[0]
+
+    in_tick = (b(0x10018BAF, 8) == bytes.fromhex("84e40f8995050000")
+               and b(0x10018D2A, 5) == bytes.fromhex("3d00000201")
+               and b(0x10018DC0, 5) == bytes.fromhex("3d02000080")
+               and b(0x10018DF7, 5) == bytes.fromhex("6808020000")
+               and b(0x10018E0D, 9) == bytes.fromhex("6a0068000001006aff")
+               and b(0x10018E98, 6) == bytes.fromhex("6a0250ff5230"))
+    out_tick = (b(0x1001914F, 3) == bytes.fromhex("f6c440")
+                and b(0x10019190, 5) == bytes.fromhex("3d00000201")
+                and b(0x10019234, 6) == bytes.fromhex("ff90b8000000")
+                and dword(b, 0x10059250 + 4 * 46) == 0x1000C7D0
+                and b(0x1000C877, 8) == bytes.fromhex("c744240808000000"))
+    places = (b(0x100189A7, 2) == bytes.fromhex("a8f8")
+              and b(0x100189B0, 3) == bytes.fromhex("f6c4c6")
+              and b(0x1001838F, 2) == bytes.fromhex("a840")
+              and b(0x10059788, 4) == struct.pack("<f", -0.7)
+              and b(0x10003749, 5) == bytes.fromhex("68cdcccc3d")
+              and b(0x10003754, 5) == bytes.fromhex("68cdcccc3d"))
+    superai = (dword(a, 0x100341B8 + 4 * 18) == 0x100020A0
+               and a(0x1000165F, 5) == b"\x68" + struct.pack("<I", 0x10038C08)
+               and a(0x10038C08, 20) == b"Mech_GeneratorFound\x00"
+               and a(0x10001686, 5) == b"\x68" + struct.pack("<I", 0x10038C4C)
+               and a(0x10038C4C, 19) == b"Fort_Task_Complete\x00"
+               and dword(a, 0x10005E34 + 4 * 7) == 0x10005E1C
+               and a(0x10005E20, 3) == bytes.fromhex("83c103"))
+    opening = i(0x100626F2, 8) == bytes.fromhex("05feffff7f83f83e")
+    check("Behavior.dll: a hero at a main teleport's in place drops to its 0x10000 vertex",
+          in_tick and places,
+          "0x8000 (0x10018bb1): a Type 0x1020000 occupant (0x10018d2a) of the teleport's "
+          "owner, every generator 0x80000002 its clan's (0x10018dc0), property 0x208 at 0 "
+          "(0x10018df7), moved to the hall way's 0x10000 vertex (0x10018e0f) through "
+          "interface 6 slot 7; a place is a vertex with a bit of 0xf8 or 0xc600 (0x100189a7), "
+          "a cylinder from 3 (pod, out) or 0.7 x 3 below to 3 above, its set ticking on "
+          "(0.1 s, 0.1 s) timers (0x10003749)")
+    check("ai.dll: a hero at the out place runs its teleport's clan's Hero_Teleported",
+          out_tick and superai and opening,
+          "0x4000 (0x1001914f) calls the building's MBehaviour slot 46 (+0xb8), "
+          "OnMainTeleportDetectHero (0x1000c7d0), which hands SuperAI slot 18 (0x100020a0) "
+          "event 8; a unit's event 8 runs the handler three past Mech_GeneratorFound "
+          "(0x10005e1c); the capture's opening switches past 0x80000200 (0x100626f2)")
+
+    fortif = NResArchive.open(paths["fortif.rlb"])
+    blob = fortif.read_name("fr_m_mtp.msh")
+    graph = objmesh.read_path_graph(NResArchive(blob, "fr_m_mtp"))
+    mesh = objmesh.parse(blob, "fr_m_mtp.msh")
+    links: dict[int, set[int]] = defaultdict(set)
+    for link in graph.links:
+        links[link.start].add(link.end)
+        links[link.end].add(link.start)
+    way = [(n.flags, sorted(links[k])) for k, n in enumerate(graph.nodes)]
+    pos = [objmesh.apply(mesh.world_pose(n.b), n.position) for n in graph.nodes]
+    chamber = round(math.dist(pos[3], pos[1]) + math.dist(pos[1], pos[2])
+                    + math.dist(pos[2], pos[0]), 2)
+    names = frozenset(p.name.lower() for p in all_archives(game))
+    ctl = control.parse(fortif.read_name("fr_m_mtp.ctl"), names)
+    kinds = Counter(c.type_id for c in ctl.components)
+    class25 = sorted(mesh.nodes[c.node].name[:3] for c in ctl.components if c.type_id == 25)
+    field = materials.MaterialLibrary(game / "Material.lib").get("B_TELEPORT")
+    cells = [e.cell for e in field.entries] if field else []
+    scripts = sorted((game / "MISSIONS" / "SCRIPTS").glob("*.scr"))
+    third, bodies = 0, {}
+    for s in scripts:
+        handlers = behaviour.read(s).handlers
+        order = [h.name for h in handlers]
+        third += order[order.index("Mech_GeneratorFound") + 3] == "Hero_Teleported"
+        nodes = handlers[order.index("Hero_Teleported")].nodes
+        if nodes:
+            bodies[s.stem.lower()] = len(nodes)
+    check("fortif.rlb: fr_m_mtp's hall way, chamber and field, and the scripts' handler",
+          way == MAIN_TELEPORT_WAY and chamber == 68.76 and kinds[13] == 2 and kinds[25] == 3
+          and class25 == ["i01", "i03", "o01"] and cells == [5, 6, 7]
+          and field.blend == materials.BLEND_ALPHA
+          and [e.ambient for e in field.entries] == [(107, 228, 255)] * 3
+          and third == len(scripts) == 58
+          and bodies == {"c1m4p": 1, "c2m4p": 1, "c3m4p": 1, "c4m2p": 1, "c5m1p": 5,
+                         "tut4_pl": 1, "tut4_pl2": 1},
+          f"13 vertices (flags, links) {way}; the chamber's way 3-1-2-0 is {chamber} long; "
+          f"{kinds[13]} computers and class-25 parts on {class25}; B_TELEPORT steps cells "
+          f"{cells} of TPG01, alpha, ambient (107, 228, 255); in {third}/{len(scripts)} "
+          f"scripts the handler three past Mech_GeneratorFound is Hero_Teleported, with a "
+          f"body in {bodies}")
+
+
+def check_mission_04(check, game: Path) -> None:
+    """Mission 04, Teleport, as its data and scripts drive it (docs/34)."""
+    d04 = game / MISSION_04
+    scripts_dir = game / "MISSIONS" / "SCRIPTS"
+    if not (d04 / "data.tma").exists() or not (scripts_dir / behaviour.VARSET).exists():
+        return
+    table = behaviour.variables(game)
+    m = mission.load(d04 / "data.tma")
+    stems = [c.ai_script.replace("\\", "/").rsplit("/", 1)[-1] for c in m.clans]
+    scripts = [behaviour.read(scripts_dir / f"{s}.scr") for s in stems]
+    called = [sorted({n.function for h in s.handlers for n in h.nodes if n.calls})
+              for s in scripts]
+    formulas = behaviour.formulas(scripts_dir / f"{stems[0]}.scr")
+    handlers = {h.name: h for h in scripts[0].handlers}
+    mission_h = handlers["Mission"]
+    tests = _handler_blocks(table, mission_h, formulas)
+    routes_asked = [tuple(_handler_value(table, mission_h.nodes, formulas, k, o)
+                          for o in n.operands[:2])
+                    for k, n in enumerate(mission_h.nodes)
+                    if n.calls and n.function == FN_IN_ROUTE]
+    init_formulas = [formulas[n.formula] for n in handlers["Init"].nodes
+                     if not n.calls and 0 <= n.formula < len(formulas)
+                     and table[n.destination].name == "df5"]
+    teleported = [[table[o].name for o in n.operands[:2]]
+                  for n in handlers["Hero_Teleported"].nodes if n.calls]
+    check("Mission 04: tut4_pl2's tests, and what each one gives",
+          tests == MISSION_04_TESTS
+          and called == [[0, 19, 30, FN_COUNT, FN_IN_ROUTE, FN_OWNER], [19]]
+          and routes_asked == [(0, 2), (1, 2), (2, 2), (2, 3)]
+          and init_formulas == ["( df5 + 2 )"]
+          and teleported == [["SYSTEM_MESSAGE", "MISSION_COMPLETE"]],
+          f"{stems} call {called}; routes and ids {routes_asked} give messages 9, 17, 16, "
+          f"16; function 52 of id 1 and CLASS_BUILDING|2, |3, |1 against 0 complete "
+          f"objectives 0, 1, 2, 4 (messages 10+15, 11, 12, 14) and ERROR fails; robots >= "
+          f"df5, Init's {init_formulas}, complete objective 3 (message 13); "
+          f"Hero_Teleported {teleported}")
+
+    by_index = {msg.index: msg for msg in briefing.messages(d04 / briefing.MESSAGES)}
+    helps = sorted(k for k, msg in by_index.items() if msg.info_system)
+    lines = _cfg_lines(d04 / "mission.cfg", mission.PRIMARY_OBJECTIVES)
+    one_per_key = mission.objectives(d04 / "mission.cfg")
+    c2m3 = _cfg_lines(game / "MISSIONS/CAMPAIGN/CAMPAIGN.02/Mission.03/mission.cfg",
+                      mission.BONUS_OBJECTIVES)
+    completed = sorted(o for *_, obj, _, _ in tests for o in obj)
+    check("Mission 04: six objective lines, a repeated key, and five completed",
+          len(lines) == 6 and lines[3].startswith("4. Develop") and len(one_per_key) == 5
+          and one_per_key[3].text.startswith("5.") and completed == [0, 1, 2, 3, 4]
+          and len(c2m3) == 2 and sorted(by_index) == list(range(18)) and helps == [15, 16, 17],
+          f"primary_objectives writes {len(lines)} lines, objective4 twice, where a reader "
+          f"keeping one value per key finds {len(one_per_key)}; the script completes "
+          f"{completed}, so line 5, '{lines[5]}', is never completed; "
+          f"CAMPAIGN.02/Mission.03's bonus list writes {len(c2m3)} lines under one key; "
+          f"messages 0-17, info_system on {helps}")
+
+    units = [o for o in m.objects if o.kind == mission.KIND_UNIT]
+
+    def name(o):
+        return o.path.rsplit("\\", 1)[-1]
+
+    ids = {o.logical_id & 0xFFFFFFFF: name(o) for o in m.objects}
+    owners = {name(o): o.clan_id for o in m.objects if o.clan_id is not None}
+    inside = {k: sorted(name(o) for o in m.objects if r.contains(*o.position[:2]))
+              for k, r in ((r.id, r) for r in m.routes)}
+    robots = Counter(o.clan_id for o in units if (o.type_id or 0) & CLASS_ROBOT)
+    hero = next(o for o in units if "\\HERO\\" in o.path.upper())
+    hq = next(o for o in units if "\\HQ\\" in o.path.upper())
+    apart = round(math.dist(hero.position[:2], hq.position[:2]), 1)
+    generators = [o.clan_id for o in m.objects if (o.type_id or 0) & 0xFFFFFFFF == 0x80000002]
+    check("Mission 04: the clans, the units, the buildings and the routes",
+          [c.type for c in m.clans] == [mission.CLAN_PLAYER, mission.CLAN_NEUTRAL]
+          and [c.minds for c in m.clans] == [3, 5]
+          and [ids[k] for k in (1, 2, 3)] == ["tut4_hq.dat", "tut4_p.dat", "tut4_f1.dat"]
+          and [ids[0x80000000 | k] for k in (1, 2, 3, 5)]
+          == ["mtp_m_n1.dat", "lplant01.dat", "einst01.dat", "gener01.dat"]
+          and owners == {"tut4_hq.dat": 1, "tut4_p.dat": 0, "tut4_f1.dat": 0, "mtp_m_n1.dat": 1,
+                         "lplant01.dat": 1, "einst01.dat": 1, "gener01.dat": 0}
+          and inside == {0: ["tut4_p.dat"], 1: ["mtp_m_n1.dat"], 2: ["einst01.dat"]}
+          and dict(robots) == {0: 2, 1: 1} and generators == [0] and apart == 65.7
+          and not m.lodes,
+          f"clans {[c.name for c in m.clans]}, minds {[c.minds for c in m.clans]}; ids 1-3 "
+          f"{[ids[k] for k in (1, 2, 3)]}; owners {owners}; routes hold {inside}; robots "
+          f"{dict(robots)}; generators owned by {generators}; the HQ {apart} m from the "
+          f"hero; {len(m.lodes)} lodes")
+
+
 def check_outcome(check, game: Path) -> None:
     """What follows a mission's outcome: its panel, the keys that leave it, briefings alone."""
     path = game / "iron3d.dll"
@@ -19709,7 +19932,8 @@ def run(game: Path) -> int:
         check_controls, check_player_input, check_focus, check_selection, check_turret_channels,
         check_behaviour, check_research, check_descriptions, check_saves,
         check_vocabulary, check_resources, check_briefing, check_briefing_screen,
-        check_progression, check_mission_02, check_mission_03, check_outcome,
+        check_progression, check_mission_02, check_mission_03, check_mission_04,
+        check_main_teleport, check_outcome,
         check_hud_top,
         check_hud_radar,
         check_hud_screens,

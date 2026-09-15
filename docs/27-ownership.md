@@ -24,9 +24,9 @@ of one mask and every bit of another).
 | `0x20`, `0x200`, `0x400` | a **dock**: charges, repairs and rearms who stands in it | `0x10019251` |
 | `0x8` | a mine's loading place ("Mined"): exactly one, ground-level, on each mine model and on no other building ([32-builder.md](32-builder.md)) | `0x10019482` |
 | `0x10` | a storage's unloading place ("Stored"): exactly one, ground-level, on each storage model | `0x100195b8` |
-| `0x8000`, `0x4000`, `0x10000` | main teleport in, out, and the exit vertex | `0x10018bb1`, `0x1001914f` |
+| `0x8000`, `0x4000`, `0x10000` | main teleport in, out, and the vertex *in* puts a hero on, which is no place ([below](#the-main-teleport--read-measured-and-seen)) | `0x10018bb1`, `0x1001914f`, `0x10018e0f` |
 | `0x80`, `0x800` | a factory's creation node | `0x100299ea` |
-| `0x10000000` | **ground level**: a place 10 wide and 12 high instead of 5 and 3 | `0x100184f0` |
+| `0x10000000` | **ground level**: a place of radius 10 and height 12 instead of 5 and 3 ([who is in a place](#who-stands-in-a-place--read)) | `0x100184f0` |
 
 The engine's own debug view draws the ore places blue, the docks red and the
 pod green (`0x10018574`). That is what the game looks like too: a red charging
@@ -78,16 +78,18 @@ So a unit sitting in a dock is full in ten seconds, whatever it is.
 **A unit must stand still to be in a place** (*read*, and *measured*):
 
 - **What is tested.** The occupancy refresh (`0x10018310`) takes each object
-  the hall way finds in the place's box. It reads the object's property `0x27`,
+  found in the place, an upright cylinder
+  ([Who stands in a place](#who-stands-in-a-place--read)). It reads the object's property `0x27`,
   which is its world velocity (`Control.dll:0x1000deee`, `+0x200`). The object
   counts only if that vector's length is at most the place's bound
   (`0x10018492`).
 - **The bound** is set with the box (`0x100184f0`): 2 m/s, or 1000 at a place
   with any bit of `0x7c000`, a teleport's (`0x1001851f`).
-- **Which places.** Five places carry such a bit: four on the main teleport
-  `fr_m_mtp` and one teleport-out place on the large ruin `fr_b_ruin`
-  (*measured*). The other 43 pods, docks and ore places count a unit only while
-  it stands.
+- **Which places.** Five vertices carry such a bit: four on the main teleport
+  `fr_m_mtp` — two teleport-in places, a teleport-out place and the vertex the
+  in places send a hero to — and one teleport-out place on the large ruin
+  `fr_b_ruin` (*measured*). The other 43 pods, docks and ore places count a unit
+  only while it stands.
 - **So a dock charges nobody driving through it**, and a capturer must stop on
   the pod (*derived*).
 
@@ -367,11 +369,315 @@ with a pod that floor is the pod room's:
 | `fr_l_store`, the Small Warehouse (`sstore01.dat`) | 11 | 10 | −29.24 … −18.69 | −27.32 | −24.41, 5.53 |
 | `fr_b_plant`, the Large Factory (`lplant01.dat`) | 25 | 23 | −14.32 … −3.77 | −12.40 | −9.67, 4.77 |
 | `fr_l_angar`, the Outpost (`shang01.dat`) | 2 | 1 | 0 … 36.86 | 0.48 | 4.79, 6.37 |
+| `fr_m_mtp`, the Main Teleport (`mtp_m_n1.dat`) | 13 | 7 | 3.84 … 15.69 | 5.32 | 0.91, 6.37 |
 
 *Derived:* the pod node's own sphere is not the bound. It happens to hold the
 hero on 20 of the 21. It does not on the generator: the pod's item plays the
 platform `ic22`, which rests 5.8 m above the floor. Its sphere reaches down to
 −10.23, while the hero's centre on the pod room's floor is at −10.86.
+
+## The main teleport — *read*, *measured*, and *seen*
+
+The Main Teleport is the goal of Mission 04, *Teleport*
+([34-progression.md](34-progression.md#mission-04-teleport-end-to-end--derived)).
+The hero takes it at its pod like any building. Then the hero walks under its
+arc, is moved into a chamber buried beneath it, and walks up to a force field.
+Reaching the field raises the clan script's `Hero_Teleported`, and the training
+script's handler wins the mission.
+
+### What the building is — *measured*
+
+`mtp_m_n1.dat` is `fortif.rlb`'s `fr_m_mtp`, plus `parts.rlb`'s `u_mtp_def_a_01`
+on node 12 (`Base_DF`). Its nodes at rest, in model space:
+
+| node | what | materials | extent |
+|---|---|---|---|
+| 1 `o01` | the arc, and the floor under it at z 3.84 | `B_MTP_01`, `02L`, `05` | x ±32.3, y −47.0 … 13.7, z 3.84 … 19.2 |
+| 6 `o10` | a flat sheet across the arc's middle, x = 0 | `B_TELEPORT2` | y ±5.4, z −5.9 … 3.84 |
+| 7 `o09` | the tower's base, with the pod room | `B_COMP_4G`, `B_GEN_*`… | y −44.3 … −28.7, z 3.84 … 15.7 |
+| 8–11 `o02`–`o05` | the mast; `o05` turns (a class-3 device, rate 0.4) | `B_PG*` | up to z 34.2 |
+| 13, 14 `o06`, `o07` | the pod's two computers, rate 0.4 | `B_COMP_3G` | about (0, −36.5) |
+| 2–4 `i01`–`i03` | the **chamber** | `B_MTP_02L`, `06`, `07BT`… | x −40.9 … 20.1, y −45.6 … 17.4, z −32.0 … −7.5 |
+| 5 `i04` | the **field**: a hexagon at the chamber's end | `B_TELEPORT` | x −6.9 … 6.3, y −41.1 … −31.7, z −23.1 … −11.8 |
+
+- **`B_TELEPORT` and `B_TELEPORT2`** are unlit cyan: ambient (107, 228, 255), a
+  black diffuse, alpha-blended. Their one track steps through cells 5–7 and 8–9
+  of `TPG01` a cell every 50 ms.
+- **The chamber is buried.** On Mission 04 the building stands at z 96.29, and
+  the ground over the whole of it is 100.0–100.3. The chamber's top is 88.8.
+
+**The hall way** is 13 vertices in four chains, and none of the four meets
+another. Model and world positions below are for Mission 04's placement,
+(1153.67, 1265.86, 96.29), turned 0.739:
+
+| vertex | flags | node | model | Mission 04 | links |
+|---:|---|---|---|---|---|
+| 4 | exit | `o01` | (41.04, 0, 6.95) | (1184.0, 1293.5, 103.2) | 5 |
+| 5 | — | `o01` | (33.84, 0, 6.95) | (1178.7, 1288.7, 103.2) | 4, 6 |
+| 6 | `0x8000` in | `o01` | (1.92, 0, 6.95) | (1155.1, 1267.2, 103.2) | 5 |
+| 7 | `0x8000` in | `o01` | (−1.92, 0, 6.95) | (1152.3, 1264.6, 103.2) | 8 |
+| 8 | — | `o01` | (−33.84, 0, 6.95) | (1128.7, 1243.1, 103.2) | 7, 9 |
+| 9 | exit | `o01` | (−41.04, 0, 6.95) | (1123.3, 1238.2, 103.2) | 8 |
+| 10 | exit | `o01` | (0, −53.04, 6.95) | (1189.4, 1226.7, 103.2) | 11 |
+| 11 | — | `o01` | (0, −48.72, 6.95) | (1186.5, 1229.9, 103.2) | 10, 12 |
+| 12 | `0x40` pod | `o09` | (0, −36.50, 6.95) | (1178.3, 1238.9, 103.2) | 11 |
+| 3 | `0x10000` | `i01` | (−27.84, 10.08, −27.37) | (1126.3, 1254.6, 68.9) | 1 |
+| 1 | — | `i02` | (−4.80, 11.04, −21.61) | (1142.7, 1270.8, 74.7) | 2, 3 |
+| 2 | — | `i02` | (0.96, −2.64, −17.29) | (1156.2, 1264.6, 79.0) | 0, 1 |
+| 0 | `0x4000` out | `i03` | (0, −32.16, −17.29) | (1175.3, 1242.1, 79.0) | 2 |
+
+So:
+
+- A ramp from each end of the arc runs to one side of the sheet: vertices 6
+  and 7 stand 1.92 either side of it.
+- A stair from the third exit climbs to the pod under the tower.
+- The chamber runs from vertex 3 past 1 and 2 to vertex 0, 0.5 in front of the
+  hexagon. That way is 68.76 long.
+- Nothing walks from the arc into the chamber.
+
+### Taking it — *read*, and *measured*
+
+**The pod is an ordinary pod.** Computer 0 is node 13. Its sphere is centred at
+(0, −36.49, 0.91), radius 6.37, so the zone reaches 5.10 across the ground.
+The zone's height is `o09`'s box, 3.84 to 15.69. A hero on the pod room's floor
+at 5.32 has its centre at 6.94, inside that box (the table above). The pod's
+rate, 0.4, fires the capture 2.25 s after the hero stops in the zone.
+
+**The callback treats it as any building of another clan**
+([Capture](#capture--read)). "Building is captured" shows. The opening that
+follows switches on the Type less `0x80000002` against `0x3e`
+(`iron3d.dll:0x100626f2`). A main teleport's `0x80000200` falls past the switch,
+so it opens no screen and selects nothing.
+
+A unit's capture order refuses a main teleport (`0x10030252`,
+[31-packages.md](31-packages.md#what-each-package-does--read)). So only a hero
+on foot takes it, or a player-driven small unit standing in the pod room.
+Whether such a unit fits is not established.
+
+### Who stands in a place — *read*
+
+`MBehaviour`'s place set (`+0x3d0`) runs its tick (`0x10018ac0`) from the
+behaviour's takt. This happens before the takt returns for a neutral clan, so
+it runs on the neutral teleport too. The set's own timer is built from
+(0.1 s, 0.1 s) (`0x10003749`, `0x10003754`). That is 64 ms plus a random share
+of 64 ms (`0x1004c550`), so the tick runs every 64–128 ms.
+
+**The place records** are 0x3c bytes (built at `0x100188e2`):
+
+| offset | field |
+|---|---|
+| `+0` | the vertex |
+| `+8` | its flag word |
+| `+0xc` | its second word, the node it rides on |
+| `+0x10` | the occupancy timer, (1, 1) words: 64–128 ms |
+| `+0x18` | the list of occupants' ids |
+| `+0x2c` | the speed bound |
+| `+0x30` | the radius: 5, or 10 at ground level |
+| `+0x34` | the height: 3, or 12 at ground level |
+| `+0x38` | a byte, the teleport's power (below) |
+
+A vertex becomes a place only with a bit of `0xf8` or `0xc600`
+(`0x100189a7`–`0x100189b3`). So the `0x10000` vertex is no place.
+
+**Each tick first asks the building about the place's node.** When the node word
+is not −1 and the building's interface `0xb`, slot 16, answers non-zero for it,
+the place is passed over whole (`0x10018b55`–`0x10018b83`). What that slot asks
+is not read; a destroyed node is the *guess*.
+
+**The occupancy refresh** (`0x10018310`) runs when the place's timer is due.
+
+1. It takes the vertex's world position from the hall way (interface `0x303`,
+   slot 5).
+2. It asks the building for the objects about a vertical segment through the
+   vertex. The segment runs up to 3 above the vertex. Down, it runs 3 below at
+   a pod or a teleport-out place (`0x40`, `0x4000`, tested at `0x1001837a`),
+   and 0.7 × 3 = 2.1 below at any other place (the float at `0x10059788`).
+3. For each object it reads the world velocity against the bound, then takes the
+   object's matrix translation, its **origin** (`0x10014b30`).
+4. `0x10022c80` projects that origin onto the segment. It counts the object
+   only when the projection falls between the segment's ends (`0x10022cfa`,
+   `0x10022d0b`) and the origin lies within the radius of it (`0x10022d6e`).
+
+So a place is an upright cylinder, radius 5, from 3 (or 2.1) below the vertex
+to 3 above it: not a box.
+
+*Measured* on `fr_m_mtp`, with a hero's origin 1.45 above its feet:
+
+- **In places.** On the arc's floor at 3.84 about vertices 6 and 7, the origin
+  stands at 5.29, inside 4.85 to 9.95.
+- **The out place.** Straight under vertex 0 the chamber's floor is −21.87,
+  which leaves the origin 0.13 below the cylinder. The floor rises within the
+  5 m toward vertex 2, from −21.74, so a hero walking up to the field comes
+  inside.
+
+### Teleport in: `0x8000` — *read*
+
+For each occupant, every tick (`0x10018c84`–`0x10019132`), these must all hold:
+
+- **Type `0x1020000`, a hero** (`0x10018d2a`).
+- **The teleport's owner** is the hero's (`0x10018d4d`), and the owner's low
+  word is not `0xfffe`, destroyed.
+- **Power: every generator is the hero's clan's.** The tick walks `World3D.dll`'s
+  queue list 3 (`GetQueue`, slot 13), taking each object's Type through
+  interface `0x10`.
+  - The first `0x80000002` it meets that belongs to another clan ends the walk,
+    and the hero is passed over (`0x10018dd5`).
+  - At least one must be the hero's.
+  - The same walk, with the teleport's owner and skipping a neutral one, sets
+    the place's power byte (`0x10018c55`).
+- **Property `0x208` is 0.** `0x208` is the behaviour's `+0xa64` (the getter's
+  table, `0x1000aa2c`), which `MBehaviour`'s mode message sets for mode 2
+  (`0x10006266`) and clears for 0 and 1. It sits beside the "Switch from Mirror
+  to Behaviour" reload, so it reads as a network mirror's flag (*guess* on the
+  name). In single play it is 0.
+- **The hall way has a vertex with bit `0x10000`** (slot 13 with −1,
+  `0x10000`, 0, `0x10018e0f`). With none, the tick logs "Cannot find
+  TeleportOut vertex".
+
+**What it does.**
+
+1. It reads the hero's matrix (interface 6, slot 8, kind 2).
+2. It copies the matrix and puts the vertex's world position into its
+   translation (elements 3, 7 and 11).
+3. It writes the matrix back through interface `0xa`, slot 12, and interface 6,
+   slot 7 (`0x10018e27`–`0x10018eaf`).
+4. It makes the place's occupancy timer due (`0x10018eb9`).
+5. It logs `SetControlPlace` and "MainTeleported Into".
+
+**Nothing else is in the branch:** no effect, sound, fade or message, and no
+change of speed. The rotation is copied unchanged.
+
+- **The hero on foot only** (*derived*). The occupant must be the hero itself.
+  A hero aboard a bot is out of the world's tree
+  ([39-boarding.md](39-boarding.md#boarding--read)), and the bot's Type is
+  another.
+- **Where the hero lands** (*derived*, on `fr_m_mtp`). Vertex 3's origin is
+  1.83 above what a hero's origin would be on the chamber's floor there (−30.65
+  plus 1.45). So the hero lands and drops that far.
+
+### Teleport out: `0x4000` — *read*
+
+For each occupant (`0x10019158`–`0x1001923e`), these must hold:
+
+- Type `0x1020000`;
+- not destroyed;
+- property `0x208` at 0.
+
+**No clan and no power is asked.** The tick logs "MainTeleported". It then calls
+the teleport's `MBehaviour` slot 46 (`+0xb8`, `0x10019234`) with the hero's id.
+It does this on every tick the hero stays.
+
+**Slot 46 is `MBehaviour::OnMainTeleportDetectHero`** (`0x1000c7d0`, from the
+vtable `0x10059250`):
+
+1. It logs its name.
+2. It logs "Main Teleported!!!", or "But pTeleFunc == NULL". The pointer at
+   `+0xa50` only picks the line: nothing in `Behavior.dll` calls through it.
+3. It finds the hero's clan's SuperAI (`AI.dll`'s ordinal 2, `GetSuperAI`) only
+   to test that one exists ("But piHeroSuperAI == NULL").
+4. It hands the event to **the teleport's own SuperAI**, `+0x4c`, which
+   `ReloadSuperAI` takes from the building's owner (`0x10008ce8`). That SuperAI's
+   slot 18 gets the hero's id and a record whose first word is **8**
+   (`0x1000c877`).
+
+**SuperAI slot 18** (`ai.dll:0x100020a0`) picks a base handler:
+
+- a building's id (high bit set) takes `+0x8a4`, the index of the handler named
+  `Fort_Task_Complete` (`0x10001686`);
+- any other id takes `+0x8a0`, the index of `Mech_GeneratorFound`
+  (`0x1000165f`).
+
+It hands on to `0x10005d70`, which does nothing while a handler is already
+running (`+0x78`, `0x10005d88`). Otherwise it runs a handler at once:
+
+- for a unit, events 1, 2, 3 and 8 run base, base + 1, base + 2 and
+  **base + 3** (the table `0x10005e34`; event 8 at `0x10005e1c`);
+- for a building, events 3 and 7 run base and base + 1.
+
+So a hero at a teleport-out place runs its teleport's clan's
+**`Hero_Teleported`**. *Measured:* in all 58 scripts the handler three after
+`Mech_GeneratorFound` is `Hero_Teleported`. Seven give it a body:
+
+- `tut4_pl`, `tut4_pl2`, `c1m4p`, `c2m4p`, `c3m4p` and `c4m2p` send
+  `SYSTEM_MESSAGE` with `MISSION_COMPLETE`;
+- `c5m1p` counts `BUILDING_GENERATOR` first, completes objective 1, then sends
+  the same.
+
+A repeated `MISSION_COMPLETE` does nothing
+([34-progression.md](34-progression.md#after-the-outcome--read-and-measured)).
+
+### The power byte — *read* in part
+
+- **What sets it.** An in place's `+0x38` holds whether the teleport's clan is
+  not neutral and holds every generator.
+- **What a change does** (`0x10019772`–`0x10019814`).
+  - The tick asks the behaviour's `+0x68` interface, slot 12, for a list of
+    words for each of the building's class-25 parts.
+  - At an in place (`0x100197dd`) it sets state `0x20`, or 0, through slot 6 on
+    every part whose list is not empty.
+  - At any other place it sets the state only on a part whose list holds the
+    place's node word. There the byte never changes.
+- **The parts.** `fr_m_mtp` has three class-25 parts, on `o01`, `i01` and
+  `i03` (*measured*).
+- **Still open.** What a class-25 part does with the state is not read.
+- **At the start.** The first tick sets state 1 on every class-29 part
+  (`0x1001982f`).
+
+### The main teleports of the campaign — *measured*
+
+| mission | teleport | its clan at the start | generators by clan |
+|---|---|---|---|
+| `CAMPAIGN.00/Mission.04` | `mtp_m_n1` | `Ntrl` | `Plr` 1 |
+| `CAMPAIGN.01/Mission.01` | `mtp_s_n1` (`fr_l_mtp`, no teleport places) | `Plr` | `Plr` 2 |
+| `CAMPAIGN.01/Mission.04` | `mtp_m_n1` | `Enm` | `Plr` 1, `Enm` 1 |
+| `CAMPAIGN.02/Mission.04` | `mtp_m_n1` | `Enemy` | `Enemy` 2 |
+| `CAMPAIGN.03/Mission.04` | `mtp_m_n1` | `Enm` | `Enm` 1 |
+
+Outside Mission 04, then, the player must take the teleport and every
+generator on the map before the arc sends the hero down (*derived*). The one
+other teleport-out place, on `CAMPAIGN.05/Mission.01`'s large ruin, asks for
+neither.
+
+### Against the recording — *seen*
+
+*Teleport*'s recording at 960 × 720, sampled at up to 5 frames a second:
+
+| time | what |
+|---|---|
+| 399 s | "The Planetary Teleport…", message 17: the hero is in route 1 |
+| 405–407.5 s | the hero climbs the stair toward the tower |
+| 408.0 s | a green field fills the view, and the hero's own panel dims: the pod room |
+| 408.6 s | message 13, *At last! Now rush this thing over to your plateau…*: the fourth robot |
+| 410.4 s | "Building is captured", 2.4 s after the pod room |
+| 411.0 s | message 14, *Now dive under the Teleport arc…*: objective 4 |
+| 411.4–416.6 s | back outside, walking round and under the arc |
+| 416.8 s | the view cuts to red organic walls: the chamber |
+| 419.0 s | the blue hexagon ahead |
+| 421.4 s | "MISSION COMPLETE !" over the hexagon, the HUD gone |
+| 428 s | the campaign menu, *Teleport* done |
+
+From 416.8 to 421.4 s is 4.6 s, which at 14 m/s is 64 m. That is about the
+chamber's 68.8 less the place's radius of 5 (*derived*). **The hexagonal tunnel at the
+end is no special view**: it is the chamber's field, `i04`, through the hero's
+eye, under the outcome panel.
+
+### For an engine
+
+1. **Capture the teleport at its pod** as any building. It opens no screen.
+2. **Run a place tick** every 64–128 ms over each building's places. Refresh a
+   place's occupants every 64–128 ms: those whose origin lies inside the place's
+   cylinder and moves no faster than the bound (1000 at a teleport place).
+3. **At `0x8000`**, check each occupant:
+   - it is the hero;
+   - it has the teleport's owner;
+   - every generator is that owner's, and there is at least one.
+
+   If so, move the hero's origin to the hall way's first `0x10000` vertex. Keep
+   its rotation and speed, play nothing, and refresh the place.
+4. **At `0x4000`**, for the hero, run the teleport's clan script's
+   `Hero_Teleported` handler at once, each tick, unless a handler is running.
+5. **Draw `B_TELEPORT`** unlit and cycling. The end screen is the outcome
+   panel over the world.
 
 ## A neutral unit is taken by the hero — *read*, and *measured*
 
@@ -474,3 +780,17 @@ generators between the players. `Multi.05`'s `Ntrl` is the exception: type 2.
   `0x10074dbf`, `0x1007e2ad`, `0x100a2a73`).~~ The briefing's end, the
   record's binding and constructor, and the briefing's start
   ([39-boarding.md](39-boarding.md#the-other-writers-of-0xa2--read)).
+- **The main teleport**
+  ([above](#the-main-teleport--read-measured-and-seen)):
+  - What a class-25 part does with the state `0x20` the power byte sets, and a
+    class-29 part with the 1 the first tick sets.
+  - What the building's interface `0xb`, slot 16, asks about a place's node.
+  - What `World3D.dll`'s queue list 3 holds beyond the generators the walk
+    looks for, and whether every generator on the map is always in it.
+  - What property `0x208`, the behaviour's `+0xa64`, is named. The network
+    mirror is a *guess*.
+  - Whether anything sets or calls `MBehaviour`'s `pTeleFunc` (`+0xa50`).
+    `Behavior.dll` only tests it; `iron3d.dll` was not searched.
+  - Whether a unit the player drives, and not the hero, can stand in the pod
+    room and take the teleport.
+  - Why the recording's hero panel dims in the pod room (408–411 s).

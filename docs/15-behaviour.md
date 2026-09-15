@@ -71,7 +71,7 @@ Two kinds, and the names tell them apart.
 | `Mission` | the mission itself |
 | `Fort_Task_Complete`, `Fort_Captured` | the base |
 | `Mech_GeneratorFound`, `Mech_Mineral_Found`, `Mech_Task_Complete` | the units |
-| `Hero_Teleported` | the player |
+| `Hero_Teleported` | the player: a hero at a main teleport's out place ([27-ownership.md](27-ownership.md#teleport-out-0x4000--read)) |
 
 That they are universal is what makes them the engine's rather than a
 mission's: a mission cannot omit one. The SuperAI constructor looks up

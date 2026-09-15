@@ -428,6 +428,27 @@ is *derived* from the update. A phase ends on the first frame past its time,
 and the next phase counts from that frame, so each change loses part of a
 frame; 14 ms is half a frame at about 35 frames a second.
 
+**Mission 04 needs nothing the first two did not** (*measured*).
+
+- **The path.** Its 22 waypoints use `spline`, `linear` and `jump` edges, and
+  `continuous` and `flyaround` dwells, all of which Missions 01 and 02 already
+  use. The two `flyaround`s, 17 and 19, dwell one turn each: 5.50 and 5.54 s
+  against `RotateTime` 5.52 and 5.55.
+- **The length.** It lasts **68.1 s**.
+- **Against its recording.** The darkest frame of each of its five `jump`s
+  falls at the jump's middle, the model's arrival + 1.2 s + half the edge:
+
+  | waypoint | model | recording |
+  |---:|---:|---:|
+  | 4 | 22.31 | 22.23 |
+  | 8 | 30.06 | 29.97 |
+  | 14 | 44.40 | 44.40 |
+  | 16 | 50.04 | 50.00 |
+  | 18 | 59.60 | 59.70 |
+
+- **What follows.** The objectives screen is up at 69.4 s, 0.1 s after the
+  model's end, and the cockpit follows 7.0 s later.
+
 ### For an engine
 
 1. Load the waypoints, the title from `descr` and the subtitle switch. Set
