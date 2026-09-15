@@ -320,9 +320,7 @@ impl Play {
         let cost = (|| {
             let path = self.placement_model(type_word)?;
             let unit = self.assembly.unit(&path)?;
-            let tree =
-                usize::try_from(self.player_clan).ok().and_then(|c| self.clans.get(c))?.behaviour.clone();
-            let catalogue = crate::designs::Catalogue::open(&self.assembly.game, &tree).ok()?;
+            let catalogue = self.catalogue()?;
             let mut ore = 0.0;
             for c in &unit.components {
                 let item = catalogue.item(&c.reference.member).filter(|i| i.in_tree() && i.researched())?;

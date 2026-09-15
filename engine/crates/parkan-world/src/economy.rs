@@ -51,9 +51,10 @@ pub fn profile_of(type_word: u32) -> Option<&'static str> {
 pub struct Site {
     pub target: usize,
     pub type_word: u32,
-    /// `Transfer_Power_Out`, `Use_Power` and `Transfer_Ore_OffBoard`.
+    /// `Transfer_Power_Out`, `Use_Power`, `Use_Ore` and `Transfer_Ore_OffBoard`.
     pub power_out: f32,
     pub use_power: f32,
+    pub use_ore: f32,
     pub off_board: f32,
     /// The class-26 value, and the level the batteries serve it at: KPD is their product.
     pub efficiency: f32,
@@ -175,8 +176,12 @@ impl Economy {
         let figure = |name: &str| -> f32 {
             vars.as_ref().and_then(|v| v.iter().find(|v| v.name == name)).map_or(0.0, |v| v.value as f32)
         };
-        let (power_out, use_power, off_board) =
-            (figure("Transfer_Power_Out"), figure("Use_Power"), figure("Transfer_Ore_OffBoard"));
+        let (power_out, use_power, use_ore, off_board) = (
+            figure("Transfer_Power_Out"),
+            figure("Use_Power"),
+            figure("Use_Ore"),
+            figure("Transfer_Ore_OffBoard"),
+        );
         let (mut efficiency, mut capacity, mut output) = (None, 0.0_f32, 0.0_f32);
         for record in assembly.records(path).into_iter().take(1) {
             let Some(slot) = assembly.library.record_slot(assembly.library.get(&record), "ctl", 0) else {
@@ -221,6 +226,7 @@ impl Economy {
             type_word,
             power_out,
             use_power,
+            use_ore,
             off_board,
             efficiency: efficiency.unwrap_or(1.0),
             level: 1.0,

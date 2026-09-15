@@ -12,6 +12,7 @@ pub mod messages;
 pub mod objectives;
 pub mod panels;
 pub mod radar;
+pub mod research;
 pub mod weapons;
 
 use std::collections::BTreeMap;
@@ -176,6 +177,14 @@ impl Cockpit {
             let shown = play.selected_units();
             play.rate_units(&shown);
         }
+        // The research panel, on page 4 or on a research centre's screen.
+        let research = match play.mode() {
+            crate::play::Mode::Factory(t) => {
+                play.units.get(t).is_some_and(|u| u.type_word == crate::selection::RESEARCH_CENTRE)
+            }
+            _ => command && self.commander.page == 4,
+        };
+        self.commander.research.update(play, research);
     }
 
     /// The HUD for `play` on `space` at its hero's clock, `view_proj` its main camera, laid
@@ -210,9 +219,15 @@ impl Cockpit {
                     ..Drawn::default()
                 };
             }
-            let previews = factory::draw(self, &mut ink, play, t, now_ms);
-            ink.painter.pin = Pin::TOP_RIGHT;
-            map::draw(self, &mut ink, play, now_ms);
+            let previews =
+                if play.units.get(t).is_some_and(|u| u.type_word == crate::selection::RESEARCH_CENTRE) {
+                    research::screen(self, &mut ink, play, now_ms)
+                } else {
+                    let previews = factory::draw(self, &mut ink, play, t, now_ms);
+                    ink.painter.pin = Pin::TOP_RIGHT;
+                    map::draw(self, &mut ink, play, now_ms);
+                    previews
+                };
             return Drawn {
                 batches: ink.painter.batches,
                 text: ink.text,

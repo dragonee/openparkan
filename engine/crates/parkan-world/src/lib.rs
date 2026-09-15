@@ -17,6 +17,7 @@ pub mod models;
 pub mod pick;
 pub mod play;
 pub mod progress;
+pub mod research;
 pub mod resources;
 pub mod robot;
 pub mod selection;

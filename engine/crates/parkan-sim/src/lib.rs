@@ -22,6 +22,7 @@ pub mod machine;
 pub mod motion;
 pub mod orders;
 pub mod progression;
+pub mod research;
 pub mod script;
 pub mod sky;
 pub mod solid;

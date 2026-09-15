@@ -1540,6 +1540,17 @@ impl ApplicationHandler for App {
                         let at = space.layout(self.cursor, parkan_world::hud::Pin::TOP_LEFT);
                         use parkan_world::cockpit::{designer, factory};
                         match self.hud.as_mut().map(|h| &mut h.cockpit) {
+                            // A research centre's screen is the research panel (`0x10089ce0`).
+                            Some(cockpit)
+                                if play.units.get(t).is_some_and(|u| {
+                                    u.type_word == parkan_world::selection::RESEARCH_CENTRE
+                                }) =>
+                            {
+                                let click = cockpit.commander.research.click(play, at);
+                                if click == parkan_world::cockpit::research::Click::Exit {
+                                    play.roll_back();
+                                }
+                            }
                             // The designer, while it is up, takes the click (`0x10055ff0`).
                             Some(cockpit) if cockpit.designer.is_open() => {
                                 let at = designer::layout_point(space, self.cursor);

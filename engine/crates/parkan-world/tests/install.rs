@@ -3197,3 +3197,133 @@ fn the_hero_button_rolls_mission_04s_hq_view_back_to_foot_and_a_lost_hq_puts_the
     assert_eq!(play.mode(), Mode::OnFoot, "rolled back and put out");
     assert!(!play.hero_away());
 }
+
+/// Mission 04, loaded with its scripts, for the research tests.
+fn mission_04_research_play() -> (parkan_world::play::Play, parkan_formats::mission::Mission) {
+    use parkan_formats::mission;
+    use parkan_world::play::Play;
+
+    let game = gamedir::find(None).expect("a Parkan install: set PARKAN_DIR");
+    let dir = gamedir::resolve(&game, "MISSIONS/CAMPAIGN/CAMPAIGN.00/Mission.04").unwrap();
+    let m = mission::parse(&std::fs::read(dir.join("data.tma")).unwrap(), "Mission.04").unwrap();
+    let mut play = Play::load(&game, &m).unwrap().expect("Mission 04 has a hero");
+    play.load_progression(&game, &dir, &m).unwrap();
+    (play, m)
+}
+
+/// The parts the large flyer's turret socket offers in the player's tree as it stands.
+fn large_flyer_turrets(play: &mut parkan_world::play::Play) -> Vec<String> {
+    let game = play.assembly.game.clone();
+    let mut designer = parkan_world::designs::Designer::new(&game, play.catalogue().unwrap(), 4);
+    let sockets: Vec<String> = designer
+        .labels(&mut play.assembly, "R_B_02")
+        .into_iter()
+        .map(|s| s.to_ascii_lowercase())
+        .filter(|s| s.starts_with("e_tur_"))
+        .collect();
+    designer.catalogue.page(&sockets)
+}
+
+#[test]
+#[ignore = "needs the game install"]
+fn mission_04s_research_centre_opens_its_screen_and_researches_the_large_battle_turret_free_in_five_seconds()
+{
+    use glam::{Mat4, Vec3};
+    use parkan_world::cockpit::Cockpit;
+    use parkan_world::cockpit::research::Click;
+    use parkan_world::hud::{Pages, Space};
+    use parkan_world::play::Mode;
+    use parkan_world::progress::{Say, Sender};
+    use parkan_world::text::GameFont;
+
+    let game = gamedir::find(None).expect("a Parkan install: set PARKAN_DIR");
+    let (mut play, m) = mission_04_research_play();
+    let player = play.player_clan;
+    let turret = {
+        let tree = play.research.clan(player).expect("Plr reads tut4_pl.trf");
+        tree.tree.items.iter().position(|i| i.code == "4L1").unwrap()
+    };
+    // At the start the turret is the one row, and the large flyer's turret socket offers nothing.
+    assert_eq!(play.research_rows(), [turret]);
+    assert!(large_flyer_turrets(&mut play).is_empty());
+
+    let pages = Pages::open(&game).unwrap();
+    let mut cockpit = Cockpit::open(&game, &pages, &play).unwrap();
+    let (font, menu) = (GameFont::ui(&game, "GAME_FONT").unwrap(), GameFont::ui(&game, "MENU_FONT").unwrap());
+    let space = Space::new(640.0, 480.0);
+    let view_proj = Mat4::perspective_infinite_reverse_rh(1.0, 4.0 / 3.0, 0.1)
+        * Mat4::look_to_rh(play.hero.eye().position, play.hero.eye().forward, Vec3::Z);
+    // The research page's button wants a centre of the clan's.
+    let now = play.hero.time_ms;
+    cockpit.commander.update(&mut play, now);
+    assert!(!cockpit.commander.enabled[6], "no centre of the player's yet");
+
+    // The Enhanced Research Center's pod: captured, objective 2, and its research screen.
+    let centre = object_target(&play, &m, "einst01.dat");
+    assert!(play.stand_on_pod(centre));
+    play_for(&mut play, 6.0, |_| {});
+    assert_eq!(play.units[centre].clan, Some(player));
+    assert_eq!(play.mode(), Mode::Factory(centre));
+    let objectives = &play.progression.as_ref().unwrap().progress.objectives;
+    assert_eq!(objectives[2].state, 1, "{objectives:?}");
+    let now = play.hero.time_ms;
+    cockpit.commander.update(&mut play, now);
+    assert!(cockpit.commander.enabled[6], "the research page's button");
+    cockpit.update(&mut play, now);
+    let drawn = cockpit.draw(&play, space, &font, &menu, view_proj);
+    let text: Vec<&str> = drawn.text.iter().map(|r| r.text.as_str()).collect();
+    for words in [
+        "Research Center",
+        "Large Battle Turret",
+        "DESCENDANTS",
+        "Large Battle Turret (5L1)",
+        "Large Battle Turret (4L1)",
+    ] {
+        assert!(text.contains(&words), "{words:?} in {text:?}");
+    }
+    assert!(
+        drawn.previews.iter().any(|p| p.key.path.eq_ignore_ascii_case("e_tur_bb_01")),
+        "the turret turns"
+    );
+
+    // The batch button orders the row; two seconds in, the row's button cancels it.
+    assert_eq!(cockpit.commander.research.click(&mut play, [186.0, 137.0]), Click::Taken);
+    assert!(play.research_queued(turret));
+    play_for(&mut play, 2.0, |_| {});
+    let progress =
+        |play: &parkan_world::play::Play| play.research.clan(player).unwrap().state.progress[turret];
+    assert!((progress(&play) - 0.4).abs() < 0.01, "{}", progress(&play));
+    cockpit.commander.research.click(&mut play, [70.0, 188.0]);
+    assert!(!play.research_queued(turret));
+    play_for(&mut play, 1.0, |_| {});
+    assert!((progress(&play) - 0.4).abs() < 0.01, "a cancel keeps the progress: {}", progress(&play));
+    let c = play.research.centres.iter().position(|c| c.target == centre).unwrap();
+    assert_eq!(play.research.centres[c].grants.free_technologies, 4);
+
+    // Ordered again it takes another free technology and only the rest of its 5 s.
+    cockpit.commander.research.click(&mut play, [70.0, 188.0]);
+    play.says.clear();
+    let mut ticks = 0;
+    while play.research_queued(turret) && ticks < 600 {
+        play_for(&mut play, 1.0 / 60.0, |_| {});
+        ticks += 1;
+    }
+    assert!((ticks as f32 / 60.0 - 3.0).abs() < 0.05, "done after {ticks} ticks");
+    assert_eq!(play.research.centres[c].grants.free_technologies, 3);
+    assert!(play.research.clan(player).unwrap().state.researched(turret));
+    assert!(
+        play.says.contains(&Say::Text(Sender::System, "Research complete... (Large Battle Turret)".into())),
+        "{:?}",
+        play.says
+    );
+    assert!(play.says.iter().any(|s| matches!(s, Say::Voice(_))), "VOICE_RSRCH_COMPLETE");
+
+    // The row has gone, the box reads no item, and the flyer's socket offers the turret.
+    let now = play.hero.time_ms;
+    cockpit.update(&mut play, now);
+    assert!(cockpit.commander.research.rows.is_empty());
+    let drawn = cockpit.draw(&play, space, &font, &menu, view_proj);
+    assert!(drawn.text.iter().any(|r| r.text == "No item selected"));
+    let offered = large_flyer_turrets(&mut play);
+    assert!(offered.iter().any(|p| p.eq_ignore_ascii_case("e_tur_bb_01")), "{offered:?}");
+}

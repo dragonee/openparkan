@@ -128,7 +128,8 @@ pub enum Mode {
     /// Mode 4 with the bunker that is target `t`: command mode, the camera over the base
     /// (docs/40).
     Command(usize),
-    /// Mode 5 with the building that is target `t`: the factory screen (docs/36).
+    /// Mode 5 with the building that is target `t`: its screen, a factory's (docs/36) or a
+    /// research centre's, the commander panel turned to page 4 (docs/41).
     Factory(usize),
 }
 
@@ -328,6 +329,8 @@ pub struct Play {
     pub construction: crate::construction::Construction,
     /// Ore and power (docs/23).
     pub economy: crate::economy::Economy,
+    /// Each clan's research tree, and the research centres' queues (docs/16).
+    pub research: crate::research::Research,
 }
 
 /// A round about to leave a barrel.
@@ -725,7 +728,9 @@ impl Play {
             commander: crate::selection::Commander::new(mission, &battle_objects),
             construction: crate::construction::Construction::new(mission, &battle_objects),
             economy: crate::economy::Economy::new(mission, &battle_objects),
+            research: crate::research::Research::default(),
         };
+        play.research = crate::research::Research::load(game, mission, &battle_objects, &play.units);
         for i in 0..play.turret_effects.len() {
             let e = play.turret_effects[i].clone();
             let frame = play.turret_frame(&e);
@@ -1252,6 +1257,8 @@ impl Play {
             self.tick_buildings(now);
             self.tick_economy(now, (dt_ms / 1000.0) as f32);
             self.tick_factories(dt_ms);
+            self.tick_research(dt_ms);
+            self.check_research();
         }
         let mut events = self.ground_damage(now);
         if !self.paused {
@@ -2028,7 +2035,11 @@ impl Play {
                 self.says.push(Say::Voice(v));
             }
         }
-        if self.units[t].type_word == BUILDING_PLANT {
+        // A plant's pod opens its screen, and a research centre's the research page
+        // (`0x10062756`).
+        if self.units[t].type_word == BUILDING_PLANT
+            || self.units[t].type_word == crate::selection::RESEARCH_CENTRE
+        {
             self.hero.release_keys();
             self.modes.push(Mode::Factory(t));
         } else if BUILDING_BUNKERS.contains(&self.units[t].type_word) {

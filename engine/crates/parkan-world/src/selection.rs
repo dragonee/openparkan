@@ -75,11 +75,11 @@ impl Commander {
     }
 }
 
-/// Whether every part of each build Type's scheme's first building is offered by the tree at
-/// `tree` (docs/41, "Which rows it offers", condition 5).
-pub fn researched(game: &Path, tree: &str) -> [bool; 7] {
+/// Whether every part of each build Type's scheme's first building is offered by `catalogue`,
+/// the clan's tree as it stands (docs/41, "Which rows it offers", condition 5).
+pub fn researched(game: &Path, catalogue: Option<&crate::designs::Catalogue>) -> [bool; 7] {
     let mut out = [false; 7];
-    let Ok(catalogue) = crate::designs::Catalogue::open(game, tree) else { return out };
+    let Some(catalogue) = catalogue else { return out };
     let schemes = parkan_formats::gamedir::resolve(game, parkan_formats::controls::BUILD_SCHEMES)
         .and_then(|p| std::fs::read(p).ok())
         .and_then(|b| {
@@ -182,12 +182,8 @@ impl Play {
     /// the build Types the clan owns.
     pub fn hq_situation(&mut self) -> hq::Situation {
         if self.commander.researched.is_none() {
-            let tree = usize::try_from(self.player_clan)
-                .ok()
-                .and_then(|c| self.clans.get(c))
-                .map(|c| c.behaviour.clone())
-                .unwrap_or_default();
-            self.commander.researched = Some(researched(&self.assembly.game.clone(), &tree));
+            let catalogue = self.catalogue();
+            self.commander.researched = Some(researched(&self.assembly.game.clone(), catalogue.as_ref()));
         }
         let researched = self.commander.researched.unwrap_or_default();
         let selected = self.selected_units();
@@ -258,12 +254,7 @@ impl Play {
             return;
         }
         let game = self.assembly.game.clone();
-        let tree = usize::try_from(self.player_clan)
-            .ok()
-            .and_then(|c| self.clans.get(c))
-            .map(|c| c.behaviour.clone())
-            .unwrap_or_default();
-        let Ok(catalogue) = crate::designs::Catalogue::open(&game, &tree) else { return };
+        let Some(catalogue) = self.catalogue() else { return };
         let mut designer = crate::designs::Designer::new(&game, catalogue, 4);
         for t in missing {
             let path = self.commander.paths.get(t).cloned().unwrap_or_default();

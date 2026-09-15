@@ -181,6 +181,8 @@ pub struct Panel {
     pub band: Option<[[f32; 2]; 2]>,
     /// The unit or building under the cursor, which gets a marker.
     pub hovered: Option<usize>,
+    /// The research panel page 4 draws (`+0x7b8`).
+    pub research: super::research::Panel,
 }
 
 impl Default for Panel {
@@ -200,6 +202,7 @@ impl Default for Panel {
             cursor_state: 1,
             band: None,
             hovered: None,
+            research: super::research::Panel::default(),
         }
     }
 }
@@ -254,6 +257,9 @@ impl Panel {
             if !keep && let Some(&first) = buildings_of(play, mask).first() {
                 play.select_building(first);
             }
+        } else if page == 4 {
+            // Turning to the research page refreshes its panel (`0x10084dda`).
+            self.research.refresh(play);
         }
     }
 
@@ -376,6 +382,12 @@ impl Panel {
         if let Some(mask) = page_units(self.page) {
             return self.click_unit_page(play, mask, left, now_ms);
         }
+        if self.page == 4 {
+            return match self.research.click(play, left) {
+                super::research::Click::Outside => Click::World,
+                _ => Click::Taken,
+            };
+        }
         if let Some(mask) = page_buildings(self.page) {
             let top = if self.page == 5 { FACTORY_ROWS_TOP } else { BUILDING_ROWS_TOP };
             if self.page == 5
@@ -472,6 +484,8 @@ impl Panel {
         } else if let Some(mask) = page_buildings(self.page) {
             let top = if self.page == 5 { FACTORY_ROWS_TOP } else { BUILDING_ROWS_TOP };
             top + ROW_STEP * buildings_of(play, mask).len() as f32
+        } else if self.page == 4 {
+            self.research.bottom()
         } else {
             UNIT_BOX[3]
         };
@@ -536,6 +550,8 @@ pub fn draw(
         factory::header(cockpit, ink, title(page));
         if let Some(mask) = page_units(page) {
             unit_page(cockpit, ink, play, mask, now_ms);
+        } else if page == 4 {
+            previews = super::research::panel(cockpit, ink, play, now_ms);
         } else if let Some(mask) = page_buildings(page) {
             let top = if page == 5 { FACTORY_ROWS_TOP } else { BUILDING_ROWS_TOP };
             // Page 5 draws the selected factory's panel above its rows.

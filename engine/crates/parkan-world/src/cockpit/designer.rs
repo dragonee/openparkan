@@ -6,13 +6,13 @@
 
 use std::collections::BTreeMap;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use glam::{Mat4, Vec3};
 use parkan_formats::mission::KIND_UNIT;
 
 use super::{Cockpit, Ink, argb};
 use crate::assembly::Assembly;
-use crate::designs::{BoxLine, Catalogue, Designer, Node, Place, Rating, Tab};
+use crate::designs::{BoxLine, Designer, Node, Place, Rating, Tab};
 use crate::hud::{Blend, Pin};
 use crate::play::Play;
 
@@ -384,7 +384,7 @@ fn slot_points(mesh: &parkan_formats::mesh::Mesh, pose: &parkan_formats::pose::P
 }
 
 /// The sphere of a record's mesh as drawn.
-fn part_sphere(assembly: &mut Assembly, record: &str) -> Option<(Vec3, f32)> {
+pub fn part_sphere(assembly: &mut Assembly, record: &str) -> Option<(Vec3, f32)> {
     let reference = assembly.library.record_mesh(assembly.library.get(record), 0)?;
     let loaded = assembly.mesh(&reference)?;
     let points = slot_points(&loaded.mesh, &parkan_formats::pose::IDENTITY);
@@ -412,12 +412,7 @@ impl Session {
     /// the player's clan's research tree (docs/37, "Opening and closing").
     pub fn open(play: &mut Play, factory: usize, path: String, now_ms: f64) -> Result<Session> {
         let game = play.assembly.game.clone();
-        let tree = usize::try_from(play.player_clan)
-            .ok()
-            .and_then(|c| play.clans.get(c))
-            .map(|c| c.behaviour.clone())
-            .unwrap_or_default();
-        let catalogue = Catalogue::open(&game, &tree)?;
+        let catalogue = play.catalogue().context("the player's clan has no research tree")?;
         let grade = play.factories.iter().find(|f| f.target == factory).map_or(4, |f| usize::from(f.size));
         Ok(Self::with(Designer::new(&game, catalogue, grade), factory, path, now_ms, &mut play.assembly))
     }

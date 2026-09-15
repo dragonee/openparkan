@@ -400,6 +400,27 @@ and the designer's save and load.
   the HQ type shows Strategic control, which opens that HQ's view from a bunker's or another
   HQ's. The hero button rolls the stack back a mode at a time to the hero on foot. A lost
   driven bot rolls the stack back in modes 1 and 2.
+- Research as docs/16 reads it. Every clan's tree is its `.trf` as state: an item's three
+  bits and its stored progress. A research centre runs its queue of order 14s one at a
+  time; a task takes a free technology while the centre has one (costing nothing), else
+  the item's research energy and ore, with the centre's `FreeResearchTime` as its time.
+  Each takt adds `min(KPD × Use_Ore × dt, ore held)` ore, `KPD × Use_Power × dt` power and
+  dt time, and the item's progress grows by the smallest of the three fractions. At 1 −
+  0.001 the item is researched, what it unlocks opens, and every newly open free item is
+  researched at once. A captured centre researches from its new clan's tree. The
+  designer's part lists, the build rows and a building's price read the tree as it stands.
+- The research panel, command mode's page 4 and the screen a player's research centre's
+  pod opens (mode 5), as docs/41 reads it: the box with the selected item's name, its
+  descendants and its part turning, or *No item selected*; the batch button, which
+  cancels everything queued and orders every row; the scroll row; and a row per item open
+  to research and priced, `name (code)`, its start or stop button and a bar of its
+  progress, red, olive or green. An order goes to the end of the queue of the player's
+  standing centre that is not building itself and holds the fewest; a cancel keeps the
+  progress. Each pass, a queued item now researched is dropped from its queue and
+  reported: *"Research complete... (name)"* from System and `VOICE_RSRCH_COMPLETE`.
+- On Mission 04 the Enhanced Research Center's pod captures it and opens its screen with
+  the one row, *Large Battle Turret (4L1)*; ordered, it is researched free in 5 s, and
+  the Large Flying chassis's turret socket then offers `e_tur_bb_01`.
 
 This directory also holds what the rest will follow:
 
@@ -489,6 +510,11 @@ whose camera rides with the HQ: the cursor at an edge swings it round, Z zooms, 
 do nothing. Esc steps back to the HQ's cockpit, and again to the hero on foot. `--hq` takes
 and boards the mission's first HQ and opens its view before `--ticks` play (`--mission
 MISSIONS/CAMPAIGN/CAMPAIGN.00/Mission.04 --skip-briefing --hq --ticks 120 --page 1`).
+
+A research centre's pod opens its research screen once the centre is the player's, as
+command mode's page 4 shows it too: a row's button orders or cancels its research, the
+batch button orders every row, the arrows scroll, and exit or Esc closes the screen.
+`--pod einst01.dat --ticks 400` on Mission 04 draws the screen.
 
 Standing on a building's control pod captures it; `--pod NAME` starts the hero
 on the pod of the building whose path ends in NAME (`--pod lplant01.dat` on
@@ -587,11 +613,6 @@ a row here. A row leaves this table when research closes it.
 | M12 | Whether the display's slot 12 answers, so the system's cursor is used | the software cursor's four phases from `new_ui1` are drawn and the system's hidden | [42](../docs/42-selection.md#the-cursor-shows-a-state--read-and-measured) |
 | M12 | A marker's gap figure (the record's slot 5), its bar frame on page9, the clan's sign, and where its name, icon and bars stand | the gap is the unit's projected radius held to 4–44; the name over the left bracket, the class icon right of the right one, a blue box under the left one holding the life bar over a full battery bar | [25](../docs/25-sensors.md#how-the-game-colours-what-it-marks--read-and-measured) |
 | M12 | What telepresence's auto-driver levels 1 and 2 give the AI | the player drives the unit whole at every level | [40](../docs/40-command-mode.md#telepresence-mode-2--read) |
-| M13 | Which bound an HQ record's `+0x98` is, whose 8 × sets how far its command camera rides behind it | the chassis mesh's authored sphere's radius (8 × 7.653 = 61.2 m on Mission 04's HQ, which the recording favours), else the unit's whole bound | [40](../docs/40-command-mode.md#not-established) |
-| M13 | What the game does when an HQ is lost in its own command view: nothing read rolls mode 3 back | the view rolls back to the HQ's cockpit, and the lost bot puts the hero out at (x − 1, y − 1) | [40](../docs/40-command-mode.md#not-established) |
-| M13 | How the stack reads after Enter in telepresence aboard an HQ | the telepresence ends and mode 3 takes its place over the command view it came from | [40](../docs/40-command-mode.md#an-hqs-command-mode-mode-3--read-and-seen) |
-| M13 | Whether the AI's aiming reaches the turret lock's lead (body `+0x38`) through the component setter, as the player's does | the lead starts from the turret's yaw target when the player takes the unit over | [30](../docs/30-turrets.md#the-hull-follows-the-turret--read-and-measured) |
-| M13 | The spin a unit let go keeps until the Wizard writes one | none: letting a unit go clears its spin | [30](../docs/30-turrets.md#the-hull-follows-the-turret--read-and-measured) |
 | M6 | What a node naming a variable, operand, formula or handler that does not exist reads | the node does nothing; a switch to no handler ends the run; a run stops after a million nodes | [15](../docs/15-behaviour.md#how-a-handler-runs) |
 | M12 | Function 15's answer: whether the unit takes the order (1) or refuses it (0) | an id some unit or building answers gives 1, and the unit is handed the order after the handler's run | [34](../docs/34-progression.md#what-the-scripts-ask--read-and-measured-1) |
 | M12 | A building's contour (property `0x203`), whose vertices a patrol of the building walks | eight points on the building's sphere, pushed out by 30 | [31](../docs/31-packages.md#the-patrol-tick-by-tick--read) |
@@ -607,6 +628,15 @@ a row here. A row leaves this table when research closes it.
 | M12 | Where a transport a full storage turns aside goes: up to 100 random points within 30 of the unloading place, walked at a quarter of its speed | it waits where it stands | [32](../docs/32-builder.md#transporting-ore--read-and-measured) |
 | M12 | The ore a mine's loading place or a storage's unloading place moves by itself (`0x10019482`, `0x100195b8`): its direction, property `0x208`, the tick's divisor | left out, as docs/23's model leaves it | [23](../docs/23-economy.md#not-established) |
 | M12 | How a building made in play is drawn, and whether the landscape's drawing is cut under it | node by node from level 0 without a lightmap; the ground queries are cut under it, the landscape's drawing is not | [03](../docs/03-terrain.md#for-an-engine) |
+| M13 | Which bound an HQ record's `+0x98` is, whose 8 × sets how far its command camera rides behind it | the chassis mesh's authored sphere's radius (8 × 7.653 = 61.2 m on Mission 04's HQ, which the recording favours), else the unit's whole bound | [40](../docs/40-command-mode.md#not-established) |
+| M13 | What the game does when an HQ is lost in its own command view: nothing read rolls mode 3 back | the view rolls back to the HQ's cockpit, and the lost bot puts the hero out at (x − 1, y − 1) | [40](../docs/40-command-mode.md#not-established) |
+| M13 | How the stack reads after Enter in telepresence aboard an HQ | the telepresence ends and mode 3 takes its place over the command view it came from | [40](../docs/40-command-mode.md#an-hqs-command-mode-mode-3--read-and-seen) |
+| M13 | Whether the AI's aiming reaches the turret lock's lead (body `+0x38`) through the component setter, as the player's does | the lead starts from the turret's yaw target when the player takes the unit over | [30](../docs/30-turrets.md#the-hull-follows-the-turret--read-and-measured) |
+| M13 | The spin a unit let go keeps until the Wizard writes one | none: letting a unit go clears its spin | [30](../docs/30-turrets.md#the-hull-follows-the-turret--read-and-measured) |
+| M13 | Whether a research centre's ore property reads the ore it holds or what the distribution delivered | the take comes out of what the economy says it holds, and its request is what it asks the next step for, as a factory's build does | [16](../docs/16-research.md#not-established) |
+| M13 | How often a building's takt runs | a research centre's every tick | [16](../docs/16-research.md#not-established) |
+| M13 | The colour the research box's name is drawn in (`GAME_FONT`'s, as whatever drew before left it) | white, as the recording reads | [41](../docs/41-commander.md#not-established) |
+| M13 | The research box's clip 5 inside its frame, applied to its preview | the preview's view is not clipped | [41](../docs/41-commander.md#what-it-draws--read) |
 
 ### Read since the stand-in was written
 

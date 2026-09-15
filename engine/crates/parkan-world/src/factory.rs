@@ -5,7 +5,7 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use glam::Vec3;
 use parkan_formats::hallway::{self, HallWay, PLACE_CREATION, PLACE_CREATION_OLD};
 use parkan_formats::mission::{self, Mission, Value};
@@ -13,7 +13,7 @@ use parkan_formats::{gamedir, objects};
 use parkan_sim::construct::{self, Construct};
 
 use crate::assembly::Assembly;
-use crate::designs::{Catalogue, Designer, Node};
+use crate::designs::{Designer, Node};
 
 /// The most recent projects a factory panel lists (`+0xb674`, five slots).
 pub const RECENT_PROJECTS: usize = 5;
@@ -247,14 +247,10 @@ pub fn prebuild(play: &mut crate::play::Play, game: &Path, mission_dir: &Path) -
     if names.is_empty() || play.factories.is_empty() {
         return Ok(0);
     }
-    let tree = usize::try_from(play.player_clan)
-        .ok()
-        .and_then(|c| play.clans.get(c))
-        .map(|c| c.behaviour.clone())
-        .unwrap_or_default();
+    let catalogue = play.catalogue().context("the player's clan has no research tree")?;
     let strings = crate::resources::game_strings(game)?;
     let grade = play.factories.first().map_or(4, |f| usize::from(f.size));
-    let mut designer = Designer::new(game, Catalogue::open(game, &tree)?, grade);
+    let mut designer = Designer::new(game, catalogue, grade);
     let mut loaded = 0;
     for name in names {
         let path = format!("{PREBUILD_DIR}{name}");
