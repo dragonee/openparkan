@@ -335,16 +335,43 @@ round with. A driven hull follows its turret at 0.7 × the live yaw rate
 - Both set the command's y to ±1, so the hero walks at the full live top
   speed: 14 m/s, `r_h_02` triple 3 (*measured*).
 - Release sends 0.
-- `World3D.dll` tracks what is held in flags at row `+0x20`/`+0x24`, and in
-  global `0x10795244`, "walking".
+- `World3D.dll` tracks what is held in flags at the input context's
+  `+0x20`/`+0x24` (W, S), and in global `0x10795244`, "walking".
 
-**Strafing** is `A`/`D`, `MCMD_LEFT`/`RIGHT`. It is not the command's x axis:
+**Strafing** is `A`/`D`, `MCMD_LEFT`/`RIGHT` (`0x10010350`, `0x10010457`). It
+is not the command's x axis. Each strafe key keeps a held flag (globals
+`0x1079523c` left, `0x10795240` right).
 
-- The command's y goes to ±1, with the sign of the current direction.
-- `SetStrafeAngle` gets ±π/2, or ±π/4 while already walking (globals
-  `0x1079523c` left, `0x10795240` right).
-- On release the angle returns to 0, and the command to 0 if nothing else is
-  held.
+- **Going down** sets the command's y to ±1 by the sign of the y it finds, +1
+  from standing, and hands `SetStrafeAngle` f × π/2 for left and −f × π/2 for
+  right (`0x10020b60`, `0x10020b58`). f is 1 standing, and while walking ½
+  with the sign of that y: +½ walking forward, **−½ backing up**, and 1 again
+  within ±0.001 of 0 (`0x10020b5c`, `0x10020250`).
+- **Coming up** sets the angle to the other strafe key's, worked out the same
+  way, or to 0 when it is up too, and the command's y to 0 when neither strafe
+  key is held and nothing walks.
+- **So backing up mirrors the angle.** `S` then `A` turns the hull π/4 to the
+  right and walks it backwards: back and to the left, 225° clockwise from the
+  heading. `S` then `D` goes back and to the right, 135°. The player sees the
+  same in the game (*seen*, `user-feedback` on Mission 01).
+
+**A walk key while strafing** (`0x100101b2`, `0x100102b9`). The handler first
+keeps W's and S's flags. A walk key coming up while the other is still held
+sets y to that key's ±1 and does nothing more (`0x10010215`, `0x10010250`).
+Otherwise "walking" becomes |magnitude| ≥ 1e-4 (`0x10020b68`), and:
+
+- with no strafe key held, y takes the row's value, as above;
+- with one held and walking, y becomes the sign of the magnitude and the angle
+  ±π/4 by it, negated for right: `A` and then `S` also turns the hull right;
+- with one held and not walking, the walk key's release, the angle becomes
+  ±π/2 by the sign of the y left standing, negated for right, and y is left
+  alone, so the strafe keeps going: `W` coming up under `A` strafes left at
+  full speed, and `S` coming up under `A` backs the hull, turned right, to the
+  left.
+
+Both handlers run a key's row once (docs/14, [A row that stays
+down](14-controls.md#a-row-that-stays-down--read)), so what is held is worked
+out only as each key goes down or comes up.
 
 **The hull turns and the turret turns back** (*read*):
 
@@ -395,9 +422,11 @@ limits the lean, and every hero state leans on no axis
 - `+` and `−` send ±1 with the table's ramp 0.05 over 1000. They reach the
   walking handler (`0x100101b2`), which sets the command's y to what the
   row's axis function returns (`0x10010a50`).
-- **A pressed key's row stays active**, and every active row is run again
-  on each input update (`World3D.dll:0x1000f477`). The key coming up clears it
-  ([14-controls.md](14-controls.md#a-row-that-stays-down--read)).
+- **A pressed key's row with a ramp time stays active**, and every active row
+  is run again on each input update (`World3D.dll:0x1000f477`). The key coming
+  up clears it ([14-controls.md](14-controls.md#a-row-that-stays-down--read)).
+  With a strafe key held the run sets y to the sign of the magnitude and the
+  strafe angle to ±π/4, as a walk key does.
 - **Each run moves y toward ±1** by 0.05 × min(1, held ms ÷ 1000), and never
   past it.
 - **So the ramp is a step per update, not per second.** The step grows over

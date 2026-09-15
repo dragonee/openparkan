@@ -12315,8 +12315,48 @@ read = true
 module = "World3D.dll"
 at = "0x10010350"
 kind = "site"
-name = "MCMD_LEFT handler: y = +-1 by current sign, strafe angle (0.5 when walking, else 1) x pi/2 through IControl slot 20"
+name = "MCMD_LEFT handler: y = +-1 by current sign, strafe angle f x pi/2 through IControl slot 20; f = 1 standing, +-0.5 by y's sign walking (1 within 0.001); up: the right key's angle or 0, y = 0 unless walking or right held"
 doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "World3D.dll"
+at = "0x10010457"
+kind = "site"
+name = "MCMD_RIGHT handler: MCMD_LEFT's with the angle negated (-pi/2 at 0x10020b58)"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "World3D.dll"
+at = "0x10010215"
+kind = "site"
+name = "walk handler: W up while S is held sets y = -1 and returns (0x10010250: S up under W, y = +1)"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "World3D.dll"
+at = "0x100102b9"
+kind = "site"
+name = "walk handler with a strafe key held: walking, y = sign(magnitude) and angle +-pi/4 by it; not walking, angle +-pi/2 by y's sign, y left; negated for right"
+doc = "docs/24-motion.md"
+read = true
+
+[[entry]]
+module = "World3D.dll"
+at = "0x100109e7"
+kind = "site"
+name = "row handler's last step: a row with no ramp time (or the context's walk/turn ramp's for its press rows) has +0x80 cleared, so it runs once"
+doc = "docs/14-controls.md"
+read = true
+
+[[entry]]
+module = "World3D.dll"
+at = "0x1000f774"
+kind = "site"
+name = "input update, mouse-button events: the row goes active and runs at once"
+doc = "docs/14-controls.md"
 read = true
 
 [[entry]]

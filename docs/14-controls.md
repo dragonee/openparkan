@@ -406,8 +406,15 @@ the game clock (`SetGameTime`'s `0x10032a38`), and clears the release row.
 Coming up does the opposite.
 
 **Every active row is handed to the row handler on each update**
-(`0x1000f477`–`0x1000f514`), not once per event. What it does with a key
-row's value is the axis function's (`0x10010a50`):
+(`0x1000f477`–`0x1000f514`), the key events after that (`0x1000f5a4`), so a
+keyboard row an event makes active runs on the next update. A mouse button's
+row runs as it goes active too (`0x1000f774`). **Then the handler clears a row
+with no ramp time** (`0x100109e7`): its last step takes the row's ramp time
+(the context's walk or turn ramp's in its place for a walk or `MCMD_ROTATE_Z`
+press row while that ramp is on), and a 0 sets the row's `+0x80` to 0. So a
+row without a ramp time runs once each time its key goes down or comes up, and
+only a ramp row runs again while it is held. What it does with a key row's
+value is the axis function's (`0x10010a50`):
 
 - **no ramp time**: the row's magnitude;
 - **a ramp time**: the current value moved toward the magnitude by

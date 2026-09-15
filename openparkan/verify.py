@@ -13155,6 +13155,102 @@ def check_player_input(check, game: Path) -> None:
           f"{tuple(round(x, 2) for x in limit)}.  Control: r_l_06 names m2.tbl")
 
 
+class _Strafer:
+    """docs/24's walk and strafe handlers (World3D.dll:0x100101b2, 0x10010350, 0x10010457)."""
+
+    def __init__(self):
+        self.y, self.angle, self.walking = 0.0, 0.0, False
+        self.walk = {"MCMD_WALK_F": False, "MCMD_WALK_B": False}
+        self.strafe = {"MCMD_LEFT": False, "MCMD_RIGHT": False}
+
+    def row(self, row) -> None:
+        if row.command in self.walk:
+            self.walk[row.command] = row.pressed
+            other = "MCMD_WALK_B" if row.command == "MCMD_WALK_F" else "MCMD_WALK_F"
+            if not row.pressed and self.walk[other]:
+                self.y = -1.0 if row.command == "MCMD_WALK_F" else 1.0
+                return
+            self.walking = abs(row.value) >= 1e-4
+            if not any(self.strafe.values()):
+                self.y = row.value
+                return
+            side = -1.0 if self.strafe["MCMD_RIGHT"] else 1.0
+            if self.walking:
+                self.y = 1.0 if row.value >= 0 else -1.0
+                self.angle = side * self.y * math.pi / 4
+            else:
+                self.angle = side * (1.0 if self.y >= 0 else -1.0) * math.pi / 2
+            return
+        left = row.command == "MCMD_LEFT"
+        other = "MCMD_RIGHT" if left else "MCMD_LEFT"
+        f = (-0.5 if self.y < -0.001 else 0.5 if self.y > 0.001 else 1.0) if self.walking else 1.0
+        self.strafe[row.command] = row.pressed
+        if row.pressed:
+            self.y = 1.0 if self.y >= 0 else -1.0
+            self.angle = f * math.pi / 2 * (1.0 if left else -1.0)
+        else:
+            self.angle = f * math.pi / 2 * (-1.0 if left else 1.0) if self.strafe[other] else 0.0
+            if not self.strafe[other] and not self.walking:
+                self.y = 0.0
+
+    def heading(self) -> float:
+        """Where the unit goes, in degrees clockwise from the heading: +z turns left."""
+        return round(-math.degrees(self.angle + (0.0 if self.y > 0 else math.pi))) % 360
+
+
+def check_strafe(check, game: Path) -> None:
+    """Backing up mirrors the strafe angle, and a walk key under a strafe works it out again."""
+    world = game / "World3D.dll"
+    if not world.exists():
+        return
+    at = _image_at(world.read_bytes())
+
+    def f32(va: int) -> float:
+        return struct.unpack("<f", at(va, 4))[0]
+
+    consts = {0x10020B60: math.pi / 2, 0x10020B58: -math.pi / 2, 0x10020B5C: -0.001,
+              0x10020250: 0.001, 0x10020B68: 1e-4}
+    half_back = bytes.fromhex("c7442464000000bf")              # mov [esp+0x64], -0.5
+    sites = {0x10010302: half_back, 0x100103B8: half_back, 0x100104BF: half_back,
+             0x10010215: bytes.fromhex("8b46108d542430c7442434000080bf"),   # y = -1
+             0x10010250: bytes.fromhex("8b46108d542430c74424340000803f"),   # y = +1
+             0x100109DA: bytes.fromhex("83b88000000002740a85d275068990")}   # +0x80 = ramp time
+    table = [struct.unpack("<I", at(0x100109F8 + 4 * (code - 1), 4))[0] for code in (9, 10)]
+    code_ok = (all(abs(f32(va) - v) < 1e-6 for va, v in consts.items())
+               and all(at(va, len(b)) == b for va, b in sites.items())
+               and table == [0x10010350, 0x10010457])
+
+    hero = controls.table(game / "hero.tbl")
+
+    def play(*events: tuple[str, bool]) -> _Strafer:
+        s = _Strafer()
+        for key, pressed in events:
+            for r in hero:
+                if r.modifier == "SCAN_NULL" and r.key == key and r.pressed == pressed:
+                    s.row(r)
+        return s
+
+    back_left = play(("SCAN_S", True), ("SCAN_A", True))
+    back_right = play(("SCAN_S", True), ("SCAN_D", True))
+    left_then_back = play(("SCAN_A", True), ("SCAN_S", True))
+    forward_left = play(("SCAN_W", True), ("SCAN_A", True))
+    w_up = play(("SCAN_W", True), ("SCAN_A", True), ("SCAN_W", False))
+    s_up = play(("SCAN_S", True), ("SCAN_A", True), ("SCAN_S", False))
+    d_then_w = play(("SCAN_D", True), ("SCAN_W", True))
+    walked = {"S A": back_left.heading(), "S D": back_right.heading(),
+              "A S": left_then_back.heading(), "W A": forward_left.heading(),
+              "W A, W up": w_up.heading(), "S A, S up": s_up.heading(), "D W": d_then_w.heading()}
+    check("World3D.dll: backing up mirrors the strafe angle, so S+A goes 225 and S+D 135 degrees",
+          code_ok and walked == {"S A": 225, "S D": 135, "A S": 225, "W A": 315, "W A, W up": 270,
+                                 "S A, S up": 270, "D W": 45}
+          and (back_left.y, round(back_left.angle, 4)) == (-1.0, round(-math.pi / 4, 4))
+          and d_then_w.angle == -math.pi / 4,
+          f"degrees clockwise from the heading by what went down: {walked}; S+A leaves y "
+          f"{back_left.y:g} and the angle {back_left.angle:.4f}.  pi/2 {f32(0x10020B60):.6f}, "
+          f"still band {f32(0x10020B5C):g}..{f32(0x10020250):g}, walking from "
+          f"{f32(0x10020B68):g}; handlers 9, 10 at {[hex(t) for t in table]}")
+
+
 def check_turret_channels(check, game: Path) -> None:
     """A turret aims by two channels, and the hero's eye rides its sight."""
     turrets = NResArchive.open(game / "turrets.rlb")
@@ -20088,7 +20184,8 @@ def run(game: Path) -> int:
         check_builder, check_placement,
         check_designs,
         check_units, check_loading, check_search, check_construction,
-        check_controls, check_player_input, check_focus, check_selection, check_turret_channels,
+        check_controls, check_player_input, check_strafe, check_focus, check_selection,
+        check_turret_channels,
         check_behaviour, check_research, check_descriptions, check_saves,
         check_vocabulary, check_resources, check_briefing, check_briefing_screen,
         check_progression, check_mission_02, check_mission_03, check_mission_04,
