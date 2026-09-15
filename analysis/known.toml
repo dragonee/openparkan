@@ -16809,14 +16809,6 @@ read = true
 
 [[entry]]
 module = "Behavior.dll"
-at = "0x10031bd0"
-kind = "function"
-name = "stay ground start: fire control, +0x21c = 0, clear the walker"
-doc = "docs/31-packages.md"
-read = true
-
-[[entry]]
-module = "Behavior.dll"
 at = "0x1002adab"
 kind = "site"
 name = "follow radius: the parameter only when 20 < p < 30, else 20"
@@ -25132,3 +25124,379 @@ kind = "datum"
 name = "float 0.05, the resource rows' step"
 read = true
 doc = "docs/23-economy.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10031bd0"
+kind = "function"
+name = "shutdown task takt (vtable 0x10059eec slot 7; once taken for stay ground's start): fire mode 0, device stub, +0x21c = 0, clear the walker"
+doc = "docs/31-packages.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10035a70"
+kind = "function"
+name = "patrol task slot 0: the order, 4"
+read = true
+doc = "docs/31-packages.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1002d250"
+kind = "function"
+name = "patrol interrupt priority: 1 for reasons 0-2 and 5, with a limit -- place circle radius + 60, building + 80, unit + 60 (reasons 2, 5: radius x 1.3 + 78); 3 and 4 the base's"
+read = true
+doc = "docs/31-packages.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1002d374"
+kind = "table"
+name = "patrol priority's jump table over reasons 0-5"
+read = true
+doc = "docs/31-packages.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1002d390"
+kind = "function"
+name = "patrol contact score: the default formula, but 0 unless the contact is strictly inside the radius of the place, the building or the unit (x 0.7) across the ground"
+read = true
+doc = "docs/31-packages.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1002d4a1"
+kind = "site"
+name = "patrol score: the centre's distance against the radius +0x70"
+read = true
+doc = "docs/31-packages.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1002de5f"
+kind = "site"
+name = "patrol draw, place: 15 + 16-bit random % 5 points within the radius square"
+read = true
+doc = "docs/31-packages.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1002e246"
+kind = "site"
+name = "patrol draw, unit: 3 + random % 5 points about the guarded unit"
+read = true
+doc = "docs/31-packages.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1002df68"
+kind = "site"
+name = "patrol draw, place: 350 tries a point, the last kept"
+read = true
+doc = "docs/31-packages.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1002e354"
+kind = "site"
+name = "patrol draw, unit: 350 tries a point, the last kept"
+read = true
+doc = "docs/31-packages.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1002e105"
+kind = "site"
+name = "patrol draw, building: each contour vertex pushed out from the centroid by Patrol_Building_Radius"
+read = true
+doc = "docs/31-packages.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1002dcdf"
+kind = "site"
+name = "patrol takt: the next point, (index + 1) % count, handed to MWalker::SetTarget"
+read = true
+doc = "docs/31-packages.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x100014c0"
+kind = "function"
+name = "task slot 4: copy the 28-byte limit (seconds, circle, unit and radius) to +0x2c and log it"
+read = true
+doc = "docs/31-packages.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10001660"
+kind = "function"
+name = "task slot 9: 0 when the limit expires -- 'Time Limit expired', 'Place Limit expired' (3-D), 'Unit Limit expired'"
+read = true
+doc = "docs/31-packages.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1000193e"
+kind = "site"
+name = "base priority: an engagement's limit, 1000 about the unit's position"
+read = true
+doc = "docs/31-packages.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10034413"
+kind = "site"
+name = "CreateTaskFromOrder: slot 3 with packet +0xc and the parameter"
+read = true
+doc = "docs/31-packages.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10034466"
+kind = "site"
+name = "CreateTaskFromOrder: slot 4 with packet +0x110, the limit; the floats at +0x12c-+0x138 are not passed"
+read = true
+doc = "docs/31-packages.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10031b10"
+kind = "function"
+name = "shutdown interrupt priority: 0 for every reason"
+read = true
+doc = "docs/31-packages.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10031b30"
+kind = "function"
+name = "shutdown start: fight module reset, fire mode 0, +0x21c = 0, clear the walker"
+read = true
+doc = "docs/31-packages.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10031ca0"
+kind = "function"
+name = "stay ground start: fire mode 2, clear the walker"
+read = true
+doc = "docs/31-packages.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10031d00"
+kind = "function"
+name = "stay ground takt: fire mode 2, clear the walker"
+read = true
+doc = "docs/31-packages.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10031d90"
+kind = "function"
+name = "Task_Stop interrupt priority: the base's (0x100018a0)"
+read = true
+doc = "docs/31-packages.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1000fa00"
+kind = "site"
+name = "the task stack's embedded idle task takes the Task_Stop vtable"
+read = true
+doc = "docs/31-packages.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10003c95"
+kind = "site"
+name = "MBehaviour constructor: flags |= 0xff8 -- unit takt 0x10, 0x20 and fight module 0x40 on"
+read = true
+doc = "docs/31-packages.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10005d59"
+kind = "site"
+name = "behaviour attach: no interface 0x201 (no machine at +0x70) clears flags 0x10 and 0x20"
+read = true
+doc = "docs/31-packages.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10005070"
+kind = "site"
+name = "MBehaviour takt: clan type 3 returns before the radar module, unit or building takt and fight module"
+read = true
+doc = "docs/31-packages.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x100150b0"
+kind = "function"
+name = "the behaviour's own clan through [+0x20] +0x74 slot 11"
+read = true
+doc = "docs/31-packages.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1002ab02"
+kind = "site"
+name = "a factory's new unit: the building object's slot 47 with its logic id (not followed)"
+read = true
+doc = "docs/31-packages.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10066bc0"
+kind = "datum"
+name = "DeterminMode, from Behavior.ini (0 as shipped)"
+read = true
+doc = "docs/31-packages.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10066bfc"
+kind = "datum"
+name = "a 16-bit random pair: x = 2x xor y, then y = (y >> 1) xor x"
+read = true
+doc = "docs/31-packages.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x100595bc"
+kind = "datum"
+name = "100: a patrol point's margin inside the map box"
+read = true
+doc = "docs/31-packages.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10059a68"
+kind = "datum"
+name = "60: a place or unit patrol's limit beyond its radius"
+read = true
+doc = "docs/31-packages.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10059a8c"
+kind = "datum"
+name = "80: a building patrol's limit beyond its radius"
+read = true
+doc = "docs/31-packages.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10059a94"
+kind = "datum"
+name = "78: a unit patrol's call-for-help limit, radius x 1.3 + 78"
+read = true
+doc = "docs/31-packages.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10059a98"
+kind = "datum"
+name = "1.3: a unit patrol's call-for-help limit factor"
+read = true
+doc = "docs/31-packages.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10059968"
+kind = "datum"
+name = "0.7: a unit patrol's score scales the distance to the guarded unit"
+read = true
+doc = "docs/31-packages.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10059150"
+kind = "datum"
+name = "500: the default score's reach"
+read = true
+doc = "docs/31-packages.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10059170"
+kind = "datum"
+name = "0.001: milliseconds to seconds"
+read = true
+doc = "docs/31-packages.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10059780"
+kind = "datum"
+name = "0.3: the least priority an engagement is let through at"
+read = true
+doc = "docs/31-packages.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1005d22c"
+kind = "datum"
+name = "' Time Limit expired'"
+read = true
+doc = "docs/31-packages.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1005d248"
+kind = "datum"
+name = "' Place Limit expired'"
+read = true
+doc = "docs/31-packages.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1005d264"
+kind = "datum"
+name = "' Unit Limit expired'"
+read = true
+doc = "docs/31-packages.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1006268c"
+kind = "datum"
+name = "']: Task Ended', the stack takt's log"
+read = true
+doc = "docs/31-packages.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x100083a6"
+kind = "site"
+name = "script fn15: success, survive, time, independence into packet +0x12c, +0x130, +0x134, +0x138"
+read = true
+doc = "docs/31-packages.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x10004330"
+kind = "function"
+name = "order packet constructor: order, parameter 0, target 0x204, no limit, floats 0 0 0 1.0"
+read = true
+doc = "docs/31-packages.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x100043a0"
+kind = "function"
+name = "order packet limit constructor: no time, no circle, unit -1"
+read = true
+doc = "docs/31-packages.md"
+
+[[entry]]
+module = "ArealMap.dll"
+at = "0x10001ab0"
+kind = "function"
+name = "clan ArealMap slot 9: a contact's 40-byte record by logic id; units only"
+read = true
+doc = "docs/31-packages.md"

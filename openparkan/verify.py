@@ -10309,6 +10309,276 @@ def check_ai_fight(check, game: Path) -> None:
           f"Search and capture skips bridges (0x10030859), so it roams and a Refit fails")
 
 
+#: The patrol block's constants, by offset: name and compiled default
+#: (``Behavior.dll:0x10016250``, bound by name at ``0x10016480``).
+PATROL_CONSTANTS = {
+    0x00: ("Patrol_Place_SpeedPercent", 0.8), 0x04: ("Patrol_Place_Radius", 60.0),
+    0x08: ("Patrol_Place_ChangeTrajectoryMinDelay", 20.0),
+    0x0C: ("Patrol_Place_ChangeTrajectoryRandomDelay", 10.0),
+    0x10: ("Patrol_Building_SpeedPercent", 80.0), 0x14: ("Patrol_Building_Radius", 30.0),
+    0x18: ("Patrol_Building_ChangeTrajectoryMinDelay", 60.0),
+    0x1C: ("Patrol_Building_ChangeTrajectoryRandomDelay", 60.0),
+    0x20: ("Patrol_Unit_SpeedPercent", 1.0), 0x24: ("Patrol_Unit_Radius", 60.0),
+    0x28: ("Patrol_Unit_ChangeTrajectoryMinDelay", 5.0),
+    0x2C: ("Patrol_Unit_ChangeTrajectoryRandomDelay", 10.0),
+    0x30: ("Patrol_Attack_Range", 400.0),
+}
+#: Mission 03's own directory, and the places its player script sends the enemy to.
+PATROL_MISSION_03 = "MISSIONS/CAMPAIGN/CAMPAIGN.00/Mission.03"
+PATROL_ORDERS_03 = [(3, 4, 0, 0x202, 1124, 783), (4, 4, 0, 0x202, 606, 993),
+                    (5, 4, 0, 0x202, 1124, 783)]
+
+
+def _defaults_block(body: bytes, base: int) -> dict[int, float]:
+    """The float fields ``0x10016250``'s straight run of moves writes into its block:
+    ``mov r32, imm32`` loads, ``mov [eax+d], imm32`` and ``mov [eax+d], r32``."""
+    regs: dict[int, int] = {}
+    out: dict[int, float] = {}
+    i = 0
+    while i < len(body):
+        op = body[i]
+        if op in (0x53, 0x55, 0x56, 0x57):                   # push
+            i += 1
+        elif op in (0x8B, 0x33) and i + 1 < len(body):       # mov eax, ecx / xor r, r
+            if op == 0x33:
+                regs[body[i + 1] & 7] = 0
+            i += 2
+        elif 0xB8 <= op <= 0xBF:                             # mov r32, imm32
+            regs[op - 0xB8] = struct.unpack_from("<I", body, i + 1)[0]
+            i += 5
+        elif op in (0xC7, 0x89) and i + 10 <= len(body):
+            modrm = body[i + 1]
+            mod, reg, rm = modrm >> 6, (modrm >> 3) & 7, modrm & 7
+            if rm != 0 or mod == 3:
+                break
+            size = {0: 0, 1: 1, 2: 4}[mod]
+            disp = (struct.unpack_from("<i", body, i + 2)[0] if size == 4
+                    else struct.unpack_from("<b", body, i + 2)[0] if size == 1 else 0)
+            at = i + 2 + size
+            if op == 0xC7:
+                word = struct.unpack_from("<I", body, at)[0]
+                i = at + 4
+            else:
+                word = regs.get(reg, 0)
+                i = at
+            out[disp - base] = struct.unpack("<f", struct.pack("<I", word))[0]
+        else:
+            break
+    return out
+
+
+def check_patrol(check, game: Path) -> None:
+    """The patrol task tick by tick, who runs a behaviour, and Mission 03's last battle."""
+    beh = (game / "Behavior.dll").read_bytes()
+    at = _image_at(beh)
+
+    vtable = struct.unpack("<16I", at(0x10059D38, 64))
+    check("Behavior.dll: the patrol task's slots -- order 4, SetTarget, start, takt, "
+          "priority, score",
+          at(vtable[0], 6) == bytes.fromhex("b804000000c3")
+          and (vtable[3], vtable[6], vtable[7], vtable[12], vtable[13])
+          == (0x1002D520, 0x1002D7C0, 0x1002D900, 0x1002D250, 0x1002D390),
+          f"vtable 0x10059d38: slot 0 {vtable[0]:#x} returns 4; 3 {vtable[3]:#x}, "
+          f"6 {vtable[6]:#x}, 7 {vtable[7]:#x}, 12 {vtable[12]:#x}, 13 {vtable[13]:#x}")
+
+    names = {}
+    binder = at(0x10016480, 0x120)
+    for off, (name, _) in PATROL_CONSTANTS.items():
+        pos = beh.find(name.encode() + b"\0")
+        where = next((va for va in range(0x1005F100, 0x1005F400, 4)
+                      if at(va, len(name) + 1) == name.encode() + b"\0"), None)
+        push = b"\x68" + struct.pack("<I", where) if where else b"?"
+        lea = b"\x57" if off == 0 else b"\x8d\x47" + bytes([off])
+        found = binder.find(push)
+        # the address loads just before its name: push edi, or lea eax, [edi + off]
+        names[name] = pos >= 0 and found > 0 and lea in binder[max(0, found - 8):found]
+    block = _defaults_block(at(0x10016250, 0x130), 0)
+    defaults = {name: round(block.get(off, float("nan")), 4)
+                for off, (name, _) in PATROL_CONSTANTS.items()}
+    check("Behavior.dll: the patrol constants' offsets and compiled defaults",
+          all(names.values())
+          and all(defaults[n] == v for n, v in PATROL_CONSTANTS.values()),
+          ", ".join(f"+{off:#x} {n} {defaults[n]:g}" for off, (n, _) in
+                    PATROL_CONSTANTS.items())
+          + "; a place and a unit radius come from the order's parameter unless it is 0 or -1")
+
+    floats = {va: struct.unpack("<f", at(va, 4))[0]
+              for va in (0x100595BC, 0x10059A68, 0x10059A8C, 0x10059A94, 0x10059A98,
+                         0x10059968, 0x10059150, 0x10059170, 0x10059780, 0x1005914C)}
+    check("Behavior.dll: a patrol's points -- 15-19 about a place, 3-7 about a unit, "
+          "a building's contour pushed out 30",
+          at(0x1002DE5F, 14) == bytes.fromhex("b90500000099f7f98bce83c20f52")
+          and at(0x1002E23F, 11) == bytes.fromhex("8bc299f7f98bce83c20352")
+          and at(0x1002DF68, 12) == bytes.fromhex("81fd5e0100000f8c16ffffff")
+          and at(0x1002E354, 5) == bytes.fromhex("3d5e010000")
+          and at(0x1002E105, 3) == bytes.fromhex("d94014")
+          and floats[0x100595BC] == 100.0
+          and at(0x1002DCDF, 24) == bytes.fromhex(
+              "8b83b80000008b8bb0000000408974243899f7bba8000000")
+          and at(0x1002D7CB, 5) == bytes.fromhex("a1c06b0610"),
+          f"15 + rand16 % 5 points (0x1002de5f) and 3 + % 5 (0x1002e246), 350 tries each "
+          f"(0x1002df68, 0x1002e354) inside the map less {floats[0x100595BC]:g}; the "
+          f"contour's vertices out by Patrol_Building_Radius (0x1002e105); the takt walks "
+          f"to (index + 1) % count (0x1002dcdf); DeterminMode (0x10066bc0) fixes the timers")
+
+    table = struct.unpack("<6I", at(0x1002D374, 24))
+    check("Behavior.dll: what a patrol lets through, and the leash it gives the attack",
+          table == (0x1002D268, 0x1002D268, 0x1002D2D5, 0x1002D369, 0x1002D369, 0x1002D2D5)
+          and at(0x1002D369, 11) == bytes.fromhex("5f5e89542404e92c45fdff")
+          and (floats[0x10059A68], floats[0x10059A8C], floats[0x10059A94]) == (60.0, 80.0, 78.0)
+          and round(floats[0x10059A98], 4) == 1.3 and floats[0x1005914C] == 1.0
+          and at(0x1002D4A1, 3) == bytes.fromhex("d85670")
+          and round(floats[0x10059968], 4) == 0.7
+          and at(0x10001049, 6) == bytes.fromhex("d81550910510") and floats[0x10059150] == 500.0,
+          f"reasons 0-5 -> {', '.join(hex(t) for t in table)}: priority 1 with a circle of "
+          f"radius + {floats[0x10059A68]:g} about a place, + {floats[0x10059A8C]:g} about a "
+          f"building, radius x {floats[0x10059A98]:.1f} + {floats[0x10059A94]:g} about a unit "
+          f"for 2 and 5; the score counts a contact within the radius of the centre "
+          f"(a unit's distance x {floats[0x10059968]:.1f}), the default within "
+          f"{floats[0x10059150]:g} of the unit")
+
+    check("Behavior.dll: a task's limits -- time, place, unit -- end it from the stack's takt",
+          at(0x100014CD, 9) == bytes.fromhex("b9070000008bfdf3a5")
+          and at(0x10001696, 10) == bytes.fromhex("df6c240cd80d70910510")
+          and round(floats[0x10059170], 4) == 0.001
+          and at(0x1005D22C, 20) == b" Time Limit expired\0"
+          and at(0x1005D248, 21) == b" Place Limit expired\0"
+          and at(0x1005D264, 20) == b" Unit Limit expired\0"
+          and at(0x10034A53, 23) == bytes.fromhex(
+              "538b01ff501c85c074248b4e3c538b11ff522485c07417")
+          and at(0x1006268C, 12) == b"]: Task Ended"[:12]
+          and at(0x10034466, 12) == bytes.fromhex("81c510010000558bcfff5210")
+          and at(0x10017A83, 6) == bytes.fromhex("d81d80970510")
+          and round(floats[0x10059780], 4) == 0.3
+          and at(0x10001938, 16) == bytes.fromhex("8972048b4008c7411000007a44894208"),
+          "slot 4 copies the order's 7-word limit to +0x2c (0x100014cd); slot 9 ends a task "
+          "past its seconds, outside its circle or away from its unit; the stack runs the "
+          "takt, then slot 9, and pops on either ('Task Ended'); CreateTaskFromOrder hands "
+          "slot 4 packet +0x110 (0x10034466); an engagement needs priority >= 0.3; the base "
+          "priority leashes an attack to 1000 about where the unit stood (0x1000193e)")
+
+    stop = struct.unpack("<16I", at(0x100596AC, 64))
+    halt = struct.unpack("<16I", at(0x10059EEC, 64))
+    stay = struct.unpack("<16I", at(0x10059EB0, 64))
+    check("Behavior.dll: stay ground's start and takt, and shutdown's takt at 0x10031bd0",
+          (stay[6], stay[7], stay[12]) == (0x10031CA0, 0x10031D00, 0x10031C80)
+          and (halt[6], halt[7]) == (0x10031B30, 0x10031BD0)
+          and at(halt[0], 6) == bytes.fromhex("b813000000c3")
+          and at(0x10031CAE, 8) == bytes.fromhex("c744240802000000")
+          and at(0x10031BDE, 8) == bytes.fromhex("c744240800000000"),
+          f"stay ground (0x10059eb0) starts at {stay[6]:#x} and ticks at {stay[7]:#x}, both "
+          f"asking fire mode 2; shutdown (0x10059eec, order {at(halt[0] + 1, 1)[0]}) starts at "
+          f"{halt[6]:#x} and ticks at {halt[7]:#x}, asking mode 0")
+    check("Behavior.dll: who thinks -- a neutral clan's objects stop at the place tick; "
+          "every behaviour starts with its unit and fight flags on",
+          at(0x10005063, 22) == bytes.fromhex("e848000100508b464850ff552883f8030f8488000000")
+          and at(0x10003C95, 6) == bytes.fromhex("81c9f80f0000")
+          and at(0x10005D44, 29) == bytes.fromhex(
+              "ba010200008b01ff1085c0751089078b86040a000024cf8986040a0000")
+          and at(0x1000FA00, 6) == bytes.fromhex("c700ac960510")
+          and stop[12] == 0x10031D90 and at(0x10031D90, 5) == bytes.fromhex("e90bfbfcff")
+          and stop[13] == 0x10001010
+          and halt[12] == 0x10031B10 and at(0x10031B10, 7) == bytes.fromhex("d90540910510c2")
+          and at(0x10031B44, 5) == bytes.fromhex("e8e72afeff"),
+          "clan type 3 returns before the radar module, the unit or building takt and the "
+          "fight module (0x10005070); the constructor ORs 0xff8 into the flags (0x10003c95), "
+          "and an object with no interface 0x201, a building, loses 0x10 and 0x20 (0x10005d59); "
+          "an empty stack's task is Task_Stop (0x1000fa00), priority the base's, score the "
+          "default's; shutdown answers 0 to every reason and resets the fight module")
+
+    ai = (game / "ai.dll").read_bytes()
+    ai_at = _image_at(ai)
+    check("ai.dll: function 15's four floats go to packet +0x12c..+0x138, which no task is given",
+          ai_at(0x100083A6, 36) == bytes.fromhex(
+              "8b85a0feffff8945ec8b8d9cfeffff894df08b9598feffff8955f48b8594feffff8945f8")
+          and ai_at(0x10004351, 28) == bytes.fromhex(
+              "89be2c01000089be3001000089be34010000c786380100000000803f")
+          and ai_at(0x100043A9, 7) == bytes.fromhex("c74014ffffffff"),
+          "success, survive, time and independence into +0x12c, +0x130, +0x134, +0x138 "
+          "(0x100083a6); the packet's limit starts at no time, no circle and unit -1 "
+          "(0x100043a0), so a script's order carries no leash")
+
+    scripts_dir = game / "MISSIONS" / "SCRIPTS"
+    d03 = game / PATROL_MISSION_03
+    if not (d03 / "data.tma").exists() or not (scripts_dir / behaviour.VARSET).exists():
+        return
+    names_table = behaviour.variables(game)
+    by_name = {v.name: v for v in names_table}
+    m = mission.load(d03 / "data.tma")
+    stems = [c.ai_script.replace("\\", "/").rsplit("/", 1)[-1] for c in m.clans]
+
+    def orders(stem: str) -> list[tuple]:
+        script = behaviour.read(scripts_dir / f"{stem}.scr")
+        fml = behaviour.formulas(scripts_dir / f"{stem}.scr")
+        found = []
+        for h in script.handlers:
+            for i, n in enumerate(h.nodes):
+                if n.calls and n.function == 15:
+                    vals = [_handler_value(names_table, h.nodes, fml, i, o)
+                            for o in n.operands]
+                    place = tuple(vals[9:11]) if len(vals) > 10 else ()
+                    found.append((h.name, vals[0], vals[1], vals[3], vals[8]) + place)
+        return found
+
+    enemy = orders(stems[1])
+    player = orders(stems[0])
+    floats4 = [by_name[n].default for n in ("fSuccess", "fSurvive", "fTime", "fIndependence")]
+    shutdown = int(by_name["ORDER_ROBOT_SHUTDOWN"].default, 0)
+    patrol = int(by_name["ORDER_ROBOT_PATROL"].default, 0)
+    check("Mission 03: the enemy starts shut down, and the player's script sends it on patrol",
+          stems == ["tut3_pl2", "tut3_en", "tut3_nt"]
+          and [(h, i, o) for h, i, o, *_ in enemy] == [("Init", 3, shutdown), ("Init", 4, shutdown),
+                                                      ("Init", 5, shutdown)]
+          and [(i, o, p, k, x, y) for _, i, o, p, k, x, y in player] == PATROL_ORDERS_03
+          and patrol == 4 and {float(f) for f in floats4} == {0.5},
+          f"{stems[1]} Init: {[(i, o) for _, i, o, *_ in enemy]} (order {shutdown}); "
+          f"{stems[0]} Mission: (id, order, parameter, target kind, x, y) "
+          f"{[(i, o, p, hex(k), x, y) for _, i, o, p, k, x, y in player]}; the four floats "
+          f"default {floats4}")
+
+    clans = [(c.name, c.type) for c in m.clans]
+    shop = units.Workshop(game)
+    enemies = {}
+    for o in m.objects:
+        if o.logical_id in (3, 4, 5):
+            sheet = shop.describe(game / o.path.replace("\\", "/"))
+            radar = next((p for p in sheet.parts if p.family == "radar"), None)
+            enemies[o.logical_id] = (
+                m.clans[o.clan_index].name, sheet.chassis.part, sheet.chassis.locomotion,
+                round(sheet.chassis.top_speed), radar.figures[0][1] if radar else None,
+                tuple(sorted((w.code, round(w.gun.round.range)) for w in sheet.weapons)))
+    land = landmesh.load(game / "DATA" / "MAPS" / m.map_name / "Land.msh")
+    heights = [round(land.height_at(x, y) or 0.0, 1) for x, y in ((1124, 783), (606, 993))]
+    check("Mission 03: three enemy S-2f flyers, and the ground under their patrol places",
+          clans == [("Plr", 1), ("Enm", 2), ("Ntrl", 3)]
+          and {k: v[:5] for k, v in enemies.items()}
+          == {3: ("Enm", "R_L_02", "flying", 160, "300 m"),
+              4: ("Enm", "R_L_02", "flying", 160, "300 m"),
+              5: ("Enm", "R_L_02", "flying", 160, "300 m")}
+          and [v[5] for _, v in sorted(enemies.items())]
+          == [(("S75Can", 350),), (("SRLs", 1000),), (("SFT", 140), ("SFT", 140))]
+          and len(heights) == 2 and all(h > 80 for h in heights),
+          f"clans {clans}; ids 3-5 {enemies}; ground {heights} m under (1124, 783) and "
+          f"(606, 993), where a script's place stands at z 0, so an engagement's circle of "
+          f"60 + 60 about it reaches no farther than sqrt(120^2 - h^2) across the ground")
+
+    bunker = shop.describe(game / "UNITS" / "BUILDS" / "BUNKER" / "sbunk01.dat")
+    radar_values = None
+    for c in objects.load_unit(game / "UNITS" / "BUILDS" / "BUNKER" / "sbunk01.dat").components:
+        if c.ref.member.lower() == "e_gun_fs_12":
+            parsed = shop.armoury.controller(c.ref.member.lower())
+            radar_values = next((p.values[control.RADAR_RANGE] for p in parsed.components
+                                 if p.type_id == control.RADAR_TYPE), None) if parsed else None
+    check("Mission 03: the Small Bunker's guns and radar",
+          hex(bunker.type) == "0x80010000"
+          and sorted((w.code, round(w.gun.round.range)) for w in bunker.weapons)
+          == [("HFTB", 250), ("HFTB", 250)]
+          and radar_values == 500.0,
+          f"{bunker.label}: {[(w.code, w.gun.round.range) for w in bunker.weapons]}, and "
+          f"e_gun_fs_12 is a radar of range {radar_values}; it thinks only once its clan "
+          f"is not neutral")
+
+
 def _turret_role(text: tuple[str, ...]) -> int:
     first = text[0].lower() if text else ""
     return {"warbot": objects.TYPE_WARRIOR, "cargobot": objects.TYPE_TRANSPORT,
@@ -17434,7 +17704,8 @@ def run(game: Path) -> int:
         check_chassis, check_weapons,
         check_firing,
         check_moving_parts,
-        check_targeting, check_target_marks, check_ai_fight, check_turrets, check_packages,
+        check_targeting, check_target_marks, check_ai_fight, check_patrol, check_turrets,
+        check_packages,
         check_target_panel,
         check_wingman,
         check_boarding,

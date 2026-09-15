@@ -267,8 +267,9 @@ readers were not traced, that is marked.
   the behaviour pull it off station. That fits the tip's "fixed firing point":
   **the guns still aim and fire through the unit's own fire control**, which the
   task sets to pick its own targets ([The fire control](#the-fire-control--read)).
-  **It moves nothing.** Its start and every takt clear the walker
-  (`0x10031bd0`, `0x10031ca0` → `0x1003c540`), emptying its three queues and
+  **It moves nothing.** Its start and every takt ask for fire mode 2 and clear
+  the walker (`0x10031ca0`, `0x10031d00` → `0x1003c540`; `0x10031bd0`, once
+  quoted here, is the shutdown task's takt), emptying its three queues and
   giving the wizard no new points
   ([24-motion.md](24-motion.md#how-the-ai-drives-a-machine--read-and-measured)).
 - **Route — go.** It walks to the place at `Go_SpeedPercent` 1.0 of the unit's
@@ -343,12 +344,13 @@ readers were not traced, that is marked.
   and the unit standing in the building, **the unit takt gives it the escape**
   (below).
 - **Guard — patrol.** Pick a unit, a building or a place (`0x1002d520`). The
-  patrol task moves to a new random point around it on a timer (`0x1002dd90`),
-  and only while `Behavior.ini`'s `DeterminMode` is 0 (`0x1002d900`). The
-  compiled defaults by target, read where `SetTarget` (`0x1002d520`) and the
-  start (`0x1002d7c0`) take them:
+  patrol task walks a loop of random points around it and draws a fresh loop
+  on a timer (`0x1002dd90`), the timer only while `Behavior.ini`'s
+  `DeterminMode` is 0 (`0x1002d900`); [The patrol, tick by tick](#the-patrol-tick-by-tick--read)
+  has it whole. The compiled defaults by target, read where `SetTarget`
+  (`0x1002d520`) and the start (`0x1002d7c0`) take them:
 
-  | guarding | radius | new point every | speed |
+  | guarding | radius | new loop every | speed |
   |---|---:|---|---:|
   | a unit | 60 | 5 + up to 10 s | 1.0 |
   | a building | 30 | 60 + up to 60 s | 80 |
@@ -743,7 +745,11 @@ named, so reasons 2 and 4 are tested by the priorities but never asked.
   attacking, but not while standing by, moving on a route, capturing, searching
   for minerals, building or transporting.** Engaging here means taking up an
   attack task. Picking a target to shoot at while the task goes on is the fire
-  control's, below.
+  control's, below. Which contacts score, and how far the attack may take the
+  unit, are the current task's to say:
+  [The patrol, tick by tick](#the-patrol-tick-by-tick--read) reads a patrol's,
+  and [A task's limits](#a-tasks-limits--read) the circle a task hands its
+  attack.
 - **Refitting.** A unit whose life or charge is below half, or whose guns are
   mostly dry, sends itself to a dock as a reason-3 task
   ([27-ownership.md](27-ownership.md)). The default priority lets reason 3
@@ -752,7 +758,8 @@ named, so reasons 2 and 4 are tested by the priorities but never asked.
   mine (`0x100088f0`). A unit placed inside a building gets a patrol inside it
   ("Give default patrol inside building order", `0x1000ac4c`). **A unit left
   idle or stopped on a building escapes** from it ([The escape](#the-escape--read)).
-  For other units no default order was found.
+  For other units no default order was found: an empty stack answers with an
+  embedded stop task ([Which objects run a behaviour](#which-objects-run-a-behaviour--read)).
 
 ### Migrate: an animal's pasture — *read*, and *measured*
 
@@ -938,6 +945,205 @@ short of its target and up to 80 aside, at 70–100% speed, picking a fresh
 point every 8–16 s. The fire control shoots whenever the aim settles
 ([29-weapons.md](29-weapons.md#how-the-ai-fires--read)).
 
+## The patrol, tick by tick — *read*
+
+Order 4's task (vtable `0x10059d38`; slot 0 answers 4) guards a place, a
+building or a unit. Mission scripts give it more than any other order
+([How the missions use them](#how-the-missions-use-them--measured)), and the
+HQ menu's Guard gives it too. Its constants are `Behavior.dll`'s compiled
+defaults (`0x10016250`), bound by name into a block at behaviour `+0x694`
+(`0x10016480`) — *measured*, re-read by `openparkan verify`:
+
+| block | constant | default |
+|---|---|---:|
+| `+0x00` | `Patrol_Place_SpeedPercent` | 0.8 |
+| `+0x04` | `Patrol_Place_Radius` | 60 |
+| `+0x08`, `+0x0c` | `Patrol_Place_ChangeTrajectoryMinDelay`, `…RandomDelay` | 20, 10 s |
+| `+0x10` | `Patrol_Building_SpeedPercent` | 80 |
+| `+0x14` | `Patrol_Building_Radius` | 30 |
+| `+0x18`, `+0x1c` | `Patrol_Building_ChangeTrajectoryMinDelay`, `…RandomDelay` | 60, 60 s |
+| `+0x20` | `Patrol_Unit_SpeedPercent` | 1.0 |
+| `+0x24` | `Patrol_Unit_Radius` | 60 |
+| `+0x28`, `+0x2c` | `Patrol_Unit_ChangeTrajectoryMinDelay`, `…RandomDelay` | 5, 10 s |
+| `+0x30` | `Patrol_Attack_Range` | 400, never read |
+
+### Setting the target (slot 3, `0x1002d520`)
+
+- **A place** (`TARGET_BY_PLACE`, `0x202`) sets the place flag `+0x64` and
+  copies the place, x, y and z, to `+0x88`. The radius (`+0x68`, and the same
+  value at `+0x70`) is `Patrol_Place_Radius`, **unless the order's parameter is
+  neither 0 nor −1**, when it is the parameter. The speed figure `+0x6c` is
+  `Patrol_Place_SpeedPercent`.
+- **A building** (a logic id with bit 31) sets `+0x58` and keeps the id at
+  `+0x74`, with `Patrol_Building_SpeedPercent` and the same parameter rule for
+  the radius. When two of the unit's own behaviour fields, `+0x18c` and
+  `+0x140`, are both other than −1 (neither is named), it instead sets `+0x5c`
+  and a speed figure of 20. This page calls that the patrol inside a building,
+  a *guess* from what its takt does.
+- **A unit** (any other logic id) sets `+0x60`, keeps the id at `+0x94`, with
+  `Patrol_Unit_Radius` (or the parameter) and `Patrol_Unit_SpeedPercent`.
+- Any other target kind logs *"\*\*\* Task_Patrol has incorrect target"* and is
+  refused.
+
+### The loop of points (`0x1002dd90`)
+
+The start (slot 6, `0x1002d7c0`) arms three randomised timers, (fixed, random)
+seconds: `+0xbc` from the building delays, `+0xc4` from the unit delays and
+`+0xcc` from the place delays, or 20/0, 10/0 and 10/0 while `DeterminMode`
+(`0x10066bc0`, `Behavior.ini`, 0 as shipped) is set. It then draws the loop,
+and a draw that fails fails the start. Unless the patrol is inside a
+building, it walks to the loop's first point at the unit's speed (`+0x5fc`) ×
+the speed figure (`0x10001960`), and asks the fire control for mode 2, the
+nearest hostile contact ([The fire control](#the-fire-control--read)).
+
+The draw, by target, into a list of 12-byte points (`+0xa4`, index `+0xb8`
+set to 0):
+
+| target | how many points | where | timer restarted |
+|---|---|---|---|
+| a place | **15 + (16-bit random % 5)**, 15–19 (`0x1002de5f`) | the place ± radius on x and y, each `rand()`/32767 × 2 − 1 | `+0xcc` |
+| a unit | **3 + (random % 5)**, 3–7 (`0x1002e246`) | the unit's position ± radius | `+0xc4` |
+| a building | one per vertex of its contour (property `0x203`) | each vertex pushed out from the contour's centroid by `Patrol_Building_Radius`, 30 — the block's constant, not the order's radius (`0x1002e105`) | `+0xbc` |
+
+- **A place or unit point** is tried up to 350 times (`0x1002df68`,
+  `0x1002e354`). It must lie inside the map's box less 100 on every side
+  (`0x100595bc`), and, unless the chassis profile's `CanFly` is set, on an areal
+  the system areal map calls usable. The last try is kept even when none
+  passes, so these draws never fail.
+- **A unit patrol** fails, logging *"Unit has been destroyed... PatrolUnit
+  failed"*, when the areal map no longer holds the unit or it is not of the
+  patroller's own clan — **Guard works only on one's own clan's units**.
+- **A building patrol** fails when the building is gone (*"Building has been
+  destroyed... PatrolBuilding failed"*) or has no contour.
+- The 16-bit random is the pair of words at `0x10066bfc`: x ← (2x) xor y, then
+  y ← (y ≫ 1) xor x, and y is the result.
+
+### Each tick (slot 7, `0x1002d900`)
+
+1. **A small unit guarding another clan's building** captures it first
+   ([What each package does](#what-each-package-does--read)): queue the
+   capture, the escape and the patrol again, and end.
+2. **Inside a building** (`+0x5c`): ask for fire mode 2, clear the walker, and
+   stay.
+3. **The timer** of the target's kind (`+0xc4`, `+0xcc` or `+0xbc`), while
+   `DeterminMode` is 0: when it has run out, draw a new loop and walk to its
+   first point (a failed draw ends the task).
+4. **Otherwise, the next point**: a place or unit patrol moves on when the
+   walker is idle (`0x1003dd80`); a building patrol when the walker's
+   `0x1003ddc0` holds and `0x1003ddb0` is below 2. The index becomes
+   (index + 1) % count (`0x1002dcdf`), and `MWalker::SetTarget` is handed the
+   point at the unit's speed × the speed figure, with 0, −1 and 5.
+
+**It never ends on its own.** Only the capture branch, a failed draw, or an
+order that replaces it takes a patrol off the stack. The speed figures are held
+by the walker ([How a walk's speed is held](#how-a-walks-speed-is-held--read)):
+0.8 of top speed for a place, full speed for a unit, and full speed for a
+building's 80.
+
+### What it scores (slot 13, `0x1002d390`) and lets through (slot 12, `0x1002d250`)
+
+**The score.** For each hostile contact the engagement asks the patrol
+(`0x10017e70`). It scores 0 unless the contact lies **within the radius of the
+patrol's centre**, across the ground and strictly inside (`0x1002d4a1`). The
+centre is the place, the building's position, or the unit's position with the
+distance × 0.7 (`0x10059968`). Inside, the score is the default's formula:
+
+    (2 − (a + 1) ÷ (b + 1)) × (c × b + 10) ÷ (d + 10)
+
+where *d* is that distance and *a*, *b*, *c* are the clan areal map's record
+of the contact at `+0x20`, `+0x18` and `+0x1c` (slot 9, `ArealMap.dll:0x10001ab0`,
+not named). The default score (`0x10001010`), which most tasks keep, measures
+*d* from the unit itself and cuts off at 500. **So a patrolling unit takes up
+an engagement only against what comes inside its patrol ground**: a place
+patrol of radius 60 ignores a hostile 61 m from its place, however close to the
+unit on its way there. Its fire control still shoots at the nearest hostile
+within 500 all along.
+
+**The priority** is 1 for every reason but refit (3) and 4, which take the
+base's (`0x100018a0`). Beside it the patrol hands the new attack a **limit**
+(jump table `0x1002d374`):
+
+| patrol | reasons 0 (engage) and 1 (retaliate) | reasons 2 and 5 (call for help) |
+|---|---|---|
+| a place | a circle about the place, radius + 60 (`0x10059a68`) | the same |
+| a building | within radius + 80 of the building (`0x10059a8c`) | the same |
+| a unit | within radius + 60 of the unit | within radius × 1.3 + 78 of it (`0x10059a98`, `0x10059a94`) |
+| inside a building | none | none |
+
+### A task's limits — *read*
+
+Every task keeps a 28-byte **limit** at `+0x2c`, which slot 4 (`0x100014c0`)
+copies in: a time in seconds (`+0x2c`), a circle's centre and radius (`+0x30`,
+`+0x3c`), and a unit's logic id and a radius (`+0x40`, `+0x44`). Slot 9
+(`0x10001660`) tests it: past its seconds since the task's stamp `+0x48`
+(milliseconds × 0.001; who sets the stamp was not traced) it logs *"Time Limit
+expired"*; with the unit farther than
+the radius from the centre, **in three dimensions**, *"Place Limit expired"*;
+farther than `+0x44` from the named unit, *"Unit Limit expired"*. A zero time
+or radius, or the id −1, tests nothing.
+
+- **Who gives a limit.** `CreateTaskFromOrder` hands slot 4 the order packet's
+  `+0x110` (`0x10034466`), and an engagement hands it the current task's answer
+  merged with that task's own limit, keeping the tighter time, circle and unit
+  radius where both give one (`0x100179c0`). An order from a script carries none: `ai.dll`'s packet
+  (`0x10004330`, `0x100043a0`) starts with no time, no circle and unit −1.
+- **The base priority's limit** (`0x100018a0`), which `Task_Stop` answers with
+  (slot 12 `0x10031d90`), is 1000 about where the unit stands (`0x1000193e`).
+- **What ends a task.** The stack's takt (`0x10034a30`) runs the task's takt,
+  then slot 9; if either answers 0 it logs *"Task Ended"*, removes the task and
+  starts the next one (`0x10034930`). **An attack that strays out of its
+  patrol's circle is dropped, and the patrol beneath it starts again**, drawing
+  a fresh loop.
+
+### What a script's four floats do
+
+Function 15's `fSuccess`, `fSurvive`, `fTime` and `fIndependence` (all 0.5 in
+`varset.var`, *measured*) go into the packet at `+0x12c`, `+0x130`, `+0x134`
+and `+0x138` (`ai.dll:0x100083a6`). `CreateTaskFromOrder` gives a task the
+target (`+0xc`), the parameter, `+8` and the limit (`+0x110`) and nothing
+beyond (`0x10034413`–`0x1003446f`), so **no task is handed them**; no reader of
+them was found.
+
+## Which objects run a behaviour — *read*
+
+`MBehaviour::takt` (`0x10004c40`) runs for every object that has a behaviour,
+of every clan, in the same order:
+
+1. the default order and killed-flag bookkeeping, the live limits and the
+   building's place tick (`0x10018ac0`);
+2. **then it returns for a neutral clan** (type 3, `0x10005070`): a neutral
+   object runs no radar module, no unit or building takt and no fire control. A
+   neutral unit takes no order through its stack, and a neutral building's guns
+   never fire;
+3. the radar module (`0x100234e0`);
+4. a building's takt (`+0xe4`), or, with flag `0x10`, a unit's (`+0xe0`),
+   which runs the task stack and, every so often, the refit and engagement
+   checks;
+5. with flag `0x40`, unless the current task is order 18's construction sphere,
+   the fire control (`0x10023ff0`).
+
+**Every behaviour starts with flags `0x10`, `0x20` and `0x40` on**: the
+constructor ORs `0xff8` into its flags (`0x10003c95`). An object that answers
+no interface `0x201`, its machine at `+0x70` — a building — has `0x10` and
+`0x20` taken off again as its behaviour attaches (`0x10005d59`), and keeps
+`0x40`. Otherwise only the wizard turns them off, for a unit the player takes
+([The escape](#the-escape--read)). So in single player **every enemy unit
+thinks as the player's own do**, and a building of a non-neutral clan aims and
+fires its guns through the same fire control. The radar module lists no
+buildings among its contacts ([25-sensors.md](25-sensors.md)), so that fire
+control shoots only at units.
+
+- **With no order**, a unit's stack answers with its embedded task, a
+  `Task_Stop` (vtable `0x100596ac`, made at `0x1000fa00`): fire mode 2, the
+  default score within 500, and the base priority with its 1000 limit. **An
+  idle unit engages whatever hostile unit comes within 500**, and its attack
+  may take it 1000 from where it stood. A new warbot's escape ends that way
+  ([36-factory.md](36-factory.md)).
+- **Shut down** (order 19, vtable `0x10059eec`): its start resets the fight
+  module and asks for fire mode 0; its takt asks again and clears the walker;
+  its priority is 0 for every reason, retaliation included
+  (`0x10031b10`). A shut-down unit neither moves, aims, fires nor answers fire.
+
 ## What Mission 01 gives the AI — *measured*
 
 - **The wingmen the hero can take.** The neutral clan `Ntrl` owns two bots:
@@ -956,6 +1162,137 @@ point every 8–16 s. The fire control shoots whenever the aim settles
   - Seek and destroy can pick only `tut1_e1`, the one unit of a clan hostile
     to the player (the other units are the neutral `Trgt` dummies), once the
     clan's areal map holds it within 3,000.
+
+## Mission 03's last battle — *measured*, *read*, *derived* and *seen*
+
+*The Field Base* ends with a fight the scripts stage: three enemy flyers are sent
+at the base once the player has built four warbots, and objective 5 completes
+when the enemy clan has no robots. The scripts' tests and messages are
+[34-progression.md](34-progression.md)'s; what the units do is this page's.
+
+### What the scripts give — *measured*
+
+- **The enemy starts shut down.** `tut3_en`'s `Init` gives logic ids 3, 4 and
+  5 `ORDER_ROBOT_SHUTDOWN` (19), replacing. They are `Enm`'s three units on the
+  plateau, `tut3_f1`–`f3` at about (1870, 1880), on ground 245 m up. A shut-down unit
+  neither moves, aims, fires nor answers fire
+  ([Which objects run a behaviour](#which-objects-run-a-behaviour--read)).
+- **The neutral clan does nothing.** `tut3_nt` only reads its base, and `Ntrl`
+  is clan type 3, so its Small Bunker and Small Generator run no radar, takt or
+  fire control until they are captured.
+- **The player's script sends the enemy.** When objective 4 completes,
+  `tut3_pl2` gives `ORDER_ROBOT_PATROL` (4), `INSERT_ORDER_REPLACE`,
+  `TARGET_BY_PLACE`, parameter `d0` = 0:
+
+  | id | unit | place | from its start | ground under the place |
+  |---:|---|---|---:|---:|
+  | 3 | `tut3_f1` | (1124, 783) | 1,326 m | 84.1 m |
+  | 4 | `tut3_f2` | (606, 993) | 1,549 m | 90.6 m |
+  | 5 | `tut3_f3` | (1124, 783) | 1,331 m | 84.1 m |
+
+  (1124, 783) lies 140 m from the Small Bunker; (606, 993) lies 74 m from the
+  Small Generator and 679 m from the bunker. Function 15 finds a unit of any
+  clan by logic id: the clan areal map's slot 7 (`ArealMap.dll:0x10001a40`)
+  hands the id to the system map's (`0x10021020`) with no clan test.
+- The four floats are `varset.var`'s 0.5 each, and no task reads them
+  ([What a script's four floats do](#what-a-scripts-four-floats-do)).
+
+### The two sides — *measured*
+
+The enemy, all **S-2f** flying chassis (`R_L_02`, 160 km/h, 190 HP body, a
+270 HP hung turret), each with a 300 m sensor module:
+
+| id | unit | guns | per second |
+|---:|---|---|---:|
+| 3 | `tut3_f1` | Small Autocannon S75Can, 350 m, 400 rounds | 600 |
+| 4 | `tut3_f2` | Small Red Laser SRLs, 1,000 m | 336 |
+| 5 | `tut3_f3` | two Small Flame Throwers SFT, 140 m, 60 rounds each | 420 |
+
+The player's side:
+
+- **The Small Bunker** (`sbunk01.dat`, Type `0x80010000`), neutral until
+  captured: a turret `e_bnt_lt_01` carrying two Huge Flame Throwers HFTB
+  (250 m, 790 a round, 0.5 a second) and `e_gun_fs_12`, which despite its name
+  is a sensor module of range 500 (`o_bnt_rdr_l_01.ctl`, class 8), with a shield
+  generator and a repair unit on the building.
+- **The prebuilt designs** ([34-progression.md](34-progression.md)):
+  `tut3_p1`, an S-12w walker with two S75Can (1,200 a second, 350 m), and
+  `tut3_p2`, an S-31 on wheels with two guided Small Missile Lr SML4S (544 a
+  second, 350 m); both carry 300 m sensors.
+- The builder `tut3_b` and the transport `tut3_t` carry no gun.
+
+### What follows — *derived*
+
+1. **The patrols.** Each flyer draws a loop of 15–19 points within 60 m of its
+   place on x and y and flies to the first at 0.8 of its speed, about
+   35.6 m/s, so about 37 s to (1124, 783) and 44 s to (606, 993). Every 20–30 s
+   it draws a new loop; it never stops patrolling.
+2. **On the way it only shoots.** Its fire control, mode 2 from the patrol's
+   start, aims at the nearest hostile unit its radar lists within 500 — within
+   its 300 m sensor. It takes up no engagement: nothing scores unless it is
+   inside 60 m of its place.
+3. **Hit, it barely turns.** Retaliation (and a call for help from a wingman
+   within 400) inserts an attack with the patrol's circle, radius 120 about the
+   place — and a script's place stands at z 0. With the ground 84.1 m and
+   90.6 m high there, even a unit on the ground is outside that sphere beyond
+   85.6 m (78.7 m) across the ground, and a unit more than 120 m above z 0 is
+   outside it everywhere. The attack is dropped on its first stack takt and the
+   patrol starts over with a fresh loop.
+4. **At its place** it circles its loop and takes up an attack on a hostile unit
+   inside 60 m of the place, dropped again as soon as it strays out of the
+   circle.
+5. **The defence.** A player warbot with no order engages any hostile unit
+   within 500 (its radar permitting) and may chase it 1000 from where it stood;
+   on Standby it only shoots; guarding, the patrol's rules apply about its own
+   ground. A captured bunker aims at the nearest hostile unit within its 500 m
+   sensor and fires the HFTB inside 250 m: (1124, 783) is in reach, (606, 993)
+   is not.
+6. **The end.** Objective 5 completes on the Mission handler run after clan 1's
+   robot count reaches 0 ([34-progression.md](34-progression.md)).
+
+### Seen in a recording
+
+In the 960 × 720 recording of *The Field Base*:
+
+- **The new warbots patrol.** SSW-4 reads *"[escaping]"* on the Battle units
+  page from 264 s to 295 s and *"[patrolling]"* by 296 s, while the player
+  points at the satellite map and the Small Generator's mark (292 s); SSW-5 to
+  SSW-8 go the same way, and all five read *"[patrolling]"* by 360 s. No code
+  read gives a new bot a patrol (the factory gives only the escape,
+  `0x1002aa6e`), so these are the player's Guard orders, given on the map
+  (*derived*; ordering from command mode is
+  [40-command-mode.md](40-command-mode.md)'s).
+- **The fight.** At 420 s the cursor over the base's marks at the top of the
+  map shows *"SFW-2 Warrior [patrolling]"* — an enemy flyer, reading its patrol.
+  From 418 s to 426 s explosions and two burning flyers fill the lower left of
+  the command camera's view over the bunker, which fits the place (1124, 783)
+  140 m from it (*guess*). *"MISSION COMPLETE !"* is up at 429 s and the
+  campaign menu at 432 s. Who fired cannot be told from the view.
+
+### For an engine
+
+- Run every unit's and building's behaviour, of every clan but a neutral one
+  (clan type 3), which runs none; a building runs its radar, its building takt
+  and its fire control, not a unit's takt.
+- **Shutdown**: no movement, fire mode 0, ignore every interrupt.
+- **Idle** (no order): fire mode 2; engage the best-scoring hostile unit within
+  500; the attack's limit is 1000 about where the unit stood.
+- **Patrol by place**: 15 + (0..4) points uniformly in the square of the radius
+  (the parameter, or 60) about the place, inside the map less 100, a walker's on
+  usable ground; walk them in turn at 0.8 × speed, advancing when the walker is
+  idle; draw a new loop every 20 + U(0, 10) s. **By unit**: 3 + (0..4) points
+  about the unit, own clan only, full speed, every 5 + U(0, 10) s. **By
+  building**: its contour's vertices pushed out 30, full speed, every
+  60 + U(0, 60) s.
+- **A patrol's engagement**: score only contacts inside the radius of its centre
+  (× 0.7 of the distance for a unit); limit the attack to radius + 60 about the
+  place in three dimensions, with the place's z as given (0 from a script), or
+  radius + 80 of a building, radius + 60 of a unit; drop an attack that leaves
+  its limit and restart the task beneath it.
+- **Fire control** (mode 2) runs whatever the task, units and buildings alike,
+  on the radar's hostile units only.
+- Mission 03: the three enemy flyers above, sent by `tut3_pl2`; the bunker's two
+  HFTB and 500 m sensor once it is the player's.
 
 ## How a walk's speed is held — *read*
 
@@ -1064,6 +1401,23 @@ captures by logic id 34 times.
 - Whether a digit that picks a wingman or an order also reaches `World3D.dll`'s
   input table, which toggles the hero's guns on the same keys. The character
   handler takes the key, but the table reads DirectInput separately.
-- What the order packet's `+0x110`, `+0x120`, `+0x124` and `+0x138` (1.0) mean,
-  and how the unit record's `+0x44` object inserts an order into the behaviour's
-  list; the call reaches `Behavior.dll` through an interface not traced here.
+- ~~What the order packet's `+0x110`, `+0x120`, `+0x124` and `+0x138` (1.0)
+  mean.~~ `+0x110` is the task's 28-byte limit: `+0x120` its circle's radius,
+  `+0x124` its unit id; `+0x12c`–`+0x138` are a script's four floats, `+0x138` defaulting to 1.0,
+  which no task is handed ([A task's limits](#a-tasks-limits--read)). How the
+  unit record's `+0x44` object inserts an order into the behaviour's list is
+  still not traced.
+- ~~What a patrol does tick by tick, and what a script's success, survive, time
+  and independence floats do.~~ [The patrol, tick by tick](#the-patrol-tick-by-tick--read).
+- ~~Which units run their behaviour.~~ Every object of a non-neutral clan
+  ([Which objects run a behaviour](#which-objects-run-a-behaviour--read)).
+- The clan areal map's contact record (slot 9, 40-byte records): what its
+  `+0x18`, `+0x1c` and `+0x20`, which every engagement score weighs, are.
+- How high a flyer on patrol flies, which decides whether a script patrol's
+  circle about a place at z 0 ever holds its attack
+  ([24-motion.md](24-motion.md#not-established)).
+- The two behaviour fields, `+0x18c` and `+0x140`, that make a building patrol
+  hold inside a building, and the walker tests `0x1003ddc0` and `0x1003ddb0` a
+  building patrol moves on by.
+- What the factory's object slot 47 does with a new bot's logic id
+  (`0x1002ab02`).
