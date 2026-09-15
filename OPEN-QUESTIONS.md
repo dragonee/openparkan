@@ -175,9 +175,9 @@ Added on 2026-09-15 against `950af7e`, after M12 made the mission winnable end t
 **Where the engine is weaker than the game**
 
 - [ ] [M12] The construction sphere's look. Its three effects' records give time mode 0, a value set from outside (slot `0x1c`), and what sets it is not read: they loop on their durations and take the sphere's radius as their size, and the dome only partly shows.
-- [ ] [M12] The commander's satellite map (`0x10073830`): its marks by type (the recording shows building and unit icons, the engine plain squares), its title bar and exit icon beyond their place, and the `+0x230` rectangle the column's click tests first.
+- [ ] [M12] The commander's satellite map (`0x10073830`): its title bar and exit icon beyond their place, and the `+0x230` rectangle the column's click tests first. (Its marks by type are read and drawn since M13.)
 - [ ] The warbot designer's save name field and load list: not built, and how they work is not established.
-- [ ] A Mission 03 transport walks about 33 m/s where docs/23 gives 24: the walker's pace, not the transport task. The recording's round is also 13 s longer than two full-speed walks.
+- [x] ~~A Mission 03 transport walks about 33 m/s where docs/23 gives 24~~ — closed in M13: the live limits now come from the unit's engine and load, and it walks 23.98. The recording's round being 13 s longer than two full-speed walks is still open.
 - [ ] Why the patrol took about 85 s to reach the base in the recording, when a straight flight is 37–44 s; and how high a patrolling flyer flies, which decides whether its 3D attack limit ever holds.
 - [ ] Which fight-module bar a building's guns must clear. With the walker's 0.85 the Small Bunker's flamers only fire at a unit close to its own ground level, never at hovering flyers, so the warbots do the fighting.
 
@@ -186,11 +186,11 @@ Added on 2026-09-15 against `950af7e`, after M12 made the mission winnable end t
 - [ ] [M12] Whether the character handler sees Esc before its binding leaves command mode (the engine peels the map and the page back first).
 - [ ] What view state 4 and the second camera at `+0x68` are for; cursors 7 and 8; the globals `0x1010bf7c`–`0x1010bf80`; the display's slot 12, which picks the system's cursor over the software one.
 - [ ] What interface `0x201` slot 9 with (`0x20`, 1) and message (6, 7, 0) do to a bunker left for another view or for telepresence.
-- [ ] [M12] What telepresence's auto-driver levels 1 and 2 hand to the AI, and what mode 2 does when its unit dies.
+- [ ] [M12] What telepresence's auto-driver levels 1 and 2 hand to the AI. (What mode 2 does when its unit dies is read: the removal table rolls modes 1, 2, 5 and 7 back.)
 - [ ] [M12] A unit record's `+0x30` and property `0x207`, and a building's `+0x30`: they pick and tint the panel's icons.
 - [ ] [M12] What slot 7 of a unit's object does 0.6 s after *Explode!*; the chat overlay; the game menu's screen (mode 7); tooltips.
 - [ ] [M12] What `0x10034230` accepts for an Upgrade row, and what Type `0x80000200` is.
-- [ ] The research panel's contents and controls (page 4).
+- [x] ~~The research panel's contents and controls (page 4)~~ — read and built in M13 ([41-commander](docs/41-commander.md)).
 - [ ] [M12] The routine that names a building (strings 6031–6098): the engine picks by Type and the root record's size letter.
 
 **Selecting and ordering**
@@ -221,6 +221,62 @@ Added on 2026-09-15 against `950af7e`, after M12 made the mission winnable end t
 - [ ] Why `T03_H03` and `T03_H02` never show in the recording.
 - [ ] Which of the generator's exits the recording's hero used (the south one is inferred), and whether a shot door opens sooner than an approach.
 - [ ] What component property `0x200` is (taken to be the door's node: all 56 door components' nodes match their channels').
+
+## Mission 04, *Teleport*
+
+Added on 2026-09-15 against `f26ffd8`, after M13 made the mission winnable end to end along the
+briefing's route. [40-command-mode](docs/40-command-mode.md#not-established),
+[16-research](docs/16-research.md#not-established), [27-ownership](docs/27-ownership.md#not-established),
+[31-packages](docs/31-packages.md#not-established), [34-progression](docs/34-progression.md#not-established),
+[24-motion](docs/24-motion.md#not-established), [30-turrets](docs/30-turrets.md#not-established),
+[35-hud](docs/35-hud.md), [41-commander](docs/41-commander.md#not-established)
+
+**Where the engine is weaker than the game**
+
+- [ ] [M13] Which of Mission 04's hero, helicopter and HQ holds no mind. The recording's factory shows one free of three once all three are the player's, and Mission 02's shows the hero holding one; the engine lets the HQ taken by Enter hold none, or the build could never start. Mission 03's "4 free, five built" may be the same question.
+- [ ] [M3] The ground contact runs once a frame (message `0x1c`, read), but the engine runs it at state steps, and moving it waits on walking from the held ground face. Until then a hero pressed against Mission 03's Small Bunker door as it sinks is pushed down between steps; the bunker walk passes, but only just.
+- [ ] The helicopter's capture pace: the recording takes 90 s to the factory and 81 s on to the research centre, the engine 54 s and 42 s at its live 14 m/s. And what held it still near (715, 847) from 362 to 402 s.
+- [ ] The briefing's route is checked only by the engine's own test: the recording's player walked to the Teleport, so the large flyer's build, its flight to the HQ, boarding it, flying up to the plateau and setting down there were never compared with the game.
+- [ ] Turret pitch and altitude as the user saw it. Measured: pitch moves neither a flyer nor its eye. Explained as rising ground lifting a low flyer, which never sinks back without F (read, `0x1001b3c3`); not confirmed in a window.
+- [ ] Tooltips (the research rows' 6251/6252, the batch button's 6243), the maps' route lines and the selected unit's white outline: not drawn.
+- [ ] [M13] The research box's name colour and its clip 5; the part preview draws larger than the game's.
+- [ ] Mission 02's leaving places moved with the joined sphere: the hero now gets out at the fourth place, and the end-to-end test lands by the Outpost. It is backed only by the recording's altitude reading 11.
+
+**The HQ's command view**
+
+- [ ] [M13] Which bound a unit record's `+0x98` is: 8 × it is how far the camera rides behind the HQ. The engine takes the chassis sphere, 61 m, which the recording favours over the whole bound's 104 m and the cylinder's 38.7 m.
+- [ ] [M13] What the game does when an HQ is lost in its own mode 3 (nothing read pops it), and how the stack reads after Enter in telepresence aboard an HQ.
+- [ ] Why the HQ reads "[no order]" in its cockpit at 160 s after "[standing]" at 94 s. The engine's capture-standby departure gives it Standby.
+
+**Capture and the maps**
+
+- [ ] [M13] How a walker's path joins the hall way (`MGraph`), so which exit a capturer takes (the engine: the shortest whole way); whether a flyer touches down or hovers at its landing corner; and a flyer against a building's walls outside the hall way (the leg to exit 67 skirts the factory's west side).
+- [ ] [M13] The escape's damaged-node test, and which paths a unit leaves a building by (the engine: back along the hall way).
+- [ ] [M13] A contour vertex's areal flag word, which the engine has no areals for: a vertex counts where the ground is above water.
+- [ ] [M13] The maps' contact list: the engine marks what lies in a player unit's radar range, not the list the run loop empties and each unit's takt refills.
+- [ ] The sphere behind `IBuilding` slot 15.
+- [ ] Why the Teleport's map icon looks white at about 412 s, as if selected, when a main teleport's capture selects nothing.
+
+**Research**
+
+- [ ] [M13] Whether a centre's ore take reads the ore it holds or the ore delivered to it.
+- [ ] [M13] How often a building's takt runs (the engine: every tick), which bounds how late "Research complete" can come.
+- [ ] What becomes of a research when its centre is captured, upgraded or destroyed mid-way (the engine keeps the queue with the building).
+- [ ] Whether anything besides the task marks an item researched (scripts, saves), and the AI clans' own research orders (order 16), which are not modelled.
+
+**The Main Teleport**
+
+- [ ] What the teleport's class-25 parts do with the power byte's state `0x20`, and its class-29 parts with 1.
+- [ ] What building interface `0xb` slot 16 asks about a place's node; what property `0x208` is (a network mirror flag is a guess); whether anything sets `pTeleFunc`.
+- [ ] Whether a player-driven small unit can take the Teleport's pod.
+- [ ] [M13] The places besides a main teleport's (a dock's charge, repair and rearm; loading places) do not tick by the place rule yet; the place timer's random source; whether a destroyed generator stays in `World3D.dll`'s queue 3.
+- [ ] Why the hero's panel dims in the pod room, and why the chamber's glow reads greyer than the recording's (the dawn scene colour is the guess).
+- [ ] Message 16, the helicopter in route 2, has no test.
+
+**Movement**
+
+- [ ] [M13] Whether the AI's aiming reaches the turret lock's lead, and what spin a unit let go keeps until the Wizard writes one.
+- [ ] [M13] What a node reaching its last damage stage takes out of the load (the engine: its own weight and armour).
 
 ## Not looked at at all
 
