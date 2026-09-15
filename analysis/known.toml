@@ -23690,3 +23690,533 @@ kind = "site"
 name = "key handler: held byte and the queued event's pressed word from one register, then code and kind"
 read = true
 doc = "docs/14-controls.md"
+
+# --- command mode, ../docs/40-command-mode.md ---------------------------------
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10036ae0"
+kind = "function"
+name = "command camera: place at (x, y, z) with roll, pitch, yaw; R_z R_y R_x matrix with the position to the view's slot 7"
+read = true
+doc = "docs/40-command-mode.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10036d60"
+kind = "function"
+name = "command camera init: position, yaw pi/2, tilt +0x4c 1.0 (1.25 with the game's +0xe5), view field 1.04 near 3 far 700, follow distance 30"
+read = true
+doc = "docs/40-command-mode.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10036fe0"
+kind = "function"
+name = "command camera key: left flag +0x8c, stamps +0x78 and +0x64 on a change"
+read = true
+doc = "docs/40-command-mode.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10037010"
+kind = "function"
+name = "command camera key: right flag +0x8d, stamps +0x78 and +0x64 on a change"
+read = true
+doc = "docs/40-command-mode.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10037040"
+kind = "function"
+name = "command camera key: backward flag +0x8f, stamps +0x7c and +0x68 on a change"
+read = true
+doc = "docs/40-command-mode.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10037070"
+kind = "function"
+name = "command camera key: forward flag +0x8e, stamps +0x7c and +0x68 on a change"
+read = true
+doc = "docs/40-command-mode.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100370a0"
+kind = "function"
+name = "command camera key: down flag +0x91, stamps +0x80 and +0x6c on a change"
+read = true
+doc = "docs/40-command-mode.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100370d0"
+kind = "function"
+name = "command camera key: up flag +0x90, stamps +0x80 and +0x6c on a change"
+read = true
+doc = "docs/40-command-mode.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10037100"
+kind = "function"
+name = "command camera: bottom edge flag +0x96, stamps +0x88 and +0x74 on a change"
+read = true
+doc = "docs/40-command-mode.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10037130"
+kind = "function"
+name = "command camera velocities from the keys: S 125 (80 with +0xe5), 2t S for 0.5 s; up/down S/2; released v x (0.5 - dt)"
+read = true
+doc = "docs/40-command-mode.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100373d0"
+kind = "function"
+name = "command camera edge rates: R 1.5 (0.5 with +0xe5, 0.2 zoomed); right -R, left +R yaw; bottom -R, top +R tilt"
+read = true
+doc = "docs/40-command-mode.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100375b0"
+kind = "function"
+name = "command camera move: dt v along (sin, -cos) and (cos, sin) of the yaw, above tan(field/2) z and below the map side; yaw, tilt in (0, pi/2); z in top+36..+236; +/-200 of the building; view matrix"
+read = true
+doc = "docs/40-command-mode.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10037a50"
+kind = "function"
+name = "command camera update: edge rates, zoom 0.1 an update, follow, edge flags from the cursor at 6 / 634 / 474 of 640x480, key velocities, move"
+read = true
+doc = "docs/40-command-mode.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10037da0"
+kind = "function"
+name = "command camera hold around a building: +0x48, clears follow, up/down keys, velocities"
+read = true
+doc = "docs/40-command-mode.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10037dd0"
+kind = "function"
+name = "command camera let go: clears +0x48, follow, up/down keys, velocities"
+read = true
+doc = "docs/40-command-mode.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10037e00"
+kind = "function"
+name = "command camera: follow step for an HQ unit (mode 3), not followed"
+read = true
+doc = "docs/40-command-mode.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100380e0"
+kind = "function"
+name = "command camera: follow step for an HQ unit (mode 3), not followed"
+read = true
+doc = "docs/40-command-mode.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10062a40"
+kind = "function"
+name = "enter a CState mode, first: a record of the same mode and building (4) or unit (2, 3) already stacked is rolled back to, and the push refused"
+read = true
+doc = "docs/40-command-mode.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10062ce0"
+kind = "function"
+name = "CState: roll the stack back to a given record"
+read = true
+doc = "docs/40-command-mode.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10063ca0"
+kind = "function"
+name = "CState handler mode 0 -> 4, a bunker: outer camera off, keyboard cleared, hero let go, camera held and placed at the bunker facing north, view state 2, page 0"
+read = true
+doc = "docs/40-command-mode.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10063d60"
+kind = "function"
+name = "CState handler mode 4 -> 0: hero taken back, selection cleared, driven unit the hero, view state 1, camera let go, keyboard cleared"
+read = true
+doc = "docs/40-command-mode.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10063df0"
+kind = "function"
+name = "CState handler mode 4 -> 4: select the new bunker, the old one sent (0x20, 1) and (6, 7, 0), camera placed and held at the new one"
+read = true
+doc = "docs/40-command-mode.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10063e90"
+kind = "function"
+name = "CState handler mode 4 -> 2, telepresence: select the unit, bunker sent (0x20, 1) and (6, 7, 0), unit taken, camera let go, view state 1"
+read = true
+doc = "docs/40-command-mode.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10063f30"
+kind = "function"
+name = "CState handler mode 2 -> 4, back from telepresence: unit let go, camera held around the bunker unmoved, view state 2, page redrawn"
+read = true
+doc = "docs/40-command-mode.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10064880"
+kind = "function"
+name = "CState handler mode 3 -> 4: the bunker as the view's building, camera placed and held there, view state 2"
+read = true
+doc = "docs/40-command-mode.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10072740"
+kind = "function"
+name = "game command release handler for 723-728: the command camera's key flag cleared (state 2 on +0x100, 4 on +0x68)"
+read = true
+doc = "docs/40-command-mode.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1003ab00"
+kind = "function"
+name = "binding table: load a .man file as a new group, returning its index"
+read = true
+doc = "docs/40-command-mode.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1003afe0"
+kind = "function"
+name = "binding table: look a scan code up in one group, giving its command"
+read = true
+doc = "docs/40-command-mode.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1007db00"
+kind = "function"
+name = "building list walk: the markers of selected buildings (modes 3 and 4)"
+read = true
+doc = "docs/40-command-mode.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1008fb00"
+kind = "function"
+name = "Esc with cursor 8 up: put it away (not followed)"
+read = true
+doc = "docs/40-command-mode.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100a1c30"
+kind = "function"
+name = "the level's view by view state: 1 driven unit's camera, 2 +0x104, 3 +8, 4 +0x6c, 5 briefing, 6 +0xaf0's camera"
+read = true
+doc = "docs/40-command-mode.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100a1c7c"
+kind = "table"
+name = "the level's view by view state, states 1-6"
+read = true
+doc = "docs/40-command-mode.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10004434"
+kind = "site"
+name = "ui_hq.man named where the four ui_*.man files are loaded together (not followed)"
+read = true
+doc = "docs/40-command-mode.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10004af3"
+kind = "site"
+name = "ui_hq.man named where the four ui_*.man files are loaded together (not followed)"
+read = true
+doc = "docs/40-command-mode.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10068dd9"
+kind = "site"
+name = "ui_hq.man loaded after ui_hero and ui_bots, before ui_other (not followed)"
+read = true
+doc = "docs/40-command-mode.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10037141"
+kind = "site"
+name = "command camera speed 80 while the game's +0xe5 is set"
+read = true
+doc = "docs/40-command-mode.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1003714b"
+kind = "site"
+name = "command camera speed 125"
+read = true
+doc = "docs/40-command-mode.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100373d4"
+kind = "site"
+name = "command camera edge rate: 0.2 zoomed, else 0.5 with +0xe5, else 1.5"
+read = true
+doc = "docs/40-command-mode.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10037835"
+kind = "site"
+name = "command camera tilt step taken only strictly inside (0, pi/2)"
+read = true
+doc = "docs/40-command-mode.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100378a6"
+kind = "site"
+name = "command camera x and y each held to the held building's +/- 200"
+read = true
+doc = "docs/40-command-mode.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10037943"
+kind = "site"
+name = "command camera pitch = pi/2 - tilt, then the view matrix"
+read = true
+doc = "docs/40-command-mode.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10037b84"
+kind = "site"
+name = "command camera zoom: the field steps 0.1 an update toward 0.2 while +0x34, else toward +0x10"
+read = true
+doc = "docs/40-command-mode.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10037c5f"
+kind = "site"
+name = "command camera, view state 2: edge flags from the cursor unless cursor 7"
+read = true
+doc = "docs/40-command-mode.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1003ac00"
+kind = "site"
+name = "binding load: the new group's index, count - 1"
+read = true
+doc = "docs/40-command-mode.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1005ce90"
+kind = "site"
+name = "game load: table_1.man, table_2.man, hero.man, addition.man into +0x28 as groups 0-3"
+read = true
+doc = "docs/40-command-mode.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10062779"
+kind = "site"
+name = "pod opening: the three bunker Types 0x80010000, 0x80020000, 0x80040000"
+read = true
+doc = "docs/40-command-mode.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10062797"
+kind = "site"
+name = "pod opening: push mode 4 with the bunker"
+read = true
+doc = "docs/40-command-mode.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10070dea"
+kind = "site"
+name = "character handler, Esc: pause, quit, help, briefing, objectives, cursor 8, pager, wingman menu, game menu, then view state 2's map and page"
+read = true
+doc = "docs/40-command-mode.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10070e03"
+kind = "site"
+name = "Esc with the game's +0xe5 set: game exit 1"
+read = true
+doc = "docs/40-command-mode.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10071027"
+kind = "site"
+name = "Esc in view state 2: close the open satellite map"
+read = true
+doc = "docs/40-command-mode.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1007104b"
+kind = "site"
+name = "Esc in view state 2: the commander panel to page 0 from another"
+read = true
+doc = "docs/40-command-mode.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10071c5a"
+kind = "site"
+name = "play dispatch: bindings group 3, addition.man"
+read = true
+doc = "docs/40-command-mode.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10071f08"
+kind = "site"
+name = "CMD_ENTER_STATE: nothing in view state 4; from mode 1 or an HQ in mode 2 mode 3; else only in view states 1 and 3"
+read = true
+doc = "docs/40-command-mode.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1007244a"
+kind = "site"
+name = "CMD_JAMES_ZOOM_MODE in view state 2: the command camera's +0x34 toggled at the field's ends"
+read = true
+doc = "docs/40-command-mode.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100848b0"
+kind = "site"
+name = "unit page: telepresence buttons +0x534, +0x550, +0x56c for a boardable unit not upgrading"
+read = true
+doc = "docs/40-command-mode.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10084966"
+kind = "site"
+name = "unit page: auto-driver +0x9c 0, 1 or 2 by button, then push mode 2 with the unit"
+read = true
+doc = "docs/40-command-mode.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100862b3"
+kind = "site"
+name = "bunkers page in mode 3: a bunker Type"
+read = true
+doc = "docs/40-command-mode.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100862d6"
+kind = "site"
+name = "bunkers page in mode 3: push mode 4 with the bunker"
+read = true
+doc = "docs/40-command-mode.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1008d326"
+kind = "site"
+name = "screens draw with cursor 8 up: its draw, the panel's resource rows only, map, box, objectives"
+read = true
+doc = "docs/40-command-mode.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100a29c8"
+kind = "site"
+name = "level set-up: the camera at +0x68 made"
+read = true
+doc = "docs/40-command-mode.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100a29da"
+kind = "site"
+name = "level set-up: the command camera at +0x100 made"
+read = true
+doc = "docs/40-command-mode.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10104148"
+kind = "datum"
+name = "the current cursor, 0-10; the command camera's edge flags wait while it is 7"
+read = true
+doc = "docs/40-command-mode.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1010414c"
+kind = "datum"
+name = "the cursor's x in screen pixels"
+read = true
+doc = "docs/40-command-mode.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10104150"
+kind = "datum"
+name = "the cursor's y in screen pixels"
+read = true
+doc = "docs/40-command-mode.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1010bf7c"
+kind = "datum"
+name = "three bytes and a dword (to 0x1010bf80) the command view transitions clear; not followed"
+read = true
+doc = "docs/40-command-mode.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1010bf80"
+kind = "datum"
+name = "a dword the command view transitions clear; not followed"
+read = true
+doc = "docs/40-command-mode.md"

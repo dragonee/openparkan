@@ -224,6 +224,7 @@ of fields carried through the readers without being understood.
 - [35-hud.md](docs/35-hud.md) — the cockpit HUD: the weapons list, the message box, the radar and the target and own-unit panels
 - [36-factory.md](docs/36-factory.md) — the factory screen: its pieces and controls, projects, and production to the bot outside
 - [37-designer.md](docs/37-designer.md) — the warbot designer as a screen: its panels, tabs and rows, the project view, the buttons, the turning previews
+- [40-command-mode.md](docs/40-command-mode.md) — command mode: a bunker's pod, the command camera over the base, what it draws, its keys, leaving, and telepresence
 
 ## Layout
 

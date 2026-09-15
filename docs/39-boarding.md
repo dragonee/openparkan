@@ -39,11 +39,11 @@ records, its front the mode the player is in.
   |---:|---|---|
   | 0 | on foot, the hero | the bottom record |
   | 1 | driving a bot | Enter (below) |
+  | 2 | telepresence: a unit driven from a command view | a unit page's buttons ([40-command-mode.md](40-command-mode.md#telepresence-mode-2--read)) |
   | 3 | an HQ's command view | Enter from a bot that passes `IsHQ` (`0x10072104`) |
-  | 4, 5, 6 | a building's screen | the building's pod ([27-ownership.md](27-ownership.md#capture--read)) |
+  | 4 | a bunker's command view ([40-command-mode.md](40-command-mode.md)) | the bunker's pod, or its page in mode 3 |
+  | 5, 6 | a building's screen | the building's pod ([27-ownership.md](27-ownership.md#capture--read)) |
   | 7 | the game menu | `CMD_GAME_MENU` (748, `0x10072359`): it pushes 7, or rolls back when the menu is up (`0x100723a5`) |
-
-  What mode 2 is was not read.
 - **These are not the names at `0x1005a5cc`.** That switch (`FREE_MODE`,
   `SELECT_ATTACK_TARGET_MODE`, … `SELECT_PLACE_MODE_FM`) reads the global
   `0x1010c388`, which the commander's order menu writes (`0x10079998`,
@@ -337,8 +337,9 @@ Neither cut fades or moves the camera between the two views.
 
 ## Not established
 
-- Mode 2 of the stack, and what modes 3, 4 and 6 do when their unit or building
-  is lost.
+- ~~Mode 2 of the stack~~ — telepresence
+  ([40-command-mode.md](40-command-mode.md#telepresence-mode-2--read)). What
+  modes 2, 3, 4 and 6 do when their unit or building is lost.
 - Whether the interface's own key-down handlers ever take Esc before the
   bindings do; the recording is consistent with leaving by Esc but does not
   show the key.

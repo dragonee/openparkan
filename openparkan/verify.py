@@ -16423,6 +16423,248 @@ def check_designer_screen(check, game: Path) -> None:
           f"(458, 241)-(639, 396), 4 s, h x 5/57: {bands}")
 
 
+def check_command_mode(check, game: Path) -> None:
+    """Command mode: a bunker's pod, the mode stack's 4, the command camera, telepresence."""
+    path = game / "iron3d.dll"
+    if not path.exists():
+        return
+    iron = path.read_bytes()
+    at = _image_at(iron)
+
+    def u32(va: int) -> int:
+        return struct.unpack("<I", at(va, 4))[0]
+
+    def f32(va: int) -> float:
+        return struct.unpack("<f", at(va, 4))[0]
+
+    def called(site: int) -> int | None:
+        if at(site, 1) != b"\xe8":
+            return None
+        return (site + 5 + struct.unpack("<i", at(site + 1, 4))[0]) & 0xFFFFFFFF
+
+    def handler(front: int, new: int) -> int:
+        return u32(0x10104B18 + 4 * (front * 8 + new))
+
+    def imported(thunk: int) -> str:
+        if at(thunk, 2) != b"\xff\x25":
+            return ""
+        name = at(_image_base(iron) + u32(u32(thunk + 2)) + 2, 32)
+        return name.split(b"\0")[0].decode(errors="replace")
+
+    def hexes(text: str) -> bytes:
+        return bytes.fromhex(text)
+
+    # The pod's same-clan branch: the three bunker Types push mode 4 with the building.
+    pod = at(0x10062779, 0x1C) == hexes(
+        "3d00000480 7726 740e 3d00000180 7407 3d00000280 753b 6a00 56 6a04") \
+        and called(0x10062797) == 0x10062BC0
+    # Every push of a mode, and its value: 4 only from the pod and from mode 3's bunkers.
+    sites = {site: _pushed_before(at, site)
+             for site, target in _calls(at, 0x10001000, 0xCC000) if target == 0x10062BC0}
+    pushes = sites == {0x10062716: 5, 0x1006275D: 5, 0x10062797: 4, 0x100627C6: 6,
+                       0x100720E8: 1, 0x10072104: 3, 0x100723B7: 7, 0x10084674: 7,
+                       0x100847EF: 3, 0x10084966: 2, 0x100862D6: 4, 0x100A357A: 1}
+    bunkers = at(0x100862B3, 0x1B) == hexes(
+        "833903 7523 8b472c 3d00000180 740e 3d00000280 7407 3d00000480")
+    # A mode already on the stack for the same building is rolled back to, not pushed.
+    again = at(0x10062AC5, 7) == hexes("8b442428 394108") and called(0x10062B5B) == 0x10062CE0
+    check("iron3d.dll: a bunker's pod pushes mode 4; only mode 3's bunkers page pushes it too",
+          pod and pushes and bunkers and again,
+          f"Types 0x80010000, 0x80020000, 0x80040000 -> 0x10062bc0(4, building): {pod}; "
+          f"the 12 pushes {sorted(sites.values())}: {pushes}; "
+          f"from mode 3 the same Types: {bunkers}; "
+          f"a record for the building already stacked is rolled back to: {again}")
+
+    # The transitions into and out of 4, by front x 8 + new.
+    table = (handler(0, 4) == 0x10063CA0 and handler(4, 0) == 0x10063D60
+             and handler(4, 2) == 0x10063E90 and handler(2, 4) == 0x10063F30
+             and handler(4, 4) == 0x10063DF0 and handler(3, 4) == 0x10064880
+             and handler(4, 3) == 0x100647E0 and handler(1, 4) == 0
+             and handler(2, 0) == 0 and handler(2, 1) == 0)
+    clear = imported(0x100CD168)
+    enter = (called(0x10063CC9) == 0x10038AD0 and called(0x10063CCE) == 0x100CD168
+             and at(0x10063CD3, 1) == b"\x53" and called(0x10063CEE) == 0x10074FF0
+             and at(0x10063CF3, 6) == hexes("8dae00010000")
+             and called(0x10063CFC) == 0x10037DA0
+             and at(0x10063D01, 1) == b"\x53" and called(0x10063D04) == 0x100A5660
+             and at(0x10063D09, 1) == b"\x57" and called(0x10063D0C) == 0x100A5680
+             and at(0x10063D11, 2) == b"\x6a\x02" and called(0x10063D15) == 0x100A4F90
+             and at(0x10063D1A, 14) == hexes("8b4f0c 8b5708 8b4704 68db0fc93f")
+             and called(0x10063D2F) == 0x10036AE0 and called(0x10063D4A) == 0x10084D80
+             and clear == "stdClearKeyboard")
+    leave = (at(0x10063D86, 2) == b"\x6a\x01" and called(0x10063D8A) == 0x10074FF0
+             and called(0x10063D95) == 0x1007D270 and called(0x10063D9D) == 0x100A5660
+             and at(0x10063DA2, 2) == b"\x6a\x00" and called(0x10063DA6) == 0x100A5680
+             and at(0x10063DAB, 2) == b"\x6a\x01" and called(0x10063DAF) == 0x100A4F90
+             and called(0x10063DBA) == 0x10037DD0 and at(0x10063DDD, 1) == b"\xe9")
+    # Esc's character handler in view state 2: the satellite map closes, else page 0.
+    esc = (at(0x10070FDE, 7) == hexes("83be1007000002") and called(0x10071027) == 0x10074100
+           and at(0x10071045, 4) == hexes("6a016a00") and called(0x1007104B) == 0x10084D80)
+    # The bunker left for another view: interface 0x201 slot 9 (0x20, 1), its object (6, 7, 0).
+    sends = hexes("8b4754 8b08 6a01 6a20 50 ff5124 8b7f3c 8b17")
+    bunker_left = (at(0x10063E2E, 23) == sends + hexes("53 6a07 6a06")
+                   and at(0x10063EBD, 24) == sends + hexes("6a00 6a07 6a06"))
+    # View state 2's view is the camera at +0x100; its update is that camera's.
+    views = (u32(0x100A1C7C + 4) == 0x100A1C65 and at(0x100A1C65, 7) == hexes("8b8104010000c3")
+             and u32(0x100A5650) == 0x100A55D8 and at(0x100A55D8, 6) == hexes("8d8e00010000")
+             and called(0x100A55DE) == 0x10037A50)
+    check("iron3d.dll: mode 0 -> 4 lets the hero go and sets the camera on the bunker; "
+          "4 -> 0 undoes it",
+          table and enter and leave and esc and bunker_left and views,
+          f"handlers 0>4 0x10063ca0, 4>0 0x10063d60, 4>2, 2>4, 4>4, 3>4, 4>3; "
+          f"none 1>4, 2>0: {table}; "
+          f"0>4: outer camera off, {clear}, hero let go, camera on the building, view state 2, "
+          f"camera at the building's +4/+8/+0xc with angles (0, 0, pi/2), page 0: {enter}; "
+          f"4>0: hero taken, selection cleared, view state 1, camera off: {leave}; "
+          f"Esc's character handler in view state 2 closes the map, else page 0: {esc}; "
+          f"4>4 and 4>2 send the bunker left (0x20, 1) and (6, 7, 0): {bunker_left}; "
+          f"view state 2 is the camera at +0x100: {views}")
+
+    # The camera's moves: keys set a flag each, a flag a velocity along the yaw.
+    setters = {0x10036FE0: 0x8C, 0x10037010: 0x8D, 0x10037070: 0x8E,
+               0x10037040: 0x8F, 0x100370D0: 0x90, 0x100370A0: 0x91}
+    flags = all(at(fn + 7, 6) == b"\x3a\x86" + struct.pack("<I", byte)
+                for fn, byte in setters.items())
+    keys = (at(0x10071D4F, 6) == hexes("81ebb0020000")
+            and at(0x10071E2A, 6) == hexes("81ebd6020000")
+            and all(at(site - 8, 8) == hexes("6a018d8f00010000") and called(site) == fn
+                    for site, fn in ((0x10071DB8, 0x10036FE0), (0x10071D85, 0x10037010),
+                                     (0x10071E20, 0x100370D0), (0x10071ECB, 0x100370A0),
+                                     (0x10071E98, 0x10037070), (0x10071E65, 0x10037040)))
+            and at(0x10072783, 2) == b"\x6a\x00" and called(0x1007278B) == 0x10036FE0)
+    speeds = (at(0x10037141, 8) == hexes("c74424040000a042")
+              and at(0x1003714B, 8) == hexes("c74424040000fa42")
+              and f32(0x100E4CCC) == 0.5 and f32(0x100E5C1C) == -2.0
+              and f32(0x100E5CEC) == -0.5 and f32(0x100E5C44) == -1.0
+              and at(0x10037317, 6) == hexes("d80dcc4c0e10")
+              and at(0x1003735D, 6) == hexes("d80dec5c0e10"))
+    # x += d sin, y -= d cos sideways; y += d sin, x += d cos forward.
+    along = (at(0x1003765B, 4) == hexes("d84c2414") and at(0x10037662, 3) == hexes("d8461c")
+             and at(0x100376A0, 7) == hexes("d84c2418d86e20")
+             and at(0x10037707, 4) == hexes("d84c2414") and at(0x1003770E, 3) == hexes("d84620")
+             and at(0x1003774C, 7) == hexes("d84c2418d8461c"))
+    edges = (at(0x10037C9B, 3) == hexes("83ff06") and at(0x10037CD2, 6) == hexes("81ff7a020000")
+             and at(0x10037D00, 3) == hexes("83fb06") and at(0x10037D2B, 6) == hexes("81fbda010000")
+             and at(0x100373DA, 8) == hexes("c7442404cdcc4c3e")
+             and at(0x100373F1, 8) == hexes("c74424040000003f")
+             and at(0x100373FB, 8) == hexes("c7442404 0000c03f"))
+    check("iron3d.dll: the command camera flies at 125 m/s, and turns 1.5 rad/s at the edges",
+          flags and keys and speeds and along and edges,
+          f"723-728 set flags +0x8c-+0x91 of the camera at +0x100, key up clears them: "
+          f"{flags and keys}; 125 (80 with the game's +0xe5), full after 0.5 s, up and down "
+          f"at half: {speeds}; sideways along (sin, -cos) of the yaw, forward along "
+          f"(cos, sin): {along}; cursor x <= 6 or >= 634, y <= 6 or >= 474 of 640 x 480 "
+          f"turns 1.5 (0.5, 0.2 zoomed): {edges}")
+
+    # Height, box, tilt, zoom, the view.
+    clamps = (called(0x10037875) == 0x100A14D0
+              and at(0x1003786A, 11) == hexes("5050 8b4620 6a01 50 51 8bcf")
+              and at(0x1003787A, 6) == hexes("d805f45c0e10") and f32(0x100E5CF4) == 36.0
+              and at(0x1003788F, 6) == hexes("d805f05c0e10") and f32(0x100E5CF0) == 200.0
+              and at(0x100378CC, 6) == hexes("d81df05c0e10")
+              and at(0x10037915, 6) == hexes("d81df05c0e10"))
+    # The tilt steps only while it stays strictly inside (0, pi/2); the yaw is not held.
+    tilt = (at(0x1003782F, 3) == hexes("d8464c") and at(0x10037835, 6) == hexes("d815a8500e10")
+            and at(0x10037842, 6) == hexes("d815f85c0e10") and f32(0x100E50A8) == 0.0
+            and at(0x100377EF, 9) == hexes("d84630 894670 d95e30")
+            and at(0x10037943, 6) == hexes("d905f85c0e10") and at(0x10037951, 3) == hexes("d8664c")
+            and abs(f32(0x100E5CF8) - math.pi / 2) < 1e-6
+            and at(0x10036DA1, 7) == hexes("c7464c0000a03f")
+            and at(0x10036DAA, 7) == hexes("c7464c0000803f"))
+    zoom = (at(0x10037B8E, 6) == hexes("d81d685c0e10") and abs(f32(0x100E5C68) - 0.2) < 1e-6
+            and at(0x10037B9E, 6) == hexes("d825705c0e10") and abs(f32(0x100E5C70) - 0.1) < 1e-6
+            and at(0x10036DBA, 15) == hexes("68b81e853f 6800004040 6800002f44")
+            and called(0x10036DCC) == 0x100364A0)
+    check("iron3d.dll: the command camera keeps 36 to 236 over the ground, near its bunker",
+          clamps and tilt and zoom,
+          f"the landscape or building top under it + 36, at most + 200 more; x and y held to "
+          f"the building's +/- 200: {clamps}; pitched pi/2 - +0x4c, +0x4c 1 (1.25) at first, "
+          f"0..pi/2: {tilt}; field 1.04, near 3, far 700; Z zooms it 0.1 an update to 0.2: "
+          f"{zoom}")
+
+    # The bindings: the game's commands are group 3 of the four files it loads, addition.man.
+    order = [(0x1005CE90, "table_1.man", 0x1005CEBB), (0x1005CEFD, "table_2.man", 0x1005CF28),
+             (0x1005CF6A, "hero.man", 0x1005CF95), (0x1005CFD7, "addition.man", 0x1005D002)]
+    loads = all(at(push, 1) == b"\x68"
+                and at(u32(push + 1), len(name) + 1) == name.encode() + b"\0"
+                and called(load) == 0x1003AB00 for push, name, load in order) \
+        and at(0x1003AC00, 4) == hexes("8d540aff")
+    group = (at(0x10071C5A, 2) == b"\x6a\x03" and called(0x10071C64) == 0x1003AFE0
+             and at(0x10071C6D, 6) == hexes("81fe01010000") and called(0x10071CB0) == 0x10072740
+             and called(0x10071CA1) == 0x10071CD0)
+    # In view state 2: Z toggles the camera's zoom at either end, comma and dot turn a
+    # building being placed (the commander's modes 4 and 6) by 0.05, Enter does nothing in 4.
+    commands = (u32(0x100726F8) == 0x10072428
+                and at(0x1007244A, 12) == hexes("d9870c010000 d81d685c0e10")
+                and at(0x10072474, 7) == hexes("80bf3401000001")
+                and u32(0x100726F8 + 12) == 0x100725A7 and u32(0x100726F8 + 16) == 0x100725DC
+                and at(0x100725A7, 5) == hexes("837c241402")
+                and at(0x100725B2, 19) == hexes("a188c31010 83f804 7409 83f806 0f8500010000")
+                and at(0x100725C5, 12) == hexes("d90594b51010 d805a4500e10")
+                and abs(f32(0x100E50A4) - 0.05) < 1e-6
+                and at(0x10071F08, 5) == hexes("837c241404"))
+
+    def bindings(name: str) -> list[list[str]]:
+        if not (game / name).exists():
+            return []
+        text = (game / name).read_bytes().decode("latin-1")
+        return [line.split() for line in text.splitlines() if line.strip()]
+
+    hq, addition = bindings("ui_hq.man"), bindings("addition.man")
+    rows = len(hq) == 8 and all(row in addition for row in hq)
+    check("iron3d.dll, addition.man: in play the game's commands are addition.man's",
+          loads and group and commands and rows,
+          f"table_1, table_2, hero, addition loaded as groups 0-3: {loads}; key down to "
+          f"group 3's command, key up to the release handler: {group}; Z at the field's ends, "
+          f"comma and dot 0.05 in place modes 4 and 6: {commands}; ui_hq.man's {len(hq)} rows "
+          f"in addition.man's {len(addition)}: {rows}")
+
+    # What modes 3 and 4 draw, and telepresence from a unit page.
+    draw = (u32(0x1008D5AC + 12) == 0x1008D51C and u32(0x1008D5AC + 16) == 0x1008D51C
+            and u32(0x1008D5AC + 8) == 0x1008D37F
+            and called(0x1008D567) == 0x1007D5E0 and called(0x1008D572) == 0x1007DB00
+            and at(0x1008D577, 2) == b"\x6a\x00" and at(0x1008D57C, 2) == b"\x6a\x00"
+            and called(0x1008D57E) == 0x100836F0)
+    buttons = (at(0x100848FF, 6) == hexes("3bbe34050000")
+               and at(0x10084923, 6) == hexes("3bbe50050000")
+               and at(0x10084787, 6) == hexes("3bbe6c050000")
+               and at(0x1008495A, 6) == hexes("89819c000000")
+               and at(0x10084964, 2) == b"\x6a\x02" and called(0x10084966) == 0x10062BC0
+               and called(0x100848E7) == 0x10076D30)
+    telepresence = (at(0x10063EDD, 2) == b"\x6a\x01" and called(0x10063EE1) == 0x10074FF0
+                    and called(0x10063EEC) == 0x10037DD0
+                    and at(0x10063F02, 2) == b"\x6a\x01" and called(0x10063F06) == 0x100A4F90
+                    and at(0x10063F80, 1) == b"\x53" and called(0x10063F83) == 0x10074FF0
+                    and called(0x10063F9F) == 0x10037DA0
+                    and at(0x10063FA4, 2) == b"\x6a\x02" and called(0x10063FA8) == 0x100A4F90)
+    check("iron3d.dll: modes 3 and 4 draw the panel with its column; mode 2 is telepresence",
+          draw and buttons and telepresence,
+          f"modes 3-4 -> 0x1008d51c: unit and building markers, 0x100836f0(0, 0), while "
+          f"mode 2 draws as 0: {draw}; a unit page's three buttons set +0x9c to 0, 1, 2 and "
+          f"push 2: {buttons}; 4>2 takes the unit, view state 1; 2>4 lets it go, the camera "
+          f"back on, view state 2: {telepresence}")
+
+    # Mission 03's bunker, and the lode the camera's box nearly reaches.
+    tma = game / "MISSIONS" / "CAMPAIGN" / "CAMPAIGN.00" / "Mission.03" / "data.tma"
+    if not tma.exists():
+        return
+    m = mission.load(tma)
+    bunker = [o for o in m.objects if o.path.lower().endswith("sbunk01.dat")]
+    lodes = m.lodes
+    placed = (len(bunker) == 1
+              and bunker[0].properties["Type"].value & 0xFFFFFFFF == 0x80010000
+              and bunker[0].properties["ClanID"].value == 2 and len(lodes) == 1)
+    dx = dy = 0.0
+    if placed:
+        dx = lodes[0].position[0] - bunker[0].position[0]
+        dy = lodes[0].position[1] - bunker[0].position[1]
+    check("Mission 03: the Small Bunker is neutral; the lode is 35 m past the camera's box",
+          placed and 234 < -dx < 236 and 128 < dy < 130,
+          f"sbunk01.dat Type 0x80010000, clan 2, at "
+          f"({bunker[0].position[0]:.1f}, {bunker[0].position[1]:.1f}); the one lode "
+          f"{dx:+.1f}, {dy:+.1f} from it" if placed else "no bunker or lode")
+
+
 def check_settings(check, game: Path) -> None:
     """The engine's own configuration files, and which module owns each."""
     registry_path = game / settings.COMPONENTS_FILE
@@ -16762,6 +17004,7 @@ def run(game: Path) -> int:
         check_hud_screens,
         check_factory_screen,
         check_designer_screen,
+        check_command_mode,
         check_settings,
         check_research_streams, check_atmosphere_events,
         check_varset_types, check_profiles, check_walker,

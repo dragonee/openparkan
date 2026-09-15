@@ -374,10 +374,11 @@ generators between the players. `Multi.05`'s `Ntrl` is the exception: type 2.
 
 ## Not established
 
-- What the game view's states 1, 3, 4 and 6 show (`iron3d.dll:0x10062bc0`),
+- What the game view's states 1, 3 and 6 show (`iron3d.dll:0x10062bc0`),
   beyond state 1 being the one boarding a bot enters (state 5 with page 5 is
-  the factory screen, [36-factory.md](36-factory.md)); and what `0x10033e40`
-  refuses on a tower. ~~What `0x1007d0a0` and `0x100a5660` open for a
+  the factory screen, [36-factory.md](36-factory.md); ~~state 4~~ is a bunker's
+  command view, [40-command-mode.md](40-command-mode.md)); and what
+  `0x10033e40` refuses on a tower. ~~What `0x1007d0a0` and `0x100a5660` open for a
   generator, mine, storage or Outpost~~ — **read**: no screen; they select the
   building and make it the interface's current one
   ([Capture](#capture--read)).
