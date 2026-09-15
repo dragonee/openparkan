@@ -769,6 +769,8 @@ struct App {
     /// Real time not yet simulated, ms.
     owed: f64,
     audio: Option<audio::Audio>,
+    /// The CD's music, as `iron3d.dll`'s CD player drives it (docs/34, "Music").
+    cd: Option<parkan_world::music::CdPlayer>,
     started: Instant,
     game: PathBuf,
     /// The game's own key chords, and the scan names held down.
@@ -810,6 +812,33 @@ fn open_briefing(
         .flatten()?;
     play.paused = true;
     Some(briefing)
+}
+
+/// A CD player over the install's tracks, `rand()` seeded from the clock as the shell's
+/// `srand(timeGetTime())` seeds it (`iron3d.dll:0x1000798f`).
+fn cd_player(game: &Path) -> parkan_world::music::CdPlayer {
+    let clock =
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis());
+    parkan_world::music::CdPlayer::open(game, clock as u32)
+}
+
+/// A briefing's start stops the CD and plays its `cd_track`, looping (`iron3d.dll:0x10031431`,
+/// `0x10031500`).
+fn briefing_music(
+    cd: &mut Option<parkan_world::music::CdPlayer>,
+    audio: &mut Option<audio::Audio>,
+    loaded: &scene::Loaded,
+    now_ms: f64,
+) {
+    let Some(cd) = cd.as_mut() else { return };
+    let mut commands = vec![cd.stop()];
+    commands.extend(parkan_world::music::briefing_track(&loaded.dir).and_then(|t| cd.play(t, true)));
+    for command in commands {
+        let length = audio.as_mut().and_then(|a| a.cd(&command));
+        if matches!(command, parkan_world::music::Cd::Play { .. }) {
+            cd.started(now_ms, length.unwrap_or(0.0));
+        }
+    }
 }
 
 /// The mission's theme, looping (docs/34, "Ambient sound").
@@ -897,6 +926,7 @@ impl App {
             }
         }
         self.audio = audio::Audio::open(&self.game);
+        self.cd = Some(cd_player(&self.game));
         if let Some(r) = self.running.as_mut() {
             scene::clear_briefing(&mut r.renderer, &r.gpu.device, &r.gpu.queue);
         }
@@ -904,6 +934,9 @@ impl App {
         self.briefing_clock = None;
         if self.briefing.is_none() {
             theme(&mut self.audio, &self.game, &self.loaded);
+        } else {
+            let now = self.started.elapsed().as_secs_f64() * 1000.0;
+            briefing_music(&mut self.cd, &mut self.audio, &self.loaded, now);
         }
         self.world = world;
         self.play = Some(play);
@@ -1339,6 +1372,16 @@ impl App {
         if let Some(a) = self.audio.as_mut() {
             a.update();
         }
+        // The CD moves on to another track 2 s after one ends, but not in a briefing.
+        if let Some(cd) = self.cd.as_mut() {
+            let now = self.started.elapsed().as_secs_f64() * 1000.0;
+            if let Some(command) = cd.frame(now, self.briefing.is_some()) {
+                let length = self.audio.as_mut().and_then(|a| a.cd(&command));
+                if matches!(command, parkan_world::music::Cd::Play { .. }) {
+                    cd.started(now, length.unwrap_or(0.0));
+                }
+            }
+        }
         let Some(r) = self.running.as_mut() else { return };
         let frame = match r.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(frame) | wgpu::CurrentSurfaceTexture::Suboptimal(frame) => {
@@ -1772,10 +1815,14 @@ fn main() -> Result<()> {
     event_loop.set_control_flow(ControlFlow::Poll);
     let camera = start_camera(&loaded);
     let mut audio = if play.is_some() { audio::Audio::open(&game) } else { None };
+    let mut cd = play.is_some().then(|| cd_player(&game));
+    let started = Instant::now();
     // The theme waits for the briefing's end (`0x10030f10`).
     let briefing = open_briefing(&game, &loaded, &args, play.as_mut());
     if briefing.is_none() {
         theme(&mut audio, &game, &loaded);
+    } else {
+        briefing_music(&mut cd, &mut audio, &loaded, 0.0);
     }
     let mut app = App {
         loaded,
@@ -1798,7 +1845,8 @@ fn main() -> Result<()> {
         last: Instant::now(),
         owed: 0.0,
         audio,
-        started: Instant::now(),
+        cd,
+        started,
         game: game.clone(),
         bindings: scene::bindings(&game),
         scans: HashSet::new(),

@@ -16,6 +16,7 @@ pub mod fx;
 pub mod hero;
 pub mod hud;
 pub mod models;
+pub mod music;
 pub mod pick;
 pub mod places;
 pub mod play;

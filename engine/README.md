@@ -575,6 +575,12 @@ presses a hero standing at it down), and which of Mission 04's units holds no mi
   plain set of acknowledgements, never the voice given last, queued behind the voices before
   it. On Mission 01 `tut1_mf1` answers plainly and `helic` in the `_S` voice, as the
   recording's pair does; Mission 04's HQ, boarded at once, says nothing.
+- The music plays (docs/34, "Music: the CD's tracks"): the CD's tracks, which the install ships
+  as `MUSIC/Track02.ogg` to `Track10.ogg`, streamed through kira's Ogg Vorbis decoder. As
+  `iron3d.dll`'s CD player drives them, a mission starts a random track, or with a briefing
+  stops the CD and plays its `cd_track` looping and starts a random track on the first frame
+  after it; 2 s after a track ends another follows, never the one just played and never the
+  data track, `rand()` seeded from the clock. `PLAY_CD_MUSIC=0` keeps it silent.
 
 This directory also holds what the rest will follow:
 
@@ -833,6 +839,8 @@ a row here. A row leaves this table when research closes it.
 | M14 | Where a batch word's 8 and `0x100`, which file a batch translucent, come from; which sort type each of the render queue's layers has | no batch word makes a batch translucent, and a look is translucent when any of its phases has an ambient alpha below 1, decided once; groups draw mode by mode in their list, unsorted | [07](../docs/07-objects.md#what-a-blended-batch-writes-and-the-alpha-tests-reference--read) |
 | M14 | With which depth state the beacon lights (flags 0x400 and 0x800, no bit-8 emitter) draw in the pass flag 0x800 waits for: by the read path their 9 m glow is depth-tested and cut by the faces it hangs on | every sprite of a flag-0x400 effect draws over the scene while its tested point is in view, as a bit-8 emitter's does | [11](../docs/11-effects.md#a-beacon-lights-glow--read-in-part-and-measured) |
 | M14 | What silences the hero's breath in its own view: its effect is read to run, its loop inside its near distance, and the recording has none of it | the hero's own turret effects flagged `0x800` (`hero_breath`; `hero_helm_light` is a light) play no sound | [11](../docs/11-effects.md#how-a-sound-is-heard--read-and-measured) |
+| M14 | How many tracks the install's `winmm.dll` reports for its `MUSIC` files | the highest `TrackNN.ogg` present; a track with no file is not audio | [34](../docs/34-progression.md#music-the-cds-tracks--read-and-measured) |
+| M14 | How `CD_VOLUME` and `SFX_VOLUME`, each a share of a mixer control, become loudness | the music plays at the sounds' level, as the install's equal settings and Mission 01's recording have it | [34](../docs/34-progression.md#music-the-cds-tracks--read-and-measured) |
 
 ### Read since the stand-in was written
 

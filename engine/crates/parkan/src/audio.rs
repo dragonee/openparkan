@@ -1,5 +1,5 @@
 //! Sound: the effects' cues played from `sounds.lib` through kira, the voices the game
-//! queues, and a mission's ambient theme.
+//! queues, a mission's ambient theme, and the music, the CD's tracks as Ogg files.
 
 use std::collections::{HashMap, VecDeque};
 use std::io::Cursor;
@@ -7,12 +7,14 @@ use std::path::Path;
 use std::time::Duration;
 
 use glam::Vec3;
-use kira::sound::PlaybackState;
 use kira::sound::static_sound::{StaticSoundData, StaticSoundHandle};
+use kira::sound::streaming::{StreamingSoundData, StreamingSoundHandle};
+use kira::sound::{FromFileError, PlaybackState};
 use kira::{AudioManager, AudioManagerSettings, Decibels, DefaultBackend, Panning, Tween};
 use parkan_formats::gamedir;
 use parkan_formats::nres::Archive;
 use parkan_sim::effects::{Cue, CueKind};
+use parkan_world::music::Cd;
 use parkan_world::resources::Sound;
 
 pub struct Audio {
@@ -28,6 +30,8 @@ pub struct Audio {
     loops: HashMap<(u64, usize), StaticSoundHandle>,
     /// The last one-shot each emitter played, which it stops before playing again.
     onces: HashMap<(u64, usize), StaticSoundHandle>,
+    /// The CD track playing.
+    music: Option<StreamingSoundHandle<FromFileError>>,
 }
 
 /// How loud a cue is heard `distance` away, as Direct3D Sound hears a buffer whose
@@ -63,6 +67,7 @@ impl Audio {
                 voice: None,
                 loops: HashMap::new(),
                 onces: HashMap::new(),
+                music: None,
             }),
             Err(e) => {
                 eprintln!("no sound: {e}");
@@ -123,6 +128,35 @@ impl Audio {
     pub fn theme(&mut self, sound: &Sound) {
         if let Some(data) = self.named(sound) {
             let _ = self.manager.play(data.loop_region(..));
+        }
+    }
+
+    /// The CD: a track played from its file, or silence. Returns a started track's length in
+    /// milliseconds, 0 for one that cannot be played.
+    ///
+    /// STAND-IN: docs/34-progression.md#music-the-cds-tracks--read-and-measured -- how a
+    /// mixer control's share becomes loudness is not read: the music plays at the sounds'
+    /// level, as the install's equal `CD_VOLUME` and `SFX_VOLUME` and Mission 01's recording
+    /// have it.
+    pub fn cd(&mut self, command: &Cd) -> Option<f64> {
+        if let Some(mut playing) = self.music.take() {
+            playing.stop(Tween::default());
+        }
+        let Cd::Play { path, .. } = command else { return None };
+        // A looping track is played again by the player, 2 s after it ends.
+        let started = StreamingSoundData::from_file(path)
+            .map_err(|e| eprintln!("no music: {e}"))
+            .ok()
+            .and_then(|data| {
+                let length = data.duration().as_secs_f64() * 1000.0;
+                self.manager.play(data).ok().map(|handle| (handle, length))
+            });
+        match started {
+            Some((handle, length)) => {
+                self.music = Some(handle);
+                Some(length)
+            }
+            None => Some(0.0),
         }
     }
 
@@ -209,6 +243,24 @@ mod tests {
             .collect();
         assert_eq!(archive.entries.len(), 167);
         assert!(bad.is_empty(), "{bad:?}");
+    }
+
+    #[test]
+    #[ignore = "needs the game install"]
+    fn every_cd_track_the_player_can_pick_opens_as_ogg_vorbis() {
+        let game = gamedir::find(None).expect("a Parkan install: set PARKAN_DIR");
+        let mut cd = parkan_world::music::CdPlayer::open(&game, 1);
+        let mut tracks = std::collections::BTreeMap::new();
+        for _ in 0..200 {
+            if let Some(Cd::Play { track, path, looping }) = cd.random(false) {
+                assert!(!looping);
+                let data = StreamingSoundData::from_file(&path).expect("an Ogg Vorbis track");
+                tracks.entry(track).or_insert_with(|| data.duration().as_secs_f64());
+            }
+        }
+        // docs/34: tracks 2 to 10, 223 to 317 s long.
+        assert_eq!(tracks.keys().copied().collect::<Vec<_>>(), (2..=10).collect::<Vec<u32>>());
+        assert!(tracks.values().all(|&s| (220.0..320.0).contains(&s)), "{tracks:?}");
     }
 
     #[test]
