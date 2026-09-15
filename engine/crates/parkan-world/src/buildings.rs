@@ -41,7 +41,8 @@ pub enum Child {
     Robot(usize),
 }
 
-/// A child's position (for the pod) and its bounding sphere (for the doors).
+/// A child's position, and its bounding sphere: the doors measure the sphere, and the pod
+/// its centre (`Terrain.dll:0x10059ff1`).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Standing {
     pub child: Child,
@@ -63,6 +64,8 @@ pub struct Door {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Pod {
     pub item: Item,
+    /// The first node its item plays (`Terrain.dll:0x100583a2`), whose sphere the zone is
+    /// measured across the ground by.
     pub node: usize,
     pub phase: Phase,
     /// Who switched it on, and whether its capture has fired for them.
@@ -150,7 +153,11 @@ impl Building {
                 })
                 .collect();
             let pod = items(&controller, COMPUTER_TYPE).into_iter().next().map(|item| Pod {
-                node: controller.components[item.component].node.max(0) as usize,
+                node: item
+                    .channels
+                    .iter()
+                    .find_map(|c| usize::try_from(c.node).ok())
+                    .unwrap_or(controller.components[item.component].node.max(0) as usize),
                 item,
                 phase: Phase::Shut,
                 occupant: None,
@@ -228,18 +235,33 @@ impl Building {
         self.zone.map(|z| z.0)
     }
 
-    /// Whether `at` is in the pod's zone: within 0.8 of the pod part's radius across the
-    /// ground of its centre, and within its box in height (`0x10059d80`).
-    ///
-    /// STAND-IN: docs/24-motion.md#walking-into-a-building--read-and-measured -- which node's
-    /// box bounds the zone in height (`0x10058607`) is not read. The pod node's own level-0
-    /// box is under a metre tall and above the floor a unit stands on (0.9 on Mission 02's
-    /// Large Factory), and the Outpost's pod node plays 8.7 m up to its first frame, so the
-    /// pod node's sphere as placed, at rest, bounds the zone in height.
-    pub fn in_zone(&self, _part: &Part, at: Vec3) -> bool {
-        let Some((centre, radius)) = self.zone else { return false };
-        centre.truncate().distance(at.truncate()) <= POD_ZONE_SHARE * radius
-            && (at.z - centre.z).abs() <= radius
+    /// The heights the pod's zone lies between: the z of the first and last corners of its
+    /// node's parent's level-0 box, the current damage variant's, in the world
+    /// (`Terrain.dll:0x10059ec8`, `IJointMesh` slot 4).
+    pub fn zone_heights(&self, part: &Part) -> Option<(f32, f32)> {
+        let pod = self.pod.as_ref()?;
+        let parent = usize::from(part.mesh.nodes.get(pod.node)?.parent);
+        let node = part.mesh.nodes.get(parent)?;
+        let slot = part
+            .slot(parent)
+            .or_else(|| Some(node.slot_index[0]).filter(|&s| s != parkan_formats::mesh::NO_SLOT))?;
+        let slot = part.mesh.slots.get(usize::from(slot))?;
+        let pose = part.nodes.get(parent)?;
+        let z = |corner: [f32; 3]| pose.apply(corner.map(|v| f64::from(v * part.scale)))[2] as f32;
+        let (a, b) = (z(slot.aabb_min), z(slot.aabb_max));
+        Some((a.min(b), a.max(b)))
+    }
+
+    /// Whether a child whose bounding sphere is centred at `at` is in the pod's zone
+    /// (`Terrain.dll:0x10059d80`): across the ground within 0.8 of the radius of the pod
+    /// node's level-0 sphere, and in height between the corners of its parent's box
+    /// (docs/27, "The zone's height is the pod node's parent's box").
+    pub fn in_zone(&self, part: &Part, at: Vec3) -> bool {
+        let Some((centre, radius)) = self.pod.as_ref().and_then(|p| Self::sphere(part, p.node)) else {
+            return false;
+        };
+        let Some((low, high)) = self.zone_heights(part) else { return false };
+        centre.truncate().distance(at.truncate()) <= POD_ZONE_SHARE * radius && (low..=high).contains(&at.z)
     }
 
     /// One tick at `now_ms` with the units standing on the building: the doors open for a
@@ -287,7 +309,7 @@ impl Building {
 
     fn tick_pod(&mut self, now_ms: f64, part: &Part, children: &[Standing]) -> Option<Fired> {
         let inside: Vec<Child> =
-            children.iter().filter(|c| self.in_zone(part, c.position)).map(|c| c.child).collect();
+            children.iter().filter(|c| self.in_zone(part, c.centre)).map(|c| c.child).collect();
         let target = self.target;
         let pod = self.pod.as_mut()?;
         pod.item.tick(now_ms, &Motion::default(), true);

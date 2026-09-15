@@ -10,6 +10,7 @@ pub const MARKERS: [&str; 3] = ["Textures.lib", "MISSIONS", "DATA"];
 /// Mission 01, *Line of Fire*: the first campaign mission.
 pub const MISSION_01: &str = "MISSIONS/CAMPAIGN/CAMPAIGN.00/Mission.01";
 pub const MISSION_02: &str = "MISSIONS/CAMPAIGN/CAMPAIGN.00/Mission.02";
+pub const MISSION_03: &str = "MISSIONS/CAMPAIGN/CAMPAIGN.00/Mission.03";
 
 pub fn looks_like_install(path: &Path) -> bool {
     MARKERS.iter().all(|m| path.join(m).exists())

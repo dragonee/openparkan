@@ -1969,3 +1969,95 @@ fn mission_02s_hero_walks_in_by_the_factorys_west_door_down_to_its_pod_and_captu
     assert!((at.z - 140.7).abs() < 1.0, "on the pod room's floor: {at}");
     assert!(matches!(play.mode(), Mode::Factory(0)), "the pod captured the factory and opened its screen");
 }
+
+fn mission_03_play() -> (parkan_world::play::Play, parkan_formats::mission::Mission) {
+    use parkan_formats::mission;
+    use parkan_world::play::Play;
+
+    let game = gamedir::find(None).expect("a Parkan install: set PARKAN_DIR");
+    let dir = gamedir::resolve(&game, gamedir::MISSION_03).unwrap();
+    let m = mission::parse(&std::fs::read(dir.join("data.tma")).unwrap(), "Mission.03").unwrap();
+    let mut play = Play::load(&game, &m).unwrap().expect("Mission 03 has a hero");
+    play.load_progression(&game, &dir, &m).unwrap();
+    (play, m)
+}
+
+/// The target of the mission object whose path ends in `name`.
+fn object_target(play: &parkan_world::play::Play, m: &parkan_formats::mission::Mission, name: &str) -> usize {
+    play.battle
+        .objects
+        .iter()
+        .position(|&o| m.objects[o].path.to_ascii_lowercase().ends_with(name))
+        .unwrap_or_else(|| panic!("no {name}"))
+}
+
+#[test]
+#[ignore = "needs the game install"]
+fn every_mission_03_pod_holds_a_hero_on_its_floor_between_its_parents_box_and_fires() {
+    use parkan_world::buildings::Phase;
+
+    // docs/27, "The zone's height is the pod node's parent's box": the node the pod plays, its
+    // parent, and the parent's box in model space.
+    let expected = [
+        ("gener01.dat", 4, 3, (-12.48, -6.72)),
+        ("sbunk01.dat", 5, 4, (-13.96, -3.41)),
+        ("sstore01.dat", 11, 10, (-29.24, -18.69)),
+        ("lplant01.dat", 25, 23, (-14.32, -3.77)),
+    ];
+    for (name, pod_node, parent, (low, high)) in expected {
+        let (mut play, m) = mission_03_play();
+        let t = object_target(&play, &m, name);
+        let b = play.buildings.iter().position(|b| b.target == t).expect("a pod");
+        let building = &play.buildings[b];
+        let part = &play.battle.combat.targets[t].parts[building.part];
+        let pod = building.pod.as_ref().unwrap();
+        assert_eq!((pod.node, usize::from(part.mesh.nodes[pod.node].parent)), (pod_node, parent), "{name}");
+        let z = play.battle.combat.targets[t].position.z;
+        let (l, h) = building.zone_heights(part).unwrap();
+        assert!((l - z - low).abs() < 0.02 && (h - z - high).abs() < 0.02, "{name}: {l} to {h} over {z}");
+        assert!(play.stand_on_pod(t), "{name}");
+        let mut fired_at = None;
+        for tick in 0..(60 * 8) {
+            play.update_input();
+            play.tick(1000.0 / 60.0, [0.0; 2]);
+            if play.buildings[b].pod.as_ref().unwrap().fired {
+                fired_at = Some(tick);
+                break;
+            }
+        }
+        let centre = play.hero.collision_centre();
+        let feet = play.hero.walker.body.position;
+        assert!(
+            fired_at.is_some(),
+            "{name}: the hero's centre {centre} (feet {feet}) stands between {l} and {h}; phase {:?}",
+            play.buildings[b].pod.as_ref().map(|p| p.phase)
+        );
+        assert_ne!(play.buildings[b].pod.as_ref().unwrap().phase, Phase::Shut);
+    }
+}
+
+#[test]
+#[ignore = "needs the game install"]
+fn mission_03s_hero_on_the_generators_pod_captures_it_and_completes_the_first_objective() {
+    use parkan_world::progress::{Say, Sender};
+
+    let (mut play, m) = mission_03_play();
+    let t = object_target(&play, &m, "gener01.dat");
+    assert_eq!(play.units[t].clan, Some(2), "neutral");
+    assert!(play.stand_on_pod(t));
+    let mut says = Vec::new();
+    for _ in 0..(60 * 6) {
+        play.update_input();
+        play.tick(1000.0 / 60.0, [0.0; 2]);
+        says.append(&mut play.says);
+    }
+    assert_eq!(play.units[t].clan, Some(play.player_clan));
+    assert!(
+        says.iter().any(|s| matches!(s, Say::Text(Sender::System, text) if text == "Building is captured")),
+        "{says:?}"
+    );
+    // `CLASS_BUILDING|7` is the generator's (docs/34, "Mission 03").
+    let p = play.progression.as_ref().unwrap();
+    assert_eq!(p.progress.owner(0x8000_0007_u32 as i32), 0);
+    assert_eq!(p.progress.objectives[0].state, 1, "Find and capture the Power Generator");
+}

@@ -277,6 +277,13 @@ pod (the recording's hero takes the west side door); the chimney smoke is orange
 where the recording's is black; the designer's save and load;
 the own panel's unit while aboard.
 
+**M12.** Mission 03, *The Field Base*.
+
+- A pod's zone is measured as read: a child's bounding-sphere centre within 0.8 of
+  the pod node's sphere across the ground, and between the heights of the pod
+  node's parent's level-0 box. Every pod of Mission 03 fires for a hero on its
+  floor, the Small Generator's too.
+
 This directory also holds what the rest will follow:
 
 - **`docs/`** is the source of truth. Every behaviour the engine implements is
@@ -508,7 +515,6 @@ engine pass replaces each with what was read and removes its row.
 | M10 | What a device's byte 0 of 1 adds from the machine's list at `+0xc4` | nothing: its channels hold their initial values (no Mission 01 unit has one) | [28](../docs/28-chassis.md#not-established) |
 | M11 | What `CBuilding` does to a door's or a computer's switch word as it files the item (the records leave the constructor's 5, which wraps for ever) | a door and a pod start shut, word 0 and progress 0 | [24](../docs/24-motion.md#walking-into-a-building--read-and-measured) |
 | M11 | The capsule a door's part is measured against (`Terrain.dll:0x1005a27f`) | the door node's level-0 slot sphere; the holds are worked out from every child each tick rather than on each child's move | [24](../docs/24-motion.md#walking-into-a-building--read-and-measured) |
-| M11 | Which node's box bounds a pod's zone in height (`0x10058607`) | the pod node's sphere as placed, at rest: its own level-0 box is under a metre tall and above the floor a unit stands on, and the Outpost's pod node plays 8.7 m up | [24](../docs/24-motion.md#walking-into-a-building--read-and-measured) |
 | M11 | A clan's ore stores and power distribution, which a build draws on | a build's ore request is granted in full and its power taken as available, at efficiency 1 and a use of 1 a second | [23](../docs/23-economy.md#construction--read) |
 | M11 | What the factory screen's Ore and Energy rows hold with no economy modelled | Ore 0, as with no mine or storage; Energy the player's generators' share of the map's | [23](../docs/23-economy.md#what-the-hud-shows--read) |
 | M11 | The fill colour the resource rows hand their bar | the weapons list's: red under 20%, olive under 80%, green above | [36](../docs/36-factory.md#the-resource-rows) |
