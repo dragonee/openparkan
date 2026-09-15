@@ -1144,15 +1144,17 @@ finished (`+0x3c`).
 track index 0; with two and track 1 not audio, index 1; with more, `rand()` over
 the count until the pick differs from the track playing and is not index 0
 unless track 1 is audio. So the install's CD plays a random one of tracks 2 to
-10, never the same twice running.
+10, never the same twice running. `rand()` is the C library's
+(`0x100b47d0`), seeded once from `timeGetTime()` (`0x1000798f`).
 
 **When** (`iron3d.dll`):
 
 - **At a mission's load**, unless a briefing is running (state word 5), a random
   track (`0x1005e1ca`).
-- **At a briefing's start** the CD stops (`0x10031431`), and `mission.cfg`'s
-  `cd_track`, when there is one, plays looping (`0x10031500`; its argument 1
-  becomes the loop flag 2).
+- **At a briefing's start** the CD stops (`0x10031431`), and the `briefing`
+  object's `cd_track` in `mission.cfg`, when there is one, plays looping as a track
+  index, so CD track `cd_track` + 1 (`0x10031500`; its argument 1 becomes the loop
+  flag 2).
 - **Every game frame outside a briefing**, when the player's track is marked
   finished, another random track (`0x1005ea34`–`0x1005ea4e`, no loop).
 

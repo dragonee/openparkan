@@ -28792,3 +28792,11 @@ kind = "site"
 name = "Enter on a neutral unit not boarded: its record +0x30 picks an acknowledgement voice (0x1008e840), queued through 0x10061ac0"
 read = true
 doc = "docs/27-ownership.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1000798f"
+kind = "site"
+name = "srand(timeGetTime()): the seed the CD player's rand() picks tracks from"
+read = true
+doc = "docs/34-progression.md"
