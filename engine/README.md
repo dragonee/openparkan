@@ -494,6 +494,14 @@ presses a hero standing at it down), and which of Mission 04's units holds no mi
   key works the angle out again, W or S let go under one leaves the strafe going at full speed,
   and a walk key let go while the other is held walks the other way. A key row without a ramp
   runs once as its key goes down or comes up, as read (docs/14, "A row that stays down").
+- A selected guided gun draws its lock (docs/35, "The guided lock"). While its report is
+  locking or locked, its round is one of the 20 with a seeker (frame `+116` of 16), it has
+  rounds and its share is not 0, four 9 × 9 corners of `page9` close from the HUD's (30, 30)
+  and (630, 450) onto 20 about the target's projection, each lock after the first 4 further
+  out. The share is 1 − the lock left ÷ value 9, kept every tick and held once locked; the
+  corners' green runs from 205 to 255 with it. `TARGET_ZOOM` beeps past 0.35 s since the last
+  beep while locking, and `TARGET_READY` past 0.2 s once locked. The locks draw while the
+  satellite map is open too. On Mission 01 the missiles, 60 m off a dummy, lock in 4 s.
 
 This directory also holds what the rest will follow:
 
@@ -536,7 +544,9 @@ the window, which lets every key up as the game does, centres the view again.
 Cmd frees the cursor and lets every key up too, so a macOS shortcut such as
 Cmd-Shift-4, which takes the keyboard without the window losing focus, leaves
 nothing held.
-1 to 4 select guns and the left button fires. The game's
+1 to 4 select guns and the left button fires; a selected plasma rifle or missile launcher
+closes its lock's corners on the target and beeps as it locks (`--face l_targ.dat,60 --hold
+SCAN_W_4 --ticks 150` draws the missiles half locked). The game's
 own chords from `ui_other.man` pick targets: Tab the next listed, E the next
 or nearest enemy, T a friend, the right button what the view points at; Enter
 captures a neutral unit within 20 m. A click grabs the mouse; Escape lets it
@@ -733,6 +743,7 @@ a row here. A row leaves this table when research closes it.
 | M13 | The random source of a place set's and a place's 64 ms share (`0x1004c550`) | a 32-bit xorshift per building | [27](../docs/27-ownership.md#who-stands-in-a-place--read) |
 | M13 | Whether a destroyed generator stays in `World3D.dll`'s queue 3, which the in place's power walk reads | the live generators are asked | [27](../docs/27-ownership.md#teleport-in-0x8000--read) |
 | M13 | Which of Mission 04's hero, helicopter and HQ holds no mind: the recording's factory shows one free of three once all three are the player's, and Mission 02's shows the hero holding one | a unit the hero's Enter took holds none | [34](../docs/34-progression.md#mission-04-teleport-end-to-end--derived) |
+| M14 | The target point the guided lock projects (the target list's `+4`), and whether `getTimer`, which times its beeps, runs on a clock or on `timeGetTime` | the target's sphere centre, as the target panel's frame takes it; game time | [35](../docs/35-hud.md#the-guided-lock--read) |
 
 ### Read since the stand-in was written
 

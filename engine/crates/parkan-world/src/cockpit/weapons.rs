@@ -2,10 +2,12 @@
 //! laid right to left from x 640 out of `ui/compaund.cfg`'s pieces. See `docs/35-hud.md`,
 //! "The weapons list".
 
-use parkan_sim::guns::{GATE_NO_TARGET, GATE_OFF_BARREL, GATE_OUT_OF_RANGE, Gun, UNLIMITED};
+use glam::Mat4;
+use parkan_sim::guns::{GATE_NO_TARGET, GATE_OFF_BARREL, GATE_OUT_OF_RANGE, Gun, LOCK_DRAWN, UNLIMITED};
 use parkan_sim::orders::State;
 
-use super::{Cockpit, Ink, WHITE};
+use super::{Cockpit, Ink, WHITE, argb};
+use crate::hud::{Piece, Pin};
 use crate::play::Play;
 
 pub const ROW_HEIGHT: f32 = 19.0;
@@ -66,9 +68,106 @@ pub fn fill_colour(percent: i32) -> u32 {
     }
 }
 
-/// The three latches each gun keeps for its voices: no rounds, no energy, destroyed.
+/// The guided lock's corner, cut from `page9` four ways (`0x1009cc50`): top left, top right,
+/// bottom right and bottom left, each its source and its quarter turns.
+pub const LOCK_CORNERS: [([f32; 4], u8); 4] = [
+    ([0.0, 32.0, 9.0, 9.0], 0),
+    ([0.0, 32.0, 9.0, 9.0], 1),
+    ([-1.0, 31.0, 9.0, 9.0], 2),
+    ([-1.0, 31.0, 9.0, 9.0], 3),
+];
+pub const LOCK_CORNER: f32 = 9.0;
+/// How much further out each lock drawn after the first stands (`0x1009d04d`).
+pub const LOCK_NEST: f32 = 4.0;
+/// The lock's beeps and how long each waits after the last (`0x1009d06e`, `0x1009d109`).
+pub const TARGET_ZOOM: &str = "TARGET_ZOOM";
+pub const TARGET_READY: &str = "TARGET_READY";
+pub const ZOOM_EVERY_S: f64 = 0.35;
+pub const READY_EVERY_S: f64 = 0.2;
+
+/// The three latches each gun keeps for its voices (no rounds, no energy, destroyed), and
+/// the stamp the lock's beeps are timed from (`+0x59c`), one for every row.
 #[derive(Clone, Debug, Default)]
-pub struct Latches(Vec<[bool; 3]>);
+pub struct Latches {
+    latches: Vec<[bool; 3]>,
+    pub beep_ms: f64,
+}
+
+/// A lock's left, top, right and bottom edges on the layout about the target's projection
+/// `at`, its share `f` done, `nest` further out (`0x1009cede`–`0x1009d048`): from (30, 30)
+/// and (630, 450) at 0 to 20 about the target at 1, each rounded to the nearest (`fistp`).
+pub fn lock_edges([x, y]: [f32; 2], f: f32, nest: f32) -> [f32; 4] {
+    let r = f32::round_ties_even;
+    [
+        r((x - 50.0) * f + 30.0 - nest),
+        r((y - 50.0) * f + 30.0 - nest),
+        r((x - 610.0) * f + 630.0 + nest),
+        r((y - 430.0) * f + 450.0 + nest),
+    ]
+}
+
+/// A lock's colour at share `f` (`0x1009ce84`): `0xff14GG14`, GG = 205 − round(f × −50).
+pub fn lock_colour(f: f32) -> u32 {
+    let green = (205 - (f * -50.0).round_ties_even() as i32).clamp(0, 255) as u32;
+    0xff14_0014 | (green << 8)
+}
+
+/// Whether a gun draws its lock now (`0x1009ce00`–`0x1009ce41`): its report 0 or 1, its round
+/// marked 16, selected, with rounds (an unlimited −1 too), and a share that is not 0. The
+/// target and its projection are the caller's.
+pub fn draws_lock(gun: &Gun, report: i32) -> bool {
+    matches!(report, 0 | 1)
+        && gun.round_flags == LOCK_DRAWN
+        && gun.selected
+        && gun.rounds != 0
+        && gun.lock_share != 0.0
+}
+
+/// The guided locks of the driven unit's guns, in list order, about the target's projection
+/// through `view_proj`, and the beeps they play (docs/35-hud.md, "The guided lock"). They are
+/// drawn while the satellite map is open too.
+///
+/// STAND-IN: docs/35-hud.md#the-guided-lock--read -- the target's point the lock projects
+/// (the list's `+4`) is taken as its sphere's centre, as the target panel's frame takes it;
+/// and whether `getTimer`, which times the beeps, runs on a clock is not read: game time.
+pub fn locks(cockpit: &mut Cockpit, ink: &mut Ink, play: &Play, view_proj: Mat4) -> Vec<&'static str> {
+    let now_ms = play.hero.time_ms;
+    let mut sounds = Vec::new();
+    let (Some(t), Some(&page)) = (play.targets.current, cockpit.pages.get("page9")) else { return sounds };
+    let Some(target) = play.battle.combat.targets.get(t) else { return sounds };
+    let clip = view_proj * target.centre.extend(1.0);
+    if clip.w <= 1e-6 {
+        return sounds;
+    }
+    let space = ink.painter.space;
+    let pixel = [(clip.x / clip.w + 1.0) * 0.5 * space.width, (1.0 - clip.y / clip.w) * 0.5 * space.height];
+    let at = space.layout(pixel, Pin::CENTRE);
+    let pin = std::mem::replace(&mut ink.painter.pin, Pin::CENTRE);
+    let mut nest = 0.0;
+    for gun in &play.driven().guns {
+        let report = gun.lamp_report(now_ms);
+        if !draws_lock(gun, report) {
+            continue;
+        }
+        let [l, top, r, b] = lock_edges(at, gun.lock_share, nest);
+        let c = LOCK_CORNER;
+        let colour = argb(lock_colour(gun.lock_share));
+        let rects =
+            [[l, top, l + c, top + c], [r - c, top, r, top + c], [r - c, b - c, r, b], [l, b - c, l + c, b]];
+        for ((rect, turns), quad) in LOCK_CORNERS.into_iter().zip(rects) {
+            ink.painter.piece(Piece { page, rect, turns }, quad, colour);
+        }
+        nest += LOCK_NEST;
+        let (every, beep) =
+            if report == 1 { (ZOOM_EVERY_S, TARGET_ZOOM) } else { (READY_EVERY_S, TARGET_READY) };
+        if (now_ms - cockpit.weapons.beep_ms) * 0.001 > every {
+            cockpit.weapons.beep_ms = now_ms;
+            sounds.push(beep);
+        }
+    }
+    ink.painter.pin = pin;
+    sounds
+}
 
 /// The list for the driven unit's guns, and the voices a latch rising plays.
 pub fn draw(cockpit: &mut Cockpit, ink: &mut Ink, play: &Play) -> Vec<&'static str> {
@@ -76,7 +175,7 @@ pub fn draw(cockpit: &mut Cockpit, ink: &mut Ink, play: &Play) -> Vec<&'static s
     let selecting = play.selector.state != State::Off;
     let guns = &play.driven().guns;
     let mut voices = Vec::new();
-    cockpit.weapons.0.resize(guns.len(), [false; 3]);
+    cockpit.weapons.latches.resize(guns.len(), [false; 3]);
     let top = (ink.font.line_height).round();
     let text_down = ((ROW_HEIGHT - top) / 2.0).floor();
     for (i, gun) in guns.iter().enumerate() {
@@ -146,7 +245,7 @@ pub fn draw(cockpit: &mut Cockpit, ink: &mut Ink, play: &Play) -> Vec<&'static s
         piece(ink, &mut pen, "ccres_ray_ending", 6.0);
 
         // `0x1009d5ba`–`0x1009d834`: each voice once, as its latch rises.
-        let latches = &mut cockpit.weapons.0[i];
+        let latches = &mut cockpit.weapons.latches[i];
         let now = [gun.rounds == 0, gun.capacitor > 0.0 && gun.charge < 0.01, false];
         for (k, voice) in [VOICE_AMMO_OUT, VOICE_ENERGY_OUT, VOICE_WEAPON_DESTROYED].into_iter().enumerate() {
             if now[k] && !latches[k] {
@@ -166,6 +265,14 @@ mod tests {
     fn a_selected_guns_lamp_follows_its_report_and_an_unselected_one_is_black() {
         assert_eq!(lamp(false, 0), 4);
         assert_eq!([0, 1, 2, 3, 4, 5, 6, 7, 8].map(|r| lamp(true, r)), [3, 2, 2, 2, 1, 0, 1, 2, 2]);
+    }
+
+    #[test]
+    fn a_lock_closes_from_the_huds_edges_to_twenty_about_the_target_and_brightens() {
+        assert_eq!(lock_edges([320.0, 240.0], 0.0, 0.0), [30.0, 30.0, 630.0, 450.0]);
+        assert_eq!(lock_edges([320.0, 240.0], 1.0, 0.0), [300.0, 220.0, 340.0, 260.0]);
+        assert_eq!(lock_edges([100.0, 400.0], 0.5, 4.0), [51.0, 201.0, 379.0, 439.0]);
+        assert_eq!([0.0, 0.5, 1.0].map(lock_colour), [0xff14_cd14, 0xff14_e614, 0xff14_ff14]);
     }
 
     #[test]

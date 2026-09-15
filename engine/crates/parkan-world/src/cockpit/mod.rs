@@ -258,8 +258,9 @@ impl Cockpit {
         }
         let mut voices = Vec::new();
         let water_level = self.water_level;
-        let sounds = radar::draw(self, &mut ink, play, water_level);
+        let mut sounds = radar::draw(self, &mut ink, play, water_level);
         let views = panels::draw(self, &mut ink, play, view_proj, now_ms);
+        sounds.extend(weapons::locks(self, &mut ink, play, view_proj));
         ink.painter.pin = Pin::TOP_RIGHT;
         if !self.map.open {
             voices.extend(weapons::draw(self, &mut ink, play));

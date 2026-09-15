@@ -24,6 +24,10 @@ pub const CONTINUE_FIGHT: i32 = 0x100;
 pub const SINGLE_FIGHT: i32 = 0x200;
 /// Barrel stroke steps, counting down (`0x1002a190`).
 const STROKE: u8 = 4;
+/// A round's frame `+116` for which the HUD draws a guided lock (`iron3d.dll:0x1009ce0d`):
+/// every round with a seeker, and no other (docs/35-hud.md, "The guided lock").
+pub const LOCK_DRAWN: i32 = 16;
+
 /// What a gun reports of its target gate (`+0x11c`): a shot may go, no target, the
 /// target out of range, the target off the barrel.
 pub const GATE_CLEAR: i32 = 1;
@@ -147,6 +151,11 @@ pub struct Gun {
     /// The lock left, s (`+0x170`), and the gate's last report.
     pub lock: f32,
     pub report: i32,
+    /// The word its round's frame keeps at `+116`, which the gun copies with the rest of
+    /// the frame's block at link (`0x100297a4`); the HUD draws a lock for [`LOCK_DRAWN`].
+    pub round_flags: i32,
+    /// The lock's share (`+0x17c`, property `0xf00`), which slot 10 keeps every frame.
+    pub lock_share: f32,
     last_wake_ms: f64,
     start_ms: f64,
     next_ms: f64,
@@ -193,6 +202,8 @@ impl Gun {
             target: None,
             lock: TargetGate::NONE.lock_s,
             report: GATE_NO_TARGET,
+            round_flags: 0,
+            lock_share: 0.0,
             last_wake_ms: 0.0,
             start_ms: 0.0,
             next_ms: 0.0,
@@ -289,7 +300,21 @@ impl Gun {
             self.started = true;
             guard += 1;
         }
+        self.keep_share(now_ms);
         shots
+    }
+
+    /// Slot 10 after the events (`0x10029be0`, from the time driver at `0x1002d317`): while
+    /// locking, the share is 1 − the lock left ÷ value 9 (1 with no lock), held to 0..1;
+    /// in any other report it stays. Slot 10 also writes the wait's progress while the gun
+    /// waits its interval (report 4), which nothing drawn reads: the lock draws only in
+    /// reports 0 and 1, and a lock starts again at a share of 0.
+    fn keep_share(&mut self, now_ms: f64) {
+        if self.lamp_report(now_ms) == 1 {
+            let lock_s = self.gate.lock_s;
+            let share = if lock_s > 0.0 { 1.0 - self.lock / lock_s } else { 1.0 };
+            self.lock_share = share.clamp(0.0, 1.0);
+        }
     }
 
     /// `0x10029ca0`: continue a stroke, or start one when the gun has rounds, charge,
@@ -530,6 +555,30 @@ mod tests {
         cannon.link(TargetGate::new(500.0, None));
         assert!(!cannon.gate.guided());
         assert_eq!(hold(&mut cannon, 1000.0).len(), 4);
+    }
+
+    #[test]
+    fn a_locking_guns_share_grows_to_the_lock_and_stays_once_locked() {
+        let mut g = gun([-1.0, 0.0, 0.0, 250.0], &[2.0]);
+        g.link(TargetGate::new(150.0, Some((0.25, 500.0, 250.0))));
+        g.sight = Sight { unit: Vec3::ZERO, barrel: Vec3::Y, target: Some(Vec3::new(0.0, 100.0, 0.0)) };
+        let step = 1000.0 / 60.0;
+        let mut t = 0.0;
+        let mut shares = Vec::new();
+        while t <= 500.0 {
+            g.tick(t);
+            shares.push((t, g.lamp_report(t), g.lock_share));
+            t += step;
+        }
+        // The first wake finds the lock full: nothing yet.
+        assert_eq!(shares[0], (0.0, 1, 0.0));
+        let at = |ms: f64| shares.iter().rev().find(|s| s.0 <= ms).copied().unwrap();
+        let (_, report, half) = at(135.0);
+        assert!(report == 1 && (0.4..0.6).contains(&half), "{:?}", at(135.0));
+        // Locked and not asked to fire: report 0, the share kept just short of 1.
+        let (_, report, kept) = at(500.0);
+        assert!(report == 0 && (0.9..1.0).contains(&kept), "{:?}", at(500.0));
+        assert!(shares.windows(2).all(|w| w[1].2 >= w[0].2), "it only grows");
     }
 
     #[test]

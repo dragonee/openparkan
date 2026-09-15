@@ -587,7 +587,9 @@ impl Robot {
     ) -> Option<usize> {
         let kind = battle.round_kind(assembly, &c.resource.member);
         gun.round_speed = kind.map_or(0.0, |k| battle.combat.kinds[k].top_speed);
-        gun.falls = controller(assembly, &c.resource.member).ok().flatten().is_some_and(|r| r.mode != 0);
+        let frame = controller(assembly, &c.resource.member).ok().flatten();
+        gun.falls = frame.as_ref().is_some_and(|r| r.mode != 0);
+        gun.round_flags = frame.as_ref().map_or(0, |r| r.flags);
         if let Some(k) = kind.map(|k| &battle.combat.kinds[k]) {
             gun.link(TargetGate::new(k.range, k.seeker.map(|s| (s.cone, s.reach, s.lock_ms))));
         }

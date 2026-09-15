@@ -632,6 +632,70 @@ fn the_plasma_rifle_holds_its_fire_without_a_target_and_its_bolt_follows_one() {
 
 #[test]
 #[ignore = "needs the game install"]
+fn the_missiles_lock_draws_corners_closing_on_the_target_and_beeps_as_it_locks_and_once_locked() {
+    use glam::{Mat4, Vec3};
+    use parkan_sim::guns::LOCK_DRAWN;
+    use parkan_world::cockpit::Cockpit;
+    use parkan_world::cockpit::weapons::{TARGET_READY, TARGET_ZOOM, draws_lock, lock_edges};
+    use parkan_world::hud::{Pages, Space};
+    use parkan_world::text::GameFont;
+
+    let game = gamedir::find(None).expect("a Parkan install: set PARKAN_DIR");
+    let (mut play, m) = mission_01_play();
+    let tick = 1000.0 / 60.0;
+    // The plasma rifle's and the missiles' rounds are marked; the cannon's and the laser's not.
+    let marked: Vec<bool> = play.hero.guns.iter().map(|g| g.round_flags == LOCK_DRAWN).collect();
+    assert_eq!(marked, vec![false, true, false, true]);
+    // The missiles alone.
+    for key in ["SCAN_W_1", "SCAN_W_3", "SCAN_W_4"] {
+        play.hero.key(key, true);
+        play.tick(tick, [0.0; 2]);
+        play.hero.key(key, false);
+    }
+    let pages = Pages::open(&game).unwrap();
+    let mut cockpit = Cockpit::open(&game, &pages, &play).unwrap();
+    let (font, menu) = (GameFont::ui(&game, "GAME_FONT").unwrap(), GameFont::ui(&game, "MENU_FONT").unwrap());
+    let object = m.objects.iter().position(|o| o.path.to_ascii_lowercase().ends_with("l_targ.dat")).unwrap();
+    let t = play.battle.objects.iter().position(|&o| o == object).unwrap();
+    stand_facing(&mut play, t, 60.0, 0.0);
+    // The fire button stays up: the lock counts all the same.
+    let (mut zooms, mut readies, mut shares) = (Vec::new(), Vec::new(), Vec::new());
+    for _ in 0..(6 * 60) {
+        play.tick(tick, [0.0; 2]);
+        let eye = play.hero.eye();
+        let view_proj = Mat4::perspective_infinite_reverse_rh(1.0, 4.0 / 3.0, 0.5)
+            * Mat4::look_to_rh(eye.position, eye.forward, Vec3::Z);
+        let drawn = cockpit.draw(&play, Space::new(640.0, 480.0), &font, &menu, view_proj);
+        let now = play.hero.time_ms;
+        let gun = &play.hero.guns[3];
+        let report = gun.lamp_report(now);
+        shares.push((now, report, gun.lock_share, draws_lock(gun, report)));
+        for sound in drawn.sounds {
+            match sound {
+                s if s == TARGET_ZOOM => zooms.push(now),
+                s if s == TARGET_READY => readies.push(now),
+                _ => {}
+            }
+        }
+    }
+    assert!(play.targets.current.is_some(), "the dummy is the target");
+    let drawn: Vec<_> = shares.iter().filter(|s| s.3).collect();
+    let first = drawn.first().expect("the lock is drawn");
+    assert_eq!(first.1, 1, "locking first");
+    let locked = drawn.iter().find(|s| s.1 == 0).expect("then locked");
+    assert!((locked.0 - first.0 - 4000.0).abs() < 100.0, "a 4 s lock: {first:?} to {locked:?}");
+    assert!(locked.2 > 0.99 && locked.2 < 1.0, "the share kept short of 1: {}", locked.2);
+    // Beeps: TARGET_ZOOM a little over every 0.35 s while locking, TARGET_READY every 0.2 s on.
+    let gaps = |v: &[f64]| v.windows(2).map(|w| w[1] - w[0]).collect::<Vec<_>>();
+    assert!(zooms.len() >= 10 && gaps(&zooms).iter().all(|g| (350.0..=370.0).contains(g)), "{zooms:?}");
+    assert!(zooms.iter().all(|&z| z < locked.0) && readies.iter().all(|&r| r >= locked.0));
+    assert!(readies.len() >= 5 && gaps(&readies).iter().all(|g| (200.0..=220.0).contains(g)), "{readies:?}");
+    // The corners close from the HUD's edges onto 20 about the target.
+    assert_eq!(lock_edges([320.0, 240.0], 0.0, 0.0), [30.0, 30.0, 630.0, 450.0]);
+}
+
+#[test]
+#[ignore = "needs the game install"]
 fn a_neutral_warbot_makes_itself_the_target_and_enter_captures_both_for_the_second_objective() {
     use parkan_world::progress::{STRING_VACANT_VEHICLE, Say, Sender};
 
