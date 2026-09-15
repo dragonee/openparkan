@@ -54,6 +54,7 @@ for state 4. Its fields:
 | `+0x1c`–`+0x24` | position x, y, z |
 | `+0x28`, `+0x2c`, `+0x30` | roll, pitch and yaw handed to the view |
 | `+0x34` | zoom on |
+| `+0x38` | the distance it follows an HQ unit at: 30 when made, 0 when a follow starts ([below](#an-hqs-command-mode-mode-3--read-and-seen)) |
 | `+0x44` | an HQ unit it follows (mode 3) |
 | `+0x48` | **the building it is held around** |
 | `+0x4c` | the tilt: 0 straight down, π/2 level |
@@ -62,6 +63,7 @@ for state 4. Its fields:
 | `+0x64`–`+0x74` | per axis, the time of the last update |
 | `+0x78`–`+0x88` | per axis, the time its key or edge last changed |
 | `+0x8c`–`+0x91` | the six keys held: left, right, forward, backward, up, down |
+| `+0x92`, `+0x93` | shorten and lengthen the follow distance; only the constructor writes them, 0 (`0x10036f8c`) |
 | `+0x94`–`+0x97` | the cursor at the right, left, bottom and top edge |
 
 ## Entering — *read*
@@ -118,7 +120,8 @@ The recording's builder walks while the camera watches.
 
 1. works out the edge turn rates from the edge flags (`0x100373d0`);
 2. steps the zoom;
-3. follows an HQ unit in mode 3 (`+0x44`; not Mission 03's);
+3. follows an HQ unit in mode 3 (`+0x44`,
+   [below](#an-hqs-command-mode-mode-3--read-and-seen));
 4. sets the four edge flags from the cursor;
 5. works out the velocities from the keys (`0x10037130`);
 6. moves, turns, clamps and hands the frame to the view (`0x100375b0`).
@@ -327,8 +330,10 @@ order, taking the key at the first that applies (from `0x10070dea`):
 
 Otherwise the key is not taken. If this handler sees Esc's key-down, Esc in
 command mode peels those back one at a time before 735 leaves; if it sees only
-the character that follows the key-down, 735 has already left. Which is not
-established ([39-boarding.md](39-boarding.md#not-established)).
+the character that follows the key-down, 735 has already left. The code read
+does not say which. **Mission 04's recording shows the peeling** (*seen*): from
+an HQ's command view, one Esc a second closes the map, then the page, then
+leaves ([below](#leaving)).
 
 ## Leaving — *read*
 
@@ -394,6 +399,302 @@ a 1 → 4: its table entry is 0, and `0x10062bc0` calls the entry without a test
 so the game does not expect a driven bot in a bunker's pod (*derived*; large
 bots are not routed to pods, [27-ownership.md](27-ownership.md#capture--read)).
 
+## An HQ's command mode: mode 3 — *read*, and *seen*
+
+*Teleport* (`CAMPAIGN.00/Mission.04`) gives the player a mobile command centre.
+Its help line T04_H01 (message 15) says command mode is "Enter" inside the
+warbot and "Escape" out, and that "the mobile command center's camera only
+moves in sync with the warbot". This section reads how. *Seen* here is the
+recording `training mission 4   teleport [xoPlGMdKVSY].mkv` (960 × 720);
+*measured* is `check_hq_command_mode`.
+
+**The HQ** (*measured*):
+- Mission 04's unit with logical id 1, `tut4_hq.dat` at (422.5, 518.2),
+  belongs to `Ntrl`, a clan of type 3, neutral. Its Type is `0x1010000`.
+- Its chassis `R_B_03` is wheeled and of size letter `b` (class 4), and drives
+  with `m1.tbl`.
+- Its turret `e_tur_bt_04` is its class-1 component. The turret word
+  `0xc000000` carries the HQ bit `0x8000000` beside the upright mounting.
+- The hero starts 65.7 m from it.
+- Of the campaign's HQ units, a neutral clan owns two: this one and
+  `CAMPAIGN.02/Mission.02`'s `23lhq1.dat`.
+
+### Getting in: one Enter takes it, a second opens the view
+
+- **The first Enter captures and boards it.** This HQ passes every test of the
+  hero's Enter ([39-boarding.md](39-boarding.md#boarding--read),
+  [27-ownership.md](27-ownership.md#a-neutral-unit-is-taken-by-the-hero--read-and-measured)):
+  its Type is within `0x103e000`, its size class is 4, and it has a class-1
+  turret. So Enter within 20 m captures it for the player's clan and pushes
+  mode 1 with it (*derived*).
+  - Driving it is driving any wheeled bot: `m1.tbl`, the turret's camera and
+    its cockpit.
+  - Nothing in mode 1 asks `IsHQ` (`0x10076f50`) but Enter. Its seven calls
+    (*measured*, as a call scan) are the push's refusal (`0x10062c2e`), the
+    three handlers into mode 3 (`0x10063a52`, `0x1006480c`, `0x10064934`),
+    Enter in telepresence (`0x10071f4e`), and the unit page's D button, drawn
+    (`0x10085b5e`) and clicked (`0x100847d5`).
+- **The second Enter pushes mode 3.** `CMD_ENTER_STATE`'s case
+  (`0x10071f08`) does nothing in view state 4.
+  - With mode 1 at the front, it pushes mode 3 with the driven unit (`+0xaec`,
+    `0x100720f2`–`0x10072104`).
+  - With mode 2 at the front, it does the same if the driven unit passes
+    `IsHQ` (`0x10071f43`–`0x10071f55`).
+  - The push refuses a unit that fails `IsHQ` (`0x10062c2e`), so Enter aboard
+    any other bot does nothing.
+- **The other way in** is the unit page's D button, *Strategic control*, shown
+  for an HQ ([41-commander.md](41-commander.md#the-pages--read)). It calls
+  `0x10062bc0(3, 0, unit)` and turns to page 0 (`0x100847ef`), from mode 4 or
+  from another HQ's mode 3.
+- **There is no handler for 0 → 3**: the table's entry is 0, so the hero on
+  foot cannot open an HQ's view.
+
+**The handlers** (*measured*, table `0x10104b18` at *front* × 8 + *new*):
+
+| front → new | handler | reached by |
+|---|---|---|
+| 1 → 3 | `0x10063a20` | Enter aboard the HQ |
+| 3 → 1 | `0x10063ad0` | Esc |
+| 3 → 2 | `0x10063b40` | a unit page's A, B and C buttons |
+| 2 → 3 | `0x10063bf0` | Esc from telepresence; Enter in telepresence aboard an HQ |
+| 3 → 3 | `0x10064900` | D on another HQ |
+| 4 → 3, 3 → 4 | `0x100647e0`, `0x10064880` | D from a bunker's view; the bunkers page, or Esc back to the bunker |
+| 3 → 6, 6 → 3 | `0x10064210`, `0x10064280` | a tower's *Manual*; Esc back |
+| 3 → 7 | `0x10064650` | the game menu |
+| 0 → 3, 3 → 0 | none | |
+
+**Mode 1 → 3** (`0x10063a20`), in order:
+1. turns the outer camera off, and clears the four globals
+   `0x1010bf7c`–`0x1010bf80`;
+2. stops there for a unit that fails `IsHQ`;
+3. **places the camera at the HQ's record position** (`+4`, `+8`, `+0xc`) with
+   roll 0, pitch 0 and yaw π/2 (`0x10036ae0`). The tilt and the zoom are kept;
+4. **sets the camera to follow the HQ** (`0x10037d70`): `+0x44` = the HQ and
+   `+0x48` = 0, so no building box. It also clears the up and down keys, the
+   velocities and the follow distance `+0x38`;
+5. keeps the HQ as the driven unit (`+0xaec`), clears the view's building, and
+   **sets view state 2**;
+6. **lets the HQ go** (`0x10074ff0` with 0). It goes back to its AI with every
+   override on ([31-packages.md](31-packages.md#the-escape--read));
+7. turns an open page to 0 (`0x10084d80`).
+
+**What 1 → 3 leaves alone** (*derived*):
+- The selection is not touched. The HQ was selected alone when it was boarded,
+  so it stays selected and marked.
+- The hero stays out of the world, as it was aboard.
+- Unlike 0 → 4, the keyboard is not cleared.
+
+### The camera rides with the HQ
+
+Each frame, while `+0x44` is set, the command camera's update (`0x10037a50`)
+runs two steps before its ordinary ones ([The camera](#the-camera--read)).
+
+**1. The target** (`0x10037e00`). The terms:
+- θ is the yaw, τ the tilt and d the follow distance;
+- (X, Y, Z) is the HQ object's position, the last column of its matrix
+  (interface `+0x3c`, slot 8, kind 2).
+
+The target is
+
+  target = (X − d sin τ cos θ, Y − d sin τ sin θ, Z + d cos τ).
+
+That is the point d back along the view's look from the HQ (*derived*: the
+look is (cos θ sin τ, sin θ sin τ, −cos τ)).
+
+For each axis, the camera's distance from the target is compared with a limit:
+**3 m** for x and y, **2 m** for z (`0x100e5c14`, `0x100e5c0c`).
+- **Within the limit**, the coordinate is **set to the target's**, its velocity
+  cleared and both its keys let up.
+- **Beyond it**, the key toward the target is pressed and the other let up:
+  right for a target at greater x and left for less, forward for greater y and
+  backward for less, up or down for z.
+
+The keys' velocities are then worked out as for the player's keys
+(`0x10037130`): S × min(2t, 1), with S = 125.
+
+**2. The move** (`0x100380e0`):
+- x += dt·v<sub>x</sub> and y += dt·v<sub>y</sub>, **along the world's axes,
+  not the yaw's**. Each new value is taken only while above tan(½ field) × z
+  when the velocity is negative, and below the map's side − tan(½ field) × z
+  when it is positive.
+- z += dt·v<sub>z</sub>, and yaw += dt × the yaw rate.
+- z is raised to at least **2.5** above the highest landscape or building top
+  at x, y (`0x100a14d0`, `0x100e5d04`).
+
+**The follow distance** is then stepped:
+- d −= 1 when d > 8 r, where r is the HQ record's `+0x98` (`0x100382e2`; the 8
+  is at `0x100e5d00`);
+- d −= 1 when a building is held and d > 200, which never happens in mode 3;
+- d += 1 when d < 200.
+
+So d grows by 1 a frame from 0 until it passes 8 r, then stays (*derived*).
+**The camera pulls back out of the HQ to its orbit over the first frames**,
+faster at a higher frame rate. The update also reads `+0x92` and `+0x93`, which
+would shorten or lengthen d by 1 a frame, but nothing sets them (*read*, as a
+search: their only writes are the constructor's). The move then hands the
+frame to the view, as the ordinary move does.
+
+**The ordinary update then runs as in mode 4**: edge flags, velocities from
+the keys, and the move (`0x100375b0`).
+- Its dt for each axis is the time since the follow's move stamped that axis,
+  so it moves the position by next to nothing (*derived*).
+- Its tilt step still applies, and so does its **h + 36 … h + 236 height band**.
+- The box does not apply, since no building is held.
+
+**What follows** (*derived*):
+- **The camera stays on the HQ.** A unit at 95 km/h moves 0.44 m in a 60 Hz
+  frame, well inside 3 m. So the camera sits on the target every frame and
+  moves with the HQ, as T04_H01 says.
+- **The player's camera keys do nothing.** They set the same key flags, but the
+  follow resets every flag each frame before the velocities are read. The
+  arrows, PageUp and PageDown are lost; Z still zooms.
+- **The cursor at an edge swings the camera round the HQ.** The yaw and tilt
+  turn as in mode 4, and the target is worked out from them afresh each frame,
+  so the camera circles the HQ at distance d, and rises or sinks over it.
+- **The height band wins over the orbit.** Where the ground under the camera is
+  higher than Z + d cos τ − 36, the camera is lifted, and the HQ sits below the
+  middle of the view.
+
+**r, the HQ record's `+0x98`.** It is the seventh float that the unit's
+interface `0x18` slot 12 fills in mode 2 (`0x1007e5c8`–`0x1007e5d6`,
+`AniMesh.dll:0x100146a0`).
+- **That slot returns the mesh object's bound** at `+0x134`: its two axis
+  points put through the object's matrix, and a radius.
+- **Where the bound comes from.** A single-part mesh copies it from its
+  stream-2 header's cylinder (`AniMesh.dll:0x1000a899`,
+  [07-objects.md](07-objects.md#the-stream-2-header-is-the-models-authored-extent)).
+  A multi-part mesh works it out from its box (`0x10009d10`–`0x10009e47`, not
+  followed). Which of the two a unit's object is was not traced.
+- **Measured** on Mission 04's HQ: `r_b_03.msh`'s cylinder radius is 4.832 and
+  its sphere's radius 7.653, so 8 r is 38.7 m or 61.2 m.
+- **Seen**, the recording favours the second. At 80.5 s the HQ is about 200
+  pixels across on the 960-pixel frame. With a field of 1.04 rad, a body
+  13–15 m across would span about 300 pixels at 39 m.
+
+### What the player has in mode 3
+
+- **The same screen as a bunker's.** Modes 3 and 4 share their draw
+  (`0x1008d51c`, [What command mode draws](#what-command-mode-draws--read)).
+  The panel's buttons act in either mode
+  ([41-commander.md](41-commander.md#what-a-click-on-the-column-does)). A page
+  is enabled by what the clan holds, not by the view. *Seen* from 83.5 s: the
+  Battle units page lists *LWC-1 Comm. Center* and *TFB-2 Warrior*.
+- **The HQ carries out its own order.** It was let go on entry, so its AI
+  drives it, and the player orders it from its page like any unit. *Seen* at
+  90–94 s: *LWC-1 Comm. Center [no order]* becomes *[standing]* after a click
+  on Standby. A Route would carry the camera along with it (*derived*).
+- **Telepresence works from mode 3.**
+  - A unit page's A, B and C buttons push mode 2 (3 → 2, `0x10063b40`). The
+    handler clears the selection and selects the unit, lets the HQ go (with 0)
+    and takes the unit (with 1), and makes the unit the driven unit. It lets the
+    camera go, sets view state 1, clears the `CState`'s `+0x31` and stamps its
+    `+0x2c`, and clears the keyboard.
+  - **Esc comes back to mode 3** (2 → 3, `0x10063bf0`). The handler lets the
+    unit go and **places the camera on the HQ again, facing north, following it
+    from distance 0**. It makes the HQ the driven unit, sets view state 2,
+    clears the keyboard and redraws the page.
+  - Unlike 2 → 4, which leaves the camera where it was, 2 → 3 pulls the camera
+    back out of the HQ once more.
+- **Enter does nothing** in mode 3. The front is neither 1 nor 2, and the
+  hero's test wants view state 1 or 3 (*derived*, as in mode 4).
+- **The hero button** rolls the stack back to mode 0 (`0x10062ce0` with 0,
+  [41-commander.md](41-commander.md#what-a-click-on-the-column-does)). That goes
+  through 3 → 1, then 1 → 0, which puts the hero down beside the HQ or refuses
+  with *Risk area!* ([39-boarding.md](39-boarding.md#leaving--read))
+  (*derived*).
+
+### Leaving
+
+**Esc** (735) rolls the stack back. From mode 3 the record below is the HQ's
+mode 1. **Mode 3 → 1** (`0x10063ad0`), in order:
+1. turns the outer camera off;
+2. selects the HQ (`0x1007d0a0` with 1);
+3. makes it the driven unit, clears the view's building, and **sets view state 1**;
+4. lets the camera go (`0x10037dd0`);
+5. **sets the HQ's auto-driver level `+0x9c` to 0 and takes it**
+   (`0x10074ff0` with 1);
+6. clears the keyboard (`stdClearKeyboard`, its tail jump).
+
+So **Esc returns to the HQ's cockpit**, with the player driving it, and a
+second Esc puts the hero down beside it (*derived*). Before either, Esc's
+character handler closes an open satellite map and turns a page to 0
+([Input](#input--read-and-measured)).
+
+*Seen*, 157–162 s, four cuts about a second apart:
+- 158.0 s: the satellite map closes;
+- 159.0 s: the Battle units page closes;
+- 160.0 s: the HQ's cockpit, with two struts, target *Small Generator*, own
+  panel *LWC-1 Comm. Center [no order]*, and weapons *LFT, LFT*;
+- 162.0 s: the hero on foot beside the HQ, *Human*.
+
+So **the map and the page do peel back one Esc at a time before 735 leaves.**
+
+**When the HQ is lost in mode 3.**
+- The unit record's removal (`0x100751a0`) rolls the stack back only when the
+  lost unit is the driven one and the front is mode 1, 2, 5 or 7. Its case
+  table at `0x1007563c` gives modes 3, 4 and 6 nothing (*measured*).
+- The takt's lost-building flag (`0x10062950`) reads only a record's building.
+- So nothing read pops mode 3 when the HQ dies, and the camera's `+0x44` and
+  the driven unit still name it. What the game does then was not followed.
+
+### Against the recording — *seen*
+
+| time (s) | what |
+|---|---|
+| 76.5–77.5 | the hero walks to the HQ; target *LWC-1 Comm. Center*, 5 m |
+| 78.0 | **a cut into the HQ's cockpit**: two struts against the sky; own panel *LWC-1 Comm. Center [no order]*; weapons *LFT* ×2; target *TFB-2 Warrior [escaping]*. The box still shows *"Good job, Cadet!…"* (T04_I01) |
+| 78.4 | **a cut to the command view**: the icon column, *Ore* and *Energy 5%*, the message box at the bottom right. The camera is low at the HQ, looking north at a rock face, with blue and yellow at the bottom edge |
+| 78.8–79.2 | **the HQ rises into view from the bottom edge and settles** in the lower middle, bracketed and named in green, as the camera backs away |
+| 79.5 | the box changes to T04_H01, from the Information assistant |
+| 81.5 | the satellite map opens |
+| 82.5–83.0 | the view swings off the HQ toward the rock: an edge turn |
+| 83.5– | the Battle units page |
+| 84–90 | the TFB-2 Warrior is ordered to *Search and capture* |
+| 90–94 | the HQ is ordered to *Standby* |
+| 157–162 | leaving, above |
+
+**The pull-back takes about 0.8 s** from the cut, 78.4 to 79.2 s. At 1 m a
+frame that is about 75 frames a second to reach 61 m, or about 48 to reach
+39 m. The recording's own frame rate is not known, so this does not settle r
+(*derived*).
+
+### For an engine
+
+1. **Board** Mission 04's HQ with Enter as any large bot: capture it if it is
+   neutral, push mode 1, and drive it with `m1.tbl`.
+2. **Enter aboard an HQ** (a unit whose turret carries `0x8000000`), or
+   aboard one in telepresence, pushes mode 3. Enter in any other bot does
+   nothing. Mode 3:
+   - the camera at the HQ's position, yaw π/2, tilt and zoom kept, following
+     the HQ from distance 0, with no building box;
+   - the HQ handed back to its AI, keeping its order;
+   - view state 2 with the commander panel on page 0;
+   - the HQ still selected.
+3. **Each frame in mode 3**, before the ordinary camera update:
+   - target = HQ − d (sin τ cos θ, sin τ sin θ, −cos τ);
+   - per axis: within 3 m (x and y) or 2 m (z), snap to the target and stop;
+     otherwise drive toward it at the ramped key speed S × min(2t, 1), along
+     the world axis;
+   - z at least 2.5 above the ground or building top;
+   - d += 1 a frame (not a second) until it passes 8 r, and d ≤ 200;
+   - then the ordinary update: the edges turn yaw and tilt, the height band is
+     h + 36 … h + 236, and there is no box. The player's move keys are
+     overridden; Z zooms.
+
+   For r, 8 r ≈ 61 m on Mission 04's HQ fits the recording. Until `+0x98` is
+   traced, use the assembly's bounding sphere radius as a STAND-IN.
+4. **Panel and orders** work as in mode 4. The HQ may be ordered like any unit,
+   and the camera rides with it.
+5. **Telepresence** works from mode 3 as from mode 4. Esc returns to mode 3
+   with the camera placed back on the HQ and pulled out again.
+6. **Esc** peels back the map, then the page, then leaves 3 → 1: the HQ is
+   selected and taken at auto-driver level 0, the view is its cockpit, and held
+   keys are dropped. A further Esc leaves the HQ as it would any bot.
+7. **The hero button** goes to mode 0 through mode 1.
+8. **An HQ lost in mode 3** is not handled by anything read. Rolling back to
+   mode 1, and on to the hero put down at (x − 1, y − 1), is the nearest thing
+   the game does for other modes (*guess*).
+
 ## Selecting and ordering in the world
 
 Clicks in the world and on the satellite map, the cursors, the markers and the
@@ -451,9 +752,8 @@ mode.
    placed by 0.05 rad. Enter does nothing.
 7. **Esc** leaves (mode 4 → 0): take the hero back where it stands, clear the
    selection, back to the cockpit, drop held keys. The character handler would
-   first close an open satellite map, then turn a page back to 0; whether it
-   sees the key before the binding leaves is not established, and peeling them
-   back first is the gentler choice (*guess*).
+   first close an open satellite map, then turn a page back to 0, one Esc each,
+   before the binding leaves: Mission 04's recording does so (*seen*).
 8. **Telepresence**: a unit page's three buttons set the unit's auto-driver
    level 0, 1 or 2 and push mode 2 (take the unit, cockpit view). Esc returns to
    the command view, the camera where it was.
@@ -469,10 +769,24 @@ mode.
   another view or for telepresence, and whether its guns fire on their own
   while command mode is up.
 - The display's slot 12 that decides whether the system cursor is shown.
-- The following camera's distance logic in mode 3 (`+0x38`, `+0x92`, `+0x93`,
-  `0x10037e00`, `0x100380e0`) and the two attached positions (`+0x3c` 30 above,
-  `+0x40` 90 above) the move routine takes first.
-- Whether the key-down binding 735 or the character handler's Esc comes first.
-- What mode 2 does when its unit dies.
+- ~~The following camera's distance logic in mode 3~~ — **read**, in
+  [An HQ's command mode](#an-hqs-command-mode-mode-3--read-and-seen). Still
+  open: the two attached positions (`+0x3c` 30 above, `+0x40` 90 above) that
+  the move routine takes first.
+- ~~Whether the key-down binding 735 or the character handler's Esc comes
+  first~~ — the character handler, in effect: Mission 04's recording peels the
+  map and the page back one Esc at a time (*seen*); the path the key takes was
+  not traced.
+- ~~What mode 2 does when its unit dies~~ — **read**: the unit record's removal
+  rolls the stack back in modes 1, 2, 5 and 7 (`0x100755a9`, table
+  `0x1007563c`), so telepresence ends with its unit, back to the command view.
+- **r, the unit record's `+0x98`**, which sets an HQ camera's follow distance at
+  8 r: the bound's seventh float, but whether a unit's object keeps its
+  chassis mesh's cylinder or a bound worked out over its parts was not traced.
+- **What happens when an HQ is lost in its own mode 3**: nothing read rolls the
+  stack back.
+- Why *LWC-1 Comm. Center* reads *[no order]* in its cockpit at 160 s, after
+  *[standing]* in its command view at 94 s: whether taking a unit at level 0
+  clears its order, or the player ordered it again unseen.
 - The recording's camera height and turn rates, beyond the tilt's timing:
   nothing in view gives a scale.

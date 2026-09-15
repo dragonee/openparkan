@@ -40,7 +40,7 @@ records, its front the mode the player is in.
   | 0 | on foot, the hero | the bottom record |
   | 1 | driving a bot | Enter (below) |
   | 2 | telepresence: a unit driven from a command view | a unit page's buttons ([40-command-mode.md](40-command-mode.md#telepresence-mode-2--read)) |
-  | 3 | an HQ's command view | Enter from a bot that passes `IsHQ` (`0x10072104`) |
+  | 3 | an HQ's command view ([40-command-mode.md](40-command-mode.md#an-hqs-command-mode-mode-3--read-and-seen)) | Enter from a bot that passes `IsHQ` (`0x10072104`), Enter in telepresence aboard one, or a unit page's D button |
   | 4 | a bunker's command view ([40-command-mode.md](40-command-mode.md)) | the bunker's pod, or its page in mode 3 |
   | 5, 6 | a building's screen | the building's pod ([27-ownership.md](27-ownership.md#capture--read)) |
   | 7 | the game menu | `CMD_GAME_MENU` (748, `0x10072359`): it pushes 7, or rolls back when the menu is up (`0x100723a5`) |
@@ -338,11 +338,15 @@ Neither cut fades or moves the camera between the two views.
 ## Not established
 
 - ~~Mode 2 of the stack~~ — telepresence
-  ([40-command-mode.md](40-command-mode.md#telepresence-mode-2--read)). What
-  modes 2, 3, 4 and 6 do when their unit or building is lost.
+  ([40-command-mode.md](40-command-mode.md#telepresence-mode-2--read)). When
+  their unit is lost, mode 2 rolls back like mode 1 (the removal's table
+  `0x1007563c`); what modes 3, 4 and 6 then do is not read — nothing in that
+  path pops them.
 - Whether the interface's own key-down handlers ever take Esc before the
-  bindings do; the recording is consistent with leaving by Esc but does not
-  show the key.
+  bindings do. This recording is consistent with leaving by Esc but does not
+  show the key; Mission 04's shows Esc closing the satellite map and the
+  commander's page before it leaves an HQ's command view
+  ([40-command-mode.md](40-command-mode.md#leaving)).
 - The facing: the heading above follows the column convention the placement
   matrices use elsewhere. That the leaving matrix is read the same way is
   *derived*, not traced into `IControl` slot 8's mode 5 or `IGameObject` slot 7.

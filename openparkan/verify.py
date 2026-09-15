@@ -18098,6 +18098,205 @@ def check_focus(check, game: Path) -> None:
           f"before createGame; each held byte of 0x1002a490 below 700 cleared and queued pressed 0")
 
 
+MISSION_04 = "MISSIONS/CAMPAIGN/CAMPAIGN.00/Mission.04"
+
+#: Every call of ``IsHQ`` (``0x10076f50``): the push's refusal, the three handlers into mode 3,
+#: Enter in telepresence, and the unit page's D button drawn and clicked.
+IS_HQ_CALLS = {0x10062C2E, 0x10063A52, 0x1006480C, 0x10064934, 0x10071F4E, 0x100847D5,
+               0x10085B5E}
+
+#: The CState handlers of an HQ's command view, by (front, new): docs/40-command-mode.md.
+HQ_MODE_HANDLERS = {(1, 3): 0x10063A20, (3, 1): 0x10063AD0, (3, 2): 0x10063B40,
+                    (2, 3): 0x10063BF0, (3, 3): 0x10064900, (4, 3): 0x100647E0,
+                    (3, 4): 0x10064880, (3, 6): 0x10064210, (6, 3): 0x10064280,
+                    (3, 7): 0x10064650, (0, 3): 0, (3, 0): 0}
+
+
+def check_hq_command_mode(check, game: Path) -> None:
+    """An HQ's command view, CState mode 3: Enter aboard, the following camera, leaving."""
+    path = game / "iron3d.dll"
+    if not path.exists():
+        return
+    iron = path.read_bytes()
+    at = _image_at(iron)
+
+    def u32(va: int) -> int:
+        return struct.unpack("<I", at(va, 4))[0]
+
+    def f32(va: int) -> float:
+        return struct.unpack("<f", at(va, 4))[0]
+
+    def called(site: int) -> int | None:
+        if at(site, 1) not in (b"\xe8", b"\xe9"):
+            return None
+        return (site + 5 + struct.unpack("<i", at(site + 1, 4))[0]) & 0xFFFFFFFF
+
+    def hexes(text: str) -> bytes:
+        return bytes.fromhex(text)
+
+    # Enter: aboard (front 1) push 3 with the driven unit; in telepresence (front 2) on an HQ.
+    table = all(u32(0x10104B18 + 4 * (front * 8 + new)) == fn
+                for (front, new), fn in HQ_MODE_HANDLERS.items())
+    is_hq = {site for site, target in _calls(at, 0x10001000, 0xCC000) if target == 0x10076F50}
+    enter = (at(0x10071F21, 11) == hexes("8b00 833801 0f84c6010000")
+             and at(0x10071F41, 13) == hexes("8b00 83f802 7513 8b8fec0a0000")
+             and called(0x10071F4E) == 0x10076F50
+             and at(0x100720F2, 18) == hexes("8b97ec0a0000 8b442418 8b4820 52 6a00 6a03")
+             and called(0x10072104) == 0x10062BC0 and at(0x10071F08, 5) == hexes("837c241404"))
+    check("iron3d.dll: Enter aboard an HQ pushes CState mode 3; no handler takes 0 -> 3",
+          table and is_hq == IS_HQ_CALLS and enter,
+          f"handlers {', '.join(f'{f}>{n} {h:#x}' for (f, n), h in HQ_MODE_HANDLERS.items())}: "
+          f"{table}; IsHQ called at {sorted(hex(s) for s in is_hq)}: {is_hq == IS_HQ_CALLS}; "
+          f"730 with mode 1 in front pushes 3 with +0xaec, with mode 2 when IsHQ, never in "
+          f"view state 4: {enter}")
+
+    # 1 -> 3: camera on the HQ facing north and following it, view state 2, the HQ let go.
+    into = (at(0x10063A36, 2) == hexes("33db") and called(0x10063A52) == 0x10076F50
+            and at(0x10063A5B, 15) == hexes("8b4e0c 8b5608 8b4604 55 68db0fc93f")
+            and called(0x10063A77) == 0x10036AE0 and called(0x10063A7F) == 0x10037D70
+            and called(0x10063A87) == 0x100A5660 and called(0x10063A8F) == 0x100A5680
+            and at(0x10063A94, 2) == b"\x6a\x02" and called(0x10063A98) == 0x100A4F90
+            and at(0x10063A9D, 1) == b"\x53" and called(0x10063AA0) == 0x10074FF0
+            and called(0x10063ABC) == 0x10084D80)
+    # 3 -> 1: select the HQ, driven, view state 1, camera let go, level 0 and taken.
+    out = (called(0x10063AEE) == 0x1007D0A0 and called(0x10063AF6) == 0x100A5660
+           and at(0x10063B04, 2) == b"\x6a\x01" and called(0x10063B08) == 0x100A4F90
+           and called(0x10063B13) == 0x10037DD0
+           and at(0x10063B1C, 14) == hexes("6a01 8bcf c7879c00000000000000")
+           and called(0x10063B2A) == 0x10074FF0 and called(0x10063B31) == 0x100CD168)
+    # 3 -> 2 lets the HQ go and takes the unit; 2 -> 3 lets it go and follows the HQ afresh.
+    tele = (called(0x10063B7D) == 0x1007D0A0
+            and at(0x10063B82, 6) == hexes("85db 7409 6a00") and called(0x10063B8A) == 0x10074FF0
+            and at(0x10063B93, 2) == b"\x6a\x01" and called(0x10063B97) == 0x10074FF0
+            and called(0x10063BB3) == 0x10037DD0 and at(0x10063BB8, 2) == b"\x6a\x01"
+            and at(0x10063C28, 1) == b"\x53" and called(0x10063C2B) == 0x10074FF0
+            and at(0x10063C3D, 5) == hexes("68db0fc93f") and called(0x10063C4F) == 0x10036AE0
+            and called(0x10063C57) == 0x10037D70 and at(0x10063C6C, 2) == b"\x6a\x02")
+    check("iron3d.dll: mode 1 -> 3 sets the command camera following the HQ; Esc takes it back",
+          into and out and tele,
+          f"1>3: IsHQ, camera at the HQ's +4/+8/+0xc with yaw pi/2, 0x10037d70 follow, driven, "
+          f"view state 2, HQ let go (0), page 0: {into}; 3>1: HQ selected and driven, view "
+          f"state 1, camera let go, +0x9c = 0 and taken (1), keyboard cleared: {out}; 3>2 lets "
+          f"the HQ go and takes the unit, 2>3 re-places the camera and follows again: {tele}")
+
+    # The follow: +0x44 set, +0x48 and +0x38 cleared; the target d back along the look,
+    # snapped within 3 m across and 2 m up; a world-axis move; d grows to 8 r and at most 200.
+    setter = at(0x10037D70, 37) == hexes(
+        "33c0 894148 888190000000 888191000000 894158 894150 894154 894138 8b442404 894144 c2")
+    update = (at(0x10037BE2, 7) == hexes("8b4644 85c0 7460")
+              and called(0x10037C3D) == 0x10037E00 and called(0x10037C44) == 0x100380E0
+              and called(0x10037D5C) == 0x100375B0)
+    target = (at(0x10037E07, 15) == hexes("d9464c 8b4644 d9fe 33db 3bc3 d84e38")
+              and at(0x10037E3D, 16) == hexes("8b403c 8b08 8d542418 52 6a02 50 ff5120")
+              and at(0x10037EC0, 6) == hexes("d81d145c0e10") and f32(0x100E5C14) == 3.0
+              and at(0x10038014, 6) == hexes("d81d0c5c0e10") and f32(0x100E5C0C) == 2.0
+              and called(0x100380C8) == 0x10037130)
+    move = (at(0x10038144, 7) == hexes("d9442410 d8461c")
+            and at(0x100381E7, 7) == hexes("d9442410 d84620")
+            and called(0x100382C6) == 0x100A14D0
+            and at(0x100382CB, 6) == hexes("d805045d0e10") and f32(0x100E5D04) == 2.5
+            and at(0x100382E2, 22) == hexes("8b4644 85c0 7422 d98098000000 d80d005d0e10 d85e38")
+            and f32(0x100E5D00) == 8.0
+            and at(0x1003832E, 9) == hexes("d94638 d81df05c0e10") and f32(0x100E59CC) == 1.0
+            and at(0x10036E03, 7) == hexes("c746380000f041"))
+    # The distance keys +0x92 and +0x93: a byte store with a 32-bit displacement only in the
+    # constructor.
+    body = at(0x10001000, 0xCC000)
+    distance_store = rb"[\x88\xc6][\x80-\xbf][\x92\x93]\x00\x00\x00"
+    stores = {0x10001000 + m.start() for m in re.finditer(distance_store, body)}
+    keys = stores == {0x10036F8C, 0x10036F92}
+    check("iron3d.dll: mode 3's camera rides with the HQ, d back along its look",
+          setter and update and target and move and keys,
+          f"0x10037d70 sets +0x44 and clears +0x48, keys, velocities and +0x38: {setter}; the "
+          f"update follows before the ordinary move: {update}; target = HQ - d look, snapped "
+          f"within 3 (x, y) and 2 (z), else its keys pressed: {target}; x and y moved along the "
+          f"world axes, z >= top + 2.5, d -= 1 past 8 r, += 1 below 200, 30 when made: {move}; "
+          f"+0x92/+0x93 stored only at {sorted(hex(s) for s in stores)}: {keys}")
+
+    # r: the record's +0x98 is the seventh float of interface 0x18 slot 12, mode 2; AniMesh
+    # keeps it at +0x134, copied from the stream-2 header's cylinder.
+    anim_path = game / "AniMesh.dll"
+    radius = at(0x1007E583, 2) == b"\x6a\x02" and at(0x1007E5C8, 20) == hexes(
+        "ff5130 8b44242c 8b4e3c 8d542440 898698000000")
+    if anim_path.exists():
+        anim = _image_at(anim_path.read_bytes())
+        radius = (radius and struct.unpack("<I", anim(0x1002053C + 12 * 4, 4))[0] == 0x100146A0
+                  and anim(0x100146A7, 3) == hexes("83f802")
+                  and anim(0x100146B0, 6) == hexes("8db030010000")
+                  and anim(0x100146BC, 7) == hexes("b907000000f3a5")
+                  and anim(0x1000A899, 6) == hexes("8dbd34010000")
+                  and anim(0x1000A8BB, 10) == hexes("83c670 b907000000 f3a5"))
+    else:
+        radius = False
+    # When a driven unit goes: roll back in modes 1, 2, 5, 7; nothing in 3, 4, 6.
+    cases = list(at(0x1007563C, 7))
+    lost = (cases == [0, 0, 1, 1, 0, 1, 0] and u32(0x10075634) == 0x100755A9
+            and u32(0x10075638) == 0x1007561E and called(0x100755AD) == 0x10062FF0)
+    check("iron3d.dll: 8 r is the unit's bound radius; a lost HQ does not end mode 3",
+          radius and lost,
+          f"+0x98 from interface 0x18 slot 12 mode 2, AniMesh.dll:0x100146a0 returning the 7 "
+          f"floats at +0x134, filled from the header's cylinder (header +0x70): {radius}; the "
+          f"removal's cases by mode 1-7 {cases}, 0 rolling back: {lost}")
+
+    # The HQ Mission 04 gives, and the two a neutral clan owns.
+    d04 = game / MISSION_04
+    if not (d04 / "data.tma").exists():
+        return
+    lib = objects.ObjectLibrary(game / "objects.rlb")
+    held = profiles.load(game)
+    names = frozenset(p.name.lower() for p in all_archives(game))
+    turrets = NResArchive.open(game / "turrets.rlb")
+    parts = assembly.Assembly(game)
+    neutral_hqs = []
+    for data in sorted((game / "MISSIONS").rglob("data.tma")):
+        m = mission.load(data)
+        for o in m.objects:
+            if o.kind != mission.KIND_UNIT or o.clan_id is None or o.clan_id >= len(m.clans):
+                continue
+            if m.clans[o.clan_id].type != mission.CLAN_NEUTRAL:
+                continue
+            f = parts.unit_file(o.path)
+            if f is not None and objects.load_unit(f).kind == objects.TYPE_HQ:
+                neutral_hqs.append(o.path.replace("\\", "/").rsplit("/", 1)[-1])
+    m = mission.load(d04 / "data.tma")
+    hq = next(o for o in m.objects if o.logical_id == 1)
+    hero = next(o for o in m.objects if "\\HERO\\" in o.path.upper())
+    unit = objects.load_unit(parts.unit_file(hq.path))
+    root = unit.components[0].ref.member.lower()
+    record = lib.get(root)
+    kind = profiles.CHASSIS_TYPE[held[record.profile]["ChassisType"].value]
+    table_name = record.slots[CHASSIS_TABLE_SLOT].member.lower()
+    turret = next(c.ref.member.lower() for c, p in zip(unit.components, unit.parents(), strict=True)
+                  if p == 0 and c.ref.member.lower().startswith("e_tur_"))
+    part = control.parse(turrets.read_name(lib.get(turret).slot_with_suffix("ctl").member),
+                         names).components[0]
+    apart = math.hypot(hero.position[0] - hq.position[0], hero.position[1] - hq.position[1])
+    chassis = parts.parts(mission.KIND_UNIT, hq.path)[0]
+    volume = parts.mesh(chassis.ref).volume
+    texts = resources.TextResources.open(game)
+    by_index = {msg.index: msg for msg in briefing.messages(d04 / briefing.MESSAGES)}
+    h01 = by_index.get(15)
+    help_text = texts.get("T04_H01") or ""
+    check("Mission 04: a neutral HQ to board, whose camera moves with it",
+          hq.path.lower().endswith("tut4_hq.dat")
+          and m.clans[hq.clan_id].type == mission.CLAN_NEUTRAL
+          and unit.kind == objects.TYPE_HQ and root == "r_b_03"
+          and profiles.CHASSIS_SIZE[root[2]] == 4 and kind == "wheeled" and table_name == "m1.tbl"
+          and part.type_id == control.TURRET_TYPE and part.flags & control.MOUNT_HQ
+          and abs(apart - 65.7) < 0.1 and sorted(neutral_hqs) == ["23lhq1.dat", "tut4_hq.dat"]
+          and abs(volume.axis_radius - 4.832) < 1e-3 and abs(volume.radius - 7.653) < 1e-3
+          and h01 is not None and h01.text_id == "T04_H01" and h01.info_system
+          and by_index[10].text_id == "T04_I02"
+          and "only moves in sync with the warbot" in help_text,
+          f"id 1 {hq.path} of clan type {m.clans[hq.clan_id].type}, Type {unit.kind:#x}, "
+          f"chassis {root} size {profiles.CHASSIS_SIZE[root[2]]} {kind} on {table_name}, turret "
+          f"{turret} component type {part.type_id} word {part.flags:#x}; the hero {apart:.1f} m "
+          f"away; neutral HQs {sorted(neutral_hqs)}; r_b_03 cylinder r {volume.axis_radius:.3f} "
+          f"and sphere r {volume.radius:.3f}, so 8 r {8 * volume.axis_radius:.1f} or "
+          f"{8 * volume.radius:.1f}; message 15 {h01.text_id if h01 else None} (info system), "
+          f"10 {by_index[10].text_id}: the camera 'only moves in sync with the warbot'")
+
+
 #: The commander panel's words (``iron3d.dll``'s string table), docs/41-commander.md.
 COMMANDER_STRINGS = {
     1600: "Battle units", 1601: "Transports", 1602: "Builders", 5080: "Research Center",
@@ -18908,6 +19107,7 @@ def run(game: Path) -> int:
         check_factory_screen,
         check_designer_screen,
         check_command_mode,
+        check_hq_command_mode,
         check_commander_panel,
         check_settings,
         check_research_streams, check_atmosphere_events,

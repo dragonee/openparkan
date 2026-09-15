@@ -12435,7 +12435,7 @@ read = true
 module = "iron3d.dll"
 at = "0x10062c2e"
 kind = "site"
-name = "enter CState mode: mode 3 (SELECT_GUARD_TARGET_MODE) only for an object that passes IsHQ"
+name = "enter CState mode: mode 3, an HQ's command view, only for an object that passes IsHQ"
 doc = "docs/30-turrets.md"
 read = true
 
@@ -12451,7 +12451,7 @@ read = true
 module = "iron3d.dll"
 at = "0x10071f4e"
 kind = "site"
-name = "CMD_ENTER_STATE (730) case: IsHQ on the controlled unit"
+name = "CMD_ENTER_STATE (730) case: with mode 2 in front, push mode 3 when the driven unit passes IsHQ"
 doc = "docs/30-turrets.md"
 read = true
 
@@ -12683,7 +12683,7 @@ read = true
 module = "iron3d.dll"
 at = "0x10063a20"
 kind = "function"
-name = "CState handler, state 1 mode 3: IsHQ, then the unit's position and pi/2 on"
+name = "CState handler 1 -> 3: IsHQ; camera at the HQ, yaw pi/2, following it; HQ driven; view state 2; HQ let go (0); page 0"
 doc = "docs/30-turrets.md"
 read = true
 
@@ -12691,7 +12691,7 @@ read = true
 module = "iron3d.dll"
 at = "0x100647e0"
 kind = "function"
-name = "CState handler, state 4 mode 3: IsHQ, then the unit's position and pi/2 on"
+name = "CState handler 4 -> 3: IsHQ; selection the HQ alone; camera at it following; HQ let go (0), driven; view state 2; keyboard cleared"
 doc = "docs/30-turrets.md"
 read = true
 
@@ -12699,7 +12699,7 @@ read = true
 module = "iron3d.dll"
 at = "0x10064900"
 kind = "function"
-name = "CState handler, state 3 mode 3: IsHQ, then the unit's position and pi/2 on"
+name = "CState handler 3 -> 3: IsHQ; select the new HQ; camera at it following; old and new HQ let go (0); driven; view state 2"
 doc = "docs/30-turrets.md"
 read = true
 
@@ -23841,7 +23841,7 @@ doc = "docs/40-command-mode.md"
 module = "iron3d.dll"
 at = "0x10037e00"
 kind = "function"
-name = "command camera: follow step for an HQ unit (mode 3), not followed"
+name = "command camera follow target: HQ position - d (sin t cos y, sin t sin y, -cos t); per axis snap within 3 (x, y) / 2 (z), else press the key toward it; key velocities"
 read = true
 doc = "docs/40-command-mode.md"
 
@@ -23849,7 +23849,7 @@ doc = "docs/40-command-mode.md"
 module = "iron3d.dll"
 at = "0x100380e0"
 kind = "function"
-name = "command camera: follow step for an HQ unit (mode 3), not followed"
+name = "command camera follow move: x, y along the world axes, z, yaw; z >= top + 2.5; d -= 1 past 8 x record +0x98, += 1 below 200; view matrix"
 read = true
 doc = "docs/40-command-mode.md"
 
@@ -24242,6 +24242,110 @@ module = "iron3d.dll"
 at = "0x1010bf80"
 kind = "datum"
 name = "a dword the command view transitions clear; not followed"
+read = true
+doc = "docs/40-command-mode.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10063ad0"
+kind = "function"
+name = "CState handler 3 -> 1, Esc from an HQ's view: select the HQ, driven, view state 1, camera let go, +0x9c = 0 and the HQ taken, keyboard cleared"
+read = true
+doc = "docs/40-command-mode.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10063b40"
+kind = "function"
+name = "CState handler 3 -> 2, telepresence from an HQ's view: select the unit, HQ let go (0), unit taken (1), driven, camera let go, view state 1, keyboard cleared"
+read = true
+doc = "docs/40-command-mode.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10063bf0"
+kind = "function"
+name = "CState handler 2 -> 3: unit let go, camera placed at the HQ facing north and following it afresh, HQ driven, view state 2, keyboard cleared, page redrawn"
+read = true
+doc = "docs/40-command-mode.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10064210"
+kind = "function"
+name = "CState handler 3 -> 6, a tower's Manual from an HQ's view: tower sent (0x20, 3) and (6, 7, 1), view's building, no driven unit, view state 6"
+read = true
+doc = "docs/40-command-mode.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10064280"
+kind = "function"
+name = "CState handler 6 -> 3: tower sent (0x20, 1) and (6, 7, 0), HQ driven, camera follows it from where it stands with d from 0, view state 2, page redrawn"
+read = true
+doc = "docs/40-command-mode.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10037d70"
+kind = "function"
+name = "command camera follow a unit: +0x44 = unit, +0x48 = 0, up/down keys, velocities and follow distance +0x38 cleared"
+read = true
+doc = "docs/40-command-mode.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100720f2"
+kind = "site"
+name = "CMD_ENTER_STATE with mode 1 in front: push mode 3 with the driven unit +0xaec (refused unless IsHQ)"
+read = true
+doc = "docs/40-command-mode.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100382e2"
+kind = "site"
+name = "command camera follow distance: d -= 1 while d > 8 x the followed unit's +0x98"
+read = true
+doc = "docs/40-command-mode.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1007e5d6"
+kind = "site"
+name = "unit record +0x98: the seventh float of interface 0x18 slot 12 in mode 2, the bound's radius"
+read = true
+doc = "docs/40-command-mode.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10036f8c"
+kind = "site"
+name = "command camera constructor: follow distance keys +0x93 and +0x92 cleared; their only stores"
+read = true
+doc = "docs/40-command-mode.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1007563c"
+kind = "table"
+name = "a driven unit's record goes: case by CState mode 1-7, 0 rolling back (1, 2, 5, 7), 1 nothing (3, 4, 6)"
+read = true
+doc = "docs/40-command-mode.md"
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x100146a0"
+kind = "function"
+name = "mesh interface 0x18 slot 12: the 7-float bound at +0x134 (axis low, axis high, radius); mode 2 puts the axis points through the matrix at +0x160"
+read = true
+doc = "docs/40-command-mode.md"
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x1000a899"
+kind = "site"
+name = "a single-part mesh's bound at +0x134 copied from its stream-2 header +0x70: the cylinder"
 read = true
 doc = "docs/40-command-mode.md"
 

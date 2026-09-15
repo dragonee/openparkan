@@ -396,7 +396,11 @@ a neutral bot (a search, not a proof).
 *Measured:* the 22 units owned by neutral clans, all in the campaign, are
 18 warriors (`0x1008000`), 2 HQs (`0x1010000`), a builder and a transport.
 Every one passes the handler's unit test, and none of the neutral clans' 28
-buildings does.
+buildings does. One of the HQs is Mission 04's `tut4_hq.dat`, on an `R_B_03`
+chassis (size class 4) with a class-1 turret, so the Enter that captures it
+also boards it. A second Enter aboard then opens its command view
+([40-command-mode.md](40-command-mode.md#an-hqs-command-mode-mode-3--read-and-seen))
+(*measured*, `check_hq_command_mode`; the boarding *derived*).
 
 ## The clan word is a type — *measured*, and *read*
 

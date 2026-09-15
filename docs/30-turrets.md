@@ -507,11 +507,13 @@ seven places:
   (`0x10063a20`, `0x100647e0`, `0x10064900`, table `0x10104b18`) test it again
   before they hand the unit's position and π/2 on.
 - **Command 730, `CMD_ENTER_STATE`.** Its case tests it on the controlled unit
-  (`0x10071f4e`).
+  in telepresence (`0x10071f4e`); aboard a bot it pushes mode 3 and lets the
+  push's own test refuse.
 
-So the bit unlocks a guard-target selection that other units' panels grey
-out. What the guard target then does for an HQ is the packages' side
-([31-packages.md](31-packages.md)), not read here.
+So the bit is what lets a unit open **a command view that rides with it**:
+Enter aboard, or *Strategic control* on its page. An earlier reading here took
+that for a guard-target selection. What mode 3 does is
+[40-command-mode.md](40-command-mode.md#an-hqs-command-mode-mode-3--read-and-seen)'s.
 
 ## Every turret
 
@@ -606,8 +608,9 @@ test was not read. That a zero cost marks them unbuildable is still a *guess*.
   That Shift's free look runs vertically opposite is *derived* too, and not
   checked in the game.
 - ~~What `IControl` does with the HQ bit~~ — **read**: query 13, value 117,
-  `iron3d.dll`'s `IsHQ`. What an HQ's guard target does
-  ([An HQ unit in play](#an-hq-unit-in-play--read)) is still open.
+  `iron3d.dll`'s `IsHQ`. ~~What an HQ's guard target does~~ — there is none:
+  the bit opens the HQ's command view, mode 3
+  ([40-command-mode.md](40-command-mode.md#an-hqs-command-mode-mode-3--read-and-seen)).
 - The Large transport's second slot, and which Large builder socket takes the
   module. **No module names the `Base_*` nodes.** A search of every DLL for
   the string, and for `Base`/`BASE`/`ase_` as a four-byte constant, finds
