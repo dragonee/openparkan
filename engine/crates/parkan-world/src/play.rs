@@ -331,6 +331,8 @@ pub struct Play {
     pub economy: crate::economy::Economy,
     /// Each clan's research tree, and the research centres' queues (docs/16).
     pub research: crate::research::Research,
+    /// The main teleports' places (docs/27, "The main teleport").
+    pub places: Vec<crate::places::Places>,
 }
 
 /// A round about to leave a barrel.
@@ -729,8 +731,10 @@ impl Play {
             construction: crate::construction::Construction::new(mission, &battle_objects),
             economy: crate::economy::Economy::new(mission, &battle_objects),
             research: crate::research::Research::default(),
+            places: Vec::new(),
         };
         play.research = crate::research::Research::load(game, mission, &battle_objects, &play.units);
+        play.load_places(mission);
         for i in 0..play.turret_effects.len() {
             let e = play.turret_effects[i].clone();
             let frame = play.turret_frame(&e);
@@ -831,7 +835,13 @@ impl Play {
     /// Stand the hero on the highest ground or building floor at (x, y), turned to `yaw`.
     /// False where there is none.
     pub fn stand_at(&mut self, x: f32, y: f32, yaw: f32) -> bool {
-        let Some(hit) = self.ground.below(x, y, 10_000.0) else { return false };
+        self.stand_below(x, y, 10_000.0, yaw)
+    }
+
+    /// Stand the hero on the highest ground or building floor at (x, y) at or below `top`,
+    /// turned to `yaw`: a buried room under the landscape, as a main teleport's chamber.
+    pub fn stand_below(&mut self, x: f32, y: f32, top: f32, yaw: f32) -> bool {
+        let Some(hit) = self.ground.below(x, y, top) else { return false };
         self.place_hero(Vec3::new(x, y, hit.point.z + 2.0), yaw);
         true
     }
@@ -844,8 +854,17 @@ impl Play {
             return false;
         };
         let Some(centre) = b.pod_centre(part) else { return false };
+        let heights = b.zone_heights(part);
         let yaw = self.hero.walker.body.yaw;
         self.place_hero(centre + Vec3::Z * 4.0, yaw);
+        // A pod room whose floor stands higher over the node's centre, as the main teleport's
+        // does, is stood on from under the top of the zone's box.
+        if let Some((low, high)) = heights
+            && !(low..high).contains(&self.hero.collision_centre().z)
+            && let Some(hit) = self.ground.below(centre.x, centre.y, high - 0.5)
+        {
+            self.place_hero(Vec3::new(centre.x, centre.y, hit.point.z + 2.0), yaw);
+        }
         true
     }
 
@@ -1258,6 +1277,7 @@ impl Play {
         let now = self.hero.time_ms;
         if !self.paused {
             self.tick_buildings(now);
+            self.tick_places(now);
             self.tick_economy(now, (dt_ms / 1000.0) as f32);
             self.tick_factories(dt_ms);
             self.tick_research(dt_ms);
@@ -2030,8 +2050,13 @@ impl Play {
                 self.says.extend(said.voice.and_then(|v| p.sound(v)).map(Say::Voice));
             }
         }
-        // The opening acts only for the player's own unit (`0x10062630`).
-        if fired.child != Child::Hero || taker != self.player_clan {
+        // The opening acts only for the player's own unit (`0x10062630`). Its switch on the Type
+        // less `0x80000002` stops at `0x3e`: a main teleport opens nothing and selects nothing
+        // (`0x100626f2`, docs/27, "Taking it").
+        if fired.child != Child::Hero
+            || taker != self.player_clan
+            || self.units[t].type_word == parkan_sim::behaviour::MAIN_TELEPORT
+        {
             return;
         }
         if !self.selected.contains(&t) {

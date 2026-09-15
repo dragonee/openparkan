@@ -347,13 +347,17 @@ impl Progress {
         out
     }
 
+    /// `SYSTEM_MESSAGE` (`0x10060d9f`): an outcome already recorded does nothing again. The
+    /// complete tests the state word against won (`0x10060d8c`) and the failure against lost
+    /// (`0x10060de9`), so either replaces the other (docs/34, "After the outcome"); a hero
+    /// standing at a teleport's out place raises the win every place tick.
     fn system(&mut self, value: i64, out: &mut Vec<Notice>) {
         match value {
-            MISSION_COMPLETE => {
+            MISSION_COMPLETE if self.outcome != Some(true) => {
                 self.outcome = Some(true);
                 out.push(Notice::MissionComplete);
             }
-            MISSION_FAILED => {
+            MISSION_FAILED if self.outcome != Some(false) => {
                 self.outcome = Some(false);
                 out.push(Notice::MissionFailed);
             }
@@ -495,8 +499,14 @@ mod tests {
             vec![Notice::ObjectiveComplete { index: 0 }, Notice::MissionComplete]
         );
         assert_eq!(p.outcome, Some(true));
-        // The test follows every call: a repeat sends the outcome again.
-        assert_eq!(p.call(OBJECTIVE_COMPLETE, 0), vec![Notice::MissionComplete]);
+        // The test follows every call, but a repeated outcome does nothing.
+        assert_eq!(p.call(OBJECTIVE_COMPLETE, 0), vec![]);
+        assert_eq!(p.call(SYSTEM_MESSAGE, MISSION_COMPLETE), vec![]);
+        // A failure after a win replaces it, and a win after that replaces the failure.
+        assert_eq!(p.call(SYSTEM_MESSAGE, MISSION_FAILED), vec![Notice::MissionFailed]);
+        assert_eq!(p.call(SYSTEM_MESSAGE, MISSION_FAILED), vec![]);
+        assert_eq!(p.outcome, Some(false));
         assert_eq!(p.call(OBJECTIVE_COMPLETE, 9), vec![Notice::MissionComplete]);
+        assert_eq!(p.outcome, Some(true));
     }
 }

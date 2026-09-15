@@ -3618,3 +3618,162 @@ fn a_click_on_the_research_centre_sends_the_helicopter_to_take_it_alone_then_it_
     eprintln!("taken in {seconds} s, off the building {second} s later at {at}, from {pod}");
     assert!((at - pod).truncate().abs().max_element() < 175.0, "escaped to {at} from {pod}");
 }
+
+/// Mission 04's Main Teleport's hall way (docs/27, "What the building is"): from the third
+/// exit (vertex 10) up the stair to the pod (12); from the arc's east end (4) to its in place
+/// (6); and in the chamber from where the in place lands a hero (3) past 1 and 2 to the out
+/// place (0), in the world.
+const TELEPORT_POD_ROUTE: [[f32; 2]; 3] = [[1189.4, 1226.7], [1186.5, 1229.9], [1178.3, 1238.9]];
+const TELEPORT_ARC_ROUTE: [[f32; 2]; 2] = [[1178.7, 1288.7], [1155.1, 1267.2]];
+const TELEPORT_CHAMBER_ROUTE: [[f32; 2]; 3] = [[1142.7, 1270.8], [1156.2, 1264.6], [1175.3, 1242.1]];
+const TELEPORT_LANDING: [f32; 3] = [1126.305, 1254.558, 68.914];
+
+fn tick_for(play: &mut parkan_world::play::Play, seconds: f32) {
+    for _ in 0..(seconds * 60.0) as usize {
+        play.update_input();
+        play.tick(1000.0 / 60.0, [0.0; 2]);
+    }
+}
+
+#[test]
+#[ignore = "needs the game install"]
+fn mission_04_lists_six_objectives_under_a_repeated_key_and_greets_the_hero_in_route_0() {
+    let (mut play, _) = mission_04_play();
+    let p = play.progression.as_ref().unwrap();
+    let texts = &p.objective_texts;
+    assert_eq!(texts.len(), 6, "{texts:?}");
+    assert!(texts[3].starts_with("4. Develop") && texts[4].starts_with("5.") && texts[5].starts_with("6."));
+    assert!(p.progress.objectives.iter().all(|o| !o.exempt && o.state == 0));
+    tick_for(&mut play, 3.0);
+    let p = play.progression.as_ref().unwrap();
+    assert!(p.progress.played[&9], "T04_I01, the hero in route 0");
+    assert!(!p.progress.played[&17] && !p.progress.played[&16]);
+}
+
+#[test]
+#[ignore = "needs the game install"]
+fn mission_04s_hero_climbs_the_teleports_stair_and_its_pod_takes_it_opening_nothing_and_winning_nothing() {
+    use parkan_world::play::Mode;
+    use parkan_world::progress::{Say, Sender};
+
+    let (mut play, m) = mission_04_play();
+    let t = object_target(&play, &m, "mtp_m_n1.dat");
+    assert_eq!(play.units[t].clan, Some(1), "neutral");
+    // The route messages share one latch, which a run finding the hero in no route opens: out of
+    // route 0 for longer than a takt's report and a Mission run take, then outside the third
+    // exit, in route 1.
+    assert!(play.stand_at(700.0, 700.0, 0.0));
+    tick_for(&mut play, 8.0);
+    assert!(!play.progression.as_ref().unwrap().progress.areals.holds(0, i64::from(play.hero_id)));
+    assert!(play.stand_at(1193.4, 1222.3, 0.74));
+    let player = play.player_clan;
+    let (_, arrived, next, captured) =
+        walk_route(&mut play, &TELEPORT_POD_ROUTE, 30, |p| p.units[t].clan == Some(player));
+    let at = play.hero.walker.body.position;
+    let arrived = arrived.unwrap_or_else(|| panic!("stopped before vertex {next} of the stair, at {at}"));
+    let captured = captured.expect("the pod fired");
+    assert!((at.z - 101.6 - 1.4).abs() < 0.5, "on the pod room's floor: {at}");
+    let wait = (captured as f32 - arrived as f32) / 60.0;
+    assert!((1.0..3.0).contains(&wait), "the pod fired {wait:.2} s after the hero reached it");
+    assert!(
+        play.says
+            .iter()
+            .any(|s| matches!(s, Say::Text(Sender::System, text) if text == "Building is captured")),
+        "{:?}",
+        play.says
+    );
+    // A main teleport opens no screen and selects nothing (`0x100626f2`).
+    assert_eq!(play.mode(), Mode::OnFoot);
+    assert!(!play.selected.contains(&t));
+    tick_for(&mut play, 3.0);
+    let p = play.progression.as_ref().unwrap();
+    assert_eq!(p.progress.objectives[4].state, 1, "5. Find and capture the Teleport");
+    assert!(p.progress.played[&14], "T04_I06");
+    assert!(p.progress.played[&17], "T04_H03, the hero in route 1: {:?}", p.progress.played);
+    assert_eq!(p.progress.objectives[5].state, 0, "6. is never completed");
+    assert_eq!(p.progress.outcome, None, "the capture wins nothing");
+}
+
+#[test]
+#[ignore = "needs the game install"]
+fn standing_on_the_main_teleports_pod_puts_the_hero_on_its_room_floor_over_the_node_and_it_fires() {
+    let (mut play, m) = mission_04_play();
+    let t = object_target(&play, &m, "mtp_m_n1.dat");
+    // The pod room's floor stands 4.4 over the computer node's centre.
+    assert!(play.stand_on_pod(t));
+    tick_for(&mut play, 4.0);
+    let at = play.hero.walker.body.position;
+    assert!((at.z - 101.6 - 1.4).abs() < 0.5, "on the pod room's floor: {at}");
+    assert_eq!(play.units[t].clan, Some(play.player_clan));
+}
+
+#[test]
+#[ignore = "needs the game install"]
+fn mission_04s_teleport_arc_sends_the_hero_down_only_while_the_player_holds_it_and_every_generator() {
+    let (mut play, m) = mission_04_play();
+    let t = object_target(&play, &m, "mtp_m_n1.dat");
+    let generator = object_target(&play, &m, "gener01.dat");
+    let player = play.player_clan;
+    assert_eq!(play.units[generator].clan, Some(player), "Mission 04's one generator");
+    // Under the arc of a neutral teleport nothing happens.
+    assert!(play.stand_at(1184.0, 1293.5, 0.84));
+    let (_, arrived, _, sent) =
+        walk_route(&mut play, &TELEPORT_ARC_ROUTE, 20, |p| p.hero.walker.body.position.z < 90.0);
+    assert!(arrived.is_some() && sent.is_none(), "{}", play.hero.walker.body.position);
+    // The player's teleport beside a generator of another clan: still nothing.
+    play.units[t].clan = Some(player);
+    play.units[generator].clan = Some(1);
+    tick_for(&mut play, 1.0);
+    assert!(play.hero.walker.body.position.z > 100.0);
+    // Every generator the player's: the next place tick puts the hero on the landing vertex,
+    // turned as it was.
+    play.units[generator].clan = Some(player);
+    let yaw = play.hero.walker.body.yaw;
+    let mut ticks = 0;
+    while play.hero.walker.body.position.z > 90.0 && ticks < 60 {
+        play.update_input();
+        play.tick(1000.0 / 60.0, [0.0; 2]);
+        ticks += 1;
+    }
+    let at = play.hero.walker.body.position;
+    assert!(ticks <= 9, "moved {ticks} ticks after the generator came back, to {at}");
+    assert!(at.distance(glam::Vec3::from_array(TELEPORT_LANDING)) < 0.05, "on vertex 3: {at}");
+    assert!((play.hero.walker.body.yaw - yaw).abs() < 1e-4, "turned as it was");
+    // It drops to the chamber's floor under the landscape.
+    tick_for(&mut play, 1.5);
+    let ground = play.hero.walker.ground.expect("on a floor");
+    assert!(ground.solid.is_some_and(|(s, _)| s == t), "the teleport's own floor: {ground:?}");
+    assert!((ground.point.z - 65.6).abs() < 1.0, "the chamber's floor: {ground:?}");
+}
+
+#[test]
+#[ignore = "needs the game install"]
+fn mission_04_is_won_once_as_the_hero_walks_up_the_teleports_chamber_to_its_field() {
+    use parkan_world::progress::{Say, VOICE_MISSION_COMPLETE};
+
+    let (mut play, m) = mission_04_play();
+    let t = object_target(&play, &m, "mtp_m_n1.dat");
+    let player = play.player_clan;
+    play.units[t].clan = Some(player);
+    let [x, y, z] = TELEPORT_LANDING;
+    assert!(play.stand_below(x, y, z, 0.79), "the chamber under the landscape");
+    let (_, _, next, won) = walk_route(&mut play, &TELEPORT_CHAMBER_ROUTE, 20, |p| {
+        p.progression.as_ref().unwrap().progress.outcome.is_some()
+    });
+    let won =
+        won.unwrap_or_else(|| panic!("heading for point {next}, at {}", play.hero.walker.body.position));
+    // The recording's hero reaches the field 4.6 s after the chamber: 68.8 m, less the place's 5.
+    let seconds = won as f32 / 60.0;
+    assert!((3.5..7.0).contains(&seconds), "won {seconds:.2} s up the chamber");
+    play.hero.key("SCAN_W", false);
+    let p = play.progression.as_ref().unwrap();
+    assert_eq!(p.progress.outcome, Some(true));
+    assert_eq!(p.progress.objectives[5].state, 0, "won with the sixth objective open");
+    assert!(p.panel().is_some_and(|panel| panel.won));
+    let voice = p.sound(VOICE_MISSION_COMPLETE).expect("its voice");
+    let wins = |says: &[Say]| says.iter().filter(|s| **s == Say::Voice(voice.clone())).count();
+    assert_eq!(wins(&play.says), 1);
+    // Standing on at the field raises the handler each place tick; a repeated outcome is silent.
+    tick_for(&mut play, 2.0);
+    assert_eq!(wins(&play.says), 1);
+}

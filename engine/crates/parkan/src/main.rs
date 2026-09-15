@@ -6,7 +6,7 @@
 //! parkan [--game DIR] [--mission MISSIONS/…] [--fly]
 //!        [--screenshot OUT.png] [--size WxH] [--top-down] [--look X,Y,Z,TX,TY,TZ]
 //!        [--headless] [--ticks N] [--hold SCAN_W,SCAN_A] [--mouse DX,DY] [--trace] [--sway]
-//!        [--capture-idle] [--stretch-hud] [--outcome won|lost] [--text "…"] [--face NAME,DISTANCE] [--at X,Y,YAW] [--pod NAME] [--drive PATH] [--hq] [--take NAME] [--designer] [--design PART,…]
+//!        [--capture-idle] [--stretch-hud] [--outcome won|lost] [--text "…"] [--face NAME,DISTANCE] [--at X,Y,YAW[,Z]] [--pod NAME] [--drive PATH] [--hq] [--take NAME] [--designer] [--design PART,…]
 //!        [--skip-briefing] [--briefing-at SECONDS] [--objectives] [--map]
 //! ```
 //!
@@ -102,8 +102,9 @@ struct Args {
     text: Option<String>,
     /// `--face NAME,DISTANCE`: the hero starts that far from that object, facing it.
     face: Option<(String, f32)>,
-    /// `--at X,Y,YAW`: the hero starts on the ground at X,Y, turned to YAW.
-    at: Option<[f32; 3]>,
+    /// `--at X,Y,YAW[,Z]`: the hero starts on the ground at X,Y, turned to YAW; with Z, on the
+    /// highest floor at or below Z, as in a building's buried rooms.
+    at: Option<[f32; 4]>,
     /// `--pod NAME`: the hero starts on the control pod of the building whose path ends in NAME.
     pod: Option<String>,
     /// `--drive PATH`: a unit of that design is made beside the hero, and the hero boards it.
@@ -216,8 +217,11 @@ fn args() -> Result<Args> {
                 out.face = Some((name.to_ascii_lowercase(), distance.parse()?));
             }
             "--at" => {
-                let v: Vec<f32> = value()?.split(',').map(str::parse).collect::<Result<_, _>>()?;
-                out.at = Some(v.try_into().map_err(|_| anyhow::anyhow!("--at takes X,Y,YAW"))?);
+                let mut v: Vec<f32> = value()?.split(',').map(str::parse).collect::<Result<_, _>>()?;
+                if v.len() == 3 {
+                    v.push(10_000.0);
+                }
+                out.at = Some(v.try_into().map_err(|_| anyhow::anyhow!("--at takes X,Y,YAW or X,Y,YAW,Z"))?);
             }
             "--pod" => out.pod = Some(value()?.to_ascii_lowercase()),
             "--drive" => out.drive = Some(value()?),
@@ -301,8 +305,8 @@ fn rehearse(play: &mut scene::Play, loaded: &scene::Loaded, args: &Args) {
             eprintln!("--pod: no building {name} with a pod");
         }
     }
-    if let Some([x, y, yaw]) = args.at
-        && !play.stand_at(x, y, yaw)
+    if let Some([x, y, yaw, top]) = args.at
+        && !play.stand_below(x, y, top, yaw)
     {
         eprintln!("--at: no ground at {x}, {y}");
     }

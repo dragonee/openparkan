@@ -282,7 +282,9 @@ pub fn push(start: Vec3, end: Vec3, radius: f32, obstacle: &Solid) -> Vec3 {
         }
     }
 
-    // Gather the faces within the sphere at its end.
+    // Gather the faces within the sphere at its end: every face, floors and faces flagged 4
+    // among them, which hide others before the filter takes them out (docs/24, "Collision
+    // between objects": gather, drop the hidden, then filter).
     let mut near: Vec<(f32, Vec3, usize)> = Vec::new();
     for node in obstacle.nodes.iter().filter(|n| !n.open) {
         if node.centre.distance(end) > node.radius + radius {
@@ -290,9 +292,6 @@ pub fn push(start: Vec3, end: Vec3, radius: f32, obstacle: &Solid) -> Vec3 {
         }
         for f in node.faces.clone() {
             let face = &obstacle.faces[f];
-            if passes(face, obstacle) {
-                continue;
-            }
             // `0x1000e900`: the centre in front of the face's plane and within the radius
             // of it, then the triangle's nearest point, inside it or on an edge or corner.
             let plane = face.normal.dot(end - face.a);
@@ -320,8 +319,11 @@ pub fn push(start: Vec3, end: Vec3, radius: f32, obstacle: &Solid) -> Vec3 {
                     .is_some_and(|q| inside(q, other.a, other.b, other.c))
         })
     };
-    let kept: Vec<(f32, Vec3)> =
-        near.iter().filter(|&&(_, _, f)| !hidden(f)).map(|&(d, n, _)| (d, n)).collect();
+    let kept: Vec<(f32, Vec3)> = near
+        .iter()
+        .filter(|&&(_, _, f)| !hidden(f) && !passes(&obstacle.faces[f], obstacle))
+        .map(|&(d, n, _)| (d, n))
+        .collect();
 
     // Accumulate nearest first (`0x1000dd7d`–`0x1000def8`).
     let mut p = Vec3::ZERO;

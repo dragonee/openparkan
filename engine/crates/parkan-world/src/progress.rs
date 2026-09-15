@@ -78,6 +78,11 @@ pub struct OutcomePanel {
     pub lines: Vec<String>,
 }
 
+/// The unit handlers' base, which the SuperAI constructor finds by name (`ai.dll:0x1000165f`),
+/// and event 8's step past it: `Hero_Teleported` (docs/27, "Teleport out").
+pub const HANDLER_GENERATOR_FOUND: &str = "Mech_GeneratorFound";
+pub const EVENT_HERO_TELEPORTED: usize = 3;
+
 /// Function 15's answer when no object answers the logical id (`ai.dll:0x10008376`), and
 /// when the unit takes the order.
 pub const ORDER_NO_UNIT: u32 = 5;
@@ -290,6 +295,42 @@ impl Progression {
                 orders: &mut self.orders,
             };
             script.run_named(handler, &mut answers);
+        }
+        notices
+    }
+
+    /// A hero at a teleport-out place, handed to the SuperAI of `clan`, the teleport's owner
+    /// (`Behavior.dll:0x1000c7d0`, docs/27, "Teleport out"): slot 18 (`ai.dll:0x100020a0`) runs
+    /// event 8 for a unit as the handler three after `Mech_GeneratorFound` (`0x10005e1c`),
+    /// `Hero_Teleported` in every shipped script. What that clan's calls to function 30
+    /// raised. A clan with no script, or a script with no such handler, does nothing.
+    ///
+    /// The game does nothing while a handler is already running (`0x10005d88`); here every
+    /// handler runs to its end before the next is started, so none is.
+    pub fn hero_teleported(&mut self, clan: i64) -> Vec<Notice> {
+        let mut notices = Vec::new();
+        let (script, base) = if clan == self.clan {
+            (self.script.as_mut(), self.base)
+        } else {
+            match self.others.iter_mut().find(|o| o.clan == clan) {
+                Some(o) => (Some(&mut o.script), o.base),
+                None => (None, [0.0; 2]),
+            }
+        };
+        let Some(script) = script else { return notices };
+        let Some(handler) = script.handler(HANDLER_GENERATOR_FOUND).map(|h| h + EVENT_HERO_TELEPORTED) else {
+            return notices;
+        };
+        let mut answers = Answers {
+            progress: &mut self.progress,
+            clan,
+            base,
+            notices: &mut notices,
+            unanswered: &mut self.unanswered,
+            orders: &mut self.orders,
+        };
+        if handler < script.script.handlers.len() {
+            script.run(handler, &mut answers);
         }
         notices
     }

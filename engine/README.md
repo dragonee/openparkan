@@ -378,7 +378,7 @@ builder puts the Small Mine on the lode from command mode, the transport carries
 Large Factory builds four *SSW-X* in batch, and they beat the patrol: the mission is won. Not
 yet: Explode!, tooltips, the chat and game menu buttons, and the designer's save and load.
 
-**M13.** Mission 04, *Teleport*: a mobile command centre, research, and a small warbot's captures.
+**M13.** Mission 04, *Teleport*: a mobile command centre, research, a small warbot's captures, and the Main Teleport.
 
 - Enter on a neutral unit within 20 m captures it and, where the hero can board it (size
   class 4, its turret alive), boards it at once. Mission 04's *LWC-1 Comm. Center* is taken
@@ -445,6 +445,27 @@ On Mission 04 the helicopter ordered Search and capture takes the Large Factory 
 order, landing at its ring's vertex 9 and walking in by exit 67 as the recording's does, and
 the Research Center 42 s after that, their icons turning from grey to light blue; the
 recording's took 90 s and 81 s.
+- A repeated `mission.cfg` key is kept in the objective list, as the game's loader walks the
+  lines by index: Mission 04 lists six objectives, `objective4` twice, and the sixth, which
+  nothing completes, holds the win back from the Teleport's capture.
+- A repeated `MISSION_COMPLETE` or `MISSION_FAILED` does nothing again; either replaces the
+  other.
+- A main teleport's in and out places are ticked every 64–128 ms as upright cylinders about
+  their vertices, 5 across, 3 up and 2.1 down (3 at an out place). A hero on foot in an in
+  place, of the teleport's clan while that clan holds every generator on the map, is put on
+  the hall way's `0x10000` vertex in the chamber buried under it, turned as it was; a hero in
+  the out place runs the teleport's clan's `Hero_Teleported`, the handler three after
+  `Mech_GeneratorFound`, and Mission 04's wins.
+- The Main Teleport's pod takes it like any building's, and opens no screen and selects
+  nothing. The hero climbs its stair from the third exit to the pod, which fires 2 s after.
+- The push-out gathers every face in the sphere, a floor too, drops a face another hides from
+  the centre, and only then lets a floor or a see-through face by: the pod computer's wall
+  standing under the Teleport's pod room floor no longer stops the hero on the stair.
+- `--at X,Y,YAW,Z` stands the hero on the highest floor at or below Z, as in the chamber, and
+  `--pod` stands the hero on a pod room floor that stands higher over its node than 4.
+
+On Mission 04 the hero walks up the Teleport's stair and takes it, under its arc drops into
+the chamber, and walks up it to the field: the mission is won.
 
 This directory also holds what the rest will follow:
 
@@ -556,6 +577,12 @@ off `,` and `.` spin the hull. R and F climb and sink a flyer, and nothing else 
 Every machine's top speed and turn rate come from its fitted engine, its load and the life
 left in its body, recomputed each tick: Mission 03's transport runs at 24 m/s, and a unit shot
 to half its body's hit points runs at half speed.
+
+On Mission 04, once the hero has taken the Main Teleport at its pod (`--pod mtp_m_n1.dat`),
+walking under its arc drops the hero into the chamber below, and walking up the chamber to its
+field wins. `--at X,Y,YAW,Z` stands the hero on the highest floor at or below Z: `--mission
+MISSIONS/CAMPAIGN/CAMPAIGN.00/Mission.04 --skip-briefing --at 1172.2,1245.6,-2.434,80
+--outcome won --screenshot won.png` draws the field under the won panel.
 
 ## Checks
 
@@ -675,6 +702,9 @@ a row here. A row leaves this table when research closes it.
 | M13 | The building's own paths an escape is routed out by ("LEAVE IS TOO !!!") | a unit sent into a building along its hall way walks out of it along the hall way, from its nearest vertex to the exit that makes the way to its goal shortest, while it stands inside the building's outer ring | [31](../docs/31-packages.md#the-escape--read) |
 | M13 | The unit takt escape's node test (a unit on a damaged node is left be) | every node counts as whole | [31](../docs/31-packages.md#the-escape--read) |
 | M13 | The clan's contact list the maps mark other clans' objects by, and the scan's signatures | every live object strictly within the radar range of a live unit of the player's clan, the hero among them | [35](../docs/35-hud.md#the-panel-in-the-cockpit--read-and-seen) |
+| M13 | The places besides a main teleport's: a dock's charge, repair and rearm, and whether a loading or unloading place's cylinder is what a transport's arrival reads | only the in and out places of a main teleport are ticked; a transport keeps its own arrival | [27](../docs/27-ownership.md#the-places--read-and-measured) |
+| M13 | The random source of a place set's and a place's 64 ms share (`0x1004c550`) | a 32-bit xorshift per building | [27](../docs/27-ownership.md#who-stands-in-a-place--read) |
+| M13 | Whether a destroyed generator stays in `World3D.dll`'s queue 3, which the in place's power walk reads | the live generators are asked | [27](../docs/27-ownership.md#teleport-in-0x8000--read) |
 
 ### Read since the stand-in was written
 
