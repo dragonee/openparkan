@@ -2,15 +2,25 @@
 //! budgets, and where the finished bot appears. See `docs/36-factory.md`, "Projects" and
 //! "Production", and `docs/23-economy.md`, "Construction".
 
+use std::collections::BTreeMap;
+use std::path::Path;
+
+use anyhow::Result;
 use glam::Vec3;
 use parkan_formats::hallway::{self, HallWay, PLACE_CREATION, PLACE_CREATION_OLD};
 use parkan_formats::mission::{self, Mission, Value};
+use parkan_formats::{gamedir, objects};
 use parkan_sim::construct::{self, Construct};
 
 use crate::assembly::Assembly;
+use crate::designs::{Catalogue, Designer, Node};
 
 /// The most recent projects a factory panel lists (`+0xb674`, five slots).
 pub const RECENT_PROJECTS: usize = 5;
+/// The `mission.cfg` object naming the designs a mission starts the recent projects with,
+/// and where they are loaded from (`iron3d.dll:0x1004ddc9`, `0x1004df52`).
+pub const PREBUILD: &str = "prebuild";
+pub const PREBUILD_DIR: &str = "units\\units\\prebld\\";
 /// The mission property that spares a factory's bots their price (`MBehaviour+0x9ec`).
 pub const FREE_BOT_NUM: &str = "FreeBotNum";
 /// `VOICE_UNIT_READY`, queued for the player's clan when its factory makes a bot
@@ -116,6 +126,15 @@ impl Factory {
         self.selected = Some(0);
     }
 
+    /// A design `mission.cfg`'s `prebuild` object names (`iron3d.dll:0x1004ded7`): the recent
+    /// projects shift down and it loads into slot 0. With none selected, project 0 is, as the
+    /// panel selects it once it has recent projects and shows none (`0x10097a06`).
+    pub fn prebuild(&mut self, project: Project) {
+        self.projects.insert(0, project);
+        self.projects.truncate(RECENT_PROJECTS);
+        self.selected.get_or_insert(0);
+    }
+
     /// Start production of the shown project (`0x100986e0`): nothing without a project or a
     /// free mind, or for a chassis bigger than the factory.
     pub fn start(&mut self, batch: bool, free_minds: usize) -> bool {
@@ -171,9 +190,120 @@ pub fn creation_vertex(hall_way: &HallWay) -> Option<hallway::Vertex> {
     hall_way.first(PLACE_CREATION).or_else(|| hall_way.first(PLACE_CREATION_OLD)).copied()
 }
 
+/// The design at `path` as the constructor rates, names and prices it from `designer`'s
+/// research tree: what accept hands a factory (`0x1005144c`).
+pub fn design_project(
+    designer: &mut Designer,
+    assembly: &mut Assembly,
+    path: &str,
+    strings: &BTreeMap<u32, String>,
+) -> Option<Project> {
+    let file = gamedir::resolve(&assembly.game, path)?;
+    let unit = objects::parse_unit(&std::fs::read(file).ok()?, path).ok()?;
+    let design = Node::from_unit(&unit)?;
+    let (ore, power, _) = designer.price(&design);
+    let lines = designer
+        .rate(assembly, &design)
+        .map(|r| r.lines(designer.offence_range, designer.defence_range).to_vec())
+        .unwrap_or_default();
+    Some(Project {
+        path: path.to_owned(),
+        name: designer.name(assembly, &design, 0, strings),
+        type_word: designer.type_word(&design),
+        chassis_size: crate::robot::chassis_size(&design.part),
+        ore,
+        power,
+        lines,
+        sphere: crate::cockpit::designer::design_sphere(assembly, path).map(|(c, r)| (c.to_array(), r)),
+    })
+}
+
+/// `mission.cfg`'s `prebuild` object (`iron3d.dll:0x1004ddc9`): each design it names, from
+/// `units\units\prebld\`, in turn into every factory's recent projects, so the last named is
+/// project 0 (docs/23, "What `prebuild` does"). The player clan's research tree prices them.
+/// Returns how many loaded.
+pub fn prebuild(play: &mut crate::play::Play, game: &Path, mission_dir: &Path) -> Result<usize> {
+    let Some(cfg) = gamedir::resolve(mission_dir, "mission.cfg") else { return Ok(0) };
+    let blocks = crate::resources::read_cfg(&cfg)?;
+    let Some(names) = blocks.get(PREBUILD) else { return Ok(0) };
+    let names: Vec<String> = names.properties.iter().map(|(_, v)| v.clone()).collect();
+    if names.is_empty() || play.factories.is_empty() {
+        return Ok(0);
+    }
+    let tree = usize::try_from(play.player_clan)
+        .ok()
+        .and_then(|c| play.clans.get(c))
+        .map(|c| c.behaviour.clone())
+        .unwrap_or_default();
+    let strings = crate::resources::game_strings(game)?;
+    let grade = play.factories.first().map_or(4, |f| usize::from(f.size));
+    let mut designer = Designer::new(game, Catalogue::open(game, &tree)?, grade);
+    let mut loaded = 0;
+    for name in names {
+        let path = format!("{PREBUILD_DIR}{name}");
+        let Some(project) = design_project(&mut designer, &mut play.assembly, &path, &strings) else {
+            continue;
+        };
+        for f in &mut play.factories {
+            f.prebuild(project.clone());
+        }
+        loaded += 1;
+    }
+    Ok(loaded)
+}
+
 /// A vertex's point in the world, through its joint node's pose (`ArealMap.dll:0x1000a760`).
 pub fn vertex_world(vertex: &hallway::Vertex, part: &parkan_sim::combat::Part) -> Option<Vec3> {
     let pose = part.nodes.get(vertex.joint as usize)?;
     let p = pose.apply(vertex.position.map(|v| f64::from(v * part.scale)));
     Some(Vec3::new(p[0] as f32, p[1] as f32, p[2] as f32))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn project(name: &str) -> Project {
+        Project {
+            path: format!("units\\units\\prebld\\{name}.dat"),
+            name: name.to_owned(),
+            type_word: 0,
+            chassis_size: 2,
+            ore: 0.0,
+            power: 0.0,
+            lines: Vec::new(),
+            sphere: None,
+        }
+    }
+
+    fn factory() -> Factory {
+        Factory {
+            target: 0,
+            logic_id: 0,
+            size: 4,
+            free_bots: 0,
+            creation: None,
+            projects: Vec::new(),
+            selected: None,
+            build: None,
+            batch: false,
+        }
+    }
+
+    #[test]
+    fn prebuilt_designs_shift_down_so_the_last_named_is_project_0_and_it_is_selected() {
+        let mut f = factory();
+        for name in ["p1", "p2"] {
+            f.prebuild(project(name));
+        }
+        assert_eq!(f.projects.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(), ["p2", "p1"]);
+        assert_eq!(f.selected, Some(0));
+        for name in ["a", "b", "c", "d"] {
+            f.prebuild(project(name));
+        }
+        assert_eq!(
+            f.projects.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(),
+            ["d", "c", "b", "a", "p2"]
+        );
+    }
 }

@@ -287,6 +287,10 @@ the own panel's unit while aboard.
   fired; an area hit carries the node to every building it reaches. Nothing holds
   the door, so it shuts 5 s after opening unless a unit stands near it. A laser
   round on the Small Bunker's door opens it in 3.6 s.
+- `mission.cfg`'s `prebuild` designs, from `units\units\prebld\`, go into every
+  factory's recent projects at the start, rated, named and priced from the player
+  clan's research tree, the last named first: Mission 03's Large Factory offers
+  *SWW-X Warrior* and *SSW-X Warrior*.
 
 This directory also holds what the rest will follow:
 

@@ -390,7 +390,7 @@ fn part_sphere(assembly: &mut Assembly, record: &str) -> Option<(Vec3, f32)> {
 }
 
 /// The sphere of an assembly's parts as drawn.
-fn design_sphere(assembly: &mut Assembly, path: &str) -> Option<(Vec3, f32)> {
+pub fn design_sphere(assembly: &mut Assembly, path: &str) -> Option<(Vec3, f32)> {
     let parts = assembly.parts(KIND_UNIT, path);
     let mut points = Vec::new();
     for part in parts {

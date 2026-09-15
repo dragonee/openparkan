@@ -2064,6 +2064,42 @@ fn mission_03s_hero_on_the_generators_pod_captures_it_and_completes_the_first_ob
 
 #[test]
 #[ignore = "needs the game install"]
+fn mission_03s_large_factory_starts_with_its_two_prebuilt_designs_the_last_named_first() {
+    let (play, m) = mission_03_play();
+    let t = object_target(&play, &m, "lplant01.dat");
+    let f = play.factories.iter().find(|f| f.target == t).expect("the Large Factory");
+    // docs/23, "What `prebuild` does", priced from `tut3_pl.trf`.
+    let shown: Vec<(&str, &str, String, String, &[String])> = f
+        .projects
+        .iter()
+        .map(|p| {
+            (
+                p.path.as_str(),
+                p.name.as_str(),
+                format!("{:.1}", p.ore),
+                format!("{:.1}", p.power),
+                &p.lines[..],
+            )
+        })
+        .collect();
+    let lines = |l: [&str; 5]| l.map(str::to_owned).to_vec();
+    let (p2, p1) = (
+        lines(["6 / 2 t", "64 kph", "7 %", "8 %", "300 m"]),
+        lines(["7 / 0 t", "43 kph", "8 %", "18 %", "300 m"]),
+    );
+    assert_eq!(
+        shown,
+        vec![
+            ("units\\units\\prebld\\tut3_p2.dat", "SWW-X Warrior", "118.6".into(), "63.7".into(), &p2[..]),
+            ("units\\units\\prebld\\tut3_p1.dat", "SSW-X Warrior", "125.6".into(), "72.7".into(), &p1[..]),
+        ]
+    );
+    assert_eq!(f.selected, Some(0));
+    assert!(f.projects.iter().all(|p| p.chassis_size == 2 && p.sphere.is_some()));
+}
+
+#[test]
+#[ignore = "needs the game install"]
 fn a_laser_round_on_mission_03s_bunker_door_opens_it_and_it_shuts_again_once_free() {
     use glam::Vec3;
     use parkan_sim::combat::Event;

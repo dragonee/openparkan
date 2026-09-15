@@ -636,9 +636,10 @@ impl Play {
     }
 
     /// Load the mission's progression from `mission_dir`: its player clan's script, its
-    /// messages and objectives.
+    /// messages and objectives, and the designs its `mission.cfg` prebuilds.
     pub fn load_progression(&mut self, game: &Path, mission_dir: &Path, mission: &Mission) -> Result<()> {
         self.progression = Some(Progression::load(game, mission_dir, mission, self.hero.object)?);
+        crate::factory::prebuild(self, game, mission_dir).context("the prebuilt designs")?;
         Ok(())
     }
 
