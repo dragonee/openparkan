@@ -2659,3 +2659,140 @@ fn mission_03s_transport_carries_2000_ore_from_the_mine_to_the_small_warehouse()
     let task = play.robots.iter().find(|(t, _)| *t == transport).unwrap().1.behaviour.task();
     assert!(matches!(task, Task::Transport { goal: Some(_), .. }), "{task:?}");
 }
+
+/// Walk the hero along `route`, W held and turned toward each point in turn, for at most
+/// `seconds`, W let go at the last point: the tick it reached the first point on the building's
+/// floor (the first whose ground is a building's face), the tick it reached the last point, the
+/// index of the point it was heading for, and the tick `done` first held.
+fn walk_route(
+    play: &mut parkan_world::play::Play,
+    route: &[[f32; 2]],
+    seconds: usize,
+    done: impl Fn(&parkan_world::play::Play) -> bool,
+) -> (Option<usize>, Option<usize>, usize, Option<usize>) {
+    play.hero.key("SCAN_W", true);
+    let (mut on_floor, mut arrived, mut finished, mut next) = (None, None, None, 0);
+    for tick in 0..(60 * seconds) {
+        let at = play.hero.walker.body.position;
+        while next < route.len() && glam::Vec2::from_array(route[next]).distance(at.truncate()) < 1.2 {
+            next += 1;
+        }
+        if on_floor.is_none() && play.hero.walker.ground.is_some_and(|g| g.solid.is_some()) {
+            on_floor = Some(tick);
+        }
+        if next == route.len() {
+            if arrived.is_none() {
+                arrived = Some(tick);
+                play.hero.key("SCAN_W", false);
+            }
+        } else {
+            let to = glam::Vec2::from_array(route[next]) - at.truncate();
+            play.hero.walker.body.yaw = (-to.x).atan2(to.y);
+        }
+        play.update_input();
+        play.tick(1000.0 / 60.0, [0.0; 2]);
+        if done(play) {
+            finished = Some(tick + 1);
+            break;
+        }
+    }
+    (on_floor, arrived, next, finished)
+}
+
+#[test]
+#[ignore = "needs the game install"]
+fn mission_03s_hero_walks_into_the_small_generator_from_the_south_and_its_pod_captures_it() {
+    // The hall way's shortest way from the south exit (vertex 51) to the pod (16), docs/24,
+    // "The ways into Mission 03's Small Generator and Small Bunker".
+    let route = [
+        [648.26, 995.35],
+        [648.55, 999.96],
+        [649.76, 1019.04],
+        [650.12, 1024.73],
+        [650.78, 1035.22],
+        [659.57, 1036.86],
+        [663.95, 1032.77],
+        [668.69, 1029.95],
+        [674.04, 1030.13],
+        [678.53, 1034.81],
+        [678.95, 1041.43],
+        [672.62, 1049.86],
+        [665.26, 1050.32],
+        [659.45, 1050.69],
+    ];
+    let (mut play, m) = mission_03_play();
+    let t = object_target(&play, &m, "gener01.dat");
+    assert!(play.stand_at(647.73, 987.06, 0.0));
+    let player = play.player_clan;
+    let (on_floor, arrived, next, captured) =
+        walk_route(&mut play, &route, 40, |p| p.units[t].clan == Some(player));
+    let at = play.hero.walker.body.position;
+    let arrived = arrived.unwrap_or_else(|| panic!("stopped before vertex {next} of the way, at {at}"));
+    let (on_floor, captured) = (on_floor.expect("on the generator's floor"), captured.expect("captured"));
+    assert!((at.z - 81.4).abs() < 1.0, "on the pod room's floor: {at}");
+    assert!(arrived < 12 * 60, "on the pod {:.1} s in", arrived as f32 / 60.0);
+    // The recording's hero is on the apron at 108.0 s and sees the capture at 116.5 s.
+    let apron_to_capture = (captured - on_floor) as f32 / 60.0;
+    eprintln!(
+        "generator: on the apron {:.2} s, on the pod {:.2} s, captured {:.2} s",
+        on_floor as f32 / 60.0,
+        arrived as f32 / 60.0,
+        captured as f32 / 60.0
+    );
+    assert!((7.0..11.0).contains(&apron_to_capture), "apron to capture {apron_to_capture:.1} s");
+    // The Mission handler, every 2 s, completes the objective.
+    for _ in 0..150 {
+        play.tick(1000.0 / 60.0, [0.0; 2]);
+    }
+    let p = play.progression.as_ref().unwrap();
+    assert_eq!(p.progress.objectives[0].state, 1, "Find and capture the Power Generator");
+}
+
+#[test]
+#[ignore = "needs the game install"]
+fn mission_03s_hero_walks_down_the_small_bunkers_ramp_to_its_pod_and_command_mode_opens() {
+    use parkan_world::play::Mode;
+
+    // The hall way's way from its one exit (vertex 43) down the ramp, through the door and the
+    // corridors to the pod (6), docs/24, "The ways into Mission 03's Small Generator and Small
+    // Bunker".
+    let route = [
+        [1209.39, 825.78],
+        [1225.93, 822.23],
+        [1243.24, 818.02],
+        [1257.07, 814.87],
+        [1267.09, 812.64],
+        [1265.22, 804.06],
+        [1262.78, 792.13],
+        [1261.52, 786.69],
+        [1265.58, 785.58],
+        [1274.34, 783.54],
+        [1282.90, 781.75],
+        [1286.42, 796.31],
+        [1288.90, 807.37],
+    ];
+    let (mut play, m) = mission_03_play();
+    let bunker = object_target(&play, &m, "sbunk01.dat");
+    assert!(play.stand_at(1198.14, 829.49, -std::f32::consts::FRAC_PI_2));
+    let (on_floor, arrived, next, opened) = walk_route(&mut play, &route, 60, |p| p.mode() != Mode::OnFoot);
+    let at = play.hero.walker.body.position;
+    let arrived = arrived.unwrap_or_else(|| panic!("stopped before vertex {next} of the way, at {at}"));
+    let (on_floor, opened) = (on_floor.expect("on the bunker's ramp"), opened.expect("the pod fired"));
+    assert!((at.z - 69.7).abs() < 1.0, "on the pod's floor: {at}");
+    assert!(arrived < 20 * 60, "on the pod {:.1} s in", arrived as f32 / 60.0);
+    assert_eq!(play.mode(), Mode::Command(bunker), "the capture opens command mode");
+    // The recording's hero starts down the ramp by 164.4 s, and command mode is up at 178.2 s.
+    let ramp_to_command = (opened - on_floor) as f32 / 60.0;
+    eprintln!(
+        "bunker: on the ramp {:.2} s, on the pod {:.2} s, command mode {:.2} s",
+        on_floor as f32 / 60.0,
+        arrived as f32 / 60.0,
+        opened as f32 / 60.0
+    );
+    assert!((12.0..17.0).contains(&ramp_to_command), "ramp to command mode {ramp_to_command:.1} s");
+    for _ in 0..150 {
+        play.tick(1000.0 / 60.0, [0.0; 2]);
+    }
+    let p = play.progression.as_ref().unwrap();
+    assert_eq!(p.progress.objectives[1].state, 1, "Find and capture the Bunker");
+}

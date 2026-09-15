@@ -362,6 +362,11 @@ the own panel's unit while aboard.
 - Telepresence: a unit page's three drive buttons take the selected unit over (mode 2) with
   its own cockpit and table while the hero stays in the bunker; Esc goes back to the command
   view with the camera where it was left.
+- The hero walks into Mission 03's buildings by their hall ways (docs/24, "The ways into
+  Mission 03's Small Generator and Small Bunker"): from the Small Generator's south exit down
+  its ramp and through its sliding door to the pod, which captures it 8.2 s after it steps on,
+  and down the Small Bunker's sunk ramp, through its door, to the pod, which opens command
+  mode 14.6 s after the ramp's top, as the recording takes 8.5 and 14.2 s.
 
 Not yet: Explode!, tooltips, and the chat and game menu buttons.
 
