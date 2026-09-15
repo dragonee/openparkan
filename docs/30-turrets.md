@@ -461,6 +461,210 @@ A turret's yaw channel turns at 0.5–0.85 turns a second, 3.1–5.3 rad/s. So t
 turret reaches the new heading first, and the hull comes round under it in
 about a second (*derived*).
 
+## The zoom — *read*, and *measured*
+
+`CMD_JAMES_ZOOM_MODE` (738) is bound to Z in `ui_other.man` and `addition.man`
+(*measured*). Its case (`iron3d.dll:0x10072428`) switches on the level's view
+state word ([40-command-mode.md](40-command-mode.md#three-words-the-mode-the-view-state-and-the-camera--read)):
+
+- **State 2**, a command view: the command camera's own zoom
+  ([40-command-mode.md](40-command-mode.md#zoom)).
+- **State 1**, the driven unit's camera, and **state 6**, a building's: the
+  zoom of that unit record (`+0xaec`) or building record (`+0xaf0`).
+- **Any other state**, the outer camera's 3 among them, does nothing.
+
+**A unit record keeps its own zoom.**
+
+| field | what |
+|---|---|
+| `+0x10` | the widest field |
+| `+0x14` | the field now |
+| `+0xa3` | zoom on; the constructor clears it (`0x1007e2b3`) |
+| `+0xa4` | set once the record has had its first update |
+
+- **The press toggles `+0xa3` only at an end** (`0x1007244a`–`0x100724cb`): the
+  field at most 0.2 (`0x100e5c68`), or at least `+0x10`. A press while the field
+  moves does nothing.
+- **The widest is the unit camera's own field.** The record's first update
+  (`0x10075985`) asks the camera view's interface `0x12` slot 17 for its field
+  and stores it in both `+0x10` and `+0x14`.
+- **Each game frame steps it** (`0x10075c51`). The frame (`0x1005e680`) updates
+  the unit records (`0x1007d6e0`, `0x1005eaae`). For each record of the player's
+  clan whose camera answers, the step is:
+  - zoom on, and the field above 0.2: minus 0.1 (`0x100e5c70`);
+  - zoom off, and the field below the widest: plus 0.1.
+
+  The field then goes to the view (interface `0x12` slot 10, `0x10075ca8`). The
+  building records' update (`0x1007db30` → `0x10033020`) steps theirs the same
+  way (`0x10033417`).
+- **It is per frame, not per second, and it stops past an end rather than on
+  it** (*derived*). In 32-bit floats, 1.3 steps to 0.2 in eleven frames and back
+  in eleven.
+- **No sound plays** (*read*). Neither the case nor the step calls the sound
+  server.
+
+**The mouse slows while zoomed** (*read*).
+
+- **Setting the state sends it on.** Both the zoom case and every change of
+  view state (`0x100a4f90` → `0x100a4fc0`) pass on "zoomed". For view state 2
+  that is the command camera's `+0x34`; for 1 and 6, the record's `+0xa3`; for
+  any other state, 0.
+- **Where it goes** (`0x10061a50`): the game-settings object's setting
+  group 10, `0x66`, the mouse filter's multiplier
+  ([14-controls.md](14-controls.md#the-ini-reaches-world3d--read)).
+  - Zoomed, it asks the handler's slot 4 for the setting and sets what that
+    answers, 0.5 (`World3D.dll:0x1000adf0`).
+  - Not zoomed, it sets the level's `+0xe0`, the value `Iron_3D.ini`'s
+    `MOUSE_SENS` × 0.01 was sent as at load (`0x100617dc`).
+- With the install's `MOUSE_SENS=100`, **the mouse turns half as fast while
+  zoomed** (*derived*).
+
+**What it looks like** (*measured*, from the Mission 01 recording at 60
+frames of the game to 30 of the video):
+
+- **The zoom-in.** It comes in between 159.0 s and 159.1 s, over about five
+  video frames, which fits eleven game frames at 60 a second.
+- **The magnification.** A dummy about 24 pixels tall on the 720-pixel frame
+  stands about 152 tall zoomed, some 6.3 times. Stepping the hero camera's
+  horizontal field from 1.3 to 0.2 magnifies the middle
+  tan 0.65 ÷ tan 0.1 = 7.6 times. The blurred dummy leaves the difference
+  within the measurement (*derived*).
+
+## The outer camera — *read*, and *measured*
+
+`CMD_JAMES_OUTER_CAMERA` (736, *"Activate outer camera"*) is bound to C in
+`ui_other.man` and `addition.man` (*measured*).
+
+**The case** (`0x10072244`) acts when the stack's front mode is 0, 1 or 2 (on
+foot, a boarded bot, telepresence) and there is a driven unit record
+(`+0xaec`). It hands that record to the level's outer camera at `+4`
+(`0x10038b30`).
+
+**The camera's fields.**
+
+| field | what |
+|---|---|
+| `+4` | its view, made at the first press (`0x100364a0`) with far 700, near 0.5 and field 1.3 |
+| `+0x38` | the record it looks at |
+| `+0x3c` | that record's camera component, interface 6 |
+| `+0x40`, `+0x44`, `+0x48` | where it is going: an angle, a drop, a distance back |
+| `+0x4c`, `+0x50`, `+0x54` | where it stands now, the same three |
+| `+0x58` | the next place a press takes it to, 0–4 |
+| `+0x5c` | the time of the last press, ms |
+| `+0x60` | moving |
+
+**A press** (`0x10038b30`, `0x10038920`).
+
+- **Another record** than `+0x38` becomes the one looked at: the view is made if
+  it is not, the record's camera component is taken, and the place goes to 0.
+  The same record goes on to its next place.
+- **While `+0x60` is set a press does nothing.**
+- **The places** (the jump table at `0x10038ab4`):
+
+  | `+0x58` | angle `+0x40` | distance back `+0x48` | on screen |
+  |---:|---:|---:|---|
+  | 0 | 0.4 | 2.5 | right near |
+  | 1 | 0.2 | 4.5 | right far |
+  | 2 | −0.2 | 4.5 | left far |
+  | 3 | −0.4 | 2.5 | left near |
+  | 4 | 0 | 0 | back into the eye |
+
+  - **The drop `+0x44`** is 0.15 (`0x100e5d18`), or −0.45 (`0x100e5d1c`) when
+    the unit flies (`0x10075f70`, [35-hud.md](35-hud.md#the-radar--read-and-seen)).
+  - **Place 0 turns the camera on.** It sets view state 3 (`0x100a4f90`), puts the
+    view on (`0x10036d40`) and hands the view to the record's camera component
+    (interface slot 4). It also copies the main view's flag `0x20` to the outer
+    view (`0x1003895c`–`0x10038995`). It clears `+0x4c`–`+0x54`, so the move
+    starts in the eye.
+  - **Places 0 to 3** step `+0x58` on. Place 4 zeroes the three and sets `+0x58`
+    back to 0.
+  - **Every place** sets `+0x60` and stamps `+0x5c` with the timer's time now
+    (`ITimer` slot 2).
+
+**Each frame in view state 3** the level updates the outer camera
+(`0x100a55f4` → `0x10038720`):
+
+1. **A removed object turns it off.** When the record's object answers `0xfffe`,
+   view state 1 comes back, the view is switched off and taken from the
+   component, and `+0x38` is cleared.
+2. **The unit's camera.** Its matrix comes from the component (slot 8, with 2).
+   Its first column is the look, and its last column the eye
+   ([Aiming and the camera](#aiming-and-the-camera--read-and-measured)).
+3. **Where it stands** (`0x10038799`–`0x10038800`). With r the record's
+   `+0x98` and h = atan2(look y, look x):
+   - x = eye x − cos(h + angle) × r × back;
+   - y = eye y − sin(h + angle) × r × back;
+   - z = eye z − r × drop.
+
+   The look, the up and the rest of the matrix are the unit camera's. So the
+   camera looks where the unit looks, from behind it: to its right for a
+   positive angle, a little below the eye for a walker, above it for a flyer
+   (*derived*).
+4. **Nothing stands between** (`0x100384d0`).
+   - Let the line run from the eye to the camera. If it is longer than 0.1,
+     take d as its direction.
+   - The line is asked of the world (IWorld slot 7, mask `0x41a`, with `0x208`,
+     `0x10038649`–`0x10038699`), from the eye plus d × the record's `+0x94` to
+     the camera plus d × 0.5 (`0x100e4ccc`).
+   - When it meets something, the camera stands at the point met plus 0.75
+     (`0x100e5d0c`) × the vector at `+8` of the world's answer (slot 6, with 2).
+5. **The view takes the matrix** (slot 7).
+6. **While `+0x60` is set, the camera moves** (`0x10038819`–`0x10038896`).
+   - The move lasts 0.5 s, or 0.3 s (`0x3e99999a`) when `+0x58` is 0, the way
+     back into the eye.
+   - With s the seconds since the press (`ITimer` slot 3): below 0.8 × the time
+     (`0x100e5d14`), t = 1.25 × s (`0x100e5d10`), and each of the three becomes
+     t × goal + (1 − t) × now.
+   - At 0.8 × the time the three are set to the goal and `+0x60` is cleared.
+     Back in the eye (`+0x58` = 0) the camera is off: view state 1 comes back
+     and the view is handed back (`0x100388b9`–`0x100388f5`).
+
+So a move is done 0.4 s after its press, or 0.24 s for the way back, and eases
+out fast at first (*derived*). **Five presses go round**: four places, then
+back into the cockpit.
+
+**What turns it off** (`0x10038ad0`, *read*):
+
+- **Thirteen of the mode stack's handlers**, as their first steps (table
+  `0x10104b18`, [39-boarding.md](39-boarding.md#the-game-view-keeps-a-stack-of-modes--read)):
+  - out of mode 0: 0 → 1, 4, 5 and 6;
+  - out of mode 1: 1 → 0 and 3;
+  - out of mode 2: 2 → 3, 4, 5 and 6;
+  - and 3 → 1, 3 → 2 and 4 → 0.
+- **The driven unit's removal** in view state 3 (`0x10075504`).
+- **Nothing else** (*read*, as a search: fourteen calls in all). So every way
+  out of modes 0, 1 and 2 turns it off but the game menu's (→ 7).
+- Z does nothing in view state 3. The outer view is not zoomed, and the mouse
+  gets its ini multiplier back (above).
+
+**What the view shows** (*seen*, Mission 01's recording, 218.4–223.0 s). The
+hero is drawn whole and animated, with no cockpit; the HUD draws as in the
+cockpit.
+
+| video frames | seconds | view |
+|---|---|---|
+| 74–81 | 218.43–218.67 | the camera flies out of the hero's head to its right, about 7 frames |
+| 81–87 | to 218.87 | right near: the hero on the left, cut by the frame's foot |
+| ~88–130 | 218.9–220.3 | right far: the hero's centre about x 350 of 960 |
+| 178–193 | 221.9–222.4 | left far, the hero right of the middle |
+| 195–207 | 222.5–222.87 | left near |
+| 208–211 | 222.9–223.0 | back through the hero's head into the cockpit |
+
+- **The places fit.** The table puts the hero's centre at 480 × (1 −
+  tan 0.4 ÷ tan 0.65) = 213 near and 480 × (1 − tan 0.2 ÷ tan 0.65) = 352 far.
+  The recording's are about 200 and 350 (*derived*).
+- **r on the hero.** The recording's right-far hero stands about 290 of 720
+  pixels tall, 145 on a half-size frame.
+  - The engine draws Mission 01's hero at that place 170 tall with r = 1.15,
+    the chassis mesh's sphere.
+  - It draws 135 with 1.47, the chassis mesh's box's half-diagonal, and 88 with
+    2.18, the joined sphere.
+  - A multi-part mesh works its bound's radius out of a box
+    (`AniMesh.dll:0x10009d0f`: the half-diagonal between `+0x78` and `+0xa8`).
+  - So the recording favours a box's half-diagonal of about 1.3–1.5 m (*seen*).
+    Which box that is was not traced
+    ([40-command-mode.md](40-command-mode.md#not-established)).
+
 ## Gun sockets are the mesh's `Base_*` nodes — *measured*
 
 Every `Base_*` node of a turret mesh, except the one it mounts by (`Base_TM` or
@@ -720,6 +924,16 @@ test was not read. That a zero cost marks them unbuildable is still a *guess*.
   five are absent from every player tree and the hero's chassis from every tree
   that holds its turret ([The turrets the player never builds](#the-turrets-the-player-never-builds--measured)).
   Which state bits the design screen tests is the next handle.
-- How often the input update runs, and the 0.5 mouse sensitivity
-  `iron3d.dll:0x10061a50` sets in some screen states
-  ([14-controls.md](14-controls.md#the-ini-reaches-world3d--read)).
+- How often the input update runs. ~~The 0.5 mouse sensitivity
+  `iron3d.dll:0x10061a50` sets in some screen states~~ — **read**: while the view
+  is zoomed ([The zoom](#the-zoom--read-and-measured)).
+- **How often the game frame runs**, which paces the zoom's 0.1 steps and the
+  outer camera's ease: both are per frame. The recording's zoom-in fits 60 a
+  second.
+- **The outer camera's line through the world**: which objects mask `0x41a`
+  takes, what `0x208` lets through, and the vector at `+8` of the world's answer
+  (slot 6) that 0.75 of is added to the point met: a face's normal, or the line
+  turned back, was not read.
+- **What the outer view's flag `0x20`** copied from the main view is.
+- **Which box r, the unit record's `+0x98`, is the half-diagonal of**
+  ([40-command-mode.md](40-command-mode.md#not-established)).

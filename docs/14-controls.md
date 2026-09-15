@@ -379,9 +379,11 @@ setting (`0x5a`–`0x6e`, table `0x1000aae0`).
 
 The handler's slot 4 (`0x1000adf0`) answers 0.5 for both sensitivities, and
 slot 5 answers 2.0: a slider's range, by the look of it (*guess*).
-`iron3d.dll:0x10061a50` sets the mouse sensitivity to that 0.5 in some screen
-states and puts the ini's value back in the others. It switches on
-`+0x710` at `0x100a4fc0`, and which states those are was not read.
+`iron3d.dll:0x10061a50` sets the mouse sensitivity to that 0.5 while the view
+is zoomed and puts the ini's value back otherwise: `0x100a4fc0` hands it the
+zoom of the view state `+0x710` names, the command camera's in state 2 and the
+unit or building record's in states 1 and 6, and none in any other
+([30-turrets.md](30-turrets.md#the-zoom--read-and-measured)).
 `iron3d.dll:0x1002a64d` is another `MOUSE_SENS` reader, into an options
 object's `+0x724`.
 

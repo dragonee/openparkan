@@ -875,6 +875,14 @@ field of view (*guess*). Each frame (`0x100418a3`–`0x10041cc0`):
    - Either way the field is then 1.25 × 2·asin(r ÷ distance).
 3. **The eye** is *c* − *d* × distance. The frame's axes are *d*, *s* =
    **Z** × *d* and *d* × *s*, so z is up. A vertical *d* takes fixed axes.
+
+   **The sphere and the matrix are the object's as it is drawn** (*derived*).
+   Both come from the object, whose matrix the machine sets every frame
+   between its state step's two poses by the step's phase (`Control.dll:0x10015a50`,
+   [24-motion.md](24-motion.md#playing-a-state--read-and-measured)). So the
+   camera moves with the drawn unit, and a unit running holds still in its
+   view, its limbs moving. A camera placed from where a step will end jumps a
+   stride at a time: on Mission 01's hero running, up to 0.26 m in a tick.
 4. **Drawing.**
    - The view's rectangle goes to the camera (`0x10036d20`) and the device.
    - Stage 0's texture is unset and blend mode 0 set.

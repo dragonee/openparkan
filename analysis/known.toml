@@ -12233,14 +12233,6 @@ read = true
 
 [[entry]]
 module = "iron3d.dll"
-at = "0x100a4fc0"
-kind = "site"
-name = "screen-state switch on +0x710 that calls 0x10061a50 with a byte of the state"
-doc = "docs/14-controls.md"
-read = true
-
-[[entry]]
-module = "iron3d.dll"
 at = "0x1005b570"
 kind = "function"
 name = "the CreateGameSettings object iron3d keeps at 0x1010b60c"
@@ -28421,3 +28413,115 @@ kind = "site"
 name = "draw: FVF 0x1e2 (pre-lit) unless flags 8 (0x1c4) or 0x10 (0x112); lighting is flags bit 0x10"
 read = true
 doc = "docs/11-effects.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100a4fc0"
+kind = "site"
+name = "zoom state by view state +0x710: 2 the command camera +0x34, 1 and 6 the record +0xa3, else 0, to 0x10061a50"
+doc = "docs/14-controls.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10072428"
+kind = "site"
+name = "CMD_JAMES_ZOOM_MODE case: view state 2 the command camera, 1 the driven record, 6 the building record; toggles +0xa3 only at an end, then 0x100a4fc0"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10075985"
+kind = "site"
+name = "unit record's first update: the camera view's field (interface 0x12 slot 17) into +0x10 and +0x14"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10075c51"
+kind = "site"
+name = "unit record frame, player's clan: zoom on and above 0.2 minus 0.1, off and below +0x10 plus 0.1; the field to view slot 10"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10033417"
+kind = "site"
+name = "building record update: the same zoom step as the unit record's"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1007d6e0"
+kind = "function"
+name = "unit record list update: each record's 0x10075680, from the game frame (0x1005eaae) and the level's load"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10072294"
+kind = "site"
+name = "CMD_JAMES_OUTER_CAMERA case: front mode 0, 1 or 2 with a driven record hands it to the outer camera (0x10038b30)"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10038b30"
+kind = "function"
+name = "outer camera press: another record makes the view (700, 0.5, 1.3), takes its camera component and starts at place 0; the same record goes on"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10038920"
+kind = "function"
+name = "outer camera next place, not while moving: (0.4, 2.5) (0.2, 4.5) (-0.2, 4.5) (-0.4, 2.5) then back; drop 0.15, -0.45 on a flyer; place 0 sets view state 3"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10038ab4"
+kind = "table"
+name = "outer camera place jump table, five cases on +0x58"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10038720"
+kind = "function"
+name = "outer camera frame: eye - (cos, sin)(atan2 look + angle) x r(+0x98) x back, z - r x drop; the move t = 1.25 s until 0.8 of 0.5 s (0.3 back), then off in the eye"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100384d0"
+kind = "function"
+name = "outer camera line: eye + d x record +0x94 to camera + 0.5 d through IWorld slot 7 (0x41a, 0x208); met point + 0.75 x the answer's +8"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100a55f4"
+kind = "site"
+name = "level frame, view state 3: the outer camera's frame"
+doc = "docs/30-turrets.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10075504"
+kind = "site"
+name = "a removed unit record that is the driven one, in view state 3: the outer camera off"
+doc = "docs/30-turrets.md"
+read = true

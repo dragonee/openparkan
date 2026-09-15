@@ -38,7 +38,7 @@ from (`0x100a1c30`, table `0x100a1c7c`):
 |---:|---|---|
 | 1 | the driven unit's camera (`0x1007e6a0` on `+0xaec`) | on foot, in a bot, telepresence |
 | **2** | **the command camera**, the level's `+0x104` (the camera object at `+0x100`) | modes 3 and 4 |
-| 3 | the outer camera, `+8` | `CMD_JAMES_OUTER_CAMERA` |
+| 3 | the outer camera, `+8` ([30-turrets.md](30-turrets.md#the-outer-camera--read-and-measured)) | `CMD_JAMES_OUTER_CAMERA` |
 | 4 | a second camera of the same class, `+0x6c` (at `+0x68`) | not read |
 | 5 | the briefing's | [21-briefing.md](21-briefing.md) |
 | 6 | the building's camera (`0x1007e6a0` on `+0xaf0`) | a tower's screen |
@@ -783,6 +783,16 @@ mode.
 - **r, the unit record's `+0x98`**, which sets an HQ camera's follow distance at
   8 r: the bound's seventh float, but whether a unit's object keeps its
   chassis mesh's cylinder or a bound worked out over its parts was not traced.
+  The outer camera stands off by the same r
+  ([30-turrets.md](30-turrets.md#the-outer-camera--read-and-measured)).
+  - Mission 01's recording puts the hero's at about 1.3–1.5 m. That is near its
+    chassis mesh's box half-diagonal, 1.47, and far from its chassis sphere,
+    1.15, or its joined sphere, 2.18.
+  - Here the HQ recording favours the chassis sphere, 7.65, over the cylinder,
+    4.83. The chassis box's half-diagonal, 8.14, would put the camera at 65 m
+    and fits that recording nearly as well.
+  - The multi-part branch of the bound (`AniMesh.dll:0x10009d0f`) takes the
+    half-diagonal of a box (*seen*, *read* in part).
 - **What happens when an HQ is lost in its own mode 3**: nothing read rolls the
   stack back.
 - Why *LWC-1 Comm. Center* reads *[no order]* in its cockpit at 160 s, after

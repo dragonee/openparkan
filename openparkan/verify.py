@@ -19114,6 +19114,135 @@ def check_joined_sphere(check, game: Path) -> None:
           f"the recording's 11")
 
 
+#: docs/30's outer camera places, in order: (angle, distance back in r).
+OUTER_PLACES = [(0.4, 2.5), (0.2, 4.5), (-0.2, 4.5), (-0.4, 2.5)]
+#: The mode handlers that turn the outer camera off, front -> new, and their address
+#: (iron3d.dll's table 0x10104b18 at front x 8 + new).
+OUTER_OFF_HANDLERS = {
+    (0, 1): 0x100637C0, (0, 4): 0x10063CA0, (0, 5): 0x10064430, (0, 6): 0x10063FD0,
+    (1, 0): 0x100638C0, (1, 3): 0x10063A20,
+    (2, 3): 0x10063BF0, (2, 4): 0x10063F30, (2, 5): 0x10064520, (2, 6): 0x10064310,
+    (3, 1): 0x10063AD0, (3, 2): 0x10063B40, (4, 0): 0x10063D60,
+}
+
+
+def check_zoom_and_outer_camera(check, game: Path) -> None:
+    """docs/30: a unit's zoom, 0.1 a frame to 0.2, the mouse at 0.5; the outer camera's places."""
+    bound = {command: sorted({b.chord for name in ("addition.man", "ui_other.man")
+                              for b in controls.bindings(game / name) if b.command == command})
+             for command in ("CMD_JAMES_ZOOM_MODE", "CMD_JAMES_OUTER_CAMERA")}
+    check("addition.man, ui_other.man: Z is the zoom (738), C the outer camera (736)",
+          bound == {"CMD_JAMES_ZOOM_MODE": ["SCAN_Z"], "CMD_JAMES_OUTER_CAMERA": ["SCAN_C"]}
+          and controls.CMD["CMD_JAMES_ZOOM_MODE"] == 738
+          and controls.CMD["CMD_JAMES_OUTER_CAMERA"] == 736,
+          f"{bound}")
+
+    def f32(x: float) -> float:
+        return struct.unpack("<f", struct.pack("<f", x))[0]
+
+    field, wide, steps_in = f32(1.3), f32(1.3), 0
+    while field > f32(0.2):
+        field, steps_in = f32(field - f32(0.1)), steps_in + 1
+    low, steps_out = field, 0
+    while field < wide:
+        field, steps_out = f32(field + f32(0.1)), steps_out + 1
+    zoom = math.tan(0.65) / math.tan(0.1)
+    check("the zoom steps 1.3 to 0.2 in eleven frames and back in eleven, 7.6 times the middle",
+          steps_in == 11 and steps_out == 11 and abs(low - 0.2) < 1e-6 and field == wide
+          and abs(zoom - 7.58) < 0.01,
+          f"in 32-bit floats: {steps_in} steps to {low:.7f}, {steps_out} back to {field:.7f}; "
+          f"tan 0.65 / tan 0.1 = {zoom:.2f}")
+
+    asm = assembly.Assembly(game)
+    halves = {}
+    for path in ("UNITS\\UNITS\\HERO\\tut1_p.dat", "UNITS\\UNITS\\HQ\\tut4_hq.dat"):
+        for part in asm.parts(mission.KIND_UNIT, path):
+            m = asm.mesh(part.ref)
+            chassis = str(part.ref.member).lower().startswith("r_")
+            if m is not None and m.volume is not None and chassis:
+                v = m.volume
+                halves[path] = (round(math.dist(v.minimum, v.maximum) / 2, 3), round(v.radius, 3))
+                break
+    hero = halves.get("UNITS\\UNITS\\HERO\\tut1_p.dat")
+    hq = halves.get("UNITS\\UNITS\\HQ\\tut4_hq.dat")
+    near = 480 * (1 - math.tan(0.4) / math.tan(0.65))
+    far = 480 * (1 - math.tan(0.2) / math.tan(0.65))
+    check("UNITS: the hero's chassis box's half-diagonal 1.473 (sphere 1.152), the HQ's 8.144",
+          hero == (1.473, 1.152) and hq == (8.144, 7.653)
+          and round(near) == 213 and round(far) == 352,
+          f"(half-diagonal, sphere): hero {hero}, HQ {hq}; the hero's centre on a 960-pixel frame "
+          f"at 1.3 rad: {near:.0f} near, {far:.0f} far")
+
+    path = game / "iron3d.dll"
+    if not path.exists():
+        return
+    iron = _image_at(path.read_bytes())
+
+    def f32_at(va: int) -> float:
+        return struct.unpack("<f", iron(va, 4))[0]
+
+    sites = [
+        # the zoom: toggled at an end, stepped by 0.1 toward 0.2, handed to the view
+        (0x10072450, b"\xd8\x1d\x68\x5c\x0e\x10"), (0x100724CB, b"\x88\x81\xa3\x00\x00\x00"),
+        (0x1007599B, b"\xd9\x56\x14"), (0x10075C51, b"\x8a\x86\xa3\x00\x00\x00"),
+        (0x10075C5E, b"\xd8\x1d\x68\x5c\x0e\x10"), (0x10075C6E, b"\xd8\x25\x70\x5c\x0e\x10"),
+        (0x10075C83, b"\xd8\x05\x70\x5c\x0e\x10"), (0x10075CA8, b"\xff\x50\x28"),
+        # the mouse: setting 0x66 set to slot 4's answer, or +0xe0; each view state change sends it
+        (0x10061A6A, b"\x66\xc7\x44\x24\x0e\x66\x00"), (0x10061A80, b"\xff\x50\x10"),
+        (0x10061A9A, b"\x8b\x87\xe0\x00\x00\x00"), (0x100A4FB4, b"\xe8\x07\x00\x00\x00"),
+        # the outer camera: C's case, its view 700 / 0.5 / 1.3, the places and drops
+        (0x10072294, b"\xe8\x97\x68\xfc\xff"),
+        (0x10038B64, b"\x68\x66\x66\xa6\x3f"), (0x10038B69, b"\x68\x00\x00\x00\x3f"),
+        (0x10038B6E, b"\x68\x00\x00\x2f\x44"),
+        (0x100389D2, b"\xd9\x05\x1c\x5d\x0e\x10"), (0x100389E4, b"\xd9\x05\x18\x5d\x0e\x10"),
+        (0x100389D8, b"\xc7\x46\x40\xcd\xcc\xcc\x3e"),
+        (0x100389FD, b"\xc7\x46\x40\xcd\xcc\x4c\x3e"),
+        (0x10038A04, b"\xc7\x46\x48\x00\x00\x90\x40"),
+        (0x10038A2D, b"\xc7\x46\x40\xcd\xcc\x4c\xbe"),
+        (0x10038A65, b"\xc7\x46\x40\xcd\xcc\xcc\xbe"),
+        (0x10038A6C, b"\xc7\x46\x48\x00\x00\x20\x40"),
+        (0x10038A73, b"\xd9\x5e\x44"), (0x10038AAC, b"\x89\x5e\x58"),
+        # each frame: atan2 of the look, r from the record's +0x98, the move's 0.3 / 0.5 s
+        (0x100A55F4, b"\xe8\x27\x31\xf9\xff"), (0x100387B7, b"\xd9\xf3"),
+        (0x100387C5, b"\xd9\x81\x98\x00\x00\x00"), (0x100387DF, b"\xd8\x4d\x54"),
+        (0x100387F9, b"\xd8\x4d\x50"), (0x10038827, b"\xc7\x44\x24\x08\x9a\x99\x99\x3e"),
+        (0x10038831, b"\xc7\x44\x24\x08\x00\x00\x00\x3f"),
+        (0x1003884D, b"\xd8\x0d\x14\x5d\x0e\x10"),
+        (0x1003885E, b"\xd8\x0d\x10\x5d\x0e\x10"),
+        # the line through the world: mask 0x41a with 0x208, 0.5 past the camera, 0.75 off
+        (0x10038649, b"\x68\x08\x02\x00\x00"), (0x10038656, b"\x68\x1a\x04\x00\x00"),
+        (0x100385D4, b"\xd8\x0d\xcc\x4c\x0e\x10"), (0x100386B8, b"\xd8\x0d\x0c\x5d\x0e\x10"),
+        # +0x98 set from the object's bound; the driven unit's removal turns the camera off
+        (0x1007E5D6, b"\x89\x86\x98\x00\x00\x00"), (0x10075504, b"\xe8\xc7\x35\xfc\xff"),
+    ]
+    constants = {va: round(f32_at(va), 6) for va in
+                 (0x100E5C68, 0x100E5C70, 0x100E5D18, 0x100E5D1C, 0x100E5D10, 0x100E5D14,
+                  0x100E4CCC, 0x100E5D0C)}
+    want = {0x100E5C68: 0.2, 0x100E5C70: 0.1, 0x100E5D18: 0.15, 0x100E5D1C: -0.45,
+            0x100E5D10: 1.25, 0x100E5D14: 0.8, 0x100E4CCC: 0.5, 0x100E5D0C: 0.75}
+    table = struct.unpack("<5I", iron(0x10038AB4, 20))
+    placed = [(round(f32_at(va + 3), 3), round(f32_at(vb + 3), 3))
+              for va, vb in ((0x100389D8, 0x10038A6C), (0x100389FD, 0x10038A04),
+                             (0x10038A2D, 0x10038A04), (0x10038A65, 0x10038A6C))]
+    check("iron3d.dll: the zoom steps 0.1 a frame to 0.2, the mouse to 0.5, C's places as read",
+          all(iron(va, len(code)) == code for va, code in sites)
+          and all(abs(constants[va] - w) < 1e-6 for va, w in want.items())
+          and table == (0x1003895B, 0x100389F3, 0x10038A23, 0x10038A53, 0x10038A90)
+          and placed == OUTER_PLACES,
+          f"{len(sites)} sites; constants {({hex(k): v for k, v in constants.items()})}; "
+          f"places (angle, back) {placed}; the place table {[hex(t) for t in table]}")
+
+    modes = struct.unpack("<64I", iron(0x10104B18, 64 * 4))
+    callers = [site for site, target in _calls(iron, 0x10001000, 0xC8000)
+               if target == 0x10038AD0]
+    handlers = {pair: modes[pair[0] * 8 + pair[1]] for pair in OUTER_OFF_HANDLERS}
+    first = {pair: any(0 <= site - h < 0x60 for site in callers) for pair, h in handlers.items()}
+    check("iron3d.dll: fourteen calls turn the outer camera off, thirteen of them mode handlers'",
+          handlers == OUTER_OFF_HANDLERS and all(first.values()) and len(callers) == 14
+          and 0x10075504 in callers,
+          f"calls of 0x10038ad0: {[hex(c) for c in callers]}; handlers {sorted(handlers)}")
+
+
 def check_focus(check, game: Path) -> None:
     """Leaving the window lets every key up: WM_ACTIVATEAPP to stdSetApplicationState."""
     paths = [game / name for name in ("iron3d.dll", "World3D.dll", "iron_3d.exe")]
@@ -20409,6 +20538,7 @@ def run(game: Path) -> int:
         check_target_panel,
         check_wingman,
         check_boarding, check_hull_follow, check_live_limits, check_joined_sphere,
+        check_zoom_and_outer_camera,
         check_builder, check_placement,
         check_designs,
         check_units, check_loading, check_search, check_construction,
