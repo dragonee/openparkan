@@ -32,7 +32,8 @@ pub struct Quad {
 
 /// The corners of a sprite seen from `eye`: a square of side `width` facing the eye,
 /// or, when `along` is not zero, `along` long and `width` wide, turned about its
-/// length toward the eye.
+/// length toward the eye. Drawn in order, the texture's u runs across a stretched quad and
+/// v along it; [`lengthwise`] turns them round.
 pub fn billboard(centre: Vec3, along: Vec3, width: f32, eye: Vec3) -> [Vec3; 4] {
     let view = (centre - eye).normalize_or(Vec3::Y);
     let (half_long, side) = if along.length_squared() > 1e-12 {
@@ -51,11 +52,19 @@ pub fn billboard(centre: Vec3, along: Vec3, width: f32, eye: Vec3) -> [Vec3; 4] 
     ]
 }
 
+/// A stretched quad's corners reordered so the texture's u runs along its length and v
+/// across it, as a bolt's sprites take theirs (`docs/11-effects.md`, "Bolts, streams and fades").
+pub fn lengthwise(corners: [Vec3; 4]) -> [Vec3; 4] {
+    [corners[0], corners[3], corners[2], corners[1]]
+}
+
 /// A material's look as sprites use it: its texture and blend mode.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SpriteLook {
     pub texture: Option<usize>,
     pub blend_mode: u8,
+    /// The entry's ambient colour, 0..1 in display space as the file gives it.
+    pub ambient: [f32; 3],
     /// The texture's cell a quad spans: `(u0, v0, du, dv)`.
     pub cell: [f32; 4],
 }
@@ -144,7 +153,7 @@ impl SpriteRenderer {
         });
         let camera = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("sprite camera"),
-            size: 112,
+            size: 128,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -210,9 +219,14 @@ impl SpriteRenderer {
             .iter()
             .map(|l| {
                 let view = l.texture.and_then(|t| bank.views.get(t)).unwrap_or(&bank.white);
+                let [r, g, b] = l.ambient;
+                let skin: [f32; 8] = {
+                    let [fr, fg, fb, fw] = fog_override(l.blend_mode);
+                    [fr, fg, fb, fw, r, g, b, 1.0]
+                };
                 let toward = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("sprite fog"),
-                    contents: bytemuck::bytes_of(&fog_override(l.blend_mode)),
+                    label: Some("sprite skin"),
+                    contents: bytemuck::cast_slice(&skin),
                     usage: wgpu::BufferUsages::UNIFORM,
                 });
                 let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -245,12 +259,14 @@ impl SpriteRenderer {
         lighting: &Lighting,
         quads: &[Quad],
     ) {
-        let mut camera = [0.0_f32; 28];
+        let mut camera = [0.0_f32; 32];
         camera[..16].copy_from_slice(&view_proj.to_cols_array());
         camera[16..20].copy_from_slice(&[lighting.eye.x, lighting.eye.y, lighting.eye.z, 1.0]);
         let [r, g, b] = lighting.fog_colour;
         camera[20..24].copy_from_slice(&[r, g, b, 1.0]);
         camera[24..28].copy_from_slice(&[lighting.fog_start, lighting.fog_end, 0.0, 0.0]);
+        let [r, g, b] = lighting.scene_colour;
+        camera[28..32].copy_from_slice(&[r, g, b, 1.0]);
         queue.write_buffer(&self.camera, 0, bytemuck::cast_slice(&camera));
         let mut sorted: Vec<&Quad> = quads.iter().filter(|q| q.look < self.looks.len()).collect();
         sorted.sort_by_key(|q| (q.overlay, self.looks[q.look].0, q.look));
@@ -314,5 +330,8 @@ mod tests {
         let s = billboard(Vec3::ZERO, Vec3::new(4.0, 0.0, 0.0), 1.0, Vec3::new(0.0, 0.0, 10.0));
         assert!((s[2] - s[1]).length() - 4.0 < 1e-5);
         assert!(s.iter().all(|p| p.z.abs() < 1e-6), "a streak seen from above lies flat");
+        // Lengthwise, u (corner 0 to 1) runs along the streak's 4 and v (1 to 2) across its 1.
+        let l = lengthwise(s);
+        assert!(((l[1] - l[0]).length() - 4.0).abs() < 1e-5 && ((l[2] - l[1]).length() - 1.0).abs() < 1e-5);
     }
 }

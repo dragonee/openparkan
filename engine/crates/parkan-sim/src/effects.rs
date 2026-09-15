@@ -19,6 +19,9 @@ use parkan_formats::fxid::{
 
 /// Header flag 0x400: draw nothing while the tested point is hidden (`Effect.dll:0x10008016`).
 pub const FX_HIDE_OCCLUDED: u32 = 0x400;
+/// Header flag 0x1000: hand the emitters the manager's target point every manager tick
+/// (`Effect.dll:0x10006349`), which a bolt takes for its start (`0x10003070`).
+pub const FX_TARGET_POINT: u32 = 0x1000;
 
 /// Where an effect sits: an origin and three axes whose lengths carry a size, as
 /// a control point's vector does (`docs/07-objects.md`, "CTPT").
@@ -86,14 +89,16 @@ pub struct Sprite {
     /// The quad's long side, as a vector; a square faces the camera when this is zero.
     pub along: Vec3,
     pub width: f32,
-    /// The fade value the emitter hands the renderer; 0 is not drawn.
-    ///
-    /// STAND-IN: docs/11-effects.md#not-resolved -- whether the fade value scales alpha
-    /// or colour is not read; it is the quad's alpha.
+    /// The fade value the emitter hands the renderer; 0 is not drawn. It stands in for the
+    /// material's ambient alpha, so it scales the texture's alpha (docs/11, "Bolts, streams
+    /// and fades").
     pub alpha: f32,
     /// Drawn with the depth test off: an emitter with bit 8 whose effect's tested point
     /// is in view (`Effect.dll:0x10009930`, `Terrain.dll:0x100282c6`).
     pub overlay: bool,
+    /// The texture's u runs along the quad's long side and v across it, as a bolt's sprites
+    /// take theirs (`Effect.dll:0x10009b90`); otherwise u runs across.
+    pub lengthwise: bool,
 }
 
 /// A particle a stream left: when, from where, and how long it lives, in seconds.
@@ -125,7 +130,8 @@ pub struct Instance {
     pub value: f32,
     /// The owner's speed as a fraction of its top speed, for modes 5–15.
     pub speed: f32,
-    /// Where a bolt starts: where the effect was when it started.
+    /// Where a bolt starts: where the effect was when it started, or the manager's target
+    /// point, which its owner hands it every tick when the header asks ([`FX_TARGET_POINT`]).
     pub start_point: Vec3,
     seed: u32,
     /// The caller's number for the instance, which its sounds' keys carry.
@@ -259,6 +265,11 @@ impl Instance {
         // ± half of +0xc from the effect manager's generator, which is not read; the jitter
         // is left out (no Mission 01 effect carries the flag).
         t.clamp(0.0, 1.0)
+    }
+
+    /// Whether the header asks for the manager's target point every tick (flag 0x1000).
+    pub fn takes_target_point(&self) -> bool {
+        self.effect.header.flags & FX_TARGET_POINT != 0
     }
 
     /// Flag 2: an instance deletes itself once *t* ≥ 1 (`0x100062a6`).
@@ -441,6 +452,7 @@ impl Instance {
             },
             alpha,
             overlay: false,
+            lengthwise: false,
         }
     }
 
@@ -459,12 +471,11 @@ impl Instance {
 
     /// A type-5 bolt: floor(length / +36) sprites, at least 1 and at most +20, along the
     /// line from its start point to where the effect is now (`0x10002c53`), fading
-    /// +4 → +8 across the window.
+    /// +4 → +8 straight across the window (`0x10002dd4`), the texture's u along the line.
     ///
-    /// STAND-IN: docs/11-effects.md#not-resolved -- who sets the manager's target point
-    /// that flag 0x1000 hands a bolt for its start is not read, nor what its widths +24
-    /// and +28 are: it starts where the effect started, each sprite is +24 wide, and the
-    /// fade runs straight across the window.
+    /// STAND-IN: docs/11-effects.md#not-resolved -- what a bolt's widths +24 and +28 are is
+    /// not read: each sprite is +24 wide. Its texture repeats every +32 along the line
+    /// (`0x10002e79`); here each sprite spans its cell once.
     fn bolt(&self, e: &Emitter, p: f32, out: &mut Vec<Sprite>) {
         let line = self.frame.origin - self.start_point;
         let step = e.f(36);
@@ -479,6 +490,7 @@ impl Instance {
                 width: e.f(24) * self.scale,
                 alpha,
                 overlay: false,
+                lengthwise: true,
             });
         }
     }
@@ -516,6 +528,7 @@ impl Instance {
                 width: size * self.scale * self.frame.axes[0].length().max(f32::EPSILON),
                 alpha,
                 overlay: false,
+                lengthwise: false,
             });
         }
     }
@@ -798,6 +811,24 @@ mod tests {
         fx.value = 0.25;
         draw(&fx, &mut out);
         assert!(out.iter().all(|s| (s.alpha - 0.75).abs() < 1e-6), "+4 → +8 across the window");
+        assert!(fx.takes_target_point() && out.iter().all(|s| s.lengthwise));
+
+        // Handed the muzzle for its start, and run once through as its round stops, it fades
+        // out over the header's 0.75 s (docs/29, "A beam outlives its round").
+        fx.start_point = Vec3::new(10.0, 4900.0, 0.0);
+        fx.mode = TIME_ONCE;
+        (fx.start_ms, fx.end_ms) = (1000.0, 1750.0);
+        for (now, alpha) in [(1000.0, 1.0), (1375.0, 0.5), (1750.0, 0.0)] {
+            out.clear();
+            fx.sprites(now, true, &mut out);
+            if alpha == 0.0 {
+                assert!(out.is_empty(), "a fade of 0 draws nothing");
+            } else {
+                assert_eq!(out.len(), 2, "floor(100 / 50)");
+                assert!(out.iter().all(|s| (s.alpha - alpha).abs() < 1e-5), "{} at {now}", out[0].alpha);
+                assert!((out[0].centre - Vec3::new(10.0, 4925.0, 0.0)).length() < 1e-2);
+            }
+        }
     }
 
     /// A stream over t 0–0.9, every 0.1 s at the window's start and 0.2 s at its end, a

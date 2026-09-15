@@ -5,7 +5,7 @@
 //! ```text
 //! parkan [--game DIR] [--mission MISSIONS/…] [--fly]
 //!        [--screenshot OUT.png] [--size WxH] [--top-down] [--look X,Y,Z,TX,TY,TZ]
-//!        [--headless] [--ticks N] [--hold SCAN_W,SCAN_A] [--mouse DX,DY] [--trace] [--sway]
+//!        [--headless] [--ticks N] [--hold SCAN_W,SCAN_A] [--release N] [--mouse DX,DY] [--trace] [--sway]
 //!        [--capture-idle] [--stretch-hud] [--outcome won|lost] [--text "…"] [--face NAME,DISTANCE] [--at X,Y,YAW[,Z]] [--pod NAME] [--drive PATH] [--hq] [--take NAME] [--designer] [--design PART,…]
 //!        [--skip-briefing] [--briefing-at SECONDS] [--objectives] [--map]
 //! ```
@@ -144,6 +144,8 @@ struct Args {
     tilde: bool,
     ticks: u32,
     hold: Vec<String>,
+    /// `--release N`: the `--hold` keys come up after N of the `--ticks`.
+    release: Option<u32>,
     mouse: [f32; 2],
 }
 
@@ -184,6 +186,7 @@ fn args() -> Result<Args> {
         tilde: false,
         ticks: 0,
         hold: Vec::new(),
+        release: None,
         mouse: [0.0; 2],
     };
     let mut it = std::env::args().skip(1);
@@ -239,6 +242,7 @@ fn args() -> Result<Args> {
             "--design" => out.design = value()?.split(',').map(str::to_owned).collect(),
             "--ticks" => out.ticks = value()?.parse()?,
             "--hold" => out.hold = value()?.split(',').map(str::to_owned).collect(),
+            "--release" => out.release = Some(value()?.parse()?),
             "--mouse" => {
                 let v: Vec<f32> = value()?.split(',').map(str::parse).collect::<Result<_, _>>()?;
                 out.mouse = v.try_into().map_err(|_| anyhow::anyhow!("--mouse takes two numbers"))?;
@@ -389,6 +393,11 @@ fn rehearse(play: &mut scene::Play, loaded: &scene::Loaded, args: &Args) {
     }
     let mut kills = Vec::new();
     for tick in 0..args.ticks {
+        if args.release == Some(tick) {
+            for key in &args.hold {
+                play.key(key, false);
+            }
+        }
         // Nothing is rendered here: the input update runs once a tick, and command mode's
         // camera once a tick on the hero's clock.
         play.update_input();

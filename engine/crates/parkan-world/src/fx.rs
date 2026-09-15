@@ -23,8 +23,9 @@ pub const SURFACES: u8 = 11;
 pub enum Owner {
     /// Placed once, in the world.
     World,
-    /// A round in flight, by its id.
-    Round(u64),
+    /// One of a round's load-group effects: the round's id, and the record's id its groups
+    /// name it by. It stays while the round is in the world, its flight over or not.
+    Round(u64, i32),
     /// One of the hero turret's load-group effects, by its record's id.
     Turret(i32),
     /// One of the hero chassis's load-group effects on a node, by its record's id.
@@ -41,6 +42,8 @@ pub enum Owner {
 pub struct Look {
     pub texture: Option<usize>,
     pub blend_mode: u8,
+    /// The entry's ambient colour, 0..1 as the file gives it: the material's self-light.
+    pub ambient: [f32; 3],
     /// `(u0, v0, du, dv)`: a sprite's corner (u, v) samples `u0 + u × du`, `v0 + v × dv`.
     pub cell: [f32; 4],
 }
@@ -126,6 +129,19 @@ impl Fx {
         }
     }
 
+    /// Switch every instance `owner` holds on or off (actions 18 and 19): one switched off
+    /// neither updates, draws nor sounds, and its loops stop.
+    pub fn switch(&mut self, owner: Owner, on: bool) {
+        let mut stops = Vec::new();
+        for i in self.owned(owner) {
+            if i.on && !on {
+                stops.extend(i.silence());
+            }
+            i.on = on;
+        }
+        self.stops.extend(stops);
+    }
+
     /// Keep the instances `keep` says, silencing the loops of the rest.
     pub fn retain(&mut self, mut keep: impl FnMut(&Owner, &Instance) -> bool) {
         let mut stops = Vec::new();
@@ -186,6 +202,7 @@ impl Fx {
             self.looks.push(Look {
                 texture: look.still.texture,
                 blend_mode: look.blend_mode,
+                ambient: look.still.ambient,
                 cell: look.still.cell,
             });
             self.look_of.insert(key(&m), self.looks.len() - 1);

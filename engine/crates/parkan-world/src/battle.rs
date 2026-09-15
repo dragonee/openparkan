@@ -7,8 +7,9 @@ use std::rc::Rc;
 use anyhow::Result;
 use glam::{Mat4, Vec3};
 use parkan_formats::control::{
-    self, ACT_EFFECT_POINTS, ACT_EXPLODE_NODE, ENTRY_LOAD, ENTRY_RANGE, SEEKER_CONE, SEEKER_LOCK,
-    SEEKER_REACH, SEEKER_TYPE, TRIPLE_TOP_SPEED, TRIPLE_TURN,
+    self, ACT_DELETE_EFFECT, ACT_EFFECT_OFF, ACT_EFFECT_ON, ACT_EFFECT_POINTS, ACT_EXPLODE_NODE,
+    ACT_START_EFFECT, ENTRY_EDGE, ENTRY_HIT, ENTRY_LOAD, ENTRY_RANGE, SEEKER_CONE, SEEKER_LOCK, SEEKER_REACH,
+    SEEKER_TYPE, TRIPLE_TOP_SPEED, TRIPLE_TURN,
 };
 use parkan_formats::cpt::{self, ControlPoint};
 use parkan_formats::exp::{self, Explosion};
@@ -37,10 +38,53 @@ pub const POOL: usize = 32;
 pub struct Loaded {
     pub record: String,
     pub frame_flags: i32,
-    /// The effects its load group creates: a name on three control points.
-    pub effects: Vec<(String, [usize; 3])>,
+    /// The effects its load group creates.
+    pub effects: Vec<RoundEffect>,
     /// Its record's control points.
     pub points: Vec<ControlPoint>,
+    /// What its hit, edge and range groups (block entries 2, 3 and 4) do to its effects, in
+    /// [`RoundEnd`](parkan_sim::combat::RoundEnd)'s order.
+    pub ends: [Vec<EffectCommand>; 3],
+    /// Its controller's `+92`: the ms it stays in the world once its flight is over
+    /// (docs/29-weapons.md, "A beam outlives its round").
+    pub death_ms: f64,
+}
+
+/// An effect a round's load group creates (action 4): its name, the three control points it
+/// sits on, and the id its groups name it by (v7).
+#[derive(Clone, Debug, PartialEq)]
+pub struct RoundEffect {
+    pub name: String,
+    pub points: [usize; 3],
+    pub id: i32,
+}
+
+/// What a group does to one of its object's effects, by id (docs/13, "The section-5 record").
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EffectCommand {
+    /// Action 10: start it now in a time mode.
+    Start(i32, u32),
+    /// Actions 18 and 19: switch it on or off.
+    Switch(i32, bool),
+    /// Action 8: delete it.
+    Delete(i32),
+}
+
+/// The effect commands of a group's records.
+fn effect_commands(records: &[&control::Reference]) -> Vec<EffectCommand> {
+    records
+        .iter()
+        .filter_map(|r| {
+            let id = r.values[4];
+            Some(match r.action() {
+                ACT_START_EFFECT => EffectCommand::Start(id, u32::try_from(r.values[5]).ok()?),
+                ACT_EFFECT_ON => EffectCommand::Switch(id, true),
+                ACT_EFFECT_OFF => EffectCommand::Switch(id, false),
+                ACT_DELETE_EFFECT => EffectCommand::Delete(id),
+                _ => return None,
+            })
+        })
+        .collect()
 }
 
 pub struct Battle {
@@ -311,14 +355,25 @@ impl Battle {
             .group(ENTRY_LOAD)
             .into_iter()
             .filter(|r| r.action() == ACT_EFFECT_POINTS && !r.resource.member.is_empty())
-            .map(|r| {
-                (r.resource.member.clone(), [4, 5, 6].map(|k| usize::try_from(r.values[k]).unwrap_or(0)))
+            .map(|r| RoundEffect {
+                name: r.resource.member.clone(),
+                points: [4, 5, 6].map(|k| usize::try_from(r.values[k]).unwrap_or(0)),
+                id: r.values[7],
             })
             .collect();
         let points = find("cpt")
             .and_then(|c| read(assembly, &c).and_then(|b| cpt::parse(&b, &c.member).ok()))
             .unwrap_or_default();
-        self.kinds.push(Loaded { record: record.to_owned(), frame_flags: controller.flags, effects, points });
+        let ends =
+            [ENTRY_HIT, ENTRY_EDGE, ENTRY_RANGE].map(|entry| effect_commands(&controller.group(entry)));
+        self.kinds.push(Loaded {
+            record: record.to_owned(),
+            frame_flags: controller.flags,
+            effects,
+            points,
+            ends,
+            death_ms: f64::from(controller.death_ms),
+        });
         self.pools.push(Vec::new());
         let k = self.combat.kinds.len() - 1;
         self.kind_of.insert(key, k);

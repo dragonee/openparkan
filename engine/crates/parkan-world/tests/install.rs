@@ -696,6 +696,81 @@ fn the_missiles_lock_draws_corners_closing_on_the_target_and_beeps_as_it_locks_a
 
 #[test]
 #[ignore = "needs the game install"]
+fn a_laser_beam_stands_from_the_muzzle_three_quarters_of_a_second_after_its_round_stops() {
+    use parkan_sim::effects::Sprite;
+    use parkan_world::fx::Owner;
+
+    let (mut play, m) = mission_01_play();
+    let tick = 1000.0 / 60.0;
+    // The laser alone: 1 deselects the cannon. Gun 2 is the laser.
+    play.hero.key("SCAN_W_1", true);
+    play.tick(tick, [0.0; 2]);
+    play.hero.key("SCAN_W_1", false);
+    let object = m.objects.iter().position(|o| o.path.to_ascii_lowercase().ends_with("l_targ.dat")).unwrap();
+    let t = play.battle.objects.iter().position(|&o| o == object).unwrap();
+    stand_facing(&mut play, t, 60.0, 0.0);
+    play.hero.key("SCAN_LMOUSE", true);
+    let mut stopped = None;
+    for _ in 0..240 {
+        play.tick(tick, [0.0; 2]);
+        if let Some((r, _)) = play.spent.first() {
+            stopped = Some((*r, play.hero.time_ms));
+            break;
+        }
+    }
+    play.hero.key("SCAN_LMOUSE", false);
+    let (round, at) = stopped.expect("a laser round stops within 4 s");
+    assert_eq!(play.battle.kinds[round.kind].record.to_ascii_lowercase(), "bl_h_01");
+    assert_eq!(play.battle.kinds[round.kind].death_ms, 3000.0);
+
+    // The round's bolt effect, `hero_laser_bullet`, and what it draws at `now`.
+    let beam = |play: &parkan_world::play::Play, now: f64| -> Option<Vec<Sprite>> {
+        let (_, i) = play.fx.instances.iter().find(|(o, _)| *o == Owner::Round(round.id, 0))?;
+        let mut out = Vec::new();
+        i.sprites(now, true, &mut out);
+        Some(out)
+    };
+    let muzzle = |play: &parkan_world::play::Play| play.hero.gun_muzzle(2, 0).expect("the laser's muzzle").0;
+    let ends = |sprites: &[Sprite]| {
+        let first = &sprites[0];
+        let last = sprites.last().unwrap();
+        (first.centre - first.along / 2.0, last.centre + last.along / 2.0)
+    };
+
+    // As it stops the beam is whole: from the muzzle to where the round stopped.
+    let now = beam(&play, at).expect("the bolt outlives its round's flight");
+    assert!(!now.is_empty() && now.iter().all(|s| s.lengthwise && (s.alpha - 1.0).abs() < 1e-3));
+    let (from, to) = ends(&now);
+    assert!((from - muzzle(&play)).length() < 0.5, "starts at the muzzle: {from} against {}", muzzle(&play));
+    assert!((to - round.position).length() < 1e-3, "ends where the round stopped");
+    assert!((round.position - play.battle.combat.targets[t].centre).length() < 10.0, "on the dummy");
+
+    // Its start rides on the hero: stood 10 m nearer, the beam starts at the muzzle there.
+    stand_facing(&mut play, t, 50.0, 0.0);
+    while play.hero.time_ms < at + 375.0 {
+        play.tick(tick, [0.0; 2]);
+    }
+    let half = beam(&play, play.hero.time_ms).expect("still there");
+    let fade = 1.0 - ((play.hero.time_ms - at) / 750.0) as f32;
+    assert!(half.iter().all(|s| (s.alpha - fade).abs() < 1e-3), "{} against {fade}", half[0].alpha);
+    let (from, to) = ends(&half);
+    assert!((from - muzzle(&play)).length() < 0.5, "{from} against {}", muzzle(&play));
+    assert!((to - round.position).length() < 1e-3);
+
+    // Out at 0.75 s, and gone with the round at 3 s.
+    while play.hero.time_ms < at + 750.0 {
+        play.tick(tick, [0.0; 2]);
+    }
+    assert_eq!(beam(&play, play.hero.time_ms).map(|s| s.len()), Some(0), "a fade of 0 draws nothing");
+    while play.hero.time_ms < at + 3000.0 + tick {
+        play.tick(tick, [0.0; 2]);
+    }
+    assert!(beam(&play, play.hero.time_ms).is_none(), "the round and its effects are deleted");
+    assert!(play.spent.iter().all(|(r, _)| r.id != round.id));
+}
+
+#[test]
+#[ignore = "needs the game install"]
 fn a_neutral_warbot_makes_itself_the_target_and_enter_captures_both_for_the_second_objective() {
     use parkan_world::progress::{STRING_VACANT_VEHICLE, Say, Sender};
 

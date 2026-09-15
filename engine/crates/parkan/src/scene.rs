@@ -496,6 +496,7 @@ pub fn sprite_looks(play: &Play) -> Vec<parkan_render::sprites::SpriteLook> {
         .map(|l| parkan_render::sprites::SpriteLook {
             texture: l.texture,
             blend_mode: l.blend_mode,
+            ambient: l.ambient,
             cell: l.cell,
         })
         .collect()
@@ -515,11 +516,14 @@ pub fn sync(
     let quads: Vec<parkan_render::sprites::Quad> = play
         .sprites(eye)
         .into_iter()
-        .map(|(look, s)| parkan_render::sprites::Quad {
-            look,
-            corners: parkan_render::sprites::billboard(s.centre, s.along, s.width, eye),
-            alpha: s.alpha,
-            overlay: s.overlay,
+        .map(|(look, s)| {
+            let corners = parkan_render::sprites::billboard(s.centre, s.along, s.width, eye);
+            parkan_render::sprites::Quad {
+                look,
+                corners: if s.lengthwise { parkan_render::sprites::lengthwise(corners) } else { corners },
+                alpha: s.alpha,
+                overlay: s.overlay,
+            }
         })
         .collect();
     renderer.set_sprites(device, queue, view_proj, &quads);

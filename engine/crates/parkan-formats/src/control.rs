@@ -33,6 +33,10 @@ pub const ACT_EFFECT_POINTS: i32 = 4;
 /// in time mode v5 (docs/13, "The section-5 record").
 pub const ACT_EFFECT_NODE: i32 = 3;
 pub const ACT_START_EFFECT: i32 = 10;
+/// Action 8 deletes effect v4; 18 and 19 switch it on and off.
+pub const ACT_DELETE_EFFECT: i32 = 8;
+pub const ACT_EFFECT_ON: i32 = 18;
+pub const ACT_EFFECT_OFF: i32 = 19;
 /// A record's int 0: 0x40000000 runs it when any masked condition holds, 0x20000000 when
 /// all do, a record with neither always runs; 0x80000000 opens a run and 0x10000000
 /// closes it (`0x100022c0`, `0x100028b2`). Ints 1 and 2 are the mask and the inversion.

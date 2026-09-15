@@ -152,6 +152,22 @@ pub enum Event {
     Killed { target: usize },
     /// A round left the map, with no explosion.
     Gone { round: Round },
+    /// A round's flight is over, `round.position` where it stopped: `end` names the block
+    /// entry whose group runs. None of the three deletes it at once: it stays its controller's
+    /// `+92` ms (docs/29-weapons.md, "A beam outlives its round").
+    Ended { round: Round, end: RoundEnd },
+}
+
+/// How a round's flight ended: the block entry whose group runs (`docs/29-weapons.md`, "How
+/// a round ends").
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RoundEnd {
+    /// Entry 2, a hit.
+    Hit,
+    /// Entry 3, the map's edge.
+    Edge,
+    /// Entry 4, the end of its range.
+    Range,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -377,6 +393,7 @@ impl Combat {
                 if let Some(e) = &k.range_end {
                     self.explode(e, &k, &r, r.position, None, &mut events);
                 }
+                events.push(Event::Ended { round: r, end: RoundEnd::Range });
                 continue;
             }
             let hit = self.first_hit(ground, r.owner, r.previous, r.position, k.radius);
@@ -402,11 +419,13 @@ impl Combat {
                         let direct = target.zip(strike.node).map(|(t, n)| (t, part, n));
                         self.explode(e, &k, &r, strike.point, direct, &mut events);
                     }
+                    events.push(Event::Ended { round: struck, end: RoundEnd::Hit });
                 }
                 (_, Some((point, _))) => {
                     let mut gone = r;
                     gone.position = point;
                     events.push(Event::Gone { round: gone });
+                    events.push(Event::Ended { round: gone, end: RoundEnd::Edge });
                 }
                 _ => flying.push(r),
             }
@@ -636,6 +655,16 @@ mod tests {
                 .collect();
             assert_eq!(damage, vec![250.0]);
             assert_eq!(events.iter().any(|e| matches!(e, Event::Killed { target: 0 })), shot == 1);
+            // Its flight ends where it struck the post's face, and the hit group runs.
+            let ended: Vec<_> = events
+                .iter()
+                .filter_map(|e| {
+                    if let Event::Ended { round, end } = e { Some((round.position, *end)) } else { None }
+                })
+                .collect();
+            assert_eq!(ended.len(), 1, "{events:?}");
+            assert_eq!(ended[0].1, RoundEnd::Hit);
+            assert!((ended[0].0.y - 30.0).abs() < 1e-3, "{:?}", ended[0].0);
         }
         let life = c.targets[0].parts[0].life.as_ref().unwrap();
         assert!(life.dead && !c.targets[0].alive);
@@ -643,6 +672,7 @@ mod tests {
         c.fire(0, None, muzzle, Vec3::Y, Vec3::ZERO, 1.0, None);
         let events = c.tick(1.0 / 60.0, &g);
         assert!(events.iter().any(|e| matches!(e, Event::Gone { .. })), "{events:?}");
+        assert!(events.iter().any(|e| matches!(e, Event::Ended { end: RoundEnd::Edge, .. })), "{events:?}");
     }
 
     #[test]
@@ -745,6 +775,25 @@ mod tests {
         };
         assert_eq!(on(0).collect::<Vec<_>>(), vec![370.0]);
         assert_eq!(on(1).count(), 1);
+    }
+
+    #[test]
+    fn a_round_that_runs_out_ends_where_its_range_does() {
+        let g = floor();
+        let short = RoundKind { range: 40.0, ..laser() };
+        let mut c = Combat { kinds: vec![short], ..Default::default() };
+        let muzzle = Vec3::new(20.0, 5.0, 1.0);
+        c.fire(0, None, muzzle, Vec3::Y, Vec3::ZERO, 1.0, None);
+        let events = c.tick(1.0 / 60.0, &g);
+        let ended: Vec<_> = events
+            .iter()
+            .filter_map(
+                |e| if let Event::Ended { round, end } = e { Some((round.position, *end)) } else { None },
+            )
+            .collect();
+        assert_eq!(ended.len(), 1, "{events:?}");
+        assert_eq!(ended[0].1, RoundEnd::Range);
+        assert!((ended[0].0 - (muzzle + Vec3::Y * 40.0)).length() < 1e-3, "{:?}", ended[0].0);
     }
 
     #[test]

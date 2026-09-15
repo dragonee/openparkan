@@ -26,7 +26,7 @@ use parkan_formats::{gamedir, landmesh};
 use parkan_sim::behaviour::{
     FIRE_BAR_FLYER, FIRE_BAR_WALKER, Search, Seen, Senses, Takt, Task, Walk, distance_score, fire_wait_ms,
 };
-use parkan_sim::combat::{Event, Part, Round};
+use parkan_sim::combat::{Event, Part, Round, RoundEnd};
 use parkan_sim::damage::FLIGHT_MS;
 use parkan_sim::damage::{Life, share_loss, touching};
 use parkan_sim::effects::{Cue, Frame, Sprite};
@@ -42,7 +42,7 @@ use parkan_sim::targeting::{Contact, TargetList};
 use parkan_sim::wizard::{GROUND_POINT, path_walk, straight_walk, walk_speed};
 
 use crate::assembly::Assembly;
-use crate::battle::Battle;
+use crate::battle::{Battle, EffectCommand};
 use crate::building_fx::BuildingEffects;
 use crate::buildings::{Building, Child, Fired, Standing};
 use crate::factory::{Factory, Project, VOICE_UNIT_READY};
@@ -296,6 +296,12 @@ pub struct Play {
     pub capture_standby: bool,
     /// Knocked-off parts in flight.
     pub flights: Vec<Flight>,
+    /// Rounds whose flight is over, where each stopped, and when each goes: a round stays its
+    /// controller's `+92` ms, and its effects with it (docs/29, "A beam outlives its round").
+    pub spent: Vec<(Round, f64)>,
+    /// Each round's target point: who fired it (none for the hero) and the muzzle in that
+    /// shooter's node-0 frame, which the round's bolt starts from.
+    anchors: HashMap<u64, (Option<usize>, [f64; 3])>,
     /// Dead units and when each is deleted; and each target deleted.
     pub deaths: Vec<(usize, f64)>,
     pub deleted: Vec<bool>,
@@ -598,8 +604,8 @@ impl Play {
             })
             .collect();
         for k in &battle.kinds {
-            for (name, _) in &k.effects {
-                fx.template(name);
+            for e in &k.effects {
+                fx.template(&e.name);
             }
         }
         for kind in &battle.combat.kinds {
@@ -716,6 +722,8 @@ impl Play {
             voice_pick: VoicePick::default(),
             capture_standby: false,
             flights: Vec::new(),
+            spent: Vec::new(),
+            anchors: HashMap::new(),
             deaths: Vec::new(),
             deleted: vec![false; target_count],
             robots,
@@ -1315,6 +1323,7 @@ impl Play {
                     self.deaths
                         .push((target, now + self.battle.death_ms.get(target).copied().unwrap_or(0.0)));
                 }
+                Event::Ended { round, end } => self.spend(round, end, now),
                 _ => {}
             }
         }
@@ -1341,21 +1350,46 @@ impl Play {
             }
         }
         self.follow_building_effects();
-        // Flight effects follow their rounds, and go with them. Time modes 5–15 read the
-        // round's speed over its top speed: the plasma bolt's and the missile's trails.
-        let rounds: Vec<Round> = self.battle.combat.rounds.clone();
-        for r in &rounds {
-            let kind = &self.battle.kinds[r.kind];
-            let frames: Vec<Frame> = kind.effects.iter().map(|(_, p)| self.round_frame(r, *p)).collect();
+        // Flight effects follow their rounds. A round whose flight is over stays where it
+        // stopped until its `+92` is up, and its effects go with it. Time modes 5–15 read the
+        // round's speed over its top speed: the plasma bolt's and the missile's trails. Every
+        // manager tick hands the effects the muzzle, carried with the shooter's node 0
+        // (`Effect.dll:0x10003e16`), and a bolt starts there.
+        let anchors = &mut self.anchors;
+        self.spent.retain(|(r, gone)| {
+            let stays = now < *gone;
+            if !stays {
+                anchors.remove(&r.id);
+            }
+            stays
+        });
+        let flying = self.battle.combat.rounds.iter().map(|r| {
             let top = self.battle.combat.kinds[r.kind].top_speed;
-            let speed = if top > 0.0 { r.velocity.length() / top } else { 0.0 };
-            for (instance, frame) in self.fx.owned(Owner::Round(r.id)).zip(frames) {
-                instance.frame = frame;
-                instance.speed = speed;
+            (*r, if top > 0.0 { r.velocity.length() / top } else { 0.0 })
+        });
+        let rounds: Vec<(Round, f32)> = flying.chain(self.spent.iter().map(|(r, _)| (*r, 0.0))).collect();
+        for (r, speed) in &rounds {
+            let placed: Vec<(i32, Frame)> = self.battle.kinds[r.kind]
+                .effects
+                .iter()
+                .map(|e| (e.id, self.round_frame(r, e.points)))
+                .collect();
+            let start = self.anchors.get(&r.id).and_then(|&(owner, local)| {
+                let at = self.node_zero(owner)?.apply(local);
+                Some(Vec3::new(at[0] as f32, at[1] as f32, at[2] as f32))
+            });
+            for (id, frame) in placed {
+                for instance in self.fx.owned(Owner::Round(r.id, id)) {
+                    instance.frame = frame;
+                    instance.speed = *speed;
+                    if let Some(at) = start.filter(|_| instance.takes_target_point()) {
+                        instance.start_point = at;
+                    }
+                }
             }
         }
         self.fx.retain(|o, _| match o {
-            Owner::Round(id) => rounds.iter().any(|r| r.id == *id),
+            Owner::Round(id, _) => rounds.iter().any(|(r, _)| r.id == *id),
             _ => true,
         });
         self.lode_plumes(now);
@@ -2232,8 +2266,8 @@ impl Play {
         )?;
         robot.arm(&mut self.battle, &mut self.assembly);
         for k in &self.battle.kinds {
-            for (name, _) in &k.effects {
-                self.fx.template(name);
+            for e in &k.effects {
+                self.fx.template(&e.name);
             }
         }
         for kind in &self.battle.combat.kinds {
@@ -2671,11 +2705,16 @@ impl Play {
             if let Some(id) =
                 self.battle.combat.fire(l.kind, l.owner, l.muzzle, l.direction, l.velocity, 1.0, l.target)
             {
-                // The round's load group creates its flight effects at spawn.
+                // The round's load group creates its flight effects at spawn, and the gun hands its
+                // effect manager the muzzle on the shooter's node 0 (`Control.dll:0x1002a56d`).
                 let round = *self.battle.combat.rounds.last().expect("just fired");
-                for (name, points) in self.battle.kinds[l.kind].effects.clone() {
-                    let frame = self.round_frame(&round, points);
-                    self.fx.start(Owner::Round(id), &name, frame, 1.0, now, None);
+                for e in self.battle.kinds[l.kind].effects.clone() {
+                    let frame = self.round_frame(&round, e.points);
+                    self.fx.start(Owner::Round(id, e.id), &e.name, frame, 1.0, now, None);
+                }
+                if let Some(node) = self.node_zero(l.owner) {
+                    let local = node.invert().apply(l.muzzle.to_array().map(f64::from));
+                    self.anchors.insert(id, (l.owner, local));
                 }
             }
         }
@@ -2778,6 +2817,37 @@ impl Play {
             let says = p.say(n);
             self.says.extend(says);
         }
+    }
+
+    /// A round's flight is over (docs/29, "A beam outlives its round"): its hit, edge or range
+    /// group runs on its effects, and it stays where it stopped for its controller's `+92` ms.
+    fn spend(&mut self, round: Round, end: RoundEnd, now: f64) {
+        let Some(kind) = self.battle.kinds.get(round.kind) else { return };
+        let gone = now + kind.death_ms;
+        for command in kind.ends[end as usize].clone() {
+            match command {
+                EffectCommand::Start(id, mode) => {
+                    self.fx.restart(Owner::Round(round.id, id), now, Some(mode))
+                }
+                EffectCommand::Switch(id, on) => self.fx.switch(Owner::Round(round.id, id), on),
+                EffectCommand::Delete(id) => self.fx.remove(Owner::Round(round.id, id)),
+            }
+        }
+        self.spent.push((round, gone));
+    }
+
+    /// Node 0 of the unit that fired a round, in the world: the hero's for `None`, else the
+    /// robot's whose target `owner` is.
+    ///
+    /// STAND-IN: docs/29-weapons.md#not-established -- which matrix `AniMesh` slot `0x10` hands
+    /// the effect manager for its argument 2 is not read: node 0's world pose, the unit's
+    /// placement and its chassis's node 0 as drawn.
+    fn node_zero(&self, owner: Option<usize>) -> Option<Pose> {
+        let robot = match owner {
+            None => &self.hero.robot,
+            Some(t) => &self.robots.iter().find(|(r, _)| *r == t)?.1,
+        };
+        Some(robot.placement().compose(&robot.chassis_pose(0)))
     }
 
     /// A round's control points in the world, as action 4's frame.

@@ -513,6 +513,21 @@ presses a hero standing at it down), and which of Mission 04's units holds no mi
   01, with both warbots captured, the tilde draws the two lines and the seven rows where the
   recording's stand at 208 s and 228.7 s. The commander's unit rows' icon pieces are 19 wide,
   as read.
+- A beam outlives its round (docs/29, "A beam outlives its round"). A round whose flight is
+  over, by a hit, the map's edge or its range, stays where it stopped for its controller's `+92`
+  ms, and its effects with it; its hit, edge or range group starts, switches or deletes them by
+  id. Every laser, taser and builder round restarts its bolt in time mode 1 as it stops, so the
+  hero's laser beam stands from the muzzle to the dummy it struck for 0.75 s, fading straight
+  from whole to nothing, as the recording's is gone 0.78 s after its round left. The bolt starts
+  at the muzzle the gun handed the round's effects, carried with the shooter's node 0, so the
+  beam's near end rides with the hero.
+- An effect sprite is coloured by its material: the scene colour plus the material's ambient,
+  the self-light nearly every effect material carries, times the texture. The laser's grey
+  `LASER.0` draws red under `NE_Laser_R`'s ambient and a yellow-white core under `NE_Laser_Y`'s,
+  and a bolt's texture runs along the beam, its bright line down the middle.
+- `--release N` lets the `--hold` keys up after N of the `--ticks`: `--skip-briefing --face
+  l_targ.dat,60 --hold SCAN_LMOUSE --release 36 --ticks 46 --screenshot beam.png` draws one shot's
+  beam.
 
 This directory also holds what the rest will follow:
 
@@ -693,11 +708,11 @@ a row here. A row leaves this table when research closes it.
 | M4 | Whether vegetation and rock take damage | they stop rounds and take none | [04](../docs/04-missions.md#the-scale) |
 | M4 | Shields: bubble contacts and sectors | not modelled: no bubble stops a round, a blast skips its shield step and kind 4 does nothing; Mission 01's `tut1_e1`, `tut1_mf1` and `helic` carry fight shields and deflectors | [26](../docs/26-damage.md#shields-a-generator-a-deflector-six-sectors--read-and-measured) |
 | M4 | Poses of other units for the hit test | their rest poses: other units' animation is not played | [24](../docs/24-motion.md#playing-a-state--read-and-measured) |
-| M4 | The rest of the emitter floats: what the fade value scales, what a particle's exponent-shaped triples are, a bolt's widths | sprites (3, 4, 9) move +40→+52 and grow +100→+112 straight by progress through the window, per-axis powers left out; a burst (7, 10) flies between velocities +44 and +56, spread +68, its age progress over +28, sized +92→+104; a stream (8) particle sits at +88→+100 and grows +136→+148 by its age in seconds; a bolt's sprites are +24 wide, its fade straight across the window; a fade value is the quad's alpha | [11](../docs/11-effects.md#not-resolved) |
+| M4 | The rest of the emitter floats: what a particle's exponent-shaped triples are, a bolt's widths | sprites (3, 4, 9) move +40→+52 and grow +100→+112 straight by progress through the window, per-axis powers left out; a burst (7, 10) flies between velocities +44 and +56, spread +68, its age progress over +28, sized +92→+104; a stream (8) particle sits at +88→+100 and grows +136→+148 by its age in seconds; a bolt's sprites are +24 wide, each spanning its texture's cell once where the texture repeats every +32 along the beam | [11](../docs/11-effects.md#not-resolved) |
 | M4 | An effect's jitter (flag 1), the owner values of time modes 5–15, and a phase's animated texture frames | no jitter; modes 5–15 all read the owner's speed over its top speed, set on rounds; frame 0 of every texture | [11](../docs/11-effects.md#how-an-effect-runs--read) |
 | M4 | How a sprite whose material says opaque blends | alpha-blended, so its fade shows | [07](../docs/07-objects.md#how-a-material-draws-is-in-the-archive-directory) |
 | M4 | How the shade lights with a type-1 light's range and attenuation; type 1 is a light in the owner's `CLightManager` | none yet; to come, Direct3D's fixed-function falloff, 1 / (a0 + a1·d + a2·d²) inside the range | [11](../docs/11-effects.md#not-resolved) |
-| M4 | Which draw pass draws header-flag-0x800 effects; who sets the manager's target point a bolt starts from | 0x800 effects draw with the rest; a bolt starts where its effect started | [11](../docs/11-effects.md#not-resolved) |
+| M4 | Which draw pass draws header-flag-0x800 effects | 0x800 effects draw with the rest | [11](../docs/11-effects.md#not-resolved) |
 | M4 | When a stream emits its first particle | on its first update inside its window | [11](../docs/11-effects.md#bolts-streams-and-fades--read-and-measured) |
 | M4 | How often an effect instance tests its point's view, and what the ray through the world meets | every frame, against what a round meets (the ground less its water surface, and every live object's level-0 mesh) | [11](../docs/11-effects.md#bit-8-and-the-tested-point--read-and-measured) |
 | M4 | What a building (a `CBuilding` aggregating its agent) answers for a strike's material, and a node's wear base | a strike on a building plays slot 0; the batch's material byte alone indexes the wear | [11](../docs/11-effects.md#what-an-explosion-plays--read-and-measured) |
@@ -757,6 +772,8 @@ a row here. A row leaves this table when research closes it.
 | M13 | Whether a destroyed generator stays in `World3D.dll`'s queue 3, which the in place's power walk reads | the live generators are asked | [27](../docs/27-ownership.md#teleport-in-0x8000--read) |
 | M13 | Which of Mission 04's hero, helicopter and HQ holds no mind: the recording's factory shows one free of three once all three are the player's, and Mission 02's shows the hero holding one | a unit the hero's Enter took holds none | [34](../docs/34-progression.md#mission-04-teleport-end-to-end--derived) |
 | M14 | The target point the guided lock projects (the target list's `+4`), and whether `getTimer`, which times its beeps, runs on a clock or on `timeGetTime` | the target's sphere centre, as the target panel's frame takes it; game time | [35](../docs/35-hud.md#the-guided-lock--read) |
+| M14 | How an effect sprite's pre-lit vertices are coloured (draw flags 4, FVF `0x1e2`) | as a batch's emissive: the scene colour plus the material's ambient, held to 1 and decoded, times the texture; the laser draws red as the recording's does | [11](../docs/11-effects.md#not-resolved) |
+| M14 | Which matrix `AniMesh` slot `0x10` hands the effect manager for its argument 2, which carries a beam's muzzle with its shooter | node 0's world pose: the unit's placement and its chassis's node 0 as drawn | [29](../docs/29-weapons.md#not-established) |
 
 ### Read since the stand-in was written
 
