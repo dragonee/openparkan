@@ -226,6 +226,7 @@ of fields carried through the readers without being understood.
 - [37-designer.md](docs/37-designer.md) — the warbot designer as a screen: its panels, tabs and rows, the project view, the buttons, the turning previews
 - [40-command-mode.md](docs/40-command-mode.md) — command mode: a bunker's pod, the command camera over the base, what it draws, its keys, leaving, and telepresence
 - [41-commander.md](docs/41-commander.md) — the commander panel of command mode: the icon column, the unit and building pages, the order rows a selection is offered
+- [42-selection.md](docs/42-selection.md) — selecting and ordering in command mode: the selection, the band, the pick under the cursor, the cursors, clicks and pending picks
 
 ## Layout
 
@@ -247,6 +248,7 @@ openparkan/
   descriptions.py objects.dlb parts database
   weapons.py    guns, ammunition clips and rounds
   packages.py   orders, the commander's packages, and who may run them
+  cursors.py    ui/cursor.cfg and its RIFF ACON animated cursors
   units.py      a unit assembly described whole
   resources.py  .cfg resource descriptors and the PE string table
   briefing.py   briefing.cfg flythroughs and messages.cfg

@@ -23,6 +23,7 @@ from . import (
     briefing,
     control,
     controls,
+    cursors,
     descriptions,
     designs,
     effects,
@@ -17846,6 +17847,299 @@ def check_placement(check, game: Path) -> None:
           f"{ore.value if ore else None}")
 
 
+#: ``ui/cursor.cfg``'s eight objects in file order: name, hardware cursor, offset, extent.
+#: Every one is ``new_ui1``, 16 x 16, a phase 150 ms.
+CURSOR_OBJECTS = (
+    ("ARROW", "ui/arrow.ani", (0, 0), (0, 0)),
+    ("PICK", "ui/pick.ani", (0, 16), (8, 8)),
+    ("PLACE", "ui/place.ani", (192, 16), (8, 8)),
+    ("WRONG_PLACE", "ui/stop_002.ani", (64, 32), (8, 8)),
+    ("TARGET", "ui/target_5.ani", (0, 32), (8, 8)),
+    ("CAPTURE", "ui/capture.ani", (64, 0), (8, 8)),
+    ("GUARD", "ui/guard.ani", (128, 0), (8, 8)),
+    ("UPGRADE", "ui/upd_03.ani", (128, 32), (8, 8)),
+)
+
+
+#: Each ``.ani``: frames, steps, the frame each step shows, and the hot spot.
+CURSOR_ANIS = {
+    "arrow.ani": (4, 4, [0, 1, 2, 3], (1, 1)),
+    "capture.ani": (4, 4, [0, 1, 2, 3], (7, 7)),
+    "place.ani": (4, 4, [0, 1, 2, 3], (8, 15)),
+    "stop_002.ani": (4, 4, [0, 1, 2, 3], (7, 7)),
+    "upd_03.ani": (4, 4, [0, 1, 2, 3], (7, 7)),
+    "guard.ani": (3, 4, [0, 1, 2, 1], (7, 7)),
+    "pick.ani": (3, 4, [0, 1, 2, 1], (7, 7)),
+    "target_5.ani": (3, 4, [0, 1, 2, 1], (7, 7)),
+}
+
+
+#: iron3d.dll's cursor objects: name -> object, constructor, the constructor's name load,
+#: and the name string.
+CURSOR_STATE_OBJECTS = {
+    "ARROW": (0x1010B2D8, 0x10058A90, 0x10058AD8, 0x101041DC),
+    "PICK": (0x1010B070, 0x10058BF0, 0x10058C38, 0x101041E4),
+    "PLACE": (0x1010AE08, 0x10058D50, 0x10058D98, 0x101041EC),
+    "TARGET": (0x1010ABA0, 0x10058EB0, 0x10058EF8, 0x101041F4),
+    "GUARD": (0x1010A938, 0x10059010, 0x10059058, 0x101041FC),
+    "CAPTURE": (0x1010A6D0, 0x10059170, 0x100591B8, 0x10104204),
+    "WRONG_PLACE": (0x1010A460, 0x100592F0, 0x10059338, 0x1010420C),
+    "UPGRADE": (0x1010A1F8, 0x10059450, 0x10059498, 0x10104218),
+}
+
+
+#: The cursor states 0-10 and the object each shows (None: no cursor).
+CURSOR_STATES = (None, "ARROW", "PICK", "PLACE", "TARGET", "GUARD", "CAPTURE", "ARROW",
+                 None, "WRONG_PLACE", "UPGRADE")
+
+
+#: The pick's kinds 0-12 and the cursor state the chooser gives each (above 12: 1).
+KIND_CURSOR_STATES = (1, 3, 9, 4, 6, 2, 2, 2, 5, 5, 5, 1, 3)
+
+
+#: The world click's switch over kinds 1-17 (0x1009067e does nothing).
+CLICK_KIND_TARGETS = (0x10090036, 0x1009067E, 0x10090061, 0x10090109, 0x1009067E, 0x1009067E,
+                      0x100901C7, 0x10090284, 0x10090337, 0x100903E9, 0x1009067E, 0x1009049B,
+                      0x1009067E, 0x1009067E, 0x1009067E, 0x10090520, 0x1009059F)
+
+
+#: The dispatcher's order packets: a site and the bytes that write its order, target or
+#: parameter.
+DISPATCH_WRITES = {
+    0x100792D9: b"\xc7\x84\x24\xe8\x08\x00\x00" + struct.pack("<I", 0x15),
+    0x10079355: b"\xc7\x84\x24\x80\x01\x00\x00" + struct.pack("<I", 2),
+    0x10079360: b"\xc7\x84\x24\x8c\x01\x00\x00" + struct.pack("<I", 0x202),
+    0x100793B6: b"\xc7\x84\x24\x7c\x06\x00\x00" + struct.pack("<I", 0x203),
+    0x100793C1: b"\xc7\x84\x24\x80\x06\x00\x00" + struct.pack("<I", 0x8017365E),
+    0x10079413: b"\xc7\x84\x24\xbc\x07\x00\x00" + struct.pack("<I", 0xFFFFFFFF),
+    0x1007946A: b"\xc7\x44\x24\x48" + struct.pack("<I", 0x201),
+    0x10079472: b"\xc7\x44\x24\x4c" + struct.pack("<I", 0x8017365E),
+    0x100794D8: b"\xc7\x84\x24\x24\x0a\x00\x00" + struct.pack("<I", 8),
+    0x1007953A: b"\xc7\x84\x24\xbc\x02\x00\x00" + struct.pack("<I", 0x16),
+    0x10079545: b"\xc7\x84\x24\xc0\x02\x00\x00" + struct.pack("<I", 0x32),
+    0x10079586: b"\xc7\x84\x24\xf8\x03\x00\x00" + struct.pack("<I", 6),
+    0x100795CB: b"\xc7\x84\x24\x40\x05\x00\x00" + struct.pack("<I", 0x203),
+    0x100795D6: b"\xc7\x84\x24\x44\x05\x00\x00" + struct.pack("<I", 0x10001000),
+}
+
+
+def check_selection(check, game: Path) -> None:
+    """Selecting and ordering in command mode: the cursors, the pick, the clicks."""
+    iron_path, areal_path = game / "iron3d.dll", game / "ArealMap.dll"
+    ui = game / "ui"
+    if not iron_path.exists() or not (ui / "cursor.cfg").exists():
+        return
+    image = iron_path.read_bytes()
+    iron = _image_at(image)
+    base = _image_base(image)
+
+    def u32(va: int) -> int:
+        return struct.unpack("<I", iron(va, 4))[0]
+
+    def ptr(va: int) -> bytes:
+        return struct.pack("<I", va)
+
+    def f32(va: int) -> float:
+        return struct.unpack("<f", iron(va, 4))[0]
+
+    def called(site: int) -> int | None:
+        if iron(site, 1) != b"\xe8":
+            return None
+        return (site + 5 + struct.unpack("<i", iron(site + 1, 4))[0]) & 0xFFFFFFFF
+
+    def cstr(va: int) -> str:
+        raw = iron(va, 48)
+        return raw[:raw.index(b"\0")].decode("latin-1") if b"\0" in raw else ""
+
+    # ui/cursor.cfg, and the software strips on new_ui1.
+    specs = cursors.cursor_cfg(ui / "cursor.cfg")
+    table = tuple((c.name, c.hardware.lower(), c.offset, c.extent) for c in specs)
+    uniform = all(c.texture == "new_ui1" and c.size == (16, 16) and c.phase_delay_ms == 150
+                  for c in specs)
+    roles = {d.role: d.bindings for d in resources.descriptors(ui / "game_resources.cfg")}
+    index = roles.get("textures", {}).get("new_ui1")
+    inked, page = 0, ""
+    if index is not None and (ui / "ui.lib").exists():
+        lib = NResArchive.open(ui / "ui.lib")
+        entries = list(lib)
+        if 0 <= int(index) < len(entries):
+            page = entries[int(index)].name
+            tex = texm.decode(lib.read(entries[int(index)]))
+            for c in specs:
+                w, h = c.size
+                for phase in range(4):
+                    x0, y0 = c.offset[0] + w * phase, c.offset[1]
+                    ink = sum(tex.rgba[(y * tex.width + x) * 4 + 3] > 16
+                              for y in range(y0, y0 + h) for x in range(x0, x0 + w))
+                    inked += ink >= w * h // 5
+    check("ui/cursor.cfg: eight cursors, an .ani and four 16 x 16 phases on new_ui1",
+          table == CURSOR_OBJECTS and uniform and page == "new_ui1.tex" and inked == 32,
+          f"{[c.name for c in specs]}; texture new_ui1 = ui.lib member {index} {page!r}, "
+          f"{inked}/32 phases inked; PHASE_DELAY 150")
+
+    # The .ani files.
+    on_disk = {p.name.lower(): p for p in ui.iterdir() if p.suffix.lower() == ".ani"}
+    anis = {name: cursors.parse_ani(on_disk[name].read_bytes())
+            for name in CURSOR_ANIS if name in on_disk}
+    shapes = {name: (a.frame_count, a.step_count, a.sequence, a.frames[0].hotspot)
+              for name, a in anis.items()}
+    frames_ok = all(f.width == 32 and f.height == 32 and f.resource_type == 2 and f.bit_count == 4
+                    and f.hotspot == a.frames[0].hotspot
+                    for a in anis.values() for f in a.frames)
+    timing = {round(a.step_ms(i)) for a in anis.values() for i in range(a.step_count)}
+    named = {h.split("/")[-1] for _, h, _, _ in CURSOR_OBJECTS} == set(CURSOR_ANIS)
+    summary = {n: (s[0], s[2], s[3]) for n, s in shapes.items()}
+    check("ui/*.ani: RIFF ACON cursors, 32 x 32 4-bit, each step 9 jiffies (150 ms)",
+          shapes == CURSOR_ANIS and frames_ok and timing == {150} and named,
+          f"{summary}; every step {sorted(timing)} ms")
+
+    # The cursor objects, their loader, and the states that show them.
+    objects_ok = all(iron(site, 5) == b"\xbf" + ptr(string) and cstr(string) == name
+                     for name, (_obj, _ctor, site, string) in CURSOR_STATE_OBJECTS.items())
+    order = ("ARROW", "PICK", "PLACE", "TARGET", "GUARD", "CAPTURE", "WRONG_PLACE", "UPGRADE")
+    loader = (iron(0x100576A5, 5) == b"\xbf" + ptr(0x10104154)
+              and cstr(0x10104154) == "ui/cursor.cfg"
+              and all(iron(0x10057711 if i == 0 else 0x1005771B + 15 * i - 5, 5)
+                      == b"\xb9" + ptr(CURSOR_STATE_OBJECTS[name][0])
+                      and called(0x1005771B + 15 * i) == 0x10057860
+                      for i, name in enumerate(order)))
+    shown = []
+    for state, want in enumerate(CURSOR_STATES):
+        target = u32(0x10057634 + 4 * state)
+        if want is None:
+            shown.append(target == 0x10057619)
+        else:
+            shown.append(b"\xa1" + ptr(CURSOR_STATE_OBJECTS[want][0]) in iron(target, 0x40))
+    leave = (iron(0x10057628, 11) == bytes([0] * 8 + [1, 0, 0])
+             and u32(0x10057624) == 0x100571C1
+             and iron(0x100571C1, 5) == b"\xb9" + ptr(0x1010B540)
+             and called(0x100571C6) == 0x10057EC0)
+    imports = {va: iron(base + u32(va) + 2, 24).split(b"\0")[0]
+               for va in (0x100E41D8, 0x100E41E4)}
+    timed = (iron(0x10057DF9, 6) == b"\xd8\x0d" + ptr(0x100E5C3C)
+             and abs(f32(0x100E5C3C) - 0.001) < 1e-9
+             and iron(0x10057E15, 10) == b"\xc7\x85\x60\x02\x00\x00" + struct.pack("<f", 0.25))
+    check("iron3d.dll: cursor states 1-10 show cursor.cfg's objects; 8 is the ghost",
+          objects_ok and loader and all(shown) and leave and timed
+          and imports == {0x100E41D8: b"SetCursor", 0x100E41E4: b"LoadCursorFromFileA"},
+          f"states 0-10 -> {CURSOR_STATES}; leaving 8 ends the ghost (0x10057ec0); "
+          f"PHASE_DELAY x 0.001 s, 0.25 s absent; {sorted(v.decode() for v in imports.values())}")
+
+    # The chooser's kind -> state table, and the pick modes' names.
+    chooser = []
+    for kind in range(13):
+        code = iron(u32(0x100587B4 + 4 * kind), 6)
+        chooser.append(struct.unpack_from("<I", code, 1)[0]
+                       if code[0] == 0xB9 and code[5] == 0xE9 else None)
+    names = [cstr(u32(u32(0x1005A828 + 4 * m) + 6)) for m in range(7)]
+    check("iron3d.dll: the pick's kind picks the cursor; the seven pick modes",
+          tuple(chooser) == KIND_CURSOR_STATES and iron(0x10058760, 3) == b"\x83\xf8\x0c"
+          and names == ["CState::FREE_MODE", "CState::SELECT_ATTACK_TARGET_MODE",
+                        "CState::SELECT_BUILDING_MODE", "CState::SELECT_GUARD_TARGET_MODE",
+                        "CState::SELECT_PLACE_MODE_FB", "CState::SELECT_WAY_MODE",
+                        "CState::SELECT_PLACE_MODE_FM"],
+          f"kinds 0-12 -> states {chooser}, above 12 -> 1; modes 0-6 {names}")
+
+    # The pick's rules, the band, the place test, the right click, the listener.
+    rules = (iron(0x1008DA8A, 3) == b"\x83\xf8\x04" and iron(0x1008DA9B, 3) == b"\x83\xf8\x06"
+             and iron(0x1008DD8F, 3) == b"\x83\xf9\x05"
+             and iron(0x1008DB2E, 5) == b"\x68" + ptr(374) and iron(0x1008DB40, 2) == b"\x6a\x2a"
+             and iron(0x1008DB42, 5) == b"\x68" + ptr(640)
+             and iron(0x1008DC49, 5) == b"\x68" + struct.pack("<f", 40.0)
+             and iron(0x1008DC67, 5) == b"\x68" + struct.pack("<f", 80.0)
+             and iron(0x1003614B, 5) == b"\x68" + struct.pack("<f", 0.7)
+             and iron(0x10036156, 5) == b"\xb9" + ptr(3)
+             and iron(0x10036171, 5) == b"\x68" + struct.pack("<f", 1.0)
+             and iron(0x1003617E, 5) == b"\xb9" + ptr(4)
+             and iron(0x10035EEE, 6) == b"\xd8\x0d" + ptr(0x100E5C3C)
+             and all(iron(site, 6) == b"\x81\xfe" + ptr(t) for site, t in
+                     ((0x1008E007, 0x80000200), (0x1008E013, 0x80001000),
+                      (0x1008E01F, 0x80002000)))
+             and iron(0x1008E11E, 3) == b"\x83\xf8\x01" and iron(0x1008E123, 3) == b"\x83\xf8\x02")
+    band = (iron(0x100714AD, 6) == b"\xd8\x1d" + ptr(0x100E64B8)
+            and abs(f32(0x100E64B8) - 0.35) < 1e-6
+            and iron(0x10071476, 3) == b"\x83\xf9\x02" and iron(0x100714BA, 5) == b"\xb9" + ptr(7)
+            and iron(0x10071659, 3) == b"\x83\xf9\x0a" and iron(0x1007166E, 3) == b"\x83\xfa\x0a"
+            and iron(0x10058664, 5) == b"\x68" + ptr(0xFF19B419)
+            and iron(0x10076C8A, 5) == b"\xbf" + ptr(0x10104C78)
+            and cstr(0x10104C78) == "VOICE_SELECTED"
+            and iron(0x10076A39, 7) == b"\x81\x79\x2c" + ptr(0x1020000))
+    place = iron(0x100767DE, 5) == b"\x68" + ptr(0x207) and iron(0x10076805, 3) == b"\x8b\x48\x20"
+    if areal_path.exists():
+        areal = _image_at(areal_path.read_bytes())
+        slots67 = struct.unpack("<2I", areal(0x10039810 + 24, 8))
+        place = (place and slots67 == (0x10020310, 0x10020370)
+                 and areal(0x10020353, 3) == b"\x83\xc0\x04")
+    strings = resources.strings(image)
+    cancel = (iron(0x1008FE08, 5) == b"\x68" + ptr(6207)
+              and strings.get(6207) == "Building was cancelled by user"
+              and iron(0x1008FBA3, 7) == b"\xc6\x82\x30\x01\x00\x00\x01"
+              and called(0x10070EDE) == 0x1008FB00 and called(0x10063004) == 0x1008FB00)
+    slots = struct.unpack("<7I", iron(0x100E6490, 28))
+    listener = (slots[0] == 0x10070DB0
+                and slots[3:] == (0x10071410, 0x100714D0, 0x10071620, 0x100716B0)
+                and iron(0x10070AFC, 3) == b"\xff\x50\x0c"
+                and iron(0x10070B4C, 3) == b"\xff\x50\x10"
+                and iron(0x10070BA1, 3) == b"\xff\x50\x14"
+                and iron(0x10070B74, 5) == b"\xa2" + ptr(0x1010BF7C))
+    check("iron3d.dll: the pick, the band and the place test",
+          rules and band and place and cancel and listener,
+          "place modes 4/6 -> 13, route 5; rows (374,0)-(640,42); map radii 40/80; ray 0.7r/1.0r; "
+          "no capture of 0x80000200/1000/2000; band after 0.35 s, 10 px, 0xff19b419; "
+          "place: 0x207 flyer, else areal word +0x20; right click and Esc say 6207")
+
+    # The world click's switch, the dispatcher's orders, the pending picks.
+    clicks = tuple(u32(0x10090758 + 4 * i) for i in range(17))
+    case_map = list(iron(0x100796C4, 32))
+    dispatch = (all(iron(site, len(want)) == want for site, want in DISPATCH_WRITES.items())
+                and case_map == list(range(10)) + [13] * 9 + [10] + [13] * 9 + [11, 13, 12]
+                and u32(0x1007968C + 4) == 0x100792F6)
+    rows = (all(iron(site, 10) == b"\xc7\x87\xac\x00\x00\x00" + ptr(kind) for site, kind in
+                ((0x1007B7EA, 1), (0x1007B8E8, 5), (0x1007B90B, 4), (0x1007BAAE, 3)))
+            and iron(0x1007BA09, 10) == b"\xc7\x87\xb0\x00\x00\x00" + ptr(0x80000004)
+            and called(0x10075D2B) == 0x10079700
+            and all(iron(site, 10) == b"\xc7\x05" + ptr(0x1010C388) + ptr(mode) for site, mode in
+                    ((0x10079998, 5), (0x1007A1A2, 3), (0x1007A3CE, 2)))
+            and called(0x10079993) == 0x100740F0)
+    check("iron3d.dll: the world click's kinds, the dispatcher's orders, the pending picks",
+          clicks == CLICK_KIND_TARGETS and dispatch and rows
+          and iron(0x100901E9, 6) == b"\xbb\x01\x00\x00\x00\x53",
+          "kinds 1-17 by table 0x10090758; cases 1 STAYGROUND, 2 GO 0x202, 3/4/6/30 SEARCH, "
+          "8 RELOAD, 10 FOLLOW 50, 20 TRANSPORT; rows Route, Guard, Capture building and Build "
+          "open picks (modes 5, 3, 2)")
+
+    # Tut_3's areals: the first flag word decides where a walker may be sent.
+    land = game / "DATA" / "MAPS" / "Tut_3" / "Land.map"
+    tma = game / "MISSIONS" / "CAMPAIGN" / "CAMPAIGN.00" / "Mission.03" / "data.tma"
+    if not land.exists() or not tma.exists():
+        return
+    amap = arealmap.load(land)
+
+    def inside(a, x, y):
+        v, hit = a.vertices, False
+        for i in range(len(v)):
+            (x1, y1, _), (x2, y2, _) = v[i], v[(i + 1) % len(v)]
+            if (y1 > y) != (y2 > y) and x < (x2 - x1) * (y - y1) / (y2 - y1) + x1:
+                hit = not hit
+        return hit
+
+    words = Counter(a.flags[0] for a in amap.areals)
+    share = sum(a.area for a in amap.areals if a.flags[0]) / sum(a.area for a in amap.areals)
+    stands = {}
+    for obj in mission.load(tma).objects:
+        x, y = obj.position[0], obj.position[1]
+        found = [amap.areals[i].flags[0] for i in amap.areals_at(x, y)
+                 if inside(amap.areals[i], x, y)]
+        stands[obj.path.split("\\")[-1].lower()] = found[0] if len(found) == 1 else None
+    enemy = {"tut3_f1.dat", "tut3_f2.dat", "tut3_f3.dat"}
+    check("Tut_3 Land.map: areal flag word 0, where a non-flyer may be sent",
+          words == Counter({0: 636, 1: 86}) and 0.12 < share < 0.14 and len(stands) == 10
+          and all(v == 0 for k, v in stands.items() if k in enemy)
+          and all(v == 1 for k, v in stands.items() if k not in enemy),
+          f"{words[1]} of {len(amap.areals)} areals set it, {share:.1%} of the area; "
+          f"Mission 03's objects stand in {stands}")
+
+
 def run(game: Path) -> int:
     """Run every check against ``game``.  Returns a process exit code."""
     results: list[tuple[str, bool, str]] = []
@@ -17882,7 +18176,7 @@ def run(game: Path) -> int:
         check_builder, check_placement,
         check_designs,
         check_units, check_loading, check_search, check_construction,
-        check_controls, check_player_input, check_focus, check_turret_channels,
+        check_controls, check_player_input, check_focus, check_selection, check_turret_channels,
         check_behaviour, check_research, check_descriptions, check_saves,
         check_vocabulary, check_resources, check_briefing, check_briefing_screen,
         check_progression, check_mission_02, check_outcome,
