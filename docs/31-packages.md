@@ -691,7 +691,7 @@ is 0:
 | generator `gener01` | 122.0 | never: the player's |
 
 **The factory.**
-- Its outer ring, placed at rotation −0.616, has 13 vertices, all on areals
+- Its outer ring, placed at rotation −0.616, has 14 vertices, all on areals
   whose word is 1.
 - The nearest to the start is vertex 9 at (734.3, 892.0), 443.1 away. Vertex 8,
   at 445.1, is next.
@@ -700,12 +700,15 @@ is 0:
   (733.1, 1022.2) by 115.5, 68 by 161.4, and 69 by 170.3.
 
 **The research centre**, planned from the factory's pod:
-- Its ring has 8 vertices, all on areals whose word is 1.
-- The nearest is vertex 7 at (897.4, 922.7), 150.0 away.
+- Its ring has 9 vertices, all on areals whose word is 1.
+- The nearest is vertex 8, the ring's last, at (881.8, 900.3), 141.1 away.
+  Vertex 7, at (897.4, 922.7), is 150.0 away. (This page once counted 13 and 8
+  vertices and gave vertex 7: its check dropped each ring's last corner twice,
+  once as the closing repeat the reader already drops.)
 - Its pod is vertex 0, at (950.71, 869.39, 65.65).
 - Its three exits all reach the pod: 19 by 92.3, 21 by 108.9, and 23 by 108.8.
-  Exit 23, at (877.1, 920.9), is 20.4 from vertex 7.
-- Route 2 of the mission holds the research centre and vertex 7. Its script
+  Exit 23 is at (877.1, 920.9).
+- Route 2 of the mission holds the research centre and vertex 8. Its script
   shows `T04_H02` once the helicopter (id 3) or the hero (id 2) is reported
   inside it (function 32, [15-behaviour.md](15-behaviour.md)).
 

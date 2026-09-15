@@ -9216,7 +9216,7 @@ def check_mission_04_capture(check, game: Path) -> None:
                     heapq.heappush(queue, (nd, w))
         exits = {i: round(best[i], 1) for i, n in enumerate(graph.nodes) if n.a & 1 and i in best}
         _, outer = objects.parse_base(fortif.read_name(stem + ".bas"), stem)
-        ring = [world(p) for p in outer.points[:-1]]
+        ring = [world(p) for p in outer.points]
         return dict(pod=pod, pod_at=tuple(round(c, 2) for c in pos[pod]), exits=exits,
                     ring=ring, words={word(*v[:2]) for v in ring}, pos=pos,
                     all_exits=sum(1 for n in graph.nodes if n.a & 1))
@@ -9236,7 +9236,7 @@ def check_mission_04_capture(check, game: Path) -> None:
     check("Mission 04: the helicopter takes the factory first and lands at its ring's vertex 9",
           word(hx, hy) == 0 and pickable == {"lplant01.dat": 549.1, "einst01.dat": 591.3}
           and first == "lplant01.dat" and by_type[mission.KIND_BUILDING]["mtp_m_n1.dat"][0] == 998.6
-          and len(plant["ring"]) == 13 and plant["words"] == {1}
+          and len(plant["ring"]) == 14 and plant["words"] == {1}
           and corner == (9, (734.3, 892.0), 443.1)
           and (plant["pod"], plant["pod_at"][:2]) == (31, (750.02, 950.7))
           and plant["exits"] == {67: 115.5, 68: 161.4, 69: 170.3} and plant["all_exits"] == 9,
@@ -9246,8 +9246,8 @@ def check_mission_04_capture(check, game: Path) -> None:
           f"ring: {len(plant['ring'])} vertices on areal words {plant['words']}, nearest "
           f"{corner}; pod vertex {plant['pod']} at {plant['pod_at']}; exits reaching it by the "
           f"hall way {plant['exits']} of {plant['all_exits']}")
-    check("Mission 04: from the factory's pod the research centre, by its ring's vertex 7",
-          len(inst["ring"]) == 8 and inst["words"] == {1} and second == (7, (897.4, 922.7), 150.0)
+    check("Mission 04: from the factory's pod the research centre, by its ring's vertex 8",
+          len(inst["ring"]) == 9 and inst["words"] == {1} and second == (8, (881.8, 900.3), 141.1)
           and (inst["pod"], inst["pod_at"][:2]) == (0, (950.71, 869.39))
           and inst["exits"] == {19: 92.3, 21: 108.9, 23: 108.8} and in_route,
           f"fr_e_inst's outer ring: {len(inst['ring'])} vertices on areal words "
