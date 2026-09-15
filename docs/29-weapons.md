@@ -542,6 +542,91 @@ at the muzzle, and not at all beyond it (*derived*).
   includes the box's doubled top, which is 2 × the land's highest point
   ([26-damage.md](26-damage.md#the-hit-test--read-and-measured)).
 
+### A beam outlives its round — *read*, and *measured*
+
+**None of the three groups deletes the round at once** (*read*):
+
+- **Action 15** (`0x10003341`) marks the owner word `0xfffe` and, unless the
+  agent is a building or carries `+0x104` bit `0x10000000`, sets the death time
+  `+0x59c` to the clock `+0xe4` plus the controller's `+92` (`+0x4b8`,
+  `0x10003375`–`0x1000339b`), then sends the object message `0x15` with 7.
+  That is the same death time a dead unit gets
+  ([26-damage.md](26-damage.md#what-a-damaged-node-a-destroyed-part-and-a-dead-unit-draw--read-and-measured)).
+- **Action 17** kills the round through `ILifeSystem`, which takes the same path.
+- **Action 27** (`0x100030ce`) swaps node v4's explosion for the named `.exp`, deals
+  that node minus the life at `+0x590` (`0x1000330d`–`0x10003319`, through
+  `0x10010f30`), runs its stage, and puts the old explosion back. Node 0 is out
+  of life, so the round is dead.
+
+Each way, **the round stays in the world for its controller's `+92` ms**, with its
+body stopped by action 0, until the control tick calls `KillGameObject`. Its
+effect manager, and every effect on it, goes with it.
+
+**Every beam round restarts its bolt as it stops** (*measured*):
+
+- 23 rounds in `weapon.rlb` create an effect with a type-5 bolt at load: the 16
+  lasers (`bl_*`), the 4 tasers (`bt_*`) and the 3 builder beams (`bld_*`).
+- On all 23, the hit, edge and range groups each run action 10 on effect id 0,
+  that bolt, in time mode 1, before their 17, 15 or 27.
+- The lasers' and tasers' bolt effects last **0.75 s** and their `+92` is 3000.
+  The builder beams' `builder_tail` lasts 10 s and their `+92` is 11000.
+- The cannon, the plasma rifle and the other rounds stop their tracers with
+  action 19 instead.
+
+**`hero_laser_bullet`**, the hero's laser round's bolt effect (*measured*):
+
+- header time mode 0, duration 0.75 s, flags `0x1010`: keep running while the
+  attach point is hidden, and take the manager's target point;
+- two bolts over the window 0 to 1, fading 1 → 0: `NE_Laser_R`, widths +24 and +28
+  of 0.4, and `NE_Laser_Y`, 0.1;
+- both materials add (flags 8) the grey, alpha-striped `LASER.0` with a black
+  diffuse, `NE_Laser_R` under an ambient of (255, 26, 26) and `NE_Laser_Y`
+  under (255, 255, 0).
+
+**Where a beam starts** (*read*):
+
+- As the round is made, the gun asks it for interface `0x13`, its effect manager,
+  and calls slot `0x44` (`0x1002a517`–`0x1002a56d`). It passes the pair (the
+  shooter's id, node 0), 2, and the muzzle's world point.
+- The manager (`0x10004c50`) keeps the pair at `+0x94`/`+0x98`. It looks the
+  shooter up, takes that node's matrix (`AniMesh` interface `0xb`, slot `0x10`),
+  and stores the point in the node's frame at `+0x9c`
+  (`[0x1001e0bc]` slot `0x84`).
+- On every manager tick (`0x10003d6c`–`0x10003e34`) the manager takes the node's
+  matrix again and carries the point back into the world (slot `0x18`). It then
+  hands the point to every instance that asked for it (`0x10007b60`), and a bolt
+  takes it as its start (`0x10003070`).
+
+So **a beam runs from the muzzle to where the round is**:
+
+- the muzzle end rides on the shooter's body, and the far end stays where the
+  round stopped;
+- the beam is drawn at full strength while the round flies, since mode 0's
+  time is 0 until something sets it;
+- once the round stops, action 10 runs the bolt's time over 0.75 s, and its
+  fade falls straight from 1 to 0 (`0x10002dd4`);
+- the bolt's effect has no flag 2, so it holds at the fade's 0, which draws
+  nothing (`Terrain.dll:0x1002887e`), until the round goes 3 s after it stopped.
+
+A laser round crosses its 1,000 m in a tenth of a second, so the beam stands for the
+flight and **0.75 s after it, fading** (*derived*). The manager updates an instance
+only every 100 ms ([11-effects.md](11-effects.md#how-an-effect-runs--read)), so the
+fade steps and its last step can land up to 0.1 s later.
+
+**Measured** on the recording of Mission 01 (30 fps, the game drawing about 20):
+
+- The hero fires the cannon and the laser together from 132 s. The laser's muzzle
+  glow shows every 0.47 to 0.5 s: a 250 ms stroke and 200 ms of wait.
+- Consecutive beams overlap, so the beam never goes out while the button is held.
+- The last glow is at 135.07 s, and the round leaves 125 ms into the stroke,
+  about 135.19 s.
+- Measured on its middle, the beam stays at the brightest the video holds until
+  135.73 s, dims, and is gone by 135.97 s. That is 0.78 s after the round
+  left, and 0.9 s after the glow.
+- Over the lavender sky it is pink with a white core. The only red anywhere in
+  its textures and materials is `NE_Laser_R`'s ambient, so the ambient colours it
+  (*seen*).
+
 ### What a shot plays — *read*, and *measured*
 
 - **Guns with a shot group.** 34 guns name a section-5 group at record +0xc.

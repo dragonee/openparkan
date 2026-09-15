@@ -13979,14 +13979,6 @@ read = true
 
 [[entry]]
 module = "Control.dll"
-at = "0x10003341"
-kind = "site"
-name = "action 15: the object is marked 0xfffe and removed after +0xe4, with no explosion"
-doc = "docs/13-control.md"
-read = true
-
-[[entry]]
-module = "Control.dll"
 at = "0x100033d0"
 kind = "site"
 name = "action 17: clear invulnerability (+0x5b0) and kill through ILifeSystem slot 7, so node 0's .exp plays"
@@ -28261,3 +28253,171 @@ kind = "function"
 name = "ITimer slot 3: the milliseconds since a stamp x 0.001, from the clock at +4 or timeGetTime"
 read = true
 doc = "docs/35-hud.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x10003341"
+kind = "site"
+name = "action 15: the object is marked 0xfffe and its death time +0x59c set to the clock +0xe4 plus +0x4b8 (the controller's +92), with no explosion"
+doc = "docs/13-control.md"
+read = true
+
+[[entry]]
+module = "Control.dll"
+at = "0x10003375"
+kind = "site"
+name = "action 15: the controller's +92 (+0x4b8) as the death delay"
+read = true
+doc = "docs/29-weapons.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000339b"
+kind = "site"
+name = "action 15: the death time +0x59c written, clock +0xe4 plus the delay"
+read = true
+doc = "docs/29-weapons.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000330d"
+kind = "site"
+name = "action 27: node v4 takes minus the life at +0x590 through 0x10010f30, then its stage"
+read = true
+doc = "docs/29-weapons.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002a517"
+kind = "site"
+name = "a round's creation: its interface 0x13, the effect manager, asked for the target point"
+read = true
+doc = "docs/29-weapons.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1002a56d"
+kind = "site"
+name = "a round's creation: manager slot 0x44 with (the shooter's id, node 0), 2 and the muzzle's world point"
+read = true
+doc = "docs/29-weapons.md"
+
+[[entry]]
+module = "Effect.dll"
+at = "0x10003d6c"
+kind = "site"
+name = "manager tick: an instance asked for the target point; the object's node matrix taken again"
+read = true
+doc = "docs/29-weapons.md"
+
+[[entry]]
+module = "Effect.dll"
+at = "0x10003e16"
+kind = "site"
+name = "manager tick: the kept point carried from the node's frame into the world"
+read = true
+doc = "docs/29-weapons.md"
+
+[[entry]]
+module = "Effect.dll"
+at = "0x10003e29"
+kind = "site"
+name = "manager tick: the target point handed to each instance (0x10007b60)"
+read = true
+doc = "docs/29-weapons.md"
+
+[[entry]]
+module = "Effect.dll"
+at = "0x10007b60"
+kind = "function"
+name = "instance: hand a point to every emitter's slot 6"
+read = true
+doc = "docs/29-weapons.md"
+
+[[entry]]
+module = "Effect.dll"
+at = "0x10002dd4"
+kind = "site"
+name = "type-5 draw: the fade value +4 + (+8 - +4) x window progress, straight"
+read = true
+doc = "docs/11-effects.md"
+
+[[entry]]
+module = "Effect.dll"
+at = "0x10002e79"
+kind = "site"
+name = "type-5 draw: a sprite's length over +32, the texture's repeats along the beam"
+read = true
+doc = "docs/11-effects.md"
+
+[[entry]]
+module = "Effect.dll"
+at = "0x10009b90"
+kind = "function"
+name = "sprite record: its u from an offset over a length along the beam"
+read = true
+doc = "docs/11-effects.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1002887e"
+kind = "site"
+name = "effect sprite draw: a fade (the state's +0x20) of 0 draws nothing"
+read = true
+doc = "docs/11-effects.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x100288e1"
+kind = "site"
+name = "effect sprite draw: the state copied as a material block (0x10029aa0)"
+read = true
+doc = "docs/11-effects.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10029aa0"
+kind = "function"
+name = "copy a material phase block: colours +4..+0x30 (+0x20 the ambient alpha), texture, cell"
+read = true
+doc = "docs/11-effects.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10028287"
+kind = "site"
+name = "effect sprite item: the material block copied to the item's +0x70"
+read = true
+doc = "docs/11-effects.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x100282a3"
+kind = "site"
+name = "effect sprite item: draw flags 4, cull off, no 0x10 (lighting)"
+read = true
+doc = "docs/11-effects.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x100308af"
+kind = "site"
+name = "RenderVB: the block's +0x20, the ambient alpha, as the device diffuse alpha"
+read = true
+doc = "docs/11-effects.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10030104"
+kind = "site"
+name = "RenderVB: the unlit branch, draw flags without 0x10, picks its vertex path"
+read = true
+doc = "docs/11-effects.md"
+
+[[entry]]
+module = "Ngi32.dll"
+at = "0x100075fb"
+kind = "site"
+name = "draw: FVF 0x1e2 (pre-lit) unless flags 8 (0x1c4) or 0x10 (0x112); lighting is flags bit 0x10"
+read = true
+doc = "docs/11-effects.md"

@@ -491,9 +491,17 @@ effect's current position (`0x10002a20`). The draw measures the distance
 between the two and lays **floor(length / +36) sprites** along it, at least
 one and at most +20 (`0x10002c53`); +4 → +8 is the fade value across the
 window. *Measured* on all 31 bolts: +20 is 20, +36 is 50, 150, 200 or 250, +40
-is −1 (a phase in seconds) and +4 → +8 is 1 → 0. Who sets the manager's target
-point (slot `0x44`, `0x10004c50`) is not traced; the 14 effects that use it are
-laser, shock and builder tails.
+is −1 (a phase in seconds) and +4 → +8 is 1 → 0. The fade runs straight across
+the window (`0x10002dd4`). Each sprite's texture runs along the beam, one repeat
+every +32 (`0x10002e79`, `0x10009b90`); +32 is 5 on the hero's laser.
+
+**The manager's target point is the muzzle.** The gun sets it as it makes the
+round (slot `0x44`, `0x10004c50`): the shooter's node 0 and the muzzle point, which
+the manager carries with that node on every tick. The 14 effects that take it
+are the laser, taser and builder tails, and each of the 23 rounds that carries
+one restarts it in time mode 1 as it stops. The beam then stands after the
+round has stopped, 0.75 s on a laser
+([29-weapons.md](29-weapons.md#a-beam-outlives-its-round--read-and-measured)).
 
 **A type-8 stream emits by interval.** While (last emission + lerp(+24, +28,
 window progress)) is before now, it emits one more particle, spaced along the
@@ -510,8 +518,25 @@ to 0.02, ten at a time, so each lives 0.5 s falling to 0.2.
 progress^+28 (`0x10010881`). The renderer draws nothing at 0
 (`Terrain.dll:0x1002887e`). *Measured*: 1197 of the 1321 burst blocks fall
 from start to end, 118 hold and 6 rise; 233 of the 237 streams fall and 4
-hold. Whether the value scales alpha or colour depends on the material's blend
-and is not read.
+hold.
+
+**The value stands in for the material's ambient alpha** (*derived*):
+
+- The renderer copies the state the value arrives in (`Terrain.dll:0x100288e1`,
+  `0x10029aa0`) into the draw item's material block (`0x10028287`). That block's
+  `+0x20` is the entry's ambient alpha
+  ([07-objects.md](07-objects.md#how-a-material-reaches-the-device--read-and-measured)).
+- The device material makes it its diffuse alpha (`0x100308af`), so the value
+  scales the texture's alpha.
+- An effect sprite's draw item carries draw flags 4 (`0x100282a3`), without the
+  `0x10` that turns Direct3D's lighting on. `Ngi32.dll` draws such an item as
+  pre-lit vertices, FVF `0x1e2` (`0x100075fb`). How those vertices' colours are
+  formed is not traced.
+- *Measured*: 233 of the 243 materials the effects draw carry a black diffuse and
+  an ambient colour, the unlit glow of
+  [07-objects.md](07-objects.md#how-a-material-reaches-the-device--read-and-measured).
+- *Seen*: the hero's laser is red and pink, while its `LASER.0` is grey and only
+  its materials' ambient is red.
 
 ## Which effects run: the settings switch — *read*, and *measured*
 
@@ -644,7 +669,8 @@ Read one slot either way, none of the seven name witnesses agrees.
   ([above](#time-mode-4-is-a-nodes-animation-value--read-and-measured)).
 - **The rounds** carry their flight effects: `hero_cannon_bullet`
   (a sprite and two glows), `hero_laser_bullet` (two type-5 bolts from the
-  manager's target point to the round), `hero_prifle_bulletA/B`, and the
+  muzzle, riding on the hero's body, to the round, run over 0.75 s once it
+  stops), `hero_prifle_bulletA/B`, and the
   missile's engine, smoke and launch.
 - **A hit.** Each round's node explodes through its `.ndp` `.exp`: `bb_h_01`,
   `bl_h_01`, `bp_h_01` kind 2 and `bm_h_01` kind 3, all with placement 7 and
@@ -668,21 +694,27 @@ Read one slot either way, none of the seven name witnesses agrees.
 
 - **The rest of each emitter's floats.** The window, the phase, the sprite's
   moving and growing triples, the light, the bolt's segments, the stream's
-  interval and lifetime, and the fade values are read. Still unnamed: what the
-  fade value scales (alpha or colour; it goes to the shade as `+0x20` of the
-  material state), what the (low, high) triples a particle's per-axis
+  interval and lifetime, and the fade values are read, and the fade value is the
+  material's ambient alpha ([above](#bolts-streams-and-fades--read-and-measured)).
+  Still unnamed: what the (low, high) triples a particle's per-axis
   exponents shape are — position and size is a *guess* (types 7 and 10: +80
   and +128; type 8: +124 and +172, `0x10012030`) — and a bolt's widths +24/+28
   (a width at each end is a *guess*).
+- **How an effect sprite's pre-lit vertices are coloured** (draw flags 4, FVF
+  `0x1e2`): the unlit branch of `CStridedPrimitive::RenderVB` picks its vertex
+  path at `0x10030104`, and none of them was followed. *Seen*: the laser is red,
+  as its materials' ambient colours are.
 - **How the shade lights with a type-1 light** — the falloff over range and
   attenuation (`EmulatePointLights`, `Terrain.dll:0x1002a130`, and the Direct3D
   path), and what the manager flags `0x80000000` and `0x20000000` mean beyond
   the two tests found.
 - **Who passes the draw's pass argument** that flag 0x800 waits for (manager
   slot 3, `0x10004050`; the landscape's call at `Terrain.dll:0x1001f178` pushes
-  one argument fewer than the slot takes), **who sets the manager's target
-  point** (slot `0x44`) that bolts start from, what draw flag 4 (header
+  one argument fewer than the slot takes), what draw flag 4 (header
   0x2000) changes in the texture choice, and header flag 0x10000.
+  ~~Who sets the manager's target point that bolts start from.~~ Answered: the
+  gun, as it makes the round: the muzzle on the shooter's node 0
+  ([29-weapons.md](29-weapons.md#a-beam-outlives-its-round--read-and-measured)).
 - **What the four settings groups are**, and the group floats `+0x1084` and
   `+0x1294` and the page's `+0x14a4` that the presets set.
 - Snow and rain are **not** here. There is no FXID whose name mentions either,

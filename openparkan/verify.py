@@ -16508,6 +16508,134 @@ def check_push_out_and_ground_contact(check, game: Path) -> None:
           "its edge point (0x1000e9fd -> 0x1000eb70)")
 
 
+def check_beam_rounds(check, game: Path) -> None:
+    """A beam outlives its round: the end groups restart its bolt, the round stays its +92,
+    and the bolt starts at the muzzle carried with the shooter (docs/29, "A beam outlives
+    its round"; docs/11, "Bolts, streams and fades")."""
+    names = ("Control.dll", "Effect.dll", "Terrain.dll", "Ngi32.dll", "weapon.rlb", "effects.rlb",
+             "Material.lib", "Textures.lib")
+    paths = {n: game / n for n in names}
+    if not all(p.exists() for p in paths.values()):
+        return
+    c = _image_at(paths["Control.dll"].read_bytes())
+    e = _image_at(paths["Effect.dll"].read_bytes())
+    t = _image_at(paths["Terrain.dll"].read_bytes())
+    g = _image_at(paths["Ngi32.dll"].read_bytes())
+
+    def dword(at, va: int) -> int:
+        return struct.unpack("<I", at(va, 4))[0]
+
+    # The rounds whose load group makes an effect with a bolt, and what their ends do.
+    library = effects.EffectLibrary(paths["effects.rlb"])
+    weapons_rlb = NResArchive.open(paths["weapon.rlb"])
+    beams: dict[str, tuple[int, float, bool]] = {}
+    for entry in weapons_rlb:
+        if entry.tag != control.CTL_TAG:
+            continue
+        ctl = control.parse(weapons_rlb.read(entry))
+        if len(ctl.groups) <= 4:
+            continue
+        made = {r.args[3]: library.get(r.resource.member) for r in ctl.group(0)
+                if r.action == 4 and r.resource and r.resource.member}
+        bolt = [i for i, fx in made.items() if fx and any(m.kind == 5 for m in fx.emitters)]
+        if not bolt:
+            continue
+        restarts = all(any(r.action == 10 and r.args[:2] == (bolt[0], 1) for r in ctl.group(k))
+                       for k in (2, 3, 4))
+        beams[entry.name.lower()] = (ctl.scale, made[bolt[0]].duration, restarts)
+    kinds = Counter(n.split("_")[0] for n in beams)
+    lasting = Counter((scale, round(duration, 2)) for scale, duration, _ in beams.values())
+    check("weapon.rlb: every beam round restarts its bolt as it stops, and stays its +92",
+          len(beams) == 23 and kinds == Counter({"bl": 16, "bt": 4, "bld": 3})
+          and all(r for _, _, r in beams.values())
+          and lasting == Counter({(3000, 0.75): 20, (11000, 10.0): 3}),
+          f"{len(beams)} rounds make a bolt at load ({dict(kinds)}); on all of them the hit, edge "
+          f"and range groups run action 10 on its id in time mode 1; +92 and bolt duration "
+          f"{dict(lasting)}")
+
+    hero = library.get("hero_laser_bullet")
+    bolts = [m for m in hero.emitters if m.kind == 5] if hero else []
+    widths = [struct.unpack_from("<2f", m.body, 24) for m in bolts]
+    spans = [(struct.unpack_from("<2f", m.body, 12), struct.unpack_from("<2f", m.body, 4))
+             for m in bolts]
+    mats = materials.MaterialLibrary(paths["Material.lib"])
+    red, yellow = mats.get("NE_Laser_R"), mats.get("NE_Laser_Y")
+    textures = NResArchive.open(paths["Textures.lib"])
+    laser = texm.decode(textures.read_name("LASER.0"))
+    px = laser.rgba
+    grey = all(px[i] == px[i + 1] == px[i + 2] for i in range(0, len(px), 4))
+    ok = (hero is not None and hero.mode == 0 and abs(hero.duration - 0.75) < 1e-6
+          and hero.flags == 0x1010
+          and [m.resource.member for m in bolts] == ["NE_Laser_R", "NE_Laser_Y"]
+          and [round(w[0], 3) for w in widths] == [0.4, 0.1]
+          and all(s == ((0.0, 1.0), (1.0, 0.0)) for s in spans)
+          and red is not None and yellow is not None and red.blend == yellow.blend == 8
+          and red.entries[0].colour == (0, 0, 0) and red.entries[0].ambient == (255, 26, 26)
+          and yellow.entries[0].ambient == (255, 255, 0) and grey)
+    check("effects.rlb: hero_laser_bullet, two bolts under a red and a yellow ambient",
+          ok,
+          "mode 0, 0.75 s, flags 0x1010; NE_Laser_R 0.4 and NE_Laser_Y 0.1 wide over the window "
+          "0..1, fading 1 -> 0; both add, black diffuse, ambients (255, 26, 26) and (255, 255, 0); "
+          f"LASER.0 is grey on all {len(px) // 4} texels")
+
+    drawn = {m.resource.member.upper() for fx in library for m in fx.emitters
+             if m.kind in (3, 4, 5, 7, 8, 9, 10) and m.resource and m.resource.member}
+    glows = sum(1 for n in drawn if (m := mats.get(n)) and m.entries
+                and m.entries[0].colour == (0, 0, 0) and m.entries[0].ambient != (0, 0, 0))
+    check("effects.rlb: the materials effects draw are unlit glows",
+          len(drawn) == 243 and glows == 233,
+          f"{glows} of the {len(drawn)} materials the drawn emitters name carry a black diffuse "
+          "and an ambient colour")
+
+    ends = (dword(c, 0x10003590 + 4 * 10) == 0x10002F92
+            and dword(c, 0x10003590 + 4 * 15) == 0x10003341
+            and dword(c, 0x10003590 + 4 * 17) == 0x100033D0
+            and dword(c, 0x10003590 + 4 * 27) == 0x100030CE
+            and c(0x10002FAD, 3) == bytes.fromhex("ff512c")
+            and c(0x10003375, 6) == bytes.fromhex("8b85b8040000")
+            and c(0x10003395, 12) == bytes.fromhex("d885e4000000d99d9c050000")
+            and c(0x1000330D, 8) == bytes.fromhex("d98590050000d9e0"))
+    muzzle = (c(0x1002A51E, 5) == bytes.fromhex("ba13000000")
+              and c(0x1002A56D, 3) == bytes.fromhex("ff5244")
+              and e(0x10004C65, 6) == bytes.fromhex("898e94000000")
+              and e(0x10004C72, 6) == bytes.fromhex("8d9e9c000000")
+              and e(0x10003D77, 6) == bytes.fromhex("8b8e94000000")
+              and e(0x10003E06, 5) == bytes.fromhex("a1bce00110")
+              and e(0x10003E16, 3) == bytes.fromhex("ff5018")
+              and e(0x10003E29, 1) == b"\xe8"
+              and _calls(e, 0x10003E29, 6)[:1] == [(0x10003E29, 0x10007B60)]
+              and dword(e, 0x1001E360 + 4 * 6) == 0x10003070
+              and e(0x10003076, 3) == bytes.fromhex("897120")
+              and e(0x10003082, 4) == bytes.fromhex("c6413801"))
+    fade = (e(0x10002DD7, 13) == bytes.fromhex("d94004d94008d8e1d9431cd8c9")
+            and e(0x10002E79, 3) == bytes.fromhex("d87020"))
+    check("Control.dll, Effect.dll: a beam's round stays, and its bolt starts at the muzzle",
+          ends and muzzle and fade,
+          "actions 10, 15, 17, 27 are 0x10002f92, 0x10003341, 0x100033d0, 0x100030ce; 10 is "
+          "manager slot 0x2c; 15 sets +0x59c = +0xe4 + +0x4b8; 27 deals -(+0x590); the gun hands "
+          "the round's interface 0x13 slot 0x44 the shooter and the muzzle (0x1002a56d), kept at "
+          "+0x94..+0x9c (0x10004c50), carried through the node each tick (0x10003e16) to every "
+          "instance (0x10007b60), whose bolt takes it as its start (slot 6, 0x10003070); the "
+          "fade is +4 + (+8 - +4) x progress (0x10002dd7); +32 is a texture repeat (0x10002e79)")
+
+    item = (t(0x100282A3, 10) == bytes.fromhex("c7812801000004000000")
+            and t(0x1002887B, 3) == bytes.fromhex("d94020")
+            and t(0x100288E1, 1) == b"\xe8"
+            and _calls(t, 0x100288E1, 6)[:1] == [(0x100288E1, 0x10029AA0)]
+            and t(0x100308AF, 3) == bytes.fromhex("8b4820")
+            and t(0x1003005D, 3) == bytes.fromhex("83e010")
+            and t(0x10030062, 2) == bytes.fromhex("0f84"))
+    unlit = (g(0x100075F6, 3) == bytes.fromhex("83e108")
+             and g(0x100075FB, 5) == bytes.fromhex("bbe2010000")
+             and g(0x1000760B, 3) == bytes.fromhex("83e210"))
+    check("Terrain.dll: an effect sprite's fade is its ambient alpha, drawn unlit",
+          item and unlit,
+          "the fade is the state's +0x20 (0x1002887b), copied as the item's material block "
+          "(0x10029aa0), whose +0x20 becomes the device diffuse alpha (0x100308af); the sprite's "
+          "item carries draw flags 4 (0x100282a3), without 0x10, which RenderVB (0x1003005d) and "
+          "Ngi32 (0x100075fb, FVF 0x1e2) take as unlit")
+
+
 def _rel_je(at, va: int) -> int:
     """The target of a ``0f 84 rel32`` at ``va``."""
     return (va + 6 + struct.unpack("<i", at(va + 2, 4))[0]) & 0xFFFFFFFF
@@ -20289,7 +20417,7 @@ def run(game: Path) -> int:
         check_behaviour, check_research, check_descriptions, check_saves,
         check_vocabulary, check_resources, check_briefing, check_briefing_screen,
         check_progression, check_mission_02, check_mission_03, check_mission_04,
-        check_main_teleport, check_outcome, check_push_out_and_ground_contact,
+        check_main_teleport, check_outcome, check_push_out_and_ground_contact, check_beam_rounds,
         check_hud_top,
         check_hud_radar,
         check_hud_screens,
