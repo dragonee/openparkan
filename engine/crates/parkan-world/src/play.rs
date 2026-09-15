@@ -11,8 +11,8 @@ use parkan_formats::control::{
     ENTRY_LOAD, run_group,
 };
 use parkan_formats::controls::{
-    CMD_ENTER_STATE, CMD_JAMES_AIM_TARGET, CMD_JAMES_SELECT_ENEMY, CMD_JAMES_SELECT_FRIEND,
-    CMD_JAMES_SELECT_TARGET, CMD_JAMES_WINGMAN_MENU, CMD_JAMES_ZOOM_MODE,
+    CMD_ENTER_STATE, CMD_JAMES_AIM_TARGET, CMD_JAMES_OUTER_CAMERA, CMD_JAMES_SELECT_ENEMY,
+    CMD_JAMES_SELECT_FRIEND, CMD_JAMES_SELECT_TARGET, CMD_JAMES_WINGMAN_MENU, CMD_JAMES_ZOOM_MODE,
 };
 use parkan_formats::exp::Explosion;
 use parkan_formats::landmesh::FLAGS_LIQUID_BED_BIT;
@@ -330,6 +330,10 @@ pub struct Play {
     pub driving: Option<Driving>,
     /// Command mode's camera, kept between visits (docs/40).
     pub command: crate::command::Camera,
+    /// The outer camera, and the mode it was turned on in: every change of mode from 0, 1 or 2
+    /// turns it off (docs/30, "The outer camera").
+    pub outer: crate::camera::Outer,
+    outer_mode: Mode,
     /// `Iron_3D.ini`'s `MOUSE_SENS` × 0.01, the mouse filter's multiplier while nothing is
     /// zoomed.
     pub mouse_sensitivity: f32,
@@ -741,6 +745,8 @@ impl Play {
             building_effects,
             driving: None,
             command: crate::command::Camera::default(),
+            outer: crate::camera::Outer::default(),
+            outer_mode: Mode::OnFoot,
             mouse_sensitivity: crate::hero::mouse_sensitivity(game) * parkan_sim::input::SENSITIVITY_SCALE,
             commander: crate::selection::Commander::new(mission, &battle_objects),
             construction: crate::construction::Construction::new(mission, &battle_objects),
@@ -1068,13 +1074,17 @@ impl Play {
                 self.auto_driver = (self.auto_driver + 1) % 3;
                 false
             }
-            // The driven unit's own view, view state 1 (`0x10072428`).
+            // In view state 1 only: the outer camera's view lets Z be (`0x10072428`).
             CMD_JAMES_ZOOM_MODE => {
-                if matches!(self.mode(), Mode::OnFoot | Mode::Driving(_)) {
+                if !self.outer.on() && matches!(self.mode(), Mode::OnFoot | Mode::Driving(_)) {
                     let robot = self.driven_mut();
                     let widest = robot.rig.camera_values[2];
                     robot.zoom.toggle(widest);
                 }
+                false
+            }
+            CMD_JAMES_OUTER_CAMERA => {
+                self.press_outer();
                 false
             }
             CMD_JAMES_WINGMAN_MENU => {
@@ -1807,18 +1817,74 @@ impl Play {
         }
     }
 
-    /// The eye the world is drawn from: command mode's camera, or the driven unit's.
+    /// The eye the world is drawn from: command mode's camera, the outer camera, or the driven
+    /// unit's.
     pub fn eye(&self) -> crate::robot::Eye {
+        let own = self.own_eye();
+        if !self.outer_shows() {
+            return own;
+        }
+        // STAND-IN: docs/30-turrets.md#not-established -- which classes and faces the outer
+        // camera's line meets (mask `0x41a`, `0x208`) is not followed: the ground, and every live
+        // target but the unit looked at, passing what a round passes.
+        let unit = self.outer.unit.flatten();
+        let meets = |from, to| {
+            self.battle.combat.first_hit(&self.ground, unit, from, to, 0.0).map(|(s, _, _)| s.point)
+        };
+        self.outer.place(&own, self.outer_bound(unit), meets)
+    }
+
+    /// The driven unit's own eye, or command mode's camera: what the right button picks along.
+    pub fn own_eye(&self) -> crate::robot::Eye {
         if self.mode().commands() {
             return self.command.eye();
         }
         self.driven().eye().unwrap_or_else(|| self.hero.eye())
     }
 
-    /// A game frame's views (`0x1007d6e0`): the zoom of every unit of the player's clan steps.
+    /// Whether the outer camera makes the view: turned on, in the mode it was turned on in.
+    pub fn outer_shows(&self) -> bool {
+        self.outer.on() && self.mode() == self.outer_mode
+    }
+
+    /// `CMD_JAMES_OUTER_CAMERA` (`0x10072244`): in modes 0, 1 and 2, on the driven unit
+    /// (`0x10038b30`).
+    fn press_outer(&mut self) {
+        if !matches!(self.mode(), Mode::OnFoot | Mode::Driving(_)) {
+            return;
+        }
+        let unit = self.driven_target();
+        let flyer = self.driven().flyer;
+        self.outer_mode = self.mode();
+        self.outer.press(unit, flyer, self.hero.time_ms);
+    }
+
+    /// The bound the outer camera stands off by, the unit record's `+0x98` (`0x1007e5d6`).
+    ///
+    /// STAND-IN: docs/40-command-mode.md#not-established -- which bound the record's `+0x98`
+    /// is: the half-diagonal of the chassis mesh's authored box, as the multi-part branch of
+    /// `AniMesh.dll:0x10009d0f` works a radius out of a box (1.47 m on Mission 01's hero, which
+    /// its recording's outer views favour), else the unit's collision radius.
+    pub fn outer_bound(&self, unit: Option<usize>) -> f32 {
+        let robot = unit
+            .and_then(|t| self.robots.iter().find(|(rt, _)| *rt == t))
+            .map_or(&self.hero.robot, |(_, r)| r);
+        robot.chassis.mesh.corners.map_or(robot.collision.1, |corners| {
+            let (lo, hi) =
+                corners.iter().fold((Vec3::splat(f32::MAX), Vec3::splat(f32::MIN)), |(lo, hi), c| {
+                    (lo.min(Vec3::from_array(*c)), hi.max(Vec3::from_array(*c)))
+                });
+            (hi - lo).length() / 2.0
+        })
+    }
+
+    /// A game frame's views (`0x1007d6e0`, `0x10038720`): the zoom of every unit of the player's
+    /// clan steps, the outer camera moves, or is turned off when its mode is left or its unit
+    /// lost, and the mouse filter takes the zoomed multiplier while the view is zoomed
+    /// (`0x100a4fc0`).
     ///
     /// STAND-IN: docs/30-turrets.md#not-established -- how often the game frame runs, which
-    /// paces the zoom's steps: once a 60 Hz tick.
+    /// paces the zoom's steps and the outer camera's ease: once a 60 Hz tick.
     fn tick_views(&mut self) {
         let widest = self.hero.rig.camera_values[2];
         self.hero.zoom.step(widest);
@@ -1829,12 +1895,23 @@ impl Play {
                 robot.zoom.step(widest);
             }
         }
+        if self.outer.on() {
+            let lost = self
+                .outer
+                .unit
+                .flatten()
+                .is_some_and(|t| !self.battle.combat.targets.get(t).is_some_and(|x| x.alive));
+            if self.mode() != self.outer_mode || lost {
+                self.outer.off();
+            }
+            self.outer.update(self.hero.time_ms);
+        }
     }
 
     /// The mouse filter's multiplier, as `0x100a4fc0` hands it on at each change of view: 0.5
     /// while the driven unit's own view is zoomed, else `MOUSE_SENS` × 0.01.
     fn sync_sensitivity(&mut self) {
-        let zoomed = self.driven().zoom.on;
+        let zoomed = !self.outer_shows() && self.driven().zoom.on;
         let s = if zoomed { crate::camera::ZOOMED_SENSITIVITY } else { self.mouse_sensitivity };
         match self.driving.as_mut() {
             Some(d) => d.pilot.sensitivity = s,
@@ -3083,6 +3160,7 @@ mod tests {
             frame_map: Vec::new(),
             frame_count: 0,
             sphere: None,
+            corners: None,
         };
         Part { mesh: Rc::new(mesh), nodes: vec![IDENTITY], scale: 1.0, life: None }
     }

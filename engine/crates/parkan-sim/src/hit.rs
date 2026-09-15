@@ -243,6 +243,7 @@ mod tests {
             frame_map: Vec::new(),
             frame_count: 0,
             sphere: None,
+            corners: None,
         };
         let moved = Pose { translation: [0.0, -2.0, 0.0], ..IDENTITY };
         (mesh, vec![IDENTITY, moved])

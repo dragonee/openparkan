@@ -142,8 +142,11 @@ struct Args {
     /// other, before `--ticks` play; `--tilde` then presses the tilde once `--ticks` have played.
     wingmen: bool,
     tilde: bool,
-    /// `--zoom`: after `--ticks` play, Z is pressed and a quarter of a second plays, so a
-    /// screenshot shows the view zoomed.
+    /// `--outer N`: after `--ticks` play, C is pressed N times, half a second apart, so a
+    /// screenshot shows the outer camera's Nth place (5 is back in the eye).
+    outer: usize,
+    /// `--zoom`: after `--ticks` (and `--outer`) play, Z is pressed and a quarter of a second
+    /// plays, so a screenshot shows the view zoomed.
     zoom: bool,
     ticks: u32,
     hold: Vec<String>,
@@ -189,6 +192,7 @@ fn args() -> Result<Args> {
         capture: false,
         wingmen: false,
         tilde: false,
+        outer: 0,
         zoom: false,
         ticks: 0,
         hold: Vec::new(),
@@ -220,6 +224,7 @@ fn args() -> Result<Args> {
             "--capture" => out.capture = true,
             "--wingmen" => out.wingmen = true,
             "--tilde" => out.tilde = true,
+            "--outer" => out.outer = value()?.parse()?,
             "--zoom" => out.zoom = true,
             "--build" => {
                 let v: Vec<f32> = value()?.split(',').map(str::parse).collect::<Result<_, _>>()?;
@@ -433,9 +438,9 @@ fn rehearse(play: &mut scene::Play, loaded: &scene::Loaded, args: &Args) {
     if args.headless && !kills.is_empty() {
         println!("killed mission objects {kills:?}");
     }
-    // A key pressed as the game's key runs it, its move played out.
+    // Keys pressed as the game runs them, each move played out.
     let press = |play: &mut scene::Play, command: &str, ticks: usize| {
-        let eye = play.eye();
+        let eye = play.own_eye();
         let view = parkan_world::play::View {
             eye: eye.position,
             look: eye.forward,
@@ -448,6 +453,9 @@ fn rehearse(play: &mut scene::Play, loaded: &scene::Loaded, args: &Args) {
             play.tick(TICK_MS, args.mouse);
         }
     };
+    for _ in 0..args.outer {
+        press(play, parkan_formats::controls::CMD_JAMES_OUTER_CAMERA, 30);
+    }
     if args.zoom {
         press(play, parkan_formats::controls::CMD_JAMES_ZOOM_MODE, 15);
     }
@@ -632,7 +640,7 @@ fn screenshot(loaded: &scene::Loaded, game: &Path, args: &Args, out: &Path) -> R
     if let Some(p) = play.as_mut() {
         scene::sync(&mut renderer, &gpu.device, &gpu.queue, p, &world.objects, view_proj, eye);
         if let Some(v) = &view {
-            let outside = briefing.is_some() || p.mode().shows_cursor();
+            let outside = briefing.is_some() || p.mode().shows_cursor() || p.outer_shows();
             scene::place_own_view(&mut renderer, &gpu.queue, v, p, outside);
         }
         scene::panel_fonts(&mut renderer, &gpu.device, &gpu.queue, game);
@@ -961,7 +969,8 @@ impl App {
             .running
             .as_ref()
             .map_or(16.0 / 9.0, |r| r.config.width as f32 / r.config.height.max(1) as f32);
-        let eye = play.eye();
+        // The right button picks along the unit's own camera, whichever view is drawn.
+        let eye = play.own_eye();
         let view = parkan_world::play::View {
             eye: eye.position,
             look: eye.forward,
@@ -1378,7 +1387,7 @@ impl App {
                     eye.position,
                 );
                 if let Some(v) = &self.view {
-                    let outside = briefing.is_some() || play.mode().shows_cursor();
+                    let outside = briefing.is_some() || play.mode().shows_cursor() || play.outer_shows();
                     scene::place_own_view(&mut r.renderer, &r.gpu.queue, v, play, outside);
                     if let Some(hud) = self.hud.as_mut() {
                         let (voices, sounds) = scene::draw_hud(

@@ -144,6 +144,8 @@ pub struct Mesh {
     pub frame_count: u32,
     /// The authored bounding sphere: centre and radius.
     pub sphere: Option<([f32; 3], f32)>,
+    /// The authored box's eight corners, which head the same header.
+    pub corners: Option<[[f32; 3]; 8]>,
 }
 
 fn f32_at(b: &[u8], at: usize) -> f32 {
@@ -427,6 +429,8 @@ pub fn parse(blob: &[u8], name: &str) -> Result<Mesh, FormatError> {
     };
     let sphere =
         (raw_slots.len() >= SLOT_HEADER_SIZE).then(|| (vec3(raw_slots, 24 * 4), f32_at(raw_slots, 27 * 4)));
+    let corners =
+        (raw_slots.len() >= SLOT_HEADER_SIZE).then(|| std::array::from_fn(|k| vec3(raw_slots, k * 12)));
 
     let raw_keys = stream(STREAM_POSE_KEY)?;
     let n_keys = entry(STREAM_POSE_KEY).map_or(0, |e| e.element_count as usize);
@@ -491,6 +495,7 @@ pub fn parse(blob: &[u8], name: &str) -> Result<Mesh, FormatError> {
         frame_map,
         frame_count,
         sphere,
+        corners,
     })
 }
 

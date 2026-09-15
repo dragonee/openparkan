@@ -356,6 +356,7 @@ mod tests {
             frame_map: Vec::new(),
             frame_count: 0,
             sphere: None,
+            corners: None,
         };
         LoadedMesh {
             mesh,

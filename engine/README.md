@@ -541,6 +541,16 @@ presses a hero standing at it down), and which of Mission 04's units holds no mi
   toward 0.2, eleven updates from the hero's 1.3, and back when Z is pressed again, which it
   takes only at an end; every unit of the player's clan keeps its own zoom, and while the view is
   zoomed the mouse filter's multiplier is 0.5 in place of `MOUSE_SENS` × 0.01.
+- C turns the outer camera on the driven unit, on foot, aboard a bot or in telepresence (docs/30,
+  "The outer camera"). Each press takes it to the next of four places: right near (0.4 rad off
+  straight behind, 2.5 r back), right far (0.2, 4.5 r), left far and left near, then back into
+  the eye and off. It stands behind the unit's own eye along its heading turned by the angle,
+  0.15 r below the eye (0.45 r above on a flyer), looks where the eye looks with a field of 1.3,
+  and eases there: each update takes 1.25 × the seconds since the press of the way left, done
+  at 0.4 s (0.24 s back into the eye); a press while it moves does nothing. A camera the
+  line from the eye meets something on is brought in front of it. The unit is drawn whole from
+  it, a boarded bot too, with the HUD over; Z does nothing, and any change of mode turns it off.
+  On Mission 01 the hero stands in the four views where the recording's put it.
 
 This directory also holds what the rest will follow:
 
@@ -666,6 +676,9 @@ MISSIONS/CAMPAIGN/CAMPAIGN.00/Mission.04 --skip-briefing --at 1172.2,1245.6,-2.4
 Z zooms the view of the unit the player drives to a field of 0.2 in eleven updates and slows
 the mouse to half; Z again widens it back. `--zoom` presses Z after `--ticks` play and a quarter
 of a second more, for a screenshot: `--skip-briefing --face m_targ.dat,150 --ticks 30 --zoom`.
+C steps the outer camera round the unit and back into the cockpit; `--outer N` presses C N times
+half a second apart after `--ticks` play (`--skip-briefing --ticks 60 --outer 2` draws Mission
+01's hero from the right far place).
 
 ## Checks
 
@@ -792,6 +805,9 @@ a row here. A row leaves this table when research closes it.
 | M14 | How an effect sprite's pre-lit vertices are coloured (draw flags 4, FVF `0x1e2`) | as a batch's emissive: the scene colour plus the material's ambient, held to 1 and decoded, times the texture; the laser draws red as the recording's does | [11](../docs/11-effects.md#not-resolved) |
 | M14 | Which matrix `AniMesh` slot `0x10` hands the effect manager for its argument 2, which carries a beam's muzzle with its shooter | node 0's world pose: the unit's placement and its chassis's node 0 as drawn | [29](../docs/29-weapons.md#not-established) |
 | M14 | How often the game frame runs, which paces a unit's zoom by 0.1 an update | once a 60 Hz tick | [30](../docs/30-turrets.md#not-established) |
+| M14 | How often the game frame runs, which paces a unit's zoom by 0.1 an update and the outer camera's ease | once a 60 Hz tick | [30](../docs/30-turrets.md#not-established) |
+| M14 | Which objects and faces the outer camera's line through the world meets (mask `0x41a`, `0x208`), and the vector at `+8` of the world's answer 0.75 of which is added to the point met | the ground and every live target but the unit looked at, passing what a round passes; the camera stands 0.75 back toward the eye | [30](../docs/30-turrets.md#not-established) |
+| M14 | Which box the unit record's `+0x98`, the outer camera's r, is the half-diagonal of | the chassis mesh's authored box (1.47 m on Mission 01's hero, which its recording favours), else the unit's collision radius; an HQ's command camera keeps its M13 stand-in | [40](../docs/40-command-mode.md#not-established) |
 
 ### Read since the stand-in was written
 

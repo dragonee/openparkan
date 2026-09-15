@@ -784,6 +784,7 @@ mod tests {
             frame_map: vec![0, 1, 2, 3],
             frame_count: 2,
             sphere: None,
+            corners: None,
         };
         let point = |node: u32| ControlPoint {
             name: String::new(),

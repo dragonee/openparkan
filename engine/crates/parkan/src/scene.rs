@@ -755,6 +755,8 @@ pub fn place_own_view(
         };
         renderer.set_instance(queue, instance, unit * models::pose_matrix(&pose), first_person);
     }
+    // From the outer camera a boarded bot is drawn whole, as any other unit.
+    let driven = driven.filter(|_| !play.outer_shows());
     for &(instance, t, p, node) in &view.cockpits {
         let placed = (Some(t) == driven)
             .then(|| play.robots.iter().find(|(rt, _)| *rt == t))

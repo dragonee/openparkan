@@ -4256,7 +4256,7 @@ fn mission_04_is_won_by_the_hq_the_helicopters_captures_research_a_large_flyer_a
 
 /// A game command as its key runs it, from the unit's own view.
 fn press_command(play: &mut parkan_world::play::Play, command: &str) {
-    let eye = play.eye();
+    let eye = play.own_eye();
     let view = parkan_world::play::View {
         eye: eye.position,
         look: eye.forward,
@@ -4300,6 +4300,58 @@ fn mission_01s_zoom_narrows_the_eye_to_0_2_in_eleven_updates_and_halves_the_mous
     assert!((play.eye().fov_x - 1.3).abs() < 1e-5, "{}", play.eye().fov_x);
     tick(&mut play);
     assert!((play.hero.pilot.sensitivity - 1.0).abs() < 1e-6);
+}
+
+#[test]
+#[ignore = "needs the game install"]
+fn mission_01s_outer_camera_stands_at_its_four_places_about_the_hero_and_goes_back_into_the_eye() {
+    use parkan_formats::controls::{CMD_JAMES_OUTER_CAMERA, CMD_JAMES_ZOOM_MODE};
+    use parkan_world::camera::PLACES;
+
+    // docs/30-turrets.md, "The outer camera".
+    let (mut play, _) = mission_01_play();
+    let tick = |play: &mut parkan_world::play::Play, n: usize| {
+        for _ in 0..n {
+            play.tick(1000.0 / 60.0, [0.0; 2]);
+        }
+    };
+    tick(&mut play, 1);
+    let r = play.outer_bound(None);
+    assert!((r - 1.473).abs() < 2e-3, "the hero's chassis box's half-diagonal: {r}");
+    for (k, &(angle, back)) in PLACES.iter().enumerate() {
+        press_command(&mut play, CMD_JAMES_OUTER_CAMERA);
+        tick(&mut play, 30);
+        let own = play.own_eye();
+        let eye = play.eye();
+        let heading = own.forward.y.atan2(own.forward.x) + angle;
+        let want = own.position
+            - glam::Vec3::new(heading.cos(), heading.sin(), 0.0) * r * back
+            - glam::Vec3::Z * r * parkan_world::camera::WALKER_DROP;
+        assert!(eye.position.distance(want) < 1e-3, "place {k}: {} against {want}", eye.position);
+        assert_eq!((eye.forward, eye.fov_x, eye.near), (own.forward, 1.3, 0.5));
+        // On the hero's right for the first two, on its left for the others.
+        let right = own.forward.cross(own.up);
+        assert_eq!((eye.position - own.position).dot(right) > 0.0, k < 2, "place {k}");
+    }
+    // Z does nothing from the outer camera's view.
+    press_command(&mut play, CMD_JAMES_ZOOM_MODE);
+    tick(&mut play, 12);
+    assert!(!play.hero.zoom.on);
+    press_command(&mut play, CMD_JAMES_OUTER_CAMERA);
+    tick(&mut play, 13);
+    assert!(play.outer.on(), "the move back is 0.24 s");
+    tick(&mut play, 2);
+    assert!(!play.outer.on() && play.eye() == play.own_eye());
+
+    // A change of mode turns it off at once.
+    press_command(&mut play, CMD_JAMES_OUTER_CAMERA);
+    tick(&mut play, 30);
+    assert!(play.outer_shows());
+    play.modes.push(parkan_world::play::Mode::Factory(0));
+    assert!(!play.outer_shows());
+    tick(&mut play, 1);
+    play.modes.pop();
+    assert!(!play.outer.on());
 }
 
 #[test]

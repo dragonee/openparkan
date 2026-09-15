@@ -535,6 +535,7 @@ mod tests {
             frame_map: Vec::new(),
             frame_count: 0,
             sphere: None,
+            corners: None,
         };
         let mut life = Life::new(&table(&[hit_points]), vec![None], vec![false], 1.0, 1.0);
         life.building = building;

@@ -207,6 +207,8 @@ pub const CMD_JAMES_SELECT_FRIEND: &str = "CMD_JAMES_SELECT_FRIEND";
 pub const CMD_JAMES_AIM_TARGET: &str = "CMD_JAMES_AIM_TARGET";
 pub const CMD_JAMES_WINGMAN_MENU: &str = "CMD_JAMES_WINGMAN_MENU";
 pub const CMD_JAMES_AUTO_DRIVER: &str = "CMD_JAMES_AUTO_DRIVER";
+/// The unit's own camera's zoom, and the outer camera (docs/30, "The zoom" and "The outer camera").
+pub const CMD_JAMES_OUTER_CAMERA: &str = "CMD_JAMES_OUTER_CAMERA";
 pub const CMD_PAGER: &str = "CMD_PAGER";
 pub const CMD_JAMES_MISSION_OBJ: &str = "CMD_JAMES_MISSION_OBJ";
 pub const CMD_JAMES_SATELLITE_MAP: &str = "CMD_JAMES_SATELLITE_MAP";
