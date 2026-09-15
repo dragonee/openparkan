@@ -1786,8 +1786,11 @@ points are given is not traced. `Movement_FlyHeight` is 40 and
   runs the building's, so they do
   ([Walking into a building](#walking-into-a-building--read-and-measured)).
 - How the building's mesh builds the capsule a door part is tested against
-  (`Terrain.dll:0x1005a27f`), the node whose box bounds a pod's zone in height
-  (`0x10058607`). ~~How a lightmap combines with a batch's lit colour~~ —
+  (`Terrain.dll:0x1005a27f`). ~~The node whose box bounds a pod's zone in
+  height (`0x10058607`)~~ — **read**: the pod node's parent, its level-0 box
+  in world space
+  ([27-ownership.md](27-ownership.md#the-zones-height-is-the-pod-nodes-parents-box--read-and-measured)).
+  ~~How a lightmap combines with a batch's lit colour~~ —
   **read**: [07-objects.md](07-objects.md#how-a-lightmapped-batch-is-drawn--read-and-measured).
 - ~~How a walker climbs a building's ramp while the ramp's faces push its
   sphere back; which way the hero takes to the Large Factory's pod~~ —

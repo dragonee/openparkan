@@ -8052,6 +8052,126 @@ def check_building_entry(check, game: Path) -> None:
           f"{min(outpost_floor):.2f}; no lightmap")
 
 
+def _sphere_union(spheres):
+    """The smallest sphere holding two or more spheres, grown one at a time:
+    ((x, y, z), r)."""
+    (centre, radius), *rest = spheres
+    for other, r in rest:
+        d = math.dist(centre, other)
+        if d + r <= radius:
+            continue
+        if d + radius <= r:
+            centre, radius = other, r
+            continue
+        grown = (d + radius + r) / 2
+        t = (grown - radius) / d
+        centre = tuple(centre[k] + (other[k] - centre[k]) * t for k in range(3))
+        radius = grown
+    return centre, radius
+
+
+def check_pod_zone(check, game: Path) -> None:
+    """The pod zone's height: the box of the pod node's parent (docs/27)."""
+    paths = {n: game / n for n in ("Terrain.dll", "AniMesh.dll")}
+    if not all(p.exists() for p in paths.values()) or not (game / "fortif.rlb").exists():
+        return
+    t_at = _image_at(paths["Terrain.dll"].read_bytes())
+    a_at = _image_at(paths["AniMesh.dll"].read_bytes())
+
+    def dword(at, va: int) -> int:
+        return struct.unpack("<I", at(va, 4))[0]
+
+    # Computer 0's +0x48 is its first node's parent, from IAnimation slot 29.
+    filing = t_at(0x100585DF, 0x86)
+    animation_slot29 = dword(a_at, 0x1002057C + 4 * 29)
+    parent_out = (a_at(0x10005BB9, 3) == b"\x8b\x56\x18"
+                  and a_at(0x10005BBF, 6) == b"\x89\x15" + struct.pack("<I", 0x10025BDC)
+                  and a_at(0x10005C72, 5) == b"\xb8" + struct.pack("<I", 0x10025BC8))
+    # The zone test asks IJointMesh (CBuilding +0x38, interface 0x20) for +8's sphere
+    # and +0x48's box, and tests z against corners 0 and 7.
+    joint = t_at(0x10055FB3, 0x1F) == bytes.fromhex(
+        "8b8d84fdffff83c13851ba200000008b8530ffffff8b008b8d30ffffffff10")
+    sphere_call = t_at(0x10059DC7, 0x2B) == bytes.fromhex(
+        "6a028b55fc83c2088b8d64ffffff8b49388b8564ffffff8b40388b00ff500cd945e8d80db4b60910"
+        "d95df8")
+    box_call = t_at(0x10059EA9, 0x1F) == bytes.fromhex(
+        "6a028b55fc83c2488b8564ffffff8b48388b8564ffffff8b40388b00ff5010")
+    corners = (t_at(0x10059ECA, 13) == bytes.fromhex("6bc90c8b5508d94208d85c0d84")
+               and t_at(0x10059EDE, 5) == b"\xb8\x07\x00\x00\x00"
+               and t_at(0x10059EE9, 7) == bytes.fromhex("d94108d85c0584"))
+    joint_slots = [dword(a_at, 0x1002050C + 4 * k) for k in (3, 4)]
+    level0 = a_at(0x1000F796, 4) == b"\x6a\xff\x6a\x00"
+    box_order = a_at(0x100118DD, 3) == b"\x8d\x48\x54"
+    check("Terrain.dll: a pod's zone runs in height between its node's parent's box corners",
+          filing[:3] == b"\x6a\x02\x33" and filing[0x28:0x2B] == b"\xff\x50\x74"
+          and filing[0x2E:0x34] == bytes.fromhex("8b4dd48b5114")
+          and filing[0x66:0x69] == b"\x83\xc2\x48"
+          and animation_slot29 == 0x10005B40 and parent_out and joint and sphere_call
+          and box_call and corners and joint_slots == [0x1000F3B0, 0x1000F760] and level0
+          and box_order,
+          f"the computer filing hands its first node to IAnimation slot 29 "
+          f"({animation_slot29:#x}), whose answer's +0x14 is the node record's +0x18, the "
+          f"parent, and keeps it at +0x48 (0x100585df); the zone test asks IJointMesh "
+          f"(CBuilding +0x38 by interface 0x20) slot 3 ({joint_slots[0]:#x}) for +8's "
+          f"sphere, x and y within {POD_ZONE_SHARE:g} x its radius, and slot 4 "
+          f"({joint_slots[1]:#x}) for +0x48's level-0 box corners (variant -1, level 0), "
+          f"z between corner 0, the minimum, and corner 7, the maximum")
+
+    names = frozenset(p.name.lower() for p in all_archives(game))
+    fortif = NResArchive.open(game / "fortif.rlb")
+    entries = {e.name.lower(): e for e in fortif}
+    hero = assembly.Assembly(game)
+    parts = hero.parts(mission.KIND_UNIT, "UNITS\\UNITS\\HERO\\tut3_p.dat")
+    meshes = [(p, hero.mesh(p.ref)) for p in parts]
+    centre, radius = _sphere_union([(objmesh.apply(p.pose, m.volume.centre), m.volume.radius)
+                                    for p, m in meshes if m and m.volume])
+    feet = meshes[0][1].volume.minimum[2]
+    lift = centre[2] - feet
+    rows = {}
+    for name in sorted(entries):
+        stem = name[:-4]
+        if not name.endswith(".ctl") or stem + ".msh" not in entries:
+            continue
+        ctl = control.parse(fortif.read(entries[name]), names)
+        pods = [p for p in ctl.components if p.type_id == control.COMPUTER_TYPE]
+        if not pods:
+            continue
+        model = objmesh.parse(fortif.read(entries[stem + ".msh"]), stem + ".msh")
+        node = ctl.channels[pods[0].entries[0]].node
+        slot = model.slots[model.nodes[node].hit_slot()]
+        pod = objmesh.apply(model.world_pose(node), slot.sphere[:3])
+        parent = model.nodes[node].parent
+        box = model.slots[model.nodes[parent].hit_slot()]
+        z0 = objmesh.apply(model.world_pose(parent), box.aabb_min)[2]
+        z7 = objmesh.apply(model.world_pose(parent), box.aabb_max)[2]
+        floors = _walkable_heights([t for ts in _posed_level0(model).values() for t in ts],
+                                   *pod[:2])
+        inside = [f for f in floors if min(z0, z7) < f + lift < max(z0, z7)]
+        own = [f for f in floors if abs(f + lift - pod[2]) <= slot.sphere[3]]
+        animated = any(ch.node == parent for ch in ctl.channels)
+        rows[stem] = (node, parent, round(min(z0, z7), 2), round(max(z0, z7), 2),
+                      [round(f, 2) for f in inside], len(own), animated)
+    gener = rows.get("fr_l_gener")
+    check("fortif.rlb: every pod's parent box holds the floor a hero stands on at the pod",
+          len(rows) == 21 and all(len(r[4]) == 1 and not r[6] for r in rows.values())
+          and [s for s, r in rows.items() if not r[5]] == ["fr_l_gener"]
+          and gener == (4, 3, -12.48, -6.72, [-12.48], 0, False)
+          and rows["fr_l_bunker"][:5] == (5, 4, -13.96, -3.41, [-12.04])
+          and rows["fr_l_store"][:5] == (11, 10, -29.24, -18.69, [-27.32])
+          and rows["fr_b_plant"][:5] == (25, 23, -14.32, -3.77, [-12.4])
+          and rows["fr_l_angar"][:5] == (2, 1, -0.0, 36.86, [0.48])
+          and abs(radius - 2.01) < 0.01 and abs(lift - 1.62) < 0.01,
+          f"a hero's bounding sphere (tut3_p.dat, its parts' header spheres) has radius "
+          f"{radius:.2f} and its centre {lift:.2f} above its chassis box's foot; with the "
+          f"centre that high over each of the {len(rows)} buildings' floors under its pod, "
+          f"exactly one floor falls inside the pod node's parent's box, no item plays the "
+          f"parent, and the pod node's own sphere misses only on "
+          f"{[s for s, r in rows.items() if not r[5]]}: (pod node, parent, box z, the floor "
+          f"inside) fr_l_gener {gener[:5]}, fr_l_bunker {rows['fr_l_bunker'][:5]}, "
+          f"fr_l_store {rows['fr_l_store'][:5]}, fr_b_plant {rows['fr_b_plant'][:5]}, "
+          f"fr_l_angar {rows['fr_l_angar'][:5]}")
+
+
 #: D3D texture stage state and operation codes the phase table's triples carry.
 D3DTSS_COLOROP, D3DTSS_COLORARG1, D3DTSS_COLORARG2, D3DTSS_ALPHAOP = 1, 2, 3, 4
 D3DTOP_MODULATE, D3DTOP_SELECTARG2 = 4, 3
@@ -18162,7 +18282,8 @@ def run(game: Path) -> int:
         check_motion, check_playback, check_ground, check_sensors, check_hit_test,
         check_collision, check_lake_and_buoys,
         check_combat, check_ownership,
-        check_capture, check_building_entry, check_building_lighting, check_building_ground,
+        check_capture, check_building_entry, check_pod_zone, check_building_lighting,
+        check_building_ground,
         check_building_route,
         check_repair,
         check_chassis, check_weapons,

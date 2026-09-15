@@ -170,10 +170,13 @@ of `IBuilding` (`0x1005b250`) is where `iron3d.dll` stores its callback
   and forgets one that leaves, provided the object has a mesh and a life
   system (`0x10059f40`; the same notification opens the doors,
   [24-motion.md](24-motion.md#walking-into-a-building--read-and-measured)).
+  The position is the centre of the object's bounding sphere.
   On each tick (`CBuilding::SendMsg`, `0x10057550`) it
   looks for one standing in the **first** computer's zone: within 0.8 of that
-  part's bounding radius across the ground, and within its box in height
-  (`0x10059d80`). The test reads only the position: no clan, size, order or
+  part's bounding radius across the ground, and in height inside the box of
+  that part's parent node (`0x10059d80`,
+  [below](#the-zones-height-is-the-pod-nodes-parents-box--read-and-measured)).
+  The test reads only the position: no clan, size, order or
   speed is checked here.
 - **The pod opens, then fires.** With someone in the zone and the pod idle,
   the building switches the computer on, and it starts opening. When the item
@@ -289,6 +292,60 @@ when the player takes a building from a neutral or an ally,
 `VOICE_EBUILD_CAPTURE` from an enemy, and `VOICE_BUILD_CAPTURE` when the
 player loses one. The cursor over a building a selected capturer can take is
 `CAPTURE`, `ui/capture.ani` (`ui/cursor.cfg`, *measured*).
+
+### The zone's height is the pod node's parent's box — *read*, and *measured*
+
+**Computer 0 keeps two node references** (*read*). Each holds the building and
+a node index:
+
+- `+8`, **the first node the pod's item plays**, filed with the item
+  (`Terrain.dll:0x100583a2`–`0x100584e8`);
+- `+0x48`, **that node's parent**. The filing (`0x100585df`) hands `+8` to the
+  building's `IAnimation` (`CBuilding +0x24`), slot 29
+  (`AniMesh.dll:0x10005b40`). That slot fills a record about the node whose
+  `+0x14` is the node record's `+0x18` (`0x10005bb9`), the parent
+  ([26-damage.md](26-damage.md#what-a-damaged-node-a-destroyed-part-and-a-dead-unit-draw--read-and-measured)).
+  The filing stores it beside the building (`0x1005860d`–`0x10058662`).
+
+**The zone test** (`0x10059d80`, *read*) asks the building's `IJointMesh`
+(`CBuilding +0x38`, interface `0x20`, `0x10055fb3`) about both, in world space
+(query 2):
+
+1. **Across the ground.** Slot 3 (`AniMesh.dll:0x1000f3b0`) gives `+8`'s
+   sphere: its level-0 slot's sphere through the node's matrix. The object's x
+   and y must lie within 0.8 × that radius of the centre (`0x10059de9`).
+2. **In height.** Slot 4 (`0x1000f760`) gives the eight corners of `+0x48`'s
+   level-0 slot box. The box is the current damage variant's
+   (`0x100124d0` with level 0 and variant −1), scaled by the object's scale and
+   carried through the node's matrix. Corner 0 is the box's minimum and corner
+   7 its maximum (`0x10011850`). The object's z must lie between corner 0's z
+   and corner 7's, whichever is higher (`0x10059ec8`–`0x10059f26`).
+
+**The object's position is its bounding-sphere centre** (*read*). The
+notification that files a child (`0x10059ff1`) keeps `IMesh2` slot 9's sphere
+in world space, the same centre a door measures. A hero's bounding sphere
+spans its chassis's and turret's header spheres. On `tut3_p.dat`, as on
+`tut2_p.dat`, its radius is 2.01 and its centre 1.62 above the foot of its
+chassis box at rest, which is where it stands (*derived*).
+
+**On every building** (*measured*, model space at rest). Take the pod node's
+sphere centre across the ground and a hero standing on each floor under it.
+Exactly one of the floors puts the hero's centre inside the parent's box, and
+no item plays the parent, so the box stays where it rests. On all 21 buildings
+with a pod that floor is the pod room's:
+
+| building | pod node | parent | parent's box, z | the floor inside | the pod node's own sphere, z centre and radius |
+|---|---:|---:|---|---:|---|
+| `fr_l_gener`, the Small Generator (`gener01.dat`) | 4 | 3 | −12.48 … −6.72 | −12.48 | −3.84, 6.39 |
+| `fr_l_bunker`, the Small Bunker (`sbunk01.dat`) | 5 | 4 | −13.96 … −3.41 | −12.04 | −9.13, 5.96 |
+| `fr_l_store`, the Small Warehouse (`sstore01.dat`) | 11 | 10 | −29.24 … −18.69 | −27.32 | −24.41, 5.53 |
+| `fr_b_plant`, the Large Factory (`lplant01.dat`) | 25 | 23 | −14.32 … −3.77 | −12.40 | −9.67, 4.77 |
+| `fr_l_angar`, the Outpost (`shang01.dat`) | 2 | 1 | 0 … 36.86 | 0.48 | 4.79, 6.37 |
+
+*Derived:* the pod node's own sphere is not the bound. It happens to hold the
+hero on 20 of the 21. It does not on the generator: the pod's item plays the
+platform `ic22`, which rests 5.8 m above the floor. Its sphere reaches down to
+−10.23, while the hero's centre on the pod room's floor is at −10.86.
 
 ## A neutral unit is taken by the hero — *read*, and *measured*
 

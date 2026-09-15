@@ -7824,7 +7824,7 @@ read = true
 module = "Terrain.dll"
 at = "0x10059d80"
 kind = "function"
-name = "pod zone: horizontal distance within 0.8 x the item part's sphere radius, height inside its box"
+name = "pod zone: across the ground within 0.8 x the pod node's sphere radius; in height inside its parent node's box"
 doc = "docs/27-ownership.md"
 read = true
 
@@ -20917,9 +20917,81 @@ doc = "docs/27-ownership.md"
 module = "Terrain.dll"
 at = "0x10058607"
 kind = "site"
-name = "computer 0's height box: the node the mesh (+0x24 slot 29) gives for its first node, into +0x48"
+name = "computer 0's height box: IAnimation (+0x24) slot 29 on its first node; the answer's +0x14, the parent, into +0x48"
 read = true
-doc = "docs/24-motion.md"
+doc = "docs/27-ownership.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x100585df"
+kind = "site"
+name = "computer filing: record 0's +8 node reference to IAnimation slot 29, the parent node kept with the building at +0x48"
+read = true
+doc = "docs/27-ownership.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10055fb3"
+kind = "site"
+name = "CBuilding +0x38: IJointMesh, interface 0x20 of the building's agent"
+read = true
+doc = "docs/27-ownership.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10059ec8"
+kind = "site"
+name = "pod zone height: the object's z against corner 0's z and corner 7's, between them either way"
+read = true
+doc = "docs/27-ownership.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10059ff1"
+kind = "site"
+name = "child notification: IMesh2 slot 9, query 2, the child's world bounding sphere, kept as its position"
+read = true
+doc = "docs/27-ownership.md"
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10005b40"
+kind = "function"
+name = "IAnimation slot 29: a node's facts into a static record; +0x14 is the node record's +0x18, its parent"
+read = true
+doc = "docs/27-ownership.md"
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x1002050c"
+kind = "datum"
+name = "IJointMesh (interface 0x20) vtable: slot 3 a node's sphere, 4 its box corners, 5 its capsule, 6 a part's draw"
+read = true
+doc = "docs/27-ownership.md"
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x1000f3b0"
+kind = "function"
+name = "IJointMesh slot 3: a node's level-0 slot sphere through its matrix; no slot gives the matrix origin, radius 0"
+read = true
+doc = "docs/27-ownership.md"
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x1000f760"
+kind = "function"
+name = "IJointMesh slot 4: the eight corners of a node's level-0 slot box (current variant), scaled, through its matrix"
+read = true
+doc = "docs/27-ownership.md"
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10011850"
+kind = "function"
+name = "box corners from minimum and maximum: corner 0 the minimum, corner 7 (+0x54) the maximum"
+read = true
+doc = "docs/27-ownership.md"
 
 [[entry]]
 module = "AniMesh.dll"
