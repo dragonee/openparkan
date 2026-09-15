@@ -27108,3 +27108,67 @@ kind = "site"
 name = "script function 0: result 1"
 read = true
 doc = "docs/34-progression.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000ebf7"
+kind = "site"
+name = "hit opener: the object's agent kind (+0x50) must be 3, a building"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000ec01"
+kind = "site"
+name = "hit opener: the hit names an object, a node not -2 and a batch not -1"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000ec13"
+kind = "site"
+name = "hit opener: the device list from the last component to the first; class 12 whose property 0x200 is the hit's node"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1005b2f0"
+kind = "function"
+name = "IBuilding slot 6: lock a door (bit 1 of +0x58, value +0x60; value 0 opens it) or unlock; no caller found"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1005a1ca"
+kind = "site"
+name = "door proximity: a door whose lock bit is set and value 1 is passed over"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10059de9"
+kind = "site"
+name = "pod zone: the sphere's radius times 0.8 across the ground"
+read = true
+doc = "docs/27-ownership.md"
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10005bb9"
+kind = "site"
+name = "IAnimation slot 29: the node record's +0x18, its parent, into the answer's +0x14"
+read = true
+doc = "docs/27-ownership.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1005860d"
+kind = "site"
+name = "computer filing: the answer's +0x14 and the building kept at record +0x48"
+read = true
+doc = "docs/27-ownership.md"

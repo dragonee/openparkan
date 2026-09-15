@@ -8052,6 +8052,96 @@ def check_building_entry(check, game: Path) -> None:
           f"{min(outpost_floor):.2f}; no lightmap")
 
 
+def check_door_shot(check, game: Path) -> None:
+    """A shot opens a door; no door is locked; Mission 03's bunker door (docs/24)."""
+    paths = {n: game / n for n in ("Terrain.dll", "Control.dll")}
+    if not all(p.exists() for p in paths.values()) or not (game / "fortif.rlb").exists():
+        return
+    t_at = _image_at(paths["Terrain.dll"].read_bytes())
+    c_at = _image_at(paths["Control.dll"].read_bytes())
+    opener = c_at(0x1000EBE9, 0x98)
+    steps = (opener[0x0E:0x12] == bytes.fromhex("837f4c03")
+             and opener[0x1F:0x23] == bytes.fromhex("837e10fe")
+             and opener[0x25:0x28] == bytes.fromhex("395e14")
+             and opener[0x2C:0x34] == bytes.fromhex("ff500c8be84d3beb")
+             and opener[0x3D:0x43] == bytes.fromhex("ff502083f80c")
+             and opener[0x4D:0x52] == b"\x68\x00\x02\x00\x00"
+             and opener[0x56:0x59] == b"\xff\x50\x18"
+             and opener[0x61:0x66] == bytes.fromhex("8b4e103bc1")
+             and opener[0x68:0x6D] == bytes.fromhex("4d3beb75c9")
+             and opener[0x82:0x87] == b"\xba\x17\x00\x00\x00"
+             and opener[0x95:0x98] == b"\xff\x51\x38")
+    open_door = (t_at(0x1005B493, 5) == bytes.fromhex("837c025002")
+                 and t_at(0x1005B4A6, 5) == bytes.fromhex("837c025000")
+                 and t_at(0x1005B4DD, 8) == bytes.fromhex("c744085003000000")
+                 and _calls(t_at, 0x1005B612, 6) == [(0x1005B612, 0x1005B480)])
+    lock = (struct.unpack("<I", t_at(0x1009B52C + 4 * 6, 4))[0] == 0x1005B2F0
+            and t_at(0x1005B32C, 2) == b"\x0c\x01"
+            and t_at(0x1005B344, 4) == bytes.fromhex("89441160")
+            and t_at(0x1005A1CA, 3) == bytes.fromhex("83e201")
+            and t_at(0x1005A1DD, 5) == bytes.fromhex("837c026001"))
+    queries = slot6 = 0
+    for binary in sorted(game.glob("*.dll")) + [game / "iron_3d.exe"]:
+        data = binary.read_bytes()
+        i = data.find(b"\xba\x17\x00\x00\x00")
+        while i >= 0:
+            queries += 1
+            window = data[i:i + 0x80]
+            slot6 += sum(1 for k in range(len(window) - 2) if window[k] == 0xFF
+                         and 0x50 <= window[k + 1] <= 0x57 and window[k + 2] == 0x18)
+            i = data.find(b"\xba\x17\x00\x00\x00", i + 1)
+    check("Control.dll: a hit that names a building's door node opens that door",
+          steps and open_door and lock and queries == 25 and slot6 == 0,
+          "ILifeSystem slot 8 (0x1000ebc0), for an agent of kind 3 and a hit with an object, "
+          "a node not -2 and a batch not -1, walks the device list from the last component to "
+          "the first, takes the first of class 12 whose property 0x200 is the hit's node, and "
+          "hands it to IBuilding slot 14 (0x1000ec7e); 0x1005b480 switches a shut (0) or "
+          "closing (2) door's item on and sets it opening (3), with no hold, clan or lock test; "
+          f"the lock, IBuilding slot 6 (0x1005b2f0, bit 1 of +0x58 and +0x60), is called "
+          f"through none of the {queries} interface-0x17 queries in the install's binaries "
+          f"({slot6} slot-6 calls within 0x80 bytes), so the proximity opener's lock test "
+          f"(0x1005a1ca) never skips a door")
+
+    names = frozenset(p.name.lower() for p in all_archives(game))
+    fortif = NResArchive.open(game / "fortif.rlb")
+    entries = {e.name.lower(): e for e in fortif}
+    doors = matched = 0
+    for name in sorted(entries):
+        if not name.endswith(".ctl"):
+            continue
+        ctl = control.parse(fortif.read(entries[name]), names)
+        for comp in ctl.components:
+            if comp.type_id == control.DOOR_TYPE:
+                doors += 1
+                matched += {ctl.channels[k].node for k in comp.entries} == {comp.node}
+    ctl = control.parse(fortif.read(entries["fr_l_bunker.ctl"]), names)
+    bunker = objmesh.parse(fortif.read(entries["fr_l_bunker.msh"]), "fr_l_bunker.msh")
+    found = [(i, c) for i, c in enumerate(ctl.components) if c.type_id == control.DOOR_TYPE]
+    index, door = found[0]
+    channel = ctl.channels[door.entries[0]]
+    low, high = bunker.pose_at(channel.node, 0.0)[0][2], bunker.pose_at(channel.node, 1.0)[0][2]
+    tris = _posed_level0(bunker)
+    rest = [t for n, ts in tris.items() if n != channel.node for t in ts]
+    top = max(_walkable_heights(rest, 0.0, -35.0))
+    foot = max(h for h in _walkable_heights(rest, 0.0, -3.0) if h < 0)
+    slot = bunker.slots[bunker.nodes[channel.node].hit_slot()]
+    centre = objmesh.apply(bunker.world_pose(channel.node), slot.sphere[:3])
+    step = [h for h in _walkable_heights(rest, 0.0, -6.0) if h < 0][0]
+    reach = math.dist((0.0, -6.0, step + 1.62), centre)
+    check("fortif.rlb: every door sits on its channel's node; the Small Bunker's door",
+          doors == 56 and matched == doors and len(found) == 1 and index == 3
+          and channel.node == 9 and math.isclose(channel.rate, 0.25, abs_tol=1e-6)
+          and abs(low - 2.87) < 0.01 and abs(high + 2.89) < 0.01
+          and abs(top - 3.47) < 0.01 and abs(foot + 5.56) < 0.01
+          and abs(slot.sphere[3] - 5.70) < 0.01 and abs(reach - 4.89) < 0.01,
+          f"{matched}/{doors} door components' node is the node their channel plays; "
+          f"fr_l_bunker has one door, component {index} on node {channel.node}, rate "
+          f"{channel.rate:g}, its node at z {low:.2f} at value 0 and {high:.2f} at 1; the "
+          f"ramp before it falls from z {top:.2f} at y -35 to {foot:.2f} at y -3; the door's "
+          f"slot sphere has radius {slot.sphere[3]:.2f}, and a hero's centre on the ramp at "
+          f"y -6 is {reach:.2f} from its centre")
+
+
 def _sphere_union(spheres):
     """The smallest sphere holding two or more spheres, grown one at a time:
     ((x, y, z), r)."""
@@ -18534,7 +18624,8 @@ def run(game: Path) -> int:
         check_motion, check_playback, check_ground, check_sensors, check_hit_test,
         check_collision, check_lake_and_buoys,
         check_combat, check_ownership,
-        check_capture, check_building_entry, check_pod_zone, check_building_lighting,
+        check_capture, check_building_entry, check_pod_zone, check_door_shot,
+        check_building_lighting,
         check_building_ground,
         check_building_route,
         check_repair,

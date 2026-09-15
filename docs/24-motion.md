@@ -1098,7 +1098,8 @@ state, the time it opened, a lock flag and value, and a hold.
   (`AniMesh.dll:0x1000dd13`–`0x1000dd46`). A shut, opening or closing door
   pushes like a wall, from wherever its channel has moved its node.
 - **Two more openers:** a hit struck on a door's node opens it
-  (`Control.dll:0x1000ec7e`), and a hall-way link opens the doors listed on it
+  (`Control.dll:0x1000ec7e`, [below](#a-shot-opens-a-door--read-and-seen)),
+  and a hall-way link opens the doors listed on it
   (`ArealMap.dll:0x1000b170`), which is how a unit routed through a building
   gets through.
 
@@ -1168,6 +1169,78 @@ nothing. Inside the Outpost, at 334–338 s, it is captured the same way.
    the player's own clan it only opens it.
 6. Leaving is walking out: a door ahead opens as the unit nears it, and once a
    landscape face is nearer the unit is the landscape's again.
+
+#### A shot opens a door — *read*, and *seen*
+
+**The hit's opener** (`Control.dll:0x1000ebc0`, `ILifeSystem` slot 8, *read*)
+runs before the hit's kind is looked at
+([26-damage.md](26-damage.md#a-hit-from-the-round-to-the-node--read)):
+
+1. **The object hit must be a building.** Its agent kind (`+0x50`) must be 3
+   (`0x1000ebf7`), and it must have a device list (`+0x38`).
+2. **The hit must name a node.** It needs an object (`+0xc`), a node that is
+   not a shield sector's −2, and a batch (`+0x14`) that is not −1
+   (`0x1000ec01`–`0x1000ec11`).
+3. **It looks for a door on that node.** It walks the components from the last
+   to the first (`0x1000ec13`–`0x1000ec54`). For each of class 12 it asks
+   property `0x200` and stops at the first whose answer is the hit's node.
+   Every door component's node is the node its channel plays: 56 of 56 in
+   `fortif.rlb` (*measured*).
+4. **It opens that door** through `IBuilding` slot 14 (`0x1000ec7e` →
+   `Terrain.dll:0x1005b5d0`). Slot 10 turns the component into its door, and
+   `0x1005b480` runs. A door that is shut (state 0) or closing (2) has its item
+   switched on and becomes opening (3). An opening or open door is left as it
+   is.
+
+The hit then does its damage like any other.
+
+*Derived* from those steps:
+- **Nothing else is asked.** No clan, no hold, no lock: a shot opens any
+  building's door, whoever fires. Nothing holds a door a shot opened, so it
+  closes 5 s after it has opened unless a child near it holds it
+  ([above](#walking-into-a-building--read-and-measured)).
+- **Any hit that names a node** opens a door: a direct hit, and a blast's,
+  which carries the struck face's node. A blast's hit reaches every building
+  in range with the same node number, and only the number is compared. A
+  nearby building with a door on that node index would open too; this is not
+  seen.
+
+**No door is locked in play** (*read*, as a search). `IBuilding` slot 6
+(`0x1005b2f0`) locks a door: bit 1 of its `+0x58` and a value at `+0x60`, where
+a value of 0 opens it at once. It is the only code that sets that bit. It has
+no direct caller. Within 0x80 bytes after each of the 25 `IBuilding` queries
+(interface `0x17`) in the install's DLLs and executable, no call goes through slot 6.
+So the proximity opener's lock test (`0x1005a1ca`) never passes a door over.
+That opener tests no clan either (`0x10059f40`): a neutral building's door
+opens for a hero on its floor as the hero's own does.
+
+**Mission 03's Small Bunker**, `fr_l_bunker` (*measured*, in model space):
+- **The door.** One door, `i03`, node 9, component 3, with rate 0.25. It opens in
+  4 s, and the building sees it open at 3.6 s. Its channel lowers the node
+  from z 2.87 to −2.89, the door's own 5.76 m, into the floor.
+- **The ramp.** The door (y −2.5 to 0.3) stands at the foot of the building's
+  own ramp. The ramp falls from z 3.47 at y −35 to −5.56 at y −3, and lies
+  below the landscape under it from about y −18 on. So a walker coming down
+  it stands on the bunker's faces, the bunker's child.
+- **The reach.** The door's slot sphere has centre (−0.22, −1.11, −2.83) and
+  radius 5.70. On the ramp at y −6, a hero's centre is 4.9 from it, well inside
+  2.01 + 5.70, the stand-in for the capsule. So walking down should open the
+  door with no shot (*derived*).
+
+**Against the recording** (*seen*, 5 fps from 164.4 s):
+- 164.4–166.6 s: the hero walks down the ramp toward the closed door, which is
+  dark with hazard stripes along its foot.
+- 166.8 s: the battle laser's beam strikes the middle of the door.
+- 167.2 s: a lit gap opens under the door's top edge, and widens as the edge
+  drops.
+- 171.5 s: the hero is in the corridor inside.
+
+The shot and the approach come together, so the recording cannot tell which
+opened the door. Both fit: the door began to move within 0.4 s of the beam, and
+the hero was through inside 4.7 s, as a 4 s door allows.
+
+**For an engine**: when a hit on a building names a node, open the first door on
+that node as proximity would, with no hold. Gate neither opener by clan.
 
 ### The ground inside a building — *read* in part, and *measured*
 
