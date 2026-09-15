@@ -17676,6 +17676,176 @@ def check_commander_panel(check, game: Path) -> None:
           f"{sorted(hex(k) for k, v in derived.items() if v)} as the recording shows")
 
 
+def check_placement(check, game: Path) -> None:
+    """Placing a building from the command view, and the builder's task that puts it up."""
+    paths = [game / name for name in ("iron3d.dll", "Behavior.dll", "Terrain.dll")]
+    if not all(p.exists() for p in paths):
+        return
+    images = [p.read_bytes() for p in paths]
+    iron, beh, ter = (_image_at(image) for image in images)
+
+    def ptr(va: int) -> bytes:
+        return struct.pack("<I", va)
+
+    def f32(at, va: int) -> float:
+        return struct.unpack("<f", at(va, 4))[0]
+
+    def cstring(at, va: int) -> str:
+        raw = at(va, 64)
+        return raw[:raw.index(b"\0")].decode("latin1")
+
+    # 1. the Build row, the pick, the order it gives
+    row = (iron(0x1007BA09, 10) == b"\xc7\x87\xb0\x00\x00\x00\x04\x00\x00\x80"
+           and iron(0x1007BAAE, 10) == b"\xc7\x87\xac\x00\x00\x00\x03\x00\x00\x00"
+           and iron(0x1007BAD5, 7) == b"\xc6\x87\xa8\x00\x00\x00\x01")
+    start = iron(0x10079E57, 29) == (
+        b"\x8b\x7e\x08\x33\xd2\x81\xff\x04\x00\x00\x80\x0f\x94\xc2"
+        b"\xb9\x08\x00\x00\x00\x8d\x54\x12\x04\x89\x15" + ptr(0x1010C388))
+    order = (iron(0x10079D45, 16)
+             == b"\xc7\x44\x24\x40\x07\x00\x00\x00\xc7\x44\x24\x4c\x06\x02\x00\x00"
+             and iron(0x10079D7D, 7) == b"\x8b\x94\x85\xec\x00\x00\x00"
+             and iron(0x10079D95, 2) == b"\x6a\x03" and iron(0x10079D9D, 3) == b"\xff\x50\x0c")
+    check("iron3d.dll: a Build row picks on the first builder, pick mode 6 a mine, 4 the rest",
+          row and start and order,
+          "0x1007ba09 writes the Type to +0xb0, kind 3 to +0xac, pending +0xa8; 0x10079e57 "
+          "sets 0x1010c388 to 6 for 0x80000004 else 4 and the cursor kind 8; the order is 7, "
+          "target 0x206 with the matrix from +0xec, insert mode 3")
+
+    # 2. the model: the Type's FORT record, and it is its scheme's first building's root part
+    model_name = ""
+    if iron(0x1003385A, 5) == b"\xb8" + ptr(0x101038E4):
+        model_name = cstring(iron, 0x101038E4)
+    ghosts = {0x80000004: 0x101038E4, 0x80000008: 0x101038F0, 0x80000010: 0x101038D8,
+              0x80000040: 0x101038C0, 0x80000400: 0x101038CC, 0x80010000: 0x101038B4,
+              0x80020000: 0x1010389C, 0x80040000: 0x101038A8, 0x80100000: 0x10103890,
+              0x80200000: 0x10103884}
+    code = iron(0x10033830, 0x98)
+    library = objects.ObjectLibrary(game / "objects.rlb")
+    by_type = {s.type: s for s in controls.build_schemes(game)}
+    matches = []
+    for kind, va in ghosts.items():
+        name = cstring(iron, va)
+        record = library.get(name)
+        scheme = by_type.get(kind)
+        root = None
+        if scheme:
+            root = objects.load_unit(game / scheme.members[0].replace("\\", "/")).components[0]
+        matches.append(ptr(va) in code and record is not None and record.tag == "FORT"
+                       and root is not None and root.ref.member.lower() == name.lower()
+                       and record.slot_with_suffix("bas") is not None)
+    loads = (iron(0x10057F5E, 11) == b"\x6a\x00\x50\x68" + ptr(0x10104138) + b"\x6a\x03\xe8"
+             and cstring(iron, 0x10104138) == "objects.rlb"
+             and iron(0x10057F33, 3) == b"\x89\x75\x54")
+    check("iron3d.dll, BuildDat.lst: the placement model is the Type's scheme's first root part",
+          all(matches) and len(matches) == 10 and loads and model_name == "fr_l_mine",
+          f"0x10033830 names {len(matches)} FORT records, each the root of its scheme's first .dat "
+          f"(Mine -> {model_name}), loaded as CreateObject class 3 (0x10057f68); yaw zeroed "
+          f"(0x10057f33)")
+
+    # 3. its colour by IsPlacementValid's answer; a mine needs a found lode within 20
+    colour = (iron(0x10058234, 5) == b"\xba\x02\x01\x00\x00"
+              and iron(0x10058249, 5) == b"\xbb\x00\xff\xff\xff"
+              and iron(0x10058254, 5) == b"\xbb\x00\xff\x00\xff"
+              and iron(0x1005825F, 5) == b"\xbb\x00\x00\xff\xff"
+              and iron(0x10058268, 9) == b"\x83\x3d" + ptr(0x1010C388) + b"\x06\x75\x31"
+              and iron(0x10072F07, 5) == b"\x68\x00\x00\xa0\x41"
+              and iron(0x10072F27, 6) == b"\x83\xf8\xff\x0f\x95\xc1"
+              and iron(0x10081BE3, 4) == b"\xd8\x5c\x24\x18"
+              and iron(0x10081CD1, 5) == b"\x68\x00\x00\xa0\x42")
+    drawn = iron(0x10035FB3, 40) == (
+        b"\x8b\x16\x6a\x00\x6a\x1c\x56\xff\x52\x0c\x8b\x06\x6a\x00\x6a\x07"
+        b"\x56\xff\x50\x0c\x8b\x0e\x6a\x01\x6a\x0e\x56\xff\x51\x0c\x8b\x16"
+        b"\x6a\x08\x6a\x17\x56\xff\x52\x0c")
+    only = (iron(0x10033D29, 6) == b"\xff\x91\x98\x00\x00\x00"
+            and iron(0x10033D66, 6) == b"\xff\x90\x98\x00\x00\x00")
+    check("iron3d.dll: the model is red, green or yellow by message 0x102; a mine needs a lode",
+          colour and drawn and only,
+          "0x10058239 asks 0x102: 0 red 0xffff0000, 1 green 0xff00ff00, 2 yellow; pick mode 6 "
+          "wants a found lode within 20 (0x10072f00); the plume hides within 80 of a building "
+          "(0x10081cd1); drawn with FOGENABLE 0, ZENABLE 0, ZWRITEENABLE 1, ZFUNC 8")
+
+    # 4. IsPlacementValid: MBehaviour's slot 38, its limits and verdicts
+    slot = beh(0x100592E8, 4) == ptr(0x1000B9E0)
+    limits = (beh(0x1000BA63, 8) == b"\xc7\x44\x24\x4c" + struct.pack("<f", 0.88)
+              and beh(0x1000BA6D, 8) == b"\xc7\x44\x24\x4c" + struct.pack("<f", 0.8)
+              and beh(0x1000BDD9, 6) == b"\xd8\x05" + ptr(0x10059608)
+              and f32(beh, 0x10059608) == 5.0 and f32(ter, 0x1009B6B8) == 5.0
+              and ter(0x1005BD47, 6) == b"\xd8\x05" + ptr(0x1009B6B8)
+              and beh(0x1000BAE9, 5) == b"\x68\x07\x02\x00\x00"
+              and beh(0x1000BAF4, 3) == b"\x83\x38\x01")
+    verdicts = {va: cstring(beh, text) for va, text in (
+        (0x1000BD2F, 0x1005E9E4), (0x1000C0FE, 0x1005EA38), (0x1000C134, 0x1005EAD8),
+        (0x1000C168, 0x1005EAE8)) if beh(va, 5) == b"\x68" + ptr(text)}
+    basement = (ter(0x10014C7A, 5) == b"\xba" + ptr(0x100A0BA8)
+                and cstring(ter, 0x100A0BA8) == "CLandscape::CheckMaxBasementAngle()"
+                and ter(0x1001509C, 5) == b"\x68" + ptr(0x1000DA20)
+                and ter(0x1000DDEA, 6) == b"\xd8\x1d" + ptr(0x100A58F0)
+                and beh(0x1000C128, 3) == b"\xff\x53\x20")
+    check("Behavior.dll: IsPlacementValid is slot 38; slope 0.88 with a builder, 0.8 without",
+          slot and limits and basement
+          and sorted(verdicts.values()) == ["Intersects with Boundary",
+                                            "IsPlacementValid(): BAD PATH",
+                                            "Place OK", "Ugly Basement"],
+          f"0x1000b9e0: acos 0.88 = {math.degrees(math.acos(0.88)):.1f} deg, "
+          f"acos 0.8 = {math.degrees(math.acos(0.8)):.1f} deg; radius slot 16 + 5 + 5; "
+          f"verdicts {sorted(verdicts.values())}; the smallest basement face normal z "
+          f"(Terrain.dll:0x1000da20)")
+
+    # 5. turning, clicking, cancelling
+    step = f32(iron, 0x100E50A4)
+    turn = (iron(0x100722C6, 6) == b"\x8d\x83\x1e\xfd\xff\xff"
+            and iron(0x100725C5, 12)
+            == b"\xd9\x05" + ptr(0x1010B594) + b"\xd8\x05" + ptr(0x100E50A4)
+            and iron(0x100725FA, 12)
+            == b"\xd9\x05" + ptr(0x1010B594) + b"\xd8\x25" + ptr(0x100E50A4))
+    strings = resources.strings(images[0])
+    roles = {d.role: d.bindings for d in resources.descriptors(game / "ui" / "game_resources.cfg")}
+    click = (iron(0x1008FEFB, 7) == b"\x83\x3d" + ptr(0x10104148) + b"\x08"
+             and iron(0x1008FF35, 6) == b"\x88\x99\x31\x01\x00\x00"
+             and iron(0x1008FF42, 18) == b"\x81\xc7\xec\x00\x00\x00\xb9\x10\x00\x00\x00\xbe"
+             + ptr(0x1010B554) + b"\xf3\xa5"
+             and iron(0x1008FE08, 5) == b"\x68\x3f\x18\x00\x00"
+             and iron(0x10062FF7, 7) == b"\x83\x3d" + ptr(0x10104148) + b"\x08"
+             and iron(0x10070ED1, 7) == b"\x83\x3d" + ptr(0x10104148) + b"\x08"
+             and iron(0x100E64A8, 4) == ptr(0x100716B0))
+    check("iron3d.dll: , and . turn the model 0.05 rad; a click places, the right button cancels",
+          turn and click and abs(step - 0.05) < 1e-7
+          and strings.get(6207) == "Building was cancelled by user"
+          and roles.get("voices", {}).get("VOICE_POINT_LAND") == "vc_003.wav"
+          and cstring(iron, 0x101041C8) == "VOICE_POINT_LAND",
+          f"741/742 add/subtract {step:.2f} (0x100e50a4); 0x1008ff35 sets +0x131 and copies the "
+          f"matrix to +0xec; string 6207 {strings.get(6207)!r}; a missed pick says "
+          f"VOICE_POINT_LAND = {roles.get('voices', {}).get('VOICE_POINT_LAND')}")
+
+    # 6. the builder's task: walk to the origin, create on arrival, end
+    task = (beh(0x10028B96, 5) == b"\xe8" + struct.pack("<i", 0x10029420 - 0x10028B9B)
+            and beh(0x10028E89, 11) == b"\x2b\x86\x28\x01\x00\x00\x3d\xe8\x03\x00\x00"
+            and beh(0x10028E9C, 5) == b"\xe8" + struct.pack("<i", 0x10029240 - 0x10028EA1)
+            and beh(0x10028ED7, 5) == b"\x68" + ptr(0x100614BC)
+            and cstring(beh, 0x100614BC) == "BuildTask is over"
+            and beh(0x10029286, 5) == b"\xe8" + struct.pack("<i", 0x1001D440 - 0x1002928B)
+            and beh(0x10029318, 18)
+            == b"\xd9\x86\xec\x00\x00\x00\xd9\x86\xfc\x00\x00\x00\xd9\x86\x0c\x01\x00\x00"
+            and beh(0x10028F2A, 7) == b"\xc7\x46\x5c\x04\x00\x00\x00"
+            and beh(0x10028FF4, 7) == b"\x81\x7b\x60\x04\x00\x00\x80")
+    m03 = mission.load(game / "MISSIONS/CAMPAIGN/CAMPAIGN.00/Mission.03/data.tma")
+    builder = next(o for o in m03.objects if o.path.lower().endswith("tut3_b.dat"))
+    lodes = m03.lodes
+    lx, ly, _ = lodes[0].position
+    near = min(math.hypot(o.position[0] - lx, o.position[1] - ly)
+               for o in m03.objects if o.kind == mission.KIND_BUILDING)
+    reach = math.hypot(builder.position[0] - lx, builder.position[1] - ly)
+    ore = builder.properties.get("CurrentOre")
+    check("Behavior.dll, Mission 03: a builder walks to the origin, creates the building, stops",
+          task and len(lodes) == 1 and lodes[0].found and near > 80
+          and ore is not None and ore.value == 200.0,
+          f"GoToBuild walks to the matrix translation (0x10029318); 1000 ms past a zeroed +0x128 "
+          f"it creates (0x10029240) and logs 'BuildTask is over'; a mine goes straight to the "
+          f"site (0x10028ff4); Mission 03: 1 lode at ({lx:.1f}, {ly:.1f}), found, the nearest "
+          f"building {near:.1f} away, tut3_b {reach:.1f} from it holding "
+          f"{ore.value if ore else None}")
+
+
 def run(game: Path) -> int:
     """Run every check against ``game``.  Returns a process exit code."""
     results: list[tuple[str, bool, str]] = []
@@ -17709,7 +17879,7 @@ def run(game: Path) -> int:
         check_target_panel,
         check_wingman,
         check_boarding,
-        check_builder,
+        check_builder, check_placement,
         check_designs,
         check_units, check_loading, check_search, check_construction,
         check_controls, check_player_input, check_focus, check_turret_channels,

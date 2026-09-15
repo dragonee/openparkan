@@ -72,6 +72,215 @@ not a weapon to the behaviour code, and both builder tasks refuse to run
 without an intact one — a type-30 device whose value `0x400` is above zero
 (`0x10029420`, `0x10033250`).
 
+## Placing a building — *read*, *measured* and *seen*
+
+The player puts a building down from the command view: a Build row of the
+builders' page ([31-packages.md](31-packages.md#the-commanders-menus--measured-and-read)),
+then a full-size model under the cursor, red or green, turned with `<` and `>`
+(T03_H08), and a click. What the view, its camera and the cursor otherwise do is
+[40-command-mode.md](40-command-mode.md)'s; the page is
+[41-commander.md](41-commander.md)'s.
+
+### The Build row starts a pick on the first builder
+
+The HQ executor (`iron3d.dll:0x1007b740`) gathers the selected records of the
+player's clan (`0x10076e70`, which answers nothing once the game's state word
+`+8` is not 4). For rows 10–16 it writes a pending pick into the **first**
+record only (`0x1007ba09`–`0x1007bad5`), a small block at the record's `+0xa8`:
+
+| offset | holds |
+|---|---|
+| `+0xa8` | pending, 1 |
+| `+0xac` | the pick's kind: 1 Route, 3 build, 4 Guard, 5 Capture building |
+| `+0xb0` | the building Type: `…04` mine, `…08` storage, `…10` plant, `…40` Outpost, `…400` institute, `0x80100000` light tower, `0x80200000` heavy tower |
+| `+0xb8` | 0 (the stage) |
+| `+0xbc` | the record itself |
+
+The record's takt runs a pending block (`0x10075d1b` → `0x10079700`, a switch
+on the kind); the build kind is `0x10079c40`, in two stages:
+
+1. **Start** (`0x10079e57`). The game's pick mode `0x1010c388` becomes **6 for a
+   mine and 4 for any other building**; the cursor kind `0x10104148` becomes 8,
+   the model (`0x100571a0`), under which the commander panel draws only its
+   resource rows ([41-commander.md](41-commander.md)); the model is made for the
+   Type (`0x10057f00`); the record's placed byte `+0x131` is cleared.
+2. **Waiting** for `+0x131`. When it is set (the click, below) the model goes, the
+   cursor kind becomes 2, and the builder is given its order: `ORDER_ROBOT_BUILD`
+   (7), the Type as its parameter, target kind `0x206` with the 4 × 4 placement
+   matrix copied from the record's `+0xec` (`0x10079d45`–`0x10079d8d`), through the
+   record's `+0x44` slot 3 with **insert mode 3, replacing** (`0x10079d95`). A
+   player's unit then acknowledges with a voice as the wingman menu's orders do
+   ([31-packages.md](31-packages.md#the-wingman-menu-from-first-person--read-and-measured)).
+
+### The model under the cursor
+
+**Which model** (`0x10033830`). The Type picks a `FORT` record of `objects.rlb`,
+and `World3D.dll!CreateObject` class 3, a building, loads it
+(`0x10057f68`): `fr_l_mine`, `fr_l_store`, `fr_l_plant`, `fr_l_angar`,
+`fr_l_inst`, `fr_l_towL`, `fr_l_towH`, and for the bunkers `fr_l_bunker`,
+`fr_m_bunker`, `fr_b_bunker`. *Measured*: each is the root part of its scheme's
+first `.dat` in `BuildDat.lst` (`smine01.dat`'s root is `fr_l_mine`, and so on),
+a `FORT` record whose first slot is the building's agent and whose second is its
+`.bas`. So the model is the bare building the builder will put up, without its
+batteries, shields and guns. The object is told message `0x101` as it is made,
+and `0x103` before it is deleted (below).
+
+**Where it stands** (`0x10058020`, run by the cursor's draw each frame while the
+cursor kind is 8, `0x100585b0`):
+- **The pick.** A ray from the camera through the cursor
+  (`0x10035e40`) goes into `Terrain.dll!GetWorld`'s segment query, slot 7
+  ([29-weapons.md](29-weapons.md#where-the-round-leaves-and-which-way)), with a
+  query record of its own whose first word is `0xa` (`0x10035e82`); what that
+  record asks for is not established. The hit counts only strictly inside the
+  map, a margin of 0.001 of its size in from each side.
+- **A pick that misses** leaves the model where it was. The first miss after a
+  hit says `VOICE_POINT_LAND` (`vc_003.wav`, *measured*) when the sound server's
+  slot 10 answers true (`0x10058340`), and a miss as the model is made says it
+  too.
+- **A hit** places the model at the hit point, turned about z by its yaw (`+0x54`
+  of the model's object `0x1010b540`): the matrix is `Rz(yaw)` with the hit as its
+  translation (`0x1005810d`), counter-clockwise from +x for a positive yaw.
+- **The yaw starts at 0** each time a model is made (`0x10057f33`).
+
+**Its colour.** With a selection, the model object's behaviour is asked message
+`0x102` with the first selected record's logic id (`0x10033d10`, below), and the
+answer colours it (`0x10058239`–`0x10058264`):
+
+| answer | colour | placeable (`0x1010b598`) |
+|---|---|---|
+| 0 | `0xffff0000`, red | no |
+| 1 | `0xff00ff00`, green | yes |
+| 2 | `0xffffff00`, yellow | yes |
+| no selection | `0xff000000`, black | no |
+
+In pick mode 6 a **mine off a lode** is red whatever the answer
+(`0x10058268`, below). The query returns only 0 or 1 (below), so the model is
+red or green. When the game's `+0xe4` byte is set (`0x10033d36`, not followed),
+an answer of 1 or 2 also turns to 0 within 400 across the ground of any of the
+level's `+0x728` records (`0x10033d80`).
+
+**How it is drawn** (`0x10035f50`): in one flat colour, its red, green and blue
+each 1 or 0 by the colour word's bytes, with alpha 1. The camera is put in mode
+2 and handed the colour through slot 30, as the HUD panels draw their unit
+([35-hud.md](35-hud.md#the-unit-in-the-middle--read-and-seen)), and the model is
+drawn through its interface `0x18` slot 11 with flags `0x5f0`. For the draw fog
+is off and the depth test is off (`D3DRS_FOGENABLE` 0, `ZENABLE` 0,
+`ZWRITEENABLE` 1, `ZFUNC` 8, always; the four put back after). So it shows whole
+over whatever stands in front of it. *Seen*, at
+183–184 s in the recording of *The Field Base*: a solid red silhouette of the
+mine, then a solid green one.
+
+### The test: `IsPlacementValid` — *read*
+
+Message `0x102` is `MBehaviour`'s `IAgent` slot 38 (`Behavior.dll:0x1000b9e0`,
+vtable `0x100592e8`), which logs itself as `IsPlacementValid()`. Message `0x101`
+starts `CLandscape::StartCheckMaxBasementAngle` for the model and `0x103`
+stops it (`0x1000ba17`, `0x1000ba45`). For the query:
+1. **The slope limit** is 0.88 when a builder is named and 0.8 without one
+   (`0x1000ba63`, `0x1000ba6d`).
+2. **The sphere.** The model's `IBuilding` slot 16 (`Terrain.dll:0x1005b680`)
+   gives the middle of its outer contour's box and the contour's farthest
+   point from there + 5; the query adds 5 more (`0x1000bdd9`).
+3. **The path.** With a builder named, unless its chassis type (variable
+   `0x207`) is 1, a flyer (`0x1000baf4`), the builder's position and the model's
+   are looked up (`0x100366b0`, `0x10043220`) and a path is searched between them
+   (`0x10020910`). A search that fails or comes back empty: *"BAD PATH"*, 0.
+4. **The map.** The sphere must lie strictly inside the world box
+   (`MBehaviour+0x690`) in x and y: else *"Intersects with Boundary"*, 0.
+5. **Other buildings.** For every other building (the world's class-3 objects),
+   the distance between the two spheres' centres across the ground must be at
+   least the model's radius plus the other's (slot 16 again): else *"Intersects
+   with …"*, 0 (`0x1000be44`–`0x1000bf21`).
+6. **Its vertices.** Each vertex of the model's interface `0x303` whose flag word
+   has bit 1 must fall on an areal of `GetSystemArealMap`'s map whose record's
+   `+0x20` is set: else *"HallVertex …"*, 0 (`0x1000bf4a`–`0x1000bfa9`). That
+   `0x303` is the hall way, and what bit 1 marks, are *guesses*.
+7. **The basement** (`CLandscape::CheckMaxBasementAngle`, `Terrain.dll:0x10014c60`,
+   through `+0x40` slot 8 at `0x1000c128`). Each outer-contour vertex is dropped
+   onto the landscape; every inner-contour vertex is set to the mean of those
+   heights; and every face of the basement triangulated between the two rings
+   (`StartCheckMaxBasementAngle`'s) has its normal taken
+   (`0x1000da20`). The smallest normal z must be at least the slope limit: else
+   *"Ugly Basement"*, 0. So no basement face may be steeper than 28.4° with a
+   builder (acos 0.88), 36.9° without.
+8. Otherwise *"Place OK"*, 1.
+
+**The query is the model's alone** (*read*, with a byte search). Its only
+callers are `iron3d.dll`'s wrapper `0x10033d10` (`0x10033d29`, `0x10033d66`),
+which only the model's class calls. `ai.dll`, `ArealMap.dll`, `Behavior.dll` and
+`World3D.dll` make no call through `+0x98` at all. So an AI builder's site is not
+put to this test, and `CreateObjectFromScheme` refuses only a sphere that meets
+another building's ([Building a building](#building-a-building--read)).
+
+### A mine must stand on a lode
+
+In pick mode 6 the model's position, rounded to whole units, goes to
+`0x10072f00`, which asks the lode list (`0x10081ba0`) for **a lode already found
+within 20 across the ground**, strictly nearer (`0x10072f07`, `0x10081bee`). With
+none the mine is red. The lode's amount, and whether the Search minerals order has
+found it, are
+[31-packages.md](31-packages.md#mineral-lodes--read-and-measured)'s.
+
+**The plume** (`env_mineral`, [04-missions.md](04-missions.md)) shows only while
+no building stands within 80 of its lode: `0x10081c10` asks the level's building
+list (`0x100728e0`, any clan, strictly nearer) before drawing each
+(`0x10081cd1`). *Seen*: the plume over *The Field Base*'s lode is there at 194.5 s
+and gone at 195.0 s, as the mine appears beside it (below).
+
+### Turning it
+
+`CMD_JAMES_BASE_ROTLEFT` (741, `,`) adds **0.05 rad** to the yaw and
+`CMD_JAMES_BASE_ROTRIGHT` (742, `.`) takes 0.05 away (`0x100725a7`,
+`0x100725dc`, the float at `0x100e50a4`), but only while the view state word
+(`+0x710`) is 2 and the pick mode is 4 or 6
+([40-command-mode.md](40-command-mode.md) reads the same, at `0x100725b2`).
+Whether a held key repeats the turn is not established. Seen from above, a
+positive yaw turns the model anticlockwise.
+
+### The click, and cancelling
+
+**The left button going down** (the input listener's slot 8, `0x100714d0` →
+`0x1008d690`) goes straight to the placement while the cursor kind is 8, over the
+panel or not (`0x1008d70b`). The placement (`0x1008fe80`):
+- **on a placeable site** sets `+0x131` on every selected record and copies the
+  model's matrix into each one's `+0xec`, and ends the pick mode
+  (`0x1008ff2d`–`0x1008ff66`). Only the record holding the pending build acts on
+  it, so **only the first selected builder builds**;
+- **on a red site** does nothing: the model stays under the cursor.
+
+**Cancelling.** The right button's handler (`0x1008fb00`), in pick mode 4 or 6,
+deletes the model, sets the cursor kind to 1, ends the pick mode and shows string
+6207, *"Building was cancelled by user"* (*measured*), as a System line
+(`0x1008fdaf`–`0x1008fe33`,
+[35-hud.md](35-hud.md#the-message-box--read-and-measured)). It is called:
+- by **the right button going down** (listener slot 10, `0x100716b0`), outside
+  the first-person views and a building's screen;
+- by **Esc** in the character handler (`0x10070ed1`), while the cursor is the
+  model, after the objectives screen and the like have had it;
+- by **`CMD_ROLLBACK_STATE`** (735, bound to Esc) while the cursor is the model,
+  before it rolls the view mode back (`0x10062ff7`).
+
+The pending block keeps waiting after a cancel with nothing to set its `+0x131`;
+the next Build row writes a new one (*derived*).
+
+### For an engine
+
+1. A Build row puts the first selected builder into a placement for the row's
+   Type. Pick mode 6 for a mine, 4 for the others.
+2. Load the Type's `fr_*` `FORT` record (the scheme's first `.dat` root) as the
+   model. Yaw 0.
+3. Each frame: cast the cursor ray into the world. On a hit inside the map, place
+   the model at the hit, turned by the yaw. Colour it by the test: green when
+   `IsPlacementValid` passes for the first selected builder and, for a mine, a
+   found lode lies within 20; red otherwise. Draw it in that flat colour, unlit,
+   unfogged and over everything.
+4. `,` and `.` turn it by ±0.05 rad a key-down.
+5. A left click on a green site gives the builder `ORDER_ROBOT_BUILD` with the
+   Type and the model's matrix, replacing its orders, and ends the placement. A
+   click on red does nothing.
+6. The right button, or Esc, cancels: *"Building was cancelled by user"*.
+7. Hide a lode's plume while any building stands within 80 of it.
+
 ## Building a building — *read*
 
 `ORDER_ROBOT_BUILD` (7) makes `M_Task_Build` (vtable `0x10059c60`). Its target
@@ -175,6 +384,78 @@ Following each result finds reads of 34 of the block's fields and none of its
 
 **The menu's build and upgrade rows need an intact beam too**
 (`iron3d.dll:0x10076da0`, [31-packages.md](31-packages.md#the-commanders-menus--measured-and-read)).
+
+### Building a building, tick by tick — *read*, and *seen*
+
+For the order a placement gives, target kind `0x206`:
+
+1. **The target** (`SetTarget`, `0x100285f0`) is the placement matrix, copied to
+   the task's `+0xe0`. A `0x202` place becomes an unturned matrix at the place,
+   at the ground's height there (`0x100146b0`).
+2. **The start** (`0x10028800`) reads the Type's first scheme `.dat` and sums its
+   parts' ore. An unresearched part or an unreadable file ends the task with
+   *"Cannot build"*, telling the behaviour's world object message `0x102` (its
+   slot 51, `0x10028a03`). Otherwise the chooser (`0x10028ff0`) picks the first
+   state, and the go command sets off.
+3. **Each takt** (`0x10028b80`) first needs an intact beam (`0x10029420`); without
+   one the task ends. Then, by state (`+0x5c`):
+   - **3, GoToBuild.** The walk is to the matrix's translation, the building's
+     own origin (`0x10029318`), at the unit's top speed × `Build_SpeedPercent`,
+     1. When the walker reports its walk done (`0x1003dd80`), the state becomes 4.
+   - **4, Wait.** On the next takt, `now − +0x128 ≥ 1000 ms` holds
+     (`0x10028e89`), and the building is created (`0x10029240`):
+     `CreateObjectFromScheme` with the scheme, the matrix and the builder's clan.
+     A refusal tells the world object message `0x103` and logs *"CreateBuilding()
+     failed..."*. Either way the cost comes off the builder's ore, the log reads
+     *"BuildTask is over"*, and the takt answers 0: **the task ends there**.
+4. **The builder is left with no order**, standing inside the building's site.
+   The building's order 18 sends it out when the sphere's second phase clears the
+   area ([The construction sphere](#the-construction-sphere--read-and-measured)).
+
+**Mission 03's mine** (*measured*, and *derived*). `tut3_b`, an SWB-2 on the
+S-31 wheel chassis, carries 200 of its 2,000 ore and stands 85.3 from the
+mission's one lode, (1026.1, 942.7), which starts found. No building stands
+within 80 of that lode, so its plume shows. A mine goes straight to its site
+(`0x10028ff4`), and by the catalogue a small mine costs 540, so the builder is
+left owing 340.
+
+**Seen**, in the recording of *The Field Base* (960 × 720, 30 frames a second,
+frames taken every half second):
+
+| s | what shows |
+|---:|---|
+| 183–184 | the mine model, solid red, then green, under the cursor |
+| 185.0 | *SWB-2 Builder \[building\]* |
+| 194.5 | the lode's plume still up |
+| 195.0 | the plume gone |
+| 195.5 | a cyan glow at the site, the sign |
+| 196.0 | *SWB-2 Builder \[no order\]* |
+| 200.0 | *SWB-2 Builder \[escaping\]* |
+| 230.5 | *\[no order\]*; rings over the site |
+| 231.5–234.5 | the ray, with lightning, and the dome rising |
+| 235.0–236.5 | the blue dome over the site, fading at the end |
+| 237.0 | the Small Mine standing; the Ore row at 1% |
+
+Against the read sequence
+([above](#the-construction-sphere--read-and-measured)), with the building made
+between 194.5 and 195.0 s: the sign for 5 s, the clearing about 200 s, the
+dome's obstacle and then the ray, the dome and the kill from about 230 s, the ray
+stopped at about 235 s and the task done at about 236 s — each within the
+half-second sampling. The builder's own task ends as the building appears, and it
+walks out once the sign's phase ends. What the site shows of the unfinished mine
+before the dome was not made out: the recording's views of it are distant or
+behind the dome.
+
+**For an engine.**
+1. On a build order, walk the builder to the placement's origin at its top speed.
+2. On the takt after it arrives, create the scheme's first building at the
+   placement matrix for the builder's clan, take its ore cost from the builder
+   (going below zero), and end the builder's task.
+3. Give the building order 18, parameter 0: the 41 s sign, clearing, dome, ray
+   and kill of [the construction sphere](#the-construction-sphere--read-and-measured).
+   The builder goes out with everyone else when the clearing phase starts.
+4. Hide the lode's plume from the moment the building exists
+   ([A mine must stand on a lode](#a-mine-must-stand-on-a-lode)).
 
 ## Upgrading a building — *read*
 
@@ -417,3 +698,12 @@ laser (`e_gun_lc_03`, `e_gun_mc_20`).
   is no more than a takt's dig. Only the 500 dug comes off it, so no shipped
   lode runs out
   ([23-economy.md](23-economy.md#a-mine-digs-to-500-and-then-a-draw-does-not-empty-it--read)).
+- What the pick's query record (first word `0xa`, `iron3d.dll:0x10035e82`) asks
+  the world's segment query for, so which objects stop the cursor's ray.
+- That interface `0x303` is the hall way and what its vertex bit 1 marks, which
+  `IsPlacementValid` tests against the system areal map's `+0x20`.
+- What the game's `+0xe4` byte is (`0x10033d36`), under which a placement within
+  400 of one of the level's `+0x728` records turns red.
+- Whether holding `,` or `.` turns the model again on the key's repeats.
+- What the site shows of an unfinished building before the dome: the recording's
+  views of the mine are distant or behind it.

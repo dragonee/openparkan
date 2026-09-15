@@ -2892,14 +2892,6 @@ read = false
 
 [[entry]]
 module = "Terrain.dll"
-at = "0x10014c60"
-kind = "function"
-name = "CLandscape::CheckMaxBasementAngle"
-doc = "the binary's own assertion text"
-read = false
-
-[[entry]]
-module = "Terrain.dll"
 at = "0x100150f0"
 kind = "function"
 name = "CLandscape::StartCheckMaxBasementAngle"
@@ -25500,3 +25492,619 @@ kind = "function"
 name = "clan ArealMap slot 9: a contact's 40-byte record by logic id; units only"
 read = true
 doc = "docs/31-packages.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10014c60"
+kind = "function"
+name = "CLandscape::CheckMaxBasementAngle: outer contour dropped on the ground, inner at their mean, the basement faces' smallest normal z against a limit"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10076e70"
+kind = "function"
+name = "the selected records of the player's clan with a type mask; nothing unless the game's +8 is 4"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1007ba09"
+kind = "site"
+name = "HQ executor, Build rows: the building Type into the first record's +0xb0"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1007bad5"
+kind = "site"
+name = "HQ executor: the pending pick byte +0xa8 set, kind +0xac 3 for a build"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10075d1b"
+kind = "site"
+name = "record takt: runs a pending pick block (+0xa8) through 0x10079700"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10079700"
+kind = "function"
+name = "a record's pending pick: switch on its kind (+0xac) 1-5"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10079c40"
+kind = "function"
+name = "pending build pick: start the placement model, then order ORDER_ROBOT_BUILD once +0x131 is set"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10079e57"
+kind = "site"
+name = "build pick start: pick mode 0x1010c388 = 6 for a mine else 4, cursor kind 8, make the model"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10079d45"
+kind = "site"
+name = "build order packet: order 7, target 0x206, the matrix from the record's +0xec"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10079d95"
+kind = "site"
+name = "build order given with insert mode 3 through the record's +0x44 slot 3"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100571a0"
+kind = "function"
+name = "set the cursor kind 0x10104148 (8 = the placement model)"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10057f00"
+kind = "function"
+name = "placement model: CreateObject class 3 of the Type's FORT record, yaw 0, message 0x101"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10057f33"
+kind = "site"
+name = "placement model's yaw +0x54 zeroed"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10057f68"
+kind = "site"
+name = "CreateObject(3, objects.rlb, the Type's fr_* record)"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10033830"
+kind = "function"
+name = "building Type to its placement model's FORT name (fr_l_mine, ...)"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10058020"
+kind = "function"
+name = "placement model per frame: cursor pick, matrix Rz(yaw) at the hit, colour by message 0x102"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100585b0"
+kind = "function"
+name = "cursor draw by cursor kind; kind 8 runs the placement model"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10035e40"
+kind = "function"
+name = "cursor ray into GetWorld's segment query; a hit strictly inside the map by 0.001"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10035e82"
+kind = "site"
+name = "cursor pick query record's first word 0xa"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10058340"
+kind = "function"
+name = "a missed placement pick says VOICE_POINT_LAND once"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1005810d"
+kind = "site"
+name = "placement matrix: Rz of the model's yaw, the hit as translation"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10033d10"
+kind = "function"
+name = "ask an object's agent slot 0x98 (IsPlacementValid) with a record's logic id; network base-distance veto"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10033d80"
+kind = "function"
+name = "within 400 of one of the level's +0x728 records: refuse"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10033d36"
+kind = "site"
+name = "the base-distance veto only while the game's +0xe4 is set"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10033d29"
+kind = "site"
+name = "call agent slot 0x98 with the logic id"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10033d66"
+kind = "site"
+name = "call agent slot 0x98 with -1"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10058239"
+kind = "site"
+name = "placement colour by the answer: 0 red, 1 green, 2 yellow; placeable byte 0x1010b598"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10058264"
+kind = "site"
+name = "answer 0: red, not placeable"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10058268"
+kind = "site"
+name = "pick mode 6: a mine off a found lode is red"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10035f50"
+kind = "function"
+name = "draw an object in a flat colour: camera mode 2, fog, z test off, depth written"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10072f00"
+kind = "function"
+name = "a found lode within 20 of a point (for a mine's placement)"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10072f07"
+kind = "site"
+name = "push 20.0, the lode reach"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10081ba0"
+kind = "function"
+name = "the first found lode strictly within a distance across the ground, or -1"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10081bee"
+kind = "site"
+name = "lode search: skips a lode whose found word is 0"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100728e0"
+kind = "function"
+name = "the first building of the level within a distance across the ground"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10081cd1"
+kind = "site"
+name = "lode plume: hidden while a building stands within 80"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100725a7"
+kind = "site"
+name = "CMD_JAMES_BASE_ROTLEFT: model yaw + 0.05 in view state 2, pick mode 4 or 6"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100725dc"
+kind = "site"
+name = "CMD_JAMES_BASE_ROTRIGHT: model yaw - 0.05"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100725b2"
+kind = "site"
+name = "rotation only in pick mode 4 or 6"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100e50a4"
+kind = "datum"
+name = "0.05, the placement model's turn step"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100714d0"
+kind = "function"
+name = "input listener slot 8, a mouse button going down"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1008d70b"
+kind = "site"
+name = "cursor kind 8: the click goes to the placement over the panel or not"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1008fe80"
+kind = "function"
+name = "left click in the world: a placeable model sets +0x131 and the matrix on the selection"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1008ff2d"
+kind = "site"
+name = "placement click: +0x131 and +0xec on each selected record"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1008ff66"
+kind = "site"
+name = "placement click: pick mode ended"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1008fb00"
+kind = "function"
+name = "right button in the world: in pick mode 4 or 6 cancels the placement"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1008fdaf"
+kind = "site"
+name = "placement cancelled: model deleted, cursor kind 1, pick mode 0"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1008fe33"
+kind = "site"
+name = "string 6207 'Building was cancelled by user' as a System line"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100716b0"
+kind = "function"
+name = "input listener slot 10, the right button going down: cancels a placement"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10070ed1"
+kind = "site"
+name = "character handler Esc: cancels a placement while the cursor kind is 8"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10062ff7"
+kind = "site"
+name = "mode stack rollback: cancels a placement first while the cursor kind is 8"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10104148"
+kind = "datum"
+name = "the cursor kind (8 = placement model)"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1010b540"
+kind = "datum"
+name = "the placement model object"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1010b598"
+kind = "datum"
+name = "the placement model is placeable"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1000b9e0"
+kind = "function"
+name = "MBehaviour slot 38: messages 0x101/0x103 start/stop the basement check, else IsPlacementValid"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x100592e8"
+kind = "datum"
+name = "MBehaviour IAgent vtable slot 38"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1000ba17"
+kind = "site"
+name = "message 0x101: StartCheckMaxBasementAngle"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1000ba45"
+kind = "site"
+name = "message 0x103: StopCheckMaxBasementAngle"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1000ba63"
+kind = "site"
+name = "IsPlacementValid slope limit 0.88 with a builder"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1000ba6d"
+kind = "site"
+name = "IsPlacementValid slope limit 0.8 without"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1000baf4"
+kind = "site"
+name = "a flying builder (variable 0x207 = 1) skips the path test"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1000bdd9"
+kind = "site"
+name = "placement sphere radius + 5"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1000be44"
+kind = "site"
+name = "placement: other buildings' spheres must not overlap"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1000bf21"
+kind = "site"
+name = "placement: 'Intersects with' another building"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1000bf4a"
+kind = "site"
+name = "placement: each bit-1 vertex of interface 0x303 on a usable areal"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1000bfa9"
+kind = "site"
+name = "placement: vertex loop"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1000c128"
+kind = "site"
+name = "placement: CheckMaxBasementAngle against the slope limit, 'Ugly Basement'"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x100366b0"
+kind = "function"
+name = "a position's place on the navigation graph (for IsPlacementValid's path)"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10043220"
+kind = "function"
+name = "navigation graph node lookup (for IsPlacementValid's path)"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10020910"
+kind = "function"
+name = "path search between two graph nodes"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x100146b0"
+kind = "function"
+name = "ground height at x, y"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10028a03"
+kind = "site"
+name = "M_Task_Build start refused: message 0x102 to the world object"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10029318"
+kind = "site"
+name = "builder walks to the placement matrix's translation"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10028e89"
+kind = "site"
+name = "Wait: now - +0x128 >= 1000 ms, then CreateBuilding and 'BuildTask is over'"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10028ff4"
+kind = "site"
+name = "a mine (0x80000004) goes straight to the site"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1005b680"
+kind = "function"
+name = "CBuilding::GetConstructionSphere (IBuilding slot 16): outer contour box middle, farthest point + 5"
+doc = "docs/32-builder.md"
+read = true
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1000da20"
+kind = "function"
+name = "basement face callback: the smallest face normal z into 0x100a58f0"
+doc = "docs/32-builder.md"
+read = true
