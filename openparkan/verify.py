@@ -18596,6 +18596,245 @@ def check_commander_panel(check, game: Path) -> None:
           f"{sorted(hex(k) for k, v in derived.items() if v)} as the recording shows")
 
 
+#: tut4_pl.trf's starting categories: out of the tree, granted, open.
+M04_TREE_STATE = {0: 341, 7: 26, 5: 1}
+#: The one technology open: index, name, code, parts, the four costs.
+M04_OPEN = (36, "Large Battle Turret", "4L1", ("e_tur_bb_01", "e_tur_bt_01"),
+            (12.0, 35.0, 12.0, 35.0))
+#: The flyer's unit box with the turret fitted and the default internals, as the
+#: recording's constructor shows it at 337 s.
+M04_FLYER_BOX = ["37 / 28 t", "58 kph", "23 %", "0 %", "350 m"]
+#: iron3d.dll strings the research panel uses.
+RESEARCH_PANEL_STRINGS = {
+    2010: "Research complete...", 5078: "No item selected", 5079: "DESCENDANTS",
+    5080: "Research Center", 6243: "Mark all items to research", 6251: "Research item",
+    6252: "Cancel research",
+}
+
+
+def check_mission_04_research(check, game: Path) -> None:
+    """Mission 04's research: its tree, the centre's grants, the turret the flyer lacks,
+    the research task, and the research panel."""
+    from dataclasses import replace
+
+    m4 = game / "MISSIONS" / "CAMPAIGN" / "CAMPAIGN.00" / "Mission.04"
+    trf = game / "MISSIONS" / "SCRIPTS" / "tut4_pl.trf"
+    if not (m4 / "data.tma").exists() or not trf.exists():
+        return
+    placed = mission.load(m4 / "data.tma")
+    by_name = {o.name.lower(): o for o in placed.objects}
+
+    def prop(o, name):
+        p = o.properties.get(name) if o is not None else None
+        return p.value if p else None
+
+    player = next((c for c in placed.clans if c.type == mission.CLAN_PLAYER), None)
+    centre, plant = by_name.get("einst01"), by_name.get("lplant01")
+    grants = (player is not None and player.behaviour.lower().endswith("tut4_pl.trf")
+              and player.minds == 3
+              and centre is not None and prop(centre, "Type") & 0xFFFFFFFF == 0x80000400
+              and prop(centre, "FreeTechnoNum") == 5 and prop(centre, "FreeResearchTime") == 5.0
+              and prop(plant, "FreeBotNum") == 50 and not placed.lodes)
+
+    tree = research.read(trf)
+    state = dict(Counter(i.category for i in tree.items))
+    index, name, code, parts, costs = M04_OPEN
+    item = tree[index]
+    opened = [i.index for i in tree.items if i.category == 5]
+    granted = [i for i in tree.items if i.category == 7]
+    open_ok = (opened == [index] and item.name == name and item.code == code
+               and item.parts == parts and item.values == costs
+               and all(tree[r].category == 7 for r in item.requires)
+               and [tree[r].name for r in item.requires]
+               == ["Lrg Research cntr RC-47", "Large Factory FB-47L"]
+               and list(item.unlocks) == [37] and tree[37].category == 0
+               and tree[37].code == "5L1")
+    no_gun = not any(i.part_kind == "WPN" for i in granted)
+
+    # The designer's pages before and after: the chassis, its turret socket, the box.
+    shop = units.Workshop(game)
+    before = designs.Catalogue(tree)
+    items = list(tree.items)
+    items[index] = replace(item, category=item.category | research.RESEARCHED)
+    after = designs.Catalogue(replace(tree, items=tuple(items)))
+    chassis = before.page(designs.chassis_prefixes(4))
+    designer = designs.Designer(shop, after)
+    sockets = [s.lower() for s in designer.labels("R_B_02") if s.lower().startswith("e_tur_")]
+    turrets = (before.page(tuple(sockets)), after.page(tuple(sockets)))
+    design = designer.chassis("R_B_02")
+    box = None
+    if turrets[1]:
+        designer.fit_turret(design, turrets[1][0])
+        rated = designer.rate(design)
+        box = rated.lines() if rated else None
+    gun_sockets = [s for s in designer.labels("e_tur_bb_01") if s.lower().startswith("e_gun_")]
+
+    names = frozenset(p.name.lower() for p in all_archives(game))
+    fort = NResArchive.open(game / "fortif.rlb")
+    entries = {e.name.lower(): e for e in fort}
+    kpd = sum(p.efficiency or 0.0
+              for p in control.parse(fort.read(entries["fr_e_inst.ctl"]), names).components)
+    label = objects.load_unit(game / "UNITS" / "BUILDS" / "INSTITUT" / "einst01.dat").label
+    held = profiles.load(game)
+    rates = (held["prof_institute.var"][profiles.USE_POWER].value,
+             held["prof_institute.var"][profiles.USE_ORE].value)
+    check("Mission 04: one technology to research, free, and it is the flyer's turret",
+          grants and state == M04_TREE_STATE and open_ok and no_gun
+          and chassis == ["R_B_02"] and sockets == ["e_tur_bb"]
+          and turrets == ([], ["e_tur_bb_01"]) and not gun_sockets and box == M04_FLYER_BOX
+          and kpd == 7.0 and "RC-67" in label and rates == (3.0, 1.0),
+          f"Plr reads {Path(player.behaviour.replace(chr(92), '/')).name if player else None} with "
+          f"{player.minds if player else None} minds; {label.strip()} FreeTechnoNum "
+          f"{prop(centre, 'FreeTechnoNum')}, FreeResearchTime {prop(centre, 'FreeResearchTime')}, "
+          f"KPD {kpd:g}, Use_Power/Use_Ore {rates}; the factory FreeBotNum "
+          f"{prop(plant, 'FreeBotNum')}; {len(placed.lodes)} lodes; categories {state}; open "
+          f"{[(tree[i].name, tree[i].code, tree[i].values[:2]) for i in opened]}, needing "
+          f"{[tree[r].name for r in item.requires]}, unlocking {tree[37].code} out of the tree; "
+          f"no gun granted {no_gun}; chassis {chassis}, turret socket {sockets} offers "
+          f"{turrets[0]} then {turrets[1]} with gun sockets {gun_sockets}; box {box}")
+
+    free_open = free_waiting = 0
+    for path in research.trees(game):
+        for i in research.read(path).items:
+            free = i.values[0] == 0 and i.values[1] == 0
+            free_open += free and i.category == 5
+            free_waiting += free and i.category == 4
+    check("research: no tree starts with a free technology open",
+          free_open == 0 and free_waiting > 1000,
+          f"{free_open} free items start open and {free_waiting} free items start waiting "
+          f"across the trees -- each is researched the moment it opens (0x10023aa0), so "
+          f"the panel's rows, which leave free items out, miss none")
+
+    behaviour_path, iron_path = game / "Behavior.dll", game / "iron3d.dll"
+    if not (behaviour_path.exists() and iron_path.exists()):
+        return
+    beh = _image_at(behaviour_path.read_bytes())
+    iron = iron_path.read_bytes()
+    i3 = _image_at(iron)
+    strings = resources.strings(iron)
+
+    def u32(at, va: int) -> int:
+        return struct.unpack("<I", at(va, 4))[0]
+
+    def f32(at, va: int) -> float:
+        return struct.unpack("<f", at(va, 4))[0]
+
+    def target(at, site: int) -> int | None:
+        if at(site, 1) != b"\xe8":
+            return None
+        return (site + 5 + struct.unpack("<i", at(site + 1, 4))[0]) & 0xFFFFFFFF
+
+    def cstring(at, va: int) -> str:
+        return at(va, 40).split(b"\0")[0].decode("latin-1")
+
+    # M_Task_Research's table: order 14, SetTarget, start, takt, priority 0, label.
+    table = [u32(beh, 0x10059F58 + 4 * s) for s in (0, 3, 6, 7, 12, 14)]
+    slots = (table == [0x10036060, 0x1002F470, 0x1002F710, 0x1002F730, 0x1002F460, 0x1002F440]
+             and beh(0x10036060, 6).hex() == "b80e000000c3"
+             and beh(0x1002F460, 9).hex() == "d90540910510c20800" and f32(beh, 0x10059140) == 0.0
+             and cstring(beh, 0x10061E58) == "Research (%X)"
+             and beh(0x1002F4DA, 5).hex() == "3d04020000")
+    # The start: FreeTechnoNum (+0x9f4) decremented with the costs zeroed; the time cost
+    # FreeResearchTime (+0x9f8); the step dt x 0.001.
+    start = (beh(0x1002F8F8, 10).hex() == "8b88f409000085c97e28"
+             and beh(0x1002F917, 17).hex() == "498908c7467400000000c7450000000000"
+             and beh(0x1002F942, 6).hex() == "8b90f8090000"
+             and beh(0x1002F758, 10).hex() == "df6c241c894650d80d70"
+             and abs(f32(beh, 0x10059170) - 0.001) < 1e-9)
+    # The ore request halved above 5; done when progress + 0.001 reaches 1; the centre's
+    # completion (0x10023aa0), progress set to 1, the current id back to -1.
+    finish = (beh(0x1002FBDF, 6).hex() == "d81508960510" and f32(beh, 0x10059608) == 5.0
+              and beh(0x1002FBF2, 6).hex() == "d80dc0950510" and f32(beh, 0x100595C0) == 0.5
+              and beh(0x1002FE12, 16).hex() == "d9442468d80570910510d81d4c910510"
+              and f32(beh, 0x1005914C) == 1.0
+              and target(beh, 0x1002FEBF) == 0x10023AA0
+              and beh(0x1002FF1B, 19).hex() == "8b03680000803f5753ff5014c7466cffffffff"
+              and cstring(beh, 0x10062048) == "cannot research more...")
+    check("Behavior.dll: M_Task_Research spends a free technology first, and finishes at 1",
+          slots and start and finish,
+          f"table 0x10059f58 slots 0, 3, 6, 7, 12, 14 {[hex(t) for t in table]}, order 14, "
+          f"priority 0 {slots}; the start decrements FreeTechnoNum and zeroes the costs, the "
+          f"time is FreeResearchTime, dt x 0.001 {start}; ore request halved above 5, done at "
+          f"progress + 0.001 >= 1 through 0x10023aa0, progress 1 and no current id {finish}")
+
+    # The centre's completion: slot 7, the unlocks (slot 10), each free one again; and
+    # a capture takes its new clan's tree into +0x50.
+    cascade = (beh(0x10023AC7, 3).hex() == "ff501c" and beh(0x10023AD7, 3).hex() == "ff5128"
+               and target(beh, 0x10023B34) == 0x10023AA0
+               and beh(0x10023B0D, 8).hex() == "d9442420d81d4091"
+               and beh(0x10023B1E, 8).hex() == "d9442424d81d4091")
+    capture = (beh(0x10008FD9, 13).hex() == "8b0f57ff51288b168bce894650"
+               and beh(0x10009220, 9).hex() == "8b0f57ff5128894650"
+               and beh(0x10008D69, 9).hex() == "8b0e56ff5128894750")
+    check("Behavior.dll: completing opens the unlocks and researches the free ones; a capture "
+          "re-reads the tree",
+          cascade and capture,
+          f"0x10023aa0 calls slot 7, walks slot 10 and completes each unlock with both research "
+          f"costs 0 {cascade}; Capture, SetClan and ReloadSuperAI each store the clan SuperAI's "
+          f"slot 10 at +0x50 {capture}")
+
+    # The pod: a research centre pushes mode 5 and turns the panel to page 4; the setup
+    # files a player's centre in the list the panel orders through.
+    pod = (i3(0x100626E5, 5).hex() == "3d00040080"
+           and i3(0x10062756, 7).hex() == "6a00566a058bcf" and target(i3, 0x1006275D) == 0x10062BC0
+           and i3(0x10062762, 8).hex() == "8b4c24106a016a04"
+           and target(i3, 0x1006276A) == 0x10084D80
+           and i3(0x10032D81, 20).hex() == "3d000400800f85cc000000396e240f85c3000000"
+           and target(i3, 0x10032D95) == 0x10087AF0 and target(i3, 0x10032DA1) == 0x10087B70)
+    # The layout: the box (51,20)-(369,158), the preview 127 at (226,18), the batch button
+    # at (170,127); the scroll row at (51,159) with 208 of body; 12 rows at (51,179+20k),
+    # 50 at most; a row's button 35, its bar 262, its label "%s (%s)".
+    layout = (i3(0x10088CC4, 4).hex() == "6a146a33"
+              and i3(0x10088CD3, 10).hex() == "689e0000006871010000"
+              and i3(0x10088E29, 6).hex() == "81c2af000000"
+              and i3(0x100890AB, 9).hex() == "576a7f6a7f6a006a00"
+              and i3(0x10088F6A, 3).hex() == "8d4177" and i3(0x10088F71, 3).hex() == "83c16b"
+              and i3(0x100898C4, 16).hex() == "c744241033000000c74424149f000000"
+              and i3(0x10089901, 5).hex() == "68d0000000" and i3(0x100899CE, 3).hex() == "83f90c"
+              and i3(0x10089A09, 10).hex() == "8d0c85b3000000516a33"
+              and i3(0x1008A09A, 7).hex() == "83beb449000032"
+              and i3(0x100886B4, 3).hex() == "83c023" and i3(0x1008870D, 5).hex() == "6806010000"
+              and i3(0x1008884C, 5).hex() == "68e03f1010" and cstring(i3, 0x10103FE0) == "%s (%s)"
+              and i3(0x10089241, 5).hex() == "b904000000" and i3(0x10089426, 3).hex() == "83c123")
+    sprites = all(cstring(i3, va) == s for va, s in (
+        (0x101053F8, "resbutton_start"), (0x101053E8, "resbutton_stop"),
+        (0x10105408, "batch_research_icon"), (0x10104CA4, "scroll_up_icon"),
+        (0x10104CB4, "scroll_down_icon")))
+    words = {k: strings.get(k) for k in RESEARCH_PANEL_STRINGS}
+    ids = (i3(0x10088E97, 5).hex() == "68d6130000" and i3(0x1008917B, 5).hex() == "68d7130000"
+           and i3(0x10088B62, 5).hex() == "ba63180000" and i3(0x100883E1, 5).hex() == "ba6b180000"
+           and i3(0x1008845B, 5).hex() == "ba6c180000" and i3(0x10089B5A, 5).hex() == "68da070000")
+    check("iron3d.dll: a research centre's pod opens page 4, and the research panel's layout",
+          pod and layout and sprites and words == RESEARCH_PANEL_STRINGS and ids,
+          f"0x10062756 pushes mode 5 and page 4 for Type 0x80000400, and the record setup "
+          f"files the player's centres {pod}; the box (51,20)-(369,158), preview 127 at "
+          f"(226,18), batch at (170,127), scroll row at (51,159), 12 rows at (51,179+20k) of "
+          f"50, a 35 button and a 262 bar labelled '%s (%s)', four descendants at x+35 "
+          f"{layout}; sprites {sprites}; strings {words}")
+
+    # The clicks: batch cancels every order 14 then orders every row; the order skips a
+    # researched or queued item and picks a living centre, 0x20c clear, fewest orders,
+    # order 14 target 0x204; the loop reports completions with 2010 and a voice.
+    clicks = (target(i3, 0x10089D8E) == 0x10087F10 and target(i3, 0x10089DAA) == 0x100880B0
+              and i3(0x10089E7E, 3).hex() == "8d480c"
+              and target(i3, 0x10089F38) == 0x10087C00 and target(i3, 0x10089F55) == 0x100880B0)
+    order = (i3(0x1008813B, 5).hex() == "3dfeff0000" and i3(0x10088147, 5).hex() == "680c020000"
+             and i3(0x10088188, 8).hex() == "c744244004020000"
+             and i3(0x100881F0, 8).hex() == "c744243c0e000000"
+             and target(i3, 0x10088107) == 0x10087C00)
+    report = (target(i3, 0x1005EA7A) == 0x10089A50 and i3(0x10089B69, 5).hex() == "68e03f1010"
+              and i3(0x10089BAE, 5).hex() == "bf2c541010"
+              and cstring(i3, 0x1010542C) == "VOICE_RSRCH_COMPLETE"
+              and target(i3, 0x10089B80) == 0x1007EB60 and target(i3, 0x10089C41) == 0x10089FD0)
+    check("iron3d.dll: the research panel's clicks, its order 14, and the completion message",
+          clicks and order and report,
+          f"0x10089ce0: batch cancels all (0x10087f10) and orders every row, scroll by 1 "
+          f"within 12, a row's button cancels or orders {clicks}; 0x100880b0 skips a queued "
+          f"item, picks a centre not removed with 0x20c clear and the fewest orders, gives "
+          f"order 14 target 0x204 {order}; the game loop's 0x10089a50 posts '%s (%s)' of 2010 "
+          f"and the name, plays VOICE_RSRCH_COMPLETE, refreshes {report}")
+
+
 def check_placement(check, game: Path) -> None:
     """Placing a building from the command view, and the builder's task that puts it up."""
     paths = [game / name for name in ("iron3d.dll", "Behavior.dll", "Terrain.dll")]
@@ -19109,6 +19348,7 @@ def run(game: Path) -> int:
         check_command_mode,
         check_hq_command_mode,
         check_commander_panel,
+        check_mission_04_research,
         check_settings,
         check_research_streams, check_atmosphere_events,
         check_varset_types, check_profiles, check_walker,

@@ -40,6 +40,12 @@ does four things for a building of Type `0x80000010`:
    Page 5 lists the clan's buildings of Type `0x80000010` and sets the page
    word `+0x5f0` to 5 (`0x10084de3`).
 
+The same branch gives a research centre (`0x80000400`) the same mode 5 and
+**page 4**, the research panel (`0x10062756`,
+[41-commander.md](41-commander.md#the-research-page-4--read-and-seen)). A
+generator, mine, storage or Outpost is only selected (`0x10062732`), a bunker
+pushes mode 4 and a tower mode 6 while its turret lives (`0x100627b6`).
+
 **The factory record** (`0x100875e0`) is made when a factory joins the player's
 clan list. It is 0x1c bytes:
 

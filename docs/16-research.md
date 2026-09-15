@@ -265,8 +265,15 @@ archives, which the bytes of one packed number would not.
 More slots matter: 9 and 10 return the prerequisite and unlock lists as
 `(pointer, count)` over the pairs the loader built, 21 is the mapping below,
 and 2 finds an item by part id. `Behavior.dll`'s research centre calls 3 and 9
-(`MResearchCenter::CalcSummCost`, `::CreateParentTechArray`), and
-`iron3d.dll` 3, 11–15, 17 and 18 through the tree it keeps at `0x1010c380`.
+(`MResearchCenter::CalcSummCost`, `::CreateParentTechArray`), and 7 and 10 when
+a research completes ([below](#completing--read)). `iron3d.dll` calls 3,
+11–15, 17 and 18 through the tree it keeps at `0x1010c380`. That tree is the
+player clan's: the level's setup installs it from the player's clan record
+(`0x100a2610`, `0x1008a3e0`).
+
+**Slot 3's record** (`MisLoad.dll:0x10002aa0`, *read*) is eight words: the
+researched bit, the available bit and the in-tree bit, each as 0 or 1; the four
+costs; and the part id.
 
 ### The six bytes: a role, `objects.dlb`'s classification line, a size and a level — *read* and *measured*
 
@@ -326,6 +333,221 @@ Every one of the 368 items is named by at least one part, and none by more
 than two. The 27 that take two are mounting pairs — `e_tur_bb_01` and
 `e_tur_bt_01`, one turret researched once — which is exactly the 395 − 368
 difference that made the counts look like a puzzle.
+
+## Researching — *read*
+
+A technology is researched by **a research centre carrying out order 14**. The
+player's research panel gives the order
+([41-commander.md](41-commander.md#the-research-page-4--read-and-seen)):
+- it goes to the end of one centre's queue, as
+  [31-packages.md](31-packages.md#the-orders--measured) reads;
+- the centre runs its orders one at a time, so **each centre researches one
+  technology at a time**;
+- the panel spreads a queue over several centres by giving each order to the
+  one with the fewest.
+
+### The task
+
+`M_Task_Research`'s table is at `Behavior.dll:0x10059f58`, 17 slots:
+
+| slot | address | does |
+|---:|---|---|
+| 0 | `0x10036060` | returns 14, the order |
+| 1, 2 | `0x10036070`, `0x10036050` | destroy and stop; both run `0x1002f400`: the ore request (property `0x2000100`) to 0, `SetPowerUsage(0)` |
+| 3 | `0x1002f470` | `SetTarget` |
+| 6 | `0x1002f710` | start: stamps the clock (`+0x50`) |
+| 7 | `0x1002f730` | the takt, `OnBehaviourTakt` |
+| 12 | `0x1002f460` | interrupt priority: **0 for every reason**, so nothing the centre sees interrupts it |
+| 14 | `0x1002f440` | the label, `"Research (%X)"` |
+
+- **`SetTarget`** with target `0x204` and a technology id appends the id to the
+  task's own list (`+0x58`) and succeeds (`0x1002f51e`). Target `0x205`, a
+  design's name, is the AI's order 16. Any other target logs
+  *"Research: Incorrect Target"* and fails.
+- **Which tree it reads.** The tree is the centre's `MBehaviour+0x50`. `Capture`
+  (`0x10008e40`, at `0x10008fe3`), `SetClan` (`0x10009130`, at `0x10009226`) and
+  `ReloadSuperAI` (`0x10008c70`, at `0x10008d6f`) each set it from slot 10 of the
+  clan's SuperAI. So **a captured centre
+  researches from its new clan's tree** (*derived*).
+
+### The takt
+
+Each takt (`0x1002f730`):
+1. **The step.** dt is (now − last) × 0.001 s, and last becomes now.
+2. **With no technology in hand** (`+0x6c` is −1), it walks its list for the
+   first id whose slot-3 record reads *not researched* and *available*. It logs
+   the others as *"is not ready for research"*. The first one found becomes
+   current (`0x1002f8db`), and:
+   - **Free.** If the centre's `FreeTechnoNum` (`MBehaviour+0x9f4`) is above
+     zero, it is decremented and the ore and power costs are 0 (`0x1002f8f8`).
+   - **Otherwise** the power cost is the item's research energy and the ore
+     cost its research ore: record words 4 and 5, `values[0]` and `values[1]`.
+   - **The time cost** is the centre's `FreeResearchTime` (`+0x9f8`,
+     `0x1002f942`).
+   - All three collected amounts start at 0. The centre's power use is set to
+     its profile's `Use_Power`, and its ore request to the ore cost.
+   - **If no id qualifies**, it logs *"cannot research more..."*, clears the
+     request and the power use, and returns 0: **the task is over**
+     (`0x1002fa37`).
+3. **A current technology already researched** (by another centre, say) is
+   dropped: *"allready researched"*, and the current id goes back to −1.
+4. **Otherwise it accrues.** Take *old* as the smallest of three fractions:
+   time collected over the time cost, ore over ore, and power over power. A
+   zero cost's fraction is 1. Then:
+   - **Ore.** The take is `KPD × Use_Ore × dt`, held to what the centre holds
+     (property `0x2000100`), and it is added to the ore collected. The request
+     becomes the ore still missing: halved while more than 5 is missing, and 0
+     once none is (`0x1002fbdf`–`0x1002fc27`).
+   - **Power and time.** Power collected grows by `KPD × Use_Power × dt`, and
+     time by dt.
+   - **Progress.** *new* is the smallest of the three fractions again. The
+     item's stored progress (slot 4) grows by *new* − *old*, held to 1, and is
+     written back (slot 5, `0x1002fe0f`).
+   - **Done.** When the stored progress + 0.001 reaches 1 (`0x1002fe16`), it
+     logs *"researched"*. It then completes the technology through the centre
+     (`0x1002febf`), sets its progress to 1, and makes −1 current again. It
+     returns 1, so the next takt starts the next id in its list, or ends.
+
+### Completing — *read*
+
+`0x10023aa0`, the research centre's completion:
+1. It calls the tree's slot 7. That sets the researched and available bits,
+   and gives the available bit to every item in the tree whose prerequisites
+   are all researched ([above](#trf1-is-state-not-a-label)).
+2. It walks the item's unlocks (slot 10). An unlock that is now in the tree,
+   available and not researched, **and whose two research costs are both 0**,
+   is completed the same way, recursively (`0x10023b34`).
+
+**So a free technology is researched the moment it opens.** Nothing waits in a
+queue for it. *Measured*, over all 29 trees:
+- 1,318 free items start waiting;
+- no tree starts with a free item already open.
+
+**The message comes from `iron3d.dll`, not from here.** *"Research complete..."*
+is posted by the game loop's check of the queued orders
+([41-commander.md](41-commander.md#the-research-page-4--read-and-seen)).
+
+### What follows — *derived*
+
+- **No size gate.** Neither the order nor the takt reads a size or level byte of
+  the item or the centre. A centre's grade gates research only through the
+  tree's edges, which name the centres
+  ([The spine](#the-spine)).
+- **Cancelling keeps what was done.** An aborted order stops the task, which
+  clears the request and the power use. Nothing refunds what was collected, and
+  the item's stored progress stays. Started again, a research needs only the
+  rest of its budgets. A free one takes another of the centre's
+  `FreeTechnoNum`.
+- **Without ore, only free research finishes.** An ore cost's fraction grows only
+  by what the centre holds, so on a map with no ore a paid technology never
+  completes.
+- **What sets the pace.** The time budget is fixed. `KPD` speeds only ore and
+  power. Paid at an enhanced centre (`KPD` 7, `Use_Power` 3, `Use_Ore` 1), the
+  Large Battle Turret's 12 energy would take 12 ÷ 21 = 0.57 s and its 35 ore
+  5 s, with the ore on hand, against the default 2 s of time.
+
+## Mission 04's tree — *measured*, and *seen*
+
+*"In the Research Center, research the missing components of the large flying
+warbot and construct it in the Factory."*
+
+**The clans.**
+- The player's clan `Plr` researches from `tut4_pl.trf` and has **3 minds**.
+- The neutral `Ntrl` reads `data.trf`.
+
+**The starting state** of `tut4_pl.trf` is 368 items:
+- **341 out of the tree.**
+- **26 granted:**
+  - the Large Flying chassis L-2f (`R_B_02`);
+  - the large internals: engines 1–3, batteries, shield generators, detection
+    shields, sensor modules, repair units, deflectors, and armour 1 and 2;
+  - the large research centre RC-47 and the large factory FB-47L;
+  - six brain modules.
+  - **No gun of any kind.**
+- **One open: the Large Battle Turret 4L1** (`e_tur_bb_01` hung, `e_tur_bt_01`
+  upright).
+  - It costs 12 energy and 35 ore to research.
+  - It needs RC-47 and FB-47L, both granted.
+  - It unlocks the Large Battle Turret 5L1, which is out of the tree: the panel
+    names it as a descendant, but it can never be researched.
+
+**The missing component is that one turret**, by the designer's pages
+([37-designer.md](37-designer.md)):
+- A large factory's chassis page offers `R_B_02` alone.
+- The chassis's turret socket, `e_tur_bb`, offers nothing until 4L1 is
+  researched. Then it offers `e_tur_bb_01`, which has no gun socket.
+- With the default internals, the design's box reads **37 / 28 t, 58 kph,
+  23 %, 0 %, 350 m**.
+
+**The buildings.**
+- **The research centre.** `einst01.dat` is the *Enh Research cntr RC-67*:
+  - `KPD` 7;
+  - `FreeTechnoNum` 5 and `FreeResearchTime` 5, the only centre in the install
+    granted either ([23-economy.md](23-economy.md#the-four-grants-a-mission-gives-a-building--read-and-measured)).
+- **The factory.** `lplant01.dat` has `FreeBotNum` 50.
+- **No ore.** The map has no lode.
+
+**So** (*derived*):
+- **The research.** The turret costs nothing and takes 5 s: without the free
+  technologies it could never finish.
+- **The build.** The flyer costs no ore and 1 power, and 60 s on a large
+  factory ([23-economy.md](23-economy.md#construction--read)).
+
+**Seen** in the recording, `training mission 4 teleport`, at 960 × 720:
+- **302.5 s — the screen.** The hero stands on the centre's pod and the
+  *Research Center* screen is up. The box shows *Large Battle Turret*, under it
+  *DESCENDANTS* and *Large Battle Turret (5L1)* (the font's 5 reads like an S),
+  and the turret turning. One row reads *Large Battle Turret (4L1)* with the
+  start icon.
+- **303.5–303.75 s — the click.** The player clicks the batch button, whose
+  tooltip *Mark all items to research* shows at 304 s. The row's icon becomes
+  the red stop cross, and a fill grows from the row's left: red at 303.75 and
+  304.25 s, olive by 304.5 s. The Energy row falls from 99% to 93%.
+- **304.75 s — closed.** The screen has gone and the hero is still in the pod.
+  The research goes on.
+- **308.75 s — done.** *"from: System / Research complete... (Large Battle
+  Turret)"*: 5.0–5.25 s after the click, which is the free 5 s.
+- **336–346 s — the factory.**
+  - The warbot constructor offers the *Large Flying Chs (L-2f)* alone.
+  - *SELECT WEAPON* reads *NO ITEMS AVAILABLE*.
+  - The box reads *LFW-X Warrior 37 / 28 t, 58 kph, 23 %, 0 %, 350 m*, as
+    measured above. Tuned, it reads 45 / 20 t, 60 kph, 26 %, 0 %, 400 m.
+  - Production starts at 346 s, with the free-bots icon and **1** free mind.
+  - The player then has the helicopter and the captured HQ, so **the hero
+    holds no mind** (*derived*).
+
+### For an engine
+
+1. **Order 14** puts a technology on a centre's queue. The centre runs one at a
+   time, and a task's list holds the ids it was given.
+2. **The start.** A research starts only on an item in the tree, available and
+   not researched. It takes a free technology while the centre has one (costs
+   0), else the item's research energy and ore. Its time is the centre's
+   `FreeResearchTime`. Set the centre's power use to `Use_Power`.
+3. **Each tick:**
+   - add `min(KPD × Use_Ore × dt, ore held)` ore, `KPD × Use_Power × dt` power
+     and dt time;
+   - progress is the smallest of the three fractions, a zero cost counting as
+     1;
+   - keep the progress on the item, not on the task.
+4. **At progress 1 − 0.001:**
+   - mark the item researched, and open what it unlocks;
+   - research at once every newly open item that costs nothing;
+   - end the task when no queued id is left.
+5. **Mission 04.** Its only research is the Large Battle Turret 4L1: free, 5 s,
+   at the enhanced centre.
+
+### Not established
+
+- **The ore take.** Whether property `0x2000100`'s get is the centre's ore held
+  or what the distribution step has delivered. The name is
+  [23-economy.md](23-economy.md#research--read)'s reading.
+- **Who else completes a technology.** Only the takt and the routine itself call
+  `0x10023aa0` (*read*, as a search). Calls to the tree's slot 7 made through
+  its table, from a script or a save, were not searched.
+- **What happens to a research when its centre is captured, upgraded or
+  destroyed** mid-way. Not followed.
+- **How often a building's takt runs**, which fixes how late the message can be.
 
 ## What is not read here
 

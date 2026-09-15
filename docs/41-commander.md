@@ -438,13 +438,194 @@ What modes 4 and 6 then show is [40-command-mode.md](40-command-mode.md)'s.
 flag, a button whose icon the cursor covers, a palm, and *Small Bunker* on a green
 bar ending at about 363.
 
-## The research page, 4 — *read* in part
+## The research page, 4 — *read*, and *seen*
 
-Page 4 draws the research panel (`+0x7b8`, `0x100898a0`) under its header, and
-turning to it refreshes the panel (`0x10089fd0`). Its button needs a research
-centre of the clan's, so on Mission 03 it stays disabled; the panel's contents
-were not read ([31-packages.md](31-packages.md#the-orders--measured) reads the
-order 14 it gives).
+Page 4 draws **the research panel** (`+0x7b8`, `0x100898a0`) under its header,
+titled 5080 *Research Center*, and turning to the page refreshes the panel
+(`0x10089fd0`, from `0x10084dda`).
+- **In command mode**, its button needs a research centre of the clan's (see
+  above), so on Mission 03 it stays disabled.
+- **From a pod.** Standing on the pod of one of the player's own research
+  centres opens it too. The pod callback's same-clan branch pushes view mode 5
+  with the building and turns the panel to page 4 (`0x10062756`), as it turns a
+  factory's pod to page 5 ([36-factory.md](36-factory.md#how-the-screen-opens--read)).
+  The column is left out, and the exit button or Esc pops the mode.
+
+The research itself, what order 14 does at the centre, is
+[16-research.md](16-research.md#researching--read)'s.
+
+### The panel's parts
+
+The constructor is `0x10089560`:
+
+| field | what |
+|---|---|
+| `+0x04` | **the box**, 0x1d0 bytes (`0x10088980`): the preview (`+0`), the item it shows (`+4`), `long_button_frame_off` and `_on`, `batch_research_icon`, tooltip 6243 *Mark all items to research*, and a byte set for the frame after a click |
+| `+0x1d4` | **50 rows** of 0x170 bytes each (`0x10088210`). A row holds its label (`+0x24`), its technology (`+0x30`), `resbutton_start` and `resbutton_stop`, and tooltips 6251 *Research item* and 6252 *Cancel research* |
+| `+0x49b4`, `+0x49b8`, `+0x49bc` | the row count, **the selected technology**, the first row shown |
+| `+0x49c0`, `+0x4a4c` | `scroll_down_icon`, `scroll_up_icon` |
+
+**The sprites** are `ui/hq.cfg`'s:
+
+| sprite | page | at | size |
+|---|---|---|---|
+| `resbutton_start` | `ui_menu` | (49, 126) | 15 × 15 |
+| `resbutton_stop` | `ui_menu` | (238, 238) | 15 × 15 |
+| `batch_research_icon` | `ui_menu3` | (177, 43) | 30 × 15 |
+| `scroll_up_icon` | `ui_menu` | (145, 94) | 30 × 15 |
+| `scroll_down_icon` | `ui_menu` | (176, 94) | 30 × 15 |
+
+### Which rows — *read*
+
+The refresh (`0x10089fd0`) walks every item of the player clan's tree in order.
+It lists an item that is:
+- in the tree;
+- available;
+- not researched;
+- **priced**: a research energy or ore cost other than 0.
+
+The rules:
+- **At most 50 rows.**
+- **The label** is `"%s (%s)"` of the item's name (slot 15) and short code
+  (slot 13), or the name alone when the code is empty (`0x100887f0`).
+- **A stale scroll resets.** If the first row shown is past the end, it becomes
+  0.
+- **The selection.** If the selected technology is not among the rows, the first
+  row shown becomes selected.
+- **Free items never show.** An item costing nothing is researched as soon as it
+  opens ([16-research.md](16-research.md#completing--read)).
+
+### What it draws — *read*
+
+The pen primitives and pieces are
+[35-hud.md](35-hud.md#everything-is-drawn-on-a-640--480-screen--read)'s.
+
+**The box** (`0x10088c80`) is framed about (51, 20)–(369, 158) and filled
+`0x80008000`. Its contents are clipped 5 inside.
+
+- **A selected technology not yet researched** shows:
+  - **its name** in `GAME_FONT` at (71, 30);
+  - **the preview**: its part turning, 127 × 127 at (226, 18) (`0x10089050`
+    makes it, `0x1009ee30` draws it);
+  - **its descendants** (`0x100890e0`), when it unlocks anything:
+    - 5079 *DESCENDANTS* at (71, 48) in `#c0c0ff`;
+    - then up to four of the unlocked items as `"name (code)"`, at
+      (86, 60 + *k* × line), where line is the font's height + 1;
+    - `...` below the fourth when there are more.
+    - The list is slot 10's unlocks, whether or not they are in the tree.
+- **Otherwise** it shows 5078 *No item selected* at (71, 30).
+- **The batch button.**
+  - The frame `long_button_frame_off` sits at (170, 127)–(202, 148), and
+    `_on` for the one frame after a click.
+  - `batch_research_icon` sits at (172, 129)–(200, 146): white on that frame,
+    `#80ff80` otherwise.
+  - Its tooltip 6243 shows while the cursor is on the icon.
+
+**The scroll row**, from the pen at (51, 159):
+
+| x | piece | what |
+|---|---|---|
+| 51–56 | `ending_stub` | |
+| 56–264 | `body_stub`, 208 wide (`0x1009b0e0`) | |
+| 264–314 | long button, `scroll_up_icon` | variant 1 while the first row shown is above 0, else 0 |
+| 314–364 | long button, `scroll_down_icon` | variant 1 while there are more than 12 rows and the first shown + 12 is short of their count |
+| 364–369 | `ending_stub`, mirrored | |
+
+**The rows.** At most 12 are shown, from the first shown; row *k* is at
+(51, 179 + 20*k*) (`0x10089a09`). A row is drawn by `0x100885f0`:
+
+| x | piece | what |
+|---|---|---|
+| 51–56 | `ending_stub` | |
+| 56–91 | short button (`0x1009ab00`), variant 1 when selected | the icon 15 × 15 at (66, *y* + 2): `resbutton_stop` in `#ff8080` while the item is queued, else `resbutton_start` in white |
+| 91–101 | `ray_emitter`, variant 1 when selected | |
+| 101–363 | bar, 262 wide | the label centred, white when selected and `#c0c0c0` otherwise, over **a fill of the item's stored progress**: red under 20%, olive under 80%, green above |
+| 363–369 | `ray_ending` | |
+
+The button's tooltip is 6252 *Cancel research* while the item is queued, and
+6251 *Research item* otherwise. **No row prints a cost or a percentage.**
+
+**Queued** means an order 14 for that technology sits in any of the player's
+research centres' order lists (`0x10087c00`, `0x10087d50`). The list of centres
+(`0x1010c36c`) has two maintainers:
+- the building record's setup files each of the player's own research centres
+  in it (`0x10032d95`);
+- the record's removal takes it out (`0x1007da7c`).
+
+### What a click does — *read*
+
+**The commander's click reaches the panel** on page 4 (`0x10084a90`). The
+panel's area is x 51–369, from the top down to 177 + 20 × the row count
+(`0x10089f90`, tested at `0x10084d45`). The panel's handler (`0x10089ce0`) then
+takes, in order:
+
+1. **The batch button**, when there are rows.
+   - It flashes.
+   - It **cancels every queued research at every centre** (`0x10087f10`: each
+     order 14 is aborted through the centre's `IAgent` slot 40).
+   - It **orders every row's technology**, in row order.
+   - If nothing is selected, it selects the first row shown.
+2. **Scroll up.** The first row shown goes down by 1, while it is above 0.
+3. **Scroll down.** It goes up by 1, while the first shown + 12 is short of the
+   count.
+4. **A row.**
+   - **On its button:** a queued technology's order is aborted, and one not
+     queued is ordered.
+   - **Anywhere on the row**, the row's technology becomes the selected one, and
+     the preview is made again.
+
+**Ordering** (`0x100880b0`, [31-packages.md](31-packages.md#the-orders--measured)):
+- It skips a technology already researched or already queued.
+- **Which centre.** The one that has not been destroyed (class word not
+  `0xfffe`), whose property `0x20c` reads 0 (its construction sphere is not
+  running), and which has the fewest orders.
+- **The order.** 14, target `0x204`, the id as the parameter, to the end of the
+  queue.
+- **With no such centre**, nothing is ordered.
+
+### When research completes — *read*
+
+**The check runs every pass of the game loop** (`0x1005ea7a` → `0x10089a50`).
+It walks every queued order 14 at every centre. For each whose technology now
+reads researched, it:
+1. **aborts that order**, so the research is reported once;
+2. **posts a system message** (`0x1007eb60`): `"%s (%s)"` of 2010 *Research
+   complete...* and the item's name;
+3. **plays `VOICE_RSRCH_COMPLETE`**.
+
+Afterwards:
+- **The rows.** If any was reported, the panel is refreshed.
+- **The box.** The refresh has already moved the selection to the first row
+  shown, if any is left. If the box's technology still reads researched, the
+  preview is dropped and the box reads *No item selected*. On Mission 04, with its
+  one row gone, that is what the box shows (*derived*).
+
+**A research that finishes after its order is gone is never reported.** The task
+keeps its order through the takt after the one that completes
+([16-research.md](16-research.md#the-takt)), so the check sees it as long as it
+runs between two of the centre's takts (*derived*; how often a building's takt
+runs was not read).
+
+### Against the recording — *seen*
+
+Mission 04, on the Enhanced Research Center's pod
+([16-research.md](16-research.md#mission-04s-tree--measured-and-seen)), at
+960 × 720 halved to 640 × 480:
+- **The header and box.** The header *Research Center* spans 51–369. The box
+  is framed from (53, 20) to (367, 157).
+- **The name.** *Large Battle Turret* sits at about (75, 38): the text is drawn
+  from its top at 30.
+- **The descendants.** *DESCENDANTS* at about (75, 57), and its one descendant
+  at about (91, 69), both light blue.
+- **The preview** turns about (290, 92).
+- **The batch button** at about (177–207, 133–150).
+- **The scroll row** at y 160–177, the arrows at about 273–307 and 320–353.
+- **The one row** at y 181–197: its button at 57–90, the label centred over
+  101–363.
+- **After the batch click**, the stop cross is pinkish-red and the fill runs from
+  the bar's left.
+- **The message.** 2010 reads *"Research complete... (Large Battle Turret)"*,
+  from *System*.
 
 ## For an engine
 
@@ -490,6 +671,20 @@ order 14 it gives).
 10. **Building rows** on pages 5–8: lamp, icon, the Strategic control button for a
     bunker, the Manual button for a bunker or tower, the name over its life;
     Strategic control moves command mode to that bunker, Manual takes its turret.
+11. **The research page, 4.** It also opens in view mode 5 from a player's
+    research centre's pod.
+    - **Rows.** The tree's items in the tree, available, unresearched and
+      priced, at most 50. Each is labelled `"name (code)"`, 12 shown at
+      (51, 179 + 20*k*), with a start or stop button and a bar filled by the
+      item's progress.
+    - **The box** (51, 20)–(369, 158): the selected item's name, its
+      descendants and its preview; the batch button at (170, 127).
+    - **The scroll row** at y 159.
+    - **Clicks.** A row's button orders or cancels. The batch button cancels
+      everything, then orders every row. Order 14 goes to the end of the living,
+      unsphered centre with the fewest orders.
+    - **Every frame**, report each queued item now researched: abort its order,
+      post *"Research complete... (name)"* and play `VOICE_RSRCH_COMPLETE`.
 
 ## Not established
 
@@ -502,7 +697,10 @@ order 14 it gives).
 - What slot 7 of a unit's object does 0.6 s after *Explode!*.
 - What `0x10034230` accepts for an upgrade row, and what `0x80000200`, the Type
   given its own building icon, is.
-- The research panel's contents and controls.
+- ~~The research panel's contents and controls~~ — **read**, above.
+- **The research panel's text colours.** The box's name is drawn in `GAME_FONT`'s
+  current colour, set by whatever drew before it. It reads white in the
+  recording.
 - What the wingman menu's rows look like beside the commander's: the row draw
   with a number (`0x1009c8e6`) was not followed here ([31-packages.md](31-packages.md#the-wingman-menu-from-first-person--read-and-measured)).
 - Whether a click on a disabled order row can happen at all: the commander's

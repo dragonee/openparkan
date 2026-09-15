@@ -24841,7 +24841,7 @@ doc = "docs/41-commander.md"
 module = "iron3d.dll"
 at = "0x100898a0"
 kind = "function"
-name = "research panel draw (not followed)"
+name = "research panel draw: the box, the scroll row at (51,159), 12 rows at (51,179+20k)"
 read = true
 doc = "docs/41-commander.md"
 
@@ -24849,7 +24849,7 @@ doc = "docs/41-commander.md"
 module = "iron3d.dll"
 at = "0x10089fd0"
 kind = "function"
-name = "research panel refresh on turning to page 4 (not followed)"
+name = "research panel refresh: rows of the tree's items in the tree, available, unresearched and priced, 50 at most"
 read = true
 doc = "docs/41-commander.md"
 
@@ -27276,3 +27276,340 @@ kind = "site"
 name = "computer filing: the answer's +0x14 and the building kept at record +0x48"
 read = true
 doc = "docs/27-ownership.md"
+
+# --- research at a research centre, and the research panel, ../docs/16-research.md, ../docs/41-commander.md ---
+[[entry]]
+module = "Behavior.dll"
+at = "0x10036060"
+kind = "function"
+name = "M_Task_Research slot 0: returns 14, its order"
+read = true
+doc = "docs/16-research.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1002f400"
+kind = "function"
+name = "M_Task_Research stop (slots 1 and 2): ore request 0x2000100 to 0, SetPowerUsage(0)"
+read = true
+doc = "docs/16-research.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1002f440"
+kind = "function"
+name = "M_Task_Research slot 14: the label 'Research (%X)'"
+read = true
+doc = "docs/16-research.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1002f460"
+kind = "function"
+name = "M_Task_Research slot 12: interrupt priority 0 for every reason"
+read = true
+doc = "docs/16-research.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1002f710"
+kind = "function"
+name = "M_Task_Research slot 6, start: stamps the clock at +0x50"
+read = true
+doc = "docs/16-research.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1002f51e"
+kind = "site"
+name = "research SetTarget 0x204: the id appended to the task's list (+0x58, slot 4 of the list)"
+read = true
+doc = "docs/16-research.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1002f8db"
+kind = "site"
+name = "research takt: the first listed id not researched and available becomes current (+0x6c)"
+read = true
+doc = "docs/16-research.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1002f8f8"
+kind = "site"
+name = "research start: FreeTechnoNum (+0x9f4) above 0 is decremented and the ore and power costs are 0"
+read = true
+doc = "docs/16-research.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1002fa37"
+kind = "site"
+name = "research takt: no id qualifies -- 'cannot research more...', request and power use 0, returns 0"
+read = true
+doc = "docs/16-research.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1002fbdf"
+kind = "site"
+name = "research takt: the ore still missing is halved while above 5, 0 below, and requested"
+read = true
+doc = "docs/16-research.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1002fe16"
+kind = "site"
+name = "research takt: done when the stored progress + 0.001 reaches 1"
+read = true
+doc = "docs/16-research.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1002febf"
+kind = "site"
+name = "research takt: completion through the centre (+0x480, 0x10023aa0), then progress 1 and no current id"
+read = true
+doc = "docs/16-research.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10023aa0"
+kind = "function"
+name = "MResearchCenter completion: tree slot 7, then each unlock (slot 10) now open, unresearched and free is completed recursively"
+read = true
+doc = "docs/16-research.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10008fe3"
+kind = "site"
+name = "MBehaviour::Capture: +0x50 = the new clan SuperAI's slot 10, the research tree"
+read = true
+doc = "docs/16-research.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10009226"
+kind = "site"
+name = "MBehaviour SetClan: +0x50 = the clan SuperAI's slot 10, the research tree"
+read = true
+doc = "docs/16-research.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10062756"
+kind = "site"
+name = "pod, same clan: a research centre pushes view mode 5 and turns the commander panel to page 4"
+read = true
+doc = "docs/36-factory.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10032d95"
+kind = "site"
+name = "building record setup: a player's research centre is filed in the research centres list (0x1010c36c)"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1007da50"
+kind = "function"
+name = "building record removal: a player's research centre leaves the research centres list"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1010c36c"
+kind = "datum"
+name = "the player's research centres, the list the research panel orders through"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10087af0"
+kind = "function"
+name = "research centres list: made on first use"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10087b70"
+kind = "function"
+name = "research centres list: append a building"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10087ba0"
+kind = "function"
+name = "research centres list: remove a building"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10087c00"
+kind = "function"
+name = "research centres list: the first queued order 14 for a technology (centre, index), or 0"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10087d50"
+kind = "function"
+name = "research centres list: every order 14 for a technology (or any, -1) as (centre, index)"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10087e40"
+kind = "function"
+name = "research centres list: every queued order 14 as (centre, technology)"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10087f10"
+kind = "function"
+name = "research panel: abort every queued order 14 at every centre (IAgent slot 40)"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10089560"
+kind = "function"
+name = "research panel constructor: the box, 50 rows of 0x170, scroll_up/down_icon"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10088980"
+kind = "function"
+name = "research panel box constructor: long_button_frame_off/on, batch_research_icon, tooltip 6243"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10088210"
+kind = "function"
+name = "research row constructor: label '---', technology -1, resbutton_start/stop, tooltips 6251 and 6252"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100887f0"
+kind = "function"
+name = "research row set: technology, label '%s (%s)' of name and short code, or the name"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100885f0"
+kind = "function"
+name = "research row draw: stub, short button (stop icon #ff8080 when queued), emitter, 262 bar of the progress, ending"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10088c80"
+kind = "function"
+name = "research box draw: frame (51,20)-(369,158), name at (71,30) or 5078, preview at (226,18), batch button at (170,127)"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10089050"
+kind = "function"
+name = "research box select: the 127 x 127 preview of a technology, or none"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100890e0"
+kind = "function"
+name = "research box descendants: 5079 at (x+20, y+8) in #c0c0ff, four unlocks at x+35, '...' past four"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10089a50"
+kind = "function"
+name = "research completion check, every game loop pass: a queued technology now researched -- abort, '%s (%s)' of 2010 and its name, VOICE_RSRCH_COMPLETE, refresh"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10089ce0"
+kind = "function"
+name = "research panel click: batch (cancel all, order every row), scroll up and down, a row's button orders or cancels, a row selects"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10089f90"
+kind = "function"
+name = "research panel area: x 51-369, y below 177 + 20 x rows"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1005ea7a"
+kind = "site"
+name = "game loop: the research completion check (0x10089a50)"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1009ab00"
+kind = "function"
+name = "compound-control pen: short icon button, 35 wide, icon 15x15 at (+10,+2) in a given colour"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1009b0e0"
+kind = "function"
+name = "compound-control pen: body_stub stretched to a width"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1008a3e0"
+kind = "function"
+name = "research: install the tree iron3d.dll keeps at 0x1010c380, once"
+read = true
+doc = "docs/16-research.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100a2610"
+kind = "site"
+name = "level setup: the player clan's research tree becomes 0x1010c380"
+read = true
+doc = "docs/16-research.md"

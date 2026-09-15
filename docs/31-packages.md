@@ -53,8 +53,9 @@ them, and none of the thirteen game binaries carries an `ORDER_` string at
 all. The tasks' own log strings ("Research (%X)", "Migrate %d", "ShowUpgrade")
 name the task, not the order. What gives them is *read*:
 
-- **14** comes from the player's research panel (`iron3d.dll:0x100880b0`). For
-  a technology whose state in the clan's tree reads 0 and which is not already
+- **14** comes from the player's research panel (`iron3d.dll:0x100880b0`,
+  [41-commander.md](41-commander.md#the-research-page-4--read-and-seen)). For
+  a technology whose researched bit in the clan's tree reads 0 and which is not already
   queued (`0x10087c00`), it picks among the clan's research centres the living
   one whose sphere is not running (`0x20c` reads 0) and which has the fewest
   orders. It gives that centre order 14, target `0x204`, with the technology's
