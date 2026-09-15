@@ -139,6 +139,8 @@ pub struct Instance {
     /// Switched on (actions 18 and 19); header flag 0x40 starts it off. An instance
     /// switched off neither updates, draws nor sounds (docs/11, "Starting, ending, switching").
     pub on: bool,
+    /// Plays none of its sounds, while it updates and draws as ever.
+    pub silent: bool,
     /// The sound emitters' previous time (`+0x9c`), 0 at load, and the loops playing.
     heard_t: f32,
     looping: Vec<usize>,
@@ -220,6 +222,7 @@ impl Instance {
             seed,
             id: 0,
             on,
+            silent: false,
             heard_t: 0.0,
             looping: Vec::new(),
             streams,
@@ -340,7 +343,7 @@ impl Instance {
     /// taken *t* becomes the previous time. A loop plays while low +8 ≤ *t* ≤ high +12 and
     /// stops outside (`0x10012fca`, `0x10013008`).
     pub fn cues(&mut self, now_ms: f64) -> Vec<Cue> {
-        if !self.on {
+        if !self.on || self.silent {
             return Vec::new();
         }
         let t = self.t(now_ms);
@@ -768,6 +771,11 @@ mod tests {
         fx.value = 0.5;
         fx.cues(40.0);
         assert_eq!(fx.silence()[0].kind, CueKind::Stop, "the instance goes");
+
+        let mut quiet = Instance::new(fx.effect.clone(), frame, 1.0, 0.0, None, 1);
+        quiet.silent = true;
+        quiet.value = 0.5;
+        assert!(quiet.cues(10.0).is_empty(), "a silent instance starts no loop");
     }
 
     #[test]

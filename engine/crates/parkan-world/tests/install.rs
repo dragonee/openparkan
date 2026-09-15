@@ -867,6 +867,25 @@ fn the_hero_sounds_its_steps_as_it_runs_and_its_arm_as_a_gun_is_put_away() {
     assert!(steps >= 6, "{steps} steps in 2 s: {:?}", play.cues.iter().map(|c| &c.sound).collect::<Vec<_>>());
 }
 
+#[test]
+#[ignore = "needs the game install"]
+fn the_heros_breath_is_not_heard_while_its_steps_are() {
+    // docs/11, "How a sound is heard": Mission 01's recording has no H_breath.wav.
+    let (mut play, _) = mission_01_play();
+    let tick = 1000.0 / 60.0;
+    play.hero.key("SCAN_W", true);
+    for _ in 0..300 {
+        play.hero.update_input();
+        play.tick(tick, [0.0; 2]);
+    }
+    let sounds: Vec<String> = play.cues.iter().map(|c| c.sound.to_ascii_lowercase()).collect();
+    assert!(!sounds.iter().any(|s| s == "h_breath.wav"), "{sounds:?}");
+    assert!(sounds.iter().any(|s| s.starts_with("step_h")), "{sounds:?}");
+    let breath =
+        play.fx.instances.iter().filter(|(_, i)| i.effect.name.eq_ignore_ascii_case("hero_breath")).count();
+    assert_eq!(breath, 1, "the breath's effect still runs");
+}
+
 /// Walk the hero from `from` facing `yaw` for `seconds`, holding W; where it stood each tick.
 fn walk(play: &mut parkan_world::play::Play, from: glam::Vec3, yaw: f32, seconds: usize) -> Vec<glam::Vec3> {
     let w = &mut play.hero.walker;

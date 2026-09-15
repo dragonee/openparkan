@@ -761,6 +761,13 @@ impl Play {
             let e = play.turret_effects[i].clone();
             let frame = play.turret_frame(&e);
             play.fx.start(Owner::Turret(e.id), &e.name, frame, 1.0, 0.0, None);
+            // STAND-IN: docs/11-effects.md#how-a-sound-is-heard--read-and-measured -- the
+            // hero's breath is measured silent in Mission 01's recording though its effect is
+            // read to run, and what silences it is not established: the hero's own turret
+            // effects flagged 0x800 (its breath; its helm light is a light) play no sound.
+            for instance in play.fx.owned(Owner::Turret(e.id)) {
+                instance.silent = instance.effect.header.flags & parkan_formats::fxid::FX_PASS_ONLY != 0;
+            }
         }
         for e in play.chassis_effects.clone() {
             let (at, y) = play.hero.chassis_point(e.node);

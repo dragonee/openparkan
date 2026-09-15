@@ -15,6 +15,9 @@ pub const FX_KEEP_WHEN_HIDDEN: u32 = 0x10;
 pub const FX_PING_PONG: u32 = 0x20;
 pub const FX_START_OFF: u32 = 0x40;
 pub const FX_TIMES_LINEAR: u32 = 0x200;
+/// Drawn only by a draw call that passes its pass argument: lights, sounds, breath and
+/// beacons.
+pub const FX_PASS_ONLY: u32 = 0x800;
 
 /// Time modes.
 pub const TIME_MANUAL: u32 = 0;

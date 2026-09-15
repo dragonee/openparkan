@@ -560,6 +560,9 @@ presses a hero standing at it down), and which of Mission 04's units holds no mi
   nothing while its tested point is hidden and, while it is in view, draws every sprite over
   the scene as bit 8 does, so the glow on the bridge's pylons is no longer cut by the faces
   it hangs on.
+- The hero's breath is not heard (docs/11, "How a sound is heard"): Mission 01's recording
+  has no `H_breath.wav`, so the hero's own turret effects flagged `0x800` play no sound,
+  while they update as ever.
 
 This directory also holds what the rest will follow:
 
@@ -817,6 +820,7 @@ a row here. A row leaves this table when research closes it.
 | M14 | Which box the unit record's `+0x98`, the outer camera's r, is the half-diagonal of | the chassis mesh's authored box (1.47 m on Mission 01's hero, which its recording favours), else the unit's collision radius; an HQ's command camera keeps its M13 stand-in | [40](../docs/40-command-mode.md#not-established) |
 | M14 | Where a batch word's 8 and `0x100`, which file a batch translucent, come from; which sort type each of the render queue's layers has | no batch word makes a batch translucent, and a look is translucent when any of its phases has an ambient alpha below 1, decided once; groups draw mode by mode in their list, unsorted | [07](../docs/07-objects.md#what-a-blended-batch-writes-and-the-alpha-tests-reference--read) |
 | M14 | With which depth state the beacon lights (flags 0x400 and 0x800, no bit-8 emitter) draw in the pass flag 0x800 waits for: by the read path their 9 m glow is depth-tested and cut by the faces it hangs on | every sprite of a flag-0x400 effect draws over the scene while its tested point is in view, as a bit-8 emitter's does | [11](../docs/11-effects.md#a-beacon-lights-glow--read-in-part-and-measured) |
+| M14 | What silences the hero's breath in its own view: its effect is read to run, its loop inside its near distance, and the recording has none of it | the hero's own turret effects flagged `0x800` (`hero_breath`; `hero_helm_light` is a light) play no sound | [11](../docs/11-effects.md#how-a-sound-is-heard--read-and-measured) |
 
 ### Read since the stand-in was written
 
