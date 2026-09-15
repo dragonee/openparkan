@@ -53,6 +53,36 @@ pub const LEAVE_REACH: f32 = 150.0;
 /// The fight module's bars (`0x10024e7a`): a flyer's, and a walker's.
 pub const FIRE_BAR_FLYER: f32 = 0.45;
 pub const FIRE_BAR_WALKER: f32 = 0.85;
+/// The base priority's limit, which a stopped unit hands the attack it takes up: this far
+/// from where it stood (`0x1000193e`).
+pub const STOP_LIMIT: f32 = 1000.0;
+/// The patrol's compiled defaults (`Behavior.dll:0x10016250`): a place's speed figure and
+/// radius, a building's radius and a unit's, and each kind's loop delays, (fixed, random) s.
+/// A building's speed figure, 80, and a unit's, 1.0, both hold the walker at full speed.
+pub const PATROL_PLACE_SPEED: f32 = 0.8;
+pub const PATROL_PLACE_RADIUS: f32 = 60.0;
+pub const PATROL_BUILDING_RADIUS: f32 = 30.0;
+pub const PATROL_UNIT_RADIUS: f32 = 60.0;
+pub const PATROL_PLACE_DELAY_S: (f64, f64) = (20.0, 10.0);
+pub const PATROL_BUILDING_DELAY_S: (f64, f64) = (60.0, 60.0);
+pub const PATROL_UNIT_DELAY_S: (f64, f64) = (5.0, 10.0);
+/// A loop's points: a place's 15 and a unit's 3, and a 16-bit random % 5 more
+/// (`0x1002de5f`, `0x1002e246`); each tried this many times inside the map less the
+/// roaming inset, the last try kept (`0x1002df68`).
+pub const PATROL_PLACE_POINTS: usize = 15;
+pub const PATROL_UNIT_POINTS: usize = 3;
+pub const PATROL_EXTRA_POINTS: u32 = 5;
+pub const PATROL_TRIES: usize = 350;
+/// The limit a patrol hands the attack it lets through, past its radius (jump table
+/// `0x1002d374`): about a place, a building, a unit, and a unit's for a call for help as
+/// radius × 1.3 + 78.
+pub const PATROL_PLACE_LIMIT: f32 = 60.0;
+pub const PATROL_BUILDING_LIMIT: f32 = 80.0;
+pub const PATROL_UNIT_LIMIT: f32 = 60.0;
+pub const PATROL_HELP_SCALE: f32 = 1.3;
+pub const PATROL_HELP_LIMIT: f32 = 78.0;
+/// A unit guard scores a contact by its distance from the unit × this (`0x10059968`).
+pub const PATROL_UNIT_SHARE: f32 = 0.7;
 
 /// What the behaviour sees of another object.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -83,6 +113,11 @@ pub struct Senses<'a> {
     pub walker_idle: bool,
     /// A neutral clan's unit never engages on its own.
     pub neutral: bool,
+    /// A building: it runs its fire control and no unit takt, so it takes up no engagement
+    /// and its tasks do not move it (docs/31, "Which objects run a behaviour").
+    pub building: bool,
+    /// An animal: it takes up no engagement unless it migrates (`0x10017a1e`).
+    pub animal: bool,
 }
 
 impl Senses<'_> {
@@ -109,12 +144,62 @@ pub enum Search {
     Building(i32),
 }
 
+/// What a patrol guards (slot 3, `0x1002d520`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Guarded {
+    /// A place, `TARGET_BY_PLACE`, with its z as given.
+    Place(Vec3),
+    /// A building, by a logic id with bit 31.
+    Building(i32),
+    /// A unit, by any other logic id: of the patroller's own clan only.
+    Unit(i32),
+}
+
+/// A task's limit (`+0x2c`, tested by slot 9, `0x10001660`): past `radius` from its centre,
+/// in three dimensions, the task is ended.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Limit {
+    pub centre: Limited,
+    pub radius: f32,
+}
+
+/// Where a limit is measured from: a place, or a unit by logic id.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Limited {
+    Place(Vec3),
+    Unit(i32),
+}
+
+impl Limit {
+    /// Whether a unit at `at` is past the limit; a named unit that is gone tests nothing.
+    fn passed(&self, at: Vec3, senses: &Senses) -> bool {
+        let centre = match self.centre {
+            Limited::Place(p) => Some(p),
+            Limited::Unit(id) => senses.find(id).map(|s| s.position),
+        };
+        self.radius > 0.0 && centre.is_some_and(|c| at.distance(c) > self.radius)
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Task {
     /// No order: the unit stands, and engages on its own.
     Stop,
     /// Standby: clears the walker every takt, and is pulled into nothing.
     StayGround,
+    /// Shutdown (order 19, vtable `0x10059eec`): its takt clears the walker and asks the fire
+    /// control for nothing, and its priority is 0 for every reason (`0x10031b10`).
+    Shutdown,
+    /// Patrol (order 4, vtable `0x10059d38`): a loop of points about what it guards, walked
+    /// in turn and drawn afresh on its timer. `next_loop_ms` is `None` until the task
+    /// starts, or starts again once an attack over it is dropped.
+    Patrol {
+        guarded: Guarded,
+        radius: f32,
+        speed: f32,
+        index: usize,
+        next_loop_ms: Option<f64>,
+    },
     Follow {
         leader: i32,
         radius: f32,
@@ -130,6 +215,8 @@ pub enum Task {
         target: Option<i32>,
         fighting: bool,
         next_ms: f64,
+        /// The limit the task beneath handed it, if any.
+        limit: Option<Limit>,
     },
     /// The escape (`ORDER_ROBOT_LEAVE`): off a building to open ground, ending when the
     /// walker has nothing left to do; its priority is 0 for every reason (`0x1002b9f0`).
@@ -148,13 +235,41 @@ impl Task {
             Task::Stop => 1.0,
             Task::Search { search: Search::Enemies, .. } => 1.0,
             Task::Attack { .. } => 1.0,
+            // The patrol lets every reason but a refit through (`0x1002d250`).
+            Task::Patrol { .. } => 1.0,
             _ => 0.0,
         }
     }
 
     /// The task an order builds (the dispatcher's `INSERT_ORDER_REPLACE`).
     pub fn from_order(order: &Order) -> Task {
-        match (order.code, order.target) {
+        Self::try_from_order(order).unwrap_or(Task::Stop)
+    }
+
+    /// The task an order builds, or `None` where its task refuses the target, as a patrol
+    /// of anything but a place, a building or a unit does ("*** Task_Patrol has incorrect
+    /// target").
+    pub fn try_from_order(order: &Order) -> Option<Task> {
+        Some(match (order.code, order.target) {
+            (orders::SHUTDOWN, _) => Task::Shutdown,
+            (orders::PATROL, target) => {
+                // The radius is the kind's default unless the parameter is neither 0 nor −1.
+                let p = order.parameter;
+                let radius = |default: f32| if p == 0 || p == -1 { default } else { p as f32 };
+                let (guarded, radius, speed) = match target {
+                    Target::Place(at) => (
+                        Guarded::Place(Vec3::from_array(at)),
+                        radius(PATROL_PLACE_RADIUS),
+                        PATROL_PLACE_SPEED,
+                    ),
+                    Target::LogicId(id) if id < 0 => {
+                        (Guarded::Building(id), radius(PATROL_BUILDING_RADIUS), 1.0)
+                    }
+                    Target::LogicId(id) => (Guarded::Unit(id), radius(PATROL_UNIT_RADIUS), 1.0),
+                    _ => return None,
+                };
+                Task::Patrol { guarded, radius, speed, index: 0, next_loop_ms: None }
+            }
             (orders::STAYGROUND, _) => Task::StayGround,
             (orders::FOLLOW, Target::LogicId(leader)) => {
                 let p = order.parameter as f32;
@@ -171,10 +286,10 @@ impl Task {
             (orders::RELOAD, _) => Task::Reload,
             (orders::LEAVE, _) => Task::Leave { goal: None },
             (orders::ATTACK, Target::LogicId(id)) => {
-                Task::Attack { target: Some(id), fighting: false, next_ms: 0.0 }
+                Task::Attack { target: Some(id), fighting: false, next_ms: 0.0, limit: None }
             }
             _ => Task::Stop,
-        }
+        })
     }
 }
 
@@ -214,12 +329,14 @@ pub struct Takt {
 pub struct Behaviour {
     pub tasks: Vec<Task>,
     pub fire: FireMode,
+    /// The running patrol's loop of points (`+0xa4`).
+    pub patrol_loop: Vec<Vec3>,
     seed: u32,
 }
 
 impl Behaviour {
     pub fn new(seed: u32) -> Self {
-        Self { tasks: vec![Task::Stop], fire: FireMode::Nearest, seed: seed | 1 }
+        Self { tasks: vec![Task::Stop], fire: FireMode::Nearest, patrol_loop: Vec::new(), seed: seed | 1 }
     }
 
     /// STAND-IN: docs/31-packages.md#what-each-package-does--read -- the behaviour's random
@@ -242,6 +359,29 @@ impl Behaviour {
         self.tasks = vec![Task::from_order(order)];
     }
 
+    /// An order put in the list as `insert` says (`INSERT_ORDER_*`): replacing every task,
+    /// before the running one, or after the rest. A stop at the bottom is the empty
+    /// stack's own task, which an order to the end takes the place of. False when the task
+    /// refuses its target, leaving the tasks as they were.
+    pub fn insert_order(&mut self, order: &Order, insert: u32) -> bool {
+        let Some(task) = Task::try_from_order(order) else { return false };
+        match insert {
+            orders::INSERT_TO_START => self.tasks.push(task),
+            orders::INSERT_TO_END => match self.tasks.first() {
+                Some(Task::Stop) | None => {
+                    if self.tasks.is_empty() {
+                        self.tasks.push(task);
+                    } else {
+                        self.tasks[0] = task;
+                    }
+                }
+                Some(_) => self.tasks.insert(0, task),
+            },
+            _ => self.tasks = vec![task],
+        }
+        true
+    }
+
     /// The task running.
     pub fn task(&self) -> Task {
         self.tasks.last().copied().unwrap_or(Task::Stop)
@@ -254,20 +394,36 @@ impl Behaviour {
         // top, unless the clan is neutral or the task holds the unit below the bar.
         //
         // STAND-IN: docs/31-packages.md#between-orders--read -- how the radar module's
-        // contacts are scored through the task is not read: the nearest hostile unit within
-        // 500 is the best. An attack already running is not given another.
+        // contacts are scored through the task is not read (the contact record's three
+        // unnamed fields): the nearest hostile unit within 500 is the best, and for a patrol
+        // the one nearest its centre inside its radius. An attack already running is not
+        // given another.
         let task = self.task();
         if !senses.neutral
+            && !senses.building
+            && !senses.animal
             && senses.has_weapon
             && task.engage_priority() >= ENGAGE_BAR
             && !matches!(task, Task::Attack { .. })
-            && let Some(enemy) = senses.nearest(|s| s.hostile && !s.building, ENGAGE_RANGE)
+            && let Some((enemy, limit)) = Self::engagement(task, senses)
         {
-            self.tasks.push(Task::Attack { target: Some(enemy.id), fighting: false, next_ms: 0.0 });
+            self.tasks.push(Task::Attack { target: Some(enemy), fighting: false, next_ms: 0.0, limit });
         }
         for _ in 0..4 {
             match self.run(senses) {
-                Some(takt) => return takt,
+                Some(takt) => {
+                    // The stack's takt tests the task's limit after its takt (`0x10034a53`):
+                    // an attack past it ends, and the patrol beneath starts again.
+                    if let Task::Attack { limit: Some(limit), .. } = self.task()
+                        && limit.passed(senses.position, senses)
+                    {
+                        self.tasks.pop();
+                        if let Some(Task::Patrol { next_loop_ms, .. }) = self.tasks.last_mut() {
+                            *next_loop_ms = None;
+                        }
+                    }
+                    return takt;
+                }
                 None => {
                     self.tasks.pop();
                     if self.tasks.is_empty() {
@@ -279,13 +435,109 @@ impl Behaviour {
         Takt { walk: Walk::Clear, target: self.fire_target(senses), fire_freely: false }
     }
 
-    /// The fire control's target (`0x100240a6`).
+    /// The contact `task` lets an engagement take up, and the limit it hands the attack
+    /// (`0x10017e70`, the task's slots 12 and 13).
+    fn engagement(task: Task, senses: &Senses) -> Option<(i32, Option<Limit>)> {
+        let hostile = |s: &&Seen| s.hostile && !s.building;
+        match task {
+            // A patrol scores only a contact strictly inside its radius of its centre, across
+            // the ground (`0x1002d4a1`), and limits the attack about what it guards.
+            Task::Patrol { guarded, radius, .. } => {
+                let (centre, share, limit) = match guarded {
+                    Guarded::Place(p) => {
+                        (p, 1.0, Limit { centre: Limited::Place(p), radius: radius + PATROL_PLACE_LIMIT })
+                    }
+                    Guarded::Building(id) => {
+                        let p = senses.find(id)?.position;
+                        (p, 1.0, Limit { centre: Limited::Place(p), radius: radius + PATROL_BUILDING_LIMIT })
+                    }
+                    Guarded::Unit(id) => (
+                        senses.find(id)?.position,
+                        PATROL_UNIT_SHARE,
+                        Limit { centre: Limited::Unit(id), radius: radius + PATROL_UNIT_LIMIT },
+                    ),
+                };
+                let d = |s: &Seen| s.position.truncate().distance(centre.truncate()) * share;
+                let enemy = senses
+                    .seen
+                    .iter()
+                    .filter(hostile)
+                    .filter(|s| d(s) < radius)
+                    .min_by(|a, b| d(a).total_cmp(&d(b)))?;
+                Some((enemy.id, Some(limit)))
+            }
+            // The base priority's limit: 1000 about where the unit stands (`0x100018a0`).
+            Task::Stop => {
+                let enemy = senses.nearest(|s| s.hostile && !s.building, ENGAGE_RANGE)?;
+                let limit = Limit { centre: Limited::Place(senses.position), radius: STOP_LIMIT };
+                Some((enemy.id, Some(limit)))
+            }
+            _ => senses.nearest(|s| s.hostile && !s.building, ENGAGE_RANGE).map(|s| (s.id, None)),
+        }
+    }
+
+    /// The fire control's target (`0x100240a6`). The radar module lists no buildings, so the
+    /// nearest hostile contact is a unit's (docs/31, "Which objects run a behaviour").
     fn fire_target(&self, senses: &Senses) -> Option<i32> {
         match self.fire {
             FireMode::None => None,
             FireMode::Fixed(id) => senses.find(id).map(|s| s.id),
-            FireMode::Nearest => senses.nearest(|s| s.hostile, ENGAGE_RANGE).map(|s| s.id),
+            FireMode::Nearest => senses.nearest(|s| s.hostile && !s.building, ENGAGE_RANGE).map(|s| s.id),
         }
+    }
+
+    /// A 16-bit random, as the patrol's point counts take one (`0x10066bfc`).
+    ///
+    /// STAND-IN: docs/31-packages.md#what-each-package-does--read -- the behaviour's random
+    /// source is not read: the same xorshift, its high bits.
+    fn random16(&mut self) -> u32 {
+        (self.random() * 65_536.0) as u32
+    }
+
+    /// A patrol's loop about `centre` (`0x1002dd90`): a place's or a unit's 15 or 3 points
+    /// and up to 4 more, each within the radius on x and y and inside the map less 100; a
+    /// building's points about it.
+    ///
+    /// STAND-IN: docs/31-packages.md#where-a-search-looks--read-and-measured -- which areals
+    /// are usable is not modelled: a walker's point needs no usable areal, as a flyer's does
+    /// not.
+    fn draw_loop(&mut self, guarded: Guarded, centre: Vec3, radius: f32, senses: &Senses) -> Vec<Vec3> {
+        let (lo, hi) = senses.bounds;
+        let inside = |p: Vec3| {
+            p.x > lo[0] + ROAM_INSET
+                && p.x < hi[0] - ROAM_INSET
+                && p.y > lo[1] + ROAM_INSET
+                && p.y < hi[1] - ROAM_INSET
+        };
+        let count = match guarded {
+            // STAND-IN: docs/31-packages.md#the-patrol-tick-by-tick--read -- a building's
+            // contour (property `0x203`) is not modelled: eight points on its sphere, pushed
+            // out by the block's 30, stand in for its vertices.
+            Guarded::Building(id) => {
+                let reach = senses.find(id).map_or(0.0, |s| s.radius) + PATROL_BUILDING_RADIUS;
+                return (0..8)
+                    .map(|k| {
+                        let a = k as f32 * std::f32::consts::FRAC_PI_4;
+                        centre + Vec3::new(a.cos(), a.sin(), 0.0) * reach
+                    })
+                    .collect();
+            }
+            Guarded::Place(_) => PATROL_PLACE_POINTS,
+            Guarded::Unit(_) => PATROL_UNIT_POINTS,
+        } + (self.random16() % PATROL_EXTRA_POINTS) as usize;
+        (0..count)
+            .map(|_| {
+                let mut point = centre;
+                for _ in 0..PATROL_TRIES {
+                    let (dx, dy) = (self.random() * 2.0 - 1.0, self.random() * 2.0 - 1.0);
+                    point = centre + Vec3::new(dx * radius, dy * radius, 0.0);
+                    if inside(point) {
+                        break;
+                    }
+                }
+                point
+            })
+            .collect()
     }
 
     /// The running task's takt; `None` when it ended or failed.
@@ -297,8 +549,42 @@ impl Behaviour {
             Some(Takt { walk, target: me.fire_target(senses), fire_freely: false })
         };
         match self.task() {
+            // STAND-IN: docs/31-packages.md#migrate-an-animals-pasture--read-and-measured -- an
+            // animal's default order, migrate, is not modelled: it stands, asking the fire
+            // control for nothing, as a grazing animal does.
+            Task::Stop if senses.animal => at_rest(FireMode::None, Walk::Keep, self),
             Task::Stop => at_rest(FireMode::Nearest, Walk::Keep, self),
             Task::StayGround => at_rest(FireMode::Nearest, Walk::Clear, self),
+            Task::Shutdown => at_rest(FireMode::None, Walk::Clear, self),
+            Task::Patrol { guarded, radius, speed, index, next_loop_ms } => {
+                // A unit guarded must stand, of the patroller's own clan; a building must
+                // stand ("PatrolUnit failed", "PatrolBuilding failed").
+                let centre = match guarded {
+                    Guarded::Place(p) => p,
+                    Guarded::Building(id) => senses.find(id)?.position,
+                    Guarded::Unit(id) => senses.find(id).filter(|s| s.own)?.position,
+                };
+                self.fire = FireMode::Nearest;
+                let (mut index, mut next) = (index, next_loop_ms);
+                let mut walk = Walk::Keep;
+                if next.is_none_or(|n| now >= n) {
+                    // The start, and the loop's timer run out: a fresh loop, from its first point.
+                    self.patrol_loop = self.draw_loop(guarded, centre, radius, senses);
+                    let delay = match guarded {
+                        Guarded::Place(_) => PATROL_PLACE_DELAY_S,
+                        Guarded::Building(_) => PATROL_BUILDING_DELAY_S,
+                        Guarded::Unit(_) => PATROL_UNIT_DELAY_S,
+                    };
+                    next = Some(self.timer(now, (delay.0 * 1000.0, delay.1 * 1000.0)));
+                    index = 0;
+                    walk = Walk::To(*self.patrol_loop.first()?, speed);
+                } else if senses.walker_idle && !self.patrol_loop.is_empty() {
+                    index = (index + 1) % self.patrol_loop.len();
+                    walk = Walk::To(self.patrol_loop[index], speed);
+                }
+                *self.tasks.last_mut()? = Task::Patrol { guarded, radius, speed, index, next_loop_ms: next };
+                Some(Takt { walk, target: self.fire_target(senses), fire_freely: false })
+            }
             // STAND-IN: docs/31-packages.md#what-each-package-does--read -- the refit's dock
             // pick (`0x10023b60`) is not read, and no dock is modelled: a refit fails at its
             // start, as it does on a map without one.
@@ -387,7 +673,7 @@ impl Behaviour {
                 let _ = goal;
                 Some(Takt { walk: Walk::Keep, target: None, fire_freely: false })
             }
-            Task::Attack { target, fighting, next_ms } => {
+            Task::Attack { target, fighting, next_ms, limit } => {
                 if !senses.has_weapon {
                     return None;
                 }
@@ -420,7 +706,7 @@ impl Behaviour {
                     next = self.timer(now, ATTACK_TIMER_MS);
                     self.fire = FireMode::Fixed(id);
                 }
-                *self.tasks.last_mut()? = Task::Attack { target: Some(id), fighting, next_ms: next };
+                *self.tasks.last_mut()? = Task::Attack { target: Some(id), fighting, next_ms: next, limit };
                 Some(Takt { walk, target: self.fire_target(senses), fire_freely: true })
             }
         }
@@ -494,7 +780,111 @@ mod tests {
             has_weapon: true,
             walker_idle: idle,
             neutral: false,
+            building: false,
+            animal: false,
         }
+    }
+
+    fn place_patrol(x: f32, y: f32) -> Order {
+        Order { code: orders::PATROL, parameter: 0, target: Target::Place([x, y, 0.0]) }
+    }
+
+    #[test]
+    fn a_shut_down_unit_neither_moves_aims_nor_takes_up_a_fight() {
+        let enemy = Seen { hostile: true, ..unit(9, 100.0, 0.0) };
+        let mut b = Behaviour::new(3);
+        assert!(
+            b.insert_order(&Order { code: orders::SHUTDOWN, parameter: 0, target: Target::NotDefined }, 3)
+        );
+        let t = b.takt(&senses(&[enemy], 0.0, Vec3::ZERO, true));
+        assert_eq!((t.walk, t.target, b.task()), (Walk::Clear, None, Task::Shutdown));
+    }
+
+    #[test]
+    fn a_place_patrol_walks_a_loop_of_15_to_19_points_within_its_radius_at_0_8_and_redraws_it_on_its_timer() {
+        let mut b = Behaviour::new(21);
+        assert!(b.insert_order(&place_patrol(1124.0, 783.0), 3));
+        let t = b.takt(&senses(&[], 0.0, Vec3::new(1800.0, 1800.0, 250.0), true));
+        let Walk::To(first, share) = t.walk else { panic!("{t:?}") };
+        assert_eq!(share, PATROL_PLACE_SPEED);
+        assert!((15..=19).contains(&b.patrol_loop.len()), "{}", b.patrol_loop.len());
+        assert!(
+            b.patrol_loop
+                .iter()
+                .all(|p| (p.x - 1124.0).abs() <= 60.0 && (p.y - 783.0).abs() <= 60.0 && p.z == 0.0)
+        );
+        assert_eq!(first, b.patrol_loop[0]);
+        assert_eq!(t.target, None);
+        // Busy, it keeps on; idle, it moves on to the next point.
+        let busy = b.takt(&senses(&[], 1000.0, first, false));
+        assert_eq!(busy.walk, Walk::Keep);
+        let next = b.takt(&senses(&[], 2000.0, first, true));
+        assert_eq!(next.walk, Walk::To(b.patrol_loop[1], PATROL_PLACE_SPEED));
+        // Past 30 s a fresh loop is always due.
+        let old = b.patrol_loop.clone();
+        let fresh = b.takt(&senses(&[], 31_000.0, first, false));
+        assert!(matches!(fresh.walk, Walk::To(..)) && b.patrol_loop != old);
+        // A guard of a unit of another clan fails.
+        let mut guard = Behaviour::new(4);
+        guard.order(&Order { code: orders::PATROL, parameter: 0, target: Target::LogicId(7) });
+        guard.takt(&senses(&[unit(7, 10.0, 0.0)], 0.0, Vec3::ZERO, true));
+        assert_eq!(guard.task(), Task::Stop);
+        assert!(
+            !Behaviour::new(1)
+                .insert_order(&Order { code: orders::PATROL, parameter: 0, target: Target::Any }, 3)
+        );
+    }
+
+    #[test]
+    fn a_patrol_fights_only_inside_its_ground_and_drops_an_attack_that_strays_past_radius_plus_60() {
+        let place = Vec3::new(1000.0, 1000.0, 0.0);
+        let mut b = Behaviour::new(8);
+        b.order(&Order { code: orders::PATROL, parameter: 0, target: Target::Place(place.to_array()) });
+        // An enemy 61 m from the place, however near the patroller, is not taken up.
+        let outside = Seen { hostile: true, ..unit(5, 1061.0, 1000.0) };
+        let t = b.takt(&senses(&[outside], 0.0, Vec3::new(1060.0, 1000.0, 0.0), true));
+        assert!(matches!(b.task(), Task::Patrol { .. }));
+        assert_eq!(t.target, Some(5), "its guns still aim at the nearest within 500");
+        let inside = Seen { hostile: true, ..unit(6, 1030.0, 1000.0) };
+        b.takt(&senses(&[inside], 1000.0, Vec3::new(1030.0, 1000.0, 0.0), true));
+        assert!(matches!(
+            b.task(),
+            Task::Attack { target: Some(6), limit: Some(Limit { radius: 120.0, .. }), .. }
+        ));
+        // Past 120 m of the place (in 3D) the attack ends and the patrol draws afresh.
+        b.takt(&senses(&[inside], 2000.0, Vec3::new(1000.0, 1000.0, 121.0), true));
+        assert!(matches!(b.task(), Task::Patrol { next_loop_ms: None, .. }), "{:?}", b.task());
+    }
+
+    #[test]
+    fn a_stopped_unit_limits_its_attack_to_1000_from_where_it_stood_and_buildings_and_animals_take_up_none() {
+        let enemy = Seen { hostile: true, ..unit(9, 300.0, 0.0) };
+        let mut b = Behaviour::new(3);
+        b.takt(&senses(&[enemy], 0.0, Vec3::ZERO, true));
+        assert!(matches!(b.task(), Task::Attack { limit: Some(Limit { radius: 1000.0, .. }), .. }));
+
+        let mut bunker = Behaviour::new(3);
+        let t = bunker.takt(&Senses { building: true, ..senses(&[enemy], 0.0, Vec3::ZERO, true) });
+        assert_eq!((bunker.task(), t.target), (Task::Stop, Some(9)), "a building only aims and fires");
+        let hall = Seen { building: true, hostile: true, ..unit(4, 10.0, 0.0) };
+        let t = bunker.takt(&Senses { building: true, ..senses(&[hall], 0.0, Vec3::ZERO, true) });
+        assert_eq!(t.target, None, "the radar lists no buildings");
+
+        let mut medusa = Behaviour::new(3);
+        let t = medusa.takt(&Senses { animal: true, ..senses(&[enemy], 0.0, Vec3::ZERO, true) });
+        assert_eq!((medusa.task(), t.target), (Task::Stop, None));
+    }
+
+    #[test]
+    fn an_order_to_the_end_waits_behind_the_running_one_and_takes_the_empty_stacks_place() {
+        let mut b = Behaviour::new(1);
+        assert!(b.insert_order(&place_patrol(500.0, 500.0), orders::INSERT_TO_END));
+        assert_eq!(b.tasks.len(), 1);
+        let standby = Order { code: orders::STAYGROUND, parameter: 0, target: Target::NotDefined };
+        assert!(b.insert_order(&standby, orders::INSERT_TO_END));
+        assert!(matches!(b.task(), Task::Patrol { .. }) && b.tasks[0] == Task::StayGround);
+        assert!(b.insert_order(&standby, orders::INSERT_REPLACE));
+        assert_eq!(b.tasks, vec![Task::StayGround]);
     }
 
     #[test]

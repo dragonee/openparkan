@@ -2257,3 +2257,136 @@ fn mission_03s_builders_page_selects_the_builder_and_offers_build_mine_and_stand
     let lines = play.unit_lines(builder).expect("the builder rates");
     assert_eq!(lines[4], "250 m", "{lines:?}");
 }
+
+/// Play `seconds` at 60 ticks a second, calling `each` after every tick.
+fn play_for(
+    play: &mut parkan_world::play::Play,
+    seconds: f32,
+    mut each: impl FnMut(&mut parkan_world::play::Play),
+) {
+    for _ in 0..(seconds * 60.0) as usize {
+        play.update_input();
+        play.tick(1000.0 / 60.0, [0.0; 2]);
+        each(play);
+    }
+}
+
+#[test]
+#[ignore = "needs the game install"]
+fn mission_03s_patrol_waits_shut_down_until_the_fourth_bot_then_flies_to_the_base_and_its_end_wins() {
+    use parkan_sim::behaviour::{Guarded, Task};
+    use parkan_world::factory::Project;
+
+    let (mut play, _) = mission_03_play();
+    let script = play.progression.as_ref().unwrap().script.as_ref().unwrap();
+    // `Init` counts the hero, the builder and the transport: objective 3 wants four bots more.
+    assert_eq!((script.dword("df5"), script.dword("df6")), (Some(7), Some(4)));
+    let enemy: Vec<usize> =
+        play.robots.iter().filter(|(t, _)| play.units[*t].clan == Some(1)).map(|r| r.0).collect();
+    assert_eq!(enemy.len(), 3);
+    let ids: Vec<i32> = enemy.iter().map(|&t| play.units[t].logical_id).collect();
+    assert_eq!(ids, [3, 4, 5]);
+    assert!(
+        play.robots
+            .iter()
+            .filter(|(t, _)| enemy.contains(t))
+            .all(|(_, r)| r.behaviour.task() == Task::Shutdown)
+    );
+
+    // Shut down, the patrol neither moves nor fires at the hero 200 m off.
+    assert!(play.stand_facing(enemy[0], 200.0, 0.0));
+    let start: Vec<glam::Vec3> = enemy.iter().map(|&t| play.battle.combat.targets[t].position).collect();
+    let mut shots = 0;
+    play_for(&mut play, 8.0, |p| {
+        shots +=
+            p.battle.combat.rounds.iter().filter(|r| r.owner.is_some_and(|o| enemy.contains(&o))).count();
+    });
+    assert_eq!(shots, 0, "a shut-down unit does not fire");
+    for (&t, from) in enemy.iter().zip(&start) {
+        let at = play.battle.combat.targets[t].position;
+        assert!(at.distance(*from) < 2.0, "a shut-down unit does not move: {from} → {at}");
+    }
+
+    // Four bots of the player's: the next `Mission` run completes objective 3 and sends the patrol.
+    assert!(play.stand_at(1750.0, 250.0, 0.0), "the hero out of the fight");
+    let project = Project {
+        path: "UNITS\\UNITS\\PREBLD\\tut3_p1.dat".into(),
+        name: "SSW-X Warrior".into(),
+        type_word: 0x0100_8000,
+        chassis_size: 2,
+        ore: 0.0,
+        power: 0.0,
+        lines: Vec::new(),
+        sphere: None,
+    };
+    for k in 0..4 {
+        let (x, y) = (1700.0 + 12.0 * k as f32, 300.0);
+        let z = play.ground.below(x, y, 10_000.0).map_or(0.0, |h| h.point.z) + 1.0;
+        let clan = play.player_clan;
+        assert!(play.spawn(&project, clan, glam::Vec3::new(x, y, z), 0.0).is_some());
+    }
+    play_for(&mut play, 3.0, |_| {});
+    let p = play.progression.as_ref().unwrap();
+    assert_eq!(p.progress.objectives[3].state, 1, "objective 3: four warbots");
+    let guarded: Vec<Task> =
+        enemy.iter().map(|&t| play.robots.iter().find(|r| r.0 == t).unwrap().1.behaviour.tasks[0]).collect();
+    let place = |t: &Task| match t {
+        Task::Patrol { guarded: Guarded::Place(p), radius, .. } => Some((p.x, p.y, p.z, *radius)),
+        _ => None,
+    };
+    assert_eq!(place(&guarded[0]), Some((1124.0, 783.0, 0.0, 60.0)));
+    assert_eq!(place(&guarded[1]), Some((606.0, 993.0, 0.0, 60.0)));
+    assert_eq!(place(&guarded[2]), Some((1124.0, 783.0, 0.0, 60.0)));
+
+    // They fly there at 0.8 of their speed: 1.3 km in well under two minutes.
+    let mut nearest = f32::MAX;
+    play_for(&mut play, 100.0, |p| {
+        let at = p.battle.combat.targets[enemy[0]].position;
+        nearest = nearest.min(at.truncate().distance(glam::Vec2::new(1124.0, 783.0)));
+    });
+    assert!(nearest < 100.0, "tut3_f1 came within {nearest} m of its place");
+
+    // Destroyed, the patrol completes objective 4, and with 0–3 done the mission is won.
+    for o in &mut play.progression.as_mut().unwrap().progress.objectives[..3] {
+        o.state = 1;
+    }
+    play_for(&mut play, 6.0, |p| {
+        for (t, r) in &mut p.robots {
+            if enemy.contains(t) {
+                r.ground_damage.read(1.0e6);
+            }
+        }
+    });
+    let p = play.progression.as_ref().unwrap();
+    assert!(enemy.iter().all(|&t| !play.battle.combat.targets[t].alive));
+    assert_eq!(p.progress.objectives.iter().map(|o| o.state).collect::<Vec<_>>(), [1, 1, 1, 1, 1]);
+    assert_eq!(p.progress.outcome, Some(true), "MISSION COMPLETE");
+}
+
+#[test]
+#[ignore = "needs the game install"]
+fn a_small_bunker_taken_by_the_player_turns_its_flamers_on_an_enemy_at_its_door_and_a_neutral_one_does_not() {
+    let (mut play, _) = mission_03_play();
+    let (bunker, _) = play.emplacements[0];
+    assert_eq!(play.units[bunker].clan, Some(2), "the Small Bunker starts neutral");
+    assert_eq!(play.emplacements[0].1.guns.len(), 2, "two HFTB");
+    // An enemy flyer, shut down, held 20 m east of the bunker on its ground. The AI's gun
+    // score falls with distance past half the flame's 45 m/s and with height over the
+    // bunker's base (docs/29, "How the AI fires"), so a flame is fired close in.
+    let flyer = play.robots.iter().position(|(t, _)| play.units[*t].logical_id == 3).unwrap();
+    let at = play.battle.combat.targets[bunker].position + glam::Vec3::new(20.0, 0.0, 0.0);
+    let hold = |p: &mut parkan_world::play::Play, fired: &mut usize| {
+        p.robots[flyer].1.walker.body.position = at;
+        *fired += p.battle.combat.rounds.iter().filter(|r| r.owner == Some(bunker)).count();
+    };
+    let mut fired = 0;
+    play_for(&mut play, 6.0, |p| hold(p, &mut fired));
+    assert_eq!(fired, 0, "a neutral clan's bunker runs no fire control");
+    assert_eq!(play.emplacements[0].1.fire_target, None);
+
+    // Taken, as its pod's capture changes its clan (docs/27), it aims and fires.
+    play.units[bunker].clan = Some(play.player_clan);
+    play_for(&mut play, 6.0, |p| hold(p, &mut fired));
+    assert!(fired > 0, "the player's bunker fires at the enemy");
+    assert_eq!(play.emplacements[0].1.fire_target, Some(play.robots[flyer].0));
+}

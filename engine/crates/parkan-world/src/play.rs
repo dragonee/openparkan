@@ -24,7 +24,7 @@ use parkan_formats::mission::{
 use parkan_formats::pose::Pose;
 use parkan_formats::{gamedir, landmesh};
 use parkan_sim::behaviour::{
-    FIRE_BAR_FLYER, FIRE_BAR_WALKER, Seen, Senses, Walk, distance_score, fire_wait_ms,
+    FIRE_BAR_FLYER, FIRE_BAR_WALKER, Seen, Senses, Takt, Walk, distance_score, fire_wait_ms,
 };
 use parkan_sim::combat::{Event, Part, Round};
 use parkan_sim::damage::FLIGHT_MS;
@@ -109,6 +109,9 @@ pub const SPAWNED_OBJECTS: usize = 1 << 20;
 /// `CLASS_ROBOT`: a Type word with this bit is a robot, which holds one of its clan's minds
 /// (docs/23, "The bot limit is the clan's mind count").
 pub const CLASS_ROBOT: u32 = 0x0100_0000;
+/// `CLASS_ANIMAL`: an animal, which takes up no fight unless it migrates (docs/31, "Between
+/// orders").
+pub const CLASS_ANIMAL: u32 = 0x2000_0000;
 
 /// A view mode on the interface's stack (docs/39-boarding.md, "The game view keeps a stack
 /// of modes"): the hero on foot, or a building's screen.
@@ -265,6 +268,9 @@ pub struct Play {
     pub progression: Option<Progression>,
     /// Every unit but the hero that is a robot, with the target it is in the battle.
     pub robots: Vec<(usize, Robot)>,
+    /// Every building that carries guns on a turret, as a robot that does not move, with its
+    /// target in the battle (docs/31, "Which objects run a behaviour").
+    pub emplacements: Vec<(usize, Robot)>,
     /// Each target's name, for the wingman panel.
     pub names: Vec<String>,
     pub selector: Selector,
@@ -314,6 +320,108 @@ pub struct Launch {
     pub direction: Vec3,
     pub velocity: Vec3,
     pub target: Option<usize>,
+}
+
+/// What a behaviour sees of an object: its target in the battle (none for the hero), what
+/// it is, and its clan.
+type Sighting = (Option<usize>, Seen, Option<i64>);
+
+/// The fire control's target, which is target `t`'s `robot`'s takt handed, reaches every gun:
+/// an AI turret traces a point, so its unguided guns take it too (docs/29). Each gun fires
+/// once its AI timer runs out and its score clears the bar, or freely during a search or an
+/// attack (docs/29, "How the AI fires").
+fn aim_and_fire(
+    robot: &mut Robot,
+    t: usize,
+    takt: &Takt,
+    seen: &[Sighting],
+    battle: &Battle,
+    ground: &Ground,
+) {
+    let now = robot.time_ms;
+    let at = robot.walker.body.position;
+    let target = takt.target.and_then(|id| seen.iter().find(|(_, s, _)| s.id == id)).and_then(|(i, _, _)| *i);
+    if target != robot.fire_target {
+        robot.fire_target = target;
+        for g in &mut robot.guns {
+            g.relink(target);
+        }
+    }
+    let Some(victim) = target.and_then(|i| battle.combat.targets.get(i)) else {
+        robot.target_point = None;
+        return;
+    };
+    let (point, reach) = (victim.centre, victim.radius);
+    robot.target_point = Some(point);
+    robot.aim_at(point);
+    let settled = [robot.rig.yaw, robot.rig.pitch].iter().enumerate().all(|(axis, c)| {
+        c.is_none_or(|c| (robot.rig.values[c] - robot.rig.target(axis)).abs() < AIM_SETTLED)
+    });
+    let distance = at.distance(point);
+    // STAND-IN: docs/29-weapons.md#how-the-ai-fires--read -- which of the fight module's bars
+    // a building's guns clear is not read: a building flies not, and takes the walker's.
+    let bar = if takt.fire_freely {
+        0.0
+    } else if robot.flyer {
+        FIRE_BAR_FLYER
+    } else {
+        FIRE_BAR_WALKER
+    };
+    for g in 0..robot.guns.len() {
+        if now < robot.next_shot_ms[g] {
+            continue;
+        }
+        let gun = &robot.guns[g];
+        let score = if takt.fire_freely {
+            0.5
+        } else {
+            // STAND-IN: docs/29-weapons.md#how-the-ai-fires--read -- the turret's aim stage
+            // and the gun's report codes are not transcribed: θ is 0 once both channels
+            // have reached their targets and π before, and a guided gun's θ is the share
+            // of its lock left × π.
+            let turret = if settled { 1.0 } else { 1.0 - std::f32::consts::PI * distance / reach.max(1.0) };
+            let lock = if gun.gate.guided() && gun.gate.lock_s > 0.0 {
+                (gun.lock.max(0.0) / gun.gate.lock_s).min(1.0) * std::f32::consts::PI
+            } else {
+                0.0
+            };
+            let own = 1.0 - lock * distance / reach.max(1.0);
+            if turret <= 0.0 || own <= 0.0 {
+                continue;
+            }
+            distance_score(distance, point.z - at.z, gun.round_speed) * turret * own
+        };
+        if score < bar {
+            continue;
+        }
+        let Some((muzzle, _)) = robot.gun_muzzle(g, gun.current) else { continue };
+        let clear = match battle.combat.first_hit(ground, Some(t), muzzle, point, 0.0) {
+            None => true,
+            Some((_, struck, _)) => struck == target,
+        };
+        if !clear {
+            continue;
+        }
+        let magazine = gun.magazine;
+        robot.guns[g].state = SINGLE_FIGHT;
+        let wait = fire_wait_ms(magazine, robot.behaviour.random());
+        robot.next_shot_ms[g] = now + wait;
+    }
+}
+
+/// Whether part `p` of `robot` is its turret or hangs from it, however far down.
+fn carried_by_turret(robot: &Robot, p: usize) -> bool {
+    let mut part = p;
+    for _ in 0..robot.parts.len() {
+        if part == robot.turret_part {
+            return true;
+        }
+        match robot.parts.get(part).and_then(|x| usize::try_from(x.host).ok()) {
+            Some(host) if host != part => part = host,
+            _ => return false,
+        }
+    }
+    false
 }
 
 /// The rounds `shots` send from `robot`'s barrels, `owner` being its target in the battle.
@@ -407,6 +515,7 @@ impl Play {
         let mut battle = Battle::load(&mut assembly, mission, Some(hero.object), ratio)?;
         hero.arm(&mut battle, &mut assembly);
         let mut robots = Vec::new();
+        let mut emplacements = Vec::new();
         for t in 0..battle.objects.len() {
             let o = battle.objects[t];
             if mission.objects[o].kind == KIND_UNIT
@@ -414,6 +523,13 @@ impl Play {
             {
                 robot.arm(&mut battle, &mut assembly);
                 robots.push((t, robot));
+            } else if mission.objects[o].kind == KIND_BUILDING
+                && let Some(mut robot) = Robot::load(&mut assembly, mission, o)?
+            {
+                robot.arm(&mut battle, &mut assembly);
+                if !robot.guns.is_empty() {
+                    emplacements.push((t, robot));
+                }
             }
         }
         let materials = Library::open(&gamedir::resolve(game, "Material.lib").context("no Material.lib")?)?;
@@ -576,6 +692,7 @@ impl Play {
             deaths: Vec::new(),
             deleted: vec![false; target_count],
             robots,
+            emplacements,
             buildings,
             modes: vec![Mode::OnFoot],
             selected: Vec::new(),
@@ -660,6 +777,8 @@ impl Play {
     pub fn load_progression(&mut self, game: &Path, mission_dir: &Path, mission: &Mission) -> Result<()> {
         self.progression = Some(Progression::load(game, mission_dir, mission, self.hero.object)?);
         crate::factory::prebuild(self, game, mission_dir).context("the prebuilt designs")?;
+        // What the clans' `Init` handlers ordered: Mission 03's enemy patrol shut down.
+        self.deliver_orders();
         Ok(())
     }
 
@@ -715,14 +834,27 @@ impl Play {
     /// Whether clan `other` is hostile to the player's: another clan, not nature's, toward
     /// which the player's clan's relation word is 0 (`iron3d.dll:0x10039440`).
     pub fn hostile(&self, other: Option<i64>) -> bool {
-        let Some(other) = other.filter(|&c| c != self.player_clan) else { return false };
-        let (Some(them), Some(us)) = (self.clan(other), self.clan(self.player_clan)) else { return false };
+        self.hostile_to(Some(self.player_clan), other)
+    }
+
+    /// Whether clan `other` is hostile to clan `us`, by `us`'s relation word toward it.
+    pub fn hostile_to(&self, us: Option<i64>, other: Option<i64>) -> bool {
+        let Some(us) = us else { return false };
+        let Some(other) = other.filter(|&c| c != us) else { return false };
+        let (Some(them), Some(us)) = (self.clan(other), self.clan(us)) else { return false };
         them.kind != CLAN_NATURE
             && us
                 .relations
                 .iter()
                 .find(|(name, _)| *name == them.name)
                 .is_some_and(|&(_, w)| w == RELATION_HOSTILE)
+    }
+
+    /// Whether clan `clan`'s objects run their behaviour: every clan's but a neutral one's,
+    /// which runs no radar, takt or fire control (`Behavior.dll:0x10005070`, docs/31, "Which
+    /// objects run a behaviour").
+    pub fn thinks(&self, clan: Option<i64>) -> bool {
+        clan.and_then(|c| self.clan(c)).is_some_and(|c| c.kind != CLAN_NEUTRAL)
     }
 
     /// The colour the game marks an object of clan `clan` in, seen by the player's clan
@@ -1167,6 +1299,7 @@ impl Play {
         // `Mission` handler or clan takt runs in the briefing's state 5.
         if !self.paused {
             self.progress();
+            self.deliver_orders();
         }
         events
     }
@@ -1923,9 +2056,10 @@ impl Play {
     }
 
     /// What every robot's behaviour sees: each live unit and building, and the hero, with
-    /// its target in the battle.
-    fn seen(&self) -> Vec<(Option<usize>, Seen)> {
-        let mut seen: Vec<(Option<usize>, Seen)> = self
+    /// its target in the battle and its clan. `own` and `hostile` are the player's clan's;
+    /// [`Play::seen_by`] turns them to another's.
+    fn seen(&self) -> Vec<Sighting> {
+        let mut seen: Vec<Sighting> = self
             .battle
             .combat
             .targets
@@ -1943,7 +2077,7 @@ impl Play {
                     own: u.clan == Some(self.player_clan),
                     hostile: self.hostile(u.clan),
                 };
-                (Some(i), s)
+                (Some(i), s, u.clan)
             })
             .collect();
         if !self.hero.dead() && self.driving.is_none() {
@@ -1956,17 +2090,29 @@ impl Play {
                 own: true,
                 hostile: false,
             };
-            seen.push((None, hero));
+            seen.push((None, hero, Some(self.player_clan)));
         }
         seen
     }
 
-    /// Every other robot's tick: a robot of the player's clan runs its behaviour, which
-    /// moves it through its Wizard and aims and fires its guns; then its machine and its
-    /// turret, and its target in the battle and its faces follow where it stands.
-    ///
-    /// STAND-IN: docs/31-packages.md#between-orders--read -- the behaviour runs only on the
-    /// player's clan's robots, the wingmen; every other unit stands where it was placed.
+    /// What target `t` sees of `seen`: everything but itself, each of its own clan or
+    /// hostile to it by its own clan's relations (`0x1000d460`).
+    fn seen_by(&self, t: usize, seen: &[Sighting]) -> Vec<Seen> {
+        let (id, clan) = (self.units[t].logical_id, self.units[t].clan);
+        seen.iter()
+            .filter(|(_, s, _)| s.id != id)
+            .map(|&(_, s, c)| Seen {
+                own: clan.is_some() && c == clan,
+                hostile: self.hostile_to(clan, c),
+                ..s
+            })
+            .collect()
+    }
+
+    /// Every other robot's tick: a robot of a clan that thinks, the enemy's too, runs its
+    /// behaviour, which moves it through its Wizard and aims and fires its guns; then its
+    /// machine and its turret, and its target in the battle and its faces follow where it
+    /// stands. Then every building that carries guns.
     fn tick_robots(&mut self, dt_ms: f64, mouse: [f32; 2]) {
         let seen = self.seen();
         let mut fired = Vec::new();
@@ -1976,7 +2122,7 @@ impl Play {
                 continue;
             }
             let driven = self.driving.as_ref().is_some_and(|d| d.target == t);
-            if !self.paused && !driven && self.units[t].clan == Some(self.player_clan) {
+            if !self.paused && !driven && self.thinks(self.units[t].clan) {
                 self.behave(r, dt_ms, &seen);
             }
             let (t, robot) = &mut self.robots[r];
@@ -2024,6 +2170,77 @@ impl Play {
             let now = robot.time_ms;
             self.launch(launched, now);
         }
+        self.tick_emplacements(dt_ms, &seen);
+    }
+
+    /// Every building that carries guns on a turret: its game time moves on; while its clan
+    /// thinks, its behaviour's fire control picks its target, its turret traces it and its
+    /// guns fire as an AI unit's do; then its turret's and guns' takt, and the turret and
+    /// what hangs on it are posed where they aim. A building does not move: no machine
+    /// steps, and its faces stay as placed.
+    fn tick_emplacements(&mut self, dt_ms: f64, seen: &[Sighting]) {
+        let mut fired = Vec::new();
+        for e in 0..self.emplacements.len() {
+            let t = self.emplacements[e].0;
+            if !self.battle.combat.targets.get(t).is_some_and(|target| target.alive) {
+                continue;
+            }
+            self.emplacements[e].1.time_ms += dt_ms;
+            if !self.paused && self.thinks(self.units[t].clan) {
+                let others = self.seen_by(t, seen);
+                let Play { emplacements, battle, ground, .. } = self;
+                let robot = &mut emplacements[e].1;
+                let senses = Senses {
+                    now_ms: robot.time_ms,
+                    position: robot.walker.body.position,
+                    seen: &others,
+                    bounds: ground.bounds(),
+                    has_weapon: !robot.guns.is_empty(),
+                    walker_idle: true,
+                    neutral: false,
+                    building: true,
+                    animal: false,
+                };
+                let takt = robot.behaviour.takt(&senses);
+                aim_and_fire(robot, t, &takt, seen, battle, ground);
+            }
+            let (t, robot) = &mut self.emplacements[e];
+            let shots = robot.takt(dt_ms);
+            if !shots.is_empty() {
+                fired.push((e, shots));
+            }
+            let place = robot.placement();
+            let target = &mut self.battle.combat.targets[*t];
+            for (p, part) in target.parts.iter_mut().enumerate() {
+                if carried_by_turret(robot, p) {
+                    for n in 0..part.nodes.len() {
+                        part.nodes[n] = place.compose(&robot.part_pose(p, n));
+                    }
+                }
+            }
+        }
+        for (e, shots) in fired {
+            let (t, robot) = &self.emplacements[e];
+            let launched = launches(robot, Some(*t), &shots, &self.battle, &self.ground);
+            let now = robot.time_ms;
+            self.launch(launched, now);
+        }
+    }
+
+    /// Hand every order the scripts gave to its unit (function 15): a robot, or a building
+    /// that carries guns, puts it in its list as its insert mode says (docs/34, "Mission
+    /// 03").
+    fn deliver_orders(&mut self) {
+        let Some(p) = self.progression.as_mut() else { return };
+        for o in std::mem::take(&mut p.orders) {
+            let Some(t) = self.units.iter().position(|u| u.logical_id == o.id) else { continue };
+            let robot = self.robots.iter_mut().chain(self.emplacements.iter_mut()).find(|(rt, _)| *rt == t);
+            if let Some((_, robot)) = robot
+                && robot.behaviour.insert_order(&o.order, o.insert)
+            {
+                robot.order = Some(o.order);
+            }
+        }
     }
 
     /// One robot's behaviour takt (docs/31): its task's walk handed to the walker, which
@@ -2031,10 +2248,10 @@ impl Play {
     /// guns and traced by its turret; and each gun let fire once its AI timer runs out and
     /// its score clears the bar, or freely during a search or an attack (docs/29, "How the
     /// AI fires").
-    fn behave(&mut self, r: usize, dt_ms: f64, seen: &[(Option<usize>, Seen)]) {
+    fn behave(&mut self, r: usize, dt_ms: f64, seen: &[Sighting]) {
         let t = self.robots[r].0;
-        let id = self.units[t].logical_id;
-        let others: Vec<Seen> = seen.iter().filter(|(_, s)| s.id != id).map(|(_, s)| *s).collect();
+        let others = self.seen_by(t, seen);
+        let animal = self.units[t].type_word & CLASS_ANIMAL != 0;
         let bounds = self.ground.bounds();
         let (_, robot) = &mut self.robots[r];
         let now = robot.time_ms;
@@ -2047,6 +2264,8 @@ impl Play {
             has_weapon: !robot.guns.is_empty(),
             walker_idle: robot.wizard.idle(now),
             neutral: false,
+            building: false,
+            animal,
         };
         let takt = robot.behaviour.takt(&senses);
         match takt.walk {
@@ -2072,75 +2291,7 @@ impl Play {
             }
         }
         robot.walker.drive = Some(robot.wizard.takt(now, at, dt_ms));
-
-        // The fire control's target reaches every gun: an AI turret traces a point, so its
-        // unguided guns take it too (docs/29).
-        let target = takt.target.and_then(|id| seen.iter().find(|(_, s)| s.id == id)).and_then(|(i, _)| *i);
-        if target != robot.fire_target {
-            robot.fire_target = target;
-            for g in &mut robot.guns {
-                g.relink(target);
-            }
-        }
-        let Some(victim) = target.and_then(|i| self.battle.combat.targets.get(i)) else {
-            robot.target_point = None;
-            return;
-        };
-        let (point, reach) = (victim.centre, victim.radius);
-        robot.target_point = Some(point);
-        robot.aim_at(point);
-        let settled = [robot.rig.yaw, robot.rig.pitch].iter().enumerate().all(|(axis, c)| {
-            c.is_none_or(|c| (robot.rig.values[c] - robot.rig.target(axis)).abs() < AIM_SETTLED)
-        });
-        let distance = at.distance(point);
-        let bar = if takt.fire_freely {
-            0.0
-        } else if robot.flyer {
-            FIRE_BAR_FLYER
-        } else {
-            FIRE_BAR_WALKER
-        };
-        for g in 0..robot.guns.len() {
-            if now < robot.next_shot_ms[g] {
-                continue;
-            }
-            let gun = &robot.guns[g];
-            let score = if takt.fire_freely {
-                0.5
-            } else {
-                // STAND-IN: docs/29-weapons.md#how-the-ai-fires--read -- the turret's aim stage
-                // and the gun's report codes are not transcribed: θ is 0 once both channels
-                // have reached their targets and π before, and a guided gun's θ is the share
-                // of its lock left × π.
-                let turret =
-                    if settled { 1.0 } else { 1.0 - std::f32::consts::PI * distance / reach.max(1.0) };
-                let lock = if gun.gate.guided() && gun.gate.lock_s > 0.0 {
-                    (gun.lock.max(0.0) / gun.gate.lock_s).min(1.0) * std::f32::consts::PI
-                } else {
-                    0.0
-                };
-                let own = 1.0 - lock * distance / reach.max(1.0);
-                if turret <= 0.0 || own <= 0.0 {
-                    continue;
-                }
-                distance_score(distance, point.z - at.z, gun.round_speed) * turret * own
-            };
-            if score < bar {
-                continue;
-            }
-            let Some((muzzle, _)) = robot.gun_muzzle(g, gun.current) else { continue };
-            let clear = match self.battle.combat.first_hit(&self.ground, Some(t), muzzle, point, 0.0) {
-                None => true,
-                Some((_, struck, _)) => struck == target,
-            };
-            if !clear {
-                continue;
-            }
-            let magazine = gun.magazine;
-            robot.guns[g].state = SINGLE_FIGHT;
-            let wait = fire_wait_ms(magazine, robot.behaviour.random());
-            robot.next_shot_ms[g] = now + wait;
-        }
+        aim_and_fire(robot, t, &takt, seen, &self.battle, &self.ground);
     }
 
     /// Rounds leaving their barrels: each round, and its load group's flight effects.

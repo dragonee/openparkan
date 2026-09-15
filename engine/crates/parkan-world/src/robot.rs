@@ -251,7 +251,18 @@ impl Robot {
         let parts: Vec<Part> = assembly.parts(placed.kind, &placed.path);
         let Some(chassis_part) = parts.iter().find(|p| p.host == -1).cloned() else { return Ok(None) };
         let Some(chassis) = assembly.mesh(&chassis_part.reference) else { return Ok(None) };
-        let Some(chassis_ctl) = controller(assembly, &chassis_part.record)? else { return Ok(None) };
+        let chassis_ctl = match controller(assembly, &chassis_part.record)? {
+            Some(c) => c,
+            // A building's frame is no machine: it stands on one still state, and its own
+            // controller's doors and pod are the building's (docs/24, "Walking into a
+            // building"). What it carries on a turret aims and fires as a unit's does.
+            None if placed.kind == parkan_formats::mission::KIND_BUILDING => Controller {
+                states: vec![control::State::default()],
+                costs: vec![0.0],
+                ..Controller::default()
+            },
+            None => return Ok(None),
+        };
 
         let mut turret = None;
         for part in parts.iter().filter(|p| p.host == 0) {

@@ -9,16 +9,15 @@ use crate::orders::{CAPTURE_TYPES, Order, RELOAD, SEARCH, STAYGROUND, Target};
 pub const EVERY_ROBOT: u32 = 0x0103_e000;
 pub const TRANSPORTS: u32 = 0x0100_2000;
 pub const BUILDERS: u32 = 0x0100_4000;
-/// `ORDER_ROBOT_GO`, `_PATROL`, `_TRANSPORT` and `_BUILD` (docs/31, "The orders").
+/// `ORDER_ROBOT_GO`, `_TRANSPORT` and `_BUILD` (docs/31, "The orders").
 pub const GO: i32 = 2;
-pub const PATROL: i32 = 4;
 pub const TRANSPORT: i32 = 6;
 pub const BUILD: i32 = 7;
 /// Search minerals' type (`0x10001000`).
 pub const MINERALS: u32 = 0x1000_1000;
 
 /// What a row does once clicked (`0x1007b740`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Act {
     /// An order for every selected unit, replacing its queue.
     Order(Order),

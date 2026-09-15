@@ -1,6 +1,7 @@
-//! A mission's progression as it plays: its player clan's script, run on the handler's
-//! cadence against the mission's routes, units and objectives, and what the game says
-//! for it. See `docs/34-progression.md`.
+//! A mission's progression as it plays: every clan's script's `Init`, and the player
+//! clan's `Mission` handler run on its cadence against the mission's routes, units and
+//! objectives; what the game says for it, and the orders the scripts give. See
+//! `docs/34-progression.md`.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -9,6 +10,7 @@ use anyhow::{Context, Result};
 use glam::Vec3;
 use parkan_formats::mission::{self, Mission, Value};
 use parkan_formats::{gamedir, scr};
+use parkan_sim::orders::{self, Order, Target};
 use parkan_sim::progression::{Notice, Progress};
 use parkan_sim::script::{Args, Host, Interpreter};
 
@@ -76,9 +78,36 @@ pub struct OutcomePanel {
     pub lines: Vec<String>,
 }
 
+/// Function 15's answer when no object answers the logical id (`ai.dll:0x10008376`), and
+/// when the unit takes the order.
+pub const ORDER_NO_UNIT: u32 = 5;
+pub const ORDER_TAKEN: u32 = 1;
+
+/// An order a script gave through function 15: the unit's logical id, the order, and where
+/// it goes in the unit's list (`INSERT_ORDER_*`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ScriptOrder {
+    pub id: i32,
+    pub order: Order,
+    pub insert: u32,
+}
+
+/// Another clan's script: its SuperAI runs `Init` once, as every clan's does, and never
+/// `Mission`, which the game frame runs for the local player's clan alone (docs/34, "When
+/// the Mission handler runs").
+pub struct ClanScript {
+    pub clan: i64,
+    pub base: [f32; 2],
+    pub script: Interpreter,
+}
+
 pub struct Progression {
     /// The player clan's script, when it has one that loads.
     pub script: Option<Interpreter>,
+    /// Every other clan's script that loads.
+    pub others: Vec<ClanScript>,
+    /// The orders the scripts gave and the play has not yet handed their units.
+    pub orders: Vec<ScriptOrder>,
     pub progress: Progress,
     /// The player's clan, and its base's centre.
     pub clan: i64,
@@ -99,12 +128,36 @@ struct Answers<'a> {
     base: [f32; 2],
     notices: &'a mut Vec<Notice>,
     unanswered: &'a mut BTreeSet<i32>,
+    orders: &'a mut Vec<ScriptOrder>,
 }
 
 impl Host for Answers<'_> {
     fn call(&mut self, function: i32, args: &mut Args<'_>) -> u32 {
         let int = |args: &Args<'_>, i: usize| i64::from(args.dword(i) as i32);
         match function {
+            // An order packet for the unit of any clan with logical id 0 (`ai.dll:0x10008054`):
+            // the order, the insert mode, the parameter, four floats no task reads, the target
+            // kind and the target, a place's two words as its x and y.
+            //
+            // STAND-IN: docs/34-progression.md#what-the-scripts-ask--read-and-measured-1 -- the
+            // unit's own answer (1 taken, 0 refused) is not waited for: the order is handed to
+            // the unit after the handler's run, and a known id answers 1.
+            15 => {
+                let id = args.dword(0) as i32;
+                if !self.progress.knows(id) {
+                    return ORDER_NO_UNIT;
+                }
+                let word = |i: usize| args.dword(i) as i32;
+                let target = match args.dword(8) {
+                    orders::TARGET_BY_PLACE => Target::Place([word(9) as f32, word(10) as f32, 0.0]),
+                    orders::TARGET_BY_LOGIC_ID => Target::LogicId(word(9)),
+                    orders::TARGET_BY_TYPE => Target::TypeMask(args.dword(9)),
+                    _ => Target::NotDefined,
+                };
+                let order = Order { code: word(1), parameter: word(3), target };
+                self.orders.push(ScriptOrder { id, order, insert: args.dword(2) });
+                ORDER_TAKEN
+            }
             // The base's centre and the clan's number, written into the three operands.
             19 => {
                 args.set_float(0, self.base[0]);
@@ -119,10 +172,11 @@ impl Host for Answers<'_> {
             }
             31 => self.progress.robots(int(args, 0), i64::from(args.dword(1))) as u32,
             32 => u32::from(self.progress.areals.holds(int(args, 0), int(args, 1))),
+            34 => self.progress.count_type(self.clan, args.dword(0)) as u32,
             52 => self.progress.owner(args.dword(0) as i32),
             // STAND-IN: docs/15-behaviour.md#what-the-functions-do -- the engine answers only
-            // the functions a campaign's player script needs for its messages and
-            // objectives (19, 30, 31, 32, 52); any other call does nothing and answers 0.
+            // the functions the campaign's first scripts need for their messages, objectives
+            // and orders (15, 19, 30, 31, 32, 34, 52); any other call does nothing and answers 0.
             other => {
                 self.unanswered.insert(other);
                 0
@@ -156,7 +210,8 @@ fn load_script(game: &Path, path: &str) -> Result<Interpreter> {
 impl Progression {
     /// The progression of `mission`, in `mission_dir`, for the clan of its object `hero`.
     /// Every placed unit with a logical id joins its clan's list and reports where it
-    /// stands, and the script's `Init` runs once (SuperAI slot 5).
+    /// stands, and every clan's script runs its `Init` once (SuperAI slot 5), the placed
+    /// units already in their clans (docs/34, "Mission 03").
     pub fn load(game: &Path, mission_dir: &Path, mission: &Mission, hero: usize) -> Result<Self> {
         let clan = mission.objects.get(hero).and_then(mission::Object::clan_id).unwrap_or(0);
         let record = usize::try_from(clan).ok().and_then(|c| mission.clans.get(c));
@@ -164,9 +219,10 @@ impl Progression {
         let exempt: Vec<bool> = objectives.iter().map(|o| o.exempt).collect();
         let messages = Messages::load(game, mission_dir)?;
         let mut progress = Progress::new(&mission.routes, &exempt, messages.0.iter().map(|m| m.index));
-        // Every building with a logical id answers function 52 with its owner.
+        // Every building with a logical id answers function 52 with its owner, and 34 its type.
         for o in mission.objects.iter().filter(|o| o.kind == mission::KIND_BUILDING) {
-            progress.place_building(o.logical_id, o.clan_id().unwrap_or(-1));
+            let type_word = o.property("Type").map_or(0, |p| number(p.value)) as u32;
+            progress.place_building(o.logical_id, o.clan_id().unwrap_or(-1), type_word);
         }
         for o in mission.objects.iter().filter(|o| o.kind == mission::KIND_UNIT && o.logical_id >= 0) {
             let type_word = o.property("Type").map_or(0, |p| number(p.value)) as u32;
@@ -182,8 +238,21 @@ impl Progression {
             Some(path) => Some(load_script(game, path)?),
             None => None,
         };
+        // Another clan's script that does not load leaves that clan without one.
+        let others = mission
+            .clans
+            .iter()
+            .enumerate()
+            .filter(|&(i, c)| i as i64 != clan && !c.ai_script.is_empty())
+            .filter_map(|(i, c)| {
+                let script = load_script(game, &c.ai_script).ok()?;
+                Some(ClanScript { clan: i as i64, base: c.base, script })
+            })
+            .collect();
         let mut me = Self {
             script,
+            others,
+            orders: Vec::new(),
             progress,
             clan,
             base: record.map_or([0.0; 2], |c| c.base),
@@ -194,10 +263,21 @@ impl Progression {
             objective_texts: objectives.into_iter().map(|o| o.text).collect(),
         };
         me.run("Init");
+        for other in &mut me.others {
+            let mut answers = Answers {
+                progress: &mut me.progress,
+                clan: other.clan,
+                base: other.base,
+                notices: &mut Vec::new(),
+                unanswered: &mut me.unanswered,
+                orders: &mut me.orders,
+            };
+            other.script.run_named("Init", &mut answers);
+        }
         Ok(me)
     }
 
-    /// Run one of the script's handlers; what its calls to function 30 raised.
+    /// Run one of the player clan's script's handlers; what its calls to function 30 raised.
     pub fn run(&mut self, handler: &str) -> Vec<Notice> {
         let mut notices = Vec::new();
         if let Some(script) = self.script.as_mut() {
@@ -207,6 +287,7 @@ impl Progression {
                 base: self.base,
                 notices: &mut notices,
                 unanswered: &mut self.unanswered,
+                orders: &mut self.orders,
             };
             script.run_named(handler, &mut answers);
         }

@@ -452,6 +452,8 @@ pub fn status_order(play: &Play, t: usize) -> i32 {
     match robot.behaviour.task() {
         Task::Stop => 0,
         Task::StayGround => 21,
+        Task::Shutdown => 19,
+        Task::Patrol { .. } => 4,
         Task::Follow { .. } => 22,
         Task::Search { .. } => robot.order.map_or(5, |o| if o.code == 17 { 17 } else { 5 }),
         Task::Reload => 8,

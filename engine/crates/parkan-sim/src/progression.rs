@@ -2,8 +2,8 @@
 //! them, how many robots each clan has, when the player clan's `Mission` handler
 //! runs, and what its message and objective calls do. See `docs/34-progression.md`.
 //!
-//! The script itself runs elsewhere; this answers its functions 30, 31, 32 and 52 and
-//! keeps the state they read and write.
+//! The script itself runs elsewhere; this answers its functions 30, 31, 32, 34 and 52,
+//! finds function 15's unit, and keeps the state they read and write.
 
 use std::collections::BTreeMap;
 
@@ -120,6 +120,7 @@ pub struct Unit {
 pub struct Building {
     pub id: i32,
     pub clan: i64,
+    pub type_word: u32,
     pub alive: bool,
 }
 
@@ -238,9 +239,27 @@ impl Progress {
         self.units.iter().filter(|u| u.alive && u.clan == clan && i64::from(u.type_word) & mask != 0).count()
     }
 
-    /// A building with a logical id, owned by clan `clan`.
-    pub fn place_building(&mut self, id: i32, clan: i64) {
-        self.buildings.push(Building { id, clan, alive: true });
+    /// A building with a logical id, owned by clan `clan`, of `type_word`. A building is on
+    /// its clan's SuperAI list too (`ai.dll:0x10001880`, docs/34, "Mission 03").
+    pub fn place_building(&mut self, id: i32, clan: i64, type_word: u32) {
+        self.buildings.push(Building { id, clan, type_word, alive: true });
+    }
+
+    /// Function 34 (`ai.dll:0x10009c30`): how many entries of clan `clan`'s own list, units
+    /// and buildings, have exactly the type `type_word` and a logical id.
+    pub fn count_type(&self, clan: i64, type_word: u32) -> usize {
+        let units =
+            self.units.iter().filter(|u| u.alive && u.clan == clan && u.type_word == type_word).count();
+        let buildings =
+            self.buildings.iter().filter(|b| b.alive && b.clan == clan && b.type_word == type_word).count();
+        units + buildings
+    }
+
+    /// Whether any unit or building answers logical id `id`, as function 15 finds its unit
+    /// through the clan areal map's slot 7 (`ai.dll:0x1000835e`).
+    pub fn knows(&self, id: i32) -> bool {
+        self.units.iter().any(|u| u.id == id && u.alive)
+            || self.buildings.iter().any(|b| b.id == id && b.alive)
     }
 
     /// Function 52 (`ai.dll:0x1000e0e4`): the owner word of the object with logical id `id`,
@@ -351,7 +370,7 @@ mod tests {
     fn function_52_answers_a_buildings_clan_its_destroyed_word_or_error() {
         let mut p = Progress::new(&[], &[], []);
         let factory = 0x8000_0001_u32 as i32;
-        p.place_building(factory, 2);
+        p.place_building(factory, 2, 0x8000_0010);
         p.join(1, 0, 0x0102_0000, Vec3::ZERO, 0.0);
         assert_eq!((p.owner(factory), p.owner(1)), (2, 0));
         p.captured(factory, 0);
@@ -359,6 +378,20 @@ mod tests {
         p.destroyed(factory);
         assert_eq!(p.owner(factory), DESTROYED_OWNER);
         assert_eq!(p.owner(0x8000_0003_u32 as i32), NO_OBJECT);
+    }
+
+    #[test]
+    fn function_34_counts_a_clans_own_units_and_buildings_of_exactly_one_type() {
+        let mut p = Progress::new(&[], &[], []);
+        let mine = 0x8000_0004_u32;
+        p.place_building(0x8000_0009_u32 as i32, 0, mine);
+        p.place_building(0x8000_000a_u32 as i32, 1, mine);
+        p.place_building(0x8000_000b_u32 as i32, 0, 0x8000_0008);
+        p.join(1, 0, 0x0102_0000, Vec3::ZERO, 0.0);
+        assert_eq!(p.count_type(0, mine), 1);
+        assert_eq!(p.count_type(0, 0x8000_0000), 0, "the type is compared whole");
+        assert_eq!(p.count_type(0, 0x0102_0000), 1);
+        assert!(p.knows(1) && p.knows(0x8000_000a_u32 as i32) && !p.knows(3));
     }
 
     fn square(id: u32, x0: f32, y0: f32, side: f32) -> Route {

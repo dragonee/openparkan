@@ -4,10 +4,13 @@
 
 /// Order codes (`varset.var`'s `ORDER_*`, the packet's `+0`).
 pub const ATTACK: i32 = 3;
+pub const PATROL: i32 = 4;
 pub const SEARCH: i32 = 5;
 pub const RELOAD: i32 = 8;
 /// `ORDER_ROBOT_LEAVE`, the escape (docs/31, "The escape").
 pub const LEAVE: i32 = 20;
+/// `ORDER_ROBOT_SHUTDOWN` (docs/31, "Which objects run a behaviour").
+pub const SHUTDOWN: i32 = 0x13;
 pub const STAYGROUND: i32 = 0x15;
 pub const FOLLOW: i32 = 0x16;
 /// Follow me's parameter: the radius it keeps within.
@@ -17,8 +20,18 @@ pub const FOLLOW_RADIUS: i32 = 50;
 pub const CAPTURE_TYPES: u32 = 0x8017_365e;
 pub const UNCAPTURABLE_BUILDING: u32 = 0x8000_0200;
 
+/// The target kinds an order names (`varset.var`'s `TARGET_*`).
+pub const TARGET_BY_LOGIC_ID: u32 = 0x201;
+pub const TARGET_BY_PLACE: u32 = 0x202;
+pub const TARGET_BY_TYPE: u32 = 0x203;
+pub const TARGET_NOT_DEFINED: u32 = 0x204;
+/// Where an order goes in the unit's list (`varset.var`'s `INSERT_ORDER_*`).
+pub const INSERT_TO_END: u32 = 1;
+pub const INSERT_TO_START: u32 = 2;
+pub const INSERT_REPLACE: u32 = 3;
+
 /// What an order aims at (the packet's `+0xc` and `+0x10`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Target {
     /// `TARGET_NOT_DEFINED` (0x204) with the value 0.
     NotDefined,
@@ -26,10 +39,13 @@ pub enum Target {
     Any,
     LogicId(i32),
     TypeMask(u32),
+    /// `TARGET_BY_PLACE`: x, y and z. A script's two words give x and y, and z stays 0
+    /// (docs/31, "Mission 03's last battle").
+    Place([f32; 3]),
 }
 
 /// One order packet (`iron3d.dll:0x1007d000`), given with `INSERT_ORDER_REPLACE`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Order {
     pub code: i32,
     pub parameter: i32,
