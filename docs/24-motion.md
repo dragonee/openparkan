@@ -1064,10 +1064,44 @@ starts at 0:
      that point when it is inside the edges; otherwise it takes the closest
      point on an edge or a corner (`0x1000eb70`). So a face pushes only from its
      front, from its closest point.
-   - **Hidden faces go.** A face whose centroid is hidden from B's centre by
-     another gathered face is dropped: the segment from the centre to the
-     centroid meets that face inside its triangle, edges included
-     (`0x1000d7a5`–`0x1000dac0`).
+     - **Which edge** (*read*, `0x1000e9a7`–`0x1000eb1e`). The edges are taken
+       in the order a→b, b→c, c→a, each as (e × n)·(q − start) with e the edge
+       made unit and q the projection. The **first** edge that gives more than
+       0 decides alone; the other two are not looked at.
+     - **That edge's point** (`0x1000eb70`–`0x1000ed4e`). The projection must lie
+       within √(r² − h²) of the edge's line, h the height over the plane, or the
+       triangle is passed over. Then t = (q − start)·e: below 0 the point is the
+       edge's start and above its length its end, either of which must lie
+       within r of the centre; between, the point is the foot on the edge at a
+       distance √(s² + h²). So near a corner the first edge's end stands in for
+       a nearer point through the next edge (*derived*).
+   - **Hidden faces go** (*read*, `0x1000d7a5`–`0x1000dac0`). A face whose
+     centroid, (a + b + c) ÷ 3, is hidden from B's centre by another gathered
+     face is dropped.
+     - **The order.** The faces are tested from the last, the farthest, to the
+       first. A hidden face is taken out of both lists at once
+       (`0x1000dade`–`0x1000db57`), so it hides nothing after. Each is tested
+       against every other face still in the list, from the last.
+     - **The crossing** is `Ngi32.dll`'s `g_FastProc` slot `+0xb4`, whose
+       generic build is `0x1001fa00` (set at `0x10003cca`): with p₀ in front of
+       the face's plane or on it, it answers only a segment that runs against
+       the normal and reaches the plane before p₁
+       (`0x1001fa2a`–`0x1001fa66`). The test runs it from the centre to the
+       centroid (`0x1000d8c5`). When the hider's batch word, record `+0x40`,
+       carries 2, it runs it both ways, centroid to centre first
+       (`0x1000d86c`–`0x1000d8a4`).
+     - **Inside the hider** (`0x1000d8d3`–`0x1000dab8`). The crossing is
+       measured in the plane that drops the normal's largest axis, x before y
+       and either before z on a tie. Each edge in the order c→a, a→b, b→c gives
+       the cross product's component on that axis times the normal's. The
+       first edge within 1e-5 of 0 (the float at `0x1002097c`) hides the face
+       at once, whatever the others give; one below 0 does not hide it; three
+       above 0 hide it.
+     - **Floors hide too.** The test reads no triangle flag, so a floor, flagged
+       2, hides a face behind it before the filter below takes the floor out.
+     - **The record** (`0x1000d61b`–`0x1000d765`, 0x48 bytes): the three
+       corners, the normal twice, the plane's −n·a, the batch word `+0x40` and
+       the triangle word `+0x44`.
    - **Filter.** What is left is filtered by batch and triangle flags. The
      batches go as in step 1. The triangles go by a third filter of the pair's:
      flagged 4, and **flagged 2 unless B's collision flags carry 8**
@@ -1096,8 +1130,19 @@ record gains flag 8.
 sends every object message 1, and the control system's tick moves the machine.
 Then the pass runs, then message `0x1c`, and then each record with flags set
 gets message `0x1b`. So the push lands after this frame's move and ground
-contact, and the next frame starts from it. That the ground contact runs inside
-that tick is *derived*.
+contact, and the next frame starts from it.
+
+**The ground contact is message `0x1c`** (*read*). The control system's message
+switch (`Control.dll:0x10007cc2`, messages `0x14` to `0x1c`) sends `0x1b` to
+slot 23 (`0x10007cda`, the push below) and `0x1c` to slot 24 (`0x10007d03`).
+Slot 24 (`0x1000cb80`) runs the ground contact (`0x1001a450`) for an agent of
+kind 4, a unit, at `0x1000cb98`, the ground contact's only caller. So:
+
+- **it runs once a frame, not once a state step:** after the move and the
+  collision pass, before the push is taken;
+- **its dt is the frame's:** the machine tick keeps the milliseconds since its
+  last at `+0xe8` (`0x1000bcfd`–`0x1000bd03`), and the lift's fall reads that
+  × 0.001 (the float at `0x1003c018`, `0x1001b41b`).
 
 **The machine takes the push** on message `0x1b` (`0x1000c990`, slot 23),
 for record flags 8 or `0x10`, by moving its position — the velocity is
@@ -1217,6 +1262,16 @@ state, the time it opened, a lock flag and value, and a hold.
   `0x1005b620`), and drops the face when it is
   (`AniMesh.dll:0x1000dd13`–`0x1000dd46`). A shut, opening or closing door
   pushes like a wall, from wherever its channel has moved its node.
+  - **A door that sinks pushes down** (*derived*, and *measured* on openparkan's
+    engine). The Small Bunker's door `i03` lowers into the floor for 3.6 s. A
+    hero pressed against it meanwhile keeps meeting its upper triangles, while
+    the floor in front, at 74.63, hides the lower ones whose centroids have gone
+    under it. The upper triangles' ends lie above the hero's centre, so their
+    push points down and back, and a walker on a building takes a downward push
+    whole. The ground contact after the next frame's pass lifts it again. An
+    engine that runs the ground contact only at state steps lets those pushes
+    add up between steps: the hero sank 1.2 m there, and on one build fell
+    through the floor.
 - **Two more openers:** a hit struck on a door's node opens it
   (`Control.dll:0x1000ec7e`, [below](#a-shot-opens-a-door--read-and-seen)),
   and a hall-way link opens the doors listed on it
@@ -1280,7 +1335,9 @@ nothing. Inside the Outpost, at 334–338 s, it is captured the same way.
    ([28-chassis.md](28-chassis.md)).
 4. Collide: a building's faces push every unit on it or touching its sphere,
    the faces of a door that is open excepted; units on the same building push
-   each other.
+   each other. Work the pushes out, run each unit's ground contact, and only
+   then move the units by their pushes
+   ([When it happens](#collision-between-objects--read)).
 5. Tick the pod ([27-ownership.md](27-ownership.md#capture--read)): a child in
    the first computer's zone switches it on; when it has opened, and that child
    is still there, the capture callback runs once. For another clan it takes the

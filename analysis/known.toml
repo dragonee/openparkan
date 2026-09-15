@@ -16682,7 +16682,7 @@ doc = "docs/24-motion.md"
 module = "AniMesh.dll"
 at = "0x1000d7a5"
 kind = "site"
-name = "sphere push-out: a face whose centroid another gathered face hides from the centre is dropped"
+name = "sphere push-out: from the farthest face, one whose centroid another gathered face hides from the centre is dropped at once"
 read = true
 doc = "docs/24-motion.md"
 
@@ -17715,7 +17715,7 @@ doc = "docs/24-motion.md"
 module = "AniMesh.dll"
 at = "0x1000e900"
 kind = "function"
-name = "push-out triangle test: plane distance 0..r, the centre projected; outside an edge, the edge or corner closest point"
+name = "push-out triangle test: plane distance 0..r, the centre projected; outside, the first edge a-b, b-c, c-a it lies beyond decides alone: its foot, start or end"
 read = true
 doc = "docs/24-motion.md"
 
@@ -28045,3 +28045,67 @@ kind = "site"
 name = "objectives loader: the object's property records walked by index, 40 bytes each, no key lookup"
 read = true
 doc = "docs/34-progression.md"
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x1000eb70"
+kind = "site"
+name = "push-out triangle test: past its first edge, within sqrt(r^2 - h^2) of the edge line, then t along it picks the start, the end or the foot"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x1000d86c"
+kind = "site"
+name = "push-out hidden test: a hider whose batch word +0x40 carries 2 is crossed both ways, centroid to centre first; any other from the centre only"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x1000d8d3"
+kind = "site"
+name = "push-out hidden test: inside the hider in the plane dropping the normal's largest axis; edges c-a, a-b, b-c; within 1e-5 of 0 hides at once, below 0 does not"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x1000dade"
+kind = "site"
+name = "push-out hidden test: the hidden face is taken out of both lists at once"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Ngi32.dll"
+at = "0x1001fa00"
+kind = "site"
+name = "g_FastProc slot +0xb4 generic build: a segment from p0, in front of the plane or on it, running against the normal and reaching the plane before p1; the point"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x10007cc2"
+kind = "site"
+name = "control system message switch 0x14..0x1c: 0x1b to slot 23 (the push), 0x1c to slot 24 with the frame's time"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000cb80"
+kind = "function"
+name = "control slot 24, message 0x1c: the ground contact 0x1001a450 for an agent of kind 4, its only caller"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x1000bcfd"
+kind = "site"
+name = "machine tick: the milliseconds since the last kept at +0xe8, the ground contact's dt"
+read = true
+doc = "docs/24-motion.md"

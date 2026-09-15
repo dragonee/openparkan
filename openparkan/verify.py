@@ -16297,6 +16297,72 @@ def _cfg_lines(path: Path, block: str) -> list[str]:
     return values
 
 
+def check_push_out_and_ground_contact(check, game: Path) -> None:
+    """The push-out's touch and hidden-face tests, and the ground contact on message 0x1c
+    (docs/24, "Collision between objects")."""
+    paths = {n: game / n for n in ("AniMesh.dll", "Control.dll", "Ngi32.dll")}
+    if not all(p.exists() for p in paths.values()):
+        return
+    m = _image_at(paths["AniMesh.dll"].read_bytes())
+    c = _image_at(paths["Control.dll"].read_bytes())
+    n = _image_at(paths["Ngi32.dll"].read_bytes())
+
+    def dword(at, va: int) -> int:
+        return struct.unpack("<I", at(va, 4))[0]
+
+    def rel(at, va: int) -> int:
+        return (va + 5 + struct.unpack("<i", at(va + 1, 4))[0]) & 0xFFFFFFFF
+
+    # 0x1c is the switch's ninth case from 0x14, 0x1b its eighth.
+    switch = (c(0x10007CC2, 13) == bytes.fromhex("8d42ec83f8080f87b2000000ff")
+              and dword(c, 0x10007D8C + 4 * 7) == 0x10007CD5
+              and dword(c, 0x10007D8C + 4 * 8) == 0x10007CE6
+              and c(0x10007CDA, 3) == bytes.fromhex("ff525c")
+              and c(0x10007D03, 3) == bytes.fromhex("ff5060"))
+    slots = (dword(c, 0x1003D298 + 4 * 23) == 0x1000C990
+             and dword(c, 0x1003D298 + 4 * 24) == 0x1000CB80)
+    contact = (c(0x1000CB90, 4) == bytes.fromhex("837e5004")
+               and c(0x1000CB98, 1) == b"\xe8" and rel(c, 0x1000CB98) == 0x1001A450
+               and [va for va, t in _calls(c, 0x10001000, 0x3B000)
+                    if t == 0x1001A450] == [0x1000CB98])
+    dt = (c(0x1000BCFD, 12) == bytes.fromhex("d8a5e4000000d995e8000000")
+          and c(0x1001B41B, 12) == bytes.fromhex("d90518c00310d88ee8000000")
+          and c(0x1003C018, 4) == struct.pack("<f", 0.001))
+    check("Control.dll: the ground contact is message 0x1c, once a frame with the frame's dt",
+          switch and slots and contact and dt,
+          "the message switch (0x10007cc2) sends 0x1b to slot 23 (0x1000c990) and 0x1c to slot 24 "
+          "(0x1000cb80), which runs the ground contact 0x1001a450, its only caller, for an agent "
+          "of kind 4 (0x1000cb90); the machine tick keeps the ms since its last at +0xe8 "
+          "(0x1000bcfd) and the lift's fall takes that x 0.001 (0x1001b41b)")
+
+    crossing = (n(0x10003CCA, 10) == bytes.fromhex("c7050ca1031000fa0110")
+                and n(0x1001FA24, 6) == bytes.fromhex("d90520720310")
+                and struct.unpack("<f", n(0x10037220, 4))[0] < 0)
+    # The outer loop starts at the last face (0x1000d778) and counts down (0x1000db76), the
+    # inner too (0x1000dac8).
+    hider = (m(0x1000D778, 3) == bytes.fromhex("8d70ff") and m(0x1000DB76, 1) == b"\x4e"
+             and m(0x1000DAC8, 1) == b"\x48"
+             and m(0x1000D85D, 4) == bytes.fromhex("8a442f40")
+             and m(0x1000D865, 2) == bytes.fromhex("a802")
+             and m(0x1000D9B2, 6) == bytes.fromhex("d81d7c090210")
+             and m(0x1002097C, 4) == struct.pack("<f", 1e-5)
+             and m(0x10020940, 4) == struct.pack("<f", 1 / 3))
+    first_edge = (m(0x1000E9EF, 15) == bytes.fromhex("d81548020210d9530cdfe0f6c4410f")
+                  and m(0x1000E9FD + 1, 1) == b"\x84" and _rel_je(m, 0x1000E9FD) == 0x1000EB70)
+    check("AniMesh.dll: the push-out takes a face by its first edge, and hides from the farthest",
+          crossing and hider and first_edge,
+          "g_FastProc +0xb4 is 0x1001fa00 (0x10003cca), a one-sided crossing that needs the "
+          "segment to run against the normal (below -FLT_MIN); a hider's batch word +0x40 bit 2 "
+          "makes it two-sided (0x1000d865); an edge within 1e-5 hides at once (0x1000d9b2); the "
+          "centroid is a third of the corners; the triangle test's first edge above 0 jumps to "
+          "its edge point (0x1000e9fd -> 0x1000eb70)")
+
+
+def _rel_je(at, va: int) -> int:
+    """The target of a ``0f 84 rel32`` at ``va``."""
+    return (va + 6 + struct.unpack("<i", at(va + 2, 4))[0]) & 0xFFFFFFFF
+
+
 def check_main_teleport(check, game: Path) -> None:
     """The Main Teleport: its places, the in and out ticks, and Hero_Teleported (docs/27)."""
     paths = {n: game / n for n in ("Behavior.dll", "ai.dll", "iron3d.dll", "fortif.rlb")}
@@ -20026,7 +20092,7 @@ def run(game: Path) -> int:
         check_behaviour, check_research, check_descriptions, check_saves,
         check_vocabulary, check_resources, check_briefing, check_briefing_screen,
         check_progression, check_mission_02, check_mission_03, check_mission_04,
-        check_main_teleport, check_outcome,
+        check_main_teleport, check_outcome, check_push_out_and_ground_contact,
         check_hud_top,
         check_hud_radar,
         check_hud_screens,
