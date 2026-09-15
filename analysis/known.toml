@@ -28629,3 +28629,157 @@ kind = "site"
 name = "effect manager message 23: set flag bit 0 (message 24 at 0x10003f46 clears it)"
 read = true
 doc = "docs/11-effects.md"
+
+[[entry]]
+module = "Ngi32.dll"
+at = "0x1000c3e0"
+kind = "function"
+name = "niCreate3DSound: returns the 3D sound there is, or makes it with the flags given; bit 16 goes to +0x7c"
+read = true
+doc = "docs/11-effects.md"
+
+[[entry]]
+module = "Ngi32.dll"
+at = "0x1000c7d0"
+kind = "function"
+name = "3D sound slot 4: a sound world (vtable 0x100316f0), the effects' sound server"
+read = true
+doc = "docs/11-effects.md"
+
+[[entry]]
+module = "Ngi32.dll"
+at = "0x1000dad0"
+kind = "function"
+name = "sound world slot 4: set a sound's parameters by mask (2 rate, 4 position, 8 velocity, 0x80 min, 0x100 max, 0x200 mode)"
+read = true
+doc = "docs/11-effects.md"
+
+[[entry]]
+module = "Ngi32.dll"
+at = "0x1000c970"
+kind = "function"
+name = "3D sound slot 6, the tick: listener parameters, each world's buffers, the CD's end and loop"
+read = true
+doc = "docs/11-effects.md"
+
+[[entry]]
+module = "Ngi32.dll"
+at = "0x1000e2c0"
+kind = "function"
+name = "sound world update: rate to SetFrequency, stop a one-shot past max distance, then SetAllParameters or the software gain and pan"
+read = true
+doc = "docs/11-effects.md"
+
+[[entry]]
+module = "Ngi32.dll"
+at = "0x1000e443"
+kind = "site"
+name = "the sample's frequency times record +0x5c, the emitter's +72/+76 factor"
+read = true
+doc = "docs/11-effects.md"
+
+[[entry]]
+module = "Ngi32.dll"
+at = "0x1000e51b"
+kind = "site"
+name = "distance against flMaxDistance: past it +0x37, and a record not looping is stopped"
+read = true
+doc = "docs/11-effects.md"
+
+[[entry]]
+module = "Ngi32.dll"
+at = "0x1000e74e"
+kind = "site"
+name = "IDirectSound3DBuffer::SetAllParameters with the record's DS3DBUFFER (the path with +0x7c clear)"
+read = true
+doc = "docs/11-effects.md"
+
+[[entry]]
+module = "Ngi32.dll"
+at = "0x1000d123"
+kind = "site"
+name = "listener constructor: distance, rolloff and Doppler factors 1.0"
+read = true
+doc = "docs/11-effects.md"
+
+[[entry]]
+module = "services.dll"
+at = "0x10011919"
+kind = "site"
+name = "sound server slot 0: niCreate3DSound with flags 0x120 when none exists"
+read = true
+doc = "docs/11-effects.md"
+
+[[entry]]
+module = "World3D.dll"
+at = "0x10014c30"
+kind = "site"
+name = "settings start: the 3D sound mode flags 0x10000 (setting 110)"
+read = true
+doc = "docs/11-effects.md"
+
+[[entry]]
+module = "Effect.dll"
+at = "0x10006170"
+kind = "function"
+name = "manager: one instance's tick, switched off when its attach node counts as hidden and its header lacks 0x10"
+read = true
+doc = "docs/11-effects.md"
+
+# --- the CD's tracks, ../docs/34-progression.md --------------------------------
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1008e260"
+kind = "function"
+name = "CD player constructor: PLAY_CD_MUSIC 0 disables every play"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1008e4d0"
+kind = "function"
+name = "CD player: a random track, not the one playing, not track 1 unless it is audio"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1008e5d0"
+kind = "function"
+name = "CD player: play a given track, argument 1 looping"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1005e1ca"
+kind = "site"
+name = "mission load: a random CD track unless a briefing runs (state 5)"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1005ea4e"
+kind = "site"
+name = "game frame outside a briefing: a random track once the CD's track is finished"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10031500"
+kind = "site"
+name = "briefing start: mission.cfg's cd_track, looping"
+read = true
+doc = "docs/34-progression.md"
+
+[[entry]]
+module = "Ngi32.dll"
+at = "0x1000ed60"
+kind = "function"
+name = "CD object slot 3: MCI_PLAY a track to the next, flag 2 looping, its end time at +0x38"
+read = true
+doc = "docs/34-progression.md"

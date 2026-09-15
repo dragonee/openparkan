@@ -464,9 +464,10 @@ set the byte `+0x94` (`0x10012d3e`), anything else clears it.
   (`0x10013008`).
 - **While a sound plays** (`0x1001300b`) the update hands the server, as message
   `0x38e`, a position lerped from +16 to +28 across the window and carried into
-  the owner's frame, a near distance +64 and a far distance +68, and a volume
-  lerped from +72 to +76. The lerps of +64 and +68 run from each value to
-  itself: they do not change.
+  the owner's frame, a near distance +64 and a far distance +68, and a factor
+  lerped from +72 to +76 (`0x10013050`). The lerps of +64 and +68 run from each
+  value to itself: they do not change. The factor is the playback rate, not a
+  volume ([below](#how-a-sound-is-heard--read-and-measured)).
 - **Switched off** (slot 5, `0x10013170`), a playing sound is stopped.
 
 So a one-shot **plays again on the way down** once it has sat at 1.0
@@ -481,6 +482,85 @@ none. The 106 loops are what hums or breathes: the chassis engines
 hero's `hero_breath`, `H_breath.wav` looping from 1 to 4 m over the whole of
 its 3-second time. Every `step_*` effect and all four hero arm sounds are
 one-shots.
+
+### How a sound is heard — *read*, and *measured*
+
+**The server.** The emitter's server is a sound world of `Ngi32.dll`'s 3D sound
+(vtable `0x100316f0`, made by the 3D sound's slot 4, `0x1000c7d0`; the landscape
+keeps it at `Terrain.dll` `+0x7bf4`). Its slots take a sound handle: 4
+(`0x1000dad0`) sets parameters, 6 (`0x1000de60`) marks it to play, 7
+(`0x1000def0`) stops it, 11 (`0x1000df90`) answers whether it plays. Each sound
+is a `0x88`-byte record whose `+8` is a Direct3D `DS3DBUFFER`.
+
+**Message `0x38e` is a mask**, one bit a field (`0x1000dad0`): `2` the factor
+(`+8` of the block → record `+0x5c`), `4` the position (`+0xc` → `+0xc`), `8` the
+velocity (`+0x18`), `0x80` the near distance (`+0x3c` → `flMinDistance`), `0x100`
+the far distance (`+0x40` → `flMaxDistance`) and `0x200` the mode (`+0x44` →
+`dwMode`). The emitter's block, laid out from `0x10013048`: `+8` the factor, `+0xc`
+the position, `+0x18` the owner's velocity (its interface `0x27`), `+0x3c` near,
+`+0x40` far, `+0x44` the emitter's float +80. *Measured*: +72 and +76 are 1.0 on
+516 of the 517 sound emitters (0.8 → 1.0 on the other), and +80 is 0 on all 517,
+`DS3DMODE_NORMAL`.
+
+**The factor is a rate.** The 3D sound's update (`0x1000e2c0`) multiplies the
+sample's own frequency by record `+0x5c` and hands it to the buffer's
+`SetFrequency`, held to the device's range (`0x1000e443`).
+
+**Two paths, one taken.** The 3D sound object keeps at `+0x7c` bit 16 of the flags
+it was made with (`0x1000c667`). With it set the update mixes by itself; with it
+clear it hands each buffer its `DS3DBUFFER` whole through `SetAllParameters`
+(`0x1000e74e`) and the listener its own each frame (`0x1000ca06`), and Direct3D
+Sound places the sound. **The object is made once**, by whoever asks first
+(`niCreate3DSound`, `0x1000c3e0`, returns the one there is):
+
+- `services.dll`'s sound server makes it with flags **`0x120`**
+  (`0x10011919`), from `iron3d.dll`'s `createSubsystems` (`0x1005b6d0`,
+  `0x1005b835`), which the executable calls at start;
+- `World3D.dll!stdInitGame` (`0x10013f5e`) would make it with its settings'
+  flags, whose sound mode starts at `0x10000` (`0x10014c30`; setting 110,
+  `0x1000a91f`, which nothing found sets), but it runs when a mission loads,
+  after the object exists.
+
+So the game takes **the Direct3D Sound path** (*derived*). Its distance law is
+Direct3D Sound's own: whole within the minimum distance, and beyond it the gain
+falls as *min* ÷ (*min* + *R* × (*d* − *min*)), 6 dB a doubling for a rolloff *R*
+of 1, no further past the maximum distance (Microsoft's `DS3DBUFFER`
+documentation). *R* is the listener's: the listener object (vtable `0x10031728`,
+made by the 3D sound's slot 3, `0x1000c8c0`, for `Terrain.dll`'s camera at
+`0x10083bc2`) starts its distance, rolloff and Doppler factors at 1.0
+(`0x1000d123`–`0x1000d129`), and no call to its parameter slot (5, `0x1000d370`)
+is found. The listener's position and orientation come from its camera's
+matrix (`0x1000d4bc`), and both the listener and the buffers go to Direct3D
+Sound with y and z swapped (`0x1000d5df`, `0x1000e4a7`).
+
+**Past the far distance** a one-shot is stopped (`0x1000e51b`–`0x1000e54a`: the
+distance above `flMaxDistance` sets `+0x37`, and a record not looping, `+0x7d`,
+is cleared); a loop plays on.
+
+**The other path**, for the record (`0x1000e615`–`0x1000e6ff`): silent past the
+far distance, else `1000 × log2(min ÷ (min + R × (d − min)))` hundredths of a
+decibel inside it, 0 within the near distance, held above −10000; and a pan of
+−4000 times the sound's direction against the cross of the listener's front and
+top.
+
+*Measured* in Mission 01's recording, where the sound server's levels are known
+(a voice, `T01_T01`, sits 11.8 dB under its file's own level): the hero's cannon
+(`H_fire_cannon.wav`, within its near 10) is found at normalised correlation
+0.64–0.74 at every shot from 126 s to 166 s, and the radar's ping every 1.51 s
+from 106.8 s on.
+
+**The hero's breath is not heard.** `hero_breath` is made by the turret's load
+group (action 4 on points 20–22, node 3) and runs in time mode 2, its loop over
+the whole window, some 0.6 m from the eye in the engine's rest pose, inside its
+near distance of 1: read, it should sound whole. But `H_breath.wav` mixed into the recording's own audio at
+the voices' level, once every 3.1 s from 100.5 s, is found at every one of its
+starts (correlation 0.08–0.15), and the recording itself has no such run (none
+above 0.062, and no 3-second rhythm) (*measured*). What silences it is not
+established. One gate is read: before each tick an instance whose attach node
+(`AniMesh` record `+0x14` flags 1 or 4, or a stage `+0x1c` not 0 without header
+flag `0x8000`) counts as hidden is switched off unless its header has flag
+`0x10` (`0x10006170`–`0x10006211`), and `hero_breath` has not; that the hero's
+node 3 counts as hidden in the game's own view is not found.
 
 ### Bolts, streams and fades — *read*, and *measured*
 
@@ -725,10 +805,13 @@ Read one slot either way, none of the seven name witnesses agrees.
 
 ## Not resolved
 
-- **The sound server's slots**: 6 starts, 7 stops and 11 answers whether a
-  sound plays, as the emitter uses them (*derived*); what message `0x38e`'s
-  +80 float is (0 on the step and arm sounds), and how near, far and volume
-  become gain.
+- ~~**The sound server's slots**, what message `0x38e`'s +80 float is, and how
+  near, far and volume become gain.~~ Answered: a sound world of `Ngi32.dll`'s
+  3D sound; +80 is the `DS3DBUFFER` mode, the "volume" is a playback rate, and
+  Direct3D Sound's distance law applies
+  ([How a sound is heard](#how-a-sound-is-heard--read-and-measured)).
+- **What silences the hero's breath** in its own view.
+- **How Direct3D Sound pans** a sound about the listener.
 
 - **The rest of each emitter's floats.** The window, the phase, the sprite's
   moving and growing triples, the light, the bolt's segments, the stream's

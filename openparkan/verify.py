@@ -6537,6 +6537,39 @@ def _planted_steps(c: control.Controller, m, points, order: list[int]) -> tuple[
     return steps, nearest
 
 
+def check_music(check, game: Path) -> None:
+    """The CD tracks the install ships as Ogg files, and what picks and sets them."""
+    music = game / "MUSIC"
+    tracks = sorted(p.name for p in music.iterdir()) if music.is_dir() else []
+    check("MUSIC/: CD tracks 2 to 10 as Track02.ogg..Track10.ogg, no track 1",
+          tracks == [f"Track{n:02d}.ogg" for n in range(2, 11)],
+          f"{tracks}")
+    cs = settings.sections(game / "Iron_3D.ini").get("CS", {})
+    wanted = {"PLAY_CD_MUSIC": "1", "SFX_VOLUME": "12", "CD_VOLUME": "12",
+              "FORCE_CD_SOUND": '".\\MUSIC\\"'}
+    check("Iron_3D.ini: PLAY_CD_MUSIC 1, SFX_VOLUME and CD_VOLUME both 12, "
+          "FORCE_CD_SOUND .\\MUSIC\\",
+          all(cs.get(k) == v for k, v in wanted.items()),
+          f"{ {k: cs.get(k) for k in wanted} }")
+    pattern = re.compile(r"^\s*cd_track\s*=\s*(-?\d+)", re.IGNORECASE | re.MULTILINE)
+    named = {}
+    for cfg in sorted(game.glob("MISSIONS/**/mission.cfg")):
+        found = pattern.findall(cfg.read_text(errors="replace"))
+        if found:
+            named[cfg.parent.relative_to(game / "MISSIONS").as_posix()] = [int(x) for x in found]
+    shell_cfg = game / "ui" / "shell_ctrls.cfg"
+    shell = settings.switches(shell_cfg) if shell_cfg.is_file() else {}
+    menu = re.search(r"main_menu_track\s*=\s*(-?\d+)",
+                     shell_cfg.read_text(errors="replace"))
+    check("mission.cfg: only CAMPAIGN.01/Mission.01 names a cd_track (3); the main menu's is -1",
+          named == {"CAMPAIGN/CAMPAIGN.01/Mission.01": [3]} and menu and menu.group(1) == "-1",
+          f"cd_track {named}; main_menu_track {menu.group(1) if menu else None} "
+          f"({len(shell)} shell switches)")
+    winmm = (game / "winmm.dll").read_bytes() if (game / "winmm.dll").is_file() else b""
+    check("winmm.dll names a CD track's file as %s\\Track%02d.ogg",
+          b"%s\\Track%02d.ogg\x00" in winmm, f"{len(winmm)} bytes")
+
+
 def check_sounds(check, game: Path) -> None:
     """Sound emitters, the gun arms' sounds and the hero's footsteps."""
     library = effects.EffectLibrary(game / "effects.rlb")
@@ -6573,9 +6606,37 @@ def check_sounds(check, game: Path) -> None:
           f"{dict(step_shape)} (mode, duration, emitters, sound, loops, window) over "
           f"{sorted(fx.name for fx in steps)}")
 
+    rates: Counter[tuple[float, float]] = Counter()
+    ds3d_modes: Counter[float] = Counter()
+    for fx in library:
+        for e in fx.emitters:
+            if e.is_sound:
+                rates[tuple(round(v, 3) for v in struct.unpack_from("<2f", e.body, 72))] += 1
+                ds3d_modes[struct.unpack_from("<f", e.body, 80)[0]] += 1
+    check("FXID: a sound's +72/+76 is a playback rate of 1, and +80 the DS3DBUFFER mode 0",
+          rates[(1.0, 1.0)] == 516 and rates[(0.8, 1.0)] == 1 and sum(rates.values()) == 517
+          and ds3d_modes == Counter({0.0: 517}),
+          f"+72/+76 {dict(rates)}; +80 {dict(ds3d_modes)} (Ngi32.dll:0x1000e443 multiplies the "
+          f"sample's frequency by it; DS3DMODE_NORMAL is 0)")
+    breath_fx = library.get("hero_breath")
+    check("FXID: hero_breath loops in time mode 2 with header flag 0x800 and without 0x10",
+          breath_fx is not None and breath_fx.mode == 2 and breath_fx.flags & 0x800
+          and not breath_fx.flags & 0x10 and abs(breath_fx.duration - 3.0) < 1e-6,
+          f"mode {breath_fx.mode if breath_fx else None}, flags "
+          f"{hex(breath_fx.flags) if breath_fx else None}, "
+          f"{breath_fx.duration if breath_fx else None} s")
+
     names = frozenset(p.name.lower() for p in all_archives(game))
     turrets = NResArchive.open(game / "turrets.rlb")
     turret = control.parse(turrets.read_name("o_tur_ht_02.ctl"), names)
+    breath_ref = [r for r in turret.references if r.resource.member.lower() == "hero_breath"]
+    check(".ctl: the hero's turret makes hero_breath at load on points 20-22, and nothing starts, "
+          "stops or switches it",
+          len(breath_ref) == 1 and breath_ref[0].action == control.ACT_EFFECT_POINTS
+          and breath_ref[0].group == 0 and breath_ref[0].args == (20, 22, 21, 4)
+          and not [r for r in turret.references if r.action in (8, 10, 11, 18, 19)
+                   and r.args[0] == 4],
+          f"{[(r.group, r.action, r.args) for r in breath_ref]}")
     arm_nodes = {11, 7, 19, 15}
     arm_channels = [ch for ch in turret.channels if ch.node in arm_nodes and ch.first == 42.0]
     check(".ctl: the hero's arm channels carry no flag, so their nodes' values run 0 to 1",
@@ -20588,7 +20649,8 @@ def run(game: Path) -> int:
         check_render_state, check_blend_depth, check_minimap_agreement, check_arealmap,
         check_grid, check_missions, check_scale, check_objects, check_poses, check_lod,
         check_damage, check_node_stages,
-        check_effects, check_effect_timing, check_sounds, check_actions, check_footprints,
+        check_effects, check_effect_timing, check_sounds, check_music, check_actions,
+        check_footprints,
         check_rsli,
         check_control, check_efficiency, check_mission_03_economy,
         check_motion, check_playback, check_ground, check_sensors, check_hit_test,

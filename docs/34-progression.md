@@ -1106,6 +1106,69 @@ in this order:
   key exists (`0x1005f8f1`). When one plays, and how day or night picks among
   them, is not read.
 
+## Music: the CD's tracks — *read*, and *measured*
+
+The music is not a sound resource. It is **audio CD tracks**, which the Steam
+install ships as `MUSIC/Track02.ogg` to `Track10.ogg` (nine files) beside a
+`winmm.dll` whose only string about them is `%s\Track%02d.ogg`: a CD track *n*
+is `Track`*nn*`.ogg` (*measured*; the `winmm.dll` is third-party and not read).
+Track 1, the data track, has no file.
+
+**The player.** `iron3d.dll`'s `createSubsystems` (`0x1005b6d0`) makes a CD
+player object (`0x1008e260`, one global at `0x1010b608`):
+
+- it reads `Iron_3D.ini`'s `PLAY_CD_MUSIC` as an integer, and a 0 there turns
+  every play into a no-op (`0x1008e2dd`–`0x1008e329`);
+- it opens the CD through `Ngi32.dll`'s 3D sound (`0x1008e390`, its slot 9,
+  `0x1000cc30`) with `FORCE_CD_SOUND` (`0x1005bb8c`), and keeps the track count
+  and whether track 1 is audio (the CD object's slots 6 and 8, `0x1000ef30` and
+  `0x1000f050`; `MCI_STATUS_NUMBER_OF_TRACKS`, and `MCI_CDA_STATUS_TYPE_TRACK`
+  against `MCI_CDA_TRACK_AUDIO`);
+- it reads `SFX_VOLUME` and `CD_VOLUME` as integers and hands each on × 0.01
+  (`0x1005ba69`–`0x1005ba80`, `0x1005bb41`–`0x1005bb58`), which `Ngi32.dll` sets
+  as that share of a mixer control's range (`0x1000cf5c`–`0x1000cfec`).
+
+The install sets `PLAY_CD_MUSIC=1`, `SFX_VOLUME=12`, `CD_VOLUME=12` and
+`FORCE_CD_SOUND=".\MUSIC\"` (*measured*).
+
+**Playing a track** (`Ngi32.dll`'s CD object, vtable `0x1003178c`). It opens
+MCI's `cdaudio` in tracks-minutes-seconds-frames (`0x1000ec50`). Play
+(`0x1000ed60`) plays track index + 1 from its start to the next track's; its
+flag 2 marks the track as looping, and it notes when the track will have run,
+now plus the track's length (`0x1000ee25`). Each tick of the 3D sound
+(`0x1000ca42`–`0x1000ca85`), 2 s past that time and once MCI's mode reads 2, a
+looping track is played again from its start, and any other is marked
+finished (`+0x3c`).
+
+**Which track** (`0x1008e4d0`, with a loop flag). With one track that is audio,
+track index 0; with two and track 1 not audio, index 1; with more, `rand()` over
+the count until the pick differs from the track playing and is not index 0
+unless track 1 is audio. So the install's CD plays a random one of tracks 2 to
+10, never the same twice running.
+
+**When** (`iron3d.dll`):
+
+- **At a mission's load**, unless a briefing is running (state word 5), a random
+  track (`0x1005e1ca`).
+- **At a briefing's start** the CD stops (`0x10031431`), and `mission.cfg`'s
+  `cd_track`, when there is one, plays looping (`0x10031500`; its argument 1
+  becomes the loop flag 2).
+- **Every game frame outside a briefing**, when the player's track is marked
+  finished, another random track (`0x1005ea34`–`0x1005ea4e`, no loop).
+
+So a mission with no `cd_track` is silent through its briefing and starts a
+random track on the first frame after it, and moves to another random track
+2 s after each ends (*derived*). *Measured*: only `CAMPAIGN.01/Mission.01`
+names a `cd_track` (3), and it is a briefing alone; `ui/shell_ctrls.cfg`'s `main_menu_track` is −1, "play
+random track".
+
+**Against Mission 01's recording** (*measured*): `Track07.ogg`'s first 20 s is
+found in the recording's audio at 99.65 s (normalised correlation 0.44; no other
+track above 0.07), the moment the briefing hands over. Twenty seconds on, the
+recording is 9.8 dB under the file's own level over the same span, where a voice
+sits 11.8 dB under its file: music and sounds come out alike, as the equal
+`CD_VOLUME` and `SFX_VOLUME` say.
+
 ## Not established
 
 - The clock unit of the behaviour takt that times the route reports.
