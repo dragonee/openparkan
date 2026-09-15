@@ -164,6 +164,54 @@ engineering such as terrain culling or drawing the sky's textures.
 - [ ] What `TRF1`'s directory flag does beyond the debug warning.
 - [ ] What the landscape, camera and atmosphere component constructors read.
 
+## Mission 02, *The Constructor*
+
+Added on 2026-09-15 against `4f3a16e`, after the Outpost island's landing was fixed in M14.
+[34-progression](docs/34-progression.md#not-established), [36-factory](docs/36-factory.md#not-established),
+[37-designer](docs/37-designer.md#not-established), [38-designs](docs/38-designs.md#not-established),
+[39-boarding](docs/39-boarding.md#not-established), [24-motion](docs/24-motion.md#not-established),
+[31-packages](docs/31-packages.md#not-established)
+
+**Where the engine is weaker than the game**
+
+- [ ] The Large Factory's front door: its hall way does not lead to the pod, so the engine's way in is the west side door, which the recording's hero takes.
+- [ ] [M11] The chimney smoke is orange where the recording's plumes are black: an effect sprite samples its material's first cell (`fire_smoke`'s) and never plays the track.
+- [ ] [M12] The medusas stand still. An animal's migration over its clan's pastures is not modelled, so the fight the recording shows from 195 to 218 s, two medusas high over the ground and green acid landing round the hero, never happens. Also not read: what their attack does with the migrate task's figures and circle, and how a flyer's migration point, at the pasture centre's height, meets its flying height.
+- [ ] [M14] When `AniMesh.dll` works an agent's sphere and its node sphere out again (`0x10009510`), and at which pose. The engine works both out once, at rest, as the unit is made; they set how high a landed flyer stands, and so where the hero can get out.
+- [ ] The minds: the recording's factory shows the hero holding one of the player's two, the same question as Mission 04's which unit holds none.
+
+**The factory screen and production**
+
+- [ ] What puts the capture and the factory screen on one frame.
+- [ ] [M11] How the cursor is shown in view mode 5 (the engine: the system's cursor), and the fill colour the resource rows hand their bar (the engine: the weapons list's).
+- [ ] Whether the designer pauses the world (the level's flag bit 8), and whether the `Mission` handler runs while a building's screen or the designer is up (the pause byte `+0xe8`).
+- [ ] What handing the hero back does to it while the screen is up, and whether the player's keys still move it.
+- [ ] The heading the escape leaves a new bot with, whether a flyer climbs on its way out, and [M11] which areals the escape's random points must be on.
+- [ ] What commander pages 1–4 and 6–8 show from first person.
+
+**The warbot designer**
+
+- [ ] [M11] That the factory record's `+0x30`, the grade the chassis page is taken over, is the building's size class.
+- [ ] [M11] The part box: `Epower`, the properties behind `regener`, `capacity`, `throughput`, `shotnum` and `blast`, and the formatter that prints one decimal whatever the template asks.
+- [ ] [M11] What the turret fit does to guns on a turret it replaces, and the gun fit to a clip on a gun it replaces.
+- [ ] [M11] Which destination row a tab selects as it turns on, which tab the panels turn to after a fit (only *seen*), and when fitting a chassis enables Armour (`0x10052491`).
+- [ ] [M11] The previews' camera (which way it looks, the axis of its −0.5 rad pitch, which side its 60° field spans, its lights' colours), and how a scan band's green specular lights its strip.
+- [ ] What the driven unit's property flag `0x8` gates while the designer is open; how the font's colour slot turns a row's colours into text; who fills the recent projects' count (`+0xb8e0`); the destination panel's own draw and takt; the tooltip's box and timing.
+
+**Boarding, flying and getting out**
+
+- [ ] [M11] The heading the hero is given on leaving, read as (F.x, −F.y) under an assumed matrix layout; the engine turns the hero to face the bot, as the recording shows.
+- [ ] [M11] Which of a turret's nodes the boarding test's property `0x52` reads the life of.
+- [ ] [M11] The name a bot's gun takes in the weapons list (`0x1008a470`, not followed).
+- [ ] Why the recording's bot came to the hero between 236 and 249 s: an order the player gave, or its own behaviour after production.
+- [ ] Whether a detached hero stays in the collision manager's or the areal map's lists, and what game messages `0x3f1` and `0x3f2` carry.
+
+**Walking into the Large Factory**
+
+- [ ] [M11] What `CBuilding` does to a door's or a pod's switch word as it files the item, and the capsule a door is measured against (`Terrain.dll:0x1005a27f`).
+- [ ] [M11] The patch and basement faces a building's insertion stitches in, and where a gathered face's batch word comes from (the engine lets movers through the `DEFAULT` and `PORTAL` materials' faces).
+- [ ] [M11] Whether the slope brake reads a building's stair faces, and who sets a collision object's flags, so which movers keep the floors in their push-out.
+
 ## Mission 03, *The Field Base*
 
 Added on 2026-09-15 against `950af7e`, after M12 made the mission winnable end to end.
@@ -240,7 +288,7 @@ briefing's route. [40-command-mode](docs/40-command-mode.md#not-established),
 - [ ] Turret pitch and altitude as the user saw it. Measured: pitch moves neither a flyer nor its eye. Explained as rising ground lifting a low flyer, which never sinks back without F (read, `0x1001b3c3`); not confirmed in a window.
 - [ ] Tooltips (the research rows' 6251/6252, the batch button's 6243), the maps' route lines and the selected unit's white outline: not drawn.
 - [ ] [M13] The research box's name colour and its clip 5; the part preview draws larger than the game's.
-- [ ] Mission 02's leaving places moved with the joined sphere: the hero now gets out at the fourth place, and the end-to-end test lands by the Outpost. It is backed only by the recording's altitude reading 11.
+- [x] ~~Mission 02's leaving places moved with the joined sphere~~ — closed in M14: the ground contact holds a machine about its node sphere's centre with the joined sphere's radius (read), so a landed L-2f stands 9.67 over flat ground and the whole island lets the hero out. The recording's 11 on landing and the hero's 3 on the same ground fit it ([24-motion](docs/24-motion.md#finding-the-ground--read), [39-boarding](docs/39-boarding.md#against-the-recording--seen)). Open still: see [Mission 02](#mission-02-the-constructor).
 
 **The HQ's command view**
 
