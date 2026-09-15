@@ -563,6 +563,13 @@ presses a hero standing at it down), and which of Mission 04's units holds no mi
 - The hero's breath is not heard (docs/11, "How a sound is heard"): Mission 01's recording
   has no `H_breath.wav`, so the hero's own turret effects flagged `0x800` play no sound,
   while they update as ever.
+- Explosions, shots and steps fade with distance as Direct3D Sound fades them, which the game's
+  sound server hands every emitter's sound to (docs/11, "How a sound is heard"): whole within
+  the emitter's near distance, then near ÷ distance, no quieter past its far distance, 6 dB a
+  doubling where the old straight line from near to far lost barely 1 dB by twice the near
+  distance. A one-shot farther than its far distance is not played, and stops once it gets
+  there; a loop plays on. Every update hands a playing sound its emitter's place again, so its
+  gain and pan follow the emitter and the eye.
 
 This directory also holds what the rest will follow:
 
@@ -758,7 +765,7 @@ a row here. A row leaves this table when research closes it.
 | M4 | How often an effect instance tests its point's view, and what the ray through the world meets | every frame, against what a round meets (the ground less its water surface, and every live object's level-0 mesh) | [11](../docs/11-effects.md#bit-8-and-the-tested-point--read-and-measured) |
 | M4 | What a building (a `CBuilding` aggregating its agent) answers for a strike's material, and a node's wear base | a strike on a building plays slot 0; the batch's material byte alone indexes the wear | [11](../docs/11-effects.md#what-an-explosion-plays--read-and-measured) |
 | M4 | The effect manager's random generator | any uniform generator | [11](../docs/11-effects.md#how-an-effect-runs--read) |
-| M5 | How a sound falls off between its near and far distances, and how it is panned | linear in distance; panned by its direction against the eye's right | [11](../docs/11-effects.md#emitter-types--read-and-measured) |
+| M5 | How Direct3D Sound places a sound between the speakers | panned by its direction against the eye's right | [11](../docs/11-effects.md#not-resolved) |
 | M5 | How the game turns a string's characters into the font's glyph indices | ASCII as its own index; Cyrillic by code page 866, where the font draws it (А–Я at 0x80, а–п at 0xA0, р–я at 0xE0); anything else draws `?` | [12](../docs/12-rsli.md#what-is-inside) |
 | M5 | How tall a glyph is drawn and how far apart lines are: a record has no bottom edge | the atlas's row pitch, 18 pixels, for both | [12](../docs/12-rsli.md#what-is-inside) |
 | M5 | How far the pen moves after a glyph | its advance: a recording of Mission 01's win measures it on the interface's menu font (each glyph of "MISSION COMPLETE !" starts its advance after the last, the space's 6 included), and the game font is taken to space the same way | [12](../docs/12-rsli.md#what-is-inside) |
@@ -851,7 +858,6 @@ engine pass replaces each with what was read and removes its row.
 | M6 | Whether a type-5 descriptor loops its sound, and when the ambient variations play | the theme loops from the mission's load; the variations are not played | [34](../docs/34-progression.md#ambient-sound--read-in-part) |
 | M7 | Which pose the live contact record's height comes from when the loader decides which states plant a foot | the rest pose | [13](../docs/13-control.md#a-footstep-end-to-end--read-and-measured) |
 | M7 | A contact's node life, which decides whether a foot can land | every contact is intact | [13](../docs/13-control.md#section-1s-conditions-are-contacts--read-and-measured) |
-| M7 | How a playing sound's position, near, far and volume become gain | a sound keeps the linear gain and pan it started with, a loop included | [11](../docs/11-effects.md#type-2-is-a-sound--read-and-measured) |
 | M7 | The class the small-face stop reads | the hero's class is its size class, 2, so small faces never stop it | [24](../docs/24-motion.md#collision-between-objects--read) |
 | M7 | The batch flags 8 and 0x200 a collision's face query passes, and the batch word's 2 that makes a hider hide both ways: a mesh's batch record carries no such word | no batch passes, and every hider hides from its front only | [24](../docs/24-motion.md#collision-between-objects--read) |
 | M7 | Which pairs the collision pass moves besides the hero's | the hero is always the mover and nothing else is pushed | [24](../docs/24-motion.md#collision-between-objects--read) |

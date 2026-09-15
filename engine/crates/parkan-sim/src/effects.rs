@@ -66,6 +66,9 @@ pub enum CueKind {
     Loop,
     /// Stop the loop with this cue's key.
     Stop,
+    /// Where the sound with this cue's key is now, while it plays (`0x1001300b`): the
+    /// server is handed its position, near and far each update. Its `sound` is empty.
+    Move,
 }
 
 /// A sound to play: a type-2 emitter's `sounds.lib` member, where, and the distances
@@ -144,6 +147,8 @@ pub struct Instance {
     /// The sound emitters' previous time (`+0x9c`), 0 at load, and the loops playing.
     heard_t: f32,
     looping: Vec<usize>,
+    /// The one-shots started, which may still be playing.
+    sounding: Vec<usize>,
     streams: Vec<Stream>,
     /// Seconds since the start, and where the effect was, at the last update.
     updated: Option<(f32, Vec3)>,
@@ -225,6 +230,7 @@ impl Instance {
             silent: false,
             heard_t: 0.0,
             looping: Vec::new(),
+            sounding: Vec::new(),
             streams,
             updated: None,
         }
@@ -341,7 +347,8 @@ impl Instance {
     /// takes a *t* of exactly 1 as 0 (`0x10012f2d`) and plays when the previous time is
     /// at or below both that *t* and its trigger +8, and the trigger is below *t*; the
     /// taken *t* becomes the previous time. A loop plays while low +8 ≤ *t* ≤ high +12 and
-    /// stops outside (`0x10012fca`, `0x10013008`).
+    /// stops outside (`0x10012fca`, `0x10013008`). Every sound started and not stopped is
+    /// then told where it is now (`0x1001300b`).
     pub fn cues(&mut self, now_ms: f64) -> Vec<Cue> {
         if !self.on || self.silent {
             return Vec::new();
@@ -374,8 +381,22 @@ impl Instance {
                     out.push(cue(CueKind::Stop));
                 }
             } else if before <= taken && before <= e.f(8) && e.f(8) < taken {
+                if !self.sounding.contains(&i) {
+                    self.sounding.push(i);
+                }
                 out.push(cue(CueKind::Once));
             }
+        }
+        for &i in self.looping.iter().chain(&self.sounding) {
+            let e = &self.effect.emitters[i];
+            out.push(Cue {
+                sound: String::new(),
+                position: self.frame.origin,
+                near: e.f(64),
+                far: e.f(68),
+                key: (self.id, i),
+                kind: CueKind::Move,
+            });
         }
         out
     }
@@ -566,6 +587,11 @@ mod tests {
     use parkan_formats::fxid::{Header, TIME_MANUAL, TIME_POINT, TIME_SPEED};
     use parkan_formats::objects::ResourceRef;
 
+    /// The cues that start or stop a sound, leaving out where the playing ones are.
+    fn heard(fx: &mut Instance, now_ms: f64) -> Vec<Cue> {
+        fx.cues(now_ms).into_iter().filter(|c| c.kind != CueKind::Move).collect()
+    }
+
     fn block(kind: u8, size: usize, floats: &[(usize, f32)], material: &str) -> Emitter {
         let mut body = vec![0u8; size];
         body[0] = kind;
@@ -706,17 +732,22 @@ mod tests {
         let shot = block(2, 148, &[(8, 0.01), (12, 1.0), (64, 10.0), (68, 80.0)], "h_fire_cannon.wav");
         let frame = Frame::along(Vec3::ONE, Vec3::X, 1.0);
         let mut fx = Instance::new(effect(TIME_POINT, 0.0, 0, vec![shot]), frame, 1.0, 0.0, None, 1);
-        assert!(fx.cues(0.0).is_empty(), "t 0 is short of 0.01");
+        assert!(heard(&mut fx, 0.0).is_empty(), "t 0 is short of 0.01");
         fx.value = 0.5;
-        let cues = fx.cues(10.0);
+        let cues = heard(&mut fx, 10.0);
         assert_eq!(cues.len(), 1);
         assert_eq!((cues[0].position, cues[0].near, cues[0].far), (Vec3::ONE, 10.0, 80.0));
         fx.value = 1.0;
-        assert!(fx.cues(20.0).is_empty(), "already past");
+        assert!(heard(&mut fx, 20.0).is_empty(), "already past");
         fx.value = 0.0;
-        assert!(fx.cues(30.0).is_empty());
+        assert!(heard(&mut fx, 30.0).is_empty());
         fx.value = 0.5;
-        assert_eq!(fx.cues(40.0).len(), 1, "the next stroke");
+        assert_eq!(heard(&mut fx, 40.0).len(), 1, "the next stroke");
+        // While it may still play, each update says where it is now.
+        fx.frame.origin = Vec3::new(5.0, 0.0, 0.0);
+        let moves: Vec<Cue> = fx.cues(50.0).into_iter().filter(|c| c.kind == CueKind::Move).collect();
+        assert_eq!(moves.len(), 1);
+        assert_eq!((moves[0].position, moves[0].key, moves[0].far), (Vec3::new(5.0, 0.0, 0.0), (0, 0), 80.0));
     }
 
     #[test]
@@ -730,10 +761,10 @@ mod tests {
         fx.value = 0.5;
         let mut out = Vec::new();
         fx.sprites(0.0, true, &mut out);
-        assert!(!fx.on && out.is_empty() && fx.cues(0.0).is_empty());
+        assert!(!fx.on && out.is_empty() && heard(&mut fx, 0.0).is_empty());
         fx.on = true;
         fx.sprites(10.0, true, &mut out);
-        assert!(!out.is_empty() && fx.cues(10.0).len() == 1);
+        assert!(!out.is_empty() && heard(&mut fx, 10.0).len() == 1);
     }
 
     #[test]
@@ -743,39 +774,39 @@ mod tests {
         let frame = Frame::along(Vec3::ZERO, Vec3::X, 1.0);
         let mut fx = Instance::new(effect(TIME_POINT, 0.0, 0, vec![arm]), frame, 1.0, 0.0, None, 1);
         fx.value = 0.5;
-        assert_eq!(fx.cues(0.0).len(), 1, "unfolding past 0.15");
+        assert_eq!(heard(&mut fx, 0.0).len(), 1, "unfolding past 0.15");
         fx.value = 1.0;
-        assert!(fx.cues(10.0).is_empty(), "out: 1 is taken as 0");
+        assert!(heard(&mut fx, 10.0).is_empty(), "out: 1 is taken as 0");
         fx.value = 0.9;
-        assert_eq!(fx.cues(20.0).len(), 1, "folding: from 0 past 0.15 again");
+        assert_eq!(heard(&mut fx, 20.0).len(), 1, "folding: from 0 past 0.15 again");
         fx.value = 0.5;
-        assert!(fx.cues(30.0).is_empty());
+        assert!(heard(&mut fx, 30.0).is_empty());
         // Folded from short of 1: silent.
         fx.value = 0.8;
-        fx.cues(40.0);
+        heard(&mut fx, 40.0);
         fx.value = 0.3;
-        assert!(fx.cues(50.0).is_empty());
+        assert!(heard(&mut fx, 50.0).is_empty());
 
         let breath =
             with_word(block(2, 148, &[(8, 0.2), (12, 0.8), (64, 1.0), (68, 4.0)], "H_breath.wav"), 4, 2);
         let mut fx = Instance::new(effect(TIME_POINT, 0.0, 0, vec![breath]), frame, 1.0, 0.0, None, 1);
         fx.id = 7;
         fx.value = 0.1;
-        assert!(fx.cues(0.0).is_empty());
+        assert!(heard(&mut fx, 0.0).is_empty());
         fx.value = 0.5;
-        let start = fx.cues(10.0);
+        let start = heard(&mut fx, 10.0);
         assert_eq!((start.len(), start[0].kind, start[0].key), (1, CueKind::Loop, (7, 0)));
-        assert!(fx.cues(20.0).is_empty(), "still playing");
+        assert!(heard(&mut fx, 20.0).is_empty(), "still playing");
         fx.value = 0.9;
-        assert_eq!(fx.cues(30.0)[0].kind, CueKind::Stop);
+        assert_eq!(heard(&mut fx, 30.0)[0].kind, CueKind::Stop);
         fx.value = 0.5;
-        fx.cues(40.0);
+        heard(&mut fx, 40.0);
         assert_eq!(fx.silence()[0].kind, CueKind::Stop, "the instance goes");
 
         let mut quiet = Instance::new(fx.effect.clone(), frame, 1.0, 0.0, None, 1);
         quiet.silent = true;
         quiet.value = 0.5;
-        assert!(quiet.cues(10.0).is_empty(), "a silent instance starts no loop");
+        assert!(heard(&mut quiet, 10.0).is_empty(), "a silent instance starts no loop");
     }
 
     #[test]

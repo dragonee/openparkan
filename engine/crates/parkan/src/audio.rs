@@ -4,11 +4,12 @@
 use std::collections::{HashMap, VecDeque};
 use std::io::Cursor;
 use std::path::Path;
+use std::time::Duration;
 
 use glam::Vec3;
 use kira::sound::PlaybackState;
 use kira::sound::static_sound::{StaticSoundData, StaticSoundHandle};
-use kira::{AudioManager, AudioManagerSettings, Decibels, DefaultBackend, Panning};
+use kira::{AudioManager, AudioManagerSettings, Decibels, DefaultBackend, Panning, Tween};
 use parkan_formats::gamedir;
 use parkan_formats::nres::Archive;
 use parkan_sim::effects::{Cue, CueKind};
@@ -29,19 +30,24 @@ pub struct Audio {
     onces: HashMap<(u64, usize), StaticSoundHandle>,
 }
 
-/// How loud a cue is heard `distance` away: whole within `near`, nothing past `far`.
-///
-/// STAND-IN: docs/11-effects.md#emitter-types--read-and-measured -- a sound's near and
-/// far distances are read; the falloff between them is not, and is taken as linear.
+/// How loud a cue is heard `distance` away, as Direct3D Sound hears a buffer whose
+/// minimum distance is `near` and maximum `far` (docs/11, "How a sound is heard"): whole
+/// within `near`, then `near ÷ (near + R × (d − near))` with the listener's rolloff R of 1,
+/// no quieter past `far`.
 pub fn gain(distance: f32, near: f32, far: f32) -> f32 {
     if distance <= near {
         1.0
-    } else if distance >= far || far <= near {
-        0.0
     } else {
-        (far - distance) / (far - near)
+        let d = distance.min(far.max(near));
+        if d <= 0.0 { 0.0 } else { near.max(0.0) / (near.max(0.0) + ROLLOFF * (d - near.max(0.0))) }
     }
 }
+
+/// The listener's rolloff factor, which nothing sets (`Ngi32.dll:0x1000d123`).
+const ROLLOFF: f32 = 1.0;
+
+/// How long a playing sound takes to reach its new gain and pan.
+const MOVE_TWEEN: Duration = Duration::from_millis(30);
 
 impl Audio {
     /// The audio device and `sounds.lib`, or `None` when either is missing.
@@ -130,37 +136,57 @@ impl Audio {
 
     /// Play `cue` as heard at `eye`, whose right is `right`.
     ///
-    /// STAND-IN: docs/11-effects.md#emitter-types--read-and-measured -- how a sound is
-    /// placed between the speakers is not read; it pans by its direction.
+    /// STAND-IN: docs/11-effects.md#not-resolved -- how Direct3D Sound places a sound
+    /// between the speakers is not read; it pans by its direction.
     pub fn play(&mut self, cue: &Cue, eye: Vec3, right: Vec3) {
-        if cue.kind == CueKind::Stop {
-            if let Some(mut handle) = self.loops.remove(&cue.key) {
-                handle.stop(Default::default());
-            }
-            return;
-        }
         let offset = cue.position - eye;
-        let g = gain(offset.length(), cue.near, cue.far);
-        if g <= 0.0 {
-            return;
-        }
-        let Some(sound) = self.sound(&cue.sound) else { return };
-        let pan = offset.normalize_or_zero().dot(right.normalize_or_zero()).clamp(-1.0, 1.0);
-        let volume = Decibels((20.0 * g.log10()).max(Decibels::SILENCE.0));
-        let sound = sound.volume(volume).panning(Panning(pan));
-        if cue.kind == CueKind::Loop {
-            // STAND-IN: docs/11-effects.md#type-2-is-a-sound--read-and-measured -- a playing
-            // sound's position, near, far and volume go to the server each update; how they
-            // become gain is not read, and a loop keeps the gain and pan it started with.
-            if let Ok(handle) = self.manager.play(sound.loop_region(..)) {
-                self.loops.insert(cue.key, handle);
+        let distance = offset.length();
+        let volume = Decibels((20.0 * gain(distance, cue.near, cue.far).log10()).max(Decibels::SILENCE.0));
+        let pan = Panning(offset.normalize_or_zero().dot(right.normalize_or_zero()).clamp(-1.0, 1.0));
+        match cue.kind {
+            CueKind::Stop => {
+                if let Some(mut handle) = self.loops.remove(&cue.key) {
+                    handle.stop(Default::default());
+                }
             }
-        } else {
-            if let Some(mut old) = self.onces.remove(&cue.key) {
-                old.stop(Default::default());
+            // A playing sound follows its emitter each update; a one-shot past its far
+            // distance is stopped (`Ngi32.dll:0x1000e51b`), a loop plays on.
+            CueKind::Move => {
+                let tween = Tween { duration: MOVE_TWEEN, ..Default::default() };
+                if let Some(handle) = self.loops.get_mut(&cue.key) {
+                    handle.set_volume(volume, tween);
+                    handle.set_panning(pan, tween);
+                }
+                let done = self.onces.get(&cue.key).is_some_and(|h| h.state() == PlaybackState::Stopped);
+                if done {
+                    self.onces.remove(&cue.key);
+                } else if let Some(handle) = self.onces.get_mut(&cue.key) {
+                    if distance > cue.far {
+                        handle.stop(Default::default());
+                        self.onces.remove(&cue.key);
+                    } else {
+                        handle.set_volume(volume, tween);
+                        handle.set_panning(pan, tween);
+                    }
+                }
             }
-            if let Ok(handle) = self.manager.play(sound) {
-                self.onces.insert(cue.key, handle);
+            CueKind::Loop => {
+                let Some(sound) = self.sound(&cue.sound) else { return };
+                if let Ok(handle) = self.manager.play(sound.volume(volume).panning(pan).loop_region(..)) {
+                    self.loops.insert(cue.key, handle);
+                }
+            }
+            CueKind::Once => {
+                if let Some(mut old) = self.onces.remove(&cue.key) {
+                    old.stop(Default::default());
+                }
+                if distance > cue.far {
+                    return;
+                }
+                let Some(sound) = self.sound(&cue.sound) else { return };
+                if let Ok(handle) = self.manager.play(sound.volume(volume).panning(pan)) {
+                    self.onces.insert(cue.key, handle);
+                }
             }
         }
     }
@@ -186,9 +212,11 @@ mod tests {
     }
 
     #[test]
-    fn a_cue_is_whole_inside_its_near_distance_and_silent_past_its_far() {
+    fn a_cue_is_whole_inside_its_near_distance_and_falls_as_near_over_distance_to_its_far() {
         assert_eq!(gain(5.0, 10.0, 80.0), 1.0);
-        assert_eq!(gain(45.0, 10.0, 80.0), 0.5);
-        assert_eq!(gain(90.0, 10.0, 80.0), 0.0);
+        assert_eq!(gain(20.0, 10.0, 80.0), 0.5, "6 dB a doubling");
+        assert_eq!(gain(40.0, 10.0, 80.0), 0.25);
+        assert_eq!(gain(90.0, 10.0, 80.0), 0.125, "no quieter past far");
+        assert_eq!(gain(1000.0, 10.0, 80.0), 0.125);
     }
 }
