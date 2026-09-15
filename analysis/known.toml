@@ -24220,3 +24220,675 @@ kind = "datum"
 name = "a dword the command view transitions clear; not followed"
 read = true
 doc = "docs/40-command-mode.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10033e40"
+kind = "function"
+name = "a building's turret reads dead: owner word 0xfffe, or its first class-1 component's value 0x52 not above 0"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10033ea0"
+kind = "function"
+name = "a builder of the player's clan heads off to build a Type: head order 7 with that Type as its parameter"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10034010"
+kind = "function"
+name = "build row test: refused with no research tree, a clan building of the Type, a builder already sent, or parts of the scheme's first .dat unresearched"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10034230"
+kind = "function"
+name = "upgrade row test for one building (not followed)"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100344c0"
+kind = "function"
+name = "a building is building itself: property 0x20c non-zero"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100344e0"
+kind = "function"
+name = "a building row's icon: 15x15 ui_menu cell by Type, tinted by record +0x30 (1 white, 2 red, 3 green, 4 blue)"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100571a0"
+kind = "function"
+name = "set the cursor kind 0x10104148 (0..10) and its cursor sprite"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10057619"
+kind = "site"
+name = "cursor kinds 0 and 8: no cursor sprite"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1005eb3f"
+kind = "site"
+name = "game loop: the screens takt 0x1008d5f0 once an iteration"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10062ce0"
+kind = "function"
+name = "CState roll back to a mode: pops while more than one record and the front is not the mode (0, 0: to the hero)"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100714d0"
+kind = "function"
+name = "mouse press: stamps the press, then the interface's handler 0x1008d690"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100729a0"
+kind = "function"
+name = "the first building of a clan whose Type lies within a mask, on the level's building list +0x71c"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100756dc"
+kind = "site"
+name = "unit record takt: 0.6 s after Explode! clear +0x135 and call the object's slot 7"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10075fa0"
+kind = "function"
+name = "Explode!: set the unit record's +0x135 and stamp +0x12c"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10076e70"
+kind = "function"
+name = "the selected units of the player's clan, only while the game's +0x08 is 4"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10077120"
+kind = "function"
+name = "a unit's two row icons: by Type (49/65/81, 110) and by property 0x207 (97/49/65/81, 94), tinted by +0x30"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1007a902"
+kind = "site"
+name = "order menu open: the seven build Types whose ownership it marks in its +0x34 map"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1007a9a6"
+kind = "site"
+name = "order menu open: a Type already marked owned stays marked"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1007aef9"
+kind = "site"
+name = "commander rows: the offered command ids sorted"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1007af92"
+kind = "site"
+name = "commander rows: duplicate command ids dropped"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1007b0bf"
+kind = "site"
+name = "commander row rect: 269 (0x10d) wide, 20 tall, 20 apart below the strip"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1007b1a0"
+kind = "function"
+name = "order menu place: x, y, and visible rows min(count, (454 - y) / 21)"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1007b1e0"
+kind = "function"
+name = "order menu draw: the Orders strip (158 box, scroll_up/down buttons) for the commander, then the visible rows"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1007b4a0"
+kind = "function"
+name = "order menu takt: rebuild every 2 s unless a row is pressed"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1007b510"
+kind = "function"
+name = "order menu click: press the row, BUTTON_CLICK, execute its command id"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1007bdec"
+kind = "table"
+name = "order row test's case table, commands 0-23"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1007d7f0"
+kind = "function"
+name = "the units of a clan whose Type lies within a mask, into a list"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1007db00"
+kind = "function"
+name = "building list walk for the command-mode markers (not followed)"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1007df50"
+kind = "function"
+name = "the buildings of a clan within a mask, less removed ones, into a list"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10081b50"
+kind = "function"
+name = "lode i of the areal map is found: its +0x0c reads 1"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10082550"
+kind = "function"
+name = "commander panel constructor: the column's twelve buttons, head, separator and lock, the unit box's sprites and tooltips, research, factory and resource panels"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10083733"
+kind = "site"
+name = "column draw: the hero button from slide step 1"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10083741"
+kind = "site"
+name = "column draw: the separator moved to y 41"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10083826"
+kind = "site"
+name = "column draw: the separator moved to y 345"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10083879"
+kind = "site"
+name = "column draw: the page only above slide step 15"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100839f8"
+kind = "table"
+name = "commander page draw's jump table, pages 1-8"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10083c00"
+kind = "table"
+name = "commander page header's title table, pages 1-8"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10083c20"
+kind = "site"
+name = "column init: open, 16 steps, the lock at y 457"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10083c60"
+kind = "function"
+name = "column update: the lock's slide, buttons enabled and lit, the page kept current"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10083d29"
+kind = "site"
+name = "column update: no lock handling while the CState front is mode 5"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10083d41"
+kind = "site"
+name = "column update: the mouse over the shut lock starts the slide out, BAR_OPEN"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10083e1d"
+kind = "site"
+name = "column update: one slide step every 0.05 s"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10084045"
+kind = "site"
+name = "column update: the page's upkeep by page"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100840a3"
+kind = "site"
+name = "column update: the order menu at (100, 118 + 20N)"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10084154"
+kind = "site"
+name = "column update: a page whose button is disabled turns to page 0"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1008427a"
+kind = "site"
+name = "commander click: no lock handling while the CState front is mode 5"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10084297"
+kind = "site"
+name = "commander click: the open lock starts the slide in, BAR_OPEN"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100843c6"
+kind = "site"
+name = "commander click: the hero button rolls the CState back to mode 0"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10084674"
+kind = "site"
+name = "commander click: the game menu button pushes CState mode 7"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1008470d"
+kind = "site"
+name = "commander click, pages 1-3: the unit box's buttons, the rows, the order menu"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10084b5c"
+kind = "table"
+name = "commander click's page controls jump table, pages 1-8"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10084e60"
+kind = "function"
+name = "select for a page: keep one selected of the mask, else the clan's first; rebuild the list and open the order menu"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10085100"
+kind = "function"
+name = "unit page list: the clan's units within a mask, page 0 when none, select the first when none selected"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100852b4"
+kind = "site"
+name = "unit page list: no units turns to page 0"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10085340"
+kind = "function"
+name = "building page rows: the clan's buildings within a mask, less those building themselves"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10085530"
+kind = "function"
+name = "unit page draw: box (51,20)-(369,117), 5076/one unit/5077, rows at 118 + 20i"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100857fc"
+kind = "site"
+name = "unit page draw: rows from y 118, 20 apart"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10085890"
+kind = "function"
+name = "one unit's box: icons, yellow name [status], unit lines at (122, 27), Manual/Gunner/Automatic/Strategic control/Explode! buttons"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100860a0"
+kind = "function"
+name = "commander row click: a unit alone selected and its order menu; a building selected, Strategic control -> mode 4, Manual -> mode 6"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10086256"
+kind = "site"
+name = "building row click: Manual enters CState mode 6 with the building"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100862d6"
+kind = "site"
+name = "building row click: Strategic control enters CState mode 4 with the bunker"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100898a0"
+kind = "function"
+name = "research panel draw (not followed)"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10089fd0"
+kind = "function"
+name = "research panel refresh on turning to page 4 (not followed)"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1008b130"
+kind = "function"
+name = "the parts of a .dat not yet researched by the clan, into a list"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1008d326"
+kind = "site"
+name = "screens draw: cursor kind 8 draws the commander panel's resource rows alone"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1008d5f0"
+kind = "function"
+name = "screens takt: the designer, the column update in CState modes 3-5, the open map"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1008d665"
+kind = "site"
+name = "screens takt: the column update in modes 3-5"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1008fe80"
+kind = "function"
+name = "mouse press on the world, past the interface (not followed)"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10095b30"
+kind = "function"
+name = "unit row widget constructor"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10095b80"
+kind = "function"
+name = "unit row draw: lamp, two icons, separator, emitter, 248 bar with name [status] over life, ending"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100961f0"
+kind = "function"
+name = "building row draw: lamp, icon, Strategic control (bunkers), Manual (bunkers, towers), bar to x 354"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x100965d0"
+kind = "function"
+name = "building row hit: 1 on Manual, 0 on Strategic control"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1009a7a0"
+kind = "function"
+name = "compound-control pen: small icon piece with a sprite and colour"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1009b730"
+kind = "function"
+name = "compound-control widget: set its rect"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1009bad0"
+kind = "function"
+name = "three-state button widget base: sprites +0x24/+0xb0/+0x13c, on +0x1c8"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1009bec0"
+kind = "function"
+name = "three-state button draw: disabled 0 grey 0xff646464, enabled 1 0xff80ff80, on 2 white, hovered 1/2 by turns"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1009bf61"
+kind = "site"
+name = "button draw: the hover blink every 0.1 s"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1009c030"
+kind = "function"
+name = "column button constructor: objpanel_button1-3, icon at (+16,+3), tooltip by string id"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1009c3a0"
+kind = "function"
+name = "column button draw and its tooltip"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1009c420"
+kind = "function"
+name = "column lock constructor: objpanel_lock1-3, objpanel_lock_icon at (+18,+7)"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1009c830"
+kind = "function"
+name = "order row draw: ending, emitter, 247 bar white or grey, full for 1 s after a press"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1009c89a"
+kind = "site"
+name = "order row draw: a press shows 1 s"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x1009c8e6"
+kind = "site"
+name = "order row draw with a number, the wingman menu's (not followed)"
+read = true
+doc = "docs/41-commander.md"
+
+[[entry]]
+module = "iron3d.dll"
+at = "0x10104148"
+kind = "datum"
+name = "the interface's cursor kind; 8 hides the commander panel but its resource rows"
+read = true
+doc = "docs/41-commander.md"

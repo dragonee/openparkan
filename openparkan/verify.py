@@ -16960,6 +16960,305 @@ def check_focus(check, game: Path) -> None:
           f"before createGame; each held byte of 0x1002a490 below 700 cleared and queued pressed 0")
 
 
+#: The commander panel's words (``iron3d.dll``'s string table), docs/41-commander.md.
+COMMANDER_STRINGS = {
+    1600: "Battle units", 1601: "Transports", 1602: "Builders", 5080: "Research Center",
+    1607: "Factory", 1614: "Battle tower buildings", 1608: "Bunker buildings",
+    1610: "Other buildings", 6205: "Unknown", 1612: "Strategic control off", 5038: "Chat",
+    1501: "Satellite map", 1302: "Game menu", 1502: "Manual", 1517: "Strategic control",
+    1518: "Automatic", 1519: "Gunner", 6169: "Close", 6244: "Explode!",
+    5076: "No bots selected", 5077: "%d bots selected", 5084: "Orders",
+}
+
+#: The column's buttons as the panel's constructor (``0x10082550``) makes them: the member,
+#: y, the icon and the tooltip id, top to bottom.
+COMMANDER_COLUMN = [
+    (0x10, 12, "objpanel_icon_hero", 1612), (0x14, 65, "objpanel_icon_warbots", 1600),
+    (0x1C, 94, "objpanel_icon_builder", 1602), (0x18, 123, "objpanel_icon_cargo", 1601),
+    (0x20, 176, "objpanel_icon_restree", 5080), (0x24, 229, "objpanel_icon_factory", 1607),
+    (0x28, 258, "objpanel_icon_tower", 1614), (0x2C, 287, "objpanel_icon_bunker", 1608),
+    (0x30, 316, "objpanel_icon_build", 1610), (0x34, 369, "objpanel_icon_chat", 5038),
+    (0x38, 399, "objpanel_icon_map", 1501), (0x3C, 428, "objpanel_icon_system", 1302),
+]
+
+#: The members the column's draw (``0x100836f0``) draws, in order, and the separator's four
+#: places: the head, then one item a step of the slide, the lock last.
+COMMANDER_DRAW_ORDER = [0x04, 0x10, 0x08, 0x14, 0x1C, 0x18, 0x08, 0x20, 0x08, 0x24, 0x28, 0x2C,
+                        0x30, 0x08, 0x34, 0x38, 0x3C, 0x0C]
+COMMANDER_SEPARATORS = [41, 152, 205, 345]
+
+#: The page each button opens (the click, ``0x100841a0``), the header's title of each page
+#: (``0x10083a20``), and what turning to a page selects (``0x10084d80``).
+COMMANDER_PAGES = {0x14: 1, 0x18: 2, 0x1C: 3, 0x20: 4, 0x24: 5, 0x28: 6, 0x2C: 7, 0x30: 8}
+COMMANDER_TITLES = [1600, 1601, 1602, 5080, 1607, 1614, 1608, 1610]
+COMMANDER_SELECTS = {1: 0x1018000, 2: 0x1002000, 3: 0x1004000, 5: 0x80000010, 6: 0x80300000,
+                     7: 0x80070000, 8: 0x8000044E}
+
+#: ``ui/hq.cfg`` pieces the panel draws: name -> (page, width, height).
+COMMANDER_PIECES = {
+    **{f"objpanel_button{i}": ("ui_menu", 46, 29) for i in (1, 2, 3)},
+    **{f"objpanel_lock{i}": ("ui_menu", 46, 24) for i in (1, 2, 3)},
+    **{name: ("ui_menu", 23, 23) for _, _, name, _ in COMMANDER_COLUMN},
+    "objpanel_separator": ("ui_menu", 46, 24), "objpanel_head": ("ui_menu", 46, 12),
+    "objpanel_lock_icon": ("ui_menu", 13, 13),
+    "buildscreen_hq_icon": ("ui_menu", 15, 15), "buildscreen_direct_icon": ("ui_menu", 15, 15),
+    "botscreen_autogunner_icon": ("ui_menu", 15, 15),
+    "botscreen_autodriver_icon": ("ui_menu", 15, 15),
+    "self_destruction_icon": ("ui_menu3", 30, 15),
+    "scroll_up_icon": ("ui_menu", 30, 15), "scroll_down_icon": ("ui_menu", 30, 15),
+}
+
+#: The 15 x 15 ``ui_menu`` cells a unit row and a building row take their icons from
+#: (``0x10077120``, ``0x100344e0``).
+COMMANDER_ICON_CELLS = [(49, 110), (65, 110), (81, 110), (97, 94), (49, 94), (65, 94), (81, 94),
+                        (129, 126), (113, 126), (129, 94), (97, 126), (49, 126), (65, 126),
+                        (81, 126)]
+
+COMMANDER_MISSION = "MISSIONS/CAMPAIGN/CAMPAIGN.00/Mission.03"
+
+#: The seven build rows' Types and the first building of each one's scheme.
+COMMANDER_BUILDS = {0x80000004: "MINE/smine01.dat", 0x80000008: "STORAGE/sstore01.dat",
+                    0x80000010: "PLANT/splant01.dat", 0x80000040: "HANGAR/shang01.dat",
+                    0x80000400: "INSTITUT/sinst01.dat", 0x80100000: "TOWER/mtow01.dat",
+                    0x80200000: "TOWER/ltow01.dat"}
+
+#: Mission 03 at 180 s, the Small Bunker just taken: which column buttons the recording shows
+#: enabled (the page buttons' members; the hero, map and game menu are always enabled).
+MISSION_03_COLUMN_SEEN = {0x14: False, 0x1C: True, 0x18: True, 0x20: False, 0x24: True,
+                          0x28: False, 0x2C: True, 0x30: True, 0x34: False}
+
+
+def check_commander_panel(check, game: Path) -> None:
+    """The commander panel of command mode: its column, pages, unit box and order rows."""
+    path = game / "iron3d.dll"
+    if not path.exists():
+        return
+    iron = path.read_bytes()
+    at = _image_at(iron)
+    strings = resources.strings(iron)
+
+    def u32(va: int) -> int:
+        return struct.unpack("<I", at(va, 4))[0]
+
+    def cstring(va: int) -> str:
+        return at(va, 40).split(b"\0")[0].decode("latin-1")
+
+    def imm(value: int) -> bytes:
+        return b"\x68" + struct.pack("<I", value)
+
+    # 1. The words, and the column's buttons from the constructor: y, icon, tooltip, member.
+    words = {k: strings.get(k) for k in COMMANDER_STRINGS}
+    ctor_start, ctor_size = 0x10082550, 0x1196
+    made = []
+    for site, target in _calls(at, ctor_start, ctor_size):
+        if target != 0x1009C030:
+            continue
+        before = at(site - 160, 160)
+        tip = list(re.finditer(rb"\x68(.{4})\x8d\x44\x24.\x50\x55(\x6a.|\x68.{4})\x6a\x00", before,
+                               re.S))
+        icon = list(re.finditer(rb"\xbf(.{4})\xf2\xae", before, re.S))
+        member = re.search(rb"\x89\x46(.)", at(site + 5, 24), re.S)
+        if not tip or not icon or not member:
+            made.append(None)
+            continue
+        y_raw = tip[-1].group(2)
+        y = y_raw[1] if y_raw[0] == 0x6A else struct.unpack("<I", y_raw[1:])[0]
+        made.append((member.group(1)[0], y, cstring(struct.unpack("<I", icon[-1].group(1))[0]),
+                     struct.unpack("<I", tip[-1].group(1))[0]))
+    lock_y = b"\x25\xbd\x01\x00\x00\x83\xc0\x0c" in at(ctor_start, ctor_size) \
+        and at(0x10083C20, 0x36).count(b"\x68\xc9\x01\x00\x00") == 1
+    check("iron3d.dll: the commander column's twelve buttons, their places and tooltips",
+          words == COMMANDER_STRINGS and made == COMMANDER_COLUMN and lock_y,
+          f"0x10082550 makes {len([m for m in made if m])} buttons at x 0: "
+          + ", ".join(f"{strings.get(t)!r} y {y}" for _, y, _, t in (m for m in made if m))
+          + f"; the lock at y 12, or 12 + 445 when open (0x10083c20 opens it at 457): {lock_y}")
+
+    # 2. The draw: the members in slide order, the separator's places, pages only when out.
+    draw = at(0x10083719, 0x160)
+    order = [0x04] + [m.group(1)[0] for m in re.finditer(rb"\x8b\x4e(.)\x8b", draw[5:], re.S)]
+    order = [m for i, m in enumerate(order) if not (m == 0x08 and i and order[i - 1] == 0x08)]
+    seps = [int.from_bytes(m.group(1)[1:], "little") if m.group(1)[0] == 0x68 else m.group(1)[1]
+            for m in re.finditer(rb"\x8b\x4e\x08\x8b.(\x6a.|\x68.{4})\x6a\x00\xff..", draw, re.S)]
+    steps = [m.group(1)[0] for m in re.finditer(rb"\x83\xbe\xec\x05\x00\x00(.)", draw, re.S)]
+    gate = at(0x10083860, 5) == b"\xbf\x0f\x00\x00\x00" \
+        and at(0x10083879, 8) == b"\x39\xbe\xec\x05\x00\x00\x0f\x8e"
+    header = at(0x10083A20, 0x70)
+    titles = []
+    for p in range(8):
+        target = u32(0x10083C00 + 4 * p)
+        body = at(target, 5)
+        titles.append(struct.unpack("<I", body[1:])[0] if body[0] == 0xBF else None)
+    unknown = b"\xbf\x3d\x18\x00\x00" in header
+    check("iron3d.dll: the column slides out one item a step, and a page shows at 16",
+          order == COMMANDER_DRAW_ORDER and seps == COMMANDER_SEPARATORS
+          and steps == list(range(1, 15)) and gate and titles == COMMANDER_TITLES and unknown,
+          f"0x100836f0 draws members {[hex(m) for m in order]} by +0x5ec steps {steps} and 15, "
+          f"the separator at {seps}, the page above 15: {gate}; titles "
+          f"{[strings.get(t) for t in titles]}, else {strings.get(6205)!r}")
+
+    # 3. The update: enabling masks, the lock's slide, and the page upkeep.
+    update = at(0x10083C60, 0x520)
+    masks = [b"\x68\x00\x80\x01\x01", b"\x68\x00\x20\x00\x01", b"\x68\x00\x40\x00\x01",
+             b"\x68\x00\x04\x00\x80", b"\x68\x10\x00\x00\x80", b"\x68\x00\x00\x30\x80",
+             b"\x68\x00\x00\x07\x80", b"\x68\x4e\x04\x00\x80"]
+    places = [update.find(m) for m in masks]
+    enabling = all(p > 0 for p in places) and places == sorted(places) \
+        and b"\x6a\x00\x52\x68\x4e\x04\x00\x80" not in update \
+        and update.count(b"\x6a\x01") >= 7 and b"\x8a\x87\xe4\x00\x00\x00" in update
+    step = struct.unpack("<f", at(u32(0x10083E1F), 4))[0]
+    slide = b"\xd8\x1d" in at(0x10083E1D, 2) and abs(step - 0.05) < 1e-6 \
+        and cstring(0x101053C0) == "BAR_OPEN" and b"\x83\xf8\x10" in update \
+        and b"\x83\xf8\x05" in update
+    pages = {}
+    click = at(0x100843D2, 0x220)
+    toggle = rb"\x8b\x4e(.)\x8a\x41\x21.{20,50}?\x6a\x00\xe8.{4}\xb0\x01\xe9.{4}\x6a(.)\xe8"
+    for m in re.finditer(toggle, click, re.S):
+        pages[m.group(1)[0]] = m.group(2)[0]
+    selects = {}
+    for p in range(8):
+        target = u32(0x10084E38 + 4 * p)
+        m = re.match(rb"\x6a(.)\x68(.{4})", at(target, 7), re.S)
+        if m:
+            selects[p + 1] = struct.unpack("<I", m.group(2))[0]
+    hero = at(0x100843BE, 13) == b"\x8b\x4c\x24\x14\x6a\x00\x6a\x00\xe8" + struct.pack(
+        "<i", 0x10062CE0 - 0x100843CB)
+    menu = at(0x1008466E, 11) == b"\x6a\x00\x6a\x00\x6a\x07\xe8" + struct.pack(
+        "<i", 0x10062BC0 - 0x10084679)
+    swallow = b"\x3d\x76\x01\x00\x00" in at(0x1008D7CF, 6) and b"\x83\xfe\x2a" in at(0x1008D7E1, 3)
+    check("iron3d.dll: what enables and lights each button, the lock, and the pages they open",
+          enabling and slide and pages == COMMANDER_PAGES and selects == COMMANDER_SELECTS
+          and hero and menu and swallow,
+          f"0x10083c60 enables by units 0x1018000/0x1002000/0x1004000 and buildings "
+          f"0x80000400..0x8000044e (any, even building itself), chat on +0xe4: {enabling}; "
+          f"a {step:g} s step to 0 or 16 with BAR_OPEN: {slide}; pages "
+          f"{ {hex(k): v for k, v in pages.items()} }; 0x10084d80 "
+          f"selects {', '.join(f'{p}: {v:#x}' for p, v in selects.items())}; hero rolls back "
+          f"to mode 0 {hero}, game menu pushes 7 {menu}; (374, 0)-(640, 42) swallowed {swallow}")
+
+    # 4. The unit page: its box, the one unit's lines and buttons, the rows and the order menu.
+    page = at(0x10085530, 0x360)
+    box = at(0x10085560, 4) == b"\x6a\x14\x6a\x33" \
+        and b"\x6a\x75\x68\x71\x01\x00\x00" in page and b"\xb9\x00\x80\x00\x80" in page \
+        and b"\x68\xd4\x13\x00\x00" in page and b"\x68\xd5\x13\x00\x00" in page \
+        and b"\xbb\x76\x00\x00\x00" in page and b"\x83\xc3\x14" in page
+    unit = at(0x10085890, 0x7B0)
+    buttons = all(p in unit for p in (b"\x8d\x7b\x57", b"\x8d\x53\x09", b"\x8d\x43\x21",
+                                      b"\x8d\x43\x39", b"\x8d\x83\x11\x01\x00\x00",
+                                      b"\x83\xc6\x44", b"\x68\x00\xff\xff\xff",
+                                      b"\x81\x79\x2c\x00\x00\x01\x01", b"\x8d\x4a\x47",
+                                      b"\x83\x7c\x24\x18\x18"))
+    tips = [strings.get(struct.unpack("<I", at(va + 1, 4))[0]) for va in
+            (0x100833E8, 0x1008345D, 0x100834C3, 0x10083529, 0x1008358F, 0x100835F5)]
+    icons = [cstring(u32(va + 1)) for va in (0x100830B5, 0x1008311A, 0x10083182, 0x100831EA)]
+    colours = at(0x1007716D, 0x20).count(b"\xc7\x07") == 4 and all(
+        c in at(0x1007716D, 0x20) for c in (b"\xff\xe7\xff\xff", b"\x80\x80\xff\xff",
+                                            b"\x80\xff\x80\xff", b"\xff\x80\x80\xff"))
+    placed = at(0x10084092, 0x24)
+    order_menu = b"\x8d\x0c\x85\x76\x00\x00\x00" in placed and b"\x6a\x64" in placed \
+        and at(0x1007B1AE, 5) == b"\xba\xc6\x01\x00\x00" and at(0x1007B1B5, 5) == \
+        b"\xb8\x31\x0c\xc3\x30" and at(0x1007B0BF, 6) == b"\x8d\xb9\x0d\x01\x00\x00" \
+        and at(0x1007B22A, 5) == b"\x68\xdc\x13\x00\x00" and at(0x1007B293, 5) == \
+        b"\x68\x9e\x00\x00\x00" and at(0x1009C8DC, 5) == b"\x68\xf7\x00\x00\x00" \
+        and struct.unpack("<f", at(u32(0x1007B4BA), 4))[0] == 2.0 \
+        and cstring(u32(0x1007A5BE)) == "scroll_down_icon" \
+        and cstring(u32(0x1007A62F)) == "scroll_up_icon"
+    unread = not any(re.search(rb"[\x8b\x39\x3b].[\x60\x7c]\x01\x00\x00",
+                               at(va, 0x600), re.S) for va in (0x1007B510, 0x1007B670, 0x100841A0))
+    check("iron3d.dll: the unit page's box, buttons and rows, and the order menu under them",
+          box and buttons and tips == ["Manual", "Gunner", "Automatic", "Strategic control",
+                                       "Close", "Explode!"]
+          and icons == ["buildscreen_hq_icon", "buildscreen_direct_icon",
+                        "botscreen_autogunner_icon", "botscreen_autodriver_icon"]
+          and colours and order_menu and unread,
+          f"box (51, 20)-(369, 117) with {words[5076]!r} / {words[5077]!r}, rows at 118 + 20i: "
+          f"{box}; one unit's buttons A 60, B 84, C 108, D 138 (HQ), E 324 at y 88 with "
+          f"tooltips {tips}: {buttons}; icons {icons}; tints by +0x30: {colours}; the menu at "
+          f"(100, 118 + 20N), (454 - y) / 21 rows 269 wide, 'Orders' in 158, bar 247, rebuilt "
+          f"every 2 s: {order_menu}; no reader of the arrows' rects: {unread}")
+
+    # 5. Which rows: the table walk, the row test's cases, the build conditions.
+    cases = [u32(0x1007BDEC + 4 * i) for i in range(24)]
+    always = cases[0]
+    shapes = (all(cases[i] == always for i in (0, 1, 3, 4, 6, 7, 8))
+              and cases[2] == cases[5] != always and cases[9] not in (always, cases[2])
+              and len(set(cases[10:17])) == 7 and len(set(cases[17:24])) == 7)
+    owned_types = [u32(0x1007A902 + 4 + 8 * i) for i in range(7)]
+    build = at(0x10034010, 0x80)
+    targets = [t for _, t in _calls(at, 0x10034010, 0x80)]
+    walk = (0x100729A0 in targets and 0x10033EA0 in targets
+            and targets.index(0x100729A0) < targets.index(0x10033EA0)
+            and at(0x10033F42, 3) == b"\x83\x38\x07" and b"\x8b\x85\xe8\x0a\x00\x00" in build)
+    table_walk = at(0x1007AE60, 11) == b"\x8b\x47\x04\x8b\x0c\xa9\x23\xc6\x39\x41\x2c"
+    lodes = at(0x10081B7B, 11) == bytes.fromhex("8b500c33c983fa010f94c1")
+    check("iron3d.dll: the order rows a selection is offered, and one building of a kind",
+          shapes and owned_types == list(COMMANDER_BUILDS) and walk and table_walk and lodes,
+          f"0x1007bbb0's cases: 0 1 3 4 6 7 8 always, 2 and 5 capturers, 9 while a lode is not "
+          f"found ({lodes}), 10-16 and 17-23 each their own: {shapes}; the menu marks owned "
+          f"{[hex(t) for t in owned_types]}; 0x10034010 refuses a Type the clan owns, or a "
+          f"builder heads off to with order 7, before the research: {walk}; rows by (mask & "
+          f"Type) == Type: {table_walk}")
+
+    # 6. The art.
+    hq = {k.lower(): {kk.lower(): vv for kk, vv in v.items()}
+          for k, v in resources.load_cfg(game / "ui" / "hq.cfg").items()}
+    art = _hud_art(game)
+    placed_art = []
+    for name, (tex, w, h) in COMMANDER_PIECES.items():
+        p = hq.get(name, {})
+        rect = tuple(int(p.get(k, -1)) for k in ("offset_x", "offset_y", "width", "height"))
+        placed_art.append(p.get("texture") == tex and rect[2:] == (w, h) and art(tex, *rect)[1])
+    cells = [art("ui_menu", x, y, 15, 15)[1] for x, y in COMMANDER_ICON_CELLS]
+    roles = {d.role: d.bindings for d in resources.descriptors(game / "ui" / "game_resources.cfg")}
+    sounds = {k: v for r in roles.values() for k, v in r.items()
+              if k in ("BAR_OPEN", "BUTTON_CLICK")}
+    check("ui/hq.cfg: the commander panel's pieces and icon cells, and its two sounds",
+          all(placed_art) and all(cells)
+          and sounds == {"BAR_OPEN": "i_bar_op.wav", "BUTTON_CLICK": "i_click1.wav"},
+          f"{sum(placed_art)}/{len(placed_art)} pieces on their page at their size with ink: "
+          f"buttons and lock pieces 46 wide, icons 23 x 23, the unit box's 15 x 15; "
+          f"{sum(cells)}/{len(cells)} icon cells inked; {sounds}")
+
+    # 7. Mission 03: the build rows the tree allows, the lodes, and the column at 180 s.
+    d03 = game / COMMANDER_MISSION
+    tree_path = game / "MISSIONS" / "SCRIPTS" / "tut3_pl.trf"
+    if not (d03 / "data.tma").exists() or not tree_path.exists():
+        return
+    m = mission.load(d03 / "data.tma")
+    player = m.clans[0]
+    catalogue = designs.Catalogue(research.read(tree_path))
+    allowed = []
+    for kind, rel in COMMANDER_BUILDS.items():
+        unit_def = objects.load_unit(game / "UNITS" / "BUILDS" / rel)
+        if unit_def.kind == kind and all(catalogue.offered(c.ref.member)
+                                         for c in unit_def.components):
+            allowed.append(rel.rsplit("/", 1)[-1])
+    types = {}
+    for o in m.objects:
+        if o.kind in (mission.KIND_UNIT, mission.KIND_BUILDING):
+            types[o.logical_id] = (o.clan_id, objects.load_unit(
+                game / o.path.replace("\\", "/")).kind)
+    held = [kind for clan, kind in types.values() if clan == 0]
+    taken = [kind for clan, kind in types.values()
+             if kind in (0x80000002, 0x80010000) and m.clans[clan].type == mission.CLAN_NEUTRAL]
+    kinds = held + taken
+
+    def within(mask: int) -> bool:
+        return any(k & mask == k for k in kinds)
+
+    derived = {0x14: within(0x1018000), 0x1C: within(0x1004000), 0x18: within(0x1002000),
+               0x20: within(0x80000400), 0x24: within(0x80000010), 0x28: within(0x80300000),
+               0x2C: within(0x80070000), 0x30: within(0x8000044E), 0x34: False}
+    owned_builds = sorted(hex(k) for k in kinds if k in COMMANDER_BUILDS)
+    check("Mission 03: Build Mine alone, no Search minerals, and the column at 180 s",
+          "tut3_pl" in player.behaviour and allowed == ["smine01.dat"]
+          and all(lode.found for lode in m.lodes) and len(m.lodes) == 1
+          and derived == MISSION_03_COLUMN_SEEN,
+          f"{player.name}'s tree {Path(player.behaviour.replace(chr(92), '/')).name} researches "
+          f"every part of {allowed} among the seven first buildings, and it owns {owned_builds}; "
+          f"{len(m.lodes)} lode, found; with the generator and bunker taken the column enables "
+          f"{sorted(hex(k) for k, v in derived.items() if v)} as the recording shows")
+
+
 def run(game: Path) -> int:
     """Run every check against ``game``.  Returns a process exit code."""
     results: list[tuple[str, bool, str]] = []
@@ -17005,6 +17304,7 @@ def run(game: Path) -> int:
         check_factory_screen,
         check_designer_screen,
         check_command_mode,
+        check_commander_panel,
         check_settings,
         check_research_streams, check_atmosphere_events,
         check_varset_types, check_profiles, check_walker,
