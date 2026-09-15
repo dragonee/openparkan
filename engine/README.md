@@ -460,7 +460,11 @@ recording's took 90 s and 81 s.
   nothing. The hero climbs its stair from the third exit to the pod, which fires 2 s after.
 - The push-out gathers every face in the sphere, a floor too, drops a face another hides from
   the centre, and only then lets a floor or a see-through face by: the pod computer's wall
-  standing under the Teleport's pod room floor no longer stops the hero on the stair.
+  standing under the Teleport's pod room floor no longer stops the hero on the stair. A face
+  is touched past its first edge alone, a→b, b→c, c→a in turn, at that edge's foot, start or
+  end; the hidden faces go from the farthest, each out at once, behind a hider crossed from
+  its front, inside it on the plane of its normal's largest axis, an edge within 1e-5 letting
+  it in.
 - `--at X,Y,YAW,Z` stands the hero on the highest floor at or below Z, as in the chamber, and
   `--pod` stands the hero on a pod room floor that stands higher over its node than 4.
 
@@ -622,7 +626,7 @@ a row here. A row leaves this table when research closes it.
 | M1 | The sky's textures: stars, clouds, the sun and moon sprites, the lens flare | not drawn | [10](../docs/10-sky.md#the-dome-the-fog-and-the-scene-colour--read-and-measured) |
 | M1 | The files' colours in a renderer that decodes textures to linear | sky, fog and dome colours and texture tints decoded from sRGB to linear; the lit colour (scene colour, material ambient and diffuse, both lights) formed from the files' values, held to 1, then decoded, so blends match the game's display-space ones | [10](../docs/10-sky.md#the-dome-the-fog-and-the-scene-colour--read-and-measured) |
 | M3 | What the draw layers 10 and 9 a fifth slot is filed under do (`Terrain.dll:0x1004553b`), and `CShade` slot 15 | the fifth slots draw with the scene, depth-tested, lit and fogged like any model | [07](../docs/07-objects.md#the-fifth-slot-is-what-the-units-own-view-draws) |
-| M3 | When the ground contact runs and with what dt, the frames its contact points are placed at, the second sphere's radius r₂, and what lifts a sphere with no face under it | after every state step, with the step as dt; contacts on the step's last frames; r₂ = r; no lift | [24](../docs/24-motion.md#holding-the-body-on-the-ground--read-and-measured) |
+| M3 | The frames the ground contact's points are placed at, the second sphere's radius r₂, and what lifts a sphere with no face under it | contacts on the step's last frames; r₂ = r; no lift | [24](../docs/24-motion.md#holding-the-body-on-the-ground--read-and-measured) |
 | M3 | A state's use count `+0x94` | unlimited | [24](../docs/24-motion.md#section-1-is-the-animation-state-graph--read-and-measured) |
 | M3 | The state a machine starts in | state 0 | [24](../docs/24-motion.md#playing-a-state--read-and-measured) |
 | M3 | The request code a controller holds before any is sent | none (−1): a state waiting for a code of its own does not apply until one is sent; no Mission 01 state has one | [32](../docs/32-builder.md#the-construction-sphere--read-and-measured) |
@@ -736,8 +740,8 @@ engine pass replaces each with what was read and removes its row.
 | M7 | Which pose the live contact record's height comes from when the loader decides which states plant a foot | the rest pose | [13](../docs/13-control.md#a-footstep-end-to-end--read-and-measured) |
 | M7 | A contact's node life, which decides whether a foot can land | every contact is intact | [13](../docs/13-control.md#section-1s-conditions-are-contacts--read-and-measured) |
 | M7 | How a playing sound's position, near, far and volume become gain | a sound keeps the linear gain and pan it started with, a loop included | [11](../docs/11-effects.md#type-2-is-a-sound--read-and-measured) |
-| M7 | What `0x1000e900` accepts past its first edge test, and the class the small-face stop reads | a face whose plane has the centre in front within the radius, measured to the triangle's nearest point; the hero's class is its size class, 2, so small faces never stop it | [24](../docs/24-motion.md#collision-between-objects--read) |
-| M7 | The batch flags 8 and 0x200 a collision's face query passes: a mesh's batch record carries no such word | no batch passes | [24](../docs/24-motion.md#collision-between-objects--read) |
+| M7 | The class the small-face stop reads | the hero's class is its size class, 2, so small faces never stop it | [24](../docs/24-motion.md#collision-between-objects--read) |
+| M7 | The batch flags 8 and 0x200 a collision's face query passes, and the batch word's 2 that makes a hider hide both ways: a mesh's batch record carries no such word | no batch passes, and every hider hides from its front only | [24](../docs/24-motion.md#collision-between-objects--read) |
 | M7 | Which pairs the collision pass moves besides the hero's | the hero is always the mover and nothing else is pushed | [24](../docs/24-motion.md#collision-between-objects--read) |
 | M11 | Who sets a collision object's flags, so which movers carry 8 and keep the floors (triangle flag 2) in their push-out | no mover carries 8: every floor lets a mover by | [24](../docs/24-motion.md#not-established) |
 | M8 | The two labels a wingman line draws beside its number, and where the panel and the order menu stand on screen | the unit's name; wingmen down the left 19 apart from (20, 100), rows 19 apart from (220, 250), on a 640 by 480 screen | [31](../docs/31-packages.md#the-wingman-menu-from-first-person--read-and-measured) |
@@ -798,6 +802,7 @@ engine pass replaces each with what was read and removes its row.
 | M8 | How a knocked-off part flies: its push, its spin, its update, and the world query that ends a flight early | it drops off at 2 m/s away from the unit's centre, falls under gravity turning at 3 rad/s about a level axis across its path, and its flight ends when its sphere meets the ground (the player remembers a part falling about half a second): a dummy's side panel goes 1.3 s after it is knocked off | [26](../docs/26-damage.md#not-established) |
 | M8 | A unit's life system holds all its models' nodes under one root | a life per part: a dead unit destroys its other parts' roots, and a part's root, having no parent, is never knocked off | [26](../docs/26-damage.md#what-a-damaged-node-a-destroyed-part-and-a-dead-unit-draw--read-and-measured) |
 | M8 | The statuses 4 and 8, a node copying its parent's life fraction or its stage | not modelled; no Mission 01 node carries them | [26](../docs/26-damage.md#what-a-damaged-node-a-destroyed-part-and-a-dead-unit-draw--read-and-measured) |
+| M3 | the ground contact runs after every state step, with the step as its dt | once a frame on message `0x1c`, after the collision pass and before a push is taken, with the frame's dt. Held back behind the held-face walk above: a fresh search each frame loses a bed too steep to walk (a hero on Tut_1's lake bed no longer dies) and lifts a hero through stacked floors (the Small Generator's way stops at vertex 7). Meanwhile a sinking door's downward pushes add up between steps: the hero sinks 1.2 m at the Small Bunker's door | [24](../docs/24-motion.md#collision-between-objects--read) |
 
 ## Departures
 

@@ -195,38 +195,90 @@ fn height_at(face: &SolidFace, p: Vec3) -> Option<f32> {
     (n.z.abs() > 1e-6).then(|| face.a.z - (n.x * (p.x - face.a.x) + n.y * (p.y - face.a.y)) / n.z)
 }
 
-/// The point of a triangle nearest `p`.
-fn closest_on_triangle(p: Vec3, a: Vec3, b: Vec3, c: Vec3) -> Vec3 {
-    let (ab, ac, ap) = (b - a, c - a, p - a);
-    let (d1, d2) = (ab.dot(ap), ac.dot(ap));
-    if d1 <= 0.0 && d2 <= 0.0 {
-        return a;
+/// How a sphere at `centre` of `radius` touches a face (`AniMesh.dll:0x1000e900`): the
+/// distance and the unit direction from the touching point to the centre, or none.
+///
+/// The face is passed over when its plane lies behind the centre or more than the radius in
+/// front of it. The centre's projection onto the plane is the point while it lies inside the
+/// edges, taken in the order a→b, b→c, c→a. Past the first edge it lies beyond, that edge
+/// alone decides (`0x1000eb70`): the projection must lie within √(r² − h²) of the edge's
+/// line, h the height over the plane, and the point is the projection's foot on the edge,
+/// or the edge's start or end past them, which must then lie within the radius
+/// (`0x1000ebb2`, `0x1000ec51`, `0x1000eccf`). A corner nearer through another edge is not
+/// looked for.
+fn touch(face: &SolidFace, centre: Vec3, radius: f32) -> Option<(f32, Vec3)> {
+    let n = face.normal;
+    let height = n.dot(centre - face.a);
+    if !(0.0..=radius).contains(&height) {
+        return None;
     }
-    let bp = p - b;
-    let (d3, d4) = (ab.dot(bp), ac.dot(bp));
-    if d3 >= 0.0 && d4 <= d3 {
-        return b;
-    }
-    let vc = d1 * d4 - d3 * d2;
-    if vc <= 0.0 && d1 >= 0.0 && d3 <= 0.0 {
-        return a + ab * (d1 / (d1 - d3));
-    }
-    let cp = p - c;
-    let (d5, d6) = (ab.dot(cp), ac.dot(cp));
-    if d6 >= 0.0 && d5 <= d6 {
-        return c;
-    }
-    let vb = d5 * d2 - d1 * d6;
-    if vb <= 0.0 && d2 >= 0.0 && d6 <= 0.0 {
-        return a + ac * (d2 / (d2 - d6));
-    }
-    let va = d3 * d6 - d5 * d4;
-    if va <= 0.0 && (d4 - d3) >= 0.0 && (d5 - d6) >= 0.0 {
-        return b + (c - b) * ((d4 - d3) / ((d4 - d3) + (d5 - d6)));
-    }
-    let denominator = 1.0 / (va + vb + vc);
-    a + ab * (vb * denominator) + ac * (vc * denominator)
+    let q = centre - n * height;
+    let beyond = [(face.a, face.b), (face.b, face.c), (face.c, face.a)].into_iter().find_map(|(from, to)| {
+        let length = (to - from).length();
+        let e = (to - from).normalize_or_zero();
+        let side = e.cross(n).dot(q - from);
+        (side > 0.0).then_some((from, to, e, length, side))
+    });
+    let (at, distance) = match beyond {
+        None => (q, height),
+        Some((from, to, e, length, side)) => {
+            if radius * radius - height * height < side * side {
+                return None;
+            }
+            let along = (q - from).dot(e);
+            if along < 0.0 || along > length {
+                let corner = if along < 0.0 { from } else { to };
+                let d = centre.distance(corner);
+                if d > radius {
+                    return None;
+                }
+                (corner, d)
+            } else {
+                (from + e * along, (side * side + height * height).sqrt())
+            }
+        }
+    };
+    (distance > 1e-6).then(|| (distance, (centre - at).normalize_or_zero()))
 }
+
+/// A one-sided crossing (`Ngi32.dll`'s `g_FastProc` slot `+0xb4`, `0x1001fa00`): the segment
+/// from `p0` to `p1` meets the plane of `face` running against its normal, `p0` in front of it
+/// or on it and `p1` strictly behind. The point where it meets it.
+fn crossing(face: &SolidFace, p0: Vec3, p1: Vec3) -> Option<Vec3> {
+    let along = (p1 - p0).dot(face.normal);
+    if along >= -f32::MIN_POSITIVE {
+        return None;
+    }
+    let front = face.normal.dot(p0 - face.a);
+    if front < 0.0 || -along <= front {
+        return None;
+    }
+    Some(p0 + (p1 - p0) * (front / -along))
+}
+
+/// Whether `q`, on the plane of `face`, lies in its triangle as the hidden-face test takes it
+/// (`AniMesh.dll:0x1000d8d3`–`0x1000dab8`): on the plane dropping the axis the normal is
+/// largest along (x before y, and either before z on a tie), each edge in the order c→a,
+/// a→b, b→c gives the cross product's component times the normal's. The first edge within
+/// 1e-5 of 0 lets the point in at once; one below 0 keeps it out; three above let it in.
+fn hides(face: &SolidFace, q: Vec3) -> bool {
+    let n = face.normal;
+    let axis = if n.y.abs() > n.x.abs() { 1 } else { 0 };
+    let axis = if n.z.abs() > n[axis].abs() { 2 } else { axis };
+    for (prev, cur) in [(face.c, face.a), (face.a, face.b), (face.b, face.c)] {
+        let v = (cur - prev).cross(q - prev)[axis] * n[axis];
+        if v.abs() <= HIDDEN_EDGE {
+            return true;
+        }
+        if v < 0.0 {
+            return false;
+        }
+    }
+    true
+}
+
+/// How near 0 an edge's value lets a point into a hiding face (`AniMesh.dll:0x1002097c`).
+pub const HIDDEN_EDGE: f32 = 1e-5;
 
 /// Whether a face lets a mover through.
 ///
@@ -256,14 +308,12 @@ fn passes(face: &SolidFace, _obstacle: &Solid) -> bool {
 ///    from the centre, adds to the push what its depth still needs, square to the push
 ///    so far; the push is held to 4r.
 ///
-/// `0x1000e900` accepts a face whose plane has the centre in front within the radius,
-/// and measures to the centre's projection inside the triangle or to the nearest edge
-/// outside it.
+/// A face touches the sphere as [`touch`] reads `0x1000e900`, and hides another as the test
+/// at `0x1000d7a5` reads it ([`crossing`], [`hides`]).
 ///
-/// STAND-IN: docs/24-motion.md#collision-between-objects--read -- past the first edge's
-/// test `0x1000e900` is not transcribed: the triangle's nearest point, within the radius,
-/// the direction running from it to the centre. The small-face stop needs the mover's
-/// class 3 or more, and the hero's is taken as its size class, 2, so it never applies.
+/// STAND-IN: docs/24-motion.md#collision-between-objects--read -- the small-face stop needs
+/// the mover's class 3 or more, and the hero's is taken as its size class, 2, so it never
+/// applies.
 pub fn push(start: Vec3, end: Vec3, radius: f32, obstacle: &Solid) -> Vec3 {
     let mut end = end;
     let mut total = Vec3::ZERO;
@@ -282,46 +332,45 @@ pub fn push(start: Vec3, end: Vec3, radius: f32, obstacle: &Solid) -> Vec3 {
         }
     }
 
-    // Gather the faces within the sphere at its end: every face, floors and faces flagged 4
-    // among them, which hide others before the filter takes them out (docs/24, "Collision
-    // between objects": gather, drop the hidden, then filter).
+    // Gather every face the sphere at its end touches, floors and faces flagged 4 among them,
+    // nearest first (`0x1000dfe0`, `0x1000e900`).
     let mut near: Vec<(f32, Vec3, usize)> = Vec::new();
     for node in obstacle.nodes.iter().filter(|n| !n.open) {
         if node.centre.distance(end) > node.radius + radius {
             continue;
         }
         for f in node.faces.clone() {
-            let face = &obstacle.faces[f];
-            // `0x1000e900`: the centre in front of the face's plane and within the radius
-            // of it, then the triangle's nearest point, inside it or on an edge or corner.
-            let plane = face.normal.dot(end - face.a);
-            if !(0.0..=radius).contains(&plane) {
-                continue;
-            }
-            let on = closest_on_triangle(end, face.a, face.b, face.c);
-            let distance = on.distance(end);
-            if distance < radius && distance > 1e-6 {
-                near.push((distance, (end - on) / distance, f));
+            if let Some((distance, direction)) = touch(&obstacle.faces[f], end, radius) {
+                near.push((distance, direction, f));
             }
         }
     }
     near.sort_by(|a, b| a.0.total_cmp(&b.0));
-    // A face whose centroid another gathered face hides from the centre goes
-    // (`0x1000d7a5`–`0x1000dac0`).
-    let hidden = |f: usize| {
-        let face = &obstacle.faces[f];
+    // Drop the hidden faces (`0x1000d7a5`–`0x1000dac0`), from the farthest to the nearest: a
+    // face goes when the segment from the centre to its centroid crosses another face still
+    // gathered, from its front into its back, inside its triangle. A face dropped hides
+    // nothing after.
+    //
+    // STAND-IN: docs/24-motion.md#collision-between-objects--read -- a hider whose batch word
+    // (record `+0x40`) carries 2 is crossed either way (`0x1000d86c`); where the batch word
+    // comes from is not traced and the engine carries none, so every hider is one-sided.
+    let mut i = near.len();
+    while i > 0 {
+        i -= 1;
+        let face = &obstacle.faces[near[i].2];
         let centroid = (face.a + face.b + face.c) / 3.0;
-        near.iter().any(|&(_, _, g)| {
+        let hidden = near.iter().enumerate().rev().any(|(j, &(_, _, g))| {
             let other = &obstacle.faces[g];
-            g != f
-                && crate::hit::plane_crossing(end, centroid, other.normal, other.a)
-                    .or_else(|| crate::hit::plane_crossing(centroid, end, other.normal, other.a))
-                    .is_some_and(|q| inside(q, other.a, other.b, other.c))
-        })
-    };
+            j != i && crossing(other, end, centroid).is_some_and(|q| hides(other, q))
+        });
+        if hidden {
+            near.remove(i);
+        }
+    }
+    // Then filter (`0x1000db93`).
     let kept: Vec<(f32, Vec3)> = near
         .iter()
-        .filter(|&&(_, _, f)| !hidden(f) && !passes(&obstacle.faces[f], obstacle))
+        .filter(|&&(_, _, f)| !passes(&obstacle.faces[f], obstacle))
         .map(|&(d, n, _)| (d, n))
         .collect();
 
@@ -434,5 +483,52 @@ mod tests {
         let mut leaves = wall.clone();
         leaves.faces.iter_mut().for_each(|f| f.triangle_flags = COLLISION_SKIPS_FACE);
         assert_eq!(push(Vec3::new(-3.0, 0.0, 0.0), Vec3::new(1.0, 0.0, 0.0), 2.0, &leaves), Vec3::ZERO);
+    }
+
+    fn face(a: Vec3, b: Vec3, c: Vec3, triangle_flags: u16) -> SolidFace {
+        let normal = (b - a).cross(c - a).normalize();
+        SolidFace { a, b, c, normal, triangle_flags, surface: None, damage_rate: 0.0 }
+    }
+
+    #[test]
+    fn past_its_first_edge_a_triangle_is_touched_along_that_edge_alone() {
+        // A floor triangle facing up; the centre 1 above and beyond both of its corner's edges.
+        let t = face(Vec3::ZERO, Vec3::new(4.0, 0.0, 0.0), Vec3::new(0.0, 4.0, 0.0), 0);
+        let inside = touch(&t, Vec3::new(1.0, 1.0, 1.0), 2.0).unwrap();
+        assert!((inside.0 - 1.0).abs() < 1e-6 && inside.1 == Vec3::Z);
+        // Beyond a→b only: the foot on it.
+        let (d, dir) = touch(&t, Vec3::new(2.0, -1.0, 1.0), 2.0).unwrap();
+        assert!(
+            (d - 2f32.sqrt()).abs() < 1e-5 && (dir - Vec3::new(0.0, -1.0, 1.0).normalize()).length() < 1e-5
+        );
+        // Beyond a→b and c→a near the corner: a→b, the first, decides, and its start is the point.
+        let (d, dir) = touch(&t, Vec3::new(-0.5, -0.5, 1.0), 2.0).unwrap();
+        assert!((d - 1.5f32.sqrt()).abs() < 1e-5, "{d}");
+        assert!((dir - Vec3::new(-0.5, -0.5, 1.0).normalize()).length() < 1e-5);
+        // Beyond b→c alone, but 1.6 off its line with 1 of height: √(4 − 1) = 1.73 lets it in.
+        assert!(touch(&t, Vec3::new(3.13, 3.13, 1.0), 2.0).is_some());
+        assert!(touch(&t, Vec3::new(3.3, 3.3, 1.0), 2.0).is_none());
+        // Behind the plane, or farther than the radius in front: nothing.
+        assert!(touch(&t, Vec3::new(1.0, 1.0, -0.1), 2.0).is_none());
+        assert!(touch(&t, Vec3::new(1.0, 1.0, 2.1), 2.0).is_none());
+    }
+
+    #[test]
+    fn a_face_hides_another_only_from_its_front_through_its_triangle_or_an_edges_line() {
+        // A wall facing -x at x = 0, and behind it a second at x = 1; the centre at x = -1.
+        let wall = |x: f32, flags| {
+            face(Vec3::new(x, -5.0, -5.0), Vec3::new(x, -5.0, 5.0), Vec3::new(x, 5.0, 5.0), flags)
+        };
+        let near = wall(0.0, 0);
+        assert!(near.normal.x < 0.0);
+        let centre = Vec3::new(-1.0, 0.0, 0.0);
+        let behind = Vec3::new(1.0, 1.0, 1.0);
+        let q = crossing(&near, centre, behind).expect("from its front into its back");
+        assert!(q.x.abs() < 1e-6 && hides(&near, q));
+        assert!(crossing(&near, behind, centre).is_none(), "not from its back");
+        assert!(crossing(&near, centre, Vec3::new(-0.5, 0.0, 0.0)).is_none(), "nor short of it");
+        // A point on an edge's line, even past the triangle, lets it in at once.
+        assert!(hides(&near, Vec3::new(0.0, 7.0, 7.0)));
+        assert!(!hides(&near, Vec3::new(0.0, 6.0, 0.0)));
     }
 }
