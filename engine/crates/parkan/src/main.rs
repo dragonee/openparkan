@@ -134,6 +134,9 @@ struct Args {
     /// `--build X,Y`: the first builder of the player's clan is ordered to build a mine at X,Y
     /// before `--ticks` play.
     build: Option<[f32; 2]>,
+    /// `--capture`: every unit of the player's clan that may capture is given Search and
+    /// capture before `--ticks` play.
+    capture: bool,
     ticks: u32,
     hold: Vec<String>,
     mouse: [f32; 2],
@@ -171,6 +174,7 @@ fn args() -> Result<Args> {
         ghost: None,
         camera_yaw: None,
         build: None,
+        capture: false,
         ticks: 0,
         hold: Vec::new(),
         mouse: [0.0; 2],
@@ -196,6 +200,7 @@ fn args() -> Result<Args> {
             "--map" => out.map = true,
             "--page" => out.page = Some(value()?.parse()?),
             "--camera-yaw" => out.camera_yaw = Some(value()?.parse()?),
+            "--capture" => out.capture = true,
             "--build" => {
                 let v: Vec<f32> = value()?.split(',').map(str::parse).collect::<Result<_, _>>()?;
                 out.build = v.get(..2).map(|v| [v[0], v[1]]);
@@ -351,6 +356,18 @@ fn rehearse(play: &mut scene::Play, loaded: &scene::Loaded, args: &Args) {
         if !builder.is_some_and(|b| play.order_build(b, mine, Vec3::new(x, y, z), 0.0)) {
             eprintln!("--build: no builder can build a mine at {x}, {y}");
         }
+    }
+    if args.capture {
+        let capturers: Vec<usize> = play
+            .own_units_within(parkan_world::selection::BATTLE_UNITS | parkan_world::selection::BUILDERS)
+            .into_iter()
+            .filter(|&t| matches!(play.record_class(t), 1 | 2))
+            .collect();
+        if capturers.is_empty() {
+            eprintln!("--capture: no unit of the player's clan may capture");
+        }
+        play.commander.units = capturers;
+        play.hq_command(2);
     }
     for key in &args.hold {
         play.key(key, true);

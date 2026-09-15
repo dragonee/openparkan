@@ -4,11 +4,18 @@
 //! See `docs/35-hud.md`, "The satellite map".
 
 use glam::Vec3;
-use parkan_formats::mission::KIND_UNIT;
+use parkan_formats::mission::{KIND_BUILDING, KIND_UNIT};
+use parkan_sim::orders::SHUTDOWN;
 
 use super::{Cockpit, Ink, argb, messages};
 use crate::hud::{Blend, MINIMAP, Pin};
-use crate::play::Play;
+use crate::play::{BUILDING_BRIDGE, BUILDING_RUINE, Play};
+
+/// The page the buildings' icons are cut from, a cell's side there, and the side a mark is
+/// drawn at about the building's place (docs/35, "The marks").
+pub const ICONS: &str = "icons";
+pub const ICON_CELL: f32 = 24.0;
+pub const BUILDING_MARK: f32 = 20.0;
 
 /// The panel in the cockpit, (x₀, y₀)–(x₁, y₁) on the 640 × 480 screen (`+0x1bc`).
 pub const PANEL: [f32; 4] = [374.0, 0.0, 640.0, 266.0];
@@ -152,15 +159,40 @@ pub fn draw_in(
         ink.painter.piece(compass, [right - COMPASS[0], bottom - COMPASS[1], right, bottom], [1.0; 4]);
     }
 
-    // The marks: the player's own units; Mission 01's bridges take no icon.
-    //
-    // STAND-IN: docs/25-sensors.md#not-established -- what fills the player clan record's
-    // `+0x54` list, whose clans' units and buildings are marked too, is not read: only the
-    // player's own units are.
+    // The marks (`0x10074220`): every building the player may see by its icon, then every unit.
     let side = play.ground.world_box().1.truncate().max_element();
     let [sx, sy] = ink.painter.space.scales();
+    let known = known_to_player(play);
+    if let Some(&page) = cockpit.pages.get(ICONS) {
+        for (t, u) in play.units.iter().enumerate() {
+            if u.kind != KIND_BUILDING || !known.get(t).copied().unwrap_or(false) {
+                continue;
+            }
+            let (Some(target), Some([cx, cy])) =
+                (play.battle.combat.targets.get(t).filter(|t| t.alive), building_icon(u.type_word))
+            else {
+                continue;
+            };
+            let own_selected = u.clan == Some(play.player_clan) && play.selected.contains(&t);
+            let colour = if own_selected {
+                [1.0; 4]
+            } else {
+                let c = play.mark_colour(u.clan).map(|v| f32::from(v) / 255.0);
+                [c[0], c[1], c[2], 1.0]
+            };
+            let [x, y] = at(map_point(target.position, side));
+            let h = BUILDING_MARK / 2.0;
+            ink.painter.sprite_to(
+                Blend::Alpha,
+                page,
+                [cx, cy, ICON_CELL, ICON_CELL],
+                [x - h, y - h, BUILDING_MARK, BUILDING_MARK],
+                colour,
+            );
+        }
+    }
     for (t, u) in play.units.iter().enumerate() {
-        if u.kind != KIND_UNIT || u.clan != Some(play.player_clan) || u.logical_id == play.hero_id {
+        if u.kind != KIND_UNIT || u.logical_id == play.hero_id || !known.get(t).copied().unwrap_or(false) {
             continue;
         }
         let Some(target) = play.battle.combat.targets.get(t).filter(|t| t.alive) else { continue };
@@ -211,6 +243,61 @@ pub fn draw_in(
             yellow,
         );
     }
+}
+
+/// A building's icon cell on the `icons` page by its type (`0x10064f10`, type to index
+/// `0x1009f4c0`), and none for the rest, the bridge and the ruin among them.
+pub fn building_icon(type_word: u32) -> Option<[f32; 2]> {
+    Some(match type_word {
+        0x8000_0002 => [0.0, 24.0],
+        0x8000_0004 => [24.0, 24.0],
+        0x8000_0008 => [48.0, 0.0],
+        0x8000_0010 => [72.0, 24.0],
+        0x8001_0000 | 0x8002_0000 | 0x8004_0000 => [96.0, 24.0],
+        0x8000_0040 => [120.0, 24.0],
+        0x8000_0400 => [48.0, 24.0],
+        0x8010_0000 | 0x8020_0000 => [168.0, 24.0],
+        0x8000_0200 => [216.0, 24.0],
+        _ => return None,
+    })
+}
+
+/// Which objects the player may see on a map this frame (`0x1007e660`): the player's clan's,
+/// and another clan's while one of the player's live units has it within its radar's range —
+/// neither a bridge nor a ruin, and not a hostile unit shut down.
+///
+/// STAND-IN: docs/35-hud.md#the-panel-in-the-cockpit--read-and-seen -- the clan's id list is
+/// the units' radar contacts refilled each pass; with a scan's three signatures not computed
+/// (docs/25), every live object strictly within a radar's range is a contact.
+pub fn known_to_player(play: &Play) -> Vec<bool> {
+    let player = Some(play.player_clan);
+    let mut eyes: Vec<(glam::Vec3, f32)> = play
+        .robots
+        .iter()
+        .filter(|(t, _)| {
+            play.units[*t].clan == player && play.battle.combat.targets.get(*t).is_some_and(|x| x.alive)
+        })
+        .map(|(_, r)| (r.walker.body.position, r.radar.range))
+        .collect();
+    if !play.hero.dead() {
+        eyes.push((play.hero.walker.body.position, play.hero.radar.range));
+    }
+    play.units
+        .iter()
+        .enumerate()
+        .map(|(t, u)| {
+            if u.clan == player {
+                return true;
+            }
+            let Some(target) = play.battle.combat.targets.get(t).filter(|x| x.alive) else { return false };
+            let shut_down = play.hostile(u.clan)
+                && play.robots.iter().any(|(rt, r)| *rt == t && r.order.is_some_and(|o| o.code == SHUTDOWN));
+            u.type_word != BUILDING_BRIDGE
+                && u.type_word != BUILDING_RUINE
+                && !shut_down
+                && eyes.iter().any(|(at, range)| target.position.distance(*at) < *range)
+        })
+        .collect()
 }
 
 /// A unit's mark at `at`: a cross for a flyer, else a square, in screen pixels about the

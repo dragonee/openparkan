@@ -142,8 +142,8 @@ Not yet: boarding a captured bot, and the ambient variations.
   them, writing the machine's velocity and turning its hull; a flyer's points
   keep every axis. Standby holds. Follow me keeps within 20 + 20 of the hero.
   Seek and destroy hunts the nearest hostile warrior, builder or transport and
-  roams when there is none; Search and capture looks for a building to take and
-  roams; Capture building walks to its building; Refit fails with no dock.
+  roams when there is none; Search and capture and Capture building take a
+  building from its pod (M13); Refit fails with no dock.
   Between orders a unit engages the nearest hostile within 500, and an attack
   circles 50–100 short of its target.
 - A wingman's fire control points its turret at the nearest hostile within 500,
@@ -376,10 +376,9 @@ the own panel's unit while aboard.
 On Mission 03 the hero takes the Small Generator and the Small Bunker from their pods, the
 builder puts the Small Mine on the lode from command mode, the transport carries its ore, the
 Large Factory builds four *SSW-X* in batch, and they beat the patrol: the mission is won. Not
-yet: Explode!, tooltips, the chat and game menu buttons, the commander's map marks by type,
-and the designer's save and load.
+yet: Explode!, tooltips, the chat and game menu buttons, and the designer's save and load.
 
-**M13.** Mission 04, *Teleport*: a mobile command centre.
+**M13.** Mission 04, *Teleport*: a mobile command centre, research, and a small warbot's captures.
 
 - Enter on a neutral unit within 20 m captures it and, where the hero can board it (size
   class 4, its turret alive), boards it at once. Mission 04's *LWC-1 Comm. Center* is taken
@@ -421,6 +420,31 @@ and the designer's save and load.
 - On Mission 04 the Enhanced Research Center's pod captures it and opens its screen with
   the one row, *Large Battle Turret (4L1)*; ordered, it is researched free in 5 s, and
   the Large Flying chassis's turret socket then offers `e_tur_bb_01`.
+- A small warbot captures buildings (docs/31, "The capture, tick by tick"). A click on
+  another clan's building with only size-1 or size-2 units selected searches that one
+  building; Search and capture searches by type over `0x8017365e`, taking the nearest
+  foreign, finished building across the ground, a generator at half its distance, never a
+  bridge or a main teleport. A flyer lands first at the nearest corner of the building's
+  contour (its `.bas` outer ring, or an octagon about its construction sphere) and then walks
+  in; a walker walks straight in, along the building's hall way to the pod from the exit (or a
+  vertex within 5) that makes the whole way shortest, and holds on the pod until it fires. A
+  search on one building ends there; a search by type walks back out along the hall way to
+  the next building, and roams once none is left. A script's `ORDER_ROBOT_CAPTURE` takes the
+  one-building path.
+- A unit with no order standing on a live building that is not a ruin is given the escape, and
+  one that walked into a building along its hall way walks out the same way.
+- A change of owner says what `0x100a48a0` says: string 5039 and a voice by the old clan when
+  the player's clan gains a building (the neutral's for a neutral clan or a word of 1, the
+  enemy's for 0, else the plain one), and the plain voice alone when it loses one.
+- Both satellite maps mark buildings with their `icons` cell, 20 × 20 about their place, in the
+  marking rule's colour, white for the player's own selected building; another clan's
+  buildings and units show only while one of the player's units has them within its radar's
+  range.
+
+On Mission 04 the helicopter ordered Search and capture takes the Large Factory 54 s after the
+order, landing at its ring's vertex 9 and walking in by exit 67 as the recording's does, and
+the Research Center 42 s after that, their icons turning from grey to light blue; the
+recording's took 90 s and 81 s.
 
 This directory also holds what the rest will follow:
 
@@ -503,7 +527,9 @@ pages, a click selects and orders in the world or on the map (M), a drag bands u
 button undoes, and Esc peels back the map and the page before leaving. `--page N`,
 `--camera-yaw RAD` and `--ghost X,Y` draw command mode's screenshots after `--pod sbunk01.dat
 --ticks 400` on Mission 03, and `--build X,Y` orders the first builder to build a mine there
-before `--ticks` play.
+before `--ticks` play. `--capture` gives every unit of the player's clan that may capture
+Search and capture before `--ticks` play: `--mission MISSIONS/CAMPAIGN/CAMPAIGN.00/Mission.04
+--skip-briefing --capture --ticks 3000 --map` draws Mission 04's map with both buildings taken.
 
 On Mission 04 Enter by the HQ takes and boards it, and Enter aboard opens its command view,
 whose camera rides with the HQ: the cursor at an edge swings it round, Z zooms, and the arrows
@@ -643,6 +669,12 @@ a row here. A row leaves this table when research closes it.
 | M13 | The colour the research box's name is drawn in (`GAME_FONT`'s, as whatever drew before left it) | white, as the recording reads | [41](../docs/41-commander.md#not-established) |
 | M13 | The research box's clip 5 inside its frame, applied to its preview | the preview's view is not clipped | [41](../docs/41-commander.md#what-it-draws--read) |
 | M13 | What "a node reaching its last damage stage" takes out of the load (`0x10011920`) | a destroyed node's own weight and its armour; the devices on it stay | [24](../docs/24-motion.md#what-sets-the-live-limits--read) |
+| M13 | How the walker's path joins a building's hall way (`MGraph`), and how it brings a unit to rest on a place in it | straight to the exit, or a hall-way vertex within 5, that makes the whole way to the pod shortest, then along the links; a way in stops on its last vertex rather than half its velocity beyond it | [31](../docs/31-packages.md#not-established) |
+| M13 | What the walker does with the pod handed to it again while the unit stands there | within 1.5 of the pod, the go task's arrival at an object, it holds | [31](../docs/31-packages.md#each-tick-slot-7-0x10030300--read) |
+| M13 | An areal's flag word under a contour vertex a flyer lands at | the engine keeps no areals: a vertex counts where the ground under it is above any water | [31](../docs/31-packages.md#the-plan-slot-15-0x100306f0--read) |
+| M13 | The building's own paths an escape is routed out by ("LEAVE IS TOO !!!") | a unit sent into a building along its hall way walks out of it along the hall way, from its nearest vertex to the exit that makes the way to its goal shortest, while it stands inside the building's outer ring | [31](../docs/31-packages.md#the-escape--read) |
+| M13 | The unit takt escape's node test (a unit on a damaged node is left be) | every node counts as whole | [31](../docs/31-packages.md#the-escape--read) |
+| M13 | The clan's contact list the maps mark other clans' objects by, and the scan's signatures | every live object strictly within the radar range of a live unit of the player's clan, the hero among them | [35](../docs/35-hud.md#the-panel-in-the-cockpit--read-and-seen) |
 
 ### Read since the stand-in was written
 
@@ -690,7 +722,7 @@ engine pass replaces each with what was read and removes its row.
 | M8 | The height a flyer's points are given; who reads `Movement_FlyHeight` | at least `FlyNearLandHeight`, 15, above the ground under the point | [24](../docs/24-motion.md#not-established) |
 | M8 | How an engagement scores the radar's contacts through the task (the contact record's three unnamed fields); follow's and refit's priorities for one | the nearest hostile unit within 500 is the best, and for a patrol the one nearest its centre inside its radius; follow and refit answer 0; an attack running is not given another | [31](../docs/31-packages.md#between-orders--read) |
 | M8 | The follower's two timers; the behaviour's random source | it measures once a second; a 32-bit xorshift | [31](../docs/31-packages.md#what-each-package-does--read) |
-| M8 | A building's pod, the generator's half distance, the construction phase, which areals are usable, and a dock for a refit | a capture walks to the building's placement; the retreat, read to lie off the map, roams; a roam takes the first point tried; no dock is modelled, so a refit always fails at its start | [31](../docs/31-packages.md#where-a-search-looks--read-and-measured) |
+| M8 | Which areals are usable, and a dock for a refit | a capture's retreat, read to lie off the map, roams; a roam takes the first point tried; no dock is modelled, so a refit always fails at its start | [31](../docs/31-packages.md#where-a-search-looks--read-and-measured) |
 | M8 | How the turret turns a traced point into its targets (`0x10028bb0`), its aim stage, and the gun's report codes | each channel moves on by the angle the sight is off, at the rate a small nudge turns it; θ is 0 once both channels reach their targets and π before; a guided gun's θ is its lock left × π | [29](../docs/29-weapons.md#how-the-ai-fires--read) |
 | M9 | Where a gun's takt stores its report codes 0 and 3–6, which the weapons list's lamp reads | the code from the gun's state now: 5 no rounds, 6 short of charge, 7 not ready, 3 stroking, 4 waiting its interval; then the gate's 2, 7 or 8; 1 locking; 0 ready | [29](../docs/29-weapons.md#the-guns-takt-a-stroke-then-the-interval) |
 | M9 | The charge level of a gun with no capacity, which only a shot sets | its bar shows full | [29](../docs/29-weapons.md#a-gun-is-a-capacitor-a-magazine-and-a-clock--read) |
@@ -707,7 +739,6 @@ engine pass replaces each with what was read and removes its row.
 | M10 | Which keys act while a briefing plays, besides Esc | none reaches the hero or the game's commands | [21](../docs/21-briefing.md#not-established) |
 | M10 | The default `SUBTITLES` is read with | subtitles show when the key is absent (the install sets 1) | [21](../docs/21-briefing.md#when-it-runs--read) |
 | M10 | That a unit record's `+0xd8` and `+0xdc`, which the satellite map's heading line runs along, are its heading | the line runs along the hero's facing | [35](../docs/35-hud.md#not-established-4) |
-| M10 | Which clans' units the map marks besides the player's: the player clan record's `+0x54` list | the player's own units only | [25](../docs/25-sensors.md#not-established) |
 | M10 | Whether a cull mode changes for the mirrored reflection frame | the faces that face the mirrored eye draw, as a mirror shows them | [03](../docs/03-terrain.md#not-established) |
 | M10 | What the reflection camera's pass flags `0x120` leave out | the effects' sprites; the dome, the ground less its water and beds, and every shown object draw | [03](../docs/03-terrain.md#not-established) |
 | M10 | How far the water's bump map displaces its lookup | a signed byte stands for −1 to 1 at 127, so the largest offset is 0.01 × 64 ÷ 127 of the box | [03](../docs/03-terrain.md#not-established) |

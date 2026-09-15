@@ -3,6 +3,7 @@ pub mod battle;
 pub mod briefing;
 pub mod building_fx;
 pub mod buildings;
+pub mod capture;
 pub mod cockpit;
 pub mod command;
 pub mod construction;

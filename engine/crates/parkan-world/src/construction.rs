@@ -112,7 +112,7 @@ impl Plan {
 }
 
 /// A point of the model's frame placed at `at` turned `yaw` about z, across the ground.
-fn placed(p: [f32; 2], at: Vec3, yaw: f32) -> [f32; 2] {
+pub(crate) fn placed(p: [f32; 2], at: Vec3, yaw: f32) -> [f32; 2] {
     let (s, c) = yaw.sin_cos();
     [at.x + p[0] * c - p[1] * s, at.y + p[0] * s + p[1] * c]
 }
@@ -136,6 +136,9 @@ pub struct Construction {
     pub lodes: Vec<Lode>,
     /// The ore a building of each Type costs by the player's tree (docs/32, "What it costs").
     pub costs: HashMap<u32, Option<f32>>,
+    /// The buildings' hall ways and the units walked into them (docs/31, "The capture, tick by
+    /// tick").
+    pub ways: crate::capture::Ways,
 }
 
 impl Construction {
@@ -185,7 +188,7 @@ impl Play {
     }
 
     /// The ground plan of the building at `path`: its root record's `.bas`.
-    fn plan(&mut self, path: &str) -> Plan {
+    pub(crate) fn plan(&mut self, path: &str) -> Plan {
         let key = path.to_ascii_lowercase();
         if let Some(p) = self.construction.plans.get(&key) {
             return p.clone();

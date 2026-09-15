@@ -13,6 +13,8 @@ pub const SEARCH: i32 = 5;
 pub const TRANSPORT: i32 = 6;
 pub const BUILD: i32 = 7;
 pub const RELOAD: i32 = 8;
+/// `ORDER_ROBOT_CAPTURE`: a script's capture of one building by logic id (docs/27, "Capture").
+pub const CAPTURE: i32 = 17;
 /// `ORDER_BUILDING_MINE`, which every mine is given as it joins (docs/23, "A mine digs to 500").
 pub const MINE: i32 = 10;
 /// The hidden construction sphere a new building runs (docs/32, "The construction sphere").

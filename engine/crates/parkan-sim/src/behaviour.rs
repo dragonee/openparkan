@@ -36,6 +36,12 @@ pub const ROAM_INSET: f32 = 100.0;
 /// A capture skips bridges and main teleports (`0x10030859`).
 pub const BRIDGE: u32 = 0x8000_1000;
 pub const MAIN_TELEPORT: u32 = 0x8000_0200;
+/// A capture's plan takes a generator at half its distance (`0x100308ac`).
+pub const GENERATOR: u32 = 0x8000_0002;
+/// The largest size class that may capture (`0x100301a9`), and the bit a building's logic id
+/// and a capture's type mask carry.
+pub const CAPTURE_SIZE_MAX: u8 = 2;
+pub const BUILDING_BIT: u32 = 0x8000_0000;
 /// The attack (`0x10027580`): the band short of the target, the reach aside, the distance
 /// under which it fights, its speeds while fighting, and its timers (fixed, random) ms.
 pub const ATTACK_SHORT: (f32, f32) = (50.0, 50.0);
@@ -115,6 +121,20 @@ pub struct Seen {
     pub hostile: bool,
 }
 
+/// The places of a building a capturer goes to (docs/31, "The capture, tick by tick"), in the
+/// world.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Places {
+    pub id: i32,
+    /// Standing, its construction sphere done (variable `0x202` not above 0).
+    pub complete: bool,
+    /// Its hall way's pod vertex (`0x40`), carried through its node.
+    pub pod: Option<Vec3>,
+    /// Its contour's vertices a flyer may land at (variable `0x203`, on areals whose flag word
+    /// is not 0).
+    pub contour: Vec<Vec3>,
+}
+
 /// What a takt has to go on.
 #[derive(Clone, Copy, Debug)]
 pub struct Senses<'a> {
@@ -123,6 +143,11 @@ pub struct Senses<'a> {
     /// Every live object but the unit, the clan's areal map being whole from its first
     /// tick (docs/31, "Where a search looks").
     pub seen: &'a [Seen],
+    /// The buildings' places, for a capture; empty when the unit runs none.
+    pub places: &'a [Places],
+    /// The unit's size class (`+0x30`, variable `0x201`) and whether its chassis has `CanFly`.
+    pub size_class: u8,
+    pub flyer: bool,
     /// The map's extent in x and y.
     pub bounds: ([f32; 2], [f32; 2]),
     pub has_weapon: bool,
@@ -222,9 +247,15 @@ pub enum Task {
         radius: f32,
         next_ms: f64,
     },
+    /// Search (order 5, vtable `0x10059cf8`): `building` is the one picked (`+0x6c`),
+    /// `landing` the landing flag (`+0x7c`, set once a flyer is to walk in), `next_ms` the
+    /// rescan timer (`+0x74`) and `started` whether slot 6 has run.
     Search {
         search: Search,
         next_ms: f64,
+        building: Option<i32>,
+        landing: bool,
+        started: bool,
     },
     /// Refit: a trip to a dock.
     Reload,
@@ -279,6 +310,11 @@ impl Task {
         }
     }
 
+    /// A search not yet started.
+    pub fn search(search: Search) -> Task {
+        Task::Search { search, next_ms: 0.0, building: None, landing: false, started: false }
+    }
+
     /// The task an order builds (the dispatcher's `INSERT_ORDER_REPLACE`).
     pub fn from_order(order: &Order) -> Task {
         Self::try_from_order(order).unwrap_or(Task::Stop)
@@ -314,13 +350,11 @@ impl Task {
                 let radius = if p > 20.0 && p < 30.0 { p } else { FOLLOW_RADIUS };
                 Task::Follow { leader, radius, next_ms: 0.0 }
             }
-            (orders::SEARCH, Target::TypeMask(mask)) => {
-                Task::Search { search: Search::Capture(mask), next_ms: 0.0 }
-            }
-            (orders::SEARCH, Target::LogicId(id)) => {
-                Task::Search { search: Search::Building(id), next_ms: 0.0 }
-            }
-            (orders::SEARCH, _) => Task::Search { search: Search::Enemies, next_ms: 0.0 },
+            (orders::SEARCH, Target::TypeMask(mask)) => Task::search(Search::Capture(mask)),
+            // A script's `ORDER_ROBOT_CAPTURE` builds the same search on one building (docs/31,
+            // "The orders").
+            (orders::SEARCH | orders::CAPTURE, Target::LogicId(id)) => Task::search(Search::Building(id)),
+            (orders::SEARCH, _) => Task::search(Search::Enemies),
             (orders::RELOAD, _) => Task::Reload,
             (orders::LEAVE, _) => Task::Leave { goal: None },
             (orders::ATTACK, Target::LogicId(id)) => {
@@ -363,6 +397,9 @@ pub enum Walk {
     Clear,
     /// To a place, at a share of the unit's speed.
     To(Vec3, f32),
+    /// Into the building of logic id `.0` to its pod at `.1`, at a share of the unit's speed
+    /// (`MakeInsideDest`, `0x10001270`): the play routes the walk through its hall way.
+    Inside(i32, Vec3, f32),
 }
 
 /// What a takt asks of the unit.
@@ -660,46 +697,25 @@ impl Behaviour {
                 self.fire = FireMode::Nearest;
                 Some(Takt { walk, target: self.fire_target(senses), fire_freely: false })
             }
-            Task::Search { search, next_ms } => {
-                if let Search::Building(id) = search
-                    && senses.find(id).is_none_or(|b| b.own)
-                {
-                    return None;
-                }
+            Task::Search { search: Search::Enemies, next_ms, .. } => {
                 let mut walk = Walk::Keep;
                 if senses.walker_idle || now >= next_ms {
-                    let goal = match search {
-                        Search::Enemies => senses
-                            .nearest(
-                                |s| s.hostile && s.type_word & !HUNTED_TYPES == 0 && !s.building,
-                                SEEK_RANGE,
-                            )
-                            .map(|s| s.position),
-                        // STAND-IN: docs/31-packages.md#what-each-package-does--read -- a
-                        // building's pod, the generator's half distance and the construction
-                        // phase are not modelled: the nearest building's placement; and the
-                        // capturer's retreat, read to lie off the map, roams.
-                        Search::Capture(mask) => senses
-                            .nearest(
-                                |s| {
-                                    s.building
-                                        && !s.own
-                                        && s.type_word & !mask & 0x7fff_ffff == 0
-                                        && s.type_word != BRIDGE
-                                        && s.type_word != MAIN_TELEPORT
-                                },
-                                f32::MAX,
-                            )
-                            .map(|s| s.position),
-                        Search::Building(id) => senses.find(id).map(|s| s.position),
-                    };
+                    let goal = senses
+                        .nearest(|s| s.hostile && s.type_word & !HUNTED_TYPES == 0 && !s.building, SEEK_RANGE)
+                        .map(|s| s.position);
                     let goal = goal.unwrap_or_else(|| self.roam(senses.bounds, at));
                     walk = Walk::To(goal, 1.0);
-                    let rescan =
-                        if matches!(search, Search::Enemies) { SEARCH_RESCAN_MS } else { CAPTURE_RESCAN_MS };
-                    let next = self.timer(now, rescan);
-                    *self.tasks.last_mut()? = Task::Search { search, next_ms: next };
+                    let next = self.timer(now, SEARCH_RESCAN_MS);
+                    *self.tasks.last_mut()? = Task::search(Search::Enemies);
+                    if let Some(Task::Search { next_ms, started, .. }) = self.tasks.last_mut() {
+                        (*next_ms, *started) = (next, true);
+                    }
                 }
+                self.fire = FireMode::Nearest;
+                Some(Takt { walk, target: self.fire_target(senses), fire_freely: true })
+            }
+            Task::Search { search, next_ms, building, landing, started } => {
+                let walk = self.capture_takt(search, next_ms, building, landing, started, senses)?;
                 self.fire = FireMode::Nearest;
                 Some(Takt { walk, target: self.fire_target(senses), fire_freely: true })
             }
@@ -816,6 +832,146 @@ impl Behaviour {
         };
         Vec3::new(pick(self, 0), pick(self, 1), at.z)
     }
+
+    /// A capture search's takt (docs/31, "The capture, tick by tick"): its start, then slot 7.
+    /// `None` when it ends or refuses its target.
+    fn capture_takt(
+        &mut self,
+        search: Search,
+        next_ms: f64,
+        building: Option<i32>,
+        landing: bool,
+        started: bool,
+        senses: &Senses,
+    ) -> Option<Walk> {
+        let now = senses.now_ms;
+        let (mut building, mut landing, mut next_ms) = (building, landing, next_ms);
+        let walk = if !started {
+            // Slot 3 (`0x10030110`): a logic id must be another clan's building, not a main
+            // teleport, for a unit of size class 2 at most; a mask with the top bit wants the
+            // same size. The timer is 15 s and up to 15, or 3 and up to 3 by type.
+            let rescan = match search {
+                Search::Building(id) => {
+                    let b = senses.find(id)?;
+                    if id as u32 & BUILDING_BIT == 0
+                        || !b.building
+                        || b.own
+                        || b.type_word == MAIN_TELEPORT
+                        || senses.size_class > CAPTURE_SIZE_MAX
+                    {
+                        return None;
+                    }
+                    building = Some(id);
+                    SEARCH_RESCAN_MS
+                }
+                Search::Capture(mask) if mask & BUILDING_BIT != 0 => {
+                    if senses.size_class > CAPTURE_SIZE_MAX {
+                        return None;
+                    }
+                    CAPTURE_RESCAN_MS
+                }
+                _ => SEARCH_RESCAN_MS,
+            };
+            next_ms = self.timer(now, rescan);
+            // Slot 6 (`0x10030280`): the landing flag from `CanFly`, then a plan.
+            landing = !senses.flyer;
+            self.plan_capture(search, &mut building, &mut landing, senses)
+        } else {
+            // Slot 7 (`0x10030300`): a building picked and gone or turned the unit's ends a
+            // single building, and a search by type plans the next; one still another
+            // clan's skips the timer.
+            let picked = building.map(|id| senses.find(id).filter(|b| !b.own).is_some());
+            match picked {
+                Some(false) => match search {
+                    Search::Building(_) => return None,
+                    _ => {
+                        building = None;
+                        landing = !senses.flyer;
+                        self.plan_capture(search, &mut building, &mut landing, senses)
+                    }
+                },
+                Some(true) if !senses.walker_idle => Walk::Keep,
+                // A flyer at its corner sets the flag and walks in; one on the pod asks again.
+                Some(true) => {
+                    landing = true;
+                    self.plan_capture(search, &mut building, &mut landing, senses)
+                }
+                None if now >= next_ms || senses.walker_idle => {
+                    let rescan = if matches!(search, Search::Capture(m) if m & BUILDING_BIT != 0) {
+                        CAPTURE_RESCAN_MS
+                    } else {
+                        SEARCH_RESCAN_MS
+                    };
+                    next_ms = self.timer(now, rescan);
+                    self.plan_capture(search, &mut building, &mut landing, senses)
+                }
+                None => Walk::Keep,
+            }
+        };
+        *self.tasks.last_mut()? = Task::Search { search, next_ms, building, landing, started: true };
+        Some(walk)
+    }
+
+    /// A capture's plan (slot 15, `0x100306f0`): a search by type picks the nearest building of
+    /// its mask no other clan's but another's, finished, no bridge or main teleport, across the
+    /// ground with a generator at half; a walker, or a flyer to walk in, goes to its pod; a
+    /// flyer first to its contour's nearest vertex; otherwise it roams.
+    ///
+    /// STAND-IN: docs/31-packages.md#where-a-search-looks--read-and-measured -- the retreat
+    /// read to lie off the map, and which areals are usable, are not modelled: a plan with
+    /// nowhere to go roams.
+    fn plan_capture(
+        &mut self,
+        search: Search,
+        building: &mut Option<i32>,
+        landing: &mut bool,
+        senses: &Senses,
+    ) -> Walk {
+        let at = senses.position;
+        if let Search::Capture(mask) = search {
+            let finished = |id: i32| senses.places.iter().find(|p| p.id == id).is_none_or(|p| p.complete);
+            let weight = |s: &Seen| {
+                let d = s.position.truncate().distance(at.truncate());
+                if s.type_word == GENERATOR { d / 2.0 } else { d }
+            };
+            *building = senses
+                .seen
+                .iter()
+                .filter(|s| {
+                    s.building
+                        && !s.own
+                        && s.type_word & !mask & 0x7fff_ffff == 0
+                        && s.type_word != BRIDGE
+                        && s.type_word != MAIN_TELEPORT
+                        && finished(s.id)
+                })
+                .min_by(|a, b| weight(a).total_cmp(&weight(b)))
+                .map(|s| s.id);
+        }
+        if let Some(id) = *building {
+            let places = senses.places.iter().find(|p| p.id == id);
+            // `MakeInsideDest` (`0x10001270`): a finished building with a pod, a small unit.
+            if !senses.flyer || *landing {
+                let pod = places
+                    .filter(|p| p.complete && senses.size_class <= CAPTURE_SIZE_MAX)
+                    .and_then(|p| p.pod);
+                if let Some(pod) = pod {
+                    *landing = true;
+                    return Walk::Inside(id, pod, GO_SPEED);
+                }
+            }
+            if senses.flyer {
+                *landing = false;
+                let across = |p: &Vec3| p.truncate().distance(at.truncate());
+                let corner =
+                    places.and_then(|p| p.contour.iter().min_by(|a, b| across(a).total_cmp(&across(b))));
+                if let Some(&corner) = corner {
+                    return Walk::To(corner, GO_SPEED);
+                }
+            }
+        }
+        Walk::To(self.roam(senses.bounds, at), GO_SPEED)
+    }
 }
 
 /// The fight module's distance score (`0x1001b9f0`): 0 to 1 over the first 5 m, 1 out to
@@ -869,6 +1025,9 @@ mod tests {
             now_ms,
             position: at,
             seen,
+            places: &[],
+            size_class: 2,
+            flyer: false,
             bounds: ([0.0; 2], [2000.0; 2]),
             has_weapon: true,
             walker_idle: idle,
@@ -1021,6 +1180,74 @@ mod tests {
         // The target dies: the attack ends and the unit stops again.
         idle.takt(&senses(&[], 1000.0, Vec3::ZERO, true));
         assert_eq!(idle.task(), Task::Stop);
+    }
+
+    fn capturer<'a>(seen: &'a [Seen], places: &'a [Places], at: Vec3, idle: bool) -> Senses<'a> {
+        Senses { places, size_class: 1, flyer: true, ..senses(seen, 0.0, at, idle) }
+    }
+
+    #[test]
+    fn a_capture_takes_a_generator_at_half_distance_lands_a_flyer_at_its_corner_then_walks_it_in() {
+        let building =
+            |id: i32, x: f32, type_word: u32| Seen { building: true, type_word, ..unit(id, x, 0.0) };
+        let generator = building(-2_147_483_643, 500.0, GENERATOR);
+        let plant = building(-2_147_483_646, 300.0, 0x8000_0010);
+        let teleport = building(-2_147_483_647, 100.0, MAIN_TELEPORT);
+        let own = Seen { own: true, ..building(-2_147_483_644, 50.0, 0x8000_0400) };
+        let places = |id: i32, x: f32| Places {
+            id,
+            complete: true,
+            pod: Some(Vec3::new(x, 0.0, 1.0)),
+            contour: vec![Vec3::new(x - 30.0, 5.0, 0.0), Vec3::new(x + 30.0, 5.0, 0.0)],
+        };
+        let all = [places(generator.id, 500.0), places(plant.id, 300.0), places(teleport.id, 100.0)];
+        let seen = [generator, plant, teleport, own];
+        let search =
+            Order { code: orders::SEARCH, parameter: 0, target: Target::TypeMask(orders::CAPTURE_TYPES) };
+
+        let mut b = Behaviour::new(7);
+        b.order(&search);
+        // The generator's 500 counts as 250: nearer than the plant, and the teleport and the
+        // unit's own building are never picked. A flyer first makes for the nearest corner.
+        let t = b.takt(&capturer(&seen, &all, Vec3::ZERO, true));
+        assert_eq!(t.walk, Walk::To(Vec3::new(470.0, 5.0, 0.0), GO_SPEED));
+        assert!(
+            matches!(b.task(), Task::Search { building: Some(id), landing: false, .. } if id == generator.id)
+        );
+        assert_eq!(b.takt(&capturer(&seen, &all, Vec3::new(200.0, 0.0, 0.0), false)).walk, Walk::Keep);
+        // Idle at its corner it sets the flag and walks in, and asks again while waiting.
+        let inside = Walk::Inside(generator.id, Vec3::new(500.0, 0.0, 1.0), GO_SPEED);
+        assert_eq!(b.takt(&capturer(&seen, &all, Vec3::new(470.0, 5.0, 0.0), true)).walk, inside);
+        assert!(matches!(b.task(), Task::Search { landing: true, .. }));
+        assert_eq!(b.takt(&capturer(&seen, &all, Vec3::new(500.0, 0.0, 1.0), true)).walk, inside);
+        // Taken, the search by type goes on to the plant, landing first again.
+        let taken = [Seen { own: true, ..generator }, plant, teleport, own];
+        let t = b.takt(&capturer(&taken, &all, Vec3::new(500.0, 0.0, 1.0), false));
+        assert_eq!(t.walk, Walk::To(Vec3::new(330.0, 5.0, 0.0), GO_SPEED));
+
+        // A walker goes straight in.
+        let mut walker = Behaviour::new(3);
+        walker.order(&search);
+        assert_eq!(
+            walker.takt(&Senses { flyer: false, ..capturer(&seen, &all, Vec3::ZERO, true) }).walk,
+            inside
+        );
+
+        // One building: never a main teleport or the unit's own, never for a unit bigger than 2;
+        // it ends once the building is the unit's clan's.
+        for (id, size) in [(teleport.id, 1), (own.id, 1), (plant.id, 3)] {
+            let mut one = Behaviour::new(5);
+            one.order(&Order { code: orders::CAPTURE, parameter: 0, target: Target::LogicId(id) });
+            one.takt(&Senses { size_class: size, ..capturer(&seen, &all, Vec3::ZERO, true) });
+            assert_eq!(one.task(), Task::Stop, "{id} size {size}");
+        }
+        let mut one = Behaviour::new(5);
+        one.order(&Order { code: orders::SEARCH, parameter: 0, target: Target::LogicId(plant.id) });
+        let t = one.takt(&capturer(&seen, &all, Vec3::ZERO, true));
+        assert_eq!(t.walk, Walk::To(Vec3::new(270.0, 5.0, 0.0), GO_SPEED));
+        let taken = [Seen { own: true, ..plant }];
+        one.takt(&capturer(&taken, &all, Vec3::new(300.0, 0.0, 1.0), true));
+        assert_eq!(one.task(), Task::Stop);
     }
 
     #[test]

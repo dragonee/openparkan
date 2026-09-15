@@ -213,9 +213,88 @@ pub fn straight_walk(from: Vec3, to: Vec3, speed: f32, now_ms: f64, flags: u32) 
     (points, stop)
 }
 
+/// The points for a walk from `from` through each of `path` in turn at `speed`, starting at
+/// `now_ms`, and the stop it ends in: each leg as [`straight_walk`] cuts it, one after the
+/// other, the whole at least three points. With `rest` the stop is the last point itself, at
+/// rest.
+///
+/// STAND-IN: docs/31-packages.md#not-established -- how the walker's path joins a building's
+/// hall way (`MGraph`), and how it brings a unit to rest on a place in it, are not read: the
+/// hall way's vertices are handed on as legs, and a way in stops on its last vertex rather than
+/// half its velocity beyond it.
+pub fn path_walk(
+    from: Vec3,
+    path: &[Vec3],
+    speed: f32,
+    now_ms: f64,
+    flags: u32,
+    rest: bool,
+) -> (Vec<Point>, Point) {
+    let speed = speed.max(MIN_WALK_SPEED);
+    let mut points = Vec::new();
+    let (mut start, mut time) = (from, now_ms);
+    for &to in path {
+        let span = to - start;
+        let length = span.length();
+        if length < 1e-3 {
+            continue;
+        }
+        let seconds = f64::from(length / speed);
+        let count = seconds.ceil().max(1.0) as usize;
+        let velocity = span / length * speed;
+        points.extend((1..=count).map(|k| {
+            let f = k as f32 / count as f32;
+            Point {
+                position: start + span * f,
+                velocity,
+                time_ms: time + seconds * 1000.0 * f64::from(f),
+                flags,
+            }
+        }));
+        start = to;
+        time += seconds * 1000.0;
+    }
+    if !rest && points.len() < MIN_POINTS {
+        return straight_walk(from, start, speed, now_ms, flags);
+    }
+    let Some(&last) = points.last() else {
+        return (
+            Vec::new(),
+            Point { position: from, velocity: Vec3::ZERO, time_ms: now_ms, flags: flags | 1 },
+        );
+    };
+    if rest {
+        points.pop();
+        return (points, Point { velocity: Vec3::ZERO, flags: flags | 1, ..last });
+    }
+    let stop = Point {
+        position: last.position + last.velocity * 0.5,
+        velocity: Vec3::ZERO,
+        time_ms: last.time_ms + STOP_AFTER_MS,
+        flags: flags | 1,
+    };
+    (points, stop)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_path_walk_passes_each_point_in_turn_at_its_speed() {
+        let path = [Vec3::new(10.0, 0.0, 0.0), Vec3::new(10.0, 20.0, 0.0)];
+        let (points, stop) = path_walk(Vec3::ZERO, &path, 5.0, 1000.0, GROUND_POINT, false);
+        let corner = points.iter().find(|p| p.position == path[0]).expect("the corner is a point");
+        assert_eq!((corner.time_ms, corner.velocity), (3000.0, Vec3::new(5.0, 0.0, 0.0)));
+        let end = points.last().unwrap();
+        assert_eq!((end.position, end.time_ms, end.velocity), (path[1], 7000.0, Vec3::new(0.0, 5.0, 0.0)));
+        assert_eq!((stop.velocity, stop.time_ms), (Vec3::ZERO, 8000.0));
+        assert!(points.windows(2).all(|w| w[1].time_ms > w[0].time_ms));
+        // A way in comes to rest on its last point.
+        let (points, stop) = path_walk(Vec3::ZERO, &path, 5.0, 1000.0, GROUND_POINT, true);
+        assert_eq!((stop.position, stop.velocity, stop.time_ms), (path[1], Vec3::ZERO, 7000.0));
+        assert!(points.last().is_some_and(|p| p.time_ms < 7000.0));
+    }
 
     #[test]
     fn a_walk_is_held_between_two_metres_a_second_and_the_units_capped_top() {

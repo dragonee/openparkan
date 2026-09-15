@@ -3137,6 +3137,23 @@ fn command_frames(
     }
 }
 
+/// Where Mission 04's capturer is when a landing flag is set with building `id` picked: its
+/// landing corner.
+fn landing_corner(
+    play: &parkan_world::play::Play,
+    heli: usize,
+    id: i32,
+    was: &mut bool,
+) -> Option<glam::Vec3> {
+    use parkan_sim::behaviour::Task;
+    let robot = &play.robots.iter().find(|(t, _)| *t == heli).unwrap().1;
+    let landing =
+        matches!(robot.behaviour.task(), Task::Search { building: Some(b), landing: true, .. } if b == id);
+    let corner = (landing && !*was).then_some(robot.walker.body.position);
+    *was = landing;
+    corner
+}
+
 #[test]
 #[ignore = "needs the game install"]
 fn one_enter_takes_and_boards_mission_04s_hq_and_its_capture_completes_the_first_objective() {
@@ -3491,4 +3508,113 @@ fn mission_04s_helicopter_rides_up_a_slope_on_its_joined_sphere_with_its_eye_abo
     let climbed = play.driven().walker.body.position.z - z0;
     assert!(climbed > 50.0, "rode up {climbed}");
     assert!(lowest > 1.0, "the eye stays above the ground: at least {lowest}");
+}
+
+#[test]
+#[ignore = "needs the game install"]
+fn mission_04s_helicopter_searches_out_the_factory_and_the_research_centre_landing_at_their_corners() {
+    use parkan_world::cockpit::panels::status_order;
+    use parkan_world::progress::{Say, Sender};
+
+    let (mut play, m) = mission_04_play();
+    let heli = object_target(&play, &m, "tut4_f1.dat");
+    let plant = object_target(&play, &m, "lplant01.dat");
+    let centre = object_target(&play, &m, "einst01.dat");
+    let player = play.player_clan;
+    let objectives = |p: &parkan_world::play::Play| {
+        p.progression.as_ref().unwrap().progress.objectives.iter().map(|o| o.state).collect::<Vec<_>>()
+    };
+    // The Battle units page offers the helicopter Search and capture, a search by type.
+    play.commander.units = vec![heli];
+    assert!(play.hq_rows().contains(&2), "{:?}", play.hq_rows());
+    play.hq_command(2).expect("Search and capture");
+    assert_eq!(status_order(&play, heli), 5, "searching");
+
+    let mut says = Vec::new();
+    for (building, id, corner, objective) in [
+        (plant, play.units[plant].logical_id, glam::Vec2::new(734.3, 892.0), 1),
+        (centre, play.units[centre].logical_id, glam::Vec2::new(881.8, 900.3), 2),
+    ] {
+        let (mut landed, mut was, mut taken) = (None, false, None);
+        for tick in 0..(180 * 60) {
+            play.update_input();
+            play.tick(1000.0 / 60.0, [0.0; 2]);
+            says.append(&mut play.says);
+            if let Some(at) = landing_corner(&play, heli, id, &mut was) {
+                landed.get_or_insert(at);
+            }
+            if play.units[building].clan == Some(player) {
+                taken = Some(tick as f32 / 60.0);
+                break;
+            }
+        }
+        let taken =
+            taken.unwrap_or_else(|| panic!("{} is not taken", m.objects[play.battle.objects[building]].path));
+        let landed = landed.expect("it lands first");
+        eprintln!(
+            "{} taken {taken:.1} s on, landing at {landed}",
+            m.objects[play.battle.objects[building]].path
+        );
+        assert!(landed.truncate().distance(corner) < 25.0, "lands at its corner {corner}: {landed}");
+        play_for(&mut play, 2.5, |p| says.append(&mut p.says));
+        assert_eq!(objectives(&play)[objective], 1, "objective {objective}");
+    }
+    let p = play.progression.as_ref().unwrap();
+    let captured =
+        says.iter().filter(|s| matches!(s, Say::Text(Sender::System, t) if t == "Building is captured"));
+    assert_eq!(captured.count(), 2);
+    let neutral = p.sound(parkan_world::play::VOICE_NBUILD_CAPTURE).expect("the neutral's voice");
+    assert_eq!(says.iter().filter(|s| **s == Say::Voice(neutral.clone())).count(), 2);
+    // With nothing left to take it roams, and never goes for the teleport.
+    let teleport = object_target(&play, &m, "mtp_m_n1.dat");
+    play_for(&mut play, 30.0, |_| {});
+    assert_ne!(play.units[teleport].clan, Some(player));
+}
+
+#[test]
+#[ignore = "needs the game install"]
+fn a_click_on_the_research_centre_sends_the_helicopter_to_take_it_alone_then_it_escapes() {
+    use parkan_sim::behaviour::{Search, Task};
+    use parkan_world::pick::Aim;
+
+    let (mut play, m) = mission_04_play();
+    let heli = object_target(&play, &m, "tut4_f1.dat");
+    let centre = object_target(&play, &m, "einst01.dat");
+    let id = play.units[centre].logical_id;
+    let player = play.player_clan;
+    // A click straight down onto the neutral centre with the helicopter selected is pick kind 4,
+    // the capture cursor, and a search on that one building.
+    play.commander.units = vec![heli];
+    let over = play.battle.combat.targets[centre].centre + glam::Vec3::new(0.0, 0.0, 300.0);
+    let pick = play.pick(Aim::Ray { eye: over, direction: -glam::Vec3::Z });
+    assert_eq!((pick.kind, pick.object), (4, Some(centre)));
+    assert_eq!(parkan_world::pick::cursor_state(pick.kind), 6, "CAPTURE");
+    play.click_world(pick);
+    let task =
+        |p: &parkan_world::play::Play| p.robots.iter().find(|(t, _)| *t == heli).unwrap().1.behaviour.task();
+    assert!(matches!(task(&play), Task::Search { search: Search::Building(b), .. } if b == id));
+
+    let mut seconds = 0.0;
+    while play.units[centre].clan != Some(player) && seconds < 180.0 {
+        play_for(&mut play, 0.25, |_| {});
+        seconds += 0.25;
+    }
+    assert_eq!(play.units[centre].clan, Some(player), "taken in {seconds} s");
+    let pod = play.robots.iter().find(|(t, _)| *t == heli).unwrap().1.walker.body.position;
+    // The search ends; standing idle on the building the unit is given the escape, and walks off
+    // the building to open ground within 150.
+    play_for(&mut play, 0.5, |_| {});
+    assert!(matches!(task(&play), Task::Leave { .. }), "{:?}", task(&play));
+    let mut off = None;
+    for second in 0..60 {
+        play_for(&mut play, 1.0, |_| {});
+        let robot = &play.robots.iter().find(|(t, _)| *t == heli).unwrap().1;
+        if task(&play) == Task::Stop && robot.walker.ground.and_then(|h| h.solid).is_none() {
+            off = Some((second, robot.walker.body.position));
+            break;
+        }
+    }
+    let (second, at) = off.expect("off the building and at rest within a minute");
+    eprintln!("taken in {seconds} s, off the building {second} s later at {at}, from {pod}");
+    assert!((at - pod).truncate().abs().max_element() < 175.0, "escaped to {at} from {pod}");
 }

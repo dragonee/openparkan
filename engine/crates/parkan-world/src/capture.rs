@@ -1,0 +1,327 @@
+//! A small warbot's capture, the world's side: the places a capture search goes to — a
+//! building's contour and its pod — the ways into a building and out of it along its hall way,
+//! and what the player hears when a building changes owner. See `docs/31-packages.md`, "The
+//! capture, tick by tick", and `docs/27-ownership.md`, "Capture".
+
+use std::collections::HashMap;
+use std::rc::Rc;
+
+use glam::Vec3;
+use parkan_formats::hallway::{self, HallWay, PLACE_POD};
+use parkan_formats::mission::KIND_BUILDING;
+use parkan_sim::behaviour::Places;
+
+use crate::construction::placed;
+use crate::play::{
+    CLAN_NEUTRAL, Play, RELATION_HOSTILE, RELATION_NEUTRAL, VOICE_BUILD_CAPTURE, VOICE_EBUILD_CAPTURE,
+    VOICE_NBUILD_CAPTURE,
+};
+
+/// A hall way's exit: flag 1 (docs/24, "The way to the pod").
+pub const PLACE_EXIT: u32 = 0x1;
+/// The contour while a construction sphere runs: eight points on a circle of the sphere's
+/// radius ÷ cos(π/8) + 20 (`0x1000a611`).
+pub const OCTAGON_MARGIN: f32 = 20.0;
+/// How near its pod a unit walked in holds (the go task's arrival at an object, `0x1002b670`).
+pub const POD_ARRIVED: f32 = 1.5;
+/// A unit this near a hall-way vertex joins the way there rather than at an exit.
+pub const WAY_JOIN: f32 = 5.0;
+
+/// The buildings' hall ways by path, and which building each unit walked into.
+#[derive(Clone, Debug, Default)]
+pub struct Ways {
+    hall_ways: HashMap<String, Rc<HallWay>>,
+    /// A unit's target: the building target it was last sent into along the hall way.
+    pub entered: HashMap<usize, usize>,
+}
+
+/// What a change of owner says to the player (`0x100a48a0`): with the player's clan the taker,
+/// string 5039 and a voice by the old clan — a neutral clan's, or one whose word towards the
+/// taker is 1, `VOICE_NBUILD_CAPTURE`; 0, `VOICE_EBUILD_CAPTURE`; any other,
+/// `VOICE_BUILD_CAPTURE`. With the player's clan the loser, `VOICE_BUILD_CAPTURE` alone. With
+/// neither, nothing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Announcement {
+    pub text: bool,
+    pub voice: Option<&'static str>,
+}
+
+/// The announcement for a building of `old` taken by `taker`, the player's clan being
+/// `player`; `old_kind` is the old clan's type and `word` its relation word towards the taker.
+pub fn announcement(
+    player: i64,
+    taker: i64,
+    old: Option<i64>,
+    old_kind: Option<u32>,
+    word: Option<u32>,
+) -> Announcement {
+    if taker == player {
+        let voice = if old_kind.is_none_or(|k| k == CLAN_NEUTRAL) || word == Some(RELATION_NEUTRAL) {
+            VOICE_NBUILD_CAPTURE
+        } else if word == Some(RELATION_HOSTILE) {
+            VOICE_EBUILD_CAPTURE
+        } else {
+            VOICE_BUILD_CAPTURE
+        };
+        Announcement { text: true, voice: Some(voice) }
+    } else if old == Some(player) {
+        Announcement { text: false, voice: Some(VOICE_BUILD_CAPTURE) }
+    } else {
+        Announcement { text: false, voice: None }
+    }
+}
+
+/// The shortest ways along a hall way's links from `from` to every vertex: each vertex's
+/// distance and the vertex before it, `positions` giving the vertices in the world.
+fn shortest(hall_way: &HallWay, positions: &[Option<Vec3>], from: usize) -> (Vec<f32>, Vec<Option<usize>>) {
+    let n = hall_way.vertices.len();
+    let (mut dist, mut prev, mut done) = (vec![f32::INFINITY; n], vec![None; n], vec![false; n]);
+    if from >= n {
+        return (dist, prev);
+    }
+    dist[from] = 0.0;
+    let next = |dist: &[f32], done: &[bool]| {
+        (0..n).filter(|&i| !done[i] && dist[i].is_finite()).min_by(|&a, &b| dist[a].total_cmp(&dist[b]))
+    };
+    while let Some(u) = next(&dist, &done) {
+        done[u] = true;
+        for link in &hall_way.links {
+            let (a, b) = (link.start as usize, link.end as usize);
+            let v = if a == u {
+                b
+            } else if b == u {
+                a
+            } else {
+                continue;
+            };
+            let (Some(pu), Some(pv)) =
+                (positions.get(u).copied().flatten(), positions.get(v).copied().flatten())
+            else {
+                continue;
+            };
+            let d = dist[u] + pu.distance(pv);
+            if v < n && d < dist[v] {
+                dist[v] = d;
+                prev[v] = Some(u);
+            }
+        }
+    }
+    (dist, prev)
+}
+
+/// The vertices from `to` back along `prev` to the way's start, start first.
+fn walk_back(prev: &[Option<usize>], to: usize) -> Vec<usize> {
+    let mut out = vec![to];
+    while let Some(p) = prev.get(*out.last().expect("one")).copied().flatten() {
+        out.push(p);
+    }
+    out.reverse();
+    out
+}
+
+impl Play {
+    /// Target `t`'s hall way, read once for its path.
+    fn hall_way(&mut self, t: usize) -> Option<Rc<HallWay>> {
+        let path = self.commander.paths.get(t)?.to_ascii_lowercase();
+        if let Some(h) = self.construction.ways.hall_ways.get(&path) {
+            return Some(h.clone());
+        }
+        let parts = self.assembly.parts(KIND_BUILDING, &path);
+        let root = parts.iter().find(|p| p.host == -1)?.clone();
+        let blob =
+            self.assembly.archive(&root.reference.library)?.read_name(&root.reference.member).ok()?.to_vec();
+        let h = Rc::new(hallway::parse(&blob, &root.reference.member).unwrap_or_default());
+        self.construction.ways.hall_ways.insert(path, h.clone());
+        Some(h)
+    }
+
+    /// Target `t`'s hall-way vertices in the world, through their nodes' poses.
+    fn hall_way_points(&mut self, t: usize) -> Option<(Rc<HallWay>, Vec<Option<Vec3>>)> {
+        let h = self.hall_way(t)?;
+        let part = self.battle.combat.targets.get(t)?.parts.first()?;
+        let points = h.vertices.iter().map(|v| crate::factory::vertex_world(v, part)).collect();
+        Some((h, points))
+    }
+
+    /// Building `t`'s contour in the world (variable `0x203`, `0x1000a611`): its `.bas` outer
+    /// ring placed where it stands, or, while its construction sphere runs, eight points on a
+    /// circle of the sphere's radius ÷ cos(π/8) + 20 about it. Each point stands on the ground
+    /// under it.
+    pub fn contour(&mut self, t: usize) -> Vec<Vec3> {
+        let on_ground = |play: &Play, x: f32, y: f32| {
+            let z = play.ground.below(x, y, 1.0e5).map_or(0.0, |h| h.point.z);
+            Vec3::new(x, y, z)
+        };
+        if let Some(sphere) = self.construction.spheres.iter().find(|s| s.target == t) {
+            let (centre, r) =
+                (sphere.centre, sphere.radius / (std::f32::consts::PI / 8.0).cos() + OCTAGON_MARGIN);
+            return (0..8)
+                .map(|k| {
+                    let a = k as f32 * std::f32::consts::FRAC_PI_4;
+                    on_ground(self, centre.x + r * a.cos(), centre.y + r * a.sin())
+                })
+                .collect();
+        }
+        let Some(&(at, yaw)) = self.construction.placements.get(&t) else { return Vec::new() };
+        let Some(path) = self.commander.paths.get(t).cloned() else { return Vec::new() };
+        self.plan(&path)
+            .outer
+            .iter()
+            .map(|p| {
+                let [x, y] = placed([p[0], p[1]], at, yaw);
+                on_ground(self, x, y)
+            })
+            .collect()
+    }
+
+    /// Whether `at` lies inside building `t`'s outer ring across the ground.
+    fn within_contour(&mut self, t: usize, at: Vec3) -> bool {
+        let ring = self.contour(t);
+        let mut inside = false;
+        for i in 0..ring.len() {
+            let (a, b) = (ring[i], ring[(i + 1) % ring.len()]);
+            if (a.y > at.y) != (b.y > at.y) && at.x < a.x + (at.y - a.y) * (b.x - a.x) / (b.y - a.y) {
+                inside = !inside;
+            }
+        }
+        inside
+    }
+
+    /// Every live building's places for a capture search: whether it is finished, its pod and
+    /// the contour vertices a flyer may land at.
+    ///
+    /// STAND-IN: docs/31-packages.md#the-plan-slot-15-0x100306f0--read -- the engine keeps no
+    /// areals, so an areal's flag word is not tested: a contour vertex counts where the ground
+    /// under it is above any water.
+    pub fn capture_places(&mut self) -> Vec<Places> {
+        let buildings: Vec<usize> = (0..self.units.len())
+            .filter(|&t| {
+                self.units[t].kind == KIND_BUILDING
+                    && self.battle.combat.targets.get(t).is_some_and(|x| x.alive)
+            })
+            .collect();
+        buildings
+            .into_iter()
+            .map(|t| {
+                let pod = self.hall_way_points(t).and_then(|(h, points)| {
+                    h.vertices.iter().position(|v| v.flags & PLACE_POD != 0).and_then(|i| points[i])
+                });
+                let contour = self
+                    .contour(t)
+                    .into_iter()
+                    .filter(|p| self.ground.water(p.x, p.y, p.z).is_none_or(|w| w <= p.z))
+                    .collect();
+                Places { id: self.units[t].logical_id, complete: !self.building_itself(t), pod, contour }
+            })
+            .collect()
+    }
+
+    /// The way into building `t` for a unit at `from`: its hall way's shortest way to the pod
+    /// from the exit, or a vertex within 5 of `from`, that makes the whole way shortest, counting
+    /// the way to it straight; that vertex first.
+    ///
+    /// STAND-IN: docs/31-packages.md#not-established -- how the walker joins the hall way is
+    /// not read: straight to that vertex, then along the links.
+    pub fn way_in(&mut self, t: usize, from: Vec3) -> Option<Vec<Vec3>> {
+        let (h, points) = self.hall_way_points(t)?;
+        let pod = h.vertices.iter().position(|v| v.flags & PLACE_POD != 0)?;
+        let (dist, prev) = shortest(&h, &points, pod);
+        let to = |i: usize| points[i].map_or(f32::INFINITY, |p| p.distance(from));
+        let whole = |i: usize| to(i) + dist[i];
+        let start = (0..h.vertices.len())
+            .filter(|&i| (h.vertices[i].flags & PLACE_EXIT != 0 || to(i) <= WAY_JOIN) && dist[i].is_finite())
+            .min_by(|&a, &b| whole(a).total_cmp(&whole(b)))?;
+        // `prev` leads back to the pod, so the way from the start runs along it.
+        let mut way = walk_back(&prev, start);
+        way.reverse();
+        way.into_iter().map(|i| points[i]).collect()
+    }
+
+    /// The way out of building `t` for a unit at `from` bound for `to`: from its nearest
+    /// hall-way vertex along the links to the exit that makes the way to `to` shortest,
+    /// counting the rest straight.
+    ///
+    /// STAND-IN: docs/31-packages.md#the-escape--read -- the building's own paths an escape is
+    /// routed out by ("LEAVE IS TOO !!!") are not read: the hall way's.
+    pub fn way_out(&mut self, t: usize, from: Vec3, to: Vec3) -> Option<Vec<Vec3>> {
+        let (h, points) = self.hall_way_points(t)?;
+        let near = |i: &usize| points[*i].map_or(f32::INFINITY, |p| p.distance(from));
+        let start = (0..h.vertices.len()).min_by(|a, b| near(a).total_cmp(&near(b)))?;
+        let (dist, prev) = shortest(&h, &points, start);
+        let total =
+            |i: usize| dist[i] + points[i].map_or(f32::INFINITY, |p| p.truncate().distance(to.truncate()));
+        let exit = (0..h.vertices.len())
+            .filter(|&i| h.vertices[i].flags & PLACE_EXIT != 0 && dist[i].is_finite())
+            .min_by(|&a, &b| total(a).total_cmp(&total(b)))?;
+        walk_back(&prev, exit).into_iter().map(|i| points[i]).collect()
+    }
+
+    /// The legs of a walk for robot target `t` at `from` to `goal`: out of the building it
+    /// walked into first while it still stands inside that building's outer ring. Once outside,
+    /// the building is forgotten.
+    pub fn legs_to(&mut self, t: usize, from: Vec3, goal: Vec3) -> Vec<Vec3> {
+        let mut legs = Vec::new();
+        if let Some(&b) = self.construction.ways.entered.get(&t) {
+            if self.battle.combat.targets.get(b).is_some_and(|x| x.alive) && self.within_contour(b, from) {
+                legs = self.way_out(b, from, goal).unwrap_or_default();
+            } else {
+                self.construction.ways.entered.remove(&t);
+            }
+        }
+        legs.push(goal);
+        legs
+    }
+
+    /// The legs of a walk for robot target `t` at `from` into the building of logic id `id`,
+    /// to its pod at `pod`: its way in, or straight to the pod.
+    ///
+    /// STAND-IN: docs/31-packages.md#each-tick-slot-7-0x10030300--read -- what the walker does
+    /// with the pod handed to it again while it stands there is not read: within 1.5 of it, the
+    /// go task's arrival at an object, it holds.
+    pub fn legs_inside(&mut self, t: usize, from: Vec3, id: i32, pod: Vec3) -> Vec<Vec3> {
+        let Some(b) = self.units.iter().position(|u| u.logical_id == id && u.kind == KIND_BUILDING) else {
+            return vec![pod];
+        };
+        self.construction.ways.entered.insert(t, b);
+        if from.distance(pod) <= POD_ARRIVED {
+            return Vec::new();
+        }
+        self.way_in(b, from).unwrap_or_else(|| vec![pod])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::play::RELATION_ALLIED;
+    use parkan_formats::hallway::{Link, Vertex};
+
+    #[test]
+    fn the_player_gaining_a_building_hears_it_by_the_old_clan_and_losing_one_hears_the_voice_alone() {
+        let neutral = announcement(0, 0, Some(1), Some(CLAN_NEUTRAL), Some(RELATION_HOSTILE));
+        assert_eq!(neutral, Announcement { text: true, voice: Some(VOICE_NBUILD_CAPTURE) });
+        let word_1 = announcement(0, 0, Some(1), Some(2), Some(RELATION_NEUTRAL));
+        assert_eq!(word_1.voice, Some(VOICE_NBUILD_CAPTURE));
+        let enemy = announcement(0, 0, Some(1), Some(2), Some(RELATION_HOSTILE));
+        assert_eq!(enemy.voice, Some(VOICE_EBUILD_CAPTURE));
+        let ally = announcement(0, 0, Some(1), Some(1), Some(RELATION_ALLIED));
+        assert_eq!(ally, Announcement { text: true, voice: Some(VOICE_BUILD_CAPTURE) });
+        let lost = announcement(0, 1, Some(0), Some(1), Some(RELATION_HOSTILE));
+        assert_eq!(lost, Announcement { text: false, voice: Some(VOICE_BUILD_CAPTURE) });
+        assert_eq!(announcement(0, 1, Some(2), Some(2), None), Announcement { text: false, voice: None });
+    }
+
+    #[test]
+    fn the_shortest_way_follows_the_links_either_way() {
+        let v = |x: f32, flags: u32| Vertex { position: [x, 0.0, 0.0], flags, joint: 0 };
+        let h = HallWay {
+            vertices: vec![v(0.0, PLACE_POD), v(10.0, 0), v(20.0, PLACE_EXIT), v(5.0, PLACE_EXIT)],
+            links: vec![Link { start: 1, end: 0 }, Link { start: 2, end: 1 }, Link { start: 3, end: 0 }],
+        };
+        let points: Vec<Option<Vec3>> =
+            h.vertices.iter().map(|v| Some(Vec3::from_array(v.position))).collect();
+        let (dist, prev) = shortest(&h, &points, 0);
+        assert_eq!(dist, vec![0.0, 10.0, 20.0, 5.0]);
+        assert_eq!(walk_back(&prev, 2), vec![0, 1, 2]);
+    }
+}

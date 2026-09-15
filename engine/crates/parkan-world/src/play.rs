@@ -24,7 +24,7 @@ use parkan_formats::mission::{
 use parkan_formats::pose::Pose;
 use parkan_formats::{gamedir, landmesh};
 use parkan_sim::behaviour::{
-    FIRE_BAR_FLYER, FIRE_BAR_WALKER, Seen, Senses, Takt, Walk, distance_score, fire_wait_ms,
+    FIRE_BAR_FLYER, FIRE_BAR_WALKER, Search, Seen, Senses, Takt, Task, Walk, distance_score, fire_wait_ms,
 };
 use parkan_sim::combat::{Event, Part, Round};
 use parkan_sim::damage::FLIGHT_MS;
@@ -39,7 +39,7 @@ use parkan_sim::orders::{self, ACKNOWLEDGEMENTS, Digit, Picked, Selector, VoiceP
 use parkan_sim::progression::Notice;
 use parkan_sim::solid::{self, NO_CONTACT, Solid};
 use parkan_sim::targeting::{Contact, TargetList};
-use parkan_sim::wizard::{GROUND_POINT, straight_walk, walk_speed};
+use parkan_sim::wizard::{GROUND_POINT, path_walk, straight_walk, walk_speed};
 
 use crate::assembly::Assembly;
 use crate::battle::Battle;
@@ -2014,18 +2014,20 @@ impl Play {
             if let Some(p) = self.progression.as_mut() {
                 p.progress.captured(self.units[t].logical_id, taker);
             }
+            let old = owner.and_then(|c| self.clan(c));
+            let taker_name = self.clan(taker).map(|c| c.name.clone());
+            let word = old.and_then(|c| {
+                c.relations.iter().find(|(name, _)| Some(name) == taker_name.as_ref()).map(|&(_, w)| w)
+            });
+            let said =
+                crate::capture::announcement(self.player_clan, taker, owner, old.map(|c| c.kind), word);
             if let Some(p) = self.progression.as_ref() {
-                if let Some(text) = p.strings.get(&STRING_BUILDING_CAPTURED) {
+                if said.text
+                    && let Some(text) = p.strings.get(&STRING_BUILDING_CAPTURED)
+                {
                     self.says.push(Say::Text(crate::progress::Sender::System, text.clone()));
                 }
-                let voice = if taker == self.player_clan {
-                    if self.hostile(owner) { VOICE_EBUILD_CAPTURE } else { VOICE_NBUILD_CAPTURE }
-                } else if owner == Some(self.player_clan) {
-                    VOICE_BUILD_CAPTURE
-                } else {
-                    ""
-                };
-                self.says.extend(p.sound(voice).map(Say::Voice));
+                self.says.extend(said.voice.and_then(|v| p.sound(v)).map(Say::Voice));
             }
         }
         // The opening acts only for the player's own unit (`0x10062630`).
@@ -2477,6 +2479,9 @@ impl Play {
                     now_ms: robot.time_ms,
                     position: robot.walker.body.position,
                     seen: &others,
+                    places: &[],
+                    size_class: robot.size_class,
+                    flyer: robot.flyer,
                     bounds: ground.bounds(),
                     has_weapon: !robot.guns.is_empty(),
                     walker_idle: true,
@@ -2533,9 +2538,15 @@ impl Play {
     /// AI fires").
     fn behave(&mut self, r: usize, dt_ms: f64, seen: &[Sighting]) {
         let t = self.robots[r].0;
+        self.escape_off_building(r);
         let others = self.seen_by(t, seen);
         let animal = self.units[t].type_word & CLASS_ANIMAL != 0;
         let bounds = self.ground.bounds();
+        let capturing = matches!(
+            self.robots[r].1.behaviour.task(),
+            Task::Search { search: Search::Capture(_) | Search::Building(_), .. }
+        );
+        let places = if capturing { self.capture_places() } else { Vec::new() };
         let (_, robot) = &mut self.robots[r];
         let now = robot.time_ms;
         let at = robot.walker.body.position;
@@ -2543,6 +2554,9 @@ impl Play {
             now_ms: now,
             position: at,
             seen: &others,
+            places: &places,
+            size_class: robot.size_class,
+            flyer: robot.flyer,
             bounds,
             has_weapon: !robot.guns.is_empty(),
             walker_idle: robot.wizard.idle(now),
@@ -2551,23 +2565,39 @@ impl Play {
             animal,
         };
         let takt = robot.behaviour.takt(&senses);
-        match takt.walk {
-            Walk::Keep => {}
-            Walk::Clear => robot.wizard.clear(),
+        let (flyer, top, low) = (
+            robot.flyer,
+            robot.walker.limits.top_speed[1].abs(),
+            robot.walker.controller.triples[1][1].abs(),
+        );
+        let legs = match takt.walk {
+            Walk::Keep => None,
+            Walk::Clear => Some((Vec::new(), 0.0, false)),
             Walk::To(goal, share) => {
-                let top = robot.walker.limits.top_speed[1].abs();
-                let low = robot.walker.controller.triples[1][1].abs();
-                let speed = walk_speed(share * top, top, low, SPEED_MAXIMUM_FACTOR);
                 let floor = self.ground.below(goal.x, goal.y, 10_000.0).map_or(goal.z, |h| h.point.z);
                 // STAND-IN: docs/24-motion.md#not-established -- the height a flyer's points
                 // are given, and who reads `Movement_FlyHeight`, are not read: a flyer's
                 // points keep at least `FlyNearLandHeight` above the ground under them.
-                let (goal, flags) = if robot.flyer {
-                    (goal.with_z(goal.z.max(floor + FLY_NEAR_LAND)), 0)
+                let goal =
+                    if flyer { goal.with_z(goal.z.max(floor + FLY_NEAR_LAND)) } else { goal.with_z(floor) };
+                Some((self.legs_to(t, at, goal), share, false))
+            }
+            Walk::Inside(id, pod, share) => Some((self.legs_inside(t, at, id, pod), share, true)),
+        };
+        let (_, robot) = &mut self.robots[r];
+        match legs {
+            None => {}
+            Some((legs, _, _)) if legs.is_empty() => robot.wizard.clear(),
+            Some((legs, share, inside)) => {
+                let speed = walk_speed(share * top, top, low, SPEED_MAXIMUM_FACTOR);
+                // A walker's points run along the ground; a flyer's follow each point's height,
+                // down to the hall way's vertices inside a building.
+                let flags = if flyer { 0 } else { GROUND_POINT };
+                let (points, stop) = if legs.len() == 1 && !inside {
+                    straight_walk(at, legs[0], speed, now, flags)
                 } else {
-                    (goal.with_z(floor), GROUND_POINT)
+                    path_walk(at, &legs, speed, now, flags, inside)
                 };
-                let (points, stop) = straight_walk(at, goal, speed, now, flags);
                 robot.wizard.clear();
                 robot.wizard.give(points);
                 robot.wizard.stop_at(stop);
@@ -2575,6 +2605,27 @@ impl Play {
         }
         robot.walker.drive = Some(robot.wizard.takt(now, at, dt_ms));
         aim_and_fire(robot, t, &takt, seen, &self.battle, &self.ground);
+    }
+
+    /// The unit takt's escape (`Behavior.dll:0x10005408`, docs/31, "The escape"): a unit with
+    /// no order but its stop, standing on a live building that is not a ruin, is given the
+    /// escape, replacing.
+    ///
+    /// STAND-IN: docs/31-packages.md#the-escape--read -- the node test (a unit on a damaged
+    /// node of the building is left be) is not modelled: every node counts as whole.
+    fn escape_off_building(&mut self, r: usize) {
+        let (_, robot) = &self.robots[r];
+        let Some((b, _)) = robot.walker.ground.and_then(|h| h.solid) else { return };
+        if robot.behaviour.task() != Task::Stop
+            || self.units.get(b).is_none_or(|u| u.kind != KIND_BUILDING || u.type_word == BUILDING_RUINE)
+            || !self.battle.combat.targets.get(b).is_some_and(|x| x.alive)
+        {
+            return;
+        }
+        let leave = orders::Order { code: orders::LEAVE, parameter: 0, target: orders::Target::NotDefined };
+        let robot = &mut self.robots[r].1;
+        robot.order = Some(leave);
+        robot.behaviour.order(&leave);
     }
 
     /// Rounds leaving their barrels: each round, and its load group's flight effects.
