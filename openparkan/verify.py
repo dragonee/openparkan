@@ -8751,6 +8751,264 @@ def check_building_route(check, game: Path) -> None:
           f"{floors}")
 
 
+#: Mission 03's ways in, as hall-way vertices: the Small Generator's from its south exit, the
+#: Small Bunker's from its one exit (docs/24, "The ways into Mission 03's Small Generator and
+#: Small Bunker").
+GENERATOR_POD_ROUTE = [51, 55, 52, 56, 35, 30, 33, 32, 15, 8, 7, 9, 6, 17, 16]
+BUNKER_POD_ROUTE = [43, 42, 41, 40, 39, 37, 36, 25, 27, 28, 23, 22, 8, 6]
+
+
+def _segment_meets_triangle(p0, p1, a, b, c) -> bool:
+    """Whether the segment p0-p1 passes through the triangle (a, b, c), either side."""
+    e1 = [b[i] - a[i] for i in range(3)]
+    e2 = [c[i] - a[i] for i in range(3)]
+    d = [p1[i] - p0[i] for i in range(3)]
+    h = (d[1] * e2[2] - d[2] * e2[1], d[2] * e2[0] - d[0] * e2[2], d[0] * e2[1] - d[1] * e2[0])
+    det = sum(e1[i] * h[i] for i in range(3))
+    if abs(det) < 1e-9:
+        return False
+    s = [p0[i] - a[i] for i in range(3)]
+    u = sum(s[i] * h[i] for i in range(3)) / det
+    q = (s[1] * e1[2] - s[2] * e1[1], s[2] * e1[0] - s[0] * e1[2], s[0] * e1[1] - s[1] * e1[0])
+    v = sum(d[i] * q[i] for i in range(3)) / det
+    t = sum(e2[i] * q[i] for i in range(3)) / det
+    return 0 <= u <= 1 and v >= 0 and u + v <= 1 and 0 <= t <= 1
+
+
+def _point_triangle_distance(p, a, b, c) -> tuple[float, tuple[float, float, float]]:
+    """The distance from p to the triangle (a, b, c), and the triangle's unit normal."""
+    u = [b[i] - a[i] for i in range(3)]
+    v = [c[i] - a[i] for i in range(3)]
+    n = (u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0])
+    length = math.sqrt(sum(k * k for k in n)) or 1.0
+    n = (n[0] / length, n[1] / length, n[2] / length)
+    d = sum(n[i] * (p[i] - a[i]) for i in range(3))
+    q = [p[i] - d * n[i] for i in range(3)]
+
+    def inside(x, y, z) -> bool:
+        e = [y[i] - x[i] for i in range(3)]
+        w = [q[i] - x[i] for i in range(3)]
+        cross = (e[1] * w[2] - e[2] * w[1], e[2] * w[0] - e[0] * w[2], e[0] * w[1] - e[1] * w[0])
+        return sum(cross[i] * n[i] for i in range(3)) >= 0
+
+    if inside(a, b, c) and inside(b, c, a) and inside(c, a, b):
+        return abs(d), n
+
+    def to_edge(x, y) -> float:
+        e = [y[i] - x[i] for i in range(3)]
+        span = sum(k * k for k in e) or 1.0
+        t = max(0.0, min(1.0, sum(e[i] * (p[i] - x[i]) for i in range(3)) / span))
+        return math.dist(p, [x[i] + e[i] * t for i in range(3)])
+
+    return min(to_edge(a, b), to_edge(b, c), to_edge(c, a)), n
+
+
+def check_mission_03_ways(check, game: Path) -> None:
+    """The ways into Mission 03's Small Generator and Small Bunker: their hall ways' routes from
+    an exit to the pod, the rings they cross, the floors and doors under and across them, and
+    the walls at the bunker ramp's mouth."""
+    import heapq
+
+    tma = game / COMMANDER_MISSION / "data.tma"
+    fortif_path = game / "fortif.rlb"
+    if not (tma.exists() and fortif_path.exists()):
+        return
+    fortif = NResArchive.open(fortif_path)
+    tut3 = mission.load(tma)
+    names = frozenset(p.name.lower() for p in all_archives(game))
+
+    def inside(poly, x, y) -> bool:
+        hit = False
+        for i in range(len(poly)):
+            (x1, y1), (x2, y2) = poly[i][:2], poly[(i + 1) % len(poly)][:2]
+            if (y1 > y) != (y2 > y) and x < x1 + (y - y1) * (x2 - x1) / (y2 - y1):
+                hit = not hit
+        return hit
+
+    found = {}
+    for stem, placed_name, route in (("fr_l_gener", "gener01", GENERATOR_POD_ROUTE),
+                                     ("fr_l_bunker", "sbunk01", BUNKER_POD_ROUTE)):
+        placed = next(o for o in tut3.objects if placed_name in o.path.lower())
+        (px, py, pz), r = placed.position, placed.rotation
+
+        def world(p, px=px, py=py, pz=pz, r=r):
+            return (px + p[0] * math.cos(r) - p[1] * math.sin(r),
+                    py + p[0] * math.sin(r) + p[1] * math.cos(r), pz + p[2])
+
+        blob = fortif.read_name(stem + ".msh")
+        wear = objmesh.parse_wear(fortif.read_name(stem + ".wea"))
+        mesh = objmesh.parse(blob, stem, wear.materials)
+        graph = objmesh.read_path_graph(NResArchive(blob, stem))
+        pos = [objmesh.apply(mesh.world_pose(n.b), n.position) for n in graph.nodes]
+        links = defaultdict(set)
+        for link in graph.links:
+            links[link.start].add(link.end)
+            links[link.end].add(link.start)
+
+        def shortest(start: int, goal: int, pos=pos, links=links):
+            best, back, queue = {start: 0.0}, {}, [(0.0, start)]
+            while queue:
+                d, v = heapq.heappop(queue)
+                if v == goal:
+                    path = [v]
+                    while path[-1] in back:
+                        path.append(back[path[-1]])
+                    return d, path[::-1]
+                if d > best[v]:
+                    continue
+                for w in links[v]:
+                    nd = d + math.dist(pos[v], pos[w])
+                    if nd < best.get(w, math.inf):
+                        best[w], back[w] = nd, v
+                        heapq.heappush(queue, (nd, w))
+            return None
+
+        pods = [i for i, n in enumerate(graph.nodes) if n.a & objmesh.PLACE_POD]
+        exits = [i for i, n in enumerate(graph.nodes) if n.a & 1]
+        ways = {e: shortest(e, pods[0]) for e in exits}
+        ways = {e: (round(w[0], 1), w[1]) for e, w in ways.items() if w}
+        inner, outer = objects.parse_base(fortif.read_name(stem + ".bas"), stem)
+        rings = ([world(p) for p in inner.points], [world(p) for p in outer.points])
+
+        def ring(v, rings=rings, pos=pos, world=world) -> str:
+            x, y, _ = world(pos[v])
+            if inside(rings[0], x, y):
+                return "inner"
+            return "between" if inside(rings[1], x, y) else "out"
+
+        mat_of = {}
+        for batch in mesh.batches:
+            first, count = batch.triangles
+            for t in range(first, first + count):
+                known = batch.material < len(wear.materials)
+                mat_of[t] = wear.materials[batch.material] if known else ""
+        posed = mesh.posed_positions()
+        faces, level0 = [], []
+        for node in mesh.nodes:
+            slot = node.hit_slot()
+            if slot is None or slot >= len(mesh.slots):
+                continue
+            s = mesh.slots[slot]
+            for t in range(s.first_triangle, s.first_triangle + s.triangle_count):
+                tri = tuple(posed[v] for v in mesh.triangles[t])
+                faces.append((*tri, mesh.face_flags[t]))
+                level0.append((t, tri))
+        flags, floors, slopes = Counter(), [], Counter()
+        first_floor = None
+        for a, b in zip(route, route[1:], strict=False):
+            pa, pb = pos[a], pos[b]
+            steps = max(1, int(math.dist(pa[:2], pb[:2]) / 0.5))
+            for k in range(steps + 1):
+                p = [pa[i] + (pb[i] - pa[i]) * k / steps for i in range(3)]
+                under = _slope_under(faces, *p)
+                if under is None:
+                    continue
+                if first_floor is None:
+                    first_floor = (round(p[1], 2), round(under[0], 2))
+                flags[under[2]] += 1
+                floors.append(under[0])
+                if under[2] & 2:
+                    slopes[round(under[1])] += 1
+        crossed = defaultdict(set)
+        for a, b in zip(route, route[1:], strict=False):
+            for t, tri in level0:
+                if _segment_meets_triangle(pos[a], pos[b], *tri):
+                    node = mesh.node_of_triangle(t)
+                    crossed[(a, b)].add((mesh.nodes[node].name[:3], mat_of.get(t, ""),
+                                         mesh.face_flags[t], node))
+        ctl = control.parse(fortif.read_name(stem + ".ctl"), names)
+        doors = {}
+        for comp in ctl.components:
+            if comp.type_id == control.DOOR_TYPE:
+                channel = ctl.channels[comp.entries[0]]
+                low, high = mesh.pose_at(channel.node, 0.0)[0], mesh.pose_at(channel.node, 1.0)[0]
+                doors[comp.node] = (round(channel.rate, 2),
+                                    tuple(round(high[i] - low[i], 2) for i in range(3)))
+        found[stem] = dict(
+            nodes=len(graph.nodes), links=len(graph.links), pods=pods, ways=ways,
+            names=[mesh.nodes[graph.nodes[v].b].name[:3] for v in route],
+            pod_world=tuple(round(c, 2) for c in world(pos[pods[0]])[:2]),
+            rings=[ring(v) for v in route[:3]], first_floor=first_floor,
+            flags=flags, low=round(min(floors), 2), high=round(max(floors), 2),
+            steepest=max(slopes), crossed=crossed, doors=doors, faces=level0, mat_of=mat_of,
+            mesh=mesh)
+
+    gen, bunk = found["fr_l_gener"], found["fr_l_bunker"]
+    check("fortif.rlb: Mission 03's Small Generator and Small Bunker hall ways reach their pods",
+          (gen["nodes"], gen["links"], gen["pods"]) == (57, 56, [16])
+          and sorted(gen["ways"]) == [46, 49, 51, 53, 54]
+          and gen["ways"][51] == (112.5, GENERATOR_POD_ROUTE)
+          and {w[0] for w in gen["ways"].values()} == {112.5, 119.7}
+          and (bunk["nodes"], bunk["links"], bunk["pods"]) == (44, 51, [6])
+          and list(bunk["ways"]) == [43] and bunk["ways"][43] == (149.8, BUNKER_POD_ROUTE)
+          and gen["names"] == ["o07"] * 4 + ["i12"] * 4 + ["i04"] * 5 + ["i05"] * 2
+          and bunk["names"] == ["o01"] * 5 + ["i02"] * 2 + ["i09"] * 5 + ["i12"] * 2,
+          f"fr_l_gener: {gen['nodes']} vertices, {gen['links']} links, pod {gen['pods']}, exits "
+          f"reaching it {gen['ways']}; fr_l_bunker: {bunk['nodes']} vertices, {bunk['links']} "
+          f"links, pod {bunk['pods']}, exits reaching it {bunk['ways']}; the ways' nodes "
+          f"{gen['names']} and {bunk['names']}")
+    check("Tut_3: the ways cross the inner ring onto their buildings' floors and end on the pods",
+          gen["pod_world"] == (659.45, 1050.69) and bunk["pod_world"] == (1288.9, 807.37)
+          and gen["rings"] == ["out", "between", "inner"]
+          and bunk["rings"] == ["out", "between", "inner"]
+          and bunk["first_floor"] is not None and bunk["first_floor"][0] == -45.33,
+          f"pods at {gen['pod_world']} and {bunk['pod_world']}; the first three vertices of each "
+          f"way lie {gen['rings']} and {bunk['rings']} of the .bas rings; the first floored "
+          f"half-metre sample (model y, floor) {gen['first_floor']} and {bunk['first_floor']}")
+
+    def crossing(found, a, b, what):
+        return {(n, m, f) for n, m, f, node in found["crossed"][(a, b)] if what(n, m, f, node)}
+
+    gen_door = crossing(gen, 56, 35, lambda n, m, f, node: node == 13)
+    gen_portal = crossing(gen, 6, 17, lambda n, m, f, node: m.upper() == "PORTAL_001")
+    def quads(n, m, f, node):
+        return m.upper() == "DEFAULT"
+
+    gen_quads = {n for n, m, f in crossing(gen, 56, 35, quads)}
+    bunk_door = crossing(bunk, 39, 37, lambda n, m, f, node: node == 9)
+    bunk_quads = {n for n, m, f in crossing(bunk, 39, 37, quads)}
+    bunk_portal = crossing(bunk, 22, 8, lambda n, m, f, node: m.upper() == "PORTAL_001")
+    bunk_screen = crossing(bunk, 8, 6, lambda n, m, f, node: True)
+    check("fortif.rlb: under Mission 03's ways, flag-2 floors; across them, doors and quads",
+          gen["flags"] == Counter({2: 203, 0: 2}) and (gen["low"], gen["high"]) == (-12.48, -0.04)
+          and gen["steepest"] == 18
+          and gen_door == {("i32", "B_MTP_01", 0)} and gen["doors"][13] == (0.7, (-5.18, 0.0, 0.0))
+          and gen_quads == {"o07", "i30", "i12"}
+          and {n for n, _, f in gen_portal} == {"i04", "i05"}
+          and {f for _, _, f in gen_portal} == {0}
+          and bunk["flags"] == Counter({2: 258}) and (bunk["low"], bunk["high"]) == (-13.96, 3.7)
+          and bunk["steepest"] == 26
+          and bunk_door == {("i03", "R_NP13", 0x10)}
+          and bunk["doors"] == {9: (0.25, (0.0, 0.0, -5.76))}
+          and bunk_quads == {"o01", "i01", "i02"}
+          and {n for n, _, _ in bunk_portal} == {"i09", "i12"}
+          and bunk_screen == {("i13", "B_COMP_3G", 0x20)},
+          f"the generator's way: floor samples by triangle flags {dict(gen['flags'])}, floors "
+          f"{gen['low']} to {gen['high']}, steepest flag-2 floor {gen['steepest']} deg; between "
+          f"56 and 35 the door node 13 {gen_door} {gen['doors'][13]} (rate, travel) and DEFAULT "
+          f"quads on {sorted(gen_quads)}; between 6 and 17 PORTAL_001 {sorted(gen_portal)}; the "
+          f"bunker's way: {dict(bunk['flags'])}, {bunk['low']} to {bunk['high']}, steepest "
+          f"{bunk['steepest']} deg; between 39 and 37 the door {bunk_door} {bunk['doors']} and "
+          f"DEFAULT "
+          f"on {sorted(bunk_quads)}; between 22 and 8 PORTAL_001 {sorted(bunk_portal)}; between 8 "
+          f"and 6 {sorted(bunk_screen)}")
+
+    probe = (0.18, -41.94, 4.45)
+    near = set()
+    for t, tri in bunk["faces"]:
+        d, n = _point_triangle_distance(probe, *tri)
+        if d < 0.4 and abs(n[2]) < 0.9:
+            node = bunk["mesh"].node_of_triangle(t)
+            near.add((bunk["mesh"].nodes[node].name[:3], bunk["mat_of"].get(t, ""),
+                      bunk["mesh"].face_flags[t],
+                      round(math.degrees(math.acos(min(1.0, abs(n[2])))))))
+    check("fortif.rlb: off the Small Bunker's way, pushing walls at its ramp's mouth",
+          ("o01", "B_GEN_08", 0, 90) in near and ("o01", "B_RL_06", 0, 32) in near
+          and all(not f & 2 for _, _, f, _ in near),
+          f"level-0 faces steeper than 26 deg within 0.4 of model {probe} (node, material, "
+          f"triangle flags, tilt from level): {sorted(near)}")
+
+
 def _phase_record(ngi_at, index: int) -> tuple[int, dict]:
     """Record ``index`` of ``Ngi32.dll``'s render phase table (``0x10036a30``, 44 bytes
     each): its phase and its triples as {(stage, state): value}, render states under
@@ -18627,7 +18885,7 @@ def run(game: Path) -> int:
         check_capture, check_building_entry, check_pod_zone, check_door_shot,
         check_building_lighting,
         check_building_ground,
-        check_building_route,
+        check_building_route, check_mission_03_ways,
         check_repair,
         check_chassis, check_weapons,
         check_firing,

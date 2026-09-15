@@ -1504,6 +1504,147 @@ neither limit comes into play.
    and takes 2.5 s to open at rate 0.4.
 7. Draw `DEFAULT` as its material says: black.
 
+#### The ways into Mission 03's Small Generator and Small Bunker — *measured*, and *seen*
+
+*The Field Base* sends the hero into two buildings for their pods: the Small
+Generator (`gener01.dat`, `fr_l_gener`) and the Small Bunker (`sbunk01.dat`,
+`fr_l_bunker`). **Both ways in are their hall ways' shortest ways from an exit
+(flag 1) to the pod (flag `0x40`)**, as the Large Factory's is, and each is
+walkable on the rules above with nothing more. The columns are the table's
+above; *world* is Tut_3's, from the placements (651.79, 1051.17, 92.51) turned
+by −0.0631 rad and (1260.93, 813.89, 80.35) turned by −1.6016 rad.
+
+**The Small Generator** is two mirrored halves: 57 vertices, 56 links, the pod
+vertex 16. Of its eleven exits, five reach the pod: 46 and 49 to the north
+(`o06`, both also ground places, `0x10000000`), and 51, 53 and 54 to the south
+(`o07`), 112.5 to 119.7 along. The recording's hero comes from the south,
+past the warehouse, and takes the south way:
+
+| vertex | node | model (x, y, z) | floor under it | world (x, y, z) | along |
+|---|---|---|---|---|---:|
+| 51, the exit | `o07` | (0.00, −64.24, 2.72) | none: the landscape | (647.73, 987.06, 95.23) | 0 |
+| 55 | `o07` | (0.00, −55.93, 2.72) | none: the landscape | (648.26, 995.35, 95.23) | 8.3 |
+| 52 | `o07` | (0.00, −51.32, 2.95) | −0.30, 14° | (648.55, 999.96, 95.46) | 12.9 |
+| 56 | `o07` | (0.00, −32.20, −2.21) | −5.14, 14° | (649.76, 1019.04, 90.30) | 32.7 |
+| 35 | `i12` | (0.00, −26.50, −3.51) | −6.27, 13° | (650.12, 1024.73, 89.01) | 38.6 |
+| 30 | `i12` | (0.00, −15.99, −5.82) | −7.68, flat | (650.78, 1035.22, 86.69) | 49.3 |
+| 33 | `i12` | (8.67, −13.79, −5.14) | −7.68, flat | (659.57, 1036.86, 87.37) | 58.3 |
+| 32 | `i12` | (13.30, −17.60, −5.85) | −8.17, 9° | (663.95, 1032.77, 86.66) | 64.4 |
+| 15 | `i04` | (18.21, −20.11, −6.15) | −8.88, 5° | (668.69, 1029.95, 86.36) | 69.9 |
+| 8 | `i04` | (23.54, −19.59, −7.27) | −9.58, 17° | (674.04, 1030.13, 85.24) | 75.3 |
+| 7 | `i04` | (27.72, −14.65, −7.80) | −10.55, 6° | (678.53, 1034.81, 84.71) | 81.8 |
+| 9 | `i04` | (27.72, −8.01, −7.80) | −10.56, flat | (678.95, 1041.43, 84.71) | 88.5 |
+| 6 | `i04` | (20.88, 0.00, −8.20) | −11.97, 10° | (672.62, 1049.86, 84.31) | 99.0 |
+| 17 | `i05` | (13.50, 0.00, −10.24) | −12.48, flat | (665.26, 1050.32, 82.27) | 106.7 |
+| 16, the pod | `i05` | (7.68, 0.00, −10.12) | −12.48, flat | (659.45, 1050.69, 82.39) | 112.5 |
+
+Along it, on half-metre samples:
+1. **51 → 52.** No face of the building under the first 12 m: the way starts
+   on the landscape, crosses the inner ring between 55 (between the rings) and
+   52 (inside), and the building's floor starts under it at model y −52.3, at
+   −0.04.
+2. **52 → 56.** A 14° ramp down, 19 m long. Half-way to 35 it passes the
+   entrance's `DEFAULT` quads (`o07`, `i30`, `i12`) and the sliding door `i32`
+   (node 13, rate 0.7, sliding 5.18 across): its faces carry triangle flags 0,
+   not the door face's `0x10`, and its lower edge gives the only two samples
+   off a floor, a 51° face at −3.80.
+3. **35 → 6.** Corridors and ramps of up to 17°, with `DEFAULT` quads between
+   `i12` and `i04`.
+4. **6 → 16.** `PORTAL_001` quads between `i04` and the pod room `i05`, and the
+   pod's floor at −12.48.
+
+203 of the 205 samples lie on faces flagged 2, from −12.48 to −0.04.
+
+**The Small Bunker** is 44 vertices and 51 links with **one exit, 43, and its
+pod, 6**, 149.8 along. The way comes down the sunk ramp
+([A shot opens a door](#a-shot-opens-a-door--read-and-seen)) and through the
+bunker's one door:
+
+| vertex | node | model (x, y, z) | floor under it | world (x, y, z) | along |
+|---|---|---|---|---|---:|
+| 43, the exit | `o01` | (−13.66, −63.24, 6.06) | none: the landscape | (1198.14, 829.49, 86.40) | 0 |
+| 42 | `o01` | (−10.30, −51.88, 6.06) | none: the landscape | (1209.39, 825.78, 86.40) | 11.8 |
+| 41, the ramp's top | `o01` | (−7.26, −35.24, 6.82) | 3.47, flat | (1225.93, 822.23, 87.17) | 28.8 |
+| 40 | `o01` | (−3.58, −17.80, 4.22) | 0.38, 23° | (1243.24, 818.02, 84.56) | 46.8 |
+| 39, before the door | `o01` | (−0.86, −3.88, −3.33) | −5.18, 20° | (1257.07, 814.87, 77.01) | 62.9 |
+| 37 | `i02` | (1.06, 6.20, −3.33) | −5.75, flat | (1267.09, 812.64, 77.01) | 73.1 |
+| 36 | `i02` | (9.70, 4.60, −3.33) | −6.03, 24° | (1265.22, 804.06, 77.01) | 81.9 |
+| 25 | `i09` | (21.70, 2.52, −9.09) | −11.35, 23° | (1262.78, 792.13, 71.26) | 95.4 |
+| 27 | `i09` | (27.17, 1.43, −9.09) | −11.48, flat | (1261.52, 786.69, 71.26) | 101.0 |
+| 28 | `i09` | (28.16, 5.52, −9.09) | −11.50, 15° | (1265.58, 785.58, 71.26) | 105.2 |
+| 23 | `i09` | (29.93, 14.34, −11.17) | −13.91, 15° | (1274.34, 783.54, 69.17) | 114.4 |
+| 22 | `i09` | (31.45, 22.95, −11.17) | −13.96, flat | (1282.90, 781.75, 69.17) | 123.1 |
+| 8 | `i12` | (16.79, 26.03, −13.00) | −13.74, 5° | (1286.42, 796.31, 67.35) | 138.2 |
+| 6, the pod | `i12` | (5.66, 28.16, −10.79) | −12.04, flat | (1288.90, 807.37, 69.55) | 149.8 |
+
+Along it:
+1. **43 → 41.** No face of the building under the first 17 m: the way crosses
+   the inner ring between 42 (between the rings) and 41 (inside), and the
+   building's floor starts under it at model y −45.3, at 3.02, and runs flat at
+   3.47 to the ramp's top.
+2. **41 → 39.** The ramp, 20 to 23°, down to −5.18.
+3. **39 → 37.** The door `i03` (node 9, rate 0.25, lowering 5.76): its faces
+   carry `0x10`, and `DEFAULT` quads stand on `o01`, `i01` and `i02` at it.
+   The two samples at its threshold have no floor.
+4. **37 → 22.** The corridors `i02` and `i09`, ramps of up to 24°, `DEFAULT`
+   quads between them.
+5. **22 → 6.** `PORTAL_001` quads between `i09` and the pod room `i12`, and a
+   see-through `B_COMP_3G` face flagged `0x20` before the pod.
+
+All 258 floored samples lie on faces flagged 2, from −13.96 to 3.70.
+
+**Off the way the ramp's mouth has walls** (*measured*). A walker heading east
+along world y 815, 9 m south of the way, meets the building at model
+(0.18, −41.94): `o01`'s vertical `B_GEN_08` face (normal −x) and a 32°
+`B_RL_06` face stand within 0.4 of (0.18, −41.94, 4.45), where a hero's centre
+is at world z 84.8.
+They carry no flag 2, so they push. *Measured on openparkan's engine*, a hero
+started there at (1212, 815) facing east slides along them and walks round the
+building.
+
+*Measured on openparkan's engine*, the hero walking each table's vertices with W
+held from the exit, each vertex counted within 1.2:
+- **The Small Generator.** On the building's floor 1.15 s in, on the pod at
+  8.32 s, and captured at 9.37 s: 8.2 s from the floor to the capture. Its step
+  from the landscape onto the floor lifts it 2.8, from 89.50 to 92.28. The door
+  `i32` opens as it comes, and objective 1 completes at the next Mission handler.
+- **The Small Bunker.** On the building's floor 1.60 s in, the ramp's top at about
+  2.5 s, at the closed door from 4.75 to 8.0 s, on the pod at 13.72 s, and in
+  command mode at 17.07 s: 14.6 s from the ramp's top. Its step onto the floor
+  lifts it 1.6, from 81.98 to 83.55.
+
+*Seen*, the recording at 2 fps:
+
+| time (s) | the Small Generator |
+|---|---|
+| 104.0 | walking north between the pillars |
+| 108.0 | the grey apron under the hero |
+| 109.5 | down the dark ramp |
+| 110.5 | the laser strikes the door ahead |
+| 111.5 | through the doorway |
+| 112.0–114.0 | the green corridors |
+| 116.0 | on the pod |
+| 116.5 | *"from: System / Building is captured"* |
+
+| time (s) | the Small Bunker |
+|---|---|
+| 162.5 | the forecourt's grey under the hero |
+| 164.0 | the ramp's top, the tower ahead |
+| 166.5 | the laser strikes the door |
+| 167.5 | the corridor |
+| 178.2 | command mode ([40-command-mode.md](40-command-mode.md#against-the-recording--seen)) |
+
+*Derived*: the generator's apron to its capture takes 8.5 s in the recording
+and 8.2 on the engine; the bunker's ramp top to command mode 14.2 s and 14.6.
+Both of the recording's heroes shoot the door on the way, and the engine's
+doors open as the hero comes, so the shots change nothing here.
+
+**For an engine**: walk Mission 03's buildings by their hall ways, as step 6
+above does the Large Factory's: the Small Generator's from 51 (or 46, 49, 53,
+54), the Small Bunker's from 43, in the world as the tables give them. The rules
+above let a walker through; a walker off the bunker's way meets the ramp's
+walls.
+
 ### What a buoy does to a walker — *read*, *measured*, and not established
 
 The five buoys on Mission 01 — objects 25, 26, 27, 29 and 30 — are `s_tree_29`,
