@@ -664,6 +664,14 @@ presses a hero standing at it down), and which of Mission 04's units holds no mi
   and landed there at every wrap, so Mission 03's four bunkers, three computers, store and
   generator restarted their hum once a second, over and over. The wrap is no longer taken as
   leaving the window.
+- **The wingman menu opens across the middle of the window** (docs/35, "How the radar draws").
+  Its rows stand at 220 of the game's 640-wide layout, all but centred on the screens the game
+  ran on; pinned to the top left with the lines above them they slid off to one side of a wider
+  window. They are pinned to the top now, as the message box over them is.
+- **A fit in the warbot designer steps to the next slot** (docs/37, "Fitting"). Fitting a gun,
+  armour, a system or a clip left the destination panel on the slot just filled, so every part
+  after the first took a click on its slot first. The panels step down the tab's own rows
+  instead, and the source panel offers what the next slot takes.
 
 This directory also holds what the rest will follow:
 
@@ -739,7 +747,10 @@ or `--map` is given.
 On a factory's screen the warbot constructor button opens the warbot designer:
 a double click on a source row (or its preview) fits the part, one on a
 destination row takes a chassis, turret or gun out, the tabs page through the
-slots, accept hands the design to the factory, and exit or Esc closes it.
+slots, accept hands the design to the factory, and exit or Esc closes it. A
+chassis turns the panels to Turrets and a turret to Weapons; on the tabs they
+stay on, a fit steps the destination to the next slot, so the guns, the armour,
+the systems and the clips fill one after the other.
 `--designer` draws a screenshot with the designer open on the first factory,
 and `--design PART,…` fits those parts to it in turn; `accept` among them
 clicks accept, leaving the factory screen with the project.
@@ -1012,7 +1023,7 @@ engine pass replaces each with what was read and removes its row.
 | M11 | That the factory record's `+0x30`, the grade the constructor's chassis page is taken over, is the building's size class | the designer is given the factory's size class | [38](../docs/38-designs.md#not-established) |
 | M11 | What the turret fit does to guns on a turret it replaces, and the gun fit to a clip on a gun it replaces | the old turret's guns and clips, and the old gun's clip, go with it | [38](../docs/38-designs.md#not-established) |
 | M11 | The part box's `Epower`, the properties behind `regener`, `capacity`, `throughput`, `shotnum` and `blast`, and the formatter that prints one decimal whatever the template asks | `Epower` and `Adfactor` print 0.0; the others are the record values the recording's figures fit (a shield's second value, a repair unit's first, a battery's first ÷ 1000 and its power figure, a magazine, the round's first area blast); every number one decimal | [38](../docs/38-designs.md#not-established) |
-| M11 | Which destination row a designer tab selects as it turns on, and which tab the panels turn to after a fit | the first row; *seen*: a chassis turns them to Turrets and a turret to Weapons | [37](../docs/37-designer.md#not-established) |
+| M11 | Which destination row a designer tab selects as it turns on and is left on after a fit, and which tab the panels turn to after one | the first row, and after a fit the next row, wrapping round; *seen*: a chassis turns them to Turrets and a turret to Weapons | [37](../docs/37-designer.md#not-established) |
 | M11 | The condition under which fitting a chassis enables the Armour tab (`0x10052491`) | when the chassis has an armour slot | [37](../docs/37-designer.md#not-established) |
 | M11 | The designer's save name field and load list | not built: save and load do nothing | [37](../docs/37-designer.md#not-established) |
 | M11 | Which way a model view's camera looks, which axis its −0.5 rad pitch turns about, which of the view's sides its 60° field spans, and its two lights' colours | from −y, about x, the narrower side, about the drawn level-0 vertices' sphere; lights grey 0.4 and a scene colour of 0.15 | [37](../docs/37-designer.md#the-previews--read-and-seen) |
@@ -1035,4 +1046,4 @@ has a row here, and a switch that restores the game's behaviour.
 |---|---|---|---|
 | The hero's body node yaws with the gait, ±10° once a run cycle, and the turret, eye, sight and barrels swing with it | node 0 keeps only the part of its turn not about its up axis, so the view, the sight and the barrels hold the heading the body moves along | `--sway` | [30](../docs/30-turrets.md#aiming-and-the-camera--read-and-measured) |
 | A capture changes only the unit's clan, SuperAI and areal map, and gives it no order, so a captured bot engages a hostile within 500 on its own | a captured bot is given Standby, and holds until the player orders it | `--capture-idle` | [27](../docs/27-ownership.md#a-neutral-unit-is-taken-by-the-hero--read-and-measured) |
-| The HUD's 640 × 480 layout and the outcome panel scale by the screen's width over 640 across and its height over 480 down, so on a wide screen they stretch | the layout scales by the height alone and each element keeps its pin to the screen's edges: the panels in the bottom corners, the weapons at the top right, the radar at the bottom middle, the reticle in the middle; the warbot designer keeps its shape centred, over a black ground across the window | `--stretch-hud` | [35](../docs/35-hud.md#how-the-radar-draws--read) |
+| The HUD's 640 × 480 layout and the outcome panel scale by the screen's width over 640 across and its height over 480 down, so on a wide screen they stretch | the layout scales by the height alone and each element keeps its pin to the screen's edges: the panels in the bottom corners, the weapons at the top right, the radar at the bottom middle, the reticle and the wingman menu's rows in the middle; the warbot designer keeps its shape centred, over a black ground across the window | `--stretch-hud` | [35](../docs/35-hud.md#how-the-radar-draws--read) |

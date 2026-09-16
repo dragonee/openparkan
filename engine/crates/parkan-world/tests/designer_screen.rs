@@ -162,3 +162,56 @@ fn the_designers_exit_closes_it_and_clear_empties_the_project() {
     click(&mut play, &mut screen, [420.0, 460.0], &strings);
     assert!(!screen.is_open());
 }
+
+/// A tab the fit stays on steps its destination to the next slot, so a turret's sockets, the
+/// armour, the systems and the clips fill one after the other and the source panel offers the
+/// next slot's parts without another click (docs/37, "Fitting").
+#[test]
+#[ignore = "needs the game install"]
+fn a_fit_steps_the_destination_to_the_next_slot_and_the_source_offers_what_that_one_takes() {
+    let mut play = mission_02_play();
+    let game = gamedir::find(None).unwrap();
+    let strings = parkan_world::resources::game_strings(&game).unwrap();
+    let t = play.factories[0].target;
+    let mut screen = Screen::default();
+    screen.open(&mut play, t, &strings).unwrap();
+    // The chassis turns the panels to Turrets, the turret to Weapons, both on their first row.
+    double(&mut play, &mut screen, row(0.0, 0), &strings);
+    double(&mut play, &mut screen, row(0.0, 0), &strings);
+    let s = screen.session.as_ref().unwrap();
+    assert_eq!((s.tab, s.destination.selected), (Tab::Weapons, Some(0)));
+    let sockets = s.destination.rows.len();
+    assert!(sockets > 2, "the turret has {sockets} sockets");
+
+    // A gun into the first socket: the destination steps to the second, and the source panel
+    // is what that socket offers.
+    let offered = |screen: &Screen| {
+        let s = screen.session.as_ref().unwrap();
+        s.designer.offers(s.destination.selected_row().unwrap().place.as_ref().unwrap())
+    };
+    let second = {
+        let s = screen.session.as_ref().unwrap();
+        s.designer.offers(s.destination.rows[1].place.as_ref().unwrap())
+    };
+    double(&mut play, &mut screen, row(0.0, 0), &strings);
+    let s = screen.session.as_ref().unwrap();
+    assert!(s.destination.rows[0].part.is_some(), "the first socket is filled");
+    assert_eq!(s.destination.selected, Some(1), "and the second is selected");
+    assert_eq!(offered(&screen), second);
+    assert_eq!(s.source.rows.iter().filter_map(|r| r.part.clone()).collect::<Vec<_>>(), second);
+
+    // Round the last socket it comes back to the first.
+    for _ in 1..sockets {
+        double(&mut play, &mut screen, row(0.0, 0), &strings);
+    }
+    assert_eq!(screen.session.as_ref().unwrap().destination.selected, Some(0), "wrapped round");
+
+    // The systems tab steps down its own rows the same way.
+    let s = screen.session.as_mut().unwrap();
+    assert!(s.select_tab(Tab::Internal, &mut play.assembly, &strings));
+    assert_eq!(s.destination.selected, Some(0));
+    let slots = s.destination.rows.len();
+    assert!(slots > 1, "the L-2f has {slots} system slots");
+    double(&mut play, &mut screen, row(0.0, 0), &strings);
+    assert_eq!(screen.session.as_ref().unwrap().destination.selected, Some(1));
+}

@@ -5,7 +5,7 @@
 use super::commander::{ICON_PIECE, icon, life_bar, put, unit_icons};
 use super::weapons::LAMPS;
 use super::{Cockpit, Ink, WHITE};
-use crate::hud::Pin;
+use crate::hud::{LAYOUT, Pin};
 use crate::play::Play;
 
 /// A line's height and how far apart the lines stand, from (0, 0) (`0x1004321c`).
@@ -18,6 +18,8 @@ pub const NAME_BAR: f32 = 135.0;
 pub const MENU_X: f32 = 220.0;
 pub const MENU_TOP: f32 = 50.0;
 pub const ORDER_BAR: f32 = 150.0;
+/// A row's whole width: its ending, number box, emitter, order bar and ray ending.
+pub const MENU_WIDTH: f32 = 5.0 + NUMBER_BOX + 10.0 + ORDER_BAR + 6.0;
 /// The text of a line not chosen and of a disabled row.
 pub const GREY: u32 = 0xff80_8080;
 /// The emitters, by variant: off, normal, pressed.
@@ -47,7 +49,8 @@ fn step(cockpit: &Cockpit, ink: &mut Ink, name: &str, pen: &mut f32, y: f32, wid
     x
 }
 
-/// The panel for `play`, pinned to the screen's top left.
+/// The panel for `play`: the wingman lines pinned to the screen's top left, the menu's rows
+/// under them across the top middle.
 pub fn draw(cockpit: &Cockpit, ink: &mut Ink, play: &Play) {
     let Some(panel) = play.panel() else { return };
     let pin = std::mem::replace(&mut ink.painter.pin, Pin::TOP_LEFT);
@@ -75,10 +78,18 @@ pub fn draw(cockpit: &Cockpit, ink: &mut Ink, play: &Play) {
         *pen += NAME_BAR;
         step(cockpit, ink, "ccres_ray_ending", pen, y, 6.0);
     }
+    // MENU_X stands a row's 183 all but centred across the layout's 640, which is the shape
+    // every screen the game ran on had. Pinned to the top left with the lines above them the
+    // rows slide off to one side of a wider window, so they are pinned to the top and centred
+    // across it, as the rest of the HUD keeps its pin to the screen's edges; `--stretch-hud`,
+    // which draws the layout as the game does, leaves them where it puts them (docs/35, "How
+    // the radar draws").
+    ink.painter.pin = Pin::TOP;
+    let menu_x = if ink.painter.space.stretch { MENU_X } else { ((LAYOUT[0] - MENU_WIDTH) / 2.0).round() };
     for (n, &(string, enabled)) in panel.rows.iter().enumerate() {
         let y = MENU_TOP + LINE_HEIGHT * n as f32;
         let text = if enabled { WHITE } else { GREY };
-        let pen = &mut { MENU_X };
+        let pen = &mut { menu_x };
         step(cockpit, ink, "ccres_ending_text", pen, y, 5.0);
         let x = step(cockpit, ink, "ccres_body_text", pen, y, NUMBER_BOX);
         ink.centred(&(n + 1).to_string(), x, NUMBER_BOX, y + text_down, text);

@@ -594,7 +594,8 @@ impl Session {
     /// empty slot; from the destination a chassis, turret or gun is removed.
     ///
     /// STAND-IN: docs/37-designer.md#not-established -- which tab the panels turn to after a
-    /// fit is not read; *seen*: a chassis turns them to Turrets and a turret to Weapons.
+    /// fit, and which row it leaves selected, are not read; *seen*: a chassis turns them to
+    /// Turrets and a turret to Weapons. A tab that keeps them steps to its next row.
     pub fn double_click(
         &mut self,
         side: Side,
@@ -623,10 +624,17 @@ impl Session {
                     Tab::Turrets => Some(Tab::Weapons),
                     _ => None,
                 };
-                if let Some(next) = next {
-                    self.tab = next;
-                    self.destination = Panel::default();
-                    self.source = Panel::default();
+                match next {
+                    Some(next) => {
+                        self.tab = next;
+                        self.destination = Panel::default();
+                        self.source = Panel::default();
+                    }
+                    // A tab the fit stays on steps to its next slot, so the sockets of a
+                    // turret, the armour, the systems and the clips are filled one after the
+                    // other and the source panel offers the next slot's parts without another
+                    // click.
+                    None => self.step_destination(),
                 }
                 self.refresh(assembly, strings);
                 true
@@ -647,6 +655,19 @@ impl Session {
                 true
             }
         }
+    }
+
+    /// The destination's selection moved on to the next row, wrapping round at the last, with
+    /// the list scrolled to keep it in view.
+    fn step_destination(&mut self) {
+        let rows = self.destination.rows.len();
+        if rows == 0 {
+            return;
+        }
+        let next = self.destination.selected.map_or(0, |row| (row + 1) % rows);
+        self.destination.selected = Some(next);
+        self.destination.clicked_ms = None;
+        self.destination.first = self.destination.first.clamp(next.saturating_sub(ROWS_SHOWN - 1), next);
     }
 
     /// Fit `part` where its name says it goes, as a double click from the source would: a
