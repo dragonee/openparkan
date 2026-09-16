@@ -685,6 +685,34 @@ What those effects are ([11-effects.md](11-effects.md#how-an-effect-runs--read),
 *Seen*: in *The Constructor*'s recording the factory's chimneys smoke from the
 briefing on (12 s), and its consoles glow inside (100 s).
 
+**Where an action-3 effect stands** (*read*, and *measured*). The instance is
+made on the owner and an attach point of (object, node)
+(`Control.dll:0x100029ee`; the node is v4 plus the part's first node, less one),
+and each tick it takes the node's matrix, property 2, as its own frame
+(`Effect.dll:0x1000625a`). Every emitter of the four door effects sits at
+(0, 0, 0) in it, so the sound plays at the **node's authored origin**.
+
+That origin is often nowhere near the geometry the node draws. *Measured* over
+the 112 action-3 door effects in `fortif.rlb`, as the distance from the node's
+origin to the centre of its level-0 bounding sphere:
+
+| buildings | origin to sphere |
+|---|---:|
+| the mines, stores, towers, ruins, `fr_l_bunker`, `fr_l_gener` | 0.0 to 1.5 m |
+| `fr_b_plant` entrance | 8.1 m |
+| `fr_l_plant` entrance | 19.4 m |
+| `fr_m_plant` entrance, the bunkers | 20.0 to 21.2 m |
+| the institutes | 14.6 to 15.0 m |
+| the three factories' side doors | 30.8 m |
+
+68 of the 112 stand more than 10 m out. A door sound is audible from 5 m to
+60 m ([11-effects.md](11-effects.md#how-a-sound-is-heard--read-and-measured)),
+so at 30.8 m it plays at a sixth of its gain — all but inaudible standing in
+the doorway, while the Small Generator's, whose origins are on its doors, plays
+whole. **STAND-IN**: openparkan stands an action-3 effect at the centre of the
+node's level-0 bounding sphere instead, which puts every one of the 112 on its
+door. Where the node's matrix itself comes from is not traced.
+
 **For an engine:** when a building is placed, run its controller's load group
 as the hero's turret's is run. That means the effects of actions 3 and 4 on
 the building's nodes and control points, each placed through the building's

@@ -27,6 +27,38 @@ pub const VIEW_LEVEL: usize = 4;
 /// wear's `LIGHTMAPS` list (docs/07, "The batch material's high byte marks the lit batches").
 pub const NO_LIGHTMAP: u16 = 0xFF;
 
+/// The see-through materials a building's doorways and portals wear (docs/24, "Portal quads
+/// stand between the rooms").
+pub const PORTAL_MATERIALS: [&str; 3] = ["DEFAULT", "PORTAL_001", "PORTAL_004"];
+
+/// Whether a face of material `name` is a portal: a doorway or room opening, which is not
+/// drawn and which a mover and a round pass through.
+///
+/// STAND-IN: docs/24-motion.md#the-ground-inside-a-building--read-in-part-and-measured --
+/// where a gathered face's batch word, whose 8 and 0x200 the collision query passes, comes
+/// from is not traced; a recording shows the hero walking through the Large Factory's black
+/// `DEFAULT` doorway and its `PORTAL_001` quads, so those materials' faces pass.
+pub fn doorway(name: &str) -> bool {
+    PORTAL_MATERIALS.iter().any(|m| name.eq_ignore_ascii_case(m))
+}
+
+/// Which of `mesh`'s triangles wear a [`doorway`] material, by the batch that covers each:
+/// empty where none does, so a mesh without portals costs nothing.
+pub fn portal_triangles(mesh: &Mesh, wear: &Wear) -> Vec<bool> {
+    let portal = |material: u16| wear.materials.get(usize::from(material)).is_some_and(|name| doorway(name));
+    if !mesh.batches.iter().any(|b| portal(b.material)) {
+        return Vec::new();
+    }
+    let mut out = vec![false; mesh.triangles.len()];
+    for batch in mesh.batches.iter().filter(|b| portal(b.material)) {
+        let (first, count) = batch.triangles();
+        for flag in out.iter_mut().skip(first).take(count) {
+            *flag = true;
+        }
+    }
+    out
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Vertex {
     pub position: [f32; 3],
@@ -93,6 +125,12 @@ impl Model {
             usize::from(slot.first_batch)..usize::from(slot.first_batch) + usize::from(slot.batch_count);
         for batch in batches.filter_map(|b| mesh.batches.get(b)) {
             let name = wear.materials.get(usize::from(batch.material)).cloned().unwrap_or_default();
+            // A portal quad is not drawn: it is the opening between a building's cells, and
+            // `CBuilding` draws the cell beyond it instead (docs/24, "Portal quads stand
+            // between the rooms").
+            if doorway(&name) {
+                continue;
+            }
             let look = skins.look(&name)?;
             let page = (batch.flag != NO_LIGHTMAP && !mesh.lightmap_uv.is_empty())
                 .then(|| wear.lightmaps.get(usize::from(batch.flag)))

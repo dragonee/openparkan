@@ -1466,7 +1466,10 @@ opened the door. Both fit: the door began to move within 0.4 s of the beam, and
 the hero was through inside 4.7 s, as a 4 s door allows.
 
 **For an engine**: when a hit on a building names a node, open the first door on
-that node as proximity would, with no hold. Gate neither opener by clan.
+that node as proximity would, with no hold. Gate neither opener by clan. The
+round has to reach the door first: the black doorway quad stands a step in front
+of every door that has one, and a round passes it as a mover does
+([The doorways are portal quads](#the-doorways-are-portal-quads--measured-read-and-seen)).
 
 ### The ground inside a building — *read* in part, and *measured*
 
@@ -1505,23 +1508,80 @@ door nodes. On two institutes they lie on all their door nodes but one. On the
 generator they lie on other nodes than its doors. Where a face's batch word
 (`8`, `0x200`) comes from is not traced.
 
-**The doorways are black quads** (*measured*, and *seen*). `fr_b_plant` carries
-87 triangles of the material `DEFAULT`, all with triangle flags 0. 80 are at
-level 0, and 70 of those are on interior nodes. 8 of the 10 on outer nodes have
-a coincident twin on an interior node, facing the other way. At the entrance
-they are triangles 118 and 119 on node 1 (`o01`) and triangle 2294 on node 2
-(`i06`), all at y 89.3 across x −11…11, z 0…15.4. That is the whole doorway, a
-step outside the door `i05`.
-- `DEFAULT` is `Material.lib`'s flags-4 material: blend mode 4, a black diffuse
-  with alpha 0, and the texture `DEFAULT.0`, 16 × 16, black and opaque.
-  `World3D.dll` also falls back to it for a material it cannot find
-  (`0x10004354`).
-- *Seen*: the recording's entrance is black from outside at 88–93 s, and the
-  hero walks through it at 94.5 s.
-- So the quad draws black, which hides the interior from outside. It does not
-  stop a walker (*derived*). By the filter above, something passes it: its
-  batch word carrying `8` or `0x200` is the only way the read code allows, and
-  that it does is a *guess*.
+**The doorways are portal quads** (*measured*, *read*, and *seen*). `fr_b_plant`
+carries 87 triangles of the material `DEFAULT`, all with triangle flags 0. 80
+are at level 0, and 70 of those are on interior nodes. 8 of the 10 on outer
+nodes have a coincident twin on an interior node, facing the other way. At the
+entrance they are triangles 118 and 119 on node 1 (`o01`) and triangle 2294 on
+node 2 (`i06`), all at y 89.3 across x −11…11, z 0…15.4. That is the whole
+doorway, a step outside the door `i05`, with a third quad at y 87.4 on the hall
+`i01` a step behind it.
+- `DEFAULT` is `Material.lib`'s flags-4 material: blend mode 4, a black diffuse,
+  the ambient alpha the device sees at 1, and the texture `DEFAULT.0`, 16 × 16,
+  black and opaque. `World3D.dll` also falls back to it for a material it cannot
+  find (`0x10004354`). `PORTAL_001` and `PORTAL_004` wear `PG23.0` and a bright
+  green ambient.
+- **They are not drawn** ([below](#a-building-is-drawn-cell-by-cell-through-its-portals--read)).
+  `CBuilding` draws a building one cell at a time and reaches the next cell
+  through these openings, so drawing the quad itself would black out the very
+  room the portal exists to show.
+- *Seen*: Mission 03's Small Bunker carries a `DEFAULT` quad on its outer node
+  `o01` at y −3.4…−1.5, in front of its door `i03` at y −2.5…0.3, and the hero
+  comes down the ramp from −y. In the recording at 164.4–166.6 s that door is
+  plainly in view, dark with hazard stripes along its foot, and the lit interior
+  shows through the windows beside it. A drawn quad would hide both.
+- The Large Factory's entrance still reads black from outside at 88–93 s because
+  the hall behind it is unlit, not because the quad covers it.
+- It does not stop a walker either (*derived*). By the filter above, something
+  passes it: its batch word carrying `8` or `0x200` is the only way the read
+  code allows, and that it does is a *guess*. **A round passes it too**: the
+  round's query builds its filter the same way (`Control.dll:0x1001d9fa`), and
+  with the quad solid a shot at the Large Factory's entrance strikes node 1,
+  `o01`, a metre in front of the door, so no shot could ever open a door that
+  has a doorway quad (*measured* on openparkan's engine).
+
+#### A building is drawn cell by cell through its portals — *read*
+
+`CBuilding` splits its mesh into **cells** and draws only the ones the camera
+can see. The lists are built once, as the items are filed
+(`Terrain.dll:0x100580b0`):
+
+- node count into `+0xa0`, a byte per node into `+0x98` (drawn this frame) and
+  a dword per node into `+0x9c` (the node's stream-1 flags, property `0xe`);
+- node 0 always goes into the **exterior** list at `+0x80`;
+- every other node whose flags carry **4** is a cell: with flag **1**, the
+  interior bit, it joins the **room** list at `+0x74`, otherwise the exterior
+  list.
+
+*Measured* on `fr_b_plant`: 0x4 marks `o01`, `o03` and every `i*` room; the
+three door nodes `i05`, `i19`, `i21` carry `0xd1` — no 4 — so each is drawn
+with the room it hangs under, and `i16`, `i17` (`0x451`) with `i15`.
+
+`CBuilding::Render` (`0x10058b90`) then:
+
+1. culls the building's bounding sphere against the six frustum planes and
+   hands the draw to its agent when it is out;
+2. clears the drawn bytes and empties the portal queue at `+0x8c`/`+0x90`;
+3. **camera outside the building's sphere**: draws the exterior list's entry 0
+   and marks every exterior node drawn;
+4. **camera inside it**: walks the room list, turns the camera into each room's
+   frame (node matrix, property 2) and keeps the rooms whose box it lies in,
+   then draws each;
+5. drains the queue `CBuilding::PortalDrawNotify` (`0x1005a5d0`) fills as those
+   cells draw: a portal names a node, and a node not yet drawn is queued — an
+   interior one marks itself drawn, an exterior one marks the whole exterior
+   list. Each queued node draws as a room if its flags carry 1, else as the
+   exterior.
+
+`PortalNearDist` and `PortalFarDist` are registered as variables
+(`0x1005f24d`, `0x1005f26f`) and nothing reads them; `Ngi32.dll` exports
+`n3dGetPortalClipRect` and no module imports it.
+
+**Not implemented**: openparkan draws every cell of a building at once and only
+drops the portal quads. What the cells hide is geometry behind a wall the camera
+cannot see through anyway, so the picture is the same and the cost is frame time.
+How a portal face reaches `PortalDrawNotify`, and which node it names, is not
+read.
 
 **The hall way's second word is the vertex's node** (*measured*). Posed through
 the node it names, a vertex lands where it belongs:
@@ -1728,7 +1788,12 @@ neither limit comes into play.
    walker nears it (step 2 of
    [Walking into a building](#walking-into-a-building--read-and-measured)),
    and takes 2.5 s to open at rate 0.4.
-7. Draw `DEFAULT` as its material says: black.
+7. Draw no portal quad: the `DEFAULT`, `PORTAL_001` and `PORTAL_004` faces are
+   the openings between the building's cells, and a drawn one hides the door a
+   step behind it and the next room beyond it
+   ([above](#a-building-is-drawn-cell-by-cell-through-its-portals--read)).
+8. Pass them with a round as well as with a mover, so a shot reaches the door
+   behind the doorway ([A shot opens a door](#a-shot-opens-a-door--read-and-seen)).
 
 #### The ways into Mission 03's Small Generator and Small Bunker — *measured*, and *seen*
 

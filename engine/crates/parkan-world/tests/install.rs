@@ -1901,6 +1901,131 @@ fn mission_02s_factory_builds_a_free_warbot_in_a_minute_which_escapes_and_comple
 
 #[test]
 #[ignore = "needs the game install"]
+fn the_large_factorys_portal_quads_are_not_drawn_so_its_doors_and_rooms_show() {
+    use parkan_formats::mission;
+    use parkan_world::assembly::Assembly;
+    use parkan_world::models;
+    use parkan_world::textures::TextureStore;
+
+    let game = gamedir::find(None).expect("a Parkan install: set PARKAN_DIR");
+    let mut assembly = Assembly::new(&game).unwrap();
+    let mut store = TextureStore::open(&game).unwrap();
+    // `fr_b_plant` wears 87 `DEFAULT` and 16 `PORTAL_*` triangles: the black doorway a step
+    // in front of each door, and the openings between its rooms (docs/24, "The doorways are
+    // black quads").
+    let part = assembly
+        .parts(mission::KIND_BUILDING, "UNITS\\BUILDS\\PLANT\\lplant01.dat")
+        .into_iter()
+        .next()
+        .expect("the Large Factory's chassis");
+    let loaded = assembly.mesh(&part.reference).expect("its mesh");
+    let portals = models::portal_triangles(&loaded.mesh, &loaded.wear);
+    assert_eq!(portals.iter().filter(|&&p| p).count(), 103, "its portal triangles");
+    // None of them reaches the drawn model.
+    let model = models::build_model(
+        &mut assembly,
+        &mut store,
+        mission::KIND_BUILDING,
+        "UNITS\\BUILDS\\PLANT\\lplant01.dat",
+    )
+    .unwrap()
+    .expect("the Large Factory");
+    assert!(!model.groups.is_empty());
+    assert!(
+        !model.groups.iter().any(|g| models::doorway(&g.look.material)),
+        "a portal quad is drawn: {:?}",
+        model.groups.iter().map(|g| g.look.material.clone()).collect::<Vec<_>>()
+    );
+    // A robot wears none at all, so nothing of it is dropped.
+    let hero = assembly
+        .parts(mission::KIND_UNIT, "UNITS\\UNITS\\BATTLE\\w_b_trk1.dat")
+        .into_iter()
+        .next()
+        .expect("a battle unit's chassis");
+    let hero = assembly.mesh(&hero.reference).expect("its mesh");
+    assert!(models::portal_triangles(&hero.mesh, &hero.wear).is_empty());
+}
+
+#[test]
+#[ignore = "needs the game install"]
+fn a_shot_at_mission_02s_factory_door_passes_the_black_doorway_in_front_of_it_and_opens_it() {
+    use glam::Vec3;
+    use parkan_sim::combat::Event;
+    use parkan_world::buildings::Phase;
+
+    let (mut play, _) = mission_02_play();
+    let b = play.buildings.iter().position(|b| b.doors.len() == 3).expect("fr_b_plant's three doors");
+    let t = play.buildings[b].target;
+    let part_index = play.buildings[b].part;
+    let node = play.buildings[b].doors[0].nodes[0];
+    // The entrance door `i05` stands between two black `DEFAULT` quads, one on the outer node
+    // `o01` and one in the hall (docs/24, "The doorways are black quads"). A round passes
+    // them, as a walker does, and strikes the door.
+    let door = door_centre(&play, t, part_index, node);
+    let muzzle = Vec3::new(door.x, door.y + 40.0, door.z);
+    let (strike, struck, _) =
+        play.battle.combat.first_hit(&play.ground, None, muzzle, door, 0.0).expect("a line to the door");
+    assert_eq!((strike.node, struck), (Some(node), Some(t)), "the round reaches the door");
+    let laser = play.hero.robot.rounds[2].expect("the battle laser's round");
+    let direction = (door - muzzle).normalize();
+    play.battle.combat.fire(laser, None, muzzle, direction, Vec3::ZERO, 1.0, None).unwrap();
+    let mut struck_at = None;
+    let mut open_at = None;
+    for tick in 0..(60 * 15) {
+        for e in play.tick(1000.0 / 60.0, [0.0; 2]) {
+            if matches!(e, Event::Struck { target: Some(x), node: Some(n), .. } if x == t && n == node) {
+                struck_at.get_or_insert(tick);
+            }
+        }
+        if play.buildings[b].doors[0].phase == Phase::Open {
+            open_at.get_or_insert(tick);
+        }
+    }
+    let struck = struck_at.expect("the round strikes the door, not the doorway quad");
+    let open = open_at.expect("the door opens");
+    assert!(open > struck, "the shot opened it: struck {struck}, open {open}");
+}
+
+#[test]
+#[ignore = "needs the game install"]
+fn the_factorys_door_sounds_stand_on_their_doors_not_on_their_nodes_origins() {
+    use glam::Vec3;
+    use parkan_world::fx::Owner;
+
+    let (mut play, _) = mission_02_play();
+    let b = play.buildings.iter().position(|b| b.doors.len() == 3).expect("fr_b_plant's three doors");
+    let t = play.buildings[b].target;
+    let part_index = play.buildings[b].part;
+    // `door_open_01` on each door's node, ids 8000, 8002 and 8004 (docs/13, "A building's
+    // load group"). Their nodes' origins stand 8 m and 30.8 m from the doors themselves.
+    for (d, id) in [(0usize, 8000i32), (1, 8002), (2, 8004)] {
+        let node = play.buildings[b].doors[d].nodes[0];
+        let door = door_centre(&play, t, part_index, node);
+        let origin = play.battle.combat.targets[t].parts[part_index].nodes[node].translation;
+        let origin = Vec3::new(origin[0] as f32, origin[1] as f32, origin[2] as f32);
+        let at: Vec<Vec3> = play.fx.owned(Owner::Building(t, id)).map(|i| i.frame.origin).collect();
+        assert_eq!(at.len(), 1, "one open sound on door {d}");
+        assert!(at[0].distance(door) < 0.01, "door {d}'s sound stands on it: {at:?} against {door}");
+        if d > 0 {
+            assert!(
+                (origin.distance(door) - 30.8).abs() < 0.5,
+                "the side door's node origin is 30.8 m away: {origin} against {door}"
+            );
+        }
+    }
+}
+
+/// The centre of the level-0 bounding sphere of `node` of a target's part, in the world.
+fn door_centre(play: &parkan_world::play::Play, target: usize, part_index: usize, node: usize) -> glam::Vec3 {
+    let part = &play.battle.combat.targets[target].parts[part_index];
+    let slot = &part.mesh.slots[usize::from(part.mesh.nodes[node].slot_index[0])];
+    let [cx, cy, cz, _] = slot.sphere;
+    let c = part.nodes[node].apply([cx, cy, cz].map(|v| f64::from(v * part.scale)));
+    glam::Vec3::new(c[0] as f32, c[1] as f32, c[2] as f32)
+}
+
+#[test]
+#[ignore = "needs the game install"]
 fn mission_02s_large_factory_cuts_the_ground_from_under_it_and_lets_the_hero_through_its_doorway() {
     let (mut play, _) = mission_02_play();
     // Over the pod the landscape is gone: the ground there is the factory's pod floor, 12.4

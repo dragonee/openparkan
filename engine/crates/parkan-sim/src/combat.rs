@@ -14,7 +14,7 @@ use parkan_formats::pose::Pose;
 
 use crate::damage::{Change, Life, blast, round_hit, share_loss};
 use crate::ground::Ground;
-use crate::hit::{ROUND_SKIPS_FACE, SIGHT_SKIPS_FACE, Strike, map_edge, segment_mesh_slots, swept_spheres};
+use crate::hit::{ROUND_SKIPS_FACE, SIGHT_SKIPS_FACE, Strike, map_edge, swept_spheres};
 
 /// A mode-0 round's sideways speed, in its own frame, bleeds off at this many m/s a
 /// millisecond (`Control.dll:0x1000ceec`).
@@ -89,6 +89,10 @@ pub struct Part {
     pub scale: f32,
     /// Its nodes' hit points; `None` where it takes no damage.
     pub life: Option<Life>,
+    /// The portal quads, by triangle: a segment passes them whatever their flags, as a
+    /// mover does (docs/24, "Portal quads stand between the rooms"). Empty on a mesh that
+    /// wears none, which is every mesh but a building's.
+    pub portals: Rc<Vec<bool>>,
 }
 
 impl Part {
@@ -108,9 +112,19 @@ impl Part {
             .filter(|&s| s != parkan_formats::mesh::NO_SLOT)
     }
 
-    /// A segment through the part as it stands, passing the triangles flagged `passes`.
+    /// A segment through the part as it stands, passing the triangles flagged `passes` and
+    /// its portal quads.
     pub fn segment(&self, p0: Vec3, p1: Vec3, passes: u16) -> Option<Strike> {
-        segment_mesh_slots(&self.mesh, &self.nodes, self.scale, p0, p1, passes, |i| self.slot(i))
+        crate::hit::segment_mesh_skipping(
+            &self.mesh,
+            &self.nodes,
+            self.scale,
+            p0,
+            p1,
+            passes,
+            |i| self.slot(i),
+            |t| self.portals.get(t).copied().unwrap_or(false),
+        )
     }
 }
 
@@ -615,7 +629,13 @@ mod tests {
         let life = Life::new(&table, vec![None], vec![false], 1.0, 1.0);
         let pose = Pose { translation: [f64::from(at.x), f64::from(at.y), f64::from(at.z)], ..IDENTITY };
         Target {
-            parts: vec![Part { mesh: Rc::new(mesh), nodes: vec![pose], scale: 1.0, life: Some(life) }],
+            parts: vec![Part {
+                mesh: Rc::new(mesh),
+                nodes: vec![pose],
+                scale: 1.0,
+                life: Some(life),
+                portals: Rc::default(),
+            }],
             centre: at + Vec3::Z,
             radius: 1.5,
             alive: true,

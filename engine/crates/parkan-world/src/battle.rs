@@ -287,7 +287,8 @@ impl Battle {
                 (None, Vec::new())
             };
             blasts.push(part_blasts);
-            parts.push(Part { mesh, nodes, scale, life });
+            let portals = Rc::new(crate::models::portal_triangles(&mesh, &loaded.wear));
+            parts.push(Part { mesh, nodes, scale, life, portals });
             part_wears.push(loaded.wear.materials.clone());
         }
         if parts.is_empty() || lo.x > hi.x {

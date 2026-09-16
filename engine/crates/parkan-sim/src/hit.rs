@@ -91,6 +91,27 @@ pub fn segment_mesh_slots(
     passes: u16,
     slot_of: impl Fn(usize) -> Option<u16>,
 ) -> Option<Strike> {
+    segment_mesh_skipping(mesh, world, scale, p0, p1, passes, slot_of, |_| false)
+}
+
+/// [`segment_mesh_slots`], passing every triangle `skip` names whatever its flags.
+///
+/// STAND-IN: docs/24-motion.md#the-ground-inside-a-building--read-in-part-and-measured --
+/// the mover's face query drops a batch by a word that is not traced, and the stand-in for
+/// it is the portal materials; a round's query builds its filter the same way
+/// (`Control.dll:0x1001d9fa`), so it passes the same faces. Without it a shot at a building's
+/// door strikes the black doorway quad a step in front of it and no door opens.
+#[allow(clippy::too_many_arguments)]
+pub fn segment_mesh_skipping(
+    mesh: &Mesh,
+    world: &[Pose],
+    scale: f32,
+    p0: Vec3,
+    p1: Vec3,
+    passes: u16,
+    slot_of: impl Fn(usize) -> Option<u16>,
+    skip: impl Fn(usize) -> bool,
+) -> Option<Strike> {
     let mut best = (p1 - p0).length_squared();
     let mut out = None;
     for i in 0..mesh.nodes.len() {
@@ -101,7 +122,7 @@ pub fn segment_mesh_slots(
         let first = usize::from(s.first_triangle);
         let last = (first + usize::from(s.triangle_count)).min(mesh.triangles.len());
         for t in first..last {
-            if mesh.face_flags.get(t).is_some_and(|f| f & passes != 0) {
+            if mesh.face_flags.get(t).is_some_and(|f| f & passes != 0) || skip(t) {
                 continue;
             }
             let [a, b, c] = mesh.triangles[t].map(|v| Vec3::from_array(mesh.positions[usize::from(v)]));

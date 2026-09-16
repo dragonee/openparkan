@@ -209,8 +209,10 @@ Added on 2026-09-15 against `4f3a16e`, after the Outpost island's landing was fi
 **Walking into the Large Factory**
 
 - [ ] [M11] What `CBuilding` does to a door's or a pod's switch word as it files the item, and the capsule a door is measured against (`Terrain.dll:0x1005a27f`).
-- [ ] [M11] The patch and basement faces a building's insertion stitches in, and where a gathered face's batch word comes from (the engine lets movers through the `DEFAULT` and `PORTAL` materials' faces).
+- [ ] [M11] The patch and basement faces a building's insertion stitches in, and where a gathered face's batch word comes from (the engine lets movers **and rounds** through the `DEFAULT` and `PORTAL` materials' faces).
 - [ ] [M11] Whether the slope brake reads a building's stair faces, and who sets a collision object's flags, so which movers keep the floors in their push-out.
+- [ ] [M14] How a portal face reaches `CBuilding::PortalDrawNotify` (`Terrain.dll:0x1005a5d0`, an interface slot nothing in the install is found to call) and which node its record names, so which cells a building draws. The lists and the render are read (docs/24, "A building is drawn cell by cell through its portals"); the engine draws every cell and only drops the portal quads, which costs frame time and shows nothing extra.
+- [ ] [M14] Where the node matrix an action-3 effect takes as its frame (`Effect.dll:0x1000625a`, property 2) comes from. Its translation is the node's authored origin, which on 68 of `fortif.rlb`'s 112 door sounds stands more than 10 m from the door — 30.8 m on the three factories' side doors — so the sound is all but inaudible in the doorway. The engine stands the effect at the node's level-0 sphere centre instead.
 
 ## Mission 03, *The Field Base*
 

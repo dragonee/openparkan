@@ -175,20 +175,6 @@ pub const VOICE_SELECTED_B: &str = "VOICE_SELECTED_B";
 /// (`0x100638a7`, docs/34 "Mission 02").
 pub const MESSAGE_FLYER_TAKEN: i64 = 100;
 
-/// The see-through materials a building's doorways and portals wear (docs/24, "The way to
-/// the pod").
-pub const PORTAL_MATERIALS: [&str; 3] = ["DEFAULT", "PORTAL_001", "PORTAL_004"];
-
-/// Whether a face of material `name` lets a mover through.
-///
-/// STAND-IN: docs/24-motion.md#the-ground-inside-a-building--read-in-part-and-measured --
-/// where a gathered face's batch word, whose 8 and 0x200 the collision query passes, comes
-/// from is not traced; a recording shows the hero walking through the Large Factory's black
-/// `DEFAULT` doorway and its `PORTAL_001` quads, so those materials' faces pass.
-pub fn doorway(name: &str) -> bool {
-    PORTAL_MATERIALS.iter().any(|m| name.eq_ignore_ascii_case(m))
-}
-
 /// What a target is beside what a round strikes: its clan, its `Type` word, its logical id.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Unit {
@@ -658,7 +644,7 @@ impl Play {
             .collect();
         let materials_for = |t: usize, part: usize, material: u16| {
             let name = battle.wears.get(t)?.get(part)?.get(usize::from(material & 0xFF))?;
-            materials.get(name).map(|m| (m.surface, m.damage_rate, doorway(name)))
+            materials.get(name).map(|m| (m.surface, m.damage_rate, crate::models::doorway(name)))
         };
         ground.solids = battle
             .combat
@@ -1560,7 +1546,7 @@ impl Play {
         let solid =
             Solid::from_parts(&target.parts, target.centre, target.radius, building, |part, material| {
                 let name = wears.get(part)?.get(usize::from(material & 0xFF))?;
-                materials.get(name).map(|m| (m.surface, m.damage_rate, doorway(name)))
+                materials.get(name).map(|m| (m.surface, m.damage_rate, crate::models::doorway(name)))
             });
         let mut solid = solid;
         if let Some(b) = self.buildings.iter().find(|b| b.target == t) {
@@ -3185,7 +3171,7 @@ mod tests {
             sphere: None,
             corners: None,
         };
-        Part { mesh: Rc::new(mesh), nodes: vec![IDENTITY], scale: 1.0, life: None }
+        Part { mesh: Rc::new(mesh), nodes: vec![IDENTITY], scale: 1.0, life: None, portals: Rc::default() }
     }
 
     #[test]

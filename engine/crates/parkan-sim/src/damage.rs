@@ -592,6 +592,7 @@ mod tests {
                 nodes: vec![pose],
                 scale: 1.0,
                 life: Some(life),
+                portals: std::rc::Rc::default(),
             }],
             centre: at + Vec3::Z,
             radius: 1.5,

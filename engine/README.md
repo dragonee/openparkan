@@ -608,6 +608,19 @@ presses a hero standing at it down), and which of Mission 04's units holds no mi
   over the Outpost's ground-level dock, 20 over a generator's, 5.7 and 5.2 over an indoor one —
   so the red field it draws covers the charging station it stands on, and `f_recharge.wav`
   sounds as its time crosses 0.1 rising, once every 3 s sweep.
+- A building's portal quads are not drawn (docs/24, "The doorways are portal quads"). The
+  `DEFAULT`, `PORTAL_001` and `PORTAL_004` faces are the openings between its cells, which
+  `CBuilding` draws one at a time and reaches the next through, so a drawn one blacks out the
+  room the portal exists to show. Dropping them shows the Large Factory's doors from outside,
+  the lit rooms through its windows and the next segment from inside, where before every one
+  stood behind a black rectangle.
+- A round passes them too, as a mover does, so a shot at a door reaches the door: with the
+  quad solid a shot at the Large Factory's entrance struck node 1, `o01`, a metre in front of
+  the door, and no door with a doorway in front of it could ever be shot open.
+- An action-3 effect stands at the centre of its node's level-0 bounding sphere rather than
+  at the node's origin (docs/13, "Where an action-3 effect stands"). 68 of the 112 door
+  sounds in `fortif.rlb` hang on a node whose origin is more than 10 m from the door, 30.8 m
+  on the three factories' side doors, where a door sound carries 5 to 60 m.
 
 This directory also holds what the rest will follow:
 
@@ -944,7 +957,9 @@ engine pass replaces each with what was read and removes its row.
 | M11 | How the cursor is shown in view mode 5 | the system's cursor, with the grab let go | [36](../docs/36-factory.md#not-established) |
 | M11 | Which areals the escape's random points must be on | the first point tried within 150 of the unit, inside the map by 100 | [31](../docs/31-packages.md#the-escape--read) |
 | M11 | The heights and textures of the patch and basement faces a building's insertion stitches in | the landscape is left out only inside a building's inner ring, from the ground queries and the draw, and keeps its own faces between the inner and outer rings | [03](../docs/03-terrain.md#for-an-engine) |
-| M11 | Where a gathered face's batch word, whose 8 and 0x200 the collision query passes, comes from | the faces of the `DEFAULT`, `PORTAL_001` and `PORTAL_004` materials, a building's black doorway and portal quads, let a mover through, as a recording shows | [24](../docs/24-motion.md#the-ground-inside-a-building--read-in-part-and-measured) |
+| M11 | Where a gathered face's batch word, whose 8 and 0x200 the collision query passes, comes from | the faces of the `DEFAULT`, `PORTAL_001` and `PORTAL_004` materials, a building's doorway and portal quads, let a mover **and a round** through, as a recording shows and as a shot at a door needs | [24](../docs/24-motion.md#the-doorways-are-portal-quads--measured-read-and-seen) |
+| M14 | How a portal face reaches `CBuilding::PortalDrawNotify` and which node it names, and so which cells a building draws | no cell is culled: every node is drawn, and the portal quads themselves are dropped, which is what the cells would have hidden them behind | [24](../docs/24-motion.md#a-building-is-drawn-cell-by-cell-through-its-portals--read) |
+| M14 | Where the node matrix an action-3 effect takes as its frame comes from, whose translation is the node's authored origin | an action-3 effect stands at the centre of the node's level-0 bounding sphere, which puts all 112 door sounds on their doors | [13](../docs/13-control.md#a-buildings-load-group--read-and-measured) |
 | M11 | Whether the slope brake reads a building's stair faces | on a building's faces the slope brake is left out | [24](../docs/24-motion.md#the-ground-inside-a-building--read-in-part-and-measured) |
 | M11 | Which of a turret's nodes the boarding test's property `0x52` reads the life of | the turret part's node 0 | [39](../docs/39-boarding.md#boarding--read) |
 | M11 | The heading the hero is given on leaving a bot, read as (F.x, −F.y) under an assumed matrix layout | the hero faces the bot | [39](../docs/39-boarding.md#not-established) |
