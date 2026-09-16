@@ -1845,7 +1845,7 @@ fn mission_02s_factory_door_opens_for_the_hero_on_its_forecourt_and_shuts_after_
 
 #[test]
 #[ignore = "needs the game install"]
-fn mission_02s_factory_builds_a_free_warbot_in_a_minute_which_escapes_and_completes_the_objective() {
+fn mission_02s_factory_builds_a_free_warbot_which_leaves_by_the_front_door_and_completes_the_objective() {
     use parkan_world::factory::Project;
 
     let (mut play, _) = mission_02_play();
@@ -1888,6 +1888,46 @@ fn mission_02s_factory_builds_a_free_warbot_in_a_minute_which_escapes_and_comple
     let at = robot.walker.body.position;
     assert!((at.truncate() - glam::Vec2::new(393.75, 854.91)).length() < 1.0, "at the creation vertex: {at}");
     assert!(matches!(robot.behaviour.task(), parkan_sim::behaviour::Task::Leave { .. }));
+
+    // The escape is routed out along the factory's own paths (docs/31, "The escape"): the
+    // hall way from the creation vertex north through the front door, at world y 854.9,
+    // 873.4 just inside the door, and 885.4 on the forecourt outside it.
+    let bot = play.robots.len() - 1;
+    let way = play.way_out(t, at, glam::Vec3::new(535.7, 727.9, 154.0)).expect("a way out");
+    let ys: Vec<f32> = way.iter().map(|p| p.y).collect();
+    assert!(way.len() == 5 && ys[0] < 855.0 && ys[3] > 885.0, "out through the front door: {way:?}");
+
+    // Walking it: the front door (node 3) opens for the bot as it nears it, no shot fired,
+    // and its shut faces hold the bot inside until it has (docs/24, "Walking into a
+    // building"). The doorway stands at about y 876.
+    const DOORWAY_Y: f32 = 876.0;
+    let door = |play: &parkan_world::play::Play| {
+        play.buildings.iter().find(|b| b.target == t).expect("the factory's doors").doors[0].phase
+    };
+    let mut opened_at = None;
+    let mut out_at = None;
+    for tick in 0..(12 * 60) {
+        play.tick(1000.0 / 60.0, [0.0; 2]);
+        let phase = door(&play);
+        let robot = &play.robots[bot].1;
+        let at = robot.walker.body.position;
+        if phase == parkan_world::buildings::Phase::Open && opened_at.is_none() {
+            opened_at = Some(tick as f32 / 60.0);
+        }
+        if opened_at.is_none() {
+            assert!(at.y < DOORWAY_Y, "the shut door holds it in: {at} at tick {tick}");
+        }
+        if out_at.is_none() && at.y > DOORWAY_Y && robot.walker.ground.and_then(|h| h.solid).is_none() {
+            out_at = Some(tick as f32 / 60.0);
+        }
+    }
+    // The door is rate 0.4, and the building sees it open at 0.9 / rate, 2.25 s (docs/27,
+    // "Capture"). The bot is through it and back on the landscape within four seconds of that.
+    let opened = opened_at.expect("the front door opens for the bot");
+    let out = out_at.expect("the bot walks out onto the landscape");
+    assert!((2.2..2.4).contains(&opened), "the door opens in {opened} s");
+    assert!(out > opened && out - opened < 4.0, "out {out} s after the door opened at {opened} s");
+
     assert_eq!(play.factories[f].free_bots, 99);
     // Batch starts no second bot: no mind is free.
     assert!(play.factories[f].build.is_none());

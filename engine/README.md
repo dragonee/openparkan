@@ -621,6 +621,18 @@ presses a hero standing at it down), and which of Mission 04's units holds no mi
   at the node's origin (docs/13, "Where an action-3 effect stands"). 68 of the 112 door
   sounds in `fortif.rlb` hang on a node whose origin is more than 10 m from the door, 30.8 m
   on the three factories' side doors, where a door sound carries 5 to 60 m.
+- **Every unit is in the collision pass, not the hero alone** (docs/24, "Collision between
+  objects"): after its move and ground contact each robot's swept body sphere is run against
+  every placed object whose sphere it meets, its own excepted, and it takes the push as the
+  machine does. A warbot is held by a building's walls and by its shut doors, and pushed off
+  trees, stones and other units, where before it walked through them.
+- **A bot built in a factory leaves by its doors** (docs/31, "The escape"). It is made at the
+  factory's creation vertex, inside the building, so it counts as having walked in and its
+  escape is routed out along the hall way, which is what the engine's own 20-second check does
+  with a unit still on a building ("LEAVE IS TOO !!!"). On Mission 02 the Large Factory's bot
+  walks north from the creation vertex, waits 2.25 s at the front door it opened by standing
+  near it, and is out on the landscape 1.5 s later; before, the escape's straight line took it
+  through the wall and the ground contact put it on the roof.
 
 This directory also holds what the rest will follow:
 
@@ -885,6 +897,8 @@ a row here. A row leaves this table when research closes it.
 | M14 | What a dock does with a unit's batteries and shields, and the device manager's value 7 it adds a tenth of | neither is simulated (docs/23, docs/26), so a dock gives life and ammunition alone | [27](../docs/27-ownership.md#what-a-dock-gives--read) |
 | M14 | What becomes of a part already knocked off and flying when its dock puts its node back | it is taken out of the air, rather than drawn beside the node it is again | [26](../docs/26-damage.md#repair-a-units-own-repair-unit-switched-on-and-off--read-and-measured) |
 | M14 | What the game drives a dock's glow with: its own time mode is 0, a value set from outside, and nothing read sets it | a charging dock runs it looping and switches it off again; the `f_recharge_*` nearest a dock's vertex is that dock's | [13](../docs/13-control.md#a-buildings-load-group--read-and-measured) |
+| M14 | The masses property `0x7c` gives a unit and a static object, by whose squares a pair shares its push | no push is shared: every unit, not the hero alone, is run as the mover against every placed object and takes the whole push, which is what a building, a tree or a stone gives anyway | [24](../docs/24-motion.md#not-established) |
+| M14 | Where a unit built in a factory joins the building's own paths, which the escape's 20-second check routes it out by ("LEAVE IS TOO !!!") | a bot made at a creation vertex counts as having walked in: it leaves along the hall way, as a unit sent in does | [31](../docs/31-packages.md#the-escape--read) |
 
 ### Read since the stand-in was written
 
@@ -917,7 +931,6 @@ engine pass replaces each with what was read and removes its row.
 | M7 | A contact's node life, which decides whether a foot can land | every contact is intact | [13](../docs/13-control.md#section-1s-conditions-are-contacts--read-and-measured) |
 | M7 | The class the small-face stop reads | the hero's class is its size class, 2, so small faces never stop it | [24](../docs/24-motion.md#collision-between-objects--read) |
 | M7 | The batch flags 8 and 0x200 a collision's face query passes, and the batch word's 2 that makes a hider hide both ways: a mesh's batch record carries no such word | no batch passes, and every hider hides from its front only | [24](../docs/24-motion.md#collision-between-objects--read) |
-| M7 | Which pairs the collision pass moves besides the hero's | the hero is always the mover and nothing else is pushed | [24](../docs/24-motion.md#collision-between-objects--read) |
 | M11 | Who sets a collision object's flags, so which movers carry 8 and keep the floors (triangle flag 2) in their push-out | no mover carries 8: every floor lets a mover by | [24](../docs/24-motion.md#not-established) |
 | M8 | Whether a digit the wingman selector takes also reaches the input table that toggles the hero's guns | it does not | [31](../docs/31-packages.md#the-wingman-menu-from-first-person--read-and-measured) |
 | M8 | What a unit record's `+0x30` is, which picks capturers and the acknowledgement voices | the size class of the chassis's name: t 1, l and h 2, m 3, b 4 | [31](../docs/31-packages.md#the-wingman-menu-from-first-person--read-and-measured) |

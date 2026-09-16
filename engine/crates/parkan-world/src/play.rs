@@ -529,6 +529,43 @@ pub fn struck_wear<'a>(part: &Part, wear: &'a [String], p0: Vec3, p1: Vec3) -> O
     wear.get(usize::from(batch.material & 0xFF)).map(String::as_str)
 }
 
+/// The push a unit takes this frame (docs/24, "Collision between objects"): its sphere, swept
+/// from `from` to `to`, against the level-0 faces of every placed object whose sphere it
+/// meets, its own solid `mover` excepted. Each obstacle sees the end the ones before it have
+/// already moved, as the pass reads B's end with its push so far.
+///
+/// A building's faces push every unit on it or near it, the one it stands on included,
+/// through the building's own pass (docs/24, "Walking into a building"), and an open door's
+/// faces let it by.
+///
+/// STAND-IN: docs/24-motion.md#not-established -- the masses property `0x7c` gives a unit and
+/// a static object are not read, so a pair's push cannot be shared by mass squared: every
+/// unit is run as the mover against every obstacle and takes the whole push. Against a
+/// building, a tree or a stone that is what the pass gives anyway, the obstacle having no
+/// contact record; between two units it moves both sides where the game moves the lighter
+/// one further.
+fn collision_push(solids: &[Solid], from: Vec3, to: Vec3, radius: f32, mover: Option<usize>) -> Vec3 {
+    let mut total = Vec3::ZERO;
+    for (i, obstacle) in solids.iter().enumerate() {
+        if !obstacle.present || mover == Some(i) {
+            continue;
+        }
+        let end = to + total;
+        if parkan_sim::hit::swept_spheres(
+            (from, end),
+            radius,
+            (obstacle.centre, obstacle.centre),
+            obstacle.radius,
+        )
+        .is_none()
+        {
+            continue;
+        }
+        total += solid::push(from, end, radius, obstacle);
+    }
+    total
+}
+
 impl Play {
     /// The mission's hero armed, its map's ground, every other object a target, and the
     /// effects they can play loaded.
@@ -1281,6 +1318,7 @@ impl Play {
     pub fn tick(&mut self, dt_ms: f64, mouse: [f32; 2]) -> Vec<Event> {
         self.sync_sensitivity();
         self.update_targets();
+        self.refresh_present();
         self.tick_robots(dt_ms, mouse);
         // STAND-IN: docs/40-command-mode.md#not-established -- nothing read pops mode 3 when its HQ is
         // lost: the view rolls back to the HQ's cockpit, which the lost bot then puts the hero
@@ -2336,6 +2374,14 @@ impl Play {
                 continue;
             };
             if let Some(unit) = self.spawn(&project, clan, at, 0.0) {
+                // The bot is made at the factory's creation vertex, inside it (docs/36, "The
+                // bot appears"), so it walks out along the building's own paths, as the
+                // escape's 20-second check routes out a unit still on a building ("LEAVE IS
+                // TOO !!!", docs/31, "The escape"). Without it the escape's straight line
+                // would run into a wall.
+                if place.is_some() {
+                    self.construction.ways.entered.insert(unit, t);
+                }
                 if let Some((_, robot)) = self.robots.iter_mut().find(|(rt, _)| *rt == unit) {
                     let leave = orders::Order {
                         code: orders::LEAVE,
@@ -2618,6 +2664,7 @@ impl Play {
             }
             let (t, robot) = &mut self.robots[r];
             let target = &mut self.battle.combat.targets[*t];
+            let from = robot.collision_centre();
             let shots = match self.driving.as_mut().filter(|d| d.target == *t) {
                 Some(d) => {
                     crate::hero::drive(robot, &mut d.pilot, &mut d.fire_held, dt_ms, mouse, &self.ground)
@@ -2627,6 +2674,18 @@ impl Play {
                     robot.takt(dt_ms)
                 }
             };
+            // The collision pass, after the move and the ground contact: a unit is a mover
+            // like the hero, so a building's walls hold it in until a door opens for it.
+            let push = collision_push(
+                &self.ground.solids,
+                from,
+                robot.collision_centre(),
+                robot.collision.1,
+                Some(*t),
+            );
+            if push.length_squared() >= NO_CONTACT {
+                robot.walker.take_push(push);
+            }
             robot.turn_devices(|p, n| node_alive(target.parts.get(p).and_then(|part| part.life.as_ref()), n));
             robot.relimit(|p, n| node_share(target.parts.get(p).and_then(|part| part.life.as_ref()), n));
             if !shots.is_empty() {
@@ -2856,46 +2915,27 @@ impl Play {
         }
     }
 
-    /// The collision pass for the hero (docs/24, "Collision between objects"), after its
-    /// move and ground contact: against every placed object whose sphere its swept sphere
-    /// meets, the hero the mover and taking the whole push.
-    ///
-    /// A building's faces push every unit on it or near it, the one it stands on included,
-    /// through the building's own pass (docs/24, "Walking into a building"), and an open
-    /// door's faces let it by.
-    ///
-    /// STAND-IN: docs/24-motion.md#collision-between-objects--read -- the pass is read for
-    /// every pair with a contact record; the engine moves only the hero, so the hero is
-    /// always the mover and nothing else is pushed.
-    fn collide(&mut self, from: Vec3) {
-        let to = self.hero.collision_centre();
-        let radius = self.hero.collision.1;
+    /// A placed object's faces are in the world while its target is alive (docs/26).
+    fn refresh_present(&mut self) {
         for (i, target) in self.battle.combat.targets.iter().enumerate() {
             if let Some(s) = self.ground.solids.get_mut(i) {
                 s.present = target.alive;
             }
         }
-        let mut total = Vec3::ZERO;
-        for obstacle in &self.ground.solids {
-            if !obstacle.present {
-                continue;
-            }
-            let end = to + total;
-            let swept = (from, end);
-            if parkan_sim::hit::swept_spheres(
-                swept,
-                radius,
-                (obstacle.centre, obstacle.centre),
-                obstacle.radius,
-            )
-            .is_none()
-            {
-                continue;
-            }
-            total += solid::push(from, end, radius, obstacle);
-        }
-        if total.length_squared() >= NO_CONTACT {
-            self.hero.walker.take_push(total);
+    }
+
+    /// The collision pass for the hero (docs/24, "Collision between objects"), after its
+    /// move and ground contact.
+    fn collide(&mut self, from: Vec3) {
+        let push = collision_push(
+            &self.ground.solids,
+            from,
+            self.hero.collision_centre(),
+            self.hero.collision.1,
+            None,
+        );
+        if push.length_squared() >= NO_CONTACT {
+            self.hero.walker.take_push(push);
         }
     }
 
