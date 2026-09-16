@@ -51,7 +51,8 @@ pub fn world(game: &Path, loaded: &Loaded) -> Result<World> {
     let mut store = TextureStore::open(game)?;
     let mut terrain = terrain::build(&terrain::map_dir(game, &loaded.mission.map_path)?, &mut store)?;
     let mut assembly = Assembly::new(game)?;
-    terrain.cuts = terrain::building_cuts(&mut assembly, &loaded.mission);
+    let footings = parkan_world::basement::footings(&mut assembly, &loaded.mission, &terrain.land);
+    terrain.place_buildings(&footings, &mut store)?;
     let objects = models::build(&mut assembly, &mut store, &loaded.mission)?;
     let atmosphere = gamedir::resolve(&loaded.dir, "sky.ske")
         .and_then(|p| std::fs::read(&p).ok().map(|b| (b, p)))

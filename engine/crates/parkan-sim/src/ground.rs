@@ -45,19 +45,35 @@ impl Hit {
 /// What the map's water level is taken as with no water (`Terrain.dll:0x10017d60`).
 pub const NO_WATER_LEVEL: f32 = -1.0;
 
-/// A building's inner ring in the world, across the ground: the landscape is cut from under it.
+/// Whichever of two strikes is the nearer.
+fn nearer(a: Option<crate::hit::Strike>, b: Option<crate::hit::Strike>) -> Option<crate::hit::Strike> {
+    match (a, b) {
+        (Some(a), Some(b)) => Some(if a.d2 <= b.d2 { a } else { b }),
+        (a, b) => a.or(b),
+    }
+}
+
+/// A building's outer ring in the world, across the ground: the landscape is cut from under
+/// it, and the building's footing takes its place between the ring and the building's own
+/// floor (docs/03, "Placing a building cuts the landscape").
 #[derive(Clone, Debug, PartialEq)]
 pub struct Cut {
     pub points: Vec<[f32; 2]>,
+    /// The footing's faces, which are ground where the landscape was cut away.
+    pub faces: Vec<[Vec3; 3]>,
     pub lo: [f32; 2],
     pub hi: [f32; 2],
 }
 
 impl Cut {
     pub fn new(points: Vec<[f32; 2]>) -> Self {
+        Self::with_faces(points, Vec::new())
+    }
+
+    pub fn with_faces(points: Vec<[f32; 2]>, faces: Vec<[Vec3; 3]>) -> Self {
         let lo = points.iter().fold([f32::MAX; 2], |m, p| [m[0].min(p[0]), m[1].min(p[1])]);
         let hi = points.iter().fold([f32::MIN; 2], |m, p| [m[0].max(p[0]), m[1].max(p[1])]);
-        Self { points, lo, hi }
+        Self { points, faces, lo, hi }
     }
 
     pub fn holds(&self, x: f32, y: f32) -> bool {
@@ -65,18 +81,31 @@ impl Cut {
             && (self.lo[1]..=self.hi[1]).contains(&y)
             && parkan_formats::basement::contains(&self.points, x, y)
     }
+
+    /// The footing's faces whose triangle holds `(x, y)`, each with its height there and its
+    /// own normal.
+    fn holding(&self, x: f32, y: f32) -> impl Iterator<Item = (f32, Vec3)> + '_ {
+        self.faces.iter().filter_map(move |t| {
+            let [a, b, c] = *t;
+            let den = (b.y - c.y) * (a.x - c.x) + (c.x - b.x) * (a.y - c.y);
+            if den.abs() < 1e-9 {
+                return None;
+            }
+            let l1 = ((b.y - c.y) * (x - c.x) + (c.x - b.x) * (y - c.y)) / den;
+            let l2 = ((c.y - a.y) * (x - c.x) + (a.x - c.x) * (y - c.y)) / den;
+            let l3 = 1.0 - l1 - l2;
+            (l1 >= -1e-5 && l2 >= -1e-5 && l3 >= -1e-5)
+                .then(|| (l1 * a.z + l2 * b.z + l3 * c.z, (b - a).cross(c - a).normalize_or_zero()))
+        })
+    }
 }
 
 pub struct Ground {
     pub land: LandMesh,
     /// Placed objects' faces, by the caller's numbering; a building's are ground.
     pub solids: Vec<Solid>,
-    /// Where placed buildings have cut the landscape away (docs/03, "Placing a building cuts
-    /// the landscape").
-    ///
-    /// STAND-IN: docs/03-terrain.md#for-an-engine -- the insertion's patch and basement faces
-    /// are not built: the landscape is left out only inside a building's inner ring, and keeps
-    /// its own faces between the inner and the outer ring.
+    /// Where placed buildings have cut the landscape away, each with the footing that stands
+    /// there instead (docs/03, "Placing a building cuts the landscape").
     pub cuts: Vec<Cut>,
     lo: [f32; 2],
     size: [usize; 2],
@@ -176,11 +205,12 @@ impl Ground {
                     let d2 = (q - p0).length_squared();
                     if crate::hit::inside(q, a, b, c) && best.is_none_or(|s| d2 < s.d2) && !self.cut(q.x, q.y)
                     {
-                        best = Some(crate::hit::Strike { point: q, d2, node: None, triangle: f as usize });
+                        best =
+                            Some(crate::hit::Strike { point: q, d2, node: None, triangle: Some(f as usize) });
                     }
                 }
                 if best.is_some() {
-                    return best;
+                    return nearer(best, self.footing_strike(p0, p1));
                 }
             }
             if tx < ty {
@@ -191,7 +221,22 @@ impl Ground {
                 ty += dty;
             }
         }
-        None
+        self.footing_strike(p0, p1)
+    }
+
+    /// The nearest footing face the segment crosses: a round that reaches the band stops on
+    /// it, as it would on the landscape the band replaced.
+    fn footing_strike(&self, p0: Vec3, p1: Vec3) -> Option<crate::hit::Strike> {
+        let mut best: Option<crate::hit::Strike> = None;
+        for [a, b, c] in self.cuts.iter().flat_map(|cut| cut.faces.iter().copied()) {
+            let normal = (b - a).cross(c - a).normalize_or_zero();
+            let Some(q) = crate::hit::plane_crossing(p0, p1, normal, a) else { continue };
+            let d2 = (q - p0).length_squared();
+            if crate::hit::inside(q, a, b, c) && best.is_none_or(|s| d2 < s.d2) {
+                best = Some(crate::hit::Strike { point: q, d2, node: None, triangle: None });
+            }
+        }
+        best
     }
 
     /// The ground faces whose triangle holds `(x, y)`, in the file's order, which is the
@@ -204,6 +249,16 @@ impl Ground {
     fn holding(&self, x: f32, y: f32) -> impl Iterator<Item = (usize, f32)> + '_ {
         let cut = self.cut(x, y);
         self.holding_in(&self.cells, x, y).filter(move |_| !cut)
+    }
+
+    /// The footings' faces over `(x, y)`: where a building has cut the landscape away, its
+    /// basement band is the ground out to the outer contour.
+    fn footing_faces(&self, x: f32, y: f32) -> impl Iterator<Item = Hit> + '_ {
+        self.cuts
+            .iter()
+            .filter(move |c| c.holds(x, y))
+            .flat_map(move |c| c.holding(x, y))
+            .map(move |(z, normal)| Hit { face: None, solid: None, point: Vec3::new(x, y, z), normal })
     }
 
     fn holding_in<'a>(
@@ -245,8 +300,10 @@ impl Ground {
     /// The highest ground face at `(x, y)` whose plane there is not above `top`, a
     /// building's deck included.
     pub fn below(&self, x: f32, y: f32, top: f32) -> Option<Hit> {
-        let mut best: Option<Hit> =
-            self.solid_faces(Vec3::new(x, y, top), false).max_by(|a, b| a.point.z.total_cmp(&b.point.z));
+        let mut best: Option<Hit> = self
+            .solid_faces(Vec3::new(x, y, top), false)
+            .chain(self.footing_faces(x, y).filter(|h| h.point.z <= top))
+            .max_by(|a, b| a.point.z.total_cmp(&b.point.z));
         for (f, z) in self.holding(x, y) {
             if z <= top && best.is_none_or(|h| z > h.point.z) {
                 best = Some(Hit {
@@ -280,6 +337,9 @@ impl Ground {
             })
             .into_iter()
             .chain(self.solid_faces(p, up))
+            .chain(
+                self.footing_faces(p.x, p.y).filter(|h| if up { h.point.z >= p.z } else { h.point.z <= p.z }),
+            )
             .min_by(|a, b| (a.point.z - p.z).abs().total_cmp(&(b.point.z - p.z).abs()))
     }
 

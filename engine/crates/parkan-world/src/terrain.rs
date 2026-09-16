@@ -38,6 +38,9 @@ pub struct Group {
     /// A liquid's bed (face flag `0x2000`), which is not drawn while the camera is above the
     /// liquid (`Terrain.dll:0x10043c43`).
     pub bed: bool,
+    /// A building's footing, stitched in where the landscape was cut away
+    /// ([`crate::basement`]): the cut does not apply to it, since it is what fills the cut.
+    pub basement: bool,
 }
 
 /// The box every water face lies in, at the water level (`Terrain.dll:0x10017e6e`): the
@@ -56,42 +59,55 @@ pub struct Terrain {
     pub groups: Vec<Group>,
     /// The water's box, on a map with water.
     pub water: Option<WaterBox>,
-    /// The inner rings of the placed buildings, across the ground, where the landscape is cut
-    /// away (docs/03, "Placing a building cuts the landscape").
+    /// The outer rings of the placed buildings, across the ground, where the landscape is cut
+    /// away (docs/03, "Placing a building cuts the landscape"). The band between the rings is
+    /// drawn as the basement groups instead.
     pub cuts: Vec<Vec<[f32; 2]>>,
 }
 
-/// Every placed building's inner `.bas` ring, placed by its position and angle, across the
-/// ground (`IBasement` slot 4, docs/03, "Placing a building cuts the landscape").
-pub fn building_cuts(
-    assembly: &mut crate::assembly::Assembly,
-    mission: &parkan_formats::mission::Mission,
-) -> Vec<Vec<[f32; 2]>> {
-    let mut out = Vec::new();
-    for o in mission.objects.iter().filter(|o| o.kind == parkan_formats::mission::KIND_BUILDING) {
-        let parts = assembly.parts(o.kind, &o.path);
-        let Some(root) = parts.iter().find(|p| p.host == -1) else { continue };
-        let Some(slot) = assembly.library.record_slot(assembly.library.get(&root.record), "bas", 0) else {
-            continue;
-        };
-        let Some(rings) = assembly
-            .archive(&slot.library)
-            .and_then(|a| a.read_name(&slot.member).ok())
-            .and_then(|data| parkan_formats::basement::parse(data, &slot.member).ok())
-        else {
-            continue;
-        };
-        let Some(inner) = rings.first() else { continue };
-        let (s, c) = o.rotation.sin_cos();
-        out.push(
-            inner
-                .points
-                .iter()
-                .map(|p| [o.position[0] + p[0] * c - p[1] * s, o.position[1] + p[0] * s + p[1] * c])
-                .collect(),
-        );
+impl Terrain {
+    /// Let the placed buildings into the ground: cut the landscape away inside each outer
+    /// contour and stitch the footing's own faces in between the contours (docs/03,
+    /// "Placing a building cuts the landscape").
+    ///
+    /// A footing's faces are grouped by the pair they wear, exactly as the landscape's own
+    /// faces are, and drawn after them.
+    pub fn place_buildings(
+        &mut self,
+        footings: &[crate::basement::Footing],
+        store: &mut TextureStore,
+    ) -> Result<()> {
+        self.cuts = footings.iter().map(|f| f.outline.clone()).collect();
+        let mut buckets: BTreeMap<(u8, u8), Vec<&crate::basement::Facet>> = BTreeMap::new();
+        for facet in footings.iter().flat_map(|f| f.faces.iter().chain(f.apron.iter())) {
+            buckets.entry((facet.tex1, facet.tex2)).or_default().push(facet);
+        }
+        for ((tex1, tex2), facets) in buckets {
+            let start = self.indices.len() as u32;
+            for facet in &facets {
+                for corner in facet.corners {
+                    self.indices.push(self.vertices.len() as u32);
+                    self.vertices.push(corner);
+                }
+            }
+            let name1 = self.land.layer1.get(usize::from(tex1)).cloned().unwrap_or_default();
+            let layer1 = store.look(&name1)?;
+            let layer2 = match self.land.layer2.get(usize::from(tex2)) {
+                Some(name) if tex2 != NO_TEXTURE => Some(store.look(name)?),
+                _ => None,
+            };
+            self.groups.push(Group {
+                start,
+                count: facets.len() as u32 * 3,
+                layer1,
+                layer2,
+                water: false,
+                bed: false,
+                basement: true,
+            });
+        }
+        Ok(())
     }
-    out
 }
 
 /// The box `land`'s water faces' vertices widen from empty (`0x1001d5d0`), its corners handed
@@ -156,7 +172,15 @@ pub fn build(map_dir: &Path, store: &mut TextureStore) -> Result<Terrain> {
             Some(name) if tex2 != NO_TEXTURE => Some(store.look(name)?),
             _ => None,
         };
-        groups.push(Group { start, count: faces.len() as u32 * 3, layer1, layer2, water, bed });
+        groups.push(Group {
+            start,
+            count: faces.len() as u32 * 3,
+            layer1,
+            layer2,
+            water,
+            bed,
+            basement: false,
+        });
     }
     let water = water_box(&land);
     Ok(Terrain { land, vertices, indices, groups, water, cuts: Vec::new() })

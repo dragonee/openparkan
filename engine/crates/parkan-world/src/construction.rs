@@ -473,8 +473,10 @@ impl Play {
         // STAND-IN: docs/03-terrain.md#for-an-engine -- how a building made in play is drawn is
         // not followed: it is drawn node by node from level 0 without a lightmap, and only the
         // ground queries, not the landscape's drawing, are cut under it.
-        if let Some(inner) = crate::terrain::building_cuts(&mut self.assembly, &one).into_iter().next() {
-            self.ground.cuts.push(parkan_sim::ground::Cut::new(inner));
+        if let Some(footing) =
+            crate::basement::footings(&mut self.assembly, &one, &self.ground.land).into_iter().next()
+        {
+            self.ground.cuts.push(crate::basement::cut(footing));
         }
         if let Some(mut b) = Building::load(&mut self.assembly, &one, 0, t) {
             if let Some(part) = self.battle.combat.targets.get(t).and_then(|x| x.parts.get(b.part)) {

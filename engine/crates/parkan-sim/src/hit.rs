@@ -21,8 +21,9 @@ pub struct Strike {
     pub d2: f32,
     /// The mesh node struck, or `None` on the ground.
     pub node: Option<usize>,
-    /// The triangle, or the ground face.
-    pub triangle: usize,
+    /// The triangle, or the ground face; `None` on a building's footing, whose faces belong
+    /// to no mesh (`parkan_world::basement`).
+    pub triangle: Option<usize>,
 }
 
 /// `NGI32.dll:0x10024410`, one-sided: with `v = p1 − p0`, the segment crosses when
@@ -135,7 +136,12 @@ pub fn segment_mesh_skipping(
             let d2 = (q - q0).length_squared() * scale * scale;
             if d2 <= best {
                 best = d2;
-                out = Some(Strike { point: vec(pose.apply(arr(q * scale))), d2, node: Some(i), triangle: t });
+                out = Some(Strike {
+                    point: vec(pose.apply(arr(q * scale))),
+                    d2,
+                    node: Some(i),
+                    triangle: Some(t),
+                });
             }
         }
     }

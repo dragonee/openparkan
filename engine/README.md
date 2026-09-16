@@ -672,6 +672,16 @@ presses a hero standing at it down), and which of Mission 04's units holds no mi
   armour, a system or a clip left the destination panel on the slot just filled, so every part
   after the first took a click on its slot first. The panels step down the tab's own rows
   instead, and the source panel offers what the next slot takes.
+- **A building stands on a band of stone** (docs/03, "What a basement face wears"). The
+  landscape was cut away under a building's inner `.bas` ring and nothing put in its place,
+  so the ground stopped short of the building and the sky showed through the gap. The cut is
+  the **outer** ring now, and the band between the two rings is stitched in as the insertion's
+  basement faces: layer-1 slot 0 with no second layer, which is every map's foundation
+  material — `B_S0`, texture `B_FOUND`, a grey slab, and no shipped face on any of the 33
+  maps names that slot. Its UV is laid over the world at 0.066 a unit, tiling every 3.8, and
+  its outer edge drops onto the landscape, flush with it on the contour, while its inner edge
+  holds the building's own base. The band is ground: a machine walks it, and a round stops on
+  it.
 
 This directory also holds what the rest will follow:
 
@@ -1012,7 +1022,7 @@ engine pass replaces each with what was read and removes its row.
 | M11 | The fill colour the resource rows hand their bar | the weapons list's: red under 20%, olive under 80%, green above | [36](../docs/36-factory.md#the-resource-rows) |
 | M11 | How the cursor is shown in view mode 5 | the system's cursor, with the grab let go | [36](../docs/36-factory.md#not-established) |
 | M11 | Which areals the escape's random points must be on | the first point tried within 150 of the unit, inside the map by 100 | [31](../docs/31-packages.md#the-escape--read) |
-| M11 | The heights and textures of the patch and basement faces a building's insertion stitches in | the landscape is left out only inside a building's inner ring, from the ground queries and the draw, and keeps its own faces between the inner and outer rings | [03](../docs/03-terrain.md#for-an-engine) |
+| M14 | How the basement is triangulated between its two rings, and which of its faces the first builder (`0x1000bdb0`) makes with the ground's own texture pair rather than the foundation | the two rings are walked together and stitched, and every face of the band is the foundation, layer-1 slot 0 with no second layer, as the second builder (`0x1000d9c4`) writes it; the contour is sampled onto the ground every 4 units instead of at each landscape face it crosses, and the band runs 2 units past the contour, sunk 0.5 under the ground there, so the cut's own texel edge shows no sliver of sky | [03](../docs/03-terrain.md#for-an-engine) |
 | M11 | Where a gathered face's batch word, whose 8 and 0x200 the collision query passes, comes from | the faces of the `DEFAULT`, `PORTAL_001` and `PORTAL_004` materials, a building's doorway and portal quads, let a mover **and a round** through, as a recording shows and as a shot at a door needs | [24](../docs/24-motion.md#the-doorways-are-portal-quads--measured-read-and-seen) |
 | M14 | How a portal face reaches `CBuilding::PortalDrawNotify` and which node it names, and so which cells a building draws | no cell is culled: every node is drawn, and the portal quads themselves are dropped, which is what the cells would have hidden them behind | [24](../docs/24-motion.md#a-building-is-drawn-cell-by-cell-through-its-portals--read) |
 | M14 | Where the node matrix an action-3 effect takes as its frame comes from, whose translation is the node's authored origin | an action-3 effect stands at the centre of the node's level-0 bounding sphere, which puts all 112 door sounds on their doors | [13](../docs/13-control.md#a-buildings-load-group--read-and-measured) |

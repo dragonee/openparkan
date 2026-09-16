@@ -524,7 +524,7 @@ pub fn struck_wear<'a>(part: &Part, wear: &'a [String], p0: Vec3, p1: Vec3) -> O
     let batches = part.mesh.batches.get(first..first + usize::from(slot.batch_count))?;
     let batch = batches.iter().find(|b| {
         let (from, count) = b.triangles();
-        (from..from + count).contains(&strike.triangle)
+        (from..from + count).contains(&strike.triangle.unwrap_or(usize::MAX))
     })?;
     wear.get(usize::from(batch.material & 0xFF)).map(String::as_str)
 }
@@ -675,9 +675,9 @@ impl Play {
         }
         // Every target's faces, for the ground a building gives and the collision pass.
         let mut ground = Ground::new(land);
-        ground.cuts = terrain::building_cuts(&mut assembly, mission)
+        ground.cuts = crate::basement::footings(&mut assembly, mission, &ground.land)
             .into_iter()
-            .map(parkan_sim::ground::Cut::new)
+            .map(crate::basement::cut)
             .collect();
         let materials_for = |t: usize, part: usize, material: u16| {
             let name = battle.wears.get(t)?.get(part)?.get(usize::from(material & 0xFF))?;
@@ -3094,9 +3094,12 @@ impl Play {
                 let (surface, axis) = match target {
                     None => {
                         let face = self.ground.segment(round.previous, *point + round.forward * 0.01);
-                        let surface = face.and_then(|s| self.surface(s.triangle));
-                        let normal = face
-                            .map_or(Vec3::Z, |s| Vec3::from_array(self.ground.land.faces[s.triangle].normal));
+                        // A footing's faces are in no mesh, so they name no surface and the
+                        // explosion stands on end, as it does on level ground.
+                        let hit = face.and_then(|s| s.triangle);
+                        let surface = hit.and_then(|t| self.surface(t));
+                        let normal =
+                            hit.map_or(Vec3::Z, |t| Vec3::from_array(self.ground.land.faces[t].normal));
                         (surface, normal)
                     }
                     Some(t) => (self.struck_class(*t, *part, round, *point), -round.forward),

@@ -406,7 +406,8 @@ impl TerrainRenderer {
                         g.layer2.as_ref(),
                         g.layer2.as_ref().is_some_and(|l| l.still.texture.is_some()),
                     ),
-                    cut,
+                    // A building's own footing stands where the cut is: it is what fills it.
+                    cut: if g.basement { [cut[0], cut[1], cut[2], 0.0] } else { cut },
                     cut_size,
                 };
                 let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {

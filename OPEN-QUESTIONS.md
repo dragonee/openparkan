@@ -209,7 +209,8 @@ Added on 2026-09-15 against `4f3a16e`, after the Outpost island's landing was fi
 **Walking into the Large Factory**
 
 - [ ] [M11] What `CBuilding` does to a door's or a pod's switch word as it files the item, and the capsule a door is measured against (`Terrain.dll:0x1005a27f`).
-- [ ] [M11] The patch and basement faces a building's insertion stitches in, and where a gathered face's batch word comes from (the engine lets movers **and rounds** through the `DEFAULT` and `PORTAL` materials' faces).
+- [ ] [M11] Where a gathered face's batch word comes from (the engine lets movers **and rounds** through the `DEFAULT` and `PORTAL` materials' faces).
+- [ ] [M14] How the basement is triangulated between its two rings, and which of the band's faces the first builder (`Terrain.dll:0x1000bdb0`) makes with the cut landscape face's own texture pair rather than the foundation. What the second builder writes on every face it makes — layer-1 slot 0, no second layer, flags `0x300`, a UV over the world at 0.066 a unit — is read (docs/03, "What a basement face wears"), and it is what the engine lays down.
 - [ ] [M11] Whether the slope brake reads a building's stair faces, and who sets a collision object's flags, so which movers keep the floors in their push-out.
 - [ ] [M14] How a portal face reaches `CBuilding::PortalDrawNotify` (`Terrain.dll:0x1005a5d0`, an interface slot nothing in the install is found to call) and which node its record names, so which cells a building draws. The lists and the render are read (docs/24, "A building is drawn cell by cell through its portals"); the engine draws every cell and only drops the portal quads, which costs frame time and shows nothing extra.
 - [ ] [M14] Where the node matrix an action-3 effect takes as its frame (`Effect.dll:0x1000625a`, property 2) comes from. Its translation is the node's authored origin, which on 68 of `fortif.rlb`'s 112 door sounds stands more than 10 m from the door — 30.8 m on the three factories' side doors — so the sound is all but inaudible in the doorway. The engine stands the effect at the node's level-0 sphere centre instead.
@@ -253,7 +254,7 @@ Added on 2026-09-15 against `950af7e`, after M12 made the mission winnable end t
 
 **Placing and building**
 
-- [ ] [M12] The site test's path search, its hall-way areal test (interface `0x303`, vertex bit 1) and the basement's triangulation.
+- [ ] [M12] The site test's path search and its hall-way areal test (interface `0x303`, vertex bit 1). The basement's triangulation is [above](#walking-into-the-large-factory).
 - [ ] What the pick's query record (first word `0xa`) asks the world for, so which objects stop the cursor's ray.
 - [ ] What the game's `+0xe4` byte is, under which a site within 400 of one of the level's records turns red; whether holding `,` or `.` keeps turning the ghost.
 - [ ] What an unfinished building looks like before the dome.

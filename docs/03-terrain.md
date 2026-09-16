@@ -455,6 +455,39 @@ Tut_2's ground is a few large faces where the buildings stand, so every face
 under them is a cut face: the pod room's floor at −12.4 lies under faces that
 the placement deletes.
 
+### What a basement face wears — *read*, and *measured*
+
+The insertion builds its new faces in one array and fills it from two places.
+The first (`0x1000bdb0`, called once per cut face from `0x10011cc5`) copies
+that landscape face's flags and **both texture bytes** into a template
+(`0x10011bbf` into `0x100a5964`–`0x100a5968`) and stamps them onto each face it
+makes (`0x1000ccdc`, `0x1000ccf7`, `0x1000cd18`), so those faces keep the
+ground's own pair. The second (`0x1000cd40`, called once from `0x10011ce9`)
+writes every face it makes the same way instead (`0x1000d9c4`):
+
+| field | value |
+|---|---|
+| tex1 (`+4`) | **0** |
+| tex2 (`+5`) | `0xFF`, no second layer |
+| flags (`+0`) | `0x300` |
+| surface (`+6`) | 0 |
+| normal (`+0x14`) | its own, from its corners, as int16 over 32767 |
+
+and each corner takes a layer-1 UV from **its own world x and y times 0.066**
+(`0x1009a214`, packed at 1024 to the UV unit at `0x1000d4be`), a blend of 1
+(`0x1000d1fd`) and a **zero vertex normal** (`0x1000d106` into the packer at
+`0x10015fd0`). The engine's own UV unit is 1024 (`0x100227c0`, `1.0/1024`),
+while the stream reads at 256 to the unit
+([above](#how-each-of-these-was-established)),
+so the foundation tiles **every 3.8 world units**, against the landscape's 50.
+
+**Layer-1 slot 0 is the footing material, and nothing else uses it**
+(*measured*). `Land1.wea` names slot 0 `B_S0` on 32 of the 33 maps and
+`B_MTP_01` on FINAL; `B_S0`'s texture is `B_FOUND`, a grey foundation slab. Of
+the **275882 faces across all 33 maps, not one names layer-1 slot 0** — at
+either level of detail. The slot is reserved for the faces the engine makes,
+which is why a building in the game stands on a band of stone.
+
 ### For an engine
 
 1. Take the building's two `.bas` rings, the first inner and the second outer,
@@ -463,10 +496,16 @@ the placement deletes.
    draw and from every ground and collision query.
 3. Fill the ring between the outer contour and the landscape faces that remain
    with new faces on the landscape's heights, and the ring between the outer
-   and inner contours with basement faces.
-   STAND-IN until read: the heights and textures the patch and the basement
-   take. The contours' own z is the building's base, and the landscape's
-   heights at the outer contour are a fair guess.
+   and inner contours with basement faces wearing layer-1 slot 0 and no second
+   layer, their UV laid over the world at 0.066 a unit
+   ([above](#what-a-basement-face-wears--read-and-measured)).
+   The contours' own z is the building's base, and the outer contour's corners
+   drop onto the landscape (`CheckMaxBasementAngle`,
+   [32-builder.md](32-builder.md#the-test-isplacementvalid--read), builds the
+   same two rings to measure the slope).
+   STAND-IN until read: how the band is triangulated between the two rings, and
+   which of the band's faces the first builder makes with the ground's own
+   texture pair rather than the foundation.
 4. Inside the inner ring, the building's level-0 faces are the ground.
 
 ## What fparkan's notes add, and what they do not

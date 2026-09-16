@@ -23573,6 +23573,78 @@ doc = "docs/03-terrain.md"
 
 [[entry]]
 module = "Terrain.dll"
+at = "0x1000cd40"
+kind = "function"
+name = "basement face builder: every face layer-1 slot 0, no second layer, flags 0x300, surface 0, its own normal; each corner's layer-1 UV from its world xy times 0.066, blend 1, a zero vertex normal"
+read = true
+doc = "docs/03-terrain.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1000d9c4"
+kind = "site"
+name = "basement face: tex1 = 0 and tex2 = 0xFF written, the map's foundation material with no second layer"
+read = true
+doc = "docs/03-terrain.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1000bdb0"
+kind = "function"
+name = "the insertion's other new-face builder, run per cut landscape face: takes that face's flags and texture pair from the template, its corners' layer-1 UV and blend from the contour, and a layer-2 UV from the world xy times 0.05"
+read = true
+doc = "docs/03-terrain.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10011bbf"
+kind = "site"
+name = "insertion: a cut landscape face's flags and both texture bytes copied into the new-face template at 0x100a5964"
+read = true
+doc = "docs/03-terrain.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1001a470"
+kind = "function"
+name = "CTerrain face descriptor by index and stream mask: bit 0 positions, 1 and 6 the UV streams, 2 adjacency and the winged-edge codes, 3 and 8 the texture pair, 13 the blend; the flags always"
+read = true
+doc = "docs/03-terrain.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1001a420"
+kind = "function"
+name = "wrapper: reads a face descriptor through the terrain's slot 4 and copies its 0x80 bytes out"
+read = true
+doc = "docs/03-terrain.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x100227c0"
+kind = "function"
+name = "sets the UV unpack scale at 0x100a5a04 to 1/1024"
+read = true
+doc = "docs/03-terrain.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x10015fd0"
+kind = "function"
+name = "packs a float3 into a vertex's three normal bytes, times 127"
+read = true
+doc = "docs/03-terrain.md"
+
+[[entry]]
+module = "Terrain.dll"
+at = "0x1000c8e7"
+kind = "site"
+name = "insertion: a landscape edge bordering the basement takes 0x8000 | n as its neighbour ('OUTER LINK!!!!')"
+read = true
+doc = "docs/03-terrain.md"
+
+[[entry]]
+module = "Terrain.dll"
 at = "0x10060530"
 kind = "site"
 name = "draw-order builder: a face flagged 0x20 is left out"

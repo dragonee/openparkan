@@ -1,4 +1,5 @@
 pub mod assembly;
+pub mod basement;
 pub mod battle;
 pub mod briefing;
 pub mod building_fx;
