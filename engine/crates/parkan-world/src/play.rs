@@ -2613,6 +2613,7 @@ impl Play {
                     building: u.kind == KIND_BUILDING,
                     own: u.clan == Some(self.player_clan),
                     hostile: self.hostile(u.clan),
+                    sensed: false,
                 };
                 (Some(i), s, u.clan)
             })
@@ -2626,6 +2627,7 @@ impl Play {
                 building: false,
                 own: true,
                 hostile: false,
+                sensed: false,
             };
             seen.push((None, hero, Some(self.player_clan)));
         }
@@ -2633,17 +2635,57 @@ impl Play {
     }
 
     /// What target `t` sees of `seen`: everything but itself, each of its own clan or
-    /// hostile to it by its own clan's relations (`0x1000d460`).
-    fn seen_by(&self, t: usize, seen: &[Sighting]) -> Vec<Seen> {
+    /// hostile to it by its own clan's relations (`0x1000d460`), and marked with whether its
+    /// own radar list holds it, `sensed` naming the ids that list carries.
+    fn seen_by(&self, t: usize, seen: &[Sighting], sensed: &[i32]) -> Vec<Seen> {
         let (id, clan) = (self.units[t].logical_id, self.units[t].clan);
         seen.iter()
             .filter(|(_, s, _)| s.id != id)
             .map(|&(_, s, c)| Seen {
                 own: clan.is_some() && c == clan,
                 hostile: self.hostile_to(clan, c),
+                sensed: sensed.contains(&s.id),
                 ..s
             })
             .collect()
+    }
+
+    /// Every object a radar may find, by the same numbering `contacts` uses with the hero
+    /// after the targets, so a kept answer stays good as units die.
+    fn radar_world(&self) -> Vec<Contact> {
+        let mut world = self.contacts();
+        let hero = &self.hero;
+        world.push(Contact {
+            position: hero.walker.body.position,
+            centre: hero.collision_centre(),
+            radius: hero.collision.1,
+            alive: !hero.dead() && !self.hero_away(),
+            building: false,
+            hostile: false,
+            friend: true,
+            unlisted: true,
+        });
+        world
+    }
+
+    /// The logical id of a `radar_world` entry.
+    fn radar_id(&self, i: usize) -> Option<i32> {
+        match self.units.get(i) {
+            Some(u) => Some(u.logical_id),
+            None => (i == self.units.len()).then_some(self.hero_id),
+        }
+    }
+
+    /// The ids on unit `r`'s radar list now (docs/25, "What the AI does with it"): the
+    /// behaviour's radar module re-reads its machine's radar list, whose scan holds for the
+    /// radar's period. A unit with no radar senses 1 m and so lists nothing, and picks no
+    /// target of its own.
+    fn radar_ids(&mut self, robot: usize, emplacement: bool, world: &[Contact]) -> Vec<i32> {
+        let list = if emplacement { &mut self.emplacements } else { &mut self.robots };
+        let Some((_, unit)) = list.get_mut(robot) else { return Vec::new() };
+        let (now, at) = (unit.time_ms, unit.walker.body.position);
+        let contacts = unit.radar.scan(now, at, world).to_vec();
+        contacts.iter().filter_map(|&i| self.radar_id(i)).collect()
     }
 
     /// Every other robot's tick: a robot of a clan that thinks, the enemy's too, runs its
@@ -2652,6 +2694,7 @@ impl Play {
     /// stands. Then every building that carries guns.
     fn tick_robots(&mut self, dt_ms: f64, mouse: [f32; 2]) {
         let seen = self.seen();
+        let world = self.radar_world();
         let mut fired = Vec::new();
         for r in 0..self.robots.len() {
             let t = self.robots[r].0;
@@ -2660,7 +2703,7 @@ impl Play {
             }
             let driven = self.driving.as_ref().is_some_and(|d| d.target == t);
             if !self.paused && !driven && self.thinks(self.units[t].clan) {
-                self.behave(r, dt_ms, &seen);
+                self.behave(r, dt_ms, &seen, &world);
             }
             let (t, robot) = &mut self.robots[r];
             let target = &mut self.battle.combat.targets[*t];
@@ -2721,7 +2764,7 @@ impl Play {
             let now = robot.time_ms;
             self.launch(launched, now);
         }
-        self.tick_emplacements(dt_ms, &seen);
+        self.tick_emplacements(dt_ms, &seen, &world);
     }
 
     /// Every building that carries guns on a turret: its game time moves on; while its clan
@@ -2729,7 +2772,7 @@ impl Play {
     /// guns fire as an AI unit's do; then its turret's and guns' takt, and the turret and
     /// what hangs on it are posed where they aim. A building does not move: no machine
     /// steps, and its faces stay as placed.
-    fn tick_emplacements(&mut self, dt_ms: f64, seen: &[Sighting]) {
+    fn tick_emplacements(&mut self, dt_ms: f64, seen: &[Sighting], world: &[Contact]) {
         let mut fired = Vec::new();
         for e in 0..self.emplacements.len() {
             let t = self.emplacements[e].0;
@@ -2738,7 +2781,8 @@ impl Play {
             }
             self.emplacements[e].1.time_ms += dt_ms;
             if !self.paused && self.thinks(self.units[t].clan) {
-                let others = self.seen_by(t, seen);
+                let sensed = self.radar_ids(e, true, world);
+                let others = self.seen_by(t, seen, &sensed);
                 let Play { emplacements, battle, ground, .. } = self;
                 let robot = &mut emplacements[e].1;
                 let senses = Senses {
@@ -2802,10 +2846,11 @@ impl Play {
     /// guns and traced by its turret; and each gun let fire once its AI timer runs out and
     /// its score clears the bar, or freely during a search or an attack (docs/29, "How the
     /// AI fires").
-    fn behave(&mut self, r: usize, dt_ms: f64, seen: &[Sighting]) {
+    fn behave(&mut self, r: usize, dt_ms: f64, seen: &[Sighting], world: &[Contact]) {
         let t = self.robots[r].0;
         self.escape_off_building(r);
-        let others = self.seen_by(t, seen);
+        let sensed = self.radar_ids(r, false, world);
+        let others = self.seen_by(t, seen, &sensed);
         let animal = self.units[t].type_word & CLASS_ANIMAL != 0;
         let bounds = self.ground.bounds();
         let capturing = matches!(

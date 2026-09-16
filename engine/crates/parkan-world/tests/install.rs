@@ -937,6 +937,49 @@ fn the_hero_crosses_mission_01s_bridge_on_its_deck() {
     assert!(path.last().unwrap().y > 800.0, "and off the far end: {}", path.last().unwrap());
 }
 
+/// A unit the Wizard drives is held by a slope as the player's own machine is (docs/24,
+/// "Ground and slope"). A written velocity replaces the machine's own at the top of every
+/// step, so the brake's pull never built up on one: an AI unit walked up this face at 8 m/s
+/// where the same chassis under the player does not move at all.
+#[test]
+#[ignore = "needs the game install"]
+fn a_slope_past_the_cone_holds_a_wizard_driven_unit_as_it_holds_the_player() {
+    use glam::Vec3;
+    let (mut play, _) = mission_01_play();
+    assert_eq!(play.hero.walker.controller.mode, 2, "the hero's chassis is one that brakes");
+    // A 40 degree face on Tut_1, past the mode-2 cone of 0.6 rad, and the way up it.
+    let hit = play.ground.below(125.0, 1050.0, 1.0e5).expect("ground at (125, 1050)");
+    let degrees = hit.normal.z.acos().to_degrees();
+    assert!((39.0..41.0).contains(&degrees), "a {degrees} degree face");
+    let up = -Vec3::new(hit.normal.x, hit.normal.y, 0.0).normalize();
+    let yaw = up.y.atan2(up.x) - std::f32::consts::FRAC_PI_2;
+    let from = hit.point + Vec3::new(0.0, 0.0, 20.0);
+
+    let path = walk(&mut play, from, yaw, 6);
+    let keyed = path.last().unwrap().truncate().distance(path[0].truncate());
+
+    // The same chassis with the Wizard writing its top speed uphill, as a behaviour drives one.
+    let top = play.hero.walker.limits.top_speed[1].abs();
+    let w = &mut play.hero.walker;
+    w.body.position = from;
+    w.body.yaw = yaw;
+    w.follow_ground(&play.ground);
+    w.from = (w.body.position, w.body.yaw);
+    let start = play.hero.walker.body.position;
+    for _ in 0..(6 * 60) {
+        let yaw = play.hero.walker.body.yaw;
+        play.hero.walker.drive = Some(parkan_sim::wizard::Drive {
+            velocity: Vec3::new(-yaw.sin(), yaw.cos(), 0.0) * top,
+            heading: Some(yaw),
+            flags: parkan_sim::wizard::GROUND_POINT,
+        });
+        play.tick(1000.0 / 60.0, [0.0; 2]);
+    }
+    let driven = play.hero.walker.body.position.truncate().distance(start.truncate());
+    assert!(keyed < 2.0, "the player gets nowhere up it: {keyed} m in 6 s");
+    assert!(driven < 2.0, "and nor does a unit the Wizard drives: {driven} m in 6 s");
+}
+
 #[test]
 #[ignore = "needs the game install"]
 fn a_stone_stops_the_hero_and_a_tree_turns_it_aside() {
@@ -1264,13 +1307,33 @@ fn a_captured_bot_stands_by_until_ordered_and_with_no_order_engages_as_the_games
         assert!(play.battle.combat.targets[b].position.distance(p) < 1.0, "standby holds");
     }
 
+    // With no order the base priority takes an engagement up, but only against a contact on
+    // the unit's own radar list (docs/25, "What the AI does with it"). `tut1_e1` stands 474
+    // from `tut1_mf1`, whose radar reaches 350, and 457 from `helic`, whose reaches 250:
+    // inside the engagement's 500 and beyond both radars, so neither takes it up.
     let (mut play, [mf1, helic, _]) = mission_01_captured(false);
-    for _ in 0..60 {
+    for _ in 0..120 {
+        play.tick(tick, [0.0; 2]);
+    }
+    assert!(
+        tasks(&play, &[mf1, helic]).iter().all(|t| !matches!(t, Task::Attack { .. })),
+        "beyond both radars: nothing to engage"
+    );
+
+    // Brought inside them, both engage. The scan holds 750 ms, so it takes a second to show.
+    let (mut play, [mf1, helic, e1]) = mission_01_captured(false);
+    let near = play.battle.combat.targets[mf1].position + glam::Vec3::new(150.0, 0.0, 0.0);
+    let r = play.robots.iter().position(|(t, _)| *t == e1).expect("tut1_e1 is a robot");
+    let w = &mut play.robots[r].1.walker;
+    w.body.position = near;
+    w.follow_ground(&play.ground);
+    w.from = (w.body.position, w.body.yaw);
+    for _ in 0..120 {
         play.tick(tick, [0.0; 2]);
     }
     assert!(
         tasks(&play, &[mf1, helic]).iter().any(|t| matches!(t, Task::Attack { .. })),
-        "no order: it engages"
+        "no order, the enemy on the radar: it engages"
     );
 }
 

@@ -119,6 +119,16 @@ pub struct Seen {
     /// Of the unit's own clan, and hostile to it (`0x1000d460`).
     pub own: bool,
     pub hostile: bool,
+    /// On the unit's own radar list now (docs/25, "What the AI does with it"). A search
+    /// looks over the clan's areal map, which lists whatever stands in an areal a unit's
+    /// report has reached; only what the unit's own radar holds may be engaged or fired on.
+    pub sensed: bool,
+}
+
+/// A contact the fire control may take up: on the unit's radar list, hostile, and not a
+/// building, which the radar module never lists (docs/25, "What the AI does with it").
+fn engageable(s: &Seen) -> bool {
+    s.sensed && s.hostile && !s.building
 }
 
 /// The places of a building a capturer goes to (docs/31, "The capture, tick by tick"), in the
@@ -527,7 +537,7 @@ impl Behaviour {
     /// The contact `task` lets an engagement take up, and the limit it hands the attack
     /// (`0x10017e70`, the task's slots 12 and 13).
     fn engagement(task: Task, senses: &Senses) -> Option<(i32, Option<Limit>)> {
-        let hostile = |s: &&Seen| s.hostile && !s.building;
+        let hostile = |s: &&Seen| engageable(s);
         match task {
             // A patrol scores only a contact strictly inside its radius of its centre, across
             // the ground (`0x1002d4a1`), and limits the attack about what it guards.
@@ -557,21 +567,23 @@ impl Behaviour {
             }
             // The base priority's limit: 1000 about where the unit stands (`0x100018a0`).
             Task::Stop => {
-                let enemy = senses.nearest(|s| s.hostile && !s.building, ENGAGE_RANGE)?;
+                let enemy = senses.nearest(engageable, ENGAGE_RANGE)?;
                 let limit = Limit { centre: Limited::Place(senses.position), radius: STOP_LIMIT };
                 Some((enemy.id, Some(limit)))
             }
-            _ => senses.nearest(|s| s.hostile && !s.building, ENGAGE_RANGE).map(|s| (s.id, None)),
+            _ => senses.nearest(engageable, ENGAGE_RANGE).map(|s| (s.id, None)),
         }
     }
 
-    /// The fire control's target (`0x100240a6`). The radar module lists no buildings, so the
-    /// nearest hostile contact is a unit's (docs/31, "Which objects run a behaviour").
+    /// The fire control's target (`0x100240a6`): the nearest hostile contact on the unit's own
+    /// radar list, within 500 (docs/25, "What the AI does with it"). The radar module lists no
+    /// buildings, so a picked target is always a unit's (docs/31, "Which objects run a
+    /// behaviour"); a target an order names is taken whatever the radar holds.
     fn fire_target(&self, senses: &Senses) -> Option<i32> {
         match self.fire {
             FireMode::None => None,
             FireMode::Fixed(id) => senses.find(id).map(|s| s.id),
-            FireMode::Nearest => senses.nearest(|s| s.hostile && !s.building, ENGAGE_RANGE).map(|s| s.id),
+            FireMode::Nearest => senses.nearest(engageable, ENGAGE_RANGE).map(|s| s.id),
         }
     }
 
@@ -1017,6 +1029,7 @@ mod tests {
             building: false,
             own: false,
             hostile: false,
+            sensed: true,
         }
     }
 

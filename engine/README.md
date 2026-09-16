@@ -633,6 +633,21 @@ presses a hero standing at it down), and which of Mission 04's units holds no mi
   walks north from the creation vertex, waits 2.25 s at the front door it opened by standing
   near it, and is out on the landscape 1.5 s later; before, the escape's straight line took it
   through the wall and the ground contact put it on the roof.
+- **A slope holds an AI unit as it holds the player** (docs/24, "Ground and slope"). The
+  mode-2 brake acts on the machine's velocity, and a velocity the Wizard writes replaced that
+  every step, so the brake's pull never built up on a unit the AI drives: on a 40 degree face
+  of Tut_1 a warbot walked up at 8 m/s where the same chassis under the player does not move
+  at all. Where the brake acts, the ground's fraction is now taken off the written velocity
+  whole; measured over Tut_1's faces the two agree at 20, 30, 40 and 50 degrees. Mode 0 —
+  the Large Walking Chs, the Tiny Spider and every flyer — still ignores slope, as read.
+- **An AI unit fires on what its own radar holds** (docs/25, "What the AI does with it"). The
+  fire control and the engagement walk the unit's hostile radar list, not the whole map: each
+  unit's radar is scanned every 750 ms over its range, and the behaviour may pick only from
+  what it returns. Before, a warbot engaged anything hostile within 500 wherever it stood. On
+  Mission 01 `tut1_mf1` reaches 350 and `helic` 250 against a `tut1_e1` 474 and 457 away, so
+  neither takes it up until it comes nearer. A unit with no radar senses 1 m and picks no
+  target of its own, as read. A target an order names is still taken whatever the radar holds,
+  and a search still looks over the clan's areal map, which lists without any detection test.
 
 This directory also holds what the rest will follow:
 
@@ -899,6 +914,7 @@ a row here. A row leaves this table when research closes it.
 | M14 | What the game drives a dock's glow with: its own time mode is 0, a value set from outside, and nothing read sets it | a charging dock runs it looping and switches it off again; the `f_recharge_*` nearest a dock's vertex is that dock's | [13](../docs/13-control.md#a-buildings-load-group--read-and-measured) |
 | M14 | The masses property `0x7c` gives a unit and a static object, by whose squares a pair shares its push | no push is shared: every unit, not the hero alone, is run as the mover against every placed object and takes the whole push, which is what a building, a tree or a stone gives anyway | [24](../docs/24-motion.md#not-established) |
 | M14 | Where a unit built in a factory joins the building's own paths, which the escape's 20-second check routes it out by ("LEAVE IS TOO !!!") | a bot made at a creation vertex counts as having walked in: it leaves along the hall way, as a unit sent in does | [31](../docs/31-packages.md#the-escape--read) |
+| M14 | The behaviour's radar module: its two timers, and the hostile and friendly lists it keeps from its machine's radar | the machine's own radar scan stands in for the module, read afresh each takt; the fire control and the engagement pick from it alone, so a unit with no radar picks no target of its own, while a search still looks over the clan's areal map, which the engine keeps whole | [25](../docs/25-sensors.md#what-the-ai-does-with-it--read) |
 
 ### Read since the stand-in was written
 
@@ -939,7 +955,7 @@ engine pass replaces each with what was read and removes its row.
 | M8 | The shell's menus after a mission, the load-game screen, and `MISSIONS/dispatcher.ini` | Esc after the outcome closes the window, L does nothing, and a win is not written to the install | [34](../docs/34-progression.md#after-the-outcome--read-and-measured) |
 | M8 | A material's start stamp, from which its track is played, and the random a mode-3 track jumps by | the world clock's 0 for every material; a hash of the clock | [07](../docs/07-objects.md#how-a-material-reaches-the-device--read-and-measured) |
 | M8 | The areal search, the local path and its obstacle contours; the Wizard's heading curve | the straight line to the place, cut into at least three points a second or more apart at the walk's velocity, ending in the read stop; the heading is the curve's velocity's direction | [24](../docs/24-motion.md#not-established) |
-| M8 | How a velocity the Wizard writes combines with the velocity integrator, and whether its spin is a rate or a fraction | a driven machine takes the written velocity as its own and turns toward the heading at up to its live yaw rate | [24](../docs/24-motion.md#not-established) |
+| M8 | How a velocity the Wizard writes combines with the velocity integrator, and whether its spin is a rate or a fraction | a driven machine takes the written velocity as its own and turns toward the heading at up to its live yaw rate; since that replaces the machine's own velocity every step, where the mode-2 brake would act the ground's fraction is taken off the written velocity whole, rather than pulled at over several steps as it is on the player's | [24](../docs/24-motion.md#not-established) |
 | M8 | The height a flyer's points are given; who reads `Movement_FlyHeight` | at least `FlyNearLandHeight`, 15, above the ground under the point | [24](../docs/24-motion.md#not-established) |
 | M8 | How an engagement scores the radar's contacts through the task (the contact record's three unnamed fields); follow's and refit's priorities for one | the nearest hostile unit within 500 is the best, and for a patrol the one nearest its centre inside its radius; follow and refit answer 0; an attack running is not given another | [31](../docs/31-packages.md#between-orders--read) |
 | M8 | The follower's two timers; the behaviour's random source | it measures once a second; a 32-bit xorshift | [31](../docs/31-packages.md#what-each-package-does--read) |

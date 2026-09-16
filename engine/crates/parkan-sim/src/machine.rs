@@ -397,7 +397,18 @@ impl Walker {
             // act one way across the slope; taken as uphill, against the face normal.
             if along.x * normal.x + along.y * normal.y < 0.0 {
                 let factor = motion::slope_factor(normal.z, self.controller.cone);
-                motion::brake(&mut self.body.velocity, factor, &self.limits, step);
+                // STAND-IN: docs/24-motion.md#not-established -- how a velocity the Wizard
+                // writes combines with the integrator is not read, and a written one replaces
+                // the machine's own at the top of every step, so the brake's pull, which
+                // needs several steps to build up, would never hold on a driven machine: the
+                // ground's fraction is taken off the written velocity whole. Without it an
+                // AI unit walks up a 40 degree slope at 8 m/s where the same chassis under
+                // the player is stopped dead.
+                if self.drive.is_some() {
+                    self.body.velocity = self.body.velocity.map(|v| v * factor);
+                } else {
+                    motion::brake(&mut self.body.velocity, factor, &self.limits, step);
+                }
             }
         }
 
