@@ -289,6 +289,33 @@ impl Life {
     pub fn total(&self) -> f32 {
         self.nodes.iter().map(|n| n.life).sum()
     }
+
+    /// The life its nodes could have.
+    pub fn full(&self) -> f32 {
+        self.nodes.iter().map(|n| n.max).sum()
+    }
+
+    /// Every node put at `share` of its own maximum, which restores a destroyed one
+    /// (`0x1000e9c2`): its destroy, hide and knock-off marks go, its flight with them, and its
+    /// stage falls back to what its life now says. The object is marked and dead again only
+    /// while node 0 or a vital node is still destroyed.
+    fn set_share(&mut self, share: f32) {
+        let share = share.clamp(0.0, 1.0);
+        for n in &mut self.nodes {
+            n.life = n.max * share;
+            if n.life > 0.0 {
+                n.destroyed = false;
+                n.status &=
+                    !(STATUS_DESTROYED | STATUS_HIDDEN | STATUS_FLYING | STATUS_CARRIED | STATUS_DOWN);
+                n.stage = n.stage_now();
+            }
+        }
+        let nodes = &self.nodes;
+        self.flights.retain(|(n, _)| nodes[*n].destroyed);
+        self.marked = (0..self.nodes.len())
+            .any(|i| self.nodes[i].destroyed && (i == 0 || self.nodes[i].status & STATUS_VITAL != 0));
+        self.dead = self.marked && !self.building;
+    }
 }
 
 /// A life update's wait, and how far either side of it one may fall
@@ -317,6 +344,24 @@ pub fn share_loss(lives: &mut [&mut Life], loss: f32) -> Vec<Vec<usize>> {
                 .collect()
         })
         .collect()
+}
+
+/// What a dock does to a unit's life (docs/26-damage.md, "Nobody repairs anybody else"): it
+/// reads property `0x31`, the life fraction over the whole control system, and writes it back
+/// raised (`Control.dll:0x1000e980` → `0x1000e9c2`, from `Behavior.dll:0x1001816a`). So the
+/// life of every one of `lives` over their full life rises by `rise`, held to 1, and each node
+/// is put at that share of its own maximum, destroyed nodes restored with the rest. Returns the
+/// share written.
+pub fn raise_life_share(lives: &mut [&mut Life], rise: f32) -> f32 {
+    let (life, full) = lives.iter().fold((0.0, 0.0), |(l, f), x| (l + x.total(), f + x.full()));
+    if full <= 0.0 {
+        return 0.0;
+    }
+    let share = (life / full + rise.max(0.0)).min(1.0);
+    for x in lives.iter_mut() {
+        x.set_share(share);
+    }
+    share
 }
 
 /// What the ground under a machine deals it (docs/24-motion.md, "Water and lava beds
@@ -618,6 +663,36 @@ mod tests {
         let gone = share_loss(&mut [&mut chassis, &mut turret], 2500.0);
         assert_eq!(gone, vec![vec![0, 1], vec![0, 1]]);
         assert!(chassis.dead && turret.dead && chassis.total() == 0.0);
+    }
+
+    #[test]
+    fn a_docks_repair_raises_the_whole_units_life_share_and_brings_a_destroyed_part_back() {
+        // A tenth of full life a second, so ten seconds from nothing to full (docs/27).
+        let mut chassis = Life::new(&table(&[881.0, 2000.0]), vec![None, Some(0)], vec![false; 2], 1.0, 1.0)
+            .staged(&[2, 2], &[false; 2]);
+        let mut turret = Life::new(&table(&[4000.0, 474.0]), vec![None, None], vec![false; 2], 1.0, 1.0);
+        chassis.hit(1, 2000.0);
+        chassis.takt(0.0);
+        assert!(chassis.nodes[1].destroyed && chassis.nodes[1].flying() && !chassis.flights.is_empty());
+        let full = chassis.full() + turret.full();
+        let share = raise_life_share(&mut [&mut chassis, &mut turret], 0.1);
+        let left = (full - 2000.0) / full;
+        assert!((share - (left + 0.1)).abs() < 1e-4, "a tenth of full life on: {share}");
+        assert!((chassis.total() + turret.total() - share * full).abs() < 0.1);
+        assert!(!chassis.nodes[1].destroyed && !chassis.nodes[1].flying(), "the part is back");
+        assert!(!chassis.nodes[1].hidden() && chassis.flights.is_empty());
+        assert_eq!(chassis.nodes[1].stage, 0, "and draws its whole block again");
+        // A dead unit's every node comes back, and it is neither marked nor dead.
+        let mut life = dummy();
+        life.hit(0, 500.0);
+        life.takt(0.0);
+        assert!(life.dead && life.marked && life.nodes.iter().all(|n| n.destroyed));
+        for _ in 0..10 {
+            raise_life_share(&mut [&mut life], 0.1);
+        }
+        assert!(!life.dead && !life.marked && life.nodes.iter().all(|n| n.life == n.max && n.stage == 0));
+        assert_eq!(raise_life_share(&mut [&mut life], 0.1), 1.0, "and it stops at full");
+        assert_eq!(raise_life_share(&mut [], 0.1), 0.0, "with nothing to repair");
     }
 
     #[test]

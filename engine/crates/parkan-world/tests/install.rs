@@ -2222,6 +2222,104 @@ fn mission_02s_warbot_lets_the_hero_out_on_the_outpost_islands_flat_ground() {
 
 #[test]
 #[ignore = "needs the game install"]
+fn mission_02s_outpost_charges_repairs_and_rearms_the_hero_standing_on_its_dock() {
+    use parkan_sim::damage::{Life, share_loss};
+    use parkan_world::cockpit::panels::life_share;
+    use parkan_world::places::PLACE_DOCK;
+
+    let (mut play, _) = mission_02_play();
+    let tick = |play: &mut parkan_world::play::Play, seconds: f32| {
+        for _ in 0..(seconds * 60.0) as usize {
+            play.update_input();
+            play.tick(1000.0 / 60.0, [0.0; 2]);
+        }
+    };
+    // Half the hero's life gone and its first gun empty.
+    let hurt = |play: &mut parkan_world::play::Play| {
+        let full: f32 = play.hero.lives.iter().flatten().map(Life::full).sum();
+        let mut lives: Vec<&mut Life> = play.hero.lives.iter_mut().flatten().collect();
+        let left: f32 = lives.iter().map(|l| l.total()).sum();
+        share_loss(&mut lives, left - full * 0.5);
+        play.hero.guns[0].rounds = 0;
+    };
+    let life = |play: &parkan_world::play::Play| life_share(play.hero.lives.iter().flatten());
+
+    tick(&mut play, 0.5);
+    // `fr_l_angar`'s one place is its ground-level dock (docs/27, "The places"): 10 across, 12
+    // up and 8.4 down about its vertex, so the hero stands on it from the ground outside.
+    let outpost = play.buildings.iter().find(|b| b.doors.is_empty()).unwrap().target;
+    let set = play.places.iter().find(|p| p.target == outpost).expect("the Outpost's places");
+    assert_eq!(set.places.len(), 1);
+    let vertex = set.places[0].vertex;
+    assert_eq!(vertex.flags, 0x1000_0620, "a ground-level dock and no pod bit");
+    assert!(vertex.flags & PLACE_DOCK != 0);
+    let part = &play.battle.combat.targets[outpost].parts[set.part];
+    let dock = parkan_world::factory::vertex_world(&vertex, part).expect("the dock's world point");
+
+    // A neutral Outpost charges nobody.
+    let away = play.hero.walker.body.position;
+    hurt(&mut play);
+    let magazine = play.hero.guns[0].magazine;
+    assert!(magazine > 0, "the hero's first gun holds a clip");
+    put(&mut play.hero.walker, &play.ground, dock);
+    tick(&mut play, 2.0);
+    assert_ne!(play.units[outpost].clan, Some(play.player_clan));
+    assert!((life(&play) - 0.5).abs() < 1e-3, "no charge from another clan's dock: {}", life(&play));
+    assert_eq!(play.hero.guns[0].rounds, 0);
+
+    // Taken, and the hero hurt again away from it.
+    assert!(play.stand_on_pod(outpost));
+    tick(&mut play, 6.0);
+    assert_eq!(play.units[outpost].clan, Some(play.player_clan));
+    put(&mut play.hero.walker, &play.ground, away);
+    tick(&mut play, 0.5);
+    hurt(&mut play);
+
+    // On the dock: a tenth of full life and of the magazine a second, full in ten seconds.
+    play.cues.clear();
+    put(&mut play.hero.walker, &play.ground, dock);
+    tick(&mut play, 2.0);
+    let after = life(&play);
+    assert!((after - 0.7).abs() < 0.01, "a tenth of full life a second: {after}");
+    // A tenth of the magazine a second less what each tick's rounding down drops: 93 of 100.
+    let rounds = play.hero.guns[0].rounds;
+    assert!((85..=100).contains(&rounds), "a tenth of a magazine of {magazine} a second: {rounds}");
+    tick(&mut play, 9.0);
+    assert_eq!(life(&play), 1.0, "full in ten seconds, whatever it is");
+    assert_eq!(play.hero.guns[0].rounds, magazine);
+
+    // The dock's glow runs while it charges, with `f_recharge.wav` in it (docs/13).
+    let charged: Vec<String> = play.cues.iter().map(|c| c.sound.to_ascii_lowercase()).collect();
+    assert!(charged.iter().any(|s| s == "f_recharge.wav"), "the charging sound: {charged:?}");
+    let ids = play.places.iter().find(|p| p.target == outpost).unwrap().places[0].recharge.clone();
+    assert_eq!(ids.len(), 1, "the Outpost's one dock glow");
+    let owner = parkan_world::fx::Owner::Building(outpost, ids[0]);
+    let (_, glow) = play.fx.instances.iter().find(|(o, _)| *o == owner).expect("its glow runs");
+    assert!(glow.effect.name.eq_ignore_ascii_case("f_recharge_r"), "{}", glow.effect.name);
+    assert!(glow.on && glow.mode == parkan_world::places::RECHARGE_TIME_MODE);
+    // It hangs on the field's own `Rech_*` points, which size it to the ground-level dock's
+    // cylinder: 10 across and 12 up.
+    let axes = glow.frame.axes.map(glam::Vec3::length);
+    assert!((14.0..17.0).contains(&axes[0]), "{axes:?} up the field");
+    assert!((10.0..13.0).contains(&axes[1]) && (10.0..13.0).contains(&axes[2]), "{axes:?} across it");
+    assert!(glow.frame.origin.distance(dock) < 4.0, "over the dock: {} to {dock}", glow.frame.origin);
+
+    // Stepped off it, the charge stops within a place's own 64-128 ms timer, and the glow with
+    // it.
+    hurt(&mut play);
+    put(&mut play.hero.walker, &play.ground, away);
+    tick(&mut play, 0.5);
+    let off = life(&play);
+    play.cues.clear();
+    tick(&mut play, 3.0);
+    assert_eq!(life(&play), off, "off the dock: {off}");
+    let quiet: Vec<String> = play.cues.iter().map(|c| c.sound.to_ascii_lowercase()).collect();
+    assert!(!quiet.iter().any(|s| s == "f_recharge.wav"), "the glow is quiet again: {quiet:?}");
+    assert!(!play.fx.instances.iter().any(|(o, i)| *o == owner && i.on), "and switched off");
+}
+
+#[test]
+#[ignore = "needs the game install"]
 fn leaving_the_window_lets_shift_up_and_the_free_look_centres_on_foot_and_aboard() {
     use parkan_world::factory::Project;
 

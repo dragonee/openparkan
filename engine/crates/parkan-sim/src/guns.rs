@@ -274,6 +274,18 @@ impl Gun {
         }
     }
 
+    /// What a dock rearms it by (`Behavior.dll:0x100181e0`, docs/29, "There is no reload"):
+    /// `share` of the magazine rounded down, but at least one round, into the rounds left
+    /// (properties `0x800` and `0x700`), and `share` of the capacitor into the charge. A gun
+    /// whose magazine is [`UNLIMITED`] never spends a round and takes none.
+    pub fn rearm(&mut self, share: f32) {
+        if self.magazine > 0 && self.rounds < self.magazine {
+            let add = (share * self.magazine as f32).floor().max(1.0) as i32;
+            self.rounds = (self.rounds + add).min(self.magazine);
+        }
+        self.charge = (self.charge + share * self.capacitor).min(self.capacitor);
+    }
+
     /// Top the capacitor up.
     ///
     /// STAND-IN: docs/23-economy.md#bots-spend-power-through-the-same-code-priced-by-part--read-and-measured
@@ -502,6 +514,30 @@ mod tests {
         assert_eq!((shots.len(), laser.rounds), (1, 0));
         let mut free = gun([-1.0, 200.0, 5.5, 200.0], &[4.0]);
         assert_eq!((hold(&mut free, 3000.0).len(), free.rounds), (7, -1));
+    }
+
+    #[test]
+    fn a_dock_rearms_a_gun_by_a_tenth_of_its_magazine_a_second_but_never_by_less_than_a_round() {
+        // A tenth of a second in a dock, so 0.01 of the magazine a rearm (docs/27).
+        let mut cannon = gun([500.0, 20.0, 0.1, 0.0], &[4.0]);
+        cannon.rounds = 0;
+        cannon.charge = 0.0;
+        cannon.rearm(0.01);
+        assert_eq!(cannon.rounds, 5, "5 of 500 rounds");
+        assert!((cannon.charge - 0.2).abs() < 1e-5, "0.2 of a capacitor of 20: {}", cannon.charge);
+        for _ in 0..200 {
+            cannon.rearm(0.01);
+        }
+        assert_eq!((cannon.rounds, cannon.charge), (500, 20.0), "full in ten seconds, and no further");
+        // A two-round launcher takes its one round rather than none.
+        let mut missiles = gun([2.0, 0.8, 0.2, 1250.0], &[1.0, 2.5]);
+        missiles.rounds = 0;
+        missiles.rearm(0.01);
+        assert_eq!(missiles.rounds, 1);
+        let mut free = gun([-1.0, 200.0, 5.5, 200.0], &[4.0]);
+        free.rounds = -1;
+        free.rearm(0.01);
+        assert_eq!(free.rounds, -1, "an unlimited magazine spends nothing and takes nothing");
     }
 
     #[test]

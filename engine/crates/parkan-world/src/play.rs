@@ -925,6 +925,15 @@ impl Play {
                 .is_some_and(|&(_, w)| w == RELATION_HOSTILE)
     }
 
+    /// Whether clan `other` is an ally of clan `us`, by `us`'s relation word toward it, which a
+    /// dock asks before it charges an occupant (`Behavior.dll:0x10019318`).
+    pub fn allied_to(&self, us: Option<i64>, other: Option<i64>) -> bool {
+        let Some(us) = us else { return false };
+        let Some(other) = other.filter(|&c| c != us) else { return false };
+        let (Some(them), Some(us)) = (self.clan(other), self.clan(us)) else { return false };
+        us.relations.iter().find(|(name, _)| *name == them.name).is_some_and(|&(_, w)| w == RELATION_ALLIED)
+    }
+
     /// Whether clan `clan`'s objects run their behaviour: every clan's but a neutral one's,
     /// which runs no radar, takt or fire control (`Behavior.dll:0x10005070`, docs/31, "Which
     /// objects run a behaviour").

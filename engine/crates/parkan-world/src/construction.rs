@@ -19,6 +19,7 @@ use crate::building_fx::BuildingEffects;
 use crate::buildings::Building;
 use crate::factory::Factory;
 use crate::fx::Owner;
+use crate::places::Places;
 use crate::play::{Play, SPAWNED_OBJECTS, Unit};
 use crate::robot::Robot;
 
@@ -484,6 +485,13 @@ impl Play {
         if let Some(f) = Factory::load(&mut self.assembly, &one, 0, t) {
             self.factories.push(f);
         }
+        // A building put up in play docks units like any other: an Outpost or a generator is
+        // built to be the charging station its ground-level dock makes it (docs/27). Its glows
+        // are joined once its load group below has placed them.
+        let docked = Places::load(&mut self.assembly, &one, 0, t).is_some_and(|places| {
+            self.places.push(places);
+            true
+        });
         let sphere_effects = sphere_effects(&mut self.assembly, &path);
         if let Some(effects) = BuildingEffects::load(&mut self.assembly, &one, 0, t) {
             if let Some(part) = self.battle.combat.targets.get(t).and_then(|x| x.parts.get(effects.part)) {
@@ -498,6 +506,9 @@ impl Play {
             }
             let n = effects.effects.len();
             self.building_effects.push((effects, vec![0.0; n]));
+        }
+        if docked {
+            self.join_dock_glows();
         }
         for (_, name) in &sphere_effects {
             self.fx.template(name);

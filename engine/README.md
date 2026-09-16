@@ -590,6 +590,24 @@ presses a hero standing at it down), and which of Mission 04's units holds no mi
   Mission 02's island it reads altitude 11 by the Outpost, as the recording's does, and lets
   the hero out anywhere on the island's flat ground, where M13's model said "Risk area!"; the
   places stand 13.43 m out, and Mission 04's helicopter rests 3.04 over the ground.
+- **A dock charges, repairs and rearms who stands in it** (docs/27, "What a dock gives"): the
+  hall-way vertices with a bit of `0x620`, the charging stations. They tick with a main
+  teleport's places, as upright cylinders about their vertices — 5 across, 3 up and 2.1 down
+  indoors, 10 and 12 and 8.4 at a ground-level one — and hold only an occupant moving at most
+  2 m/s, so a dock charges nobody driving through it. Each unit standing in one that belongs to
+  the building's clan or an ally gains, a second, a tenth of its full life, its destroyed parts
+  restored with the rest, and a tenth of each gun's magazine, rounded down but never less than
+  a round, and of its capacitor: full in ten seconds, whatever it is. The 16 dock vertices the
+  building models carry stand where the models put them — one indoors in each bunker, tower and
+  the large ruin, one indoors and one outside on each factory, one outside on the Outpost and
+  three on a generator — and a building put up in play gets its own.
+- **A charging dock glows, and sounds** (docs/13, "A building's load group"): the `f_recharge_r`
+  its load group placed over the field stands still at time 0 until something drives it, and a
+  dock that is charging runs it looping and stops it again when it stops. It hangs on the
+  field's own `Rech_*` control points, whose direction vectors size it — 15 up and 11 across
+  over the Outpost's ground-level dock, 20 over a generator's, 5.7 and 5.2 over an indoor one —
+  so the red field it draws covers the charging station it stands on, and `f_recharge.wav`
+  sounds as its time crosses 0.1 rising, once every 3 s sweep.
 
 This directory also holds what the rest will follow:
 
@@ -835,7 +853,7 @@ a row here. A row leaves this table when research closes it.
 | M13 | The building's own paths an escape is routed out by ("LEAVE IS TOO !!!") | a unit sent into a building along its hall way walks out of it along the hall way, from its nearest vertex to the exit that makes the way to its goal shortest, while it stands inside the building's outer ring | [31](../docs/31-packages.md#the-escape--read) |
 | M13 | The unit takt escape's node test (a unit on a damaged node is left be) | every node counts as whole | [31](../docs/31-packages.md#the-escape--read) |
 | M13 | The clan's contact list the maps mark other clans' objects by, and the scan's signatures | every live object strictly within the radar range of a live unit of the player's clan, the hero among them | [35](../docs/35-hud.md#the-panel-in-the-cockpit--read-and-seen) |
-| M13 | The places besides a main teleport's: a dock's charge, repair and rearm, and whether a loading or unloading place's cylinder is what a transport's arrival reads | only the in and out places of a main teleport are ticked; a transport keeps its own arrival | [27](../docs/27-ownership.md#the-places--read-and-measured) |
+| M13 | The places besides a dock's and a main teleport's: whether a loading or unloading place's cylinder is what a transport's arrival reads | only a dock and the in and out places of a main teleport are ticked; a transport keeps its own arrival | [27](../docs/27-ownership.md#the-places--read-and-measured) |
 | M13 | The random source of a place set's and a place's 64 ms share (`0x1004c550`) | a 32-bit xorshift per building | [27](../docs/27-ownership.md#who-stands-in-a-place--read) |
 | M13 | Whether a destroyed generator stays in `World3D.dll`'s queue 3, which the in place's power walk reads | the live generators are asked | [27](../docs/27-ownership.md#teleport-in-0x8000--read) |
 | M13 | Which of Mission 04's hero, helicopter and HQ holds no mind: the recording's factory shows one free of three once all three are the player's, and Mission 02's shows the hero holding one | a unit the hero's Enter took holds none | [34](../docs/34-progression.md#mission-04-teleport-end-to-end--derived) |
@@ -851,6 +869,9 @@ a row here. A row leaves this table when research closes it.
 | M14 | How many tracks the install's `winmm.dll` reports for its `MUSIC` files | the highest `TrackNN.ogg` present; a track with no file is not audio | [34](../docs/34-progression.md#music-the-cds-tracks--read-and-measured) |
 | M14 | When `AniMesh.dll` works an agent's sphere and node sphere out again (`0x10009510`), and at which pose | once, at the parts' and nodes' rest poses, as the unit is made | [24](../docs/24-motion.md#finding-the-ground--read) |
 | M14 | How `CD_VOLUME` and `SFX_VOLUME`, each a share of a mixer control, become loudness | the music plays at the sounds' level, as the install's equal settings and Mission 01's recording have it | [34](../docs/34-progression.md#music-the-cds-tracks--read-and-measured) |
+| M14 | What a dock does with a unit's batteries and shields, and the device manager's value 7 it adds a tenth of | neither is simulated (docs/23, docs/26), so a dock gives life and ammunition alone | [27](../docs/27-ownership.md#what-a-dock-gives--read) |
+| M14 | What becomes of a part already knocked off and flying when its dock puts its node back | it is taken out of the air, rather than drawn beside the node it is again | [26](../docs/26-damage.md#repair-a-units-own-repair-unit-switched-on-and-off--read-and-measured) |
+| M14 | What the game drives a dock's glow with: its own time mode is 0, a value set from outside, and nothing read sets it | a charging dock runs it looping and switches it off again; the `f_recharge_*` nearest a dock's vertex is that dock's | [13](../docs/13-control.md#a-buildings-load-group--read-and-measured) |
 
 ### Read since the stand-in was written
 
