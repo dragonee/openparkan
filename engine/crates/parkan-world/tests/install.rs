@@ -2187,6 +2187,89 @@ fn mission_02s_large_factory_runs_its_load_group_smoke_screens_and_lamps_on_thei
     assert!(smoke_at.z > centre.z + 40.0, "a chimney's smoke at {smoke_at}");
 }
 
+/// A chimney's puff leaves orange and is black a quarter of a second on, and its plume is the
+/// size the recording shows (docs/07, "How a material reaches the device"). `fire_smoke`'s
+/// track steps through 26 of `DUST.0`'s cells, the first five of them the orange flame row and
+/// the rest the black smoke rows, and an effect sprite plays it from its own start; before, it
+/// drew the first cell for ever, so the whole plume was orange.
+#[test]
+#[ignore = "needs the game install"]
+fn a_chimneys_puff_leaves_orange_turns_black_and_its_plume_is_the_recordings_size() {
+    use parkan_world::textures::TextureStore;
+
+    let game = gamedir::find(None).expect("a Parkan install: set PARKAN_DIR");
+    let (mut play, _) = mission_02_play();
+    let mut store = TextureStore::open(&game).unwrap();
+    play.fx.resolve_looks(&mut store).unwrap();
+    let t = play.factories.first().expect("the Large Factory").target;
+    let (b, _) = play.building_effects.iter().find(|(b, _)| b.target == t).expect("its load group");
+    let part = &play.battle.combat.targets[t].parts[b.part];
+    let chimney = b
+        .effects
+        .iter()
+        .find(|e| e.name == "smoke_fr_02")
+        .and_then(|e| b.frame(part, e.on))
+        .expect("a chimney's frame");
+    for _ in 0..(10 * 60) {
+        play.tick(1000.0 / 60.0, [0.0; 2]);
+    }
+
+    // The cell a look draws, as the mean of its texture's pixels weighted by their alpha.
+    let colour = |look: usize| {
+        let l = play.fx.looks[look];
+        let tex = &store.textures[l.texture.expect("fire_smoke's texture")];
+        let (w, h) = (tex.width as f32, tex.height as f32);
+        let [u0, v0, du, dv] = l.cell;
+        let (x0, y0) = ((u0 * w) as u32, (v0 * h) as u32);
+        let (x1, y1) = (((u0 + du) * w) as u32, ((v0 + dv) * h) as u32);
+        let rgba = &tex.levels[0];
+        let (mut sum, mut weight) = ([0.0f32; 3], 0.0f32);
+        for y in y0..y1 {
+            for x in x0..x1 {
+                let i = ((y * tex.width + x) * 4) as usize;
+                let a = f32::from(rgba[i + 3]) / 255.0;
+                for c in 0..3 {
+                    sum[c] += f32::from(rgba[i + c]) * a;
+                }
+                weight += a;
+            }
+        }
+        sum.map(|c| c / weight.max(1e-6))
+    };
+
+    let mut smoke: Vec<(usize, parkan_sim::effects::Sprite)> = play
+        .sprites(play.hero.eye().position)
+        .into_iter()
+        .filter(|(_, s)| s.material.eq_ignore_ascii_case("fire_smoke"))
+        .filter(|(_, s)| s.centre.distance(chimney.origin) < 60.0 || s.age_ms < 100.0)
+        .collect();
+    assert!(smoke.len() > 20, "a plume of {} puffs", smoke.len());
+    smoke.sort_by(|a, b| a.1.age_ms.total_cmp(&b.1.age_ms));
+
+    // The youngest puff is on the flame row, warm and bright; one 250 ms old is on a smoke row.
+    let young = colour(smoke[0].0);
+    assert!(young[0] > 180.0 && young[0] > young[2] * 1.5, "the flame is orange: {young:?}");
+    let (old, age) = smoke
+        .iter()
+        .find(|(_, s)| s.age_ms > 250.0)
+        .map(|&(look, ref s)| (colour(look), s.age_ms))
+        .expect("a puff older than 250 ms");
+    assert!(old.iter().all(|&c| c < 90.0), "black smoke {age:.0} ms on: {old:?}");
+
+    // The plume: 50 m over the chimney, 10 to 30 m across, as lerp(+88, +100) and
+    // lerp(+136, +148) give in metres.
+    let over = |s: &parkan_sim::effects::Sprite| s.centre.z - chimney.origin.z;
+    let top = smoke.iter().map(|(_, s)| over(s)).fold(f32::MIN, f32::max);
+    let widths: Vec<f32> = smoke.iter().map(|(_, s)| s.width).collect();
+    assert!((0.0..=50.5).contains(&top) && top > 45.0, "the plume stands {top:.1} m over it");
+    assert!(
+        widths.iter().all(|&w| (9.5..=30.5).contains(&w)),
+        "10 to 30 m across: {:.1}..{:.1}",
+        widths.iter().copied().fold(f32::MAX, f32::min),
+        widths.iter().copied().fold(f32::MIN, f32::max)
+    );
+}
+
 #[test]
 #[ignore = "needs the game install"]
 fn mission_01s_bridges_start_their_signal_lights() {
@@ -2723,6 +2806,38 @@ fn mission_03_play() -> (parkan_world::play::Play, parkan_formats::mission::Miss
     let mut play = Play::load(&game, &m).unwrap().expect("Mission 03 has a hero");
     play.load_progression(&game, &dir, &m).unwrap();
     (play, m)
+}
+
+/// A building's ambience hums on: the load group starts `f_bunk_sfx` and its like in time
+/// mode 2 over a one-second duration, and their loops run over the whole of *t*, so the wrap
+/// at the end of each period must not stop and start them again (docs/11, "Type 2 is a
+/// sound"). Mission 03 starts the hero among four bunkers, three computers, a store and a
+/// generator, which restarted once a second.
+#[test]
+#[ignore = "needs the game install"]
+fn mission_03s_building_ambiences_start_once_and_are_never_stopped() {
+    use parkan_sim::effects::CueKind;
+
+    let (mut play, _) = mission_03_play();
+    let mut started: std::collections::BTreeMap<String, usize> = Default::default();
+    let mut stopped = Vec::new();
+    for _ in 0..(30 * 60) {
+        play.tick(1000.0 / 60.0, [0.0; 2]);
+        for c in play.cues.drain(..) {
+            let sound = c.sound.to_ascii_lowercase();
+            match c.kind {
+                CueKind::Loop => *started.entry(sound).or_default() += 1,
+                CueKind::Stop => stopped.push(sound),
+                _ => {}
+            }
+        }
+    }
+    assert_eq!(
+        (started.get("f_bunk.wav"), started.get("f_comp.wav"), started.get("f_gener.wav")),
+        (Some(&4), Some(&3), Some(&1)),
+        "one start each in 30 s: {started:?}"
+    );
+    assert!(stopped.is_empty(), "and none stopped: {stopped:?}");
 }
 
 /// The target of the mission object whose path ends in `name`.

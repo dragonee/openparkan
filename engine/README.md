@@ -648,6 +648,22 @@ presses a hero standing at it down), and which of Mission 04's units holds no mi
   neither takes it up until it comes nearer. A unit with no radar senses 1 m and picks no
   target of its own, as read. A target an order names is still taken whatever the radar holds,
   and a search still looks over the clan's areal map, which lists without any detection test.
+- **A chimney's smoke is black, and the size the recording shows** (docs/07, "How a material
+  reaches the device"). An effect sprite took its material's first entry and never played its
+  track, so every puff of the Large Factory's plumes drew `fire_smoke`'s first cell, orange.
+  A sprite now takes the entry its track is on, from its own start — a stream's particle from
+  when it left — so a puff leaves the chimney orange and is on the track's later, black cells a
+  quarter of a second on, as the recording's plumes are. A stream's particle walks and grows in
+  metres, the frame only turning it: the plume stands 50 m over the chimney and grows from 10
+  to 30 m across, against about 29 and 31 measured off the recording, where the control points'
+  2.6-long axes had made it 130 and 78.
+- **A building's ambience hums on** (docs/11, "Type 2 is a sound"). A loop stops when effect
+  time leaves its window, and a looping mode's time comes round to 0 at the end of each period,
+  below a window that starts at 0.001. The game's effect manager updates on wall time and lands
+  in that millisecond about once in a thousand updates; this one steps an exact 1/60 s from 0
+  and landed there at every wrap, so Mission 03's four bunkers, three computers, store and
+  generator restarted their hum once a second, over and over. The wrap is no longer taken as
+  leaving the window.
 
 This directory also holds what the rest will follow:
 
@@ -834,7 +850,7 @@ a row here. A row leaves this table when research closes it.
 | M4 | Whether vegetation and rock take damage | they stop rounds and take none | [04](../docs/04-missions.md#the-scale) |
 | M4 | Shields: bubble contacts and sectors | not modelled: no bubble stops a round, a blast skips its shield step and kind 4 does nothing; Mission 01's `tut1_e1`, `tut1_mf1` and `helic` carry fight shields and deflectors | [26](../docs/26-damage.md#shields-a-generator-a-deflector-six-sectors--read-and-measured) |
 | M4 | Poses of other units for the hit test | their rest poses: other units' animation is not played | [24](../docs/24-motion.md#playing-a-state--read-and-measured) |
-| M4 | The rest of the emitter floats: what a particle's exponent-shaped triples are, a bolt's widths | sprites (3, 4, 9) move +40→+52 and grow +100→+112 straight by progress through the window, per-axis powers left out; a burst (7, 10) flies between velocities +44 and +56, spread +68, its age progress over +28, sized +92→+104; a stream (8) particle sits at +88→+100 and grows +136→+148 by its age in seconds; a bolt's sprites are +24 wide, each spanning its texture's cell once where the texture repeats every +32 along the beam | [11](../docs/11-effects.md#not-resolved) |
+| M4 | The rest of the emitter floats: what a particle's exponent-shaped triples are, a bolt's widths | sprites (3, 4, 9) move +40→+52 and grow +100→+112 straight by progress through the window, per-axis powers left out; a burst (7, 10) flies between velocities +44 and +56, spread +68, its age progress over +28, sized +92→+104; a stream (8) particle sits at +88→+100 and grows +136→+148 by its age in seconds, both in metres times the instance's scale, its frame turning them but not sizing them; a bolt's sprites are +24 wide, each spanning its texture's cell once where the texture repeats every +32 along the beam | [11](../docs/11-effects.md#not-resolved) |
 | M4 | An effect's jitter (flag 1), the owner values of time modes 5–15, and a phase's animated texture frames | no jitter; modes 5–15 all read the owner's speed over its top speed, set on rounds; frame 0 of every texture | [11](../docs/11-effects.md#how-an-effect-runs--read) |
 | M4 | How a sprite whose material says opaque blends | alpha-blended, so its fade shows | [07](../docs/07-objects.md#how-a-material-draws-is-in-the-archive-directory) |
 | M4 | How the shade lights with a type-1 light's range and attenuation; type 1 is a light in the owner's `CLightManager` | none yet; to come, Direct3D's fixed-function falloff, 1 / (a0 + a1·d + a2·d²) inside the range | [11](../docs/11-effects.md#not-resolved) |
@@ -953,7 +969,7 @@ engine pass replaces each with what was read and removes its row.
 | M8 | The acknowledgement's xorshift: its shifts and seed | 7, 9, 8 from 0xACE1, never repeating the last voice | [31](../docs/31-packages.md#the-wingman-menu-from-first-person--read-and-measured) |
 | M8 | The game's random source for a life update's spread | a 16-bit xorshift (7, 9, 8), seeded apart per unit | [24](../docs/24-motion.md#water-and-lava-beds-kill--read-and-measured) |
 | M8 | The shell's menus after a mission, the load-game screen, and `MISSIONS/dispatcher.ini` | Esc after the outcome closes the window, L does nothing, and a win is not written to the install | [34](../docs/34-progression.md#after-the-outcome--read-and-measured) |
-| M8 | A material's start stamp, from which its track is played, and the random a mode-3 track jumps by | the world clock's 0 for every material; a hash of the clock | [07](../docs/07-objects.md#how-a-material-reaches-the-device--read-and-measured) |
+| M8 | A material's start stamp, from which its track is played, and the random a mode-3 track jumps by | the world clock's 0 for a mesh batch's material, and a sprite's own start for an effect's — a stream's particle from when it left; a hash of the clock | [07](../docs/07-objects.md#how-a-material-reaches-the-device--read-and-measured) |
 | M8 | The areal search, the local path and its obstacle contours; the Wizard's heading curve | the straight line to the place, cut into at least three points a second or more apart at the walk's velocity, ending in the read stop; the heading is the curve's velocity's direction | [24](../docs/24-motion.md#not-established) |
 | M8 | How a velocity the Wizard writes combines with the velocity integrator, and whether its spin is a rate or a fraction | a driven machine takes the written velocity as its own and turns toward the heading at up to its live yaw rate; since that replaces the machine's own velocity every step, where the mode-2 brake would act the ground's fraction is taken off the written velocity whole, rather than pulled at over several steps as it is on the player's | [24](../docs/24-motion.md#not-established) |
 | M8 | The height a flyer's points are given; who reads `Movement_FlyHeight` | at least `FlyNearLandHeight`, 15, above the ground under the point | [24](../docs/24-motion.md#not-established) |
@@ -1001,7 +1017,7 @@ engine pass replaces each with what was read and removes its row.
 | M11 | The designer's save name field and load list | not built: save and load do nothing | [37](../docs/37-designer.md#not-established) |
 | M11 | Which way a model view's camera looks, which axis its −0.5 rad pitch turns about, which of the view's sides its 60° field spans, and its two lights' colours | from −y, about x, the narrower side, about the drawn level-0 vertices' sphere; lights grey 0.4 and a scene colour of 0.15 | [37](../docs/37-designer.md#the-previews--read-and-seen) |
 | M11 | How a scan band's green specular lights its strip | an added colour of (⅔g, g, ⅔g) over the strip in `0xff009b00` | [37](../docs/37-designer.md#the-scan-bands--read-and-seen) |
-| M11 | Which cell of its material an effect sprite samples, and when the material's track plays for a particle | the material's first key's cell, the track not played: `smoke_fr_02`'s puffs show `fire_smoke`'s first cell, orange, where the recording's plumes are its later, black cells | [07](../docs/07-objects.md#how-a-material-reaches-the-device--read-and-measured) |
+| M11 | Which cell of its material an effect sprite samples, and when the material's track plays for a particle | the entry's cell, as a mesh batch takes it, from the key the track is on at the sprite's own age — a stream's particle counting from when it left, everything else from its instance's start; the masked colour lerp between two keys is not drawn | [07](../docs/07-objects.md#how-a-material-reaches-the-device--read-and-measured) |
 | M8 | A gun fitted as a part of its own: its ready byte and its barrels' recoil | ready; its recoil is not played | [29](../docs/29-weapons.md#a-gun-is-ready-once-its-arm-is-out--read-and-measured) |
 | M8 | Which difficulty profile a wingman holds: `Speed_MaximumFactor` | 1, as four of the five profiles set it | [26](../docs/26-damage.md#the-difficulty-ratio--read-and-measured) |
 | M8 | How a knocked-off part flies: its push, its spin, its update, and the world query that ends a flight early | it drops off at 2 m/s away from the unit's centre, falls under gravity turning at 3 rad/s about a level axis across its path, and its flight ends when its sphere meets the ground (the player remembers a part falling about half a second): a dummy's side panel goes 1.3 s after it is knocked off | [26](../docs/26-damage.md#not-established) |

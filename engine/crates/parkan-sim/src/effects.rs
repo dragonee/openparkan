@@ -51,6 +51,12 @@ impl Frame {
     pub fn point(&self, local: Vec3) -> Vec3 {
         self.origin + self.axes[0] * local.x + self.axes[1] * local.y + self.axes[2] * local.z
     }
+
+    /// The same frame with its axes a unit long: it turns what it places without sizing it.
+    pub fn turned(&self) -> Self {
+        let fallback = [Vec3::X, Vec3::Y, Vec3::Z];
+        Self { origin: self.origin, axes: std::array::from_fn(|i| self.axes[i].normalize_or(fallback[i])) }
+    }
 }
 
 /// A sound block's +4: 2 or 3 make it a loop (`Effect.dll:0x10012d3e`).
@@ -102,6 +108,10 @@ pub struct Sprite {
     /// The texture's u runs along the quad's long side and v across it, as a bolt's sprites
     /// take theirs (`Effect.dll:0x10009b90`); otherwise u runs across.
     pub lengthwise: bool,
+    /// How long this sprite's own material has been running, ms: its track 0 is played from
+    /// here (docs/07, "Playing a track"). A stream's particle counts from when it left, and
+    /// everything else from the instance's start.
+    pub age_ms: f32,
 }
 
 /// A particle a stream left: when, from where, and how long it lives, in seconds.
@@ -371,8 +381,16 @@ impl Instance {
                 kind,
             };
             if SOUND_LOOPS.contains(&word(e, SOUND_MODE_AT)) {
-                let inside = e.f(8) <= t && t <= e.f(12);
                 let playing = self.looping.contains(&i);
+                // A looping mode's *t* comes round to 0 at the end of every period, below a
+                // window that starts at 0.001, so a loop over the whole of *t* falls outside
+                // it for one update each period and is stopped and started again. The game's
+                // manager updates on wall time and lands in that millisecond about once in a
+                // thousand updates; this one steps an exact 1/60 s from 0 and lands there at
+                // every wrap, which restarted Mission 03's four building ambiences once a
+                // second. The wrap itself is not taken as leaving the window.
+                let wrapped = self.mode == TIME_LOOP && playing && t < e.f(8) && e.f(12) >= 1.0;
+                let inside = (e.f(8) <= t && t <= e.f(12)) || wrapped;
                 if inside && !playing {
                     self.looping.push(i);
                     out.push(cue(CueKind::Loop));
@@ -436,10 +454,11 @@ impl Instance {
             }
             let Some(p) = progress(e, t) else { continue };
             let first = out.len();
+            let age_ms = seconds * 1000.0;
             match e.kind {
-                3 | 4 | 9 => self.sprite(e, p, out),
-                5 => self.bolt(e, p, out),
-                7 | 10 => self.burst(e, i as u32, p, out),
+                3 | 4 | 9 => self.sprite(e, p, age_ms, out),
+                5 => self.bolt(e, p, age_ms, out),
+                7 | 10 => self.burst(e, i as u32, p, age_ms, out),
                 8 => self.stream(i, e, seconds, out),
                 _ => {}
             }
@@ -468,7 +487,7 @@ impl Instance {
     /// A quad at `local` in `frame`, `size` along its axes, both times the instance's
     /// scale: stretched along the frame's first axis when the first two sizes differ,
     /// and otherwise a square facing the camera.
-    fn quad(&self, e: &Emitter, frame: &Frame, local: Vec3, size: Vec3, alpha: f32) -> Sprite {
+    fn quad(&self, e: &Emitter, frame: &Frame, local: Vec3, size: Vec3, alpha: f32, age_ms: f32) -> Sprite {
         let (x, y) = (frame.axes[0], frame.axes[1]);
         let stretched = (size.x - size.y).abs() > f32::EPSILON;
         Sprite {
@@ -483,6 +502,7 @@ impl Instance {
             alpha,
             overlay: false,
             lengthwise: false,
+            age_ms,
         }
     }
 
@@ -493,10 +513,10 @@ impl Instance {
     /// it sits at lerp(+40, +52) in the frame and is lerp(+100, +112) in size along its
     /// axes, both straight by progress through the window; the phase is left to animated
     /// textures, which are not drawn.
-    fn sprite(&self, e: &Emitter, p: f32, out: &mut Vec<Sprite>) {
+    fn sprite(&self, e: &Emitter, p: f32, age_ms: f32, out: &mut Vec<Sprite>) {
         let local = lerp3(e.triple(40), e.triple(52), p);
         let size = lerp3(e.triple(100), e.triple(112), p);
-        out.push(self.quad(e, &self.frame, local, size, fade(e.f(20), e.f(24), e.f(28), p)));
+        out.push(self.quad(e, &self.frame, local, size, fade(e.f(20), e.f(24), e.f(28), p), age_ms));
     }
 
     /// A type-5 bolt: floor(length / +36) sprites, at least 1 and at most +20, along the
@@ -506,7 +526,7 @@ impl Instance {
     /// STAND-IN: docs/11-effects.md#not-resolved -- what a bolt's widths +24 and +28 are is
     /// not read: each sprite is +24 wide. Its texture repeats every +32 along the line
     /// (`0x10002e79`); here each sprite spans its cell once.
-    fn bolt(&self, e: &Emitter, p: f32, out: &mut Vec<Sprite>) {
+    fn bolt(&self, e: &Emitter, p: f32, age_ms: f32, out: &mut Vec<Sprite>) {
         let line = self.frame.origin - self.start_point;
         let step = e.f(36);
         let n = if step > 0.0 { (line.length() / step) as u32 } else { 0 };
@@ -521,6 +541,7 @@ impl Instance {
                 alpha,
                 overlay: false,
                 lengthwise: true,
+                age_ms,
             });
         }
     }
@@ -532,7 +553,7 @@ impl Instance {
     /// big they are is not read, nor when each spawns: each flies from the origin at a
     /// velocity between +44 and +56 per axis (a random share of each), spread by +68/2,
     /// its age its progress through the window over +28; its size lerp(+92, +104) by age.
-    fn burst(&self, e: &Emitter, index: u32, p: f32, out: &mut Vec<Sprite>) {
+    fn burst(&self, e: &Emitter, index: u32, p: f32, age_ms: f32, out: &mut Vec<Sprite>) {
         let count = word(e, 36).saturating_mul(word(e, 40)).min(BURST_CAP);
         let life = if e.f(28) > 0.0 { e.f(28) } else { 1.0 };
         let age = (p / life).clamp(0.0, 1.0);
@@ -559,6 +580,7 @@ impl Instance {
                 alpha,
                 overlay: false,
                 lengthwise: false,
+                age_ms,
             });
         }
     }
@@ -568,15 +590,23 @@ impl Instance {
     ///
     /// STAND-IN: docs/11-effects.md#not-resolved -- where a stream's particle goes and how
     /// big it is are not read (the exponent triples +124 and +172 shape them, a guess): it
-    /// sits at lerp(+88, +100) in the frame it left from and is lerp(+136, +148) in size,
-    /// both by its age; its age is in seconds since it left.
+    /// sits at lerp(+88, +100) from where it left and is lerp(+136, +148) in size, both by
+    /// its age, both in metres times the instance's scale; its age is in seconds since it
+    /// left. The frame only turns them: a control-point frame's axes, which size a type 3,
+    /// 4 or 9 sprite, do not, and the shipped streams read as metres either way — a muzzle
+    /// puff 0.2 to 0.5, a missile's trail 3 long, a chimney's plume 10 to 30 across. *Seen*:
+    /// on the recording of Mission 02 the Large Factory's plume stands about 29 m over the
+    /// chimney and is about 31 m across at its widest, where its points' 2.6-long axes had
+    /// made it 130 and 78.
     fn stream(&self, index: usize, e: &Emitter, seconds: f32, out: &mut Vec<Sprite>) {
         let Some(stream) = self.streams.iter().find(|s| s.emitter == index) else { return };
         for q in &stream.ring {
             let age = ((seconds - q.born) / q.life.max(f32::EPSILON)).clamp(0.0, 1.0);
             let local = lerp3(e.triple(88), e.triple(100), age);
             let size = lerp3(e.triple(136), e.triple(148), age);
-            out.push(self.quad(e, &q.frame, local, size, fade(e.f(4), e.f(8), e.f(12), age)));
+            let alpha = fade(e.f(4), e.f(8), e.f(12), age);
+            let since = (seconds - q.born).max(0.0) * 1000.0;
+            out.push(self.quad(e, &q.frame.turned(), local, size, alpha, since));
         }
     }
 }
@@ -807,6 +837,29 @@ mod tests {
         quiet.silent = true;
         quiet.value = 0.5;
         assert!(heard(&mut quiet, 10.0).is_empty(), "a silent instance starts no loop");
+    }
+
+    /// A building ambience: `f_bunk_sfx`'s loop over the whole of a one-second mode-2 time.
+    #[test]
+    fn a_loop_over_the_whole_of_a_looping_time_plays_on_through_the_wrap() {
+        let hum =
+            with_word(block(2, 148, &[(8, 0.001), (12, 1.0), (64, 5.0), (68, 28.0)], "f_bunk.wav"), 4, 2);
+        let frame = Frame::along(Vec3::ZERO, Vec3::X, 1.0);
+        let mut fx = Instance::new(effect(TIME_LOOP, 1.0, 0, vec![hum]), frame, 1.0, 0.0, None, 1);
+        assert!(heard(&mut fx, 0.0).is_empty(), "t 0 is short of 0.001");
+        assert_eq!(heard(&mut fx, 500.0)[0].kind, CueKind::Loop);
+        for tick in 1..=180 {
+            let cues = heard(&mut fx, f64::from(tick) * 1000.0 / 60.0);
+            assert!(cues.is_empty(), "nothing at tick {tick}: {cues:?}");
+        }
+
+        // A loop that gives up the end of its time is still stopped there and started again.
+        let half =
+            with_word(block(2, 148, &[(8, 0.0), (12, 0.5), (64, 5.0), (68, 28.0)], "f_bunk.wav"), 4, 2);
+        let mut fx = Instance::new(effect(TIME_LOOP, 1.0, 0, vec![half]), frame, 1.0, 0.0, None, 1);
+        assert_eq!(heard(&mut fx, 0.0)[0].kind, CueKind::Loop);
+        assert_eq!(heard(&mut fx, 600.0)[0].kind, CueKind::Stop);
+        assert_eq!(heard(&mut fx, 1100.0)[0].kind, CueKind::Loop);
     }
 
     #[test]

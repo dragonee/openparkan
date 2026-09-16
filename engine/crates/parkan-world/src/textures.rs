@@ -72,19 +72,19 @@ pub struct Animation {
 }
 
 impl Animation {
-    /// The phase shown `t_ms` after the material's start (slot 3, `0x100031f0`): the
-    /// period is the last key's time; key i is the largest whose interval, from the
-    /// previous key's time, holds t, or 0 when none does; the phase is key i's with the
-    /// masked colours lerped toward key i + 1's (wrapping) by how far t is through it.
+    /// The key shown `t_ms` after the material's start (slot 3, `0x100031f0`), and how far t
+    /// is through its interval: the period is the last key's time; key i is the largest whose
+    /// interval, from the previous key's time, holds t, or 0 when none does.
     ///
     /// STAND-IN: docs/07-objects.md#how-a-material-reaches-the-device--read-and-measured --
-    /// a material's start stamp (list record `+4`, set by slot 10) is not read: every
-    /// material starts at the clock's 0. Mode 3's `rand()` is not the game's: a hash of t.
-    pub fn at(&self, t_ms: f64) -> Phase {
+    /// a material's start stamp (list record `+4`, set by slot 10) is not read: a mesh batch's
+    /// material starts at the world clock's 0, and an effect sprite's at the sprite's own
+    /// start. Mode 3's `rand()` is not the game's: a hash of t.
+    pub fn key_at(&self, t_ms: f64) -> (usize, f32) {
         let n = self.keys.len();
         let period = f64::from(self.keys.last().map_or(0.0, |k| k.1));
         if n == 0 || period <= 0.0 {
-            return self.keys.first().map_or(Phase::PLAIN, |k| k.0);
+            return (0, 0.0);
         }
         let t = t_ms.max(0.0);
         let t = match self.mode {
@@ -92,7 +92,7 @@ impl Animation {
                 let u = t % (2.0 * period);
                 if u > period { 2.0 * period - u } else { u }
             }
-            TRACK_ONCE if t >= period => return self.keys[n - 1].0,
+            TRACK_ONCE if t >= period => return (n - 1, 0.0),
             TRACK_ONCE => t,
             TRACK_JUMP => {
                 let mut x = (t as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1;
@@ -105,6 +105,17 @@ impl Animation {
         let from = if i == 0 { 0.0 } else { self.keys[i - 1].1 };
         let span = self.keys[i].1 - from;
         let f = if span > 0.0 { ((t - from) / span).clamp(0.0, 1.0) } else { 0.0 };
+        (i, f)
+    }
+
+    /// The phase shown `t_ms` after the material's start: [`Self::key_at`]'s key, with the
+    /// masked colours lerped toward the next key's (wrapping) by how far t is through it.
+    pub fn at(&self, t_ms: f64) -> Phase {
+        let n = self.keys.len();
+        if n == 0 {
+            return Phase::PLAIN;
+        }
+        let (i, f) = self.key_at(t_ms);
         let (a, b) = (self.keys[i].0, self.keys[(i + 1) % n].0);
         let lerp3 = |x: [f32; 3], y: [f32; 3]| std::array::from_fn(|c| x[c] + (y[c] - x[c]) * f);
         let mut phase = a;

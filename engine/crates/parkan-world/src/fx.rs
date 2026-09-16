@@ -13,7 +13,7 @@ use parkan_formats::gamedir;
 use parkan_formats::nres::Archive;
 use parkan_sim::effects::{Cue, Frame, Instance, Sprite};
 
-use crate::textures::TextureStore;
+use crate::textures::{Animation, Phase, TextureStore};
 
 /// The surfaces an `.exp` names a slot for: slot surface + 1 plays on surface 0..10.
 pub const SURFACES: u8 = 11;
@@ -56,8 +56,16 @@ pub struct Fx {
     /// The number the next instance takes, and the loops its removals stopped.
     next_id: u64,
     stops: Vec<Cue>,
-    look_of: HashMap<String, usize>,
+    look_of: HashMap<String, MaterialLooks>,
     pub looks: Vec<Look>,
+}
+
+/// A material's looks for sprites: one per key of its track 0, in the track's own order, and
+/// the track itself, which says which of them a sprite of a given age draws with. A material
+/// with no track has the one look its first entry gives.
+struct MaterialLooks {
+    keys: Vec<usize>,
+    animation: Option<Animation>,
 }
 
 fn key(name: &str) -> String {
@@ -179,8 +187,21 @@ impl Fx {
         }
     }
 
+    /// The index `look` draws with, kept once: the same texture, cell and colours from two
+    /// materials share it, so one draw covers both.
+    fn look_index(&mut self, look: Look) -> usize {
+        match self.looks.iter().position(|kept| *kept == look) {
+            Some(i) => i,
+            None => {
+                self.looks.push(look);
+                self.looks.len() - 1
+            }
+        }
+    }
+
     /// Resolve the looks of every loaded effect's materials through `store`, so their
-    /// textures upload with the world's.
+    /// textures upload with the world's. A material's track 0 gives one look per key, which
+    /// [`Self::sprites`] picks between by the sprite's own age.
     pub fn resolve_looks(&mut self, store: &mut TextureStore) -> Result<()> {
         let materials: Vec<String> = self
             .templates
@@ -195,19 +216,37 @@ impl Fx {
                 continue;
             }
             let look = store.look(&m)?;
-            // STAND-IN: docs/07-objects.md#how-a-material-reaches-the-device--read-and-measured
-            // -- that an effect sprite takes its material entry's cell as a mesh batch does
-            // is not read for the effect draw; its first key's cell is taken, and the keys are
-            // not played.
-            self.looks.push(Look {
-                texture: look.still.texture,
-                blend_mode: look.blend_mode,
-                ambient: look.still.ambient,
-                cell: look.still.cell,
-            });
-            self.look_of.insert(key(&m), self.looks.len() - 1);
+            let blend_mode = look.blend_mode;
+            let phases: Vec<Phase> = match &look.animation {
+                Some(a) => a.keys.iter().map(|(phase, _)| *phase).collect(),
+                None => vec![look.still],
+            };
+            let keys = phases
+                .into_iter()
+                .map(|p| {
+                    self.look_index(Look { texture: p.texture, blend_mode, ambient: p.ambient, cell: p.cell })
+                })
+                .collect();
+            self.look_of.insert(key(&m), MaterialLooks { keys, animation: look.animation });
         }
         Ok(())
+    }
+
+    /// The look `material` draws with `age_ms` into its own track (docs/07, "Playing a
+    /// track"): an effect sprite takes its material entry's texture, cell and colours as a
+    /// mesh batch does, and its track steps them as it plays. `smoke_fr_02`'s puff leaves a
+    /// chimney on `fire_smoke`'s first five cells, orange, each 50 ms, and is on its later,
+    /// black ones a quarter of a second on, as the recording's plumes are.
+    ///
+    /// STAND-IN: docs/07-objects.md#how-a-material-reaches-the-device--read-and-measured --
+    /// that the effect draw takes the entry's cell is not read, nor what a sprite's material
+    /// starts from: a stream's particle starts its own track when it leaves, and every other
+    /// sprite starts it with its instance. The masked colour lerp between two keys is not
+    /// drawn: a sprite takes the key it is in whole.
+    fn sprite_look(&self, material: &str, age_ms: f32) -> Option<usize> {
+        let m = self.look_of.get(&key(material))?;
+        let k = m.animation.as_ref().map_or(0, |a| a.key_at(f64::from(age_ms)).0);
+        m.keys.get(k).copied()
     }
 
     /// Forget every instance `owner` holds.
@@ -252,7 +291,7 @@ impl Fx {
         for (_, instance) in &self.instances {
             buffer.clear();
             instance.sprites(now_ms, instance.test_point().is_none_or(&in_view), &mut buffer);
-            out.extend(buffer.drain(..).filter_map(|s| Some((*self.look_of.get(&key(&s.material))?, s))));
+            out.extend(buffer.drain(..).filter_map(|s| Some((self.sprite_look(&s.material, s.age_ms)?, s))));
         }
         out
     }
