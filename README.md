@@ -1,7 +1,7 @@
 # openparkan
 
-Clean-room readers for the data files of **Parkan: Iron Strategy** (Nikita,
-1998), and a step toward an open reimplementation of its engine.
+A reimplementation of the **Parkan: Iron Strategy** (Nikita, 1998) game
+engine, built on clean-room readers for the game's own data files.
 
 This repository contains **no game assets**. Point it at your own installation.
 
@@ -280,12 +280,20 @@ analysis/       disassembly scaffolding (not part of the library)
   borrowed is checked against the shipped data before it is used: the slot
   layout accounts for stream 2 exactly on all 434 meshes, and every one of the
   26 RsLi members unpacks to the size its decrypted entry declares. fparkan is
-  GPL-2.0 and this project is MIT, so only its documentation was read, never
-  its source; a file format is a fact, an implementation of one is not.
+  GPL-2.0 and this project is GPL-3.0, so only its documentation was read,
+  never its source; a file format is a fact, an implementation of one is not.
 - [AlexKimov/parkan-file-formats](https://github.com/AlexKimov/parkan-file-formats)
   — 010Editor templates and QuickBMS scripts, mostly for Parkan 1's `.lib`.
 
 ## Licence
 
-MIT for this code — the terms are in [LICENSE](LICENSE). The game's data files
-are not covered and are not included; you need your own copy of the game.
+Copyright (C) 2026 Michał Moroz. This program is free software: you can
+redistribute it and/or modify it under the terms of the GNU General Public
+License as published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version — the terms are in
+[LICENSE](LICENSE). It is distributed in the hope that it will be useful, but
+WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+FITNESS FOR A PARTICULAR PURPOSE.
+
+The game's data files are not covered and are not included; you need your own
+copy of the game.

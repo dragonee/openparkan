@@ -112,7 +112,7 @@ search over `header + count * unit + tail` layouts that never tried a fixed
 140-byte header.
 
 The same discipline applies as with a binary, plus one more consideration.
-fparkan is GPL-2.0; this project is MIT. So: **documentation only, never
+fparkan is GPL-2.0; this project is GPL-3.0. So: **documentation only, never
 source.** A file format is a fact and facts are not copyrightable; a particular
 implementation is expression and is. Every borrowed fact was then checked
 against the shipped data before being relied on — `140 + 68 * count` accounts
