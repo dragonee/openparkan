@@ -252,7 +252,9 @@ gun's ready byte (`0x10027f51`):
 3. **A falling round adds an elevation.** The gun keeps its round's top speed
    (`+0x94`) and a gravity flag (`+0x98`), which is 1 when the round's mode is
    not 0 (`0x100297ef`). With *g* = the world's 10 × that flag and *d* the target
-   from `TurretCenter`, the mount solves for the flight time, *t*² =
+   from `TurretCenter` — the point a turret in `CIS_POINTTRACE` traces, less
+   `TurretCenter`'s position (`0x1001b4f0`, handed in by the turret's takt,
+   `0x10027f06`–`0x10027f51`) — the mount solves for the flight time, *t*² =
    2 (*A* ∓ √*D*) ÷ *g*² with *A* = *v*² − *g d*z and *D* = *A*² − *g*²|*d*|²,
    the lower arc first (`0x10028401`). It rises by the angle between the launch
    and the straight line × 0.83 ÷ the channel's span, signed by the z of
@@ -833,9 +835,24 @@ units only, or weighted by the areal figure (`0x100240ae`).
 - **Heavy rounds are held back.** A gun whose round does 10,000 damage or more
   fires only at a target whose id has 3 in its `0x0f000000` nibble
   (`0x10024d30`). Those are the three winged SSM launchers (*measured*).
-- **Distance** (`0x1001b9f0`). The score rises from 0 to 1 over the first 5 m,
-  holds 1 out to (*v* + 1) ÷ 2, and falls to 0 at 2 (*v* + 1). It is then
-  multiplied by 1 − height ÷ *v*.
+- **Distance** (`0x1001b9f0`). **A round whose frame flags (`.ctl` `+116`, the
+  record's `+0x34`) carry bit `0x10` scores 1.1, and bit 8 scores 1.0, wherever the
+  target stands.** Any other rises from 0 to 1 over the first 5 m (0 m for an
+  animal, `+0x44`), holds 1 out to (*v* + 1) ÷ 2, and falls to 0 at 2 (*v* + 1),
+  then is multiplied by 1 − height ÷ *v*.
+  - ***v* is the round's top speed**, `.ctl` `+48`: property `0x54` is interface
+    `0x202` slot 3 (`Control.dll:0x1002e580`, case at `0x1002e5c6`), which answers
+    a class-2 or class-30 gun's `+0x94`, set to `+0xb8` by the gun's link
+    (`0x100297f5`), the probe round's frame (`.ctl` `+20`…`+127`, property `0x11`,
+    `0x1000dd52`) being copied to the gun's `+0x9c`.
+  - *Measured* over the 66 round controllers, whose `+116` is 0, 4, 12 or 16: 12
+    on the four lobbed `bf_*_01` (score 1.0); 16 on `bm_*`, `bp_*`, `ba_b_04/05`,
+    `ba_m_04/05`, `bb_b_02`, `bb_m_02` and `fm_h_01` (1.1); 4 on `bb_*_01`, `bl_*`,
+    `bld_*`, `bt_*`, `ba_a_*` and `rg_b_01`, and 0 on `br_*` and `fr_l_01` (the
+    band). So the Small Bunker's `bf_f_01` (*v* 45) scores 1 at any range, while
+    the Small Tower's `bb_f_01` — its controller is `bb_f_02.ctl`, *v* 200 — holds 1
+    to 100.5 m and scores nothing past 402 (*derived*: it clears a building's 0.85
+    within about 146 m).
 - **Aim.** It is multiplied by two more factors, one for the turret and one for
   the gun, each `1 − θ × d ÷ R` (`0x10024cea`, `0x10024db4`):
   - *d* is the distance from the unit to the target (`0x10024377`).
@@ -988,9 +1005,13 @@ The enemy variants and the huge guns:
   ([The player's target reaches the turret](#the-players-target-reaches-the-turret--read)).
 - Whether the landscape is one of the objects IWorld slot 7 walks, so that the
   sight ray converges on the ground and not only on objects.
-- The vector a falling round's mount solves for when its turret has no target
-  (it is then the turret's aim triple, `Control.dll:0x10027e07`), and which way
-  the `0.83 × angle` elevation turns on a hanging turret.
+- ~~The vector a falling round's mount solves for.~~ The traced point less
+  `TurretCenter`'s position; a turret in `CIS_MANUALCONTROL` gets no lift and its
+  gun is ready. `TurretCenter`'s vector is (0, −1, 0) on node 0 in 57 of 59 turret
+  `.cpt`, so on an upright turret the lift is upward (*measured*). Still open: how
+  a lobbed round's gun fitted as a part on a turret with no follower channel, the
+  Small Bunker's `e_gun_fc_08` on `e_bnt_lt_01`, is raised; the gun's gate (report
+  7, `0x10029d27`, `0x10029e37`) refuses a target past value 8, `.ctl` `+108`.
 - `e_gun_bl_03` and `e_gun_tl_02` carry a follower and no gun. The turret's takt
   reads the paired gun without a check, so either they are never fitted or the
   follower pairs with a later part's gun; not traced.

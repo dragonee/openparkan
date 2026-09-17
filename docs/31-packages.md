@@ -1113,19 +1113,107 @@ the areal map as the clan's *migration areals* (slot 35, `0x100220e0`).
     (`0x1002c8f8`): for an engagement, reasons 0, 2 and 5, it is 1 when the
     animal itself is within the outer radius of the centre and the contact
     within it too, and 0 otherwise. For **retaliation**, reason 1, it is always
-    1. Reasons 3 and 4 get the default. The task also fills in two figures for
-    the attack it lets through — 20, 10, 25 or 35 by where the two stand, and
-    a circle about the centre of the outer radius plus 20, 80 or 100 — which
-    `0x100179c0` merges into the new task (not followed further).
-- **So** (*derived*): a grazing animal fires at nothing. It attacks a hostile
-  unit that comes within the inner radius of its clan's current pasture while
-  it is itself inside the outer radius, and anything that hurts it. The attack
-  is then the animal's version of [the attack](#the-attack-tick-by-tick--read).
+    1. Reasons 3 and 4 get the default. The task also hands the attack it lets
+    through a time and a circle about the pasture's centre, which `0x100179c0`
+    merges into the new task ([A hit pulls a unit in](#a-hit-pulls-a-unit-in--read)
+    gives them).
+- **So**: a grazing animal fires at nothing. It attacks a hostile unit that
+  comes within the inner radius of its clan's current pasture while it is
+  itself inside the outer radius (*derived*), and anything that hurts it
+  (*read*, [below](#a-hit-pulls-a-unit-in--read)). The attack is then the
+  animal's version of [the attack](#the-attack-tick-by-tick--read).
 
 *Measured:* only nature clans carry zones — 12 of the 15, each with animals
 of its own. One more places animals with no zone at all, where slot 47 has no
 pasture to give (what the task does then is not read). Mission 02's two
 pastures are in [34-progression.md](34-progression.md#mission-02-the-constructor-end-to-end--derived).
+
+### A hit pulls a unit in — *read*
+
+**Every hit tells its victim who fired.** `ILifeSystem` slot 8
+(`Control.dll:0x1000ebc0`), the hit a struck object takes, first sends its object
+message `0x19` with the firer's object id (`IGameObject` slot 13 with class `0x10`,
+`0x1000ebdf`). That is before the shields, the invulnerability test and any damage
+is worked out, so a direct hit and every object a blast reaches (`0x10012ce0`) are
+told, **whatever the hit does to them**. A round passing through a shield bubble
+tells the shielded object too (`0x1000d1ed`), while its firer exists. The id is the
+round's property 127 (`0x10011766`, setter `0x1000e9d2`), which the gun's fire
+(`0x1002a3e8`) sets to the firing unit's id. **Message `0x1a` is never sent**: a
+search of every binary finds the two `0x19` sends and nothing else.
+
+`AniMesh.dll:0x10001370` routes class `0x10` to the agent's behaviour
+(`MBehaviour::SendMsg`), and slot 67 (`Behavior.dll:0x100064b0`) takes it. It does
+nothing for a building, for property `0x208` set (`+0xa64`), or in a network game
+(`+0xa04 & 4`, from the game mode's bit 2). Otherwise:
+
+1. It asks for a **reason-1 attack on the firer's logic id** (`0x10018060` →
+   `0x100179c0`).
+2. Unless the victim is a hero (`0x1020000`), it adds **0.004** to its clan
+   SuperAI's decrease toward the firer's clan (`ai.dll:0x10001fe0`). The clan's takt,
+   every 7–8 s (`0x100017f0`), takes that off the attitude and reads the word from it
+   again ([25-sensors.md](25-sensors.md#clan-relations-the-files-words-straight-through--read-and-measured)),
+   so enough hits turn a neutral or allied clan hostile, both ways.
+3. It **calls for help** (`0x1000c260`): message `0x12d` to every warrior
+   (`0x1008000` and no other bit) in its clan's areal snapshot within **400**, in
+   three dimensions. Each asks for a reason-5 attack (`0x10018030`) on the nearest
+   hostile warrior, builder or transport (mask `0x100e000`) its clan knows within
+   **3,000** of the victim, across the ground (`0x10001120`). **A hero is never
+   picked**, so a call against a lone hero finds nothing.
+
+**The gate** (`0x100179c0`) every interrupt passes, in order:
+
+| | refused when |
+|---|---|
+| 1 | an animal (`0x20000000`) whose current order is not 15, migrate: **an attacking animal takes no other interrupt** |
+| 2 | `DeterminMode` is set |
+| 3 | the unit is a building |
+| 4 | its clan's type is 3, neutral |
+| 5 | its current order is 7, build |
+| 6 | the running task's priority for the reason (slot 12) is 0.3 or less |
+| 7 | the pause `+0x5e0` has not run out: **2 s plus up to 3 s** (`0x1000388e`), one for every reason, started again whenever the gate reaches it, even if what follows fails |
+| 8 | a unit that is not a building with a speed cap (`+0x614`) below 0.5 or no mobile flag (`0x800`) (`0x10034510`) |
+| 9 | the attack's target (`0x10026d40`) is missing, itself, **of its own clan**, or destroyed: **no relation, radar or distance is asked** |
+| 10 | the unit has no weapon (the attack's start) |
+
+The new task goes on top. Its limit is the running task's answer merged with the
+running task's own, the tighter of each winning, and its start stamps the limit's
+timer (`0x100349a8`). Slot 9 (`0x10001660`) ends the attack past its time or outside
+its circle, in three dimensions, and the task beneath starts again.
+
+**What each task answers a hit** (slot 12 with reason 1, and its limit):
+
+| task | answer | the attack's limit |
+|---|---|---|
+| stop, and the tasks that embed it (seek and destroy, mine, construct) | 1 | 1,000 about where the unit stood (`0x100018a0`) |
+| patrol (`0x1002d250`) | 1, wherever the firer is | a place: radius + 60 about it; a building: radius + 80; a unit guarded: radius + 60 about it; inside a building, none |
+| follow (`0x1002acd0`) | 1 if armed | 2 × radius + 20 about the leader |
+| an attack an interrupt made (`0x10026b10`) | the firer's score, 1000 ÷ (*d* + 10) across the ground, 0 past 700 or with no snapshot record; it switches only to a firer scoring above its own target | |
+| an attack an order gave (`+0x54` 1) | 0 | |
+| migrate (`0x1002c640`) | 1 | by where the animal and the firer stand, across the ground, below |
+| standby, shutdown, go, transport, build, capture and capture building, search minerals, random go, boarding, research, the construction sphere | 0 | |
+
+A migrating animal's attack, about its pasture's centre:
+
+| the animal | the firer | time | circle |
+|---|---|---:|---|
+| beyond the outer radius | anywhere | 10 s | none |
+| within the outer radius | beyond it | 20 s | outer + 20 |
+| within the outer radius | between the inner and the outer | 25 s | outer + 80 |
+| within the outer radius | within the inner | 35 s | outer + 100 |
+
+For an engagement (reasons 0, 2, 5) a migrating animal answers 1 only when it and
+the contact are both within the outer radius: 20 s and outer + 80 for a contact
+within the inner radius, 10 s and outer + 20 otherwise.
+
+**An animal's attack** is the ordinary one with the animal's timers (5 + 5 s and
+4 + 4 s), going straight at the target on 30% of its picks. It fires on the target
+(mode 1) from within 200 and on the nearest hostile contact (mode 2) beyond, the
+target's place taken from the system map, not the radar. The fire control does
+nothing for an animal whose walker is idle (`0x10024069`).
+
+*Measured*, Mission 02's pastures: the western's outer radius 50, the eastern's 40,
+both inner 20. A hero firing from off a pasture draws a 20 s attack held within 70 m
+(west) or 60 m (east) of its centre.
 
 ## The fire control — *read*
 
@@ -1705,8 +1793,14 @@ captures by logic id 34 times.
     buildings.
 - What a fire-control request's third value, 0.5, does, and what sets `+0x5c`
   and `+0x60` to lock a unit's fire mode.
-- Who sends `MBehaviour` messages `0x19` and `0x1a`, the explosions that start a
-  retaliation.
+- ~~Who sends `MBehaviour` messages `0x19` and `0x1a`, the explosions that start a
+  retaliation.~~ Every hit's first step sends `0x19` with the firer's id, and so
+  does a round passing through a shield; `0x1a` is never sent
+  ([A hit pulls a unit in](#a-hit-pulls-a-unit-in--read)).
+- Whether fire mode 1's target fetch (`0x100241d8`, from the system map) consults
+  the radar when it aims or fires; who writes the clan attitude's increase field;
+  what `IGameObject` slot 21, the test that the firer still exists, answers; how
+  high a flying medusa holds against its attack's three-dimensional circle.
 - What a unit record's `+0x30` is. The wingman menu lets only 1 or 2 capture, the
   same records speak `_S` voices, 4 and 5 speak `_B`, and boarding wants 4
   ([27-ownership.md](27-ownership.md#a-neutral-unit-is-taken-by-the-hero--read-and-measured)).

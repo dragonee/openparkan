@@ -279,6 +279,9 @@ The hit is queued on the object that exploded and applied on its tick
   sector" ([below](#shields-a-generator-a-deflector-six-sectors--read-and-measured)).
 - **Kind 3** hits the exploding object's own nodes, then **every object whose
   bounds reach the blast**, through `ILifeSystem` slot 8.
+- **Before anything, the hit tells its object who fired** (message `0x19`,
+  `0x1000ebdf`), whatever it goes on to do
+  ([31-packages.md](31-packages.md#a-hit-pulls-a-unit-in--read)).
 - A hit does nothing if the object that fired it no longer exists, if it is
   the target's own, or if the target is **invulnerable** (property 162, `+0x5b0`
   — the `[CS] INVULNERABILITY` debug key sets it on the hero, `0x1005e487`,
@@ -493,6 +496,104 @@ armour fitted ([28-chassis.md](28-chassis.md#a-fitted-part-takes-over-its-slot--
 No building controller carries a deflector: a building's shield absorbs only
 once one is fitted (the `u_*_def` parts).
 
+**Where the figures sit** (*read*, the component record's values at `+0x2c`): a
+fight shield's value 0 is the sector maximum (times `+0x11c`, the level ratio),
+value 1 the recharge a second (times its node's condition), value 2 the charge a
+point, its power figure the idle draw a second, its resource the hit effect and its
+node the node whose life is its condition. A deflector's values 0–5 are the six
+sectors' coefficients, read as `values[i] ×` condition × level (id `0x300 + i`,
+`0x10021d00`), and its power figure its draw. A fitted generator re-parses its slot
+through slot 9 (`0x10025600`), taking the part's figures and effect names and
+keeping the slot's node ([28-chassis.md](28-chassis.md#a-fitted-part-takes-over-its-slot--read-and-measured)).
+
+**Who carries one** (*measured*): 61 of the 76 building assemblies carry a fight
+shield in their `fortif.rlb` controller and a deflector in a `u_*_def` part of
+their own (coefficient 0.36, power 0). The bridges, generators, the mast, the ruins
+and `mtp_s_n1` have neither; `teleport` and `mtp_m_n1` a deflector alone.
+
+| (*measured*) | sector max | recharge /s | charge /point | deflector | effect |
+|---|---|---|---|---|---|
+| `11tin1`, `11tin2` (C01 Mission 02) | 350 | 4 | 0.03 | 0.7 | `r_shield_r` |
+| `11smal1` | 1,500 | 11 | 0.04 | 0.7 | `r_shield_r` |
+| `hero11` | 1,850 | 15 | 0.04 | 0.9 | `r_shield_b` |
+| `12tower` (C01 Mission 03) | 3,800 | 80 | 0.06 | 1.0 | `r_shield_y` |
+| `l_bunk1` | 11,000 (`o_fsh_f_01`) | 120 | 0.0005 | 0.36 (`u_bun_def_l_01`) | `r_shield_g` |
+
+### Power — *read*
+
+The bubble's existence asks for no power (`0x1002c500`): both devices on
+(state `+0x50` not 0) and their nodes' conditions not 0. **Neither can be switched
+off**: no row of `hero.tbl`, `m1.tbl` or `m2.tbl` gives class 9 a state, `CICLS`
+names no class 21, and both are built on (class 9 at `0x20`, the generic device
+at 5) with no record overriding it (*measured*, 61 and 79 records).
+
+The **level** in a sector's strength is the deflector's `+0x4c`: the share of what
+its power channel wants that the channel is served, `min(1, supply ÷ want)`,
+written on the power tick (`0x1002dca0`). Classes 9, 10, 21 and 27 share channel
+5, served with channel 2 after the engines and channel 0 and before the weapons. A
+battery supplies its output × fill × condition a second (`0x100229a0`). The
+deflector draws its power × dt while on and whole (`0x10021860`); the generator
+draws power × dt + value 2 × min(value 1 × condition × dt, value 0 × (6 − Σ
+fills)) (`0x10025700`), and its charge is level × draw − power × dt, a point for
+every value 2 of it (`0x100257b0`).
+
+### A round meets a bubble — *read*
+
+- **Which objects.** The pair resolve (`Control.dll:0x1001d630`) gives a bubble
+  for a kind-4 object by its swept world bounding sphere and for a kind-3 one by
+  its sphere; the round's owner gives none.
+- **The touch** (`0x1001e9f0`), with *S* the bubble's radius plus the round's: a
+  round whose start lies within *S* of the object's start makes **no contact**, so
+  a shot from inside a bubble meets no shield; otherwise the first *t* ≤ 1 at which
+  the two spheres touch, moving toward each other, marks contact flag 4.
+- **The point** kept, sorted by distance from the round's start: the round's centre
+  at *t* moved toward the object's by *r* ÷ (*R* + *r*), on the bubble's surface,
+  then carried with the object's rest of the frame. No normal is kept; the sector
+  pick works the direction from the centre again.
+- **What the round does** (`0x1000d0c0`): a round with `+0x104` bit `0x2000000`
+  skips bubbles. With more life than the sector's strength it passes, the object is
+  told who fired ([31-packages.md](31-packages.md#a-hit-pulls-a-unit-in--read)), the
+  sector is emptied (slot 15 with 0: raw strength becomes *E* ÷ (coefficient ×
+  condition × level)) and the round's life drops by the strength. Otherwise it moves
+  to the point, runs its hit group and dies, its hit carrying the sector.
+
+### What a shield hit draws — *read*, and *measured*
+
+**The effect is the generator's own resource** (`.ctl` record `+0x6c`/`+0x8c`), not
+an action group's. Slot 1 (`0x100254e0`) loads it three times, the same names each
+time, as instances `0x20000001`–`3` on the object's node 0.
+
+- **When.** The sector pick (`0x1002c590`, called for every round contact at
+  `0x1000d19b` and every blast crossing the bubble at `0x1000ffc1`) plays it when
+  the sector's deflected strength is above 0 (`0x1002c83e`): never for a spent
+  sector, an unpowered deflector or a unit with no bubble, and also for a round
+  that passes through. A round the bubble stops does not flash again: its hit
+  carries the sector.
+- **Where** (`0x1002c844`–`0x1002c9ed`): a matrix whose first axis is *n*, the unit
+  vector from the bubble's centre to the hit, its second (−*n*.y, *n*.x, 0) and its
+  third their cross product, standing at the bubble's centre, placed in mode 2 and
+  kept on node 0, **scaled by the bubble's radius** on all three axes (`0x10025ca0`,
+  manager slots `0x28`, `0x20`), started in time mode 1 (`0x2c`). The instances are
+  taken in turn, (index + 1) mod 3, so a fourth hit restarts the first.
+- **Its colour** is the generator's (*measured*, the 61 class-9 records): `_df`
+  parts name `r_shield_r`, `_01` `_g`, `_02` `_b`, `_03` `_y`; the chassis slots
+  `_b` on `r_b_*` and `r_l_07`, `_r` on the other `r_l_*`, `r_h_02` and `r_t_*`,
+  `_g` on `r_m_*`; `o_fsh_f_df` and the `fortif.rlb` slots `f_shield_r`. **It does
+  not follow the sector's fill** (*read*): nothing edits the names, the instance is
+  picked by the counter alone, no value is passed, and each shield material is one
+  colour throughout. The HUD's sectors are what run from red to green
+  ([35-hud.md](35-hud.md#shields-six-sectors--read)).
+- **What `r_shield_<c>` draws** (0.5 s, flags 0): two type-9 emitters,
+  `NE_shield_<c>` (fade 1) and the white `NE_shield_w` (fade 0.5), placed in the
+  effect's frame (`+4` = 2) moving from 0.9 to 1.0 along *n* and sized
+  (0.07, 0.4, 0.4) → (0.077, 0.44, 0.44): a **hemisphere** (`+200` = 0: 8 around by 3
+  rings; 1: 16 × 6; 2: 24 × 9, `Terrain.dll:0x100273b0`) flat along the hit and 0.4
+  of the bubble across, on its surface; a type-3 `ENV_wave_<C>` quad facing the
+  camera at the centre, 2.4 → 2.5 of the radius, fading 0.5 → 0.1, the translucent
+  sphere a recording shows (orange for `_R`, (255, 60, 0)); and `hit_shld.wav`,
+  heard 10 to 100. `f_shield_*` draws the same at half the dome's size and a wave of
+  2.15 → 2.3. Nothing draws while a shield is not hit.
+
 ## Armour — *read*, and *measured*
 
 Class 27 (`i_arm`) is three numbers, kept when the part is created
@@ -691,6 +792,13 @@ shield, battery and ammunition (`Behavior.dll:0x10018100`, `0x10019372`,
 
 ## Not established
 
+- Which of the effect frame's axes a type-9 dome's pole ends on: as read
+  (`Effect.dll:0x1000d110`, a default direction (0, 0, 1)) its second, so the
+  flash's dome would stand across the hit rather than bulge toward it; not checked
+  against a recording. Where a round's `+0x104` bit `0x2000000`, which skips
+  bubbles, is set; the height below which a building's own collision context drops
+  a contact (`0x1001d846`); whether the deflector parts' own `deflector` and
+  `tur_deflector*` load effects loop.
 - ~~Which of ±x, ±y is a model's front.~~ Answered: +y, sector 0
   ([Shields](#shields-a-generator-a-deflector-six-sectors--read-and-measured)).
 - ~~How a collision object's start and end differ when the pass runs.~~

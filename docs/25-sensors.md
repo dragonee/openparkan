@@ -364,10 +364,22 @@ holds. Nothing maps a 0/1 file onto a 0/2 runtime.
 
 *Measured*, over the 101 clans of the 29 shipped missions: towards other clans
 the words are 0 on 135, 1 on 137 and 2 on 28, and every clan that names itself
-writes 1, which the loader turns into 2. No name misses its clan, and every word
-to or from a neutral clan is already 1. After the loader's rules every pair of
-clans holds the **same word both ways**: 69 pairs hostile, 69 neutral and 14
-allied. On Mission 01 the player (`Plr`) and the target dummies (`Trgt`) are
+writes 1, which the loader turns into 2. Every record's name matches a clan, and
+every word to or from a neutral clan is already 1. After the loader's rules every
+pair of clans holds the **same word both ways**: 69 pairs hostile, 69 neutral and 14
+allied.
+
+**One mission leaves a clan unnamed.** `CAMPAIGN.01/Mission.03`, *Outflanking
+Maneuver*, has five clans, and every one of them carries four relation records,
+none naming `player`. So every word towards `player` stays 0, and `player`'s own
+towards `Enemy` is 0 in its file: **the player and the enemy are hostile both
+ways**, which the mission, an attack on the enemy's bunker, needs. The nature clans'
+words towards `player` are 0 too, but a nature clan is hostile to no one by the
+target list's rule and to everyone by the behaviour's. The loader's record loop
+(`MisLoad.dll:0x100018c1`–`0x10001948`) runs to the same count the array is sized
+by (`[esi]`, `0x10001899`), and an unmatched record writes its word one before the
+array (`0x10001931` with index −1); whether that count is the clan count or the
+record count, and so what a fifth read on this mission lands on, is not read. On Mission 01 the player (`Plr`) and the target dummies (`Trgt`) are
 neutral to each other, as are `Trgt` and `Enm`.
 
 What follows for sensors: a clan's units put only the machines of clans at 0

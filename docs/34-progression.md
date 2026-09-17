@@ -437,9 +437,12 @@ with the flyer profile `chas_fly.var`, Type `CLASS_ANIMAL`.
 Both medusas start 7.7 and 9.6 m from the centre of the western pasture, and
 their clan changes pasture every 60–180 s at random. A grazing medusa shoots at
 nothing. It attacks a hostile unit — the hero, or the player's warbot — that
-comes within 20 m of the current pasture's centre, and anything that hurts it
-(*derived*). The briefing's `T02_T03` says as much: they attack only those who
-trespass on their territory.
+comes within 20 m of the current pasture's centre (*derived*), and anything that
+hurts it, whatever its radar holds: shot from off its pasture it goes for the
+firer for 20 s, held within 70 m of the western pasture's centre or 60 m of the
+eastern's (*read*, [31-packages.md](31-packages.md#a-hit-pulls-a-unit-in--read)).
+The briefing's `T02_T03` says as much: they attack only those who trespass on
+their territory.
 
 **Destroying both** empties `Anml`'s count, which completes the bonus
 objective with `T02_I04`. How a dead unit leaves the count is not read; the
