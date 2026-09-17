@@ -68,8 +68,16 @@ repairs, not only the Outpost's.
 For each unit in a dock that belongs to the building's clan or an ally
 (`0x10019318`), every building tick adds, per second of game time:
 
-- **10% of a full battery** (`0x10019372`, the device manager's value 1);
-- **10% of full life** and 10% of the device manager's value 7 (`0x10018100`);
+- **10% of a full battery** (`0x10019372`, the device manager's value 1): the
+  batteries' fill, raised, held to 1 and written into every battery with a
+  capacity (`Control.dll:0x1002bae6`);
+- **10% of full life** and 10% of the device manager's value 7 (`0x10018100`),
+  **the fight shield's mean sector fill** (`Control.dll:0x1002b6ae`,
+  [14-controls.md](14-controls.md#the-join-with-the-controller--read)): read,
+  raised, held to 1 and written back as id 7 (`0x1002ba9e`), which hands the
+  rise to the six sectors **in proportion to what each lacks** (`0x10025a90`),
+  the recharge's own spread, so a spent sector fills fastest. The deflector, the
+  power level and the generator's condition are not asked;
 - to **each gun**, 10% of its magazine rounded down but at least one round,
   and 10% of its capacitor (`0x100181e0`).
 

@@ -101,6 +101,11 @@ pub struct Part {
     pub scale: f32,
     /// Its nodes' hit points; `None` where it takes no damage.
     pub life: Option<Life>,
+    /// The earlier part and its node this part hangs on. In the game's one merged model a
+    /// turret's or gun's own node 0 is not merged: that socket takes its place
+    /// (`AniMesh.dll:0x1000a79d`, `Control.dll:0x10008c6a`, docs/28, "The order parts load
+    /// in"), so the part's nodes go when the socket does.
+    pub host: Option<(usize, usize)>,
     /// The portal quads, by triangle: a segment passes them whatever their flags, as a
     /// mover does (docs/24, "Portal quads stand between the rooms"). Empty on a mesh that
     /// wears none, which is every mesh but a building's.
@@ -246,6 +251,27 @@ pub struct Combat {
     /// numbered after the targets ([`Combat::hero_index`]), as the radar numbers it.
     pub hero: Option<Target>,
     pub fired: u64,
+}
+
+/// Part `p`'s socket, as the walk from node 0 treats the node standing in for the part's node 0
+/// (`0x10011130`): once the socket is destroyed, or its stage rose in this takt (`rose`, by
+/// part), the part's node 0 is destroyed, so its own walk takes every node below it. A turret
+/// shot off takes its guns and its radar with it.
+///
+/// STAND-IN: docs/26-damage.md#what-a-damaged-node-a-destroyed-part-and-a-dead-unit-draw--read-and-measured
+/// -- in the game the socket stands for the part's node 0 and its knocked-off flight carries
+/// the part's nodes; the engine keeps a life per part, so the part's node 0 is destroyed where
+/// it stands and its nodes explode and go there, not in the air.
+fn follow_socket(target: &mut Target, p: usize, rose: &[Vec<usize>]) {
+    let Some((h, socket)) = target.parts[p].host.filter(|&(h, _)| h < p) else { return };
+    let host = target.parts[h].life.as_ref().and_then(|l| l.nodes.get(socket));
+    if !host.is_some_and(|n| n.destroyed) && !rose[h].contains(&socket) {
+        return;
+    }
+    let Some(life) = target.parts[p].life.as_mut() else { return };
+    let Some(root) = life.nodes.first().filter(|n| !n.destroyed) else { return };
+    let all = root.life;
+    life.lose(0, all.max(f32::MIN_POSITIVE));
 }
 
 /// A unit dead (`0x10011098`): out of the fight, and every part goes with node 0, which
@@ -761,11 +787,17 @@ impl Combat {
                 kill(target);
                 events.push(Event::Killed { target: t });
             }
-            for (p, part) in target.parts.iter_mut().enumerate() {
-                let Some(life) = part.life.as_mut() else { continue };
+            // Parts load after their hosts, so a socket's walk has run before its part's.
+            let mut rose: Vec<Vec<usize>> = vec![Vec::new(); target.parts.len()];
+            for p in 0..target.parts.len() {
+                follow_socket(target, p, &rose);
+                let Some(life) = target.parts[p].life.as_mut() else { continue };
                 for change in life.takt(now_ms) {
                     events.push(match change {
-                        Change::Staged(node) => Event::Staged { target: t, part: p, node },
+                        Change::Staged(node) => {
+                            rose[p].push(node);
+                            Event::Staged { target: t, part: p, node }
+                        }
                         Change::Hidden(node) => Event::Hidden { target: t, part: p, node },
                         Change::KnockedOff(node) => Event::KnockedOff { target: t, part: p, node },
                     });
@@ -855,6 +887,7 @@ mod tests {
                 scale: 1.0,
                 life: Some(life),
                 portals: Rc::default(),
+                host: None,
             }],
             centre: at + Vec3::Z,
             radius: 1.5,
@@ -889,6 +922,63 @@ mod tests {
             .iter()
             .filter_map(|e| if let Event::Damaged { damage, .. } = e { Some(*damage) } else { None })
             .collect()
+    }
+
+    /// A unit of three parts: a body whose node 1 is a turret's socket, the turret, whose node
+    /// 1 carries a gun, and the gun.
+    fn turret_unit() -> Target {
+        let part = |points: &[f32], parents: Vec<Option<usize>>, host: Option<(usize, usize)>| {
+            let mut p = post(Vec3::ZERO, 1.0).parts.remove(0);
+            let table: Vec<NodeDamage> = points
+                .iter()
+                .map(|&d| NodeDamage {
+                    flags: 0,
+                    durability: d,
+                    density: 0.0,
+                    explosion: ResourceRef::default(),
+                })
+                .collect();
+            let vital = vec![false; parents.len()];
+            p.life = Some(Life::new(&table, parents, vital, 1.0, 1.0));
+            p.host = host;
+            p
+        };
+        let mut unit = post(Vec3::ZERO, 1.0);
+        unit.parts = vec![
+            part(&[500.0, 1.0], vec![None, Some(0)], None),
+            part(&[1.0, 270.0, 1.0], vec![None, Some(0), Some(1)], Some((0, 1))),
+            part(&[150.0, 150.0], vec![None, Some(0)], Some((1, 2))),
+        ];
+        unit
+    }
+
+    #[test]
+    fn a_turret_shot_off_its_body_takes_its_gun_and_a_gun_its_nodes() {
+        let mut c = Combat::default();
+        c.targets.push(turret_unit());
+        let life = |c: &Combat, p: usize| c.targets[0].parts[p].life.clone().unwrap();
+        // The turret's main node destroyed: its socket for the gun goes with it in the turret's
+        // walk, and the gun's nodes in the gun's, in the same takt.
+        c.targets[0].parts[1].life.as_mut().unwrap().hit(1, 270.0);
+        c.takt_lives(0.0);
+        assert!(life(&c, 1).nodes[2].destroyed);
+        assert!(life(&c, 2).nodes.iter().all(|n| n.destroyed && n.hidden()), "{:?}", life(&c, 2).nodes);
+        assert!(!life(&c, 0).nodes[1].destroyed && c.targets[0].alive, "the body stands");
+
+        // The body's socket destroyed: the turret goes, and its gun through it.
+        let mut c = Combat::default();
+        c.targets.push(turret_unit());
+        c.targets[0].parts[0].life.as_mut().unwrap().hit(1, 1.0);
+        c.takt_lives(0.0);
+        assert!(life(&c, 1).nodes.iter().all(|n| n.destroyed));
+        assert!(life(&c, 2).nodes.iter().all(|n| n.destroyed));
+
+        // A gun shot off leaves the turret whole.
+        let mut c = Combat::default();
+        c.targets.push(turret_unit());
+        c.targets[0].parts[2].life.as_mut().unwrap().hit(1, 150.0);
+        c.takt_lives(0.0);
+        assert!(life(&c, 1).nodes.iter().all(|n| !n.destroyed));
     }
 
     #[test]

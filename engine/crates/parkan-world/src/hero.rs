@@ -69,9 +69,13 @@ impl Hero {
         let pilot = Hero::pilot_for(assembly, &chassis.record.clone())?;
         // The robot's parts, those whose meshes load, in its order.
         let (mut lives, mut blasts) = (Vec::new(), Vec::new());
+        let armour = crate::shields::armour(assembly, placed.kind, &placed.path);
         for part in &parts {
             let Some(mesh) = assembly.mesh(&part.reference) else { continue };
-            let (life, blast) = part_damage(assembly, part, &mesh.mesh, 1.0, false);
+            let (mut life, blast) = part_damage(assembly, part, &mesh.mesh, 1.0, false);
+            if let Some(life) = life.as_mut() {
+                life.armour = armour;
+            }
             lives.push(life);
             blasts.push(blast);
         }
@@ -120,6 +124,8 @@ impl Hero {
     /// guns the number keys select and the button fires, then the turret and the guns.
     /// Returns the rounds that left, by gun.
     pub fn tick(&mut self, dt_ms: f64, mouse: [f32; 2], ground: &Ground) -> Vec<(usize, Shot)> {
+        let lives = &self.lives;
+        self.robot.check_devices(|p, n| crate::play::node_alive(lives.get(p).and_then(Option::as_ref), n));
         let shots = drive(&mut self.robot, &mut self.pilot, &mut self.fire_held, dt_ms, mouse, ground);
         let lives = &self.lives;
         self.robot.turn_devices(|p, n| crate::play::node_alive(lives.get(p).and_then(Option::as_ref), n));

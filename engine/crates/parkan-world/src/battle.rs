@@ -245,13 +245,18 @@ impl Battle {
         let place = placement(object.position, object.rotation);
         let damageable = !matches!(object.kind, mission::KIND_VEGETATION | mission::KIND_ROCK);
         let object_ratio = object_ratio(clans, object, player, ratio);
+        let armour =
+            if damageable { crate::shields::armour(assembly, object.kind, &object.path) } else { None };
         let mut parts = Vec::new();
         let mut blasts = Vec::new();
         let mut part_wears = Vec::new();
         let mut part_meshes = Vec::new();
         let mut lasts = 0.0;
         let (mut lo, mut hi) = (Vec3::splat(f32::MAX), Vec3::splat(f32::MIN));
+        // Each assembly part's index among the parts that load, which a part's host names.
+        let mut loaded_as: Vec<Option<usize>> = Vec::new();
         for part in assembly.parts(object.kind, &object.path) {
+            loaded_as.push(None);
             let Some(loaded) = assembly.mesh(&part.reference) else { continue };
             if parts.is_empty() {
                 let ctl = assembly.library.get(&part.record).and_then(|r| r.slot_with_suffix("ctl")).cloned();
@@ -279,14 +284,23 @@ impl Battle {
                 lo = lo.min(c - Vec3::splat(r * scale));
                 hi = hi.max(c + Vec3::splat(r * scale));
             }
-            let (life, part_blasts) = if damageable {
+            let (mut life, part_blasts) = if damageable {
                 part_damage(assembly, &part, &mesh, object_ratio, object.kind == mission::KIND_BUILDING)
             } else {
                 (None, Vec::new())
             };
+            // One control system holds every part's nodes, so the one armour covers them all.
+            if let Some(life) = life.as_mut() {
+                life.armour = armour;
+            }
             blasts.push(part_blasts);
             let portals = Rc::new(crate::models::portal_triangles(&mesh, &loaded.wear));
-            parts.push(Part { mesh, nodes, scale, life, portals });
+            let host = usize::try_from(part.host)
+                .ok()
+                .and_then(|h| loaded_as.get(h).copied().flatten())
+                .zip(usize::try_from(part.node).ok());
+            *loaded_as.last_mut().unwrap() = Some(parts.len());
+            parts.push(Part { mesh, nodes, scale, life, portals, host });
             part_wears.push(loaded.wear.materials.clone());
         }
         if parts.is_empty() || lo.x > hi.x {

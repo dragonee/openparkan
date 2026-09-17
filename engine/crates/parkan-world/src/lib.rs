@@ -21,6 +21,7 @@ pub mod music;
 pub mod pick;
 pub mod places;
 pub mod play;
+pub mod power;
 pub mod progress;
 pub mod research;
 pub mod resources;

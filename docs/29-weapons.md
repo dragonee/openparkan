@@ -176,6 +176,13 @@ time driver catches up, running several events in one frame if it has to
 (`0x1002d2e2`). At each wake the gun's fire method either continues a barrel
 stroke or starts one. It starts one only if all of these hold:
 
+- its node has life: slot 2 (`0x10021820`, called at `0x10029cc3`) answers 1 at
+  a life of 0, and the gun reports 5 as for an empty magazine (`0x10029f8d`). A
+  stroke already under way is continued before the test (`0x10029cb9`), so its
+  round still leaves. A gun part's node 0 is its turret's socket
+  ([28-chassis.md](28-chassis.md#the-order-parts-load-in-and-what-a-slot-keeps--read-and-measured)),
+  so a turret destroyed takes the gun's nodes, and the gun, with it
+  ([26-damage.md](26-damage.md#what-a-damaged-node-a-destroyed-part-and-a-dead-unit-draw--read-and-measured));
 - it has rounds (state 5 otherwise);
 - its capacitor holds value 2 (state 6 otherwise);
 - its ready byte `+0x118` is set (state 7 otherwise, `0x10029d27`). The

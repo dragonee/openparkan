@@ -287,6 +287,129 @@ fn the_heros_laser_kills_a_small_target_in_two_hits() {
     assert_eq!(play.killed, vec![object]);
 }
 
+/// The hero's battery pays for what it runs (docs/23, "Bots spend power through the same code,
+/// priced by part"): standing, its shield, deflector, detection shield and radar idle at 2.39 a
+/// second of its 4,080; walking costs nothing more, every state of its chassis carrying an engine
+/// factor of 0 (docs/24); camouflage adds its 0.3; G switches its repair system on, which heals its
+/// nodes at 15 × its node's condition a second for 0.04 a point and 0.1 idle, and off again; and a
+/// laser shot's 5.5 is drawn back into its capacitor from the battery, served after the rest.
+#[test]
+#[ignore = "needs the game install"]
+fn the_heros_battery_pays_for_its_shield_repair_camouflage_and_laser_but_not_its_walking() {
+    use parkan_formats::mission;
+    use parkan_sim::damage::{Life, share_loss};
+    use parkan_world::play::Play;
+
+    let game = gamedir::find(None).expect("a Parkan install: set PARKAN_DIR");
+    let dir = gamedir::resolve(&game, gamedir::MISSION_01).unwrap();
+    let m = mission::parse(&std::fs::read(dir.join("data.tma")).unwrap(), "Mission.01").unwrap();
+    let mut play = Play::load(&game, &m).unwrap().expect("Mission 01 has a hero");
+    let tick = |play: &mut Play, seconds: f32| {
+        for _ in 0..(seconds * 60.0) as usize {
+            play.update_input();
+            play.tick(1000.0 / 60.0, [0.0; 2]);
+        }
+    };
+    let power = play.hero.robot.power.clone().expect("the hero carries a battery");
+    let (battery, _) = power.batteries[0];
+    assert_eq!((power.batteries.len(), battery.capacity, battery.output), (1, 4080.0, 6.8));
+    let spent = |play: &Play| (1.0 - play.battery(None).unwrap()) * 4080.0;
+    // What it spends a second over `seconds`, timed by its own power ticks.
+    let last = |play: &Play| play.hero.robot.power.as_ref().unwrap().last_ms;
+    let rate = |play: &mut Play, seconds: f32| {
+        let (before, from) = (spent(play), last(play));
+        tick(play, seconds);
+        (spent(play) - before) / ((last(play) - from) / 1000.0) as f32
+    };
+    // A key's press and release rows, for a class's state row.
+    let press = |play: &mut Play, class: &str| {
+        let key = play
+            .hero
+            .pilot
+            .rows
+            .iter()
+            .find(|r| r.target == class && r.command == "MCMD_STATE")
+            .unwrap()
+            .key
+            .clone();
+        play.key(&key, true);
+        play.update_input();
+        play.key(&key, false);
+    };
+
+    tick(&mut play, 0.5);
+    let idle = rate(&mut play, 10.0);
+    assert!((idle - 2.39).abs() < 0.05, "standing, the idle draws: {idle} a second");
+    let from = play.hero.walker.body.position;
+    play.key("SCAN_W", true);
+    let walking = rate(&mut play, 5.0);
+    play.key("SCAN_W", false);
+    assert!(play.hero.walker.body.position.distance(from) > 20.0, "the hero walks");
+    assert!((walking - idle).abs() < 0.05, "walking costs nothing more: {walking} against {idle}");
+
+    press(&mut play, "CICLS_DETECTSHIELD");
+    assert!(play.hero.pilot.switches.camouflage);
+    let camouflaged = rate(&mut play, 5.0);
+    assert!((camouflaged - idle - 0.3).abs() < 0.05, "camouflage adds 0.3: {camouflaged}");
+    press(&mut play, "CICLS_DETECTSHIELD");
+
+    // Half its life gone from every node. The repair system sits on node 0, the first it heals,
+    // so it starts at 7.5 points a second and speeds up with its node's condition: node 0's 190
+    // grow by 15 ÷ 380 of themselves a second, 190 × (e^(150/380) − 1) ≈ 92 in ten seconds.
+    let full: f32 = play.hero.lives.iter().flatten().map(Life::full).sum();
+    let total = |play: &Play| play.hero.lives.iter().flatten().map(Life::total).sum::<f32>();
+    let mut lives: Vec<&mut Life> = play.hero.lives.iter_mut().flatten().collect();
+    share_loss(&mut lives, full * 0.5);
+    let hurt = total(&play);
+    let unrepaired = rate(&mut play, 3.0);
+    assert!((total(&play) - hurt).abs() < 1e-3, "nothing heals it while repair is off");
+    assert!((unrepaired - idle).abs() < 0.05, "hurt, it idles as before: {unrepaired} against {idle}");
+    press(&mut play, "CICLS_REPAIRSYS");
+    assert!(play.hero.pilot.switches.repair, "G switches repair on");
+    let before = total(&play);
+    let repairing = rate(&mut play, 10.0);
+    let healed = total(&play) - before;
+    assert!((86.0..98.0).contains(&healed), "{healed} in 10 s");
+    assert!(
+        (repairing - idle - (0.1 + 0.04 * healed / 10.0)).abs() < 0.05,
+        "at 0.04 a point and 0.1: {repairing}"
+    );
+    press(&mut play, "CICLS_REPAIRSYS");
+    assert!(!play.hero.pilot.switches.repair);
+    let off = total(&play);
+    tick(&mut play, 2.0);
+    assert!((total(&play) - off).abs() < 1.0, "off again, it stops");
+
+    // The laser alone, fired for three seconds: its capacitor spends 5.5 a shot and is refilled
+    // from what the battery has left after the idle draws.
+    play.key("SCAN_W_1", true);
+    play.key("SCAN_W_1", false);
+    tick(&mut play, 0.1);
+    let selected: Vec<usize> =
+        (0..play.hero.robot.guns.len()).filter(|&g| play.hero.robot.guns[g].selected).collect();
+    assert_eq!(selected.len(), 1, "key 1 leaves the laser alone selected");
+    let laser = selected[0];
+    let capacitor = play.hero.robot.guns[laser].capacitor;
+    play.key("SCAN_LMOUSE", true);
+    let firing = rate(&mut play, 3.0);
+    play.key("SCAN_LMOUSE", false);
+    let drawn = play.hero.robot.guns[laser].charge;
+    assert!(drawn < capacitor - 10.0, "its shots spend the capacitor: {drawn} of {capacitor}");
+    assert!(
+        firing > idle + 2.0 && firing <= 6.8 + 1e-3,
+        "the battery refills it at up to its output: {firing}"
+    );
+    // Its battery's node, the hurt chassis's node 0, stands at 74%: it gives 4.9 a second, 2.5
+    // of it past the idle draws.
+    tick(&mut play, 15.0);
+    let refilled = play.hero.robot.guns[laser].charge;
+    assert!(
+        (refilled - capacitor).abs() < 1e-3,
+        "full again: {refilled} of {capacitor}, {drawn} after firing"
+    );
+    assert!(play.battery(None).unwrap() < 1.0 - (idle * 50.0) / 4080.0);
+}
+
 #[test]
 #[ignore = "needs the game install"]
 fn the_hero_destroys_mission_01s_five_targets() {
@@ -2533,7 +2656,7 @@ fn mission_02s_warbot_lets_the_hero_out_on_the_outpost_islands_flat_ground() {
 
 #[test]
 #[ignore = "needs the game install"]
-fn mission_02s_outpost_charges_repairs_and_rearms_the_hero_standing_on_its_dock() {
+fn mission_02s_outpost_charges_repairs_rearms_and_shields_the_hero_standing_on_its_dock() {
     use parkan_sim::damage::{Life, share_loss};
     use parkan_world::cockpit::panels::life_share;
     use parkan_world::places::PLACE_DOCK;
@@ -2545,15 +2668,23 @@ fn mission_02s_outpost_charges_repairs_and_rearms_the_hero_standing_on_its_dock(
             play.tick(1000.0 / 60.0, [0.0; 2]);
         }
     };
-    // Half the hero's life gone and its first gun empty.
+    // Half the hero's life gone, its shield half spent, one sector wholly, and its first gun
+    // empty.
     let hurt = |play: &mut parkan_world::play::Play| {
         let full: f32 = play.hero.lives.iter().flatten().map(Life::full).sum();
         let mut lives: Vec<&mut Life> = play.hero.lives.iter_mut().flatten().collect();
         let left: f32 = lives.iter().map(|l| l.total()).sum();
         share_loss(&mut lives, left - full * 0.5);
         play.hero.guns[0].rounds = 0;
+        let shield = play.battle.combat.hero.as_mut().and_then(|h| h.shield.as_mut()).unwrap();
+        shield.fills = [0.0, 1.0, 0.5, 0.5, 0.5, 0.5];
     };
     let life = |play: &parkan_world::play::Play| life_share(play.hero.lives.iter().flatten());
+    let shield = |play: &parkan_world::play::Play| {
+        play.battle.combat.hero.as_ref().and_then(|h| h.shield.as_ref()).unwrap().mean_fill()
+    };
+    // What `hero`'s generator recharges by itself in a second, as a mean fill: 15 of 6 × 1,850.
+    let recharge = 15.0 / (6.0 * 1850.0);
 
     tick(&mut play, 0.5);
     // `fr_l_angar`'s one place is its ground-level dock (docs/27, "The places"): 10 across, 12
@@ -2577,6 +2708,7 @@ fn mission_02s_outpost_charges_repairs_and_rearms_the_hero_standing_on_its_dock(
     assert_ne!(play.units[outpost].clan, Some(play.player_clan));
     assert!((life(&play) - 0.5).abs() < 1e-3, "no charge from another clan's dock: {}", life(&play));
     assert_eq!(play.hero.guns[0].rounds, 0);
+    assert!(shield(&play) < 0.5 + 2.5 * recharge, "the shield only recharges itself: {}", shield(&play));
 
     // Taken, and the hero hurt again away from it.
     assert!(play.stand_on_pod(outpost));
@@ -2586,18 +2718,22 @@ fn mission_02s_outpost_charges_repairs_and_rearms_the_hero_standing_on_its_dock(
     tick(&mut play, 0.5);
     hurt(&mut play);
 
-    // On the dock: a tenth of full life and of the magazine a second, full in ten seconds.
+    // On the dock: a tenth of full life, of the shield's mean fill and of the magazine a second,
+    // full in ten seconds.
     play.cues.clear();
     put(&mut play.hero.walker, &play.ground, dock);
     tick(&mut play, 2.0);
     let after = life(&play);
     assert!((after - 0.7).abs() < 0.01, "a tenth of full life a second: {after}");
+    let shielded = shield(&play);
+    assert!((shielded - 0.7).abs() < 0.01 + 2.0 * recharge, "a tenth of the shield a second: {shielded}");
     // A tenth of the magazine a second less what each tick's rounding down drops: 93 of 100.
     let rounds = play.hero.guns[0].rounds;
     assert!((85..=100).contains(&rounds), "a tenth of a magazine of {magazine} a second: {rounds}");
     tick(&mut play, 9.0);
     assert_eq!(life(&play), 1.0, "full in ten seconds, whatever it is");
     assert_eq!(play.hero.guns[0].rounds, magazine);
+    assert!(shield(&play) > 0.9999, "every sector full, the spent one too: {}", shield(&play));
 
     // The dock's glow runs while it charges, with `f_recharge.wav` in it (docs/13).
     let charged: Vec<String> = play.cues.iter().map(|c| c.sound.to_ascii_lowercase()).collect();
@@ -5064,6 +5200,156 @@ fn c01_m02s_patrol_takes_on_the_hero_in_its_ground_and_the_heros_shield_meets_th
         "and the generator's effect plays on it"
     );
     assert!(!play.hero.dead());
+}
+
+/// Outflanking Maneuver's units wear the armour fitted into their chassis's slot, and every hit on
+/// any node of theirs passes through it (docs/26, "Armour"): the hero and the enemy's `12wel2`
+/// warbots `i_arm_l_02`, the helicopters `i_arm_t_df`, the tower `i_arm_b_05`. A laser bolt of 250
+/// takes 165 off a `12wel2`'s hull of 224, so it stands after one bolt where it fell to one before.
+#[test]
+#[ignore = "needs the game install"]
+fn c01_m03s_units_wear_their_fitted_armour_on_every_node_and_it_cuts_a_laser_bolt_by_a_third() {
+    use parkan_formats::mission;
+
+    let game = gamedir::find(None).expect("a Parkan install: set PARKAN_DIR");
+    let dir = gamedir::resolve(&game, gamedir::C01_MISSION_03).unwrap();
+    let m = mission::parse(&std::fs::read(dir.join("data.tma")).unwrap(), "Mission.03").unwrap();
+    let mut play = parkan_world::play::Play::load(&game, &m).unwrap().expect("a hero");
+
+    let near = |a: Option<(f32, f32)>, b: (f32, f32)| {
+        a.is_some_and(|a| (a.0 - b.0).abs() < 1e-5 && (a.1 - b.1).abs() < 1e-7)
+    };
+    let light = (0.62362, 0.00014);
+    assert!(
+        play.hero.lives.iter().flatten().all(|l| near(l.armour, light)),
+        "the hero's i_arm_l_02 on every part"
+    );
+    let of = |path: &str| {
+        let objects = &play.battle.objects;
+        (0..objects.len())
+            .filter(|&t| m.objects[objects[t]].path.eq_ignore_ascii_case(path))
+            .collect::<Vec<_>>()
+    };
+    for (path, armour) in [
+        ("UNITS\\UNITS\\BATTLE\\12wel2.dat", light),
+        ("UNITS\\UNITS\\BATTLE\\12hel1.dat", (0.85425, 0.00008)),
+        ("UNITS\\UNITS\\BATTLE\\12tower.dat", (0.21893, 0.00028)),
+    ] {
+        let targets = of(path);
+        assert!(!targets.is_empty(), "{path} is placed");
+        for t in targets {
+            let lives: Vec<_> =
+                play.battle.combat.targets[t].parts.iter().filter_map(|p| p.life.as_ref()).collect();
+            assert!(
+                lives.len() > 1 && lives.iter().all(|l| near(l.armour, armour)),
+                "{path}: {:?}",
+                lives[0].armour
+            );
+        }
+    }
+
+    // An enemy `12wel2`'s hull: 320 hit points at MEDIUM's level ratio of 0.7.
+    let wel = *of("UNITS\\UNITS\\BATTLE\\12wel2.dat")
+        .iter()
+        .find(|&&t| m.objects[play.battle.objects[t]].clan_id() == Some(1))
+        .expect("an enemy 12wel2");
+    let hull = play.battle.combat.targets[wel].parts[0].life.as_mut().unwrap();
+    assert!((hull.nodes[0].max - 224.0).abs() < 0.01);
+    let bolt = play
+        .battle
+        .combat
+        .kinds
+        .iter()
+        .find(|k| k.name.eq_ignore_ascii_case("bl_h_01"))
+        .map(|k| k.hit_points + k.hit.as_ref().unwrap().damage);
+    assert_eq!(bolt, Some(250.0), "the hero's laser bolt");
+    assert!(!hull.hit(0, 250.0), "one bolt leaves the hull standing");
+    assert!(
+        (hull.nodes[0].life - (224.0 - (0.62362 * 250.0 + 0.00014 * 250.0 * 250.0))).abs() < 0.05,
+        "{}",
+        hull.nodes[0].life
+    );
+    assert!(hull.hit(0, 250.0), "and a second destroys it");
+}
+
+/// A turret shot off takes what hangs on it: in the game's one merged model a gun part's node 0
+/// is the turret's socket, so the walk from the turret's main node down destroys the socket and
+/// the gun's nodes below it (docs/26, "Children go with their parent"), and a gun whose node has
+/// no life starts no stroke (`Control.dll:0x10029cc3`), nor a radar a scan. Outflanking
+/// Maneuver's first `12tower`, firing on the hero from 150 m, falls silent once its turret goes;
+/// an enemy `12wel2` shot through one gun keeps firing the other two.
+#[test]
+#[ignore = "needs the game install"]
+fn c01_m03s_tower_whose_turret_is_shot_off_loses_its_gun_and_radar_and_fires_no_more() {
+    let mut play = campaign_play(gamedir::C01_MISSION_03);
+    let tower = play.units.iter().position(|u| u.logical_id == 23).expect("the first 12tower");
+    let e = play.robots.iter().position(|(t, _)| *t == tower).expect("the tower is a robot");
+    // The rounds the tower has in the air, by id.
+    let rounds = |play: &parkan_world::play::Play| -> Vec<u64> {
+        play.battle.combat.rounds.iter().filter(|r| r.owner == Some(tower)).map(|r| r.id).collect()
+    };
+    assert!(play.stand_facing(tower, 150.0, 0.0));
+    let mut seen = std::collections::HashSet::new();
+    for _ in 0..(5 * 60) {
+        play.tick(1000.0 / 60.0, [0.0; 2]);
+        seen.extend(rounds(&play));
+    }
+    assert!(!seen.is_empty(), "the tower fires on the hero");
+
+    // The turret's main node `TTur` destroyed where it stands.
+    let robot = &play.robots[e].1;
+    let turret = robot.turret_part;
+    let gun_part = robot.gun_parts.iter().flatten().next().expect("the tower's gun is a part").part;
+    assert_eq!(play.battle.combat.targets[tower].parts[gun_part].host, Some((turret, 5)), "on `Base_gun`");
+    assert!(robot.radar_node.is_some_and(|(p, _)| p == turret), "{:?}", robot.radar_node);
+    play.battle.combat.targets[tower].parts[turret].life.as_mut().unwrap().lose(1, 1.0e9);
+    // A stroke under way may still send its round in the first frames.
+    for _ in 0..30 {
+        play.tick(1000.0 / 60.0, [0.0; 2]);
+        seen.extend(rounds(&play));
+    }
+    let mut after = Vec::new();
+    for _ in 0..(8 * 60) {
+        play.tick(1000.0 / 60.0, [0.0; 2]);
+        after.extend(rounds(&play).into_iter().filter(|id| !seen.contains(id)));
+    }
+    let target = &play.battle.combat.targets[tower];
+    assert!(target.alive, "the tower's base stands");
+    let gun = target.parts[gun_part].life.as_ref().unwrap();
+    assert!(
+        gun.nodes.iter().all(|n| n.destroyed && n.hidden()),
+        "the gun goes with its socket: {:?}",
+        gun.nodes
+    );
+    let robot = &play.robots[e].1;
+    assert!(robot.guns.iter().all(|g| g.broken) && robot.radar.broken);
+    assert!(after.is_empty(), "and the tower fires no more: {after:?}");
+
+    // An enemy `12wel2` with one gun part shot through: that gun is broken, the others are not.
+    let mut play = campaign_play(gamedir::C01_MISSION_03);
+    let (r, (wel, robot)) = play
+        .robots
+        .iter()
+        .enumerate()
+        .find(|(_, (t, robot))| {
+            robot.gun_parts.iter().flatten().count() == 3 && play.units[*t].clan == Some(1)
+        })
+        .map(|(r, (t, robot))| (r, (*t, robot.clone())))
+        .expect("an enemy warbot with three gun parts");
+    let shot = robot.gun_parts.iter().flatten().next().unwrap().part;
+    play.battle.combat.targets[wel].parts[shot].life.as_mut().unwrap().lose(1, 1.0e9);
+    for _ in 0..3 {
+        play.tick(1000.0 / 60.0, [0.0; 2]);
+    }
+    let robot = &play.robots[r].1;
+    let broken: Vec<bool> = robot
+        .gun_parts
+        .iter()
+        .zip(&robot.guns)
+        .filter_map(|(p, g)| p.as_ref().map(|p| (p.part == shot) == g.broken))
+        .collect();
+    assert!(broken.iter().all(|&b| b), "only the gun shot through is broken: {broken:?}");
+    assert!(!robot.radar.broken);
 }
 
 /// Outflanking Maneuver's relation records name every clan but `player`. The loader files each

@@ -32,23 +32,29 @@ pub struct Radar {
     /// Value 3, m, and value 4, ms.
     pub range: f32,
     pub period_ms: f32,
+    /// Its node has no life left (slot 2, `0x10021820`), which the owner keeps from the node.
+    pub broken: bool,
     contacts: Vec<usize>,
     next_ms: f64,
 }
 
 impl Radar {
     pub fn new(range: f32, period_ms: f32) -> Self {
-        Self { range, period_ms, contacts: Vec::new(), next_ms: f64::NEG_INFINITY }
+        Self { range, period_ms, broken: false, contacts: Vec::new(), next_ms: f64::NEG_INFINITY }
     }
 
-    /// The contacts of a radar at `at` by `now_ms`: the last answer while it is fresh,
-    /// otherwise a new scan of the objects within range.
+    /// The contacts of a radar at `at` by `now_ms`: none while its node is destroyed
+    /// (`0x10024390` asks slot 2 first), the last answer while it is fresh, otherwise a new scan
+    /// of the objects within range.
     ///
     /// STAND-IN: docs/25-sensors.md#a-scan-is-a-sphere-a-falloff-and-three-tests--read --
     /// the three signatures a detection weighs are not computed: every live object within
     /// the range is detected. A unit's mass alone is thousands of kilograms, which a fitted
     /// radar's 0.05 sees out to nearly its whole range.
     pub fn scan(&mut self, now_ms: f64, at: Vec3, world: &[Contact]) -> &[usize] {
+        if self.broken {
+            return &[];
+        }
         if now_ms >= self.next_ms {
             self.next_ms = now_ms + f64::from(self.period_ms);
             self.contacts = (0..world.len())
@@ -239,6 +245,11 @@ mod tests {
         assert_eq!(radar.scan(750.0, Vec3::ZERO, &world), &[0, 1]);
         world[0].alive = false;
         assert_eq!(radar.scan(1500.0, Vec3::ZERO, &world), &[1]);
+        radar.broken = true;
+        assert!(
+            radar.scan(3000.0, Vec3::ZERO, &world).is_empty(),
+            "a radar whose node is destroyed sees nothing"
+        );
     }
 
     #[test]

@@ -21,6 +21,7 @@ pub mod input;
 pub mod machine;
 pub mod motion;
 pub mod orders;
+pub mod power;
 pub mod progression;
 pub mod research;
 pub mod script;

@@ -321,7 +321,8 @@ briefing's route. [40-command-mode](docs/40-command-mode.md#not-established),
 - [ ] What building interface `0xb` slot 16 asks about a place's node; what property `0x208` is (a network mirror flag is a guess); whether anything sets `pTeleFunc`.
 - [ ] Whether a player-driven small unit can take the Teleport's pod.
 - [ ] [M14] The places besides a dock's and a main teleport's (loading places) do not tick by the place rule yet; the place timer's random source; whether a destroyed generator stays in `World3D.dll`'s queue 3.
-- [ ] [M14] What a dock does with a unit's batteries and shields, neither simulated, and with the device manager's value 7; what the game drives a dock's `f_recharge_*` glow with, whose own time mode is 0, a value set from outside.
+- [ ] [M14] What the game drives a dock's `f_recharge_*` glow with, whose own time mode is 0, a value set from outside.
+- [ ] [M14] The AI's repair decision and camouflage in play, and what sends an AI unit short of charge to a dock.
 - [ ] Why the hero's panel dims in the pod room, and why the chamber's glow reads greyer than the recording's (the dawn scene colour is the guess).
 - [ ] Message 16, the helicopter in route 2, has no test.
 

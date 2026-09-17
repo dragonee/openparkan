@@ -65,6 +65,10 @@ pub const FRAME_EASE_MS: f64 = 1000.0;
 pub const VOICE_LIFE_LOW: &str = "VOICE_LIFE_LOW";
 pub const VOICE_BATTERY_LOW: &str = "VOICE_BATT_LOW";
 pub const VOICE_GAP_MS: f64 = 20_000.0;
+/// What the cockpit says as the player's unit's repair system is switched on and off
+/// (`iron3d.dll:0x100a5485`, docs/26, "Repair").
+pub const VOICE_REPAIR_ON: &str = "VOICE_REPAIR_SYS_ON";
+pub const VOICE_REPAIR_OFF: &str = "VOICE_REPAIR_SYS_OFF";
 
 /// A view of a unit a panel holds: where on the layout, the camera, and the unit.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -108,6 +112,8 @@ pub struct Panels {
     pub hero_name: String,
     frame_clock_ms: f64,
     last_voices_ms: [Option<f64>; 2],
+    /// The player's unit and whether its repair system was on, last seen.
+    last_repair: Option<(Option<usize>, bool)>,
 }
 
 /// A unit's name (`0x10075d50`, `0x10076270`): "Human" for a hero, "Animal", or its size,
@@ -217,13 +223,12 @@ impl Panels {
             hero_name: name(ROBOT_HERO, 0, 0, 0, strings),
             frame_clock_ms: 0.0,
             last_voices_ms: [None; 2],
+            last_repair: None,
         }
     }
 
-    /// The own panel's voices due at `now_ms`.
-    ///
-    /// STAND-IN: docs/23-economy.md#bots-spend-power-through-the-same-code-priced-by-part--read-and-measured
-    /// -- batteries are not simulated: they read full, so the low battery voice never plays.
+    /// The own panel's voices due at `now_ms`, and the repair system's as the player switches it
+    /// (`iron3d.dll:0x10076e10`): a change on the same unit, one with a repair system.
     pub fn voices(&mut self, play: &Play, now_ms: f64) -> Vec<&'static str> {
         let life = life_share(play.hero.lives.iter().flatten());
         let mut out = Vec::new();
@@ -231,6 +236,22 @@ impl Panels {
         if life < 0.2 && due(self.last_voices_ms[0]) {
             out.push(VOICE_LIFE_LOW);
             self.last_voices_ms[0] = Some(now_ms);
+        }
+        let unit = play.driven_target();
+        if play.battery(unit).is_some_and(|b| b < 0.2) && due(self.last_voices_ms[1]) {
+            out.push(VOICE_BATTERY_LOW);
+            self.last_voices_ms[1] = Some(now_ms);
+        }
+        let robot = match unit {
+            None => Some(&play.hero.robot),
+            Some(t) => play.robots.iter().find(|(rt, _)| *rt == t).map(|(_, r)| r),
+        };
+        if robot.is_some_and(|r| r.power.as_ref().is_some_and(|p| p.repair.is_some())) {
+            let on = play.driving.as_ref().map_or(play.hero.pilot.switches, |d| d.pilot.switches).repair;
+            if matches!(self.last_repair, Some((u, was)) if u == unit && was != on) {
+                out.push(if on { VOICE_REPAIR_ON } else { VOICE_REPAIR_OFF });
+            }
+            self.last_repair = Some((unit, on));
         }
         out
     }
@@ -410,9 +431,8 @@ fn panel(
         let piece = Piece { page, ..piece };
         let rect = if own { [491.0, 314.0 + t, 531.0, 408.0] } else { [149.0, 314.0 + t, 109.0, 408.0] };
         ink.painter.piece(piece, rect, argb(LIFE_TINT));
-        // STAND-IN: docs/23-economy.md#bots-spend-power-through-the-same-code-priced-by-part--read-and-measured
-        // -- batteries are not simulated: a unit with one reads full, one without empty.
-        let (t, piece) = arc(if designation.battery { 100.0 } else { 0.0 });
+        let battery = play.battery(shown).unwrap_or(if designation.battery { 1.0 } else { 0.0 });
+        let (t, piece) = arc(100.0 * battery);
         let piece = Piece { page, ..piece };
         let rect = if own { [640.0, 314.0 + t, 600.0, 408.0] } else { [0.0, 314.0 + t, 40.0, 408.0] };
         if piece.rect[3] > 0.0 {

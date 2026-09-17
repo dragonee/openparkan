@@ -198,6 +198,8 @@ pub struct Robot {
     pub guns: Vec<Gun>,
     pub rounds: Vec<Option<usize>>,
     pub gun_parts: Vec<Option<GunPart>>,
+    /// Each gun's node, as a part and a node of it: whose life decides whether it fires.
+    pub gun_nodes: Vec<Option<(usize, usize)>>,
     /// Whether its chassis flies: its movement points keep every axis.
     pub flyer: bool,
     /// The points it follows, and what it does with its orders, when the AI drives it.
@@ -208,6 +210,12 @@ pub struct Robot {
     pub fire_target: Option<usize>,
     /// The unit's one radar: its fitted radar part's, else its turret's (docs/25).
     pub radar: Radar,
+    /// The radar slot's node, as a part and a node of it, which a fitted radar keeps (docs/28,
+    /// "A fitted part takes over its slot").
+    pub radar_node: Option<(usize, usize)>,
+    /// A unit's batteries and what draws on them; `None` on a building, and on a unit with no
+    /// battery.
+    pub power: Option<crate::power::Power>,
     /// The collision sphere in the unit's frame: its centre and radius.
     pub collision: (Vec3, f32),
     /// The node sphere in the unit's frame ([`node_sphere`]): the centre the ground contact
@@ -504,6 +512,13 @@ impl Robot {
             }
         }
         let radar = radar.unwrap_or_else(|| Radar::new(NO_RADAR_RANGE, NO_RADAR_PERIOD_MS));
+        let slot = |c: &Controller| c.components.iter().find(|k| k.type_id == RADAR_TYPE).map(|k| k.node);
+        let radar_node = match slot(&turret_ctl) {
+            Some(n) => usize::try_from(n).ok().map(|n| (turret_index, n)),
+            None => {
+                slot(&walker.controller).and_then(|n| usize::try_from(n).ok()).map(|n| (chassis_index, n))
+            }
+        };
 
         // The agent's sphere from its parts' header spheres (`AniMesh.dll:0x10009510`,
         // docs/26): every part's, the chassis's, the turret's and each gun's, their centres
@@ -524,6 +539,9 @@ impl Robot {
         if !spheres.is_empty() {
             walker.set_body_sphere(bound.0, collision.1);
         }
+        let power = (placed.kind == parkan_formats::mission::KIND_UNIT)
+            .then(|| crate::power::Power::load(assembly, placed.kind, &placed.path))
+            .flatten();
         let size_class = chassis_size(&chassis_part.record);
         let flyer = assembly
             .library
@@ -538,6 +556,7 @@ impl Robot {
             next_shot_ms: Vec::new(),
             fire_target: None,
             gun_parts: Vec::new(),
+            gun_nodes: Vec::new(),
             size_class,
             order: None,
             parts: robot_parts,
@@ -554,6 +573,8 @@ impl Robot {
             guns: Vec::new(),
             rounds: Vec::new(),
             radar,
+            radar_node,
+            power,
             collision,
             bound,
             target_point: None,
@@ -591,6 +612,7 @@ impl Robot {
         self.guns.clear();
         self.rounds.clear();
         self.gun_parts.clear();
+        self.gun_nodes.clear();
         let components = self.turret_controller.components.clone();
         for (i, c) in components.iter().enumerate().filter(|(_, c)| c.type_id == GUN_TYPE) {
             let mut gun = Gun::new(i, c, &self.turret_controller.channels);
@@ -602,6 +624,7 @@ impl Robot {
             self.guns.push(gun);
             self.rounds.push(kind);
             self.gun_parts.push(None);
+            self.gun_nodes.push(usize::try_from(c.node).ok().map(|n| (self.turret_part, n)));
         }
         // The guns fitted as parts of their own: each part's controller's class-2 component.
         for p in 0..self.parts.len() {
@@ -633,6 +656,7 @@ impl Robot {
                     channels: ctl.channels.clone(),
                     points: points.clone(),
                 }));
+                self.gun_nodes.push(usize::try_from(c.node).ok().map(|n| (p, n)));
             }
         }
         self.next_shot_ms = vec![0.0; self.guns.len()];
@@ -716,7 +740,9 @@ impl Robot {
                             .is_some()
                     });
             }
-            g.recharge();
+            if self.power.is_none() {
+                g.recharge();
+            }
             shots.extend(g.tick(self.time_ms).into_iter().map(|s| (i, s)));
             if self.gun_parts.get(i).is_some_and(Option::is_some) {
                 continue;
@@ -728,6 +754,29 @@ impl Robot {
             }
         }
         shots
+    }
+
+    /// The engines' share of their power figure now (`Control.dll:0x100265c0`, docs/24, "The
+    /// engine factor is the state's"): the largest component of the machine's velocity over the
+    /// largest of its top speed, times the current state's factor, which is 0 on every state of
+    /// the hero's chassis.
+    pub fn engine_share(&self) -> f32 {
+        let w = &self.walker;
+        let largest = |v: [f32; 3]| v.iter().fold(0.0_f32, |m, x| m.max(x.abs()));
+        let top = largest(w.controller.triples[TRIPLE_TOP_SPEED]);
+        let factor = w.controller.states.get(w.machine.current).map_or(0.0, |s| s.engine);
+        if top > 0.0 { largest(w.body.velocity) / top * factor } else { 0.0 }
+    }
+
+    /// The guns and the radar as their nodes stand, `alive` saying whether node `node` of part
+    /// `part` still has life: a device whose node is destroyed does nothing (slot 2,
+    /// `Control.dll:0x10021820`). A gun starts no stroke (`0x10029cc3`) and the radar answers
+    /// no scan (`0x10024390`, docs/25).
+    pub fn check_devices(&mut self, alive: impl Fn(usize, usize) -> bool) {
+        for (g, node) in self.guns.iter_mut().zip(&self.gun_nodes) {
+            g.broken = node.is_some_and(|(p, n)| !alive(p, n));
+        }
+        self.radar.broken = self.radar_node.is_some_and(|(p, n)| !alive(p, n));
     }
 
     /// The parts that move by themselves, at the current game time: each item's steps due,

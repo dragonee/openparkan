@@ -652,9 +652,15 @@ anybody else" below).
   `value 1 ×` the hit points it would restore. It restores at most
   `value 0 ×` its node's condition a second, never more than the object lacks.
 - **Short of power:** after the idle draw, the charge left buys
-  `charge ÷ value 1` points.
+  `charge ÷ value 1` points (`0x10022bf1`); a charge below the idle draw buys
+  none, and a repair with a value 1 of 0 restores what it asked for
+  (`0x10022c1c`).
+- **What the object lacks** (`0x10010b10`): on a building, its whole life's
+  maximum less its life; on a unit, `max − life` over the nodes whose life is
+  above 0, so a destroyed node asks for nothing.
 - **Where the points go:** to the object's *own* nodes, in index order
-  (`0x10010ba0` on the owner, `+0x3c`).
+  (`0x10010ba0` on the owner, `+0x3c`), each filled to its maximum before the
+  next takes any (`0x10010cd4`–`0x10010d4d`).
   - A unit's repair skips destroyed parts; a kind-3 object's restores them
     (`0x10022b00`).
 - **Running cost:** left on at full health it costs only its idle figure.

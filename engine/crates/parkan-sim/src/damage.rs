@@ -593,6 +593,7 @@ mod tests {
                 scale: 1.0,
                 life: Some(life),
                 portals: std::rc::Rc::default(),
+                host: None,
             }],
             centre: at + Vec3::Z,
             radius: 1.5,

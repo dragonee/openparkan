@@ -156,23 +156,64 @@ impl Shield {
         if self.shield_condition <= 0.0 || self.cost <= 0.0 || self.max <= 0.0 || dt <= 0.0 {
             return;
         }
-        let held: f32 = self.fills.iter().sum();
-        let lack = SECTORS as f32 - held;
-        let wanted = (self.recharge * self.shield_condition * dt).min(self.max * lack);
+        let wanted = self.wanted(dt);
         let idle = self.shield_power * dt;
         let charge = self.level * (idle + self.cost * wanted) - idle;
-        let points = charge / self.cost;
-        if points > 0.0 && lack > 0.0 {
-            let share = points.min(self.max * lack) / self.max / lack;
+        self.spread(charge / self.cost / self.max / SECTORS as f32);
+    }
+
+    /// The points the generator would recharge over `dt` seconds: value 1 × its condition a
+    /// second, never more than the sectors lack.
+    fn wanted(&self, dt: f32) -> f32 {
+        let lack = SECTORS as f32 - self.fills.iter().sum::<f32>();
+        (self.recharge * self.shield_condition * dt).min(self.max * lack).max(0.0)
+    }
+
+    /// What the generator and the deflector want of their channel over `dt` seconds, each while
+    /// its node lives: the generator its power and value 2 × the points it would recharge
+    /// (`Control.dll:0x10025700`), the deflector its power (`0x10021860`).
+    pub fn want(&self, dt: f32) -> f32 {
+        let generator = if self.shield_condition > 0.0 {
+            self.shield_power * dt + self.cost * self.wanted(dt)
+        } else {
+            0.0
+        };
+        let deflector = if self.deflector_condition > 0.0 { self.deflector_power * dt } else { 0.0 };
+        generator + deflector
+    }
+
+    /// The six sectors' mean fill: what the device manager answers as id 7
+    /// (`Control.dll:0x1002b6ae`).
+    pub fn mean_fill(&self) -> f32 {
+        self.fills.iter().sum::<f32>() / SECTORS as f32
+    }
+
+    /// `rise` of mean fill over the sectors (`0x10025a90`): a gain goes to each sector in
+    /// proportion to what it lacks and a loss in proportion to what it holds, at most all of
+    /// either.
+    pub fn spread(&mut self, rise: f32) {
+        let mean = self.mean_fill();
+        if rise > 0.0 && mean < 1.0 {
+            let share = (rise / (1.0 - mean)).min(1.0);
             for f in &mut self.fills {
                 *f = (*f + share * (1.0 - *f)).min(1.0);
             }
-        } else if points < 0.0 && held > 0.0 {
-            let share = (-points / self.max / held).min(1.0);
+        } else if rise < 0.0 && mean > 0.0 {
+            let share = (-rise / mean).min(1.0);
             for f in &mut self.fills {
                 *f = (*f - share * *f).max(0.0);
             }
         }
+    }
+
+    /// What a dock gives the shield, `rise` being a tenth of the seconds it gives for
+    /// (`Behavior.dll:0x10018173`–`0x100181d4`): the mean fill read as id 7, raised by `rise`
+    /// and held to 1, and written back as id 7 (`Control.dll:0x1002ba9e`), which spreads the
+    /// difference. Neither the deflector, the power level nor the generator's condition is
+    /// asked.
+    pub fn dock(&mut self, rise: f32) {
+        let mean = self.mean_fill();
+        self.spread((mean + rise).min(1.0) - mean);
     }
 
     /// The sector a hit at `point` lands in, for a bubble about `centre` on an object turned by
@@ -250,6 +291,25 @@ mod tests {
         // The idle draw unserved: 0.8 / 0.03 points out, shared by what each holds.
         let lost: f32 = s.fills.iter().map(|f| (1.0 - f) * 350.0).sum();
         assert!((lost - 0.8 / 0.03).abs() < 1e-2, "{lost}");
+    }
+
+    #[test]
+    fn a_dock_raises_the_mean_fill_by_what_each_sector_lacks_and_stops_at_full() {
+        let mut s = shield();
+        s.fills = [0.0, 0.4, 1.0, 1.0, 1.0, 1.0];
+        s.deflector_condition = 0.0;
+        s.level = 0.0;
+        // A tenth of a second in a dock: the mean fill rises by 0.01, whatever the deflector.
+        let mean = s.mean_fill();
+        s.dock(0.01);
+        assert!((s.mean_fill() - (mean + 0.01)).abs() < 1e-5, "{:?}", s.fills);
+        // Shared 1 : 0.6 between the sectors lacking all and 0.6; the full ones take nothing.
+        assert!((s.fills[0] / (s.fills[1] - 0.4) - 1.0 / 0.6).abs() < 1e-3, "{:?}", s.fills);
+        assert_eq!(s.fills[2], 1.0);
+        for _ in 0..200 {
+            s.dock(0.01);
+        }
+        assert_eq!(s.fills, [1.0; SECTORS], "full, and no further");
     }
 
     #[test]

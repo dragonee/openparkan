@@ -354,7 +354,13 @@ channel, in a fixed order**, each class having one channel
 Each channel's consumers all get the same **level**, `min(1, what is left /
 what the channel wants)` (`0x1002dca0`), written through slot 6 into the `+0x4c`
 factor above; the batteries, served last, drain by the share of their output
-that was used. The class numbers are the engine's `CICLS_` ids (*measured*:
+that was used. The tick passes the level function a mask of channels each time
+(`0x1002d3c1`–`0x1002d439`, masks `0x1003cdbc`): 8, 1, **4 | 32** — channels 2
+and 5 at one shared level — 16, and 2 for the batteries with what was used. A
+group that wants nothing is passed over and its consumers' levels are not
+written (`0x1002dcd7`). Each component's flow is summed into its channel
+(`0x1002d3a0`, slot 9 of `+0xc`), and every positive flow, a battery's, into
+the supply. The class numbers are the engine's `CICLS_` ids (*measured*:
 every `.ctl` label family sits on one class, and the named ones agree —
 `i_pws` on 19, `i_fsh` 9, `i_dsh` 10, `i_eng` 5, `i_rdr` 8, `i_rps` 15).
 

@@ -131,6 +131,8 @@ pub struct Gun {
     pub capacitor: f32,
     pub charge: f32,
     pub shot_energy: f32,
+    /// Its record's power figure, which it draws a second on top of its capacitor's lack.
+    pub power: f32,
     pub interval_ms: f32,
     pub salvo: bool,
     /// The state word the fire rows set.
@@ -156,6 +158,9 @@ pub struct Gun {
     pub round_flags: i32,
     /// The lock's share (`+0x17c`, property `0xf00`), which slot 10 keeps every frame.
     pub lock_share: f32,
+    /// Its node has no life left (slot 2, `0x10021820`), which the owner keeps from the node:
+    /// it starts no stroke and reports 5 (`0x10029cc3`), though one under way finishes.
+    pub broken: bool,
     last_wake_ms: f64,
     start_ms: f64,
     next_ms: f64,
@@ -190,6 +195,7 @@ impl Gun {
             capacitor: v[CAPACITOR],
             charge: v[CAPACITOR],
             shot_energy: v[SHOT_ENERGY],
+            power: record.power,
             interval_ms: v[INTERVAL],
             salvo: record.flags & SALVO != 0,
             state: STATE_OFF,
@@ -204,6 +210,7 @@ impl Gun {
             report: GATE_NO_TARGET,
             round_flags: 0,
             lock_share: 0.0,
+            broken: false,
             last_wake_ms: 0.0,
             start_ms: 0.0,
             next_ms: 0.0,
@@ -250,7 +257,7 @@ impl Gun {
     /// taken from the gun's state now rather than kept from the last point that wrote it.
     pub fn lamp_report(&self, now_ms: f64) -> i32 {
         let guided = self.gate.lock_s > 0.0;
-        if self.rounds == 0 {
+        if self.rounds == 0 || (self.broken && self.barrels.iter().all(|b| b.step == 0)) {
             5
         } else if self.capacitor > 0.0 && self.charge < self.shot_energy {
             6
@@ -286,11 +293,30 @@ impl Gun {
         self.charge = (self.charge + share * self.capacitor).min(self.capacitor);
     }
 
+    /// What it wants of its channel over `dt` seconds (`Control.dll:0x10029a40`): its power and
+    /// whatever its capacitor lacks, nothing while its node is destroyed.
+    pub fn want(&self, dt: f32) -> f32 {
+        if self.broken {
+            return 0.0;
+        }
+        self.power * dt + (self.capacitor - self.charge).max(0.0)
+    }
+
+    /// Served at `level` over `dt` seconds (`0x10029a90`): what the level gives beyond its power
+    /// goes into the capacitor.
+    pub fn serve(&mut self, level: f32, dt: f32) {
+        let charge = level * self.want(dt) - self.power * dt;
+        if charge > 0.0 {
+            self.charge = (self.charge + charge).min(self.capacitor);
+        }
+    }
+
     /// Top the capacitor up.
     ///
     /// STAND-IN: docs/23-economy.md#bots-spend-power-through-the-same-code-priced-by-part--read-and-measured
-    /// -- a gun draws what its capacitor lacks on the power tick, which is not
-    /// modelled; the capacitor is full again every tick.
+    /// -- a building's guns draw what their capacitors lack from its batteries on its power
+    /// tick, which the building's economy does not model: a gun on a unit with no battery, or on
+    /// a building, is full again every tick.
     pub fn recharge(&mut self) {
         self.charge = self.capacitor;
     }
@@ -329,8 +355,8 @@ impl Gun {
         }
     }
 
-    /// `0x10029ca0`: continue a stroke, or start one when the gun has rounds, charge,
-    /// its ready byte and a state.
+    /// `0x10029ca0`: continue a stroke, or start one when the gun's node lives and it has
+    /// rounds, charge, its ready byte and a state.
     fn fire_step(&mut self, t: f64, shots: &mut Vec<Shot>) {
         let since_s = ((t - self.last_wake_ms) * 0.001) as f32;
         self.last_wake_ms = t;
@@ -344,7 +370,11 @@ impl Gun {
             }
             return;
         }
-        if self.rounds == 0 || (self.capacitor > 0.0 && self.charge < self.shot_energy) || !self.ready {
+        if self.broken
+            || self.rounds == 0
+            || (self.capacitor > 0.0 && self.charge < self.shot_energy)
+            || !self.ready
+        {
             return;
         }
         // The gate runs whether or not the button is held (`0x10029d3a`).
@@ -514,6 +544,20 @@ mod tests {
         assert_eq!((shots.len(), laser.rounds), (1, 0));
         let mut free = gun([-1.0, 200.0, 5.5, 200.0], &[4.0]);
         assert_eq!((hold(&mut free, 3000.0).len(), free.rounds), (7, -1));
+    }
+
+    #[test]
+    fn a_gun_whose_node_is_destroyed_finishes_its_stroke_and_starts_no_other() {
+        let mut laser = gun([-1.0, 200.0, 5.5, 200.0], &[4.0]);
+        laser.state = CONTINUE_FIGHT;
+        assert_eq!(laser.tick(0.0).len(), 0, "a stroke starts");
+        laser.broken = true;
+        assert_eq!(laser.tick(200.0).len(), 1, "the round under way still leaves");
+        assert!(hold(&mut laser, 3000.0).is_empty(), "and no stroke starts after it");
+        assert_eq!(laser.lamp_report(3000.0), 5);
+        laser.broken = false;
+        let again: usize = (0..30).map(|k| laser.tick(3000.0 + f64::from(k) * 1000.0 / 60.0).len()).sum();
+        assert!(again > 0, "a node brought back fires again");
     }
 
     #[test]

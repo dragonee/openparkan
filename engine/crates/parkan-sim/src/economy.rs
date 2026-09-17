@@ -60,6 +60,23 @@ impl Battery {
         (level, used)
     }
 
+    /// What a unit's battery gives over `dt` seconds at `condition`, its node's life over its
+    /// maximum (`Control.dll:0x100229a0`): `min(output × charge × condition × dt, capacity ×
+    /// charge × condition)`.
+    pub fn supply(&self, dt: f32, condition: f32) -> f32 {
+        if self.capacity <= 0.0 || condition <= 0.0 {
+            return 0.0;
+        }
+        (self.output * self.charge * condition * dt).min(self.capacity * self.charge * condition)
+    }
+
+    /// `used` of what it gave taken from its charge, served last (`0x1002d439`).
+    pub fn drain(&mut self, used: f32) {
+        if self.capacity > 0.0 {
+            self.charge = (self.charge - used.max(0.0) / self.capacity).max(0.0);
+        }
+    }
+
     /// What the batteries lack of full (`Control.dll:0x1002b42b`, `0x1002b4e9`).
     pub fn lack(&self) -> f32 {
         if self.capacity <= 0.0 { 0.0 } else { self.capacity * (1.0 - self.charge) }

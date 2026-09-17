@@ -148,7 +148,7 @@ impl Economy {
     /// STAND-IN: docs/23-economy.md#how-often-and-where-it-settles--read-with-a-derived-settle-point
     /// -- the timers' random sources (the step's `0..63`, the power tick's shift register)
     /// are not transcribed: a 32-bit xorshift, 0..1.
-    fn random(&mut self) -> f64 {
+    pub(crate) fn random(&mut self) -> f64 {
         let mut x = self.seed;
         x ^= x << 13;
         x ^= x >> 17;

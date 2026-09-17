@@ -746,6 +746,44 @@ Feedback on the first chapter's *The Arrival* and *Outflanking Maneuver*.
   the hero from off its pasture on *The Arrival*, a medusa turns on the hero and its acid lands
   about it.
 
+More feedback on the first chapter: armour, docks, turrets, batteries and repair.
+
+- **Armour cuts every hit** (docs/26, "Armour"). Each unit's and building's last class-27
+  component, a fitted armour part in its chassis's slot, now covers every node of every part:
+  a hit becomes `min(d, linear × d + square × d²)`. It was parsed and never attached. The hero
+  and *Outflanking Maneuver*'s `12wel2` wear `i_arm_l_02` (0.624, 0.00014), so the hero's 250
+  laser bolt takes 165 off a hull of 224 and the warbot stands after one where it fell before;
+  its helicopters' `i_arm_t_df` keeps 85%, and its tower's `i_arm_b_05` 22–30%.
+- **A dock tops up the shield** (docs/27, "What a dock gives"). The device manager's value 7 the
+  dock adds a tenth a second of is the fight shield's mean sector fill: raised, held to 1 and
+  written back, which spreads the rise over the sectors by what each lacks, so a spent sector
+  fills fastest. A dock also gives a tenth of a full battery a second.
+- **A turret shot off takes its guns and radar** (docs/28, "The order parts load in"; docs/26,
+  "Children go with their parent"). A gun part's node 0 is the turret's socket in the game's one
+  model, so a socket destroyed, or stepping up a stage, now destroys the node 0 of every part
+  hanging on it, and that part's walk takes its other nodes: they explode and go. A gun whose
+  node has no life starts no stroke and reports 5, a stroke under way finishing, and a radar
+  whose node has no life answers no scan. *Outflanking Maneuver*'s first `12tower`, firing on
+  the hero, falls silent the moment its turret goes; a `12wel2` shot through one gun keeps
+  firing the other two.
+- **A unit spends its battery** (docs/23, "Bots spend power through the same code, priced by
+  part"). Every unit with a battery runs its power tick every 250 ± 31 ms: the battery gives
+  `min(output × charge × condition × dt, capacity × charge × condition)`, and the draws are
+  served in the game's order — the engines (power × speed ÷ top speed × the state's factor),
+  then channel 0 (the repair system), then the radar, camera, shields, deflector, detection
+  shield and armour at one level, then the turret and guns (what each capacitor lacks) — and the
+  battery drains by what they used. The shield recharges at the level its group was served, and
+  a gun's capacitor fills only from what is left, where both were served whole before. The hero
+  idles at 2.39 a second of its 4,080 and camouflage adds 0.3; walking costs nothing, every
+  state of its chassis carrying an engine factor of 0, as read (docs/24). The panels' battery
+  arcs show the charge, and the own panel says `VOICE_BATT_LOW` under a fifth.
+- **G repairs** (docs/26, "Repair"). The repair system, switched by `CICLS_REPAIRSYS`'s rows,
+  asks for its idle 0.1 and 0.04 a point for up to 15 × its node's condition points a second,
+  never more than the unit's live nodes lack; what its level leaves past the idle draw buys
+  points, handed to the nodes in index order, each filled before the next and a destroyed one
+  passed over. The cockpit says `VOICE_REPAIR_SYS_ON` and `_OFF` as the player switches it. On
+  Mission 01 the hero at half life heals 92 points in ten seconds, faster as its own node mends.
+
 This directory also holds what the rest will follow:
 
 - **`docs/`** is the source of truth. Every behaviour the engine implements is
@@ -1008,12 +1046,14 @@ a row here. A row leaves this table when research closes it.
 | M14 | How many tracks the install's `winmm.dll` reports for its `MUSIC` files | the highest `TrackNN.ogg` present; a track with no file is not audio | [34](../docs/34-progression.md#music-the-cds-tracks--read-and-measured) |
 | M14 | When `AniMesh.dll` works an agent's sphere and node sphere out again (`0x10009510`), and at which pose | once, at the parts' and nodes' rest poses, as the unit is made | [24](../docs/24-motion.md#finding-the-ground--read) |
 | M14 | How `CD_VOLUME` and `SFX_VOLUME`, each a share of a mixer control, become loudness | the music plays at the sounds' level, as the install's equal settings and Mission 01's recording have it | [34](../docs/34-progression.md#music-the-cds-tracks--read-and-measured) |
-| M14 | What a dock does with a unit's batteries and shields, and the device manager's value 7 it adds a tenth of | batteries are not simulated (docs/23), so a dock gives life and ammunition alone and leaves a shield to its own recharge | [27](../docs/27-ownership.md#what-a-dock-gives--read) |
 | M14 | What becomes of a part already knocked off and flying when its dock puts its node back | it is taken out of the air, rather than drawn beside the node it is again | [26](../docs/26-damage.md#repair-a-units-own-repair-unit-switched-on-and-off--read-and-measured) |
 | M14 | What the game drives a dock's glow with: its own time mode is 0, a value set from outside, and nothing read sets it | a charging dock runs it looping and switches it off again; the `f_recharge_*` nearest a dock's vertex is that dock's | [13](../docs/13-control.md#a-buildings-load-group--read-and-measured) |
 | M14 | The masses property `0x7c` gives a unit and a static object, by whose squares a pair shares its push | no push is shared: every unit, not the hero alone, is run as the mover against every placed object and takes the whole push, which is what a building, a tree or a stone gives anyway | [24](../docs/24-motion.md#not-established) |
 | M14 | Where a unit built in a factory joins the building's own paths, which the escape's 20-second check routes it out by ("LEAVE IS TOO !!!") | a bot made at a creation vertex counts as having walked in: it leaves along the hall way, as a unit sent in does | [31](../docs/31-packages.md#the-escape--read) |
-| M14 | A unit's batteries, which serve its shield's power channel | a unit's shield channel is served whole; a building's takes the level its batteries serve it at; the shield's and deflector's draws come out of no battery | [26](../docs/26-damage.md#power--read) |
+| M14 | A building's draws beyond its efficiency: its shield, deflector and guns on its batteries | a building's shield takes the level its batteries serve its efficiency at, its shield's and deflector's draws come out of no battery, and its guns' capacitors are full again every tick | [23](../docs/23-economy.md#bots-spend-power-through-the-same-code-priced-by-part--read-and-measured) |
+| M14 | When a unit's shield recharges against its power tick: the recharge is read on the power tick | the battery pays for the shield on the unit's power tick and the shield recharges every frame at the level that tick served | [26](../docs/26-damage.md#power--read) |
+| M14 | The AI's repair decision (`Behavior.dll:0x10017c70`) and camouflage, and what sends an AI unit short of charge to a dock | a unit the player does not drive keeps its repair system and camouflage off, and nothing sends it to charge | [26](../docs/26-damage.md#repair-a-units-own-repair-unit-switched-on-and-off--read-and-measured) |
+| M14 | A unit's parts share one life system in the game, the engine keeps a life per part: how a part hanging on a knocked-off socket flies with it | a part whose socket is destroyed, or steps up a stage, has its node 0 destroyed where it stands, so its nodes explode and go there rather than in the air | [26](../docs/26-damage.md#what-a-damaged-node-a-destroyed-part-and-a-dead-unit-draw--read-and-measured) |
 | M14 | That a shield flash rides on node 0 | it keeps its direction and follows the bubble's centre | [26](../docs/26-damage.md#what-a-shield-hit-draws--read-and-measured) |
 | M14 | Which of the effect frame's axes a type-9 dome's pole ends on, and how its texture runs over it | the first, so a shield flash bulges out of the bubble toward the hit, the round glow a recording shows; u around, v from rim to pole | [11](../docs/11-effects.md#not-resolved) |
 | M14 | An animal's migrate: its pasture, its points and its timers | the animal stands; a hit is answered as a migrating animal answers it, about its clan's zone nearest it, and with none as one beyond its pasture | [31](../docs/31-packages.md#migrate-an-animals-pasture--read-and-measured) |
@@ -1070,7 +1110,6 @@ engine pass replaces each with what was read and removes its row.
 | M9 | The charge level of a gun with no capacity, which only a shot sets | its bar shows full | [29](../docs/29-weapons.md#a-gun-is-a-capacitor-a-magazine-and-a-clock--read) |
 | M9 | Which caller hands a unit's name its class word, and which robots are *"Tiny Tower"* | each class letter its own word (W *Warrior*, T *Transport*, B *Builder*, C *Comm. Center*); no robot is a Tiny Tower | [35](../docs/35-hud.md#name-and-status--read-and-seen) |
 | M9 | The component value `0x400` the *"Dangerous!"* line asks for | no unit is called dangerous | [35](../docs/35-hud.md#name-and-status--read-and-seen) |
-| M9 | A panel's battery arc: batteries are not simulated | a unit with a battery reads full and one without empty, so the low battery voice never plays | [23](../docs/23-economy.md#bots-spend-power-through-the-same-code-priced-by-part--read-and-measured) |
 | M9 | A wingman's order queue, which its status line names | the running task names the order: none *no order*, standby *standing*, follow *following*, search *searching* (*capturing* for a capture), refit *refitting*, attack *attacking* | [31](../docs/31-packages.md#the-orders--measured) |
 | M9 | The driven unit record's `+0x10 ÷ +0x14` in the scale of the square about the target | the camera's focal length: the square's half-side is two thirds of the target's projected radius, then held as read | [35](../docs/35-hud.md#the-frame-around-the-target-in-the-world--read) |
 | M9 | How the panel camera draws a mesh in the colour it is handed in mode 2 | flat, untextured and opaque, the node colour lifted by 0.1 and by 0.1 more with the light: an intact dummy (38, 166, 38) against the recording's (39, 162, 41) | [35](../docs/35-hud.md#the-unit-in-the-middle--read-and-seen) |

@@ -497,6 +497,7 @@ fn hero_target(hero: &Hero, shield: Option<parkan_sim::shield::Shield>) -> Targe
             scale: 1.0,
             life: None,
             portals: Rc::default(),
+            host: usize::try_from(part.host).ok().zip(usize::try_from(part.node).ok()),
         })
         .collect();
     let mut target = Target {
@@ -1499,6 +1500,7 @@ impl Play {
         }
         let launches = launches(&self.hero.robot, None, &shots, &self.battle, &self.ground);
         self.launch(launches, now);
+        self.tick_power();
         self.power_shields();
         self.lend_hero_lives(true);
         events.extend(self.battle.combat.tick((dt_ms / 1000.0) as f32, &self.ground));
@@ -2723,18 +2725,77 @@ impl Play {
         target.alive = alive;
     }
 
-    /// Each shield's power level for the frame: a building's is the share its batteries serve
-    /// it at (docs/23).
+    /// Each building's shield's power level for the frame: the share its batteries serve it at
+    /// (docs/23). A unit's is set on its own power tick ([`Play::tick_power`]).
     ///
-    /// STAND-IN: docs/26-damage.md#power--read -- a unit's batteries are not simulated, so its shield channel is served whole, and the
-    /// shield's and deflector's draws are not taken from any battery.
+    /// STAND-IN: docs/26-damage.md#power--read -- a building's shield and deflector draws are not
+    /// taken from its batteries, which serve the efficiency alone.
     fn power_shields(&mut self) {
         for t in 0..self.battle.combat.targets.len() {
-            let level = self.economy.site(t).map_or(1.0, |site| site.level);
+            let Some(level) = self.economy.site(t).map(|site| site.level) else { continue };
             if let Some(shield) = self.battle.combat.targets[t].shield.as_mut() {
                 shield.level = level;
             }
         }
+    }
+
+    /// Every unit's power tick that is due (`Control.dll:0x1002d340`, docs/23, "Bots spend power
+    /// through the same code, priced by part"): the hero's, with its own switches, and each
+    /// robot's, with the switches of the player driving it.
+    ///
+    /// STAND-IN: docs/26-damage.md#repair-a-units-own-repair-unit-switched-on-and-off--read-and-measured
+    /// -- the AI's repair decision (`Behavior.dll:0x10017c70`) and its camouflage are not
+    /// modelled: a unit the player does not drive keeps its repair system and camouflage off.
+    fn tick_power(&mut self) {
+        let jitter = |p: &mut Play| (p.economy.random() * 2.0 - 1.0) * parkan_sim::economy::POWER_JITTER_MS;
+        // A paused world, a dead hero and a hero out of the world keep their tick's clock moving
+        // and spend nothing, so no tick afterwards pays for the gap.
+        let hero_runs = !self.paused && !self.hero.dead() && !self.hero_away();
+        let j = jitter(self);
+        if let Some(mut power) = self.hero.robot.power.take() {
+            if let Some(dt) = power.due(self.hero.robot.time_ms, j)
+                && hero_runs
+            {
+                let share = self.hero.robot.engine_share();
+                let mut lives: Vec<Option<&mut Life>> =
+                    self.hero.lives.iter_mut().map(Option::as_mut).collect();
+                let shield = self.battle.combat.hero.as_mut().and_then(|h| h.shield.as_mut());
+                let switches = self.hero.pilot.switches;
+                power.tick(dt, &mut lives, shield, &mut self.hero.robot.guns, share, switches);
+            }
+            self.hero.robot.power = Some(power);
+        }
+        for r in 0..self.robots.len() {
+            let j = jitter(self);
+            let Play { robots, battle, driving, paused, .. } = self;
+            let (t, robot) = &mut robots[r];
+            let Some(mut power) = robot.power.take() else { continue };
+            if let Some(dt) = power.due(robot.time_ms, j)
+                && !*paused
+                && let Some(target) = battle.combat.targets.get_mut(*t).filter(|x| x.alive)
+            {
+                let share = robot.engine_share();
+                let switches = driving
+                    .as_ref()
+                    .filter(|d| d.target == *t)
+                    .map_or(Default::default(), |d| d.pilot.switches);
+                let Target { parts, shield, .. } = target;
+                let mut lives: Vec<Option<&mut Life>> = parts.iter_mut().map(|p| p.life.as_mut()).collect();
+                power.tick(dt, &mut lives, shield.as_mut(), &mut robot.guns, share, switches);
+            }
+            robot.power = Some(power);
+        }
+    }
+
+    /// The batteries' fill of unit `unit`, or of the hero for `None`: a unit's power, else a
+    /// building's batteries; `None` for what holds none.
+    pub fn battery(&self, unit: Option<usize>) -> Option<f32> {
+        let Some(t) = unit else { return self.hero.robot.power.as_ref().map(crate::power::Power::fill) };
+        self.robots
+            .iter()
+            .find(|(rt, _)| *rt == t)
+            .and_then(|(_, r)| r.power.as_ref().map(crate::power::Power::fill))
+            .or_else(|| self.economy.site(t).map(|site| site.battery.charge))
     }
 
     /// A hit on target `t` from the round's `owner` (message `0x19`): a robot's behaviour asks
@@ -2962,6 +3023,8 @@ impl Play {
             let (t, robot) = &mut self.robots[r];
             let target = &mut self.battle.combat.targets[*t];
             let from = robot.collision_centre();
+            robot
+                .check_devices(|p, n| node_alive(target.parts.get(p).and_then(|part| part.life.as_ref()), n));
             let shots = match self.driving.as_mut().filter(|d| d.target == *t) {
                 Some(d) => {
                     crate::hero::drive(robot, &mut d.pilot, &mut d.fire_held, dt_ms, mouse, &self.ground)
@@ -3039,6 +3102,9 @@ impl Play {
                 aim_and_fire(robot, t, &takt, seen, battle, ground, false, *building_fire_floor);
             }
             let (t, robot) = &mut self.emplacements[e];
+            let target = &self.battle.combat.targets[*t];
+            robot
+                .check_devices(|p, n| node_alive(target.parts.get(p).and_then(|part| part.life.as_ref()), n));
             let shots = robot.takt(dt_ms);
             if !shots.is_empty() {
                 fired.push((e, shots));
@@ -3501,7 +3567,14 @@ mod tests {
             sphere: None,
             corners: None,
         };
-        Part { mesh: Rc::new(mesh), nodes: vec![IDENTITY], scale: 1.0, life: None, portals: Rc::default() }
+        Part {
+            mesh: Rc::new(mesh),
+            nodes: vec![IDENTITY],
+            scale: 1.0,
+            life: None,
+            portals: Rc::default(),
+            host: None,
+        }
     }
 
     #[test]

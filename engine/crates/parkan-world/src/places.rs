@@ -345,15 +345,14 @@ impl Play {
     }
 
     /// A dock (`0x10019251`): every unit standing in it that belongs to the building's clan or
-    /// an ally (`0x10019318`) gains, over `dt` seconds, [`DOCK_SHARE`] a second of its full
-    /// life, destroyed parts restored with it (`0x10018100`), and of each of its guns' magazine
-    /// and capacitor (`0x100181e0`). See docs/27, "What a dock gives". Returns whether it gave
-    /// this occupant anything, which runs the dock's glow.
+    /// an ally (`0x10019318`) gains, over `dt` seconds, [`DOCK_SHARE`] a second of a full
+    /// battery (`0x10019372`), of its full life, destroyed parts restored with it, and of its
+    /// fight shield's mean sector fill (`0x10018100`), and of each of its guns' magazine and
+    /// capacitor (`0x100181e0`). See docs/27, "What a dock gives". Returns whether it gave this
+    /// occupant anything, which runs the dock's glow.
     ///
-    /// STAND-IN: docs/27-ownership.md#what-a-dock-gives--read -- a unit's batteries and shields
-    /// are not simulated (docs/23, docs/26), so the tenth of a full battery and of the device
-    /// manager's value 7 is not given; and a part still in the air when its node is put back is
-    /// taken out of the air rather than drawn beside it.
+    /// STAND-IN: docs/27-ownership.md#what-a-dock-gives--read -- a part still in the air when its
+    /// node is put back is taken out of the air rather than drawn beside it.
     fn dock(&mut self, t: usize, occupant: Child, dt: f32) -> bool {
         let Some(Some(clan)) = self.occupant_clan(occupant) else { return false };
         if !self.battle.combat.targets.get(t).is_some_and(|x| x.alive) {
@@ -371,6 +370,12 @@ impl Play {
             Child::Hero => {
                 let mut lives: Vec<&mut Life> = self.hero.lives.iter_mut().flatten().collect();
                 raise_life_share(&mut lives, share);
+                if let Some(shield) = self.battle.combat.hero.as_mut().and_then(|h| h.shield.as_mut()) {
+                    shield.dock(share);
+                }
+                if let Some(power) = self.hero.robot.power.as_mut() {
+                    power.set_fill(power.fill() + share);
+                }
                 for g in &mut self.hero.robot.guns {
                     g.rearm(share);
                 }
@@ -380,11 +385,17 @@ impl Play {
                     let mut lives: Vec<&mut Life> =
                         target.parts.iter_mut().filter_map(|p| p.life.as_mut()).collect();
                     raise_life_share(&mut lives, share);
+                    if let Some(shield) = target.shield.as_mut() {
+                        shield.dock(share);
+                    }
                 }
                 self.flights.retain(|f| f.target != r);
                 if let Some((_, robot)) = self.robots.iter_mut().find(|(rt, _)| *rt == r) {
                     for g in &mut robot.guns {
                         g.rearm(share);
+                    }
+                    if let Some(power) = robot.power.as_mut() {
+                        power.set_fill(power.fill() + share);
                     }
                 }
             }
