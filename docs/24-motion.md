@@ -2265,8 +2265,9 @@ non-flyer anywhere ([42-selection.md](42-selection.md#a-valid-place--read-and-me
 | a vertex with flag 4 to another building's with flag 4, closer than 50 | 0.1 | `0x1000b663`, `0x1000b6bc` |
 
 An exit is a hall-way vertex with flag 1 over a walkable areal. Buildings do
-not cut areals: only a tree or a stone (object kind 10) splits the areals it
-stands on (`OnAddStatic`, `0x1001f68e`; `MBrokenAreal::Divide`).
+not cut areals: only a tree or a stone (object kind 10) cuts the areals it
+stands on
+([below](#a-tree-or-a-stone-cuts-the-areals-it-stands-on--read-and-measured)).
 
 **A bridge's halves meet at their flag-4 vertices.** *Measured*: each of the
 four half-span `fr_*_brige` hall ways has three or five exits at its landward
@@ -2325,6 +2326,71 @@ either side at about 50 m. Every areal of the canyon floor and walls has the wor
 and the plateaus either side have 1. So the walker finds no way down into
 it, and none across but over the bridge.
 
+### A tree or a stone cuts the areals it stands on — *read*, and *measured*
+
+**Which objects.** The system areal map's slot 3 (`ArealMap.dll:0x1001f660`)
+hears of each static object attached or detached. One of kind 10, a tree or
+a stone, goes on to `OnAddStatic` (`0x10022580`) as it is attached
+(`0x1001f68e`), and to `OnRemoveStatic` (`0x10022d80`) as it is detached. No
+size, flag or margin keeps one out.
+
+**Its footprint** (`0x1000f660`). The object's interface `0x18` answers slot
+10 with mode 2. A mesh (`AniMesh.dll:0x10014620`) gives the 8 corners of its
+header's box, each through its world matrix, and the areal map keeps the
+first 4. *Measured*: on all 68 meshes of `static.rlb` those 4 are the box's
+bottom face, (lo, lo), (hi, lo), (hi, hi), (lo, hi), counter-clockwise. So
+the footprint is the model's whole box across the ground, turned and scaled
+as it is placed: a tree's canopy, not its trunk. Height plays no part. Some
+boxes are huge: `s_tree_0_87`'s is 92 × 113 m, `s_stn_0_13`'s 64 × 139 m.
+
+**Which areals** (`0x10022580`). A walkable areal is broken when its box
+overlaps the footprint's and its polygon meets it (`0x10018150`: a corner of
+either inside the other, or two edges crossing). Each broken areal is built
+again (`0x10011900`). It, its walkable neighbours and the areals under
+hall-way vertices are then linked again (`0x10023240`). An areal left with
+no static is made whole (`0x10007920`).
+
+**Divide** (`MBrokenAreal::Divide`, `0x10010b10`) runs once per static,
+starting from the whole areal:
+
+1. The footprint joins the areal's holes. One inside a hole becomes that
+   hole; one crossing a hole becomes their union.
+2. A sub-areal the footprint crosses is replaced by what is left of it
+   outside the footprint, traced as one or more polygons (`0x1000fe00`). An
+   edge along the footprint gets no neighbour. A sub-areal the footprint lies
+   wholly inside is kept whole, the footprint a hole in it. So **a stone in
+   the middle of an areal leaves the links as they were**. A sub-areal inside
+   the footprint is dropped.
+3. On a crossing, the footprint's contour with each corner moved 1.5 out is
+   kept (`0x10013190`). It only classifies points.
+
+The footprint lies in no sub-areal, so it is not walkable.
+
+**Links.** A broken areal gets no links of its own. A sub-areal's edge links
+only where it lies on one of the areal's own edges. It links to the walkable
+areal across, or, if that areal is broken, to its sub-areal whose edge ends
+match within 2.0. The cost is the distance between the centres + 1, and a
+sub-areal's centre is its vertices' average. A point on a broken areal
+resolves to its sub-areal, else to a hole, else to an inflated contour
+(`0x10024110`).
+
+**Waypoints from a sub-areal** (`Behavior.dll:0x100377d6`). Where the line to
+the goal crosses the edge, the point is the crossing. Otherwise it is an end
+moved 0.2 × the edge's length in. A second point is pushed into the next
+node, 0.2 at a time up to 2.
+
+**The local path.** Its generator takes a sub-areal's polygon as the outline
+and every hole of the broken areal as an obstacle (`0x10039002`–`0x10039089`).
+An unbroken areal gives it none. It logs a start or a finish inside an
+obstacle contour (`0x10039365`, `0x10039337`). A walker whose place is in a
+hole or an inflated contour logs "Leave Obstacle !!!!!!!!" and fetches that
+contour to walk out of (`0x1003e81d`).
+
+***Ballen's Crossing*'s central stone** (*measured*). On C02 M02,
+`s_stone_07` stands at (1026, 1031). Its box, 68.6 × 56.3 m, reaches off to
+the south-west over ground the areal map leaves walkable. The laser walker's
+patrol runs past it.
+
 ## Not established
 
 - How the velocity integrator's pull toward *command × top speed*, with the
@@ -2337,9 +2403,15 @@ it, and none across but over the bridge.
   That the Wizard writes the same triple is not traced.
 - ~~The areal search (`MGraph`: algorithm, costs, and what the land answers for
   `0x303`)~~ — **read**
-  ([The global path](#the-global-path--read-and-measured)). Still open: the
-  local path and its obstacle contours (a straight leg across an areal that is
-  not convex can leave the walkable areals), how the walker drops the points a
+  ([The global path](#the-global-path--read-and-measured)), and how a tree or a
+  stone cuts the areals it stands on
+  ([read](#a-tree-or-a-stone-cuts-the-areals-it-stands-on--read-and-measured)).
+  Still open: how the local path goes round its obstacle contours, and whether
+  it widens them by the unit's size (a straight leg across an areal that is
+  not convex can leave the walkable areals); how a walker in a hole walks out
+  of it, and what it does with a goal in one; whether every scenery object
+  reaches the areal map's slot 3, and a box for a mesh of several parts;
+  whether the search measures a sub-areal from its centre; how the walker drops the points a
   unit has passed (`MWalker::ClearMoverReachedPoint`, `0x1003cfd0`), how the walker goes to the point
   it finds off a non-walkable areal, how a unit's place comes to be on a
   building's map object and which vertex the search starts from, who calls

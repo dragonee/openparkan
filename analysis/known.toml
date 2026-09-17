@@ -3694,9 +3694,9 @@ read = false
 module = "ArealMap.dll"
 at = "0x10010b10"
 kind = "function"
-name = "MBrokenAreal::Divide"
-doc = "the binary's own assertion text"
-read = false
+name = "MBrokenAreal::Divide: the footprint merged with the holes; each sub-areal hit gives S - P, one inside keeps P as a hole, one inside P is dropped"
+doc = "docs/24-motion.md"
+read = true
 
 [[entry]]
 module = "ArealMap.dll"
@@ -28990,7 +28990,7 @@ doc = "docs/24-motion.md"
 module = "ArealMap.dll"
 at = "0x1001f68e"
 kind = "site"
-name = "OnAddStatic: only an object of kind 10 (a tree or stone) breaks areals"
+name = "static attach/detach (slot 3): only an object of kind 10 (a tree or stone) goes on to OnAddStatic or OnRemoveStatic"
 read = true
 doc = "docs/24-motion.md"
 
@@ -29090,3 +29090,124 @@ kind = "site"
 name = "seeker tick: interface 0x20 slot 3 with 2 and the all-zero request -- steers at the target's node sphere's centre"
 read = true
 doc = "docs/29-weapons.md"
+
+# --- a tree or a stone cuts the areals it stands on, ../docs/24-motion.md -------
+[[entry]]
+module = "ArealMap.dll"
+at = "0x10022580"
+kind = "function"
+name = "M_ISystemArealMap::OnAddStatic: each walkable areal whose box and polygon meet the footprint is broken and rebuilt, then it and its walkable neighbours relinked"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "ArealMap.dll"
+at = "0x1000f660"
+kind = "function"
+name = "a static's contour: interface 0x18 slot 10 with mode 2, the first 4 of the 8 box corners kept"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "AniMesh.dll"
+at = "0x10014620"
+kind = "function"
+name = "mesh slot 10: mode 2 answers the 8 corners of the box at +0x50, each through the world matrix at +0x160"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "ArealMap.dll"
+at = "0x1000fe00"
+kind = "function"
+name = "GenerateSubAreal: S - P traced forward along S and back along P, an edge along P given no neighbour"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x100377d6"
+kind = "site"
+name = "waypoint from a sub-areal: an edge the line to the goal misses gives an end moved 0.2 x the edge's length in"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10039337"
+kind = "site"
+name = "local path: 'Finish is inside ObstacleContour'"
+read = false
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1003e81d"
+kind = "site"
+name = "walker: 'Leave Obstacle' -- a place in a hole or an inflated contour fetches that contour to walk out of"
+read = false
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "ArealMap.dll"
+at = "0x1001f660"
+kind = "function"
+name = "system areal map slot 3: a static attached or detached; kind 10 goes to OnAddStatic (slot 44) or OnRemoveStatic (slot 45), its id kept in the set at +0x254"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "ArealMap.dll"
+at = "0x10018150"
+kind = "function"
+name = "two contours meet: a corner of either inside the other, or two edges crossing strictly"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "ArealMap.dll"
+at = "0x10011900"
+kind = "function"
+name = "broken areal rebuild: the sub-areals reset to the whole areal, then Divide once per static"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "ArealMap.dll"
+at = "0x10007920"
+kind = "function"
+name = "broken areal with no static left: the areal made whole"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "ArealMap.dll"
+at = "0x10013190"
+kind = "function"
+name = "contour inflated: each corner moved out along its averaged edges' normal (1.5 for a static's)"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "ArealMap.dll"
+at = "0x10024110"
+kind = "function"
+name = "system areal map slot 48: a point on a broken areal resolves to its sub-areal (0xfff2), else a hole (0xfff9), else an inflated contour (0xfffa), else 0xfff8"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10039002"
+kind = "site"
+name = "local path generator: the node's polygon its outline; on a sub-areal every hole of the broken areal an obstacle (slots 54, 55)"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10039365"
+kind = "site"
+name = "local path: 'Start is inside ObstacleContour'"
+read = false
+doc = "docs/24-motion.md"

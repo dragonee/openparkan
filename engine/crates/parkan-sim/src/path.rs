@@ -1,9 +1,10 @@
 //! The walker's global path: the areals and hall-way vertices from a unit to its goal, found
-//! by A* over the links the areal map builds, and the points the unit walks through them. See
-//! `docs/24-motion.md`, "The global path".
+//! by A* over the links the areal map builds, and the points the unit walks through them, round
+//! the trees and stones cut out of the areals. See `docs/24-motion.md`, "The global path" and
+//! "A tree or a stone cuts the areals it stands on".
 
 use std::cmp::Ordering;
-use std::collections::{BinaryHeap, HashMap, HashSet, VecDeque};
+use std::collections::{BinaryHeap, HashMap, HashSet};
 
 use glam::{DVec2, Vec2, Vec3};
 use parkan_formats::arealmap::ArealMap;
@@ -35,6 +36,9 @@ pub const MAX_NODES: usize = 2048;
 /// A waypoint on an edge the straight line to the goal misses stands this far along the edge
 /// from one of its ends (`Behavior.dll:0x10036cc5`).
 pub const EDGE_INSET: f32 = 3.0;
+/// On a piece of a broken areal the end is moved a fifth of the edge's length instead
+/// (`Behavior.dll:0x100377d6`).
+pub const PIECE_EDGE_INSET: f32 = 0.2;
 /// A walker on an areal no link leaves (`0x1003e2dc`) tries this many random points in a square
 /// about it, of half-width 30, then 33, and so on while under 500, and goes to the first that
 /// lies on a walkable areal (`0x1003e2f4`–`0x1003e419`).
@@ -77,6 +81,10 @@ impl Triangle {
             })
             .min_by(|a, b| a.distance_squared(p).total_cmp(&b.distance_squared(p)))
             .expect("three edges")
+    }
+
+    fn centroid(&self) -> Vec2 {
+        (self.flat(0) + self.flat(1) + self.flat(2)) / 3.0
     }
 
     /// The height of the triangle's plane at `p`, or its corners' mean where it has none.
@@ -161,24 +169,42 @@ pub enum Refusal {
     NoWay,
 }
 
-/// The areal map as the walker's search links it, and cut into triangles for a walk through
-/// an areal that is not convex.
+/// A piece of an areal: its triangles that still hang together once the scenery's footprints
+/// are cut out, as the game's sub-areals do (`MBrokenAreal::Divide`, `ArealMap.dll:0x10010b10`).
+#[derive(Clone, Debug, PartialEq)]
+struct Piece {
+    areal: usize,
+    triangles: Vec<usize>,
+    /// Where the search measures it from: the areal's record centre while the areal is one
+    /// piece, else its triangles' centre.
+    centre: Vec2,
+    /// The pieces across its areal's edges whose areals are walkable.
+    links: Vec<usize>,
+}
+
+/// The areal map as the walker's search links it, cut into triangles for a walk through an
+/// areal that is not convex, with the scenery's footprints cut out.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Graph {
     map: ArealMap,
     bounds: ([f32; 2], [f32; 2]),
     triangles: Vec<Triangle>,
-    /// Each areal's triangles, a range of `triangles`.
-    of_areal: Vec<std::ops::Range<usize>>,
-    /// Each vertex's triangles, and whether it lies on the outside of the map.
+    /// Each areal's triangles.
+    of_areal: Vec<Vec<usize>>,
+    /// Whether scenery was cut out of an areal.
+    broken: Vec<bool>,
+    pieces: Vec<Piece>,
+    /// Each triangle's piece.
+    piece_of: Vec<usize>,
+    /// Each vertex's triangles, and whether it lies on the outside of the map or of a hole.
     fans: Vec<Vec<usize>>,
     outside: Vec<bool>,
 }
 
-/// A node of the search: an areal, or a way's vertex.
+/// A node of the search: a piece of an areal, or a way's vertex.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 enum Node {
-    Areal(usize),
+    Piece(usize),
     Vertex(usize, usize),
 }
 
@@ -200,6 +226,21 @@ impl PartialOrd for Open {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
+}
+
+/// A corner nearer than this to a vertex already there joins it as a footprint is cut in.
+const SNAP: f32 = 0.05;
+
+/// Whether `p` lies strictly inside the counter-clockwise convex polygon `polygon`.
+fn inside_convex(polygon: &[Vec2], p: Vec2) -> bool {
+    let n = polygon.len();
+    (0..n).all(|k| (polygon[(k + 1) % n] - polygon[k]).perp_dot(p - polygon[k]) > 0.0)
+}
+
+/// What a segment being cut in meets next from the vertex it has reached.
+enum Step {
+    Vertex(Vec3),
+    Split(usize, usize, Vec3),
 }
 
 impl Graph {
@@ -238,7 +279,7 @@ impl Graph {
                     across,
                 });
             }
-            of_areal.push(start..triangles.len());
+            of_areal.push((start..triangles.len()).collect());
             outer.push(edges);
         }
         // Across an areal's edge lies the triangle on its twin in the neighbour.
@@ -251,10 +292,28 @@ impl Graph {
                 }
             }
         }
+        let broken = vec![false; map.areals.len()];
+        let mut graph = Self {
+            map,
+            bounds,
+            triangles,
+            of_areal,
+            broken,
+            pieces: Vec::new(),
+            piece_of: Vec::new(),
+            fans: Vec::new(),
+            outside: Vec::new(),
+        };
+        graph.finish();
+        graph
+    }
+
+    /// The vertices, and the pieces each areal's triangles make, worked out afresh.
+    fn finish(&mut self) {
         // A vertex is a place, to the centimetre, that corners share.
         let mut places: HashMap<(i64, i64), usize> = HashMap::new();
         let mut fans: Vec<Vec<usize>> = Vec::new();
-        for (t, tri) in triangles.iter_mut().enumerate() {
+        for (t, tri) in self.triangles.iter_mut().enumerate() {
             for k in 0..3 {
                 let key =
                     ((tri.corners[k].x * 100.0).round() as i64, (tri.corners[k].y * 100.0).round() as i64);
@@ -267,13 +326,300 @@ impl Graph {
             }
         }
         let mut outside = vec![false; fans.len()];
-        for tri in &triangles {
+        for tri in &self.triangles {
             for k in (0..3).filter(|&k| tri.across[k].is_none()) {
                 outside[tri.vertices[k]] = true;
                 outside[tri.vertices[(k + 1) % 3]] = true;
             }
         }
-        Self { map, bounds, triangles, of_areal, fans, outside }
+        self.fans = fans;
+        self.outside = outside;
+
+        let n = self.triangles.len();
+        let mut piece_of = vec![usize::MAX; n];
+        let mut pieces: Vec<Piece> = Vec::new();
+        for first in 0..n {
+            if piece_of[first] != usize::MAX {
+                continue;
+            }
+            let (areal, p) = (self.triangles[first].areal, pieces.len());
+            let (mut stack, mut members) = (vec![first], Vec::new());
+            piece_of[first] = p;
+            while let Some(t) = stack.pop() {
+                members.push(t);
+                for &u in self.triangles[t].across.iter().flatten() {
+                    if piece_of[u] == usize::MAX && self.triangles[u].areal == areal {
+                        piece_of[u] = p;
+                        stack.push(u);
+                    }
+                }
+            }
+            pieces.push(Piece { areal, triangles: members, centre: Vec2::ZERO, links: Vec::new() });
+        }
+        let mut count = vec![0usize; self.map.areals.len()];
+        for piece in &pieces {
+            count[piece.areal] += 1;
+        }
+        for piece in &mut pieces {
+            piece.centre = if count[piece.areal] == 1 {
+                Vec2::from(self.map.areals[piece.areal].centre)
+            } else {
+                let (mut sum, mut area) = (Vec2::ZERO, 0.0);
+                for &t in &piece.triangles {
+                    let tri = &self.triangles[t];
+                    let a = (tri.flat(1) - tri.flat(0)).perp_dot(tri.flat(2) - tri.flat(0)).abs() / 2.0;
+                    sum += tri.centroid() * a;
+                    area += a;
+                }
+                if area > 0.0 { sum / area } else { Vec2::from(self.map.areals[piece.areal].centre) }
+            };
+        }
+        for piece in &mut pieces {
+            let mut links = Vec::new();
+            for &t in &piece.triangles {
+                for &u in self.triangles[t].across.iter().flatten() {
+                    let (q, there) = (piece_of[u], self.triangles[u].areal);
+                    if there != piece.areal && self.walkable(there) && !links.contains(&q) {
+                        links.push(q);
+                    }
+                }
+            }
+            piece.links = links;
+        }
+        self.pieces = pieces;
+        self.piece_of = piece_of;
+    }
+
+    /// Cut the scenery's `footprints` out of the walkable areals, as the areal map does for an
+    /// object of kind 10 (`M_ISystemArealMap::OnAddStatic`, `ArealMap.dll:0x10022580`): each a
+    /// rectangle across the ground, corners in order. What lies inside is no longer walkable,
+    /// an areal it cuts apart falls into pieces the search takes as nodes, and one it lies
+    /// wholly inside keeps a hole a walk goes round.
+    ///
+    /// STAND-IN: docs/24-motion.md#not-established -- the sub-areals' shapes (`0x1000fe00`),
+    /// the holes' own list and the inflated contours are not followed: the footprints' edges are
+    /// cut into the triangles, what lies inside goes, and each areal's triangles that still hang
+    /// together make a piece. A piece is measured from its areal's record centre while the areal
+    /// is one piece, and from its triangles' centre once it falls apart, where a sub-areal is
+    /// measured from its vertices' average.
+    pub fn carve(&mut self, footprints: &[[Vec2; 4]]) {
+        if footprints.is_empty() {
+            return;
+        }
+        let (lo, hi) = self.bounds;
+        let on_map = |p: Vec2| Vec2::new(p.x.clamp(lo[0], hi[0]), p.y.clamp(lo[1], hi[1]));
+        let polygons: Vec<[Vec2; 4]> = footprints
+            .iter()
+            .map(|f| {
+                let mut f = f.map(on_map);
+                let area: f32 = (0..4).map(|k| f[k].perp_dot(f[(k + 1) % 4])).sum();
+                if area < 0.0 {
+                    f.reverse();
+                }
+                f
+            })
+            .collect();
+        for f in &polygons {
+            let corners: Vec<Option<Vec3>> = f.iter().map(|&p| self.insert_point(p)).collect();
+            for k in 0..4 {
+                if let (Some(a), Some(b)) = (corners[k], corners[(k + 1) % 4]) {
+                    self.insert_segment(a, b);
+                }
+            }
+        }
+        let gone: Vec<bool> = self
+            .triangles
+            .iter()
+            .map(|t| self.walkable(t.areal) && polygons.iter().any(|f| inside_convex(f, t.centroid())))
+            .collect();
+        let mut index = vec![usize::MAX; self.triangles.len()];
+        let mut kept = Vec::with_capacity(self.triangles.len());
+        for (t, tri) in self.triangles.iter().enumerate() {
+            if gone[t] {
+                self.broken[tri.areal] = true;
+            } else {
+                index[t] = kept.len();
+                kept.push(tri.clone());
+            }
+        }
+        for tri in &mut kept {
+            for e in &mut tri.across {
+                *e = e.and_then(|u| (index[u] != usize::MAX).then_some(index[u]));
+            }
+        }
+        self.of_areal = vec![Vec::new(); self.map.areals.len()];
+        for (t, tri) in kept.iter().enumerate() {
+            self.of_areal[tri.areal].push(t);
+        }
+        self.triangles = kept;
+        self.finish();
+    }
+
+    /// The triangles of every areal the grid lists within `rings` cells of `p`.
+    fn near(&self, p: Vec2, rings: i32) -> Vec<usize> {
+        let (lo, hi) = self.bounds;
+        let cell = Vec2::new(
+            (hi[0] - lo[0]) / self.map.cells_across.max(1) as f32,
+            (hi[1] - lo[1]) / self.map.cells_down.max(1) as f32,
+        );
+        let mut areals: Vec<usize> = Vec::new();
+        for dx in -rings..=rings {
+            for dy in -rings..=rings {
+                let q = p + Vec2::new(dx as f32 * cell.x, dy as f32 * cell.y);
+                for &a in self.map.listed_at(self.bounds, q.x, q.y) {
+                    if !areals.contains(&usize::from(a)) {
+                        areals.push(usize::from(a));
+                    }
+                }
+            }
+        }
+        areals.iter().flat_map(|&a| self.of_areal.get(a).cloned().unwrap_or_default()).collect()
+    }
+
+    /// Point `n` of neighbour `n` of a split at `from` now answers `to`.
+    fn repoint(&mut self, n: Option<usize>, from: usize, to: usize) {
+        if let Some(n) = n {
+            for e in &mut self.triangles[n].across {
+                if *e == Some(from) {
+                    *e = Some(to);
+                }
+            }
+        }
+    }
+
+    /// Triangle `t` cut in two at `x` on its edge `k`: the two halves, each with that edge's
+    /// part first, the neighbour across it left for the caller to join.
+    fn split_side(&mut self, t: usize, k: usize, x: Vec3) -> (usize, usize) {
+        let old = self.triangles[t].clone();
+        let c = |i: usize| old.corners[(k + i) % 3];
+        let n = |i: usize| old.across[(k + i) % 3];
+        let b = self.triangles.len();
+        self.triangles[t] = Triangle {
+            corners: [c(0), x, c(2)],
+            vertices: [0; 3],
+            areal: old.areal,
+            across: [None, Some(b), n(2)],
+        };
+        self.triangles.push(Triangle {
+            corners: [x, c(1), c(2)],
+            vertices: [0; 3],
+            areal: old.areal,
+            across: [None, n(1), Some(t)],
+        });
+        self.of_areal[old.areal].push(b);
+        self.repoint(n(1), t, b);
+        (t, b)
+    }
+
+    /// Edge `k` of triangle `t` cut at `x`, and the triangle across it with it.
+    fn split_edge(&mut self, t: usize, k: usize, x: Vec3) {
+        let u = self.triangles[t].across[k];
+        let (ta, tb) = self.split_side(t, k, x);
+        let Some(u) = u else { return };
+        let Some(k2) = (0..3).find(|&e| self.triangles[u].across[e] == Some(t)) else { return };
+        let (ua, ub) = self.split_side(u, k2, x);
+        // `t`'s edge runs one way and `u`'s the other: each half meets the other's far half.
+        self.triangles[ta].across[0] = Some(ub);
+        self.triangles[ub].across[0] = Some(ta);
+        self.triangles[tb].across[0] = Some(ua);
+        self.triangles[ua].across[0] = Some(tb);
+    }
+
+    /// Triangle `t` cut into three about `x` inside it.
+    fn split_face(&mut self, t: usize, x: Vec3) {
+        let old = self.triangles[t].clone();
+        let ([c0, c1, c2], [n0, n1, n2], areal) = (old.corners, old.across, old.areal);
+        let (t1, t2) = (self.triangles.len(), self.triangles.len() + 1);
+        let tri = |corners, across| Triangle { corners, vertices: [0; 3], areal, across };
+        self.triangles[t] = tri([c0, c1, x], [n0, Some(t1), Some(t2)]);
+        self.triangles.push(tri([c1, c2, x], [n1, Some(t2), Some(t)]));
+        self.triangles.push(tri([c2, c0, x], [n2, Some(t), Some(t1)]));
+        self.of_areal[areal].extend([t1, t2]);
+        self.repoint(n1, t, t1);
+        self.repoint(n2, t, t2);
+    }
+
+    /// A vertex at `p`: one already there within [`SNAP`], or `p` cut into the edge or the
+    /// triangle it lies on. None off the triangles.
+    fn insert_point(&mut self, p: Vec2) -> Option<Vec3> {
+        let t = self.near(p, 1).into_iter().find(|&t| self.triangles[t].holds(p, 1e-3))?;
+        let tri = self.triangles[t].clone();
+        if let Some(k) = (0..3).find(|&k| tri.flat(k).distance(p) < SNAP) {
+            return Some(tri.corners[k]);
+        }
+        for k in 0..3 {
+            let (a, b) = (tri.corners[k], tri.corners[(k + 1) % 3]);
+            let e = (b - a).truncate();
+            let s = ((p - a.truncate()).dot(e) / e.length_squared().max(1e-9)).clamp(0.0, 1.0);
+            if (a.truncate() + e * s).distance(p) < SNAP * 0.2 {
+                let x = a.lerp(b, s);
+                self.split_edge(t, k, x);
+                return Some(x);
+            }
+        }
+        let x = p.extend(tri.height(p));
+        self.split_face(t, x);
+        Some(x)
+    }
+
+    /// The segment from vertex `a` to vertex `b` cut into the triangles: each edge it crosses
+    /// split where it does, until it runs along edges from one to the other.
+    fn insert_segment(&mut self, a: Vec3, b: Vec3) {
+        let mut at = a;
+        for _ in 0..4096 {
+            let (here, there) = (at.truncate(), b.truncate());
+            if here.distance(there) < SNAP {
+                return;
+            }
+            let d = there - here;
+            let mut step = None;
+            for t in self.near(here, 1) {
+                let tri = &self.triangles[t];
+                let Some(i) = (0..3).find(|&k| tri.flat(k).distance(here) < 1e-4) else { continue };
+                let (p, q) = (tri.corners[(i + 1) % 3], tri.corners[(i + 2) % 3]);
+                if p.truncate().distance(there) < SNAP || q.truncate().distance(there) < SNAP {
+                    return;
+                }
+                let (pp, qq) = (p.truncate() - here, q.truncate() - here);
+                let along = |v: Vec2| v.perp_dot(d).abs() <= 1e-4 * v.length() * d.length() && v.dot(d) > 0.0;
+                if along(pp) {
+                    step = Some(Step::Vertex(p));
+                    break;
+                }
+                if along(qq) {
+                    step = Some(Step::Vertex(q));
+                    break;
+                }
+                if pp.perp_dot(d) > 0.0 && d.perp_dot(qq) > 0.0 {
+                    let e = (q - p).truncate();
+                    let denominator = d.perp_dot(e);
+                    if denominator.abs() < 1e-9 {
+                        continue;
+                    }
+                    let r = ((p.truncate() - here).perp_dot(d) / denominator).clamp(0.0, 1.0);
+                    let x = p.lerp(q, r);
+                    if x.truncate().distance(here) > d.length() + SNAP {
+                        return;
+                    }
+                    step = Some(if x.truncate().distance(p.truncate()) < SNAP {
+                        Step::Vertex(p)
+                    } else if x.truncate().distance(q.truncate()) < SNAP {
+                        Step::Vertex(q)
+                    } else {
+                        Step::Split(t, (i + 1) % 3, x)
+                    });
+                    break;
+                }
+            }
+            match step {
+                Some(Step::Vertex(v)) => at = v,
+                Some(Step::Split(t, k, x)) => {
+                    self.split_edge(t, k, x);
+                    at = x;
+                }
+                None => return,
+            }
+        }
     }
 
     pub fn map(&self) -> &ArealMap {
@@ -291,19 +637,23 @@ impl Graph {
         self.areal_at(x, y).is_some_and(|a| self.walkable(a))
     }
 
+    /// Whether `(x, y)` lies on a walkable areal inside a footprint cut out of it.
+    pub fn in_footprint(&self, x: f32, y: f32) -> bool {
+        let p = Vec2::new(x, y);
+        self.areal_at(x, y).is_some_and(|a| {
+            self.walkable(a) && !self.of_areal[a].iter().any(|&t| self.triangles[t].holds(p, 1e-3))
+        })
+    }
+
     fn walkable(&self, a: usize) -> bool {
         self.map.areals.get(a).is_some_and(|areal| areal.usable())
     }
 
-    fn centre(&self, a: usize) -> Vec2 {
-        Vec2::from(self.map.areals[a].centre)
-    }
-
     /// The triangle under `p`: one of its areal's, or, on an edge the areals' own test leaves
-    /// out, the nearest of those the grid lists there.
+    /// out or in a footprint, the nearest of those the grid lists there.
     fn triangle_at(&self, p: Vec2) -> Option<usize> {
         if let Some(a) = self.areal_at(p.x, p.y)
-            && let Some(t) = self.of_areal[a].clone().find(|&t| self.triangles[t].holds(p, 1e-3))
+            && let Some(t) = self.of_areal[a].iter().copied().find(|&t| self.triangles[t].holds(p, 1e-3))
         {
             return Some(t);
         }
@@ -317,15 +667,38 @@ impl Graph {
             })
     }
 
+    /// The nearest walkable ground to `p` in a footprint, `clearance` on out from the
+    /// footprint's edge where that is walkable too, and the triangle it stands in.
+    fn off_footprint(&self, p: Vec2, clearance: f32) -> Option<(usize, Vec2)> {
+        let d = |t: usize| self.triangles[t].nearest(p).distance_squared(p);
+        let t = (1..=12).find_map(|rings| {
+            self.near(p, rings)
+                .into_iter()
+                .filter(|&t| self.walkable(self.triangles[t].areal))
+                .min_by(|&x, &y| d(x).total_cmp(&d(y)))
+        })?;
+        let edge = self.triangles[t].nearest(p);
+        let out = edge + (edge - p).normalize_or_zero() * clearance;
+        let beyond = self
+            .near(out, 1)
+            .into_iter()
+            .find(|&u| self.walkable(self.triangles[u].areal) && self.triangles[u].holds(out, 1e-3));
+        Some(beyond.map_or((t, edge), |u| (u, out)))
+    }
+
     /// The points a walker that does not fly passes from `from` to `goal`, the last `goal`
-    /// itself. The search starts from the areal under `from`, or from the nearest vertex of the
-    /// way `aboard` names, and ends at the areal under `goal`. `random` gives a number in 0..1
+    /// itself. The search starts from the piece under `from`, or from the nearest vertex of the
+    /// way `aboard` names, and ends at the piece under `goal`. `random` gives a number in 0..1
     /// for each link tried; `clearance` is how far a walk through an areal's triangles keeps off
     /// ground that is not walkable.
     ///
     /// STAND-IN: docs/24-motion.md#not-established -- how a unit's place comes to stand on a
     /// building's map object, and which of its vertices the search starts from, are not read:
-    /// a unit on a way's building takes the way's nearest vertex.
+    /// a unit on a way's building takes the way's nearest vertex. Nor is what the walker does
+    /// with a goal inside a footprint ("Finish is inside ObstacleContour",
+    /// `Behavior.dll:0x10039337`), nor how one inside a footprint leaves it ("Leave Obstacle",
+    /// `0x1003e81d`): a goal inside one is moved to the nearest ground outside it, `clearance`
+    /// on where that is walkable, and a unit inside one sets out from the nearest piece.
     pub fn route(
         &self,
         from: Vec3,
@@ -341,14 +714,29 @@ impl Graph {
                 .min_by(|&a, &b| points[a].distance_squared(p).total_cmp(&points[b].distance_squared(p)))
                 .map(|v| Node::Vertex(w, v))
         };
-        let end = match self.areal_at(goal.x, goal.y) {
-            Some(a) if self.walkable(a) => Node::Areal(a),
+        let areal = match self.areal_at(goal.x, goal.y) {
+            Some(a) if self.walkable(a) => a,
             _ => return Err(Refusal::Goal),
+        };
+        let (goal, end) = match self.of_areal[areal]
+            .iter()
+            .copied()
+            .find(|&t| self.triangles[t].holds(goal.truncate(), 1e-3))
+        {
+            Some(t) => (goal, Node::Piece(self.piece_of[t])),
+            None => {
+                let (t, p) = self.off_footprint(goal.truncate(), clearance).ok_or(Refusal::Goal)?;
+                (p.extend(self.triangles[t].height(p)), Node::Piece(self.piece_of[t]))
+            }
         };
         let start = match aboard.and_then(|w| nearest(w, from)) {
             Some(node) => node,
-            None => match self.triangle_at(from.truncate()).map(|t| self.triangles[t].areal) {
-                Some(a) if self.walkable(a) => Node::Areal(a),
+            None => match self.triangle_at(from.truncate()) {
+                Some(t) if self.walkable(self.triangles[t].areal) => Node::Piece(self.piece_of[t]),
+                _ if self.in_footprint(from.x, from.y) => {
+                    let (t, _) = self.off_footprint(from.truncate(), 0.0).ok_or(Refusal::Stranded)?;
+                    Node::Piece(self.piece_of[t])
+                }
                 _ => return Err(Refusal::Stranded),
             },
         };
@@ -356,11 +744,11 @@ impl Graph {
         Ok(self.walk(&nodes, from, goal, ways, clearance))
     }
 
-    /// A node's centre, as the search's estimate measures from it: an areal's record centre at
-    /// height 0, a vertex's point.
+    /// A node's centre, as the search's estimate measures from it: a piece's centre at height 0,
+    /// a vertex's point.
     fn node_centre(&self, node: Node, ways: &[Way]) -> Vec3 {
         match node {
-            Node::Areal(a) => self.centre(a).extend(0.0),
+            Node::Piece(p) => self.pieces[p].centre.extend(0.0),
             Node::Vertex(w, v) => ways[w].points[v],
         }
     }
@@ -383,16 +771,20 @@ impl Graph {
         if start == end {
             return Some(vec![start]);
         }
-        // Each way's exits by the walkable areal under them.
+        // Each way's exits by the walkable piece under them.
         let mut exits: HashMap<usize, Vec<Node>> = HashMap::new();
         let mut under: HashMap<Node, usize> = HashMap::new();
         for (w, way) in ways.iter().enumerate() {
             for (v, &p) in way.points.iter().enumerate() {
                 if way.flags.get(v).is_some_and(|f| f & VERTEX_EXIT != 0)
                     && let Some(a) = self.areal_at(p.x, p.y).filter(|&a| self.walkable(a))
+                    && let Some(t) = self.of_areal[a]
+                        .iter()
+                        .copied()
+                        .find(|&t| self.triangles[t].holds(p.truncate(), 1e-3))
                 {
-                    exits.entry(a).or_default().push(Node::Vertex(w, v));
-                    under.insert(Node::Vertex(w, v), a);
+                    exits.entry(self.piece_of[t]).or_default().push(Node::Vertex(w, v));
+                    under.insert(Node::Vertex(w, v), self.piece_of[t]);
                 }
             }
         }
@@ -400,14 +792,12 @@ impl Graph {
         let links = |node: Node| -> Vec<(Node, f32)> {
             let mut out = Vec::new();
             match node {
-                Node::Areal(a) => {
-                    let areal = &self.map.areals[a];
-                    for b in (0..areal.edges.len()).filter_map(|e| areal.neighbour(e)) {
-                        if self.walkable(b) {
-                            out.push((Node::Areal(b), self.centre(a).distance(self.centre(b)) + AREAL_STEP));
-                        }
+                Node::Piece(p) => {
+                    let piece = &self.pieces[p];
+                    for &q in &piece.links {
+                        out.push((Node::Piece(q), piece.centre.distance(self.pieces[q].centre) + AREAL_STEP));
                     }
-                    out.extend(exits.get(&a).into_iter().flatten().map(|&x| (x, EXIT_STEP)));
+                    out.extend(exits.get(&p).into_iter().flatten().map(|&x| (x, EXIT_STEP)));
                 }
                 Node::Vertex(w, v) => {
                     let way = &ways[w];
@@ -428,8 +818,8 @@ impl Graph {
                         };
                         out.push((Node::Vertex(w, other), cost));
                     }
-                    if let Some(&a) = under.get(&node) {
-                        out.push((Node::Areal(a), EXIT_STEP));
+                    if let Some(&p) = under.get(&node) {
+                        out.push((Node::Piece(p), EXIT_STEP));
                     }
                     if flag(v) & VERTEX_JOIN != 0 {
                         for (x, there) in ways.iter().enumerate().filter(|&(x, _)| x != w) {
@@ -486,18 +876,40 @@ impl Graph {
         None
     }
 
-    /// The waypoint for a step from areal `a` into `b`, from `at` bound for `goal`
+    /// The waypoint for a step from piece `a` into piece `b`, from `at` bound for `goal`
     /// (`Behavior.dll:0x10036a80`): on an edge of `a` that `b` lies across, where the straight
-    /// line to the goal crosses it, else either end of it moved 3 along it across the ground
-    /// at the end's own height; of those, the one that makes the way through it shortest.
+    /// line to the goal crosses it, else either end of it moved along it across the ground at
+    /// the end's own height, 3 on a whole areal's edge and a fifth of its length on a piece's
+    /// (`0x100377d6`); of those, the one that makes the way through it shortest.
     fn edge_point(&self, a: usize, b: usize, at: Vec3, goal: Vec3) -> Option<Vec3> {
-        let areal = &self.map.areals[a];
-        let n = areal.vertices.len();
         let (from, to) = (at.truncate(), goal.truncate());
-        (0..n)
-            .filter(|&e| areal.neighbour(e) == Some(b))
-            .flat_map(|e| {
-                let (p, q) = (Vec3::from(areal.vertices[e]), Vec3::from(areal.vertices[(e + 1) % n]));
+        let (areal_a, areal_b) = (self.pieces[a].areal, self.pieces[b].areal);
+        let edges: Vec<(Vec3, Vec3, f32)> = if !self.broken[areal_a] && !self.broken[areal_b] {
+            let areal = &self.map.areals[areal_a];
+            let n = areal.vertices.len();
+            (0..n)
+                .filter(|&e| areal.neighbour(e) == Some(areal_b))
+                .map(|e| (Vec3::from(areal.vertices[e]), Vec3::from(areal.vertices[(e + 1) % n]), EDGE_INSET))
+                .collect()
+        } else {
+            self.pieces[a]
+                .triangles
+                .iter()
+                .flat_map(|&t| {
+                    let tri = &self.triangles[t];
+                    (0..3)
+                        .filter(|&k| tri.across[k].is_some_and(|u| self.piece_of[u] == b))
+                        .map(|k| {
+                            let (p, q) = (tri.corners[k], tri.corners[(k + 1) % 3]);
+                            (p, q, (q - p).truncate().length() * PIECE_EDGE_INSET)
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .collect()
+        };
+        edges
+            .into_iter()
+            .flat_map(|(p, q, inset)| {
                 let (span, edge) = (to - from, (q - p).truncate());
                 let denominator = span.perp_dot(edge);
                 let crossing = (denominator.abs() > 1e-9)
@@ -508,7 +920,7 @@ impl Graph {
                             .then(|| p.lerp(q, along))
                     })
                     .flatten();
-                let inset = (edge.normalize_or_zero() * EDGE_INSET).extend(0.0);
+                let inset = (edge.normalize_or_zero() * inset).extend(0.0);
                 match crossing {
                     Some(c) => vec![c],
                     None => vec![p + inset, q - inset],
@@ -528,10 +940,11 @@ impl Graph {
     /// left out while the unit stands no farther from the next vertex than it does, so a unit
     /// part way along a way, planned again, goes on rather than back.
     ///
-    /// STAND-IN: docs/24-motion.md#not-established -- the local path and its obstacle contours
-    /// are not read. A straight leg across an areal that would leave the walkable areals, as a
-    /// leg across one that is not convex can, walks through that areal's triangles instead,
-    /// pulled straight, `clearance` off each vertex that touches ground that is not walkable.
+    /// STAND-IN: docs/24-motion.md#not-established -- how the local path goes round its obstacle
+    /// contours is not read. A straight leg across an areal that would leave the walkable ground,
+    /// as a leg across one that is not convex or across a footprint cut out of it can, walks
+    /// through its piece's triangles instead, pulled straight, `clearance` off each vertex that
+    /// touches ground that is not walkable.
     fn walk(&self, nodes: &[Node], from: Vec3, goal: Vec3, ways: &[Way], clearance: f32) -> Vec<Vec3> {
         let allowed = |t: usize| self.walkable(self.triangles[t].areal);
         let exposed = |v: usize| self.outside[v] || self.fans[v].iter().any(|&t| !allowed(t));
@@ -548,7 +961,7 @@ impl Graph {
         let mut at = from;
         let mut across = None;
         match nodes.first() {
-            Some(&Node::Areal(a)) => across = Some(a),
+            Some(&Node::Piece(a)) => across = Some(a),
             // A unit aboard a way steps onto it first.
             Some(&Node::Vertex(w, v)) => {
                 at = ways[w].points[v];
@@ -558,7 +971,7 @@ impl Graph {
         }
         for pair in nodes.windows(2) {
             match (pair[0], pair[1]) {
-                (Node::Areal(a), Node::Areal(b)) => {
+                (Node::Piece(a), Node::Piece(b)) => {
                     let Some(point) = self.edge_point(a, b, at, goal) else { continue };
                     leg(&mut out, at, point, Some(a));
                     at = point;
@@ -570,7 +983,7 @@ impl Graph {
                     at = point;
                     across = None;
                 }
-                (Node::Vertex(..), Node::Areal(b)) => across = Some(b),
+                (Node::Vertex(..), Node::Piece(b)) => across = Some(b),
             }
         }
         leg(&mut out, at, goal, across);
@@ -587,27 +1000,36 @@ impl Graph {
         out
     }
 
-    /// The corners of a walk from `from` to `to` inside areal `a`, through its triangles.
-    fn through(&self, a: usize, from: Vec2, to: Vec2, keep_off: &dyn Fn(usize) -> f32) -> Vec<Vec3> {
-        let own = self.of_areal[a].clone();
+    /// The corners of a walk from `from` to `to` inside piece `piece`, through its triangles by
+    /// the shortest run between their centres.
+    fn through(&self, piece: usize, from: Vec2, to: Vec2, keep_off: &dyn Fn(usize) -> f32) -> Vec<Vec3> {
+        let own = &self.pieces[piece].triangles;
         let nearest = |p: Vec2| {
-            own.clone().min_by(|&x, &y| {
+            own.iter().copied().min_by(|&x, &y| {
                 let d = |t: usize| self.triangles[t].nearest(p).distance_squared(p);
                 d(x).total_cmp(&d(y))
             })
         };
         let (Some(first), Some(last)) = (nearest(from), nearest(to)) else { return Vec::new() };
-        // An areal's triangles make a tree: there is one run between two of them.
+        let mut cost: HashMap<usize, f32> = HashMap::from([(first, 0.0)]);
         let mut before: HashMap<usize, usize> = HashMap::new();
-        let mut queue = VecDeque::from([first]);
-        while let Some(t) = queue.pop_front() {
+        let mut done: HashSet<usize> = HashSet::new();
+        while let Some((&t, &c)) =
+            cost.iter().filter(|(t, _)| !done.contains(*t)).min_by(|a, b| a.1.total_cmp(b.1))
+        {
             if t == last {
                 break;
             }
-            for &u in self.triangles[t].across.iter().flatten() {
-                if own.contains(&u) && u != first && !before.contains_key(&u) {
+            done.insert(t);
+            let tri = &self.triangles[t];
+            for &u in tri.across.iter().flatten() {
+                if self.piece_of[u] != piece || done.contains(&u) {
+                    continue;
+                }
+                let step = c + tri.centroid().distance(self.triangles[u].centroid());
+                if cost.get(&u).is_none_or(|&old| step < old) {
+                    cost.insert(u, step);
                     before.insert(u, t);
-                    queue.push_back(u);
                 }
             }
         }
@@ -845,8 +1267,8 @@ mod tests {
                     .sum::<f64>()
                     / 2.0;
                 let cut: f64 = graph.of_areal[a]
-                    .clone()
-                    .map(|t| {
+                    .iter()
+                    .map(|&t| {
                         let [p, q, r] = graph.triangles[t].corners.map(|c| c.truncate().as_dvec2());
                         (q - p).perp_dot(r - p) / 2.0
                     })
@@ -859,8 +1281,8 @@ mod tests {
                 // Each edge with an areal across it has a triangle across it.
                 let across = areal.edges.iter().filter(|e| e.0 >= 0).count();
                 let met = graph.of_areal[a]
-                    .clone()
-                    .flat_map(|t| {
+                    .iter()
+                    .flat_map(|&t| {
                         graph.triangles[t].across.map(|u| u.filter(|&u| graph.triangles[u].areal != a))
                     })
                     .flatten()
@@ -1028,6 +1450,132 @@ mod tests {
         assert_eq!(past.map(|l| l[0]), Ok(ways[1].points[0]), "the joining end is behind it");
         let onto = graph.route(from, Vec3::new(25.0, 25.0, 5.0), &ways, None, 2.0, &mut fixed(0.0));
         assert_eq!(onto, Err(Refusal::Goal));
+    }
+
+    /// A rectangle's corners from `lo` to `hi`, counter-clockwise.
+    fn rectangle(lo: [f32; 2], hi: [f32; 2]) -> [Vec2; 4] {
+        [Vec2::new(lo[0], lo[1]), Vec2::new(hi[0], lo[1]), Vec2::new(hi[0], hi[1]), Vec2::new(lo[0], hi[1])]
+    }
+
+    /// Whether any leg from `from` through `legs` passes inside `rect` by more than `slack`.
+    fn enters(from: Vec3, legs: &[Vec3], rect: [Vec2; 4], slack: f32) -> bool {
+        let mut a = from;
+        legs.iter().any(|&b| {
+            let inside = (0..=200).any(|s| {
+                let p = a.lerp(b, s as f32 / 200.0);
+                p.x > rect[0].x + slack
+                    && p.x < rect[2].x - slack
+                    && p.y > rect[0].y + slack
+                    && p.y < rect[2].y - slack
+            });
+            a = b;
+            inside
+        })
+    }
+
+    /// Every triangle turns counter-clockwise and meets the one across each edge on that edge,
+    /// the other way round.
+    fn sound(graph: &Graph) {
+        for (t, tri) in graph.triangles.iter().enumerate() {
+            assert!((tri.flat(1) - tri.flat(0)).perp_dot(tri.flat(2) - tri.flat(0)) > 0.0, "{t}: {tri:?}");
+            for k in 0..3 {
+                let Some(u) = tri.across[k] else { continue };
+                let there = &graph.triangles[u];
+                let back = (0..3).find(|&e| there.across[e] == Some(t));
+                let Some(e) = back else { panic!("{u} does not answer {t}") };
+                assert!(there.flat(e).distance(tri.flat(k + 1)) < 1e-3, "{t}/{k} and {u}/{e}");
+                assert!(there.flat(e + 1).distance(tri.flat(k)) < 1e-3, "{t}/{k} and {u}/{e}");
+            }
+        }
+    }
+
+    /// The ground each areal's triangles cover.
+    fn cover(graph: &Graph, a: usize) -> f32 {
+        graph.of_areal[a]
+            .iter()
+            .map(|&t| {
+                let tri = &graph.triangles[t];
+                (tri.flat(1) - tri.flat(0)).perp_dot(tri.flat(2) - tri.flat(0)) / 2.0
+            })
+            .sum()
+    }
+
+    #[test]
+    fn a_footprint_inside_an_areal_leaves_a_hole_its_walks_go_round() {
+        let mut graph = Graph::new(squares(5, 5, &[]));
+        let stone = rectangle([22.0, 22.0], [28.0, 28.0]);
+        graph.carve(&[stone]);
+        sound(&graph);
+        assert!((cover(&graph, 12) - 64.0).abs() < 1e-3, "{}", cover(&graph, 12));
+        assert!((cover(&graph, 11) - 100.0).abs() < 1e-3);
+        // The areal is still one piece, measured from its record centre.
+        let pieces: Vec<_> = graph.pieces.iter().filter(|p| p.areal == 12).collect();
+        assert_eq!(pieces.len(), 1);
+        assert_eq!(pieces[0].centre, Vec2::new(25.0, 25.0));
+        assert!(graph.in_footprint(25.0, 25.0) && !graph.in_footprint(21.0, 25.0));
+        assert!(graph.usable(25.0, 25.0), "the areal is still walkable");
+
+        let (from, goal) = (Vec3::new(5.0, 25.0, 0.0), Vec3::new(45.0, 25.0, 0.0));
+        let legs = graph.route(from, goal, &[], None, 2.0, &mut fixed(0.0)).unwrap();
+        assert_eq!(legs.last(), Some(&goal));
+        assert!(!enters(from, &legs, stone, 1e-3), "{legs:?}");
+        // Round the stone's corners, off them by the clearance or half the way past them.
+        let corners =
+            [Vec2::new(22.0, 22.0), Vec2::new(28.0, 22.0), Vec2::new(22.0, 28.0), Vec2::new(28.0, 28.0)];
+        let off = |p: &Vec3| corners.iter().map(|c| p.truncate().distance(*c)).fold(f32::MAX, f32::min);
+        assert!(legs.iter().filter(|p| off(p) < 2.0 + 1e-3).count() == 2, "{legs:?}");
+        assert!(legs.iter().all(|p| off(p) > 1.0), "{legs:?}");
+    }
+
+    #[test]
+    fn a_footprint_across_an_areals_edges_cuts_it_into_pieces_the_search_links_apart() {
+        // Down the middle square of a 3 × 3 grid, from inside the square below to inside the one
+        // above.
+        let mut graph = Graph::new(squares(3, 3, &[]));
+        let stone = rectangle([12.0, 5.0], [18.0, 25.0]);
+        graph.carve(&[stone]);
+        sound(&graph);
+        let middle: Vec<_> = graph.pieces.iter().filter(|p| p.areal == 4).collect();
+        assert_eq!(middle.len(), 2, "{middle:?}");
+        let mut centres: Vec<Vec2> = middle.iter().map(|p| p.centre).collect();
+        centres.sort_by(|a, b| a.x.total_cmp(&b.x));
+        assert!(centres[0].distance(Vec2::new(11.0, 15.0)) < 1e-3, "{centres:?}");
+        assert!(centres[1].distance(Vec2::new(19.0, 15.0)) < 1e-3, "{centres:?}");
+        assert_eq!(graph.pieces.iter().filter(|p| p.areal == 3).count(), 1, "a notch only");
+        assert!((cover(&graph, 3) - 70.0).abs() < 1e-3 && (cover(&graph, 4) - 40.0).abs() < 1e-3);
+
+        let (from, goal) = (Vec3::new(5.0, 15.0, 0.0), Vec3::new(25.0, 15.0, 0.0));
+        let legs = graph.route(from, goal, &[], None, 2.0, &mut fixed(0.0)).unwrap();
+        assert_eq!(legs.last(), Some(&goal));
+        assert!(!enters(from, &legs, stone, 1e-3), "{legs:?}");
+
+        // Right across the map it leaves no way past.
+        let mut graph = Graph::new(squares(3, 1, &[]));
+        graph.carve(&[rectangle([13.0, -5.0], [17.0, 15.0])]);
+        sound(&graph);
+        let route =
+            graph.route(Vec3::new(5.0, 5.0, 0.0), Vec3::new(25.0, 5.0, 0.0), &[], None, 2.0, &mut fixed(0.0));
+        assert_eq!(route, Err(Refusal::NoWay));
+    }
+
+    #[test]
+    fn a_walker_sent_into_a_footprint_stops_outside_it_and_one_inside_walks_out() {
+        let mut graph = Graph::new(squares(5, 5, &[]));
+        let stone = rectangle([22.0, 22.0], [28.0, 28.0]);
+        // Two footprints that overlap cut as one.
+        graph.carve(&[stone, rectangle([26.0, 21.0], [29.0, 24.0])]);
+        sound(&graph);
+        assert!((cover(&graph, 12) - (100.0 - 36.0 - 9.0 + 4.0)).abs() < 1e-3, "{}", cover(&graph, 12));
+
+        let from = Vec3::new(5.0, 25.0, 0.0);
+        let legs = graph.route(from, Vec3::new(23.0, 25.0, 0.0), &[], None, 2.0, &mut fixed(0.0)).unwrap();
+        let last = *legs.last().unwrap();
+        assert!(!enters(from, &legs, stone, 1e-3), "{legs:?}");
+        assert!(last.truncate().distance(Vec2::new(20.0, 25.0)) < 1e-3, "2 in from the stone's edge: {last}");
+
+        let inside = Vec3::new(24.0, 25.0, 0.0);
+        let legs = graph.route(inside, Vec3::new(5.0, 25.0, 0.0), &[], None, 2.0, &mut fixed(0.0)).unwrap();
+        assert_eq!(legs.last(), Some(&Vec3::new(5.0, 25.0, 0.0)));
     }
 
     #[test]

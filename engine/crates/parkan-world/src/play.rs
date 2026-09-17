@@ -6,7 +6,7 @@ use std::path::Path;
 use std::rc::Rc;
 
 use anyhow::{Context, Result};
-use glam::{Mat4, Vec3};
+use glam::{Mat4, Vec2, Vec3};
 use parkan_formats::control::{
     ACT_EFFECT_NODE, ACT_EFFECT_POINTS, ACT_EFFECT_TIME_POINT, ACT_START_EFFECT, COND_BED, CONDITIONS,
     ENTRY_LOAD, run_group,
@@ -679,6 +679,26 @@ fn collision_push(solids: &[Solid], from: Vec3, to: Vec3, radius: f32, mover: Op
     total
 }
 
+/// The ground each tree and stone stands on, as the areal map cuts it out of the walkable
+/// areals (`ArealMap.dll:0x1000f660`): the four lower corners of its mesh's box, in the box's
+/// order, placed and scaled as the object is.
+fn scenery_footprints(mission: &Mission, battle: &Battle) -> Vec<[Vec2; 4]> {
+    (0..battle.objects.len())
+        .filter(|&t| matches!(battle.placed_kinds.get(t), Some(&(KIND_VEGETATION | KIND_ROCK))))
+        .filter_map(|t| {
+            let object = &mission.objects[battle.objects[t]];
+            let corners = battle.meshes.get(t)?.first()?.mesh.corners?;
+            let scale = object.placed_scale();
+            let (sin, cos) = object.rotation.sin_cos();
+            let at = Vec2::new(object.position[0], object.position[1]);
+            Some(std::array::from_fn(|k| {
+                let (x, y) = (corners[k][0] * scale, corners[k][1] * scale);
+                at + Vec2::new(cos * x - sin * y, sin * x + cos * y)
+            }))
+        })
+        .collect()
+}
+
 impl Play {
     /// The mission's hero armed, its map's ground, every other object a target, and the
     /// effects they can play loaded.
@@ -687,13 +707,16 @@ impl Play {
         let Some(mut hero) = Hero::load(&mut assembly, mission)? else { return Ok(None) };
         let dir = terrain::map_dir(game, &mission.map_path)?;
         let land = landmesh::load(&gamedir::resolve(&dir, "Land.msh").context("the map has no Land.msh")?)?;
-        let graph = match gamedir::resolve(&dir, "Land.map").map(|p| arealmap::load(&p)) {
+        let mut graph = match gamedir::resolve(&dir, "Land.map").map(|p| arealmap::load(&p)) {
             Some(Ok(map)) => Some(Graph::new(map)),
             Some(Err(e)) => return Err(e.into()),
             None => None,
         };
         let ratio = settings::level_ratio(game);
         let mut battle = Battle::load(&mut assembly, mission, Some(hero.object), ratio)?;
+        if let Some(graph) = &mut graph {
+            graph.carve(&scenery_footprints(mission, &battle));
+        }
         hero.arm(&mut battle, &mut assembly);
         // The player's own hero is never given the level ratio (docs/26).
         let hero_shield =

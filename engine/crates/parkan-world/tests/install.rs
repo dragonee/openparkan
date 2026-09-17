@@ -5765,3 +5765,80 @@ fn c02_m02s_hq_driven_by_the_hero_locks_its_winged_missiles_on_a_tower_and_bring
     }
     assert!(!play.battle.combat.targets[tower].alive, "the tower falls: {whole} -> {}", life(&play));
 }
+
+/// Mission.02's laser walker, `mwlk1e`, logical id 10, patrols past `s_stone_07` in the middle of
+/// the map, a stone whose box is some 69 by 56 m across on ground the areal map leaves walkable. The areal map
+/// cuts each tree's and stone's footprint, its mesh's box's lower corners, out of the walkable
+/// areals (`ArealMap.dll:0x10022580`), and the walker's path goes round it; on the areal map alone
+/// its path crossed the stone, and the walker climbed at it and slid back for most of a minute.
+#[test]
+#[ignore = "needs the game install"]
+fn c02_m02s_laser_walker_walks_round_the_central_stone_and_never_climbs_it() {
+    use glam::{Vec2, Vec3};
+    use parkan_formats::{arealmap, mission};
+
+    let mut play = campaign_play(gamedir::C02_MISSION_02);
+    let graph = play.graph.clone().expect("Mission.02 has an areal map");
+    let stone = (0..play.units.len())
+        .filter(|&t| play.units[t].kind == mission::KIND_ROCK)
+        .any(|t| play.battle.combat.targets[t].position.truncate().distance(Vec2::new(1026.4, 1031.1)) < 1.0);
+    assert!(stone, "the central stone");
+    // Its mesh's box stands off its placement, to the south-west.
+    let middle = Vec2::new(997.0, 1010.0);
+    assert!(graph.usable(middle.x, middle.y), "on walkable ground");
+    assert!(graph.in_footprint(middle.x, middle.y), "cut out of it");
+    // How far inside a footprint `p` stands: the nearest ring about it with a point outside.
+    let depth = |p: Vec3| {
+        [0.0f32, 0.5, 1.0, 1.5, 2.0, 4.0, 8.0, 16.0, 32.0].into_iter().find(|&r| {
+            (0..32).any(|k| {
+                let a = k as f32 / 32.0 * std::f32::consts::TAU;
+                !graph.in_footprint(p.x + r * a.cos(), p.y + r * a.sin())
+            })
+        })
+    };
+    let crosses = |from: Vec3, legs: &[Vec3]| {
+        let mut start = from;
+        legs.iter().any(|&end| {
+            let inside = (0..=100).any(|s| {
+                let p = start.lerp(end, s as f32 / 100.0);
+                p.truncate().distance(middle) < 60.0 && depth(p) != Some(0.0)
+            });
+            start = end;
+            inside
+        })
+    };
+
+    let t = play.units.iter().position(|u| u.logical_id == 10).expect("unit 10");
+    let at = |play: &parkan_world::play::Play| {
+        play.robots.iter().find(|(rt, _)| *rt == t).expect("a robot").1.walker.body.position
+    };
+    let from = at(&play);
+    let goal = Vec3::new(1048.0, 526.0, 0.0);
+    let legs = play.route(t, from, goal);
+    assert!(!legs.is_empty() && !crosses(from, &legs), "round the stone: {legs:?}");
+    let carved = play.graph.take();
+    let game = gamedir::find(None).unwrap();
+    let data = gamedir::resolve(&game, gamedir::C02_MISSION_02).unwrap().join("data.tma");
+    let map_path = mission::parse(&std::fs::read(data).unwrap(), "Mission.02").unwrap().map_path;
+    let dir = parkan_world::terrain::map_dir(&game, &map_path).unwrap();
+    let land = arealmap::load(&gamedir::resolve(&dir, "Land.map").unwrap()).unwrap();
+    play.graph = Some(parkan_sim::path::Graph::new(land));
+    let uncut = play.route(t, from, goal);
+    assert!(crosses(from, &uncut), "on the areal map alone, over it: {uncut:?}");
+    play.graph = carved;
+
+    // On its patrol it passes the stone within 25 s, never more than a stride's curve inside a
+    // footprint.
+    let tick = 1000.0 / 60.0;
+    let mut deepest = 0.0f32;
+    for _ in 0..25 {
+        for _ in 0..60 {
+            play.tick(tick, [0.0; 2]);
+        }
+        let p = at(&play);
+        deepest = deepest.max(depth(p).unwrap_or(f32::MAX));
+    }
+    let end = at(&play);
+    assert!(end.y < 950.0, "past the stone: {end}");
+    assert!(deepest <= 1.5, "{deepest} m inside a footprint");
+}
