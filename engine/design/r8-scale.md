@@ -60,5 +60,5 @@ Labels: **read**, **measured**, **guess**, **unknown**.
   no scaled building; only the two animals among units.
 - `check_scale_on_ground`: scaled kind 2/3 at their scale float in fewer than 10% of cases,
   against about half at scale 1. The control is the unit-scale placements.
-- The engine's `install.rs` bridge test already multiplies by `instance.scale`. It stays
+- The engine's `install/scene.rs` bridge test already multiplies by `instance.scale`. It stays
   valid, since bridges are buildings at scale 1.
