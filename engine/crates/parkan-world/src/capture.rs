@@ -217,22 +217,24 @@ impl Play {
             .collect()
     }
 
-    /// The way into building `t` for a unit at `from`: its hall way's shortest way to the pod
-    /// from the exit, or a vertex within 5 of `from`, that makes the whole way shortest, counting
-    /// the way to it straight; that vertex first.
+    /// The way into building `t` for a unit at `from` bound for the hall-way vertex nearest
+    /// `goal` — its pod, for a capture, or one of its docks, for a refit: the hall way's
+    /// shortest way there from the exit, or a vertex within 5 of `from`, that makes the whole
+    /// way shortest, counting the way to it straight; that vertex first.
     ///
     /// STAND-IN: docs/31-packages.md#not-established -- how the walker joins the hall way is
     /// not read: straight to that vertex, then along the links.
-    pub fn way_in(&mut self, t: usize, from: Vec3) -> Option<Vec<Vec3>> {
+    pub fn way_in(&mut self, t: usize, from: Vec3, goal: Vec3) -> Option<Vec<Vec3>> {
         let (h, points) = self.hall_way_points(t)?;
-        let pod = h.vertices.iter().position(|v| v.flags & PLACE_POD != 0)?;
-        let (dist, prev) = shortest(&h, &points, pod);
+        let near = |i: &usize| points[*i].map_or(f32::INFINITY, |p| p.distance(goal));
+        let end = (0..h.vertices.len()).min_by(|a, b| near(a).total_cmp(&near(b)))?;
+        let (dist, prev) = shortest(&h, &points, end);
         let to = |i: usize| points[i].map_or(f32::INFINITY, |p| p.distance(from));
         let whole = |i: usize| to(i) + dist[i];
         let start = (0..h.vertices.len())
             .filter(|&i| (h.vertices[i].flags & PLACE_EXIT != 0 || to(i) <= WAY_JOIN) && dist[i].is_finite())
             .min_by(|&a, &b| whole(a).total_cmp(&whole(b)))?;
-        // `prev` leads back to the pod, so the way from the start runs along it.
+        // `prev` leads back to the goal vertex, so the way from the start runs along it.
         let mut way = walk_back(&prev, start);
         way.reverse();
         way.into_iter().map(|i| points[i]).collect()
@@ -346,21 +348,21 @@ impl Play {
         legs
     }
 
-    /// The legs of a walk for robot target `t` at `from` into the building of logic id `id`,
-    /// to its pod at `pod`: its way in, or straight to the pod.
+    /// The legs of a walk for robot target `t` at `from` into the building of logic id `id`, to
+    /// the place at `goal` — its pod or one of its docks: its way in, or straight there.
     ///
     /// STAND-IN: docs/31-packages.md#each-tick-slot-7-0x10030300--read -- what the walker does
     /// with the pod handed to it again while it stands there is not read: within 1.5 of it, the
     /// go task's arrival at an object, it holds.
-    pub fn legs_inside(&mut self, t: usize, from: Vec3, id: i32, pod: Vec3) -> Vec<Vec3> {
+    pub fn legs_inside(&mut self, t: usize, from: Vec3, id: i32, goal: Vec3) -> Vec<Vec3> {
         let Some(b) = self.units.iter().position(|u| u.logical_id == id && u.kind == KIND_BUILDING) else {
-            return vec![pod];
+            return vec![goal];
         };
         self.construction.ways.entered.insert(t, b);
-        if from.distance(pod) <= POD_ARRIVED {
+        if from.distance(goal) <= POD_ARRIVED {
             return Vec::new();
         }
-        let way = self.way_in(b, from).unwrap_or_else(|| vec![pod]);
+        let way = self.way_in(b, from, goal).unwrap_or_else(|| vec![goal]);
         let mut legs = self.route(t, from, way[0]);
         if legs.is_empty() {
             return Vec::new();

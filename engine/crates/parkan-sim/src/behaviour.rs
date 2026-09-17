@@ -117,6 +117,37 @@ pub const GO_ARRIVED: f32 = 30.0;
 pub const BUILD_SPEED: f32 = 1.0;
 pub const TRANSPORT_SPEED: f32 = 1.0;
 
+/// A refit (`M_Task_Reload`, docs/27, "What sends a bot to a dock"): it stands in its dock
+/// until life, charge and ammunition are all at 98% (`0x1002ed3b`).
+pub const REFIT_FULL: f32 = 0.98;
+/// The largest size class `MakeInsideDest` routes into a building (*"TypedSizes missmached"*,
+/// `0x10001270`): a bigger unit fits through no door, so only a ground-level dock serves it.
+pub const INSIDE_SIZE_MAX: u8 = 2;
+/// What sends a bot to a dock on its own (`0x10017d50`, docs/27): its life under half (under
+/// 90% for a building, `0x1001c700`), its charge under half (`0x1001cbe0`), or more than 80%
+/// of its guns under 20% of their magazine (`0x1001ca40`).
+pub const SERVICE_LIFE: f32 = 0.5;
+pub const SERVICE_BUILDING_LIFE: f32 = 0.9;
+pub const SERVICE_CHARGE: f32 = 0.5;
+pub const SERVICE_GUNS: f32 = 0.8;
+pub const SERVICE_MAGAZINE: f32 = 0.2;
+/// A capture answers 0 for a refit unless its life is at most 0.2 or its charge at most 0.3
+/// (`0x10030000`).
+pub const CAPTURE_REFIT_LIFE: f32 = 0.2;
+pub const CAPTURE_REFIT_CHARGE: f32 = 0.3;
+/// The AI's repair decision (`0x10017c70`, docs/26, "What the AI does with the switch"): the
+/// life it switches the repair system on below and off above, and the charge it needs to
+/// switch on and falls back off at.
+///
+/// STAND-IN: docs/26-damage.md#repair-a-units-own-repair-unit-switched-on-and-off--read-and-measured
+/// -- which difficulty profile a unit's behaviour holds (`+0x8d4`) is not read:
+/// `diff_strong.var`'s `Decision_RepairOn` and `Decision_RepairOff` (*measured*), so a unit
+/// looks after itself while it is only lightly damaged.
+pub const REPAIR_ON: f32 = 0.8;
+pub const REPAIR_OFF: f32 = 0.9;
+pub const REPAIR_CHARGE_ON: f32 = 0.3;
+pub const REPAIR_CHARGE_OFF: f32 = 0.1;
+
 /// Where a build task stands (`+0x5c`, `0x10028b80`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BuildState {
@@ -166,6 +197,69 @@ pub struct Places {
     pub contour: Vec<Vec3>,
 }
 
+/// A dock a refit may go to (docs/27, "The places"), in the world: a hall-way vertex that
+/// charges, repairs and rearms who stands in it. Only the docks of a building that would
+/// charge this unit — its own clan's or an ally's — are handed to it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Dock {
+    /// The building's logic id.
+    pub id: i32,
+    /// Which of that building's docks, as the world lists them.
+    pub index: usize,
+    /// Where it stands, its vertex carried into the world through its node.
+    pub at: Vec3,
+    /// Ground level (`0x10000000`): a place 10 across and 12 high, outside the building, which
+    /// any unit may stand in. An indoor dock is 5 and 3, and only a unit that fits inside may
+    /// be routed to it.
+    pub ground_level: bool,
+    /// The place's own cylinder about its vertex (`0x100184f0`): how far across, how far above
+    /// and how far below a unit's origin may stand and still be in it.
+    pub radius: f32,
+    pub height: f32,
+    pub below: f32,
+}
+
+impl Dock {
+    /// Whether a unit whose origin is `at` stands in the place (`0x10018310`, docs/27, "Who
+    /// stands in a place"), which is what the dock charges and what a refit waits in.
+    pub fn holds(&self, at: Vec3) -> bool {
+        let dz = at.z - self.at.z;
+        (-self.below..=self.height).contains(&dz) && at.truncate().distance(self.at.truncate()) <= self.radius
+    }
+}
+
+/// What a unit's own systems report to its behaviour: the life fraction over its whole control
+/// system (property `0x31`), its batteries' fill, the share of its guns' magazines left, and
+/// whether more than [`SERVICE_GUNS`] of its guns are under [`SERVICE_MAGAZINE`] of their
+/// magazine (`0x1001ca40`). See docs/27, "What sends a bot to a dock".
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Condition {
+    pub life: f32,
+    pub charge: f32,
+    pub ammo: f32,
+    pub guns_dry: bool,
+}
+
+impl Default for Condition {
+    fn default() -> Self {
+        Self { life: 1.0, charge: 1.0, ammo: 1.0, guns_dry: false }
+    }
+}
+
+impl Condition {
+    /// Whether the unit needs service (`0x10017d50`): its life or its charge under half, or its
+    /// guns mostly dry; a building under 90% of its life.
+    pub fn needs_service(&self, building: bool) -> bool {
+        let bar = if building { SERVICE_BUILDING_LIFE } else { SERVICE_LIFE };
+        self.life < bar || self.charge < SERVICE_CHARGE || self.guns_dry
+    }
+
+    /// Whether a refit is over: life, charge and ammunition all at 98% (`0x1002ed3b`).
+    pub fn refitted(&self) -> bool {
+        self.life >= REFIT_FULL && self.charge >= REFIT_FULL && self.ammo >= REFIT_FULL
+    }
+}
+
 /// Whether a point lies on a usable areal, one a walker may be sent to (docs/24, "The global
 /// path"; docs/31, "Where a search looks").
 #[derive(Clone, Copy)]
@@ -200,6 +294,11 @@ pub struct Senses<'a> {
     pub seen: &'a [Seen],
     /// The buildings' places, for a capture; empty when the unit runs none.
     pub places: &'a [Places],
+    /// Every dock that would charge this unit, for a refit (docs/27, "What sends a bot to a
+    /// dock").
+    pub docks: &'a [Dock],
+    /// What its own systems report: what a refit waits for, and what sends it to a dock.
+    pub condition: Condition,
     /// The unit's size class (`+0x30`, variable `0x201`) and whether its chassis has `CanFly`.
     pub size_class: u8,
     pub flyer: bool,
@@ -232,6 +331,23 @@ pub struct Pasture {
 impl Senses<'_> {
     fn find(&self, id: i32) -> Option<&Seen> {
         self.seen.iter().find(|s| s.id == id)
+    }
+
+    /// The dock a refit goes to (`0x10023b60`): the nearest one this unit fits, by the dock's
+    /// own distance. A ground-level dock stands outside the building and takes any unit; an
+    /// indoor one is reached along the hall way, so only a unit of size class at most
+    /// [`INSIDE_SIZE_MAX`] is routed to one (*"TypedSizes missmached"*, `0x10001270`).
+    ///
+    /// STAND-IN: docs/27-ownership.md#what-sends-a-bot-to-a-dock--read -- the pick
+    /// (`0x10023b60`) is not read, and the game's own refit asks `MakeInsideDest` for the
+    /// ground-level bit on every dock, so it never sends anybody indoors: here a tiny or small
+    /// unit takes whichever dock is nearest, indoors or out, and a medium or large one only a
+    /// ground-level dock.
+    pub fn dock(&self) -> Option<&Dock> {
+        self.docks
+            .iter()
+            .filter(|d| d.ground_level || self.size_class <= INSIDE_SIZE_MAX)
+            .min_by(|a, b| a.at.distance(self.position).total_cmp(&b.at.distance(self.position)))
     }
 
     fn nearest(&self, pick: impl Fn(&Seen) -> bool, within: f32) -> Option<&Seen> {
@@ -342,8 +458,14 @@ pub enum Task {
         landing: bool,
         started: bool,
     },
-    /// Refit: a trip to a dock.
-    Reload,
+    /// Refit (order 8, `M_Task_Reload`, vtable `0x10059be0`, which `ORDER_ROBOT_REPARE` builds
+    /// too): a trip to a dock, where it stands until life, charge and ammunition are all at
+    /// 98%. `dock` is the one picked at its start, by building and index, and `walking`
+    /// whether the walker has been sent there.
+    Reload {
+        dock: Option<(i32, usize)>,
+        walking: bool,
+    },
     Attack {
         target: Option<i32>,
         fighting: bool,
@@ -397,6 +519,26 @@ impl Task {
         }
     }
 
+    /// The interrupt priority for a refit, reason 3 (docs/31, "Between orders"): the base's,
+    /// which lets one through while a dock is reachable (`0x100018a0`), except that a capture
+    /// answers 0 unless the unit's life is at most 0.2 or its charge at most 0.3
+    /// (`0x10030000`), and that a task that neither moves nor fights answers 0.
+    ///
+    /// STAND-IN: docs/31-packages.md#between-orders--read -- only the route's answer (reasons 3
+    /// and 4 alone interrupt it, `0x1002b390`), the patrol's and the capture's are read: every
+    /// other task that moves takes the base's, and standby, shutdown, the escape and a refit
+    /// already running answer 0.
+    fn refit_priority(&self, condition: Condition) -> f32 {
+        match self {
+            Task::StayGround | Task::Shutdown | Task::Leave { .. } | Task::Reload { .. } => 0.0,
+            Task::Search { search: Search::Capture(_) | Search::Building(_), .. } => {
+                let low = condition.life <= CAPTURE_REFIT_LIFE || condition.charge <= CAPTURE_REFIT_CHARGE;
+                if low { 1.0 } else { 0.0 }
+            }
+            _ => 1.0,
+        }
+    }
+
     /// A search not yet started.
     pub fn search(search: Search) -> Task {
         Task::Search { search, next_ms: 0.0, building: None, landing: false, started: false }
@@ -442,7 +584,7 @@ impl Task {
             // "The orders").
             (orders::SEARCH | orders::CAPTURE, Target::LogicId(id)) => Task::search(Search::Building(id)),
             (orders::SEARCH, _) => Task::search(Search::Enemies),
-            (orders::RELOAD, _) => Task::Reload,
+            (orders::RELOAD | orders::REPARE, _) => Task::Reload { dock: None, walking: false },
             (orders::LEAVE, _) => Task::Leave { goal: None },
             (orders::ATTACK, Target::LogicId(id)) => {
                 Task::Attack { target: Some(id), fighting: false, next_ms: 0.0, limit: None, ordered: true }
@@ -512,6 +654,9 @@ pub struct Behaviour {
     pub hurt_by: Option<i32>,
     /// When the interrupt gate next lets one through (`+0x5e0`).
     pub interrupt_ms: f64,
+    /// What the AI's repair decision last sent the device manager (`+0xaf`, `0x10017c70`):
+    /// its own repair system switched on. Starting any task turns it off (`0x10034930`).
+    pub repair: bool,
     seed: u32,
 }
 
@@ -523,6 +668,7 @@ impl Behaviour {
             patrol_loop: Vec::new(),
             hurt_by: None,
             interrupt_ms: 0.0,
+            repair: false,
             seed: seed | 1,
         }
     }
@@ -551,6 +697,7 @@ impl Behaviour {
     /// An order replaces every task.
     pub fn order(&mut self, order: &Order) {
         self.tasks = vec![Task::from_order(order)];
+        self.repair = false;
     }
 
     /// An order put in the list as `insert` says (`INSERT_ORDER_*`): replacing every task,
@@ -573,6 +720,9 @@ impl Behaviour {
             },
             _ => self.tasks = vec![task],
         }
+        // Starting any task turns the repair system off (`0x10034930`); the next decision
+        // turns it back on if it is needed.
+        self.repair = false;
         true
     }
 
@@ -581,8 +731,10 @@ impl Behaviour {
         self.tasks.last().copied().unwrap_or(Task::Stop)
     }
 
-    /// One behaviour takt: the engagement, then the running task's takt; a task that ends
-    /// or fails gives way to the one beneath it, and with none left the unit stops.
+    /// One behaviour takt: the self-refit and the engagement, then the running task's takt; a
+    /// task that ends or fails gives way to the one beneath it, and with none left the unit
+    /// stops. The repair decision runs unless this takt sent the unit to a dock or into an
+    /// attack (docs/26, "What the AI does with the switch").
     pub fn takt(&mut self, senses: &Senses) -> Takt {
         // Engaging (`0x10017e70`): the best hostile contact within 500 becomes an attack on
         // top, unless the clan is neutral or the task holds the unit below the bar.
@@ -595,24 +747,10 @@ impl Behaviour {
         if let Some(firer) = self.hurt_by.take() {
             self.retaliate(firer, senses);
         }
-        let task = self.task();
-        if !senses.neutral
-            && !senses.building
-            && !senses.animal
-            && senses.has_weapon
-            && task.engage_priority() >= ENGAGE_BAR
-            && !matches!(task, Task::Attack { .. })
-            && let Some((enemy, limit)) = Self::engagement(task, senses)
-            && self.pause_passed(senses.now_ms)
-        {
-            let limit = limit.map(|l| Self::stamped(l, senses.now_ms));
-            self.tasks.push(Task::Attack {
-                target: Some(enemy),
-                fighting: false,
-                next_ms: 0.0,
-                limit,
-                ordered: false,
-            });
+        let refitting = self.self_refit(senses);
+        let engaging = !refitting && self.engage(senses);
+        if !refitting && !engaging {
+            self.repair_decision(senses);
         }
         for _ in 0..4 {
             match self.run(senses) {
@@ -641,6 +779,70 @@ impl Behaviour {
             }
         }
         Takt { walk: Walk::Clear, target: self.fire_target(senses), fire_freely: false }
+    }
+
+    /// The engagement (`0x10017e70`), inserted as a reason-0 task: whether one was taken up.
+    fn engage(&mut self, senses: &Senses) -> bool {
+        let task = self.task();
+        if !senses.neutral
+            && !senses.building
+            && !senses.animal
+            && senses.has_weapon
+            && task.engage_priority() >= ENGAGE_BAR
+            && !matches!(task, Task::Attack { .. })
+            && let Some((enemy, limit)) = Self::engagement(task, senses)
+            && self.pause_passed(senses.now_ms)
+        {
+            let limit = limit.map(|l| Self::stamped(l, senses.now_ms));
+            self.tasks.push(Task::Attack {
+                target: Some(enemy),
+                fighting: false,
+                next_ms: 0.0,
+                limit,
+                ordered: false,
+            });
+            self.repair = false;
+            return true;
+        }
+        false
+    }
+
+    /// The self-refit (`0x10017d50`, docs/27, "What sends a bot to a dock"), inserted as a
+    /// reason-3 task: a unit that needs service — its life or its charge under half, or its
+    /// guns mostly dry — sends itself to a dock, provided its task lets a refit through, a dock
+    /// that would take it is in the world, and the interrupt gate's pause has run out. A
+    /// building, an animal and a neutral clan's unit ask for none. Answers whether one was
+    /// taken up.
+    fn self_refit(&mut self, senses: &Senses) -> bool {
+        let task = self.task();
+        if senses.building
+            || senses.animal
+            || senses.neutral
+            || !senses.condition.needs_service(false)
+            || task.refit_priority(senses.condition) <= ENGAGE_BAR
+            || senses.dock().is_none()
+            || !self.pause_passed(senses.now_ms)
+        {
+            return false;
+        }
+        self.tasks.push(Task::Reload { dock: None, walking: false });
+        self.repair = false;
+        true
+    }
+
+    /// The AI's repair decision (`0x10017c70`, docs/26): it switches the unit's own repair
+    /// system on while the unit needs service or its life is under [`REPAIR_ON`], provided its
+    /// charge is over [`REPAIR_CHARGE_ON`]; and off once it needs none and its life is over
+    /// [`REPAIR_OFF`], or whenever its charge falls under [`REPAIR_CHARGE_OFF`].
+    fn repair_decision(&mut self, senses: &Senses) {
+        let c = senses.condition;
+        let needs = c.needs_service(senses.building);
+        if (needs || c.life < REPAIR_ON) && c.charge > REPAIR_CHARGE_ON {
+            self.repair = true;
+        }
+        if (!needs && c.life > REPAIR_OFF) || c.charge < REPAIR_CHARGE_OFF {
+            self.repair = false;
+        }
     }
 
     /// The interrupt gate's pause (step 7 of `0x100179c0`): whether it has run out, restarting
@@ -939,10 +1141,41 @@ impl Behaviour {
                 *self.tasks.last_mut()? = Task::Patrol { guarded, radius, speed, index, next_loop_ms: next };
                 Some(Takt { walk, target: self.fire_target(senses), fire_freely: false })
             }
-            // STAND-IN: docs/31-packages.md#what-each-package-does--read -- the refit's dock
-            // pick (`0x10023b60`) is not read, and no dock is modelled: a refit fails at its
-            // start, as it does on a map without one.
-            Task::Reload => None,
+            // Refit (`M_Task_Reload`, docs/27, "What sends a bot to a dock"): it walks to the
+            // dock picked at its start and stands in it until life, charge and ammunition are
+            // all at 98%, then leaves. With no dock to go to it fails at once ("No Where to
+            // reX..."), and so does one whose dock has gone.
+            Task::Reload { dock, walking } => {
+                let (id, index) = match dock {
+                    Some(key) => key,
+                    None => senses.dock().map(|d| (d.id, d.index))?,
+                };
+                let &found = senses.docks.iter().find(|d| (d.id, d.index) == (id, index))?;
+                // It is there once it stands in the place itself: a unit must stand still to
+                // be in one (docs/27), so it holds there and the dock's own tick charges it.
+                //
+                // STAND-IN: docs/27-ownership.md#what-sends-a-bot-to-a-dock--read -- where the
+                // walk to a dock is counted over is not read: the place the unit is to stand
+                // in, a cylinder 10 across at a ground-level dock and 5 indoors.
+                let arrived = found.holds(at);
+                if arrived && senses.condition.refitted() {
+                    return None;
+                }
+                let mut walking = walking;
+                let mut walk = Walk::Keep;
+                if !arrived && (!walking || senses.walker_idle) {
+                    // The walk runs along the building's hall way, which reaches an indoor
+                    // dock through its doors and a ground-level one from its exits.
+                    walk = Walk::Inside(found.id, found.at, GO_SPEED);
+                    walking = true;
+                } else if arrived && walking {
+                    walk = Walk::Clear;
+                    walking = false;
+                }
+                *self.tasks.last_mut()? = Task::Reload { dock: Some((id, index)), walking };
+                self.fire = FireMode::Nearest;
+                Some(Takt { walk, target: self.fire_target(senses), fire_freely: false })
+            }
             Task::Follow { leader, radius, next_ms } => {
                 let lead = *senses.find(leader).filter(|s| s.own)?;
                 let mut walk = Walk::Keep;
@@ -1341,6 +1574,8 @@ mod tests {
             position: at,
             seen,
             places: &[],
+            docks: &[],
+            condition: Condition::default(),
             size_class: 2,
             flyer: false,
             bounds: ([0.0; 2], [2000.0; 2]),
@@ -1690,7 +1925,122 @@ mod tests {
         let mut refit = Behaviour::new(5);
         refit.order(&Order { code: orders::RELOAD, parameter: 0, target: Target::NotDefined });
         refit.takt(&senses(&[], 0.0, Vec3::ZERO, true));
-        assert_eq!(refit.task(), Task::Stop);
+        assert_eq!(refit.task(), Task::Stop, "with no dock a refit fails at its start");
+    }
+
+    #[test]
+    fn a_refit_walks_to_the_nearest_dock_its_size_fits_and_ends_once_it_is_charged() {
+        let dock = |id: i32, index: usize, x: f32, ground_level: bool| Dock {
+            id,
+            index,
+            at: Vec3::new(x, 0.0, 0.0),
+            ground_level,
+            radius: if ground_level { 10.0 } else { 5.0 },
+            height: if ground_level { 12.0 } else { 3.0 },
+            below: if ground_level { 8.4 } else { 2.1 },
+        };
+        // A bunker's indoor dock at 100, and the Outpost's ground-level one at 300.
+        let docks = [dock(-1, 0, 100.0, false), dock(-2, 0, 300.0, true)];
+        let hurt = Condition { life: 0.4, charge: 0.5, ammo: 0.5, guns_dry: false };
+        let refitting = |x: f32, size: u8, idle: bool, condition: Condition| Senses {
+            docks: &docks,
+            condition,
+            size_class: size,
+            ..senses(&[], 0.0, Vec3::new(x, 0.0, 0.0), idle)
+        };
+        let order = Order { code: orders::RELOAD, parameter: 0, target: Target::NotDefined };
+
+        // A small unit takes the nearer dock, indoors, and walks in along the hall way.
+        let mut small = Behaviour::new(5);
+        small.order(&order);
+        let t = small.takt(&refitting(0.0, 2, true, hurt));
+        assert_eq!(t.walk, Walk::Inside(-1, docks[0].at, GO_SPEED));
+        assert!(matches!(small.task(), Task::Reload { dock: Some((-1, 0)), walking: true }));
+        // On the dock it holds still, so the dock's own tick may charge it.
+        assert_eq!(small.takt(&refitting(100.0, 2, true, hurt)).walk, Walk::Clear);
+        assert_eq!(small.takt(&refitting(100.0, 2, true, hurt)).walk, Walk::Keep);
+        // Charged, it leaves: the task ends and the one beneath it runs.
+        small.takt(&refitting(100.0, 2, true, Condition::default()));
+        assert_eq!(small.task(), Task::Stop);
+
+        // A medium or large unit fits through no door: only the ground-level dock serves it.
+        for size in [3, 4] {
+            let mut big = Behaviour::new(7);
+            big.order(&order);
+            let t = big.takt(&refitting(0.0, size, true, hurt));
+            assert_eq!(t.walk, Walk::Inside(-2, docks[1].at, GO_SPEED), "size {size}");
+            assert!(matches!(big.task(), Task::Reload { dock: Some((-2, 0)), .. }));
+        }
+        // With none it fits, a refit fails at its start.
+        let indoor = [docks[0]];
+        let mut big = Behaviour::new(7);
+        big.order(&order);
+        big.takt(&Senses {
+            docks: &indoor,
+            condition: hurt,
+            size_class: 4,
+            ..senses(&[], 0.0, Vec3::ZERO, true)
+        });
+        assert_eq!(big.task(), Task::Stop);
+        // A dock that has gone ends the trip.
+        let mut small = Behaviour::new(5);
+        small.order(&order);
+        small.takt(&refitting(0.0, 2, true, hurt));
+        small.takt(&Senses { docks: &[], condition: hurt, ..senses(&[], 0.0, Vec3::ZERO, true) });
+        assert_eq!(small.task(), Task::Stop);
+    }
+
+    #[test]
+    fn a_unit_that_needs_service_sends_itself_to_a_dock_and_repairs_itself_while_it_is_scratched() {
+        let docks = [Dock {
+            id: -1,
+            index: 0,
+            at: Vec3::new(100.0, 0.0, 0.0),
+            ground_level: true,
+            radius: 10.0,
+            height: 12.0,
+            below: 8.4,
+        }];
+        let of = |condition: Condition| Senses {
+            docks: &docks,
+            condition,
+            ..senses(&[], 0.0, Vec3::new(0.0, 0.0, 0.0), true)
+        };
+        let scratched = Condition { life: 0.7, ..Condition::default() };
+
+        // Only scratched: it switches its own repair system on and stays on its order.
+        let mut b = Behaviour::new(3);
+        b.order(&Order { code: orders::STAYGROUND, parameter: 0, target: Target::NotDefined });
+        b.takt(&of(scratched));
+        assert_eq!(b.task(), Task::StayGround);
+        assert!(b.repair, "the repair decision switches it on under 0.8");
+        // Repaired past 0.9 it switches off again, and a flat battery switches it off whatever.
+        b.takt(&of(Condition { life: 0.95, ..Condition::default() }));
+        assert!(!b.repair);
+        b.takt(&of(Condition { life: 0.7, charge: 0.05, ..Condition::default() }));
+        assert!(!b.repair, "under a tenth of a battery nothing is repaired");
+
+        // Under half its life it sends itself to a dock, and standby is not interrupted.
+        let hurt = Condition { life: 0.4, ..Condition::default() };
+        let mut b = Behaviour::new(3);
+        b.order(&Order { code: orders::STAYGROUND, parameter: 0, target: Target::NotDefined });
+        b.takt(&of(hurt));
+        assert_eq!(b.task(), Task::StayGround, "standby answers 0 for a refit");
+        let mut b = Behaviour::new(3);
+        b.order(&Order { code: orders::GO, parameter: 0, target: Target::Place([500.0, 0.0, 0.0]) });
+        b.takt(&of(hurt));
+        assert!(matches!(b.task(), Task::Reload { .. }), "a route lets a refit through: {:?}", b.task());
+        // Guns mostly dry send it too, and starting the trip turns its repair system off.
+        let mut b = Behaviour::new(3);
+        b.order(&Order { code: orders::SEARCH, parameter: 0, target: Target::Any });
+        b.takt(&of(Condition { guns_dry: true, ..Condition::default() }));
+        assert!(matches!(b.task(), Task::Reload { .. }));
+        assert!(!b.repair);
+        // With no dock in the world it stays on its order.
+        let mut b = Behaviour::new(3);
+        b.order(&Order { code: orders::SEARCH, parameter: 0, target: Target::Any });
+        b.takt(&Senses { condition: hurt, ..senses(&[], 0.0, Vec3::ZERO, true) });
+        assert!(matches!(b.task(), Task::Search { .. }));
     }
 
     #[test]

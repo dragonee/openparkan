@@ -25,8 +25,8 @@ use parkan_formats::mission::{
 use parkan_formats::pose::Pose;
 use parkan_formats::{arealmap, gamedir, landmesh};
 use parkan_sim::behaviour::{
-    FIRE_BAR_FLYER, FIRE_BAR_WALKER, SCORE_RAMP, Search, Seen, Senses, Takt, Task, Usable, Walk,
-    distance_score, fire_wait_ms,
+    Condition, FIRE_BAR_FLYER, FIRE_BAR_WALKER, SCORE_RAMP, SERVICE_GUNS, SERVICE_MAGAZINE, Search, Seen,
+    Senses, Takt, Task, Usable, Walk, distance_score, fire_wait_ms,
 };
 use parkan_sim::combat::{Event, Part, Round, RoundEnd, Target};
 use parkan_sim::damage::FLIGHT_MS;
@@ -2845,15 +2845,45 @@ impl Play {
                 && let Some(target) = battle.combat.targets.get_mut(*t).filter(|x| x.alive)
             {
                 let share = robot.engine_share();
-                let switches = driving
-                    .as_ref()
-                    .filter(|d| d.target == *t)
-                    .map_or(Default::default(), |d| d.pilot.switches);
+                // A bot the player drives spends on the player's switches; one left to itself
+                // spends on what its own repair decision last sent (docs/26, "What the AI does
+                // with the switch").
+                let switches = driving.as_ref().filter(|d| d.target == *t).map_or(
+                    parkan_sim::input::Switches { repair: robot.behaviour.repair, ..Default::default() },
+                    |d| d.pilot.switches,
+                );
                 let Target { parts, shield, .. } = target;
                 let mut lives: Vec<Option<&mut Life>> = parts.iter_mut().map(|p| p.life.as_mut()).collect();
                 power.tick(dt, &mut lives, shield.as_mut(), &mut robot.guns, share, switches);
             }
             robot.power = Some(power);
+        }
+    }
+
+    /// What unit `t`'s own systems report to its behaviour (docs/27, "What sends a bot to a
+    /// dock"): its life fraction over its whole control system (property `0x31`), its
+    /// batteries' fill, the rounds its guns have left over their magazines, and whether more
+    /// than [`SERVICE_GUNS`] of them are under [`SERVICE_MAGAZINE`] of theirs. A unit with no
+    /// battery reports a full one, and a gun of unlimited rounds counts as full.
+    fn condition(&self, t: usize) -> Condition {
+        let (life, full) = self.battle.combat.targets.get(t).map_or((0.0, 0.0), |x| {
+            x.parts
+                .iter()
+                .filter_map(|p| p.life.as_ref())
+                .fold((0.0, 0.0), |(l, f), life| (l + life.total(), f + life.full()))
+        });
+        let Some((_, robot)) = self.robots.iter().find(|(rt, _)| *rt == t) else {
+            return Condition::default();
+        };
+        let counted: Vec<&parkan_sim::guns::Gun> = robot.guns.iter().filter(|g| g.magazine > 0).collect();
+        let dry = counted.iter().filter(|g| (g.rounds as f32) < SERVICE_MAGAZINE * g.magazine as f32).count();
+        let (rounds, magazines) =
+            counted.iter().fold((0.0, 0.0), |(r, m), g| (r + g.rounds as f32, m + g.magazine as f32));
+        Condition {
+            life: if full > 0.0 { life / full } else { 1.0 },
+            charge: robot.power.as_ref().map_or(1.0, crate::power::Power::fill),
+            ammo: if magazines > 0.0 { rounds / magazines } else { 1.0 },
+            guns_dry: !counted.is_empty() && dry as f32 > SERVICE_GUNS * counted.len() as f32,
         }
     }
 
@@ -3159,6 +3189,8 @@ impl Play {
                     position: robot.walker.body.position,
                     seen: &others,
                     places: &[],
+                    docks: &[],
+                    condition: Condition::default(),
                     size_class: robot.size_class,
                     flyer: robot.flyer,
                     bounds: ground.bounds(),
@@ -3233,6 +3265,11 @@ impl Play {
             Task::Search { search: Search::Capture(_) | Search::Building(_), .. }
         );
         let places = if capturing { self.capture_places() } else { Vec::new() };
+        // The docks are only wanted by a refit, and by a unit that needs service and so may
+        // send itself to one (docs/27, "What sends a bot to a dock").
+        let condition = self.condition(t);
+        let refitting = matches!(self.robots[r].1.behaviour.task(), Task::Reload { .. });
+        let docks = if refitting || condition.needs_service(false) { self.docks_for(t) } else { Vec::new() };
         let graph = &self.graph;
         let usable = |x: f32, y: f32| graph.as_ref().is_none_or(|g| g.usable(x, y));
         let (_, robot) = &mut self.robots[r];
@@ -3243,6 +3280,8 @@ impl Play {
             position: at,
             seen: &others,
             places: &places,
+            docks: &docks,
+            condition,
             size_class: robot.size_class,
             flyer: robot.flyer,
             bounds,

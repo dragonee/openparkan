@@ -12,7 +12,10 @@ pub const SEARCH: i32 = 5;
 /// a building").
 pub const TRANSPORT: i32 = 6;
 pub const BUILD: i32 = 7;
+/// `ORDER_ROBOT_RELOAD` and `ORDER_ROBOT_REPARE`, which build the same refit
+/// (`MTaskStack::CreateTaskFromOrder`, docs/27, "What sends a bot to a dock").
 pub const RELOAD: i32 = 8;
+pub const REPARE: i32 = 9;
 /// `ORDER_ROBOT_CAPTURE`: a script's capture of one building by logic id (docs/27, "Capture").
 pub const CAPTURE: i32 = 17;
 /// `ORDER_BUILDING_MINE`, which every mine is given as it joins (docs/23, "A mine digs to 500").

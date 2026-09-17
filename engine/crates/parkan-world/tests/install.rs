@@ -1392,7 +1392,7 @@ fn wingmen_follow_seek_and_destroy_stand_by_and_fail_a_refit_with_no_dock() {
     // Refit: Mission 01 has no dock, so the task fails at its start and they stop.
     order(&mut play, 7);
     run(&mut play, 1);
-    assert!([mf1, helic].iter().all(|&b| !matches!(task(&play, b), Task::Reload)));
+    assert!([mf1, helic].iter().all(|&b| !matches!(task(&play, b), Task::Reload { .. })));
 
     // Seek and destroy: the one hostile warrior on the map, `tut1_e1`, is hunted and shot.
     order(&mut play, 4);
@@ -2767,6 +2767,136 @@ fn mission_02s_outpost_charges_repairs_rearms_and_shields_the_hero_standing_on_i
 
 #[test]
 #[ignore = "needs the game install"]
+fn a_refit_walks_mission_02s_warbot_to_the_outposts_dock_and_one_under_half_its_life_goes_by_itself() {
+    use parkan_sim::behaviour::Task;
+    use parkan_sim::damage::{Life, share_loss};
+    use parkan_sim::orders::{Order, Target};
+    use parkan_world::factory::Project;
+
+    let (mut play, _) = mission_02_play();
+    let tick = |play: &mut parkan_world::play::Play, seconds: f32| {
+        for _ in 0..(seconds * 60.0) as usize {
+            play.update_input();
+            play.tick(1000.0 / 60.0, [0.0; 2]);
+        }
+    };
+    // The Outpost taken, so its one dock — ground level, the only kind a large unit fits —
+    // charges the player's units (docs/27, "What sends a bot to a dock").
+    tick(&mut play, 0.5);
+    let outpost = play.buildings.iter().find(|b| b.doors.is_empty()).unwrap().target;
+    assert!(play.stand_on_pod(outpost));
+    tick(&mut play, 6.0);
+    assert_eq!(play.units[outpost].clan, Some(play.player_clan));
+    let set = play.places.iter().find(|p| p.target == outpost).expect("the Outpost's places");
+    let vertex = set.places[0].vertex;
+    let part = &play.battle.combat.targets[outpost].parts[set.part];
+    let dock = parkan_world::factory::vertex_world(&vertex, part).expect("the dock's world point");
+
+    // A large flyer of the player's clan on the island's flat ground, 55 m off the Outpost.
+    let project = Project {
+        path: "UNITS\\bld_unit_-2147483647.dat".to_owned(),
+        name: "LFW-2 Warrior".into(),
+        type_word: 0x0100_8000,
+        chassis_size: 4,
+        ore: 0.0,
+        power: 0.0,
+        lines: Vec::new(),
+        sphere: None,
+    };
+    let centre = play.battle.combat.targets[outpost].position;
+    let spot = (0..16)
+        .map(|k| {
+            let a = k as f32 * std::f32::consts::TAU / 16.0;
+            glam::Vec3::new(centre.x + 55.0 * a.cos(), centre.y + 55.0 * a.sin(), 0.0)
+        })
+        .find(|p| play.ground.below(p.x, p.y, 1_000.0).is_some_and(|h| (151.0..152.0).contains(&h.point.z)))
+        .expect("a place on the island");
+    let t = play.spawn(&project, play.player_clan, spot.with_z(165.0), 0.0).expect("the L-2f");
+    tick(&mut play, 1.0);
+
+    // Scratched to 0.7 of its life: it needs no service, so it stays where it is and switches
+    // its own repair system on (docs/26, "What the AI does with the switch").
+    let hurt = |play: &mut parkan_world::play::Play, share: f32| {
+        let mut lives: Vec<&mut Life> =
+            play.battle.combat.targets[t].parts.iter_mut().filter_map(|p| p.life.as_mut()).collect();
+        let (left, full): (f32, f32) =
+            lives.iter().fold((0.0, 0.0), |(l, f), x| (l + x.total(), f + x.full()));
+        share_loss(&mut lives, left - full * share);
+    };
+    let life = |play: &parkan_world::play::Play| {
+        let (l, f): (f32, f32) = play.battle.combat.targets[t]
+            .parts
+            .iter()
+            .filter_map(|p| p.life.as_ref())
+            .fold((0.0, 0.0), |(l, f), x| (l + x.total(), f + x.full()));
+        l / f
+    };
+    let bot = |play: &parkan_world::play::Play| {
+        let (_, robot) = play.robots.iter().find(|(rt, _)| *rt == t).unwrap();
+        (robot.behaviour.task(), robot.walker.body.position, robot.behaviour.repair)
+    };
+    hurt(&mut play, 0.7);
+    tick(&mut play, 1.0);
+    let (task, stood, repairing) = bot(&play);
+    assert_eq!(task, Task::Stop, "0.7 of its life needs no service");
+    assert!(repairing, "a scratched warbot switches its own repair system on");
+
+    // Told to refit, it makes for the Outpost's dock and stands in it until it is full.
+    let order = Order { code: parkan_sim::orders::RELOAD, parameter: 0, target: Target::NotDefined };
+    play.robots.iter_mut().find(|(rt, _)| *rt == t).unwrap().1.behaviour.order(&order);
+    tick(&mut play, 0.1);
+    assert!(matches!(bot(&play).0, Task::Reload { dock: Some(_), .. }), "{:?}", bot(&play).0);
+    let mut arrived = None;
+    for s in 0..90 {
+        tick(&mut play, 1.0);
+        let (task, at, _) = bot(&play);
+        if arrived.is_none() && at.distance(dock) <= 12.0 {
+            arrived = Some(s);
+        }
+        if !matches!(task, Task::Reload { .. }) {
+            break;
+        }
+    }
+    let (task, at, _) = bot(&play);
+    assert!(arrived.is_some(), "it never reached the dock: stopped {at}, {} from it", at.distance(dock));
+    assert!(at.distance(stood) > 20.0, "it left where it stood");
+    assert!(!matches!(task, Task::Reload { .. }), "the refit ends once it is charged: {task:?}");
+    assert!(life(&play) > 0.98, "charged in the dock: {}", life(&play));
+
+    // Charged and standing in the Outpost's dock, its own takt walks it back off the building
+    // (docs/31, "The escape"), which ends on open ground.
+    let mut settled = false;
+    for _ in 0..60 {
+        tick(&mut play, 1.0);
+        settled = bot(&play).0 == Task::Stop;
+        if settled {
+            break;
+        }
+    }
+    assert!(settled, "the escape ends and it stands: {:?}", bot(&play).0);
+
+    // Under half its life it sends itself back there, with no order at all (docs/27).
+    hurt(&mut play, 0.4);
+    let mut sent = false;
+    for _ in 0..20 {
+        tick(&mut play, 1.0);
+        sent = matches!(bot(&play).0, Task::Reload { .. });
+        if sent {
+            break;
+        }
+    }
+    assert!(sent, "a bot under half its life refits itself: {:?}", bot(&play).0);
+    for _ in 0..180 {
+        tick(&mut play, 1.0);
+        if !matches!(bot(&play).0, Task::Reload { .. }) {
+            break;
+        }
+    }
+    assert!(life(&play) > 0.98, "and is charged again: {}", life(&play));
+}
+
+#[test]
+#[ignore = "needs the game install"]
 fn leaving_the_window_lets_shift_up_and_the_free_look_centres_on_foot_and_aboard() {
     use parkan_world::factory::Project;
 
@@ -3158,6 +3288,102 @@ fn a_laser_round_on_mission_03s_bunker_door_opens_it_and_it_shuts_again_once_fre
     let shut = shut_at.expect("the door shuts once free");
     let closed = (shut - open) as f32 / 60.0;
     assert!((5.0..10.0).contains(&closed), "shut {closed} s after it opened");
+}
+
+#[test]
+#[ignore = "needs the game install"]
+fn a_small_warbots_refit_walks_it_into_mission_03s_bunker_to_the_dock_a_large_one_cannot_reach() {
+    use parkan_sim::behaviour::Task;
+    use parkan_sim::damage::{Life, share_loss};
+    use parkan_sim::orders::{Order, Target};
+    use parkan_world::factory::Project;
+
+    let (mut play, m) = mission_03_play();
+    let tick = |play: &mut parkan_world::play::Play, seconds: f32| {
+        for _ in 0..(seconds * 60.0) as usize {
+            play.update_input();
+            play.tick(1000.0 / 60.0, [0.0; 2]);
+        }
+    };
+    // The Small Bunker taken: its one place is an indoor dock, `0x620`, which only a unit of
+    // size class 1 or 2 is routed to (docs/27, "The places").
+    let bunker = object_target(&play, &m, "sbunk01.dat");
+    assert!(play.stand_on_pod(bunker));
+    tick(&mut play, 6.0);
+    assert_eq!(play.units[bunker].clan, Some(play.player_clan));
+    let set = play.places.iter().find(|p| p.target == bunker).expect("the bunker's places");
+    assert_eq!(set.places.len(), 1);
+    assert_eq!(set.places[0].vertex.flags, 0x620, "one indoor dock and no ground-level bit");
+    let (dock_vertex, dock_part) = (set.places[0].vertex, set.part);
+    assert!(play.roll_back(), "out of command mode");
+
+    // A small warbot of the player's clan, hurt, outside the bunker.
+    let project = Project {
+        path: "UNITS\\UNITS\\PREBLD\\tut3_p1.dat".into(),
+        name: "SSW-X Warrior".into(),
+        type_word: 0x0100_8000,
+        chassis_size: 2,
+        ore: 0.0,
+        power: 0.0,
+        lines: Vec::new(),
+        sphere: None,
+    };
+    let at = play.battle.combat.targets[bunker].position;
+    let spot = glam::Vec3::new(at.x + 60.0, at.y, at.z);
+    let t = play.spawn(&project, play.player_clan, spot, 0.0).expect("the SSW-X");
+    tick(&mut play, 1.0);
+    let mut lives: Vec<&mut Life> =
+        play.battle.combat.targets[t].parts.iter_mut().filter_map(|p| p.life.as_mut()).collect();
+    let (left, full): (f32, f32) = lives.iter().fold((0.0, 0.0), |(l, f), x| (l + x.total(), f + x.full()));
+    share_loss(&mut lives, left - full * 0.6);
+    let life = |play: &parkan_world::play::Play| {
+        let (l, f): (f32, f32) = play.battle.combat.targets[t]
+            .parts
+            .iter()
+            .filter_map(|p| p.life.as_ref())
+            .fold((0.0, 0.0), |(l, f), x| (l + x.total(), f + x.full()));
+        l / f
+    };
+    let task = |play: &parkan_world::play::Play| {
+        play.robots.iter().find(|(rt, _)| *rt == t).unwrap().1.behaviour.task()
+    };
+
+    // Told to refit, it walks in along the bunker's hall way and charges at the dock inside.
+    let order = Order { code: parkan_sim::orders::RELOAD, parameter: 0, target: Target::NotDefined };
+    play.robots.iter_mut().find(|(rt, _)| *rt == t).unwrap().1.behaviour.order(&order);
+    tick(&mut play, 0.1);
+    assert!(matches!(task(&play), Task::Reload { dock: Some(_), .. }), "{:?}", task(&play));
+    let part = &play.battle.combat.targets[bunker].parts[dock_part];
+    let dockpt = parkan_world::factory::vertex_world(&dock_vertex, part).unwrap();
+    let mut inside = None;
+    for k in 0..120 {
+        tick(&mut play, 1.0);
+        let p = play.robots.iter().find(|(rt, _)| *rt == t).unwrap().1.walker.body.position;
+        if inside.is_none() && p.distance(dockpt) < 5.0 {
+            inside = Some(k);
+        }
+        if !matches!(task(&play), Task::Reload { .. }) {
+            break;
+        }
+    }
+    let seconds = inside.expect("it walks down the ramp to the dock inside");
+    assert!(life(&play) > 0.98, "charged at the bunker's indoor dock {seconds} s in: {}", life(&play));
+
+    // A large unit fits through no door: it passes the bunker's dock by and takes a
+    // ground-level one, the player's own Large Factory's.
+    let large = Project { chassis_size: 4, path: "UNITS\\bld_unit_-2147483647.dat".to_owned(), ..project };
+    let big =
+        play.spawn(&large, play.player_clan, spot + glam::Vec3::new(0.0, 40.0, 0.0), 0.0).expect("the L-2f");
+    tick(&mut play, 1.0);
+    play.robots.iter_mut().find(|(rt, _)| *rt == big).unwrap().1.behaviour.order(&order);
+    tick(&mut play, 0.5);
+    let big_task = play.robots.iter().find(|(rt, _)| *rt == big).unwrap().1.behaviour.task();
+    let Task::Reload { dock: Some((id, index)), .. } = big_task else { panic!("{big_task:?}") };
+    assert_ne!(id, play.units[bunker].logical_id, "never the bunker's indoor dock");
+    let docks = play.docks_for(big);
+    assert!(docks.iter().any(|d| !d.ground_level), "the bunker's indoor dock is in the world");
+    let picked = docks.iter().find(|d| (d.id, d.index) == (id, index)).expect("the dock it picked");
+    assert!(picked.ground_level, "a large unit takes a ground-level dock");
 }
 
 #[test]

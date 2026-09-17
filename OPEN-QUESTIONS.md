@@ -324,7 +324,7 @@ briefing's route. [40-command-mode](docs/40-command-mode.md#not-established),
 - [ ] Whether a player-driven small unit can take the Teleport's pod.
 - [ ] [M14] The places besides a dock's and a main teleport's (loading places) do not tick by the place rule yet; the place timer's random source; whether a destroyed generator stays in `World3D.dll`'s queue 3.
 - [ ] [M14] What the game drives a dock's `f_recharge_*` glow with, whose own time mode is 0, a value set from outside.
-- [ ] [M14] The AI's repair decision and camouflage in play, and what sends an AI unit short of charge to a dock.
+- [ ] [M14] The AI's camouflage in play. Its repair decision and its trip to a dock are in (the engine: `diff_strong`'s 0.8 and 0.9 for `Decision_RepairOn` and `_Off`, since the profile a unit holds is not read; the nearest dock its size class fits, since the pick `0x10023b60` is not read, and never a building's own repair system).
 - [ ] Why the hero's panel dims in the pod room, and why the chamber's glow reads greyer than the recording's (the dawn scene colour is the guess).
 - [ ] Message 16, the helicopter in route 2, has no test.
 

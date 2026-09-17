@@ -8,6 +8,7 @@
 use glam::Vec3;
 use parkan_formats::hallway::{self, HallWay, Vertex};
 use parkan_formats::mission::{self, Mission};
+use parkan_sim::behaviour::Dock;
 use parkan_sim::damage::{Life, raise_life_share};
 
 use crate::assembly::Assembly;
@@ -74,15 +75,22 @@ pub fn speed_bound(flags: u32) -> f32 {
     if flags & TELEPORT_BITS != 0 { TELEPORT_SPEED_BOUND } else { SPEED_BOUND }
 }
 
+/// The cylinder a place with `flags` stands in about its vertex (`0x100184f0`, `0x1001837a`):
+/// how far across, how far above and how far below the vertex an object's origin may be.
+pub fn extent(flags: u32) -> (f32, f32, f32) {
+    let (radius, height) =
+        if flags & GROUND_LEVEL != 0 { (GROUND_RADIUS, GROUND_HEIGHT) } else { (RADIUS, HEIGHT) };
+    let below =
+        if flags & (hallway::PLACE_POD | PLACE_TELEPORT_OUT) != 0 { height } else { height * BELOW_SHARE };
+    (radius, height, below)
+}
+
 /// Whether a place with `flags` about the world point `vertex` holds an object whose origin is
 /// `origin` (`0x10018310`, `0x10022c80`): the origin's projection onto the vertical segment
 /// from below the vertex to the height above it falls between the segment's ends, and the
 /// origin lies within the radius of it.
 pub fn holds(vertex: Vec3, flags: u32, origin: Vec3) -> bool {
-    let (radius, height) =
-        if flags & GROUND_LEVEL != 0 { (GROUND_RADIUS, GROUND_HEIGHT) } else { (RADIUS, HEIGHT) };
-    let below =
-        if flags & (hallway::PLACE_POD | PLACE_TELEPORT_OUT) != 0 { height } else { height * BELOW_SHARE };
+    let (radius, height, below) = extent(flags);
     let dz = origin.z - vertex.z;
     (-below..=height).contains(&dz) && origin.truncate().distance(vertex.truncate()) <= radius
 }
@@ -308,6 +316,36 @@ impl Play {
                 }
             }
         }
+    }
+
+    /// Every dock a refit of unit `t` may go to (docs/27, "What sends a bot to a dock"): the
+    /// docks of every live, finished building whose clan would charge that unit — its own or an
+    /// ally's (`0x10019318`) — each with its vertex carried into the world.
+    pub fn docks_for(&self, t: usize) -> Vec<Dock> {
+        let clan = self.units.get(t).and_then(|u| u.clan);
+        let mut out = Vec::new();
+        for set in &self.places {
+            let b = set.target;
+            if !self.battle.combat.targets.get(b).is_some_and(|x| x.alive) || self.building_itself(b) {
+                continue;
+            }
+            let owner = self.units.get(b).and_then(|u| u.clan);
+            if owner != clan && !self.allied_to(owner, clan) {
+                continue;
+            }
+            let Some(part) = self.battle.combat.targets[b].parts.get(set.part) else { continue };
+            let id = self.units[b].logical_id;
+            for (index, place) in set.places.iter().enumerate() {
+                if place.vertex.flags & PLACE_DOCK == 0 {
+                    continue;
+                }
+                let Some(at) = crate::factory::vertex_world(&place.vertex, part) else { continue };
+                let ground_level = place.vertex.flags & GROUND_LEVEL != 0;
+                let (radius, height, below) = extent(place.vertex.flags);
+                out.push(Dock { id, index, at, ground_level, radius, height, below });
+            }
+        }
+        out
     }
 
     /// The clan of a place's occupant, and whether it is still there to act on.

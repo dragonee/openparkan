@@ -143,7 +143,7 @@ Not yet: boarding a captured bot, and the ambient variations.
   keep every axis. Standby holds. Follow me keeps within 20 + 20 of the hero.
   Seek and destroy hunts the nearest hostile warrior, builder or transport and
   roams when there is none; Search and capture and Capture building take a
-  building from its pod (M13); Refit fails with no dock.
+  building from its pod (M13); Refit walks to a charging station (M14).
   Between orders a unit engages the nearest hostile within 500, and an attack
   circles 50–100 short of its target.
 - A wingman's fire control points its turret at the nearest hostile within 500,
@@ -819,6 +819,31 @@ More feedback on the first chapter: armour, docks, turrets, batteries and repair
   outside it. On *Ballen's Crossing* (C02 M02) the laser walker's patrol had run straight at
   `s_stone_07`, and it spent most of a minute climbing the stone and sliding back; it now
   walks round it.
+- **Refit walks a bot to a charging station, and a hurt one goes by itself** (docs/27, "What
+  sends a bot to a dock"). A refit — the wingman menu's row and the commander's, and
+  `ORDER_ROBOT_RELOAD` or `_REPARE` from a script — picks the nearest dock of a live, finished
+  building of the unit's own clan or an ally, walks there along that building's hall way, holds
+  still in the place while the dock charges, repairs and rearms it, and ends once life, charge
+  and ammunition are all at 98%. It failed at its start before, on every map. Which docks a unit
+  may use goes by its size class, as `MakeInsideDest` does ("TypedSizes missmached"): a tiny or
+  small bot fits through a door and takes whichever dock is nearest, indoors or out; a medium or
+  large one only a ground-level dock — a generator's two, an Outpost's or a factory's — and with
+  none of those on the map its clan holds, its refit fails at its start as every refit did. A unit that needs service sends itself there with no
+  order at all: under half its life or its charge, or more than 80% of its guns under 20% of
+  their magazine, the trip goes on top of its task, which standby, shutdown, the escape and a
+  capture (above 0.2 life and 0.3 charge) refuse. On Mission 02, *The Constructor*, a large
+  warbot of the player's clan told to refit flies to the Outpost's ground-level dock, is full
+  three seconds later and walks itself back off the building; hurt below half again, it goes
+  back with no order. On Mission 03, *The Field Base*, a small warbot's refit walks it down the
+  Small Bunker's ramp to the dock inside, while a large one on the same map passes that dock by
+  and takes the Large Factory's ground-level one.
+- **A warbot repairs itself while it is scratched** (docs/26, "What the AI does with the
+  switch"). Every unit the player does not drive now runs the AI's repair decision on its takt,
+  unless that takt sent it to a dock or into an attack: it switches its own repair system on
+  while it needs service or its life is under `Decision_RepairOn`, provided its charge is over
+  30%, and off once it needs none and its life is over `Decision_RepairOff`, or its charge falls
+  under 10%. Starting any task turns it off again. Its power tick then pays for the points, as
+  the player's G does. Bots left their repair systems off before, however hurt.
 
 This directory also holds what the rest will follow:
 
@@ -1145,8 +1170,12 @@ engine pass replaces each with what was read and removes its row.
 | M8 | How a velocity the Wizard writes combines with the velocity integrator, and whether its spin is a rate or a fraction | a driven machine takes the written velocity as its own and turns toward the heading at up to its live yaw rate; since that replaces the machine's own velocity every step, where the mode-2 brake would act the ground's fraction is taken off the written velocity whole, rather than pulled at over several steps as it is on the player's | [24](../docs/24-motion.md#not-established) |
 | M8 | The height a flyer's points are given; who reads `Movement_FlyHeight` | at least `FlyNearLandHeight`, 15, above the ground under the point | [24](../docs/24-motion.md#not-established) |
 | M8 | How an engagement scores the radar's contacts through the task (the contact record's three unnamed fields); follow's and refit's priorities for one | the nearest hostile unit within 500 is the best, and for a patrol the one nearest its centre inside its radius; follow and refit answer 0; an attack running is not given another | [31](../docs/31-packages.md#between-orders--read) |
+| M14 | Each task's priority for a refit, reason 3, beyond the route's, the patrol's and the capture's | every task that moves or fights takes the base's, which lets one through while a dock is reachable; standby, shutdown, the escape and a refit already running answer 0 | [31](../docs/31-packages.md#between-orders--read) |
 | M8 | The follower's two timers; the behaviour's random source | it measures once a second; a 32-bit xorshift | [31](../docs/31-packages.md#what-each-package-does--read) |
-| M8 | A dock for a refit | a capture's retreat, read to lie off the map, roams; no dock is modelled, so a refit always fails at its start | [31](../docs/31-packages.md#where-a-search-looks--read-and-measured) |
+| M8 | A capture's retreat, read to lie off the map | a plan with nowhere to go roams | [31](../docs/31-packages.md#where-a-search-looks--read-and-measured) |
+| M14 | Which dock a refit picks (`0x10023b60`), and when its walk is over | the nearest dock the unit's size fits — any for size class 1 or 2, a ground-level one alone above that, the size rule `MakeInsideDest` routes a unit inside by — walked to along that building's hall way, and it is there once it stands in the place itself, the cylinder that charges it. The game's own refit asks `MakeInsideDest` for the ground-level bit on every dock, so it would never send even a small bot indoors | [27](../docs/27-ownership.md#what-sends-a-bot-to-a-dock--read) |
+| M14 | Which difficulty profile a unit's behaviour holds (`+0x8d4`), whose `Decision_RepairOn` and `Decision_RepairOff` the repair decision reads | `diff_strong.var`'s 0.8 and 0.9, so a unit repairs itself while it is only lightly damaged | [26](../docs/26-damage.md#repair-a-units-own-repair-unit-switched-on-and-off--read-and-measured) |
+| M14 | A building's own repair decision and its repair system | a building never switches one on: only a unit's is modelled | [26](../docs/26-damage.md#repair-a-units-own-repair-unit-switched-on-and-off--read-and-measured) |
 | M8 | How the turret turns a traced point into its targets (`0x10028bb0`), its aim stage, and the gun's report codes | each channel moves on by the angle the sight is off, at the rate a small nudge turns it; θ is 0 once both channels reach their targets and π before; a guided gun's θ is its lock left × π | [29](../docs/29-weapons.md#how-the-ai-fires--read) |
 | M9 | Where a gun's takt stores its report codes 0 and 3–6, which the weapons list's lamp reads | the code from the gun's state now: 5 no rounds, 6 short of charge, 7 not ready, 3 stroking, 4 waiting its interval; then the gate's 2, 7 or 8; 1 locking; 0 ready | [29](../docs/29-weapons.md#the-guns-takt-a-stroke-then-the-interval) |
 | M9 | The charge level of a gun with no capacity, which only a shot sets | its bar shows full | [29](../docs/29-weapons.md#a-gun-is-a-capacitor-a-magazine-and-a-clock--read) |
