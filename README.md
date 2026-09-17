@@ -1,16 +1,39 @@
 # openparkan
 
 A reimplementation of the **Parkan: Iron Strategy** (Nikita, 1998) game
-engine, built on clean-room readers for the game's own data files.
+engine.
 
 This repository contains **no game assets**. Point it at your own installation.
 
-Most of it was derived by observing the shipped data files. `Land.map` resisted
-that and was recovered by disassembling `ArealMap.dll`; what that means in
-practice — format facts yes, code no — is set out in
+## The engine
+
+**[`engine/`](engine/README.md) is the project.** It is a Rust workspace —
+wgpu, winit, glam — that reads the game's own install and plays it: the
+terrain and its sky, every unit and building drawn from its own assembly, the
+hero in first person, the AI on its takt, the commander's map and orders, the
+factory and the warbot designer.
+
+The four training missions and the four of *Tricky Tellus* are playable; the
+later campaigns are untested. **[engine/README.md](engine/README.md)** has the
+mission-by-mission table, the milestone log from M0 to M14, the stand-ins
+where the game's behaviour is not yet established, and how to run it.
+
+```bash
+cd engine
+cargo run --release -p parkan          # Mission 01, in the hero's cockpit
+```
+
+Everything else here is what the engine stands on: a Python toolkit of
+clean-room readers for every data file the game ships, and `docs/`, where each
+format and behaviour is written down and re-derived by `uv run openparkan
+verify`.
+
+Most of that was derived by observing the shipped data files. `Land.map`
+resisted that and was recovered by disassembling `ArealMap.dll`; what that
+means in practice — format facts yes, code no — is set out in
 [09-method.md](docs/09-method.md). No code from the game is reproduced here.
 
-## Status
+## Reader status
 
 | | |
 |---|---|
@@ -42,7 +65,7 @@ practice — format facts yes, code no — is set out in
 | **Resource bindings** | done — the `desc = "resource"` descriptor, 132 objects across 32 `.cfg` files binding 751 names into seven libraries, all resolving; and `TextRes.dll`'s string table, the game's own 173 lines of dialogue, read without a PE dependency |
 | **Save games** | partial — all six saves parse to the last byte as the fixed sequence of sections read off `iron3d.dll`'s writer and loader (`0x100a1590`, `0x100a2bd0`): the header and its difficulty byte, every object's world record, part list and placement, the clans, objectives, mind lists and unit designs. `openparkan saves` lists what a save holds in the game's own words. Most of each owner's own chunk, and the AI state's layout, are the engine's memory and are not decoded |
 | **Behaviour scripts, semantics** | read one call deep — `ai.dll`'s executor gives every node kind its behaviour (statement, `if`, label, goto, switch to a handler, return, constant); the function table has 73 slots and every call maps to its handler, each named as far as its code says; the trailer is a formula index into the script's `.fml`. What a handler asks of the engine below it is mostly not followed |
-| **Engine research (Phase R)** | done — the hit test, the ground and gravity, the player's controls and eye, animation playback, effects, firing and the sky's fog, each in `docs/` with `verify` checks; [`engine/`](engine/README.md) lists the unknowns the engine must stand in for. No engine code yet |
+| **Engine research (Phase R)** | done — the hit test, the ground and gravity, the player's controls and eye, animation playback, effects, firing and the sky's fog, each in `docs/` with `verify` checks; [`engine/`](engine/README.md) lists the unknowns the engine must stand in for. The engine itself is at M14 — see [engine/README.md](engine/README.md) |
 
 ## Quickstart
 
@@ -258,6 +281,7 @@ openparkan/
   verify.py     the checks quoted above
   png.py        dependency-free PNG writer
   cli.py        command line
+engine/         the Rust engine — see engine/README.md
 docs/           format documentation
 tests/          unit tests, no game data needed
 analysis/       disassembly scaffolding (not part of the library)

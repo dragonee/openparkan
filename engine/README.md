@@ -1,10 +1,50 @@
 # engine
 
 A Rust engine for *Parkan: Iron Strategy* that reads the game's own install.
-Its first target is Phase One: load Mission 01, *Line of Fire*, put the hero
-at its start, and walk, look and shoot in first person.
+Its first target, Phase One — load Mission 01, *Line of Fire*, put the hero at
+its start, and walk, look and shoot in first person — is in. It now plays the
+training campaign and the first campaign, in the cockpit and from the
+commander's map.
 
-Milestones **M0** to **M5** are in, each with the stand-ins listed below:
+## Campaign missions
+
+The game ships twenty campaign missions over six campaigns. *Playable* means
+the mission loads, briefs and runs in the engine; the figure beside it is how
+much of what that mission asks for is in. *Untested* means it has not been
+played through here — the engine loads every mission, but nothing about these
+has been checked.
+
+| campaign | mission | done | status |
+|---|---|---|---|
+| **C00** *Tara. The Home Base* | M01 *Line of Fire* | 90% | Playable |
+| | M02 *The Constructor* | 80% | Playable |
+| | M03 *The Field Base* | 70% | Playable |
+| | M04 *Teleport* | 60% | Playable |
+| **C01** *Tricky Tellus* | M01 *The Prologue* | 30% | Playable |
+| | M02 *The Arrival* | 30% | Playable |
+| | M03 *Outflanking Maneuver* | 30% | Playable |
+| | M04 *Unstable Equilibrium* | 30% | Playable |
+| **C02** *The Alari Gorge* | M01 *The Iron Monster* | — | Untested |
+| | M02 *Ballen's Crossing* | — | Untested |
+| | M03 *The Lost Key* | — | Untested |
+| | M04 *The Last Bastion* | — | Untested |
+| **C03** *The Flame of Logy* | M01 *The Silver Eye* | — | Untested |
+| | M02 *The Convoy* | — | Untested |
+| | M03 *Interception* | — | Untested |
+| | M04 *Foggy Island* | — | Untested |
+| **C04** *The Labyrinths of Timango* | M01 *Brute Force* | — | Untested |
+| | M02 *The Dead City* | — | Untested |
+| **C05** *The Black Tower of Laks* | M01 *The Last Gate* | — | Untested |
+| | M02 *The Epilogue* | — | Untested |
+
+Campaign and mission titles are the game's own, out of each campaign's
+`descr` and each mission's `data.tma`; `uv run openparkan missions` lists
+them from the install.
+
+## Milestones
+
+Milestones **M0** to **M14** are in, each with the stand-ins listed below.
+**M0** to **M2**:
 
 - the workspace;
 - the NRes, mission, `Texm`, `Material.lib`, wear, `Land.msh`, object mesh,
