@@ -148,6 +148,24 @@ pub const REPAIR_OFF: f32 = 0.9;
 pub const REPAIR_CHARGE_ON: f32 = 0.3;
 pub const REPAIR_CHARGE_OFF: f32 = 0.1;
 
+/// An upgrade (`M_Task_Upgrade`, docs/32, "Upgrading a building"): the builder walks to a point
+/// beside the building, this far out past its sphere, and counts itself there within this of
+/// the point it picked. It tries this many points on that ring for one on usable ground.
+pub const UPGRADE_BESIDE: f32 = 20.0;
+pub const UPGRADE_ARRIVED: f32 = 10.0;
+pub const UPGRADE_TRIES: usize = 77;
+
+/// How far an upgrade has got (`+0x5c`, `0x100332e0`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum UpgradeState {
+    /// GoToBuild: walking to the point beside the building.
+    Going,
+    /// Standing beside it, for the play to start the sphere.
+    Arrived,
+    /// Waiting while the play walks the building up its scheme.
+    Working,
+}
+
 /// Where a build task stands (`+0x5c`, `0x10028b80`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BuildState {
@@ -493,6 +511,16 @@ pub enum Task {
         site: [f32; 4],
         state: BuildState,
     },
+    /// Upgrade (order 24, `M_Task_Upgrade`, vtable `0x10059c20`): a trip to a building of the
+    /// unit's own clan, which the play then walks one step up its scheme (docs/32, "Upgrading a
+    /// building"). The task holds the building by logic id, the point beside it the walker was
+    /// sent to, and how far it has got; the play takes it up once it has arrived and ends it
+    /// when the new building's sphere stops.
+    Upgrade {
+        building: i32,
+        state: UpgradeState,
+        goal: Option<Vec3>,
+    },
     /// Transport minerals (order 6, `M_Task_Transport`, vtable `0x10059ca8`): the play picks
     /// the mine and the storage and hands the task each place to walk to; the task tells it
     /// when it has arrived (docs/32, "Transporting ore").
@@ -601,6 +629,12 @@ impl Task {
                 state: BuildState::Start,
             },
             (orders::BUILD, _) => return None,
+            // The upgrade takes a building of the unit's own clan by logic id (`0x100332e0`);
+            // the play refuses one it cannot walk up its scheme before the order is given.
+            (orders::UPGRADE, Target::LogicId(id)) => {
+                Task::Upgrade { building: id, state: UpgradeState::Going, goal: None }
+            }
+            (orders::UPGRADE, _) => return None,
             // The transport ignores its target (`0x10031f70`).
             (orders::TRANSPORT, _) => Task::Transport { goal: None, going: false, arrived: false },
             _ => Task::Stop,
@@ -1288,6 +1322,34 @@ impl Behaviour {
                 *self.tasks.last_mut()? = Task::Build { type_word, site, state };
                 Some(Takt { walk, target: self.fire_target(senses), fire_freely: false })
             }
+            // The upgrade (`0x100338a0`, docs/32): it walks to a point beside the building and
+            // stands there; the play takes it from there and ends the task when it is done. A
+            // building gone, lost to another clan or no longer seen ends it ("dead, enemy or
+            // fully upgraded building").
+            Task::Upgrade { building, state, goal } => {
+                let it = *senses.find(building).filter(|s| s.building && s.own)?;
+                let (mut state, mut goal) = (state, goal);
+                let mut walk = Walk::Keep;
+                if state == UpgradeState::Going {
+                    let spot = match goal {
+                        Some(spot) => spot,
+                        None => {
+                            let spot = self.beside(&it, senses);
+                            walk = Walk::To(spot, GO_SPEED);
+                            spot
+                        }
+                    };
+                    goal = Some(spot);
+                    if at.truncate().distance(spot.truncate()) <= UPGRADE_ARRIVED {
+                        (state, walk) = (UpgradeState::Arrived, Walk::Clear);
+                    } else if senses.walker_idle && walk == Walk::Keep {
+                        walk = Walk::To(spot, GO_SPEED);
+                    }
+                }
+                *self.tasks.last_mut()? = Task::Upgrade { building, state, goal };
+                self.fire = FireMode::Nearest;
+                Some(Takt { walk, target: self.fire_target(senses), fire_freely: false })
+            }
             Task::Transport { goal, going, arrived } => {
                 self.fire = FireMode::Nearest;
                 let (walk, going, arrived) = match goal {
@@ -1503,6 +1565,25 @@ impl Behaviour {
             }
         }
         Walk::To(self.roam(senses, at), GO_SPEED)
+    }
+
+    /// A point beside building `it` for an upgrade (`0x100338a0`): the first of
+    /// [`UPGRADE_TRIES`] on the ring [`UPGRADE_BESIDE`] out past its sphere that stands on
+    /// usable ground, and the last tried with none.
+    ///
+    /// STAND-IN: docs/32-builder.md#upgrading-a-building--read -- how the point beside the
+    /// building is drawn is not read: a random one on that ring, as the attack draws its own.
+    fn beside(&mut self, it: &Seen, senses: &Senses) -> Vec3 {
+        let reach = it.radius + UPGRADE_BESIDE;
+        let mut spot = it.position;
+        for _ in 0..UPGRADE_TRIES {
+            let a = self.random() * std::f32::consts::TAU;
+            spot = it.position + Vec3::new(a.cos(), a.sin(), 0.0) * reach;
+            if senses.flyer || senses.usable.at(spot) {
+                break;
+            }
+        }
+        spot
     }
 }
 

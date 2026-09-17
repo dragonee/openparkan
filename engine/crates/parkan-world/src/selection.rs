@@ -75,11 +75,20 @@ impl Commander {
     }
 }
 
-/// Whether every part of each build Type's scheme's first building is offered by `catalogue`,
-/// the clan's tree as it stands (docs/41, "Which rows it offers", condition 5).
+/// Whether every part of the building at `path` is offered by `catalogue`, the clan's tree as
+/// it stands (docs/41, "Which rows it offers", condition 5).
+pub fn researched_building(game: &Path, catalogue: Option<&crate::designs::Catalogue>, path: &str) -> bool {
+    let Some(catalogue) = catalogue else { return false };
+    parkan_formats::gamedir::resolve(game, path)
+        .and_then(|p| std::fs::read(p).ok())
+        .and_then(|b| parkan_formats::objects::parse_unit(&b, path).ok())
+        .is_some_and(|u| u.components.iter().all(|c| catalogue.offered(&c.reference.member)))
+}
+
+/// Whether every part of each build Type's scheme's first building is offered by `catalogue`
+/// (docs/41, "Which rows it offers", condition 5).
 pub fn researched(game: &Path, catalogue: Option<&crate::designs::Catalogue>) -> [bool; 7] {
     let mut out = [false; 7];
-    let Some(catalogue) = catalogue else { return out };
     let schemes = parkan_formats::gamedir::resolve(game, parkan_formats::controls::BUILD_SCHEMES)
         .and_then(|p| std::fs::read(p).ok())
         .and_then(|b| {
@@ -92,10 +101,7 @@ pub fn researched(game: &Path, catalogue: Option<&crate::designs::Catalogue>) ->
         else {
             continue;
         };
-        let unit = parkan_formats::gamedir::resolve(game, first)
-            .and_then(|p| std::fs::read(p).ok())
-            .and_then(|b| parkan_formats::objects::parse_unit(&b, first).ok());
-        out[i] = unit.is_some_and(|u| u.components.iter().all(|c| catalogue.offered(&c.reference.member)));
+        out[i] = researched_building(game, catalogue, first);
     }
     out
 }
@@ -200,7 +206,9 @@ impl Play {
             });
             buildable[i] = researched[i] && !self.commander.owned_marks[i] && !owned && !heading_off;
         }
+        let upgradable = hq::BUILD_TYPES.map(|kind| self.upgrade_target(kind).is_some());
         hq::Situation {
+            upgradable,
             first_class: first.map_or(0, |t| self.record_class(t)),
             lode_unfound: self.commander.lodes.iter().any(|l| !l.found),
             // STAND-IN: docs/32-builder.md#building-a-building--read -- a builder's beam's
@@ -217,12 +225,62 @@ impl Play {
         hq::offered(&types, &situation)
     }
 
+    /// The building an Upgrade row names: the clan's first live building of `type_word` whose
+    /// level -- its place in its scheme's ladder -- has another entry above it, and whose next
+    /// entry the clan's tree has researched whole.
+    ///
+    /// STAND-IN: docs/41-commander.md#not-established -- what `0x10034230` accepts is not
+    /// followed. The upgrade task's own target test (`0x100332e0`, docs/32) gives the first
+    /// half; the second is *derived* from the recording of Mission 03, where the builder is
+    /// offered no Upgrade Warehouse although the clan's Small Warehouse stands at the foot of
+    /// its scheme -- the Medium Warehouse's `fr_m_store` is not researched in `tut3_pl.trf` --
+    /// so the row asks for the next building's parts as a Build row asks for the first's.
+    pub fn upgrade_target(&mut self, type_word: u32) -> Option<usize> {
+        let owned: Vec<usize> = self
+            .own_buildings_within(type_word)
+            .into_iter()
+            .filter(|&b| self.units[b].type_word == type_word)
+            .collect();
+        if owned.is_empty() {
+            return None;
+        }
+        let game = self.assembly.game.clone();
+        let catalogue = self.catalogue();
+        owned.into_iter().find(|&b| {
+            self.upgrade_model(b).is_some_and(|next| researched_building(&game, catalogue.as_ref(), &next))
+        })
+    }
+
+    /// The `.dat` building `b` would become: the entry after its own in its Type's scheme
+    /// (docs/32, "What gets built": a scheme's list is its upgrade ladder). `None` where it
+    /// stands at the top, or is of no scheme.
+    pub fn upgrade_model(&mut self, b: usize) -> Option<String> {
+        let type_word = self.units.get(b)?.type_word;
+        let path = self.commander.paths.get(b)?.to_ascii_lowercase();
+        let scheme = self.schemes().iter().find(|s| s.type_word() == Some(type_word))?;
+        let level = scheme.members.iter().position(|m| m.to_ascii_lowercase() == path)?;
+        scheme.members.get(level + 1).cloned()
+    }
+
     /// Row `command` clicked (`0x1007b740`): an order goes to every selected robot at once,
-    /// replacing its queue (`0x10079230`). Returns what the row does, so the caller can open
-    /// the picks the others start.
+    /// replacing its queue (`0x10079230`). An Upgrade row names the building itself
+    /// (`0x10078f60`): the order carries its logic id and the Type as its parameter. Returns
+    /// what the row does, so the caller can open the picks the others start.
     pub fn hq_command(&mut self, command: u8) -> Option<hq::Act> {
         let act = hq::act(command)?;
-        if let hq::Act::Order(order) = act {
+        let order = match act {
+            hq::Act::Order(order) => Some(order),
+            hq::Act::Upgrade(kind) => {
+                let b = self.upgrade_target(kind)?;
+                Some(parkan_sim::orders::Order {
+                    code: parkan_sim::orders::UPGRADE,
+                    parameter: kind as i32,
+                    target: parkan_sim::orders::Target::LogicId(self.units[b].logical_id),
+                })
+            }
+            _ => None,
+        };
+        if let Some(order) = order {
             for t in self.selected_units() {
                 if let Some((_, robot)) = self.robots.iter_mut().find(|(rt, _)| *rt == t) {
                     robot.order = Some(order);

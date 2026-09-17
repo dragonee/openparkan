@@ -22,6 +22,9 @@ pub const CAPTURE: i32 = 17;
 pub const MINE: i32 = 10;
 /// The hidden construction sphere a new building runs (docs/32, "The construction sphere").
 pub const SHOW_UPGRADE: i32 = 18;
+/// `ORDER_ROBOT_UPGRADE`: a builder walks a building of its own clan one step up its scheme
+/// (docs/32, "Upgrading a building").
+pub const UPGRADE: i32 = 24;
 /// `ORDER_ROBOT_LEAVE`, the escape (docs/31, "The escape").
 pub const LEAVE: i32 = 20;
 /// `ORDER_ROBOT_SHUTDOWN` (docs/31, "Which objects run a behaviour").

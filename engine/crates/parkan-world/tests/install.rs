@@ -3491,6 +3491,103 @@ fn taking_mission_03s_bunker_opens_command_mode_whose_camera_moves_about_it_and_
 
 #[test]
 #[ignore = "needs the game install"]
+fn c03_m01s_builder_upgrades_the_captured_factory_to_the_medium_one_its_clan_has_researched() {
+    use parkan_formats::mission::{KIND_BUILDING, KIND_UNIT};
+    use parkan_sim::behaviour::{Task, UpgradeState};
+    use parkan_world::cockpit::commander::Panel;
+
+    let mut play = campaign_play(gamedir::C03_MISSION_01);
+    let player = play.player_clan;
+    // The neutral clan's Small Factory, bunker and builder, as capturing them would leave them.
+    let of = |play: &parkan_world::play::Play, kind: u32, which: u32| {
+        (0..play.units.len())
+            .find(|&t| {
+                play.units[t].kind == which
+                    && play.units[t].type_word == kind
+                    && play.units[t].clan == Some(2)
+            })
+            .unwrap_or_else(|| panic!("the neutral clan's 0x{kind:08x}"))
+    };
+    let factory = of(&play, 0x8000_0010, KIND_BUILDING);
+    let bunker = of(&play, 0x8001_0000, KIND_BUILDING);
+    let builder = of(&play, 0x0100_4000, KIND_UNIT);
+    assert!(play.commander.paths[factory].to_ascii_lowercase().contains("splant01"), "the small one");
+    for t in [factory, bunker, builder] {
+        play.units[t].clan = Some(player);
+    }
+    let stood = play.battle.combat.targets[factory].position;
+    let id = play.units[factory].logical_id;
+
+    // The builders page offers Upgrade Factory (19) and no Build row: this mission's tree has
+    // the Medium Factory researched and none of the seven first buildings.
+    play.enter_command(bunker);
+    let mut panel = Panel::default();
+    panel.update(&mut play, 0.0);
+    panel.turn(&mut play, 3, 0.0);
+    assert_eq!(play.selected_units(), vec![builder]);
+    assert_eq!(panel.menu, vec![0, 1, 2, 3, 6, 7, 19], "{:?}", panel.menu);
+    assert_eq!(play.upgrade_target(0x8000_0010), Some(factory));
+    assert_eq!(play.hq_command(19), Some(parkan_sim::hq::Act::Upgrade(0x8000_0010)));
+    let task = |play: &parkan_world::play::Play| {
+        play.robots.iter().find(|(t, _)| *t == builder).unwrap().1.behaviour.task()
+    };
+    assert!(
+        matches!(task(&play), Task::Upgrade { building, state: UpgradeState::Going, .. } if building == id),
+        "{:?}",
+        task(&play)
+    );
+    assert!(play.roll_back(), "out of command mode");
+
+    // It walks to the factory and stands beside it, and the factory's own sphere starts.
+    let run = |play: &mut parkan_world::play::Play, seconds: usize| {
+        for _ in 0..(60 * seconds) {
+            play.update_input();
+            play.tick(1000.0 / 60.0, [0.0; 2]);
+        }
+    };
+    let mut working = None;
+    for s in 0..90 {
+        run(&mut play, 1);
+        if matches!(task(&play), Task::Upgrade { state: UpgradeState::Working, .. }) {
+            working = Some(s);
+            break;
+        }
+    }
+    let arrived = working.unwrap_or_else(|| panic!("it never reached the factory: {:?}", task(&play)));
+    assert!(play.construction.spheres.iter().any(|s| s.target == factory), "the factory's sphere runs");
+
+    // 50 s on, the small factory goes and the scheme's next stands where it did, the player's.
+    for _ in 0..90 {
+        run(&mut play, 1);
+        if !matches!(task(&play), Task::Upgrade { .. }) {
+            break;
+        }
+    }
+    assert!(!matches!(task(&play), Task::Upgrade { .. }), "the builder is let go: {:?}", task(&play));
+    assert!(!play.battle.combat.targets[factory].alive && play.deleted[factory], "the small one is gone");
+    let made = (0..play.units.len())
+        .find(|&t| {
+            play.units[t].kind == KIND_BUILDING
+                && play.units[t].clan == Some(player)
+                && play.commander.paths[t].to_ascii_lowercase().contains("mplant01")
+        })
+        .expect("the Medium Factory stands");
+    let at = play.battle.combat.targets[made].position;
+    assert!(at.truncate().distance(stood.truncate()) < 1.0, "where the small one stood: {at} to {stood}");
+    assert_eq!(play.units[made].type_word, 0x8000_0010);
+    assert!(play.buildings.iter().any(|b| b.target == made), "with its doors and pod");
+    eprintln!("beside the factory {arrived} s in");
+
+    // The row is gone: the Large Factory above it is not researched in this mission's tree.
+    play.enter_command(bunker);
+    let mut panel = Panel::default();
+    panel.update(&mut play, 0.0);
+    panel.turn(&mut play, 3, 0.0);
+    assert!(!panel.menu.contains(&19), "no Upgrade Factory left: {:?}", panel.menu);
+}
+
+#[test]
+#[ignore = "needs the game install"]
 fn mission_03s_builders_page_selects_the_builder_and_offers_build_mine_and_standby_stands_it_by() {
     use parkan_world::cockpit::commander::Panel;
     use parkan_world::play::Mode;

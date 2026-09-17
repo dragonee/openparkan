@@ -9,7 +9,7 @@ use glam::Vec3;
 use parkan_formats::controls::BuildScheme;
 use parkan_formats::mission::{self, KIND_BUILDING, Mission, Value};
 use parkan_formats::{basement, control, gamedir};
-use parkan_sim::behaviour::{BuildState, Task};
+use parkan_sim::behaviour::{BuildState, Task, UpgradeState};
 use parkan_sim::combat::Event;
 use parkan_sim::effects::Frame;
 use parkan_sim::orders::{self, Order, Target};
@@ -75,12 +75,42 @@ pub const NEW_BUILDING: [Phase; 5] = [
     Phase { code: Some(0), seconds: 1.0, clear: false },
 ];
 
+/// Order 18 with parameter 1, the building an upgrade is taking (`0x100335a1`): `0x309` for
+/// 25 s, a second with no code, then 8 for 90 s. The swap comes 50 s in, part way through the
+/// last phase, and the building is gone before it ends.
+pub const UPGRADING: [Phase; 3] = [
+    Phase { code: Some(0x309), seconds: 25.0, clear: false },
+    Phase { code: None, seconds: 1.0, clear: false },
+    Phase { code: Some(8), seconds: 90.0, clear: false },
+];
+/// Order 18 with parameter 2, the building an upgrade made (`0x10033790`): 10 for 3 s, then 0
+/// for 1. The builder waits while it runs.
+pub const UPGRADED: [Phase; 2] = [
+    Phase { code: Some(10), seconds: 3.0, clear: false },
+    Phase { code: Some(0), seconds: 1.0, clear: false },
+];
+/// How long after the builder arrives the old building is removed and the next one made
+/// (`0x1003363f`).
+pub const UPGRADE_SWAP_MS: f64 = 50_000.0;
+
+/// A building being walked one step up its scheme (docs/32, "Upgrading a building"): the
+/// builder waiting on it, the building, when its sphere began, and the building the swap made.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Upgrading {
+    pub builder: usize,
+    pub building: usize,
+    pub since_ms: f64,
+    pub made: Option<usize>,
+}
+
 /// A new building's construction sphere running.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Sphere {
     pub target: usize,
     pub centre: Vec3,
     pub radius: f32,
+    /// The phases the order's parameter picked (`0x10031150`).
+    pub phases: &'static [Phase],
     pub phase: usize,
     pub phase_ms: f64,
     pub next_kill_ms: f64,
@@ -134,6 +164,8 @@ pub struct Construction {
     /// Each building target's placement: where it stands and its turn.
     pub placements: HashMap<usize, (Vec3, f32)>,
     pub spheres: Vec<Sphere>,
+    /// The upgrades under way (docs/32, "Upgrading a building").
+    pub upgrades: Vec<Upgrading>,
     pub lodes: Vec<Lode>,
     /// The ore a building of each Type costs by the player's tree (docs/32, "What it costs").
     pub costs: HashMap<u32, Option<f32>>,
@@ -165,7 +197,7 @@ impl Construction {
 
 impl Play {
     /// `BuildDat.lst`'s schemes, read once.
-    fn schemes(&mut self) -> &[BuildScheme] {
+    pub(crate) fn schemes(&mut self) -> &[BuildScheme] {
         if self.construction.schemes.is_none() {
             let schemes = gamedir::resolve(&self.assembly.game, parkan_formats::controls::BUILD_SCHEMES)
                 .and_then(|p| std::fs::read(p).ok())
@@ -370,13 +402,187 @@ impl Play {
                 robot.order = None;
             }
         }
+        // A builder standing beside the building it was sent to upgrade takes it up.
+        let beside: Vec<(usize, i32)> = self
+            .robots
+            .iter()
+            .filter(|(t, _)| self.battle.combat.targets.get(*t).is_some_and(|x| x.alive))
+            .filter_map(|(t, r)| match r.behaviour.task() {
+                Task::Upgrade { building, state: UpgradeState::Arrived, .. } => Some((*t, building)),
+                _ => None,
+            })
+            .collect();
+        for (t, id) in beside {
+            self.start_upgrade(t, id, now);
+        }
+        self.step_upgrades(now);
         self.step_spheres(now)
     }
 
+    /// A builder that has arrived takes up its upgrade (`0x100335a1`): the building's own
+    /// sphere starts on it and the builder waits beside it. A building gone, taken by another
+    /// clan or already at the top of its scheme leaves the builder with no order, as the task's
+    /// target test refuses one ("dead, enemy or fully upgraded building").
+    ///
+    /// STAND-IN: docs/32-builder.md#upgrading-a-building--read -- the builder's invulnerability
+    /// (property 162) while it works is not modelled: it is hurt as it always is.
+    fn start_upgrade(&mut self, builder: usize, id: i32, now: f64) {
+        let clan = self.units.get(builder).and_then(|u| u.clan);
+        let building = self.units.iter().position(|u| {
+            u.logical_id == id && u.kind == KIND_BUILDING && u.clan.is_some() && u.clan == clan
+        });
+        let building = building
+            .filter(|&b| self.battle.combat.targets.get(b).is_some_and(|x| x.alive))
+            .filter(|&b| self.upgrade_model(b).is_some())
+            .filter(|&b| !self.construction.upgrades.iter().any(|u| u.building == b));
+        let Some(building) = building else {
+            if let Some((_, robot)) = self.robots.iter_mut().find(|(rt, _)| *rt == builder) {
+                robot.behaviour.tasks = vec![Task::Stop];
+                robot.order = None;
+            }
+            return;
+        };
+        if let Some((_, robot)) = self.robots.iter_mut().find(|(rt, _)| *rt == builder)
+            && let Some(Task::Upgrade { state, .. }) = robot.behaviour.tasks.last_mut()
+        {
+            *state = UpgradeState::Working;
+        }
+        self.construction.upgrades.push(Upgrading { builder, building, since_ms: now, made: None });
+        self.start_sphere(building, &UPGRADING, now);
+    }
+
+    /// Every upgrade's step: the swap 50 s in (`0x1003363f`), and the builder let go once the
+    /// new building's own sphere has stopped. One whose building or builder has gone is dropped.
+    fn step_upgrades(&mut self, now: f64) {
+        let mut u = 0;
+        while u < self.construction.upgrades.len() {
+            let up = self.construction.upgrades[u];
+            let builder_gone = !self.battle.combat.targets.get(up.builder).is_some_and(|x| x.alive);
+            // A builder given another order leaves the building as it stands, its sphere with
+            // it, as the task's own end does.
+            let left = !self.robots.iter().any(|(t, r)| {
+                *t == up.builder
+                    && matches!(r.behaviour.task(), Task::Upgrade { state: UpgradeState::Working, .. })
+            });
+            match up.made {
+                None if builder_gone
+                    || left
+                    || !self.battle.combat.targets.get(up.building).is_some_and(|x| x.alive) =>
+                {
+                    self.construction.upgrades.remove(u);
+                    self.construction.spheres.retain(|s| s.target != up.building);
+                    self.end_upgrade(up.builder);
+                    continue;
+                }
+                None if now - up.since_ms >= UPGRADE_SWAP_MS => {
+                    let made = self.swap_building(up.building, now);
+                    self.construction.upgrades[u].made = Some(made.unwrap_or(up.building));
+                    if made.is_none() {
+                        self.construction.upgrades.remove(u);
+                        self.end_upgrade(up.builder);
+                        continue;
+                    }
+                }
+                Some(made) if builder_gone || !self.construction.spheres.iter().any(|s| s.target == made) => {
+                    self.construction.upgrades.remove(u);
+                    self.end_upgrade(up.builder);
+                    continue;
+                }
+                _ => {}
+            }
+            u += 1;
+        }
+    }
+
+    /// The builder is done: it is left with no order, as every task of its own end leaves it.
+    fn end_upgrade(&mut self, builder: usize) {
+        if let Some((_, robot)) = self.robots.iter_mut().find(|(rt, _)| *rt == builder)
+            && matches!(robot.behaviour.task(), Task::Upgrade { .. })
+        {
+            robot.behaviour.tasks = vec![Task::Stop];
+            robot.order = None;
+        }
+    }
+
+    /// Building `b` walked one step up its scheme (`0x10033790`): it is taken out of the world
+    /// and the scheme's next `.dat` made where it stood, with its ore carried over and the
+    /// sphere an upgrade's new building runs. Returns the new target.
+    fn swap_building(&mut self, b: usize, now: f64) -> Option<usize> {
+        let path = self.upgrade_model(b)?;
+        let &(at, yaw) = self.construction.placements.get(&b)?;
+        let (clan, type_word) = (self.units.get(b)?.clan?, self.units.get(b)?.type_word);
+        let ore = self.economy.held(b);
+        self.remove_building(b);
+        let made = self.place_building(clan, type_word, &path, at, yaw, now, &UPGRADED, false)?;
+        if ore > 0.0 {
+            let most = self.economy.most(made);
+            self.economy.add_ore(made, if most > 0.0 { ore.min(most) } else { ore });
+        }
+        Some(made)
+    }
+
+    /// Building `b` taken out of the world: its target dies unseen, its own records go, and the
+    /// drawing drops it.
+    fn remove_building(&mut self, b: usize) {
+        if let Some(target) = self.battle.combat.targets.get_mut(b) {
+            target.alive = false;
+        }
+        if let Some(solid) = self.ground.solids.get_mut(b) {
+            solid.present = false;
+        }
+        if let Some(d) = self.deleted.get_mut(b) {
+            *d = true;
+        }
+        if let Some(&object) = self.battle.objects.get(b) {
+            self.killed.push(object);
+        }
+        self.buildings.retain(|x| x.target != b);
+        self.places.retain(|x| x.target != b);
+        self.factories.retain(|x| x.target != b);
+        self.building_effects.retain(|(x, _)| x.target != b);
+        self.emplacements.retain(|(t, _)| *t != b);
+        self.construction.spheres.retain(|s| s.target != b);
+        self.construction.placements.remove(&b);
+        self.economy.sites.retain(|s| s.target != b);
+        self.economy.ore.remove(&b);
+        self.fx.retain(|o, _| !matches!(o, Owner::Building(t, _) if *t == b));
+        self.selected.retain(|&t| t != b);
+        if let (Some(unit), Some(p)) = (self.units.get(b), self.progression.as_mut()) {
+            p.progress.deleted(unit.logical_id);
+        }
+    }
+
+    /// Sphere `phases` started on building `t`, round its outer contour.
+    fn start_sphere(&mut self, t: usize, phases: &'static [Phase], now: f64) {
+        let path = self.commander.paths.get(t).cloned().unwrap_or_default();
+        let effects = sphere_effects(&mut self.assembly, &path);
+        for (_, name) in &effects {
+            self.fx.template(name);
+        }
+        let Some((position, radius)) =
+            self.battle.combat.targets.get(t).map(|target| (target.position, target.radius))
+        else {
+            return;
+        };
+        let (centre, radius) = self.building_sphere(t).unwrap_or((position, radius));
+        self.construction.spheres.retain(|s| s.target != t);
+        self.construction.spheres.push(Sphere {
+            target: t,
+            centre,
+            radius,
+            phases,
+            phase: 0,
+            phase_ms: now,
+            next_kill_ms: now,
+            effects,
+        });
+        self.start_phase(self.construction.spheres.len() - 1, now, true);
+    }
+
     /// Make a building of `type_word` for `clan` at `at` turned `yaw`
-    /// (`CreateObjectFromScheme`, `Behavior.dll:0x1001d440`), in build mode: a new target with
-    /// its unit, name, ground, doors and pod, factory and load group, on its clan's list, and
-    /// its construction sphere started. Refused when its sphere meets another building's.
+    /// (`CreateObjectFromScheme`, `Behavior.dll:0x1001d440`), in build mode: its scheme's first
+    /// `.dat`, with a new building's sphere, refused where that sphere meets another
+    /// building's.
     pub fn create_building(
         &mut self,
         clan: i64,
@@ -386,8 +592,28 @@ impl Play {
         now: f64,
     ) -> Option<usize> {
         let path = self.placement_model(type_word)?;
+        self.place_building(clan, type_word, &path, at, yaw, now, &NEW_BUILDING, true)
+    }
+
+    /// The building `path` puts up for `clan` at `at` turned `yaw`: a new target with its unit,
+    /// name, ground, doors and pod, factory and load group, on its clan's list, and the sphere
+    /// `phases` started on it. `clear` asks for the ground to be free of another building's
+    /// sphere, which an upgrade standing where its own building stood does not.
+    #[allow(clippy::too_many_arguments)]
+    fn place_building(
+        &mut self,
+        clan: i64,
+        type_word: u32,
+        path: &str,
+        at: Vec3,
+        yaw: f32,
+        now: f64,
+        phases: &'static [Phase],
+        clear: bool,
+    ) -> Option<usize> {
+        let path = path.to_owned();
         let plan = self.plan(&path);
-        if let Some((mid, reach)) = plan.contour_sphere() {
+        if let Some((mid, reach)) = plan.contour_sphere().filter(|_| clear) {
             let [cx, cy] = placed(mid, at, yaw);
             let others: Vec<usize> = self.construction.placements.keys().copied().collect();
             for t in others {
@@ -526,6 +752,7 @@ impl Play {
             target: t,
             centre,
             radius,
+            phases,
             phase: 0,
             phase_ms: now,
             next_kill_ms: now,
@@ -542,14 +769,17 @@ impl Play {
     /// STAND-IN: docs/32-builder.md#the-construction-sphere--read-and-measured -- the
     /// controller's path between the states the codes open is not read, nor where an action-5
     /// effect is placed: code 1 starts the sign, code 2 the dome and the ray and stops the
-    /// sign, code 0 stops the ray, each effect at the sphere's centre sized by its radius.
+    /// sign, code 0 stops the ray, each effect at the sphere's centre sized by its radius. An
+    /// upgrade's codes -- `0x309`, 8 and 10 -- show nothing, and neither of its two phase lists
+    /// clears the area, whose switches the docs' table does not carry: the builder must stand
+    /// where it is until the swap is made.
     ///
     /// STAND-IN: docs/11-effects.md#how-an-effect-runs--read -- the three effects' records give
     /// time mode 0, a value set from outside (slot `0x1c`), and what sets it is not read: they
     /// loop on their own durations (mode 2) while their phase runs.
     fn start_phase(&mut self, s: usize, now: f64, first: bool) {
         let sphere = self.construction.spheres[s].clone();
-        let Some(phase) = NEW_BUILDING.get(sphere.phase) else { return };
+        let Some(phase) = sphere.phases.get(sphere.phase) else { return };
         let frame = Frame::along(sphere.centre, Vec3::X, 1.0);
         let start = |play: &mut Play, id: i32| {
             if let Some((_, name)) = sphere.effects.iter().find(|(i, _)| *i == id) {
@@ -597,12 +827,12 @@ impl Play {
         let mut s = 0;
         while s < self.construction.spheres.len() {
             let sphere = &mut self.construction.spheres[s];
-            let length = NEW_BUILDING.get(sphere.phase).map_or(0.0, |p| p.seconds * 1000.0);
+            let length = sphere.phases.get(sphere.phase).map_or(0.0, |p| p.seconds * 1000.0);
             if now - sphere.phase_ms >= length {
                 sphere.phase += 1;
                 sphere.phase_ms += length;
                 sphere.next_kill_ms = now;
-                if sphere.phase >= NEW_BUILDING.len() {
+                if sphere.phase >= sphere.phases.len() {
                     let done = self.construction.spheres.remove(s);
                     for id in [SIGN, RAY, DOME] {
                         self.fx.remove(Owner::Building(done.target, id));
@@ -618,7 +848,7 @@ impl Play {
                 self.start_phase(s, now, false);
             }
             let sphere = self.construction.spheres[s].clone();
-            if NEW_BUILDING[sphere.phase].code == Some(2) && now >= sphere.next_kill_ms {
+            if sphere.phases[sphere.phase].code == Some(2) && now >= sphere.next_kill_ms {
                 self.construction.spheres[s].next_kill_ms = now + KILL_STEP_MS;
                 events.extend(self.kill_inside(sphere.target, sphere.centre, sphere.radius));
             }

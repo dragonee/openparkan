@@ -241,7 +241,7 @@ Added on 2026-09-15 against `950af7e`, after M12 made the mission winnable end t
 - [ ] [M12] What telepresence's auto-driver levels 1 and 2 hand to the AI. (What mode 2 does when its unit dies is read: the removal table rolls modes 1, 2, 5 and 7 back.)
 - [ ] [M12] A unit record's `+0x30` and property `0x207`, and a building's `+0x30`: they pick and tint the panel's icons.
 - [ ] [M12] What slot 7 of a unit's object does 0.6 s after *Explode!*; the chat overlay; the game menu's screen (mode 7); tooltips.
-- [ ] [M12] What `0x10034230` accepts for an Upgrade row, and what Type `0x80000200` is.
+- [ ] [M12] What `0x10034230` accepts for an Upgrade row, and what Type `0x80000200` is. (The engine: the upgrade task's own target test — a live building of the Type whose scheme has an entry above its own — and, *derived* from Mission 03's recording offering no Upgrade Warehouse over a Small Warehouse whose Medium is unresearched, that the entry above is researched whole.)
 - [x] ~~The research panel's contents and controls (page 4)~~ — read and built in M13 ([41-commander](docs/41-commander.md)).
 - [ ] [M12] The routine that names a building (strings 6031–6098): the engine picks by Type and the root record's size letter.
 

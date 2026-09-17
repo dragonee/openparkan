@@ -489,6 +489,7 @@ pub fn status_order(play: &Play, t: usize) -> i32 {
         Task::Go { .. } => 2,
         Task::Build { .. } => 7,
         Task::Transport { .. } => 6,
+        Task::Upgrade { .. } => 24,
     }
 }
 

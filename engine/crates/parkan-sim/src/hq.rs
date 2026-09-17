@@ -89,6 +89,9 @@ pub struct Situation {
     pub can_build: bool,
     /// Per build Type: offered by the tree, owned now or marked owned, or already heading off.
     pub buildable: [bool; 7],
+    /// Per build Type: the clan has a building of it an upgrade would take
+    /// (`0x10034230`).
+    pub upgradable: [bool; 7],
 }
 
 /// The rows offered to units of these Types, each command once, in command order
@@ -107,14 +110,16 @@ pub fn offered(types: &[u32], situation: &Situation) -> Vec<u8> {
 
 /// The row test (`0x1007bbb0`).
 ///
-/// STAND-IN: docs/41-commander.md#not-established -- what `0x10034230` accepts for an upgrade
-/// is not followed: no Upgrade row is offered.
+/// STAND-IN: docs/41-commander.md#not-established -- what `0x10034230` accepts for one of the
+/// clan's buildings is not followed: the test the upgrade task itself makes of its target
+/// (`0x100332e0`, docs/32, "Upgrading a building") stands in for it -- a live building of that
+/// Type whose level + 1 is still inside its scheme.
 fn test(command: u8, s: &Situation) -> bool {
     match command {
         2 => matches!(s.first_class, 1 | 2),
         9 => s.lode_unfound,
         10..=16 => s.can_build && s.buildable[usize::from(command - 10)],
-        17..=23 => false,
+        17..=23 => s.can_build && s.upgradable[usize::from(command - 17)],
         _ => true,
     }
 }
@@ -154,6 +159,23 @@ mod tests {
             ..Situation::default()
         };
         assert_eq!(offered(&[BUILDER], &s), vec![0, 1, 2, 3, 6, 7, 10]);
+    }
+
+    #[test]
+    fn an_upgrade_row_needs_a_builder_and_a_building_of_its_type_to_take_up() {
+        let s = Situation {
+            first_class: 2,
+            can_build: true,
+            upgradable: [false, false, true, false, false, false, false],
+            ..Situation::default()
+        };
+        // Command 19 is the Factory's, third of the seven, as 12 is Build Factory.
+        assert_eq!(offered(&[BUILDER], &s), vec![0, 1, 2, 3, 6, 7, 19]);
+        assert_eq!(act(19), Some(Act::Upgrade(BUILD_TYPES[2])));
+        // A unit that cannot build gets none of them, and neither does a warrior.
+        let cannot = Situation { can_build: false, ..s };
+        assert_eq!(offered(&[BUILDER], &cannot), vec![0, 1, 2, 3, 6, 7]);
+        assert_eq!(offered(&[WARRIOR], &s), vec![0, 1, 2, 3, 6, 7], "no Upgrade row off the mask");
     }
 
     #[test]

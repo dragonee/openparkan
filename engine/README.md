@@ -859,6 +859,21 @@ More feedback on the first chapter: armour, docks, turrets, batteries and repair
   as it always did and letting W go leaves the walk running; a strafe, a walk back or Q again
   ends it, and so does leaving the window, which lets every key up. It drives a bot the player
   has boarded the same way, its own table's full walk forward being the value held.
+- **A builder upgrades a building** (docs/32, "Upgrading a building"). The commander's seven
+  Upgrade rows were never offered; they are now, and they work end to end. A row is offered
+  when the first selected unit can build and the clan holds a live building of that Type whose
+  scheme has another entry above it — a scheme's `.dat` list is its upgrade ladder — and that
+  entry's parts are researched whole. Clicking it gives every selected builder
+  `ORDER_ROBOT_UPGRADE` (24) on that building by logic id. The builder walks to a point beside
+  it, and on arrival the building's own construction sphere starts (order 18, parameter 1:
+  `0x309` for 25 s, a second bare, then 8 for 90). Fifty seconds in the old building is taken
+  out of the world — its target, solid, doors, pod, places, factory, effects and ore all go —
+  and the scheme's next `.dat` is made where it stood, the same clan's, carrying the old one's
+  ore and running the sphere an upgrade's new building gets (parameter 2, 4 s); the builder is
+  let go when that stops. Nothing charges ore for it, as read. On C03 M01
+  a builder sent at the captured Small Factory has it standing as a Medium Factory — the one
+  building that mission's tree researches — 50 s later, and the row then goes, the Large
+  Factory above it being unresearched.
 - **A warbot repairs itself while it is scratched** (docs/26, "What the AI does with the
   switch"). Every unit the player does not drive now runs the AI's repair decision on its takt,
   unless that takt sent it to a dock or into an attack: it switches its own repair system on
@@ -1072,7 +1087,9 @@ a row here. A row leaves this table when research closes it.
 | M6 | How the loader turns a `varset.var` default into a value | an integer type reads hex after `0x`, a decimal, or a float truncated; a float reads its decimal; anything else is 0 (every shipped default reads either way) | [15](../docs/15-behaviour.md#the-vocabulary-varsetvar) |
 | M6 | The formula parser and evaluator, beyond the operator table's priorities | parse by those priorities, left to right among equals, in doubles; `!` is 1 for 0, `&` and `\|` are logical, `N` holds to 0..1, `S` is the sign, `B` is 1 for non-zero, `A` the absolute value; an unknown name is refused (the shipped formulas use numbers, variables, `+ - *` and brackets) | [15](../docs/15-behaviour.md#a-statement) |
 | M12 | Whether the character handler sees Esc before its binding leaves command mode: the path the key takes is not traced | an open satellite map closes first, then a page other than 0 turns to 0, then Esc leaves, as Mission 04's recording shows one Esc at a time | [40](../docs/40-command-mode.md#not-established) |
-| M12 | What `0x10034230` accepts for an Upgrade row | no Upgrade row is offered | [41](../docs/41-commander.md#not-established) |
+| M12 | What `0x10034230` accepts for an Upgrade row | the upgrade task's own target test (`0x100332e0`): a live building of that Type of the clan whose level -- its place in its scheme's ladder -- has another entry above it; and, *derived* from the recording of Mission 03, where the clan's Small Warehouse is offered no Upgrade row, that the entry above it is researched whole, as a Build row asks of its first | [41](../docs/41-commander.md#not-established) |
+| M14 | The clear-the-area switches of the sphere's phase lists for parameters 1 and 2, and what their codes `0x309`, 8 and 10 show; the builder's invulnerability (property 162) while it works | neither list clears the area, so the builder stands where it is; the codes show nothing; the builder is hurt as it always is | [32](../docs/32-builder.md#upgrading-a-building--read) |
+| M14 | How the point beside a building an upgrade walks to is drawn (`0x100338a0`) | a random one on the ring 20 out past the building's sphere, on walkable ground, as the attack draws its own | [32](../docs/32-builder.md#upgrading-a-building--read) |
 | M12 | A builder's beam's life, which the Build rows need intact | a live builder can build | [32](../docs/32-builder.md#building-a-building--read) |
 | M12 | A unit's property `0x207` and a building's record `+0x30`, which pick and tint the panel's icons; the width of the piece a building row's icon stands in | a unit's second icon is the cell for 1; a building's icon red (2), as the recording shows; the building row's icon piece 20 wide | [41](../docs/41-commander.md#not-established) |
 | M12 | The chat overlay and the game menu's screen (mode 7) | not built: their buttons are taken and do nothing | [41](../docs/41-commander.md#what-a-click-on-the-column-does) |

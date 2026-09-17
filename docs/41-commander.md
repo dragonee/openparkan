@@ -387,6 +387,15 @@ So **a clan builds one building of each kind** from the menu. *Derived*: once a
 builder has been sent to build a mine, the row goes, and once the mine stands, it
 does not come back.
 
+**What an Upgrade row asks of a building** (`0x10034230`) is *not established*,
+but Mission 03 bounds it — *derived*. The upgrade task's own target test
+(`0x100332e0`, [32-builder.md](32-builder.md#upgrading-a-building--read)) takes a
+building of the clan whose level + 1 is still inside its scheme, and the player's
+Small Warehouse there is exactly that; yet the recording's builder is offered no
+Upgrade Warehouse (below). The Medium Warehouse's `fr_m_store` is unresearched in
+`tut3_pl.trf`, so the row plausibly asks for the parts of the entry **above** the
+building, as condition 5 asks for the scheme's first.
+
 **Mission 03** (*measured*, taking a part as researched when the item that
 researches it is in the tree and researched, the constructor's rule of
 [38-designs.md](38-designs.md)):
