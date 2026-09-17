@@ -27,6 +27,13 @@ pub const OCTAGON_MARGIN: f32 = 20.0;
 pub const POD_ARRIVED: f32 = 1.5;
 /// A unit this near a hall-way vertex joins the way there rather than at an exit.
 pub const WAY_JOIN: f32 = 5.0;
+/// How far over the ground under it a door may stand and still be a way in. A walker reaches
+/// a door from the areal under it (docs/24, "What the links cost": a walkable areal and a
+/// building's exit over it), and the areal map carries no way up a building's own ramps, so a
+/// door on an upper storey is one no walk outside can deliver it to. *Measured*: every exit of
+/// every building the shipped campaigns place stands within 15 of the ground under it but the
+/// two mines' upper doors, which stand 28 and 29 over it, their ground-level doors 5 and 10.
+pub const WAY_DOOR_STEP: f32 = 20.0;
 
 /// The buildings' hall ways by path, and which building each unit walked into.
 #[derive(Clone, Debug, Default)]
@@ -219,8 +226,13 @@ impl Play {
 
     /// The way into building `t` for a unit at `from` bound for the hall-way vertex nearest
     /// `goal` — its pod, for a capture, or one of its docks, for a refit: the hall way's
-    /// shortest way there from the exit, or a vertex within 5 of `from`, that makes the whole
+    /// shortest way there from the door, or a vertex within 5 of `from`, that makes the whole
     /// way shortest, counting the way to it straight; that vertex first.
+    ///
+    /// A door the walk outside cannot reach is passed over: one standing more than
+    /// [`WAY_DOOR_STEP`] over the ground under it is on an upper storey, up the building's own
+    /// ramps, which the areal map does not carry, so the unit goes round to a door at ground
+    /// level instead. With no such door left it takes the nearest anyway, as it did before.
     ///
     /// STAND-IN: docs/31-packages.md#not-established -- how the walker joins the hall way is
     /// not read: straight to that vertex, then along the links.
@@ -231,9 +243,21 @@ impl Play {
         let (dist, prev) = shortest(&h, &points, end);
         let to = |i: usize| points[i].map_or(f32::INFINITY, |p| p.distance(from));
         let whole = |i: usize| to(i) + dist[i];
-        let start = (0..h.vertices.len())
+        let joins: Vec<usize> = (0..h.vertices.len())
             .filter(|&i| (h.vertices[i].flags & PLACE_EXIT != 0 || to(i) <= WAY_JOIN) && dist[i].is_finite())
-            .min_by(|&a, &b| whole(a).total_cmp(&whole(b)))?;
+            .collect();
+        // A vertex the unit already stands by needs no ground: it is there. A door does.
+        let reachable = |i: usize| {
+            to(i) <= WAY_JOIN
+                || points[i].is_some_and(|p| {
+                    self.ground
+                        .below(p.x, p.y, p.z + WAY_DOOR_STEP)
+                        .is_some_and(|g| g.point.z >= p.z - WAY_DOOR_STEP)
+                })
+        };
+        let nearest = |list: &[usize]| list.iter().copied().min_by(|&a, &b| whole(a).total_cmp(&whole(b)));
+        let ground_level: Vec<usize> = joins.iter().copied().filter(|&i| reachable(i)).collect();
+        let start = nearest(&ground_level).or_else(|| nearest(&joins))?;
         // `prev` leads back to the goal vertex, so the way from the start runs along it.
         let mut way = walk_back(&prev, start);
         way.reverse();
@@ -348,8 +372,51 @@ impl Play {
         legs
     }
 
+    /// The way round building `b` on the ground, from the corner of its contour nearest `from`
+    /// to the one nearest its door at `door`: the corners between them, the way about with the
+    /// fewer corners off walkable ground and then the shorter, the first corner first. Empty
+    /// where the unit already stands by the door's corner, or the building has no contour.
+    ///
+    /// A walk to a door is planned over the areals, which a building does not cut (docs/24,
+    /// "What the links cost"), so a leg to a door on the far side runs straight through the
+    /// walls. The contour is the building's own ground plan, the ring a capturing flyer lands
+    /// on, and its corners stand outside them.
+    fn way_round(&mut self, b: usize, from: Vec3, door: Vec3) -> Vec<Vec3> {
+        let ring = self.contour(b);
+        if ring.len() < 3 {
+            return Vec::new();
+        }
+        let across = |p: Vec3, q: Vec3| p.truncate().distance(q.truncate());
+        let nearest =
+            |to: Vec3| (0..ring.len()).min_by(|&i, &j| across(ring[i], to).total_cmp(&across(ring[j], to)));
+        let (Some(start), Some(end)) = (nearest(from), nearest(door)) else { return Vec::new() };
+        if start == end {
+            return Vec::new();
+        }
+        let usable: Vec<bool> = ring
+            .iter()
+            .map(|p| match &self.graph {
+                Some(graph) => graph.usable(p.x, p.y),
+                None => true,
+            })
+            .collect();
+        let round = |step: isize| {
+            let mut out = vec![start];
+            while *out.last().expect("started with one") != end {
+                let last = *out.last().expect("started with one");
+                out.push((last as isize + step).rem_euclid(ring.len() as isize) as usize);
+            }
+            out
+        };
+        let (up, down) = (round(1), round(-1));
+        let blocked = |way: &[usize]| way.iter().filter(|&&i| !usable[i]).count();
+        let way = if (blocked(&up), up.len()) <= (blocked(&down), down.len()) { up } else { down };
+        way.into_iter().map(|i| ring[i]).collect()
+    }
+
     /// The legs of a walk for robot target `t` at `from` into the building of logic id `id`, to
-    /// the place at `goal` — its pod or one of its docks: its way in, or straight there.
+    /// the place at `goal` — its pod or one of its docks: the way round the building to the door
+    /// its way in starts at, then that way in; or straight there.
     ///
     /// STAND-IN: docs/31-packages.md#each-tick-slot-7-0x10030300--read -- what the walker does
     /// with the pod handed to it again while it stands there is not read: within 1.5 of it, the
@@ -363,10 +430,28 @@ impl Play {
             return Vec::new();
         }
         let way = self.way_in(b, from, goal).unwrap_or_else(|| vec![goal]);
-        let mut legs = self.route(t, from, way[0]);
+        // A unit that joins the hall way where it stands walks it straight: the global path is
+        // over the areals, which lie over the building, and it is under them. The vertex it
+        // stands by is behind it, so the walk goes on from the next one.
+        if from.distance(way[0]) <= WAY_JOIN {
+            return if way.len() > 1 { way[1..].to_vec() } else { way };
+        }
+        // A flyer goes over the walls; a walker goes round them where its way to the door
+        // would run into one, and straight at it where the way is clear.
+        let flyer = self.robots.iter().find(|(rt, _)| *rt == t).is_some_and(|(_, r)| r.flyer);
+        let walled = !flyer
+            && self
+                .ground
+                .solids
+                .get(b)
+                .is_some_and(|s| s.present && parkan_sim::solid::blocked(from, way[0], s));
+        let round = if walled { self.way_round(b, from, way[0]) } else { Vec::new() };
+        let (start, rest) = round.split_first().map_or((way[0], Vec::new()), |(s, r)| (*s, r.to_vec()));
+        let mut legs = self.route(t, from, start);
         if legs.is_empty() {
             return Vec::new();
         }
+        legs.extend(rest);
         legs.extend(way);
         legs
     }

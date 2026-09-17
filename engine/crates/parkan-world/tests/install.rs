@@ -6079,6 +6079,78 @@ fn c02_m02s_laser_walker_walks_round_the_central_stone_and_never_climbs_it() {
 /// 27 of the 32 placed building models are driven past a run's end this way.
 #[test]
 #[ignore = "needs the game install"]
+fn a_capture_walks_round_c02_m03s_mine_to_the_door_it_can_reach_rather_than_at_its_wall() {
+    use parkan_sim::orders::{Order, Target};
+    use parkan_world::factory::Project;
+
+    let mut play = campaign_play(gamedir::C02_MISSION_03);
+    let mine = play
+        .units
+        .iter()
+        .position(|u| u.type_word == 0x8000_0004 && u.clan == Some(2))
+        .expect("the neutral mine");
+    let id = play.units[mine].logical_id;
+    let centre = play.battle.combat.targets[mine].position;
+    let pod = play.capture_places().into_iter().find(|p| p.id == id).and_then(|p| p.pod).expect("its pod");
+
+    // A small warbot 60 m out on the pod's own side of the mine, where the way to the pod runs
+    // through the walls.
+    let project = Project {
+        path: "UNITS\\UNITS\\PREBLD\\tut3_p1.dat".into(),
+        name: "SSW-X Warrior".into(),
+        type_word: 0x0100_4000,
+        chassis_size: 2,
+        ore: 0.0,
+        power: 0.0,
+        lines: Vec::new(),
+        sphere: None,
+    };
+    let away = (pod.truncate() - centre.truncate()).normalize_or_zero();
+    let spot = centre + (away * 60.0).extend(0.0);
+    let t = play.spawn(&project, play.player_clan, spot, 0.0).expect("the SSW-X");
+    for _ in 0..60 {
+        play.update_input();
+        play.tick(1000.0 / 60.0, [0.0; 2]);
+    }
+
+    // The way in starts at a door the walk outside can reach (docs/24, "The way to the pod"):
+    // the mine's east door stands 28 m over the terrain, up its own ramps, which the areal map
+    // does not carry, so the ground-level door on the west is taken instead.
+    let from = play.robots.iter().find(|(rt, _)| *rt == t).unwrap().1.walker.body.position;
+    let way = play.way_in(mine, from, pod).expect("a way in");
+    let door = way[0];
+    let under = play.ground.below(door.x, door.y, door.z + 40.0).expect("ground under the door").point.z;
+    assert!(door.z - under < 20.0, "a door {:.1} over the ground under it: {door}", door.z - under);
+    assert!(door.x < centre.x, "the door on the far side from the pod: {door}");
+
+    // It walks round the building to that door, in along the hall way, and takes the pod. It had
+    // driven at the wall on the pod's side and shuffled there for good.
+    let order = Order { code: parkan_sim::orders::CAPTURE, parameter: 0, target: Target::LogicId(id) };
+    play.robots.iter_mut().find(|(rt, _)| *rt == t).unwrap().1.behaviour.order(&order);
+    let mut round = false;
+    let mut captured = None;
+    for s in 0..150 {
+        for _ in 0..60 {
+            play.update_input();
+            play.tick(1000.0 / 60.0, [0.0; 2]);
+        }
+        let at = play.robots.iter().find(|(rt, _)| *rt == t).unwrap().1.walker.body.position;
+        round |= at.x < door.x + 20.0;
+        if play.units[mine].clan == Some(play.player_clan) {
+            captured = Some(s);
+            break;
+        }
+    }
+    let seconds = captured.unwrap_or_else(|| {
+        let at = play.robots.iter().find(|(rt, _)| *rt == t).unwrap().1.walker.body.position;
+        panic!("it never took the mine: stopped at {at}, {:.1} from the pod", at.distance(pod))
+    });
+    assert!(round, "it went round to the door rather than at the wall");
+    eprintln!("round the mine and on the pod {seconds} s in");
+}
+
+#[test]
+#[ignore = "needs the game install"]
 fn c02_m03s_neutral_mine_holds_its_pod_still_while_it_opens_and_the_hero_on_it_captures() {
     use parkan_world::buildings::Phase;
 

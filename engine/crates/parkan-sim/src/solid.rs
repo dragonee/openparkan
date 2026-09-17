@@ -298,6 +298,25 @@ fn passes(face: &SolidFace, _obstacle: &Solid) -> bool {
     face.triangle_flags & (COLLISION_SKIPS_FACE | FLOOR_FACE) != 0
 }
 
+/// Whether a straight move from `start` to `end` runs into a shut face of `obstacle` — a wall
+/// between the two. It is the push's own first step (`0x1001dd42`): a face the segment meets
+/// against its normal, the doors that stand open and the faces a mover passes left out. A walk
+/// planned over the areal map knows nothing of a building's walls (docs/24, "What the links
+/// cost"), so a walk into one asks this before it sets off.
+pub fn blocked(start: Vec3, end: Vec3, obstacle: &Solid) -> bool {
+    obstacle
+        .nodes
+        .iter()
+        .filter(|n| !n.open)
+        .flat_map(|n| n.faces.clone())
+        .map(|f| &obstacle.faces[f])
+        .filter(|f| !passes(f, obstacle))
+        .any(|face| {
+            crate::hit::plane_crossing(start, end, face.normal, face.a)
+                .is_some_and(|q| inside(q, face.a, face.b, face.c))
+        })
+}
+
 /// A mover's sphere, from `start` to `end`, against an obstacle's faces
 /// (`Control.dll:0x1001daf0`): the push its move takes.
 ///

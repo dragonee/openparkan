@@ -837,6 +837,22 @@ More feedback on the first chapter: armour, docks, turrets, batteries and repair
   back with no order. On Mission 03, *The Field Base*, a small warbot's refit walks it down the
   Small Bunker's ramp to the dock inside, while a large one on the same map passes that dock by
   and takes the Large Factory's ground-level one.
+- **A walk into a building goes round to a door it can reach** (docs/24, "What the links
+  cost"; docs/27, "Capture"). The global path is over the areals, and a building cuts none of
+  them, so a walk to a door on the far side ran straight at the walls: a builder sent to take
+  *The Lost Key*'s mine from the pod's own side climbed its apron and ground against it for
+  good. Two checks now stand between the plan and the walk. **A door the walk cannot reach is
+  passed over**: one standing more than 20 over the ground under it is on an upper storey, up
+  the building's own ramps, which the areal map does not carry — every exit of every building
+  the campaigns place stands within 15 of the ground under it but the two mines' upper doors,
+  which stand 28 and 29. **A way blocked by a wall goes round the ring**: where the straight
+  line from the unit to the door runs into a shut face of the building (the push's own first
+  test, the doors that stand open left out), the walk goes to the nearest corner of the
+  building's ground contour — the ring a capturing flyer lands on — and round it, the way about
+  with the fewer corners off walkable ground, to the corner by the door. A flyer goes over the
+  walls as before, and a unit that joins the hall way where it stands walks it straight rather
+  than asking the areal map for a way to a vertex under the ground. The builder now walks round
+  the mine, in by its western door, down the corridor and onto the pod in 66 s.
 - **A warbot repairs itself while it is scratched** (docs/26, "What the AI does with the
   switch"). Every unit the player does not drive now runs the AI's repair decision on its takt,
   unless that takt sent it to a dock or into an attack: it switches its own repair system on
@@ -1173,6 +1189,7 @@ engine pass replaces each with what was read and removes its row.
 | M14 | Each task's priority for a refit, reason 3, beyond the route's, the patrol's and the capture's | every task that moves or fights takes the base's, which lets one through while a dock is reachable; standby, shutdown, the escape and a refit already running answer 0 | [31](../docs/31-packages.md#between-orders--read) |
 | M8 | The follower's two timers; the behaviour's random source | it measures once a second; a 32-bit xorshift | [31](../docs/31-packages.md#what-each-package-does--read) |
 | M8 | A capture's retreat, read to lie off the map | a plan with nowhere to go roams | [31](../docs/31-packages.md#where-a-search-looks--read-and-measured) |
+| M14 | Which door a walk into a building makes for, and how it gets there past the walls, the local path being unread | a door standing within 20 of the ground under it, the nearest by the whole way, and with none left the nearest anyway; where the straight line to it runs into a wall, the way round the building's ground contour, the way about with the fewer corners off walkable ground and then the shorter | [24](../docs/24-motion.md#not-established) |
 | M14 | Which dock a refit picks (`0x10023b60`), and when its walk is over | the nearest dock the unit's size fits — any for size class 1 or 2, a ground-level one alone above that, the size rule `MakeInsideDest` routes a unit inside by — walked to along that building's hall way, and it is there once it stands in the place itself, the cylinder that charges it. The game's own refit asks `MakeInsideDest` for the ground-level bit on every dock, so it would never send even a small bot indoors | [27](../docs/27-ownership.md#what-sends-a-bot-to-a-dock--read) |
 | M14 | Which difficulty profile a unit's behaviour holds (`+0x8d4`), whose `Decision_RepairOn` and `Decision_RepairOff` the repair decision reads | `diff_strong.var`'s 0.8 and 0.9, so a unit repairs itself while it is only lightly damaged | [26](../docs/26-damage.md#repair-a-units-own-repair-unit-switched-on-and-off--read-and-measured) |
 | M14 | A building's own repair decision and its repair system | a building never switches one on: only a unit's is modelled | [26](../docs/26-damage.md#repair-a-units-own-repair-unit-switched-on-and-off--read-and-measured) |
