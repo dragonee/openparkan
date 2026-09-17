@@ -5842,3 +5842,46 @@ fn c02_m02s_laser_walker_walks_round_the_central_stone_and_never_climbs_it() {
     assert!(end.y < 950.0, "past the stone: {end}");
     assert!(deepest <= 1.5, "{deepest} m inside a footprint");
 }
+
+/// The Lost Key: a pod is driven by its controller's channel across frames its node's own
+/// animation run does not reach, and past the run the node holds its last key
+/// (`AniMesh.dll:0x10012ba2`). The neutral Medium Core mine's pod runs frames 1 to 3 over a
+/// node whose run ends at frame 2, and blending on into the key after it — the next node's —
+/// threw the pod tens of metres out of the building halfway through its two-second stroke.
+/// The zone it fires from goes with the node, so nobody was ever in it when the pod reported
+/// open, and the hero or a warbot stood on the pod indefinitely without taking the mine.
+/// 27 of the 32 placed building models are driven past a run's end this way.
+#[test]
+#[ignore = "needs the game install"]
+fn c02_m03s_neutral_mine_holds_its_pod_still_while_it_opens_and_the_hero_on_it_captures() {
+    use parkan_world::buildings::Phase;
+
+    let mut play = campaign_play(gamedir::C02_MISSION_03);
+    let mine = play
+        .units
+        .iter()
+        .position(|u| u.type_word == 0x8000_0004 && u.clan == Some(2))
+        .expect("the neutral mine");
+    let b = play.buildings.iter().position(|x| x.target == mine).expect("it has a pod");
+    let part = play.buildings[b].part;
+    assert!(play.stand_on_pod(mine), "the hero stands on its pod");
+
+    // Through the whole stroke the zone stays under the hero standing on it, and the pod opens.
+    let (mut opened, mut left) = (false, 0);
+    for tick in 0..(6 * 60) {
+        play.update_input();
+        play.tick(1000.0 / 60.0, [0.0; 2]);
+        let centre = play.hero.collision_centre();
+        let target = &play.battle.combat.targets[mine];
+        if !play.buildings[b].in_zone(&target.parts[part], centre) {
+            left += 1;
+            if left == 1 {
+                eprintln!("out of the zone from tick {tick}");
+            }
+        }
+        opened |= play.buildings[b].pod.as_ref().is_some_and(|p| p.phase == Phase::Open);
+    }
+    assert_eq!(left, 0, "the zone stayed under the hero every tick");
+    assert!(opened, "the pod opened");
+    assert_eq!(play.units[mine].clan, Some(play.player_clan), "and it captured the mine");
+}

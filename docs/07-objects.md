@@ -647,12 +647,19 @@ by the same distance instead.
 
 `AniMesh.dll` poses a node at a fractional frame f (`0x10012880`):
 
-- **The key** is the run's entry at round(f − 0.5). Past the run, on a node
-  that is not animated, or at or beyond the node's fallback key, the fallback
-  key is used.
+- **The key** is the run's entry at round(f − 0.5).
+- **Past the run**, on a node that is not animated, or where the entry is at
+  or beyond the node's fallback key, the **fallback key alone** is the pose
+  (`0x10012ba2`), with no interpolation at all. That branch matters: the
+  fallback key is the last key of the node's *own* run, so the key after it in
+  stream 8 belongs to the next node, and interpolating on into it sends the
+  node anywhere. A controller's channel reaches those frames often — the frame
+  map repeats the last key to hold it, and the channel's frame range runs to
+  the end of that hold on 27 of the 32 building models any mission places.
 - **Between keys** it takes that key or the next one in stream 8 when f equals
   its time. Otherwise it interpolates between them by time: a lerp of the
-  translation and a slerp of the rotation.
+  translation and a slerp of the rotation. The key is below the fallback key
+  here, so the next one is still the node's own.
 
 A controller hands the mesh **two frames and a weight**:
 

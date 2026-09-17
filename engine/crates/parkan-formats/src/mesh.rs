@@ -199,20 +199,20 @@ impl Mesh {
     ///
     /// The key is the run's entry at `floor(frame)`. Past the run, on a node that is
     /// not animated, or where the entry is at or past the node's fallback key, the
-    /// fallback key is used. At a key's time, or the next key's, that key is taken
-    /// whole; otherwise the two are blended by time.
+    /// **fallback key alone** is the pose (`0x10012ba2`): it is the last key of the
+    /// node's own run, so the key after it belongs to the next node and is never
+    /// blended in. Otherwise, at a key's time or the next key's, that key is taken
+    /// whole, and between them the two are blended by time.
     pub fn pose_at(&self, node: usize, frame: f64) -> Pose {
         let n = &self.nodes[node];
-        let mut index = usize::from(n.fallback_key);
         let k = frame.floor();
-        if n.is_animated() && k >= 0.0 && k < f64::from(self.frame_count) {
-            let at = usize::from(n.anim_start) + k as usize;
-            if let Some(&entry) = self.frame_map.get(at)
-                && entry < n.fallback_key
-            {
-                index = usize::from(entry);
-            }
-        }
+        let entry = (n.is_animated() && k >= 0.0 && k < f64::from(self.frame_count))
+            .then(|| self.frame_map.get(usize::from(n.anim_start) + k as usize).copied())
+            .flatten()
+            .filter(|&entry| entry < n.fallback_key);
+        let Some(index) = entry.map(usize::from) else {
+            return self.keys.get(usize::from(n.fallback_key)).map_or(IDENTITY, Key::pose);
+        };
         let Some(key) = self.keys.get(index) else { return IDENTITY };
         let time = f64::from(key.time);
         let Some(next) = self.keys.get(index + 1).filter(|_| frame != time) else { return key.pose() };
@@ -521,5 +521,55 @@ mod tests {
         assert_eq!(node(&[3, 4]).slot_for_lod(0, 0), Some(3));
         assert_eq!(node(&[NO_SLOT, NO_SLOT, NO_SLOT, NO_SLOT, 9]).slot_for_lod(0, 0), Some(9));
         assert_eq!(node(&[NO_SLOT, NO_SLOT, NO_SLOT, NO_SLOT, 9]).slot_for_lod(1, 0), None);
+    }
+
+    /// Two runs back to back, as the frame map lays them out: node 0 holds its last key from
+    /// frame 2 on, and node 1's run follows in stream 8. A frame in that hold must give the
+    /// last key of node 0's own run, never a blend towards node 1's first key
+    /// (`AniMesh.dll:0x10012ba2`). The pod of every mine, bunker, plant and store is driven
+    /// into the hold by its controller, and blending there flung it across the map.
+    #[test]
+    fn a_frame_past_a_nodes_last_key_holds_it_and_never_reaches_the_next_nodes_run() {
+        let key =
+            |x: f32, time: f32| Key { translation: [x, 0.0, 0.0], time, rotation: [1.0, 0.0, 0.0, 0.0] };
+        let animated = |anim_start: u16, fallback_key: u16| Node {
+            name: String::new(),
+            flags: 0,
+            parent: NO_PARENT,
+            anim_start,
+            fallback_key,
+            slot_index: [NO_SLOT; 15],
+        };
+        let mesh = Mesh {
+            name: String::new(),
+            positions: Vec::new(),
+            normals: Vec::new(),
+            uv: Vec::new(),
+            lightmap_uv: Vec::new(),
+            triangles: Vec::new(),
+            nodes: vec![animated(0, 2), animated(4, 5)],
+            slots: Vec::new(),
+            batches: Vec::new(),
+            face_flags: Vec::new(),
+            face_normals: Vec::new(),
+            // Node 0: keys 0, 1, 2 at frames 0, 1, 2. Node 1: keys 3, 4, 5, a long way off.
+            keys: vec![
+                key(0.0, 0.0),
+                key(10.0, 1.0),
+                key(20.0, 2.0),
+                key(1000.0, 0.0),
+                key(1000.0, 1.0),
+                key(1000.0, 2.0),
+            ],
+            frame_map: vec![0, 1, 2, 2, 3, 4, 5, 5],
+            frame_count: 4,
+            sphere: None,
+            corners: None,
+        };
+        assert_eq!(mesh.pose_at(0, 0.5).translation[0], 5.0, "between its own two keys");
+        assert_eq!(mesh.pose_at(0, 2.0).translation[0], 20.0, "on its last key");
+        assert_eq!(mesh.pose_at(0, 2.5).translation[0], 20.0, "held through the hold");
+        assert_eq!(mesh.pose_at(0, 3.0).translation[0], 20.0, "and at the run's end");
+        assert_eq!(mesh.pose_at(0, 9.0).translation[0], 20.0, "and past the frame count");
     }
 }

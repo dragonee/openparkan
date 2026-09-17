@@ -617,17 +617,23 @@ class ObjectMesh:
 
         The key is the run's entry at ``round(frame - 0.5)``.  Past the run,
         on a node that is not animated, or where the entry is at or beyond the
-        node's fallback key, the fallback key is used.  At a key's time, or
-        the next key's in stream 8, that key is taken whole; otherwise the two
-        are blended by time.
+        node's fallback key, the *fallback key alone* is the pose
+        (``0x10012ba2``): it is the last key of the node's own run, so the key
+        after it belongs to the next node and is never blended in.  Otherwise,
+        at a key's time or the next key's in stream 8, that key is taken
+        whole, and between them the two are blended by time.
         """
         n = self.nodes[node]
-        index = n.fallback_key
+        index = None
         k = int(math.floor(frame - 0.5 + 0.5))
         if n.is_animated and 0 <= k < self.frame_count:
             entry = self.frame_map[n.anim_start + k]
             if entry < n.fallback_key:
                 index = entry
+        if index is None:
+            if n.fallback_key >= len(self.keys):
+                return IDENTITY_POSE
+            return self.keys[n.fallback_key].pose
         if index >= len(self.keys):
             return IDENTITY_POSE
         key = self.keys[index]
