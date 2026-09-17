@@ -2160,17 +2160,17 @@ the points and writes the machine's velocity and spin.
 
 **The walker** (`Behavior.dll`):
 
-- **The global path** (`0x1003fbf0`). Two places on the same map object
-  (place `+0x1c`) and in the same areal (`+0x20`) need no path. Otherwise the
-  clan areal map's slot 7 names the map object, and that object's interface
-  `0x303` slot 14 returns the areals from start to goal. Each areal after the
-  first goes into the global queue `+0xe8`. A count of 0 or less fails
-  quietly. Places on different map objects log "Cannot Generate GlobalPath".
-  The local queue `+0xfc` and the trajectory `+0x110` (records of `0x48`
-  bytes) are built from it.
-- **The search** is `ArealMap.dll`'s `MGraph`, not read. `MHallWay` answers
-  `0x303` (`ArealMap.dll:0x1000aab0`), and `FormPath` walks back through a
-  chain it guards against cycles (`0x10017265`).
+- **The global path** is `0x10036730`, which `MWalker::SetTarget` calls at
+  `0x1003bfda` and `AppendTarget` at `0x1003c3b3`. It searches the walker's
+  `MWorldGraph` (`+0x128`) and puts a waypoint into the global queue `+0xe8`
+  for each step ([The global path](#the-global-path--read-and-measured)). The
+  local queue `+0xfc` and the trajectory `+0x110` (records of `0x48` bytes)
+  are built from it.
+- ~~`0x1003fbf0` is the global path~~: nothing calls it, and no pointer to it
+  lies anywhere in `Behavior.dll`; it is dead code. The interface `0x303` slot
+  14 it asks for is `MHallWay`'s `0x1000a930`, which always answers 0; the
+  system areal map's query (`ArealMap.dll:0x10020c60`) answers only 0, `0x302`
+  and `0x305`.
 - **Each takt** (`0x1003d280`) looks up the unit's areal ("is out of
   ArealMap" when there is none). It grows the trajectory to at least
   `PathFind_MinPointInTrajectory`, 3 points, in at most six tries.
@@ -2244,6 +2244,87 @@ velocity in the machine's frame each tick, and the yaw spin. The height its
 points are given is not traced. `Movement_FlyHeight` is 40 and
 `FlyNearLandHeight` 15, by name only.
 
+### The global path — *read*, and *measured*
+
+**The areal map links only walkable areals** (`ArealMap.dll:0x10023240`,
+run at load at `0x1001e657` and again as a static object is added or
+removed). An areal whose record's first flag word (`+0x20`,
+[08-arealmap.md](08-arealmap.md)) is 0 gets no links at all
+(`0x100232ab`). Across each edge, a neighbour whose word is 0 is skipped
+(`0x100232f4`). The engine's own strings call such an areal
+*Non-Walkable*. So the word is the one command mode tests before it sends a
+non-flyer anywhere ([42-selection.md](42-selection.md#a-valid-place--read-and-measured)).
+
+**What the links cost:**
+
+| link | cost | where |
+|---|---|---|
+| areal to areal across an edge | the distance between the two records' centres, across the ground, + 1 | `0x1002342b` |
+| a walkable areal and a building's exit over it | 1 | `0x1002363f` |
+| hall-way vertex to vertex | 3 × the distance + 5; 10 when either vertex has flag 2 | `0x1000a1dd` |
+| a vertex with flag 4 to another building's with flag 4, closer than 50 | 0.1 | `0x1000b663`, `0x1000b6bc` |
+
+An exit is a hall-way vertex with flag 1 over a walkable areal. Buildings do
+not cut areals: only a tree or a stone (object kind 10) splits the areals it
+stands on (`OnAddStatic`, `0x1001f68e`; `MBrokenAreal::Divide`).
+
+**A bridge's halves meet at their flag-4 vertices.** *Measured*: each of the
+four half-span `fr_*_brige` hall ways has three or five exits at its landward
+end and one vertex with flag 4 toward the joint. On Tut_1 and KM_4 every exit stands on a
+walkable areal, and the two halves' flag-4 vertices are 6.96 and 8.24 apart.
+So the only link across either canyon runs over the deck.
+
+**The search** (`MWorldGraph`, `Behavior.dll:0x10042c10`):
+
+1. It is A\*, its open list ordered by the cost so far plus the distance from
+   a node's centre to the goal's (`0x100431c0`); an areal's centre is its
+   record's `+0`..`+8`, at height 0.
+2. Each link's new cost is (the cost so far + the link's) × (1 + `rand()` ÷
+   32767 × 0.7). The 0.7 is the graph's `+0x38` (`0x1003642b`, `0x10042e0b`).
+   The factor compounds along the path.
+3. It stops as soon as it reaches the goal (`0x10043011`, "Reached"). It
+   fails after taking 2048 nodes off its open list (`0x100207df`).
+4. A flag `0x20000` on a link is never crossed; `0x10000` only with `CanFly`
+   (`0x10036934`). Links between areals carry `0xffff`.
+5. A hall-way vertex also gates the unit by size (`0x10042d08`): flag
+   `0x10000000` passes; `0x20000000` passes when the building's property
+   `0x201` is at least the unit's `+0x960`; otherwise only a unit whose
+   `+0x960` is at most 2. What `+0x960` holds is not established.
+
+**Where a walker may be sent.** `MWalker::SetTarget` first empties the three
+queues, and answers 1 only once the global path is found (`0x1003bfdf`).
+It then looks up the areal under the goal (system areal map slots 7
+and 6). It refuses the goal when there is none, or when the areal's word is 0
+and the chassis profile lacks `CanFly` (`0x1003bd5d`). A flyer is not
+searched at all on open ground: `SetTarget` copies `CanFly` into walker
+`+0x28` (`0x1003bb94`) and queues the goal straight (`0x10036915`). It clears
+`+0x28` when either place is on a building (`0x1003bfcc`).
+
+**The waypoints** (`0x10036a80`). Each step from one areal into the next puts
+a point on an edge the two share. Where the straight line to the goal crosses
+that edge, the point is the crossing. Otherwise it is one of the edge's ends
+moved 3 along it (`0x10036cc5`): the one that makes the way through it,
+from the last point to the goal, shortest.
+
+**Off a non-walkable areal** (`0x1003dde0`). A walker whose search cannot
+start because the areal under it has no links logs "Cannot leave Non-Walkable
+Areal" (`0x1003e2dc`). It then tries 50 random points in a square about
+itself, of half-width 30 (`0x1003e2f4`). Each round adds 3 to the half-width,
+while it stays under 500 (`0x1003e400`). It takes the first point on a
+walkable areal, empties its queues and goes there. With none it logs
+"Warbot is absolutely in non-walkable". The square doubles its half-width on
+every try for a unit whose slot 14 answers `0x20000000`.
+
+**The areals are not all convex** (*measured*). 10,441 of the 34,662 areals
+turn back by more than 0.6° at some corner, many by a right angle. A
+straight line between two points of one of them can leave it.
+
+**KM_4's canyon** (*measured*). *The Iron Monster* (C02 M01) has a canyon
+across its valley. Its floor under the bridge lies at 18 m, the plateaus
+either side at about 50 m. Every areal of the canyon floor and walls has the word 0,
+and the plateaus either side have 1. So the walker finds no way down into
+it, and none across but over the bridge.
+
 ## Not established
 
 - How the velocity integrator's pull toward *command × top speed*, with the
@@ -2254,11 +2335,18 @@ points are given is not traced. `Movement_FlyHeight` is 40 and
   turns the hull by spin × the live turn rate × dt (`0x10014b56`,
   [30-turrets.md](30-turrets.md#the-hull-follows-the-turret--read-and-measured)).
   That the Wizard writes the same triple is not traced.
-- The areal search (`MGraph`: algorithm, costs, and what the land answers for
-  `0x303`), the local path and its obstacle contours, the Wizard's heading
-  curve (`0x10003d80`), and who reads `Movement_FlyHeight`. A stand-in
-  searches the areal adjacency of [08-arealmap.md](08-arealmap.md) by A*, with
-  straight lines between edge midpoints.
+- ~~The areal search (`MGraph`: algorithm, costs, and what the land answers for
+  `0x303`)~~ — **read**
+  ([The global path](#the-global-path--read-and-measured)). Still open: the
+  local path and its obstacle contours (a straight leg across an areal that is
+  not convex can leave the walkable areals), how the walker drops the points a
+  unit has passed (`MWalker::ClearMoverReachedPoint`, `0x1003cfd0`), how the walker goes to the point
+  it finds off a non-walkable areal, how a unit's place comes to be on a
+  building's map object and which vertex the search starts from, who calls
+  `MHallWay` slot 11 (`0x1000b390`, which links a building's exits), what a
+  vertex's size gate reads from the unit (`+0x960`) and its record (`+0x28`),
+  what the link flags `0x10000` and `0x20000` mean, the Wizard's heading curve
+  (`0x10003d80`), and who reads `Movement_FlyHeight`.
 - Whether the walker's clear (`0x1003c540`) also empties the points the Wizard
   already holds. `ClearWizardPath` is logged at `0x10040e3b`.
 

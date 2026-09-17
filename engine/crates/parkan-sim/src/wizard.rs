@@ -178,17 +178,26 @@ impl Wizard {
     }
 }
 
+/// The part of a leg `span` the points move a machine along: across the ground when the
+/// flags zero the z axis, as a walker's do, the ground contact holding its height; the whole
+/// leg for a flyer.
+fn moving(span: Vec3, flags: u32) -> Vec3 {
+    if (flags >> 12) & 0xF == 3 { span.with_z(0.0) } else { span }
+}
+
 /// The points a walker hands the Wizard for a walk from `from` to `to` at `speed`,
 /// starting at `now_ms`, and the stop it ends in.
 ///
-/// STAND-IN: docs/24-motion.md#not-established -- the areal search, the local path and
-/// its obstacle contours are not read: the trajectory is the straight line, cut into
-/// at least three points a second or more apart, each at the walk's velocity.
+/// STAND-IN: docs/24-motion.md#not-established -- the local path and its obstacle contours
+/// are not read: the trajectory is the straight line, cut into at least three points a second
+/// or more apart, each at the walk's velocity. A walker's walk is measured and timed across the
+/// ground, since its points neither let it climb nor sink: a point above the ground under it,
+/// as a hall way's vertex over a bridge's deck is, does not slow it.
 pub fn straight_walk(from: Vec3, to: Vec3, speed: f32, now_ms: f64, flags: u32) -> (Vec<Point>, Point) {
     let span = to - from;
-    let length = span.length();
+    let length = moving(span, flags).length();
     let speed = speed.max(MIN_WALK_SPEED);
-    let direction = span.normalize_or_zero();
+    let direction = moving(span, flags).normalize_or_zero();
     let seconds = f64::from(length / speed);
     let count = (seconds.ceil() as usize).max(MIN_POINTS);
     let velocity = direction * speed;
@@ -235,13 +244,13 @@ pub fn path_walk(
     let (mut start, mut time) = (from, now_ms);
     for &to in path {
         let span = to - start;
-        let length = span.length();
+        let length = moving(span, flags).length();
         if length < 1e-3 {
             continue;
         }
         let seconds = f64::from(length / speed);
         let count = seconds.ceil().max(1.0) as usize;
-        let velocity = span / length * speed;
+        let velocity = moving(span, flags) / length * speed;
         points.extend((1..=count).map(|k| {
             let f = k as f32 / count as f32;
             Point {
@@ -294,6 +303,29 @@ mod tests {
         let (points, stop) = path_walk(Vec3::ZERO, &path, 5.0, 1000.0, GROUND_POINT, true);
         assert_eq!((stop.position, stop.velocity, stop.time_ms), (path[1], Vec3::ZERO, 7000.0));
         assert!(points.last().is_some_and(|p| p.time_ms < 7000.0));
+    }
+
+    #[test]
+    fn a_walkers_leg_to_a_point_above_the_ground_keeps_its_speed_across_the_ground_and_a_flyers_climbs() {
+        // A hall-way vertex 4.3 m over the deck, 0.65 m ahead, then one 21.6 m on.
+        let from = Vec3::new(0.0, 0.0, 61.7);
+        let path = [Vec3::new(0.0, 0.65, 66.0), Vec3::new(0.0, 22.25, 65.0)];
+        let (points, _) = path_walk(from, &path, 6.5, 0.0, GROUND_POINT, false);
+        assert!(points.iter().all(|p| p.velocity == Vec3::new(0.0, 6.5, 0.0)), "{points:?}");
+        assert!((points.last().unwrap().time_ms - 22_250.0 / 6.5).abs() < 1e-3);
+        // The Wizard keeps it walking forward all the way, once under way from rest.
+        let mut w = Wizard::default();
+        w.give(points);
+        let (mut at, mut t) = (from, 0.0);
+        while t < 3000.0 {
+            let drive = w.takt(t, at, 1000.0 / 60.0);
+            let forward = drive.velocity.y > 5.0 || t < 300.0;
+            assert!(forward && drive.heading.is_some_and(|h| h.abs() < 0.1), "at {t}: {drive:?}");
+            at += drive.velocity.with_z(0.0) * (1.0 / 60.0);
+            t += 1000.0 / 60.0;
+        }
+        let (points, _) = straight_walk(from, path[0], 6.5, 0.0, 0);
+        assert!(points[0].velocity.z > 6.0, "a flyer's points climb: {points:?}");
     }
 
     #[test]

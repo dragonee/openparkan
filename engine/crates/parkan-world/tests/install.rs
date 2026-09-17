@@ -4201,8 +4201,10 @@ fn enter_aboard_mission_04s_hq_opens_its_command_view_whose_camera_rides_with_it
     let across = (play.command.position - at).truncate();
     assert!((across.length() - back).abs() <= SNAP_ACROSS, "{} from the HQ against {back}", across.length());
 
-    // Route: the HQ drives off, and the camera goes with it.
-    let goal = at + glam::Vec3::new(0.0, 120.0, 0.0);
+    // Route: the HQ drives off, and the camera goes with it. The goal is 70 m ahead of it, on the
+    // walkable pad it stands on; the ground north of the pad is not walkable, and the walker
+    // refuses a goal there (docs/24, "The global path").
+    let goal = at + glam::Vec3::new(-44.0, -54.0, 0.0);
     play.dispatch(Order { code: parkan_sim::hq::GO, parameter: 0, target: Target::Place(goal.to_array()) });
     let mut worst: f32 = 0.0;
     command_frames(&mut play, 600, |p| {
@@ -5465,4 +5467,195 @@ fn c01_m02s_medusa_shot_by_the_hero_turns_on_it() {
         turned |= matches!(play.robots[r].1.behaviour.task(), Task::Attack { target: Some(id), .. } if id == play.hero_id);
     }
     assert!(turned, "shot, it attacks the hero: {:?}", play.robots[r].1.behaviour.task());
+}
+
+/// The Iron Monster's valley is cut by a canyon, and one bridge crosses it. The canyon floor
+/// and walls are not walkable (their areals' first flag word is 0), so the walker's global path
+/// from the south bank to the north goes over the bridge's deck, half to half, and a goal on the
+/// canyon floor is refused. A warbot sent across keeps out of the canyon, where a straight walk
+/// took it down before (docs/24, "The global path").
+#[test]
+#[ignore = "needs the game install"]
+fn c02_m01s_warbots_cross_the_canyon_by_its_bridge_and_are_never_sent_down_into_it() {
+    use glam::Vec3;
+    use parkan_sim::orders::{self, Order, Target};
+    use parkan_sim::path::{VERTEX_EXIT, VERTEX_JOIN};
+
+    let mut play = campaign_play(gamedir::C02_MISSION_01);
+    let graph = play.graph.clone().expect("KM_4 has an areal map");
+    let north = Vec3::new(433.0, 780.0, 47.0);
+    let floor = Vec3::new(427.0, 645.0, 18.0);
+    assert!(graph.usable(502.0, 551.0) && graph.usable(north.x, north.y), "both banks are walkable");
+    assert!(!graph.usable(floor.x, floor.y), "the canyon floor is not");
+
+    // The bridge's two halves: an exit on walkable ground at either bank, and ends that join.
+    let ways = play.bridge_ways();
+    assert_eq!(ways.len(), 2);
+    let flagged = |w: &parkan_sim::path::Way, flag: u32| -> Vec<Vec3> {
+        (0..w.points.len()).filter(|&v| w.flags[v] & flag != 0).map(|v| w.points[v]).collect()
+    };
+    for (_, way) in &ways {
+        let exits = flagged(way, VERTEX_EXIT);
+        assert!(exits.iter().any(|p| graph.usable(p.x, p.y)), "an exit on a bank: {exits:?}");
+    }
+    let (a, b) = (flagged(&ways[0].1, VERTEX_JOIN), flagged(&ways[1].1, VERTEX_JOIN));
+    assert!(a.iter().any(|p| b.iter().any(|q| p.distance(*q) < 50.0)), "the halves join: {a:?} {b:?}");
+    let deck: Vec<Vec3> = ways.iter().flat_map(|(_, w)| w.points.clone()).collect();
+
+    // `21mwlk1`, logical id 24, stands on the south bank.
+    let t = play.units.iter().position(|u| u.logical_id == 24).expect("unit 24");
+    let at = |play: &parkan_world::play::Play| {
+        play.robots.iter().find(|(rt, _)| *rt == t).expect("a robot").1.walker.body.position
+    };
+    let from = at(&play);
+    assert!(from.y < 600.0 && graph.usable(from.x, from.y), "{from}");
+    let legs = play.route(t, from, north);
+    assert_eq!(legs.last(), Some(&north));
+    assert!(legs.iter().any(|p| deck.contains(p)), "over the bridge: {legs:?}");
+    let mut start = from;
+    for &end in &legs {
+        if !(deck.contains(&start) && deck.contains(&end)) {
+            for s in 0..=50 {
+                let p = start.lerp(end, s as f32 / 50.0);
+                assert!(graph.usable(p.x, p.y), "{p} off walkable ground, from {start} to {end}: {legs:?}");
+            }
+        }
+        start = end;
+    }
+    assert!(play.route(t, from, floor).is_empty(), "a goal on the canyon floor is refused");
+
+    // Sent across, it walks over the deck and never down into the canyon, some 30 m below.
+    let order = Order { code: orders::GO, parameter: 0, target: Target::Place(north.to_array()) };
+    let robot = &mut play.robots.iter_mut().find(|(rt, _)| *rt == t).unwrap().1;
+    assert!(robot.behaviour.insert_order(&order, orders::INSERT_REPLACE));
+    robot.order = Some(order);
+    let (mut lowest, mut crossed) = (f32::MAX, false);
+    for _ in 0..(90 * 60) {
+        play.tick(1000.0 / 60.0, [0.0; 2]);
+        let p = at(&play);
+        lowest = lowest.min(p.z);
+        crossed |= (620.0..700.0).contains(&p.y) && p.z > 55.0;
+    }
+    let end = at(&play);
+    assert!(crossed, "over the deck");
+    assert!(lowest > 35.0, "never below the banks: {lowest}");
+    assert!(end.truncate().distance(north.truncate()) < 30.0, "and on to its goal: {end}");
+}
+
+/// Follow me on The Iron Monster: the wingmen follow the hero over the canyon by its bridge.
+/// Near the bridge most spots about the hero lie over the canyon, which the walker refuses, so
+/// each pick takes the first of 77 on walkable ground (docs/31, "Follow me"); and a follower
+/// planned again part way along the bridge's hall way goes on along it rather than back to the
+/// vertex it has passed. Over the middle of the deck neither stops: the hall way's vertices
+/// stand 4 m over it, and a walker's leg to one is timed across the ground, where its whole
+/// length once slowed a leg just short of the halves' joint to a standstill.
+#[test]
+#[ignore = "needs the game install"]
+fn c02_m01s_wingmen_follow_the_hero_over_the_bridge_and_keep_out_of_the_canyon() {
+    use glam::Vec3;
+    use parkan_sim::orders::{self, Order, Target};
+    use parkan_world::play::Play;
+
+    let mut play = campaign_play(gamedir::C02_MISSION_01);
+    let graph = play.graph.clone().expect("KM_4 has an areal map");
+    let hero_id = play.hero_id;
+    // The player's two `21swlk1`, logical ids 9 and 10, brought to the south bank and told to
+    // follow the hero.
+    let bots: Vec<usize> =
+        [9, 10].iter().map(|&id| play.units.iter().position(|u| u.logical_id == id).unwrap()).collect();
+    let south = Vec3::new(470.0, 520.0, 0.0);
+    assert!(play.stand_at(south.x, south.y, 0.0));
+    for (k, &t) in bots.iter().enumerate() {
+        let Play { robots, ground, .. } = &mut play;
+        let robot = &mut robots.iter_mut().find(|(rt, _)| *rt == t).unwrap().1;
+        put(&mut robot.walker, ground, Vec3::new(490.0 + 10.0 * k as f32, 500.0, 100.0));
+        let order = Order { code: orders::FOLLOW, parameter: 50, target: Target::LogicId(hero_id) };
+        assert!(robot.behaviour.insert_order(&order, orders::INSERT_REPLACE));
+        robot.order = Some(order);
+    }
+    let at =
+        |play: &Play, t: usize| play.robots.iter().find(|(rt, _)| *rt == t).unwrap().1.walker.body.position;
+
+    // The hero walks over the bridge at 10 m/s to the north plateau and waits there.
+    let way =
+        [south, Vec3::new(421.0, 573.0, 0.0), Vec3::new(427.0, 656.0, 0.0), Vec3::new(434.0, 747.0, 0.0)];
+    let north = Vec3::new(433.0, 800.0, 0.0);
+    let (mut hero, mut leg) = (south, 1);
+    let mut lowest = f32::MAX;
+    // Where each follower stood a second ago, and the least it has gone in a second over the
+    // deck between y 620 and 700.
+    let mut second_ago: Vec<Vec3> = bots.iter().map(|&t| at(&play, t)).collect();
+    let mut slowest = vec![f32::MAX; bots.len()];
+    for tick in 0..(120 * 60) {
+        let to = if leg < way.len() { way[leg] } else { north };
+        let off = (to - hero).truncate();
+        if off.length() <= 10.0 / 60.0 {
+            hero = to;
+            leg += 1;
+        } else {
+            hero += (off.normalize() * 10.0 / 60.0).extend(0.0);
+        }
+        let yaw = play.hero.walker.body.yaw;
+        play.stand_at(hero.x, hero.y, yaw);
+        play.tick(1000.0 / 60.0, [0.0; 2]);
+        lowest = bots.iter().map(|&t| at(&play, t).z).fold(lowest, f32::min);
+        if tick % 60 == 59 {
+            for (k, &t) in bots.iter().enumerate() {
+                let p = at(&play, t);
+                if (620.0..700.0).contains(&p.y) && (620.0..700.0).contains(&second_ago[k].y) && p.z > 55.0 {
+                    slowest[k] = slowest[k].min(p.truncate().distance(second_ago[k].truncate()));
+                }
+                second_ago[k] = p;
+            }
+        }
+    }
+    assert!(
+        slowest.iter().all(|&m| m > 5.0 && m < f32::MAX),
+        "no stop on the deck: {slowest:?} m in a second"
+    );
+    let hero = play.hero.walker.body.position;
+    for &t in &bots {
+        let p = at(&play, t);
+        assert!(
+            p.truncate().distance(hero.truncate()) < 40.0,
+            "unit {} follows over the bridge: {p}",
+            play.units[t].logical_id
+        );
+        assert!(graph.usable(p.x, p.y), "and stands on walkable ground: {p}");
+    }
+    assert!(lowest > 35.0, "never down in the canyon: {lowest}");
+}
+
+/// The Iron Monster's third objective, the enemy's heavy warbot destroyed: the player's script
+/// ticks it once function 52 answers `ERROR` for logical id 22, the `21bwlk1`, which it does
+/// only once the dead unit has been deleted; until then its owner word reads 65534 (docs/26, "A
+/// dead unit is deleted"; docs/15, "65534 is a destroyed object's owner").
+#[test]
+#[ignore = "needs the game install"]
+fn c02_m01s_heavy_warbot_objective_completes_once_the_dead_warbot_is_deleted() {
+    let mut play = campaign_play(gamedir::C02_MISSION_01);
+    let tick = 1000.0 / 60.0;
+    let t = play.units.iter().position(|u| u.logical_id == 22).expect("the heavy warbot");
+    assert!(play.battle.combat.targets[t].parts[0].life.is_some());
+    let state =
+        |play: &parkan_world::play::Play| play.progression.as_ref().unwrap().progress.objectives[2].state;
+    for _ in 0..(5 * 60) {
+        play.tick(tick, [0.0; 2]);
+    }
+    assert_eq!(state(&play), 0, "not yet");
+    assert_eq!(play.progression.as_ref().unwrap().progress.owner(22), 1, "the enemy's");
+
+    // Its base node destroyed: it dies on the next tick.
+    let life = play.battle.combat.targets[t].parts[0].life.as_mut().unwrap();
+    life.hit(0, f32::MAX / 4.0);
+    play.tick(tick, [0.0; 2]);
+    assert!(!play.battle.combat.targets[t].alive);
+    assert_eq!(play.progression.as_ref().unwrap().progress.owner(22), 65534, "destroyed, not yet deleted");
+    let lasts = play.battle.death_ms[t];
+    for _ in 0..((lasts / 1000.0).ceil() as usize * 60 + 5 * 60) {
+        play.tick(tick, [0.0; 2]);
+    }
+    assert!(play.deleted[t], "deleted after its controller's {lasts} ms");
+    assert_eq!(play.progression.as_ref().unwrap().progress.owner(22), u32::MAX, "no object answers id 22");
+    assert_eq!(state(&play), 1, "the objective is complete");
 }

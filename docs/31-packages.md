@@ -493,6 +493,12 @@ readers were not traced, that is marked.
     spots in the square ±radius about the leader, at the leader's height + 5
     (`0x1002b067`). It hands the first that `SetTarget` accepts over at the
     unit's full speed (`+0x5fc`, no percentage), the same near or far.
+    `SetTarget` (`0x1002b059`) accepts a spot only on a walkable areal, or
+    any for a flyer, and only once the global path to it is found: it answers
+    1 when the path does (`0x1003bfdf`), 0 otherwise
+    ([24-motion.md](24-motion.md#the-global-path--read-and-measured)). Near a
+    bridge most spots about a leader on it lie over the canyon, and are
+    refused.
   - **When the leader stops**, the follower walks out its last trajectory to
     that spot and stays there. Neither timer's period was read.
 - **Attack.** `M_Task_Attack` on a logic id. It cancels when the unit has no
@@ -902,7 +908,9 @@ warriors only (*measured* against `varset.var`'s robot types).
 
 **Roaming.** With nothing to go for, the unit tries up to 150 random points at
 least 100 inside the map's bounds, and walks to the first that lies in a usable
-areal (`0x10030ed2`). It moves at its speed × `Go_SpeedPercent`, 1.0, in every
+areal (`0x10030ed2`). A usable areal is a walkable one: the test reads its
+record's first flag word (`0x10030fc4`,
+[24-motion.md](24-motion.md#the-global-path--read-and-measured)). It moves at its speed × `Go_SpeedPercent`, 1.0, in every
 mode.
 
 **The capturer's retreat, as read.** A capturer with no building to take and

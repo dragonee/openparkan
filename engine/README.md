@@ -783,6 +783,28 @@ More feedback on the first chapter: armour, docks, turrets, batteries and repair
   points, handed to the nodes in index order, each filled before the next and a destroyed one
   passed over. The cockpit says `VOICE_REPAIR_SYS_ON` and `_OFF` as the player switches it. On
   Mission 01 the hero at half life heals 92 points in ten seconds, faster as its own node mends.
+- **A deleted unit leaves the scripts' view** (docs/15, "65534 is a destroyed object's
+  owner"). Function 52 answers 65534 for a dead unit until it is deleted, its controller's
+  `+92` ms later, and `ERROR` after, as no object answers its id; a building's shell answers
+  65534 for good. So *The Iron Monster*'s heavy warbot objective, which waits for `ERROR` on
+  logical id 22, completes once the warbot is destroyed.
+- **The walker's global path** (docs/24, "The global path"). The engine reads each map's
+  `Land.map` and links its areals as the game does: only a walkable areal, one whose first flag
+  word is set, links to a walkable neighbour, at the distance between their centres + 1, and a
+  live bridge's hall-way exits join the areals under them and its halves join each other at
+  their flag-4 vertices. A non-flyer's walk is an A\* search over those links, each link's cost
+  scaled by 1 + a random share up to 0.7, given up after 2048 nodes. Each step puts a waypoint
+  where the line to the goal crosses the shared edge, or 3 in from the nearer end. A goal on no
+  walkable areal is refused and the unit holds. A unit on one no link leaves makes for the first
+  of 50 random points about it that is walkable, in squares growing from 30 by 3 to 500.
+  Roaming, a patrol's points (a flyer's excepted), the escape's rings, a capture's landing
+  corners and command mode's valid places all keep to walkable areals too. On *The Iron Monster*
+  (C02 M01) the warbots that walked straight into the canyon under the bridge now cross over
+  its deck, and a goal on the canyon floor is refused. Follow me takes the first of 77 spots
+  about the leader on walkable ground, as read, so wingmen follow the hero over the bridge
+  rather than stop at its end. A walker's legs are timed across the ground: the bridge's
+  hall-way vertices stand 4 m over its deck, and a leg's height had slowed a follower planned
+  again just short of one to a standstill at the halves' joint.
 
 This directory also holds what the rest will follow:
 
@@ -935,7 +957,7 @@ input tables, and from M6 the key bindings; from M4 every damage table, explosio
 mission's atmosphere, both RsLi archives and the game font; from M6 every
 `.cfg`, the text and interface string tables, each mission's objectives,
 messages and ambient sound resolved, and every behaviour script, its formulas
-and `varset.var`: 448 dumps.
+and `varset.var`: 448 dumps. From M14 it adds every map's `Land.map`.
 
 ## Stand-ins
 
@@ -994,7 +1016,6 @@ a row here. A row leaves this table when research closes it.
 | M12 | The chat overlay and the game menu's screen (mode 7) | not built: their buttons are taken and do nothing | [41](../docs/41-commander.md#what-a-click-on-the-column-does) |
 | M12 | The routine that names a building | strings 6031–6098 by Type, by the size letter of its root record (`fr_l_` small, `fr_m_` medium, `fr_b_` large) and a bunker's by its Type | [35](../docs/35-hud.md#name-and-status--read-and-seen) |
 | M12 | The commander's satellite map's title bar and exit icon, beyond their place | a page header's pieces 20 tall at (374, 43), the title 5074 centred | [35](../docs/35-hud.md#not-established-4) |
-| M12 | An areal's first flag word, which decides where a walker may be sent | the engine keeps no areals: a place is valid where there is ground above any water, and always for flyers | [42](../docs/42-selection.md#a-valid-place--read-and-measured) |
 | M12 | Which objects the world's classes 3 and 4 are, and the object pick's order and nearest-hit rule | a unit within 0.7 of its radius and a building within all of it, a sphere holding the eye passed over; the nearest centre along the ray wins | [42](../docs/42-selection.md#not-established) |
 | M12 | Whether the display's slot 12 answers, so the system's cursor is used | the software cursor's four phases from `new_ui1` are drawn and the system's hidden | [42](../docs/42-selection.md#the-cursor-shows-a-state--read-and-measured) |
 | M12 | A marker's gap figure (the record's slot 5), its bar frame on page9, the clan's sign, and where its name, icon and bars stand | the gap is the unit's projected radius held to 4–44; the name over the left bracket, the class icon right of the right one, a blue box under the left one holding the life bar over a full battery bar | [25](../docs/25-sensors.md#how-the-game-colours-what-it-marks--read-and-measured) |
@@ -1002,7 +1023,6 @@ a row here. A row leaves this table when research closes it.
 | M6 | What a node naming a variable, operand, formula or handler that does not exist reads | the node does nothing; a switch to no handler ends the run; a run stops after a million nodes | [15](../docs/15-behaviour.md#how-a-handler-runs) |
 | M12 | Function 15's answer: whether the unit takes the order (1) or refuses it (0) | an id some unit or building answers gives 1, and the unit is handed the order after the handler's run | [34](../docs/34-progression.md#what-the-scripts-ask--read-and-measured-1) |
 | M12 | A building's contour (property `0x203`), whose vertices a patrol of the building walks | eight points on the building's sphere, pushed out by 30 | [31](../docs/31-packages.md#the-patrol-tick-by-tick--read) |
-| M12 | Which areals a walker's patrol points must lie on | none: a walker's point needs no usable areal, as a flyer's does not | [31](../docs/31-packages.md#where-a-search-looks--read-and-measured) |
 | M12 | An animal's migration over its clan's pastures, its default order | not modelled: an animal stands and asks its fire control for nothing | [31](../docs/31-packages.md#migrate-an-animals-pasture--read-and-measured) |
 | M12 | Which of the fight module's bars a building's guns clear | the walker's, 0.85 | [29](../docs/29-weapons.md#how-the-ai-fires--read) |
 | M12 | `IsPlacementValid`'s path search from the builder and its hall-way vertices' areal test; how the basement is triangulated between its rings | every site has a path and usable areals; each corner of either ring, against the nearest corner of the other, stands for a face falling along that line | [32](../docs/32-builder.md#the-test-isplacementvalid--read) |
@@ -1026,7 +1046,6 @@ a row here. A row leaves this table when research closes it.
 | M13 | What "a node reaching its last damage stage" takes out of the load (`0x10011920`) | a destroyed node's own weight and its armour; the devices on it stay | [24](../docs/24-motion.md#what-sets-the-live-limits--read) |
 | M13 | How the walker's path joins a building's hall way (`MGraph`), and how it brings a unit to rest on a place in it | straight to the exit, or a hall-way vertex within 5, that makes the whole way to the pod shortest, then along the links; a way in stops on its last vertex rather than half its velocity beyond it | [31](../docs/31-packages.md#not-established) |
 | M13 | What the walker does with the pod handed to it again while the unit stands there | within 1.5 of the pod, the go task's arrival at an object, it holds | [31](../docs/31-packages.md#each-tick-slot-7-0x10030300--read) |
-| M13 | An areal's flag word under a contour vertex a flyer lands at | the engine keeps no areals: a vertex counts where the ground under it is above any water | [31](../docs/31-packages.md#the-plan-slot-15-0x100306f0--read) |
 | M13 | The building's own paths an escape is routed out by ("LEAVE IS TOO !!!") | a unit sent into a building along its hall way walks out of it along the hall way, from its nearest vertex to the exit that makes the way to its goal shortest, while it stands inside the building's outer ring | [31](../docs/31-packages.md#the-escape--read) |
 | M13 | The unit takt escape's node test (a unit on a damaged node is left be) | every node counts as whole | [31](../docs/31-packages.md#the-escape--read) |
 | M13 | The clan's contact list the maps mark other clans' objects by, and the scan's signatures | every live object strictly within the radar range of a live unit of the player's clan, the hero among them | [35](../docs/35-hud.md#the-panel-in-the-cockpit--read-and-seen) |
@@ -1060,6 +1079,15 @@ a row here. A row leaves this table when research closes it.
 | M14 | How a turret component on a chassis's own controller poses its nodes against the chassis's frames, and how an animal's gun aims, its pitch channel having no point | the turret's channels pose the mesh as a turret part's would; an AI gun with no sight fires straight at the point its fire control traces | [34](../docs/34-progression.md#the-medusas--read-and-measured) |
 | M14 | The call for help and the clan attitude a hit lowers | neither is modelled: a hit pulls in its victim alone, and relations stay as the mission gives them | [31](../docs/31-packages.md#a-hit-pulls-a-unit-in--read) |
 | M14 | The behaviour's radar module: its two timers, and the hostile and friendly lists it keeps from its machine's radar | the machine's own radar scan stands in for the module, read afresh each takt; the fire control and the engagement pick from it alone, so a unit with no radar picks no target of its own, while a search still looks over the clan's areal map, which the engine keeps whole | [25](../docs/25-sensors.md#what-the-ai-does-with-it--read) |
+| M14 | How a unit's place comes to be on a building's map object, and which of its vertices the global path starts or ends at | a unit standing on a bridge's faces takes the bridge's nearest hall-way vertex; a goal over a bridge is refused, as the areal under it is not walkable | [24](../docs/24-motion.md#not-established) |
+| M14 | Who calls `MHallWay` slot 11, which links a building's exits to the areals under them and its flag-4 vertices to another's | only a live bridge's hall way joins the search; a way through any other building is left out | [24](../docs/24-motion.md#not-established) |
+| M14 | The size gate a hall-way vertex puts on a unit (the unit's `+0x960`, the vertex record's `+0x28`) | every vertex passes | [24](../docs/24-motion.md#not-established) |
+| M14 | How a walker goes to the point it finds off a non-walkable areal; what slot 14's `0x20000000`, which doubles the square, is | straight; the square never doubles | [24](../docs/24-motion.md#the-global-path--read-and-measured) |
+| M14 | The walker's random source, `rand()`, which scales each link's cost | a 32-bit xorshift the play keeps | [24](../docs/24-motion.md#the-global-path--read-and-measured) |
+| M14 | What the walker does when its search fails, out of links or past 2048 nodes | it holds, its queues emptied as `SetTarget` empties them before it searches | [24](../docs/24-motion.md#the-global-path--read-and-measured) |
+| M14 | How the walker drops the points a unit has already passed (`MWalker::ClearMoverReachedPoint`) | a way's first vertex is left out of a new plan while the unit stands no farther from the next vertex than it does, so a follower planned again on a bridge goes on rather than back | [24](../docs/24-motion.md#not-established) |
+| M14 | Which spot `SetTarget` accepts for Follow me beyond its areal: the path search is read to decide it too | the first of the 77 on a walkable areal (any, for a flyer); one the search then finds no way to is refused by the walker, and the unit holds | [31](../docs/31-packages.md#what-each-package-does--read) |
+| M14 | What a roam with no usable point among its 150 does | it takes the last point tried, which the walker refuses | [31](../docs/31-packages.md#where-a-search-looks--read-and-measured) |
 
 ### Read since the stand-in was written
 
@@ -1099,12 +1127,12 @@ engine pass replaces each with what was read and removes its row.
 | M8 | The game's random source for a life update's spread | a 16-bit xorshift (7, 9, 8), seeded apart per unit | [24](../docs/24-motion.md#water-and-lava-beds-kill--read-and-measured) |
 | M8 | The shell's menus after a mission, the load-game screen, and `MISSIONS/dispatcher.ini` | Esc after the outcome closes the window, L does nothing, and a win is not written to the install | [34](../docs/34-progression.md#after-the-outcome--read-and-measured) |
 | M8 | A material's start stamp, from which its track is played, and the random a mode-3 track jumps by | the world clock's 0 for a mesh batch's material, and a sprite's own start for an effect's — a stream's particle from when it left; a hash of the clock | [07](../docs/07-objects.md#how-a-material-reaches-the-device--read-and-measured) |
-| M8 | The areal search, the local path and its obstacle contours; the Wizard's heading curve | the straight line to the place, cut into at least three points a second or more apart at the walk's velocity, ending in the read stop; the heading is the curve's velocity's direction | [24](../docs/24-motion.md#not-established) |
+| M8 | The local path and its obstacle contours; the Wizard's heading curve | a leg of the global path that would leave the walkable areals, as a leg across an areal that is not convex can, walks through that areal's triangles pulled straight, the unit's collision radius off every vertex that touches ground that is not walkable; a walker's legs are measured and timed across the ground, its points holding no height, so a hall-way vertex standing over a deck does not slow it; the heading is the curve's velocity's direction | [24](../docs/24-motion.md#not-established) |
 | M8 | How a velocity the Wizard writes combines with the velocity integrator, and whether its spin is a rate or a fraction | a driven machine takes the written velocity as its own and turns toward the heading at up to its live yaw rate; since that replaces the machine's own velocity every step, where the mode-2 brake would act the ground's fraction is taken off the written velocity whole, rather than pulled at over several steps as it is on the player's | [24](../docs/24-motion.md#not-established) |
 | M8 | The height a flyer's points are given; who reads `Movement_FlyHeight` | at least `FlyNearLandHeight`, 15, above the ground under the point | [24](../docs/24-motion.md#not-established) |
 | M8 | How an engagement scores the radar's contacts through the task (the contact record's three unnamed fields); follow's and refit's priorities for one | the nearest hostile unit within 500 is the best, and for a patrol the one nearest its centre inside its radius; follow and refit answer 0; an attack running is not given another | [31](../docs/31-packages.md#between-orders--read) |
 | M8 | The follower's two timers; the behaviour's random source | it measures once a second; a 32-bit xorshift | [31](../docs/31-packages.md#what-each-package-does--read) |
-| M8 | Which areals are usable, and a dock for a refit | a capture's retreat, read to lie off the map, roams; a roam takes the first point tried; no dock is modelled, so a refit always fails at its start | [31](../docs/31-packages.md#where-a-search-looks--read-and-measured) |
+| M8 | A dock for a refit | a capture's retreat, read to lie off the map, roams; no dock is modelled, so a refit always fails at its start | [31](../docs/31-packages.md#where-a-search-looks--read-and-measured) |
 | M8 | How the turret turns a traced point into its targets (`0x10028bb0`), its aim stage, and the gun's report codes | each channel moves on by the angle the sight is off, at the rate a small nudge turns it; θ is 0 once both channels reach their targets and π before; a guided gun's θ is its lock left × π | [29](../docs/29-weapons.md#how-the-ai-fires--read) |
 | M9 | Where a gun's takt stores its report codes 0 and 3–6, which the weapons list's lamp reads | the code from the gun's state now: 5 no rounds, 6 short of charge, 7 not ready, 3 stroking, 4 waiting its interval; then the gate's 2, 7 or 8; 1 locking; 0 ready | [29](../docs/29-weapons.md#the-guns-takt-a-stroke-then-the-interval) |
 | M9 | The charge level of a gun with no capacity, which only a shot sets | its bar shows full | [29](../docs/29-weapons.md#a-gun-is-a-capacitor-a-magazine-and-a-clock--read) |
@@ -1128,7 +1156,6 @@ engine pass replaces each with what was read and removes its row.
 | M11 | The capsule a door's part is measured against (`Terrain.dll:0x1005a27f`) | the door node's level-0 slot sphere; the holds are worked out from every child each tick rather than on each child's move | [24](../docs/24-motion.md#walking-into-a-building--read-and-measured) |
 | M11 | The fill colour the resource rows hand their bar | the weapons list's: red under 20%, olive under 80%, green above | [36](../docs/36-factory.md#the-resource-rows) |
 | M11 | How the cursor is shown in view mode 5 | the system's cursor, with the grab let go | [36](../docs/36-factory.md#not-established) |
-| M11 | Which areals the escape's random points must be on | the first point tried within 150 of the unit, inside the map by 100 | [31](../docs/31-packages.md#the-escape--read) |
 | M14 | How the basement is triangulated between its two rings, and which of its faces the first builder (`0x1000bdb0`) makes with the ground's own texture pair rather than the foundation | the two rings are walked together and stitched, and every face of the band is the foundation, layer-1 slot 0 with no second layer, as the second builder (`0x1000d9c4`) writes it; the contour is sampled onto the ground every 4 units instead of at each landscape face it crosses, and the band runs 2 units past the contour, sunk 0.5 under the ground there, so the cut's own texel edge shows no sliver of sky | [03](../docs/03-terrain.md#for-an-engine) |
 | M11 | Where a gathered face's batch word, whose 8 and 0x200 the collision query passes, comes from | the faces of the `DEFAULT`, `PORTAL_001` and `PORTAL_004` materials, a building's doorway and portal quads, let a mover **and a round** through, as a recording shows and as a shot at a door needs | [24](../docs/24-motion.md#the-doorways-are-portal-quads--measured-read-and-seen) |
 | M14 | How a portal face reaches `CBuilding::PortalDrawNotify` and which node it names, and so which cells a building draws | no cell is culled: every node is drawn, and the portal quads themselves are dropped, which is what the cells would have hidden them behind | [24](../docs/24-motion.md#a-building-is-drawn-cell-by-cell-through-its-portals--read) |

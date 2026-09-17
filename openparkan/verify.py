@@ -1450,6 +1450,17 @@ def check_water_reflection(check, game: Path) -> None:
           f"the maps")
 
 
+def _inside(vertices, x: float, y: float) -> bool:
+    """Whether (x, y) lies inside a polygon, by the crossings of a ray toward +x."""
+    inside = False
+    n = len(vertices)
+    for i in range(n):
+        (ax, ay, _), (bx, by, _) = vertices[i], vertices[(i + 1) % n]
+        if (ay > y) != (by > y) and x < ax + (y - ay) * (bx - ax) / (by - ay):
+            inside = not inside
+    return inside
+
+
 def check_arealmap(check, game: Path) -> None:
     """The navigation mesh, whose layout came out of ArealMap.dll."""
     maps = [d for d in gamedir.maps(game) if (d / "Land.map").exists()]
@@ -1542,6 +1553,52 @@ def check_arealmap(check, game: Path) -> None:
                 bad += not (0 <= idx < am.areal_count)
     check("Land.map: cell grid indexes real areals", bad == 0,
           f"{items} cell entries across {len(loaded)} maps")
+
+    # Not every areal is convex: a corner that turns back by more than 0.6 degrees
+    # (a sine under -0.01, the polygons being counter-clockwise).
+    def turns_back(a) -> bool:
+        v, n = a.vertices, len(a.vertices)
+        for i in range(n):
+            (ax, ay, _), (bx, by, _), (cx, cy, _) = v[i], v[(i + 1) % n], v[(i + 2) % n]
+            ux, uy, wx, wy = bx - ax, by - ay, cx - bx, cy - by
+            lu, lw = (ux * ux + uy * uy) ** 0.5, (wx * wx + wy * wy) ** 0.5
+            if lu and lw and (ux * wy - uy * wx) / (lu * lw) < -0.01:
+                return True
+        return False
+    concave = sum(turns_back(a) for _, am in loaded for a in am.areals)
+    check("Land.map: a third of the areals are not convex",
+          concave == 10441 and total_areals == 34662,
+          f"{concave} of {total_areals} turn back by more than 0.6 degrees at a corner")
+
+    # The first flag word marks a walkable areal: the share of each map's area.
+    shares = sorted((sum(a.area for a in am.areals if a.flags[0])
+                     / sum(a.area for a in am.areals), d.name) for d, am in loaded)
+    check("Land.map: 3% to 53% of a map's area is walkable",
+          round(shares[0][0] * 100) == 3 and round(shares[-1][0] * 100) == 53,
+          f"from {shares[0][0]:.1%} on {shares[0][1]} to {shares[-1][0]:.1%} on {shares[-1][1]}")
+
+    # KM_4, The Iron Monster: the canyon under the bridge is not walkable, the banks are.
+    km4 = next((am for d, am in loaded if d.name == "KM_4"), None)
+    if km4 is not None:
+        def under(x: float, y: float):
+            return next((km4.areals[i] for i in km4.areals_at(x, y)
+                         if _inside(km4.areals[i].vertices, x, y)), None)
+        floor, south, north = under(427.0, 645.0), under(502.0, 551.0), under(433.0, 780.0)
+        low = min(v[2] for v in floor.vertices)
+        check("KM_4: the canyon floor under the bridge is not walkable, both banks are",
+              floor.flags[0] == 0 and south.flags[0] == 1 and north.flags[0] == 1
+              and abs(low - 18.1) < 0.1,
+              f"floor at {low:.1f} m word {floor.flags[0]}; "
+              f"banks word {south.flags[0]}, {north.flags[0]}")
+
+    # A bridge half's hall way: exits at its landward end and one vertex with flag 4.
+    halves = {n: g for n, g in _hall_ways(game).items()
+              if n.endswith("_brige.msh") and g is not None}
+    shapes = {n: (sum(v.flags & 1 != 0 for v in g.nodes),
+                  sum(v.flags & 4 != 0 for v in g.nodes))
+              for n, g in sorted(halves.items())}
+    check("fortif.rlb: each bridge half's hall way has three or five exits and one flag-4 vertex",
+          len(shapes) == 4 and all(e in (3, 5) and j == 1 for e, j in shapes.values()), f"{shapes}")
 
 
 def check_missions(check, game: Path) -> None:

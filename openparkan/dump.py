@@ -20,6 +20,7 @@ import struct
 from pathlib import Path
 
 from . import (
+    arealmap,
     assembly,
     behaviour,
     briefing,
@@ -191,6 +192,22 @@ def material_library(path: Path, names: list[str] | None = None) -> dict:
 #: How many height samples a side the land mesh dump takes, each at the centre of
 #: its square so none falls on a face edge the two readers index differently.
 HEIGHT_SAMPLES = 17
+
+
+def areal_map(path: Path, names: list[str] | None = None) -> dict:
+    """A ``Land.map``: every areal as read, and the grid's lists, x the outer index."""
+    am = arealmap.load(path)
+    return {
+        "kind": "arealmap",
+        "areals": [{"centre": vector(a.centre), "area": number(a.area),
+                    "vertices": [vector(v) for v in a.vertices],
+                    "edges": [list(e) for e in a.edges], "flags": list(a.flags)}
+                   for a in am.areals],
+        "cells_across": am.cells_across,
+        "cells_down": am.cells_down,
+        "cells": [list(am.cells[(x, y)]) for x in range(am.cells_across)
+                  for y in range(am.cells_down)],
+    }
 
 
 def land_mesh(path: Path, names: list[str] | None = None) -> dict:
@@ -716,4 +733,4 @@ KINDS = {"nres": _nres, "mission": _mission, "texm": texm, "materials": material
          "sky": atmosphere, "cfg": cfg_file, "strings": pe_strings, "progression": progression,
          "rsli": rsli_archive, "font": game_font, "scr": script, "varset": variable_table,
          "fml": formula_set, "man": key_bindings, "research": research_tree,
-         "buildings": buildings}
+         "buildings": buildings, "arealmap": areal_map}

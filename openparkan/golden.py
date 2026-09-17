@@ -134,7 +134,9 @@ def targets(game: Path) -> list[tuple[str, Path, list[str]]]:
             + [("fml", p.with_suffix(behaviour.FORMULAS), []) for p in behaviour.scripts(game)]
             + [("varset", game / "MISSIONS" / "SCRIPTS" / behaviour.VARSET, [])]
             + [("research", p, []) for p in research.trees(game)]
-            + [("buildings", game / "fortif.rlb", [])])
+            + [("buildings", game / "fortif.rlb", [])]
+            + [("arealmap", d / "Land.map", []) for d in gamedir.maps(game)
+               if (d / "Land.map").exists()])
 
 
 def engine_dump(engine: Path, kind: str, path: Path, names: list[str] | None = None) -> dict:

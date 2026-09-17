@@ -53,9 +53,9 @@ pub const ATTACK_TIMER_MS: (f64, f64) = (8000.0, 8000.0);
 pub const ATTACK_BUILDING_INSIDE: (f32, f32) = (20.0, 5.0);
 /// The attack's tries at a point.
 pub const ATTACK_TRIES: usize = 77;
-/// The escape's first ring of tries: points within this of the unit along each axis,
-/// inside the map by the roaming inset (`0x1002ba50`).
-pub const LEAVE_REACH: f32 = 150.0;
+/// The escape's rings of tries (`0x1002ba50`): so many points within so far of the unit along
+/// each axis, each inside the map by the roaming inset and on a usable areal.
+pub const LEAVE_RINGS: [(usize, f32); 4] = [(400, 150.0), (300, 300.0), (200, 400.0), (200, 1000.0)];
 /// The fight module's bars (`0x10024e7a`): a flyer's, and a walker's.
 pub const FIRE_BAR_FLYER: f32 = 0.45;
 pub const FIRE_BAR_WALKER: f32 = 0.85;
@@ -166,6 +166,30 @@ pub struct Places {
     pub contour: Vec<Vec3>,
 }
 
+/// Whether a point lies on a usable areal, one a walker may be sent to (docs/24, "The global
+/// path"; docs/31, "Where a search looks").
+#[derive(Clone, Copy)]
+pub struct Usable<'a>(pub &'a dyn Fn(f32, f32) -> bool);
+
+fn anywhere(_: f32, _: f32) -> bool {
+    true
+}
+
+impl Usable<'_> {
+    /// Every point, as on a map with no areal map.
+    pub const ANYWHERE: Usable<'static> = Usable(&anywhere);
+
+    pub fn at(&self, p: Vec3) -> bool {
+        (self.0)(p.x, p.y)
+    }
+}
+
+impl std::fmt::Debug for Usable<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Usable")
+    }
+}
+
 /// What a takt has to go on.
 #[derive(Clone, Copy, Debug)]
 pub struct Senses<'a> {
@@ -181,6 +205,8 @@ pub struct Senses<'a> {
     pub flyer: bool,
     /// The map's extent in x and y.
     pub bounds: ([f32; 2], [f32; 2]),
+    /// Where on the map a unit may be sent.
+    pub usable: Usable<'a>,
     pub has_weapon: bool,
     /// Whether the walker has nothing left to follow.
     pub walker_idle: bool,
@@ -827,12 +853,8 @@ impl Behaviour {
     }
 
     /// A patrol's loop about `centre` (`0x1002dd90`): a place's or a unit's 15 or 3 points
-    /// and up to 4 more, each within the radius on x and y and inside the map less 100; a
-    /// building's points about it.
-    ///
-    /// STAND-IN: docs/31-packages.md#where-a-search-looks--read-and-measured -- which areals
-    /// are usable is not modelled: a walker's point needs no usable areal, as a flyer's does
-    /// not.
+    /// and up to 4 more, each within the radius on x and y, inside the map less 100 and, but
+    /// for a flyer's, on a usable areal, the last try kept; a building's points about it.
     fn draw_loop(&mut self, guarded: Guarded, centre: Vec3, radius: f32, senses: &Senses) -> Vec<Vec3> {
         let (lo, hi) = senses.bounds;
         let inside = |p: Vec3| {
@@ -863,7 +885,7 @@ impl Behaviour {
                 for _ in 0..PATROL_TRIES {
                     let (dx, dy) = (self.random() * 2.0 - 1.0, self.random() * 2.0 - 1.0);
                     point = centre + Vec3::new(dx * radius, dy * radius, 0.0);
-                    if inside(point) {
+                    if inside(point) && (senses.flyer || senses.usable.at(point)) {
                         break;
                     }
                 }
@@ -927,10 +949,22 @@ impl Behaviour {
                 if senses.walker_idle || now >= next_ms {
                     let across = lead.position.truncate().distance(at.truncate());
                     let up = (lead.position.z - at.z).abs();
+                    // The first of 77 spots about the leader the walker takes (`0x1002b059`), a
+                    // refused one having emptied its queues.
+                    //
+                    // STAND-IN: docs/31-packages.md#what-each-package-does--read -- `SetTarget`'s
+                    // acceptance is tested by the areal under the spot alone, as a flyer's by
+                    // none: a spot the search then finds no way to is refused by the walker.
                     if across > radius + FOLLOW_SLACK || up > radius + FOLLOW_SLACK_UP {
-                        let (dx, dy) = (self.random() * 2.0 - 1.0, self.random() * 2.0 - 1.0);
-                        let spot = lead.position + Vec3::new(dx * radius, dy * radius, FOLLOW_LIFT);
-                        walk = Walk::To(spot, 1.0);
+                        walk = Walk::Clear;
+                        for _ in 0..FOLLOW_TRIES {
+                            let (dx, dy) = (self.random() * 2.0 - 1.0, self.random() * 2.0 - 1.0);
+                            let spot = lead.position + Vec3::new(dx * radius, dy * radius, FOLLOW_LIFT);
+                            if senses.flyer || senses.usable.at(spot) {
+                                walk = Walk::To(spot, 1.0);
+                                break;
+                            }
+                        }
                     }
                     // STAND-IN: docs/31-packages.md#what-each-package-does--read -- neither of
                     // the follower's timers' periods is read: it measures once a second.
@@ -946,7 +980,7 @@ impl Behaviour {
                     let goal = senses
                         .nearest(|s| s.hostile && s.type_word & !HUNTED_TYPES == 0 && !s.building, SEEK_RANGE)
                         .map(|s| s.position);
-                    let goal = goal.unwrap_or_else(|| self.roam(senses.bounds, at));
+                    let goal = goal.unwrap_or_else(|| self.roam(senses, at));
                     walk = Walk::To(goal, 1.0);
                     let next = self.timer(now, SEARCH_RESCAN_MS);
                     *self.tasks.last_mut()? = Task::search(Search::Enemies);
@@ -962,16 +996,23 @@ impl Behaviour {
                 self.fire = FireMode::Nearest;
                 Some(Takt { walk, target: self.fire_target(senses), fire_freely: true })
             }
-            // STAND-IN: docs/31-packages.md#the-escape--read -- which areals are usable is not
-            // modelled: the first point tried within 150 of the unit, inside the map by 100.
+            // The first point of the rings inside the map by 100 on a usable areal; with none
+            // the escape fails ("Cannot Leave").
             Task::Leave { goal: None } => {
                 let (lo, hi) = senses.bounds;
-                let pick = |me: &mut Self, a: usize| {
-                    let (from, to) = (lo[a] + ROAM_INSET, hi[a] - ROAM_INSET);
-                    let v = at[a] + (me.random() * 2.0 - 1.0) * LEAVE_REACH;
-                    if to > from { v.clamp(from, to) } else { (lo[a] + hi[a]) / 2.0 }
-                };
-                let goal = Vec3::new(pick(self, 0), pick(self, 1), at.z);
+                let inside = |p: Vec3| (0..2).all(|a| p[a] > lo[a] + ROAM_INSET && p[a] < hi[a] - ROAM_INSET);
+                let mut goal = None;
+                'rings: for (tries, reach) in LEAVE_RINGS {
+                    for _ in 0..tries {
+                        let (dx, dy) = (self.random() * 2.0 - 1.0, self.random() * 2.0 - 1.0);
+                        let p = at + Vec3::new(dx * reach, dy * reach, 0.0);
+                        if inside(p) && senses.usable.at(p) {
+                            goal = Some(p);
+                            break 'rings;
+                        }
+                    }
+                }
+                let goal = goal?;
                 *self.tasks.last_mut()? = Task::Leave { goal: Some(goal) };
                 self.fire = FireMode::None;
                 Some(Takt { walk: Walk::To(goal, 1.0), target: None, fire_freely: false })
@@ -1071,16 +1112,25 @@ impl Behaviour {
         }
     }
 
-    /// A random point at least 100 inside the map (`0x10030ed2`).
+    /// The first of up to 150 random points at least 100 inside the map that lies on a usable
+    /// areal (`0x10030ed2`).
     ///
-    /// STAND-IN: docs/31-packages.md#where-a-search-looks--read-and-measured -- which areals
-    /// are usable is not modelled: the first point tried is taken.
-    fn roam(&mut self, (lo, hi): ([f32; 2], [f32; 2]), at: Vec3) -> Vec3 {
+    /// STAND-IN: docs/31-packages.md#where-a-search-looks--read-and-measured -- what a roam
+    /// with no usable point does is not read: it takes the last point tried.
+    fn roam(&mut self, senses: &Senses, at: Vec3) -> Vec3 {
+        let (lo, hi) = senses.bounds;
         let pick = |me: &mut Self, a: usize| {
             let (from, to) = (lo[a] + ROAM_INSET, hi[a] - ROAM_INSET);
             if to > from { from + me.random() * (to - from) } else { (lo[a] + hi[a]) / 2.0 }
         };
-        Vec3::new(pick(self, 0), pick(self, 1), at.z)
+        let mut point = at;
+        for _ in 0..ROAM_TRIES {
+            point = Vec3::new(pick(self, 0), pick(self, 1), at.z);
+            if senses.usable.at(point) {
+                break;
+            }
+        }
+        point
     }
 
     /// A capture search's takt (docs/31, "The capture, tick by tick"): its start, then slot 7.
@@ -1168,8 +1218,7 @@ impl Behaviour {
     /// flyer first to its contour's nearest vertex; otherwise it roams.
     ///
     /// STAND-IN: docs/31-packages.md#where-a-search-looks--read-and-measured -- the retreat
-    /// read to lie off the map, and which areals are usable, are not modelled: a plan with
-    /// nowhere to go roams.
+    /// read to lie off the map is not modelled: a plan with nowhere to go roams.
     fn plan_capture(
         &mut self,
         search: Search,
@@ -1220,7 +1269,7 @@ impl Behaviour {
                 }
             }
         }
-        Walk::To(self.roam(senses.bounds, at), GO_SPEED)
+        Walk::To(self.roam(senses, at), GO_SPEED)
     }
 }
 
@@ -1295,6 +1344,7 @@ mod tests {
             size_class: 2,
             flyer: false,
             bounds: ([0.0; 2], [2000.0; 2]),
+            usable: Usable::ANYWHERE,
             has_weapon: true,
             walker_idle: idle,
             neutral: false,
@@ -1499,8 +1549,27 @@ mod tests {
         let Walk::To(spot, share) = far.walk else { panic!("{far:?}") };
         assert!((spot.x - 100.0).abs() <= 20.0 && (spot.y - 100.0).abs() <= 20.0 && spot.z == 5.0);
         assert_eq!(share, 1.0);
+        // It takes the first spot on usable ground, and with none of its 77 it holds.
+        let east = |x: f32, _: f32| x > 110.0;
+        let t = b.takt(&Senses {
+            usable: Usable(&east),
+            ..senses(&[leader], 3000.0, Vec3::new(200.0, 100.0, 0.0), true)
+        });
+        assert!(matches!(t.walk, Walk::To(spot, _) if spot.x > 110.0), "{t:?}");
+        let nowhere = |_: f32, _: f32| false;
+        let t = b.takt(&Senses {
+            usable: Usable(&nowhere),
+            ..senses(&[leader], 4000.0, Vec3::new(200.0, 100.0, 0.0), true)
+        });
+        assert_eq!(t.walk, Walk::Clear);
+        let flies = b.takt(&Senses {
+            usable: Usable(&nowhere),
+            flyer: true,
+            ..senses(&[leader], 5000.0, Vec3::new(200.0, 100.0, 0.0), true)
+        });
+        assert!(matches!(flies.walk, Walk::To(..)), "a flyer's spot needs no walkable areal");
         let gone = Seen { own: false, ..leader };
-        b.takt(&senses(&[gone], 4000.0, Vec3::ZERO, true));
+        b.takt(&senses(&[gone], 6000.0, Vec3::ZERO, true));
         assert_eq!(b.task(), Task::Stop, "a leader of another clan ends the follow");
     }
 
@@ -1622,6 +1691,38 @@ mod tests {
         refit.order(&Order { code: orders::RELOAD, parameter: 0, target: Target::NotDefined });
         refit.takt(&senses(&[], 0.0, Vec3::ZERO, true));
         assert_eq!(refit.task(), Task::Stop);
+    }
+
+    #[test]
+    fn roaming_patrol_and_escape_points_lie_on_usable_areals_but_a_flyers_patrol_points_need_not() {
+        // Only the strip x < 300 is usable.
+        let west = |x: f32, _: f32| x < 300.0;
+        let usable =
+            Senses { usable: Usable(&west), ..senses(&[], 20_000.0, Vec3::new(1000.0, 1000.0, 0.0), true) };
+        let mut seek = Behaviour::new(11);
+        seek.order(&Order { code: orders::SEARCH, parameter: 0, target: Target::Any });
+        let Walk::To(p, _) = seek.takt(&usable).walk else { panic!() };
+        assert!(p.x < 300.0 && p.x > 100.0, "roams onto usable ground: {p}");
+
+        let mut walker = Behaviour::new(21);
+        walker.order(&place_patrol(300.0, 1000.0));
+        walker.takt(&Senses { now_ms: 0.0, ..usable });
+        assert!(walker.patrol_loop.iter().all(|p| p.x < 300.0), "{:?}", walker.patrol_loop);
+        let mut flyer = Behaviour::new(21);
+        flyer.order(&place_patrol(300.0, 1000.0));
+        flyer.takt(&Senses { now_ms: 0.0, flyer: true, ..usable });
+        assert!(flyer.patrol_loop.iter().any(|p| p.x >= 300.0), "{:?}", flyer.patrol_loop);
+
+        // The escape looks out to 1,000 for usable ground, and fails with none.
+        let mut leave = Behaviour::new(4);
+        leave.order(&Order { code: orders::LEAVE, parameter: 0, target: Target::NotDefined });
+        let Walk::To(p, _) = leave.takt(&usable).walk else { panic!() };
+        assert!(p.x < 300.0 && (p.x - 1000.0).abs() <= 1000.0, "{p}");
+        let nowhere = |_: f32, _: f32| false;
+        let mut stuck = Behaviour::new(4);
+        stuck.order(&Order { code: orders::LEAVE, parameter: 0, target: Target::NotDefined });
+        stuck.takt(&Senses { usable: Usable(&nowhere), ..usable });
+        assert_eq!(stuck.task(), Task::Stop, "Cannot Leave");
     }
 
     #[test]

@@ -16891,7 +16891,7 @@ read = true
 module = "Behavior.dll"
 at = "0x1003fbf0"
 kind = "function"
-name = "MWalker global path: same map object and areal need none; else 0x303 slot 14 areal list into +0xe8; 'Cannot Generate GlobalPath'"
+name = "dead code, no caller or pointer: an old global path (same map object and areal need none; else 0x303 slot 14 into +0xe8; 'Cannot Generate GlobalPath') -- the live one is 0x10036730"
 doc = "docs/24-motion.md"
 read = true
 
@@ -28928,3 +28928,148 @@ kind = "site"
 name = "unit record bind: interface 0x20 slot 3 asked with kind 1 and the all-zero request 0x1010c03c -- the node sphere"
 read = true
 doc = "docs/39-boarding.md"
+
+# --- the walker's global path, ../docs/24-motion.md -----------------------
+[[entry]]
+module = "ArealMap.dll"
+at = "0x10023240"
+kind = "function"
+name = "areal links: an areal whose record +0x20 is 0 gets none (0x100232ab); a walkable areal links to each walkable neighbour at the centres' distance + 1 (0x1002342b), and to a building exit over it at 1"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "ArealMap.dll"
+at = "0x100232ab"
+kind = "site"
+name = "areal links: the record's first flag word 0 skips the areal -- Non-Walkable"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "ArealMap.dll"
+at = "0x100232f4"
+kind = "site"
+name = "areal links: a neighbour whose record's first flag word is 0 is skipped"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "ArealMap.dll"
+at = "0x1002342b"
+kind = "site"
+name = "areal link cost: the 2D distance between the records' centres + 1.0 (0x100394f8)"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "ArealMap.dll"
+at = "0x1000a930"
+kind = "function"
+name = "MHallWay interface 0x303 slot 14: always answers 0"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "ArealMap.dll"
+at = "0x10020c60"
+kind = "function"
+name = "system areal map query: answers interfaces 0, 0x302 and 0x305 only"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "ArealMap.dll"
+at = "0x1000b6bc"
+kind = "site"
+name = "hall-way exit links: a flag-4 vertex joins another building's flag-4 vertex nearer than 50.0 (0x10039520)"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "ArealMap.dll"
+at = "0x1001f68e"
+kind = "site"
+name = "OnAddStatic: only an object of kind 10 (a tree or stone) breaks areals"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10036730"
+kind = "function"
+name = "the walker's global path: MWorldGraph (+0x128) searched from start to goal, a waypoint per step into +0xe8"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10036cc5"
+kind = "site"
+name = "global path waypoint: an edge the line to the goal misses gives its ends moved 3.0 (0x10059600) along it, the one making the way shorter"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10042e0b"
+kind = "site"
+name = "MWorldGraph link: new cost = (cost so far + link) x (1 + rand()/32767 x graph +0x38, 0.7)"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x100207df"
+kind = "site"
+name = "graph search: fails past 0x800 nodes taken off the open list"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10043011"
+kind = "site"
+name = "MWorldGraph search: stops as the goal is reached ('Reached')"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1003bd5d"
+kind = "site"
+name = "MWalker::SetTarget: a goal on no areal, or on one whose first flag word is 0 without CanFly, is refused"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1003e2dc"
+kind = "site"
+name = "walker idle: 'Cannot leave Non-Walkable Areal' -- 50 random points a round in a square of half-width 30, +3 a round while under 500; the first walkable is taken"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x10030fc4"
+kind = "site"
+name = "roam: a point counts on an areal whose record's first flag word is set, up to 150 tries"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1003bfdf"
+kind = "site"
+name = "MWalker::SetTarget: answers 1 only when the global path (0x10036730) is found"
+read = true
+doc = "docs/24-motion.md"
+
+[[entry]]
+module = "Behavior.dll"
+at = "0x1002b059"
+kind = "site"
+name = "follow pick: SetTarget on each random spot, the first it accepts kept, up to 0x4d (77) tries"
+read = true
+doc = "docs/31-packages.md"

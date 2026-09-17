@@ -15,6 +15,8 @@ pub const MISSION_04: &str = "MISSIONS/CAMPAIGN/CAMPAIGN.00/Mission.04";
 /// The first chapter's *The Arrival* and *Outflanking Maneuver*.
 pub const C01_MISSION_02: &str = "MISSIONS/CAMPAIGN/CAMPAIGN.01/Mission.02";
 pub const C01_MISSION_03: &str = "MISSIONS/CAMPAIGN/CAMPAIGN.01/Mission.03";
+/// The second chapter's *The Iron Monster*.
+pub const C02_MISSION_01: &str = "MISSIONS/CAMPAIGN/CAMPAIGN.02/Mission.01";
 
 pub fn looks_like_install(path: &Path) -> bool {
     MARKERS.iter().all(|m| path.join(m).exists())

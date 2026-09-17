@@ -278,6 +278,15 @@ impl Progress {
         }
     }
 
+    /// A dead unit deleted, its controller's `+92` ms after it died
+    /// (`World3D.dll!KillGameObject`, docs/26, "A dead unit is deleted"): no object answers its
+    /// id any more, and function 52 gives `ERROR`. A building is never deleted; its shell
+    /// stays, and its owner word reads 65534.
+    pub fn deleted(&mut self, id: i32) {
+        self.units.retain(|u| u.id != id);
+        self.areals.leave(id);
+    }
+
     /// A unit or building destroyed.
     ///
     /// STAND-IN: docs/34-progression.md#function-31-how-many-robots-a-clan-has--read -- how
@@ -382,6 +391,13 @@ mod tests {
         p.destroyed(factory);
         assert_eq!(p.owner(factory), DESTROYED_OWNER);
         assert_eq!(p.owner(0x8000_0003_u32 as i32), NO_OBJECT);
+        // A dead unit reads 65534 until it is deleted, and then nothing answers its id; a
+        // building's shell is never deleted.
+        p.destroyed(1);
+        assert_eq!(p.owner(1), DESTROYED_OWNER);
+        p.deleted(1);
+        p.deleted(factory);
+        assert_eq!((p.owner(1), p.owner(factory)), (NO_OBJECT, DESTROYED_OWNER));
     }
 
     #[test]

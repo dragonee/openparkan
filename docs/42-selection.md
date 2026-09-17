@@ -297,7 +297,9 @@ when the areal's first flag word (`+0x20` of its record,
 over the satellite map. The four points it marks, taken to the world at L =
 1996.1, lie in areals whose first word is 0.
 
-What the word means beyond this test is not established.
+The word is what makes an areal walkable: the areal map links only areals
+that set it, and the walker refuses a goal on one that does not
+([24-motion.md](24-motion.md#the-global-path--read-and-measured)).
 
 ## The cursor shows a state — *read*, and *measured*
 
@@ -610,8 +612,10 @@ gives its orders; the others keep their points until a later `GO` erases them.
 
 ## Not established
 
-- **Areal flag word 0.** What it means, beyond deciding where a non-flyer
-  selection may be sent; and why the recording shows `PLACE`, not `GUARD`,
+- ~~**Areal flag word 0.** What it means, beyond deciding where a non-flyer
+  selection may be sent~~ — **read**: it marks a walkable areal
+  ([24-motion.md](24-motion.md#the-global-path--read-and-measured)). Still
+  open: why the recording shows `PLACE`, not `GUARD`,
   over the bunker's roof at 190.5 s. The object pick may miss the bunker there,
   or the frame may lag the cursor.
 - **The object pick.** Which object classes the world's lists 3 and 4 are, and

@@ -10,7 +10,8 @@ use parkan_formats::mission::{self, Value as PropertyValue};
 use parkan_formats::nres::Archive;
 use parkan_formats::pose::Pose;
 use parkan_formats::{
-    control, controls, cpt, exp, font, fxid, landmesh, materials, mesh, ndp, rsli, scr, sky, texm, wea,
+    arealmap, control, controls, cpt, exp, font, fxid, landmesh, materials, mesh, ndp, rsli, scr, sky, texm,
+    wea,
 };
 
 use crate::assembly;
@@ -205,6 +206,24 @@ pub fn material_library(path: &Path) -> Result<Value> {
 
 /// How many height samples a side the land mesh dump takes.
 pub const HEIGHT_SAMPLES: usize = 17;
+
+/// A `Land.map`: every areal as read, and the grid's lists, x the outer index.
+pub fn areal_map(path: &Path) -> Result<Value> {
+    let map = arealmap::load(path)?;
+    Ok(json!({
+        "kind": "arealmap",
+        "areals": map.areals.iter().map(|a| json!({
+            "centre": vector(&a.centre),
+            "area": number(a.area),
+            "vertices": a.vertices.iter().map(|v| vector(v)).collect::<Vec<_>>(),
+            "edges": a.edges.iter().map(|&(n, t)| json!([n, t])).collect::<Vec<_>>(),
+            "flags": a.flags,
+        })).collect::<Vec<_>>(),
+        "cells_across": map.cells_across,
+        "cells_down": map.cells_down,
+        "cells": map.cells,
+    }))
+}
 
 /// A `Land.msh`: every stream as parsed, and the elevation on a grid.
 pub fn land_mesh(path: &Path) -> Result<Value> {
@@ -856,8 +875,9 @@ pub fn dump(kind: &str, path: &Path, names: &[String]) -> Result<Value> {
         "fml" => formula_set(path),
         "research" => research_tree(path),
         "buildings" => buildings(path),
+        "arealmap" => areal_map(path),
         other => anyhow::bail!(
-            "unknown kind {other:?}; expected nres, mission, texm, materials, landmesh, mesh, assembly, control, controls, cpt, ndp, exp, fxid, sky, cfg, strings, progression, rsli, font, man, scr, varset, fml, research or buildings"
+            "unknown kind {other:?}; expected nres, mission, texm, materials, landmesh, mesh, assembly, control, controls, cpt, ndp, exp, fxid, sky, cfg, strings, progression, rsli, font, man, scr, varset, fml, research, buildings or arealmap"
         ),
     }
 }

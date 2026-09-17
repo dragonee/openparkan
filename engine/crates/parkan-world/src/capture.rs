@@ -10,11 +10,12 @@ use glam::Vec3;
 use parkan_formats::hallway::{self, HallWay, PLACE_POD};
 use parkan_formats::mission::KIND_BUILDING;
 use parkan_sim::behaviour::Places;
+use parkan_sim::path::{Refusal, Way};
 
 use crate::construction::placed;
 use crate::play::{
-    CLAN_NEUTRAL, Play, RELATION_HOSTILE, RELATION_NEUTRAL, VOICE_BUILD_CAPTURE, VOICE_EBUILD_CAPTURE,
-    VOICE_NBUILD_CAPTURE,
+    BUILDING_BRIDGE, CLAN_NEUTRAL, Play, RELATION_HOSTILE, RELATION_NEUTRAL, VOICE_BUILD_CAPTURE,
+    VOICE_EBUILD_CAPTURE, VOICE_NBUILD_CAPTURE,
 };
 
 /// A hall way's exit: flag 1 (docs/24, "The way to the pod").
@@ -188,11 +189,8 @@ impl Play {
     }
 
     /// Every live building's places for a capture search: whether it is finished, its pod and
-    /// the contour vertices a flyer may land at.
-    ///
-    /// STAND-IN: docs/31-packages.md#the-plan-slot-15-0x100306f0--read -- the engine keeps no
-    /// areals, so an areal's flag word is not tested: a contour vertex counts where the ground
-    /// under it is above any water.
+    /// the contour vertices a flyer may land at, those on an areal whose first flag word is set
+    /// (on a map with no areal map, those over ground above any water).
     pub fn capture_places(&mut self) -> Vec<Places> {
         let buildings: Vec<usize> = (0..self.units.len())
             .filter(|&t| {
@@ -209,7 +207,10 @@ impl Play {
                 let contour = self
                     .contour(t)
                     .into_iter()
-                    .filter(|p| self.ground.water(p.x, p.y, p.z).is_none_or(|w| w <= p.z))
+                    .filter(|p| match &self.graph {
+                        Some(graph) => graph.usable(p.x, p.y),
+                        None => self.ground.water(p.x, p.y, p.z).is_none_or(|w| w <= p.z),
+                    })
                     .collect();
                 Places { id: self.units[t].logical_id, complete: !self.building_itself(t), pod, contour }
             })
@@ -256,6 +257,74 @@ impl Play {
         walk_back(&prev, exit).into_iter().map(|i| points[i]).collect()
     }
 
+    /// Every live bridge's hall way in the world, with its target, as the walker's search links
+    /// it: each vertex that has a point, and the links between them.
+    ///
+    /// STAND-IN: docs/24-motion.md#the-global-path--read -- the areal map links the exits of
+    /// every building's hall way to the areals under them; only a bridge's are linked here,
+    /// since a way through any other building's inside is not walked.
+    pub fn bridge_ways(&mut self) -> Vec<(usize, Way)> {
+        let bridges: Vec<usize> = (0..self.units.len())
+            .filter(|&t| {
+                self.units[t].kind == KIND_BUILDING
+                    && self.units[t].type_word == BUILDING_BRIDGE
+                    && self.battle.combat.targets.get(t).is_some_and(|x| x.alive)
+            })
+            .collect();
+        bridges
+            .into_iter()
+            .filter_map(|t| {
+                let (h, points) = self.hall_way_points(t)?;
+                let kept: Vec<usize> = (0..points.len()).filter(|&i| points[i].is_some()).collect();
+                let index = |i: u32| kept.iter().position(|&k| k == i as usize);
+                let way = Way {
+                    points: kept.iter().filter_map(|&i| points[i]).collect(),
+                    flags: kept.iter().map(|&i| h.vertices[i].flags).collect(),
+                    links: h.links.iter().filter_map(|l| Some((index(l.start)?, index(l.end)?))).collect(),
+                };
+                Some((t, way))
+            })
+            .collect()
+    }
+
+    /// The points robot target `t` walks from `from` to `goal` across the ground: the walker's
+    /// global path for a unit that does not fly, straight for a flyer or on a map with no areal
+    /// map (docs/24, "The global path"). A goal the walker refuses, or one it finds no way to,
+    /// gives none, and the unit holds; a unit on an areal no link leaves makes for the nearest
+    /// walkable ground first.
+    ///
+    /// STAND-IN: docs/24-motion.md#the-global-path--read -- how the walker goes to the point it
+    /// finds off a non-walkable areal is not read: straight. What the walker does when its search
+    /// fails is not read: it holds, its queues emptied as `SetTarget` empties them first. The
+    /// game's `rand()` is not followed: a 32-bit xorshift of the play's own.
+    pub fn route(&mut self, t: usize, from: Vec3, goal: Vec3) -> Vec<Vec3> {
+        let Some((_, robot)) = self.robots.iter().find(|(rt, _)| *rt == t) else { return vec![goal] };
+        if robot.flyer || self.graph.is_none() {
+            return vec![goal];
+        }
+        let (clearance, standing) =
+            (robot.collision.1, robot.walker.ground.and_then(|h| h.solid).map(|s| s.0));
+        let ways = self.bridge_ways();
+        let on = |b: Option<usize>| b.and_then(|b| ways.iter().position(|(w, _)| *w == b));
+        let aboard = on(standing);
+        let ways: Vec<Way> = ways.into_iter().map(|(_, w)| w).collect();
+        let Play { graph, walk_seed, .. } = self;
+        let graph = graph.as_ref().expect("tested above");
+        let mut random = || {
+            let mut x = *walk_seed;
+            x ^= x << 13;
+            x ^= x >> 17;
+            x ^= x << 5;
+            *walk_seed = x;
+            (x >> 8) as f32 / (1u32 << 24) as f32
+        };
+        match graph.route(from, goal, &ways, aboard, clearance, &mut random) {
+            Ok(legs) => legs,
+            Err(Refusal::Stranded) => graph.escape(from, &mut random).into_iter().collect(),
+            Err(Refusal::Goal | Refusal::NoWay) => Vec::new(),
+        }
+    }
+
     /// The legs of a walk for robot target `t` at `from` to `goal`: out of the building it
     /// walked into first while it still stands inside that building's outer ring. Once outside,
     /// the building is forgotten.
@@ -268,7 +337,12 @@ impl Play {
                 self.construction.ways.entered.remove(&t);
             }
         }
-        legs.push(goal);
+        let start = legs.last().copied().unwrap_or(from);
+        let way = self.route(t, start, goal);
+        if way.is_empty() {
+            return Vec::new();
+        }
+        legs.extend(way);
         legs
     }
 
@@ -286,7 +360,13 @@ impl Play {
         if from.distance(pod) <= POD_ARRIVED {
             return Vec::new();
         }
-        self.way_in(b, from).unwrap_or_else(|| vec![pod])
+        let way = self.way_in(b, from).unwrap_or_else(|| vec![pod]);
+        let mut legs = self.route(t, from, way[0]);
+        if legs.is_empty() {
+            return Vec::new();
+        }
+        legs.extend(way);
+        legs
     }
 }
 

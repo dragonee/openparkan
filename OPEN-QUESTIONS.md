@@ -69,6 +69,7 @@ engineering such as terrain culling or drawing the sky's textures.
 - [ ] [M3] Which way across a slope the mode-2 brake acts, and which way a positive lean tips the model.
 - [ ] [M3] A chord with no row of its own, such as Shift+W.
 - [ ] What behaviour flag `0x800` changes besides clearing the walker.
+- [ ] [M14] The walker's local path and its obstacle contours; how it drops the points a unit has passed (`MWalker::ClearMoverReachedPoint`); how a unit's place comes onto a building's map object and which vertex the search starts from; who calls `MHallWay` slot 11; a hall-way vertex's size gate (the unit's `+0x960`, the record's `+0x28`); the link flags `0x10000` and `0x20000`; how a walker goes to the point it finds off a non-walkable areal, and what it does when its search fails ([24-motion](docs/24-motion.md#not-established)).
 - [ ] The remaining `.ctl` values:
   - [ ] class 3's value 0, the camera's values 3–5, and the hero's arms' values 1 and 4
   - [ ] the section-5 record's int 8
@@ -186,7 +187,7 @@ Added on 2026-09-15 against `4f3a16e`, after the Outpost island's landing was fi
 - [ ] [M11] How the cursor is shown in view mode 5 (the engine: the system's cursor), and the fill colour the resource rows hand their bar (the engine: the weapons list's).
 - [ ] Whether the designer pauses the world (the level's flag bit 8), and whether the `Mission` handler runs while a building's screen or the designer is up (the pause byte `+0xe8`).
 - [ ] What handing the hero back does to it while the screen is up, and whether the player's keys still move it.
-- [ ] The heading the escape leaves a new bot with, whether a flyer climbs on its way out, and [M11] which areals the escape's random points must be on.
+- [ ] The heading the escape leaves a new bot with, and whether a flyer climbs on its way out. (~~[M11] which areals the escape's random points must be on~~ — closed in M14: walkable ones, as the roam's test reads.)
 - [ ] What commander pages 1–4 and 6–8 show from first person.
 
 **The warbot designer**
@@ -246,7 +247,8 @@ Added on 2026-09-15 against `950af7e`, after M12 made the mission winnable end t
 
 **Selecting and ordering**
 
-- [ ] [M12] An areal's first flag word (`+0x20`), which decides where a walker may be sent, and why the recording shows `PLACE`, not `GUARD`, over the bunker's roof at 190.5 s.
+- [x] ~~[M12] An areal's first flag word (`+0x20`), which decides where a walker may be sent~~ — read in M14: it marks a walkable areal, the only kind the areal map links, and the engine's walker now keeps to them ([24-motion](docs/24-motion.md#the-global-path--read-and-measured)).
+- [ ] Why the recording shows `PLACE`, not `GUARD`, over the bunker's roof at 190.5 s.
 - [ ] [M12] Which objects the world's classes 3 and 4 are, and the object pick's order and nearest-hit rule (`0x100361a0`).
 - [ ] Whether the band is filled or only outlined; double clicks; whether a group sent to one place spreads out.
 - [ ] The pending picks not traced: kind 2 (attack-target mode) and the orders kinds 2–5 give.
@@ -303,7 +305,7 @@ briefing's route. [40-command-mode](docs/40-command-mode.md#not-established),
 
 - [ ] [M13] How a walker's path joins the hall way (`MGraph`), so which exit a capturer takes (the engine: the shortest whole way); whether a flyer touches down or hovers at its landing corner; and a flyer against a building's walls outside the hall way (the leg to exit 67 skirts the factory's west side).
 - [ ] [M13] The escape's damaged-node test, and which paths a unit leaves a building by (the engine: back along the hall way).
-- [ ] [M13] A contour vertex's areal flag word, which the engine has no areals for: a vertex counts where the ground is above water.
+- [x] ~~[M13] A contour vertex's areal flag word, which the engine has no areals for~~ — closed in M14: the engine reads the areal map, and a vertex counts on a walkable areal.
 - [ ] [M13] The maps' contact list: the engine marks what lies in a player unit's radar range, not the list the run loop empties and each unit's takt refills.
 - [ ] The sphere behind `IBuilding` slot 15.
 - [ ] Why the Teleport's map icon looks white at about 412 s, as if selected, when a main teleport's capture selects nothing.

@@ -1,8 +1,10 @@
 # Land.map — the navigation mesh
 
 Each map's `Land.map` is an NRes archive with a single member of type 12 named
-`ArealMap`. It holds a convex decomposition of the world into *areals*, the
+`ArealMap`. It holds a decomposition of the world into polygons, *areals*, the
 adjacency between them, and a uniform grid that indexes them for point lookup.
+Most areals are convex, but not all: 10,441 of 34,662 turn back by more than
+0.6° at some corner (*measured*).
 
 This is the pathfinding structure. It is also the first format here recovered
 by **disassembling `ArealMap.dll`** rather than by inference from data —
@@ -31,8 +33,9 @@ One areal:
 0x08  float32  0, 0
 0x10  float32  area of the polygon
 0x14  float32  0, 0, 1.0
-0x20  uint32   flags: word 0 is 0 or 1; word 2 has all of 0xF0 set (240,
-               242) on a lake and 1..29 elsewhere; words 1 and 3 are 0
+0x20  uint32   flags: word 0 is 1 on a walkable areal, 0 elsewhere; word 2
+               has all of 0xF0 set (240, 242) on a lake and 1..29
+               elsewhere; words 1 and 3 are 0
 0x30  uint32   vertex count V
 0x34  uint32   sub-block count B          zero on every shipped map
 0x38  float32  V × [3]                    polygon vertices
@@ -66,6 +69,12 @@ ground apart from 12 shore faces (*measured* at the level-0 faces whose centre
 lies in exactly one areal; `Areal.lake`). Tut_1 has 5 such areals among
 378. What the low bits mean is not established; see
 [24-motion.md](24-motion.md#lakes-in-the-areal-map--measured).
+
+**The first flag word says where a walker may go** (*read*). The areal map
+links an areal to its neighbours only when both set it, and a walker is
+refused a goal on one that does not; the engine's strings call the others
+*Non-Walkable*. Only 3% to 53% of a map's area is walkable. See
+[24-motion.md](24-motion.md#the-global-path--read-and-measured).
 
 **The areal count is not in the payload.** It lives in the NRes directory
 entry's element-count field at offset +4 — see [01-nres.md](01-nres.md), which
@@ -108,6 +117,11 @@ Six checks in `uv run openparkan verify`, over all 33 maps:
 - **Areals tile the map** — the areas sum to the full square, to within 1%, on
   every map. The decomposition has no gaps and no overlaps.
 - **Every cell index is a real areal.**
+- **A third of the areals are not convex** — 10,441 of 34,662 turn back by
+  more than 0.6° at a corner.
+- **3% to 53% of a map's area is walkable** — from 2.6% on `Mission.03.bis`
+  to 53.3% on `ILKON`; and on KM_4 the canyon floor under the bridge is not,
+  while both banks are.
 
 Two more sit with the ground checks: **the four flag words take only the
 values above** — 34662 areals — and **a lake areal holds only water and

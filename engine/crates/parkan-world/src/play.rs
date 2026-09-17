@@ -23,10 +23,10 @@ use parkan_formats::mission::{
     self, Clan, KIND_BUILDING, KIND_ROCK, KIND_UNIT, KIND_VEGETATION, Mission, Value,
 };
 use parkan_formats::pose::Pose;
-use parkan_formats::{gamedir, landmesh};
+use parkan_formats::{arealmap, gamedir, landmesh};
 use parkan_sim::behaviour::{
-    FIRE_BAR_FLYER, FIRE_BAR_WALKER, SCORE_RAMP, Search, Seen, Senses, Takt, Task, Walk, distance_score,
-    fire_wait_ms,
+    FIRE_BAR_FLYER, FIRE_BAR_WALKER, SCORE_RAMP, Search, Seen, Senses, Takt, Task, Usable, Walk,
+    distance_score, fire_wait_ms,
 };
 use parkan_sim::combat::{Event, Part, Round, RoundEnd, Target};
 use parkan_sim::damage::FLIGHT_MS;
@@ -38,6 +38,7 @@ use parkan_sim::hit::ROUND_SKIPS_FACE;
 use parkan_sim::machine::Walker;
 use parkan_sim::motion::GRAVITY;
 use parkan_sim::orders::{self, ACKNOWLEDGEMENTS, Digit, Picked, Selector, VoicePick};
+use parkan_sim::path::Graph;
 use parkan_sim::progression::Notice;
 use parkan_sim::solid::{self, NO_CONTACT, Solid};
 use parkan_sim::targeting::{Contact, TargetList};
@@ -246,6 +247,8 @@ pub struct NodeEffect {
 pub struct Play {
     pub hero: Hero,
     pub ground: Ground,
+    /// The map's areals cut for the walker's search, where the map has a `Land.map`.
+    pub graph: Option<Graph>,
     pub battle: Battle,
     pub assembly: Assembly,
     pub fx: Fx,
@@ -344,6 +347,8 @@ pub struct Play {
     pub places: Vec<crate::places::Places>,
     /// The units the hero's Enter took, which hold no mind (see [`Play::free_minds`]).
     pub mindless: Vec<usize>,
+    /// The walker's search's random source (docs/24, "The global path").
+    pub walk_seed: u32,
 }
 
 /// A round about to leave a barrel.
@@ -679,6 +684,11 @@ impl Play {
         let Some(mut hero) = Hero::load(&mut assembly, mission)? else { return Ok(None) };
         let dir = terrain::map_dir(game, &mission.map_path)?;
         let land = landmesh::load(&gamedir::resolve(&dir, "Land.msh").context("the map has no Land.msh")?)?;
+        let graph = match gamedir::resolve(&dir, "Land.map").map(|p| arealmap::load(&p)) {
+            Some(Ok(map)) => Some(Graph::new(map)),
+            Some(Err(e)) => return Err(e.into()),
+            None => None,
+        };
         let ratio = settings::level_ratio(game);
         let mut battle = Battle::load(&mut assembly, mission, Some(hero.object), ratio)?;
         hero.arm(&mut battle, &mut assembly);
@@ -838,6 +848,7 @@ impl Play {
         let mut play = Play {
             hero,
             ground,
+            graph,
             battle,
             assembly,
             fx,
@@ -889,6 +900,7 @@ impl Play {
             research: crate::research::Research::default(),
             places: Vec::new(),
             mindless: Vec::new(),
+            walk_seed: 0x2545_f491,
         };
         play.research = crate::research::Research::load(game, mission, &battle_objects, &play.units);
         play.load_places(mission);
@@ -1545,6 +1557,10 @@ impl Play {
             self.deleted[target] = true;
             self.flights.retain(|f| f.target != target);
             self.killed.push(self.battle.objects[target]);
+            // No object answers a deleted unit's id any more: function 52 gives `ERROR`.
+            if let (Some(unit), Some(p)) = (self.units.get(target), self.progression.as_mut()) {
+                p.progress.deleted(unit.logical_id);
+            }
         }
         // Turret effects follow their points and the channels that drive them.
         for i in 0..self.turret_effects.len() {
@@ -3081,8 +3097,9 @@ impl Play {
             if !self.paused && self.thinks(self.units[t].clan) {
                 let sensed = self.radar_ids(e, true, world);
                 let others = self.seen_by(t, seen, &sensed);
-                let Play { emplacements, battle, ground, building_fire_floor, .. } = self;
+                let Play { emplacements, battle, ground, building_fire_floor, graph, .. } = self;
                 let robot = &mut emplacements[e].1;
+                let usable = |x: f32, y: f32| graph.as_ref().is_none_or(|g| g.usable(x, y));
                 let senses = Senses {
                     now_ms: robot.time_ms,
                     position: robot.walker.body.position,
@@ -3091,6 +3108,7 @@ impl Play {
                     size_class: robot.size_class,
                     flyer: robot.flyer,
                     bounds: ground.bounds(),
+                    usable: Usable(&usable),
                     has_weapon: !robot.guns.is_empty(),
                     walker_idle: true,
                     neutral: false,
@@ -3161,6 +3179,8 @@ impl Play {
             Task::Search { search: Search::Capture(_) | Search::Building(_), .. }
         );
         let places = if capturing { self.capture_places() } else { Vec::new() };
+        let graph = &self.graph;
+        let usable = |x: f32, y: f32| graph.as_ref().is_none_or(|g| g.usable(x, y));
         let (_, robot) = &mut self.robots[r];
         let now = robot.time_ms;
         let at = robot.walker.body.position;
@@ -3172,6 +3192,7 @@ impl Play {
             size_class: robot.size_class,
             flyer: robot.flyer,
             bounds,
+            usable: Usable(&usable),
             has_weapon: !robot.guns.is_empty(),
             walker_idle: robot.wizard.idle(now),
             neutral: false,

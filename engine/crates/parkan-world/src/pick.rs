@@ -159,13 +159,15 @@ impl Play {
         }
     }
 
-    /// Whether a selection may be sent to `point` (`0x10076770`).
-    ///
-    /// STAND-IN: docs/42-selection.md#a-valid-place--read-and-measured -- the engine keeps no
-    /// areals, so an areal's first flag word is not tested: a place is valid where there is
-    /// ground above any water, and always for a selection of flyers.
+    /// Whether a selection may be sent to `point` (`0x10076770`): an areal holds it, and every
+    /// selected unit flies or the areal's first flag word is set. The game loads no map without
+    /// an areal map; on one here a place is valid where there is ground above any water.
     pub fn valid_place(&self, point: Vec3) -> bool {
-        if self.selected_units().iter().all(|&t| self.units[t].designation.chassis_type == 1) {
+        let flyers = self.selected_units().iter().all(|&t| self.units[t].designation.chassis_type == 1);
+        if let Some(graph) = &self.graph {
+            return graph.areal_at(point.x, point.y).is_some() && (flyers || graph.usable(point.x, point.y));
+        }
+        if flyers {
             return true;
         }
         let Some(ground) = self.ground.below(point.x, point.y, point.z + 1.0) else { return false };

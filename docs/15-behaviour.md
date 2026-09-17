@@ -642,6 +642,13 @@ a *guess*). `c3m3p.scr` sets 65534 and never compares it.
 The scripts read two other answers beside it: 0, the player's clan
 (`PLAYER_CLAN`), ticks the objective, and 1 marks it in progress.
 
+**A dead unit answers 65534 only until it is deleted** (*derived*). The game
+deletes it its controller's `+92` ms after it dies
+([26-damage.md](26-damage.md)), and then no object answers its id: function 52
+gives `ERROR`. A building is never deleted, so its shell answers 65534 for good.
+`c2m1p.scr` ticks *The Iron Monster*'s third objective, the enemy's heavy
+warbot, on `ERROR` for logical id 22.
+
 ## Naming the functions from the binary
 
 The first pass concluded the binary would not name them: the handlers carry no
