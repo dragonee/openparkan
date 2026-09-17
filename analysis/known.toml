@@ -29073,3 +29073,20 @@ kind = "site"
 name = "follow pick: SetTarget on each random spot, the first it accepts kept, up to 0x4d (77) tries"
 read = true
 doc = "docs/31-packages.md"
+
+# --- a guided gun's target point, ../docs/29-weapons.md ------------------------
+[[entry]]
+module = "Control.dll"
+at = "0x1002a8c0"
+kind = "function"
+name = "gun gate's target point: interface 0x20 slot 3 with 2 and the all-zero request -- the node sphere's centre, or a named part's; the matrix position for an object without 0x20"
+read = true
+doc = "docs/29-weapons.md"
+
+[[entry]]
+module = "Control.dll"
+at = "0x100248b6"
+kind = "site"
+name = "seeker tick: interface 0x20 slot 3 with 2 and the all-zero request -- steers at the target's node sphere's centre"
+read = true
+doc = "docs/29-weapons.md"

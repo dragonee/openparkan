@@ -428,6 +428,12 @@ value 8 is positive (`0x10029d3a`):
 2. **Too far.** When the target's point (its part's where it names one,
    `0x1002a8c0`) is farther from the unit's position than value 8
    (`0x10029e28`, squared): state 7, no shot, and the lock goes back to value 9.
+   With no part named, the point is **the centre of the target's node sphere**:
+   interface `0x20` slot 3 asked with 2 and the all-zero request
+   (`0x1002a95b`–`0x1002a97f`), the sphere
+   [24-motion.md](24-motion.md#finding-the-ground--read) reads; only an object
+   that does not answer `0x20` gives its matrix's position (`0x1002a9a5`). A
+   tower's is its middle, not its foot on the ground.
 3. **Off the barrel.** With value 10 positive, the barrel point's direction and
    the line from the unit to the target are normalised. A dot product no greater
    than value 10 gives state 8, no shot, and the lock back to value 9
@@ -815,7 +821,11 @@ the round, and those are the seeker's values 1, 0 and 2 (`0x1002b738`,
 
 A seeker's target is the gun's target, handed to the round as it leaves
 ([The round's start](#the-rounds-start)). A turret's gun has its turret's
-target.
+target, and a unit the player drives has the player's: the target list is
+that unit's (`iron3d.dll:0x10091a80`). **The seeker steers at the target's
+node sphere's centre**, asked as the gate asks it (`Control.dll:0x100248b6`).
+A winged SSM (`bm_m_04`: mode 0, 45 m/s) flies straight at that point, so a
+crest between it and a tower on a hill takes the missile.
 
 ## How the AI fires — *read*
 

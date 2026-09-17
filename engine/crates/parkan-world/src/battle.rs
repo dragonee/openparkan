@@ -307,6 +307,11 @@ impl Battle {
             return None;
         }
         let centre = (lo + hi) / 2.0;
+        // The node sphere's centre, placed; a unit's follows it as it moves ([`crate::play`]).
+        let assembly_parts = assembly.parts(object.kind, &object.path);
+        let (local, _) = crate::robot::node_sphere(assembly, &assembly_parts);
+        let aim = place.apply((local * scale).to_array().map(f64::from));
+        let aim = Vec3::new(aim[0] as f32, aim[1] as f32, aim[2] as f32);
         let shield = if matches!(object.kind, mission::KIND_UNIT | mission::KIND_BUILDING) {
             crate::shields::load(assembly, object.kind, &object.path, object_ratio)
         } else {
@@ -318,6 +323,7 @@ impl Battle {
             radius: (hi - lo).length() / 2.0,
             alive: true,
             position: Vec3::from_array(object.position),
+            aim,
             shield,
         });
         self.objects.push(index);

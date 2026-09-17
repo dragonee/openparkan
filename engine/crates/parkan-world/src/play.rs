@@ -487,6 +487,8 @@ fn pose_target(robot: &Robot, target: &mut Target) {
         target.centre = (lo + hi) / 2.0;
     }
     target.position = robot.walker.body.position;
+    let aim = place.apply(robot.bound.0.to_array().map(f64::from));
+    target.aim = Vec3::new(aim[0] as f32, aim[1] as f32, aim[2] as f32);
 }
 
 /// The hero as the battle strikes it: each of its parts, posed by [`pose_target`], its sphere
@@ -511,6 +513,7 @@ fn hero_target(hero: &Hero, shield: Option<parkan_sim::shield::Shield>) -> Targe
         radius: 0.0,
         alive: true,
         position: hero.walker.body.position,
+        aim: hero.walker.body.position,
         shield,
     };
     pose_target(&hero.robot, &mut target);
@@ -1163,7 +1166,8 @@ impl Play {
 
     /// A new target: `TARGET_SELECTED`, and the guided guns take it (`0x10090a70`).
     fn target_changed(&mut self) {
-        self.hero.relink(self.targets.current);
+        let current = self.targets.current;
+        self.gunner_mut().relink(current);
         if let Some(s) = self.progression.as_ref().and_then(|p| p.sound(TARGET_SELECTED)) {
             self.says.push(Say::Sound(s));
         }
@@ -1218,7 +1222,14 @@ impl Play {
                 self.say_sound(VOICE_UNIT_DETECTED, true);
             }
         }
-        self.hero.target_point = self.targets.current.and_then(|t| world.get(t)).map(|c| c.position);
+        // The gate measures to the target's node sphere's centre (`Control.dll:0x1002a8c0`).
+        let point = self
+            .targets
+            .current
+            .filter(|&t| world.get(t).is_some())
+            .and_then(|t| self.battle.combat.target(t))
+            .map(|x| x.aim);
+        self.gunner_mut().target_point = point;
     }
 
     /// One of `iron3d.dll`'s commands (`0x10071cd0`), the player looking from `view`.
@@ -1918,6 +1929,12 @@ impl Play {
             crate::hero::drive_input(robot, &mut d.pilot, true);
             robot.walker.body.command = [0.0; 3];
             let_go(robot);
+            // Back to its fire control, which picks its own target; the hero's guns take the
+            // player's again.
+            robot.relink(None);
+            robot.target_point = None;
+            let current = self.targets.current;
+            self.hero.relink(current);
         }
     }
 
@@ -1929,10 +1946,14 @@ impl Play {
         let chassis = self.robots[r].1.parts[self.robots[r].1.chassis_part].record.clone();
         let Ok(pilot) = crate::hero::Hero::pilot_for(&mut self.assembly, &chassis) else { return false };
         self.hero.release_keys();
+        let current = self.targets.current;
         let robot = &mut self.robots[r].1;
         robot.wizard.clear();
         robot.walker.drive = None;
         take_over(robot, lock);
+        // Its guided guns take the player's target, and its fire control's own is forgotten.
+        robot.fire_target = None;
+        robot.relink(current);
         self.driving = Some(Driving { target: t, pilot, fire_held: false, telepresence });
         true
     }
@@ -2011,6 +2032,16 @@ impl Play {
         self.driven_target()
             .and_then(|d| self.robots.iter().find(|(t, _)| *t == d))
             .map_or(&self.hero.robot, |(_, r)| r)
+    }
+
+    /// The unit whose guns take the player's target: the target list is the driven unit's, and
+    /// `iron3d.dll:0x10091a80` hands its target to that unit's turret — the bot the player
+    /// drives, else the hero.
+    fn gunner_mut(&mut self) -> &mut Robot {
+        match self.driving.as_ref().and_then(|d| self.robots.iter().position(|(t, _)| *t == d.target)) {
+            Some(r) => &mut self.robots[r].1,
+            None => &mut self.hero.robot,
+        }
     }
 
     /// The view's own unit, to change.

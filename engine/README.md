@@ -783,6 +783,12 @@ More feedback on the first chapter: armour, docks, turrets, batteries and repair
   points, handed to the nodes in index order, each filled before the next and a destroyed one
   passed over. The cockpit says `VOICE_REPAIR_SYS_ON` and `_OFF` as the player switches it. On
   Mission 01 the hero at half life heals 92 points in ten seconds, faster as its own node mends.
+- **A driven unit's guns take the player's target** (docs/29, "Guided rounds differ in how
+  hard they steer"). The target list is the driven unit's, and its target goes to that unit's
+  guided guns, and their gate measures to it; before, the hero's own guns took it, so a bot the
+  player drove, *Ballen's Crossing*'s HQ among them, reported every target out of range. A
+  gun's gate and a seeker find a target at its node sphere's centre, not its placement, so the
+  HQ's winged missiles, 380 m off a tower on the hill, clear the crest and bring it down.
 - **A deleted unit leaves the scripts' view** (docs/15, "65534 is a destroyed object's
   owner"). Function 52 answers 65534 for a dead unit until it is deleted, its controller's
   `+92` ms later, and `ERROR` after, as no object answers its id; a building's shell answers

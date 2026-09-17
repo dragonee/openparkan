@@ -5659,3 +5659,109 @@ fn c02_m01s_heavy_warbot_objective_completes_once_the_dead_warbot_is_deleted() {
     assert_eq!(play.progression.as_ref().unwrap().progress.owner(22), u32::MAX, "no object answers id 22");
     assert_eq!(state(&play), 1, "the objective is complete");
 }
+
+/// Ballen's Crossing: the hero boards the neutral HQ, whose two `LWML2M` winged missiles
+/// (round `bm_m_04`: range 700, a seeker of 500 reach, a 0.7 rad cone and a 7 s lock) are the
+/// only guns that reach the enemy towers on the hill. The target list is the driven unit's,
+/// and its target goes to the driven unit's guns (`iron3d.dll:0x10091a80`): from 380 m, looking
+/// at a tower, the missiles lock on and fire, where they kept reporting out of range because
+/// the hero's own guns took the target. They steer at the tower's node sphere's centre, not
+/// its foot on the crest (`Control.dll:0x100248b6`), and bring it down.
+#[test]
+#[ignore = "needs the game install"]
+fn c02_m02s_hq_driven_by_the_hero_locks_its_winged_missiles_on_a_tower_and_brings_it_down() {
+    use parkan_formats::controls::CMD_JAMES_SELECT_TARGET;
+    use parkan_sim::guns::GATE_CLEAR;
+    use parkan_world::play::Play;
+
+    let mut play = campaign_play(gamedir::C02_MISSION_02);
+    let tick = 1000.0 / 60.0;
+    let hq = play.units.iter().position(|u| u.logical_id == 11).expect("the HQ");
+    let tower = play.units.iter().position(|u| u.logical_id == 20).expect("a tower");
+    stand_facing(&mut play, hq, 12.0, 0.0);
+    play.tick(tick, [0.0; 2]);
+    for _ in 0..=play.targets.listed.len() {
+        if play.targets.current == Some(hq) {
+            break;
+        }
+        play.targets.select_next();
+    }
+    assert_eq!(play.targets.current, Some(hq));
+    press_enter(&mut play);
+    assert!(play.driving.as_ref().is_some_and(|d| d.target == hq), "aboard the HQ");
+
+    // The HQ 380 m north-east of the tower on the high ground, facing it: inside its own radar's
+    // 400 and its missiles' 500, outside both towers' radar's 350, and with nothing of the hill
+    // between it and the tower's middle. Toward the tower from the HQ's own start the hill's
+    // crest hides it: a winged missile flies straight at its target, and meets the crest.
+    let aim = play.battle.combat.targets[tower].aim;
+    let way = -glam::Vec2::new(30f32.to_radians().cos(), 30f32.to_radians().sin());
+    {
+        let Play { robots, ground, .. } = &mut play;
+        let robot = &mut robots.iter_mut().find(|(t, _)| *t == hq).unwrap().1;
+        robot.walker.body.yaw = (-way.x).atan2(way.y);
+        put(&mut robot.walker, ground, (aim.truncate() - way * 380.0).extend(aim.z + 150.0));
+    }
+    for _ in 0..30 {
+        play.tick(tick, [0.0; 2]);
+    }
+    // Tab, as the player picks it.
+    for _ in 0..=play.targets.listed.len() {
+        if play.targets.current == Some(tower) {
+            break;
+        }
+        let eye = play.eye();
+        let view = parkan_world::play::View {
+            eye: eye.position,
+            look: eye.forward,
+            view_proj: glam::Mat4::IDENTITY,
+            shift: false,
+        };
+        play.command(CMD_JAMES_SELECT_TARGET, &view);
+    }
+    assert_eq!(play.targets.current, Some(tower), "the tower is on the HQ's radar");
+    let reports = |play: &Play| play.driven().guns.iter().map(|g| g.report).collect::<Vec<_>>();
+    for _ in 0..60 {
+        play.tick(tick, [0.0; 2]);
+    }
+    let at = play.driven().walker.body.position;
+    assert!((at.truncate().distance(aim.truncate()) - 380.0).abs() < 5.0, "{at}");
+    assert!(play.driven().guns.iter().all(|g| g.target == Some(tower)), "the HQ's missiles take the target");
+    assert_eq!(reports(&play), vec![GATE_CLEAR; 2], "in range and on the barrel, locking");
+    assert!(play.hero.guns.iter().all(|g| g.target != Some(tower)), "not the hero's own guns");
+
+    // Held on it, the lock runs out and the button sends the missiles off at it.
+    let selected: Vec<usize> =
+        (0..play.driven().guns.len()).filter(|&i| play.driven().guns[i].selected).collect();
+    assert!(!selected.is_empty(), "a missile rack is selected");
+    for _ in 0..(8 * 60) {
+        play.tick(tick, [0.0; 2]);
+    }
+    let before: Vec<i32> = play.driven().guns.iter().map(|g| g.rounds).collect();
+    let life = |play: &Play| {
+        play.battle.combat.targets[tower]
+            .parts
+            .iter()
+            .filter_map(|p| p.life.as_ref())
+            .map(|l| l.total())
+            .sum::<f32>()
+    };
+    let whole = life(&play);
+    play.driving.as_mut().unwrap().pilot.fire = true;
+    let mut fired = false;
+    for _ in 0..(3 * 60) {
+        play.tick(tick, [0.0; 2]);
+        fired |= play.battle.combat.rounds.iter().any(|r| r.target == Some(tower));
+    }
+    play.driving.as_mut().unwrap().pilot.fire = false;
+    let after: Vec<i32> = play.driven().guns.iter().map(|g| g.rounds).collect();
+    assert!(
+        fired && after.iter().sum::<i32>() < before.iter().sum::<i32>(),
+        "a missile leaves for the tower: {before:?} -> {after:?}"
+    );
+    // They fly the 380 m in under 9 s, and each does 60,000 where the tower holds 16,452.
+    for _ in 0..(15 * 60) {
+        play.tick(tick, [0.0; 2]);
+    }
+    assert!(!play.battle.combat.targets[tower].alive, "the tower falls: {whole} -> {}", life(&play));
+}

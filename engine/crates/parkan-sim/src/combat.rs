@@ -153,8 +153,12 @@ pub struct Target {
     pub centre: Vec3,
     pub radius: f32,
     pub alive: bool,
-    /// The object's placement: where a gun's gate and a seeker find it.
+    /// The object's placement.
     pub position: Vec3,
+    /// Its node sphere's centre in the world, the point a gun's gate measures to and a seeker
+    /// steers at: interface `0x20` slot 3 asked with no node (`Control.dll:0x1002a8c0`,
+    /// `0x100248b6`, docs/29, "A guided gun waits for a lock").
+    pub aim: Vec3,
     /// Its fight shield and deflector, where it has both; the bubble is its bounding sphere.
     pub shield: Option<Shield>,
 }
@@ -497,7 +501,7 @@ impl Combat {
             if let Some(seeker) = k.seeker
                 && let Some(target) = r.target.and_then(target_at).filter(|t| t.alive)
             {
-                steer(r, seeker, k.turn_rate, target.position, dt);
+                steer(r, seeker, k.turn_rate, target.aim, dt);
             }
             if k.mode == MODE_FALLING {
                 // A lobbed round falls, and turns along its flight.
@@ -893,6 +897,7 @@ mod tests {
             radius: 1.5,
             alive: true,
             position: at,
+            aim: at,
             shield: None,
         }
     }
@@ -1157,7 +1162,7 @@ mod tests {
 
         // Past the test floor's edge: the steering alone, a second of it.
         let mut r = c.rounds[0];
-        let (seeker, turn, at) = (c.kinds[0].seeker.unwrap(), c.kinds[0].turn_rate, c.targets[0].position);
+        let (seeker, turn, at) = (c.kinds[0].seeker.unwrap(), c.kinds[0].turn_rate, c.targets[0].aim);
         for _ in 0..60 {
             steer(&mut r, seeker, turn, at, dt);
             r.position += r.velocity * dt;
