@@ -112,12 +112,14 @@ search over `header + count * unit + tail` layouts that never tried a fixed
 140-byte header.
 
 The same discipline applies as with a binary, plus one more consideration.
-fparkan is GPL-2.0; this project is GPL-3.0. So: **documentation only, never
-source.** A file format is a fact and facts are not copyrightable; a particular
-implementation is expression and is. Every borrowed fact was then checked
-against the shipped data before being relied on — `140 + 68 * count` accounts
-for stream 2 exactly on all 434 meshes, and every node slot index addresses a
-real slot.
+fparkan is GPL-2.0-only — its `Cargo.toml` says exactly that, and nothing in
+the project elects "or later" — while this project is GPL-3.0. Those two do
+not combine in either direction, so the rule is not a preference:
+**documentation only, never source.** A file format is a fact and facts are
+not copyrightable; a particular implementation is expression and is. Every
+borrowed fact was then checked against the shipped data before being relied
+on — `140 + 68 * count` accounts for stream 2 exactly on all 434 meshes, and
+every node slot index addresses a real slot.
 
 That check is not a formality. It is what turns someone else's claim into
 something this project knows.

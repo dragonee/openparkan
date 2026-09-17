@@ -280,8 +280,9 @@ analysis/       disassembly scaffolding (not part of the library)
   borrowed is checked against the shipped data before it is used: the slot
   layout accounts for stream 2 exactly on all 434 meshes, and every one of the
   26 RsLi members unpacks to the size its decrypted entry declares. fparkan is
-  GPL-2.0 and this project is GPL-3.0, so only its documentation was read,
-  never its source; a file format is a fact, an implementation of one is not.
+  GPL-2.0-only and this project is GPL-3.0 — terms that do not combine in
+  either direction — so only its documentation was read, never its source; a
+  file format is a fact, an implementation of one is not.
 - [AlexKimov/parkan-file-formats](https://github.com/AlexKimov/parkan-file-formats)
   — 010Editor templates and QuickBMS scripts, mostly for Parkan 1's `.lib`.
 
