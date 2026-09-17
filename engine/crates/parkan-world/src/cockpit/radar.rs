@@ -167,6 +167,7 @@ pub fn draw(cockpit: &mut Cockpit, ink: &mut Ink, play: &Play, water_level: f32)
     // The contacts: the driven unit's target list.
     let range = play.driven().radar.range;
     let contacts = play.contacts();
+    let chosen = play.chosen_wingmen();
     let [sx, sy] = ink.painter.space.scales();
     let scale = ink.painter.space.scale();
     let px = 1.0 / scale;
@@ -208,7 +209,7 @@ pub fn draw(cockpit: &mut Cockpit, ink: &mut Ink, play: &Play, water_level: f32)
                 ink.painter.fill(Blend::Alpha, rect, colour);
             }
         }
-        if play.selector.chosen.iter().any(|&w| play.robots.get(w).is_some_and(|(target, _)| *target == t)) {
+        if chosen.contains(&t) {
             let radius = (5.0 * sx).trunc() * px;
             let apex = [at[0], at[1] - radius];
             let left = [at[0] - radius * 0.866, at[1] + radius * 0.5];

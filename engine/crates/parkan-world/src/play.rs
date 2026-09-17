@@ -1316,8 +1316,9 @@ impl Play {
         true
     }
 
-    /// The wingmen (`iron3d.dll:0x10091f20`): the robots of the player's clan on the hero's
-    /// radar, in the radar's order, as indices into `robots`.
+    /// The wingmen (`iron3d.dll:0x10091f20`, docs/31, "Who can be a wingman"): the robots of
+    /// the player's clan on the driven unit's radar, in the radar's order, as indices into
+    /// `robots`.
     pub fn wingmen(&self) -> Vec<usize> {
         self.targets
             .listed
@@ -1325,6 +1326,18 @@ impl Play {
             .filter(|&&t| self.units.get(t).is_some_and(|u| u.clan == Some(self.player_clan)))
             .filter_map(|&t| self.robots.iter().position(|(rt, _)| *rt == t))
             .filter(|&r| self.battle.combat.targets.get(self.robots[r].0).is_some_and(|t| t.alive))
+            .collect()
+    }
+
+    /// The wingmen chosen in the selector, by target. Its choice is by place in the wingman
+    /// list (`+0xc`, docs/31, "The selector's three states"), which the list turns into units.
+    pub fn chosen_wingmen(&self) -> Vec<usize> {
+        let wingmen = self.wingmen();
+        self.selector
+            .chosen
+            .iter()
+            .filter_map(|&i| wingmen.get(i))
+            .filter_map(|&r| self.robots.get(r).map(|(t, _)| *t))
             .collect()
     }
 

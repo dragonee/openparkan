@@ -1213,9 +1213,13 @@ fn captured_warbots_answer_the_wingman_menu_with_the_order_its_row_gives() {
     }
     assert!(!play.says.is_empty(), "the last one acknowledges");
 
-    // Shift picks: only the second wingman, then Standby.
+    // Shift picks: only the second wingman, then Standby. The choice is by place in the
+    // wingman list, which the radar's magenta triangle turns back into a unit.
     play.command("CMD_JAMES_WINGMAN_MENU", &view(true));
+    assert!(play.chosen_wingmen().is_empty(), "Shift empties the choice");
     assert!(play.wingman_digit(2));
+    let second = play.robots[play.wingmen()[1]].0;
+    assert_eq!(play.chosen_wingmen(), vec![second]);
     play.command("CMD_JAMES_WINGMAN_MENU", &view(false));
     assert!(play.wingman_digit(1));
     let orders: Vec<i32> = play.robots.iter().filter_map(|(_, r)| r.order.map(|o| o.code)).collect();
