@@ -3223,30 +3223,46 @@ fn mission_03s_patrol_waits_shut_down_until_the_fourth_bot_then_flies_to_the_bas
 
 #[test]
 #[ignore = "needs the game install"]
-fn a_small_bunker_taken_by_the_player_turns_its_flamers_on_an_enemy_at_its_door_and_a_neutral_one_does_not() {
+fn a_small_bunker_taken_by_the_player_turns_its_flamers_on_an_enemy_holds_them_close_in_and_a_neutral_one_does_not()
+ {
     let (mut play, _) = mission_03_play();
+    // The engine's departure: a building holds its fire below its turret's reach.
+    play.building_fire_floor = true;
     let (bunker, _) = play.emplacements[0];
     assert_eq!(play.units[bunker].clan, Some(2), "the Small Bunker starts neutral");
     assert_eq!(play.emplacements[0].1.guns.len(), 2, "two HFTB");
-    // An enemy flyer, shut down, held 20 m east of the bunker on its ground. The AI's gun
-    // score falls with distance past half the flame's 45 m/s and with height over the
-    // bunker's base (docs/29, "How the AI fires"), so a flame is fired close in.
+    let lowest = play.emplacements[0].1.lowest_sight().expect("a pitch channel");
+    assert!((lowest.to_degrees() + 15.0).abs() < 0.1, "its sight looks down to 15°: {}", lowest.to_degrees());
+    // An enemy flyer, shut down, held 5 m over the ground east of the bunker. The flame's frame
+    // flags carry 8, so its distance scores 1 wherever the target stands (docs/29, "How the AI
+    // fires").
     let flyer = play.robots.iter().position(|(t, _)| play.units[*t].logical_id == 3).unwrap();
-    let at = play.battle.combat.targets[bunker].position + glam::Vec3::new(20.0, 0.0, 0.0);
-    let hold = |p: &mut parkan_world::play::Play, fired: &mut usize| {
-        p.robots[flyer].1.walker.body.position = at;
+    let flyer_target = play.robots[flyer].0;
+    let base = play.battle.combat.targets[bunker].position;
+    let hold = |p: &mut parkan_world::play::Play, off: f32, fired: &mut usize, aimed: &mut bool| {
+        let at = base + glam::Vec3::new(off, 0.0, 0.0);
+        let ground = p.ground.below(at.x, at.y, 1.0e5).map_or(at.z, |h| h.point.z);
+        p.robots[flyer].1.walker.body.position = at.with_z(ground + 5.0);
         *fired += p.battle.combat.rounds.iter().filter(|r| r.owner == Some(bunker)).count();
+        *aimed |= p.emplacements[0].1.fire_target == Some(flyer_target);
     };
-    let mut fired = 0;
-    play_for(&mut play, 6.0, |p| hold(p, &mut fired));
+    let (mut fired, mut aimed) = (0, false);
+    play_for(&mut play, 6.0, |p| hold(p, 80.0, &mut fired, &mut aimed));
     assert_eq!(fired, 0, "a neutral clan's bunker runs no fire control");
     assert_eq!(play.emplacements[0].1.fire_target, None);
+    assert!(!aimed);
 
-    // Taken, as its pod's capture changes its clan (docs/27), it aims and fires.
+    // Taken, as its pod's capture changes its clan (docs/27), it aims. At its door, 20 m out and
+    // below the lowest its sight looks, it holds its fire.
     play.units[bunker].clan = Some(play.player_clan);
-    play_for(&mut play, 6.0, |p| hold(p, &mut fired));
+    play_for(&mut play, 6.0, |p| hold(p, 20.0, &mut fired, &mut aimed));
+    assert!(aimed, "it traces the flyer at its door");
+    assert_eq!(fired, 0, "and holds its fire on it");
+    // 80 m out it fires.
+    aimed = false;
+    play_for(&mut play, 6.0, |p| hold(p, 80.0, &mut fired, &mut aimed));
     assert!(fired > 0, "the player's bunker fires at the enemy");
-    assert_eq!(play.emplacements[0].1.fire_target, Some(play.robots[flyer].0));
+    assert!(aimed, "on the flyer");
 }
 
 #[test]
@@ -4986,4 +5002,181 @@ fn mission_01s_own_panel_keeps_the_running_hero_steady_in_its_view() {
     eprintln!("camera against the drawn hero {drawn_step} m a tick at most; the step's end {stepped_step} m");
     assert!(stepped_step > 0.2, "the step's end jumps {stepped_step} m in a tick");
     assert!(drawn_step < 0.05, "the camera moves {drawn_step} m against the drawn hero in a tick");
+}
+
+/// A campaign mission's play with its progression, the hero standing still.
+fn campaign_play(path: &str) -> parkan_world::play::Play {
+    use parkan_formats::mission;
+    use parkan_world::play::Play;
+
+    let game = gamedir::find(None).expect("a Parkan install: set PARKAN_DIR");
+    let dir = gamedir::resolve(&game, path).unwrap();
+    let name = path.rsplit('/').next().unwrap();
+    let m = mission::parse(&std::fs::read(dir.join("data.tma")).unwrap(), name).unwrap();
+    let mut play = Play::load(&game, &m).unwrap().expect("a hero");
+    play.load_progression(&game, &dir, &m).unwrap();
+    play
+}
+
+/// The Arrival's first patrol walks its loop about (579, 381) within 150. The hero standing in
+/// that ground is on both warbots' radars and hostile to their clan: they take it up and fire on
+/// it, the hero being a target rounds strike like any unit (docs/26, "The hit test"), and its
+/// shield's sectors meet their rounds first and flash (docs/26, "Shields").
+#[test]
+#[ignore = "needs the game install"]
+fn c01_m02s_patrol_takes_on_the_hero_in_its_ground_and_the_heros_shield_meets_their_rounds() {
+    use parkan_sim::behaviour::Task;
+    use parkan_sim::combat::Event;
+
+    let mut play = campaign_play(gamedir::C01_MISSION_02);
+    let hero = play.battle.combat.hero_index();
+    let shield = play.battle.combat.hero.as_ref().and_then(|h| h.shield.clone()).expect("hero11 is shielded");
+    // docs/26's measured figures for `hero11`: 1,850 a sector, 15 a second, 0.04 a point, 0.9.
+    assert_eq!((shield.max, shield.recharge, shield.cost), (1850.0, 15.0, 0.04));
+    assert!(shield.coefficients.iter().all(|&c| (c - 0.9).abs() < 1e-6));
+    assert_eq!(shield.effect.to_ascii_lowercase(), "r_shield_b");
+
+    let patrol: Vec<usize> =
+        play.robots.iter().map(|(t, _)| *t).filter(|&t| [3, 4].contains(&play.units[t].logical_id)).collect();
+    assert_eq!(patrol.len(), 2);
+    assert!(play.stand_at(579.0, 330.0, 0.0));
+    let (mut attacked, mut flashes, mut lowest) = (false, 0, 1.0_f32);
+    for _ in 0..(20 * 60) {
+        for e in play.tick(1000.0 / 60.0, [0.0; 2]) {
+            if matches!(e, Event::ShieldHit { target, .. } if target == hero) {
+                flashes += 1;
+            }
+        }
+        attacked |= play.robots.iter().any(|(t, r)| {
+            patrol.contains(t)
+                && matches!(r.behaviour.task(), Task::Attack { target: Some(id), .. } if id == play.hero_id)
+        });
+        let fills = play.battle.combat.hero.as_ref().unwrap().shield.as_ref().unwrap().fills;
+        lowest = fills.into_iter().fold(lowest, f32::min);
+    }
+    assert!(attacked, "the patrol takes the hero up");
+    assert!(flashes > 0 && lowest < 1.0, "its rounds meet the hero's shield: {flashes} flashes, {lowest}");
+    assert!(
+        play.fx
+            .instances
+            .iter()
+            .any(|(o, _)| matches!(o, parkan_world::fx::Owner::Shield(t, _) if *t == hero)),
+        "and the generator's effect plays on it"
+    );
+    assert!(!play.hero.dead());
+}
+
+/// Outflanking Maneuver's relation records name every clan but `player`. The loader files each
+/// record under its name and leaves a clan no record names at 0 (docs/25, "Clan relations"), so
+/// the enemy is hostile to the player both ways, its Small Tower fires on the hero once its radar
+/// holds it, and its Small Bunker carries a shield from its deflector part.
+#[test]
+#[ignore = "needs the game install"]
+fn c01_m03s_enemy_takes_the_player_as_hostile_though_no_relation_record_names_it() {
+    use parkan_world::play::{MARK_HOSTILE, RELATION_HOSTILE};
+
+    let mut play = campaign_play(gamedir::C01_MISSION_03);
+    assert!(play.clans[1].relations.iter().all(|(name, _)| name != "player"));
+    assert_eq!((play.relations[0][1], play.relations[1][0]), (RELATION_HOSTILE, RELATION_HOSTILE));
+    assert!(play.hostile_to(Some(1), Some(0)) && play.hostile(Some(1)));
+    assert_eq!(play.mark_colour(Some(1)), MARK_HOSTILE);
+
+    let bunker = play.units.iter().position(|u| u.logical_id == -2147483645).expect("l_bunk1");
+    let shield = play.battle.combat.targets[bunker].shield.clone().expect("the bunker's shield");
+    assert_eq!((shield.max, shield.effect.to_ascii_lowercase().as_str()), (11_000.0, "r_shield_g"));
+    assert!(shield.coefficients.iter().all(|&c| (c - 0.36).abs() < 1e-6), "{:?}", shield.coefficients);
+
+    let tower = play.units.iter().position(|u| u.logical_id == 23).expect("the first 12tower");
+    let e = play.robots.iter().position(|(t, _)| *t == tower).expect("the tower is a robot");
+    assert!(play.stand_facing(tower, 150.0, 0.0));
+    let hero = play.battle.combat.hero_index();
+    let mut aimed = false;
+    for _ in 0..(3 * 60) {
+        play.tick(1000.0 / 60.0, [0.0; 2]);
+        aimed |= play.robots[e].1.fire_target == Some(hero);
+    }
+    assert!(aimed, "the tower's fire control takes the hero");
+    assert!(play.battle.combat.fired > 0, "and it fires");
+
+    // The bunker's lobbed `bf_f_01` carries frame flag 8, so its distance scores 1 at any range
+    // (`Behavior.dll:0x1001b9f0`): from 150 m, where a speed of 45 would score nothing, it fires.
+    let mut play = campaign_play(gamedir::C01_MISSION_03);
+    let hero = play.battle.combat.hero_index();
+    let e = play.emplacements.iter().position(|(t, _)| *t == bunker).expect("the bunker carries guns");
+    assert!(play.stand_facing(bunker, 150.0, 0.0));
+    let at = play.hero.walker.body.position;
+    let (mut shells, mut nearest, mut aimed) = (0, f32::MAX, false);
+    // A shell takes about 3.7 s over 150 m on its arc.
+    for _ in 0..(8 * 60) {
+        aimed |= play.emplacements[e].1.fire_target == Some(hero);
+        for event in play.tick(1000.0 / 60.0, [0.0; 2]) {
+            if let parkan_sim::combat::Event::Ended { round, .. } = event
+                && round.owner == Some(bunker)
+            {
+                shells += 1;
+                nearest = nearest.min(round.position.distance(at));
+            }
+        }
+    }
+    assert!(shells > 0, "the bunker fires on the hero 150 m off");
+    assert!(aimed, "at the hero");
+    // Its guns hang on the turret as parts with no mount; their shells leave on the lower arc.
+    assert!(nearest < 5.0, "and its shells come down on it: {nearest} m off");
+
+    // With the engine's departure on, the hero standing on its pod, inside and below the lowest
+    // its sight looks, is not fired on while the bunker is the enemy's; the pod takes it for the
+    // player a few seconds in.
+    let mut play = campaign_play(gamedir::C01_MISSION_03);
+    play.building_fire_floor = true;
+    assert!(play.stand_on_pod(bunker));
+    let (mut shells, mut traced) = (0, false);
+    while play.units[bunker].clan == Some(1) && play.hero.time_ms < 10_000.0 {
+        traced |= play.emplacements[e].1.fire_target == Some(hero);
+        shells += play.battle.combat.rounds.iter().filter(|r| r.owner == Some(bunker)).count();
+        play.tick(1000.0 / 60.0, [0.0; 2]);
+    }
+    assert!(traced, "it traces the hero on its pod");
+    assert_eq!(shells, 0, "and holds its fire on it");
+    assert_eq!(play.units[bunker].clan, Some(play.player_clan), "the pod takes the bunker");
+    assert!(!play.hero.dead());
+}
+
+/// A grazing medusa takes up no fight, but a hit tells it who fired, and it attacks that unit
+/// whatever its radar holds (message `0x19`, docs/31, "A hit pulls a unit in"): shot by the hero
+/// from off its pasture, it turns on the hero.
+#[test]
+#[ignore = "needs the game install"]
+fn c01_m02s_medusa_shot_by_the_hero_turns_on_it() {
+    use parkan_sim::behaviour::Task;
+    use parkan_world::play::CLASS_ANIMAL;
+
+    let mut play = campaign_play(gamedir::C01_MISSION_02);
+    let medusa = play.units.iter().position(|u| u.type_word & CLASS_ANIMAL != 0).expect("a medusa");
+    let r = play.robots.iter().position(|(t, _)| *t == medusa).expect("the medusa is a robot");
+    let at = play.battle.combat.targets[medusa].position;
+    assert!(play.stand_at(at.x + 60.0, at.y, 0.0));
+    for _ in 0..60 {
+        play.tick(1000.0 / 60.0, [0.0; 2]);
+    }
+    assert_eq!(play.robots[r].1.behaviour.task(), Task::Stop, "grazing, it lets the hero be");
+
+    // A laser of the hero's at the medusa's sphere.
+    let kinds = &play.battle.combat.kinds;
+    let kind = play
+        .hero
+        .rounds
+        .iter()
+        .flatten()
+        .copied()
+        .find(|&k| kinds[k].name.starts_with("bl_"))
+        .expect("the hero's laser");
+    let from = play.hero.collision_centre() + glam::Vec3::Z * 2.0;
+    let at = play.battle.combat.targets[medusa].centre;
+    play.battle.combat.fire(kind, None, from, at - from, glam::Vec3::ZERO, 1.0, None);
+    let mut turned = false;
+    for _ in 0..120 {
+        play.tick(1000.0 / 60.0, [0.0; 2]);
+        turned |= matches!(play.robots[r].1.behaviour.task(), Task::Attack { target: Some(id), .. } if id == play.hero_id);
+    }
+    assert!(turned, "shot, it attacks the hero: {:?}", play.robots[r].1.behaviour.task());
 }

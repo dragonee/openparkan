@@ -304,13 +304,14 @@ fn panel(
     let (hero_centre, hero_radius) = hero_sphere(play);
     // Aboard a bot, the own panel is the bot's (docs/39, "The view and the HUD").
     let shown = if own { play.driving.as_ref().map(|d| d.target) } else { Some(play.targets.current?) };
-    let (centre, radius, designation, life, building) = match shown {
+    let (centre, radius, designation, life, building, shield) = match shown {
         None => (
             hero_centre,
             hero_radius,
             play.hero_designation,
             life_share(play.hero.lives.iter().flatten()),
             false,
+            play.battle.combat.hero.as_ref().and_then(|h| h.shield.as_ref()),
         ),
         Some(t) => {
             let c = contacts.get(t)?;
@@ -321,17 +322,14 @@ fn panel(
                 play.units.get(t)?.designation,
                 life_share(target.parts.iter().filter_map(|p| p.life.as_ref())),
                 play.units[t].kind == KIND_BUILDING,
+                target.shield.as_ref(),
             )
         }
     };
 
-    // 4: the six sectors, with a fight shield and a deflector.
-    //
-    // STAND-IN: docs/26-damage.md#shields-a-generator-a-deflector-six-sectors--read-and-measured
-    // -- shields are not simulated: every sector reads full.
+    // 4: the six sectors, with a fight shield and a deflector: each its fill × the deflector's
+    // level × its condition, red at 0 and green full.
     if designation.shielded {
-        let v = 255u32;
-        let colour = argb(0xff00_0000 | ((255 - v) << 16) | (v << 8));
         let dx = if own { 491.0 } else { 0.0 };
         let sectors = [
             ("frwd_shld", [44.0, 321.0, 105.0, 340.0]),
@@ -341,7 +339,10 @@ fn panel(
             ("top_shld", [40.0, 308.0, 109.0, 327.0]),
             ("bott_shld", [22.0, 420.0, 127.0, 451.0]),
         ];
-        for (name, [x0, y0, x1, y1]) in sectors {
+        for (s, (name, [x0, y0, x1, y1])) in sectors.into_iter().enumerate() {
+            let share = shield.map_or(1.0, |sh| sh.fills[s] * sh.level * sh.deflector_condition);
+            let v = (255.0 * share.clamp(0.0, 1.0)) as u32;
+            let colour = argb(0xff00_0000 | ((255 - v) << 16) | (v << 8));
             if let Some(p) = skin.get(name) {
                 ink.painter.piece(p, [x0 + dx, y0, x1 + dx, y1], colour);
             }

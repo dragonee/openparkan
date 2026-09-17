@@ -34,6 +34,8 @@ pub enum Owner {
     Building(usize, i32),
     /// A mineral lode's plume, by the lode's index.
     Lode(usize),
+    /// One of the three instances of a target's shield effect a hit plays (`0x10025ca0`).
+    Shield(usize, usize),
 }
 
 /// A material's look for sprites: its texture, the cell of it the entry takes, and its blend

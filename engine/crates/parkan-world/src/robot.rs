@@ -293,8 +293,9 @@ fn read_member(assembly: &mut Assembly, library: &str, member: &str) -> Result<V
     Ok(archive.read_name(member)?.to_vec())
 }
 
-fn controller(assembly: &mut Assembly, record: &str) -> Result<Option<Controller>> {
-    let Some(slot) = assembly.library.get(record).and_then(|r| r.slot_with_suffix("ctl")).cloned() else {
+pub(crate) fn controller(assembly: &mut Assembly, record: &str) -> Result<Option<Controller>> {
+    // A building's FORT record names its controller through a mesh-less slot, as its mesh.
+    let Some(slot) = assembly.library.record_slot(assembly.library.get(record), "ctl", 0) else {
         return Ok(None);
     };
     let data = read_member(assembly, &slot.library, &slot.member)?;
@@ -425,6 +426,19 @@ impl Robot {
                 }
             }
         }
+        // An animal carries no turret part: its one controller holds the turret and the gun,
+        // on its own mesh (docs/34, "The medusas").
+        //
+        // STAND-IN: docs/34-progression.md#the-medusas--read-and-measured -- how a turret component on the chassis's
+        // own controller poses its nodes against the chassis's frames is not read: the turret
+        // channels pose the mesh as a turret part's would, about the chassis's root.
+        let turret = turret.or_else(|| {
+            chassis_ctl
+                .components
+                .iter()
+                .any(|k| k.type_id == TURRET_TYPE)
+                .then(|| (chassis_part.clone(), chassis_ctl.clone()))
+        });
         let Some((turret_part, turret_ctl)) = turret else { return Ok(None) };
         let mut robot_parts = Vec::new();
         let (mut chassis_index, mut turret_index) = (0, 0);
@@ -687,10 +701,20 @@ impl Robot {
             })
             .collect();
         let mut shots = Vec::new();
+        let traced = self.rig.traced;
         for (i, (g, sight)) in self.guns.iter_mut().zip(sights).enumerate() {
             g.sight = sight;
             if self.gun_parts.get(i).is_some_and(Option::is_some) {
-                g.ready = true;
+                // STAND-IN: docs/29-weapons.md#not-established -- how a lobbed round's gun fitted
+                // as a part on a turret with no follower channel (the Small Bunker's) is raised
+                // is not read: it is ready while the point its turret traces lies within the
+                // round's lower arc, as a mount's gun is, and its round leaves on that arc
+                // ([`Robot::lobbed_launch`]).
+                g.ready = !g.falls
+                    || traced.is_none_or(|to| {
+                        parkan_sim::turret::lobbed_launch(g.round_speed, parkan_sim::turret::GRAVITY, to)
+                            .is_some()
+                    });
             }
             g.recharge();
             shots.extend(g.tick(self.time_ms).into_iter().map(|s| (i, s)));
@@ -783,6 +807,23 @@ impl Robot {
         Some((position + heading * at, heading * dir))
     }
 
+    /// The lowest the turret's sight can look, radians above the horizontal (negative below):
+    /// its pitch channel at either end of its span. `None` without a sight or a pitch channel.
+    pub fn lowest_sight(&mut self) -> Option<f32> {
+        let c = self.rig.pitch?;
+        let now = self.rig.values[c];
+        let mut lowest = None::<f32>;
+        for end in [0.0, 1.0] {
+            self.rig.values[c] = end;
+            if let Some((_, d)) = self.sight() {
+                let rise = d.z.atan2(d.truncate().length());
+                lowest = Some(lowest.map_or(rise, |l| l.min(rise)));
+            }
+        }
+        self.rig.values[c] = now;
+        lowest
+    }
+
     /// The sight a turret hands its guns (`0x10028130`): the yaw channel's second point
     /// and the pitch channel's point, `TurretCenter` and `TargetDirect`.
     pub fn sight(&self) -> Option<(Vec3, Vec3)> {
@@ -795,6 +836,17 @@ impl Robot {
     /// A barrel's muzzle (`0x1002a302`): its channel's control point, in the world.
     pub fn muzzle(&self, channel: usize) -> Option<(Vec3, Vec3)> {
         self.point(usize::try_from(self.rig.channels.get(channel)?.point).ok()?)
+    }
+
+    /// The direction a lobbed round of gun `gun`, fitted as a part, leaves its muzzle at to land
+    /// on the point its turret traces: the lower arc from the muzzle at its round's speed. `None`
+    /// for any other gun, for no traced point, or out of the round's reach.
+    pub fn lobbed_launch(&self, gun: usize, muzzle: Vec3) -> Option<Vec3> {
+        let g = self.guns.get(gun).filter(|g| g.falls)?;
+        self.gun_parts.get(gun)?.as_ref()?;
+        let target = self.target_point?;
+        self.rig.traced?;
+        parkan_sim::turret::lobbed_launch(g.round_speed, parkan_sim::turret::GRAVITY, target - muzzle)
     }
 
     /// Barrel `barrel` of gun `gun`'s muzzle in the world: a turret gun's through the
@@ -821,6 +873,7 @@ impl Robot {
     /// the sight, the aim being linear in the value (docs/30).
     pub fn aim_at(&mut self, point: Vec3) {
         let Some((origin, direction)) = self.sight() else { return };
+        self.rig.traced = Some(point - origin);
         let want = point - origin;
         let yaw = |d: Vec3| yaw_along(d).unwrap_or(0.0);
         let rise = |d: Vec3| d.z.atan2(d.truncate().length());

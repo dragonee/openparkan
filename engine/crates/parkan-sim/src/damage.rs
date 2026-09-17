@@ -598,6 +598,7 @@ mod tests {
             radius: 1.5,
             alive: true,
             position: at,
+            shield: None,
         }
     }
 

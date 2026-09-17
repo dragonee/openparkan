@@ -112,7 +112,26 @@ pub struct Sprite {
     /// here (docs/07, "Playing a track"). A stream's particle counts from when it left, and
     /// everything else from the instance's start.
     pub age_ms: f32,
+    /// Drawn as a hemisphere about `centre` instead of a quad: a type-9 emitter's shape.
+    pub dome: Option<Dome>,
 }
+
+/// A type-9 emitter's hemisphere (`Terrain.dll:0x100273b0`): a unit dome with its pole on the
+/// mesh's own z, carried by `axes` (each as long as the emitter's size along it), cut into
+/// `segments` around and `rings` from the rim to the pole.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Dome {
+    pub axes: [Vec3; 3],
+    pub segments: u8,
+    pub rings: u8,
+}
+
+/// A type-9 block's shape (`+200`), and the detail each gives its dome at the finest level
+/// (tables `Terrain.dll:0x1009a750` and `0x1009a780`): around, and from rim to pole.
+pub const DOME_SHAPE_AT: usize = 200;
+pub const DOME_DETAIL: [(u8, u8); 3] = [(8, 3), (16, 6), (24, 9)];
+/// Where an emitter is placed (`+4`): 2 in the effect's own frame.
+pub const PLACEMENT_AT: usize = 4;
 
 /// A particle a stream left: when, from where, and how long it lives, in seconds.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -503,6 +522,7 @@ impl Instance {
             overlay: false,
             lengthwise: false,
             age_ms,
+            dome: None,
         }
     }
 
@@ -516,7 +536,27 @@ impl Instance {
     fn sprite(&self, e: &Emitter, p: f32, age_ms: f32, out: &mut Vec<Sprite>) {
         let local = lerp3(e.triple(40), e.triple(52), p);
         let size = lerp3(e.triple(100), e.triple(112), p);
-        out.push(self.quad(e, &self.frame, local, size, fade(e.f(20), e.f(24), e.f(28), p), age_ms));
+        let mut sprite = self.quad(e, &self.frame, local, size, fade(e.f(20), e.f(24), e.f(28), p), age_ms);
+        if e.kind == 9 {
+            sprite.dome = self.dome(e, size);
+        }
+        out.push(sprite);
+    }
+
+    /// A type-9 emitter's dome in the effect's frame, sized along each of its axes.
+    ///
+    /// STAND-IN: docs/11-effects.md#not-resolved -- which of the frame's axes the dome's pole
+    /// ends on is not established (the read of `Effect.dll:0x1000d110` would put it on the
+    /// second axis): here it is the first, so a shield's flash bulges out of the bubble toward
+    /// the hit, the round glow a recording shows. Its texture's u runs around the dome and v
+    /// from the rim to the pole, which is not read.
+    fn dome(&self, e: &Emitter, size: Vec3) -> Option<Dome> {
+        let shape = e.body.get(DOME_SHAPE_AT..DOME_SHAPE_AT + 4)?;
+        let shape = u32::from_le_bytes(shape.try_into().ok()?) as usize;
+        let (segments, rings) = DOME_DETAIL.get(shape).copied().unwrap_or(DOME_DETAIL[0]);
+        let [x, y, z] = self.frame.axes;
+        let s = size * self.scale;
+        Some(Dome { axes: [y * s.y, z * s.z, x * s.x], segments, rings })
     }
 
     /// A type-5 bolt: floor(length / +36) sprites, at least 1 and at most +20, along the
@@ -542,6 +582,7 @@ impl Instance {
                 overlay: false,
                 lengthwise: true,
                 age_ms,
+                dome: None,
             });
         }
     }
@@ -581,6 +622,7 @@ impl Instance {
                 overlay: false,
                 lengthwise: false,
                 age_ms,
+                dome: None,
             });
         }
     }

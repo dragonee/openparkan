@@ -24,6 +24,7 @@ pub mod orders;
 pub mod progression;
 pub mod research;
 pub mod script;
+pub mod shield;
 pub mod sky;
 pub mod solid;
 pub mod targeting;

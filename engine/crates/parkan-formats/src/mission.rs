@@ -141,6 +141,44 @@ fn string(r: &mut Cursor) -> Result<String, FormatError> {
     Ok(latin1(&raw[..end]))
 }
 
+/// A clan type: nature's, and a neutral clan's (docs/27, "The clan word is a type").
+pub const CLAN_NATURE: u32 = 0;
+pub const CLAN_NEUTRAL: u32 = 3;
+/// A relation word: hostile, neutral, allied (docs/25, "Clan relations").
+pub const RELATION_HOSTILE: u32 = 0;
+pub const RELATION_NEUTRAL: u32 = 1;
+pub const RELATION_ALLIED: u32 = 2;
+
+/// Each clan's relation word towards each clan, by index, as the loader files them
+/// (`MisLoad.dll:0x100015b0`, docs/25, "Clan relations"): every word starts at 0, and a
+/// record lands under the clan its name matches, ignoring case, so a clan no record names
+/// stays hostile. Then a neutral clan's whole row becomes 1, every word towards a neutral
+/// clan 1, and every clan's word towards itself 2.
+pub fn relation_words(clans: &[Clan]) -> Vec<Vec<u32>> {
+    let mut words = vec![vec![RELATION_HOSTILE; clans.len()]; clans.len()];
+    for (i, clan) in clans.iter().enumerate() {
+        for (name, word) in &clan.relations {
+            if let Some(j) = clans.iter().position(|c| c.name.eq_ignore_ascii_case(name)) {
+                words[i][j] = *word;
+            }
+        }
+        if clan.kind == CLAN_NEUTRAL {
+            words[i].fill(RELATION_NEUTRAL);
+        }
+    }
+    for (i, row) in words.iter_mut().enumerate() {
+        for (j, word) in row.iter_mut().enumerate() {
+            if clans[j].kind == CLAN_NEUTRAL {
+                *word = RELATION_NEUTRAL;
+            }
+            if i == j {
+                *word = RELATION_ALLIED;
+            }
+        }
+    }
+    words
+}
+
 fn clan(r: &mut Cursor) -> Result<Clan, FormatError> {
     let name = string(r)?;
     let parent = r.i32()?;
@@ -282,6 +320,32 @@ mod tests {
         assert_eq!(m.map_name(), "Tut_1");
         assert_eq!(m.description, "Line of fire");
         assert_eq!(m.viewpoints[0].unknown, [1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn a_clan_no_record_names_stays_hostile_and_neutral_and_own_words_are_forced() {
+        let clan = |name: &str, kind: u32, relations: &[(&str, u32)]| Clan {
+            name: name.to_owned(),
+            parent: 0,
+            base: [0.0; 2],
+            kind,
+            ai_script: String::new(),
+            zones: Vec::new(),
+            behaviour: String::new(),
+            minds: 0,
+            relations: relations.iter().map(|&(n, w)| (n.to_owned(), w)).collect(),
+        };
+        // `CAMPAIGN.01/Mission.03`'s shape: no clan's records name `player`.
+        let clans = [
+            clan("player", 1, &[("Enemy", 0), ("neutral", 1), ("nature", 0)]),
+            clan("Enemy", 2, &[("enemy", 1), ("neutral", 1), ("nature", 0)]),
+            clan("neutral", 3, &[("Enemy", 0), ("neutral", 1), ("nature", 0)]),
+            clan("nature", 0, &[("Enemy", 0), ("neutral", 1), ("nature", 1)]),
+        ];
+        assert_eq!(
+            relation_words(&clans),
+            vec![vec![2, 0, 1, 0], vec![0, 2, 1, 0], vec![1, 1, 2, 1], vec![0, 0, 1, 2]]
+        );
     }
 
     #[test]

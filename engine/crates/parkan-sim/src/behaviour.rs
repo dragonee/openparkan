@@ -89,6 +89,27 @@ pub const PATROL_HELP_SCALE: f32 = 1.3;
 pub const PATROL_HELP_LIMIT: f32 = 78.0;
 /// A unit guard scores a contact by its distance from the unit × this (`0x10059968`).
 pub const PATROL_UNIT_SHARE: f32 = 0.7;
+/// The interrupt gate's pause between interrupts of any reason, (fixed, random) ms
+/// (`0x1000388e`): it restarts each time the gate reaches it.
+pub const INTERRUPT_PAUSE_MS: (f64, f64) = (2000.0, 3000.0);
+/// An interrupt-made attack answers a new contact by `1000 / (d + 10)` across the ground,
+/// nothing from this far (`0x10026b10`).
+pub const ATTACK_SWITCH_SCORE: f32 = 1000.0;
+pub const ATTACK_SWITCH_RANGE: f32 = 700.0;
+/// A follower answers a retaliation with a limit of `2 × radius + 20` about its leader
+/// (`0x1002acd0`).
+pub const FOLLOW_RETALIATE_SLACK: f32 = 20.0;
+/// A migrating animal's answer to a hit (`0x1002c640`), by where it and the firer stand
+/// against its pasture, across the ground: the attack's time, s, and its circle past the outer
+/// radius about the pasture's centre, `None` for no circle.
+pub const MIGRATE_AWAY: (f64, Option<f32>) = (10.0, None);
+pub const MIGRATE_FIRER_OUTSIDE: (f64, Option<f32>) = (20.0, Some(20.0));
+pub const MIGRATE_FIRER_ON_PASTURE: (f64, Option<f32>) = (25.0, Some(80.0));
+pub const MIGRATE_FIRER_INSIDE: (f64, Option<f32>) = (35.0, Some(100.0));
+/// An animal's attack fires on its target from within this, and on the nearest hostile
+/// contact beyond (`0x10027580`).
+pub const ANIMAL_FIXED_FIRE: f32 = 200.0;
+
 /// The go task's `Go_SpeedPercent`, and how near its place it is over (`0x1002b670`).
 pub const GO_SPEED: f32 = 1.0;
 pub const GO_ARRIVED: f32 = 30.0;
@@ -170,6 +191,16 @@ pub struct Senses<'a> {
     pub building: bool,
     /// An animal: it takes up no engagement unless it migrates (`0x10017a1e`).
     pub animal: bool,
+    /// An animal's pasture: its centre and its inner and outer radii.
+    pub pasture: Option<Pasture>,
+}
+
+/// A nature clan's zone an animal grazes in (docs/31, "Migrate: an animal's pasture").
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Pasture {
+    pub centre: Vec3,
+    pub inner: f32,
+    pub outer: f32,
 }
 
 impl Senses<'_> {
@@ -208,11 +239,13 @@ pub enum Guarded {
 }
 
 /// A task's limit (`+0x2c`, tested by slot 9, `0x10001660`): past `radius` from its centre,
-/// in three dimensions, the task is ended.
+/// in three dimensions, or past its time, the task is ended. A radius of 0 limits nothing.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Limit {
     pub centre: Limited,
     pub radius: f32,
+    /// When it runs out, ms, stamped as the task starts.
+    pub until_ms: Option<f64>,
 }
 
 /// Where a limit is measured from: a place, or a unit by logic id.
@@ -229,7 +262,23 @@ impl Limit {
             Limited::Place(p) => Some(p),
             Limited::Unit(id) => senses.find(id).map(|s| s.position),
         };
-        self.radius > 0.0 && centre.is_some_and(|c| at.distance(c) > self.radius)
+        (self.radius > 0.0 && centre.is_some_and(|c| at.distance(c) > self.radius))
+            || self.until_ms.is_some_and(|t| senses.now_ms >= t)
+    }
+
+    /// Two limits taken together, the tighter of each winning.
+    fn merged(self, other: Option<Limit>) -> Limit {
+        let Some(other) = other else { return self };
+        let radius = match (self.radius > 0.0, other.radius > 0.0) {
+            (true, true) if other.radius < self.radius => other,
+            (false, true) => other,
+            _ => self,
+        };
+        let until_ms = match (self.until_ms, other.until_ms) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
+        };
+        Limit { until_ms, ..radius }
     }
 }
 
@@ -275,6 +324,8 @@ pub enum Task {
         next_ms: f64,
         /// The limit the task beneath handed it, if any.
         limit: Option<Limit>,
+        /// Given as an order (`+0x54` 1), which no interrupt switches.
+        ordered: bool,
     },
     /// The escape (`ORDER_ROBOT_LEAVE`): off a building to open ground, ending when the
     /// walker has nothing left to do; its priority is 0 for every reason (`0x1002b9f0`).
@@ -368,7 +419,7 @@ impl Task {
             (orders::RELOAD, _) => Task::Reload,
             (orders::LEAVE, _) => Task::Leave { goal: None },
             (orders::ATTACK, Target::LogicId(id)) => {
-                Task::Attack { target: Some(id), fighting: false, next_ms: 0.0, limit: None }
+                Task::Attack { target: Some(id), fighting: false, next_ms: 0.0, limit: None, ordered: true }
             }
             (orders::GO, Target::Place(at)) => Task::Go { goal: Vec3::from_array(at), walking: false },
             (orders::GO, _) => return None,
@@ -430,12 +481,30 @@ pub struct Behaviour {
     pub fire: FireMode,
     /// The running patrol's loop of points (`+0xa4`).
     pub patrol_loop: Vec<Vec3>,
+    /// The unit that last hurt it, by logic id, whose retaliation the next takt asks for
+    /// (message `0x19`, slot 67, `0x100064b0`).
+    pub hurt_by: Option<i32>,
+    /// When the interrupt gate next lets one through (`+0x5e0`).
+    pub interrupt_ms: f64,
     seed: u32,
 }
 
 impl Behaviour {
     pub fn new(seed: u32) -> Self {
-        Self { tasks: vec![Task::Stop], fire: FireMode::Nearest, patrol_loop: Vec::new(), seed: seed | 1 }
+        Self {
+            tasks: vec![Task::Stop],
+            fire: FireMode::Nearest,
+            patrol_loop: Vec::new(),
+            hurt_by: None,
+            interrupt_ms: 0.0,
+            seed: seed | 1,
+        }
+    }
+
+    /// A hit on the unit, fired by the unit of logic id `firer` (message `0x19`): it asks for
+    /// an attack on it at its next takt. Delivered even when the hit does no damage.
+    pub fn hurt(&mut self, firer: i32) {
+        self.hurt_by = Some(firer);
     }
 
     /// STAND-IN: docs/31-packages.md#what-each-package-does--read -- the behaviour's random
@@ -497,6 +566,9 @@ impl Behaviour {
         // unnamed fields): the nearest hostile unit within 500 is the best, and for a patrol
         // the one nearest its centre inside its radius. An attack already running is not
         // given another.
+        if let Some(firer) = self.hurt_by.take() {
+            self.retaliate(firer, senses);
+        }
         let task = self.task();
         if !senses.neutral
             && !senses.building
@@ -505,8 +577,16 @@ impl Behaviour {
             && task.engage_priority() >= ENGAGE_BAR
             && !matches!(task, Task::Attack { .. })
             && let Some((enemy, limit)) = Self::engagement(task, senses)
+            && self.pause_passed(senses.now_ms)
         {
-            self.tasks.push(Task::Attack { target: Some(enemy), fighting: false, next_ms: 0.0, limit });
+            let limit = limit.map(|l| Self::stamped(l, senses.now_ms));
+            self.tasks.push(Task::Attack {
+                target: Some(enemy),
+                fighting: false,
+                next_ms: 0.0,
+                limit,
+                ordered: false,
+            });
         }
         for _ in 0..4 {
             match self.run(senses) {
@@ -521,7 +601,10 @@ impl Behaviour {
                             *next_loop_ms = None;
                         }
                     }
-                    return takt;
+                    // The fire control does nothing for an animal whose walker is idle
+                    // (`0x10024069`).
+                    let target = if senses.animal && senses.walker_idle { None } else { takt.target };
+                    return Takt { target, ..takt };
                 }
                 None => {
                     self.tasks.pop();
@@ -534,6 +617,135 @@ impl Behaviour {
         Takt { walk: Walk::Clear, target: self.fire_target(senses), fire_freely: false }
     }
 
+    /// The interrupt gate's pause (step 7 of `0x100179c0`): whether it has run out, restarting
+    /// it when it has.
+    fn pause_passed(&mut self, now_ms: f64) -> bool {
+        if now_ms < self.interrupt_ms {
+            return false;
+        }
+        self.interrupt_ms = self.timer(now_ms, INTERRUPT_PAUSE_MS);
+        true
+    }
+
+    /// A limit's time counted from `now_ms`, as the attack's start stamps it (`0x100349a8`).
+    fn stamped(limit: Limit, now_ms: f64) -> Limit {
+        Limit { until_ms: limit.until_ms.map(|t| now_ms + t), ..limit }
+    }
+
+    /// The attack on the unit that hurt it (reason 1, `0x10018060` through the gate
+    /// `0x100179c0`): refused by an animal that is not migrating, a building, a neutral clan's
+    /// unit, a task that answers 0.3 or less, the gate's pause, or a firer that is gone, the
+    /// unit itself or of its own clan, and by an unarmed unit. No radar, relation or distance is
+    /// asked. The attack goes on top, its limit the task's answer merged with the task's own.
+    fn retaliate(&mut self, firer: i32, senses: &Senses) {
+        let task = self.task();
+        if senses.building || senses.neutral || (senses.animal && task != Task::Stop) {
+            return;
+        }
+        let Some((priority, limit)) = self.retaliation(task, firer, senses) else { return };
+        if priority <= ENGAGE_BAR || !self.pause_passed(senses.now_ms) {
+            return;
+        }
+        let Some(target) = senses.find(firer).filter(|s| !s.own) else { return };
+        if !senses.has_weapon {
+            return;
+        }
+        let own = match task {
+            Task::Attack { limit, .. } => limit,
+            _ => None,
+        };
+        let limit = limit.map(|l| Self::stamped(l, senses.now_ms).merged(own)).or(own);
+        self.tasks.push(Task::Attack {
+            target: Some(target.id),
+            fighting: false,
+            next_ms: 0.0,
+            limit,
+            ordered: false,
+        });
+    }
+
+    /// What `task` answers a hit from `firer` with (its slot 12 for reason 1, and slot 13's
+    /// limit), `None` for 0.
+    fn retaliation(&self, task: Task, firer: i32, senses: &Senses) -> Option<(f32, Option<Limit>)> {
+        let at = senses.position;
+        match task {
+            // A migrating animal answers 1 wherever the firer is; its pasture limits the attack.
+            //
+            // STAND-IN: docs/31-packages.md#migrate-an-animals-pasture--read-and-measured -- an
+            // animal's migrate is not modelled: a standing animal answers as a migrating one, about
+            // its clan's zone nearest it, and with none as one beyond its pasture.
+            Task::Stop if senses.animal => {
+                let firer_at = senses.find(firer)?.position;
+                let (time, circle, centre) = match senses.pasture {
+                    Some(p) if at.truncate().distance(p.centre.truncate()) <= p.outer => {
+                        let d = firer_at.truncate().distance(p.centre.truncate());
+                        let (time, circle) = if d > p.outer {
+                            MIGRATE_FIRER_OUTSIDE
+                        } else if d > p.inner {
+                            MIGRATE_FIRER_ON_PASTURE
+                        } else {
+                            MIGRATE_FIRER_INSIDE
+                        };
+                        (time, circle.map(|c| p.outer + c), p.centre)
+                    }
+                    _ => (MIGRATE_AWAY.0, MIGRATE_AWAY.1, at),
+                };
+                let limit = Limit {
+                    centre: Limited::Place(centre),
+                    radius: circle.unwrap_or(0.0),
+                    until_ms: Some(time * 1000.0),
+                };
+                Some((1.0, Some(limit)))
+            }
+            // The base priority, and the tasks that embed it: 1000 about where the unit stands.
+            Task::Stop | Task::Search { search: Search::Enemies, .. } => {
+                Some((1.0, Some(Limit { centre: Limited::Place(at), radius: STOP_LIMIT, until_ms: None })))
+            }
+            // A patrol answers 1 wherever the firer is, limited about what it guards.
+            Task::Patrol { guarded, radius, .. } => {
+                let limit = match guarded {
+                    Guarded::Place(p) => Limit {
+                        centre: Limited::Place(p),
+                        radius: radius + PATROL_PLACE_LIMIT,
+                        until_ms: None,
+                    },
+                    Guarded::Building(id) => Limit {
+                        centre: Limited::Place(senses.find(id)?.position),
+                        radius: radius + PATROL_BUILDING_LIMIT,
+                        until_ms: None,
+                    },
+                    Guarded::Unit(id) => Limit {
+                        centre: Limited::Unit(id),
+                        radius: radius + PATROL_UNIT_LIMIT,
+                        until_ms: None,
+                    },
+                };
+                Some((1.0, Some(limit)))
+            }
+            Task::Follow { leader, radius, .. } if senses.has_weapon => Some((
+                1.0,
+                Some(Limit {
+                    centre: Limited::Unit(leader),
+                    radius: 2.0 * radius + FOLLOW_RETALIATE_SLACK,
+                    until_ms: None,
+                }),
+            )),
+            // An attack an interrupt made takes a firer that scores above its own target.
+            Task::Attack { target, ordered: false, .. } => {
+                let score = |id: i32| {
+                    senses.find(id).map_or(0.0, |s| {
+                        let d = s.position.truncate().distance(at.truncate());
+                        if d > ATTACK_SWITCH_RANGE { 0.0 } else { ATTACK_SWITCH_SCORE / (d + 10.0) }
+                    })
+                };
+                let now = target.map_or(0.0, score);
+                let new = score(firer);
+                (new > now && target != Some(firer)).then_some((new, None))
+            }
+            _ => None,
+        }
+    }
+
     /// The contact `task` lets an engagement take up, and the limit it hands the attack
     /// (`0x10017e70`, the task's slots 12 and 13).
     fn engagement(task: Task, senses: &Senses) -> Option<(i32, Option<Limit>)> {
@@ -543,17 +755,35 @@ impl Behaviour {
             // the ground (`0x1002d4a1`), and limits the attack about what it guards.
             Task::Patrol { guarded, radius, .. } => {
                 let (centre, share, limit) = match guarded {
-                    Guarded::Place(p) => {
-                        (p, 1.0, Limit { centre: Limited::Place(p), radius: radius + PATROL_PLACE_LIMIT })
-                    }
+                    Guarded::Place(p) => (
+                        p,
+                        1.0,
+                        Limit {
+                            centre: Limited::Place(p),
+                            radius: radius + PATROL_PLACE_LIMIT,
+                            until_ms: None,
+                        },
+                    ),
                     Guarded::Building(id) => {
                         let p = senses.find(id)?.position;
-                        (p, 1.0, Limit { centre: Limited::Place(p), radius: radius + PATROL_BUILDING_LIMIT })
+                        (
+                            p,
+                            1.0,
+                            Limit {
+                                centre: Limited::Place(p),
+                                radius: radius + PATROL_BUILDING_LIMIT,
+                                until_ms: None,
+                            },
+                        )
                     }
                     Guarded::Unit(id) => (
                         senses.find(id)?.position,
                         PATROL_UNIT_SHARE,
-                        Limit { centre: Limited::Unit(id), radius: radius + PATROL_UNIT_LIMIT },
+                        Limit {
+                            centre: Limited::Unit(id),
+                            radius: radius + PATROL_UNIT_LIMIT,
+                            until_ms: None,
+                        },
                     ),
                 };
                 let d = |s: &Seen| s.position.truncate().distance(centre.truncate()) * share;
@@ -568,7 +798,8 @@ impl Behaviour {
             // The base priority's limit: 1000 about where the unit stands (`0x100018a0`).
             Task::Stop => {
                 let enemy = senses.nearest(engageable, ENGAGE_RANGE)?;
-                let limit = Limit { centre: Limited::Place(senses.position), radius: STOP_LIMIT };
+                let limit =
+                    Limit { centre: Limited::Place(senses.position), radius: STOP_LIMIT, until_ms: None };
                 Some((enemy.id, Some(limit)))
             }
             _ => senses.nearest(engageable, ENGAGE_RANGE).map(|s| (s.id, None)),
@@ -794,7 +1025,7 @@ impl Behaviour {
                 *self.tasks.last_mut()? = Task::Transport { goal, going, arrived };
                 Some(Takt { walk, target: self.fire_target(senses), fire_freely: false })
             }
-            Task::Attack { target, fighting, next_ms, limit } => {
+            Task::Attack { target, fighting, next_ms, limit, ordered } => {
                 if !senses.has_weapon {
                     return None;
                 }
@@ -827,7 +1058,14 @@ impl Behaviour {
                     next = self.timer(now, ATTACK_TIMER_MS);
                     self.fire = FireMode::Fixed(id);
                 }
-                *self.tasks.last_mut()? = Task::Attack { target: Some(id), fighting, next_ms: next, limit };
+                // An animal fires on its target from within 200, and on the nearest hostile contact
+                // beyond (`0x10027580`).
+                if senses.animal {
+                    let near = victim.position.distance(at) <= ANIMAL_FIXED_FIRE;
+                    self.fire = if near { FireMode::Fixed(id) } else { FireMode::Nearest };
+                }
+                *self.tasks.last_mut()? =
+                    Task::Attack { target: Some(id), fighting, next_ms: next, limit, ordered };
                 Some(Takt { walk, target: self.fire_target(senses), fire_freely: true })
             }
         }
@@ -986,13 +1224,28 @@ impl Behaviour {
     }
 }
 
-/// The fight module's distance score (`0x1001b9f0`): 0 to 1 over the first 5 m, 1 out to
-/// (v + 1) ÷ 2, 0 at 2 (v + 1); times 1 − height ÷ v.
-pub fn distance_score(distance: f32, height: f32, round_speed: f32) -> f32 {
+/// A round frame's flags (`+116`) the distance score skips the distance for: bit `0x10` scores
+/// 1.1, bit 8 1.0 (`0x1001b9f0`).
+pub const SCORE_FLAG_ANYWHERE_HIGH: i32 = 0x10;
+pub const SCORE_FLAG_ANYWHERE: i32 = 0x8;
+pub const SCORE_ANYWHERE_HIGH: f32 = 1.1;
+/// The ramp a score rises over from 0: 5 m, and none for an animal (`+0x44`, `0x1001b5e0`).
+pub const SCORE_RAMP: f32 = 5.0;
+
+/// The fight module's distance score (`0x1001b9f0`): for a round whose frame flags carry bit
+/// `0x10`, 1.1, and bit 8, 1.0, wherever the target stands; otherwise 0 to 1 over the first
+/// `ramp` m, 1 out to (v + 1) ÷ 2, 0 at 2 (v + 1), times 1 − height ÷ v.
+pub fn distance_score(distance: f32, height: f32, round_speed: f32, flags: i32, ramp: f32) -> f32 {
+    if flags & SCORE_FLAG_ANYWHERE_HIGH != 0 {
+        return SCORE_ANYWHERE_HIGH;
+    }
+    if flags & SCORE_FLAG_ANYWHERE != 0 {
+        return 1.0;
+    }
     let v = round_speed.max(1e-3);
     let (hold, gone) = ((v + 1.0) / 2.0, 2.0 * (v + 1.0));
-    let score = if distance < 5.0 {
-        distance / 5.0
+    let score = if distance < ramp {
+        distance / ramp
     } else if distance <= hold {
         1.0
     } else if distance < gone {
@@ -1047,6 +1300,7 @@ mod tests {
             neutral: false,
             building: false,
             animal: false,
+            pasture: None,
         }
     }
 
@@ -1138,6 +1392,86 @@ mod tests {
         let mut medusa = Behaviour::new(3);
         let t = medusa.takt(&Senses { animal: true, ..senses(&[enemy], 0.0, Vec3::ZERO, true) });
         assert_eq!((medusa.task(), t.target), (Task::Stop, None));
+    }
+
+    #[test]
+    fn a_grazing_medusa_hit_from_off_its_pasture_attacks_the_firer_for_20_s_within_outer_plus_20() {
+        // Mission 02's western pasture: outer 50, inner 20. The hero fires from 150 m off it, far
+        // past the radar's reach of the test's world, which retaliation does not ask.
+        let pasture = Pasture { centre: Vec3::new(0.0, 0.0, 0.0), inner: 20.0, outer: 50.0 };
+        let hero = Seen { sensed: false, ..unit(11, 200.0, 0.0) };
+        let medusa = |at: Vec3, idle: bool| Senses {
+            animal: true,
+            flyer: true,
+            pasture: Some(pasture),
+            ..senses(std::slice::from_ref(&hero), 1000.0, at, idle)
+        };
+        let mut b = Behaviour::new(5);
+        b.takt(&medusa(Vec3::new(8.0, 0.0, 11.0), true));
+        assert_eq!(b.task(), Task::Stop, "grazing, it takes up nothing");
+        b.hurt(11);
+        let t = b.takt(&medusa(Vec3::new(8.0, 0.0, 11.0), false));
+        let Task::Attack { target: Some(11), limit: Some(limit), ordered: false, .. } = b.task() else {
+            panic!("{:?}", b.task())
+        };
+        assert_eq!(limit.radius, 70.0);
+        assert_eq!(limit.until_ms, Some(21_000.0));
+        assert!(matches!(t.walk, Walk::To(..)), "it goes for the firer");
+        // An attacking animal takes no other interrupt.
+        let other = Seen { sensed: false, ..unit(12, 30.0, 0.0) };
+        b.hurt(12);
+        b.takt(&Senses { seen: &[hero, other], now_ms: 9000.0, ..medusa(Vec3::new(20.0, 0.0, 11.0), false) });
+        assert!(matches!(b.task(), Task::Attack { target: Some(11), .. }), "{:?}", b.task());
+        // Past 70 m of the pasture's centre the attack is dropped, and the medusa grazes again.
+        b.takt(&Senses { now_ms: 9500.0, ..medusa(Vec3::new(75.0, 0.0, 11.0), false) });
+        assert_eq!(b.task(), Task::Stop);
+
+        // Hit from inside the inner circle: 35 s, outer + 100.
+        let near = Seen { sensed: false, ..unit(11, 10.0, 0.0) };
+        let mut b = Behaviour::new(5);
+        b.hurt(11);
+        b.takt(&Senses { seen: std::slice::from_ref(&near), ..medusa(Vec3::new(8.0, 0.0, 11.0), false) });
+        assert!(matches!(
+            b.task(),
+            Task::Attack { limit: Some(Limit { radius: 150.0, until_ms: Some(36_000.0), .. }), .. }
+        ));
+    }
+
+    #[test]
+    fn a_hit_pulls_a_patrol_into_an_attack_on_a_firer_past_its_radar_and_radius_once_the_gate_pauses() {
+        let firer = Seen { sensed: false, ..unit(11, 600.0, 0.0) };
+        let mut b = Behaviour::new(2);
+        b.order(&place_patrol(0.0, 0.0));
+        b.takt(&senses(std::slice::from_ref(&firer), 0.0, Vec3::ZERO, true));
+        assert!(matches!(b.task(), Task::Patrol { .. }), "not hostile and not on its radar: no engagement");
+        b.hurt(11);
+        b.takt(&senses(std::slice::from_ref(&firer), 100.0, Vec3::ZERO, true));
+        assert!(
+            matches!(
+                b.task(),
+                Task::Attack { target: Some(11), limit: Some(Limit { radius: 120.0, .. }), .. }
+            ),
+            "{:?}",
+            b.task()
+        );
+        // A friend's round is not answered, and nor is anything while the gate pauses.
+        let mut b = Behaviour::new(2);
+        let own = Seen { own: true, ..firer };
+        b.hurt(11);
+        b.takt(&senses(std::slice::from_ref(&own), 0.0, Vec3::ZERO, true));
+        assert_eq!(b.task(), Task::Stop);
+        b.hurt(11);
+        b.takt(&senses(std::slice::from_ref(&firer), 1000.0, Vec3::ZERO, true));
+        assert_eq!(b.task(), Task::Stop, "the gate paused at the first hit");
+        b.hurt(11);
+        b.takt(&senses(std::slice::from_ref(&firer), 5000.0, Vec3::ZERO, true));
+        assert!(matches!(b.task(), Task::Attack { target: Some(11), .. }));
+        // A standing-by or shut-down unit answers nothing.
+        let mut b = Behaviour::new(2);
+        b.order(&Order { code: orders::STAYGROUND, parameter: 0, target: Target::NotDefined });
+        b.hurt(11);
+        b.takt(&senses(std::slice::from_ref(&firer), 0.0, Vec3::ZERO, true));
+        assert_eq!(b.task(), Task::StayGround);
     }
 
     #[test]
@@ -1347,10 +1681,14 @@ mod tests {
 
     #[test]
     fn a_gun_scores_fully_out_to_half_its_round_speed_and_waits_by_its_magazine() {
-        assert_eq!(distance_score(2.5, 0.0, 350.0), 0.5);
-        assert_eq!(distance_score(175.0, 0.0, 350.0), 1.0);
-        assert!((distance_score(438.75, 0.0, 350.0) - 0.5).abs() < 1e-3);
-        assert_eq!(distance_score(702.0, 0.0, 350.0), 0.0);
+        assert_eq!(distance_score(2.5, 0.0, 350.0, 4, SCORE_RAMP), 0.5);
+        assert_eq!(distance_score(2.5, 0.0, 350.0, 4, 0.0), 1.0, "an animal's has no ramp");
+        assert_eq!(distance_score(175.0, 0.0, 350.0, 4, SCORE_RAMP), 1.0);
+        assert!((distance_score(438.75, 0.0, 350.0, 4, SCORE_RAMP) - 0.5).abs() < 1e-3);
+        assert_eq!(distance_score(702.0, 0.0, 350.0, 4, SCORE_RAMP), 0.0);
+        // The Small Bunker's lobbed `bf_f_01` (flags 12) and a missile (16) score at any range.
+        assert_eq!(distance_score(180.0, 10.0, 45.0, 12, SCORE_RAMP), 1.0);
+        assert_eq!(distance_score(900.0, 0.0, 80.0, 16, SCORE_RAMP), 1.1);
         assert_eq!(fire_wait_ms(-1, 0.0), 500.0);
         assert_eq!(fire_wait_ms(10, 1.0), 6000.0);
     }

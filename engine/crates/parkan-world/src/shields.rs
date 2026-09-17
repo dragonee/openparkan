@@ -1,0 +1,57 @@
+//! The fight shield and deflector a placed object carries, as its controllers give them
+//! (docs/26-damage.md, "Shields: a generator, a deflector, six sectors").
+
+use parkan_formats::control::{self, Component};
+use parkan_sim::shield::{SECTORS, Shield};
+
+use crate::assembly::Assembly;
+use crate::robot::controller;
+
+/// The fight shield value holding a sector's maximum, its recharge a second and the charge a
+/// point costs.
+pub const SHIELD_MAX: usize = 0;
+pub const SHIELD_RECHARGE: usize = 1;
+pub const SHIELD_COST: usize = 2;
+
+/// The shield of the object built from `path`, where it has both a fight shield and a
+/// deflector; its sectors' maximum times the level ratio `ratio`.
+///
+/// Each part's class-9 and class-21 slots are taken in part order, and an internal part fitted
+/// into a slot re-parses it with its own first record, keeping the slot's node (docs/28, "A
+/// fitted part takes over its slot"). The generator's resource is the effect a hit plays.
+pub fn load(assembly: &mut Assembly, kind: u32, path: &str, ratio: f32) -> Option<Shield> {
+    let parts = assembly.parts(kind, path);
+    let mut slots: Vec<(usize, usize, Component)> = Vec::new();
+    for (p, part) in parts.iter().enumerate() {
+        let Some(c) = controller(assembly, &part.record).ok().flatten() else { continue };
+        for (i, k) in c.components.iter().enumerate() {
+            if matches!(k.type_id, control::FIGHT_SHIELD_TYPE | control::DEFLECTOR_TYPE) {
+                slots.push((p, i, k.clone()));
+            }
+        }
+    }
+    for (p, i, record) in assembly.fitted(path) {
+        let Some(c) = controller(assembly, &record).ok().flatten() else { continue };
+        let Some(k) = c.components.first() else { continue };
+        if let Some(slot) = slots.iter_mut().find(|s| s.0 == p && s.1 == i && s.2.type_id == k.type_id) {
+            slot.2 = Component { node: slot.2.node, ..k.clone() };
+        }
+    }
+    let of = |type_id: i32| slots.iter().find(|s| s.2.type_id == type_id);
+    let (generator, deflector) = (of(control::FIGHT_SHIELD_TYPE)?, of(control::DEFLECTOR_TYPE)?);
+    let node = |(p, _, k): &(usize, usize, Component)| usize::try_from(k.node).ok().map(|n| (*p, n));
+    let g = &generator.2;
+    let mut shield = Shield::new(
+        g.values[SHIELD_MAX] * ratio,
+        g.values[SHIELD_RECHARGE],
+        g.values[SHIELD_COST],
+        std::array::from_fn(|i| deflector.2.values[i]),
+    );
+    shield.shield_power = g.power;
+    shield.deflector_power = deflector.2.power;
+    shield.effect = g.resource.member.clone();
+    shield.shield_node = node(generator);
+    shield.deflector_node = node(deflector);
+    debug_assert_eq!(SECTORS, 6);
+    Some(shield)
+}

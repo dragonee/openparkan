@@ -108,13 +108,14 @@ pub fn lighting(
 }
 
 /// The mission's play, with the hero's view held steady against its gait unless `--sway`,
-/// a captured bot standing by unless `--capture-idle`, and its progression when its script
-/// and messages load.
+/// a captured bot standing by unless `--capture-idle`, a building holding its fire below its
+/// turret's reach unless `--fire-below`, and its progression when its script and messages load.
 pub fn play(game: &Path, loaded: &Loaded, args: &crate::Args) -> Result<Option<Play>> {
     let mut play = Play::load(game, &loaded.mission)?;
     if let Some(p) = play.as_mut() {
         p.hero.steady = !args.sway;
         p.capture_standby = !args.capture_idle;
+        p.building_fire_floor = !args.fire_below;
         if let Err(e) = p.load_progression(game, &loaded.dir, &loaded.mission) {
             eprintln!("no mission progression: {e:#}");
         }
@@ -517,14 +518,28 @@ pub fn sync(
     let quads: Vec<parkan_render::sprites::Quad> = play
         .sprites(eye)
         .into_iter()
-        .map(|(look, s)| {
-            let corners = parkan_render::sprites::billboard(s.centre, s.along, s.width, eye);
-            parkan_render::sprites::Quad {
+        .flat_map(|(look, s)| {
+            use parkan_render::sprites::{Quad, billboard, dome, lengthwise};
+            if let Some(d) = s.dome {
+                return dome(s.centre, d.axes, d.segments, d.rings)
+                    .into_iter()
+                    .map(|(corners, uv)| Quad {
+                        look,
+                        corners,
+                        alpha: s.alpha,
+                        overlay: s.overlay,
+                        uv: Some(uv),
+                    })
+                    .collect::<Vec<_>>();
+            }
+            let corners = billboard(s.centre, s.along, s.width, eye);
+            vec![Quad {
                 look,
-                corners: if s.lengthwise { parkan_render::sprites::lengthwise(corners) } else { corners },
+                corners: if s.lengthwise { lengthwise(corners) } else { corners },
                 alpha: s.alpha,
                 overlay: s.overlay,
-            }
+                uv: None,
+            }]
         })
         .collect();
     renderer.set_sprites(device, queue, view_proj, &quads);

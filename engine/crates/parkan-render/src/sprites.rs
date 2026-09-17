@@ -28,6 +28,33 @@ pub struct Quad {
     /// Drawn over the scene, with the depth test off (effect draw flag 1,
     /// `docs/11-effects.md`, "Bit 8 and the tested point").
     pub overlay: bool,
+    /// Each corner's (u, v) across the look's cell, where the quad is a piece of a larger
+    /// shape; `None` spans the cell.
+    pub uv: Option<[[f32; 2]; 4]>,
+}
+
+/// The quads a hemisphere is cut into: about `centre`, its rim spanning `axes[0]` and
+/// `axes[1]` and its pole at `axes[2]`, `segments` around and `rings` from the rim up. Each
+/// comes with its corners' (u, v), u around and v from the rim to the pole.
+pub fn dome(centre: Vec3, axes: [Vec3; 3], segments: u8, rings: u8) -> Vec<([Vec3; 4], [[f32; 2]; 4])> {
+    let (segments, rings) = (usize::from(segments.max(3)), usize::from(rings.max(1)));
+    let point = |s: usize, r: usize| {
+        let around = s as f32 / segments as f32 * std::f32::consts::TAU;
+        let up = r as f32 / rings as f32 * std::f32::consts::FRAC_PI_2;
+        let at = centre
+            + axes[0] * (around.cos() * up.cos())
+            + axes[1] * (around.sin() * up.cos())
+            + axes[2] * up.sin();
+        (at, [s as f32 / segments as f32, 1.0 - r as f32 / rings as f32])
+    };
+    let mut out = Vec::with_capacity(segments * rings);
+    for r in 0..rings {
+        for s in 0..segments {
+            let corners = [point(s, r), point(s + 1, r), point(s + 1, r + 1), point(s, r + 1)];
+            out.push((corners.map(|c| c.0), corners.map(|c| c.1)));
+        }
+    }
+    out
 }
 
 /// The corners of a sprite seen from `eye`: a square of side `width` facing the eye,
@@ -275,7 +302,8 @@ impl SpriteRenderer {
         for q in sorted {
             let [u0, v0, du, dv] = self.looks[q.look].2;
             let uv =
-                [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]].map(|[u, v]| [u0 + u * du, v0 + v * dv]);
+                q.uv.unwrap_or([[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]])
+                    .map(|[u, v]| [u0 + u * du, v0 + v * dv]);
             let v = |i: usize| GpuVertex { position: q.corners[i].to_array(), uv: uv[i], alpha: q.alpha };
             let start = vertices.len() as u32;
             vertices.extend([v(0), v(1), v(2), v(0), v(2), v(3)]);

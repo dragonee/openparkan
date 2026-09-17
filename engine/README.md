@@ -76,7 +76,7 @@ and its animation, when seen from outside.
   as their emitters say, in their materials' blend modes; a bit-8 emitter
   draws over the scene while its effect's tested point is in view.
 
-Not yet: lights, animated textures, shields, and what a dead unit leaves
+Not yet: lights, animated textures, and what a dead unit leaves
 behind.
 
 **M5.** The sky is the mission's `sky.ske`, interpolated on its clock, which
@@ -683,6 +683,69 @@ presses a hero standing at it down), and which of Mission 04's units holds no mi
   holds the building's own base. The band is ground: a machine walks it, and a round stops on
   it.
 
+Feedback on the first chapter's *The Arrival* and *Outflanking Maneuver*.
+
+- **The hero is struck** (docs/26, "The hit test"). The hero on foot was no target in the
+  battle: no round could meet it and no AI unit's fire control could take it, so an enemy that
+  had it on its radar aimed at nothing. The battle now keeps the hero as a target numbered after
+  the placed objects, as the radar numbers it, posed where the hero stands each tick and alive
+  while it is in the world; its lives stay the hero's, lent to the battle for its frame. A round
+  it fires never meets it. A node it loses plays its explosion, and losing it fails the mission.
+  On *The Arrival* the first patrol takes the hero up in its ground and its rounds reach it.
+- **A clan no relation record names stays hostile** (docs/25, "Clan relations"). The loader
+  starts every word at 0 and files each record under the clan its name matches, ignoring case;
+  a neutral clan's row and every word towards one become 1, and a clan's word towards itself 2.
+  The engine had read a missing name as no relation, and *Outflanking Maneuver*'s records name
+  every clan but `player`, so its enemy, towers and bunker took the player for no foe. Every
+  relation now comes from the loader's words, the behaviour's own test with it: a neutral
+  clan's unit takes nothing as hostile and a nature clan's everything, and neither a nature nor
+  a neutral clan's unit is a hostile contact.
+- **Shields** (docs/26, "Shields"). Every unit and building with a fight shield and a deflector
+  carries six sectors, loaded from its controllers with a fitted generator or deflector taking
+  its slot's figures, and the sector maximum at the level ratio: `hero11` 1,850 at 0.9,
+  `11tin2` 350 at 0.7, *Outflanking Maneuver*'s Small Bunker 11,000 at 0.36. The bubble is the
+  bounding sphere, up while both devices' nodes live. A round meeting it from outside takes the
+  sector its hit's dominant axis names in the unit's frame; a round with more life than the
+  sector's strength passes, emptying the sector and losing that much life, and any other stops
+  on the bubble, its hit stopped by what the sector holds, the sector paying for it over the
+  deflector. A blast crossing the bubble from outside is stopped first and the rest reaches the
+  nodes; one inside it, and a shot from inside, meet no shield. Kind 4 hits shields alone. Each
+  tick the generator recharges its sectors by what each lacks, at most value 1 a second, and a
+  building's shield takes its batteries' level: an unpowered one drains and stops nothing. The
+  HUD's six sectors read each sector's fill × the deflector's level and condition, red to green.
+- **A shield hit flashes** (docs/26, "What a shield hit draws"). A hit on a sector with strength
+  plays the generator's effect — `r_shield_r` on a small warbot, `r_shield_b` on the hero — at
+  the bubble's centre, turned toward the hit and sized by its radius, on the next of three
+  instances: the camera-facing wave, 2.4 radii across, is the translucent sphere, and two
+  type-9 emitters draw hemispheres at the point of impact. A type-9 emitter's `+200` now draws
+  its dome, 8 × 3, 16 × 6 or 24 × 9 quads, rather than a quad. The flash is the generator's
+  colour whatever the sector holds, as read.
+- **A hit pulls a unit in** (docs/31, "A hit pulls a unit in"). Every hit tells its victim who
+  fired — a direct hit, every object a blast reaches, a round stopped by or passing a bubble —
+  and at its next takt the unit asks for an attack on the firer, through the interrupt gate: an
+  animal only while it grazes, never a building or a neutral clan's unit, a task answering more
+  than 0.3, a pause of 2 s plus up to 3 between interrupts that the engagement shares, a firer
+  that is not of its own clan, and a weapon. No radar or relation is asked. A stopped unit's
+  attack keeps within 1,000 of where it stood, a patrol's within its guarded ground's limit, a
+  follower's within 2 × radius + 20 of its leader, and an attack an interrupt made switches to a
+  nearer firer; a migrating animal's runs 10, 20, 25 or 35 s within its pasture's outer radius
+  plus 20, 80 or 100, by where it and the firer stand, and fires on the firer within 200.
+- **A lobbed round flies as read** (docs/29, "How the AI fires"). The distance score skips the
+  distance for a round whose frame flags carry bit `0x10` (1.1) or 8 (1.0), and has no ramp on
+  an animal; *Outflanking Maneuver*'s Small Bunker, whose `bf_f_01` carries 8, had scored
+  nothing past 33 m at its speed of 45 and never fired, and now fires on the hero 150 m off. A
+  mode-3 round falls at 10 and turns along its flight, leaves along its barrel rather than
+  converging on the sight, and a follower mount lifts its gun for the point its turret traces,
+  a manual turret's taking no lift. The bunker's guns hang on its turret as parts, with no
+  mount to lift them; their shells leave on the lower arc to the point the turret traces, and
+  the guns hold their fire past the arc's reach, about 200 m on level ground. A building's guns
+  also hold their fire on a target below the lowest its turret's sight looks (a departure,
+  below), so the Small Bunker leaves alone a unit within about 40 m of it or on its pod.
+- **Animals are units** (docs/34, "The medusas"). A medusa is one part whose controller holds its
+  turret and gun, and it had never loaded; it does now, its own controller its turret. Shot by
+  the hero from off its pasture on *The Arrival*, a medusa turns on the hero and its acid lands
+  about it.
+
 This directory also holds what the rest will follow:
 
 - **`docs/`** is the source of truth. Every behaviour the engine implements is
@@ -863,13 +926,12 @@ a row here. A row leaves this table when research closes it.
 | M3 | How the camera builds its look-only frame when its up is parallel to the look (`0x10023769`) | any frame about the look; no shipped camera's pitch reaches it | [30](../docs/30-turrets.md#aiming-and-the-camera--read-and-measured) |
 | M4 | Whether a target the hero's AI set before the player took over survives | none: nothing sets it while the player drives, so the plasma bolt and the missile fly straight | [29](../docs/29-weapons.md#not-established) |
 | M4 | Whether the landscape is one of the objects the sight ray (IWorld slot 7) walks; it skips no batch or triangle | the ground (less the water surface) and every live object's level-0 mesh, passing no triangle, as far as the map's diagonal and 200 m more | [29](../docs/29-weapons.md#not-established) |
-| M4 | What a falling round's mount solves for with no target (the aim triple, `0x10027e07`), which way its lift turns on a hung turret, and whether a player's turret is in `CIS_MANUALCONTROL` | the stored aim triple as the vector, the lift signed by `TurretCenter`'s z, and the solve runs (no hero round falls) | [29](../docs/29-weapons.md#not-established) |
+| M14 | How a lobbed round's gun fitted as a part on a turret with no follower channel (the Small Bunker's) is raised | its round leaves on the lower arc from its muzzle to the point its turret traces, at its speed, and the gun is ready only while that point is within the arc's reach | [29](../docs/29-weapons.md#not-established) |
 | M4 | How a gun's capacitor refills | full again every tick (the power tick is not modelled) | [23](../docs/23-economy.md#bots-spend-power-through-the-same-code-priced-by-part--read-and-measured) |
 | M4 | Whether a round's ground test strikes the water surface | it passes through: the ground index holds no face with `Land.msh` surface bit `0x02`, so a round meets the bed | [26](../docs/26-damage.md#the-hit-test--read-and-measured) |
 | M4 | The point-in-triangle test of the hit test (`0x10011090`), and the landscape's own cell size | an edge test on the triangle's winding; the ground index's 16 m cells | [26](../docs/26-damage.md#the-hit-test--read-and-measured) |
 | M4 | Which node flag makes a node vital | the mesh node's `0x200` | [26](../docs/26-damage.md#hit-points--read-and-measured) |
 | M4 | Whether vegetation and rock take damage | they stop rounds and take none | [04](../docs/04-missions.md#the-scale) |
-| M4 | Shields: bubble contacts and sectors | not modelled: no bubble stops a round, a blast skips its shield step and kind 4 does nothing; Mission 01's `tut1_e1`, `tut1_mf1` and `helic` carry fight shields and deflectors | [26](../docs/26-damage.md#shields-a-generator-a-deflector-six-sectors--read-and-measured) |
 | M4 | Poses of other units for the hit test | their rest poses: other units' animation is not played | [24](../docs/24-motion.md#playing-a-state--read-and-measured) |
 | M4 | The rest of the emitter floats: what a particle's exponent-shaped triples are, a bolt's widths | sprites (3, 4, 9) move +40→+52 and grow +100→+112 straight by progress through the window, per-axis powers left out; a burst (7, 10) flies between velocities +44 and +56, spread +68, its age progress over +28, sized +92→+104; a stream (8) particle sits at +88→+100 and grows +136→+148 by its age in seconds, both in metres times the instance's scale, its frame turning them but not sizing them; a bolt's sprites are +24 wide, each spanning its texture's cell once where the texture repeats every +32 along the beam | [11](../docs/11-effects.md#not-resolved) |
 | M4 | An effect's jitter (flag 1), the owner values of time modes 5–15, and a phase's animated texture frames | no jitter; modes 5–15 all read the owner's speed over its top speed, set on rounds; frame 0 of every texture | [11](../docs/11-effects.md#how-an-effect-runs--read) |
@@ -946,11 +1008,17 @@ a row here. A row leaves this table when research closes it.
 | M14 | How many tracks the install's `winmm.dll` reports for its `MUSIC` files | the highest `TrackNN.ogg` present; a track with no file is not audio | [34](../docs/34-progression.md#music-the-cds-tracks--read-and-measured) |
 | M14 | When `AniMesh.dll` works an agent's sphere and node sphere out again (`0x10009510`), and at which pose | once, at the parts' and nodes' rest poses, as the unit is made | [24](../docs/24-motion.md#finding-the-ground--read) |
 | M14 | How `CD_VOLUME` and `SFX_VOLUME`, each a share of a mixer control, become loudness | the music plays at the sounds' level, as the install's equal settings and Mission 01's recording have it | [34](../docs/34-progression.md#music-the-cds-tracks--read-and-measured) |
-| M14 | What a dock does with a unit's batteries and shields, and the device manager's value 7 it adds a tenth of | neither is simulated (docs/23, docs/26), so a dock gives life and ammunition alone | [27](../docs/27-ownership.md#what-a-dock-gives--read) |
+| M14 | What a dock does with a unit's batteries and shields, and the device manager's value 7 it adds a tenth of | batteries are not simulated (docs/23), so a dock gives life and ammunition alone and leaves a shield to its own recharge | [27](../docs/27-ownership.md#what-a-dock-gives--read) |
 | M14 | What becomes of a part already knocked off and flying when its dock puts its node back | it is taken out of the air, rather than drawn beside the node it is again | [26](../docs/26-damage.md#repair-a-units-own-repair-unit-switched-on-and-off--read-and-measured) |
 | M14 | What the game drives a dock's glow with: its own time mode is 0, a value set from outside, and nothing read sets it | a charging dock runs it looping and switches it off again; the `f_recharge_*` nearest a dock's vertex is that dock's | [13](../docs/13-control.md#a-buildings-load-group--read-and-measured) |
 | M14 | The masses property `0x7c` gives a unit and a static object, by whose squares a pair shares its push | no push is shared: every unit, not the hero alone, is run as the mover against every placed object and takes the whole push, which is what a building, a tree or a stone gives anyway | [24](../docs/24-motion.md#not-established) |
 | M14 | Where a unit built in a factory joins the building's own paths, which the escape's 20-second check routes it out by ("LEAVE IS TOO !!!") | a bot made at a creation vertex counts as having walked in: it leaves along the hall way, as a unit sent in does | [31](../docs/31-packages.md#the-escape--read) |
+| M14 | A unit's batteries, which serve its shield's power channel | a unit's shield channel is served whole; a building's takes the level its batteries serve it at; the shield's and deflector's draws come out of no battery | [26](../docs/26-damage.md#power--read) |
+| M14 | That a shield flash rides on node 0 | it keeps its direction and follows the bubble's centre | [26](../docs/26-damage.md#what-a-shield-hit-draws--read-and-measured) |
+| M14 | Which of the effect frame's axes a type-9 dome's pole ends on, and how its texture runs over it | the first, so a shield flash bulges out of the bubble toward the hit, the round glow a recording shows; u around, v from rim to pole | [11](../docs/11-effects.md#not-resolved) |
+| M14 | An animal's migrate: its pasture, its points and its timers | the animal stands; a hit is answered as a migrating animal answers it, about its clan's zone nearest it, and with none as one beyond its pasture | [31](../docs/31-packages.md#migrate-an-animals-pasture--read-and-measured) |
+| M14 | How a turret component on a chassis's own controller poses its nodes against the chassis's frames, and how an animal's gun aims, its pitch channel having no point | the turret's channels pose the mesh as a turret part's would; an AI gun with no sight fires straight at the point its fire control traces | [34](../docs/34-progression.md#the-medusas--read-and-measured) |
+| M14 | The call for help and the clan attitude a hit lowers | neither is modelled: a hit pulls in its victim alone, and relations stay as the mission gives them | [31](../docs/31-packages.md#a-hit-pulls-a-unit-in--read) |
 | M14 | The behaviour's radar module: its two timers, and the hostile and friendly lists it keeps from its machine's radar | the machine's own radar scan stands in for the module, read afresh each takt; the fire control and the engagement pick from it alone, so a unit with no radar picks no target of its own, while a search still looks over the clan's areal map, which the engine keeps whole | [25](../docs/25-sensors.md#what-the-ai-does-with-it--read) |
 
 ### Read since the stand-in was written
@@ -1002,7 +1070,7 @@ engine pass replaces each with what was read and removes its row.
 | M9 | The charge level of a gun with no capacity, which only a shot sets | its bar shows full | [29](../docs/29-weapons.md#a-gun-is-a-capacitor-a-magazine-and-a-clock--read) |
 | M9 | Which caller hands a unit's name its class word, and which robots are *"Tiny Tower"* | each class letter its own word (W *Warrior*, T *Transport*, B *Builder*, C *Comm. Center*); no robot is a Tiny Tower | [35](../docs/35-hud.md#name-and-status--read-and-seen) |
 | M9 | The component value `0x400` the *"Dangerous!"* line asks for | no unit is called dangerous | [35](../docs/35-hud.md#name-and-status--read-and-seen) |
-| M9 | A panel's battery arc and shield sectors: batteries and shields are not simulated | a unit with a battery reads full and one without empty, so the low battery voice never plays; every sector of a unit with a fight shield and a deflector reads full | [23](../docs/23-economy.md#bots-spend-power-through-the-same-code-priced-by-part--read-and-measured) |
+| M9 | A panel's battery arc: batteries are not simulated | a unit with a battery reads full and one without empty, so the low battery voice never plays | [23](../docs/23-economy.md#bots-spend-power-through-the-same-code-priced-by-part--read-and-measured) |
 | M9 | A wingman's order queue, which its status line names | the running task names the order: none *no order*, standby *standing*, follow *following*, search *searching* (*capturing* for a capture), refit *refitting*, attack *attacking* | [31](../docs/31-packages.md#the-orders--measured) |
 | M9 | The driven unit record's `+0x10 ÷ +0x14` in the scale of the square about the target | the camera's focal length: the square's half-side is two thirds of the target's projected radius, then held as read | [35](../docs/35-hud.md#the-frame-around-the-target-in-the-world--read) |
 | M9 | How the panel camera draws a mesh in the colour it is handed in mode 2 | flat, untextured and opaque, the node colour lifted by 0.1 and by 0.1 more with the light: an intact dummy (38, 166, 38) against the recording's (39, 162, 41) | [35](../docs/35-hud.md#the-unit-in-the-middle--read-and-seen) |
@@ -1055,5 +1123,6 @@ has a row here, and a switch that restores the game's behaviour.
 | what the game does | what the engine does | switch | see |
 |---|---|---|---|
 | The hero's body node yaws with the gait, ±10° once a run cycle, and the turret, eye, sight and barrels swing with it | node 0 keeps only the part of its turn not about its up axis, so the view, the sight and the barrels hold the heading the body moves along | `--sway` | [30](../docs/30-turrets.md#aiming-and-the-camera--read-and-measured) |
+| A building's guns fire on whatever its fire control traces, however far below its turret the target stands, so a bunker's lobbed flames reach a unit at its door or inside it | a building's guns hold their fire on a target lower than its turret's pitch channel lets its sight look — −15° on the Small Bunker's, about 40 m out from it — while its turret keeps tracing it | `--fire-below` | [29](../docs/29-weapons.md#how-the-ai-fires--read) |
 | A capture changes only the unit's clan, SuperAI and areal map, and gives it no order, so a captured bot engages a hostile within 500 on its own | a captured bot is given Standby, and holds until the player orders it | `--capture-idle` | [27](../docs/27-ownership.md#a-neutral-unit-is-taken-by-the-hero--read-and-measured) |
 | The HUD's 640 × 480 layout and the outcome panel scale by the screen's width over 640 across and its height over 480 down, so on a wide screen they stretch | the layout scales by the height alone and each element keeps its pin to the screen's edges: the panels in the bottom corners, the weapons at the top right, the radar at the bottom middle, the reticle and the wingman menu's rows in the middle; the warbot designer keeps its shape centred, over a black ground across the window | `--stretch-hud` | [35](../docs/35-hud.md#how-the-radar-draws--read) |

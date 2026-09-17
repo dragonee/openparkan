@@ -3,6 +3,7 @@
 
 use std::collections::HashMap;
 use std::path::Path;
+use std::rc::Rc;
 
 use anyhow::{Context, Result};
 use glam::{Mat4, Vec3};
@@ -24,9 +25,10 @@ use parkan_formats::mission::{
 use parkan_formats::pose::Pose;
 use parkan_formats::{gamedir, landmesh};
 use parkan_sim::behaviour::{
-    FIRE_BAR_FLYER, FIRE_BAR_WALKER, Search, Seen, Senses, Takt, Task, Walk, distance_score, fire_wait_ms,
+    FIRE_BAR_FLYER, FIRE_BAR_WALKER, SCORE_RAMP, Search, Seen, Senses, Takt, Task, Walk, distance_score,
+    fire_wait_ms,
 };
-use parkan_sim::combat::{Event, Part, Round, RoundEnd};
+use parkan_sim::combat::{Event, Part, Round, RoundEnd, Target};
 use parkan_sim::damage::FLIGHT_MS;
 use parkan_sim::damage::{Life, share_loss, touching};
 use parkan_sim::effects::{Cue, Frame, Sprite};
@@ -65,13 +67,9 @@ pub const BUILDING_RUINE: u32 = 0x8000_2000;
 /// within 20 across the ground (`0x10071fe7`).
 pub const CAPTURABLE_TYPES: u32 = 0x0103_e000;
 pub const CAPTURE_REACH: f32 = 20.0;
-/// A clan type: 0 nature, 3 neutral (docs/27).
-pub const CLAN_NATURE: u32 = 0;
-pub const CLAN_NEUTRAL: u32 = 3;
-/// A relation word toward a clan the list counts as hostile, neutral and allied.
-pub const RELATION_HOSTILE: u32 = 0;
-pub const RELATION_NEUTRAL: u32 = 1;
-pub const RELATION_ALLIED: u32 = 2;
+pub use parkan_formats::mission::{
+    CLAN_NATURE, CLAN_NEUTRAL, RELATION_ALLIED, RELATION_HOSTILE, RELATION_NEUTRAL,
+};
 /// The colours a mark takes (`iron3d.dll:0x10065440`), r, g, b.
 pub const MARK_OWN: [u8; 3] = [128, 128, 255];
 pub const MARK_NATURE: [u8; 3] = [255, 255, 0];
@@ -80,6 +78,9 @@ pub const MARK_NEUTRAL: [u8; 3] = [255, 0, 255];
 pub const MARK_ALLIED: [u8; 3] = [0, 255, 255];
 pub const MARK_HOSTILE: [u8; 3] = [255, 0, 0];
 pub const MARK_OTHER: [u8; 3] = [255, 255, 0];
+/// A shield's effect instances, and the time mode a flash plays in (`0x10025ca0`).
+pub const SHIELD_FLASHES: usize = 3;
+pub const SHIELD_FLASH_MODE: u32 = parkan_formats::fxid::TIME_ONCE;
 /// `FlyNearLandHeight`, bound by name (docs/24): how high a flyer's points keep.
 pub const FLY_NEAR_LAND: f32 = 15.0;
 /// STAND-IN: docs/26-damage.md#the-difficulty-ratio--read-and-measured -- which difficulty
@@ -262,6 +263,11 @@ pub struct Play {
     /// The driven unit's auto-driver level, 0–2, which `CMD_JAMES_AUTO_DRIVER` steps (docs/31).
     pub auto_driver: u8,
     pub clans: Vec<Clan>,
+    /// Each clan's relation word towards each clan, as the loader files them.
+    pub relations: Vec<Vec<u32>>,
+    /// Each shielded target's next effect instance, of three, and where each flash stands off
+    /// its bubble's centre, which it follows.
+    pub shield_flashes: HashMap<usize, usize>,
     /// The player's clan, and the hero's logical id.
     pub player_clan: i64,
     pub hero_id: i32,
@@ -280,6 +286,9 @@ pub struct Play {
     voice_pick: VoicePick,
     /// Whether a captured bot is given Standby ([`Play::enter`]); off, as the game's.
     pub capture_standby: bool,
+    /// Whether a building's guns hold their fire on a target below the lowest its turret's
+    /// sight looks; off, as the game's.
+    pub building_fire_floor: bool,
     /// Knocked-off parts in flight.
     pub flights: Vec<Flight>,
     /// Rounds whose flight is over, where each stopped, and when each goes: a round stays its
@@ -348,14 +357,16 @@ pub struct Launch {
     pub target: Option<usize>,
 }
 
-/// What a behaviour sees of an object: its target in the battle (none for the hero), what
-/// it is, and its clan.
+/// What a behaviour sees of an object: its target in the battle (the hero's number after the
+/// targets), what it is, and its clan.
 type Sighting = (Option<usize>, Seen, Option<i64>);
 
 /// The fire control's target, which is target `t`'s `robot`'s takt handed, reaches every gun:
 /// an AI turret traces a point, so its unguided guns take it too (docs/29). Each gun fires
 /// once its AI timer runs out and its score clears the bar, or freely during a search or an
-/// attack (docs/29, "How the AI fires").
+/// attack (docs/29, "How the AI fires"). With `floor`, a building's guns hold their fire on a
+/// target below the lowest its turret's sight can look.
+#[allow(clippy::too_many_arguments)]
 fn aim_and_fire(
     robot: &mut Robot,
     t: usize,
@@ -363,6 +374,8 @@ fn aim_and_fire(
     seen: &[Sighting],
     battle: &Battle,
     ground: &Ground,
+    animal: bool,
+    floor: bool,
 ) {
     let now = robot.time_ms;
     let at = robot.walker.body.position;
@@ -373,13 +386,24 @@ fn aim_and_fire(
             g.relink(target);
         }
     }
-    let Some(victim) = target.and_then(|i| battle.combat.targets.get(i)) else {
+    let Some(victim) = target.and_then(|i| battle.combat.target(i)) else {
         robot.target_point = None;
+        robot.rig.traced = None;
         return;
     };
     let (point, reach) = (victim.centre, victim.radius);
     robot.target_point = Some(point);
     robot.aim_at(point);
+    // DEPARTURE: docs/29-weapons.md#how-the-ai-fires--read -- no floor on a building's fire is
+    // read. A building's turret keeps tracing a target that stands lower than its pitch channel
+    // lets its sight look (−15° on the Small Bunker's), but its guns hold their fire, so a unit
+    // that comes within about 40 m of a bunker, or stands inside it, is not shot at by it.
+    if floor && let (Some(lowest), Some((origin, _))) = (robot.lowest_sight(), robot.sight()) {
+        let to = point - origin;
+        if to.z.atan2(to.truncate().length()) < lowest {
+            return;
+        }
+    }
     let settled = [robot.rig.yaw, robot.rig.pitch].iter().enumerate().all(|(axis, c)| {
         c.is_none_or(|c| (robot.rig.values[c] - robot.rig.target(axis)).abs() < AIM_SETTLED)
     });
@@ -415,7 +439,8 @@ fn aim_and_fire(
             if turret <= 0.0 || own <= 0.0 {
                 continue;
             }
-            distance_score(distance, point.z - at.z, gun.round_speed) * turret * own
+            let ramp = if animal { 0.0 } else { SCORE_RAMP };
+            distance_score(distance, point.z - at.z, gun.round_speed, gun.round_flags, ramp) * turret * own
         };
         if score < bar {
             continue;
@@ -433,6 +458,73 @@ fn aim_and_fire(
         let wait = fire_wait_ms(magazine, robot.behaviour.random());
         robot.next_shot_ms[g] = now + wait;
     }
+}
+
+/// A target's nodes where `robot` stands this tick, and its centre amid their level-0
+/// spheres.
+fn pose_target(robot: &Robot, target: &mut Target) {
+    let place = robot.placement();
+    let (mut lo, mut hi) = (Vec3::splat(f32::MAX), Vec3::splat(f32::MIN));
+    for (p, part) in target.parts.iter_mut().enumerate() {
+        for n in 0..part.nodes.len() {
+            part.nodes[n] = place.compose(&robot.part_pose(p, n));
+            let Some(slot) = part.mesh.slots.get(usize::from(part.mesh.nodes[n].slot_index[0])) else {
+                continue;
+            };
+            let [cx, cy, cz, r] = slot.sphere;
+            let c = part.nodes[n].apply([cx, cy, cz].map(f64::from));
+            let c = Vec3::new(c[0] as f32, c[1] as f32, c[2] as f32);
+            lo = lo.min(c - Vec3::splat(r));
+            hi = hi.max(c + Vec3::splat(r));
+        }
+    }
+    if lo.x <= hi.x {
+        target.centre = (lo + hi) / 2.0;
+    }
+    target.position = robot.walker.body.position;
+}
+
+/// The hero as the battle strikes it: each of its parts, posed by [`pose_target`], its sphere
+/// over their level-0 spheres as a placed unit's is. Its lives stay the hero's and are lent to
+/// the target for the battle's frame ([`Play::lend_hero_lives`]).
+fn hero_target(hero: &Hero, shield: Option<parkan_sim::shield::Shield>) -> Target {
+    let parts: Vec<Part> = hero
+        .parts
+        .iter()
+        .map(|part| Part {
+            mesh: Rc::new(part.mesh.mesh.clone()),
+            nodes: vec![parkan_formats::pose::IDENTITY; part.mesh.mesh.nodes.len()],
+            scale: 1.0,
+            life: None,
+            portals: Rc::default(),
+        })
+        .collect();
+    let mut target = Target {
+        parts,
+        centre: Vec3::ZERO,
+        radius: 0.0,
+        alive: true,
+        position: hero.walker.body.position,
+        shield,
+    };
+    pose_target(&hero.robot, &mut target);
+    let (mut lo, mut hi) = (Vec3::splat(f32::MAX), Vec3::splat(f32::MIN));
+    for part in &target.parts {
+        for (n, node) in part.nodes.iter().enumerate() {
+            let Some(slot) = part.mesh.slots.get(usize::from(part.mesh.nodes[n].slot_index[0])) else {
+                continue;
+            };
+            let [cx, cy, cz, r] = slot.sphere;
+            let c = node.apply([cx, cy, cz].map(f64::from));
+            let c = Vec3::new(c[0] as f32, c[1] as f32, c[2] as f32);
+            lo = lo.min(c - Vec3::splat(r));
+            hi = hi.max(c + Vec3::splat(r));
+        }
+    }
+    if lo.x <= hi.x {
+        target.radius = (hi - lo).length() / 2.0;
+    }
+    target
 }
 
 /// Whether part `p` of `robot` is its turret or hangs from it, however far down.
@@ -466,12 +558,24 @@ fn launches(
         .filter_map(|&(g, shot)| {
             let kind = (*robot.rounds.get(g)?)?;
             let (muzzle, barrel) = robot.gun_muzzle(g, shot.barrel)?;
-            let aim = robot.sight().and_then(|(o, s)| battle.combat.aim_point(ground, owner, o, s));
+            // STAND-IN: docs/34-progression.md#the-medusas--read-and-measured -- how an animal's
+            // gun aims is not read: its turret's pitch channel has no point, so it has no sight,
+            // and an AI unit with none fires straight at the point its fire control traces.
+            let traced = owner.is_some().then_some(robot.target_point).flatten();
+            let falls = robot.guns.get(g).is_some_and(|gun| gun.falls);
+            // The sight's convergence is for a mode-0 round: a lobbed one leaves along its
+            // barrel, which its mount has raised (`0x1002a34c`).
+            let aim = match robot.sight() {
+                _ if falls => None,
+                Some((o, s)) => battle.combat.aim_point(ground, owner, o, s),
+                None => traced,
+            };
+            let lobbed = if owner.is_some() { robot.lobbed_launch(g, muzzle) } else { None };
             Some(Launch {
                 kind,
                 owner,
                 muzzle,
-                direction: aim.map_or(barrel, |p| p - muzzle),
+                direction: lobbed.unwrap_or_else(|| aim.map_or(barrel, |p| p - muzzle)),
                 velocity: robot.world_velocity(),
                 target: robot.guns.get(g)?.target,
             })
@@ -577,6 +681,10 @@ impl Play {
         let ratio = settings::level_ratio(game);
         let mut battle = Battle::load(&mut assembly, mission, Some(hero.object), ratio)?;
         hero.arm(&mut battle, &mut assembly);
+        // The player's own hero is never given the level ratio (docs/26).
+        let hero_shield =
+            crate::shields::load(&mut assembly, KIND_UNIT, &mission.objects[hero.object].path, 1.0);
+        battle.combat.hero = Some(hero_target(&hero, hero_shield));
         let mut robots = Vec::new();
         let mut emplacements = Vec::new();
         for t in 0..battle.objects.len() {
@@ -741,6 +849,8 @@ impl Play {
             hero_designation,
             auto_driver: 0,
             clans: mission.clans.clone(),
+            relations: mission::relation_words(&mission.clans),
+            shield_flashes: HashMap::new(),
             player_clan,
             hero_id,
             targets: TargetList::default(),
@@ -751,6 +861,7 @@ impl Play {
             selector: Selector::default(),
             voice_pick: VoicePick::default(),
             capture_standby: false,
+            building_fire_floor: false,
             flights: Vec::new(),
             spent: Vec::new(),
             anchors: HashMap::new(),
@@ -798,6 +909,7 @@ impl Play {
         }
         play.start_building_effects();
         play.join_sites();
+        play.pose_hero();
         Ok(Some(play))
     }
 
@@ -927,6 +1039,8 @@ impl Play {
         w.follow_ground(&self.ground);
         w.from = (w.body.position, w.body.yaw);
         w.from_heading = w.body.yaw;
+        // The battle strikes the hero where it now stands.
+        self.pose_hero();
     }
 
     /// Whether clan `other` is hostile to the player's: another clan, not nature's, toward
@@ -935,17 +1049,32 @@ impl Play {
         self.hostile_to(Some(self.player_clan), other)
     }
 
+    /// Clan `us`'s relation word towards clan `other`, as the loader filed it.
+    pub fn word(&self, us: i64, other: i64) -> Option<u32> {
+        let (us, other) = (usize::try_from(us).ok()?, usize::try_from(other).ok()?);
+        self.relations.get(us)?.get(other).copied()
+    }
+
     /// Whether clan `other` is hostile to clan `us`, by `us`'s relation word toward it.
     pub fn hostile_to(&self, us: Option<i64>, other: Option<i64>) -> bool {
         let Some(us) = us else { return false };
         let Some(other) = other.filter(|&c| c != us) else { return false };
-        let (Some(them), Some(us)) = (self.clan(other), self.clan(us)) else { return false };
-        them.kind != CLAN_NATURE
-            && us
-                .relations
-                .iter()
-                .find(|(name, _)| *name == them.name)
-                .is_some_and(|&(_, w)| w == RELATION_HOSTILE)
+        let Some(them) = self.clan(other) else { return false };
+        them.kind != CLAN_NATURE && self.word(us, other) == Some(RELATION_HOSTILE)
+    }
+
+    /// Whether a unit of clan `us` takes clan `other`'s objects as hostile, the behaviour's
+    /// own test (`Behavior.dll:0x1000d460`, docs/31, "Where a search looks"): never its own
+    /// clan; nothing for a neutral clan's unit and everything for a nature clan's; otherwise
+    /// the relation word.
+    pub fn behaviour_hostile(&self, us: Option<i64>, other: Option<i64>) -> bool {
+        let Some(us) = us else { return false };
+        let Some(other) = other.filter(|&c| c != us) else { return false };
+        match self.clan(us).map(|c| c.kind) {
+            Some(CLAN_NEUTRAL) | None => false,
+            Some(CLAN_NATURE) => true,
+            _ => self.word(us, other) == Some(RELATION_HOSTILE),
+        }
     }
 
     /// Whether clan `other` is an ally of clan `us`, by `us`'s relation word toward it, which a
@@ -953,8 +1082,7 @@ impl Play {
     pub fn allied_to(&self, us: Option<i64>, other: Option<i64>) -> bool {
         let Some(us) = us else { return false };
         let Some(other) = other.filter(|&c| c != us) else { return false };
-        let (Some(them), Some(us)) = (self.clan(other), self.clan(us)) else { return false };
-        us.relations.iter().find(|(name, _)| *name == them.name).is_some_and(|&(_, w)| w == RELATION_ALLIED)
+        self.word(us, other) == Some(RELATION_ALLIED)
     }
 
     /// Whether clan `clan`'s objects run their behaviour: every clan's but a neutral one's,
@@ -975,11 +1103,10 @@ impl Play {
             return MARK_OWN;
         }
         let Some(them) = self.clan(clan) else { return MARK_OTHER };
-        let us = self.clan(self.player_clan).map(|c| c.name.as_str());
         match them.kind {
             CLAN_NATURE => MARK_NATURE,
             CLAN_NEUTRAL => MARK_NEUTRAL_CLAN,
-            _ => match them.relations.iter().find(|(name, _)| Some(name.as_str()) == us).map(|&(_, w)| w) {
+            _ => match self.word(clan, self.player_clan) {
                 Some(RELATION_NEUTRAL) => MARK_NEUTRAL,
                 Some(RELATION_ALLIED) => MARK_ALLIED,
                 Some(RELATION_HOSTILE) => MARK_HOSTILE,
@@ -1307,8 +1434,11 @@ impl Play {
         if self.battle.placed_kinds.get(target) == Some(&KIND_BUILDING) {
             return None;
         }
-        let p = self.battle.combat.targets.get(target)?.parts.get(part)?;
-        let wear = self.battle.wears.get(target)?.get(part)?;
+        let p = self.battle.combat.target(target)?.parts.get(part)?;
+        let wear = match self.battle.wears.get(target) {
+            Some(wears) => wears.get(part)?,
+            None => &self.hero.parts.get(part)?.mesh.wear.materials,
+        };
         let name = struck_wear(p, wear, round.previous, point + round.forward * 0.01)?;
         self.materials.get(name).map(|m| m.surface)
     }
@@ -1353,6 +1483,7 @@ impl Play {
             self.footsteps();
             shots
         };
+        self.pose_hero();
         let now = self.hero.time_ms;
         if !self.paused {
             self.tick_buildings(now);
@@ -1368,8 +1499,12 @@ impl Play {
         }
         let launches = launches(&self.hero.robot, None, &shots, &self.battle, &self.ground);
         self.launch(launches, now);
+        self.power_shields();
+        self.lend_hero_lives(true);
         events.extend(self.battle.combat.tick((dt_ms / 1000.0) as f32, &self.ground));
         events.extend(self.battle.combat.takt_lives(now));
+        self.lend_hero_lives(false);
+        let hero_index = self.battle.combat.hero_index();
         for e in &events {
             self.effects_for(e, now);
             match *e {
@@ -1389,6 +1524,9 @@ impl Play {
                 }
                 Event::KnockedOff { target, part, node } => self.knock_off(target, part, node, now),
                 Event::Staged { target, .. } | Event::Hidden { target, .. } => self.rebuild_solid(target),
+                Event::Killed { target } if target == hero_index => self.hero_lost(),
+                Event::Hurt { target, owner } => self.hurt(target, owner),
+                Event::ShieldHit { target, point } => self.shield_flash(target, point, now),
                 Event::Killed { target } => {
                     self.deaths
                         .push((target, now + self.battle.death_ms.get(target).copied().unwrap_or(0.0)));
@@ -1420,6 +1558,7 @@ impl Play {
             }
         }
         self.follow_building_effects();
+        self.follow_shield_flashes();
         self.tick_views();
         // Flight effects follow their rounds. A round whose flight is over stays where it
         // stopped until its `+92` is up, and its effects go with it. Time modes 5–15 read the
@@ -1469,9 +1608,10 @@ impl Play {
         self.fx.tick(now);
         for e in &events {
             if let Event::Killed { target } = e
+                && let Some(unit) = self.units.get(*target)
                 && let Some(p) = self.progression.as_mut()
             {
-                p.progress.destroyed(self.units[*target].logical_id);
+                p.progress.destroyed(unit.logical_id);
             }
         }
         // A won or lost mission plays on under its panel (docs/34, "After the outcome"). No
@@ -2244,10 +2384,7 @@ impl Play {
                 p.progress.captured(self.units[t].logical_id, taker);
             }
             let old = owner.and_then(|c| self.clan(c));
-            let taker_name = self.clan(taker).map(|c| c.name.clone());
-            let word = old.and_then(|c| {
-                c.relations.iter().find(|(name, _)| Some(name) == taker_name.as_ref()).map(|&(_, w)| w)
-            });
+            let word = owner.and_then(|c| self.word(c, taker));
             let said =
                 crate::capture::announcement(self.player_clan, taker, owner, old.map(|c| c.kind), word);
             if let Some(p) = self.progression.as_ref() {
@@ -2547,29 +2684,141 @@ impl Play {
         let (parts, mut lives): (Vec<usize>, Vec<&mut Life>) =
             self.hero.lives.iter_mut().enumerate().filter_map(|(p, l)| Some((p, l.as_mut()?))).unzip();
         let gone = share_loss(&mut lives, loss);
-        let place = self.hero.placement();
         for (p, destroyed) in parts.into_iter().zip(gone) {
-            let mesh = self.hero.parts[p].mesh.clone();
             for n in destroyed {
-                let Some(Some(exp)) = self.hero.blasts.get(p).and_then(|b| b.get(n)).cloned() else {
-                    continue;
-                };
-                let Some(slot) = mesh.mesh.slots.get(usize::from(mesh.mesh.nodes[n].slot_index[0])) else {
-                    continue;
-                };
-                let node = place.compose(&self.hero.part_pose(p, n));
-                self.node_blast(&exp, &node, slot.sphere, 1.0, now);
+                self.hero_node_blast(p, n, now);
             }
         }
-        // `iron3d.dll:0x10075619`: the loss of the player's clan's hero fails the mission.
-        if self.hero.dead()
-            && let Some(p) = self.progression.as_mut()
-        {
+        if self.hero.dead() {
+            self.hero_lost();
+        }
+        events
+    }
+
+    /// The loss of the player's clan's hero fails the mission (`iron3d.dll:0x10075619`).
+    fn hero_lost(&mut self) {
+        if let Some(p) = self.progression.as_mut() {
             p.progress.outcome = Some(false);
             let says = p.say(&Notice::MissionFailed);
             self.says.extend(says);
         }
-        events
+    }
+
+    /// A node of the hero's destroyed: its explosion at its sphere's centre, as a placed
+    /// unit's node plays its own (docs/26).
+    fn hero_node_blast(&mut self, p: usize, n: usize, now: f64) {
+        let Some(Some(exp)) = self.hero.blasts.get(p).and_then(|b| b.get(n)).cloned() else { return };
+        let mesh = self.hero.parts[p].mesh.clone();
+        let Some(slot) = mesh.mesh.slots.get(usize::from(mesh.mesh.nodes[n].slot_index[0])) else { return };
+        let node = self.hero.placement().compose(&self.hero.part_pose(p, n));
+        self.node_blast(&exp, &node, slot.sphere, 1.0, now);
+    }
+
+    /// The hero's target follows the hero: its nodes where it stands, struck while it is alive
+    /// and in the world.
+    fn pose_hero(&mut self) {
+        let alive = !self.hero.dead() && !self.hero_away();
+        let Some(target) = self.battle.combat.hero.as_mut() else { return };
+        pose_target(&self.hero.robot, target);
+        target.alive = alive;
+    }
+
+    /// Each shield's power level for the frame: a building's is the share its batteries serve
+    /// it at (docs/23).
+    ///
+    /// STAND-IN: docs/26-damage.md#power--read -- a unit's batteries are not simulated, so its shield channel is served whole, and the
+    /// shield's and deflector's draws are not taken from any battery.
+    fn power_shields(&mut self) {
+        for t in 0..self.battle.combat.targets.len() {
+            let level = self.economy.site(t).map_or(1.0, |site| site.level);
+            if let Some(shield) = self.battle.combat.targets[t].shield.as_mut() {
+                shield.level = level;
+            }
+        }
+    }
+
+    /// A hit on target `t` from the round's `owner` (message `0x19`): a robot's behaviour asks
+    /// for an attack on the unit that fired. A building does nothing (`0x100064b0`), nor a unit
+    /// the player drives.
+    ///
+    /// STAND-IN: docs/31-packages.md#a-hit-pulls-a-unit-in--read -- the call for help to the
+    /// clan's warriors within 400 and the clan attitude a hit lowers are not modelled.
+    fn hurt(&mut self, t: usize, owner: Option<usize>) {
+        let firer = match owner {
+            None => self.hero_id,
+            Some(o) => match self.units.get(o) {
+                Some(u) => u.logical_id,
+                None => return,
+            },
+        };
+        if self.driving.as_ref().is_some_and(|d| d.target == t) {
+            return;
+        }
+        if let Some((_, robot)) = self.robots.iter_mut().find(|(rt, _)| *rt == t) {
+            robot.behaviour.hurt(firer);
+        }
+    }
+
+    /// The pasture animal `t` grazes: its clan's zone nearest it, across the ground.
+    fn pasture(&self, t: usize) -> Option<parkan_sim::behaviour::Pasture> {
+        let at = self.battle.combat.targets.get(t)?.position;
+        let clan = self.clan(self.units.get(t)?.clan?)?;
+        let d = |z: &mission::Zone| Vec3::from_array(z.position).truncate().distance(at.truncate());
+        let zone = clan.zones.iter().min_by(|a, b| d(a).total_cmp(&d(b)))?;
+        Some(parkan_sim::behaviour::Pasture {
+            centre: Vec3::from_array(zone.position),
+            inner: zone.inner,
+            outer: zone.outer,
+        })
+    }
+
+    /// A hit met target `t`'s shield (`0x1002c83e`, played at `0x10025ca0`): the generator's
+    /// effect at the bubble's centre, its first axis toward the hit, sized by the bubble's
+    /// radius, in time mode 1, on the next of its three instances, the fourth restarting the
+    /// first.
+    ///
+    /// STAND-IN: docs/26-damage.md#what-a-shield-hit-draws--read-and-measured -- the flash is
+    /// placed on node 0 and so turns with the unit; here it keeps its direction and follows
+    /// the bubble's centre.
+    fn shield_flash(&mut self, t: usize, point: Vec3, now: f64) {
+        let Some(target) = self.battle.combat.target(t) else { return };
+        let Some(shield) = target.shield.as_ref().filter(|s| !s.effect.is_empty()) else { return };
+        let (name, centre, radius) = (shield.effect.clone(), target.centre, target.radius);
+        let slot = self.shield_flashes.entry(t).or_insert(0);
+        let owner = Owner::Shield(t, *slot);
+        *slot = (*slot + 1) % SHIELD_FLASHES;
+        self.fx.retain(|o, _| *o != owner);
+        let frame = Frame::along(centre, point - centre, radius);
+        self.fx.start(owner, &name, frame, 1.0, now, Some(SHIELD_FLASH_MODE));
+    }
+
+    /// Every shield flash stands at its bubble's centre as the unit moves.
+    fn follow_shield_flashes(&mut self) {
+        let centres: Vec<(usize, Vec3)> = self
+            .shield_flashes
+            .keys()
+            .filter_map(|&t| Some((t, self.battle.combat.target(t)?.centre)))
+            .collect();
+        for (t, centre) in centres {
+            for k in 0..SHIELD_FLASHES {
+                for instance in self.fx.owned(Owner::Shield(t, k)) {
+                    instance.frame.origin = centre;
+                }
+            }
+        }
+    }
+
+    /// The hero's lives handed to its target for the battle's frame (`to_battle`), or taken
+    /// back after it.
+    fn lend_hero_lives(&mut self, to_battle: bool) {
+        let Some(target) = self.battle.combat.hero.as_mut() else { return };
+        for (part, life) in target.parts.iter_mut().zip(self.hero.lives.iter_mut()) {
+            if to_battle {
+                part.life = life.take();
+            } else {
+                *life = part.life.take();
+            }
+        }
     }
     /// The condition bytes the ground gives (`Control.dll:0x10002790`, `0x1001ab2d`): byte i
     /// set for the surface id i under the body, then byte 7 the face's liquid-bed flag.
@@ -2619,6 +2868,7 @@ impl Play {
             })
             .collect();
         if !self.hero.dead() && !self.hero_away() {
+            let index = self.battle.combat.hero_index();
             let hero = Seen {
                 id: self.hero_id,
                 position: self.hero.walker.body.position,
@@ -2629,21 +2879,25 @@ impl Play {
                 hostile: false,
                 sensed: false,
             };
-            seen.push((None, hero, Some(self.player_clan)));
+            seen.push((Some(index), hero, Some(self.player_clan)));
         }
         seen
     }
 
     /// What target `t` sees of `seen`: everything but itself, each of its own clan or
-    /// hostile to it by its own clan's relations (`0x1000d460`), and marked with whether its
-    /// own radar list holds it, `sensed` naming the ids that list carries.
+    /// hostile to it by the behaviour's test (`0x1000d460`), and marked with whether its own
+    /// radar list holds it, `sensed` naming the ids that list carries. The radar module drops
+    /// a contact of a nature or neutral clan from both its lists (`0x10023240`), so neither is
+    /// hostile.
     fn seen_by(&self, t: usize, seen: &[Sighting], sensed: &[i32]) -> Vec<Seen> {
         let (id, clan) = (self.units[t].logical_id, self.units[t].clan);
         seen.iter()
             .filter(|(_, s, _)| s.id != id)
             .map(|&(_, s, c)| Seen {
                 own: clan.is_some() && c == clan,
-                hostile: self.hostile_to(clan, c),
+                hostile: self.behaviour_hostile(clan, c)
+                    && c.and_then(|c| self.clan(c))
+                        .is_some_and(|c| !matches!(c.kind, CLAN_NATURE | CLAN_NEUTRAL)),
                 sensed: sensed.contains(&s.id),
                 ..s
             })
@@ -2734,26 +2988,7 @@ impl Play {
             if !shots.is_empty() {
                 fired.push((r, shots));
             }
-            let place = robot.placement();
-            let (mut lo, mut hi) = (Vec3::splat(f32::MAX), Vec3::splat(f32::MIN));
-            for (p, part) in target.parts.iter_mut().enumerate() {
-                for n in 0..part.nodes.len() {
-                    part.nodes[n] = place.compose(&robot.part_pose(p, n));
-                    let Some(slot) = part.mesh.slots.get(usize::from(part.mesh.nodes[n].slot_index[0]))
-                    else {
-                        continue;
-                    };
-                    let [cx, cy, cz, r] = slot.sphere;
-                    let c = part.nodes[n].apply([cx, cy, cz].map(f64::from));
-                    let c = Vec3::new(c[0] as f32, c[1] as f32, c[2] as f32);
-                    lo = lo.min(c - Vec3::splat(r));
-                    hi = hi.max(c + Vec3::splat(r));
-                }
-            }
-            if lo.x <= hi.x {
-                target.centre = (lo + hi) / 2.0;
-            }
-            target.position = robot.walker.body.position;
+            pose_target(robot, target);
             if let Some(solid) = self.ground.solids.get_mut(*t) {
                 *solid = Solid::from_parts(&target.parts, target.centre, target.radius, false, |_, _| None);
             }
@@ -2783,7 +3018,7 @@ impl Play {
             if !self.paused && self.thinks(self.units[t].clan) {
                 let sensed = self.radar_ids(e, true, world);
                 let others = self.seen_by(t, seen, &sensed);
-                let Play { emplacements, battle, ground, .. } = self;
+                let Play { emplacements, battle, ground, building_fire_floor, .. } = self;
                 let robot = &mut emplacements[e].1;
                 let senses = Senses {
                     now_ms: robot.time_ms,
@@ -2798,9 +3033,10 @@ impl Play {
                     neutral: false,
                     building: true,
                     animal: false,
+                    pasture: None,
                 };
                 let takt = robot.behaviour.takt(&senses);
-                aim_and_fire(robot, t, &takt, seen, battle, ground);
+                aim_and_fire(robot, t, &takt, seen, battle, ground, false, *building_fire_floor);
             }
             let (t, robot) = &mut self.emplacements[e];
             let shots = robot.takt(dt_ms);
@@ -2852,6 +3088,7 @@ impl Play {
         let sensed = self.radar_ids(r, false, world);
         let others = self.seen_by(t, seen, &sensed);
         let animal = self.units[t].type_word & CLASS_ANIMAL != 0;
+        let pasture = if animal { self.pasture(t) } else { None };
         let bounds = self.ground.bounds();
         let capturing = matches!(
             self.robots[r].1.behaviour.task(),
@@ -2874,6 +3111,7 @@ impl Play {
             neutral: false,
             building: false,
             animal,
+            pasture,
         };
         let takt = robot.behaviour.takt(&senses);
         let (flyer, top, low) = (
@@ -2915,7 +3153,7 @@ impl Play {
             }
         }
         robot.walker.drive = Some(robot.wizard.takt(now, at, dt_ms));
-        aim_and_fire(robot, t, &takt, seen, &self.battle, &self.ground);
+        aim_and_fire(robot, t, &takt, seen, &self.battle, &self.ground, animal, false);
     }
 
     /// The unit takt's escape (`Behavior.dll:0x10005408`, docs/31, "The escape"): a unit with
@@ -3113,6 +3351,9 @@ impl Play {
                     self.fx.explode(&exp, None, Frame::along(*point, *forward, 1.0), exp.radius, now);
                 }
             }
+            Event::Staged { target, part, node } if *target == self.battle.combat.hero_index() => {
+                self.hero_node_blast(*part, *node, now);
+            }
             // A node's stage rising plays its `.exp` at its sphere's centre (docs/26).
             Event::Staged { target, part, node } => {
                 let Some(Some(exp)) = self
@@ -3188,6 +3429,7 @@ pub fn node_share(life: Option<&parkan_sim::damage::Life>, node: usize) -> (f32,
 /// aiming reaches it through the same setter is not read. Here the lead starts from the
 /// turret's target at the takeover, as if it had.
 fn take_over(robot: &mut Robot, lock: bool) {
+    robot.rig.traced = None;
     let body = &mut robot.walker.body;
     body.turret_lock = lock;
     body.lead = robot.rig.aim[0];

@@ -27,6 +27,7 @@ pub mod resources;
 pub mod robot;
 pub mod selection;
 pub mod settings;
+pub mod shields;
 pub mod terrain;
 pub mod text;
 pub mod textures;

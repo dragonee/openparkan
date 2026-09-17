@@ -144,11 +144,9 @@ pub fn object_ratio(
     if !RATIO_TYPES.contains(&kind) {
         return 1.0;
     }
-    let name = clans.get(clan as usize).map(|c| c.name.as_str());
-    let allied = clans
-        .get(player as usize)
-        .and_then(|p| p.relations.iter().find(|(n, _)| Some(n.as_str()) == name))
-        .is_some_and(|&(_, relation)| relation != 0);
+    let words = mission::relation_words(clans);
+    let word = usize::try_from(player).ok().zip(usize::try_from(clan).ok());
+    let allied = word.and_then(|(p, c)| words.get(p)?.get(c)).is_some_and(|&relation| relation != 0);
     if allied { 1.0 } else { ratio }
 }
 
@@ -295,12 +293,18 @@ impl Battle {
             return None;
         }
         let centre = (lo + hi) / 2.0;
+        let shield = if matches!(object.kind, mission::KIND_UNIT | mission::KIND_BUILDING) {
+            crate::shields::load(assembly, object.kind, &object.path, object_ratio)
+        } else {
+            None
+        };
         self.combat.targets.push(Target {
             parts,
             centre,
             radius: (hi - lo).length() / 2.0,
             alive: true,
             position: Vec3::from_array(object.position),
+            shield,
         });
         self.objects.push(index);
         self.explosions.push(blasts);
@@ -351,6 +355,7 @@ impl Battle {
                 lock_ms: c.values[SEEKER_LOCK],
             }),
             turn_rate: controller.triples[TRIPLE_TURN],
+            mode: controller.mode,
         });
         let effects = controller
             .group(ENTRY_LOAD)

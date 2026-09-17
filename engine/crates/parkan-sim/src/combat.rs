@@ -15,6 +15,7 @@ use parkan_formats::pose::Pose;
 use crate::damage::{Change, Life, blast, round_hit, share_loss};
 use crate::ground::Ground;
 use crate::hit::{ROUND_SKIPS_FACE, SIGHT_SKIPS_FACE, Strike, map_edge, swept_spheres};
+use crate::shield::Shield;
 
 /// A mode-0 round's sideways speed, in its own frame, bleeds off at this many m/s a
 /// millisecond (`Control.dll:0x1000ceec`).
@@ -57,14 +58,22 @@ pub struct RoundKind {
     pub seeker: Option<Seeker>,
     /// The controller's fourth triple: the most it turns about each axis, rad/s.
     pub turn_rate: [f32; 3],
+    /// Its controller's mode: 3 falls under the world's gravity (docs/24, "Gravity").
+    pub mode: i32,
 }
+
+/// The controller mode whose velocity integrator adds gravity (`0x10015879`).
+pub const MODE_FALLING: i32 = 3;
+/// The world's gravity (`Terrain.dll:0x10024c1a`).
+pub const GRAVITY: f32 = 10.0;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Round {
     /// Unique among the rounds a `Combat` has fired.
     pub id: u64,
     pub kind: usize,
-    /// The target id of the robot that fired it, which it never strikes.
+    /// The target id of the robot that fired it, which it never strikes; `None` for the
+    /// hero's, which never strikes the hero.
     pub owner: Option<usize>,
     pub previous: Vec3,
     pub position: Vec3,
@@ -74,6 +83,9 @@ pub struct Round {
     pub forward: Vec3,
     pub remaining: f32,
     pub ratio: f32,
+    /// Its node 0's life, which a shield sector it passes through takes from
+    /// (`Control.dll:0x1000d1b4`).
+    pub life: f32,
     /// The target its gun handed it (`0x1002a514`), which its seeker follows.
     pub target: Option<usize>,
     expired: bool,
@@ -138,12 +150,47 @@ pub struct Target {
     pub alive: bool,
     /// The object's placement: where a gun's gate and a seeker find it.
     pub position: Vec3,
+    /// Its fight shield and deflector, where it has both; the bubble is its bounding sphere.
+    pub shield: Option<Shield>,
 }
 
 impl Target {
     pub fn dead(&self) -> bool {
         self.parts.first().and_then(|p| p.life.as_ref()).is_some_and(|l| l.dead)
     }
+
+    /// The object's turn: its first node's, as placed.
+    pub fn rotation(&self) -> glam::Quat {
+        let Some(pose) = self.parts.first().and_then(|p| p.nodes.first()) else {
+            return glam::Quat::IDENTITY;
+        };
+        let [w, x, y, z] = pose.rotation.map(|v| v as f32);
+        glam::Quat::from_xyzw(x, y, z, w).normalize()
+    }
+
+    /// The share of its life node `node` of part `part` keeps: a device's condition. A node
+    /// that takes no damage is whole.
+    pub fn condition(&self, (part, node): (usize, usize)) -> f32 {
+        let Some(n) = self.parts.get(part).and_then(|p| p.life.as_ref()).and_then(|l| l.nodes.get(node))
+        else {
+            return 1.0;
+        };
+        if n.destroyed || n.max <= 0.0 { if n.destroyed { 0.0 } else { 1.0 } } else { n.life / n.max }
+    }
+
+    /// Its shield's bubble while it is up.
+    fn bubble(&self) -> Option<&Shield> {
+        self.shield.as_ref().filter(|s| self.alive && s.up())
+    }
+}
+
+/// What a round's explosion names (`0x10011479`, `0x1000d23f`): a node it struck, a shield
+/// sector of the object whose bubble stopped it, or nothing.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Struck {
+    Nothing,
+    Node(usize, usize, usize),
+    Bubble(usize, usize),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -164,6 +211,12 @@ pub enum Event {
     KnockedOff { target: usize, part: usize, node: usize },
     /// A target died.
     Killed { target: usize },
+    /// A hit reached a target, whatever it did to it (`0x1000ebdf`, `0x1000d1ed`): its
+    /// behaviour learns who fired, `owner` as a round names it.
+    Hurt { target: usize, owner: Option<usize> },
+    /// A hit met a shield sector with strength left: the generator's effect plays at the
+    /// bubble, turned toward `point` (`Control.dll:0x1002c83e`).
+    ShieldHit { target: usize, point: Vec3 },
     /// A round left the map, with no explosion.
     Gone { round: Round },
     /// A round's flight is over, `round.position` where it stopped: `end` names the block
@@ -189,6 +242,9 @@ pub struct Combat {
     pub kinds: Vec<RoundKind>,
     pub rounds: Vec<Round>,
     pub targets: Vec<Target>,
+    /// The player's hero, which is no placed object's target but is struck like one:
+    /// numbered after the targets ([`Combat::hero_index`]), as the radar numbers it.
+    pub hero: Option<Target>,
     pub fired: u64,
 }
 
@@ -252,6 +308,33 @@ fn vec(v: [f64; 3]) -> Vec3 {
 }
 
 impl Combat {
+    /// The hero's number among the targets: the one after the last.
+    pub fn hero_index(&self) -> usize {
+        self.targets.len()
+    }
+
+    /// Target `t`, the hero's number giving the hero.
+    pub fn target(&self, t: usize) -> Option<&Target> {
+        match t.cmp(&self.targets.len()) {
+            std::cmp::Ordering::Less => self.targets.get(t),
+            std::cmp::Ordering::Equal => self.hero.as_ref(),
+            std::cmp::Ordering::Greater => None,
+        }
+    }
+
+    pub fn target_mut(&mut self, t: usize) -> Option<&mut Target> {
+        match t.cmp(&self.targets.len()) {
+            std::cmp::Ordering::Less => self.targets.get_mut(t),
+            std::cmp::Ordering::Equal => self.hero.as_mut(),
+            std::cmp::Ordering::Greater => None,
+        }
+    }
+
+    /// Every target by its number, the hero last.
+    pub fn every(&self) -> impl Iterator<Item = (usize, &Target)> {
+        self.targets.iter().chain(self.hero.as_ref()).enumerate()
+    }
+
     /// A round leaves a muzzle (`0x1002a387`): facing `direction` with z up, at its top
     /// speed plus the shooter's world velocity, in free flight, with its gun's `target`.
     #[allow(clippy::too_many_arguments)]
@@ -278,6 +361,7 @@ impl Combat {
             forward,
             remaining: k.range,
             ratio,
+            life: ratio * k.hit_points,
             target,
             expired: false,
         });
@@ -285,8 +369,8 @@ impl Combat {
     }
 
     /// The nearest thing a round's segment meets: the ground, or a live target other
-    /// than `skip`, passing the triangles a round passes. Returns the strike and the
-    /// target struck.
+    /// than `skip` (the hero, for `None`), passing the triangles a round passes. Returns the
+    /// strike and the target struck.
     pub fn first_hit(
         &self,
         ground: &Ground,
@@ -309,8 +393,9 @@ impl Combat {
         passes: u16,
     ) -> Option<(Strike, Option<usize>, usize)> {
         let mut best: Option<(Strike, Option<usize>, usize)> = ground.segment(p0, p1).map(|s| (s, None, 0));
-        for (id, target) in self.targets.iter().enumerate() {
-            if !target.alive || Some(id) == skip {
+        let skip = skip.unwrap_or(self.hero_index());
+        for (id, target) in self.every() {
+            if !target.alive || id == skip {
                 continue;
             }
             let still = (target.centre, target.centre);
@@ -359,21 +444,47 @@ impl Combat {
     /// One frame of `dt` seconds.
     pub fn tick(&mut self, dt: f32, ground: &Ground) -> Vec<Event> {
         let mut events = Vec::new();
+        // The power tick's shields: each device's condition from its node, then the charge.
+        for target in self.targets.iter_mut().chain(self.hero.as_mut()) {
+            if !target.alive {
+                continue;
+            }
+            let (Some(sn), Some(dn)) = (
+                target.shield.as_ref().map(|s| s.shield_node),
+                target.shield.as_ref().map(|s| s.deflector_node),
+            ) else {
+                continue;
+            };
+            let (sc, dc) = (sn.map_or(1.0, |n| target.condition(n)), dn.map_or(1.0, |n| target.condition(n)));
+            if let Some(shield) = target.shield.as_mut() {
+                shield.shield_condition = sc;
+                shield.deflector_condition = dc;
+                shield.tick(dt);
+            }
+        }
         // Message 1: every round moves and spends its range (`0x1000cbb0`), a guided one
         // turning toward its target first (`0x1000ccc5`).
+        let (targets, hero) = (&self.targets, self.hero.as_ref());
+        let target_at = |t: usize| if t == targets.len() { hero } else { targets.get(t) };
         for r in &mut self.rounds {
             let k = &self.kinds[r.kind];
             if let Some(seeker) = k.seeker
-                && let Some(target) = r.target.and_then(|t| self.targets.get(t)).filter(|t| t.alive)
+                && let Some(target) = r.target.and_then(target_at).filter(|t| t.alive)
             {
                 steer(r, seeker, k.turn_rate, target.position, dt);
             }
-            let side = r.forward.cross(Vec3::Z).normalize_or(Vec3::X);
-            let up = side.cross(r.forward).normalize_or(Vec3::Z);
-            let bleed = SIDEWAYS_BLEED * dt * 1000.0;
-            let toward_zero = |v: f32| if v.abs() <= bleed { 0.0 } else { v - bleed.copysign(v) };
-            let (along, x, z) = (r.velocity.dot(r.forward), r.velocity.dot(side), r.velocity.dot(up));
-            r.velocity = r.forward * along + side * toward_zero(x) + up * toward_zero(z);
+            if k.mode == MODE_FALLING {
+                // A lobbed round falls, and turns along its flight.
+                r.velocity.z -= GRAVITY * dt;
+                r.forward = r.velocity.normalize_or(r.forward);
+            } else {
+                let side = r.forward.cross(Vec3::Z).normalize_or(Vec3::X);
+                let up = side.cross(r.forward).normalize_or(Vec3::Z);
+                let bleed = SIDEWAYS_BLEED * dt * 1000.0;
+                let toward_zero = |v: f32| if v.abs() <= bleed { 0.0 } else { v - bleed.copysign(v) };
+                let (along, x, z) = (r.velocity.dot(r.forward), r.velocity.dot(side), r.velocity.dot(up));
+                r.velocity = r.forward * along + side * toward_zero(x) + up * toward_zero(z);
+            }
             r.previous = r.position;
             let moved = r.velocity * dt;
             let length = moved.length();
@@ -405,13 +516,48 @@ impl Combat {
                     at_range: true,
                 });
                 if let Some(e) = &k.range_end {
-                    self.explode(e, &k, &r, r.position, None, &mut events);
+                    self.explode(e, &k, &r, r.position, Struck::Nothing, &mut events);
                 }
                 events.push(Event::Ended { round: r, end: RoundEnd::Range });
                 continue;
             }
             let hit = self.first_hit(ground, r.owner, r.previous, r.position, k.radius);
             let edge = map_edge(box_lo, box_hi, r.previous, r.position);
+            // The bubbles it meets nearer than its face or the edge (`0x1000d0c0`): each sector
+            // with strength flashes; a round with more life than the strength passes, emptying
+            // the sector, and otherwise it stops on the bubble.
+            let nearest = hit.as_ref().map_or(f32::MAX, |h| h.0.d2).min(edge.map_or(f32::MAX, |e| e.1));
+            let mut r = r;
+            let mut stopped = None;
+            for (t, point, _) in self.bubble_contacts(&r, k.radius, nearest) {
+                let Some(target) = self.target_mut(t) else { continue };
+                let (centre, rotation) = (target.centre, target.rotation());
+                let Some(shield) = target.shield.as_mut() else { continue };
+                let s = Shield::sector_of(centre, rotation, point);
+                let strength = shield.strength(s);
+                if strength > 0.0 {
+                    events.push(Event::ShieldHit { target: t, point });
+                }
+                if r.life > strength {
+                    shield.empty(s);
+                    r.life -= strength;
+                    events.push(Event::Hurt { target: t, owner: r.owner });
+                } else {
+                    stopped = Some((t, s, point));
+                    break;
+                }
+            }
+            if let Some((t, s, point)) = stopped {
+                let mut struck = r;
+                struck.position = point;
+                events.push(Event::Struck { round: struck, target: Some(t), part: 0, node: None, point });
+                events.push(Event::Exploded { kind: r.kind, point, forward: r.forward, at_range: false });
+                if let Some(e) = &k.hit {
+                    self.explode(e, &k, &r, point, Struck::Bubble(t, s), &mut events);
+                }
+                events.push(Event::Ended { round: struck, end: RoundEnd::Hit });
+                continue;
+            }
             match (hit, edge) {
                 (Some((strike, target, part)), e) if e.is_none_or(|(_, d2)| strike.d2 <= d2) => {
                     let mut struck = r;
@@ -430,7 +576,9 @@ impl Combat {
                         at_range: false,
                     });
                     if let Some(e) = &k.hit {
-                        let direct = target.zip(strike.node).map(|(t, n)| (t, part, n));
+                        let direct = target
+                            .zip(strike.node)
+                            .map_or(Struck::Nothing, |(t, n)| Struck::Node(t, part, n));
                         self.explode(e, &k, &r, strike.point, direct, &mut events);
                     }
                     events.push(Event::Ended { round: struck, end: RoundEnd::Hit });
@@ -448,32 +596,109 @@ impl Combat {
         events
     }
 
+    /// The bubbles a round meets over its move, nearer than `within` (squared): each live
+    /// target's but its owner's, nearest first.
+    fn bubble_contacts(&self, r: &Round, radius: f32, within: f32) -> Vec<(usize, Vec3, f32)> {
+        let skip = r.owner.unwrap_or(self.hero_index());
+        let mut contacts: Vec<(usize, Vec3, f32)> = self
+            .every()
+            .filter(|&(t, target)| t != skip && target.bubble().is_some())
+            .filter_map(|(t, target)| {
+                let (point, d2) =
+                    crate::shield::contact(r.previous, r.position, radius, target.centre, target.radius)?;
+                (d2 < within).then_some((t, point, d2))
+            })
+            .collect();
+        contacts.sort_by(|a, b| a.2.total_cmp(&b.2));
+        contacts
+    }
+
+    /// A hit's shield step on target `t` (`0x1000ff00`): a hit carrying a sector takes it, and
+    /// any other is given one where its sphere of `radius` about `point` crosses the bubble
+    /// from outside; a sector with strength flashes, and stops what it can. Returns the damage
+    /// left.
+    fn shield_step(
+        &mut self,
+        t: usize,
+        point: Vec3,
+        radius: f32,
+        carried: Option<usize>,
+        damage: f32,
+        events: &mut Vec<Event>,
+    ) -> f32 {
+        let Some(target) = self.target_mut(t) else { return damage };
+        if target.bubble().is_none() {
+            return damage;
+        }
+        let (centre, rotation, r) = (target.centre, target.rotation(), target.radius);
+        let d = (point - centre).length();
+        let Some(s) =
+            carried.or_else(|| (r < d && d < r + radius).then(|| Shield::sector_of(centre, rotation, point)))
+        else {
+            return damage;
+        };
+        let Some(shield) = target.shield.as_mut() else { return damage };
+        if carried.is_none() && shield.strength(s) > 0.0 {
+            events.push(Event::ShieldHit { target: t, point });
+        }
+        damage - shield.absorb(s, damage)
+    }
+
     /// A round's `.exp` going off (`0x1000ebc0`): kind 2 on the node struck, kind 3 a
-    /// blast over every node in reach, each for `ratio × (hit points + damage)`.
+    /// blast over every node in reach, each for `ratio × (hit points + damage)`, and kind 4
+    /// on shields alone. A shield first stops what it can: all that is left of a round
+    /// stopped by a bubble is spent, and what is left of a blast goes on to the nodes.
     fn explode(
         &mut self,
         e: &Explosion,
         kind: &RoundKind,
         round: &Round,
         point: Vec3,
-        direct: Option<(usize, usize, usize)>,
+        struck: Struck,
         events: &mut Vec<Event>,
     ) {
         let damage = round_hit(round.ratio, kind.hit_points, e.damage);
+        let carried = |t: usize| match struck {
+            Struck::Bubble(b, s) if b == t => Some(s),
+            _ => None,
+        };
+        let hurt = |t: usize| Event::Hurt { target: t, owner: round.owner };
         match e.kind {
-            HIT_DIRECT => {
-                if let Some((t, p, n)) = direct {
+            HIT_DIRECT => match struck {
+                Struck::Node(t, p, n) => {
+                    events.push(hurt(t));
                     self.damage(t, p, n, damage, events);
                 }
-            }
-            HIT_AREA => {
-                for t in 0..self.targets.len() {
-                    let target = &self.targets[t];
+                Struck::Bubble(t, s) => {
+                    events.push(hurt(t));
+                    self.shield_step(t, point, e.radius, Some(s), damage, events);
+                }
+                Struck::Nothing => {}
+            },
+            HIT_SHIELDS => {
+                for t in 0..=self.targets.len() {
+                    let Some(target) = self.target(t) else { continue };
                     if !target.alive || (target.centre - point).length() >= target.radius + e.radius {
                         continue;
                     }
-                    for p in 0..target.parts.len() {
-                        let part = &self.targets[t].parts[p];
+                    events.push(hurt(t));
+                    self.shield_step(t, point, e.radius, carried(t), damage, events);
+                }
+            }
+            HIT_AREA => {
+                for t in 0..=self.targets.len() {
+                    let Some(target) = self.target(t) else { continue };
+                    if !target.alive || (target.centre - point).length() >= target.radius + e.radius {
+                        continue;
+                    }
+                    let parts = target.parts.len();
+                    events.push(hurt(t));
+                    let damage = self.shield_step(t, point, e.radius, carried(t), damage, events);
+                    if damage <= 0.0 {
+                        continue;
+                    }
+                    for p in 0..parts {
+                        let Some(part) = self.target(t).and_then(|x| x.parts.get(p)) else { continue };
                         let spheres: Vec<(usize, f32)> = part
                             .mesh
                             .nodes
@@ -495,11 +720,6 @@ impl Combat {
                     }
                 }
             }
-            // STAND-IN: docs/26-damage.md#shields-a-generator-a-deflector-six-sectors--read-and-measured
-            // -- shields are not modelled: no bubble stops a round, a blast skips its
-            // shield step, and kind 4, shields only, does nothing. Mission 01's `tut1_e1`,
-            // `tut1_mf1` and `helic` carry fight shields and deflectors.
-            HIT_SHIELDS => {}
             _ => {}
         }
     }
@@ -508,7 +728,7 @@ impl Combat {
     /// `loss` shared over the nodes of every part that takes damage, as a hit's events.
     pub fn ground_loss(&mut self, t: usize, loss: f32) -> Vec<Event> {
         let mut events = Vec::new();
-        let Some(target) = self.targets.get_mut(t).filter(|t| t.alive) else { return events };
+        let Some(target) = self.target_mut(t).filter(|t| t.alive) else { return events };
         let (parts, mut lives): (Vec<usize>, Vec<&mut Life>) = target
             .parts
             .iter_mut()
@@ -535,7 +755,7 @@ impl Combat {
     /// that rose, the nodes hidden and the parts knocked off, as events.
     pub fn takt_lives(&mut self, now_ms: f64) -> Vec<Event> {
         let mut events = Vec::new();
-        for (t, target) in self.targets.iter_mut().enumerate() {
+        for (t, target) in self.targets.iter_mut().chain(self.hero.as_mut()).enumerate() {
             // A death by any other way than a round, the ground's loss say.
             if target.alive && target.dead() {
                 kill(target);
@@ -556,7 +776,7 @@ impl Combat {
     }
 
     fn damage(&mut self, t: usize, p: usize, n: usize, damage: f32, events: &mut Vec<Event>) {
-        let target = &mut self.targets[t];
+        let Some(target) = self.target_mut(t) else { return };
         let Some(life) = target.parts.get_mut(p).and_then(|part| part.life.as_mut()) else { return };
         let was_dead = life.dead;
         let destroyed = life.hit(n, damage);
@@ -640,6 +860,7 @@ mod tests {
             radius: 1.5,
             alive: true,
             position: at,
+            shield: None,
         }
     }
 
@@ -656,6 +877,100 @@ mod tests {
         }
     }
 
+    /// A post behind a small warbot's shield: 350 a sector at 0.7.
+    fn shielded_post() -> Target {
+        let mut post = post(Vec3::new(20.0, 30.0, 0.0), 500.0);
+        post.shield = Some(Shield::new(350.0, 0.0, 0.03, [0.7; crate::shield::SECTORS]));
+        post
+    }
+
+    fn damage_of(events: &[Event]) -> Vec<f32> {
+        events
+            .iter()
+            .filter_map(|e| if let Event::Damaged { damage, .. } = e { Some(*damage) } else { None })
+            .collect()
+    }
+
+    #[test]
+    fn a_bubble_stops_a_round_it_outlives_and_flashes_and_a_stronger_round_empties_the_sector_and_goes_on() {
+        let g = floor();
+        let bullet = RoundKind { name: "bb_t_01".into(), hit_points: 99.0, ..laser() };
+        let mut c =
+            Combat { kinds: vec![bullet, laser()], targets: vec![shielded_post()], ..Default::default() };
+        let muzzle = Vec3::new(20.0, 5.0, 1.0);
+        let back = crate::shield::BACK;
+
+        // A bullet of 100 against the back sector's 245: stopped on the bubble, its 100 taken
+        // from the sector, nothing from the post.
+        c.fire(0, None, muzzle, Vec3::Y, Vec3::ZERO, 1.0, None);
+        let events = c.tick(1.0 / 60.0, &g);
+        assert!(damage_of(&events).is_empty(), "{events:?}");
+        assert_eq!(events.iter().filter(|e| matches!(e, Event::ShieldHit { target: 0, .. })).count(), 1);
+        let ended = events
+            .iter()
+            .find_map(|e| if let Event::Ended { round, .. } = e { Some(round.position) } else { None });
+        assert!((ended.unwrap().y - 28.5).abs() < 1e-3, "on the bubble's surface: {ended:?}");
+        let shield = c.targets[0].shield.clone().unwrap();
+        assert!((shield.fills[back] * 350.0 - (350.0 - 100.0 / 0.7)).abs() < 0.05, "{:?}", shield.fills);
+        assert_eq!(shield.fills[crate::shield::FRONT], 1.0);
+
+        // A laser of 249 life outlives the 145 left: it flashes, empties the sector and strikes.
+        c.fire(1, None, muzzle, Vec3::Y, Vec3::ZERO, 1.0, None);
+        let events = c.tick(1.0 / 60.0, &g);
+        assert!(events.iter().any(|e| matches!(e, Event::ShieldHit { .. })));
+        assert_eq!(damage_of(&events), vec![250.0]);
+        assert_eq!(c.targets[0].shield.as_ref().unwrap().fills[back], 0.0);
+
+        // A spent sector still meets a round, but has nothing to flash or to stop.
+        c.fire(1, None, muzzle, Vec3::Y, Vec3::ZERO, 1.0, None);
+        let events = c.tick(1.0 / 60.0, &g);
+        assert!(!events.iter().any(|e| matches!(e, Event::ShieldHit { .. })));
+        assert_eq!(damage_of(&events), vec![250.0]);
+    }
+
+    #[test]
+    fn a_blast_crossing_the_bubble_is_stopped_first_and_one_inside_it_meets_no_shield() {
+        let g = floor();
+        // A round whose range ends 5 m short of the post's centre, in a blast of 10.
+        let shell = |damage: f32| RoundKind {
+            name: "shell".into(),
+            top_speed: 1200.0,
+            range: 20.0,
+            radius: 0.1,
+            hit_points: 0.0,
+            hit: None,
+            range_end: Some(explosion(HIT_AREA, damage, 10.0)),
+            ..RoundKind::default()
+        };
+        let mut c = Combat {
+            kinds: vec![shell(200.0), shell(1000.0)],
+            targets: vec![shielded_post()],
+            ..Default::default()
+        };
+        let muzzle = Vec3::new(20.0, 5.0, 1.0);
+        c.fire(0, None, muzzle, Vec3::Y, Vec3::ZERO, 1.0, None);
+        let events = c.tick(1.0 / 60.0, &g);
+        assert!(events.iter().any(|e| matches!(e, Event::ShieldHit { .. })), "{events:?}");
+        assert!(damage_of(&events).is_empty(), "200 stopped whole: {events:?}");
+
+        // 1000 against the 102.9 the back sector has left: the rest reaches the node whole.
+        let left = c.targets[0].shield.as_ref().unwrap().strength(crate::shield::BACK);
+        c.fire(1, None, muzzle, Vec3::Y, Vec3::ZERO, 1.0, None);
+        let events = c.tick(1.0 / 60.0, &g);
+        let damage = damage_of(&events);
+        assert_eq!(damage.len(), 1);
+        assert!((damage[0] - (1000.0 - left)).abs() < 0.05, "{damage:?} with {left} left");
+
+        // Fired from inside the bubble, the same blast goes off inside it: no shield.
+        let mut c =
+            Combat { kinds: vec![shell(200.0)], targets: vec![shielded_post()], ..Default::default() };
+        c.kinds[0].range = 0.5;
+        c.fire(0, None, Vec3::new(20.0, 29.0, 1.0), Vec3::Y, Vec3::ZERO, 1.0, None);
+        let events = c.tick(1.0 / 60.0, &g);
+        assert!(!events.iter().any(|e| matches!(e, Event::ShieldHit { .. })));
+        assert_eq!(damage_of(&events), vec![200.0]);
+    }
+
     #[test]
     fn two_laser_hits_kill_a_five_hundred_point_post_and_nothing_tunnels() {
         let g = floor();
@@ -663,6 +978,7 @@ mod tests {
             kinds: vec![laser()],
             rounds: Vec::new(),
             fired: 0,
+            hero: None,
             targets: vec![post(Vec3::new(20.0, 30.0, 0.0), 500.0)],
         };
         let muzzle = Vec3::new(20.0, 5.0, 1.0);
@@ -776,6 +1092,7 @@ mod tests {
             kinds: vec![missile],
             rounds: Vec::new(),
             fired: 0,
+            hero: None,
             targets: vec![post(Vec3::new(20.0, 16.0, 0.0), 5000.0), post(Vec3::new(20.0, 12.0, 0.0), 5000.0)],
         };
         // Fired by the nearer post, from inside it: it passes its owner and flies on.

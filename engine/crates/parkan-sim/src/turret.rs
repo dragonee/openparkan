@@ -64,6 +64,14 @@ fn settle(channel: &Channel, value: f32) -> f32 {
 /// cannot (`0x10028401`): the flight time from t² = 2 (A ∓ √D) ÷ g², A = v² − g·to.z,
 /// D = A² − g²|to|², the lower arc first; the angle between that launch and the line.
 pub fn lobbed_elevation(speed: f32, gravity: f32, to: Vec3) -> Option<f32> {
+    let launch = lobbed_launch(speed, gravity, to)?;
+    let square = to.length_squared();
+    Some((launch.dot(to) / (launch.length() * square.sqrt())).clamp(-1.0, 1.0).acos())
+}
+
+/// The velocity, `speed` long, that carries a round falling at `gravity` to `to` on the lower
+/// arc, or `None` when it cannot reach (the solve of `0x10028401`).
+pub fn lobbed_launch(speed: f32, gravity: f32, to: Vec3) -> Option<Vec3> {
     let reach = speed * speed - gravity * to.z;
     let square = to.length_squared();
     let disc = reach * reach - gravity * gravity * square;
@@ -77,8 +85,7 @@ pub fn lobbed_elevation(speed: f32, gravity: f32, to: Vec3) -> Option<f32> {
         return None;
     }
     let t = t2.sqrt();
-    let launch = Vec3::new(to.x / t, to.y / t, (to.z + 0.5 * gravity * t2) / t);
-    Some((launch.dot(to) / (launch.length() * square.sqrt())).clamp(-1.0, 1.0).acos())
+    Some(Vec3::new(to.x / t, to.y / t, (to.z + 0.5 * gravity * t2) / t))
 }
 
 /// A class-24 arm, the base item (`0x10020800`): a progress its channels head for.
@@ -279,6 +286,10 @@ pub struct Rig {
     /// The z of `TurretCenter`'s direction in the world, which signs a falling round's
     /// elevation; the caller keeps it.
     pub center_up: f32,
+    /// The point a turret in `CIS_POINTTRACE` traces, less `TurretCenter`'s position: what a
+    /// falling round's mount solves for (`0x1001b4f0`, `0x10028200`). `None` for a turret under
+    /// `CIS_MANUALCONTROL`, the player's, whose mounts take no lift.
+    pub traced: Option<Vec3>,
     pub shake: Shake,
     /// The strafe offset the control takt hands the turret, in radians (`0x10005ab8`);
     /// the caller keeps it. The yaw channel plays it on top of its value ([`Rig::frame_of`]).
@@ -327,6 +338,7 @@ impl Rig {
             mounts: mounts(controller, &arms),
             arms,
             center_up: 1.0,
+            traced: None,
             shake: Shake::default(),
             strafe: 0.0,
             channels,
@@ -366,16 +378,15 @@ impl Rig {
                 // `0x10028200`: while the arm moves, the mount blends from its rest.
                 _ if p < 1.0 => ((1.0 - p) * ch.initial + p * pitch, false),
                 None => (pitch, true),
-                // STAND-IN: docs/29-weapons.md#not-established -- with no target (and
-                // nothing sets one) a falling round's mount solves for the turret's aim
-                // triple (`0x10027e07`), and what that vector stands for is not
-                // established; nor is which way the lift turns on a hung turret, nor
-                // whether a player's turret is in `CIS_MANUALCONTROL`, which skips the
-                // solve. The stored triple is solved for, the lift signed by
-                // `TurretCenter`'s z.
-                Some(speed) => match lobbed_elevation(speed, GRAVITY, Vec3::from_array(self.aim)) {
-                    Some(angle) => (pitch + LOB_SHARE * angle / ch.span * self.center_up.signum(), true),
-                    None => (pitch, false),
+                // `0x10028200`: a traced target's offset is solved for, the lift signed by
+                // `TurretCenter`'s z; a target out of the round's reach leaves the gun unready.
+                // A manual turret's mount takes no lift and its gun is ready.
+                Some(speed) => match self.traced {
+                    None => (pitch, true),
+                    Some(to) => match lobbed_elevation(speed, GRAVITY, to) {
+                        Some(angle) => (pitch + LOB_SHARE * angle / ch.span * self.center_up.signum(), true),
+                        None => (pitch, false),
+                    },
                 },
             };
             self.values[m.channel] =
@@ -605,6 +616,13 @@ mod tests {
         let v = lobbed_elevation(50.0, GRAVITY, Vec3::new(100.0, 0.0, 0.0)).unwrap();
         // On flat ground sin 2θ = g R ÷ v².
         assert!((v - 0.5 * (0.4_f32).asin()).abs() < 1e-4, "{v}");
+        // The launch is the round's speed long, and it lands where it was aimed.
+        let to = Vec3::new(120.0, 40.0, -9.0);
+        let launch = lobbed_launch(45.0, GRAVITY, to).unwrap();
+        assert!((launch.length() - 45.0).abs() < 1e-3, "{launch}");
+        let t = to.truncate().length() / launch.truncate().length();
+        let landed = launch * t - Vec3::Z * (0.5 * GRAVITY * t * t);
+        assert!((landed - to).length() < 1e-2, "{landed} for {to}");
         assert_eq!(lobbed_elevation(50.0, GRAVITY, Vec3::new(300.0, 0.0, 0.0)), None);
         assert_eq!(lobbed_elevation(50.0, 0.0, Vec3::new(100.0, 0.0, 0.0)), None);
 
@@ -614,11 +632,19 @@ mod tests {
         guns[0].round_speed = 50.0;
         rig.arms[0].progress = 1.0;
         rig.aim = [0.5, 1.0 - LEVEL, 0.5];
+        // A manual turret traces nothing: its mount takes no lift, and its gun is ready.
         rig.update(1.0, &mut guns);
-        let lift = LOB_SHARE * lobbed_elevation(50.0, GRAVITY, Vec3::from_array(rig.aim)).unwrap();
+        assert!(guns[0].ready);
+        assert!((rig.values[3] - LEVEL).abs() < 1e-5, "{}", rig.values[3]);
+        // Tracing a target 100 m off, level: the lower arc's lift.
+        let to = Vec3::new(0.0, 100.0, 0.0);
+        rig.traced = Some(to);
+        rig.update(1.0, &mut guns);
+        let lift = LOB_SHARE * lobbed_elevation(50.0, GRAVITY, to).unwrap();
         assert!(guns[0].ready);
         assert!((rig.values[3] - (LEVEL + lift)).abs() < 1e-5, "{}", rig.values[3]);
-        guns[0].round_speed = 0.0;
+        // Past its reach, v² ÷ g = 250 m, the gun is not ready.
+        rig.traced = Some(Vec3::new(0.0, 300.0, 0.0));
         rig.update(1.0, &mut guns);
         assert!(!guns[0].ready, "no solution, no shot");
     }

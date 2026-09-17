@@ -94,6 +94,9 @@ struct Args {
     sway: bool,
     /// `--capture-idle`: a captured bot is given no order, as the game's capture gives none.
     capture_idle: bool,
+    /// `--fire-below`: a building's guns fire on a target below the lowest its turret looks, as
+    /// the game's do.
+    fire_below: bool,
     /// `--stretch-hud`: the HUD's layout stretches to the window, as the game's does.
     stretch_hud: bool,
     /// `--outcome won|lost`: a screenshot's mission is taken to have that outcome.
@@ -170,6 +173,7 @@ fn args() -> Result<Args> {
         trace: false,
         sway: false,
         capture_idle: false,
+        fire_below: false,
         stretch_hud: false,
         outcome: None,
         text: None,
@@ -213,6 +217,7 @@ fn args() -> Result<Args> {
             "--trace" => out.trace = true,
             "--sway" => out.sway = true,
             "--capture-idle" => out.capture_idle = true,
+            "--fire-below" => out.fire_below = true,
             "--stretch-hud" => out.stretch_hud = true,
             "--outcome" => out.outcome = Some(value()? == "won"),
             "--text" => out.text = Some(value()?),
@@ -419,8 +424,10 @@ fn rehearse(play: &mut scene::Play, loaded: &scene::Loaded, args: &Args) {
         play.update_input();
         play.command_frame(play.hero.time_ms / 1000.0, parkan_world::command::Edges::default());
         for e in play.tick(TICK_MS, args.mouse) {
-            if let parkan_sim::combat::Event::Killed { target } = e {
-                kills.push(play.battle.objects[target]);
+            if let parkan_sim::combat::Event::Killed { target } = e
+                && let Some(&object) = play.battle.objects.get(target)
+            {
+                kills.push(object);
             }
         }
         if args.headless {

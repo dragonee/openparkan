@@ -118,6 +118,31 @@ impl Assembly {
             .unwrap_or_default()
     }
 
+    /// Each internal part and clip fitted into a slot (docs/28, "A fitted part takes over its
+    /// slot"): the part it is fitted to, numbered as [`Assembly::parts`] numbers them, the slot's
+    /// index in that part's controller (the `.dat`'s attach field), and its record.
+    pub fn fitted(&mut self, path: &str) -> Vec<(usize, usize, String)> {
+        let Some(data) = self.unit_bytes(path) else { return Vec::new() };
+        let Ok(unit) = objects::parse_unit(&data, path) else { return Vec::new() };
+        let Ok(parents) = unit.parents() else { return Vec::new() };
+        let mut slot_of: HashMap<usize, usize> = HashMap::new();
+        let mut out = Vec::new();
+        for (i, component) in unit.components.iter().enumerate() {
+            let meshed = self.library.record_mesh(self.library.get(&component.reference.member), 0).is_some();
+            if component.is_external() {
+                if meshed {
+                    slot_of.insert(i, slot_of.len());
+                }
+                continue;
+            }
+            let host = usize::try_from(parents[i]).ok().and_then(|p| slot_of.get(&p).copied());
+            if let (Some(host), Ok(slot)) = (host, usize::try_from(component.attach_node)) {
+                out.push((host, slot, component.reference.member.clone()));
+            }
+        }
+        out
+    }
+
     pub fn parts(&mut self, kind: u32, path: &str) -> Vec<Part> {
         if matches!(kind, mission::KIND_VEGETATION | mission::KIND_ROCK) {
             let reference = self.library.record_mesh(self.library.get(path), 0);
