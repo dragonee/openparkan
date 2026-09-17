@@ -18,6 +18,10 @@ use crate::motion::Body;
 pub const MOUSE_X: &str = "SCAN_MOUSE_X";
 pub const MOUSE_Y: &str = "SCAN_MOUSE_Y";
 pub const SHIFT: &str = "SCAN_LSHIFT";
+/// The walk-straight key, the engine's own: no shipped table holds a row for it (docs/14,
+/// "The table"), so the pilot answers it itself. It toggles the walk forward on and off, and
+/// any strafe or a walk back turns it off again.
+pub const WALK_STRAIGHT: &str = "SCAN_Q";
 /// The mouse filter (`World3D.dll:0x1000f24b`): this much of the new counts, the
 /// rest of the last value, and Y a further 1.2.
 pub const FILTER_NEW: f32 = 0.95;
@@ -111,6 +115,9 @@ pub struct Pilot {
     pub switches: Switches,
     /// The keys down, in the order they went down.
     held: Vec<String>,
+    /// Walk straight ([`WALK_STRAIGHT`]): the command is held forward while no walk or strafe
+    /// key of its own holds it.
+    pub walk_straight: bool,
 }
 
 /// A unit's switched systems, as the input table's `MCMD_STATE` rows leave them.
@@ -176,12 +183,17 @@ impl Pilot {
             selects: Vec::new(),
             switches: Switches::default(),
             held: Vec::new(),
+            walk_straight: false,
         }
     }
 
     /// Every key still down comes up, as `stdClearKeyboard` leaves the keyboard when the
     /// player's view changes hands (docs/39-boarding.md, "Boarding").
     pub fn release_all(&mut self, hands: &mut Hands) {
+        // Walk straight comes up with them: nothing is holding the unit forward any more.
+        if std::mem::take(&mut self.walk_straight) {
+            hands.body.command[1] = 0.0;
+        }
         for key in std::mem::take(&mut self.held).into_iter().rev() {
             self.key(&key, false, hands);
         }
@@ -224,6 +236,14 @@ impl Pilot {
         if key == SHIFT {
             self.shift = pressed;
         }
+        // The walk-straight key going down turns the toggle over; turned off, the unit stops
+        // where no walk key of its own is holding it up.
+        if key == WALK_STRAIGHT && pressed {
+            self.walk_straight = !self.walk_straight;
+            if !self.walk_straight && self.walks == [false; 2] {
+                hands.body.command[1] = 0.0;
+            }
+        }
         self.active.retain(|(row, _)| row.key != key);
         for row in &rows {
             if row.ramp_time != 0 {
@@ -232,6 +252,7 @@ impl Pilot {
                 self.apply(row, None, hands);
             }
         }
+        self.hold_walk_straight(hands.body);
     }
 
     /// The input update (`World3D.dll:0x1000f477`): every active ramp row is run again,
@@ -258,6 +279,20 @@ impl Pilot {
             if row.pressed || !arrived {
                 self.active.push((row, since));
             }
+        }
+        self.hold_walk_straight(hands.body);
+    }
+
+    /// Walk straight holds the command forward while nothing else moves the unit: no walk or
+    /// strafe key down, and no walk row ramping, whose own step the toggle must not override.
+    /// The value is the table's full walk forward.
+    fn hold_walk_straight(&self, body: &mut Body) {
+        let ramping =
+            self.active.iter().any(|(r, _)| matches!(r.code(), MCMD_WALK_F | MCMD_WALK_B | MCMD_FORWARD));
+        if self.walk_straight && self.walks == [false; 2] && self.strafing == [false; 2] && !ramping {
+            let forward =
+                self.rows.iter().find(|r| r.code() == MCMD_WALK_F && r.pressed).map_or(1.0, |r| r.value);
+            body.command[1] = forward;
         }
     }
 
@@ -349,6 +384,10 @@ impl Pilot {
     /// leaves y be and turns the angle to ±π/2 by y's sign, so the strafe goes on.
     fn walk(&mut self, row: &Action, value: f32, body: &mut Body) {
         let code = row.code();
+        // A walk back turns the walk-straight toggle off (the engine's own).
+        if code == MCMD_WALK_B && row.pressed {
+            self.walk_straight = false;
+        }
         if code == MCMD_WALK_F || code == MCMD_WALK_B {
             let key = usize::from(code == MCMD_WALK_B);
             self.walks[key] = row.pressed;
@@ -379,6 +418,10 @@ impl Pilot {
     /// backing up mirrors it and S with A walks back and to the left. Coming up turns the
     /// angle to the other strafe key's, or 0, and the command to 0 when nothing else moves.
     fn strafe(&mut self, left: bool, pressed: bool, body: &mut Body) {
+        // A strafe turns the walk-straight toggle off (the engine's own).
+        if pressed {
+            self.walk_straight = false;
+        }
         let y = body.command[1];
         let share = match self.walking {
             true if y < -STILL => -0.5,
@@ -515,6 +558,55 @@ KEY   SCAN_NULL SCAN_W_3 1 CICLS_MULTIGUN MCMD_SELECT 0.0 3 0 0.0 0
         );
         pilot.key("SCAN_D", false, &mut r.hands());
         assert_eq!((r.body.command[1], r.body.strafe), (0.0, 0.0));
+    }
+
+    #[test]
+    fn the_walk_straight_key_holds_the_walk_forward_and_a_strafe_or_a_walk_back_turns_it_off() {
+        let mut pilot = Pilot::new(hero_table(), 100.0);
+        let mut r = rig();
+
+        // Q walks forward with no key held, and holds it through the input updates.
+        pilot.key(WALK_STRAIGHT, true, &mut r.hands());
+        assert!(pilot.walk_straight);
+        assert_eq!(r.body.command[1], 1.0, "the table's own full walk forward");
+        pilot.update(16.0, &mut r.hands());
+        assert_eq!(r.body.command[1], 1.0);
+
+        // W under it walks as it always did, and letting W go leaves the walk running.
+        pilot.key("SCAN_W", true, &mut r.hands());
+        assert_eq!(r.body.command[1], 1.0);
+        pilot.key("SCAN_W", false, &mut r.hands());
+        assert_eq!((pilot.walk_straight, r.body.command[1]), (true, 1.0), "W's release does not stop it");
+
+        // Q again stops it.
+        pilot.key(WALK_STRAIGHT, true, &mut r.hands());
+        assert_eq!((pilot.walk_straight, r.body.command[1]), (false, 0.0));
+        pilot.update(32.0, &mut r.hands());
+        assert_eq!(r.body.command[1], 0.0);
+
+        // A strafe turns it off, and the unit stands once the strafe key comes up.
+        pilot.key(WALK_STRAIGHT, true, &mut r.hands());
+        pilot.key("SCAN_A", true, &mut r.hands());
+        assert!(!pilot.walk_straight, "a strafe turns it off");
+        pilot.key("SCAN_A", false, &mut r.hands());
+        pilot.update(48.0, &mut r.hands());
+        assert_eq!((r.body.command[1], r.body.strafe), (0.0, 0.0));
+        for key in ["SCAN_D", "SCAN_S"] {
+            pilot.key(WALK_STRAIGHT, true, &mut r.hands());
+            assert!(pilot.walk_straight);
+            pilot.key(key, true, &mut r.hands());
+            assert!(!pilot.walk_straight, "{key} turns it off");
+            pilot.key(key, false, &mut r.hands());
+            pilot.update(64.0, &mut r.hands());
+            assert_eq!(r.body.command[1], 0.0, "and the unit stands after {key}");
+        }
+
+        // Leaving the window, which lets every key up, turns it off too.
+        pilot.key(WALK_STRAIGHT, true, &mut r.hands());
+        pilot.release_all(&mut r.hands());
+        assert!(!pilot.walk_straight);
+        pilot.update(80.0, &mut r.hands());
+        assert_eq!(r.body.command[1], 0.0);
     }
 
     /// Where a unit goes, in degrees clockwise from its heading: the hull turned by the strafe

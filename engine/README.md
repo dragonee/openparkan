@@ -853,6 +853,12 @@ More feedback on the first chapter: armour, docks, turrets, batteries and repair
   walls as before, and a unit that joins the hall way where it stands walks it straight rather
   than asking the areal map for a way to a vertex under the ground. The builder now walks round
   the mine, in by its western door, down the corridor and onto the pod in 66 s.
+- **Q walks straight** (docs/14, "From a row to a command"). No shipped table holds a row for
+  Q, so the pilot answers the key itself: it turns the walk forward on and off, and while it is
+  on the command is held forward through every input update with no key down. W walks under it
+  as it always did and letting W go leaves the walk running; a strafe, a walk back or Q again
+  ends it, and so does leaving the window, which lets every key up. It drives a bot the player
+  has boarded the same way, its own table's full walk forward being the value held.
 - **A warbot repairs itself while it is scratched** (docs/26, "What the AI does with the
   switch"). Every unit the player does not drive now runs the AI's repair decision on its takt,
   unless that takt sent it to a dock or into an attack: it switches its own repair system on
@@ -896,8 +902,9 @@ cargo run --release -p parkan -- --mission MISSIONS/Single.01  # another mission
 repository.
 
 In the cockpit the hero's own `hero.tbl` drives it. W and S walk, A and D
-strafe, the mouse turns the hull and tilts the turret, and Shift with the
-mouse looks around while the guns hold their aim. Letting Shift go, or leaving
+strafe, Q walks straight on and off without a key held (the engine's own key;
+any strafe or a walk back ends it), the mouse turns the hull and tilts the
+turret, and Shift with the mouse looks around while the guns hold their aim. Letting Shift go, or leaving
 the window, which lets every key up as the game does, centres the view again.
 Cmd frees the cursor and lets every key up too, so a macOS shortcut such as
 Cmd-Shift-4, which takes the keyboard without the window losing focus, leaves

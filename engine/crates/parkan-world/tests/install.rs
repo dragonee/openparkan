@@ -1048,6 +1048,66 @@ fn walk(play: &mut parkan_world::play::Play, from: glam::Vec3, yaw: f32, seconds
 
 #[test]
 #[ignore = "needs the game install"]
+fn q_walks_the_hero_straight_on_and_off_and_a_strafe_or_a_walk_back_ends_it() {
+    use glam::Vec3;
+
+    let (mut play, _) = mission_01_play();
+    let tick = |play: &mut parkan_world::play::Play, seconds: f32| {
+        for _ in 0..(seconds * 60.0) as usize {
+            play.update_input();
+            play.tick(1000.0 / 60.0, [0.0; 2]);
+        }
+    };
+    let at = |play: &parkan_world::play::Play| play.hero.walker.body.position;
+    let start = at(&play);
+    tick(&mut play, 0.5);
+
+    // Q with no key held runs the hero as W does, and it keeps running with nothing held.
+    play.key("SCAN_Q", true);
+    play.key("SCAN_Q", false);
+    tick(&mut play, 3.0);
+    let ran = at(&play).truncate().distance(start.truncate());
+    assert!(ran > 20.0, "it runs on its own: {ran:.1} m in 3 s");
+
+    // Q again stops it.
+    play.key("SCAN_Q", true);
+    play.key("SCAN_Q", false);
+    tick(&mut play, 1.0);
+    let stopped = at(&play);
+    tick(&mut play, 2.0);
+    assert!(at(&play).truncate().distance(stopped.truncate()) < 1.0, "Q again stands it: {}", at(&play));
+
+    // A strafe ends it: the hero stands once the key comes up, and stays standing.
+    for key in ["SCAN_A", "SCAN_D", "SCAN_S"] {
+        play.key("SCAN_Q", true);
+        play.key("SCAN_Q", false);
+        tick(&mut play, 1.0);
+        play.key(key, true);
+        tick(&mut play, 0.5);
+        play.key(key, false);
+        tick(&mut play, 0.5);
+        let held = at(&play);
+        tick(&mut play, 2.0);
+        let after = at(&play).truncate().distance(held.truncate());
+        assert!(after < 1.0, "{key} ends the walk: {after:.1} m more after it came up");
+    }
+
+    // Put back where it started, the hero on Q walks the way it faces.
+    let heading = play.hero.walker.body.yaw;
+    play.hero.walker.body.position = start;
+    play.hero.walker.body.yaw = heading;
+    play.key("SCAN_Q", true);
+    play.key("SCAN_Q", false);
+    tick(&mut play, 2.0);
+    let went = at(&play) - start;
+    let along = Vec3::new(-heading.sin(), heading.cos(), 0.0);
+    assert!(went.truncate().dot(along.truncate()) > 0.9 * went.truncate().length(), "straight ahead: {went}");
+    play.key("SCAN_Q", true);
+    play.key("SCAN_Q", false);
+}
+
+#[test]
+#[ignore = "needs the game install"]
 fn the_hero_crosses_mission_01s_bridge_on_its_deck() {
     use glam::Vec3;
     let (mut play, _) = mission_01_play();
