@@ -1225,6 +1225,78 @@ fn captured_warbots_answer_the_wingman_menu_with_the_order_its_row_gives() {
 
 #[test]
 #[ignore = "needs the game install"]
+fn the_wingman_menu_is_the_driven_bots_and_follow_me_names_it_not_the_hero_left_behind() {
+    use glam::Vec3;
+    use parkan_sim::behaviour::Task;
+    use parkan_sim::orders::{FOLLOW, Target};
+    use parkan_world::factory::Project;
+    use parkan_world::play::{Mode, View};
+
+    let tick = 1000.0 / 60.0;
+    let (mut play, [mf1, helic, _]) = mission_01_wingmen();
+    // A large warbot beside the hero for it to board (docs/39, "Boarding").
+    let project = Project {
+        path: "UNITS\\bld_unit_-2147483647.dat".to_owned(),
+        name: "LFW-2 Warrior".into(),
+        type_word: 0x0100_8000,
+        chassis_size: 4,
+        ore: 0.0,
+        power: 0.0,
+        lines: Vec::new(),
+        sphere: None,
+    };
+    let hero_at = play.hero.walker.body.position;
+    let bot =
+        play.spawn(&project, play.player_clan, hero_at + Vec3::new(8.0, 0.0, 1.0), 0.0).expect("the L-2f");
+    for _ in 0..60 {
+        play.tick(tick, [0.0; 2]);
+    }
+    assert!(play.board(bot));
+    assert_eq!(play.mode(), Mode::Driving(bot));
+    for _ in 0..60 {
+        play.tick(tick, [0.0; 2]);
+    }
+
+    // The list is the driven bot's, which is never its own wingman (docs/31, "Who can be a
+    // wingman"), and the menu opens from its cockpit.
+    let listed: Vec<usize> = play.wingmen().iter().map(|&r| play.robots[r].0).collect();
+    assert_eq!(listed.len(), 2, "the two captured warbots: {listed:?}");
+    assert!(!listed.contains(&bot), "the bot the player drives is not listed");
+    let eye = play.own_eye();
+    let view = View { eye: eye.position, look: eye.forward, view_proj: glam::Mat4::IDENTITY, shift: false };
+    play.command("CMD_JAMES_WINGMAN_MENU", &view);
+    assert_eq!(play.panel().expect("the panel is open").wingmen.len(), 2);
+    play.says.clear();
+    assert!(play.wingman_digit(2));
+    assert!(!play.says.is_empty(), "the last one acknowledges");
+
+    // Follow me is by the driven unit's logic id, not the hero's (docs/31, "The orders").
+    let id = play.units[bot].logical_id;
+    assert_ne!(id, play.hero_id);
+    for (_, robot) in play.robots.iter().filter(|(t, _)| [mf1, helic].contains(t)) {
+        let order = robot.order.expect("an order");
+        assert_eq!((order.code, order.target), (FOLLOW, Target::LogicId(id)));
+    }
+
+    // So they keep up with the bot the player drives while the hero stays out of the world.
+    let r = play.robots.iter().position(|(t, _)| *t == bot).expect("the driven bot");
+    let start = play.robots[r].1.walker.body.position;
+    put(&mut play.robots[r].1.walker, &play.ground, start + Vec3::new(60.0, -120.0, 40.0));
+    for _ in 0..(60 * 15) {
+        play.tick(tick, [0.0; 2]);
+    }
+    let at = play.robots[r].1.walker.body.position;
+    assert!(at.truncate().distance(hero_at.truncate()) > 100.0, "the hero is well behind");
+    for b in [mf1, helic] {
+        let (_, robot) = play.robots.iter().find(|(t, _)| *t == b).unwrap();
+        let off = robot.walker.body.position.truncate().distance(at.truncate());
+        assert!(off < 45.0, "a follower keeps near the driven bot: {off}");
+        assert!(matches!(robot.behaviour.task(), Task::Follow { .. }));
+    }
+}
+
+#[test]
+#[ignore = "needs the game install"]
 fn the_wingman_panel_draws_a_line_per_wingman_by_name_and_the_menus_rows_under_the_tilde() {
     use glam::Mat4;
     use parkan_world::cockpit::Cockpit;

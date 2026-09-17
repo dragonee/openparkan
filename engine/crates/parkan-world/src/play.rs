@@ -1263,13 +1263,16 @@ impl Play {
     /// its pick keeps from the unit, are not read: both are 0.
     pub fn command(&mut self, command: &str, view: &View) -> bool {
         let world = self.contacts();
-        let unit = self.hero.walker.body.position;
+        // Every pick is on the unit the player drives, its place and its sensor range
+        // (docs/25, "Each takt, on the unit the player drives"), so a bot taken by telepresence
+        // or boarded picks with its own list, not with the hero's where it stands.
+        let unit = self.driven().walker.body.position;
         let changed = match command {
             CMD_JAMES_SELECT_TARGET => self.targets.select_next(),
             CMD_JAMES_SELECT_ENEMY => self.targets.select_nearest(unit, &world, |c| c.hostile),
             CMD_JAMES_SELECT_FRIEND => self.targets.select_nearest(unit, &world, |c| c.friend),
             CMD_JAMES_AIM_TARGET => {
-                let range = self.hero.radar.range;
+                let range = self.driven().radar.range;
                 self.targets.aim(unit, view.eye, view.look, 0.0, 0.0, range, &world, |c, r| {
                     on_screen(view.view_proj, c, r)
                 })
@@ -1363,7 +1366,7 @@ impl Play {
                 let target = self.picked();
                 if !chosen.is_empty()
                     && orders::enabled(row, target, capturers)
-                    && let Some(order) = orders::order_for(row, self.hero_id, target)
+                    && let Some(order) = orders::order_for(row, self.driven_id(), target)
                 {
                     for &r in &chosen {
                         self.robots[r].1.order = Some(order);
@@ -1887,6 +1890,12 @@ impl Play {
     /// in, whose place and radar the target list takes.
     pub fn driven_target(&self) -> Option<usize> {
         self.driving.as_ref().map(|d| d.target).or_else(|| self.aboard())
+    }
+
+    /// The logical id of the view's own unit, its record's `+0x34`: the bot the player drives,
+    /// else the hero. It is the id Follow me names (docs/31, "The orders").
+    pub fn driven_id(&self) -> i32 {
+        self.driven_target().and_then(|t| self.units.get(t)).map_or(self.hero_id, |u| u.logical_id)
     }
 
     /// Mode 3 with HQ unit `t` pushed: from its cockpit (1 → 3, `0x10063a20`), from
