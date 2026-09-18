@@ -425,7 +425,23 @@ impl Combat {
         radius: f32,
         passes: u16,
     ) -> Option<(Strike, Option<usize>, usize)> {
-        let mut best: Option<(Strike, Option<usize>, usize)> = ground.segment(p0, p1).map(|s| (s, None, 0));
+        self.nearest_over(ground, skip, p0, p1, radius, passes, false)
+    }
+
+    /// [`Combat::nearest`], with `water` taking the water surface as ground too.
+    #[allow(clippy::too_many_arguments)]
+    fn nearest_over(
+        &self,
+        ground: &Ground,
+        skip: Option<usize>,
+        p0: Vec3,
+        p1: Vec3,
+        radius: f32,
+        passes: u16,
+        water: bool,
+    ) -> Option<(Strike, Option<usize>, usize)> {
+        let ray = if water { ground.segment_including_water(p0, p1) } else { ground.segment(p0, p1) };
+        let mut best: Option<(Strike, Option<usize>, usize)> = ray.map(|s| (s, None, 0));
         let skip = skip.unwrap_or(self.hero_index());
         for (id, target) in self.every() {
             if !target.alive || id == skip {
@@ -451,9 +467,14 @@ impl Combat {
     /// The ray asks for every class and passes no triangle (`0x1002adc0`), so it can stop
     /// on leaves a round flies through.
     ///
-    /// STAND-IN: docs/29-weapons.md#not-established -- whether the landscape is one of
-    /// the objects the ray walks is not traced; the ground is met, less its water
-    /// surface, as a round meets it.
+    /// **The landscape is the first object the ray walks** (*read*): `IWorld` slot 7 takes
+    /// the world's root (`Terrain.dll:0x10024feb`) and the root is the landscape --
+    /// `CLightning::Init` panics "Root object is not a landscape" unless its class is 1
+    /// (`0x10071c41`) -- the walk admits an object whose `1 << class` meets the query's
+    /// mask (`0x1002510f`, the table of `1 << N` at `0x1009a5f0`), which `0xfff` does, and
+    /// the landscape's interface `0x18` slot 6 is `GetFirstIntersectedFace`
+    /// (`0x1001a202`, vtable `0x1009a3f8`). The ray excludes no face, so unlike a round it
+    /// stops on a lake's surface.
     pub fn aim_point(
         &self,
         ground: &Ground,
@@ -466,7 +487,7 @@ impl Combat {
         let (lo, hi) = ground.bounds();
         let reach = Vec3::new(hi[0] - lo[0], hi[1] - lo[1], 0.0).length() + 2.0 * NEAREST_AIM;
         let (p0, p1) = (origin + s * SIGHT_FROM, origin + s * reach.min(SIGHT_TO));
-        let (strike, _, _) = self.nearest(ground, owner, p0, p1, 0.0, SIGHT_SKIPS_FACE)?;
+        let (strike, _, _) = self.nearest_over(ground, owner, p0, p1, 0.0, SIGHT_SKIPS_FACE, true)?;
         let mut point = strike.point;
         if (point - origin).length() < NEAREST_AIM {
             point = origin + s * NEAREST_AIM;
@@ -871,6 +892,7 @@ mod tests {
                 volume: 0.0,
             }],
             batches: Vec::new(),
+            face_two_sided: Vec::new(),
             face_flags: vec![0, 0],
             face_normals: vec![[0.0, -1.0, 0.0]; 2],
             keys: Vec::new(),

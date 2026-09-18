@@ -311,9 +311,31 @@ once.
   only, and passes through triangles flagged 4 or 32 and batches flagged 8 or
   `0x200` ([26-damage.md](26-damage.md)). So the sight can stop on a tree's
   leaves that the round then flies through.
-- **The ground.** The landscape answers interface `0x18` as well
-  (`Terrain.dll:0x1001a174`). That it is one of the objects the ray walks was
-  not traced.
+- **The ground, and it is the first thing walked** — *read*. The world's
+  **root object is the landscape**: `CLightning::Init` asks the world for its
+  root through the same slot `0x30` the sight ray uses (`0x10071c33`,
+  `0x10024feb`), asks that root for its class through the same slot `0x2c` the
+  walk uses (`0x10071c41`, `0x10025101`), and **panics *"Root object is not a
+  landscape"* unless the class is 1**. The walk admits an object whose
+  `1 << class` meets the query's mask, through a table that is `1 << N` for
+  N = 0..15 (`0x1002510f`, `Terrain.dll:0x1009a5f0`), and the sight ray's mask
+  `0xfff` holds bit 1. The landscape answers interface `0x18` at its `+0x138`
+  (`0x1001a174`, `0x1001a202`), and **slot 6 of that interface's vtable
+  (`0x1009a3f8` + 0x18) is `CLandscape::GetFirstIntersectedFace`**
+  (`0x100205c0`) — the very routine a round's ground test runs. So the sight
+  ray does converge on the ground.
+  - The control is the same enumeration: it also finds the object lists the
+    walk descends into, the children at `[vtable+0x3c]` (`0x100254e4`,
+    recursing at `0x10025520`), and an object that fails the class mask or has
+    no interface `0x18` is skipped while its children are still walked.
+- **The sight ray excludes no face, so a lake stops it** — *read*. Its query
+  is `[0xfff, 0, 0, ?, 0, 0, 0, 0]` (`0x1002a68e` → `0x1001bca0`, then
+  `0x1002a6c1`–`0x1002a6cd` zeroing the last four): no required or excluded
+  world flags and no required or excluded class. A round's excludes world
+  flags `0x208`, of which `0x200` is the landscape's water surface
+  ([26-damage.md](26-damage.md#the-query-record-and-what-a-round-excludes--read-and-measured)).
+  **So the sight stops on a lake's surface where the round it aims flies
+  through to the bed.**
 
 ### The round's start
 
@@ -1054,8 +1076,12 @@ assembled nowhere, so "in the tree" and "assembled" are detected apart.
   into first-person play.~~ Moot: the player's target list sets the turret's
   target whenever the player's target changes
   ([The player's target reaches the turret](#the-players-target-reaches-the-turret--read)).
-- Whether the landscape is one of the objects IWorld slot 7 walks, so that the
-  sight ray converges on the ground and not only on objects.
+- ~~Whether the landscape is one of the objects IWorld slot 7 walks, so that the
+  sight ray converges on the ground and not only on objects.~~ **Answered**: it
+  is the **root** the walk starts from, class 1, and its interface `0x18` slot 6
+  is `GetFirstIntersectedFace`; the ray excludes no face, so unlike a round it
+  stops on a lake's surface
+  ([Where the round leaves, and which way](#where-the-round-leaves-and-which-way)).
 - ~~The vector a falling round's mount solves for.~~ The traced point less
   `TurretCenter`'s position; a turret in `CIS_MANUALCONTROL` gets no lift and its
   gun is ready. `TurretCenter`'s vector is (0, −1, 0) on node 0 in 57 of 59 turret
