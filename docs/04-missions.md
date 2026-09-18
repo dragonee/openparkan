@@ -293,9 +293,18 @@ Measured against the terrain, taking the lowest level-0 vertex after poses:
 Drawn at scale 1, nearly half the scaled scenery would hang in the air. At its
 scale it is dug in, like the control.
 
-**Unknown:** whether vegetation and rock carry node life, so whether a scaled
-tree is also tougher; and whether anything calls `SetScale` on a unit while
-the game runs.
+**A scaled tree is also tougher** — *read*, and *measured*. Vegetation and rock
+do carry node life: their `STAT` records name a `.ndp` and a `.ctl` (81 of 81),
+`iron3d.dll` gives them to `AddNewObjectToGame` as **type 10**
+(`0x100a4331`), and the agent loader hands every agent, whatever its tag, a
+control system and its `ILifeSystem` (`AniMesh.dll:0x100032e7`, `0x1000330d`).
+The control system re-reads its mesh's scale on every tick and rescales every
+node's life and maximum by **the three factors multiplied**
+(`Control.dll:0x10007ac6` → `0x10009ee0`), so a tree at scale 3 has 27 times
+its table's hit points and Mission 02's `s_stone_10` at 21 holds 4,630,500,000.
+See [26-damage.md](26-damage.md#vegetation-and-rock-carry-node-life--read-and-measured).
+
+**Unknown:** whether anything calls `SetScale` on a unit while the game runs.
 
 ### Property
 

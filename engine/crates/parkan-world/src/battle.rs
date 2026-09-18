@@ -150,12 +150,14 @@ pub fn object_ratio(
     if allied { 1.0 } else { ratio }
 }
 
-/// A part's nodes' hit points from its record's `.ndp`, at the level ratio `ratio`, and what
-/// each node plays when it is destroyed; no life where the record names no table.
+/// A part's nodes' hit points from its record's `.ndp`, at the volume scale `volume_scale`
+/// and the level ratio `ratio`, and what each node plays when it is destroyed; no life where
+/// the record names no table.
 pub fn part_damage(
     assembly: &mut Assembly,
     part: &crate::assembly::Part,
     mesh: &Mesh,
+    volume_scale: f32,
     ratio: f32,
     building: bool,
 ) -> (Option<Life>, Vec<Option<Explosion>>) {
@@ -183,7 +185,8 @@ pub fn part_damage(
         })
         .collect();
     let never_hidden: Vec<bool> = mesh.nodes.iter().map(|n| n.flags & NEVER_HIDDEN_NODE_FLAG != 0).collect();
-    let mut life = Life::new(&nodes_table, parents, vital, 1.0, ratio).staged(&stages, &never_hidden);
+    let mut life =
+        Life::new(&nodes_table, parents, vital, volume_scale, ratio).staged(&stages, &never_hidden);
     life.building = building;
     (Some(life), blasts)
 }
@@ -195,13 +198,11 @@ fn placement(position: [f32; 3], yaw: f32) -> Pose {
 }
 
 impl Battle {
-    /// Every placed object but `hero` as a target. Units and buildings take damage
-    /// through their parts' `.ndp`; scenery stops rounds and takes none. A mission's
-    /// building is a `CBuilding` around its agent, agent kind 3, which node 0's death
-    /// only marks (`docs/26-damage.md`, "Hit points").
-    ///
-    /// STAND-IN: docs/04-missions.md#the-scale -- whether vegetation and rock carry
-    /// node life is not established; they take no damage.
+    /// Every placed object but `hero` as a target. Every one of them takes damage through
+    /// its parts' `.ndp`, scenery included: a tree and a stone are agents like any other
+    /// and carry a life system (`docs/26-damage.md`, "Vegetation and rock carry node
+    /// life"). A mission's building is a `CBuilding` around its agent, agent kind 3, which
+    /// node 0's death only marks (`docs/26-damage.md`, "Hit points").
     pub fn load(
         assembly: &mut Assembly,
         mission: &Mission,
@@ -243,10 +244,13 @@ impl Battle {
     ) -> Option<usize> {
         let scale = object.placed_scale();
         let place = placement(object.position, object.rotation);
-        let damageable = !matches!(object.kind, mission::KIND_VEGETATION | mission::KIND_ROCK);
+        // The control system re-reads its mesh's scale every tick and rescales every node's
+        // life by the three factors multiplied (`Control.dll:0x10007ac6` -> `0x10009ee0`).
+        // Only scenery is built at its placement scale, so only a tree or a stone has one
+        // other than 1 (docs/04-missions.md, "The scale").
+        let volume_scale = scale * scale * scale;
         let object_ratio = object_ratio(clans, object, player, ratio);
-        let armour =
-            if damageable { crate::shields::armour(assembly, object.kind, &object.path) } else { None };
+        let armour = crate::shields::armour(assembly, object.kind, &object.path);
         let mut parts = Vec::new();
         let mut blasts = Vec::new();
         let mut part_wears = Vec::new();
@@ -284,11 +288,14 @@ impl Battle {
                 lo = lo.min(c - Vec3::splat(r * scale));
                 hi = hi.max(c + Vec3::splat(r * scale));
             }
-            let (mut life, part_blasts) = if damageable {
-                part_damage(assembly, &part, &mesh, object_ratio, object.kind == mission::KIND_BUILDING)
-            } else {
-                (None, Vec::new())
-            };
+            let (mut life, part_blasts) = part_damage(
+                assembly,
+                &part,
+                &mesh,
+                volume_scale,
+                object_ratio,
+                object.kind == mission::KIND_BUILDING,
+            );
             // One control system holds every part's nodes, so the one armour covers them all.
             if let Some(life) = life.as_mut() {
                 life.armour = armour;

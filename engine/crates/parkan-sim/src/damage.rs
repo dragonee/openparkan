@@ -2,11 +2,15 @@
 
 use parkan_formats::ndp::NodeDamage;
 
-/// A mesh node flag the life system reads as vital.
+/// A mesh node flag the life system reads as vital: the stream-1 node record's own
+/// flags word, bit 9.
 ///
-/// STAND-IN: docs/26-damage.md#hit-points--read-and-measured -- the node record's
-/// bit 0 comes from AniMesh query 0xe & 0x200 (`Control.dll:0x1000f9aa`); that the
-/// query is the mesh node's flags word is not read.
+/// The life loader asks `IAnimation` query `0xe` and tests `ah & 2`
+/// (`Control.dll:0x1000f9aa`). Query `0xe` is the node's **mesh** flags word:
+/// `AniMesh.dll:0x10005242` takes the mesh behind the runtime node record's `+0x12c`,
+/// indexes it by the record's `+8` at a stride of 38 bytes and reads the `uint16` at
+/// offset 0 -- stream 1's node record, and its first field
+/// (docs/26-damage.md#what-a-damaged-node-a-destroyed-part-and-a-dead-unit-draw--read-and-measured).
 pub const VITAL_NODE_FLAG: u16 = 0x200;
 
 /// `min(damage, linear × damage + square × damage²)` (`0x10010030`).
@@ -516,6 +520,30 @@ mod tests {
         assert!(changes.contains(&Change::Hidden(3)) && !changes.contains(&Change::Hidden(1)), "{changes:?}");
         assert!(life.nodes[1].flying(), "a part already flying keeps flying");
         assert!(life.nodes.iter().all(|n| n.destroyed && n.life == 0.0));
+    }
+
+    /// The hero's chassis `R_H_02`: its body and its eight leg segments carry mesh node flag
+    /// `0x200`, and `Base_TL` does not (docs/26, "What the loader takes from the mesh").
+    #[test]
+    fn a_vital_node_kills_the_object_where_an_ordinary_one_is_only_knocked_off() {
+        let parents = vec![None, Some(0), Some(1)];
+        let flags = [0x0000_u16, 0x0200, 0x0010];
+        let vital: Vec<bool> = flags.iter().map(|f| f & VITAL_NODE_FLAG != 0).collect();
+        assert_eq!(vital, vec![false, true, false]);
+
+        // The leaf, flagged 0x10 and nothing the loader reads, is knocked off and flies.
+        let mut life = Life::new(&table(&[380.0, 350.0, 300.0]), parents.clone(), vital.clone(), 1.0, 1.0);
+        assert!(life.hit(2, 300.0) && !life.marked && !life.dead);
+        assert_eq!(life.takt(0.0), vec![Change::KnockedOff(2)]);
+
+        // The leg segment above it marks and kills the machine instead; node 0 then takes
+        // the whole of its own life ([`crate::combat`]'s `kill`), and the walk takes the rest.
+        let mut life = Life::new(&table(&[380.0, 350.0, 300.0]), parents, vital, 1.0, 1.0);
+        assert_eq!(life.nodes[1].status, STATUS_VITAL);
+        assert!(life.hit(1, 350.0) && life.marked && life.dead);
+        life.lose(0, 380.0);
+        life.takt(0.0);
+        assert!(life.nodes.iter().all(|n| n.destroyed), "the whole machine goes with it");
     }
 
     #[test]

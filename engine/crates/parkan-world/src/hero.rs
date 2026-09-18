@@ -72,7 +72,9 @@ impl Hero {
         let armour = crate::shields::armour(assembly, placed.kind, &placed.path);
         for part in &parts {
             let Some(mesh) = assembly.mesh(&part.reference) else { continue };
-            let (mut life, blast) = part_damage(assembly, part, &mesh.mesh, 1.0, false);
+            // A unit is built from its `.dat` with the placement's matrix alone, so its
+            // volume scale is 1 (docs/04-missions.md, "The scale").
+            let (mut life, blast) = part_damage(assembly, part, &mesh.mesh, 1.0, 1.0, false);
             if let Some(life) = life.as_mut() {
                 life.armour = armour;
             }

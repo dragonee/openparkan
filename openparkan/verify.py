@@ -4404,6 +4404,9 @@ def check_node_stages(check, game: Path) -> None:
     stages: Counter[int] = Counter()
     never_hidden: Counter[str] = Counter()
     chassis_delay: Counter[int] = Counter()
+    vital_meshes: dict[str, tuple[int, int]] = {}
+    vital_names: Counter[str] = Counter()
+    all_nodes = 0
     for record in library.records.values():
         blob = member(record.mesh)
         if blob is not None:
@@ -4415,6 +4418,14 @@ def check_node_stages(check, game: Path) -> None:
                 stages[_stage_count(node)] += 1
                 if node.flags & NODE_NEVER_HIDDEN:
                     never_hidden[record.name] += 1
+            if model and any(n.flags & NODE_VITAL for n in model.nodes):
+                flagged = [n for n in model.nodes if n.flags & NODE_VITAL]
+                key = record.mesh.member.lower()
+                if key not in vital_meshes:
+                    vital_meshes[key] = (len(flagged), len(model.nodes))
+                    all_nodes += len(flagged)
+                    for n in flagged:
+                        vital_names[n.name.split("_")[0]] += 1
         if record.name.lower().startswith("r_"):
             raw = member(record.slot_with_suffix("ctl"))
             if raw is not None:
@@ -4431,6 +4442,15 @@ def check_node_stages(check, game: Path) -> None:
           f"{sum(never_hidden.values())} nodes over {len(never_hidden)} records, all "
           f"bu_* buildings; every other node is hidden at its last stage "
           f"(Control.dll:0x100118cd)")
+    expected = {"a_l_01.msh", "a_l_02.msh", "a_l_04.msh", "a_l_05.msh", "r_b_05.msh",
+                "r_b_07.msh", "r_h_02.msh", "o_tur_ha_02.msh", "o_tur_la_06.msh"}
+    check("MESH: a vital node (flag 0x200) is a limb of the hero, a monster or an animal",
+          set(vital_meshes) == expected and all_nodes == 90,
+          f"{all_nodes} nodes over {len(vital_meshes)} meshes -- the hero chassis R_H_02 "
+          f"(9 of 10), the Transformer R_B_05's two leg spines (12 of 32), the L-7f "
+          f"R_B_07's body chain (4 of 11), the four animals' limbs and the hero turret's "
+          f"arms: {dict(sorted(vital_meshes.items()))}.  Any one of them destroyed kills "
+          f"the object (Control.dll:0x1000f9aa, 0x1001107d)")
     check("controller +92: a dead chassis lasts one to five seconds",
           set(chassis_delay) <= {1000, 2000, 3000, 5000} and chassis_delay[2000] > 0,
           f"{dict(sorted(chassis_delay.items()))} over the r_* chassis: ms added to the "
@@ -4469,6 +4489,102 @@ def check_node_stages(check, game: Path) -> None:
           switch and flight == 3000.0 and b"KillGameObject" in image,
           f"0x100063b4 stores 1 in the switch at 0x100424a0 and {flight} in 0x100424a4; "
           f"KillGameObject imported {b'KillGameObject' in image}")
+
+
+def check_scenery_life(check, game: Path) -> None:
+    """Trees and stones carry node life, and a placement's scale multiplies it."""
+    library = objects.ObjectLibrary(game / "objects.rlb")
+    opened: dict[str, NResArchive] = {}
+
+    def member(ref) -> bytes | None:
+        if ref is None or not ref.member:
+            return None
+        try:
+            if ref.library not in opened:
+                opened[ref.library] = NResArchive.open(game / ref.library)
+            return opened[ref.library].read_name(ref.member)
+        except (KeyError, ValueError, FileNotFoundError):
+            return None
+
+    tables: dict[str, list] = {}
+    controllers = struck = meshes = 0
+    explosions: Counter[str] = Counter()
+    classes: Counter[int] = Counter()
+    for record in library.by_tag("STAT"):
+        raw = member(record.damage)
+        if raw is None:
+            continue
+        try:
+            tables[record.name.lower()] = objects.parse_damage(raw, record.damage.member)
+        except objects.ObjectFormatError:
+            continue
+        for row in tables[record.name.lower()]:
+            explosions[row.explosion.member] += 1
+        ctl = member(record.slot_with_suffix("ctl"))
+        if ctl is not None:
+            controllers += 1
+            classes.update(k.type_id for k in control.parse(ctl).components)
+        blob = member(record.mesh)
+        if blob is None:
+            continue
+        try:
+            model = objmesh.parse(blob, record.mesh.member)
+        except (ValueError, struct.error):
+            continue
+        meshes += 1
+        hit = 0
+        for node in model.nodes:
+            index = node.hit_slot()
+            if index is None or index >= len(model.slots):
+                continue
+            s = model.slots[index]
+            faces = model.face_flags[s.first_triangle:s.first_triangle + s.triangle_count]
+            hit += sum(1 for f in faces if not f & objmesh.ROUND_SKIPS_FACE)
+        struck += hit > 0
+
+    # The control: the same query on the tags whose life is already established.
+    control_tags = {tag: sum(1 for r in library.by_tag(tag) if member(r.damage) is not None)
+                    for tag in ("BTLU", "EXTO", "FORT")}
+    points = [row.durability for table in tables.values() for row in table]
+    check("objects.rlb: every scenery record carries a damage table and a controller",
+          len(tables) == len(library.by_tag("STAT")) == controllers and not classes
+          and min(points) > 0,
+          f"{len(tables)} STAT records, each with a .ndp ({len(points)} node rows, "
+          f"{min(points):g}..{max(points):g} hit points, none 0) and a .ctl with no "
+          f"components at all: no armour, no shield.  Explosions "
+          f"{dict(explosions.most_common())}.  Control, the same query by tag: "
+          f"{control_tags} -- a unit part answers, a FORT record has no table")
+    check("objects.rlb: a round can strike most scenery",
+          0 < struck < meshes,
+          f"{struck} of {meshes} scenery meshes have a level-0 triangle a round strikes; "
+          f"on the other {meshes - struck} every triangle is flagged 4 or 32 and a round "
+          f"flies through (Control.dll:0x1001d9fa)")
+
+    # A placement's scale multiplies the life: the control system re-reads its mesh's
+    # scale every tick and rescales every node by the three factors multiplied
+    # (Control.dll:0x10007ac6 -> 0x10009ee0).
+    scaled = placed = 0
+    toughest = (0.0, "", 1.0)
+    for directory in gamedir.missions(game):
+        try:
+            data = mission.load(directory / "data.tma")
+        except (mission.MissionFormatError, FileNotFoundError):
+            continue
+        for obj in data.objects:
+            if not obj.is_static:
+                continue
+            table = tables.get(obj.path.lower())
+            if table is None:
+                continue
+            placed += 1
+            scaled += obj.placed_scale != 1.0
+            life = sum(row.durability for row in table) * obj.placed_scale ** 3
+            toughest = max(toughest, (life, obj.path.lower(), obj.placed_scale))
+    check("missions: scenery is placed at a scale, which cubes its hit points",
+          placed > 0 and scaled > placed // 4 and toughest[0] > 1e9,
+          f"{scaled} of {placed} placed trees and stones stand at a scale other than 1; "
+          f"the toughest is {toughest[1]} at {toughest[2]:g}, {toughest[0]:,.0f} hit "
+          f"points against its table's {toughest[0] / toughest[2] ** 3:,.0f}")
 
 
 def check_profiles(check, game: Path) -> None:
@@ -22165,7 +22281,7 @@ def run(game: Path) -> int:
         check_sky,
         check_render_state, check_blend_depth, check_minimap_agreement, check_arealmap,
         check_grid, check_missions, check_scale, check_objects, check_poses, check_lod,
-        check_damage, check_node_stages,
+        check_damage, check_node_stages, check_scenery_life,
         check_effects, check_effect_timing, check_sounds, check_music, check_actions,
         check_footprints,
         check_rsli,

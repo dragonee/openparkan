@@ -279,7 +279,10 @@ fn follow_socket(target: &mut Target, p: usize, rose: &[Vec<usize>]) {
 }
 
 /// A unit dead (`0x10011098`): out of the fight, and every part goes with node 0, which
-/// takes the unit's whole life so the walk takes every node below it (`0x10011105`).
+/// takes the unit's whole life so the walk takes every node below it (`0x10011105`). It is
+/// a vital node's death that makes this do work on the part it happened in: the hero and
+/// the two monster chassis die when a leg segment goes, and node 0 is then taken with it
+/// (docs/26, "What the loader takes from the mesh").
 ///
 /// STAND-IN: docs/26-damage.md#what-a-damaged-node-a-destroyed-part-and-a-dead-unit-draw--read-and-measured
 /// -- a unit's life system holds the nodes of all its models under one root; the engine
@@ -287,7 +290,7 @@ fn follow_socket(target: &mut Target, p: usize, rose: &[Vec<usize>]) {
 /// part's root has no parent to be knocked off from.
 fn kill(target: &mut Target) {
     target.alive = false;
-    for part in target.parts.iter_mut().skip(1) {
+    for part in target.parts.iter_mut() {
         let Some(life) = part.life.as_mut() else { continue };
         for root in 0..life.nodes.len() {
             if life.parents[root].is_none() {

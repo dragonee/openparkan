@@ -874,3 +874,52 @@ fn c02_m02s_hq_driven_by_the_hero_locks_its_winged_missiles_on_a_tower_and_bring
     }
     assert!(!play.battle.combat.targets[tower].alive, "the tower falls: {whole} -> {}", life(&play));
 }
+
+/// A tree and a stone are agents like any other: their `STAT` record names a `.ndp` and a
+/// `.ctl`, the agent loader gives them a control system and so a life system, and the
+/// control tick rescales every node's life by the placement scale's three factors
+/// multiplied (docs/26, "Vegetation and rock carry node life").
+#[test]
+#[ignore = "needs the game install"]
+fn mission_01s_trees_and_stones_carry_node_life_at_their_placement_scale_cubed() {
+    use parkan_formats::mission::{KIND_ROCK, KIND_VEGETATION};
+    use parkan_sim::combat::Event;
+
+    let (mut play, m) = mission_01_play();
+    let tick = 1000.0 / 60.0;
+    let target_of = |object: usize| play.battle.objects.iter().position(|&o| o == object).unwrap();
+    let maxima = |t: usize| {
+        play.battle.combat.targets[t].parts[0]
+            .life
+            .as_ref()
+            .map(|l| l.nodes.iter().map(|n| n.max).collect::<Vec<_>>())
+    };
+
+    let scenery: Vec<usize> =
+        (0..m.objects.len()).filter(|&i| matches!(m.objects[i].kind, KIND_VEGETATION | KIND_ROCK)).collect();
+    assert_eq!(scenery.len(), 22, "Mission 01 places 11 s_tree_04, 5 s_tree_29 and 6 stones");
+    assert!(scenery.iter().all(|&i| maxima(target_of(i)).is_some()), "every one of them has life");
+
+    // `s_stone_07` is one node of 500,000; object 3 stands at scale 20, so 8,000 times it.
+    let stone = target_of(3);
+    assert_eq!(m.objects[3].placed_scale(), 20.0);
+    assert_eq!(maxima(stone), Some(vec![500_000.0 * 8_000.0]));
+    // `s_tree_04` is a trunk of 3,000 and ten leaves of 1; object 15 stands at scale 3.
+    let tree = target_of(15);
+    assert_eq!(m.objects[15].placed_scale(), 3.0);
+    assert_eq!(maxima(tree), Some([81_000.0].into_iter().chain([27.0; 10]).collect::<Vec<_>>()));
+    // `s_tree_29` stands at 1: three nodes of 28,000, untouched by a scale.
+    assert_eq!(maxima(target_of(25)), Some(vec![28_000.0; 3]));
+
+    // Its controller's +92 is 5,000 ms on 79 of the 81 scenery records, and it is agent
+    // kind 10, not a building: node 0's death kills it and it is deleted five seconds on.
+    assert_eq!(play.battle.death_ms[tree], 5000.0);
+    play.battle.combat.targets[tree].parts[0].life.as_mut().unwrap().hit(0, 81_000.0);
+    let events = play.tick(tick, [0.0; 2]);
+    assert!(events.iter().any(|e| matches!(e, Event::Killed { target } if *target == tree)));
+    assert!(!play.battle.combat.targets[tree].alive && play.ground.solids[tree].faces.is_empty());
+    for _ in 0..(6 * 60) {
+        play.tick(tick, [0.0; 2]);
+    }
+    assert!(play.deleted[tree] && play.killed.contains(&15), "the felled tree is removed");
+}

@@ -17,10 +17,12 @@ Each node of a model has a life, built from its `.ndp` record
 ([07-objects.md](07-objects.md#ndp-is-a-damage-table-one-record-per-node)):
 
 - **Maximum** = the `.ndp` hit points × the object's **volume scale** (its three
-  scales multiplied, `+0x548`, `0x10009ee0`; 1 in every shipped mission, since
-  units and buildings are built without the placement's scale) × the
-  **level ratio** (`+0x660`, below). Changing either scale rescales every
-  node's life and maximum in proportion (`0x10009f90`).
+  scales multiplied, `+0x548`, `0x10009ee0`) × the **level ratio** (`+0x660`,
+  below). Changing either scale rescales every node's life and maximum in
+  proportion (`0x10009f90`). The volume scale is 1 on every unit and building,
+  which are built from their `.dat` with the placement's matrix alone, and the
+  placement's scale cubed on **vegetation and rock**, which are not
+  ([below](#vegetation-and-rock-carry-node-life--read-and-measured)).
 - **Damage** lowers a node's life, clamped at 0 (`0x10010f30`). A part's
   *condition* — the `0x100` bit on component values — is `life / max`.
 - **A node at 0 is destroyed.** A node that is destroyed, or steps up a damage
@@ -92,12 +94,29 @@ records are 0x130 bytes (`+0x1a8`): `+8` the mesh node, `+0x14` a flags word,
 **What the loader takes from the mesh** (`0x1000f940`).
 
 - The parent: query `0xd`, the mesh record's `+0x18` (`AniMesh.dll:0x1000523d`).
-- Status bits from query `0xe`, **the mesh node's own flags word**
-  (`AniMesh.dll:0x10005242`): `0x200` → status 1, a vital node
-  (`0x1000f9aa`); **`0x100` → status 2, a node that is never hidden**
-  (`0x1000f9bd`); `0x400` → 4 and `0x1` without `0x80` → 8, a node that copies
-  its parent's life fraction or its stage (`0x1000f9d0`, `0x1000f9e3`;
-  `0x1001130e`–`0x10011344`).
+- Status bits from query `0xe`, **the mesh node's own flags word**:
+  `0x200` → status 1, a vital node (`0x1000f9aa`, `test ah, 2`); **`0x100` →
+  status 2, a node that is never hidden** (`0x1000f9bd`); `0x400` → 4 and `0x1`
+  without `0x80` → 8, a node that copies its parent's life fraction or its stage
+  (`0x1000f9d0`, `0x1000f9e3`; `0x1001130e`–`0x10011344`).
+
+  **That query `0xe` is the mesh word, and not the runtime record's own, is
+  read.** `AniMesh.dll:0x100051f0` is the node query: it strides the 0x130-byte
+  records from `+0x1a8` and dispatches ids `0xa`–`0x10` through the table at
+  `0x100052fc`, anything else answering nothing (`0x100052f5`). Id `0xa` answers
+  the **runtime** record's flags word, its `+0x14` (`0x10005221`) — the word
+  `IAnimation` slot 8 writes, whose bit 1 is *hidden* and bit 4 *flying*
+  ([below](#what-a-damaged-node-a-destroyed-part-and-a-dead-unit-draw--read-and-measured)).
+  Id `0xe` (`0x10005242`) is a different word: it takes the pointer at the
+  record's `+0x12c`, dereferences it, indexes it by the record's `+8` at a
+  **stride of 38 bytes** and reads the `uint16` at offset 0, zero-extended —
+  the mesh's stream-1 node record and its first field
+  ([07-objects.md](07-objects.md#nodes-slots-and-levels-of-detail)). Ids `0xd`,
+  `0xf` and `0x10` are the parent, the area and the volume, as above. The four
+  bits the loader tests settle it from the other side: bit 0 of the mesh word is
+  the documented *interior* bit, measured on 1564 sub-objects, while bit 0 of
+  the runtime word is *hidden*, which nothing is at load — read that way status
+  8 could never be set on anything.
 - **The stage count**: `IAnimation` slot 18 (`AniMesh.dll:0x10005840`) counts
   variants 0, 1 and 2 in a row whose level-0 slot exists; none gives 1
   (`0x1000fa0b`).
@@ -175,6 +194,11 @@ and the agent is not a building (`0x100110ab`) nor carries `+0x104` bit
 - node 0 takes a hit of minus the unit's total life, and its stage runs
   (`0x10011105`–`0x1001110f`).
 
+That last step is what a **vital** node's death buys: node 0 is taken with it,
+and the walk from node 0 then takes everything else. The vital bit is not one of
+the `0x1ce` that bar a knock-off, so the vital node itself is offered to the
+knock-off like any other destroyed part.
+
 The control tick compares the death time with the clock and, once it has
 passed, calls `World3D.dll!KillGameObject` with the object's id
 (`0x1000c93f`–`0x1000c977`, `0x1000d080`–`0x1000d0af`). That looks the object
@@ -191,6 +215,31 @@ building is only marked, and its never-hidden nodes stay as the shell
   1).
 - **Never hidden** (mesh node flag `0x100`) on 60 nodes, all on the 33
   `bu_*` building records: the shells.
+- **Vital** (mesh node flag `0x200`) on **90 nodes of 1845**, on **9 of the 435
+  meshes**, in three archives, and it is a coherent 90: every one of them is a
+  geometry-bearing segment of an **articulated limb or body chain**.
+
+  | mesh | vital / nodes | which |
+  |---|---:|---|
+  | `R_H_02` (the hero chassis) | 9 / 10 | the body `B_Dn` and both legs, `LL_Up`…`FL_Dn`; only the empty socket `Base_TL` is not |
+  | `R_B_05` (the Transformer) | 12 / 32 | the two leg spines `LUU`…`LDD`, `RUU`…`RDD`; not node 0, the body panels or the foot pads |
+  | `R_B_07` (the L-7f monster) | 4 / 11 | the body chain `Mnst1`…`Mnst4`; not the shells or the turbines |
+  | `A_L_01`, `A_L_02`, `A_L_04`, `A_L_05` | 13/16, 7/19, 17/27, 17/27 | body, neck, head, tail, legs and wings; not the last segment of a tail or wing |
+  | `o_tur_ha_02` (the hero turret) | 8 / 36 | its two arm segments each side and the body `B_Md`, `B_Up`; not a gun pod, the radar, the deflector or an empty pivot |
+  | `o_tur_la_06` | 3 / 10 | `LTdu`, `LTdl`, `LTdr` |
+
+  No building carries the bit — 0 of the 273 `fortif.rlb` nodes — and neither
+  does any wheeled or tracked chassis. The bit is disjoint from every other one
+  the loader reads: 0 of the 90 also carry `0x100`, `0x400` or `0x1`. It is not
+  a variant of the unexplained `0x10`, which is broad where this is narrow —
+  `0x10` is on **861 of the 1845** nodes and in all nine archives, `0x200` on
+  90 in three, and they coincide on 8, each of them the leaf of a flagged chain
+  (`0x210`). **What the flag buys**: the hero's 2,881 hit points over ten nodes,
+  `a_l_05`'s 130,010 over 27 or the L-7f's 1,050,001 over eleven need not be
+  chewed through node by node — shoot any one limb off and the thing is
+  finished. *Not established*: why the
+  bit falls on these nine models and not on the other walkers, whose legs
+  (`R_B_01`, `R_M_01`, `R_L_01`) carry it nowhere.
 - **The controller's `+92`**: 0 on 333 records, then 5000 on 118, 1000 on 42,
   2000 on 22, 3000 on 21, 11000 on 3. On the chassis: 2000 on 20, 5000 on 2,
   3000 and 1000 on one each.
@@ -218,6 +267,76 @@ building is only marked, and its never-hidden nodes stay as the shell
 - The base, node 0, reaching 0 hides it and every part still standing, each
   with its explosion. The unit is deleted three seconds later on `l_targ`,
   five on `M_targ`.
+
+## Vegetation and rock carry node life — *read*, and *measured*
+
+A tree and a stone are agents like any other, and they take damage.
+
+**Read.** `iron3d.dll` builds a placed tree or stone by handing
+`World3D`'s `AddNewObjectToGame` the `objects.rlb` library, the record name and
+the **type 10** (`0x100a4331`–`0x100a4334`,
+[04-missions.md](04-missions.md#the-scale)). The agent that comes out is built
+by the same code as a robot's (`AniMesh.dll:0x10003100`–`0x100033d1`): the
+`STAT` tag makes its collision kind 10 (`0x100031be`), it is given the
+sub-object at `+0x6f4` that only kinds 3, 4 and 10 get
+(`0x100031cf`–`0x100031e4`), and then — before any
+branch on the kind — its **control system is loaded**
+(`0x100032e7`, `Control.dll!LoadControlSystem`) and its **`ILifeSystem`,
+interface `0x16`, is queried out of it and kept at `+0x160` (`0x1000330d`).
+Only the later branch, `kind − 3` then `− 1` (`0x100033d1`), is a building's or
+a unit's alone. So a tree gets the whole of [Hit points](#hit-points--read-and-measured)
+above.
+
+The life loader says so itself. Its last act is to write the object's total
+maximum to `+0x58c` and `+0x590` and a **threshold** to `+0x594`: the total
+times **0.3 for an agent of kind 10**, times **0.2 for anything else**
+(`0x1000fa82`–`0x1000faaf`, the two constants written once by
+`0x100063c5`/`0x100063cf`). A branch on kind 10 inside the life loader is
+reachable only if scenery has a life system. What the threshold does is the
+wreck's burn: on the control tick, once the total falls below it, an effect
+`+0x4f4` starts, the mark moves to the current total, and the object takes
+0.1 of that mark spread over its nodes through the repair's own update
+(`0x10012bdc`–`0x10012c37`); the effect `+0x4f8` stops again if it climbs back
+(`0x10012b0a`–`0x10012b20`). A tree is given the longer fuse.
+
+Nothing else treats scenery apart: its agent kind is 10, not 3, so node 0's
+death **kills and deletes** it rather than leaving a shell.
+
+**Measured.** All **81** `STAT` records in `objects.rlb` name a `.ndp` and a
+`.ctl`; the tables hold **123 node rows**, none of them 0.
+
+| | records | nodes | hit points | explosion |
+|---|---:|---:|---|---|
+| stones `s_stone_*` | 14 | 1 each | 500,000 or 1,000,000 | `explode_stone` |
+| trees `s_tree_*` | 66 | 1 to 11 | 1 (a leaf) to 1,500,000 | `explode_tree`, `explode_tree_30`, `explode_leaf` |
+| `mtcheck` | 1 | 1 | 1,000,000 | `explode_rbr_l` |
+
+`s_tree_04` is the clearest: a trunk of 3,000 with ten leaves of 1 apiece, each
+leaf playing `explode_leaf`. The three `s_tree_30/31/32` are 100 hit points, so at
+scale 1 a single light bullet's 150 fells one. **The control**, the same query by tag: 63 of 63
+`BTLU` units and 146 of 146 `EXTO` parts name a table that reads, and **0 of 34**
+`FORT` records do — so the query discriminates and the scenery's 81 are not an
+artefact of it. Every scenery `.ctl` has **no components at all**: no armour,
+no shield, nothing to draw power. Their `+92` is 5,000 ms on 79 of the 81, so a
+felled tree lies for five seconds before it is removed.
+
+**A round can strike it.** 74 of the 81 scenery meshes carry a level-0 triangle
+a round does not pass through; on the other 7 — `s_tree_33`, `34`, `45`, `46`,
+`47`, `48` and `mtcheck` — every level-0 triangle is flagged 4 or 32 and a round
+flies through the whole model ([the hit test](#the-hit-test--read-and-measured)).
+Of the 71 records the shipped missions place, 66 can be struck, covering 372 of
+the 401 placements.
+
+**And a scaled tree really is tougher.** Only vegetation and rock are built at
+their placement's scale ([04-missions.md](04-missions.md#the-scale)), and the
+control system re-reads its mesh's scale on every tick and rescales every node's
+life and maximum by the three factors multiplied (`0x10007ac6` → `0x10009ee0`).
+216 of the 401 placed trees and stones stand at a scale other than 1, from 0.2
+to 21, so the cube runs from 0.008 to 9,261: Mission 01's `s_tree_04` at 3 has a
+trunk of 81,000 rather than 3,000, its `s_tree_41` at 0.4 is 64 hit points
+rather than 1,000, and Mission 02's `s_stone_10` at 21 holds
+**4,630,500,000**. A big rock is scenery in the arithmetic as well as the
+fiction.
 
 ## The difficulty ratio — *read*, and *measured*
 
@@ -296,6 +415,58 @@ sphere has radius *r* and centre at distance *d* from a blast of radius *R*:
 | `d ≥ R + r`, or a node sphere of radius 0 | 0 |
 | one sphere strictly inside the other, `d < R − r` or `d < r − R` | the whole blast |
 | otherwise | `damage × ((R + r − d) / 2R)³` |
+
+### What nothing reads in an `.exp` — *read*, as a search
+
+An `.exp` is 792 bytes on all 144 (*measured*), and every one of them is
+accounted for: a 0x18-byte header — kind, damage, radius, **two floats**,
+placement word — and twelve 64-byte name pairs, `0x18 + 12 × 64 = 792` exactly.
+The two floats at `+0xc` and `+0x10` are **1.0 on all 144**, and **nothing in
+the shipped modules reads them**. The search is exhaustive rather than merely
+unlucky, and it runs like this:
+
+1. **The bytes only ever reach one pointer.** `.exp` records live in one cache
+   in `Control.dll`, the object at `0x10042750`. The index-to-record getter
+   `0x1000a200` is called three times in the module, and the other two use the
+   `.ndp` cache at `0x10042700` (`0x10008bc0`, `0x10008c56` — 0x4c-byte records,
+   which is the `.ndp` stride). So `0x100113db` is the only fetch of an `.exp`,
+   and no other module can reach one: `Control.dll` exports `CreateCollManager`,
+   `CreateCollObject`, `InitializeSettings`, `LoadControlSystem` and
+   `LoadPhysicalModel`, and nothing else, and no module holds the string `.exp`
+   at all — the record is found by its `objects.rlb` slot name.
+2. **What the fetcher reads.** Tracking the returned pointer through the damage
+   stage (`0x100113e0`–`0x10011900`), it is read at `+0x14` (`0x100115d6`, the
+   placement word), `+8` (`0x10011749`, `0x1001175c`, the radius), `+4`
+   (`0x100117a7`, the damage) and `+0x18`/`+0x38` (`0x100117fa`–`0x10011803`,
+   the name pairs) — and nowhere else. It is then stored **at offset 0 of the
+   hit record** by the hit's constructor (`0x100129f0`).
+3. **Where a hit goes.** A hit is 0x48 bytes and lives in the target's own queue
+   at `+0x57c`, count `+0x580`. Every access to that queue in the module is one
+   function, the queue walk `0x10012ce0` (`0x10012d17`, `0x10012de0`,
+   `0x10012eb2`, `0x10013007`, `0x100130b8`, `0x100130d6`), plus the constructor
+   at `0x1000710f` and the destructor at `0x100075f5`. The one interface entry
+   that takes a hit is `ILifeSystem` slot 8, `0x1000ebc0` (vtable `0x1003b59c`).
+4. **What they read of it.** The hit's `+0` is dereferenced in exactly four
+   functions — the blast-centre average `0x10012d24`, the queue walk
+   `0x10012f1f`, slot 8 `0x1000ec81` and the blast `0x10010093` / `0x100100ed` —
+   and every one of them reads the record's **first dword only**, the kind. `0x1000ff00`, the sector pick, reads the hit's `+0xc` and `+0x10`
+   (its object and its node) and never touches the `.exp` at all. The blast's
+   `fadd [eax+4]` and `fmul [eax+8]` at `0x10010235`/`0x10010226` are the
+   **armour's** linear and square factors, not the explosion's.
+
+**The control**: the same enumeration finds every other field. It finds the
+kind at the four hit sites, the damage, the radius and the placement word at the
+addresses in step 2, and all twelve names — four of the six scalars and the
+whole tail. A search that comes back with that and misses two adjacent floats
+between the radius and the placement word is not blind to them; they are not
+read.
+
+**What they are for** is a *guess* the format supports and the code does not
+settle. They sit between the two magnitudes a hit uses — the damage and the
+radius — and the word that steers the effect, and 1.0 on every record is what an
+editor writes for a factor nobody touched. A pair of unit multipliers on the
+damage and the radius is the reading the layout suggests; a second, unshipped
+pair of magnitudes is as consistent with it. Neither is established.
 
 ## The hit test — *read*, and *measured*
 
@@ -772,8 +943,12 @@ shipped code that raises a node's life:
      set invulnerability and life (what calls it is not traced; mission
      properties, by the look of it — *guess*).
 3. **The other callers of the node update** (`0x10010ba0`) all pass damage:
-   collision (`0x1000d212`, `0x1000d2f9`), the ground (`0x10012a7e`) and
-   vital nodes (`0x10012c37`). The ground's loss is shared: every node gives
+   collision (`0x1000d212`, `0x1000d2f9`), the ground (`0x10012a7e`) and the
+   **wreck's burn** (`0x10012c37`) — an object whose total life has fallen
+   below the mark at `+0x594` loses 0.1 of that mark, and the mark follows it
+   down ([Vegetation and rock](#vegetation-and-rock-carry-node-life--read-and-measured),
+   where the mark's 0.3 for scenery against 0.2 for everything else is what
+   settles that a tree has a life system at all). The ground's loss is shared: every node gives
    up the same share of its own life, and none is destroyed until all of them
    are ([24-motion.md](24-motion.md#water-and-lava-beds-kill--read-and-measured)).
 4. **A hit cannot heal**: the armoured damage is clamped at 0
@@ -828,13 +1003,8 @@ shield, battery and ammunition (`Behavior.dll:0x10018100`, `0x10019372`,
   query `0x1100`, a repair system's value 0 × condition
   ([Repair](#repair-a-units-own-repair-unit-switched-on-and-off--read-and-measured)).
 - The two 1.0 floats of an `.exp` (`+0xc`, `+0x10`; 1.0 on all 144,
-  *measured*). **No reader was found**, as a search: the only place an `.exp`
-  record is fetched (`Control.dll:0x100113db`) reads its `+4`, `+8`, `+0x14`
-  and names and not these, and the hits it builds read only its kind
-  (`0x1000ebc0`, `0x10012ce0`, `0x10010030`, `0x1000ff00`). The next place to
-  look is anything a hit record is handed to beyond those four. Its slots 1–11
-  are by ground surface
-  ([11-effects.md](11-effects.md#what-an-explosion-plays--read-and-measured)).
+  *measured*). **Nothing reads them**, and the search is now finished rather
+  than abandoned — see [What nothing reads in an `.exp`](#what-nothing-reads-in-an-exp--read-as-a-search).
 - ~~What agent kind 3 is.~~ Answered: a building. What becomes of one whose
   node 0 is destroyed is narrowed: its behaviour stops for good and the object
   stays ([Hit points](#hit-points--read-and-measured)); what `iron3d.dll` does
@@ -856,4 +1026,21 @@ shield, battery and ammunition (`Behavior.dll:0x10018100`, `0x10019372`,
 - Who sends an agent message 6 with `0x16`, which deletes it through
   `KillGameObject` from `AniMesh.dll` (`0x10001602`).
 - What the mesh node flag `0x10` means: it is on `ASd1`, `ASd3` and every part
-  of `r_h_03`, and the life loader does not read it.
+  of `r_h_03`, and the life loader does not read it. It is a **broad** mark —
+  861 of the 1845 mesh nodes, in all nine archives (*measured*) — where the
+  vital `0x200` is narrow, so the two are not the same kind of thing; they
+  coincide on 8 nodes, each of them the leaf of a vital chain.
+- ~~Which node flag makes a node vital, and whether AniMesh query `0xe` is the
+  mesh node's flags word.~~ Answered: query `0xe` is the mesh node's stream-1
+  flags word, read at a 38-byte stride (`AniMesh.dll:0x10005242`), and the bit
+  is `0x200` (`Control.dll:0x1000f9aa`), on 90 of the 1845 nodes
+  ([What the loader takes from the mesh](#what-a-damaged-node-a-destroyed-part-and-a-dead-unit-draw--read-and-measured)).
+  What is **not** established is why it falls on the hero chassis, the
+  Transformer, the L-7f, the four animals and two turrets and on no other
+  walker's legs.
+- ~~Whether vegetation and rock carry node life.~~ Answered: they do, through
+  the same control system as a robot, and the placement's scale cubes it
+  ([Vegetation and rock](#vegetation-and-rock-carry-node-life--read-and-measured)).
+  What the low-life mark at `+0x594` is worth — the effects `+0x4f4` and
+  `+0x4f8` it starts and stops, and whether the burn is per tick or per second —
+  is read only in outline.
