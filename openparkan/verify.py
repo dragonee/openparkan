@@ -19012,6 +19012,61 @@ def check_outcome(check, game: Path) -> None:
           f"only_briefing true on {', '.join(true)}; false on "
           f"{sum(v == 'false' for v in flagged.values())}; absent from {', '.join(absent)}")
 
+    # docs/34, "Ambient sound": every mission names one type-5 theme and a type-4 list of
+    # variations, and no mission mixes DEFAULT_ with DAY_/NIGHT_.
+    themes, kinds, shapes, counts = Counter(), Counter(), [], []
+    for d in gamedir.missions(game):
+        cfg = d / "mission.cfg"
+        found = mission.load_cfg(cfg) if cfg.exists() else {}
+        loop = found.get("ambient_music_loop", {})
+        var = found.get("ambient_music_variation", {})
+        kinds[(loop.get("type"), var.get("type"))] += 1
+        theme = loop.get("THEME")
+        if theme:
+            themes[theme.strip('"')] += 1
+        named = {k: v for k, v in var.items()
+                 if k not in ("desc", "library", "libtype", "type")}
+        by_prefix = Counter(k.split("VARIATION")[0] for k in named)
+        shapes.append(tuple(sorted(by_prefix)))
+        counts.append(len(named))
+    total = sum(counts)
+    mixed = [s for s in shapes if "DEFAULT_" in s and len(s) > 1]
+    day_night = sum(1 for s in shapes if "DAY_" in s or "NIGHT_" in s)
+    default = sum(1 for s in shapes if s == ("DEFAULT_",))
+    check("missions: every mission's ambient theme is type 5 and its variations type 4",
+          kinds == {("5", "4"): len(counts)} and not mixed and min(counts) > 0,
+          f"all {len(counts)} missions name a type-5 ambient_music_loop with one THEME and a "
+          f"type-4 ambient_music_variation; {total} variations between them, {min(counts)} to "
+          f"{max(counts)} each; {day_night} use DAY_/NIGHT_ and {default} DEFAULT_, none both; "
+          f"{len(themes)} themes serve them all -- "
+          f"{', '.join(f'{k} on {v}' for k, v in sorted(themes.items()))}")
+
+    # docs/34, "MISSIONS/dispatcher.ini": the shell's lists are the directory numbering,
+    # named by each directory's own descr.
+    root = game / "MISSIONS"
+    groups = sorted(d for d in (root / "CAMPAIGN").iterdir() if d.is_dir())
+    per_group = [sorted(m for m in g.iterdir() if m.is_dir()) for g in groups]
+    numbered = all(g.name == f"CAMPAIGN.{i:02d}" for i, g in enumerate(groups)) and all(
+        m.name == f"Mission.{i:02d}" for ms in per_group for i, m in enumerate(ms, 1))
+    flat = {"single": sorted(d for d in root.iterdir() if d.name.lower().startswith("single.")),
+            "multi": sorted(d for d in root.iterdir() if d.name.lower().startswith("multi."))}
+    numbered = numbered and all(
+        d.name.lower() == f"{prefix}.{i:02d}" for prefix, ds in flat.items()
+        for i, d in enumerate(ds, 1))
+    walked = groups + [m for ms in per_group for m in ms] + flat["single"] + flat["multi"]
+    described = [d for d in walked if (d / "descr").exists()
+                 and len((d / "descr").read_bytes().splitlines()) <= 1
+                 and (d / "descr").read_bytes().strip()]
+    check("missions: the campaign is the directory numbering, each row named by its descr",
+          numbered and len(described) == len(walked),
+          f"{len(groups)} campaigns CAMPAIGN.00..{len(groups) - 1:02d} of "
+          f"{', '.join(str(len(m)) for m in per_group)} missions, numbered Mission.01 up with no "
+          f"gaps, beside Single.01..{len(flat['single']):02d} and "
+          f"Multi.01..{len(flat['multi']):02d}; all {len(walked)} directories the shell's two "
+          f"enumerators walk carry a one-line descr -- "
+          f"{(groups[0] / 'descr').read_text().strip()}, "
+          f"{(per_group[0][0] / 'descr').read_text().strip()}")
+
 
 #: ``ui/compaund.cfg``'s pieces as ``iron3d.dll:0x100989b0`` files them, by slot (the
 #: offset into the skin over 0x8c).  Slot 13 is never filled; the radio buttons are never

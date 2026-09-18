@@ -66,9 +66,20 @@ at all, and that is the interesting one.
 Nothing uses 3.
 
 Types 4 and 5 both name `sounds.lib`, and the **role** separates them: all 29
-type-5 descriptors are `ambient_music_loop`, the mission's looping theme, and
-type 4 is every one-shot beside it. That reads as *streamed against sampled* —
-a **guess**; what is measured is only that the split is exact.
+type-5 descriptors are `ambient_music_loop`, the mission's theme, and type 4 is
+every one-shot beside it — including all 29 `ambient_music_variation`
+descriptors, so the theme's own variations are type 4 (*measured*).
+
+**The loader does not tell 4 from 5** — *read*. `services.dll`'s descriptor
+loader switches on `type` − 1 through the table at `0x1000a17c` (`0x100096e1`),
+and types **4, 5 and 7 share one case** (`0x100097ff`), which builds a
+0x20-byte resource of kind 3 with vtable `0x1003a498`. The control is that the
+switch does discriminate: type 1 builds kind 1 (`0x10009702`), type 2 kind 2 in
+0x2c bytes (`0x10009753`), type 3 kind 4 (`0x100097b4`), and type 6 falls to the
+default path. So *streamed against sampled* is not what the pair means — an
+earlier **guess** here, now withdrawn — and whatever makes the theme loop, it is
+not the `type` ([34-progression.md](34-progression.md#ambient-sound--read-and-measured)).
+Nothing uses 7 either, so what the engine would accept there is not read.
 
 For the DLL the number is not the game's own. **6 is Win32 `RT_STRING`**, so a
 descriptor over a PE states the Win32 resource type directly.

@@ -584,8 +584,18 @@ both in the training campaign — 22 in `CAMPAIGN.00/Mission.03`, 100 in
 - **The first twelve bytes of the briefing view's parameter block**, which
   `0x100364a0` does not write before handing it over, and the names of the
   near and far planes (a *guess*, as for the unit camera).
-- **Whether the ambient variations play** during the briefing. The game
-  frame's random 10–20 s sound timer (`0x1005eb44`) is not gated on state 5,
-  but what it plays was not followed, and the recording does not settle it.
+- ~~**Whether the ambient variations play** during the briefing.~~ Answered:
+  they do. The timer at `0x1005eb44` plays `mission.cfg`'s
+  `ambient_music_variation` names, gathered in the mission's set-up
+  (`0x1005f650`, called from `0x1005e091`) before the briefing starts, one
+  every 10 + `rand()` % 10 s from the first frame on
+  ([34-progression.md](34-progression.md#ambient-sound--read-and-measured)).
+  The only gates above it in the frame are the pause byte `+0xe8` and the state
+  word at 3 (`0x1005ea7f`, `0x1005ea8d`), neither of which a briefing sets. The
+  recording does not contradict it: its near-silent stretch is 5 s long and the
+  variations are 10 to 19 s apart, so one need not fall in it.
+- **Whether a variation is audible over the briefing's voices.** They are
+  chirps and frog calls a few dB up from nothing, and the recording was not
+  measured for them.
 
 Everything above is re-derived by `uv run openparkan verify`.

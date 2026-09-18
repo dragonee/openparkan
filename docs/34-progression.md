@@ -63,8 +63,31 @@ logical ids per tactical areal.
   - The takt fires on a randomised timer: next = now + 31 × 64 +
     rand8 × 46 × 64 ÷ 256 (the words at `0x100039c2`; the timer is
     `0x1004c550`).
-  - In milliseconds that is 1.98 to 4.92 s between reports. That the takt's
-    clock is in milliseconds is a *guess*.
+  - **The clock is milliseconds** — *read*. The takt's argument is the
+    parameter of `MBehaviour::SendMsg`'s message 1, which the game names
+    `NEW_GAME_TAKT`: `Terrain.dll`'s atmosphere handles the same message with
+    the same parameter (`CAtmosphere::SendMsg(), NEW_GAME_TAKT`,
+    `0x10070058` tests the id against 1), and spends it against a span it
+    builds as `CAtmData::GetTimeDiffInSec()` **× 1000** (`0x10070134`,
+    `0x100701d2`). It is the world's *game* clock, not the wall's: `World3D.dll`
+    exports `PauseGameTime` and `ResumeGameTime`, and `Behavior.dll` imports no
+    clock at all. The chain is `AniMesh.dll:0x100013cf`, which passes its own
+    message 1's parameter on to the behaviour unchanged.
+  - So a takt comes **1984 to 4916 ms** after the last, 1.98 to 4.92 s (the
+    share is truncated, `sar` by 8).
+  - **`rand8` is the low byte of `Behavior.dll`'s own `rand()`** — *read*. The
+    timer draws it at `0x1004ce3c`, the CRT's linear generator
+    (`seed = seed × 0x343fd + 0x269ec3`, the answer `seed >> 16` held to 15
+    bits), masked to 8 bits at `0x1004c574`. Its state at `0x10063c1c` is **1**
+    in the shipped file and the only other instruction that touches it is the
+    generator's own store, so nothing ever calls `srand` on it: every behaviour
+    timer in the module draws from one deterministic stream, the same on every
+    run.
+  - **A unit's first takt runs at once** — *read*. The timer record's next-run
+    dword starts at 0 (`0x100039bc`, beside the 31 and the 46), and
+    `0x1004c550` fires on a 0 as well as on a time already past. So the first
+    object takt a unit is given reports, and only the waits after it are
+    spaced.
 - **So the list lags** (*derived*).
   - A unit is re-placed at most every 2 to 5 s, and only once it has moved
     5 m or crossed into another areal.
@@ -120,11 +143,41 @@ resolved to its pool constant or the literal its handler last wrote to it:
   (Single.01) and `scr_pl_2` (Single.02) pair it with `CLASS_ROBOT`, for an
   objective that wants the enemy gone entirely. A count that leaves the
   buildings out completes the four bonus objectives as the mission starts.
-- **How units leave** on destruction or capture is not read. A unit that is
-  captured changes its SuperAI ([27-ownership.md](27-ownership.md)).
+- **Units never leave** — *read*, as a search, and this is the surprise. The
+  list is an `MArray` (the class names itself in its own bounds assert,
+  `MArray<T>(%d)::operator[%d]` at `0x10038cd0`). `ai.dll` names the offset
+  `0x8c` in 135 instructions; of the calls that follow one straight away, **99
+  are `operator[]` (`0x10002e20`) and 23 are the count (`0x10002970`)**, and the
+  rest are slot 4's own two. The one insert (`0x10002da0`, add-if-absent) has
+  exactly **two** call sites, slot 4's events 1 and 2, and there is no erase and
+  no clear. The only write of −1 to a
+  record's id is the record constructor's *object not found* path
+  (`0x10003db9`), and slot 4 then refuses to insert such a record at all
+  (`0x10001913`, `0x10001a1b`). Nothing afterwards writes a record's `+4`: a
+  sweep of every store to a `+4` within twelve instructions of an
+  `operator[]` on any of these lists returns nothing.
+  - **The control.** The same sweep does find the *other* field of the same
+    records being cleared — the task slot `+0x14` is set to −1 at `0x1000511a`
+    and `0x1000e0be` and to `0xfffe` at `0x10002568` and `0x1000e0d9` — so the
+    search can see a field of these records go. It sees nothing for the id.
+- **A captured object is counted twice** — *read*. Changing an object's clan
+  (`iron3d.dll:0x10032fd0`) looks up the **new** clan's SuperAI in the level's
+  clan table (`+0x774`) and files the object on it as slot 4's event 2
+  (`0x10032ffa`); the old clan is told nothing. So a captured warbot is on both
+  clans' lists, and `fn31` counts it for both
+  ([27-ownership.md](27-ownership.md)).
+- **What follows.** `fn31` and `fn34` count every object a clan was ever told
+  about, alive or not. `scr_pl_1`'s (Single.01) `Mission` handler completes an
+  objective on `fn31(1, CLASS_ROBOT) == 0` and *un*completes it with
+  `OBJECTIVE_PROGRESS` when the count rises again — which reads as an author
+  expecting a falling count. On this reading it never falls, so that objective
+  and the `CLASS_BUILDING` one beside it never complete, and the four campaign
+  missions' bonus objectives do not either. Whether the shipped game really
+  behaves that way has not been watched; the reading is of the code alone.
 - **What Mission 01 needs** (*derived* from the objectives' text): destroyed
   and captured robots leave their old clan's count, and a captured one joins
-  the player's.
+  the player's. That is what the engine does, against the reading above, so
+  that those objectives stay reachable ([engine/README](../engine/README.md)).
 
 *Measured*, on Mission 01:
 
@@ -1147,6 +1200,109 @@ The block (`iron_3d.exe:0x406550`) starts as mode 0, `+0x148` −1, `+0x14c` 1,
     screen, 21 (`0x10012ce0`, `"load_game"`, `"save/"`);
   - **any other code:** the main menu stays.
 
+### The two branches, and what leads to the next mission — *read*
+
+**Neither branch starts anything.** Both copy the parameter block's mission
+path (`+4`) and read two-digit numbers out of it with `strrchr('.')`:
+
+- the **campaign branch** (`0x10009c10`) takes the digits after the last dot,
+  the mission's, less one (`0x10009c68`: `d₁×10 + d₂ − 0x211`), then cuts the
+  string at that dot and takes the digits after the dot before it, the
+  campaign's, as they stand (`0x10009c86`, `− 0x210`);
+- the **single-mission branch** (`0x10009f40`) takes the mission's digits less
+  one and nothing else (`0x10009f92`).
+
+Those are exactly the **list positions of what was just played** — the campaign
+list counts from `CAMPAIGN.00` and the mission list from `Mission.01` (below).
+Neither adds one, and neither writes the parameter block. Each then posts shell
+events (`0x1000aa10` builds one: a type, an integer code and a string) to the
+screen the shell's `+0x54` names, which case 2 has just set to 10, the main
+menu (`0x10009a76`); the campaign branch posts three, the last carrying the
+campaign number and the mission index, the single branch one. **So what leads
+to the next mission is the player**: the shell puts them back in the menus on
+the row they just finished, and the win written to `[COMPLETE]` is what opens
+the row below it.
+
+### `MISSIONS/dispatcher.ini`, and how the lists are built — *read*, and *measured*
+
+The file is **not an order**. The order is the directory numbering, walked at
+the moment a list is opened:
+
+- **campaigns** (`0x100227a0`): `"%s%02d"` on `missions/campaign/campaign.`
+  from **0** upwards, stopping at the first index whose `<path>/descr` will not
+  open;
+- **missions** (`0x10022220`): `"%s%02d/"` on that campaign's path + `/mission.`
+  (`0x100229b0`), or on `missions/single.` (`0x10028f95`), from **1** upwards,
+  stopping the same way.
+
+Each entry's name is the **first line of its `descr`**, and each record (0x1c
+bytes) carries two bytes: *complete* at `+0x18` and *available* at `+0x19`.
+
+- **Complete** is `[COMPLETE]`'s value for the entry's own path, flattened to a
+  key, and is only looked up while every earlier entry was complete
+  (`0x100223ca`, `0x1002245b`, `0x10022640`). A campaign is complete when every
+  one of its missions is (`0x10022998`–`0x10022a3b`).
+- **Available** is the entry before it being complete, with the first entry
+  starting available (`0x100227d5`, `0x1002225f`; stored at `0x10022b3a`,
+  `0x10022598`).
+- The list control greys an unavailable row when its caller asks it to
+  (`0x1001dd39`). The campaign screen asks (`0x1000364e`, `0x100038ba`); the
+  single-mission screen does not (`0x10028fab`), so both single missions are
+  always open.
+- **`[COMMON] ALL_AVAILABLE`.** The same object reads that key from the same
+  file at construction (`0x10022195`, `GetPrivateProfileStringA` with
+  `"__default__"`); a non-zero integer there sets its `+0x24` (`0x100221fe`),
+  and every entry is then taken as complete without consulting `[COMPLETE]`
+  (`0x1002242d`, `0x10022998`) — so every campaign and mission is unlocked.
+
+*Measured*: the install's `dispatcher.ini` is 935 bytes, one `[COMPLETE]`
+section, 21 keys, every value `1` — `missions_single_02_` and all 20 campaign
+missions; no `[COMMON]` section, so `ALL_AVAILABLE` is absent and its default
+applies ([22-settings.md](22-settings.md#iron_3dini-and-dispatcherini--the-players-not-the-games)).
+The install holds 6 campaign directories, `CAMPAIGN.00` to `CAMPAIGN.05`, with
+4, 4, 4, 4, 2 and 2 missions, numbered `Mission.01` upwards with no gaps,
+beside `Single.01`–`02` and `Multi.01`–`06`; all **34** directories the
+enumerators walk — 6 campaign groups, their 20 missions, the 6 multiplayer maps
+and the 2 single missions — carry a one-line `descr`: *TARA. THE HOME BASE*, *Line of Fire*,
+*Two strongholds (2 clans)* and so on. So the shipped tree walks exactly as the
+two enumerators expect.
+
+### The parameter block's modes — *read*
+
+The game turns the block's mode word (`+0`) into three bytes of its own in one
+place (`0x1005c748`–`0x1005c766`):
+
+| byte | set when the mode is | what it means |
+|---|---:|---|
+| `+0xe4` | 2 | a network game |
+| `+0xe5` | 3 | the auto-demo |
+| `+0xe6` | 4 | the training campaign |
+
+- **Mode 3** is the demo: with `+0xe5` set the loop overwrites the block's
+  mission path with `missions\autodemo.00\` (`0x1005dde3`) and Esc exits at
+  once, before the outcome is even looked at (`0x10070e03`).
+- **Mode 4** is `CAMPAIGN.00`. The campaign screen writes the mode as it starts
+  a mission: **4** for the campaign at list position 0 and **1** for any other
+  (`0x1000386e`–`0x1000387c`, the `neg`/`sbb` idiom). The single-mission screen
+  writes 1 (`0x10028f42`). That is why the shell's case 2 accepts code 1 in
+  mode 1 *or* 4: a training mission and a campaign mission come back the same
+  way.
+
+### Who sends the game message 3 — *read*
+
+The game hands `0x1005fa50` to `World3D` as it creates the world
+(`0x1005ca5a`), and World3D keeps it at `0x1013b59c`. Message 3 is sent from
+that module's network layer, always as `cb(0, 3)` and always latched by a flag
+at `0x10795164` so it is sent once:
+
+- when DirectPlay's system queue delivers `DPSYS_SESSIONLOST`, `0x31`
+  (`0x1000986e`, `0x10009892`);
+- when a send or receive fails (`0x100077c2`, `0x10013901`, `0x10013975`).
+
+The same pointer carries message 2, the unit-lost one, with a unit id
+(`0x10008855`, `0x10013aac`). So the state word 2 and its *"Multiplayer session
+lost"* panel are the network's, and no single-player path reaches them.
+
 **A briefing-only mission** (`0x1005ea08`). The briefing plays while the
 level's state word `+0x710` (the game's `+0x1c`) is 5. When it ends, or Esc skips it (`0x10070e75`),
 the loop reads `mission.cfg`'s `only_briefing` from its `mission` object. If
@@ -1187,6 +1343,11 @@ through `0x1007d4e0`. That it is a loss is *derived* from the voices it plays.
 3. **On a failure** (the hero lost, or a script's `MISSION_FAILED`), show the red
    title and the R and L lines. R restarts the mission with the same parameters;
    L goes to the load-game screen.
+4. **Nothing runs the next mission.** Build the campaign list by walking
+   `MISSIONS/CAMPAIGN/CAMPAIGN.%02d/` from 00 and each one's `Mission.%02d/`
+   from 01, naming each by its `descr`'s first line, and open a row only when
+   the row before it is in `[COMPLETE]`. Then put the cursor back on the
+   mission just finished: `CAMPAIGN.00/Mission.01` is campaign 0, mission 0.
 
 ## Capturing a neutral warbot, for an engine — *read*
 
@@ -1210,16 +1371,73 @@ in this order:
    bot, and the player drives the bot from then on
    ([39-boarding.md](39-boarding.md)).
 
-## Ambient sound — *read* in part
+## Ambient sound — *read*, and *measured*
 
-- **The theme.** `mission.cfg`'s `ambient_music_loop` `THEME` goes straight to
-  the sound server's slot 2 at mission load (`iron3d.dll:0x1005e2e1`). It is a
-  type-5 descriptor ([20-resources.md](20-resources.md)); whether that type is
-  what makes it loop is not read.
+- **The theme.** `mission.cfg`'s `ambient_music_loop` `THEME` goes to the sound
+  server's slot 2 at mission load (`iron3d.dll:0x1005e2e1`), and again out of
+  the briefing object's destructor, which drops the resource cache and then
+  plays it (`0x10030fca`, [21-briefing.md](21-briefing.md#how-the-briefing-is-shown--read-and-measured)).
+  The recording has no theme until the briefing hands over.
 - **The variations.** `ambient_music_variation`'s names are gathered as
   `DEFAULT_`, `DAY_` and `NIGHT_` + `VARIATION1`, `2`, … for as long as the
-  key exists (`0x1005f8f1`). When one plays, and how day or night picks among
-  them, is not read.
+  key exists (`0x1005f8f1`), into three lists keyed 0, 1 and 2 by the prefix
+  (`0x1008e650`). That runs in the mission's set-up (`0x1005f650`, called from
+  `0x1005e091`), before the loop and so before any briefing.
+
+**When one plays** — *read*. The game frame keeps a stamp (`+0x90`) and a wait
+(`+0x94`). Each frame it asks `services.dll`'s `ITimer` how many seconds have
+passed since the stamp (slot 3), and when that is more than the wait
+(`0x1005eb57`) it takes a new stamp (slot 2), draws a new wait of
+**10 + `rand()` % 10 seconds** — the float 10.0 at `0x100e5d6c`, `rand()` at
+`0x100b47d0`, the CRT's, seeded once from `timeGetTime()` (`0x1000798f`) —
+and plays one variation (`0x1005eb7a`–`0x1005ec03`). Both stamp and wait start
+at 0, so the **first frame plays one**, and the rest are **10 to 19 s** apart.
+The only gates above it in the frame are the pause byte `+0xe8` and the game's
+state word at 3 (`0x1005ea7f`, `0x1005ea8d`): no test of the briefing's state
+word 5 stands between them and the tick, so the variations play during a
+briefing as well.
+
+**Which one** (`0x1008e690`):
+
+- **The list** is chosen by the part of the day (`0x1008e760`). When the
+  mission gathered no `DAY_` and no `NIGHT_` name, it is the `DEFAULT_` list.
+  Otherwise the level's `+0xae4` is asked for its object of type 3 and that
+  object for a flag (its slot 6); the flag picks the `NIGHT_` list and its
+  absence the `DAY_` one. Which flag that is was not followed.
+- **The pick.** An empty list plays nothing; a list of one always plays it.
+  With more, two 16-bit words at the object's `+0x10` and `+0x12` step as
+  `s0 ← (s0 << 1) ⊕ s1`, `s1 ← (s1 >> 1) ⊕ s0`, and the index is `s1 mod n`,
+  drawn again while it equals the last index (`+0x1c`). **A variation never
+  repeats immediately**, as a CD track does not.
+- Both the theme and a variation go to the **same** call, `ISoundServer` slot 2
+  (`0x1005e2e1` and `0x1005ec03`, `services.dll:0x10011bb0`), with the resource
+  name alone and no loop flag.
+
+**Whether a type-5 descriptor loops its sound: no** — *read*, a negative with
+its control. `services.dll`'s descriptor loader switches on `type` − 1 through
+the table at `0x1000a17c` (`0x100096e1`). Types **4, 5 and 7 share one case**,
+`0x100097ff`, which builds a 0x20-byte resource of kind 3 with vtable
+`0x1003a498`: a type-5 descriptor produces an object indistinguishable from a
+type-4 one. The control is that the switch does discriminate — type 1 builds
+kind 1 (`0x10009702`), type 2 kind 2 and 0x2c bytes (`0x10009753`), type 3
+kind 4 (`0x100097b4`), and type 6 falls to the default path. So nothing in the
+`type`, and nothing in the play call, makes the theme loop; what does is not
+established.
+
+*Measured*, over all 29 shipped `mission.cfg`:
+
+- every one declares both objects; `ambient_music_loop` is `type = 5` on all
+  29 with exactly one `THEME`, and `ambient_music_variation` is **`type = 4`**
+  on all 29 — the variations are ordinary sounds, not music;
+- the 29 bind **170 variations** between them, 2 to 13 each;
+- **17 missions** use `DAY_`/`NIGHT_` (5 to 9 day names, and 0 to 4 night ones
+  — C01 Mission 01 names six day variations and no night one, so its nights are
+  silent) and **12** use `DEFAULT_` (2 or 3); **none mixes** `DEFAULT_` with the
+  others, so the day/night branch above never falls back;
+- no mission goes past `VARIATION9`; **three themes** serve all 29
+  (`atm_c1_lp.wav` on 8, `atm_c2_lp.wav` on 15, `atm_c3_lp.wav` on 6), and the
+  variations are the same handful of `atm_bird*`, `atm_frog*`, `atm_bees`,
+  `atm_c2_*` and `atm_c3_*` members of `sounds.lib`.
 
 ## Music: the CD's tracks — *read*, and *measured*
 
@@ -1288,8 +1506,18 @@ sits 11.8 dB under its file: music and sounds come out alike, as the equal
 
 ## Not established
 
-- The clock unit of the behaviour takt that times the route reports.
-- How a destroyed or captured unit leaves function 31's list.
+- ~~The clock unit of the behaviour takt that times the route reports.~~
+  Answered: game milliseconds, read off `Terrain.dll`'s handler for the same
+  message 1, which spends its parameter against `GetTimeDiffInSec() * 1000`
+  ([Who stands in a route](#who-stands-in-a-route--read)). Its `rand8` is the
+  low byte of `Behavior.dll`'s own never-seeded `rand()`, and a unit's first
+  takt runs at once.
+- ~~How a destroyed or captured unit leaves function 31's list.~~ Answered: it
+  does not. Nothing in `ai.dll` shortens a SuperAI's list or clears an entry's
+  id, and a capture files the object with its new clan without telling the old
+  one ([Function 31](#function-31-how-many-robots-a-clan-has--read)). What is
+  still open is whether the shipped game plays that way -- the reading is of
+  the code alone, and it would leave six missions' objectives unreachable.
 - ~~Where a message's text is drawn and for how long.~~ Answered: in the
   message box at the top, for 20 seconds
   ([35-hud.md](35-hud.md#the-message-box--read-and-measured)).
@@ -1300,13 +1528,20 @@ sits 11.8 dB under its file: music and sounds come out alike, as the equal
 - ~~What the game shows after `MISSION_COMPLETE`.~~ A panel in place of the HUD,
   until Esc exits to the menus, which record the win
   ([After the outcome](#after-the-outcome--read-and-measured)). Still open:
-  - what the shell's campaign branch (`0x10009c10`) and single-mission branch
-    (`0x10009f40`) show, and so what leads to the next mission;
-  - which parameter modes 3 and 4 are;
+  - ~~what the shell's campaign branch (`0x10009c10`) and single-mission branch
+    (`0x10009f40`) show, and so what leads to the next mission~~. Answered:
+    neither starts anything -- they name the campaign and mission just played to
+    the main menu, and the player picks the next
+    ([The two branches](#the-two-branches-and-what-leads-to-the-next-mission--read));
+  - ~~which parameter modes 3 and 4 are~~. Answered: 3 is the auto-demo and 4
+    the training campaign, `CAMPAIGN.00`
+    ([The parameter block's modes](#the-parameter-blocks-modes--read));
   - ~~the display's two scale queries that place the panel's text~~, answered
     in [35-hud.md](35-hud.md#how-the-radar-draws--read): the screen's width over
     640 and its height over 480;
-  - who sends the game message 3 that sets the state word to 2.
+  - ~~who sends the game message 3 that sets the state word to 2~~. Answered:
+    `World3D.dll`'s network layer, on `DPSYS_SESSIONLOST` or a failed send
+    ([Who sends the game message 3](#who-sends-the-game-message-3--read)).
 - ~~Whether the hero keeps reporting its route while it sits inside a boarded
   bot.~~ It does, where the bot goes: in a recording of Mission 02 route 4's
   message plays while the hero flies the warbot over the lake
@@ -1323,7 +1558,13 @@ sits 11.8 dB under its file: music and sounds come out alike, as the equal
   the pasture centre's height, meets its flying height.
 - What the behaviour does with the message 6 it sends itself for each tactical
   areal it is in.
-- The ambient variations' schedule.
+- ~~The ambient variations' schedule.~~ Answered: one every 10 + `rand()` % 10
+  seconds from the first frame on, picked from the part of the day's list by a
+  two-word generator that never repeats the last
+  ([Ambient sound](#ambient-sound--read-and-measured)). Still open there: which
+  flag of the level's `+0xae4` object the day/night branch reads, where the
+  picker's two words start, and -- since types 4, 5 and 7 load alike -- what
+  does make the theme loop.
 - ~~A failure on the hero's death.~~ The game fails the mission itself when the
   player's clan's hero is lost (`iron3d.dll:0x10075619`,
   [After the outcome](#after-the-outcome--read-and-measured)), though
