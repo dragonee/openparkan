@@ -955,6 +955,48 @@ with legs, wheels or tracks falls under gravity 10, and every flyer holds its
 height. A mode-0 or mode-2 machine falls exactly when its state has contact
 points.
 
+### Wheels ride clear of the ground — *measured*
+
+The lift plants a chassis's **contact points**, not its geometry, and the two
+do not meet. Over the campaign's 20 missions, taking each chassis's state-0
+flag-1 contacts through their nodes and comparing the lowest against the
+merged model's lowest vertex:
+
+| chassis | class | gear | lowest vertex | lowest contact | clear | missions |
+|---|---|---|---|---|---|---|
+| `R_B_03` | b | 6 × `weel_*` | −2.84 | −5.07 | **2.23** | 5 |
+| `R_T_01` | t | 6 × `leg_*` | −0.87 | −1.71 | **0.85** | 3 |
+| `R_M_03` | m | 6 × `weel_*` | −1.55 | −2.34 | **0.79** | 4 |
+| `R_B_04` | b | 4 × `weel_*` | −2.93 | −3.43 | **0.50** | 3 |
+| `R_L_03` | l | 4 × `weel_*` | −1.07 | −1.57 | **0.50** | 11 |
+| `R_M_04` | m | 4 × `weel_*` | −1.22 | −1.64 | **0.42** | 7 |
+| `R_M_01` | m | 2 × `*Foot` | −3.03 | −3.04 | 0.02 | 5 |
+| `R_B_06` | b | 1 × `Tur_Base` | −1.55 | −1.56 | 0.01 | 6 |
+| `R_L_01` | l | 2 × `*Foot` | −1.63 | −1.62 | −0.01 | 6 |
+| `R_B_01` | b | 4 × `foot_*` | −2.95 | −2.94 | −0.01 | 4 |
+| `A_L_01` | l | 2 × `*Foot` | −1.13 | −1.05 | −0.09 | 2 |
+| `A_L_04` | l | 4 × `*_Foot` | −1.51 | −1.14 | −0.37 | 2 |
+| `R_L_04` | l | 4 × `weel_*` | −1.20 | −0.82 | −0.38 | 1 |
+| `A_L_05` | l | 4 × `*_Foot` | −9.07 | −6.82 | −2.25 | 2 |
+| `R_B_05` | b | 2 × `*Foot` | −11.26 | −2.11 | −9.15 | 4 |
+
+Every wheeled chassis but `R_L_04` authors its `weel_*` points **below** the
+tyres, so the lift hangs the wheels that far clear of the ground, and the gap
+grows with the chassis. `R_B_03`, the six-wheeled heavy, rides **2.23** clear
+wherever it stands — plainly visible in play, and matched by openparkan's
+engine to the same figure on level ground. The legged chassis go the other
+way: `A_L_05`'s `*_Foot` points sit 2.25 *above* its lowest vertex, so the big
+spider's feet sink into the ground rather than hover.
+
+On broken ground the gap is larger still, since the lift is the **largest**
+rise over the contacts: a unit is held at the highest ground under any one
+wheel. `R_B_03` measured 2.66 clear where the ground under its six wheels
+spread 0.85.
+
+**For an engine:** do not seat a unit by its lowest vertex. Place it by the
+contact points and the floating wheels come out on their own; seat it by the
+geometry and every wheeled warbot sits lower than the game's.
+
 ### A flyer's height — *read*, and *measured*
 
 **Only the command's z climbs or sinks a flyer** (*read*).
