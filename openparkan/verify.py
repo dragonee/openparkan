@@ -14397,6 +14397,122 @@ def check_behaviour(check, game: Path) -> None:
     check_behaviour_flow(check, game, scripts, table)
 
 
+#: A name in a formula: a ``varset.var`` declaration or one of the tokeniser's
+#: own two literals.
+_IDENTIFIER = re.compile(r"[A-Za-z_]\w*")
+
+
+class _Flow:
+    """One script's handlers as a graph the executor could walk.
+
+    A state is ``(handler, node, chain, step)``.  With ``chain`` unset it is
+    the node about to run with every enclosing block holding; with ``chain``
+    set to the index of an ``if``, it is the ``step``-th constant of that
+    ``if``'s false region -- because a false block runs its constants and
+    nothing else, the one arm of the eight that does not test the condition
+    byte (``ai.dll:0x100121e2``), while a goto, a switch and a return fire
+    only in a true one.  A goto is an edge to its label, a switch an edge into
+    the target handler at node 0, since a handler always starts there with no
+    block open (``0x10011fb0``); a return, and running off the end, stop.
+
+    ``conservative`` counts every operand of a call as a read, rather than
+    excluding the ones the handler writes back (``OUT_OPERANDS``).
+    """
+
+    def __init__(self, script, index_of, conservative: bool = False) -> None:
+        B = behaviour
+        self.script = script
+        exprs = B.formulas(script.source)
+        self.reads, self.writes, self.ends, self.consts = [], [], [], []
+        for h in script.handlers:
+            reads, writes = [], []
+            for n in h.nodes:
+                r, w = set(), set()
+                if n.calls:
+                    out = B.OUT_OPERANDS.get(n.function, ())
+                    r = {o for i, o in enumerate(n.operands)
+                         if conservative or i not in out}
+                    w = {n.operands[i] for i in out if i < len(n.operands)}
+                elif n.kind == B.IF:
+                    r = set(n.operands)
+                elif n.kind == B.STATEMENT:
+                    if n.reference != B.NULL:
+                        r = {n.reference}
+                    elif 0 <= n.trailer < len(exprs):
+                        r = {index_of[m] for m in _IDENTIFIER.findall(exprs[n.trailer])
+                             if m in index_of}
+                if n.destination != B.NULL and (n.calls or n.kind in B.ASSIGN_TAGS):
+                    w.add(n.destination)
+                reads.append(r)
+                writes.append(w)
+            self.reads.append(reads)
+            self.writes.append(writes)
+            end = [len(h.nodes)] * len(h.nodes)
+            stack = []
+            for i, n in enumerate(h.nodes):
+                if n.closes and stack:
+                    end[stack.pop()] = i
+                if n.opens:
+                    stack.append(i)
+            self.ends.append(end)
+            self.consts.append({
+                i: [k for k in range(i + 1, end[i])
+                    if not h.nodes[k].calls and h.nodes[k].kind == B.CONST]
+                for i, n in enumerate(h.nodes) if n.opens})
+
+    def _successors(self, state):
+        B = behaviour
+        h, i, chain, step = state
+        nodes = self.script.handlers[h].nodes
+        if chain is not None:
+            if step < len(self.consts[h][chain]):
+                return ((h, chain, chain, step + 1),)
+            at = self.ends[h][chain] + 1
+            return ((h, at, None, 0),) if at < len(nodes) else ()
+        n = nodes[i]
+        if n.calls:
+            return ((h, i + 1, None, 0),) if i + 1 < len(nodes) else ()
+        if n.kind == B.IF:
+            on = ((h, i + 1, None, 0),) if i + 1 < len(nodes) else ()
+            return on + ((h, i, i, 0),)
+        if n.kind == B.GOTO:
+            return ((h, n.target, None, 0),) if 0 <= n.target < len(nodes) else ()
+        if n.kind == B.SWITCH:
+            reached = 0 <= n.target < len(self.script.handlers)
+            return ((n.target, 0, None, 0),) if reached else ()
+        if n.kind == B.RETURN:
+            return ()
+        return ((h, i + 1, None, 0),) if i + 1 < len(nodes) else ()
+
+    def _effect(self, state):
+        h, i, chain, step = state
+        if chain is not None:
+            run = self.consts[h][chain]
+            if step >= len(run):
+                return (), ()
+            i = run[step]
+        return self.reads[h][i], self.writes[h][i]
+
+    def outcome(self, start, var: int) -> str:
+        """``read`` if any path reads ``var`` before writing it, ``escape`` if
+        one ends the run without doing either, else ``overwritten``."""
+        seen, stack, escapes = set(), [start], False
+        while stack:
+            state = stack.pop()
+            if state in seen:
+                continue
+            seen.add(state)
+            reads, writes = self._effect(state)
+            if var in reads:
+                return "read"
+            if var in writes:
+                continue
+            after = self._successors(state)
+            escapes |= not after
+            stack.extend(after)
+        return "escape" if escapes else "overwritten"
+
+
 def check_behaviour_flow(check, game: Path, scripts, table) -> None:
     """What the executor does with a node, measured on the scripts.
 
@@ -14481,6 +14597,58 @@ def check_behaviour_flow(check, game: Path, scripts, table) -> None:
           f"{gotos - len(bad)}/{gotos} tag-{B.GOTO} operands are the node index of a "
           f"tag-{B.LABEL} node in the same handler; {targeted} of the {labels} labels "
           f"are aimed at -- the operand read as fPry was node 26")
+
+    # --- the five labels no goto aims at, and the one label inside a block ---
+    aims = Counter()
+    unaimed, in_block, protect = [], [], {}
+    control_35 = Counter()
+    for s in scripts:
+        for h in s.handlers:
+            hits = Counter(n.target for n in h.nodes if not n.calls and n.kind == B.GOTO)
+            if h.name == "PBM_BUILDING_INF_CAPTURE_Continue" and hits[35]:
+                control_35[s.source.stem] += hits[35]
+            if h.name == "PBM_BUILDING_PROTECT_Continue":
+                exprs = B.formulas(s.source)
+                protect[s.source.stem] = (
+                    len(h.nodes), sum(hits.values()),
+                    tuple((n.head, n.opcode, n.operands) for n in h.nodes[:19]),
+                    tuple(exprs[n.trailer] for n in h.nodes[:19] if n.trailer != B.NULL))
+            depth = 0
+            for i, n in enumerate(h.nodes):
+                if n.closes:
+                    depth = max(0, depth - 1)
+                if not n.calls and n.kind == B.LABEL:
+                    aims[hits[i]] += 1
+                    if not hits[i]:
+                        unaimed.append((s.source.stem, h.name, i, len(h.nodes)))
+                    if depth:
+                        in_block.append((s.source.stem, h.name, i, hits[i]))
+                if n.opens:
+                    depth += 1
+    dead = {"c1m3e", "c2m3e", "c3m1e", "c4m2e2", "scream"}
+    shapes = {v[2] for v in protect.values()}
+    texts = {v[3] for v in protect.values()}
+    check("behaviour: five labels are dead code, and the one inside a block is not",
+          aims == Counter({2: 33, 1: 19, 0: 5}) and 33 * 2 + 19 == gotos
+          and {u[0] for u in unaimed} == dead
+          and all(u[1:] == ("PBM_BUILDING_PROTECT_Continue", 19, 20) for u in unaimed)
+          and all(protect[k][1] == 0 for k in protect)
+          and set(protect) == dead | {"c1m4e", "c2m1e"}
+          and all(protect[k][0] == 19 for k in ("c1m4e", "c2m1e"))
+          and len(shapes) == 1 and len(texts) == 1
+          and in_block == [("c5m1p", "PBM_BASE_DEFENCE_Start", 9, 1)]
+          and sum(control_35.values()) == 26 and len(control_35) == 13,
+          f"{aims[2]} labels take two gotos and {aims[1]} one, {33 * 2 + 19} in all; "
+          f"the {aims[0]} none aims at are one label five times over -- "
+          f"PBM_BUILDING_PROTECT_Continue node 19 of 20, the last, in "
+          f"{', '.join(sorted(dead))}, handlers holding no goto at all, while c1m4e "
+          f"and c2m1e carry the same handler at 19 nodes, equal field for field but "
+          f"for the trailer and resolving to the same "
+          f"{len(set(next(iter(texts))))} expressions; the one label inside a block, "
+          f"c5m1p PBM_BASE_DEFENCE_Start node 9, is aimed at by node 3's goto.  "
+          f"Control: the sibling trailing label, PBM_BUILDING_INF_CAPTURE_Continue "
+          f"node 35, is aimed at {sum(control_35.values())} times across "
+          f"{len(control_35)} scripts")
 
     reached = {name for ok, name, _ in switches if ok}
     carried = Counter(h.name for s in scripts for h in s.handlers
@@ -14596,6 +14764,199 @@ def check_behaviour_flow(check, game: Path, scripts, table) -> None:
           f"{against}/{compared} comparisons against a variable holding 65534 or "
           f"4094 test it against function 52's answer, the owner word of a logical "
           f"id, which a destroyed object sets to {B.DESTROYED:#x}")
+
+    check_behaviour_constants(check, game, scripts, table)
+    check_behaviour_operators(check, game, scripts, table)
+
+
+def check_behaviour_constants(check, game: Path, scripts, table) -> None:
+    """Does any script depend on a constant landing in a false block?
+
+    The engine writes one 63 times over, because the constant is the one arm
+    of the eight that does not test the condition byte first.  This walks the
+    executor's control flow from each such write and asks whether the value
+    can be read before something else overwrites it.
+    """
+    B = behaviour
+    index_of = {v.name: i for i, v in enumerate(table)}
+    consts = inside = control = 0
+    destinations, outcomes = Counter(), Counter()
+    escaped = set()
+    observable = Counter()
+    for conservative in (False, True):
+        first = not conservative
+        for s in scripts:
+            flow = _Flow(s, index_of, conservative)
+            for hi, h in enumerate(s.handlers):
+                depth, opened = 0, []
+                for i, n in enumerate(h.nodes):
+                    if n.closes:
+                        depth = max(0, depth - 1)
+                        if opened:
+                            opened.pop()
+                    literal = not n.calls and n.kind == B.CONST
+                    if literal:
+                        if first:
+                            consts += 1
+                            inside += bool(opened)
+                            if opened:
+                                destinations[table[n.destination].name] += 1
+                        # One scenario per enclosing if, each in turn the false
+                        # one; the constant runs whichever of them is.
+                        for a in opened:
+                            step = flow.consts[hi][a].index(i)
+                            got = flow.outcome((hi, a, a, step + 1), n.destination)
+                            outcomes[got] += first
+                            if got == "escape":
+                                escaped.add((s.source.stem, table[n.destination].name))
+                    elif depth and n.destination != B.NULL:
+                        # The control: the same question asked of a write the
+                        # block does guard, from where that block closes.
+                        control += first
+                        at = flow.ends[hi][opened[-1]] + 1
+                        observable[conservative] += (
+                            at < len(h.nodes)
+                            and flow.outcome((hi, at, None, 0), n.destination) == "read")
+                    if n.opens:
+                        depth += 1
+                        opened.append(i)
+    live = []
+    for stem, name in sorted(escaped):
+        s = next(x for x in scripts if x.source.stem == stem)
+        flow = _Flow(s, index_of)
+        for hi, h in enumerate(s.handlers):
+            if h.name in B.SUBROUTINES or not h.nodes:
+                continue
+            if flow.outcome((hi, 0, None, 0), index_of[name]) == "read":
+                live.append((stem, name, h.name))
+    check("behaviour: no script depends on a constant landing in a false block",
+          dict(destinations) == {"dTemp": 38, "dT": 14, "dT1": 7, "dX": 3, "dT2": 1}
+          and consts == 266 and inside == 63
+          and outcomes == Counter({"overwritten": 88, "escape": 33})
+          and len(escaped) == 17 and not live
+          and control == 1063 and 0 < observable[False] == 98 and observable[True] == 108,
+          f"{inside} of the {consts} constants sit inside a block, writing only "
+          + ", ".join(f"{k} {v}" for k, v in destinations.most_common())
+          + f"; over the {sum(outcomes.values())} (constant, enclosing if) pairs "
+          f"{outcomes['overwritten']} are overwritten on every path the script can "
+          f"take and {outcomes['escape']} are never read before the handler ends, "
+          f"{outcomes['read']} read -- {len(escaped)} (script, variable) pairs "
+          f"escaping, {len(live)} of them live on entry at any engine entry point of "
+          f"their script.  Control: the same pass over the {control} non-constant "
+          f"writes inside a block finds {observable[False]} observable "
+          f"({observable[True]} counting every operand of a call as a read), so the "
+          f"query can see a read where there is one")
+
+    path = game / "ai.dll"
+    if not path.exists():
+        return
+    image = path.read_bytes()
+    at = _image_at(image)
+    arms = struct.unpack("<8I", at(B.EXECUTOR_TABLE, 32))
+    guarded = {i for i, va in enumerate(arms) if at(va, len(B.CONDITION_TEST)) == B.CONDITION_TEST}
+    # And the other half of the answer: the engine never names the five either.
+    named = [v.name for v in table if v.name.encode() + b"\0" in image]
+    escapes = ("dTemp", "dT", "dT1", "dT2", "dX")
+    absent = [n for n in escapes if n.encode() not in image]
+    check("behaviour: the constant is the one arm that skips the condition test",
+          arms[B.CONST + 1] == B.CONSTANT_ARM
+          and guarded == {B.STATEMENT + 1, B.GOTO + 1, B.SWITCH + 1, B.RETURN + 1}
+          and len(named) == 16 and not set(named) & set(escapes)
+          and len(absent) == 4,
+          f"the executor's table at {B.EXECUTOR_TABLE:#x} holds {len(arms)} arms; "
+          + ", ".join(f"{i} {va:#x}" for i, va in enumerate(arms))
+          + f".  {len(guarded)} open with the same {len(B.CONDITION_TEST)} bytes that "
+          f"fetch the open-block count and give up on a zero condition byte -- the "
+          f"statement, goto, switch and return; the constant's, entry {B.CONST + 1}, "
+          f"does not, and neither does the label's, which has nothing to guard.  "
+          f"ai.dll carries {len(named)} of the {len(table)} varset.var names as "
+          f"strings, the ones it resolves by name, and none of the {len(escapes)} a "
+          f"suppressed constant writes; {len(absent)} of those do not occur in the "
+          f"image even as a byte sequence")
+
+
+def check_behaviour_operators(check, game: Path, scripts, table) -> None:
+    """The .fml expression language: 13 operators, of which the corpus uses 3."""
+    B = behaviour
+    files = [s.source.with_suffix(B.FORMULAS) for s in scripts]
+    raw, inside = Counter(), Counter()
+    exprs: list[str] = []
+    for fml in files:
+        text = fml.read_text("latin-1")
+        raw.update(c for c in text if not c.isalnum() and not c.isspace() and c not in "_.")
+        exprs += B.parse_formulas(text, fml.name)
+    for e in exprs:
+        inside.update(c for c in e if not c.isalnum() and not c.isspace() and c not in "_.")
+    names = {v.name for v in table}
+    used = Counter(m for e in exprs for m in _IDENTIFIER.findall(e))
+
+    def left_of(text: str) -> str:
+        """The last character before a sign, whitespace skipped."""
+        return text.rstrip()[-1:]
+
+    minuses = [left_of(e[:i]) for e in exprs for i, c in enumerate(e) if c == "-"]
+    binary = sum(bool(c) and (c.isalnum() or c in "._)") for c in minuses)
+    check("behaviour: the corpus uses 3 of the evaluator's 13 operators",
+          len(files) == 58 and len(exprs) == 1379 and len(set(exprs)) == 198
+          and dict(inside) == {"+": 106, "-": 50, "*": 29, "(": 5, ")": 5}
+          and dict(raw) == {"/": 116, "(": 1384, ")": 1384, ",": 2758,
+                            "+": 106, "-": 50, "*": 29}
+          and raw["("] - len(exprs) == 5 and raw[","] == 2 * len(exprs)
+          and raw["/"] == 2 * len(files) and binary == len(minuses) == 50
+          and len(used) == 11 and set(used) <= names
+          and not set(used) & set(B.FORMULA_LITERALS),
+          f"{len(exprs)} FUNCTION lines in {len(files)} .fml, {len(set(exprs))} "
+          f"distinct expressions, and inside them only "
+          + " ".join(f"{k}{v}" for k, v in sorted(inside.items()))
+          + f"; every one of the {binary} minus signs has a left operand, so Sign "
+          f"change is never used, and the {len(used)} identifiers are all varset.var "
+          f"declarations with neither "
+          + " nor ".join(B.FORMULA_LITERALS)
+          + f" among them.  Control: the raw files hold {raw['/']} slashes, "
+          f"{len(files)} x 2 for //FormulaSet export file, all outside an "
+          f"expression -- so a Division would have been counted")
+
+    path = game / "ai.dll"
+    if not path.exists():
+        return
+    image = path.read_bytes()
+    at = _image_at(image)
+    count = struct.unpack("<I", at(B.OPERATOR_COUNT, 4))[0]
+    span = len(B.OPERATORS) * B.OPERATOR_STRIDE
+    block = at(B.OPERATOR_TABLE, span)
+    records = []
+    for i in range(count if count == len(B.OPERATORS) else 0):
+        record = block[i * B.OPERATOR_STRIDE:(i + 1) * B.OPERATOR_STRIDE]
+        arity, symbol, flag, priority = struct.unpack_from("<Iiii", record, B.OPERATOR_FIELDS)
+        records.append((record[:B.OPERATOR_FIELDS].split(b"\0")[0].decode("latin-1"),
+                        chr(symbol), arity, flag, priority))
+    arms = struct.unpack("<13I", at(B.EVALUATOR_TABLE, 52)) if count == 13 else ()
+    # Which copy is live: every base relocation, and the dword it fixes up.  The
+    # executor's own jump table is the control -- it must come back exactly once.
+    pointers = _relocations(image)
+    arity = B.OPERATOR_TABLE + B.OPERATOR_FIELDS
+    dead = [v for v in pointers if B.OPERATOR_TABLE_COPY - 8 <= v
+            < B.OPERATOR_TABLE_COPY + span]
+    check("behaviour: ai.dll's operator table is the one the evaluator indexes",
+          count == len(B.OPERATORS) and tuple(records) == B.OPERATORS
+          and block == at(B.OPERATOR_TABLE_COPY, span)
+          and len(set(arms)) == 13
+          and len(pointers[B.EXECUTOR_TABLE]) == 1
+          and len(pointers[arity]) == 1 and not dead,
+          f"{count} records of {B.OPERATOR_STRIDE:#x} bytes at "
+          f"{B.OPERATOR_TABLE:#x}, the count in the dword at {B.OPERATOR_COUNT:#x}: "
+          + " ".join(f"{n}{s}{a}/{p}" for n, s, a, _, p in records)
+          + f"; byte-identical to the copy at {B.OPERATOR_TABLE_COPY:#x}, which "
+          f"confirms the layout -- a 256-byte name, then the arity, the symbol, a "
+          f"flag and a priority.  Of the {sum(len(v) for v in pointers.values())} "
+          f"base relocations, {len(pointers[arity])} names record 0's arity at "
+          f"{arity:#x} (indexed by {B.OPERATOR_STRIDE:#x}, so the code dictates the "
+          f"stride) and {len(dead)} reaches the dead copy; control: the executor's "
+          f"table at {B.EXECUTOR_TABLE:#x} comes back "
+          f"{len(pointers[B.EXECUTOR_TABLE])} time, at "
+          + ", ".join(f"{a:#x}" for a in pointers[B.EXECUTOR_TABLE])
+          + f"; and the evaluator's jump table at {B.EVALUATOR_TABLE:#x} holds "
+          f"{len(set(arms))} distinct arms")
 
 
 def check_varset_types(check, game: Path) -> None:
@@ -17991,6 +18352,34 @@ def _image_at(image: bytes):
         return image[off:off + n]
 
     return at
+
+
+def _relocations(image: bytes) -> defaultdict[int, list[int]]:
+    """Every address the loader fixes up in ``image``, by the value it holds.
+
+    The base relocation table's type-3 entries are the 32-bit ones, and the
+    dword at each is an address in the image.  Reading them all is how a claim
+    that nothing points at a given table is settled: it is a negative, so it
+    wants the whole set rather than a search."""
+    lfanew = struct.unpack_from("<I", image, 0x3C)[0]
+    option = lfanew + 24
+    base = struct.unpack_from("<I", image, option + 28)[0]
+    rva, size = struct.unpack_from("<II", image, option + 96 + 5 * 8)
+    sections, _ = resources._sections(image)
+    found = defaultdict(list)
+    at, end = resources._offset(sections, rva), resources._offset(sections, rva) + size
+    while at < end:
+        page, block = struct.unpack_from("<II", image, at)
+        if block < 8:
+            break
+        for i in range(at + 8, at + block, 2):
+            (word,) = struct.unpack_from("<H", image, i)
+            if word >> 12 == 3:
+                site = page + (word & 0xFFF)
+                (value,) = struct.unpack_from("<I", image, resources._offset(sections, site))
+                found[value].append(base + site)
+        at += block
+    return found
 
 
 def _calls(at, start: int, size: int) -> list[tuple[int, int]]:

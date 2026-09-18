@@ -147,6 +147,14 @@ doc = "docs/15-behaviour.md"
 
 [[entry]]
 module = "ai.dll"
+at = "0x10012376"
+kind = "site"
+name = "kind 2, label: pops the frame and returns 1, doing nothing"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
 at = "0x10012225"
 kind = "site"
 name = "kind 4: switch to the handler the operand names, depth reset"
@@ -227,9 +235,33 @@ doc = "docs/15-behaviour.md"
 
 [[entry]]
 module = "ai.dll"
-at = "0x10037c90"
+at = "0x10047c70"
 kind = "datum"
-name = "formula operator table: 13 named operators with arity and symbol"
+name = "formula operator table: 13 records of name[0x100], arity, symbol, flag, priority"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x10037c98"
+kind = "datum"
+name = "a second, byte-identical copy of the operator table that nothing points at"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x10015b30"
+kind = "function"
+name = "formula evaluator: a stack machine over the parsed tokens"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x10016064"
+kind = "table"
+name = "formula evaluator's jump table, the 13 operators' arms"
 read = true
 doc = "docs/15-behaviour.md"
 

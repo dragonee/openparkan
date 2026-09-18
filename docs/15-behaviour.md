@@ -15,7 +15,10 @@ to its handler, and the functions are named as far as their code says —
 problems raised and solved, units picked and ordered, targets found. The two
 helpers the target functions lean on are read as well, and one of them was being
 read wrong: what a script gets back from them is a **strength held over a place**,
-not a distance ([What the functions do](#what-the-functions-do)). What a handler asks
+not a distance ([What the functions do](#what-the-functions-do)). The expression
+language a statement's formula is written in is read arm for arm as well, and the
+corpus uses **three** of its thirteen operators ([The `.fml`
+operators](#the-fml-operators--read-and-measured)). What a handler asks
 of the engine below *that* is mostly not followed.
 
 **Every claim is tagged**: *measured* is re-derived by `openparkan verify`,
@@ -279,11 +282,11 @@ A `.fml` is `//FormulaSet export file`, a blank line, and one
 `FUNCTION( , <expression>,  )` per formula, the outer fields empty on all 1379.
 The expressions use numbers, `+ - * ( )` and eleven variables:
 `fTemp + 0.00001`, `dPlaceProtectHits - dTemp`, `20 + 55*fDifficulty`. The
-evaluator knows more than that — a table of **13 operators** (`0x10037c90`,
-*read*) names `Addition`, `Subtraction`, `Multiplication`, `Division`, `Power`,
-`And`, `Or`, `Sign change`, `Not`, `Normalisator`, `Significator`,
-`Booleanisator` and `Absolute`. A formula's value is set through the float
-setter (`0x10013650`), so it is truncated when the destination is a `DWORD`.
+evaluator knows **13 operators** and the corpus uses **three** of them — the
+expression language is read in full below ([The `.fml`
+operators](#the-fml-operators--read-and-measured)). A formula's value is set
+through the float setter (`0x10013650`), so it is truncated when the
+destination is a `DWORD`.
 
 ### `head[2]` is a variable under one kind and a number under the other
 
@@ -383,11 +386,9 @@ What an engine running the scripts has to reproduce, value by value:
 - **The condition bytes are not bounded.** An `if` writes the byte at the
   current depth without checking it against the 32 the SuperAI reserves; the
   shipped scripts nest five deep.
-- **The formula evaluator's operator table** (`0x10037c90`) is 13 records of a
-  256-byte name, then arity, symbol, a flag and a priority: `+` `-` `|` 1,
-  `*` `/` `&` 2, `^` 3, the unary `-` and `!` 1, and the one-letter `N`, `S`,
-  `B`, `A` 100, flagged. How the parser uses the priorities, and what the
-  flagged four compute, is not read.
+- **A formula evaluates in the x87's own arithmetic**, over a stack of 4-byte
+  floats, and the thirteen operators are read one arm at a time
+  ([below](#the-fml-operators--read-and-measured)).
 
 ### What the functions do
 
@@ -582,6 +583,15 @@ constant does not** — `0x100121e2` writes its number whatever the condition.
 **63 of the 266 constants sit inside a block** (*measured*), so on a false
 branch they still land.
 
+That is not a reading of one arm against seven; it is what the jump table
+holds. Four of its eight entries open with the **same five instructions** —
+the statement's, the goto's, the switch's and the return's — which fetch the
+open-block count and hand control to the do-nothing tail when the innermost
+condition byte is zero. The `if`'s arm fetches both operands and compares
+first. The label's has nothing to guard: it pops its frame and returns. **The
+constant's is the only one that goes straight to the destination variable**
+(all *read*, and *measured* by `verify` over the table's eight entries).
+
 - **675 of 677 handlers hold exactly as many `end`s as `if`s**, and bracket
   cleanly — the depth never goes negative and ends at zero. Nesting reaches
   **five** deep, against 32 condition bytes.
@@ -591,15 +601,64 @@ branch they still land.
 - **`return` is followed immediately by `end` on 210 of 210** nodes, and the
   jumps on 109 of 110: an exit is written as the last thing in its block.
 
+### Does any script depend on it? — *measured*
+
+**No.** The engine writes a suppressed constant 63 times over, and not one of
+those writes can be observed. Every one of the 63 lands in one of five
+variables — `dTemp` 38, `dT` 14, `dT1` 7, `dX` 3, `dT2` 1 — and building the
+executor's control flow faithfully (a false block runs its constants and
+nothing else; a `goto`, `switch` or `return` fires only in a true one; a
+`switch` is an edge into the target handler at node 0) gives **121 scenarios**,
+one per (constant, enclosing `if`) pair, since some constants nest two or three
+deep. Asking of each whether the value can be read before something else writes
+the variable:
+
+| | |
+|---:|---|
+| **88** | overwritten before any read on **every** path the script can take |
+| **33** | no read at all; the handler ends and control returns to the engine |
+| **0** | read |
+
+The 33 are **17 (script, variable) pairs**, and none of them is live when the
+engine next calls in: no entry point of that script — the 9 events plus every
+`PBM_*_Start` and `_Continue`, the five switch-only subroutines excluded
+because nothing but a `switch` reaches them — reads the variable before writing
+it, **0 of 17**. Counting *every* operand of a call as a read, rather than
+excluding the ones the handler writes back, leaves both numbers at 0.
+
+The engine does not read them either. `ai.dll` carries **16 of the 231**
+`varset.var` names as strings, and they are exactly the ones it resolves by
+name: `dCurrentProblem`, `dCurrentSender`, `fDifficulty`, the six `dMax*`, the
+four factors, `PBM_BUILDING_INF_CAPTURE`, `TRUE` and `FALSE`. None of the five
+is among them, and four of the five — `dTemp`, `dT1`, `dT2` and `dX` — do not
+occur in the image even as a byte sequence (*measured*).
+
+**The control is in the check.** The same pass over the **1063** non-constant
+writes inside a block — the ones the block *does* guard, asked from where that
+block closes — returns **98** observable, 108 under the conservative reading.
+Those are the objective flags a `Mission` handler sets inside `if dfN == d0`
+and tests again further down, the tutorials' `dcl0`, and `c2m2p`'s `dTime0`:
+`c1m3p`'s `Mission` writes `df1` at node 5 and reads it at node 22. So the
+query can see a read where there is one, and its answer for the constants is
+0 because there is none.
+
+Two side doors are closed as well. An `if` inside a false block **does**
+evaluate its comparison, so it can read a variable a suppressed constant
+clobbered — but `0x1001219f` forces the byte it pushes to 0 when the enclosing
+byte is 0, so the comparison cannot change control flow and the read changes
+nothing. And `0x10011fb0` starts every handler at node 0 with the depth
+zeroed, so there is no resume point at which a stale value could be picked up.
+
 ### The jumps — *read*, and *measured*
 
 **Kinds 3, 4 and 5 are goto, switch and return**, and when taken each clears
 every open block (`0x10012258`, `0x10012225`, `0x10012285`):
 
-- **goto** sets the running node to its operand minus one, so the next node
-  run is the operand. **85 of 85** gotos name a **label** in their own handler
-  (*measured*), all but one forward; 52 of the 57 labels are aimed at and one
-  sits inside a block (`c5m1p.scr`, `PBM_BASE_DEFENCE_Start`).
+- **goto** sets the open-block count to zero (`0x1001226e`) and then the
+  running node to its operand minus one, so the next node run is the operand.
+  **85 of 85** gotos name a **label** in their own handler (*measured*), all
+  but one forward; 52 of the 57 labels are aimed at, and the arithmetic closes
+  exactly — **33 labels take two gotos and 19 take one**, and 33 × 2 + 19 = 85.
 - **switch** makes its operand the running handler and starts it at node 0.
   **25 of 25** name a handler of the same script, and the ones they reach —
   `All_Defence` (21 times, from `PBM_BASE_DEFENCE_Start`), `Easy`, `Normal`,
@@ -607,7 +666,9 @@ every open block (`0x10012258`, `0x10012225`, `0x10012285`):
   that are neither events nor problems.
 - **return** stops the handler, and so does running off its end
   (`0x10011ffd`).
-- **label** does nothing at all.
+- **label** does nothing at all: the arm pops its frame and returns 1
+  (`0x10012376`). Every one of the 57 is bare — `head = (−1, −1, −1, 2)`,
+  relation 6, no operands, trailer −1 (*measured*).
 
 **A dead end, written down.** This page once read the goto's operand as a
 weight, because its commonest value, 26, is `fPry` in `varset.var`, and argued
@@ -618,6 +679,147 @@ wherever it happens to sit — and `f3`, `f4`, `f5` are `Easy`, `Normal` and
 `Hard`. The label is not "where a handler stops planning" but where its gotos
 land, which is where the bookkeeping sits. There *is* a priority,
 and it is the problem's weight, above.
+
+#### Five labels are dead code, and one is not — *measured*
+
+Five of the 57 labels no goto aims at, and one label sits inside a block. This
+page used to file the two together as six anomalies. They are **five plus
+one**, and the one is not an anomaly.
+
+**The five are one label, five times over.** It is
+`PBM_BUILDING_PROTECT_Continue`'s **node 19 of 20** — the handler's last —
+in `c1m3e`, `c2m3e`, `c3m1e`, `c4m2e2` and `scream`, at depth 0. The
+interpreter does reach it, by falling in from node 18, and reaching it does
+nothing. It is an **authoring leftover rather than a code-generator artefact**,
+and the corpus says so from three sides:
+
+- those five handlers contain **no goto at all**; both their early exits are
+  `return`, at nodes 3 and 15;
+- `PBM_BUILDING_PROTECT` appears in **seven** scripts, and the other two —
+  `c1m4e` and `c2m1e` — carry the **same handler with 19 nodes and no label**,
+  identical node for node to the five's first nineteen. The only differences
+  are the per-script formula indices in the five trailers, and all seven
+  resolve to the same five expressions: `dBuildingProtectHits - dTemp`, `0.5`,
+  `25`, `24`, `150`. One source compiled twice does not come out both ways;
+- the sibling shows what a trailing label is *for*.
+  `PBM_BUILDING_INF_CAPTURE_Continue` has one at node **35 of 36** in **13**
+  scripts, and it is the common exit: two gotos per script aim at it, **26** in
+  all. In `PBM_BUILDING_PROTECT_Continue` the two exits were written as
+  `return` instead, so nothing needs to jump to the end. That count is also the
+  control on the negative — asking for gotos that aim at node 19 anywhere in
+  the corpus returns 0, and the same question about node 35 returns 26.
+
+**The sixth is the ordinary case.** `c5m1p.scr`, `PBM_BASE_DEFENCE_Start`, node
+9 of 11 — and **the goto at node 3 lands on it**. It is inside a block only
+because the handler's whole body is one `if df2 == d0` opened at node 0.
+Nothing breaks, and the binary says why: a taken goto sets the open-block count
+to zero (`0x1001226e`, *read*) before setting the node, so the `end` at node 10
+decrements to −1 and is clamped back to 0 (`0x100121cb`, *read*).
+
+## The `.fml` operators — *read*, and *measured*
+
+The expression language behind a statement's trailer has **13 operators**, and
+the shipped corpus uses **three**.
+
+### The table, and the address this page had wrong
+
+The doc used to put the operator table at `0x10037c90`. **Nothing in `ai.dll`
+holds that address**, and the copy of the table that begins eight bytes later
+is dead. Enumerating every base relocation — **3788** type-3 sites — and
+reading the dword at each settles it, with `0x10012380`, the executor's own
+jump table, as the positive control: that comes back exactly **once**, at the
+executor's `jmp` through it. The only nine pointers anywhere into
+`0x10037000..0x10038a68` land in the CRT's own data at the very front of it,
+below `0x100371c0`; none reaches the copy at `0x10037c98`, and none reaches the
+six type-tag names at `0x10037688` either (all *measured*).
+
+The same sweep finds what the evaluator does use: `0x10047d70`, from
+`0x10015cbc` — which is the **arity field of record 0**, indexed `op × 0x110`,
+so the code itself dictates the stride and the field offset. The table's first
+record therefore begins at **`0x10047c70`**, and the count **13** sits in the
+dword at **`0x10047c68`**. It is **byte-identical** to the `0x10037c98` copy
+over all 13 records, which is an independent check on the layout.
+
+**The layout, corrected**: `name[0x100]`, then **arity** at `+0x100`, **symbol**
+at `+0x104`, a **flag** at `+0x108` and a **priority** at `+0x10c`; stride
+`0x110`. The old note had the fields right and landed one record off, because
+it started eight bytes before the first name — on the count. The tokeniser
+walks the symbol at `0x100153e8`, the flag at `0x10015435` and the priority at
+`0x100154a4`.
+
+### What the interpreter implements — *read*
+
+The evaluator (`0x10015b30`) is a stack machine over the parsed tokens — token
+type 1 an operator, 2 a variable, 3 a literal — and dispatches through a
+13-entry jump table at **`0x10016064`**. A binary operator takes the right-hand
+operand from one slot of the evaluator's frame and the left from another; a
+unary one reads only the left, which is how the arity column is confirmed a
+second way — **arms 0 to 6 read both slots and arms 7 to 12 only one**. Its
+constants are 1.0, 0.0, −1.0 and 0.5 (`0x1003470c`..`0x10034718`), `0x1001df70`
+is `_ftol` and `0x10021030` the CRT's `pow`.
+
+| # | name | sym | arity | flag | prio | computes |
+|---:|---|:--:|:--:|:--:|--:|---|
+| 0 | Addition | `+` | 2 | 0 | 1 | `l + r` |
+| 1 | Subtraction | `-` | 2 | 0 | 1 | `l − r` |
+| 2 | Multiplication | `*` | 2 | 0 | 2 | `l × r` |
+| 3 | Division | `/` | 2 | 0 | 2 | `l / r` — but it compares `r` with 0.0 first and **answers 0.0 when `r` is zero**, never dividing |
+| 4 | Power | `^` | 2 | 0 | 3 | `pow(l, r)` through the CRT |
+| 5 | And | `&` | 2 | 0 | 2 | 1.0 when `_ftol(l)` and `_ftol(r)` are both non-zero, else 0.0 |
+| 6 | Or | `\|` | 2 | 0 | 1 | 1.0 when either is, else 0.0 |
+| 7 | Sign change | `-` | 1 | 0 | 1 | negate |
+| 8 | Not | `!` | 1 | 0 | 1 | 1.0 when `_ftol(x)` is 0, else 0.0 |
+| 9 | Normalisator | `N` | 1 | 1 | 100 | 0.0 below −1, `(x + 1) × 0.5` on [−1, 1], 1.0 above 1 |
+| 10 | Significator | `S` | 1 | 1 | 100 | `x` when `x > 0`, else 0.0 |
+| 11 | Booleanisator | `B` | 1 | 1 | 100 | 1.0 when `x > 0`, else 0.0 |
+| 12 | Absolute | `A` | 1 | 1 | 100 | `\|x\|` |
+
+The three that truncate first are worth the emphasis: `0.5 & 1` is **0**, and
+`!0.5` is **1**, because each value goes through `_ftol` before it is tested.
+Every comparison in the table is the x87's, so an unordered operand falls to
+the arm's other branch — a NaN is not greater than 1, so `N` gives 0.0 for one.
+
+Two more things the language has and the corpus does not touch. The tokeniser
+knows the literals **`TRUE`** and **`FALSE`** without the symbol table
+(`0x10048a40`, `0x10048a48`, used at `0x10015973` and `0x100159a6`;
+`varset.var` happens to declare them 1 and 0 as well, so nothing turns on it).
+And it rewrites operator 1 into operator 7 — binary `-` into Sign change — when
+a state word it carries is zero (`0x1001541e`–`0x10015429`), which is how the
+unary minus is recognised.
+
+**What is still not read** is the parser above the arms: the flagged four take
+a branch of their own (`0x1001543b`) instead of going through the precedence
+stack, which is what priority 100 says, and how that branch differs in detail
+was not followed.
+
+### What the corpus uses — *measured*
+
+All **1379** formulas, **198** distinct expressions. The only non-alphanumeric
+characters that appear inside an expression are `+` 106, `-` 50, `*` 29 and
+five bracket pairs. **50 of 50** minus signs have a left operand, so every one
+is Subtraction and **Sign change is never used**. The 11 identifiers are all
+`varset.var` declarations — `fTemp`, `fT`, `fDifficulty`, `dTemp`, `dTemp3`,
+`dT`, `dT2`, `dTime0`, `dBuildingProtectHits`, `dPlaceProtectHits`, `df5` —
+and neither `TRUE` nor `FALSE` appears. The five bracket pairs group nothing:
+`( df5 + 4 )`, `( df5 + 2 )`, `( df5 - 3 )`. So the corpus uses **3 of the 13**,
+at priorities 1 and 2 only. The commonest are `fTemp + 0.00001` (44),
+`fTemp + 0.001` (23), `fTemp + 0.0001` (22), the protect-hit differences (28
+lines across four forms) and the difficulty ramps in the shape
+`20 + 55*fDifficulty` (25 lines, 24 of them distinct).
+
+**The control on a negative** is that the scan can see the characters it says
+are absent. The raw `.fml` files hold `/` **116** times — 58 files × the two
+slashes of `//FormulaSet export file` — and the census counts every one, with
+zero inside an expression. The arithmetic closes on both sides: 1384 `(` and
+1384 `)` against 1379 `FUNCTION(…)` wrappers plus the 5 real pairs, 2758 `,`
+against 1379 × 2, and no other non-alphanumeric byte anywhere. A `/`, `^`, `&`,
+`|`, `!`, `N`, `S`, `B` or `A` in any of the 1379 lines would have been
+counted.
+
+So **ten of the thirteen operators are never exercised by a shipped mission**.
+An engine can implement them from the arms above — [the
+engine](../engine/crates/parkan-sim/src/script.rs) does — but play would not
+show a wrong one.
 
 ## The top bit is `CLASS_BUILDING` — *measured*, and *read*
 
@@ -713,12 +915,18 @@ capturer — which is why the table stops one call deep.
   function 69 stores. What `MESSAGE_INFO`'s value selects in `iron3d.dll` is
   read: a `messages.cfg` id, played as [34-progression.md](34-progression.md)
   describes.
-- **Whether any script depends on a constant landing inside a false block.**
-  The engine does it 63 times over; the scripts may overwrite the variable
-  before reading it every time.
-- **Five labels no goto aims at**, and why one label sits inside a block.
-- **`.fml` operators the corpus never uses** — `Division`, `Power`, `And`,
-  `Or`, `Not`, `Sign change` and the one-letter `N`, `S`, `B` and `A` —
-  beyond their names and arities.
+- ~~**Whether any script depends on a constant landing inside a false block.**~~
+  Now answered: **no**, over all 121 (constant, enclosing `if`) pairs, with a
+  control that returns 98 on the writes the block does guard ([Does any script
+  depend on it?](#does-any-script-depend-on-it--measured)).
+- ~~**Five labels no goto aims at**, and why one label sits inside a block.~~
+  Now read: the five are one dead label repeated, and the sixth is an ordinary
+  common exit ([Five labels are dead
+  code](#five-labels-are-dead-code-and-one-is-not--measured)).
+- ~~**`.fml` operators the corpus never uses** — beyond their names and
+  arities.~~ All thirteen arms are now read ([The `.fml`
+  operators](#the-fml-operators--read-and-measured)). What is still not
+  followed is the **parser** above them: the branch at `0x1001543b` that the
+  four priority-100 operators take instead of the precedence stack.
 - **`.trf`**, the research tree — identified above, and read in
   [16-research.md](16-research.md).

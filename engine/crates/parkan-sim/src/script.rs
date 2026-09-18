@@ -43,12 +43,16 @@ impl Type {
     }
 }
 
-/// A float truncated toward zero to 64 bits, low word kept (`_ftol`); out of range
-/// it is the x87's indefinite integer, whose low word is 0.
-fn ftol(f: f32) -> u32 {
-    let f = f64::from(f);
+/// A value truncated toward zero to 64 bits, low word kept (`_ftol`, `0x1001df70`);
+/// out of range it is the x87's indefinite integer, whose low word is 0.
+fn truncate(f: f64) -> u32 {
     // 2^63: the first float no i64 holds.
     if f.is_finite() && f.abs() < 9_223_372_036_854_775_808.0 { f.trunc() as i64 as u32 } else { 0 }
+}
+
+/// A float truncated the same way, which is how the getters and setters read one.
+fn ftol(f: f32) -> u32 {
+    truncate(f64::from(f))
 }
 
 /// One variable: its type and its four bytes.
@@ -192,7 +196,8 @@ enum Expr {
 }
 
 /// A binary operator's priority, by the evaluator's own operator table
-/// (`ai.dll:0x10037c90`): `+ - |` 1, `* / &` 2, `^` 3.
+/// (`ai.dll:0x10047c70`, 13 records the count at `0x10047c68` gives): `+ - |` 1,
+/// `* / &` 2, `^` 3.
 fn binary_priority(op: char) -> Option<u8> {
     match op {
         '+' | '-' | '|' => Some(1),
@@ -293,28 +298,46 @@ impl Parser<'_> {
                 let op = name.chars().next()?;
                 Some(Expr::Unary(op, Box::new(self.expression(unary_priority(op)? + 1)?)))
             }
+            // The tokeniser knows these two without the symbol table (`0x10015973`,
+            // `0x100159a6`); `varset.var` declares them 1 and 0 as well.
+            Token::Name(name) if name == "TRUE" => Some(Expr::Number(1.0)),
+            Token::Name(name) if name == "FALSE" => Some(Expr::Number(0.0)),
             Token::Name(name) => self.names.iter().position(|n| *n == name).map(Expr::Var),
             Token::Close => None,
         }
     }
 }
 
-/// STAND-IN: docs/15-behaviour.md#a-statement -- the formula parser and its evaluator
-/// (`0x10015b30`) are not read, only their operator table. An expression parses by
-/// that table's priorities, left to right among equals, and evaluates in doubles. `!`
-/// is 1 for 0, `&` and `|` are logical, `N` holds to 0..1, `S` is the sign, `B` 1 for
-/// anything but 0 and `A` the absolute value; a name that is not a variable is refused.
-/// The shipped formulas use numbers, variables, `+ - *` and brackets alone.
+/// STAND-IN: docs/15-behaviour.md#the-fml-operators--read-and-measured -- the thirteen
+/// arms of the evaluator are read and [`evaluate`] follows them, but the parser above
+/// them is not: the tokeniser hands the four flagged operators (`N`, `S`, `B`, `A`,
+/// priority 100) to a branch of its own rather than to the precedence stack
+/// (`0x1001543b`), and what that branch does differently is not followed. Here
+/// everything parses off the table's
+/// priorities, left to right among equals, and evaluates in doubles where the engine
+/// keeps its stack in 4-byte floats. A name that is neither an operator, `TRUE`,
+/// `FALSE` nor a variable is refused. The shipped formulas use numbers, variables,
+/// `+ - *` and brackets alone, so only those three arms are exercised in play.
 fn parse_formula(text: &str, names: &[String]) -> Option<Expr> {
     let mut parser = Parser { tokens: tokens(text)?, at: 0, names };
     let expr = parser.expression(0)?;
     (parser.at == parser.tokens.len()).then_some(expr)
 }
 
-fn truth(v: f64) -> f64 {
-    if v != 0.0 { 1.0 } else { 0.0 }
+/// What the three arms that fold a value down to a flag test (`0x10015e53`,
+/// `0x10015e82`, `0x10015eb1`, all *read*): the value through `_ftol` first, so
+/// anything that truncates to zero -- 0.5, -0.9 -- is false.
+fn truthy(v: f64) -> bool {
+    truncate(v) != 0
 }
 
+fn flag(held: bool) -> f64 {
+    if held { 1.0 } else { 0.0 }
+}
+
+/// One expression, arm for arm as the evaluator's 13-entry jump table runs them
+/// (`ai.dll:0x10016064`, *read*). Every comparison below is the x87's, so a NaN is
+/// unordered and falls to the arm's else.
 fn evaluate(expr: &Expr, vars: &[Var]) -> f64 {
     match expr {
         Expr::Number(n) => *n,
@@ -322,19 +345,31 @@ fn evaluate(expr: &Expr, vars: &[Var]) -> f64 {
         Expr::Unary(op, a) => {
             let a = evaluate(a, vars);
             match op {
+                // 7 Sign change: `fchs`.
                 '-' => -a,
-                '!' => 1.0 - truth(a),
-                'N' => a.clamp(0.0, 1.0),
-                'S' => {
-                    if a > 0.0 {
+                // 8 Not.
+                '!' => flag(!truthy(a)),
+                // 9 Normalisator: 0 below -1, the ramp (x + 1)/2 between, 1 above 1.
+                'N' => {
+                    if a > 1.0 {
                         1.0
-                    } else if a < 0.0 {
-                        -1.0
+                    } else if a >= -1.0 {
+                        (a + 1.0) * 0.5
                     } else {
                         0.0
                     }
                 }
-                'B' => truth(a),
+                // 10 Significator: the value itself, but only where it is positive.
+                'S' => {
+                    if a > 0.0 {
+                        a
+                    } else {
+                        0.0
+                    }
+                }
+                // 11 Booleanisator: positive, not merely non-zero.
+                'B' => flag(a > 0.0),
+                // 12 Absolute.
                 _ => a.abs(),
             }
         }
@@ -344,10 +379,20 @@ fn evaluate(expr: &Expr, vars: &[Var]) -> f64 {
                 '+' => a + b,
                 '-' => a - b,
                 '*' => a * b,
-                '/' => a / b,
+                // 3 Division tests the divisor against 0 first and answers 0 rather
+                // than dividing (`0x10015e1f`), so no formula can raise an exception.
+                '/' => {
+                    if b == 0.0 || b.is_nan() {
+                        0.0
+                    } else {
+                        a / b
+                    }
+                }
+                // 4 Power, through the CRT's `pow` (`0x10021030`).
                 '^' => a.powf(b),
-                '&' => truth(a) * truth(b),
-                _ => truth(truth(a) + truth(b)),
+                // 5 And, 6 Or.
+                '&' => flag(truthy(a) && truthy(b)),
+                _ => flag(truthy(a) || truthy(b)),
             }
         }
     }
@@ -507,7 +552,10 @@ impl Interpreter {
         node == RERUN
     }
 
-    /// A statement, jump or return acts only while the innermost block holds.
+    /// A statement, jump or return acts only while the innermost block holds. Four of
+    /// the executor's eight arms open with the same condition test -- the statement,
+    /// goto, switch and return, table entries 0, 4, 5 and 6 (*read*). The constant's,
+    /// entry 7, does not; nor does the label's, entry 3, which has nothing to guard.
     fn blocked(&self) -> bool {
         self.conditions.last() == Some(&false)
     }
@@ -534,16 +582,25 @@ impl Interpreter {
                     (Some(a), Some(b)) => compare_floats(n.opcode, a.float(), b.float()),
                     _ => false,
                 };
+                // The comparison runs even inside a false block -- it can read a
+                // variable a suppressed constant clobbered -- but the byte it pushes is
+                // forced to 0 there, so it cannot open a live one (`0x1001219f`).
                 let enclosing = self.conditions.last().copied().unwrap_or(true);
                 self.conditions.push(holds && enclosing);
                 Flow::Next
             }
+            // A spare end clamps at zero rather than going negative (`0x100121cb`).
             scr::END => {
                 self.conditions.pop();
                 Flow::Next
             }
+            // Nothing: the arm pops its frame and returns (`0x10012376`). Five of the
+            // corpus's 57 labels are reached only by falling into one.
             scr::LABEL => Flow::Next,
             scr::GOTO | scr::SWITCH | scr::RETURN if self.blocked() => Flow::Next,
+            // A taken goto zeroes the open-block count before it sets the node
+            // (`0x1001226e`), so a label inside an `if` lands at depth 0 and the `end`
+            // behind it decrements to -1 and is clamped back.
             scr::GOTO => match n.operands.first() {
                 Some(&target) => {
                     self.conditions.clear();
@@ -561,8 +618,10 @@ impl Interpreter {
             },
             scr::RETURN => Flow::Stop,
             scr::CONST => {
-                // Written whatever the condition (`0x100121e2`): as a DWORD into a
-                // DWORD, and its bits through the float setter into anything else.
+                // Written whatever the condition (`0x100121e2`): the one arm of the
+                // eight that goes straight to the destination without testing the
+                // condition byte. As a DWORD into a DWORD, and its bits through the
+                // float setter into anything else.
                 let word = n.source() as u32;
                 if let Some(v) = self.var_mut(n.destination()) {
                     if v.ty == Type::Dword {
@@ -661,6 +720,10 @@ mod tests {
     }
     fn jump(kind: i32, target: i32) -> Node {
         node([-1, -1, -1, kind], NO_RELATION, &[target], -1)
+    }
+    /// A label is bare: `head = (-1, -1, -1, 2)`, no operands, no trailer, on all 57.
+    fn label() -> Node {
+        node([-1, -1, -1, scr::LABEL], NO_RELATION, &[], -1)
     }
 
     fn interpreter(handlers: Vec<Vec<Node>>, formulas: &[&str]) -> Interpreter {
@@ -814,5 +877,75 @@ mod tests {
     fn a_formula_with_an_unknown_name_is_refused() {
         let script = Script { magic: scr::MAGIC, handlers: Vec::new() };
         assert!(Interpreter::new(script, &["nowhere + 1".to_string()], &table()).is_err());
+    }
+
+    /// `c5m1p`'s `PBM_BASE_DEFENCE_Start`: the whole body is one block, and the goto at
+    /// node 3 lands on the label at node 9 -- which is inside it. The goto zeroes the
+    /// open-block count, so the `end` behind the label clamps rather than going
+    /// negative, and the next handler starts clean.
+    #[test]
+    fn a_goto_to_a_label_inside_a_block_leaves_no_block_open() {
+        let mut i = interpreter(
+            vec![vec![
+                if_(1, D0, D0), // true: the handler's whole body
+                jump(scr::GOTO, 3),
+                call(30, -1, &[]), // skipped over
+                label(),
+                end(), // clamped: the goto already closed the block
+                call(31, -1, &[]),
+            ]],
+            &[],
+        );
+        let mut calls = Calls::default();
+        i.run(0, &mut calls);
+        assert_eq!(calls.0.iter().map(|c| c.0).collect::<Vec<_>>(), [31]);
+    }
+
+    /// The five unaimed labels are `PBM_BUILDING_PROTECT_Continue`'s last node: reached
+    /// by falling in from the node before, and doing nothing when it is.
+    #[test]
+    fn a_label_fallen_into_does_nothing() {
+        let mut i = interpreter(vec![vec![call(30, -1, &[]), label()], vec![call(31, -1, &[])]], &[]);
+        let mut calls = Calls::default();
+        i.run(0, &mut calls);
+        assert_eq!(calls.0.iter().map(|c| c.0).collect::<Vec<_>>(), [30]);
+    }
+
+    /// The thirteen operators, as their arms compute them. Ten are never reached by a
+    /// shipped formula, so only `+`, `-` and `*` are exercised in play.
+    #[test]
+    fn the_operators_are_the_evaluators() {
+        let names: Vec<String> = table().iter().map(|v| v.name.clone()).collect();
+        let value = |text: &str| evaluate(&parse_formula(text, &names).expect("parses"), &[]);
+        assert_eq!(value("3 + 4"), 7.0);
+        assert_eq!(value("3 - 4"), -1.0);
+        assert_eq!(value("3 * 4"), 12.0);
+        assert_eq!(value("3 / 4"), 0.75);
+        assert_eq!(value("2 ^ 10"), 1024.0);
+        // Division tests the divisor first and answers 0 rather than dividing.
+        assert_eq!(value("3 / 0"), 0.0);
+        assert_eq!(value("0 / 0"), 0.0);
+        // And, Or and Not truncate first, so a fraction is false.
+        assert_eq!(value("0.5 & 1"), 0.0);
+        assert_eq!(value("2 & 1"), 1.0);
+        assert_eq!(value("0.5 | 0.5"), 0.0);
+        assert_eq!(value("0.5 | 1"), 1.0);
+        assert_eq!(value("!0.5"), 1.0);
+        assert_eq!(value("!1"), 0.0);
+        // Sign change, and the four flagged ones.
+        assert_eq!(value("0 - -4"), 4.0);
+        assert_eq!(value("N 2"), 1.0);
+        assert_eq!(value("N 0"), 0.5);
+        assert_eq!(value("N(0 - 2)"), 0.0);
+        assert_eq!(value("S 3"), 3.0);
+        assert_eq!(value("S(0 - 3)"), 0.0);
+        assert_eq!(value("B 3"), 1.0);
+        assert_eq!(value("B(0 - 3)"), 0.0);
+        assert_eq!(value("A(0 - 3)"), 3.0);
+        // The tokeniser's own two literals.
+        assert_eq!(value("TRUE + FALSE"), 1.0);
+        // Priority: `^` above `*` and `/` above `+` and `-`.
+        assert_eq!(value("1 + 2 * 3 ^ 2"), 19.0);
+        assert_eq!(value("1 + ( 2 * 3 ) ^ 2"), 37.0);
     }
 }

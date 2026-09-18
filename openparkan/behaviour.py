@@ -103,6 +103,17 @@ SWITCH = 4          # continue in the handler whose index is the operand
 RETURN = 5          # stop running the handler
 CONST = 6           # write head[2], as a plain number, to the destination
 
+#: The executor's jump table, indexed by ``kind + 1``, and the arm the
+#: constant takes.  Four of the eight -- the statement's, the goto's, the
+#: switch's and the return's -- open with the same five instructions, which
+#: fetch the open-block count and give up when the innermost condition byte is
+#: zero; ``CONDITION_TEST`` is their opening bytes.  The constant's arm has no
+#: test at all, which is why a constant inside a false block still writes, and
+#: the label's has nothing to guard: it pops its frame and returns.
+EXECUTOR_TABLE = 0x10012380
+CONSTANT_ARM = 0x100121E2
+CONDITION_TEST = bytes.fromhex("8b466c85c07e0c8a4c064b84c9")
+
 #: How many operands each handler of the function table reads, by function
 #: id -- out of ``ai.dll`` by ``analysis/scrtable.py``, which fetches each
 #: operand the same way.  The scripts pass exactly this many on 55 of the 57
@@ -168,6 +179,61 @@ DESTROYED = 0xFFFE
 #: line per statement that evaluates one.
 FORMULAS = ".fml"
 FORMULA_HEADER = "//FormulaSet export file"
+
+#: The expression language the ``.fml`` files are written in, as ``ai.dll``
+#: holds it: ``(name, symbol, arity, flag, priority)`` for each of the 13
+#: operators, in the order the evaluator's jump table (``0x10016064``) runs
+#: them.  What each computes is read from its arm; see
+#: ``docs/15-behaviour.md``.  The corpus uses three of them.
+OPERATORS = (
+    ("Addition", "+", 2, 0, 1),
+    ("Subtraction", "-", 2, 0, 1),
+    ("Multiplication", "*", 2, 0, 2),
+    ("Division", "/", 2, 0, 2),
+    ("Power", "^", 2, 0, 3),
+    ("And", "&", 2, 0, 2),
+    ("Or", "|", 2, 0, 1),
+    ("Sign change", "-", 1, 0, 1),
+    ("Not", "!", 1, 0, 1),
+    ("Normalisator", "N", 1, 1, 100),
+    ("Significator", "S", 1, 1, 100),
+    ("Booleanisator", "B", 1, 1, 100),
+    ("Absolute", "A", 1, 1, 100),
+)
+
+#: Where that table lives, and how it is laid out: a 256-byte name, then the
+#: arity, the symbol, a flag and a priority, ``0x110`` to a record.  The
+#: evaluator indexes the copy at ``OPERATOR_TABLE`` (``0x10015cba``) and the
+#: count sits in the dword eight bytes in front of it; the image carries a
+#: second, byte-identical copy at ``OPERATOR_TABLE_COPY`` that nothing points
+#: at.  An earlier note here gave that copy's address eight bytes early, which
+#: put every field one record out.
+OPERATOR_TABLE = 0x10047C70
+OPERATOR_COUNT = 0x10047C68
+OPERATOR_TABLE_COPY = 0x10037C98
+OPERATOR_STRIDE = 0x110
+OPERATOR_FIELDS = 0x100
+
+#: The evaluator's own jump table: one arm per operator, in table order
+#: (``0x10015de8`` dispatches through it).
+EVALUATOR_TABLE = 0x10016064
+
+#: The two literals the tokeniser knows without the symbol table
+#: (``0x10048a40``, ``0x10048a48``).  ``varset.var`` declares them 1 and 0 as
+#: well, and no shipped formula uses either.
+FORMULA_LITERALS = {"TRUE": 1.0, "FALSE": 0.0}
+
+#: Which operand each function writes back rather than reads, by function id
+#: -- the "out" column of the function table in ``docs/15-behaviour.md``.  A
+#: handler fetches its other operands with one of the getters; these it sets.
+OUT_OPERANDS = {18: (0, 1), 19: (0, 1, 2), 25: (1,), 35: (1,), 36: (1,),
+                37: (0,), 40: (0, 1, 2), 47: (1,), 64: (1,), 66: (1,),
+                67: (0,), 71: (2,)}
+
+#: The five handlers that are neither the engine's events nor a problem's
+#: halves.  Nothing but a ``SWITCH`` reaches them, so they are not entry
+#: points: the engine never starts a run in one.
+SUBROUTINES = ("All_Defence", "BUILD_MINE", "Easy", "Normal", "Hard")
 
 #: The engine's own event handlers: present in all 58 scripts.
 EVENTS = (
