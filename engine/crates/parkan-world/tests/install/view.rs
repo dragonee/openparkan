@@ -449,3 +449,44 @@ fn mission_01s_own_panel_keeps_the_running_hero_steady_in_its_view() {
     assert!(stepped_step > 0.2, "the step's end jumps {stepped_step} m in a tick");
     assert!(drawn_step < 0.05, "the camera moves {drawn_step} m against the drawn hero in a tick");
 }
+
+/// The software mouse cursor is the last thing the frame draws. Every other batch of the HUD
+/// lies under the text, which the renderer lays down in its own pass after the art, so a
+/// pointer over the commander's rows was painted on by their words; it draws in the top layer
+/// instead, over the text as well (docs/42, "The cursor shows a state").
+#[test]
+#[ignore = "needs the game install"]
+fn in_command_mode_the_cursor_is_the_one_thing_drawn_over_the_panels_text() {
+    use glam::Mat4;
+    use parkan_world::cockpit::Cockpit;
+    use parkan_world::hud::{Layer, Pages, Space};
+    use parkan_world::text::GameFont;
+
+    let game = gamedir::find(None).expect("a Parkan install: set PARKAN_DIR");
+    let (mut play, m) = mission_03_play();
+    let bunker = object_target(&play, &m, "sbunk01.dat");
+    play.units[bunker].clan = Some(play.player_clan);
+    play.enter_command(bunker);
+    play.command_frame(0.0, parkan_world::command::Edges::default());
+    let pages = Pages::open(&game).unwrap();
+    let mut cockpit = Cockpit::open(&game, &pages, &play).unwrap();
+    let (font, menu) = (GameFont::ui(&game, "GAME_FONT").unwrap(), GameFont::ui(&game, "MENU_FONT").unwrap());
+    // The builders' page, with the cursor resting on its rows as PICK.
+    cockpit.update(&mut play, 0.0);
+    cockpit.commander.turn(&mut play, 3, 0.0);
+    cockpit.commander.cursor = Some([200.0, 140.0]);
+    cockpit.commander.cursor_state = 2;
+    let drawn = cockpit.draw(&play, Space::new(640.0, 480.0), &font, &menu, Mat4::IDENTITY);
+    assert!(drawn.text.iter().any(|r| !r.text.is_empty()), "the page's rows are drawn in GAME_FONT");
+    let top: Vec<usize> = drawn
+        .batches
+        .iter()
+        .enumerate()
+        .filter(|(_, b)| b.layer == Layer::OverText)
+        .map(|(i, _)| i)
+        .collect();
+    assert_eq!(top.len(), 1, "one batch draws over the text");
+    assert_eq!(top[0], drawn.batches.len() - 1, "and it is the last of the frame");
+    // The cursor's one quad, two triangles of three vertices.
+    assert_eq!(drawn.batches[top[0]].vertices.len(), 6);
+}

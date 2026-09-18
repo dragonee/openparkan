@@ -12,7 +12,7 @@ use parkan_sim::behaviour::Task;
 use parkan_sim::damage::Life;
 
 use super::{Cockpit, Ink, argb};
-use crate::hud::{Blend, Piece, Pin};
+use crate::hud::{Blend, Layer, Piece, Pin};
 use crate::play::{Play, ROBOT_HERO};
 
 /// The two panels: the driven unit's target, and the driven unit itself.
@@ -268,7 +268,7 @@ pub fn draw(
     let mut views = Vec::new();
     views.extend(panel(cockpit, ink, play, Side::Target, view_proj, now_ms));
     views.extend(panel(cockpit, ink, play, Side::Own, view_proj, now_ms));
-    ink.painter.over = false;
+    ink.painter.layer = Layer::UnderViews;
     views
 }
 
@@ -294,7 +294,7 @@ fn panel(
 ) -> Option<UnitView> {
     let own = side == Side::Own;
     ink.painter.pin = if own { Pin::BOTTOM_RIGHT } else { Pin::BOTTOM_LEFT };
-    ink.painter.over = false;
+    ink.painter.layer = Layer::UnderViews;
     let white = [1.0; 4];
     let put = |ink: &mut Ink, skin: &crate::hud::Skin, name: &str, rect: [f32; 4]| {
         if let Some(p) = skin.get(name) {
@@ -419,7 +419,7 @@ fn panel(
     };
 
     // 7–10, over the view.
-    ink.painter.over = true;
+    ink.painter.layer = Layer::OverViews;
     let arc = |percent: f32| {
         let p = percent.round().clamp(0.0, 100.0) as i32;
         let t = (94 * (100 - p) / 100) as f32;
@@ -544,7 +544,7 @@ fn frame(
     }
     let [r, g, b] = play.mark_colour(play.units.get(t).and_then(|u| u.clan)).map(|c| f32::from(c) / 255.0);
     let colour = [r, g, b, 1.0];
-    let (pin, over) = (ink.painter.pin, ink.painter.over);
+    let (pin, layer) = (ink.painter.pin, ink.painter.layer);
     ink.painter.pin = Pin::CENTRE;
     let line = 1.0 / space.scale();
     let (x0, y0, x1, y1) = (cx - half, cy - half, cx + half, cy + half);
@@ -557,7 +557,7 @@ fn frame(
         ink.painter.fill(Blend::Alpha, rect, colour);
     }
     ink.painter.pin = pin;
-    ink.painter.over = over;
+    ink.painter.layer = layer;
 }
 
 #[cfg(test)]

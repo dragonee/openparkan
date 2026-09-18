@@ -7,6 +7,7 @@
 use anyhow::{Context, Result, anyhow};
 use bytemuck::{Pod, Zeroable};
 use glam::{Mat4, Vec2, Vec3};
+use parkan_world::hud::Layer;
 use wgpu::util::DeviceExt;
 
 pub mod dome;
@@ -617,13 +618,13 @@ impl Renderer {
         self.draw_views(&mut encoder, target, depth, (width, height), true);
         if let Some(ui) = &self.ui {
             let mut pass = pass_over(&mut encoder, display, depth, "hud under", wgpu::LoadOp::Load);
-            ui.draw(&mut pass, false);
+            ui.draw(&mut pass, Layer::UnderViews);
         }
         self.draw_views(&mut encoder, target, depth, (width, height), false);
         {
             let mut pass = pass_over(&mut encoder, display, depth, "overlay", wgpu::LoadOp::Load);
             if let Some(ui) = &self.ui {
-                ui.draw(&mut pass, true);
+                ui.draw(&mut pass, Layer::OverViews);
             }
             if let Some(hud) = &self.hud {
                 hud.draw(&mut pass);
@@ -633,6 +634,11 @@ impl Renderer {
             }
             for text in self.more_text.iter().flatten() {
                 text.draw(&mut pass);
+            }
+            // The mouse cursor last of all, over the text as well (docs/42, "The cursor
+            // shows a state").
+            if let Some(ui) = &self.ui {
+                ui.draw(&mut pass, Layer::OverText);
             }
         }
         queue.submit([encoder.finish()]);

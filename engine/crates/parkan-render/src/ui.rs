@@ -10,7 +10,7 @@
 //! pick, and how the 2D layer samples, are not read: pages are sampled nearest.
 
 use bytemuck::{Pod, Zeroable};
-use parkan_world::hud::{Batch, Blend, Page};
+use parkan_world::hud::{Batch, Blend, Layer, Page};
 
 use crate::DEPTH_FORMAT;
 
@@ -33,7 +33,7 @@ pub struct UiRenderer {
     white: u32,
     vertices: Option<wgpu::Buffer>,
     capacity: usize,
-    runs: Vec<(Blend, bool, std::ops::Range<u32>)>,
+    runs: Vec<(Blend, Layer, std::ops::Range<u32>)>,
 }
 
 impl UiRenderer {
@@ -223,7 +223,7 @@ impl UiRenderer {
                 colour: v.colour,
             }));
             if vertices.len() as u32 > start {
-                self.runs.push((b.blend, b.over, start..vertices.len() as u32));
+                self.runs.push((b.blend, b.layer, start..vertices.len() as u32));
             }
         }
         if vertices.is_empty() {
@@ -243,12 +243,12 @@ impl UiRenderer {
         }
     }
 
-    /// The batches under the views of units, or with `over` those over them.
-    pub fn draw(&self, pass: &mut wgpu::RenderPass<'_>, over: bool) {
+    /// The batches of one layer, the layers drawn in their own order.
+    pub fn draw(&self, pass: &mut wgpu::RenderPass<'_>, layer: Layer) {
         let Some(buffer) = &self.vertices else { return };
         pass.set_bind_group(0, &self.bind_group, &[]);
         pass.set_vertex_buffer(0, buffer.slice(..));
-        for (blend, _, range) in self.runs.iter().filter(|r| r.1 == over) {
+        for (blend, _, range) in self.runs.iter().filter(|r| r.1 == layer) {
             pass.set_pipeline(match blend {
                 Blend::Alpha => &self.alpha,
                 Blend::Add => &self.add,

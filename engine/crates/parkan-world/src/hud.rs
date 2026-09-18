@@ -246,12 +246,24 @@ pub struct Vertex {
     pub colour: [f32; 4],
 }
 
-/// A run of triangles drawn the same way, in order: under the views of units the HUD
-/// shows, or over them.
+/// Where a run of triangles draws among the views of units the HUD shows and its text.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Layer {
+    /// Under the views.
+    #[default]
+    UnderViews,
+    /// Over the views, under the text.
+    OverViews,
+    /// Over the text as well: the mouse cursor, which nothing is drawn on top of
+    /// (docs/42, "The cursor shows a state").
+    OverText,
+}
+
+/// A run of triangles drawn the same way, in its layer.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Batch {
     pub blend: Blend,
-    pub over: bool,
+    pub layer: Layer,
     pub vertices: Vec<Vertex>,
 }
 
@@ -264,20 +276,20 @@ pub struct Painter {
     pub space: Space,
     /// Where what is pushed from now on is pinned.
     pub pin: Pin,
-    /// Whether what is pushed from now on draws over the views of units.
-    pub over: bool,
+    /// The layer what is pushed from now on draws in.
+    pub layer: Layer,
     pub batches: Vec<Batch>,
 }
 
 impl Painter {
     pub fn new(space: Space) -> Painter {
-        Painter { space, pin: Pin::CENTRE, over: false, batches: Vec::new() }
+        Painter { space, pin: Pin::CENTRE, layer: Layer::UnderViews, batches: Vec::new() }
     }
 
     fn triangles(&mut self, blend: Blend) -> &mut Vec<Vertex> {
-        let over = self.over;
-        if self.batches.last().is_none_or(|b| b.blend != blend || b.over != over) {
-            self.batches.push(Batch { blend, over, vertices: Vec::new() });
+        let layer = self.layer;
+        if self.batches.last().is_none_or(|b| b.blend != blend || b.layer != layer) {
+            self.batches.push(Batch { blend, layer, vertices: Vec::new() });
         }
         &mut self.batches.last_mut().expect("pushed above").vertices
     }

@@ -9,7 +9,7 @@ use parkan_sim::hq;
 use super::panels::{life_share, order_status};
 use super::weapons::fill_colour;
 use super::{Cockpit, Ink, WHITE, argb, factory, map, messages};
-use crate::hud::{Blend, Pin};
+use crate::hud::{Blend, Layer, Pin};
 use crate::play::Play;
 use crate::selection::{
     BATTLE_UNITS, BUILDERS, BUNKERS, FACTORY, OTHER_BUILDINGS, RESEARCH_CENTRE, TOWERS, TRANSPORTS,
@@ -575,7 +575,10 @@ pub fn draw(
 }
 
 /// The band in state 7, and the software cursor of the state (`0x100585b0`, `0x10057060`):
-/// four 16 × 16 phases of `new_ui1` stepping every 150 ms, its extent the hot spot.
+/// four 16 × 16 phases of `new_ui1` stepping every 150 ms, its extent the hot spot. The
+/// cursor draws in the top layer: the HUD's text is laid out into its own pass, drawn after
+/// all of the art, so the rows and the order menu under the pointer painted over it, where
+/// the interface drawing the cursor last leaves nothing on top of it.
 ///
 /// STAND-IN: docs/42-selection.md#the-cursor-shows-a-state--read-and-measured -- whether the
 /// display's slot 12 answers, which picks the system's cursor, is not read: the software
@@ -597,6 +600,7 @@ fn band_and_cursor(cockpit: &Cockpit, ink: &mut Ink, now_ms: f64) {
     };
     let side = crate::pick::CURSOR_SIDE;
     let phase = ((now_ms / crate::pick::CURSOR_PHASE_MS).floor() as i64).rem_euclid(4) as f32;
+    let layer = std::mem::replace(&mut ink.painter.layer, Layer::OverText);
     ink.painter.sprite(
         Blend::Alpha,
         page,
@@ -604,6 +608,7 @@ fn band_and_cursor(cockpit: &Cockpit, ink: &mut Ink, now_ms: f64) {
         [at[0] - hot[0], at[1] - hot[1]],
         [1.0; 4],
     );
+    ink.painter.layer = layer;
 }
 
 pub(super) fn put(cockpit: &Cockpit, ink: &mut Ink, name: &str, rect: [f32; 4], colour: u32) {

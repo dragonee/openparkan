@@ -13,7 +13,7 @@ use parkan_formats::mission::KIND_UNIT;
 use super::{Cockpit, Ink, argb};
 use crate::assembly::Assembly;
 use crate::designs::{BoxLine, Designer, Node, Place, Rating, Tab};
-use crate::hud::{Blend, Pin};
+use crate::hud::{Blend, Layer, Pin};
 use crate::play::Play;
 
 /// A second click on the selected row within this long is a double click (`0x10047f10`).
@@ -1209,7 +1209,7 @@ fn draw_session(
             let py = py.clamp(10.0, 301.0);
             let px = px.clamp(195.0, 445.0);
             let green = argb(GREEN);
-            ink.painter.over = true;
+            ink.painter.layer = Layer::OverViews;
             ink.painter.line(Blend::Alpha, [DESTINATION_X, r], [445.0, r], 1.0, green);
             ink.painter.line(Blend::Alpha, [427.0, r.clamp(10.0, 301.0)], [427.0, py], 1.0, green);
             ink.painter.line(Blend::Alpha, [(px + 16.0).min(445.0), py], [427.0, py], 1.0, green);
@@ -1221,13 +1221,13 @@ fn draw_session(
             ] {
                 ink.painter.line(Blend::Alpha, a, b, 1.0, green);
             }
-            ink.painter.over = false;
+            ink.painter.layer = Layer::UnderViews;
         }
     }
 
     // The scan bands, over the views (`0x1009f750`).
     let cycle = (now_ms - s.opened_ms).rem_euclid(BAND_CYCLE_MS);
-    ink.painter.over = true;
+    ink.painter.layer = Layer::OverViews;
     for (rect, start) in [
         ([185.0, 10.0, 455.0, 304.0], 0.0),
         ([1.0, 241.0, 182.0, 396.0], 2000.0),
@@ -1261,7 +1261,7 @@ fn draw_session(
             ink.painter.sprite_to(Blend::Add, p, strip, [x0, top, x1 - x0, bottom - top], add);
         }
     }
-    ink.painter.over = false;
+    ink.painter.layer = Layer::UnderViews;
     previews
 }
 
