@@ -72,12 +72,24 @@ NO_FACE = 0xFFFF
 FACE_LINK_BITS = 2
 FACE_LINK_MASK = 0x3F
 FACE_NO_TWIN = 3
-#: Face flag ``0x02`` is on the floors of the buildings a unit walks through:
-#: it sits on exactly the 29 meshes that carry a path graph and on nothing
-#: else, and 5590 of its 6166 faces face straight up once posed (*measured*;
-#: no reader of it is established).  4 and 32 are the faces a round passes
-#: through (``ROUND_SKIPS_FACE``); 16 is on 384 vertical faces of 20 buildings.
+#: Face flag ``0x02`` is the **walkable surface** of the buildings a unit walks
+#: through: it sits on exactly the 29 meshes that carry a path graph, all in
+#: ``fortif.rlb``, and on nothing else.  All 6166 of its faces lie in a level-0
+#: slot, and posed into model space 6100 stand above the engine's own cos-80
+#: degree ground threshold (``landmesh.WALKABLE_NORMAL_Z``) -- ramps and stairs
+#: as well as flat floor -- of which 4258 are within 10 degrees of level.  It is
+#: a chosen subset: 1802 more of the same meshes' level-0 faces point within
+#: 10 degrees of up and carry nothing.  The collision push-out reads it
+#: (``Control.dll:0x1001dbce``); the ground search does not (*measured*, and
+#: *read*; ``docs/07-objects.md``).  4 and 32 are the faces a round passes
+#: through (``ROUND_SKIPS_FACE``); ``FACE_DOOR_LEAF`` is 16.
 FACE_BUILDING_FLOOR = 0x02
+#: Face flag ``0x10`` is the **broad face of a door leaf**, which the collision
+#: pass's door test requires (``AniMesh.dll:0x1000dbba``).  All 384 are vertical
+#: once posed, on 52 interior nodes of 20 ``fortif.rlb`` buildings, 50 of them
+#: animated; within a leaf's level-0 slot only its two broad sides carry it,
+#: never the slab's rim.
+FACE_DOOR_LEAF = 0x10
 STREAM_SUBOBJECT_NAME = 9
 STREAM_SUBOBJECT_HEADER = 1
 STREAM_BATCH = 13

@@ -968,7 +968,12 @@ impl Robot {
     }
 
     /// A chassis node's pose in the unit's frame, the chassis playing its frames as the
-    /// pose walk does ([`parkan_formats::mesh::Mesh::walk_pose`]).
+    /// pose walk does ([`parkan_formats::mesh::Mesh::walk_pose`]), and then — on a node a
+    /// `CONTACT_PLACE` contact carries, the twelve belts of the tracked chassis — turned to
+    /// lie along the ground under it and put back where it stood
+    /// ([`parkan_sim::machine::Walker::placed`], docs/28-chassis.md, "The belt lies along
+    /// the ground"). The turn goes on the world side, so it does not reach the node's own
+    /// children; every one of the twelve is a leaf.
     ///
     /// DEPARTURE: docs/30-turrets.md#aiming-and-the-camera--read-and-measured -- the game's
     /// body node yaws with the gait (±10° once a run cycle on the hero), and the turret,
@@ -979,13 +984,21 @@ impl Robot {
         let f = self.walker.frames(self.time_ms);
         let chassis = &self.chassis.mesh;
         let (a, b, w) = (f64::from(f.a), f64::from(f.b), f64::from(f.weight));
-        chassis.world_pose_by(node, |n| {
+        let pose = chassis.world_pose_by(node, |n| {
             if let Some(frame) = self.device_frame(n) {
                 return chassis.pose_at(n, f64::from(frame));
             }
             let pose = chassis.walk_pose(n, a, b, w);
             if n == 0 && self.steady { without_yaw(&pose, &chassis.local_pose(0)) } else { pose }
-        })
+        });
+        match self.walker.placed.iter().find(|&&(n, _)| n == node) {
+            Some(&(_, turn)) => {
+                let t = turn.to_array();
+                let turn = [f64::from(t[3]), f64::from(t[0]), f64::from(t[1]), f64::from(t[2])];
+                Pose { translation: pose.translation, rotation: multiply(turn, pose.rotation) }
+            }
+            None => pose,
+        }
     }
 
     /// The collision sphere's centre in the world.

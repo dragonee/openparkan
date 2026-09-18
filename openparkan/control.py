@@ -621,9 +621,15 @@ LEAN_SOURCES = {1: ("turn", 0), 2: ("turn", 1), 3: ("turn", 2),
 #:   only while that point's node is intact, or destroyed (``0x10001107``,
 #:   ``0x1001ac39``) -- a walker's limping states.  ``CONTACT_FALLBACK`` moves a
 #:   destroyed point on to the next control point whose node is intact.
-#:   ``CONTACT_SUPPORT`` counts it in the body's ground height, and
-#:   ``CONTACT_PLACE`` puts the node on the ground (``0x1001b00a``,
-#:   ``0x1001afcb``).  ``CONTACT_PLANTED`` is set at load on the states whose
+#:   ``CONTACT_SUPPORT`` counts it in the body's ground height
+#:   (``0x1001b00a``), and ``CONTACT_PLACE`` **lays the node the point carries
+#:   along the ground under it** (``0x1001afcb``, ``0x1001affd``): the ground
+#:   contact hands ``IAnimation`` slot 31 the contact's own axis and the ground
+#:   normal, and marks the carrier with node mask ``0x10``, which makes the pose
+#:   walk turn that node's world matrix by the rotation between them and put its
+#:   translation back.  The 12 contacts that carry it are the tracked chassis's
+#:   belts and nothing else (``docs/28-chassis.md``, "The belt lies along the
+#:   ground").  ``CONTACT_PLANTED`` is set at load on the states whose
 #:   last pose holds the point within ``PLANTED_WITHIN`` of its rest height
 #:   (``0x1001a328``); ``0x10`` and ``0x20`` ask the load to set
 #:   ``CONTACT_SUPPORT`` and ``CONTACT_PLACE`` from the pose as well.

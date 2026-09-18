@@ -10,9 +10,9 @@
 
 use std::collections::VecDeque;
 
-use glam::Vec3;
+use glam::{Quat, Vec3};
 use parkan_formats::control::{
-    ANY_REQUEST, CONTACT_PLANTED, CONTACT_SUPPORT, Controller, PLANTED_WITHIN, STATE_FIXED,
+    ANY_REQUEST, CONTACT_PLACE, CONTACT_PLANTED, CONTACT_SUPPORT, Controller, PLANTED_WITHIN, STATE_FIXED,
     STATE_GROUND_CONTACTS, STATE_JITTER, State,
 };
 use parkan_formats::cpt::ControlPoint;
@@ -120,6 +120,30 @@ impl Feet {
         Some(Vec3::new(at[0] as f32, at[1] as f32, at[2] as f32))
     }
 
+    /// The contact's own axis in the model's frame: the control point's vector turned by
+    /// the pose of the node it sits on, the same pose [`Feet::place`] puts the point in.
+    ///
+    /// *Measured*: on all twelve contacts that ask for it the point sits on node 0 and its
+    /// vector comes out along the model's up — `(0, −1, 0)` on the S-42t, whose root turns
+    /// −90° about x, and `(0, 0, 1)` on the M-42t and the L-42t. So it is the direction the
+    /// belt's ground normal is compared against.
+    pub fn axis(&self, point: i32, frames: Frames) -> Option<Vec3> {
+        let p = self.points.get(usize::try_from(point).ok()?)?;
+        let node = usize::try_from(p.nodes().0).ok().filter(|&n| n < self.mesh.nodes.len())?;
+        let (a, b, w) = (f64::from(frames.a), f64::from(frames.b), f64::from(frames.weight));
+        let pose = self.mesh.world_pose_by(node, |n| self.mesh.walk_pose(n, a, b, w));
+        let v = parkan_formats::pose::rotate(pose.rotation, p.direction.map(f64::from));
+        let v = Vec3::new(v[0] as f32, v[1] as f32, v[2] as f32);
+        (v.length_squared() > 1e-12).then(|| v.normalize())
+    }
+
+    /// The node a contact lives and dies with, which is also the node it lays along the
+    /// ground when its flags carry [`CONTACT_PLACE`] (the control point's third slot).
+    pub fn carrier(&self, point: i32) -> Option<usize> {
+        let p = self.points.get(usize::try_from(point).ok()?)?;
+        usize::try_from(p.nodes().1).ok().filter(|&n| n < self.mesh.nodes.len())
+    }
+
     /// Whether `state`'s last pose plants control point `point` (`0x1001a2d5`–`0x1001a328`):
     /// the mesh posed at pair B's last frame with all of the weight on B, the root's own
     /// height kept, puts the point within 0.1 of its height at rest.
@@ -170,6 +194,10 @@ pub struct Walker {
     /// since the caller last took them.
     pub planted: Vec<bool>,
     pub landed: Vec<usize>,
+    /// What the ground contact leaves on a [`CONTACT_PLACE`] contact: the node it carries
+    /// and the turn that lays that node along the ground under it, in the machine's own
+    /// frame. The pose walk turns the node's world pose by it and leaves it where it was.
+    pub placed: Vec<(usize, Quat)>,
     /// What the Wizard writes, when the AI drives: the velocity is taken as the machine's
     /// own, and the hull turns toward the heading.
     pub drive: Option<Drive>,
@@ -256,6 +284,7 @@ impl Walker {
             planting: Vec::new(),
             planted: Vec::new(),
             landed: Vec::new(),
+            placed: Vec::new(),
             drive: None,
         }
     }
@@ -469,19 +498,25 @@ impl Walker {
         let hit = ground.search(centre, r);
         self.ground = hit;
         let last = Frames { a: state.pair_a[1], b: state.pair_b[1], weight: self.machine.q };
-        let contacts: Vec<(Vec3, Option<Hit>)> = match &self.feet {
+        let searched: Vec<(u32, i32, Vec3, Option<Hit>)> = match &self.feet {
             Some(feet) if state.mode & STATE_GROUND_CONTACTS != 0 => state
                 .contacts
                 .iter()
-                .filter(|c| c.flags & CONTACT_SUPPORT != 0)
-                .filter_map(|c| feet.place(c.point, last))
-                .map(|at| {
+                .filter(|c| c.flags & (CONTACT_SUPPORT | CONTACT_PLACE) != 0)
+                .filter_map(|c| feet.place(c.point, last).map(|at| (c.flags, c.point, at)))
+                .map(|(flags, point, at)| {
                     let p = self.body.position + self.body.to_world(at);
-                    (p, ground.search(p, r))
+                    (flags, point, p, ground.search(p, r))
                 })
                 .collect(),
             _ => Vec::new(),
         };
+        self.lay_belts(&searched, last);
+        let contacts: Vec<(Vec3, Option<Hit>)> = searched
+            .iter()
+            .filter(|(flags, ..)| flags & CONTACT_SUPPORT != 0)
+            .map(|&(_, _, p, h)| (p, h))
+            .collect();
         let lift = if contacts.is_empty() {
             hit.filter(|h| centre.z - h.point.z < r).map(|h| h.point.z - centre.z + r)
         } else {
@@ -505,6 +540,43 @@ impl Walker {
                 self.body.ground_normal = normals.iter().sum::<Vec3>() / normals.len() as f32;
             }
         }
+    }
+
+    /// A [`CONTACT_PLACE`] contact lays its carrier node along the ground beneath it
+    /// (`Control.dll:0x1001affd`): docs/28-chassis.md, "The belt lies along the ground".
+    ///
+    /// The ground contact hands `IAnimation` slot 31 (`0x10005c90`) the contact's own axis
+    /// and the ground normal it has just found; the slot builds the rotation that takes the
+    /// first onto the second and leaves it on the node the contact carries, which the
+    /// ground contact has marked with node mask `0x10` (`0x1001a3af`). The pose walk then
+    /// turns that node's world pose by it and writes the translation back, so the node
+    /// **tilts where it stands** and the hull above it does not move.
+    ///
+    /// STAND-IN: docs/28-chassis.md#the-belt-lies-along-the-ground--read-and-measured --
+    /// the slot keeps the previous turn beside the current one and the walk slerps the two
+    /// by the mesh's pose-blend weight, and a contact whose node is dead is handed nulls,
+    /// which leaves identity and lets the node relax back to level. Node life is not
+    /// modelled on the walker (see [`Walker::land`]), and every one of the twelve shipped
+    /// contacts belongs to a velocity-driven state, whose weight never leaves 1 — so the
+    /// blend is the current turn and only that is kept.
+    fn lay_belts(&mut self, searched: &[(u32, i32, Vec3, Option<Hit>)], frames: Frames) {
+        let Some(feet) = self.feet.as_ref() else {
+            self.placed.clear();
+            return;
+        };
+        let level = Quat::from_rotation_z(-self.body.yaw);
+        self.placed = searched
+            .iter()
+            .filter(|(flags, ..)| flags & CONTACT_PLACE != 0)
+            .filter_map(|&(_, point, _, hit)| {
+                let node = feet.carrier(point)?;
+                let axis = feet.axis(point, frames)?;
+                // A point with no face under it is left level, as its own ground.
+                let normal = level * hit.map_or(Vec3::Z, |h| h.normal);
+                let normal = normal.try_normalize().unwrap_or(Vec3::Z);
+                Some((node, Quat::from_rotation_arc(axis, normal)))
+            })
+            .collect();
     }
 
     /// `0x1001e650`, once a tick: the map edge's push on the body sphere, taken as a
@@ -860,6 +932,71 @@ mod tests {
         let mut sunk = on_legs(0.2, [CONTACT_SUPPORT; 2]);
         sunk.advance(0.0, &g);
         assert!((sunk.body.position.z - 1.0).abs() < 1e-5, "{}", sunk.body.position.z);
+    }
+
+    /// A contact that sits on the body and carries the second node, as every tracked
+    /// chassis's `weel_*` does: the point's own axis is the model's up.
+    fn on_a_belt(flags: u32, yaw: f32) -> Walker {
+        let (mesh, _) = legs();
+        let mut c = crate::motion::tests::hero();
+        c.counts[1] = 1;
+        c.states = vec![State {
+            mode: STATE_ANCHOR | STATE_GROUND_CONTACTS,
+            pair_a: [1.0, 1.0],
+            pair_b: [1.0, 1.0],
+            contacts: vec![Contact { point: 0, flags, group: -1 }],
+            ..stand()
+        }];
+        c.costs = vec![0.0];
+        let point = ControlPoint {
+            name: String::new(),
+            a: [0.0, f32::from_bits(0), f32::from_bits(1)],
+            position: [0.0, 0.0, -1.0],
+            direction: [0.0, 0.0, 1.0],
+        };
+        Walker::new(c, &mesh, &[point], Vec3::new(500.0, 500.0, 3.0), yaw)
+    }
+
+    #[test]
+    fn a_flag_two_contact_lays_its_carrier_node_along_the_ground_and_a_flag_one_one_does_not() {
+        // A 1000 m field rising 100 in x: 5.71 degrees, normal (-0.0995, 0, 0.995).
+        let g =
+            quads(&[[[0.0, 0.0, 0.0], [1000.0, 0.0, 100.0], [1000.0, 1000.0, 100.0], [0.0, 1000.0, 0.0]]]);
+        let slope = Vec3::new(-100.0, 0.0, 1000.0).normalize();
+
+        let mut plain = on_a_belt(CONTACT_SUPPORT, 0.0);
+        plain.advance(2000.0, &g);
+        assert!(plain.placed.is_empty(), "flag 1 alone leaves the node level");
+
+        let mut belt = on_a_belt(CONTACT_SUPPORT | CONTACT_PLACE, 0.0);
+        belt.advance(2000.0, &g);
+        assert_eq!(belt.placed.len(), 1);
+        let (node, turn) = belt.placed[0];
+        assert_eq!(node, 1, "the node the point carries, not the one it sits on");
+        assert!((turn * Vec3::Z - slope).length() < 1e-5, "{:?}", turn * Vec3::Z);
+
+        // The turn is kept in the machine's own frame, so a bot facing another way tilts
+        // the same amount about its own axis.
+        let mut turned = on_a_belt(CONTACT_SUPPORT | CONTACT_PLACE, FRAC_PI_2);
+        turned.advance(2000.0, &g);
+        let (_, about) = turned.placed[0];
+        let want = Quat::from_rotation_z(-FRAC_PI_2) * slope;
+        assert!((about * Vec3::Z - want).length() < 1e-5, "{:?}", about * Vec3::Z);
+        let angle = |q: Quat| (q * Vec3::Z).dot(Vec3::Z).acos().to_degrees();
+        assert!((angle(turn) - angle(about)).abs() < 1e-4);
+        assert!((angle(turn) - 5.71).abs() < 0.01, "{}", angle(turn));
+    }
+
+    #[test]
+    fn a_belt_on_level_ground_and_one_over_nothing_are_not_turned_at_all() {
+        let mut level = on_a_belt(CONTACT_SUPPORT | CONTACT_PLACE, 0.4);
+        level.advance(2000.0, &field());
+        assert!((level.placed[0].1.angle_between(Quat::IDENTITY)).abs() < 1e-6);
+        // Off the mesh there is no face: the node stays as it stood.
+        let off = quads(&[[[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [10.0, 10.0, 0.0], [0.0, 10.0, 0.0]]]);
+        let mut away = on_a_belt(CONTACT_SUPPORT | CONTACT_PLACE, 0.0);
+        away.advance(2000.0, &off);
+        assert!((away.placed[0].1.angle_between(Quat::IDENTITY)).abs() < 1e-6);
     }
 
     #[test]

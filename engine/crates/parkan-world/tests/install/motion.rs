@@ -610,6 +610,130 @@ fn c03_02s_wheeled_warbots_stand_on_their_tyres_their_contacts_being_authored_th
     assert_eq!(heavies, 2, "Mission C03/02 stands two R_B_03");
 }
 
+/// A contact whose flags carry `CONTACT_PLACE` lays the node it carries along the ground
+/// under it (docs/28, "The belt lies along the ground"). Twelve contacts in the game do:
+/// the four `weel_*` of each tracked chassis, whose carriers are the belt nodes. So a
+/// Medium Track warbot parked across a slope tilts its four belts onto it and leaves its
+/// hull where it stood.
+#[test]
+#[ignore = "needs the game install"]
+fn a_tracked_warbots_belts_lie_along_the_ground_under_them_and_its_hull_does_not_move() {
+    use parkan_formats::control::CONTACT_PLACE;
+    use parkan_formats::pose::{Pose, multiply};
+    use parkan_sim::machine::Frames;
+    use std::f32::consts::FRAC_PI_2;
+
+    let mut play = campaign_play(gamedir::C01_MISSION_04);
+    play_for(&mut play, 1.0, |_| {});
+    let r = play
+        .robots
+        .iter()
+        .position(|(_, rb)| rb.parts[rb.chassis_part].record.starts_with("R_M_04"))
+        .expect("C01 Mission 04 places two Medium Track warbots");
+
+    // The four contacts that ask for it, and the nodes they carry. The M-42t's `weel_*`
+    // points all sit on node 0, the hull, and each carries a belt node of its own.
+    let carriers: Vec<usize> = {
+        let w = &play.robots[r].1.walker;
+        let feet = w.feet.as_ref().expect("a tracked chassis has contact points");
+        let placing: Vec<i32> = w.controller.states[w.machine.current]
+            .contacts
+            .iter()
+            .filter(|c| c.flags & CONTACT_PLACE != 0)
+            .map(|c| c.point)
+            .collect();
+        assert_eq!(placing.len(), 4, "the M-42t's four belts");
+        assert!(placing.iter().all(|&p| feet.points[p as usize].nodes().0 == 0), "all on the hull");
+        placing.iter().map(|&p| feet.carrier(p).unwrap()).collect()
+    };
+    let mut sorted = carriers.clone();
+    sorted.sort_unstable();
+    sorted.dedup();
+    assert_eq!(sorted.len(), 4, "four distinct belt nodes: {carriers:?}");
+    assert!(!carriers.contains(&0), "none of them is the hull");
+
+    // Somewhere sloped to park it: a face between 15 and 35 degrees off level.
+    let ([lo_x, lo_y], [hi_x, hi_y]) = play.ground.bounds();
+    let top = play.ground.world_box().1.z + 10.0;
+    let mut slope = None;
+    let mut x = lo_x + 20.0;
+    while x < hi_x - 20.0 && slope.is_none() {
+        let mut y = lo_y + 20.0;
+        while y < hi_y - 20.0 {
+            if let Some(hit) = play.ground.below(x, y, top)
+                && (0.82..0.97).contains(&hit.normal.z)
+            {
+                slope = Some(glam::Vec3::new(x, y, hit.point.z));
+                break;
+            }
+            y += 8.0;
+        }
+        x += 8.0;
+    }
+    let at = slope.expect("Mission 04's map has a slope");
+
+    let turn_of = |robot: &mut parkan_world::robot::Robot, node: usize| {
+        let tilted = robot.chassis_pose(node);
+        let held = std::mem::take(&mut robot.walker.placed);
+        let level = robot.chassis_pose(node);
+        robot.walker.placed = held;
+        let [w, i, j, k] = level.rotation;
+        (tilted, level, multiply(tilted.rotation, [w, -i, -j, -k]))
+    };
+
+    for &yaw in &[0.0, FRAC_PI_2] {
+        // Steps, not ticks, run the ground contact: a second of them to settle, then one
+        // more from a standstill, whose start is where the contacts were searched from.
+        let stood = {
+            let (robots, ground) = (&mut play.robots, &play.ground);
+            let robot = &mut robots[r].1;
+            let w = &mut robot.walker;
+            w.body.yaw = yaw;
+            w.drive = None;
+            put(w, ground, at);
+            w.advance(w.machine.clock_ms + 1000.0, ground);
+            (w.body.velocity, w.body.command, w.body.spin) = ([0.0; 3], [0.0; 3], [0.0; 3]);
+            let stood = w.body.position;
+            w.advance(w.machine.clock_ms, ground);
+            robot.time_ms = robot.walker.machine.step_start_ms;
+            stood
+        };
+        assert_eq!(play.robots[r].1.walker.placed.len(), 4, "four belts laid on the ground");
+
+        let hull = play.robots[r].1.chassis_pose(0);
+        let mut steepest = 0.0_f32;
+        for (i, &node) in carriers.iter().enumerate() {
+            // The ground under this contact, in the machine's own frame.
+            let (axis, normal) = {
+                let w = &play.robots[r].1.walker;
+                let feet = w.feet.as_ref().unwrap();
+                let state = &w.controller.states[w.machine.current];
+                let last = Frames { a: state.pair_a[1], b: state.pair_b[1], weight: w.machine.q };
+                let point = state.contacts.iter().filter(|c| c.flags & CONTACT_PLACE != 0).nth(i).unwrap();
+                let place = stood + w.body.to_world(feet.place(point.point, last).unwrap());
+                let hit = play.ground.search(place, w.radius).expect("ground under a belt");
+                (feet.axis(point.point, last).unwrap(), glam::Quat::from_rotation_z(-yaw) * hit.normal)
+            };
+            let robot = &mut play.robots[r].1;
+            let (tilted, level, turn) = turn_of(robot, node);
+
+            // The node stays where it stood -- only its attitude changes.
+            for (a, b) in tilted.translation.iter().zip(level.translation) {
+                assert!((a - b).abs() < 1e-9, "belt {node} moved: {tilted:?} against {level:?}");
+            }
+            // And the turn is the one that takes the contact's own axis onto the ground's
+            // normal: the belt lies along the slope under it.
+            let turned = Pose { translation: [0.0; 3], rotation: turn }.apply(axis.as_dvec3().to_array());
+            let turned = glam::Vec3::new(turned[0] as f32, turned[1] as f32, turned[2] as f32);
+            assert!((turned - normal).length() < 1e-4, "belt {node}: {turned:?} against {normal:?}");
+            steepest = steepest.max(axis.dot(normal).clamp(-1.0, 1.0).acos().to_degrees());
+        }
+        assert!(steepest > 10.0, "the ground under the belts is only {steepest} degrees off level");
+        // The hull is posed exactly as it was: no contact carries node 0.
+        assert_eq!(play.robots[r].1.chassis_pose(0), hull);
+    }
+}
+
 #[test]
 #[ignore = "needs the game install"]
 fn mission_04s_helicopter_rides_up_a_slope_on_its_body_sphere_with_its_eye_above_the_ground() {

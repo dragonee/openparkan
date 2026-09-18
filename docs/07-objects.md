@@ -830,9 +830,9 @@ which is what an exporter's uncleared buffer looks like (*guess*).
 
 | flag | faces | where |
 |---|---|---|
-| `0x02` | 6166 | **the floors of the buildings you walk through**: on exactly the 29 meshes with a path graph and nowhere else, and 5590 face straight up once posed |
+| `0x02` | 6166 | **the walkable surfaces of the buildings you walk through**: on exactly the 29 `fortif.rlb` meshes with a path graph and nowhere else |
 | `0x04` | 1355 | foliage (`TF2`, 707) and see-through glass and teleports in buildings; 1033 name a see-through material |
-| `0x10` | 384 | vertical faces in 20 buildings, 320 of them `R_NP13` |
+| `0x10` | 384 | **the broad faces of door leaves**, on 20 `fortif.rlb` buildings; 320 of them `R_NP13` |
 | `0x20` | 274 | building glass (`B_COMP_3G`, 234) and the bridge's additive `B_A_BRIGE` |
 
 A round passes through faces flagged 4 or 32 and strikes 2 and 16 — *read*,
@@ -841,11 +841,60 @@ The collision push-out drops faces flagged 2 unless the mover's collision flags
 carry 8, and its door test takes 16 — *read*,
 `Control.dll:0x1001dbce`, `AniMesh.dll:0x1000dbba`
 ([24-motion.md](24-motion.md#collision-between-objects--read)). So a floor does
-not push a walker standing on it. What else reads 2 and 16 is not
-established: the mesh visitor takes a required and an excluded triangle mask
-from its caller (`AniMesh.dll:0x10008120`), and
-`CBuilding::GetFirstIntersectedFace` forwards whatever filter it is given, so
-the answer is in whoever queries a building's faces.
+not push a walker standing on it.
+
+**Flag 2 is a walkable surface, and a chosen one** (*measured*). All 6166 faces
+lie in a **level-0** slot — 4562 in the first variant's, 1480 in the second's,
+124 in the third's — and nowhere else. Posed into model space the normal's z is
+above the engine's own cos-80° ground threshold `0.173648` on **6100 of 6166**,
+of which 4258 are within 10° of level; 66 lie at or below zero. So it covers
+**ramps and stairs**, not just flat floor. 3306 sit on exterior nodes and 2860
+on interior ones, and the meshes that carry most are `fr_b_plant` (453),
+`fr_m_plant` (443), `fr_l_plant` (423) and `fr_l_bunker` (398). And it is a
+**subset somebody chose**: against the 4562 flagged faces of the first variant's
+level-0 slot, **1802 more faces of that same slot** point within 10° of up and
+carry nothing at all.
+
+**Flag 16 is the leaf's face, not the leaf** (*measured*), which sharpens the
+door test [24-motion.md](24-motion.md#a-shot-opens-a-door--read-and-seen)
+already reads. All 384 are vertical once posed (|normal z| < 0.1, 384 of 384).
+They sit on 52 nodes, **every one interior**, 50 of them animated; the two that
+are not are `fr_l_gener`'s `i20_m1o1` and `i30_m1o1` — the same generator
+docs/24 already flags as the one mesh whose flagged triangles sit on other nodes
+than its doors. Each mesh takes them from a single wear entry: `R_NP13` on 18
+meshes (320 faces), `B_GEN_05` on `fr_b_ruin` (40) and `B_MTP_01` on
+`fr_l_gener` (24). Grouped by shared vertices they are back-to-back pairs of
+thin planar slabs with opposite normals — `fr_m_tower`'s at y = ∓0.72, each
+7.66 × 6.34; `fr_b_store`'s at x = −0.60 and +0.61. Within a door node's level-0
+slot only **the two broad sides** are flagged — 8 triangles of 20 on 34 of the
+52 nodes, 4 of 12 on twelve small ones, 10 of 16 on four and 12 of 36 on two —
+never the slab's rim.
+
+**What reads them** — *read*, and narrowed. Three places in the install, all in
+`AniMesh.dll`: the triangle visitor `0x10008120`, which loads the flags word and
+tests it against its filter's required and excluded masks (`+4` and `+8`); the
+push-out's test of a gathered face's `+0x44` against the filter's `+0x18` and
+`+0x1c` (`0x1000dbfb`, `0x1000dc0e`); and the door test's required `0x10`
+(`0x1000dbba`). The visitor has exactly two callers, `0x100106a4` and
+`0x10010c91`, both inside the segment hit test's node visitors, and it is **not
+exported** — `AniMesh.dll` exports `LoadAgent` and `LoadAniMesh` and nothing
+else. (Control: the same direct-call and whole-section dword scan does find the
+data references for `0x1000ce90`, `0x1000dfe0`, `0x100106d0` and `0x10010dc0` as
+single vtable entries, so it finds pointers where there are any.)
+
+Two narrowings follow. **The walk-face query does not read flag 2**: the face
+test docs/24 already reads (interface `0x25` slot 2, interface `0x18` slot 7 —
+`0x1000d0ef`, `0x10013fe0`, `0x10015ca0`) selects ground by the normal's z
+against `0.173648` with **no triangle-flag test at all**, so the flagged floors
+are chosen for the collision **push-out**, not for the ground search. And the
+six-word filter constructor `Control.dll:0x10013f60` has four call sites —
+`0x10013481`, `0x1001db67`, `0x1001dbb8`, `0x1001dc03` — the last three the
+collision pair query already read, the first writing 0 into both triangle masks.
+
+Still open: whether anything **outside `Control.dll`** hands a face query a mask
+carrying 2 or 16. The round's filter is built inline rather than through the
+constructor, so enumerating the constructor's callers is not a complete
+enumeration of filters.
 
 ### Indices are batch-relative
 

@@ -171,6 +171,40 @@ def check_texm(check, game: Path) -> None:
           f"the fourth palette byte is constant on all {palettised} palettised "
           f"textures, so transparency lives in the 4444 and 8888 formats only")
 
+    # Header +0x14 is an exporter flags word, not a property of the picture:
+    # what sorts the marked textures is where they sit in the file.
+    runs = {}
+    for lib in ("Textures.lib", "lightmap.lib", "ui/minimap.lib", "ui/ui.lib", "ui/ui_back.lib"):
+        archive = NResArchive.open(game / lib)
+        rows = []
+        for e in archive:
+            blob = archive.read(e)
+            rows.append((e.offset, e.name, struct.unpack_from("<I", blob, 0x14)[0]))
+        marked = [i for i, r in enumerate(rows) if r[2]]
+        runs[lib] = (
+            len(rows),
+            [r[0] for r in rows] == sorted(r[0] for r in rows),
+            Counter(r[2] for r in rows),
+            (min(marked), max(marked)) if marked else None,
+            [rows[i][1] for i in range(min(marked), max(marked) + 1) if not rows[i][2]]
+            if marked else [],
+        )
+    textures, lightmaps = runs["Textures.lib"], runs["lightmap.lib"]
+    check("Texm: header +0x14 marks one batch of exports, not a kind of texture",
+          all(r[1] for r in runs.values())
+          and textures[0] == 393 and textures[2] == Counter({0: 312, 0x4000000: 81})
+          and textures[3] == (66, 154) and len(textures[4]) == 8
+          and lightmaps[2] == Counter({0: 22, 0x800000: 3}) and lightmaps[3] == (0, 2)
+          and all(set(runs[k][2]) == {0}
+                  for k in ("ui/minimap.lib", "ui/ui.lib", "ui/ui_back.lib")),
+          f"every directory is in offset order; Textures.lib's 81 with bit 0x4000000 are "
+          f"members {textures[3][0]} to {textures[3][1]} of {textures[0]} -- one run of "
+          f"{textures[3][1] - textures[3][0] + 1}, no marked member outside it and only "
+          f"{len(textures[4])} unmarked inside it ({textures[4]}), and the names in the run "
+          f"are not alphabetical, so it is insertion order; lightmap.lib carries a different "
+          f"bit, 0x800000, on exactly its three _01 lightmaps and nothing else, and the three "
+          f"ui/*.lib are 0 throughout (the loader reads only bits 24 and 25)")
+
 
 def check_terrain(check, game: Path) -> None:
     maps = gamedir.maps(game)
@@ -2266,10 +2300,16 @@ def check_objects(check, game: Path) -> None:
     # The trailing word's low six bits are the winged-edge link, checked by
     # geometry: the code names the neighbour's edge with the same two vertex
     # positions.  And flag 2 is a building's floor.
+    COS_10 = math.cos(math.radians(10.0))
     named = coded = open_edges = open_three = 0
     floor_meshes: set[str] = set()
     graph_meshes: set[str] = set()
     floor_faces = floor_up = 0
+    floor_level0 = floor_walkable = floor_spare = floor_first = 0
+    leaf_meshes: set[str] = set()
+    leaf_faces = leaf_vertical = leaf_interior = 0
+    leaf_nodes: set[tuple[str, int]] = set()
+    leaf_animated: set[tuple[str, int]] = set()
     for name in ARCHIVES:
         ar = NResArchive.open(game / name)
         for e in ar:
@@ -2282,21 +2322,49 @@ def check_objects(check, game: Path) -> None:
                 graph_meshes.add(f"{name}/{e.name}")
             P = m.positions
             node_of = {}
-            if any(f & objmesh.FACE_BUILDING_FLOOR for f in m.face_flags):
-                floor_meshes.add(f"{name}/{e.name}")
+            slot_of = {}
+            marked = objmesh.FACE_BUILDING_FLOOR | objmesh.FACE_DOOR_LEAF
+            if any(f & marked for f in m.face_flags):
+                if any(f & objmesh.FACE_BUILDING_FLOOR for f in m.face_flags):
+                    floor_meshes.add(f"{name}/{e.name}")
+                if any(f & objmesh.FACE_DOOR_LEAF for f in m.face_flags):
+                    leaf_meshes.add(f"{name}/{e.name}")
                 for k, node in enumerate(m.nodes):
-                    for s in node.slot_index:
+                    for si, s in enumerate(node.slot_index):
                         if s != objmesh.NO_SLOT and s < len(m.slots):
                             sl = m.slots[s]
                             stop = sl.first_triangle + sl.triangle_count
                             for t in range(sl.first_triangle, stop):
                                 node_of[t] = k
+                                slot_of[t] = si
+            posed = {}
             for i, tri in enumerate(m.triangles):
-                if m.face_flags[i] & objmesh.FACE_BUILDING_FLOOR:
-                    floor_faces += 1
+                if m.face_flags[i] & marked:
                     k = node_of.get(i)
                     pose = m.world_pose(k) if k is not None else objmesh.IDENTITY_POSE
-                    floor_up += objmesh.quaternion_rotate(pose[1], m.face_normal[i])[2] > 0.9
+                    posed[i] = objmesh.quaternion_rotate(pose[1], m.face_normal[i])[2]
+                if m.face_flags[i] & objmesh.FACE_BUILDING_FLOOR:
+                    floor_faces += 1
+                    floor_up += posed[i] > 0.9
+                    # It is a level-0 face of some variant, and walkable by the
+                    # engine's own cos-80 threshold -- ramps and stairs included.
+                    floor_level0 += slot_of.get(i, -1) % objmesh.SLOTS_PER_VARIANT == 0
+                    floor_walkable += posed[i] > landmesh.WALKABLE_NORMAL_Z
+                    floor_first += slot_of.get(i, -1) == 0
+                elif m.face_flags[i] == 0 and slot_of.get(i, -1) == 0 \
+                        and f"{name}/{e.name}" in floor_meshes:
+                    k = node_of.get(i)
+                    pose = m.world_pose(k) if k is not None else objmesh.IDENTITY_POSE
+                    floor_spare += objmesh.quaternion_rotate(pose[1], m.face_normal[i])[2] >= COS_10
+                if m.face_flags[i] & objmesh.FACE_DOOR_LEAF:
+                    leaf_faces += 1
+                    leaf_vertical += abs(posed[i]) < 0.1
+                    k = node_of.get(i)
+                    if k is not None:
+                        leaf_nodes.add((e.name, k))
+                        leaf_interior += m.nodes[k].name.lower().startswith("i")
+                        if m.nodes[k].is_animated:
+                            leaf_animated.add((e.name, k))
                 for edge in range(3):
                     j = m.face_adjacency[i][edge]
                     back = m.edge_twin(i, edge)
@@ -2321,6 +2389,24 @@ def check_objects(check, game: Path) -> None:
           f"it is on {len(floor_meshes)} meshes, exactly the {len(graph_meshes)} "
           f"that carry a path graph, and {floor_up}/{floor_faces} of its faces "
           f"point straight up once posed")
+    check("MESH: face flag 2 is a walkable surface, chosen -- ramps and stairs, not every floor",
+          floor_faces == floor_level0 == 6166 and floor_walkable == 6100
+          and (floor_first, floor_spare) == (4562, 1802)
+          and all(k.startswith("fortif.rlb/") for k in floor_meshes),
+          f"all {floor_level0} of its faces lie in a level-0 slot, all in fortif.rlb, and "
+          f"{floor_walkable} stand above the engine's own {landmesh.WALKABLE_NORMAL_Z} "
+          f"(cos 80 degrees) once posed, so it covers ramps and stairs and not just flat "
+          f"floor; it is a chosen subset -- against its {floor_first} faces in the first "
+          f"variant's level-0 slot, {floor_spare} more faces of that slot point within 10 "
+          f"degrees of up and carry nothing")
+    check("MESH: face flag 16 is the broad face of a door leaf",
+          leaf_faces == leaf_vertical == leaf_interior == 384 and len(leaf_meshes) == 20
+          and len(leaf_nodes) == 52 and len(leaf_animated) == 50
+          and all(k.startswith("fortif.rlb/") for k in leaf_meshes),
+          f"{leaf_faces} faces on {len(leaf_meshes)} fortif.rlb buildings, all vertical once "
+          f"posed (|normal z| < 0.1) and all on interior nodes -- {len(leaf_nodes)} of them, "
+          f"{len(leaf_animated)} animated; the collision pass's door test requires it "
+          f"(AniMesh.dll:0x1000dbba)")
 
     # A batch's vertex range is D3D's (BaseVertexIndex, NumVertices): the span
     # its indices reach, not a slice of the array it owns.
@@ -10163,6 +10249,69 @@ def check_chassis(check, game: Path) -> None:
           naming == {"objects.rlb", "objects.dlb", "bases.rlb"},
           f"outside MISSIONS/SCRIPTS/*.trf the S-6f is named by {sorted(naming)}: no "
           f"assembly, mission or binary")
+
+    # 13. contact flag 0x2 lays a belt node along the ground: the tracked chassis alone
+    every_contact = placing = 0
+    carriers: dict[str, list[str]] = {}
+    axes: dict[str, tuple] = {}
+    on_body = distinct = upright = leaves = 0
+    wheeled: Counter[int] = Counter()
+    by_ctl = {}
+    for record in library.records.values():
+        ctl = record.slot_with_suffix("ctl")
+        if ctl and ctl.library.lower() == "bases.rlb":
+            by_ctl.setdefault(ctl.member.lower(), record)
+    for path in all_archives(game):
+        archive = NResArchive.open(path)
+        for entry in archive:
+            if not entry.tag.upper().startswith("CTL"):
+                continue
+            try:
+                c = control.parse(archive.read(entry))
+            except control.ControlFormatError:
+                continue
+            name = entry.name.lower()
+            for s in c.states:
+                every_contact += len(s.contacts)
+                if name in ("r_l_03.ctl", "r_m_03.ctl", "r_b_03.ctl"):
+                    wheeled.update(k.flags for k in s.contacts)
+                laid = [k for k in s.contacts if k.flags & control.CONTACT_PLACE]
+                if not laid:
+                    continue
+                placing += len(laid)
+                rec = by_ctl.get(name)
+                cref = rec.slot_with_suffix("cpt") if rec else None
+                if not cref or not rec.mesh:
+                    continue
+                pts = objmesh.parse_control_points(bases.read_name(cref.member))
+                model = objmesh.parse(bases.read_name(rec.mesh.member), rec.mesh.member)
+                carriers[name] = [model.nodes[pts[k.point].carrier].name.split("_")[0]
+                                  for k in laid]
+                parents = {n.parent for n in model.nodes}
+                for k in laid:
+                    p = pts[k.point]
+                    on_body += p.placed_on == 0
+                    leaves += p.carrier not in parents
+                    up = objmesh.quaternion_rotate(model.world_pose(p.placed_on)[1], p.direction)
+                    upright += abs(up[2] - 1.0) < 1e-5
+                    axes[name] = tuple(round(v, 3) for v in p.direction)
+                distinct += len({pts[k.point].carrier for k in laid}) == len(laid)
+    belts = {"r_l_04.ctl": {"TFL", "TFR", "TBL", "TBR"},
+             "r_m_04.ctl": {"TMFL", "TMFR", "TMDL", "TMDR"},
+             "r_b_04.ctl": {"BRLFD", "BRRFD", "BRLBD", "BRRBD"}}
+    check(".ctl: contact flag 0x2 lays a belt node along the ground, on the tracked chassis alone",
+          every_contact == 2634 and placing == 12 and set(carriers) == set(belts)
+          and all(set(carriers[n]) == belts[n] for n in belts)
+          and on_body == distinct * 4 == upright == leaves == 12
+          and set(wheeled) == {control.CONTACT_SUPPORT | control.CONTACT_FALLBACK},
+          f"{placing} of {every_contact} contacts carry CONTACT_PLACE (0x2), four each on "
+          f"r_l_04, r_m_04 and r_b_04 and nowhere else; every one sits on node 0, the hull, "
+          f"carries a node of its own, and the twelve carriers are the belt nodes "
+          f"{ {n: sorted(v) for n, v in sorted(carriers.items())} }, all of them leaves; their "
+          f"axes {dict(sorted(axes.items()))} all come out along world up once posed; the "
+          f"wheeled _03 chassis carry {sorted(wheeled)} and never 0x2 "
+          f"(the ground contact hands the axis and the ground normal to IAnimation slot 31 "
+          f"at Control.dll:0x1001affd and marks the carrier with node mask 0x10)")
 
 
 #: ``Control.dll``'s item: the base component's vtable, the radar's, their shared

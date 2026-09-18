@@ -324,6 +324,86 @@ The engine plays it this way: `CHANNEL_MATERIAL` in `parkan-formats`,
 `Robot::material_phase` for the value and `Animation::by_fraction` for slot 5,
 handed to the node's model as it is placed.
 
+### The belt lies along the ground — *read*, and *measured*
+
+The other thing only a tracked chassis does is a contact flag. A contact's
+`0x2` ([13-control.md](13-control.md#section-1s-conditions-are-contacts--read-and-measured))
+lays the node the contact **carries** — the control point's third slot,
+[24-motion.md](24-motion.md#a-contact-point-sits-on-one-node-and-dies-with-another--measured) —
+along the ground beneath that contact, and leaves it where it stood.
+
+**How it reaches the picture** (*read*), in three steps:
+
+1. The ground contact, for every contact whose flags carry `0x2`, marks the
+   carrier node with **`IAnimation` node mask `0x10`** — slot 8
+   (`AniMesh.dll:0x10005500`), called at `Control.dll:0x1001a3af` with the
+   carrier the pass has just fetched (`0x1001a3aa`). Slot 8 sets the bit in the
+   node record's flags word and mirrors three of that word's bits into bytes of
+   the same record, `0x4`, `0x8` and `0x10` into `+0x111`, `+0x112` and `+0x113`;
+   a change to the last two clears the node's pose cache (`0x1000a2a0`).
+   **Nothing tests the flags word against `0x10` anywhere** — a scan of every
+   test of that word against an immediate finds 1, 2, 4, 8, `0xc` and
+   `0x1000000` and no `0x10` — so the byte is the whole consumption path.
+   Nothing clears it either. (Enumerating every four-argument call of slot 8
+   across all sixteen modules returns eleven, all in `Control.dll`; three of
+   them are the damage flags [26-damage.md](26-damage.md) already reads, which
+   is the check on the scan. `0x8` is both set and cleared; `0x10` is only set.)
+2. The same pass, for a contact whose `0x2` is set and whose node still stands,
+   hands **`IAnimation` slot 31** (`0x10005c90`, from `0x1001affd`) the
+   contact's own axis and the ground normal it has just found under that
+   contact (`0x1001bfc0`). The slot shifts the node's current turn `+0xf0` into
+   its previous one `+0xe0`, writes identity in its place, and — given two
+   vectors — builds the turn that takes the first onto the second by the
+   half-angle trick: from the dot and the cross of the pair it makes twice that
+   turn, and slerps identity halfway toward it. **Handed a null vector it
+   leaves identity** (`0x1001aff5`, `0x1001affa`), so a node whose contact stops
+   being placed relaxes back to level over the next blend.
+3. The **pose walk** reads `+0x113` in three places — `0x100090a5`,
+   `0x100091a6` and `0x100092b6`, the root's pass, a parented node's and a third
+   (`0x10008b70` / `0x10009018`) — each just after the node's world matrix has
+   been composed from its parent's and its own. Where the byte is set the walk
+   slerps the node's previous and current turns by the mesh's pose-blend weight
+   `+0x1f4`, the weight it uses everywhere else; saves the world matrix's fourth
+   column; turns the slerped quaternion into a matrix and multiplies it onto the
+   world matrix; and writes the column back. **So the node tilts where it
+   stands** and the hull above it does not move (*derived*, from the save and
+   the restore).
+
+**Who asks for it** (*measured*), over every `.ctl` in the install — 2634
+contacts on the 961 states of the 99 controllers that declare any:
+
+- **12 contacts carry `0x2`**, four each on `r_l_04`, `r_m_04` and `r_b_04` —
+  the S-42t, the M-42t and the L-42t — and nowhere else. Their flags are `0x7`:
+  support, place and fallback together.
+- Their points are `weel_fl`, `weel_fr`, `weel_bl` and `weel_br`, **every one
+  placed on node 0**, the hull, and each **carried by a node of its own**. The
+  twelve carriers are exactly the belt nodes: `TFL/TFR/TBL/TBR` on the S-42t,
+  `TMFL/TMFR/TMDL/TMDR` on the M-42t, `BRLFD/BRRFD/BRLBD/BRRBD` on the L-42t.
+  All twelve are leaves, so the tilt reaches no child node.
+- Their axes come out along the model's up once posed: the point's vector is
+  `(0, −1, 0)` on the S-42t, whose root turns −90° about x, and `(0, 0, 1)` on
+  the other two, and all three land on world up.
+- Every contact of the wheeled `_03` chassis carries `0x5` — support and
+  fallback — and never `0x2`.
+
+**So a tracked warbot's four belts each lie on the patch of ground under them
+while its hull holds its own attitude.** Twelve nodes in the whole game.
+
+**It is not the belt's material.** These three chassis also carry the
+**channel** flag `0x10`,
+[`CHANNEL_MATERIAL`](#the-belt-is-a-material-a-channel-plays--measured-and-read),
+on channels naming the same four nodes. The two are unrelated: one is the
+belt's texture phase, driven by the skid-steering value; the other is the belt
+node's tilt, driven by the ground contact. They meet on these twelve nodes
+because both are things only a tracked chassis needs.
+
+The engine does it this way: `CONTACT_PLACE` in `parkan-formats`,
+`Walker::lay_belts` for the turn — kept per carrier node, in the machine's own
+frame — and `Robot::chassis_pose` turning that node's world pose by it with its
+translation untouched. The previous/current pair is left out: all twelve
+contacts belong to a velocity-driven state, whose blend weight never leaves 1,
+so the slerp is the current turn.
+
 ### What moves by itself on Mission 01 — *measured*
 
 Over every unit and building `data.tma` places (the hero `tut1_p`, the enemy

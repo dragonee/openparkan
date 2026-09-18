@@ -70,6 +70,13 @@ pub const ANY_REQUEST: i32 = -1;
 
 /// A contact's point counts toward the body's ground gap and normal (`0x1001b00a`).
 pub const CONTACT_SUPPORT: u32 = 0x1;
+/// The contact's **carrier** node lies along the ground under it (`0x1001affd`): the
+/// ground contact hands `IAnimation` slot 31 the contact's own axis and the ground normal
+/// it has just found, and marks the carrier with node mask `0x10`, which makes the pose
+/// walk turn that node's world matrix by the rotation between them and put it back where
+/// it was. *Measured*: the 12 contacts that carry it are the four belts of each tracked
+/// chassis and nothing else (docs/28-chassis.md, "The belt lies along the ground").
+pub const CONTACT_PLACE: u32 = 0x2;
 /// Set at load on the states whose last pose holds the contact within 0.1 of its rest
 /// height: the states that end on that foot (`0x1001a2d5`).
 pub const CONTACT_PLANTED: u32 = 0x1000;

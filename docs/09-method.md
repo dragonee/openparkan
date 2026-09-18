@@ -101,6 +101,24 @@ disassembly proper: the NRes element-count field. It gave stream 13 a stride of
 plainly a list of draw batches. There was never a per-face material field to
 find.
 
+### Searches that do not discriminate, so nobody repeats them
+
+- **Looking for a filter by its constant pair.** A face query's filter is six
+  words, of which two are a required and an excluded triangle mask four bytes
+  apart. Scanning every module for a pair of dword immediate stores four bytes
+  apart with a candidate mask returns several hundred hits, dominated by
+  unrelated `0x10`s in `ArealMap.dll` and `Behavior.dll`, and separates nothing.
+  What did work was going the other way: enumerate the readers of the field, and
+  then the callers of each.
+- **Looking for a flag by its immediate.** A plain immediate scan finds a mask
+  only where the compiler kept it as one. `Ngi32.dll`'s texture loader isolates
+  bit 21 of its load flags with a shift and an `and 1`, so the constant
+  `0x200000` is nowhere in the module, while every neighbouring load flag is
+  ([02-texm.md](02-texm.md#who-loads-a-texture-opaque--read-and-measured)). A
+  sweep for shifts by the bit's index, across all the modules at once, is short
+  enough to read: by `0x15` it returns seven sites, six of them one statically
+  linked CRT routine.
+
 
 ## Reading other people's work
 

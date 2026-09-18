@@ -563,7 +563,7 @@ The engine keeps one 0x5c-byte entry per contact at `+0xc4`
 | `0x200` | … only while it is **destroyed** — a node at 0 life, status `0x10` (`0x1001106c`, `0x1001ac39`) |
 | `0x4` | a destroyed point falls back to the next control point whose node is intact (`0x1001ac75`) |
 | `0x1` | the point's ground gap, point and normal count toward the body's (`0x1001b00a`) |
-| `0x2` | the node is put on the ground through `IAnimation` slot 31 (`0x1001afcb`) |
+| `0x2` | the node the point **carries** is laid along the ground under it, through `IAnimation` slot 31 and node mask `0x10` (`0x1001affd`, `0x1001a3af`) — the tracked chassis's belts, and nothing else ([28-chassis.md](28-chassis.md#the-belt-lies-along-the-ground--read-and-measured)) |
 | `0x1000` | set at load on the states whose last pose holds the point within 0.1 of its rest height (`0x1001a328`) |
 | `0x10`, `0x20` | ask the load to derive `0x1` from that, and `0x2` from the point's axis standing within 0.05 of upright (`0x1001a314`) |
 

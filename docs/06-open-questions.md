@@ -154,17 +154,28 @@ outer ring is a clearance drawn around the building. See
   part's root node and hangs its children on the socket
   (`AniMesh.dll:0x1000a7dd`), and all 1417 mounted parts' roots are empty. See
   [07-objects.md](07-objects.md#how-parts-attach).
-- What reads object face flags 2 (the floors of the 29 walkable buildings) and
-  16. The mesh visitor takes its triangle masks from the caller
-  (`AniMesh.dll:0x10008120`), so the answer is in whoever queries a building's
-  faces other than a round.
+- What reads object face flags 2 (the walkable surfaces of the 29 such
+  buildings) and 16 (a door leaf's broad faces) — **narrowed**: the three places
+  that read them are all in `AniMesh.dll`, the visitor is not exported and has
+  two callers, and the ground search reads no triangle flag at all, so flag 2 is
+  for the collision push-out. Still open: whether anything outside `Control.dll`
+  hands a face query a mask carrying 2 or 16 — the round's filter is built
+  inline, not through the filter constructor, so enumerating that constructor's
+  callers does not enumerate the filters. See
+  [07-objects.md](07-objects.md#stream-7-is-the-per-face-record).
 - What sets an object's material track (`ILifeSystem` slot 16,
   `Control.dll:0x10008810`; nothing found) and who calls IAnimation slot 27,
   which makes a mesh wear the material of a face it names
   (`AniMesh.dll:0x10005970`). See
   [07-objects.md](07-objects.md#who-picks-an-object-meshs-material-track--read).
-- What IAnimation node mask bit `0x10` does — the ground contact sets it on a
-  contact point's carrying node (`Control.dll:0x1001a3aa`).
+- ~~What IAnimation node mask bit `0x10` does — the ground contact sets it on a
+  contact point's carrying node (`Control.dll:0x1001a3aa`)~~ — **read**: the
+  mask's bit is mirrored into the node record's byte `+0x113`, and where that
+  byte is set the pose walk turns the node's world matrix by the rotation the
+  ground contact left on it and puts the translation back. So the node lies
+  along the ground under its contact without moving. The twelve nodes that ask
+  for it are the tracked chassis's belts. See
+  [28-chassis.md](28-chassis.md#the-belt-lies-along-the-ground--read-and-measured).
 - How a material draws is **read** — the device material, the track playback
   and the cell rewrite; see
   [07-objects.md](07-objects.md#how-a-material-reaches-the-device--read-and-measured).
@@ -238,9 +249,18 @@ outer ring is a clearance drawn around the building. See
   for every lit skin (directory flags bit 1) unless `EMBOSS_BUMP` is on, so
   171 of the 279 alpha-format textures upload without alpha on this install.
   See [02-texm.md](02-texm.md#who-loads-a-texture-opaque--read-and-measured).
-- **Header `+0x14` bit `0x4000000`** on 81 textures: no module reads it (a
-  sweep with a positive control); its meaning is *unknown* and the engine can
-  ignore it.
+- ~~**Header `+0x14` bit `0x4000000`** on 81 textures~~ — answered as far as it
+  goes: no module reads it (a sweep with a positive control), and what sorts the
+  81 is **where they sit in the file** — members 66 to 154 of 393, the directory
+  being in offset order — so `+0x14` is the exporter's flags word marking one
+  batch of exports, not a property of the picture. `lightmap.lib` carries a
+  different bit of the same word on its three `_01` lightmaps. See
+  [02-texm.md](02-texm.md#0x14-is-the-exporters-flags-word--measured).
+- ~~Load flag `0x200000`, which `World3D.dll` sets for `ENV_STARS` alone~~ —
+  **read**: it is bit 21 of the texture's load flags, and `Ngi32.dll` shifts it
+  into `DDSURFACEDESC2.dwTextureStage`. Exactly one surface in the shipped game
+  is created on texture stage 1. See
+  [02-texm.md](02-texm.md#load-flag-0x200000-is-the-texture-stage--read-and-measured).
 
 ## Not looked at at all
 

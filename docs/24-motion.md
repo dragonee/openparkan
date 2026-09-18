@@ -48,7 +48,7 @@ conditions behind a pointer (`0x10001730`).
 | +0x3c / +0x48 | spin box, min xyz / max xyz |
 | **+0x54** | **the engine factor** |
 | +0x94 | a use count, −1 for unlimited (`0x1000530f`) |
-| 16 × B | the **contacts**, a foot, wheel or leg each: a control point, flags, the group run when it lands. `0x100` makes the state need that point's node intact, `0x200` destroyed (`0x10001107`) — a walker's limping states ([13-control.md](13-control.md#section-1s-conditions-are-contacts--read-and-measured)) |
+| 16 × B | the **contacts**, a foot, wheel or leg each: a control point, flags, the group run when it lands. `0x100` makes the state need that point's node intact, `0x200` destroyed (`0x10001107`) — a walker's limping states; `0x2` lays the point's carrier node on the ground ([13-control.md](13-control.md#section-1s-conditions-are-contacts--read-and-measured)) |
 
 A state applies while the machine's velocity and spin lie inside the boxes its
 flags switch on, its contacts' nodes are intact or destroyed as they ask, and
@@ -899,7 +899,11 @@ and that group picks the step by surface
    state's `counts[1]` contact points (`0x1001abcc`) — the feet, wheels or
    tracks, placed on their nodes. Each 16-byte record in the state is one
    contact: `+0` a node, `+4` flags, `+8` a group. Flag 1 lets it lift the
-   body and join the averaged normal (below). The live record's byte `+0x59`
+   body and join the averaged normal (below); **flag 2 lays the node the point
+   carries along the ground it has just found** (`0x1001affd`,
+   [28-chassis.md](28-chassis.md#the-belt-lies-along-the-ground--read-and-measured))
+   — the tracked chassis's belts, twelve contacts in the game. The live
+   record's byte `+0x59`
    is set when the contact's node lacks flag `0x10` in its 44-byte life record
    (`+0x55c`, `0x1001ac39`) — whether the node still stands: status `0x10` is
    a node at 0 life (`0x1001106c`, *read* in
@@ -2522,8 +2526,13 @@ patrol runs past it.
   the ground search excludes; the landscape converts them to its own mask at
   `Terrain.dll:0x10022da0` (world `0x8` → `0x20`, `0x200` → `0x20000`,
   `0x400` → `0x2000`).
-- The contact records' flag 2, which hands the contact to the object's
-  interface slot `0x7c` (`0x1001affd`), and flag `0x20`. Flag `0x1000` runs the
+- ~~The contact records' flag 2, which hands the contact to the object's
+  interface slot `0x7c` (`0x1001affd`)~~ — **read**, and **measured**: it lays
+  the node the point carries along the ground under it, through `IAnimation`
+  slot 31 and node mask `0x10`, and the twelve contacts that ask for it are the
+  tracked chassis's belts
+  ([28-chassis.md](28-chassis.md#the-belt-lies-along-the-ground--read-and-measured)).
+  Still open: flag `0x20`. Flag `0x1000` runs the
   record's group once while its node stands (`0x1001b08f`); no shipped record
   sets it.
 - ~~Where G would ever differ from 1~~ — answered: nowhere but a `MAT0`
