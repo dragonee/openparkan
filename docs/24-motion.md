@@ -955,47 +955,47 @@ with legs, wheels or tracks falls under gravity 10, and every flyer holds its
 height. A mode-0 or mode-2 machine falls exactly when its state has contact
 points.
 
-### Wheels ride clear of the ground — *measured*
+### A contact point sits on one node and dies with another — *measured*
 
-The lift plants a chassis's **contact points**, not its geometry, and the two
-do not meet. Over the campaign's 20 missions, taking each chassis's state-0
-flag-1 contacts through their nodes and comparing the lowest against the
-merged model's lowest vertex:
+The contact names a control point, and the point's first triple carries **two**
+node numbers ([07-objects.md](07-objects.md#the-control-points)): the second
+slot is the node the point **sits on**, the third the node it **dies with**,
+which is what the state's `0x100` and `0x200` conditions test and what
+[13-control.md](13-control.md#section-1s-conditions-are-contacts--read-and-measured)
+means by "the node is its third slot". The third slot is a damage reference,
+not a frame. Placing the point in it is wrong wherever the two differ.
 
-| chassis | class | gear | lowest vertex | lowest contact | clear | missions |
-|---|---|---|---|---|---|---|
-| `R_B_03` | b | 6 × `weel_*` | −2.84 | −5.07 | **2.23** | 5 |
-| `R_T_01` | t | 6 × `leg_*` | −0.87 | −1.71 | **0.85** | 3 |
-| `R_M_03` | m | 6 × `weel_*` | −1.55 | −2.34 | **0.79** | 4 |
-| `R_B_04` | b | 4 × `weel_*` | −2.93 | −3.43 | **0.50** | 3 |
-| `R_L_03` | l | 4 × `weel_*` | −1.07 | −1.57 | **0.50** | 11 |
-| `R_M_04` | m | 4 × `weel_*` | −1.22 | −1.64 | **0.42** | 7 |
-| `R_M_01` | m | 2 × `*Foot` | −3.03 | −3.04 | 0.02 | 5 |
-| `R_B_06` | b | 1 × `Tur_Base` | −1.55 | −1.56 | 0.01 | 6 |
-| `R_L_01` | l | 2 × `*Foot` | −1.63 | −1.62 | −0.01 | 6 |
-| `R_B_01` | b | 4 × `foot_*` | −2.95 | −2.94 | −0.01 | 4 |
-| `A_L_01` | l | 2 × `*Foot` | −1.13 | −1.05 | −0.09 | 2 |
-| `A_L_04` | l | 4 × `*_Foot` | −1.51 | −1.14 | −0.37 | 2 |
-| `R_L_04` | l | 4 × `weel_*` | −1.20 | −0.82 | −0.38 | 1 |
-| `A_L_05` | l | 4 × `*_Foot` | −9.07 | −6.82 | −2.25 | 2 |
-| `R_B_05` | b | 2 × `*Foot` | −11.26 | −2.11 | −9.15 | 4 |
+*Measured* over the campaign's 15 chassis, they differ on 8:
 
-Every wheeled chassis but `R_L_04` authors its `weel_*` points **below** the
-tyres, so the lift hangs the wheels that far clear of the ground, and the gap
-grows with the chassis. `R_B_03`, the six-wheeled heavy, rides **2.23** clear
-wherever it stands — plainly visible in play, and matched by openparkan's
-engine to the same figure on level ground. The legged chassis go the other
-way: `A_L_05`'s `*_Foot` points sit 2.25 *above* its lowest vertex, so the big
-spider's feet sink into the ground rather than hover.
+- **The walkers** — `A_L_04`, `A_L_05`, `R_L_01`, `R_M_01`, `R_B_01`, `A_L_01`,
+  `R_B_05` — name the same node twice, so the foot rides its own leg either
+  way.
+- **`R_T_01` and `R_M_03`** name a node and one below it: `leg_fl` sits on 14
+  and dies with 16, `weel_fr` sits on 3 and dies with 5.
+- **Every other wheeled chassis** — `R_B_03`, `R_B_04`, `R_L_03`, `R_L_04`,
+  `R_B_06` — authors its `weel_*` points on **node 0, the body**, and names the
+  wheel in the third slot. That is docs/07's "a wheel's contact point rides on
+  the body and dies with the wheel", read exactly.
 
-On broken ground the gap is larger still, since the lift is the **largest**
-rise over the contacts: a unit is held at the highest ground under any one
-wheel. `R_B_03` measured 2.66 clear where the ground under its six wheels
-spread 0.85.
+So a wheel's contact is authored in the model's own frame, at the tyre's
+contact patch. `R_B_03`'s `weel_fr` is at (3.02, 3.22, −2.80): its x and y are
+the front-right wheel node's own translation, (3.02, 3.19), and its z sits
+0.04 above the model's lowest vertex, −2.84. Taken that way every wheeled
+chassis's lowest contact lands within 0.03 of its tyres, and the bot sits on
+the ground.
 
-**For an engine:** do not seat a unit by its lowest vertex. Place it by the
-contact points and the floating wheels come out on their own; seat it by the
-geometry and every wheeled warbot sits lower than the game's.
+Posed in the wheel's frame instead, the same point lands at (6.24, 0.17,
+−5.05) — outside a hull 8.02 wide, and 2.23 under the tyres. Since the lift
+plants the contacts, the bot then rides 2.23 clear of the ground, about three
+quarters of its own 3.10 wheel, and visibly hovers. openparkan did this until
+it was measured; the mistake is easy to make and hard to see, because it is
+invisible on the walkers and on anything with four small wheels.
+
+**What is left is terrain.** The lift is the **largest** rise over the flag-1
+contacts, so a unit is held at the highest ground under any one wheel and the
+rest of it hangs. That is a real gap and the game has it: measured across the
+campaign, `R_B_03` rides up to 0.67 clear where the ground under its six
+wheels is broken, and `R_B_01` up to 0.98.
 
 ### A flyer's height — *read*, and *measured*
 
