@@ -44,10 +44,53 @@ belt contacts: flag `0x20` makes the engine work the flag out afresh each time
 a machine takes a state, from the contact's own axis in the state's end pose,
 and it comes out set on **2229 of the install's 2634 contacts** rather than
 twelve. Every walker's feet conform to the terrain, not just the tracked
-chassis' belts. Two smaller corrections came out of the round: the contact pass
-runs at each state, not at load ([13-control](docs/13-control.md)), and the
+chassis' belts. Two smaller corrections came out of the round: the flag is
+worked out at each state, not at load ([13-control](docs/13-control.md)) — the
+*ground contact's* own pass runs once a frame, as the round after this one
+established — and the
 derivation behind "a clan orders a bot it has no mind for" was reading `op5` as
 `==` when it is `!=` ([23-economy](docs/23-economy.md)).
+
+A third round of twelve was worked the same day, the same four areas of three.
+**All twelve closed**, one of them — how the shade lights a type-1 light — leaving
+a named remainder that is now a line of its own. Three carry negatives with their
+controls: an effect light's attenuation triple is read by nothing, a SuperAI's
+object list has no erase and no clear, and three of the four bits a round's ground
+query excludes are on no shipped face. Four more queue lines went with them, all
+four **stale** rather than researched — the message box, `info_system`, the hero's
+death and the sound falloff were answered in the docs and never ticked here; the
+first three are struck, and the fourth is rewritten to the one thing still open,
+how DirectSound pans. The engine changed in a dozen places across four crates, and
+the largest is not a stand-in at all: the ground contact's second sphere r₂ had
+been taken as r and is the node sphere's, which differs from r on **all 148** unit
+models the campaign places, so the up pass was wrong on every unit in the game.
+
+Two premises of earlier work are corrected where they stand.
+[20-resources](docs/20-resources.md) read a sound descriptor's `type` as *streamed
+against sampled*: it is not, and the withdrawal came with a replacement — types 4,
+5 and 7 build the same object and differ only in the flags their binding is made
+with, `0`, `2` and `0x200`, of which bit 1 survives into
+`IDirectSoundBuffer::Play` as `DSBPLAY_LOOPING`, so an ambient theme loops
+**because** its descriptor is type 5 and a variation does not because it is type 4.
+And [29-weapons](docs/29-weapons.md)'s charge level of a gun with no capacity was
+said to be set by a shot; **nothing** sets it, all three writers sitting behind a
+`value 1 > 0` gate, so the five such components keep their constructor's 0.
+
+Two of this round's own claims were overturned **before they landed**, both by the
+coordinator's spot-checks rather than by the agent that made them. The ambient
+count was reported as 170 variations and is **171 lines binding 170 names**,
+because `Single.02` writes `DAY_VARIATION1` twice and the loader keeps the later;
+and chasing that duplicate through the loader is what turned up the type-5 loop
+flag above, which had been published as a negative — *"type 5 does not loop"* — on
+a read that had stopped one table too early. Which way that ran is worth recording:
+the negative was not wrong for want of evidence but for want of a second question,
+and it is the spot-check, not the research, that asked it.
+
+One earlier reading is **refined rather than corrected**. The round before this
+established that `CONTACT_PLACE` is worked out from the state's end pose, and that
+stands — but it happens once per state, while the ground contact's own pass runs
+once a frame, on message `0x1c`, with the frame's milliseconds for dt, and reads
+each point at the frame's **interpolated** pose.
 
 ## Sky and rendering
 
@@ -117,12 +160,45 @@ derivation behind "a clan orders a bot it has no mind for" was reading `op5` as
 
 [11-effects](docs/11-effects.md#not-resolved)
 
-- [ ] [M4] The rest of the emitter floats:
-  - [ ] whether a fade scales alpha or colour
-  - [ ] the per-axis exponent triples
-  - [ ] the sprite powers at `+64` and `+124`
-  - [ ] a bolt's widths at `+24` and `+28`
-- [ ] [M4] How the shade lights a type-1 light (falloff, attenuation) and the manager flags `0x80000000` and `0x20000000`.
+- [x] ~~[M4] The rest of the emitter floats~~ — closed 2026-09-18, and the guess was right: the
+  triples shape **position and size**. Every drawing emitter builds one particle class (`Effect.dll`
+  vtable `0x1001eb08`) holding three lerped `float32[3]` channels, of which the draw reads the first
+  as the particle's position (`0x100093fc`) and the third as a per-axis scale on its billboard
+  (`0x1000d0c0`); and a channel turns out to be **four consecutive triples — low, high, jitter,
+  exponents**, a reading that checks itself, because each run ends exactly where the block's
+  `(archive, member)` pair begins. So the sprite powers at `+64` and `+124` are the position and
+  size exponents. *Measured*: **6818 of 7142 channels carry (1, 1, 1)**, 324 are bent over 208
+  effects and **192 triples differ across their axes** — the shipped data does bend them (counted
+  here independently). A bolt's `+24`/`+28` are its width at the two ends of its **window**, not of
+  its beam (`0x10002944`, `0x10002fb4`): on all 31 bolts 26 write the same width twice and 5 halve,
+  none widens, and `hero_laser_bullet`'s are a constant 0.4 and 0.1 — so the recording's broad beam
+  is the additive blend, not the width. And **a fade scales alpha, not colour**: no device material
+  is ever built for an effect sprite, because `CStridedPrimitive::RenderVB` gates the material path
+  on draw flag `0x10` and an effect item carries 4, so it takes the unlit path; the item builder
+  overrides the streams with two `D3DCOLOR`s at **stride 0**, so all four vertices carry one pair,
+  which the Shader component makes at `0x1004f710` from the entry's **ambient rgb** — kneed (c ≤ 1
+  kept, then c/6 + 5/6 up to 7, then 2; the constants read out here) — with the **ambient alpha**,
+  where the fade is written, as its alpha. *Measured*: all 1598 entries of the 243 materials the
+  effects draw carry ambient alpha 1.0, so the fade is the whole of a sprite's alpha, and none has a
+  component above 1, so the knee never fires. Fixed: a burst's particle had been modelled as a
+  velocity from the origin and is a lerp in place ([11-effects](docs/11-effects.md)).
+- [x] ~~[M4] How the shade lights a type-1 light (falloff, attenuation) and the manager flags
+  `0x80000000` and `0x20000000`~~ — closed 2026-09-18: **there is no analytic falloff at all.**
+  `EmulatePointLights` (`Terrain.dll:0x1002a130`) reads six fields of the 0x5c-byte record and no
+  more — type `+4`, manager flags `+0x50`, colour `+8`, position `+0x18` and range `+0x30` — cuts on
+  the range **twice** (the plane distance, then any vertex), and then **projects the light onto the
+  triangle's plane as a disc of radius sqrt(range² − d²)** (`0x1002a804`–`0x1002a994`), clipped and
+  queued as an extra pass whose colour is normalised into the ambient rgb and whose ambient alpha is
+  that length × 0.25 held at 2. **The attenuation triple `+0x38`..`+0x40` is never read**, a
+  negative whose control is that the same walk does find the range and the colour the routine
+  plainly uses. Both manager flags are now enumerated: `0x80000000` at `0x10047a52`, `0x10047c96`
+  (a second loop skips such a light outright) and `0x100808c1`/`0x10080914`; `0x20000000` only at
+  `0x1002a200`. The engine still lights with none of it, and its row now says why rather than
+  promising `1 / (a₀ + a₁d + a₂d²)`: a texture on a projected disc is not an attenuation term
+  ([11-effects](docs/11-effects.md)).
+- [ ] What an effect light's attenuation triple `+0x38`..`+0x40` is for, which nothing reads, and
+  whether anything reaches `Ngi32.dll`'s `SetLight` (`0x10008b50`, slot 29 of the render interface;
+  the exported `n3dSetLighting` is a `ret 8` stub).
 - [ ] [M4] Header flag `0x800` and the rest of the draw path:
   - [ ] who passes the draw-pass argument flag `0x800` waits for
   - [ ] who sets the target point a bolt starts from
@@ -133,7 +209,15 @@ derivation behind "a clan orders a bot it has no mind for" was reading `op5` as
 - [ ] [M4] When a stream emits its first particle, and where burst and stream particles go.
 - [ ] [M4] How often an effect tests its point's view, and what that ray meets.
 - [ ] [M4] What a building answers for a strike's material, and a node's wear base.
-- [ ] [M5] How a sound falls off between its near and far distances, and how it is panned.
+- [ ] How Direct3D Sound places a sound between the speakers. (~~[M5] How a sound falls off between
+  its near and far distances~~ — this half was **stale**: the game takes the Direct3D Sound path
+  rather than its own mixer, so the law is DirectSound's — whole within the near distance, then
+  *min* ÷ (*min* + *R* × (*d* − *min*)) for the listener's rolloff *R* of 1, and no further past the
+  far distance. Re-checked by the coordinator 2026-09-18: `services.dll:0x10011914` pushes flags
+  `0x120` into `niCreate3DSound`, so bit 16 is clear and each buffer goes to DirectSound whole
+  through `SetAllParameters`
+  ([11-effects](docs/11-effects.md#how-a-sound-is-heard--read-and-measured)). What is left is only
+  how DirectSound itself pans.)
 
 ## Motion, ground and controls
 
@@ -142,7 +226,25 @@ derivation behind "a clan orders a bot it has no mind for" was reading `op5` as
 
 - [ ] [M3] How interface `0x25` slot 3 turns level-0 triangles into a push, and what slot 2 does with its 0.5.
 - [ ] [M3] Which scene nodes are types 1 and 3, which decides whether bridges and buildings are ground; plus a machine's type-3 parent and what message `0x201` returns.
-- [ ] [M3] The ground contact's timing and dt, the pose its contact points use, the second sphere's radius r₂, and what lifts a sphere with no face under it.
+- [x] ~~[M3] The ground contact's timing and dt, the pose its contact points use, the second
+  sphere's radius r₂, and what lifts a sphere with no face under it~~ — closed 2026-09-18, all four.
+  It runs **once a frame** for every unit, a flyer included — message `0x1c` to slot 24
+  (`0x10007d03` → `0x1000cb80` → `0x1001a450`), gated only on the agent's kind being 4 — and its
+  **dt is the frame's own milliseconds** at machine `+0xe8` (`0x1001b41b`), not the state step's
+  length. Its points are read at the **frame's interpolated pose**: the pass makes no slot-25 call
+  anywhere, every virtual call in it enumerated, and asks the node's current matrix, which the
+  machine tick has just set by playing the mesh at that frame's time. That **refines the round
+  before this one** rather than overturning it — the state's end pose is used once per state, to
+  work `CONTACT_PLACE` out, and the run-time pass reads the live one. **r₂ is the node sphere's
+  radius**, held to 7.5 only when it is under 20 *and* the object carries flag `0x1000000`
+  (`0x1001a51b`–`0x1001a58a`; the constants at `0x1003c044`/`0x1003c048` are 7.5 and 20.0, read out
+  here) — and it differs from r on **all 148 unit models the campaign places**, r₂/r from 0.42 to
+  2.34, larger on 26 and smaller on 122, so the engine's `r₂ = r` was wrong on every unit in the
+  game. **A sphere with no face under it is lifted by its whole r**: the failure path copies the
+  centre into the ground point and the constant (0, 0, 1) into the normal, so the gap is 0, above
+  −r, and the lift is r every frame; a contact point with no face is handled the same way and lifts
+  by 0, its default normal still joining an average taken over the contacts' count **plus one**.
+  Fixed and tested ([24-motion](docs/24-motion.md)).
 - [x] ~~Which `Land.msh` faces carry the world bit `0x8` and class bit 8 that the ground search
   excludes~~ — closed 2026-09-18: **none of them do**. The missing step was naming the fields. The
   ground search excludes world `0x208` and class bit 8; `Terrain.dll` folds each pair into one
@@ -171,9 +273,48 @@ derivation behind "a clan orders a bot it has no mind for" was reading `op5` as
   `0x5`. Right about the flag; wrong that those twelve were all that place.)
 - [ ] [M3] How often `World3D.dll`'s input update runs (it paces the cruise ramp), and which screen states set the 0.5 mouse sensitivity.
 - [ ] [M3] What handlers do when an active row runs again each update, and who calls the second walk/turn ramp's setter (slot 11).
-- [ ] [M3] A state's use count `+0x94`, the state a machine starts in, the game's jitter random source, and a controller's request code before any is sent.
-- [ ] [M3] The vector that righting bits `0x30` stand the hull toward (`+0x348`, no writer found).
-- [ ] [M3] Which way across a slope the mode-2 brake acts, and which way a positive lean tips the model.
+- [x] ~~[M3] A state's use count `+0x94`, the state a machine starts in, the game's jitter random
+  source, and a controller's request code before any is sent~~ — closed 2026-09-18, all four, and
+  the engine was wrong on three. **A use count of 0 means the state never applies again**
+  (`0x10001132`, tested before the code), and the planner spends one on its destination anchor
+  unless it is −1 or already 0; *measured over the install's 1690 states*: −1 on **1607**, 30 on
+  **80**, 20 on 2 and 10 on 1, every finite one on an anchor and on its controller's state 0, the 80
+  being `static.rlb`'s one-state controllers of a 500 ms step, so 30 uses is fifteen seconds of life
+  (counted here independently). **The starting state is index 0** (`0x10006d19`), but the record a
+  machine starts with is the constructor's zeroed copy, whose use count is 0 — so it does not apply,
+  and the first plan runs from 0 to the cheapest anchor that does. **The jitter is neither `rand()`
+  nor a 32-bit xorshift**: a pair of 16-bit words inlined at `0x100057de`, `s0 ← (s0<<1) ⊕ s1` then
+  `s1 ← (s1>>1) ⊕ s0`, seeded once at load from `ngiGetClocks` through the module's `_initterm`
+  table — which matters, because all-zero is a fixed point and an unseeded generator would hand
+  every jittering step the same −12.5%. **The request code starts at 0, not −1** (`0x10006ecf`):
+  *measured*, 1510 states ask for no code and the other **180 are the 30 `fortif.rlb` buildings' six
+  apiece**, codes 0, 1, 2, 6, 8 and 10 (counted here independently), so a finished building applies
+  its code-0 state — stop the construction ray — from its first tick, which the old stand-in
+  prevented ([24-motion](docs/24-motion.md)).
+- [x] ~~[M3] The vector that righting bits `0x30` stand the hull toward (`+0x348`, no writer
+  found)~~ — closed 2026-09-18, and **no negative was needed**: the field no search for a writer had
+  ever found is one the project already had under another name. Control `+0x348` **is the motion
+  body's `+0x194`**, the averaged ground normal of the last landing — the body sits at control
+  `+0x1b4`, and the lift writes the normal there through the body's own `this` (`0x10015e55`, inside
+  `0x10015d60`, called with `lea ecx, [esi+0x1b4]` at `0x1001b440`). Body `+0x194` has exactly two
+  writers, the body constructor and that lift, and two readers, the mode-2 brake and the righting at
+  `0x1000c439`; the same arithmetic already underlies `+0x21c` = body `+0x68` and `+0x254` = body
+  `+0xa0`. So the **390 states with bits `0x30`** — the six wheeled and tracked chassis, 91 Large
+  Walking and 13 Tiny Spider states, two animals, 15 stones and 21 trees — stand their hull along
+  the ground they last landed on. The engine already kept the right field and now knows what it is;
+  righting itself still waits on a body with more than a yaw ([24-motion](docs/24-motion.md)).
+- [x] ~~[M3] Which way across a slope the mode-2 brake acts, and which way a positive lean tips the
+  model~~ — closed 2026-09-18: the brake acts **uphill, or exactly along the contour**, which is
+  what the engine had but for the contour case, now included. The integrator builds C = up × N and
+  D = W × up and skips on a negative D·C (`0x100156ae`–`0x10015799`); that dot is −(W·N) over x and
+  y alone and (Nx, Ny) points downhill, so the sign does not depend on which way the global up
+  points. The lean's sense falls out of the rotation itself: the turn triple goes to three
+  axis-angle quaternions (`0x100141c0`) and `Ngi32.dll:0x10014450` builds not R but **S·R·S with
+  S = diag(1, 1, −1)**, so **a positive pitch tips the nose down, a positive roll the top to the
+  left, a positive yaw the nose to the left** — which is what the righting needs, since its settle
+  angles are *added* to the spin at `0x10014b83` and could not otherwise converge. Every prose
+  reading in the existing lean table survives: the flyers' `0x03` banks *into* a turn and the
+  wheeled `0x83` leans *out* ([13-control](docs/13-control.md), [24-motion](docs/24-motion.md)).
 - [x] ~~[M3] A chord with no row of its own, such as Shift+W~~ — closed 2026-09-18: **the plain row**,
   unless another row of the same key claims that modifier. There is no best match and no search. A pass
   after loading appends each modifier's scan code to every plain row of any table with the same key; a
@@ -196,10 +337,34 @@ derivation behind "a clan orders a bot it has no mind for" was reading `op5` as
 [29-weapons](docs/29-weapons.md#not-established), [30-turrets](docs/30-turrets.md#not-established),
 [28-chassis](docs/28-chassis.md#not-established), [25-sensors](docs/25-sensors.md#not-established)
 
-- [ ] [M4] Whether the landscape is among the objects the sight ray walks.
+- [x] ~~[M4] Whether the landscape is among the objects the sight ray walks~~ — closed 2026-09-18:
+  **it is, and it is walked first**, because the world's root object *is* the landscape.
+  `CLightning::Init` fetches the root through slot `0x30`, reads its class through the same slot
+  `0x2c` the walk uses, and panics *"Root object is not a landscape"* unless the class is 1
+  (`Terrain.dll:0x10071c44`, read out here verbatim); the walk admits `1 << class` against the
+  query's mask through the table at `0x1009a5f0`, and the sight's `0xfff`, a round's `0x41e` and the
+  camera's `0x41a` all carry bit 1. The landscape answers interface `0x18`, whose slot 6 is
+  `GetFirstIntersectedFace`. The control is that the same enumeration finds the child lists the walk
+  descends into (`0x100254e4`, `0x10025520`). A correction falls out with it: the sight's query
+  excludes **nothing** (`0x1002a68e`, zeroed at `0x1002a6c1`), so unlike a round it **stops on a
+  lake's surface**. The engine had given the sight ray the round's water-excluding index; fixed and
+  tested ([29-weapons](docs/29-weapons.md)).
 - [ ] [M4] What a falling round's mount solves for with no target, which way its lift turns on a hung turret, and whether a player's turret is in `CIS_MANUALCONTROL`.
 - [ ] [M4] Whether an AI-set target survives the player taking over, and what sets the hero's target field (`+0x38`).
-- [ ] [M4] How a gun's capacitor refills (the power tick).
+- [x] ~~[M4] How a gun's capacitor refills (the power tick)~~ — closed 2026-09-18: **by the power
+  tick alone, 250 ± 31 ms** (`0x1000c756`), the same tick a building runs, out of the carrier's
+  batteries. Slot 5 asks for `power × dt` plus `value 1 − charge` and slot 6 banks `level × ask −
+  power × dt` (`0x10029a40`, `0x10029a90`); nothing else writes the charge but the parse, a shot and
+  a dock's rearm. *Measured*: **all 158 shipped class-2/30 components have `power` = 0**, so the ask
+  is the lack exactly and a full tick refills outright; capacitors run 0.1 to 6400 over 133 records,
+  and **every one of the 153 with a shot energy holds at least two shots** (2.00 on `e_gun_bl_17` to
+  6666.67 on `e_tur_bt_11`), so no gun is ever stopped by charge on a single shot — only on
+  sustained fire, at 0.04 to 31.22 a second against a bot battery's 5 to 34.5. The engine was
+  already right for a unit with a battery; the stand-in only ever covered a *building's* guns and
+  now says so. A neighbouring claim is **corrected**: the charge level of a gun with no capacity is
+  set by **nothing**, not by a shot — all three writers of `+0x4c` sit behind a `value 1 > 0` gate,
+  so the five such components keep the 0 their constructor leaves
+  ([29-weapons](docs/29-weapons.md)).
 - [ ] [M3] How the camera builds its frame when its up is parallel to the look.
 - [ ] [M5] How the HUD draws the aim point, the guns and the player's target; what plays `TARGET_READY` and `TARGET_ZOOM`; and the unit record's `+0x94` and `+0x98`.
 - [x] ~~`e_gun_bl_03` and `e_gun_tl_02` carry a follower and no gun: are they never fitted, or does it
@@ -238,7 +403,25 @@ derivation behind "a clan orders a bot it has no mind for" was reading `op5` as
 [26-damage](docs/26-damage.md#not-established), [25-sensors](docs/25-sensors.md#not-established),
 [27-ownership](docs/27-ownership.md#not-established)
 
-- [ ] [M4] The hit test's point-in-triangle test (`0x10011090`) and the landscape's own cell size.
+- [x] ~~[M4] The hit test's point-in-triangle test (`0x10011090`) and the landscape's own cell
+  size~~ — closed 2026-09-18, and the engine was wrong twice. The test borrows both halves from
+  `Ngi32.dll`. The plane half is one-sided with **no epsilon** — `n·v < 0`, `d(p₀) ≥ 0`, `d(p₁) ≤ 0`,
+  each against exactly 0.0 — and the containment half is **`mrnPointInPoly`** (ordinal 202,
+  `0x10001e60`): **not barycentric** but a dominant-axis 2D projection, whose axis comes from two
+  comparisons rather than a maximum, with three edge cross products each multiplied by the normal's
+  component on the dropped axis and required `≥ 0`, no epsilon, a point on an edge inside. That
+  product is the full dot with the normal up to a positive factor, so it is an edge test signed by
+  the face's **own stored normal**, not by its winding — and the two differ on **8 of 241887** mesh
+  faces. New with it: **`0x1001110c` makes a batch flagged bit 1 two-sided**, rerunning the plane
+  test with the segment reversed, on **1477 of 15153 shipped batches** — `static.rlb` 946,
+  `fortif.rlb` 440, `turrets.rlb` 31, `weapon.rlb` 28 and 32 across three more archives, the trees
+  and the buildings (counted here independently). And the landscape's cell is **the map's extent
+  over the grid its own file states**: cells across from the square stream's NRes link-count field,
+  cells down from its element count over that (`0x100178e6`–`0x1001794f`), the cell itself from cell
+  0's box. *Measured on all 33 maps*: the stated grid equals the corner-derived grid **33 of 33**
+  (16 × 16 on 28, 8 × 8 on 5), cell 0's box equals extent ÷ grid **33 of 33**, and the cell runs
+  **49.90 units (map 41) to 311.28 (SC_3)** over 22 distinct values — never the engine's flat 16 m.
+  Both fixed and tested ([26-damage](docs/26-damage.md), [03-terrain](docs/03-terrain.md)).
 - [x] ~~[M4] Which node flag makes a node vital (is AniMesh query `0xe` the mesh node's flags?)~~ —
   closed 2026-09-18: **yes, and the bit is `0x200`**, which is what the engine already had. Query `0xe`
   reaches the mesh node's own stream-1 record — pointer at the runtime record's `+0x12c`, indexed by its
@@ -261,7 +444,15 @@ derivation behind "a clan orders a bot it has no mind for" was reading `op5` as
   every node's life by the three factors multiplied, so Mission 01's `s_tree_04` at 3 has a trunk of
   81000 rather than 3000 and Mission 02's `s_stone_10` at 21 holds 4630500000. Fixed and tested
   ([26-damage](docs/26-damage.md), [04-missions](docs/04-missions.md)).
-- [ ] [M4] Whether a round's ground test strikes the water surface.
+- [x] ~~[M4] Whether a round's ground test strikes the water surface~~ — closed 2026-09-18: **it
+  passes through, and the engine was right for a reason it did not have.** A round's ground query
+  (`Control.dll:0x1001d9d0`) is eight dwords excluding world flags `0x208` and class `0x24`, which
+  `GetFirstIntersectedFace` folds inline into the landscape's own mask (`Terrain.dll:0x100209a9` for
+  the flags, `0x100208e3` for the class): the flags word's `0x20`/`0x80` and the surface word's
+  `0x02`/`0x01`. Surface `0x02` is the water sheet, on exactly **3630** faces; the other three are
+  on **0, 0 and 0 of 275882** — the control being the same scan on the same two fields, which does
+  find the 3630. So a shot into a lake splashes on the bed, while the sight ray, which excludes
+  nothing, stops on the surface ([26-damage](docs/26-damage.md)).
 - [ ] [M4] What a dead unit leaves (wreck, damage stages), and what `iron3d.dll` does with owner word `0xfffe` (37 compares).
 - [x] ~~The `.exp` record's two 1.0 floats, for which no reader was found~~ — closed 2026-09-18 as a
   **negative with its control**: the thread the doc named ends, and nothing reads them. The record is
@@ -341,15 +532,82 @@ derivation behind "a clan orders a bot it has no mind for" was reading `op5` as
 
 [34-progression](docs/34-progression.md#not-established)
 
-- [ ] The clock unit that times route reports.
-- [ ] How a destroyed or captured unit leaves function 31's list.
-- [ ] Where message text is drawn, and for how long.
-- [ ] What `info_system` changes on screen.
-- [ ] What follows `MISSION_COMPLETE`, and what leads to the next mission.
+- [x] ~~The clock unit that times route reports~~ — closed 2026-09-18: **game milliseconds**, so a
+  takt comes 1984 to 4916 ms after the last. The takt's argument is the parameter of
+  `MBehaviour::SendMsg`'s message 1, which the game itself names `NEW_GAME_TAKT`; `Terrain.dll`
+  handles the same message with the same parameter and spends it against
+  `CAtmData::GetTimeDiffInSec() × 1000` (`0x10070134`, `0x100701d2`). It is the *game* clock, not
+  the wall's — `World3D.dll` exports `PauseGameTime`/`ResumeGameTime`, and `Behavior.dll` imports no
+  clock at all. **`rand8` is the low byte of `Behavior.dll`'s own `rand()`** (`0x1004ce3c`, the CRT
+  LCG), whose state at `0x10063c1c` is **1** in the shipped file and is written by nothing but the
+  generator — no `srand` ever runs, so it is one deterministic stream, whose first draws are 41, 35,
+  190 and 132 (recomputed here from the LCG). **The first takt runs at once**: the timer record's
+  next-run dword starts at 0 and the scheduler fires on a 0. The engine was wrong on all three;
+  fixed and tested ([34-progression](docs/34-progression.md)).
+- [x] ~~How a destroyed or captured unit leaves function 31's list~~ — closed 2026-09-18 as a
+  **negative with its control: it never does.** `ai.dll` names offset `0x8c` in 135 instructions; of
+  the calls that follow one directly, 99 are `operator[]` and 23 the count, and the one insert
+  (`0x10002da0`, add-if-absent) has exactly two call sites, slot 4's events 1 and 2. **There is no
+  erase and no clear**, and the only write of −1 to a record's id is the constructor's
+  object-not-found path, which slot 4 then refuses to insert. The control is that the same sweep
+  does find these records' task slot `+0x14` cleared, at four named addresses. A **capture** files
+  the object with the *new* clan's SuperAI as event 2 (`iron3d.dll:0x10032fd0`) and tells the old
+  clan nothing, so it is counted by both. The engine declines to copy this — it still takes a
+  destroyed unit off the count and moves a captured one — under a stand-in that now says plainly
+  what the game does and why, since counting every object a clan was ever told about would leave
+  several missions' objectives unreachable, which has not been watched in the game
+  ([34-progression](docs/34-progression.md)).
+- [x] ~~Where message text is drawn, and for how long~~ — this line was **stale**: the doc has
+  answered it since M9. The message box stands at x 230, y 0, width 182 on the 640 × 480 screen
+  (moving to x 374, y 352 in view state 2), holds at most six lines, and each frame deletes it once
+  **20 seconds** have passed since it was made (`0x1007f4f0`); in the recording, two boxes that no
+  later message replaced left 19.75 s and 20.0 s after their text appeared. Confirmed by the
+  coordinator 2026-09-18 ([35-hud](docs/35-hud.md#the-message-box--read-and-measured)).
+- [x] ~~What `info_system` changes on screen~~ — **stale** too, and answered in the same section: it
+  makes the message kind 4 rather than 3, and the kind picks the box's header out of the table at
+  `0x1007f9a0` — string 6214 *from: Information assistant* instead of 3057 *from: Training
+  assistant*. Nothing else about the box changes
+  ([35-hud](docs/35-hud.md#the-message-box--read-and-measured)).
+- [x] ~~What follows `MISSION_COMPLETE`, and what leads to the next mission~~ — closed 2026-09-18:
+  **nothing auto-advances; the player does.** Both shell branches parse the path of the mission just
+  played and stop there — the campaign branch (`0x10009c10`) takes the mission's two digits less one
+  and the campaign's as they stand, the single branch (`0x10009f40`) the mission's less one — and
+  those are the **list positions of what was just played**. Neither adds one, neither writes the
+  parameter block, and each posts shell events to the screen `+0x54` names, which case 2 has just
+  set to the main menu. **`dispatcher.ini` is progress, not order**: the order is the directory
+  numbering, walked when a list opens (campaigns from 0, missions from 1, each stopping at the first
+  index whose `descr` will not open), while the record's `+0x18` is *complete* and `+0x19`
+  *available*, and `[COMMON] ALL_AVAILABLE` unlocks everything. *Measured*: the install's file is
+  **935 bytes with one `[COMPLETE]`, 21 keys all 1 and no `[COMMON]`**, and six campaigns of
+  4/4/4/4/2/2 with no gaps (checked here independently); all 34 directories the enumerators walk
+  carry a one-line `descr`. The same read settles the rest of the paragraph: **mode 3 is the
+  auto-demo** and **mode 4 the training campaign** (`0x1005c748`–`0x1005c766`), and **game message
+  3** is `World3D.dll`'s network layer on `DPSYS_SESSIONLOST` or a failed send. The engine has no
+  shell, so its row stays, reworded ([34-progression](docs/34-progression.md)).
 - [ ] Whether the hero reports its route from inside a boarded bot.
 - [ ] What the behaviour does with the message 6 it sends itself.
-- [ ] The ambient variations' schedule.
-- [ ] A failure on the hero's death.
+- [x] ~~The ambient variations' schedule~~ — closed 2026-09-18: **one every 10 to 19 seconds, from
+  the first frame.** Each frame the game asks `services.dll`'s `ITimer` for the seconds since its
+  stamp and, once that exceeds the wait, restamps, draws a new wait of **10 + `rand()` % 10**
+  seconds and plays one variation (`iron3d.dll:0x1005eb49`); both stamp and wait start at 0, so the
+  first frame plays one. Only the pause byte and state word 3 gate it, so the variations play during
+  a briefing too, which closes [21-briefing](docs/21-briefing.md)'s line with it. The list is the
+  `DEFAULT_` one when the mission gathered no `DAY_`/`NIGHT_` name, else picked by a day/night flag,
+  and the index is drawn by the same pair of 16-bit words as the motion jitter, redrawn while it
+  equals the last — so **a variation never repeats immediately**. *Measured* over all 29
+  `mission.cfg`: every one names a type-5 theme with exactly one `THEME` and a type-4 variation
+  list; **171 variation lines binding 170 names**, 2 to 13 each; 17 use `DAY_`/`NIGHT_` and 12
+  `DEFAULT_`, none both; three themes serve all 29. The odd line is **`Single.02`, which writes
+  `DAY_VARIATION1` twice** — `atm_bees.wav` then `atm_bird2.wav` — and the loader's
+  `std::map::operator[]` keeps the later, so `atm_bees` is built and dropped and never plays in that
+  mission; it is the only repeated key in the 29. Implemented and tested
+  ([34-progression](docs/34-progression.md), [20-resources](docs/20-resources.md)).
+- [x] ~~A failure on the hero's death~~ — **stale**: the game fails the mission itself when the
+  player's clan's hero (`Type` `0x1020000`) is lost, driven or not, putting the view on it first
+  (`0x100a4e50`) and then failing (`iron3d.dll:0x10075619`), after which the panel reads *"MISSION
+  FAILED..."*. `CLAN_HERO_KILLED` does nothing in this build and Mission 01's script never fails,
+  which is what had kept the line open. Confirmed by the coordinator 2026-09-18
+  ([34-progression](docs/34-progression.md#after-the-outcome--read-and-measured)).
 
 ## Files and formats
 
