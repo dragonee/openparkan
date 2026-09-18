@@ -70,16 +70,29 @@ type-5 descriptors are `ambient_music_loop`, the mission's theme, and type 4 is
 every one-shot beside it — including all 29 `ambient_music_variation`
 descriptors, so the theme's own variations are type 4 (*measured*).
 
-**The loader does not tell 4 from 5** — *read*. `services.dll`'s descriptor
-loader switches on `type` − 1 through the table at `0x1000a17c` (`0x100096e1`),
-and types **4, 5 and 7 share one case** (`0x100097ff`), which builds a
-0x20-byte resource of kind 3 with vtable `0x1003a498`. The control is that the
-switch does discriminate: type 1 builds kind 1 (`0x10009702`), type 2 kind 2 in
-0x2c bytes (`0x10009753`), type 3 kind 4 (`0x100097b4`), and type 6 falls to the
-default path. So *streamed against sampled* is not what the pair means — an
-earlier **guess** here, now withdrawn — and whatever makes the theme loop, it is
-not the `type` ([34-progression.md](34-progression.md#ambient-sound--read-and-measured)).
-Nothing uses 7 either, so what the engine would accept there is not read.
+**What 4 and 5 decide is the loop** — *read*. `services.dll`'s loader switches
+on the `type` twice. The **object** comes from the table at `0x1000a17c`
+(`0x100096e1`), where types 4, 5 and 7 share one case (`0x100097ff`, a
+0x20-byte resource of kind 3, vtable `0x1003a498`) — so far the three are
+alike. Each **binding** then goes through a second table, `0x1000a198`
+(`0x10009909`), whose cases differ by one immediate: the flags the sound is
+built with are **0** for type 4, **2** for type 5 and `0x200` for type 7
+(`0x10009ab2`, `0x10009ae3`, `0x10009b14`). `Ngi32.dll` keeps that word at the
+sound's `+0xc` (`0x1000e980`, masked by `0x702`) and its play shifts bit 1 out
+as `IDirectSoundBuffer::Play`'s looping flag (`0x1000eb15`–`0x1000eb1c`). So
+**type 5 means looping and type 4 means once**, which is exactly the theme
+against its one-shots; *streamed against sampled* was the earlier **guess**
+here and is withdrawn
+([34-progression.md](34-progression.md#ambient-sound--read-and-measured)).
+Nothing uses 7, so what its `0x200` asks for is not read.
+
+**A repeated key keeps the later line** — *read*. Each binding is stored with
+`map[name] = sound` (`0x10009b32` into the `operator[]` at `0x1000b6b0`, the
+result written at `0x10009b37`), so a name written twice ends as its second
+value. One shipped descriptor does it: `MISSIONS/Single.02`'s
+`ambient_music_variation` writes `DAY_VARIATION1` twice, so its 8 lines bind 7
+names and `atm_bees.wav` never plays there (*measured*; across the 29 missions,
+171 variation lines bind 170 names, and this is the only repeat).
 
 For the DLL the number is not the game's own. **6 is Win32 `RT_STRING`**, so a
 descriptor over a PE states the Win32 resource type directly.

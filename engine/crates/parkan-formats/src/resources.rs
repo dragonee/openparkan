@@ -44,7 +44,9 @@ fn integer(text: &str) -> Option<i64> {
 }
 
 impl Descriptor {
-    /// The member or index bound to `name`: an exact key first, then ignoring case.
+    /// The member or index bound to `name`: an exact key first, then ignoring case. A key
+    /// written twice is already down to its later value, which is what the game binds
+    /// (`cfg::parse`).
     pub fn get(&self, name: &str) -> Option<&str> {
         let exact = self.bindings.iter().find(|(k, _)| k == name);
         let lower = name.to_lowercase();
@@ -255,6 +257,21 @@ mod tests {
             bound(&found, "T01_T01").map(|(d, v)| (d.role.as_str(), v)),
             Some(("text_resources", "8"))
         );
+    }
+
+    #[test]
+    fn a_key_written_twice_keeps_the_last_line_as_the_loaders_map_does() {
+        const TWICE: &str = "object\tambient_music_variation\r\n desc = \"resource\"\r\n \
+            library = \"sounds.lib\"\r\n libtype = \"multi\"\r\n type = 4\r\n \
+            DAY_VARIATION1 = \"atm_bees.wav\"\r\n DAY_VARIATION1 = \"atm_bird2.wav\"\r\n \
+            DAY_VARIATION2 = \"atm_bird3.wav\"\r\nend\r\n";
+        let found = descriptors(&cfg::parse(TWICE.as_bytes()));
+        let d = &found[0];
+        // Three lines bind two names, and the repeat is already down to the later value.
+        assert_eq!(d.bindings.len(), 2);
+        assert_eq!(d.get("DAY_VARIATION1"), Some("atm_bird2.wav"));
+        assert_eq!(d.get("day_variation1"), Some("atm_bird2.wav"), "ignoring case too");
+        assert_eq!(d.get("DAY_VARIATION2"), Some("atm_bird3.wav"));
     }
 
     /// A PE32 image with one section holding a resource directory: `RT_STRING`, one

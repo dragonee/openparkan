@@ -89,6 +89,14 @@ fn lines(text: &str) -> Vec<&str> {
 /// block name adds to the first block of that name, and a repeated key keeps its
 /// place in `properties` and takes the later value; `lines` keeps both. Values lose
 /// surrounding quotes.
+///
+/// The later value is the game's rule too, for a resource descriptor at least: the
+/// loader binds each line with `map[key] = value` over a `std::map::operator[]`
+/// (`services.dll:0x10009b32` into `0x1000b6b0`, the result stored at `0x10009b37`),
+/// which returns the existing node for a key already there. One shipped descriptor
+/// repeats a key -- `MISSIONS/Single.02`'s `ambient_music_variation` writes
+/// `DAY_VARIATION1` twice -- so `atm_bees.wav` is bound and at once replaced by
+/// `atm_bird2.wav`, and never plays there.
 pub fn parse(data: &[u8]) -> Blocks {
     let text = latin1(data);
     let mut blocks: Vec<Block> = Vec::new();

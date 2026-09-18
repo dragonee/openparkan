@@ -19013,32 +19013,37 @@ def check_outcome(check, game: Path) -> None:
           f"{sum(v == 'false' for v in flagged.values())}; absent from {', '.join(absent)}")
 
     # docs/34, "Ambient sound": every mission names one type-5 theme and a type-4 list of
-    # variations, and no mission mixes DEFAULT_ with DAY_/NIGHT_.
-    themes, kinds, shapes, counts = Counter(), Counter(), [], []
+    # variations, and no mission mixes DEFAULT_ with DAY_/NIGHT_.  Lines and names are
+    # counted apart, because the loader's map keeps the later of a repeated key: one
+    # shipped descriptor repeats one, and the count would hide it.
+    themes, kinds, shapes, keys, lines, repeats = Counter(), Counter(), [], [], [], []
     for d in gamedir.missions(game):
         cfg = d / "mission.cfg"
-        found = mission.load_cfg(cfg) if cfg.exists() else {}
-        loop = found.get("ambient_music_loop", {})
-        var = found.get("ambient_music_variation", {})
-        kinds[(loop.get("type"), var.get("type"))] += 1
-        theme = loop.get("THEME")
-        if theme:
-            themes[theme.strip('"')] += 1
-        named = {k: v for k, v in var.items()
-                 if k not in ("desc", "library", "libtype", "type")}
-        by_prefix = Counter(k.split("VARIATION")[0] for k in named)
-        shapes.append(tuple(sorted(by_prefix)))
-        counts.append(len(named))
-    total = sum(counts)
+        by_line = mission.load_cfg_lines(cfg) if cfg.exists() else {}
+        loop = dict(by_line.get("ambient_music_loop", []))
+        var_lines = [(k, v) for k, v in by_line.get("ambient_music_variation", [])
+                     if k not in ("desc", "library", "libtype", "type")]
+        kinds[(loop.get("type"), dict(by_line.get("ambient_music_variation", [])).get("type"))] += 1
+        if loop.get("THEME"):
+            themes[loop["THEME"]] += 1
+        named = dict(var_lines)
+        shapes.append(tuple(sorted(Counter(k.split("VARIATION")[0] for k in named))))
+        keys.append(len(named))
+        lines.append(len(var_lines))
+        twice = sorted(k for k, n in Counter(k for k, _ in var_lines).items() if n > 1)
+        if twice:
+            repeats.append(f"{d.relative_to(game / 'MISSIONS').as_posix()} {', '.join(twice)}")
     mixed = [s for s in shapes if "DEFAULT_" in s and len(s) > 1]
     day_night = sum(1 for s in shapes if "DAY_" in s or "NIGHT_" in s)
     default = sum(1 for s in shapes if s == ("DEFAULT_",))
     check("missions: every mission's ambient theme is type 5 and its variations type 4",
-          kinds == {("5", "4"): len(counts)} and not mixed and min(counts) > 0,
-          f"all {len(counts)} missions name a type-5 ambient_music_loop with one THEME and a "
-          f"type-4 ambient_music_variation; {total} variations between them, {min(counts)} to "
-          f"{max(counts)} each; {day_night} use DAY_/NIGHT_ and {default} DEFAULT_, none both; "
-          f"{len(themes)} themes serve them all -- "
+          kinds == {("5", "4"): len(keys)} and not mixed and min(keys) > 0
+          and sum(lines) - sum(keys) == 1 and repeats == ["Single.02 DAY_VARIATION1"],
+          f"all {len(keys)} missions name a type-5 ambient_music_loop with one THEME and a "
+          f"type-4 ambient_music_variation; {sum(lines)} variation lines bind {sum(keys)} names, "
+          f"{min(keys)} to {max(keys)} each, the one repeat {'; '.join(repeats)} where the "
+          f"loader's map keeps the later line; {day_night} use DAY_/NIGHT_ and {default} "
+          f"DEFAULT_, none both; {len(themes)} themes serve them all -- "
           f"{', '.join(f'{k} on {v}' for k, v in sorted(themes.items()))}")
 
     # docs/34, "MISSIONS/dispatcher.ini": the shell's lists are the directory numbering,

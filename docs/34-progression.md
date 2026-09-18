@@ -1413,23 +1413,44 @@ briefing as well.
   (`0x1005e2e1` and `0x1005ec03`, `services.dll:0x10011bb0`), with the resource
   name alone and no loop flag.
 
-**Whether a type-5 descriptor loops its sound: no** — *read*, a negative with
-its control. `services.dll`'s descriptor loader switches on `type` − 1 through
-the table at `0x1000a17c` (`0x100096e1`). Types **4, 5 and 7 share one case**,
-`0x100097ff`, which builds a 0x20-byte resource of kind 3 with vtable
-`0x1003a498`: a type-5 descriptor produces an object indistinguishable from a
-type-4 one. The control is that the switch does discriminate — type 1 builds
-kind 1 (`0x10009702`), type 2 kind 2 and 0x2c bytes (`0x10009753`), type 3
-kind 4 (`0x100097b4`), and type 6 falls to the default path. So nothing in the
-`type`, and nothing in the play call, makes the theme loop; what does is not
-established.
+**A type-5 descriptor does loop its sound** — *read*, end to end.
+`services.dll`'s loader switches on the `type` **twice**, and the second switch
+is the one that matters:
+
+- the descriptor's **object** comes from the table at `0x1000a17c`
+  (`0x100096e1`), where types 4, 5 and 7 share one case (`0x100097ff`, a
+  0x20-byte resource of kind 3, vtable `0x1003a498`) — which is why an earlier
+  reading here stopped and called the question a negative;
+- each **binding** then goes through a second table, `0x1000a198`
+  (`0x10009909`), and there the three part. The cases are the same code but for
+  one immediate, the flags handed to the sound: **0** for type 4
+  (`0x10009ab2`), **2** for type 5 (`0x10009ae3`) and `0x200` for type 7
+  (`0x10009b14`). Each then calls `niGet3DSound`'s slot 7
+  (`Ngi32.dll:0x1000cab0`) to build the sound, and stores it in the resource's
+  name map with `map[name] = sound` (`0x10009b32` into `0x1000b6b0`, the
+  `operator[]`, stored at `0x10009b37`).
+- The flag survives: the sound's constructor (`Ngi32.dll:0x1000e980`) keeps it
+  masked by `0x702` at the sound's `+0xc`, and the play — the resource's slot 3,
+  the one `ISoundServer` slot 2 tail-jumps to (`services.dll:0x10011bdd`) —
+  shifts that word right by one and masks it to 1 (`0x1000eb15`–`0x1000eb1c`),
+  handing it to `IDirectSoundBuffer::Play` as its flags. **Bit 1, the value 2,
+  is `DSBPLAY_LOOPING`.**
+
+So the theme loops because its descriptor is type 5, and a variation does not
+because its descriptor is type 4 — the one thing the two types decide. What
+type 7's `0x200` is for is not read, and no shipped descriptor uses it
+([20-resources.md](20-resources.md)).
 
 *Measured*, over all 29 shipped `mission.cfg`:
 
 - every one declares both objects; `ambient_music_loop` is `type = 5` on all
   29 with exactly one `THEME`, and `ambient_music_variation` is **`type = 4`**
   on all 29 — the variations are ordinary sounds, not music;
-- the 29 bind **170 variations** between them, 2 to 13 each;
+- the 29 write **171 variation lines** binding **170 names**, 2 to 13 each:
+  `Single.02` writes `DAY_VARIATION1` twice, `atm_bees.wav` and then
+  `atm_bird2.wav`, and since the loader binds each line with `map[name] = sound`
+  the second replaces the first — `atm_bees.wav` is built and dropped, and never
+  plays in that mission. It is the only repeated key in the 29;
 - **17 missions** use `DAY_`/`NIGHT_` (5 to 9 day names, and 0 to 4 night ones
   — C01 Mission 01 names six day variations and no night one, so its nights are
   silent) and **12** use `DEFAULT_` (2 or 3); **none mixes** `DEFAULT_` with the
@@ -1561,10 +1582,11 @@ sits 11.8 dB under its file: music and sounds come out alike, as the equal
 - ~~The ambient variations' schedule.~~ Answered: one every 10 + `rand()` % 10
   seconds from the first frame on, picked from the part of the day's list by a
   two-word generator that never repeats the last
-  ([Ambient sound](#ambient-sound--read-and-measured)). Still open there: which
+  ([Ambient sound](#ambient-sound--read-and-measured)). ~~And whether a type-5
+  descriptor loops its sound~~: it does, through the flag its binding case hands
+  the sound (2, `DSBPLAY_LOOPING`) where type 4 hands 0. Still open there: which
   flag of the level's `+0xae4` object the day/night branch reads, where the
-  picker's two words start, and -- since types 4, 5 and 7 load alike -- what
-  does make the theme loop.
+  picker's two words start, and what type 7's `0x200` is for.
 - ~~A failure on the hero's death.~~ The game fails the mission itself when the
   player's clan's hero is lost (`iron3d.dll:0x10075619`,
   [After the outcome](#after-the-outcome--read-and-measured)), though
