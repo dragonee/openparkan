@@ -82,6 +82,11 @@ pub const CHANNEL_INVERT: i32 = 0x2;
 pub const CHANNEL_UNDRIVEN: i32 = 0x4;
 /// Joins the turret's list: a gun mount that follows the pitch.
 pub const CHANNEL_TURRET: i32 = 0x8;
+/// Plays its node's material rather than posing it: the value is the fraction the material
+/// manager's slot 5 takes (`World3D.dll:0x10003680`), not an animation frame. *Measured*: the
+/// 12 channels that carry it are the tracked chassis's belts and nothing else
+/// (docs/28-chassis.md, "The belt is a material a channel plays").
+pub const CHANNEL_MATERIAL: i32 = 0x10;
 /// Takes the previous channel's value.
 pub const CHANNEL_FOLLOWS: i32 = 0x40;
 

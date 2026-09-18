@@ -773,11 +773,11 @@ pub fn place_own_view(
     }
     // From the outer camera a boarded bot is drawn whole, as any other unit.
     let driven = driven.filter(|_| !play.outer_shows());
+    let robot_of = |t: usize| play.robots.iter().find(|(rt, _)| *rt == t).map(|(_, robot)| robot);
     for &(instance, t, p, node) in &view.cockpits {
-        let placed = (Some(t) == driven)
-            .then(|| play.robots.iter().find(|(rt, _)| *rt == t))
-            .flatten()
-            .map(|(_, robot)| models::pose_matrix(&robot.placement().compose(&robot.part_pose(p, node))));
+        let robot = (Some(t) == driven).then(|| robot_of(t)).flatten();
+        let placed = robot.map(|r| models::pose_matrix(&r.placement().compose(&r.part_pose(p, node))));
+        renderer.set_model_phase(instance, robot.and_then(|r| r.material_phase(p, node)));
         renderer.set_instance(queue, instance, placed.unwrap_or(Mat4::IDENTITY), placed.is_some());
     }
     for &(instance, part, node, variant) in &view.outside {
@@ -807,6 +807,9 @@ pub fn place_own_view(
         };
         let visible = shown && !play.deleted.get(t).copied().unwrap_or(false) && Some(t) != driven;
         let matrix = models::pose_matrix(&part.nodes[node]) * glam::Mat4::from_scale(Vec3::splat(part.scale));
+        // A tracked chassis's belt runs with the track under it, not with the world clock:
+        // its device plays the material (docs/28, "The belt is a material a channel plays").
+        renderer.set_model_phase(instance, robot_of(t).and_then(|r| r.material_phase(p, node)));
         renderer.set_instance(queue, instance, matrix, visible);
     }
 }

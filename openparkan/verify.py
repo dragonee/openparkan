@@ -10204,6 +10204,8 @@ def check_moving_parts(check, game: Path) -> None:
 
     # every class-3 and radar record keeps the item's defaults
     records = []
+    channel_count = 0
+    flagged: list[tuple[str, control.Channel]] = []
     for archive_path in all_archives(game):
         archive = NResArchive.open(archive_path)
         for entry in archive:
@@ -10214,6 +10216,9 @@ def check_moving_parts(check, game: Path) -> None:
                 parsed = control.parse(blob)
             except control.ControlFormatError:
                 continue
+            channel_count += len(parsed.channels)
+            flagged += [(entry.name.lower(), ch) for ch in parsed.channels
+                        if ch.flags & control.CHANNEL_MATERIAL]
             for p in parsed.components:
                 if p.type_id in (control.SIMPLE_TYPE, control.RADAR_TYPE):
                     groups = struct.unpack_from("<2i", blob, p.offset + control.ITEM_ON_GROUP_AT)
@@ -10265,8 +10270,57 @@ def check_moving_parts(check, game: Path) -> None:
           f"frames a quarter turn apart about the node's z on {quarter}; rates {dict(rates)}; "
           f"the hero's turret's radar slot has {len(hero[2].entries)} entries")
 
-    # stepped as read: the rotors, the dishes and the M-2f's switches
+    # the tracked chassis's belts: a channel with no frames, playing a material
     bases = NResArchive.open(game / "bases.rlb")
+    tread = materials.MaterialLibrary(game / "Material.lib")
+    played_nodes: dict[str, set[int]] = {}
+    for name in ("r_l_04.ctl", "r_m_04.ctl", "r_b_04.ctl"):
+        ref = meshes.get(("bases.rlb", name))
+        model = parts.mesh(objects.ResourceRef(*ref)) if ref else None
+        if model is None:
+            continue
+        nodes = set()
+        for n, node in enumerate(model.nodes):
+            for slot in node.slots_for_lod(0, 0):
+                block = model.slots[slot]
+                for batch in model.batches[block.first_batch:
+                                           block.first_batch + block.batch_count]:
+                    material = tread.get(model.texture_names[batch.material]
+                                         if batch.material < len(model.texture_names) else "")
+                    if material and material.tracks and len(material.tracks[0].keys) > 1:
+                        nodes.add(n)
+        played_nodes[name] = nodes
+    driven = {(name, ch.node) for lib, name, p, _, channels in simple
+              if p.flags in (0x01070C00, 0x02040C00)
+              for ch in (channels[e] for e in p.entries)}
+    belts = {(name, ch.node) for name, ch in flagged}
+    frameless = all(ch.first == ch.last == -1 and ch.flags & control.CHANNEL_WRAP
+                    and ch.span == 1.0 and ch.initial == 0.0 for _, ch in flagged)
+    others = [ch for _, _, p, _, channels in records for e in p.entries
+              for ch in (channels[e],)
+              if ch.first == ch.last == -1 and not ch.flags & control.CHANNEL_MATERIAL]
+    rates = {name: round(ch.rate, 2) for name, ch in flagged}
+    pitch = {}
+    for name in played_nodes:
+        c = control.parse(bases.read_name(name))
+        pitch[name] = round(c.triples[2][1] / rates[name], 2)
+    check(".ctl: a tracked chassis's belt is a material its channel plays, not a pose",
+          len(flagged) == 12 and frameless and not others
+          and {name for name, _ in flagged} == set(played_nodes)
+          and all(belts & {(n, node) for node in played_nodes[n]}
+                  == {(n, node) for node in played_nodes[n]} for n in played_nodes)
+          and belts <= driven
+          and sorted(set(rates.values())) == [19.23, 51.4, 100.0]
+          and sorted(pitch.values()) == [0.29, 0.51, 1.3],
+          f"{len(flagged)} of {channel_count} channels carry CHANNEL_MATERIAL (0x10) and "
+          f"they are the four belt channels of r_l_04, r_m_04 and r_b_04; every one spans "
+          f"no frames -- no other channel a device drives does -- wraps, and is an entry of "
+          f"a skid-steering record; each names a node whose level-0 slot wears a played "
+          f"material, and those nodes are exactly the ones that do; the belts go round at "
+          f"{sorted(set(rates.values()))} a second at top speed, one loop every "
+          f"{sorted(pitch.values())} m")
+
+    # stepped as read: the rotors, the dishes and the M-2f's switches
     turrets = NResArchive.open(game / "turrets.rlb")
     t2 = control.parse(bases.read_name("r_t_02.ctl"))
     rotors = [_turns(control.Item(p, t2.channels), 10.0, 60.0)

@@ -130,6 +130,16 @@ impl Animation {
         }
         phase
     }
+
+    /// The phase a fraction picks (slot 5, `0x10003680`): a fraction outside 0..1 becomes
+    /// 0.5, and the time is the period -- the last key's time -- times it. This is how a
+    /// `CHANNEL_MATERIAL` channel plays its node's material: the value is where the loop
+    /// stands, not when it is (docs/28-chassis.md, "The belt is a material a channel plays").
+    pub fn by_fraction(&self, fraction: f32) -> Phase {
+        let fraction = if (0.0..=1.0).contains(&fraction) { fraction } else { 0.5 };
+        let period = f64::from(self.keys.last().map_or(0.0, |k| k.1));
+        self.at(period * f64::from(fraction))
+    }
 }
 
 /// How a material draws.
@@ -372,5 +382,18 @@ mod tests {
         assert_eq!(once.at(5000.0).cell[0], 0.5, "the last key's entry");
         let jump = beam(TRACK_JUMP, 0);
         assert!((0..50).all(|t| jump.at(f64::from(t) * 37.0).cell[0] <= 1.0));
+    }
+
+    /// A tracked chassis's belt is played by a value, not by a clock: the fraction stands
+    /// for where the loop is, and a value off the end takes the middle.
+    #[test]
+    fn a_fraction_picks_the_key_it_stands_at_and_wraps_at_the_end() {
+        let a = beam(TRACK_LOOP, LERP_AMBIENT);
+        assert_eq!(a.by_fraction(0.0), a.at(0.0));
+        assert_eq!(a.by_fraction(0.125), a.at(25.0), "an eighth of the way is 25 of 200 ms");
+        assert_eq!(a.by_fraction(0.625), a.at(125.0));
+        assert_eq!(a.by_fraction(1.0), a.at(0.0), "the loop closes on itself");
+        assert_eq!(a.by_fraction(-1.0), a.at(100.0), "a fraction off the end becomes 0.5");
+        assert_eq!(a.by_fraction(2.0), a.at(100.0));
     }
 }

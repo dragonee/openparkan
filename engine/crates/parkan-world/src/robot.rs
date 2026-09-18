@@ -818,6 +818,28 @@ impl Robot {
             .map(|(c, &v)| c.frame(v))
     }
 
+    /// Where the material of node `node` of part `part` stands, 0..1, when a device plays it
+    /// instead of posing the node: the first `CHANNEL_MATERIAL` channel on that node.
+    ///
+    /// A tracked chassis's belt is the only thing that carries it. The channel spans no
+    /// frames and its device is the skid-steering one, so the value runs with the track's
+    /// own speed and holds where it is while the unit stands (docs/28-chassis.md, "The belt
+    /// is a material a channel plays").
+    pub fn material_phase(&self, part: usize, node: usize) -> Option<f32> {
+        let devices = if part == self.chassis_part {
+            &self.chassis_devices
+        } else if part == self.turret_part {
+            &self.turret_devices
+        } else {
+            return None;
+        };
+        devices
+            .iter()
+            .flat_map(|d| d.channels.iter().zip(&d.now))
+            .find(|(c, _)| c.node == node as i32 && c.flags & control::CHANNEL_MATERIAL != 0)
+            .map(|(_, &v)| v)
+    }
+
     /// Run the machine's steps due by now one at a time, handing the camera each step's
     /// jolt: (previous − current velocity) ÷ the step in seconds, the velocity from the
     /// poses either side of the step (`Control.dll:0x1000c6e7`, docs/30, "The camera shake").

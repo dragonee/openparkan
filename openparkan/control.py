@@ -59,6 +59,11 @@ CHANNEL_WRAP = 0x1
 CHANNEL_INVERT = 0x2
 CHANNEL_UNDRIVEN = 0x4
 CHANNEL_TURRET = 0x8
+#: Plays its node's material rather than posing it: the value is the fraction the
+#: material manager's slot 5 takes (``World3D.dll:0x10003680``), not a frame.  The 12
+#: channels that carry it are the tracked chassis's belts and nothing else
+#: (``docs/28-chassis.md``, "The belt is a material a channel plays").
+CHANNEL_MATERIAL = 0x10
 CHANNEL_FOLLOWS = 0x40
 
 #: Section 1's record, section 2's record, the fixed block the loader copies

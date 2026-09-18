@@ -108,6 +108,10 @@ struct GpuModel {
     vertices: wgpu::Buffer,
     indices: wgpu::Buffer,
     groups: Vec<DrawGroup>,
+    /// Where this model's played materials stand, 0..1, in place of the world clock: what a
+    /// `CHANNEL_MATERIAL` channel hands a unit's node (docs/28-chassis.md, "The belt is a
+    /// material a channel plays"). `None` on everything else, which plays on the clock.
+    phase: Cell<Option<f32>>,
 }
 
 struct GpuInstance {
@@ -360,6 +364,7 @@ impl ModelRenderer {
                         usage: wgpu::BufferUsages::INDEX,
                     }),
                     groups,
+                    phase: Cell::new(None),
                 }
             })
             .collect();
@@ -434,15 +439,31 @@ impl ModelRenderer {
         queue.write_buffer(&frame.buffer, 0, bytemuck::bytes_of(uniform));
     }
 
-    /// The frame's uniforms, and every played material's phase at the lighting's clock:
-    /// its colours and cell, and the texture its key names.
+    /// Where an instance's model's played materials stand, 0..1, in place of the world
+    /// clock, or `None` to put them back on it. A unit is drawn one model a node, so this
+    /// reaches that node alone; it is not for a model several instances share.
+    pub fn set_model_phase(&self, instance: usize, phase: Option<f32>) {
+        if let Some(i) = self.instances.get(instance) {
+            self.models[i.model].phase.set(phase);
+        }
+    }
+
+    /// The frame's uniforms, and every played material's phase at the lighting's clock --
+    /// or, where its model carries one, at its own: its colours and cell, and the texture
+    /// its key names.
     pub fn prepare(&self, queue: &wgpu::Queue, view_proj: Mat4, lighting: &crate::frame::Lighting) {
         queue.write_buffer(&self.frame, 0, bytemuck::bytes_of(&FrameUniform::new(view_proj, lighting)));
-        for g in self.models.iter().flat_map(|m| &m.groups) {
-            let Some(animation) = &g.animation else { continue };
-            let phase = animation.at(lighting.clock_ms);
-            queue.write_buffer(&g.look, 0, bytemuck::bytes_of(&LookUniform::new(&phase, g.mode, g.lit)));
-            g.current.set(g.bind_groups.iter().position(|(t, _)| *t == phase.texture).unwrap_or(0));
+        for model in &self.models {
+            let stands = model.phase.get();
+            for g in &model.groups {
+                let Some(animation) = &g.animation else { continue };
+                let phase = match stands {
+                    Some(f) => animation.by_fraction(f),
+                    None => animation.at(lighting.clock_ms),
+                };
+                queue.write_buffer(&g.look, 0, bytemuck::bytes_of(&LookUniform::new(&phase, g.mode, g.lit)));
+                g.current.set(g.bind_groups.iter().position(|(t, _)| *t == phase.texture).unwrap_or(0));
+            }
         }
     }
 

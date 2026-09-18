@@ -455,6 +455,15 @@ impl Renderer {
         }
     }
 
+    /// Where an instance's played materials stand, 0..1, in place of the world clock: a
+    /// tracked chassis's belt, which its device plays (docs/28-chassis.md, "The belt is a
+    /// material a channel plays"). `None` puts them back on the clock.
+    pub fn set_model_phase(&self, index: usize, phase: Option<f32>) {
+        if let Some(objects) = &self.objects {
+            objects.set_model_phase(index, phase);
+        }
+    }
+
     /// Draw the scene into `target`, a view of a `width` × `height` texture, and the HUD into
     /// `display`, a view of the same texture in [`Renderer::display_format`].
     pub fn draw(

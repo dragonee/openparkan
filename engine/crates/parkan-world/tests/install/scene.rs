@@ -223,6 +223,109 @@ fn mission_01s_helicopter_turns_its_rotors_and_the_warbots_their_dishes_as_read(
     assert_eq!(play.robots[mf1].1.device_frame(wing), Some(2.0));
 }
 
+/// C01 Mission 04 places two Medium Track warbots. A tracked chassis's belt is not a pose: its
+/// four skid-steering devices drive channels that span no frames and carry `CHANNEL_MATERIAL`,
+/// and the value plays the belt material the same nodes wear (docs/28, "The belt is a material
+/// a channel plays"). So the belt runs with the track under it: it holds while the bot stands,
+/// runs at the channel's rate at top speed, and the two sides run opposite ways in a turn.
+#[test]
+#[ignore = "needs the game install"]
+fn a_tracked_warbots_belt_is_played_by_its_track_so_it_holds_while_the_bot_stands() {
+    use parkan_formats::control::{CHANNEL_MATERIAL, TRIPLE_TOP_SPEED};
+    use parkan_world::textures::TextureStore;
+
+    let game = gamedir::find(None).expect("a Parkan install: set PARKAN_DIR");
+    let mut play = campaign_play(gamedir::C01_MISSION_04);
+    let r = play
+        .robots
+        .iter()
+        .position(|(_, robot)| {
+            robot.walker.controller.channels.iter().any(|c| c.flags & CHANNEL_MATERIAL != 0)
+        })
+        .expect("C01 Mission 04 places a Medium Track warbot");
+
+    // The belt nodes are exactly the nodes that wear a played material: four of the chassis's
+    // seven, the four the skid-steering devices name.
+    let (chassis, controller) = {
+        let robot = &play.robots[r].1;
+        (robot.chassis.clone(), robot.walker.controller.clone())
+    };
+    let belts: Vec<usize> = controller
+        .channels
+        .iter()
+        .filter(|c| c.flags & CHANNEL_MATERIAL != 0)
+        .map(|c| c.node as usize)
+        .collect();
+    assert_eq!(belts.len(), 4, "two belts, each on two nodes: {belts:?}");
+    let mut store = TextureStore::open(&game).unwrap();
+    let played: Vec<usize> = (0..chassis.mesh.nodes.len())
+        .filter(|&n| {
+            let slot = chassis.mesh.nodes[n].slot_index[0];
+            let Some(slot) = chassis.mesh.slots.get(usize::from(slot)) else { return false };
+            let batches =
+                usize::from(slot.first_batch)..usize::from(slot.first_batch) + usize::from(slot.batch_count);
+            batches.filter_map(|b| chassis.mesh.batches.get(b)).any(|b| {
+                let name = chassis.wear.materials.get(usize::from(b.material)).cloned().unwrap_or_default();
+                store.look(&name).unwrap().animation.is_some()
+            })
+        })
+        .collect();
+    let mut named = belts.clone();
+    named.sort_unstable();
+    assert_eq!(named, played, "the channels name the nodes that wear a played material");
+
+    // Standing still -- no velocity, no spin -- the belt holds where it stopped.
+    let (_, robot) = &mut play.robots[r];
+    let (part, node) = (robot.chassis_part, belts[0]);
+    let tick = |robot: &mut parkan_world::robot::Robot, ms: f64| {
+        robot.time_ms += ms;
+        robot.turn_devices(|_, _| true);
+    };
+    robot.walker.body.velocity = [0.0; 3];
+    robot.walker.body.spin = [0.0; 3];
+    for _ in 0..60 {
+        tick(robot, 1000.0 / 60.0);
+    }
+    let held = robot.material_phase(part, node).expect("the belt is played by a value");
+    for _ in 0..60 {
+        tick(robot, 1000.0 / 60.0);
+    }
+    assert_eq!(robot.material_phase(part, node), Some(held), "the belt holds while the bot stands");
+
+    // At top speed it runs at its channel's rate, 51.4 loops a second on the medium chassis.
+    let rate = controller.channels[0].rate;
+    robot.walker.body.velocity = [0.0, controller.triples[TRIPLE_TOP_SPEED][1], 0.0];
+    let mut ran = 0.0_f32;
+    let mut last = held;
+    for _ in 0..1000 {
+        tick(robot, 1.0);
+        let now = robot.material_phase(part, node).unwrap();
+        ran += wrapped(last, now);
+        last = now;
+    }
+    assert!((ran - rate).abs() < rate * 0.05, "{ran} loops a second against the channel's {rate}");
+
+    // Turning on the spot the two sides run opposite ways: skid steering.
+    robot.walker.body.velocity = [0.0; 3];
+    robot.walker.body.spin = [0.0, 0.0, 0.5];
+    let before: Vec<f32> = belts.iter().map(|&n| robot.material_phase(part, n).unwrap()).collect();
+    for _ in 0..100 {
+        tick(robot, 1.0);
+    }
+    let sides: Vec<f32> = belts
+        .iter()
+        .zip(&before)
+        .map(|(&n, &was)| wrapped(was, robot.material_phase(part, n).unwrap()))
+        .collect();
+    assert!(sides.iter().any(|&s| s > 0.0) && sides.iter().any(|&s| s < 0.0), "skid steering: {sides:?}");
+}
+
+/// How far a wrapping value went from `a` to `b`, the short way round.
+fn wrapped(a: f32, b: f32) -> f32 {
+    let d = b - a;
+    d - d.round()
+}
+
 #[test]
 #[ignore = "needs the game install"]
 fn the_large_factorys_portal_quads_are_not_drawn_so_its_doors_and_rooms_show() {

@@ -270,6 +270,60 @@ holds, and not until a swing has finished once it moves.
 `openparkan.control.Item` is this update, driver and playback, and `openparkan
 verify` steps it over the shipped records.
 
+### The belt is a material a channel plays — *measured*, and *read*
+
+A wheeled chassis turns its wheels: its devices' channels span frames and the
+node plays them. A **tracked** chassis has nothing to turn — a belt is one
+piece — and its four skid-steering channels say so. They are the only channels
+in the game that carry **flag `0x10`**, and they are the only ones a device
+drives that span no frames.
+
+*Measured*, over every `.ctl` in the install — 991 channels:
+
+- **12 carry `0x10`**, and they are the four belt channels of each of the three
+  tracked chassis, `r_l_04`, `r_m_04` and `r_b_04`, and nothing else.
+- Every one has **`first` = `last` = −1**: no segment to play, so no node moves
+  with it. Every other channel a device drives has frames.
+- Their flags are `0x15`: wrapping, not driven by the component update, and
+  `0x10`. Their span is 1 and their initial value 0.
+- Their devices are the **skid-steering** records of the table above,
+  `0x01070C00` and `0x02040C00` at gains 1 and 0.5: forward speed ∓ half the
+  turn.
+- **The nodes they name are exactly the nodes that wear a played material** —
+  `TFL/TFR/TBL/TBR` on the S-42t, `TMFL/TMFR/TMDL/TMDR` on the M-42t,
+  `BRLFD/BRRFD/BRLBD/BRRBD` on the L-42t. Those wear `R_RL_25`, `R_RL_26` and
+  `R_RL_27` and their `REV` twins: four-entry tracks ending at 50, 100, 150 and
+  200 ms, which step four tread images (or four cells of `NP03`), the `REV`
+  twins the other way round so the far side of the hull scrolls to match. The
+  upper rollers, which are held at `0x00000001`, wear `R_NP03`, which has one
+  key and does not play.
+
+So the value has one thing left to drive: the belt's material. The manager has
+a fetch for that — **slot 5** (`World3D.dll:0x10003680`,
+[07-objects.md](07-objects.md#how-a-material-reaches-the-device--read-and-measured)),
+which takes a **fraction** rather than the world clock and shows the key at
+last-key-time × it. A wrapping 0..1 value is exactly what that fetch wants.
+
+**What it comes to** (*derived* from the read update): the value moves at
+|rate| × the channel's rate a second, so the belt goes round once per
+
+| chassis | channel rate | top speed | metres a loop |
+|---|---:|---:|---:|
+| S-42t (`r_l_04`) | 100.0 | 29.17 m/s | **0.29** |
+| M-42t (`r_m_04`) | 51.4 | 26.39 m/s | **0.51** |
+| L-42t (`r_b_04`) | 19.23 | 25.0 m/s | **1.30** |
+
+— a track-link pitch that grows with the chassis, which is the check on the
+reading: the rates are not arbitrary, they are that chassis's belt measured
+against its own top speed. And because the rate is the skid-steering one, the
+belt **holds where it stopped while the bot stands** (a rate under 1e-9 moves
+the progress not at all), runs backwards in reverse, and the two sides run
+opposite ways when the bot turns on the spot.
+
+The engine plays it this way: `CHANNEL_MATERIAL` in `parkan-formats`,
+`Robot::material_phase` for the value and `Animation::by_fraction` for slot 5,
+handed to the node's model as it is placed.
+
 ### What moves by itself on Mission 01 — *measured*
 
 Over every unit and building `data.tma` places (the hero `tut1_p`, the enemy

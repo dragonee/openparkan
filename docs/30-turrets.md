@@ -163,6 +163,7 @@ hero turret the four channels animate `CP_m1o1`, `Turn_m1o1` (49–53),
 | 2 | inverts, 1 − v |
 | 4 | is not driven by the component update (the camera) |
 | 8 | joins the turret's list (the gun mounts that follow pitch) |
+| `0x10` | plays the node's material, not its pose: the value is the material manager's slot-5 fraction. Only the 12 belt channels of the three tracked chassis carry it ([28-chassis.md](28-chassis.md#the-belt-is-a-material-a-channel-plays--measured-and-read)) |
 | `0x40` | takes the previous channel's value (`AR_*`, `AL_*`) |
 
 **A turret's two component entries are its yaw and pitch channels.**
