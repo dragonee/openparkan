@@ -236,8 +236,13 @@ impl Ground {
                         && best.is_none_or(|s| d2 < s.d2)
                         && !self.cut(q.x, q.y)
                     {
-                        best =
-                            Some(crate::hit::Strike { point: q, d2, node: None, triangle: Some(f as usize) });
+                        best = Some(crate::hit::Strike {
+                            point: q,
+                            d2,
+                            node: None,
+                            triangle: Some(f as usize),
+                            normal: Vec3::from_array(face.normal),
+                        });
                     }
                 }
                 if best.is_some() {
@@ -264,7 +269,8 @@ impl Ground {
             let Some(q) = crate::hit::plane_crossing(p0, p1, normal, a) else { continue };
             let d2 = (q - p0).length_squared();
             if crate::hit::inside(q, a, b, c, normal) && best.is_none_or(|s| d2 < s.d2) {
-                best = Some(crate::hit::Strike { point: q, d2, node: None, triangle: None });
+                best =
+                    Some(crate::hit::Strike { point: q, d2, node: None, triangle: None, normal });
             }
         }
         best

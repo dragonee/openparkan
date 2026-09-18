@@ -11496,11 +11496,20 @@ def check_firing(check, game: Path) -> None:
                      if k.lower().startswith("e_gun_"))
     fitted: Counter[str] = Counter()
     short: list[str] = []
+    spare: list[tuple[str, int, int]] = []
+    loose: Counter[tuple[str, int]] = Counter()
     followers_total = guns_total = 0
+    turrets = several = mixed = not_first = beam_led = 0
+    ratios: list[float] = []
+    tops: list[tuple[str, float]] = []
     dats = sorted(game.glob("UNITS/**/*.dat"))
     for path in dats:
         unit = objects.load_unit(path)
         followers = merged = 0
+        #: Each class-1 turret opens a list; the class-2 and class-30 guns after it are its,
+        #: as the fight module's table builder files them (Behavior.dll:0x1001bf82).
+        buckets: list[list[tuple[float, int]]] = []
+        order: list[tuple[str, int]] = []
         for i, comp in enumerate(unit.components):
             member = comp.ref.member.lower()
             if member.startswith("e_gun_"):
@@ -11509,15 +11518,44 @@ def check_firing(check, game: Path) -> None:
             parsed = armoury.controller(member) if record else None
             if parsed is None or not (i == 0 or record.tag == objects.EXTERNAL_TAG):
                 continue
+            if i == 0:
+                tops.append((path.stem.lower(),
+                             parsed.triples[control.TRIPLE_TOP_SPEED][1]))
             followers += sum(1 for ch in parsed.channels
                              if ch.flags & control.CHANNEL_TURRET
                              and not ch.flags & control.CHANNEL_FOLLOWS)
             merged += sum(1 for p in parsed.components
                           if p.type_id in (control.GUN_TYPE, control.BUILDER_TYPE))
+            for part in parsed.components:
+                if part.type_id == control.TURRET_TYPE:
+                    buckets.append([])
+                elif part.type_id in (control.GUN_TYPE, control.BUILDER_TYPE):
+                    shot = armoury.round(part.resource.member) if part.resource.member else None
+                    pair = (shot.speed if shot else 0.0, shot.mode if shot else 0)
+                    if buckets:
+                        buckets[-1].append(pair)
+                    order.append((member, pair[1]))
         followers_total += followers
         guns_total += merged
         if followers > merged:
             short.append(path.name)
+        if merged > followers:
+            spare.append((path.name, followers, merged))
+            for member, mode in order[followers:]:
+                loose[(member, mode)] += 1
+        for one in buckets:
+            turrets += 1
+            speeds = [speed for speed, _ in one]
+            if len(speeds) < 2:
+                continue
+            several += 1
+            if len(set(speeds)) == 1:
+                continue
+            mixed += 1
+            not_first += speeds.index(max(speeds)) != 0
+            beam_led += max(speeds) >= 10000.0
+            if min(speeds) > 0.0:
+                ratios.append(max(speeds) / min(speeds))
     never = sorted(g for g in gun_ids if not fitted[g])
     part_lists = {tuple(p.lower() for p in research.read(path).part_ids)
                   for path in research.trees(game)}
@@ -11557,6 +11595,78 @@ def check_firing(check, game: Path) -> None:
           f"means zero; and all 29 trees carry one and the same part list, which names "
           f"e_gun_bs_01, assembled nowhere -- so in the tree and assembled are detected "
           f"apart")
+
+    # The turret record's +0x1c, the gun whose round speed becomes the turret's lead: the
+    # fight module's refresh keeps the index of the strictly greatest of its guns' property
+    # 0x54 (Behavior.dll:0x1001c37d-0x1001c398), zeroing it first (0x1001c2a9).
+    check("UNITS: a turret's lead is its fastest gun's round speed, wrong for every other gun",
+          (turrets, several, mixed, not_first, beam_led) == (407, 312, 160, 85, 91)
+          and len(ratios) == 160
+          and (round(min(ratios), 2), round(statistics.median(ratios), 1),
+               round(max(ratios), 1)) == (1.06, 111.1, 285.7),
+          f"{turrets} turret records over the {len(dats)} assemblies, {several} with two guns "
+          f"or more; on {mixed} the guns' round speeds differ, so the lead is wrong for all "
+          f"but the fastest, and on {not_first} of those the fastest is not the first fitted "
+          f"(the field is initialised to 0 at Behavior.dll:0x1001bf6a and rewritten every "
+          f"refresh).  {beam_led} of the {mixed} are led by a 10,000 m/s beam, which is no "
+          f"lead at all: a missile on that turret is aimed where its target stands.  The "
+          f"fastest is {min(ratios):.2f} to {max(ratios):.1f} times the slowest, median "
+          f"{statistics.median(ratios):.1f}")
+
+    # A gun with no follower gets no mount, so the turret's takt never writes its ready byte
+    # (Control.dll:0x10027f51) and it keeps the 1 its constructor sets (0x100295b3).
+    check("UNITS: 19 guns hang on no follower, and not one of them lobs",
+          followers_total == 1015 and guns_total == 1034 and len(spare) == 19
+          and sum(loose.values()) == 19 and {mode for _, mode in loose} == {0}
+          and sorted(m for m, _ in loose) == ["a_l_01", "a_l_02", "a_l_03", "e_gun_lc_01",
+                                              "e_gun_lc_03", "e_gun_ls_10", "e_gun_ms_12"],
+          f"summed over each assembly's merged control system, {followers_total} followers "
+          f"against {guns_total} guns, and {len(spare)} assemblies fit more guns than "
+          f"followers: {sorted(loose.items())} (part, round mode, fittings).  Every one is a "
+          f"mode-0 round, so no lobbing gun is ever left without a mount -- the Small Bunker's "
+          f"e_bnt_lt_01 carries no follower of its own, but each e_gun_fc_08 brings one, and "
+          f"a fitted part's follower joins the turret's list (Control.dll:0x10009120)")
+
+    # The fight module holds a heavy gun back for a target whose id nibble is 3
+    # (Behavior.dll:0x10024d02-0x10024d3e), the bar being 10,000 damage (0x1005994c).
+    heavy = sorted((g, round(armoury.gun(g).round.damage))
+                   for g in gun_ids
+                   if armoury.gun(g) and armoury.gun(g).round
+                   and armoury.gun(g).round.damage >= 10000.0)
+    armed = [armoury.gun(g).round.damage for g in gun_ids
+             if armoury.gun(g) and armoury.gun(g).round]
+    below = max(d for d in armed if d < 10000.0)
+    nibbles: Counter[int] = Counter()
+    for folder in gamedir.missions(game):
+        for placed in mission.load(folder / "data.tma").objects:
+            nibbles[(placed.logical_id & 0xFFFFFFFF) >> 24 & 0xF] += 1
+    check("guns.rlb: the three winged SSM launchers are the only guns the AI holds back",
+          [g for g, _ in heavy] == ["e_gun_bl_17", "e_gun_bl_18", "e_gun_ml_18"]
+          and [d for _, d in heavy] == [100000, 60000, 60000] and below == 3000.0
+          and dict(nibbles) == {0: 463, 0xF: 401},
+          f"{len(heavy)} of the {len(armed)} e_gun_ records with a round do 10,000 damage or "
+          f"more: {heavy}.  The next gun down does {below:g} (the huge missile launcher's "
+          f"fm_h_01), so the bar separates the winged SSMs from everything else by 3.3x.  "
+          f"The nibble the gate asks of the target is a runtime id's, not a mission's: over "
+          f"the {sum(nibbles.values())} objects the missions place, the logical id's nibble "
+          f"is {dict(sorted(nibbles.items()))} (0 on the owned ones, 0xf on scenery) and "
+          f"never 3")
+
+    # The fight module's bar reads MBehaviour+0x614, the live forward top speed
+    # (docs/24, "How the AI asks for speed"), against 0.5 (Behavior.dll:0x10024e8f,
+    # 0x100595c0): 0.85 at or above it, 0.45 below, and a building takes 0.85 outright.
+    crawlers = sorted(name for name, top in tops if top < 0.5)
+    check("UNITS: only the fixed towers are authored below the 0.5 m/s the fight module's bar reads",
+          len(tops) == 382 and len(crawlers) == 19
+          and {round(top, 4) for name, top in tops if top < 0.5} == {0.2}
+          and all("tow" in name or "targ" in name for name in crawlers)
+          and min(top for _, top in tops if top >= 0.5) > 1.0,
+          f"{len(crawlers)} of the {len(tops)} assemblies with a root controller carry a "
+          f"forward top speed (.ctl +48) below 0.5, every one of them 0.2: {crawlers}.  They "
+          f"are the fixed gun towers and the practice targets, and they are units, not "
+          f"buildings, so nothing else lifts their bar: an AI tower fires at 0.45 where a "
+          f"warbot needs 0.85.  Every other assembly is authored above 1 m/s, so only damage "
+          f"can bring one under the bar")
 
     fx = effects.EffectLibrary(game / "effects.rlb")
     load = [r for r in tur.references if r.group == tur.load_group]

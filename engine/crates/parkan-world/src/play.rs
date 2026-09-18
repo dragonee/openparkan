@@ -2132,12 +2132,17 @@ impl Play {
         if !self.outer_shows() {
             return own;
         }
-        // STAND-IN: docs/30-turrets.md#not-established -- which classes and faces the outer
-        // camera's line meets (mask `0x41a`, `0x208`) is not followed: the ground, and every live
-        // target but the unit looked at, passing what a round passes.
+        // The camera's query is a round's less one class bit (`0x10038649`: `0x41a` against a
+        // round's `0x41e`, the same `0x208` and `0x24`), so it meets the ground and every live
+        // object, passing what a round passes, and stands off along the face's normal.
+        // STAND-IN: docs/30-turrets.md#not-established -- which objects answer the world class
+        // the camera drops, class 2, is not found: nothing is dropped here.
         let unit = self.outer.unit.flatten();
         let meets = |from, to| {
-            self.battle.combat.first_hit(&self.ground, unit, from, to, 0.0).map(|(s, _, _)| s.point)
+            self.battle
+                .combat
+                .first_hit(&self.ground, unit, from, to, 0.0)
+                .map(|(s, _, _)| (s.point, s.normal))
         };
         self.outer.place(&own, self.outer_bound(unit), meets)
     }

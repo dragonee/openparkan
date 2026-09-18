@@ -320,6 +320,40 @@ ready half a second after the key**. The plasma rifle and the missiles are
 never ready until selected, and a gun deselected mid-fold stops being ready at
 once.
 
+#### A gun with no follower is ready from birth — *read*, and *measured*
+
+A gun that gets no mount is never touched by the turret's takt. Its ready byte
+(`+0x118`) has **two writers**: the gun's constructor, which sets it to **1**
+(`0x100295b3`), and the mount step (`0x10027f51`). The shot's test
+(`0x10029d1d`) is the only other reference to the field as a byte in
+`Control.dll`. So a gun with no mount is **permanently ready**, takes no
+elevation, and its round leaves along its barrel's own direction.
+
+**A fitted gun part carries its own follower**, which joins the turret's list at
+load (`0x10009120`), so the pairing finds it even when the turret record has none
+of its own. *Measured*: `e_bnt_lt_01`, the Small Bunker's turret, has three
+channels and not one flagged 8, but each `e_gun_fc_08` bolted to it holds a
+follower (node 2, flags `0x8`, no control point) beside its class-2 gun — so the
+bunker's two flamers are mounted, and a flamer's lobbed round is lifted like any
+other. **The case this page once worried about does not exist in the shipped
+data.**
+
+*Measured* over the 458 assemblies, summed across each one's merged control system:
+**1,015 followers against 1,034 guns**, and **19 assemblies fit more guns than
+followers**, so 19 guns hang on nothing:
+
+| gun | round mode | fittings | where |
+|---|---:|---:|---|
+| `a_l_01`, `a_l_02`, `a_l_03` | 0 | 1 each | the tushkan, the bird and the tent animal, whose root controller has a turret and a gun and no follower at all |
+| `e_gun_lc_01`, `e_gun_lc_03` | 0 | 1, 5 | the gun a builder fills its battle slot with |
+| `e_gun_ls_10`, `e_gun_ms_12` | 0 | 5, 5 | a builder module's **second** class-30 beam: the module brings one follower and two beams |
+
+**Every one fires a mode-0 round**, so no lobbing gun is ever left unmounted, and
+each of the 19 is a gun that wants no elevation anyway — an animal bites, a builder
+beam reaches out to a site. Never the other way round: no assembly has a follower
+that would find no gun
+([The two guns nothing carries](#the-two-guns-nothing-carries--measured)).
+
 ### Where the round leaves, and which way
 
 - **The muzzle** is the barrel channel's control point (+0x14), in world space,
@@ -492,7 +526,11 @@ value 8 is positive (`0x10029d3a`):
    no gate.
 2. **Too far.** When the target's point (its part's where it names one,
    `0x1002a8c0`) is farther from the unit's position than value 8
-   (`0x10029e28`, squared): state 7, no shot, and the lock goes back to value 9.
+   (`0x10029e28`, squared — value 8 is squared first unless it is `FLT_MAX`
+   already, `0x10029dfc`): state 7, no shot, and the lock goes back to value 9
+   (`0x10029e37`). **Report 7 is two refusals**: this one, and the ready byte
+   clear before the gate is even reached (`0x10029d27`,
+   [A gun with no follower is ready from birth](#a-gun-with-no-follower-is-ready-from-birth--read-and-measured)).
    With no part named, the point is **the centre of the target's node sphere**:
    interface `0x20` slot 3 asked with 2 and the all-zero request
    (`0x1002a95b`–`0x1002a97f`), the sphere
@@ -906,17 +944,34 @@ units only, or weighted by the areal figure (`0x100240ae`).
 88 a gun) is aimed at it (`0x10024b1b`–`0x10024c51`):
 
 - the unit's turret target is set (interface `0x204` slot 16);
-- the turret's lead speed is set to one of its guns' round speeds
-  (property `0x54`);
+- the turret's lead speed is set to **its fastest gun's** round speed
+  (property `0x54`, [below](#the-lead-is-the-turrets-fastest-gun--read-and-measured));
 - the turret is put in `CIS_POINTTRACE` (`0x400`).
 
 **Each gun is scored.** Its record (`0x1001b4b0`) keeps its round's damage
 (property 6), its round's speed *v* (property `0x54`), its magazine (property
 `0x800`), and the round frame's flags and range. Then:
 
-- **Heavy rounds are held back.** A gun whose round does 10,000 damage or more
-  fires only at a target whose id has 3 in its `0x0f000000` nibble
-  (`0x10024d30`). Those are the three winged SSM launchers (*measured*).
+- **Heavy rounds are held back.** A gun whose round does **more** than 10,000
+  damage (property 6 against `0x1005994c`, `0x10024d02`–`0x10024d2e`) fires only at
+  a target whose id has 3 in its `0x0f000000` nibble (`0x10024d30`–`0x10024d3e`).
+  - **The nibble is the object id's class** (*read*). `iron3d.dll`'s game-message
+    handler switches on `(id >> 24) & 0xf` (`0x1006016b`, `0x100606fe`) and hands
+    class 3 to the level's **building** list `+0x71c` and class 4 to its **unit**
+    list `+0x720` — the two lists [42-selection.md](42-selection.md#not-established)
+    and [36-factory.md](36-factory.md) select from. `World3D.dll:0x10001853` filters
+    an object list by the same field, its flag `0x40` admitting class 3 and `0x20`
+    class 4. So **the AI fires a winged SSM only at a building** (*derived*), which
+    is what a 45–60 m blast at 700 m is for.
+  - **The bar separates cleanly** (*measured*): 3 of the 62 `e_gun_*` records with
+    a round do 10,000 or more — `e_gun_bl_17` (`bm_b_04`, 100,000) and
+    `e_gun_bl_18` and `e_gun_ml_18` (`bm_m_04`, 60,000), the three winged SSM
+    launchers — and the next gun down, the huge missile launcher's `fm_h_01`,
+    does 3,000.
+  - **The nibble is in no shipped file** (*measured*): over the 864 objects the 33
+    missions place, the logical id's nibble is 0 on the 463 owned ones and `0xf`
+    on the 401 scenery, never 3. It is a runtime id, minted as the object is
+    registered.
 - **Distance** (`0x1001b9f0`). **A round whose frame flags (`.ctl` `+116`, the
   record's `+0x34`) carry bit `0x10` scores 1.1, and bit 8 scores 1.0, wherever the
   target stands.** Any other rises from 0 to 1 over the first 5 m (0 m for an
@@ -964,8 +1019,32 @@ units only, or weighted by the areal figure (`0x100240ae`).
     is 1 (`0x10024d9e`).
 - **Threshold** (`0x10024e7a`–`0x10024ec5`):
   - 0.45 for a unit whose chassis profile can fly (`0x10014670`, `+0xc`);
-  - otherwise 0.85 when `MBehaviour+0x614` is at least 0.5 or the unit is a
-    building, and 0.45 when not.
+  - otherwise 0.85 when `MBehaviour+0x614` is **above 0.5** or the unit's Type
+    carries `0x80000000`, a building, and 0.45 when not.
+
+  **`MBehaviour+0x614` is the unit's live forward top speed**, in m/s — *read*.
+  The fight module sits at `MBehaviour+0x5fc`, and its refresh copies six live
+  figures into `+0x5fc`–`+0x610` and the same six again into `+0x614`–`+0x628`
+  (`0x1001bbe0`, from `0x1001c1a0`). They come from interface `0xa` slot 13 with id
+  `0x12`, the **live** parameter block at control `+0x470` (`Control.dll:0x1000dd6f`;
+  id `0x11` is the authored one at `+0x46c`), and `+0x614` is that block's `+0x1c`,
+  which is file `.ctl` +48, the forward component of the top-speed triple
+  ([24-motion.md](24-motion.md#how-the-ai-asks-for-speed--read)). That is the
+  limited speed — authored × the gear × the engine's drive and condition × the load —
+  not the authored one. The engine's debug line prints it as `ns`
+  (`'%X %s%s ns%2.1f bs%2.1f li%d cl%d …'`, `0x1000d2f4`), and the unit takt uses
+  the same 0.5 to decide whether to drive the unit at all
+  (`0x100051b0`, [24-motion.md](24-motion.md#what-sets-the-live-limits--read)).
+
+  So **the bar is 0.5 m/s**, and a machine shot down to a crawl starts firing on
+  half the aim a healthy one needs. A building has no speed at all, which is why
+  its Type is tested apart.
+
+  *Measured*: 19 of the 382 shipped assemblies with a root controller are
+  **authored** below the bar, all at 0.2 m/s, and they are exactly the fixed gun
+  towers and the two practice targets. Those are units, not buildings, so nothing
+  lifts their bar: **an AI tower fires at 0.45 where a warbot needs 0.85.** Every
+  other assembly is authored above 1 m/s, so only damage brings one under.
 
   Past the bar, the gun fires **one shot** (`CIS_SINGLEFIGHT`, `0x200`,
   `0x10024fa2`). Before that it must have both factors above 0, a clear line
@@ -1003,6 +1082,44 @@ target, and keep their range gate.**
 scores fully out to 5,000 m, a 350 m/s cannon to 175 m, and a 70 m/s missile
 only to 35 m and not at all beyond 142 m. `weapons.ai_distance_score` and
 `weapons.ai_fire_wait` compute them.
+
+### The lead is the turret's fastest gun — *read*, and *measured*
+
+The fight module's table is two vectors deep. **A turret record is 52 bytes**
+(`0x1002522c`) and a **gun record 88** (`0x1002520b`); the turret keeps the turret
+component at `+4`, its own vector of gun records at `+8` (count `+0xc`, data `+0x14`)
+and, at **`+0x1c`, the index of one of them**. The builder (`0x1001be10`) files each
+class-1 component as a new turret record and each class-2 or class-30 component
+after it into **the last turret's** list (`0x1001bf82`–`0x1001bfcf`), and sets
+`+0x1c` to 0 (`0x1001bf6a`).
+
+**`+0x1c` is the fastest gun.** The module's refresh (`0x1001c1a0`, called from the
+unit takt at `0x10005037`, from `MBehaviour`'s variable and debug paths at
+`0x1000a7c5` and `0x1000d0ab`, and from the go and attack tasks at `0x1003be2f` and
+`0x1003c2b1`) zeroes `+0x1c` and a running best (`0x1001c2a9`, `0x1001c2b0`) and
+then, for each gun in turn, keeps the index whose record `+0x14` is **strictly
+greater** (`0x1001c37d`–`0x1001c398`). That `+0x14` is property `0x54`, the round's top
+speed, read when the record is filled (`0x1001b52b`, `0x1001b545`). The aiming pass
+then reads gun `+0x1c`'s component (`0x10024b5c`–`0x10024b6a`), asks it for property
+`0x54` and writes that to the turret's own (`0x10024ba2`).
+
+- **Those are the only two writers.** `+0x1c` is written in exactly two places in
+  `Behavior.dll`, the builder's 0 and the refresh's pick. A **third copy of the same
+  loop is dead code**: `0x1001bb30` is a standalone picker over the same field that
+  nothing calls — no `call` or `jmp` reaches it and its address appears nowhere in
+  the file, in a vtable or otherwise.
+- **So a turret leads for one gun and misleads for the rest** (*derived*). A turret
+  in `CIS_POINTTRACE` aims at where a target moving at its velocity meets a round at
+  the lead speed ([The player's target reaches the turret](#the-players-target-reaches-the-turret--read)),
+  and every gun on that turret fires down the same barrel line.
+
+*Measured* over the 458 assemblies: **407 turret records**, 312 of them carrying two
+guns or more, and on **160** the guns' round speeds differ. On **85** of those 160
+the fastest is not even the first gun fitted. **91 of the 160 are led by a 10,000 m/s
+beam** — a laser or a taser — and a lead speed of 10,000 is no lead at all: the
+turret aims where the target stands, so the missiles beside the laser are fired with
+no allowance whatever. The mixed turrets' fastest-over-slowest runs 1.06 to 285.7,
+median 111.1.
 
 ## The weapons the player builds — *measured*, with *derived* rates
 
@@ -1124,10 +1241,17 @@ assembled nowhere, so "in the tree" and "assembled" are detected apart.
 - ~~The vector a falling round's mount solves for.~~ The traced point less
   `TurretCenter`'s position; a turret in `CIS_MANUALCONTROL` gets no lift and its
   gun is ready. `TurretCenter`'s vector is (0, −1, 0) on node 0 in 57 of 59 turret
-  `.cpt`, so on an upright turret the lift is upward (*measured*). Still open: how
+  `.cpt`, so on an upright turret the lift is upward (*measured*). ~~Still open: how
   a lobbed round's gun fitted as a part on a turret with no follower channel, the
   Small Bunker's `e_gun_fc_08` on `e_bnt_lt_01`, is raised; the gun's gate (report
-  7, `0x10029d27`, `0x10029e37`) refuses a target past value 8, `.ctl` `+108`.
+  7, `0x10029d27`, `0x10029e37`) refuses a target past value 8, `.ctl` `+108`.~~
+  **The case does not arise**: a gun fitted as a part brings its own follower, so
+  the Small Bunker's flamers are mounted and lifted like any other, and of the 19
+  shipped guns that do hang on no follower none fires a lobbed round
+  ([A gun with no follower is ready from birth](#a-gun-with-no-follower-is-ready-from-birth--read-and-measured)).
+  Report 7 is two refusals, not one: `0x10029d27` is the ready byte and
+  `0x10029e37` the range, which is value 8, the round's `.ctl` `+108`, already read
+  in [A guided gun waits for a lock](#a-guided-gun-waits-for-a-lock--read-and-measured).
 - ~~`e_gun_bl_03` and `e_gun_tl_02` carry a follower and no gun. The turret's
   takt reads the paired gun without a check, so either they are never fitted or
   the follower pairs with a later part's gun~~ — **measured**: never fitted, and
@@ -1137,9 +1261,20 @@ assembled nowhere, so "in the tree" and "assembled" are detected apart.
   tasks 2, 3 and 5 are.~~ Answered: `1 − θ × d ÷ R` from the turret's aim stage
   and the gun's report; the tasks are go, attack and search
   ([How the AI fires](#how-the-ai-fires--read)).
-- Which of a turret's guns lends its round speed as the lead (the turret
+- ~~Which of a turret's guns lends its round speed as the lead (the turret
   record's `+0x1c`), what `MBehaviour+0x614` measures against the 0.5 of the
-  threshold, and the target id's nibble 3 that frees the winged SSMs.
+  threshold, and the target id's nibble 3 that frees the winged SSMs.~~ All
+  three answered. The lead is **the fastest** gun's: the refresh keeps the index
+  of the strictly greatest round speed and a standalone picker over the same
+  field (`0x1001bb30`) is dead code
+  ([The lead is the turret's fastest gun](#the-lead-is-the-turrets-fastest-gun--read-and-measured)).
+  `+0x614` is the unit's **live forward top speed**, so the bar is 0.5 m/s, and
+  19 shipped assemblies — the fixed towers and the targets — are authored under
+  it ([How the AI fires](#how-the-ai-fires--read)). The nibble is the object
+  id's **class**, 3 being a building and 4 a unit, so a winged SSM is held for
+  buildings ([above](#how-the-ai-fires--read)). Which object answers class 2,
+  the one bit an outer camera's query drops from a round's, is still open
+  ([30-turrets.md](30-turrets.md#not-established)).
 - The order record whose `+0x30` id lets the go, attack and search tasks fire
   without aim (`0x10014bd0`); whether a self-given attack carries one; and
   the height term in the distance score.

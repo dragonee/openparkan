@@ -659,9 +659,13 @@ impl Robot {
             for (i, c) in ctl.components.iter().enumerate().filter(|(_, c)| c.type_id == GUN_TYPE) {
                 let mut gun = Gun::new(i, c, &ctl.channels);
                 let kind = self.fit(&mut gun, c, battle, assembly);
-                // STAND-IN: docs/29-weapons.md#a-gun-is-ready-once-its-arm-is-out--read-and-measured
-                // -- a gun fitted as a part has no mount on the turret's list: its ready byte
-                // is taken as set, and its barrels' recoil is not played.
+                // A gun fitted as a part is not given a mount here, so it keeps the 1 its
+                // constructor sets (`Control.dll:0x100295b3`), which is what a gun with no
+                // follower keeps for good; its barrels' recoil is not played. In the game a
+                // fitted part's own follower joins the turret's list (`0x10009120`), so all
+                // but 19 of the 1034 shipped guns are mounted and lifted, and none of the 19
+                // lobs (docs/29, "A gun with no follower is ready from birth"). The lobbed
+                // lift a mount would give is applied below.
                 gun.ready = true;
                 gun.selected = true;
                 self.guns.push(gun);
@@ -744,11 +748,10 @@ impl Robot {
         for (i, (g, sight)) in self.guns.iter_mut().zip(sights).enumerate() {
             g.sight = sight;
             if self.gun_parts.get(i).is_some_and(Option::is_some) {
-                // STAND-IN: docs/29-weapons.md#not-established -- how a lobbed round's gun fitted
-                // as a part on a turret with no follower channel (the Small Bunker's) is raised
-                // is not read: it is ready while the point its turret traces lies within the
-                // round's lower arc, as a mount's gun is, and its round leaves on that arc
-                // ([`Robot::lobbed_launch`]).
+                // A part's gun brings its own follower, so the turret's takt runs the same
+                // mount step over it: ready while the point its turret traces lies within the
+                // round's lower arc, and its round leaves on that arc
+                // (docs/29, "A gun with no follower is ready from birth").
                 g.ready = !g.falls
                     || traced.is_none_or(|to| {
                         parkan_sim::turret::lobbed_launch(g.round_speed, parkan_sim::turret::GRAVITY, to)
