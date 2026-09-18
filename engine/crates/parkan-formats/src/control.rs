@@ -74,14 +74,31 @@ pub const CONTACT_SUPPORT: u32 = 0x1;
 /// ground contact hands `IAnimation` slot 31 the contact's own axis and the ground normal
 /// it has just found, and marks the carrier with node mask `0x10`, which makes the pose
 /// walk turn that node's world matrix by the rotation between them and put it back where
-/// it was. *Measured*: the 12 contacts that carry it are the four belts of each tracked
-/// chassis and nothing else (docs/28-chassis.md, "The belt lies along the ground").
+/// it was. *Measured*: the 12 contacts that carry it **as authored** are the four belts of
+/// each tracked chassis and nothing else (docs/28-chassis.md, "The belt lies along the
+/// ground"); another 2217 gain it from their state's own pose through
+/// [`CONTACT_PLACE_BY_POSE`], which is how a walker's feet are laid flat.
 pub const CONTACT_PLACE: u32 = 0x2;
-/// Set at load on the states whose last pose holds the contact within 0.1 of its rest
+/// Set on the states whose last pose holds the contact within 0.1 of its rest
 /// height: the states that end on that foot (`0x1001a2d5`).
 pub const CONTACT_PLANTED: u32 = 0x1000;
 /// How close a state's last pose must hold a contact to its rest height (`0x1003c03c`).
 pub const PLANTED_WITHIN: f32 = 0.1;
+/// The machine works [`CONTACT_SUPPORT`] out from the pose instead of taking it as
+/// authored: set where the state's last pose plants the point, clear where it does not
+/// (`0x1001a314`). *Measured*: no shipped contact carries it.
+pub const CONTACT_SUPPORT_BY_POSE: u32 = 0x10;
+/// The machine works [`CONTACT_PLACE`] out from the pose (`0x1001a331`): the contact
+/// places when its own axis, in the state's last pose, stands within
+/// [`PLACE_AXIS_WITHIN`] of the model's up, and does not when it leans away. So a foot is
+/// laid flat on the terrain in the states whose animation has it flat, and left alone
+/// mid-stride. *Measured*: 2410 of the install's 2634 contacts carry it — every walking
+/// chassis's feet, and nothing with a wheel or a belt — and 2217 of those stand up
+/// (docs/24-motion.md, "A walker's feet lie flat where the animation lays them").
+pub const CONTACT_PLACE_BY_POSE: u32 = 0x20;
+/// How close to the model's up a contact's posed axis must stand for
+/// [`CONTACT_PLACE_BY_POSE`] to place it: z above 0 and within this of 1 (`0x1003c038`).
+pub const PLACE_AXIS_WITHIN: f32 = 0.05;
 
 pub const CHANNEL_WRAP: i32 = 0x1;
 pub const CHANNEL_INVERT: i32 = 0x2;

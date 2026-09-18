@@ -563,9 +563,10 @@ The engine keeps one 0x5c-byte entry per contact at `+0xc4`
 | `0x200` | … only while it is **destroyed** — a node at 0 life, status `0x10` (`0x1001106c`, `0x1001ac39`) |
 | `0x4` | a destroyed point falls back to the next control point whose node is intact (`0x1001ac75`) |
 | `0x1` | the point's ground gap, point and normal count toward the body's (`0x1001b00a`) |
-| `0x2` | the node the point **carries** is laid along the ground under it, through `IAnimation` slot 31 and node mask `0x10` (`0x1001affd`, `0x1001a3af`) — the tracked chassis's belts, and nothing else ([28-chassis.md](28-chassis.md#the-belt-lies-along-the-ground--read-and-measured)) |
-| `0x1000` | set at load on the states whose last pose holds the point within 0.1 of its rest height (`0x1001a328`) |
-| `0x10`, `0x20` | ask the load to derive `0x1` from that, and `0x2` from the point's axis standing within 0.05 of upright (`0x1001a314`) |
+| `0x2` | the node the point **carries** is laid along the ground under it, through `IAnimation` slot 31 and node mask `0x10` (`0x1001affd`, `0x1001a3af`) — authored on the tracked chassis's twelve belts, and nothing else ([28-chassis.md](28-chassis.md#the-belt-lies-along-the-ground--read-and-measured)) |
+| `0x1000` | set on the states whose last pose holds the point within 0.1 of its rest height (`0x1001a328`) |
+| `0x10` | derive `0x1` from that too (`0x1001a314`); **no shipped contact carries it**, 0 of 2634 |
+| `0x20` | derive `0x2` from the point's axis standing within 0.05 of upright in that same pose (`0x1001a331`). **2410 of the 2634 carry it** — every walking chassis's feet — and the pose places 2217 ([24-motion.md](24-motion.md#a-walkers-feet-lie-flat-where-the-animation-lays-them--read-and-measured)) |
 
 **A contact that lands runs its group**: an intact point in a `0x1000` state
 that was not planted in the one before runs `+8` (`0x1001b08f`). Those are the
@@ -582,14 +583,18 @@ walkers limp** when a leg is shot off.
 
 ### A footstep, end to end — *read*, and *measured*
 
-**Which states plant a foot** is worked out at load (`0x1001a2d5`–`0x1001a328`).
-For each state and each contact the loader poses the mesh at the state's last
-pose — pair B's last frame, all of the weight on B — and finds the contact
-point, its height carried back up by the root's own height at that pose. When
-that height lies within 0.1 (`0x1003c03c`) of the height the live contact record
-holds (`+0x14`), the contact gains `0x1000`. Flag `0x10` then sets or clears
-`0x1` to match, and `0x20` sets `0x2` when the point's axis stands within 0.05
-of upright.
+**Which states plant a foot** is worked out as the machine **takes** the state
+(`0x10019df0`, from `0x10007b99` and `0x10031982`, each right after the state's
+record is copied into the current-state slot `+0x100`), in the same pass that
+measures the state's stride (`0x1001a2d5`–`0x1001a328`). For each contact the
+pass poses the mesh at the state's last pose — pair B's last frame, all of the
+weight on B — and finds the contact point, its height carried back up by the
+root's own height at that pose. When that height lies within 0.1 (`0x1003c03c`)
+of the height the live contact record holds (`+0x14`), the contact gains
+`0x1000`. Flag `0x10` then sets or clears `0x1` to match, and `0x20` sets or
+clears `0x2` by whether the point's axis stands within 0.05 of upright. The
+answer depends on nothing but the state, so working it out once per state, as
+the engine does, comes to the same thing.
 
 **A foot lands** in the ground contact's pass over the contacts
 (`0x1001b081`–`0x1001b0be`), with no ground distance in the test:

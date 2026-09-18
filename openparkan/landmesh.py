@@ -139,6 +139,27 @@ WALK_FACES = 24
 #: not 0xFF, and on no other, across all 33 maps.
 FLAGS_LAYER2_BIT = 0x0004
 
+#: The landscape keeps stream 21 as it reads it -- the pointer at its ``+0x6c``
+#: and the element count beside it (``Terrain.dll:0x100176e6``), 28 bytes a
+#: face, adjacency at ``+0xe`` (``0x1001e951``) -- and reads the record's first
+#: **dword** as the face's flags (``0x10060530``).  So the landscape's 32-bit
+#: face mask is the file's *flags* word in its low half and its *surface* word
+#: in its high half, and a query's world-level masks are turned into it by
+#: ``Terrain.dll:0x10022da0``.  Two identities check the reading: the
+#: landscape's ``0x2000``, world flag ``0x400``, is the flags word's
+#: ``FLAGS_LIQUID_BED_BIT``, on exactly the 6102 bed faces, and its
+#: ``0x20000``, world flag ``0x200``, is the surface word's
+#: ``SURFACE_WATER_BIT``, on exactly the 3630 water faces.
+#:
+#: A unit's ground search and its contact points' searches ask for faces with
+#: **world flags 0x208 and class bit 8 excluded** (``Control.dll:0x1001a687``,
+#: ``0x1001ad7f``).  Beside the liquid surface that is landscape ``0x20`` and
+#: ``0x40000`` -- the flags word's ``0x20`` and the surface word's ``0x04``.
+#: **No shipped face carries either**: 0 of 275882 across all 33 maps.  See
+#: ``docs/24-motion.md``, "Finding the ground".
+FLAGS_NOT_GROUND_BIT = 0x0020
+SURFACE_NOT_GROUND_BIT = 0x0004
+
 #: Bit 1 of the face's surface word marks a water surface.  It is a *bitfield*,
 #: not an enum: the observed values are 0, 2, 16 and 18, and testing ``== 2``
 #: silently misses every water face that also carries bit 16.
@@ -346,6 +367,18 @@ class LandMesh:
     def is_water(self, face: int) -> bool:
         """Whether a face is part of a water surface."""
         return bool(self.face_surface[face] & SURFACE_WATER_BIT)
+
+    def is_ground(self, face: int) -> bool:
+        """Whether a unit's ground search would look at this face.
+
+        The search's filter excludes world face flags ``0x208`` and class bit
+        8 (``Control.dll:0x1001a687``), which in the file are the surface
+        word's water bit, the flags word's ``FLAGS_NOT_GROUND_BIT`` and the
+        surface word's ``SURFACE_NOT_GROUND_BIT``.  The last two are set on
+        **no shipped face**, so on the install this is "not water".
+        """
+        return not (self.face_surface[face] & (SURFACE_WATER_BIT | SURFACE_NOT_GROUND_BIT)
+                    or self.face_flags[face] & FLAGS_NOT_GROUND_BIT)
 
     def water_faces(self) -> list[int]:
         return [i for i in range(self.face_count) if self.is_water(i)]

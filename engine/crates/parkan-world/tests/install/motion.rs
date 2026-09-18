@@ -610,6 +610,35 @@ fn c03_02s_wheeled_warbots_stand_on_their_tyres_their_contacts_being_authored_th
     assert_eq!(heavies, 2, "Mission C03/02 stands two R_B_03");
 }
 
+/// A walker's feet ask for `CONTACT_PLACE` to be worked out from the state's own pose
+/// (docs/24, "A walker's feet lie flat where the animation lays them"). The hero's
+/// `r_h_02` authors none of its 210 contacts with `CONTACT_PLACE` and every one with
+/// `CONTACT_PLACE_BY_POSE`; the pose gives it to 190 of them and withholds it from the 20
+/// whose foot is on its side at the end of the step.
+#[test]
+#[ignore = "needs the game install"]
+fn the_heros_feet_place_in_the_states_whose_last_pose_stands_them_up_and_not_in_the_rest() {
+    use parkan_formats::control::{CONTACT_PLACE, CONTACT_PLACE_BY_POSE};
+    use parkan_formats::{landmesh, mission};
+    use parkan_sim::ground::Ground;
+    use parkan_world::{assembly::Assembly, hero::Hero};
+
+    let game = gamedir::find(None).expect("a Parkan install: set PARKAN_DIR");
+    let dir = gamedir::resolve(&game, gamedir::MISSION_01).unwrap();
+    let m = mission::parse(&std::fs::read(dir.join("data.tma")).unwrap(), "Mission.01").unwrap();
+    let mut assembly = Assembly::new(&game).unwrap();
+    let mut hero = Hero::load(&mut assembly, &m).unwrap().expect("Mission 01 has a hero");
+    let land = landmesh::load(&gamedir::resolve(&game, "DATA/MAPS/Tut_1/Land.msh").unwrap()).unwrap();
+    hero.tick(1000.0 / 60.0, [0.0; 2], &Ground::new(land));
+
+    let contacts: Vec<u32> =
+        hero.walker.controller.states.iter().flat_map(|s| s.contacts.iter().map(|c| c.flags)).collect();
+    assert_eq!(contacts.len(), 210, "r_h_02: two feet on 105 states");
+    assert!(contacts.iter().all(|f| f & CONTACT_PLACE_BY_POSE != 0), "every one asks the pose");
+    let placed = contacts.iter().filter(|f| *f & CONTACT_PLACE != 0).count();
+    assert_eq!(placed, 190, "the pose stands 190 of the 210 up");
+}
+
 /// A contact whose flags carry `CONTACT_PLACE` lays the node it carries along the ground
 /// under it (docs/28, "The belt lies along the ground"). Twelve contacts in the game do:
 /// the four `weel_*` of each tracked chassis, whose carriers are the belt nodes. So a

@@ -849,8 +849,49 @@ and that group picks the step by surface
    `AniMesh` object answers `0x25` at object `+0xc` (its interface request,
    `AniMesh.dll:0x10006e50`), and both its slot 2 (`0x1000ccb0`) and its slot 7
    (`0x10013fe0`) visit **level 0 of the current variant** (`0x10007edb`); a
-   `CBuilding` hands slot 7 to its mesh (`Terrain.dll:0x10056c70`). The ground search's filter excludes
-   world face bits `0x200` (the liquid surface) and `0x8` (`0x1001a687`).
+   `CBuilding` hands slot 7 to its mesh (`Terrain.dll:0x10056c70`).
+
+   **What the filter excludes** (*read*, and *measured*). The ground search
+   builds its query with a required mask of nothing and an excluded one of
+   **world face flags `0x208` and class bit 8** (`0x1001a687`; the contact
+   points' searches use the same, `0x1001ad7f`). The record is eight dwords —
+   the node-type mask, then a required and an excluded pair of a world flags
+   word and a class word (`0x1001bd50`) — and the landscape turns each pair
+   into one mask of its own (`Terrain.dll:0x10022da0`), which it tests as
+   *all of the required bits present, none of the excluded*
+   (`0x10021d33`–`0x10021d4f`). World flag `0x8` becomes landscape `0x20`,
+   world `0x200` becomes `0x20000`, world `0x400` becomes `0x2000`, and class
+   bit 8 becomes `0x40000`.
+   - **The landscape's mask is the file's face record.** `CLandscape` keeps
+     `Land.msh` stream 21 as it reads it — the pointer at `+0x6c` and the
+     element count beside it (`0x100176e6`), 28 bytes a face, adjacency read at
+     `+0xe` (`0x1001e951`), the texture bytes at `+4` and `+5` — and reads the
+     record's first **dword** as the flags (`0x10060530`). So the landscape's
+     32-bit mask is the file's **flags word** in its low half and its
+     **surface word** in its high half. Two identities this document already
+     holds confirm it: landscape `0x2000`, the liquid bed, is the flags word's
+     `0x2000`, set on exactly the 6102 bed faces, and landscape `0x20000`, the
+     liquid surface, is the surface word's `0x02`, set on exactly the 3630
+     water faces ([03-terrain.md](03-terrain.md#the-face-records-last-unread-fields)).
+   - So the two unnamed bits are the **flags word's `0x20`** and the **surface
+     word's `0x04`**, and **no shipped face carries either**: 0 of 275882
+     across all 33 maps, at both levels of detail. The control is the same scan
+     over the same two fields for the other two bits the same filter names —
+     3630 and 6102, as above. `LandMesh.is_ground` is the filter, and on the
+     install it comes to "not water".
+   - **What would set either is not established.** Enumerating every masked
+     access to the face array in `Terrain.dll` — each `imul r, r, 0x1c`
+     followed by a mask — returns thirteen sites and all of them are reads;
+     the building insertion's own range was scanned for `or` and masked writes
+     to no effect ([03-terrain.md](03-terrain.md#placing-a-building-cuts-the-landscape--read-in-outline-and-measured)).
+     A plain immediate scan for `0x20` does not discriminate: `Terrain.dll`
+     carries the world-to-landscape mask converter inlined at a dozen sites and
+     the constant is in every one of them.
+   - The other readers are the **draw-order rebuild**: the builder that lays
+     out a cell's batches skips a face carrying `0x20` (`0x10060530`, beside
+     `0x800`), and a later builder gathers the faces that do carry it and gives
+     each one a batch of its own (`0x100644dc`). So a face with the bit would
+     still be drawn, one batch apiece, and not walked on.
 
    **Buildings are ground; scenery and units are not** (*read*). The type the
    filter tests is `IGameObject` slot 11. The collision pass reads the same
@@ -1000,6 +1041,72 @@ contacts, so a unit is held at the highest ground under any one wheel and the
 rest of it hangs. That is a real gap and the game has it: measured across the
 campaign, `R_B_03` rides up to 0.67 clear where the ground under its six
 wheels is broken, and `R_B_01` up to 0.98.
+
+### A walker's feet lie flat where the animation lays them — *read*, and *measured*
+
+A contact's flag `0x2`, `CONTACT_PLACE`, lays the node the contact carries
+along the ground under it. Twelve contacts in the game are authored with it,
+the tracked chassis's belts
+([28-chassis.md](28-chassis.md#the-belt-lies-along-the-ground--read-and-measured)).
+**Flag `0x20` asks for the same flag to be worked out from the state's own
+pose**, and 2410 of the install's 2634 contacts carry it.
+
+**When it is worked out** (*read*). Taking a state copies that state's
+section-1 record into the current-state slot `+0x100` and then runs one pass
+over the machine's contacts (`0x10019df0`, from `0x10007b99` and
+`0x10031982`) — the pass that also measures the state's stride. It poses the
+object at the state's end, `IAnimation` slot 25 with 1.0 and 1.0
+(`0x1001a1fd`), and for each contact asks slot 4 for the point's position and
+its **own vector**, both through the node the point sits on
+(`0x1001b4f0`). Then, per contact (`0x1001a311`–`0x1001a370`):
+
+- `0x1000`, `CONTACT_PLANTED`, is set where the point's height there is within
+  0.1 of the height the live record holds (`0x1003c03c`, `0x1001a328`);
+- `0x10` sets `0x1` to match that and clears it otherwise (`0x1001a314`);
+- **`0x20` sets `0x2` where the vector's z is above 0 and 1 − z is below 0.05
+  (`0x1003c038`, `0x1001a364`), and clears it otherwise** (`0x1001a36d`).
+
+The vector is the posed axis in the model's frame, so the test is *this
+contact's own up, within about 18° of the model's up*. It is unnormalised, and
+every shipped control point's vector is unit length (2410 of 2410, *measured*),
+so the comparison against 1 is a cosine.
+
+**Who asks, and what the answer is** (*measured*, over every `.ctl` in the
+install):
+
+| controller | contacts with `0x20` | of them, placed |
+|---|---:|---:|
+| `a_a_l4`, `a_a_l5` (animals) | 484 each | 484 each |
+| `r_b_01` | 364 | 364 |
+| `a_a_l1` (an animal) | 218 | 114 |
+| `r_h_02` (the hero) | 210 | 190 |
+| `r_l_01` | 210 | 173 |
+| `r_b_05` | 180 | 180 |
+| `r_t_01` (the Tiny Spider) | 162 | 148 |
+| `r_m_01` | 96 | 78 |
+| `r_h_01`, `r_h_03` | 1 each | 1 each |
+| **total** | **2410** | **2217** |
+
+- **Every one of them is a foot** — `LeftFoot`, `RightFoot`, `foot_fl`,
+  `leg_fl` — on the eight walking chassis that declare contacts and the three
+  animals. Their flags are `0x21`, `0x25` and `0x125`: support, `0x20`, and the
+  fallback and intact conditions. **No wheeled or tracked contact carries it**,
+  and none of the 2410 is authored with `0x2`.
+- **No shipped contact carries `0x10`**: 0 of 2634. A walker's support flag is
+  authored, not derived.
+- So **2229 contacts in the game lay their node along the ground** — the twelve
+  belts and 2217 feet — against the twelve this document counted before.
+
+**What it looks like.** A walker's foot node is turned onto the patch of ground
+under it and put back where it stood, so the foot conforms to the slope and the
+leg above it does not move. The states it is withheld from are the ones whose
+last frame has the foot on its side: 20 of the hero's 210, 37 of `r_l_01`'s
+210. The Large Walking Chs and `r_b_05` keep their feet flat throughout and
+place in every state.
+
+The engine does it in `place_by_pose`, once per state as the controller loads,
+since the answer depends on nothing but the state; `Feet::stands_up` is the
+test and `Walker::lay_belts` the turn, the same path the belts take.
 
 ### A flyer's height — *read*, and *measured*
 
@@ -2522,17 +2629,29 @@ patrol runs past it.
   argument (the step-1 filter), and what else reads triangle flag 2.
 - What joins the Large Factory's three hall-way groups; the front group never
   reaches the pod.
-- Which `Land.msh` faces carry the world face bit `0x8` and class bit 8 that
+- ~~Which `Land.msh` faces carry the world face bit `0x8` and class bit 8 that
   the ground search excludes; the landscape converts them to its own mask at
   `Terrain.dll:0x10022da0` (world `0x8` → `0x20`, `0x200` → `0x20000`,
-  `0x400` → `0x2000`).
+  `0x400` → `0x2000`)~~ — **read**, and **measured**: **none do**. The
+  landscape's mask is the file's face record read as one dword, flags low and
+  surface high, so the two are the flags word's `0x20` and the surface word's
+  `0x04`, and 0 of the 275882 faces across the 33 maps carry either — against
+  3630 and 6102 for the same filter's other two bits
+  ([What the filter excludes](#finding-the-ground--read)). Still open: what
+  would ever set them. Every masked access to the face array in `Terrain.dll`
+  is a read, and the only readers beside the query filters are the draw-order
+  rebuilders, one of which gives such a face a batch of its own.
 - ~~The contact records' flag 2, which hands the contact to the object's
   interface slot `0x7c` (`0x1001affd`)~~ — **read**, and **measured**: it lays
   the node the point carries along the ground under it, through `IAnimation`
   slot 31 and node mask `0x10`, and the twelve contacts that ask for it are the
   tracked chassis's belts
   ([28-chassis.md](28-chassis.md#the-belt-lies-along-the-ground--read-and-measured)).
-  Still open: flag `0x20`. Flag `0x1000` runs the
+  ~~Still open: flag `0x20`~~ — **read**, and **measured**: it asks for `0x2`
+  to be worked out from the state's own last pose, and it is on 2410 of the
+  2634 contacts — every walker's feet — of which 2217 stand up and are placed
+  ([A walker's feet lie flat where the animation lays them](#a-walkers-feet-lie-flat-where-the-animation-lays-them--read-and-measured)).
+  Flag `0x1000` runs the
   record's group once while its node stands (`0x1001b08f`); no shipped record
   sets it.
 - ~~Where G would ever differ from 1~~ — answered: nowhere but a `MAT0`

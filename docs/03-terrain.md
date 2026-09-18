@@ -432,10 +432,14 @@ transcribed).
 - The cell's draw order is then rebuilt ([above](#what-the-engine-does-with-the-byte--read-and-measured)).
   That builder leaves out every face whose flags carry `0x20` or `0x800`
   (`0x10060530`, `0x10060547`). Landscape `0x20` is world face bit `0x8`, which
-  the ground search also excludes
+  the ground search also excludes. The landscape's flags are the file's face
+  record read as one dword — the flags word low, the surface word high — so
+  that bit is **the flags word's `0x20`**, and the class bit 8 the ground
+  search excludes beside it is **the surface word's `0x04`**; 0 of the 275882
+  faces carry either
   ([24-motion.md](24-motion.md#finding-the-ground--read)). No writer of either
   bit was found in the insertion (a scan of its range for `or` and masked
-  writes), and no shipped face carries them.
+  writes).
 
 **Nothing of the landscape is left inside the inner contour** (*derived*). The
 faces there are deleted, and neither the patch nor the basement reaches past

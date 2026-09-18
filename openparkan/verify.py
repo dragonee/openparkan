@@ -313,6 +313,32 @@ def check_terrain(check, game: Path) -> None:
           f"on all {free_ok}/{slots} edge slots.  63 -- all three edges free -- "
           f"is why the field stops at 62: no map has such a face")
 
+    # The two bits a unit's ground search excludes besides the liquid surface:
+    # landscape 0x20 and 0x40000 (Terrain.dll:0x10022da0 turns world flag 0x8
+    # and class bit 8 into them), which in the file are the flags word's 0x20
+    # and the surface word's 0x04.  Neither is on any shipped face; the control
+    # is the two bits of the same pair of fields that the same filter names and
+    # that faces do carry.
+    excluded = Counter()
+    faces = 0
+    for folder in maps:
+        mesh = landmesh.load(folder / "Land.msh")
+        faces += mesh.face_count
+        for flags, surface in zip(mesh.face_flags, mesh.face_surface, strict=True):
+            excluded["flags 0x20"] += bool(flags & landmesh.FLAGS_NOT_GROUND_BIT)
+            excluded["surface 0x04"] += bool(surface & landmesh.SURFACE_NOT_GROUND_BIT)
+            excluded["surface 0x02"] += bool(surface & landmesh.SURFACE_WATER_BIT)
+            excluded["flags 0x2000"] += bool(flags & landmesh.FLAGS_LIQUID_BED_BIT)
+    check("Land.msh: no face carries the two bits the ground search excludes",
+          faces and not excluded["flags 0x20"] and not excluded["surface 0x04"]
+          and excluded["surface 0x02"] == 3630 and excluded["flags 0x2000"] == 6102,
+          f"0 of {faces} faces across the {len(maps)} maps carry the flags word's 0x20 "
+          f"(landscape 0x20, world face flag 0x8) or the surface word's 0x04 (landscape "
+          f"0x40000, the filter's class bit 8).  The same scan over the same two fields "
+          f"finds the bits that are there: the surface word's 0x02, the liquid surface the "
+          f"same filter also excludes, on {excluded['surface 0x02']}, and the flags word's "
+          f"0x2000, the bed under it, on {excluded['flags 0x2000']}")
+
     check("Land.msh: the surface word's bit 0x10 is clear on lava",
           exact == using and unused == len(maps) - using,
           f"on all {exact}/{using} maps that set the bit, the faces with it "
@@ -5595,6 +5621,88 @@ def check_ctl_fields(check, game: Path, blobs, parsed) -> None:
           f"(Control.dll:0x10020d90): {inputs}; "
           f"the wheels' two inputs are the forward speed and half the yaw rate either "
           f"way, {dict(pairs)}")
+
+    check_contact_place(check, game)
+
+
+def check_contact_place(check, game: Path) -> None:
+    """.ctl: which contacts have `CONTACT_PLACE` worked out from their state's pose.
+
+    ``Control.dll:0x1001a331``, in the pass a machine runs as it takes a state
+    (``0x10019df0``): a contact carrying ``CONTACT_PLACE_BY_POSE`` gains
+    ``CONTACT_PLACE`` where the contact point's own axis, posed at pair B's last
+    frame with all the weight on B, stands within ``PLACE_AXIS_WITHIN`` of the
+    model's up, and loses it where it leans away.
+    """
+    names = frozenset(p.name.lower() for p in all_archives(game))
+    members: dict[str, tuple[Path, object]] = {}
+    for path in all_archives(game):
+        for entry in NResArchive.open(path):
+            members.setdefault(entry.name.lower(), (path, entry))
+
+    def member(stem: str, ext: str):
+        found = members.get(stem + ext)
+        if found is None:
+            # The animals' controllers are a_a_lN.ctl against meshes A_L_0N.msh.
+            animal = re.fullmatch(r"a_a_l(\d)", stem)
+            if animal:
+                found = members.get(f"a_l_0{animal.group(1)}{ext}")
+        return found
+
+    def posed(mesh, node: int, frame: float):
+        pose = mesh.blended_pose(node, frame, frame, 1.0)
+        parent = mesh.nodes[node].parent
+        while parent != objmesh.NO_PARENT and parent < len(mesh.nodes):
+            pose = objmesh.compose(mesh.blended_pose(parent, frame, frame, 1.0), pose)
+            parent = mesh.nodes[parent].parent
+        return pose
+
+    asks: Counter[str] = Counter()
+    total = places = unit_length = 0
+    authored = 0
+    missing = []
+    for path in all_archives(game):
+        archive = NResArchive.open(path)
+        for entry in list(archive):
+            name = entry.name.lower()
+            if not name.endswith(".ctl"):
+                continue
+            try:
+                c = control.parse(archive.read(entry), names)
+            except control.ControlFormatError:
+                continue
+            authored += sum(1 for s in c.states for k in s.contacts
+                            if k.flags & control.CONTACT_PLACE)
+            wanted = [(s, k) for s in c.states for k in s.contacts
+                      if k.flags & control.CONTACT_PLACE_BY_POSE]
+            if not wanted:
+                continue
+            stem = name[:-4]
+            asks[stem] = len(wanted)
+            msh, cpt = member(stem, ".msh"), member(stem, ".cpt")
+            if not msh or not cpt:
+                missing.append(stem)
+                continue
+            mesh = objmesh.parse(NResArchive.open(msh[0]).read(msh[1]), stem)
+            points = objmesh.parse_control_points(NResArchive.open(cpt[0]).read(cpt[1]))
+            for state, contact in wanted:
+                total += 1
+                point = points[contact.point]
+                pose = posed(mesh, point.nodes[0], state.pair_b[1])
+                v = objmesh.quaternion_rotate(pose[1], point.direction)
+                unit_length += abs(math.sqrt(sum(x * x for x in v)) - 1.0) < 1e-4
+                places += v[2] > 0.0 and 1.0 - v[2] < control.PLACE_AXIS_WITHIN
+
+    check(".ctl: a walker's feet get CONTACT_PLACE from their state's own pose",
+          sum(asks.values()) == 2410 and not missing and total == 2410
+          and places == 2217 and unit_length == total and authored == 12,
+          f"{sum(asks.values())} of the install's 2634 contacts carry "
+          f"CONTACT_PLACE_BY_POSE -- {dict(sorted(asks.items()))} -- and none of the 12 "
+          f"that carry CONTACT_PLACE outright (the tracked chassis's belts) is among "
+          f"them.  Posed at each state's pair-B last frame the axis stands up on "
+          f"{places} of {total}, so 2229 contacts in the game lay their node along the "
+          f"ground.  Every one of the {unit_length} axes is unit length, which is why the "
+          f"engine's unnormalised comparison against 1 works")
 
 
 #: A building's model number, as its display name carries it, against the

@@ -396,6 +396,23 @@ def test_a_state_carries_its_contacts_and_lean(ctl, state):
     assert not s.allows([False, False])
 
 
+def test_a_contact_can_ask_for_its_place_flag_to_come_from_the_pose(ctl, state):
+    """``0x20`` is not ``CONTACT_PLACE``: it asks the machine to work that flag
+    out from the state's own last pose (``Control.dll:0x1001a331``).  The two
+    are distinct bits and a contact carrying only ``0x20`` is authored without
+    ``CONTACT_PLACE``, which is how all 2410 of the install's are."""
+    rec = bytearray(state(conditions=1))
+    struct.pack_into("<iIi", rec, control.SECTION1_RECORD, 0,
+                     control.CONTACT_SUPPORT | control.CONTACT_PLACE_BY_POSE
+                     | control.CONTACT_FALLBACK, -1)
+    (s,) = control.parse(ctl(counts=(1, 1, 0, 0, 0), states=[bytes(rec)])).states
+    (k,) = s.contacts
+    assert k.flags & control.CONTACT_PLACE_BY_POSE
+    assert not k.flags & control.CONTACT_PLACE
+    assert control.CONTACT_PLACE_BY_POSE != control.CONTACT_PLACE
+    assert control.CONTACT_SUPPORT_BY_POSE != control.CONTACT_SUPPORT
+
+
 def test_a_generic_device_names_its_inputs(ctl, component):
     wheel = bytearray(component(3, entries=(0,), flags=0x01070C00))
     struct.pack_into("<2f", wheel, control.COMPONENT_WEIGHTS_AT, 1.0, 0.5)

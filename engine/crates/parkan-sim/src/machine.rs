@@ -12,8 +12,8 @@ use std::collections::VecDeque;
 
 use glam::{Quat, Vec3};
 use parkan_formats::control::{
-    ANY_REQUEST, CONTACT_PLACE, CONTACT_PLANTED, CONTACT_SUPPORT, Controller, PLANTED_WITHIN, STATE_FIXED,
-    STATE_GROUND_CONTACTS, STATE_JITTER, State,
+    ANY_REQUEST, CONTACT_PLACE, CONTACT_PLACE_BY_POSE, CONTACT_PLANTED, CONTACT_SUPPORT, Controller,
+    PLACE_AXIS_WITHIN, PLANTED_WITHIN, STATE_FIXED, STATE_GROUND_CONTACTS, STATE_JITTER, State,
 };
 use parkan_formats::cpt::ControlPoint;
 use parkan_formats::mesh::Mesh;
@@ -52,6 +52,38 @@ pub fn strides(controller: &Controller, mesh: &Mesh) -> Vec<Stride> {
         Vec3::new((to[0] - from[0]) as f32, (to[1] - from[1]) as f32, (to[2] - from[2]) as f32)
     };
     controller.states.iter().map(|s| Stride { a: travel(s.pair_a), b: travel(s.pair_b) }).collect()
+}
+
+/// What a contact's [`CONTACT_PLACE_BY_POSE`] asks of the pass that measures the strides
+/// (`0x10019df0`, `0x1001a331`): it sets [`CONTACT_PLACE`] on the contact where the state's
+/// last pose stands its axis up, and clears it where it does not.
+///
+/// The machine does this each time it takes a state, on the copy of that state's record it
+/// keeps at `+0x100` (`0x10007b99`, `0x10031982`); since the answer depends on nothing but
+/// the state, the engine works it out once per state instead and writes it into the
+/// controller's own records, which is what the rest of the machine reads.
+///
+/// *Measured*: 2410 of the install's 2634 contacts ask for it — every walking chassis's
+/// feet — and 2217 of them stand up (docs/24-motion.md, "A walker's feet lie flat where
+/// the animation lays them").
+fn place_by_pose(controller: &mut Controller, feet: &Feet) {
+    let decided: Vec<Vec<bool>> = controller
+        .states
+        .iter()
+        .map(|s| s.contacts.iter().map(|c| feet.stands_up(c.point, s)).collect())
+        .collect();
+    for (state, up) in controller.states.iter_mut().zip(&decided) {
+        for (contact, &up) in state.contacts.iter_mut().zip(up) {
+            if contact.flags & CONTACT_PLACE_BY_POSE == 0 {
+                continue;
+            }
+            if up {
+                contact.flags |= CONTACT_PLACE;
+            } else {
+                contact.flags &= !CONTACT_PLACE;
+            }
+        }
+    }
 }
 
 /// The weight toward pair B of a state that is neither velocity-driven nor fixed in
@@ -144,6 +176,20 @@ impl Feet {
         usize::try_from(p.nodes().1).ok().filter(|&n| n < self.mesh.nodes.len())
     }
 
+    /// Whether `state`'s last pose stands control point `point`'s own axis up
+    /// (`0x1001a331`–`0x1001a364`): the axis at pair B's last frame with all of the weight
+    /// on B, its z above 0 and within [`PLACE_AXIS_WITHIN`] of 1. That is what a contact's
+    /// [`CONTACT_PLACE_BY_POSE`] asks, and the answer is [`CONTACT_PLACE`] for that state.
+    ///
+    /// The machine compares the posed vector as it comes, unnormalised, where [`Feet::axis`]
+    /// hands it back normalised; every shipped control point's vector is unit length, so on
+    /// all 2410 contacts that ask the two answers agree.
+    pub fn stands_up(&self, point: i32, state: &State) -> bool {
+        let b = state.pair_b[1];
+        self.axis(point, Frames { a: b, b, weight: 1.0 })
+            .is_some_and(|v| v.z > 0.0 && 1.0 - v.z < PLACE_AXIS_WITHIN)
+    }
+
     /// Whether `state`'s last pose plants control point `point` (`0x1001a2d5`–`0x1001a328`):
     /// the mesh posed at pair B's last frame with all of the weight on B, the root's own
     /// height kept, puts the point within 0.1 of its height at rest.
@@ -232,6 +278,7 @@ impl Walker {
                         .collect()
                 })
                 .collect();
+            place_by_pose(&mut walker.controller, &feet);
             walker.feet = Some(feet);
         }
         walker
@@ -543,7 +590,10 @@ impl Walker {
     }
 
     /// A [`CONTACT_PLACE`] contact lays its carrier node along the ground beneath it
-    /// (`Control.dll:0x1001affd`): docs/28-chassis.md, "The belt lies along the ground".
+    /// (`Control.dll:0x1001affd`): a tracked chassis's belt, which carries the flag as
+    /// authored (docs/28-chassis.md, "The belt lies along the ground"), and a walker's foot
+    /// in the states where [`place_by_pose`] has given it the flag (docs/24-motion.md, "A
+    /// walker's feet lie flat where the animation lays them").
     ///
     /// The ground contact hands `IAnimation` slot 31 (`0x10005c90`) the contact's own axis
     /// and the ground normal it has just found; the slot builds the rotation that takes the
@@ -556,9 +606,10 @@ impl Walker {
     /// the slot keeps the previous turn beside the current one and the walk slerps the two
     /// by the mesh's pose-blend weight, and a contact whose node is dead is handed nulls,
     /// which leaves identity and lets the node relax back to level. Node life is not
-    /// modelled on the walker (see [`Walker::land`]), and every one of the twelve shipped
-    /// contacts belongs to a velocity-driven state, whose weight never leaves 1 — so the
-    /// blend is the current turn and only that is kept.
+    /// modelled on the walker (see [`Walker::land`]); the current turn is kept and used
+    /// whole. On the twelve belts that costs nothing — each belongs to a velocity-driven
+    /// state, whose weight never leaves 1 — but a walker's foot is laid in states that
+    /// blend, so its tilt arrives a step sooner than the game's.
     fn lay_belts(&mut self, searched: &[(u32, i32, Vec3, Option<Hit>)], frames: Frames) {
         let Some(feet) = self.feet.as_ref() else {
             self.placed.clear();
@@ -985,6 +1036,108 @@ mod tests {
         let angle = |q: Quat| (q * Vec3::Z).dot(Vec3::Z).acos().to_degrees();
         assert!((angle(turn) - angle(about)).abs() < 1e-4);
         assert!((angle(turn) - 5.71).abs() < 0.01, "{}", angle(turn));
+    }
+
+    /// One node whose animation rolls it about x: frame 0 upright, frame 1 by 10 degrees,
+    /// frame 2 by 30. A control point on it carries its own axis, the model's up.
+    fn a_rolling_foot() -> (Mesh, Vec<ControlPoint>) {
+        let roll = |degrees: f32| {
+            let half = (degrees.to_radians() / 2.0) as f64;
+            Key { translation: [0.0; 3], time: 0.0, rotation: [half.cos(), half.sin(), 0.0, 0.0] }
+        };
+        let keys: Vec<Key> = [0.0, 10.0, 30.0, 0.0]
+            .iter()
+            .enumerate()
+            .map(|(i, &d)| Key { time: i.min(2) as f32, ..roll(d) })
+            .collect();
+        let mesh = Mesh {
+            name: "foot".into(),
+            positions: Vec::new(),
+            normals: Vec::new(),
+            uv: Vec::new(),
+            lightmap_uv: Vec::new(),
+            triangles: Vec::new(),
+            nodes: vec![Node {
+                name: String::new(),
+                flags: 0,
+                parent: NO_PARENT,
+                anim_start: 0,
+                fallback_key: 3,
+                slot_index: [NO_SLOT; 15],
+            }],
+            slots: Vec::new(),
+            batches: Vec::new(),
+            face_flags: Vec::new(),
+            face_normals: Vec::new(),
+            keys,
+            frame_map: vec![0, 1, 2],
+            frame_count: 3,
+            sphere: None,
+            corners: None,
+        };
+        let point = ControlPoint {
+            name: String::new(),
+            a: [0.0, f32::from_bits(0), f32::from_bits(0)],
+            position: [0.0, 0.0, -1.0],
+            direction: [0.0, 0.0, 1.0],
+        };
+        (mesh, vec![point])
+    }
+
+    /// A machine whose three states end on frames 0, 1 and 2 of [`a_rolling_foot`], each
+    /// with one contact carrying `flags`.
+    fn on_a_rolling_foot(flags: u32) -> Walker {
+        let (mesh, points) = a_rolling_foot();
+        let mut c = crate::motion::tests::hero();
+        c.counts[1] = 1;
+        c.states = (0..3)
+            .map(|frame| State {
+                mode: STATE_ANCHOR | STATE_GROUND_CONTACTS,
+                pair_a: [frame as f32, frame as f32],
+                pair_b: [frame as f32, frame as f32],
+                contacts: vec![Contact { point: 0, flags, group: -1 }],
+                ..stand()
+            })
+            .collect();
+        c.costs = vec![0.0; 9];
+        Walker::new(c, &mesh, &points, Vec3::new(500.0, 500.0, 3.0), 0.0)
+    }
+
+    /// `Control.dll:0x1001a331`: a contact with `CONTACT_PLACE_BY_POSE` places in the
+    /// states whose last pose stands its axis within 0.05 of the model's up, and not in
+    /// the ones that lean it away. That is how a walker's feet come to lie flat on the
+    /// ground: 2410 of the install's 2634 contacts ask for it and none of them is
+    /// authored with `CONTACT_PLACE`.
+    #[test]
+    fn a_contact_places_only_in_the_states_whose_last_pose_stands_its_axis_up() {
+        let asked = on_a_rolling_foot(CONTACT_SUPPORT | CONTACT_PLACE_BY_POSE);
+        let places: Vec<bool> =
+            asked.controller.states.iter().map(|s| s.contacts[0].flags & CONTACT_PLACE != 0).collect();
+        // cos 10 degrees is 0.985, within 0.05 of 1; cos 30 is 0.866 and is not.
+        assert_eq!(places, [true, true, false]);
+
+        // The control: without the flag the pose decides nothing, either way.
+        let plain = on_a_rolling_foot(CONTACT_SUPPORT);
+        assert!(plain.controller.states.iter().all(|s| s.contacts[0].flags & CONTACT_PLACE == 0));
+        let authored = on_a_rolling_foot(CONTACT_SUPPORT | CONTACT_PLACE);
+        assert!(authored.controller.states.iter().all(|s| s.contacts[0].flags & CONTACT_PLACE != 0));
+    }
+
+    /// And the flag the pose sets reaches the ground contact: on a slope the foot's node
+    /// is laid along it in the states that place and left alone in the one that does not.
+    #[test]
+    fn a_foot_the_pose_places_is_laid_along_the_ground_and_one_it_does_not_is_left_alone() {
+        let g =
+            quads(&[[[0.0, 0.0, 0.0], [1000.0, 0.0, 100.0], [1000.0, 1000.0, 100.0], [0.0, 1000.0, 0.0]]]);
+        let slope = Vec3::new(-100.0, 0.0, 1000.0).normalize();
+        let mut w = on_a_rolling_foot(CONTACT_SUPPORT | CONTACT_PLACE_BY_POSE);
+        w.machine.current = 0;
+        w.advance(0.0, &g);
+        assert_eq!(w.placed.len(), 1, "state 0's pose stands the axis up");
+        assert!((w.placed[0].1 * Vec3::Z - slope).length() < 1e-5);
+        w.machine.current = 2;
+        w.advance(w.machine.clock_ms + 1.0, &g);
+        assert!(w.placed.is_empty(), "state 2 leans the foot 30 degrees: it is not placed");
     }
 
     #[test]

@@ -969,11 +969,12 @@ impl Robot {
 
     /// A chassis node's pose in the unit's frame, the chassis playing its frames as the
     /// pose walk does ([`parkan_formats::mesh::Mesh::walk_pose`]), and then — on a node a
-    /// `CONTACT_PLACE` contact carries, the twelve belts of the tracked chassis — turned to
-    /// lie along the ground under it and put back where it stood
-    /// ([`parkan_sim::machine::Walker::placed`], docs/28-chassis.md, "The belt lies along
-    /// the ground"). The turn goes on the world side, so it does not reach the node's own
-    /// children; every one of the twelve is a leaf.
+    /// `CONTACT_PLACE` contact carries — the tracked chassis's twelve belts, and a walker's
+    /// feet in the states whose pose stands them up — turned to lie along the ground under
+    /// it and put back where it stood ([`parkan_sim::machine::Walker::placed`],
+    /// docs/28-chassis.md, "The belt lies along the ground"; docs/24-motion.md, "A walker's
+    /// feet lie flat where the animation lays them"). The turn goes on the world side, so it
+    /// does not reach the node's own children; every one of the twelve belts is a leaf.
     ///
     /// DEPARTURE: docs/30-turrets.md#aiming-and-the-camera--read-and-measured -- the game's
     /// body node yaws with the gait (±10° once a run cycle on the hero), and the turret,

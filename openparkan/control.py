@@ -627,12 +627,13 @@ LEAN_SOURCES = {1: ("turn", 0), 2: ("turn", 1), 3: ("turn", 2),
 #:   contact hands ``IAnimation`` slot 31 the contact's own axis and the ground
 #:   normal, and marks the carrier with node mask ``0x10``, which makes the pose
 #:   walk turn that node's world matrix by the rotation between them and put its
-#:   translation back.  The 12 contacts that carry it are the tracked chassis's
-#:   belts and nothing else (``docs/28-chassis.md``, "The belt lies along the
-#:   ground").  ``CONTACT_PLANTED`` is set at load on the states whose
+#:   translation back.  The 12 contacts that carry it **as authored** are the
+#:   tracked chassis's belts and nothing else (``docs/28-chassis.md``, "The belt
+#:   lies along the ground").  ``CONTACT_PLANTED`` is set on the states whose
 #:   last pose holds the point within ``PLANTED_WITHIN`` of its rest height
-#:   (``0x1001a328``); ``0x10`` and ``0x20`` ask the load to set
-#:   ``CONTACT_SUPPORT`` and ``CONTACT_PLACE`` from the pose as well.
+#:   (``0x1001a328``); ``CONTACT_SUPPORT_BY_POSE`` and
+#:   ``CONTACT_PLACE_BY_POSE`` ask for ``CONTACT_SUPPORT`` and
+#:   ``CONTACT_PLACE`` to be derived from that same pose.
 #: * +8 the section-5 group run when the point lands: when a planted state
 #:   follows one where it was not (``0x1001b0a5``) -- footsteps.
 #: * +12 zero in the file; the load writes the planted gap there.
@@ -643,6 +644,24 @@ NEEDS_INTACT = 0x100
 NEEDS_DESTROYED = 0x200
 CONTACT_PLANTED = 0x1000
 PLANTED_WITHIN = 0.1
+#: Derive ``CONTACT_SUPPORT`` from the state's last pose: set where the pose
+#: plants the point, clear where it does not (``0x1001a314``).  *Measured*: no
+#: shipped contact carries it.
+CONTACT_SUPPORT_BY_POSE = 0x10
+#: Derive ``CONTACT_PLACE`` from the state's last pose (``0x1001a331``): set
+#: where the contact point's own **axis**, posed at pair B's last frame with
+#: all of the weight on B, has a z above 0 and within ``PLACE_AXIS_WITHIN`` of
+#: 1 -- the point standing up in the model's frame -- and clear where it leans
+#: away.  So a walker's foot is laid flat on the terrain in the states whose
+#: animation ends with it flat, and left alone mid-stride.  *Measured*: 2410 of
+#: the install's 2634 contacts carry it, every walking chassis's feet and
+#: nothing with a wheel or a belt, and the pose stands 2217 of them up
+#: (``docs/24-motion.md``, "A walker's feet lie flat where the animation lays
+#: them").
+CONTACT_PLACE_BY_POSE = 0x20
+#: How close the posed axis's z must come to 1 for ``CONTACT_PLACE_BY_POSE`` to
+#: place the contact (``0x1003c038``).
+PLACE_AXIS_WITHIN = 0.05
 
 #: Each class's power channel, by type id -- ``Control.dll:0x1003ccc8``.
 POWER_CHANNEL = (0, 4, 4, 0, 2, 3, 0, 0, 2, 5, 5, 0, 0, 0, 1, 0,

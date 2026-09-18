@@ -93,3 +93,15 @@ def test_the_walk_gives_up_off_its_start_face_or_on_a_steep_face():
     assert mesh.walk(1, (0.2, 0.7), (1.8, 0.3)) is None
     # leaving the mesh has no neighbour to cross to
     assert mesh.walk(1, (0.2, 0.7), (0.2, 1.5)) is None
+
+
+def test_the_ground_search_skips_water_and_the_two_bits_nothing_ships():
+    """``Control.dll:0x1001a687`` excludes world flags 0x208 and class bit 8.
+
+    In the file those are the surface word's water bit, the flags word's 0x20
+    and the surface word's 0x04 -- the last two on no shipped face, which is
+    why a reader that only skips water gets the same answer everywhere.
+    """
+    mesh = build([0x10, 0x12, 0x10 | landmesh.SURFACE_NOT_GROUND_BIT, 0x10])
+    mesh.face_flags[3] = landmesh.FLAGS_NOT_GROUND_BIT
+    assert [mesh.is_ground(i) for i in range(4)] == [True, False, False, False]

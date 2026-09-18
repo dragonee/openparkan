@@ -387,7 +387,18 @@ contacts on the 961 states of the 99 controllers that declare any:
   fallback — and never `0x2`.
 
 **So a tracked warbot's four belts each lie on the patch of ground under them
-while its hull holds its own attitude.** Twelve nodes in the whole game.
+while its hull holds its own attitude.** Twelve nodes in the whole game carry
+the flag as authored.
+
+**A walker's feet reach the same code by another road.** Flag `0x20` asks for
+`0x2` to be worked out from the state's own last pose, and 2410 contacts carry
+it — every foot of every walking chassis and of the three animals — of which
+2217 stand up and are placed
+([24-motion.md](24-motion.md#a-walkers-feet-lie-flat-where-the-animation-lays-them--read-and-measured)).
+So the twelve belts are what is *authored* as placed, not what is placed: 2229
+contacts in the game lay their node along the ground. A tracked chassis is
+still the only one that does it without asking the pose, which is the point —
+a belt is flat in every state, so there is nothing to work out.
 
 **It is not the belt's material.** These three chassis also carry the
 **channel** flag `0x10`,
@@ -398,11 +409,13 @@ node's tilt, driven by the ground contact. They meet on these twelve nodes
 because both are things only a tracked chassis needs.
 
 The engine does it this way: `CONTACT_PLACE` in `parkan-formats`,
-`Walker::lay_belts` for the turn — kept per carrier node, in the machine's own
-frame — and `Robot::chassis_pose` turning that node's world pose by it with its
-translation untouched. The previous/current pair is left out: all twelve
-contacts belong to a velocity-driven state, whose blend weight never leaves 1,
-so the slerp is the current turn.
+`place_by_pose` for the flag `0x20` decides, `Walker::lay_belts` for the turn —
+kept per carrier node, in the machine's own frame — and `Robot::chassis_pose`
+turning that node's world pose by it with its translation untouched. The
+previous/current pair is left out: all twelve belt contacts belong to a
+velocity-driven state, whose blend weight never leaves 1, so there the slerp is
+the current turn. A walker's foot is placed in states that do blend, so its
+tilt arrives a step sooner than the game's.
 
 ### What moves by itself on Mission 01 — *measured*
 
