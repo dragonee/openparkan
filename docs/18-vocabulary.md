@@ -69,11 +69,62 @@ What a save actually holds. Across the six saves, **361 distinct members**,
 | `R_*` | chassis | labels are `Large Track Chs (L-42t)` — **measured** |
 | `u_*` | emplacements | `u_bun_def_l_01` reads as bunker/defence |
 | `r_shield_b/g/r` | shield effects in three colours | *guess* |
-| `bb`, `bl`, `bm`, `bp`, `br`, `ba`, `bf`, `bt` | building types | *unknown* which is which |
+| `b*` | rounds, one family per second letter | **measured**, [below](#bkind-is-a-round-and-the-second-letter-is-the-weapon-family) |
 
 The first five rows are not guesses at all: the `.dat` assemblies pair each
 member with the display name the game's UI shows, which
 [07-objects.md](07-objects.md) already uses.
+
+## `b<kind>` is a round, and the second letter is the weapon family
+
+An earlier draft of this note filed `bb`, `bl`, `bm`, `bp`, `br`, `ba`, `bf`
+and `bt` as building types, unknown which was which. **They are not
+buildings.** Sixty-one members take the shape `b<kind>_<size>_<index>` — `ba`
+9, `bb` 9, `bf` 4, `bl` 16, `bm` 8, `bp` 6, `br` 5, `bt` 4 — and **all 61 are
+`BULL` records** (*measured*), the projectile tag, none `FORT` and none
+`BTLU`. Every one names five slots, a `.msh`, `.wea`, `.cpt`, `.ndp` and
+`.ctl`, all five in `weapon.rlb` — only `bm_b_02` names two that are not
+there — and **not one is placed in any of the 29 missions**. The control
+for that absence: `s_tree*` scenery, which *is* placed by record name, is named
+by 59 distinct records over the 864 placements, so a placement does reach
+`objects.rlb` by name and the rounds simply are not among the things placed.
+[17-saves.md](17-saves.md), [26-damage.md](26-damage.md) and
+[29-weapons.md](29-weapons.md) have treated them as rounds all along; only this
+page was stale.
+
+`b` is the `BULL` tag's own letter. **The second letter is the weapon family**
+— *measured*, three ways over: by what fires each round (every firing component
+of every controller in `objects.rlb`, joined to the sub-kind `objects.dlb`
+gives the firing part), by the trail the round's own controller plays
+(action 4), and by how it flies.
+
+| | is | fired by | trail | flight |
+|---|---|---|---|---|
+| `bb` | bullet, shell | `WPN:GUN`, 8 of 9; `bb_h_01` the hero's gun 1 | `b_bull_r/g/b`, `b_howizer_r/y`, `hero_cannon_bullet` | 85–350 m/s |
+| `bl` | laser | `WPN:LAS`, 14 of 16; `bl_h_01` hero gun 3; `bl_b_05` unfired | `las_<size>_tail_<colour>`, `hero_laser_bullet` | 10,000 m/s and 1,000 m, all 16 |
+| `bm` | missile | `WPN:MIS`, 6 of 8; `bm_h_01` hero gun 4; `bm_b_02` unfired | `engine_mis_*`, `smoke_*_ms_*`, `gunf_missile_*` | **guided, 7 of 7 readable** |
+| `br` | rocket | `WPN:ROC`, 3 of 5; `br_b_02/03` the Monstr turrets | `engine_mis_*`, `smoke_rk_01/02/03` | **unguided, 5 of 5** |
+| `bf` | flamer | `WPN:FLM`, 4 of 4 | `flamer_l/m/b_01` | the only rounds in controller mode 3 — they fall |
+| `bt` | taser | `WPN:TAS`, 4 of 4 | `tas_t/l/m/b_tail` | 10,000 m/s, 90–130 m |
+| `bp` | plasma rifle | hero gun 2; `bp_b_01`–`04` the three Monstr turrets; `bp_l_06` the unused flyer `r_l_06` | `hero_prifle_bulletA/B`, `Monster_L07/B07/B08_bullet*` | guided, cone 0.25–1.57 |
+| `ba` | animal | the five `a_l_0N` creatures; **no gun in the install fires one** | `bul_anl`, `bul_anl_03`, `bul_anl_05` | 10–110 m/s |
+
+The two families the firing side cannot name are named by the engine's own
+effect strings: `bp` by `hero_prifle_bullet` — *p-rifle*, and
+[29-weapons.md](29-weapons.md) already calls the hero's gun 2 a plasma rifle —
+and `ba` by `bul_anl`, bullet-animal.
+
+Two rows of the table are worth stating on their own. **Missile against rocket
+is a real distinction and the data keeps it**: all seven readable `bm` carry a
+class-17 seeker and all five `br` carry none, so `WPN:MIS` is the guided
+launcher and `WPN:ROC` the unguided one. And **`bl` and `bt` are both a beam**
+— exactly 10,000 m/s on every one of the twenty — differing only in reach,
+1,000 m against 90–130 m.
+
+The residue of each family is the hero's own round: `bb_h_01`, `bl_h_01`,
+`bm_h_01`, `bp_h_01`, the four guns of `e_tur_ht_02`. Two more are fired by
+nothing at all — `bl_b_05`, and `bm_b_02`, which has no `.ndp` or `.ctl` in
+`weapon.rlb` to read in the first place.
 
 ## `i_cNN` is ammunition, and `NN` names the weapon — *measured*
 

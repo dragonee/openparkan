@@ -50,17 +50,28 @@ TAG = "DSCR"
 #: How many parts it describes.
 PARTS = 395
 
-#: The size letter of the classification line, as in a part id.  ``A`` (27
-#: parts), ``N`` (the five creatures) and ``E`` (the three enhanced buildings)
-#: are letters no part id uses; the research tree files ``A``, ``H`` and ``N``
-#: as size 4 and ``E`` as 5.
+#: The size letter of the classification line, as in a part id.  ``A``, ``N``
+#: and ``E`` are letters no part id uses; the research tree files ``A``, ``H``
+#: and ``N`` as size 4 and ``E`` as 5.  ``N`` is an animal -- the five ``ANM``
+#: parts, the same five the research tree marks with role 7 -- and ``A`` is a
+#: fortification's fittings: 27 parts, 21 of them fitted only into assemblies
+#: with an ``fr_*`` building at the root, and every line in the file that says
+#: "fortification" belongs to one.  The words themselves are not recoverable;
+#: see ``docs/19-descriptions.md``.
 SIZES = {"B": "large", "M": "medium", "L": "small", "T": "tiny", "H": "huge"}
 
 #: The ``A<n>`` token that closes the classification line, by size letter.  It
-#: follows the letter on 358 of 395 parts; the 37 that differ are all weapons
-#: and ammunition -- launchers, their packs and the level-0 large guns.
+#: follows the part's own letter on 358 of 395, and on all 275 parts that are
+#: neither ``WPN`` nor ``AMM``.  On a weapon it is instead **the size of the
+#: round it fires** -- which covers 25 of the 37 that differ.  Eight more keep
+#: their own letter, seven of them because the round they fire is ``f``-sized
+#: and no grade covers that; the 12 clip-less built-in guns are unexplained.
+#: See ``round_grade`` and ``docs/19-descriptions.md``.
 GRADES = {"T": "A0", "L": "A1", "N": "A1", "M": "A2", "B": "A3", "E": "A4",
           "A": "A5", "H": "A5"}
+
+#: The armament kinds whose grade the round they fire decides.
+ARMAMENT_KINDS = ("WPN", "AMM")
 
 #: Nothing in the game reads this file's text.  ``iron3d.dll`` opens it once
 #: (``0x100487a4``) and only asks whether a member exists for a part id; the
@@ -103,6 +114,22 @@ _CLASS = re.compile(r"^//([A-Z]+):([A-Z]+):(.+?)\s*$")
 _MARK = re.compile(r"^MK\d+$")
 _SLOT = re.compile(r"^#(\w)(.*)$")
 _STAT = re.compile(r"^@G@(.*?)\s*@B,([^,]*),G,([^,]*),")
+#: An ``objects.rlb`` member's size letter -- ``<family>_<size>_<index>``.
+_MEMBER = re.compile(r"^[A-Za-z]{2,4}_([A-Za-z])_")
+
+
+def round_grade(member: str) -> str:
+    """The grade the round ``member``'s own size letter implies, or ''.
+
+    A weapon's or ammunition pack's ``A<n>`` is the size of the **round it
+    fires**, not its own: ``e_gun_bl_14`` is a large launcher loaded with
+    ``bm_l_01``, a small missile, and carries ``A1``, as does ``i_c14_b_df``,
+    the large pack that feeds it.  A round whose size letter is ``f`` grades
+    nothing -- ``f`` is outside ``GRADES`` -- which is why the huge guns keep
+    their own ``A3``.  See ``docs/19-descriptions.md``.
+    """
+    found = _MEMBER.match(member)
+    return GRADES.get(found.group(1).upper(), "") if found else ""
 
 
 class DescriptionFormatError(ValueError):

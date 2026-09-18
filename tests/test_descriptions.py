@@ -126,3 +126,20 @@ def test_the_level_band_follows_the_upgrade_level():
     assert not descriptions.parse_entry("//G3:L21\n//B:WPN:GUN:MK2\n#6UpgradeLevel=1\n").banded
     # level 0 is the free stock and never counts against a band
     assert descriptions.parse_entry("//G3:L0\n//B:WPN:GUN:MK2\n#6UpgradeLevel=3\n").banded
+
+
+def test_a_weapons_grade_is_the_size_of_the_round_it_fires():
+    """`e_gun_bl_14` is a large launcher firing a small missile, and is A1."""
+    launcher = descriptions.parse_entry("//G3:L14\n//B:WPN:MIS:MK5:A1\n#2Lrg Missile L\n")
+    assert not launcher.graded  # its own B letter would say A3
+    assert descriptions.round_grade("bm_l_01") == launcher.grade == "A1"
+    # the large pack that feeds it is graded by the same round, not by its own B
+    pack = descriptions.parse_entry("//G3:L14\n//B:AMM:MIS:MK5:A1\n#2Winged pack\n")
+    assert not pack.graded and pack.grade == descriptions.round_grade("bm_l_01")
+
+
+def test_an_f_sized_round_grades_nothing():
+    """`f` is outside GRADES, so the huge guns keep their own A3."""
+    assert descriptions.round_grade("bb_f_01") == ""
+    assert descriptions.round_grade("bld_l_01") == "A1"
+    assert descriptions.round_grade("not a member") == ""

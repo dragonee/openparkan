@@ -81,26 +81,111 @@ chain, and one `A<n>` token follows.
 The first slot is the **same size letter as a part id**
 ([18-vocabulary.md](18-vocabulary.md)): `B` large (144), `M` medium (96),
 `L` small (92), `T` tiny (26), `H` huge (2), plus three no part id uses — `A`
-(27: the brain modules, the `f`-sized battery, shield and repair units, and
-the building upgrades and deflectors), `N` (the five creatures) and `E` (the
-three enhanced buildings, `fr_e_*`). The research tree files `H`, `A` and `N`
-as size 4 and `E` as 5 ([16-research.md](16-research.md)); what the letters
-stand for is not written anywhere — `E` for *enhanced* fits the display names,
-and `A` and `N` are *unknown*.
+(27), `N` (5) and `E` (the three enhanced buildings, `fr_e_*`). The research
+tree files `H`, `A` and `N` as size 4 and `E` as 5
+([16-research.md](16-research.md)). `E` for *enhanced* fits the display names;
+what `A` and `N` refer to is settled [below](#the-a-and-n-size-letters), and
+the words themselves are not recoverable.
 The kind slot is six values: `DVC` device (134), `SHS` chassis (78),
 `WPN` weapon (62), `BLD` building (58), `AMM` ammunition (58), `ANM`
 creature (5). The sub-kind is a three-letter mnemonic — `TUR`, `GUN`, `ARM`,
 `LAS`, `ROC`, `MIS`, `FSH`, `DSH`, `BAT`, `REP`, `DEF`, `FLM`, `BUN` — and
 the mark runs `MK1` to `MK20`.
 
-**The closing `A<n>` token is a size grade** — *measured*. It follows the size
-letter on **358 of 395** parts: `T` → `A0`, `L` and `N` → `A1`, `M` → `A2`,
-`B` → `A3`, `E` → `A4`, `A` and `H` → `A5`. The 37 that differ are all weapons
-(20) and ammunition (17): rocket and missile launchers and their packs,
-mostly a grade or two below their letter (`e_gun_bl_14`, a large missile
-launcher, is `A1`; two small packs, `i_c09_m` and `i_c10_b`, sit above), and
-the large guns of tech level 0 (`e_gun_bc_25`…`29`, `e_gun_bl_30`…`35`), all
-but one `A4` or `A5`. Why those differ is not established.
+### The `A` and `N` size letters
+
+Neither is a word we can recover, and both are a referent we can.
+
+**`N` is an animal** — *measured*. Exactly five parts carry it, `A_L_01`
+through `A_L_05`, and they are also the only five of kind `ANM`. The research
+tree says the same thing independently of this file: **the same five and no
+others** carry role byte `+0x22` = 7, the byte
+[30-turrets.md](30-turrets.md) already reads as *an animal*, and the agreement
+holds both ways round on all 29 trees. Their line is `//N:ANM:SHS:MK<n>:A1` —
+grade `A1`, the small grade, which is what their models are — while the tree
+files them as size 4 beside `H` and `A`.
+
+**`A` is a fortification's fittings** — *measured*. Twenty-seven parts carry
+it, all at tech level 0, all `UpgradeLevel=0`, all graded `A5`: six brain
+modules `i_brn_a_01`…`06`, four fortification shields `i_fsh_f_01/02/03/df`,
+four fortification batteries `i_pws_f_*`, four fortification repairs
+`i_rps_f_*`, six building deflectors `u_{ang,ins,min,mtp,pln,str}_def_a_01`
+and three mine upgrades `u_min_upg_a_01/02/03`. Over all 458
+`UNITS/**/*.dat`, **21 of the 27 appear in an assembly, and all 31 of the
+distinct assembly roots that take one are an `fr_*` building** — a bunker, a
+mine, a plant, a store, a tower, a bridge; never a robot.
+
+The file names the referent itself for twelve of them. **Every line in
+`objects.dlb` that mentions a fortification belongs to an `A` part**, 12 of
+12: `#4Fortification shield` on the four `i_fsh_f`, `#4Fortifications PS` on
+the four `i_pws_f`, `#4Fortifications unit M1`–`M4` on the four `i_rps_f`.
+Nothing else in the file uses the word. That same free-text slot is what names
+`H` too — `e_tur_ht_02` carries `#4HERO`.
+
+The six brain modules are the stranger part of the `A` set: they have **no
+`objects.rlb` record at all** (26 of the 32 `A` and `N` parts do), sit in no
+assembly and no save, and yet **all 29 research trees list them**, kind 11
+`DVC`, sub-kind 69 `BRN`, size 4.
+
+**The words themselves are not recoverable, and there is a control for
+that** — *measured*. The token `objects.dlb` is present in `iron3d.dll`, so a
+byte search over every shipped `.dll` and the executable does find a string
+that is there; the tokens `DSCR`, `ANM`, `DVC` and `ResearchEnergyCost` are in
+**no** shipped binary.
+The classification line's vocabulary never reaches the code, so there is no
+resolver chain to pull the spelling out of, and no shipped text writes `A` or
+`N` out in words. They are referents, not words.
+
+### The closing `A<n>` is a size grade, and on a weapon it is the round's
+
+**The `A<n>` token is a size grade** — *measured*. It follows the part's own
+size letter on **358 of 395**: `T` → `A0`, `L` and `N` → `A1`, `M` → `A2`,
+`B` → `A3`, `E` → `A4`, `A` and `H` → `A5`. All **275** parts that are neither
+`WPN` nor `AMM` carry the grade their letter implies, 275 of 275. The 37 that
+differ are all armament, and a second rule accounts for 25 of them:
+
+> **The `A<n>` on a weapon is the size of the round it fires, not the size of
+> the weapon.**
+
+All 120 `WPN` and `AMM` parts name a round through their controller's firing
+component ([29-weapons.md](29-weapons.md)). **100 of the 120 carry the grade
+of that round's size letter**; 83 carry the grade of their own; 75 agree on
+both. Cross-tabulated: **75 fit both, 8 fit their own letter only, 25 fit
+their round only, 12 fit neither** — 75 + 8 + 25 + 12 = 120.
+
+- **25 of the 37 carry the round's grade**: all 17 ammunition packs, and eight
+  weapons — `e_gun_bl_12`, `bl_13`, `bl_14`, `bl_15`, `bl_18`, `e_gun_fl_03`,
+  `e_gun_ml_10` and `e_gun_ml_11`. These are large or medium launchers loaded
+  with medium or small missiles. `e_gun_bl_14` is a large launcher firing
+  `bm_l_01`, a small missile, and is graded `A1`; `i_c14_b_df`, the large pack
+  that feeds it, is graded `A1` too.
+- **8 are exceptions to nothing**, and all eight keep their own `A3`. Seven of
+  them, `e_gun_fc_01/02/04/05/06/07/08`, fire a round whose size letter is
+  `f` — `bb_f_01`, `bl_f_01/02/03/04`, `bb_f_02`, `bf_f_01`; `f` is not one of
+  `t/l/m/b`, so a round of that size grades nothing. The eighth is
+  `e_gun_bs_01`, a mobile builder, whose beam `bld_l_01` would say `A1` and
+  does not get a hearing.
+- **12 fit neither and stay unexplained**: `e_gun_bc_25`–`29`,
+  `e_gun_bl_30`–`35` and `e_gun_fl_09`. All twelve are **clip-less** — the
+  magazine reads `UNLIMITED` and the class-2 slot is unlabelled (only 1 of the
+  25 round-graded ones is). Ten of the eleven at tech level 0 fire **exactly
+  the round the clip-fed twin twenty marks earlier fires** — `bc_25`↔`bc_05`,
+  `bc_26`↔`bc_06`, `bc_27`↔`bc_07`, `bc_28`↔`bc_08`, `bl_30`↔`bl_10`,
+  `bl_31`↔`bl_11`, `bl_32`↔`bl_12`, `bl_33`↔`bl_13`, `bl_34`↔`bl_14`,
+  `bl_35`↔`bl_15` — and only `bc_29` differs. They carry `A4` or `A5`
+  (`bl_35` `A2`, `fl_09` `A1`) where both readings say `A1`–`A3`. So they are
+  the built-in, ammunition-free versions of guns that already exist; **why
+  they are graded as they are is not established.**
+
+The control that the letters mean a size in this data at all is
+`verify.py`'s existing *a name's size letter is the model's size*, which
+re-derives chassis `R_T_/R_L_/R_M_/R_B_` → `T-/S-/M-/L-` and buildings
+`fr_l/m/b/e_` → `-17/-30/-47/-67`. The control on the weapon-to-round join is
+that, run over all 67 `BULL` records rather than the 61 in question, it
+reproduces three families the docs already name: `rg_b_01` under
+`e_gun_bc_05`, the Large Rail Gun; the `bld_*` beams under the mobile
+builders; and `e_tur_ht_02`'s four guns as `bb_h_01`, `bp_h_01`, `bl_h_01`
+and `bm_h_01`, in the gun order [29-weapons.md](29-weapons.md) gives.
 
 ### What the game takes from this file — *read*
 
@@ -154,11 +239,17 @@ code that is itself a member and the rest naming it in words
 
 ## What is not read here
 
-- ~~**The `A<n>` token**~~ — **narrowed**: a size grade that follows the size
-  letter on 358 of 395; why 37 launchers, packs and level-0 guns differ is open,
-  and the game never reads it.
-- **What the `A` and `N` size letters stand for.** Which parts carry them is
-  measured above, and the tree files them as size 4; the words are unknown.
+- ~~**The `A<n>` token**~~ — **answered**: a size grade, the part's own letter
+  on 358 of 395 and **the size of the round it fires** on a weapon, which
+  accounts for 25 of the 37 that differ; 8 more keep their own letter, seven
+  of them because the round they fire is `f`-sized and no grade covers that.
+  The 12 clip-less built-in guns are still unexplained. The game never reads
+  any of it.
+- ~~**What the `A` and `N` size letters stand for**~~ — **answered as far as
+  the data can answer it**: `N` is an animal and `A` a fortification's
+  fittings, both settled twice over above. The *words* are not recoverable —
+  the classification line's vocabulary reaches no shipped binary, and the
+  control says a byte search would have found it if it did.
 - ~~**What the tech level gates exactly**~~ — **closed, negatively**: nothing.
   The game never reads this file's text, and the research tree it does read has
   no level field.

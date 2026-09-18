@@ -37,9 +37,21 @@ few fields are carried through without being understood:
   are scaled, and the engine applies it to them (218 placements carry a value
   other than 1, 0.2 to 21; see [04-missions.md](04-missions.md#the-scale)).
   Uniform on all 864, so the data still does not exercise the axis order.
-- What reads a building's start flag back (`IBuilding` slot 13, `CBuilding
-  +0xb8`), and the word after the map path, which `IMission` slot 11 returns to
-  no caller found.
+- ~~What reads a building's start flag back~~ — **answered, negatively**:
+  `IBuilding` slot 13 has no caller anywhere in the install, but `CBuilding
+  +0xb8` is read — `CBuilding::SetObjectState` names it the building's
+  **object state** and `CBuilding::SendMsg` tests it against zero, which a
+  placed building never is. So the flag changes nothing through the only
+  reader the engine has. See [04-missions.md](04-missions.md#the-start-flag-changes-nothing--read).
+- ~~The word after the map path~~ — **half answered**: **nothing reads it**
+  (`IMission` slot 11 is called nowhere; the control finds the slot 12 and 13
+  calls a caller would have looked like). What it *means* is still open. It is
+  1 on the six `Multi` maps and `Single.01` and 0 on the other 22, and the two
+  readings that track it each break once — `Single.01` has a single player
+  clan, and `Single.02` is outside the campaign and carries 0. Whether
+  `Single.01` is offered in the game's multiplayer map list would settle it,
+  and that is in `iron3d.dll`'s menu code. See
+  [04-missions.md](04-missions.md#trailer).
 
 ## Land.map leftovers
 

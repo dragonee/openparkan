@@ -166,17 +166,59 @@ the scenery. `MisLoad.dll` hands it each record through `IMission` slot 10
   the pair, all units, each naming a building placed in the same mission and a
   vertex inside its graph — 12 heroes in their own clan's bunker and one
   walker in another clan's store; the other 851 set both to −1.
-- **The start flag is a building's.** `iron3d.dll:0x10033cb0` turns it into bit
-  0 of `CreateObjectFromScheme`'s `dwCreateFlag` (bit 2 says a logical id
-  follows), and that bit sets 2 on the building through `IBuilding` slot 12
-  (`Terrain.dll:0x10056cb0`, `CBuilding +0xb8`, 1 by default). A unit's and
-  scenery's flag is not passed on. *Measured*: it marks **exactly one half of
-  each of the nine bridge pairs** — always the half with the later logical id
-  and the angle π further on — and 4 other buildings (two mines, a plant, a
-  generator); 6 units and 4 trees set it to no effect. What reads the
-  building's 2 back (`IBuilding` slot 13) is not found.
+- **The start flag is a building's, and it is the building's object state.**
+  `iron3d.dll:0x10033cb0` turns it into bit 0 of `CreateObjectFromScheme`'s
+  `dwCreateFlag` (bit 2 says a logical id follows), and that bit sets 2 on the
+  building through `IBuilding` slot 12 (`Terrain.dll:0x10056cb0`,
+  `CBuilding +0xb8`, 1 by default). A unit's and scenery's flag is not passed
+  on. *Measured*: it marks **exactly one half of each of the nine bridge
+  pairs** — always the half with the later logical id and the angle π further
+  on — and 4 other buildings (two mines, a plant, a generator); 6 units and 4
+  trees set it to no effect. What the field is called, and that it changes
+  nothing, is [below](#the-start-flag-changes-nothing--read).
 - **The property table's leading word** is read into a local and dropped
   (`0x10003ab0`); it is 1 on all 864.
+
+### The start flag changes nothing — *read*
+
+`IBuilding`'s vtable is `Terrain.dll:0x1009b52c`, 22 slots. Slot 12
+(`0x10056cb0`, 2 arguments) writes the interface's `+0xac` and slot 13
+(`0x10056cd0`, 1 argument) reads it back. The interface sits at
+`CBuilding +0xc`, so `+0xac` is `CBuilding +0xb8` — which is the offset this
+page already named.
+
+**Slot 13 has no caller.** Enumerating every `QueryInterface(0x17)` site in the
+install — `mov edx, 0x17` then `call [vtable]` with an out-pointer, **23 sites**
+across `AniMesh`, `ArealMap`, `Behavior`, `Control`, `Terrain` and `iron3d` —
+and every vtable offset then called on the answer, rejecting any call whose
+argument run does not match the slot's own `ret n`, gives: slot 3 (2 arguments)
+one caller, slot 12 (2) two, slot 14 (2) one, slot 15 (3) twelve, slot 16 (2)
+six, and **slot 13 (1) none**. The control is the writer of that same field:
+`ArealMap.dll:0x10015a0d` tests `dwCreateFlag` bit 0, asks for `0x17` and calls
+slot 12 with the literal `2` — the path described above — and the pass finds
+it. The arity check is what makes the pass trustworthy: without it the pass
+also reported two hits whose receiver register had its definition killed by an
+intervening call.
+
+**But the field itself is read, and it has a name.** Every `+0xb8` memory
+operand in `Terrain.dll`, mapped to its enclosing function and named by the
+assertion string that function carries, gives five `CBuilding` sites and no
+more: `0x100569b4`, `CBuilding::CBuilding()`, writes **1**; `0x10056cb9`, slot
+12, writes its argument; `0x10056cd6`, slot 13, reads — no caller;
+`0x10057868` and `0x1005797e`, both in `CBuilding::SendMsg()`, each
+`cmp [this+0xb8], 0`; and `0x10058993`, `CBuilding::SetObjectState()`, writes
+it from the **last** element of the object's state array, asserting that
+element's type code is 4. `SetObjectState` names the field: **`CBuilding
++0xb8` is the building's object state**, 1 by construction and 2 when the
+mission's flag is set.
+
+And `SendMsg` only ever tests it against zero — in two cases of a four-way
+switch on the per-item state at `[this+0x64] + i*0x6c + 0x50`, under message 1
+— while a placed building is never zero. **So the mission's flag reaches
+exactly one reader in the engine, and that reader cannot tell 1 from 2.** There
+is no `CBuilding::GetObjectState`; the ten `CBuilding::` names in the binary do
+not include one. What the mission file marks on nine bridge halves and four
+other buildings, the game does not act on.
 
 ### The rotation's sense
 
@@ -328,15 +370,42 @@ is dropped too. The amount runs 1e4 to 1e20 — what reads it off the lode
 (`+0x14`) is not found. The fourth word (0, or 100.0 as a float on the three
 with type 0) never leaves `MisLoad.dll`.
 
-The word after the map path is `IMission` slot 11's (`0x10001510`), and no
-caller of that slot was found. `iron3d.dll` is the only module that imports
-`CreateMissionData`; the three functions that create the object
-(`0x100a1f90`, `0x100a2bd0`, `0x100a36a0`) keep it local, hand it only to the
-placement (`0x100a3ea0`) and the lode setup (`0x10081880`), and between the
-five they call slots 1–3, 5–10 and 12–14. It is 1 on `Multi.01` to
-`Multi.06` and `Single.01`, 0 elsewhere. The lode table's word is passed to
-the lode reader, which ignores it. A save keeps its own copy of the lodes, 24
-bytes each, read back by `0x10081750`.
+**The word after the map path is read by nothing** — *read*, with a control.
+It is `IMission` slot 11's: a 16-slot vtable at `MisLoad.dll:0x1000e0e8`
+(slot 16 null), slot 11 at `0x10001510`, `__stdcall`, `ret 4`, returning the
+object's `+0x28`. `MisLoad.dll` exports `CreateMissionData` and, over the
+import tables of all fifteen DLLs and the executable, **`iron3d.dll` is its
+only importer**. The three calls to the import thunk (`0x100cd06c`) are at
+`0x100a2041`, `0x100a2e3b` and `0x100a37e1`, inside `0x100a1f90`,
+`0x100a2bd0` and `0x100a36a0`, which hand the pointer on only to the placement
+(`0x100a3ea0`) and the lode setup (`0x10081880`). Across all five frames the
+pointer is **never stored to a global or an object field** — every store is
+`mov [esp+k], reg` into the function's own frame — so a call on it has to sit
+inside one of the five, and those five hold exactly two indirect calls at
+`+0x2c`, `0x100a257d` and `0x100a3aa2`, both pushing three arguments at the
+object in `[game + 0xae8]` rather than one at the mission. **Slot 11 is called
+nowhere.** The control: the same one-argument interface-call scan
+(`push R; call [V+disp]` where `V` came from `mov V,[R]`), run over every
+module at `+0x30` and `+0x34`, returns `iron3d.dll:0x10081893` and
+`0x1008192c` — the known slot 12 and slot 13 calls that feed `SetMineralLode`.
+A slot-11 call would have had exactly that shape. For scale, the same scan at
+`+0x2c` finds 152 calls across the install.
+
+What the word *means* stays open, and deliberately so. **It is 1 on seven of
+the 29 missions — `Multi.01`…`Multi.06` and `Single.01` — and 0 on the other
+22** (*measured*), `Autodemo.00` and `Single.02` included. Two readings track
+it and **both break once**. The six `Multi` maps are the only missions with
+more than one clan of type `CLAN_PLAYER` (2, 2, 2, 2, 3 and 4), and every
+mission with the word clear has one player clan or none — but `Single.01` has
+one and carries the word, so that reading is right on 28 of 29. No campaign
+mission carries it and no `Multi` lacks it — but `Single.02` is outside the
+campaign too and carries 0, so that reading is right on 27 of 29. Routes do
+not separate them either. With one break in each, no meaning is published
+here. The one thing that could still settle it is whether `Single.01` appears
+in the game's multiplayer map list, which lives in `iron3d.dll`'s menu code.
+
+The lode table's word is passed to the lode reader, which ignores it. A save
+keeps its own copy of the lodes, 24 bytes each, read back by `0x10081750`.
 
 **The description field is damaged in the shipped data.** Its length word is
 the *capacity* of a fixed-size buffer, and whatever followed the real text in

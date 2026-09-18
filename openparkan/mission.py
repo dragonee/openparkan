@@ -376,6 +376,13 @@ class MissionObject:
 
         It marks the second half of each bridge pair.  A unit's or scenery's
         is not passed on.
+
+        ``CBuilding +0xb8`` is the building's **object state**, named by
+        ``CBuilding::SetObjectState``: 1 by construction, 2 when this is set.
+        The engine acts on none of it -- ``IBuilding`` slot 13, the getter, has
+        no caller, and the one other reader, ``CBuilding::SendMsg``, only tests
+        the field against zero, which a placed building never is.  So nothing
+        here drives behaviour; see ``docs/04-missions.md``.
         """
         return self.unknown[2][0] if self.unknown else 0
 
@@ -480,9 +487,14 @@ class Mission:
     viewpoints: list[Viewpoint]
     #: The object record's version word, ``OBJECT_VERSION``.
     unknown_pre_objects: int
-    #: The word after the map path: 1 on the six multiplayer maps and
-    #: Single.01, 0 elsewhere.  ``IMission`` slot 11 returns it and nothing
-    #: calls that slot.
+    #: The word after the map path: 1 on the six ``Multi`` maps and
+    #: ``Single.01``, 0 on the other 22.  ``IMission`` slot 11 returns it and
+    #: **nothing calls that slot** anywhere in the install (``docs/04``).  What
+    #: it means is open: the six ``Multi`` maps are the only ones with more
+    #: than one ``CLAN_PLAYER`` clan, but ``Single.01`` has one and carries the
+    #: word; and no campaign mission carries it, but ``Single.02`` is outside
+    #: the campaign too and does not.  Each reading breaks once, so neither is
+    #: published.
     map_word: int = 0
     #: The word before the lode count, 1 on all 29; the lode reader is handed
     #: it and ignores it.

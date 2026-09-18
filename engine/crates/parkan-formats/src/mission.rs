@@ -76,6 +76,11 @@ pub struct Object {
     pub rotation: f32,
     pub scale: [f32; 3],
     pub name: String,
+    /// The start flag, the host building, its hall-way vertex, and the property table's
+    /// leading word. The start flag is a building's object state (`CBuilding +0xb8`, 1 by
+    /// construction and 2 when set), and **the game acts on none of it**: `IBuilding`'s
+    /// getter has no caller and the one other reader only tests the field against zero,
+    /// which a placed building never is. Nothing here drives behaviour — see `docs/04`.
     pub tail: (u32, i32, i32, u32),
     pub properties: Vec<Property>,
 }
@@ -254,6 +259,9 @@ pub fn parse(data: &[u8], source: &str) -> Result<Mission, FormatError> {
     let unknown_pre_objects = r.u32()?;
     let objects = (0..r.u32()?).map(|_| object(&mut r)).collect::<Result<_, _>>()?;
     let map_path = string(&mut r)?;
+    // The word after the map path: 1 on the six Multi maps and Single.01, 0 on the other
+    // 22. `IMission` slot 11 returns it and nothing in the install calls that slot, so it
+    // is skipped here too; what it means is open (`docs/04-missions.md`).
     r.u32()?;
     let description = string(&mut r)?;
     r.u32()?;

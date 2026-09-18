@@ -1809,6 +1809,29 @@ def check_missions(check, game: Path) -> None:
           f"leading word, which the reader discards, is 1 on {headers[1]}/"
           f"{len(everything)} objects")
 
+    # The word after the map path: nothing reads it, and the two readings that
+    # track it each break once, so neither is published (docs/04-missions.md).
+    marked = {m.source.parent.name for m in parsed if m.map_word}
+    players = {m.source.parent.name:
+               sum(1 for c in m.clans if c.type == mission.CLAN_PLAYER) for m in parsed}
+    multi = {name for name, n in players.items() if n > 1}
+    campaign = {m.source.parent.name for m in parsed
+                if "CAMPAIGN" in str(m.source).upper()}
+    outside = {m.source.parent.name for m in parsed} - campaign
+    check("data.tma: the word after the map path is set on the Multi maps and Single.01",
+          marked and {m.map_word for m in parsed} == {0, 1}
+          and marked == multi | {"Single.01"}
+          and multi < marked and not marked & campaign,
+          f"1 on {len(marked)}/{len(parsed)} missions -- "
+          f"{', '.join(sorted(marked))} -- and 0 on the rest.  Two readings "
+          f"track it and each breaks once: the {len(multi)} missions with more "
+          f"than one CLAN_PLAYER clan are exactly the Multi maps, but Single.01 "
+          f"has one and carries it ({len(parsed) - 1}/{len(parsed)}); and no "
+          f"campaign mission carries it, but Single.02 is one of the "
+          f"{len(outside)} outside the campaign too and does not "
+          f"({len(parsed) - 2}/{len(parsed)}).  IMission slot 11 returns it and "
+          f"nothing in the install calls that slot")
+
     owned_objects = [o for o in everything if o.clan_id is not None]
     indexed = sum(o.clan_index == o.clan_id for o in owned_objects)
     level = sum(o.angles[:2] == (0.0, 0.0) for o in everything)
@@ -14717,6 +14740,27 @@ def check_saves(check, game: Path) -> None:
           f"{agree} of those name a .sav that is there")
 
 
+#: A round: ``b<family>_<size>_<index>``.  ``b`` is the BULL tag's own letter
+#: and the second letter is the weapon family (``docs/18-vocabulary.md``).
+ROUND_MEMBER = re.compile(r"^b([abflmprt])_[a-z]_\w+$")
+
+#: The ``objects.dlb`` sub-kind of the weapon that fires each family.  ``bp``
+#: and ``ba`` have none: no catalogued weapon fires them, and they are named by
+#: their own trail effects, ``hero_prifle_bullet`` and ``bul_anl``.
+ROUND_FAMILIES = {"b": "GUN", "l": "LAS", "m": "MIS", "r": "ROC",
+                  "f": "FLM", "t": "TAS"}
+
+#: How fast a beam round -- every ``bl`` and ``bt`` -- is said to fly.
+BEAM_SPEED = 10000.0
+
+#: The controller mode that makes a round fall: the flamers', and no others'.
+FALLING_MODE = 3
+
+#: How many distinct ``s_tree`` records the 29 missions place by name.  The
+#: control on "no round is placed": a placement does reach objects.rlb by name.
+PLACED_TREES = 59
+
+
 def check_vocabulary(check, game: Path) -> None:
     """The naming scheme the archives and saves share."""
     library = game / "objects.rlb"
@@ -14794,6 +14838,97 @@ def check_vocabulary(check, game: Path) -> None:
           f"the same number and size, none orphaned -- so NN is a weapon type, "
           f"not a component class; the kind letter splits "
           + ", ".join(f"{k}:{v}" for k, v in sorted(kinds.items())))
+
+    # b<kind> is not a building type.  It is a round, the second letter names
+    # the weapon family, and nothing places one on a map.
+    arm = weapons.Armoury(game)
+    catalogue = {k.lower(): v for k, v in descriptions.library(game).items()}
+    families: Counter[str] = Counter()
+    round_tags: Counter[str] = Counter()
+    slot_sets: Counter[tuple[str, ...]] = Counter()
+    homes: set[str] = set()
+    for member, record in sorted(arm.library.records.items()):
+        found = ROUND_MEMBER.match(member)
+        if not found:
+            continue
+        families[found.group(1)] += 1
+        round_tags[record.tag] += 1
+        filled = [s for s in record.slots if s.member]
+        slot_sets[tuple(sorted(s.member.rsplit(".", 1)[-1].lower() for s in filled))] += 1
+        homes |= {s.library.lower() for s in filled}
+    check("vocabulary: b<kind> is a round, not a building type",
+          families and set(round_tags) == {"BULL"} and homes == {"weapon.rlb"}
+          and list(slot_sets) == [("cpt", "ctl", "msh", "ndp", "wea")],
+          f"all {sum(families.values())} b<kind>_<size>_<index> members are "
+          f"{'/'.join(sorted(round_tags))} records, none FORT or BTLU -- "
+          + ", ".join(f"{k} {v}" for k, v in sorted(families.items()))
+          + " -- and every one names the same five slots, "
+          + "/".join(f".{s}" for s in slot_sets.most_common(1)[0][0])
+          + f", all in {'/'.join(homes)}")
+
+    stems: Counter[str] = Counter()
+    for folder in gamedir.missions(game):
+        for placed in mission.load(folder / "data.tma").objects:
+            leaf = placed.path.replace("\\", "/").rsplit("/", 1)[-1].lower()
+            stems[leaf.rsplit(".", 1)[0]] += 1
+    shot = {m for m in arm.library.records if ROUND_MEMBER.match(m)}
+    trees = {m for m in stems if m.startswith("s_tree")}
+    check("vocabulary: no round is placed in a mission, but scenery is",
+          stems and not shot & set(stems) and len(trees) == PLACED_TREES,
+          f"none of the {len(shot)} rounds is among the {sum(stems.values())} "
+          f"placements over {len(gamedir.missions(game))} missions; control: "
+          f"{len(trees)} distinct s_tree records are placed by name "
+          f"{sum(stems[t] for t in trees)} times, so a placement does reach "
+          f"objects.rlb by name and the absence is real")
+
+    firing: defaultdict[str, set[str]] = defaultdict(set)
+    flight: dict[str, tuple[bool, float, float, int]] = {}
+    for member in sorted(arm.library.records):
+        try:
+            parsed = arm.controller(member)
+        except (KeyError, control.ControlFormatError, ValueError):
+            continue
+        if parsed is None:
+            continue
+        if member in shot:
+            flight[member] = (
+                any(c.type_id == control.SEEKER_TYPE for c in parsed.components),
+                parsed.triples[control.TRIPLE_TOP_SPEED][1],
+                parsed.bounds[0], parsed.mode)
+        for part in parsed.components:
+            if part.type_id not in (control.GUN_TYPE, control.BUILDER_TYPE):
+                continue
+            found = ROUND_MEMBER.match(part.resource.member.lower())
+            if found:
+                firing[found.group(1)].add(member)
+    subs = {family: Counter(
+        (catalogue[m].sub if m in catalogue else "-") for m in shooters)
+        for family, shooters in firing.items()}
+    check("vocabulary: a round's second letter is the weapon family",
+          subs and all(subs.get(f) and subs[f].most_common(1)[0][0] == sub
+                       for f, sub in ROUND_FAMILIES.items()),
+          "; ".join(f"{f} " + "/".join(f"{k}:{v}" for k, v in sorted(subs[f].items()))
+                    for f in sorted(subs))
+          + " -- GUN shell, LAS laser, MIS missile, ROC rocket, FLM flamer, "
+          "TAS taser.  TUR is e_tur_ht_02, the hero's four guns, and the Monstr "
+          "turrets; SHS the five animals and the unused flyer r_l_06")
+
+    missiles = [v for k, v in flight.items() if k.startswith("bm_")]
+    rockets = [v for k, v in flight.items() if k.startswith("br_")]
+    beams = {k: v for k, v in flight.items() if k[:3] in ("bl_", "bt_")}
+    tasers = [r for k, (_, _, r, _) in beams.items() if k.startswith("bt_")]
+    falling = {k for k, (*_, mode) in flight.items() if mode == FALLING_MODE}
+    check("vocabulary: a missile is guided, a rocket is not, and a beam is a beam",
+          missiles and rockets and all(seeks for seeks, *_ in missiles)
+          and not any(seeks for seeks, *_ in rockets)
+          and beams and all(speed == BEAM_SPEED for _, speed, _, _ in beams.values())
+          and falling == {k for k in flight if k.startswith("bf_")},
+          f"all {len(missiles)} readable bm carry a class-17 seeker and none of "
+          f"the {len(rockets)} br does, so WPN:MIS is the guided launcher and "
+          f"WPN:ROC the unguided one; the {len(beams)} bl and bt all fly at "
+          f"{BEAM_SPEED:g} m/s and differ only in reach, 1000 m against "
+          f"{min(tasers):g}-{max(tasers):g} m; and the {len(falling)} bf are the "
+          f"only rounds in controller mode {FALLING_MODE}, which falls")
 
     # bu_ and fr_ are not two sides: a building's FORT record names its body,
     # a BTLU record, which names the fr_ models.  Terrain.dll's CBuilding
@@ -15332,14 +15467,116 @@ def check_descriptions(check, game: Path) -> None:
 
     graded = [p for p in parts.values() if p.graded]
     ungraded = Counter(p.kind for p in parts.values() if not p.graded)
+    plain = [p for p in parts.values() if p.kind not in descriptions.ARMAMENT_KINDS]
     check("descriptions: the A<n> token is a size grade",
-          len(graded) == len(parts) - 37 and set(ungraded) == {"WPN", "AMM"},
+          len(graded) == len(parts) - 37 and set(ungraded) == {"WPN", "AMM"}
+          and sum(1 for p in plain if p.graded) == len(plain),
           f"{len(graded)}/{len(parts)} parts carry the grade their size letter "
           f"implies -- "
           + ", ".join(f"{k} {v}" for k, v in descriptions.GRADES.items())
-          + "; the other "
+          + f"; all {len(plain)} that are neither WPN nor AMM do, and the other "
           + " and ".join(f"{n} {k}" for k, n in sorted(ungraded.items()))
-          + " are launchers, their packs and the level-0 large guns")
+          + " are weapons and the packs that feed them")
+
+    # On a weapon the A<n> is the size of the ROUND it fires, not its own.
+    arm = weapons.Armoury(game)
+    armament = [p for p in parts.values() if p.kind in descriptions.ARMAMENT_KINDS]
+    cross: Counter[tuple[bool, bool]] = Counter()
+    fires = clipless = huge_round = 0
+    for part in armament:
+        try:
+            parsed = arm.controller(part.part)
+        except (KeyError, control.ControlFormatError, ValueError):
+            parsed = None
+        shot = next((c.resource.member for c in parsed.components
+                     if c.type_id in (control.GUN_TYPE, control.BUILDER_TYPE)
+                     and c.resource.member), "") if parsed else ""
+        fires += bool(shot)
+        by_round = bool(shot) and descriptions.round_grade(shot) == part.grade
+        cross[(part.graded, by_round)] += 1
+        if part.graded and not by_round:
+            huge_round += not descriptions.round_grade(shot)
+        if not part.graded and not by_round:
+            gun = arm.gun(part.part)
+            clipless += gun is not None and gun.magazine < 0 and not gun.slot
+    check("descriptions: on a weapon the grade is the round's size, not its own",
+          fires == len(armament) == 120 and cross[(True, True)] == 75
+          and cross[(True, False)] == 8 and cross[(False, True)] == 25
+          and cross[(False, False)] == clipless == 12 and huge_round == 7,
+          f"all {fires} WPN and AMM parts name a round through their "
+          f"controller's firing component, and "
+          f"{cross[(True, True)] + cross[(False, True)]} carry the grade that "
+          f"round's size letter implies against "
+          f"{cross[(True, True)] + cross[(True, False)]} carrying their own: "
+          f"{cross[(True, True)]} fit both, {cross[(True, False)]} only their "
+          f"own letter ({huge_round} of them fire an f-sized round, which "
+          f"grades nothing, and the last is a mobile builder), "
+          f"{cross[(False, True)]} only the round -- which is 25 of the 37 "
+          f"exceptions -- and {cross[(False, False)]} fit neither.  All "
+          f"{clipless} of those are clip-less built-in guns, magazine "
+          f"UNLIMITED and no clip slot, and why they are graded as they are is "
+          f"not established")
+
+    # The A and N size letters, as referents: N an animal, A a fortification's
+    # fittings.  The words themselves are in no shipped binary.
+    animals = sorted(p.part.lower() for p in parts.values() if p.size == "N")
+    fittings = sorted(p.part.lower() for p in parts.values() if p.size == "A")
+    by_role = [sorted(x.lower() for item in research.read(t).items
+                      if item.role == research.ROLE_ANIMAL for x in item.parts)
+               for t in research.trees(game)]
+    kinds = {p.kind for p in parts.values() if p.size == "N"}
+    check("descriptions: the N size letter is an animal",
+          animals and kinds == {"ANM"}
+          and by_role and all(row == animals for row in by_role),
+          f"the {len(animals)} N parts are {', '.join(animals)}, the only "
+          f"{'/'.join(kinds)} parts in the file, and the same five and no "
+          f"others carry role byte {research.ROLE_ANIMAL} on all "
+          f"{len(by_role)} research trees -- the byte docs/30-turrets.md reads "
+          f"as an animal")
+
+    in_assembly: dict[str, set[str]] = defaultdict(set)
+    for path in sorted(game.glob("UNITS/**/*.dat")):
+        unit = objects.load_unit(path)
+        members = [c.ref.member.lower() for c in unit.components]
+        for member in members:
+            if member in set(fittings):
+                in_assembly[member].add(members[0])
+    roots = {root for fitted in in_assembly.values() for root in fitted}
+    forts = sorted(t for p in parts.values() for t in p.text if "ortification" in t)
+    named = {p.size for p in parts.values() for t in p.text if "ortification" in t}
+    modelled = {n.lower() for n in library_names}
+    missing = sorted(p for p in fittings if modelled and p not in modelled)
+    listed = [sorted(x.lower() for item in research.read(t).items for x in item.parts
+                     if x.lower().startswith("i_brn_")) for t in research.trees(game)]
+    check("descriptions: the A size letter is a fortification's fittings",
+          fittings and in_assembly and roots
+          and all(r.startswith("fr_") for r in roots)
+          and named == {"A"} and missing == [f"i_brn_a_0{n}" for n in range(1, 7)]
+          and listed and all(row == missing for row in listed),
+          f"{len(in_assembly)}/{len(fittings)} A parts are fitted somewhere in "
+          f"the 458 assemblies, and every one of the {len(roots)} distinct "
+          f"assembly roots that takes one is an fr_ building, never a robot; "
+          f"all {len(forts)} lines in the file that name a fortification belong "
+          f"to an A part and nothing else uses the word.  The {len(missing)} "
+          f"left over are the brain modules, which have no objects.rlb record "
+          f"at all and yet are listed by all {len(listed)} research trees")
+
+    # The control on "the words A and N are not recoverable": the file's name
+    # is in a binary, so a byte search does find what is there; nothing of its
+    # own vocabulary is.  Written as a referent, not a word.
+    modules = {p.name: p.read_bytes() for p in sorted(game.glob("*.dll"))}
+    modules.update({p.name: p.read_bytes() for p in sorted(game.glob("*.exe"))})
+    where = {token: sorted(n for n, blob in modules.items()
+                           if token.encode("latin-1") in blob)
+             for token in ("objects.dlb", "DSCR", "ANM", "DVC", "ResearchEnergyCost")}
+    check("descriptions: the classification line's vocabulary is in no binary",
+          modules and where["objects.dlb"] == ["iron3d.dll"]
+          and not any(where[t] for t in ("DSCR", "ANM", "DVC", "ResearchEnergyCost")),
+          f"over {len(modules)} shipped modules the token objects.dlb is in "
+          f"{', '.join(where['objects.dlb'])} -- so a byte search does find a "
+          f"string that is there -- while DSCR, ANM, DVC and "
+          f"ResearchEnergyCost are in none.  The line's words never reach the "
+          f"code, so A and N can be settled as referents and not as words")
 
     free = [p for p in parts.values() if not p.researched]
     check("descriptions: what costs nothing to research is what you start with",
