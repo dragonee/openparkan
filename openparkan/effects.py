@@ -326,6 +326,28 @@ PARTICLE_FADE_AT = (8, 12, 16)
 STREAM_FADE_AT = (4, 8, 12)
 SPRITE_FADE_AT = (20, 24, 28)
 
+#: Where a drawing emitter keeps the two **channels** that place and size what it
+#: draws, as ``(low, high, jitter, exponents)`` -- four ``float32[3]`` in a row, the
+#: jitter absent where the type does not randomise.  Each axis of a channel is
+#: ``low + (high - low) * x ** exponent``, *x* the progress through the window on a
+#: sprite or a bolt and the particle's age on a burst or a stream; an exponent of
+#: exactly 1.0 is taken straight (``Effect.dll:0x10011170``).  The class that holds
+#: them is the same for every type (vtable ``0x1001eb08``): its first channel is the
+#: particle's position and its third its per-axis size (``0x1000d390``,
+#: ``0x1000d450``).  See ``docs/11-effects.md``.
+CHANNEL_POSITION = {3: (40, 52, None, 64), 4: (40, 52, None, 64), 9: (40, 52, None, 64),
+                    7: (44, 56, 68, 80), 10: (44, 56, 68, 80),
+                    8: (88, 100, 112, 124)}
+CHANNEL_SIZE = {3: (100, 112, None, 124), 4: (100, 112, None, 124), 9: (100, 112, None, 124),
+                7: (92, 104, 116, 128), 10: (92, 104, 116, 128),
+                8: (136, 148, 160, 172)}
+
+#: A type-5 bolt's sprite is ``lerp(+24, +28)`` wide by the progress through its
+#: window: the load writes the size channel's base as ``(1, +24, +24)`` and its delta
+#: as ``(0, +28 - +24, +28 - +24)`` (``Effect.dll:0x10002944``), and the draw hands
+#: that channel the progress (``0x10002fb4``).
+BOLT_WIDTH_AT = (24, 28)
+
 NAME_FIELD = 32
 
 #: Emitter type -> the offsets its own class **loads as a float**, recovered

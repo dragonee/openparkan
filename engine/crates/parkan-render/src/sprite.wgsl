@@ -6,7 +6,8 @@ struct Camera {
     fog_colour: vec4<f32>,
     // x start, y end.
     fog: vec4<f32>,
-    // Added to every material's emissive (sky slot 20), in display space.
+    // Added to a lit batch's emissive (sky slot 20), in display space. An effect sprite
+    // never goes through a device material, so it is not read here.
     scene_colour: vec4<f32>,
 };
 
@@ -60,12 +61,19 @@ fn vs_main(v: VertexIn) -> VertexOut {
 fn fs_main(v: VertexOut) -> @location(0) vec4<f32> {
     let texel = textureSample(skin, skin_sampler, v.uv);
     let d = distance(v.world, camera.eye.xyz);
+    // STAND-IN: docs/11-effects.md#how-an-effect-sprite-is-coloured--read-and-measured -- the
+    // game puts a fog factor of its own in the specular alpha of every vertex, linear in the
+    // *squared* distance between its near and far (`Terrain.dll:0x1004bf20`), and effect draw
+    // flag 4 forces it to 1. Here the renderer's own fog, linear in the distance itself.
     let keep = clamp((camera.fog.y - d) / max(camera.fog.y - camera.fog.x, 0.001), 0.0, 1.0);
     let fog = display(mix(camera.fog_colour.rgb, look.toward.rgb, look.toward.w));
-    // STAND-IN: docs/11-effects.md#not-resolved -- how an effect sprite's pre-lit vertices are
-    // coloured is not traced: as a batch's emissive, the scene colour plus the material's
-    // ambient, held to 1, times the texture; its alpha the texture's times the fade, which
-    // stands in for the ambient alpha.
-    let lit = min(vec3<f32>(1.0), camera.scene_colour.rgb + look.ambient.rgb);
+    // An effect sprite's quad carries one pre-lit colour on every vertex: the material's
+    // ambient, with the ambient alpha -- where the fade lands -- as its alpha
+    // (`Terrain.dll:0x1004f710`, the stream written at `0x1002845b` with a stride of 0).
+    // The scene colour is not added: the draw item's flags are 4, without the 0x10 that would
+    // build a device material at all (`0x1002fe3d`). A component above 1 is kneed to
+    // c/6 + 5/6 and held at 2, which no shipped effect material reaches -- all 1598 entries
+    // of the 243 they draw carry a byte ambient (docs/11, "How an effect sprite is coloured").
+    let lit = look.ambient.rgb;
     return vec4<f32>(mix(fog, display(texel.rgb) * lit, keep), texel.a * v.alpha);
 }

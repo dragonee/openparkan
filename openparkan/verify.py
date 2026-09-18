@@ -5235,6 +5235,61 @@ def check_effects(check, game: Path) -> None:
                     for t, (g, n) in sorted(unit.items()))
           + " -- a direction, defaulting to (1, 0, 0)")
 
+    # The two channels that place and size what a type draws: (low, high, jitter,
+    # exponents), lerped per axis by x ** exponent.  The offsets came out of
+    # Effect.dll; what the data says is how much of the corpus bends them.
+    straight = bent = channels = anisotropic = 0
+    bent_effects: set[str] = set()
+    for effect in library:
+        for emitter in effect.emitters:
+            for table in (effects.CHANNEL_POSITION, effects.CHANNEL_SIZE):
+                at = table.get(emitter.kind)
+                if at is None or at[3] + 12 > len(emitter.body):
+                    continue
+                powers = struct.unpack_from("<3f", emitter.body, at[3])
+                channels += 1
+                if powers == (1.0, 1.0, 1.0):
+                    straight += 1
+                else:
+                    bent += 1
+                    bent_effects.add(effect.name)
+                anisotropic += len(set(powers)) > 1
+    check("effects.rlb: a channel's per-axis exponents are 1 unless an artist bent them",
+          bent > 0 and anisotropic > 0 and straight > bent,
+          f"{straight} of the {channels} position and size channels across the "
+          f"drawing blocks carry (1, 1, 1), which Effect.dll:0x10011170 takes "
+          f"straight rather than through pow; {bent} are bent, over "
+          f"{len(bent_effects)} effects, and {anisotropic} differ across their "
+          f"three axes -- which is what makes them per-axis")
+
+    # A bolt's +24 and +28 are its width at the two ends of its window: the load
+    # lays the size channel out as (1, +24, +24) -> (1, +28, +28).
+    widths = [
+        struct.unpack_from("<2f", e.body, effects.BOLT_WIDTH_AT[0])
+        for effect in library for e in effect.emitters if e.kind == 5
+    ]
+    even = sum(1 for lo, hi in widths if lo == hi)
+    check("effects.rlb: a bolt's +24 and +28 are a width at each end of its window",
+          widths and all(hi <= lo for lo, hi in widths),
+          f"{even} of the {len(widths)} bolts write the same width twice and "
+          f"{len(widths) - even} narrow, none widens; "
+          + ", ".join(f"{lo:g}->{hi:g}" for lo, hi in sorted(set(widths))[:4]))
+
+    # What an effect sprite's pre-lit vertices are coloured with is the material's
+    # ambient, and its alpha the ambient alpha -- which is where the fade lands.
+    drawn = {n.lower() for effect in library for n in effect.materials}
+    entries = [e for n in sorted(drawn) if (m := mats.get(n))
+               for e in m.entries]
+    opaque = sum(1 for e in entries if e.ambient_alpha == 1.0)
+    within = sum(1 for e in entries if max(e.ambient) <= 255)
+    check("Material.lib: a fade is the whole of an effect sprite's alpha",
+          entries and opaque == len(entries) == within,
+          f"all {opaque} entries of the {len(drawn)} materials the effects draw "
+          f"carry an ambient alpha of 1.0, so the value an emitter writes over it "
+          f"(Effect.dll:0x100099a8) is the whole of the vertex alpha the shader "
+          f"packs (Terrain.dll:0x1004f710); and none of the {within} has an "
+          f"ambient component above 1, so that routine's knee never fires")
+
     # An explosion's size lives in the .exp, not in the effect: the small,
     # medium and big fortification blasts share their emitter blocks exactly.
     trio = [library.get(f"exp_frt_{suffix}") for suffix in ("l", "m", "b")]

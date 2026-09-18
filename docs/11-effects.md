@@ -165,14 +165,18 @@ Type 3's `+40..+48` and `+52..+60` are a component-wise (low, high) pair of
 `float32[3]` on 1427 of 1545 blocks, which is the shape a particle spread
 takes — and the engine reads exactly those six, which is the data and the code
 agreeing without either being derived from the other. Types 7 and 10 read a
-`float32[3]` at `+56`, `+80`, `+104` and `+128`, a regular 24-byte stride, in
-their own methods rather than through a helper.
+`float32[3]` at `+56`, `+80`, `+104` and `+128`, in their own methods rather
+than through a helper: those are the second and fourth triple of each of their
+two channels, 12 bytes apart throughout
+([below](#a-channel-is-a-low-high-jitter-exponent-run--read-and-measured)).
 
 **None of that names a field.** It says which of the 30 to 60 floats in a
 block are live, which classes share a layout, and which two hold a direction.
 The types' own code names the light, the bolt, the stream's rate and the
-fades — see [the emitter types](#emitter-types--read-and-measured); most of
-the rest is still open.
+fades — see [the emitter types](#emitter-types--read-and-measured); the runs of
+four triples that place and size what a type draws are
+[below](#a-channel-is-a-low-high-jitter-exponent-run--read-and-measured), and
+most of the rest is still open.
 
 One negative result worth keeping: **an explosion's size is not in its
 effect.** `exp_frt_l`, `exp_frt_m` and `exp_frt_b` share their emitter blocks
@@ -395,12 +399,12 @@ channel numbers instead, the seven name a channel on that node twice.
 |---:|---|---|---|---|
 | 1 | 0xf0, vtable `0x1001e78c` | +8..+12 | creates a light in the owner's light manager, interface `0xe` (`0x1000f4b0`), switches it on inside the window and off outside, and hands it a position, direction, colour, range and attenuation every update (`0x1000f6e0`) | a **light** — [below](#type-1-is-a-light--read-and-measured) |
 | 2 | 0xa0, `0x1001f048` | trigger +8, window +8..+12 | +4 of 0: plays as *t* crosses +8 going up; +4 of 2 or 3: plays while *t* is inside the window (`0x10012eb0`) | the **sound**; near/far at +64/+68 — [below](#type-2-is-a-sound--read-and-measured) |
-| 3 | 0xfc, `0x1001e770` | +32..+36 | a phase *a* + (*b* − *a*)·*x*^*g* from +8/+12/+16, *x* the progress through the window or seconds when +8 < 0 (`0x100105f0`); the (low, high) triples +40/+52 and +100/+112 shaped by per-axis powers; a 0..1 value +20..+24 to the power +28 and the phase's fractional part go to the draw (`0x100106c0`) | a **sprite** that moves (+40/+52) and grows (+100/+112) over its window — muzzle flashes, glows, bullets |
+| 3 | 0xfc, `0x1001e770` | +32..+36 | a phase *a* + (*b* − *a*)·*x*^*g* from +8/+12/+16, *x* the progress through the window or seconds when +8 < 0 (`0x100105f0`); its position +40 → +52 shaped by the powers at +64 and its size +100 → +112 by those at +124; a 0..1 value +20..+24 to the power +28 and the phase's fractional part go to the draw (`0x100106c0`) | a **sprite** that moves (+40/+52) and grows (+100/+112) over its window — muzzle flashes, glows, bullets |
 | 4 | 0x104, `0x1001e754` | +32..+36 | type 3's phase (`0x100108f0`) | a sprite variant |
-| 5 | 0x54, `0x1001e360` | +12..+16 | a phase from +40, seconds when negative (`0x10002a20`); a start point, and sprites along the line from it to where the effect is now (`0x10002be0`) | a **bolt**: laser and shock tails, `hero_laser_bullet` — [below](#bolts-streams-and-fades--read-and-measured) |
+| 5 | 0x54, `0x1001e360` | +12..+16 | a phase from +40, seconds when negative (`0x10002a20`); a start point, and sprites along the line from it to where the effect is now, each lerp(+24, +28) wide by the progress (`0x10002be0`) | a **bolt**: laser and shock tails, `hero_laser_bullet` — [below](#bolts-streams-and-fades--read-and-measured) |
 | 6 | 0x1c, `0x1001e738` | — | — | never shipped |
-| 7 | 0x48, `0x1001e228` | +20..+24 | +0x24 × +0x28 particles with random start positions and velocities (`0x10001720`); each particle's age = (phase − its spawn) / +0x1c, one-shot flag, drag, and a fade value from +8/+12/+16 (`0x10001300`) | a **particle burst** — smoke, fire, splashes |
-| 8 | 0xac, `0x1001e71c` | +16..+20 | windowed on *t* unless +0x8c; one particle every +24..+28 seconds into a ring of +36 (`0x100115c0`) | a **particle stream** — dust, missile smoke |
+| 7 | 0x48, `0x1001e228` | +20..+24 | +0x24 × +0x28 particles, each running +44 → +56 in place and +92 → +104 in size over its life, both jittered at the high end and shaped by the powers at +80 and +128 (`0x10001720`, `0x10001300`); its age = (phase − its spawn) / +0x1c, one-shot flag, drag, and a fade value from +8/+12/+16 | a **particle burst** — smoke, fire, splashes |
+| 8 | 0xac, `0x1001e71c` | +16..+20 | windowed on *t* unless +0x8c; one particle every +24..+28 seconds into a ring of +36 (`0x100115c0`), each running +88 → +100 in place and +136 → +148 in size, shaped by the powers at +124 and +172 | a **particle stream** — dust, missile smoke |
 | 9 | 0x100, `0x1001e700` | +32..+36 | type 3 with its own draw | sprite |
 | 10 | 0x48, `0x1001e24c` | +20..+24 | type 7 with its own start | particles (`NE_Gibs_Stn` debris) |
 
@@ -409,6 +413,56 @@ emitters; read four bytes early or late, 705.
 
 A type-7 block with +4 = 1 draws its particles in sprite mode 3, any other
 value in mode 0 (`0x100019d0`); that mode 0 faces the camera is a *guess*.
+
+### A channel is a (low, high, jitter, exponent) run — *read*, and *measured*
+
+Every drawing emitter builds the same **particle**: a 0xcc-byte class whose vtable is
+`Effect.dll:0x1001eb08` and whose constructor is `0x100092d0`. A type-3, 4 or 9 sprite
+embeds one at its `+0x30` (`0x10009246`); types 7, 10 and 8 allocate an array of them; a
+bolt's sprites are a 0x14c-byte derivation with the same slots (`0x1001eb2c`). The class
+keeps **three lerped `float32[3]` channels** — a base, a delta and the value they make —
+at `+0x60`/`+0x6c`/`+0x78`, `+0x84`/`+0x90`/`+0x9c` and `+0xa8`/`+0xb4`/`+0xc0`. Each has
+a setter that takes one lerp parameter (slots 2, 4, 6: `0x1000d4b0`, `0x1000d510`,
+`0x1000d580`) and one that takes **a parameter per axis** (slots 3, 5, 7: `0x1000d390`,
+`0x1000d3f0`, `0x1000d450`).
+
+The draw names them. The first channel's value is the particle's **position** — the
+billboard is turned by the camera less it (`0x100093fc`) — the third is a **per-axis
+scale** on its matrix (`0x1000d0c0`, called at `0x100098c0`), and the second is a
+direction, used only where a sprite mode orients rather than faces (`0x1000d110` at
+`0x1000986c`). **So the per-axis exponents shape position and size**, which this page had
+as a guess.
+
+A channel's floats are four consecutive triples — **low, high, jitter, exponents** — and
+each type reads its two at:
+
+| type | position: low, high, jitter, exponent | size: low, high, jitter, exponent | the pow calls |
+|---:|---|---|---|
+| 3, 4, 9 | +40, +52, —, **+64** | +100, +112, —, **+124** | `0x100106f6`, `0x10010784`; 4 and 9 tail into 3's draw at `0x10010a5a`, `0x10013920` |
+| 7, 10 | +44, +56, +68, **+80** | +92, +104, +116, **+128** | `0x10001684`, `0x10001693` |
+| 8 | +88, +100, +112, **+124** | +136, +148, +160, **+172** | `0x100121f8`, `0x10012276` |
+
+Each axis is `low + (high − low) × x^e`, with *x* the progress through the window on a
+sprite and a bolt and the particle's age on a burst and a stream; an exponent of exactly
+1.0 is taken straight rather than through `pow` (`0x10011170`). Where a jitter triple
+exists the spawn adds a uniform in ±half of it to the **high** end (`0x1000186a`,
+`0x1000195b`, `0x10011ee1`, `0x10011f60`; the generator at `0x10002680` returns
+`rand16 × v / 65536 − v / 2`). Types 3, 4 and 9 have a third channel at +76 → +88 with no
+exponent, and the run ends exactly where the block's `(archive, member)` pair begins —
++136 for types 3, 4 and 9, +184 for type 8, which is `RESOURCE_AT` twice over.
+
+*Measured* over the **3571** drawing blocks: the position triple is exactly (1, 1, 1) on
+**3518** and the size triple on **3300**, so **324 of the 7142 channels** are bent —
+**320** blocks over **208** effects, 28 of them a position and 182 a size. By type the
+position is bent on 22 of the 1545 type 3, 25 of the 1161 type 7 and 6 of the 160 type 10,
+and on none of type 4, 8 or 9; the size on 100, 135, 21 of type 9, 11 of type 8 and 4 of
+type 4. **192 of those 7142 triples differ across their axes**, so the per-axis part earns
+its name: (0.5, 1, 1) on 134 blocks, (1.5, 1.5, 0.5) on
+13, `B_Sphere_Main`'s (1, 0.1, 0.1) on 3. The two ends of the range are worth naming:
+**0** puts the value at its high end from the first update, since `x^0` is 1 — the size of
+`aim_light_L` and `aim_light_S`, the position of `env_lightning` — and **2** holds it near
+its low end almost to the end of the window, which is what `B_Sphere_Sign` and
+`B_Sphere_Start` open with.
 
 ### Type 1 is a light — *read*, and *measured*
 
@@ -436,11 +490,54 @@ through the window** (`0x1000f6e0`):
 | +120 | range jitter (the read map missed it) | 0 on 560 |
 | +124..+132 | the three attenuation terms, handed on unchanged | (0, 1, 0) on 447, (0, 1, 1) on 170, (0, 0, 1) on 1 — never a constant term |
 
-The manager skips a light flagged `0x80000000` unless the object being lit is
-the light's owner (`Terrain.dll:0x10047a52`), and `EmulatePointLights` leaves
-out one flagged `0x20000000` (`0x1002a200`). How the shade turns range and
-attenuation into light on a surface is not read here; that it is Direct3D's
-fixed-function falloff is a *guess* from the layout.
+### What a light does to a surface — *read*, and *measured*
+
+A light record is **0x5c bytes** in the manager's array (`Terrain.dll:0x1002a1ca`), and
+the manager's flags sit at **+0x50** (`0x100808b7`).
+
+**`EmulatePointLights` (`Terrain.dll:0x1002a130`) reads six fields and no more**: the type
++4, and it skips anything but a point light (`0x1002a1da`); the flags +0x50, and it skips
+a light with `0x20000000` (`0x1002a200`); the colour +8..+0x14 (`0x1002ad33`); the
+position +0x18 (`0x1002a3f3`); and the range +0x30 (`0x1002a59c`, `0x1002a7d1`,
+`0x1002a804`). **The three attenuation terms at +0x38..+0x40 are never read**, nor the
+direction +0x24, nor the manager's 1 / range at +0x54. The control is in the same walk:
+it does find +0x30 and +8, which the routine plainly uses.
+
+**The range is a hard cut, twice.** A triangle is dropped when the light's distance to its
+plane is past the range (`0x1002a59c`), and again when no vertex of it is within the range
+of the light itself (`0x1002a7d1`).
+
+What stands in for a falloff is **an extra additive pass**. The light is projected onto the
+triangle's plane, and a **disc of radius sqrt(range² − d²)** (`0x1002a804`–`0x1002a817`) is
+spanned by two in-plane axes of that length (`0x1002a994`), clipped to the triangle, and
+queued as its own draw item. That item's material is the shade's light template —
+`shade+0xc18`, copied to the item's `+0x70` at `0x1002ae5e` — with the light's colour
+**divided by its own length** in the block's ambient rgb (`shade+0xc2c`, `0x1002ae12`) and
+**that length × 0.25, held at 2**, in its ambient alpha (`shade+0xc38`, `0x1002ae35`). So
+the shape of the falloff is a texture across the disc, the overbright is the colour's
+length rather than its components, and 1 / (a₀ + a₁·d + a₂·d²) never happens.
+
+**What switches it on.** A mesh batch takes emulated lights only when its batch word
+carries `0x800` and the shade's `+0xcc4` is set (`0x10045d38`, `0x10045d47`). `+0xcc4` is
+settings id 3, **`EmulatePointLight`** (`0x10046c7a`, the page's values at `0x100a6cac`),
+which `Terrain.dll` registers with a default of 1 (`0x1005ec5a`); its neighbours are
+`LightingOn` (1), `SpecularsOn` (1), `ForceSWFog` (0) and, at id 29, `UseDXLighting`
+(default 2), which `CStridedPrimitive::RenderVB` tests before it will build a device
+material at all (`0x1002fe50`). `Iron_3D.ini` sets none of the five, so every default
+stands.
+
+**The manager flags, every test found.** `0x80000000` at `0x10047a52` — the light is
+skipped unless the object being drawn is its owner — at `0x10047c96`, where a second loop
+skips such a light outright, and at `0x100808c1` / `0x10080914`, the manager's set-flags
+slot, which re-registers the light when that bit changes. `0x20000000` only at
+`0x1002a200`. Nothing else in `Terrain.dll` tests either constant.
+
+*Measured*: the shipped attenuation triples are (0, 1, 0) on 447 blocks, (0, 1, 1) on 170
+and (0, 0, 1) on 1 — and this path reads none of them, so **what a light's attenuation is
+for is not established**. `Ngi32.dll` does carry a `SetLight` wrapper (`0x10008b50`, slot
+29 of its render interface, vtable `0x10031600`) and a `LightEnable` beside it
+(`0x10008b20`), while its exported `n3dSetLighting` is a stub (`ret 8`, `0x100025a0`);
+which caller, if any, reaches slot 29 is not found.
 
 ### Type 2 is a sound — *read*, and *measured*
 
@@ -575,6 +672,17 @@ is −1 (a phase in seconds) and +4 → +8 is 1 → 0. The fade runs straight ac
 the window (`0x10002dd4`). Each sprite's texture runs along the beam, one repeat
 every +32 (`0x10002e79`, `0x10009b90`); +32 is 5 on the hero's laser.
 
+**A bolt's +24 and +28 are its width at the two ends of its window**, not at the two ends
+of its beam. The load lays every sprite's size channel out with a base of (1, +24, +24) and
+a delta of (0, +28 − +24, +28 − +24) (`0x10002944`–`0x100299be`), and the draw hands that
+channel the progress through the window (`0x10002fb4`, the scalar setter `0x1000d580`) —
+the same channel a particle's size uses ([above](#a-channel-is-a-low-high-jitter-exponent-run--read-and-measured)).
+The 1 is along the beam, where each segment's own length sizes it, so y and z are the
+width and the cross-section is square. *Measured* on all 31 bolts: **26 carry the same
+value twice** — a width that does not change — and 5 halve: (1.5, 0.75), (3, 1.5),
+(1.5, 0.5), (0.6, 0.3) and (0.9, 0.45). `hero_laser_bullet`'s two bolts are 0.4 and 0.1
+wide and both are constant.
+
 **The manager's target point is the muzzle.** The gun sets it as it makes the
 round (slot `0x44`, `0x10004c50`): the shooter's node 0 and the muzzle point, which
 the manager carries with that node on every tick. The 14 effects that take it
@@ -610,8 +718,9 @@ hold.
   scales the texture's alpha.
 - An effect sprite's draw item carries draw flags 4 (`0x100282a3`), without the
   `0x10` that turns Direct3D's lighting on. `Ngi32.dll` draws such an item as
-  pre-lit vertices, FVF `0x1e2` (`0x100075fb`). How those vertices' colours are
-  formed is not traced.
+  pre-lit vertices, FVF `0x1e2` (`0x100075fb`), and their colour is the material's
+  ambient with the ambient alpha as its alpha
+  ([below](#how-an-effect-sprite-is-coloured--read-and-measured)).
 - *Measured*: 233 of the 243 materials the effects draw carry a black diffuse and
   an ambient colour, the unlit glow of
   [07-objects.md](07-objects.md#how-a-material-reaches-the-device--read-and-measured).
@@ -626,8 +735,67 @@ hold.
   recording's beam is a broad pink band, and yellow `NE_Laser_Y` makes its core
   white, not yellow.
 - *Seen*, not explained: near the camera the recording's beam looks broader than a
-  0.4 m strip whose alpha peaks in the middle quarter. A bolt's widths +24/+28
-  remain a *guess*.
+  0.4 m strip whose alpha peaks in the middle quarter. The width is not the answer —
+  `hero_laser_bullet`'s +24 and +28 are 0.4 and 0.4 (*measured*, above).
+
+### How an effect sprite is coloured — *read*, and *measured*
+
+**The device material is never built for one.** `CStridedPrimitive::RenderVB` gates both
+the device material (`Terrain.dll:0x10030620`) and the software shade that stands in for it
+on draw flag `0x10` (`0x1002fe3d`), and an effect sprite's item carries 4. With the flag
+clear the draw goes straight to the unlit vertex paths chosen at `0x10030104`: a buffer of
+FVF **`0x1c2`** — `XYZ | DIFFUSE | SPECULAR | TEX1`, 28 bytes a vertex — for one texture
+stage (`0x1002f1e0`) and `0x2c2` for two (`0x1002f3a0`, `0x1002f480`), against `0x112`
+(`XYZ | NORMAL | TEX1`) and `0x212` on the lit side. The expansion copies the item's colour
+stream into each vertex's diffuse and its specular stream into the specular
+(`0x1003534f`, `0x100355bd`). `Ngi32.dll` then sets the format from the same flags:
+`0x1c4` for flag 8, `0x112` for flag `0x10` and **`0x1e2`** otherwise (`0x100075fb`).
+
+**The item carries one colour, not a stream.** Building it (`0x10028260`), `CShade` copies
+the material entry to the item's `+0x70`, sets the draw flags to 4 (`0x100282a3`) and then
+**overrides what the caller passed**: it writes one `D3DCOLOR` at the item's `+0x19c` and
+one at `+0x1a0` and points the diffuse and specular streams at them **with a stride of 0**
+(`0x1002845b`–`0x100284a1`), so all four vertices of the quad carry the same pair. (What
+the emitter passes instead is an all-zero descriptor — `Effect.dll:0x1001e860`, the
+particle's slot 8 — so nothing of its own reaches the vertices.)
+
+**Where the pair comes from.** `CShade::RenderEffect` (`Terrain.dll:0x10028840`, the
+shade's interface slot 27, which `Effect.dll` calls at `0x100099df`) is handed the material
+entry the manager gave the sprite, with the fade already written into the entry's **ambient
+alpha `+0x20`** (`Effect.dll:0x100099a8`); it draws nothing at 0 or less (`0x1002887e`).
+The item builder then asks the **Shader** component — `Comp.ini` names component 6
+`terrain.dll!CreateShader` — through `shade+0xbd0` slot 4 (`0x10028220`, `0x1002824e`),
+which is `0x1004f710`, with the entry, the distance to the eye (`0x1003c340`) and effect
+draw flag 4. It reads three components at the block's `+0x14`, `+0x18` and `+0x1c`
+(`0x1004f71c` and on) and the alpha at `+0x20` (`0x1004f82f`), which is the slot the fade
+arrives in:
+
+```
+diffuse  = knee(ambient.r), knee(ambient.g), knee(ambient.b), ambient alpha   x 255
+           knee(c) = c              c <= 1
+                     c/6 + 5/6      1 < c <= 7
+                     2              c > 7
+specular = 0, 0, 0, fog             x 255
+           fog = 1                              d^2 <= near^2   (0x1004bf20)
+                 0                              d^2 >= far^2
+                 1 - (d^2 - near^2) x k         between
+```
+
+so an effect sprite fogs **linearly in the squared distance**, which the engine does not
+follow — its sprites take the same linear-in-distance fog as its other pipelines. Effect
+draw flag 4 — header flag `0x2000`, which only `env_lightning` carries — forces the factor
+to 1, so that effect never fogs. One branch is left over: with the shader's own `+0x3c`
+bit 0 set the diffuse is replaced by green alone at `(r + g + b) × 0.33 × 7` held at 255 (`0x1004f900`),
+a monochrome mode nothing found switches on.
+
+**So a fade scales alpha, not colour** (*read*). The colour on every vertex is the
+material's ambient — the unlit glow of
+[07-objects.md](07-objects.md#how-a-material-reaches-the-device--read-and-measured) — with
+no scene colour added, and the fade is the alpha the texture stage multiplies the texture's
+alpha by. *Measured* over the **243** materials the effects draw: **all 1598 of their
+entries carry an ambient alpha of 1.0**, so the fade is the whole of a sprite's alpha, and
+not one entry has an ambient component above 1, so the knee never fires on a shipped
+effect; 1583 of the 1598 carry a black diffuse, which this path would not read anyway.
 
 ## Which effects run: the settings switch — *read*, and *measured*
 
@@ -817,18 +985,29 @@ Read one slot either way, none of the seven name witnesses agrees.
   moving and growing triples, the light, the bolt's segments, the stream's
   interval and lifetime, and the fade values are read, and the fade value is the
   material's ambient alpha ([above](#bolts-streams-and-fades--read-and-measured)).
-  Still unnamed: what the (low, high) triples a particle's per-axis
+  ~~Still unnamed: what the (low, high) triples a particle's per-axis
   exponents shape are — position and size is a *guess* (types 7 and 10: +80
   and +128; type 8: +124 and +172, `0x10012030`) — and a bolt's widths +24/+28
-  (a width at each end is a *guess*).
-- **How an effect sprite's pre-lit vertices are coloured** (draw flags 4, FVF
+  (a width at each end is a *guess*).~~ Answered: they shape **position and size**,
+  each channel a (low, high, jitter, exponent) run the particle class lerps per axis,
+  and a bolt's +24 and +28 are its width at the two ends of its *window*
+  ([above](#a-channel-is-a-low-high-jitter-exponent-run--read-and-measured)).
+- ~~**How an effect sprite's pre-lit vertices are coloured** (draw flags 4, FVF
   `0x1e2`): the unlit branch of `CStridedPrimitive::RenderVB` picks its vertex
-  path at `0x10030104`, and none of them was followed. *Seen*: the laser is red,
-  as its materials' ambient colours are.
-- **How the shade lights with a type-1 light** — the falloff over range and
+  path at `0x10030104`, and none of them was followed.~~ Answered: one colour on
+  every vertex of the quad — the material's ambient, with the ambient alpha, where
+  the fade lands, as its alpha, and the fog factor in the specular's
+  ([above](#how-an-effect-sprite-is-coloured--read-and-measured)). *Seen*: the laser
+  is red, as its materials' ambient colours are.
+- ~~**How the shade lights with a type-1 light** — the falloff over range and
   attenuation (`EmulatePointLights`, `Terrain.dll:0x1002a130`, and the Direct3D
   path), and what the manager flags `0x80000000` and `0x20000000` mean beyond
-  the two tests found.
+  the two tests found.~~ Answered in part: `EmulatePointLights` reads six fields of
+  the record and **not the attenuation**, cuts hard at the range and draws the light
+  as a textured disc of radius sqrt(range² − d²); every test of both flags is now
+  enumerated ([above](#what-a-light-does-to-a-surface--read-and-measured)). Still open:
+  **what a light's attenuation triple is for**, since no path found reads it, and
+  whether anything reaches `Ngi32.dll`'s `SetLight` (`0x10008b50`).
 - **Who passes the draw's pass argument** that flag 0x800 waits for (manager
   slot 3, `0x10004050`; the landscape's call at `Terrain.dll:0x1001f178` pushes
   one argument fewer than the slot takes), what draw flag 4 (header

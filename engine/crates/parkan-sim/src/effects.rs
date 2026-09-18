@@ -4,8 +4,9 @@
 //! An instance places a template on a frame and keeps its clock; effect time
 //! *t* runs 0 to 1 by the time mode, and each emitter acts only inside its window
 //! of *t*. Read and followed: the window, every fade value, a burst's count, a
-//! bolt's sprites along its line, a stream's emission into its ring, and bit 8's
-//! draw over the scene. Where a sprite or a particle sits and how big it is are
+//! bolt's sprites along its line and their width, a stream's emission into its ring,
+//! bit 8's draw over the scene, and the (low, high, jitter, exponent) channels that
+//! place and size a sprite or a particle. When each of a burst's particles spawns is
 //! not read: the drawing there is a stand-in, marked where it chooses.
 
 use std::collections::VecDeque;
@@ -185,6 +186,21 @@ pub struct Instance {
 
 fn lerp3(lo: [f32; 3], hi: [f32; 3], s: f32) -> Vec3 {
     Vec3::from_array(lo).lerp(Vec3::from_array(hi), s)
+}
+
+/// A lerp whose parameter is given per axis, which is how a particle's channels move
+/// (`Effect.dll:0x1000d390`, `0x1000d450`).
+fn lerp3_axis(lo: [f32; 3], hi: [f32; 3], s: Vec3) -> Vec3 {
+    let (lo, hi) = (Vec3::from_array(lo), Vec3::from_array(hi));
+    lo + (hi - lo) * s
+}
+
+/// `x` to the power of each axis's exponent (`Effect.dll:0x10011170`), which shapes a
+/// channel's lerp per axis. An exponent of exactly 1.0 is taken straight, which is what
+/// 6818 of the 7142 channels across the shipped drawing blocks carry on all three axes.
+fn shaped(x: f32, powers: [f32; 3]) -> Vec3 {
+    let curve = |p: f32| if p == 1.0 { x } else { x.max(0.0).powf(p) };
+    Vec3::new(curve(powers[0]), curve(powers[1]), curve(powers[2]))
 }
 
 /// A block's four bytes at `at` read as a `uint32`.
@@ -528,14 +544,14 @@ impl Instance {
 
     /// A type 3, 4 or 9 sprite, fading +20 + (+24 − +20) × progress^+28 (`0x10010881`).
     ///
-    /// STAND-IN: docs/11-effects.md#not-resolved -- how the per-axis powers at +64 and +124
-    /// shape a sprite's moving (+40 → +52) and growing (+100 → +112) triples is not read:
-    /// it sits at lerp(+40, +52) in the frame and is lerp(+100, +112) in size along its
-    /// axes, both straight by progress through the window; the phase is left to animated
-    /// textures, which are not drawn.
+    /// It sits at lerp(+40, +52) in the frame and is lerp(+100, +112) in size along its
+    /// axes, each axis by progress through the window raised to that axis's exponent —
+    /// +64..+72 for the position, +124..+132 for the size (`0x100106f6`, `0x10010784`;
+    /// docs/11, "A channel is a (low, high, jitter, exponent) run"). The phase is
+    /// left to animated textures, which are not drawn.
     fn sprite(&self, e: &Emitter, p: f32, age_ms: f32, out: &mut Vec<Sprite>) {
-        let local = lerp3(e.triple(40), e.triple(52), p);
-        let size = lerp3(e.triple(100), e.triple(112), p);
+        let local = lerp3_axis(e.triple(40), e.triple(52), shaped(p, e.triple(64)));
+        let size = lerp3_axis(e.triple(100), e.triple(112), shaped(p, e.triple(124)));
         let mut sprite = self.quad(e, &self.frame, local, size, fade(e.f(20), e.f(24), e.f(28), p), age_ms);
         if e.kind == 9 {
             sprite.dome = self.dome(e, size);
@@ -563,9 +579,13 @@ impl Instance {
     /// line from its start point to where the effect is now (`0x10002c53`), fading
     /// +4 → +8 straight across the window (`0x10002dd4`), the texture's u along the line.
     ///
-    /// STAND-IN: docs/11-effects.md#not-resolved -- what a bolt's widths +24 and +28 are is
-    /// not read: each sprite is +24 wide. Its texture repeats every +32 along the line
-    /// (`0x10002e79`); here each sprite spans its cell once.
+    /// Every sprite is the same width, lerp(+24, +28) by that same progress: the load lays
+    /// the size channel's base out as (1, +24, +24) and its delta as (0, +28 − +24,
+    /// +28 − +24) (`0x10002944`–`0x100299be`) and the draw hands the channel the progress
+    /// (`0x10002fb4`). So +24 and +28 are the width at the window's ends, not at the beam's.
+    ///
+    /// STAND-IN: docs/11-effects.md#bolts-streams-and-fades--read-and-measured -- its texture
+    /// repeats every +32 along the line (`0x10002e79`); here each sprite spans its cell once.
     fn bolt(&self, e: &Emitter, p: f32, age_ms: f32, out: &mut Vec<Sprite>) {
         let line = self.frame.origin - self.start_point;
         let step = e.f(36);
@@ -577,7 +597,7 @@ impl Instance {
                 material: e.resource.member.clone(),
                 centre: self.start_point + line * ((k as f32 + 0.5) / n as f32),
                 along: line / n as f32,
-                width: e.f(24) * self.scale,
+                width: (e.f(24) + (e.f(28) - e.f(24)) * p) * self.scale,
                 alpha,
                 overlay: false,
                 lengthwise: true,
@@ -590,10 +610,15 @@ impl Instance {
     /// A type 7 or 10 burst of +0x24 × +0x28 particles (`0x10001720`), each fading
     /// +8 + (+12 − +8) × age^+16 (`0x100013c2`).
     ///
-    /// STAND-IN: docs/11-effects.md#not-resolved -- where a burst's particles go and how
-    /// big they are is not read, nor when each spawns: each flies from the origin at a
-    /// velocity between +44 and +56 per axis (a random share of each), spread by +68/2,
-    /// its age its progress through the window over +28; its size lerp(+92, +104) by age.
+    /// A particle runs from +44 to +56 in the frame and from +92 to +104 in size, each
+    /// axis by its age raised to that axis's exponent — +80..+88 for the position,
+    /// +128..+136 for the size (`0x10001684`, `0x10001693`). The spawn jitters each high
+    /// end by ±half of the triple that follows it, +68 on the position and +116 on the
+    /// size (`0x1000186a`, `0x1000195b`, the generator at `0x10002680`).
+    ///
+    /// STAND-IN: docs/11-effects.md#bolts-streams-and-fades--read-and-measured -- when each
+    /// particle spawns is not read: every one is as old as the emitter's progress through
+    /// the window over +28.
     fn burst(&self, e: &Emitter, index: u32, p: f32, age_ms: f32, out: &mut Vec<Sprite>) {
         let count = word(e, 36).saturating_mul(word(e, 40)).min(BURST_CAP);
         let life = if e.f(28) > 0.0 { e.f(28) } else { 1.0 };
@@ -603,37 +628,26 @@ impl Instance {
         }
         let alpha = fade(e.f(8), e.f(12), e.f(16), age);
         for k in 0..count {
-            let r = |axis: u32| noise(self.seed, index * 64 + k, axis);
-            let (vlo, vhi, spread) = (e.triple(44), e.triple(56), e.triple(68));
-            let velocity = Vec3::new(
-                vlo[0] + (vhi[0] - vlo[0]) * r(0),
-                vlo[1] + (vhi[1] - vlo[1]) * r(1),
-                vlo[2] + (vhi[2] - vlo[2]) * r(2),
-            );
-            let offset = Vec3::new(r(3) - 0.5, r(4) - 0.5, r(5) - 0.5) * Vec3::from_array(spread);
-            let local = offset + velocity * age;
-            let size = e.f(92) + (e.f(104) - e.f(92)) * age;
-            out.push(Sprite {
-                material: e.resource.member.clone(),
-                centre: self.frame.point(local * self.scale),
-                along: Vec3::ZERO,
-                width: size * self.scale * self.frame.axes[0].length().max(f32::EPSILON),
-                alpha,
-                overlay: false,
-                lengthwise: false,
-                age_ms,
-                dome: None,
-            });
+            let r = |axis: u32| noise(self.seed, index * 64 + k, axis) - 0.5;
+            let jitter = |at: usize, axis: u32| {
+                let (hi, spread) = (e.triple(at), e.triple(at + 12));
+                [0, 1, 2].map(|i| hi[i] + r(axis + i as u32) * spread[i])
+            };
+            let local = lerp3_axis(e.triple(44), jitter(56, 0), shaped(age, e.triple(80)));
+            let size = lerp3_axis(e.triple(92), jitter(104, 3), shaped(age, e.triple(128)));
+            out.push(self.quad(e, &self.frame, local, size, alpha, age_ms));
         }
     }
 
     /// A type-8 stream's particles, each fading +4 + (+8 − +4) × age^+12 (`0x10012322`),
     /// its age running 0 to 1 over its life.
     ///
-    /// STAND-IN: docs/11-effects.md#not-resolved -- where a stream's particle goes and how
-    /// big it is are not read (the exponent triples +124 and +172 shape them, a guess): it
-    /// sits at lerp(+88, +100) from where it left and is lerp(+136, +148) in size, both by
-    /// its age, both in metres times the instance's scale; its age is in seconds since it
+    /// It sits at lerp(+88, +100) from where it left and is lerp(+136, +148) in size, each
+    /// axis by its age raised to that axis's exponent — +124..+132 for the position,
+    /// +172..+180 for the size (`0x100121f8`, `0x10012276`).
+    ///
+    /// STAND-IN: docs/11-effects.md#bolts-streams-and-fades--read-and-measured -- both are
+    /// taken in metres times the instance's scale, and its age in seconds since it
     /// left. The frame only turns them: a control-point frame's axes, which size a type 3,
     /// 4 or 9 sprite, do not, and the shipped streams read as metres either way — a muzzle
     /// puff 0.2 to 0.5, a missile's trail 3 long, a chimney's plume 10 to 30 across. *Seen*:
@@ -644,8 +658,8 @@ impl Instance {
         let Some(stream) = self.streams.iter().find(|s| s.emitter == index) else { return };
         for q in &stream.ring {
             let age = ((seconds - q.born) / q.life.max(f32::EPSILON)).clamp(0.0, 1.0);
-            let local = lerp3(e.triple(88), e.triple(100), age);
-            let size = lerp3(e.triple(136), e.triple(148), age);
+            let local = lerp3_axis(e.triple(88), e.triple(100), shaped(age, e.triple(124)));
+            let size = lerp3_axis(e.triple(136), e.triple(148), shaped(age, e.triple(172)));
             let alpha = fade(e.f(4), e.f(8), e.f(12), age);
             let since = (seconds - q.born).max(0.0) * 1000.0;
             out.push(self.quad(e, &q.frame.turned(), local, size, alpha, since));
@@ -664,9 +678,23 @@ mod tests {
         fx.cues(now_ms).into_iter().filter(|c| c.kind != CueKind::Move).collect()
     }
 
+    /// A block of `kind`, its per-axis exponent triples 1.0 as every shipped block that
+    /// does not bend them carries them (an exponent of 0 would put the lerp at its high
+    /// end from the first update), and `floats` written over the zeros.
     fn block(kind: u8, size: usize, floats: &[(usize, f32)], material: &str) -> Emitter {
         let mut body = vec![0u8; size];
         body[0] = kind;
+        let powers: &[usize] = match kind {
+            3 | 4 | 9 => &[64, 124],
+            7 | 10 => &[80, 128],
+            8 => &[124, 172],
+            _ => &[],
+        };
+        for &at in powers {
+            for axis in 0..3 {
+                body[at + axis * 4..at + axis * 4 + 4].copy_from_slice(&1.0f32.to_le_bytes());
+            }
+        }
         for &(at, v) in floats {
             body[at..at + 4].copy_from_slice(&v.to_le_bytes());
         }
@@ -919,6 +947,65 @@ mod tests {
         assert!(out.iter().all(|s| (s.alpha - 0.8).abs() < 1e-5), "{}", out[0].alpha);
     }
 
+    #[test]
+    fn a_channels_two_ends_are_lerped_per_axis_by_the_progress_raised_to_that_axiss_exponent() {
+        // A sprite moving (0,0,0) → (4,4,4) and growing 1 → 3 on its first axis, with the
+        // position's exponents (1, 2, 0.5) and the size's 2 (`0x100106f6`, `0x10010784`).
+        let sprite = block(
+            3,
+            200,
+            &[
+                (32, 0.0), (36, 1.0), (20, 1.0), (24, 1.0), (28, 1.0),
+                (52, 4.0), (56, 4.0), (60, 4.0),
+                (68, 2.0), (72, 0.5),
+                (100, 1.0), (104, 1.0), (108, 1.0), (112, 3.0), (116, 3.0), (120, 3.0),
+                (124, 2.0), (128, 2.0), (132, 2.0),
+            ],
+            "flash",
+        );
+        let frame = Frame::along(Vec3::ZERO, Vec3::X, 1.0);
+        // The header's scale is 0.1, so a size of 10 puts the instance at scale 1.
+        let mut fx = Instance::new(effect(TIME_MANUAL, 0.0, 0, vec![sprite]), frame, 10.0, 0.0, None, 1);
+        fx.value = 0.25;
+        let mut out = Vec::new();
+        fx.sprites(0.0, false, &mut out);
+        assert_eq!(out.len(), 1);
+        // x straight, y by 0.25² = 0.0625, z by sqrt(0.25) = 0.5; the size by 0.25².
+        assert!((out[0].centre - Vec3::new(1.0, 0.25, 2.0)).length() < 1e-4, "{:?}", out[0].centre);
+        assert!((out[0].width - (1.0 + 2.0 * 0.0625)).abs() < 1e-5, "{}", out[0].width);
+
+        // An exponent of exactly 1.0 is taken straight, and every axis of 3518 of the 3571
+        // shipped drawing blocks carries it.
+        assert_eq!(shaped(0.25, [1.0, 1.0, 1.0]), Vec3::splat(0.25));
+    }
+
+    #[test]
+    fn a_bursts_particle_runs_44_to_56_in_place_and_92_to_104_in_size_over_its_life() {
+        // One particle, no jitter (+68 and +116 left at 0), running to (2, 0, 0) and from
+        // 1 to 5 in size over a life of +28 = 1.
+        let e = block(
+            7,
+            208,
+            &[
+                (20, 0.0), (24, 1.0), (28, 1.0), (8, 1.0), (12, 1.0), (16, 1.0),
+                (56, 2.0), (92, 1.0), (96, 1.0), (100, 1.0), (104, 5.0), (108, 5.0), (112, 5.0),
+            ],
+            "fire",
+        );
+        let burst = with_word(with_word(e, 36, 1), 40, 1);
+        let frame = Frame::along(Vec3::ZERO, Vec3::X, 1.0);
+        let mut fx = Instance::new(effect(TIME_MANUAL, 0.0, 0, vec![burst]), frame, 10.0, 0.0, None, 7);
+        let mut out = Vec::new();
+        for (age, x, width) in [(0.0, 0.0, 1.0), (0.5, 1.0, 3.0), (1.0, 2.0, 5.0)] {
+            fx.value = age;
+            out.clear();
+            fx.sprites(0.0, false, &mut out);
+            assert_eq!(out.len(), 1);
+            assert!((out[0].centre.x - x).abs() < 1e-5, "{} at {age}", out[0].centre.x);
+            assert!((out[0].width - width).abs() < 1e-5, "{} at {age}", out[0].width);
+        }
+    }
+
     /// `hero_laser_bullet`'s red bolt: 20 sprites at most, one per 50, 0.4 wide, fading 1 → 0.
     fn bolt() -> Emitter {
         let e =
@@ -968,6 +1055,24 @@ mod tests {
                 assert!(out.iter().all(|s| (s.alpha - alpha).abs() < 1e-5), "{} at {now}", out[0].alpha);
                 assert!((out[0].centre - Vec3::new(10.0, 4925.0, 0.0)).length() < 1e-2);
             }
+        }
+    }
+
+    #[test]
+    fn a_bolts_sprites_are_as_wide_as_lerp_24_28_by_the_progress_through_its_window() {
+        // `las_l_tail_g`'s wide beam: 1.5 at the window's start, 0.5 at its end.
+        let e = block(5, 112, &[(12, 0.0), (16, 1.0), (4, 1.0), (8, 1.0), (24, 1.5), (28, 0.5), (36, 50.0)], "L");
+        let wide = with_word(e, 20, 20);
+        let frame = Frame::along(Vec3::new(0.0, 100.0, 0.0), Vec3::Y, 1.0);
+        let mut fx = Instance::new(effect(TIME_MANUAL, 1.0, 0, vec![wide]), frame, 10.0, 0.0, None, 1);
+        fx.start_point = Vec3::ZERO;
+        let mut out = Vec::new();
+        for (p, width) in [(0.0, 1.5), (0.5, 1.0), (1.0, 0.5)] {
+            fx.value = p;
+            out.clear();
+            fx.sprites(0.0, false, &mut out);
+            assert_eq!(out.len(), 2, "floor(100 / 50)");
+            assert!(out.iter().all(|s| (s.width - width).abs() < 1e-5), "{} at {p}", out[0].width);
         }
     }
 
