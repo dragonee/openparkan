@@ -216,6 +216,22 @@ pub(crate) fn command_frames(
     }
 }
 
+/// A campaign mission's progression on its own: its clans' scripts, its objects and its
+/// messages, with no scene under it, so a test can run a whole mission's worth of takts.
+pub(crate) fn campaign_progression(
+    path: &str,
+) -> (parkan_world::progress::Progression, parkan_formats::mission::Mission) {
+    use parkan_formats::mission;
+
+    let game = gamedir::find(None).expect("a Parkan install: set PARKAN_DIR");
+    let dir = gamedir::resolve(&game, path).unwrap();
+    let name = path.rsplit('/').next().unwrap();
+    let m = mission::parse(&std::fs::read(dir.join("data.tma")).unwrap(), name).unwrap();
+    let hero = m.objects.iter().position(|o| parkan_world::hero::is_hero(&o.path)).expect("a hero");
+    let p = parkan_world::progress::Progression::load(&game, &dir, &m, hero).unwrap();
+    (p, m)
+}
+
 /// A campaign mission's play with its progression, the hero standing still.
 pub(crate) fn campaign_play(path: &str) -> parkan_world::play::Play {
     use parkan_formats::mission;

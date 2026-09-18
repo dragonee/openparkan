@@ -13,6 +13,13 @@ use parkan_formats::mission::Route;
 /// `ai.dll:0x10001b80`: once the clock reaches the next-run time the `Mission` handler
 /// runs, and the next-run time is set 2000 ms on.
 pub const MISSION_PERIOD_MS: f64 = 2000.0;
+/// The clan's takt, SuperAI slot 3 (`ai.dll:0x10001780`), which the game frame runs for every
+/// clan: it comes 7000 + rand % 1000 ms after the last, adds 7 to the seconds clock function 59
+/// reads (`+0x854`), and then runs the clan's problem handler. See
+/// `docs/34-progression.md`, "When the Mission handler runs".
+pub const CLAN_TAKT_MS: f64 = 7000.0;
+pub const CLAN_TAKT_RANDOM_MS: u32 = 1000;
+pub const CLAN_TAKT_SECONDS: u32 = 7;
 /// A unit reports its position once it has moved more than this by |dx| + |dy|
 /// (`Behavior.dll:0x1000af70`).
 pub const REPORT_MOVE: f32 = 5.0;
@@ -32,11 +39,13 @@ pub const OBJECTIVE_PROGRESS: i64 = 5;
 /// `SYSTEM_MESSAGE`'s two outcomes.
 pub const MISSION_FAILED: i64 = 0;
 pub const MISSION_COMPLETE: i64 = 1;
+/// `varset.var`'s `ERROR`: what a function answers when it has none.
+pub const ERROR: u32 = 0xffff_ffff;
 /// Function 52's answers besides a clan's index: a destroyed object's owner word
 /// (`Behavior.dll:0x1000698d`), and `ERROR` when no object answers the id
 /// (`ai.dll:0x1000e153`).
 pub const DESTROYED_OWNER: u32 = 0xfffe;
-pub const NO_OBJECT: u32 = 0xffff_ffff;
+pub const NO_OBJECT: u32 = ERROR;
 
 /// Whether a route's outline holds the point (x, y): the crossing test
 /// `ArealMap.dll:0x10017b90` makes. A ray from the point toward +x crosses the outline,
@@ -115,13 +124,55 @@ pub struct Unit {
 }
 
 /// A placed object with a logical id that is not a unit: a building, whose owner function
-/// 52 reads.
+/// 52 reads. It never reports, so where it was placed is where it stands.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Building {
     pub id: i32,
     pub clan: i64,
     pub type_word: u32,
     pub alive: bool,
+    pub at: [f32; 2],
+}
+
+/// A clan's SuperAI takt, slot 3 (`ai.dll:0x10001780`): when it next runs, and the seconds
+/// clock function 59 reads and 60 tests.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ClanTakt {
+    next_ms: f64,
+    clock_s: u32,
+    seed: u32,
+}
+
+impl ClanTakt {
+    /// A clan's takt, its clock starting at `start_s`. The SuperAI's constructor sets the clock
+    /// from `timeGetTime` over 1000, so where it starts is arbitrary: only the difference
+    /// between a time function 59 wrote and the clock counts.
+    pub fn new(start_s: u32, seed: u32) -> Self {
+        Self { next_ms: 0.0, clock_s: start_s, seed: seed | 1 }
+    }
+
+    /// The seconds clock (`+0x854`).
+    pub fn clock(&self) -> u32 {
+        self.clock_s
+    }
+
+    /// Whether the takt is due at `now_ms`, as the game frame asks every clan. A takt that runs
+    /// steps the clock 7 s on and sets the next 7000 + rand % 1000 ms away; the caller then runs
+    /// the clan's problem handler.
+    ///
+    /// STAND-IN: docs/34-progression.md#when-the-mission-handler-runs--read -- the takt's clock
+    /// is taken as game milliseconds rather than `timeGetTime`, and its `rand` as the engine's
+    /// own generator.
+    pub fn due(&mut self, now_ms: f64) -> bool {
+        if self.next_ms > now_ms {
+            return false;
+        }
+        self.seed = self.seed.wrapping_mul(1_103_515_245).wrapping_add(12_345);
+        let wait = f64::from((self.seed >> 16) % CLAN_TAKT_RANDOM_MS);
+        self.next_ms = now_ms + CLAN_TAKT_MS + wait;
+        self.clock_s = self.clock_s.wrapping_add(CLAN_TAKT_SECONDS);
+        true
+    }
 }
 
 /// One objective: whether the completion test passes over it, and its state (1 complete).
@@ -248,10 +299,10 @@ impl Progress {
         units + buildings
     }
 
-    /// A building with a logical id, owned by clan `clan`, of `type_word`. A building is on
-    /// its clan's SuperAI list too (`ai.dll:0x10001880`, docs/34, "Mission 03").
-    pub fn place_building(&mut self, id: i32, clan: i64, type_word: u32) {
-        self.buildings.push(Building { id, clan, type_word, alive: true });
+    /// A building with a logical id, owned by clan `clan`, of `type_word`, standing at `at`. A
+    /// building is on its clan's SuperAI list too (`ai.dll:0x10001880`, docs/34, "Mission 03").
+    pub fn place_building(&mut self, id: i32, clan: i64, type_word: u32, at: Vec3) {
+        self.buildings.push(Building { id, clan, type_word, alive: true, at: [at.x, at.y] });
     }
 
     /// Function 34 (`ai.dll:0x10009c30`): how many entries of clan `clan`'s own list, units
@@ -262,6 +313,49 @@ impl Progress {
         let buildings =
             self.buildings.iter().filter(|b| b.alive && b.clan == clan && b.type_word == type_word).count();
         units + buildings
+    }
+
+    /// Every object the areal map holds, alive: its logical id, its clan, its type word and
+    /// where it last reported (a building, where it was placed).
+    pub fn objects(&self) -> impl Iterator<Item = (i32, i64, u32, [f32; 2])> + '_ {
+        let units = self.units.iter().filter(|u| u.alive).map(|u| (u.id, u.clan, u.type_word, u.reported));
+        let buildings = self.buildings.iter().filter(|b| b.alive).map(|b| (b.id, b.clan, b.type_word, b.at));
+        units.chain(buildings)
+    }
+
+    /// The strength standing within `radius` of (x, y): `ai.dll:0x10006130` sums it over the
+    /// objects the areal map holds inside that circle, and asked for no clan in particular it
+    /// counts the enemy's alone — how strongly a place is held against the clan asking.
+    ///
+    /// STAND-IN: docs/15-behaviour.md#what-is-not-read-here -- an object's own strength
+    /// (`0x1000fc70`: `(q + 0.8) × p × 1e-5` over `IControl` property `0x36` and interface
+    /// `0x204`'s `+4`) is not followed to what those two are, so every object counts 1 and this
+    /// is how many stand there. Only the order between candidates is used below, and a count
+    /// leaves the least defended one least.
+    pub fn strength_near(&self, hostile: impl Fn(i64) -> bool, x: f32, y: f32, radius: f32) -> f32 {
+        self.objects()
+            .filter(|&(_, clan, _, at)| hostile(clan) && (at[0] - x).hypot(at[1] - y) < radius)
+            .count()
+            .min(u32::MAX as usize) as f32
+    }
+
+    /// Function 71 (`ai.dll:0x1000f12e`): of the enemy objects whose type word is exactly
+    /// `type_word`, the one the least enemy strength stands within `radius` of — the least
+    /// defended — and that strength. `hostile` is the clan table's own test: another clan the
+    /// running clan's relation word gives 0. `None` where no object answers, which the caller
+    /// reads as `ERROR`. Functions 35, 36, 37, 40 and 64 pick by the same score.
+    pub fn enemy_of_type(
+        &self,
+        hostile: impl Fn(i64) -> bool,
+        type_word: u32,
+        radius: f32,
+    ) -> Option<(i32, f32)> {
+        self.objects()
+            .filter(|&(_, clan, word, _)| word == type_word && hostile(clan))
+            .map(|(id, _, _, at)| (id, self.strength_near(&hostile, at[0], at[1], radius)))
+            // The first of an equal pair is kept: the game's own loop takes a candidate only
+            // when it is strictly below the best so far.
+            .reduce(|best, one| if one.1 < best.1 { one } else { best })
     }
 
     /// Whether any unit or building answers logical id `id`, as function 15 finds its unit
@@ -392,7 +486,7 @@ mod tests {
     fn function_52_answers_a_buildings_clan_its_destroyed_word_or_error() {
         let mut p = Progress::new(&[], &[], []);
         let factory = 0x8000_0001_u32 as i32;
-        p.place_building(factory, 2, 0x8000_0010);
+        p.place_building(factory, 2, 0x8000_0010, Vec3::ZERO);
         p.join(1, 0, 0x0102_0000, Vec3::ZERO, 0.0);
         assert_eq!((p.owner(factory), p.owner(1)), (2, 0));
         p.captured(factory, 0);
@@ -413,9 +507,9 @@ mod tests {
     fn function_34_counts_a_clans_own_units_and_buildings_of_exactly_one_type() {
         let mut p = Progress::new(&[], &[], []);
         let mine = 0x8000_0004_u32;
-        p.place_building(0x8000_0009_u32 as i32, 0, mine);
-        p.place_building(0x8000_000a_u32 as i32, 1, mine);
-        p.place_building(0x8000_000b_u32 as i32, 0, 0x8000_0008);
+        p.place_building(0x8000_0009_u32 as i32, 0, mine, Vec3::ZERO);
+        p.place_building(0x8000_000a_u32 as i32, 1, mine, Vec3::ZERO);
+        p.place_building(0x8000_000b_u32 as i32, 0, 0x8000_0008, Vec3::ZERO);
         p.join(1, 0, 0x0102_0000, Vec3::ZERO, 0.0);
         assert_eq!(p.count_type(0, mine), 1);
         assert_eq!(p.count_type(0, 0x8000_0000), 0, "the type is compared whole");
@@ -511,9 +605,9 @@ mod tests {
         // reach 0, so a clan that still holds a building is never done.
         let (robot, building) = (0x0100_0000, 0x8000_0000_u32 as i64);
         let mut p = Progress::new(&[], &[], []);
-        p.place_building(0x8000_0006_u32 as i32, 1, 0x8001_0000);
-        p.place_building(0x8000_0007_u32 as i32, 1, 0x8000_0002);
-        p.place_building(0x8000_0008_u32 as i32, 1, 0x8000_0010);
+        p.place_building(0x8000_0006_u32 as i32, 1, 0x8001_0000, Vec3::ZERO);
+        p.place_building(0x8000_0007_u32 as i32, 1, 0x8000_0002, Vec3::ZERO);
+        p.place_building(0x8000_0008_u32 as i32, 1, 0x8000_0010, Vec3::ZERO);
         p.join(24, 1, 0x0108_0000, Vec3::ZERO, 0.0);
         assert_eq!((p.robots(1, building), p.robots(1, robot)), (3, 1));
         // Captured and destroyed buildings both leave their clan's count, as either way of
@@ -523,6 +617,64 @@ mod tests {
         assert_eq!((p.robots(1, building), p.robots(0, building)), (1, 1));
         p.destroyed(0x8000_0008_u32 as i32);
         assert_eq!(p.robots(1, building), 0);
+    }
+
+    #[test]
+    fn a_clans_takt_comes_every_seven_seconds_and_its_clock_follows() {
+        let mut t = ClanTakt::new(0, 1);
+        assert!(t.due(0.0), "the first takt runs at once");
+        assert_eq!(t.clock(), CLAN_TAKT_SECONDS);
+        assert!(!t.due(CLAN_TAKT_MS - 1.0));
+        // Every later takt comes 7000 to 7999 ms after the one before, and steps the clock a
+        // flat 7 s however long it waited.
+        let mut last = 0.0_f64;
+        for step in 2..200_u32 {
+            let mut now = last;
+            while !t.due(now) {
+                now += 1.0;
+            }
+            let wait = now - last;
+            let window = CLAN_TAKT_MS..CLAN_TAKT_MS + f64::from(CLAN_TAKT_RANDOM_MS);
+            assert!(window.contains(&wait), "takt {step} waited {wait} ms");
+            assert_eq!(t.clock(), step * CLAN_TAKT_SECONDS);
+            last = now;
+        }
+    }
+
+    #[test]
+    fn function_71_takes_the_enemy_of_a_type_with_the_least_held_against_it() {
+        // C03 Mission 02's shape: the player's Small Bunker and two factories against the
+        // enemy's own factory, which is of the same type but not an enemy's.
+        let (bunker, plant) = (0x8001_0000, 0x8000_0010);
+        let mut p = Progress::new(&[], &[], []);
+        p.place_building(0x8000_0001_u32 as i32, 0, bunker, Vec3::new(381.9, 1199.1, 0.0));
+        p.place_building(0x8000_0003_u32 as i32, 0, plant, Vec3::new(508.9, 1390.9, 0.0));
+        p.place_building(0x8000_0005_u32 as i32, 0, plant, Vec3::new(20.0, 20.0, 0.0));
+        p.place_building(0x8000_0009_u32 as i32, 2, plant, Vec3::new(1213.5, 175.1, 0.0));
+        // Two of the player's warbots stand by its first factory and one of the clan's own by
+        // its second, which counts for nothing: the strength is what is held against us.
+        p.join(6, 0, 0x0100_8000, Vec3::new(520.0, 1400.0, 0.0), 0.0);
+        p.join(7, 0, 0x0100_8000, Vec3::new(560.0, 1380.0, 0.0), 0.0);
+        p.join(9, 2, 0x0100_8000, Vec3::new(40.0, 30.0, 0.0), 0.0);
+        let hostile = |clan: i64| clan == 0;
+        assert_eq!(
+            p.enemy_of_type(hostile, bunker, 100.0),
+            Some((0x8000_0001_u32 as i32, 1.0)),
+            "the bunker is the only one of its type an enemy holds, and stands alone"
+        );
+        assert_eq!(
+            p.enemy_of_type(hostile, plant, 100.0),
+            Some((0x8000_0005_u32 as i32, 1.0)),
+            "of the two factories the player holds, the one nothing guards"
+        );
+        assert_eq!(p.enemy_of_type(hostile, 0x8000_0002, 100.0), None, "no enemy generator");
+        // Its own factory is never a candidate, and a destroyed bunker leaves the map.
+        assert_eq!(
+            p.enemy_of_type(|clan| clan == 2, plant, 100.0).map(|(id, _)| id),
+            Some(0x8000_0009_u32 as i32)
+        );
+        p.destroyed(0x8000_0001_u32 as i32);
+        assert_eq!(p.enemy_of_type(hostile, bunker, 100.0), None);
     }
 
     #[test]

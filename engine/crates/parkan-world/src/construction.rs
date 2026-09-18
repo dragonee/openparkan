@@ -743,7 +743,7 @@ impl Play {
         }
         self.construction.placements.insert(t, (at, yaw));
         if let Some(p) = self.progression.as_mut() {
-            p.progress.place_building(logical_id, clan, type_word);
+            p.progress.place_building(logical_id, clan, type_word, at);
         }
         // The sphere, round the outer contour, 15 wider on a mine.
         let (centre, radius) = self.building_sphere(t).unwrap_or((at, self.battle.combat.targets[t].radius));

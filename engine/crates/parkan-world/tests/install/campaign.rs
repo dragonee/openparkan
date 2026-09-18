@@ -269,3 +269,119 @@ fn c01_m04s_enemy_base_objective_counts_the_buildings_the_enemy_still_holds() {
     p.run("Mission");
     assert_eq!(p.progress.objectives[3].state, 1, "the bonus objective is complete");
 }
+
+/// C03 Mission 02, *The Convoy*: the second enemy clan's script, `c3m2e2`, starts three timers in
+/// its `Init` and its problem handler runs them on the clan's takt (docs/34, "The Convoy's two
+/// raids"). Two of them send a warbot with winged SSMs at the player's Small Bunker — unit 15, a
+/// Medium Wheel Chassis, at 622 − 300 × difficulty s, and unit 14, a Large Wheel Chassis, at
+/// 1120 − 400 × difficulty, which goes on to the player's factory. Each raid says its message and
+/// is latched behind its own flag, so it runs once: the script runs twice, and no more.
+#[test]
+#[ignore = "needs the game install"]
+fn c03_m02s_enemy_raids_the_players_bunker_twice_on_its_own_timers() {
+    use parkan_sim::behaviour::Task;
+    use parkan_sim::orders::{self, Target};
+    use parkan_sim::progression::Notice;
+    use parkan_world::progress::ScriptOrder;
+
+    let (mut p, _) = campaign_progression(gamedir::C03_MISSION_02);
+    let (bunker, plant) = (0x8000_0001_u32 as i32, 0x8000_0003_u32 as i32);
+    assert_eq!(p.progress.owner(bunker), 0, "the Small Bunker is the player's");
+    assert_eq!(p.progress.owner(plant), 0, "and so is the factory");
+    let enemy = p.others.iter().position(|o| o.clan == 2).expect("Enm2 runs c3m2e2");
+    // The `Init`s gave two orders and left the raiders waiting: the player's script shuts the
+    // large arach (12) down, and `c3m2e2` sends unit 8 on patrol.
+    let init: Vec<(i32, i32)> = p.orders.iter().map(|o| (o.id, o.order.code)).collect();
+    assert_eq!(init, [(12, orders::SHUTDOWN), (8, orders::PATROL)]);
+    p.orders.clear();
+
+    // Twenty minutes of takts, the units standing where they were placed.
+    let (mut raids, mut messages) = (Vec::new(), Vec::new());
+    let mut now = 0.0;
+    while now < 1_200_000.0 {
+        now += 100.0;
+        for notice in p.tick(now, |_| None) {
+            if let Notice::Message { id, first: true } = notice {
+                messages.push(id);
+            }
+        }
+        if !p.orders.is_empty() {
+            let orders: Vec<ScriptOrder> = std::mem::take(&mut p.orders);
+            raids.push((now / 1000.0, p.others[enemy].takt.clock(), orders));
+        }
+    }
+    assert_eq!(raids.len(), 2, "two raids and no more: {raids:#?}");
+    assert_eq!(messages, [0, 1], "each raid says its own message");
+
+    // `fDifficulty` stands at `varset.var`'s own 0.5, so the first timer is 472 s and the second
+    // 920; the clock steps a flat 7 s a takt, and a timer is passed once the clock is above it.
+    let (at, clock, orders) = &raids[0];
+    assert_eq!(*clock, 476, "the first raid on the takt whose clock passes 472");
+    assert!((469.0..537.0).contains(at), "which comes at {at} s, 68 takts of 7 to 8 s in");
+    assert_eq!(orders.len(), 1);
+    assert_eq!(orders[0].id, 15, "the Medium Wheel Chassis with two winged SSMs");
+    assert_eq!(orders[0].insert, orders::INSERT_REPLACE);
+    assert_eq!(orders[0].order.code, orders::ATTACK);
+    assert_eq!(orders[0].order.target, Target::LogicId(bunker));
+    assert!(
+        matches!(Task::from_order(&orders[0].order), Task::Attack { target: Some(id), .. } if id == bunker)
+    );
+
+    let (at, clock, orders) = &raids[1];
+    assert_eq!(*clock, 924, "and the second on the one that passes 920");
+    assert!((917.0..1049.0).contains(at), "which comes at {at} s");
+    // The bunker first, then the factory behind it; the player holds no mine, so the third order
+    // the script would give is never built.
+    let given: Vec<(i32, i32, u32, Target)> =
+        orders.iter().map(|o| (o.id, o.order.code, o.insert, o.order.target)).collect();
+    assert_eq!(
+        given,
+        [
+            (14, orders::ATTACK, orders::INSERT_REPLACE, Target::LogicId(bunker)),
+            (14, orders::ATTACK, orders::INSERT_TO_END, Target::LogicId(plant)),
+        ]
+    );
+}
+
+/// And the raid order reaches the warbot: given the attack its clan's script gives at the first
+/// timer, unit 15 takes it up and drives at the player's bunker across the map (docs/31, "The
+/// attack"), rather than standing where it was placed.
+#[test]
+#[ignore = "needs the game install"]
+fn c03_m02s_raider_takes_up_the_attack_on_the_bunker_and_closes_on_it() {
+    use parkan_sim::behaviour::Task;
+    use parkan_sim::orders::{self, Order, Target};
+    use parkan_world::progress::ScriptOrder;
+
+    let mut play = campaign_play(gamedir::C03_MISSION_02);
+    let bunker = 0x8000_0001_u32 as i32;
+    let raider = play.units.iter().position(|u| u.logical_id == 15).expect("the medium raider");
+    let target = play.units.iter().position(|u| u.logical_id == bunker).expect("the player's bunker");
+    let order = Order { code: orders::ATTACK, parameter: 0, target: Target::LogicId(bunker) };
+    play.progression.as_mut().unwrap().orders.push(ScriptOrder {
+        id: 15,
+        order,
+        insert: orders::INSERT_REPLACE,
+    });
+
+    let bunker_at = play.battle.combat.targets[target].position;
+    let start = play.battle.combat.targets[raider].position.distance(bunker_at);
+    for _ in 0..(30 * 60) {
+        play.tick(1000.0 / 60.0, [0.0; 2]);
+    }
+    let (_, robot) = play.robots.iter().find(|(t, _)| *t == raider).expect("a robot");
+    assert!(
+        matches!(robot.behaviour.task(), Task::Attack { target: Some(id), .. } if id == bunker),
+        "it is attacking the bunker, not {:?}",
+        robot.behaviour.task()
+    );
+    let now = play.battle.combat.targets[raider].position.distance(bunker_at);
+    eprintln!("the raider closed from {start:.0} to {now:.0} of the bunker in 30 s");
+    assert!(now < start - 100.0, "it closed on the bunker: {start:.0} → {now:.0}");
+
+    // And the clock behind the timers runs in a real play: four or five takts of 7 to 8 s in
+    // half a minute, each stepping the enemy clan's seconds clock 7 on.
+    let p = play.progression.as_ref().unwrap();
+    let clock = p.others.iter().find(|o| o.clan == 2).expect("Enm2").takt.clock();
+    assert!((28..=42).contains(&clock), "the enemy clan's clock reads {clock} after 30 s");
+}

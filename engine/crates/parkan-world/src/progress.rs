@@ -11,7 +11,7 @@ use glam::Vec3;
 use parkan_formats::mission::{self, Mission, Value};
 use parkan_formats::{gamedir, scr};
 use parkan_sim::orders::{self, Order, Target};
-use parkan_sim::progression::{Notice, Progress};
+use parkan_sim::progression::{self, ClanTakt, Notice, Progress};
 use parkan_sim::script::{Args, Host, Interpreter};
 
 use crate::resources::{self, Messages, Sound, Sounds};
@@ -97,18 +97,32 @@ pub struct ScriptOrder {
     pub insert: u32,
 }
 
-/// Another clan's script: its SuperAI runs `Init` once, as every clan's does, and never
-/// `Mission`, which the game frame runs for the local player's clan alone (docs/34, "When
-/// the Mission handler runs").
+/// The handler every clan's takt runs (docs/34, "When the Mission handler runs"). Function 33
+/// can name another, `Problems<n>`; no shipped script calls it.
+pub const HANDLER_PROBLEMS: &str = "Problems0";
+
+/// Another clan's script: its SuperAI runs `Init` once, as every clan's does, and its problem
+/// handler on its own takt, but never `Mission`, which the game frame runs for the local
+/// player's clan alone (docs/34, "When the Mission handler runs").
 pub struct ClanScript {
     pub clan: i64,
     pub base: [f32; 2],
     pub script: Interpreter,
+    pub takt: ClanTakt,
+}
+
+/// Whose script a run is for: the player clan's, or the clan of `others[i]`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Which {
+    Player,
+    Other(usize),
 }
 
 pub struct Progression {
     /// The player clan's script, when it has one that loads.
     pub script: Option<Interpreter>,
+    /// Its clan's takt, which runs its problem handler as every other clan's does.
+    pub takt: ClanTakt,
     /// Every other clan's script that loads.
     pub others: Vec<ClanScript>,
     /// The orders the scripts gave and the play has not yet handed their units.
@@ -117,6 +131,9 @@ pub struct Progression {
     /// The player's clan, and its base's centre.
     pub clan: i64,
     pub base: [f32; 2],
+    /// Each clan's relation word towards each other, as the loader filed them: 0 is an enemy
+    /// (docs/25, "Clan relations").
+    pub relations: Vec<Vec<u32>>,
     pub messages: Messages,
     pub sounds: Sounds,
     pub strings: BTreeMap<u32, String>,
@@ -131,9 +148,25 @@ struct Answers<'a> {
     progress: &'a mut Progress,
     clan: i64,
     base: [f32; 2],
+    /// The running clan's seconds clock, which functions 59 and 60 read.
+    clock: u32,
+    relations: &'a [Vec<u32>],
     notices: &'a mut Vec<Notice>,
     unanswered: &'a mut BTreeSet<i32>,
     orders: &'a mut Vec<ScriptOrder>,
+}
+
+impl Answers<'_> {
+    /// The clan table's own test, as functions 35, 36, 64 and 71 make it (`ai.dll:0x1000f2c4`):
+    /// another clan whose relation word from the running clan is 0.
+    fn hostile(&self, other: i64) -> bool {
+        other != self.clan
+            && usize::try_from(self.clan)
+                .ok()
+                .zip(usize::try_from(other).ok())
+                .and_then(|(us, them)| self.relations.get(us)?.get(them).copied())
+                == Some(mission::RELATION_HOSTILE)
+    }
 }
 
 impl Host for Answers<'_> {
@@ -179,9 +212,34 @@ impl Host for Answers<'_> {
             32 => u32::from(self.progress.areals.holds(int(args, 0), int(args, 1))),
             34 => self.progress.count_type(self.clan, args.dword(0)) as u32,
             52 => self.progress.owner(args.dword(0) as i32),
+            // The clan's seconds clock plus a delay, whole seconds (`ai.dll:0x1000e643`).
+            59 => self.clock.wrapping_add(args.dword(0)),
+            // 1 once that time has passed, else `ERROR` (`0x1000e6a0`): the comparison is
+            // unsigned and strict, so a time is passed only once the clock is above it.
+            60 => {
+                if args.dword(0) < self.clock {
+                    1
+                } else {
+                    progression::ERROR
+                }
+            }
+            // The enemy object of exactly that type with the least strength about it, and that
+            // strength written into the third operand, truncated (`0x1000f12e`).
+            71 => {
+                let (type_word, radius) = (args.dword(1), args.float(0));
+                match self.progress.enemy_of_type(|other| self.hostile(other), type_word, radius) {
+                    Some((id, strength)) => {
+                        args.set_dword(2, strength as u32);
+                        id as u32
+                    }
+                    None => progression::ERROR,
+                }
+            }
             // STAND-IN: docs/15-behaviour.md#what-the-functions-do -- the engine answers only
-            // the functions the campaign's first scripts need for their messages, objectives
-            // and orders (15, 19, 30, 31, 32, 34, 52); any other call does nothing and answers 0.
+            // the functions the campaign's scripts need for their messages, objectives, timed
+            // orders and targets (15, 19, 30, 31, 32, 34, 52, 59, 60, 71); any other call does
+            // nothing and answers 0. Nothing raises or runs an AI problem, so a clan's takt
+            // reaches only what its problem handler does itself.
             other => {
                 self.unanswered.insert(other);
                 0
@@ -227,7 +285,12 @@ impl Progression {
         // Every building with a logical id answers function 52 with its owner, and 34 its type.
         for o in mission.objects.iter().filter(|o| o.kind == mission::KIND_BUILDING) {
             let type_word = o.property("Type").map_or(0, |p| number(p.value)) as u32;
-            progress.place_building(o.logical_id, o.clan_id().unwrap_or(-1), type_word);
+            progress.place_building(
+                o.logical_id,
+                o.clan_id().unwrap_or(-1),
+                type_word,
+                Vec3::from_array(o.position),
+            );
         }
         for o in mission.objects.iter().filter(|o| o.kind == mission::KIND_UNIT && o.logical_id >= 0) {
             let type_word = o.property("Type").map_or(0, |p| number(p.value)) as u32;
@@ -251,16 +314,19 @@ impl Progression {
             .filter(|&(i, c)| i as i64 != clan && !c.ai_script.is_empty())
             .filter_map(|(i, c)| {
                 let script = load_script(game, &c.ai_script).ok()?;
-                Some(ClanScript { clan: i as i64, base: c.base, script })
+                let takt = ClanTakt::new(0, i as u32 + 1);
+                Some(ClanScript { clan: i as i64, base: c.base, script, takt })
             })
             .collect();
         let mut me = Self {
             script,
+            takt: ClanTakt::new(0, clan as u32 + 1),
             others,
             orders: Vec::new(),
             progress,
             clan,
             base: record.map_or([0.0; 2], |c| c.base),
+            relations: mission::relation_words(&mission.clans),
             messages,
             sounds: Sounds::open(game, mission_dir)?,
             strings: resources::game_strings(game).unwrap_or_default(),
@@ -268,35 +334,47 @@ impl Progression {
             objective_texts: objectives.into_iter().map(|o| o.text).collect(),
         };
         me.run("Init");
-        for other in &mut me.others {
-            let mut answers = Answers {
-                progress: &mut me.progress,
-                clan: other.clan,
-                base: other.base,
-                notices: &mut Vec::new(),
-                unanswered: &mut me.unanswered,
-                orders: &mut me.orders,
-            };
-            other.script.run_named("Init", &mut answers);
+        for i in 0..me.others.len() {
+            me.run_clan(Which::Other(i), |script, host| {
+                script.run_named("Init", host);
+            });
         }
         Ok(me)
     }
 
-    /// Run one of the player clan's script's handlers; what its calls to function 30 raised.
-    pub fn run(&mut self, handler: &str) -> Vec<Notice> {
+    /// Run `run` on one clan's script, with the engine below it answering its calls; what its
+    /// calls to function 30 raised. A clan without a script does nothing.
+    fn run_clan(&mut self, which: Which, run: impl FnOnce(&mut Interpreter, &mut dyn Host)) -> Vec<Notice> {
+        let Self { script, takt, others, orders, progress, clan, base, relations, unanswered, .. } = self;
+        let (script, clan, base, clock) = match which {
+            Which::Player => (script.as_mut(), *clan, *base, takt.clock()),
+            Which::Other(i) => match others.get_mut(i) {
+                Some(o) => (Some(&mut o.script), o.clan, o.base, o.takt.clock()),
+                None => (None, 0, [0.0; 2], 0),
+            },
+        };
         let mut notices = Vec::new();
-        if let Some(script) = self.script.as_mut() {
+        if let Some(script) = script {
             let mut answers = Answers {
-                progress: &mut self.progress,
-                clan: self.clan,
-                base: self.base,
+                progress,
+                clan,
+                base,
+                clock,
+                relations: relations.as_slice(),
                 notices: &mut notices,
-                unanswered: &mut self.unanswered,
-                orders: &mut self.orders,
+                unanswered,
+                orders,
             };
-            script.run_named(handler, &mut answers);
+            run(script, &mut answers);
         }
         notices
+    }
+
+    /// Run one of the player clan's script's handlers; what its calls to function 30 raised.
+    pub fn run(&mut self, handler: &str) -> Vec<Notice> {
+        self.run_clan(Which::Player, |script, host| {
+            script.run_named(handler, host);
+        })
     }
 
     /// A hero at a teleport-out place, handed to the SuperAI of `clan`, the teleport's owner
@@ -308,38 +386,46 @@ impl Progression {
     /// The game does nothing while a handler is already running (`0x10005d88`); here every
     /// handler runs to its end before the next is started, so none is.
     pub fn hero_teleported(&mut self, clan: i64) -> Vec<Notice> {
-        let mut notices = Vec::new();
-        let (script, base) = if clan == self.clan {
-            (self.script.as_mut(), self.base)
+        let which = if clan == self.clan {
+            Which::Player
         } else {
-            match self.others.iter_mut().find(|o| o.clan == clan) {
-                Some(o) => (Some(&mut o.script), o.base),
-                None => (None, [0.0; 2]),
+            match self.others.iter().position(|o| o.clan == clan) {
+                Some(i) => Which::Other(i),
+                None => return Vec::new(),
             }
         };
-        let Some(script) = script else { return notices };
-        let Some(handler) = script.handler(HANDLER_GENERATOR_FOUND).map(|h| h + EVENT_HERO_TELEPORTED) else {
-            return notices;
-        };
-        let mut answers = Answers {
-            progress: &mut self.progress,
-            clan,
-            base,
-            notices: &mut notices,
-            unanswered: &mut self.unanswered,
-            orders: &mut self.orders,
-        };
-        if handler < script.script.handlers.len() {
-            script.run(handler, &mut answers);
-        }
-        notices
+        self.run_clan(which, |script, host| {
+            let handler = script.handler(HANDLER_GENERATOR_FOUND).map(|h| h + EVENT_HERO_TELEPORTED);
+            if let Some(handler) = handler.filter(|&h| h < script.script.handlers.len()) {
+                script.run(handler, host);
+            }
+        })
     }
 
-    /// The units' takts, and the `Mission` handler when it is due, at `now_ms`, with
-    /// `position` giving where a unit by logical id stands.
+    /// The units' takts, every clan's takt, and the `Mission` handler when it is due, at
+    /// `now_ms`, with `position` giving where a unit by logical id stands.
+    ///
+    /// The game frame runs slot 3 for every clan and slot 9 for the local player's alone
+    /// (docs/34, "When the Mission handler runs"), so an enemy's problem handler is what gives
+    /// it its timed orders, and only the player's `Mission` handler sees the world.
     pub fn tick(&mut self, now_ms: f64, position: impl Fn(i32) -> Option<Vec3>) -> Vec<Notice> {
         self.progress.takt(now_ms, position);
-        if self.progress.mission_due(now_ms) { self.run("Mission") } else { Vec::new() }
+        let mut notices = Vec::new();
+        let problems = |script: &mut Interpreter, host: &mut dyn Host| {
+            script.run_named(HANDLER_PROBLEMS, host);
+        };
+        if self.takt.due(now_ms) {
+            notices.extend(self.run_clan(Which::Player, problems));
+        }
+        for i in 0..self.others.len() {
+            if self.others[i].takt.due(now_ms) {
+                notices.extend(self.run_clan(Which::Other(i), problems));
+            }
+        }
+        if self.progress.mission_due(now_ms) {
+            notices.extend(self.run("Mission"));
+        }
+        notices
     }
 
     /// The panel that gives way to the HUD once the outcome is recorded (`iron3d.dll:0x1009f8b0`,

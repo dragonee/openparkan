@@ -165,7 +165,14 @@ state word `+0x710` is 5:
   `Fort_Task_Complete`. Which of the others run, and when, is not read.
 
 So a player script's `Mission` handler sees the world every 2 s. From the
-frame, an enemy's or a neutral's `Mission` handler never runs (*derived*).
+frame, an enemy's or a neutral's `Mission` handler never runs (*derived*), and
+an enemy clan does what it does out of its problem handler on its own takt —
+[The Convoy's two raids](#the-convoys-two-raids--read-and-measured) is the
+plainest case of it.
+
+The engine keeps both clocks: `Progression::tick` runs every clan's takt, which
+steps that clan's seconds clock 7 s on and runs its `Problems0`, and then the
+player clan's `Mission` handler when it is due.
 
 The handler's variables belong to the SuperAI (`+0x18`,
 [15-behaviour.md](15-behaviour.md#how-a-handler-runs)). They keep their values
@@ -926,6 +933,96 @@ What follows from it:
 5. **Win only on `Hero_Teleported`**: the teleport's out place, reached through
    its in place once the player holds it
    ([27-ownership.md](27-ownership.md#for-an-engine)).
+
+## The Convoy's two raids — *read*, and *measured*
+
+C03 Mission 02, *The Convoy*, is the first campaign mission whose enemy does
+something on a clock rather than in answer to the player, and it is the plainest
+case of what a clan's takt is for.
+
+Six clans: the player is clan 0 (`c3m2p`), and two enemies hold the rest of the
+map, `Enm1` (clan 1, `c3m2e`) and `Enm2` (clan 2, `c3m2e2`). Neither enemy
+script has a node in its `Mission` handler — the frame would not run it for them
+anyway — and both work out of `Problems0`, which runs from each clan's own
+takt. The player holds three buildings — a Small Bunker
+(`sbunk02`, logical id `0x80000001`, type `BUILDING_BUNKER_SMALL`), a generator
+and a factory — and they are what `Enm2` comes for.
+
+**`c3m2e2`'s `Init` starts three timers** (`uv run openparkan behaviour c3m2e2
+Init`), each `fn59` of a delay against the clan's seconds clock:
+
+| variable | delay, s | what it drives |
+|---|---|---|
+| `dTime0` | 900 − 400 × `fDifficulty` | a `PBM_BUILDING_CAPTURE` on an enemy building |
+| `dTime1` | 622 − 300 × `fDifficulty` | the first raid |
+| `dTime2` | 1120 − 400 × `fDifficulty` | the second |
+
+`Init` also reserves three units from the problem system with `fn51` — 15, 14
+and 8 — so no problem can take them away from what it has in mind for them, and
+sends 8 out on patrol to (893, 146).
+
+**Each raid is one `fn60` behind a latch.** The first, at `dTime1`:
+
+```
+26  dTemp = fn60(dTime1)
+27  if dTemp == d1
+28    if df0 == d0
+29      df0 = 1
+30      fTemp = 100
+31      dX = fn71(fTemp, BUILDING_BUNKER_SMALL, fTemp3)
+32      if dX == ERROR
+33        dX = fn71(fTemp, BUILDING_PLANT, fTemp3)
+34      end
+35      dT = 15
+36      dT1 = fn15(dT, ORDER_ROBOT_ATTACK, INSERT_ORDER_REPLACE, …, TARGET_BY_LOGIC_ID, dX)
+37      if dT1 != d0
+38        fn30(MESSAGE_INFO, d0)
+```
+
+`fn71` asks for the enemy's least defended object of **exactly**
+`BUILDING_BUNKER_SMALL`, scoring each by the strength standing within 100 of it
+([15-behaviour.md](15-behaviour.md#what-the-functions-do)); the player's bunker is
+the only one in the mission. Unit 15 is then ordered onto it, its whole order
+list replaced, and the message plays if the order was taken. The second raid, at
+`dTime2`, is the same with unit 14 and three targets: the bunker replaces its
+list, and the player's factory and mine are queued behind it — the player holds
+no mine, so `fn71` answers `ERROR` for that one and only two orders are built.
+
+**The two units are the mission's heaviest** (`uv run openparkan unit 32_m_w2`):
+
+| id | unit | what it carries |
+|---:|---|---|
+| 15 | `32_m_w2`, Medium Wheel Chs M-32 | two Medium winged SSMs (guided, 700 m, 60000 a round) and a Medium Taser |
+| 14 | `32_m_w1`, Large Wheel Chs L-32 | four Large Winged SSMs, 18462 dmg/s |
+
+So the mission's shape, from the player's side, is two warbots with winged
+missiles arriving out of nothing, about eight and fifteen minutes in, and going
+for the bunker.
+
+### For an engine
+
+1. **Run every clan's takt**, not just the player's `Mission` handler: step the
+   clan's seconds clock 7 s and run `Problems0`
+   ([When the Mission handler runs](#when-the-mission-handler-runs--read)).
+2. **Answer 59 and 60** against that clock. 60's test is unsigned and strict, so
+   a timer set to *t* fires on the first takt whose clock is above *t*.
+3. **Answer 71** by type word, exactly, over the enemy's objects alone.
+4. **Let another clan's `fn30` reach the player's message box.** `iron3d.dll`
+   hands every SuperAI the same callback, so `MESSAGE_INFO 0` raised by clan 2
+   is what warns the player its bunker is under attack.
+5. **Hand another clan's `fn15` orders to its units** as the player clan's are
+   handed: the packet is found by logical id through the areal map, whatever
+   clan owns it.
+
+`uv run openparkan verify` re-derives all of this from the install: the three
+formulas and the units `fn51` holds back, what each raid asks `fn71` for and
+what it sends, the one Small Bunker in the mission being the player's while the
+raiders are the enemy's, and the winged SSMs each raider carries.
+
+With `fDifficulty` at `varset.var`'s own 0.5 the timers stand at 472 and 920 s,
+and a clock stepping 7 s every 7 to 8 s passes them at 476 and 924 — 68 and 132
+takts in, about 8 and 15 minutes of play (*derived*). Each latch (`df0`, `df1`)
+holds after its raid, so each runs once.
 
 ## After the outcome — *read*, and *measured*
 

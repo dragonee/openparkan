@@ -16712,6 +16712,146 @@ def _cfg_lines(path: Path, block: str) -> list[str]:
     return values
 
 
+#: C03 Mission 02, *The Convoy*: the mission whose enemy raids on a clock (docs/34).
+C03_MISSION_02 = "MISSIONS/CAMPAIGN/CAMPAIGN.03/Mission.02"
+
+#: Its second enemy's script, and the three timers ``Init`` starts, each formula
+#: giving a delay in seconds against the clan's own clock.
+CONVOY_SCRIPT = "c3m2e2"
+CONVOY_TIMERS = {
+    "dTime0": "900 - 400*fDifficulty",
+    "dTime1": "622 - 300*fDifficulty",
+    "dTime2": "1120 - 400*fDifficulty",
+}
+
+#: The script functions the raids are built out of: set a time, test one, find an
+#: enemy object of a type, order a unit, say a message.
+FN_TIME_AT, FN_TIME_PASSED, FN_ENEMY_OF_TYPE, FN_MESSAGE = 59, 60, 71, 30
+
+#: ``varset.var``'s own names for what the raids ask for and what they send.
+CONVOY_TARGET_TYPES = ("BUILDING_BUNKER_SMALL", "BUILDING_PLANT", "BUILDING_MINE")
+CONVOY_RAIDERS = {15: "32_m_w2.dat", 14: "32_m_w1.dat"}
+
+
+def check_convoy_raids(check, game: Path) -> None:
+    """C03 Mission 02's two timed raids on the player's bunker (docs/34)."""
+    d = game / C03_MISSION_02
+    by_stem = {p.stem.lower(): p for p in behaviour.scripts(game)}
+    if not (d / "data.tma").exists() or CONVOY_SCRIPT not in by_stem:
+        return
+    path = by_stem[CONVOY_SCRIPT]
+    table = behaviour.variables(game)
+    script = behaviour.read(path)
+    formulas = behaviour.formulas(path)
+    handlers = {h.name: h for h in script.handlers}
+    const = {}
+    for v in table:
+        try:
+            const[v.name] = int(v.default, 0) & 0xFFFFFFFF
+        except ValueError:
+            pass
+
+    def calls(handler):
+        """Every call of a handler: its function, its operands' names and their values."""
+        out = []
+        for i, n in enumerate(handler.nodes):
+            if not n.calls:
+                continue
+            names = [behaviour.name_at(table, o) or str(o) for o in n.operands]
+            values = [_handler_value(table, handler.nodes, formulas, i, o) for o in n.operands]
+            out.append((n.function, names, values))
+        return out
+
+    # Init: three timers, each a formula then function 59, and three units reserved.
+    init = handlers["Init"]
+    timers = {}
+    for n in init.nodes:
+        if not n.calls and 0 <= n.formula < len(formulas):
+            timers[behaviour.name_at(table, n.destination)] = formulas[n.formula]
+    started = [names[0] for f, names, _ in calls(init) if f == FN_TIME_AT]
+    reserved = [values[0] for f, _, values in calls(init) if f == 51]
+    patrol = [values for f, _, values in calls(init) if f == FN_ORDER]
+    check("The Convoy: c3m2e2's Init starts three timers and holds three units back",
+          {k: v for k, v in timers.items() if k in CONVOY_TIMERS} == CONVOY_TIMERS
+          and started == list(CONVOY_TIMERS)
+          and reserved == [15, 14, 8]
+          and len(patrol) == 1 and patrol[0][:2] == [8, const["ORDER_ROBOT_PATROL"]],
+          "; ".join(f"{k} = {v} through fn59" for k, v in CONVOY_TIMERS.items())
+          + f"; fn51 holds {reserved} back from every problem; unit {patrol[0][0]} patrols "
+          f"({patrol[0][9]}, {patrol[0][10]})")
+
+    # Problems0: the timers tested, what each raid asks for, and what it sends.
+    problems = calls(handlers["Problems0"])
+    tested = [names[0] for f, names, _ in problems if f == FN_TIME_PASSED]
+    asked = [(values[0], values[1]) for f, _, values in problems if f == FN_ENEMY_OF_TYPE]
+    sent = [tuple(values[:3]) for f, _, values in problems if f == FN_ORDER]
+    said = [tuple(values[:2]) for f, _, values in problems if f == FN_MESSAGE]
+    latched = {behaviour.name_at(table, n.destination)
+               for i, n in enumerate(handlers["Problems0"].nodes)
+               if not n.calls
+               and _handler_value(table, handlers["Problems0"].nodes, formulas, i + 1,
+                                  n.destination) == 1
+               and (behaviour.name_at(table, n.destination) or "").startswith("df")}
+    types = [const[t] for t in CONVOY_TARGET_TYPES]
+    bunker, plant, mine = types
+    attack, replace, to_end = (const["ORDER_ROBOT_ATTACK"], const["INSERT_ORDER_REPLACE"],
+                               const["INSERT_ORDER_TO_END"])
+    check("The Convoy: two raids, each a timer, a latch, the least held bunker and one unit",
+          tested == list(CONVOY_TIMERS)
+          and asked == [(100, bunker), (100, plant), (100, bunker), (100, plant), (100, mine)]
+          and sent == [(15, attack, replace), (14, attack, replace),
+                       (14, attack, to_end), (14, attack, to_end)]
+          and said == [(const["MESSAGE_INFO"], 0), (const["MESSAGE_INFO"], 1)]
+          and latched == {"df0", "df1"},
+          f"fn60 on {tested}; fn71 asks within 100 for "
+          f"{'/'.join(CONVOY_TARGET_TYPES)}; unit 15 attacks on dTime1 and unit 14 on dTime2, "
+          f"replacing its orders and queueing two more; messages {[v for _, v in said]}; "
+          f"latches {sorted(latched)}")
+
+    # What the mission puts under those calls.
+    m = mission.load(d / "data.tma")
+    hero = next(o for o in m.objects if "\\HERO\\" in o.path.upper())
+    raider_clan = next(i for i, c in enumerate(m.clans)
+                       if c.ai_script.lower().endswith(CONVOY_SCRIPT))
+    def typed(o):
+        return (o.type_id or 0) & 0xFFFFFFFF
+
+    bunkers = [o for o in m.objects if typed(o) == bunker]
+    player_has = {name: [o for o in m.objects
+                         if typed(o) == const[name] and o.clan_id == hero.clan_id]
+                  for name in CONVOY_TARGET_TYPES}
+    raiders = {o.logical_id: o for o in m.objects if o.logical_id in CONVOY_RAIDERS}
+    both_ways = (m.clans[raider_clan].relations[m.clans[hero.clan_id].name],
+                 m.clans[hero.clan_id].relations[m.clans[raider_clan].name])
+    check("The Convoy: the one Small Bunker is the player's, and the raiders the enemy's",
+          len(bunkers) == 1 and bunkers[0].clan_id == hero.clan_id
+          and [len(v) for v in player_has.values()] == [1, 1, 0]
+          and len(raiders) == 2
+          and all(o.clan_id == raider_clan and o.path.lower().endswith(CONVOY_RAIDERS[i])
+                  for i, o in raiders.items())
+          and both_ways == (0, 0),
+          f"one BUILDING_BUNKER_SMALL, clan {bunkers[0].clan_id}'s, at "
+          f"({bunkers[0].position[0]:.0f}, {bunkers[0].position[1]:.0f}); the player also holds "
+          f"{len(player_has['BUILDING_PLANT'])} factory and no mine, so the third order is "
+          f"never built; units {sorted(raiders)} are clan {raider_clan}'s "
+          f"({m.clans[raider_clan].name}), whose relation with the player is {both_ways[0]} "
+          f"and the player's with it {both_ways[1]} -- enemies both ways")
+
+    # And what the two of them carry.
+    workshop = units.Workshop(game)
+    carried = {}
+    for logical_id, name in CONVOY_RAIDERS.items():
+        found = next((p for p in game.glob(f"UNITS/**/{name}")), None)
+        if found is None:
+            return
+        sheet = workshop.describe(found)
+        carried[logical_id] = [w for w in sheet.weapons if "winged" in w.name.lower()]
+    check("The Convoy: both raiders carry winged SSMs",
+          all(len(v) >= 2 for v in carried.values()),
+          "; ".join(f"unit {i} ({CONVOY_RAIDERS[i]}) carries {len(v)} x {v[0].name} "
+                    f"{v[0].code}, {v[0].gun.round.range:g} m" for i, v in carried.items()))
+
+
 def check_push_out_and_ground_contact(check, game: Path) -> None:
     """The push-out's touch and hidden-face tests, and the ground contact on message 0x1c
     (docs/24, "Collision between objects")."""
@@ -20908,7 +21048,8 @@ def run(game: Path) -> int:
         check_behaviour, check_research, check_descriptions, check_saves,
         check_vocabulary, check_resources, check_briefing, check_briefing_screen,
         check_progression, check_mission_02, check_mission_03, check_mission_04,
-        check_main_teleport, check_outcome, check_push_out_and_ground_contact, check_beam_rounds,
+        check_main_teleport, check_convoy_raids, check_outcome,
+    check_push_out_and_ground_contact, check_beam_rounds,
         check_hud_top,
         check_hud_radar,
         check_hud_screens,

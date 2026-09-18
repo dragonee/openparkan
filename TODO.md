@@ -1038,9 +1038,11 @@ today; each is a small trap for anyone extending the code.
   building of the mission), and 65534 is the owner word of a destroyed object,
   which the scripts compare with function 52's answer 11 of 11 times;
   `c1m3p.scr` writes 4094 instead, so its check never fires. What is left is
-  the engine side of those calls — a unit's strength, the distance helper, the
-  object at SuperAI `+0x40c`, channel 2 of the message callback — and whether
-  any script depends on the constant kind ignoring its block's condition.
+  the engine side of those calls — what the two floats an object's strength is
+  made of are (the "distance helper" turned out to sum that strength over a
+  radius, not to measure a distance), the object at SuperAI `+0x40c`, channel 2
+  of the message callback — and whether any script depends on the constant kind
+  ignoring its block's condition.
 - ~~**Component classes 6, 7, 14 and 16-18**~~ — **narrowed**. 17 is the
   rounds' seeker (20 components). 6, 7, 14, 16 and 18 are in no shipped
   controller, `Control.dll`'s factory builds them as its generic device, and

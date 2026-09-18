@@ -616,7 +616,7 @@ doc = "docs/15-behaviour.md"
 module = "ai.dll"
 at = "0x1000c847"
 kind = "function"
-name = "script function 35: an enemy object with no PBM_BUILDING_CAPTURE raised, generators first; distance out"
+name = "script function 35: an enemy object with no PBM_BUILDING_CAPTURE raised, generators first, the least held against it of its rank; that strength out"
 read = true
 doc = "docs/15-behaviour.md"
 
@@ -624,7 +624,7 @@ doc = "docs/15-behaviour.md"
 module = "ai.dll"
 at = "0x1000db98"
 kind = "function"
-name = "script function 36: the nearest enemy object; distance out"
+name = "script function 36: the enemy object with the least strength held against it; that strength out"
 read = true
 doc = "docs/15-behaviour.md"
 
@@ -632,7 +632,7 @@ doc = "docs/15-behaviour.md"
 module = "ai.dll"
 at = "0x1000cedf"
 kind = "function"
-name = "script function 37: the nearest of the clan's buildings; distance out"
+name = "script function 37: the clan's building with the least strength held against it; that strength out"
 read = true
 doc = "docs/15-behaviour.md"
 
@@ -656,7 +656,7 @@ doc = "docs/15-behaviour.md"
 module = "ai.dll"
 at = "0x1000d030"
 kind = "function"
-name = "script function 40: the nearest unclaimed place on the system areal map's list: x, y and distance out"
+name = "script function 40: the unclaimed place on the system areal map's list with the least strength about it: x, y and that strength out"
 read = true
 doc = "docs/15-behaviour.md"
 
@@ -688,7 +688,7 @@ doc = "docs/15-behaviour.md"
 module = "ai.dll"
 at = "0x1000d57e"
 kind = "function"
-name = "script function 44: a distance to a place or logical id, through 0x10006130"
+name = "script function 44: the strength standing within f of a place or logical id, through 0x10006130"
 read = true
 doc = "docs/15-behaviour.md"
 
@@ -816,7 +816,7 @@ doc = "docs/15-behaviour.md"
 module = "ai.dll"
 at = "0x1000e6a0"
 kind = "function"
-name = "script function 60: 1 once a time has passed, else ERROR"
+name = "script function 60: 1 once a time has passed, else ERROR; the unsigned test is strict"
 read = true
 doc = "docs/15-behaviour.md"
 
@@ -848,7 +848,7 @@ doc = "docs/15-behaviour.md"
 module = "ai.dll"
 at = "0x1000e8e7"
 kind = "function"
-name = "script function 64: the nearest enemy inside the base radius; distance out"
+name = "script function 64: the enemy inside the base radius with the least strength about it; that strength out"
 read = true
 doc = "docs/15-behaviour.md"
 
@@ -872,7 +872,7 @@ doc = "docs/15-behaviour.md"
 module = "ai.dll"
 at = "0x1000eec7"
 kind = "function"
-name = "script function 67: the clan's nearest factory; distance out"
+name = "script function 67: the clan's factory and the strength standing within f of it"
 read = true
 doc = "docs/15-behaviour.md"
 
@@ -904,7 +904,31 @@ doc = "docs/15-behaviour.md"
 module = "ai.dll"
 at = "0x1000f12e"
 kind = "function"
-name = "script function 71: the nearest enemy object of a type; distance out"
+name = "script function 71: the enemy object of exactly a type with the least strength held against it; that strength out"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x10006130"
+kind = "function"
+name = "the strength standing within f of a point: every areal-map object inside that circle, and with no clan named (-1) the enemy's alone, summed through 0x1000fc70 -- what functions 35, 36, 37, 40, 44, 64, 67 and 71 score a candidate by"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x1000fc70"
+kind = "function"
+name = "an object's strength: (q + 0.8) * p * 1e-05, over the two floats an areal-map entry caches at +0x20 and +0x24"
+read = true
+doc = "docs/15-behaviour.md"
+
+[[entry]]
+module = "ai.dll"
+at = "0x100065e0"
+kind = "function"
+name = "a unit's strength: IControl property 0x36 and interface 0x204's +4 through 0x1000fc70; 0x10034280 without a control"
 read = true
 doc = "docs/15-behaviour.md"
 
@@ -5770,7 +5794,7 @@ read = true
 module = "ai.dll"
 at = "0x10001780"
 kind = "function"
-name = "SuperAI takt (slot 3): the distributor step, then message 1 to the clan areal map (+0x3d8)"
+name = "SuperAI takt (slot 3): every 7000 + rand % 1000 ms, the distributor step, message 1 to the clan areal map (+0x3d8), +7 on the seconds clock (+0x854), then the problem handler (+0x89c)"
 doc = "docs/31-packages.md"
 read = true
 

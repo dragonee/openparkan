@@ -43,7 +43,7 @@ them from the install.
 
 ## Milestones
 
-Milestones **M0** to **M14** are in, each with the stand-ins listed below.
+Milestones **M0** to **M15** are in, each with the stand-ins listed below.
 **M0** to **M2**:
 
 - the workspace;
@@ -922,6 +922,23 @@ More feedback on the first chapter: armour, docks, turrets, batteries and repair
   under 10%. Starting any task turns it off again. Its power tick then pays for the points, as
   the player's G does. Bots left their repair systems off before, however hurt.
 
+**M15.** The enemy keeps its own clock.
+
+- **Every clan's AI keeps its own clock, and an enemy can attack on a timer** (docs/34,
+  "The Convoy's two raids"). The game frame runs SuperAI slot 3 for every clan, not just the
+  player's: each takt steps that clan's seconds clock 7 s on and runs its `Problems0`. The
+  engine ran `Init` for the other clans and nothing after it, so an enemy that works out of
+  its problem handler did nothing at all for the whole mission. It now runs, with the three
+  functions those handlers turn on answered — 59 sets a time against the clan's clock, 60 says
+  when it has passed, and 71 finds the enemy object of exactly a type with the least strength
+  held against it. On C03 M02, *The Convoy*, `c3m2e2`'s timers fire about eight and fifteen
+  minutes in and send two warbots with winged SSMs at the player's Small Bunker, one after the
+  other, each announcing itself in the player's message box; the second goes on to the
+  player's factory. What those raids are worth in a fight is the same engine as any other
+  attack order. What the score behind 71 is worth is not: an object's own strength
+  (`0x1000fc70`) is read as a formula but not as numbers, so a candidate is scored by how many
+  enemy objects stand within the radius, which orders them but does not weigh them.
+
 This directory also holds what the rest will follow:
 
 - **`docs/`** is the source of truth. Every behaviour the engine implements is
@@ -1303,6 +1320,8 @@ engine pass replaces each with what was read and removes its row.
 | M8 | A unit's life system holds all its models' nodes under one root | a life per part: a dead unit destroys its other parts' roots, and a part's root, having no parent, is never knocked off | [26](../docs/26-damage.md#what-a-damaged-node-a-destroyed-part-and-a-dead-unit-draw--read-and-measured) |
 | M8 | The statuses 4 and 8, a node copying its parent's life fraction or its stage | not modelled; no Mission 01 node carries them | [26](../docs/26-damage.md#what-a-damaged-node-a-destroyed-part-and-a-dead-unit-draw--read-and-measured) |
 | M3 | the ground contact runs after every state step, with the step as its dt | once a frame on message `0x1c`, after the collision pass and before a push is taken, with the frame's dt. Held back behind the held-face walk above: a fresh search each frame loses a bed too steep to walk (a hero on Tut_1's lake bed no longer dies) and lifts a hero through stacked floors (the Small Generator's way stops at vertex 7). Meanwhile a sinking door's downward pushes add up between steps: the hero sinks 1.2 m at the Small Bunker's door | [24](../docs/24-motion.md#collision-between-objects--read) |
+| M15 | What an object's strength is worth: the two floats `0x1000fc70` multiplies (`IControl` property `0x36` and interface `0x204`'s `+4`), which functions 35, 36, 37, 40, 44, 64, 67 and 71 sum over a radius | every object counts 1, so a candidate's score is how many enemy objects stand within the radius; it orders candidates but does not weigh them, and what a script's `TAKE_BY_HITS` amount is worth against it is unknown | [15](../docs/15-behaviour.md#what-is-not-read-here) |
+| M15 | Whether `fDifficulty`, which the timers of a mission's raids scale by, is written from the C++ side as `varset.var`'s comment says | it stands at its declared 0.5, the middle of the three levels | [34](../docs/34-progression.md#the-convoys-two-raids--read-and-measured) |
 
 ## Departures
 

@@ -12,9 +12,11 @@ problem in two: parsing the graph is a weekend, making the nodes *behave* is
 months. The first half is done, and the second is further along than that
 estimate: the control flow is **read** from the executor, every call is mapped
 to its handler, and the functions are named as far as their code says —
-problems raised and solved, units picked and ordered, targets found. What a
-handler asks of the engine below it (a unit's strength, a distance) is
-mostly not followed.
+problems raised and solved, units picked and ordered, targets found. The two
+helpers the target functions lean on are read as well, and one of them was being
+read wrong: what a script gets back from them is a **strength held over a place**,
+not a distance ([What the functions do](#what-the-functions-do)). What a handler asks
+of the engine below *that* is mostly not followed.
 
 **Every claim is tagged**: *measured* is re-derived by `openparkan verify`,
 *read* comes from the disassembly at the address given (all `ai.dll` unless
@@ -450,28 +452,45 @@ slot `0xfffe`) is taken by nobody.
 | 72 | 1 | *id* | the object's property `0x201` |
 | 54, 58 | — | … | a unit's current order; one of the clan's buildings |
 
-**Places and targets.** The SuperAI keeps its base's centre at `+0x80`/`+0x84`
-and a radius at `+0x88`. *Enemy* below is an object of another clan whose entry
-in the SuperAI's clan table (`+0x448`, 16 bytes a clan) is 0; that the table
-holds the mission's alliance matrix, 0 towards enemies, is a *guess*. The
-distances come from `0x10006130`, which takes the float *f* as well; what *f*
-changes is not read.
+**Places and targets.** The SuperAI keeps its clan number at `+0x7c`, its base's
+centre at `+0x80`/`+0x84` and a radius at `+0x88`. *Enemy* below is an object of
+another clan whose entry in the SuperAI's clan table (`+0x448`, 16 bytes a clan)
+is 0; that the table holds the mission's alliance matrix, 0 towards enemies, is
+a *guess*.
+
+**What these functions measure is a strength, not a distance** (*read*), and the
+float *f* is the radius it is measured over. `0x10006130` walks the areal map,
+keeps every object standing within *f* of a point — the enemy's alone unless a
+clan is named, in which case that clan's — and sums `(q + 0.8) × p × 1e-5` over
+each (`0x1000fc70`, over the two floats an areal-map entry caches at `+0x20` and
+`+0x24`; the same formula gives one unit's strength at `0x100065e0`, over
+`IControl` property `0x36` and interface `0x204`'s `+4`). So what these
+functions write into their "out" operand is **how strongly a place is held
+against the clan asking** — which is what a script hands `TAKE_BY_HITS` to size
+the group it sends: `dTemp3 = fn44(fT, ERROR, TARGET_BY_LOGIC_ID, dX)`, then
+`fn25(TAKE_BY_HITS, dTemp3, …)`.
+
+Six of them **pick the least**: 35, 36, 37, 40, 64 and 71 gather their
+candidates, score each, and keep the one whose score is strictly below the best
+so far — the least defended, not the nearest. 44 and 67 score without picking.
+An earlier reading of this page called the score a distance and these functions
+"the nearest"; it was wrong.
 
 | fn | uses | arguments | does |
 |---:|---:|---|---|
 | 19 | 58 | x out, y out, clan out | write the base's centre and the clan's number into the three — it reads the base, it does not place it |
 | 68 | 9 | range | recompute the base radius from the clan's buildings within range of the centre |
 | 63 | 3 | *id* | 1 when the object stands inside the base radius |
-| 44 | 21 | *f*, *clan*, target kind, target… | a distance to a place or an object |
+| 44 | 21 | *f*, *clan*, target kind, target… | the strength standing within *f* of a place or an object, of that clan or the enemy's for `ERROR` |
 | 18 | 2 | x out, y out | a building site spiralling out from the base, at least 250 from every object and place it knows |
-| 40 | 1 | x out, y out, distance out | the nearest unclaimed place on the list the system areal map gives (slots 25 and 26) — a mineral site, going by its one caller, `PBM_MINE_NEEDED_Start` |
-| 35 | 5 | *f*, distance out | an enemy object no `PBM_BUILDING_CAPTURE` is raised for: a generator first, then a factory, a mine, a research centre, a storage, anything else last |
-| 36 | 2 | *f*, distance out | the nearest enemy object |
-| 71 | 9 | *f*, type, distance out | the nearest enemy object of a type |
-| 64 | 3 | *f*, distance out | the nearest enemy inside the base radius |
+| 40 | 1 | x out, y out, strength out | the unclaimed place on the list the system areal map gives (slots 25 and 26) with the least about it — a mineral site, going by its one caller, `PBM_MINE_NEEDED_Start` |
+| 35 | 5 | *f*, strength out | an enemy object no `PBM_BUILDING_CAPTURE` is raised for, the least defended of its rank: a generator first, then a factory, a mine, a research centre, a storage, anything else last |
+| 36 | 2 | *f*, strength out | the enemy object with the least held against it |
+| 71 | 9 | *f*, type, strength out | the enemy object whose type word is **exactly** that type with the least held against it; `ERROR` when the enemy holds none |
+| 64 | 3 | *f*, strength out | the enemy inside the base radius with the least about it |
 | 47 | 8 | range, strength out | an enemy within range of the base that no `PBM_BASE_DEFENCE` is raised for: the hero if one is there, else the strongest |
-| 37 | 3 | distance out | the nearest of the clan's own buildings |
-| 67 | 2 | distance out | the clan's nearest factory |
+| 37 | 3 | strength out | the clan's own building with the least held against it |
+| 67 | 2 | strength out | the clan's factory, and the strength about it |
 | 10, 46, 55 | — | … | an areal-map entry of another clan; the base radius; a bounds test |
 
 **Economy.**
@@ -488,8 +507,8 @@ changes is not read.
 |---:|---:|---|---|
 | 30 | 244 | kind, value | hand both to the message callback `iron3d.dll` gives `CreateSuperAI` (`iron3d.dll:0x10060ce0`), channel 0 |
 | 57 | 14 | *a*, *b* | the same callback, channel 2 |
-| 59 | 26 | delay | now plus the delay, in whole seconds (`+0x854`, which the constructor sets from `timeGetTime` over 1000) |
-| 60 | 20 | time | 1 once that time has passed, else `ERROR` |
+| 59 | 26 | delay | the clan's seconds clock plus the delay (`+0x854`, which the constructor sets from `timeGetTime` over 1000 and each clan takt steps 7 on: [34-progression.md](34-progression.md#when-the-mission-handler-runs--read)) |
+| 60 | 20 | time | 1 once that time has passed — the clock strictly above it, compared unsigned — else `ERROR` |
 | 70 | 1 | *n* | a random number below *n* |
 | 32 | 62 | *route*, *id* | 1 when the unit with logical id *id* was last reported inside route *route*, the system areal map's tactical areal of that id (slot 33). Read here once as two clans; 36 of 36 resolved calls pass a route id and a unit's logical id ([34-progression.md](34-progression.md)) |
 | 43 | 10 | — | load the files in `UNITS\UNITS\AI\` into the object at `+0x40c`, which also keeps the place list function 40 reads |
@@ -673,11 +692,16 @@ capturer — which is why the table stops one call deep.
 
 ## What is not read here
 
-- **What the helpers below the handlers compute.** A unit's *strength*
-  (`0x100065e0`: IControl property `0x36` and object property `0x204`), a
-  distance (`0x10006130`), the problem's action record (`+0x34`), the object at
-  `+0x40c` behind functions 40, 41, 43, 53 and 65. The table says what each
-  handler does with them. ~~The areal-map list function 32 tests~~ is now read:
+- **What the helpers below the handlers compute.** ~~A unit's *strength*
+  (`0x100065e0`), a distance (`0x10006130`)~~ are now read, and the second was
+  not a distance at all: both are the strength formula at `0x1000fc70`, and
+  `0x10006130` sums it over a radius ([What the functions
+  do](#what-the-functions-do)). What is still not followed is what the two
+  floats that formula multiplies are — `IControl` property `0x36` and interface
+  `0x204`'s `+4` — and so what a strength is worth in the numbers the scripts
+  compare it against. The problem's action record (`+0x34`) and the object at
+  `+0x40c` behind functions 40, 41, 43, 53 and 65 are not read either. The table
+  says what each handler does with them. ~~The areal-map list function 32 tests~~ is now read:
   a route's list of the units last reported inside it
   ([34-progression.md](34-progression.md)).
 - **The two numbers a problem is raised with** — `fn2`'s third and fourth

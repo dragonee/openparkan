@@ -120,7 +120,7 @@ engineering such as terrain culling or drawing the sky's textures.
 [15-behaviour](docs/15-behaviour.md#what-is-not-read-here), [31-packages](docs/31-packages.md#not-established),
 [23-economy](docs/23-economy.md#not-established), [32-builder](docs/32-builder.md#not-established)
 
-- [ ] What the helpers below the `.scr` handlers compute: a unit's strength, the distance helper, the problem's action record, and SuperAI `+0x40c`.
+- [ ] What the two floats an object's strength is made of are (`IControl` property `0x36` and interface `0x204`'s `+4`), and so what a `TAKE_BY_HITS` amount is worth; the problem's action record, and SuperAI `+0x40c`. The strength formula and the helper that sums it over a radius — once read as a distance — are now read.
 - [ ] A problem's two raise numbers, which handler runs when, and who writes `dCurrentProblem` and `dCurrentSender`.
 - [ ] Channel 2 of the message callback (function 57), and the count function 69 stores.
 - [ ] Whether any script depends on a constant landing inside a false block.
