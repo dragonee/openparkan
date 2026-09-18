@@ -106,11 +106,14 @@ pub struct Feet {
 
 impl Feet {
     /// Where control point `point` stands in the model's frame with the mesh posed at
-    /// `frames`, on the node its first triple's third slot names (docs/13). The pose walk
+    /// `frames`, on the node its first triple's **second** slot names — the one the point
+    /// sits on (docs/07, "a wheel's contact point rides on the body and dies with the
+    /// wheel"). The third slot names the node the contact dies with, which the state's
+    /// damage conditions read (docs/13), not a frame to place the point in. The pose walk
     /// leaves out node 0's travel ([`Mesh::walk_pose`]): the body's own move carries it.
     pub fn place(&self, point: i32, frames: Frames) -> Option<Vec3> {
         let p = self.points.get(usize::try_from(point).ok()?)?;
-        let node = usize::try_from(p.nodes().1).ok().filter(|&n| n < self.mesh.nodes.len())?;
+        let node = usize::try_from(p.nodes().0).ok().filter(|&n| n < self.mesh.nodes.len())?;
         let (a, b, w) = (f64::from(frames.a), f64::from(frames.b), f64::from(frames.weight));
         let pose = self.mesh.world_pose_by(node, |n| self.mesh.walk_pose(n, a, b, w));
         let at = pose.apply(p.position.map(f64::from));
@@ -125,7 +128,7 @@ impl Feet {
     /// the live contact record's height is taken from at load is not read: the rest pose.
     pub fn planted(&self, point: i32, state: &State) -> bool {
         let Some(p) = self.points.get(usize::try_from(point).unwrap_or(usize::MAX)) else { return false };
-        let Some(node) = usize::try_from(p.nodes().1).ok().filter(|&n| n < self.mesh.nodes.len()) else {
+        let Some(node) = usize::try_from(p.nodes().0).ok().filter(|&n| n < self.mesh.nodes.len()) else {
             return false;
         };
         let b = f64::from(state.pair_b[1]);

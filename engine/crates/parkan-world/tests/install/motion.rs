@@ -554,13 +554,14 @@ fn a_units_live_limits_come_from_its_engine_and_load_so_a_driven_hull_follows_it
     }
 }
 
-/// The lift plants a chassis's contact points, never its geometry, and a wheeled chassis
-/// authors its `weel_*` points below the tyres, so the wheels ride clear of the ground
-/// (docs/24, "Wheels ride clear of the ground"). Seating a unit on its lowest vertex
-/// instead would put every wheeled warbot lower than the game's.
+/// A contact point sits on the node its first triple's second slot names; the third slot
+/// is the node it dies with, a damage reference and not a frame (docs/24, "A contact point
+/// sits on one node and dies with another"). A wheeled chassis authors its `weel_*` points
+/// on the body, at the tyres, so its wheels land on the ground; posing them on the wheel
+/// node instead drops them clear under the tyres and the whole bot visibly hovers.
 #[test]
 #[ignore = "needs the game install"]
-fn c03_02s_wheeled_warbots_ride_clear_of_the_ground_their_contact_points_hold_them_off() {
+fn c03_02s_wheeled_warbots_stand_on_their_tyres_their_contacts_being_authored_there() {
     use parkan_formats::control::CONTACT_SUPPORT;
     use parkan_sim::machine::Frames;
 
@@ -571,31 +572,38 @@ fn c03_02s_wheeled_warbots_ride_clear_of_the_ground_their_contact_points_hold_th
     for (_, robot) in &play.robots {
         let w = &robot.walker;
         let Some(feet) = &w.feet else { continue };
+        let record = &robot.parts[robot.chassis_part].record;
+        if !record.starts_with("R_B_03") && !record.starts_with("R_M_04") {
+            continue;
+        }
         let state = &w.controller.states[w.machine.current];
         let last = Frames { a: state.pair_a[1], b: state.pair_b[1], weight: w.machine.q };
-        let lowest_contact = state
+        let placed: Vec<glam::Vec3> = state
             .contacts
             .iter()
             .filter(|c| c.flags & CONTACT_SUPPORT != 0)
-            .filter_map(|c| Some(feet.place(c.point, last)?.z))
-            .fold(f32::MAX, f32::min);
-        if lowest_contact == f32::MAX {
-            continue;
-        }
-        // How far the lowest contact is authored below the model's own lowest vertex. The
-        // hull turns on yaw alone, so this is a world height too.
-        let authored = -w.base - lowest_contact;
-        let p = w.body.position;
-        let under = play.ground.below(p.x, p.y, p.z + w.sphere_radius).expect("ground below it");
-        let clear = p.z - w.base - under.point.z;
-        let record = &robot.parts[robot.chassis_part].record;
-        // The lift is the largest rise over the contacts, so broken ground only holds it
-        // higher, never lower.
-        assert!(clear > authored - 0.05, "{record} rides {clear} clear, authored {authored}");
+            .filter_map(|c| feet.place(c.point, last))
+            .collect();
+        assert!(!placed.is_empty(), "{record} has support contacts");
+
+        // The tyres: the contacts sit on them, not under them. Posed on the wheel node
+        // instead, R_B_03's lowest lands 2.23 below its own lowest vertex.
+        let lowest = placed.iter().map(|p| p.z).fold(f32::MAX, f32::min);
+        assert!((lowest - -w.base).abs() < 0.05, "{record} contacts at {lowest}, tyres at {}", -w.base);
+
+        // And inside the hull, which is what the wrong node breaks most plainly: it threw
+        // R_B_03's front-right contact out to x 6.24 on a hull 8.02 wide.
+        let half_width = placed.iter().map(|p| p.x.abs()).fold(0.0, f32::max);
+        assert!(half_width < 4.01, "{record} contact {half_width} off centre, hull half-width 4.01");
+
         if record == "R_B_03" {
-            // The six-wheeled heavy, the one this is plain on: `weel_*` 2.23 under the tyres.
-            assert!((authored - 2.23).abs() < 0.02, "{record} authors {authored} clear");
-            assert!(clear > 2.0, "{record} rides {clear} clear");
+            let p = w.body.position;
+            let under = play.ground.below(p.x, p.y, p.z + w.sphere_radius).expect("ground below it");
+            // Level ground puts it on its tyres; broken ground holds it at the highest
+            // wheel, which measured up to 0.67 across the campaign, never the 2.23 the
+            // wheel node's frame gave it everywhere.
+            let clear = p.z - w.base - under.point.z;
+            assert!((-0.1..1.0).contains(&clear), "{record} rides {clear} clear");
             heavies += 1;
         }
     }
