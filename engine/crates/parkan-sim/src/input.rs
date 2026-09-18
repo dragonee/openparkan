@@ -199,25 +199,34 @@ impl Pilot {
         }
     }
 
-    /// The rows a chord selects: the Shift rows while Shift is held.
+    /// The rows a chord selects (`World3D.dll:0x1000f5ee`-`0x1000f6d9`,
+    /// docs/14-controls.md, "A chord with no row of its own").
     ///
-    /// STAND-IN: docs/14-controls.md#the-table -- how a chord with no row of its own
-    /// is resolved is not read; it falls back to the plain rows.
+    /// A row whose key and press/release match fires when its modifier is held. A **plain**
+    /// row fires unless one of the modifiers that another row pairs with **the same key** is
+    /// held: the table's load lists those on the plain row (`0x1000bd31`), and the lookup
+    /// walks that list. So there is no best match and no search: a chord with no row of its
+    /// own falls through to the plain row, and it is only a key that has a row under some
+    /// other modifier that goes silent.
+    ///
+    /// *Measured*: `SCAN_LSHIFT` is the only modifier the three shipped tables use, on four
+    /// rows each, and the only plain rows it blocks are mouse X's and mouse Y's -- two per
+    /// table. Shift with any of the keyboard's keys reaches the plain row.
     fn matching(&self, key: &str, pressed: bool) -> Vec<Action> {
-        let find = |modifier: &str| -> Vec<Action> {
-            self.rows
-                .iter()
-                .filter(|r| r.key == key && r.pressed == pressed && r.modifier == modifier)
-                .cloned()
-                .collect()
+        let held = |modifier: &str| match modifier {
+            SHIFT => self.shift,
+            other => self.held.iter().any(|k| k == other),
         };
-        if self.shift && key != SHIFT {
-            let shifted = find(SHIFT);
-            if !shifted.is_empty() {
-                return shifted;
-            }
-        }
-        find(controls::NO_MODIFIER)
+        let blocked = self
+            .rows
+            .iter()
+            .any(|r| r.key == key && r.modifier != controls::NO_MODIFIER && held(&r.modifier));
+        self.rows
+            .iter()
+            .filter(|r| r.key == key && r.pressed == pressed)
+            .filter(|r| if r.modifier == controls::NO_MODIFIER { !blocked } else { held(&r.modifier) })
+            .cloned()
+            .collect()
     }
 
     /// A key or button going down or up.
@@ -514,6 +523,33 @@ KEY   SCAN_NULL SCAN_W_3 1 CICLS_MULTIGUN MCMD_SELECT 0.0 3 0 0.0 0
         assert!((m[0] - (9.5 + 0.475)).abs() < 1e-5 && (m[1] - 0.57).abs() < 1e-5);
         assert_eq!(f.filter([0.0, 0.0], 1.0), [0.0, 0.0]);
         assert_eq!(f.filter([0.0, 10.0], 1.0)[1], 11.4);
+    }
+
+    /// `World3D.dll:0x1000f5ee`-`0x1000f6d9`: a plain row fires unless a modifier that
+    /// another row pairs with the **same key** is held. So Shift+W, which has no row,
+    /// walks; Shift+mouse X, whose key does have a Shift row, moves the camera and not
+    /// the hull. *Measured*: `SCAN_LSHIFT` is the only modifier the three shipped tables
+    /// use, and mouse X and mouse Y are the only plain rows it blocks.
+    #[test]
+    fn a_chord_with_no_row_of_its_own_falls_through_to_the_plain_row() {
+        let mut pilot = Pilot::new(hero_table(), 100.0);
+        let mut r = rig();
+        pilot.key(SHIFT, true, &mut r.hands());
+        pilot.key("SCAN_W", true, &mut r.hands());
+        assert_eq!(r.body.command[1], 1.0, "Shift+W has no row: the plain W row walks");
+
+        // Mouse X has both, so the plain row is blocked and only the camera moves.
+        let turn = r.body.pending[2];
+        pilot.mouse([20.0, 0.0], &mut r.hands());
+        assert_eq!(r.body.pending[2], turn, "the hull's row is blocked while Shift is held");
+        assert_ne!(r.camera[0], 0.5, "the Shift row turns the camera");
+
+        // Shift up: the same movement turns the hull and leaves the camera where it is.
+        pilot.key(SHIFT, false, &mut r.hands());
+        let camera = r.camera[0];
+        pilot.mouse([20.0, 0.0], &mut r.hands());
+        assert_ne!(r.body.pending[2], turn, "the plain row is back");
+        assert_eq!(r.camera[0], camera);
     }
 
     #[test]

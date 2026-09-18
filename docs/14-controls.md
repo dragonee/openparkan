@@ -62,7 +62,7 @@ KEY   SCAN_NULL SCAN_G_PLUS 1 CICLS_UNKNOWN MCMD_FORWARD   1.0 0 0         0.05 
 | Field | Meaning |
 |---|---|
 | 1 | `KEY` or `MOUSE` |
-| 2, 3 | the chord: a modifier (`SCAN_NULL` on 104 of 116 rows) and the key |
+| 2, 3 | the chord: a modifier (`SCAN_NULL` on 104 of 116 rows) and the key; a chord with no row falls through to the plain row ([below](#a-chord-with-no-row-of-its-own--read-and-measured)) |
 | 4 | 1 on the press, 0 on the release |
 | 5 | `CICLS_*` — the class of component the command is aimed at |
 | 6 | `MCMD_*` — the command itself |
@@ -442,6 +442,70 @@ positive control, so it proves nothing.
   instead (`ANGLE_X`).
 - **The table is the chassis's.** The hero chassis record `r_h_02` names
   `hero.tbl`; `r_l_06` names `m2.tbl`.
+
+### A chord with no row of its own — *read*, and *measured*
+
+Shift+W has no row in any shipped table. **It walks**: the lookup is an exact
+match on the chord, and a row with no modifier answers for every chord *except*
+the ones that another row of the same key claims.
+
+**What the load builds** (*read*). The manager keeps, beside its three row
+tables, one list of every modifier any row uses: the count at `+0x8830`, the
+scan codes at `+0x8834`, each one's **held flag** at `+0x8884`, the rows that
+use it at `+0x88d4` (200 to a modifier) and their counts at `+0xc754`. A row
+with a modifier is registered there as it is read (`0x1000c080`). Then, once
+the file is read, a pass over that list (`0x1000bd31`–`0x1000beb9`) takes each
+modifier, walks the rows that use it, and for every **plain** row of any of the
+three tables **whose key is the same** appends that modifier's scan code to the
+plain row's own list at `+0x08`, counted at `+0x58`. So a plain row ends up
+carrying the modifiers that would steal its key.
+
+**What a key event does** (`0x1000f5ee`–`0x1000f6d9`). For each row of the
+table the event's kind selects:
+
+1. row `+0x5c`, the key, must be the event's code, else the row is passed over;
+2. row `+0x60`, press or release, must be the event's, else the row's active
+   flag `+0x80` is **cleared** and the row passed over;
+3. then the modifier:
+   - **a row with one** is made active only while that modifier's held flag is
+     set (`0x1000f634`);
+   - **a plain row** is made active only while **none** of the modifiers in its
+     own list is held (`0x1000f682`–`0x1000f6d9`).
+
+Making a row active is `+0x80 = 1` and `+0x84 =` the game clock, as
+[above](#a-row-that-stays-down--read). The same exclusion gates the input
+update's pass over the rows already active (`0x1000f2f0`, `0x1000f39e`,
+`0x1000f3e5`), so a plain row does not keep running once its key is claimed.
+
+**And a modifier going down re-decides the rows that use it** (`0x1000f950`,
+called from the input update at `0x1000f2be`). For each queued event the pass
+looks the code up in the modifier list; on a hit it writes the event's pressed
+word into that modifier's held flag (`0x1000f9c3`) and then, for each row that
+uses the modifier, matches the row's key and press field against the **key's own
+held byte** (`0x1002a490 + code`) and sets or clears the row's active flag
+(`0x1000fa12`, `0x1000fa39`). So pressing Shift while the mouse is already
+moving hands the movement to the Shift row without waiting for a fresh key
+event.
+
+**So there is no best match and no search.** A chord whose modifier no row of
+that key uses falls through to the plain row; a chord whose modifier some row
+of that key does use fires that row, and the plain row is silent; and a
+modifier that a *different* key's row uses changes nothing.
+
+*Measured*, over the three shipped tables (116 rows):
+
+- **`SCAN_LSHIFT` is the only modifier any of them uses**, on 4 rows of each
+  table — mouse X, mouse Y and the right button twice.
+- The load's pass therefore writes **two entries per table**: `SCAN_LSHIFT`
+  onto the plain mouse X row and the plain mouse Y row. Every other plain row's
+  list is empty.
+- `SCAN_RMOUSE` has a Shift row and no plain row, so there is nothing to
+  exclude; the plain right button is `iron3d.dll`'s, out of `ui_other.man`.
+
+So in the shipped game the rule shows itself in exactly one place: holding
+Shift moves the camera with the mouse instead of the hull and the turret
+([30-turrets.md](30-turrets.md#aiming-and-the-camera--read-and-measured)).
+Shift with any key of the keyboard reaches the plain row, W included.
 
 ### Leaving the window lets every key up — *read*
 
