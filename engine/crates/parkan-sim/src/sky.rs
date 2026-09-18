@@ -25,10 +25,17 @@ pub const DOME_ANGLE: f32 = PI / 4.0;
 pub const DOME_RINGS: usize = 5;
 pub const DOME_SEGMENTS: usize = 16;
 
-/// Where the sun and the moon stand: `CSun`'s constant azimuth and tilt as a direction,
-/// `(sin A sin B, −cos A sin B, cos B)` (`docs/10-sky.md`, "Where the sun stands").
+/// Where the sun and the moon stand **at the top of their arc**: `CSun`'s constant
+/// azimuth and tilt as a direction, `(sin A sin B, −cos A sin B, cos B)`
+/// (`docs/10-sky.md`, "Where the sun stands").
 pub const SUN_DIRECTION: Vec3 = Vec3::new(0.5, 0.0, 0.866_025_4);
 pub const MOON_DIRECTION: Vec3 = Vec3::new(0.0, -0.766_044_4, 0.642_787_6);
+
+/// A body travels an arc of `(SPAN × progress + START) × π` through its lifetime
+/// (`Terrain.dll:0x1007ed40`), so it rises 18° below one horizon and sets 18° below the
+/// other, standing at its constant azimuth and tilt halfway through.
+pub const BODY_ARC_START: f32 = -0.1;
+pub const BODY_ARC_SPAN: f32 = 1.2;
 
 /// The sun object's second directional light's colour (`0x1007ed34`).
 pub const SUN_SECOND_LIGHT_SLOT: usize = 21;
@@ -44,7 +51,7 @@ pub const CLOCK_DAY: u64 = 86_400;
 /// "The lens flare").
 pub const FLARE_CONE_DEGREES: f32 = 15.0;
 /// The second gate ramps on the body's height between `cos 60°` and `cos 30°`; the
-/// sun stands exactly on the top edge.
+/// sun reaches exactly the top edge at the top of its arc.
 pub const FLARE_HEIGHT_ZERO: f32 = 0.5;
 pub const FLARE_HEIGHT_FULL: f32 = SUN_DIRECTION.z;
 /// How far the gates lift the main light: from its colour `c` to `5c`.
@@ -112,12 +119,28 @@ impl Body {
         if name == "sun" { Body::Sun } else { Body::Moon }
     }
 
-    /// Its fixed direction, which nothing rewrites.
-    pub fn direction(self) -> Vec3 {
+    /// Its azimuth and its tilt from the zenith, the two constants `GetEvents` picks by
+    /// the keyframe's name (`docs/10-sky.md`, "Where the sun stands").
+    pub fn angles(self) -> (f32, f32) {
         match self {
-            Body::Sun => SUN_DIRECTION,
-            Body::Moon => MOON_DIRECTION,
+            Body::Sun => (90f32.to_radians(), 30f32.to_radians()),
+            Body::Moon => (0.0, 50f32.to_radians()),
         }
+    }
+
+    /// The unit direction **to** the body `progress` of the way through its lifetime.
+    ///
+    /// `CSun` turns `(cos θ, 0, −sin θ)` through `Rz(A)·Rx(B)` each takt and hands the
+    /// result to the light manager as the first light's direction; this is its negation,
+    /// the way a viewer sees the body. At `progress` ½ it is the fixed direction the
+    /// azimuth and tilt name.
+    pub fn direction(self, progress: f32) -> Vec3 {
+        let (a, b) = self.angles();
+        let theta = (BODY_ARC_SPAN * progress + BODY_ARC_START) * PI;
+        let (sa, ca) = a.sin_cos();
+        let (sb, cb) = b.sin_cos();
+        let (st, ct) = theta.sin_cos();
+        Vec3::new(sa * sb * st - ca * ct, -sa * ct - ca * sb * st, cb * st)
     }
 }
 
@@ -262,15 +285,25 @@ pub fn bodies(atmosphere: &Atmosphere) -> Vec<(Body, Position, f64)> {
 /// the clock's start, and a body due by then is up as the mission begins; one stamped
 /// after it waits for the clock.
 pub fn bodies_up(atmosphere: &Atmosphere, elapsed: f64) -> Vec<Body> {
+    bodies_aloft(atmosphere, elapsed).into_iter().map(|(body, _)| body).collect()
+}
+
+/// The same, each with how far through its lifetime it is, 0 to 1 — the fraction `CSun`
+/// forms as `(now − start) ÷ lifetime` and clamps to 1 (`Terrain.dll:0x1007ed4c`), which
+/// is what carries a body along its arc.
+pub fn bodies_aloft(atmosphere: &Atmosphere, elapsed: f64) -> Vec<(Body, f32)> {
     let now = since_epoch(atmosphere, elapsed);
     let cycle = (cycle_seconds(atmosphere) as f64).max(1.0);
     bodies(atmosphere)
         .into_iter()
-        .filter(|&(_, start, life)| {
+        .filter_map(|(body, start, life)| {
             let fired = between(atmosphere, Position::default(), start);
-            now >= fired && (now - fired).rem_euclid(cycle) < life
+            if now < fired {
+                return None;
+            }
+            let into = (now - fired).rem_euclid(cycle);
+            (into < life).then(|| (body, (into / life.max(1.0)) as f32))
         })
-        .map(|(body, ..)| body)
         .collect()
 }
 
@@ -358,14 +391,13 @@ pub fn flare_height_gate(height: f32) -> f32 {
     ((height - FLARE_HEIGHT_ZERO) / (FLARE_HEIGHT_FULL - FLARE_HEIGHT_ZERO)).clamp(0.0, 1.0)
 }
 
-/// The sun object's two directional lights' colours for `body`, seen along `view`
+/// The sun object's two directional lights' colours with the body at `toward`, seen along `view`
 /// (`docs/10-sky.md`, "What the sun does with its seven values"): the main light is
 /// `lerp(c, 5c, gate1² × gate2 × slot 17's alpha)` of slot 19 × the third float
 /// (`0x1007ea14`), the second slot 21.
-pub fn sun_lights(sky: &Sky, body: Body, view: Vec3) -> [Rgb; 2] {
-    let direction = body.direction();
-    let gate = flare_view_gate(view, direction);
-    let lift = gate * gate * flare_height_gate(direction.z) * sky.sun_boost;
+pub fn sun_lights(sky: &Sky, toward: Vec3, view: Vec3) -> [Rgb; 2] {
+    let gate = flare_view_gate(view, toward);
+    let lift = gate * gate * flare_height_gate(toward.z) * sky.sun_boost;
     let main = sky.sun_light.map(|c| c + (FLARE_LIGHT_BOOST * c - c) * lift);
     [main, sky.second_light]
 }
@@ -663,6 +695,48 @@ mod tests {
         assert_eq!(Body::named("Sun"), Body::Moon);
     }
 
+    /// `CSun` turns `(cos θ, 0, −sin θ)` through `Rz(A)·Rx(B)` with θ running from −0.1π
+    /// to 1.1π across the body's lifetime, and hands the result to the light manager as
+    /// the first light's direction and its negation as the second's
+    /// (`Terrain.dll:0x1007ed40`, `0x1007ee2a`, `0x1007eea8`).
+    #[test]
+    fn a_body_travels_an_arc_and_stands_at_its_constant_angles_halfway() {
+        for (body, top) in [(Body::Sun, SUN_DIRECTION), (Body::Moon, MOON_DIRECTION)] {
+            let mid = body.direction(0.5);
+            assert!((mid - top).length() < 1e-5, "{body:?} {mid:?} against {top:?}");
+            for p in [0.0, 0.25, 0.5, 0.75, 1.0] {
+                assert!((body.direction(p).length() - 1.0).abs() < 1e-5, "unit at {p}");
+            }
+            // It rises from below one horizon and sets below the other.
+            assert!(body.direction(0.0).z < 0.0 && body.direction(1.0).z < 0.0);
+            assert!(body.direction(0.25).z > 0.0 && body.direction(0.75).z > 0.0);
+            // Rise and set are mirror images about the top of the arc.
+            let (rise, set) = (body.direction(0.2), body.direction(0.8));
+            assert!((rise.z - set.z).abs() < 1e-5, "{rise:?} {set:?}");
+            // The height is cos(tilt) × sin θ, so the top of the arc is cos(tilt).
+            assert!((mid.z - body.angles().1.cos()).abs() < 1e-6);
+        }
+        // The sun's zenith is exactly the top edge of the flare's second gate, and the
+        // moon's 0.39 of the way up it; away from the top the sun's flare fades.
+        assert_eq!(flare_height_gate(Body::Sun.direction(0.5).z), 1.0);
+        assert!(flare_height_gate(Body::Sun.direction(0.15).z) < 1.0);
+        assert_eq!(flare_height_gate(Body::Sun.direction(0.0).z), 0.0);
+    }
+
+    #[test]
+    fn a_body_carries_how_far_through_its_lifetime_it_is() {
+        let a = mission_01();
+        // The sun is up 525 s from 18 s into the day, and the clock opens 56 s in.
+        let aloft = |t: f64| bodies_aloft(&a, t);
+        assert_eq!(aloft(0.0).len(), 1);
+        assert!((aloft(0.0)[0].1 - 38.0 / 525.0).abs() < 1e-6, "{:?}", aloft(0.0));
+        assert!((aloft(262.5 - 38.0)[0].1 - 0.5).abs() < 1e-6, "halfway, at its zenith");
+        assert!(aloft(524.0 - 38.0)[0].1 < 1.0);
+        assert!(aloft(525.0 - 38.0).is_empty(), "down at its stop");
+        // The moon runs its own arc over its own 300 s.
+        assert_eq!(aloft(600.0 - 56.0)[0].0, Body::Moon);
+    }
+
     #[test]
     fn the_flare_gates_lift_the_main_light_up_to_five_times() {
         let mut sky = at(&day(vec![sky_keyframe(0, 0, 1.0)]), at_seconds(0, 0.0)).unwrap();
@@ -670,24 +744,24 @@ mod tests {
         sky.second_light = [0.3, 0.3, 0.4];
         sky.sun_boost = 1.0;
         // On the view axis the sun, on the top edge of the height ramp, lights at 5×.
-        let [main, second] = sun_lights(&sky, Body::Sun, SUN_DIRECTION);
+        let [main, second] = sun_lights(&sky, SUN_DIRECTION, SUN_DIRECTION);
         assert!((main[0] - 2.5).abs() < 1e-4 && (main[1] - 1.0).abs() < 1e-4, "{main:?}");
         assert_eq!(second, [0.3, 0.3, 0.4], "the second light is slot 21, unlifted");
         // The moon's height gives 0.39 of the lift.
         assert!((flare_height_gate(MOON_DIRECTION.z) - 0.390).abs() < 1e-3);
         assert_eq!(flare_height_gate(SUN_DIRECTION.z), 1.0);
         // Past 15° off the axis the light is its colour.
-        assert_eq!(sun_lights(&sky, Body::Sun, Vec3::Y)[0], [0.5, 0.2, 0.0]);
+        assert_eq!(sun_lights(&sky, SUN_DIRECTION, Vec3::Y)[0], [0.5, 0.2, 0.0]);
         // Halfway along the cosine the gate is a half, and squared a quarter of the lift.
         let edge = FLARE_CONE_DEGREES.to_radians().cos();
         let half = ((1.0 + edge) / 2.0).acos() + 30f32.to_radians();
         let view = Vec3::new(half.sin(), 0.0, half.cos());
         assert!((flare_view_gate(view, SUN_DIRECTION) - 0.5).abs() < 1e-3);
-        let lifted = sun_lights(&sky, Body::Sun, view)[0];
+        let lifted = sun_lights(&sky, SUN_DIRECTION, view)[0];
         assert!((lifted[0] - 0.5 * (1.0 + 4.0 * 0.25)).abs() < 5e-3, "{lifted:?}");
         sky.sun_boost = 0.0;
         assert_eq!(
-            sun_lights(&sky, Body::Sun, SUN_DIRECTION)[0],
+            sun_lights(&sky, SUN_DIRECTION, SUN_DIRECTION)[0],
             [0.5, 0.2, 0.0],
             "slot 17's alpha scales it"
         );

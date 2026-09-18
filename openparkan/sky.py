@@ -282,24 +282,40 @@ BODY_ANGLES = {"sun": (90.0, 30.0), "moon": (0.0, 50.0)}
 BODY_SLOT = {"sun": 3, "moon": 4}
 
 
-def body_direction(name: str) -> tuple[float, float, float]:
+#: A body travels an arc of ``(ARC_SPAN * progress + ARC_START) * pi`` across
+#: its lifetime (``Terrain.dll:0x1007ed40``): it rises a tenth of a turn below
+#: one horizon, passes through its constant azimuth and tilt halfway, and sets
+#: the same distance below the other.
+BODY_ARC_START = -0.1
+BODY_ARC_SPAN = 1.2
+
+
+def body_direction(name: str, progress: float = 0.5) -> tuple[float, float, float]:
     """The unit direction to ``sun`` or ``moon``, in game axes, z up.
 
     ``CSun::Render`` builds ``Rz(azimuth) . Rx(tilt)`` every frame from the two
-    constants above and nothing ever changes them, so this is fixed for the
-    whole mission.  The direction is that matrix's third column.
+    constants above and nothing ever changes them -- but the body is not still
+    in it.  Each takt ``CSun`` turns ``(cos t, 0, -sin t)`` through that matrix,
+    with ``t`` running across the arc as its lifetime runs out, and hands the
+    result to the light manager as its first light's direction; this is that
+    vector negated, the way a viewer sees the body.  At ``progress`` 1/2 it is
+    the matrix's third column, the top of the arc.
     """
     azimuth, tilt = (math.radians(v) for v in BODY_ANGLES[name])
+    t = (BODY_ARC_SPAN * progress + BODY_ARC_START) * math.pi
+    sin_a, cos_a = math.sin(azimuth), math.cos(azimuth)
+    sin_b, cos_b = math.sin(tilt), math.cos(tilt)
+    sin_t, cos_t = math.sin(t), math.cos(t)
     return (
-        math.sin(azimuth) * math.sin(tilt),
-        -math.cos(azimuth) * math.sin(tilt),
-        math.cos(tilt),
+        sin_a * sin_b * sin_t - cos_a * cos_t,
+        -sin_a * cos_t - cos_a * sin_b * sin_t,
+        cos_b * sin_t,
     )
 
 
-def body_elevation(name: str) -> float:
+def body_elevation(name: str, progress: float = 0.5) -> float:
     """How far above the horizon a body stands, in degrees."""
-    return math.degrees(math.asin(body_direction(name)[2]))
+    return math.degrees(math.asin(body_direction(name, progress)[2]))
 
 
 def body_for(name: str) -> str:

@@ -66,7 +66,8 @@ pub use parkan_world::play::Play;
 /// looking along `forward`; `None` without an atmosphere.
 ///
 /// The clock starts at the file's closing time and plays the sections in turn; the sun
-/// object's two lights shine while a body is up (docs/10-sky.md).
+/// object's two lights shine while a body is up, the first along the body's travel and the
+/// second against it (docs/10-sky.md).
 pub fn lighting(
     world: &World,
     seconds: f64,
@@ -78,20 +79,23 @@ pub fn lighting(
     let a = world.atmosphere.as_ref()?;
     let now = atm::position(a, seconds);
     let sky = atm::at(a, now)?;
-    // STAND-IN: docs/10-sky.md#not-resolved -- which camera axis the fog's heading angle
-    // measures is not read; the view direction's heading, 0 along +y turning towards +x.
+    // The heading is the compass heading of the camera matrix's first column, 0 along +y
+    // turning towards +x (Terrain.dll:0x100850f0); that column is the view direction --
+    // Ngi32.dll's view builder makes it the view's depth axis (0x10009450).
     let heading = forward.x.atan2(forward.y);
     let fog = sky.fog_colour(heading);
     // No shipped section has the sun and the moon up at once; where two bodies are up,
     // the first started lights the scene.
-    let lights = match atm::bodies_up(a, seconds).first() {
-        Some(&body) => {
-            let [main, second] = atm::sun_lights(&sky, body, forward);
-            // STAND-IN: docs/10-sky.md#not-resolved -- where the sun object's two lights
-            // point is not read (CSun sets only their colours); both shine from the
-            // body's fixed place.
-            let direction = -body.direction();
-            [Light { direction, colour: main }, Light { direction, colour: second }]
+    let lights = match atm::bodies_aloft(a, seconds).first() {
+        Some(&(body, progress)) => {
+            // CSun sets both directions every takt (Terrain.dll:0x1007ed40): the first
+            // light travels the way the body's light does, the second the opposite way.
+            let toward = body.direction(progress);
+            let [main, second] = atm::sun_lights(&sky, toward, forward);
+            [
+                Light { direction: -toward, colour: main },
+                Light { direction: toward, colour: second },
+            ]
         }
         None => [Light::OFF; 2],
     };

@@ -3026,24 +3026,32 @@ def check_sky(check, game: Path) -> None:
                     for name, slot in sky.BODY_SLOT.items()))
 
     # Three: the flare's second gate ramps between cos 60 and cos 30, and the
-    # sun's own tilt is 30 degrees off the zenith -- so its height is cos 30
-    # exactly and it sits on the top edge of the ramp.  That coincidence is
-    # what identifies the gate as the body's height.
+    # sun's own tilt is 30 degrees off the zenith -- so at the top of its arc
+    # its height is cos 30 exactly and it reaches the top edge of the ramp.
+    # That coincidence is what identifies the gate as the body's height.
     heights = {n: sky.body_direction(n)[2] for n in sky.BODY_ANGLES}
-    check("CSun: the sun stands exactly at the top of the flare's second gate",
+    check("CSun: the sun reaches exactly the top of the flare's second gate",
           abs(heights["sun"] - sky.FLARE_HEIGHT_FULL) < 1e-6
           and sky.flare_height_gate(heights["sun"]) == 1.0,
           f"the sun's height is {heights['sun']:.6f} against a ramp that tops "
           f"out at {sky.FLARE_HEIGHT_FULL:.6f}; the moon's "
           f"{heights['moon']:.6f} gives "
           f"{sky.flare_height_gate(heights['moon']):.3f}")
-    check("CSun: both bodies stand above the horizon and a quarter turn apart",
+    check("CSun: both bodies top their arc above the horizon, a quarter turn apart",
           all(sky.body_elevation(n) > 0 for n in sky.BODY_ANGLES)
           and abs(sky.BODY_ANGLES["sun"][0] - sky.BODY_ANGLES["moon"][0]) == 90,
           f"sun {sky.body_elevation('sun'):.0f} degrees up, moon "
           f"{sky.body_elevation('moon'):.0f}, azimuths "
           f"{sky.BODY_ANGLES['sun'][0]:.0f} and "
           f"{sky.BODY_ANGLES['moon'][0]:.0f}")
+
+    # Four: a body rises and sets -- its arc starts and ends below the horizon,
+    # and the two ends mirror each other about the top.
+    ends = {n: (sky.body_elevation(n, 0.0), sky.body_elevation(n, 1.0))
+            for n in sky.BODY_ANGLES}
+    check("CSun: each body rises from below the horizon and sets below it again",
+          all(a < 0 and b < 0 and abs(a - b) < 1e-4 for a, b in ends.values()),
+          ", ".join(f"{n} {a:.1f} to {b:.1f} degrees" for n, (a, b) in ends.items()))
 
 
 #: The one header +0x14 bit shipped textures set, on 81 ARGB8888 textures.

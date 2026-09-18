@@ -299,8 +299,12 @@ keeps whatever the previous search left, which happens on the two 24-hour
 skies' second sun start.
 
 Mission 01's sun is given 525 seconds (00:30 to 14:30 of a 900-second day)
-and its moon 300 (15:30 to 23:30). What `CSun` does with the lifetime once
-it has it (`× 1000` at `+0x2c`) is not traced.
+and its moon 300 (15:30 to 23:30). What `CSun` does with the lifetime once it
+has it (`× 1000` at `+0x2c`) is **pace the body across the sky**: the fraction
+of it that has run is θ along the arc
+([below](#the-body-travels-that-matrixs-arc--read)). The clock it measures
+against is `this+0x28`, stamped by the object's slot 2 from the time its caller
+hands it (`0x1007d168`); which time that is, is not traced.
 
 ## The sibling `sky.wea` — the slot index is the role
 
@@ -413,8 +417,9 @@ is not established.
 Intensity has two gates, and both are now exact. The first: the flare is off
 once the sun is more than **15°** off the view axis, ramps linearly to full
 on-axis, and the ramp is then squared. The second ramps on **how high the body
-stands** — see [below](#where-the-sun-stands-and-it-is-not-in-a-file). Both
-sets of cosines are cached at load from constants of 15, 30 and 60 degrees.
+stands at that moment**, which rises and falls as it crosses — see
+[below](#where-the-sun-stands-and-it-is-not-in-a-file). Both sets of cosines
+are cached at load from constants of 15, 30 and 60 degrees.
 
 The whole flare is skipped when the first gate falls below **0.1**. The same
 gates also **brighten the sun's main light**, not its sprite, as this page
@@ -440,7 +445,8 @@ data from that one test:
 | +C | 3 | 4 | the `sky.wea` slot to draw with |
 
 The event record carries a pointer to that block at `+0x10`, and
-`CreateAtmosphereObject` hands it to the constructor. Three things fall out.
+`CreateAtmosphereObject` hands it to the constructor. Everything below falls
+out of those four fields.
 
 **The fourth field is the slot table.** 3 and 4 are `sun` and `moon` in
 `SLOT_ROLES` — read out of `sky.wea` quite separately, from the nine slots all
@@ -449,31 +455,59 @@ index without either having been derived from the other.
 
 **The two angles are an azimuth and a tilt.** `CSun::Render` builds
 `Rodrigues(axis = (cos A, sin A, 0), B)` and multiplies it by a rotation of
-`A` about the vertical, which is `Rz(A) · Rx(B)`; the body's direction is that
-matrix's third column, `(sin A sin B, −cos A sin B, cos B)`. So:
+`A` about the vertical, which is `Rz(A) · Rx(B)` (`0x1007d2e3`), and keeps it
+at `this+0x38`. Its third column is `(sin A sin B, −cos A sin B, cos B)`. So:
 
-| | azimuth | tilt | direction (game axes, z up) | above the horizon |
+| | azimuth | tilt | third column (game axes, z up) | above the horizon |
 |---|---:|---:|---|---:|
 | sun | 90° | 30° | (0.5, 0, 0.866) | **60°** |
 | moon | 0° | 50° | (0, −0.766, 0.643) | **40°** |
 
-**And that is where the flare's second gate comes from.** It ramps on the
-height of that same direction — the vector at `this+0x78`, whose third
-component is the `+0x80` the gate negates and compares — between
-`cos 60° = 0.5` and `cos 30° = 0.866`. The sun's height *is* `cos 30°`, to
-the last bit, so the sun sits exactly on the top edge of the ramp and always
-flares at full; the moon's 0.643 gives 0.390. The two gate constants were
-chosen to bracket the two bodies, which is what identifies what the gate
-measures.
+### The body travels that matrix's arc — *read*
 
-Nothing ever rewrites the two angles: `Render` rebuilds the same matrix from
-them every frame. The sun does not travel.
+The two angles are never rewritten, but they place an **arc**, not a body.
+Every takt the sun object's slot 3 (`0x1007ed40`) takes the fraction of its
+lifetime that has run — `(now − this+0x28) ÷ this+0x2c`, clamped to 1
+(`0x1007ed4c`–`0x1007ed85`) — forms
+
+```
+θ = (1.2 × fraction − 0.1) × π
+```
+
+from the constants `1.1` and `−0.1` (`0x1009bb48`, and `0x1009c1ac`, which sits
+immediately past the object's vtable), writes `(cos θ, 0, −sin θ)` to `this+0x78`
+(`0x1007edc9`) and turns it through the matrix at `this+0x38` (`0x1007ede6`).
+The result is the direction the body's **light travels**:
+
+```
+(cos A cos θ − sin A sin B sin θ,  sin A cos θ + cos A sin B sin θ,  −cos B sin θ)
+```
+
+At θ = 90° — halfway through the lifetime — that is the third column negated,
+so the table above is where each body stands at the **top** of its arc. The
+ends, θ = −18° and θ = 198°, put the body below the horizon: −15.5° for the
+sun, −11.5° for the moon, the same at both ends (*measured*, from the two
+angles). **The sun rises, crosses and sets**, on a plane the azimuth and the
+tilt tip out of the vertical.
+
+**And that is where the flare's second gate comes from.** It ramps on the
+height of that same vector — `this+0x78`, whose third component is the `+0x80`
+the gate negates and compares — between `cos 60° = 0.5` and `cos 30° = 0.866`.
+Negated, the height is `cos B × sin θ`, which peaks at `cos B`: the sun's peak
+*is* `cos 30°`, to the last bit, so it reaches exactly the top edge of the ramp
+at its zenith and falls off it as it rises and sets; the moon's peak of 0.643
+gives 0.390 and never more. The two gate constants were chosen to bracket the
+two bodies at their highest, which is what identifies what the gate measures.
+
+That also settles what `CSun` does with the lifetime it is handed: it is the
+**span of the crossing**. Mission 01's sun has 525 seconds of a 900-second day
+to cross, and its moon 300.
 
 What the mission does choose is **when**, and the data backs the reading.
 **33 of the 35 shipped sections hold exactly one sun window and one moon
 window**, opcode 0 to opcode 1 — the sun up from about 00:30 to 14:30, the
 moon from 15:30 to 23:30. **No section has them up at once**, which is what
-makes two fixed positions only a quarter turn apart coherent: they are never
+makes two arcs only a quarter turn apart coherent: they are never
 in the sky together. The other two sections are the 24-hour skies, which run
 the sun twice and never the moon.
 
@@ -550,13 +584,6 @@ the flare gates as [above](#the-lens-flare), and the second's to slot 21
 `CShade::EmbossBumpMap` (`0x1002ce40`), passes over a `0x10000000` light
 (`0x1002cf87`); where else each is used is not traced.
 
-**Their direction is not set by `CSun`.** It calls the light manager at slots
-3, 6, 9, 12, 13 and 18 and never at the one that writes a position
-(slot 4, `0x100800a0`). A type-3 light's direction is the three floats at
-its record's `+0x24`, both where the Direct3D light is built (`0x10030ab3`)
-and in the emboss pass (`0x1002d08d`), and no writer of that field has been
-found.
-
 The sun's on-screen half-extents are `float 1 × 0.1625 × camera slot 27`
 across and `float 2 ×` the same up (`0x1007dfdf`), which the takt tests
 against the screen's edges. When the shader's flag bit 0 is set, the sun
@@ -564,6 +591,36 @@ passes slot 17 through the shader's slot 5 first, and the sky does the same
 to its fog colour (`0x1007d93d`, `0x10079b05`); the sky also sets its colour
 mask to `0xff00ff00` in that mode, which reads as a green night-vision filter
 (*guess*).
+
+### Where the two lights point — *read*
+
+A `CLightSrc` record is **0x5c bytes**, in an array at the manager's `+0xc`
+with the count at `+0x10` (`CLightSrc::CheckLightSrcNo`, `0x1008006e`). A
+type-3 light's direction is
+the three floats at record `+0x24`, both where the Direct3D light is built
+(`0x10030ab3`, against `+0x18` and `+0x30` for the other types) and in the
+emboss pass (`0x1002d08d`). Its writer is the manager's **slot 9**,
+`0x10080550` — `SetDirection(id, space, x, y, z)`: space 0 stores the vector
+as given (`0x100805a8`), space 2 first turns it through the manager's own
+object's world placement (`0x100805be`–`0x10080629`), and any other space does
+nothing.
+
+`CSun` calls it twice every takt, from the same slot 3 that walks the arc
+([above](#the-body-travels-that-matrixs-arc--read)): the **first** light
+(`this+0x20`) gets the vector at `this+0x78` in space 0 (`0x1007edfd`–
+`0x1007ee2a`), and the **second** (`this+0x24`) gets it negated
+(`0x1007ee2d`–`0x1007eea8`). So the main light shines the way the body's light
+travels and the second shines back at it — a counter light, which is what the
+unread setting `ContrLightOn` is named for.
+
+*Measured*, over the whole module: of the **72** sites in `Terrain.dll` that
+stride a light record by `0x5c`, the record offsets ever written are 4, 8, 0xc,
+0x10, 0x14, 0x18, 0x1c, 0x20, 0x24, 0x28, 0x2c, 0x30, 0x34, 0x38, 0x3c, 0x40,
+0x44, 0x48, 0x4c, 0x50, 0x54 and 0x58 — and `+0x24` is written at exactly
+**three**: slot 9's two branches, and `CLightManager::CLightManager` at
+`0x1007fde1`, which gives every light it makes the default direction
+**(1, 0, 0)** and the colour white. Nothing outside the module can reach a
+record except through the manager's 23 slots, and no other slot writes `+0x24`.
 
 ### The dome
 
@@ -608,8 +665,41 @@ own. Bits 0 and 1 of one argument become the draw item's `ZENABLE` and
 | `0x1007a408`, `0x1007a49e` | `+0x384`, `+0x404` | at the camera | 1 | 0 |
 
 So the layers drawn at the camera are depth-tested and write no depth.
-Neither says how a 34142-radius cap escapes the far plane, or a fog that ends
-by 700.
+
+**What a render layer is** (*read*). The last argument but one of that call —
+the 1 the sky passes — is the **item pool** the draw item is allocated from
+(`0x10028508`, `0x1002850c`), and a view draws in two rounds
+(`0x10081c90`–`0x10081ce8`): it runs the pass list's group 0, flushes pool 0,
+runs group 1, then flushes pool 1. The pass list (`0x10032c60`) keeps one array
+of passes per group. So layer 1 is drawn **after** everything in layer 0.
+
+**A pass carries its own near plane, far plane and depth range** (*read*). At
+its start (`0x1003d760`) a pass asks the render device for the current camera
+into a 100-byte block of its own (`GetCamera`, `Ngi32.dll:0x100073f0`, which
+names the block: size `0x64` at `+0`, near at `+4`, far at `+8`, the field of
+view at `+0xc`, the camera matrix pointer at `+0x14`, the viewport rectangle at
+`+0x3c` and its min and max z at `+0x4c` and `+0x50`), overwrites the near, the
+far and both z bounds from its own six-word descriptor (`slot 5`,
+`0x10031bd0`), and hands the block back through the device's `SetCamera` (slot
+25, `Ngi32.dll:0x10007170`). At its end (`0x1003d920`) it restores all four and
+sets the camera again. A descriptor is `{type 0..5, near, far, min z, max z,
+flag}`, 24 bytes, and the type picks which of six pass classes the factory
+makes (`0x10031760`); the list is built from two such arrays (`0x10032ae0`).
+
+That is a mechanism that would answer the question, and `Terrain.dll` even
+holds a descriptor shaped for it: one static initialiser (`0x1007c450`) fills a
+run of ten descriptors at `0x100a3828`, of which the **first** is near **700**,
+far **50000**, z range **1.0 to 1.0** — a pass that begins exactly where the
+ordinary far plane ends and reaches past the dome's 34142, with its depth range
+pinned to the very back of the buffer — while the other nine are near 0.5 (or
+0.2, or 0.05), far 700 (or 10), z range 0.1 to 0.99. **But nothing reads
+them**: a raw byte search of every section of `Terrain.dll` finds no reference
+to `0x100a3828`, nor to the four-descriptor array at `0x100a7410` that the same
+initialiser fills. The control is the same search: it does find `0x100a3800`,
+the blob the dome's own draw pushes (`0x1007a339`), and the pass list's vtable
+`0x1009ae18` at its two constructors. So the tables are written at load and
+never used, and which descriptor the sky's pass actually gets is **not
+established**.
 
 **Its colours** (`0x1007ac60`):
 
@@ -665,12 +755,32 @@ by 700.
 - the colour `lerp(horizon[k], horizon[k+1], f)`, alpha forced to 255,
   becomes `FOGCOLOR` (`0x10079b28`) and the colour of every rim vertex.
 
-So *b* = 0 gives property 0, and *b* grows from +y towards +x. The matrices
-here are column-vector (the camera's translation is `m[3]`, `m[7]`, `m[11]`,
-`0x1007a17d`), so the first column is one of the camera's own axes in world
-space. That it is the axis the camera looks along — which would make the fog
-exactly the horizon in the direction you look — is a *guess*: it is the only
-axis the angle getter describes.
+So *b* = 0 gives property 0, and *b* grows from +y towards +x.
+
+**The first column is the axis the camera looks along — *read*.** The matrix
+the angle getter reads is the camera object's world placement: slot 28
+(`0x100850f0`) asks the `CGameObject` interface at the camera's `+4` for
+placement type 2 (`CGameObject::GetPlacement`, `0x1008ae50`, which returns the
+world matrix at the object's `+0x60`) and takes `m[0]`, `m[4]` and `m[8]`.
+The same call, with the same type, is what the view hands the renderer: the
+view's placement getter (`0x10082f60`) forwards type 2 to its attached
+object, the view's projection setup puts the pointer it returns at `+0x14` of
+a 100-byte camera block (`0x10081a58`), and the render device's slot 25 copies
+all sixteen floats into its own slot (`Ngi32.dll:0x100073a5`) and builds the
+Direct3D view from them (`0x10009450`):
+
+- the view's **depth** is `(m[0], m[4], m[8]) · (p − E)`;
+- its **x** is `−(m[1], m[5], m[9]) · (p − E)`, its **y** `(m[2], m[6], m[10])`;
+- with the eye *E* = `(m[3], m[7], m[11])`, which is how the dome is placed at
+  the camera (`0x1007a17d`) and how a camera's position is read elsewhere
+  ([03-terrain.md](03-terrain.md#when-it-draws--read)).
+
+So the columns are forward, left, up and the eye, the bottom row is
+`(0, 0, 0, 1)`, and *b* is the compass heading of the **view direction**: the
+fog is exactly the horizon in the direction you look. The second consumer
+agrees — `Control.dll` builds a unit's first-person frame as a matrix whose
+columns are look, side, up and eye and hands it out as the same placement type
+2 ([30-turrets.md](30-turrets.md#aiming-and-the-camera--read-and-measured)).
 
 **Blended geometry fogs to a neutral colour.** For the duration of a draw,
 the fog colour is swapped by blend mode (`0x1002ffea`; tables `0x1009a9c8`
@@ -827,32 +937,45 @@ entries; the scan that finds nothing at index 0 finds both.
   the centre of the screen instead.
 
 The time-of-day control walks the first section's keyframes and opens on the
-one in force when the mission's clock starts. The scene's light points at
-whichever body is up, so the shading and the sky agree; the game's own light
-direction is not established.
+one in force when the mission's clock starts. The scene's light points where
+the body up at that moment stands on its arc, and the second light back at it,
+which is what the game does.
 
 ## Not resolved
 
-- **Where the sun's lights point.** `CSun` makes two directional lights and
-  sets only their colours; the field a directional light is drawn with, the
-  light record's `+0x24`, has no writer found. Next handle: the light
-  manager's other callers and whatever fills its records each frame.
-- **What `CSun` does with the lifetime** it is given, and so whether a body
-  started before the clock's start keeps its full lifetime from its own
-  keyframe or from creation.
-- **How the 34142-radius dome escapes the far plane and a fog ending by
-  700.** Its layers are depth-tested without depth writes, in render layer 1,
-  on a record that takes the scene's fog. Next handle: how layer 1 is drawn —
-  its projection, and the fog defaults the render pass copies from the
-  shader's slot 7 at `0x1003d9f2`.
+- ~~Where the sun's lights point~~ — the light manager's slot 9
+  (`0x10080550`) writes the record's `+0x24`, and `CSun` calls it twice every
+  takt with the body's travel and its negation; the only other writer of the
+  field is the manager's constructor, whose default is (1, 0, 0), and no
+  other of its 23 slots touches it ([Where the two lights
+  point](#where-the-two-lights-point--read)).
+- ~~What `CSun` does with the lifetime~~ — it is the span of the body's
+  crossing: the fraction of it that has run is θ along the arc
+  ([The body travels that matrix's arc](#the-body-travels-that-matrixs-arc--read)).
+  Whether a body started before the clock's start keeps its full lifetime from
+  its own keyframe or from creation still turns on what stamps `this+0x28`
+  (`0x1007d168`), which is not traced.
+- **How the 34142-radius dome escapes the far plane and a fog ending by 700.**
+  *Narrowed.* A render layer is an item pool, and a view runs the pass list's
+  group *k* and then flushes pool *k*, so layer 1 draws after layer 0
+  (`0x10081c90`). Each pass overrides the camera's near plane, far plane and
+  viewport z range from its own descriptor for the length of the pass
+  (`0x1003d760`, restored at `0x1003d920`), which is a mechanism that would do
+  it — and one shipped descriptor is near 700, far 50000, z range 1 to 1
+  (`0x100a3828`, filled at `0x1007c450`). But nothing in the module references
+  that table ([The dome](#the-dome)). Next handle: who calls the pass list's
+  `SetPasses` (`0x10032ae0`, slot 0 of the vtable at `0x1009ae18`) and with
+  which descriptors, and what the item-pool flush does to the fog.
 - ~~Whether `ForceSWFog` does anything outside `Terrain.dll`~~ — nothing
   reads it anywhere: 0 of `Terrain.dll`'s 41 reads of the settings page name
   entry 0, and of the four other modules that can reach the page only
   `AniMesh.dll` reads it at all, for `RobotBestLOD`
   ([Nobody reads `ForceSWFog`](#nobody-reads-forceswfog--read-and-measured)).
-- **The heading's world axis.** The angle is the compass heading of the
-  camera matrix's first column, 0 along +y and turning towards +x; that the
-  first column is the view direction is a *guess*.
+- ~~The heading's world axis~~ — the view direction. The matrix is the camera
+  object's world placement (`GetPlacement` type 2), and the same matrix, by
+  the same call, is what `Ngi32.dll` turns into the Direct3D view: its first
+  column is the view's depth axis (`0x10009450`), its last the eye
+  ([Fog](#fog)).
 - The sun sprite's extent unit, camera slot 27, and the shader's slot 5
   colour filter and its flag bit 0.
 - ~~Which field carries the opcode~~ — the word ahead of slot 0; the three
