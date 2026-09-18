@@ -24,6 +24,31 @@ premises in this file were wrong and are rewritten above: the six turrets'
 gate is measured over 17 player trees, not 11, and the "five labels and the
 label inside a block" is five plus one, the one being no anomaly.
 
+A second round of twelve, the same four areas of three, was worked the same
+day. **All twelve closed**, one of them because an earlier round had already
+answered it and this file was never ticked. Three are negatives carrying their
+controls: no module outside `Terrain.dll` reads `ForceSWFog`, not one of the
+275882 shipped land faces carries either bit the ground search excludes, and
+nothing reads an `.exp`'s two 1.0 floats. The engine changed in five places,
+and elsewhere it was already right, which the docs now record as read rather
+than assumed: a tree and a stone carry node life like any other
+agent and are built at their placement scale, so a stone scaled 21 holds
+billions rather than thousands; a vital node's death now takes node 0 with it;
+a mine's lode and its total meet half way, so a lode of 600 yields 350; a chord
+falls through to the plain row by the read rule rather than by luck; and a
+walker's feet are laid along the ground by the pose its state ends in.
+
+That last one **corrects a premise of the round before it**, and both entries
+are rewritten where they stand. `CONTACT_PLACE` is not only the authored flag 2 on twelve
+belt contacts: flag `0x20` makes the engine work the flag out afresh each time
+a machine takes a state, from the contact's own axis in the state's end pose,
+and it comes out set on **2229 of the install's 2634 contacts** rather than
+twelve. Every walker's feet conform to the terrain, not just the tracked
+chassis' belts. Two smaller corrections came out of the round: the contact pass
+runs at each state, not at load ([13-control](docs/13-control.md)), and the
+derivation behind "a clan orders a bot it has no mind for" was reading `op5` as
+`==` when it is `!=` ([23-economy](docs/23-economy.md)).
+
 ## Sky and rendering
 
 [10-sky](docs/10-sky.md#not-resolved), [02-texm](docs/02-texm.md),
@@ -32,10 +57,31 @@ label inside a block" is five plus one, the one being no anomaly.
 - [ ] [M1] Where the sun object's two lights point: nothing writes the light record's `+0x24`.
 - [ ] What `CSun` does with a body's lifetime, for a body that started before the clock's start.
 - [ ] [M1] How the dome escapes the far plane and the fog (render layer 1's projection, fog defaults at `0x1003d9f2`), and what lies below its rim.
-- [ ] [M1] Whether `ForceSWFog` does anything outside `Terrain.dll`.
+- [x] ~~[M1] Whether `ForceSWFog` does anything outside `Terrain.dll`~~ — closed 2026-09-18: **no
+  module reads it**, and it is entry 0 of `Terrain.dll`'s 36-setting page. A setting is read as
+  `[index * 4 + 0x100a6cac]`, an address the loader relocates, so the readers are countable rather than
+  searchable: 41 relocation sites name the page, all 41 carry a constant index, none is 0, and between
+  them they cover 32 of the 36 — entries 1 `LightingOn` and 2 `SpecularsOn` either side of it are the
+  control. Across modules the page is interface `0x1e` of `World3D.dll`'s settings registry, keyed
+  `(index << 16) | id`, and the game makes exactly one cross-module settings read in its life:
+  `RobotBestLOD`, from `AniMesh.dll`. `Ngi32.dll`, which would have to implement a software fog, does
+  not import the registry at all. The engine's per-fragment fog stands ([10-sky](docs/10-sky.md)).
 - [ ] [M1] The fog heading's world axis: that the camera matrix's first column is the view direction is a guess.
-- [ ] [M1] Whether water draws see-through (`WATER` says opaque, with a `WATER_BOT` bed beneath).
-- [ ] [M2] Whether a blended material writes depth, and the alpha test's reference value.
+- [x] ~~[M1] Whether water draws see-through~~ — closed 2026-09-18: **opaque**, and the engine was
+  already right. A mesh batch takes its blend mode from its material's flags byte through `CShade`'s
+  translate table, but the ground does not: the ground surface takes `CShade+0xbf4`, which its init
+  fills from translate index 0 — mode 0, `ONE`/`ZERO`, no blend and no alpha test — and the
+  `REFLECTION_SHIFTED` water surface writes mode 0 outright. Measured over all 275882 faces of the 33
+  maps, `WATER` (1006 faces on 7 maps), `WATER_BOT` (2015) and every `L*` ground material carry flags
+  byte 0. The control is the 2624 `ENV_NLAVA` faces, whose flags byte 4 *does* ask for
+  `SRCALPHA`/`INVSRCALPHA`: they draw opaque anyway, because the ground draw never looks
+  ([03-terrain](docs/03-terrain.md)).
+- [x] ~~[M2] Whether a blended material writes depth, and the alpha test's reference value~~ — this
+  line was **stale**: an earlier round answered it (`27172f2`), a blended batch drops only alpha 0 and
+  writes depth, and the engine implements it. Re-read independently 2026-09-18 and it holds:
+  `ALPHAREF` is 1 and `ALPHAFUNC` is `GREATEREQUAL`, written by two agreeing writers, and the six
+  blend-mode records are 30 `{state, value}` pairs over five states, among which neither `ALPHAREF`
+  nor `ZWRITEENABLE` appears ([07-objects](docs/07-objects.md)).
 - [ ] [M3] What draw layers 10 and 9, which a fifth slot is filed under, do (`Terrain.dll:0x1004553b`); and `CShade` slot 15.
 - [ ] The sun sprite's extent unit, camera slot 27, and shader slot 5's colour filter and flag bit 0.
 - [ ] Texture header bit `0x4000000`: which batch of exports it marks, and whether the exporter is
@@ -61,9 +107,11 @@ label inside a block" is five plus one, the one being no anomaly.
   ground under it. Slot 8 mirrors the bit into the node record's byte `+0x113` — nothing tests the mask
   word against `0x10`, so the byte is the whole path — and the pose walk then turns the node's world
   matrix by the rotation slot 31 left on it and writes the translation back, so the node tilts where it
-  stands. Set by the ground contact on a `CONTACT_PLACE` contact's carrier, and set on twelve nodes in
-  the game: the belts of the three tracked chassis. Implemented
-  ([28-chassis](docs/28-chassis.md), [24-motion](docs/24-motion.md)).
+  stands. Set by the ground contact on a `CONTACT_PLACE` contact's carrier. ~~Set on twelve nodes in the
+  game: the belts of the three tracked chassis.~~ **Corrected later the same day**: `CONTACT_PLACE` is
+  worked out from the state's end pose as well as read from the file, so it reaches 2229 of the 2634
+  contacts and every walker's feet, not twelve belts (see *Contact record flag `0x20`* below).
+  Implemented ([28-chassis](docs/28-chassis.md), [24-motion](docs/24-motion.md)).
 
 ## Effects and sound
 
@@ -95,18 +143,46 @@ label inside a block" is five plus one, the one being no anomaly.
 - [ ] [M3] How interface `0x25` slot 3 turns level-0 triangles into a push, and what slot 2 does with its 0.5.
 - [ ] [M3] Which scene nodes are types 1 and 3, which decides whether bridges and buildings are ground; plus a machine's type-3 parent and what message `0x201` returns.
 - [ ] [M3] The ground contact's timing and dt, the pose its contact points use, the second sphere's radius r₂, and what lifts a sphere with no face under it.
-- [ ] Which `Land.msh` faces carry the world bit `0x8` and class bit 8 that the ground search excludes.
-- [ ] Contact record flag `0x20`. (~~flags 2 (slot `0x7c`)~~ — closed 2026-09-18: flag 2 is
-  `CONTACT_PLACE`, which lays the node the contact *carries* along the ground beneath it and leaves it
-  where it stood; 12 of the install's 2634 contacts carry it, four each on the three tracked chassis, and
-  every contact of the wheeled chassis is `0x5`. Read, measured, implemented and tested
-  ([28-chassis](docs/28-chassis.md)).)
+- [x] ~~Which `Land.msh` faces carry the world bit `0x8` and class bit 8 that the ground search
+  excludes~~ — closed 2026-09-18: **none of them do**. The missing step was naming the fields. The
+  ground search excludes world `0x208` and class bit 8; `Terrain.dll` folds each pair into one
+  landscape mask, and the landscape's mask is the file's face record unconverted — the flags word low,
+  the surface word high. So the two bits are the flags word's `0x20` and the surface word's `0x04`, and
+  **0 of 275882 faces across all 33 maps** carry either, at both levels of detail. The reading is
+  cross-checked on two bits of the same word that faces *do* carry: landscape `0x2000` is the flags
+  word's `0x2000` on exactly the 6102 bed faces, and landscape `0x20000` the surface word's `0x02` on
+  exactly the 3630 water faces — which is also the control. The engine's ground index was already
+  exactly this filter. What would ever set them is not established
+  ([24-motion](docs/24-motion.md)).
+- [x] ~~Contact record flag `0x20`~~ — closed 2026-09-18, and it **corrects the flag-2 entry below**.
+  `0x20` does not mean "place": taking a state poses the object at the state's end, asks each contact
+  point for its own axis, and then *sets* `CONTACT_PLACE` where that axis stands up — z above 0 and
+  1 − z below 0.05 — and clears it otherwise. So the flag is worked out afresh **each time a machine
+  takes a state**, not read from the file. Measured over all 2634 contacts: 2410 carry `0x20` and every
+  one of them is a **foot** — nothing with a wheel or a belt has it, and none of the 2410 is authored
+  with flag 2. Posed at each state's last frame the axis stands up on 2217 of the 2410, so **2229
+  contacts in the game lay their node along the ground**, not the twelve this file had counted. A
+  walker's feet conform to the terrain in every state whose animation ends with the foot flat (20 of the
+  hero's 210 states withhold it); the tracked belts are simply the case with nothing to work out. All
+  2410 axes are unit length, which is why the game's unnormalised compare against 1 is a cosine. Read,
+  measured, implemented and tested ([28-chassis](docs/28-chassis.md), [24-motion](docs/24-motion.md)).
+  (~~flags 2 (slot `0x7c`)~~ — closed 2026-09-18: flag 2 is `CONTACT_PLACE` as authored, on 12 of the
+  2634 contacts, four each on the three tracked chassis, every contact of the wheeled chassis being
+  `0x5`. Right about the flag; wrong that those twelve were all that place.)
 - [ ] [M3] How often `World3D.dll`'s input update runs (it paces the cruise ramp), and which screen states set the 0.5 mouse sensitivity.
 - [ ] [M3] What handlers do when an active row runs again each update, and who calls the second walk/turn ramp's setter (slot 11).
 - [ ] [M3] A state's use count `+0x94`, the state a machine starts in, the game's jitter random source, and a controller's request code before any is sent.
 - [ ] [M3] The vector that righting bits `0x30` stand the hull toward (`+0x348`, no writer found).
 - [ ] [M3] Which way across a slope the mode-2 brake acts, and which way a positive lean tips the model.
-- [ ] [M3] A chord with no row of its own, such as Shift+W.
+- [x] ~~[M3] A chord with no row of its own, such as Shift+W~~ — closed 2026-09-18: **the plain row**,
+  unless another row of the same key claims that modifier. There is no best match and no search. A pass
+  after loading appends each modifier's scan code to every plain row of any table with the same key; a
+  key event then activates a modified row only while its modifier is held, and a plain row only while
+  **none** of its listed modifiers is. Measured over the three tables' 116 rows: `SCAN_LSHIFT` is the
+  only modifier any of them uses, on 4 rows each, and the pass writes exactly two exclusion entries per
+  table — the plain mouse X and mouse Y rows. Every other plain row's list is empty, so Shift+W walks.
+  The engine's stand-in agreed with the rule on all 116 shipped rows; it now applies the rule
+  ([14-controls](docs/14-controls.md)).
 - [ ] What behaviour flag `0x800` changes besides clearing the walker.
 - [ ] [M14] The walker's local path and its obstacle contours: how it goes round a tree's or a stone's hole, whether it widens it by the unit's size, how a walker in one walks out, and what it does with a goal in one; the sub-areals' shapes and whether the search measures one from its centre; whether every scenery object reaches the areal map, and the box of a mesh of several parts; how it drops the points a unit has passed (`MWalker::ClearMoverReachedPoint`); how a unit's place comes onto a building's map object and which vertex the search starts from; who calls `MHallWay` slot 11; a hall-way vertex's size gate (the unit's `+0x960`, the record's `+0x28`); the link flags `0x10000` and `0x20000`; how a walker goes to the point it finds off a non-walkable areal, and what it does when its search fails; and how a walk to a door gets past the building's own walls, which cut no areal (the engine: a door more than 20 over the ground under it is passed over, and a straight line into a wall goes round the building's ground contour) ([24-motion](docs/24-motion.md#not-established)).
 - [ ] The remaining `.ctl` values:
@@ -163,11 +239,39 @@ label inside a block" is five plus one, the one being no anomaly.
 [27-ownership](docs/27-ownership.md#not-established)
 
 - [ ] [M4] The hit test's point-in-triangle test (`0x10011090`) and the landscape's own cell size.
-- [ ] [M4] Which node flag makes a node vital (is AniMesh query `0xe` the mesh node's flags?).
-- [ ] [M4] Whether vegetation and rock carry node life.
+- [x] ~~[M4] Which node flag makes a node vital (is AniMesh query `0xe` the mesh node's flags?)~~ —
+  closed 2026-09-18: **yes, and the bit is `0x200`**, which is what the engine already had. Query `0xe`
+  reaches the mesh node's own stream-1 record — pointer at the runtime record's `+0x12c`, indexed by its
+  `+8` at a stride of 38, the first `uint16` — where query `0xa`, four ids along, answers the *runtime*
+  word instead; the life loader tests bit 9 of the former. Measured: 90 of 1845 mesh nodes on 9 of the
+  435 meshes, and a coherent 90 — every one a geometry-bearing segment of an articulated limb or body
+  chain (the hero's body and legs, the animals' necks, heads, tails and wings, the hero turret's two
+  arms), 0 of `fortif.rlb`'s 273, and none on a wheeled or tracked chassis. Named against its neighbour
+  as asked: mask `0x10` is broad, 861 of 1845 over all nine archives, where `0x200` is narrow; they
+  coincide on 8, each the leaf of a flagged chain. Why the bit falls on those nine models and not on the
+  other walkers' legs is not established ([26-damage](docs/26-damage.md)).
+- [x] ~~[M4] Whether vegetation and rock carry node life~~ — closed 2026-09-18: **they do**, and the
+  engine was wrong. A placed tree or stone goes into the game as agent type 10, and the agent build
+  gives every agent a control system and queries its `ILifeSystem` before any branch on the kind; the
+  life loader then branches on kind 10 to set the low-life mark at 0.3 of the total rather than 0.2,
+  which is only reachable if scenery has a life system at all. Measured: all 81 `STAT` records name a
+  `.ndp` and a `.ctl`, 123 node rows, 1 to 1500000 hit points, **none 0**, with `explode_tree` and
+  `explode_stone` to play. The control is the same query by tag: 63 of 63 `BTLU`, 146 of 146 `EXTO`,
+  **0 of 34 `FORT`**. And scenery is the one thing built at its placement scale, the tick rescaling
+  every node's life by the three factors multiplied, so Mission 01's `s_tree_04` at 3 has a trunk of
+  81000 rather than 3000 and Mission 02's `s_stone_10` at 21 holds 4630500000. Fixed and tested
+  ([26-damage](docs/26-damage.md), [04-missions](docs/04-missions.md)).
 - [ ] [M4] Whether a round's ground test strikes the water surface.
 - [ ] [M4] What a dead unit leaves (wreck, damage stages), and what `iron3d.dll` does with owner word `0xfffe` (37 compares).
-- [ ] The `.exp` record's two 1.0 floats, for which no reader was found.
+- [x] ~~The `.exp` record's two 1.0 floats, for which no reader was found~~ — closed 2026-09-18 as a
+  **negative with its control**: the thread the doc named ends, and nothing reads them. The record is
+  792 bytes on all 144, exactly `0x18 + 12 × 64`, so nothing is unparsed. Its bytes reach one pointer,
+  the `.exp` cache, whose only fetch is the known one — and no module in the install holds the string
+  `.exp` besides. That pointer is stored at offset 0 of the hit record, and the hit's `+0` is
+  dereferenced in four functions, each reading the first dword only, the kind. The control is that the
+  same enumeration finds four of the six scalars and all twelve names at named addresses: it is not
+  blind to two adjacent floats between the radius and the placement word. What they are *for* is left
+  as a guess the layout supports and the code does not settle ([26-damage](docs/26-damage.md)).
 - [ ] What the player's map and radar display show (`iron3d.dll:0x1003fb90` and `0x10073550`).
 - [ ] What moves a SuperAI's attitude from one relation band to another.
 - [ ] The game view's states 1, 3, 4, 5 and 6, and what pods open on a generator, mine, storage or Outpost; also what `0x10033e40` refuses on a tower.
@@ -180,7 +284,19 @@ label inside a block" is five plus one, the one being no anomaly.
 
 - [ ] What the two floats an object's strength is made of are (`IControl` property `0x36` and interface `0x204`'s `+4`), and so what a `TAKE_BY_HITS` amount is worth; the problem's action record, and SuperAI `+0x40c`. The strength formula and the helper that sums it over a radius — once read as a distance — are now read.
 - [ ] A problem's two raise numbers, which handler runs when, and who writes `dCurrentProblem` and `dCurrentSender`.
-- [ ] Channel 2 of the message callback (function 57), and the count function 69 stores.
+- [x] ~~Channel 2 of the message callback (function 57), and the count function 69 stores~~ — closed
+  2026-09-18. **Channel 2 runs a line of the mission's own `object script` block** in `mission.cfg`:
+  the callback takes the channel first, function 57 passes 2, and that arm formats its one value into
+  the key `script%d`, looks it up and dispatches the first token against a ten-entry table which is
+  **the game's debug console**, names and help text intact — `truth kill bkill cls summon ? create
+  delete bcreate death`. Measured: 6 of the 29 shipped `mission.cfg` files carry a non-empty block, 20
+  lines between them, three of the ten names used; 14 of 14 calls of function 57 name a line their own
+  mission declares and 0 of 14 one it has not got. Control: 244 calls on channel 0. **Function 69's
+  count is the AI design pick's spread**: the pick scores every design, sorts it best first, and then
+  takes not the best but the candidate at a random index within that many of the top. All 7 call sites
+  set it in `Init` from `fDifficulty` — an easy game makes the enemy clan build worse designs. The
+  engine answers 0 to both, which is indistinguishable here: 0 of the 21 call sites names a destination
+  ([15-behaviour](docs/15-behaviour.md)).
 - [x] ~~Whether any script depends on a constant landing inside a false block~~ — closed 2026-09-18: no,
   and the executor says why — the constant arm is the only one of the eight that does not test the
   condition byte first. All 63 in-block constants write one of five scratch variables; over the 121
@@ -203,8 +319,23 @@ label inside a block" is five plus one, the one being no anomaly.
   ([15-behaviour](docs/15-behaviour.md)).
 - [ ] A fire-control request's 0.5, and what sets `+0x5c` and `+0x60` to lock a unit's fire mode.
 - [ ] Who sends `MBehaviour` messages `0x19` and `0x1a` (the retaliations).
-- [ ] Whether a clan's AI re-orders a build refused for want of a mind.
-- [ ] What a mine's ToMine does to its output.
+- [x] ~~Whether a clan's AI re-orders a build refused for want of a mind~~ — closed 2026-09-18: **it
+  drops it, at every level**, and the page's derived claim was backwards. `op5` is `!=`, not `==`, so
+  all 9 `ORDER_BUILDING_CONSTRUCT` sites — one per script, every one in `PBM_ROBOT_NEEDED_Start` — mark
+  the problem *solved* and return when the order was **not** taken, and nothing in the handler orders
+  again. 8 of the 9 never try without a mind at all, opening on `if dFreeMindNumber <= 0`. Because the
+  problem is marked solved rather than left standing, the duplicate test no longer blocks it, and the
+  108 raises of `PBM_ROBOT_NEEDED` across 13 scripts bring it back when something wants a robot. The
+  engine's factory already refuses correctly and queues nothing ([23-economy](docs/23-economy.md)).
+- [x] ~~What a mine's ToMine does to its output~~ — closed 2026-09-18: it **bounds** the output and
+  never scales it — the rate is `Mine_OrePerSecond × KPD` whatever the lode holds — but **the bound
+  bites at half**. A takt digs, takes `ToMine − total` before either changes, then adds the dig to the
+  total *and* takes the same dig off `ToMine`, ending when that pre-dig gap was no more than the dig. So
+  the two meet half way and a lode of 600 yields 350. Measured over all 29 missions: 15 placed mines in
+  8 missions, each with exactly one lode within 250, none carrying less than twice the 500 a mine may
+  hold — so no shipped mine is ever bounded by its lode and the fix is fidelity, not behaviour. Control:
+  6 of the 95 other buildings in those missions also stand within 250 of a lode. Fixed, with the final
+  dig now banked on the ending takt ([23-economy](docs/23-economy.md)).
 
 ## Mission progression
 
