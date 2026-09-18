@@ -842,6 +842,39 @@ fn mission_04_research_play() -> (parkan_world::play::Play, parkan_formats::miss
     (play, m)
 }
 
+#[test]
+#[ignore = "needs the game install"]
+fn a_research_centre_built_in_play_takes_the_research_panels_orders() {
+    use parkan_world::selection::RESEARCH_CENTRE;
+
+    let (mut play, _) = mission_04_research_play();
+    let player = play.player_clan;
+    let turret = play.research_rows()[0];
+    // The mission's own centre is the enemy's, so the panel has nowhere to send an order.
+    assert!(!play.order_research(turret), "no centre of the player's");
+
+    // A Small Research Center of the player's, put up east of the hero.
+    let at = glam::Vec3::new(683.17, 146.46, 215.13);
+    assert!(play.placement_valid(None, RESEARCH_CENTRE, at, 0.0), "somewhere to put it");
+    let now = play.hero.time_ms;
+    let centre = play.create_building(player, RESEARCH_CENTRE, at, 0.0, now).expect("it stands");
+    play_for(&mut play, 1.0 / 60.0, |_| {});
+    let of = |play: &parkan_world::play::Play| {
+        play.research.centres.iter().find(|c| c.target == centre).cloned().expect("it joined")
+    };
+    // MBehaviour's own grants, none of them a mission's (docs/23, "The four grants").
+    assert_eq!(of(&play).grants, parkan_sim::research::Grants::default());
+    // The order waits for its construction sphere (docs/41: "the living, unsphered centre").
+    assert!(play.building_itself(centre));
+    assert!(!play.order_research(turret), "not while its sphere runs");
+
+    play_for(&mut play, 60.0, |_| {});
+    assert!(!play.building_itself(centre));
+    assert!(play.order_research(turret));
+    assert!(play.research_queued(turret));
+    assert_eq!(of(&play).orders, [turret]);
+}
+
 /// The parts the large flyer's turret socket offers in the player's tree as it stands.
 fn large_flyer_turrets(play: &mut parkan_world::play::Play) -> Vec<String> {
     let game = play.assembly.game.clone();

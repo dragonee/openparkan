@@ -122,6 +122,22 @@ impl Play {
         self.research.clan(self.player_clan).map(|c| c.state.rows()).unwrap_or_default()
     }
 
+    /// Every research centre standing joins the list an order may go to: those the mission
+    /// placed, at load, and one built since, which carries `MBehaviour`'s own grants --
+    /// no free technology and a two-second research time (docs/23, "The four grants").
+    pub fn join_centres(&mut self) {
+        for t in 0..self.units.len() {
+            if self.units[t].kind != mission::KIND_BUILDING
+                || self.units[t].type_word != RESEARCH_CENTRE
+                || self.research.centres.iter().any(|c| c.target == t)
+            {
+                continue;
+            }
+            let centre = Centre { target: t, grants: Grants::default(), orders: Vec::new(), task: None };
+            self.research.centres.push(centre);
+        }
+    }
+
     /// The player's research centres an order may go to (`0x10087c00`, list `0x1010c36c`):
     /// those of the clan that stand, in target order.
     fn player_centres(&self) -> Vec<usize> {
@@ -203,6 +219,7 @@ impl Play {
     /// not read: every tick.
     pub fn tick_research(&mut self, dt_ms: f64) {
         let dt = (dt_ms / 1000.0) as f32;
+        self.join_centres();
         for c in 0..self.research.centres.len() {
             let t = self.research.centres[c].target;
             let alive = self.battle.combat.targets.get(t).is_some_and(|x| x.alive);
