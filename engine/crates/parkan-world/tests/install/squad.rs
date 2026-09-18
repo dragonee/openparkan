@@ -1067,6 +1067,48 @@ fn a_click_on_the_research_centre_sends_the_helicopter_to_take_it_alone_then_it_
     assert!((at - pod).truncate().abs().max_element() < 175.0, "escaped to {at} from {pod}");
 }
 
+/// A building's mark on the satellite map is the building: the pick takes what the map marks
+/// within 80 of the place clicked, so an order lands on it as it does on a click in the world
+/// (docs/42, "On the open satellite map"). The neutral research centre is a capture for the
+/// helicopter and an attack once a big warbot is the one selected.
+#[test]
+#[ignore = "needs the game install"]
+fn a_click_on_a_buildings_mark_on_the_map_captures_with_a_small_bot_and_attacks_with_a_big_one() {
+    use parkan_sim::behaviour::{Search, Task};
+    use parkan_sim::orders::{ATTACK, Target};
+    use parkan_world::pick::{Aim, cursor_state};
+
+    let (mut play, m) = mission_04_play();
+    let heli = object_target(&play, &m, "tut4_f1.dat");
+    let centre = object_target(&play, &m, "einst01.dat");
+    let id = play.units[centre].logical_id;
+    // The whole map on the hero's radar, so the map marks every live object on it.
+    play.hero.radar.range = 1.0e5;
+    play.commander.units = vec![heli];
+    let at = play.battle.combat.targets[centre].position;
+    // The centre's mark with the helicopter selected: kind 4, the CAPTURE cursor, and a search
+    // on that one building.
+    let pick = play.pick(Aim::Map([at.x, at.y]));
+    assert_eq!((pick.kind, pick.object), (4, Some(centre)), "{pick:?}");
+    assert_eq!(cursor_state(pick.kind), 6, "CAPTURE");
+    play.click_world(pick);
+    let task =
+        |p: &parkan_world::play::Play| p.robots.iter().find(|(t, _)| *t == heli).unwrap().1.behaviour.task();
+    assert!(matches!(task(&play), Task::Search { search: Search::Building(b), .. } if b == id));
+    // The same mark with a big warbot selected: kind 3, the TARGET cursor, and an attack on it.
+    play.units[heli].designation.size_class = 3;
+    let pick = play.pick(Aim::Map([at.x, at.y]));
+    assert_eq!((pick.kind, pick.object), (3, Some(centre)), "{pick:?}");
+    assert_eq!(cursor_state(pick.kind), 4, "TARGET");
+    play.click_world(pick);
+    let order = play.robots.iter().find(|(t, _)| *t == heli).unwrap().1.order;
+    assert_eq!(order.map(|o| (o.code, o.target)), Some((ATTACK, Target::LogicId(id))));
+    // Well away from every mark the map still sends the unit to the place clicked.
+    let empty = [at.x + 400.0, at.y + 400.0];
+    let pick = play.pick(Aim::Map(empty));
+    assert_eq!((pick.kind, pick.object), (1, None), "{pick:?}");
+}
+
 /// Follow me on The Iron Monster: the wingmen follow the hero over the canyon by its bridge.
 /// Near the bridge most spots about the hero lie over the canyon, which the walker refuses, so
 /// each pick takes the first of 77 on walkable ground (docs/31, "Follow me"); and a follower

@@ -252,17 +252,20 @@ impl Play {
     }
 
     /// On the open satellite map: the place, and the first live unit within 40 of it in the
-    /// level's order, or else the first building within 80 (`0x10072b70`, `0x100728e0`).
+    /// level's order, or else the first building within 80 (`0x10072b70`, `0x100728e0`), of
+    /// those the player knows (`0x1007e660`, docs/42, "On the open satellite map").
     ///
-    /// STAND-IN: docs/25-sensors.md#not-established -- the clans the player clan record's
-    /// `+0x54` lists are not read: only the player's own units and buildings are picked.
+    /// What the map marks is what it picks, so a mark is the object it stands for: a click on
+    /// another clan's building sends the selection at it, to capture or to attack by the kinds
+    /// table, as a click on the building in the world does.
     fn map_pick(&self, [x, y]: [f32; 2]) -> (Option<Vec3>, Option<usize>) {
         let z = self.ground.below(x, y, 1.0e5).map_or(0.0, |h| h.point.z);
         let point = Vec3::new(x, y, z);
+        let known = crate::cockpit::map::known_to_player(self);
         let near = |kind: u32, reach: f32| {
             (0..self.units.len()).find(|&t| {
                 self.units[t].kind == kind
-                    && self.units[t].clan == Some(self.player_clan)
+                    && known.get(t).copied().unwrap_or(false)
                     && self.units[t].logical_id != self.hero_id
                     && self.battle.combat.targets.get(t).is_some_and(|x| x.alive)
                     && self.battle.combat.targets[t].position.truncate().distance(point.truncate()) <= reach
