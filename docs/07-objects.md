@@ -1067,9 +1067,11 @@ depth states or the reference, so those come from elsewhere:
   `ALPHAREF` (`+0x17c`) 1, `ALPHAFUNC` 7 (`GREATEREQUAL`), `ZENABLE` 1 and
   culling off into the cache, then pushes every state that differs to the
   device (`0x10006c52`). Its constructor set `ZWRITEENABLE` (`+0x154`) 1 as
-  well (`0x100060de`, `ebx` 1 from `0x10005e45`). No mode record changes
-  `ALPHAREF`, so **a blended draw drops exactly the texels whose alpha is 0**
-  and keeps every other.
+  well, and `ALPHAREF` again (`0x100060de`, `0x1000611a`, `ebx` 1 from
+  `0x10005e45`), so the cache entry's two writers agree. The six mode records
+  are 30 `{state, value}` pairs over five states, and **neither `ALPHAREF`
+  (24) nor `ZWRITEENABLE` (14) is among them** (*measured*), so **a blended
+  draw drops exactly the texels whose alpha is 0** and keeps every other.
 - **The depth states belong to the draw item.** `CShade`'s mesh draw gives each
   batch's item `ZENABLE` at `+0x12c` and `ZWRITEENABLE` at `+0x12d`
   (`Terrain.dll:0x10045b1e`): 1 and 1; 1 and **0** when the item is filed under

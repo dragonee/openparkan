@@ -27,9 +27,10 @@ fn linear(c: vec3<f32>) -> vec3<f32> {
     return select(high, low, c <= vec3<f32>(0.04045));
 }
 
-// STAND-IN: docs/10-sky.md#not-resolved -- whether ForceSWFog is read outside Terrain.dll,
-// which asks Direct3D for linear range vertex fog, is not read; the fog is taken per
-// fragment, which looks the same.
+// The scene's linear range fog: the game asks Direct3D for it on the distance to the eye and
+// lets the device compute it per vertex (docs/10, "Nobody reads ForceSWFog" -- the one setting
+// that might have said otherwise is read by nothing in the install). Taken per fragment here,
+// which is the same fog without the seams a coarse mesh gives it.
 fn fogged(colour: vec3<f32>, world: vec3<f32>, toward: vec4<f32>) -> vec3<f32> {
     let d = distance(world, frame.eye.xyz);
     let span = max(frame.fog.y - frame.fog.x, 0.001);

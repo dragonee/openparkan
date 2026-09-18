@@ -647,10 +647,10 @@ if (typeof THREE === "undefined" || typeof pako === "undefined") {
   // A material's diffuse colour multiplies its texture.  It is where a
   // Parkan lake gets its blue: WATER's texture is a neutral grey ripple.
   const WHITE = 0xffffff;
-  // Water is drawn see-through.  The material itself says opaque, but every
-  // map with water also carries a WATER_BOT material on the ground under it,
-  // and a lake bed nobody can see would not be worth authoring.  The exact
-  // figure is a renderer choice.
+  // Water is drawn see-through here, which the game does not do: its ground
+  // surface takes a fixed opaque blend mode and the water's takes mode 0
+  // outright (docs/03, "The ground draws opaque").  This viewer shows the lake
+  // bed instead, because seeing the terrain under a lake is the point of it.
   const WATER_OPACITY = 0.72;
 
   function multiply(a, b) {

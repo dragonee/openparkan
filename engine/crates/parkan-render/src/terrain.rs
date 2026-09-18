@@ -274,9 +274,11 @@ impl TerrainRenderer {
                     bias: Default::default(),
                 }),
                 multisample: Default::default(),
-                // STAND-IN: docs/03-terrain.md#not-established -- whether the water surface is
-                // blended over the frame beneath it is not read; no layer's blend mode is read, and
-                // the ground and the water draw opaque.
+                // No target blends: the ground and the water are opaque, and read so (docs/03,
+                // "The ground draws opaque"). The ground surface takes its mode from the fixed
+                // `CShade+0xbf4`, filled from translate index 0 -- `ONE`/`ZERO` -- rather than
+                // from the layer material's flags byte, and the water's REFLECTION_SHIFTED
+                // surface writes mode 0 outright (`Terrain.dll:0x1002cdd0`).
                 fragment: Some(wgpu::FragmentState {
                     module: &shader,
                     entry_point: Some(fragment),

@@ -1474,6 +1474,46 @@ def check_water_reflection(check, game: Path) -> None:
         boxes[d.name] = (min(xs), min(ys), max(xs), max(ys), m.water_level())
     tut = boxes.get("Tut_1")
     texels = sorted(max(b[2] - b[0], b[3] - b[1]) / 256 for b in boxes.values())
+    # The blend: the ground surface takes a fixed CShade field, filled once from
+    # translate index 0; the water surface writes mode 0 outright.  A layer
+    # material's own flags byte never reaches either.
+    surfaces = (t_at(0x1002C226, 6) == bytes.fromhex("8b88f40b0000")
+                and t_at(0x1002C235, 6) == bytes.fromhex("8982cc000000")
+                and t_at(0x1002C298, 6) == bytes.fromhex("8b82f40b0000")
+                and t_at(0x1002C2A7, 6) == bytes.fromhex("8991cc000000")
+                and t_at(0x100411EA, 5) == bytes.fromhex("33c9c1e102")
+                and t_at(0x100411F2, 7) == bytes.fromhex("8b840afc0b0000")
+                and t_at(0x1004121F, 6) == bytes.fromhex("8982f40b0000"))
+    water_opaque = t_at(0x1002CDD0, 10) == bytes.fromhex("c780cc00000000000000")
+    # The two mesh draws are the only sites that index the table with a register
+    # the caller filled (SIB scale 4 on a material's blend field).
+    meshes = (t_at(0x10028907, 7) == bytes.fromhex("8b848afc0b0000")
+              and t_at(0x1004565F, 7) == bytes.fromhex("8b848afc0b0000"))
+    uses = terrain.count(struct.pack("<I", 0xBFC))
+    # Every face's layer-1 material, by the flags byte it draws with.
+    lib = materials.MaterialLibrary(game / "Material.lib")
+    by_flags: Counter[int | None] = Counter()
+    liquid = {}
+    for d in gamedir.maps(game):
+        m = landmesh.load(d / "Land.msh")
+        for i in range(m.face_count):
+            name = (m.texture_name(1, m.face_tex1[i]) or "").upper()
+            mat = lib.get(name)
+            by_flags[None if mat is None else mat.blend] += 1
+            if name in ("WATER", "WATER_BOT", "ENV_NLAVA", "ENV_LAVA_BOT"):
+                liquid.setdefault(name, mat.blend)
+    check("Terrain.dll: the ground and the water draw opaque, whatever the material says",
+          surfaces and water_opaque and meshes and uses == 16
+          and dict(by_flags) == {0: 273258, 4: 2624}
+          and liquid == {"WATER": 0, "WATER_BOT": 0, "ENV_NLAVA": 4, "ENV_LAVA_BOT": 0},
+          f"the ground surface takes CShade+0xbf4, filled from translate index 0 -- mode 0, "
+          f"ONE/ZERO -- at 0x100411f2/0x1004121f ({surfaces}); the REFLECTION_SHIFTED surface "
+          f"writes blend mode 0 at 0x1002cdd0 ({water_opaque}); of the {uses} places that name "
+          f"the table at +0xbfc only 0x10028907 and 0x1004565f index it with a material's "
+          f"blend field ({meshes}).  Measured over every face of the 33 maps: "
+          f"{dict(by_flags)} by flags byte -- the control is ENV_NLAVA's 4, a liquid whose "
+          f"material does ask for SRCALPHA/INVSRCALPHA and is drawn opaque anyway")
+
     check("Land.msh: Tut_1's water box is 1095 x 1276, 4.3 x 5.0 units a reflection texel",
           tut is not None and len(boxes) == 11
           and [round(v, 1) for v in tut[:4]] == [385.5, 255.8, 1480.5, 1531.7]
@@ -2952,6 +2992,24 @@ def check_sky(check, game: Path) -> None:
 
 #: The one header +0x14 bit shipped textures set, on 81 ARGB8888 textures.
 TEXTURE_BIT_26 = 0x04000000
+
+#: ``Terrain.dll``'s 36 render settings in the order ``0x1005eb10`` fills their
+#: descriptors.  The index is what every read of the page names, and what a
+#: cross-module key carries in its high word.
+RENDER_SETTINGS = (
+    "ForceSWFog", "LightingOn", "SpecularsOn", "EmulatePointLight", "MicroTexturingOn",
+    "MicroTexScale", "MaxShadowsQty", "RobotDetail", "RobotBestLOD", "RobShadowsOn",
+    "RobShadowDetail", "RobShadowBestLOD", "RobShdwRefreshMask", "RobShadowSmooth",
+    "BuildingDetail", "BldShadowsOn", "BldShadowDetail", "BldShadowBestLOD",
+    "BldShdwRefreshMask", "BldShadowSmooth", "AtmCloudsOn", "AtmStarsOn", "AtmSkyDetail",
+    "LensFlareOn", "ContrLightOn", "UseEmbossBump", "UseReflections", "PortalNearDist",
+    "PortalFarDist", "UseDXLighting", "UseEMBMReflections", "EMBMCoeff00", "EMBMCoeff11",
+    "EMBMMaxVal", "EMBMBumpTile", "EMBMBumpMove",
+)
+
+#: ``CSettings``' 36 values: the global object is at ``0x100a6ca8`` and entry
+#: *i* at ``0x100a6cac + 4 * i``.
+SETTINGS_PAGE = 0x100A6CAC
 MISSION_01_SKY = "MISSIONS/CAMPAIGN/CAMPAIGN.00/Mission.01/sky.ske"
 
 
@@ -3079,6 +3137,83 @@ def check_render_state(check, game: Path) -> None:
           f"{len(found)} shade.cfg among {len(cfgs)} .cfg files; Terrain.dll reads it "
           f"at 0x1005f652 and falls back to ForceSWFog 1, AtmSkyDetail 4 "
           f"({2 ** 4} dome segments) at 0x1005fa80")
+
+    _check_fog_setting(check, game)
+
+
+def _check_fog_setting(check, game: Path) -> None:
+    """Nobody reads ``ForceSWFog``: the settings page's readers, counted.
+
+    ``Terrain.dll`` addresses a setting as ``[index * 4 + 0x100a6cac]``, an
+    absolute address the loader relocates, so its readers are the relocation
+    sites naming the page -- the whole set, not a search -- and each names its
+    index in the ``mov reg, N; shl reg, 2`` ahead of it.  Outside the module
+    the page is interface ``0x1e`` of ``World3D.dll``'s settings registry, and
+    only a module that imports ``CreateGameSettings`` can ask for it.
+    """
+    paths = {n: game / n for n in ("Terrain.dll", "World3D.dll", "AniMesh.dll",
+                                   "Control.dll", "Effect.dll", "iron3d.dll")}
+    if not all(p.exists() for p in paths.values()):
+        return
+    images = {n: p.read_bytes() for n, p in paths.items()}
+    at = {n: _image_at(b) for n, b in images.items()}
+
+    sites = _relocations(images["Terrain.dll"])[SETTINGS_PAGE]
+    indexed = re.compile(rb"[\xb8-\xbf](....)\xc1[\xe0-\xe7]\x02", re.S)
+    reads: Counter[int] = Counter()
+    unresolved = []
+    for site in sites:
+        ahead = list(indexed.finditer(at["Terrain.dll"](site - 40, 40)))
+        if ahead:
+            reads[struct.unpack("<I", ahead[-1].group(1))[0]] += 1
+        else:
+            unresolved.append(site)
+    silent = [i for i in range(len(RENDER_SETTINGS)) if not reads[i]]
+    check("Terrain.dll: none of its 41 reads of the settings page names ForceSWFog",
+          len(sites) == 41 and not unresolved and reads[0] == 0
+          and silent == [0, 5, 21, 24] and all(i < 36 for i in reads),
+          f"{len(sites)} relocation sites name {SETTINGS_PAGE:#x}, all {sum(reads.values())} "
+          f"of them at a constant index; they cover {len(reads)} of the 36 settings, "
+          f"including 1 {RENDER_SETTINGS[1]} and 2 {RENDER_SETTINGS[2]} either side of it -- "
+          f"the control.  Read by nothing: "
+          f"{', '.join(f'{i} {RENDER_SETTINGS[i]}' for i in silent)}")
+
+    # Every module that can reach the page at all, and what it does with it.
+    modules = sorted(game.glob("*.dll")) + sorted(game.glob("*.exe"))
+    reach = sorted(p.name for p in modules if b"CreateGameSettings" in p.read_bytes())
+    named = sorted(p.name for p in modules if b"ForceSWFog" in p.read_bytes())
+    # World3D's registry: a record is {uint16 id, interface}; its getter matches the
+    # key's low word against the id and tail-calls the interface's slot 3 with the
+    # key's high word as the index.
+    registry = (at["World3D.dll"](0x1000A40D, 4) == bytes.fromhex("8b54240c")
+                and at["World3D.dll"](0x1000A411, 8) == bytes.fromhex("663914c558261210")
+                and at["World3D.dll"](0x1000A43C, 4) == bytes.fromhex("8b54240e")
+                and at["World3D.dll"](0x1000A44B, 3) == bytes.fromhex("ff610c")
+                and at["World3D.dll"](0x1000A687, 8) == bytes.fromhex("66890cc558261210"))
+    registers = {
+        "Terrain.dll": (0x1005F5A0, "6a1e", 0x1005F5AB, "ff5024"),
+        "Control.dll": (0x1003226C, "6a15", 0x1003226F, "ff5124"),
+        "Effect.dll": (0x100140A9, "6a14", 0x100140AC, "ff5024"),
+    }
+    registered = {n: at[n](i, 2) == bytes.fromhex(v) and at[n](c, 3) == bytes.fromhex(s)
+                  for n, (i, v, c, s) in registers.items()}
+    # AniMesh is the control: one cross-module read, key (8 << 16) | 0x1e.
+    animesh = (at["AniMesh.dll"](0x100071A7, 7) == bytes.fromhex("66c744244c1e00")
+               and at["AniMesh.dll"](0x100071AE, 7) == bytes.fromhex("66c744244e0800")
+               and at["AniMesh.dll"](0x100071BC, 3) == bytes.fromhex("ff510c"))
+    ini = settings.sections(game / "Iron_3D.ini").get("CS", {})
+    check("install: ForceSWFog is read by no module, and AniMesh's RobotBestLOD is",
+          reach == ["AniMesh.dll", "Control.dll", "Effect.dll", "Terrain.dll",
+                    "World3D.dll", "iron3d.dll"]
+          and named == ["Terrain.dll"] and registry and all(registered.values()) and animesh
+          and not any(k.upper().startswith("FOG") or "SWFOG" in k.upper() for k in ini),
+          f"{len(reach)} of {len(modules)} shipped modules name CreateGameSettings ({reach}); "
+          f"Terrain, Control and Effect only register ids 0x1e, 0x15 and 0x14 ({registered}), "
+          f"iron3d keeps the registry and writes settings 25, 26 and 30, and AniMesh makes the "
+          f"one cross-module read there is -- key 0x0008001e, index 8 {RENDER_SETTINGS[8]} "
+          f"({animesh}).  World3D's getter keys on the low word and forwards the high word "
+          f"({registry}).  'ForceSWFog' is a string in {named} alone and Iron_3D.ini has no "
+          f"fog key, so the setting holds its compiled 1 and nothing asks")
 
 
 def check_blend_depth(check, game: Path) -> None:

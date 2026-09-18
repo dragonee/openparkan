@@ -264,7 +264,11 @@ the interface's pages and `ui/compaund.cfg` and `ui/hq.cfg`'s pieces.
   drawn from the eye mirrored in the water plane into a 256 texture covering
   the water's box, clipped half a unit below the water. A water face shows it
   through the drifting environment bump map, times its lit colour; a lake's
-  bed is not drawn from above.
+  bed is not drawn from above. The lake is **opaque**, and so is every other
+  layer: the ground surface takes a fixed blend mode rather than the layer
+  material's flags byte, and the water's surface writes mode 0 outright
+  (docs/03, "The ground draws opaque"). The 2624 lava faces whose material
+  does ask to be blended draw opaque for the same reason.
 
 Not yet: the view from under the water, which draws only the beds. The lake
 comes out bluer than the recording's, whose water is brighter than the sky it
@@ -1100,8 +1104,6 @@ a row here. A row leaves this table when research closes it.
 
 | milestone | what is unknown | stand-in | see |
 |---|---|---|---|
-| M1 | Whether the water surface is blended over the frame beneath it | opaque: the terrain draws every material opaque, whatever its blend | [03](../docs/03-terrain.md#not-established) |
-| M1 | Whether `ForceSWFog` is read outside `Terrain.dll`, which asks Direct3D for linear range vertex fog and never reads it | per-pixel linear range fog on the distance to the eye, from 700 × slot 5 to 700 × slot 6 | [10](../docs/10-sky.md#not-resolved) |
 | M1 | How the 34142-radius dome escapes the far plane and a fog ending by 700, and what lies below its rim | draw the dome first at the camera, depth-tested without writing depth under a projection with no far plane, unfogged but for its rim; clear the frame to the fog colour | [10](../docs/10-sky.md#the-dome) |
 | M1 | Which camera axis the fog's heading angle measures: the compass heading, 0 at +y towards +x, of the camera matrix's first column | the view direction's heading, 0 along +y, turning towards +x, like the dome's segments | [10](../docs/10-sky.md#not-resolved) |
 | M1 | Where the sun object's two directional lights point | both lights shine from the fixed place of the body that is up; none while no body is up | [10](../docs/10-sky.md#not-resolved) |

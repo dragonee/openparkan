@@ -182,12 +182,13 @@ Two things follow that a flat-colour stand-in was hiding:
 - **Water is blue because its material is.** The texture is neutral grey; the
   colour is the material's `#4d6aff` diffuse, which multiplies it.
 
-Water is drawn see-through here. The material declares no transparency, but
-every map that has water also carries a `WATER_BOT` material on the ground
-beneath it, and a lake bed nobody can see would not be worth authoring. The
-exact figure is a renderer choice. The game itself does neither: with its
-shipped settings a lake from above shows a reflection, not its texture, and
-its bed is drawn only from under the water ([Water reflects](#water-reflects--read-and-measured)).
+**Water is opaque**, and so is every other layer:
+[The ground draws opaque](#the-ground-draws-opaque--read-and-measured). The
+`WATER_BOT` bed beneath it is not a hint that a lake is see-through; it is
+what the camera sees from under the water, and what the reflection would show
+if the lake were drawn from below ([Water reflects](#water-reflects--read-and-measured)).
+The HTML viewer draws its lakes see-through anyway, which is a viewer's
+licence rather than a reading.
 
 **The layer-1 material is also the ground a unit feels.** Its `MAT0` class
 byte is the surface id and its dword a damage rate. `WATER_BOT` and
@@ -851,6 +852,57 @@ draw; with it off, beds and water. The camera it tests is the one drawing, so
 the reflection camera, under the water by construction, sets it whenever its
 eye is over a lake (*derived*).
 
+### The ground draws opaque — *read*, and *measured*
+
+A model's batch takes its blend mode from its material's flags byte, through
+`CShade`'s five-entry translate table at `+0xbfc`
+([07-objects.md](07-objects.md#how-a-material-draws-is-in-the-archive-directory)).
+**The ground does not.** Fifteen instructions in `Terrain.dll` name that table
+(sixteen byte matches, one of them a coincidence inside an unrelated
+immediate), and they sort into four groups: five are
+`InitAlphaBlendModeTranslateTable` filling it (`0x10046a3c` to `0x10046b25`);
+seven read it at a **constant** index, all inside one `CShade` init
+(`0x100411f2` to `0x10041347`); one is an accessor at `0x10042832` that no call
+reaches; and **two** read it at a material's own blend field — `0x10028907`
+and `0x1004565f`, the two mesh draws, the only ones whose SIB scale is 4 on a
+register the caller filled. None of the four groups is the ground. What the
+ground's surfaces take instead is one of the fields that init fills:
+
+| field | filled from | mode | who takes it |
+|---|---|---|---|
+| `+0xbf4` | index 0, or index 3 where the device has no render phase 3 (`0x100411e4`, `0x1004121f`) | 0 (`ONE`/`ZERO`) or 3 (`ZERO`/`SRCCOLOR`) | **the ground surface** (`0x1002c226`→`0x1002c235`, `0x1002c298`→`0x1002c2a7`) |
+| `+0xbe0`, `+0xbf0`, `+0xbf8` | index 1 (`0x10041305`, `0x10041326`, `0x10041347`) | 4 (`SRCALPHA`/`INVSRCALPHA`) | the two surfaces built over a ground one (`0x1002b505`, `0x1002c0da`→`0x1002c0e9`) |
+| `+0xbe8`, `+0x1930` | index 1 | 4 | the surface that writes no depth (`0x1002b9fb`, `ZENABLE` 1 and `ZWRITEENABLE` 0) |
+
+`InitAlphaBlendModeTranslateTable` fills the table with mode ids `0, 4, 2, 3,
+5`, so index 0 is **mode 0: `ONE`/`ZERO`, no blend and no alpha test**. The
+draw item keeps the mode at `+0xcc`, which its render hands to the device
+(`0x100302d0`) before the two depth bytes.
+
+The water is the same answer written a second way: the
+`REFLECTION_SHIFTED` surface sets its own blend mode, and sets it to **0**,
+literally, at `0x1002cdd0` — three instructions after the phase 10 at
+`0x1002cdc3`. So a lake is opaque whether or not reflections are on, and what
+lies under it is never mixed in.
+
+*Measured* over `Material.lib`'s 905 materials and the layer-1 material of
+every one of the 275882 faces on the 33 maps: **273258 faces wear a material
+whose flags byte is 0, and 2624 wear one whose flags byte is 4.** `WATER`
+(1006 faces on 7 maps) and `WATER_BOT` (2015) are among the first, with
+`ENV_LAVA_BOT` and all 20 `L*` ground materials that any face wears; `WATER_M`,
+named on the same 7 maps but worn by no layer-1 face, is 0 too, and so is
+`B_S0` at flags 2, which is still index 0.
+
+The 2624 are `ENV_NLAVA`, the lava surface of 4 maps, and that is the control:
+the same measurement over the same field does find a liquid whose material asks
+to be blended — flags 4, index 1, mode 4, `SRCALPHA`/`INVSRCALPHA` with the
+alpha test on. It is drawn opaque anyway, because the ground draw never looks.
+A 0 on the water is therefore a reading, not a default.
+
+Phase 10's own record turns the alpha test on (`GREATEREQUAL`, against the
+device's `ALPHAREF` of 1) while the blend stays off; the alpha it tests is the
+face's diffuse, which is opaque, so nothing is dropped.
+
 ### What the recording shows — *measured*
 
 Mission 01's recording (960 × 720):
@@ -886,9 +938,10 @@ yet reproduced (below).
 - **Culling in a mirrored frame.** Both reflection transforms have a
   determinant of −1, which turns every triangle's winding round on screen;
   whether a cull mode is changed for the reflection was not found.
-- **How the water blends.** The phase leaves the alpha to the diffuse's; the
-  surface clears its flag `0x400` (`0x1002cd82`); whether the water is
-  blended over the frame beneath it was not read.
+- ~~**How the water blends.**~~ — it does not: the `REFLECTION_SHIFTED`
+  surface sets blend mode 0 outright at `0x1002cdd0`, and the ordinary ground
+  takes mode 0 from `CShade+0xbf4`, so nothing under a lake shows through
+  ([The ground draws opaque](#the-ground-draws-opaque--read-and-measured)).
 - **How far the bump displaces.** `D3DFMT_V8U8`-style values are signed and
   stand for −1 to 1 on the device, which would make the largest displacement
   0.01 × 64 ÷ 127 ≈ 0.005 of the box, about 5.5 units on Tut_1 (*derived*

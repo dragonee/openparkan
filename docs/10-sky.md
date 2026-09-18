@@ -649,14 +649,8 @@ by 700.
   `0x112`, `0x212` and `0x252`, all `D3DFVF_XYZ` (`0x1002f1e0`–`0x1002f800`)
   — for which Direct3D computes the vertex fog itself. The one pre-transformed
   path, FVF `0x1c4` behind the item flag 8 (`0x1002f2c0`), is outside it.
-- **`ForceSWFog` is never read.** Its value lands at `CSettings+4`, the first
-  entry of the table at `0x100a6cac`; every one of the 41 indexed reads of
-  that table in `Terrain.dll` resolves to another setting — `AtmCloudsOn`,
-  `AtmSkyDetail` and `LensFlareOn` among them — and nothing reads the table's
-  first entry directly. The settings interface is registered with
-  `World3D.dll`'s `CreateGameSettings` object under id `0x1e` (`0x1005f5ab`),
-  and its getter (slot 3, `0x1005f9c0`) could still hand the value to another
-  module.
+- **`ForceSWFog` is never read, in `Terrain.dll` or anywhere else.** See
+  [below](#nobody-reads-forceswfog--read-and-measured).
 
 **Its colour follows the camera's heading** (`0x10079730`):
 
@@ -706,19 +700,108 @@ ambient term is moot: a material's ambient colour is its self-light. See
 
 `Terrain.dll` reads 36 settings from `shade.cfg` (`0x1005f652`). No
 `shade.cfg` ships (*measured*), so the compiled defaults apply
-(`0x1005fa80`):
+(`0x1005fa80`). They are one page, in a fixed order: `CSettings` is the
+global at `0x100a6ca8`, its values the 36 dwords from `+4`, and its names the
+36-byte descriptors from `0x100a6798` that `0x1005eb10` fills at load. The
+index is what every read of the page names, so it is worth having whole:
 
-| setting | default |
-|---|---|
-| `ForceSWFog` | 1, never read |
-| `LightingOn` | 1 |
-| `AtmCloudsOn` | 1 |
-| `AtmStarsOn` | 1, never read in `Terrain.dll` either |
-| `AtmSkyDetail` | 4 |
-| `LensFlareOn` | 1 |
-| `UseDXLighting` | 0 |
+| # | setting | default | reads |
+|---:|---|---|---:|
+| 0 | `ForceSWFog` | 1 | **0** |
+| 1 | `LightingOn` | 1 | 1 |
+| 2 | `SpecularsOn` | 1 | 1 |
+| 3 | `EmulatePointLight` | 1 | 1 |
+| 4 | `MicroTexturingOn` | 1 | 1 |
+| 5 | `MicroTexScale` | 0.05 | **0** |
+| 6 | `MaxShadowsQty` | 20 | 1 |
+| 7 | `RobotDetail` | 1.0 | 1 |
+| 8 | `RobotBestLOD` | 1 | 1 |
+| 9 | `RobShadowsOn` | 1 | 1 |
+| 10 | `RobShadowDetail` | 1.0 | 1 |
+| 11 | `RobShadowBestLOD` | 1 | 1 |
+| 12 | `RobShdwRefreshMask` | 1 | 1 |
+| 13 | `RobShadowSmooth` | 1 | 1 |
+| 14 | `BuildingDetail` | 1.0 | 1 |
+| 15 | `BldShadowsOn` | 0 | 1 |
+| 16 | `BldShadowDetail` | 1.0 | 1 |
+| 17 | `BldShadowBestLOD` | 1 | 1 |
+| 18 | `BldShdwRefreshMask` | 3 | 1 |
+| 19 | `BldShadowSmooth` | 0 | 1 |
+| 20 | `AtmCloudsOn` | 1 | 1 |
+| 21 | `AtmStarsOn` | 1 | **0** |
+| 22 | `AtmSkyDetail` | 4 | 1 |
+| 23 | `LensFlareOn` | 1 | 1 |
+| 24 | `ContrLightOn` | 1 | **0** |
+| 25 | `UseEmbossBump` | 1 | 1 |
+| 26 | `UseReflections` | 1 | 5 |
+| 27 | `PortalNearDist` | 75 | 1 |
+| 28 | `PortalFarDist` | 95 | 1 |
+| 29 | `UseDXLighting` | 0 | 2 |
+| 30 | `UseEMBMReflections` | 0 | 5 |
+| 31 | `EMBMCoeff00` | 0.01 | 1 |
+| 32 | `EMBMCoeff11` | 0.01 | 1 |
+| 33 | `EMBMMaxVal` | 64 | 1 |
+| 34 | `EMBMBumpTile` | 100.0 | 1 |
+| 35 | `EMBMBumpMove` | 10000 | 1 |
 
 The water's settings, `UseReflections` to `EMBMBumpMove`, are in [03-terrain.md](03-terrain.md#water-reflects--read-and-measured).
+
+### Nobody reads `ForceSWFog` — *read*, and *measured*
+
+`ForceSWFog` is the page's entry 0, at `0x100a6cac`. Inside `Terrain.dll`
+a setting is read as `[index * 4 + 0x100a6cac]`, an absolute address the
+loader relocates, so the whole set of reads is countable rather than
+searchable: **41 sites name the page, all 41 resolve to a constant index, and
+none of them is 0** (*measured*, from the module's relocation table). The
+control is in the same 41: they cover 32 of the 36 settings, including entries
+1 and 2 either side of it. Four are never read — `ForceSWFog`,
+`MicroTexScale`, `AtmStarsOn` and `ContrLightOn`.
+
+Outside it, the page is reachable only through `World3D.dll`'s settings
+registry. `Terrain.dll`'s `InitializeSettings` builds `CSettings`, asks it for
+interface 7 — which hands back the object itself (`0x1005ff20`) — and
+registers it with the registry under id `0x1e` (slot 9, `0x1005f5ab`). The
+registry is a table of 8-byte `{uint16 id, interface}` records at
+`World3D.dll:0x10122658`, at most `0x80` of them ("Too many Settings.").
+Its getter, slot 3 (`0x1000a400`), takes one dword key: it matches the key's
+**low word against the id**, then tail-calls that interface's own slot 3 with
+the key's **high word as the index** (`0x1000a43c` rebuilds the argument in
+place, and `CSettings`' getter at `0x1005f9c0` masks it to 16 bits and returns
+`[this + index * 4 + 4]`). So a cross-module read of `ForceSWFog` is the key
+`0x0000001e`, and of `RobotBestLOD` the key `0x0008001e`.
+
+Only the registry hands that interface out, and only
+`World3D.dll!CreateGameSettings` hands the registry out. **5 of the 21 shipped
+modules import it** — `AniMesh.dll`, `Control.dll`, `Effect.dll`,
+`Terrain.dll` and `iron3d.dll` — and each calls it from exactly one site
+(*measured*):
+
+| module | site | what it does |
+|---|---|---|
+| `Terrain.dll` | `0x1005f569` | registers id `0x1e` and drops the pointer |
+| `Control.dll` | `0x10032260` | registers id `0x15` and drops the pointer |
+| `Effect.dll` | `0x10014091` | registers id `0x14` and drops the pointer |
+| `AniMesh.dll` | `0x1000719c` | **reads** key `0x0008001e` — `RobotBestLOD` |
+| `iron3d.dll` | `0x1005bc86` | keeps the registry at `0x1010b60c` |
+
+`iron3d.dll` hands it out through one accessor (`0x1005b570`) called twice,
+both on the `iron_3d.ini` path: it **writes** `UseReflections` (26),
+`UseEmbossBump` (25) and `UseEMBMReflections` (30) from `REFLECTIONS`,
+`EMBOSS_BUMP` and `EMBM` (`0x10061736`, `0x1006177b`, `0x10061795`), and
+otherwise touches only interface `0xa`. `World3D.dll`'s own uses of the record
+table are the registry's own methods and its constructor.
+
+So: **`ForceSWFog` is read by nothing in the shipped install.** Its key is
+never built, no read of the page resolves to index 0, the name is a string in
+`Terrain.dll` and in no other module (*measured*), `Iron_3D.ini` carries no
+fog key, and no `shade.cfg` ships — so it holds its compiled 1 for the whole
+game and changes nothing. `Ngi32.dll`, the module that would have to implement
+a software fog, cannot even reach the settings registry: it does not import
+`CreateGameSettings`.
+
+Two controls, both from the same searches: `AniMesh.dll` does read this very
+page across a module boundary, and `iron3d.dll` does write three of its
+entries; the scan that finds nothing at index 0 finds both.
 
 ## What the viewer draws
 
@@ -762,9 +845,11 @@ direction is not established.
   on a record that takes the scene's fog. Next handle: how layer 1 is drawn —
   its projection, and the fog defaults the render pass copies from the
   shader's slot 7 at `0x1003d9f2`.
-- **Whether `ForceSWFog` does anything outside `Terrain.dll`**, through the
-  settings interface's getter. Inside it the scene asks Direct3D for linear
-  range-based vertex fog on untransformed vertices.
+- ~~Whether `ForceSWFog` does anything outside `Terrain.dll`~~ — nothing
+  reads it anywhere: 0 of `Terrain.dll`'s 41 reads of the settings page name
+  entry 0, and of the four other modules that can reach the page only
+  `AniMesh.dll` reads it at all, for `RobotBestLOD`
+  ([Nobody reads `ForceSWFog`](#nobody-reads-forceswfog--read-and-measured)).
 - **The heading's world axis.** The angle is the compass heading of the
   camera matrix's first column, 0 along +y and turning towards +x; that the
   first column is the view direction is a *guess*.
