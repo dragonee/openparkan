@@ -5604,6 +5604,38 @@ def check_ctl_fields(check, game: Path, blobs, parsed) -> None:
           f"authored triple-6 limit below a turn, {authored} of {selected}, and z, which "
           f"none leans, keeps 6.28 on all {z_default}")
 
+    uses = Counter()
+    finite_on_anchor = finite = 0
+    codes = Counter()
+    coded_controllers = set()
+    first_applies = 0
+    for (_lib, name, _blob), c in zip(blobs, parsed, strict=True):
+        for s_ in c.states:
+            uses[s_.uses] += 1
+            if s_.uses != control.UNLIMITED_USES:
+                finite += 1
+                finite_on_anchor += s_.anchor
+            codes[s_.request] += 1
+            if s_.request != control.ANY_REQUEST:
+                coded_controllers.add(name.lower())
+        first_applies += any(s_.request == control.FIRST_REQUEST for s_ in c.states)
+    check(".ctl: a state's use count is spent only by a stone, a tree and two mines",
+          uses[control.UNLIMITED_USES] == 1607 and finite == 83 == finite_on_anchor
+          and uses[30] == 80 and uses[20] == 2 and uses[10] == 1,
+          f"+0x94 reads {dict(sorted(uses.items()))} over the {sum(uses.values())} states; "
+          f"the {finite} finite counts are all on anchors, which is the only place the "
+          f"planner spends one (Control.dll:0x1000530f), and a state at 0 stops applying "
+          f"(0x10001132)")
+
+    check(".ctl: the only states that wait on a request code are a building's six",
+          codes[control.ANY_REQUEST] == 1510 and len(coded_controllers) == 30
+          and all(codes[k] == 30 for k in (0, 1, 2, 6, 8, 10)) and first_applies == 30,
+          f"+0x98 reads {dict(sorted(codes.items()))}; the six codes open one state each on "
+          f"every one of the {len(coded_controllers)} building controllers, and the "
+          f"controller's own code starts at {control.FIRST_REQUEST} (0x10006ecf), so the "
+          f"state that waits for 0 -- the one that stops the ray -- is the one a finished "
+          f"building applies, on all {first_applies}")
+
     unread = sum(1 for c in parsed if not any(c.triples[control.TRIPLE_UNREAD]))
     check(".ctl: triple 2 is mostly left zero",
           unread == 518,

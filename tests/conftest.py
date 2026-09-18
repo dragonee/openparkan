@@ -86,13 +86,16 @@ def build_reference(library: str, member: str,
 
 def build_state(flags: int = 0, velocity=((0.0,) * 3, (0.0,) * 3),
                 spin=((0.0,) * 3, (0.0,) * 3), engine: float = 0.0,
-                conditions: int = 0) -> bytes:
+                conditions: int = 0, uses: int = control.UNLIMITED_USES,
+                request: int = control.ANY_REQUEST) -> bytes:
     """One section-1 state and its ``conditions`` zeroed 16-byte conditions."""
     rec = bytearray(control.SECTION1_RECORD + control.SECTION1_PER_B * conditions)
     struct.pack_into("<I", rec, control.STATE_FLAGS_AT, flags)
     struct.pack_into("<6f", rec, control.STATE_VELOCITY_AT, *velocity[0], *velocity[1])
     struct.pack_into("<6f", rec, control.STATE_SPIN_AT, *spin[0], *spin[1])
     struct.pack_into("<f", rec, control.STATE_ENGINE_AT, engine)
+    struct.pack_into("<i", rec, control.STATE_USES_AT, uses)
+    struct.pack_into("<i", rec, control.STATE_REQUEST_AT, request)
     return bytes(rec)
 
 

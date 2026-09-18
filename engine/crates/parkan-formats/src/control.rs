@@ -67,6 +67,11 @@ pub const STATE_FIXED: u32 = 0x100000;
 pub const STATE_JITTER: u32 = 0x1000000;
 /// A state's request code that any code the controller holds matches (`0x10001140`).
 pub const ANY_REQUEST: i32 = -1;
+/// The code a controller holds before any is sent (`Control.dll:0x10006ecf`, the
+/// constructor's zero). `IControl` slot 19 (`0x10004800`) is what changes it.
+pub const FIRST_REQUEST: i32 = 0;
+/// A use count `+0x94` that is never spent (`Control.dll:0x10005307`).
+pub const UNLIMITED_USES: i32 = -1;
 
 /// A contact's point counts toward the body's ground gap and normal (`0x1001b00a`).
 pub const CONTACT_SUPPORT: u32 = 0x1;
@@ -192,6 +197,12 @@ pub struct State {
     pub actions: i32,
     /// The code the controller must hold for the state to apply, or `ANY_REQUEST`.
     pub request: i32,
+    /// `+0x94`: how many times the planner may still choose this state. `UNLIMITED_USES`
+    /// is never spent; any other count goes down by one each time the planner picks the
+    /// state as its destination anchor (`0x1000530f`), and at 0 the state stops applying
+    /// for good (`0x10001132`). *Measured*: −1 on 1607 of the install's 1690 states, 30 on
+    /// 80, 20 on 2 and 10 on 1, every finite one on an anchor.
+    pub uses: i32,
     pub mode: u32,
     pub pair_a: [f32; 2],
     pub pair_b: [f32; 2],
@@ -212,6 +223,7 @@ impl Default for State {
             engine: 0.0,
             actions: 0,
             request: ANY_REQUEST,
+            uses: UNLIMITED_USES,
             mode: 0,
             pair_a: [0.0; 2],
             pair_b: [0.0; 2],
@@ -232,10 +244,12 @@ impl State {
     }
 
     /// `0x10001000`: whether `velocity` and `spin` lie inside the boxes the flags switch
-    /// on, and the state's request code is `ANY_REQUEST` or the code the controller
-    /// holds (`0x10001140`). The contacts' conditions are the caller's.
+    /// on, the state's use count is not spent (`0x10001132`), and its request code is
+    /// `ANY_REQUEST` or the code the controller holds (`0x10001140`). The contacts'
+    /// conditions are the caller's.
     pub fn applies(&self, velocity: [f32; 3], spin: [f32; 3], request: i32) -> bool {
-        (self.request == ANY_REQUEST || self.request == request)
+        self.uses != 0
+            && (self.request == ANY_REQUEST || self.request == request)
             && (0..3).all(|a| {
                 let inside = |bit: u32, value: f32, (lo, hi): ([f32; 3], [f32; 3])| {
                     self.flags & (1 << bit) == 0 || (lo[a] <= value && value <= hi[a])
@@ -558,6 +572,7 @@ pub fn parse(b: &[u8], source: &str) -> Result<Controller, FormatError> {
                 spin: (triple(b, at + 0x3C), triple(b, at + 0x48)),
                 engine: f32_at(b, at + 0x54),
                 actions: i32_at(b, at + 0x90),
+                uses: i32_at(b, at + 0x94),
                 request: i32_at(b, at + 0x98),
                 contacts: (0..per_b)
                     .map(|j| {
@@ -704,6 +719,18 @@ mod tests {
     }
 
     #[test]
+    fn a_state_whose_uses_are_spent_stops_applying() {
+        // `0x10001132`: the use count is tested before the request code, and 0 is the end
+        // of the state. -1 is never spent (`0x10005307`).
+        let mut s = State { uses: 2, ..Default::default() };
+        assert!(s.applies([0.0; 3], [0.0; 3], ANY_REQUEST));
+        s.uses = 0;
+        assert!(!s.applies([0.0; 3], [0.0; 3], ANY_REQUEST));
+        s.uses = UNLIMITED_USES;
+        assert!(s.applies([0.0; 3], [0.0; 3], ANY_REQUEST));
+    }
+
+    #[test]
     fn a_state_with_a_request_code_applies_only_while_the_controller_holds_it() {
         let s = State { request: 6, ..Default::default() };
         assert!(s.applies([0.0; 3], [0.0; 3], 6));
@@ -736,8 +763,10 @@ mod tests {
         }
         let block = HEADER_SIZE + per_state + 4;
         b[block..block + 4 * BLOCK_ENTRIES].fill(0xFF);
+        b[at + 0x94..at + 0x98].copy_from_slice(&30i32.to_le_bytes());
         let c = parse(&b, "t").unwrap();
         assert_eq!(c.states[0].request, ANY_REQUEST);
+        assert_eq!(c.states[0].uses, 30, "+0x94 is the use count");
         assert_eq!(
             c.states[0].contacts,
             vec![Contact { point: 0, flags: 0x125, group: 3 }, Contact { point: 2, flags: 0x125, group: 4 }]

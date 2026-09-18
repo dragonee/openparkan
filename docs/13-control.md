@@ -162,8 +162,17 @@ lean carries an authored triple-6 limit (32 of 32); z, which none leans, keeps
 - **`r_t_02`** (`0x05, 0x84`): about x from the forward speed, about y from the
   negated sideways speed.
 
-Which way a positive lean tips the model on screen was not traced through the
-quaternion.
+**Which way a positive lean tips the model** is now traced through the
+quaternion: a positive angle about x tips the **nose down**, about y the **top
+to the left**, about z the **nose to the left**. The turn triple goes to three
+axis-angle quaternions (`0x100141c0`, q = (cos a/2, sin a/2 x axis) from
+`ngiGetSinCos`), and `g_FastProc` slot `+0x3c` (`Ngi32.dll:0x10014450`) builds
+from them not R but **S . R . S with S = diag(1, 1, -1)**: `M02`, `M12`, `M20`
+and `M21` carry the sign a right-handed R does not. So the x and y rotations
+run left-handed and the z one right-handed
+([24-motion.md](24-motion.md#the-hull-leans-and-rights-itself--read-and-measured)).
+That is what the righting needs: the settle angles are added to the spin, so
+they can only stand the hull up if a positive pitch tips the nose down.
 
 The only other reader of the lean is a generic device's input
 ([below](#the-entries-are-channels-and-a-devices-inputs--read-and-measured)),
@@ -779,9 +788,17 @@ is wired to a message.
 - The section-5 record's int 8 (`+0x20`): not read by the interpreter, the only
   code that walks the records; 1.0 as a float on the two `eng_rb_0?_snd`
   records.
-- Which way a positive lean tips the model on screen.
+- ~~Which way a positive lean tips the model on screen.~~ — **read**: a
+  positive pitch tips the nose down, a positive roll the top to the left and a
+  positive yaw the nose to the left, since the rotation the turn triple builds
+  is S . R . S with S = diag(1, 1, -1)
+  ([above](#the-lean-and-triple-6--read-and-measured)).
 - What control message 7's arguments 0, 1 and 2 stand for, and so what byte 15
-  and `+0x618` mean; no shipped record tests byte 15.
+  and `+0x618` mean; no shipped record tests byte 15. One more reader is now
+  known: while `+0x618` is set the ground contact does not move the body at all
+  (`0x1001b3f7` skips the lift), so whatever the message means, it freezes the
+  machine where it stands
+  ([24-motion.md](24-motion.md#holding-the-body-on-the-ground--read-and-measured)).
 - `IDeviceManager` ids 5 and 6: what the gun's `+0x174` (the round's property
   `0x35`) is.
 - The height a live contact record holds at `+0x14` when the loader compares

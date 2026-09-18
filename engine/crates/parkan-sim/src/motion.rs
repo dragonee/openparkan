@@ -200,9 +200,11 @@ pub fn horizontal(push: Vec3) -> Vec3 {
 ///
 /// STAND-IN: docs/24-motion.md#the-hull-leans-and-rights-itself--read-and-measured --
 /// the lean (state `+0x08`, triple 6) and the righting (bits `0x30`/`0xC0`, triple 5)
-/// are read but not modelled, and the vector bits `0x30` right the hull toward is not
-/// read: the body has a yaw alone, takes only the turn about z, and neither leans nor
-/// rights. Every hero state leans on no axis and rights toward world up.
+/// are read but not modelled: the body has a yaw alone, takes only the turn about z, and
+/// neither leans nor rights. Every hero state leans on no axis and rights toward world up.
+/// The vector bits `0x30` right toward is read -- it is [`Body::ground_normal`] -- and a
+/// positive angle about x tips the nose down, about y the top to the left, about z the
+/// nose to the left (`Ngi32.dll:0x10014450` builds S.R.S with S = diag(1, 1, -1)).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Body {
     /// World position of the object's origin.
@@ -241,7 +243,10 @@ pub struct Body {
     /// The fall speed, 0 or less (body `+0xac`).
     pub fall_speed: f32,
     /// The averaged ground normal of the last landing (body `+0x194`), which the slope
-    /// brake reads.
+    /// brake reads. The motion body sits at control `+0x1b4`, so this is **control
+    /// `+0x348`** -- the vector a state with righting bits `0x30` stands the hull toward
+    /// (`0x1000c439`). Its only writers are the body's constructor and the lift
+    /// (`0x10015e47`); docs/24-motion.md, "The hull leans and rights itself".
     pub ground_normal: Vec3,
 }
 

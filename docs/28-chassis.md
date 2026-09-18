@@ -400,6 +400,16 @@ contacts in the game lay their node along the ground. A tracked chassis is
 still the only one that does it without asking the pose, which is the point —
 a belt is flat in every state, so there is nothing to work out.
 
+**Where the point stands when the turn is worked out** (*read*). The pass that
+lays the node runs once a frame, on message `0x1c`, and it does not pose the
+object: it asks the point's position and axis through the carrier's node matrix
+as the mesh currently holds it, and the machine tick has just played the mesh
+at that frame's own time (`Control.dll:0x1000c737`). So the axis a belt or a
+foot is turned from is the **frame's interpolated pose**, not the state's last
+frames
+([24-motion.md](24-motion.md#holding-the-body-on-the-ground--read-and-measured)).
+The state's end pose is used only once per state, to decide the flag.
+
 **It is not the belt's material.** These three chassis also carry the
 **channel** flag `0x10`,
 [`CHANNEL_MATERIAL`](#the-belt-is-a-material-a-channel-plays--measured-and-read),

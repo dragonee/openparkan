@@ -537,7 +537,7 @@ impl Robot {
         let collision = join_spheres(&spheres);
         let bound = node_sphere(assembly, &parts);
         if !spheres.is_empty() {
-            walker.set_body_sphere(bound.0, collision.1);
+            walker.set_body_sphere(bound.0, collision.1, bound.1);
         }
         let power = (placed.kind == parkan_formats::mission::KIND_UNIT)
             .then(|| crate::power::Power::load(assembly, placed.kind, &placed.path))

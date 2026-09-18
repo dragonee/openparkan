@@ -47,7 +47,8 @@ conditions behind a pointer (`0x10001730`).
 | +0x24 / +0x30 | velocity box, min xyz / max xyz |
 | +0x3c / +0x48 | spin box, min xyz / max xyz |
 | **+0x54** | **the engine factor** |
-| +0x94 | a use count, −1 for unlimited (`0x1000530f`) |
+| +0x94 | a **use count**: how many times the planner may still choose this state, −1 for unlimited ([below](#a-states-use-count-and-its-request-code--read-and-measured)) |
+| +0x98 | the **request code** the state waits for, −1 for any ([below](#a-states-use-count-and-its-request-code--read-and-measured)) |
 | 16 × B | the **contacts**, a foot, wheel or leg each: a control point, flags, the group run when it lands. `0x100` makes the state need that point's node intact, `0x200` destroyed (`0x10001107`) — a walker's limping states; `0x2` lays the point's carrier node on the ground ([13-control.md](13-control.md#section-1s-conditions-are-contacts--read-and-measured)) |
 
 A state applies while the machine's velocity and spin lie inside the boxes its
@@ -84,7 +85,9 @@ tick (`0x1000bcf0`, loop at `0x1000c2a5`):
 | `+0x20` = 0 | ((1 − q) × stride A + q × stride B) ÷ speed (`0x100057c1`) |
 
 - **Then** bit `0x1000000` jitters it by up to ±12.5% (30 states), and it is
-  held to 0.01–5 s (`0x100057d6`).
+  held to 0.01–5 s (`0x100057d6`). The step gains
+  *step × 0.25 × (r ÷ 65536 − 0.5)*, with r the draw
+  ([below](#the-jitter-draws-from-a-pair-of-16-bit-words--read)).
 - **Speed** is the largest component of the velocity in the machine's frame.
 - **A stride** is how far node 0, the body, moves from a pair's first frame to
   its last. It is measured once per state through the mesh
@@ -161,7 +164,8 @@ feet do not slide.
 - **An anchor that still applies** queues the path back to itself: a whole
   cycle.
 - **Otherwise** it queues the path to the cheapest other anchor that applies,
-  and that anchor's use count `+0x94` goes down by one unless it is −1.
+  and that anchor's use count `+0x94` goes down by one unless it is −1 or
+  already 0 ([below](#a-states-use-count-and-its-request-code--read-and-measured)).
 - **The path** is the cheapest by Dijkstra (`0x100019d0`).
   - The row is the destination: `table[to][from]` (*measured*: all 826
     zero-cost edges join a state whose B ends where the next one's starts; read
@@ -202,6 +206,92 @@ feet do not slide.
   cycle covers 2.445 and a run cycle 5.674.
 - **So** a walk cycle at 5 m/s takes 0.49 s, and a run cycle at the hero's
   14 m/s takes 0.405 s (*derived*).
+
+### The state a machine starts in — *read*
+
+The constructor (`0x10006bf0`) puts the state **index** at 0 (`0x10006d19`) and
+zeroes the current-state copy at `+0x100`, except that it writes `0x10001` into
+its `+0x104` — anchor, and moves by velocity (`0x10006d43`, `0x10006d49`). So
+the record the machine begins with is not a state of the file at all, and its
+own use count, zero, stops it applying ([below](#a-states-use-count-and-its-request-code--read-and-measured)).
+On the first tick the planner therefore plans from index **0** to the cheapest
+anchor that applies, and the machine plays the path to it. The loader writes
+neither field. *Read*, enumerating every access to the two displacements in the
+module: `+0xfc` is written by the constructor and by the pop off the queue
+(`0x1000c317`, `0x1000cc1a`), and `+0x100` by the constructor alone. The one
+other write to each (`0x10029584`, `0x10029562`) is in another class's
+constructor, whose vtable is `0x1003cbd8`.
+
+So "the machine starts in state 0" is right as the graph's **source**, and
+wrong as the state it plays: the first state it plays is whichever anchor the
+plan reaches.
+
+### A state's use count and its request code — *read*, and *measured*
+
+The last two dwords of the 156-byte record are the two things that can stop a
+state applying, and the applicability test reads them one after the other
+(`0x1000112c`–`0x10001147`):
+
+- **`+0x94`, the use count.** A state whose count is **0 does not apply**, ever
+  again. The planner spends one each time it picks a state as its destination
+  anchor: −1 is left alone, 0 is left alone, anything else goes down by one
+  (`0x100052fd`–`0x1000530f`). Nothing else writes the field, so a finite count
+  is a state the machine may take that many times in its life.
+- **`+0x98`, the request code.** A state applies when its code equals the
+  controller's current one, or when the state's own is −1
+  (`0x10001136`–`0x10001147`). The controller's is at `+0x1ac`, `IControl`
+  slot 19 sets it (`0x10004800`), and **the constructor starts it at 0**
+  (`0x10006ecf`, where `ebx` is the zero the constructor clears at
+  `0x10006bfc`) — not at −1.
+
+*Measured*, over the install's 1,690 states:
+
+| `+0x94` | states | where |
+|---:|---:|---|
+| −1 | 1,607 | everything else |
+| 30 | 80 | 15 `s_stn_a_*` stones and 65 `s_tree_a_*` trees |
+| 20 | 2 | `bm_b_04` and `bm_m_04` in `weapon.rlb` |
+| 10 | 1 | `mtcheck` in `system.rlb` |
+
+All 83 finite counts sit on **anchors**, which is the only place the planner
+spends one, and every one of them is its controller's state 0. The 80 in
+`static.rlb` are the whole of a **one-state** controller, each a 500 ms step, so
+the count is a lifetime: 30 steps, 15 seconds, and then the only anchor there is
+no longer applies and the machine stops planning. `mtcheck` has two states and
+the two `bm_*_04` rounds three.
+
+*Measured* for `+0x98`: 1,510 states ask for no code; the other 180 are the
+`fortif.rlb` building controllers' — 30 controllers of 14 states each, with
+codes 0, 1, 2, 6, 8 and 10 opening exactly one state apiece
+([32-builder.md](32-builder.md#the-construction-sphere--read-and-measured)).
+Since the controller starts at 0, **the state a finished building applies from
+the start is the code-0 one** — the state that stops the construction ray — and
+the other five wait for the construction task to send their code.
+
+### The jitter draws from a pair of 16-bit words — *read*
+
+The generator bit `0x1000000` draws from is inlined at the jitter itself
+(`0x100057de`–`0x1000582f`), over two 16-bit words laid side by side in one
+dword at `0x10042230`:
+
+    s₀ ← (s₀ << 1) xor s₁        then        s₁ ← (s₁ >> 1) xor s₀
+
+and the draw r is the new s₁, an integer 0–65535, scaled by 1/65536 (the float
+at `0x1003b374`; the 0.25 at `0x1003b378` is the ±12.5%). It is **not**
+`rand()` — no call is made at all — and not an xorshift over 32 bits.
+
+**It is seeded, once, at load.** A static initialiser at `0x10006330` writes
+the whole dword from `ngiGetClocks` (`NGI32.dll` ordinal 52, `0x100045b0`:
+`QueryPerformanceCounter`, or `rdtsc` when the module's flag `0x20000` is set),
+and it is reached through the module's `_initterm` table — the pointer sits at
+`0x1003e160`, inside the range `0x1003e000`–`0x1003ed78` that `0x10034166`
+walks. That matters: **all-zero is a fixed point of the recurrence**, so
+without the seed every jittering step would come out at exactly −12.5%.
+
+The same generator is inlined a second time, with its own words at
+`0x10043228` and its own seeder at `0x1000dc20`, in the machine tick
+(`0x1000c74a`) — there it jitters the interval between life updates, not a
+step.
 
 ## The engine factor is the state's — *read*, and *measured*
 
@@ -469,7 +559,14 @@ points forward.
 |---|---|---|---|
 | `0x0386` | every state of the other eight flyers, and all 10 of the `a_a_l2` animal's | −(vertical speed ÷ top) | the turn about z: banks into a turn |
 | `0x8389` | the six wheeled and tracked chassis | −(forward speed gained ÷ acceleration): squats as it pulls away | −(the turn about z): leans out of a turn |
-| `0x8405` | the Tiny Helicopter T-2 | forward speed ÷ top: nose down | −(sideways speed ÷ top) |
+| `0x8405` | the Tiny Helicopter T-2 | forward speed ÷ top: nose down | −(sideways speed ÷ top): banks the way it slides |
+
+The three readings in that column are confirmed by the turn's sense, which is
+*read* [below](#the-hull-leans-and-rights-itself--read-and-measured): a
+positive pitch tips the nose **down**, a positive roll the top to the **left**,
+a positive yaw the nose to the **left**. A flyer's `0x03` roll is therefore a
+left turn's positive yaw tipping the top left — into the turn — and a wheeled
+chassis's negated `0x83` tips the top the other way, out of it.
 
 Byte 2 is 0 on all 1,690, so nothing leans in yaw and triple 6's z of 6.28 is
 never used. Every walker, the hero and four of the five animals carry 0
@@ -483,9 +580,23 @@ tick).
 - **Bit `0x400000`** skips the step.
 - **Bits `0x40` and `0x80`** aim at the world's up, (0, 0, 1), turned into the
   hull's frame by its matrix (`+0x264`).
-- **Bits `0x10` and `0x20`** aim instead at the vector at `+0x348`. Nothing in
-  `Control.dll` writes that offset by displacement; that it is the ground's
-  normal is a *guess*.
+- **Bits `0x10` and `0x20`** aim instead at the vector at `+0x348`
+  (`0x1000c439`). **That vector is the averaged ground normal** (*read*). The
+  reason no writer turned up is arithmetic: the motion body sits at control
+  `+0x1b4`, so control `+0x348` is body **`+0x194`**, and the lift writes it
+  through the body's own `this` (`0x10015e55`, in `0x10015d60`, called with
+  `lea ecx, [esi+0x1b4]` at `0x1001b440`). The body's `+0x194` has exactly two
+  writers — the body constructor (`0x1001432c`) and that lift — and two
+  readers, the mode-2 slope brake (`0x100156c6`) and this righting. The same
+  arithmetic already underlies two rows of
+  [The pieces](#the-pieces--read): `+0x21c` is body `+0x68` and `+0x254` is
+  body `+0xa0`.
+  - So a machine with bits `0x30` **stands its hull along the ground it last
+    landed on**: the face under the body sphere and each flag-1 contact's,
+    averaged over their count plus one, refreshed every frame the lift is
+    taken ([Holding the body](#holding-the-body-on-the-ground--read-and-measured)).
+    With nothing under it the average is the default (0, 0, 1), so the hull
+    stands upright.
 - Pitch is taken from the target when bit `0x10` or `0x40` is set, and roll
   when `0x20` or `0x80` is; an axis not taken is left at 0 (`0x1000c4af`).
 - The angles land in `+0x21c`. Each step the hull turns by triple 5 × those
@@ -508,8 +619,35 @@ at once, 0.15 slowly, 0.01 (the L-8f) barely.
   `system.rlb`. The 70 rounds set none of these bits, and the flying camera
   sets `0x40` alone.
 
-That the wheeled and tracked chassis follow the slope and the rest stand
-upright is *derived* from this, and the guess about `+0x348` above.
+So the wheeled and tracked chassis follow the slope and the rest stand upright
+— *read* now that `+0x348` is the averaged ground normal, where this page once
+called it *derived* from a guess.
+
+**Which way a positive angle turns the hull** (*read*). The step's turn triple
+— spin × dt plus triple 5 × the settle angles, added (`0x10014b83`) — is built
+into three axis-angle quaternions about y, x and z (`0x100141c0`, axes pushed
+at `0x10014d80`, `0x10014da1`, `0x10014dc0`), each q = (cos a/2, sin a/2 ×
+axis) from `ngiGetSinCos`. `g_FastProc` slot `+0x3c` turns that into a matrix
+(`Ngi32.dll:0x10014450`) and it is applied row by row (slot `+0x1c`,
+`0x1001f790`). Reading the matrix out, it is **S · R · S with S = diag(1, 1,
+−1)**: `M01 = 2xy − 2wz` and `M10 = 2xy + 2wz` as a right-handed R has them,
+but `M02`, `M12`, `M20` and `M21` all carry the opposite sign
+(`0x100144e9`, `0x1001450c`, `0x10014517`, `0x10014522`). So
+
+| a positive angle | about | turns |
+|---|---|---|
+| pitch | x | the **nose down** |
+| roll | y | the **top to the left** |
+| yaw | z | the **nose to the left** |
+
+The righting is what fixes it and is the check on it: the settle angles are
+asin of the target in the hull's frame — pitch from its y, roll from its x
+negated (`0x1000c4b4`, `0x1000c562`) — and they are **added** to the spin, so
+they can only right the hull if a positive pitch tips the nose down. Two other
+readings agree without being used to get there: a positive yaw turning left
+matches the camera's ([30-turrets.md](30-turrets.md#aiming-and-the-camera--read-and-measured)),
+and the running gear's `(right − left)` added to the yaw turns a machine toward
+its own damaged side ([below](#running-gear-legs-wheels-and-tracks-by-side--read-and-measured)).
 
 ## Running gear: legs, wheels and tracks by side — *read*, and *measured*
 
@@ -615,11 +753,21 @@ hero.
     has it ([below](#what-the-shipped-surfaces-carry--measured)).
 - **Mode 2 brakes on slopes.** Only when file +104 is 2 does the velocity
   integrator compare the ground's tilt with the cone at +112 (`0x100157ac`):
-  with `c` the cosine of the tilt, a factor
+  with `c` the cosine of the tilt — the ground normal dotted with world up,
+  which is the global (0, 0, 1) at `0x10043b40` (`0x10016730`) — a factor
   `min(1, 2 (c − cos cone) ÷ (1 − cos cone))`, 0 past the cone, pulls the
-  velocity toward that fraction of itself at 1.5 × the acceleration. It
-  applies moving one way across the slope only — uphill, by the look of it
-  (*guess*).
+  velocity toward that fraction of itself at 1.5 × the acceleration.
+- **It acts going uphill** (*read*). Before the cone test the integrator builds
+  two horizontal cross products and takes their dot
+  (`0x100156ae`–`0x10015799`): **C** = up × N, with N the averaged ground
+  normal at body `+0x194`, and **D** = W × up, with W the velocity turned into
+  the world by the body's matrix `+0xb0`. A negative D · C skips the brake. In
+  components that dot is −(W·N) over x and y alone, and (Nx, Ny) points
+  **downhill**, so the brake is skipped exactly when the machine is moving
+  downhill and acts when it is moving uphill — or exactly along the contour,
+  where the dot is 0 and the test passes. The sign does not depend on which way
+  the global up points: flipping it flips both cross products and leaves their
+  dot alone.
 
 *Measured:* all 509 mode-0 controllers keep the default cone of 1.57079; all
 16 mode-2 controllers carry 0.6 rad (34°); the six mode-3 controllers carry
@@ -718,8 +866,8 @@ player's own hero is never given the difficulty ratio
   that is feet within about 0.9 of the water line. Walking onto a lake's bed is
   death within a second.
 - **A flyer** (*derived*) whose sphere keeps more than r above the water never
-  reads the bed. Whether a flying machine runs the ground contact at all is not
-  traced.
+  reads the bed. It does run the ground contact — the pass's only gate is an
+  agent of kind 4 (`0x1000cb90`) — but state bit `0x4` keeps it from falling.
 - **The water does not slow a unit on its way in**: G is 1 on `WATER_BOT`, as
   on every material.
 - **Leaving keeps the rate** (*derived* from the first paragraph). A unit that
@@ -774,8 +922,18 @@ and that group picks the step by surface
      slot 3 (`0x1001a518`, `AniMesh.dll:0x1000f3b0`), with 2 and a request
      record that is all zero (`0x10046328`). Its answer's centre is copied to
      `+0x98` (`0x1001a591`–`0x1001a5c3`), and its radius is r₂, held to 7.5
-     only on objects with flag `0x1000000`; r₂ bounds the first search pass
-     below.
+     only when it is under 20 **and** the object's flags carry `0x1000000`
+     (`0x1001a51b`–`0x1001a58a`, message `0x10` then slot 14; which objects
+     carry that flag is not read); r₂ bounds the first search pass below.
+   - **r₂ is the node sphere's radius, and it is not r** (*measured*). r comes
+     from the parts' header spheres and r₂ from the nodes' boxes, and over the
+     **148** unit models the campaign places they differ on all 148 — r₂ ÷ r
+     runs from 0.42 to 2.34. r₂ is the **larger** on 26 of them, 25 of which are
+     the big machines whose parts' sphere is over 7.5 and held there (the L-2f
+     at 11.84 against 7.5, the Transformer at 14.68, `M_targ` at 17.57), plus
+     `42_mons`, whose parts' sphere clears 20 and is kept: 34.19 against 27.90.
+     On the other 122 r₂ is the smaller. So reading r₂ as r changes the up pass
+     on every unit in the game.
    - **What slot 3 answers.** A request equal to the default one (all zero,
      `0x10026ad0`) with no node gets the object's **node sphere**, `+0x124`
      and `+0x130`, through the object's matrix (`0x1000f5c8`); any other gets
@@ -987,11 +1145,51 @@ After the search the ground contact moves the body, through
   that loses g dt (`0x10015d91`). If the fall stays above the lift it is
   taken; otherwise the body rises or sinks by the lift.
 - Whenever the lift is taken, in either case, v returns to 0 and the averaged
-  normal — the sphere's and each flag-1 contact's, over their count —
-  becomes the body's ground normal `+0x194` (`0x10015e47`), which the slope
-  brake reads.
+  normal — the sphere's and each flag-1 contact's, over **their count plus
+  one** (`0x1001b0ea`) — becomes the body's ground normal `+0x194`
+  (`0x10015e47`), which the slope brake reads and the righting stands the hull
+  toward ([The hull leans](#the-hull-leans-and-rights-itself--read-and-measured)).
+- **Whether the fall is tried at all** is a fifth argument the pass works out:
+  the number of flag-1 contacts it walked, above 0 (`0x1001b401`). With bit
+  `0x4` set but no flag-1 contact the lift vector the loop fills is left at
+  (0, 0, 0) (`0x1001ab5d`) and nothing moves.
 - The move shifts the body's three matrices (`+0xb0`, `+0xf0`, `+0x130`) and
   notifies the object (`0x10015f0f`). The velocity is not touched.
+- **The whole move is skipped** while the machine's byte `+0x618` is set
+  (`0x1001b3f7`), which is control message 7's
+  ([13-control.md](13-control.md#not-established)).
+
+**A sphere with no face under it is lifted by its whole radius** (*read*). The
+search's failure path does not leave the ground point empty: it copies the
+**centre** into `+0x70` and the constant (0, 0, 1) at `0x10046428`
+(`0x1001bfa0`) into the normal (`0x1001a862`–`0x1001a8a4`). So with bit `0x4`
+clear the gap (ground z − centre z) is 0, which is above −r, and the lift is
+**r**, every frame, for as long as the search finds nothing. A contact point
+with no face under it is handled the same way (`0x1001af72`) and so lifts by 0,
+and its default normal joins the average like any other.
+
+**When it runs, and with what dt** (*read*). The pass is message `0x1c`, slot
+24 of the control system (`0x10007d03`), and its only caller is
+`0x1000cb80` → `0x1001a450` at `0x1000cb98`, for an agent of kind 4. So it runs
+**once a frame**, after the machine tick and the collision pass and before the
+push. Its dt is the frame's: the machine tick keeps the milliseconds since its
+last at `+0xe8` (`0x1000bcfd`–`0x1000bd03`), and the fall reads that × 0.001
+(`0x1001b41b`, the float at `0x1003c018`). It is not the state step's length,
+and a frame in which no state step falls due still runs the contact.
+
+**Which pose the contact points are read at** (*read*). The run-time pass does
+**not** pose the object: no slot-25 call is made anywhere in it (every virtual
+call in `0x1001a450` enumerated). It asks each point's position and axis
+through the node the point sits on, at whatever pose the mesh currently holds
+(`0x1001b4f0` mode 2 → interface `0x20` slot 4, the node's matrix). And the
+machine tick has just set that pose: after its state-step loop it plays the
+mesh at the frame's own time, for an agent of kind 4 (`0x1000c728`–`0x1000c737`,
+`0x100059a0` with `+0xe4`). **So the contacts are placed at the frame's
+interpolated pose, phase s of the step being played** — not at the step's last
+frames. Only the once-per-state pass poses at the state's **end**, and it does
+so to work `CONTACT_PLACE` out
+([A walker's feet](#a-walkers-feet-lie-flat-where-the-animation-lays-them--read-and-measured)),
+not to place anything.
 
 *Measured:* bit `0x4` is set on exactly the 961 states of the controllers
 that declare contact points — the walkers, wheeled and tracked chassis, the
@@ -2599,7 +2797,16 @@ patrol runs past it.
 - Who sets the machine's counter `+0xd4`, which runs the life update — and so
   the ground damage — on every tick
   ([Water and lava beds kill](#water-and-lava-beds-kill--read-and-measured)).
-  Whether a flying machine runs the ground contact at all.
+  ~~Whether a flying machine runs the ground contact at all.~~ — **read**: it
+  does. The pass's only gate is that the agent's kind is 4, a unit
+  (`0x1000cb90`), which a flyer's is; it runs on message `0x1c`, once a frame,
+  and state bit `0x4` is what decides whether the machine falls
+  ([Holding the body](#holding-the-body-on-the-ground--read-and-measured)).
+  Still open beside it: which objects carry the flag `0x1000000` that holds r₂
+  to 7.5, and what the **contact points'** own up pass tests against — the body
+  sphere's is r₂, but each contact's compares with a triple the pass builds from
+  control `+0x2ec`, `+0x2fc` and `+0x30c` (`0x1001aba7`, `0x1001ae12`), which is
+  not read.
 - ~~Whether `PlaceObjectOnWorldFace`'s reparenting sends a collision object its
   message 21, so that a machine on a building's deck leaves the world's
   collision manager for the building's; and so whether a bridge's own faces
@@ -2670,8 +2877,13 @@ patrol runs past it.
   ([13-control.md](13-control.md#the-lean-and-triple-6--read-and-measured))
   and 5 how fast it rights itself
   ([The hull leans](#the-hull-leans-and-rights-itself--read-and-measured)).
-  Still open there: who writes the vector at control `+0x348` that bits
-  `0x10` and `0x20` right the hull toward.
+  ~~Still open there: who writes the vector at control `+0x348` that bits
+  `0x10` and `0x20` right the hull toward.~~ — **read**: it is the motion
+  body's `+0x194`, the averaged ground normal the lift writes (`0x10015e47`),
+  since the body sits at control `+0x1b4`; and the turn's own sense is read
+  too, a positive pitch tipping the nose down, roll the top left and yaw the
+  nose left
+  ([The hull leans](#the-hull-leans-and-rights-itself--read-and-measured)).
 - ~~Whether any module calls `CWorld` slot 5~~ — answered: none does
   ([Gravity](#gravity--read-and-measured)).
 - ~~Where `Speed_MaximumFactor` is applied, and the `+0x5fc` speed base~~ —

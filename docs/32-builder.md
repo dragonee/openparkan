@@ -514,7 +514,10 @@ What a phase does when it starts:
   `Control.dll:0x10004800`), except `0x309`, and is kept as behaviour property
   `0x205`. A building controller's states each carry a request code at `+0x98`;
   a state applies only when that is the current code or −1
-  (`Control.dll:0x10001140`). Entering a state runs the state's **action group**
+  (`Control.dll:0x10001140`). The controller's own code starts at **0**, the
+  constructor's (`0x10006ecf`), so a building applies its code-0 state — the one
+  that stops the ray — before any phase has sent it anything
+  ([24-motion.md](24-motion.md#a-states-use-count-and-its-request-code--read-and-measured)). Entering a state runs the state's **action group**
   (`+0x90`, section 5; `Control.dll:0x1000c37c`, interpreter `0x10002800`).
 - **Clearing the area.** Every unit within the sphere's radius + 15 (on start)
   or + 20 (on a phase change) is ordered `ORDER_ROBOT_LEAVE` to radius + 20

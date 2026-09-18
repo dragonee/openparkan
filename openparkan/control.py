@@ -590,8 +590,18 @@ NO_EDGE = 1_000_000.0
 #: The section-5 group entering the state runs (``0x1000c37c``), and the request
 #: code the state waits for, -1 for any (``0x10001140``).  A building's states
 #: answer the construction sphere's codes (docs/32-builder.md).
+#: ``STATE_USES_AT`` is how many times the planner may still choose the state: -1
+#: is never spent, any other count goes down by one when the planner picks the state
+#: as its destination anchor (``0x1000530f``), and at 0 the state stops applying
+#: (``0x10001132``).
 STATE_ACTIONS_AT = 0x90
+STATE_USES_AT = 0x94
 STATE_REQUEST_AT = 0x98
+UNLIMITED_USES = -1
+#: A state's request code that any code the controller holds matches.
+ANY_REQUEST = -1
+#: The code a controller holds before any is sent (``0x10006ecf``).
+FIRST_REQUEST = 0
 #: Bytes +0x08..+0x0a pick what leans the body about x, y and z
 #: (``0x10014e8d``): 1-3 the turn about x, y or z this step over dt x the
 #: authored turn rate, 4-6 the velocity along x, y or z over the authored top
@@ -966,7 +976,9 @@ class State:
     engine: float
     #: The section-5 group entering it runs, and the request code it waits for.
     actions: int = -1
-    request: int = -1
+    request: int = ANY_REQUEST
+    #: +0x94: the uses the planner has left, -1 for unlimited.
+    uses: int = UNLIMITED_USES
     #: +0x04: ``STATE_ANCHOR``, ``STATE_BY_VELOCITY``, ``STATE_FIXED``,
     #: ``STATE_JITTER``.
     mode: int = 0
@@ -1417,6 +1429,7 @@ def read_states(blob: bytes, counts: tuple[int, ...]) -> tuple[State, ...]:
             engine=struct.unpack_from("<f", blob, at + STATE_ENGINE_AT)[0],
             actions=struct.unpack_from("<i", blob, at + STATE_ACTIONS_AT)[0],
             request=struct.unpack_from("<i", blob, at + STATE_REQUEST_AT)[0],
+            uses=struct.unpack_from("<i", blob, at + STATE_USES_AT)[0],
             mode=struct.unpack_from("<I", blob, at + STATE_MODE_AT)[0],
             pair_a=struct.unpack_from("<2f", blob, at + STATE_PAIR_A_AT),
             pair_b=struct.unpack_from("<2f", blob, at + STATE_PAIR_B_AT),

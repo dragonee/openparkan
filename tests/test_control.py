@@ -548,3 +548,19 @@ def test_a_destroyed_or_switched_off_item_holds_its_channels():
     held = item.now[0]
     item.tick(3000.0, alive=False)
     assert item.now[0] == held
+
+
+def test_a_states_last_two_dwords_are_its_use_count_and_its_request_code(ctl, state):
+    """+0x94 and +0x98, the two fields that can stop a state applying.
+
+    ``Control.dll:0x1000112c``-``0x10001147`` tests the use count first: 0 means
+    the state is spent and never applies again.  The controller's own code starts
+    at 0 (``0x10006ecf``), so a state waiting for 0 applies from the first tick
+    and one waiting for any other code does not.
+    """
+    blob = ctl(counts=(2, 0, 0, 0, 0),
+               states=[state(uses=30, request=0), state(uses=control.UNLIMITED_USES, request=6)])
+    c = control.parse(blob)
+    assert [s.uses for s in c.states] == [30, control.UNLIMITED_USES]
+    assert [s.request for s in c.states] == [0, 6]
+    assert c.states[0].request == control.FIRST_REQUEST

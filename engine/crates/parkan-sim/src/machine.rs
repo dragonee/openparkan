@@ -12,8 +12,9 @@ use std::collections::VecDeque;
 
 use glam::{Quat, Vec3};
 use parkan_formats::control::{
-    ANY_REQUEST, CONTACT_PLACE, CONTACT_PLACE_BY_POSE, CONTACT_PLANTED, CONTACT_SUPPORT, Controller,
+    CONTACT_PLACE, CONTACT_PLACE_BY_POSE, CONTACT_PLANTED, CONTACT_SUPPORT, Controller, FIRST_REQUEST,
     PLACE_AXIS_WITHIN, PLANTED_WITHIN, STATE_FIXED, STATE_GROUND_CONTACTS, STATE_JITTER, State,
+    UNLIMITED_USES,
 };
 use parkan_formats::cpt::ControlPoint;
 use parkan_formats::mesh::Mesh;
@@ -27,8 +28,11 @@ pub const STEP_MIN: f32 = 0.01;
 pub const STEP_MAX: f32 = 5.0;
 /// A velocity-driven state's fixed step is cut so speed × step ≤ 5 (`0x1000550e`).
 pub const VELOCITY_STEP_REACH: f32 = 5.0;
-/// A jittering state's step moves by up to ±12.5%.
+/// A jittering state's step moves by up to ±12.5%: it gains step × `JITTER` × (r − 0.5)
+/// with r the generator's word over 65536 (`0x100057de`-`0x1000584b`).
 pub const JITTER: f32 = 0.25;
+/// The jitter's draw is a 16-bit word over 65536 (`0x1003b374`).
+const RANDOM_SCALE: f32 = 1.0 / 65536.0;
 /// The blend weight eases from the last step's q over the first quarter.
 pub const EASE: f32 = 4.0;
 /// Steps one `advance` may run before it gives the clock up to the caller's time.
@@ -117,7 +121,10 @@ pub struct Machine {
     pub q_prev: f32,
     /// The request code the controller holds (IControl slot 19,
     /// `docs/32-builder.md`); a state with a code of its own applies only while it is this.
+    /// The constructor's is [`FIRST_REQUEST`], 0 (`Control.dll:0x10006ecf`).
     pub request: i32,
+    /// The jitter generator's two words, s0 in the low half and s1 in the high
+    /// (`Control.dll:0x10042230`; [`Walker::random`]).
     seed: u32,
 }
 
@@ -227,6 +234,12 @@ pub struct Walker {
     pub centre: Vec3,
     pub radius: f32,
     pub sphere_radius: f32,
+    /// r₂: the **node** sphere's own radius, which bounds the ground search's up pass
+    /// (`0x1001a70a`). It is held to 7.5 only when it is under 20 and the object's flags
+    /// carry `0x1000000` (`0x1001a51b`-`0x1001a58a`); which objects carry that flag is not
+    /// read, and the hold is left out here. *Measured*: r₂ differs from r on all 148 units
+    /// the campaign places, r₂/r running 0.42 to 2.34.
+    pub node_radius: f32,
     /// How far the origin stands above the model's lowest point.
     pub base: f32,
     /// The face the ground search last found under the body's centre.
@@ -265,6 +278,9 @@ impl Walker {
         let mut walker = Self::with_strides(controller, strides, contact_radius(sphere), base, position, yaw);
         walker.centre = centre;
         walker.sphere_radius = sphere;
+        // A bare mesh has no merged model to work a node sphere out of; its own header
+        // sphere stands in for r₂ until [`Walker::set_body_sphere`] is given one.
+        walker.node_radius = sphere;
         if contacts && !points.is_empty() {
             let feet = Feet { mesh: mesh.clone(), points: points.to_vec() };
             walker.planting = walker
@@ -305,8 +321,11 @@ impl Walker {
             limits,
             body,
             machine: Machine {
-                // STAND-IN: docs/24-motion.md#playing-a-state--read-and-measured -- the
-                // state a machine starts in is not read; state 0.
+                // The constructor puts the state index at 0 (`Control.dll:0x10006d19`) and
+                // zeroes the current-state copy but for its flags, `0x10001`
+                // (`0x10006d43`-`0x10006d49`). A zeroed record's use count is 0, so that
+                // copy does not apply and the first plan runs from index 0 to the cheapest
+                // anchor that does (docs/24, "Playing a state").
                 current: 0,
                 queue: VecDeque::new(),
                 clock_ms: 0.0,
@@ -314,10 +333,11 @@ impl Walker {
                 step_ms: 0.0,
                 q: 1.0,
                 q_prev: 1.0,
-                // STAND-IN: docs/32-builder.md#the-construction-sphere--read-and-measured --
-                // the code a controller holds before any is sent is not read; none, so a
-                // state waiting for a code of its own does not apply until one is sent.
-                request: ANY_REQUEST,
+                // The constructor's code is 0 (`Control.dll:0x10006ecf`), which is the code
+                // a finished building's own state waits for (docs/32, "stop the ray").
+                request: FIRST_REQUEST,
+                // The game seeds its generator once, at load, from `ngiGetClocks`
+                // (`0x10006330`); a fixed seed keeps the engine's runs repeatable.
                 seed: 0x2545_F491,
             },
             from: (position, yaw),
@@ -325,6 +345,7 @@ impl Walker {
             centre: Vec3::ZERO,
             radius,
             sphere_radius: radius,
+            node_radius: radius,
             base,
             ground: None,
             feet: None,
@@ -369,7 +390,6 @@ impl Walker {
         // STAND-IN: docs/24-motion.md#section-1-is-the-animation-state-graph--read-and-measured
         // -- a state's contacts are read to need their nodes intact (0x100) or destroyed
         // (0x200), but node life is not modelled here: those conditions are taken as met.
-        // The use count +0x94 is not read; unlimited.
         if c.states[current].applies(v, s, code)
             && let Some((path, _)) = c.path_by(&self.costs, current, current)
         {
@@ -378,22 +398,31 @@ impl Walker {
         }
         let best = (0..c.states.len())
             .filter(|&j| j != current && c.states[j].anchor() && c.states[j].applies(v, s, code))
-            .filter_map(|j| c.path_by(&self.costs, current, j))
-            .min_by(|a, b| a.1.total_cmp(&b.1));
-        if let Some((path, _)) = best {
+            .filter_map(|j| c.path_by(&self.costs, current, j).map(|(path, cost)| (j, path, cost)))
+            .min_by(|a, b| a.2.total_cmp(&b.2));
+        if let Some((to, path, _)) = best {
+            // `0x100052fd`-`0x1000530f`: the destination anchor spends one use, unless its
+            // count is unlimited or already 0.
+            let uses = &mut self.controller.states[to].uses;
+            if *uses != UNLIMITED_USES && *uses != 0 {
+                *uses -= 1;
+            }
             self.machine.queue = path.into();
         }
     }
 
+    /// The generator the jitter draws from (`Control.dll:0x100057de`-`0x1000582f`), a pair
+    /// of 16-bit words held side by side in one dword: s0 takes (s0 << 1) xor s1, then s1
+    /// takes (s1 >> 1) xor the new s0, and the new s1 over 65536 is the draw. The game
+    /// seeds it once at load from `ngiGetClocks` (`0x10006330`, a static initialiser in the
+    /// module's table at `0x1003e160`); all-zero is a fixed point, so an unseeded one would
+    /// hand every jittering step the same −12.5%.
     fn random(&mut self) -> f32 {
-        // STAND-IN: docs/24-motion.md#playing-a-state--read-and-measured -- the
-        // game's random source is not read; xorshift.
-        let mut x = self.machine.seed;
-        x ^= x << 13;
-        x ^= x >> 17;
-        x ^= x << 5;
-        self.machine.seed = x;
-        x as f32 / u32::MAX as f32
+        let (mut s0, mut s1) = (self.machine.seed as u16, (self.machine.seed >> 16) as u16);
+        s0 = (s0 << 1) ^ s1;
+        s1 = (s1 >> 1) ^ s0;
+        self.machine.seed = u32::from(s0) | (u32::from(s1) << 16);
+        f32::from(s1) * RANDOM_SCALE
     }
 
     /// `0x10005370`: one state step.
@@ -472,9 +501,11 @@ impl Walker {
         if self.controller.mode == SLOPE_MODE && !on_building {
             let along = self.body.to_world(Vec3::from_array(self.body.velocity));
             let normal = self.body.ground_normal;
-            // STAND-IN: docs/24-motion.md#ground-and-slope--read -- the brake is read to
-            // act one way across the slope; taken as uphill, against the face normal.
-            if along.x * normal.x + along.y * normal.y < 0.0 {
+            // `0x10015738`-`0x10015799`: the brake acts while (velocity x up) . (up x normal)
+            // is not negative, which is the horizontal velocity having no component along the
+            // normal's own horizontal part -- moving uphill, or exactly across the slope
+            // (docs/24, "Ground and slope").
+            if along.x * normal.x + along.y * normal.y <= 0.0 {
                 let factor = motion::slope_factor(normal.z, self.controller.cone);
                 // STAND-IN: docs/24-motion.md#not-established -- how a velocity the Wizard
                 // writes combines with the integrator is not read, and a written one replaces
@@ -535,14 +566,17 @@ impl Walker {
     /// become the ground normal. A point with no face under it has itself as its ground.
     ///
     /// STAND-IN: docs/24-motion.md#holding-the-body-on-the-ground--read-and-measured --
-    /// not read: when the ground contact runs and its dt, the frames the contact points
-    /// are placed at, the second sphere's radius r₂, and what a sphere with no face under
-    /// it does. It runs after every state step with dt the step, the contacts on the
-    /// step's last frames, r₂ = r, and a sphere with no face is not lifted.
+    /// the pass runs once a frame on message `0x1c`, with the frame's own milliseconds as
+    /// its dt (`0x1001b41b` reads machine `+0xe8`), and reads its contact points at the
+    /// pose the machine tick has just put the mesh in for that frame
+    /// (`0x1000c737`). Here it still runs after every state step, with the step as dt and
+    /// the contacts on the step's last frames.
     fn hold(&mut self, ground: &Ground, state: &State, dt: f32) {
         let r = self.radius;
         let centre = self.body.position + self.body.to_world(self.centre);
-        let hit = ground.search(centre, r);
+        // The up pass takes a face only where it stands less than r₂ -- the node sphere's
+        // own radius, not r -- above the centre (`0x1001a70a`).
+        let hit = ground.search(centre, self.node_radius);
         self.ground = hit;
         let last = Frames { a: state.pair_a[1], b: state.pair_b[1], weight: self.machine.q };
         let searched: Vec<(u32, i32, Vec3, Option<Hit>)> = match &self.feet {
@@ -564,8 +598,17 @@ impl Walker {
             .filter(|(flags, ..)| flags & CONTACT_SUPPORT != 0)
             .map(|&(_, _, p, h)| (p, h))
             .collect();
-        let lift = if contacts.is_empty() {
-            hit.filter(|h| centre.z - h.point.z < r).map(|h| h.point.z - centre.z + r)
+        let lift = if state.mode & STATE_GROUND_CONTACTS == 0 {
+            // Bit `0x4` clear (`0x1001b3c3`): the sphere is pushed out of the ground and
+            // never pulled down. With no face under it the ground point is the centre
+            // itself (`0x1001a86e`), so the gap is 0 and the lift is the whole r -- such a
+            // sphere climbs by its own radius every frame.
+            let gap = hit.map_or(0.0, |h| h.point.z - centre.z);
+            Some(if gap > -r { gap + r } else { 0.0 })
+        } else if contacts.is_empty() {
+            // Bit `0x4` with no flag-1 contact: the lift vector the contact loop fills is
+            // left at zero (`0x1001ab5d`), and the fall is not tried either (`0x10015d7b`).
+            Some(0.0)
         } else {
             let lift =
                 contacts.iter().map(|(p, h)| h.map_or(0.0, |h| h.point.z - p.z)).fold(f32::MIN, f32::max);
@@ -581,11 +624,13 @@ impl Walker {
         if let Some(lift) = lift {
             self.body.position.z += lift;
             self.body.fall_speed = 0.0;
+            // The sphere's normal and every flag-1 contact's, over their count plus one
+            // (`0x1001b0ea`). A point with no face under it keeps the default normal, world
+            // up (`Control.dll:0x1001bfa0`), and counts like any other.
+            let up = |h: &Option<Hit>| h.map_or(Vec3::Z, |h| h.normal);
             let normals: Vec<Vec3> =
-                hit.iter().chain(contacts.iter().filter_map(|(_, h)| h.as_ref())).map(|h| h.normal).collect();
-            if !normals.is_empty() {
-                self.body.ground_normal = normals.iter().sum::<Vec3>() / normals.len() as f32;
-            }
+                std::iter::once(up(&hit)).chain(contacts.iter().map(|(_, h)| up(h))).collect();
+            self.body.ground_normal = normals.iter().sum::<Vec3>() / normals.len() as f32;
         }
     }
 
@@ -656,10 +701,11 @@ impl Walker {
     /// The body sphere as the ground contact takes it: the centre in the model's frame
     /// (`0x1001a518`, the agent's node sphere's), and the radius (`0x1001a487`, the agent's
     /// sphere's), held to 7.5 under 20 for the contact.
-    pub fn set_body_sphere(&mut self, centre: Vec3, radius: f32) {
+    pub fn set_body_sphere(&mut self, centre: Vec3, radius: f32, node_radius: f32) {
         self.centre = centre;
         self.sphere_radius = radius;
         self.radius = contact_radius(radius);
+        self.node_radius = node_radius;
     }
 
     /// The body sphere's centre in the world.
@@ -778,6 +824,53 @@ mod tests {
         assert!(c.costs.iter().all(|&x| x < NO_EDGE));
         let strides = vec![Stride::default(), Stride { a: Vec3::ZERO, b: Vec3::new(0.0, 0.5, 0.0) }];
         Walker::with_strides(c, strides, 2.0, 0.0, position, yaw)
+    }
+
+    #[test]
+    fn the_planner_spends_a_states_use_count_and_stops_choosing_it_at_zero() {
+        // `0x100052fd`-`0x1000530f`: the destination anchor pays one use, and at 0 the
+        // state no longer applies (`0x10001132`). Every finite count in the install is 30,
+        // 20 or 10, and every one of them is on an anchor.
+        let g = field();
+        let mut w = walker(Vec3::new(500.0, 500.0, 2.0), 0.0);
+        w.controller.states[1].uses = 2;
+        // Already walking, so the walk anchor applies and standing does not.
+        w.body.velocity = [0.0, 10.0, 0.0];
+        w.advance(0.0, &g);
+        assert_eq!((w.machine.current, w.controller.states[1].uses), (1, 1));
+        // Back to standing, then forward again: the walk's second and last use.
+        w.machine.current = 0;
+        w.advance(w.machine.clock_ms, &g);
+        assert_eq!((w.machine.current, w.controller.states[1].uses), (1, 0));
+        w.machine.current = 0;
+        w.advance(w.machine.clock_ms, &g);
+        assert_eq!(w.machine.current, 0, "the walk is spent, so it is no longer chosen");
+        w.controller.states[1].uses = UNLIMITED_USES;
+        w.body.velocity = [0.0, 10.0, 0.0];
+        w.advance(w.machine.clock_ms, &g);
+        assert_eq!(w.machine.current, 1, "an unlimited count is never spent");
+        assert_eq!(w.controller.states[1].uses, UNLIMITED_USES);
+    }
+
+    #[test]
+    fn the_jitter_draws_from_the_games_own_pair_of_words() {
+        // `0x100057de`-`0x1000582f`: s0 = (s0 << 1) ^ s1, then s1 = (s1 >> 1) ^ s0, and
+        // the draw is the new s1 over 65536. Worked by hand from seed 1 | (2 << 16):
+        // s0 = 2 ^ 2 = 0, s1 = 1 ^ 0 = 1, so the first draw is 1/65536.
+        let mut w = walker(Vec3::ZERO, 0.0);
+        w.machine.seed = 1 | (2 << 16);
+        assert_eq!(w.random(), 1.0 / 65536.0);
+        assert_eq!(w.machine.seed, 1 << 16);
+        // All-zero is a fixed point, which is why the game seeds from the clock: an
+        // unseeded generator would hand every jittering step the same -12.5%.
+        w.machine.seed = 0;
+        assert_eq!((w.random(), w.machine.seed), (0.0, 0));
+        // Whatever it draws, a jittering step stays within 12.5%.
+        w.machine.seed = 0x2545_F491;
+        for _ in 0..1000 {
+            let r = w.random();
+            assert!((0.0..1.0).contains(&r) && (JITTER * (r - 0.5)).abs() <= 0.125);
+        }
     }
 
     #[test]
