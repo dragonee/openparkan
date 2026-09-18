@@ -47,6 +47,45 @@ starts only once the barrel has finished its stroke, so **value 3 is not the
 whole time between shots**
 ([Firing, from button to round](#firing-from-button-to-round--read-and-measured)).
 
+### What refills the capacitor — *read*, and *measured*
+
+**Nothing but the power tick.** The gun is priced like every other part: its
+class slot 5 (`0x10029a40`) answers what it wants of its channel over `dt`
+seconds — **its `power` figure times `dt`, plus whatever its capacitor lacks of
+value 1** — and its slot 6 (`0x10029a90`) takes the tick's level `r` and puts
+`r × want − power × dt` into `+0x120`, then sets the component's level `+0x4c`
+to `charge ÷ value 1`. There is no other writer of `+0x120` than the parse
+(full, `0x1002967f`), a shot (`0x1002a06a`) and a dock's rearm.
+
+- **Whose batteries.** Its carrier's, through the control system every agent
+  but a projectile shares — a bot's own fitted battery, a building's clan
+  power ([23-economy.md](23-economy.md#bots-spend-power-through-the-same-code-priced-by-part--read-and-measured)).
+  Weapons are served on the last channel, after the engines, the repair, the
+  devices and the shield, so they get what is left.
+- **Against which clock.** The power tick, **250 ± 31 ms**
+  (`Control.dll:0x1000c756`), about four times a second, not the gun's own
+  takt and nothing in a data file.
+- **At what rate.** **Every one of the 158 shipped gun and builder components
+  has a `power` of 0** (*measured*), so the ask is exactly the lack and the
+  grant exactly `r ×` it: at full power a capacitor is **whole again on the
+  next tick**, and short of power it closes the fraction `r` of its gap each
+  tick. The game adds the difference unguarded and clamps nothing, which with
+  a power of 0 and `r ≤ 1` can neither overshoot value 1 nor go backwards.
+- **The numbers** (*measured*, 158 components on 133 records — 93 `EXTO` guns,
+  58 `INTO` clips and 7 on `BTLU` units): capacitors run **0.1 to 6400**, and
+  **every gun's capacitor holds at least two shots** — the tightest is 2.00
+  (`e_gun_bl_17`, `e_gun_ml_18` and their clips) and the loosest 6666.67
+  (`e_tur_bb_11`). So no gun is ever stopped by charge on a single shot; what
+  costs is sustained fire, 0.04 to 31.22 units a second at full rate against a
+  bot battery's 5 to 34.5.
+- **A gun with no capacity has no level, ever.** All three writers of `+0x4c`
+  stand behind a `value 1 > 0` gate — the tick (`0x10029ae2`), the load setter
+  (`0x10029b25`) and **the shot** (`0x1002a03d`) — so on the five animals'
+  guns, the only ones with value 1 at 0 (`a_l_01`…`a_l_05`, *measured*), the
+  level keeps the 0 the base component's constructor leaves
+  (`0x1001f29c`, `0x1001f2cf`). A shot does not set it: it skips the whole
+  capacitor block.
+
 **Barrels.** A component's entries name the section-2 channels its barrels
 are. One shot fires the next barrel in turn (`0x1002a0d2`) — so a 9-tube
 launcher looses one rocket every stroke and interval — **or every barrel at

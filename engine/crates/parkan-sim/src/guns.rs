@@ -293,8 +293,10 @@ impl Gun {
         self.charge = (self.charge + share * self.capacitor).min(self.capacitor);
     }
 
-    /// What it wants of its channel over `dt` seconds (`Control.dll:0x10029a40`): its power and
-    /// whatever its capacitor lacks, nothing while its node is destroyed.
+    /// What it wants of its channel over `dt` seconds (`Control.dll:0x10029a40`, class slot 5):
+    /// its power and whatever its capacitor lacks of value 1, nothing while its node is
+    /// destroyed. **Every one of the 158 shipped gun and builder components has a power of
+    /// 0** (*measured*), so on the install this is exactly the lack.
     pub fn want(&self, dt: f32) -> f32 {
         if self.broken {
             return 0.0;
@@ -302,8 +304,12 @@ impl Gun {
         self.power * dt + (self.capacitor - self.charge).max(0.0)
     }
 
-    /// Served at `level` over `dt` seconds (`0x10029a90`): what the level gives beyond its power
-    /// goes into the capacitor.
+    /// Served at `level` over `dt` seconds (`0x10029a90`, slot 6): what the level gives beyond
+    /// its power goes into the capacitor, which is where a gun's charge comes from and the only
+    /// place it comes from. At a level of 1 the capacitor is full again on the next power tick;
+    /// short of power it closes `level` of the gap, and a gun with a power of its own could lose
+    /// charge. The game adds the difference unguarded and clamps nothing; with a power of 0 and
+    /// a level of at most 1 neither guard here can bind.
     pub fn serve(&mut self, level: f32, dt: f32) {
         let charge = level * self.want(dt) - self.power * dt;
         if charge > 0.0 {
@@ -311,14 +317,15 @@ impl Gun {
         }
     }
 
-    /// Top the capacitor up.
+    /// Top the capacitor up, as a full power tick would.
     ///
     /// STAND-IN: docs/23-economy.md#bots-spend-power-through-the-same-code-priced-by-part--read-and-measured
     /// -- a building's guns draw what their capacitors lack from its batteries on its power
-    /// tick, which the building's economy does not model: a gun on a unit with no battery, or on
-    /// a building, is full again every tick.
+    /// tick, and the building's economy is not modelled: a gun on a building, or on a unit with
+    /// no battery, is served at a level of 1. A unit with a battery runs the read tick,
+    /// [`Gun::want`] and [`Gun::serve`].
     pub fn recharge(&mut self) {
-        self.charge = self.capacitor;
+        self.serve(1.0, 0.0);
     }
 
     /// Run every event due by `now_ms` (`Control.dll:0x1002d260`); returns the rounds
@@ -508,6 +515,31 @@ mod tests {
             t += 1000.0 / 60.0;
         }
         out
+    }
+
+    /// `Control.dll:0x10029a40` and `0x10029a90`: the gun asks its channel for whatever its
+    /// capacitor lacks of value 1 and takes the tick's share of it, and nothing else fills it.
+    /// Every shipped gun's own power figure is 0, so the ask is the lack exactly; the level
+    /// is the charge over value 1, and a gun with no capacity has neither
+    /// (`0x10029ae2`, `0x1002a03d`).
+    #[test]
+    fn a_capacitor_closes_the_ticks_share_of_what_it_lacks_and_only_that() {
+        let mut g = gun([500.0, 20.0, 5.0, 0.0], &[4.0]);
+        assert_eq!(g.power, 0.0, "every shipped gun component's power figure");
+        assert_eq!(g.charge, g.capacitor, "the parse leaves it full (`0x1002967f`)");
+        g.charge = 0.0;
+        assert_eq!(g.want(0.25), 20.0, "the whole lack, whatever dt");
+        g.serve(0.5, 0.25);
+        assert_eq!(g.charge, 10.0, "half a tick's power closes half the gap");
+        g.serve(1.0, 0.25);
+        assert_eq!(g.charge, 20.0, "and a full tick fills it");
+        g.serve(1.0, 0.25);
+        assert_eq!(g.charge, 20.0, "never past value 1");
+        // A gun with no capacity is not held up by charge and spends none.
+        let mut free = gun([500.0, 0.0, 5.0, 0.0], &[4.0]);
+        assert_eq!(free.want(0.25), 0.0);
+        let shots = hold(&mut free, 1000.0);
+        assert!(!shots.is_empty() && free.charge == 0.0);
     }
 
     #[test]

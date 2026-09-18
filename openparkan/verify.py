@@ -11142,6 +11142,35 @@ def check_weapons(check, game: Path) -> None:
           f"assemblies {sum(fitted.values())} fitted guns hang a clip and "
           f"{sum(bare.values())} do not, each on the side its label says")
 
+    # Control.dll:0x10029a40 and 0x10029a90: a gun asks for its power and whatever its
+    # capacitor lacks of value 1, and takes the power tick's share of it.
+    parts = []
+    for name, record in arm.library.records.items():
+        ref = record.slot_with_suffix("ctl") if record else None
+        if not ref:
+            continue
+        try:
+            parsed = control.parse(arm.read(ref))
+        except (KeyError, NotAnNResArchive, struct.error, ValueError):
+            continue
+        for c in parsed.components:
+            if c.type_id in (control.GUN_TYPE, control.BUILDER_TYPE):
+                parts.append((name, c))
+    free = sorted({n for n, c in parts if c.values[control.GUN_CAPACITOR] == 0.0})
+    powered = [c.power for _, c in parts]
+    shots = sorted((c.values[control.GUN_CAPACITOR] / c.values[control.GUN_SHOT_ENERGY], n)
+                   for n, c in parts if c.values[control.GUN_SHOT_ENERGY] > 0)
+    check("guns.rlb: a gun's own power figure is zero, so its draw is the lack alone",
+          parts and set(powered) == {0.0},
+          f"all {len(parts)} class-2 and class-30 components read power 0, so slot 5's "
+          f"ask (0x10029a40) is exactly value 1 less the charge and a full power tick "
+          f"fills the capacitor outright; the five with no capacity at all are {free}")
+    check("guns.rlb: a capacitor always holds at least two shots",
+          shots and shots[0][0] >= 2.0,
+          f"value 1 over value 2 runs {shots[0][0]:.2f} ({shots[0][1]}) to "
+          f"{shots[-1][0]:.2f} ({shots[-1][1]}) over {len(shots)} components -- no gun "
+          f"is ever held up by charge on a single shot, only on sustained fire")
+
     slot_of = {g.slot: g for _, g in firearms.values() if g.slot}
     pairs = [(c, slot_of.get(c.family)) for _, c in clips.values()]
     same = sum(1 for c, g in pairs if g and g.round and c.round == g.round.member
