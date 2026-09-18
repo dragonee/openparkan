@@ -474,9 +474,17 @@ writes every face it makes the same way instead (`0x1000d9c4`):
 |---|---|
 | tex1 (`+4`) | **0** |
 | tex2 (`+5`) | `0xFF`, no second layer |
-| flags (`+0`) | `0x300` |
-| surface (`+6`) | 0 |
+| flags (`+0`) | `0x300`, written as a **dword**, so the surface word at `+2` is zeroed with it |
+| field 3 (`+6`) | 0, over the `0xFFFF` every shipped face carries there |
 | normal (`+0x14`) | its own, from its corners, as int16 over 32767 |
+
+The surface word is not written on its own: `0x1000d9d8` stores the dword
+`0x300` across fields 0 and 1 together, and the `word` store four instructions
+later (`0x1000d9e4`) goes to `+6`, which is [the face record's](#the-face-record-28-bytes-14--uint16)
+always-`0xFFFF` field 3 and not the surface. The flags then take a conditional
+**`0x8000`** (`0x1000d9fa`–`0x1000da0b`): a local float is compared against
+zero and the bit is set unless it is negative. Which float that is, and so
+which of the band's faces wear the bit, is **not established**.
 
 and each corner takes a layer-1 UV from **its own world x and y times 0.066**
 (`0x1009a214`, packed at 1024 to the UV unit at `0x1000d4be`), a blend of 1
