@@ -240,6 +240,12 @@ impl Host for Answers<'_> {
             // orders and targets (15, 19, 30, 31, 32, 34, 52, 59, 60, 71); any other call does
             // nothing and answers 0. Nothing raises or runs an AI problem, so a clan's takt
             // reaches only what its problem handler does itself.
+            //
+            // Two of the unanswered are read rather than unknown: 57 is the same callback on
+            // channel 2, which runs `mission.cfg`'s `script<n>` as a debug-console command,
+            // and 69 sets how far below the best the AI's next design pick may fall. Neither
+            // is called by a mission this engine plays, and none of the corpus's 21 call
+            // sites names a destination, so answering 0 is indistinguishable.
             other => {
                 self.unanswered.insert(other);
                 0

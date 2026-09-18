@@ -5864,6 +5864,14 @@ def check_mission_03_economy(check, game: Path) -> None:
             and abs(f32(beh, 0x10059604) - 0.1) < 1e-7
             and target(beh, 0x1002CE1F) == 0x10020F70 and f32(beh, 0x10059A90) == 250.0
             and beh(0x10020F70, 18).hex() == "d94104d901d9c0d8c9d9c2d8cbdec1d9fadd")
+    # ToMine bounds the dig and never scales it: a takt on ToMine at or below 0 ends the
+    # task before anything else, and a takt that digs raises the total (+0x5c) and lowers
+    # ToMine (+0x58) by the same dig before testing what stood between them.
+    to_mine = (beh(0x1002CF68, 14).hex() == "d94658d81d40910510dfe0f6c441"
+               and f32(beh, 0x10059140) == 0.0
+               and beh(0x1002D0BD, 0x27).hex() ==
+               "d9442410d85c241cd944241cd8465c8bcfdfe0d95e5cd94658d864241c2500410000d95e58755e"
+               and beh(0x1002D142, 12).hex() == "e8e974feff8b4e588988e809")
     # The distribution step's offer: dt (+0x68) times id 0x1002; the build's request's
     # 0.2 and 0.07, and its take through 0x10015540; order 18 to the start.
     shares = (beh(0x1001A8C6, 16).hex() == "8b0e680210000056ff5168d9442468d8"
@@ -5898,9 +5906,12 @@ def check_mission_03_economy(check, game: Path) -> None:
     # The resource rows step once more than 0.05 s has passed.
     step = i3(0x1006DA2F, 6).hex() == "d81da4500e10" and abs(f32(i3, 0x100E50A4) - 0.05) < 1e-8
     check("Behavior.dll, iron3d.dll: a mine keeps its total, ore at a holder's rate, prebuild",
-          digs and shares and usage_ok and profile and mine_order and prebuild and step,
+          digs and to_mine and shares and usage_ok and profile and mine_order and prebuild
+          and step,
           f"0x1002cf60 digs dt x 50 x KPD and writes its running total over the held ore, "
-          f"zeroes both below KPD 0.1, sums lodes within 250 by x and y {digs}; 0x1001a8c6 "
+          f"zeroes both below KPD 0.1, sums lodes within 250 by x and y {digs}; the total "
+          f"rises and ToMine falls by the same dig, so the two meet half way {to_mine}; "
+          f"0x1001a8c6 "
           f"offers dt x KPD x off-board, 0x1002a4f0 requests x 0.2 + 0.07, order 18 to the start "
           f"{shares}; SetPowerUsage from {[hex(s) for s in usage]}; profile by Type "
           f"{profile}; 0x10032d30 gives a mine order 10, replacing {mine_order}; prebuild into "
@@ -13572,6 +13583,8 @@ def check_search(check, game: Path) -> None:
     amounts: set[float] = set()
     mines = Counter()
     others = Counter()
+    in_reach = Counter()
+    to_mine: list[float] = []
     for path in sorted(game.glob("MISSIONS/**/data.tma")):
         m = mission.load(path)
         got = packages.mineral_lodes(m)
@@ -13589,18 +13602,30 @@ def check_search(check, game: Path) -> None:
                        <= packages.MINE_LODE_RADIUS for lode in got)
             is_mine = (int(kind.value) & 0xFFFFFFFF) == 0x80000004
             (mines if is_mine else others)[near] += 1
+            if is_mine:
+                # A mine's ToMine is the amounts of every lode in reach, and what it may
+                # dig is about half of that (docs/23, "A mine digs to 500").
+                reach = [lode for lode in got
+                         if math.hypot(lode.x - o.position[0], lode.y - o.position[1])
+                         <= packages.MINE_LODE_RADIUS]
+                in_reach[len(reach)] += 1
+                to_mine.append(sum(lode.amount for lode in reach))
     decades = {round(math.log10(a)) for a in amounts if a > 0}
     check("data.tma: the trailer's records are mineral lodes, and every mine sits by one",
           lodes and mines[True] and not mines[False] and others[True] * 10 < others[False]
           and typed > lodes // 2
           and all(abs(a / 10 ** round(math.log10(a)) - 1) < 1e-3 for a in amounts)
-          and min(decades) >= 4,
+          and min(decades) >= 4
+          and set(in_reach) == {1} and min(to_mine) >= 2 * profiles.MINE_MAX_ORE,
           f"{lodes} records in {missions_with} of {total} missions; all {mines[True]} placed "
           f"mines lie within {packages.MINE_LODE_RADIUS:g} of one (M_Task_Mine takes the "
           f"amounts of those), against {others[True]} of {sum(others.values())} other "
           f"buildings; {typed} carry the type 0x10001000 Search minerals asks for; the "
           f"amounts are 10^n or 10^n - 1 for n {min(decades)}..{max(decades)}; {found} start "
-          f"found, which a minerals search skips")
+          f"found, which a minerals search skips; every mine has exactly one lode in reach "
+          f"{dict(in_reach)}, so its ToMine is that amount alone, {min(to_mine):.6g} at "
+          f"least -- none is under twice the {profiles.MINE_MAX_ORE:g} a mine may hold, so "
+          f"no shipped mine is ever bounded by its lode")
 
 
 #: Section-5 action codes (``Control.dll:0x10002800``): start and stop an
@@ -15018,6 +15043,153 @@ def check_behaviour_flow(check, game: Path, scripts, table) -> None:
 
     check_behaviour_constants(check, game, scripts, table)
     check_behaviour_operators(check, game, scripts, table)
+    check_behaviour_mission_scripts(check, game, scripts, table)
+    check_behaviour_builds(check, game, scripts, table)
+
+
+#: The message callback's two channels: function 30 opens channel 0, the mission's
+#: message switch, and function 57 channel 2, which runs a line of ``mission.cfg``'s
+#: ``object script`` block as a debug-console command (docs/15-behaviour.md).
+FN_MESSAGE, FN_SCRIPT_LINE = 30, 57
+
+#: Function 69 stores the AI design pick's spread at the design store's ``+0x10``.
+FN_SPREAD = 69
+
+#: The ``mission.cfg`` object whose ``script<n>`` lines channel 2 looks up.
+SCRIPT_BLOCK = "script"
+
+
+def check_behaviour_mission_scripts(check, game: Path, scripts, table) -> None:
+    """Channel 2 of the message callback, and the count function 69 stores.
+
+    Function 57 hands a number to the callback on channel 2, which looks the key
+    up as ``script<n>`` and runs the answer as a console command.  If that is what
+    it is, every call names a line its own mission declares and no mission's block
+    is missed.  Function 69's count is the design pick's spread, and the corpus
+    should set it out of ``fDifficulty``.
+    """
+    B = behaviour
+    by_stem = defaultdict(list)
+    blocks = {}
+    for d in gamedir.missions(game):
+        cfg = d / "mission.cfg"
+        lines = mission.load_cfg_lines(cfg).get(SCRIPT_BLOCK, []) if cfg.exists() else []
+        blocks[d] = [value for _, value in lines]
+        for c in mission.load(d / "data.tma").clans:
+            by_stem[c.ai_script.replace("\\", "/").split("/")[-1].lower()].append(d)
+
+    numbers = {v.name: int(v.default, 0) for v in table
+               if v.default and v.default.lstrip("-").isdigit()}
+    named = declared = destinations = 0
+    orphan_scripts, orphan_blocks = 0, 0
+    verbs = Counter()
+    for got in blocks.values():
+        for value in got:
+            verbs[value.split("(", 1)[0].strip().lower()] += 1
+    callers = set()
+    for s in scripts:
+        stem = s.source.stem.lower()
+        users = by_stem.get(stem, [])
+        for h in s.handlers:
+            for n in h.nodes:
+                if not n.calls or n.function != FN_SCRIPT_LINE:
+                    continue
+                callers.add(stem)
+                destinations += n.destination != B.NULL
+                if not users:
+                    orphan_scripts += 1
+                    continue
+                index = numbers.get(B.name_at(table, n.operands[0]))
+                named += 1
+                declared += all(index is not None and 1 <= index <= len(blocks[d])
+                                for d in users)
+    orphan_blocks = sum(1 for d, got in blocks.items() if got
+                        and not any(stem in callers for stem in
+                                    (c.ai_script.replace("\\", "/").split("/")[-1].lower()
+                                     for c in mission.load(d / "data.tma").clans)))
+    with_block = sum(1 for got in blocks.values() if got)
+    check("behaviour: function 57 names a line of its own mission's script block",
+          named and declared == named and not orphan_scripts and not destinations
+          and with_block and set(verbs) <= {"create", "bcreate", "death", "delete",
+                                            "kill", "bkill", "summon", "cls", "truth", "?"},
+          f"{with_block} of {len(blocks)} missions carry a non-empty `object script` block, "
+          f"{sum(verbs.values())} lines between them {dict(verbs)} -- all names of the debug "
+          f"console's table at iron3d.dll:0x10103bf0; {declared}/{named} calls of function "
+          f"{FN_SCRIPT_LINE} name a line their own mission declares, {orphan_scripts} sit in "
+          f"a script no mission names, {orphan_blocks} blocks are never asked for and "
+          f"{destinations} of the calls name a destination")
+
+    spread = []
+    for s in scripts:
+        for h in s.handlers:
+            for n in h.nodes:
+                if n.calls and n.function == FN_SPREAD:
+                    spread.append((s.source.stem.lower(), h.name, n.destination != B.NULL))
+    difficulty = 0
+    for s in scripts:
+        if not any(stem == s.source.stem.lower() for stem, _, _ in spread):
+            continue
+        fml = B.formulas(s.source) if s.source.with_suffix(B.FORMULAS).exists() else []
+        difficulty += any("fDifficulty" in e for e in fml)
+    check("behaviour: function 69's spread is set once, in Init, out of the difficulty",
+          spread and all(h == B.EVENTS[0] for _, h, _ in spread)
+          and not any(dest for _, _, dest in spread) and difficulty,
+          f"{len(spread)} calls of function {FN_SPREAD} in "
+          f"{len({stem for stem, _, _ in spread})} scripts, every one in "
+          f"{B.EVENTS[0]} and none naming a destination; {difficulty} of those scripts "
+          f"write it from fDifficulty, so an easy game lets the AI build worse designs")
+
+
+def check_behaviour_builds(check, game: Path, scripts, table) -> None:
+    """What a clan's AI does with a build the factory will not take.
+
+    Every ``ORDER_BUILDING_CONSTRUCT`` in the corpus sits in a
+    ``PBM_ROBOT_NEEDED_Start`` handler and is followed by one comparison of the
+    result.  If the handler dropped the problem on a refusal, the comparison is
+    against *taken* and its arm is ``fn8(ST_SOLVED)``.
+    """
+    B = behaviour
+    names = {v.name: i for i, v in enumerate(table)}
+    numbers = {v.name: int(v.default, 0) for v in table
+               if v.default and v.default.lstrip("-").isdigit()}
+    order = names.get("ORDER_BUILDING_CONSTRUCT")
+    solved = numbers.get("ST_SOLVED")
+    builds = drops = guards = raises = 0
+    scripts_with = set()
+    for s in scripts:
+        handlers = {h.name for h in s.handlers}
+        for h in s.handlers:
+            for i, n in enumerate(h.nodes):
+                if n.calls and n.function == 2 and n.operands \
+                        and B.name_at(table, n.operands[0]) == "PBM_ROBOT_NEEDED":
+                    raises += 1
+                if not n.calls or n.function != 15 or len(n.operands) < 2:
+                    continue
+                if n.operands[1] != order:
+                    continue
+                builds += 1
+                scripts_with.add(s.source.stem.lower())
+                test, arm = h.nodes[i + 1], h.nodes[i + 2]
+                # The guard reads "not taken": == 0 under op1, != 1 under op5.
+                want = {(1, 0), (5, 1)}
+                got = (test.opcode, numbers.get(B.name_at(table, test.operands[1])))
+                drops += (h.name == "PBM_ROBOT_NEEDED_Start" and not test.calls
+                          and test.kind == B.IF and test.operands[0] == n.destination
+                          and got in want and arm.calls and arm.function == 8
+                          and numbers.get(B.name_at(table, arm.operands[0])) == solved)
+        if "PBM_ROBOT_NEEDED_Start" in handlers:
+            start = next(h for h in s.handlers if h.name == "PBM_ROBOT_NEEDED_Start")
+            head = start.nodes[0] if start.nodes else None
+            guards += bool(head and not head.calls and head.kind == B.IF
+                           and B.name_at(table, head.operands[0]) == "dFreeMindNumber")
+    check("behaviour: a build the factory will not take is dropped, not re-ordered",
+          builds and drops == builds and guards == builds - 1 and raises > builds,
+          f"all {builds} ORDER_BUILDING_CONSTRUCT calls in the {len(scripts)} scripts sit in "
+          f"a PBM_ROBOT_NEEDED_Start handler, one per script, and every one is followed by a "
+          f"test of the result that marks the problem ST_SOLVED when the order was not "
+          f"taken ({drops}/{builds}); {guards} of them refuse to order at all with "
+          f"dFreeMindNumber at or below 0, so only one tries blind; the problem comes back "
+          f"only because {raises} raises of PBM_ROBOT_NEEDED sit elsewhere in the corpus")
 
 
 def check_behaviour_constants(check, game: Path, scripts, table) -> None:

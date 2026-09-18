@@ -694,9 +694,12 @@ laser (`e_gun_lc_03`, `e_gun_mc_20`).
   mine once the storage has more than 0.5 free.
 - ~~What a mine's "ToMine", the amount of the lodes within 250, does to its
   output ([31-packages.md](31-packages.md#mineral-lodes--read-and-measured)).~~
-  It bounds the digging: the task ends, "All Ore mined...", when what is left
-  is no more than a takt's dig. Only the 500 dug comes off it, so no shipped
-  lode runs out
+  It bounds the digging and never scales it: the task ends, "All Ore mined...",
+  when what is left is no more than a takt's dig — and since a takt raises the
+  total and lowers `ToMine` by the same dig, that bound bites at **half**, so a
+  mine yields about `ToMine / 2` or 500, whichever is less. Only the ore dug
+  comes off `ToMine`, and all 15 placed mines sit on 999,999 or more, so no
+  shipped lode runs out
   ([23-economy.md](23-economy.md#a-mine-digs-to-500-and-then-a-draw-does-not-empty-it--read)).
 - What the pick's query record (first word `0xa`, `iron3d.dll:0x10035e82`) asks
   the world's segment query for, so which objects stop the cursor's ray.

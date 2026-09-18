@@ -8,8 +8,8 @@ use std::collections::{BTreeSet, HashMap};
 use parkan_formats::mission::{KIND_BUILDING, Mission, Value};
 use parkan_formats::{control, gamedir, nres, profiles};
 use parkan_sim::economy::{
-    Battery, EFFICIENCY_POWER, LODE_REACH, MINE_MAX_ORE, Mine, ORE_ROW_SCALE, POWER_JITTER_MS, POWER_TICK_MS,
-    STEP_MS, STEP_RANDOM_MS, STORAGE_MAX_ORE, WANT_FLOOR, share,
+    Battery, Dug, EFFICIENCY_POWER, LODE_REACH, MINE_MAX_ORE, Mine, ORE_ROW_SCALE, POWER_JITTER_MS,
+    POWER_TICK_MS, STEP_MS, STEP_RANDOM_MS, STORAGE_MAX_ORE, WANT_FLOOR, share,
 };
 
 use crate::assembly::Assembly;
@@ -343,8 +343,15 @@ impl Play {
             let site = &mut self.economy.sites[i];
             let Some(mine) = site.mine.as_mut() else { continue };
             match mine.takt(dt, kpd, most) {
-                Some(held) => self.economy.ore.entry(t).or_insert((0.0, most)).0 = held,
-                None => {
+                Dug::Digging(held) => self.economy.ore.entry(t).or_insert((0.0, most)).0 = held,
+                // "All Ore mined...": the last dig is banked before the task ends.
+                Dug::AllMined(held) => {
+                    self.economy.ore.entry(t).or_insert((0.0, most)).0 = held;
+                    site.mine = None;
+                    site.digging = false;
+                    site.usage = 0.0;
+                }
+                Dug::Spent => {
                     site.mine = None;
                     site.digging = false;
                     site.usage = 0.0;

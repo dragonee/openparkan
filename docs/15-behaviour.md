@@ -507,7 +507,7 @@ An earlier reading of this page called the score a distance and these functions
 | fn | uses | arguments | does |
 |---:|---:|---|---|
 | 30 | 244 | kind, value | hand both to the message callback `iron3d.dll` gives `CreateSuperAI` (`iron3d.dll:0x10060ce0`), channel 0 |
-| 57 | 14 | *a*, *b* | the same callback, channel 2 |
+| 57 | 14 | *a*, *b* | the same callback, channel 2: run `mission.cfg`'s `script`*a* as a console command ([below](#channel-2-runs-a-line-of-the-missions-script-block--read-and-measured)). *b* is never read |
 | 59 | 26 | delay | the clan's seconds clock plus the delay (`+0x854`, which the constructor sets from `timeGetTime` over 1000 and each clan takt steps 7 on: [34-progression.md](34-progression.md#when-the-mission-handler-runs--read)) |
 | 60 | 20 | time | 1 once that time has passed — the clock strictly above it, compared unsigned — else `ERROR` |
 | 70 | 1 | *n* | a random number below *n* |
@@ -515,7 +515,7 @@ An earlier reading of this page called the score a distance and these functions
 | 43 | 10 | — | load the files in `UNITS\UNITS\AI\` into the object at `+0x40c`, which also keeps the place list function 40 reads |
 | 41 | 2 | *id* | a test of the unit through that object; `FALSE` ends `PBM_MAKE_RESEARCH_Start` as solved |
 | 65, 56 | 1, 2 | — | a flag of that object (`dLargeResearched = fn65()`); the byte at `+0x431` |
-| 69 | 7 | *n* | store *n* at `+0x41c` |
+| 69 | 7 | *n* | store *n* at `+0x41c`, the design store's own `+0x10`: **how far down its ranking the AI's next build may reach** ([below](#function-69-sets-how-sloppy-the-ais-design-pick-is--read-and-measured)). Negative is ignored; the result is 1 |
 | 53 | — | *clan* | an entry of that clan's place list |
 | 0, 1, 9 | 6, —, 8 | | stubs: 0 sets the result to 1, 1 reads a float and drops it, 9 does nothing |
 
@@ -527,6 +527,106 @@ The callback's channel 0 is the mission's message switch, and its six kinds are
 manager and plays `VOICE_OBJ_COMPLETE`; `OBJECTIVE_FAILED` fetches 5041;
 `OBJECTIVE_PROGRESS` updates the objective the value numbers; `MESSAGE_INFO`
 hands its value to `iron3d.dll:0x10094e30`; `CLAN_HERO_KILLED` does nothing.
+
+## Channel 2 runs a line of the mission's `script` block — *read*, and *measured*
+
+The callback is `cdecl` and takes three words: the channel, then two values.
+Only two functions call it, and each pushes its channel as a constant —
+function 30 pushes 0 (`ai.dll:0x1000c2ee`), function 57 pushes 2
+(`0x1000e4f0`), both through the pointer at `0x100555e4` that `CreateSuperAI`
+was given. A channel that is neither falls straight out
+(`iron3d.dll:0x10060d15`–`0x10060d22`), and the whole callback is gated on a
+byte of the game object, `+0xe5`, which is set when the game's mode word reads
+3 (`0x1005c75a`): with that byte set no channel does anything.
+
+**Channel 2** (`0x10060d28`) reads the **first** value only — the second word
+is on the stack and never touched. It formats that value into the key
+`script%d` (`0x1003c8dd`), looks the key up in the configuration object the
+game keeps at `+0x48`, and hands the answer to `0x1003ca50`, which splits it on
+`()` and dispatches the first token against a ten-entry table at
+`0x10103bf0`. That table is **the game's debug console**, its names and its
+help text intact: `truth`, `kill`, `bkill`, `cls`, `summon`, `?`, `create`,
+`delete`, `bcreate`, `death` — `create` documents itself as `(<x>, <y>, <z>,
+<clan number>, <datafile name>)`, `delete` as `(Logic ID)`, `death` as
+`(x, y, r, delay)`.
+
+The configuration object is the mission's own `mission.cfg`, and the whole
+install says so:
+
+- **6 of the 29 shipped `mission.cfg` files carry a non-empty `object script`
+  block**, 20 lines between them: 18 `create`, one `bcreate`, one `death` —
+  exactly three of the table's ten names, and nothing else.
+- **The 14 calls of function 57 sit in 4 scripts, and every one names a line
+  its own mission declares.** `c2m2p` and `c2m3p` pass 1–3 against Campaign 2
+  Mission 02's and Mission 03's three lines, `c4m2p` passes 1–5 against
+  Campaign 4 Mission 02's five, and `c5m1e` passes 1–3 against Campaign 5
+  Mission 01's three. **0 of 14** name a line the mission has not got, and
+  **0 of 4** of those scripts belong to a mission with no block at all.
+- **Two blocks are dead.** Campaign 3 Mission 02's two lines and Multi 03's
+  four are never asked for: no script of either mission calls function 57.
+- Every one of the 14 calls passes the **same number twice** — `fn57(d1, d1)`,
+  `fn57(d2, d2)` — which the channel's one-argument arm makes harmless.
+- Control: the same corpus makes **244** calls on channel 0.
+
+So a mission's `script` block is a list of console commands and a script fires
+them by index: Campaign 4 Mission 02's `death(1246, 1051, 100, 0)` and
+`bcreate(1246, 1051, 10, 0, teleport.dat, 0)` are how its Teleport objective
+clears its ground and puts the Teleport there.
+
+## Function 69 sets how sloppy the AI's design pick is — *read*, and *measured*
+
+`+0x41c` is not a field the SuperAI reads itself but the **design store's**
+`+0x10`. The store is embedded at the SuperAI's `+0x40c` — function 43 loads
+`UNITS\UNITS\AI\` into it (`0x1000d561`), and functions 15 and 40 reach the
+same bytes by adding `+0x7c` and then `+0x390` (`0x10008678`, `0x1000d08e`).
+Its constructor clears the field (`0x10010493`) and function 69's handler is
+the only writer in the module: a sweep of every memory operand in `ai.dll`'s
+`.text` with that displacement returns `0x1000f0c9` and nothing else. The
+handler takes the value as a `DWORD`, stores it only when it is not negative,
+and leaves 1 in the result slot.
+
+**What reads it is the design pick** (`0x100107c0`), which function 15 reaches
+through `0x10010be0` when a call's target kind is `TARGET_BY_NAME`
+(`0x1000867e`). The pick scores every design the store loaded, sorts the
+indices by that score largest first (a selection sort at `0x10010a37`), and
+then takes **not the best but the one at index
+`(rand() + timeGetTime()) % (n + 1)`** (`0x10010abc`–`0x10010ae1`; `rand` is
+the CRT's own at `0x1001d6d0`, `timeGetTime` the import at `0x10034128`). An
+index at or past the candidate count falls back to 0, and `n = 0` — what the
+constructor leaves — always takes index 0. So the count is a **spread**: how
+far down its own ranking the clan's next build may fall.
+
+Which field is scored is the script's `SELECT_*`. The pick's second argument is
+that constant, and `mode − 1` indexes a six-arm jump table at `0x10010bbc`,
+each arm copying a different float of the 0x124-byte design record (`+0x110`,
+`+0x114`, `+0x11c`, …) into the score array. `SELECT_SMALLEST`, 6, skips the
+draw altogether and takes the last of the ranking (`0x10010aab`,
+`0x10010b65`). The scripts pass the mode as the `TARGET_BY_NAME` target of
+their `ORDER_BUILDING_CONSTRUCT`, out of the problem's third parameter
+(`dT1 = fn29(d2)`): all **108** raises of `PBM_ROBOT_NEEDED` in the corpus pass
+a `SELECT_*` there — 65 `SELECT_BEST_COMBAT`, 42 `SELECT_FASTEST`, one
+`SELECT_SMALLEST`.
+
+*Measured*: **all 7 calls sit in `Init`**, in 6 scripts, every one of them an
+enemy script that also builds by name — and the value is a **difficulty knob**:
+
+| script | what `Init` sets | `fDifficulty` 0 | 1 |
+|---|---|---:|---:|
+| `c2m1e` | `fn69(2)`, then `fn69(1)` inside `if fDifficulty > 0` | 2 | 1 |
+| `c2m3e` | `dT = 6 − 4·fDifficulty` | 6 | 2 |
+| `c3m1e` | `dT = 3 − 2·fDifficulty` | 3 | 1 |
+| `c3m2e` | `dT = 6 − 6·fDifficulty` | 6 | 0 |
+| `c3m2e2` | `fn69(2)` | 2 | 2 |
+| `c4m2e2` | `dT = 7 − 6·fDifficulty` | 7 | 1 |
+
+An easy game makes the clan build worse designs. **9 scripts build by name**
+([23-economy.md](23-economy.md#the-bot-limit-is-the-clans-mind-count--read-and-measured));
+the three that never call 69 — `c1m3e`, `c1m4e`, `scream` — keep the spread at
+0 and always take the best their `SELECT_*` ranks.
+
+**Neither function's result is ever read**: 0 of the 14 calls of 57 and 0 of
+the 7 of 69 name a destination, so what 69 leaves in the result slot goes
+nowhere.
 
 ## Reading a script
 
@@ -911,10 +1011,18 @@ capturer — which is why the table stops one call deep.
   engine does with a problem once raised: which problem handler runs when, and
   who writes `dCurrentProblem` and `dCurrentSender`. When `Init`, `Mission` and
   `Problems<n>` run is read in [34-progression.md](34-progression.md).
-- **Channel 2 of the message callback** (function 57), and the `+0x41c` count
-  function 69 stores. What `MESSAGE_INFO`'s value selects in `iron3d.dll` is
+- ~~**Channel 2 of the message callback** (function 57), and the `+0x41c` count
+  function 69 stores.~~ Both are now read. Channel 2 runs `mission.cfg`'s
+  `script`*a* as a debug-console command, and the 14 calls name only lines
+  their own missions declare ([Channel 2 runs a
+  line](#channel-2-runs-a-line-of-the-missions-script-block--read-and-measured));
+  `+0x41c` is the design store's spread, how far below the best the AI's next
+  build may fall, and the 7 calls set it from `fDifficulty` ([Function
+  69](#function-69-sets-how-sloppy-the-ais-design-pick-is--read-and-measured)).
+  What `MESSAGE_INFO`'s value selects in `iron3d.dll` was already
   read: a `messages.cfg` id, played as [34-progression.md](34-progression.md)
-  describes.
+  describes. Still not read: what the design store **scores** — the six floats
+  at the design record's `+0x110` upward that `SELECT_*` chooses between.
 - ~~**Whether any script depends on a constant landing inside a false block.**~~
   Now answered: **no**, over all 121 (constant, enclosing `if`) pairs, with a
   control that returns 98 on the writes the block does guard ([Does any script

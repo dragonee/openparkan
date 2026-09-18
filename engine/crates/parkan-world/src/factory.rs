@@ -322,4 +322,21 @@ mod tests {
             ["d", "c", "b", "a", "p2"]
         );
     }
+
+    #[test]
+    fn a_build_with_no_free_mind_is_dropped_and_nothing_waits_for_one() {
+        // "No Free mind... cannot start constructing": the task's start fails, the stack
+        // removes the order and nothing in the factory waits (docs/23, "The bot limit is
+        // the clan's mind count"). The AI's own handlers do the same one level up -- a
+        // refused `ORDER_BUILDING_CONSTRUCT` marks the problem solved.
+        let mut f = factory();
+        f.prebuild(project("p1"));
+        assert!(!f.start(false, 0), "no mind, no build");
+        assert!(f.build.is_none(), "and nothing is queued behind it");
+        // The project is still shown, so a later order can start it once a mind frees.
+        assert!(f.start(false, 1));
+        assert!(f.build.is_some());
+        // A second order while one runs is refused too, and again queues nothing.
+        assert!(!f.start(false, 1));
+    }
 }

@@ -499,18 +499,40 @@ CPUs" in the game's own interface (`iron3d.dll` string 3067).
   orders in the 58 scripts sit in a `PBM_ROBOT_NEEDED_Start` handler, one per
   script. Each gives the order to the end of a factory's queue. It sets
   `fn8(ST_SOLVED)` behind a comparison of `fn15`'s result with 1 (`op5`, 8 of
-  them) or with 0 (`op1`, `c1m3e`); what the two comparisons test is the
-  *guess* of [15-behaviour.md](15-behaviour.md).
+  them) or with 0 (`op1`, `c1m3e`). The two opcodes are the relation table's
+  own — `op5` is `!=` and `op1` is `==` (`ai.dll:0x1001211a`–`0x1001218b`,
+  [15-behaviour.md](15-behaviour.md#values-one-type-into-another--read)) — so
+  both guards read the same way: **the problem is marked solved when the order
+  was not taken**.
 - **What `fn15` answers** — *read*. Its handler (`ai.dll:0x10008054`, the
   table's fifteenth slot) gives the order through the unit's `AddOrder` and
   leaves 1 in the interpreter's result (`+0x50`) when `AddOrder` returns
   non-zero, 0 when it returns 0, and 5 when no object answers the id
   (`0x10008376`).
-- *Derived*, if `op5` is equality and that result is what `dT3` receives: a
-  factory with an empty queue and no free mind refuses at once, the problem
-  stays unsolved, and the handler orders again the next time the clan plans
-  `PBM_ROBOT_NEEDED`. A build queued behind another is accepted and marked
-  solved, then dropped when it reaches the top. `ai.dll:0x10007fd0`, named here
+- **A build the AI cannot place is dropped too** — *read*, and *measured*, and
+  the opposite of what this page derived before. The executor writes a call's
+  result slot into the call's destination (`0x100122e5`), so `dT3` is `fn15`'s
+  answer; the guard above then reads *refused* and the handler does
+  `fn8(ST_SOLVED)` and returns. **All 9** of them do: a build the factory would
+  not take **ends the problem as solved**, and nothing in the handler orders
+  again. The earlier reading here — that the problem stays unsolved and is
+  re-ordered on the next plan — had the comparison's polarity backwards.
+- **8 of the 9 do not even try without a mind** — *measured*. `Problems0`
+  opens with `dFreeMindNumber = fn49()` in **all 9** scripts, at node 0, and
+  eight of the nine `PBM_ROBOT_NEEDED_Start` handlers open with
+  `if dFreeMindNumber <= 0` → `fn8(ST_SOLVED)`, `return`. Only `c1m3e` orders
+  without looking. So the usual path is not a refusal at all: the clan drops
+  the problem before the factory ever hears of it.
+- **What re-raises it is the want, not the build.** The 58 scripts raise
+  `PBM_ROBOT_NEEDED` 108 times, from 13 scripts and 13 handler names that each
+  want a robot for something — `PBM_BUILDING_CAPTURE_Start`,
+  `PBM_ATTACK_UNIT_Start`, `All_Defence`, `PBM_N_OPTIMAL_TRANSPORT_Start`,
+  `Problems0` itself. Because the refused problem was marked **solved** rather
+  than left standing, function 2's duplicate test (`0x10004c50`, same code,
+  same *p1* and *p2*) no longer blocks it, and the next want raises it afresh.
+  So the answer to *retry, drop or queue* is **drop** at every level: the
+  factory drops the task, the handler drops the problem, and the clan comes
+  back only when something wants a robot again. `ai.dll:0x10007fd0`, named here
   before, is only a helper in the handlers' code that evaluates one argument.
 
 So a clan with 5 minds can have at most 5 bots alive or under construction,
@@ -714,21 +736,44 @@ a player's institute for the research panel.
   then on.
 
 **Each takt** (`0x1002cf60`), with `dt` the time since the last in seconds:
-1. **Efficiency.** `KPD` is the mine's efficiency, or 1 when its profile uses
+1. **Nothing left ends it.** A takt that finds `ToMine` at or below zero
+   returns 0 at once and the task is over, writing nothing (`0x1002cf68`).
+2. **Efficiency.** `KPD` is the mine's efficiency, or 1 when its profile uses
    no power.
-2. **Below 0.1** the task logs `BAD KPD`. It sets its running total, its
+3. **Below 0.1** the task logs `BAD KPD`. It sets its running total, its
    progress **and the mine's held ore** to 0 (`0x1002cff6`, then the setter
    at `0x1002d010`).
-3. **Otherwise it digs** `dt × Mine_OrePerSecond × KPD` (`0x1002d06c`).
+4. **Otherwise it digs** `dt × Mine_OrePerSecond × KPD` (`0x1002d06c`).
    - The dig is capped so that the running total does not pass the ore
-     property's maximum, 500.
-   - The dig is added to the total and taken off `ToMine`.
+     property's maximum, 500 (`0x1002d09e`).
+   - It takes `ToMine` less the total **before either changes**, then adds the
+     dig to the total and takes the same dig off `ToMine` (`0x1002d0bd`–
+     `0x1002d0df`). So a takt moves the two **towards each other**, one dig
+     each.
    - `ToMine` is written into `MBehaviour+0x9e8`.
    - **The mine's held ore is set to the running total** (`0x1002d0f9`).
-   - The progress is the total over `ToMine`.
-4. **When `ToMine` less the total is no more than the dig**, it logs
-   "All Ore mined...". The progress goes to 1, `SetPowerUsage(0)` is called and
-   the task ends.
+   - The progress is the total over `ToMine`, both as they now stand.
+5. **When the amount it took in step 4 — `ToMine` less the total, as they stood
+   before the dig — is no more than that dig**, it logs "All Ore mined...".
+   The last dig is banked all the same: the total, the held ore and `ToMine`
+   are written first, then the progress goes to 1, `SetPowerUsage(0)` is called
+   and the task ends (`0x1002d142`).
+
+**So `ToMine` bounds the output and never scales it** (*read*). The rate is
+`Mine_OrePerSecond × KPD` whatever the lodes hold; what the lodes decide is
+only when the task stops. And because a takt moves the total up and `ToMine`
+down by the same dig, the two meet **half way**: a mine digs about `ToMine / 2`
+before it hears "All Ore mined", or 500, whichever comes first. A lode of 600
+yields 350, not 600. Only the ore actually dug comes off `ToMine`.
+
+*Measured* over all 29 missions: **15 placed mines in 8 missions, and every one
+has exactly one lode within 250** — so its `ToMine` is that lode's amount
+alone, from 999,999 up to 10²⁰. **0 of the 15 carry less than 1000**, so the
+halving never binds on shipped data: every shipped mine digs its full 500 and
+then stops digging, with `ToMine` down by exactly 500 and the task still
+running. Control: of the other buildings in the missions that carry lodes, 6 of
+95 stand within 250 of one
+([31-packages.md](31-packages.md#mineral-lodes--read-and-measured)).
 
 The running total only grows, and every takt writes it over the mine's held
 ore. Once a mine has dug its 500:
@@ -947,12 +992,14 @@ construction slows research.
 
 ## Not established
 
-- Whether a clan's AI re-orders a build that was refused for want of a mind.
-  An immediate refusal makes `AddOrder` return 0 and `fn15` leave 0, so a
-  `PBM_ROBOT_NEEDED_Start` handler does not mark its problem solved. Still to
-  read: that the result reaches `dT3` and `op5` is equality (the interpreter's
-  semantics), and when the SuperAI plans `PBM_ROBOT_NEEDED` again. A build
-  refused later, behind another order, is not re-ordered by that handler.
+- ~~Whether a clan's AI re-orders a build that was refused for want of a
+  mind.~~ It does not: **it drops it**, and the guess this line rested on was
+  backwards. `op5` is `!=`, not equality, so all 9 handlers mark the problem
+  `ST_SOLVED` when `fn15` does not answer 1; and 8 of the 9 never order at all
+  without a free mind, because they open on `if dFreeMindNumber <= 0`. The
+  problem comes back only when one of the 108 raises in the corpus wants a
+  robot again ([The bot
+  limit](#the-bot-limit-is-the-clans-mind-count--read-and-measured)).
 - **Which of Mission 03's units hold a mind, and what the factory's "Available
   CPUs" counts** as a build runs.
   - The player clan has 7 minds and starts with the hero, a builder and a

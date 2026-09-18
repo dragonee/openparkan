@@ -90,6 +90,19 @@ impl Battery {
     }
 }
 
+/// What one of a mine's takts leaves (docs/23, "A mine digs to 500").
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Dug {
+    /// The mine now holds this, and the task runs on (`0x1002d0e4`).
+    Digging(f32),
+    /// "All Ore mined..." (`0x1002d142`): the mine holds this — the last dig is banked
+    /// whole — the progress goes to 1, `SetPowerUsage(0)` is called and the task ends.
+    AllMined(f32),
+    /// A takt that finds nothing left to mine ends the task at once and writes nothing
+    /// (`0x1002cf68`).
+    Spent,
+}
+
 /// `M_Task_Mine`: the lodes' amount it may dig and the running total dug.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Mine {
@@ -104,19 +117,34 @@ impl Mine {
     }
 
     /// One takt of `dt` seconds at efficiency `kpd` with the ore property's most `most`
-    /// (`0x1002cf60`): the ore the mine now holds, or `None` once all is mined. With the
-    /// efficiency under 0.1 the total and the held ore fall to 0.
-    pub fn takt(&mut self, dt: f32, kpd: f32, most: f32) -> Option<f32> {
+    /// (`0x1002cf60`). With the efficiency under 0.1 the total and the held ore fall to 0
+    /// and the task runs on.
+    ///
+    /// The dig is `dt × 50 × kpd`, capped so the total does not pass `most`; the takt then
+    /// **adds it to the total and takes it off `to_mine`**, and ends when what stood
+    /// between them before the dig was no more than the dig itself. The two therefore meet
+    /// half way: a mine yields about `to_mine / 2`, or `most`, whichever is less.
+    pub fn takt(&mut self, dt: f32, kpd: f32, most: f32) -> Dug {
+        // The game's test is an x87 compare an unordered pair passes, so only a real zero
+        // or less ends the takt here.
+        if self.to_mine <= 0.0 {
+            return Dug::Spent;
+        }
         if kpd < BAD_KPD {
             self.total = 0.0;
-            return Some(0.0);
+            return Dug::Digging(0.0);
         }
         let dig = (dt * MINE_ORE_PER_SECOND * kpd).min((most - self.total).max(0.0));
-        if self.to_mine - self.total <= dig {
-            return None;
-        }
+        let left = self.to_mine - self.total;
         self.total += dig;
-        Some(self.total)
+        self.to_mine -= dig;
+        if left <= dig { Dug::AllMined(self.total) } else { Dug::Digging(self.total) }
+    }
+
+    /// The task's progress, the total over what is left to mine (`0x1002d109`); a task that
+    /// has ended reads 1.
+    pub fn progress(&self) -> f32 {
+        if self.to_mine <= 0.0 { 1.0 } else { (self.total / self.to_mine).min(1.0) }
     }
 }
 
@@ -151,17 +179,37 @@ mod tests {
 
     #[test]
     fn a_mine_digs_50_a_second_to_500_and_holds_nothing_below_a_tenth() {
-        let mut m = Mine::new(1e19).unwrap();
-        assert_eq!(m.takt(1.0, 1.0, MINE_MAX_ORE), Some(50.0));
+        // The smallest ToMine any of the 15 shipped mines carries is 999,999, so none of
+        // them is ever bounded by its lode: it digs the full 500 and stops digging.
+        let mut m = Mine::new(999_999.0).unwrap();
+        assert_eq!(m.takt(1.0, 1.0, MINE_MAX_ORE), Dug::Digging(50.0));
         for _ in 0..20 {
-            m.takt(1.0, 1.0, MINE_MAX_ORE);
+            assert!(matches!(m.takt(1.0, 1.0, MINE_MAX_ORE), Dug::Digging(_)));
         }
         assert_eq!(m.total, 500.0);
-        assert_eq!(m.takt(0.2, 0.05, MINE_MAX_ORE), Some(0.0));
+        // Every 500 dug comes off ToMine, and nothing more.
+        assert_eq!(m.to_mine, 999_999.0 - 500.0);
+        // A full mine never runs dry: the dig is 0, so the task cannot reach its end.
+        assert_eq!(m.takt(1.0, 1.0, MINE_MAX_ORE), Dug::Digging(500.0));
+        assert_eq!(m.takt(0.2, 0.05, MINE_MAX_ORE), Dug::Digging(0.0), "BAD KPD holds nothing");
         assert_eq!(Mine::new(0.0), None);
-        let mut small = Mine::new(60.0).unwrap();
-        assert_eq!(small.takt(1.0, 1.0, MINE_MAX_ORE), Some(50.0));
-        assert_eq!(small.takt(1.0, 1.0, MINE_MAX_ORE), None, "all ore mined");
+    }
+
+    #[test]
+    fn a_takt_moves_the_total_and_the_lode_towards_each_other_so_a_mine_yields_half_its_lode() {
+        // 600 of lode: the total climbs 50 a second and ToMine falls 50 a second, so they
+        // meet at 300 and the seventh takt ends the task -- banking its dig all the same.
+        let mut m = Mine::new(600.0).unwrap();
+        for takt in 1..=6 {
+            assert_eq!(m.takt(1.0, 1.0, MINE_MAX_ORE), Dug::Digging(50.0 * takt as f32), "takt {takt}");
+        }
+        assert_eq!((m.total, m.to_mine), (300.0, 300.0));
+        assert_eq!(m.takt(1.0, 1.0, MINE_MAX_ORE), Dug::AllMined(350.0), "all ore mined");
+        assert_eq!(m.progress(), 1.0);
+        // A takt on a spent task ends it before anything else, writing nothing.
+        let mut over = Mine { to_mine: 0.0, total: 120.0 };
+        assert_eq!(over.takt(1.0, 1.0, MINE_MAX_ORE), Dug::Spent);
+        assert_eq!(over.total, 120.0);
     }
 
     #[test]
