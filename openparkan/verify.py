@@ -15811,8 +15811,13 @@ MISSION_01_ROUTE_BOXES = {
 CLASS_ROBOT = 0x01000000
 
 #: The two script functions a mission's progression turns on: 31 counts a
-#: clan's units by class, 32 asks whether a unit stands in a route.
+#: clan's units and buildings by class, 32 asks whether a unit stands in a route.
 FN_COUNT, FN_IN_ROUTE = 31, 32
+
+#: The scripts that ask function 31 for a clan's buildings, and the mission each
+#: one plays: the bonus objective that ends when the enemy base is captured or
+#: destroyed, and the two single missions' "nothing of theirs left" (docs/34).
+BASE_COUNT_SCRIPTS = {"c1m4p", "c2m3p", "c3m1p", "c4m2p", "scr_pl_1", "scr_pl_2"}
 
 #: ``iron3d.dll``'s own strings for an objective's end and a repeated message.
 PROGRESSION_STRINGS = {
@@ -15973,6 +15978,50 @@ def check_progression(check, game: Path) -> None:
           f"fit, the 2 that do not c2m3p's, whose list is {len(c2m3)} lines; "
           f"Mission 01 lists {len(listed)} primary objectives and completes "
           f"{sorted(m01_values)}")
+
+    # Function 31 walks the SuperAI's own list, the one function 34 counts by type,
+    # where a building sits beside the units: CLASS_BUILDING counts the buildings.
+    def constant(var: int) -> int | None:
+        """The ``varset.var`` constant operand ``var`` names, as a 32-bit word."""
+        if not 0 <= var < len(table) or not table[var].name.isupper():
+            return None
+        try:
+            return int(table[var].default, 0) & 0xFFFFFFFF
+        except ValueError:
+            return None
+
+    base_tests = []
+    for _, m in loaded:
+        for _, script in clan_scripts(m):
+            for handler in script.handlers:
+                for i, node in enumerate(handler.nodes):
+                    if not (node.calls and node.function == FN_COUNT):
+                        continue
+                    mask = constant(node.operands[1])
+                    if mask is None or not mask & behaviour.CLASS_BUILDING:
+                        continue
+                    whose = _script_value(table, handler.nodes, i, node.operands[0])
+                    standing = sum(o.kind == mission.KIND_BUILDING and o.clan_id == whose
+                                   for o in m.objects)
+                    base_tests.append((script.source.stem, whose, standing))
+    aid = _image_at((game / "ai.dll").read_bytes()) if (game / "ai.dll").exists() else None
+    asked = sorted({t[0] for t in base_tests})
+    check("progression: function 31 counts a clan's buildings, not its robots alone",
+          aid is not None and base_tests
+          and aid(0x1000C3D8, 7) == bytes.fromhex("8b0c8598530510")
+          and aid(0x1000C3DF, 6) == bytes.fromhex("81c18c000000")
+          and aid(0x1000C408, 4) == bytes.fromhex("837804ff")
+          and aid(0x1000C427, 6) == bytes.fromhex("8b50082355f4")
+          and aid(0x100018BA, 6) == bytes.fromhex("8db38c000000")
+          and set(asked) == BASE_COUNT_SCRIPTS
+          and all(standing for _, _, standing in base_tests),
+          f"function 31 (0x1000c2fd) takes the SuperAI of the clan out of the table at "
+          f"0x10055398 and walks its list at +0x8c, function 34's list, testing each "
+          f"entry's logical id (+4, skipped at -1) and its type (+8) against the mask; "
+          f"slot 4's event 2 files a building on that same list (0x100018ba). "
+          f"{len(base_tests)} script tests ask it for CLASS_BUILDING, in "
+          f"{', '.join(asked)}, and the clan each names holds "
+          f"{sorted({t[2] for t in base_tests})} buildings where the mission starts")
 
     voices = resources.locate(game, "voices.lib")
     members = ({e.name.lower() for e in NResArchive.open(voices).entries}

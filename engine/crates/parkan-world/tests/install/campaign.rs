@@ -234,3 +234,38 @@ fn c02_m03s_neutral_mine_holds_its_pod_still_while_it_opens_and_the_hero_on_it_c
     assert!(opened, "the pod opened");
     assert_eq!(play.units[mine].clan, Some(play.player_clan), "and it captured the mine");
 }
+
+/// C01 Mission 04's second bonus objective, the enemy base captured or destroyed, ends on
+/// `fn31(1, CLASS_BUILDING)` reaching 0 (docs/34, "Function 31"). The enemy holds five
+/// buildings, so it stands in progress while the mission starts and the objectives screen
+/// opens; a count that walked the units alone would show it complete before the hero moves.
+#[test]
+#[ignore = "needs the game install"]
+fn c01_m04s_enemy_base_objective_counts_the_buildings_the_enemy_still_holds() {
+    use parkan_sim::behaviour::BUILDING_BIT;
+
+    let mut play = campaign_play(gamedir::C01_MISSION_04);
+    let base = i64::from(BUILDING_BIT);
+    let p = play.progression.as_ref().unwrap();
+    assert_eq!(p.objective_texts[3], "2. Capture or destroy the enemy base");
+    assert_eq!(p.progress.robots(1, base), 5, "the enemy's bunker, generator, factory, hangar and teleport");
+    assert_eq!(p.progress.robots(1, 0x0100_0000), 7, "and its robots are counted apart");
+
+    // Ten seconds of the Mission handler, the hero standing still.
+    for _ in 0..(10 * 60) {
+        play.tick(1000.0 / 60.0, [0.0; 2]);
+    }
+    let p = play.progression.as_ref().unwrap();
+    assert!(p.progress.objectives.iter().all(|o| o.state == 0), "every objective is still in progress");
+
+    // The enemy's buildings taken and destroyed, the count falls to 0 and the objective ends.
+    let enemy: Vec<i32> = p.progress.buildings.iter().filter(|b| b.clan == 1).map(|b| b.id).collect();
+    let p = play.progression.as_mut().unwrap();
+    p.progress.captured(enemy[0], 0);
+    for id in &enemy[1..] {
+        p.progress.destroyed(*id);
+    }
+    assert_eq!(p.progress.robots(1, base), 0);
+    p.run("Mission");
+    assert_eq!(p.progress.objectives[3].state, 1, "the bonus objective is complete");
+}

@@ -105,6 +105,21 @@ resolved to its pool constant or the literal its handler last wrote to it:
 - **How units join.** A placed unit joins its clan's list when it is created:
   `iron3d.dll:0x10077511` sends that clan's SuperAI slot 4 event 1 with the
   unit's id.
+- **A building is on that list too**, so `CLASS_BUILDING` (`0x80000000`)
+  counts a clan's buildings and not its robots. The list `fn31` walks is the
+  one function 34 counts by type, the SuperAI's own `+0x8c` (Mission 03,
+  [What the scripts ask](#what-the-scripts-ask--read-and-measured-1)), and
+  slot 4's event 2 files a building on it beside the units, its type word at
+  `+8` and its logical id at `+4` (`0x10001880`, `0x100018ba`, `0x10001934`).
+  `fn31` reads those two fields and no other (`0x1000c408`, `0x1000c427`), so
+  nothing tells a building from a unit but the type.
+- **What reads the buildings.** Four missions end a bonus objective on
+  `fn31(enemy, CLASS_BUILDING) == 0` — the enemy base captured or destroyed:
+  `c1m4p` (C01 Mission 04), `c2m3p` (C02 Mission 03, "the enemy camp"),
+  `c3m1p` (C03 Mission 01) and `c4m2p` (C04 Mission 02). `scr_pl_1`
+  (Single.01) and `scr_pl_2` (Single.02) pair it with `CLASS_ROBOT`, for an
+  objective that wants the enemy gone entirely. A count that leaves the
+  buildings out completes the four bonus objectives as the mission starts.
 - **How units leave** on destruction or capture is not read. A unit that is
   captured changes its SuperAI ([27-ownership.md](27-ownership.md)).
 - **What Mission 01 needs** (*derived* from the objectives' text): destroyed

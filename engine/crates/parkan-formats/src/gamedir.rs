@@ -12,9 +12,10 @@ pub const MISSION_01: &str = "MISSIONS/CAMPAIGN/CAMPAIGN.00/Mission.01";
 pub const MISSION_02: &str = "MISSIONS/CAMPAIGN/CAMPAIGN.00/Mission.02";
 pub const MISSION_03: &str = "MISSIONS/CAMPAIGN/CAMPAIGN.00/Mission.03";
 pub const MISSION_04: &str = "MISSIONS/CAMPAIGN/CAMPAIGN.00/Mission.04";
-/// The first chapter's *The Arrival* and *Outflanking Maneuver*.
+/// The first chapter's *The Arrival*, *Outflanking Maneuver* and *Teleport*.
 pub const C01_MISSION_02: &str = "MISSIONS/CAMPAIGN/CAMPAIGN.01/Mission.02";
 pub const C01_MISSION_03: &str = "MISSIONS/CAMPAIGN/CAMPAIGN.01/Mission.03";
+pub const C01_MISSION_04: &str = "MISSIONS/CAMPAIGN/CAMPAIGN.01/Mission.04";
 /// The second chapter's *The Iron Monster*.
 pub const C02_MISSION_01: &str = "MISSIONS/CAMPAIGN/CAMPAIGN.02/Mission.01";
 /// The second chapter's *Ballen's Crossing*.

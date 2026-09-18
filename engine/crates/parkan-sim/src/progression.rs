@@ -233,10 +233,19 @@ impl Progress {
         true
     }
 
-    /// Function 31 (`ai.dll:0x1000c2fd`): how many of clan `clan`'s units have a type
-    /// sharing a bit with `mask`.
+    /// Function 31 (`ai.dll:0x1000c2fd`): how many of clan `clan`'s units and buildings have
+    /// a type sharing a bit with `mask`.
+    ///
+    /// It walks the clan's SuperAI's own list (`+0x8c`), the one function 34 counts by type,
+    /// where slot 4's event 2 files a building beside the units (`0x10001880`), so
+    /// `CLASS_BUILDING` counts a clan's buildings: four campaign missions end a bonus
+    /// objective, the enemy base captured or destroyed, on that count reaching 0.
     pub fn robots(&self, clan: i64, mask: i64) -> usize {
-        self.units.iter().filter(|u| u.alive && u.clan == clan && i64::from(u.type_word) & mask != 0).count()
+        let counted =
+            |c: i64, type_word: u32, alive: bool| alive && c == clan && i64::from(type_word) & mask != 0;
+        let units = self.units.iter().filter(|u| counted(u.clan, u.type_word, u.alive)).count();
+        let buildings = self.buildings.iter().filter(|b| counted(b.clan, b.type_word, b.alive)).count();
+        units + buildings
     }
 
     /// A building with a logical id, owned by clan `clan`, of `type_word`. A building is on
@@ -493,6 +502,27 @@ mod tests {
         p.captured(13, 0);
         p.destroyed(8);
         assert_eq!((p.robots(0, robot), p.robots(3, robot)), (2, 0));
+    }
+
+    #[test]
+    fn function_31_counts_the_buildings_on_the_clans_list_too() {
+        // C01 Mission 04's base: the enemy's bunker, generator and factory, none of them a
+        // robot, all of them `CLASS_BUILDING`. Its bonus objective waits for the count to
+        // reach 0, so a clan that still holds a building is never done.
+        let (robot, building) = (0x0100_0000, 0x8000_0000_u32 as i64);
+        let mut p = Progress::new(&[], &[], []);
+        p.place_building(0x8000_0006_u32 as i32, 1, 0x8001_0000);
+        p.place_building(0x8000_0007_u32 as i32, 1, 0x8000_0002);
+        p.place_building(0x8000_0008_u32 as i32, 1, 0x8000_0010);
+        p.join(24, 1, 0x0108_0000, Vec3::ZERO, 0.0);
+        assert_eq!((p.robots(1, building), p.robots(1, robot)), (3, 1));
+        // Captured and destroyed buildings both leave their clan's count, as either way of
+        // taking the base completes the objective.
+        p.captured(0x8000_0006_u32 as i32, 0);
+        p.destroyed(0x8000_0007_u32 as i32);
+        assert_eq!((p.robots(1, building), p.robots(0, building)), (1, 1));
+        p.destroyed(0x8000_0008_u32 as i32);
+        assert_eq!(p.robots(1, building), 0);
     }
 
     #[test]
