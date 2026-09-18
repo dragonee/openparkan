@@ -554,6 +554,54 @@ fn a_units_live_limits_come_from_its_engine_and_load_so_a_driven_hull_follows_it
     }
 }
 
+/// The lift plants a chassis's contact points, never its geometry, and a wheeled chassis
+/// authors its `weel_*` points below the tyres, so the wheels ride clear of the ground
+/// (docs/24, "Wheels ride clear of the ground"). Seating a unit on its lowest vertex
+/// instead would put every wheeled warbot lower than the game's.
+#[test]
+#[ignore = "needs the game install"]
+fn c03_02s_wheeled_warbots_ride_clear_of_the_ground_their_contact_points_hold_them_off() {
+    use parkan_formats::control::CONTACT_SUPPORT;
+    use parkan_sim::machine::Frames;
+
+    let mut play = campaign_play("MISSIONS/CAMPAIGN/CAMPAIGN.03/Mission.02");
+    play_for(&mut play, 1.0, |_| {});
+
+    let mut heavies = 0;
+    for (_, robot) in &play.robots {
+        let w = &robot.walker;
+        let Some(feet) = &w.feet else { continue };
+        let state = &w.controller.states[w.machine.current];
+        let last = Frames { a: state.pair_a[1], b: state.pair_b[1], weight: w.machine.q };
+        let lowest_contact = state
+            .contacts
+            .iter()
+            .filter(|c| c.flags & CONTACT_SUPPORT != 0)
+            .filter_map(|c| Some(feet.place(c.point, last)?.z))
+            .fold(f32::MAX, f32::min);
+        if lowest_contact == f32::MAX {
+            continue;
+        }
+        // How far the lowest contact is authored below the model's own lowest vertex. The
+        // hull turns on yaw alone, so this is a world height too.
+        let authored = -w.base - lowest_contact;
+        let p = w.body.position;
+        let under = play.ground.below(p.x, p.y, p.z + w.sphere_radius).expect("ground below it");
+        let clear = p.z - w.base - under.point.z;
+        let record = &robot.parts[robot.chassis_part].record;
+        // The lift is the largest rise over the contacts, so broken ground only holds it
+        // higher, never lower.
+        assert!(clear > authored - 0.05, "{record} rides {clear} clear, authored {authored}");
+        if record == "R_B_03" {
+            // The six-wheeled heavy, the one this is plain on: `weel_*` 2.23 under the tyres.
+            assert!((authored - 2.23).abs() < 0.02, "{record} authors {authored} clear");
+            assert!(clear > 2.0, "{record} rides {clear} clear");
+            heavies += 1;
+        }
+    }
+    assert_eq!(heavies, 2, "Mission C03/02 stands two R_B_03");
+}
+
 #[test]
 #[ignore = "needs the game install"]
 fn mission_04s_helicopter_rides_up_a_slope_on_its_body_sphere_with_its_eye_above_the_ground() {
