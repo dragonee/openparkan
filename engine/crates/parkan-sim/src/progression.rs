@@ -23,10 +23,16 @@ pub const CLAN_TAKT_SECONDS: u32 = 7;
 /// A unit reports its position once it has moved more than this by |dx| + |dy|
 /// (`Behavior.dll:0x1000af70`).
 pub const REPORT_MOVE: f32 = 5.0;
-/// The object takt's timer, next = now + 31 × 64 + rand8 × 46 × 64 ÷ 256 (the words at
-/// `Behavior.dll:0x100039c2`).
-pub const TAKT_BASE: f64 = 31.0 * 64.0;
-pub const TAKT_STEP: f64 = 46.0 * 64.0 / 256.0;
+/// The object takt's timer, next = now + 31 × 64 + rand8 × 46 × 64 ÷ 256 ms, the share
+/// truncated (the words at `Behavior.dll:0x100039c2`, the timer `0x1004c550`, whose stored
+/// words count 64 ms each): 1984 to 4916 ms.
+pub const TAKT_BASE: u32 = 31 * 64;
+pub const TAKT_SPREAD: u32 = 46 * 64;
+
+/// The wait the timer sets from a `rand8`, as the game works it out.
+fn takt_wait(rand8: u8) -> f64 {
+    f64::from(TAKT_BASE + u32::from(rand8) * TAKT_SPREAD / 256)
+}
 
 /// The first value a script hands function 30: the channel-0 cases of the mission
 /// callback (`iron3d.dll:0x10060ce0`), named by `varset.var`'s `Messages` constants.
@@ -230,21 +236,23 @@ impl Progress {
         }
     }
 
+    /// The object takt's `rand8`: the low byte of `Behavior.dll`'s own `rand()`
+    /// (`0x1004ce3c`), the CRT's linear generator. Its state (`0x10063c1c`) is 1 in the
+    /// file and nothing else writes it, so no `srand` ever moves it: one deterministic
+    /// stream, shared by every timer in that module.
     fn rand8(&mut self) -> u8 {
-        self.seed = self.seed.wrapping_mul(1_103_515_245).wrapping_add(12_345);
+        self.seed = self.seed.wrapping_mul(0x0003_43fd).wrapping_add(0x0026_9ec3);
         (self.seed >> 16) as u8
     }
 
     /// A unit joins its clan's list, and reports once as its id is attached
-    /// (`Behavior.dll:0x10005f91`, `iron3d.dll:0x10077511`).
-    ///
-    /// STAND-IN: docs/34-progression.md#who-stands-in-a-route--read -- the takt's clock is
-    /// taken as game milliseconds, its rand8 as the engine's own generator, and its first
-    /// run as one timer after the unit joins.
+    /// (`Behavior.dll:0x10005f91`, `iron3d.dll:0x10077511`). Its takt's next-run word starts
+    /// at 0 (`0x100039bc`) and the timer fires on a 0 (`0x1004c550`), so the first object
+    /// takt it is given runs, and only the timers after that are spaced.
     pub fn join(&mut self, id: i32, clan: i64, type_word: u32, at: Vec3, now_ms: f64) {
+        let _ = now_ms;
         self.areals.report(id, at);
-        let next_takt_ms = now_ms + TAKT_BASE + f64::from(self.rand8()) * TAKT_STEP;
-        self.units.push(Unit { id, clan, type_word, alive: true, reported: [at.x, at.y], next_takt_ms });
+        self.units.push(Unit { id, clan, type_word, alive: true, reported: [at.x, at.y], next_takt_ms: 0.0 });
     }
 
     /// Run every unit's object takt that is due by `now_ms`, with `position` giving where
@@ -259,7 +267,7 @@ impl Progress {
             if !self.units[i].alive || self.units[i].next_takt_ms > now_ms {
                 continue;
             }
-            let wait = TAKT_BASE + f64::from(self.rand8()) * TAKT_STEP;
+            let wait = takt_wait(self.rand8());
             let u = &mut self.units[i];
             u.next_takt_ms = now_ms + wait;
             let Some(at) = position(u.id) else { continue };
@@ -392,8 +400,11 @@ impl Progress {
 
     /// A unit or building destroyed.
     ///
-    /// STAND-IN: docs/34-progression.md#function-31-how-many-robots-a-clan-has--read -- how
-    /// a destroyed unit leaves its clan's list is not read: it leaves it, and every route's.
+    /// STAND-IN: docs/34-progression.md#function-31-how-many-robots-a-clan-has--read -- the
+    /// game's own list never lets an entry go: nothing in `ai.dll` shortens it or clears an
+    /// entry's id, so functions 31 and 34 keep counting a destroyed unit. The engine takes
+    /// it off the count instead, because reproducing that would leave Single.01's and
+    /// Single.02's objectives, and four campaign missions' bonus ones, unreachable.
     pub fn destroyed(&mut self, id: i32) {
         for u in self.units.iter_mut().filter(|u| u.id == id) {
             u.alive = false;
@@ -404,9 +415,9 @@ impl Progress {
         self.areals.leave(id);
     }
 
-    /// A unit or building captured into `clan`: a unit leaves its old clan's count and joins
-    /// the new one's (`MBehaviour::Capture`, docs/27; how the lists change is derived,
-    /// docs/34).
+    /// A unit or building captured into `clan`. The game files it with the new clan's
+    /// SuperAI as slot 4's event 2 (`iron3d.dll:0x10032fd0`) and tells the old clan nothing,
+    /// so it is counted by both; the engine moves it, for the same reason `destroyed` does.
     pub fn captured(&mut self, id: i32, clan: i64) {
         for u in self.units.iter_mut().filter(|u| u.id == id) {
             u.clan = clan;
@@ -566,13 +577,39 @@ mod tests {
         // Inside by 4 by |dx| + |dy|: not reported, however long it waits.
         p.takt(10_000.0, |_| Some(Vec3::new(2.0, 5.0, 0.0)));
         assert!(!p.areals.holds(0, 1));
-        // A takt comes 1984 to 4917 ms after the last.
+        // A takt comes 1984 to 4916 ms after the last.
         let next = p.units[0].next_takt_ms;
-        assert!((10_000.0 + TAKT_BASE..=10_000.0 + TAKT_BASE + 255.0 * TAKT_STEP).contains(&next));
+        assert!((11_984.0..=14_916.0).contains(&next), "next {next}");
         p.takt(next - 1.0, |_| Some(Vec3::new(4.0, 5.0, 0.0)));
         assert!(!p.areals.holds(0, 1), "not yet due");
         p.takt(next, |_| Some(Vec3::new(4.0, 5.0, 0.0)));
         assert!(p.areals.holds(0, 1), "moved 6");
+    }
+
+    #[test]
+    fn a_units_first_takt_runs_at_once_and_the_ones_after_it_are_two_to_five_seconds_apart() {
+        let mut p = Progress::new(&[square(0, 0.0, 0.0, 10.0)], &[], []);
+        p.join(1, 0, 0x0102_0000, Vec3::new(-20.0, 5.0, 0.0), 9_000.0);
+        assert_eq!(p.units[0].next_takt_ms, 0.0, "the timer's word starts at 0");
+        // The first takt runs however long after the unit joined, and reports the move.
+        p.takt(9_000.0, |_| Some(Vec3::new(5.0, 5.0, 0.0)));
+        assert!(p.areals.holds(0, 1), "the first takt reports");
+        let mut at = 9_000.0;
+        for _ in 0..200 {
+            let next = p.units[0].next_takt_ms;
+            let wait = next - at;
+            assert!((1984.0..=4916.0).contains(&wait), "wait {wait}");
+            at = next;
+            p.takt(next, |_| Some(Vec3::new(5.0, 5.0, 0.0)));
+        }
+    }
+
+    #[test]
+    fn the_object_takts_rand8_is_the_crts_own_from_a_seed_of_one() {
+        // `rand()` seeded 1 gives 41, 18467, 6334, 26500, ...; rand8 is each one's low byte.
+        let mut p = Progress::new(&[], &[], []);
+        let drawn: Vec<u8> = (0..4).map(|_| p.rand8()).collect();
+        assert_eq!(drawn, vec![41u8, (18467 & 0xff) as u8, (6334 & 0xff) as u8, (26500 & 0xff) as u8]);
     }
 
     #[test]
