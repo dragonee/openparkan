@@ -28,8 +28,10 @@ A `.dat` is a tree ([07-objects.md](07-objects.md#unitsdat--unit-and-building-as
   and `b` hung under a flyer. Its Type — the `.dat` class word — is the unit's
   role: warrior, transport, builder, HQ or hero;
 - under the turret **a radar and a deflector** part, of the sizes its controller
-  names, and **the guns** in its `Base_*` sockets, a builder's module on
-  `Base_LU_01`;
+  names, and **the guns** in its `Base_*` sockets, a builder's module on the
+  socket labelled `universal_<size>s` — `Base_LU_01` on the small and medium
+  builders, `Base_LU_02` on the Large one
+  ([30-turrets.md](30-turrets.md#gun-sockets-are-the-meshs-base_-nodes-and-their-kind-is-the-label--measured-and-read));
 - under each gun that takes clips, **one clip** of the family its slot names.
 
 *Measured* over the shipped assemblies: 374 stand on a robot chassis and 372 of

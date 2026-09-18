@@ -666,25 +666,44 @@ cockpit.
     Which box that is was not traced
     ([40-command-mode.md](40-command-mode.md#not-established)).
 
-## Gun sockets are the mesh's `Base_*` nodes — *measured*
+## Gun sockets are the mesh's `Base_*` nodes, and their kind is the label — *measured*, and *read*
 
 Every `Base_*` node of a turret mesh, except the one it mounts by (`Base_TM` or
 `Base_TL`), is a gun socket. The names say where: `LU`, `RU` and `MU` (left,
 right and middle, upper); `C`, `CL`, `CR`; `LD`, `RD` (lower); `FC` and `BC` on
 the big HQ and the Transformer; `Base_gun` on the Small tower.
 
-**The sockets are the catalogue's slots.** On 22 of the 28 turrets the socket
-count equals the number in the turret's `objects.dlb` text ("4-slot large
-battle", "HQ turret with 5 battle slots"), once a builder's module socket is
-counted apart. The six that differ are all special:
+**What a socket takes is not in its node name: it is the node's stream-10
+label** ([38-designs.md](38-designs.md#sockets-carry-the-part-prefix-they-take--measured-and-read)).
+On all 55 turret records the labelled nodes are exactly the `Base_*` nodes bar
+the mount, so the two pick the same sockets — but only the label says the kind.
+The gun page is `e_gun_` and the label's last two letters, and a label ending
+in `r` opens two pages, cannons then launchers (`iron3d.dll:0x100482f2`–
+`0x100483c1`: it finds the last two characters from the label's length, tests
+the second for `r`, and otherwise appends the size letter and the kind letter).
+The turret page (`0x10049126`) passes the chassis socket's label through
+unchanged.
 
-- the **Large transport** has one socket where its text says two battle slots;
-- the **Large builder** has two sockets for "two battle slots" and a module, so
-  one of them must be the module's (never assembled, so it can't be told which);
-- the **three monsters** and the **hero turret** have no socket at all. Each
-  carries **four guns built into its own controller** (class 2): `pcannon`
-  effects on the monsters; `hero_cannon`, `hero_prifle`, `hero_redlaser` and
-  `hero_missile` on the hero. The monsters' "1 battle slot" is those guns.
+**The sockets are the catalogue's hanger rows** (*measured*). `objects.dlb`
+declares them in its stat rows — `Cannon hanger "2"`, `Rocket hanger "2"`,
+`Universal hanger`, `Builder hanger` ([19-descriptions.md](19-descriptions.md))
+— and the declared total equals the socket count on **48 of the 55** turret
+records, per kind on **46**:
+
+- the **three monsters** and the **hero turret**, which are seven of those
+  records (two spellings each but the hero's), have no socket at all and
+  declare hangers for the **four guns built into their own controller**
+  (class 2): `pcannon` effects on the monsters; `hero_cannon`, `hero_prifle`,
+  `hero_redlaser` and `hero_missile` on the hero;
+- the **Transformer**'s only slip is a name: its two `universal_bl` are filed
+  as *Universal* rather than *Rocket*, while its 6 + 2 = 8 is right.
+
+**The free-text line is the unreliable one.** `e_tur_b?_07` and `e_tur_b?_08`
+both read `with 2 battle slot`, while the small and medium builders — which
+also have two sockets — read `with 1 battle slot`. Reading the hangers instead:
+the **Large transport declares one cannon hanger and has one socket**,
+`central_bc`, and the **Large builder declares a cannon hanger and a builder
+hanger** for its two.
 
 **What goes in a socket** (*measured*, over the 372 turret mounts):
 
@@ -693,10 +712,14 @@ counted apart. The six that differ are all special:
   (`e_gun_fc_*`, `e_gun_fl_*`), all on the Small tower.
 - **Gun kinds.** The gun's second letter is its kind: `c` gun, `l` launcher,
   `s` a module ([18-vocabulary.md](18-vocabulary.md), [29-weapons.md](29-weapons.md)).
-- **The builder module.** A **builder turret carries its module on
-  `Base_LU_01`**: all 16 `e_gun_ls_10` / `e_gun_ms_12` "Mobile builder modules"
-  do, on the small and medium builders, and no other turret mounts one. What
-  the module does is in [32-builder.md](32-builder.md).
+- **The builder module.** A **builder turret carries its module on the socket
+  labelled `universal_<size>s`**, and only three turrets have one, in both
+  mountings: the small builder's is node 6 `Base_LU_01`, the medium builder's
+  node 5 `Base_LU_01` and **the Large builder's node 6 `Base_LU_02`**, whose
+  `Base_LU_01` is a `central_bc` cannon socket instead. All 16 `e_gun_ls_10` /
+  `e_gun_ms_12` "Mobile builder modules" in the shipped assemblies sit on their
+  turret's `universal_?s`, and no other turret mounts one. What the module does
+  is in [32-builder.md](32-builder.md).
 - **The radar and deflector parts don't use sockets.** Their attach field is not a
   node: it is the index of the turret controller's radar slot (1) and deflector slot
   (3), which the parts are re-parsed into
@@ -829,8 +852,8 @@ zero. "Assembled on" names the chassis in the shipped `.dat` files, the `t` and
 | Medium HQ `mt/mb_05`–`07` | HQm1–3 | HQ | 3 / 4 / 5 | 720 | 7 / 14, 10 / 17, 12 / 20 | never assembled |
 | Large Battle `bt/bb_01`–`03` | 4L1, 5L1, 6L1 | battle | 4 / 5 / 6 | 3,000 | 12 / 35, 15 / 40, 17 / 45 | `R_B_01`–`04` |
 | Large HQ `bt/bb_04`–`06` | HQL1–3 | HQ | 4 / 5 / 6 | 3,000 | 20 / 40, 25 / 45, 30 / 50 | `R_B_01`, `03`, `04` |
-| Large Transport `bt/bb_07` | TL1 | transport | 1 (text: 2) | 3,000 | 18 / 35 | `R_B_01` |
-| Large Builder `bt/bb_08` | BL1 | builder | 2 (text: 2 + module) | 1,500 | 20 / 45 | never assembled |
+| Large Transport `bt/bb_07` | TL1 | transport | 1 | 3,000 | 18 / 35 | `R_B_01`, once, its socket empty |
+| Large Builder `bt/bb_08` | BL1 | builder | 1 + module | 1,500 | 20 / 45 | never assembled |
 | Transformer `bt/bb_09` | TR1 | battle | 8 | 15,000 | free | `R_B_05` |
 | Small tower `bt/bb_10` | TT1 | battle | 1, fortification guns | 3,500 | free | `R_B_06` |
 | Monstr C4M2 `bt/bb_11` | M2 | battle | 0, 4 built-in | 10,000 | free | `R_B_07` |
@@ -842,7 +865,7 @@ The bunker and tower turrets (`e_bnt_*`, `e_tow_*`) are buildings' parts
 camera, and they carry fortification guns and a bunker or tower radar
 ([25-sensors.md](25-sensors.md)).
 
-## The turrets the player never builds — *measured*
+## The turrets the player never builds — *measured*, and *read*
 
 **Six turrets cost nothing** to research or build: the Transformer, the Small
 tower, the three monsters and the hero's. Their chassis (`R_B_05`–`08`,
@@ -871,21 +894,72 @@ so a tree's part list doesn't gate them. **A tree's state for them does.**
 - **Researching sets them.** Slot 7 (`0x10002c10`) sets 1 and 2 on an item
   that has 4. It then sets 1 on every present item whose prerequisites all
   have 4 and 2. The shipped states are only 0, 2, 4, 5 and 7 (*measured*).
-- **What the trees say** (*measured*, all 29):
-  - In the 11 player trees (`*p.trf`, `tut*_pl.trf`) the Transformer, Small
-    tower and three monster turrets are never present.
-  - The monsters are present and researched (7) in the enemy trees (`*e.trf`)
-    and in `auto`.
-  - The Transformer and Small tower are present only in `full`.
-  - The hero turret is present in 9 trees, `c2m4p` and `c3m2p` among them.
-    In every one of those its chassis `r_h_02` reads 2, researched but not in
-    the tree.
 
-So the missions keep five of the six out of the player's trees, and the
-sixth's chassis. That a designer offers only parts with bit 4 is a *guess*.
-`iron3d.dll` reads item records through wrappers at `0x1008a480`–`0x1008a4f0`,
-used by the design screens from `0x10048925`, and which bits those screens
-test was not read. That a zero cost marks them unbuildable is still a *guess*.
+**Which trees a player reads is the missions' to say, not the file names'**
+(*measured*). Reading the behaviour-tree string of every clan in all 29
+`data.tma`, **a type-1 clan loads 17 distinct `.trf`**: the eleven `*p.trf` and
+`tut*_pl.trf` plus `data.trf` (9 clans), `multi.trf` (6), `full2.trf` (4),
+`multi3.trf` (3), `multi4.trf` (2) and `scream.trf` (2). So **`data.trf` alone
+is the player's tree in nine missions**, `full.trf` is loaded by no clan at all
+(nor are `42.trf` and `multi2.trf`), and `auto.trf` only by the autodemo's two
+*enemy* clans. An earlier reading here counted 11 and missed six trees; the
+conclusion below is unchanged, but a check that reasons over the file names
+misses `data`, `multi` and `scream`.
+
+- **What the trees say** (*measured*, over the 17 a player reads):
+  - The Transformer, Small tower and three monster turrets are never present:
+    **0 of 17** each. The Transformer and Small tower are in `full` alone, and
+    the monsters in `auto` and the seven `*e.trf`.
+  - The hero turret passes both bits in **6 of 17** — `c2m4p`, `c3m2p`,
+    `data`, `multi`, `multi4` and `scream`. It is present in 9 of the 29
+    trees, and in every one its chassis `r_h_02` reads 2, researched but not in
+    the tree.
+  - Their chassis `r_b_05` (Transformer) and `r_b_06` (Small tower) are 0 of
+    17 as well; `r_l_07`, `r_b_07` and `r_b_08`, the monsters' chassis, are
+    listed.
+
+**What the design screen tests is bit 2 and bit 4, and not bit 1** (*read*).
+`iron3d.dll:0x1008a780` collects a page; its gate runs at `0x1008a875`–
+`0x1008a8a4`:
+
+1. `0x1008a875` — the part id, fetched through `IResearch` slot 21, is matched
+   against the page's prefix by `0x10090900`, a case-insensitive compare with
+   `?` wildcards. No match, next part.
+2. `0x1008a879` — a byte argument is tested, and **clear, the part is taken
+   with no further test**. All five call sites fill it with the inverse of
+   `0x1008ac50`, which is `atoi` over `Iron_3D.ini`'s `[CS]
+   FULL_RESEARCH_TREE` ([22-settings.md](22-settings.md)); the shipped file
+   does not set the key.
+3. `0x1008a884` — otherwise it calls `IResearch` slot 3 (`MisLoad.dll:0x10002aa0`),
+   which unpacks the category byte into a record: `+0x00` bit 2, `+0x04` bit 1,
+   `+0x08` bit 4, then the four cost dwords and the part-id pointer.
+4. `0x1008a896` and `0x1008a89e` — it keeps the part only when `+0x00` and
+   `+0x08` are non-zero.
+
+So the catalogue asks **researched and in the tree**, and nothing reads the
+`AVAILABLE` bit slot 3 also writes. That retires the *guess* this section
+carried. **Zero cost is not the gate either**: the collector reads the four
+cost dwords and compares none of them, and `BuildDat.lst`, the only other build
+path, is 48 lines of fortification `.dat` and names no robot. The zero cost
+follows from these parts being placed rather than built.
+
+**Five of the six are stopped by that gate alone. The hero turret is walled off
+one level further out.** It passes both bits in 6 of the 17, so the gate lets
+it through; what stops it is that its page never opens. A turret page's prefix
+is the chassis socket's label; `r_h_02` is the only chassis labelled
+`e_tur_ht` (`r_h_01` and `r_h_03` have no turret socket at all); and `r_h_02`
+can never be listed for two independent reasons — its item is category 2 in all
+29 trees, **and** `r_h` is no chassis-page prefix at any grade. The chassis
+page switches on the factory's grade (`0x10048b21`) and its four cases build
+`r_t`; `r_t, r_l`; `r_t, r_l, r_m`; `r_t, r_l, r_m, r_b`. The second reason is
+the harder one: `FULL_RESEARCH_TREE` skips the state test entirely, so with it
+set every monster turret would appear — **the hero chassis still would not**.
+
+Driving `openparkan.designs` over all 17 trees and all four grades — every
+chassis a page offers, then every turret each chassis's socket offers — gives
+**39 reachable turrets and none of the six** (*measured*). The chassis ever
+listed are `r_t_01`–`02`, `r_l_01`–`07`, `r_m_01`–`04`, `r_b_01`–`04`,
+`r_b_07`–`08`; never `r_b_05`, `r_b_06` or any `r_h_*`.
 
 ## Not established
 
@@ -902,13 +976,13 @@ test was not read. That a zero cost marks them unbuildable is still a *guess*.
   `iron3d.dll`'s `IsHQ`. ~~What an HQ's guard target does~~ — there is none:
   the bit opens the HQ's command view, mode 3
   ([40-command-mode.md](40-command-mode.md#an-hqs-command-mode-mode-3--read-and-seen)).
-- The Large transport's second slot, and which Large builder socket takes the
-  module. **No module names the `Base_*` nodes.** A search of every DLL for
-  the string, and for `Base`/`BASE`/`ase_` as a four-byte constant, finds
-  nothing. The unit writer takes each part's node from the design's slot
-  records instead: three arrays of 0x330-byte records at design `+0xd220`,
-  `+0x1a0c4` and `+0x26f68`, the node at `+4` and the item at `+0x20`
-  (`0x10054767`, `0x10054877`). What fills them was not read.
+- ~~The Large transport's second slot, and which Large builder socket takes the
+  module~~ — **measured**: there is no second slot, and the module is on
+  `Base_LU_02`. No module names the `Base_*` nodes because a socket's kind was
+  never in its node name: it is the node's stream-10 label
+  ([Gun sockets](#gun-sockets-are-the-meshs-base_-nodes-and-their-kind-is-the-label--measured-and-read)).
+  What fills the design's slot records, which is where the unit writer takes
+  each part's node from, is [37-designer.md](37-designer.md)'s.
 - ~~The camera shake's constants and what triggers it~~ — **read**: a jolt in
   the machine's velocity, 2.5 s blend, cos(1.5π t) ÷ (t + 1)³ ring-down
   ([The camera shake](#aiming-and-the-camera--read-and-measured)).
@@ -921,10 +995,12 @@ test was not read. That a zero cost marks them unbuildable is still a *guess*.
   middle ([35-hud.md](35-hud.md#the-reticle--read)); no crosshair object
   appears in `ui/hq.cfg` or `ui/cursor.cfg` (whose `TARGET` is a hardware
   cursor, `ui/target_5.ani`).
-- What prevents the player from building the six free turrets — **narrowed**:
-  five are absent from every player tree and the hero's chassis from every tree
-  that holds its turret ([The turrets the player never builds](#the-turrets-the-player-never-builds--measured)).
-  Which state bits the design screen tests is the next handle.
+- ~~What prevents the player from building the six free turrets~~ — **read**,
+  and **measured**: two gates. Five are absent from every tree a player reads,
+  which the catalogue's `RESEARCHED && IN_TREE` test stops; the hero turret
+  passes that test and is stopped instead by its chassis, which no grade's page
+  prefix reaches
+  ([The turrets the player never builds](#the-turrets-the-player-never-builds--measured-and-read)).
 - How often the input update runs. ~~The 0.5 mouse sensitivity
   `iron3d.dll:0x10061a50` sets in some screen states~~ — **read**: while the view
   is zoomed ([The zoom](#the-zoom--read-and-measured)).

@@ -10708,6 +10708,75 @@ def check_firing(check, game: Path) -> None:
           f"follower and no gun.  No channel carries the flag 0x2000 the turret's takt "
           f"treats apart (Control.dll:0x10027eec)")
 
+    # And neither is ever fitted, so the unpaired follower is never reached: a
+    # unit's parts load into one control system, which is what the takt walks.
+    armoury = weapons.Armoury(game)
+    gun_ids = sorted(k.lower() for k in armoury.library.records
+                     if k.lower().startswith("e_gun_"))
+    fitted: Counter[str] = Counter()
+    short: list[str] = []
+    followers_total = guns_total = 0
+    dats = sorted(game.glob("UNITS/**/*.dat"))
+    for path in dats:
+        unit = objects.load_unit(path)
+        followers = merged = 0
+        for i, comp in enumerate(unit.components):
+            member = comp.ref.member.lower()
+            if member.startswith("e_gun_"):
+                fitted[member] += 1
+            record = armoury.library.get(member)
+            parsed = armoury.controller(member) if record else None
+            if parsed is None or not (i == 0 or record.tag == objects.EXTERNAL_TAG):
+                continue
+            followers += sum(1 for ch in parsed.channels
+                             if ch.flags & control.CHANNEL_TURRET
+                             and not ch.flags & control.CHANNEL_FOLLOWS)
+            merged += sum(1 for p in parsed.components
+                          if p.type_id in (control.GUN_TYPE, control.BUILDER_TYPE))
+        followers_total += followers
+        guns_total += merged
+        if followers > merged:
+            short.append(path.name)
+    never = sorted(g for g in gun_ids if not fitted[g])
+    part_lists = {tuple(p.lower() for p in research.read(path).part_ids)
+                  for path in research.trees(game)}
+    tree_parts = {p for one in part_lists for p in one}
+    catalogued = {k.lower() for k in descriptions.library(game)}
+    absent = sorted(set(gun_ids) - tree_parts)
+    empty_cpt = sorted(g for g in gun_ids
+                       if len(armoury.read(armoury.library.get(g).slot_with_suffix("cpt"))) == 4)
+    stubs = {g: armoury.controller(g) for g in ("e_gun_bl_03", "e_gun_tl_02")}
+    stub_channels = [(c.node, c.flags, c.rate, c.first, c.last, c.point)
+                     for p in stubs.values() for c in p.channels]
+    check("UNITS: e_gun_bl_03 and e_gun_tl_02 are fitted on nothing, so no follower goes unpaired",
+          len(gun_ids) == 71 and len(dats) == 458 and not short
+          and fitted["e_gun_bl_03"] == 0 and fitted["e_gun_tl_02"] == 0
+          and absent == ["e_gun_bl_03", "e_gun_ll_11", "e_gun_ml_16", "e_gun_tl_02"]
+          and sorted(set(gun_ids) - catalogued) == absent
+          and sorted(g for g in empty_cpt if g[7] != "s") == absent
+          and [g for g in empty_cpt if g[7] == "s"] == [f"e_gun_fs_{n}" for n in range(10, 15)]
+          and fitted["e_gun_tl_04"] == 1 and fitted["e_gun_bl_15"] and fitted["e_gun_bc_06"]
+          and all(not p.components for p in stubs.values())
+          and stub_channels == [(1, 0x8, 1.5, 1.0, 3.0, -1)] * 2
+          and len(part_lists) == 1 and "e_gun_bs_01" in tree_parts
+          and not fitted["e_gun_bs_01"],
+          f"{len(gun_ids) - len(never)} of {len(gun_ids)} e_gun_ records are fitted on one "
+          f"of the {len(dats)} shipped assemblies; the {len(never)} that are not include "
+          f"e_gun_bl_03 and e_gun_tl_02, which are also the only e_gun_ absent from every "
+          f".trf part list and from objects.dlb but e_gun_ll_11 and e_gun_ml_16.  Those "
+          f"four are the only guns whose .cpt is 4 bytes -- one empty stream, no muzzle "
+          f"point -- bar the five e_gun_fs_ fortification builder modules, which carry no "
+          f"gun to point.  Each holds one channel and no component at all: "
+          f"{stub_channels[0]} (node, flags, rate, first, last, control point).  "
+          f"Summed over each assembly's merged control system, "
+          f"{followers_total} followers against {guns_total} guns and {len(short)} of "
+          f"{len(dats)} assemblies with a follower that would find no gun.  Control: "
+          f"e_gun_tl_04 is fitted exactly {fitted['e_gun_tl_04']} time, e_gun_bl_15 "
+          f"{fitted['e_gun_bl_15']} and e_gun_bc_06 {fitted['e_gun_bc_06']}, so a zero "
+          f"means zero; and all 29 trees carry one and the same part list, which names "
+          f"e_gun_bs_01, assembled nowhere -- so in the tree and assembled are detected "
+          f"apart")
+
     fx = effects.EffectLibrary(game / "effects.rlb")
     load = [r for r in tur.references if r.group == tur.load_group]
     made = {r.values[7]: r.resource.member.lower() for r in load
@@ -11643,6 +11712,23 @@ def check_turrets(check, game: Path) -> None:
             mesh_nodes[member] = out
         return mesh_nodes[member]
 
+    mesh_labels: dict[str, list[str]] = {}
+
+    def labels_of(member: str) -> list[str]:
+        """Stream 10 of the part's mesh: one socket label a node (docs/38)."""
+        if member not in mesh_labels:
+            record = library.get(member)
+            msh = record.slot_with_suffix("msh") if record else None
+            out: list[str] = []
+            if msh:
+                arch = opened.setdefault(msh.library.lower(),
+                                         NResArchive.open(game / msh.library))
+                inner = NResArchive(arch.read_name(msh.member), msh.member)
+                streams = {e.type_id: inner.read(e) for e in inner}
+                out = designs.socket_labels(streams.get(designs.SOCKET_LABEL_STREAM, b""))
+            mesh_labels[member] = out
+        return mesh_labels[member]
+
     ids = sorted(r.lower() for r in library.records if r.lower().startswith("e_tur"))
 
     # --- t and b are one turret in two mountings ------------------------------
@@ -11705,7 +11791,7 @@ def check_turrets(check, game: Path) -> None:
     size_ok = size_all = 0
     gun_size: Counter[bool] = Counter()
     off_size: set[str] = set()
-    builder_socket: Counter[tuple[str, str]] = Counter()
+    builder_socket: Counter[tuple[str, str, str]] = Counter()
     kind_by_turret: dict[str, set[int]] = defaultdict(set)
     labelled = fitted_ok = 0
     for path in sorted(game.glob("UNITS/**/*.dat")):
@@ -11739,7 +11825,8 @@ def check_turrets(check, game: Path) -> None:
                     off_size.add(parent + ">" + member[:8])
                 if member[7] == "s":
                     node = nodes_of(parent)
-                    builder_socket[(parent[:8] + parent[9:], node[comp.attach_node])] += 1
+                    builder_socket[(parent[:8] + parent[9:], node[comp.attach_node],
+                                    labels_of(parent)[comp.attach_node])] += 1
     check("UNITS: a b turret hangs under a flyer, a t turret sits on the ground",
           variant_on["b"] and variant_on["t"] and set(variant_on["b"]) == {True}
           and set(variant_on["t"]) == {False},
@@ -11752,44 +11839,87 @@ def check_turrets(check, game: Path) -> None:
           f"{size_ok}/{size_all} turrets share their chassis' size letter; "
           f"{gun_size[True]} guns share their turret's and {gun_size[False]} do not, "
           f"all of them fortification guns on {sorted(off_size)}")
-    check("UNITS: a builder's module sits on its turret's Base_LU_01",
-          builder_socket and all(node == "Base_LU_01" for (_t, node) in builder_socket)
+    # A socket's kind is its stream-10 label, not its node name: the gun page is
+    # e_gun_ plus the label's last two letters (iron3d.dll:0x100482f2).  The
+    # module's socket is the one labelled universal_?s wherever it sits.
+    module_nodes = {t: sorted((i, nodes_of(t)[i], lab)
+                              for i, lab in enumerate(labels_of(t)) if lab.endswith("s"))
+                    for t in ids}
+    with_module = {t: rows for t, rows in module_nodes.items() if rows}
+    check("UNITS: a builder's module sits on its turret's socket labelled universal_?s",
+          builder_socket
+          and all(label.endswith("s") for (_t, _n, label) in builder_socket)
           and all(t[6:8] in ("lt", "lb", "mt", "mb") and t.endswith("03")
-                  for (t, _n) in builder_socket),
-          f"every e_gun_?s mobile builder module: {dict(builder_socket)}")
+                  for (t, _n, _l) in builder_socket)
+          and sorted(with_module) == ["e_tur_bb_08", "e_tur_bt_08", "e_tur_lb_03",
+                                      "e_tur_lt_03", "e_tur_mb_03", "e_tur_mt_03"]
+          and all(len(rows) == 1 for rows in with_module.values())
+          and {t: rows[0][1] for t, rows in with_module.items()}
+          == {"e_tur_bb_08": "Base_LU_02", "e_tur_bt_08": "Base_LU_02",
+              "e_tur_lb_03": "Base_LU_01", "e_tur_lt_03": "Base_LU_01",
+              "e_tur_mb_03": "Base_LU_01", "e_tur_mt_03": "Base_LU_01"},
+          f"every e_gun_?s mobile builder module in the shipped assemblies: "
+          f"{dict(builder_socket)} (turret, node, label).  Six turret records carry a "
+          "universal_?s socket, the three builders in both mountings: "
+          + ", ".join(f"{t} node {rows[0][0]} {rows[0][1]} {rows[0][2]}"
+                      for t, rows in sorted(with_module.items()))
+          + ".  The Large builder files its module on Base_LU_02 and a large cannon "
+          "on Base_LU_01, the other way round from the small and medium ones")
     check("UNITS: a turret takes the radar and deflector sizes its controller names",
           labelled and fitted_ok == labelled,
           f"{fitted_ok}/{labelled} fitted i_rdr/i_def parts match the size of the "
           f"i_rdr_?/i_def_? label on their turret's radar and deflector components")
 
     # --- sockets against the catalogue ----------------------------------------
-    rows = []
-    agree = 0
-    exceptions = []
+    # A socket is a labelled node, and its kind is the label's last letter.  The
+    # catalogue declares them in its stat rows -- Cannon, Rocket, Universal and
+    # Builder hanger -- not in its free text.
+    hanger_kinds = {"cannon": "c", "rocket": "l", "universal": "r", "builder": "s"}
+    named_ok = total_agree = kind_agree = 0
+    total_off: list[str] = []
+    kind_off: list[str] = []
+    text_off: list[str] = []
     for tid in ids:
-        if tid[7] == "b":
-            continue
         entry = catalogue.get(tid)
-        sockets = [n for n in (nodes_of(tid) or []) if n.startswith("Base_")
-                   and n not in objects.TURRET_MOUNT_NODES]
-        text = " ".join(entry.text)
-        slots = re.search(r"(\d+)[- ](?:\w+ )?slots?", text)
-        want = int(slots.group(1)) if slots else None
-        role = _turret_role(entry.text)
-        have = len(sockets) - (role == objects.TYPE_BUILDER)
-        rows.append((tid, want, len(sockets)))
-        if want is not None and have == want:
-            agree += 1
+        sockets = {n for n in (nodes_of(tid) or []) if n.startswith("Base_")
+                   and n not in objects.TURRET_MOUNT_NODES}
+        labels = [lab for lab in labels_of(tid) if lab]
+        named = {nodes_of(tid)[i] for i, lab in enumerate(labels_of(tid)) if lab}
+        named_ok += named == sockets
+        have: Counter[str] = Counter(lab[-1] for lab in labels)
+        want: Counter[str] = Counter()
+        for stat in entry.stats:
+            kind = hanger_kinds.get(stat.label.split()[0].lower(), "")
+            if kind and stat.literal:
+                want[kind] += int(stat.literal)
+        if sum(want.values()) == len(labels):
+            total_agree += 1
         else:
-            exceptions.append(f"{tid} {want}/{len(sockets)}")
-    check("turrets.rlb: a turret's Base_* sockets are its catalogue's battle slots",
-          agree >= 20 and len(exceptions) == 6
-          and {e.split()[0] for e in exceptions} == {"e_tur_bt_07", "e_tur_bt_08",
-                                                     "e_tur_bt_11", "e_tur_bt_12",
-                                                     "e_tur_lt_07", "e_tur_ht_02"},
-          f"{agree} of {len(rows)} turrets have as many gun sockets as their "
-          f"catalogue's slots, counting a builder's module socket apart; the rest "
-          f"(catalogue/sockets): {', '.join(exceptions)}")
+            total_off.append(f"{tid} {sum(want.values())}/{len(labels)}")
+        if want == have:
+            kind_agree += 1
+        else:
+            kind_off.append(tid)
+        slots = re.search(r"(\d+)[- ](?:\w+ )?slots?", " ".join(entry.text))
+        if slots and int(slots.group(1)) != sum(want.values()):
+            text_off.append(f"{tid} says {slots.group(1)}, declares {sum(want.values())}")
+    check("turrets.rlb: a turret's sockets are the hangers its catalogue entry declares",
+          named_ok == len(ids) and total_agree == 48 and kind_agree == 46
+          and {t[:7] + "t" + t[8:] for t in kind_off}
+          == {"e_tur_bt_09", "e_tur_bt_11", "e_tur_bt_12", "e_tur_lt_07", "e_tur_ht_02"}
+          and sorted(t.split()[0] for t in text_off)
+          == ["e_tur_bb_07", "e_tur_bt_07", "e_tur_lb_03", "e_tur_lt_03",
+              "e_tur_mb_03", "e_tur_mt_03"],
+          f"on all {named_ok} turret records the labelled nodes are exactly the Base_* "
+          f"nodes bar the mount, so the node names and the labels pick the same sockets "
+          f"and only the kind comes from the label.  The declared hanger total equals the "
+          f"socket count on {total_agree}/{len(ids)}, and per kind (Cannon c, Rocket l, "
+          f"Universal r, Builder s) on {kind_agree}/{len(ids)}; the misses are the three "
+          f"monsters and the hero, which declare hangers for their built-in guns and have "
+          f"no socket ({', '.join(total_off)}), and the Transformer, whose two "
+          f"universal_bl are filed as Universal rather than Rocket though its 6 + 2 is "
+          f"right.  The free text is the unreliable line: {'; '.join(text_off)} -- and "
+          "the Large builder's 'with 2 battle slot' matches only by counting its module")
 
     builtin = {}
     for tid in ids:
@@ -11942,9 +12072,15 @@ def check_turrets(check, game: Path) -> None:
     ai = {c.ref.member.lower() for p in game.glob("UNITS/UNITS/AI/*.dat")
           for c in objects.load_unit(p).components}
     placed: dict[str, Counter[int]] = defaultdict(Counter)
+    #: Which clan types load each behaviour tree, over every shipped mission.
+    tree_clans: dict[str, Counter[int]] = defaultdict(Counter)
     type_seen = type_same = 0
     for tma in sorted(game.glob("MISSIONS/**/data.tma")):
         m = mission.load(tma)
+        for clan in m.clans:
+            named = Path(clan.behaviour.replace("\\", "/")).name.lower()
+            if named:
+                tree_clans[named][clan.type] += 1
         for o in m.objects:
             if o.kind != mission.KIND_UNIT or o.clan_id is None:
                 continue
@@ -11984,9 +12120,15 @@ def check_turrets(check, game: Path) -> None:
           f"for players {player_battle} times")
 
     # A tree's category byte is state bits (MisLoad.dll:0x10002aa0, 0x10002c10):
-    # 4 the item is in this tree, 1 it can be researched, 2 it has been.
+    # 4 the item is in this tree, 1 it can be researched, 2 it has been.  Which
+    # trees a player ever reads is the missions' to say, not the file names':
+    # data.trf alone is the player's tree in nine missions.
     present, researched = 4, 2
-    player = [p for p in research.trees(game) if re.search(r"(p|_pl)\.trf$", p.name, re.I)]
+    shipped = {p.name.lower(): p for p in research.trees(game)}
+    player = sorted(shipped[t] for t, kinds in tree_clans.items()
+                    if kinds[mission.CLAN_PLAYER] and t in shipped)
+    by_name = sorted(p for p in shipped.values() if re.search(r"(p|_pl)\.trf$", p.name, re.I))
+    never = sorted(t for t in shipped if t not in tree_clans)
     specials_in: Counter[str] = Counter()
     hero_with_chassis = hero_trees = 0
     states: set[int] = set()
@@ -12002,14 +12144,56 @@ def check_turrets(check, game: Path) -> None:
         if tree_path in player:
             for tid in specials:
                 specials_in[tid] += bool(state.get(tid, 0) & present)
-    check(".trf: no player's tree holds a special turret, and no tree the hero's chassis",
-          player and states == {0, 2, 4, 5, 7} and not any(specials_in.values())
-          and hero_trees and hero_with_chassis == 0,
-          f"state bytes {sorted(states)}; in the {len(player)} player trees (*p, *_pl) "
-          f"the Transformer, Small tower and monster turrets are never present "
-          f"{dict(specials_in)}; the hero turret is present in {hero_trees} trees and "
-          f"its chassis r_h_02 in none of them, where it reads {researched}: "
-          f"researched but not in the tree")
+    check(".trf: no tree a player reads holds a special turret, and none the hero's chassis",
+          len(player) == 17 and states == {0, 2, 4, 5, 7} and not any(specials_in.values())
+          and hero_trees and hero_with_chassis == 0
+          and len(by_name) == 11 and set(by_name) < set(player)
+          and "full.trf" in never and tree_clans["auto.trf"][mission.CLAN_PLAYER] == 0,
+          f"state bytes {sorted(states)}; a type-1 clan of the "
+          f"{len(list(game.glob('MISSIONS/**/data.tma')))} data.tma reads {len(player)} "
+          f"distinct trees, not the {len(by_name)} the file names suggest -- it adds "
+          + ", ".join(f"{p.name.lower()} x{tree_clans[p.name.lower()][mission.CLAN_PLAYER]}"
+                      for p in player if p not in by_name)
+          + f".  In all {len(player)} the Transformer, Small tower and monster turrets are "
+          f"never present {dict(specials_in)}; the hero turret is present in {hero_trees} "
+          f"trees and its chassis r_h_02 in none of them, where it reads {researched}: "
+          f"researched but not in the tree.  No clan at all loads {never}, and auto.trf "
+          f"only enemies {dict(tree_clans['auto.trf'])}")
+
+    # What actually stops the player building the six: the catalogue's gate is
+    # RESEARCHED && IN_TREE (iron3d.dll:0x1008a896, 0x1008a89e), and the chassis
+    # page never emits r_h at any grade (0x10048b21).
+    shop = units.Workshop(game)
+    reachable: set[str] = set()
+    listed: set[str] = set()
+    paid = Counter()
+    for tree_path in player:
+        tree = research.read(tree_path)
+        offers = designs.Catalogue(tree)
+        designer = designs.Designer(shop, offers)
+        for tid in ("e_tur_lt_01", "e_tur_lt_02", "e_tur_lt_05", "e_tur_tt_01"):
+            paid[tid] += offers.offered(tid)
+        for grade in range(1, len(designs.CHASSIS_PREFIXES) + 1):
+            for chassis in offers.page(designs.chassis_prefixes(grade)):
+                listed.add(chassis.lower())
+                for label in designer.labels(chassis):
+                    if label.lower().startswith(designs.TURRET_PREFIX):
+                        reachable.update(t.lower() for t in offers.page((label.lower(),)))
+    walled = {"e_tur_bt_09", "e_tur_bt_10", "e_tur_bt_11", "e_tur_bt_12", "e_tur_lt_07",
+              "e_tur_ht_02"}
+    walled |= {t[:7] + "b" + t[8:] for t in walled if t[7] == "t"}
+    check("designs: no page of any tree a player reads offers one of the six free turrets",
+          len(reachable) == 39 and not reachable & walled
+          and not any(c.startswith("r_h") for c in listed)
+          and not {"r_b_05", "r_b_06"} & listed
+          and all(paid[t] for t in paid) and len(paid) == 4,
+          f"over the {len(player)} trees a player reads and all "
+          f"{len(designs.CHASSIS_PREFIXES)} factory grades, every chassis a page lists "
+          f"and then every turret its e_tur_ socket offers: {len(reachable)} turrets, none "
+          f"of the six.  The chassis listed are {', '.join(sorted(listed))} -- never "
+          f"r_b_05, r_b_06 or any r_h_*, whose page prefix the grade switch never emits.  "
+          f"Control: the paid turrets come back where their categories say, "
+          + ", ".join(f"{t} in {n}" for t, n in sorted(paid.items())))
 
     body: dict[str, float] = {}
     for tid in ids:

@@ -113,7 +113,10 @@ _GROUP = re.compile(r"^//G(\d+):L(\d+)\s*$")
 _CLASS = re.compile(r"^//([A-Z]+):([A-Z]+):(.+?)\s*$")
 _MARK = re.compile(r"^MK\d+$")
 _SLOT = re.compile(r"^#(\w)(.*)$")
-_STAT = re.compile(r"^@G@(.*?)\s*@B,([^,]*),G,([^,]*),")
+#: A stat row is ``@G@<label> @B,<field>,G,<unit>,<width>,<decimals>@``.  The
+#: third column is ``G`` on every row that carries a unit and empty on the 99
+#: hanger rows, which print a quoted count and nothing else (*measured*).
+_STAT = re.compile(r"^@G@(.*?)\s*@B,([^,]*),G?,([^,]*),")
 #: An ``objects.rlb`` member's size letter -- ``<family>_<size>_<index>``.
 _MEMBER = re.compile(r"^[A-Za-z]{2,4}_([A-Za-z])_")
 
@@ -125,8 +128,8 @@ def round_grade(member: str) -> str:
     fires**, not its own: ``e_gun_bl_14`` is a large launcher loaded with
     ``bm_l_01``, a small missile, and carries ``A1``, as does ``i_c14_b_df``,
     the large pack that feeds it.  A round whose size letter is ``f`` grades
-    nothing -- ``f`` is outside ``GRADES`` -- which is why the huge guns keep
-    their own ``A3``.  See ``docs/19-descriptions.md``.
+    nothing -- ``f`` is outside ``GRADES`` -- which is why the fortification
+    guns keep their own ``A3``.  See ``docs/19-descriptions.md``.
     """
     found = _MEMBER.match(member)
     return GRADES.get(found.group(1).upper(), "") if found else ""
@@ -138,11 +141,20 @@ class DescriptionFormatError(ValueError):
 
 @dataclass(frozen=True)
 class Stat:
-    """One row of the part's stat panel: a label, the field behind it, a unit."""
+    """One row of the part's stat panel: a label, the field behind it, a unit.
+
+    A row whose field is quoted prints that text instead of reading a field: a
+    turret's ``Cannon hanger "2"``, a laser's printed damage.
+    """
 
     label: str
     field: str
     unit: str
+
+    @property
+    def literal(self) -> str:
+        """The quoted text a row prints, or '' where the row names a field."""
+        return self.field[1:-1] if self.field.startswith('"') and self.field.endswith('"') else ""
 
 
 @dataclass(frozen=True)

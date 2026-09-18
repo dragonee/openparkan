@@ -66,6 +66,22 @@ def test_the_catalogue_offers_researched_parts_in_tree_order():
     assert catalogue.spelling("r_b_02") == "R_B_02"
 
 
+def test_the_catalogue_tests_researched_and_in_tree_and_not_available():
+    """``iron3d.dll:0x1008a896`` and ``0x1008a89e`` read bits 2 and 4 of the item's
+    category and nothing else: an item open to research (5) is not offered, and one
+    researched outside the tree (2) is not either."""
+    states = (research.IN_TREE | research.AVAILABLE, research.RESEARCHED,
+              research.IN_TREE, 0,
+              research.IN_TREE | research.RESEARCHED | research.AVAILABLE)
+    items = tuple(item(i, "Chassis", "C", (f"R_B_0{i}",), c) for i, c in enumerate(states))
+    parts = tuple(f"R_B_0{i}" for i in range(len(states)))
+    catalogue = designs.Catalogue(research.Tree(source=Path("t.trf"), items=items,
+                                                part_ids=parts))
+    assert catalogue.page(("r_b",)) == ["R_B_04"]
+    assert designs.Catalogue(research.Tree(source=Path("t.trf"), items=items, part_ids=parts),
+                             full=True).page(("r_b",)) == list(parts)
+
+
 def test_percent_normalises_over_the_temp_ranges():
     assert designs.percent(0.0, designs.DEFENCE_RANGE) == 0
     assert designs.percent(2941.0, designs.DEFENCE_RANGE) == 12

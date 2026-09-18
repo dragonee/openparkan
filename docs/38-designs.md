@@ -44,17 +44,34 @@ with their chassis socket's label (the exception, `42_mons.dat`, sits on
 `r_b_07`, whose socket has none), and **865 of 865** guns take the prefix
 their turret socket's label gives.
 
+**The label is the only statement of what a socket takes.** A turret mesh's
+labelled nodes are exactly its `Base_*` nodes bar the mount, on all 55 turret
+records, so the node names pick the same sockets — but the node name says only
+where the socket sits, never its kind, and no DLL names a `Base_*` node at all.
+The Large builder's module socket is `Base_LU_02`
+labelled `universal_bs`, while its `Base_LU_01` is a `central_bc` cannon
+socket; the small and medium builders have it the other way round
+([30-turrets.md](30-turrets.md#gun-sockets-are-the-meshs-base_-nodes-and-their-kind-is-the-label--measured-and-read)).
+
 ## The catalogue — *read*, and *measured*
 
 **A page lists every part whose id starts with its prefix and whose research
 item is in the tree and researched** (`iron3d.dll:0x1008a780`):
 
 - It walks the clan's research tree's `TRFB` part list in order
-  ([16-research.md](16-research.md)), matching names by prefix
-  (`0x10090900`).
-- It keeps a part only when `IResearch` slot 3 reports the item researched
-  (`TRF1` bit 2) and in the tree (bit 4) (`0x1008a879`). With `Iron_3D.ini`'s
-  `[CS] FULL_RESEARCH_TREE` set, it keeps every match.
+  ([16-research.md](16-research.md)), matching names by prefix at `0x1008a875`
+  (`0x10090900`, a case-insensitive compare with `?` wildcards).
+- `0x1008a879` tests a byte argument, and **clear it keeps the part with no
+  further test**. All five call sites fill it with the inverse of `0x1008ac50`,
+  which is `atoi` over `Iron_3D.ini`'s `[CS] FULL_RESEARCH_TREE`
+  ([22-settings.md](22-settings.md)) — a key the shipped file does not carry.
+- Otherwise `0x1008a884` calls `IResearch` slot 3 (`MisLoad.dll:0x10002aa0`),
+  which unpacks the item's category byte into a record — `+0x00` bit 2, `+0x04`
+  bit 1, `+0x08` bit 4, then the four cost dwords and the part-id pointer — and
+  `0x1008a896` and `0x1008a89e` require `+0x00` and `+0x08`. So the page keeps
+  a part whose item is **researched and in the tree**; the `AVAILABLE` bit slot
+  3 also writes is read by nothing here, and none of the four costs is
+  compared.
 - Rows keep the `TRFB` order. A page with several prefixes still walks the
   tree once, testing each part against each prefix (`0x1008a9a0`). A page
   holds at most 64 rows (`0x1004878b`).
@@ -65,9 +82,9 @@ item is in the tree and researched** (`iron3d.dll:0x1008a780`):
 
 | page | prefix |
 |---|---|
-| chassis (the name `r`) | `r_t`; `r_t`, `r_l`; … up to `r_b` as the grade runs 1 to 4 (`0x10048b38`) |
-| turret | the chassis socket's label, `e_tur_bb` (`0x10049126`) |
-| weapons | `e_gun_` and the socket label's last two letters; both `<s>c` and `<s>l` when the last is `r`, cannons listed first (`0x10048338`) |
+| chassis (the name `r`) | `r_t`; `r_t`, `r_l`; … up to `r_b` as the grade runs 1 to 4 (the switch at `0x10048b21`, its table at `0x10049398`). **`r_h` is no prefix at any grade** |
+| turret | the chassis socket's label, `e_tur_bb`, passed through unchanged once the tab's name starts `e_tur_` (`0x10049126`) |
+| weapons | `e_gun_` and the socket label's last two letters, found from the label's length; both `<s>c` and `<s>l` when the last is `r`, cannons listed first (`0x100482f2`–`0x100483c1`) |
 | armour, internal systems, ammunition | the slot's label from the part's controller, `i_arm_b`, `i_eng_b`, `i_c15_b` |
 
 **The grade is the factory's size.** The factory screen opens the constructor

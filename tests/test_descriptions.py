@@ -21,6 +21,20 @@ GUN = """\
 @G@Rate of fire @B,Frate,G,1/s,5,@
 """
 
+TURRET = """\
+//G2:L14
+//B:SHS:TUR:MK8:A3
+#1BL1
+#3Mobile builder
+#2Large Builder Trt
+#4Large builder turret
+#4with 2 battle slot
+#6UpgradeLevel=2
+@G@Weight        @B,weight,G,t,5,1@
+@G@Cannon hanger @B,"1",,,,@
+@G@Builder hanger@B,"1",,,,@
+"""
+
 CLIP = """\
 //G3:L14
 //B:AMM:GUN:MK9:A3
@@ -76,6 +90,16 @@ def test_the_stat_rows_carry_a_field_and_a_unit():
     assert [(s.label, s.field, s.unit) for s in d.stats] == [
         ("Weight", "weight", "t"),
         ("Rate of fire", "Frate", "1/s"),
+    ]
+
+
+def test_a_stat_row_may_print_a_quoted_count_instead_of_a_field():
+    """A turret's hangers are stat rows with a literal and no unit, so no ``G`` column."""
+    d = descriptions.parse_entry(TURRET)
+    assert [(s.label, s.field, s.unit, s.literal) for s in d.stats] == [
+        ("Weight", "weight", "t", ""),
+        ("Cannon hanger", '"1"', "", "1"),
+        ("Builder hanger", '"1"', "", "1"),
     ]
 
 

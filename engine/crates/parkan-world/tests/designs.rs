@@ -27,6 +27,62 @@ fn mission_02s_player_is_offered_the_32_parts_of_its_tree() {
     assert_eq!(catalogue.page(&designs::gun_prefixes("central_bc")), vec!["e_gun_bc_06"]);
 }
 
+/// A catalogue that offers every part of `data.trf`, as `FULL_RESEARCH_TREE` would.
+fn everything(game: &std::path::Path) -> Catalogue {
+    let path = gamedir::resolve(game, "MISSIONS/SCRIPTS/data.trf").unwrap();
+    Catalogue::new(parkan_formats::research::parse(&std::fs::read(path).unwrap(), "data.trf").unwrap(), true)
+}
+
+/// A socket's kind is its stream-10 label, not its node name (docs/30, "Gun sockets"). The
+/// Large builder keeps its module socket on `Base_LU_02` and a cannon socket on `Base_LU_01`,
+/// the other way round from the small and medium builders; the Large transport has one socket
+/// and it takes a cannon.
+#[test]
+#[ignore = "needs the game install"]
+fn the_large_builders_module_socket_is_base_lu_02_and_the_large_transport_has_one() {
+    let game = gamedir::find(None).expect("a Parkan install: set PARKAN_DIR");
+    let mut assembly = Assembly::new(&game).unwrap();
+    let mut designer = Designer::new(&game, everything(&game), 4);
+    /// Every gun socket a turret on `chassis` offers: its node, its label and its page.
+    fn sockets(
+        designer: &mut Designer,
+        assembly: &mut Assembly,
+        chassis: &str,
+        turret: &str,
+    ) -> Vec<(i32, String, Vec<String>)> {
+        let mut design = designer.chassis(assembly, chassis);
+        assert!(designer.fit_turret(assembly, &mut design, turret));
+        designer
+            .places(assembly, Some(&design), Tab::Weapons)
+            .into_iter()
+            .map(|p| {
+                let offers = designer.offers(&p);
+                (p.attach, p.label.clone(), offers)
+            })
+            .collect()
+    }
+    let builder = sockets(&mut designer, &mut assembly, "r_b_01", "e_tur_bt_08");
+    assert_eq!(
+        builder.iter().map(|(n, l, _)| (*n, l.as_str())).collect::<Vec<_>>(),
+        vec![(6, "universal_bs"), (7, "central_bc")]
+    );
+    assert!(builder[0].2.iter().all(|p| p.to_ascii_lowercase().starts_with("e_gun_bs")));
+    assert!(builder[1].2.iter().all(|p| p.to_ascii_lowercase().starts_with("e_gun_bc")));
+    assert!(!builder[0].2.is_empty() && !builder[1].2.is_empty());
+    // The small and medium builders put the module on their first socket instead.
+    for (turret, chassis, node) in [("e_tur_lt_03", "r_l_03", 6), ("e_tur_mt_03", "r_m_01", 5)] {
+        let places = sockets(&mut designer, &mut assembly, chassis, turret);
+        let module = places.iter().find(|(_, l, _)| l.ends_with('s')).expect("a module socket");
+        assert_eq!(module.0, node, "{turret}");
+    }
+    // One socket on the Large transport, and it is a cannon's.
+    let transport = sockets(&mut designer, &mut assembly, "r_b_01", "e_tur_bt_07");
+    assert_eq!(
+        transport.iter().map(|(n, l, _)| (*n, l.as_str())).collect::<Vec<_>>(),
+        vec![(9, "central_bc")]
+    );
+}
+
 /// The recording's designer, step by step, and each unit box it shows (docs/38, "The
 /// recording, re-derived"; `openparkan/verify.py`'s `DESIGNER_RECORDING`).
 const RECORDING: [(&str, [&str; 5], bool); 17] = [
@@ -134,15 +190,7 @@ fn mission_02s_designer_rates_every_unit_box_the_recording_shows_and_prices_the_
 fn the_installs_factory_designs_rewrite_byte_for_byte_and_load_from_memory() {
     let game = gamedir::find(None).expect("a Parkan install: set PARKAN_DIR");
     let mut assembly = Assembly::new(&game).unwrap();
-    let everything = Catalogue::new(
-        parkan_formats::research::parse(
-            &std::fs::read(gamedir::resolve(&game, "MISSIONS/SCRIPTS/data.trf").unwrap()).unwrap(),
-            "data.trf",
-        )
-        .unwrap(),
-        true,
-    );
-    let designer = Designer::new(&game, everything, 4);
+    let designer = Designer::new(&game, everything(&game), 4);
     let units = gamedir::resolve(&game, "UNITS").unwrap();
     let mut written: Vec<std::path::PathBuf> = std::fs::read_dir(&units)
         .unwrap()
@@ -209,4 +257,70 @@ fn mission_02s_part_boxes_read_as_the_recording_shows() {
     assert_eq!(values("i_rps_b_01")[2], "Regeneration 60.0 HP/s");
     assert_eq!(values("i_rdr_b_01")[2], "Sensor range 400.0 m");
     assert_eq!(values("i_def_b_01")[2], "Efficiency 85.0 %");
+}
+
+/// Every `data.tma` in the install, campaign missions included.
+fn every_mission(game: &std::path::Path) -> Vec<std::path::PathBuf> {
+    fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+        let Ok(entries) = std::fs::read_dir(dir) else { return };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                walk(&path, out);
+            } else if path.file_name().is_some_and(|n| n.eq_ignore_ascii_case("data.tma")) {
+                out.push(path);
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(&gamedir::resolve(game, "MISSIONS").unwrap(), &mut out);
+    out.sort();
+    out
+}
+
+/// What keeps the six free turrets out of the player's hands is the catalogue's gate, and for
+/// the hero turret the chassis page's prefixes (docs/30, "The turrets the player never
+/// builds"). Over every tree a player clan reads -- which the missions say, not the file names
+/// -- and every factory grade, no page offers one of the six and none lists a hero chassis.
+#[test]
+#[ignore = "needs the game install"]
+fn no_page_of_a_tree_a_player_reads_offers_one_of_the_six_free_turrets() {
+    use std::collections::BTreeSet;
+
+    let game = gamedir::find(None).expect("a Parkan install: set PARKAN_DIR");
+    let mut trees: BTreeSet<String> = BTreeSet::new();
+    for path in every_mission(&game) {
+        let m = mission::parse(&std::fs::read(&path).unwrap(), "data.tma").unwrap();
+        for clan in m.clans.iter().filter(|c| c.kind == 1 && !c.behaviour.is_empty()) {
+            trees.insert(clan.behaviour.to_ascii_lowercase());
+        }
+    }
+    assert_eq!(trees.len(), 17, "{trees:?}");
+    assert!(trees.iter().any(|t| t.ends_with("data.trf")), "data.trf is a player's tree too");
+
+    let mut assembly = Assembly::new(&game).unwrap();
+    let (mut reachable, mut listed) = (BTreeSet::new(), BTreeSet::new());
+    for tree in &trees {
+        let catalogue = Catalogue::open(&game, tree).unwrap();
+        assert!(!catalogue.full, "the shipped Iron_3D.ini sets no FULL_RESEARCH_TREE");
+        for grade in 1..=designs::CHASSIS_PREFIXES.len() {
+            let mut designer = Designer::new(&game, catalogue.clone(), grade);
+            for chassis in designer.catalogue.page(&designs::chassis_prefixes(grade)) {
+                listed.insert(chassis.to_ascii_lowercase());
+                let design = designer.chassis(&mut assembly, &chassis);
+                for place in designer.places(&mut assembly, Some(&design), Tab::Turrets) {
+                    reachable.extend(designer.offers(&place).iter().map(|t| t.to_ascii_lowercase()));
+                }
+            }
+        }
+    }
+    assert_eq!(reachable.len(), 39, "{reachable:?}");
+    for free in ["e_tur_bt_09", "e_tur_bt_10", "e_tur_bt_11", "e_tur_bt_12", "e_tur_lt_07", "e_tur_ht_02"] {
+        let hung = format!("{}b{}", &free[..7], &free[8..]);
+        assert!(!reachable.contains(free) && !reachable.contains(&hung), "{free} is offered");
+    }
+    assert!(!listed.iter().any(|c| c.starts_with("r_h")), "{listed:?}");
+    assert!(!listed.contains("r_b_05") && !listed.contains("r_b_06"), "{listed:?}");
+    // A control: the paid turrets do come back.
+    assert!(reachable.contains("e_tur_lt_01") && reachable.contains("e_tur_bt_01"));
 }

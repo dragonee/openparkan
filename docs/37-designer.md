@@ -207,6 +207,31 @@ the panel's takt (`0x1004bb90` for the source) makes a model view of the part
 (`0x1009df90`) on (*X*₀ + 12, 244) sized 160 × 151, carrying the old model's
 angle on (`0x1004bcca`).
 
+### A row's record — *read*, in part
+
+The rows a destination tab lists are kept in the designer's own memory as
+**arrays of 64 records, `0x330` bytes each**, and there are four of them, at
+`+0xd220`, `+0x1a0c4`, `+0x26f68` and `+0x33e0c` — `0xcea4` apart, so each
+array is one tab's. Which tab each one is was not read.
+
+**The reset** (`0x1004b615`) walks 64 records writing `+0x00 = −1`, `+0x04 =
+−1`, an empty string at `+0x08` and at `+0x14`, `+0x20 = −1` and `+0x24 = −1`,
+and zeroes the list's count (`+0x33ab8` for the `+0x26f68` array, `+0x26c14`
+for the `+0x1a0c4` one).
+
+**The unit writer reads three of the fields** (`0x100546e2`–`0x1005479e`). It
+skips a record whose `+0x20` is −1 or whose `+0x00` is non-zero, and otherwise
+emits one component of the `.dat` ([38-designs.md](38-designs.md#the-files--read-and-measured)),
+stride `0x78`: the library `objects.rlb`, the part id, flags 1, **`+0x04` as
+the attach node**, the string at `+0x08` as the label, and class 3. The part id
+comes from `0x1008a480` over `+0x20`, a wrapper on `IResearch` slot 3 that
+returns the out-record's `+0x1c`, which `MisLoad.dll:0x10002aa0` fills from
+`TRFB[item.part_index]` — so **`+0x20` is a research item index the writer
+turns into a part id**.
+
+What writes `+0x04`, inside the fits' node loop from `0x100527aa`, and what
+`+0x00` and `+0x24` mean, were not read.
+
 ### Moving a part — *read*, and *seen*
 
 The designer's takt (`0x100506d0`) reads the picked record once its `+0xb8` is
@@ -441,3 +466,6 @@ from top to bottom in about a second.
 - The tooltip's box and timing (`0x1009bbc0`, [35-hud.md](35-hud.md#who-draws-it-and-what-it-hides--read)).
 - The destination panel's draw and takt (`0x1004ccb0`, `0x1004cd00`) beyond their
   sharing the source's routines.
+- **Which tab each of the four `0x330`-byte row arrays holds**, what writes a
+  row's attach node at `+0x04`, and what its `+0x00` and `+0x24` mean
+  ([A row's record](#a-rows-record--read-in-part)).

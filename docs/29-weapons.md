@@ -246,8 +246,12 @@ at load (`0x10009120`).
 - *Measured*: on the hero turret, followers 4, 9, 21 and 25 take the cannon,
   plasma rifle, laser and missiles, and arms 8 to 11. A fitted gun part carries
   one follower of its own. On every controller but two, each follower finds a
-  gun; `e_gun_bl_03` and `e_gun_tl_02` have a follower and no gun. No channel
-  carries the `0x2000` flag the takt treats apart.
+  gun; `e_gun_bl_03` and `e_gun_tl_02` have a follower and no gun, and **they
+  are fitted on nothing**, so the takt never meets an unpaired one: summed over
+  the merged control system of each of the 458 shipped assemblies, 1,015
+  followers and not one without a gun
+  ([The two guns nothing carries](#the-two-guns-nothing-carries--measured)).
+  No channel carries the `0x2000` flag the takt treats apart.
 
 **Each takt** (`0x10027ecd`), `0x10028200` moves each mount and returns its
 gun's ready byte (`0x10027f51`):
@@ -1014,6 +1018,36 @@ The enemy variants and the huge guns:
 | Huge Rocket Lr | `HMRL9B` | ROC | unlimited | 0.01 | 2000 | 0.50 | 9 | 1350 | 5 | 75 | 400 | 675 | 0.0 |
 | Huge Missile Lr | `HBML9B` | MIS | unlimited | 0.01 | 250 | 4.00 | 9 | 3000 | 15 | 75 | 700 | 12000 | 0.0 |
 
+## The two guns nothing carries — *measured*
+
+`objects.rlb` holds 71 `e_gun_*` records and **61 are fitted** on at least one
+of the 458 `UNITS/**/*.dat`. `e_gun_bl_03` and `e_gun_tl_02` are fitted on
+**none**, and nothing else in the install names them either:
+
+- They are two of the four `e_gun_*` absent both from the 395-entry part list
+  every `.trf` carries — the same 395 entries in all 29 trees — and from
+  `objects.dlb`. The other two are `e_gun_ll_11` and `e_gun_ml_16`, whose
+  controllers are empty outright. **The catalogue cannot offer what the
+  research tree does not list** ([38-designs.md](38-designs.md#the-catalogue--read-and-measured)).
+- Their controllers (`guns.rlb/o_gun_ba_03.ctl`, `o_gun_ta_02.ctl`) hold one
+  channel each — node 1, flags `0x8`, rate 1.5, frames 1 → 3, control point −1 —
+  and **no components at all**.
+- Their `.cpt` is 4 bytes, one empty stream and no control point. Only those
+  four guns and the five `e_gun_fs_*` fortification builder modules, which have
+  no gun to point, have one that small. **A gun with no muzzle point could not
+  fire even if it had a gun component**
+  ([Where the round leaves](#where-the-round-leaves-and-which-way)).
+
+**So the unpaired follower is never reached.** Summed over the merged control
+system of each of the 458 assemblies, **1,015 followers and not one without a
+gun**; no assembly has more followers than guns. They are art left in the
+archive after the gun was taken out.
+
+*Control*: the same sweep finds `e_gun_bl_15` fitted 20 times, `e_gun_bc_06`
+28 and `e_gun_tl_04` exactly **once** — a single fitting is visible, so a zero
+means zero. And the part list all 29 trees share names `e_gun_bs_01`, which is
+assembled nowhere, so "in the tree" and "assembled" are detected apart.
+
 ## Not established
 
 - ~~Whether a target the hero's AI set before the player took over survives
@@ -1029,9 +1063,11 @@ The enemy variants and the huge guns:
   a lobbed round's gun fitted as a part on a turret with no follower channel, the
   Small Bunker's `e_gun_fc_08` on `e_bnt_lt_01`, is raised; the gun's gate (report
   7, `0x10029d27`, `0x10029e37`) refuses a target past value 8, `.ctl` `+108`.
-- `e_gun_bl_03` and `e_gun_tl_02` carry a follower and no gun. The turret's takt
-  reads the paired gun without a check, so either they are never fitted or the
-  follower pairs with a later part's gun; not traced.
+- ~~`e_gun_bl_03` and `e_gun_tl_02` carry a follower and no gun. The turret's
+  takt reads the paired gun without a check, so either they are never fitted or
+  the follower pairs with a later part's gun~~ — **measured**: never fitted, and
+  absent from every research tree and from `objects.dlb`
+  ([The two guns nothing carries](#the-two-guns-nothing-carries--measured)).
 - ~~The fight module's two aim factors (interface `0x202` slot 10), and what
   tasks 2, 3 and 5 are.~~ Answered: `1 − θ × d ÷ R` from the turret's aim stage
   and the gun's report; the tasks are go, attack and search

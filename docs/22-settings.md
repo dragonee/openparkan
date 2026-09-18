@@ -171,7 +171,10 @@ FULL_RESEARCH_TREE`. `iron3d.dll:0x1008ac50` reads it as non-zero or not; it
 silences the warning a research tree with debugging information raises
 ([16-research.md](16-research.md)), and four part-list builders of the panels
 take its inverse as a flag (`0x10048292`, `0x100520ee`, `0x10052ac6`,
-`0x10053321`). *Guess*: it shows every part whether researched or not.
+`0x10053321`). **It shows every part whether researched or not** (*read*): the
+flag is the byte the catalogue collector tests at `0x1008a879`, and clear — the
+key set — the part is taken with no state test at all
+([38-designs.md](38-designs.md#the-catalogue--read-and-measured)).
 
 ## `Iron_3D.ini` and `dispatcher.ini` — the player's, not the game's
 
@@ -214,7 +217,8 @@ the campaign looks like, not a statement about the format.
 - ~~**`DefaultOrderPhase`**~~ — **read**, above: a phase compared with a
   behaviour field nothing but the constructor writes. What was meant to
   advance that field is not established.
-- **What `FULL_RESEARCH_TREE` does to the part lists.**
+- ~~**What `FULL_RESEARCH_TREE` does to the part lists.**~~ — **read**: it
+  skips the catalogue's researched-and-in-tree test, above.
 
 Everything above except the export addresses is re-derived by
 `uv run openparkan verify`; those come from `analysis/registry.py`.

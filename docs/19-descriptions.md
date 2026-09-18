@@ -207,6 +207,14 @@ rows exist across the library — `weight` in `t`, `damage` in `HP`, `range` in
 `m`, `maxspeed` in `kmph`, `Frate` in `1/s`. The same templates are copied
 into the research tree's `TRFA` stream.
 
+**A quoted field is a literal the row prints instead of reading anything**
+(*measured*): 118 of the library's 1,092 rows carry one. Ninety-nine of them
+are the hanger rows a turret declares its gun sockets with — `Cannon hanger
+"2"`, `Rocket hanger`, `Universal hanger`, `Builder hanger` — and those carry
+no unit, so the `G` column is empty too; the other 19 are a laser's printed
+damage and a detect shield's suppression, which do. What the hangers say about
+a turret's sockets is [30-turrets.md](30-turrets.md#gun-sockets-are-the-meshs-base_-nodes-and-their-kind-is-the-label--measured-and-read)'s.
+
 ## What this settles
 
 **The four float32 in a research-tree record are these four costs.** Joined on
