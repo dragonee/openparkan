@@ -11,6 +11,19 @@ by milestone. Those come first. Left out: behaviour already read and waiting
 only on the engine (the README's *Read since the stand-in was written*), and
 engineering such as terrain culling or drawing the sky's textures.
 
+A round of twelve was worked on **2026-09-18**, four areas of three. Seven
+closed outright, four are answered as far as the shipped files allow — each
+with a control showing the search that found nothing would have found
+something — and one narrowed. A thirteenth, contact flag 2, closed as a side
+effect. The engine changed in two places: a tracked warbot's belts now lie
+along the ground under them, and seven of the formula evaluator's thirteen
+operators were wrong and are fixed. Three doc corrections came out of it —
+the `.fml` operator table's address, the Large builder's module socket, and
+the eight `b?` prefixes, which are rounds and never were buildings — and two
+premises in this file were wrong and are rewritten above: the six turrets'
+gate is measured over 17 player trees, not 11, and the "five labels and the
+label inside a block" is five plus one, the one being no anomaly.
+
 ## Sky and rendering
 
 [10-sky](docs/10-sky.md#not-resolved), [02-texm](docs/02-texm.md),
@@ -25,10 +38,32 @@ engineering such as terrain culling or drawing the sky's textures.
 - [ ] [M2] Whether a blended material writes depth, and the alpha test's reference value.
 - [ ] [M3] What draw layers 10 and 9, which a fifth slot is filed under, do (`Terrain.dll:0x1004553b`); and `CShade` slot 15.
 - [ ] The sun sprite's extent unit, camera slot 27, and shader slot 5's colour filter and flag bit 0.
-- [ ] Texture header bit `0x4000000` (81 textures) and load flag `0x200000`'s effect.
+- [ ] Texture header bit `0x4000000`: which batch of exports it marks, and whether the exporter is
+  identifiable. (~~and load flag `0x200000`'s effect~~ — closed 2026-09-18: it is the texture stage.
+  `Ngi32.dll`'s surface description fills `DDSURFACEDESC2 +0x78`, `dwTextureStage`, from bit 21 of the
+  load flags, shifted rather than masked, which is why an immediate scan never found it; `ENV_STARS` is
+  the one material that sets it, so exactly one surface in the game is made for stage 1
+  ([02-texm](docs/02-texm.md)). The header bit is **not a property of the picture**: format, mips, alpha
+  and wearer all fail to separate the 81, and the directory being in offset order they are members 66 to
+  154 of 393 — one run of insertions, eight unmarked inside it and none outside. `+0x14` is the
+  exporter's flags word and the loader reads only bits 24 and 25.)
 - [ ] Who sets an object's material track (`ILifeSystem` slot 16), and who calls IAnimation slot 27.
-- [ ] What reads object face flags 2 (walkable floors) and 16.
-- [ ] What IAnimation node mask bit `0x10` does.
+- [ ] Whether any caller besides the round's hit test and the collision pass hands a face query a
+  triangle mask carrying 2 or 16 — the round builds its filter inline, so enumerating the filter
+  constructor's call sites is not a complete enumeration. (~~What reads object face flags 2 and 16~~ —
+  narrowed 2026-09-18: a face flag can be read in only three places, all `AniMesh.dll`, whose visitor is
+  not exported and has two callers; and the walk-face query reads no triangle flag at all, so the flagged
+  floors are the push-out's and not the ground search's. What the two flags **are** is measured through:
+  2 is the walkable surface, all 6166 in a level-0 slot and 6100 above the engine's own cos-80° threshold,
+  a chosen subset; 16 is the broad face of a door leaf, all 384 vertical on 52 interior nodes
+  ([07-objects](docs/07-objects.md)).)
+- [x] ~~What IAnimation node mask bit `0x10` does~~ — closed 2026-09-18: it lays the node along the
+  ground under it. Slot 8 mirrors the bit into the node record's byte `+0x113` — nothing tests the mask
+  word against `0x10`, so the byte is the whole path — and the pose walk then turns the node's world
+  matrix by the rotation slot 31 left on it and writes the translation back, so the node tilts where it
+  stands. Set by the ground contact on a `CONTACT_PLACE` contact's carrier, and set on twelve nodes in
+  the game: the belts of the three tracked chassis. Implemented
+  ([28-chassis](docs/28-chassis.md), [24-motion](docs/24-motion.md)).
 
 ## Effects and sound
 
@@ -61,7 +96,11 @@ engineering such as terrain culling or drawing the sky's textures.
 - [ ] [M3] Which scene nodes are types 1 and 3, which decides whether bridges and buildings are ground; plus a machine's type-3 parent and what message `0x201` returns.
 - [ ] [M3] The ground contact's timing and dt, the pose its contact points use, the second sphere's radius r₂, and what lifts a sphere with no face under it.
 - [ ] Which `Land.msh` faces carry the world bit `0x8` and class bit 8 that the ground search excludes.
-- [ ] Contact record flags 2 (slot `0x7c`) and `0x20`.
+- [ ] Contact record flag `0x20`. (~~flags 2 (slot `0x7c`)~~ — closed 2026-09-18: flag 2 is
+  `CONTACT_PLACE`, which lays the node the contact *carries* along the ground beneath it and leaves it
+  where it stood; 12 of the install's 2634 contacts carry it, four each on the three tracked chassis, and
+  every contact of the wheeled chassis is `0x5`. Read, measured, implemented and tested
+  ([28-chassis](docs/28-chassis.md)).)
 - [ ] [M3] How often `World3D.dll`'s input update runs (it paces the cruise ramp), and which screen states set the 0.5 mouse sensitivity.
 - [ ] [M3] What handlers do when an active row runs again each update, and who calls the second walk/turn ramp's setter (slot 11).
 - [ ] [M3] A state's use count `+0x94`, the state a machine starts in, the game's jitter random source, and a controller's request code before any is sent.
@@ -87,7 +126,12 @@ engineering such as terrain culling or drawing the sky's textures.
 - [ ] [M4] How a gun's capacitor refills (the power tick).
 - [ ] [M3] How the camera builds its frame when its up is parallel to the look.
 - [ ] [M5] How the HUD draws the aim point, the guns and the player's target; what plays `TARGET_READY` and `TARGET_ZOOM`; and the unit record's `+0x94` and `+0x98`.
-- [ ] `e_gun_bl_03` and `e_gun_tl_02` carry a follower and no gun: are they never fitted, or does it pair with a later gun?
+- [x] ~~`e_gun_bl_03` and `e_gun_tl_02` carry a follower and no gun: are they never fitted, or does it
+  pair with a later gun?~~ — closed 2026-09-18: never fitted. Both are on 0 of the 458 assemblies and are
+  two of the four `e_gun_*` absent from the 395-entry part list every `.trf` carries and from
+  `objects.dlb`; the install names them nowhere but `objects.rlb`. Their controllers hold one channel and
+  no components, and their `.cpt` is empty, so there is no muzzle either. Over all 458 assemblies no
+  follower is left without a gun ([29-weapons](docs/29-weapons.md)).
 - [ ] The AI fight module:
   - [ ] its two aim factors
   - [ ] which gun lends the lead speed
@@ -95,8 +139,22 @@ engineering such as terrain culling or drawing the sky's textures.
   - [ ] `MBehaviour+0x614`
   - [ ] the id nibble that frees the winged SSMs
 - [ ] An AI turret's state word while it fights (`0x200` or `0x400`).
-- [ ] The Large transport's second slot and the Large builder's module socket: what fills the design's slot records.
-- [ ] What stops the player building the six free turrets, and which state bits the design screen tests.
+- [ ] What writes the design row's node field, inside the fits' loop over a part's nodes, and what the
+  row's `+0x00` and `+0x24` mean. (~~The Large transport's second slot and the Large builder's module
+  socket~~ — closed 2026-09-18: a socket's kind is its **stream-10 label**, not its node name, and the
+  gun page is the label's last two letters after `e_gun_`. The Large transport has one socket, a cannon
+  one; the Large builder's module is `Base_LU_02` and its cannon `Base_LU_01`, reversing the rule the
+  small and medium builders gave. `objects.dlb`'s hanger rows agree on 48 of 55 turrets; its free text
+  does not and was the source of "two battle slots". The slot records themselves are the destination
+  panel's 64-row lists, a row keeping a mesh node and a research item index
+  ([30-turrets](docs/30-turrets.md), [37-designer](docs/37-designer.md)).)
+- [x] ~~What stops the player building the six free turrets, and which state bits the design screen
+  tests~~ — closed 2026-09-18: the screen tests `RESEARCHED` and `IN_TREE` and **not** `AVAILABLE`, which
+  it parses and never reads. Five of the six are out of the tree in all **17** trees a player clan loads —
+  not 11; `full.trf` is loaded by nobody and `data.trf` is the player's in nine missions. The hero's
+  turret passes both bits in six of the 17 and is stopped one level further out: its page never opens,
+  because `r_h` is not a chassis-page prefix at any factory grade. Zero cost is not the gate
+  ([30-turrets](docs/30-turrets.md), [38-designs](docs/38-designs.md)).
 - [ ] Where the unit constructor's page item names (`+0xc4`) come from.
 
 ## Damage, sensors and ownership
@@ -123,9 +181,26 @@ engineering such as terrain culling or drawing the sky's textures.
 - [ ] What the two floats an object's strength is made of are (`IControl` property `0x36` and interface `0x204`'s `+4`), and so what a `TAKE_BY_HITS` amount is worth; the problem's action record, and SuperAI `+0x40c`. The strength formula and the helper that sums it over a radius — once read as a distance — are now read.
 - [ ] A problem's two raise numbers, which handler runs when, and who writes `dCurrentProblem` and `dCurrentSender`.
 - [ ] Channel 2 of the message callback (function 57), and the count function 69 stores.
-- [ ] Whether any script depends on a constant landing inside a false block.
-- [ ] Five labels no goto aims at, and the label that sits inside a block.
-- [ ] The `.fml` operators the corpus never uses.
+- [x] ~~Whether any script depends on a constant landing inside a false block~~ — closed 2026-09-18: no,
+  and the executor says why — the constant arm is the only one of the eight that does not test the
+  condition byte first. All 63 in-block constants write one of five scratch variables; over the 121
+  (constant, enclosing `if`) pairs, 88 are overwritten before any read on every path and the other 33
+  reach the end of their handler, where every engine entry point writes before reading. None of the five
+  names appears in `ai.dll`, so the engine cannot see them either
+  ([15-behaviour](docs/15-behaviour.md)).
+- [x] ~~Five labels no goto aims at, and the label that sits inside a block~~ — closed 2026-09-18: five
+  plus one, and **the one is not an anomaly**. The five are one label five times over —
+  `PBM_BUILDING_PROTECT_Continue` node 19 of 20 — left behind because those five handlers write both
+  exits as `return` and hold no goto at all; the same handler ships in two other scripts at 19 nodes with
+  no label. The sixth, `c5m1p:PBM_BASE_DEFENCE_Start:9`, **is** aimed at, by the goto at node 3, and sits
+  inside a block only because the handler's whole body is one `if`
+  ([15-behaviour](docs/15-behaviour.md)).
+- [x] ~~The `.fml` operators the corpus never uses~~ — closed 2026-09-18: the corpus uses **3 of 13**,
+  `+`, `-` and `*`. All thirteen arms are now read rather than named, and seven were implemented wrongly
+  here: `/` answers 0 when the divisor is 0 rather than dividing, `&`/`|`/`!` truncate through `_ftol`,
+  and `N`/`S`/`B` are a clamped ramp, the positive part and a strictly-positive test. Fixed. The doc's
+  table address was the dead copy; the live one is `0x10047c70` with its count at `0x10047c68`
+  ([15-behaviour](docs/15-behaviour.md)).
 - [ ] A fire-control request's 0.5, and what sets `+0x5c` and `+0x60` to lock a unit's fire mode.
 - [ ] Who sends `MBehaviour` messages `0x19` and `0x1a` (the retaliations).
 - [ ] Whether a clan's AI re-orders a build refused for want of a mind.
@@ -158,10 +233,30 @@ engineering such as terrain culling or drawing the sky's textures.
   - [ ] the AI state's layout
   - [ ] whether a mind list's ids are logical ids
 - [ ] What `iron3d.dll:0x1008a690` does with a part's derived number, and what else reads a part's `Type`.
-- [ ] `objects.dlb`: what the `A` and `N` size letters stand for, and the 37 exceptions to the size grade.
-- [ ] Which of the `bb`/`bl`/`bm`/`bp`/`br`/`ba`/`bf`/`bt` building prefixes is which.
+- [ ] What the words behind `objects.dlb`'s `A` and `N` are, and why twelve clip-less guns carry `A4`
+  and `A5`. (~~what the `A` and `N` size letters stand for, and the 37 exceptions~~ — partly answered
+  2026-09-18: the **referents** are pinned. `N` is the five `ANM` animals, which the research tree marks
+  role 7 and no others; `A` is 27 fortification fittings, 21 of them fitted only under an `fr_*` root, and
+  every line in the file that says "fortification" belongs to one. The words are **not recoverable**: the
+  classification vocabulary reaches no shipped binary, with the `objects.dlb` token itself as the control.
+  Of the 37 exceptions, 25 fall out of a rule — a weapon's `A<n>` is the size of the **round it fires** —
+  7 more fire `f`-lettered rounds the rule cannot grade, one is a mobile builder, and 12 stay unexplained
+  ([19-descriptions](docs/19-descriptions.md)).)
+- [x] ~~Which of the `bb`/`bl`/`bm`/`bp`/`br`/`ba`/`bf`/`bt` building prefixes is which~~ — closed
+  2026-09-18, and **they are not buildings**. All 61 records under those prefixes are `BULL` records —
+  rounds — with their meshes in `weapon.rlb`, and none is placed in any mission. `b` is the tag's own
+  letter and the second letter is the weapon family: bullet, laser, missile, plasma rifle, rocket, animal,
+  flamer, taser, each settled by what fires it, by the trail effect its controller plays and by its
+  flight ([18-vocabulary](docs/18-vocabulary.md)).
 - [ ] Briefings: what game mode 4 is, how a briefing is skipped (`WaitForClick`), and the spline's curve.
-- [ ] `data.tma`: what reads a building's start flag back, and the word after the map path.
+- [ ] What the word after `data.tma`'s map path was for — it marks the free-play maps, but `Single.02`
+  disagrees with every reading. (~~what reads a building's start flag back, and the word after the map
+  path~~ — closed 2026-09-18, both negatively and with controls. **Nothing reads either.** `IMission`
+  slot 11 returns the map word and no module calls it; the mission pointer is never stored outside the
+  five frames that hold it. `IBuilding`'s start-flag getter has no caller either, and the field it reads —
+  `CBuilding +0xb8`, the building's object state, 1 by construction and 2 when the flag is set — is only
+  ever tested against zero, which a placed building never is. So the flag changes nothing
+  ([04-missions](docs/04-missions.md)).)
 - [ ] What `TRF1`'s directory flag does beyond the debug warning.
 - [ ] What the landscape, camera and atmosphere component constructors read.
 
