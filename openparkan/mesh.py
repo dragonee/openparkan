@@ -168,6 +168,12 @@ SUBOBJECT_COLLISION = SUBOBJECT_COCKPIT
 NO_PARENT = 0xFFFF
 
 BATCH_SIZE = 20
+#: Bit 1 of a batch's flags dword: its triangles are tested from **both** sides.
+#: ``AniMesh.dll:0x1001110c`` runs the plane test once as the segment lies and,
+#: failing, once with its ends swapped, so a round or a sight ray reaches the
+#: face from behind.  It is set on 1477 of the 15153 shipped batches, 946 of them
+#: in ``static.rlb`` (the trees) and 440 in ``fortif.rlb``.
+BATCH_TWO_SIDED = 0x2
 #: High byte of a batch's material word.  It says whether the batch is lit by
 #: the model's lightmap: 0x00 on the 972 batches that are, 0xFF on the other
 #: 14181.  Every vertex a 0x00 batch reaches carries a non-zero lightmap UV
@@ -471,6 +477,15 @@ class Batch:
     #: is why it never tiled the vertex array: it is a draw hint, and two
     #: batches are free to overlap.
     vertex_count: int
+    #: The record's first dword, which a query's batch masks test
+    #: (``AniMesh.dll:0x100081fa``).  ``ROUND_SKIPS_BATCH`` and
+    #: :data:`BATCH_TWO_SIDED` live in it.
+    flags: int = 0
+
+    @property
+    def two_sided(self) -> bool:
+        """Whether its triangles are struck from behind as well."""
+        return bool(self.flags & BATCH_TWO_SIDED)
 
     @property
     def is_lit(self) -> bool:
@@ -922,6 +937,7 @@ def parse(blob: bytes, name: str = "<mesh>", texture_names: list[str] | None = N
                 first_index=f[5],
                 vertex_count=f[7],
                 first_vertex=f[8],
+                flags=f[0] | f[1] << 16,
             )
         )
 

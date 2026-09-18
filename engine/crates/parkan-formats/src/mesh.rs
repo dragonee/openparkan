@@ -36,6 +36,11 @@ pub const NODE_INTERIOR: u16 = 0x0001;
 pub const NODE_COLLISION: u16 = 0x0020;
 /// The high byte of a batch's material word when the batch takes the lightmap.
 pub const BATCH_LIT: u16 = 0x00;
+/// Bit 1 of a batch's flags dword: its triangles are tested from **both** sides
+/// (`AniMesh.dll:0x1001110c`). The plane test runs once as the segment lies and,
+/// failing, once with its ends swapped. It is set on 1477 of the 15153 shipped
+/// batches, most of them trees and buildings (docs/26, "The hit test").
+pub const BATCH_TWO_SIDED: u32 = 0x2;
 pub const UV_SCALE: f64 = 1024.0;
 pub const LIGHTMAP_UV_SCALE: f64 = 1024.0;
 pub const QUATERNION_SCALE: f64 = 32767.0;
@@ -90,6 +95,9 @@ pub struct Slot {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Batch {
+    /// The record's first dword: the flags a query's batch masks test
+    /// (`AniMesh.dll:0x100081fa`), [`BATCH_TWO_SIDED`] among them.
+    pub flags: u32,
     /// Index into the wear's materials.
     pub material: u16,
     pub flag: u16,
@@ -136,6 +144,9 @@ pub struct Mesh {
     pub nodes: Vec<Node>,
     pub slots: Vec<Slot>,
     pub batches: Vec<Batch>,
+    /// One per triangle: whether the batch covering it carries [`BATCH_TWO_SIDED`], so
+    /// that the hit test takes it from behind as well.
+    pub face_two_sided: Vec<bool>,
     /// Stream 7, one record per triangle: its flags word, and its normal (int16 ÷ 32767).
     pub face_flags: Vec<u16>,
     pub face_normals: Vec<[f32; 3]>,
@@ -461,6 +472,7 @@ pub fn parse(blob: &[u8], name: &str) -> Result<Mesh, FormatError> {
         .map(|i| {
             let w = |k: usize| u16_at(raw_batch, i * BATCH_SIZE + 2 * k);
             Batch {
+                flags: u32::from(w(0)) | u32::from(w(1)) << 16,
                 material: w(2) & 0xFF,
                 flag: w(2) >> 8,
                 index_count: w(4),
@@ -472,10 +484,13 @@ pub fn parse(blob: &[u8], name: &str) -> Result<Mesh, FormatError> {
         .collect();
 
     let mut triangles = raw_triangles.clone();
+    let mut face_two_sided = vec![false; raw_triangles.len()];
     for b in &batches {
         let (first, count) = b.triangles();
+        let two_sided = b.flags & BATCH_TWO_SIDED != 0;
         for t in first..(first + count).min(triangles.len()) {
             triangles[t] = raw_triangles[t].map(|v| v.wrapping_add(b.first_vertex));
+            face_two_sided[t] = two_sided;
         }
     }
 
@@ -489,6 +504,7 @@ pub fn parse(blob: &[u8], name: &str) -> Result<Mesh, FormatError> {
         nodes,
         slots,
         batches,
+        face_two_sided,
         face_flags,
         face_normals,
         keys,
@@ -550,6 +566,7 @@ mod tests {
             nodes: vec![animated(0, 2), animated(4, 5)],
             slots: Vec::new(),
             batches: Vec::new(),
+            face_two_sided: Vec::new(),
             face_flags: Vec::new(),
             face_normals: Vec::new(),
             // Node 0: keys 0, 1, 2 at frames 0, 1, 2. Node 1: keys 3, 4, 5, a long way off.

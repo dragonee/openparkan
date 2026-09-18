@@ -529,7 +529,9 @@ on the hero's cannon shell and laser bolt (*measured*).
   `GetFirstIntersectedFace` (`Terrain.dll:0x100205c0`). That walks the grid
   cells along the segment from its start, tests each cell's faces with a
   one-sided segment–plane test and a point-in-triangle test, and returns the
-  nearest hit in the first cell that has one (`0x1001dbe0`).
+  nearest hit in the first cell that has one (`0x1001dbe0`). The cells are
+  **the landscape's own**, not a constant
+  ([below](#the-query-record-and-what-a-round-excludes--read-and-measured)).
 - **Every pair, once.** A pair goes further only if one side has a contact
   record and the two swept spheres touch within the frame (`0x1001e9f0`).
 - **A round against an object** (`0x1001d630`):
@@ -555,7 +557,10 @@ node −1.
 
 A round's query **passes through triangles flagged 4 or 32**, through batches
 flagged 8, and through batches flagged `0x200` unless the round's type carries
-`0x4000000` (`Control.dll:0x1001d9fa`). Flags 2 and 16 are struck. The fifth
+`0x4000000` (`Control.dll:0x1001d9fa`, and the record is laid out
+[below](#the-query-record-and-what-a-round-excludes--read-and-measured)). Flags 2
+and 16 are struck, and **no shipped batch carries `0x200`** — 0 of 15153, so
+that exception never fires (*measured*). The fifth
 mesh slot and the 28 cockpit nodes that have nothing else are never tested:
 the fifth slot is what a unit's own first-person view draws, not collision
 geometry ([07-objects.md](07-objects.md#the-fifth-slot-is-what-the-units-own-view-draws)).
@@ -565,6 +570,113 @@ geometry ([07-objects.md](07-objects.md#the-fifth-slot-is-what-the-units-own-vie
 | cockpit nodes a round can strike | none — 0 of 28 have a level 0 in any variant |
 | level-0 triangles a round passes through | 1306 of 129542, on 30 meshes: trees and the mines |
 | `r_h_01` / `r_h_03` / hero `r_h_02` | 4 / 6 / 9 nodes to hit, 104 / 174 / 230 triangles, none passed |
+
+### The triangle test, exactly — *read*, and *measured*
+
+`0x10011090` is the whole per-triangle test, and it borrows both halves from
+`Ngi32.dll`.
+
+**The plane half is one-sided and has no epsilon.** It builds the plane from
+the face's three vertices and its stream-7 normal (`0x100110d9`), then calls
+`g_FastProc` slot `0xb4` — `0x1001d560` on an SSE machine, `0x10024410` on the
+FPU path, four builds of the same test (`0x1000344f`, `0x100037e6`,
+`0x10003cca`, `0x10004094`). With `v = p₁ − p₀` and `d(p) = n·p + k`, a
+crossing needs all three of
+
+    n·v < 0,    d(p₀) ≥ 0,    d(p₁) ≤ 0
+
+each **against exactly 0.0** (`Ngi32.dll:0x10037220`, `0x10037224`; the FPU
+path's ties fall the other way and nothing else differs). So a segment that
+reaches a face from **behind** meets nothing, and the hit point is
+`p₀ + v · d(p₀)/(−n·v)`, the SSE build reciprocating with `rcpss` and one
+Newton step.
+
+**A batch flagged 2 is two-sided.** Before the plane test, `0x1001110c` reads
+the covering batch's flags dword — the walker keeps the stream-13 record at
+its `+0xc` (`0x100081ca`, stride 20) — and where **bit 1** is set it runs the
+test a second time with the segment's ends swapped (`0x10011136`). So those
+faces are struck from either side. The push-out's face walk reads the same bit
+the same way (`0x1000d865`, and see
+[24-motion.md](24-motion.md#collision-between-objects--read)). It is set on
+**1477 of the 15153 shipped batches** (*measured*), 946 of them in
+`static.rlb` and 440 in `fortif.rlb` — the trees and the buildings, whose flat
+cross-planes would otherwise be invisible from one side.
+
+**The containment half is `mrnPointInPoly`** (`Ngi32.dll` ordinal 202,
+`0x10001e60`), called with the plane, the three vertex pointers, a count of 3
+and the hit point (`0x100111ac`). It is **not** barycentric:
+
+- It drops one axis and works in the other two. The axis comes from **two**
+  comparisons, not a maximum: `|n.x|` against `|n.y|`, then the loser's
+  neighbour against `|n.z|`. So x is dropped when `|n.x| ≥ |n.y| ≥ |n.z|`, y
+  when `|n.x| < |n.y| ≥ |n.z|`, and z otherwise — which is not always the
+  largest component, but is never a zero one, so the projection never
+  degenerates.
+- For each of the three edges it computes the 2D cross product of the edge
+  with the point less the edge's first vertex, **multiplies it by the normal's
+  component along the dropped axis**, and requires the result `≥ 0`. All three
+  must pass.
+- The comparison is against **exactly 0.0** (`0x100311d4`) with **no epsilon**,
+  and `≥` passes, so a point lying on an edge is inside.
+
+Multiplying by the normal's component is the same thing as the full dot
+product with the normal, up to a positive factor, for a point on the plane —
+so the test is an edge test signed by **the face's own normal**, the one the
+plane test used, and not by the cross product of its winding. Those differ on
+the 8 mesh faces (of 241887) whose stream-7 normal disagrees with their
+winding. `parkan_sim::hit::inside` takes the normal for that reason.
+
+### The query record, and what a round excludes — *read*, and *measured*
+
+Every one of these searches carries the same **eight-dword query**
+(`Control.dll:0x1001bd50` fills all eight, `0x1001bca0` the first four):
+
+| dword | what it is |
+|---|---|
+| +0x00 | the classes to visit, as `1 << class` (`Terrain.dll:0x1002510f`, the table of `1 << N` at `0x1009a5f0`) |
+| +0x04, +0x08 | a required and an excluded mask on the object's own word |
+| +0x0c | 1 skips the mesh walk's per-part pass (`AniMesh.dll:0x10010a8b`) |
+| +0x10, +0x14 | a required and an excluded **flags** mask: mesh batches, or world face flags |
+| +0x18, +0x1c | a required and an excluded **class** mask: mesh triangles, or landscape face classes |
+
+`AniMesh` tests +0x10/+0x14 against the batch's flags dword and +0x18/+0x1c
+against the face record's first word (`0x100081fa`, `0x1000824a`). The
+landscape translates both pairs into **its own** 32-bit face mask — the file's
+flags word in the low half, its surface word in the high half — inline in
+`GetFirstIntersectedFace` (`Terrain.dll:0x100209a9` for the flags, `0x100208e3`
+for the class; the same mapping as `0x10022da0`,
+[24-motion.md](24-motion.md#finding-the-ground--read)).
+
+**A round's ground query** (`0x1001d9d0`, built at `0x1001d9fa`–`0x1001da4f`)
+is `[0x41e, 0, 0, 0, 0, 0x208, 0, 0x24]`: classes 1, 2, 3, 4 and 10; nothing
+required; **excluded world flags `0x208` and excluded class `0x24`**. Against a
+mesh those last two are the batch bits 8 and `0x200` and the triangle flags 4
+and 32 — what the round passes through, as above. Against the landscape they
+become the **flags word's `0x20` and `0x80`** and the **surface word's `0x02`
+and `0x01`**.
+
+- Surface `0x02` is the **water surface**, on exactly the 3630 water faces of
+  the 33 maps. **So a round's ground test does not strike it**: a shot into a
+  lake passes the sheet and splashes on the bed.
+- The other three are on **no shipped face** — 0, 0 and 0 of 275882 — and the
+  control is the same scan over the same two fields, which finds the 3630
+  (*measured*, `openparkan verify`).
+- The round's `0x208` is the walker's; only the class differs (the walker
+  excludes class 8, the surface word's `0x04`).
+
+**The landscape's own cell.** `CLandscape` finds the cell under a point by
+`floor((x − x₀) × inv)` on x and y (`0x100205d5`), `x₀` being corner 0 of the
+stream-2 header and `inv` the reciprocal of a size it computes once in its
+constructor: the grid is **cells across from the square stream's second count
+field in the NRes directory, and its element count divided by that**
+(`0x100178e6`–`0x1001794f`), and the cell is **cell 0's own box**, which it
+takes from the stream-2 records and inverts at `0x10017c3f`. Measured over the
+33 maps: 16 × 16 on 28 and 8 × 8 on 5, agreeing with the distinct cell corners
+on all 33; cell 0's box is the map's extent over that grid on all 33; and the
+cell is **49.90 world units on map 41 to 311.28 on `SC_3`** — a per-map figure,
+never a constant, and nowhere near the 16 the engine's index used to assume.
+The engine now indexes the ground over the map's own grid
+(`parkan_sim::ground`).
 
 **What the round does** (`0x1000d0c0`):
 

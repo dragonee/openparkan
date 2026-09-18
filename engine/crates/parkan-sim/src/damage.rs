@@ -602,6 +602,7 @@ mod tests {
                 volume: 0.0,
             }],
             batches: Vec::new(),
+            face_two_sided: Vec::new(),
             face_flags: vec![0, 0],
             face_normals: vec![[0.0, -1.0, 0.0]; 2],
             keys: Vec::new(),

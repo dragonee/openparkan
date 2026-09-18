@@ -62,6 +62,11 @@ pub struct LandMesh {
     pub blend: Vec<f32>,
     pub faces: Vec<Face>,
     pub cells: Vec<Cell>,
+    /// The landscape's own grid, cells across and down: the square stream's second count
+    /// field is the first, and its element count divided by that is the second
+    /// (`Terrain.dll:0x100178e6`–`0x1001794f`). 16 x 16 on 28 of the 33 shipped maps and
+    /// 8 x 8 on the other five.
+    pub grid: [usize; 2],
     pub layer1: Vec<String>,
     pub layer2: Vec<String>,
 }
@@ -76,6 +81,16 @@ impl LandMesh {
     pub fn lod_faces(&self, level: usize) -> std::ops::Range<usize> {
         let split = self.lod_split();
         if level == 0 { 0..split } else { split..self.faces.len() }
+    }
+
+    /// The landscape's own cell, in world units on each axis: the map's extent over its
+    /// [`LandMesh::grid`]. `CLandscape` keeps its reciprocal and finds the cell under a
+    /// point by `floor((x − x0) ÷ cell)` (`Terrain.dll:0x1001775c`, `0x10017c3f`), the box
+    /// corner 0 of the stream-2 header being the origin. It is a **per-map** figure, from
+    /// 49.90 on map 41 to 311.28 on `SC_3`, and never a constant.
+    pub fn cell_size(&self) -> [f32; 2] {
+        let (lo, hi) = self.bounds();
+        [0, 1].map(|a| if self.grid[a] > 0 { (hi[a] - lo[a]) / self.grid[a] as f32 } else { 0.0 })
     }
 
     pub fn bounds(&self) -> ([f32; 3], [f32; 3]) {
@@ -202,6 +217,11 @@ pub fn load(path: &Path) -> Result<LandMesh, FormatError> {
             out
         })
         .unwrap_or_default();
+    let squares = archive.entries.iter().find(|e| e.type_id() == STREAM_SQUARES);
+    let grid = squares.map_or([0, 0], |e| {
+        let across = e.link_count as usize;
+        [across, (e.element_count as usize).checked_div(across).unwrap_or(0)]
+    });
     let table = |name: &str| {
         crate::gamedir::resolve(path.parent().unwrap_or(Path::new(".")), name)
             .and_then(|p| std::fs::read(p).ok())
@@ -216,6 +236,7 @@ pub fn load(path: &Path) -> Result<LandMesh, FormatError> {
         blend,
         faces,
         cells,
+        grid,
         layer1: table("Land1.wea"),
         layer2: table("Land2.wea"),
     })

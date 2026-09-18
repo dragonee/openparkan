@@ -359,6 +359,7 @@ mod tests {
             slot_index,
         };
         let batch = |first_index, material| Batch {
+            flags: 0,
             material,
             flag: 0xFF,
             first_index,
@@ -388,6 +389,7 @@ mod tests {
             nodes: vec![node("B_Up_m1o1", 0x200, hull), node("CP_m1o1", 0x20, cockpit)],
             slots: vec![slot(0, 0), slot(1, 1)],
             batches: vec![batch(0, 0), batch(3, 1)],
+            face_two_sided: Vec::new(),
             face_flags: Vec::new(),
             face_normals: Vec::new(),
             keys: vec![key],

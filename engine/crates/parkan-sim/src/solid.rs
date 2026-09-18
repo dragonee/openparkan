@@ -313,7 +313,7 @@ pub fn blocked(start: Vec3, end: Vec3, obstacle: &Solid) -> bool {
         .filter(|f| !passes(f, obstacle))
         .any(|face| {
             crate::hit::plane_crossing(start, end, face.normal, face.a)
-                .is_some_and(|q| inside(q, face.a, face.b, face.c))
+                .is_some_and(|q| inside(q, face.a, face.b, face.c, face.normal))
         })
 }
 
@@ -342,7 +342,7 @@ pub fn push(start: Vec3, end: Vec3, radius: f32, obstacle: &Solid) -> Vec3 {
         for face in shut.map(|f| &obstacle.faces[f]).filter(|f| !passes(f, obstacle)) {
             if move_.dot(face.normal) < 0.0
                 && let Some(q) = crate::hit::plane_crossing(start, end, face.normal, face.a)
-                && inside(q, face.a, face.b, face.c)
+                && inside(q, face.a, face.b, face.c, face.normal)
             {
                 total = start - end;
                 end = start;

@@ -385,6 +385,7 @@ mod tests {
             positions,
             faces: vec![face([0, 1, 2]), face([0, 2, 3])],
             cells: vec![Cell { first: 0, count: 2 }, Cell { first: 2, count: 0 }],
+            grid: [1, 1],
             layer1: vec!["one".into(), "two".into()],
             layer2: vec!["a".into(), "b".into(), "c".into()],
         }

@@ -3661,6 +3661,7 @@ mod tests {
     /// whose material byte is 2 with the high byte set.
     fn panel() -> Part {
         let batch = |material: u16, first: u16| Batch {
+            flags: 0,
             material,
             flag: 0,
             first_index: first * 3,
@@ -3695,6 +3696,7 @@ mod tests {
                 volume: 0.0,
             }],
             batches: vec![batch(0, 0), batch(0xFF02, 1)],
+            face_two_sided: Vec::new(),
             face_flags: vec![0, 0],
             face_normals: vec![[0.0, -1.0, 0.0]; 2],
             keys: Vec::new(),

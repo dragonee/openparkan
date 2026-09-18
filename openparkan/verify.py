@@ -434,6 +434,36 @@ def check_grid(check, game: Path) -> None:
           f"all {sum(used.values())} squares use {sorted(used)} of the 15 "
           f"slots a record has room for")
 
+    # The grid the landscape itself uses, and the cell size it derives from it.
+    stated = sized = 0
+    sizes: list[tuple[str, float]] = []
+    shape: Counter[tuple[int, int]] = Counter()
+    for folder in maps:
+        mesh = landmesh.load(folder / "Land.msh")
+        if not mesh.cells or not mesh.squares:
+            continue
+        stated += mesh.grid == mesh.grid_size
+        shape[mesh.grid] += 1
+        cell = mesh.cell_size()
+        first = mesh.cells[0]
+        sized += all(abs(cell[a] - (first.maximum[a] - first.minimum[a])) < 0.01
+                     for a in (0, 1))
+        sizes.append((folder.name, cell[0]))
+    lo = min(sizes, key=lambda r: r[1])
+    hi = max(sizes, key=lambda r: r[1])
+    check("Land.msh: the landscape's grid is the file's own count",
+          stated == len(maps) > 0,
+          f"{stated}/{len(maps)} maps have the square stream's second count field, "
+          f"which Terrain.dll:0x100178e6 reads as cells across, and its element count "
+          f"over that, agreeing with the distinct cell corners; "
+          f"{dict(sorted(shape.items()))}")
+    check("Land.msh: a cell is the map's extent over that grid",
+          sized == len(maps) > 0,
+          f"{sized}/{len(maps)} maps have cell 0's box exactly the extent over the "
+          f"grid, which is the figure CLandscape inverts at 0x10017c3f; the cell is "
+          f"per-map, {lo[1]:.2f} world units on {lo[0]} to {hi[1]:.2f} on {hi[0]}, "
+          f"never a constant")
+
     # Stream 11 is the draw order: a permutation that keeps every cell
     # contiguous and sorts the faces inside it by texture pair.
     permuted = contiguous = 0
@@ -7937,6 +7967,63 @@ def check_hit_test(check, game: Path) -> None:
           f"{len(positive)}/{len(radii)} BULL rounds with a mesh have a header sphere "
           f"of radius {min(positive):.3g}-{max(positive):.3g}; the hero's: {hero_radii}")
 
+    # AniMesh.dll:0x1001110c: bit 1 of a batch's flags dword runs the plane test a
+    # second time with the segment reversed, so the batch is struck from behind.
+    two_sided = batches = passable = 0
+    where: Counter[str] = Counter()
+    for path in sorted(game.glob("*.rlb")) + sorted(game.glob("*.lib")):
+        if not is_nres(path):
+            continue
+        archive = NResArchive.open(path)
+        for entry in archive:
+            if entry.tag != "MESH":
+                continue
+            try:
+                m = objmesh.parse(archive.read(entry), entry.name)
+            except (KeyError, NotAnNResArchive, struct.error):
+                continue
+            batches += len(m.batches)
+            passable += sum(1 for b in m.batches
+                            if b.flags & objmesh.ROUND_SKIPS_BATCH_200)
+            hits = sum(b.two_sided for b in m.batches)
+            two_sided += hits
+            if hits:
+                where[path.name] += hits
+    check("mesh: bit 1 of a batch is two-sided, and the trees carry it",
+          two_sided and batches > 10000 and where.most_common(1)[0][0] == "static.rlb",
+          f"{two_sided} of {batches} batches are flagged two-sided, in "
+          + ", ".join(f"{k} {v}" for k, v in where.most_common(4))
+          + " -- the plane test is otherwise one-sided, so a round from behind meets "
+          f"nothing.  The 0x200 a round passes only with type bit 0x4000000 is on "
+          f"{passable} of them, so that exception never fires")
+
+    # Control.dll:0x1001d9d0 builds a round's ground query: excluded world face flags
+    # 0x208 and excluded class 0x24.  Terrain.dll:0x100209a9 and 0x100208e3 turn those
+    # into the landscape's own mask, which is the file's flags word in its low half and
+    # its surface word in its high half.
+    faces = water = flags20 = flags80 = surface01 = 0
+    for folder in gamedir.maps(game):
+        mesh = landmesh.load(folder / "Land.msh")
+        faces += mesh.face_count
+        water += sum(1 for w in mesh.face_surface if w & landmesh.SURFACE_WATER_BIT)
+        flags20 += sum(1 for w in mesh.face_flags if w & landmesh.FLAGS_NOT_GROUND_BIT)
+        flags80 += sum(1 for w in mesh.face_flags if w & ROUND_NOT_GROUND_FLAG)
+        surface01 += sum(1 for w in mesh.face_surface if w & ROUND_NOT_GROUND_SURFACE)
+    check("Land.msh: a round's ground test strikes everything but the water surface",
+          water > 0 and flags20 == flags80 == surface01 == 0,
+          f"of {faces} faces across the 33 maps, the round query's excluded world flags "
+          f"0x208 and class 0x24 strike out the surface word's 0x02 on {water} -- the "
+          f"water sheets -- and the flags word's 0x20 on {flags20}, its 0x80 on "
+          f"{flags80} and the surface word's 0x01 on {surface01}.  So a shot into a lake "
+          f"splashes on the bed; the same scan finds the water, so it discriminates")
+
+
+#: A round's ground query excludes class 0x24 beside world flags 0x208
+#: (``Control.dll:0x1001da1e``, ``0x1001d9fa``).  Class bit 2 is the landscape's
+#: ``0x10000``, the surface word's 0x01, and class bit 5 is its 0x80, the flags
+#: word's (``Terrain.dll:0x100208e3``).
+ROUND_NOT_GROUND_FLAG = 0x80
+ROUND_NOT_GROUND_SURFACE = 0x01
 
 #: Mission 01, the two halves of its bridge, and what the ground contact takes as ground.
 MISSION_01_DATA = "MISSIONS/CAMPAIGN/CAMPAIGN.00/Mission.01/data.tma"

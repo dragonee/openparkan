@@ -251,6 +251,11 @@ class LandMesh:
     cells: list[Cell] = field(default_factory=list)
     #: One entry per grid square, from stream 1: the cells that cover it.
     squares: list[tuple[int, ...]] = field(default_factory=list)
+    #: The landscape's own grid, cells across and down.  ``CLandscape`` takes the
+    #: first from the square stream's **second count field** in the NRes directory
+    #: and divides the element count by it for the second
+    #: (``Terrain.dll:0x100178e6``-``0x1001794f``).
+    grid: tuple[int, int] = (0, 0)
     #: Stream 11: the order the map was baked to draw in.  See
     #: ``parse_draw_order``; the viewer buckets by material itself and does
     #: not use it.
@@ -262,11 +267,28 @@ class LandMesh:
 
     @property
     def grid_size(self) -> tuple[int, int]:
-        """How many cells across and down, from the distinct cell corners."""
+        """How many cells across and down, from the distinct cell corners.
+
+        It agrees with ``grid``, which the file states outright, on all 33 maps.
+        """
         if not self.cells:
             return (0, 0)
         return (len({round(c.minimum[0], 1) for c in self.cells}),
                 len({round(c.minimum[1], 1) for c in self.cells}))
+
+    def cell_size(self) -> tuple[float, float]:
+        """The landscape's own cell, in world units on x and y.
+
+        The map's extent over its :attr:`grid`.  ``CLandscape`` keeps the
+        reciprocal and finds the cell under a point by ``floor((x - x0) / cell)``,
+        the stream-2 header's corner 0 being the origin
+        (``Terrain.dll:0x1001775c``, ``0x10017c3f``, ``0x100205d5``).  It is a
+        **per-map** figure -- 49.90 world units on map 41 to 311.28 on ``SC_3``
+        -- and never a constant.
+        """
+        (lo, hi) = self.bounds()
+        return tuple((hi[a] - lo[a]) / self.grid[a] if self.grid[a] else 0.0
+                     for a in (0, 1))
 
     @property
     def vertex_count(self) -> int:
@@ -617,9 +639,14 @@ def load(path: str | Path) -> LandMesh:
         tex2.append(r[2] >> 8)
         patch.append(r[13])
 
+    square_entry = next(e for e in archive.entries if e.type_id == STREAM_SQUARES)
+    across = square_entry.link_count
+    grid = (across, square_entry.element_count // across if across else 0)
+
     return LandMesh(
         cells=parse_cells(archive.one_of_type(STREAM_BOUNDS)),
         squares=parse_squares(archive.one_of_type(STREAM_SQUARES)),
+        grid=grid,
         draw_order=parse_draw_order(raw_draw),
         draw_flags=parse_draw_flags(raw_draw),
         positions=positions,

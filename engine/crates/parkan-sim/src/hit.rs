@@ -26,8 +26,9 @@ pub struct Strike {
     pub triangle: Option<usize>,
 }
 
-/// `NGI32.dll:0x10024410`, one-sided: with `v = p1 − p0`, the segment crosses when
-/// `n·v < 0`, `n·p0 + d ≥ 0` and `n·p1 + d < 0`.
+/// `NGI32.dll:0x10024410` (`g_FastProc` slot `0xb4`), one-sided and with no epsilon:
+/// with `v = p1 − p0`, the segment crosses when `n·v < 0`, `n·p0 + d ≥ 0` and
+/// `n·p1 + d < 0`. A segment that reaches a face from behind meets nothing.
 pub fn plane_crossing(p0: Vec3, p1: Vec3, normal: Vec3, on_plane: Vec3) -> Option<Vec3> {
     let v = p1 - p0;
     let d = -normal.dot(on_plane);
@@ -37,16 +38,33 @@ pub fn plane_crossing(p0: Vec3, p1: Vec3, normal: Vec3, on_plane: Vec3) -> Optio
     (nv < 0.0 && s0 >= 0.0 && s1 < 0.0).then(|| p0 + v * (s0 / -nv))
 }
 
-/// Whether `p`, on the triangle's plane, lies inside it.
+/// [`plane_crossing`], and where `two_sided` the same test again with the segment's ends
+/// swapped (`AniMesh.dll:0x1001110c`–`0x10011163`): a batch flagged
+/// [`parkan_formats::mesh::BATCH_TWO_SIDED`] is struck from either side.
+pub fn plane_crossing_sided(
+    p0: Vec3,
+    p1: Vec3,
+    normal: Vec3,
+    on_plane: Vec3,
+    two_sided: bool,
+) -> Option<Vec3> {
+    plane_crossing(p0, p1, normal, on_plane)
+        .or_else(|| two_sided.then(|| plane_crossing(p1, p0, normal, on_plane)).flatten())
+}
+
+/// Whether `p`, on the triangle's plane, lies inside it (`NGI32.dll:0x10001e60`,
+/// `mrnPointInPoly`): the cross product of each edge with `p` less that edge's first
+/// vertex, signed by the face's **own** normal, is required non-negative on all three,
+/// against exactly zero and with no epsilon, so a point on an edge is inside.
 ///
-/// STAND-IN: docs/26-damage.md#the-hit-test--read-and-measured -- the engine's
-/// point-in-triangle test (`AniMesh.dll:0x10011090`) is not transcribed; an edge
-/// test against the triangle's own winding.
-pub fn inside(p: Vec3, a: Vec3, b: Vec3, c: Vec3) -> bool {
-    let n = (b - a).cross(c - a);
-    (b - a).cross(p - a).dot(n) >= 0.0
-        && (c - b).cross(p - b).dot(n) >= 0.0
-        && (a - c).cross(p - c).dot(n) >= 0.0
+/// The game does the same arithmetic in a two-dimensional projection: it drops the axis
+/// its two comparisons of `|n.x|`, `|n.y|`, `|n.z|` leave, and multiplies each 2D cross
+/// product by the normal's component along that axis. For a point on the plane that is
+/// the full dot product up to a positive factor, so the answer is the one here.
+pub fn inside(p: Vec3, a: Vec3, b: Vec3, c: Vec3, normal: Vec3) -> bool {
+    (b - a).cross(p - a).dot(normal) >= 0.0
+        && (c - b).cross(p - b).dot(normal) >= 0.0
+        && (a - c).cross(p - c).dot(normal) >= 0.0
 }
 
 fn vec(v: [f64; 3]) -> Vec3 {
@@ -129,8 +147,9 @@ pub fn segment_mesh_skipping(
             let [a, b, c] = mesh.triangles[t].map(|v| Vec3::from_array(mesh.positions[usize::from(v)]));
             let normal =
                 mesh.face_normals.get(t).map_or_else(|| (b - a).cross(c - a), |n| Vec3::from_array(*n));
-            let Some(q) = plane_crossing(q0, q1, normal, a) else { continue };
-            if !inside(q, a, b, c) {
+            let two_sided = mesh.face_two_sided.get(t).copied().unwrap_or(false);
+            let Some(q) = plane_crossing_sided(q0, q1, normal, a, two_sided) else { continue };
+            if !inside(q, a, b, c, normal) {
                 continue;
             }
             let d2 = (q - q0).length_squared() * scale * scale;
@@ -264,6 +283,7 @@ mod tests {
             nodes: vec![node(0), node(1)],
             slots: vec![slot(0), slot(1)],
             batches: Vec::new(),
+            face_two_sided: Vec::new(),
             face_flags: vec![0, ROUND_SKIPS_FACE],
             face_normals: vec![[0.0, -1.0, 0.0]; 2],
             keys: Vec::new(),
@@ -302,6 +322,38 @@ mod tests {
             segment_mesh(&mesh, &world, 1.0, Vec3::new(3.0, 0.0, 0.0), Vec3::new(3.0, 10.0, 0.0)),
             None
         );
+    }
+
+    /// `AniMesh.dll:0x1001110c`: a batch flagged `BATCH_TWO_SIDED` runs the plane test a
+    /// second time with the segment reversed, so a round reaches its triangles from behind.
+    /// 1477 of the 15153 shipped batches carry the bit, trees and buildings mostly.
+    #[test]
+    fn a_two_sided_batch_is_struck_from_behind_and_a_plain_one_is_not() {
+        let (mut mesh, world) = wall();
+        mesh.face_flags[1] = 0;
+        let (behind, front) = (Vec3::new(0.0, 10.0, 0.0), Vec3::ZERO);
+        assert_eq!(segment_mesh(&mesh, &world, 1.0, behind, front), None, "one-sided");
+        mesh.face_two_sided = vec![true, true];
+        let strike = segment_mesh(&mesh, &world, 1.0, behind, front).unwrap();
+        // Its own node's triangle at y = 5 is the nearer one from up the segment.
+        assert_eq!((strike.node, strike.point), (Some(0), Vec3::new(0.0, 5.0, 0.0)));
+        // And a face it already met head-on is still met the same way.
+        let head_on = segment_mesh(&mesh, &world, 1.0, front, behind).unwrap();
+        assert_eq!((head_on.node, head_on.point), (Some(1), Vec3::new(0.0, 3.0, 0.0)));
+    }
+
+    /// `mrnPointInPoly` signs its edge tests by the **stored** normal, the one the plane
+    /// test uses, not by the cross product of the triangle: the eight mesh faces whose
+    /// stream-7 normal disagrees with their winding are tested the file's way.
+    #[test]
+    fn the_edge_test_is_signed_by_the_faces_own_normal() {
+        let (a, b, c) = (Vec3::ZERO, Vec3::new(2.0, 0.0, 0.0), Vec3::new(0.0, 2.0, 0.0));
+        let p = Vec3::new(0.5, 0.5, 0.0);
+        let wound = (b - a).cross(c - a);
+        assert!(inside(p, a, b, c, wound));
+        assert!(!inside(p, a, b, c, -wound), "the same point, the normal reversed");
+        assert!(inside(a, a, b, c, wound), "a corner is inside: the test is against zero");
+        assert!(!inside(Vec3::new(2.0, 2.0, 0.0), a, b, c, wound));
     }
 
     #[test]

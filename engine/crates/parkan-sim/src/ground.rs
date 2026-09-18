@@ -15,8 +15,6 @@ pub const WALKABLE_NORMAL_Z: f32 = 0.173648;
 /// (`0x1001a48e`).
 pub const BODY_RADIUS_HOLD: f32 = 7.5;
 pub const LARGE_BODY: f32 = 20.0;
-/// Side of a lookup cell, in world units. Not the game's: an index for speed.
-const CELL: f32 = 16.0;
 
 /// The body sphere's radius as the ground contact uses it.
 pub fn contact_radius(sphere_radius: f32) -> f32 {
@@ -109,6 +107,8 @@ pub struct Ground {
     pub cuts: Vec<Cut>,
     lo: [f32; 2],
     size: [usize; 2],
+    /// The landscape's own cell on each axis, `LandMesh::cell_size`.
+    cell: [f32; 2],
     cells: Vec<Vec<u32>>,
     /// The water surface's faces, indexed apart: the liquid surface the bed's test asks for.
     water: Vec<Vec<u32>>,
@@ -117,17 +117,23 @@ pub struct Ground {
 }
 
 impl Ground {
+    /// The index over the map's own grid: the landscape's cells, the size and the origin
+    /// the file gives (`LandMesh::grid`, `LandMesh::cell_size`). A map with no square
+    /// stream falls back to one cell.
     pub fn new(land: LandMesh) -> Self {
         let (lo3, hi3) = land.bounds();
         let lo = [lo3[0], lo3[1]];
-        let size = [0, 1].map(|a| (((hi3[a] - lo3[a]) / CELL).floor() as usize + 1).max(1));
+        let size = [0, 1].map(|a| land.grid[a].max(1));
+        let own = land.cell_size();
+        let cell_size = [0, 1].map(|a| if own[a] > 0.0 { own[a] } else { (hi3[a] - lo3[a]).max(1.0) });
         let mut cells = vec![Vec::new(); size[0] * size[1]];
         let mut water = vec![Vec::new(); size[0] * size[1]];
         for f in land.lod_faces(0) {
             let face = &land.faces[f];
             let index = if face.is_water() { &mut water } else { &mut cells };
             let ps = face.vertices.map(|v| land.positions[usize::from(v)]);
-            let cell = |p: f32, a: usize| (((p - lo[a]) / CELL).floor().max(0.0) as usize).min(size[a] - 1);
+            let cell =
+                |p: f32, a: usize| (((p - lo[a]) / cell_size[a]).floor().max(0.0) as usize).min(size[a] - 1);
             let (x0, x1) = (
                 cell(ps.iter().map(|p| p[0]).fold(f32::MAX, f32::min), 0),
                 cell(ps.iter().map(|p| p[0]).fold(f32::MIN, f32::max), 0),
@@ -142,7 +148,17 @@ impl Ground {
                 }
             }
         }
-        Self { land, solids: Vec::new(), cuts: Vec::new(), lo, size, cells, water, world: (lo3, hi3) }
+        Self {
+            land,
+            solids: Vec::new(),
+            cuts: Vec::new(),
+            lo,
+            size,
+            cell: cell_size,
+            cells,
+            water,
+            world: (lo3, hi3),
+        }
     }
 
     /// The height the map gives its water (`Terrain.dll:0x10019180`, `ITerrain` slot 11, docs/35-hud.md,
@@ -170,32 +186,45 @@ impl Ground {
 
     /// A segment through the ground (`Terrain.dll:0x100205c0`): the cells along its xy
     /// in order from `p0`, each cell's faces one-sided through the face normal, and
-    /// the nearest strike in the first cell that has one.
+    /// the nearest strike in the first cell that has one. The cells are the landscape's
+    /// own -- the map's extent over the grid its square stream carries, 49.90 to 311.28
+    /// world units across the 33 shipped maps, and not a constant.
     ///
-    /// STAND-IN: docs/26-damage.md#the-hit-test--read-and-measured -- the landscape's
-    /// own cell size is not read; this index's 16 m cells.
-    ///
-    /// STAND-IN: docs/26-damage.md#the-hit-test--read-and-measured -- whether a round's
-    /// ground test strikes the water surface is not read; it passes through: the index
-    /// holds no face whose `Land.msh` surface bitfield has bit `0x02`, so a round meets
-    /// the bed.
+    /// **A round's ground test passes through the water surface** (*read*): its query
+    /// excludes world face flags `0x208` (`Control.dll:0x1001da1e`), of which `0x200` is
+    /// the landscape's `0x20000`, the surface word's water bit, on exactly the 3630 water
+    /// faces of the 33 maps. So a shot into a lake splashes on the bed, not the sheet.
     pub fn segment(&self, p0: Vec3, p1: Vec3) -> Option<crate::hit::Strike> {
-        let cell_of = |p: Vec3| (((p.x - self.lo[0]) / CELL).floor(), ((p.y - self.lo[1]) / CELL).floor());
+        self.segment_over(p0, p1, false)
+    }
+
+    /// [`Ground::segment`] with the water surface among the faces: the sight ray's query
+    /// excludes no face at all -- no world flags, no class (`Control.dll:0x1002a68e`,
+    /// `0x1001bca0`) -- so a lake stops the sight on its sheet where it lets a round by.
+    pub fn segment_including_water(&self, p0: Vec3, p1: Vec3) -> Option<crate::hit::Strike> {
+        self.segment_over(p0, p1, true)
+    }
+
+    fn segment_over(&self, p0: Vec3, p1: Vec3, with_water: bool) -> Option<crate::hit::Strike> {
+        let (wx, wy) = (self.cell[0], self.cell[1]);
+        let cell_of = |p: Vec3| (((p.x - self.lo[0]) / wx).floor(), ((p.y - self.lo[1]) / wy).floor());
         let (mut cx, mut cy) = cell_of(p0);
         let (ex, ey) = cell_of(p1);
         let d = p1 - p0;
         let step = |v: f32| if v > 0.0 { 1.0 } else { -1.0 };
         let (sx, sy) = (step(d.x), step(d.y));
-        let boundary = |c: f32, s: f32, lo: f32| lo + (c + if s > 0.0 { 1.0 } else { 0.0 }) * CELL;
+        let boundary = |c: f32, s: f32, lo: f32, w: f32| lo + (c + if s > 0.0 { 1.0 } else { 0.0 }) * w;
         let t_at = |b: f32, from: f32, v: f32| if v == 0.0 { f32::INFINITY } else { (b - from) / v };
-        let mut tx = t_at(boundary(cx, sx, self.lo[0]), p0.x, d.x);
-        let mut ty = t_at(boundary(cy, sy, self.lo[1]), p0.y, d.y);
-        let (dtx, dty) = (CELL / d.x.abs(), CELL / d.y.abs());
+        let mut tx = t_at(boundary(cx, sx, self.lo[0], wx), p0.x, d.x);
+        let mut ty = t_at(boundary(cy, sy, self.lo[1], wy), p0.y, d.y);
+        let (dtx, dty) = (wx / d.x.abs(), wy / d.y.abs());
         let cells = (ex - cx).abs() + (ey - cy).abs() + 1.0;
         for _ in 0..cells as usize {
             if cx >= 0.0 && cy >= 0.0 && (cx as usize) < self.size[0] && (cy as usize) < self.size[1] {
+                let at = cy as usize * self.size[0] + cx as usize;
                 let mut best: Option<crate::hit::Strike> = None;
-                for &f in &self.cells[cy as usize * self.size[0] + cx as usize] {
+                let sheet: &[u32] = if with_water { &self.water[at] } else { &[] };
+                for &f in self.cells[at].iter().chain(sheet) {
                     let face = &self.land.faces[f as usize];
                     let [a, b, c] =
                         face.vertices.map(|v| Vec3::from_array(self.land.positions[usize::from(v)]));
@@ -203,7 +232,9 @@ impl Ground {
                         continue;
                     };
                     let d2 = (q - p0).length_squared();
-                    if crate::hit::inside(q, a, b, c) && best.is_none_or(|s| d2 < s.d2) && !self.cut(q.x, q.y)
+                    if crate::hit::inside(q, a, b, c, Vec3::from_array(face.normal))
+                        && best.is_none_or(|s| d2 < s.d2)
+                        && !self.cut(q.x, q.y)
                     {
                         best =
                             Some(crate::hit::Strike { point: q, d2, node: None, triangle: Some(f as usize) });
@@ -232,7 +263,7 @@ impl Ground {
             let normal = (b - a).cross(c - a).normalize_or_zero();
             let Some(q) = crate::hit::plane_crossing(p0, p1, normal, a) else { continue };
             let d2 = (q - p0).length_squared();
-            if crate::hit::inside(q, a, b, c) && best.is_none_or(|s| d2 < s.d2) {
+            if crate::hit::inside(q, a, b, c, normal) && best.is_none_or(|s| d2 < s.d2) {
                 best = Some(crate::hit::Strike { point: q, d2, node: None, triangle: None });
             }
         }
@@ -267,8 +298,8 @@ impl Ground {
         x: f32,
         y: f32,
     ) -> impl Iterator<Item = (usize, f32)> + 'a {
-        let cx = ((x - self.lo[0]) / CELL).floor();
-        let cy = ((y - self.lo[1]) / CELL).floor();
+        let cx = ((x - self.lo[0]) / self.cell[0]).floor();
+        let cy = ((y - self.lo[1]) / self.cell[1]).floor();
         let inside = cx >= 0.0 && cy >= 0.0 && (cx as usize) < self.size[0] && (cy as usize) < self.size[1];
         let cell: &[u32] = if inside { &index[cy as usize * self.size[0] + cx as usize] } else { &[] };
         cell.iter().filter_map(move |&f| {
@@ -434,6 +465,7 @@ pub(crate) mod tests {
             positions,
             cells: vec![Cell { first: 0, count: faces.len() as u16 }],
             faces,
+            grid: [4, 4],
             layer1: Vec::new(),
             layer2: Vec::new(),
         };
@@ -518,6 +550,39 @@ pub(crate) mod tests {
         assert_eq!(g.segment(Vec3::new(20.0, 20.0, -5.0), Vec3::new(21.0, 20.0, 5.0)), None);
         let wall = g.segment(Vec3::new(45.0, 20.0, 20.0), Vec3::new(35.0, 20.0, 20.0));
         assert!(wall.is_none(), "the wall faces -x: a shot from +x is behind it");
+    }
+
+    /// The landscape's cell is the map's extent over the grid its square stream carries,
+    /// not a constant (`Terrain.dll:0x100178e6`, `0x10017c3f`). The test floor is 41 by 40
+    /// over a 4 by 4 grid.
+    #[test]
+    fn the_index_takes_the_maps_own_grid_and_cell() {
+        let g = floor();
+        assert_eq!(g.land.grid, [4, 4]);
+        let [wx, wy] = g.land.cell_size();
+        assert!((wx - 41.0 / 4.0).abs() < 1e-4 && (wy - 40.0 / 4.0).abs() < 1e-4, "{wx} {wy}");
+        assert_eq!(g.size, [4, 4]);
+        assert_eq!(g.cell, [wx, wy]);
+        // The walk crosses the cells and still finds the far floor.
+        let s = g.segment(Vec3::new(1.0, 1.0, 20.0), Vec3::new(39.0, 39.0, -20.0)).unwrap();
+        assert!(s.point.z.abs() < 1e-3, "{:?}", s.point);
+    }
+
+    /// The sight ray's query excludes no face (`Control.dll:0x1002a68e`), where a round's
+    /// excludes world flags `0x208`, the water surface among them (`0x1001da1e`). So a
+    /// lake stops the sight on its sheet and lets a round through to the bed.
+    #[test]
+    fn the_sight_stops_on_the_water_sheet_a_round_passes_through() {
+        let g = floor();
+        let (from, to) = (Vec3::new(30.0, 5.0, 20.0), Vec3::new(30.0, 5.0, -20.0));
+        assert_eq!(g.segment(from, to).unwrap().point.z, 0.0, "a round meets the bed");
+        assert_eq!(g.segment_including_water(from, to).unwrap().point.z, 5.0, "the sight, the sheet");
+        // Off the sheet the two agree.
+        let (dry, down) = (Vec3::new(5.0, 30.0, 20.0), Vec3::new(5.0, 30.0, -20.0));
+        assert_eq!(
+            g.segment(dry, down).unwrap().point.z,
+            g.segment_including_water(dry, down).unwrap().point.z
+        );
     }
 
     #[test]

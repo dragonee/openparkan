@@ -1003,6 +1003,7 @@ mod tests {
             nodes: vec![node(NO_PARENT, 0), node(0, 2)],
             slots: Vec::new(),
             batches: Vec::new(),
+            face_two_sided: Vec::new(),
             face_flags: Vec::new(),
             face_normals: Vec::new(),
             keys: vec![
@@ -1160,6 +1161,7 @@ mod tests {
             }],
             slots: Vec::new(),
             batches: Vec::new(),
+            face_two_sided: Vec::new(),
             face_flags: Vec::new(),
             face_normals: Vec::new(),
             keys,

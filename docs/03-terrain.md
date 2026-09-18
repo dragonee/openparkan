@@ -252,6 +252,32 @@ world:
 2490 units gets 8 x 8 while map 11 at 998 units gets 16 x 16 — SC_3 has 5692
 vertices and map 11 has 6458.
 
+### The file states the grid, and the cell size falls out of it — *read*, and *measured*
+
+The resolution is not something a reader has to infer from the corners: it is
+in the **NRes directory**. `CLandscape`'s constructor reads stream 1's entry
+and takes **cells across from the entry's second count field** — the one
+[01-nres.md](01-nres.md) calls the link count — and **cells down from its
+element count divided by that** (`Terrain.dll:0x100178e6`–`0x1001794f`). It
+then takes **cell 0's box** out of stream 2, keeps its x and y sizes, and
+stores their reciprocals (`0x10017bf4`–`0x10017c78`), the box's corner 0 being
+the grid origin (`0x10017849`). Every face lookup is then
+`floor((x − x₀) × inv)` on each axis (`0x100205d5`, and the same in
+`GetWalkFace`).
+
+So **the landscape's cell size is the map's extent over its own grid**, and it
+is per-map. Measured over all 33 maps (`openparkan verify`):
+
+- the stated grid equals the one the distinct cell corners give, **33 of 33** —
+  `(16, 16)` on 28 and `(8, 8)` on 5;
+- cell 0's box is exactly the extent over that grid, **33 of 33**;
+- the cell runs from **49.90 world units on map 41** to **311.28 on `SC_3`**,
+  22 distinct values, and the x and y cells are equal on every map because
+  every map is square.
+
+`LandMesh.grid` and `LandMesh.cell_size()` carry it, and the engine's ground
+index is built on it rather than on a constant of its own.
+
 Each cell is listed **twice**, and the two records are the same ground at two
 **levels of detail** — see below. They share a box, and the second holds no
 more faces than the first on all 7488 pairs.
