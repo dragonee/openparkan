@@ -120,11 +120,12 @@ impl Audio {
         }
     }
 
-    /// A mission's theme, from its load on.
+    /// A mission's theme, from the briefing's end on.
     ///
-    /// STAND-IN: docs/34-progression.md#ambient-sound--read-in-part -- whether a type-5
-    /// descriptor makes its sound loop is not read, nor when the variations play: the theme
-    /// loops, and the variations are not played.
+    /// STAND-IN: docs/34-progression.md#ambient-sound--read-and-measured -- what makes it
+    /// loop is not read: the descriptor's type does not (`services.dll` loads types 4, 5
+    /// and 7 alike) and the play call carries no flag, so the engine loops it, as the
+    /// shipped names (`atm_c1_lp.wav`) have it.
     pub fn theme(&mut self, sound: &Sound) {
         if let Some(data) = self.named(sound) {
             let _ = self.manager.play(data.loop_region(..));

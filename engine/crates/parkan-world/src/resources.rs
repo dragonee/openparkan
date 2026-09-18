@@ -195,9 +195,177 @@ pub fn ambient(game: &Path, mission_dir: &Path) -> Result<Ambient> {
     })
 }
 
+/// The shortest wait between two ambient variations: the float 10.0 at
+/// `iron3d.dll:0x100e5d6c`, in seconds.
+pub const VARIATION_BASE_S: f64 = 10.0;
+/// The spread the game adds to it, `rand() % 10` seconds (`0x1005eb7a`–`0x1005eb95`).
+pub const VARIATION_SPREAD_S: u32 = 10;
+
+/// A mission's ambient variations as the game plays them (`iron3d.dll:0x1005eb49`, the
+/// picker `0x1008e690`): every 10 to 19 s the game picks one of the names its part of the
+/// day gathered and hands it to the sound server, the same call the theme goes through.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Ambience {
+    ambient: Ambient,
+    /// When the next variation is due (`the game's +0x94` over its `+0x90` stamp).
+    next_ms: f64,
+    /// The index played last, never picked twice running (the picker's `+0x1c`).
+    last: Option<usize>,
+    /// The picker's two words (`+0x10`, `+0x12`).
+    words: (u16, u16),
+    /// The CRT `rand()` the wait is drawn from (`iron3d.dll:0x100b47d0`).
+    seed: u32,
+}
+
+impl Ambience {
+    /// The variations of `ambient`, with `seed` for the wait and `words` for the pick.
+    pub fn new(ambient: Ambient, seed: u32, words: (u16, u16)) -> Self {
+        Self { ambient, next_ms: 0.0, last: None, words, seed }
+    }
+
+    /// Which list the part of the day picks (`iron3d.dll:0x1008e760`): the `DEFAULT_` names
+    /// when the mission gathered no `DAY_` or `NIGHT_` one, else the night's or the day's.
+    pub fn bucket(&self, night: bool) -> &[Sound] {
+        if self.ambient.day.is_empty() && self.ambient.night.is_empty() {
+            &self.ambient.default
+        } else if night {
+            &self.ambient.night
+        } else {
+            &self.ambient.day
+        }
+    }
+
+    /// The CRT's `rand()`, 0 to 0x7fff.
+    fn rand(&mut self) -> u32 {
+        self.seed = self.seed.wrapping_mul(0x0003_43fd).wrapping_add(0x0026_9ec3);
+        (self.seed >> 16) & 0x7fff
+    }
+
+    /// The next index, drawn again while it repeats the last (`0x1008e6f0`). One name is
+    /// always index 0; an empty list picks nothing.
+    fn pick(&mut self, count: usize) -> Option<usize> {
+        match count {
+            0 => {
+                self.last = None;
+                return None;
+            }
+            1 => {
+                self.last = Some(0);
+                return Some(0);
+            }
+            _ => {}
+        }
+        loop {
+            let (s0, s1) = self.words;
+            let s0 = (s0 << 1) ^ s1;
+            let s1 = (s1 >> 1) ^ s0;
+            self.words = (s0, s1);
+            let index = usize::from(s1) % count;
+            if Some(index) != self.last {
+                self.last = Some(index);
+                return Some(index);
+            }
+        }
+    }
+
+    /// The frame's turn at the variations: `Some` names one to play at once. The first
+    /// frame plays one, the game's stamp and wait both starting at 0.
+    pub fn frame(&mut self, now_ms: f64, night: bool) -> Option<&Sound> {
+        if now_ms <= self.next_ms {
+            return None;
+        }
+        let wait = VARIATION_BASE_S + f64::from(self.rand() % VARIATION_SPREAD_S);
+        self.next_ms = now_ms + wait * 1000.0;
+        let index = self.pick(self.bucket(night).len())?;
+        self.bucket(night).get(index)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn sounds(names: &[&str]) -> Vec<Sound> {
+        names.iter().map(|n| Sound { library: PathBuf::new(), member: (*n).to_owned() }).collect()
+    }
+
+    #[test]
+    fn a_mission_with_day_and_night_names_never_reaches_its_default_list() {
+        let ambient = Ambient {
+            theme: None,
+            default: sounds(&["d"]),
+            day: sounds(&["day1", "day2"]),
+            night: sounds(&["night1"]),
+        };
+        let a = Ambience::new(ambient, 1, (0xace1, 0x1234));
+        assert_eq!(a.bucket(false).len(), 2);
+        assert_eq!(a.bucket(true)[0].member, "night1");
+    }
+
+    #[test]
+    fn a_mission_with_only_default_names_plays_them_by_day_and_by_night() {
+        let ambient =
+            Ambient { theme: None, default: sounds(&["a", "b"]), day: Vec::new(), night: Vec::new() };
+        let a = Ambience::new(ambient, 1, (0xace1, 0x1234));
+        assert_eq!(a.bucket(false).len(), 2);
+        assert_eq!(a.bucket(true).len(), 2);
+    }
+
+    #[test]
+    fn a_variation_plays_at_once_and_then_every_ten_to_nineteen_seconds() {
+        let ambient =
+            Ambient { theme: None, default: sounds(&["a", "b", "c"]), day: Vec::new(), night: Vec::new() };
+        let mut a = Ambience::new(ambient, 1, (0xace1, 0x1234));
+        assert!(a.frame(1.0, false).is_some(), "the first frame plays one");
+        let mut plays = Vec::new();
+        let mut last = 1.0;
+        for step in 1..200_000u32 {
+            let now = f64::from(step) * 10.0;
+            if a.frame(now, false).is_some() {
+                plays.push(now - last);
+                last = now;
+            }
+        }
+        assert!(plays.len() > 100, "{} plays over half an hour", plays.len());
+        let least = plays.iter().cloned().fold(f64::MAX, f64::min);
+        let most = plays.iter().cloned().fold(0.0, f64::max);
+        assert!(least >= 10_000.0, "least {least}");
+        // A 10 ms frame can land up to one frame past the 19 s the longest wait asks for.
+        assert!(most <= 19_010.0, "most {most}");
+    }
+
+    #[test]
+    fn no_variation_is_picked_twice_running_and_every_one_is_picked() {
+        let ambient =
+            Ambient { theme: None, default: sounds(&["a", "b", "c"]), day: Vec::new(), night: Vec::new() };
+        let mut a = Ambience::new(ambient, 1, (0xace1, 0x1234));
+        let mut heard: Vec<String> = Vec::new();
+        for step in 1..200_000u32 {
+            if let Some(s) = a.frame(f64::from(step) * 10.0, false) {
+                heard.push(s.member.clone());
+            }
+        }
+        assert!(heard.len() > 100);
+        assert!(heard.windows(2).all(|w| w[0] != w[1]), "no name repeats at once");
+        for name in ["a", "b", "c"] {
+            assert!(heard.iter().any(|h| h == name), "{name} is heard");
+        }
+    }
+
+    #[test]
+    fn one_name_alone_is_played_over_and_over() {
+        let ambient = Ambient { theme: None, default: sounds(&["only"]), day: Vec::new(), night: Vec::new() };
+        let mut a = Ambience::new(ambient, 1, (0xace1, 0x1234));
+        assert_eq!(a.frame(1.0, false).map(|s| s.member.clone()), Some("only".to_owned()));
+        assert_eq!(a.frame(30_000.0, false).map(|s| s.member.clone()), Some("only".to_owned()));
+    }
+
+    #[test]
+    fn a_mission_with_no_variations_plays_nothing() {
+        let mut a = Ambience::new(Ambient::default(), 1, (0xace1, 0x1234));
+        assert!(a.frame(1.0, false).is_none());
+        assert!(a.frame(60_000.0, false).is_none());
+    }
 
     #[test]
     fn a_library_that_names_nothing_does_not_locate() {

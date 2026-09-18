@@ -778,6 +778,9 @@ struct App {
     audio: Option<audio::Audio>,
     /// The CD's music, as `iron3d.dll`'s CD player drives it (docs/34, "Music").
     cd: Option<parkan_world::music::CdPlayer>,
+    /// The mission's ambient variations and when the next one is due (docs/34, "Ambient
+    /// sound").
+    ambience: Option<parkan_world::resources::Ambience>,
     started: Instant,
     game: PathBuf,
     /// The game's own key chords, and the scan names held down.
@@ -856,6 +859,21 @@ fn theme(audio: &mut Option<audio::Audio>, game: &Path, loaded: &scene::Loaded) 
     {
         a.theme(&theme);
     }
+}
+
+/// The mission's ambient variations, due from its first frame on (docs/34, "Ambient
+/// sound"). The names are gathered in the mission's set-up, before any briefing
+/// (`iron3d.dll:0x1005f650`).
+fn ambience(game: &Path, loaded: &scene::Loaded) -> Option<parkan_world::resources::Ambience> {
+    let ambient = parkan_world::resources::ambient(game, &loaded.dir).ok()?;
+    // The wait is drawn from the same CRT `rand()` the CD's track picker uses, seeded once
+    // from `timeGetTime()` (`iron3d.dll:0x1000798f`).
+    let clock =
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis());
+    // STAND-IN: docs/34-progression.md#ambient-sound--read-and-measured -- where the
+    // picker's own two words start is not read: 0xace1 and 0x1234, as the acknowledgement
+    // voices' generator starts.
+    Some(parkan_world::resources::Ambience::new(ambient, clock as u32, (0xace1, 0x1234)))
 }
 
 impl App {
@@ -939,6 +957,7 @@ impl App {
         }
         self.briefing = open_briefing(&self.game, &self.loaded, &self.args, Some(&mut play));
         self.briefing_clock = None;
+        self.ambience = ambience(&self.game, &self.loaded);
         if self.briefing.is_none() {
             theme(&mut self.audio, &self.game, &self.loaded);
         } else {
@@ -1389,6 +1408,25 @@ impl App {
                 }
             }
         }
+        // An ambient variation falls due every 10 to 19 s, briefing or not: the frame's
+        // test stands between the pause and the state word alone (`0x1005eb49`).
+        if let Some(amb) = self.ambience.as_mut() {
+            let seconds = self.play.as_ref().map_or(0.0, |p| p.hero.time_ms / 1000.0);
+            // STAND-IN: docs/34-progression.md#ambient-sound--read-and-measured -- which
+            // flag of the level's `+0xae4` object the picker reads for night is not
+            // followed: night is when no celestial body is up.
+            let night = self
+                .world
+                .atmosphere
+                .as_ref()
+                .is_some_and(|a| parkan_sim::sky::bodies_up(a, seconds).is_empty());
+            let now = seconds * 1000.0;
+            if let Some(sound) = amb.frame(now, night).cloned()
+                && let Some(a) = self.audio.as_mut()
+            {
+                a.play_now(&sound);
+            }
+        }
         let Some(r) = self.running.as_mut() else { return };
         let frame = match r.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(frame) | wgpu::CurrentSurfaceTexture::Suboptimal(frame) => {
@@ -1826,6 +1864,7 @@ fn main() -> Result<()> {
     let started = Instant::now();
     // The theme waits for the briefing's end (`0x10030f10`).
     let briefing = open_briefing(&game, &loaded, &args, play.as_mut());
+    let ambience = ambience(&game, &loaded);
     if briefing.is_none() {
         theme(&mut audio, &game, &loaded);
     } else {
@@ -1853,6 +1892,7 @@ fn main() -> Result<()> {
         owed: 0.0,
         audio,
         cd,
+        ambience,
         started,
         game: game.clone(),
         bindings: scene::bindings(&game),
