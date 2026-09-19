@@ -426,12 +426,70 @@ value is the axis function's (`0x10010a50`):
 So the keypad's `+` and `−` steer the cruise command by a step per update
 ([24-motion.md](24-motion.md#from-input-to-motion--read-and-measured)).
 
+**The update runs once a game frame** (*read*). It is slot 4 of the manual
+manager, and the manager's own message handler (slot 2, `0x1000ec80`) is what
+calls it, on **message 1** and while `+0x32` is set (`0x1000ecd5`). The
+message reaches it down one chain: `iron3d.dll`'s mission loop calls
+`stdCalculateGame` (`World3D.dll:0x100139a0`) once a pass; that runs the game
+object queue's slot 4 (`0x10006bf0`), which reads `timeGetTime` into the game
+clock `0x10032a38` (`0x10006c44`) and sends every object
+`send(6, 1, clock)` (`0x10006c6f`); the agent's id-6 arm forwards message 1 to
+its five sub-objects (`AniMesh.dll:0x100013a1`), the Wizard at `+0x178` among
+them; and the Wizard's message 1 hands it on to the manual manager it keeps at
+`+0x64` (`Wizard.dll:0x10001cc5`), while its mode `+0x1fc` is 1 and `+0x1f6`
+is clear. **The mission loop is not capped** (`iron3d.dll:0x1005e713` to
+`0x1005ef9e`): each pass clears the event list, pumps the window's messages,
+calculates and renders, and ends with `Sleep(0)`; it sleeps 100 ms *instead*
+of rendering when the render flag is clear (`0x1005ed55`), and there is no
+timer, no frame count and no `iron_3d.ini` setting anywhere in it. So the
+input update runs **once a rendered frame, at whatever rate the machine
+draws**, and the keypad ramp is that much faster on a faster machine.
+
+**Two gates sit on it.** The manager keeps the clock of its last update at
+`+0x18` and passes the whole update over when the message brings the same
+value (`0x1000ec90`), so it never runs twice in one millisecond; and it keeps
+the count of `stdCalculateGame` calls at `+0x1c` (the counter `0x107951a8`,
+advanced at `0x100139c4`) and, when more than one has gone by since, clears
+its state and calls `stdClearKeyboard` (`0x10011830`, `0x1000ecb7`) — so a
+machine that misses a frame's message 1 lets go of every key.
+
 The context object holds a second ramp for each of walking and turning
 (`+0x3d`/`+0x44`/`+0x4c`/`+0x50` and `+0x3e`/`+0x40`/`+0x48`/`+0x54`). The
 walk messages (19, 20) and `MCMD_ROTATE_Z` use it in place of the row's while
-it is switched on. It is set through the manager's slot 11 (`0x1000b380`). Who calls that was
-not traced: a scan for a literal kind of 1 or 2 found no caller, but it had no
-positive control, so it proves nothing.
+it is switched on. It is set through the manager's slot 11 (`0x1000b380`),
+whose kind of 1 turns the walking ramp on and 2 the turning one.
+
+**Nothing calls it** (*read*, with a control). Slot 11 is at `+0x2c` of the
+manager's own vtable (`0x10020b14`, fourteen slots, installed at
+`0x1000b299`), and it takes five stack words — `this`, the kind and the three
+values — from its `ret 0x14`. Its body has no reference anywhere in
+`World3D.dll` outside the vtable, so every call must go through `+0x2c`. Of
+the **345** indirect calls at `+0x2c` across the whole install, **none** has a
+receiver that could be this object: no site loads its object from a field a
+manual manager is kept in, and the one site that comes close
+(`iron3d.dll:0x10039254`) calls `+0x38` on the same receiver, a slot a
+fourteen-slot vtable does not have.
+
+**The control** is the same enumeration run at other offsets of the same
+vtable. At `+0x8`, slot 2, it finds all three places a manual manager is sent
+a message — `AniMesh.dll:0x1000178a` and `0x10001b4c`, the agent forwarding to
+its own at `+0x184`, and `Wizard.dll:0x10001cc5` at the Wizard's `+0x64`; at
+`+0x14`, slot 5, it finds `Wizard.dll:0x10003aa6` and `0x10003beb`, the AI
+poking keys in; at `+0x10`, slot 4, it finds `World3D.dll:0x1000ecd5`, the
+manager running its own update. The search sees calls on this object wherever
+one is held, and at `+0x2c` there are none.
+
+The flags agree. `+0x3d` and `+0x3e` are written in exactly three places in
+`World3D.dll`: the constructor clears both (`0x1000b2d1`, `0x1000b2d4`), the
+table load clears them again (`0x1000b47a`, `0x1000b47d`, inside slot 3
+`0x1000b3e0`, the reader that defaults to `M1.TBL`), and slot 11 sets one of
+them. They are read at `0x100109a2` and `0x100109c4`, where the handler picks
+the ramp time, and at `0x10010bda` and `0x10010c21` in the axis function.
+
+**So every walk and every turn takes the row's own ramp time from the
+`.tbl`** — which on all three shipped tables is 1000 ms on the keypad's `+`
+and `−` and 0 everywhere else — and the second ramp is dead code in the
+shipped game.
 
 **The hero's rows** (*measured*, `hero.tbl`):
 

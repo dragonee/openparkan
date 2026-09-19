@@ -419,7 +419,8 @@ fn rehearse(play: &mut scene::Play, loaded: &scene::Loaded, args: &Args) {
                 play.key(key, false);
             }
         }
-        // Nothing is rendered here: the input update runs once a tick, and command mode's
+        // Nothing is rendered here, so this run's fixed tick stands in for the frame the
+        // game runs the input update on (docs/24); command mode's
         // camera once a tick on the hero's clock.
         play.update_input();
         play.command_frame(play.hero.time_ms / 1000.0, parkan_world::command::Edges::default());
@@ -1315,7 +1316,8 @@ impl App {
         {
             hud.cockpit.designer.close();
         }
-        // The input update runs once a rendered frame.
+        // The input update runs once a game frame, and the mission loop renders once a
+        // frame with no cap (docs/24, "From input to motion").
         if let Some(play) = self.play.as_mut() {
             play.update_input();
         }

@@ -158,6 +158,15 @@ impl Heft {
         };
         let drive: f32 = self.engines.iter().map(|&(value, node)| value * life(root, node).0).sum();
         let e = drive * (side(GEAR_LEFT) + side(GEAR_RIGHT)) / 2.0;
+        let (total, body) = self.weight(&life);
+        let r = if self.payload != 0.0 { (self.payload + body - total).max(0.0) / self.payload } else { 0.0 };
+        (e, r)
+    }
+
+    /// What the machine weighs, kg, and what of that is the root's own body: every live node's
+    /// density x volume, armour's weight over its area, and every device's mass
+    /// (`Control.dll:0x1000fac0`).
+    fn weight(&self, life: impl Fn(usize, usize) -> (f32, bool)) -> (f32, f32) {
         let (mut total, mut body) = (self.devices, 0.0);
         for n in self.nodes.iter().filter(|n| !life(n.part, n.node).1) {
             total += n.weight + self.per_area * n.area;
@@ -165,8 +174,14 @@ impl Heft {
                 body += n.weight;
             }
         }
-        let r = if self.payload != 0.0 { (self.payload + body - total).max(0.0) / self.payload } else { 0.0 };
-        (e, r)
+        (total, body)
+    }
+
+    /// The machine's mass, kg: control `+0x538`, which the weigh sums and property `0x7c`
+    /// hands out (`Control.dll:0x1000e0ac`). A colliding pair shares its push by the squares
+    /// of the two (docs/24, "Collision between objects").
+    pub fn mass(&self, life: impl Fn(usize, usize) -> (f32, bool)) -> f32 {
+        self.weight(life).0
     }
 }
 

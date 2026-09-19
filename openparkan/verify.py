@@ -4847,6 +4847,33 @@ def check_profiles(check, game: Path) -> None:
           f"fr_b_, fr_e_ carry -17, -30, -47, -67 (bridges aside), sizes "
           f"{[profiles.BUILDING_SIZE[k] for k in 'lmbe']}")
 
+    # The size class is read from the root component's member name, and which letter
+    # depends on the scene-node kind: a unit (kind 4) gives its third and a building
+    # (kind 3) its fourth (``Behavior.dll:0x1000cee0``, docs/24-motion.md).
+    unit_third: Counter[str] = Counter()
+    unit_fourth: Counter[str] = Counter()
+    bld_third: Counter[str] = Counter()
+    bld_fourth: Counter[str] = Counter()
+    for dat in sorted((game / "UNITS").rglob("*.dat")):
+        try:
+            one = objects.load_unit(dat)
+        except objects.ObjectFormatError:
+            continue
+        if not one.components:
+            continue
+        root = one.components[0].ref.member.lower()
+        third, fourth = (bld_third, bld_fourth) if one.is_building else (unit_third, unit_fourth)
+        third[root[2:3]] += 1
+        fourth[root[3:4]] += 1
+    check("UNITS: a unit's size class is its root's third letter and a building's its fourth",
+          set(unit_third) <= set(profiles.CHASSIS_SIZE)
+          and set(bld_fourth) <= set(profiles.BUILDING_SIZE)
+          and set(unit_fourth) == {"_"} and set(bld_third) == {"_"},
+          f"{sum(unit_third.values())} unit roots carry "
+          f"{dict(sorted(unit_third.items()))} third and {sum(bld_fourth.values())} "
+          f"building roots {dict(sorted(bld_fourth.items()))} fourth; the other letter "
+          f"is '_' on every one of them, so neither branch would read the other's")
+
 
 def check_rsli(check, game: Path) -> None:
     """gamefont.rlb and sprites.lib -- the two archives that are not NRes."""

@@ -520,10 +520,18 @@ limits the lean, and every hero state leans on no axis
 - **Each run moves y toward ±1** by 0.05 × min(1, held ms ÷ 1000), and never
   past it.
 - **So the ramp is a step per update, not per second.** The step grows over
-  the first second held and is 0.05 after that. At an update every 50 ms,
-  a stopped cruise reaches full in 31 runs, about 1.5 s. Letting go leaves y
-  where it got to.
-- The rate of the input update itself was not read.
+  the first second held and is 0.05 after that. A stopped cruise reaches full
+  in 31 runs. Letting go leaves y where it got to.
+- **The update runs once a game frame, uncapped** (*read*,
+  [14-controls.md](14-controls.md#a-row-that-stays-down--read)). The mission
+  loop calculates and renders once a pass with nothing but a `Sleep(0)` at its
+  end; `stdCalculateGame` sends every object message 1 with the game clock,
+  and the Wizard hands that on to the manual manager, whose slot 2 runs the
+  update. So the 31 runs take 31 frames: about half a second at 60 a second
+  and a second at 30, and **the keypad ramps faster the faster the game
+  draws**. The manager passes the update over while the clock stands on the
+  same whole millisecond (`World3D.dll:0x1000ec90`), which is the only cap on
+  it.
 
 ## The hull leans and rights itself — *read*, and *measured*
 
@@ -1414,14 +1422,37 @@ of them with a world normal z above 0.173648:
   join that one instead.
 - **Who has a contact record.** Only rounds and units do, and a unit's is what
   moves it.
+- **An entry is the collision object plus 0x20.** The object keeps two vtables,
+  `0x1003c2fc` and `0x1003c2f4` (`Control.dll:0x1001f2f4`), and joins its
+  manager by handing it `this + 0x20` (`0x1001f611`). So every offset below,
+  and the flags and mass the pass reads, are that much past the object's own:
+  entry `+0x10` is object `+0x30`, the flags; `+0x14` is `+0x34`, the mass;
+  `+0x18` is `+0x38`, the sphere; `+0x38` and `+0x3c` are `+0x58` and `+0x5c`,
+  the face source (interface `0x18`) and the push-out (`0x25`); `+0x40` is
+  `+0x60`, the manager itself (interface `0x203`). All seven are written by the
+  attach, message 4 with a zero argument (`0x1001f598`–`0x1001f607`).
 - **What the pass skips.** It passes over an entry whose flags carry 1
-  (collision object slot 7 sets it, `0x1001fe10`; slot 6 clears it, callers not
-  traced), and one whose radius is still below 0 (`0x1001c15a`).
+  (`0x1001c1e3`), and one whose radius is still below 0 (`0x1001c15a`).
+  **Nothing sets that flag** (*read*, with a control). The flag is object
+  `+0x30` bit 0; the constructor clears it (`0x1001f2c0`), the object's own
+  slot 4 sets it (`0x1001fe10`) and slot 3 clears it (`0x1001fe00`), and slot 3
+  is called once, by the object itself, at the end of message 4 with a non-zero
+  argument — the detach (`0x1001f62d`). Neither body is referenced anywhere in
+  `Control.dll` outside the vtable, and of every indirect call at `+0x10` in
+  the install that passes no argument, **none** has a receiver that could be a
+  collision object. The control is the same enumeration at `+0x8`, slot 2,
+  which finds `AniMesh.dll:0x10001850` sending a message to the collision
+  object the agent keeps at `+0x154`. So **no entry is ever skipped** in the
+  shipped game.
 - **Which pairs go on.** It takes every pair j < i once. A pair goes on only
   when one side has a contact record (`0x1001c1e9`) and the swept spheres touch
   within the frame (`0x1001e9f0`). A unit against a tree, a stone, a building or
   another unit qualifies; two pieces of scenery never do.
-- **Handlers.** A pair with a handler of its own (`+0x40` slot 7) goes to it.
+- **Handlers.** A pair with a handler of its own (`+0x40` slot 7) goes to it;
+  `+0x40` is the **manager the object joined**, which the attach fills from
+  interface `0x203` (`0x1001f600`) and without which it would not have
+  registered at all, so the pass always has one to hand the pair to
+  (`0x1001c222`). What that manager's slot 7 then does is not read.
   A pair with no round goes to `0x1001daf0`, with **the larger sphere as the
   obstacle A and the smaller as the mover B** (`0x1001d647`). A must answer
   interface `0x25`, or the pair ends (`0x1001db07`).
@@ -1445,11 +1476,14 @@ starts at 0:
    8 (`0x1001dbeb`). When the face it strikes has a shortest edge whose square
    is under 235 and B's class is 4 or more, or under 160 and B's class is 3 or
    more, B's end goes back to its start the same way (`0x1001deb7`,
-   `0x1001deea`). The class is the first dword of message `0x201` through B's
-   interface `0x10` slot 26. `MBehaviour` answers variable `0x201` with its
-   size class (`Behavior.dll:0x1000a533`, set at `0x10005e8f` from
-   `0x1000cee0`): `t` 1, `l` and `h` 2, `m` 3, `b` 4. That this is the value the
-   pass reads is a *guess*. If so, the hero, class 2, is never stopped this way.
+   `0x1001deea`). **The class is the size class** (*read*).
+   It is the first dword of message `0x201` through B's interface `0x10` slot
+   26; interface `0x10` is the `MBehaviour` the agent build puts at `+0x17c`
+   and files under that id (`AniMesh.dll:0x100034bd`, `0x1000361f`), its slot
+   26 is `Behavior.dll:0x1000a490`, and variable `0x201` there answers
+   `&[this + 0x960]` (`0x1000a533`) — the field set once at `0x10005e8f` from
+   the machine's own slot 54, `0x1000cee0`. So the hero, class 2, is never
+   stopped this way, and a class-3 or class-4 machine is.
 3. **A's shape pushes B out** (`AniMesh.dll:0x1000d410`, *read*). B's sphere
    at its end goes to A's interface `0x25` slot 3, its radius held to 7.5 when
    B's flags carry `0x1000000` (`0x1001df8f`). The push it returns is added to P
@@ -1518,12 +1552,42 @@ starts at 0:
    - **Clamp.** P is held to 4r (`0x1000df50`, `0x10020970`).
 
 **Sharing the push.** P under 1e-6 in squared length is no contact. Otherwise P
-is shared by **mass squared**, the owner's property 0x7c copied to the
-collision object on message `0x1c` (`0x10020038`). B moves by
+is shared by **mass squared** (`0x1001e0db`), the owner's property 0x7c copied
+to the collision object on message `0x1c` (`0x10020038`). B moves by
 P × m_A² ÷ (m_A² + m_B²) and A by −P × m_B² ÷ (m_A² + m_B²). A side with no
 contact record does not move, and the other takes all of P (`0x1001e05f`). So
 a unit meeting a tree, a stone or a building takes the whole push. Each moved
 record gains flag 8.
+
+**The mass is what the machine weighs** (*read*, and *measured*). Property
+`0x7c` is one of the 37 the control system's own property interface implements
+([13-control.md](13-control.md#the-property-interface-is-not-where-the-names-are));
+all the addresses here are `Control.dll`'s. `id − 1` indexes the byte table at
+`0x1000e5e8` into the jump table at `0x1000e554`, and 124 shares its case with
+104 and returns `&control[+0x538]` (`0x1000e0ac`). `+0x538` is where the weigh
+routine accumulates ([Load](#load--read-and-measured)): it is zeroed at
+`0x1000fadb`, each node's density × volume and armour's weight over its area
+are added at `0x1000fbba` and `0x1000fc3f`, and the spare payload is the
+authored payload plus the chassis's body less it (`0x1000fc57`). It is the
+"Weight" the stat panel shows × 0.001 in t, and it is **not** the file's +124:
+that is the authored payload, which property `0x88` hands out from
+`[+0x46c] + 0x68` (`0x1000e17a`).
+
+- *Measured*, over the shipped assemblies: **all 382** units under `UNITS`
+  weigh something, from **271 kg** (`s_arah`, an `A_L_04` animal) to
+  **4,804,877 kg** (`m7_tow`, the Small Tower on `R_B_06`), and by size class
+  2,523–3,501 (class 1), 271–76,155 (2), 16,510–40,511 (3) and
+  43,367–4,804,877 (4).
+- **A static object answers nothing.** The mass field starts at 0
+  (`0x1001f2c3`) and only message `0x1c` writes it, from the owner's property
+  `0x7c`; a tree, a stone or a bridge carries no control system to answer it.
+  It never matters: neither has a contact record, so it takes none of the push
+  anyway.
+- *Derived*, on Mission 01: the hero weighs **3,300 kg** and `tut1_e1`
+  **3,239**, so a push between them is shared almost evenly — 0.491 of it to
+  the hero. The neutral flyer `tut1_mf1` weighs **25,699**, so a push between
+  the two gives the hero **0.983** and the flyer 0.017: the hero is shoved
+  aside and the flyer hardly moves.
 
 **When it happens** (*read*,
 [26-damage.md](26-damage.md#the-hit-test--read-and-measured)). The world's frame
@@ -2784,16 +2848,27 @@ patrol runs past it.
 - ~~Which scene nodes are types 1 and 3~~ — **read** for buildings: a
   `CBuilding`'s slot 11 is 3, so a bridge is ground. That a unit's and a tree's
   slot 11 give their collision kinds 4 and 10, so they are not ground, is
-  *derived*. Still open: what class message
+  *derived*. ~~Still open: what class message
   `0x201` returns through a mover's interface `0x10` (the size class is a
   *guess*; that class is read from a name's third letter, `Behavior.dll:0x1000cfb1`,
   but which name is not traced), the masses property `0x7c` gives a unit and a
-  static object, and who sets a collision entry's skip flag 1.
+  static object, and who sets a collision entry's skip flag 1.~~ — all three
+  **read**, and the first two **measured**. Message `0x201` is the size class
+  (`MBehaviour` `+0x960`), taken from the **root component's member name** the
+  object's source 0 gives (`AniMesh.dll:0x100025e0`) — a unit's third letter
+  and a **building's fourth**, which is the kind the node's slot 11 answers,
+  4 or 3 (`Behavior.dll:0x1000cee0`); property `0x7c` is control `+0x538`,
+  what the machine weighs in kg, and a static object answers nothing; and
+  **nothing sets the skip flag**
+  ([Collision between objects](#collision-between-objects--read)).
 - **What stops a walker at a small sloped object**, such as a buoy. No read
   step does
   ([What a buoy does to a walker](#what-a-buoy-does-to-a-walker--read-measured-and-not-established)).
-  Nor is it known who, if anyone, sets a collision object's pair handler
-  (`+0x40`).
+  ~~Nor is it known who, if anyone, sets a collision object's pair handler
+  (`+0x40`).~~ — **read**: the attach does, from interface `0x203`, so it is
+  the manager the object registered with
+  ([Collision between objects](#collision-between-objects--read)). What that
+  manager's slot 7 does with a pair is still open.
 - Who sets the machine's counter `+0xd4`, which runs the life update — and so
   the ground damage — on every tick
   ([Water and lava beds kill](#water-and-lava-beds-kill--read-and-measured)).
@@ -2869,8 +2944,12 @@ patrol runs past it.
   change and the turret an offset that undoes it across the step; the ramp is
   a growing step per input update
   ([From input to motion](#from-input-to-motion--read-and-measured)).
-- How often `World3D.dll`'s input update (`0x1000f100`, the manager's slot 4)
-  runs, which sets how fast the keypad cruise ramps.
+- ~~How often `World3D.dll`'s input update (`0x1000f100`, the manager's slot 4)
+  runs, which sets how fast the keypad cruise ramps.~~ — **read**: once a game
+  frame, which the mission loop runs uncapped, so the ramp is that much faster
+  on a faster machine
+  ([From input to motion](#from-input-to-motion--read-and-measured),
+  [14-controls.md](14-controls.md#a-row-that-stays-down--read)).
 - ~~Which node range the payload sum counts as the chassis~~ — answered: part
   0's nodes, the root object's ([Load](#load--read-and-measured)).
 - ~~Triples 5 and 6~~ — answered: 6 is the most the hull leans

@@ -294,7 +294,14 @@ of an interface-wide id space of 180. Of those 37:
   the same field.
 - **twelve hand out something else in the object** — `+0x2c`, `+0xf0`,
   `+0x1a0`, `+0x1bc`, `+0x1c8`, `+0x1d4`, `+0x1e0`, `+0x1f4`, `+0x200`,
-  `+0x538` (twice) and `+0x660`.
+  `+0x538` (twice) and `+0x660`. The pair `104` and `124` is that `+0x538`
+  (`0x1000e0ac`), which is **what the machine weighs in kg** — the sum the
+  weigh routine accumulates there (`0x1000fac0`,
+  [24-motion.md](24-motion.md#load--read-and-measured)), the "Weight" the stat
+  panel shows and the mass a colliding pair shares its push by the square of
+  ([24-motion.md](24-motion.md#collision-between-objects--read)). It is not the
+  file's `+124`: that is the authored payload, and the pair `136`/`137` above
+  is what hands it out.
 - **nineteen are not a plain pointer** at all: they compute or convert rather
   than hand out a field.
 

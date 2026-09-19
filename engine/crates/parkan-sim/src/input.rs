@@ -107,6 +107,9 @@ pub struct Pilot {
     active: Vec<(Action, f64)>,
     /// The game clock as the last input update saw it.
     clock_ms: f64,
+    /// The whole millisecond the last input update ran at: the update is passed over when the
+    /// game clock has not moved since (`World3D.dll:0x1000ec90`).
+    last_update_ms: Option<u32>,
     /// The fire button is held: `MCMD_STATE` to the selected guns.
     pub fire: bool,
     /// `MCMD_SELECT` rows not yet taken: a gun's number, or −1 for all of them.
@@ -179,6 +182,7 @@ impl Pilot {
             strafing: [false; 2],
             active: Vec::new(),
             clock_ms: 0.0,
+            last_update_ms: None,
             fire: false,
             selects: Vec::new(),
             switches: Switches::default(),
@@ -269,10 +273,18 @@ impl Pilot {
     /// time), never past it (`0x10010a50`). A press row stays active while its key is
     /// down; a release row clears itself once it arrives.
     ///
-    /// STAND-IN: docs/24-motion.md#not-established -- how often `World3D.dll`'s input
-    /// update runs is not read, and it paces the ramp; the caller runs it once a
-    /// rendered frame, and once a tick where nothing is rendered.
+    /// **It runs once a game frame** (docs/24, "From input to motion"): the world's frame
+    /// hands every object message 1 with the game clock, the machine's Wizard passes it to the
+    /// controls manager, and the manager runs the update (`World3D.dll:0x1000ecd5`). The
+    /// mission loop calculates and renders once a pass with no cap, so the ramp's step is a
+    /// step a rendered frame. The manager passes the update over while the clock stands on the
+    /// same whole millisecond as the last (`0x1000ec90`), so it never runs twice in one.
     pub fn update(&mut self, now_ms: f64, hands: &mut Hands) {
+        let whole = now_ms.max(0.0) as u32;
+        if self.last_update_ms == Some(whole) {
+            return;
+        }
+        self.last_update_ms = Some(whole);
         self.clock_ms = now_ms;
         for (row, since) in std::mem::take(&mut self.active) {
             let held = (now_ms - since).max(0.0) as f32;
@@ -682,6 +694,24 @@ KEY   SCAN_NULL SCAN_W_3 1 CICLS_MULTIGUN MCMD_SELECT 0.0 3 0 0.0 0
         assert_eq!(r.body.command[1], -1.0, "S is still held");
         pilot.key("SCAN_S", false, &mut r.hands());
         assert_eq!(r.body.command[1], 0.0);
+    }
+
+    /// The manager passes the update over while the game clock stands on the same whole
+    /// millisecond (`World3D.dll:0x1000ec90`), so a frame rate above 1000 a second does not
+    /// ramp the cruise faster than one step a millisecond.
+    #[test]
+    fn two_updates_in_one_millisecond_step_the_cruise_once() {
+        let mut pilot = Pilot::new(hero_table(), 100.0);
+        let mut r = rig();
+        pilot.key("SCAN_G_PLUS", true, &mut r.hands());
+        pilot.update(0.0, &mut r.hands());
+        pilot.update(1000.0, &mut r.hands());
+        let once = r.body.command[1];
+        assert!((once - 0.05).abs() < 1e-6, "{once}");
+        pilot.update(1000.4, &mut r.hands());
+        assert_eq!(r.body.command[1], once, "the same whole millisecond runs nothing");
+        pilot.update(1001.0, &mut r.hands());
+        assert!(r.body.command[1] > once, "the next millisecond runs");
     }
 
     #[test]

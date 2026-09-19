@@ -60,6 +60,10 @@ pub struct Solid {
     pub ground: bool,
     /// Still in the world.
     pub present: bool,
+    /// What it weighs, kg: the mass a pair shares its push by the square of (docs/24,
+    /// "Collision between objects"). 0 on anything with no contact record -- a building, a
+    /// tree, a stone -- which takes none of the push.
+    pub mass: f32,
     pub faces: Vec<SolidFace>,
     pub nodes: Vec<SolidNode>,
 }
@@ -129,7 +133,7 @@ impl Solid {
                 });
             }
         }
-        Self { centre, radius, ground, present: true, faces, nodes }
+        Self { centre, radius, ground, present: true, mass: 0.0, faces, nodes }
     }
 
     /// Interface `0x25` slot 2 (`AniMesh.dll:0x1000ccb0`, `0x1000cfa0`): the walkable face
@@ -435,6 +439,7 @@ mod tests {
             radius: 7.1,
             ground: true,
             present: true,
+            mass: 0.0,
             faces: vec![face(a, b, c), face(a, c, d)],
             nodes: vec![SolidNode {
                 centre: Vec3::new(5.0, 5.0, z),
@@ -482,6 +487,7 @@ mod tests {
             radius: 14.2,
             ground: false,
             present: true,
+            mass: 0.0,
             faces: vec![face(a, c, b), face(a, d, c)],
             nodes: vec![SolidNode {
                 centre: Vec3::ZERO,

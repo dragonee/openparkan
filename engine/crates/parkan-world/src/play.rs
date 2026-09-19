@@ -651,13 +651,22 @@ pub fn struck_wear<'a>(part: &Part, wear: &'a [String], p0: Vec3, p1: Vec3) -> O
 /// through the building's own pass (docs/24, "Walking into a building"), and an open door's
 /// faces let it by.
 ///
-/// STAND-IN: docs/24-motion.md#not-established -- the masses property `0x7c` gives a unit and
-/// a static object are not read, so a pair's push cannot be shared by mass squared: every
-/// unit is run as the mover against every obstacle and takes the whole push. Against a
-/// building, a tree or a stone that is what the pass gives anyway, the obstacle having no
-/// contact record; between two units it moves both sides where the game moves the lighter
-/// one further.
-fn collision_push(solids: &[Solid], from: Vec3, to: Vec3, radius: f32, mover: Option<usize>) -> Vec3 {
+/// **The push is shared by mass squared** (`Control.dll:0x1001e0db`): with a contact record on
+/// both sides, the mover takes P x m_obstacle^2 / (m_obstacle^2 + m_mover^2) of what the pair
+/// makes, so the lighter side gives way. A building, a tree and a stone have no record, carry
+/// no mass here, and the mover takes the whole push against them (`0x1001e05f`).
+///
+/// The game works one push out per pair and moves both sides by opposite shares of it; the
+/// engine runs each unit as the mover in its own turn, so each side takes its own share of
+/// the push the other's faces make.
+fn collision_push(
+    solids: &[Solid],
+    from: Vec3,
+    to: Vec3,
+    radius: f32,
+    mover: Option<usize>,
+    mover_mass: f32,
+) -> Vec3 {
     let mut total = Vec3::ZERO;
     for (i, obstacle) in solids.iter().enumerate() {
         if !obstacle.present || mover == Some(i) {
@@ -674,9 +683,20 @@ fn collision_push(solids: &[Solid], from: Vec3, to: Vec3, radius: f32, mover: Op
         {
             continue;
         }
-        total += solid::push(from, end, radius, obstacle);
+        total += solid::push(from, end, radius, obstacle) * share(obstacle.mass, mover_mass);
     }
     total
+}
+
+/// What of a pair's push the mover takes: the obstacle's mass squared over the two squared,
+/// and the whole of it where either side has no mass, which is where either has no contact
+/// record (`Control.dll:0x1001e05f`, `0x1001e0db`).
+fn share(obstacle_mass: f32, mover_mass: f32) -> f32 {
+    if obstacle_mass <= 0.0 || mover_mass <= 0.0 {
+        return 1.0;
+    }
+    let (a, b) = (obstacle_mass * obstacle_mass, mover_mass * mover_mass);
+    a / (a + b)
 }
 
 /// The ground each tree and stone stands on, as the areal map cuts it out of the walkable
@@ -840,6 +860,14 @@ impl Play {
                 })
             })
             .collect();
+        // The hero's own faces carry its mass, so a unit that meets it shares the push by the
+        // squares of the two (docs/24, "Collision between objects"). Every other unit's is set
+        // as its solid is refreshed each frame.
+        if let Some(t) = battle.objects.iter().position(|&o| o == hero.object)
+            && let Some(s) = ground.solids.get_mut(t)
+        {
+            s.mass = hero.heft.mass(|p, n| node_share(hero.lives.get(p).and_then(Option::as_ref), n));
+        }
         let player_clan = mission.objects[hero.object].clan_id().unwrap_or(0);
         let hero_id = mission.objects[hero.object].logical_id;
         let names: Vec<String> = battle
@@ -1801,7 +1829,7 @@ impl Play {
             }
         }
         if let Some(s) = self.ground.solids.get_mut(t) {
-            *s = Solid { present: s.present, ..solid };
+            *s = Solid { present: s.present, mass: s.mass, ..solid };
         }
     }
 
@@ -3158,12 +3186,16 @@ impl Play {
             };
             // The collision pass, after the move and the ground contact: a unit is a mover
             // like the hero, so a building's walls hold it in until a door opens for it.
+            let mass = robot
+                .heft
+                .mass(|p, n| node_share(target.parts.get(p).and_then(|part| part.life.as_ref()), n));
             let push = collision_push(
                 &self.ground.solids,
                 from,
                 robot.collision_centre(),
                 robot.collision.1,
                 Some(*t),
+                mass,
             );
             if push.length_squared() >= NO_CONTACT {
                 robot.walker.take_push(push);
@@ -3175,7 +3207,10 @@ impl Play {
             }
             pose_target(robot, target);
             if let Some(solid) = self.ground.solids.get_mut(*t) {
-                *solid = Solid::from_parts(&target.parts, target.centre, target.radius, false, |_, _| None);
+                *solid = Solid {
+                    mass,
+                    ..Solid::from_parts(&target.parts, target.centre, target.radius, false, |_, _| None)
+                };
             }
         }
         for (r, shots) in fired {
@@ -3412,12 +3447,15 @@ impl Play {
     /// The collision pass for the hero (docs/24, "Collision between objects"), after its
     /// move and ground contact.
     fn collide(&mut self, from: Vec3) {
+        let lives = &self.hero.lives;
+        let mass = self.hero.heft.mass(|p, n| node_share(lives.get(p).and_then(Option::as_ref), n));
         let push = collision_push(
             &self.ground.solids,
             from,
             self.hero.collision_centre(),
             self.hero.collision.1,
             None,
+            mass,
         );
         if push.length_squared() >= NO_CONTACT {
             self.hero.walker.take_push(push);
@@ -3723,5 +3761,22 @@ mod tests {
         assert_eq!(at(-1.0), Some("B_SKIN"));
         assert_eq!(at(1.0), Some("R_H_01"), "the material byte's low byte indexes the wear");
         assert_eq!(at(5.0), None, "a miss");
+    }
+
+    /// `Control.dll:0x1001e05f`, `0x1001e0db`: a pair with a contact record on both sides
+    /// shares its push by the squares of the two masses, and one with a record on one side
+    /// takes it whole. Mission 01's hero weighs 3,300 kg, its enemy `tut1_e1` 3,239 and the
+    /// neutral flyer `tut1_mf1` 25,699 (*measured*, docs/24).
+    #[test]
+    fn a_pair_of_units_shares_its_push_by_mass_squared_and_a_tree_gives_it_whole() {
+        assert_eq!(share(0.0, 3300.0), 1.0, "a tree, a stone or a building carries no mass");
+        assert_eq!(share(3300.0, 0.0), 1.0, "and neither does what has no contact record");
+        let even = share(3239.0, 3300.0);
+        assert!((even - 0.4907).abs() < 5e-4, "{even}");
+        let shoved = share(25699.0, 3300.0);
+        assert!((shoved - 0.9835).abs() < 5e-4, "the hero gives way to the flyer: {shoved}");
+        let held = share(3300.0, 25699.0);
+        assert!((held - 0.0165).abs() < 5e-4, "and the flyer barely moves: {held}");
+        assert!((shoved + held - 1.0).abs() < 1e-6, "the two shares are one push");
     }
 }
