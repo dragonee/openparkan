@@ -121,6 +121,11 @@ pub struct Atmosphere {
     pub start: ClockTime,
     pub trailer_word: u32,
     pub sky_flag: u32,
+    /// The sibling `sky.wea`'s material palette, one name per role: the nine slots all
+    /// 29 missions fill in the same order (`docs/10-sky.md`, "The sibling `sky.wea`").
+    /// Empty when the file is not read; `parse` never fills it, as the `.wea` is a
+    /// separate file.
+    pub textures: Vec<String>,
 }
 
 impl Atmosphere {
@@ -272,6 +277,7 @@ pub fn parse(b: &[u8], source: &str) -> Result<Atmosphere, FormatError> {
         start,
         trailer_word,
         sky_flag,
+        textures: Vec::new(),
     })
 }
 

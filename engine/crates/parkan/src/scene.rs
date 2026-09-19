@@ -45,6 +45,11 @@ pub struct World {
     pub terrain: Terrain,
     pub objects: Objects,
     pub atmosphere: Option<sky::Atmosphere>,
+    /// The sun's and the moon's own textures, resolved as the world loads so the store
+    /// uploads them with the rest; `None` where the mission names no `sky.wea` slot.
+    pub body_textures: [Option<usize>; 2],
+    /// Each body's cell in that texture, `(u0, v0, du, dv)`.
+    pub body_cells: [[f32; 4]; 2],
 }
 
 pub fn world(game: &Path, loaded: &Loaded) -> Result<World> {
@@ -54,10 +59,52 @@ pub fn world(game: &Path, loaded: &Loaded) -> Result<World> {
     let footings = parkan_world::basement::footings(&mut assembly, &loaded.mission, &terrain.land);
     terrain.place_buildings(&footings, &mut store)?;
     let objects = models::build(&mut assembly, &mut store, &loaded.mission)?;
+    // The sibling `sky.wea` names the nine slots' materials, the body sprites' among them
+    // (docs/10-sky.md, "The sibling `sky.wea`"); it is a separate file, so `parse` never
+    // holds it and a mission without one simply draws no sun.
     let atmosphere = gamedir::resolve(&loaded.dir, "sky.ske")
         .and_then(|p| std::fs::read(&p).ok().map(|b| (b, p)))
-        .and_then(|(b, p)| sky::parse(&b, &p.display().to_string()).ok());
-    Ok(World { store, terrain, objects, atmosphere })
+        .and_then(|(b, p)| sky::parse(&b, &p.display().to_string()).ok())
+        .map(|mut a| {
+            a.textures = gamedir::resolve(&loaded.dir, "sky.wea")
+                .and_then(|p| std::fs::read(&p).ok())
+                .map(|b| parkan_formats::wea::parse(&b).materials)
+                .unwrap_or_default();
+            a
+        });
+    // Resolved here rather than at draw time: a texture index means nothing until the
+    // store has uploaded it, and the upload takes the store whole.
+    let looks = [parkan_sim::sky::Body::Sun, parkan_sim::sky::Body::Moon].map(|body| {
+        atmosphere
+            .as_ref()
+            .and_then(|a| parkan_sim::sky::body_texture(a, body))
+            .map(str::to_owned)
+            .and_then(|name| store.look(&name).ok())
+    });
+    let body_textures = looks.each_ref().map(|l| l.as_ref().and_then(|l| l.still.texture));
+    let body_cells = looks.each_ref().map(|l| l.as_ref().map_or([0.0, 0.0, 1.0, 1.0], |l| l.still.cell));
+    Ok(World { store, terrain, objects, atmosphere, body_textures, body_cells })
+}
+
+/// The bodies to draw this frame: each one up, along its own arc, with its slot's texture.
+///
+/// STAND-IN: docs/10-sky.md#not-resolved -- what tints a body's sprite is not read; it is
+/// drawn in its texture's own colours.
+pub fn body_sprites(world: &World, seconds: f64) -> Vec<parkan_render::body::Sprite> {
+    let Some(a) = world.atmosphere.as_ref() else {
+        return Vec::new();
+    };
+    parkan_sim::sky::bodies_aloft(a, seconds)
+        .into_iter()
+        .map(|(body, progress)| parkan_render::body::Sprite {
+            toward: body.direction(progress),
+            extent: parkan_sim::sky::at(a, parkan_sim::sky::position(a, seconds))
+                .map_or([1.0, 1.0], |s| s.body_extent),
+            texture: world.body_textures[body.slot() - parkan_sim::sky::Body::Sun.slot()],
+            cell: world.body_cells[body.slot() - parkan_sim::sky::Body::Sun.slot()],
+            tint: [1.0; 4],
+        })
+        .collect()
 }
 
 pub use parkan_world::play::Play;
@@ -92,10 +139,7 @@ pub fn lighting(
             // light travels the way the body's light does, the second the opposite way.
             let toward = body.direction(progress);
             let [main, second] = atm::sun_lights(&sky, toward, forward);
-            [
-                Light { direction: -toward, colour: main },
-                Light { direction: toward, colour: second },
-            ]
+            [Light { direction: -toward, colour: main }, Light { direction: toward, colour: second }]
         }
         None => [Light::OFF; 2],
     };

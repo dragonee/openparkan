@@ -43,6 +43,15 @@ pub const SUN_SECOND_LIGHT_SLOT: usize = 21;
 pub const SUN_BOOST_SLOT: usize = 17;
 /// The third float: the main light is slot 19 × this (`0x1006ac9a`).
 pub const LIGHT_FLOAT: usize = 2;
+/// The first float: the body sprite's extent across (`CSun +0x94`, `0x1006ac9a`).
+pub const EXTENT_ACROSS_FLOAT: usize = 0;
+/// The second float: its extent up (`CSun +0x98`).
+pub const EXTENT_UP_FLOAT: usize = 1;
+
+/// What each `sky.wea` slot is, fixed across all 29 missions (`docs/10-sky.md`, "The
+/// sibling `sky.wea` -- the slot index is the role").
+pub const SLOT_ROLES: [&str; 9] =
+    ["nebula", "stars", "clouds", "sun", "moon", "flare", "flare2", "snow", "rain"];
 
 /// Seconds in the 24-hour clock a keyframe's stamp is scaled against.
 pub const CLOCK_DAY: u64 = 86_400;
@@ -117,6 +126,18 @@ pub enum Body {
 impl Body {
     pub fn named(name: &str) -> Body {
         if name == "sun" { Body::Sun } else { Body::Moon }
+    }
+
+    /// The `sky.wea` slot it draws with: the fourth field of the block `GetEvents` fills
+    /// from the one test against the literal `"sun"` (`docs/10-sky.md`, "Where the sun
+    /// stands"). 3 and 4 are `sun` and `moon` in [`SLOT_ROLES`], which is read out of the
+    /// file quite separately -- the engine and the data agree without either deriving the
+    /// index from the other.
+    pub fn slot(self) -> usize {
+        match self {
+            Body::Sun => 3,
+            Body::Moon => 4,
+        }
     }
 
     /// Its azimuth and its tilt from the zenith, the two constants `GetEvents` picks by
@@ -325,6 +346,12 @@ pub struct Sky {
     pub sun_boost: f32,
     /// The sun object's second light: slot 21.
     pub second_light: Rgb,
+    /// The body sprite's extent across and up: the first two floats (`CSun +0x94`,
+    /// `+0x98`). *Measured* over all 656 keyframes of the 29 shipped files: across runs
+    /// 0.4 to 3.3 and up 0.4 to 3.0, and **across is at or above up on all 656**, so a
+    /// body is never drawn taller than it is wide. Most are (1, 1) or (0.65, 0.65). They
+    /// are a factor and not a length, the base being camera slot 27, which is not read.
+    pub body_extent: [f32; 2],
 }
 
 fn lerp(a: Rgb, b: Rgb, t: f32) -> Rgb {
@@ -375,7 +402,22 @@ pub fn at(atmosphere: &Atmosphere, now: Position) -> Option<Sky> {
         sun_light: colour(k0, k1, SUN_LIGHT_SLOT, t).map(|c| c * light),
         sun_boost: channels(k0, k1, SUN_BOOST_SLOT, t)[3],
         second_light: colour(k0, k1, SUN_SECOND_LIGHT_SLOT, t),
+        body_extent: [EXTENT_ACROSS_FLOAT, EXTENT_UP_FLOAT]
+            .map(|f| k0.intensity[f] + (k1.intensity[f] - k0.intensity[f]) * t),
     })
+}
+
+/// The material named for one of the nine `sky.wea` roles, or `None` when the file is not
+/// read or the slot is empty.
+pub fn role_texture<'a>(atmosphere: &'a Atmosphere, role: &str) -> Option<&'a str> {
+    let index = SLOT_ROLES.iter().position(|r| *r == role)?;
+    atmosphere.textures.get(index).map(String::as_str).filter(|n| !n.is_empty())
+}
+
+/// The material a body draws with: its own slot's name.
+pub fn body_texture(atmosphere: &Atmosphere, body: Body) -> Option<&str> {
+    let index = body.slot();
+    atmosphere.textures.get(index).map(String::as_str).filter(|n| !n.is_empty())
 }
 
 /// The flare's first gate (`docs/10-sky.md`, "The lens flare"): out once `toward` is
@@ -530,6 +572,7 @@ mod tests {
             start,
             trailer_word: 0,
             sky_flag: 0,
+            textures: Vec::new(),
         }
     }
 

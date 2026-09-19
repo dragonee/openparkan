@@ -348,6 +348,36 @@ and 5, which are past the end of a 2 x 2 grid, and `SUN4.0`'s two sprites sit
 in the cells a 2 x 2 would number 1 and 3. The reader falls back to the whole
 texture for an index it cannot place rather than guess.
 
+## The sun and the moon are drawn
+
+Everything a body's sprite needs is now read, and the engine draws it. Four
+pieces come together, each from a different file:
+
+- **Which body, and when.** The start-`SUN` opcode names it, and it is up for
+  its lifetime ([above](#a-bodys-lifetime)).
+- **Where it stands.** Its own arc, from the fraction of that lifetime that has
+  run ([above](#the-body-travels-that-matrixs-arc--read)).
+- **What it draws with.** Its `sky.wea` slot — 3 for `sun`, 4 for anything
+  else — which is a **material** name, and the material names both a texture
+  and a **cell** of it ([above](#a-material-picks-a-sub-image-as-well-as-a-texture)).
+- **How big.** The keyframe's first two floats, its extent across and up.
+
+The cell is the piece that is easy to miss and impossible to miss twice.
+`ENV_SUN_3` names `SUN1.0`, which holds **four** bodies; a quad taking the whole
+sheet draws all four at once, in a square, which is what this engine did until
+the picture showed it. *Measured* over the 29 shipped files: every slot 3
+resolves to an `ENV_SUN*` material and every slot 4 to an `ENV_MOON*` or
+`ENV_SUN*` one, and all of them carry **blend mode 4**,
+`SRCALPHA`/`INVSRCALPHA` ([07-objects.md](07-objects.md)), so a body is blended
+on its texture's alpha and not added.
+
+**The extents are a factor, not a length.** *Measured* over all 656 keyframes:
+across runs 0.4 to 3.3 and up 0.4 to 3.0, and **across is at or above up on all
+656**, so a body is never drawn taller than it is wide. Nothing that small is a
+world size, and the base they scale is camera slot 27, which is
+[not read](#not-resolved). The engine picks its own: a body at extent 1 is drawn
+**3° across**, which puts the shipped range at 1.2° to 9.9°.
+
 ## What the numbers are
 
 The 88-byte block is **colours stored BGRA** — the same DirectDraw convention
@@ -976,8 +1006,11 @@ which is what the game does.
   the same call, is what `Ngi32.dll` turns into the Direct3D view: its first
   column is the view's depth axis (`0x10009450`), its last the eye
   ([Fog](#fog)).
-- The sun sprite's extent unit, camera slot 27, and the shader's slot 5
-  colour filter and its flag bit 0.
+- The sun sprite's **extent unit**, camera slot 27, and the shader's slot 5
+  colour filter and its flag bit 0. The two extents themselves are read and the
+  bodies are now drawn
+  ([The sun and the moon are drawn](#the-sun-and-the-moon-are-drawn)); what is
+  left is the base the factor scales, for which the engine picks 3° at extent 1.
 - ~~Which field carries the opcode~~ — the word ahead of slot 0; the three
   dead candidates were one keyframe out.
 - ~~What selects between a file's two day cycles~~ — nothing: they play in

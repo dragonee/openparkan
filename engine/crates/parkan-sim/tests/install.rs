@@ -129,3 +129,62 @@ fn a_running_hero_lands_three_steps_a_run_cycle() {
     let states: std::collections::BTreeSet<usize> = entered.iter().map(|&(s, _)| s).collect();
     assert!(states.iter().all(|s| [78, 90].contains(s)), "{entered:?}");
 }
+
+/// Every mission's `sky.wea` names a material for the sun and for the moon, and
+/// [`parkan_sim::sky::body_texture`] picks each body's own slot — 3 and 4, which the
+/// engine and the file agree on without either deriving the index from the other
+/// (`docs/10-sky.md`, "Where the sun stands").
+#[test]
+#[ignore = "needs the game install"]
+fn every_missions_sky_names_a_sun_and_a_moon_the_body_slots_pick_out() {
+    use parkan_sim::sky::{Body, body_texture};
+    let game = gamedir::find(None).expect("a Parkan install: set PARKAN_DIR");
+    let mut seen = 0;
+    let mut extents: Vec<f32> = Vec::new();
+    for entry in walkdir(&game) {
+        let Ok(bytes) = std::fs::read(&entry) else { continue };
+        let Ok(mut a) = parkan_formats::sky::parse(&bytes, &entry.display().to_string()) else {
+            continue;
+        };
+        let wea = entry.with_file_name("sky.wea");
+        let Ok(w) = std::fs::read(&wea) else { continue };
+        a.textures = parkan_formats::wea::parse(&w).materials;
+        seen += 1;
+        let sun = body_texture(&a, Body::Sun).unwrap_or_default().to_ascii_uppercase();
+        let moon = body_texture(&a, Body::Moon).unwrap_or_default().to_ascii_uppercase();
+        assert!(sun.starts_with("ENV_SUN"), "{}: sun slot 3 is {sun:?}", entry.display());
+        assert!(
+            moon.starts_with("ENV_MOON") || moon.starts_with("ENV_SUN"),
+            "{}: moon slot 4 is {moon:?}",
+            entry.display()
+        );
+        for k in &a.keyframes {
+            let (across, up) = (k.intensity[0], k.intensity[1]);
+            assert!(across >= up, "{}: a body is never taller than it is wide", entry.display());
+            extents.extend([across, up]);
+        }
+    }
+    assert_eq!(seen, 29, "the shipped skies");
+    assert_eq!(extents.len(), 656 * 2, "every keyframe's two extents");
+    // The extents are a factor, not a length: none is anywhere near a world size.
+    let (lo, hi) = extents.iter().fold((f32::MAX, 0.0_f32), |(l, h), &v| (l.min(v), h.max(v)));
+    assert!((lo - 0.4).abs() < 1e-6, "the smallest extent is 0.4, not {lo}");
+    assert!((hi - 3.3).abs() < 1e-6, "the largest is 3.3, not {hi}");
+}
+
+fn walkdir(game: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let mut out = Vec::new();
+    let mut stack = vec![game.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+        for e in entries.flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                stack.push(p);
+            } else if p.file_name().is_some_and(|n| n.eq_ignore_ascii_case("sky.ske")) {
+                out.push(p);
+            }
+        }
+    }
+    out
+}

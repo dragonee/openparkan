@@ -644,6 +644,7 @@ fn screenshot(loaded: &scene::Loaded, game: &Path, args: &Args, out: &Path) -> R
     if let Some((lighting, colours)) = scene::lighting(&world, seconds, eye, forward) {
         renderer.set_lighting(lighting);
         renderer.set_dome_colours(colours);
+        renderer.set_body_sprites(&gpu.device, scene::body_sprites(&world, seconds));
     }
     if let Some(p) = play.as_mut() {
         scene::sync(&mut renderer, &gpu.device, &gpu.queue, p, &world.objects, view_proj, eye);

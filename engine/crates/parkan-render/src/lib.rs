@@ -10,6 +10,7 @@ use glam::{Mat4, Vec2, Vec3};
 use parkan_world::hud::Layer;
 use wgpu::util::DeviceExt;
 
+pub mod body;
 pub mod dome;
 pub mod frame;
 pub mod hud;
@@ -123,6 +124,9 @@ pub struct Renderer {
     preview_bank: Option<GpuTextures>,
     lighting: frame::Lighting,
     dome: Option<(dome::DomeRenderer, Vec<[f32; 3]>)>,
+    /// The sun's and the moon's sprites, drawn over the dome.
+    bodies: Option<body::BodyRenderer>,
+    body_sprites: Vec<body::Sprite>,
     hud: Option<hud::HudRenderer>,
     text: Option<text::TextRenderer>,
     /// Text in other fonts, drawn after `text` in slot order.
@@ -216,6 +220,8 @@ impl Renderer {
             preview_bank: None,
             lighting: frame::Lighting::default(),
             dome: None,
+            bodies: None,
+            body_sprites: Vec::new(),
             hud: None,
             text: None,
             more_text: Vec::new(),
@@ -270,6 +276,17 @@ impl Renderer {
         self.objects = objects.map(|o| ModelRenderer::new(device, self.format, o, &bank));
         self.reflection_frame = self.objects.as_ref().map(|o| o.view_frame(device));
         self.bank = Some(bank);
+    }
+
+    /// The sun's and the moon's sprites, from the textures `set_world` uploaded.
+    pub fn set_body_sprites(&mut self, device: &wgpu::Device, sprites: Vec<body::Sprite>) {
+        if self.bodies.is_none()
+            && let Some(bank) = &self.bank
+        {
+            // The scene's format, not the display's: a body draws in the dome's own pass.
+            self.bodies = Some(body::BodyRenderer::new(device, self.format, bank));
+        }
+        self.body_sprites = sprites;
     }
 
     /// The looks effect sprites draw with, by index, from the textures `set_world` uploaded.
@@ -492,6 +509,9 @@ impl Renderer {
         if let Some((dome, colours)) = &self.dome {
             dome.prepare(queue, view_proj, self.lighting.eye, colours);
         }
+        if let Some(bodies) = self.bodies.as_mut() {
+            bodies.prepare(queue, view_proj, self.lighting.eye, &self.body_sprites);
+        }
         if let Some(terrain) = &self.terrain {
             terrain.prepare(queue, view_proj, &self.lighting);
         }
@@ -601,6 +621,11 @@ impl Renderer {
             });
             if let Some((dome, _)) = &self.dome {
                 dome.draw(&mut pass);
+            }
+            // The bodies go over the dome and under the scene: they write no depth, so
+            // the ground and the objects drawn next paint over them.
+            if let Some(bodies) = &self.bodies {
+                bodies.draw(&mut pass);
             }
             if let Some(terrain) = &self.terrain {
                 terrain.draw(&mut pass);
