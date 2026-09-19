@@ -310,11 +310,11 @@ record's id.
 | 0x80 / 0x100 | 110 on 0x100 | hold *t* at 0 while the manager's bit 0 (messages 23, 24) is clear / set |
 | 0x200 | — | × linear progress |
 | 0x400 | 114 | **draw nothing while the tested point is hidden** (`0x10008016`): the building and robot beacon lights, `f_*light*`, `rb_*light*` |
-| 0x800 | 198 | **drawn only by a draw call that passes its pass argument** (`0x10007d44`; the manager skips such calls outright when all its instances are 0x800, `0x10004061`); which caller passes it is not established. Lights, sounds, breath and beacons |
+| 0x800 | 198 | **drawn only by a draw call that passes a nonzero pass argument** (`0x10007d44`; the manager skips such a call outright when all its instances are 0x800, `0x10004061`) — which every call the game makes does ([below](#who-passes-the-draws-pass-argument--read)). Lights, sounds, breath and beacons |
 | 0x1000 | 14 | **hand the emitters the manager's target point** every manager tick (`0x10006349`, manager slot `0x44`); a type-5 bolt takes it for its start (`0x10003070`). Exactly the 14 effects with a bolt, all bolt-only |
-| 0x2000 | 1 | passed to the renderer as effect draw flag 4 (`0x1001088c`), which reaches its texture choice by distance (`Terrain.dll:0x10028417`); `env_lightning` alone |
+| 0x2000 | 1 | passed to the renderer as effect draw flag 4 (`0x1001088c`, and the same `shr 0xd` in the other three drawing classes at `0x100016c2`, `0x10002fe3`, `0x10012326`), which **holds the sprite's fog factor at 1** instead of taking it from the distance (`Terrain.dll:0x10028417` into the shader's colour call, `0x1004f841` against `0x1004bf20` — [above](#how-an-effect-sprite-is-coloured--read-and-measured)); `env_lightning` alone |
 | 0x8000 | 5 | skip the attach point's second test |
-| 0x10000 | 1 | *unknown* — no test found; `aim_tail_S` |
+| 0x10000 | 1 | **no reader**: nothing in `Effect.dll`'s own code isolates bit 16 of the word, where the same three sweeps find bits 11, 12 and 13 ([below](#who-passes-the-draws-pass-argument--read)); `aim_tail_S` |
 
 **Effect time *t*** runs 0 to 1 (`0x10005c60`, 18 modes):
 
@@ -532,12 +532,26 @@ skips such a light outright, and at `0x100808c1` / `0x10080914`, the manager's s
 slot, which re-registers the light when that bit changes. `0x20000000` only at
 `0x1002a200`. Nothing else in `Terrain.dll` tests either constant.
 
-*Measured*: the shipped attenuation triples are (0, 1, 0) on 447 blocks, (0, 1, 1) on 170
-and (0, 0, 1) on 1 — and this path reads none of them, so **what a light's attenuation is
-for is not established**. `Ngi32.dll` does carry a `SetLight` wrapper (`0x10008b50`, slot
-29 of its render interface, vtable `0x10031600`) and a `LightEnable` beside it
-(`0x10008b20`), while its exported `n3dSetLighting` is a stub (`ret 8`, `0x100025a0`);
-which caller, if any, reaches slot 29 is not found.
+**Nothing sets a Direct3D light** (*read*). `Ngi32.dll`'s render interface — the object
+`niGet3DRender` (ordinal 302) hands out, whose vtable the constructor installs at
+`0x100315e0` (`0x10005eec`) — carries `SetLight` at `+0x94` (`0x10008b50`, which forwards
+to the device's own `SetLight` at `[device+0x48]`) and `LightEnable` at `+0x90`
+(`0x10008b20`). Across all sixteen modules **no call at `+0x94` lands on a render
+interface**: the 35 that exist are on other objects, and the six inside `Ngi32.dll` itself
+are on the Direct3D device it keeps at `0x1003a488`. The control is the same sweep at
+`+0x90`, which does find the render interface — four times, in `CShade`, each a
+`for i in 0..7` loop that zeroes its own light slot and calls `LightEnable(i, 0)`
+(`Terrain.dll:0x1003dbd5`, `0x1003df55`, `0x1003e348`, `0x1003f281`, through the copy of
+the interface at `0x100a5d40` taken from `CShade+0x98`). So the shade **switches all eight
+device lights off** and never turns one on; the exported `n3dSetLighting` is a stub
+(`ret 8`, `0x100025a0`) beside it.
+
+*Measured* over every shipped light block: the attenuation triples are (0, 1, 0) on **447**
+of the 618, (0, 1, 1) on **170** and (0, 0, 1) on **1** (`env_lightning`) — never a
+constant term, never (1, 0, 0), and never anything but 0 or 1 in any of the three. With
+`EmulatePointLights` not reading them and no Direct3D light ever set, **the triple is dead
+data**: the artists wrote Direct3D's linear falloff on 617 of the 618 and added its
+quadratic term on 171, into a field the game does not read.
 
 ### Type 2 is a sound — *read*, and *measured*
 
@@ -814,8 +828,31 @@ byte is the group the switch is listed under:
 | 3 | `0x310` Smoke, `0x311` Explode, `0x312` Gun fire, `0x313` Lights |
 
 Each group also carries a "LOD distribution" and a "High quality LOD" name
-(`0x?f0`, `0x?f1`) and a float the particle emitters scale by a random number
-(`0x1000ec50`). What the four groups stand for is *unknown*.
+(`0x?f0`, `0x?f1`), and **those two names are the group's two floats**: the
+page's getter answers `0x?f0` with `page + group × 4 + 0x1084` and `0x?f1` with
+`page + group × 4 + 0x1294` (`0x1000daf8`, `0x1000dad6`), taking the group from
+the id's high byte exactly as the switch table takes the switch from its low
+byte. A group is therefore a **detail class**, not a category: the four carry the
+same switch names over and over, and what differs between them is the pair of
+numbers below.
+
+**What the two floats do** (*read*). One call reads them (`0x1000ec50`, a method
+of the page taking a settings id): it draws a 16-bit random number, scales it by
+`distribution[group] / 65536` and subtracts `highQuality[group]`. A burst
+(`0x100011d5`) and a stream (`0x10011d5d`) call it **once per particle per
+channel** as they spawn, into the emitter's per-particle array at `+0x2c`. The
+burst's update then compares a count against each particle's value and passes
+over the particle while the count is the larger (`0x100015eb`–`0x10001612`), and
+the stream's draw takes the value as that particle's lerp parameter in place of
+`age^exponent` where the block's **exponent is negative** (`0x10012125`, kept at
+`0x1001215e`). *Measured*: **0 of the 21426 position and size exponents are
+negative**, so no shipped effect takes the second path.
+
+**The page's `+0x14a4`** is set by all three presets — 1000 for preset 3, 250 for
+preset 2, 50 for preset 1 (`0x1000e865`, `0x1000e8fe`, `0x1000e997`) — and
+**nothing reads it**. The control is the same sweep over every access to the
+page's fields, which finds both the writes and the reads of `+0x1084` and
+`+0x1294` beside it.
 
 **The presets.** The page's slot 8 (`0x1000e7c0`) sets all twenty at once:
 presets 1 and 2 turn every switch on; preset 3 turns off the dust and smoke of
@@ -823,13 +860,92 @@ group 0, the dust, smoke and lights of group 1, the smoke and engine fire of
 group 2 and the smoke of group 3. `iron3d.dll` reads `Iron_3D.ini`'s
 `RENDER_QUALITY` and asks every page for preset 3, 2 or 1 for the values 0, 1
 and 2 (`0x100616f0`, through `World3D.dll:0x1000a600`); the page itself starts
-on preset 1.
+on preset 1. Each preset writes the four groups' floats as well:
+
+| preset | `RENDER_QUALITY` | LOD distribution, by group | High quality LOD | `+0x14a4` |
+|---|---|---|---|---|
+| 1 | 2 | 3, 3, 3.5, 5.5 | 0, 0, −2, −3 | 50 |
+| 2 | 1 | 1.5, 1.5, 1.75, 2.75 | 0, 0, −2, −3 | 250 |
+| 3 | 0 | 3, 3, 3.5, 5.5 | 0, 0, −2, −3 | 1000 |
+
+so at the install's `RENDER_QUALITY=2` a particle of a group-0 or group-1 effect
+draws its number from 0 to 3, one of group 2 from 2 to 5.5 and one of group 3
+from 3 to 8.5 — and lowering the quality to 1 halves the spread without moving
+the floor.
 
 *Measured*: **every one of the 923 effects names one of the twenty** — 18 of
 them in use, `0x311` "Explode" on 237 and `0x5` "Lights" on 120 — and the
 install's `RENDER_QUALITY=2` leaves them all on. The hero's guns are `0x312`
 "Gun fire". `hero_helm_light` is `0x107` "Smoke", so a switch's name is the
-artists' filing rather than a rule.
+artists' filing rather than a rule. By group the 923 fall **282, 146, 144 and
+351**, so every group is in use.
+
+## Who passes the draw's pass argument — *read*
+
+**The slot.** The manager's draw is slot 3, `0x10004050`, and it ends `ret 0x10`: four
+stack arguments — the manager itself, the camera object, a **key** and the **pass**. The
+key −2 draws every instance; any other value draws the instances whose key matches it
+(`0x1000410c`). The pass is what flag 0x800 waits for: at 0 the manager returns at once
+unless its own flag 2 is set (`0x10004061`), and the instance's draw skips a 0x800 effect
+(`0x10007d44`). The interface is named by the panic that greets its absence — *"Unable to
+obtain IEffectManager interface"*.
+
+**Two callers that certainly hold a manager, and both pass 1.** Those two are the only
+sites in any module that push the key −2 before an indirect call, and each takes its
+receiver from the field its constructor filled with `QueryInterface(0x13)` on a
+`CreateFxManager` — `CLandscape+0x7be8` (`Terrain.dll:0x100172fa`) and
+`CAtmosphere+0x17c` (`0x1006f09c`):
+
+| caller | key | pass |
+|---|---|---|
+| `CLandscape`'s draw (`Terrain.dll:0x1001b7b0`, the call at `0x1001c93e`) | −2 | **1** (`0x1001c921`) |
+| `CAtmosphere`'s draw (`Terrain.dll:0x10070b90`, the call at `0x10070cec`) | −2 | **1** (`0x10070cd5`) |
+
+Each is the last thing its draw does, after the terrain and the objects it holds. **Nothing
+in the install passes a 0**: the only computed pass is a third call of the same shape,
+`AniMesh.dll:0x100151ea` in an object's draw, which passes 1 while the object's sphere
+clears the camera's six planes (`0x10014c70`) and the draw's flag 1 is clear, else 0
+(`0x100151ce`), with the key −2 or −1 by the draw's flag 8 (`0x10014d0f`). Its receiver is
+the interface the object answers for under `0x204`, which the agent takes from its owner
+(`0x1000332c`, filed at `+0x168`) rather than its own manager under `0x13`; that this is an
+effect manager too is *inferred* from the call's shape and not read.
+
+So **a 0x800 effect draws in the scene pass with everything else**, and what the flag can
+cost it is only that an object outside the camera's planes, or drawn in a pass carrying
+flag 1, draws none of its lights, sounds, breath or beacons.
+
+**`Terrain.dll:0x1001f178` is not one of them**, and there is no stack mismatch. That call
+belongs to a method of the interface `CLandscape` installs at its **`+4`** (the table at
+`0x1009a468`, whose release adjusts `ecx − 4` at `0x1001a0d0` and whose `QueryInterface`
+reads the outer object at `+0x270`). Its `this` is the object plus four, so its
+`[this+0x7be8]` is `CLandscape+0x7bec` — what the constructor fills with
+`QueryInterface(0x302)` on `CreateSystemArealMap`'s object (*"Unable to obtain
+ISystemArealMap interface"*), not the effect manager four bytes earlier at `+0x7be8`. The
+same interface's methods read that manager as `[this+0x7be4]`, and only ever to release it
+or to post it a message: 1 and 28 at `0x1001f072`/`0x1001f0d2`, 4 at `0x1001fd48`. The
+areal map's slot 3 takes the three arguments the call pushes — the object, and 2 to add it
+or 3 to remove it.
+
+*Also read*: an agent makes a manager of its own (`AniMesh.dll:0x100033ba`) and files it
+under `0x13` in its interface table at `+0x1e4` — the table `0x100012d0` indexes by
+`(id >> 8) × 48 + (id & 0xff)` — and that is the one a controller reaches at its `+0x3c`
+and drives with slots `0x10` to `0x44`. All ten sites in `AniMesh.dll` that touch the field
+only release it or post it a message, so **which draw reaches a unit's own manager is not
+established**.
+
+### Header flag `0x10000` has no reader — *read*, a controlled negative
+
+Three sweeps over `Effect.dll` look for bit 16 of the header's flags word: every
+`shr`/`sar` by 16, every `test`/`and`/`cmp` whose immediate carries `0x10000`, and every
+byte access at the `+2` of the two places the word is kept (`+0x10` of the template,
+`+0x64` of the emitter's draw block). The four shifts by 16 and every immediate with the
+bit are in the module's statically linked CRT — string scans and 16-bit splits at
+`0x1001b45b`, `0x1001bfde`, `0x1001bfe8`, `0x1001c634` — and no byte access lands on the
+word at all. **The control is in the same sweeps**: they do find the readers of the
+neighbouring bits, `0x800` at `0x10007d44` and `0x10006364`, `0x1000` at `0x10006349`,
+`0x2000` at `0x100016c2`, `0x10002fe3`, `0x1001088c` and `0x10012326`, and `0x8000` at
+`0x100061df`. So the one effect that carries `0x10000`, `aim_tail_S`, carries a bit the
+engine never looks at.
 
 ## Bit 8 and the tested point — *read*, and *measured*
 
@@ -856,7 +972,7 @@ it off their origin. An impact is aimed along the struck face's vector
 (placement 7, below); if that vector becomes the effect's x axis, (1, 0, 0)
 keeps the test point clear of the face the effect sits on — a *guess*.
 
-### A beacon light's glow — *read* in part, and *measured*
+### A beacon light's glow — *read*, and *measured*
 
 The lamps buildings and robots carry are the other side of the test. *Measured*:
 header flag 0x400 is on 114 effects, and **112 of them have no bit-8 emitter**;
@@ -867,21 +983,23 @@ two of which each of Mission 01's bridges starts, is the lamp's ring (`LAMP`,
 additive) and a light. Only `B_Sphere_Sign` and `f_build_sign` pair 0x400 with
 bit 8.
 
-So by what is read a beacon's sprites never take effect draw flag 1: while its
-point is hidden it draws nothing, and while it is in view its sprites go through
-the renderer depth-tested like any other. Two more gates stand in front of it
-(*read*): the instance's draw skips a 0x800 effect when its pass argument is 0
-(`0x10007d3a`), and the manager's draw returns at once for a pass argument of 0
-unless its flag 2 is set (`0x10004061`). The manager starts with flags 8
-(`0x10003b9a`); message 23 sets its bit 0 and message 24 clears it
+So a beacon's sprites never take effect draw flag 1: while its point is hidden it
+draws nothing, and while it is in view its sprites go through the renderer
+depth-tested like any other. The two gates in front of it decide **whether** it
+draws, never with what depth state (*read*): the instance's draw skips a 0x800
+effect when its pass argument is 0 (`0x10007d3a`), and the manager's draw returns
+at once for a pass argument of 0 unless its flag 2 is set (`0x10004061`) — and
+every call the game makes passes 1
+([above](#who-passes-the-draws-pass-argument--read)). The manager starts with
+flags 8 (`0x10003b9a`); message 23 sets its bit 0 and message 24 clears it
 (`0x10003f2e`, `0x10003f46`), which holds a 0x100 effect's *t* at 0.
 
 *Seen*: drawn depth-tested in the scene pass, as the engine drew it, the 9 m glow
 on the bridge's pylon top is cut by the pylon's own faces and shows only through
-the gaps between them; a player's report on Mission 01 calls that wrong.
+the gaps between them; a player's report on Mission 01 calls that wrong, and the
+read says the game cuts it the same way.
 
-Not established: which call passes the pass argument, and so in which pass, and
-with which depth state, the beacons draw; what sends messages 23 and 24.
+Not established: what sends messages 23 and 24.
 
 ## What an explosion plays — *read*, and *measured*
 
@@ -1005,18 +1123,35 @@ Read one slot either way, none of the seven name witnesses agrees.
   the two tests found.~~ Answered in part: `EmulatePointLights` reads six fields of
   the record and **not the attenuation**, cuts hard at the range and draws the light
   as a textured disc of radius sqrt(range² − d²); every test of both flags is now
-  enumerated ([above](#what-a-light-does-to-a-surface--read-and-measured)). Still open:
-  **what a light's attenuation triple is for**, since no path found reads it, and
-  whether anything reaches `Ngi32.dll`'s `SetLight` (`0x10008b50`).
-- **Who passes the draw's pass argument** that flag 0x800 waits for (manager
+  enumerated ([above](#what-a-light-does-to-a-surface--read-and-measured)).
+  ~~Still open: **what a light's attenuation triple is for**, since no path found
+  reads it, and whether anything reaches `Ngi32.dll`'s `SetLight` (`0x10008b50`).~~
+  Answered: **nothing reaches it** — no call in any module lands on the render
+  interface's `+0x94`, where the same sweep at `+0x90` finds `CShade` switching all
+  eight device lights off — so the triple is dead data, and what the artists wrote
+  into it is measured
+  ([above](#what-a-light-does-to-a-surface--read-and-measured)).
+- ~~**Who passes the draw's pass argument** that flag 0x800 waits for (manager
   slot 3, `0x10004050`; the landscape's call at `Terrain.dll:0x1001f178` pushes
   one argument fewer than the slot takes), what draw flag 4 (header
-  0x2000) changes in the texture choice, and header flag 0x10000.
+  0x2000) changes in the texture choice, and header flag 0x10000.~~ Answered:
+  `CLandscape`'s and `CAtmosphere`'s draws, both with the key −2 and the pass **1**,
+  and nothing anywhere passes 0; `0x1001f178` is a call on the areal map, not the
+  manager, and takes the three arguments it pushes; draw flag 4 holds the sprite's
+  **fog factor at 1**; and `0x10000` has no reader
+  ([above](#who-passes-the-draws-pass-argument--read)). Still open: which draw
+  reaches a **unit's own** manager, the one a controller drives at its `+0x3c`.
   ~~Who sets the manager's target point that bolts start from.~~ Answered: the
   gun, as it makes the round: the muzzle on the shooter's node 0
   ([29-weapons.md](29-weapons.md#a-beam-outlives-its-round--read-and-measured)).
-- **What the four settings groups are**, and the group floats `+0x1084` and
-  `+0x1294` and the page's `+0x14a4` that the presets set.
+- ~~**What the four settings groups are**, and the group floats `+0x1084` and
+  `+0x1294` and the page's `+0x14a4` that the presets set.~~ Answered: a group is a
+  detail class, its two floats are the settings the page names "LOD distribution"
+  and "High quality LOD", and together they give each particle of a burst or a
+  stream a number — which the shipped data then never reads, since that needs a
+  negative exponent and none of the 21426 is. The page's `+0x14a4`, 50, 250 or 1000
+  by preset, has no reader at all
+  ([above](#which-effects-run-the-settings-switch--read-and-measured)).
 - Snow and rain are **not** here. There is no FXID whose name mentions either,
   and `sky.wea`'s slots name the materials `SNOWFLAKE` and `RAIN_DROP`
   directly — see [10-sky.md](10-sky.md).

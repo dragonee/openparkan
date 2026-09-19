@@ -285,8 +285,10 @@ impl Fx {
     /// `in_view` says whether a point is in view from the camera, for the instances
     /// that test one.
     ///
-    /// STAND-IN: docs/11-effects.md#not-resolved -- which draw call passes the pass
-    /// argument header flag 0x800 waits for is not read: 0x800 effects draw with the rest.
+    /// The pass argument header flag 0x800 waits for is 1 in every call the game makes --
+    /// the landscape's and the atmosphere's draws pass it outright, an object's draw passes
+    /// it while the object is inside the camera's planes -- so a 0x800 effect draws with
+    /// the rest ([11](../../../docs/11-effects.md#who-passes-the-draws-pass-argument--read)).
     pub fn sprites(&self, now_ms: f64, in_view: impl Fn(Vec3) -> bool) -> Vec<(usize, Sprite)> {
         let mut out = Vec::new();
         let mut buffer = Vec::new();

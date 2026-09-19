@@ -7002,6 +7002,30 @@ def check_effect_timing(check, game: Path) -> None:
           f"RENDER_QUALITY=2, leaves every one on; the hero's guns are group 3's "
           f"'Gun fire'")
 
+    # The switch id's high byte is the settings group, and a group carries two floats --
+    # "LOD distribution" (page +0x1084) and "High quality LOD" (+0x1294) -- that a burst
+    # or a stream draws a per-particle value from (Effect.dll:0x1000ec50).  A drawing
+    # block reads that value only where its exponent is negative, and none is.
+    groups = Counter(fx.gate >> 8 for fx in library)
+    negative = exponents = 0
+    for effect in library:
+        for emitter in effect.emitters:
+            for table in (effects.CHANNEL_POSITION, effects.CHANNEL_SIZE):
+                at = table.get(emitter.kind)
+                if at is None or at[3] + 12 > len(emitter.body):
+                    continue
+                powers = struct.unpack_from("<3f", emitter.body, at[3])
+                exponents += len(powers)
+                negative += sum(v < 0 for v in powers)
+    check("FXID: every effect falls in one of the settings page's four groups",
+          sorted(groups) == [0, 1, 2, 3] and sum(groups.values()) == len(library)
+          and negative == 0,
+          "the switch id's high byte is the group: "
+          + ", ".join(f"{g} on {n}" for g, n in sorted(groups.items()))
+          + f"; {negative} of the {exponents} position and size exponents are "
+          f"negative, which is the one reading of a group's 'LOD distribution' and "
+          f"'High quality LOD' floats (Effect.dll:0x10012125)")
+
     # The test point and bit 8.
     points = Counter(fx.test_point for fx in library)
     flagged_kinds: Counter[int] = Counter()

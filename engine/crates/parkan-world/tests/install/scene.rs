@@ -542,8 +542,10 @@ fn mission_01s_bridges_start_their_signal_lights() {
             assert!(play.fx.instances.iter().any(|(o, _)| *o == Owner::Building(b.target, e.id)));
         }
     }
-    // A pylon's lamp seen from beside it draws over the pylon's faces, not cut by them (the
-    // beacon stand-in, docs/11, "A beacon light's glow"); from under the deck it is hidden.
+    // A pylon's lamp seen from beside it draws depth-tested, so the pylon's own faces cut it
+    // (docs/11, "A beacon light's glow": a beacon has no bit-8 emitter, and the pass argument
+    // its flag 0x800 waits for decides whether it draws at all, never its depth state); from
+    // under the deck its tested point is hidden and it draws nothing.
     let mut play = play;
     let game = gamedir::find(None).unwrap();
     play.fx.resolve_looks(&mut TextureStore::open(&game).unwrap()).unwrap();
@@ -558,7 +560,7 @@ fn mission_01s_bridges_start_their_signal_lights() {
             .map(|(_, s)| s.overlay)
             .collect::<Vec<_>>()
     };
-    assert_eq!(near(glam::Vec3::new(766.0, 583.0, 21.0)), [true], "in view, over the scene");
+    assert_eq!(near(glam::Vec3::new(766.0, 583.0, 21.0)), [false], "in view, depth-tested");
     assert!(near(glam::Vec3::new(790.0, 600.0, 5.0)).is_empty(), "hidden under the bridge");
 }
 
