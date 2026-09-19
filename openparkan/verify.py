@@ -11656,7 +11656,7 @@ def check_firing(check, game: Path) -> None:
     # (docs/24, "How the AI asks for speed"), against 0.5 (Behavior.dll:0x10024e8f,
     # 0x100595c0): 0.85 at or above it, 0.45 below, and a building takes 0.85 outright.
     crawlers = sorted(name for name, top in tops if top < 0.5)
-    check("UNITS: only the fixed towers are authored below the 0.5 m/s the fight module's bar reads",
+    check("UNITS: only the fixed towers are authored below the fight module's 0.5 m/s bar",
           len(tops) == 382 and len(crawlers) == 19
           and {round(top, 4) for name, top in tops if top < 0.5} == {0.2}
           and all("tow" in name or "targ" in name for name in crawlers)
