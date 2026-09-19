@@ -24,12 +24,6 @@ pub struct Strike {
     /// The triangle, or the ground face; `None` on a building's footing, whose faces belong
     /// to no mesh (`parkan_world::basement`).
     pub triangle: Option<usize>,
-    /// The struck face's normal, in world space: the vector at `+8` of what `IWorld` slot 6,
-    /// `CWorld::GetWorldFace`, answers (`Terrain.dll:0x10024d70` → the face record's `+0x1c`,
-    /// which `0x1001a6ec` dots with the face's first vertex for the plane's *d*). The outer
-    /// camera stands 0.75 along it off whatever it meets (docs/30, "What the outer camera's
-    /// line meets").
-    pub normal: Vec3,
 }
 
 /// `NGI32.dll:0x10024410` (`g_FastProc` slot `0xb4`), one-sided and with no epsilon:
@@ -166,11 +160,6 @@ pub fn segment_mesh_skipping(
                     d2,
                     node: Some(i),
                     triangle: Some(t),
-                    // The face's normal is the node's; the world wants it turned by the pose.
-                    normal: vec(parkan_formats::pose::rotate(
-                        pose.rotation,
-                        arr(normal.normalize_or_zero()),
-                    )),
                 });
             }
         }

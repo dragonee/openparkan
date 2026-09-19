@@ -74,8 +74,8 @@ pub const BACK_S: f64 = 0.3;
 pub const DONE_SHARE: f64 = 0.8;
 pub const BLEND_PER_S: f64 = 1.25;
 /// The line from the eye to the camera is tested past the camera by this, once it is longer
-/// than `CLEAR_FROM`, and a camera behind something is lifted this far off what it meets,
-/// along that face's normal (`0x100384d0`: `0x100e4ccc`, `0x100e5c70`, `0x100e5d0c`).
+/// than `CLEAR_FROM`, and a camera behind something is brought this far back off what it
+/// meets (`0x100384d0`: `0x100e4ccc`, `0x100e5c70`, `0x100e5d0c`).
 pub const CLEAR_PAST: f32 = 0.5;
 pub const CLEAR_FROM: f32 = 0.1;
 pub const CLEAR_OFF: f32 = 0.75;
@@ -166,15 +166,11 @@ impl Outer {
     /// (`0x10038799`–`0x10038816`): back along the eye's heading turned by the angle, `r` ×
     /// the distance, and `r` × the drop below the eye, looking where the eye looks. The line
     /// from the eye through the camera is then tested (`0x100384d0`): `meets(from, to)` gives
-    /// the point the line first meets and that face's normal, and a camera behind it stands
-    /// `CLEAR_OFF` along the normal off the point -- the vector at `+8` of `CWorld::GetWorldFace`
-    /// (docs/30, "What the outer camera's line meets"), not the line turned back.
-    pub fn place(
-        &self,
-        eye: &Eye,
-        r: f32,
-        meets: impl Fn(Vec3, Vec3) -> Option<(Vec3, Vec3)>,
-    ) -> Eye {
+    /// the first thing the line meets, and a camera behind it is brought in front.
+    ///
+    /// STAND-IN: docs/30-turrets.md#not-established -- what the world query's answer `+8` is,
+    /// of which 0.75 is added to the point met: the camera stands 0.75 back toward the eye.
+    pub fn place(&self, eye: &Eye, r: f32, meets: impl Fn(Vec3, Vec3) -> Option<Vec3>) -> Eye {
         let [angle, drop, back] = self.now;
         let heading = eye.forward.y.atan2(eye.forward.x) + angle;
         let mut position = Vec3::new(
@@ -187,8 +183,8 @@ impl Outer {
         if length > CLEAR_FROM {
             let d = line / length;
             let end = position + d * CLEAR_PAST;
-            if let Some((point, normal)) = meets(eye.position, end) {
-                position = point + normal.normalize_or(-d) * CLEAR_OFF;
+            if let Some(point) = meets(eye.position, end) {
+                position = point - d * CLEAR_OFF;
             }
         }
         Eye { position, forward: eye.forward, up: eye.up, fov_x: OUTER_FIELD, near: OUTER_NEAR }
@@ -274,48 +270,17 @@ mod tests {
         assert_eq!((e.forward, e.fov_x, e.near), (Vec3::X, OUTER_FIELD, OUTER_NEAR));
     }
 
-    /// A wall at x = 8 facing +x: the camera stands 0.75 along that normal, which is
-    /// 0.75 clear of the wall whatever angle the line came in at.
-    fn wall(from: Vec3, to: Vec3) -> Option<(Vec3, Vec3)> {
-        let x = 8.0;
-        (to.x < x).then(|| {
-            (from + (to - from) * ((from.x - x) / (from.x - to.x)), Vec3::X)
-        })
-    }
-
     #[test]
     fn a_wall_between_brings_the_camera_in_front_of_it() {
         let mut o = Outer::default();
         o.press(None, true, 0.0);
         o.update(1000.0);
+        let wall = |from: Vec3, to: Vec3| {
+            let x = 8.0;
+            (to.x < x).then(|| from + (to - from) * ((from.x - x) / (from.x - to.x)))
+        };
         let e = o.place(&eye(), 2.0, wall);
-        assert!(e.position.x > 8.0 && e.position.x < 8.0 + CLEAR_OFF + 1e-4, "{}", e.position);
+        assert!(e.position.x > 8.0 && e.position.x < 8.0 + CLEAR_OFF, "{}", e.position);
         assert!(e.position.z > 5.0, "a flyer's camera stands above the eye");
-    }
-
-    /// `0x100386b5`-`0x100386e2`: the camera stands at the point met plus 0.75 x the struck
-    /// face's normal (`CWorld::GetWorldFace`'s answer `+8`), not back along its own line.
-    /// The two differ whenever the line meets the face off square.
-    #[test]
-    fn the_camera_stands_off_a_face_along_its_normal_not_back_along_the_line() {
-        let mut o = Outer::default();
-        o.press(None, false, 0.0);
-        o.update(1000.0);
-        let met = std::cell::Cell::new(Vec3::ZERO);
-        let e = o.place(&eye(), 2.0, |from, to| {
-            let hit = wall(from, to);
-            if let Some((p, _)) = hit {
-                met.set(p);
-            }
-            hit
-        });
-        // Along the normal: only x moves, and by exactly 0.75.
-        assert!((e.position - (met.get() + Vec3::X * CLEAR_OFF)).length() < 1e-4, "{}", e.position);
-        // Back along the line would have moved it in y and z too, and left it short of 0.75
-        // clear of the wall, since the line meets the face off square.
-        let d = (o.place(&eye(), 2.0, |_, _| None).position - eye().position).normalize();
-        let along = met.get() - d * CLEAR_OFF;
-        assert!(along.x < e.position.x, "{along}: and so nearer the wall");
-        assert!((along - e.position).length() > 0.25, "{along}");
     }
 }

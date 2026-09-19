@@ -608,8 +608,9 @@ foot, a boarded bot, telepresence) and there is a driven unit record
      from the eye plus d × the record's `+0x94` to the camera plus d × 0.5
      (`0x100e4ccc`).
    - When it meets something, the camera stands at the point met plus 0.75
-     (`0x100e5d0c`) × **the struck face's normal**
-     ([below](#what-the-outer-cameras-line-meets-and-what-it-stands-off--read)).
+     (`0x100e5d0c`) × the vector at `+8` of the world's answer (slot 6, with 2),
+     which is traced but not named
+     ([below](#what-the-outer-cameras-line-meets--read-in-part)).
 5. **The view takes the matrix** (slot 7).
 6. **While `+0x60` is set, the camera moves** (`0x10038819`–`0x10038896`).
    - The move lasts 0.5 s, or 0.3 s (`0x3e99999a`) when `+0x58` is 0, the way
@@ -625,7 +626,7 @@ So a move is done 0.4 s after its press, or 0.24 s for the way back, and eases
 out fast at first (*derived*). **Five presses go round**: four places, then
 back into the cockpit.
 
-### What the outer camera's line meets, and what it stands off — *read*
+### What the outer camera's line meets — *read*, in part
 
 **Its query is a round's, less one class** (`0x10038649`–`0x10038678`). The eight
 dwords are `[0x41a, 0, 0, 0, 0, 0x208, 0, 0x24]`: the six the builder takes, then
@@ -654,26 +655,45 @@ classes 1, 3, 4 and 10 where a round visits 1, 2, 3, 4 and 10.
   class 4 a unit, from the id nibble the game's message handler routes on
   ([29-weapons.md](29-weapons.md#how-the-ai-fires--read)).
 
-**The vector at `+8` is the struck face's normal.** IWorld slot 6 is
-`CWorld::GetWorldFace` — the routine names itself in its own panic string,
-*"Invalid object ID"* under `CWorld::GetWorldFace()` (`Terrain.dll:0x10024d70`,
-`0x100a1398`). It looks the struck object up by the hit record's id, asks it for
-interface `0x18`, calls that interface's slot 3 and slot 5, and returns `this+0x10`:
-`+0` the slot-3 record's first dword, `+4` the slot-5 record's first, and **`+8` the
-slot-5 record's `+4`** (`0x10024faa`–`0x10024fc4`).
+**Where the vector at `+8` comes from** — *read* as far as it goes, and it does not
+reach what the vector is. IWorld slot 6 is `CWorld::GetWorldFace`, which names itself
+in its own panic string (`Terrain.dll:0x10024d70`, *"Invalid object ID"* under
+`CWorld::GetWorldFace()` at `0x100a1398`). The trail, each function decoded from its
+own entry:
 
-- On the landscape slot 5 is `0x100202a0`, which returns `this+0xd4` and writes its
-  `+4` from the terrain face record's `+0x1c` (`0x10020389`).
-- That `+0x1c` is a **pointer to three floats**, and the face builder dots them with
-  the face's first vertex and negates the result into `+0x20` (`0x1001a6ec`–
-  `0x1001a735`) — the plane's *d*. A vector that makes a plane equation with a
-  vertex is the plane's normal.
+1. **The camera asks for 2** (`iron3d.dll:0x100386a7`). `GetWorldFace` hands that
+   word on to the struck object's interface `0x18` slot 5 (`0x10024dd9`), and the
+   landscape's slot 5 hands it on again to slot 4 (`Terrain.dll:0x100202be`).
+2. **`GetWorldFace` returns `this+0x10`** (`0x10024fc1`), and its `+8` is written at
+   `0x10024fbe` from **`+4` of the slot-5 record**.
+3. **The landscape's slot 5 is `0x100202a0`, and it returns `this+0xd4`**
+   (`0x100205af`) — the record is the landscape's own scratch struct, so its `+4`
+   *is* the landscape's `+0xd8`, which `0x10020389` fills from **`+0x1c` of the
+   slot-4 record**.
+4. **Slot 4 is `0x1001a470`, and it returns `this+0x18`** (`0x1001b0f5`) — again a
+   struct inside the object it belongs to. So the field is that object's **`+0x34`**,
+   read there exactly once, as a pointer, at `0x1001a6ec`.
 
-So the camera **lifts 0.75 m off the surface along its normal**, not back along the
-line. This also settles the same field where
-[11-effects.md](11-effects.md#what-an-explosion-plays--read-and-measured) meets it:
-an explosion's axis 7, "the struck face's vector (the face's `+8`)", is that face's
-normal, which that page had to guess.
+**What is not read is what `+0x34` points at.** Nothing in `0x1001a470` writes it,
+and no store anywhere in `Terrain.dll` puts an address into it that this page could
+follow. Two observations pull in opposite directions and neither settles it:
+
+- Under the same flag 2, `0x1001a6e6`–`0x1001a735` reads `+0x34`'s three floats,
+  dots them with the face's **first vertex** — fetched through a stream descriptor
+  at `0x1001a6c8`–`0x1001a6e0` — negates the sum and stores it as a float in
+  `+0x38`. That is the plane constant *d* for that vector and that vertex, which
+  only means anything if the vector is the face's plane normal.
+- But the face's own normal is unpacked **elsewhere** in the same block: three
+  `int16` at the face source's `+0x14`, `+0x16` and `+0x18` are scaled by
+  `[0x100a5a0c]` into a float triple at the object's `+0x7b0c`
+  (`0x1001a649`–`0x1001a6c5`) — the six bytes
+  [09-method.md](09-method.md#reading-other-peoples-work) records fparkan leaving
+  uninterpreted. **`+0x34` is not that buffer**: `0x7b0c` occurs three times in the
+  whole module and none of them stores into `+0x34`.
+
+So the vector is a plane's, by the company it keeps, and it is **not** the unpacked
+face normal this page first took it for. Which of the two it is stays
+[open](#not-established).
 
 **What turns it off** (`0x10038ad0`, *read*):
 
@@ -1058,16 +1078,17 @@ listed are `r_t_01`–`02`, `r_l_01`–`07`, `r_m_01`–`04`, `r_b_01`–`04`,
 - **How often the game frame runs**, which paces the zoom's 0.1 steps and the
   outer camera's ease: both are per frame. The recording's zoom-in fits 60 a
   second.
-- ~~**The outer camera's line through the world**: which objects mask `0x41a`
-  takes, what `0x208` lets through, and the vector at `+8` of the world's answer
-  (slot 6) that 0.75 of is added to the point met: a face's normal, or the line
-  turned back, was not read.~~ **Read**: the query is a round's less one class
-  bit, so `0x208` and `0x24` let through exactly what a round passes — the water
-  surface among them — and the vector is **the struck face's normal**, so the
-  camera lifts 0.75 m along it
-  ([What the outer camera's line meets](#what-the-outer-cameras-line-meets-and-what-it-stands-off--read)).
-  Still open: **which objects answer world class 2**, the one class the camera
-  drops from a round's mask, which is
+- **The outer camera's line through the world.** Half answered: the query is a
+  round's less one class bit, so `0x208` and `0x24` let through exactly what a
+  round passes — the water surface among them — and the `+8` vector is traced from
+  `CWorld::GetWorldFace`'s answer down to the landscape face record's `+0x34`
+  ([What the outer camera's line meets](#what-the-outer-cameras-line-meets--read-in-part)).
+  **What that field points at is still not read**: nothing writes it in the routine
+  that hands it out, and it is demonstrably not the face's own unpacked normal,
+  which the same block builds in a different buffer. So whether 0.75 of it lifts
+  the camera along the face or back along its own line is still open, and the
+  engine keeps its stand-in. Open with it: **which objects answer world class 2**,
+  the one class the camera drops from a round's mask, which is
   [42-selection.md](42-selection.md#not-established)'s question too.
 - **What the outer view's flag `0x20`** copied from the main view is.
 - **Which box r, the unit record's `+0x98`, is the half-diagonal of**
