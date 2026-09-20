@@ -225,7 +225,7 @@ Its offsets are relative to `+0xc`, which is why the slots it reads looked like
 | 1 | the batteries' fill | | 9 | the radar's value 4, its period |
 | 2 | the batteries' capacity | | 10, 11, 12 | the seeker's values 1, 0, 2 |
 | 3, 4 | channel 0/2/5 and 0/3/4 demand a second | | 13 | whether the turret is an HQ turret |
-| 5, 6 | the guns' `+0x174` × 1000 ÷ interval, 5 skipping guns in state 1 | | 14 | mean shield fill × Σ deflector values 0–5 × shield value 0 |
+| 5, 6 | **damage a second** ([below](#ids-5-and-6-are-damage-a-second--read-and-measured)) | | 14 | mean shield fill × Σ deflector values 0–5 × shield value 0 |
 | 7 | the fight shield's mean sector fill | | 15 | Σ deflector values 0–5 × shield value 0 |
 | 8 | the radar's value 3, its range | | 16 | deflector value 0 × shield value 0 |
 
@@ -233,6 +233,34 @@ Its callers ask for it after a `QueryInterface` for `0x204`: `Behavior.dll`
 for 1, 2, 5, 6 and 7 (id 1 at `0x100180bd`), `ArealMap.dll`
 for 6, `iron3d.dll` for 2, and a gun, on the round it fires, for 10–12
 (`Control.dll:0x1002986c`). The ids are listed in `control.DEVICE_QUERIES`.
+
+### Ids 5 and 6 are damage a second — *read*, and *measured*
+
+Both walk the control system's components (`+0x5b0`, `+0x5b4`) and take every
+one whose class word `[+0x48]` is **2**, a gun — id 5 passing over any whose
+slot 2 answers 1 (`0x1002b5c1`). For each it adds
+
+    the gun's +0x174  ×  1000 ÷ max(1, the gun's value 3)
+
+(`0x1002b5d1`–`0x1002b613` and `0x1002b652`–`0x1002b69e`; the 1.0 is
+`0x1003b188` and the 1000.0 `0x1003cc8c`). Value 3 is the gun's **interval**
+in ms, so the second factor is exactly the stat panel's shots a second.
+
+**`+0x174` is the damage of the last round the gun made.** It has two writers
+in the whole module: the constructor zeroes it (`0x100295e8`), and the routine
+that creates a round — `World3D.dll!CreateObject` type 9, `0x100296f0` — reads
+the new round's property `0x35` and stores it (`0x10029816`). Property `0x35`
+falls to case 15 of the control's own property table (index table
+`0x1000e5e8`, jump table `0x1000e554`), which is `0x1000e00c`: a call of
+`0x10013620` with a level ratio of 1 — **the object's nodes' hit points plus
+their explosions' damage**, the same sum `weapons.Gun.round.damage` derives
+and the stat panel shows. (Property `0xa5` is its neighbour, `0x100136c0`.)
+
+Two things follow. **A gun that has not fired yet answers 0**, since nothing
+else ever writes `+0x174`; and the sum counts **one round a shot**, so a salvo
+gun's several barrels do not multiply it, where
+`units.Unit.firepower` does. What asks: `Behavior.dll` and `ArealMap.dll`,
+which is how the AI and the builder weigh a unit up.
 
 **The rows travel another way** (*read*,
 [below](#from-a-row-to-a-command--read-and-measured)). A `.tbl` row is

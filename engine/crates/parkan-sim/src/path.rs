@@ -28,6 +28,14 @@ pub const JOIN_STEP: f32 = 0.1;
 pub const VERTEX_EXIT: u32 = 0x1;
 pub const VERTEX_FLAT: u32 = 0x2;
 pub const VERTEX_JOIN: u32 = 0x4;
+/// The size gate (`Behavior.dll:0x10042d08`, docs/24, "The global path"): a vertex flagged
+/// [`VERTEX_ANY_SIZE`] passes any unit, one flagged [`VERTEX_BUILDING_SIZE`] a unit no bigger
+/// than the building's own size class, and one with neither only a unit of [`SMALL_SIZE`] or
+/// less. *Measured*: 165 of the 1056 shipped vertices carry the first, 7 the second — all on
+/// the three factories — and the other 884 neither, the 21 control pods among them.
+pub const VERTEX_ANY_SIZE: u32 = 0x1000_0000;
+pub const VERTEX_BUILDING_SIZE: u32 = 0x2000_0000;
+pub const SMALL_SIZE: u8 = 2;
 /// Each link's cost, added to the cost so far, is scaled by 1 and up to this share at random
 /// (graph `+0x38`, `Behavior.dll:0x1003642b`, `0x10042e0b`).
 pub const RANDOM_SHARE: f64 = 0.7;
@@ -155,6 +163,9 @@ pub struct Way {
     pub points: Vec<Vec3>,
     pub flags: Vec<u32>,
     pub links: Vec<(usize, usize)>,
+    /// The building's own size class, its property `0x201`: what a [`VERTEX_BUILDING_SIZE`]
+    /// vertex measures the unit against.
+    pub size: u8,
 }
 
 /// Why the walker has no path to give.
@@ -706,6 +717,7 @@ impl Graph {
         ways: &[Way],
         aboard: Option<usize>,
         clearance: f32,
+        size: u8,
         random: &mut dyn FnMut() -> f32,
     ) -> Result<Vec<Vec3>, Refusal> {
         let nearest = |w: usize, p: Vec3| {
@@ -740,7 +752,7 @@ impl Graph {
                 _ => return Err(Refusal::Stranded),
             },
         };
-        let nodes = self.search(start, end, ways, random).ok_or(Refusal::NoWay)?;
+        let nodes = self.search(start, end, ways, size, random).ok_or(Refusal::NoWay)?;
         Ok(self.walk(&nodes, from, goal, ways, clearance))
     }
 
@@ -758,14 +770,14 @@ impl Graph {
     /// the link's scaled by 1 + random × 0.7. It stops as the goal is reached, and fails once it
     /// has taken 2048 nodes.
     ///
-    /// STAND-IN: docs/24-motion.md#not-established -- the size gate a hall-way vertex puts on
-    /// a unit (its flags `0x10000000` and `0x20000000` against the unit's `+0x960`, and its
-    /// record's `+0x28`) is not modelled: every vertex passes.
+    /// A vertex is reached only where its size gate lets `size` through
+    /// (docs/24, "The global path").
     fn search(
         &self,
         start: Node,
         end: Node,
         ways: &[Way],
+        size: u8,
         random: &mut dyn FnMut() -> f32,
     ) -> Option<Vec<Node>> {
         if start == end {
@@ -789,6 +801,18 @@ impl Graph {
             }
         }
         let goal = self.node_centre(end, ways);
+        // The size gate a vertex puts on the unit reaching it (`Behavior.dll:0x10042d08`).
+        let fits = |w: usize, v: usize| {
+            let way = &ways[w];
+            let flags = way.flags.get(v).copied().unwrap_or(0);
+            if flags & VERTEX_ANY_SIZE != 0 {
+                true
+            } else if flags & VERTEX_BUILDING_SIZE != 0 {
+                way.size >= size
+            } else {
+                size <= SMALL_SIZE
+            }
+        };
         let links = |node: Node| -> Vec<(Node, f32)> {
             let mut out = Vec::new();
             match node {
@@ -852,6 +876,11 @@ impl Graph {
             }
             for (to, step) in links(node) {
                 if closed.contains(&to) {
+                    continue;
+                }
+                if let Node::Vertex(w, v) = to
+                    && !fits(w, v)
+                {
                     continue;
                 }
                 let scale = 1.0 + f64::from(random()) * RANDOM_SHARE;
@@ -1321,7 +1350,7 @@ mod tests {
     fn a_walk_crosses_each_edge_where_the_line_to_the_goal_does_or_three_from_an_end() {
         let graph = Graph::new(squares(5, 1, &[]));
         let (from, goal) = (Vec3::new(5.0, 2.0, 0.0), Vec3::new(45.0, 8.0, 7.0));
-        let legs = graph.route(from, goal, &[], None, 2.0, &mut fixed(0.0)).unwrap();
+        let legs = graph.route(from, goal, &[], None, 2.0, 2, &mut fixed(0.0)).unwrap();
         // Along a row the line to the goal crosses every edge where it meets it.
         let line = (goal - from).truncate().normalize();
         assert_eq!(legs.len(), 5, "{legs:?}");
@@ -1334,7 +1363,7 @@ mod tests {
         // the end nearer the way on.
         let graph = Graph::new(squares(5, 5, &[]));
         let (from, goal) = (Vec3::new(5.0, 5.0, 0.0), Vec3::new(45.0, 35.0, 7.0));
-        let legs = graph.route(from, goal, &[], None, 2.0, &mut fixed(0.0)).unwrap();
+        let legs = graph.route(from, goal, &[], None, 2.0, 2, &mut fixed(0.0)).unwrap();
         assert_eq!(legs.last(), Some(&goal));
         let on_edge = |p: &Vec3| p.x % 10.0 == 0.0 || p.y % 10.0 == 0.0;
         assert!(legs[..legs.len() - 1].iter().all(on_edge), "{legs:?}");
@@ -1350,11 +1379,11 @@ mod tests {
         let wall = [10, 11, 12, 13, 14];
         let graph = Graph::new(squares(5, 5, &wall));
         let from = Vec3::new(5.0, 25.0, 0.0);
-        let route = |goal: Vec3| graph.route(from, goal, &[], None, 2.0, &mut fixed(0.5));
+        let route = |goal: Vec3| graph.route(from, goal, &[], None, 2.0, 2, &mut fixed(0.5));
         assert_eq!(route(Vec3::new(25.0, 25.0, 0.0)), Err(Refusal::Goal), "on the wall");
         assert_eq!(route(Vec3::new(75.0, 25.0, 0.0)), Err(Refusal::Goal), "off the map");
         assert_eq!(route(Vec3::new(45.0, 25.0, 0.0)), Err(Refusal::NoWay), "beyond the wall");
-        let on_wall = graph.route(Vec3::new(25.0, 5.0, 0.0), from, &[], None, 2.0, &mut fixed(0.5));
+        let on_wall = graph.route(Vec3::new(25.0, 5.0, 0.0), from, &[], None, 2.0, 2, &mut fixed(0.5));
         assert_eq!(on_wall, Err(Refusal::Stranded));
     }
 
@@ -1365,7 +1394,7 @@ mod tests {
         let map = squares(5, 5, &wall);
         let graph = Graph::new(map.clone());
         let (from, goal) = (Vec3::new(5.0, 5.0, 0.0), Vec3::new(45.0, 5.0, 0.0));
-        let legs = graph.route(from, goal, &[], None, 2.0, &mut fixed(0.0)).expect("a way round");
+        let legs = graph.route(from, goal, &[], None, 2.0, 2, &mut fixed(0.0)).expect("a way round");
         assert_eq!(legs.last(), Some(&goal));
         assert!(keeps_off(&map, from, &legs, &wall), "{legs:?}");
         // Into the gap and out of it over the edges x = 20 and x = 30 of its row, 3 above the
@@ -1401,7 +1430,7 @@ mod tests {
             ArealMap { areals: vec![l, corner], cells_across: 1, cells_down: 1, cells: vec![vec![0, 1]] };
         let graph = Graph::new(map);
         let (from, goal) = (Vec3::new(18.0, 2.0, 0.0), Vec3::new(2.0, 18.0, 0.0));
-        let legs = graph.route(from, goal, &[], None, 2.0, &mut fixed(0.0)).unwrap();
+        let legs = graph.route(from, goal, &[], None, 2.0, 2, &mut fixed(0.0)).unwrap();
         assert_eq!(legs.last(), Some(&goal));
         let mut at = from;
         for &p in &legs {
@@ -1424,15 +1453,16 @@ mod tests {
         // Two halves of a deck over the wall, each an exit on the ground and a joining end.
         let half = |exit: Vec3, end: Vec3| Way {
             points: vec![exit, end],
-            flags: vec![0x1000_0001, 0x1000_0004],
+            flags: vec![VERTEX_ANY_SIZE | VERTEX_EXIT, VERTEX_ANY_SIZE | VERTEX_JOIN],
             links: vec![(0, 1)],
+            size: 2,
         };
         let ways = [
             half(Vec3::new(15.0, 25.0, 0.0), Vec3::new(24.0, 25.0, 5.0)),
             half(Vec3::new(35.0, 25.0, 0.0), Vec3::new(26.0, 25.0, 5.0)),
         ];
         let (from, goal) = (Vec3::new(5.0, 5.0, 0.0), Vec3::new(45.0, 5.0, 0.0));
-        let legs = graph.route(from, goal, &ways, None, 2.0, &mut fixed(0.0)).expect("over the deck");
+        let legs = graph.route(from, goal, &ways, None, 2.0, 2, &mut fixed(0.0)).expect("over the deck");
         let on = |p: Vec3| legs.iter().position(|&q| q == p).unwrap_or(usize::MAX);
         let order =
             [on(ways[0].points[0]), on(ways[0].points[1]), on(ways[1].points[1]), on(ways[1].points[0])];
@@ -1441,15 +1471,49 @@ mod tests {
         assert!(keeps_off(&map, ways[1].points[0], &legs[order[3] + 1..], &wall));
         // Halves 50 apart do not join.
         let apart = [ways[0].clone(), half(Vec3::new(35.0, 25.0, 0.0), Vec3::new(74.0, 25.0, 5.0))];
-        assert_eq!(graph.route(from, goal, &apart, None, 2.0, &mut fixed(0.0)), Err(Refusal::NoWay));
+        assert_eq!(graph.route(from, goal, &apart, None, 2.0, 2, &mut fixed(0.0)), Err(Refusal::NoWay));
         // A unit on the deck sets out from its nearest vertex, or from the next once it stands no
         // farther from that; a goal over the deck is refused, the wall being under it.
-        let aboard = graph.route(Vec3::new(25.5, 25.0, 5.0), goal, &ways, Some(1), 2.0, &mut fixed(0.0));
+        let aboard = graph.route(Vec3::new(25.5, 25.0, 5.0), goal, &ways, Some(1), 2.0, 2, &mut fixed(0.0));
         assert_eq!(aboard.map(|l| l[0]), Ok(ways[1].points[1]));
-        let past = graph.route(Vec3::new(27.0, 25.0, 5.0), goal, &ways, Some(1), 2.0, &mut fixed(0.0));
+        let past = graph.route(Vec3::new(27.0, 25.0, 5.0), goal, &ways, Some(1), 2.0, 2, &mut fixed(0.0));
         assert_eq!(past.map(|l| l[0]), Ok(ways[1].points[0]), "the joining end is behind it");
-        let onto = graph.route(from, Vec3::new(25.0, 25.0, 5.0), &ways, None, 2.0, &mut fixed(0.0));
+        let onto = graph.route(from, Vec3::new(25.0, 25.0, 5.0), &ways, None, 2.0, 2, &mut fixed(0.0));
         assert_eq!(onto, Err(Refusal::Goal));
+    }
+
+    #[test]
+    fn a_hall_way_vertex_gates_the_unit_by_size() {
+        let wall = [10, 11, 12, 13, 14];
+        let map = squares(5, 5, &wall);
+        let graph = Graph::new(map);
+        // A deck over the wall: an exit each side and a middle vertex whose flags decide.
+        let deck = |middle: u32, size: u8| Way {
+            points: vec![
+                Vec3::new(15.0, 25.0, 0.0),
+                Vec3::new(25.0, 25.0, 5.0),
+                Vec3::new(35.0, 25.0, 0.0),
+            ],
+            flags: vec![VERTEX_ANY_SIZE | VERTEX_EXIT, middle, VERTEX_ANY_SIZE | VERTEX_EXIT],
+            links: vec![(0, 1), (1, 2)],
+            size,
+        };
+        let (from, goal) = (Vec3::new(5.0, 25.0, 0.0), Vec3::new(45.0, 25.0, 0.0));
+        let over = |middle: u32, size: u8, unit: u8| {
+            let ways = [deck(middle, size)];
+            graph.route(from, goal, &ways, None, 2.0, unit, &mut fixed(0.0)).is_ok()
+        };
+        // A vertex with neither flag passes only size class 2 or less -- the shipped pods' case.
+        assert!(over(0, 4, 2));
+        assert!(over(0, 4, 1));
+        assert!(!over(0, 4, 3));
+        assert!(!over(0, 4, 4));
+        // 0x10000000, a ground-level place, passes anything.
+        assert!(over(VERTEX_ANY_SIZE, 2, 4));
+        // 0x20000000 passes a unit no bigger than the building.
+        assert!(over(VERTEX_BUILDING_SIZE, 4, 4));
+        assert!(over(VERTEX_BUILDING_SIZE, 4, 3));
+        assert!(!over(VERTEX_BUILDING_SIZE, 3, 4));
     }
 
     /// A rectangle's corners from `lo` to `hi`, counter-clockwise.
@@ -1516,7 +1580,7 @@ mod tests {
         assert!(graph.usable(25.0, 25.0), "the areal is still walkable");
 
         let (from, goal) = (Vec3::new(5.0, 25.0, 0.0), Vec3::new(45.0, 25.0, 0.0));
-        let legs = graph.route(from, goal, &[], None, 2.0, &mut fixed(0.0)).unwrap();
+        let legs = graph.route(from, goal, &[], None, 2.0, 2, &mut fixed(0.0)).unwrap();
         assert_eq!(legs.last(), Some(&goal));
         assert!(!enters(from, &legs, stone, 1e-3), "{legs:?}");
         // Round the stone's corners, off them by the clearance or half the way past them.
@@ -1545,7 +1609,7 @@ mod tests {
         assert!((cover(&graph, 3) - 70.0).abs() < 1e-3 && (cover(&graph, 4) - 40.0).abs() < 1e-3);
 
         let (from, goal) = (Vec3::new(5.0, 15.0, 0.0), Vec3::new(25.0, 15.0, 0.0));
-        let legs = graph.route(from, goal, &[], None, 2.0, &mut fixed(0.0)).unwrap();
+        let legs = graph.route(from, goal, &[], None, 2.0, 2, &mut fixed(0.0)).unwrap();
         assert_eq!(legs.last(), Some(&goal));
         assert!(!enters(from, &legs, stone, 1e-3), "{legs:?}");
 
@@ -1554,7 +1618,7 @@ mod tests {
         graph.carve(&[rectangle([13.0, -5.0], [17.0, 15.0])]);
         sound(&graph);
         let route =
-            graph.route(Vec3::new(5.0, 5.0, 0.0), Vec3::new(25.0, 5.0, 0.0), &[], None, 2.0, &mut fixed(0.0));
+            graph.route(Vec3::new(5.0, 5.0, 0.0), Vec3::new(25.0, 5.0, 0.0), &[], None, 2.0, 2, &mut fixed(0.0));
         assert_eq!(route, Err(Refusal::NoWay));
     }
 
@@ -1568,13 +1632,13 @@ mod tests {
         assert!((cover(&graph, 12) - (100.0 - 36.0 - 9.0 + 4.0)).abs() < 1e-3, "{}", cover(&graph, 12));
 
         let from = Vec3::new(5.0, 25.0, 0.0);
-        let legs = graph.route(from, Vec3::new(23.0, 25.0, 0.0), &[], None, 2.0, &mut fixed(0.0)).unwrap();
+        let legs = graph.route(from, Vec3::new(23.0, 25.0, 0.0), &[], None, 2.0, 2, &mut fixed(0.0)).unwrap();
         let last = *legs.last().unwrap();
         assert!(!enters(from, &legs, stone, 1e-3), "{legs:?}");
         assert!(last.truncate().distance(Vec2::new(20.0, 25.0)) < 1e-3, "2 in from the stone's edge: {last}");
 
         let inside = Vec3::new(24.0, 25.0, 0.0);
-        let legs = graph.route(inside, Vec3::new(5.0, 25.0, 0.0), &[], None, 2.0, &mut fixed(0.0)).unwrap();
+        let legs = graph.route(inside, Vec3::new(5.0, 25.0, 0.0), &[], None, 2.0, 2, &mut fixed(0.0)).unwrap();
         assert_eq!(legs.last(), Some(&Vec3::new(5.0, 25.0, 0.0)));
     }
 

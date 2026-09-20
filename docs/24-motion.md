@@ -375,7 +375,8 @@ What follows from it:
     (`Behavior.dll:0x100051b0`).
   - Once it is not, the takt clears the flag and, if the flag was set, clears
     the walker's three target queues (`0x1000528f`, `0x1003dc90`): the AI
-    stops driving it.
+    stops driving it — and stops ordering it at all
+    ([below](#flag-0x800-is-the-units-leave-to-be-ordered--read-and-measured)).
   - Engines and running gear shot to nothing trip that. A flat battery does
     not, because it never lowers the top speed.
 - **A robot has one engine, and its mark caps its speed.** The fitted engine replaces
@@ -394,6 +395,69 @@ What follows from it:
   So a robot whose body is down to half its hit points has half its E: it
   runs at half speed and turns at half its rate. The hero too, whose built-in
   engine sits on its body node (*derived*).
+
+### Flag `0x800` is the unit's leave to be ordered — *read*, and *measured*
+
+Three routines in the whole install touch bit `0x800` of the behaviour's flag
+word `+0xa04` — the takt that keeps it, and two that read it — and the
+enumeration is the answer.
+**Every access to `+0xa04` anywhere in the fifteen modules is in
+`Behavior.dll`** — 51 of them, all at that one displacement; the only other
+hit in the install is a `lea` of a log buffer in `Effect.dll`. Bit `0x800` is
+at **five** of the 51:
+
+| where | what |
+|---|---|
+| `0x100051e9` (`or ch, 8`), `MBehaviour` vtable slot 56, the unit takt `0x10005110` | **sets** it while the copied live forward top speed `+0x614` is at least 0.5 (`0x100595c0`) and above triple 2's forward `+0x600` |
+| `0x10005295` (`test ah, 8`), `0x100052b0` (`and ah, 0xf7`), the same takt | **clears** it once that fails, and, only if it had been set, empties the walker's three queues (`0x1000528f`, `0x1003dc90`) |
+| `0x10004b25` (`test ah, 8`), **`MBehaviour::AddOrder`**, vtable slot 3 (`0x10004a90`, vtable `0x10059250` installed at `0x10003bdd`) | without it the order is **refused**: `AddOrder` returns 0 and never reaches `MBehaviour::MakeNewOrder` (slot 28, `0x10004280`, which names itself in its own log) |
+| `0x10034579` (`test ch, 8`), the self-given task factory `0x10034510` | without it **no task is built**: the six-way switch on the reason is never reached, so no `M_Task_Attack` and no `M_Task_Reload` ([31-packages.md](31-packages.md#between-orders--read)) |
+
+**Both readers let a building through.** Each falls back on the object's Type,
+`MBehaviour` `+0xafc` through slot 14 (`0x10008c50`): a Type carrying
+`0x80000000`, `CLASS_BUILDING`, passes with the flag clear (`0x10004b37`,
+`0x1003458b`). The task factory tests the live top speed against 0.5 itself
+first (`0x10034539`), with the same escape.
+
+So the flag is not a detail of the walker: **it is the unit's leave to be
+ordered at all.** A unit that has lost it refuses every order `ai.dll`'s
+script function 15 gives it — which the scripts read as *refused* and mark the
+problem solved ([23-economy.md](23-economy.md)) — and never engages,
+retaliates, answers a call for help or goes to refit.
+
+**The control** is the same sweep at the word's other bits, which finds their
+readers: `0x1` and `0x2`, the initialisation flags whose tests log
+*"GMSG_INTERNAL_INIT … twise"* and *"Invalid initialization messages"*
+(7 and 12 tests, set at `0x10005e51` and `0x10005fcb`); `0x4` (11 tests);
+`0x10` (3 tests and 2 sign-extracts, `shl 0x1b; sar 0x1f`); `0x20`; `0x40`;
+and `0x1000` (2 tests, set at `0x10004d79` and `0x10008cce`). No module
+outside `Behavior.dll` reaches the word, through the plain displacement or
+through the second interface's (`+0xc`, so `+0x9f8`, which is a float field of
+the object's own).
+
+*Measured*, over the 531 controllers: the live forward top is the authored
+top × G × E × (1 + r) ÷ 2 **capped at the authored top**, so a controller
+whose authored forward top is at or below max(0.5, triple 2's forward) can
+never carry the flag. **94 of the 531 can; 437 cannot** — and of those 437,
+30 are `fortif.rlb` buildings, which the Type escape covers, and the rest are
+guns, internal parts and scenery with no behaviour of their own. Of the 24
+`bases.rlb` chassis, **21 can and three cannot**: `r_h_01` and `r_h_03`, the
+two shooting-range targets, and `r_b_06`, the Small Tower, all three authored
+at a forward top of 0.2 against a floor of 0.1.
+
+- **Those three are fielded.** 18 of the shipped assemblies sit on them, and
+  the missions place **33**: `l_targ` ×3 and `m_targ` ×2 on *Line of Fire*,
+  and 28 Small Towers across C01 M03, C02 M02, C03 M01/M03/M04, C04 M02 and
+  `Multi.05`. Their Type is `0x01008000`, a warrior, not a building, so the
+  escape does not apply: **a Small Tower can never be given an order and never
+  takes a task of its own.** What it does to a passing hero is its guns' free
+  fire, which is not on this path ([29-weapons.md](29-weapons.md)).
+- **For everything that moves the flag is on.** A chassis loses it only once
+  E × G × (1 + r) ÷ 2 falls to between 0.0113 (`r_l_02`) and 0.0429
+  (`r_h_02`, the hero) — under 5% of its authored top speed, which takes both
+  sides of the running gear or the engine gone. So on a healthy machine the
+  flag changes nothing a player would see; on a wreck it is what stops the AI
+  giving it anything more to do.
 
 ### What shipped units get — *measured*, then *derived*
 
@@ -2705,7 +2769,75 @@ So the only link across either canyon runs over the deck.
 5. A hall-way vertex also gates the unit by size (`0x10042d08`): flag
    `0x10000000` passes; `0x20000000` passes when the building's property
    `0x201` is at least the unit's `+0x960`; otherwise only a unit whose
-   `+0x960` is at most 2. What `+0x960` holds is not established.
+   `+0x960` is at most 2.
+   `+0x960` is the **size class** — T 1, S 2, M 3, L 4 — which the behaviour
+   takes from the root component's member name, a unit's third letter and a
+   building's fourth ([below](#not-established)), so the gate measures a unit
+   against the building it is walking into.
+
+The function names itself: both its bug lines read
+*"\*\*\* Bug!!!: MWorldGraph::AddNeighbourToFront()"* (`0x10042d7d`,
+`0x10042d84`).
+
+#### The hall-way gates, in the shipped buildings — *read*, and *measured*
+
+**A vertex's gate is its own flag word**, the one the file carries at +0xc of
+its 20-byte record. The loader keeps it at the live vertex's `+0x10`
+(`ArealMap.dll:0x1000a4fb`–`0x1000a534`, 92 bytes a vertex), and the search
+reads it back through `MHallWay` slot 4. *Measured* over the **29 hall ways,
+1056 vertices and 1096 links** the install ships, all of them in `fortif.rlb`:
+
+| gate | vertices | where |
+|---|---:|---|
+| `0x10000000`, any size | 165 | every bridge vertex (9, 9, 9, 10), the mines' and stores' yards, the hangar, the Small Generator, the factories' approaches |
+| `0x20000000`, the building's own size | 7 | the three factories alone — `fr_b_plant` 2, `fr_l_plant` 3, `fr_m_plant` 2 |
+| neither, size class 2 or less | 884 | everything else |
+
+So the gate says what the capture rule says. **All 21 control pods are
+"size 2 or less"** vertices, which is the same bound the capture order puts on
+a capturer ([27-ownership.md](27-ownership.md#capture--read)) — the path graph
+refuses a medium or large bot the pod a second time. Of the 124 exits (flag
+1), 66 are ground-level and 58 are not. The missions place **190 units and
+buildings of size class 3 or 4** against 222 of size 1 or 2, so the gate is
+shut to nearly half of what is on a map.
+
+**The link flags come from the link's own tail.** The loader builds a 56-byte
+link and copies the file's forty bytes — start, end and eight further words —
+to its front, the eight as four pairs at `+8`..`+0x24`
+(`ArealMap.dll:0x1000a568`–`0x1000a5a0`). The neighbour the search is handed
+takes `0x20000` when **both** the link's `+0xc` and `+0x1c` are zero and
+`0x10000` when the first is zero and the second is not (`0x1000a274`,
+`0x1000a294`, and the same pair for the other direction at `0x1000a2d4`,
+`0x1000a2f4`) — so they are the file's tail words 1 and 5.
+
+*Measured*, over all 1096 links: **1078 carry neither, 18 carry `0x10000` and
+none carries `0x20000`.** The eighteen sit on the three mines (2 each) and the
+three factories (4 each), and are the only links in the shipped game a walker
+may not cross; a flyer may, and nothing in the install is shut to everything.
+The tail takes three shapes: all −1 on 1034, (−1, 0, −1, 0, −1, −1, −1, −1) on
+the eighteen, and a node index with 1 beside it, four times over, on 44. This
+page's reader had the tail down as "0xFFFFFFFF throughout"; it is not.
+
+*Not established* beside it: the door list a link opens
+(`ArealMap.dll:0x1000b170`, [above](#walking-into-a-building--read-and-measured))
+is four dwords at the live link's `+0x28`, which is past the forty bytes the
+load copies, so whether the 44 tails above are where it comes from is not read.
+The opener takes each of the four that is not −1, asks the building for that
+child's class and, on class 12, `CICLS_DOOR`, opens it.
+
+#### Who relinks a hall way — *read*
+
+`MHallWay` slot 11 (`0x1000b390`; the vtable is `0x10039420`, installed by
+`CreateHallWay` at `0x10009749`) fetches the system areal map and walks the
+hall way's own vertex array at `+0x28`. **Two sites in the whole install call
+it**, both in `ArealMap.dll` and both at the end of the same pass: `OnAddStatic`
+(`0x10022cae`) and `OnRemoveStatic` (`0x10023168`). Each asks the world for
+its scene objects of kind 3 — the buildings — and, for every one that answers
+interface `0x303`, runs slot 11 on its hall way. So a building's exits are
+joined to the areals under them **when the map is built and again whenever a
+tree or a stone is added or taken away**
+([below](#a-tree-or-a-stone-cuts-the-areals-it-stands-on--read-and-measured)),
+right after the broken areals themselves have been relinked by `0x10023240`.
 
 **Where a walker may be sent.** `MWalker::SetTarget` first empties the three
 queues, and answers 1 only once the global path is found (`0x1003bfdf`).
@@ -2740,6 +2872,36 @@ across its valley. Its floor under the bridge lies at 18 m, the plateaus
 either side at about 50 m. Every areal of the canyon floor and walls has the word 0,
 and the plateaus either side have 1. So the walker finds no way down into
 it, and none across but over the bridge.
+
+### Dropping the points a unit has passed — *read*
+
+`MWalker::ClearMoverReachedPoint` (`Behavior.dll:0x1003cfd0`, which names
+itself in its own log line at `0x1003d16e`) is the walker's book-keeping when
+the mover has eaten part of the trajectory. The trajectory is the list at
+`+0x11c`, `0x48` bytes a record, `+0x114` records long; the mover's own count
+sits at `MBehaviour` `+0x250`.
+
+1. **It gives up the place it was holding.** If the walker's `+0x88` is a
+   building id rather than −1, it finds that object, asks its hall way
+   (interface `0x303`) who holds vertex `+0x8c` (slot 9) and, if that is this
+   unit's own id (`MBehaviour` slot 12), sets the vertex free — slot 10 with
+   −1 (`0x1003d059`).
+2. **Nothing more happens while the mover is not behind** — `+0x250` at least
+   `+0x114` returns at once (`0x1003d064`).
+3. Otherwise *n* = `+0x114` − `+0x250` records come off the **front** of the
+   list. Before they go, the last of them becomes the walker's own place: its
+   position into `+0x6c`, and the record's `+0x28`, `+0x2c`, `+0x30` and
+   `+0x34` into `+0x78`, `+0x7c`, `+0x88` and `+0x8c` — so the building and
+   vertex the walker now counts itself at are the last passed point's.
+4. **Every place the dropped stretch had booked is handed back**, record by
+   record, by the same three calls as step 1 on each whose `+0x30` is a
+   building id (`0x1003d0c5`–`0x1003d14c`).
+5. The list then drops its first *n* (`0x1003d161`), and what is left, if
+   anything, gives the walker its next point at `+0x90`.
+
+So a unit that walks on does not hold the hall-way places behind it, and a
+walker replanned part way along keeps the place it has reached rather than the
+one it set out from.
 
 ### A tree or a stone cuts the areals it stands on — *read*, and *measured*
 
@@ -2826,13 +2988,20 @@ patrol runs past it.
   not convex can leave the walkable areals); how a walker in a hole walks out
   of it, and what it does with a goal in one; whether every scenery object
   reaches the areal map's slot 3, and a box for a mesh of several parts;
-  whether the search measures a sub-areal from its centre; how the walker drops the points a
-  unit has passed (`MWalker::ClearMoverReachedPoint`, `0x1003cfd0`), how the walker goes to the point
+  whether the search measures a sub-areal from its centre; ~~how the walker drops the points a
+  unit has passed (`MWalker::ClearMoverReachedPoint`, `0x1003cfd0`)~~ — **read**
+  ([below](#dropping-the-points-a-unit-has-passed--read)); how the walker goes to the point
   it finds off a non-walkable areal, how a unit's place comes to be on a
-  building's map object and which vertex the search starts from, who calls
-  `MHallWay` slot 11 (`0x1000b390`, which links a building's exits), what a
+  building's map object and which vertex the search starts from; ~~who calls
+  `MHallWay` slot 11 (`0x1000b390`, which links a building's exits)~~ —
+  **read**: `OnAddStatic` and `OnRemoveStatic` alone, on every building
+  ([Who relinks a hall way](#who-relinks-a-hall-way--read)); ~~what a
   vertex's size gate reads from the unit (`+0x960`) and its record (`+0x28`),
-  what the link flags `0x10000` and `0x20000` mean, the Wizard's heading curve
+  what the link flags `0x10000` and `0x20000` mean~~ — **read**, and
+  **measured**: the unit's size class against the vertex's own flag word, and
+  the link's tail words 1 and 5
+  ([The hall-way gates](#the-hall-way-gates-in-the-shipped-buildings--read-and-measured));
+  the Wizard's heading curve
   (`0x10003d80`), and who reads `Movement_FlyHeight`.
 - Whether the walker's clear (`0x1003c540`) also empties the points the Wizard
   already holds. `ClearWizardPath` is logged at `0x10040e3b`.
@@ -2973,7 +3142,13 @@ patrol runs past it.
   unpowered~~ — answered: none reads an engine's power level; the AI stops
   driving a unit whose live top speed falls to its floor
   ([What sets the live limits](#what-sets-the-live-limits--read)).
-- What behaviour flag `0x800` (`+0xa04`) changes besides clearing the walker.
+- ~~What behaviour flag `0x800` (`+0xa04`) changes besides clearing the
+  walker.~~ — **read**, and **measured**: it is read in two more places, both
+  of which refuse the unit unless it is a building — `MBehaviour::AddOrder`
+  and the self-given task factory — so it is the unit's leave to be ordered at
+  all, and the three chassis that can never carry it are the Small Tower and
+  the two shooting-range targets
+  ([Flag `0x800`](#flag-0x800-is-the-units-leave-to-be-ordered--read-and-measured)).
   Triple 2 is never read inside `Control.dll` — nothing reaches +32..+40 in
   either copy of the block ([13-control.md](13-control.md)) — and the AI reads
   its forward component as a floor.

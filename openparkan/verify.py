@@ -5708,6 +5708,50 @@ GENERIC_DEVICE_TYPES = frozenset({3, 6, 7, 11, 12, 13, 14, 16, 18, 20, 21, 22, 2
 
 def check_ctl_fields(check, game: Path, blobs, parsed) -> None:
     """.ctl: component entries, section 1's contacts, the lean, triple 2, device inputs."""
+    # The values nothing reads, and the section-5 int nothing reads.
+    # docs/13-control.md, "The values nothing reads".
+    cameras = [k for c in parsed for k in c.components if k.type_id == 4]
+    check(".ctl: every camera carries the same six values, 3 to 5 among them",
+          len(cameras) == 61
+          and all(tuple(round(v, 4) for v in k.values[:6]) == (0.1, 1000.0, 1.3, 1.0, 150.0, 1.0)
+                  for k in cameras),
+          f"{len(cameras)} class-4 components, all (0.1, 1000, 1.3, 1, 150, 1); "
+          f"values 3-5 are read by nothing (Control.dll:0x1003c720)")
+
+    arms = [(n, k) for (_lib, n, _b), c in zip(blobs, parsed, strict=True)
+            for k in c.components if k.type_id == 24]
+    check(".ctl: the hero's arms are four class-24 records on one turret",
+          len(arms) == 4 and {n.lower() for n, _ in arms} == {"o_tur_ht_02.ctl"}
+          and sorted(k.node for _n, k in arms) == [8, 12, 15, 19]
+          and all(k.values[4] == 2.0 for _n, k in arms),
+          f"{len(arms)} records on {sorted({n for n, _ in arms})}, value 1 "
+          f"{[k.values[1] for _n, k in arms]}, value 4 2.0 throughout -- neither is read")
+
+    ints8 = Counter(r.values[8] & 0xFFFFFFFF for c in parsed for r in c.references)
+    odd = [(n, r.resource.member) for (_lib, n, _b), c in zip(blobs, parsed, strict=True)
+           for r in c.references if r.values[8]]
+    check(".ctl: a section-5 record's int 8 is zero but for two records",
+          sum(ints8.values()) == 2925 and ints8[0] == 2923
+          and sorted(m for _n, m in odd) == ["eng_rb_07_snd", "eng_rb_08_snd"],
+          f"{sum(ints8.values())} records, {ints8[0]} zero; the other two carry "
+          f"0x3f800000 (1.0 as a float) on {sorted(odd)} -- read by nothing")
+
+    # Flag 0x800: which controllers can ever carry it.
+    # docs/24-motion.md, "Flag 0x800 is the unit's leave to be ordered".
+    ordered = [(lib, n) for (lib, n, _b), c in zip(blobs, parsed, strict=True)
+               if c.triples[2][1] > max(0.5, c.triples[1][1])]
+    never_chassis = sorted(n.lower() for lib, n in
+                           [(lib, n) for (lib, n, _b), c in zip(blobs, parsed, strict=True)
+                            if lib.lower() == "bases.rlb"
+                            and c.triples[2][1] <= max(0.5, c.triples[1][1])])
+    check(".ctl: three chassis can never carry behaviour flag 0x800",
+          len(ordered) == 94
+          and never_chassis == ["r_b_06.ctl", "r_h_01.ctl", "r_h_03.ctl"],
+          f"{len(ordered)}/{len(parsed)} controllers have an authored forward top speed "
+          f"above max(0.5, triple 2's forward); the three bases.rlb ones that do not are "
+          f"{never_chassis} -- the Small Tower and the two targets, which can therefore "
+          f"take no order and no task of their own")
+
     entries = [(x, c.counts[2]) for c in parsed for k in c.components for x in k.entries]
     channels = sum(c.counts[2] for c in parsed)
     named = sum(len({x for k in c.components for x in k.entries}) for c in parsed)
@@ -8726,6 +8770,58 @@ def _hall_ways(game: Path) -> dict[str, objmesh.PathGraph | None]:
         if e.tag == "MESH":
             out[e.name.lower()] = objmesh.read_path_graph(NResArchive(fortif.read(e), e.name))
     return out
+
+
+def check_hall_way_gates(check, game: Path) -> None:
+    """The size gate a hall-way vertex puts on a unit, and a link's own gate.
+
+    docs/24-motion.md, "The hall-way gates, in the shipped buildings".
+    """
+    graphs = {n: g for n, g in _hall_ways(game).items() if g is not None and g.nodes}
+    nodes = [n for g in graphs.values() for n in g.nodes]
+    links = [l for g in graphs.values() for l in g.links]
+
+    any_size = sum(1 for n in nodes if n.flags & objmesh.VERTEX_ANY_SIZE)
+    by_building = sum(1 for n in nodes if not n.flags & objmesh.VERTEX_ANY_SIZE
+                      and n.flags & objmesh.VERTEX_BUILDING_SIZE)
+    small = len(nodes) - any_size - by_building
+    check("fortif.rlb: a hall-way vertex's size gate is one of three",
+          (len(graphs), len(nodes), any_size, by_building, small) == (29, 1056, 165, 7, 884),
+          f"{len(graphs)} hall ways, {len(nodes)} vertices: {any_size} any size, "
+          f"{by_building} the building's own, {small} size class 2 or less")
+
+    sized = {n for n, g in graphs.items()
+             if any(not v.flags & objmesh.VERTEX_ANY_SIZE
+                    and v.flags & objmesh.VERTEX_BUILDING_SIZE for v in g.nodes)}
+    check("fortif.rlb: only the three factories gate a vertex by their own size",
+          sized == {"fr_b_plant.msh", "fr_l_plant.msh", "fr_m_plant.msh"},
+          f"{sorted(sized)}")
+
+    pods = [n for n in nodes if n.flags & objmesh.PLACE_POD]
+    check("fortif.rlb: every control pod is shut to a unit over size class 2",
+          bool(pods) and all(not n.fits(3, 4) and n.fits(2, 4) for n in pods),
+          f"{len(pods)} pods, none of which a size-3 or size-4 unit may walk to")
+
+    gates = Counter(l.gate for l in links)
+    check("fortif.rlb: 18 hall-way links are flyer-only and none is shut",
+          (len(links), gates[objmesh.LINK_FLYER_ONLY], gates[objmesh.LINK_SHUT])
+          == (1096, 18, 0),
+          f"{len(links)} links: {gates[objmesh.LINK_FLYER_ONLY]} flyer-only, "
+          f"{gates[objmesh.LINK_SHUT]} shut, {gates[0]} open")
+
+    flyer = {n for n, g in graphs.items()
+             if any(l.gate == objmesh.LINK_FLYER_ONLY for l in g.links)}
+    check("fortif.rlb: the flyer-only links are the mines' and the factories'",
+          flyer == {"fr_b_mine.msh", "fr_l_mine.msh", "fr_m_mine.msh",
+                    "fr_b_plant.msh", "fr_l_plant.msh", "fr_m_plant.msh"},
+          f"{sorted(flyer)}")
+
+    blank = sum(1 for l in links if set(l.extra) == {0xFFFFFFFF})
+    named = sum(1 for l in links if l.extra[0] not in (0, 0xFFFFFFFF))
+    check("fortif.rlb: a link's eight tail words are not -1 throughout",
+          (blank, named, len(links) - blank - named) == (1034, 44, 18),
+          f"{len(links)} links: {blank} all -1, {named} naming a node four times over, "
+          f"{len(links) - blank - named} gated")
 
 
 def _building_places(game: Path) -> dict[str, tuple[str, list[int]]]:
@@ -23583,7 +23679,7 @@ def run(game: Path) -> int:
         check_control, check_efficiency, check_mission_03_economy,
         check_motion, check_playback, check_ground, check_sensors, check_hit_test,
         check_collision, check_lake_and_buoys,
-        check_combat, check_ownership, check_owner_word,
+        check_combat, check_ownership, check_owner_word, check_hall_way_gates,
         check_capture, check_building_entry, check_pod_zone, check_door_shot,
         check_building_lighting,
         check_building_ground,

@@ -419,8 +419,57 @@ ever non-zero):
 | 24 the hero's arms | 1 and 4 | not read |
 | 1, 12, 13, 25, 29 | none | — |
 
+### The values nothing reads — *read*, and *measured*
+
+Three entries in that table say *not read*, and the search that says so is the
+same one for all three, so it is written down once.
+
+**A value leaves a component one way.** Every class answers a value id through
+its vtable slot 4, `Control.dll:0x10021d00`, which indexes
+`[this + 4*(id & 0xff) + 0x54]`; the sixteen floats live at the component's
+`+0x54`, so value *N* is `+0x54 + 4N`. A reader therefore either calls that
+slot with an id or reaches the floats itself.
+
+**The camera never asks for more than three.** Enumerating every access in
+`[0x54, 0x94)` across the camera class's constructor (`0x100233d0`) and all
+sixteen slots of its vtable (`0x1003c720`, installed at `0x10023459`) finds
+the indexed read inside the getter itself and three `lea`s of the block whole,
+in the shared slots 7, 14 and 15 that move it as a block (`0x10021d8e`,
+`0x10021fe0`, `0x100220b5`) — and nothing else, no slot naming a value of its
+own. What the camera does do is ask **itself** through the getter,
+with the literal ids **0, 1 and 2** (`0x10023937` and its neighbours in
+`0x100238b0`), and hand the three to the view it creates.
+
+**And nothing else asks a camera at all.** Sweeping all fourteen modules for
+an immediate pushed in front of an indirect call at vtable `+0x10`, which is
+where the getter sits, the ids 3, 4 and 5 turn up at **18** sites, all in
+`Control.dll`, and every one is inside the radar (`0x10024390`, `0x10024620`),
+the detect shield (`0x100264b0`), the gun (`0x10029ca0`, `0x1002a190`) or the
+two `IDeviceManager` summaries (`0x1002b410`, `0x1002bb40`, which ask the
+deflector for `0x303`–`0x305`). The control is that the same sweep finds the
+camera's own three asks, and 100, 196 and 28 sites for ids 0, 1 and 2.
+*Measured*: values 3, 4 and 5 are **1, 150 and 1 on every one of the 61**
+cameras, the whole six-value row being the same on all of them.
+
+**The generic device reads none of its sixteen.** Classes 3 and 24 are both
+built as the one device (`0x1002d6ec`, constructor `0x10020800`), and the same
+sweep over its constructor and update (`0x10020900`, `0x10020d90`,
+`0x10020ea0`) returns a single hit — `fld dword ptr [edx + ecx*4 + 0x54]` at
+`0x10020c7a` — which is **not a value**: the index is scaled by 23 dwords
+(`lea ecx, [eax + eax*2]; shl ecx, 3; sub ecx, eax`), the 0x5c-byte stride of
+the ground-contact array at control `+0xc4`, and `+0x54` is a field inside one
+of those. A sweep that took it for a value would have been counting contacts.
+
+*Measured*: class 3 is **72 records in 12 controllers**, and its value 0 is
+0.5 on eight and zero on the other 64. Class 24 is **four records, all on the
+hero's turret `o_tur_ht_02`**, on nodes 12, 8, 19 and 15 — the four nodes its
+four guns hang beside — each driving two or three section-2 channels and
+starting in state 33. Their value 1 is 300, 150, 0 and 2, and their value 4 is
+2 on all four. Nothing reads either.
+
 So the only values not yet read are class 3's value 0, the camera's 3–5 and
-the arms' 1 and 4.
+the arms' 1 and 4 — and now they are not "not yet": **they are read by
+nothing**.
 
 ### The entries are channels, and a device's inputs — *read*, and *measured*
 
@@ -469,10 +518,30 @@ Nine `int32`, **then** the name pair:
 0x08  int32      the inversion: the masked bytes that count when clear
 0x0c  int32      the action, 0..27 (Control.dll:0x10002800, table 0x10003590)
 0x10  int32[4]   v4..v7, the action's arguments
-0x20  int32      not read; 1.0 as a float on two records
+0x20  int32      read by nothing (below)
 0x24  char[32]   archive
 0x44  char[32]   member
 ```
+
+**Int 8 is read by nothing** — *read*, with a control, and *measured*. The
+interpreter `0x10002800` is the only code that walks the records, and it
+walks them in `esi`: the group's count is at the base, the first record four
+bytes on, and the cursor is stepped 100 bytes a record by
+`lea eax, [eax + eax*4]; lea ecx, [eax + eax*4]; lea esi, [esi + ecx*4 + 4]`
+(`0x100028a0`). Inside the loop it reads `[esi]` twice for the run flags
+(`0x80000000`, `0x10000000`), hands the record to the condition test
+(`0x100022c0`, which is where ints 1 and 2 go), then `+0xc` for the action and
+`+0x10`, `+0x14`, `+0x18` and `+0x1c` for v4..v7, and takes the two names at
+`+0x24` and `+0x44`. **`+0x20` is never one of them.** The three
+`[esi + 0x20]` in the function are all inside handlers that have first done
+`add esi, 0x24` (`0x100030e8`), so they address the *member* name's first
+byte, not int 8 — which is the control: the same sweep, honestly filtered,
+does find every neighbouring int.
+
+*Measured*: **2923 of the 2925 records leave it zero.** The two that do not
+are action-3 records naming `eng_rb_07_snd` and `eng_rb_08_snd` on `r_b_07`
+and `r_b_08`, and both hold `0x3f800000` — 1.0 read as a float. A field the
+engine never looks at, with an artist's stray value in it twice.
 
 A group is a list of actions run in order: when a state is entered (its `+0x90`),
 when a contact lands (its `+8`, [below](#section-1s-conditions-are-contacts--read-and-measured)),
@@ -558,6 +627,51 @@ groups are the clearest (`r_h_02`, one per foot):
 against 2 with the surfaces shifted by one. The critically damaged hero
 starts `smoke_fr_01` only while byte 7 is clear: no smoke over a liquid bed
 (*derived*).
+
+### Control message 7 says who simulates the object — *read*
+
+Message 7 reaches the control system's own dispatcher at `0x10007bdc`
+(`IControl` slot 2, `0x10007830`; the agent forwards it to three sub-objects at
+`AniMesh.dll:0x1000149d`, `0x100014b2` and `0x100014cb`). It takes one
+argument, and the first thing it does is the byte behind condition 15:
+
+```
++0x618 = (argument == 2)                        0x10007bf7
+argument == 2  -> clear 0x10000000 in +0x61c    0x10007c1a
+argument != 2  -> set it, unless the current state +0x50 is 2 or 9
+if +0x618 changed, refresh (0x1002dc20)         0x10007c32
+```
+
+Arguments **0 and 1** then go on (`0x10007c37`; 2 and anything else stop
+there): the object's `+0x38` interface is walked backwards, every item whose
+kind (slot 8) is `0x18` has its property `0x600` set to 1 (slot 7), and the
+turret component at `+0x5c8` is given `0x10028130`.
+
+**Who sends which.** Enumerating every site in the install that pushes 7 and 6
+next to each other — the message and the agent's id-6 arm — gives 21, all in
+`iron3d.dll` and `World3D.dll`, and the argument is the push in front:
+
+| argument | sent by |
+|---:|---|
+| 2 | `World3D.dll`'s `CreateMirror` (`0x100091fe`), `AddNewMirror` (`0x10009619`, *"AddNewMirror: Illegal player number"*) and the queued `ChangeOwner` (`0x10005031`) |
+| 0 | `LoadObject` (`0x1000a064`), the `GMSG_CHANGE_OBJECT_OWNER` handler (`0x100067b8`) and `iron3d.dll:0x1007508a`, `0x10075111` |
+| 1 | `iron3d.dll:0x100750c1` and six of the `0x10063df0`–`0x100643b0` family |
+
+So **argument 2 means the object is not simulated here** — a mirror of another
+player's, or one part way through changing hands — and 0 and 1 hand it back.
+That is what the byte's readers do with it: fourteen functions in
+`Control.dll` read `byte ptr [X + 0x618]`, and the three that are traced all
+switch off a piece of the simulation while it is set. The group runner copies
+it into condition byte 15 before every group (`0x1000286d`); the ground
+contact does not move the body at all (`0x1001b3f7`); node damage with the
+third argument set is added to the node's `+0x10` and the life put back
+(`0x10010fe6`); and **the camera makes no view** unless the owner's scene node
+is kind 3, a building (`0x100238db`, `0x10023a1f`). The serialiser writes both
+`+0x618` and `+0x61c` (`0x10017d29`, `0x10017d3c`), so the state is saved.
+
+Still open: what separates argument 0 from 1, which `Control.dll` treats
+alike; and no shipped section-5 record tests condition byte 15, so nothing an
+artist wrote turns on it.
 
 ### Section 1's conditions are contacts — *read*, and *measured*
 
@@ -790,24 +904,31 @@ is wired to a message.
 - ~~Triple 5 (+68): multiplied into the spin integrator (`0x10014b15`); what it
   stands for~~ — **read**: how fast the hull rights itself
   ([24-motion.md](24-motion.md#the-hull-leans-and-rights-itself--read-and-measured)).
-- Class 3's value 0 (0.5 on eight records), the camera's values 3–5, the
-  hero's arms' values 1 and 4.
-- The section-5 record's int 8 (`+0x20`): not read by the interpreter, the only
+- ~~Class 3's value 0 (0.5 on eight records), the camera's values 3–5, the
+  hero's arms' values 1 and 4.~~ — **read**, with a control, and **measured**:
+  all three are read by nothing, and the camera's three are 1, 150 and 1 on
+  every one of the 61
+  ([The values nothing reads](#the-values-nothing-reads--read-and-measured)).
+- ~~The section-5 record's int 8 (`+0x20`): not read by the interpreter, the only
   code that walks the records; 1.0 as a float on the two `eng_rb_0?_snd`
-  records.
+  records.~~ — **read**, with a control, and **measured**: the interpreter's
+  record cursor never reaches it, and 2923 of the 2925 records leave it zero
+  ([The section-5 record](#the-section-5-record--read-and-measured)).
 - ~~Which way a positive lean tips the model on screen.~~ — **read**: a
   positive pitch tips the nose down, a positive roll the top to the left and a
   positive yaw the nose to the left, since the rotation the turn triple builds
   is S . R . S with S = diag(1, 1, -1)
   ([above](#the-lean-and-triple-6--read-and-measured)).
-- What control message 7's arguments 0, 1 and 2 stand for, and so what byte 15
-  and `+0x618` mean; no shipped record tests byte 15. One more reader is now
-  known: while `+0x618` is set the ground contact does not move the body at all
-  (`0x1001b3f7` skips the lift), so whatever the message means, it freezes the
-  machine where it stands
-  ([24-motion.md](24-motion.md#holding-the-body-on-the-ground--read-and-measured)).
-- `IDeviceManager` ids 5 and 6: what the gun's `+0x174` (the round's property
-  `0x35`) is.
+- ~~What control message 7's arguments 0, 1 and 2 stand for, and so what byte 15
+  and `+0x618` mean; no shipped record tests byte 15.~~ — **read**: argument 2
+  says the object is not simulated here — `CreateMirror`, `AddNewMirror` and
+  the queued `ChangeOwner` are what send it — and 0 and 1 hand it back
+  ([Control message 7](#control-message-7-says-who-simulates-the-object--read)).
+  Still open there: what separates 0 from 1, which `Control.dll` treats alike.
+- ~~`IDeviceManager` ids 5 and 6: what the gun's `+0x174` (the round's property
+  `0x35`) is.~~ — **read**: the damage of the last round the gun made, so the
+  two ids answer the unit's **damage a second**
+  ([14-controls.md](14-controls.md#the-join-with-the-controller--read)).
 - The height a live contact record holds at `+0x14` when the loader compares
   each state's last pose with it: the record is filled from the point's
   position at load (`0x1001a017`, copied in by `0x1001b6a0`), and which pose the

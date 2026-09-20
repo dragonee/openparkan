@@ -1076,6 +1076,20 @@ PLACE_TELEPORT = 0x7C000
 #: a teleport place the bound is 1000 (``0x1001851f``).
 PLACE_SPEED = 2.0
 PLACE_TELEPORT_SPEED = 1000.0
+#: The size gate a vertex puts on a unit walking to it
+#: (``Behavior.dll:0x10042d08``).  ``PLACE_GROUND`` lets any unit through,
+#: ``VERTEX_BUILDING_SIZE`` one no bigger than the building's own size class,
+#: and a vertex with neither only a unit of ``VERTEX_SMALL`` or less.
+VERTEX_ANY_SIZE = PLACE_GROUND
+VERTEX_BUILDING_SIZE = 0x20000000
+VERTEX_SMALL = 2
+#: A link the search will not let a walker cross, and one only a flyer crosses
+#: (``Behavior.dll:0x10042c90``, ``0x10036934``).
+LINK_SHUT = 0x20000
+LINK_FLYER_ONLY = 0x10000
+#: Which of a link's eight tail slots decide that (``ArealMap.dll:0x1000a274``,
+#: ``0x1000a294``): the live link's ``+0xc`` and ``+0x1c``.
+LINK_GATE = (1, 5)
 
 
 @dataclass
@@ -1091,6 +1105,17 @@ class PathNode:
     def flags(self) -> int:
         return self.a
 
+    def fits(self, size: int, building: int) -> bool:
+        """Whether a unit of size class ``size`` may walk to this vertex.
+
+        ``building`` is the building's own size class, its property ``0x201``.
+        """
+        if self.a & VERTEX_ANY_SIZE:
+            return True
+        if self.a & VERTEX_BUILDING_SIZE:
+            return building >= size
+        return size <= VERTEX_SMALL
+
 
 @dataclass
 class PathLink:
@@ -1098,8 +1123,24 @@ class PathLink:
 
     start: int
     end: int
-    #: Eight further slots, ``0xFFFFFFFF`` throughout the shipped data.
+    #: Eight further slots.  The loader copies them to the live 56-byte link's
+    #: ``+8``..``+0x24`` (``ArealMap.dll:0x1000a568``), and slots 1 and 5 are
+    #: the link's own gate: both zero makes it ``0x20000``, crossed by nothing,
+    #: and the first zero alone ``0x10000``, crossed only by a flyer
+    #: (``0x1000a274``, ``0x1000a294``).  *Measured*: all eight are
+    #: ``0xFFFFFFFF`` on 1034 of the 1096 shipped links, 18 read (0, -1) on the
+    #: three mines and the three factories, and 44 carry a node index with 1
+    #: beside it four times over.  See ``docs/24-motion.md``, "The hall-way
+    #: gates, in the shipped buildings".
     extra: tuple[int, ...]
+
+    @property
+    def gate(self) -> int:
+        """``LINK_SHUT``, ``LINK_FLYER_ONLY`` or 0, as the search reads it."""
+        first, second = (self.extra[i] for i in LINK_GATE)
+        if first:
+            return 0
+        return LINK_SHUT if not second else LINK_FLYER_ONLY
 
 
 @dataclass

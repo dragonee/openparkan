@@ -306,7 +306,13 @@ impl Play {
                 let way = Way {
                     points: kept.iter().filter_map(|&i| points[i]).collect(),
                     flags: kept.iter().map(|&i| h.vertices[i].flags).collect(),
-                    links: h.links.iter().filter_map(|l| Some((index(l.start)?, index(l.end)?))).collect(),
+                    links: h
+                        .links
+                        .iter()
+                        .filter(|l| l.flags() == 0)
+                        .filter_map(|l| Some((index(l.start)?, index(l.end)?)))
+                        .collect(),
+                    size: self.units[t].designation.size_class,
                 };
                 Some((t, way))
             })
@@ -330,6 +336,7 @@ impl Play {
         }
         let (clearance, standing) =
             (robot.collision.1, robot.walker.ground.and_then(|h| h.solid).map(|s| s.0));
+        let size = robot.size_class;
         let ways = self.bridge_ways();
         let on = |b: Option<usize>| b.and_then(|b| ways.iter().position(|(w, _)| *w == b));
         let aboard = on(standing);
@@ -344,7 +351,7 @@ impl Play {
             *walk_seed = x;
             (x >> 8) as f32 / (1u32 << 24) as f32
         };
-        match graph.route(from, goal, &ways, aboard, clearance, &mut random) {
+        match graph.route(from, goal, &ways, aboard, clearance, size, &mut random) {
             Ok(legs) => legs,
             Err(Refusal::Stranded) => graph.escape(from, &mut random).into_iter().collect(),
             Err(Refusal::Goal | Refusal::NoWay) => Vec::new(),
@@ -483,7 +490,9 @@ mod tests {
         let v = |x: f32, flags: u32| Vertex { position: [x, 0.0, 0.0], flags, joint: 0 };
         let h = HallWay {
             vertices: vec![v(0.0, PLACE_POD), v(10.0, 0), v(20.0, PLACE_EXIT), v(5.0, PLACE_EXIT)],
-            links: vec![Link { start: 1, end: 0 }, Link { start: 2, end: 1 }, Link { start: 3, end: 0 }],
+            links: [(1, 0), (2, 1), (3, 0)]
+                .map(|(start, end)| Link { start, end, tail: [0xffff_ffff; 8] })
+                .to_vec(),
         };
         let points: Vec<Option<Vec3>> =
             h.vertices.iter().map(|v| Some(Vec3::from_array(v.position))).collect();
