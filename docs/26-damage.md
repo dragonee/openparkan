@@ -32,7 +32,14 @@ Each node of a model has a life, built from its `.ndp` record
   kind `LoadControlSystem` is given) is 3, which is only marked (`0x100110ab`).
   A radar never detects an object whose word reads `0xfffe`
   ([25-sensors.md](25-sensors.md#a-scan-is-a-sphere-a-falloff-and-three-tests--read)),
-  so that it passes over wrecks is a *guess* that joins the two.
+  and **so does everything else that walks the world**: the word is the one
+  thing the whole interface asks before it uses an object, in 37 places in
+  `iron3d.dll` alone
+  ([27-ownership.md](27-ownership.md#the-37-compares-in-iron3ddll--read)).
+  The pass-over-wrecks reading is no longer a guess joining two reads.
+  The word is also **one-way**: the interface's own setter refuses to write it
+  and refuses to write anything over it (`Control.dll:0x1000f1f0`), so a wreck
+  cannot be given back to a clan.
 - **Agent kind 3 is a building** — *read*. An agent with a parent takes the
   parent's kind (`AniMesh.dll:0x10003174`, `IGameObject` slot 11) instead of
   one from its `objects.rlb` tag; a building's agent is loaded by
@@ -49,11 +56,13 @@ Each node of a model has a life, built from its `.ndp` record
   and no production), no fire control (`0x10004d54`). Only the behaviour's
   constructor clears that flag (`0x10003c85`). The object is not removed: its
   model and its other nodes stay, and they can still be shot apart.
-  `iron3d.dll` compares with `0xfffe` in 37 places; the one read, a walker
-  over its registered objects by an id and a mask of type bits
-  (`iron3d.dll:0x1007dee0`) — a clan and a `Type` mask, by the look of it, a
-  *guess* — passes such an object over, so to it the building is gone. The
-  rest, and what calls that walker, were not read.
+  `iron3d.dll` compares with `0xfffe` in 37 places, and **all 37 are now
+  enumerated and grouped**
+  ([27-ownership.md](27-ownership.md#the-37-compares-in-iron3ddll--read)): the
+  lists and pickers, the HUD, the target list, the mode stack and the two
+  component tests all pass the object over, so to the interface the building is
+  gone while its model stands. The walker over registered objects by id and
+  mask (`0x1007dee0`) is one of the 13 in the first group.
 - **Which buildings that can happen to** — *measured*. 12 of the 30 building
   tables in `fortif.rlb` give node 0 one hit point beside parts of
   40,000–500,000 — mines, plants, stores, the generator, the hangar and the medium
@@ -1119,10 +1128,17 @@ shield, battery and ammunition (`Behavior.dll:0x10018100`, `0x10019372`,
   than abandoned — see [What nothing reads in an `.exp`](#what-nothing-reads-in-an-exp--read-as-a-search).
 - ~~What agent kind 3 is.~~ Answered: a building. What becomes of one whose
   node 0 is destroyed is narrowed: its behaviour stops for good and the object
-  stays ([Hit points](#hit-points--read-and-measured)); what `iron3d.dll` does
-  with its `0xfffe` owner word is not read.
-- What `iron3d.dll` does with an object whose owner word is `0xfffe`: 37
-  compares with the value, one read (`0x1007dee0`, which skips it).
+  stays ([Hit points](#hit-points--read-and-measured)), and what `iron3d.dll`
+  does with its `0xfffe` owner word is now read too: it skips it, everywhere
+  ([27-ownership.md](27-ownership.md#the-37-compares-in-iron3ddll--read)).
+- ~~What `iron3d.dll` does with an object whose owner word is `0xfffe`: 37
+  compares with the value, one read (`0x1007dee0`, which skips it).~~
+  Answered: all 37 are the same idiom — skip a dead object — spread over the
+  lists and pickers, the HUD, the target list, the mode stack and the two
+  component tests, and the value means *not a clan index*: 7 of the 37 stand
+  within a dozen instructions of an `imul …, 0x68` into the clan table. Nothing
+  authors it: 0 of the 864 placements of the 29 shipped missions carries it
+  ([27-ownership.md](27-ownership.md#the-owner-word-and-0xfffe--read-and-measured)).
 - ~~What a destroyed node draws, and what a dead unit leaves.~~ Answered: a
   node draws the block of its stage held below its stage count; at the last
   stage it is hidden from the draw, the ground, collisions and hits unless its

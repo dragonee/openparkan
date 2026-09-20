@@ -8683,6 +8683,166 @@ def check_ownership(check, game: Path) -> None:
           f"{neutral_units} units, {neutral_buildings} buildings")
 
 
+#: Every site in ``iron3d.dll`` that compares an owner word with ``0xfffe``
+#: (docs/27, "The 37 compares").  Grouped there by what each one guards.
+OWNER_DEAD_SITES = (
+    0x10033E4D, 0x100342D4, 0x10034815, 0x10034943, 0x1003621B, 0x10038739,
+    0x10040295, 0x10041586, 0x100603CB, 0x100629C4, 0x10063375, 0x10072904,
+    0x10072A29, 0x10072B94, 0x10072C88, 0x10072CEF, 0x10074EC9, 0x1007545D,
+    0x100756A8, 0x10076D41, 0x10076DB1, 0x10076EEE, 0x100776B7, 0x1007D724,
+    0x1007DE68, 0x1007DF18, 0x1007DF9C, 0x1008813B, 0x10090C50, 0x10090E6C,
+    0x10090EEE, 0x10090FF1, 0x100910A4, 0x100910EE, 0x100911B6, 0x10091CDB,
+    0x10091D36,
+)
+
+
+def check_owner_word(check, game: Path) -> None:
+    """The owner word's two reserved values, and who may be entered in mode 6."""
+    # 1. The control system's constructor writes 0xffff, a death writes 0xfffe, and the
+    # interface's own setter will write neither over the other (docs/27, "The owner word").
+    control_dll = game / "Control.dll"
+    if control_dll.exists():
+        at = _image_at(control_dll.read_bytes())
+        vtable = 0x1003B59C
+        slots = {k: struct.unpack("<I", at(vtable + 4 * k, 4))[0] for k in (10, 11)}
+        # The vtable goes in at the control system's +4, so a slot's this + 0x54c is the
+        # system's +0x550: `mov [reg+4], 0x1003b59c` at both constructors.
+        installs = [at(a, 10) for a in (0x10007293, 0x100073AA)]
+        born = at(0x100070C7, 10)                  # mov [esi+0x550], 0xffff
+        died = [at(a, 5) for a in (0x1001108B, 0x10003347)]   # mov eax, 0xfffe
+        getter = at(slots[11], 10) if slots[11] else b""
+        guard = at(slots[10], 26) if slots[10] else b""
+        check("Control.dll: the owner word starts 0xffff and 0xfffe is one-way",
+              slots[10] == 0x1000F1F0 and slots[11] == 0x100087F0
+              and all(i == bytes.fromhex("c746049cb50310") + i[7:] for i in installs)
+              and born == bytes.fromhex("c78650050000ffff0000")
+              and all(d == bytes.fromhex("b8feff0000") for d in died)
+              and getter == bytes.fromhex("8b4424048b804c050000")
+              and guard == bytes.fromhex(
+                  "8b4c240481b94c050000feff0000" "7411" "8b442408" "3dfeff0000" "74"),
+              f"the system's +0x550 is 0xffff from its constructor (0x100070c7) and 0xfffe "
+              f"from the two death paths (0x1001108b, 0x10003347); ILifeSystem slot 11 "
+              f"({slots[11]:#x}) reads it as this+0x54c and slot 10 ({slots[10]:#x}) writes "
+              f"it, refusing a write when it already reads 0xfffe and refusing 0xfffe itself")
+
+    # 1b. Each of the 37 sites docs/27 names really is a compare against the value: a
+    # `site` has to be an instruction, and a disassembly started at a guess decodes garbage.
+    iron = game / "iron3d.dll"
+    if iron.exists():
+        at = _image_at(iron.read_bytes())
+        forms = Counter()
+        for site in OWNER_DEAD_SITES:
+            head = at(site, 7)
+            if head[:1] == b"\x3d" and head[1:5] == b"\xfe\xff\x00\x00":
+                forms["cmp eax, 0xfffe"] += 1
+            elif head[:1] == b"\x81" and head[1:2] in b"\xf9\xfe\xff" \
+                    and head[2:6] == b"\xfe\xff\x00\x00":
+                forms["cmp reg, 0xfffe"] += 1
+            elif head[:3] == b"\x81\x7e\x24" and head[3:7] == b"\xfe\xff\x00\x00":
+                forms["cmp [esi+0x24], 0xfffe"] += 1
+        check("iron3d.dll: the 37 sites that compare an owner word with 0xfffe",
+              sum(forms.values()) == len(OWNER_DEAD_SITES) == 37,
+              f"{sum(forms.values())} of {len(OWNER_DEAD_SITES)} named addresses hold one: "
+              + ", ".join(f"{n} x {k}" for k, n in sorted(forms.items())))
+
+    # 2. Not one of the shipped placements carries either reserved value -- the control for
+    # "0xfffe is a runtime value only".  The control is the histogram beside it: every
+    # ClanID indexes a real clan.
+    owned = Counter()
+    placements = 0
+    reserved = 0
+    for p in sorted(game.glob("MISSIONS/**/data.tma")):
+        m = mission.load(p)
+        for o in m.objects:
+            placements += 1
+            if o.clan_id is not None:
+                owned[o.clan_id] += 1
+            for word in (o.clan_id, o.clan_index):
+                reserved += word in (0xFFFE, 0xFFFF)
+            for prop in o.properties.values():
+                try:
+                    reserved += int(prop.value) in (0xFFFE, 0xFFFF)
+                except (TypeError, ValueError):
+                    pass
+    check("data.tma: no placement is authored with a reserved owner word",
+          reserved == 0 and placements > 0 and owned and max(owned) < 0x40,
+          f"0 of {placements} placed objects carry 0xfffe or 0xffff in a clan word or a "
+          f"property; {sum(owned.values())} are owned, with ClanIDs "
+          f"{dict(sorted(owned.items()))}")
+
+    # 3. What 0x10033e40 asks of a tower: a class-1 item in its control system, with life.
+    # No building controller carries one, so it always comes from a fitted part.
+    library = objects.ObjectLibrary(game / "objects.rlb")
+    names = frozenset(p.name.lower() for p in all_archives(game))
+    opened: dict[str, NResArchive] = {}
+
+    def member(ref):
+        if ref is None:
+            return None
+        try:
+            if ref.library not in opened:
+                opened[ref.library] = NResArchive.open(game / ref.library)
+            return opened[ref.library].read_name(ref.member)
+        except (KeyError, ValueError, FileNotFoundError):
+            return None
+
+    def items(record):
+        """(class, node, hit points) of a record's own controller, following a FORT root."""
+        if record is None:
+            return []
+        if len(record.slots) < 5:
+            return items(library.records.get(record.slots[0].member.lower())) \
+                if record.slots else []
+        blob, damage = member(record.slots[4]), member(record.slots[3])
+        if blob is None or damage is None:
+            return []
+        try:
+            ctl = control.parse(blob, names)
+            table = objects.parse_damage(damage, record.slots[3].member)
+        except (control.ControlFormatError, objects.ObjectFormatError, struct.error):
+            return []
+        return [(c.type_id, c.node,
+                 table[c.node].durability if 0 <= c.node < len(table) else None)
+                for c in ctl.components]
+
+    own = [library.records.get(r.slots[0].member.lower())
+           for r in library.records.values() if r.tag == "FORT" and r.slots]
+    controllers = {r.slots[4].member.lower(): r for r in own if r and len(r.slots) > 4}
+    with_class1 = sum(1 for r in controllers.values()
+                      if any(c == control.TURRET_TYPE for c, _, _ in items(r)))
+    towers = {0x80100000: [], 0x80200000: []}
+    entered = Counter()
+    firsts = defaultdict(set)
+    for f in sorted(game.glob("UNITS/BUILDS/**/*.dat")):
+        unit = objects.load_unit(f)
+        kind = unit.kind & 0xFFFFFFFF
+        first = None
+        for part in unit.components:
+            for cls, node, life in items(library.records.get(part.ref.member.lower())):
+                if cls == control.TURRET_TYPE and first is None:
+                    first = (part.ref.member, node, life)
+        if first is None:
+            continue
+        entered[kind] += 1
+        firsts[kind].add(first)
+        if kind in towers:
+            towers[kind].append(first)
+    lives = all(life and life > 0 for rows in firsts.values() for _, _, life in rows)
+    check("fortif.rlb: only bunkers and towers can be entered, and all of them can",
+          with_class1 == 0 and lives
+          and set(entered) == {0x80010000, 0x80020000, 0x80040000, 0x80100000, 0x80200000}
+          and (len(towers[0x80100000]), len(towers[0x80200000])) == (6, 3)
+          and len(firsts[0x80100000]) == len(firsts[0x80200000]) == 1,
+          f"0x10033e40 wants a class-1 item with node life: {with_class1} of "
+          f"{len(controllers)} building controllers carries one, so it is always a fitted "
+          f"part. {sum(entered.values())} of the building assemblies have one -- "
+          + ", ".join(f"{k:#010x} x{n}" for k, n in sorted(entered.items()))
+          + "; every tower's is its turret, "
+          + " and ".join(f"{m} node {n} at {life:.0f}"
+                         for rows in (towers[0x80100000], towers[0x80200000])
+                         for m, n, life in sorted(set(rows))))
+
+
 #: The command the hero presses at a neutral bot (``iron3d.dll:0x10071f08``).
 ENTER = "CMD_ENTER_STATE"
 
@@ -23064,7 +23224,7 @@ def run(game: Path) -> int:
         check_control, check_efficiency, check_mission_03_economy,
         check_motion, check_playback, check_ground, check_sensors, check_hit_test,
         check_collision, check_lake_and_buoys,
-        check_combat, check_ownership,
+        check_combat, check_ownership, check_owner_word,
         check_capture, check_building_entry, check_pod_zone, check_door_shot,
         check_building_lighting,
         check_building_ground,

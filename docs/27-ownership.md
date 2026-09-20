@@ -787,13 +787,199 @@ shipped missions — factories, an Outpost, a bunker and a generator in the firs
 tutorials, bridges, and on four multiplayer maps a research centre, a mine or
 generators between the players. `Multi.05`'s `Ntrl` is the exception: type 2.
 
+## The owner word, and `0xfffe` — *read*, and *measured*
+
+An object's **owner word** is a clan's index, and it lives in the control
+system at `+0x550`. It reaches the rest of the game two ways, and both give the
+same word:
+
+- **`ILifeSystem` slot 11** (`Control.dll:0x100087f0`, vtable `0x1003b59c`
+  installed at the control system's `+4` by `0x10007293` and `0x100073aa`, so
+  the slot's `this + 0x54c` is the system's `+0x550`);
+- **`IGameObject` slot 17**, which the behaviour scripts' function 52 answers
+  ([15-behaviour.md](15-behaviour.md#65534-is-a-destroyed-objects-owner--read-and-measured)).
+
+**It has two reserved values.** The control system's constructor writes
+**`0xffff`** (`Control.dll:0x100070c7`) — no owner yet — and a death writes
+**`0xfffe`**, destroyed, in two places: the node update at `0x10011098` and a
+second, inlined copy of the same death sequence at `0x10003354` (in
+`0x10002800`), both of which
+go on to read `+0x104` bit `0x10000000`, agent kind 3 and the controller's
+`+0x4b8` ([26-damage.md](26-damage.md#hit-points--read-and-measured)).
+
+**`0xfffe` is one-way.** The interface's own setter, `ILifeSystem` slot 10
+(`Control.dll:0x1000f1f0`), refuses to write anything when the word already
+reads `0xfffe`, and refuses to write `0xfffe` itself. So nothing — not a
+capture, not a script — can hand a wreck to a clan or fake a death through the
+interface; the two writers above are the whole of it.
+
+### The 37 compares in `iron3d.dll` — *read*
+
+The 37 are one idiom, not 37 decisions: **skip an object that is dead**. Each
+of `iron3d.dll`'s unit and building records keeps the object's `ILifeSystem` at
+`+0x48` and a cached copy of the word at `+0x24`, and the interface asks before
+it uses a record for anything.
+
+| how the word is fetched | sites |
+|---|---:|
+| the record's `+0x48`, `ILifeSystem` slot 11 (`call [vt+0x2c]`) | 29 |
+| the same slot on the answer to a query with id `0x16`, the one `Control.dll` gives its `ILifeSystem` (`0x1003620f`) | 1 |
+| an object's `IGameObject` slot 17 (`call [vt+0x44]`): plainly (`0x100342d1`), after asking for interface `0x10` (`0x100603c6`), and masked to 16 bits (`0x10041580`) | 3 |
+| the record's own cached copy at `+0x24` — two compared in place (`cmp dword ptr [esi+0x24], 0xfffe`), one loaded first (`0x1007545d`) | 3 |
+| a target-list contact's owner word, the second dword of its 8-byte entry (`0x10090ba0`), masked to 16 bits | 1 |
+
+The 37 addresses are listed in `openparkan/verify.py`'s `OWNER_DEAD_SITES`, and
+`openparkan verify` checks that each one really holds such a compare — 27
+`cmp eax`, 8 `cmp reg`, 2 `cmp [esi+0x24]`.
+
+Grouped by what each one guards — every function named here is read elsewhere
+in these docs:
+
+- **Lists and pickers** (13): the nearest building within 80 and within 40
+  (`0x100728e0`, `0x10072b70`), the same by clan (`0x100729f0`), the clan's
+  first unit of a `Type` mask (`0x10072be0`, 25 callers) and the count of them
+  (`0x10072cb0`), the object pick's ray (`0x1003621b`), the selection
+  collector (`0x10076eee`), the walk over unit records (`0x1007d724`), the
+  walker over registered objects by id and mask (`0x1007df18`, the one this
+  file already recorded), the clan's buildings (`0x1007df9c`), the buildings
+  of a given clan (`0x1007de68`), the order menu's target (`0x1008813b`) and
+  the world's per-object callback (`0x100603cb`).
+- **The HUD** (6): the cockpit radar's marks (`0x10040295`, which skips
+  `0xffff` in the same breath), the target panel (`0x10041586`), the map's
+  building and unit marks (`0x10034815`, `0x100776b7`), the building's colour
+  rule (`0x10034943`) and the unit record's takt (`0x100756a8`).
+- **The target list** (9): what it lists (`0x10091cdb`, `0x10091d36`), its
+  takt (`0x10090c50`), the nearest hostile (`0x10090e6c`, `0x10090eee`,
+  `0x10090ff1`) and the nearest friend (`0x100910a4`, `0x100910ee`,
+  `0x100911b6`). Five of these are followed within a dozen instructions by `imul …, 0x68`,
+  the clan record's stride — which is what the value **means**: `0xfffe` is not
+  a clan index, and the compare is the guard before the table lookup.
+- **One more** (1): `0x10074ec9`, inside `0x10074d30` — a record method with no
+  direct caller (a table entry at `0x100e64dc`) that pushes the record's clan
+  onto its object through `ILifeSystem` slot 10 and rebuilds the record's name.
+  The compare cuts the rest of that short for a dead record. What calls it was
+  not traced.
+- **The view and the player's own unit** (6): the building-entry test
+  (`0x10033e4d`, [below](#what-0x10033e40-refuses-on-a-tower--read-and-measured)),
+  the Upgrade row's building (`0x100342d4`), the outer camera each frame
+  (`0x10038739` — a removed object turns it off,
+  [30-turrets.md](30-turrets.md#the-outer-camera--read-and-measured)), the
+  mode stack's lost-building byte (`0x100629c4`,
+  [39-boarding.md](39-boarding.md)), where the hero goes when it leaves a bot
+  (`0x10063375`) and the unit record's removal (`0x1007545d`).
+- **The two component tests** (2): whether the hero can board a bot
+  (`0x10076d41`, [above](#a-neutral-unit-is-taken-by-the-hero--read-and-measured))
+  and whether a builder's beam is intact (`0x10076db1`,
+  [31-packages.md](31-packages.md)). All three are the same predicate — 97
+  bytes each against `0x10033e40`'s 93, the four being its null-`this` guard —
+  differing only in the component class they ask for.
+
+**The rest of the install** compares against it 40 more times: 17 in
+`Behavior.dll` (the killed flag, the docks, the fire control), 12 in `ai.dll`
+(the mind list's `+0x14`, and function 52's answer at `0x1000698d`), 6 in
+`Control.dll`, 3 in `ArealMap.dll`, and one each in `Terrain.dll`
+(`0x1005752f`) and `World3D.dll` (`0x10009c10`).
+
+**No shipped object ever starts with it** (*measured*, the control). Over the
+**864** placed objects of the 29 shipped missions — 463 of them owned — no
+`ClanID`, no clan-index word and no object property reads `0xfffe` or `0xffff`;
+the `ClanID`s are 0 on 124, 1 on 220, 2 on 69, 3 on 37, 4 on 11 and 5 on 2, and
+every one indexes a real clan. `0xfffe` is a runtime value only, and a mission
+cannot author it.
+
+### What `0x10033e40` refuses on a tower — *read*, and *measured*
+
+`0x10033e40` is 93 bytes and answers **true to refuse**. On a building record
+it refuses when any of four things holds:
+
+1. the object's owner word reads `0xfffe` — a dead shell;
+2. the record has no `IControl` (`+0x60`);
+3. that control system has **no class-1 item** — slot 9 with index 0 and class
+   1 returns −1;
+4. that item's value `0x52`, its node's life, is **0 or below** (against the
+   0.0 at `0x100e50a8`).
+
+It is one of three copies of the same code: `0x10076d30` asks the same of class
+1 on a bot the hero would board, and `0x10076da0` of class 30, a builder's beam
+([31-packages.md](31-packages.md)). `0x10033e40` is the copy without the
+null-`this` guard, called where the record is known.
+
+**So a tower refuses when its turret is shot off**, and *not* otherwise
+(*measured*):
+
+- **0 of the 30 building controllers in `fortif.rlb` carries a class-1 item**,
+  so the item the test looks for is always a fitted part from the `.dat`
+  assembly.
+- **24 of the 68 building assemblies carry one**: the 15 bunkers
+  (`0x80010000`, `0x80020000`, `0x80040000`) and the **9 towers** — 6 medium
+  (`0x80100000`) and 3 large (`0x80200000`). The other 44 carry none.
+- On all 24 that item is a **turret**, and the tower's other class-1 `.dat`
+  component, its deflector, brings a class-**21** item, not a class-1 — so
+  there is no ambiguity about which one is first. The medium towers' turret is
+  `e_tow_mt_01` (`o_bnt_lt_01.ctl`), the large towers' `e_tow_bt_01`
+  (`o_bnt_mt_01.ctl`); both sit on node 1 of their own mesh, with **3,500** and
+  **6,000** hit points in `o_bnt_la_01.ndp` and `o_bnt_ma_01.ndp`.
+- So **all 9 shipped towers can be entered** while they stand, and the refusal
+  is a condition of the battle, not of the files. The bunkers' turrets
+  (`e_bnt_lt_01` 3,500, `e_bnt_mt_01` 6,000, `e_bnt_bt_01` 9,000) carry life
+  too, which is what lights the commander panel's *Manual* button
+  ([41-commander.md](41-commander.md)).
+
+### What the modes show — *read*
+
+The switch `0x10062bc0` makes is the **mode stack's**, whose eight modes and
+whose 8 × 8 table of transition handlers at `0x10104b18` is
+[39-boarding.md](39-boarding.md#the-game-view-keeps-a-stack-of-modes--read)'s.
+**40 of the 64 cells are filled**; a blank cell is a transition that cannot
+happen — there is no way into a building's screen from mode 1, driving a bot,
+and no way from mode 5 to mode 6. Modes 0, 1, 2, 3, 4 and 7 are read
+there and in [40-command-mode.md](40-command-mode.md). The two this file sends
+a building's captor to:
+
+- **Mode 5, a building's own screen** (`0x10064430` from mode 0; also from 2
+  and 7). It turns the outer camera off, clears the unit selection (`0x1007d270`),
+  **hands the hero back** (`0x10074ff0` with 0) so the player stops driving,
+  makes the building the interface's current building (`0x100a5680`) and the
+  hero its current unit (`0x100a5660`), and sets the **level's view-state word
+  to 1**, the cockpit (`0x100a4f90`) — so the screen is drawn over the ordinary
+  view. Which screen is then the panel's page, set by the caller: 5 for the
+  plant, the factory screen ([36-factory.md](36-factory.md)), 4 for the
+  institute, the research page ([41-commander.md](41-commander.md)).
+- **Mode 6, a tower's manual control** (`0x10063fd0` from mode 0; also from 2,
+  3, 4 and 7). The same opening, then it **clears the driven unit**
+  (`0x100a5660` with 0), makes the building current, and sets the level's
+  view-state word to **6** — of the module's 39 calls of `0x100a4f90` only these
+  four pass 6 (`0x10064047`, `0x10064142`, `0x1006426d`, `0x1006439f`), one in
+  each handler into mode 6; the rest pass 1, 2, 3 or 4. View state 6 has no case in the level's per-frame camera
+  update (`0x100a55c0`, a range table over states 2–5 at `0x100a5650`), and in
+  it the left mouse button does nothing
+  ([42-selection.md](42-selection.md#the-mouses-way-in--read)). What makes it *manual*
+  is the next call: the building's object is sent `IGameObject` slot 13 with
+  (6, 7, 1) — **byte for byte the message the takeover sends a bot it hands the
+  player** (`0x100750bf`–`0x100750c6`,
+  [39-boarding.md](39-boarding.md#the-other-writers-of-0xa2--read)). So
+  entering a tower drives its guns exactly as boarding drives a bot's.
+
+*Not read*: the record's `+0x54` object, whose slot 9 both handlers call with a
+mask and 3 — 1 in mode 5, `0x20` in mode 6, and `0x40` in the takeover
+(`0x100750b4`).
+
 ## Not established
 
-- What the game view's states 1, 3 and 6 show (`iron3d.dll:0x10062bc0`),
-  beyond state 1 being the one boarding a bot enters (state 5 with page 5 is
-  the factory screen, [36-factory.md](36-factory.md); ~~state 4~~ is a bunker's
-  command view, [40-command-mode.md](40-command-mode.md)); and what
-  `0x10033e40` refuses on a tower. ~~What `0x1007d0a0` and `0x100a5660` open for a
+- ~~What the game view's states 1, 3 and 6 show (`iron3d.dll:0x10062bc0`), and
+  what `0x10033e40` refuses on a tower.~~ Answered: the eight modes and their 8 × 8
+  handler table are [39-boarding.md](39-boarding.md#the-game-view-keeps-a-stack-of-modes--read)'s,
+  40 of the 64 cells filled; mode 5 draws the building's page over the cockpit
+  view with the hero handed back, and mode 6 puts the level's view state into a
+  state of its own and sends the tower the same "you are driven" message a
+  boarded bot gets. `0x10033e40` refuses a dead building, or one whose first
+  class-1 item is missing or has no node life — which on the shipped files
+  means only a tower whose turret has been shot off, since all 9 towers carry
+  one with 3,500 or 6,000 hit points
+  ([What `0x10033e40` refuses](#what-0x10033e40-refuses-on-a-tower--read-and-measured),
+  [What the modes show](#what-the-modes-show--read)). Still open: the record's
+  `+0x54` object, whose slot 9 both handlers call with a mask and 3.
+  ~~What `0x1007d0a0` and `0x100a5660` open for a
   generator, mine, storage or Outpost~~ — **read**: no screen; they select the
   building and make it the interface's current one
   ([Capture](#capture--read)).
