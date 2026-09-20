@@ -5067,6 +5067,103 @@ def check_rsli(check, game: Path) -> None:
           f"{decoded}/{len(sprites) if sprites else 0} members decode as Texm, "
           f"which is the whole 2D interface")
 
+    # Every Tfnt the install ships, and what its header says (12-rsli.md).
+    shipped: list[tuple[str, font.Font, texm.Texture]] = [
+        ("gamefont.rlb::ARIALTEX.TFT", glyphs, atlas)
+    ]
+    for lib in ("sys.lib", "ui/font.lib"):
+        path = game / lib
+        if not path.exists():
+            continue
+        archive = NResArchive.open(path)
+        for entry in archive:
+            if not entry.name.upper().endswith(".TFT"):
+                continue
+            tft = font.parse_font(archive.read(entry))
+            shipped.append((f"{lib}::{entry.name}", tft, texm.decode(tft.atlas)))
+
+    spacing = {t.spacing for _n, t, _a in shipped}
+    cells = all(abs(t.v_span * a.height - (t.height + 1)) < 1e-3 for _n, t, a in shipped)
+    spans = sum(1 for _n, t, a in shipped
+                for g in t.glyphs if g.drawn and g.width(a.width) == g.advance + 1)
+    drawn = sum(len(t.drawn) for _n, t, _a in shipped)
+    check("Tfnt: the header's spacing is 1 and its v span is the drawn cell",
+          len(shipped) == 11 and spacing == {1} and cells and spans == drawn,
+          f"on all {len(shipped)} shipped fonts the pen adds {sorted(spacing)} past a "
+          f"glyph's advance, the header's v span is exactly height + 1 texels, and all "
+          f"{spans}/{drawn} drawn glyphs span advance + 1 -- one texel to the pixel")
+
+    packed = []
+    for _name, tft, tex in shipped:
+        rows = sorted({round(g.v0 * tex.height, 3) for g in tft.glyphs if g.drawn})
+        pitch = {round(b - a, 3) for a, b in zip(rows, rows[1:], strict=False)}
+        packed.append(pitch == {float(tft.height + 1)})
+    check("Tfnt: the atlas rows are packed at the cell height", all(packed),
+          f"{sum(packed)}/{len(shipped)} fonts put their rows exactly height + 1 apart, "
+          f"so a line set at the cell leaves no gap")
+
+    keyed = all({tex.rgba[i * 4 + 3] for i in range(tex.width * tex.height)} == {0, 255}
+                for _n, _t, tex in shipped)
+    bits = {struct.unpack_from("<I", t.atlas, 20)[0] for _n, t, _a in shipped}
+    check("Tfnt: every font atlas sets the alpha-surface bit, so index 0 is its key",
+          bits == {texm.ALPHA_SURFACE} and keyed,
+          f"header +0x14 is {sorted(hex(b) for b in bits)} on all {len(shipped)} of them, "
+          f"and the palette's index 0 comes back with alpha 0 -- the colour key the "
+          f"text pass alpha-tests against, where no texture of Textures.lib sets the bit")
+
+    tones = {}
+    for name, tft, _tex in shipped:
+        head = struct.unpack_from("<4s7i", tft.atlas, 0)
+        body = tft.atlas[32:]
+        pal = body[:1024] if head[7] == texm.FMT_PALETTE8 else None
+        pixels = body[1024:] if pal else body
+        used = sorted(set(pixels[: head[1] * head[2]]))
+        tones[name] = (used, pal)
+    counts = {len(u) for u, _p in tones.values()}
+    shadowed = [n for n, (u, p) in tones.items() if p and 51 in u and 254 in u
+                and p[51 * 4 + 2] == 64 and p[254 * 4 + 2] == 255]
+    plain = [n for n, (u, p) in tones.items()
+             if p and 51 not in u and p[254 * 4 + 2] == 255 and 254 in u]
+    check("Tfnt: a glyph is two tones, a white body and a quarter-strength shadow",
+          all(u[0] == 0 for u, _p in tones.values()) and max(counts) <= 5
+          and len(shadowed) == 7 and {n.split("::")[1][:2] for n in plain} == {"tf"},
+          f"every atlas starts at index 0 and uses {sorted(counts)} indices in all; "
+          f"{len(shadowed)}/{len(shipped)} carry both 254 -> (255,255,255) and "
+          f"51 -> (64,64,64), so the run's colour draws a body and a shadow a quarter "
+          f"as bright.  The {len(plain)} without a shadow are the tf_ tool fonts, white "
+          f"alone; gamefont.rlb's own has 0 and 73 alone, and 73 is white too")
+
+    cp866 = {n for n, t, _a in shipped
+             if all(0x80 <= i < 0xB0 or 0xE0 <= i < 0xF2 for i in t.drawn if i >= 0x80)}
+    cp1251 = {n for n, t, _a in shipped
+              if sum(1 for i in t.drawn if i >= 0xC0) == 64 and 0x81 not in t.drawn}
+    check("Tfnt: the two ARIALTEX.TFT are laid out in CP866 and the nine ui fonts in 1251",
+          len(cp866) == 2 and len(cp1251) == 9 and not (cp866 & cp1251),
+          f"{len(cp866)} fonts draw above 0x7f only in CP866's places and {len(cp1251)} "
+          f"draw 0xC0-0xFF solid with nothing in CP866's Cyrillic run -- which is why "
+          f"Ngi32's 1251-to-866 table applies to the first and services.dll turns it off "
+          f"for the second")
+
+    # Nothing in the install names either RsLi archive.
+    wanted = {b"gamefont": 0, b"sprites": 0, b"ARIALTEX": 0, b"font.lib": 0}
+    for path in sorted(game.rglob("*")):
+        if not path.is_file():
+            continue
+        try:
+            blob = path.read_bytes()
+        except OSError:
+            continue
+        for needle in wanted:
+            if needle.lower() in blob.lower() and path.name.lower() != needle.lower().decode():
+                wanted[needle] += 1
+    check("RsLi: no file in the install names either RsLi archive",
+          wanted[b"gamefont"] == 0 and wanted[b"sprites"] == 0
+          and wanted[b"ARIALTEX"] > 0 and wanted[b"font.lib"] > 0,
+          f"'gamefont' appears in {wanted[b'gamefont']} files and 'sprites' in "
+          f"{wanted[b'sprites']}; the control is that 'ARIALTEX' appears in "
+          f"{wanted[b'ARIALTEX']} and 'font.lib' in {wanted[b'font.lib']} -- the game "
+          f"loads its font from sys.lib and ui/font.lib, never from gamefont.rlb")
+
 
 def check_footprints(check, game: Path) -> None:
     """.bas ground plans, and whether a placed building sits on its own."""

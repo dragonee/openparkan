@@ -91,10 +91,17 @@ fn the_game_font_opens_and_lays_out_a_line() {
 
     let game = gamedir::find(None).expect("a Parkan install: set PARKAN_DIR");
     let font = GameFont::open(&game).unwrap();
-    // A 128 × 128 atlas of seven rows 18 pixels apart (docs/12).
+    // A 128 × 128 atlas of seven rows 18 pixels apart, and a header that says so:
+    // height 17, so the cell is 18, and a v span of 18/128 (docs/12).
     assert_eq!((font.width, font.height), (128, 128));
     assert_eq!(font.atlas.len(), 128 * 128 * 4);
     assert_eq!(font.line_height, 18.0);
+    assert_eq!(font.v_span * font.height as f32, font.line_height, "one texel to the pixel");
+    assert_eq!(font.spacing, 1.0, "header word 3, 1 on all eleven shipped fonts");
+    // The atlas is keyed on palette index 0, cleared to alpha 0 on the font's alpha
+    // surface, and lit by index 73, which is white.
+    assert_eq!(font.atlas[..4], [0, 0, 0, 0], "the corner is the key");
+    assert!(font.atlas.as_chunks::<4>().0.contains(&[255, 255, 255, 255]), "and the glyphs are white");
     let run = TextRun::new("Objective is completed", [0.0, 0.0]);
     let placed = font.layout(&run);
     assert_eq!(placed.len(), "Objectiveiscompleted".len(), "every letter is drawn, no space is");
@@ -132,13 +139,24 @@ fn the_outcome_panels_fonts_are_the_640_by_480_menu_and_game_fonts_of_font_lib()
     let menu = GameFont::ui(&game, "MENU_FONT").unwrap();
     let text = GameFont::ui(&game, "GAME_FONT").unwrap();
     assert_eq!((menu.width, text.width), (256, 128));
-    // The recording of Mission 01's win shows the title 13 pixels a line on 640 x 480.
+    // Each font's header gives its height, and the cell is one more: mf_640 is 12 and
+    // gf_640 is 7 (docs/12, "The header's four words are the font's metrics").
     assert!((menu.line_height - 13.0).abs() < 0.5, "{}", menu.line_height);
     assert!((text.line_height - 8.0).abs() < 0.5, "{}", text.line_height);
-    // Its glyphs of "MISSION COMPLETE !" start their advances apart: 125 in all, the
-    // recording's ink running 128 from the first to the end of the "!".
-    assert_eq!(menu.advance("MISSION COMPLETE !"), 125.0);
+    // The pen steps a glyph's advance plus the header's spacing, 1 on both: the
+    // 18 glyphs of "MISSION COMPLETE !" sum 125 advances and 18 steps of spacing.
+    assert_eq!((menu.spacing, text.spacing), (1.0, 1.0));
+    assert_eq!(menu.advance("MISSION COMPLETE !"), 125.0 + 18.0);
     assert!(menu.advance("MISSION COMPLETE !") > text.advance("MISSION COMPLETE !"));
+    // The nine ui/font.lib fonts are laid out in Windows-1251, so a Cyrillic capital
+    // draws at 0xC0 and there is a glyph there; gamefont.rlb's ARIALTEX.TFT is CP866.
+    use parkan_world::text::{Encoding, glyph_index};
+    assert_eq!((menu.encoding, glyph_index(menu.encoding, 'А')), (Encoding::Windows1251, 0xC0));
+    assert!(menu.glyphs[0xC0].drawn() && menu.glyphs[0xFF].drawn(), "А and я are drawn");
+    assert!(!menu.glyphs[0x81].drawn(), "and CP866's Б is not: 0x80-0xBF is the 1251 punctuation");
+    let game_font = GameFont::open(&game).unwrap();
+    assert_eq!(game_font.encoding, Encoding::Cp866);
+    assert!(game_font.glyphs[0x80].drawn() && !game_font.glyphs[0xC0].drawn());
 }
 
 #[test]

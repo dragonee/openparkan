@@ -2,10 +2,16 @@
 //! [`parkan_world::text::GameFont`], its glyphs drawn as quads over everything,
 //! after the HUD.
 //!
-//! STAND-IN: docs/12-rsli.md#what-is-inside -- how the game draws its font is not
-//! read: the 8-bit renderer's blend table is not used. The atlas, sampled nearest, is
-//! keyed on black and multiplied by the run's colour, both in display space; the recording
-//! of Mission 01's win shows the interface font's grey shadow pixels dark, not light.
+//! The game draws its font through render phase 8 (`Ngi32.dll`'s phase table at
+//! `0x10036a30`, record 13 at `0x10036c6c`, its 25 states at `0x10034a00`): stage 0 is
+//! `MODULATE` of the texture by the diffuse colour, its alpha is `SELECTARG1` of the
+//! texture, stages 1-7 are disabled, the filters are point and point with no mip, and
+//! the alpha test is on with `GREATEREQUAL` and the device's reference of 1. So the
+//! run's colour **multiplies** the atlas rather than replacing it, and the key is the
+//! atlas's own alpha -- palette index 0, cleared when the font's alpha surface is made
+//! (`0x1000f698`). The `Ipol` blend table of `PAL.PAL` is the 8-bit software renderer's
+//! and this build has none: `vrtTextOut` is a stub. See `docs/12-rsli.md`, "How a glyph
+//! is drawn". Everything is in display space (docs/05).
 
 use bytemuck::{Pod, Zeroable};
 use parkan_world::text::{GameFont, TextRun};

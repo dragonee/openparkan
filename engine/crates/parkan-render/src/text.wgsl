@@ -38,10 +38,15 @@ fn vs_main(v: VertexIn) -> VertexOut {
 
 @fragment
 fn fs_main(v: VertexOut) -> @location(0) vec4<f32> {
-    // Black is keyed out; any other texel is the run's colour times its own brightness, so
-    // a font's grey shadow draws dark. The target is read without sRGB decoding, so both
-    // and the blend are in display space.
-    let texel = textureSample(atlas, atlas_sampler, v.uv).rgb;
-    let keyed = select(0.0, 1.0, max(texel.r, max(texel.g, texel.b)) > 0.0);
-    return vec4<f32>(texel * v.colour.rgb, v.colour.a * keyed);
+    // The font's phase (Ngi32.dll's record 13, docs/12) modulates the texel by the run's
+    // colour and takes its alpha from the texture alone, then alpha-tests GREATEREQUAL 1.
+    // The atlas is keyed on palette index 0, which comes back with alpha 0, so the test
+    // drops exactly the cell's background and every other texel is written opaque -- the
+    // glyph's own grey ramp times the colour. The target is read without sRGB decoding,
+    // so all of it is in display space.
+    let texel = textureSample(atlas, atlas_sampler, v.uv);
+    if texel.a < 0.5 {
+        discard;
+    }
+    return vec4<f32>(texel.rgb * v.colour.rgb, v.colour.a);
 }

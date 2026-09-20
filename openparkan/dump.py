@@ -625,7 +625,10 @@ def game_font(path: Path, names: list[str] | None = None) -> dict:
     atlas = textures.decode(tft.atlas, palette=pal.raw)
     return {
         "kind": "font",
-        "header": list(struct.unpack_from("<4i", tft.header, 4)),
+        "cell_width": tft.cell_width,
+        "height": tft.height,
+        "v_span": number(tft.v_span),
+        "spacing": tft.spacing,
         "glyphs": [[number(g.u0), number(g.u1), number(g.v0), g.advance] for g in tft.glyphs],
         "rows": vector(tft.rows),
         "atlas": {"width": atlas.width, "height": atlas.height, "format": atlas.fmt,

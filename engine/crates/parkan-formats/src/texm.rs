@@ -15,8 +15,12 @@ pub const FMT_ARGB4444: u32 = 4444;
 pub const FMT_XRGB8888: u32 = 888;
 pub const FMT_ARGB8888: u32 = 8888;
 
-/// Header +0x14 bits that would give a texture an alpha surface or a faded
-/// palette (`Ngi32.dll:0x1000fdf6`); no shipped texture sets either.
+/// Header +0x14 bits that give a texture an alpha surface or a faded palette
+/// (`Ngi32.dll:0x1000fdf6`). No shipped *texture* sets either, but every one of
+/// the eleven shipped fonts sets `ALPHA_SURFACE`, and on an alpha surface the
+/// palette's index 0 is cleared to alpha 0 (`0x1000f698`) while 1-255 are made
+/// opaque (`0x1000f6b0`) -- the colour key the text pass alpha-tests against.
+/// See `docs/12-rsli.md`, "How a glyph is drawn".
 pub const ALPHA_SURFACE: u32 = 0x0100_0000;
 pub const FADE_PALETTE: u32 = 0x0200_0000;
 
@@ -57,7 +61,7 @@ fn bytes_per_pixel(format: u32) -> Option<usize> {
     }
 }
 
-fn decode_level(format: u32, body: &[u8], palette: &[u8], pixels: usize) -> Vec<u8> {
+fn decode_level(format: u32, body: &[u8], palette: &[u8], pixels: usize, key0: bool) -> Vec<u8> {
     let mut out = Vec::with_capacity(pixels * 4);
     for i in 0..pixels {
         let px = match format {
@@ -76,8 +80,10 @@ fn decode_level(format: u32, body: &[u8], palette: &[u8], pixels: usize) -> Vec<
                 [p[2], p[1], p[0], if format == FMT_XRGB8888 { 255 } else { p[3] }]
             }
             _ => {
-                let j = usize::from(body[i]) * 4;
-                [palette[j + 2], palette[j + 1], palette[j], 255]
+                let index = body[i];
+                let j = usize::from(index) * 4;
+                let a = if key0 && index == 0 { 0 } else { 255 };
+                [palette[j + 2], palette[j + 1], palette[j], a]
             }
         };
         out.extend_from_slice(&px);
@@ -119,7 +125,7 @@ pub fn decode(data: &[u8], source: &str, external: Option<&[u8]>) -> Result<Text
             }
             break;
         };
-        levels.push(decode_level(format, body, palette, w * h));
+        levels.push(decode_level(format, body, palette, w * h, flags14 & ALPHA_SURFACE != 0));
         at += need;
     }
     let mut pages = Vec::new();

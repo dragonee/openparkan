@@ -62,7 +62,10 @@ FMT_ARGB8888 = 8888
 
 #: Header +0x14 bits that give a texture an alpha surface, and the second a
 #: 32-step fade on its palette (``Ngi32.dll:0x1000fdf6``, ``0x1000f620``).  No
-#: shipped texture sets either.
+#: shipped *texture* sets either, but every one of the eleven shipped fonts sets
+#: ``ALPHA_SURFACE``, and on an alpha surface the palette's index 0 is cleared to
+#: alpha 0 (``0x1000f698``) while 1-255 are made opaque (``0x1000f6b0``) -- the
+#: colour key the text pass alpha-tests against (``12-rsli.md``).
 ALPHA_SURFACE = 0x01000000
 FADE_PALETTE = 0x02000000
 #: On 81 ARGB8888 textures, 78 of them skins of lit materials, and they are
@@ -261,6 +264,7 @@ def decode(data: bytes, palette: bytes | None = None) -> Texture:
     none of its own; without one those textures come out as a grey ramp.
     """
     w, h, mips, flags, fmt = parse_header(data)
+    flags14 = HEADER.unpack_from(data, 0)[5]
     if fmt not in _BYTES_PER_PIXEL:
         raise UnsupportedTexture(f"unknown pixel format {fmt!r}")
     body = data[HEADER_SIZE:]
@@ -306,9 +310,13 @@ def decode(data: bytes, palette: bytes | None = None) -> Texture:
             b, g, r, a = body[i * 4 : i * 4 + 4]
             out[i * 4 : i * 4 + 4] = bytes((r, g, b, 255 if fmt == FMT_XRGB8888 else a))
     else:  # palettised, embedded (format 0) or external (format 2)
+        # On an alpha surface index 0 is the colour key: the fonts, and nothing else.
+        key0 = bool(flags14 & ALPHA_SURFACE)
         for i in range(w * h):
-            j = body[i] * 4
-            out[i * 4 : i * 4 + 4] = bytes((palette[j + 2], palette[j + 1], palette[j], 255))
+            index = body[i]
+            j = index * 4
+            a = 0 if key0 and index == 0 else 255
+            out[i * 4 : i * 4 + 4] = bytes((palette[j + 2], palette[j + 1], palette[j], a))
     return Texture(w, h, mips, fmt, flags, bytes(out), parse_pages(data))
 
 

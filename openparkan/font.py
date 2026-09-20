@@ -97,9 +97,17 @@ class Glyph:
 
 @dataclass
 class Font:
-    """``ARIALTEX.TFT``: 256 glyph records and the atlas they index."""
+    """``ARIALTEX.TFT``: the header's four metrics, 256 glyph records and the
+    atlas they index."""
 
-    header: bytes
+    #: Header word 0: the cell a fixed-pitch run gives every glyph.
+    cell_width: int
+    #: Header word 1: the glyph's height, one less than the cell it draws in.
+    height: int
+    #: Header word 2: that cell's height in texture coordinates.
+    v_span: float
+    #: Header word 3: what the pen adds after every glyph's advance.
+    spacing: int
     glyphs: list[Glyph]
     #: The embedded ``Texm`` blob, ready for ``texm.decode``.
     atlas: bytes
@@ -142,7 +150,8 @@ def parse_font(blob: bytes) -> Font:
         raise FontFormatError(
             f"no Texm at {ATLAS_AT}, found {blob[ATLAS_AT:ATLAS_AT + 4]!r}"
         )
-    return Font(blob[:HEADER_SIZE], glyphs, blob[ATLAS_AT:])
+    cell_width, height, v_span, spacing = struct.unpack_from("<iifi", blob, 4)
+    return Font(cell_width, height, v_span, spacing, glyphs, blob[ATLAS_AT:])
 
 
 def parse_palette(blob: bytes) -> Palette:

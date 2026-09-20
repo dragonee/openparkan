@@ -598,11 +598,17 @@ pub fn game_font(path: &Path) -> Result<Value> {
     let atlas = tft.decode_atlas(&pal, "ARIALTEX.TFT")?;
     let glyphs: Vec<Value> =
         tft.glyphs.iter().map(|g| json!([number(g.u0), number(g.u1), number(g.v0), g.advance])).collect();
+    let mut rows: Vec<f32> = tft.glyphs.iter().filter(|g| g.drawn()).map(|g| g.v0).collect();
+    rows.sort_by(f32::total_cmp);
+    rows.dedup();
     Ok(json!({
         "kind": "font",
-        "header": tft.header,
+        "cell_width": tft.cell_width,
+        "height": tft.height,
+        "v_span": number(tft.v_span),
+        "spacing": tft.spacing,
         "glyphs": glyphs,
-        "rows": vector(&tft.rows()),
+        "rows": vector(&rows),
         "atlas": {
             "width": atlas.width,
             "height": atlas.height,
