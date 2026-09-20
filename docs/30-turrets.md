@@ -289,8 +289,38 @@ hero turret the four channels animate `CP_m1o1`, `Turn_m1o1` (49–53),
     look to get the side (`0x100236bc`), and the look with the side to get the
     up (`0x100236eb`).
   - **The frame** is a matrix whose columns are look, side, up and eye
-    (`0x10023741`). If the two vectors are parallel, a look-only frame is used
-    instead (`0x10023769`).
+    (`0x10023741`), with the bottom row (0, 0, 0, 1).
+  - **If the two vectors are parallel** the camera builds a frame about the look
+    alone (`0x10003ef0`, called at `0x10023769`), and it is a square frame, not a
+    fallback:
+    - **The test** is the side's own length. `g_FastProc` slot `+0x98`
+      (`Ngi32.dll:0x10020000`, installed at `0x10003d1a`) normalises a vector in
+      place and returns the length it had; the camera calls it on the side it has
+      just crossed and compares against **0.0** (`[0x1003b18c]`, `0x100236d0`). So
+      the branch is taken on an exactly zero cross product, not on a near-parallel
+      pair.
+    - **The side** is the look's horizontal perpendicular, (−look y, look x, 0),
+      normalised through `g_FastProc` slot `+0x34` where the look's z is not zero
+      and left alone where it is, a look with no z making that vector unit already
+      (`0x10003f18`–`0x10003f63`).
+    - **Except on the axes**: where the look's x is exactly zero the side is the
+      **world x axis** and where its y is, the **world y axis**
+      (`0x10003f65`–`0x10003fa8`, the triples at `0x10041d80` and `0x10041d90`,
+      set to (1, 0, 0) and (0, 1, 0) at `0x10003e40` and `0x10003e60`). Those two
+      drop the sign the perpendicular would have carried, so half the looks on
+      each axis get a frame rolled 180° against the general one.
+    - **The up** is look × side, as the square case's is
+      (`0x10003fac`–`0x1000405f`), and the bottom row is again (0, 0, 0, 1)
+      (`0x10003fc3`–`0x10003fea`). A camera looking straight up gets side +x and
+      up +y; one looking straight down, side +x and up −y.
+    - **No shipped camera reaches it** (*measured*, `openparkan verify`). Posing
+      every camera's two points over every frame its own and its turret's channels
+      play, the look's closest approach to the up over the **63 camera components**
+      the object library names is **9.99°** (`e_tur_lt_01`): 54 come no nearer than
+      10°, 7 no nearer than 15°, and the two animal cameras, whose points are
+      `GunM_X` and `GunM_Y`, stay square. That is the pitch limit read above — the
+      look starts level, square to an up of ±z, and rises at most 80° — so the
+      degenerate branch is unreachable on the shipped data.
 - **The data agrees** (*measured*): `TargetDirect` is +y on all 58 cameras.
   `CameraCenter`'s vector is +z on all 31 upright ones and −z on 25 of the 27
   hung ones. The two hung exceptions are the Transformer's and the Small

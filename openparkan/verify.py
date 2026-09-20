@@ -15061,6 +15061,92 @@ def check_turret_channels(check, game: Path) -> None:
           f"start value; pitch limits (degrees) "
           + ", ".join(f"{lo:+g}..{hi:+g} x{n}" for (lo, hi), n in sorted(sweeps.items())))
 
+    # The camera builds a look-only frame where its up is parallel to its look
+    # (Control.dll:0x100236d0 -> 0x10003ef0).  How near any shipped camera comes:
+    # pose each one's two points over every frame its own and its turret's channels
+    # play, and take the angle between the up and the look, folded to a quarter turn.
+    archives = {p.name.lower(): NResArchive.open(p) for p in all_archives(game)}
+
+    def member(ref) -> bytes | None:
+        archive = archives.get(ref.library.lower()) if ref else None
+        try:
+            return archive.read_name(ref.member) if archive else None
+        except KeyError:
+            return None
+
+    nearest: list[tuple[float, str, str]] = []
+    unposed = []
+    for rid in sorted(library.records):
+        record = library.get(rid)
+        wiring, shape = record.slot_with_suffix("ctl"), record.mesh
+        if not wiring or not shape:
+            continue
+        blob = member(wiring)
+        if blob is None:
+            continue
+        c = control.parse(blob)
+        cameras = [p for p in c.components
+                   if p.type_id == control.CAMERA_TYPE and p.entries]
+        if not cameras:
+            continue
+        spot = record.slot_with_suffix("cpt")
+        raw = member(spot) if spot else None
+        if raw is None:
+            raw = member(objects.ResourceRef(wiring.library, wiring.member[:-4] + ".cpt"))
+        geometry = member(shape)
+        if raw is None or geometry is None:
+            unposed.append(rid)
+            continue
+        cp = objmesh.parse_control_points(raw)
+        model = objmesh.parse(geometry, shape.member)
+
+        def posed(node: int, frame: int, model=model) -> objmesh.Pose:
+            def local(k: int) -> objmesh.Pose:
+                track = model.track(k)
+                if track and 0 <= frame < len(track):
+                    return model.keys[track[frame]].pose
+                return model.local_pose(k)
+            out, parent = local(node), model.nodes[node].parent
+            while parent != objmesh.NO_PARENT:
+                out, parent = objmesh.compose(local(parent), out), model.nodes[parent].parent
+            return out
+
+        for comp in cameras:
+            chan = c.channels[comp.entries[0]]
+            if not 0 < chan.point < len(cp):
+                unposed.append(rid)
+                continue
+            up_at, look_at = cp[chan.point - 1], cp[chan.point]
+            if max(up_at.nodes[0], look_at.nodes[0]) >= len(model.nodes):
+                unposed.append(rid)
+                continue
+            frames = set(range(int(chan.first), int(chan.last) + 1))
+            for other in c.components:
+                if other.type_id == control.TURRET_TYPE and len(other.entries) == 2:
+                    for i in other.entries:
+                        played = c.channels[i]
+                        frames.update(range(int(played.first), int(played.last) + 1))
+            worst = 90.0
+            for f in sorted(frames):
+                u = objmesh.quaternion_rotate(posed(up_at.nodes[0], f)[1], up_at.direction)
+                v = objmesh.quaternion_rotate(posed(look_at.nodes[0], f)[1], look_at.direction)
+                lu, lv = math.hypot(*u), math.hypot(*v)
+                if not lu or not lv:
+                    worst = 0.0
+                    break
+                cosine = sum(a * b for a, b in zip(u, v, strict=True)) / (lu * lv)
+                worst = min(worst, math.degrees(math.acos(min(1.0, abs(cosine)))))
+            nearest.append((worst, rid, f"{up_at.name}/{look_at.name}"))
+    closest = min(nearest, default=(0.0, "", ""))
+    spread = Counter(round(w, 1) for w, _, _ in nearest)
+    check("turrets.rlb: no camera's look comes within 9.9 degrees of its own up",
+          len(nearest) >= 61 and not unposed and closest[0] > 9.9,
+          f"over {len(nearest)} camera components the look's closest approach to the up, "
+          f"at either end of every frame their channels play, is {closest[0]:.2f} degrees "
+          f"({closest[1]}); the pitch limits keep "
+          + ", ".join(f"{n} at {a:g}" for a, n in sorted(spread.items()))
+          + " degrees, so the look-only frame is never built")
+
     eye, sight = (next(q for q in cpt if q.name == n) for n in ("CameraCenter", "TargetDirect"))
     camera = [c for c in ctl.components if c.type_id == control.CAMERA_TYPE]
     poses = {f: world(EYE_NODE, f) for f in (51, 55, 56, 57)}

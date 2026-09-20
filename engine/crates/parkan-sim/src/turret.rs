@@ -240,15 +240,15 @@ impl Shake {
 pub fn view(look: Vec3, up: Vec3, free: [f32; 3]) -> (Vec3, Vec3) {
     let look = look.normalize_or(Vec3::Y);
     let side = up.cross(look);
+    // The game takes the look-only branch when the side's own length, which
+    // `g_FastProc` slot `+0x98` returns as it normalises it, is not above zero
+    // (`0x100236d0`); the engine keeps a small epsilon instead. No shipped camera's
+    // look comes within 9.99 degrees of its up, so neither is ever reached.
     let (side, up) = if side.length_squared() > 1e-12 {
         let side = side.normalize();
         (side, look.cross(side))
     } else {
-        // STAND-IN: docs/30-turrets.md#aiming-and-the-camera--read-and-measured -- how
-        // the look-only frame for an up parallel to the look is built (`0x10023769`)
-        // is not read; any frame about the look. No shipped camera's pitch reaches it.
-        let (side, up) = look.any_orthonormal_pair();
-        (side, up)
+        look_only(look)
     };
     let [x, y, _] = free;
     // STAND-IN: docs/14-controls.md#from-a-row-to-a-command--read-and-measured -- the
@@ -258,6 +258,23 @@ pub fn view(look: Vec3, up: Vec3, free: [f32; 3]) -> (Vec3, Vec3) {
     let yaw = -(0.5 - x) * TAU;
     let turn = Quat::from_axis_angle(up, yaw) * Quat::from_axis_angle(side, (0.5 - y) * PI);
     (turn * look, turn * up)
+}
+
+/// The frame the camera builds about the look alone, when its up is parallel to it
+/// (`Control.dll:0x10003ef0`, called at `0x10023769`). The side is the look's
+/// horizontal perpendicular (−look y, look x, 0), normalised; where the look's x is
+/// exactly zero it is the world x axis and where its y is, the world y axis
+/// (`0x10041d80`, `0x10041d90`, set at `0x10003e40` and `0x10003e60`), which drops the
+/// sign the perpendicular would have carried. The up is look × side, as it always is.
+fn look_only(look: Vec3) -> (Vec3, Vec3) {
+    let side = if look.x == 0.0 {
+        Vec3::X
+    } else if look.y == 0.0 {
+        Vec3::Y
+    } else {
+        Vec3::new(-look.y, look.x, 0.0).normalize_or(Vec3::X)
+    };
+    (side, look.cross(side))
 }
 
 /// A turret's channels, its arms and mounts, and the triples the input edits.
@@ -697,5 +714,28 @@ mod tests {
         // Parallel vectors still give a square frame.
         let (look, up) = view(Vec3::Z, Vec3::Z, [0.5; 3]);
         assert!(look.dot(up).abs() < 1e-6 && (look - Vec3::Z).length() < 1e-6);
+    }
+
+    #[test]
+    fn an_up_parallel_to_the_look_gives_the_looks_horizontal_perpendicular_for_a_side() {
+        // Straight up and straight down: the look's x is zero, so the side is the world
+        // x axis, and the up is look x side (`0x10003f8f`).
+        let (side, up) = look_only(Vec3::Z);
+        assert_eq!((side, up), (Vec3::X, Vec3::Y));
+        let (side, up) = look_only(-Vec3::Z);
+        assert_eq!((side, up), (Vec3::X, -Vec3::Y));
+        // A look with a zero y takes the world y axis (`0x10003f74`).
+        assert_eq!(look_only(Vec3::X).0, Vec3::Y);
+        // Otherwise the horizontal perpendicular, normalised: it is square to the look,
+        // level, and turned a quarter turn from it about the world up.
+        let look = Vec3::new(0.6, 0.48, 0.64);
+        let (side, up) = look_only(look);
+        assert!((side.length() - 1.0).abs() < 1e-6 && side.z == 0.0);
+        assert!(side.dot(look).abs() < 1e-6 && up.dot(look).abs() < 1e-6);
+        assert!((side - Vec3::new(-0.6, 0.75, 0.0).normalize()).length() < 1e-6, "{side}");
+        assert!(up.z > 0.0, "the up stays over the look: {up}");
+        // The frame the camera hands on is the same one.
+        let (l, u) = view(look, look, [0.5; 3]);
+        assert!((l - look.normalize()).length() < 1e-6 && (u - up.normalize()).length() < 1e-6);
     }
 }
