@@ -308,8 +308,64 @@ its size; teleports (22), tower parts (23) and ruins (28) give 0. A turret
 `0x1004000`, builder `0x1010000`, HQ `0x1020000`, hero `0x1002000`, and a
 battle robot `0x1008000` for anything else. *Measured*: **164 of 167** placed
 buildings carry the `Type` their root part derives; the other three are ruins,
-placed as `0x80002000` where the derivation gives 0. `0x1008a690` maps the
-same five bytes onto a small number 0–7 whose use is not traced.
+placed as `0x80002000` where the derivation gives 0. Over the 395 parts of a
+tree, **293 derive 0** and 102 name a building or a unit — the same split in
+all 29 trees.
+
+**Who reads the `Type`** (*read*, as an enumeration). `0x1008a590` has
+**six call sites in three functions, all of them the warbot designer's**, and
+each pair is the same idiom: derive from the design's base part (`+0x39c`), and
+where that part's kind is 9 derive again from the design's second part
+(`+0xd240`, the turret) and keep that instead.
+
+| caller | what it does with it |
+|---|---|
+| `0x1004ec50` at `0x1004f338`, `0x1004f364` | the unit box's title, `"%s-%s %s"` (`0x100765e0`, [38-designs.md](38-designs.md)) |
+| `0x100506d0` at `0x1005151b`, `0x10051541` | the takt's **Accept**: stores it in the designer's `+0x04` (`0x10051546`) |
+| `0x100544b0` at `0x10054520`, `0x1005454c` | the unit writer's class word ([30-turrets.md](30-turrets.md)) |
+
+Nothing else reaches it. `0x1008a590`, `0x1008a500` and `0x1008a690` are not
+among `iron3d.dll`'s eight exports, and a raw scan of every module in the
+install for their addresses as little-endian words finds **none of them in any
+vtable or data table**. The control on that scan is that it does find the
+addresses the docs say are installed in one — `Terrain.dll:0x1007ed40` at
+`0x1009c19c` and `0x10080550` at `0x1009c214`, `CSun`'s object slot 3 and
+`CLightManager`'s slot 9.
+
+### `0x1008a690` is the designer's part category — *read*, and *measured*
+
+The same five bytes, read in a different order, give a **category 0–7**, and
+the number is a dispatch index and nothing else. The chain (`0x1008a690`,
+which is a leaf, 15 compares and a `ret`) asks, in order: kind 9 sub-kind 32
+→ **0**; kind 9 sub-kind 33 → **1**; kind 8 by its *second* sub-kind — 81
+`BLD` → **5**, 80 `TUR` → **1**, 84 `UPG` → **1**, 82 `DEF` → **1**, 83 `RDR`
+→ **2**; kind 12 → **2**; kind 11 sub-kind 69 `BRN` → **6**; kind 10 → **4**;
+kind 11 sub-kind 68 `ARM` → **7**; and then `sete`/`lea ecx, [ecx*4 - 1]`
+(`0x1008a761`–`0x1008a770`), which is **3** for any other device and
+**−1** for anything else at all.
+
+So a building is filed by its branch, not its kind: a bunker's turret fits as a
+turret and a tower's radar as a gun. Its two readers are both in the designer
+and both use it as a jump table index:
+
+- **fitting a part** (`0x100519e0`): `dec eax; cmp eax, 6; ja` and the table at
+  `0x10051b88` — turret `0x10052570`, gun `0x10052fb0`, device `0x10052d10`,
+  ammunition `0x10053510`, armour `0x100537b0`, building and brain nothing.
+  Category 0 and −1 both fall past the bound, so **choosing a chassis once a
+  project exists does nothing**; the chassis path is taken earlier, at
+  `0x10051a5c`, on there being no preview object yet
+  ([38-designs.md](38-designs.md#fitting--read-and-measured)).
+- **taking one off** (`0x10053a50`): `cmp eax, 7; ja` and the table at
+  `0x10053cdc`, entered at the category itself — 0 and 5 both go to
+  `0x10053b00`, which throws the whole project away; 1 `0x10053df0`, 2
+  `0x10054210`, 3 and 4 clear a slot of the design's `0x330`-stride array, 6
+  nothing, 7 `0x10053c62`. Being unsigned, −1 falls past this bound too.
+
+*Measured* over the shipped trees: all **29** carry the same 395 parts and the
+same split — **27 chassis, 74 turrets, 67 guns, 104 devices, 58 clips, 34
+buildings, 6 brains, 24 armours**, and exactly **one** part that falls through
+to −1: `R_H_01`, *Hero target*, the only `SHS:TAR` record. The designer can
+neither fit nor unfit it.
 
 ### `TRFB` is the part-to-item mapping
 
@@ -568,6 +624,15 @@ warbot and construct it in the Factory."*
 - ~~**What `TRF1`'s directory flag switches**~~ — **narrowed**: it marks a tree
   as carrying debugging information, and its one reader found is the warning
   `FULL_RESEARCH_TREE` silences. No shipped archive sets it.
-- What `iron3d.dll:0x1008a690` does with the small number it derives from a
+- ~~What `iron3d.dll:0x1008a690` does with the small number it derives from a
   part's bytes, and whether anything but the part lists reads a part's
-  derived `Type`.
+  derived `Type`~~ — **closed**: the number is the **warbot designer's part
+  category**, 0–7 with −1 for none, and it is a jump table index in the only
+  two places that ask for it, the fit (`0x100519e0`) and unfit (`0x10053a50`)
+  dispatches. The derived `Type` has six call sites in three functions, all
+  three the designer's — the unit box title, Accept, and the unit writer —
+  and neither function's address occurs in any vtable or data table in the
+  install ([above](#0x1008a690-is-the-designers-part-category--read-and-measured)). Over
+  the 395 parts of every one of the 29 trees the categories fall 27/74/67/
+  104/58/34/6/24 with one part, `R_H_01`, uncategorised, and 293 of the 395
+  derive `Type` 0.

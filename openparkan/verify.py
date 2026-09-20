@@ -17421,6 +17421,28 @@ def check_research_streams(check, game: Path) -> None:
               f"{len(tokens[2]) - 1} and 255 -- and {named} match "
               f"research.PART_KINDS/SUBS/BRANCHES")
 
+    shapes = set()
+    for tree in trees:
+        cats = Counter()
+        zero = 0
+        for pid in tree.part_ids:
+            item = tree.item_for(pid)
+            cats[item.part_category if item else -99] += 1
+            zero += not (item and item.object_type)
+        shapes.add((len(tree.part_ids), tuple(sorted(cats.items())), zero))
+    shape = next(iter(shapes)) if len(shapes) == 1 else None
+    check("research: every part lands on one of the designer's eight categories",
+          len(shapes) == 1 and shape[0] == research.PARTS
+          and dict(shape[1]) == {-1: 1, 0: 27, 1: 74, 2: 67, 3: 104,
+                                 4: 58, 5: 34, 6: 6, 7: 24}
+          and shape[2] == 293,
+          f"all {len(trees)} trees carry the same {shape[0]} parts and the same split by "
+          f"iron3d.dll:0x1008a690's category -- "
+          + ", ".join(f"{research.PART_CATEGORIES[k]} {v}" for k, v in shape[1])
+          + f"; the one that falls through is R_H_01, SHS:TAR, the hero's target. "
+          f"{shape[2]} of the {shape[0]} derive object Type 0 from the same bytes, so "
+          f"{shape[0] - shape[2]} name a building or a unit")
+
     states = Counter(item.category for tree in trees for item in tree.items)
     opened = [(tree, item) for tree in trees for item in tree.items
               if item.category == research.IN_TREE | research.AVAILABLE]

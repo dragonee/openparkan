@@ -115,17 +115,34 @@ Every part the recording's designer shows is among them (*seen*, and
 ## Fitting — *read*, and *measured*
 
 **What a chosen part does** is picked by its research record's kind bytes
-(`0x100519e0`, `0x1008a690`):
+(`0x100519e0`, `0x1008a690` — the category's full derivation is in
+[16-research.md](16-research.md#0x1008a690-is-the-designers-part-category--read-and-measured)):
 
 | part | category | fit |
 |---|---|---|
-| chassis (kind 9, sub-kind 32) | 0 | `0x10051bb0` |
+| chassis (kind 9, sub-kind 32) | 0 | `0x10051bb0`, but see below |
 | turret (9, 33), a building's turret, defence or upgrade | 1 | `0x10052570` |
 | gun (kind 12), a building's radar | 2 | `0x10052fb0` |
 | device (kind 11) | 3 | `0x10052d10` |
 | ammunition (kind 10) | 4 | `0x10053510` |
 | armour (11, 68) | 7 | `0x100537b0` |
 | a building, a brain (11, 69) | 5, 6 | nothing |
+| anything else (only `R_H_01`, `SHS:TAR`) | −1 | nothing |
+
+**The chassis row is not the category's.** `0x10051a5c` tests the preview
+object first: with none, whatever was clicked goes to `0x10051bb0`, and only
+with one does it derive the category and dispatch. The table at `0x10051b88` is
+entered at *category − 1* under `cmp eax, 6; ja`, so category 0 and category
+−1 both fall past its end — **once a project exists, clicking a chassis does
+nothing at all**.
+
+**Taking a part off** is the same number through a second table
+(`0x10053a50`, `cmp eax, 7; ja`, the table at `0x10053cdc`, entered at the
+category itself): a turret `0x10053df0`, a gun `0x10054210`, a device and a
+clip each clear their slot of the design's `0x330`-stride array, armour
+`0x10053c62`, a brain nothing — and **a chassis or a building, 0 and 5, both
+land on `0x10053b00`, which destroys the whole project** and lays the designer
+out again with its kind's prefix.
 
 **Choosing a chassis starts the design** (`0x10051bb0`):
 

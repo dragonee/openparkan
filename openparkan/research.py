@@ -180,6 +180,27 @@ BUNKER_TYPES = {1: 0x80010000, 2: 0x80020000, 3: 0x80040000}
 TURRET_TYPES = {3: 0x1004000, 4: 0x1010000, 5: 0x1020000, 6: 0x1002000}
 TURRET_DEFAULT_TYPE = 0x1008000
 
+#: The second thing ``iron3d.dll`` derives from the same bytes
+#: (``0x1008a690``): a **part category**, which is the warbot designer's
+#: dispatch index and nothing else.  Its two readers both use it as a jump
+#: table index -- fitting a part (``0x100519e0``, the table at ``0x10051b88``,
+#: entered at category − 1) and taking one off (``0x10053a50``, the table at
+#: ``0x10053cdc``, entered at the category itself).
+SUB_CHASSIS = 32
+SUB_BRAIN = 69
+SUB_ARMOUR = 68
+KIND_AMMUNITION = 10
+KIND_DEVICE = 11
+KIND_WEAPON = 12
+#: A building part's second sub-kind decides its category.
+BRANCH_CATEGORIES = {80: 1, 81: 5, 82: 1, 83: 2, 84: 1}
+#: What a category means, and which fit routine the designer runs for it.
+PART_CATEGORIES = {
+    -1: "none",
+    0: "chassis", 1: "turret", 2: "gun", 3: "device",
+    4: "ammunition", 5: "building", 6: "brain", 7: "armour",
+}
+
 
 #: The same three bits under the names a second reading gave them
 #: (``MisLoad.dll`` slot 26, ``0x10002aa0``).  Finishing a research needs
@@ -284,6 +305,34 @@ class Item:
                 return BUNKER_TYPES.get(self.tail[4], 0)
             return BUILDING_TYPES.get(sub, 0)
         return 0
+
+    @property
+    def part_category(self) -> int:
+        """The designer's part category (``iron3d.dll:0x1008a690``), or −1.
+
+        The same five bytes the ``Type`` comes from, read in a different
+        order: a chassis 0, a turret 1, a gun 2, a device 3, ammunition 4, a
+        building 5, a brain 6 and armour 7.  A building goes by its **second**
+        sub-kind, so a building's turret is a turret and its radar is a gun.
+        Anything the chain does not name is −1, which both readers bound out.
+        """
+        if len(self.tail) < 5:
+            return -1
+        kind, sub, branch = self.tail[1], self.tail[2], self.tail[3]
+        if kind == KIND_CHASSIS:
+            if sub == SUB_CHASSIS:
+                return 0
+            if sub == SUB_TURRET:
+                return 1
+        if kind == KIND_BUILDING and branch in BRANCH_CATEGORIES:
+            return BRANCH_CATEGORIES[branch]
+        if kind == KIND_WEAPON:
+            return 2
+        if kind == KIND_AMMUNITION:
+            return 4
+        if kind == KIND_DEVICE:
+            return {SUB_BRAIN: 6, SUB_ARMOUR: 7}.get(sub, 3)
+        return -1
 
     @property
     def in_tree(self) -> bool:

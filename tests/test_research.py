@@ -250,3 +250,28 @@ def test_trf1_is_three_state_bits():
     assert granted.researched and granted.available
     creature = research.Item(2, "", "", 2, (0.0,) * 4, (), ())
     assert creature.researched and not creature.in_tree
+
+
+def test_the_same_bytes_give_the_designer_its_part_category():
+    """``iron3d.dll:0x1008a690``: the fit and unfit dispatch index, 0..7 or -1."""
+    def item(kind, sub, branch=255, role=research.ROLE_NONE, size=1):
+        return research.Item(0, "", "", 4, (0.0,) * 4, (), (),
+                             tail=(role, kind, sub, branch, size, 0))
+    assert item(9, 32).part_category == 0
+    assert item(9, 33).part_category == 1
+    assert item(12, 49).part_category == 2
+    assert item(11, 71).part_category == 3
+    assert item(10, 49).part_category == 4
+    assert item(11, 69).part_category == 6
+    assert item(11, 68).part_category == 7
+    # A building goes by its second sub-kind, not its first.
+    assert item(8, 17, 81).part_category == 5
+    assert item(8, 17, 80).part_category == 1
+    assert item(8, 17, 82).part_category == 1
+    assert item(8, 17, 83).part_category == 2
+    assert item(8, 19, 84).part_category == 1
+    # Nothing the chain names: a building with no branch, and SHS:TAR, the one
+    # shipped part that falls through -- R_H_01, the hero's target.
+    assert item(8, 17, 255).part_category == -1
+    assert item(9, 34).part_category == -1
+    assert research.Item(1, "", "", 4, (0.0,) * 4, (), ()).part_category == -1
