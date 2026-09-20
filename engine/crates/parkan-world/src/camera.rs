@@ -74,8 +74,8 @@ pub const BACK_S: f64 = 0.3;
 pub const DONE_SHARE: f64 = 0.8;
 pub const BLEND_PER_S: f64 = 1.25;
 /// The line from the eye to the camera is tested past the camera by this, once it is longer
-/// than `CLEAR_FROM`, and a camera behind something is brought this far back off what it
-/// meets (`0x100384d0`: `0x100e4ccc`, `0x100e5c70`, `0x100e5d0c`).
+/// than `CLEAR_FROM`, and a camera behind something stands this far off the face it meets
+/// **along that face's own normal** (`0x100384d0`: `0x100e4ccc`, `0x100e5c70`, `0x100e5d0c`).
 pub const CLEAR_PAST: f32 = 0.5;
 pub const CLEAR_FROM: f32 = 0.1;
 pub const CLEAR_OFF: f32 = 0.75;
@@ -166,11 +166,11 @@ impl Outer {
     /// (`0x10038799`–`0x10038816`): back along the eye's heading turned by the angle, `r` ×
     /// the distance, and `r` × the drop below the eye, looking where the eye looks. The line
     /// from the eye through the camera is then tested (`0x100384d0`): `meets(from, to)` gives
-    /// the first thing the line meets, and a camera behind it is brought in front.
-    ///
-    /// STAND-IN: docs/30-turrets.md#not-established -- what the world query's answer `+8` is,
-    /// of which 0.75 is added to the point met: the camera stands 0.75 back toward the eye.
-    pub fn place(&self, eye: &Eye, r: f32, meets: impl Fn(Vec3, Vec3) -> Option<Vec3>) -> Eye {
+    /// the point the line first meets and that face's own normal, and a camera behind it
+    /// stands 0.75 off the face along that normal (`0x100386b2`-`0x100386e2`, the world's
+    /// answer `+8` being a pointer to the face normal the query has just unpacked --
+    /// `Terrain.dll:0x1001a6ec`, docs/30, "What the outer camera's line meets").
+    pub fn place(&self, eye: &Eye, r: f32, meets: impl Fn(Vec3, Vec3) -> Option<(Vec3, Vec3)>) -> Eye {
         let [angle, drop, back] = self.now;
         let heading = eye.forward.y.atan2(eye.forward.x) + angle;
         let mut position = Vec3::new(
@@ -183,8 +183,8 @@ impl Outer {
         if length > CLEAR_FROM {
             let d = line / length;
             let end = position + d * CLEAR_PAST;
-            if let Some(point) = meets(eye.position, end) {
-                position = point - d * CLEAR_OFF;
+            if let Some((point, normal)) = meets(eye.position, end) {
+                position = point + normal * CLEAR_OFF;
             }
         }
         Eye { position, forward: eye.forward, up: eye.up, fov_x: OUTER_FIELD, near: OUTER_NEAR }
@@ -271,16 +271,32 @@ mod tests {
     }
 
     #[test]
-    fn a_wall_between_brings_the_camera_in_front_of_it() {
+    fn a_wall_between_stands_the_camera_off_the_face_along_its_own_normal() {
         let mut o = Outer::default();
         o.press(None, true, 0.0);
         o.update(1000.0);
-        let wall = |from: Vec3, to: Vec3| {
-            let x = 8.0;
-            (to.x < x).then(|| from + (to - from) * ((from.x - x) / (from.x - to.x)))
+        // A plane through x = 8 whose own normal is `n`: where the line crosses it, and that
+        // normal, as the world's answer carries both.
+        let plane = |n: Vec3| {
+            move |from: Vec3, to: Vec3| {
+                let x = 8.0;
+                (to.x < x).then(|| (from + (to - from) * ((from.x - x) / (from.x - to.x)), n))
+            }
         };
-        let e = o.place(&eye(), 2.0, wall);
-        assert!(e.position.x > 8.0 && e.position.x < 8.0 + CLEAR_OFF, "{}", e.position);
+        let e = o.place(&eye(), 2.0, plane(Vec3::X));
+        assert!((e.position.x - (8.0 + CLEAR_OFF)).abs() < 1e-4, "{}", e.position);
         assert!(e.position.z > 5.0, "a flyer's camera stands above the eye");
+        // A face leaning back pushes the camera up its own normal, not back along the line:
+        // the height gained is 0.75 × the normal's z whatever way the line ran.
+        let lean = Vec3::new(1.0, 0.0, 1.0).normalize();
+        let straight = o.place(&eye(), 2.0, plane(Vec3::X));
+        let leaned = o.place(&eye(), 2.0, plane(lean));
+        assert!(
+            (leaned.position.z - straight.position.z - CLEAR_OFF * lean.z).abs() < 1e-4,
+            "{} against {}",
+            leaned.position,
+            straight.position
+        );
+        assert!((leaned.position - straight.position).y.abs() < 1e-6);
     }
 }

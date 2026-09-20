@@ -604,9 +604,18 @@ foot, a boarded bot, telepresence) and there is a driven unit record
     the unit flies (`0x10075f70`, [35-hud.md](35-hud.md#the-radar--read-and-seen)).
   - **Place 0 turns the camera on.** It sets view state 3 (`0x100a4f90`), puts the
     view on (`0x10036d40`) and hands the view to the record's camera component
-    (interface slot 4). It also copies the main view's flag `0x20` to the outer
-    view (`0x1003895c`–`0x10038995`). It clears `+0x4c`–`+0x54`, so the move
-    starts in the eye.
+    (interface slot 4). It also **carries the infrared over**: flag `0x20` of the
+    game's own view is read through the view's flags getter (slot 20, `+0x50`) and
+    or-ed into the outer view's through its setter (slot 13, `+0x34`) at
+    `0x1003895c`–`0x10038990`, and where the game's view has it clear `0x10035c60`
+    clears it on the outer view instead (`and eax, 0xffffffdf`). Bit `0x20` is the
+    camera's **infrared**, which `Control.dll:0x10023a00` sets on `CIS_INFRARED_ON`,
+    clears on `CIS_INFRARED_OFF` and flips on `CIS_INFRARED_INV` — N — and which the
+    HUD's second lamp reads (`0x10035c20`,
+    [35-hud.md](35-hud.md#the-indicators--read-and-seen)). So the outer shot keeps
+    the night sight the cockpit had, and N goes on working while the camera is out,
+    because the unit's camera component is now holding the outer view. It clears
+    `+0x4c`–`+0x54`, so the move starts in the eye.
   - **Places 0 to 3** step `+0x58` on. Place 4 zeroes the three and sets `+0x58`
     back to 0.
   - **Every place** sets `+0x60` and stamps `+0x5c` with the timer's time now
@@ -638,9 +647,11 @@ foot, a boarded bot, telepresence) and there is a driven unit record
      from the eye plus d × the record's `+0x94` to the camera plus d × 0.5
      (`0x100e4ccc`).
    - When it meets something, the camera stands at the point met plus 0.75
-     (`0x100e5d0c`) × the vector at `+8` of the world's answer (slot 6, with 2),
-     which is traced but not named
-     ([below](#what-the-outer-cameras-line-meets--read-in-part)).
+     (`0x100e5d0c`) × the vector at `+8` of the world's answer (slot 6, with 2).
+     That `+8` is a **pointer**, dereferenced for three floats
+     (`0x100386b2`–`0x100386e2`), and it points at **the struck face's own normal**
+     ([below](#what-the-outer-cameras-line-meets--read)). So a camera that would
+     clip into the ground or a wall stands 0.75 m off that face along its normal.
 5. **The view takes the matrix** (slot 7).
 6. **While `+0x60` is set, the camera moves** (`0x10038819`–`0x10038896`).
    - The move lasts 0.5 s, or 0.3 s (`0x3e99999a`) when `+0x58` is 0, the way
@@ -656,7 +667,7 @@ So a move is done 0.4 s after its press, or 0.24 s for the way back, and eases
 out fast at first (*derived*). **Five presses go round**: four places, then
 back into the cockpit.
 
-### What the outer camera's line meets — *read*, in part
+### What the outer camera's line meets — *read*
 
 **Its query is a round's, less one class** (`0x10038649`–`0x10038678`). The eight
 dwords are `[0x41a, 0, 0, 0, 0, 0x208, 0, 0x24]`: the six the builder takes, then
@@ -676,20 +687,53 @@ classes 1, 3, 4 and 10 where a round visits 1, 2, 3, 4 and 10.
   batches a round flies past, and stops on the bed and on the trunk** — unlike the
   sight, whose query excludes nothing
   ([29-weapons.md](29-weapons.md#where-the-round-leaves-and-which-way)).
-- **The class the camera drops is class 2.** Which objects answer class 2 was not
-  found: a sweep of every module's vtables for a slot-11 stub returning a constant
-  finds 1 (`World3D.dll`, `AniMesh.dll`, `Control.dll`, `Effect.dll`), 3
-  (`iron3d.dll`) and 11 (`MisLoad.dll`) and none returning 2, and the classes that
-  matter for the pick are open too
-  ([42-selection.md](42-selection.md#not-established)). Class 3 is a building and
-  class 4 a unit, from the id nibble the game's message handler routes on
+- **A class is slot 11, and the mask is `1 << class`** (*read*). The world's line
+  walk asks each object for its class through slot 11 of the interface it answers
+  for (`Terrain.dll:0x10025101`) and ands the query's first word with
+  **`[class * 4 + 0x1009a5f0]`** (`0x1002510f`). That table is sixteen dwords, 1, 2,
+  4 … `0x8000` — entry k is exactly `1 << k` — and it runs straight into the IWorld
+  vtable after entry 15, so a class is 0…15 and the camera's `0x41a` really does
+  drop class 2 from a round's `0x41e`.
+- **Class 1 is the landscape** (*read*, named). `CLightning::Init()` panics
+  *"Root object is not a landscape"* unless the root object's slot 11 answers 1
+  (`Terrain.dll:0x10071c41`–`0x10071c58`), and the landscape's own slot 11
+  (`0x1001f140`, at slot 11 of the vtable its constructor installs at `0x1009a468`)
+  returns 1. Class 3 is a building and class 4 a unit, from the id nibble the game's
+  message handler routes on
   ([29-weapons.md](29-weapons.md#how-the-ai-fires--read)).
+- **Nothing in the install names class 2** — a negative, with three controls that
+  each find the classes the page already knows:
+  - **Every reader.** Over all 21 shipped modules, every `call [reg+0x2c]` followed
+    within eight instructions by a comparison against a constant under 16 gives
+    **68 sites**, naming 1 (4 sites), 3 (39), 4 (7), 5, 6, 7, 9 (2), 10 (4) and
+    11 (6). **Not one names 2.** `Control.dll`'s own "has a control system" test
+    asks 4, then 3, then 10 in a row (`0x100072d4`–`0x100072f6`) — the camera's three
+    live classes besides the landscape.
+  - **Every stub.** A byte sweep for a routine whose whole body is `return N` for
+    N under 16, in the release shape and in the debug shape the landscape's own
+    `GetClass` has (`push ebp` / `mov ebp, esp` / `push ecx` / `mov [ebp-4], ecx` /
+    `mov eax, N` / `mov esp, ebp` / `pop ebp` / `ret`), finds **71** of them, of which
+    **7 sit at slot 11 of a vtable some `mov` installs**: class 1 three times
+    (`Terrain.dll:0x1001f140`, `AniMesh.dll:0x10002ab0`, `Behavior.dll:0x10031da0`),
+    and 3, 5, 7 and 11 once each. **None answers 2** — four stubs do return 2, and
+    none of them is at a slot 11. This is the sweep the previous round called weak;
+    the debug shape is what it had been missing, and it is what found the landscape.
+  - **The game's own switch.** `iron3d.dll:0x1006016b` routes a game message on
+    `(id >> 24) & 0xf` through a byte map at `0x10060858` and a jump table at
+    `0x10060840`: classes **1, 3, 4, 7 and 11** have cases and 2, 5, 6, 8, 9 and 10
+    fall to the default at `0x10060779`. That one does not settle it by itself — it
+    leaves out class 10, which the camera does visit — but it names no 2 either.
 
-**Where the vector at `+8` comes from** — *read* as far as it goes, and it does not
-reach what the vector is. IWorld slot 6 is `CWorld::GetWorldFace`, which names itself
-in its own panic string (`Terrain.dll:0x10024d70`, *"Invalid object ID"* under
-`CWorld::GetWorldFace()` at `0x100a1398`). The trail, each function decoded from its
-own entry:
+  So **what answers class 2 is still not established**, and the negative is now a
+  controlled one: no shipped code compares a class against 2 and no installed slot 11
+  answers it. Whatever it is, the camera's line is the only thing in the install that
+  treats it differently from a round's, and nothing the engine models answers it
+  ([42-selection.md](42-selection.md#not-established) has the pick's own classes).
+
+**The vector at `+8` is the face's own normal** — *read*, end to end. IWorld slot 6
+is `CWorld::GetWorldFace`, which names itself in its own panic string
+(`Terrain.dll:0x10024d70`, *"Invalid object ID"* under `CWorld::GetWorldFace()` at
+`0x100a1398`). The trail, each function decoded from its own entry:
 
 1. **The camera asks for 2** (`iron3d.dll:0x100386a7`). `GetWorldFace` hands that
    word on to the struck object's interface `0x18` slot 5 (`0x10024dd9`), and the
@@ -699,31 +743,39 @@ own entry:
 3. **The landscape's slot 5 is `0x100202a0`, and it returns `this+0xd4`**
    (`0x100205af`) — the record is the landscape's own scratch struct, so its `+4`
    *is* the landscape's `+0xd8`, which `0x10020389` fills from **`+0x1c` of the
-   slot-4 record**.
+   slot-4 record**, under no flag at all.
 4. **Slot 4 is `0x1001a470`, and it returns `this+0x18`** (`0x1001b0f5`) — again a
    struct inside the object it belongs to. So the field is that object's **`+0x34`**,
    read there exactly once, as a pointer, at `0x1001a6ec`.
+5. **`+0x34` is set once, in the constructor**, to **`this+0x7b0c`**: the landscape's
+   constructor (`0x100166a0`, which installs the interface's vtable `0x1009a3c4` at
+   its own `+0x13c`) writes `this_outer + 0x7c48` into `this_outer + 0x170`
+   (`0x10018dd0`–`0x10018ddb`), among a run of the same shape for `+0x1c8`, `+0x1cc`
+   and `+0x1d0`. In the interface's own coordinates that pair is `+0x7b0c` and
+   `+0x34`.
 
-**What is not read is what `+0x34` points at.** Nothing in `0x1001a470` writes it,
-and no store anywhere in `Terrain.dll` puts an address into it that this page could
-follow. Two observations pull in opposite directions and neither settles it:
+**And `+0x7b0c` is the buffer the query has just filled with the face's normal**:
+under flag 2, three `int16` at the face source's `+0x14`, `+0x16` and `+0x18` are
+scaled by `[0x100a5a0c]` into a float triple at `+0x7b0c`
+(`0x1001a649`–`0x1001a6c5`), and `+0x34` is dereferenced eight instructions later,
+dotted with the face's first vertex and negated into `+0x38` — the plane constant
+*d* for that normal and that vertex (`0x1001a6e6`–`0x1001a735`). The scale is
+**1 ÷ 32767** (`0x10022793`–`0x1002279f`, 1.0 over 32767.0), which is the face
+record's own normal encoding, checked on all 275882 shipped faces
+([03-terrain.md](03-terrain.md#the-face-record-28-bytes-14--uint16)).
 
-- Under the same flag 2, `0x1001a6e6`–`0x1001a735` reads `+0x34`'s three floats,
-  dots them with the face's **first vertex** — fetched through a stream descriptor
-  at `0x1001a6c8`–`0x1001a6e0` — negates the sum and stores it as a float in
-  `+0x38`. That is the plane constant *d* for that vector and that vertex, which
-  only means anything if the vector is the face's plane normal.
-- But the face's own normal is unpacked **elsewhere** in the same block: three
-  `int16` at the face source's `+0x14`, `+0x16` and `+0x18` are scaled by
-  `[0x100a5a0c]` into a float triple at the object's `+0x7b0c`
-  (`0x1001a649`–`0x1001a6c5`) — the six bytes
-  [09-method.md](09-method.md#reading-other-peoples-work) records fparkan leaving
-  uninterpreted. **`+0x34` is not that buffer**: `0x7b0c` occurs three times in the
-  whole module and none of them stores into `+0x34`.
+So the outer camera stands at the point its line met **plus 0.75 of that face's
+normal** — 0.75 m out along the surface, the one step that keeps it out of the wall
+or the hillside it would otherwise sit inside. The reading published last round and
+withdrawn — that the vector is the face's normal — was right, and the withdrawal was
+the error: the sweep that found no writer looked for the immediate `0x7b0c` in the
+interface's coordinates, while the constructor writes the pair in the most-derived
+object's, as `0x7c48` into `0x170`
+([09-method.md](09-method.md#searches-that-do-not-discriminate-so-nobody-repeats-them)).
 
-So the vector is a plane's, by the company it keeps, and it is **not** the unpacked
-face normal this page first took it for. Which of the two it is stays
-[open](#not-established).
+**Read for the landscape only.** The same `+8` is dereferenced whatever the line
+meets, so a mesh object's `0x18` interface must fill the same field with its own
+face's normal; that side of it was not traced.
 
 **What turns it off** (`0x10038ad0`, *read*):
 
@@ -1108,18 +1160,24 @@ listed are `r_t_01`–`02`, `r_l_01`–`07`, `r_m_01`–`04`, `r_b_01`–`04`,
 - **How often the game frame runs**, which paces the zoom's 0.1 steps and the
   outer camera's ease: both are per frame. The recording's zoom-in fits 60 a
   second.
-- **The outer camera's line through the world.** Half answered: the query is a
-  round's less one class bit, so `0x208` and `0x24` let through exactly what a
-  round passes — the water surface among them — and the `+8` vector is traced from
-  `CWorld::GetWorldFace`'s answer down to the landscape face record's `+0x34`
-  ([What the outer camera's line meets](#what-the-outer-cameras-line-meets--read-in-part)).
-  **What that field points at is still not read**: nothing writes it in the routine
-  that hands it out, and it is demonstrably not the face's own unpacked normal,
-  which the same block builds in a different buffer. So whether 0.75 of it lifts
-  the camera along the face or back along its own line is still open, and the
-  engine keeps its stand-in. Open with it: **which objects answer world class 2**,
-  the one class the camera drops from a round's mask, which is
-  [42-selection.md](42-selection.md#not-established)'s question too.
-- **What the outer view's flag `0x20`** copied from the main view is.
+- ~~What the vector at `+8` of `CWorld::GetWorldFace`'s answer is, 0.75 of which
+  the outer camera adds to the point its line meets~~ — **read**: it is a pointer
+  to the **face's own normal**, the landscape's constructor setting the field once
+  (`Terrain.dll:0x10018dd0`, `this+0x7c48` into `this+0x170`, which is `+0x7b0c`
+  into `+0x34` in the interface's coordinates) to the very buffer the query unpacks
+  the face's three `int16` into. So the camera stands 0.75 m off the face along its
+  normal ([What the outer camera's line meets](#what-the-outer-cameras-line-meets--read)).
+  Read for the landscape; the same field on a mesh object was not traced.
+- **Which objects answer world class 2**, the one class the camera drops from a
+  round's mask, is still not established — but the negative is now controlled:
+  68 comparison sites over 21 modules name classes 1, 3, 4, 5, 6, 7, 9, 10 and 11
+  and never 2, and of the 71 `return N < 16` stubs in the install the 7 that sit at
+  slot 11 of an installed vtable answer 1, 3, 5, 7 and 11
+  ([What the outer camera's line meets](#what-the-outer-cameras-line-meets--read)).
+  It is [42-selection.md](42-selection.md#not-established)'s question too.
+- ~~What the outer view's flag `0x20` copied from the main view is~~ — **read**:
+  the camera's **infrared**, carried over so the outer shot keeps the night sight
+  the cockpit had ([The outer camera](#the-outer-camera--read-and-measured),
+  [35-hud.md](35-hud.md#the-indicators--read-and-seen)).
 - **Which box r, the unit record's `+0x98`, is the half-diagonal of**
   ([40-command-mode.md](40-command-mode.md#not-established)).

@@ -110,6 +110,17 @@ find.
   unrelated `0x10`s in `ArealMap.dll` and `Behavior.dll`, and separates nothing.
   What did work was going the other way: enumerate the readers of the field, and
   then the callers of each.
+- **Looking for a field's writer in the wrong coordinates.** A C++ object with
+  several interfaces is addressed through whichever sub-object a method was entered
+  on, and a constructor writes the whole thing through the most-derived pointer. A
+  field the landscape's face query reads as `this+0x34`, pointing at `this+0x7b0c`,
+  is set once as `this_outer+0x7c48` into `this_outer+0x170`
+  (`Terrain.dll:0x10018dd0`), because that interface sits `0x13c` into the object.
+  A sweep for the immediate `0x7b0c` finds three sites and none of them the
+  assignment, and a round was spent publishing "nothing writes it" as a fact
+  ([30-turrets.md](30-turrets.md#what-the-outer-cameras-line-meets--read)). The fix
+  is to find the constructor first — the routine that installs the vtables — and to
+  shift every offset by where the interface it installs sits.
 - **Looking for a flag by its immediate.** A plain immediate scan finds a mask
   only where the compiler kept it as one. `Ngi32.dll`'s texture loader isolates
   bit 21 of its load flags with a shift and an `and 1`, so the constant

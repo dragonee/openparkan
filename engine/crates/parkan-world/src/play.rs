@@ -2143,7 +2143,10 @@ impl Play {
         // target but the unit looked at, passing what a round passes.
         let unit = self.outer.unit.flatten();
         let meets = |from, to| {
-            self.battle.combat.first_hit(&self.ground, unit, from, to, 0.0).map(|(s, _, _)| s.point)
+            self.battle
+                .combat
+                .first_hit(&self.ground, unit, from, to, 0.0)
+                .map(|(s, _, _)| (s.point, s.normal))
         };
         self.outer.place(&own, self.outer_bound(unit), meets)
     }

@@ -24,6 +24,9 @@ pub struct Strike {
     /// The triangle, or the ground face; `None` on a building's footing, whose faces belong
     /// to no mesh (`parkan_world::basement`).
     pub triangle: Option<usize>,
+    /// The face's own normal in the world, which the world's answer carries beside the point
+    /// (`Terrain.dll:0x1001a6ec`, docs/30, "What the outer camera's line meets").
+    pub normal: Vec3,
 }
 
 /// `NGI32.dll:0x10024410` (`g_FastProc` slot `0xb4`), one-sided and with no epsilon:
@@ -160,6 +163,8 @@ pub fn segment_mesh_skipping(
                     d2,
                     node: Some(i),
                     triangle: Some(t),
+                    normal: vec(parkan_formats::pose::rotate(pose.rotation, arr(normal)))
+                        .normalize_or(Vec3::Z),
                 });
             }
         }
