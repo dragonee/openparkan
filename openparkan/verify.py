@@ -8876,7 +8876,7 @@ def check_hall_way_gates(check, game: Path) -> None:
     """
     graphs = {n: g for n, g in _hall_ways(game).items() if g is not None and g.nodes}
     nodes = [n for g in graphs.values() for n in g.nodes]
-    links = [l for g in graphs.values() for l in g.links]
+    links = [link for g in graphs.values() for link in g.links]
 
     any_size = sum(1 for n in nodes if n.flags & objmesh.VERTEX_ANY_SIZE)
     by_building = sum(1 for n in nodes if not n.flags & objmesh.VERTEX_ANY_SIZE
@@ -8899,7 +8899,7 @@ def check_hall_way_gates(check, game: Path) -> None:
           bool(pods) and all(not n.fits(3, 4) and n.fits(2, 4) for n in pods),
           f"{len(pods)} pods, none of which a size-3 or size-4 unit may walk to")
 
-    gates = Counter(l.gate for l in links)
+    gates = Counter(link.gate for link in links)
     check("fortif.rlb: 18 hall-way links are flyer-only and none is shut",
           (len(links), gates[objmesh.LINK_FLYER_ONLY], gates[objmesh.LINK_SHUT])
           == (1096, 18, 0),
@@ -8907,14 +8907,14 @@ def check_hall_way_gates(check, game: Path) -> None:
           f"{gates[objmesh.LINK_SHUT]} shut, {gates[0]} open")
 
     flyer = {n for n, g in graphs.items()
-             if any(l.gate == objmesh.LINK_FLYER_ONLY for l in g.links)}
+             if any(link.gate == objmesh.LINK_FLYER_ONLY for link in g.links)}
     check("fortif.rlb: the flyer-only links are the mines' and the factories'",
           flyer == {"fr_b_mine.msh", "fr_l_mine.msh", "fr_m_mine.msh",
                     "fr_b_plant.msh", "fr_l_plant.msh", "fr_m_plant.msh"},
           f"{sorted(flyer)}")
 
-    blank = sum(1 for l in links if set(l.extra) == {0xFFFFFFFF})
-    named = sum(1 for l in links if l.extra[0] not in (0, 0xFFFFFFFF))
+    blank = sum(1 for link in links if set(link.extra) == {0xFFFFFFFF})
+    named = sum(1 for link in links if link.extra[0] not in (0, 0xFFFFFFFF))
     check("fortif.rlb: a link's eight tail words are not -1 throughout",
           (blank, named, len(links) - blank - named) == (1034, 44, 18),
           f"{len(links)} links: {blank} all -1, {named} naming a node four times over, "

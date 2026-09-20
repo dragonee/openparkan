@@ -212,7 +212,7 @@ def mip_box_depth(data: bytes) -> tuple[int, int]:
         shift = 2 * level
         if any(
             [s >> shift for s in plane] != got
-            for plane, got in zip(folded, want)
+            for plane, got in zip(folded, want, strict=True)
         ):
             break
         sums, depth = folded, level
